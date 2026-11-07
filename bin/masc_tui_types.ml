@@ -372,12 +372,13 @@ end
 module Surface_read_source = struct
   type t = Transport | Board | Planning
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
+    | Tool_series
 
   let name = function
     | Transport -> "transport" | Board -> "Board" | Planning -> "Work"
     | Runtime_quota -> "provider windows" | Keeper_usage -> "Keeper usage"
     | Provider_history -> "provider history" | Overview_goals -> "Goals"
-    | Account_emails -> "accounts"
+    | Account_emails -> "accounts" | Tool_series -> "tool calls"
 end
 
 (** Logical full-refresh readers, not individual HTTP calls. Diagnostic
@@ -3919,6 +3920,13 @@ type provider_history_reading =
   | Provider_history_read of Masc_tui_usage_trend.t
   | Provider_history_error of string
 
+(** Usage's Calls section: the tool-call series of the window [w] selects,
+    already cut to the buckets that window draws. *)
+type tool_series_reading =
+  | Tool_series_unread
+  | Tool_series_read of Masc_tui_usage_calls.t
+  | Tool_series_error of string
+
 type overview_snapshot = {
   ov_workspace_health: workspace_health;
   ov_keeper_listing: Masc.Keeper_snapshot_unread.listing;
@@ -4533,6 +4541,10 @@ type surface_needs = {
   needs_provider_history : bool;
   needs_overview_goals : bool;
   needs_account_emails : bool;
+  (* The tool-call series Usage's Calls section draws. A surface cannot ask for
+     it: Usage is one surface and Calls one of its sections, so the loop sets
+     it from the open section ([usage_calls_drawn]). *)
+  needs_tool_series : bool;
   (* The operator quiz's scorecard and review rows, read through the lane
      add-on inventory endpoint. Feeds only the Home quiz line. *)
   needs_quiz_scorecard : bool;
@@ -4551,6 +4563,7 @@ let nothing =
     needs_provider_history = false;
     needs_overview_goals = false;
     needs_account_emails = false;
+    needs_tool_series = false;
     needs_quiz_scorecard = false;
   }
 
@@ -4661,6 +4674,8 @@ let surface_needs_delta ~previous ~next =
       next.needs_overview_goals && not previous.needs_overview_goals
   ; needs_account_emails =
       next.needs_account_emails && not previous.needs_account_emails
+  ; needs_tool_series =
+      next.needs_tool_series && not previous.needs_tool_series
   ; needs_quiz_scorecard =
       next.needs_quiz_scorecard && not previous.needs_quiz_scorecard
   }
@@ -4678,6 +4693,7 @@ let with_source (needs : surface_needs) (source : Surface_read_source.t) wanted 
   | Surface_read_source.Provider_history -> { needs with needs_provider_history = wanted }
   | Surface_read_source.Overview_goals -> { needs with needs_overview_goals = wanted }
   | Surface_read_source.Account_emails -> { needs with needs_account_emails = wanted }
+  | Surface_read_source.Tool_series -> { needs with needs_tool_series = wanted }
 
 (* The bundle sources a server push re-reads instead of the refresh cadence
    (RFC-0480 §3.4). A source joins here in the layer that wires its push; the
@@ -4694,9 +4710,11 @@ module Surface_read_order : sig
   type kind = Full | Navigation
   type source = Surface_read_source.t = Transport | Board | Planning
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
+    | Tool_series
   type dataset = Transport_data | Board_posts | Board_hearths | Planning_data
     | Runtime_quota_data | Keeper_usage_data
     | Provider_history_data | Overview_goals_data | Account_emails_data
+    | Tool_series_data
   type t
   type request
   val initial : t
@@ -4730,9 +4748,11 @@ end = struct
   type kind = Full | Navigation
   type source = Surface_read_source.t = Transport | Board | Planning
     | Runtime_quota | Keeper_usage | Provider_history | Overview_goals | Account_emails
+    | Tool_series
   type dataset = Transport_data | Board_posts | Board_hearths | Planning_data
     | Runtime_quota_data | Keeper_usage_data
     | Provider_history_data | Overview_goals_data | Account_emails_data
+    | Tool_series_data
   type request = { id: int; kind: kind; started_ns: int64; datasets: dataset list; owner: unit ref }
   type t = {
     next: int;
@@ -4746,7 +4766,8 @@ end = struct
      Planning, needs.needs_planning;
      Runtime_quota, needs.needs_runtime_quota;
      Keeper_usage, needs.needs_keeper_usage; Provider_history, needs.needs_provider_history;
-     Overview_goals, needs.needs_overview_goals; Account_emails, needs.needs_account_emails]
+     Overview_goals, needs.needs_overview_goals; Account_emails, needs.needs_account_emails;
+     Tool_series, needs.needs_tool_series]
     |> List.filter_map (fun (source, wanted) -> if wanted then Some source else None)
   let source_datasets = function
     | Transport -> [Transport_data] | Board -> [Board_posts;Board_hearths]
@@ -4754,17 +4775,19 @@ end = struct
     | Runtime_quota -> [Runtime_quota_data]
     | Keeper_usage -> [Keeper_usage_data] | Provider_history -> [Provider_history_data]
     | Overview_goals -> [Overview_goals_data] | Account_emails -> [Account_emails_data]
+    | Tool_series -> [Tool_series_data]
   let dataset_source = function
     | Transport_data -> Transport | Board_posts | Board_hearths -> Board
     | Planning_data -> Planning
     | Runtime_quota_data -> Runtime_quota
     | Keeper_usage_data -> Keeper_usage | Provider_history_data -> Provider_history
     | Overview_goals_data -> Overview_goals | Account_emails_data -> Account_emails
+    | Tool_series_data -> Tool_series
   let dataset_name = function
     | Board_posts -> "Board posts" | Board_hearths -> "Board hearths"
     | (Transport_data | Planning_data
       | Runtime_quota_data | Keeper_usage_data | Provider_history_data
-      | Overview_goals_data | Account_emails_data) as dataset ->
+      | Overview_goals_data | Account_emails_data | Tool_series_data) as dataset ->
         Surface_read_source.name (dataset_source dataset)
   let dispatch ~kind ~needs ~started_ns current =
     let request = {id=current.next; kind; started_ns;
@@ -8688,9 +8711,13 @@ type verification_export_request = {
   vex_progress : Masc_tui_evidence_file.progress Atomic.t;
 }
 
-type usage_section = Usage_plan | Usage_trend | Usage_keepers
+type usage_section = Usage_plan | Usage_trend | Usage_keepers | Usage_calls
 let next_usage_section = function
-  | Usage_plan -> Usage_trend | Usage_trend -> Usage_keepers | Usage_keepers -> Usage_plan
+  | Usage_plan -> Usage_trend | Usage_trend -> Usage_keepers
+  | Usage_keepers -> Usage_calls | Usage_calls -> Usage_plan
+let previous_usage_section = function
+  | Usage_plan -> Usage_calls | Usage_trend -> Usage_plan
+  | Usage_keepers -> Usage_trend | Usage_calls -> Usage_keepers
 
 (* A staged image records what this pane had already observed. Journal text
    can grow without adding a history row; exact source/origin snapshots let a
@@ -10223,6 +10250,8 @@ type state = {
   (* The provider history window starts at a UTC day; the reading is owed
      again once the day it was taken on has ended. *)
   mutable provider_history_reread_at: float option;
+  (* Drawn by Usage's Calls section, over the same period as the history. *)
+  mutable tool_series: tool_series_reading;
   mutable overview_account_emails: overview_account_emails_reading;
   mutable overview_goals: overview_goals_reading;
   mutable runtime_lanes: Tui_decode.runtime_resolved_lane list;
@@ -18802,6 +18831,7 @@ let withdraw_usage_workspace (state : state) =
   state.overview_providers <- Providers_unread;
   state.keeper_usage <- Keeper_usage_unread;
   state.provider_history <- Provider_history_unread;
+  state.tool_series <- Tool_series_unread;
   state.overview_account_emails <- Account_emails_unread;
   state.usage_scope_id <- None;
   reset_metrics_scroll state
@@ -18823,21 +18853,38 @@ let revalidate_workspace_surfaces (state : state) ~workspace_moved ~(needs : sur
           (match state.provider_history with Provider_history_unread -> true | Provider_history_read _ | Provider_history_error _ -> false))
       || (needs.needs_account_emails &&
           (match state.overview_account_emails with Account_emails_unread -> true | Account_emails_read _ | Account_emails_failed _ -> false))
+      || (needs.needs_tool_series &&
+          (match state.tool_series with Tool_series_unread -> true | Tool_series_read _ | Tool_series_error _ -> false))
   | Workspace_identity_unread | Workspace_identity_match_unconfirmed _ -> false
 
 (* A period change is an explicit read demand on the same surface. Its
    dataset ticket must supersede the previous period even when cycling back
    to the same number of days; the surface-needs delta cannot express this. *)
 let cycle_usage_history_window (state : state) =
-  state.usage_section <- Usage_trend;
+  (* Calls draws the same period, so the key changes the period it shows.
+     Plan and Keepers have none and land on Trend, which does. *)
+  (match state.usage_section with
+   | Usage_calls -> ()
+   | Usage_plan | Usage_trend | Usage_keepers -> state.usage_section <- Usage_trend);
   state.provider_history_days <-
     (match state.provider_history_days with
      | 1 -> 7
      | 7 -> 14
      | 14 | _ -> 1);
   state.provider_history <- Provider_history_unread;
+  state.tool_series <- Tool_series_unread;
   reset_metrics_scroll state;
-  { nothing with needs_provider_history = true }
+  { nothing with
+    needs_provider_history = true;
+    needs_tool_series = state.usage_section = Usage_calls }
+
+(* Calls is on screen: Usage with its Calls section up and the telemetry
+   panel, which replaces the sections, closed. The one place that says so,
+   because a surface alone cannot: Plan, Trend and Keepers share Usage's
+   bundle and Calls is the only section with a read of its own. *)
+let usage_calls_drawn (state : state) =
+  state.view = Metrics && state.usage_section = Usage_calls
+  && not state.usage_telemetry_open
 
 let usage_history_reading (state : state) =
   match state.usage_scope_id, state.provider_history with
@@ -20143,6 +20190,7 @@ let create_state
   provider_history = Provider_history_unread;
   provider_history_days = 14;
   provider_history_reread_at = None;
+  tool_series = Tool_series_unread;
   overview_account_emails = Account_emails_unread;
   overview_goals = Goals_unread;
   runtime_lanes = [];

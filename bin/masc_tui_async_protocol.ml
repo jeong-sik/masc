@@ -61,6 +61,14 @@ type provider_history_reading = {
   phr_result : (Masc.Tui_decode_usage.provider_usage_history, string) result;
 }
 
+(** A tool-call series answer cut to the buckets its period draws, and the
+    period it was asked for. A reply to a period the operator has since left
+    carries the old [tsl_days] and is dropped when it lands. *)
+type tool_series_load = {
+  tsl_days : int;
+  tsl_result : (Masc_tui_usage_calls.t, string) result;
+}
+
 type http_dataset =
   | Dataset_transport of (Masc.Tui_decode.transport_health, string) result
   | Dataset_board_posts of board_posts_receipt
@@ -73,6 +81,7 @@ type http_dataset =
   | Dataset_provider_history of provider_history_reading
   | Dataset_overview_goals of (Masc.Tui_decode.overview_goal list, string) result
   | Dataset_account_emails of ((string * string) list * int, string) result
+  | Dataset_tool_series of tool_series_load
 
 type early_http_dataset = {
   ed_ticket: Http_refresh_order.ticket;
@@ -92,6 +101,7 @@ let http_dataset_key = function
   | Dataset_provider_history _ -> Surface_read_order.Provider_history_data
   | Dataset_overview_goals _ -> Surface_read_order.Overview_goals_data
   | Dataset_account_emails _ -> Surface_read_order.Account_emails_data
+  | Dataset_tool_series _ -> Surface_read_order.Tool_series_data
 
 let http_dataset_received = function
   | Dataset_transport result -> Result.is_ok result
@@ -103,6 +113,7 @@ let http_dataset_received = function
   | Dataset_provider_history reading -> Result.is_ok reading.phr_result
   | Dataset_overview_goals result -> Result.is_ok result
   | Dataset_account_emails result -> Result.is_ok result
+  | Dataset_tool_series load -> Result.is_ok load.tsl_result
 
 (* Collection has no identity authority of its own. The enclosing full or
    scoped request owns the before/after probes and binds the final identity
@@ -139,6 +150,8 @@ type 'identity http_scoped_surface_readings = {
   http_overview_goals: (Masc.Tui_decode.overview_goal list, string) result option;
   (* [None] off Usage, the surface that draws account emails. *)
   http_account_emails: ((string * string) list * int, string) result option;
+  (* [None] off Usage's Calls section, the one that draws the tool-call series. *)
+  http_tool_series: tool_series_load option;
 }
 
 type http_scoped_surface_results =

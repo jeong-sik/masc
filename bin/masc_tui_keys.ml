@@ -537,9 +537,10 @@ let for_surface = function
       ; b Navigate "a" "all accounts" ~help:"clear the quota account selection"
       ; b Navigate "x" "toggle limit group"
           ~help:"on Plan: show or hide the group for reports at limit or observed exhaustion"
-      ; b Navigate "v" "Plan / Trend / Keepers" ~help:"cycle the Usage reading"
+      ; b Navigate "v / V" "Plan / Trend / Keepers / Calls"
+          ~help:"cycle the Usage reading; V goes back"
       ; b Navigate "w" "1d / 7d / 14d"
-          ~help:"on Usage: cycle the exact UTC day window for provider report history"
+          ~help:"on Usage: cycle the exact UTC day window for provider report history and tool calls"
       ; b Navigate "1 / 2 / 3" "telemetry section"
           ~help:"on Telemetry: Engine, Work, or Tools"
       ; b Act "Esc" "Dashboard"
@@ -1370,7 +1371,7 @@ let has_detail_scoped_keys surface =
 let footer_hints_metrics ~telemetry =
   for_surface Metrics
   |> List.filter (fun binding ->
-         if telemetry then not (List.mem binding.key [ "w"; "v"; "f"; "a"; "x" ])
+         if telemetry then not (List.mem binding.key [ "w"; "v / V"; "f"; "a"; "x" ])
          else not (String.equal binding.key "1 / 2 / 3"))
   |> hints_of_bindings
 

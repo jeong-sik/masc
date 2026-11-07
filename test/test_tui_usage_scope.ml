@@ -2,6 +2,8 @@ open Alcotest
 open Masc_tui_types
 module Usage = Masc.Tui_decode_usage
 module Trend = Masc_tui_usage_trend
+module Calls = Masc_tui_usage_calls
+module Series = Masc.Tui_decode_tool_series
 
 let account id : Usage.provider_usage_account =
   { pua_scope="runtime-owned-" ^ id; pua_scope_id=id;
@@ -87,6 +89,7 @@ let test_workspace_replacement_retires_usage () =
       {emails=["provider-B", "fictional@example.test"]; unreadable_rows=0};
   state.usage_section <- Usage_trend;
   state.provider_history_days <- 7;
+  state.tool_series <- Tool_series_error "the series read was refused";
   state.metrics_scroll <- 42;
   state.metrics_content_height <- 12;
   state.metrics_scroll_card_rows <- Some 3;
@@ -112,6 +115,7 @@ let test_workspace_replacement_retires_usage () =
      && state.overview_providers = Providers_unread
      && state.keeper_usage = Keeper_usage_unread
      && state.provider_history = Provider_history_unread
+     && state.tool_series = Tool_series_unread
      && state.overview_account_emails = Account_emails_unread);
   check bool "replacement clears the old selection and scroll" true
     (state.usage_scope_id = None && state.metrics_scroll = 0
@@ -233,6 +237,102 @@ let test_window_change_replaces_only_its_history_request () =
   let _, accepted = Order.take_dataset reads latest Order.Provider_history_data in
   check bool "that result cannot settle twice" false accepted
 
+(* A fortnight of idle days, cut to the window the way a read does. *)
+let fortnight_of_calls () =
+  let day = 86400.0 in
+  let first = 1793750400.0 in
+  let series =
+    { Series.tsr_generated_at = first +. (15.0 *. day)
+    ; tsr_width = Series.Series_day
+    ; tsr_utc_offset_min = 0
+    ; tsr_buckets =
+        List.init 15 (fun index ->
+          { Series.tsb_start = first +. (float_of_int index *. day)
+          ; tsb_activity = Series.Series_idle })
+    }
+  in
+  match Calls.of_series Calls.Last_fortnight series with
+  | Ok calls -> calls
+  | Error reason -> failf "the fortnight was refused: %s" reason
+
+let test_calls_closes_the_view_cycle_in_both_directions () =
+  let forward = [ Usage_plan; Usage_trend; Usage_keepers; Usage_calls ] in
+  check int "four sections" 4 (List.length forward);
+  List.iteri
+    (fun index section ->
+      let next = List.nth forward ((index + 1) mod 4) in
+      check bool "v goes to the next section" true (next_usage_section section = next);
+      check bool "V undoes v" true (previous_usage_section next = section))
+    forward
+
+let test_calls_reads_only_while_it_is_drawn () =
+  let state = state () in
+  state.view <- Metrics;
+  state.usage_section <- Usage_calls;
+  check bool "Usage on its Calls section draws it" true (usage_calls_drawn state);
+  state.usage_telemetry_open <- true;
+  check bool "the Telemetry panel replaces the sections" false (usage_calls_drawn state);
+  state.usage_telemetry_open <- false;
+  List.iter
+    (fun section ->
+      state.usage_section <- section;
+      check bool "another section does not" false (usage_calls_drawn state))
+    [ Usage_plan; Usage_trend; Usage_keepers ];
+  state.usage_section <- Usage_calls;
+  state.view <- Board;
+  check bool "another surface does not, whatever Usage last showed" false (usage_calls_drawn state);
+  check bool "no surface asks for the series on its own" true
+    (List.for_all
+       (fun (surface, _) -> not (surface_needs_of_surface surface).needs_tool_series)
+       surface_ring)
+
+let test_the_period_key_on_calls_rereads_calls () =
+  let state = state () in
+  let module Order = Surface_read_order in
+  state.view <- Metrics;
+  state.usage_section <- Usage_calls;
+  state.provider_history_days <- 14;
+  state.tool_series <- Tool_series_read (fortnight_of_calls ());
+  let needs = cycle_usage_history_window state in
+  check bool "the section stays on Calls" true (state.usage_section = Usage_calls);
+  check int "the period moves" 1 state.provider_history_days;
+  check bool "the reading of the old period is dropped" true
+    (state.tool_series = Tool_series_unread);
+  check bool "the series is read again" true needs.needs_tool_series;
+  check bool "so is the history, which shares the period" true needs.needs_provider_history;
+  let reads, request = Order.dispatch ~kind:Order.Navigation ~needs ~started_ns:0L Order.initial in
+  check bool "the new request owns the series" true
+    (Order.owns_dataset reads request Order.Tool_series_data);
+  check bool "and names it as a source" true (List.mem Order.Tool_series (Order.sources needs))
+
+let test_the_period_key_elsewhere_lands_on_trend_without_the_series () =
+  List.iter
+    (fun section ->
+      let state = state () in
+      state.view <- Metrics;
+      state.usage_section <- section;
+      state.tool_series <- Tool_series_read (fortnight_of_calls ());
+      let needs = cycle_usage_history_window state in
+      check bool "it lands on Trend" true (state.usage_section = Usage_trend);
+      check bool "it asks for no series" false needs.needs_tool_series;
+      check bool "the old reading cannot be shown for the new period" true
+        (state.tool_series = Tool_series_unread))
+    [ Usage_plan; Usage_trend; Usage_keepers ]
+
+let test_a_moved_workspace_rereads_an_unread_series_only_while_it_is_drawn () =
+  let state = state () in
+  withdraw_usage_workspace state;
+  state.workspace_identity <- Workspace_identity_mismatch
+      {local_base_path="/workspace/a";server_base_path="/workspace/b"};
+  let drawn = { nothing with needs_tool_series = true } in
+  check bool "unread and drawn" true
+    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs:drawn);
+  check bool "unread and not drawn" false
+    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs:nothing);
+  state.tool_series <- Tool_series_error "the series read was refused";
+  check bool "a settled failure is not read again" false
+    (revalidate_workspace_surfaces state ~workspace_moved:true ~needs:drawn)
+
 let () = run "usage account continuity"
   ["scope", [test_case "exact source identity" `Quick test_exact_scope_filters_both_sources;
              test_case "refresh and window continuity" `Quick test_refresh_does_not_choose_another_account;
@@ -241,4 +341,9 @@ let () = run "usage account continuity"
              test_case "workspace replacement retires usage" `Quick test_workspace_replacement_retires_usage;
              test_case "workspace replacement rereads superseded usage" `Quick test_workspace_replacement_rereads_superseded_usage;
              test_case "workspace replacement rereads shared accounts and logs" `Quick test_shared_accounts_and_server_logs_revalidate;
-             test_case "period change requests its own history" `Quick test_window_change_replaces_only_its_history_request]]
+             test_case "period change requests its own history" `Quick test_window_change_replaces_only_its_history_request;
+             test_case "Calls closes the view cycle in both directions" `Quick test_calls_closes_the_view_cycle_in_both_directions;
+             test_case "Calls reads only while it is drawn" `Quick test_calls_reads_only_while_it_is_drawn;
+             test_case "the period key on Calls rereads Calls" `Quick test_the_period_key_on_calls_rereads_calls;
+             test_case "the period key elsewhere lands on Trend" `Quick test_the_period_key_elsewhere_lands_on_trend_without_the_series;
+             test_case "a moved workspace rereads an unread series" `Quick test_a_moved_workspace_rereads_an_unread_series_only_while_it_is_drawn]]

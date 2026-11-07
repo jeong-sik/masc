@@ -16457,6 +16457,16 @@ let apply_provider_history_load state { phr_days = days; phr_requested_at; phr_r
     | Error reason -> state.provider_history <- Provider_history_error reason
   end
 
+(* A reply to a period the operator has since left is dropped. A failed read
+   replaces the last good one, as the history's does: bars drawn from a read
+   that stopped arriving would be buckets nobody observed this refresh. *)
+let apply_tool_series_load state { tsl_days = days; tsl_result = result } =
+  if days = state.provider_history_days then
+    state.tool_series <-
+      (match result with
+       | Ok calls -> Tool_series_read calls
+       | Error reason -> Tool_series_error reason)
+
 (* A failed read replaces the last good one, as the quota reading does: goals
    drawn after the read that listed them stopped arriving would be rows nobody
    observed this refresh. *)
@@ -16936,6 +16946,26 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
         | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
         | exception exn -> Error (Printexc.to_string exn))
   in
+  let read_tool_series () =
+    when_needed ~source:Surface_read_order.Tool_series
+      ~dataset:(fun load -> Dataset_tool_series load)
+      ~outcome:(fun load -> Http_refresh_progress.of_result load.tsl_result)
+      needs.needs_tool_series (fun () ->
+      let tsl_result =
+        match Masc_tui_usage_calls.window_of_days provider_history_days with
+        | None ->
+            Error (Printf.sprintf "Calls has no window of %d days" provider_history_days)
+        | Some window ->
+            (match Masc_tui_loader.load_tool_series ~host ~port
+                     ~width:(Masc_tui_usage_calls.width window)
+                     ~since_hours:(Masc_tui_usage_calls.since_hours window) with
+             | Ok series -> Masc_tui_usage_calls.of_series window series
+             | Error reason -> Error reason
+             | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+             | exception exn -> Error (Printexc.to_string exn))
+      in
+      { tsl_days = provider_history_days; tsl_result })
+  in
   (* These reads consume the same dispatch snapshot and none needs a sibling's
      result. The enclosing request verifies identity after all its readers
      join; this collector grants no publication authority and adds no probe.
@@ -16945,7 +16975,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
         http_planning)),
       (((http_asks, http_keeper_roster), http_overview_goals),
        ((http_runtime_quota, http_keeper_usage),
-        (http_provider_history, http_account_emails))) =
+        ((http_provider_history, http_account_emails), http_tool_series))) =
     Masc_tui_loader.read_pair
       (fun () ->
         Masc_tui_loader.read_pair
@@ -16961,7 +16991,10 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
           (fun () ->
             Masc_tui_loader.read_pair
               (fun () -> Masc_tui_loader.read_pair read_runtime_quota read_keeper_usage)
-              (fun () -> Masc_tui_loader.read_pair read_provider_history read_account_emails)))
+              (fun () ->
+                Masc_tui_loader.read_pair
+                  (fun () -> Masc_tui_loader.read_pair read_provider_history read_account_emails)
+                  read_tool_series)))
   in
   { http_refresh_ticket = refresh_ticket
   ; http_surface_request = surface_request
@@ -16978,6 +17011,7 @@ let load_http_scoped_surface_reads ~on_progress ~on_dataset ~surface_request ~as
   ; http_provider_history
   ; http_overview_goals
   ; http_account_emails
+  ; http_tool_series
   }
 
 let load_http_surfaces ~surface_request ~on_initial_identity ~on_progress ~on_dataset ~on_asks ~on_approvals ~on_roster ~ask_request ~roster_request ~refresh_ticket ~host ~port ~approval_ticket ~board_query
@@ -17110,6 +17144,7 @@ let apply_http_scoped_data state ~datasets results =
   apply Surface_read_order.Keeper_usage_data ~received:Result.is_ok (apply_keeper_usage_load state) results.http_keeper_usage;
   apply Surface_read_order.Provider_history_data ~received:(fun reading -> Result.is_ok reading.phr_result) (apply_provider_history_load state) results.http_provider_history;
   apply Surface_read_order.Account_emails_data ~received:Result.is_ok (apply_account_emails_load state) results.http_account_emails;
+  apply Surface_read_order.Tool_series_data ~received:(fun load -> Result.is_ok load.tsl_result) (apply_tool_series_load state) results.http_tool_series;
   let request = results.http_surface_request in
   Log.Transport.info "tui_surface_read_applied request=%d started_ns=%Ld applied_ns=%Ld sources=%s"
     (Surface_read_order.request_id request) (Surface_read_order.started_ns request)
@@ -17131,7 +17166,8 @@ let apply_http_dataset state dataset =
     | Dataset_keeper_usage result -> apply_keeper_usage_load state result; None
     | Dataset_provider_history reading -> apply_provider_history_load state reading; None
     | Dataset_overview_goals result -> apply_overview_goals_load state result; None
-    | Dataset_account_emails result -> apply_account_emails_load state result; None in
+    | Dataset_account_emails result -> apply_account_emails_load state result; None
+    | Dataset_tool_series load -> apply_tool_series_load state load; None in
   settle_pushed_dataset state (http_dataset_key dataset)
     ~received:(http_dataset_received dataset);
   application
@@ -18680,8 +18716,12 @@ let refresh_visible_detail_after_authority_recovery state ~mailbox ~previous_aut
 ;;
 
 let current_surface_needs state =
-  Masc_tui_types.surface_needs ~about_open:state.about_open
-    ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state)) state.view
+  let needs =
+    Masc_tui_types.surface_needs ~about_open:state.about_open
+      ~keeper_pane_drawn:(not (Masc_tui_render.acting_pane_suppressed state)) state.view in
+  (* Calls is a section of Usage, not a surface, so it asks here: opening it
+     reads the series, leaving it stops reading. *)
+  { needs with needs_tool_series = Masc_tui_types.usage_calls_drawn state }
 
 (* The reads a full refresh tick sends beside its surface bundle. They go out
    while the bundle is still on the wire, so a bundle that moves the read
@@ -36570,7 +36610,11 @@ Use relative paths for resources already held in the package. -->
                  | Some (_, Masc_tui_palette.Palette_usage_scope scope_id) ->
                      state.usage_scope_id <- scope_id;
                      state.usage_telemetry_open <- false;
-                     if state.usage_section=Usage_keepers then state.usage_section <- Usage_plan;
+                     (* Keepers and Calls read the whole workspace, so an account
+                        chosen there lands on the section it narrows. *)
+                     (match state.usage_section with
+                      | Usage_keepers | Usage_calls -> state.usage_section <- Usage_plan
+                      | Usage_plan | Usage_trend -> ());
                      reset_metrics_scroll state;
                      goto_surface state ~mailbox:async_messages Metrics
                  | Some (_, Masc_tui_palette.Palette_config pane) ->
@@ -38179,6 +38223,9 @@ Use relative paths for resources already held in the package. -->
             reset_metrics_scroll state
         | Some "v" when state.view = Metrics && not state.usage_telemetry_open ->
             state.usage_section <- next_usage_section state.usage_section;
+            reset_metrics_scroll state
+        | Some "V" when state.view = Metrics && not state.usage_telemetry_open ->
+            state.usage_section <- previous_usage_section state.usage_section;
             reset_metrics_scroll state
         | Some ("p" | "P") when state.view = Metrics ->
             state.usage_telemetry_open <- not state.usage_telemetry_open;

@@ -2781,6 +2781,19 @@ let fetch_provider_usage_history ~(host : string) ~(port : int) ~(days : int) :
   get_json ~host ~port
     ~path:(Printf.sprintf "/api/v1/dashboard/provider-usage-history?days=%d" days)
 
+(** What Usage's Calls section asks of the series route: a bucket width and
+    how many hours back. Nothing else is sent, so the buckets follow UTC and the
+    server's cache answers a repeated read. *)
+let tool_series_path
+    ~(width : Masc.Tui_decode_tool_series.tool_series_width) ~(since_hours : int) =
+  Printf.sprintf "/api/v1/tool-metrics/series?bucket=%s&since_hours=%d"
+    (Masc.Tui_decode_tool_series.series_width_name width) since_hours
+
+let fetch_tool_series ~(host : string) ~(port : int)
+    ~(width : Masc.Tui_decode_tool_series.tool_series_width) ~(since_hours : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:(tool_series_path ~width ~since_hours)
+
 let fetch_runtime_resolved ~(host : string) ~(port : int) :
     (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/runtime/resolved"

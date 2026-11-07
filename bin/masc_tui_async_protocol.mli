@@ -68,6 +68,14 @@ type provider_history_reading = {
   phr_result : (Masc.Tui_decode_usage.provider_usage_history, string) result;
 }
 
+(** A tool-call series answer cut to the buckets its period draws, and the
+    period it was asked for. A reply to a period the operator has since left
+    carries the old [tsl_days] and is dropped when it lands. *)
+type tool_series_load = {
+  tsl_days : int;
+  tsl_result : (Masc_tui_usage_calls.t, string) result;
+}
+
 type http_dataset =
   | Dataset_transport of (Masc.Tui_decode.transport_health, string) result
   | Dataset_board_posts of board_posts_receipt
@@ -80,6 +88,7 @@ type http_dataset =
   | Dataset_provider_history of provider_history_reading
   | Dataset_overview_goals of (Masc.Tui_decode.overview_goal list, string) result
   | Dataset_account_emails of ((string * string) list * int, string) result
+  | Dataset_tool_series of tool_series_load
 
 type early_http_dataset = {
   ed_ticket: Http_refresh_order.ticket;
@@ -127,6 +136,8 @@ type 'identity http_scoped_surface_readings = {
   http_overview_goals: (Masc.Tui_decode.overview_goal list, string) result option;
   (* [None] off Usage, the surface that draws account emails. *)
   http_account_emails: ((string * string) list * int, string) result option;
+  (* [None] off Usage's Calls section, the one that draws the tool-call series. *)
+  http_tool_series: tool_series_load option;
 }
 
 type http_scoped_surface_results =

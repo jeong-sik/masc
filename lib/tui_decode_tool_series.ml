@@ -33,6 +33,10 @@ type tool_series = {
   tsr_buckets : tool_series_bucket list;
 }
 
+let series_width_name = function
+  | Series_hour -> "hour"
+  | Series_day -> "day"
+
 let width_of_string = function
   | "hour" -> Ok Series_hour
   | "day" -> Ok Series_day

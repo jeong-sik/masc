@@ -142,6 +142,7 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
       ; delta.needs_provider_history
       ; delta.needs_overview_goals
       ; delta.needs_account_emails
+      ; delta.needs_tool_series
       ]
       |> List.fold_left (fun total wanted -> if wanted then total + 1 else total) 0
     in
@@ -190,7 +191,7 @@ let test_keeper_detail_drops_only_list_attention_reads () =
      ; added.needs_board; added.needs_planning; added.needs_keeper_chat
      ; added.needs_operator_approvals; added.needs_asks; added.needs_runtime_quota
      ; added.needs_keeper_usage; added.needs_provider_history; added.needs_overview_goals
-     ; added.needs_account_emails ]
+     ; added.needs_account_emails; added.needs_tool_series ]
      |> List.fold_left (fun count wanted -> if wanted then count + 1 else count) 0)
 ;;
 
@@ -259,6 +260,38 @@ let test_usage_and_config_ask_for_account_emails () =
     ; ("the keeper list", Types.Keepers Types.Keeper_list)
     ]
 ;;
+
+(* Calls is a section of Usage, so no surface asks for its series: the loop
+   asks while the section is on screen, and leaving it stops the read. The
+   server announces nothing when a call finishes, so no push owes the read. *)
+let test_the_tool_series_is_a_source_of_its_own_that_no_surface_or_push_asks_for () =
+  let module Order = Types.Surface_read_order in
+  List.iter
+    (fun (surface, _) ->
+      check bool "no surface asks for the series" false
+        (needs surface).Types.needs_tool_series)
+    Types.surface_ring;
+  let drawn = { Types.nothing with Types.needs_tool_series = true } in
+  check bool "the flag names exactly its source" true
+    (Order.sources drawn = [ Order.Tool_series ]);
+  check bool "the source names exactly its dataset" true
+    (Order.source_datasets Order.Tool_series = [ Order.Tool_series_data ]);
+  check bool "and the dataset its source" true
+    (Order.dataset_source Order.Tool_series_data = Order.Tool_series);
+  check bool "with_source sets only its flag" true
+    (Types.with_source Types.nothing Order.Tool_series true = drawn
+     && Types.with_source drawn Order.Tool_series false = Types.nothing);
+  let opened = Types.surface_needs_delta ~previous:(needs Types.Metrics)
+      ~next:{ (needs Types.Metrics) with Types.needs_tool_series = true } in
+  check bool "opening Calls asks for the series and nothing else" true
+    (opened = drawn);
+  check bool "leaving it asks for nothing" false
+    (Types.surface_needs_any
+       (Types.surface_needs_delta
+          ~previous:{ (needs Types.Metrics) with Types.needs_tool_series = true }
+          ~next:(needs Types.Metrics)));
+  check bool "no push owes it" false
+    (List.mem Order.Tool_series Types.pushed_sources)
 
 let test_navigation_settles_while_a_full_reader_is_pending () =
   let module Order = Types.Surface_read_order in
@@ -444,6 +477,8 @@ let () =
             test_keeper_detail_drops_only_list_attention_reads
         ; test_case "authoritative refresh coalesces to one followup" `Quick
             test_authoritative_refresh_waits_for_both_owners_then_runs_once
+        ; test_case "the tool series is a source of its own that no surface or push asks for"
+            `Quick test_the_tool_series_is_a_source_of_its_own_that_no_surface_or_push_asks_for
         ; test_case "foreground navigation settles while full readers remain pending" `Quick
             test_navigation_settles_while_a_full_reader_is_pending
         ; test_case "navigation owns overlapping data and cleanup" `Quick

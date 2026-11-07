@@ -179,11 +179,28 @@ let test_series_that_break_the_contract_are_refused () =
     ]
 ;;
 
+(* A request names the bucket with this word and the answer repeats it in
+   [window.bucket]. The server must read the word back as the width the decoder
+   then expects, or a Calls read would be refused whatever the data said. *)
+let test_the_request_names_a_width_the_server_reads () =
+  List.iter
+    (fun (decoded, served) ->
+       let word = D.series_width_name decoded in
+       match S.width_of_string word with
+       | Ok width ->
+         check bool (word ^ " is the same width") true (width = served);
+         check string (word ^ " is the word the server writes") word (S.string_of_width served)
+       | Error reason -> Alcotest.failf "the server refuses '%s': %s" word reason)
+    [ D.Series_hour, S.Hour; D.Series_day, S.Day ]
+;;
+
 let () =
   run
     "Tui_decode_tool_series"
     [ ( "decode"
-      , [ test_case "hourly series keeps counts and idle buckets" `Quick
+      , [ test_case "the request names a width the server reads" `Quick
+            test_the_request_names_a_width_the_server_reads
+        ; test_case "hourly series keeps counts and idle buckets" `Quick
             test_hourly_series_keeps_counts_and_idle_buckets
         ; test_case "daily series follows the viewer offset" `Quick
             test_daily_series_follows_the_viewer_offset

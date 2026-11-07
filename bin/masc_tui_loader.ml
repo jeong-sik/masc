@@ -1120,6 +1120,16 @@ let load_provider_usage_history ~(host : string) ~(port : int) ~(days : int) =
          | Some _ | None -> Masc.Tui_decode_usage.decode_provider_usage_history json))
         json
 
+let memo_tool_series = json_memo ()
+
+let load_tool_series ~(host : string) ~(port : int)
+    ~(width : Masc.Tui_decode_tool_series.tool_series_width) ~(since_hours : int) =
+  match fetch_tool_series ~host ~port ~width ~since_hours with
+  | Error reason -> Error ("tool series load failed: " ^ reason)
+  | Ok json ->
+      decode_offloaded memo_tool_series ~name:"tool.series.decode_wait"
+        Masc.Tui_decode_tool_series.decode_tool_series json
+
 type runtime_surface_load = {
   rsl_resolved : Tui_decode.runtime_resolved_snapshot;
   rsl_probe : (Masc.Tui_decode_runtime_probe.runtime_probe_snapshot, string) result;

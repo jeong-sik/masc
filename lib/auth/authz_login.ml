@@ -28,7 +28,8 @@ type refusal =
   | Commit_failed of Authz_zone.error
 
 let refusal_to_string = function
-  | Not_invited -> "this identity has no principal and came with no invitation"
+  | Not_invited ->
+    "this identity has no principal, came with no invitation, and has no open allowlist entry"
   | Disabled user_id -> Printf.sprintf "the principal %s is disabled" (User_id.to_string user_id)
   | Blocked user_id ->
     Printf.sprintf "a revocation of %s was given up and still blocks it" (User_id.to_string user_id)
@@ -139,32 +140,35 @@ let try_admission zone ~(snapshot : Authz_zone.snapshot) ~now_ms ~draw ~identity
        if moved then Ok (`Again (Commit_failed error)) else Error (Commit_failed error))
 ;;
 
-let admission zone ~now_ms ~draw ~identity ~invite =
+(* The way in, read from each snapshot: the invitation whose token came with
+   the login, or the open allowlist entry of the identity (plan C2d). *)
+let through_invitation invite (state : Authz_state.t) =
+  match Authz_invite_state.find_by_token_digest state.invites invite with
+  | None -> Error Invitation_unknown
+  | Some (invite_id, _) -> Ok (Authz_admission_event.Invite invite_id)
+;;
+
+let through_registration identity (state : Authz_state.t) =
+  match Authz_registration_state.find_open state.registrations identity with
+  | None -> Error Not_invited
+  | Some (registration_id, _) -> Ok (Authz_admission_event.Registration registration_id)
+;;
+
+let admission zone ~now_ms ~draw ~identity ~through_of =
   let rec go left =
     let snapshot = Authz_zone.snapshot zone in
     let state = snapshot.state in
     match Principals.find_identity state.principals identity with
     | Some user_id -> Error (Already_joined user_id)
     | None ->
-      (match Authz_invite_state.find_by_token_digest state.invites invite with
-       | None -> Error Invitation_unknown
-       | Some (invite_id, _) ->
-         (match Authz_mode_state.workspace state.mode with
-          | None -> Error Not_bootstrapped
-          | Some workspace_id ->
-            let* result =
-              try_admission
-                zone
-                ~snapshot
-                ~now_ms
-                ~draw
-                ~identity
-                ~through:(Authz_admission_event.Invite invite_id)
-                ~workspace_id
-            in
-            (match result with
-             | `Done outcome -> Ok outcome
-             | `Again last -> if left > 1 then go (left - 1) else Error last)))
+      let* through = through_of state in
+      (match Authz_mode_state.workspace state.mode with
+       | None -> Error Not_bootstrapped
+       | Some workspace_id ->
+         let* result = try_admission zone ~snapshot ~now_ms ~draw ~identity ~through ~workspace_id in
+         (match result with
+          | `Done outcome -> Ok outcome
+          | `Again last -> if left > 1 then go (left - 1) else Error last))
   in
   go attempts
 ;;
@@ -175,6 +179,6 @@ let sign_in zone ~now_ms ~draw ~identity ~invite =
   | Some user_id, None ->
     if Principals.is_active principals user_id then signed_in zone user_id else Error (Disabled user_id)
   | Some user_id, Some _ -> Error (Already_joined user_id)
-  | None, None -> Error Not_invited
-  | None, Some invite -> admission zone ~now_ms ~draw ~identity ~invite
+  | None, None -> admission zone ~now_ms ~draw ~identity ~through_of:(through_registration identity)
+  | None, Some invite -> admission zone ~now_ms ~draw ~identity ~through_of:(through_invitation invite)
 ;;

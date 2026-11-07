@@ -807,6 +807,12 @@ type keeper_runtime = {
   kr_runtime_path_rest : (keeper_path_rest option, string) result;
   (** [Ok None]: the row carried no rest. [Error]: the rest did not decode,
       without invalidating this roster row. *)
+  kr_operator_disposition :
+    ((Keeper_execution_receipt.operator_disposition_kind
+     * Keeper_execution_receipt.operator_disposition_reason) option, string) result;
+  (** Historical receipt operator disposition: [Ok (Some (kind, reason))]
+      when present and typed; [Ok None] when null or absent; [Error] when an unmapped
+      or broken wire pair was received. *)
 }
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.

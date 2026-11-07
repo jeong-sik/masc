@@ -233,6 +233,13 @@ val operator_disposition_reason_of_string : string -> operator_disposition_reaso
 (** [None] for a string {!operator_disposition_reason_to_string} never
     writes. *)
 
+val receipt_operator_disposition :
+  Yojson.Safe.t ->
+  (operator_disposition_kind * operator_disposition_reason) option
+(** Parse the typed disposition and reason from a receipt JSON record.
+    Returns [Some (kind, reason)] when both are present and recognized;
+    [None] when either field is missing, null, or unrecognized. *)
+
 (** Derived display pair (disposition, reason) computed from receipt fields.
     Exposed for test access; the runtime path consumes it via [append]. *)
 val operator_disposition : t -> operator_disposition_kind * operator_disposition_reason

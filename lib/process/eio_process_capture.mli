@@ -16,7 +16,8 @@ val reap_proc_with_clock :
   sw:Eio.Switch.t -> float Eio.Time.clock_ty Eio.Resource.t ->
   _ Eio.Process.t -> unit
 (** TERM then bounded grace and KILL. When the owning switch is cancelled,
-    its release hook owns the final reap. *)
+    its reap daemon, or its release hook if the daemon failed, owns the final
+    reap. *)
 
 val finalize_spawned_proc :
   sw:Eio.Switch.t -> clock:float Eio.Time.clock_ty Eio.Resource.t ->
@@ -25,8 +26,9 @@ val finalize_spawned_proc :
   sources:(string * [> Eio.Flow.source_ty | Eio.Resource.close_ty] Eio.Resource.t) list ->
   unit
 (** Close parent stdin first. A completed child only needs flow closure;
-    ordinary failure reaps it; cancelled-switch cleanup grants TERM grace
-    before closing output flows, leaving reap to the switch's owner. *)
+    ordinary failure reaps it; cancelled-switch cleanup sends TERM and waits,
+    within the grace, for the switch's reap daemon to settle the child before
+    closing output flows. *)
 
 val drain_to_eof :
   ?file_capture:Process_output_capture.t * Process_output_capture.stream ->

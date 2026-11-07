@@ -67,13 +67,12 @@ let child_exit_grace_seconds = 2.0
     run out. [Eio.Process.await] is resolved by the foreground manager's
     reap daemon in the switch the child was spawned in. When that
     switch is cancelled while this reap is waiting -- a keeper turn aborted,
-    or a shutdown, arriving during the grace -- the daemon is gone and the
-    await would never return, while the switch's release hook, which sends
-    the non-cancellable [SIGKILL] and [waitpid]s the child
-    ([Posix_spawn_process_mgr.Impl.T.spawn_unix]), runs only once every fiber of the switch has
-    returned, this one included. So a switch that is off after the grace gets
-    the [SIGKILL] and no wait: its release hook is the authority for the last
-    reap. A switch that is still on gets the await, bounded by the same grace:
+    or a shutdown, arriving during the grace -- the daemon takes the stop over
+    under protection: TERM, the owner's grace, [SIGKILL], [waitpid]
+    ([Posix_spawn_process_mgr.stop_owned]). So a switch that is off after the
+    grace gets the [SIGKILL] and no wait here: the daemon, or the switch's
+    release hook if the daemon failed, makes the last reap. A switch that is
+    still on gets the await, bounded by the same grace:
     a child that has not died that long after a [SIGKILL] is in a state no
     wait here can change, and the release hook reaps it all the same. *)
 let reap_proc_with_clock ~sw clock proc =
@@ -142,29 +141,44 @@ let rec discard_to_eof r chunk =
   | 0 -> ()
   | _ -> discard_to_eof r chunk
 
-(* Cancellation has stopped the owning switch's reap daemon. Neither EOF
-   nor absence of capture pipes proves the child exited: it may close its
-   streams before finishing a TERM handler. Keep the existing TERM grace
-   independently of pipe lifetime, without awaiting the cancelled daemon or
-   reaping the PID owned by the switch release hook. Only this cancellation
-   path pays the full grace; an observed successful exit never enters it. *)
-let wait_for_child_to_let_go ~clock sources =
+(* Cancelling the owning switch does not stop its reap daemon from settling
+   the child: the daemon catches the cancellation and, protected, sends TERM,
+   waits out the owner's grace, escalates and reaps
+   ([Posix_spawn_process_mgr.stop_owned]). [Eio.Process.await] resolves once
+   it has. Neither EOF nor absence of capture pipes proves the child exited:
+   it may close its streams before finishing a TERM handler. So this waits on
+   that await rather than on the pipes, and reads them to EOF meanwhile so a
+   child flushing on TERM never blocks on a full pipe. The same grace bounds
+   the wait; a reaper that failed leaves it to the grace. *)
+let await_settled_child ~clock proc sources =
   let chunk = Cstruct.create drain_chunk_size in
+  let read_to_eof () =
+    List.iter
+      (fun (label, r) ->
+         try discard_to_eof r chunk with
+         | Eio.Io _ | Invalid_argument _ ->
+           Log.Misc.debug
+             "[Process_eio] %s unavailable during cancellation grace"
+             label)
+      sources;
+    (* EOF releases a stream, not ownership of the child. *)
+    Eio.Fiber.await_cancel ()
+  in
+  let settled () =
+    match Eio.Process.await proc with
+    | `Exited _ | `Signaled _ -> ()
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception exn ->
+      Log.Misc.warn
+        "[Process_eio] child reaper failed during cancellation; waiting out the grace: %s"
+        (Printexc.to_string exn);
+      Eio.Fiber.await_cancel ()
+  in
   match
     Eio.Time.with_timeout clock child_exit_grace_seconds (fun () ->
-      List.iter
-        (fun (label, r) ->
-           try discard_to_eof r chunk with
-           | Eio.Io _ | Invalid_argument _ ->
-             Log.Misc.debug
-               "[Process_eio] %s unavailable during cancellation grace"
-               label)
-        sources;
-      (* EOF releases a stream, not ownership of the child. *)
-      Eio.Fiber.await_cancel ())
+      Ok (Eio.Fiber.first read_to_eof settled))
   with
-  | Error `Timeout -> ()
-  | Ok () -> assert false
+  | Ok () | Error `Timeout -> ()
 
 (* Runs in the [Fun.protect] finalizer of every spawn helper, so it sees three
    states: the child exited and [status] is set; the body raised and the child
@@ -179,8 +193,9 @@ let finalize_spawned_proc ~sw ~clock proc status ~sinks ~sources =
      lives on: the caller's explicit timeout race, where the
      daemon that resolves [await] is a fiber of [sw] and still running, so
      the child is reaped the ordinary way. Or [sw] itself is off: a stop
-     request, where that daemon is gone, awaiting it would deadlock the switch
-     before its release hook can reap the child, and pipe closure cannot establish that the child exited. Reading this fiber's own
+     request, where that daemon has caught the cancellation and settles the
+     child itself, so this cleanup waits for it within the grace
+     ([await_settled_child]); pipe closure cannot establish that the child exited. Reading this fiber's own
      cancellation as the switch's sent every exec timeout down the second
      path, and a 0.2s budget returned when the child's orphaned grandchild
      closed the pipe two seconds later (#33182). Record the switch's state
@@ -199,19 +214,17 @@ let finalize_spawned_proc ~sw ~clock proc status ~sinks ~sources =
       close_all sources;
       reap_proc_with_clock ~sw clock proc
     | None, true ->
-      (* The owning Eio switch release hook performs the non-cancellable
-         SIGKILL/waitpid before [Switch.run] re-raises the cancellation. It
-         does not wait first: until the grace below existed, the child had the
-         time between two consecutive lines of code to act on SIGTERM.
-         Measured 2026-09-04 on the voice recorder, that was a quarter second
-         of audio lost from the end of every stopped capture. *)
+      (* The owning switch's reap daemon sends its own TERM; this one starts
+         the child's grace here even when the daemon has not run yet. A stop
+         with no grace lost a quarter second of audio from the end of every
+         stopped voice capture (measured 2026-09-04). *)
       (try Eio.Process.signal proc Sys.sigterm with
        | Eio.Cancel.Cancelled _ as exn -> raise exn
        | exn ->
          Log.Misc.warn
            "[Process_eio] failed to request child termination during switch cancellation: %s"
            (Printexc.to_string exn));
-      wait_for_child_to_let_go ~clock sources;
+      await_settled_child ~clock proc sources;
       close_all sources)
 
 let invoke_output_chunk_callback f s =

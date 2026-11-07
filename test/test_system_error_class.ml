@@ -158,7 +158,7 @@ let test_classify_exn_enoent_is_other () =
   check_tag "ENOENT" "other"
     (S.classify_exn (Unix.Unix_error (Unix.ENOENT, "open", "/missing")))
 
-(* ---- to_short_tag / to_raw_text contract ---- *)
+(* ---- to_short_tag contract ---- *)
 
 let test_to_short_tag_all_variants () =
   check string "Fd_exhaustion" "fd_exhaustion" (S.to_short_tag S.Fd_exhaustion);
@@ -168,16 +168,6 @@ let test_to_short_tag_all_variants () =
     (S.to_short_tag S.Connection_refused);
   check string "Timeout" "timeout" (S.to_short_tag S.Timeout);
   check string "Other" "other" (S.to_short_tag (S.Other "anything"))
-
-let test_to_raw_text_other_returns_input () =
-  check string "Other returns verbatim payload" "Original_Error_Message"
-    (S.to_raw_text (S.Other "Original_Error_Message"))
-
-let test_to_raw_text_named_returns_short_label () =
-  check string "Fd_exhaustion canonical text" "fd_exhaustion"
-    (S.to_raw_text S.Fd_exhaustion);
-  check string "Disk_exhaustion canonical text" "disk_exhaustion"
-    (S.to_raw_text S.Disk_exhaustion)
 
 let () =
   run "system_error_class"
@@ -216,9 +206,5 @@ let () =
     ; ( "wire format"
       , [ test_case "to_short_tag covers all variants" `Quick
             test_to_short_tag_all_variants
-        ; test_case "to_raw_text on Other returns input" `Quick
-            test_to_raw_text_other_returns_input
-        ; test_case "to_raw_text on named returns short label" `Quick
-            test_to_raw_text_named_returns_short_label
         ] )
     ]

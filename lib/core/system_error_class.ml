@@ -124,11 +124,3 @@ let to_short_tag = function
   | Connection_refused -> "connection_refused"
   | Timeout -> "timeout"
   | Other _ -> "other"
-
-let to_raw_text = function
-  | Fd_exhaustion -> "fd_exhaustion"
-  | Disk_exhaustion -> "disk_exhaustion"
-  | Permission_denied -> "permission_denied"
-  | Connection_refused -> "connection_refused"
-  | Timeout -> "timeout"
-  | Other s -> s

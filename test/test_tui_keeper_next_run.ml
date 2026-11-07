@@ -83,7 +83,6 @@ let make_snapshot
 let test_seven_branches () =
   let now = 1794050000.0 in
   let scheduled_due = 1794053600.0 in (* 1 hour after now *)
-  let late_due = 1794046400.0 in (* 1 hour before now *)
   let hold_observed = 1794049000.0 in
 
   let runner_ok = Masc.Tui_decode.Runner_status Schedule_contract_values.Runner_ok in

@@ -32,7 +32,9 @@ val foreground_mgr :
   clock:_ Eio.Time.clock -> grace_seconds:float ->
   Eio_unix.Process.mgr_ty Eio.Resource.t
 (** Owns each foreground process group until cleanup, then promptly reaps
-    its leader. TERM grants the supplied grace even if the leader exits first.
+    its leader. TERM grants the supplied grace while any group member is
+    alive, even after the leader has exited; once the leader has exited and no
+    member is alive, the leader is reaped without waiting out the rest.
     Ordinary completion cleans up remaining group members without that delay.
     Children that deliberately leave the group are outside this contract. *)
 

@@ -5,7 +5,7 @@ name: Installer dependency contract (macOS)
 # PATH=host-bin only. On macOS /usr/bin/shasum is a perl wrapper that refuses
 # to run when $0 is not its canonical path, so a symlinked shasum dies with
 # "perl ... can't run host-bin/shasum". That only shows up on a macOS runner,
-# so the release-build macOS job caught it first. Run the contract on macos-14
+# so the release-build macOS job caught it first. Run the contract on macos-15
 # here as well, so a change to the test or scripts/install.sh is checked on the
 # platform where the wrapper behaves differently.
 on:
@@ -21,7 +21,7 @@ permissions:
 jobs:
   macos:
     name: Restricted-PATH installer contract on macOS
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

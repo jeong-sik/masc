@@ -177,7 +177,7 @@ jobs:
 
   macos-workers:
     if: inputs.mode == 'macos_workers'
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - name: Validate selected source identity
         env:

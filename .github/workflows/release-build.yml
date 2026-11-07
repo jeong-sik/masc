@@ -33,7 +33,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: macos-14  # Apple Silicon
+          - os: macos-15  # Apple Silicon
             arch: macos-arm64
             shim-arch: ''    # the exec shim is a Linux guest binary; none here
           - os: macos-15-intel

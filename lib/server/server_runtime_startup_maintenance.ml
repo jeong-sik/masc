@@ -171,23 +171,23 @@ let startup_sweep_microvm_guests (state : Mcp_server.server_state) =
 ;;
 
 (* RFC-0498 §4.4. The links are read whole (about 2.7GB on 2026-11-06), so
-   the count takes a worker domain instead of holding back readiness. *)
-let startup_count_unowned_exact (state : Mcp_server.server_state) =
+   the sweep takes a worker domain instead of holding back readiness. *)
+let startup_sweep_unowned_exact (state : Mcp_server.server_state) =
   let config = Mcp_server.workspace_config state in
   match
     Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
-      Server_unowned_exact_census.run_for_workspace config)
+      Server_unowned_exact_sweep.run_for_workspace config)
   with
   | Error error ->
-    Log.Server.warn "[Startup] %s" (Server_unowned_exact_census.error_to_string error)
+    Log.Server.warn "[Startup] %s" (Server_unowned_exact_sweep.error_to_string error)
   | Ok report ->
     Log.Server.info
-      "[Startup] unowned Exact census: declarations=%d live_originals=%d exact_records=%d \
-       exact_record_bytes=%Ld unowned_exact_records=%d unowned_exact_record_bytes=%Ld \
-       proofs=%d proof_bytes=%Ld unowned_proofs=%d unowned_proof_bytes=%Ld"
-      report.declarations report.live_originals report.exact_records
-      report.exact_record_bytes report.unowned_exact_records report.unowned_exact_record_bytes
-      report.proofs report.proof_bytes report.unowned_proofs report.unowned_proof_bytes
+      "[Startup] unowned Exact sweep: declarations=%d live_originals=%d kept_exact_records=%d \
+       kept_proofs=%d removed_proofs=%d removed_proof_bytes=%Ld removed_exact_records=%d \
+       removed_exact_record_bytes=%Ld"
+      report.declarations report.live_originals report.kept_exact_records report.kept_proofs
+      report.removed_proofs report.removed_proof_bytes report.removed_exact_records
+      report.removed_exact_record_bytes
 ;;
 
 (* [typesafeai].excluded_keepers names keepers by name, so a misspelt name
@@ -282,12 +282,12 @@ let report_unarmed_typesafeai_destinations () =
     (Typesafeai_config.unarmed_destinations ())
 ;;
 
-type task = Jsonl_retention | Microvm_guest_sweep | Unowned_exact_census
+type task = Jsonl_retention | Microvm_guest_sweep | Unowned_exact_sweep
 
 let task_name = function
   | Jsonl_retention -> "jsonl_prune"
   | Microvm_guest_sweep -> "microvm_guest_sweep"
-  | Unowned_exact_census -> "unowned_exact_census"
+  | Unowned_exact_sweep -> "unowned_exact_sweep"
 
 let start_maintenance ~sw ~task ~run =
   Eio.Fiber.fork ~sw (fun () ->

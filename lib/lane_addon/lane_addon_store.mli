@@ -173,9 +173,10 @@ val tool_request_archive_record_path : scope:string -> date:string -> request_id
     [tool-request-owners-settled/<scope digest>/<date>/records/]. A settle keeps
     no body here. *)
 val with_tool_request_settlement_barrier : t -> (unit -> 'a) -> ('a, string) result
-(** Serialize a read-only whole-store sweep with the record moves and body removals of
+(** Serialize a whole-store sweep with the record moves and body removals of
     cooperating settles in this process. [work] may re-enter individual scope
-    readers, but must not invoke a settle. For Eio callers, admission can be
+    readers and may delete files the originals do not hold, but must not
+    invoke a settle. For Eio callers, admission can be
     cancelled, and admitted blocking work finishes on a system thread before
     the barrier is released. Cancellation after admission does not establish
     that a move did not happen. This is not a cross-process lock or an atomic

@@ -255,6 +255,7 @@ let changing ?(origin = Some same_origin) ?csrf () =
 
 type installation =
   { router : Http.Router.t
+  ; routes : R.t
   ; github : github
   }
 
@@ -323,7 +324,7 @@ let with_installation f =
             ; draw
             }
           in
-          f { router = Server_login_http.add_routes routes (Http.Router.create ()); github }))
+          f { router = Server_login_http.add_routes routes (Http.Router.create ()); routes; github }))
 ;;
 
 (* ---- a login, as a browser does it ---- *)
@@ -428,6 +429,60 @@ let a_browser_signs_in_acts_and_signs_out () =
       (send old t.router ~meth:"GET" ~path:"/auth/session").status)
 ;;
 
+let whoami router browser ?(headers = []) () =
+  let reply = send browser router ~meth:"GET" ~path:"/api/v1/auth/whoami" ~headers in
+  let text name =
+    match member name reply with
+    | Some (`String value) -> value
+    | Some (`Assoc fields) ->
+      (match List.assoc_opt "kind" fields with
+       | Some (`String kind) -> kind
+       | _ -> Alcotest.failf "no kind in %S" reply.body)
+    | _ -> Alcotest.failf "no %s in %S" name reply.body
+  in
+  match reply.status with
+  | 200 -> Printf.sprintf "200 %s %s by %s" (text "role") (text "principal") (text "binding")
+  | status -> Printf.sprintf "%d %s" status (text "error")
+;;
+
+(* The localhost preview (plan, preview scope P3) as a browser uses it: the
+   pages, a GitHub login from the invitation, who-am-I, and the sign-out. *)
+let the_preview_follows_a_login () =
+  with_installation (fun t ->
+    let router = Server_login_http.add_preview_routes t.routes t.router in
+    let admin = fresh_browser () in
+    let home = send admin router ~meth:"GET" ~path:"/" in
+    Alcotest.(check int) "the home page" 200 home.status;
+    Alcotest.(check bool)
+      "a form may go to GitHub"
+      true
+      (contains ~sub:"form-action 'self' https://github.com" (one "content-security-policy" home));
+    let invitation = send admin router ~meth:"GET" ~path:"/accounts/invite" in
+    Alcotest.(check int) "the invitation page" 200 invitation.status;
+    Alcotest.(check bool)
+      "it starts a GitHub login"
+      true
+      (contains ~sub:{|action="/auth/github/start"|} invitation.body);
+    Alcotest.(check string)
+      "nobody yet"
+      ("401 " ^ Masc.Auth_gate.reason_to_string Masc.Auth_gate.Credential_required)
+      (whoami router admin ());
+    let back = sign_in t admin ~user_id:583231 ~fields:[ "invite", admin_token; "return_to", "/" ] in
+    Alcotest.(check int) ("signed in: " ^ back.body) 200 back.status;
+    Alcotest.(check string) "the Admin" "200 admin human by session" (whoami router admin ());
+    Alcotest.(check string)
+      "a session and a bearer"
+      ("401 " ^ Masc.Auth_gate.reason_to_string Masc.Auth_gate.Several_credentials)
+      (whoami router admin ~headers:[ "Authorization", "Bearer " ^ String.make 64 'f' ] ());
+    let csrf = csrf_of t admin in
+    let out = send admin router ~meth:"POST" ~path:"/auth/logout" ~headers:(changing ~csrf ()) in
+    Alcotest.(check int) ("signed out: " ^ out.body) 204 out.status;
+    Alcotest.(check string)
+      "nobody again"
+      ("401 " ^ Masc.Auth_gate.reason_to_string Masc.Auth_gate.Credential_required)
+      (whoami router admin ()))
+;;
+
 let what_the_server_reads () =
   with_installation (fun t ->
     let check label expected (reply : reply) = Alcotest.(check int) (label ^ ": " ^ reply.body) expected reply.status in
@@ -524,6 +579,7 @@ let () =
     "server_login_http"
     [ ( "login"
       , [ Alcotest.test_case "a browser signs in, acts and signs out" `Quick a_browser_signs_in_acts_and_signs_out
+        ; Alcotest.test_case "the preview follows a login" `Quick the_preview_follows_a_login
         ; Alcotest.test_case "what the server reads" `Quick what_the_server_reads
         ; Alcotest.test_case "the route table" `Quick the_route_table
         ; Alcotest.test_case "the query credential" `Quick the_query_credential

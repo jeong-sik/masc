@@ -237,7 +237,7 @@ let candidate_observations_of (waiting : waiting) events =
     | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> None) events
 ;;
 
-(* RFC-0512: a release row closes this payout's held window. The hold row
+(* RFC-0513: a release row closes this payout's held window. The hold row
    itself stays in the ledger; only the blocking fact is closed. *)
 let released_of (waiting : waiting) events =
   List.exists (fun (event : Candle_event.t) -> match event.body with
@@ -463,7 +463,7 @@ let validate_settlement_under ~rules (waiting : waiting) events body =
   let matches goal_id request_id verification_run_id =
     goal_id = waiting.goal_id && request_id = waiting.request_id
     && verification_run_id = waiting.verification_run_id in
-  (* RFC-0512: the released-window closure settles without durable Candidates;
+  (* RFC-0513: the released-window closure settles without durable Candidates;
      its truth is the release row, not a decided candidate set. *)
   let released_closure = match body with
     | Candle_event.Unattributed ({ reason = Candle_event.Window_released;

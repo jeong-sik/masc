@@ -15,7 +15,7 @@ export type GoalCandlePayout =
   | (Identity & { state: 'owed'; snapshot: Snapshot; stage: 'candidates_unrecorded' | 'candidates_consistent' | 'candidates_inconsistent' | 'candidates_unchecked' })
   | (Identity & { state: 'held'; snapshot: Snapshot; origin: 'stored' | 'derived_candidates'; issues: IssueObservation })
   | (Identity & { state: 'paid'; recorded_at: string; allocations: Allocation[] })
-  | (Identity & { state: 'unattributed'; recorded_at: string; reason: 'no_candidates' | 'all_unrelated' | 'no_related_keepers' })
+  | (Identity & { state: 'unattributed'; recorded_at: string; reason: 'no_candidates' | 'all_unrelated' | 'no_related_keepers' | 'window_released' })
   | (Identity & { state: 'payout_failed'; reason: 'recorded_unreadable_due_date' })
 export type GoalCandleObservation = {
   config: 'enabled' | 'off' | 'disabled'
@@ -100,7 +100,7 @@ function payout(raw: unknown): GoalCandlePayout {
   if (state === 'unattributed') {
     keys(raw, [...identityKeys, 'recorded_at', 'reason'])
     return { state, ...identity, recorded_at: text(raw.recorded_at),
-      reason: choice(raw.reason, ['no_candidates', 'all_unrelated', 'no_related_keepers'] as const) }
+      reason: choice(raw.reason, ['no_candidates', 'all_unrelated', 'no_related_keepers', 'window_released'] as const) }
   }
   keys(raw, [...identityKeys, 'reason'])
   return { state, ...identity, reason: choice(raw.reason, ['recorded_unreadable_due_date'] as const) }

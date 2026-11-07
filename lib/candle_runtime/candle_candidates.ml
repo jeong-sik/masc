@@ -118,7 +118,7 @@ let write_candidates ~released ~fenced ~sources ~keeper_snapshot ~now ~base_path
     && Option.is_none (Candle_payout.candidates_of waiting events)
     && Option.is_none (Candle_payout.held_window_of waiting events) in
   if durable_issue && released then (
-    (* RFC-0512: the release gave this payout one fresh read. The fresh read
+    (* RFC-0513: the release gave this payout one fresh read. The fresh read
        reproduced the same permanent ambiguity, so the payout closes for
        nobody instead of holding again. *)
     let* at = Candle_stamp.at ~now in

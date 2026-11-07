@@ -1,4 +1,4 @@
-(** Releasing a held candidate window (RFC-0512).
+(** Releasing a held candidate window (RFC-0513).
 
     The operator decision is one row, [Candidate_window_released], naming the
     open hold's Goal, request and verifier run. The append is admitted under

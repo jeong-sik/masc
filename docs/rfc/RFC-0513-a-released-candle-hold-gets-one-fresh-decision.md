@@ -1,5 +1,5 @@
 ---
-rfc: "0512"
+rfc: "0513"
 title: "보류된 Candle 지급 창은 해제되고 한 번 다시 판정된다"
 status: Draft
 created: 2026-11-07
@@ -10,7 +10,7 @@ superseded_by: null
 related: ["goal-candle-ledger"]
 ---
 
-# RFC-0512 — 보류된 Candle 지급 창은 해제되고 한 번 다시 판정된다
+# RFC-0513 — 보류된 Candle 지급 창은 해제되고 한 번 다시 판정된다
 
 ## 0. 요약
 

@@ -64,7 +64,7 @@ type unattributed_reason =
   | Window_released
 (** Nobody could be paid. [Window_released]: the held candidate window was
     released by decision and the fresh read reproduced the same permanent
-    ambiguity, so the payout settled for nobody (RFC-0512). *)
+    ambiguity, so the payout settled for nobody (RFC-0513). *)
 
 type equipment_choice = Default | Item of Keeper_portrait_item.t
 
@@ -131,7 +131,7 @@ type body =
           payout. The hold row stays. The next payout pass re-decides the
           payout from a fresh observation; a window that stays ambiguous
           closes [Unattributed] with [Window_released] instead of holding
-          again (RFC-0512). *)
+          again (RFC-0513). *)
   | Unattributed of
       { goal_id : string
       ; request_id : string

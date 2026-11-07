@@ -72,6 +72,7 @@
 (include stanzas/test_authz_login.inc)
 (include stanzas/test_auth_config_login_clients.inc)
 (include stanzas/test_login_flow.inc)
+(include stanzas/test_login_routes.inc)
 (include stanzas/test_github_oauth.inc)
 (include stanzas/test_keeper_chat_store_announces.inc)
 (include stanzas/test_keeper_memory_journal_announces.inc)

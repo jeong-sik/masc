@@ -930,7 +930,13 @@ let validate_tool_request () =
        the owner record past what the scan's owner reader already checked. *)
     | Some Candle_appraisal -> Ok ()
     (* No reader of this build reads this scope, so fresh state deletes it. *)
-    | None -> Error "no consumer of this build reads tool request originals of this scope"
+    | None ->
+      Error
+        (Printf.sprintf
+           "no consumer of this build reads tool request originals of this scope; with \
+            the server stopped, delete the folder %s under tool-request-owners, \
+            tool-request-bodies and tool-request-owners-settled"
+           (Masc.Lane_addon_store.digest record.scope))
 ;;
 
 let run_scan ~base_path = function

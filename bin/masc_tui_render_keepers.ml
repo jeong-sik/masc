@@ -443,16 +443,76 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
         row
     ]
 
+let format_attempt_node (a : Masc_tui_keeper_trail.attempt) =
+  let fault_clause =
+    match a.fault with
+    | Some w when not (String.equal w "") -> " · " ^ w
+    | _ -> ""
+  in
+  let mark = Masc_tui_keeper_mark.attempt_glyph in
+  mark ^ " " ^ Terminal_text.single_line a.runtime_id ^ fault_clause
+
+let render_attempt_chain ~max_cells (attempts : Masc_tui_keeper_trail.attempt list) =
+  match attempts with
+  | [] -> None
+  | _ ->
+      let sep = " › " in
+      let sep_len = Message_layout.display_width sep in
+      let rev_attempts = List.rev attempts in
+      let rec fit acc omitted remaining_cells = function
+        | [] -> (List.rev acc, omitted)
+        | a :: rest ->
+            let node = format_attempt_node a in
+            let node_cells = Message_layout.display_width node in
+            let cost = if acc = [] then node_cells else node_cells + sep_len in
+            let omit_cost =
+              if rest <> [] then
+                Message_layout.display_width (Printf.sprintf "+%d › " (List.length rest))
+              else 0
+            in
+            if remaining_cells >= cost + omit_cost then
+              fit (node :: acc) omitted (remaining_cells - cost) rest
+            else
+              (List.rev acc, List.length (a :: rest))
+      in
+      let fitted_rev, omitted_count = fit [] 0 max_cells rev_attempts in
+      if fitted_rev = [] then None
+      else
+        let prefix =
+          if omitted_count > 0 then Printf.sprintf "+%d%s" omitted_count sep else ""
+        in
+        let chain = prefix ^ String.concat sep fitted_rev in
+        Some (Theme.warn () ^ chain ^ Ansi.reset)
+
 let keeper_secondary_row_content ~inner (row : Keeper_list_model.row) =
   let indent_cells = Render_schedule.keeper_marker_width + 2 in
+  let available = max 0 (inner - indent_cells) in
+  let runtime =
+    match row.reading.Keeper_control.liveness with
+    | Keeper_control.Present r -> Some r
+    | _ -> None
+  in
+  let attempts = Masc_tui_keeper_trail.attempts_of_runtime runtime in
+  let chain_opt = render_attempt_chain ~max_cells:available attempts in
   let detail =
     match keeper_detail_text row with
     | "" -> Masc_tui_theme.Glyph.no_value
     | text -> text
   in
-  String.make indent_cells ' ' ^ Theme.recede ()
-  ^ fit_width detail (max 0 (inner - indent_cells))
-  ^ Ansi.reset
+  let content =
+    match chain_opt with
+    | None -> Theme.recede () ^ fit_width detail available ^ Ansi.reset
+    | Some chain ->
+        let chain_cells = Message_layout.display_width chain in
+        let remaining = available - chain_cells in
+        let sep = "  ·  " in
+        let sep_cells = Message_layout.display_width sep in
+        if remaining >= sep_cells + 10 && not (String.equal detail Masc_tui_theme.Glyph.no_value) then
+          chain ^ Theme.recede () ^ sep ^ fit_width detail (remaining - sep_cells) ^ Ansi.reset
+        else
+          fit_width chain available
+  in
+  String.make indent_cells ' ' ^ content
 
 (* The subtractions over the fleet's name lists. They answer different
    questions and only one of them is about being stopped: a keeper the fleet

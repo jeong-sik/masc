@@ -189,3 +189,88 @@ let of_readings ~health ~runtime =
       match Decode.keeper_health_reading value with
       | Decode.Health_failing -> failed runtime
       | Decode.Health_running | Decode.Health_idle | Decode.Health_offline -> Trail_sound)
+
+type attempt =
+  { ordinal : int
+  ; runtime_id : string
+  ; dispatch : Runtime_attempt_dispatch.t option
+  ; cause : cause_group
+  ; fault : string option
+  ; terminal : bool
+  }
+
+let fault_word = function
+  | None -> None
+  | Some Evidence.Api_candidate_fault.Unattributed -> Some "unattributed"
+  | Some Evidence.Api_candidate_fault.Unknown_after_dispatch -> Some "uncertain"
+  | Some Evidence.Api_candidate_fault.Local_admission -> Some "admission"
+  | Some (Evidence.Api_candidate_fault.Binding binding) ->
+      match binding with
+      | Evidence.Api_candidate_fault.Credential -> Some "credential"
+      | Evidence.Api_candidate_fault.Account_access -> Some "account access"
+      | Evidence.Api_candidate_fault.Account -> Some "account"
+      | Evidence.Api_candidate_fault.Model_absent -> Some "model absent"
+      | Evidence.Api_candidate_fault.Rate_limit -> Some "rate limit"
+      | Evidence.Api_candidate_fault.Capacity -> Some "capacity"
+      | Evidence.Api_candidate_fault.Server -> Some "server"
+      | Evidence.Api_candidate_fault.Window -> Some "context window"
+      | Evidence.Api_candidate_fault.Body_limit -> Some "body limit"
+      | Evidence.Api_candidate_fault.Admission -> Some "admission"
+      | Evidence.Api_candidate_fault.Deadline -> Some "deadline"
+      | Evidence.Api_candidate_fault.Output_dialect -> Some "dialect"
+
+let attempts_of_runtime (runtime : Decode.keeper_runtime option) : attempt list =
+  match runtime with
+  | None -> []
+  | Some row ->
+      let last = row.kr_last_failure in
+      let observation = row.kr_runtime_lane_observation in
+      let last_cause = Option.map (fun (f : Decode.keeper_failure) -> f.kf_cause) last in
+      match last_cause with
+      | None -> []
+      | Some cause when not (is_turn_failure cause) -> []
+      | Some _ ->
+          match observation with
+          | Some (Receipt.Runtime_lane_observed { evidence; _ }) ->
+              let failures = evidence.failures in
+              let terminal = evidence.terminal in
+              let terminal_attempt =
+                match terminal with
+                | Evidence.Candidate_terminal { attempt; _ } -> Some attempt
+                | Evidence.Terminal_not_observed -> None
+              in
+              let ordinals =
+                let fail_ords = List.map (fun (f : Evidence.failure) -> f.attempt) failures in
+                let all_ords =
+                  match terminal_attempt with
+                  | Some a -> a :: fail_ords
+                  | None -> fail_ords
+                in
+                List.sort_uniq Int.compare all_ords
+              in
+              List.filter_map
+                (fun ord ->
+                  match terminal with
+                  | Evidence.Candidate_terminal { runtime_id; attempt; failure } when attempt = ord ->
+                      Some
+                        { ordinal = ord
+                        ; runtime_id
+                        ; dispatch = None
+                        ; cause = cause_group_of_failure failure
+                        ; fault = None
+                        ; terminal = true
+                        }
+                  | _ ->
+                      (match List.find_opt (fun (f : Evidence.failure) -> f.attempt = ord) failures with
+                       | Some f ->
+                           Some
+                             { ordinal = ord
+                             ; runtime_id = f.runtime_id
+                             ; dispatch = Some f.dispatch
+                             ; cause = cause_group_of_failure f.failure
+                             ; fault = fault_word f.api_candidate_fault
+                             ; terminal = false
+                             }
+                       | None -> None))
+                ordinals
+          | _ -> []

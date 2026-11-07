@@ -244,6 +244,43 @@ let test_a_receipt_time_that_does_not_parse_does_not_borrow_the_server_time () =
          ; walk = Trail.Walk_no_terminal { tried = 1 }
          })
 
+let test_attempts_of_runtime_extracts_ordered_candidates_and_terminal () =
+  let failure_a : Evidence.failure =
+    { attempt = 0
+    ; runtime_id = "provider.runtime-a"
+    ; dispatch = Masc.Runtime_attempt_dispatch.Dispatched
+    ; failure = { cause = Request_failure.Provider_rate_limited "throttled" }
+    ; api_candidate_fault = Some (Evidence.Api_candidate_fault.Binding Evidence.Api_candidate_fault.Rate_limit)
+    }
+  in
+  let failure_b : Evidence.failure =
+    { attempt = 1
+    ; runtime_id = "provider.runtime-b"
+    ; dispatch = Masc.Runtime_attempt_dispatch.Dispatched
+    ; failure = { cause = Request_failure.Provider_network "timeout" }
+    ; api_candidate_fault = None
+    }
+  in
+  let terminal : Evidence.terminal =
+    Evidence.Candidate_terminal
+      { runtime_id = "provider.runtime-c"
+      ; attempt = 2
+      ; failure = { cause = Request_failure.Input_capacity }
+      }
+  in
+  let evidence : Evidence.t = { failures = [failure_a; failure_b]; terminal } in
+  let lane_observation = Some (Receipt.Runtime_lane_observed { turn = receipt_turn; evidence }) in
+  let r = runtime ~last_failure:(reported Decode.Keeper_failure_provider) ~lane_observation () in
+  let attempts = Trail.attempts_of_runtime (Some r) in
+  Alcotest.(check int) "extracts all three attempts" 3 (List.length attempts);
+  let ordinals = List.map (fun (a : Trail.attempt) -> a.ordinal) attempts in
+  Alcotest.(check (list int)) "ordinals in order" [0; 1; 2] ordinals;
+  let terminals = List.map (fun (a : Trail.attempt) -> a.terminal) attempts in
+  Alcotest.(check (list bool)) "only the last is terminal" [false; false; true] terminals;
+  let last_attempt = List.nth attempts 2 in
+  Alcotest.(check string) "terminal runtime_id" "provider.runtime-c" last_attempt.runtime_id;
+  Alcotest.(check bool) "terminal cause matches" true (last_attempt.cause = Trail.Input)
+
 let () =
   Alcotest.run "tui_keeper_trail"
     [ ( "decisions"
@@ -267,5 +304,7 @@ let () =
             test_an_observed_walk_with_no_failure_and_no_terminal_names_no_cause
         ; Alcotest.test_case "a receipt time that does not parse is not replaced" `Quick
             test_a_receipt_time_that_does_not_parse_does_not_borrow_the_server_time
+        ; Alcotest.test_case "attempts_of_runtime extracts ordered candidates and terminal" `Quick
+            test_attempts_of_runtime_extracts_ordered_candidates_and_terminal
         ] )
     ]

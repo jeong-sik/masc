@@ -22,6 +22,12 @@ type self_authenticated_reason =
           credential before it upgrades. [/ws] checks it for an upgrade only: a
           [GET /ws] that does not ask to upgrade gets the discovery document
           without one. The IDE LSP proxy checks every request. *)
+  | Browser_session
+      (** The multi-account login routes and the routes a browser session calls
+          ([/auth/...] and [/api/v1/auth/allowlist]): the start and the callback
+          of a login run before the browser has a session, and the others check
+          the session cookie, the origin and the CSRF token in their own code
+          ([Authz_browser_request.check]), answering 401 or 403. *)
   | Loopback_dev_token
       (** [/api/v1/dashboard/dev-token]: the handler answers 404 unless the bind
           is loopback and strict auth is off. Past that it runs [with_public_read]

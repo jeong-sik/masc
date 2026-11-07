@@ -25,7 +25,7 @@ let plan (kind : Route_access.t) =
   match kind with
   | Always_public -> Ok Open
   | Self_authenticated (Mcp_transport | Oauth_protocol | Websocket_upgrade) -> Ok Open
-  | Self_authenticated (Loopback_dev_token | Subpath_dispatch) ->
+  | Self_authenticated (Browser_session | Loopback_dev_token | Subpath_dispatch) ->
     Error (Kind_not_served kind)
   | Public_read -> Ok Public_read
   | Read_auth -> Ok Read_auth

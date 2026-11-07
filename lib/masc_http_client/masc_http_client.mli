@@ -63,6 +63,7 @@ val post_sync :
 val post_response_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   ?timeout_sec:float ->
+  ?max_body_bytes:int ->
   url:string ->
   headers:(string * string) list ->
   body:string ->
@@ -70,7 +71,10 @@ val post_response_sync :
   (response, string) result
 (** [post_response_sync] is {!post_sync} with the response headers kept,
     for a caller that needs one of them -- the MCP transport returns a new
-    session's id in [Mcp-Session-Id], not in the body. *)
+    session's id in [Mcp-Session-Id], not in the body. [max_body_bytes] is
+    the receive limit of {!get_response_sync}: an answer over it fails, and
+    its connection is closed. The login transport passes it, as a login
+    reads a few KiB from its provider. *)
 
 val patch_sync :
   ?clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->

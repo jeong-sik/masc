@@ -140,10 +140,10 @@ let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
 (** POST that keeps the response headers. The MCP transport answers an
     [initialize] with its session id in a header, not the body, so a caller
     opening a session has nothing to read from [post_sync]. *)
-let post_response_sync ?clock ?timeout_sec ~url ~headers ~body () =
+let post_response_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers ~body () =
   let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
-  match Pool.request pool ?clock ?timeout_seconds:timeout_sec
+  match Pool.request pool ?clock ?timeout_seconds:timeout_sec ?max_body_bytes
           ~method_:`POST ~url ~headers ~body () with
   | Ok { Pool.status; headers; body } -> Ok { status; headers; body }
   | Error e -> Error e

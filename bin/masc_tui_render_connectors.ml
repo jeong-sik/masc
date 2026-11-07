@@ -444,16 +444,22 @@ let render_connectors (state : state) =
       let scroll = max 0 (min state.connectors_scroll max_scroll) in
       let connectors_window = Rows.of_list ~first:scroll ~height:content_height connectors in
       if shown = 0 then
+        let reading = match Connector_read.view state.connectors_read with
+          | Connector_read.Reading _ -> true
+          | Quiet | Waiting_after_write | Failed_to_start -> false
+        in
         let empty =
           match
             empty_page_of ~snapshot:state.connectors
               ~error:state.connectors_error
           with
-          | Page_failed -> page_failed_note
-          | Page_unread -> page_unread_note
-          | Page_empty -> "  (no connectors registered)"
+          | Page_failed -> Some page_failed_note
+          (* The notice above the list is already saying that a read runs. *)
+          | Page_unread when reading -> None
+          | Page_unread -> Some page_unread_note
+          | Page_empty -> Some "  (no connectors registered)"
         in
-        c.push_styled ~style:(Theme.recede ()) empty
+        Option.iter (c.push_styled ~style:(Theme.recede ())) empty
       else begin
         for i = 0 to content_height - 1 do
           let idx = i + scroll in

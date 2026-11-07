@@ -902,7 +902,9 @@ let render_runtime (state : state) =
           ~error:state.runtime_surface_error
       with
       | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note
+      | Page_unread ->
+          page_unread_note_while
+            ~reading:(Option.is_some state.runtime_surface_inflight)
       | Page_empty ->
           (match state.runtime_mode with
            | Masc_tui_types.Runtime_lanes -> "  (no runtime candidate orders configured)"

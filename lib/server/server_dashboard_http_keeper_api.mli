@@ -76,7 +76,7 @@ val file_changes_max_window_hours : float
 
 val handle_keeper_fusion_post :
   Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Handle [POST /fusion] by starting an out-of-band deliberation owned by the
     keeper in the route, with the prompt, preset and topology supplied by the
     operator. This is the only HTTP surface that can reach the judge-of-judges
@@ -86,7 +86,7 @@ val handle_keeper_fusion_post :
 val handle_keeper_operator_note_post :
   Mcp_server.server_state ->
   string ->
-  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Handle [POST /operator-note] by replacing this keeper's pending note
     (RFC-0366). The note renders on the next turn that assembles and is then
     stamped consumed; oversized text is rejected rather than truncated. *)
@@ -95,7 +95,7 @@ val handle_keeper_board_attention_quarantine_recovery_post :
   Mcp_server.server_state ->
   string ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   keeper_name:string ->
   raw_partition_id:string ->
   string ->
@@ -162,7 +162,7 @@ val offline_keeper_composite_json :
 
 val handle_keeper_checkpoints_post :
   Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Handle admin [POST /checkpoints] history deletion, checkpoint purge and
     explicit original-operation input responses. Acceptance is not execution completion. *)
 
@@ -186,32 +186,32 @@ val handle_keeper_config_post :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
   Mcp_server.server_state ->
-  string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  string -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Handle [POST /config] (TOML edits). *)
 
 val handle_keeper_secrets_post :
   Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Handle [POST /secrets] (redacted env-secret projection edits). *)
 
 val handle_keeper_github_login_post :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Stream an isolated GitHub CLI login for the selected keeper. *)
 
 val handle_keeper_github_token_post :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Set a personal access token (e.g. Fine-grained PAT) for the selected keeper. *)
 
 val handle_keeper_oauth_login_post :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Handle [POST /oauth-login]: begin attaching this keeper to the declared
     provider named in the body, and answer with the URL to open. *)
 
 val handle_keeper_identity_refresh_post :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Handle [POST /identity-refresh]: ask an attached provider again what
     tools it has, and write the answer down. *)
 
@@ -219,7 +219,7 @@ val handle_keeper_identity_switch_post :
   Mcp_server.server_state ->
   actor:string ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   string ->
   unit
 (** Handle [POST /identity-switch]: turn one attached service on or off for
@@ -232,7 +232,7 @@ val handle_keeper_lifecycle_post :
   tool_name:string ->
   action:String.t ->
   Mcp_server.server_state ->
-  string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  string -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Generic handler for boot / shutdown / reset / clear posts. Boot does not
     resume an ordinary paused owner; callers must commit [Resume_owner] through
     the directive endpoint. *)
@@ -241,7 +241,7 @@ val handle_keeper_directive_post :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
   Mcp_server.server_state ->
-  string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  string -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Handle [POST /directive] (operator directive injection). A resume body
     must carry a stable [operator_operation_id], and is
     committed through the typed paused-work disposition transaction. *)
@@ -249,7 +249,7 @@ val handle_keeper_directive_post :
 val handle_keeper_paused_work_post :
   Mcp_server.server_state ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   string ->
   unit
 (** Handle authenticated [POST /paused-work] for exact Resume, Transfer,
@@ -259,7 +259,7 @@ val handle_keeper_bulk_directive_post :
   sw:Eio.Switch.t ->
   clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
   Mcp_server.server_state ->
-  string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  string -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Handle [POST /api/v1/keepers_bulk/directive]. Pause and wakeup use
     [{"names": [...]}]. Resume uses exact per-owner
     [{"targets": [{"name", "operator_operation_id"}, ...]}]
@@ -268,6 +268,6 @@ val handle_keeper_bulk_directive_post :
 
 val handle_keeper_get_subroutes :
   Mcp_server.server_state ->
-  Httpun.Request.t -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Httpun.Request.t -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Dispatch [GET /api/v1/keepers/<name>/<sub>] sub-routes
     (status / tools / checkpoints listing / etc.). *)

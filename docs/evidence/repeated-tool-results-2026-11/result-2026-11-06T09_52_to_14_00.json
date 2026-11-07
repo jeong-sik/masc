@@ -1,0 +1,529 @@
+{
+  "params": {
+    "min_bytes": 1024,
+    "stub_bytes": 350,
+    "since": 1793958720.0,
+    "until": 1793973600.0,
+    "excluded_keepers": [],
+    "match": "text"
+  },
+  "requests": {
+    "count": 380,
+    "bytes": 746116955,
+    "repeat_count": 5,
+    "repeat_bytes": 33846,
+    "repeat_share": 0.0,
+    "saved_bytes": 32096,
+    "saved_share": 0.0,
+    "earlier_turn_repeat_count": 37,
+    "earlier_turn_repeat_bytes": 68306,
+    "earlier_turn_repeat_share": 0.0001,
+    "by_keeper": [
+      {
+        "keeper": "masc-productor-owner",
+        "count": 8,
+        "bytes": 26263558,
+        "repeat_count": 3,
+        "repeat_bytes": 22767,
+        "repeat_share": 0.0009,
+        "saved_bytes": 21717,
+        "saved_share": 0.0008,
+        "earlier_turn_repeat_count": 3,
+        "earlier_turn_repeat_bytes": 24828,
+        "earlier_turn_repeat_share": 0.0009
+      },
+      {
+        "keeper": "kidsnote-slack-reader",
+        "count": 11,
+        "bytes": 13103874,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0,
+        "earlier_turn_repeat_count": 33,
+        "earlier_turn_repeat_bytes": 37444,
+        "earlier_turn_repeat_share": 0.0029
+      },
+      {
+        "keeper": "wkbl-front",
+        "count": 9,
+        "bytes": 4665822,
+        "repeat_count": 2,
+        "repeat_bytes": 11079,
+        "repeat_share": 0.0024,
+        "saved_bytes": 10379,
+        "saved_share": 0.0022,
+        "earlier_turn_repeat_count": 0,
+        "earlier_turn_repeat_bytes": 0,
+        "earlier_turn_repeat_share": 0.0
+      },
+      {
+        "keeper": "msx-retro-mania",
+        "count": 1,
+        "bytes": 2451978,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0,
+        "earlier_turn_repeat_count": 1,
+        "earlier_turn_repeat_bytes": 6034,
+        "earlier_turn_repeat_share": 0.0025
+      },
+      {
+        "keeper": "code-reviewer",
+        "count": 73,
+        "bytes": 199945659,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0,
+        "earlier_turn_repeat_count": 0,
+        "earlier_turn_repeat_bytes": 0,
+        "earlier_turn_repeat_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-brother",
+        "count": 18,
+        "bytes": 36169956,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0,
+        "earlier_turn_repeat_count": 0,
+        "earlier_turn_repeat_bytes": 0,
+        "earlier_turn_repeat_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-father",
+        "count": 6,
+        "bytes": 7345903,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0,
+        "earlier_turn_repeat_count": 0,
+        "earlier_turn_repeat_bytes": 0,
+        "earlier_turn_repeat_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-mother",
+        "count": 24,
+        "bytes": 40262940,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0,
+        "earlier_turn_repeat_count": 0,
+        "earlier_turn_repeat_bytes": 0,
+        "earlier_turn_repeat_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-sister",
+        "count": 21,
+        "bytes": 29948807,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0,
+        "earlier_turn_repeat_count": 0,
+        "earlier_turn_repeat_bytes": 0,
+        "earlier_turn_repeat_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-uncle",
+        "count": 10,
+        "bytes": 9983468,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0,
+        "earlier_turn_repeat_count": 0,
+        "earlier_turn_repeat_bytes": 0,
+        "earlier_turn_repeat_share": 0.0
+      },
+      {
+        "keeper": "context-reviewer",
+        "count": 37,
+        "bytes": 85051009,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0,
+        "earlier_turn_repeat_count": 0,
+        "earlier_turn_repeat_bytes": 0,
+        "earlier_turn_repeat_share": 0.0
+      },
+      {
+        "keeper": "e-masc-the-leader",
+        "count": 31,
+        "bytes": 31142995,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0,
+        "earlier_turn_repeat_count": 0,
+        "earlier_turn_repeat_bytes": 0,
+        "earlier_turn_repeat_share": 0.0
+      }
+    ],
+    "by_hour": [
+      {
+        "at": "2026-11-06T09",
+        "count": 22,
+        "bytes": 29361575,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0,
+        "earlier_turn_repeat_count": 4,
+        "earlier_turn_repeat_bytes": 9438,
+        "earlier_turn_repeat_share": 0.0003
+      },
+      {
+        "at": "2026-11-06T10",
+        "count": 90,
+        "bytes": 175331236,
+        "repeat_count": 2,
+        "repeat_bytes": 11079,
+        "repeat_share": 0.0001,
+        "saved_bytes": 10379,
+        "saved_share": 0.0001,
+        "earlier_turn_repeat_count": 9,
+        "earlier_turn_repeat_bytes": 10212,
+        "earlier_turn_repeat_share": 0.0001
+      },
+      {
+        "at": "2026-11-06T11",
+        "count": 103,
+        "bytes": 210124382,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0,
+        "earlier_turn_repeat_count": 12,
+        "earlier_turn_repeat_bytes": 13616,
+        "earlier_turn_repeat_share": 0.0001
+      },
+      {
+        "at": "2026-11-06T12",
+        "count": 101,
+        "bytes": 206032937,
+        "repeat_count": 3,
+        "repeat_bytes": 22767,
+        "repeat_share": 0.0001,
+        "saved_bytes": 21717,
+        "saved_share": 0.0001,
+        "earlier_turn_repeat_count": 9,
+        "earlier_turn_repeat_bytes": 31636,
+        "earlier_turn_repeat_share": 0.0002
+      },
+      {
+        "at": "2026-11-06T13",
+        "count": 64,
+        "bytes": 125266825,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0,
+        "earlier_turn_repeat_count": 3,
+        "earlier_turn_repeat_bytes": 3404,
+        "earlier_turn_repeat_share": 0.0
+      }
+    ],
+    "requests_with_repeat": 4,
+    "per_request_saved_share": {
+      "p50": 0.0,
+      "p90": 0.0,
+      "p99": 0.0021,
+      "max": 0.0202
+    }
+  },
+  "ledger": {
+    "count": 3218,
+    "bytes": 11194327,
+    "repeat_count": 5,
+    "repeat_bytes": 22259,
+    "repeat_share": 0.002,
+    "saved_bytes": 20509,
+    "saved_share": 0.0018,
+    "by_keeper": [
+      {
+        "keeper": "wkbl-front",
+        "count": 152,
+        "bytes": 274104,
+        "repeat_count": 3,
+        "repeat_bytes": 13462,
+        "repeat_share": 0.0491,
+        "saved_bytes": 12412,
+        "saved_share": 0.0453
+      },
+      {
+        "keeper": "masc-productor-owner",
+        "count": 162,
+        "bytes": 598457,
+        "repeat_count": 1,
+        "repeat_bytes": 7589,
+        "repeat_share": 0.0127,
+        "saved_bytes": 7239,
+        "saved_share": 0.0121
+      },
+      {
+        "keeper": "you-never-change",
+        "count": 383,
+        "bytes": 746577,
+        "repeat_count": 1,
+        "repeat_bytes": 1208,
+        "repeat_share": 0.0016,
+        "saved_bytes": 858,
+        "saved_share": 0.0011
+      },
+      {
+        "keeper": "code-reviewer",
+        "count": 342,
+        "bytes": 518883,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-brother",
+        "count": 214,
+        "bytes": 851917,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-father",
+        "count": 102,
+        "bytes": 326856,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-mother",
+        "count": 351,
+        "bytes": 958532,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-sister",
+        "count": 202,
+        "bytes": 557364,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-uncle",
+        "count": 110,
+        "bytes": 752393,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "keeper": "context-reviewer",
+        "count": 429,
+        "bytes": 1647958,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "keeper": "e-masc-the-leader",
+        "count": 105,
+        "bytes": 318523,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "keeper": "github-pr-checker",
+        "count": 72,
+        "bytes": 134852,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      }
+    ],
+    "by_day": [
+      {
+        "at": "2026-11-06",
+        "count": 3218,
+        "bytes": 11194327,
+        "repeat_count": 5,
+        "repeat_bytes": 22259,
+        "repeat_share": 0.002,
+        "saved_bytes": 20509,
+        "saved_share": 0.0018
+      }
+    ],
+    "by_tool": [
+      {
+        "tool": "masc_board_post_get",
+        "count": 131,
+        "bytes": 702181,
+        "repeat_count": 3,
+        "repeat_bytes": 18668,
+        "repeat_share": 0.0266,
+        "saved_bytes": 17618,
+        "saved_share": 0.0251
+      },
+      {
+        "tool": "masc_board_post_update",
+        "count": 3,
+        "bytes": 16044,
+        "repeat_count": 1,
+        "repeat_bytes": 2383,
+        "repeat_share": 0.1485,
+        "saved_bytes": 2033,
+        "saved_share": 0.1267
+      },
+      {
+        "tool": "Execute",
+        "count": 2209,
+        "bytes": 5705012,
+        "repeat_count": 1,
+        "repeat_bytes": 1208,
+        "repeat_share": 0.0002,
+        "saved_bytes": 858,
+        "saved_share": 0.0002
+      },
+      {
+        "tool": "BrowserAct",
+        "count": 3,
+        "bytes": 1374,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "tool": "BrowserGoto",
+        "count": 3,
+        "bytes": 1418,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "tool": "BrowserInteract",
+        "count": 1,
+        "bytes": 771,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "tool": "BrowserRead",
+        "count": 14,
+        "bytes": 42295,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "tool": "BrowserTabs",
+        "count": 6,
+        "bytes": 212839,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "tool": "Edit",
+        "count": 30,
+        "bytes": 6048,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "tool": "Grep",
+        "count": 16,
+        "bytes": 25723,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "tool": "Read",
+        "count": 118,
+        "bytes": 961595,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "tool": "WebFetch",
+        "count": 1,
+        "bytes": 3696,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      }
+    ]
+  },
+  "skipped": {
+    "bad_lines": 0,
+    "bad_message_entries": 0,
+    "outside_window": 187415,
+    "missing_blobs": 0,
+    "unreadable_blobs": 0,
+    "other_records": 182,
+    "unkeyed_calls": 2093,
+    "unmatched_results": 0
+  }
+}

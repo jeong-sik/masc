@@ -1,0 +1,405 @@
+{
+  "params": {
+    "min_bytes": 1024,
+    "stub_bytes": 350,
+    "since": null,
+    "until": null,
+    "excluded_keepers": [],
+    "match": "text"
+  },
+  "ledger": {
+    "count": 189388,
+    "bytes": 1112891026,
+    "repeat_count": 4871,
+    "repeat_bytes": 50265784,
+    "repeat_share": 0.0452,
+    "saved_bytes": 48560934,
+    "saved_share": 0.0436,
+    "by_keeper": [
+      {
+        "keeper": "code-reviewer",
+        "count": 49447,
+        "bytes": 365379300,
+        "repeat_count": 2006,
+        "repeat_bytes": 27129920,
+        "repeat_share": 0.0743,
+        "saved_bytes": 26427820,
+        "saved_share": 0.0723
+      },
+      {
+        "keeper": "wkbl-front",
+        "count": 8317,
+        "bytes": 26650951,
+        "repeat_count": 110,
+        "repeat_bytes": 5808163,
+        "repeat_share": 0.2179,
+        "saved_bytes": 5769663,
+        "saved_share": 0.2165
+      },
+      {
+        "keeper": "kidsnote-incoming-dd-manager",
+        "count": 4232,
+        "bytes": 20738991,
+        "repeat_count": 867,
+        "repeat_bytes": 3734326,
+        "repeat_share": 0.1801,
+        "saved_bytes": 3430876,
+        "saved_share": 0.1654
+      },
+      {
+        "keeper": "context-reviewer",
+        "count": 14409,
+        "bytes": 105697160,
+        "repeat_count": 182,
+        "repeat_bytes": 2753772,
+        "repeat_share": 0.0261,
+        "saved_bytes": 2690072,
+        "saved_share": 0.0255
+      },
+      {
+        "keeper": "code-reviewer-mother",
+        "count": 9669,
+        "bytes": 36684572,
+        "repeat_count": 205,
+        "repeat_bytes": 2316313,
+        "repeat_share": 0.0631,
+        "saved_bytes": 2244563,
+        "saved_share": 0.0612
+      },
+      {
+        "keeper": "msx-retro-mania",
+        "count": 6026,
+        "bytes": 259645143,
+        "repeat_count": 31,
+        "repeat_bytes": 2273541,
+        "repeat_share": 0.0088,
+        "saved_bytes": 2262691,
+        "saved_share": 0.0087
+      },
+      {
+        "keeper": "e-masc-the-leader",
+        "count": 5989,
+        "bytes": 19279521,
+        "repeat_count": 301,
+        "repeat_bytes": 1981521,
+        "repeat_share": 0.1028,
+        "saved_bytes": 1876171,
+        "saved_share": 0.0973
+      },
+      {
+        "keeper": "kidsnote-slack-reader",
+        "count": 4153,
+        "bytes": 17975214,
+        "repeat_count": 757,
+        "repeat_bytes": 1344619,
+        "repeat_share": 0.0748,
+        "saved_bytes": 1079669,
+        "saved_share": 0.0601
+      },
+      {
+        "keeper": "code-reviewer-uncle",
+        "count": 5524,
+        "bytes": 24387221,
+        "repeat_count": 71,
+        "repeat_bytes": 636244,
+        "repeat_share": 0.0261,
+        "saved_bytes": 611394,
+        "saved_share": 0.0251
+      },
+      {
+        "keeper": "code-reviewer-brother",
+        "count": 9250,
+        "bytes": 35574771,
+        "repeat_count": 78,
+        "repeat_bytes": 581686,
+        "repeat_share": 0.0164,
+        "saved_bytes": 554386,
+        "saved_share": 0.0156
+      },
+      {
+        "keeper": "masc-productor-owner",
+        "count": 10085,
+        "bytes": 22283150,
+        "repeat_count": 63,
+        "repeat_bytes": 368873,
+        "repeat_share": 0.0166,
+        "saved_bytes": 346823,
+        "saved_share": 0.0156
+      },
+      {
+        "keeper": "pr-updater",
+        "count": 7724,
+        "bytes": 30838269,
+        "repeat_count": 32,
+        "repeat_bytes": 355365,
+        "repeat_share": 0.0115,
+        "saved_bytes": 344165,
+        "saved_share": 0.0112
+      },
+      {
+        "keeper": "you-never-change",
+        "count": 8476,
+        "bytes": 27130215,
+        "repeat_count": 23,
+        "repeat_bytes": 260642,
+        "repeat_share": 0.0096,
+        "saved_bytes": 252592,
+        "saved_share": 0.0093
+      },
+      {
+        "keeper": "code-reviewer-sister",
+        "count": 7888,
+        "bytes": 27287433,
+        "repeat_count": 44,
+        "repeat_bytes": 167888,
+        "repeat_share": 0.0062,
+        "saved_bytes": 152488,
+        "saved_share": 0.0056
+      },
+      {
+        "keeper": "wkbl-web-leader",
+        "count": 2442,
+        "bytes": 10054797,
+        "repeat_count": 13,
+        "repeat_bytes": 116136,
+        "repeat_share": 0.0116,
+        "saved_bytes": 111586,
+        "saved_share": 0.0111
+      }
+    ],
+    "by_day": [
+      {
+        "at": "2026-11-01",
+        "count": 58216,
+        "bytes": 397468762,
+        "repeat_count": 2132,
+        "repeat_bytes": 26681290,
+        "repeat_share": 0.0671,
+        "saved_bytes": 25935090,
+        "saved_share": 0.0653
+      },
+      {
+        "at": "2026-11-02",
+        "count": 48223,
+        "bytes": 350855500,
+        "repeat_count": 1292,
+        "repeat_bytes": 9750320,
+        "repeat_share": 0.0278,
+        "saved_bytes": 9298120,
+        "saved_share": 0.0265
+      },
+      {
+        "at": "2026-11-03",
+        "count": 17930,
+        "bytes": 96385236,
+        "repeat_count": 22,
+        "repeat_bytes": 241999,
+        "repeat_share": 0.0025,
+        "saved_bytes": 234299,
+        "saved_share": 0.0024
+      },
+      {
+        "at": "2026-11-04",
+        "count": 25486,
+        "bytes": 123900041,
+        "repeat_count": 262,
+        "repeat_bytes": 7902452,
+        "repeat_share": 0.0638,
+        "saved_bytes": 7810752,
+        "saved_share": 0.063
+      },
+      {
+        "at": "2026-11-05",
+        "count": 21351,
+        "bytes": 49794355,
+        "repeat_count": 35,
+        "repeat_bytes": 166856,
+        "repeat_share": 0.0034,
+        "saved_bytes": 154606,
+        "saved_share": 0.0031
+      },
+      {
+        "at": "2026-11-06",
+        "count": 14562,
+        "bytes": 53226403,
+        "repeat_count": 821,
+        "repeat_bytes": 3702168,
+        "repeat_share": 0.0696,
+        "saved_bytes": 3414818,
+        "saved_share": 0.0642
+      },
+      {
+        "at": "2026-11-07",
+        "count": 3620,
+        "bytes": 41260729,
+        "repeat_count": 307,
+        "repeat_bytes": 1820699,
+        "repeat_share": 0.0441,
+        "saved_bytes": 1713249,
+        "saved_share": 0.0415
+      }
+    ],
+    "by_tool": [
+      {
+        "tool": "keeper_artifact_read",
+        "count": 17345,
+        "bytes": 213219203,
+        "repeat_count": 1623,
+        "repeat_bytes": 24882387,
+        "repeat_share": 0.1167,
+        "saved_bytes": 24314337,
+        "saved_share": 0.114
+      },
+      {
+        "tool": "masc_schedule_notes_list",
+        "count": 20530,
+        "bytes": 226143824,
+        "repeat_count": 710,
+        "repeat_bytes": 8018653,
+        "repeat_share": 0.0355,
+        "saved_bytes": 7770153,
+        "saved_share": 0.0344
+      },
+      {
+        "tool": "masc_board_list",
+        "count": 3082,
+        "bytes": 9556224,
+        "repeat_count": 395,
+        "repeat_bytes": 6316644,
+        "repeat_share": 0.661,
+        "saved_bytes": 6178394,
+        "saved_share": 0.6465
+      },
+      {
+        "tool": "BrowserRead",
+        "count": 2718,
+        "bytes": 17354645,
+        "repeat_count": 955,
+        "repeat_bytes": 4228083,
+        "repeat_share": 0.2436,
+        "saved_bytes": 3893833,
+        "saved_share": 0.2244
+      },
+      {
+        "tool": "masc_board_post_get",
+        "count": 8329,
+        "bytes": 55891885,
+        "repeat_count": 406,
+        "repeat_bytes": 2549321,
+        "repeat_share": 0.0456,
+        "saved_bytes": 2407221,
+        "saved_share": 0.0431
+      },
+      {
+        "tool": "masc_dos_screen",
+        "count": 2297,
+        "bytes": 210085893,
+        "repeat_count": 21,
+        "repeat_bytes": 2158268,
+        "repeat_share": 0.0103,
+        "saved_bytes": 2150918,
+        "saved_share": 0.0102
+      },
+      {
+        "tool": "Execute",
+        "count": 93392,
+        "bytes": 194667233,
+        "repeat_count": 239,
+        "repeat_bytes": 822458,
+        "repeat_share": 0.0042,
+        "saved_bytes": 738808,
+        "saved_share": 0.0038
+      },
+      {
+        "tool": "masc_ask_status",
+        "count": 1508,
+        "bytes": 2422568,
+        "repeat_count": 369,
+        "repeat_bytes": 462736,
+        "repeat_share": 0.191,
+        "saved_bytes": 333586,
+        "saved_share": 0.1377
+      },
+      {
+        "tool": "Read",
+        "count": 4460,
+        "bytes": 29380708,
+        "repeat_count": 32,
+        "repeat_bytes": 200859,
+        "repeat_share": 0.0068,
+        "saved_bytes": 189659,
+        "saved_share": 0.0065
+      },
+      {
+        "tool": "keeper_tasks_list",
+        "count": 2748,
+        "bytes": 6803252,
+        "repeat_count": 44,
+        "repeat_bytes": 191059,
+        "repeat_share": 0.0281,
+        "saved_bytes": 175659,
+        "saved_share": 0.0258
+      },
+      {
+        "tool": "WebFetch",
+        "count": 547,
+        "bytes": 5214021,
+        "repeat_count": 3,
+        "repeat_bytes": 80994,
+        "repeat_share": 0.0155,
+        "saved_bytes": 79944,
+        "saved_share": 0.0153
+      },
+      {
+        "tool": "masc_dos_press",
+        "count": 2462,
+        "bytes": 28238713,
+        "repeat_count": 7,
+        "repeat_bytes": 80352,
+        "repeat_share": 0.0028,
+        "saved_bytes": 77902,
+        "saved_share": 0.0028
+      },
+      {
+        "tool": "keeper_skill",
+        "count": 1296,
+        "bytes": 6086178,
+        "repeat_count": 15,
+        "repeat_bytes": 77791,
+        "repeat_share": 0.0128,
+        "saved_bytes": 72541,
+        "saved_share": 0.0119
+      },
+      {
+        "tool": "masc_dos_restore",
+        "count": 49,
+        "bytes": 3680588,
+        "repeat_count": 3,
+        "repeat_bytes": 34921,
+        "repeat_share": 0.0095,
+        "saved_bytes": 33871,
+        "saved_share": 0.0092
+      },
+      {
+        "tool": "BrowserTabs",
+        "count": 862,
+        "bytes": 9000077,
+        "repeat_count": 1,
+        "repeat_bytes": 34044,
+        "repeat_share": 0.0038,
+        "saved_bytes": 33694,
+        "saved_share": 0.0037
+      }
+    ]
+  },
+  "skipped": {
+    "bad_lines": 0,
+    "bad_message_entries": 0,
+    "outside_window": 0,
+    "missing_blobs": 0,
+    "unreadable_blobs": 0,
+    "other_records": 200,
+    "unkeyed_calls": 2186,
+    "unmatched_results": 0
+  }
+}

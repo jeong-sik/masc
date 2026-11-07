@@ -138,14 +138,17 @@ function mascRecordNetwork(state, event) {
     }
   }
 }
-async function mascDrainPage(page) {
+// A console read passes capture: the events of the methods it names are the
+// ones its own Runtime.enable caused, so they go to it and not to the rest.
+async function mascDrainPage(page, capture) {
   const state = mascPageEventState(page);
   const drained = await page.events();
   if (!Array.isArray(drained)) throw new Error('ego returned a non-array event buffer');
   if (drained.length >= mascNetworkRules.egoBuffer) state.fullBufferReads++;
   for (const event of drained) {
-    if (event !== null && typeof event === 'object' && typeof event.method === 'string' && event.method.startsWith('Network.'))
-      mascRecordNetwork(state, event);
+    const method = event !== null && typeof event === 'object' && typeof event.method === 'string' ? event.method : '';
+    if (method.startsWith('Network.')) mascRecordNetwork(state, event);
+    else if (capture !== undefined && capture.methods.includes(method)) capture.events.push(event);
     else state.pending.push(event);
   }
   // ego's own buffer keeps its newest events; the kept rest does the same.

@@ -1503,7 +1503,74 @@ let test_one_drain_reads_the_event_buffer () =
   List.iter (fun (name, script) ->
     check int (name ^ " never reads ego's buffer itself") 0 (count script ".events()");
     check bool (name ^ " drains through mascPageEvents") true (contains script "mascPageEvents(page)"))
-    ["the workflow", Masc.Browser_ego_workflow.script; "native typing", Masc.Browser_ego_raw_type.script]
+    ["the workflow", Masc.Browser_ego_workflow.script; "native typing", Masc.Browser_ego_raw_type.script];
+  check int "the console read never reads ego's buffer itself" 0
+    (count (Masc.Browser_ego_console.script ~answer_units:1000) ".events()")
+
+(* A page.console answer as mascConsoleRead emits it (L9 evidence c). *)
+let console_entry ?(kind="console") ?(level="log") ?(text="load-line 7 Object") ?(cut=false) () =
+  obj ["type",str kind;"level",str level;"text",str text;"textCut",`Bool cut;"timestamp",`Int 1794035766700]
+let console_answer ?(entries=[console_entry ()]) ?(hiding=obj ["offMs",`Int 8;"restored",`Bool true]) () =
+  obj ["entries",`List entries;"dropped",`Int 0;"malformedEvents",obj ["count",`Int 0;"last",`Null];"hiding",hiding]
+
+(* The answer is rebuilt from what was parsed. An answer masc cannot read
+   does not say whether the hiding came back on, so it is an unknown outcome;
+   a failure after the hiding came back on changed nothing. *)
+let test_console_read_rebuilds_every_entry () =
+  let asked = ref [] in
+  let reply = ref (refused "no reply set") in
+  let peer = opened (fun sent ->
+    asked := sent :: !asked;
+    match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.console" -> !reply
+    | other -> failf "unexpected console step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let read ?(tab_id=1) () = dispatch peer Live.Page_console (obj ["tabId",`Int tab_id]) in
+  let entries = [
+    console_entry ();
+    console_entry ~level:"warning" ~text:"load-warn" ();
+    console_entry ~kind:"javascript" ~level:"error" ~text:"Uncaught Error: load-uncaught\n    at http://127.0.0.1:18776/page:5:31" ();
+    console_entry ~text:(String.concat "" (List.init 1333 (fun _ -> "\xea\xb0\x80"))) ~cut:true () ] in
+  reply := answered (console_answer ~entries ());
+  (match read () with
+   | Ok answer ->
+     check int "the tab" 1 (Yojson.Safe.Util.to_int (field "tabId" answer));
+     check (list string) "every entry as the script answered it"
+       (List.map Yojson.Safe.to_string entries)
+       (List.map Yojson.Safe.to_string (Yojson.Safe.Util.to_list (field "entries" answer)));
+     check string "the hiding window" {|{"offMs":8,"restored":true}|} (Yojson.Safe.to_string (field "hiding" answer))
+   | other -> failf "the console read was %s" (failure_kind other));
+  check string "the Page it names" "p1" (text (field "label" (List.hd !asked).args));
+  reply := answered (console_answer ~hiding:(obj ["offMs",`Int 12;"restored",`Bool false;"error",str "egoAutomated.enable failed"]) ());
+  (match read () with
+   | Ok answer -> check bool "hiding left off says so" true (contains (Yojson.Safe.to_string (field "hiding" answer)) "is still off")
+   | other -> failf "a read that left the hiding off was %s" (failure_kind other));
+  List.iter (fun (label, value) ->
+    reply := answered value;
+    check string label "unknown" (failure_kind (read ())))
+    ["a kind the script does not name is refused", console_answer ~entries:[console_entry ~kind:"network" ()] ();
+     "an uncaught error at another level is refused", console_answer ~entries:[console_entry ~kind:"javascript" ~level:"log" ()] ();
+     "a text past the byte limit is refused",
+       console_answer ~entries:[console_entry ~text:(String.make (Masc.Browser_ego_console.text_bytes_limit + 1) 'x') ~cut:true ()] ();
+     "a text that is not UTF-8 is refused", console_answer ~entries:[console_entry ~text:"\xff" ()] ();
+     "hiding restored with an error is refused",
+       console_answer ~hiding:(obj ["offMs",`Int 1;"restored",`Bool true;"error",str "x"]) ();
+     "more entries than the read answers is refused",
+       console_answer ~entries:(List.init (Masc.Browser_ego_console.entries_limit + 1) (fun _ -> console_entry ())) ();
+     "an answer with more fields is refused",
+       (match console_answer () with `Assoc fields -> obj (fields @ ["extra",`Null]) | other -> other)];
+  reply := refused "the tab's console was not read: Runtime.enable failed; ego's console hiding was off for 4 ms and is on again";
+  check string "a failure after the hiding came back on changed nothing" "before effect" (failure_kind (read ()));
+  reply := failed "the tab's console was not read: Runtime.enable failed; ego's console hiding was not turned back on: gone";
+  (match read () with
+   | Error (Live.Outcome_unknown message) ->
+     check bool "hiding that may be off is an unknown outcome that says so" true (contains message "may still be off")
+   | other -> failf "a read that may have left the hiding off was %s" (failure_kind other));
+  let runs = List.length !asked in
+  check string "an operator tab is refused" "before effect" (failure_kind (read ~tab_id:2 ()));
+  check string "a read without a tab is refused" "before effect" (failure_kind (dispatch peer Live.Page_console (obj [])));
+  check int "and neither runs a script" runs (List.length !asked)
 
 (* What leaves the peer says where input stands and which SDK process ran
    it, failures included. *)
@@ -1623,6 +1690,7 @@ let test_the_scripts_parse_as_modules () =
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
     | "page.cookies" -> answered (storage_answer ())
     | "page.network" -> answered (network_answer ())
+    | "page.console" -> answered (console_answer ())
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.choose_files" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.emulation" -> answered (obj ["applied",`List [];"before",`Null;"observed",`Null])
@@ -1639,6 +1707,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_downloads, obj ["tabId",`Int 1];
       Live.Page_cookies, obj ["tabId",`Int 1];
       Live.Page_network, obj ["tabId",`Int 1];
+      Live.Page_console, obj ["tabId",`Int 1];
       Live.Page_capture, obj ["tabId",`Int 1];
       Live.Page_act, act_args (Lane.Action.Open_tab "https://example.test/");
       Live.Page_goto, obj ["tabId",`Int 1;"url",str "https://example.test/"];
@@ -1667,7 +1736,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
-    ["space.open";"tabs.list";"page.read";"page.document";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.cookies";"page.network";"page.capture";
+    ["space.open";"tabs.list";"page.read";"page.document";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.cookies";"page.network";"page.console";"page.capture";
      "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";"page.target_input";"page.viewport";"page.touch";"page.touch";
      "page.close";"page.reload";"page.stop_loading";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"page.emulation";"page.emulation";"page.block_requests";"page.block_requests";"space.finish"]
     (List.rev_map fst !scripts);
@@ -1697,6 +1766,10 @@ let test_the_scripts_parse_as_modules () =
     | "page.network" ->
       check bool "the log is read through the shared drain" true
         (contains script "mascNetworkLog(page)" && contains script Masc.Browser_ego_page_events.script)
+    | "page.console" ->
+      check bool "the console is read through the shared drain" true
+        (contains script "mascConsoleRead(page, reason)" && contains script Masc.Browser_ego_page_events.script
+         && contains script "egoAutomated.enable")
     | _ -> ())
     !scripts
 
@@ -1767,6 +1840,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
     | "page.cookies" -> answered (storage_answer ())
     | "page.network" -> answered (network_answer ())
+    | "page.console" -> answered (console_answer ())
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.emulation" -> answered (obj ["applied",`List [str "locale"];"before",`Null;"observed",`Null])
     | "page.block_requests" -> answered (obj ["blocked",`List [str "ads.example.com"]])
@@ -1818,7 +1892,8 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Environment_emulation -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}})
     | Request_blocking -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Block_requests ["ads.example.com"]})
     | Storage_listing -> Page_cookies {tab_id=1}
-    | Request_listing -> Page_network {tab_id=1}) in
+    | Request_listing -> Page_network {tab_id=1}
+    | Console_reading -> Page_console {tab_id=1}) in
   List.iter (fun capability ->
     let name = Lane.live_capability_to_wire capability in
     let asked = verb_asking_for capability in
@@ -4366,6 +4441,7 @@ let () =
       test_case "ego storage names withhold every value" `Quick test_storage_names_withhold_every_value;
       test_case "ego network log rebuilds every row" `Quick test_network_log_rebuilds_every_row;
       test_case "one drain reads the ego event buffer" `Quick test_one_drain_reads_the_event_buffer;
+      test_case "ego console read rebuilds every entry" `Quick test_console_read_rebuilds_every_entry;
       test_case "a dialog-interrupted workflow stays uncertain until a new click settles, without replay" `Quick test_dialog_interrupted_workflow_stays_uncertain_until_a_new_click_settles;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
       test_case "a workflow that never held input keeps the previous readiness" `Quick test_a_workflow_that_never_held_input_keeps_the_previous_readiness;

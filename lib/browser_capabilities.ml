@@ -11,7 +11,7 @@ type operation =
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
   | Hand_off | Take_over | Space_status | Finish_space | Wait_for_control | Adopt_tab | Release_tab
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
-  | Read_clipboard | Write_clipboard | Emulate_environment | Intercept_network | Read_storage | Read_network
+  | Read_clipboard | Write_clipboard | Emulate_environment | Intercept_network | Read_storage | Read_network | Read_console
 [@@deriving enumerate]
 type tool = Tabs | Read | Interact | Act | Session | Goto
 type invocation = { tool : tool; action : string option; mode : string option }
@@ -308,6 +308,13 @@ let support backend operation = match backend with
            Printf.sprintf "A request is listed once ego held it for the tab in the SDK process named by sdkProcessStartedAt. Missing: requests from before that process held the tab, often the first document load of a popup, and requests a frame of another site makes. fullBufferReads counts reads that found ego's buffer for the tab full at %d events, when older ones may be lost." Browser_ego_page_events.ego_buffer_events;
            ego_pages]
       | Safari_unavailable -> missing)
+    | Read_console -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~mode:"console" Read
+          [observed;Printf.sprintf "Explicit tabId and an explicit ego browser. Lists what the tab's current document wrote to its console and the errors it did not catch, oldest first: type (console or javascript), level, text and timestamp; at most %d entries with dropped, each text cut at %d bytes (textCut). The arguments of a line are joined by a space as the browser describes them; a format specifier such as %%s is not applied." Browser_ego_console.entries_limit Browser_ego_console.text_bytes_limit;
+           Printf.sprintf "The browser keeps the newest %d entries since the document loaded, so older ones and those before a reload are gone without a count. A frame of the same site is included; a frame of another site is not. A text is what the page wrote and can carry a token or personal data." Browser_ego_console.browser_kept_entries;
+           "To read them the step turns ego's console hiding off for this tab and back on; sites can detect automation while it is off, and hiding.offMs says for how long, seconds when the page is busy. hiding.restored false means it stayed off until the next console read or a new ego SDK process (sdkProcessStartedAt).";
+           ego_pages]
+      | Safari_unavailable -> missing)
 let catalog backend = List.map (fun operation -> {operation;support=support backend operation}) operations
 let operation_name = function
   | List_tabs -> "list_tabs" | Open_tab -> "open_tab" | Close_tab -> "close_tab"
@@ -331,7 +338,7 @@ let operation_name = function
   | List_downloads -> "list_downloads" | Page_zoom -> "page_zoom" | Resize_viewport -> "resize_viewport"
   | Touch -> "touch" | Read_clipboard -> "read_clipboard" | Write_clipboard -> "write_clipboard"
   | Emulate_environment -> "emulate_environment" | Intercept_network -> "intercept_network"
-  | Read_storage -> "read_storage" | Read_network -> "read_network"
+  | Read_storage -> "read_storage" | Read_network -> "read_network" | Read_console -> "read_console"
 let operation_of_wire name = List.find_opt (fun operation -> String.equal (operation_name operation) name) operations
 let parse_required_actions = function
   | `List values ->

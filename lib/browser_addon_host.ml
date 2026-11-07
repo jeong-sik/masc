@@ -245,9 +245,9 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
   let unchosen ~clients error=refuse ~data:(selection_detail ~clients error) (Browser_selection.error_message error) in
   let* ()=match verb,required_actions with
     | Browser_lane.Tabs_list,_ -> Ok ()
-    | (Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
+    | (Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_console _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
       | Page_goto _|Page_elements _|Page_act _|Page_context _),[] -> Ok ()
-    | (Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
+    | (Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_console _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
       | Page_goto _|Page_elements _|Page_act _|Page_context _),_::_ ->
         refuse "requiredActions applies only to initial tab discovery" in
   let* ()=match preference,verb with
@@ -260,14 +260,14 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
         refuse "live creation, control and Page management actions require an explicit observed clientId"
     | Exact (Browser_lane.Live_route (Some _)),Browser_lane.Page_act (Browser_lane.Action.Control _) -> Ok ()
     | (Automatic|Exact (Live_route _)),
-      (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
+      (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_console _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
       | Page_goto _|Page_elements _|Page_act (Browser_lane.Action.Open_tab _|On_tab _)|Page_context _) -> Ok () in
   match preference,required_actions with
     | Browser_selection.Exact (Browser_lane.Live_route None),[]
       when (match verb with
             | Browser_lane.Page_act action -> Browser_lane.Action.is_take_over action
             |Browser_lane.Tabs_list
-            |Browser_lane.Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _
+            |Browser_lane.Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_console _
             | Page_capture _|Page_scene _|Page_snapshot _
             |Browser_lane.Page_native_workflow _|Page_interact _|Page_goto _|Page_elements _
             |Browser_lane.Page_context _ -> false) ->
@@ -410,7 +410,7 @@ let issue ?goal_space ?upload_paths ?(required_actions=[]) t ~preference verb =
   let initial=match preference,verb with
     | Browser_selection.Automatic,Browser_lane.Tabs_list -> true
     | (Automatic|Exact (Live_route _)),
-      (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _
+      (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_console _
       | Page_capture _|Page_scene _|Page_snapshot _
       |Page_native_workflow _|Page_interact _|Page_goto _|Page_elements _|Page_act _|Page_context _) -> false in
   let* ()=match goal_space with
@@ -421,7 +421,7 @@ let issue ?goal_space ?upload_paths ?(required_actions=[]) t ~preference verb =
         "Goal Space defaults apply only to initial automatic discovery" in
   let upload=match verb with
     | Browser_lane.Page_act (Browser_lane.Action.On_tab {interaction=Upload {paths;_};_}) -> Some paths
-    | Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
+    | Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_console _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
     | Page_goto _|Page_elements _
     |Page_act (Open_tab _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
     |Page_context _ -> None in

@@ -209,7 +209,7 @@ let allowed route verb = match route,verb with
   | B.Live_route (Some _),B.Page_downloads _ -> Ok ()
   | (B.Live_route None),(B.Page_downloads _)
   | (B.Live_route _),
-    (B.Tabs_list|Page_read _|Page_document _|Page_cookies _|Page_network _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
+    (B.Tabs_list|Page_read _|Page_document _|Page_cookies _|Page_network _|Page_console _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
     | Page_goto _|Page_elements _|Page_act _
     |Page_context _) ->
       Error "download grants require a download read from a browser this worker runs"

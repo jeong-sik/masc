@@ -735,6 +735,14 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
      Server_startup_takeover.release_base_path_lease base_path_lease;
      Printf.eprintf "%s\n" message;
      exit code);
+  (* From here on nothing depends on the directory the server was launched
+     from, which may be a worktree removed while the server runs (#49545). *)
+  (match Server_base_path_guard.enter canonical_base_path with
+   | Ok () -> ()
+   | Error message ->
+     Server_startup_takeover.release_base_path_lease base_path_lease;
+     Printf.eprintf "%s\n" message;
+     exit 1);
   Log.init_from_env ();
   let shutdown_cfg =
     match Masc.Shutdown.config_from_env_result () with

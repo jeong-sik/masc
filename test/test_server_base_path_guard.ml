@@ -149,6 +149,34 @@ let test_canonicalize_existing_retains_failure () =
   | Ok canonical ->
     failf "missing BasePath unexpectedly resolved to %s" canonical
 
+(* A server is often launched from a git worktree that is removed while it
+   runs (#49545). Once it has entered its workspace, removing the launch
+   directory leaves its working directory readable. *)
+let test_enter_outlives_a_removed_launch_directory () =
+  with_temp_dir "masc-enter-" @@ fun dir ->
+  let original = Sys.getcwd () in
+  Fun.protect ~finally:(fun () -> Sys.chdir original) @@ fun () ->
+  let launch = Filename.concat dir "launch" in
+  let workspace = Filename.concat dir "workspace" in
+  Unix.mkdir launch 0o755;
+  Unix.mkdir workspace 0o755;
+  let workspace = Unix.realpath workspace in
+  Sys.chdir launch;
+  (match Server_base_path_guard.enter workspace with
+   | Ok () -> ()
+   | Error message -> fail message);
+  Unix.rmdir launch;
+  check string "working directory" workspace (Sys.getcwd ())
+
+let test_enter_refuses_a_missing_workspace () =
+  with_temp_dir "masc-enter-missing-" @@ fun dir ->
+  let before = Sys.getcwd () in
+  let missing = Filename.concat dir "missing" in
+  (match Server_base_path_guard.enter missing with
+   | Error (_ : string) -> ()
+   | Ok () -> failf "entered the missing workspace %s" missing);
+  check string "working directory unchanged" before (Sys.getcwd ())
+
 let () =
   Alcotest.run "Server_base_path_guard"
     [ ( "workspace root order"
@@ -176,5 +204,11 @@ let () =
             test_canonicalize_existing_freezes_symlink_target
         ; test_case "canonicalization failure is retained" `Quick
             test_canonicalize_existing_retains_failure
+        ] )
+    ; ( "working directory"
+      , [ test_case "entering the workspace outlives a removed launch directory" `Quick
+            test_enter_outlives_a_removed_launch_directory
+        ; test_case "a missing workspace is refused and the directory kept" `Quick
+            test_enter_refuses_a_missing_workspace
         ] )
     ]

@@ -33,3 +33,12 @@ let format_canonicalization_error { base_path; cause; backtrace = _ } =
     base_path
     (Printexc.to_string cause)
 ;;
+
+let enter canonical_base_path =
+  match Unix.chdir canonical_base_path with
+  | () -> Ok ()
+  | exception Unix.Unix_error (error, _, _) ->
+    Error
+      (Printf.sprintf "[FATAL] Could not make %S the server working directory: %s"
+         canonical_base_path (Unix.error_message error))
+;;

@@ -21,6 +21,7 @@ module Keeper_shutdown_reconciliation =
   Server_dashboard_http_keeper_shutdown_reconciliation
 module Official_client_session = Server_dashboard_official_client_session
 module Official_client_probe = Server_dashboard_official_client_probe
+module Keeper_api_types = Server_dashboard_http_keeper_api_types
 
 let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
@@ -40,15 +41,6 @@ let dashboard_actor_cache_segment state req =
     ~base_path:(Mcp_server.workspace_config state).base_path
     req
 ;;
-
-let dashboard_error_json ?ok message =
-  let fields = [ ("error", `String message) ] in
-  let fields =
-    match ok with
-    | None -> fields
-    | Some value -> ("ok", `Bool value) :: fields
-  in
-  `Assoc fields
 
 let respond_goal_tree_workspace_refusal req reqd error =
   let json, status = Server_auth.read_workspace_precondition_error_response error in
@@ -77,11 +69,6 @@ let fusion_run_detail_response ~registry ~path =
     ~registry
     ~path
 ;;
-
-let respond_dashboard_error ?(status = `Bad_request) ?request ?ok reqd message =
-  Http.Response.json_value ?request ~status
-    (dashboard_error_json ?ok message)
-    reqd
 
 let respond_dashboard_ok ?request reqd =
   Http.Response.json_value ?request ~compress:true
@@ -157,7 +144,7 @@ let handle_execute_output_stream ~sw ~clock _state req inner_reqd =
        in
        match keeper with
        | None ->
-         respond_dashboard_error
+         Keeper_api_types.respond_error
            ~status:`Bad_request
            ~request:req
            inner_reqd
@@ -942,7 +929,7 @@ let respond_runtime_config_commit
 let handle_runtime_config_raw_post state agent_name req reqd body_str =
   match parse_runtime_config_raw_save_body body_str with
   | Error msg ->
-    respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+    Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
   | Ok (source_text, expected_source_revision, expected_source_path) ->
     (* Audit metadata excludes the source, which can contain provider secrets. *)
     (match Keeper_runtime_config.validate_source_text source_text with
@@ -950,7 +937,7 @@ let handle_runtime_config_raw_post state agent_name req reqd body_str =
        audit_runtime_config_write state agent_name
          ~operation:Runtime_config_raw_save ~text:source_text
          ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error ~status:`Bad_request ~request:req reqd
+       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd
          ("runtime config parse failed: " ^ msg)
      | Ok report when not (Keeper_runtime_config.validation_report_is_valid report) ->
        let detail = keeper_validation_error_message report in
@@ -964,7 +951,7 @@ let handle_runtime_config_raw_post state agent_name req reqd body_str =
           audit_runtime_config_write state agent_name
             ~operation:Runtime_config_raw_save ~text:source_text
             ~outcome:(Audit_log.Failure msg) ();
-          respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+          Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
         | Error (Runtime.Config_source_conflict current) ->
           Http.Response.json_value ~status:`Conflict ~request:req
             (`Assoc
@@ -986,7 +973,7 @@ let handle_runtime_assignment_post_with ~set_assignment state agent_name req req
     body_str =
   match Runtime_request.parse_runtime_assignment_body body_str with
   | Error msg ->
-    respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+    Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
   | Ok (keeper_name, runtime_id, expected) ->
     (match
        set_assignment
@@ -1000,7 +987,7 @@ let handle_runtime_assignment_post_with ~set_assignment state agent_name req req
        audit_runtime_config_write state agent_name
          ~operation:(Runtime_config_assignment (keeper_name, runtime_id))
          ~text:body_str ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
      | Error (Runtime.Assignment_revision_conflict observed) ->
        audit_runtime_config_write state agent_name
          ~operation:(Runtime_config_assignment (keeper_name, runtime_id))
@@ -1073,7 +1060,7 @@ let handle_tui_preference_post state agent_name req reqd body_str =
     | json -> Tui_preference.change_of_yojson json
     | exception Yojson.Json_error detail -> Error ("invalid JSON: " ^ detail)
   with
-  | Error msg -> respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+  | Error msg -> Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
   | Ok change ->
     let operation = Runtime_config_tui_preference change in
     let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
@@ -1085,7 +1072,7 @@ let handle_tui_preference_post state agent_name req reqd body_str =
      | Error msg ->
        audit_runtime_config_write state agent_name ~operation ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
      | Ok (Runtime.Config_text_unchanged { observation; lock_warnings }) ->
        Http.Response.json_value ~request:req
          (`Assoc
@@ -1117,7 +1104,7 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
   let open Runtime_request in
   match parse_runtime_route_body body_str with
   | Error msg ->
-    respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+    Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
   | Ok (Runtime_route_runtime_id (Runtime_default, Some runtime_id)) ->
     (match Runtime.set_runtime_default ~runtime_id () with
      | Error msg ->
@@ -1125,16 +1112,16 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
          ~operation:(Runtime_config_routing (Runtime_default, Some runtime_id))
          ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name
          ~operation:(Runtime_config_routing (Runtime_default, Some runtime_id))
          ~receipt req reqd)
   | Ok (Runtime_route_runtime_id (Runtime_default, None)) ->
-    respond_dashboard_error ~status:`Bad_request ~request:req reqd
+    Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd
       "default runtime_id required"
   | Ok (Runtime_route_runtime_id (Runtime_media_failover, _)) ->
-    respond_dashboard_error ~status:`Bad_request ~request:req reqd
+    Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd
       "media_failover runtime_ids required"
   | Ok (Runtime_route_runtime_ids (Runtime_media_failover, runtime_ids)) ->
     (match Runtime.set_runtime_media_failover ~runtime_ids () with
@@ -1144,14 +1131,14 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
            (Runtime_config_routing_list (Runtime_media_failover, runtime_ids))
          ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name
          ~operation:
            (Runtime_config_routing_list (Runtime_media_failover, runtime_ids))
          ~receipt req reqd)
   | Ok (Runtime_route_runtime_id (Runtime_named_lane lane_id, _)) ->
-    respond_dashboard_error ~status:`Bad_request ~request:req reqd
+    Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd
       (Printf.sprintf "%s runtime_ids required" lane_id)
   | Ok (Runtime_route_runtime_ids (Runtime_named_lane lane_id, runtime_ids))
     ->
@@ -1164,7 +1151,7 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
               (Runtime_named_lane lane_id, runtime_ids))
          ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name
          ~operation:
@@ -1179,7 +1166,7 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
        let msg = Runtime.lane_set_error_to_string error in
        audit_runtime_config_write state agent_name ~operation ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error
+       Keeper_api_types.respond_error
          ~status:(match error with
                   | Runtime.Lane_set_revision_conflict _ -> `Conflict
                   | Runtime.Lane_set_invalid _ -> `Bad_request)
@@ -1187,7 +1174,7 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
   | Ok (Runtime_route_runtime_id (Runtime_exact_lane _, _)) ->
-    respond_dashboard_error ~status:`Bad_request ~request:req reqd
+    Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd
       "exact-output lane runtime_ids required"
   | Ok (Runtime_route_runtime_ids (Runtime_exact_lane exact, slots))
     ->
@@ -1199,7 +1186,7 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
               (Runtime_exact_lane exact, slots))
          ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name
          ~operation:
@@ -1207,7 +1194,7 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
               (Runtime_exact_lane exact, slots))
          ~receipt req reqd)
   | Ok (Runtime_route_runtime_ids (lane, _)) ->
-    respond_dashboard_error ~status:`Bad_request ~request:req reqd
+    Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd
       (Printf.sprintf
          "%s runtime_id required"
          (runtime_route_lane_to_string lane))
@@ -1217,7 +1204,7 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
      | Error msg ->
        audit_runtime_config_write state agent_name ~operation ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
   | Ok (Runtime_route_lane_removed lane_id) ->
@@ -1226,7 +1213,7 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
      | Error msg ->
        audit_runtime_config_write state agent_name ~operation ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
   | Ok (Runtime_route_lane_renamed (lane_id, new_lane_id)) ->
@@ -1235,7 +1222,7 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
      | Error msg ->
        audit_runtime_config_write state agent_name ~operation ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
   | Ok (Runtime_route_exact_slot_appended (exact, runtime_id)) ->
@@ -1244,7 +1231,7 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
      | Error msg ->
        audit_runtime_config_write state agent_name ~operation ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
   | Ok (Runtime_route_exact_slot_dropped (exact, runtime_id)) ->
@@ -1253,7 +1240,7 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
      | Error msg ->
        audit_runtime_config_write state agent_name ~operation ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
   | Ok (Runtime_route_exact_slot_moved (exact, runtime_id, move)) ->
@@ -1264,7 +1251,7 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
      | Error msg ->
        audit_runtime_config_write state agent_name ~operation ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
   | Ok (Runtime_route_exact_slot_replaced (exact, runtime_id, replacement)) ->
@@ -1273,7 +1260,7 @@ let handle_runtime_routing_post state agent_name req reqd body_str =
      | Error msg ->
        audit_runtime_config_write state agent_name ~operation ~text:body_str
          ~outcome:(Audit_log.Failure msg) ();
-       respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+       Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
      | Ok receipt ->
        respond_runtime_config_commit state agent_name ~operation ~receipt req reqd)
 
@@ -1927,14 +1914,14 @@ let add_routes ~sw ~clock router =
          in
          match before, run_kind with
          | Error message, _ | _, Error message ->
-           respond_dashboard_error ~request:req reqd message
+           Keeper_api_types.respond_error ~request:req reqd message
          | Ok before, Ok run_kind ->
            (match
               Server_standalone_lane_projection.recent_run_page_json
                 ~limit ~before ~lane ~run_kind
             with
             | Error message ->
-              respond_dashboard_error ~request:req reqd message
+              Keeper_api_types.respond_error ~request:req reqd message
             | Ok json ->
               Http.Response.json_value ~compress:true ~request:req json reqd)
        )
@@ -1949,17 +1936,17 @@ let add_routes ~sw ~clock router =
          in
          let run_id = Uri.pct_decode run_id in
          if String.equal (String.trim run_id) ""
-         then respond_dashboard_error ~request:req reqd "run_id is required"
+         then Keeper_api_types.respond_error ~request:req reqd "run_id is required"
          else (
            match Server_standalone_lane_projection.run_detail_json ~run_id with
            | Server_standalone_lane_projection.Detail_not_found ->
-             respond_dashboard_error
+             Keeper_api_types.respond_error
                ~status:`Not_found
                ~request:req
                reqd
                ("no retained standalone lane run named " ^ run_id)
            | Server_standalone_lane_projection.Detail_ambiguous ->
-             respond_dashboard_error
+             Keeper_api_types.respond_error
                ~status:`Internal_server_error
                ~request:req
                reqd
@@ -1981,7 +1968,7 @@ let add_routes ~sw ~clock router =
   |> Server_route.get (Server_route.Self_authenticated Route_access.Loopback_dev_token) "/api/v1/dashboard/dev-token" (fun request reqd ->
        if (not (http_auth_bind_is_loopback ()))
           || http_auth_strict_enabled () then
-         respond_dashboard_error ~status:`Not_found ~request reqd
+         Keeper_api_types.respond_error ~status:`Not_found ~request reqd
            "dev-token endpoint disabled (non-loopback bind or strict auth)"
        else
          with_public_read (fun state req reqd ->
@@ -2127,7 +2114,7 @@ let add_routes ~sw ~clock router =
              match result with
              | Ok json -> Http.Response.json_value ~request:req json reqd
              | Error error ->
-               respond_dashboard_error ~status:(account_removal_status error) ~request:req reqd
+               Keeper_api_types.respond_error ~status:(account_removal_status error) ~request:req reqd
                  (Runtime_account_removal_setup.error_message error)))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/setup/accounts/remove" (fun state agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body ->
@@ -2159,7 +2146,7 @@ let add_routes ~sw ~clock router =
              | Error error ->
                audit_runtime_config_write state agent_name ~operation ~text:body
                  ~outcome:(Audit_log.Failure (Runtime_account_removal_setup.error_message error)) ();
-               respond_dashboard_error ~status:(account_removal_status error) ~request:req reqd
+               Keeper_api_types.respond_error ~status:(account_removal_status error) ~request:req reqd
                  (Runtime_account_removal_setup.error_message error)))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/setup/context" (fun state _agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body ->
@@ -2283,7 +2270,7 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd (fun body_str ->
              match Server_skill_evidence.request_of_string body_str with
              | Error message ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+               Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd message
              | Ok (reference, composition_run_id) ->
                Http.Response.json_value
                  ~compress:true
@@ -2319,7 +2306,7 @@ let add_routes ~sw ~clock router =
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/skills/editor/preview-new" (fun state _agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              match parse_skill_create_body body_str with
-             | Error message -> respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+             | Error message -> Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd message
              | Ok { expected_kind; source_id; package_id; source_text } ->
                (match Server_skill_editor.preview_new
                  ~expected_kind:(Some expected_kind)
@@ -2334,7 +2321,7 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd (fun body_str ->
              match parse_skill_create_body body_str with
              | Error message ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+               Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd message
              | Ok { expected_kind; source_id; package_id; source_text } ->
                let base_path = (Mcp_server.workspace_config state).base_path in
                let refresh () =
@@ -2402,7 +2389,7 @@ let add_routes ~sw ~clock router =
              Http.Request.read_body_async reqd (fun body_str ->
                match parse_skill_editor_body body_str with
                | Error message ->
-                 respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+                 Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd message
                | Ok { reference; source_text = _; confirmed } ->
                  let base_path = (Mcp_server.workspace_config state).base_path in
                  let refresh () =
@@ -2446,7 +2433,7 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd (fun body_str ->
              match parse_skill_editor_body body_str with
              | Error message ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+               Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd message
              | Ok { reference; source_text = _; confirmed = _ } ->
                (match
                   Server_skill_editor.load
@@ -2464,9 +2451,9 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd (fun body_str ->
              match parse_skill_editor_body body_str with
              | Error message ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+               Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd message
              | Ok { reference; source_text = None; confirmed = _ } ->
-               respond_dashboard_error
+               Keeper_api_types.respond_error
                  ~status:`Bad_request
                  ~request:req
                  reqd
@@ -2495,9 +2482,9 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd (fun body_str ->
              match parse_skill_editor_body body_str with
              | Error message ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+               Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd message
              | Ok { reference; source_text = None; confirmed = _ } ->
-               respond_dashboard_error
+               Keeper_api_types.respond_error
                  ~status:`Bad_request
                  ~request:req
                  reqd
@@ -2555,7 +2542,7 @@ let add_routes ~sw ~clock router =
            let base_path = (Mcp_server.workspace_config state).base_path in
            match Runtime.load_config_observation () with
            | Error message ->
-             respond_dashboard_error ~status:`Internal_server_error ~request:req reqd message
+             Keeper_api_types.respond_error ~status:`Internal_server_error ~request:req reqd message
            | Ok observation ->
              (match
                 Server_skill_snapshot_runtime.refresh_from_observation
@@ -2563,7 +2550,7 @@ let add_routes ~sw ~clock router =
                   observation
               with
               | Error error ->
-                respond_dashboard_error
+                Keeper_api_types.respond_error
                   ~status:`Internal_server_error
                   ~request:req
                   reqd
@@ -2615,7 +2602,7 @@ let add_routes ~sw ~clock router =
                   ())
                reqd
            | Error msg ->
-             respond_dashboard_error
+             Keeper_api_types.respond_error
                ~status:(runtime_config_path_error_status msg)
                ~request:req reqd msg)
   (* RFC-0306 §3.1 — typed read of the active fusion config for the settings
@@ -2629,13 +2616,13 @@ let add_routes ~sw ~clock router =
               client sends back names exactly the text it was shown. *)
            match Runtime.load_config_observation ~runtime_config_path () with
            | Error msg ->
-             respond_dashboard_error
+             Keeper_api_types.respond_error
                ~status:(runtime_config_path_error_status msg)
                ~request:req reqd msg
            | Ok observation ->
              (match Otoml.Parser.from_string observation.source_text with
               | exception Otoml.Parse_error (_, msg) ->
-                respond_dashboard_error ~status:`Internal_server_error ~request:req reqd
+                Keeper_api_types.respond_error ~status:`Internal_server_error ~request:req reqd
                   ("runtime.toml parse error: " ^ msg)
               | toml ->
                 (match Fusion_config.of_toml toml with
@@ -2651,7 +2638,7 @@ let add_routes ~sw ~clock router =
                        ])
                      reqd
                  | Error errors ->
-                   respond_dashboard_error ~status:`Internal_server_error ~request:req reqd
+                   Keeper_api_types.respond_error ~status:`Internal_server_error ~request:req reqd
                      ("fusion config invalid: "
                       ^ String.concat "; "
                           (List.map Fusion_config.config_error_message errors)))))
@@ -2663,7 +2650,7 @@ let add_routes ~sw ~clock router =
            let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
            match Server_memory_recall_standing.read ~keepers_dir with
            | Error detail ->
-             respond_dashboard_error ~status:`Internal_server_error ~request:req reqd
+             Keeper_api_types.respond_error ~status:`Internal_server_error ~request:req reqd
                ("keeper declarations could not be read: " ^ detail)
            | Ok standing ->
              Http.Response.json_value ~compress:true ~request:req
@@ -2675,7 +2662,7 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd (fun body_str ->
              match parse_fusion_edit_body body_str with
              | Error msg ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+               Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
              | Ok (expected_revision, operation) ->
                let base_path = (Mcp_server.workspace_config state).base_path in
                let runtime_config_path =
@@ -2717,11 +2704,11 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd (fun body_str ->
              match parse_runtime_config_raw_body body_str with
              | Error msg ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+               Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd msg
              | Ok source_text ->
                (match Keeper_runtime_config.validate_source_text source_text with
                 | Error msg ->
-                  respond_dashboard_error
+                  Keeper_api_types.respond_error
                     ~status:`Bad_request
                     ~request:req
                     reqd
@@ -2762,7 +2749,7 @@ let add_routes ~sw ~clock router =
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/runtime/setup/resume" (fun state _agent_name req reqd ->
            match Server_model_setup_resume.request
              ~base_path:(Mcp_server.workspace_config state).base_path with
-           | Error error -> respond_dashboard_error ~status:`Service_unavailable
+           | Error error -> Keeper_api_types.respond_error ~status:`Service_unavailable
                ~request:req reqd (Server_model_setup_resume.error_message error)
            | Ok authority_available -> respond_json_value_with_cors req reqd
                (`Assoc ["runtime_ready", `Bool true;
@@ -3177,7 +3164,7 @@ let add_routes ~sw ~clock router =
                    | Goal_measurement.Store_error _ -> `Service_unavailable
                  in
                  respond_json_value_with_cors ~status req reqd
-                   (dashboard_error_json ~ok:false
+                   (Keeper_api_types.error_json ~ok:false
                       (Goal_measurement.error_to_string error))
              | Ok receipt ->
                  respond_json_value_with_cors req reqd
@@ -3197,7 +3184,7 @@ let add_routes ~sw ~clock router =
          in
          if goal_id = "" then
            respond_public_read_json_value ~status:`Bad_request req reqd
-             (dashboard_error_json ~ok:false "goal_id query param is required")
+             (Keeper_api_types.error_json ~ok:false "goal_id query param is required")
          else
            let cache_key =
              Printf.sprintf "goal_detail:%s:%s:%d" (goal_cache_scope ~config) goal_id
@@ -3287,7 +3274,7 @@ let add_routes ~sw ~clock router =
          | None | Some "" ->
            Http.Response.json_value ~compress:true ~request:req
              ~status:`Bad_request ~extra_headers
-             (dashboard_error_json "trace_id query param is required") reqd
+             (Keeper_api_types.error_json "trace_id query param is required") reqd
          | Some raw_trace_id ->
            (match
               Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
@@ -3298,7 +3285,7 @@ let add_routes ~sw ~clock router =
             | Error detail ->
               Http.Response.json_value ~compress:true ~request:req
                 ~status:`Bad_request ~extra_headers
-                (dashboard_error_json detail) reqd
+                (Keeper_api_types.error_json detail) reqd
             | Ok projection ->
               let json =
                 Keeper_skill_activation_projection.trace_to_yojson projection
@@ -3312,14 +3299,14 @@ let add_routes ~sw ~clock router =
          | None ->
            Http.Response.json_value ~compress:true ~request:req
              ~status:`Bad_request ~extra_headers
-             (dashboard_error_json "turn_ref query param is required") reqd
+             (Keeper_api_types.error_json "turn_ref query param is required") reqd
          | Some raw_turn_ref ->
            (match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
               Server_skill_physical_turn.project_string
                 ~config:(Mcp_server.workspace_config state) raw_turn_ref) with
             | Error detail ->
               Http.Response.json_value ~compress:true ~request:req
-                ~status:`Bad_request ~extra_headers (dashboard_error_json detail) reqd
+                ~status:`Bad_request ~extra_headers (Keeper_api_types.error_json detail) reqd
             | Ok json ->
               Http.Response.json_value ~compress:true ~request:req ~extra_headers json reqd))
   (* Schedule projection, served by its owner. The no-query aggregate keeps its
@@ -3492,7 +3479,7 @@ let add_routes ~sw ~clock router =
            Http.Request.read_body_async reqd (fun body_str ->
              match Dashboard_harness_health.parse_label_body body_str with
              | Error message ->
-               respond_dashboard_error ~status:`Bad_request ~request:req reqd message
+               Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd message
              | Ok label ->
                Dashboard_harness_health.record_operator_label
                  ~base_path:(Mcp_server.workspace_config state).base_path
@@ -3997,7 +3984,7 @@ let add_routes ~sw ~clock router =
                )
              ) request reqd
        | Keeper_api.Keeper_post_unknown ->
-           respond_dashboard_error ~status:`Not_found reqd "not found")
+           Keeper_api_types.respond_error ~status:`Not_found reqd "not found")
 
   (* ── Agent API routes (extracted) ── *)
   |> Server_dashboard_http_agent_api.add_agent_api_routes

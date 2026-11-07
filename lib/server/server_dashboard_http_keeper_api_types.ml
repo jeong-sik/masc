@@ -1,4 +1,4 @@
-(** Server_dashboard_http_keeper_api_types — pure routing types + helpers
+(** Server_dashboard_http_keeper_api_types — routing types + shared helpers
     extracted from Server_dashboard_http_keeper_api (3136 LoC godfile).
 
     See server_dashboard_http_keeper_api_types.mli for rationale. *)
@@ -336,3 +336,7 @@ let error_json ?ok message =
     | Some value -> ("ok", `Bool value) :: fields
   in
   `Assoc fields
+
+let respond_error ?(status = `Bad_request) ?request ?ok reqd message =
+  Http_server_eio.Response.json_value ?request ~status
+    (error_json ?ok message) reqd

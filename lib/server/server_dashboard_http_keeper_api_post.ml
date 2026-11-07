@@ -11,9 +11,6 @@ let json_list_length = function
   | _ -> 0
 ;;
 
-let respond_error ?(status = `Bad_request) ?request ?ok reqd message =
-  Http.Response.json_value ?request ~status (error_json ?ok message) reqd
-
 let input_response_error_status =
   let owner_status = function
     | Keeper_owner.Operation_rejected

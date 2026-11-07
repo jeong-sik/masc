@@ -1,0 +1,355 @@
+{
+  "params": {
+    "min_bytes": 1024,
+    "stub_bytes": 350,
+    "since": 1793958720.0,
+    "until": 1794045120.0,
+    "excluded_keepers": [],
+    "match": "text"
+  },
+  "ledger": {
+    "count": 20096,
+    "bytes": 161066127,
+    "repeat_count": 1360,
+    "repeat_bytes": 7163160,
+    "repeat_share": 0.0445,
+    "saved_bytes": 6687160,
+    "saved_share": 0.0415,
+    "by_keeper": [
+      {
+        "keeper": "kidsnote-incoming-dd-manager",
+        "count": 3529,
+        "bytes": 5378820,
+        "repeat_count": 1017,
+        "repeat_bytes": 4374587,
+        "repeat_share": 0.8133,
+        "saved_bytes": 4018637,
+        "saved_share": 0.7471
+      },
+      {
+        "keeper": "e-masc-the-leader",
+        "count": 1332,
+        "bytes": 4011375,
+        "repeat_count": 309,
+        "repeat_bytes": 2060690,
+        "repeat_share": 0.5137,
+        "saved_bytes": 1952540,
+        "saved_share": 0.4868
+      },
+      {
+        "keeper": "wkbl-growth",
+        "count": 526,
+        "bytes": 7605593,
+        "repeat_count": 7,
+        "repeat_bytes": 307077,
+        "repeat_share": 0.0404,
+        "saved_bytes": 304627,
+        "saved_share": 0.0401
+      },
+      {
+        "keeper": "wkbl-data",
+        "count": 395,
+        "bytes": 18516591,
+        "repeat_count": 6,
+        "repeat_bytes": 297121,
+        "repeat_share": 0.016,
+        "saved_bytes": 295021,
+        "saved_share": 0.0159
+      },
+      {
+        "keeper": "github-pr-checker",
+        "count": 680,
+        "bytes": 1732616,
+        "repeat_count": 8,
+        "repeat_bytes": 59858,
+        "repeat_share": 0.0345,
+        "saved_bytes": 57058,
+        "saved_share": 0.0329
+      },
+      {
+        "keeper": "wkbl-front",
+        "count": 2467,
+        "bytes": 40723916,
+        "repeat_count": 8,
+        "repeat_bytes": 26305,
+        "repeat_share": 0.0006,
+        "saved_bytes": 23505,
+        "saved_share": 0.0006
+      },
+      {
+        "keeper": "masc-productor-owner",
+        "count": 2331,
+        "bytes": 2552608,
+        "repeat_count": 3,
+        "repeat_bytes": 23691,
+        "repeat_share": 0.0093,
+        "saved_bytes": 22641,
+        "saved_share": 0.0089
+      },
+      {
+        "keeper": "sangsu",
+        "count": 1575,
+        "bytes": 1905289,
+        "repeat_count": 1,
+        "repeat_bytes": 12623,
+        "repeat_share": 0.0066,
+        "saved_bytes": 12273,
+        "saved_share": 0.0064
+      },
+      {
+        "keeper": "you-never-change",
+        "count": 383,
+        "bytes": 746577,
+        "repeat_count": 1,
+        "repeat_bytes": 1208,
+        "repeat_share": 0.0016,
+        "saved_bytes": 858,
+        "saved_share": 0.0011
+      },
+      {
+        "keeper": "code-reviewer",
+        "count": 978,
+        "bytes": 1755926,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-brother",
+        "count": 512,
+        "bytes": 2286417,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-father",
+        "count": 830,
+        "bytes": 3212586,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-mother",
+        "count": 657,
+        "bytes": 2151129,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-sister",
+        "count": 574,
+        "bytes": 1932271,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "keeper": "code-reviewer-uncle",
+        "count": 680,
+        "bytes": 4120794,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      }
+    ],
+    "by_day": [
+      {
+        "at": "2026-11-06",
+        "count": 10076,
+        "bytes": 22348783,
+        "repeat_count": 811,
+        "repeat_bytes": 3650311,
+        "repeat_share": 0.1633,
+        "saved_bytes": 3366461,
+        "saved_share": 0.1506
+      },
+      {
+        "at": "2026-11-07",
+        "count": 10020,
+        "bytes": 138717344,
+        "repeat_count": 549,
+        "repeat_bytes": 3512849,
+        "repeat_share": 0.0253,
+        "saved_bytes": 3320699,
+        "saved_share": 0.0239
+      }
+    ],
+    "by_tool": [
+      {
+        "tool": "BrowserRead",
+        "count": 1074,
+        "bytes": 4556326,
+        "repeat_count": 1017,
+        "repeat_bytes": 4374587,
+        "repeat_share": 0.9601,
+        "saved_bytes": 4018637,
+        "saved_share": 0.882
+      },
+      {
+        "tool": "masc_board_post_get",
+        "count": 1383,
+        "bytes": 5601418,
+        "repeat_count": 322,
+        "repeat_bytes": 2155318,
+        "repeat_share": 0.3848,
+        "saved_bytes": 2042618,
+        "saved_share": 0.3647
+      },
+      {
+        "tool": "keeper_tools_list",
+        "count": 53,
+        "bytes": 15122836,
+        "repeat_count": 2,
+        "repeat_bytes": 565908,
+        "repeat_share": 0.0374,
+        "saved_bytes": 565208,
+        "saved_share": 0.0374
+      },
+      {
+        "tool": "Grep",
+        "count": 753,
+        "bytes": 22716952,
+        "repeat_count": 6,
+        "repeat_bytes": 24545,
+        "repeat_share": 0.0011,
+        "saved_bytes": 22445,
+        "saved_share": 0.001
+      },
+      {
+        "tool": "masc_board_search",
+        "count": 399,
+        "bytes": 1150670,
+        "repeat_count": 6,
+        "repeat_bytes": 21470,
+        "repeat_share": 0.0187,
+        "saved_bytes": 19370,
+        "saved_share": 0.0168
+      },
+      {
+        "tool": "Execute",
+        "count": 8953,
+        "bytes": 17423859,
+        "repeat_count": 2,
+        "repeat_bytes": 13831,
+        "repeat_share": 0.0008,
+        "saved_bytes": 13131,
+        "saved_share": 0.0008
+      },
+      {
+        "tool": "masc_board_post_update",
+        "count": 3,
+        "bytes": 16044,
+        "repeat_count": 1,
+        "repeat_bytes": 2383,
+        "repeat_share": 0.1485,
+        "saved_bytes": 2033,
+        "saved_share": 0.1267
+      },
+      {
+        "tool": "masc_schedule_list",
+        "count": 2199,
+        "bytes": 2234726,
+        "repeat_count": 2,
+        "repeat_bytes": 2298,
+        "repeat_share": 0.001,
+        "saved_bytes": 1598,
+        "saved_share": 0.0007
+      },
+      {
+        "tool": "masc_task_history",
+        "count": 39,
+        "bytes": 59708,
+        "repeat_count": 1,
+        "repeat_bytes": 1477,
+        "repeat_share": 0.0247,
+        "saved_bytes": 1127,
+        "saved_share": 0.0189
+      },
+      {
+        "tool": "keeper_lane_status",
+        "count": 60,
+        "bytes": 58346,
+        "repeat_count": 1,
+        "repeat_bytes": 1343,
+        "repeat_share": 0.023,
+        "saved_bytes": 993,
+        "saved_share": 0.017
+      },
+      {
+        "tool": "BrowserAct",
+        "count": 6,
+        "bytes": 2621,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "tool": "BrowserGoto",
+        "count": 18,
+        "bytes": 6922,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "tool": "BrowserInteract",
+        "count": 2,
+        "bytes": 1379,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "tool": "BrowserTabs",
+        "count": 43,
+        "bytes": 695687,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      },
+      {
+        "tool": "Edit",
+        "count": 290,
+        "bytes": 64017,
+        "repeat_count": 0,
+        "repeat_bytes": 0,
+        "repeat_share": 0.0,
+        "saved_bytes": 0,
+        "saved_share": 0.0
+      }
+    ]
+  },
+  "skipped": {
+    "bad_lines": 0,
+    "bad_message_entries": 0,
+    "outside_window": 177034,
+    "missing_blobs": 0,
+    "unreadable_blobs": 0,
+    "other_records": 250,
+    "unkeyed_calls": 2469,
+    "unmatched_results": 0
+  }
+}

@@ -1,0 +1,209 @@
+{
+ "low/board": {
+  "n_dataset": 20,
+  "n_rows": 20,
+  "http_errors": 0,
+  "formats": {
+   "json_schema": 20
+  },
+  "json_schema_rejected": 0,
+  "finish": {
+   "stop": 20
+  },
+  "json_forms": {
+   "bare": 20
+  },
+  "valid": 20,
+  "errors": {},
+  "wall_p50": 2.85,
+  "wall_p90": 5.28,
+  "wall_max": 7.24,
+  "cloud_wall_p50": 37.493634939193726,
+  "prompt_tokens_p50": 2394,
+  "completion_tokens_p50": 577,
+  "reasoning_chars_p50": 1213,
+  "cost_usd": 0.0265,
+  "agree": 16,
+  "agree_rate": 0.8,
+  "per_class_recall": {
+   "relevant": "7/10",
+   "not_relevant": "9/10"
+  },
+  "burst_p50": 3.47,
+  "burst_group_wall_max": 7.24,
+  "pass_agree": false,
+  "pass_burst": true
+ },
+ "low/librarian": {
+  "n_dataset": 17,
+  "n_rows": 17,
+  "http_errors": 0,
+  "formats": {
+   "json_schema": 17
+  },
+  "json_schema_rejected": 0,
+  "finish": {
+   "stop": 17
+  },
+  "json_forms": {
+   "bare": 17
+  },
+  "valid": 17,
+  "errors": {},
+  "wall_p50": 6.62,
+  "wall_p90": 9.68,
+  "wall_max": 9.68,
+  "cloud_wall_p50": 150.33583784103394,
+  "prompt_tokens_p50": 23741,
+  "completion_tokens_p50": 1405,
+  "reasoning_chars_p50": 2750,
+  "cost_usd": 0.1149,
+  "retained_jaccard_mean": 0.944,
+  "dropped_exact": 9,
+  "action_agree": 11,
+  "pass_valid_all": true
+ },
+ "medium/board": {
+  "n_dataset": 20,
+  "n_rows": 20,
+  "http_errors": 0,
+  "formats": {
+   "json_schema": 20
+  },
+  "json_schema_rejected": 0,
+  "finish": {
+   "stop": 20
+  },
+  "json_forms": {
+   "bare": 20
+  },
+  "valid": 20,
+  "errors": {},
+  "wall_p50": 7.57,
+  "wall_p90": 13.44,
+  "wall_max": 14.45,
+  "cloud_wall_p50": 37.493634939193726,
+  "prompt_tokens_p50": 2394,
+  "completion_tokens_p50": 1631,
+  "reasoning_chars_p50": 4824,
+  "cost_usd": 0.0461,
+  "agree": 14,
+  "agree_rate": 0.7,
+  "per_class_recall": {
+   "relevant": "6/10",
+   "not_relevant": "8/10"
+  },
+  "burst_p50": 8.73,
+  "burst_group_wall_max": 14.45,
+  "pass_agree": false,
+  "pass_burst": true
+ },
+ "medium/librarian": {
+  "n_dataset": 17,
+  "n_rows": 17,
+  "http_errors": 0,
+  "formats": {
+   "json_schema": 17
+  },
+  "json_schema_rejected": 0,
+  "finish": {
+   "stop": 17
+  },
+  "json_forms": {
+   "bare": 17
+  },
+  "valid": 17,
+  "errors": {},
+  "wall_p50": 17.6,
+  "wall_p90": 23.59,
+  "wall_max": 30.96,
+  "cloud_wall_p50": 150.33583784103394,
+  "prompt_tokens_p50": 23741,
+  "completion_tokens_p50": 4164,
+  "reasoning_chars_p50": 11451,
+  "cost_usd": 0.1689,
+  "retained_jaccard_mean": 0.926,
+  "dropped_exact": 6,
+  "action_agree": 11,
+  "pass_valid_all": true
+ },
+ "none/board": {
+  "n_dataset": 20,
+  "n_rows": 20,
+  "http_errors": 0,
+  "formats": {
+   "json_schema": 20
+  },
+  "json_schema_rejected": 0,
+  "finish": {
+   "length": 9,
+   "stop": 11
+  },
+  "json_forms": {
+   "unparseable": 9,
+   "bare": 11
+  },
+  "valid": 11,
+  "errors": {
+   "verdicts_shape": 9
+  },
+  "wall_p50": 3.73,
+  "wall_p90": 4.37,
+  "wall_max": 4.38,
+  "cloud_wall_p50": 37.493634939193726,
+  "prompt_tokens_p50": 2392,
+  "completion_tokens_p50": 744,
+  "reasoning_chars_p50": 1822,
+  "cost_usd": 0.0267,
+  "agree": 11,
+  "agree_rate": 0.55,
+  "per_class_recall": {
+   "null": "0/9",
+   "not_relevant": "8/8",
+   "relevant": "3/3"
+  },
+  "burst_p50": 3.85,
+  "burst_group_wall_max": 4.38,
+  "pass_agree": false,
+  "pass_burst": true
+ },
+ "none/librarian": {
+  "n_dataset": 17,
+  "n_rows": 17,
+  "http_errors": 0,
+  "formats": {
+   "json_schema": 17
+  },
+  "json_schema_rejected": 0,
+  "finish": {
+   "length": 10,
+   "stop": 7
+  },
+  "json_forms": {
+   "unparseable": 10,
+   "bare": 7
+  },
+  "valid": 7,
+  "errors": {
+   "not_object": 10
+  },
+  "wall_p50": 11.66,
+  "wall_p90": 12.72,
+  "wall_max": 13.31,
+  "cloud_wall_p50": 150.33583784103394,
+  "prompt_tokens_p50": 23739,
+  "completion_tokens_p50": 3072,
+  "reasoning_chars_p50": 7238,
+  "cost_usd": 0.1347,
+  "retained_jaccard_mean": 0.915,
+  "dropped_exact": 3,
+  "action_agree": 3,
+  "pass_valid_all": false
+ },
+ "spent_usd": 0.5179,
+ "pass_lines": {
+  "librarian_valid_all": true,
+  "board_agree_min": 0.9,
+  "board_burst_p50_max_s": 42.0
+ }
+}

@@ -1,0 +1,9 @@
+data: {"id":"oai-78d6d000-e041-5125-ba7c-eb691b95c639:sample:0:853257052783","object":"chat.completion.chunk","created":1794034172,"model":"thinkingmachines/Inkling-2-Small","choices":[{"index":0,"delta":{"role":"assistant","content":null,"reasoning_content":null,"tool_calls":null},"finish_reason":null,"logprobs":null}],"usage":null}
+
+data: {"id":"oai-78d6d000-e041-5125-ba7c-eb691b95c639:sample:0:853257052783","object":"chat.completion.chunk","created":1794034172,"model":"thinkingmachines/Inkling-2-Small","choices":[{"index":0,"delta":{"role":null,"content":null,"reasoning_content":"The user wants a single word OK. This is a simple compliance request. Need final exactly \"OK\" likely with no extra. Ensure not include punctuation? They said reply with single word OK. Final should be OK only.","tool_calls":null},"finish_reason":null,"logprobs":null}],"usage":null}
+
+data: {"id":"oai-78d6d000-e041-5125-ba7c-eb691b95c639:sample:0:853257052783","object":"chat.completion.chunk","created":1794034172,"model":"thinkingmachines/Inkling-2-Small","choices":[{"index":0,"delta":{"role":null,"content":"OK","reasoning_content":null,"tool_calls":null},"finish_reason":null,"logprobs":null}],"usage":null}
+
+data: {"id":"oai-78d6d000-e041-5125-ba7c-eb691b95c639:sample:0:853257052783","object":"chat.completion.chunk","created":1794034172,"model":"thinkingmachines/Inkling-2-Small","choices":[{"index":0,"delta":{"role":null,"content":null,"reasoning_content":null,"tool_calls":null},"finish_reason":"stop","logprobs":null}],"usage":{"prompt_tokens":22,"completion_tokens":54,"total_tokens":76,"prompt_tokens_details":{"cached_tokens":0}}}
+
+data: [DONE]

@@ -17,7 +17,7 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 ## 0. 요약
 
 - 시안 `Keeper Pulse`(Artifact 3판, 2026-11-06)의 데이터 표는 14행이다. main `3519bd8c658` 과 맞춰 보면 들어간 것이 1행, 일부 들어간 것이 3행, 서버 값을 기다리는 것이 2행이다. RFC-0503 §4 가 범위 밖으로 둔 것이 7행이고, 맡은 층이 없는 것이 1행이다.
-- 이 RFC 는 남은 13행을 네 갈래로 나눈다. K 는 Keepers 목록의 글(TUI 만), S 는 roster 행에 더하는 서버 투영, A 는 행의 둘째 줄에 붙는 칸(일정 · 기억 읽기), W 는 기억 서버(나이 사다리 · 월드)다. 갈래마다 스택 하나를 두고, 갈래끼리 고치는 파일이 겹치지 않게 선을 긋는다. 겹치는 곳은 둘째 줄 함수 하나뿐이고 §5.2 에 적었다.
+- 이 RFC 는 남은 13행을 네 갈래로 나눈다. K 는 Keepers 목록의 글(TUI 만), S 는 roster 행에 더하는 서버 투영, A 는 행의 둘째 줄에 붙는 칸(일정 · 기억 읽기), W 는 기억 서버(나이 사다리 · 월드)다. 갈래마다 스택 하나를 두고, 갈래끼리 고치는 파일이 겹치지 않게 선을 긋는다. 겹치는 파일은 §5.2 표에 모두 적었다.
 - 서버 값을 화면에 그리는 층 둘(D1 D2)은 2차 착수다. 앞 층이 main 에 오른 뒤에 시작한다.
 - 나이는 값이다. stale 은 서버가 닫힌 값으로 적은 것에만 쓴다(RFC-0418). 모르는 값은 0 이 아니라 표지로 그린다.
 - 대조에서 사실 넷이 나왔다. 서버는 한도 해제 시각과 그 출처를 이미 내고 TUI 는 출처를 버린다. `failing_since` 는 서버 어디에도 없다. 쉬는 시각은 `HH:MM` 이 아니라 날짜가 붙은 19칸 글이다. RFC-0503 §6.5 의 "서버는 해제 시각을 내지 않는다"는 main 보다 낡았다.
@@ -56,7 +56,7 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 4. 오늘 다른 세션이 같은 영역을 먼저 고쳤다. 리셋 시각을 말한 한도 거절은 실패가 아니라 쉬는 중으로 끝난다(#49567). 쉬는 walk 의 해제 시각과 출처가 행에 실린다(#49568). 요약 줄의 좁은 폭 숫자 잘림이 풀렸다(#49560 #49594 #49611). RFC-0503 §1.2 의 "15행 모두 `provider`" 읽기는 이 변경 전 값이다. 지금 failing 행의 구성이 같다고 가정하지 않고, 캡처는 변경 뒤 코드로 다시 찍는다.
 5. 영수증은 `operator_disposition` 을 이미 싣는다. 행 빌더는 가장 최근 영수증 JSON 을 이미 읽는다(`lib/keeper/keeper_tool_surface_ops.ml:386`). 그 값은 roster 행에 실리지 않는다. 같은 값을 trust 쪽이 따로 읽는 비공개 파서가 있다(`lib/keeper/keeper_runtime_trust_snapshot.ml:245`).
 6. `+ 47m`, `+1 −0`, `stale ×N` 의 재료는 `keeper-memory-health` 행에 이미 있다(`updated_at`, `added`, `removed`, `source_invalidations`; `lib/server/server_dashboard_http_keeper_memory_health.ml:745`). 서버에 새로 필요한 것은 나이 사다리와 월드 읽기 경로다. Keepers 목록은 이 응답을 읽지 않는다. `memory_health_on_screen` 이 `Memory` 와 `Metrics` 에서만 읽기를 켠다(`bin/masc_tui.ml:9517`).
-7. 일정도 비슷하다. 목록 행은 일정을 읽지 않지만 TUI 는 모든 화면에서 갱신되는 fleet 첫 쪽 `schedules_agenda` 를 이미 들고 있다(`bin/masc_tui_types.ml:10258`). `◷` 는 이미 일정 배지 글리프다(`bin/masc_tui_keeper_mark.ml:51`).
+7. 일정도 비슷하다. 목록 행은 일정을 읽지 않지만 TUI 는 모든 화면에서 갱신되는 fleet 첫 쪽 `schedules_agenda` 를 이미 들고 있다(`bin/masc_tui_types.ml:10260`). `◷` 는 이미 일정 배지 글리프다(`bin/masc_tui_keeper_mark.ml:51`).
 
 ## 2. 제안
 
@@ -66,7 +66,7 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 
 1. 나이는 값이고, stale 은 서버가 적은 상태다. `stale` 은 서버가 닫힌 값으로 적은 무효화(`source_changed` · `source_unavailable`)와 브리핑 신선도 `Stale` 에만 쓴다. 나이만으로 stale 이라 부르지 않는다(RFC-0418, `lib/keeper/keeper_memory_os_types.mli:333`).
 2. 모르는 값은 `?` 나 `모름` 으로 그린다. 0 으로 그리지 않고 빈 칸으로 두지 않는다. 서버가 보내지 않은 시각 · 횟수 · 상태 이름을 TUI 가 지어내지 않는다.
-3. roster 행의 값은 읽는 시각에 따라 바뀌지 않는다(RFC-0481 §3.2). 서버는 시각과 사건을 싣고 "몇 분 전" 은 TUI 가 그린다. 그래서 맥박은 시간으로 센 값이 아니라 턴 결과 목록을 싣는다. 나이 사다리(W2)는 roster 가 아니라 health 응답의 값이고 `generated_at` 시점 값이다.
+3. roster 행의 값은 읽는 시각에 따라 바뀌지 않는다(RFC-0481 §1.4 · §3.7). 서버는 시각과 사건을 싣고 "몇 분 전" 은 TUI 가 그린다. 그래서 맥박은 시간으로 센 값이 아니라 턴 결과 목록을 싣는다. 나이 사다리(W2)는 roster 가 아니라 health 응답의 값이고 `generated_at` 시점 값이다.
 4. 새 필드는 hard cut 이다. 옛 형태를 읽는 코드를 만들지 않는다. 디코더가 모르는 키를 거부하므로 서버 · TUI 디코더 · 웹 스키마를 한 PR 에서 함께 바꾼다.
 5. 서버가 더하는 값은 모두 읽기 투영이다. 권위(원장 · 전이 기록 · 영수증 · 결정 로그)에서 계산하고, 권위로 다시 저장하지 않고, 행동을 막거나 고르는 데 쓰지 않는다.
 6. 색은 글리프나 낱말과 함께 쓴다. `NO_COLOR=1` 에서도 구분되어야 한다.
@@ -82,8 +82,8 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 | 갈래 | 맡는 행 | 층 | 고치는 곳 | 서버 변경 |
 | --- | --- | --- | --- | --- |
 | K | 2 3 4 | K1 K2 K3 | `bin/masc_tui_render_keepers.ml` 목록 영역, `bin/masc_tui_render_schedule.ml`, `bin/masc_tui_keeper_trail.ml` | 없다 |
-| S | 5 6 7 | S3 S3d S2 S1a S1b | `lib/keeper/` 의 행 투영, `lib/tui_decode.ml`, `dashboard/src/api/schemas/gate-keepers.ts` | roster 행에 필드 셋 |
-| A | 8 9 10 11 12 | A1 A2 A3 A4 A5 | `bin/masc_tui_keeper_*` 새 모듈, 둘째 줄 함수 한 곳, `bin/masc_tui.ml` 의 읽기 조건 한 곳 | 없다 |
+| S | 5 6 7 | S3 S3d S2 S1a S1b | `lib/keeper/` 의 행 투영, `lib/tui_decode.ml`, `dashboard/src/api/schemas/gate-keepers.ts`, S3d 만 `bin/masc_tui_keeper_mark.ml` 과 `bin/masc_tui_render_keepers.ml` 의 표지 · 색 함수 | roster 행에 항목 셋(JSON 키 넷) |
+| A | 8 9 10 11 12 | A1 A2 A3 A4 A5 | `bin/masc_tui_keeper_*` 새 모듈, 둘째 줄 함수 한 곳, `bin/masc_tui.ml` 의 읽기 조건 두 곳, `bin/masc_tui_types.ml` 의 `due` 규칙을 함수로 꺼내는 한 곳 | 없다 |
 | W | 13 14 | W1 W2 W3 W4 | `lib/keeper/keeper_memory_age_bins`, `lib/workspace_memory/`, health 서버 · 디코더 | health 행에 필드 하나, 읽기 경로 하나 |
 
 2차 착수는 D1(S 값을 행에 그린다)과 D2(W 값을 Memory 화면과 행에 그린다)다.
@@ -92,7 +92,7 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 
 **K1. 원인 문장이 DETAIL 칸에서 잘리지 않게 한다**
 
-- 지금: 80칸에서 DETAIL 칸은 22칸이다. NAME 이 16칸을 먼저 가져간다. 문장 머리 `◂ 2m14s · ` 가 10칸이라 원인 낱말에 12칸이 남는다. `recovery needed` 는 15칸, `terminal not observed` 는 21칸이라 `…` 로 잘린다. RUNTIME 칸은 `Detailed` 에서 inner 120칸 이상일 때만 있다. `Compact` 에서는 문장이 어디에도 온전히 나오지 않는다. 숫자는 조사 에이전트가 `bin/masc_tui_render_schedule.ml:142` 부터를 읽고 센 값이고 캡처로 확인하지 못했다.
+- 지금: 80칸에서 안쪽 폭은 78칸이다(`Masc_tui_frame.inner_width`). 칸 폭 기본값의 합이 50칸이라 남는 28칸을 `allocate_keeper_columns`(`bin/masc_tui_render_schedule.ml:183`)가 나눈다. NAME 이 기본 16칸에서 상한 32칸까지 16칸을 먼저 가져가고, 남은 12칸이 DETAIL 에 더해져 22칸이 된다. 문장 머리는 `◂ ` 2칸 + 나이 6칸(`keeper_last_turn_width`) + ` · ` 3칸으로 11칸이라 원인 낱말에 11칸이 남는다. `recovery needed` 는 15칸, `terminal not observed` 는 21칸이라 `…` 로 잘린다. RUNTIME 칸은 `Detailed` 에서 inner 120칸 이상일 때만 있다. `Compact` 에서는 문장이 어디에도 온전히 나오지 않는다. 숫자는 코드를 읽고 센 값이고 캡처로 확인하지 못했다.
 - 바꾼다: 문장 머리(`◂ ` + 가장 넓은 나이 글 + ` · ` + 원인 낱말)를 행에서 재어 DETAIL 칸의 바닥으로 삼는다. NAME 이 남는 폭을 가져가기 전에 DETAIL 에 준다. 긴 이름은 기존 `fit_middle` 이 가운데를 접는다. 문구는 바꾸지 않는다.
 - 하지 않는다: 원인을 문장 맨 앞으로 옮기지 않는다. RFC-0503 §2.2 의 표와 도움말을 함께 고쳐야 한다. "AGE 가 보이면 문장 나이를 뺀다"도 쓰지 않는다. 두 나이는 다른 시계다.
 - 확인: 80 · 90 · 120칸 전후 캡처. 열 너비를 숫자로 내는 기존 시험이 깨지면 값만 맞춘다. 새 화면 시험은 더하지 않는다.
@@ -131,7 +131,7 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 5. 시험은 서버 → 디코더 왕복(`test/test_keeper_list_truncation.ml:679` 방식)과 디코더 단독(`test/test_tui_keeper_control.ml:1328` 방식)이다.
 6. 층마다 roster 응답 크기를 `bin/masc_http_probe.ml` 로 재서 PR 본문에 적는다. 지금은 40행에 약 9 KB 다(RFC-0481 §1.1).
 
-세 필드는 같은 줄(`keeper_list_row_json` 의 목록, `keeper_runtime` 레코드, 픽스처 셋)을 만진다. 한 에이전트가 S3 → S3d → S2 → S1a → S1b 순서로 쌓는다.
+세 항목은 같은 줄(`keeper_list_row_json` 의 목록, `keeper_runtime` 레코드, 픽스처 셋)을 만진다. 한 에이전트가 S3 → S3d → S2 → S1a → S1b 순서로 쌓는다.
 
 **S3. 사람이 움직여야 하는가 (행 6)**
 
@@ -139,14 +139,19 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 - 출처: 행 빌더가 이미 읽는 가장 최근 영수증이다. 영수증을 더 읽지 않는다. trust 스냅숏은 Keeper 마다 승인 큐와 결정 로그 꼬리를 읽으므로 행마다 부르지 않는다.
 - 파서는 하나로 합친다. trust 쪽 비공개 `receipt_operator_disposition`(`lib/keeper/keeper_runtime_trust_snapshot.ml:245`)을 `Keeper_execution_receipt` 로 옮기고 양쪽이 쓴다.
 - TUI 는 기존 `_of_string` 으로 읽고, 모르는 글자는 그 행 옆에 `Error` 로 둔다(`kr_runtime_path_rest` 와 같은 방식). 사람이 움직이는지는 `needs_operator_broadcast`(`lib/keeper/keeper_execution_receipt.mli:243`)로 TUI 가 가른다.
+- `needs_operator_broadcast` 가 참인 갈래는 셋이다. `Disp_operator_action_required` 는 사람만 고칠 수 있는 원인이다. `Disp_effect_review_required` 는 원인은 알려졌지만 턴이 바깥을 바꿨는지 사람이 확인해야 하는 경우다. `Disp_unknown` 은 분류기가 맞는 갈래를 찾지 못한 경우로, 원인이 알려진 턴이 아니라 고칠 분류기 빈틈이다(`lib/keeper/keeper_execution_receipt.mli:148`). 셋을 한 낱말로 뭉치지 않는다(S3d).
 - 이 값은 가장 최근에 끝난 턴의 영수증이 적은 사실이다. 지금 상태가 아니다. 화면은 영수증 시각을 함께 그린다.
 - 이 필드로 이슈 #43018(일곱 블로커 분류의 `disposition_reason`)은 풀리지 않는다. 그 결정은 따로 남는다.
 
-**S3d. 사람 몫인 행의 표지 (행 6의 표시)**
+**S3d. 사람 손이 필요한 행의 표지 (행 6의 표시)**
 
-- 가장 최근 영수증이 사람 몫인 행은 `Held_call` 과 같은 글리프 `!` 와 `Theme.bad` 에 낱말 `사람 몫` 을 붙인다. 사람이 움직인다는 뜻이 같아서 글리프도 같다. 원인이 다르므로 낱말로 가른다.
+- 가장 최근 영수증이 `needs_operator_broadcast` 에 걸리는 행은 `Held_call` 과 같은 글리프 `!` 와 `Theme.bad` 를 쓴다. 사람이 움직인다는 뜻이 같아서 글리프도 같다. 원인이 다르므로 낱말로 가른다.
+  - `Disp_operator_action_required` → `사람 몫`: 사람만 고칠 수 있는 원인이다.
+  - `Disp_effect_review_required` → `효과 확인`: 원인은 알려졌고, 턴이 바깥을 바꿨는지 사람이 확인한다.
+  - `Disp_unknown` → `분류 안 됨`: 분류기가 갈래를 못 찾았다. 사람이 할 일이 정해진 것이 아니라 고칠 빈틈이다.
+- 위 낱말은 기본값이다. 80칸에서 잘리는지 캡처로 보고 폭에 맞춘다. 낱말 철자는 `bin/masc_tui_keeper_mark.ml` 한 곳에 선언한다(`activation_word` 와 같은 방식).
 - 그룹 편입과 요약 줄 칩은 바꾸지 않는다(D6). 표지와 색만 바꾼다.
-- 확인: 캡처(사람 몫 failing, 일반 failing, `Held_call`)를 색 있음과 `NO_COLOR=1` 로 찍는다.
+- 확인: 캡처(세 갈래 각각의 failing 행, 일반 failing 행, `Held_call`)를 색 있음과 `NO_COLOR=1` 로 찍는다. 세 낱말이 색 없이 서로, 그리고 일반 failing 과 갈리는지 본다.
 
 **S2. 실패가 시작된 시각 (행 7)**
 
@@ -188,35 +193,46 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
     | No_schedule
     | Scheduled_at of float
     | Late_since of float
-    | Held_since of float
+    | Held_current of float
+    | Held_as_of of float
     | Not_before of float
     | Unknown
-  val index_of_agenda : Masc_tui_types.schedule_snapshot option -> index
-  val of_snapshot : keeper_name:string -> Masc_tui_types.schedule_snapshot -> t
+  val index_of_agenda :
+    freshness:_ -> runner:_ -> Masc_tui_types.schedule_snapshot option -> index
+  val of_snapshot :
+    freshness:_ -> runner:_ -> keeper_name:string
+    -> Masc_tui_types.schedule_snapshot -> t
   val find : index -> keeper_name:string -> t
   val cell : now:float -> t -> Masc_tui_keeper_axis_cell.t option
   ```
 - 입력은 TUI 가 모든 화면에서 갱신하는 fleet 첫 쪽 `schedules_agenda`(20행)다. 요청을 더하지 않는다.
   - Keeper 의 일정은 `sch_payload_keeper_name = Some _` 인 행이다(`bin/masc_tui_types.ml:2825`). `lane:` 대상은 Keeper 가 아니다. 접두 문자열로 가르지 않는다.
-  - 첫 쪽에 그 Keeper 의 활성 행이 있으면 가장 이른 행이 정확한 다음 시각이다 → `Scheduled_at`.
+  - "다음 시각"은 기존 `due` 규칙 하나를 쓴다. 미해결이면 `sch_occurrence` 의 `due_at_iso`, 아니면 `sch_next_due_at_iso`, 그것도 없으면 `sch_due_at_iso` 다(`bin/masc_tui_types.ml:3176`). 그 규칙이 지역 함수이면 A1 이 이름 있는 함수로 꺼내고 두 곳이 같은 함수를 부른다.
+  - 첫 쪽에 그 Keeper 의 활성 행이 있으면 그 행들의 `due` 중 가장 이른 값이 다음 시각이다 → `Scheduled_at`. 서버가 쪽을 자르는 정렬 키는 `request.due_at` 오름차순이다(`lib/server/server_dashboard_schedule_projection.ml:1213`). 반복 일정에서 이 키와 `due` 가 다른 값이면 잘린 응답의 `Scheduled_at` 은 정확하지 않다. A1 이 서버 정렬을 읽고 정한다. 다르면 `Not_before` 로 낮추고 PR 본문에 이유를 적는다.
   - 없고 응답이 잘렸고(`scs_truncated`) 마지막 행이 활성이면 그 due 이후라는 것만 안다 → `Not_before`.
   - 없고 잘리지 않았으면 → `No_schedule`. 읽지 못했거나 시각을 해석하지 못하면 → `Unknown`.
-  - 늦음은 서버 상태로 가른다. status `Due` 이고 훅이 없으면 `Late_since`, 훅이 있으면 `Held_since` 다. TUI 시계로 늦음을 가르지 않는다. 러너 틱이 15초이고 화면은 움직임이 있을 때만 다시 그려진다.
+  - 늦음은 서버 상태로 가른다. status `Due` 이고 `sch_runner_hold = None` 이면 `Late_since`, `Some _` 이면 보류다. TUI 시계로 늦음을 가르지 않는다. 러너 틱이 15초이고 화면은 움직임이 있을 때만 다시 그려진다.
+  - 보류는 기존 규칙을 따른다. `Tui_decode.schedule_hold_reading ~freshness ~runner hold` 가 `Hold_current` 일 때만 `Held_current`(지금 보류)이고, `Hold_as_of` 이면 `Held_as_of`(그 시각 기준)다(`lib/tui_decode.mli:2838`). 낡은 보류를 지금 보류로 그리지 않는다. `freshness` 는 상태의 `schedules_agenda_freshness`(`bin/masc_tui_types.ml:10263`)에서 옮긴다. 보류 변종의 시각은 `schedule_runner_hold` 가 싣는 시각 필드에서 읽는다.
   - 상세 쪽은 같은 환원을 `keeper_schedules` 에 적용한다. `fsm.next_due_at` 가 그 Keeper 전체의 최솟값이다.
 - 마지막 실행(행 9)은 요청 행의 `last_wake` 가 시각으로 읽히면 `t` 에 `last_wake : float option` 으로 담는다. 읽히지 않으면 담지 않고 PR 본문에 적는다. 그 경우 행 9 는 미완으로 남는다.
-- 시험은 환원 결정만 본다. 여섯 갈래, 잘림 규칙, `lane:` 과 Keeper 구분, 해석 실패.
+- 시험은 환원 결정만 본다. 일곱 갈래, 잘림 규칙, `lane:` 과 Keeper 구분, 보류의 지금과 그 시각 기준, 해석 실패.
 
 **A2. 둘째 줄 칸 자리와 일정 칸**
 
 - `bin/masc_tui_render_keepers.ml:421` 의 `keeper_secondary_row_content` 가 오른쪽 정렬 `cells` 를 받는다. 왼쪽 글을 먼저 줄인다.
 - `bin/masc_tui_keeper_axis.ml(i)` 를 만든다. `val segments : Masc_tui_types.state -> now:float -> keeper_name:string -> Masc_tui_keeper_axis_cell.t list`. 인덱스는 프레임당 한 번 만든다. 이 층에서는 일정 칸 하나만 낸다.
-- 칸은 `◷` 로 시작한다. NOW 칸의 배지 글(`◷ schedule`, `bin/masc_tui_render_keepers.ml:245`)과 겹쳐 보이면 캡처에 적고 PR 본문에서 정한다.
+- 칸은 `◷` 로 시작한다. 같은 둘째 줄의 왼쪽 글에도 `◷ schedule` 배지 글이 나온다. 이 글은 DETAIL 글의 맨 앞 조각이다(`keeper_badge_text` 가 만들고 `keeper_detail_text` 가 붙인다, `bin/masc_tui_render_keepers.ml:245` `:320`). 배지는 일정 응답이 아니라 `Keeper_list_model.badges_of_row` 의 `Waiting_source_schedule_waiting` 에서 오므로 두 `◷` 가 어긋날 수 있다. 같은 줄 안의 겹침을 캡처로 확인하고 PR 본문에서 정한다.
 - 확인: 80 · 120 · 200칸, 색 있음과 `NO_COLOR=1`, 전후 쌍.
 
 **A3. 기억 읽기 모듈**
 
 - `bin/masc_tui_keeper_memory_reading.ml(i)`:
   ```ocaml
+  type lag = Lag_unmeasured | Lag of int
+  type gap =
+    | No_gap
+    | Gap of { first_atom : int; past_last_atom : int }
+    | Gap_unmeasured
   type t =
     | Unknown
     | No_row
@@ -228,8 +244,11 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
   val find : index -> keeper_name:string -> t
   val cells : now:float -> t -> Masc_tui_keeper_axis_cell.t list
   ```
-- `lag` 는 `unread_atom_turns + unread_official_turns`(둘 다 `Some` 일 때)이고 아니면 `Lag_unmeasured` 다. Memory 화면의 규칙과 같다(`bin/masc_tui_render_memory.ml:262`). 같은 낱말이 두 화면에서 같은 숫자를 뜻하게, 규칙을 이 모듈로 옮기고 Memory 화면이 이 모듈을 부른다.
-- `gap` 은 `memory_librarian_stalled`(`lib/tui_decode_memory_health.mli:76`)에서 만든다. 막대 눈금은 fleet 최댓값으로 잡아 상수를 피한다.
+- 값은 디코더의 `memory_keeper_health`(`lib/tui_decode_memory_health.mli:154`)에서 온다.
+  - `lag`: `mkh_librarian.mlh_unread_atom_turns` 와 `mlh_unread_official_turns` 가 둘 다 `Some` 이면 합이고, 아니면 `Lag_unmeasured` 다. Memory 화면의 규칙과 같다(`bin/masc_tui_render_memory.ml:264`). 같은 낱말이 두 화면에서 같은 숫자를 뜻하게, 규칙을 이 모듈로 옮기고 Memory 화면이 이 모듈을 부른다.
+  - `gap`: `mkh_librarian.mlh_stalled` 에서 만든다. `None` 이면 `No_gap`, `Some (Stalled_gap _)` 이면 `Gap`, `Some (Stalled_unmeasured _)` 이면 `Gap_unmeasured` 다. 막대 눈금은 fleet 최댓값으로 잡아 상수를 피한다.
+  - `digest_at`: `mkh_librarian.mlh_last_success_at` 다. Memory 화면은 이 시각을 `Memory saved` 라고 부른다(`bin/masc_tui_render_memory.ml:282`). 칸 낱말은 화면 사이에서 같게 맞춘다.
+  - `updated_at`: `mkh_updated_at`. `added` 와 `removed`: `mkh_added` 와 `mkh_removed`. `source_invalidations`: `mkh_source_invalidations`.
 - 갱신 시계 `+ 47m` 은 `updated_at` 의 나이, `+1 −0` 은 `added` 와 `removed` 다. `~retained` 는 필드가 아니라 `facts - added` 다.
 - `stale ×N` 의 N 은 `source_invalidations` 다. 경로당 한 건이고 다시 쓰면 지워지는 기록이라 사건 수가 아니다. 낱말은 "근거 N곳 무효" 같은 뜻으로 풀어 도움말에 적는다. 파생 사실의 지지 상실인 `support_invalidations` 는 stale 이 아니다.
 - 조인 키는 `Keeper_id.Keeper_name.t` 다(`lib/keeper_registry/keeper_id.mli`). 스냅숏을 읽었는데 행이 없으면 `No_row` 다. `mkr_keeper_id = None` 인 거부 행이 있으면 귀속할 수 없어 `Unknown` 이다(`lib/tui_decode_memory_health.mli:185` 근처).
@@ -237,7 +256,10 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 
 **A4. Keepers 목록이 기억 health 를 읽게 한다**
 
-- `memory_health_on_screen`(`bin/masc_tui.ml:9517`)이 `Memory` 와 `Metrics` 에서만 읽기를 켠다. Keepers 목록을 더한다. 그 밖의 화면에서는 읽기 빚과 푸시 대기열을 지우는 기존 동작이 그대로다(`:9525`). 도착 시 읽기 팔(`:8566`)에도 목록을 더한다.
+- 고치는 곳은 두 군데다.
+  - `memory_health_on_screen`(`bin/masc_tui.ml:9517`)이 `Memory` 와 `Metrics` 에서만 읽기를 켠다. Keepers 목록(`Keeper_list`)을 더한다. 그 밖의 화면에서는 읽기 빚과 푸시 대기열을 지우는 기존 동작이 그대로다(`:9525`).
+  - 도착 시 읽기 팔(`:8566`)은 `Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message | Keeper_runtime_pick` 여섯 화면이 함께 쓴다. 거기에 읽기를 더하면 여섯 화면이 모두 읽는다. 목록에서만 읽도록 `Keeper_list` 팔을 따로 가른다.
+- 수동 새로고침 `r` 의 Memory 팔(`:39808`)과 Metrics 팔(`:39863`)에 목록 팔이 필요한지는 확인하지 못했다. A4 가 확인한다.
 - 읽기 횟수는 도착 시 fleet 읽기 1회, `Memory_health` 푸시마다 그 Keeper 의 행 읽기 1회다(Keeper 별 중복 제거). RFC-0480 의 "바뀌었다고 서버가 말할 때 읽는다"를 지킨다. 폴링을 더하지 않는다.
 - 확인: 합성 서버 로그로 목록에 머무는 동안의 읽기 횟수를 센다.
 
@@ -305,12 +327,12 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 | S3 | — | `keeper_execution_receipt.ml(i)`, `keeper_runtime_trust_snapshot.ml`, `keeper_tool_surface_ops.ml`, `tui_decode.ml(i)`, `gate-keepers.ts` 와 시험 둘, 픽스처 셋 | 120 | — |
 | S3d | — | `bin/masc_tui_keeper_mark.ml`, `bin/masc_tui_render_keepers.ml`(표지와 색 함수만) | 80 | S3 |
 | S2 | — | `keeper_registry_types.ml(i)`, `keeper_registry.ml`, `keeper_registry_setup.ml`, `keeper_tool_surface_ops.ml`, `tui_decode.ml(i)`, TS, 시험 | 150 | S3d |
-| S1a | `keeper_turn_pulse.ml(i)`, 시험 | `keeper_heartbeat_loop_cycle.ml`, `keeper_heartbeat_loop.ml` | 200 | S2 |
+| S1a | `keeper_turn_pulse.ml(i)`, 시험 | `keeper_heartbeat_loop_cycle.ml`, `keeper_heartbeat_loop.ml`, `keeper_row_broadcast.mli`, `docs/rfc/RFC-0481-keeper-rows-reread-only-the-keeper-that-changed.md`(§1.3 표) | 200 | S2 |
 | S1b | — | `server_bootstrap_maintenance.ml`, `keeper_tool_surface_ops.ml`, `tui_decode.ml(i)`, TS, 시험 | 180 | S1a |
-| A1 | `masc_tui_keeper_axis_cell.ml(i)`, `masc_tui_keeper_next_run.ml(i)`, 시험 | `bin/dune`, `test/dune` | 310 | — |
+| A1 | `masc_tui_keeper_axis_cell.ml(i)`, `masc_tui_keeper_next_run.ml(i)`, 시험 | `bin/dune`, `test/dune`, `bin/masc_tui_types.ml`(`due` 규칙을 꺼낼 때만) | 310 | — |
 | A2 | `masc_tui_keeper_axis.ml(i)` | `bin/masc_tui_render_keepers.ml`, `bin/dune` | 90 | A1 |
 | A3 | `masc_tui_keeper_memory_reading.ml(i)`, 시험 | `bin/masc_tui_render_memory.ml`, `bin/dune` | 290 | A1 |
-| A4 | — | `bin/masc_tui.ml` | 10 | A3 |
+| A4 | — | `bin/masc_tui.ml`(읽기 조건 두 곳, 도착 팔 가르기) | 20 | A3 |
 | A5 | — | `bin/masc_tui_keeper_axis.ml` | 60 | A2 A4 |
 | W1 | `keeper_memory_age_bins.ml(i)`, 시험 | `test/dune` | 150 | — |
 | W2 | — | `server_dashboard_http_keeper_memory_health.ml`, `tui_decode_memory_health.ml(i)`, `dashboard-misc.ts`, 픽스처 | 190 | W1 |
@@ -320,6 +342,8 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 | D2 | — | `bin/masc_tui_render_memory.ml`, `bin/masc_tui_keeper_axis.ml` | 200 | W2 W4 A5 가 main 에 오른 뒤 |
 
 경로는 `lib/keeper/` · `lib/server/` · `lib/workspace_memory/` · `lib/` · `bin/` 를 줄여 적은 것이다. 층을 시작하는 에이전트가 자기 기준 커밋에서 경로를 다시 확인한다.
+
+행에 새 글을 그리는 TUI 층(K2 K3 S3d A2 A5 D1 D2)은 표의 파일에 더해 두 곳을 고친다. `bin/masc_tui_keeper_mark.ml` 의 `column_legend`(`:96`)에 그 글의 설명을 한 줄 더하고, 생성 문서 `docs/guides/TUI-KEYS.md` 를 생성기 출력과 맞춘다. 설명이 없으면 도움말이 또 낡는다. RFC-0503 L4 가 고친 어긋남과 같다. 생성기는 `bin/masc_tui_keys_doc_cli.exe` 이고 로컬 빌드는 하지 않으므로 문서를 같게 손으로 쓰고, `test_tui_keys_doc` 를 `test.yml` 로 돌려 일치를 확인한다.
 
 ## 4. 하지 않는 것
 
@@ -347,17 +371,26 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 
 | 파일 | 소유 | 다른 갈래가 닿는 곳 |
 | --- | --- | --- |
-| `bin/masc_tui_render_keepers.ml` 목록 영역 | K | A2 가 `keeper_secondary_row_content` 와 그 호출부 한 곳, S3d 가 표지와 색 함수만 |
+| `bin/masc_tui_render_keepers.ml` 목록 영역 | K | A2 가 `keeper_secondary_row_content` 와 그 호출부 한 곳(K3 도 이 함수를 고친다), S3d 가 표지와 색 함수만, D1 이 칸을 그리는 줄 |
 | `bin/masc_tui_render_schedule.ml` | K | — |
 | `bin/masc_tui_keeper_trail.ml(i)` | K | — |
 | `lib/tui_decode.ml(i)`, `lib/keeper/keeper_tool_surface_ops.ml`, `lib/keeper/keeper_registry*.ml`, `gate-keepers.ts` | S | — |
-| `bin/masc_tui_keeper_axis*.ml`, `bin/masc_tui_keeper_next_run.ml`, `bin/masc_tui_keeper_memory_reading.ml` | A | — |
-| `bin/masc_tui.ml` | 아무도 | A4 가 읽기 조건 한 곳 |
+| `bin/masc_tui_keeper_axis*.ml`, `bin/masc_tui_keeper_next_run.ml`, `bin/masc_tui_keeper_memory_reading.ml` | A | D1 · D2 가 `bin/masc_tui_keeper_axis.ml` 의 칸 목록에 줄을 더한다 |
+| `bin/masc_tui.ml` | 아무도 | A4 가 읽기 조건 두 곳 |
+| `bin/masc_tui_types.ml` | 아무도 | A1 이 `due` 규칙을 이름 있는 함수로 꺼내는 한 곳 |
+| `bin/masc_tui_keeper_mark.ml` | S(S3d 의 낱말과 글리프) | K2 K3 A2 A5 D1 D2 가 `column_legend` 에 자기 줄을 더한다 |
+| `docs/guides/TUI-KEYS.md` | 생성 문서 | 위 `column_legend` 를 고친 층이 생성기 출력과 맞춘다 |
+| `test/test_tui_keeper_control.ml`, `test/test_tui_keeper_trail.ml`, `test/test_tui_keeper_list_model.ml` | S(`keeper_runtime` 리터럴) | K3 가 `test_tui_keeper_trail.ml` 에 시험을 더한다 |
 | `lib/tui_decode_memory_health.ml(i)`, health 서버, `dashboard-misc.ts` | W | A3 는 읽기만 한다 |
 | `bin/masc_tui_render_memory.ml` | A3 가 규칙을 옮기는 두 곳 | D2 가 줄을 더한다 |
 | `bin/dune`, `test/dune` | 모두 | 떨어진 줄에 추가한다 |
 
-- 겹치는 곳은 둘째 줄 함수(K3 와 A2)다. 먼저 병합되는 스택이 이기고, 뒤 스택은 충돌이 나면 스택 전체를 `gh stack rebase` 한 번 한다. 권하는 병합 순서는 K → A → S → W 다. 순서는 병합하는 사람이 정한다.
+- 두 갈래가 같은 곳을 고치는 자리는 넷이다.
+  - 둘째 줄 함수 `keeper_secondary_row_content`: K3(사슬)와 A2(오른쪽 칸).
+  - 시험 픽스처 셋: S 가 `keeper_runtime` 에 항목을 더하고, K3 가 `test/test_tui_keeper_trail.ml` 에 시험을 더한다. 레코드 리터럴에 항목이 빠지면 컴파일이 깨지므로 뒤에 병합되는 스택이 맞춘다.
+  - `column_legend` 와 `docs/guides/TUI-KEYS.md`: §3 의 TUI 층 일곱이 한 줄씩 더한다. 줄이 서로 달라서 충돌이 나면 두 줄을 모두 남긴다.
+  - `bin/masc_tui_keeper_axis.ml`: 2차 착수의 D1 과 D2.
+- 먼저 병합되는 스택이 이기고, 뒤 스택의 충돌은 병합하는 사람이 정해 스택 전체를 `gh stack rebase` 한 번 한다. 에이전트는 리뷰가 달린 스택을 rebase 하지 않는다(§5.1). 권하는 병합 순서는 K → A → S → W 다. 순서는 병합하는 사람이 정한다.
 - 층을 시작하기 전에 `git fetch origin main` 으로 main 이 움직였는지 보고, 같은 파일을 만지는 열린 PR 이 있는지 `gh pr list` 로 확인한다. 있으면 시작 전에 보고한다.
 
 ### 5.3 층마다 지키는 것
@@ -390,7 +423,7 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 | D3 | 나이 사다리의 경계와 이름 | 1시간 · 1일 · 7일, 이름은 `Under_hour` `Under_day` `Under_week` `Older` | 이름에 강도를 암시하는 말을 쓰지 않는다(RFC-0418). 경계는 표 한 곳에서 바꾼다 |
 | D4 | 실패 시작 시각의 출처 | 서버 필드 `failing_since`(S2) | 대안은 Info 탭에서 `transitions` 를 읽는 길이다. 280–360줄이 들고, 링 50개 밖이면 모르고, 목록 행마다 읽으면 N+1 이라 목록에는 못 쓴다 |
 | D5 | 맥박의 모양 | 결과 셋(`ok` `rested` `failed`), 자율 턴만, 최대 24개, 시간으로 자르지 않는다. 12시간 창은 TUI 가 자른다 | 서버가 읽는 시각에 맞춰 세면 값이 읽는 시각에 따라 바뀐다(RFC-0481). 쉼을 실패와 섞으면 "쉼은 실패가 아니다"(#49567)와 어긋난다 |
-| D6 | 사람 몫 행의 그룹 | 표지와 색만 바꾸고 Attention 그룹에는 넣지 않는다 | 그룹 편입은 요약 줄 칩과 RFC-0503 의 그룹 정의를 바꾼다. 따로 낸다 |
+| D6 | 사람 손이 필요한 영수증 행(S3d 의 세 갈래)의 그룹 | 표지와 색만 더하고 Attention 그룹에는 넣지 않는다 | 그룹 편입은 요약 줄 칩과 RFC-0503 의 그룹 정의를 바꾼다. 따로 낸다 |
 | D7 | 일정 읽기 | fleet 첫 쪽 재사용(요청 0) | 서버가 Keeper 별 요약 필드를 더하는 안(서버 약 45줄 + TUI 약 120줄)은 캡처에서 `Not_before` 와 `Unknown` 의 비율이 높다고 드러나면 별도 RFC 로 낸다 |
 | D8 | `Provider` 가르기 | 하지 않는다 | §4. 근본 해결은 서버 RFC-0454 P2 |
 | D9 | 월드의 `published_at` 과 `absent` | 1차에서 제외 | 재료가 없거나 무겁다(W3) |

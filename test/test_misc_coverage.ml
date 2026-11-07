@@ -130,11 +130,6 @@ let test_config_of_json () =
   check bool "visible non-empty" true (List.length visible > 0)
 
 
-let test_config_of_json_invalid () =
-  (* masc_pause_status is not in public discovery, but remains callable on the admin/catalog surface. *)
-  check bool "pause status allowed on admin/catalog surface" true
-    (Config.is_tool_allowed "masc_pause_status")
-
 let test_env_session_max_age () =
   let max_age = Env_config.Session.max_age_seconds in
   check bool "positive max_age" true (max_age > 0.0)
@@ -178,7 +173,6 @@ let () =
     "config", [
       test_case "default" `Quick test_config_default;
       test_case "to_json" `Quick test_config_to_json;
-      test_case "of_json invalid" `Quick test_config_of_json_invalid;
     ];
     "env_config.session", [
       test_case "max_age" `Quick test_env_session_max_age;

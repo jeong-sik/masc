@@ -160,15 +160,18 @@ let add_routes ?sw ?clock ~port router =
      workspace precondition, which is the order these routes had before they
      carried a kind. *)
   |> Server_route.get
-       (Server_route.Public_read_on_canonical_host { port })
+       (Server_route.Public_read_on_canonical_host
+          { port; when_strict = Route_access.Credential_when_strict })
        "/dashboard"
        (fun _state req reqd -> serve_dashboard_index req reqd)
   |> Server_route.get
-       (Server_route.Public_read_on_canonical_host { port })
+       (Server_route.Public_read_on_canonical_host
+          { port; when_strict = Route_access.Credential_when_strict })
        "/dashboard/"
        (fun _state req reqd -> serve_dashboard_index req reqd)
   |> Server_route.prefix_get
-       (Server_route.Public_read_on_canonical_host { port })
+       (Server_route.Public_read_on_canonical_host
+          { port; when_strict = Route_access.Credential_when_strict })
        "/dashboard/"
        (fun _state req reqd ->
          let req_path = Http.Request.path req in

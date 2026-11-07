@@ -44,6 +44,7 @@ let writers_of =
     ; Admin_assignment, authenticated
     ; Revocation_cancel, authenticated
     ; Registration, authenticated
+    ; Session, authenticated
     ]
 ;;
 
@@ -77,6 +78,7 @@ let ordinal = function
   | R.Kind.Admin_assignment -> 13
   | R.Kind.Revocation_cancel -> 14
   | R.Kind.Registration -> 15
+  | R.Kind.Session -> 16
 ;;
 
 let kinds_are_all_listed () =
@@ -403,6 +405,7 @@ let kind_labels_are_the_names_on_disk () =
     ; "admin_assignment"
     ; "revocation_cancel"
     ; "registration"
+    ; "session"
     ]
     (List.map R.Kind.to_string R.Kind.all)
 ;;

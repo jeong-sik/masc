@@ -79,6 +79,9 @@ module Kind : sig
       (** An Admin registers an identity on the allowlist, or removes the
           registration (plan C2d). The first sign-in of a registered identity
           makes a Member. The body is that of {!Authz_registration_event}. *)
+    | Session
+      (** A person signs in and gets a browser session, or ends one (design
+          5.2, plan C3). The body is that of {!Authz_session_event}. *)
 
   val all : t list
   val to_string : t -> string
@@ -98,7 +101,8 @@ end
     authenticated principal writes invites too: the first Admin is invited by
     the local operator and every later one by an Admin. Which authenticated
     principal may invite is a question of the state, so {!Authz_state} answers
-    it. *)
+    it. A [Session] record needs an authenticated principal too: the person
+    whose session it is. *)
 val admits : Kind.t -> Author.t -> bool
 
 (** Where the next record goes: its position and the hash it must carry. *)

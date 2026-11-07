@@ -1,6 +1,7 @@
 (* Checks for the body of a browser session record: the bytes it writes, the
    digest of a secret, that it reads back what it wrote, and every way a body
-   fails to be one. No files, clock, or network. *)
+   fails to be one. A last case puts the body in a record, reads the record
+   back, and checks who may write one. No files, clock, or network. *)
 
 open Authz_types
 module E = Authz_session_event
@@ -288,6 +289,50 @@ let errors_are_told_apart () =
     (contains ~sub:"bogus" (E.error_to_string (E.Unknown_event "bogus")))
 ;;
 
+(* ---- the body in a record ---- *)
+
+module R = Authz_record
+
+let alice_author = Authz_records.Author.Authenticated (Principal.Human alice)
+let events = [ issued (); issued ~replaces:second (); revoked ]
+
+let a_record_carries_the_body () =
+  List.iter
+    (fun t ->
+      match
+        R.make ~head:R.genesis ~at_ms:1000 ~author:alice_author ~kind:R.Kind.Session
+          ~body:(to_body_exn t)
+      with
+      | Error (R.Author_not_admitted _) -> Alcotest.fail "a principal may write a session record"
+      | Ok record ->
+        (match R.of_line ~head:R.genesis (R.to_line record) with
+         | Error _ -> Alcotest.fail "the line of the record is not read back"
+         | Ok read ->
+           Alcotest.(check string) "the kind" "session" (R.Kind.to_string read.R.kind);
+           (match E.of_body read.R.body with
+            | Ok back -> Alcotest.(check bool) "the body" true (E.equal t back)
+            | Error error -> Alcotest.failf "refused: %s" (E.error_to_string error))))
+    events
+;;
+
+(* A session belongs to a person who signed in; no system author and not the
+   local operator writes one. *)
+let no_other_author_may_write_one () =
+  List.iter
+    (fun (name, author) ->
+      match
+        R.make ~head:R.genesis ~at_ms:1000 ~author ~kind:R.Kind.Session
+          ~body:(to_body_exn revoked)
+      with
+      | Error (R.Author_not_admitted _) -> ()
+      | Ok _ -> Alcotest.failf "%s wrote a session record" name)
+    [ "the local operator", Authz_records.Author.Local_operator
+    ; "system cron", Authz_records.Author.System_cron
+    ; "system maintenance", Authz_records.Author.System_maintenance
+    ; "system migration", Authz_records.Author.System_migration
+    ]
+;;
+
 let () =
   Alcotest.run
     "authz_session_event"
@@ -298,6 +343,10 @@ let () =
         ; Alcotest.test_case "equality" `Quick equality_looks_at_every_member
         ; Alcotest.test_case "refused" `Quick a_body_that_is_not_a_session_record_is_refused
         ; Alcotest.test_case "texts" `Quick errors_are_told_apart
+        ] )
+    ; ( "record"
+      , [ Alcotest.test_case "carries the body" `Quick a_record_carries_the_body
+        ; Alcotest.test_case "other authors" `Quick no_other_author_may_write_one
         ] )
     ]
 ;;

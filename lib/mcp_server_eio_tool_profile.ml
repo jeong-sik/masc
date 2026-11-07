@@ -168,9 +168,19 @@ let label_words_from_identifier ident =
     second parse would read the same bytes to the same answer. A file that
     does not parse raises rather than answering "no title": a misplaced
     declaration and no declaration are the same answer at every call site. *)
-let declared_title_table : string StringMap.t Lazy.t =
-  lazy
-    (List.fold_left
+let declared_title_table : string StringMap.t option Atomic.t = Atomic.make None
+
+(* Memo on first ask. Concurrent askers never sit on a [Lazy] cell:
+   [Lazy.force] from concurrent fibers can raise [Lazy.Undefined] or block
+   the domain while the loser waits (audit 8/8 #49747 category 1). The fold
+   is deterministic, so losing a race answers identically, and a misplaced
+   declaration keeps raising on every ask, as with the previous lazy. *)
+let declared_titles () =
+  match Atomic.get declared_title_table with
+  | Some table -> table
+  | None ->
+    let computed =
+      List.fold_left
        (fun table path ->
           match Filename.dirname path, Filename.extension path with
           | "tools", ".toml" ->
@@ -187,7 +197,12 @@ let declared_title_table : string StringMap.t Lazy.t =
                    | None -> table)))
           | _, _ -> table)
        StringMap.empty
-       Embedded_config.file_list)
+       Embedded_config.file_list
+    in
+    let (_ : bool) =
+      Atomic.compare_and_set declared_title_table None (Some computed)
+    in
+    computed
 
 (* Three titled tools have no [config/tools] file to carry the key:
    masc_operator_snapshot, masc_operator_digest and masc_operator_action each
@@ -196,7 +211,7 @@ let declared_title_table : string StringMap.t Lazy.t =
    the mechanical fallback below derives from the name, so the fallback covers
    them byte-identically. *)
 let tool_title_of_name name =
-  match StringMap.find_opt name (Lazy.force declared_title_table) with
+  match StringMap.find_opt name (declared_titles ()) with
   | Some title -> title
   | None ->
     let trimmed =

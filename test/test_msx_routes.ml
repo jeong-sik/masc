@@ -960,7 +960,7 @@ let dispatch_request ~method_ ~path ~state ~authorization ~body =
     let response_buf = Buffer.create 1024 in
     let conn =
       Httpun.Server_connection.create (fun reqd ->
-        Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+        Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd))
     in
     let request_str =
       Printf.sprintf

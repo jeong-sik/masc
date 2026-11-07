@@ -92,6 +92,7 @@ let post_handler ~workspace (runtime : Server_mcp_transport_http.runtime) =
   in
   fun reqd ->
     let request = Httpun.Reqd.request reqd in
+    let reqd = Masc.Http_reqd.of_httpun reqd in
     Server_request_authority.with_current authority (fun () ->
       Server_mcp_transport_http.handle_post_mcp ~deps request reqd)
 ;;

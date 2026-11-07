@@ -19,7 +19,7 @@ let require_ok error = function Ok value -> value | Error value -> fail (error v
 let http ~router ?token ~meth ~path ?(body = "") () =
   let output = Buffer.create 1024 in
   let connection = Httpun.Server_connection.create (fun reqd ->
-    Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+    Http.Router.dispatch router (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd)) in
   let authorization = match token with
     | None -> "" | Some token -> "Authorization: Bearer " ^ token ^ "\r\n" in
   let raw_request = Printf.sprintf

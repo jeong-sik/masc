@@ -92,7 +92,7 @@ let dispatch ~state ~token ~meth ~target ~body =
     Server_auth.publish_server_state state;
     let response = Buffer.create 1024 in
     let connection = Httpun.Server_connection.create (fun reqd ->
-      Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+      Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd)) in
     let request = Printf.sprintf
       "%s %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: http://127.0.0.1:8935\r\nAuthorization: Bearer %s\r\nContent-Type: application/json\r\nContent-Length: %d\r\n\r\n%s"
       meth target token (String.length body) body in

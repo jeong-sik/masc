@@ -3090,7 +3090,6 @@
 (include stanzas/test_keeper_turn_up_args.inc)
 (include stanzas/test_keeper_turn_up_create_response.inc)
 
-(include stanzas/test_keeper_cwd_response.inc)
 
 (include stanzas/test_channel_gate_content_length_knob.inc)
 

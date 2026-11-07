@@ -211,7 +211,7 @@ let expand_row_tabs segments =
       (List.fold_left_map
          (fun column (text, kind) ->
            let text, column =
-             Masc_tui_execute_terminal.expand_tabs ~column text
+             Message_layout.expand_tabs ~column text
            in
            (column, (text, kind)))
          0 segments)

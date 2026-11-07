@@ -594,6 +594,28 @@ let pad_left text width =
   if cells >= width then fit_width text width
   else String.make (width - cells) ' ' ^ text
 
+let tab_width = 8
+
+let expand_tabs ~column text =
+  let pieces = String.split_on_char '\t' text in
+  let last_index = List.length pieces - 1 in
+  let buffer = Buffer.create (String.length text + tab_width) in
+  let _, column =
+    List.fold_left
+      (fun (index, column) piece ->
+         Buffer.add_string buffer piece;
+         let column = column + display_width piece in
+         if index < last_index
+         then (
+           let padding = tab_width - (column mod tab_width) in
+           Buffer.add_string buffer (String.make padding ' ');
+           index + 1, column + padding)
+         else index + 1, column)
+      (0, column)
+      pieces
+  in
+  Buffer.contents buffer, column
+
 (* Where a bare URL begins and where it stops. Two readers ask -- the one that
    underlines them and the one that names what they point at -- and they get
    one answer, since a URL ending in one place for the underline and another

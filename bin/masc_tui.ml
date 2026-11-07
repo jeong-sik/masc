@@ -16393,6 +16393,28 @@ let reconcile_system_log_stream state ~mailbox =
     stop_system_log_stream state;
     launch_system_log_stream state ~mailbox ~level
 
+(* The reads on the wire that the pages tell the reader about: the facts each
+   page hands [page_unread_note_while], and the sources the status line names.
+   An iteration starts its reads, then handles the key, then draws. The key
+   that opens a page is drawn before that page's first read starts, and the
+   read starts on the next iteration, which draws nothing until an answer or a
+   key arrives. The page kept saying "press r" while its read ran. The loop
+   takes this before its launches and again just before it picks the frame,
+   and asks for a frame when it moved, wherever in between the read started. *)
+let reads_in_flight (state : state) =
+  ( ( state.clients_surface_inflight
+    , state.lane_runs_loading
+    , state.runtime_surface_inflight
+    , state.harness_inflight
+    , state.verification_inflight
+    , state.memory_health_inflight
+    , state.repositories_inflight )
+  , ( Option.is_some state.system_log_stream
+    , Snapshot_read.in_flight state.schedules_read
+    , view_is_loading (Masc_tui_fusion_model.fusion_runs_view state)
+    , view_is_loading (memory_facts_view state)
+    , surface_reads_pending state ) )
+
 (* A frame or an ending of the job that is current lands on the server page; a
    message from a job since replaced is dropped. *)
 let take_system_log_stream state (stream : system_log_follow) event =
@@ -33717,6 +33739,7 @@ Use relative paths for resources already held in the package. -->
          Log.Transport.info "main loop: %.0f ms between two iterations"
            (Masc_tui_http.ms_of_ns gap_ns);
        last_loop_at_ns := now_ns);
+      let reads_before = reads_in_flight state in
       reconcile_chat_listen state;
       ensure_acting_pane_changes state ~mailbox:async_messages;
       launch_owed_history state ~mailbox:async_messages;
@@ -42410,6 +42433,8 @@ Use relative paths for resources already held in the package. -->
         || granted_search_paste in
       reconcile_task_detail_scroll state;
       reconcile_tools_task_scroll state;
+      if reads_in_flight state <> reads_before then
+        Render_schedule.request render_schedule Render_schedule.Background;
       let terminal_rows, _ = get_terminal_size () in
       let frame_choice = Masc_tui_render.frame_choice state ~terminal_rows ~terminal_cols:(snd (Masc_tui_ansi.get_terminal_size ())) ~now:(Unix.gettimeofday ()) in
       let owned_frame = match frame_choice with

@@ -9,7 +9,7 @@
 - 자격 증명: `env -u MISTRAL_API_KEY vibe --setup` 이 macOS keychain 에 넣은 항목
   (`svce=ai.mistral.vibe`, `acct=MISTRAL_API_KEY`). 이 문서는 이것을 keychain 자격
   증명이라 부른다. 마법사에서 브라우저 로그인과 키 입력 중 어느 쪽을 골랐는지는
-  기록하지 않았다. 그래서 이 자격 증명이 플랜 자격 증명인지는 이 묶음으로 말할 수 없다.
+  기록하지 않았다. 아래 「L0 뒤 실측」이 키 scope 로 이 자격 증명의 종류를 적는다.
 - 계정은 Mistral Pro 플랜 하나다. 같은 시각 masc 의 mistral HTTP 레인
   (env `MISTRAL_API_KEY`)은 402 `billing_api_budget_exhausted` 를 받고 있었다
   (`system_log_2026-11-07.jsonl`, sangsu, 09:10:57Z). 이 로그 줄은 묶음에 없다.
@@ -72,13 +72,44 @@ journal_dir, started_at, ended_at, limits, exit_code.
     바꿨다. 메시지 종류·도구 제목·도구 입력·상태·승인 값만 남겼다.
   - 세션 journal(`session/`)과 `meta.json` 은 계정 사용자 이름과 경로를 담아 넣지 않았다.
 
+## L0 뒤 실측: vibe-acp 준비 검사와 Vibe 몫 계량기 (2026-11-07 12:1xZ)
+
+- 근거: vibe 3.1.0 설치본의 Python 소스와 아래 두 번의 호출이다. 소스 파일은
+  `vibe/setup/auth/auth_state.py`, `vibe/acp/agent.py`, `vibe/app_server/_account.py`,
+  `vibe/app_server/_billing.py` 다. 아래 확장 메서드는 공개 문서에 없다.
+- 자격 증명 순서(`assess_auth_state`): 프로세스 env → `~/.vibe/.env` → OS keyring.
+  상태 종류는 `signed_out`, `auth_not_required`, `os_keyring`, `vibe_home_env_file`,
+  `process_env`, `unsupported_provider` 다. 이 계정에는 `~/.vibe/.env` 가 없었다.
+- `repro/acp-probe.py` 는 `vibe-acp` 에 `initialize`, `_auth/status`, `session/new`,
+  `_account/read` 를 보낸다. 프롬프트를 보내지 않는다. 두 번 돌려 5.0초와 7.4초가
+  걸렸고 둘 다 exit 0 이었다. work 폴더는 비어 있었다.
+  - `acp/auth-status.json`: `authenticated=true`, `authState=os_keyring`
+  - `acp/account-read.shape.json`: `status=ready`, `plan.kind=chat`, `apiKey.scope=vibe`.
+    플랜 이름, 키 끝자리, budget 값은 계정 값이라 남기지 않았다.
+- 키 종류: Vibe 의 whoami 캐시(`~/.vibe/whoami_cache.json`)에 같은 날 두 항목이 있었다.
+  m0 시각(09:14:45Z)의 항목은 `plan_type=chat`, m4 시각(09:21:45Z, env 키)의 항목은
+  `plan_type=api` 다. Vibe 소스는 plan_type 이 키 scope 에서 온다고 적는다
+  (`chat`↔`vibe`, `api`↔`workspace`). 그래서 keychain 자격 증명은 Vibe scope 키이고,
+  env 키는 workspace scope API 키다. 캐시 파일은 묶음에 넣지 않았다.
+- m12(12:17Z, `--agent ask --max-turns 1 --time-limit 120`,
+  `-p "Write the numbers from 1 to 300, one per line."`): 호출 앞뒤로 `_account/read`
+  를 읽었다. `budget.usagePercentage` 가 호출 뒤에 올랐다. `export.json` 의 `cost_usd`
+  는 0.0 이었다. exit 3 `turn_limit`, 입력 7,938·출력 342 토큰. 계량기 값은 묶음에
+  넣지 않았다.
+  - Vibe 소스 주석은 이 budget 을 `/v1/billing/budget` 의 `vibe_budget`, 곧
+    "monthly Vibe Code allowance" 의 사용량이라 적는다.
+
 ## 확인하지 않은 것
 
-- pool 관계는 한 번의 대비(같은 시각 API 402 / Vibe 성공)뿐이다. 공식 문서는
-  "monthly usage that is shared across Studio, the API, and Vibe Code" 라고 적는다.
-  콘솔 두 막대의 소비 곡선은 재지 않았다.
+- pool 관계: Vibe 호출이 Vibe 몫 계량기를 올리는 것은 한 번 봤다(m12). Vibe 호출이
+  API 쪽 계량기를 올리는지, API 키 호출이 Vibe 몫을 올리는지는 재지 않았다. API 키
+  예산이 바닥이라 API 쪽 소비를 만들 수 없었고, `_account/read` 는 API 쪽 계량기를
+  보여 주지 않는다. 공식 문서는 "monthly usage that is shared across Studio, the API,
+  and Vibe Code" 라고 적는다.
 - 한도 소진·세션 만료의 Vibe 쪽 실패 모양(exit·outcome)은 보지 못했다. 거절을
   만들 방법이 없었다.
 - `--disabled-tools` 의 올바른 도구 이름, bash 기본 허용 목록의 범위,
   `--resume`/`--continue`, MCP 브리지, `vibe-acp`·`vibe-app-server` 는 재지 않았다.
-- 무인 준비 검사(로그인·플랜 상태)를 부를 argv 는 찾지 못했다.
+- `-p` 로 부르는 준비 검사 argv 는 없다. `vibe-acp` 확장 메서드는 공개 문서에 없어서
+  Vibe 버전이 바뀌면 다시 재야 한다. `signed_out` 상태의 실제 응답은 만들지 않았다
+  (keychain 을 건드리지 않았다).

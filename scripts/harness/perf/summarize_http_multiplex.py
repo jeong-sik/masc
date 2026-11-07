@@ -15,7 +15,7 @@ import sys
 from collections import defaultdict
 from pathlib import Path
 
-TRANSPORT_ORDER = ("h1-6", "h1", "h2c", "h2")
+TRANSPORT_ORDER = ("h1-6", "h1", "h2c", "tls-h1", "tls-h2")
 
 
 def median(values: list[float]) -> float | None:

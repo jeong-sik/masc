@@ -85,6 +85,7 @@ val developer_context : snapshot -> string list
     media in a response is shown by its identity
     ({!Keeper_client_tool_outbox_media.carrier_row}); every other receipt value
     is carried losslessly. *)
+
 val context_message : snapshot -> Agent_core.Types.message option
 (** A separately identified result-data carrier for official Start and Resume
     and Agent Core's final model-input projection.

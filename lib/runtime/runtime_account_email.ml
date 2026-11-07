@@ -159,6 +159,7 @@ let resolve_provider (provider : Runtime_schema.provider) =
   | Antigravity_cli_runtime, Some (Runtime_schema.File path) ->
     Some (Ok (Google_oauth path))
   | Antigravity_cli_runtime, (Some (Runtime_schema.Env _ | Inline _) | None) -> None
+  | Vibe_cli_runtime, _ -> None
   | (Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api), _ ->
     None
 

@@ -17,6 +17,7 @@ type api_format =
   | Antigravity_cli_runtime
   | Claude_code_runtime
   | Muse_serve_runtime
+  | Vibe_cli_runtime
 [@@deriving show, eq]
 
 type output_schema_channel =
@@ -26,7 +27,8 @@ type output_schema_channel =
 val api_format_output_schema_channel : api_format -> output_schema_channel
 (** Whether a runtime of this format can be handed a JSON Schema to hold its
     answer to. Every exact-output call hands one over, so a format without
-    the channel (Muse Code: MSP's [turn/start] has no field for it) stands in
+    the channel (Muse Code: MSP's [turn/start] has no field for it; Vibe:
+    the headless call takes no schema argument) stands in
     no exact-output list. The lane writers, the load check of [cli_slots] and
     first-run setup all read this one answer. *)
 

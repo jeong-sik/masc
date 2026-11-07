@@ -183,6 +183,7 @@ type invocation_error =
   | Not_agent_core_lane of string
   | Not_official_client_lane of string
   | Tools_only_via_mcp_bridge of string
+  | No_tool_channel of string
   | Not_muse_lane of string
   | Muse_home_unavailable of string
   | Not_antigravity_lane of string
@@ -203,6 +204,8 @@ let invocation_error_to_string = function
       "%s requires an MCP bridge; use probe_muse_invocation for Muse or \
        probe_antigravity_invocation for Antigravity"
       label
+  | No_tool_channel label ->
+    Printf.sprintf "%s has no channel for MASC tools, so no probe can observe a call" label
   | Not_muse_lane label -> Printf.sprintf "%s is not the Muse lane" label
   | Muse_home_unavailable detail -> Printf.sprintf "Muse probe home unavailable: %s" detail
   | Not_antigravity_lane label ->
@@ -318,7 +321,8 @@ let probe_invocation ~sw ~net ~clock ~now ~runtime_id ~tool ~prompt () =
         | Runtime_execution.Codex_app_server _
         | Runtime_execution.Antigravity_cli _
         | Runtime_execution.Claude_code _
-        | Runtime_execution.Muse_serve _ ->
+        | Runtime_execution.Muse_serve _
+        | Runtime_execution.Vibe_cli _ ->
           Error (Not_agent_core_lane (Runtime_execution.label rt.Runtime_instance.execution))
         | Runtime_execution.Agent_core _ ->
     (* [_for_turn], not the bare resolver: the bare one yields the provider
@@ -465,6 +469,8 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
              Error
                (Tools_only_via_mcp_bridge
                   (Runtime_execution.label rt.Runtime_instance.execution))
+           | Runtime_execution.Vibe_cli _ ->
+             Error (No_tool_channel (Runtime_execution.label rt.Runtime_instance.execution))
            | Runtime_execution.Claude_code exec ->
              (* Built from the same fields the keeper path builds it from, and
                 the deadline resolved by the same function, so the probe
@@ -604,7 +610,8 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
      | Some rt ->
        (match rt.Runtime_instance.execution with
         | Runtime_execution.Agent_core _ | Runtime_execution.Claude_code _
-        | Runtime_execution.Codex_app_server _ | Runtime_execution.Muse_serve _ ->
+        | Runtime_execution.Codex_app_server _ | Runtime_execution.Muse_serve _
+        | Runtime_execution.Vibe_cli _ ->
           Error (Not_antigravity_lane (Runtime_execution.label rt.Runtime_instance.execution))
         | Runtime_execution.Antigravity_cli exec ->
           let schemas =
@@ -771,7 +778,8 @@ let probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path ~now
               ( Runtime_execution.Agent_core _
               | Runtime_execution.Codex_app_server _
               | Runtime_execution.Antigravity_cli _
-              | Runtime_execution.Claude_code _ )
+              | Runtime_execution.Claude_code _
+              | Runtime_execution.Vibe_cli _ )
           ; _
           } as runtime) ->
        Error (Not_muse_lane (Runtime_execution.label runtime.execution)))

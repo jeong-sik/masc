@@ -3271,7 +3271,7 @@ let run_direct_attempt
                   let config =
                     match runtime.Runtime_instance.execution with
                     | Runtime_execution.Claude_code config -> config
-                    | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ ->
+                    | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
                       fail "Claude runtime fixture did not resolve"
                   in
                   let config = match admission_timeout_s with

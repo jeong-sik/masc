@@ -92,6 +92,7 @@ let resolve_runtime_providers ~runtime_id () =
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Claude_code _
     | Runtime_execution.Muse_serve _
+    | Runtime_execution.Vibe_cli _
       ->
       Error
         (Printf.sprintf

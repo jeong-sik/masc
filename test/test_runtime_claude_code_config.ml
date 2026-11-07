@@ -76,7 +76,7 @@ let test_materializes_official_client_owner () =
      | Runtime_execution.Agent_core _
      | Runtime_execution.Codex_app_server _
      | Runtime_execution.Antigravity_cli _
-     | Runtime_execution.Muse_serve _ ->
+     | Runtime_execution.Muse_serve _ | Runtime_execution.Vibe_cli _ ->
        fail "claude-code was materialized as the wrong execution owner")
 ;;
 

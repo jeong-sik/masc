@@ -118,7 +118,8 @@ let test_materializes_the_muse_serve_owner () =
      | Runtime_execution.Agent_core _
      | Runtime_execution.Codex_app_server _
      | Runtime_execution.Claude_code _
-     | Runtime_execution.Antigravity_cli _ ->
+     | Runtime_execution.Antigravity_cli _
+     | Runtime_execution.Vibe_cli _ ->
        fail "muse-serve was materialized as another execution owner");
     check (option string) "Muse is absent from exact-output slot groups" None
       (Runtime.exact_slot_list_key_of_api_format default.provider.api_format);

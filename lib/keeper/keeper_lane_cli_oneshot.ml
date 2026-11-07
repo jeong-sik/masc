@@ -337,8 +337,8 @@ let prompt_with_schema ~requirement ~prompt =
   prompt ^ "\n\n" ^ Exact_output.schema_instruction_text requirement
 ;;
 
-(* The sentence has to say what this client accepts. Claude Code, Codex and
-   Muse Code return what the model writes, so they get the Agent Core sentence
+(* The sentence has to say what this client accepts. Claude Code, Codex,
+   Muse Code and Vibe return what the model writes, so they get the Agent Core sentence
    the HTTP path uses. Antigravity takes a schema-bound answer only through
    its [finish] tool; told to write the value, the model writes it, the CLI
    refuses, and the prompt goes out twice. *)
@@ -352,6 +352,7 @@ let prompt_for_execution ~(execution : Runtime_execution.t) ~requirement ~prompt
   | Runtime_execution.Claude_code _
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Muse_serve _
+  | Runtime_execution.Vibe_cli _
   | Runtime_execution.Agent_core _ -> prompt_with_schema ~requirement ~prompt
 ;;
 

@@ -81,7 +81,7 @@ let integrations_json ~include_credential_references (config : Runtime_schema.co
         match provider.api_format with
         | Runtime_schema.Antigravity_cli_runtime | Messages_api | Chat_completions_api | Ollama_api
         | Codex_app_server_runtime | Claude_code_runtime
-        | Gemini_api | Vertex_gemini_api | Muse_serve_runtime -> true
+        | Gemini_api | Vertex_gemini_api | Muse_serve_runtime | Vibe_cli_runtime -> true
       in
       let fields =
         match provider.transport with
@@ -165,6 +165,7 @@ let account_scope (provider : Runtime_schema.provider) =
        | Some (Runtime_schema.File _) ->
            Some (Runtime_quota_window.scope_of_credential ~provider_id:provider.id provider.credentials)
        | Some (Env _ | Inline _) | None -> None)
+  | Vibe_cli_runtime -> None
   | Chat_completions_api | Messages_api | Ollama_api | Gemini_api | Vertex_gemini_api -> None
 ;;
 

@@ -156,7 +156,7 @@ let with_runtime ?(publication = Boot_config) ?(provider_headers = []) f =
               | Runtime_execution.Codex_app_server _
               | Runtime_execution.Claude_code _
               | Runtime_execution.Antigravity_cli _
-              | Runtime_execution.Muse_serve _ -> fail "expected the HTTP runtime")
+              | Runtime_execution.Muse_serve _ | Runtime_execution.Vibe_cli _ -> fail "expected the HTTP runtime")
            | _ -> fail "expected one runtime"
          in
          (match publication,observation with

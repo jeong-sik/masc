@@ -610,6 +610,8 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
        which is a bug in this module's callers rather than a provider failure. *)
     Error (Setup_failure
       "runtime is Agent_core-owned; it belongs on the Async_agent path")
+  | Runtime_execution.Vibe_cli _ ->
+    Error (Setup_failure "Mistral Vibe panelists are not wired yet")
   | Runtime_execution.Claude_code execution ->
     let config =
       claude_config ~base_dir ~turn_timeout_s:runtime.model.turn_timeout_s

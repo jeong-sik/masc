@@ -242,7 +242,7 @@ let of_flow error =
   flow, evidence
 ;;
 
-type native_family = Codex | Claude | Claude_admission | Antigravity | Muse | Host
+type native_family = Codex | Claude | Claude_admission | Antigravity | Muse | Vibe | Host
 [@@deriving yojson]
 type measured_capacity = { actual_chars : int; max_chars : int } [@@deriving yojson]
 type cli_cause =
@@ -318,7 +318,7 @@ let cli_was_dispatched observation = match observation.cause with
   | Unknown_runtime | Not_official -> false
   | Invalid_json_answer | Invalid_domain_answer | Codex_context_refused _
   | Claude_context_refused _ | Codex_measured_input_refused _
-  | Native_failed (Codex | Claude | Claude_admission | Antigravity | Muse | Host) -> true
+  | Native_failed (Codex | Claude | Claude_admission | Antigravity | Muse | Vibe | Host) -> true
 let of_cli_observation observation = match observation.cause with
   | Invalid_json_answer | Invalid_domain_answer -> invalid_output
   | Unknown_runtime | Not_official -> empty
@@ -332,7 +332,7 @@ let of_cli_observation observation = match observation.cause with
   | Codex_context_refused {tool_effect_attempted=true;message=_}
   | Claude_context_refused {tool_effect_attempted=true;response_emitted=_;message=_}
   | Claude_context_refused {tool_effect_attempted=false;response_emitted=true;message=_}
-  | Native_failed (Codex | Claude | Claude_admission | Antigravity | Muse | Host) ->
+  | Native_failed (Codex | Claude | Claude_admission | Antigravity | Muse | Vibe | Host) ->
     {empty with size_independent_execution_failure=true;unsettled_native_execution=true;
      non_capacity_execution_failure=true}
 
@@ -345,7 +345,7 @@ let cli_observation_of_yojson json =
   let valid = match value.cause with
     | Unknown_runtime | Not_official | Invalid_json_answer | Invalid_domain_answer
     | Codex_context_refused _ | Claude_context_refused _
-    | Native_failed (Codex | Claude | Claude_admission | Antigravity | Muse | Host) -> true
+    | Native_failed (Codex | Claude | Claude_admission | Antigravity | Muse | Vibe | Host) -> true
     | Codex_measured_input_refused limit ->
       limit.max_chars > 0 && limit.actual_chars > limit.max_chars in
   if original=encoded && String.trim value.runtime_id<>"" && valid then Ok value

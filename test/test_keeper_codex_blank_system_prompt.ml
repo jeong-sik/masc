@@ -149,7 +149,7 @@ let with_direct_attempt ~base_path ~cli_path body =
                 let config =
                   match runtime.Runtime_instance.execution with
                   | Runtime_execution.Codex_app_server config -> config
-                  | Agent_core _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
+                  | Agent_core _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
                     fail "Codex runtime fixture did not resolve"
                 in
                 let attempt ?on_guidance_prepared ~system_prompt ~on_transmitted_model_input () =

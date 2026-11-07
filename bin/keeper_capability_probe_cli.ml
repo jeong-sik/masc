@@ -116,7 +116,8 @@ let is_agent_core runtime_id =
      | Runtime_execution.Codex_app_server _
      | Runtime_execution.Antigravity_cli _
      | Runtime_execution.Claude_code _
-     | Runtime_execution.Muse_serve _ -> false)
+     | Runtime_execution.Muse_serve _
+     | Runtime_execution.Vibe_cli _ -> false)
 ;;
 
 let verdict_json (verdict : Probe.verdict) =
@@ -178,6 +179,8 @@ let invocation_error_json (err : Probe.invocation_error) =
     `Assoc [ "kind", `String "not_official_client_lane"; "lane", `String lane ]
   | Probe.Tools_only_via_mcp_bridge lane ->
     `Assoc [ "kind", `String "tools_only_via_mcp_bridge"; "lane", `String lane ]
+  | Probe.No_tool_channel lane ->
+    `Assoc [ "kind", `String "no_tool_channel"; "lane", `String lane ]
   | Probe.Not_muse_lane lane ->
     `Assoc [ "kind", `String "not_muse_lane"; "lane", `String lane ]
   | Probe.Muse_home_unavailable detail ->
@@ -221,7 +224,8 @@ let is_antigravity runtime_id =
           ( Runtime_execution.Agent_core _
           | Runtime_execution.Codex_app_server _
           | Runtime_execution.Claude_code _
-          | Runtime_execution.Muse_serve _ )
+          | Runtime_execution.Muse_serve _
+          | Runtime_execution.Vibe_cli _ )
       ; _
       }
   | None -> false
@@ -238,7 +242,7 @@ let probe_for_lane ~sw ~net ~secure_random ~clock ~mgr ~fs ~base_path ~runtime_i
     Probe.probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs
       ~base_path ~now:Unix.gettimeofday ~runtime_id ~tool ~prompt ()
   else if (match Runtime.get_runtime_by_id runtime_id with
-    | Some {execution=Runtime_execution.Muse_serve _; _} -> true | Some { execution = (Runtime_execution.Agent_core _ | (Runtime_execution.Codex_app_server _ | (Runtime_execution.Antigravity_cli _ | Runtime_execution.Claude_code _)));_}
+    | Some {execution=Runtime_execution.Muse_serve _; _} -> true | Some { execution = (Runtime_execution.Agent_core _ | (Runtime_execution.Codex_app_server _ | (Runtime_execution.Antigravity_cli _ | (Runtime_execution.Claude_code _ | Runtime_execution.Vibe_cli _))));_}
                                                                  | None -> false)
   then Probe.probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path
     ~now:Unix.gettimeofday ~runtime_id ~tool ~prompt ()

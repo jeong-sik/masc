@@ -211,7 +211,7 @@ let apply t current =
         | Some value, _ | None, Some value -> Some value
         | None, None -> source.max_context in
       set_int draft "num-ctx" requested
-    | Some { api_format = (Runtime_schema.Messages_api | (Runtime_schema.Chat_completions_api | (Runtime_schema.Gemini_api | (Runtime_schema.Vertex_gemini_api | (Runtime_schema.Codex_app_server_runtime | (Runtime_schema.Antigravity_cli_runtime | (Runtime_schema.Claude_code_runtime | Runtime_schema.Muse_serve_runtime)))))));_}
+    | Some { api_format = (Runtime_schema.Messages_api | (Runtime_schema.Chat_completions_api | (Runtime_schema.Gemini_api | (Runtime_schema.Vertex_gemini_api | (Runtime_schema.Codex_app_server_runtime | (Runtime_schema.Antigravity_cli_runtime | (Runtime_schema.Claude_code_runtime | (Runtime_schema.Muse_serve_runtime | Runtime_schema.Vibe_cli_runtime))))))));_}
     | None | Some {api_format=Ollama_api; _ } -> draft in
   let draft = if effort = Option.value ~default:"" t.source.reasoning_effort then draft else
     let draft = if effort = "" then draft else

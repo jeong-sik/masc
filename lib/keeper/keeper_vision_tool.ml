@@ -86,7 +86,9 @@ let vision_runtime_candidates ~now =
        (* The official-client read holds its answer to an output schema, and
           [muse serve] has no channel for one: Fusion_official_client refuses
           the request, so the runtime is no candidate. *)
-       | Runtime_execution.Muse_serve _ -> None)
+       | Runtime_execution.Muse_serve _ -> None
+       (* Vibe takes text only, so the image check above already refused it. *)
+       | Runtime_execution.Vibe_cli _ -> None)
 
 let vision_runtime_ids ~now : string list =
   List.map (fun (runtime_id, _, _) -> runtime_id) (vision_runtime_candidates ~now)

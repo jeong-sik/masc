@@ -745,7 +745,8 @@ let dashboard_runtime_probe_target ~(api_format : Runtime_schema.api_format) bas
   | Runtime_schema.Codex_app_server_runtime
   | Runtime_schema.Claude_code_runtime
   | Runtime_schema.Antigravity_cli_runtime
-  | Runtime_schema.Muse_serve_runtime -> Probe_requires_cli_transport
+  | Runtime_schema.Muse_serve_runtime
+  | Runtime_schema.Vibe_cli_runtime -> Probe_requires_cli_transport
   | Runtime_schema.Vertex_gemini_api -> Probe_native_auth
   | Runtime_schema.Ollama_api ->
     let base = dashboard_runtime_trim_trailing_slashes base_url in
@@ -796,7 +797,8 @@ let dashboard_runtime_credential_required (runtime : Runtime_instance.t) =
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
   | Runtime_execution.Antigravity_cli _
-  | Runtime_execution.Muse_serve _ -> Option.is_some runtime.provider.credentials
+  | Runtime_execution.Muse_serve _
+  | Runtime_execution.Vibe_cli _ -> Option.is_some runtime.provider.credentials
   | Runtime_execution.Agent_core _ ->
     match runtime.credential_admission with
     | None -> false (* The admission check refuses this invalid runtime before HTTP. *)
@@ -846,6 +848,7 @@ let dashboard_runtime_model_count_of_body ~(api_format : Runtime_schema.api_form
     | Runtime_schema.Claude_code_runtime
     | Runtime_schema.Antigravity_cli_runtime
     | Runtime_schema.Muse_serve_runtime
+    | Runtime_schema.Vibe_cli_runtime
     | Runtime_schema.Vertex_gemini_api -> None
     | Runtime_schema.Ollama_api | Runtime_schema.Gemini_api -> dashboard_runtime_list_member_len "models" json
     | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api ->
@@ -953,7 +956,8 @@ let dashboard_runtime_provider_probe_json
      | ( Runtime_execution.Codex_app_server _
        | Runtime_execution.Claude_code _
        | Runtime_execution.Antigravity_cli _
-       | Runtime_execution.Muse_serve _ ), _
+       | Runtime_execution.Muse_serve _
+       | Runtime_execution.Vibe_cli _ ), _
      | Runtime_execution.Agent_core _, Probe_requires_cli_transport ->
       make
         ~auth_present:false
@@ -1469,7 +1473,7 @@ let effective_capabilities_json (rt : Runtime_instance.t) =
       ; "execution_mode", `String "masc_mcp_only"
       ; "verified", `Bool false
       ]
-  | Runtime_execution.Muse_serve _ ->
+  | Runtime_execution.Muse_serve _ | Runtime_execution.Vibe_cli _ ->
     `Assoc
       [ "source", `String "unverified"
       ; "execution", `String (Runtime_execution.label rt.execution)
@@ -1560,7 +1564,7 @@ let runtime_parameter_policy_json (rt : Runtime_instance.t) =
       ; "execution", `String "claude_code"
       ; "execution_mode", `String "masc_mcp_only"
       ]
-  | Runtime_execution.Muse_serve _ ->
+  | Runtime_execution.Muse_serve _ | Runtime_execution.Vibe_cli _ ->
     `Assoc
       [ "source", `String "official-client-owned"
       ; "execution", `String (Runtime_execution.label rt.execution)
@@ -1610,7 +1614,8 @@ let runtime_admission_json (rt : Runtime_instance.t) =
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Antigravity_cli _
   | Runtime_execution.Claude_code _
-  | Runtime_execution.Muse_serve _ -> `Null
+  | Runtime_execution.Muse_serve _
+  | Runtime_execution.Vibe_cli _ -> `Null
 ;;
 
 let runtime_inventory_entry_json ~default_id (rt : Runtime_instance.t) =

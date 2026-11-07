@@ -250,7 +250,8 @@ let antigravity_cli_options ~(path : string) (tbl : Otoml.t)
   | Vertex_gemini_api
   | Codex_app_server_runtime
   | Claude_code_runtime
-  | Muse_serve_runtime ->
+  | Muse_serve_runtime
+  | Vibe_cli_runtime ->
     (match
        List.find_opt
          (fun key -> Option.is_some (Otoml.find_opt tbl Fun.id [ key ]))
@@ -347,7 +348,7 @@ let usage_read_url_field ~path ~(transport : Runtime_schema.transport) tbl =
 
 (* The read sends the API key the runtime's HTTP execution was built with,
    and its windows are recorded under the quota scope of that key.  An
-   official-client runtime (Codex, Claude Code, Antigravity, Muse Code) logs
+   official-client runtime (Codex, Claude Code, Antigravity, Muse Code, Vibe) logs
    in with the vendor's subscription, and its quota scope names no API key
    (Antigravity's names the OAuth file of that login), so an API-key read
    there would file one account's usage under another.  Codex and
@@ -363,7 +364,8 @@ let usage_read_execution_errors ~path (api_format : Runtime_schema.api_format) =
   | Runtime_schema.Codex_app_server_runtime
   | Runtime_schema.Antigravity_cli_runtime
   | Runtime_schema.Claude_code_runtime
-  | Runtime_schema.Muse_serve_runtime ->
+  | Runtime_schema.Muse_serve_runtime
+  | Runtime_schema.Vibe_cli_runtime ->
     error
       path
       "usage-read is only for an API-key HTTP provider; this protocol runs an \
@@ -531,7 +533,8 @@ let parse_provider (id : string) (tbl : Otoml.t)
            Error (error (path ^ ".account-home") "account-home must be a non-empty absolute path without surrounding whitespace")
          | Runtime_schema.Messages_api | Runtime_schema.Chat_completions_api
          | Runtime_schema.Ollama_api | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api
-         | Runtime_schema.Antigravity_cli_runtime -> Error (error (path ^ ".account-home") "account-home is valid only for Claude Code, Codex and Muse Code official clients"))
+         | Runtime_schema.Antigravity_cli_runtime
+         | Runtime_schema.Vibe_cli_runtime -> Error (error (path ^ ".account-home") "account-home is valid only for Claude Code, Codex and Muse Code official clients"))
     in
     let is_non_interactive_result =
       typed_find_or "a boolean" path tbl "is-non-interactive" Otoml.get_boolean ~default:false

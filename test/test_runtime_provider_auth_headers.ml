@@ -426,7 +426,7 @@ max-concurrent = 1
                   messages-cli, messages-http, openai-compatible-cli, \
                   openai-compatible-http, ollama-http, gemini-http, \
                   vertex-gemini, codex-app-server, claude-code, \
-                  antigravity-cli, muse-serve")
+                  antigravity-cli, muse-serve, vibe-cli")
          errors)
 
 let test_runtime_toml_editor_protocol_inventory_is_backend_owned () =
@@ -1572,7 +1572,7 @@ let agent_core_provider_config_or_fail runtime =
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Claude_code _
   | Runtime_execution.Antigravity_cli _
-  | Runtime_execution.Muse_serve _ ->
+  | Runtime_execution.Muse_serve _ | Runtime_execution.Vibe_cli _ ->
     fail "expected Agent Core runtime"
 
 let test_dispatch_rejects_missing_declared_env_credential () =
@@ -2489,7 +2489,7 @@ is-default = true
             | Ok (Runtime_execution.Codex_app_server _
                  | Runtime_execution.Claude_code _
                  | Runtime_execution.Antigravity_cli _
-                 | Runtime_execution.Muse_serve _) ->
+                 | Runtime_execution.Muse_serve _ | Runtime_execution.Vibe_cli _) ->
               fail "HTTP binding selected an official client"
             | Error message -> failf "binding failed: %s" message)
          | _ -> fail "expected one declared binding"
@@ -3396,6 +3396,7 @@ let test_parallel_policy_rejects_unsupported_runtimes () =
     ; Codex_app_server_runtime, "codex-app-server"
     ; Antigravity_cli_runtime, "antigravity-cli"
     ; Muse_serve_runtime, "muse-serve"
+    ; Vibe_cli_runtime, "vibe-cli"
     ; Ollama_api, "ollama-http"
     ; Gemini_api, "gemini-http"
     ; Vertex_gemini_api, "vertex-gemini" ]

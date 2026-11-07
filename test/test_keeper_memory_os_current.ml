@@ -110,6 +110,7 @@ let apply_disposition_guarded
 let require_disposition_ok = function
   | Ok snapshot -> snapshot
   | Error (Current.Basis_superseded _) -> fail "fresh disposition basis was refused"
+  | Error (Current.Destination_absent {memory_id;_}) -> failf "fresh disposition lost destination %s" memory_id
   | Error (Current.Disposition_store_failed detail) -> fail detail
 ;;
 
@@ -1780,6 +1781,7 @@ let test_disposition_basis_refuses_effects change () = with_temp_keepers @@ fun 
    | Error (Current.Basis_superseded observed) ->
      check bool "typed basis refusal returns the exact locked current snapshot" true
        (observed=Some actual)
+   | Error (Current.Destination_absent _) -> fail "basis refusal became a destination refusal"
    | Error (Current.Disposition_store_failed detail) -> failf "basis refusal became a storage failure: %s" detail
    | Ok _ -> fail "a changed complete Memory basis was committed");
   check bool "refusal writes no new Memory, journal, archive, absorbed rows or range receipts" true
@@ -1824,8 +1826,36 @@ let test_disposition_guarded_storage_failure_is_not_basis_superseded () =
    | Error (Current.Disposition_store_failed detail) ->
      check bool "actual unreadable store retains its diagnostic" true (String.length detail>0)
    | Error (Current.Basis_superseded _) -> fail "an unreadable receipt store became a definite basis refusal"
+   | Error (Current.Destination_absent _) -> fail "an unreadable receipt store became a definite destination refusal"
    | Ok _ -> fail "an unreadable receipt store authorized a disposition");
   check bool "storage failure preserves corrupt bytes and all existing store evidence" true
+    (before=disposition_store_bytes ~keepers_dir)
+;;
+
+(* #46372: an explicit admission decided against a Memory that still held its
+   destination commits after that destination was retired. The refusal must
+   come back typed, without a basis, so the admission can end instead of
+   retrying the same input against the same snapshot. *)
+let test_disposition_missing_destination_is_a_typed_refusal () =
+  with_temp_keepers @@ fun keepers_dir ->
+  let kept=fact ~claim:"Kept current fact" () in
+  let destination=fact ~claim:"Destination retired before the commit" () in
+  let captured=replace ~keepers_dir ~facts:[kept;destination] () |> require_ok in
+  let current=replace ~keepers_dir ~expected_revision:(Some captured.revision) ~facts:[kept] ()
+    |> require_ok in
+  let before=disposition_store_bytes ~keepers_dir in
+  let destination_id=Types.memory_id destination in
+  (match Current.apply_disposition_guarded ~required_memory_ids:[destination_id]
+      ~absorbed:[] ~revisions:[] ~keepers_dir ~keeper_id:"keeper" ~now:200.0
+      ~source:(source Current.Librarian) ~new_claims:[] () with
+   | Error (Current.Destination_absent {memory_id;current=observed}) ->
+     check string "the refusal names the retired destination" destination_id memory_id;
+     check bool "the refusal returns the exact locked current snapshot" true (observed=Some current)
+   | Error (Current.Basis_superseded _) -> fail "no basis was given, so none can be superseded"
+   | Error (Current.Disposition_store_failed detail) ->
+     failf "a retired destination became an uncertain storage failure: %s" detail
+   | Ok _ -> fail "a disposition whose destination is retired was committed");
+  check bool "the refusal writes no new Memory, journal, archive, absorbed rows or receipts" true
     (before=disposition_store_bytes ~keepers_dir)
 ;;
 
@@ -5088,7 +5118,9 @@ let () =
         test_case "fresh complete basis publishes real Memory archive and range receipts" `Quick
           test_disposition_fresh_basis_publishes_original_effects;
         test_case "unreadable store is typed as uncertain storage failure rather than basis refusal" `Quick
-          test_disposition_guarded_storage_failure_is_not_basis_superseded]);
+          test_disposition_guarded_storage_failure_is_not_basis_superseded;
+        test_case "a retired required destination is a typed refusal without a basis" `Quick
+          test_disposition_missing_destination_is_a_typed_refusal]);
       ("ordered identity recall", [
         test_case "raw same-ID replacement cannot revive bindings" `Quick test_successor_recall_rejects_raw_same_identity_incarnation;
         test_case "explicit ordered net-zero edges remain Following rather than direct aliases" `Quick test_successor_recall_follows_ordered_net_zero_incarnation;

@@ -5,13 +5,12 @@ command: argv is one non-empty argv process vector run without a shell, tokens \
 verbatim, and command is one line handed to a real shell. cwd is a relative \
 path inside the path jail, and MASC never interprets program or subcommand \
 meaning. A call runs to completion or stops at timeout_sec, and a sleep loop holds \
-the turn for the whole wait. With run_in_background true the call returns at \
-once with a request_id, the command keeps running on the server until it \
-exits or reaches timeout_sec, and its result arrives later as a tool-result \
-receipt that wakes the Keeper. A server restart ends a background run, and \
-the receipt says so. A GitHub Actions run is waited for with \
-masc_schedule_create until_github_run, which wakes the Keeper when the run \
-ends. intent is one of auto (the default) or \
+the turn for the whole wait. With run_in_background true the call returns a \
+request_id at once and the result arrives later as a tool-result receipt \
+that wakes the Keeper; a server restart ends the run and the receipt says \
+so. A GitHub Actions run is waited for with masc_schedule_create \
+until_github_run, which wakes the Keeper when the run ends. intent is one \
+of auto (the default) or \
 request_effect. In auto mode an observation-only run returns its \
 actual exit status and output, including failed writes; auto never authorizes \
 an effect. Use intent=request_effect when the command needs \
@@ -76,4 +75,4 @@ description = "auto permits restricted execution as configured; request_effect a
 name = "run_in_background"
 type = "boolean"
 default = false
-description = "true returns at once with a request_id and runs the command on the server until it exits or reaches timeout_sec. The result arrives later as a tool-result receipt that wakes the Keeper. Defaults to false."
+description = "true returns a request_id at once and runs the command on the server until it exits or reaches timeout_sec. Defaults to false."

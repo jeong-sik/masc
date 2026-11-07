@@ -150,39 +150,6 @@ groups:
               conditions:
                 - evaluator: { type: gt, params: [2147483648] }
 
-      - uid: masc-attempt-watchdog-fired
-        title: Attempt watchdog fired
-        condition: C
-        for: 0m
-        noDataState: NoData
-        execErrState: Error
-        labels: { severity: warning }
-        annotations:
-          summary: >-
-            The 1800s safety-cap watchdog killed a stuck keeper attempt in
-            the last hour (masc_keeper_attempt_watchdog_fired_total).
-            Inspect the keeper's trace for a silent provider stream.
-        data:
-          - refId: A
-            relativeTimeRange: { from: 3600, to: 0 }
-            datasourceUid: P4169E866C3094E38
-            model:
-              expr: sum(increase(masc_keeper_attempt_watchdog_fired_total[1h]))
-              refId: A
-              intervalMs: 60000
-              maxDataPoints: 300
-          - refId: B
-            datasourceUid: __expr__
-            model: { type: reduce, expression: A, reducer: last, refId: B }
-          - refId: C
-            datasourceUid: __expr__
-            model:
-              type: threshold
-              expression: B
-              refId: C
-              conditions:
-                - evaluator: { type: gt, params: [0] }
-
       - uid: masc-discord-heartbeat-ack-timeout
         title: Discord heartbeat ACK timeouts
         condition: C

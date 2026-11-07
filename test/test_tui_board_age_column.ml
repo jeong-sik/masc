@@ -1,6 +1,4 @@
 open Masc_tui_types
-let every_sort =
-  [ Board_hot; Board_trending; Board_recent; Board_updated; Board_discussed ]
 
 (* The list is drawn in the order the server returned, so the column beside it
    is only a reading of that order when it holds the time the order was made

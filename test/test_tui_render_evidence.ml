@@ -255,16 +255,6 @@ let test_no_row_carries_a_control_or_bidi_byte_from_the_evidence () =
 
 (* {2 requests: where the pictures go on the frame} *)
 
-let request_testable =
-  let pp formatter = function
-    | Section.Hold { image_id; _ } -> Format.fprintf formatter "Hold %d" image_id
-    | Section.Show p ->
-        Format.fprintf formatter "Show %d at %d,%d %d rows%s" p.View.png_image_id p.View.png_row
-          p.View.png_column p.View.png_rows
-          (if p.View.png_crop = None then "" else " cropped")
-  in
-  Alcotest.testable pp ( = )
-
 let one_picture () =
   let rows, pictures = section ~content_height:30 (fixture ()) in
   match pictures with

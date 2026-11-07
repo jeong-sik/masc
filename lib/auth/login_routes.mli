@@ -116,3 +116,14 @@ val logout : t -> Authz_browser_request.request -> answer
     session, or a JSON [{"error": ...}] with a 401 or a 403. A page reads the
     CSRF token here, as the cookie is HttpOnly. *)
 val session : t -> Authz_browser_request.request -> answer
+
+(** For the other routes a browser session calls (the allowlist of plan
+    C3-9): the session that [request] acts through, and its cookie, or the
+    JSON refusal that {!session} would give, a 401 or a 403. *)
+val acting
+  :  t
+  -> Authz_browser_request.request
+  -> (Authz_browser_session.Cookie.t * Authz_browser_session.signed_in, answer) result
+
+(** A JSON object answer with [cache-control: no-store]. *)
+val json : status -> (string * Yojson.Safe.t) list -> answer

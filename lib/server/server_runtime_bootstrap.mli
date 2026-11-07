@@ -205,7 +205,7 @@ val initialize_owner_state_blocking
   :  sw:Eio.Switch.t
   -> runtime_sw:Eio.Switch.t
   -> env:Eio_unix.Stdenv.base
-  -> base_path:string
+  -> single_user:Authz_boot_mode_read.single_user
   -> ?input_base_path:string
   -> accept_store_quarantine:bool
   -> clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -216,7 +216,10 @@ val initialize_owner_state_blocking
   -> fs:Eio.Fs.dir_ty Eio.Path.t
   -> unit
   -> initialized_owner_state
-(** [runtime_sw] must outlive [sw], including session journal cleanup.
+(** The owner state opens the base path of [single_user], which only
+    {!Authz_boot_mode_read.boot} makes; every runtime that opens a base path
+    passes the account mode judgment first.
+    [runtime_sw] must outlive [sw], including session journal cleanup.
     Complete every transport-neutral, fallible owner-initialization step and
     return the still-unclaimed persistence preparation. A transport must
     pass this opaque value directly to {!activate_owner_state}; the prepared

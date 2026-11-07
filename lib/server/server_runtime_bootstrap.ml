@@ -729,7 +729,7 @@ let initialize_owner_state_blocking
       ~sw
       ~runtime_sw
       ~env
-      ~base_path
+      ~single_user
       ?input_base_path
       ~accept_store_quarantine
       ~clock
@@ -740,6 +740,7 @@ let initialize_owner_state_blocking
       ~fs
       ()
   =
+  let base_path = Authz_boot_mode_read.single_user_base_path single_user in
   (* DET-OK: the optional transport spelling and the required owner BasePath
      denote the same requested path when the former is absent. *)
   let requested_base_path = Option.value input_base_path ~default:base_path in
@@ -1669,17 +1670,19 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
           (Server_auth.configure_error_to_string error)));
   (* HIGH-RISK-UNREVIEWED: the account mode is decided here, once per boot,
      after the BasePath lease and before anything serves (multi-account A2). *)
-  (match
-     Authz_boot_mode_read.boot
-       ~base_path
-       ~config_dir:(Env_config_core.masc_config_dir_opt ())
-       ~anonymous_mutations:(Server_auth_config.allow_anonymous_mutations resolved_auth_config)
-   with
-   | Ok () -> ()
-   | Error (first, rest) ->
-     let message = "the account mode refuses this boot: " ^ String.concat "; " (first :: rest) in
-     Log.Server.error "[FATAL] %s" message;
-     raise (Env_config_core.Config_error message));
+  let single_user =
+    match
+      Authz_boot_mode_read.boot
+        ~base_path
+        ~config_dir:(Env_config_core.masc_config_dir_opt ())
+        ~anonymous_mutations:(Server_auth_config.allow_anonymous_mutations resolved_auth_config)
+    with
+    | Ok single_user -> single_user
+    | Error (first, rest) ->
+      let message = "the account mode refuses this boot: " ^ String.concat "; " (first :: rest) in
+      Log.Server.error "[FATAL] %s" message;
+      raise (Env_config_core.Config_error message)
+  in
   let clock, mono_clock, net, domain_mgr, proc_mgr, fs =
     init_runtime_context env
   in
@@ -1780,7 +1783,7 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
     try
       Server_startup_state.mark_blocking ();
       let initialized_owner =
-        initialize_owner_state_blocking ~sw ~runtime_sw ~env ~base_path ?input_base_path
+        initialize_owner_state_blocking ~sw ~runtime_sw ~env ~single_user ?input_base_path
           ~accept_store_quarantine ~clock ~mono_clock ~net ~domain_mgr ~proc_mgr ~fs ()
       in
       let activated_owner =

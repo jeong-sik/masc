@@ -81,10 +81,18 @@ val decide : Authz_boot_mode.input -> decision
     when it is not a match. *)
 val messages : Authz_boot_mode.input -> stop -> string * string list
 
-(** {!input}, {!decide} and {!messages} in one call: [Ok ()] for a single-user
-    boot, and the messages of the stop otherwise. *)
+(** A base path that {!boot} judged a single-user boot. Only {!boot} makes one,
+    and owner initialization takes one in place of a base path, so a runtime
+    that skips the judgment does not compile. *)
+type single_user
+
+(** The base path that {!boot} read. *)
+val single_user_base_path : single_user -> string
+
+(** {!input}, {!decide} and {!messages} in one call: the judged base path for a
+    single-user boot, and the messages of the stop otherwise. *)
 val boot
   :  base_path:string
   -> config_dir:string option
   -> anonymous_mutations:bool
-  -> (unit, string * string list) result
+  -> (single_user, string * string list) result

@@ -104,6 +104,7 @@
   masc.runtime
   masc.crypto_rng
   masc.server
+  masc.auth
   masc.config
   masc.host_config
   masc_core

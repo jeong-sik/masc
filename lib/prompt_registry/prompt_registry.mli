@@ -88,6 +88,15 @@ type prompt_resolution = Prompt_registry_types.prompt_resolution = {
   has_override : bool;
 }
 
+val prompt_resolution_to_yojson : prompt_resolution -> Yojson.Safe.t
+(** The object a captured prompt is stored as, see
+    {!Prompt_registry_types.prompt_resolution_to_yojson}. *)
+
+val prompt_resolution_of_yojson :
+  Yojson.Safe.t -> (prompt_resolution, string) result
+(** Reads what {!prompt_resolution_to_yojson} writes, see
+    {!Prompt_registry_types.prompt_resolution_of_yojson}. *)
+
 type persisted_mutation_error =
   | Validation_error of string
   | Persistence_error of string

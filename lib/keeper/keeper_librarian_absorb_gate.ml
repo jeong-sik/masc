@@ -184,35 +184,16 @@ let resolve_guidance () =
     mergeable;different_context;loses_knowledge;uncertain} in
   let+ () = validate_guidance guidance in guidance
 let guidance_to_yojson guidance =
-  let optional = function None -> `Null | Some value -> `String value in
-  let resolution (p : Prompt_registry.prompt_resolution) = `Assoc [
-    "effective",`String p.effective; "source",`String (Prompt_registry.prompt_source_to_string p.source);
-    "file_value",optional p.file_value; "override_value",optional p.override_value;
-    "file_path",optional p.file_path; "file_exists",`Bool p.file_exists; "has_override",`Bool p.has_override] in
   `Assoc ["version",`Int 3;
-    "prompts",`Assoc (List.map (fun (name,_,prompt) -> name,resolution prompt)
+    "prompts",`Assoc (List.map (fun (name,_,prompt) -> name,Prompt_registry.prompt_resolution_to_yojson prompt)
     (guidance_members guidance))]
 let guidance_of_yojson json =
   let open Result.Syntax in
   let fields expected = function
     | `Assoc fields when List.sort String.compare (List.map fst fields)=List.sort String.compare expected -> Ok fields
     | _ -> Error "Captured absorption guidance has unknown, duplicate or missing fields" in
-  let text = function `String value -> Ok value | _ -> Error "Captured absorption guidance expects text" in
-  let optional = function `Null -> Ok None | json -> let+ value=text json in Some value in
-  let boolean = function `Bool value -> Ok value | _ -> Error "Captured absorption guidance expects boolean" in
   let resolution json =
-    let* members=fields ["effective";"source";"file_value";"override_value";"file_path";"file_exists";"has_override"] json in
-    let get key = List.assoc key members in
-    let* effective=text (get "effective") in
-    let* source=match get "source" with
-      | `String "file" -> Ok Prompt_registry.File | `String "override" -> Ok Prompt_registry.Override
-      | `String "missing" -> Ok Prompt_registry.Missing | _ -> Error "Unknown captured absorption prompt source" in
-    let* file_value=optional (get "file_value") in
-    let* override_value=optional (get "override_value") in
-    let* file_path=optional (get "file_path") in
-    let* file_exists=boolean (get "file_exists") in
-    let+ has_override=boolean (get "has_override") in
-    {Prompt_registry.effective;source;file_value;override_value;file_path;file_exists;has_override} in
+    Result.map_error (fun detail -> "Captured absorption guidance: " ^ detail) (Prompt_registry.prompt_resolution_of_yojson json) in
   let* members=fields ["version";"prompts"] json in
   let* ()=if List.assoc "version" members=`Int 3 then Ok () else Error "Unknown captured absorption guidance version" in
   let* members=fields ["forward";"pair";"observations";"reverse";"reverse_yes";"reverse_no";"mergeable";"different_context";"loses_knowledge";"uncertain"] (List.assoc "prompts" members) in

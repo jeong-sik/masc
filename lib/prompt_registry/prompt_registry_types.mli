@@ -60,3 +60,17 @@ val resolve_source :
 val prompt_source_to_string : prompt_source -> string
 (** The word the HTTP surfaces have always sent: ["override"], ["file"],
     ["missing"]. *)
+
+val prompt_resolution_to_yojson : prompt_resolution -> Yojson.Safe.t
+(** The object a captured prompt is stored as: [effective], [source] (the
+    {!prompt_source_to_string} word), [file_value], [override_value],
+    [file_path], [file_exists] and [has_override], in that order. The three
+    optional texts are [null] when absent. *)
+
+val prompt_resolution_of_yojson :
+  Yojson.Safe.t -> (prompt_resolution, string) result
+(** Reads what {!prompt_resolution_to_yojson} writes. The object must hold
+    exactly those seven members. The texts may be blank, because an inactive
+    file can be empty beneath an effective override. An object with another
+    member set, a member of another JSON type, or another source word is an
+    [Error]. *)

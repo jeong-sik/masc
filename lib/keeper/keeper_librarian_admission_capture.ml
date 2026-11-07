@@ -20,7 +20,6 @@ let number = function
   | `Float value when Float.is_finite value -> Ok value
   | `Int value -> Ok (float_of_int value)
   | _ -> Error "Original Librarian capture expects a finite time"
-let boolean = function `Bool value -> Ok value | _ -> Error "Original Librarian capture expects a boolean"
 let list decode = function
   | `List values ->
     let rec loop acc = function
@@ -206,24 +205,9 @@ let retirement_of_json json =
       (value "archive" fields) in Judgment.Available archive
   | _ -> Error "Unknown original retirement availability"
 
-let prompt_json (p:Prompt_registry.prompt_resolution) = `Assoc ["effective",`String p.effective;
-  "source",`String (Prompt_registry.prompt_source_to_string p.source);
-  "file_value",optional (fun value -> `String value) p.file_value;
-  "override_value",optional (fun value -> `String value) p.override_value;
-  "file_path",optional (fun value -> `String value) p.file_path;
-  "file_exists",`Bool p.file_exists;"has_override",`Bool p.has_override]
+let prompt_json = Prompt_registry.prompt_resolution_to_yojson
 let prompt_of_json json =
-  let* fields=object_fields ["effective";"source";"file_value";"override_value";"file_path";"file_exists";"has_override"] json in
-  let* effective=text (value "effective" fields) in
-  let* source=nonblank (value "source" fields) in
-  let* source=match source with "file" -> Ok Prompt_registry.File | "override" -> Ok Prompt_registry.Override
-    | "missing" -> Ok Prompt_registry.Missing | _ -> Error "Unknown original prompt source" in
-  let* file_value=option text (value "file_value" fields) in
-  let* override_value=option text (value "override_value" fields) in
-  let* file_path=option text (value "file_path" fields) in
-  let* file_exists=boolean (value "file_exists" fields) in
-  let+ has_override=boolean (value "has_override" fields) in
-  {Prompt_registry.effective;source;file_value;override_value;file_path;file_exists;has_override}
+  Result.map_error (fun detail -> "Original Librarian capture: " ^ detail) (Prompt_registry.prompt_resolution_of_yojson json)
 let preparation_json (prepared:Runtime.admission_preparation) = `Assoc [
   "policy",`Assoc ["facts_max_bytes",`Int prepared.policy.facts_max_bytes;
     "category_cap",`Int prepared.policy.category_cap;"facts_per_category_cap",`Int prepared.policy.facts_per_category_cap];

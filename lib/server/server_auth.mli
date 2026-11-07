@@ -62,6 +62,12 @@ val request_carries_auth_credential : Httpun.Request.t -> bool
 val observer_sse_auth_token_from_request : Httpun.Request.t -> string option
 (** Combined header-or-query lookup for the SSE observer endpoint. *)
 
+val authorization_header_name : string
+(** [authorization]: the header field of a bearer. *)
+
+val internal_token_header_name : string
+(** [x-masc-internal-token]: the header field of an internal token. *)
+
 val request_carries_query_credential : Httpun.Request.t -> bool
 (** Whether the request carries a credential in its query string where the
     server reads one: the [token] of an observer stream ([/mcp] with

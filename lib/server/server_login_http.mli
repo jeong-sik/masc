@@ -36,3 +36,21 @@ val max_request_bytes : int
     the server admitted at its entry, to classify its [Origin]; one without it
     is a 500. *)
 val add_routes : Login_routes.t -> Http_server_eio.Router.t -> Http_server_eio.Router.t
+
+(** [/auth/github/callback]: the redirect of a GitHub login client is this
+    path on the address of the server. *)
+val github_callback_path : string
+
+(** The routes of the localhost preview (plan, preview scope P3), on top of
+    {!add_routes}:
+    - [GET /] and [GET /accounts/invite], the pages of {!Auth_preview}, open
+      ([Always_public]); each page gets a fresh nonce from [draw]
+    - [GET /api/v1/auth/whoami], judged by {!Auth_gate.decide} on one
+      snapshot of the zone. It reads every [Authorization] and
+      [x-masc-internal-token] field and every session cookie, so two of them
+      are several credentials.
+
+    Only the preview command registers them; {!add_routes} is what a server
+    registers (S1). *)
+val add_preview_routes : Login_routes.t -> Http_server_eio.Router.t -> Http_server_eio.Router.t
+

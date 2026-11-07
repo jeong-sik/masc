@@ -79,8 +79,31 @@ let named_entries dispositions =
     dispositions
     (String_set.empty, String_set.empty)
 
+(* A claim or conflict text is written once, from the facts that made it,
+   and never rewritten. After one of those facts goes, the text can keep a
+   sentence no remaining member supports. So an entry that loses any member
+   goes with it, and its other members lose their disposition: the next
+   classification judges them again as new facts. *)
 let remove facts t =
-  let dispositions = List.fold_left (fun map fact -> Fact_map.remove fact map) t.dispositions facts in
+  let lost_claims, lost_conflicts =
+    List.fold_left
+      (fun (claims, conflicts) fact ->
+         match Fact_map.find_opt fact t.dispositions with
+         | Some (Claim_member id) -> String_set.add id claims, conflicts
+         | Some (Conflict_member id) -> claims, String_set.add id conflicts
+         | Some (Excluded _) | None -> claims, conflicts)
+      (String_set.empty, String_set.empty)
+      facts
+  in
+  let kept _ = function
+    | Claim_member id -> not (String_set.mem id lost_claims)
+    | Conflict_member id -> not (String_set.mem id lost_conflicts)
+    | Excluded _ -> true
+  in
+  let dispositions =
+    List.fold_left (fun map fact -> Fact_map.remove fact map) t.dispositions facts
+    |> Fact_map.filter kept
+  in
   let named_claims, named_conflicts = named_entries dispositions in
   { claims = String_map.filter (fun id _ -> String_set.mem id named_claims) t.claims
   ; conflicts = String_map.filter (fun id _ -> String_set.mem id named_conflicts) t.conflicts
@@ -446,15 +469,6 @@ let reconcile t keepers =
   in
   let observed = List.rev observed_order in
   let current_facts = List.map fst observed in
-  let new_facts =
-    observed
-    |> List.filter (fun ((pending : pending_fact), _) -> not (Fact_map.mem pending.fact t.dispositions))
-    |> List.stable_sort (fun ((a : pending_fact), seen_a) ((b : pending_fact), seen_b) ->
-         match Float.compare seen_a seen_b with
-         | 0 -> compare_fact_ref a.fact b.fact
-         | order -> order)
-    |> List.map fst
-  in
   let vanished =
     Fact_map.fold
       (fun fact _ vanished ->
@@ -466,7 +480,17 @@ let reconcile t keepers =
       []
     |> List.rev
   in
-  { ledger = remove vanished t; current_facts; new_facts; vanished }
+  let ledger = remove vanished t in
+  let new_facts =
+    observed
+    |> List.filter (fun ((pending : pending_fact), _) -> not (Fact_map.mem pending.fact ledger.dispositions))
+    |> List.stable_sort (fun ((a : pending_fact), seen_a) ((b : pending_fact), seen_b) ->
+         match Float.compare seen_a seen_b with
+         | 0 -> compare_fact_ref a.fact b.fact
+         | order -> order)
+    |> List.map fst
+  in
+  { ledger; current_facts; new_facts; vanished }
 
 type decision =
   | Join_claim of string

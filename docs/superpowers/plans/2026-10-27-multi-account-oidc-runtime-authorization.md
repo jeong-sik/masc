@@ -491,6 +491,44 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - C4-11: token 해석 실패, Actor_hint와 다른 service.
 - 하지 않는 것: Single_user 경로 바꾸기, MCP OAuth 결속(C5), 화면(C6), 경로 등록·HTTP/2 갈래·부팅에서 모드 넘기기(S1), Service principal의 Disable·삭제, legacy 호출자를 Service credential로 옮기는 일(S1 전 개시 증거에서 목록으로 센다).
 
+**미리보기 범위** (localhost 다계정 확인, 2026-11-08)
+
+- 사용자 결정(2026-11-08).
+  - C4-8 뒤에 사람이 브라우저로 다계정 로그인을 해 보는 길을 먼저 연다.
+  - redirect는 loopback 전용 타입으로 연다. 실제 서버의 https 규칙은 그대로 둔다.
+- 하는 일. 사람이 자기 컴퓨터에서 이 순서를 해 본다.
+  1. GitHub으로 로그인한다.
+  2. 세션이 생긴다.
+  3. 서버가 그 사람을 누구로 보는지 확인한다.
+  4. 로그아웃한다.
+- 서버(`masc serve`)는 바꾸지 않는다. 다계정 설치에서 부팅이 멈추는 것도 그대로다(S1). S1이 D1~D4 뒤인 이유는 소유권 검사 없이 Keeper와 Runtime을 서빙하면 안 되기 때문이다. 미리보기는 Keeper, Runtime, MCP, Board 경로를 하나도 열지 않는다.
+- 명령은 `masc auth preview --port N --github-client-id ID`다.
+  - `masc auth invite`처럼 다계정이 활성인 설치에서만 간다(`Authz_activation`의 판정).
+  - BasePath lease를 쥔다. 그래서 같은 base path에서 서버와 함께 돌지 않는다.
+  - 설치 기록이 가리키는 외부 저장소로 구역을 연다.
+  - `127.0.0.1:N`에만 bind한다. 요청 authority는 `http://127.0.0.1:N` 하나만 믿는다(`Server_request_authority.make_trust_policy`).
+  - GitHub client secret은 환경 변수 `MASC_GITHUB_CLIENT_SECRET`에서 읽고 출력하지 않는다. Google 경로는 client가 없어서 404다.
+- loopback client.
+  - `Login_client.loopback ~client_id ~client_secret ~port ~path`가 redirect `http://127.0.0.1:<port><path>`를 직접 만든다. host는 인자로 받지 않는다.
+  - `make`와 `of_environment`는 지금처럼 https만 받는다. S1의 부팅은 `of_environment`만 부른다.
+- 여는 경로.
+  - `Server_login_http.add_routes`의 8개. 로그인 시작·callback, 로그아웃, 세션, allowlist다.
+  - `GET /accounts/invite`. 초대 링크(`Authz_activation.link`)가 여는 페이지다. fragment의 token을 form에 넣어 `POST /auth/github/start`로 보낸다. token은 요청 줄에 실리지 않는다.
+  - `GET /`. 세션을 보여 주고, 로그아웃 버튼이 있다. CSRF token은 `GET /auth/session`에서 읽는다.
+  - `GET /api/v1/auth/whoami`. `Auth_gate.decide`가 `Read_auth`로 판정한다. principal, 역할, binding을 JSON으로 답하거나 401·403으로 답한다. `decide`를 부르는 첫 실제 경로다.
+- 확인한 사실(2026-11-08).
+  - GitHub OAuth App은 loopback redirect `http://127.0.0.1:<port>/path`를 받는다. 등록한 callback URL과 포트가 달라도 된다([GitHub 문서 Loopback redirect urls](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/authorizing-oauth-apps#loopback-redirect-urls)). 문서는 RFC 8252를 따라 `localhost`보다 `127.0.0.1`을 권한다.
+  - Chromium 148(Playwright 1.60 headless)은 `__Host-` 접두사, `Secure`, `HttpOnly`, `SameSite=Strict`가 붙은 쿠키를 http://127.0.0.1과 http://localhost에서 저장했다. 같은 출처 fetch에도 실어 보냈다. Firefox와 WebKit은 실행 파일이 없어 확인하지 못했다.
+  - MDN은 localhost의 `Secure` 예외만 적는다. `__Host-` 접두사와 127.0.0.1에도 같은 예외가 적용되는지는 적지 않는다.
+- 층.
+  - P1 `Login_client.loopback`과 그 시험.
+  - P2 미리보기 페이지와 whoami의 답. `Login_routes`처럼 HTTP 없는 답과 서버 연결을 나눈다.
+  - P3 `masc auth preview` 명령. 사람이 실제 브라우저로 한 확인을 PR 본문에 적는다.
+- 시험.
+  - P1: redirect 문자열, port 범위, `make`가 여전히 http를 거절함.
+  - P2: whoami가 세션이면 principal과 역할을, credential이 없으면 401을, legacy bearer면 401을 답함.
+- 하지 않는 것: Google 미리보기, loopback 밖 bind, `masc serve` 바꾸기, Keeper·Runtime 경로. S1이 로그인 경로를 서버에 달면 이 명령을 지운다.
+
 ### D. 소유권과 실행 게이트
 
 | 층 | 결과 | 설계 | 선행 |

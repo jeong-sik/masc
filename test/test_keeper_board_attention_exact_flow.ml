@@ -7,10 +7,6 @@ module Judgment = Keeper_board_attention_judgment
 module Partition = Keeper_board_attention_partition
 module Worker = Keeper_board_attention_worker
 
-type callback_event =
-  | Dispatch of Exact_flow.attempt_provenance
-  | Advance of Exact_flow.advance_source * Exact_flow.candidate_visit
-
 let with_prompt_registry f =
   Fun.protect
     ~finally:Prompt_registry.clear

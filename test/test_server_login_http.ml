@@ -441,6 +441,14 @@ let what_the_server_reads () =
       400
       (send b t.router ~meth:"POST" ~path:"/auth/github/start" ~headers:[ "Origin", same_origin ] ~body:"return_to=/a,b");
     check
+      "empty sequences"
+      303
+      (send b t.router ~meth:"POST" ~path:"/auth/github/start" ~headers:[ "Origin", same_origin ] ~body:"&return_to=/&&");
+    check
+      "a field with no name"
+      400
+      (send b t.router ~meth:"POST" ~path:"/auth/github/start" ~headers:[ "Origin", same_origin ] ~body:"=");
+    check
       "a body over the bound"
       413
       (send

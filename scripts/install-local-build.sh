@@ -361,7 +361,7 @@ refresh_guest_shim() (
       ;;
   esac
   version=$(MASC_RUNTIME_EVENTS=0 "$build_dir/main_eio.exe" --version 2>/dev/null | tail -n 1) || version=""
-  if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+  if ! grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' <<<"$version"; then
     echo "install-local-build: WARN guest exec shim left as it is: $build_dir/main_eio.exe names no release version (--version said '$version')" >&2
     exit 0
   fi

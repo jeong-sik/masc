@@ -205,8 +205,8 @@ for pair in "${TYPE_SET_PAIRS[@]}"; do
     # Strip "<prefix_word>_" from front (e.g. "turn_idle" → "idle").
     sym_stripped="${ocaml_sym#${prefix_word}_}"
 
-    if echo "${spec_members}" | grep -qx "${sym_full}" \
-       || echo "${spec_members}" | grep -qx "${sym_stripped}"; then
+    if grep -qx "${sym_full}" <<<"${spec_members}" \
+       || grep -qx "${sym_stripped}" <<<"${spec_members}"; then
       if [[ "${VERBOSE}" == "1" ]]; then
         echo "  ✓ ${sym_stripped} (from ${sym_full}) in ${spec_set}"
       fi

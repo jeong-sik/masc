@@ -105,7 +105,7 @@ fi
 
 # Test 4: HTTP/1.1 SSE endpoint (most critical path)
 sse_headers=$(curl -sf -I -m 3 --http1.1 "${MASC_HTTP_BASE_URL}/sse" 2>&1 || true)
-if echo "$sse_headers" | grep -qi "200\|text/event-stream"; then
+if grep -qi "200\|text/event-stream" <<<"$sse_headers"; then
   pass "HTTP/1.1 SSE endpoint accessible"
 else
   skip "HTTP/1.1 SSE endpoint" "may need session"

@@ -21,7 +21,7 @@ TODAY="$(date +%Y-%m-%d)"
 
 # Cross-platform sed -i: macOS uses sed -i '', GNU uses sed -i
 sedi() {
-  if sed --version 2>/dev/null | grep -q GNU; then
+  if grep -q GNU <<<"$(sed --version 2>/dev/null)"; then
     sed -i "$@"
   else
     sed -i '' "$@"

@@ -25,7 +25,7 @@ fi
 
 # Test 2: SSE endpoint sends correct headers
 headers=$(curl -sf -I -m 3 "${MASC_HTTP_BASE_URL}/sse" 2>&1 || true)
-if echo "$headers" | grep -qi "text/event-stream"; then
+if grep -qi "text/event-stream" <<<"$headers"; then
   pass "SSE content-type: text/event-stream"
 else
   # SSE might need a session — try POST init first then check

@@ -39,7 +39,7 @@ wait_for_grpc_health() {
         "${MASC_GRPC_ADDR}" \
         grpc.health.v1.Health/Check 2>&1 || true
     )"
-    if echo "$response" | grep -q "SERVING"; then
+    if grep -q "SERVING" <<<"$response"; then
       printf '%s\n' "$response"
       return 0
     fi
@@ -50,9 +50,9 @@ wait_for_grpc_health() {
 }
 
 health_resp="$(wait_for_grpc_health || true)"
-if echo "$health_resp" | grep -q "SERVING"; then
+if grep -q "SERVING" <<<"$health_resp"; then
   pass "gRPC health: SERVING"
-elif echo "$health_resp" | grep -qi "connect"; then
+elif grep -qi "connect" <<<"$health_resp"; then
   fail "gRPC health" "connection refused (gRPC server not running on ${MASC_GRPC_ADDR})"
   summary
   exit 1
@@ -61,12 +61,12 @@ else
 fi
 
 services="$(grpcurl -plaintext "${MASC_GRPC_ADDR}" list 2>&1 || true)"
-if echo "$services" | grep -q "${MASC_GRPC_SERVICE}"; then
+if grep -q "${MASC_GRPC_SERVICE}" <<<"$services"; then
   pass "gRPC reflection: MascWorkspace listed"
 else
   fail "gRPC reflection" "MascWorkspace missing from reflection output"
 fi
-if echo "$services" | grep -q "grpc.health.v1.Health"; then
+if grep -q "grpc.health.v1.Health" <<<"$services"; then
   pass "gRPC reflection: Health listed"
 else
   fail "gRPC reflection" "grpc.health.v1.Health missing from reflection output"
@@ -80,7 +80,7 @@ subscribe_resp="$(
     "${MASC_GRPC_ADDR}" \
     "${MASC_GRPC_SERVICE}/Subscribe" 2>&1 || true
 )"
-if echo "$subscribe_resp" | grep -q "subscription_started"; then
+if grep -q "subscription_started" <<<"$subscribe_resp"; then
   pass "Subscribe: received subscription_started event"
 else
   fail "Subscribe" "no subscription_started event: ${subscribe_resp:0:200}"

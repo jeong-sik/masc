@@ -111,7 +111,7 @@ build_one() {
   # Non-PIE static reports exactly "statically linked". A dynamic binary
   # would resurrect the glibc-version dependency this script exists to
   # remove, and static-pie is rejected on purpose (see the link flags above).
-  if ! file "$out" | grep -q "statically linked"; then
+  if ! grep -q "statically linked" <<<"$(file "$out")"; then
     echo "[build-shim] $out is not statically linked:" >&2
     file "$out" >&2
     exit 1

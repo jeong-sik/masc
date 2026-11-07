@@ -61,7 +61,7 @@ expect_ok_or_guard() {
   if response_transport_ok "$payload"; then
     local text
     text="$(response_text_or_error "$payload")"
-    if [[ -n "$text" ]] && printf '%s' "$text" | grep -Eiq "$guard_regex"; then
+    if [[ -n "$text" ]] && grep -Eiq "$guard_regex" <<<"$text"; then
       echo "  PASS: ${label} (guard)"
       return 0
     fi

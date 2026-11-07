@@ -23,7 +23,7 @@ BASE_URL="${MCP_URL%/mcp}"
 GRAPHQL_URL="${BASE_URL}/graphql"
 QUERY='{"query":"{ __typename }"}'
 
-if ! curl --version | grep -qi 'HTTP2'; then
+if ! grep -qi 'HTTP2' <<<"$(curl --version)"; then
   echo "FAIL: curl lacks HTTP/2 support; this contract cannot prove transport parity" >&2
   exit 1
 fi

@@ -27,7 +27,7 @@ _mcp_extract() { # raw request_id -> the response frame with that id
   # So select the frame whose id matches the request instead.
   local raw="$1" want_id="$2"
   local frames
-  if printf '%s' "$raw" | grep -q '^data:'; then
+  if grep -q '^data:' <<<"$raw"; then
     frames="$(printf '%s' "$raw" | grep '^data:' | sed 's/^data: //')"
   else
     frames="$raw"

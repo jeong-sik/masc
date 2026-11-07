@@ -243,8 +243,9 @@ let prepare_call_dir call_dir ~prompt =
       (fun channel ->
         Out_channel.output_string channel prompt;
         (* [with_open_gen] closes with [close_out_noerr], which would swallow
-           a failed final flush and leave Vibe a cut-off prompt. *)
-        Out_channel.flush channel)
+           a failed final flush or close and leave Vibe a cut-off prompt.
+           Closing here raises [Sys_error]; the later close does nothing. *)
+        Out_channel.close channel)
   with
   | () -> Ok (output_dir, prompt_file)
   | exception Sys_error detail -> Error (Call_dir_failed detail)

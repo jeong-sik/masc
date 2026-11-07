@@ -25,7 +25,8 @@ val error_to_string : error -> string
 
 (** [export.json] [outcome]. The arms are the [RunOutcome] taxonomy of
     Vibe 3.1.0 ([vibe/app_server/run_export.py]). The [vibe -p] process is
-    the Rust [vibe-rs]; its export uses the same twelve strings. Observed in the retained runs: [finished],
+    the Rust [vibe-rs]; this module assumes its export uses the same twelve
+    strings. Observed in the retained runs: [finished],
     [usage_error], [infrastructure_failure], [deadline], [token_limit],
     [turn_limit]; the others are read from that source. *)
 type outcome =

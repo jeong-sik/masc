@@ -77,9 +77,10 @@ type outcome =
   | Aborted
   | Unrecognized_outcome of string
 
-(* The [vibe -p] process is the Rust [vibe-rs], which writes export.json
-   with the same twelve outcome strings in the same order as Vibe's Python
-   [RunOutcome]. The exit codes are read from that Python mirror,
+(* The [vibe -p] process is the Rust [vibe-rs], which writes export.json.
+   Its binary holds the twelve strings of Vibe's Python [RunOutcome] in the
+   same order; six were seen in retained runs, the others are assumed to
+   mean the same. The exit codes are read from that Python mirror,
    [RunOutcome.exit_code] in vibe/app_server/run_export.py, 3.1.0; the Rust
    binary's own table is compiled in and was not read. *)
 let exit_code_of_outcome = function

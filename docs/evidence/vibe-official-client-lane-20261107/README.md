@@ -108,6 +108,24 @@ journal_dir, started_at, ended_at, limits, exit_code.
   넣지 않았다.
   - Vibe 소스 주석은 이 budget 을 `/v1/billing/budget` 의 `vibe_budget`, 곧
     "monthly Vibe Code allowance" 의 사용량이라 적는다.
+- m13(16:02Z, 손으로 돌림): `printf 'Reply with exactly: ok' | env -u MISTRAL_API_KEY
+  vibe --workdir <work> --output-dir <out> --trust --agent ask --max-turns 3 --time-limit
+  120 --output json -p`(값 없는 `-p`). exit 0 `finished`. user 메시지는 stdin 의 글
+  그대로였고 답은 `ok` 였다. `vibe --help` 는 `-p, --prompt [<PROMPT>]` 와
+  `--prompt-file <PATH>` 를 적는다.
+- m14(17:18Z, `repro/run-m14.py`, `fixtures/m14/`): `vibe --workdir <work>
+  --output-dir <out> --agent ask --output json --prompt-file <run>/prompt.txt`. `-p` 도,
+  `--max-turns` 도, `--time-limit` 도 주지 않았다. stdin 은 닫혀 있었다. 자식 env 는
+  `lib/runtime/runtime_vibe_cli.ml` 의 허용 목록에 있는 이름뿐이었다(이 셸에 있던 것은
+  `COLORTERM`, `HOME`, `LANG`, `LC_ALL`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `TMPDIR`,
+  `USER` 열 개). 7.1초에 exit 0 `finished`, user 메시지는 파일의 글 그대로였고 답은
+  `PINEAPPLE` 이었다. stderr 는 keychain 에서 키를 읽는다는 한 줄이었다. `limits` 는
+  네 칸 모두 `null` 이었다. 한도를 안 주면 Vibe 쪽 기본 한도도 없다.
+  - 같은 꼴에 없는 파일을 주면(`--prompt-file <run>/missing.txt`) 모델을 부르지 않고
+    exit 1 `usage_error` 로 끝났다. `export.json` 은 썼고 stdout 은 비었다.
+  - masc 의 Vibe 실행은 이 `--prompt-file` 형태를 쓴다(`lib/runtime/runtime_vibe_cli.ml`).
+    stdin 으로 보내면 Vibe 가 읽기 전에 끝날 때 큰 prompt 가 EPIPE 를 만들고 Vibe 의
+    exit code 를 가린다(#49834 리뷰).
 
 ## 확인하지 않은 것
 

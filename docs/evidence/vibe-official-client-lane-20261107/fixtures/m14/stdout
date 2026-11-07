@@ -1,0 +1,62 @@
+[
+  {
+    "id": "user-turn-9183e6782e86c50af63d0c2a8a3894f6-1",
+    "sessionId": "44c0e3f4-a016-552b-fe10-ad07ad7fb689",
+    "turnId": "turn-9183e6782e86c50af63d0c2a8a3894f6",
+    "inputEntryId": null,
+    "createdAt": 1794071928899,
+    "updatedAt": 1794071928899,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "message",
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "Reply with exactly the word PINEAPPLE and nothing else."
+      }
+    ],
+    "source": "turn_start",
+    "userDisplayContent": null,
+    "outcome": null
+  },
+  {
+    "id": "reasoning-f2ac65c4-97f3-50c8-8e29-a21616830051-0",
+    "sessionId": "44c0e3f4-a016-552b-fe10-ad07ad7fb689",
+    "turnId": "turn-9183e6782e86c50af63d0c2a8a3894f6",
+    "inputEntryId": "user-turn-9183e6782e86c50af63d0c2a8a3894f6-1",
+    "createdAt": 1794071930307,
+    "updatedAt": 1794071930307,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "reasoning",
+    "text": "The user wants exactly the word PINEAPPLE and nothing else.",
+    "summary": [],
+    "outcome": {
+      "type": "committed"
+    }
+  },
+  {
+    "id": "assistant-f2ac65c4-97f3-50c8-8e29-a21616830051",
+    "sessionId": "44c0e3f4-a016-552b-fe10-ad07ad7fb689",
+    "turnId": "turn-9183e6782e86c50af63d0c2a8a3894f6",
+    "inputEntryId": "user-turn-9183e6782e86c50af63d0c2a8a3894f6-1",
+    "createdAt": 1794071930307,
+    "updatedAt": 1794071930307,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "PINEAPPLE"
+      }
+    ],
+    "source": "harness",
+    "userDisplayContent": null,
+    "outcome": {
+      "type": "committed"
+    }
+  }
+]

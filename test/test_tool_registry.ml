@@ -126,7 +126,7 @@ let () =
             check int "external_mcp_count" 1 (s.external_mcp_count);
             check int "agent_internal_count" 2 (s.agent_internal_count))
         ] )
-    ; ( "get_top_n"
+    ; ( "get_stats"
       , [ test_case "retained observations do not change" `Quick (fun () ->
             Tool_registry.reset ();
             Tool_registry.record_call ~tool_name:"snapshot_tool"
@@ -148,40 +148,6 @@ let () =
               (current.external_mcp_count + current.agent_internal_count);
             Tool_registry.reset ();
             check int "reset leaves retained observations intact" 2 current.call_count)
-        ; test_case "returns top N by call count" `Quick (fun () ->
-            Tool_registry.reset ();
-            for _ = 1 to 3 do
-              Tool_registry.record_call
-                ~tool_name:"tool_a"
-                ~disposition:(Tool_result.Completed ())
-                ~duration_ms:1
-                ()
-            done;
-            Tool_registry.record_call ~tool_name:"tool_b" ~disposition:(Tool_result.Completed ()) ~duration_ms:1 ();
-            for _ = 1 to 5 do
-              Tool_registry.record_call
-                ~tool_name:"tool_c"
-                ~disposition:(Tool_result.Completed ())
-                ~duration_ms:1
-                ()
-            done;
-            let top2 = Tool_registry.get_top_n 2 in
-            check int "length" 2 (List.length top2);
-            let names = List.map fst top2 in
-            check (list string) "order" [ "tool_c"; "tool_a" ] names)
-        ] )
-    ; ( "get_never_called"
-      , [ test_case "identifies uncalled tools" `Quick (fun () ->
-            Tool_registry.reset ();
-            Tool_registry.record_call
-              ~tool_name:"called_tool"
-              ~disposition:(Tool_result.Completed ())
-              ~duration_ms:1
-              ();
-            let never =
-              Tool_registry.get_never_called [ "called_tool"; "uncalled_a"; "uncalled_b" ]
-            in
-            check (list string) "never called" [ "uncalled_a"; "uncalled_b" ] never)
         ] )
     ; ( "totals"
       , [ test_case "total_calls sums all" `Quick (fun () ->
@@ -190,12 +156,6 @@ let () =
             Tool_registry.record_call ~tool_name:"b" ~disposition:(Tool_result.Completed ()) ~duration_ms:1 ();
             Tool_registry.record_call ~tool_name:"a" ~disposition:(Tool_result.Failed ()) ~duration_ms:1 ();
             check int "total" 3 (Tool_registry.total_calls ()))
-        ; test_case "distinct_tools_called" `Quick (fun () ->
-            Tool_registry.reset ();
-            Tool_registry.record_call ~tool_name:"x" ~disposition:(Tool_result.Completed ()) ~duration_ms:1 ();
-            Tool_registry.record_call ~tool_name:"y" ~disposition:(Tool_result.Completed ()) ~duration_ms:1 ();
-            Tool_registry.record_call ~tool_name:"x" ~disposition:(Tool_result.Completed ()) ~duration_ms:1 ();
-            check int "distinct" 2 (Tool_registry.distinct_tools_called ()))
         ] )
     ; ( "reset"
       , [ test_case "clears all data" `Quick (fun () ->

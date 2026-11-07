@@ -46,7 +46,7 @@ type any_clock = Clock : _ Eio.Time.clock -> any_clock
 type t = {
   clock      : any_clock;
   mutable rhythm : rhythm;
-  mutable consumers : (module Consumer) list;
+  consumers : (module Consumer) list;
   (* nudge signaling — Stream is cancellation-safe under Fiber.first *)
   nudge_stream : string Eio.Stream.t;
   nudge_mutex  : Eio.Mutex.t;           (** protects is_empty + add atomically *)
@@ -55,21 +55,11 @@ type t = {
   shutdown_r   : unit Eio.Promise.u;
   (* engine state *)
   mutable seq         : int;
-  mutable last_beat_v : beat option;
   (* Written by the loop and by the daemon's release handler, read by
      [nudge] from arbitrary fibers. [Atomic] states that crossing and keeps
      the flag correct if the engine ever runs off the main domain. *)
   alive       : bool Atomic.t;
   mutable total_nudges: int;
-}
-
-(* ── Defaults ────────────────────────────────────────────────── *)
-
-let default_rhythm = {
-  base_s = 60.0;
-  min_s  = 30.0;
-  max_s  = 300.0;
-  quiet  = (1, 6);
 }
 
 (* ── Helpers ─────────────────────────────────────────────────── *)
@@ -163,7 +153,6 @@ let tick t trigger =
     ts      = now t.clock;
     trigger;
   } in
-  t.last_beat_v <- Some beat;
   (match trigger with Nudge _ -> t.total_nudges <- t.total_nudges + 1 | Rhythm | Demand -> ());
   Log.Pulse.debug "beat #%d trigger=%s" beat.seq (trigger_to_string trigger);
   dispatch_consumers t beat;
@@ -224,7 +213,6 @@ let create ~clock ~rhythm ~consumers =
     shutdown_p;
     shutdown_r;
     seq         = 0;
-    last_beat_v = None;
     alive       = Atomic.make false;
     total_nudges= 0;
   }
@@ -257,24 +245,13 @@ let set_rhythm t rhythm =
   Log.Pulse.info "rhythm updated: base=%.1fs min=%.1fs max=%.1fs"
     rhythm.base_s rhythm.min_s rhythm.max_s
 
-let get_rhythm t = t.rhythm
-
 let stats t =
   {
     total_beats  = t.seq;
     total_nudges = t.total_nudges;
   }
 
-let last_beat t = t.last_beat_v
 let is_alive t  = Atomic.get t.alive
-
-let add_consumer t consumer =
-  t.consumers <- t.consumers @ [consumer]
-
-let remove_consumer t name =
-  let before = List.length t.consumers in
-  t.consumers <- List.filter (fun (module C : Consumer) -> C.name <> name) t.consumers;
-  List.length t.consumers < before
 
 (* ── Testing helpers ───────────────────────────────────────────── *)
 

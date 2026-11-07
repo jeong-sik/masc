@@ -89,32 +89,13 @@ val shutdown : t -> unit
     Non-yielding — safe to call from any fiber. *)
 val set_rhythm : t -> rhythm -> unit
 
-(** Current rhythm configuration. *)
-val get_rhythm : t -> rhythm
-
 (** {1 Queries} *)
 
 (** Current runtime statistics. *)
 val stats : t -> stats
 
-(** The most recent beat, or [None] if the engine hasn't started. *)
-val last_beat : t -> beat option
-
 (** Is the engine currently running? *)
 val is_alive : t -> bool
-
-(** {1 Dynamic Consumer Management} *)
-
-(** Add a consumer while the engine is running. Takes effect on the next beat. *)
-val add_consumer : t -> (module Consumer) -> unit
-
-(** Remove a consumer by name. Returns [true] if found and removed. *)
-val remove_consumer : t -> string -> bool
-
-(** {1 Defaults} *)
-
-(** Default rhythm: 60s base, 30s min, 300s max, quiet 01:00-06:00 KST. *)
-val default_rhythm : rhythm
 
 (** {2 Testing helpers}
 

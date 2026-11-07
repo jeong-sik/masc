@@ -149,6 +149,57 @@ let test_a_committed_save_rereads_its_file () =
      | Code.Reload_saved_file path -> Some path
      | Code.No_answer_followup -> None)
 
+(* A file with a NUL among its first 8000 bytes is binary, the rule git
+   applies. It opens with no rows and no text, so copying and editing it are
+   refused instead of drawing its bytes as lines of escapes or handing them to
+   an editor; the next text file opens as before. *)
+let test_a_binary_file_has_no_text_to_edit_or_copy () =
+  let state = Types.create_state ~workspace:"" ~port:0 () in
+  confirm_workspace state;
+  let open_file path content =
+    let reading, read =
+      match Fetched.start ~equal:String.equal state.code_file ~key:path with
+      | Fetched.Started (next, request) -> next, request
+      | Fetched.Already_loading -> Alcotest.fail "a fresh file reported a read in flight"
+    in
+    state.code_file <- reading;
+    let source = { Masc.Tui_decode.wfs_content = content; wfs_revision = String.make 64 'a' } in
+    ignore (Code.apply state (Code.Code_file_loaded (Types.Open_code_file, read, Ok source)));
+    state.code_focus_file <- Types.Right_pane
+  in
+  let document () =
+    match Fetched.current state.code_file with
+    | Some (_, Fetched.Ready document) -> document
+    | Some (_, (Fetched.Absent | Fetched.Loading | Fetched.Stale _ | Fetched.Failed _)) | None ->
+      Alcotest.fail "the opened file is not ready"
+  in
+  let png = "\x89PNG\r\n\x1a\n\000\000\000\rIHDR" in
+  open_file "docs/a.png" png;
+  Alcotest.(check bool) "a binary file keeps its size and no text" true
+    ((document ()).Types.cfd_body = Types.Code_binary { bytes = String.length png });
+  Alcotest.(check int) "and has no rows to draw or search" 0
+    (Array.length (document ()).Types.cfd_rows);
+  Alcotest.(check bool) "copying it is refused" true
+    (Result.is_error (Code.copy_file_source state));
+  Alcotest.(check bool) "editing it is refused" true
+    (Result.is_error (Code.prepare_draft state));
+  let nul_at index = String.init 9000 (fun i -> if i = index then '\000' else 'a') in
+  open_file "src/early.dat" (nul_at 7999);
+  Alcotest.(check bool) "a NUL as the 8000th byte makes it binary" true
+    (match (document ()).Types.cfd_body with
+     | Types.Code_binary _ -> true
+     | Types.Code_text _ -> false);
+  open_file "src/late.dat" (nul_at 8000);
+  Alcotest.(check bool) "a NUL as the 8001st byte leaves it text" true
+    (match (document ()).Types.cfd_body with
+     | Types.Code_text _ -> true
+     | Types.Code_binary _ -> false);
+  open_file "src/main.ml" "let x = 1\n";
+  Alcotest.(check bool) "a text file after a binary one copies" true
+    (Code.copy_file_source state = Ok ("src/main.ml", "let x = 1\n"));
+  Alcotest.(check bool) "and is editable" true
+    (Result.is_ok (Code.prepare_draft state))
+
 let () =
   Alcotest.run "tui code msg"
     [ ( "classifiers"
@@ -160,4 +211,6 @@ let () =
       , [ Alcotest.test_case "an unasked Code answer asks the loop for nothing" `Quick
             test_an_unasked_answer_asks_for_nothing
         ; Alcotest.test_case "a committed save asks to read its file again" `Quick
-            test_a_committed_save_rereads_its_file ] ) ]
+            test_a_committed_save_rereads_its_file
+        ; Alcotest.test_case "a binary file has no text to edit or copy" `Quick
+            test_a_binary_file_has_no_text_to_edit_or_copy ] ) ]

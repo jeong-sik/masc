@@ -216,6 +216,19 @@ let expand_row_tabs segments =
            (column, (text, kind)))
          0 segments)
 
+(* The test git applies to tell a blob from text: a NUL byte among the first
+   8000 bytes. A text file almost never holds one, and image, archive and
+   compiled formats put one in their headers, so the probe stops there rather
+   than scanning a megabyte. *)
+let binary_probe_bytes = 8000
+
+let is_binary content =
+  let limit = min binary_probe_bytes (String.length content) in
+  let rec has_nul index =
+    index < limit && (Char.equal content.[index] '\000' || has_nul (index + 1))
+  in
+  has_nul 0
+
 let apply_open_file ~preserve_view (state : state) request result = (
   let path = Masc_tui_fetched.request_key request in
   (* An answer for a file the operator has moved past describes bytes
@@ -235,24 +248,32 @@ let apply_open_file ~preserve_view (state : state) request result = (
          must preserve their owners and any answers that arrived first. *)
       (* Lex once at load: comment and string state crosses rows, so a
          window could not answer. Past the budget the file draws plain
-         rather than slowly. *)
-      let language =
-        if String.length content > 500_000 then None
-        else Masc_tui_code_lexer.language_of_path path
-      in
-      let rows =
-        Masc_tui_code_lexer.rows_of_source ~language content
-        |> List.map expand_row_tabs
-        |> List.map
-             (List.map (fun (text, kind) ->
-                  (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
+         rather than slowly. A binary file has no rows to lex: its bytes
+         would draw as hundreds of lines of escapes. *)
+      let body, rows =
+        if is_binary content
+        then (Code_binary { bytes = String.length content }, [])
+        else begin
+          let language =
+            if String.length content > 500_000 then None
+            else Masc_tui_code_lexer.language_of_path path
+          in
+          let rows =
+            Masc_tui_code_lexer.rows_of_source ~language content
+            |> List.map expand_row_tabs
+            |> List.map
+                 (List.map (fun (text, kind) ->
+                      (Masc.Tui_terminal_text.sanitize_terminal_text text, kind)))
+          in
+          Code_text content, rows
+        end
       in
       (* [rows] stays a list for the memo scan and the width fold just
          below, both of which read it once front to back. The pane keeps
          the array. *)
       state.code_file <-
         Masc_tui_fetched.complete ~equal:String.equal state.code_file request
-          (Ok { cfd_source = content; cfd_revision = source.wfs_revision; cfd_rows = Array.of_list rows });
+          (Ok { cfd_body = body; cfd_revision = source.wfs_revision; cfd_rows = Array.of_list rows });
       Option.iter (fun draft ->
         let review_owned = match state.code_draft_review with
           | Some (owner, reading) -> reading == request
@@ -345,7 +366,9 @@ let copy_file_source (state : state) =
           || state.code_draft_open || Option.is_some (current_code_hover state) then
     Error "Focus file content to copy its source"
   else match Masc_tui_fetched.current state.code_file with
-    | Some (path, Masc_tui_fetched.Ready document) -> Ok (path, document.cfd_source)
+    | Some (path, Masc_tui_fetched.Ready { cfd_body = Code_text source; _ }) -> Ok (path, source)
+    | Some (_, Masc_tui_fetched.Ready { cfd_body = Code_binary _; _ }) ->
+        Error "A binary file has no text to copy"
     | None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
                      | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _)) ->
         Error "File source is not currently readable"
@@ -729,10 +752,13 @@ let prepare_draft state =
         | Draft.Saving _ -> Error "Wait for this draft's save before editing"
         | Draft.Editable | Draft.Rejected _ | Draft.Needs_review _ -> Ok draft)
     | None -> match code_draft_address state, Masc_tui_fetched.current state.code_file with
-      | Some address, Some (_, Masc_tui_fetched.Ready source) ->
-        Ok (Draft.create ~address ~source:{text=source.cfd_source; revision=source.cfd_revision})
+      | Some address, Some (_, Masc_tui_fetched.Ready { cfd_body = Code_text text; cfd_revision; _ }) ->
+        Ok (Draft.create ~address ~source:{text; revision=cfd_revision})
+      | (None | Some _), Some (_, Masc_tui_fetched.Ready { cfd_body = Code_binary _; _ }) ->
+        Error "A binary file cannot be edited as text"
       | (None | Some _), (None | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
-          | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _ | Masc_tui_fetched.Ready _))) ->
+          | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _
+          | Masc_tui_fetched.Ready { cfd_body = Code_text _; _ }))) ->
         Error "The current file has no editable source revision"
 
 let edit_draft state draft text =

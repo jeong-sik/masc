@@ -6298,8 +6298,16 @@ type code_file_load_intent =
   | Refresh_code_file
   | Navigate_code_file of code_navigation_owner
 
+(* What the pane holds for an open file. Text carries the bytes the operator
+   copies and edits. A binary file carries its size and nothing else: there
+   is no text to copy or to write back, so the type has no place for any,
+   and [cfd_rows] of such a document is empty. *)
+type code_file_body =
+  | Code_text of string
+  | Code_binary of { bytes : int }
+
 type code_file_document = {
-  cfd_source : string;
+  cfd_body : code_file_body;
   cfd_revision : string;
   cfd_rows : (string * string) list array;
 }

@@ -1,0 +1,14 @@
+Public_read registrations: 130; open under strict auth: 13
+  get        /api/v1/gate/health              Public_read                              server_routes_http_routes_channel_gate.ml:863  open
+  get        /api/v1/gate/status              Public_read                              server_routes_http_routes_channel_gate.ml:867  open
+  get        /api/v1/gate/connectors          Public_read                              server_routes_http_routes_channel_gate.ml:871  open
+  get        /api/v1/gate/connector/status    Public_read                              server_routes_http_routes_channel_gate.ml:879  open
+  get        /api/v1/gate/events              Public_read                              server_routes_http_routes_channel_gate.ml:883  open
+  get        /favicon.ico                     Public_read                              server_routes_http_routes_frontend.ml:142  open
+  get        /favicon.svg                     Public_read                              server_routes_http_routes_frontend.ml:145  open
+  get        /dashboard                       Public_read_on_canonical_host { port }   server_routes_http_routes_frontend.ml:162  open
+  get        /dashboard/                      Public_read_on_canonical_host { port }   server_routes_http_routes_frontend.ml:166  open
+  prefix_get /dashboard/                      Public_read_on_canonical_host { port }   server_routes_http_routes_frontend.ml:170  open under the whole prefix
+  get        /api/v1/msx/carts                Public_read                              server_routes_http_routes_msx.ml:536  open
+  prefix_get /api/v1/published-artifacts/     Public_read                              server_routes_http_routes_published_artifacts.ml:231  open for a well-formed artifact id
+  prefix_get /api/v1/voice/audio/             Public_read                              server_routes_http_routes_voice.ml:235  open under the whole prefix

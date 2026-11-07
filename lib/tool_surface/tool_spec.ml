@@ -16,7 +16,6 @@ type t = {
   mcp_context_required : bool;
   is_idempotent : bool;
   visibility : Tool_catalog.visibility;
-  implementation_status : Tool_catalog.implementation_status;
   reason : string option;
   allow_direct_call_when_hidden : bool;
   title : string option;
@@ -36,14 +35,13 @@ let create
     ?(mcp_context_required = false)
     ?(is_idempotent = false)
     ?(visibility = Tool_catalog.Default)
-    ?(implementation_status = Tool_catalog.Real)
     ?reason
     ?(allow_direct_call_when_hidden = false)
     ?title
     () =
   { name; description; module_tag; input_schema; handler_binding;
     is_read_only; mcp_context_required; is_idempotent;
-    visibility; implementation_status;
+    visibility;
     reason;
     allow_direct_call_when_hidden; title }
 
@@ -75,7 +73,6 @@ let register (spec : t) =
        Tool_catalog.register_runtime_metadata spec.name
          { authority with
            visibility = spec.visibility;
-           implementation_status = spec.implementation_status;
            reason = spec.reason;
            allow_direct_call_when_hidden = spec.allow_direct_call_when_hidden;
            readonly = Some spec.is_read_only;

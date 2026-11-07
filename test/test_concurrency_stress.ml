@@ -1,9 +1,7 @@
 (** Concurrency Stress Tests for MASC
 
-    Tests concurrent access patterns with 20+ agents:
-    1. Session lock contention
-    2. Cancellation token race conditions
-    3. Zombie detection under load
+    Tests concurrent access to the session registry with 20+ agents:
+    lock contention and register/unregister races.
 
     Phase 4.1 of MCP Unify project.
 *)
@@ -78,15 +76,6 @@ let test_session_concurrent_register_unregister () =
   let total = Atomic.get success_count in
   check bool "completed iterations" true (total > 0);
   Printf.printf "Completed %d register/unregister cycles\n%!" total
-
-(** {1 Cancellation Token Stress Tests} *)
-
-(* [test_cancellation_token_race] / [test_cancellation_cleanup_under_load]
-   removed 2026-05-05 — exercised the [Cancellation.TokenStore] surface
-   that was archived. See docs/audit-responses/2026-05-05-dashboard-heuristic.md §5.1. *)
-
-(** {1 Zombie Detection Under Load} *)
-
 
 (** {1 Test Suite} *)
 

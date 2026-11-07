@@ -137,8 +137,6 @@ let add_routes ?sw ?clock ~port router =
            (Runtime.agent_card_json ~request_authority req)
            reqd)
   |> Server_route.ws_get "/ws" (websocket_handler ?sw ?clock)
-  (* RFC-0217 S4-2 — Otel_metric_store scrape endpoint removed; metrics now
-     export via OTLP push (Otel_metrics observable). *)
   |> Server_route.get (Server_route.Self_authenticated Route_access.Mcp_transport) "/ag-ui/events" handle_ag_ui_events
   |> Server_route.get (Server_route.Self_authenticated Route_access.Mcp_transport) "/events/presence" handle_presence_events
   |> Server_route.get Server_route.Public_read "/favicon.ico" (fun _state req reqd ->

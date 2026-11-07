@@ -1,5 +1,5 @@
 (** Tool_workspace - Workspace management operations
-    Handles: status, init, check
+    Handles: status, check, heartbeat and the goal tools
     Note: stateful workspace helpers remain in server dispatch modules
 *)
 
@@ -7,9 +7,6 @@ module Planning_eio = Task.Planning_eio
 
 open Workspace_types
 open Tool_args
-
-(* [type tool_result = Workspace_types.tool_result] DELETED in RFC-0062 Phase 4d-2.
-   All handlers now return Tool_result.result directly. *)
 
 type context = Workspace_types.context =
   { config : Workspace.config

@@ -707,8 +707,6 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
           in
           h2_respond_json_value h2_reqd json ~extra_headers:cors
 
-      (* RFC-0217 S4-2 — Otel_metric_store scrape endpoint removed; metrics
-         now export via OTLP push (Otel_metrics observable). *)
       | `GET, "/" ->
           h2_gate_unit h2_reqd @@ fun () ->
           h2_respond_text h2_reqd "MASC MCP Server (HTTP/2)" ~extra_headers:cors

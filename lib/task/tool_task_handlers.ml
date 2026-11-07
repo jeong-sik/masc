@@ -6,8 +6,6 @@ module Workspace = Workspace_core
     done, release, task_history, tasks, transition, update_priority, archive_view
 *)
 
-(* Yojson.Safe.Util removed — use Json_util SSOT helpers instead *)
-
 let push_event_to_sessions_fn
   : (Yojson.Safe.t -> unit) Atomic.t
   = Atomic.make (fun _ -> ())

@@ -109,10 +109,6 @@ val read_file_safe : string -> (string, string) result
 val read_json_file_safe : string -> (Yojson.Safe.t, string) result
 (** Read JSON file safely. *)
 
-val read_json_file_logged : label:string -> string -> Yojson.Safe.t option
-(** Read JSON file safely, logging errors instead of silently discarding them.
-    Returns [Some json] on success, [None] on failure with a warning log. *)
-
 (* The reporters below take [Read_drop_reason.t], a closed variant, so a call
    site cannot pass a misspelled reason word. *)
 
@@ -145,9 +141,6 @@ val read_json_eio : string -> Yojson.Safe.t
 
 val list_dir_safe : string -> (string list, string) result
 (** List files in directory safely. *)
-
-val remove_file_logged : ?context:string -> string -> unit
-(** Remove file with logging on failure (for cleanup operations). *)
 
 (** {1 Numeric Parsing} *)
 

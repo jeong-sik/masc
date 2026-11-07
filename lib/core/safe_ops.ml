@@ -419,16 +419,6 @@ let read_json_file_safe path : (Yojson.Safe.t, string) result =
   | Error e -> Error e
   | Ok content -> parse_json_off_fiber ~context:path content
 
-(** Read JSON file safely, logging errors instead of silently discarding them.
-    Returns [Some json] on success, [None] on failure with a warning log.
-    Use this as a drop-in replacement for [read_json_file_safe |> Error _ -> None]. *)
-let read_json_file_logged ~label path : Yojson.Safe.t option =
-  match read_json_file_safe path with
-  | Ok json -> Some json
-  | Error msg ->
-    Log.Misc.warn "[%s] failed to read JSON from %s: %s" label path msg;
-    None
-
 (* The last line of an append-only file was still being written when a tail
    reader reached it. Kept apart from [entry_load_error] because it is not a
    loss: the reader falls through to the previous complete line and the next
@@ -473,14 +463,6 @@ let list_dir_safe path : (string list, string) result =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
       Error (Printf.sprintf "Failed to list %s: %s" path (Printexc.to_string e))
-
-(** Remove file with logging on failure (for cleanup operations) *)
-let remove_file_logged ?(context = "cleanup") path =
-  try Sys.remove path
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | e ->
-    Log.Misc.error "[%s] Failed to remove %s: %s" context path (Printexc.to_string e)
 
 (** Close channel with logging on failure *)
 (** Get environment variable with logging when invalid *)

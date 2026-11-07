@@ -324,25 +324,6 @@ let test_read_file_safe_valid () =
   | Ok content -> check string "reads content" "hello world" content
   | Error e -> fail (Printf.sprintf "unexpected error: %s" e)
 
-(* remove_file_logged *)
-let test_remove_file_logged_existing () =
-  let open Safe_ops in
-  let path = Filename.temp_file "test_safe_ops_" ".tmp" in
-  remove_file_logged path;
-  check bool "file removed" false (Sys.file_exists path)
-
-let test_remove_file_logged_nonexistent () =
-  let open Safe_ops in
-  (* Should not raise, just log *)
-  remove_file_logged "/nonexistent/file.tmp";
-  ()
-
-let test_remove_file_logged_custom_context () =
-  let open Safe_ops in
-  remove_file_logged ~context:"custom" "/nonexistent/file.tmp";
-  ()
-
-
 (* get_env_int_logged *)
 let test_get_env_int_logged_missing () =
   let open Safe_ops in
@@ -625,11 +606,6 @@ let () =
       test_case "nonexistent" `Quick test_list_dir_safe_nonexistent;
       test_case "not a dir" `Quick test_list_dir_safe_not_a_dir;
       test_case "valid dir" `Quick test_list_dir_safe_valid;
-    ];
-    "remove_file_logged", [
-      test_case "existing" `Quick test_remove_file_logged_existing;
-      test_case "nonexistent" `Quick test_remove_file_logged_nonexistent;
-      test_case "custom context" `Quick test_remove_file_logged_custom_context;
     ];
     "try_with_log", [
       test_case "success" `Quick test_try_with_log_success;

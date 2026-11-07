@@ -57,18 +57,6 @@ module Sse_connect_guard = struct
   end
 end
 
-(** {1 Cache Configuration} *)
-
-module Cache = struct
-  (** Maximum size of a single cache entry value in bytes (default 100KB) *)
-  let max_entry_size =
-    get_int ~default:102400 "MASC_CACHE_MAX_ENTRY_SIZE"
-
-  (** Maximum total number of cache entries (default 1000) *)
-  let max_entries =
-    get_int ~default:1000 "MASC_CACHE_MAX_ENTRIES"
-end
-
 (** {1 Executor / Domain Pool Configuration} *)
 
 module Executor = struct

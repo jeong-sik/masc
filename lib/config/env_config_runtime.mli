@@ -46,13 +46,6 @@ module Sse_connect_guard : sig
   end
 end
 
-(** {1 Cache} *)
-
-module Cache : sig
-  val max_entry_size : int
-  val max_entries : int
-end
-
 (** {1 Executor / Domain Pool} *)
 
 module Executor : sig

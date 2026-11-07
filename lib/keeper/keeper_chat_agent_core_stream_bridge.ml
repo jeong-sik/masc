@@ -27,11 +27,6 @@ type block_state =
          chunks and is persisted to {!Keeper_chat_media_store} at the block stop,
          emitting a reader-facing URL instead of a byte count. *)
 
-type stream_phase =
-  | Accepting_content
-  | Stop_reason_seen of Agent_core.Types.stop_reason
-  | Message_stopped
-
 type tool_quarantine =
   { occurrence : Keeper_chat_events.tool_stream_occurrence
   ; kind : Keeper_chat_events.stream_protocol_error_kind
@@ -59,7 +54,7 @@ type state =
   ; blocks_by_index : (int * block_state) list
   ; model_content : (int * content_channel * bool) list
   ; current_stream_scope : int option
-  ; stream_phase : stream_phase
+  ; stream_phase : Keeper_stream_phase.t
   ; scope_disposition : scope_disposition
   ; current_message_has_text : bool
   ; last_completed_message_has_text : bool
@@ -93,7 +88,7 @@ let empty_state ?(generation=0) () =
   ; blocks_by_index = []
   ; model_content = []
   ; current_stream_scope = None
-  ; stream_phase = Accepting_content
+  ; stream_phase = Keeper_stream_phase.Accepting_content
   ; scope_disposition = Scope_live
   ; current_message_has_text = false
   ; last_completed_message_has_text = false
@@ -112,7 +107,7 @@ let reset_runtime_attempt_state state =
     blocks_by_index = []
   ; model_content = []
   ; current_stream_scope = None
-  ; stream_phase = Accepting_content
+  ; stream_phase = Keeper_stream_phase.Accepting_content
   ; scope_disposition = Scope_live
   ; current_message_has_text = false
   ; last_completed_message_has_text = false
@@ -132,7 +127,7 @@ let enter_stream_scope state stream_scope =
       blocks_by_index = []
     ; model_content = []
     ; current_stream_scope = Some stream_scope
-    ; stream_phase = Accepting_content
+    ; stream_phase = Keeper_stream_phase.Accepting_content
     ; scope_disposition = Scope_live
     ; current_message_has_text = false
     ; message_open = false
@@ -767,15 +762,12 @@ let tool_args_event ~redact_text ~stream_scope ~snapshot bridge_state index args
          })
 
 let content_event_allowed state (evt : Agent_core.Types.sse_event) =
-  match evt, state.stream_phase with
-  | (Agent_core.Types.ContentBlockStart {index; _} | Agent_core.Types.ContentBlockDelta {index; _}),
-    Accepting_content ->
-      not (List.exists (fun (closed_index,_,active) -> closed_index=index && not active) state.model_content)
-  | Agent_core.Types.ContentBlockStop _,
-    (Accepting_content | Stop_reason_seen _) -> true
-  | (Agent_core.Types.ContentBlockStart _ | Agent_core.Types.ContentBlockDelta _
-    | Agent_core.Types.ContentBlockStop _),
-    (Stop_reason_seen _ | Message_stopped) -> false
+  match evt with
+  | Agent_core.Types.ContentBlockStart {index; _} | Agent_core.Types.ContentBlockDelta {index; _} ->
+      Keeper_stream_phase.admits_block_open_or_delta state.stream_phase
+      && not (List.exists (fun (closed_index,_,active) -> closed_index=index && not active) state.model_content)
+  | Agent_core.Types.ContentBlockStop _ ->
+      Keeper_stream_phase.admits_block_stop state.stream_phase
   | (Agent_core.Types.MessageStart _
     | Agent_core.Types.MessageDelta _
     | Agent_core.Types.MessageStop
@@ -791,8 +783,7 @@ let content_event_allowed state (evt : Agent_core.Types.sse_event) =
     | Agent_core.Types.Connected
     | Agent_core.Types.Timeout _
     | Agent_core.Types.StreamIncomplete _
-    ),
-    (Accepting_content | Stop_reason_seen _ | Message_stopped) -> true
+    ) -> true
 ;;
 
 let reject_quarantined_content_event ~stream_scope state
@@ -892,7 +883,7 @@ let event_channel_conflicts state = function
 let progress_native_tool ~redact_text ~stream_scope ~block_index ~tool_call_id progress state =
   match state.current_stream_scope, state.scope_disposition, stream_block_for_index state block_index with
   | Some current, Scope_live, Some (Active_native_tool tool)
-    when current=stream_scope && state.stream_phase <> Message_stopped
+    when current=stream_scope && state.stream_phase <> Keeper_stream_phase.Message_stopped
          && Option.equal String.equal tool.tool_call_id tool_call_id ->
       {bridge_state=state; chat_events=[Keeper_chat_events.Native_tool_progress
         (tool, Runtime_native_tools.redact_progress redact_text progress)]}
@@ -981,7 +972,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
         Agent_core_stream_message_start
           { content_generation=Some bridge_state.content_generation; stream_scope; provider_message_id = id; model; usage }
       in
-      if bridge_state.stream_phase <> Accepting_content
+      if bridge_state.stream_phase <> Keeper_stream_phase.Accepting_content
       then
         poison_scope bridge_state ~kind:Stream_event_after_terminal
           ~reason:"MessageStart arrived after the provider message became terminal"
@@ -1011,10 +1002,10 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
           ~reason:"conflicting MessageStart invalidated the provider stream scope"
   | MessageDelta { stop_reason; usage } ->
       let message_delta = Agent_core_stream_message_delta { content_generation=Some bridge_state.content_generation; stream_scope; stop_reason; usage } in
-      (match bridge_state.stream_phase, stop_reason with
-       | Accepting_content, None ->
+      (match Keeper_stream_phase.on_stop_reason bridge_state.stream_phase stop_reason with
+       | Keeper_stream_phase.Stop_reason_unchanged ->
          { bridge_state; chat_events = [ message_delta ] }
-       | Accepting_content, Some stop_reason ->
+       | Keeper_stream_phase.Stop_reason_first stop_reason ->
          let cut =
            if stop_reason = Agent_core.Types.MaxTokens
            then cut_tool_scope bridge_state ~reason:"provider_max_tokens"
@@ -1023,28 +1014,22 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
          let closed = close_open_content_blocks ~stream_scope ~redact_text ~base_dir cut.bridge_state in
          { bridge_state =
              { closed.bridge_state with
-               stream_phase = Stop_reason_seen stop_reason
+               stream_phase = Keeper_stream_phase.Stop_reason_seen stop_reason
              }
          ; chat_events = message_delta :: cut.chat_events @ closed.chat_events
          }
-       | Stop_reason_seen _, None ->
-         { bridge_state; chat_events = [ message_delta ] }
-       | Stop_reason_seen recorded, Some replay when recorded = replay ->
-         { bridge_state; chat_events = [ message_delta ] }
-       | Stop_reason_seen _, Some _
-       | Message_stopped, None
-       | Message_stopped, Some _ ->
+       | Keeper_stream_phase.Stop_reason_conflict ->
          poison_scope bridge_state ~kind:Stream_event_after_terminal
            ~reason:"MessageDelta conflicted with the frozen terminal state")
   | MessageStop ->
-      (match bridge_state.stream_phase with
-       | Message_stopped ->
+      (match Keeper_stream_phase.on_message_stop bridge_state.stream_phase with
+       | Keeper_stream_phase.Message_stop_replayed ->
          { bridge_state; chat_events = [ Agent_core_stream_message_stop (Some { response_generation = bridge_state.content_generation; response_scope = stream_scope }) ] }
-       | Accepting_content | Stop_reason_seen _ ->
+       | Keeper_stream_phase.Message_stop_without_reason | Keeper_stream_phase.Message_stop_after_reason ->
          let closed = close_open_content_blocks ~stream_scope ~redact_text ~base_dir bridge_state in
          { bridge_state =
              { closed.bridge_state with
-               stream_phase = Message_stopped
+               stream_phase = Keeper_stream_phase.Message_stopped
              ; current_message_has_text = false
              ; last_completed_message_has_text =
                  bridge_state.current_message_has_text

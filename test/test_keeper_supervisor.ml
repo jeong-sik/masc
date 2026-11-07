@@ -27,7 +27,6 @@ module Memory_lane = Masc.Keeper_memory_lane
 module Shutdown_finalize = Masc.Keeper_shutdown_finalize
 module Shutdown_store = Masc.Keeper_shutdown_store
 module Shutdown_types = Masc.Keeper_shutdown_types
-module Subprocess_registry = Masc.Keeper_subprocess_registry
 module Supervisor_cleanup = Masc.Keeper_supervisor_cleanup
 module Latched_reason = Keeper_latched_reason
 module Lifecycle_reservation = Masc.Keeper_lifecycle_reservation

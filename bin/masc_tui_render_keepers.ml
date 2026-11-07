@@ -484,6 +484,9 @@ let render_attempt_chain ~max_cells (attempts : Masc_tui_keeper_trail.attempt li
         let chain = prefix ^ String.concat sep fitted in
         Some (Theme.warn () ^ chain ^ Ansi.reset)
 
+(* The cells the detail keeps beside the attempt chain, after the separator. *)
+let attempt_detail_floor_cells = 10
+
 let keeper_secondary_row_content ?now ~inner (row : Keeper_list_model.row) =
   let indent_cells = Render_schedule.keeper_marker_width + 2 in
   let available = max 0 (inner - indent_cells) in
@@ -493,24 +496,35 @@ let keeper_secondary_row_content ?now ~inner (row : Keeper_list_model.row) =
     | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
   in
   let attempts = Masc_tui_keeper_trail.attempts_of_runtime runtime in
-  let chain_opt = render_attempt_chain ~max_cells:available attempts in
   let detail =
     match keeper_detail_text ?now row with
     | "" -> Masc_tui_theme.Glyph.no_value
     | text -> text
   in
+  let has_detail = not (String.equal detail Masc_tui_theme.Glyph.no_value) in
+  let sep = "  ·  " in
+  let sep_cells = Message_layout.display_width sep in
+  (* The chain drops its older attempts to leave the detail a floor of cells.
+     Only when the last attempt does not fit beside that floor does the chain
+     take the whole row, and the detail is left out. *)
   let content =
-    match chain_opt with
-    | None -> Theme.recede () ^ fit_width detail available ^ Ansi.reset
+    let beside_detail =
+      if has_detail then
+        render_attempt_chain
+          ~max_cells:(available - sep_cells - attempt_detail_floor_cells)
+          attempts
+      else None
+    in
+    match beside_detail with
     | Some chain ->
         let chain_cells = Message_layout.display_width chain in
-        let remaining = available - chain_cells in
-        let sep = "  ·  " in
-        let sep_cells = Message_layout.display_width sep in
-        if remaining >= sep_cells + 10 && not (String.equal detail Masc_tui_theme.Glyph.no_value) then
-          chain ^ Theme.recede () ^ sep ^ fit_width detail (remaining - sep_cells) ^ Ansi.reset
-        else
-          fit_width chain available
+        chain ^ Theme.recede () ^ sep
+        ^ fit_width detail (available - chain_cells - sep_cells)
+        ^ Ansi.reset
+    | None -> (
+        match render_attempt_chain ~max_cells:available attempts with
+        | Some chain -> fit_width chain available
+        | None -> Theme.recede () ^ fit_width detail available ^ Ansi.reset)
   in
   String.make indent_cells ' ' ^ content
 

@@ -17,13 +17,13 @@ status: reference
 
 ## 1. Purpose
 
-MCP(Model Context Protocol)를 다중 트랜스포트(HTTP/1.1, HTTP/2 h2c, WebSocket, gRPC, stdio)로 제공하는 서버 레이어. JSON-RPC 2.0 기반 MCP 요청을 받아 도구 디스패치로 라우팅하고, SSE(Server-Sent Events)로 이벤트를 스트리밍한다.
+MCP(Model Context Protocol)를 다중 트랜스포트(HTTP/1.1, HTTP/2(h2c 와 TLS ALPN), WebSocket, gRPC, stdio)로 제공하는 서버 레이어. JSON-RPC 2.0 기반 MCP 요청을 받아 도구 디스패치로 라우팅하고, SSE(Server-Sent Events)로 이벤트를 스트리밍한다.
 
 핵심 설계 결정:
 
 - **httpun-eio** 기반 HTTP/1.1이 canonical transport. Eio direct-style async.
 - SSE는 per-session `Eio.Stream.t` mailbox 패턴. broadcast 시 global write-lock 없음.
-- HTTP/2는 `h2-eio` 기반이며 `MASC_USE_H2=auto|1|0`로 listener mode를 제어한다. 기본값 `auto`는 HTTP/1.1과 h2c를 같은 포트에서 자동 감지한다.
+- HTTP/2는 `h2-eio` 기반이다. cleartext 리스너(8935)는 `MASC_USE_H2=auto|1|0`로 mode 를 고르고, 기본값 `auto`는 HTTP/1.1과 h2c를 같은 포트에서 자동 감지한다. TLS 리스너(8938, `transport.https_port`)는 ALPN 으로 h2 또는 http/1.1 을 고른다. 두 리스너와 두 프로토콜은 경로 표 하나(`Server_http_ingress` → `Router`)를 탄다(RFC-0512).
 - WebSocket은 기본 활성화(`MASC_WS_ENABLED=0`으로 비활성화), gRPC는 기본 비활성화(`MASC_GRPC_ENABLED=1`로 활성화)되는 보조 지원 트랜스포트다.
 - stdio 모드는 Claude Code 등 로컬 MCP 클라이언트의 표준 연결 방식.
 
@@ -43,12 +43,12 @@ graph TB
 
     subgraph EntryPoints["Entry Points"]
         STDIO[main_stdio_eio.ml<br/>stdin/stdout]
-        HTTP[main_eio.ml<br/>httpun-eio :8935]
+        HTTP[main_eio.ml<br/>:8935 cleartext · :8938 TLS]
     end
 
     subgraph TransportLayer["Transport Layer"]
+        INGRESS[server_http_ingress<br/>HTTP/1.1 + HTTP/2, 경로 표 하나]
         MCP_HTTP[server_mcp_transport_http<br/>POST /mcp + GET /mcp SSE]
-        H2_GW[server_h2_gateway<br/>HTTP/2 h2c]
         WS_T[server_mcp_transport_ws<br/>GET /ws same-origin upgrade]
         GRPC_S[masc_grpc_server<br/>:8936 h2c]
     end
@@ -71,16 +71,16 @@ graph TB
     EXT -->|gRPC / WS| GRPC_S & WS_T
 
     STDIO --> MCP_EIO
-    HTTP --> MCP_HTTP & H2_GW & WS_T & ROUTES
+    HTTP --> INGRESS & WS_T
+    INGRESS --> MCP_HTTP & ROUTES
     MCP_HTTP --> MCP_EIO
-    H2_GW --> MCP_EIO
     WS_T -.->|Sse.subscribe_external| SSE_MOD
     GRPC_S --> MCP_EIO
 
     MCP_EIO --> TD
     MCP_EIO --> SSE_MOD
     MCP_HTTP --> AUTH
-    H2_GW --> AUTH
+    ROUTES --> AUTH
 ```
 
 ---
@@ -89,8 +89,9 @@ graph TB
 
 | Transport | Protocol Stack | Module | Port | 활성화 조건 | Status |
 |-----------|---------------|--------|------|------------|--------|
-| HTTP/1.1 | httpun-eio | `server_mcp_transport_http` | 8935 | 기본값 | Canonical |
-| HTTP/2 (h2c) | h2-eio | `server_h2_gateway` | 8935 | `MASC_USE_H2=auto` (기본) 또는 `1` | Available |
+| HTTP/1.1 | httpun-eio | `server_http_ingress` + `server_mcp_transport_http` | 8935 | 기본값 | Canonical |
+| HTTP/2 (h2c) | h2-eio | `server_h2_gateway`(연결 어댑터) + `server_http_ingress` | 8935 | `MASC_USE_H2=auto` (기본) 또는 `1` | Available |
+| HTTPS (TLS 1.3, ALPN h2 또는 http/1.1) | tls-eio + h2-eio / httpun-eio | `server_bootstrap_http.serve_tls` + `server_http_ingress` | 8938 | 기본 켜짐, `transport.https_port = 0` 으로 끔 | Available |
 | WebSocket | ws-direct (`ws-direct-eio` / `ws-direct-gluten`) | `server_mcp_transport_ws` | HTTP 리스너의 `/ws` same-origin 업그레이드 | 기본값, `MASC_WS_ENABLED=0`으로 비활성화 | **Experimental** |
 | gRPC | grpc-direct (h2c) | `masc_grpc_server` | 8936 | 기본 비활성, `MASC_GRPC_ENABLED=1`로 활성화 | Available |
 | stdio | Eio stdin/stdout | `main_stdio_eio` + `mcp_server_eio.run_stdio` | N/A | `masc-stdio` 실행 | Available |
@@ -353,8 +354,8 @@ typed authority만 소비한다. downstream에서 raw `Host`/`:authority`를 다
 
 ### 6.0.1 Workspace precondition
 
-HTTP/1.1 입구와 HTTP/2 gateway 는 rate limit 과 MCP origin 검사 다음, 라우팅
-바로 앞에서 같은 `Server_workspace_precondition` 확인을 거친다(#43356). 한
+두 전송의 공용 입구 `Server_http_ingress` 는 rate limit 과 MCP origin 검사 다음,
+라우팅 바로 앞에서 `Server_workspace_precondition` 확인을 거친다(#43356, RFC-0512). 한
 작업공간을 보고 요청하는 client 는 두 헤더를 같이 보낸다.
 
 | 헤더 | 값 |
@@ -383,7 +384,7 @@ HTTP/1.1 입구와 HTTP/2 gateway 는 rate limit 과 MCP origin 검사 다음, �
 보는지 읽는 곳이라서다. 이 확인은 route 인증보다 먼저 돈다. 인증 없는 client 도
 경로를 맞춰 볼 수 있지만, 같은 경로를 `/health` 가 이미 공개한다.
 
-### 6.1 MCP 엔드포인트 (main_eio.ml에서 직접 매칭)
+### 6.1 MCP 엔드포인트 (`Server_routes_http_routes_frontend` 가 경로 표에 등록, 두 전송 공용)
 
 | Method | Path | Handler | 설명 |
 |--------|------|---------|------|
@@ -519,38 +520,33 @@ client는 허용한다. 로컬 Vite cross-port는 명시된 loopback dev-origin 
 
 ---
 
-## 8. HTTP/2 Gateway
+## 8. HTTP/2
 
-**소스**: `lib/server/server_h2_gateway.ml` + helpers/routes
+**소스**: `lib/server/server_h2_gateway.ml`(연결 어댑터), `lib/http_reqd.ml`(응답 손잡이), `lib/http_h2_response_ledger.ml`(응답 자원 원장), `lib/server/server_bootstrap_http.ml`(리스너, `h2_config`), `lib/server/server_http_ingress.ml`(공용 입구)
 
 ### 8.1 활성화
 
-`MASC_USE_H2=auto`는 같은 포트에서 HTTP/1.1과 HTTP/2 prior-knowledge
-연결을 자동 판별한다. `1`/`h2_only`는 HTTP/2만, `0`/`h1_only`는
-HTTP/1.1만 허용한다. 그 밖의 값은 서버 시작 전에 거부된다. 이 경로는 TLS
-ALPN이 아닌 h2c cleartext 연결이다.
+cleartext 리스너(8935): `MASC_USE_H2=auto`는 같은 포트에서 HTTP/1.1과 HTTP/2 prior-knowledge 연결을 첫 바이트로 판별한다. `1`/`h2_only`는 HTTP/2만, `0`/`h1_only`는 HTTP/1.1만 받는다. 그 밖의 값은 서버 시작 전에 거부된다.
+
+TLS 리스너(8938, `transport.https_port`, 0 이면 끔): TLS 1.3 handshake 의 ALPN 결과로 h2 또는 http/1.1 연결 핸들러를 고른다. 인증서는 `transport.tls_cert_file`/`tls_key_file`, 없으면 `<base>/.masc/tls/` 의 자체 서명 인증서다. 브라우저와 cloudflared 는 ALPN 으로만 HTTP/2 를 고르므로 HTTP/2 멀티플렉싱은 이 리스너로 받는다. 설정·인증서·확인 명령은 `docs/guides/https-and-http2.md` 에 있다.
 
 ### 8.2 동작 방식
 
-H2 gateway는 HTTP/2 요청을 받아 내부적으로 `Httpun.Request`로 변환하여 기존 handler 함수를 재사용한다:
+경로 표는 하나다(RFC-0512). H2 어댑터는 연결 층만 맡는다: 스트림 registry 와 요청 fiber(`Server_h2_stream_registry`), `H2.Request.t` 를 `Httpun.Request.t` 로 옮기기(`Http_reqd.request`: `:authority` 가 `host` 로, version 2.0), `:scheme`/`:authority` 검사(`Server_request_authority.classify_h2_request`), `Http_reqd.Http2` 손잡이 만들기. 그 뒤는 HTTP/1.1 과 같은 `Server_http_ingress.serve` 를 부른다(rate limit → MCP origin·버전 검사 → workspace 전제조건 → `Router.dispatch`, 인증은 route 안). 핸들러 서명이 `Httpun.Request.t -> Http_reqd.t -> unit` 하나라서 한쪽 전송에만 경로를 더하는 일이 생기지 않는다.
 
-```ocaml
-let httpun_headers = Httpun.Headers.of_list (H2.Headers.to_list h2_headers) in
-let httpun_request = Httpun.Request.create ~headers:httpun_headers httpun_meth h2_req.target in
-```
+응답은 `Http_reqd`(닫힌 합타입 `Http1 | Http2`)가 전송별로 쓴다. H2 쪽은 응답 자원 원장(`Http_h2_response_ledger`)에 바이트를 예약하고 flush 뒤 돌려준다. 예약이 안 되면 빈 503 `no-store` 로 답하고, 스트리밍 중 용량이 다하면 그 스트림만 리셋한다(`docs/guides/h2-response-resources.md`). connection 전용 헤더(`connection`, `keep-alive`, `proxy-connection`, `transfer-encoding`, `upgrade`)는 H2 응답에서 뺀다(RFC 9113 §8.2.2).
 
-모든 REST API, MCP, Dashboard 경로를 HTTP/2로도 제공한다. H2 고유 기능:
-- 무제한 SSE stream per connection (브라우저 6-connection 제한 해소)
-- `flush_headers_immediately:true`로 streaming response 지원
-- 개별 스트림/연결의 프로토콜 또는 핸들러 예외는 해당 H2 연결 범위에서만 격리 처리되며 리스너 전체나 다른 클라이언트 세션을 중단시키지 않는다.
+H2 연결 설정은 `Server_bootstrap_http.h2_config` 하나가 만들고 cleartext·TLS 가 같이 쓴다: server push 끔(RFC 9113 §8.4), `transport.h2_max_concurrent_streams`(100), `h2_initial_window_size`(65535), `h2_max_frame_size`(16384).
 
-### 8.3 Cloudflare Tunnel 제약
+HTTP/1.1 과 다른 점: 한 연결에 SSE 스트림을 여럿 둘 수 있다(브라우저의 origin 당 6연결 상한 밖). `/ws` 는 426 이다(h2 에 RFC 8441 extended CONNECT 가 없다). `subscriptions/listen` 의 막힌 구독자는 HTTP/1.1 과 같은 규칙으로 내려간다(stall 또는 reset). 스트림·연결 하나의 예외는 그 H2 연결 안에서만 처리되고 리스너나 다른 세션을 멈추지 않는다.
+
+### 8.3 Cloudflare Tunnel
 
 ```
-Browser --[HTTPS/HTTP2]--> Cloudflare --[HTTP/1.1]--> MASC :8935
+Browser --[HTTPS/HTTP2]--> Cloudflare --[HTTP/1.1 :8935 | HTTPS+HTTP/2 :8938]--> MASC
 ```
 
-Cloudflare tunnel origin은 cleartext h2(h2c)를 지원하지 않는다. 따라서 Cloudflare 경유 시 origin은 반드시 HTTP/1.1. Cloudflare가 브라우저에 HTTP/2를 제공하여 SSE 멀티플렉싱의 이점은 유지된다.
+cloudflared 는 origin 에 HTTP/2 를 TLS 로만 보낸다. `service: https://127.0.0.1:8938` 과 `originRequest.http2Origin: true`(자체 서명이면 `noTLSVerify: true`)로 바꾸면 origin 도 HTTP/2 다. 그대로 두면 origin 은 8935 HTTP/1.1 이고 Cloudflare 가 브라우저에만 HTTP/2 를 준다.
 
 ---
 

@@ -2188,12 +2188,7 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
             make_request_handler ~trust_policy:request_trust_policy routes
           in
           let h2_request_handler =
-            make_h2_request_handler
-              ~trust_policy:request_trust_policy
-              ~routes
-              ~sw:serving_sw
-              ~clock
-              ~server_start_time
+            make_h2_request_handler ~trust_policy:request_trust_policy ~routes
           in
           let h2_error_handler = make_h2_error_handler () in
           run_serving
@@ -2210,12 +2205,7 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
       make_request_handler ~trust_policy:request_trust_policy routes
     in
     let h2_request_handler =
-      make_h2_request_handler
-        ~trust_policy:request_trust_policy
-        ~routes
-        ~sw
-        ~clock
-        ~server_start_time
+      make_h2_request_handler ~trust_policy:request_trust_policy ~routes
     in
     let h2_error_handler = make_h2_error_handler () in
     run_serving

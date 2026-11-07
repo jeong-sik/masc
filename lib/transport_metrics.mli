@@ -158,6 +158,9 @@ type http_protocol =
   | H1
   | H2
 
+val http_protocol_to_string : http_protocol -> string
+(** The label a protocol carries in metrics and log lines: ["h1"] or ["h2"]. *)
+
 type http_rate_limit_scope =
   | Client_ip
   | Agent

@@ -1,5 +1,10 @@
 open Alcotest
-module Helpers = Server_h2_gateway_helpers
+module Response = Masc.Http_server_eio.Response
+module Request = Masc.Http_server_eio.Request
+
+let reqd_of_h2 ~sw h2_reqd =
+  Masc.Http_reqd.of_h2 ~stream_sw:sw
+    ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd
 
 type dispatch = Inline_reader | Request_fibers
 
@@ -103,9 +108,9 @@ let flow_control_body = String.make (2 * 65535) 'w'
 
 let test_reader_control () =
   let admitted, admit = Eio.Promise.create () in
-  let handler ~request_sw:_ _ reqd =
+  let handler ~request_sw _ reqd =
     Eio.Promise.resolve admit ();
-    Helpers.h2_respond_json_value_on_cpu reqd large_json in
+    Response.json_value_on_cpu large_json (reqd_of_h2 ~sw:request_sw reqd) in
   with_connection Inline_reader handler (fun ~env ~client ~client_flow:_ ~release ~close_client:_ ~server:_ ->
     let slow = request client "/slow" in
     Eio.Promise.await admitted;
@@ -125,22 +130,23 @@ let test_reader_control () =
 let test_multiplexed_progress meth =
   let admitted, admit = Eio.Promise.create () in
   let reader_ready, mark_reader_ready = Eio.Promise.create () in
-  let handler ~request_sw:sw _ reqd =
-    match (H2.Reqd.request reqd).target with
+  let handler ~request_sw:sw _ h2_reqd =
+    let reqd = reqd_of_h2 ~sw h2_reqd in
+    match (H2.Reqd.request h2_reqd).target with
     | "/slow" ->
       let respond () =
         Eio.Promise.resolve admit ();
         match meth with
-        | `GET -> Helpers.h2_respond_json_value_on_cpu reqd large_json
-        | `POST -> Helpers.h2_respond_json reqd (Yojson.Safe.to_string large_json) in
+        | `GET -> Response.json_value_on_cpu large_json reqd
+        | `POST -> Response.json (Yojson.Safe.to_string large_json) reqd in
       (match meth with
        | `GET -> respond ()
        | `POST ->
-           Helpers.h2_read_body ~sw reqd (fun body ->
+           Request.read_body_async reqd (fun body ->
              check string "POST callback receives complete input" "request body" body;
              respond ());
            Eio.Promise.resolve mark_reader_ready ())
-    | "/fast" -> Helpers.h2_respond_json ~compress:false reqd flow_control_body
+    | "/fast" -> Response.json ~compress:false flow_control_body reqd
     | path -> failf "unexpected path %s" path in
   with_connection Request_fibers handler (fun ~env ~client ~client_flow:_ ~release ~close_client:_ ~server:_ ->
     let slow =
@@ -172,13 +178,14 @@ let test_multiplexed_progress meth =
 let test_reset_does_not_break_siblings () =
   let admitted, admit = Eio.Promise.create () in
   let finished, finish = Eio.Promise.create () in
-  let handler ~request_sw:_ _ reqd =
-    match (H2.Reqd.request reqd).target with
+  let handler ~request_sw _ h2_reqd =
+    let reqd = reqd_of_h2 ~sw:request_sw h2_reqd in
+    match (H2.Reqd.request h2_reqd).target with
     | "/slow" ->
       Eio.Promise.resolve admit ();
       Fun.protect ~finally:(fun () -> Eio.Promise.resolve finish ()) (fun () ->
-        Helpers.h2_respond_json_value_on_cpu reqd large_json)
-    | "/fast" -> Helpers.h2_respond_json ~compress:false reqd "alive"
+        Response.json_value_on_cpu large_json reqd)
+    | "/fast" -> Response.json ~compress:false "alive" reqd
     | path -> failf "unexpected path %s" path in
   with_connection Request_fibers handler (fun ~env:_ ~client ~client_flow ~release ~close_client:_ ~server:_ ->
     let slow = request client "/slow" in
@@ -208,8 +215,8 @@ let test_reset_releases_stream_scopes () =
   let admitted = ref 0 and cancelled = ref 0 in
   let all_admitted, admit_all = Eio.Promise.create () in
   let all_cancelled, cancel_all = Eio.Promise.create () in
-  let handler ~request_sw:_ _ reqd =
-    match (H2.Reqd.request reqd).target with
+  let handler ~request_sw _ h2_reqd =
+    match (H2.Reqd.request h2_reqd).target with
     | "/hold" ->
       incr admitted;
       if !admitted = held_streams then Eio.Promise.resolve admit_all ();
@@ -217,7 +224,7 @@ let test_reset_releases_stream_scopes () =
          incr cancelled;
          if !cancelled = held_streams then Eio.Promise.resolve cancel_all ();
          raise exn)
-    | "/fast" -> Helpers.h2_respond_json ~compress:false reqd "alive"
+    | "/fast" -> Response.json ~compress:false "alive" (reqd_of_h2 ~sw:request_sw h2_reqd)
     | path -> failf "unexpected path %s" path in
   with_connection ~streams Request_fibers handler
     (fun ~env:_ ~client ~client_flow ~release:_ ~close_client:_ ~server:_ ->
@@ -244,12 +251,13 @@ let test_connection_closes_pending_work () =
   let cancelled, mark_cancelled = Eio.Promise.create () in
   let child_started, start_child = Eio.Promise.create () in
   let child_cancelled, cancel_child = Eio.Promise.create () in
-  let handler ~request_sw:sw _ reqd =
-    match (H2.Reqd.request reqd).target with
+  let handler ~request_sw:sw _ h2_reqd =
+    let reqd = reqd_of_h2 ~sw h2_reqd in
+    match (H2.Reqd.request h2_reqd).target with
     | "/slow" ->
       Eio.Promise.resolve admit ();
       (try
-         Helpers.h2_respond_json_value_on_cpu reqd large_json;
+         Response.json_value_on_cpu large_json reqd;
          fail "worker unexpectedly admitted disconnected request"
        with Eio.Cancel.Cancelled _ as exn ->
          Eio.Promise.resolve mark_cancelled ();
@@ -260,7 +268,7 @@ let test_connection_closes_pending_work () =
         try Eio.Fiber.await_cancel () with Eio.Cancel.Cancelled _ as exn ->
           Eio.Promise.resolve cancel_child ();
           raise exn);
-      Helpers.h2_respond_json ~compress:false reqd "started"
+      Response.json ~compress:false "started" reqd
     | path -> failf "unexpected path %s" path in
   with_connection Request_fibers handler (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client ~server ->
     ignore (request client "/slow");
@@ -275,10 +283,10 @@ let test_connection_closes_pending_work () =
     Eio.Promise.await child_cancelled)
 
 let test_handler_error_is_stream_local () =
-  let handler ~request_sw:_ _ reqd =
-    match (H2.Reqd.request reqd).target with
+  let handler ~request_sw _ h2_reqd =
+    match (H2.Reqd.request h2_reqd).target with
     | "/fail" -> failwith "fixture handler failure"
-    | "/fast" -> Helpers.h2_respond_json ~compress:false reqd "alive"
+    | "/fast" -> Response.json ~compress:false "alive" (reqd_of_h2 ~sw:request_sw h2_reqd)
     | path -> failf "unexpected path %s" path in
   with_connection Request_fibers handler (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
     check int "handler exception becomes stream 500" 500

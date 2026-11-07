@@ -55,7 +55,7 @@ let refusal_body refusal =
     (Precondition.refusal_message refusal)
 ;;
 
-let guard_http1 ~path request reqd ~admitted =
+let guard ~path request reqd ~admitted =
   match check_current_request ~path request with
   | Precondition.Refused refusal ->
     Http_server_eio.Response.json_value

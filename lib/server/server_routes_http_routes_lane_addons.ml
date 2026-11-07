@@ -633,8 +633,8 @@ let operator_control state _actor request reqd =
     | true, Operator_credential ->
         Http.Request.read_body_async_with_limit reqd ~max_bytes:Http.Request.max_body_bytes
           ~on_error:(function
-            | `Too_large _ -> reply ~status:`Payload_too_large (error_json "private operator request too large")
-            | `Internal _ -> reply ~status:`Internal_server_error (error_json "private operator operation unavailable"))
+            | Http.Request.Too_large _ -> reply ~status:`Payload_too_large (error_json "private operator request too large")
+            | Http.Request.Internal _ -> reply ~status:`Internal_server_error (error_json "private operator operation unavailable"))
           ~on_body:(fun body ->
           match decode_operator_request body with
           | Error () -> reply ~status:`Bad_request (error_json "invalid private operator request")

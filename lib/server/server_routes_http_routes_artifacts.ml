@@ -261,7 +261,7 @@ let add_routes router =
                       ; "bytes", `Int reference.Tool_output.bytes
                       ]))
              ~on_error:(function
-               | `Too_large maximum -> refuse (Upload_too_large { maximum })
-               | `Internal exn ->
+               | Http.Request.Too_large maximum -> refuse (Upload_too_large { maximum })
+               | Http.Request.Internal exn ->
                  Log.Misc.error "artifact upload failed: %s" (Printexc.to_string exn);
                  refuse Upload_store_failed))

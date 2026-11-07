@@ -925,8 +925,8 @@ let auth_error_cors_headers request =
 ;;
 
 (* A 401/403 is about the credential the client presented, and the client is
-   not where it is decided: the TUI's refresh path reaches this responder (h1)
-   and the h2 gateway reaches its twin, so a refusal must name the endpoint
+   not where it is decided: the TUI's refresh path reaches this responder on
+   either transport, so a refusal must name the endpoint and the transport
    that produced it. /mcp already names its endpoint through
    [record_mcp_auth_reject]. [auth_refusal_response] logs the path and status
    and hands back the response parts, so every responder that answers a
@@ -949,9 +949,9 @@ let log_auth_refusal ~protocol ~path ~status =
 ;;
 
 (* Log the refusal and hand back the status and body. Every responder that
-   answers a refusal — the h1 responder, the h2 gateway, and the h2 route
-   dispatcher — builds its response from here, so a refusal cannot be answered
-   without a line. *)
+   answers a refusal builds its response from here, so a refusal cannot be
+   answered without a line. [protocol] is the transport's label, read from the
+   response handle. *)
 let auth_refusal_response ~protocol ~path err =
   let status = http_status_of_auth_error err in
   log_auth_refusal ~protocol ~path
@@ -961,7 +961,8 @@ let auth_refusal_response ~protocol ~path err =
 
 let respond_auth_error request reqd err =
   let status, body =
-    auth_refusal_response ~protocol:"h1"
+    auth_refusal_response
+      ~protocol:(Transport_metrics.http_protocol_to_string (Http_reqd.protocol reqd))
       ~path:(Http_server_eio.Request.path request) err
   in
   let headers =
@@ -991,7 +992,7 @@ let respond_agent_rate_limited ~rl_key request reqd =
   in
   Transport_metrics.record_http_rate_limit_response
     ~acceptance
-    ~protocol:Transport_metrics.H1
+    ~protocol:(Http_reqd.protocol reqd)
     ~scope:Transport_metrics.Agent
 
 (** Extract a per-agent rate-limit key from the request.  Prefers the bearer
@@ -1401,7 +1402,9 @@ let with_private_token_permission_auth ~permission handler request reqd =
       match authorize_token_bound_permission_request ~base_path ~permission request with
       | Error error ->
           let status = http_status_of_auth_error error in
-          log_auth_refusal ~protocol:"h1" ~path:(Http_server_eio.Request.path request)
+          log_auth_refusal
+            ~protocol:(Transport_metrics.http_protocol_to_string (Http_reqd.protocol reqd))
+            ~path:(Http_server_eio.Request.path request)
             ~status:(Httpun.Status.to_code (status :> Httpun.Status.t));
           refuse (status :> Httpun.Status.t) "private operator authorization refused"
       | Ok actor ->

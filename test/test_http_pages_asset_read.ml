@@ -127,6 +127,18 @@ let http1_dashboard_asset_response path =
 ;;
 
 let http2_dashboard_asset_response path =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let ledger =
+    Masc.Http_h2_response_ledger.create
+      ~max_pending_bytes:H2_response_limits.default_max_pending_bytes
+  in
+  Masc.Http_h2_response_ledger.with_request ledger ~sw @@ fun () ->
+  let router =
+    Server_routes_http_routes_frontend.add_routes
+      ~port:8935
+      (Http.Router.create ())
+  in
   let status = ref None in
   let response_body = Buffer.create 256 in
   let body_complete = ref false in
@@ -166,25 +178,13 @@ let http2_dashboard_asset_response path =
   H2.Body.Writer.close request_body;
   let server =
     H2.Server_connection.create (fun h2_reqd ->
-      let h2_request = H2.Reqd.request h2_reqd in
-      let httpun_request =
-        Httpun.Request.create
-          ~headers:
-            (Httpun.Headers.of_list (H2.Headers.to_list h2_request.headers))
-          `GET
-          h2_request.target
+      let reqd =
+        Masc.Http_reqd.of_h2
+          ~stream_sw:sw
+          ~ledger:(Masc.Http_h2_response_ledger.current_exn ())
+          h2_reqd
       in
-      let handled =
-        Server_h2_gateway_routes_extra.dispatch
-          ~h2_reqd
-          ~httpun_request
-          ~cors:[]
-          ~path:h2_request.target
-          ~config:None
-          ~gate:(fun f -> f ())
-          `GET
-      in
-      if not handled then failf "HTTP/2 route was not handled: %s" path)
+      Http.Router.dispatch router (Masc.Http_reqd.request reqd) reqd)
   in
   let transfer next_write report_write read =
     let rec drain progressed =

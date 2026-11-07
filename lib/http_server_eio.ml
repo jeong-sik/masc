@@ -462,69 +462,20 @@ module Request = struct
     in
     respond_error reqd `Internal_server_error body
 
-  type body_read_error =
-    [ `Too_large of int
-    | `Internal of exn
-    ]
+  type body_read_error = Http_reqd.body_read_error =
+    | Too_large of int
+    | Internal of exn
 
   let read_body_async_with_limit reqd ~max_bytes ~on_body ~on_error =
-    let request = Http_reqd.request reqd in
-    let content_length =
-      match Httpun.Headers.get request.headers "content-length" with
-      | Some v -> parse_positive_int v
-      | None -> None
-    in
-    let body = Http_reqd.request_body reqd in
-    let stopped = ref false in
-    let stop () =
-      if not !stopped then begin
-        stopped := true;
-        (try Http_reqd.Body_reader.close body with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-          Log.Misc.error "[http] body close failed: %s" (Printexc.to_string exn))
-      end
-    in
-    (match content_length with
-     | Some len when len > max_bytes ->
-         stop ();
-         on_error (`Too_large max_bytes)
-     | _ ->
-         let initial_capacity =
-           match content_length with
-           | Some len when len > 0 && len < max_bytes -> len
-           | _ -> 1024
-         in
-         let buf = Http_body_buffer.create initial_capacity in
-         let rec read_loop () =
-           Http_reqd.Body_reader.schedule_read body
-             ~on_eof:(fun () ->
-               let body_str = Http_body_buffer.contents buf in
-               try on_body body_str with
-                 | Eio.Cancel.Cancelled _ as e -> raise e
-                 | exn ->
-                 on_error (`Internal exn))
-             ~on_read:(fun buffer ~off ~len ->
-               if !stopped then ()
-               else
-                 let next_bytes = Http_body_buffer.length buf + len in
-                 if next_bytes > max_bytes then begin
-                   stop ();
-                   on_error (`Too_large max_bytes)
-                 end else begin
-                   Http_body_buffer.add_bigstring buf buffer ~off ~len;
-                   read_loop ()
-                 end)
-         in
-         read_loop ())
+    Http_reqd.read_body reqd ~max_bytes ~on_body ~on_error
 
   let read_body_async reqd callback =
     read_body_async_with_limit reqd
       ~max_bytes:max_body_bytes
       ~on_body:callback
       ~on_error:(function
-        | `Too_large max_bytes -> respond_too_large reqd max_bytes
-        | `Internal exn -> respond_internal_error reqd exn)
+        | Too_large max_bytes -> respond_too_large reqd max_bytes
+        | Internal exn -> respond_internal_error reqd exn)
 
   (** Get path from request target *)
   let path (request : Httpun.Request.t) =

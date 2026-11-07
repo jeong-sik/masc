@@ -1,4 +1,4 @@
-(* An HTTP/1 answer from a [Dashboard_cache] payload.
+(* An answer from a [Dashboard_cache] payload on either transport.
 
    The body is the string the cache serialized when it filled the entry, and
    the validator is the entity tag it computed then, so a repeat read neither

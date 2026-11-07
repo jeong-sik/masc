@@ -1,6 +1,6 @@
 open Alcotest
 
-module Helpers = Server_h2_gateway_helpers
+module Response = Masc.Http_server_eio.Response
 
 type completion = End_of_body | Oversized_body
 
@@ -39,8 +39,7 @@ let with_gateway run =
             ~agent_name:None);
           Server_auth.For_testing.restore_server_state (Some state);
           let gateway = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env))
-            ~trust_policy:(trust_policy ()) ~sw ~clock:(Eio.Stdenv.clock env)
-            ~server_start_time:0. in
+            ~trust_policy:(trust_policy ()) in
           let pool = Domain_pool.create ~sw ~domain_count:1 env#domain_mgr in
           let previous_pool = Domain_pool_ref.get () in
           Eio.Switch.on_release sw (fun () ->
@@ -66,7 +65,10 @@ let with_gateway run =
                 let reader_ready, mark_reader_ready = Eio.Promise.create () in
                 let handler ~request_sw addr reqd =
                   match (H2.Reqd.request reqd).target with
-                  | "/fast" -> Helpers.h2_respond_json ~compress:false reqd "alive"
+                  | "/fast" ->
+                    Response.json ~compress:false "alive"
+                      (Masc.Http_reqd.of_h2 ~stream_sw:request_sw
+                         ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) reqd)
                   | "/oauth/register" ->
                     gateway ~request_sw addr reqd;
                     (* No DATA has been sent yet. Returning from the actual

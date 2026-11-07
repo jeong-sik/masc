@@ -1,0 +1,246 @@
+module Http = Http_server_eio
+module Common = Server_routes_http_common
+module Transport = Server_mcp_transport_http
+
+(* Issue #8403: derive probe exemptions from Server_health_paths SSOT so a
+   renamed probe stays exempt from rate limits without a separate manual edit
+   here. *)
+let is_rate_limit_exempt path =
+  String.equal path "/health" || Server_health_paths.is_public path
+;;
+
+let charges_agent_bucket (request : Httpun.Request.t) =
+  Common.is_mcp_transport_request request
+  || String.equal (Http.Request.path request) "/ws"
+  ||
+  match request.Httpun.Request.meth with
+  | `GET | `HEAD -> false
+  | _ -> true
+;;
+
+let respond_rate_limited reqd ~body ~rl_headers ~scope =
+  let headers =
+    Httpun.Headers.of_list
+      (("content-type", "application/json")
+       :: ("content-length", string_of_int (String.length body))
+       :: rl_headers)
+  in
+  let acceptance =
+    Http_reqd.try_respond_with_string
+      reqd
+      (Httpun.Response.create ~headers `Too_many_requests)
+      body
+  in
+  Transport_metrics.record_http_rate_limit_response
+    ~acceptance
+    ~protocol:(Http_reqd.protocol reqd)
+    ~scope
+;;
+
+(* True when the request was refused with a 429 on [reqd]. *)
+let try_rate_limit_block ~path ~client_addr ~request reqd =
+  if is_rate_limit_exempt path
+  then false
+  else (
+    let rl_key = Rate_limit.key_of_sockaddr client_addr in
+    if not (Rate_limit.check_global ~key:rl_key)
+    then (
+      respond_rate_limited
+        reqd
+        ~body:(Rate_limit.too_many_requests_body ())
+        ~rl_headers:(Rate_limit.headers_global ~key:rl_key)
+        ~scope:Transport_metrics.Client_ip;
+      true)
+    else if not (charges_agent_bucket request)
+    then false
+    else (
+      match Server_auth.auth_token_from_request request with
+      | None -> false
+      | Some token ->
+        (match Rate_limit.agent_key_of_token_or_name ~token () with
+         | None -> false
+         | Some agent_key ->
+           if Rate_limit.check_agent_global ~key:agent_key
+           then false
+           else (
+             respond_rate_limited
+               reqd
+               ~body:(Rate_limit.too_many_agent_requests_body ())
+               ~rl_headers:(Rate_limit.headers_agent_global ~key:agent_key)
+               ~scope:Transport_metrics.Agent;
+             true))))
+;;
+
+(* True when the request failed the MCP origin or protocol-version check and
+   the error response was sent on [reqd]. *)
+let try_mcp_validation_block ~request_authority ~request ~protocol_version ~origin reqd =
+  let is_mcp_transport = Common.is_mcp_transport_request request in
+  if is_mcp_transport && not (Common.validate_origin ~request_authority request)
+  then (
+    let body =
+      Server_routes_http_runtime.json_rpc_error Mcp_error_code.Invalid_request "Invalid origin"
+    in
+    let headers =
+      Httpun.Headers.of_list
+        ([ "content-length", string_of_int (String.length body)
+         ; "content-type", "application/json"
+         ; "vary", "Origin"
+         ]
+         @ Common.mcp_headers "-" protocol_version)
+    in
+    Http_reqd.respond_with_string reqd (Httpun.Response.create ~headers `Forbidden) body;
+    true)
+  else if is_mcp_transport
+          && request.Httpun.Request.meth <> `OPTIONS
+          && not (Transport.is_valid_protocol_version protocol_version)
+  then (
+    let body =
+      Server_routes_http_runtime.json_rpc_error
+        Mcp_error_code.Invalid_request
+        "Unsupported protocol version"
+    in
+    let headers =
+      Httpun.Headers.of_list
+        (("content-length", string_of_int (String.length body))
+         :: Common.json_headers "-" protocol_version origin)
+    in
+    Http_reqd.respond_with_string reqd (Httpun.Response.create ~headers `Bad_request) body;
+    true)
+  else false
+;;
+
+(* [GET /ws] (same-origin WebSocket upgrade + discovery) is owned by the route
+   table ([Server_routes_http_routes_frontend] via [Server_route.ws_get]) and
+   reached through [Http.Router.dispatch] below (RFC-0281). Board
+   reads/reactions are owned by the typed route table: exact routes win over
+   the board prefix route, and the prefix route resolves the bearer-bound
+   reaction actor itself. *)
+let dispatch_route ~router ~request ~path reqd =
+  match request.Httpun.Request.meth, path with
+  | `OPTIONS, _ -> Server_routes_http_runtime.options_handler request reqd
+  | `DELETE, "/mcp" -> Common.handle_delete_mcp request reqd
+  | `DELETE, "/mcp/managed" ->
+    Common.handle_delete_mcp ~profile:Transport.Managed_agent request reqd
+  | `DELETE, "/mcp/operator" ->
+    Common.handle_delete_mcp ~profile:Transport.Operator_remote request reqd
+  | _ -> Http.Router.dispatch router request reqd
+;;
+
+let log_late_response_failure ~context msg =
+  Log.Http.warn "%s: response already unwritable; skipped late response (%s)" context msg
+;;
+
+let try_internal_error_response reqd msg =
+  try Http.Response.internal_error msg reqd with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    (match Http_reqd.Late_response.classify_write_failure exn with
+     | Some failure_msg ->
+       log_late_response_failure ~context:"http ingress internal_error" failure_msg
+     | None ->
+       Log.Http.warn "http ingress internal_error response failed: %s" (Printexc.to_string exn))
+;;
+
+let try_auth_config_error_response reqd =
+  try Http.Response.text ~status:`Service_unavailable "Authentication configuration unavailable" reqd with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    (match Http_reqd.Late_response.classify_write_failure exn with
+     | Some failure_msg ->
+       log_late_response_failure
+         ~context:"http ingress auth configuration unavailable"
+         failure_msg
+     | None ->
+       Log.Http.warn
+         "http ingress auth configuration response failed: %s"
+         (Printexc.to_string exn))
+;;
+
+let respond_request_authority_bad_request ~error_code ~message reqd =
+  Http.Response.json_value
+    ~status:`Bad_request
+    (`Assoc [ "error_code", `String error_code; "error", `String message ])
+    reqd
+;;
+
+(* Authority admission precedes rate limiting, auth, and routing so no
+   credential I/O or URL projection can observe an untrusted Host or an
+   ambiguous/malformed Origin field set. *)
+let admitted ~routes ~client_addr ~request_authority request reqd =
+  Server_request_authority.with_current request_authority (fun () ->
+    let path = Http.Request.path request in
+    if try_rate_limit_block ~path ~client_addr ~request reqd
+    then ()
+    else (
+      try
+        let session_id_for_version = Transport.get_session_id_any request in
+        let protocol_version =
+          Transport.get_protocol_version_for_session ?session_id:session_id_for_version request
+        in
+        let origin = Server_auth.get_origin request in
+        if try_mcp_validation_block ~request_authority ~request ~protocol_version ~origin reqd
+        then ()
+        else
+          Server_workspace_precondition.guard ~path request reqd ~admitted:(fun () ->
+            dispatch_route ~router:routes ~request ~path reqd)
+      with
+      (* Cancellation propagates through the connection switch without
+         attempting a response from a cancelled handler. *)
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | Auth.Auth_config_error _ -> try_auth_config_error_response reqd
+      | exn ->
+        let msg = Printexc.to_string exn in
+        (match Http_reqd.Late_response.classify_write_failure exn with
+         | Some failure_msg ->
+           log_late_response_failure ~context:"http ingress request handler" failure_msg
+         | None -> try_internal_error_response reqd msg)))
+;;
+
+let serve ~routes ~client_addr classification reqd =
+  let request = Http_reqd.request reqd in
+  match classification with
+  | Server_request_authority.Missing ->
+    respond_request_authority_bad_request
+      ~error_code:"request_authority_missing"
+      ~message:"request is missing its Host authority"
+      reqd
+  | Server_request_authority.Multiple ->
+    respond_request_authority_bad_request
+      ~error_code:"request_authority_multiple"
+      ~message:"request contains more than one Host field"
+      reqd
+  | Server_request_authority.Malformed ->
+    respond_request_authority_bad_request
+      ~error_code:"request_authority_malformed"
+      ~message:"request Host authority is malformed"
+      reqd
+  | Server_request_authority.Untrusted ->
+    respond_request_authority_bad_request
+      ~error_code:"request_authority_untrusted"
+      ~message:"request Host is not a configured server identity"
+      reqd
+  | Server_request_authority.Single request_authority ->
+    (match Server_auth.classify_request_origin ~request_authority request with
+     | Server_auth.Multiple_origins ->
+       respond_request_authority_bad_request
+         ~error_code:"request_origin_multiple"
+         ~message:"request contains more than one Origin field"
+         reqd
+     | Server_auth.Malformed_origin ->
+       respond_request_authority_bad_request
+         ~error_code:"request_origin_malformed"
+         ~message:"request Origin is not one complete HTTP(S) serialized origin"
+         reqd
+     | Server_auth.Missing_origin | Server_auth.Single_origin _ ->
+       admitted ~routes ~client_addr ~request_authority request reqd)
+;;
+
+let http1_handler ~trust_policy routes client_addr gluten_reqd =
+  let reqd = Http_reqd.of_gluten gluten_reqd in
+  let request = Http_reqd.request reqd in
+  serve
+    ~routes
+    ~client_addr
+    (Server_request_authority.classify_http1_request ~trust_policy request)
+    reqd
+;;

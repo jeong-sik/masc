@@ -1,4 +1,4 @@
-(** An HTTP/1 answer from a {!Dashboard_cache.cached_payload}. *)
+(** An answer from a {!Dashboard_cache.cached_payload} on either transport. *)
 
 val respond :
   ?compress:bool ->

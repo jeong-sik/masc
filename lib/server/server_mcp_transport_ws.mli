@@ -261,7 +261,7 @@ val ws_upgrade_accept : Httpun.Request.t -> (string, string) result
     [Host].  Exposed for unit tests. *)
 
 val respond_and_drive_upgrade :
-  upgrade:(Gluten.impl -> unit) ->
+  upgrade:Http_reqd.upgrade ->
   reqd:Http_reqd.t ->
   max_message:int ->
   max_frame:int ->
@@ -278,7 +278,7 @@ val upgrade_connection :
   ?sw:Eio.Switch.t ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?on_message:(string -> string -> unit) ->
-  upgrade:(Gluten.impl -> unit) ->
+  upgrade:Http_reqd.upgrade ->
   Http_reqd.t ->
   (unit, string) result
 (** Handles an HTTP/1.1 [GET /ws] upgrade on the main HTTP origin using the

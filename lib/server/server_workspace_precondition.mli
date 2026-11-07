@@ -38,7 +38,7 @@ val refusal_body : Request_workspace_precondition.refusal -> Yojson.Safe.t
 (** A {!Server_refusal} body. It names no server path. *)
 
 val guard_http1 :
-  path:string -> Httpun.Request.t -> Httpun.Reqd.t -> admitted:(unit -> unit) -> unit
+  path:string -> Httpun.Request.t -> Http_reqd.t -> admitted:(unit -> unit) -> unit
 (** The HTTP/1.1 entry: answer a refused request on [reqd], or run
     [admitted]. The HTTP/2 gateway makes the same {!check_current_request}
     match with its own responder and CORS headers. *)

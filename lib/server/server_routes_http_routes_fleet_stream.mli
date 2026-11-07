@@ -26,7 +26,7 @@ val serve :
   ping_interval_s:float ->
   stalled_after_s:float ->
   max_queued_events:int ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
 (** Answers one request with the stream: the response head, then what
     {!Server_sse_pump.run} sends until the client is gone, falls behind or

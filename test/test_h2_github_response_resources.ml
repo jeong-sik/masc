@@ -5,7 +5,7 @@
 open Alcotest
 
 module Identity = Masc.Keeper_github_identity
-module Resources = Server_h2_response_resources
+module Resources = Masc.Http_h2_response_ledger
 module Registry = Server_h2_stream_registry
 
 type capacity = Exact_frame | One_byte_short

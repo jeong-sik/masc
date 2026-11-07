@@ -1,5 +1,5 @@
 open Alcotest
-module Resources = Server_h2_response_resources
+module Resources = Masc.Http_h2_response_ledger
 module Registry = Server_h2_stream_registry
 
 type lane = {mutable pending:string}

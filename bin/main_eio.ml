@@ -837,23 +837,23 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
        report.unprotected_files report.unprotected_logical_bytes report.protected_digests
        (original_inventory_elapsed ()) in
      if report.unprotected_files > 0 then Log.Server.warn "%s" message else Log.Server.info "%s" message);
-  (* RFC-0498 layer one: what the settled-archive pass would delete, counted
-     under the same lease before any settle can run. *)
-  let census_started = Unix.gettimeofday () in
-  (match Server_settled_original_census.run_at_startup ~base_path:canonical_base_path with
+  (* RFC-0498 layer three a: the settled-archive pass deletes under the same
+     lease, before any settle can run. *)
+  let sweep_started = Unix.gettimeofday () in
+  (match Server_settled_archive_sweep.run_at_startup ~base_path:canonical_base_path with
    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-   | exception _ ->
-     Log.Server.warn "[Startup] settled original census unavailable elapsed_s=%.3f"
-       (Unix.gettimeofday () -. census_started)
+   | exception exn ->
+     Log.Server.warn "[Startup] settled archive sweep unavailable elapsed_s=%.3f: %s"
+       (Unix.gettimeofday () -. sweep_started) (Printexc.to_string exn)
    | Error error ->
-     Log.Server.warn "[Startup] settled original census elapsed_s=%.3f: %s"
-       (Unix.gettimeofday () -. census_started) (Server_settled_original_census.error_to_string error)
+     Log.Server.warn "[Startup] %s elapsed_s=%.3f"
+       (Server_settled_archive_sweep.error_to_string error) (Unix.gettimeofday () -. sweep_started)
    | Ok report ->
      Log.Server.info
-       "[Startup] settled original census: live_records=%d named_ids=%d archived_records=%d archived_record_bytes=%Ld unnamed_records=%d unnamed_record_bytes=%Ld archived_bodies=%d archived_body_bytes=%Ld elapsed_s=%.3f"
-       report.live_records report.named_ids report.archived_records report.archived_record_bytes
-       report.unnamed_records report.unnamed_record_bytes report.archived_bodies report.archived_body_bytes
-       (Unix.gettimeofday () -. census_started));
+       "[Startup] settled archive sweep: live_records=%d named_ids=%d kept_records=%d removed_records=%d removed_record_bytes=%Ld removed_bodies=%d removed_body_bytes=%Ld elapsed_s=%.3f"
+       report.live_records report.named_ids report.kept_records report.removed_records
+       report.removed_record_bytes report.removed_bodies report.removed_body_bytes
+       (Unix.gettimeofday () -. sweep_started));
   (* Only the server samples. Sampling starts before [Eio_main.run] so the
      executor pool, which the main domain spawns while sampling, shares the
      profile and the boot-time loads are in the tables. The rate is a tenth

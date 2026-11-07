@@ -227,7 +227,10 @@ barrier 는 2·3 동안만 잡는다. 1 은 실행 증명을 통째로 읽어서
 2. L2 본문: D1. `settle` 이 본문을 지운다. 이미 쌓인 본문은 L3 이 지운다.
    - 확인: 배포 뒤 새 날짜 디렉터리에 `bodies/` 가 생기지 않는다.
 3. 운영자 확인: L1 수치를 보고 L3 을 병합한다. 설정 스위치는 두지 않는다.
-4. L3 지우기: §4.2·§4.4 의 pass 가 지운다. 지운 수와 바이트를 한 줄 info 로그에 남긴다.
+4. L3 지우기: §4.2·§4.4 의 pass 가 지운다. 지운 수와 바이트를 한 줄 info 로그에 남긴다. 세 조각으로 나눈다.
+   - L3a: 시작 때 §4.2 의 pass 가 지운다. 1층 census 를 지우는 pass(`Server_settled_archive_sweep`)로 바꾼다. 시작 지점은 `Eio_main.run` 앞, process lease 아래라 settle 이 아직 돌지 못한다. 그래서 barrier 를 따로 잡지 않는다.
+   - L3b: §4.4 의 Exact 기록과 실행 증명을 지운다.
+   - L3c: 24시간 주기에서 같은 pass 를 settlement barrier 안에서 돌린다.
    - 확인: 첫 pass 뒤 `tool-request-owners-settled` 가 거의 빈다. 이후 하루 크기가 settle 중에 멈춘 체인 수만큼만 남는다.
 
 ## 7. 구현 층이 코드로 닫을 것

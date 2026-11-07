@@ -8,18 +8,27 @@ open Result.Syntax
 type report =
   { live_records : int
   ; named_ids : int
-  ; archived_records : int
-  ; archived_record_bytes : int64
-  ; unnamed_records : int
-  ; unnamed_record_bytes : int64
-  ; archived_bodies : int
-  ; archived_body_bytes : int64
+  ; kept_records : int
+  ; removed_records : int
+  ; removed_record_bytes : int64
+  ; removed_bodies : int
+  ; removed_body_bytes : int64
   }
 
-type error = Census_unavailable of string
+type error =
+  | Sweep_refused of string
+  | Removal_stopped of
+      { removed_records : int
+      ; removed_bodies : int
+      ; detail : string
+      }
 
-let error_to_string (Census_unavailable detail) =
-  "settled original census unavailable: " ^ detail
+let error_to_string = function
+  | Sweep_refused detail -> "settled archive sweep deleted nothing: " ^ detail
+  | Removal_stopped { removed_records; removed_bodies; detail } ->
+    Printf.sprintf
+      "settled archive sweep stopped after deleting %d records and %d bodies: %s"
+      removed_records removed_bodies detail
 
 (* Every owner that keeps records under tool-request-owners. The review
    owners and the Curator each keep one fixed scope; a Librarian scope is
@@ -65,7 +74,7 @@ let gate_parent = function
 
 (* Parser errors can carry snippets of private records or bodies, so a
    refusal names only the class of failure. *)
-let refuse detail _ = Census_unavailable detail
+let refuse detail _ = Sweep_refused detail
 
 let live_names ~store =
   let* records =
@@ -80,7 +89,7 @@ let live_names ~store =
       (fun names record ->
         let* names = names in
         let* kind =
-          Option.to_result ~none:(Census_unavailable "a live record is in a scope no owner claims")
+          Option.to_result ~none:(Sweep_refused "a live record is in a scope no owner claims")
             (kind_of_scope (Owner.Record.scope record))
         in
         let* parent =
@@ -106,31 +115,22 @@ let live_names ~store =
   in
   Ok (List.length records, names)
 
-type archived = { files : int; bytes : int64; unnamed : int; unnamed_bytes : int64 }
+(* One archive file the pass decided to delete. *)
+type doomed = { path : string; size : int64 }
 
-let empty = { files = 0; bytes = 0L; unnamed = 0; unnamed_bytes = 0L }
-
-let add ~named archived size =
-  let bytes = Int64.add archived.bytes size in
-  if named then { archived with files = archived.files + 1; bytes }
-  else
-    { files = archived.files + 1
-    ; bytes
-    ; unnamed = archived.unnamed + 1
-    ; unnamed_bytes = Int64.add archived.unnamed_bytes size
-    }
+type plan = { kept : int; records : doomed list; bodies : doomed list }
 
 let sorted_entries path = Sys.readdir path |> Array.to_list |> List.sort String.compare
 
 let is_directory path = (Unix.lstat path).Unix.st_kind = Unix.S_DIR
 
 (* <archive>/<scope digest>/<date>/{records,bodies}/<name>.json. A staging
-   file a settle left is skipped; any other shape refuses the count. *)
-let walk_archive ~root ~named_files =
+   file a settle left is skipped; any other shape refuses the pass. *)
+let plan_archive ~root ~named_files =
   let archive = Filename.concat root Store.tool_request_archive_directory in
   let directory path =
     if is_directory path then Ok (sorted_entries path)
-    else Error (Census_unavailable "an archive entry is not a directory")
+    else Error (Sweep_refused "an archive entry is not a directory")
   in
   let files path ~init ~f =
     let* names = directory path in
@@ -139,65 +139,83 @@ let walk_archive ~root ~named_files =
         let* acc = acc in
         if Fs_compat.is_atomic_orphan_name name then Ok acc
         else
-          let stat = Unix.lstat (Filename.concat path name) in
+          let file = Filename.concat path name in
+          let stat = Unix.lstat file in
           if stat.Unix.st_kind = Unix.S_REG && Filename.check_suffix name ".json" then
-            Ok (f acc name (Int64.of_int stat.Unix.st_size))
-          else Error (Census_unavailable "an archive file is not a JSON record or body"))
+            Ok (f acc name { path = file; size = Int64.of_int stat.Unix.st_size })
+          else Error (Sweep_refused "an archive file is not a JSON record or body"))
       (Ok init) names
   in
-  let day path (records, bodies) =
+  let day path plan =
     let* kinds = directory path in
     List.fold_left
-      (fun acc kind ->
-        let* records, bodies = acc in
+      (fun plan kind ->
+        let* plan = plan in
         let path = Filename.concat path kind in
         match kind with
         | "records" ->
-          let+ records =
-            files path ~init:records ~f:(fun records name size ->
-              add ~named:(Names.mem name named_files) records size)
-          in
-          (records, bodies)
+          files path ~init:plan ~f:(fun plan name doomed ->
+            if Names.mem name named_files then { plan with kept = plan.kept + 1 }
+            else { plan with records = doomed :: plan.records })
         | "bodies" ->
-          let+ bodies = files path ~init:bodies ~f:(fun bodies _ size -> add ~named:true bodies size) in
-          (records, bodies)
-        | _ -> Error (Census_unavailable "an archive day holds an unknown directory"))
-      (Ok (records, bodies)) kinds
+          files path ~init:plan ~f:(fun plan _ doomed -> { plan with bodies = doomed :: plan.bodies })
+        | _ -> Error (Sweep_refused "an archive day holds an unknown directory"))
+      (Ok plan) kinds
   in
+  let empty = { kept = 0; records = []; bodies = [] } in
   match Unix.lstat archive with
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok (empty, empty)
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) -> Ok empty
   | _ ->
     let* scopes = directory archive in
     List.fold_left
-      (fun acc scope ->
-        let* acc = acc in
+      (fun plan scope ->
+        let* plan = plan in
         let path = Filename.concat archive scope in
         let* days = directory path in
         List.fold_left
-          (fun acc date ->
-            let* acc = acc in
-            day (Filename.concat path date) acc)
-          (Ok acc) days)
-      (Ok (empty, empty)) scopes
+          (fun plan date ->
+            let* plan = plan in
+            day (Filename.concat path date) plan)
+          (Ok plan) days)
+      (Ok empty) scopes
+
+(* Deletes in order and stops at the first failure with how many it deleted. *)
+let remove doomed =
+  List.fold_left
+    (fun acc { path; size } ->
+      let* count, bytes = acc in
+      match Unix.unlink path with
+      | () -> Ok (count + 1, Int64.add bytes size)
+      | exception Unix.Unix_error (error, _, _) -> Error (count, Unix.error_message error))
+    (Ok (0, 0L)) doomed
 
 let run ~store =
   let* live_records, names = live_names ~store in
   let named_files = Names.map (fun id -> Store.digest id ^ ".json") names in
-  let* records, bodies =
-    try walk_archive ~root:(Store.root store) ~named_files with
+  let* plan =
+    try plan_archive ~root:(Store.root store) ~named_files with
     | Unix.Unix_error (error, operation, _) ->
-      Error (Census_unavailable (operation ^ ": " ^ Unix.error_message error))
-    | Sys_error _ -> Error (Census_unavailable "an archive directory could not be listed")
+      Error (Sweep_refused (operation ^ ": " ^ Unix.error_message error))
+    | Sys_error _ -> Error (Sweep_refused "an archive directory could not be listed")
+  in
+  let* removed_bodies, removed_body_bytes =
+    remove plan.bodies
+    |> Result.map_error (fun (removed_bodies, detail) ->
+      Removal_stopped { removed_records = 0; removed_bodies; detail })
+  in
+  let* removed_records, removed_record_bytes =
+    remove plan.records
+    |> Result.map_error (fun (removed_records, detail) ->
+      Removal_stopped { removed_records; removed_bodies; detail })
   in
   Ok
     { live_records
     ; named_ids = Names.cardinal names
-    ; archived_records = records.files
-    ; archived_record_bytes = records.bytes
-    ; unnamed_records = records.unnamed
-    ; unnamed_record_bytes = records.unnamed_bytes
-    ; archived_bodies = bodies.files
-    ; archived_body_bytes = bodies.bytes
+    ; kept_records = plan.kept
+    ; removed_records
+    ; removed_record_bytes
+    ; removed_bodies
+    ; removed_body_bytes
     }
 
 let run_at_startup ~base_path =
@@ -207,15 +225,14 @@ let run_at_startup ~base_path =
     Ok
       { live_records = 0
       ; named_ids = 0
-      ; archived_records = 0
-      ; archived_record_bytes = 0L
-      ; unnamed_records = 0
-      ; unnamed_record_bytes = 0L
-      ; archived_bodies = 0
-      ; archived_body_bytes = 0L
+      ; kept_records = 0
+      ; removed_records = 0
+      ; removed_record_bytes = 0L
+      ; removed_bodies = 0
+      ; removed_body_bytes = 0L
       }
   | exception Unix.Unix_error (error, operation, _) ->
-    Error (Census_unavailable (operation ^ ": " ^ Unix.error_message error))
+    Error (Sweep_refused (operation ^ ": " ^ Unix.error_message error))
   | stat when stat.Unix.st_kind = Unix.S_DIR ->
     run ~store:(Store.create ~root:(Filename.concat runtime_root "lane-addons"))
-  | _ -> Error (Census_unavailable "workspace runtime root is not a directory")
+  | _ -> Error (Sweep_refused "workspace runtime root is not a directory")

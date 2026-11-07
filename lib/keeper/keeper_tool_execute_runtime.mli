@@ -73,6 +73,16 @@ val handle_tool_execute_with_outcome :
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->
+  ?defer:
+    ((turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+      Keeper_tool_execution.t) ->
+     Keeper_tool_execution.t) ->
+    (** [defer] receives the rest of the call once the endpoint, the cwd and
+        the typed input have been accepted, and returns what the caller gets.
+        A refusal in those checks never reaches it. The default runs the rest
+        in place. A [defer] that runs it later passes the sandbox factory the
+        rest should use, because the one given to this function belongs to the
+        calling turn. *)
   shell_ir_rewrite:(Masc_exec.Shell_ir.t -> (Masc_exec.Shell_ir.t, string) result) ->
     (** The caller's shell surface (RFC tools-as-shell-commands): it turns
         [masc] stages into delegated tool calls.  Required, because routing

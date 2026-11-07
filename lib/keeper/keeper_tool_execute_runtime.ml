@@ -349,6 +349,7 @@ let handle_tool_execute_typed
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?defer
       ~shell_ir_rewrite
       ~(result_projection : Tool_output.model_projection)
       ~(args : Yojson.Safe.t)
@@ -412,6 +413,12 @@ let handle_tool_execute_typed
              ~effect_disposition:Tool_result.Proven_pre_effect
              (error_json ~fields (typed_validation_error_text e))
          | Ok () ->
+        (* Everything above ran on the caller's turn: the endpoint, the cwd
+           jail and the typed input are checked before a deferred call is
+           accepted, so a refusal comes back at once. What follows touches the
+           sandbox, and a [defer] may run it after this turn has ended, so it
+           takes the factory it should use instead of closing over the turn's. *)
+        let continue ~turn_sandbox_factory =
         let cmd = typed_input_command_text input in
         let timeout_budget = typed_input_timeout_budget input in
         let timeout_sec = typed_input_timeout_sec input in
@@ -1283,7 +1290,12 @@ let handle_tool_execute_typed
                             ]
                             @ dispatched_model_location_fields ())
                          message)))
-        ))))))
+        )))))
+        in
+        (match defer with
+         | None -> continue ~turn_sandbox_factory
+         | Some defer -> defer continue)
+        )
 
 let handle_tool_execute_with_outcome
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -1292,6 +1304,7 @@ let handle_tool_execute_with_outcome
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?defer
       ~shell_ir_rewrite
       ~result_projection
       ~(args : Yojson.Safe.t)
@@ -1309,6 +1322,7 @@ let handle_tool_execute_with_outcome
     ?continuation_channel
     ?gate_context
     ?gate_grant
+    ?defer
     ~shell_ir_rewrite
     ~result_projection
     ~args

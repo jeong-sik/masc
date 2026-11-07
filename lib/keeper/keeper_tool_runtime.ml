@@ -172,6 +172,19 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
     args =
   match descriptor.Keeper_tool_descriptor.runtime_handler with
   | Tool_execute ->
+      (* [run_in_background] changes where the checked call runs, not what it
+         is: the endpoint, cwd and typed input are still checked on this turn,
+         and the rest is handed to the background owner. *)
+      let defer =
+        if Keeper_tool_execute_typed_input.requests_background args
+        then
+          Some
+            (Keeper_execute_background.defer
+               ~config:ctx.config
+               ~meta:ctx.meta
+               ~args)
+        else None
+      in
       Some
         (Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
            ~turn_sandbox_factory:ctx.turn_sandbox_factory
@@ -180,6 +193,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
          ?continuation_channel:ctx.continuation_channel
          ?gate_context:ctx.gate_context
          ?gate_grant:ctx.gate_grant
+         ?defer
          ~shell_ir_rewrite:
            (Keeper_shell_tool_command.rewrite
               ~lookup:descriptor_for_internal

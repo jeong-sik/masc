@@ -371,6 +371,8 @@ let with_initial_configuration ~base_path initialize =
 ;;
 
 let recover_keeper_msg_requests_on_startup ~base_path =
+  (* Before recovery: recovery settles the records this reads as lost. *)
+  Keeper_execute_background.deliver_unfinished_runs ~base_path;
   let report = Keeper_msg_async.recover_lost_disk_records ~base_path () in
   Atomic.set latest_keeper_msg_recovery (Some report);
   if

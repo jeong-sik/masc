@@ -1,0 +1,160 @@
+(** Receipts of a background Execute run.
+
+    What the Keeper reads after it starts a command with [run_in_background]
+    is the receipt, so these tests pin the fields a receipt carries and that
+    the outbox accepts it. The worker that runs the command is not exercised
+    here. *)
+
+open Alcotest
+open Masc
+
+module Background = Keeper_execute_background.For_testing
+module Outbox = Keeper_client_tool_outbox
+
+let get = function Ok value -> value | Error detail -> fail detail
+let keeper_name = "background-owner"
+
+let member key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some value -> value
+     | None -> failf "%s missing" key)
+  | other -> failf "%s looked up on %s" key (Yojson.Safe.to_string other)
+;;
+
+let text = function
+  | `String value -> value
+  | other -> failf "expected a string, got %s" (Yojson.Safe.to_string other)
+;;
+
+let arguments =
+  `Assoc [ "command", `String "sleep 30; echo done"; "run_in_background", `Bool true ]
+;;
+
+let payload =
+  `Assoc [ "ok", `Bool true; "status", `Assoc [ "kind", `String "exit"; "code", `Int 0 ] ]
+;;
+
+let test_started_result_names_the_request () =
+  let json = Background.started_json ~request_id:"req-1" in
+  check string "status" "started" (text (member "status" json));
+  check string "request_id" "req-1" (text (member "request_id" json))
+;;
+
+let test_receipt_names_the_producer_and_the_request () =
+  let receipt =
+    Background.receipt_of_unfinished ~request_id:"req-1" ~arguments ~cause:"stopped"
+  in
+  check string "thread_id" "execute_background" receipt.Outbox.thread_id;
+  check string "turn_id" "req-1" receipt.Outbox.turn_id;
+  check string "call_id" "req-1" receipt.Outbox.call_id;
+  check string "tool_name" "tool_execute" receipt.Outbox.tool_name;
+  check bool "arguments are the call's own" true (receipt.Outbox.arguments = arguments)
+;;
+
+let test_finished_run_carries_the_foreground_payload () =
+  let receipt =
+    Background.receipt_of_execution
+      ~request_id:"req-1"
+      ~arguments
+      (Keeper_tool_execution.success_data payload)
+  in
+  let response = receipt.Outbox.response in
+  check string "request_id" "req-1" (text (member "request_id" response));
+  check string "outcome" "completed" (text (member "outcome" response));
+  check bool "result is the payload" true (member "result" response = payload)
+;;
+
+let test_failed_run_says_failed () =
+  let receipt =
+    Background.receipt_of_execution
+      ~request_id:"req-1"
+      ~arguments
+      (Keeper_tool_execution.failure
+         ~class_:Tool_result.Runtime_failure
+         "sandbox start failed")
+  in
+  let response = receipt.Outbox.response in
+  check string "outcome" "failed" (text (member "outcome" response));
+  check
+    bool
+    "result keeps the failure text"
+    true
+    (String_util.contains_substring
+       (Yojson.Safe.to_string (member "result" response))
+       "sandbox start failed")
+;;
+
+let test_unfinished_run_says_the_status_was_not_recorded () =
+  let receipt =
+    Background.receipt_of_unfinished
+      ~request_id:"req-1"
+      ~arguments
+      ~cause:Background.restart_cause
+  in
+  let response = receipt.Outbox.response in
+  let result = member "result" response in
+  check string "outcome" "unfinished" (text (member "outcome" response));
+  check bool "ok is false" true (member "ok" result = `Bool false);
+  check string "message" Background.restart_cause (text (member "message" result))
+;;
+
+(* [Outbox.retain] refuses a receipt the codec rejects and one that reads back
+   different from what was written; both would block the Keeper's requests if
+   they were committed. *)
+let test_outbox_keeps_the_receipt () =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  let base_path = Filename.temp_dir "execute-background-" "" in
+  Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree base_path);
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:(Some keeper_name));
+  let finished =
+    Background.receipt_of_execution
+      ~request_id:"req-1"
+      ~arguments
+      (Keeper_tool_execution.success_data payload)
+  in
+  let unfinished =
+    Background.receipt_of_unfinished
+      ~request_id:"req-2"
+      ~arguments
+      ~cause:Background.restart_cause
+  in
+  get (Outbox.retain ~base_path ~keeper_name finished);
+  get (Outbox.retain ~base_path ~keeper_name unfinished);
+  (* The same receipt again leaves one file: the name is the content digest. *)
+  get (Outbox.retain ~base_path ~keeper_name unfinished);
+  let snapshot = get (Outbox.load ~base_path ~keeper_name) in
+  check int "two receipts" 2 (List.length (Outbox.receipt_ids snapshot));
+  let context = String.concat "\n" (Outbox.developer_context snapshot) in
+  check bool "first request id is readable" true (String_util.contains_substring context "req-1");
+  check bool "second request id is readable" true (String_util.contains_substring context "req-2")
+;;
+
+let () =
+  run
+    "keeper_execute_background"
+    [ ( "receipt"
+      , [ test_case "started result names the request" `Quick test_started_result_names_the_request
+        ; test_case
+            "receipt names the producer and the request"
+            `Quick
+            test_receipt_names_the_producer_and_the_request
+        ; test_case
+            "finished run carries the foreground payload"
+            `Quick
+            test_finished_run_carries_the_foreground_payload
+        ; test_case "failed run says failed" `Quick test_failed_run_says_failed
+        ; test_case
+            "unfinished run says the status was not recorded"
+            `Quick
+            test_unfinished_run_says_the_status_was_not_recorded
+        ] )
+    ; "outbox", [ test_case "outbox keeps the receipt" `Quick test_outbox_keeps_the_receipt ]
+    ]
+;;

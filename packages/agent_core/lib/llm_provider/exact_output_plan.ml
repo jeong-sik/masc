@@ -92,21 +92,11 @@ type finalization_error =
 let[@warning "-32"] fingerprint_to_string (Fingerprint value) = value
 let sha256 value = Sha256.(to_hex (digest_string value))
 
-let rec canonical_json = function
-  | `Assoc fields ->
-    `Assoc
-      (fields
-       |> List.map (fun (name, value) -> name, canonical_json value)
-       |> List.sort (fun (left, _) (right, _) -> String.compare left right))
-  | `List values -> `List (List.map canonical_json values)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as scalar -> scalar
-;;
-
 let canonical_response_format = function
   | Types.JsonSchema (Types.Raw_schema schema) ->
-    Types.JsonSchema (Types.Raw_schema (canonical_json schema))
+    Types.JsonSchema (Types.Raw_schema (Yojson.Safe.sort schema))
   | Types.JsonSchema (Types.Named_schema named) ->
-    Types.JsonSchema (Types.Named_schema { named with schema = canonical_json named.schema })
+    Types.JsonSchema (Types.Named_schema { named with schema = Yojson.Safe.sort named.schema })
   | (Types.Off | Types.JsonMode) as response_format -> response_format
 ;;
 

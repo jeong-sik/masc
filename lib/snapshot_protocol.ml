@@ -41,17 +41,7 @@ let to_yojson = function
       ]
 ;;
 
-let rec canonical_json = function
-  | `Assoc fields ->
-    `Assoc
-      (List.sort
-         (fun (left, _) (right, _) -> String.compare left right)
-         (List.map (fun (key, value) -> key, canonical_json value) fields))
-  | `List values -> `List (List.map canonical_json values)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value -> value
-;;
-
 let revision_of_json ~namespace value =
-  let canonical = canonical_json value |> Yojson.Safe.to_string in
+  let canonical = Yojson.Safe.sort value |> Yojson.Safe.to_string in
   Printf.sprintf "%s:%s" namespace (Agent_core_sha256.(digest_string canonical |> to_hex))
 ;;

@@ -135,18 +135,8 @@ type 'callback_error flow_request_error =
 
 open Result.Syntax
 
-let rec canonical_json = function
-  | `Assoc fields ->
-    `Assoc
-      (fields
-       |> List.map (fun (name, value) -> name, canonical_json value)
-       |> List.sort (fun (left, _) (right, _) -> String.compare left right))
-  | `List values -> `List (List.map canonical_json values)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as scalar -> scalar
-;;
-
 let fingerprint_schema schema =
-  canonical_json schema
+  Yojson.Safe.sort schema
   |> Yojson.Safe.to_string
   |> Agent_core_sha256.digest_string
   |> Agent_core_sha256.to_hex
@@ -249,7 +239,7 @@ let response_format (target : request_target) requirement =
 ;;
 
 let domain_schema_instruction_text (Domain_schema schema) =
-  let schema = canonical_json schema |> Yojson.Safe.to_string in
+  let schema = Yojson.Safe.sort schema |> Yojson.Safe.to_string in
   Printf.sprintf
     "Return exactly one JSON value matching this JSON Schema. Do not use Markdown \
      code fences or include any explanation. JSON Schema: %s"

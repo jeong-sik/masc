@@ -223,17 +223,6 @@ let path ~base_path ~keeper_name =
     (state_dir ~base_path ~keeper_name)
 ;;
 
-let rec canonical_json = function
-  | `Assoc fields ->
-    `Assoc
-      (fields
-       |> List.map (fun (name, value) -> name, canonical_json value)
-       |> List.sort (fun (left, _) (right, _) -> String.compare left right))
-  | `List values -> `List (List.map canonical_json values)
-  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as value ->
-    value
-;;
-
 let tool_surface_sha256 ?account_home ?account_revision ~native_posture tools =
   let tool_json (tool : Agent_core.Tool.t) =
     let input_schema =
@@ -251,7 +240,7 @@ let tool_surface_sha256 ?account_home ?account_revision ~native_posture tools =
       ; "input_schema", input_schema
       ; "name", `String tool.schema.name
       ]
-    |> canonical_json
+    |> Yojson.Safe.sort
   in
   tools
   |> List.sort (fun (left : Agent_core.Tool.t) right ->
@@ -270,7 +259,7 @@ let tool_surface_sha256 ?account_home ?account_revision ~native_posture tools =
       @ (match account_revision with
          | None -> []
          | Some revision -> ["account_revision", `String revision]))
-  |> canonical_json
+  |> Yojson.Safe.sort
   |> Yojson.Safe.to_string
   |> Agent_core_sha256.digest_string
   |> Agent_core_sha256.to_hex

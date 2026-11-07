@@ -404,7 +404,10 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
       when Masc.Keeper_execution_receipt.needs_operator_broadcast disp
            && activity <> Held_call && activity <> Question && activity <> Confirmation ->
         Some disp
-    | _ -> None
+    | Some { kr_operator_disposition = Ok (Some _); _ } -> None
+    | Some { kr_operator_disposition = Ok None; _ } -> None
+    | Some { kr_operator_disposition = Error _; _ } -> None
+    | None -> None
   in
   let status_color =
     match operator_disposition with

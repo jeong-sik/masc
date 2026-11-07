@@ -1,15 +1,19 @@
 # HTTP/2 response resources
 
-The H2-only and Auto listeners read two restart-scoped settings from
+The H2-only, Auto and HTTPS listeners read four restart-scoped settings from
 `runtime.toml`. The process environment is not read for them; the second column
-is the key the boot load stores the value under.
+is the key the boot load stores the value under. Server push is never
+advertised (RFC 9113 §8.4 deprecates it).
 
 | TOML key | Boot-store key | Default | Scope |
 | --- | --- | --- | --- |
 | `transport.h2_max_concurrent_streams` | `MASC_H2_MAX_CONCURRENT_STREAMS` | 100 | Peer request streams per H2 connection |
 | `transport.h2_max_pending_response_bytes` | `MASC_H2_MAX_PENDING_RESPONSE_BYTES` | 67108864 | Application payload bytes retained across all H2 connections of one listener |
+| `transport.h2_initial_window_size` | `MASC_H2_INITIAL_WINDOW_SIZE` | 65535 | Flow-control window each H2 stream starts with, in bytes |
+| `transport.h2_max_frame_size` | `MASC_H2_MAX_FRAME_SIZE` | 16384 | Largest frame payload the server accepts, in bytes (16384..16777215) |
 
-Values must be positive integers. The stream limit cannot exceed 2147483647;
+Values must be positive integers. The stream limit and the window cannot exceed
+2147483647 and the frame size must stay within 16384..16777215;
 invalid values fail configuration resolution instead of disabling admission.
 The payload setting counts whole response copies and queued/in-flight SSE
 frames. Protocol frames, source/cache values and serialization temporaries

@@ -83,7 +83,7 @@ let test_unknown_label_is_none () =
       check (option outcome) label None (TO.of_label label))
     [ ""; "completed"; "checkpoint"; "Visible_reply"; "VISIBLE_REPLY" ]
 
-let test_of_stop_reason () =
+let test_of_result_surface_stop_reasons () =
   let request : Agent_core.Error.input_required =
     { request_id = "outcome-input-1"
     ; participant_name = None
@@ -94,12 +94,13 @@ let test_of_stop_reason () =
     }
   in
   check outcome "completed -> visible" TO.Visible_reply
-    (TO.of_stop_reason (Runtime_agent.Completed { provider_turn_ordinal = 17 }));
+    (TO.of_result_surface ~response_text:"done"
+       (Runtime_agent.Completed { provider_turn_ordinal = 17 }));
   check outcome "durable stimulus yield -> checkpoint" TO.Continuation_checkpoint
-    (TO.of_stop_reason
+    (TO.of_result_surface ~response_text:"done"
        (Runtime_agent.Yielded_to_durable_stimulus { turns_used = 2 ; provider_turn_ordinal = 17 }));
   check outcome "typed input required -> visible" TO.Visible_reply
-    (TO.of_stop_reason
+    (TO.of_result_surface ~response_text:"done"
        (Runtime_agent.InputRequired { turns_used = 2; request }))
 
 let test_of_result_surface () =
@@ -1255,7 +1256,8 @@ let () =
         ] );
       ( "mapping",
         [
-          test_case "of_stop_reason" `Quick test_of_stop_reason;
+          test_case "of_result_surface by stop reason" `Quick
+            test_of_result_surface_stop_reasons;
           test_case "of_result_surface" `Quick test_of_result_surface;
           test_case "posted progress retains cooperative continuation" `Quick
             test_progress_post_keeps_typed_continuation;

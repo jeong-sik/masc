@@ -5805,6 +5805,7 @@
  (libraries alcotest masc.dashboard masc.masc_types yojson  masc.agent_core.digest))
 
 (include stanzas/test_h2_json_worker.inc)
+(include stanzas/test_https_listener.inc)
 (include stanzas/test_h2_request_fibers.inc)
 (include stanzas/test_h2_oauth_request_fibers.inc)
 (include stanzas/test_dashboard_asset_worker.inc)

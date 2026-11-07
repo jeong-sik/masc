@@ -41,28 +41,8 @@ include Server_mcp_transport_http_conn
 include Server_mcp_transport_http_respond
 include Server_mcp_transport_http_agui
 
-(** [safe_respond_with_string] is a local guard against the
-    [Failure "invalid state, currently handling error"] race that
-    httpun raises when a client disconnects during a long AGENT_CORE turn
-    (2026-05-05 cycle9 FATAL incident).  All direct
-    [Httpun.Reqd.respond_with_string] calls in this file use this
-    wrapper instead of the raw httpun call. *)
-let safe_respond_with_string reqd response body =
-  try Httpun.Reqd.respond_with_string reqd response body
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | Failure msg ->
-      Log.Server.warn
-        "[mcp-http-post] respond_with_string skipped (reqd invalid state; \
-         2026-05-05 AGENT_CORE cancel race): %s"
-        msg
-  | exn ->
-      Log.Server.warn
-        "[mcp-http-post] respond_with_string unexpected exception: %s"
-        (Printexc.to_string exn)
-
-(* RFC-0100 PR-2: chunked first-flush variant of safe_respond_with_string.
-   Writes [body] via [Httpun.Reqd.respond_with_streaming] so the response
+(* RFC-0100 PR-2: chunked first-flush variant of [Http_reqd.respond_with_string].
+   Writes [body] via [Http_reqd.respond_with_streaming] so the response
    uses [Transfer-Encoding: chunked] framing instead of
    [Content-Length: N]. Body bytes and headers (other than transfer-encoding /
    content-length) are byte-identical to the non-chunked form, so well-behaved
@@ -73,14 +53,13 @@ let safe_respond_with_string reqd response body =
    chunk flushes immediately. The placeholder-stub flow for slow paths
    is RFC-0100 PR-3's auto-upgrade work, not this PR.
 
-   Same race-safe wrapping as {!safe_respond_with_string} — the
-   2026-05-05 AGENT_CORE cancel-race exception class is caught and downgraded
-   to a WARN. *)
+   The same late-write guard as [Http_reqd.respond_with_string]: a request
+   that can no longer take a response raises [Failure], logged at WARN. *)
 let safe_respond_chunked reqd response body =
   try
-    let writer = Httpun.Reqd.respond_with_streaming reqd response in
-    Httpun.Body.Writer.write_string writer body ;
-    Httpun.Body.Writer.close writer
+    let writer = Http_reqd.respond_with_streaming reqd response in
+    Http_reqd.Body_writer.write_string writer body ;
+    Http_reqd.Body_writer.close writer
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | Failure msg ->
@@ -242,7 +221,7 @@ let serve_subscriptions_listen ~deps ~origin ~session_id ~protocol_version
         (("content-length", string_of_int (String.length body))
          :: json_headers ~deps session_id protocol_version origin)
     in
-    safe_respond_with_string reqd
+    Http_reqd.respond_with_string reqd
       (Httpun.Response.create ~headers `Bad_request)
       body
   | Some subscription_id ->
@@ -367,7 +346,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
               :: json_headers ~deps session_id protocol_version origin)
           in
           let response = Httpun.Response.create ~headers `Conflict in
-          safe_respond_with_string reqd response body;
+          Http_reqd.respond_with_string reqd response body;
           Error ()
     in
     let* () =
@@ -405,7 +384,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                 :: json_headers ~deps session_id protocol_version origin)
             in
             let response = Httpun.Response.create ~headers `Bad_request in
-            safe_respond_with_string reqd response body);
+            Http_reqd.respond_with_string reqd response body);
           Error ()
     in
     Ok (Http.Request.read_body_async reqd (fun body_str ->
@@ -428,7 +407,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                 :: json_headers ~deps session_id protocol_version
                      origin)
             in
-            safe_respond_with_string reqd
+            Http_reqd.respond_with_string reqd
               (Httpun.Response.create ~headers `Bad_request)
               body;
             Error ()
@@ -444,7 +423,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                 :: json_headers ~deps new_session_id protocol_version
                      origin)
             in
-            safe_respond_with_string reqd
+            Http_reqd.respond_with_string reqd
               (Httpun.Response.create ~headers `Not_found)
               body;
             Error ()
@@ -459,7 +438,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                 :: json_headers ~deps session_id protocol_version origin)
             in
             let response = Httpun.Response.create ~headers `Bad_request in
-            safe_respond_with_string reqd response body;
+            Http_reqd.respond_with_string reqd response body;
             Error ()
         | Error (Server_mcp_request_context.Header_mismatch rejection) ->
             let body =
@@ -472,7 +451,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                 :: json_headers ~deps session_id protocol_version origin)
             in
             let response = Httpun.Response.create ~headers `Bad_request in
-            safe_respond_with_string reqd response body;
+            Http_reqd.respond_with_string reqd response body;
             Error ()
       in
       let stateless_request = request_uses_stateless_protocol request body_str in
@@ -621,7 +600,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     (("content-length", string_of_int (String.length body))
                                      :: json_headers ~deps session_id protocol_version origin)
                                 in
-                                safe_respond_with_string reqd
+                                Http_reqd.respond_with_string reqd
                                   (Httpun.Response.create ~headers status) body
                               | None when wants_sse ->
                                 (match response_json with
@@ -634,7 +613,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let response =
                                       Httpun.Response.create ~headers `Accepted
                                     in
-                                    safe_respond_with_string reqd response ""
+                                    Http_reqd.respond_with_string reqd response ""
                                 | json when Mcp_error_code.is_http_error_response json ->
                                     let body = Yojson.Safe.to_string json in
                                     let headers =
@@ -647,7 +626,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let response =
                                       Httpun.Response.create ~headers `Bad_request
                                     in
-                                    safe_respond_with_string reqd response
+                                    Http_reqd.respond_with_string reqd response
                                       body
                                 | json ->
                                     let event =
@@ -665,7 +644,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let response =
                                       Httpun.Response.create ~headers `OK
                                     in
-                                    safe_respond_with_string reqd response
+                                    Http_reqd.respond_with_string reqd response
                                       body)
                               | None ->
                                 match response_json with
@@ -678,7 +657,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let response =
                                       Httpun.Response.create ~headers `Accepted
                                     in
-                                    safe_respond_with_string reqd response ""
+                                    Http_reqd.respond_with_string reqd response ""
                                 | json when Mcp_error_code.is_http_error_response json ->
                                     let body = Yojson.Safe.to_string json in
                                     let headers =
@@ -691,7 +670,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                                     let response =
                                       Httpun.Response.create ~headers `Bad_request
                                     in
-                                    safe_respond_with_string reqd response
+                                    Http_reqd.respond_with_string reqd response
                                       body
                                 | json ->
                                     (* RFC-0100 PR-2: chunked first-flush.
@@ -834,7 +813,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           :: json_headers ~deps session_id protocol_version origin)
       in
       let response = Httpun.Response.create ~headers `Conflict in
-      safe_respond_with_string reqd response msg
+      Http_reqd.respond_with_string reqd response msg
   | Ok () -> (
       match validate_protocol_version_continuity ~session_id request with
       | Error rejection ->
@@ -845,7 +824,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
               :: json_headers ~deps session_id protocol_version origin)
           in
           let response = Httpun.Response.create ~headers `Bad_request in
-          safe_respond_with_string reqd response body
+          Http_reqd.respond_with_string reqd response body
       | Ok () ->
       (match auth_result with
       | Error failure ->
@@ -1138,7 +1117,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
               Log.Server.debug "SSE runtime unavailable for session %s: %s"
                 session_id msg;
               Sse.unregister_if_current session_id client_id;
-              Httpun.Reqd.respond_with_string reqd response ""
+              Http_reqd.respond_with_string reqd response ""
           | Ok runtime ->
           let response =
             Server_sse_response.respond ~clock:runtime.clock
@@ -1297,7 +1276,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                   [ ("content-length", string_of_int (String.length msg)) ]
               in
               let response = Httpun.Response.create ~headers `Conflict in
-              safe_respond_with_string reqd response msg
+              Http_reqd.respond_with_string reqd response msg
           | Ok () -> (
               match validate_protocol_version_continuity ~session_id request with
               | Error rejection ->
@@ -1314,7 +1293,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                   let response =
                     Httpun.Response.create ~headers `Bad_request
                   in
-                  safe_respond_with_string reqd response body
+                  Http_reqd.respond_with_string reqd response body
               | Ok () ->
                let protocol_version = get_protocol_version request in
                let sse_active_before_stop = is_active_sse_session session_id in
@@ -1342,7 +1321,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
                   (("content-length", "0") :: mcp_headers session_id protocol_version)
               in
               let response = Httpun.Response.create ~headers `No_content in
-              safe_respond_with_string reqd response ""))
+              Http_reqd.respond_with_string reqd response ""))
       | None ->
           let body = "Mcp-Session-Id required" in
           let headers =
@@ -1350,7 +1329,7 @@ let handle_delete_mcp ~deps ?(profile = Full) request reqd =
               [ ("content-length", string_of_int (String.length body)) ]
           in
           let response = Httpun.Response.create ~headers `Bad_request in
-          safe_respond_with_string reqd response body)
+          Http_reqd.respond_with_string reqd response body)
 
 module For_testing = struct
   let with_ping_interval seconds fn =

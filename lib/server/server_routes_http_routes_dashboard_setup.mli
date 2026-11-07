@@ -16,12 +16,12 @@ val resolve_telemetry_limit :
   has_time_window:bool -> n_param:string option -> Telemetry_unified.read_limit
 
 val handle_broadcast :
-  Mcp_server.server_state -> string -> Httpun.Reqd.t -> string -> unit
+  Mcp_server.server_state -> string -> Http_reqd.t -> string -> unit
 val handle_dashboard_link_previews :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 val handle_dashboard_task_history :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 val handle_dashboard_workspace :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 val handle_telemetry :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit

@@ -40,7 +40,7 @@ let respond_redirect location reqd =
            ])
       `Found
   in
-  Httpun.Reqd.respond_with_string reqd response ""
+  Http_reqd.respond_with_string reqd response ""
 ;;
 
 let authority_opt () =

@@ -37,7 +37,7 @@ module For_testing : sig
     Mcp_server.server_state ->
     string ->
     Httpun.Request.t ->
-    Httpun.Reqd.t ->
+    Http_reqd.t ->
     string ->
     unit
 
@@ -45,7 +45,7 @@ module For_testing : sig
     Mcp_server.server_state ->
     string ->
     Httpun.Request.t ->
-    Httpun.Reqd.t ->
+    Http_reqd.t ->
     string ->
     unit
   (** The routing POST after authentication: parse the body, call the
@@ -55,7 +55,7 @@ module For_testing : sig
     Mcp_server.server_state ->
     string ->
     Httpun.Request.t ->
-    Httpun.Reqd.t ->
+    Http_reqd.t ->
     string ->
     unit
   (** The raw-source POST after authentication, including its revision guard. *)
@@ -64,14 +64,14 @@ module For_testing : sig
     Mcp_server.server_state ->
     string ->
     Httpun.Request.t ->
-    Httpun.Reqd.t ->
+    Http_reqd.t ->
     string ->
     unit
   (** The [tui] table POST after authentication: one parsed change, written
       through Runtime's config commit (RFC-0482 §3.1). *)
 
   val handle_tui_preferences_get :
-    Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+    Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
   (** The [tui] table GET after authentication: the settings only. *)
 
   val handle_runtime_assignment_post_with :
@@ -86,7 +86,7 @@ module For_testing : sig
     Mcp_server.server_state ->
     string ->
     Httpun.Request.t ->
-    Httpun.Reqd.t ->
+    Http_reqd.t ->
     string ->
     unit
 

@@ -88,56 +88,6 @@ let is_rate_limit_exempt path =
   String.equal path "/health"
   || Server_health_paths.is_public path
 
-(** [safe_reqd_respond reqd response body] guards all direct
-    [Httpun.Reqd.respond_with_string] calls in the main request handler
-    against the "invalid state, currently handling error" [Failure] that
-    httpun raises when the reqd has already entered its error-handling path
-    (e.g. client disconnect during a long AGENT_CORE turn — 2026-05-05 cycle9
-    FATAL race, also see [Http_server_eio.safe_respond_with_string]).
-    [Eio.Cancel.Cancelled] is always re-raised.  The result says only whether
-    httpun accepted the response write, not whether the peer received it. *)
-let safe_reqd_respond reqd response body =
-  try
-    Httpun.Reqd.respond_with_string reqd response body;
-    Transport_metrics.Accepted_by_writer
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | Failure msg ->
-      Log.Server.warn
-        "[http] reqd respond skipped (invalid state; 2026-05-05 AGENT_CORE cancel race): %s"
-        msg;
-      Transport_metrics.Rejected_by_writer
-  | exn ->
-      Log.Server.warn "[http] reqd respond unexpected exception: %s"
-        (Printexc.to_string exn);
-      Transport_metrics.Rejected_by_writer
-
-(** Returns true if the request was rate-limited and a 429 response write was
-    attempted on [reqd]. Caller should short-circuit further handling in that
-    case. The accepted-response counter advances only when the writer returns
-    normally. Health-probe paths are always allowed through.
-
-    Enforces two complementary rate limits:
-    1. Per-client IP (via [client_addr]) — protects against volumetric abuse.
-    2. MCP transport requests consume the per-agent operation bucket here.
-       Authenticated API operation wrappers own that charge for their routes;
-       charging them here too would double-debit one request. Dashboard assets
-       and read observations remain under the same per-IP resource boundary. *)
-(* Which requests this ingress charges to the per-agent bucket. The exemption
-   this lane introduces is for observation reads, and "not MCP transport" was a
-   wider net than that:
-
-   - A WebSocket upgrade is a GET, but it opens a persistent session rather than
-     answering a read, and no route wrapper charges it. Left exempt, one token
-     could hold open as many sessions as it liked while the per-IP bucket
-     refilled -- the session count is what is unbounded, not the message rate.
-   - Any other method is not a read. [with_public_read] reaches
-     [with_read_auth] only under MASC_HTTP_AUTH_STRICT, so outside strict mode a
-     bearer-authenticated POST through that wrapper -- nav-event is one -- had no
-     charge here and none there either.
-
-   GET and HEAD on everything else stay exempt, which is the read boundary this
-   lane set out to draw. *)
 let charges_agent_bucket (request : Httpun.Request.t) =
   is_mcp_transport_request request
   || String.equal (Http.Request.path request) "/ws"
@@ -156,7 +106,7 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
         rl_headers
       ) in
       let acceptance =
-        safe_reqd_respond reqd
+        Masc.Http_reqd.try_respond_with_string reqd
           (Httpun.Response.create ~headers `Too_many_requests) body
       in
       Transport_metrics.record_http_rate_limit_response
@@ -185,7 +135,7 @@ let try_rate_limit_block ~path ~client_addr ~request reqd =
                     :: rl_headers)
                 in
                 let acceptance =
-                  safe_reqd_respond reqd
+                  Masc.Http_reqd.try_respond_with_string reqd
                     (Httpun.Response.create ~headers `Too_many_requests)
                     body
                 in
@@ -221,7 +171,7 @@ let try_mcp_validation_block
          @ mcp_headers "-" protocol_version)
     in
     let response = Httpun.Response.create ~headers `Forbidden in
-    ignore (safe_reqd_respond reqd response body);
+    Masc.Http_reqd.respond_with_string reqd response body;
     true
   end
   else if is_mcp_transport && request.Httpun.Request.meth <> `OPTIONS &&
@@ -232,7 +182,7 @@ let try_mcp_validation_block
       :: json_headers "-" protocol_version origin
     ) in
     let response = Httpun.Response.create ~headers `Bad_request in
-    ignore (safe_reqd_respond reqd response body);
+    Masc.Http_reqd.respond_with_string reqd response body;
     true
   end
   else false
@@ -245,11 +195,11 @@ let try_mcp_validation_block
     [GET /ws] (same-origin WebSocket upgrade + discovery) is owned by
     the route table ([Server_routes_http_routes_frontend] via
     [Server_route.ws_get]) and reached through
-    [Http.Router.dispatch ~upgrade] below.  RFC-0281 consolidated the
+    [Http.Router.dispatch] below.  RFC-0281 consolidated the
     previously-duplicated main_eio upgrade/discovery handlers into the
     router so [/ws] has a single owner that actually drives the
     connection. *)
-let dispatch_route ~router ~request ~path ~upgrade reqd =
+let dispatch_route ~router ~request ~path reqd =
   match request.Httpun.Request.meth, path with
   | `OPTIONS, _ -> options_handler request reqd
   | `DELETE, "/mcp" -> handle_delete_mcp request reqd
@@ -262,7 +212,7 @@ let dispatch_route ~router ~request ~path ~upgrade reqd =
   (* Board reads/reactions are owned by the typed route table: exact routes
      ([/api/v1/board/reactions], [/catalog]) win over the board prefix route,
      and the prefix route resolves the bearer-bound reaction actor itself. *)
-  | _ -> Http.Router.dispatch router ~upgrade request reqd
+  | _ -> Http.Router.dispatch router request reqd
 
 let log_late_response_failure ~context msg =
   Log.Http.warn "%s: response already unwritable; skipped late response (%s)"
@@ -272,7 +222,7 @@ let try_internal_error_response reqd msg =
   try Http.Response.internal_error msg reqd with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> (
-      match Http.Late_response.classify_write_failure exn with
+      match Masc.Http_reqd.Late_response.classify_write_failure exn with
       | Some failure_msg ->
           log_late_response_failure ~context:"main_eio internal_error"
             failure_msg
@@ -289,7 +239,7 @@ let try_auth_config_error_response reqd =
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    (match Http.Late_response.classify_write_failure exn with
+    (match Masc.Http_reqd.Late_response.classify_write_failure exn with
      | Some failure_msg ->
        log_late_response_failure
          ~context:"main_eio auth configuration unavailable"
@@ -309,13 +259,11 @@ let respond_request_authority_bad_request ~error_code ~message reqd =
 (** Extended router to handle OPTIONS *)
 let make_extended_handler ~trust_policy routes =
   fun client_addr gluten_reqd ->
-    let reqd = gluten_reqd.Gluten.Reqd.reqd in
-    (* Gluten upgrade capability — only available here at the connection
-       boundary.  Threaded to [Http.Router.dispatch] so WebSocket routes
-       ([Server_route.ws_get]) can drive the post-101 connection.
-       RFC-0281. *)
-    let upgrade = gluten_reqd.Gluten.Reqd.upgrade in
-    let request = Httpun.Reqd.request reqd in
+    (* The handle carries this connection's Gluten upgrade capability, so
+       WebSocket routes ([Server_route.ws_get]) can drive the post-101
+       connection from [Http.Router.dispatch].  RFC-0281. *)
+    let reqd = Masc.Http_reqd.of_gluten gluten_reqd in
+    let request = Masc.Http_reqd.request reqd in
     match
       Server_request_authority.classify_http1_request ~trust_policy request
     with
@@ -379,7 +327,7 @@ let make_extended_handler ~trust_policy routes =
             else
               Server_workspace_precondition.guard_http1 ~path request reqd
                 ~admitted:(fun () ->
-                  dispatch_route ~router:routes ~request ~path ~upgrade reqd)
+                  dispatch_route ~router:routes ~request ~path reqd)
           with
           (* Cancellation propagates through the connection switch without
              attempting a response from a cancelled handler. *)
@@ -387,7 +335,7 @@ let make_extended_handler ~trust_policy routes =
           | Auth.Auth_config_error _ -> try_auth_config_error_response reqd
           | exn ->
             let msg = Printexc.to_string exn in
-            (match Http.Late_response.classify_write_failure exn with
+            (match Masc.Http_reqd.Late_response.classify_write_failure exn with
              | Some failure_msg ->
                log_late_response_failure
                  ~context:"main_eio request handler"

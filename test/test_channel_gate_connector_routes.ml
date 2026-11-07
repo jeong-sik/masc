@@ -731,7 +731,7 @@ let dispatch_gate_route ~sw ~clock state token target_path =
     let response_buf = Buffer.create 1024 in
     let conn =
       Httpun.Server_connection.create (fun reqd ->
-        Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+        Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd))
     in
     let request_str =
       Printf.sprintf
@@ -1022,7 +1022,7 @@ let test_keeper_status_http_502_dispatch_failure () =
           Httpun.Server_connection.create (fun reqd ->
             Server_request_authority.with_current (loopback_request_authority ()) (fun () ->
               let args = `Assoc [ ("name", `String "analyst"); ("tail_order", `String "invalid_order_value") ] in
-              Routes.respond_keeper_tool_json ~sw ~clock state req reqd ~tool_name:"masc_keeper_status" ~args))
+              Routes.respond_keeper_tool_json ~sw ~clock state req (Masc.Http_reqd.of_httpun reqd) ~tool_name:"masc_keeper_status" ~args))
         in
         let request_str = Printf.sprintf "GET /api/v1/gate/keeper-status?name=valid_keeper HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: http://127.0.0.1:8935\r\nAuthorization: Bearer %s\r\n\r\n" token in
         let bytes = Bigstringaf.of_string ~off:0 ~len:(String.length request_str) request_str in

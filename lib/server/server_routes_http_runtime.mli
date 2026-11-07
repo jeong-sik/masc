@@ -362,18 +362,18 @@ val keeper_fleet_runtime_resolution_light_fields :
     [keeper_board_event_collection] because the failure snapshot is in-memory
     and cheap to read. *)
 
-val health_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
+val health_handler : Httpun.Request.t -> Http_reqd.t -> unit
 (** [health_handler request reqd] writes {!make_health_response_json} as the
     response body. *)
 
-val liveness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
+val liveness_handler : Httpun.Request.t -> Http_reqd.t -> unit
 (** [liveness_handler request reqd] always responds [200] as
     soon as the HTTP accept loop is running.  Does NOT depend
     on server_state initialisation — Kubernetes / Railway
     liveness probe target.  Body:
     [{"live": true, "startup": <Server_startup_state.to_yojson>}]. *)
 
-val readiness_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
+val readiness_handler : Httpun.Request.t -> Http_reqd.t -> unit
 (** [readiness_handler request reqd] responds [200] only when
     [Server_startup_state.state_ready] is [true].
 
@@ -461,7 +461,7 @@ val board_sub_board_detail_json :
 
 (** {1 OPTIONS} *)
 
-val options_handler : Httpun.Request.t -> Httpun.Reqd.t -> unit
+val options_handler : Httpun.Request.t -> Http_reqd.t -> unit
 (** [options_handler request reqd] handles [OPTIONS *] and
     [OPTIONS <path>] CORS preflights.  It responds [204 No Content], reflecting
     only origins admitted against the typed request authority, and always sets

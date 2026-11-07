@@ -31,79 +31,8 @@ let default_config = {
 (** HTTP request handler type *)
 type request_handler =
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
-
-(** Late-response failure classifier (#13059).
-
-    [Failure] string-literal patterns are fragile (warning 52) — the
-    upstream library is free to change them.  We accept that risk
-    because:
-
-    - These exact strings ARE the public API surface for the upstream
-      libraries (httpun + the [Faraday]-style writer).  Library
-      authors treat the message text as user-facing diagnostics.
-    - This module is a defensive log-and-skip path only — if a
-      future library version reshapes the message we lose the
-      log-downgrade and revert to the fallback 500 attempt, not a
-      crash.
-    - Substring-match guards (via [String.starts_with] /
-      [String.equal]) localise the dependency rather than spreading
-      the literal across many call sites. *)
-[@@@warning "-52"]
-module Late_response = struct
-  let classify_write_failure = function
-    | Failure msg
-      when String.starts_with msg
-             ~prefix:"httpun.Reqd.respond_with_string: invalid state" ->
-        Some msg
-    | Failure msg when String.equal msg "cannot write to closed writer" ->
-        Some "cannot write to closed writer"
-    | _ -> None
-end
-[@@@warning "+52"]
-
-(** [safe_respond_with_string reqd response body] wraps
-    [Httpun.Reqd.respond_with_string] to silently discard the
-    [Failure "...invalid state..."] that httpun raises when the
-    request descriptor has already transitioned into its error-
-    handling path (e.g. client disconnected during a long AGENT_CORE
-    turn and httpun's own error_handler fired first — the
-    2026-05-05 cycle9 FATAL race).
-
-    [Eio.Cancel.Cancelled] is always re-raised so structured
-    concurrency cancellation is never swallowed.
-
-    Recognized late-response failures route through the shared
-    [Late_response.classify_write_failure] SSOT (#13082 review,
-    copilot thread on safe_respond_with_string drift) so the
-    classifier and this helper cannot diverge silently — anything
-    the classifier owns is logged identically here.  Genuinely
-    unexpected exceptions still log at WARN. *)
-let safe_respond_with_string reqd response body =
-  try Httpun.Reqd.respond_with_string reqd response body
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> (
-      match Late_response.classify_write_failure exn with
-      | Some msg ->
-          (* Recognised late-response race (httpun "invalid state" / closed
-             writer).  Aligned with the WebSocket heartbeat / send_pong /
-             handler sites which already log this at debug —
-             closes the #13082 review N-of-M leftover: the SSOT classifier
-             was unified but this site kept emitting WARN, drowning the
-             [None] branch's genuinely-unexpected signal in routine
-             disconnect noise.  Comment above ("Genuinely unexpected
-             exceptions still log at WARN") only holds once this branch
-             stops warning too. *)
-          Log.Http.debug
-            "[http-eio] respond_with_string skipped (reqd already in \
-             error-handling state; classifier match — \
-             2026-05-05 AGENT_CORE cancellation race): %s" msg
-      | None ->
-          Log.Http.warn
-            "[http-eio] respond_with_string unexpected exception: %s"
-            (Printexc.to_string exn))
 
 (** Simple response helpers *)
 module Response = struct
@@ -199,18 +128,18 @@ module Response = struct
       "405 Method Not Allowed"
 
   let text ?(status = `OK) body reqd =
-    safe_respond_with_string reqd
+    Http_reqd.respond_with_string reqd
       (response ~content_type:text_plain_content_type status body)
       body
 
   let html ?(status = `OK) ?(headers = []) body reqd =
-    safe_respond_with_string reqd
+    Http_reqd.respond_with_string reqd
       (response ~after_headers:headers ~content_type:html_content_type status body)
       body
 
   let bytes ?(status = `OK) ?(headers = []) ~content_type body reqd =
     let headers = scoped_headers () @ headers in
-    safe_respond_with_string reqd
+    Http_reqd.respond_with_string reqd
       (response ~after_headers:headers ~content_type status body)
       body
 
@@ -220,7 +149,7 @@ module Response = struct
         ~headers:(Httpun.Headers.of_list [ "content-length", "0" ])
         status
     in
-    safe_respond_with_string reqd response ""
+    Http_reqd.respond_with_string reqd response ""
 
   (** JSON response with optional zstd compression (dictionary-enhanced)
 
@@ -347,19 +276,19 @@ module Response = struct
     let request =
       match request with
       | Some request -> request
-      | None -> Httpun.Reqd.request reqd
+      | None -> Http_reqd.request reqd
     in
     let response, final_body =
       prepare_json ?status ?compress ~extra_headers ~request ?etag body
     in
-    safe_respond_with_string reqd response final_body
+    Http_reqd.respond_with_string reqd response final_body
 
   let json_lazy ?(status = `OK) ?(compress = true) ?(extra_headers = []) ?request
       ~etag (lazy_body : unit -> string) reqd =
     let request =
       match request with
       | Some req -> req
-      | None -> Httpun.Reqd.request reqd
+      | None -> Http_reqd.request reqd
     in
     let safe_read = match request.Httpun.Request.meth with `GET | `HEAD -> true | _ -> false in
     if not (safe_read && status = `OK) then
@@ -380,7 +309,7 @@ module Response = struct
                 ("cache-control", json_revalidate_cache_control);
               ])
         in
-        safe_respond_with_string reqd
+        Http_reqd.respond_with_string reqd
           (Httpun.Response.create ~headers `Not_modified)
           ""
       | _ ->
@@ -392,7 +321,7 @@ module Response = struct
             ~accept_encoding:(Httpun.Headers.get request.headers "accept-encoding")
             body
         in
-        safe_respond_with_string reqd
+        Http_reqd.respond_with_string reqd
           (response
              ~before_headers:(extra_headers @ [ ("etag", etag); ("cache-control", json_revalidate_cache_control) ])
              ~tail_headers:compression_headers
@@ -406,13 +335,13 @@ module Response = struct
   let json_value_on_cpu ?status ?compress ?extra_headers ?request value reqd =
     let status = timeout_envelope_status_override ?status value in
     let extra_headers = scoped_headers () @ Option.value ~default:[] extra_headers in
-    let request = match request with Some request -> request | None -> Httpun.Reqd.request reqd in
+    let request = match request with Some request -> request | None -> Http_reqd.request reqd in
     let response, body =
       Executor_pool_ref.submit_or_inline ~name:__FUNCTION__ (fun () ->
         prepare_json ~status ?compress ~extra_headers ~request
           (Yojson.Safe.to_string value))
     in
-    safe_respond_with_string reqd response body
+    Http_reqd.respond_with_string reqd response body
 
   (** HTML response with ETag and conditional 304 support.
       For static HTML that only changes on rebuild (e.g. dashboard).
@@ -432,7 +361,7 @@ module Response = struct
           ]
         in
         let response = Httpun.Response.create ~headers `Not_modified in
-        safe_respond_with_string reqd response ""
+        Http_reqd.respond_with_string reqd response ""
     | _ ->
         (* Serve full response, with compression if possible *)
         let final_body, compression_headers =
@@ -444,7 +373,7 @@ module Response = struct
           ("etag", etag_value);
           ("cache-control", html_cache_control);
         ] in
-        safe_respond_with_string reqd
+        Http_reqd.respond_with_string reqd
           (response ~after_headers:extra_headers ~tail_headers:compression_headers
              ~content_type:html_content_type status final_body)
           final_body
@@ -460,14 +389,14 @@ module Response = struct
     | None -> false
 
   let not_modified ~headers reqd =
-    safe_respond_with_string reqd
+    Http_reqd.respond_with_string reqd
       (Httpun.Response.create
          ~headers:(Httpun.Headers.of_list (scoped_headers () @ headers))
          `Not_modified)
       ""
 
   let bytes_not_modified ~etag ~cache_control reqd =
-    safe_respond_with_string reqd
+    Http_reqd.respond_with_string reqd
       (Httpun.Response.create
          ~headers:(Httpun.Headers.of_list (bytes_validator ~etag ~cache_control))
          `Not_modified)
@@ -477,17 +406,17 @@ module Response = struct
     if request_holds_tag ~etag request
     then bytes_not_modified ~etag ~cache_control reqd
     else
-      safe_respond_with_string reqd
+      Http_reqd.respond_with_string reqd
         (response ~after_headers:(bytes_validator ~etag ~cache_control) ~content_type `OK body)
         body
 
   let not_found reqd =
     let response, body = not_found_response in
-    safe_respond_with_string reqd response body
+    Http_reqd.respond_with_string reqd response body
 
   let method_not_allowed reqd =
     let response, body = method_not_allowed_response in
-    safe_respond_with_string reqd response body
+    Http_reqd.respond_with_string reqd response body
 
   let internal_error msg reqd =
     text ~status:`Internal_server_error ("500 Internal Server Error: " ^ msg) reqd
@@ -519,7 +448,7 @@ module Request = struct
         ~content_type:Response.text_plain_content_type body
     in
     let response = Httpun.Response.create ~headers status in
-    safe_respond_with_string reqd response body
+    Http_reqd.respond_with_string reqd response body
 
   let too_large_body max_bytes =
     Printf.sprintf "413 Request Entity Too Large (max %d bytes)" max_bytes
@@ -539,18 +468,18 @@ module Request = struct
     ]
 
   let read_body_async_with_limit reqd ~max_bytes ~on_body ~on_error =
-    let request = Httpun.Reqd.request reqd in
+    let request = Http_reqd.request reqd in
     let content_length =
       match Httpun.Headers.get request.headers "content-length" with
       | Some v -> parse_positive_int v
       | None -> None
     in
-    let body = Httpun.Reqd.request_body reqd in
+    let body = Http_reqd.request_body reqd in
     let stopped = ref false in
     let stop () =
       if not !stopped then begin
         stopped := true;
-        (try Httpun.Body.Reader.close body with
+        (try Http_reqd.Body_reader.close body with
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
           Log.Misc.error "[http] body close failed: %s" (Printexc.to_string exn))
@@ -568,7 +497,7 @@ module Request = struct
          in
          let buf = Http_body_buffer.create initial_capacity in
          let rec read_loop () =
-           Httpun.Body.Reader.schedule_read body
+           Http_reqd.Body_reader.schedule_read body
              ~on_eof:(fun () ->
                let body_str = Http_body_buffer.contents buf in
                try on_body body_str with
@@ -616,18 +545,15 @@ end
 module Router = struct
   type route_kind = Exact | Prefix
 
-  (* The Gluten protocol-upgrade capability.  It is only available at
-     the httpun-eio connection-handler boundary, where the request
-     arrives as [Httpun.Reqd.t Gluten.reqd = { reqd; upgrade }].  Plain
-     HTTP routes never need it; WebSocket-upgrade routes ([ws_get])
-     require it to hand the post-101 socket to a
-     [Httpun_ws.Server_connection.t] runtime.  Threaded through
-     [dispatch] as a typed per-request value rather than captured
-     ambiently.  See RFC-0281. *)
-  type upgrade = Gluten.impl -> unit
+  (* The Gluten protocol-upgrade capability.  A handle made at the
+     httpun-eio connection boundary ([Http_reqd.of_gluten]) carries it;
+     plain HTTP routes never need it; WebSocket-upgrade routes ([ws_get])
+     require it to hand the post-101 socket to the ws-direct runtime.
+     [dispatch] reads it from the handle.  See RFC-0281. *)
+  type upgrade = Http_reqd.upgrade
 
   type ws_handler =
-    upgrade:upgrade -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+    upgrade:upgrade -> Httpun.Request.t -> Http_reqd.t -> unit
 
   (* A route either handles the request in-band ([Plain], the common
      case) or upgrades the connection to WebSocket ([Ws]).  Encoding
@@ -779,45 +705,45 @@ module Router = struct
     type state
 
     val with_public_read
-      :  (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      :  (state -> Httpun.Request.t -> Http_reqd.t -> unit)
       -> request_handler
 
     val with_public_read_open_when_strict
-      :  (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      :  (state -> Httpun.Request.t -> Http_reqd.t -> unit)
       -> request_handler
 
     val with_read_auth
-      :  (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      :  (state -> Httpun.Request.t -> Http_reqd.t -> unit)
       -> request_handler
 
     val with_permission_auth
       :  permission:Masc_domain.permission
-      -> (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> (state -> Httpun.Request.t -> Http_reqd.t -> unit)
       -> request_handler
 
     val with_token_permission_auth
       :  permission:Masc_domain.permission
-      -> (state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> (state -> string -> Httpun.Request.t -> Http_reqd.t -> unit)
       -> request_handler
 
     val with_private_token_permission_auth
       :  permission:Masc_domain.permission
-      -> (state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> (state -> string -> Httpun.Request.t -> Http_reqd.t -> unit)
       -> request_handler
 
     val with_tool_auth
       :  tool_name:string
-      -> (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> (state -> Httpun.Request.t -> Http_reqd.t -> unit)
       -> request_handler
 
     val with_tool_observation_auth
       :  tool_name:string
-      -> (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> (state -> Httpun.Request.t -> Http_reqd.t -> unit)
       -> request_handler
 
     val with_tool_actor_auth
       :  tool_name:string
-      -> (state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> (state -> string -> Httpun.Request.t -> Http_reqd.t -> unit)
       -> request_handler
 
     val with_canonical_loopback_host : port:int -> request_handler -> request_handler
@@ -825,9 +751,9 @@ module Router = struct
 
   module type Typed = sig
     type state
-    type state_handler = state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-    type token_handler = state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-    type actor_handler = state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+    type state_handler = state -> Httpun.Request.t -> Http_reqd.t -> unit
+    type token_handler = state -> string -> Httpun.Request.t -> Http_reqd.t -> unit
+    type actor_handler = state -> string -> Httpun.Request.t -> Http_reqd.t -> unit
 
     type _ auth =
       | Always_public : request_handler auth
@@ -870,9 +796,9 @@ module Router = struct
 
   module Make_typed (W : Wrappers) : Typed with type state = W.state = struct
     type state = W.state
-    type state_handler = state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-    type token_handler = state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
-    type actor_handler = state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+    type state_handler = state -> Httpun.Request.t -> Http_reqd.t -> unit
+    type token_handler = state -> string -> Httpun.Request.t -> Http_reqd.t -> unit
+    type actor_handler = state -> string -> Httpun.Request.t -> Http_reqd.t -> unit
 
     type _ auth =
       | Always_public : request_handler auth
@@ -1012,20 +938,19 @@ module Router = struct
         else
           `Not_found
 
-  let dispatch router ?upgrade request reqd =
+  let dispatch router request reqd =
     match resolve router request with
     | `Matched route -> (
         match route.handler with
         | Plain handler -> handler request reqd
         | Ws handler -> (
-            match upgrade with
+            match Http_reqd.upgrade reqd with
             | Some upgrade -> handler ~upgrade request reqd
             | None ->
-                (* A WebSocket-upgrade route was matched on a transport
-                   that cannot upgrade (e.g. the HTTP/2 dispatch path,
-                   which has no Gluten upgrade).  Respond 426 explicitly
-                   rather than silently dropping the request.
-                   RFC-0281 S3.3. *)
+                (* A WebSocket-upgrade route was matched on a handle that
+                   carries no upgrade capability: a transport that cannot
+                   upgrade, or a fixture.  Respond 426 explicitly rather
+                   than silently dropping the request.  RFC-0281 S3.3. *)
                 Response.text ~status:`Upgrade_required
                   "426 Upgrade Required: WebSocket upgrade unavailable on \
                    this transport"

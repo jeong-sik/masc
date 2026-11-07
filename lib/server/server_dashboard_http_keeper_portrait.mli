@@ -93,7 +93,7 @@ val keeper_present : Workspace.config -> string -> unit -> (bool, string) result
     regular file where the metadata belongs). *)
 
 val handle_get :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Serves {!answer} for the Keeper named by {!route}, with this process's
     {!current_build} and cache. Drawing and encoding run on the shared CPU
     pool. *)

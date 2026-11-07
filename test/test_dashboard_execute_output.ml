@@ -645,7 +645,7 @@ let test_route_delivers_open_stream_and_releases_on_disconnect () =
               | Error `Malformed -> fail "invalid test authority" in
             let dispatch reqd =
               Server_request_authority.with_current authority (fun () ->
-                Router.dispatch routes (Httpun.Reqd.request reqd) reqd) in
+                Router.dispatch routes (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd)) in
             EO.inject_for_testing ~keeper_name:"alpha" ~task_id:"first"
               ~stdout:"before subscription\n" ~stderr:"" ~status:status_ok ();
             let connection = Httpun.Server_connection.create dispatch in

@@ -573,12 +573,13 @@ let post_checkpoint_history state ~keeper_name snapshot_ids =
               ; "snapshot_ids", `List (List.map (fun id -> `String id) snapshot_ids) ]) in
   checkpoint_http_response ~meth:"POST" ~keeper_name ~body (fun reqd ->
     Server_dashboard_http_keeper_api_post.handle_keeper_checkpoints_post
-      state (Httpun.Reqd.request reqd) reqd body)
+      state (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd) body)
 ;;
 
 let get_checkpoint_inventory state ~keeper_name =
   checkpoint_http_response ~meth:"GET" ~keeper_name ~body:"" (fun reqd ->
     let request = Httpun.Reqd.request reqd in
+    let reqd = Http_reqd.of_httpun reqd in
     Server_dashboard_http_keeper_api.handle_keeper_get_subroutes state request request reqd)
 ;;
 
@@ -1246,7 +1247,7 @@ let test_input_response_http_accepts_only_original_wait ~commit_fault () =
   let post_fields fields =
     let body=Yojson.Safe.to_string (`Assoc fields) in
     checkpoint_http_response ~meth:"POST" ~keeper_name ~body (fun reqd ->
-      Server_dashboard_http_keeper_api_post.handle_keeper_checkpoints_post state (Httpun.Reqd.request reqd) reqd body) in
+      Server_dashboard_http_keeper_api_post.handle_keeper_checkpoints_post state (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd) body) in
   let post ()=post_fields fields in
   let wrong_response ()=post_fields (("response",`Assoc ["kind",`String "timeout"])::List.remove_assoc "response" fields) in
   (match commit_fault with
@@ -1364,7 +1365,7 @@ let test_input_response_http_requires_explicit_exact_proof () =
     let body=Yojson.Safe.to_string (`Assoc fields) in
     checkpoint_http_response ~meth:"POST" ~keeper_name:"missing-response-owner" ~body (fun reqd ->
       Server_dashboard_http_keeper_api_post.handle_keeper_checkpoints_post
-        state (Httpun.Reqd.request reqd) reqd body) in
+        state (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd) body) in
   let status,_=post fields in
   check int "unavailable Owner inventory is a service failure" 503 status;
   Keeper_owner_registry.install_from_store ~sw ~operation_runner:None ~on_turn_slot_released:None

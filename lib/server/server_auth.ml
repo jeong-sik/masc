@@ -970,7 +970,7 @@ let respond_auth_error request reqd err =
        :: auth_error_headers ~status ~cors:(auth_error_cors_headers request))
   in
   let response = Httpun.Response.create ~headers (status :> Httpun.Status.t) in
-  Httpun.Reqd.respond_with_string reqd response body
+  Http_reqd.respond_with_string reqd response body
 
 (** Respond with 429 Too Many Requests when the per-agent rate limit is
     exceeded.  Includes standard rate-limit headers and CORS so browser
@@ -985,10 +985,12 @@ let respond_agent_rate_limited ~rl_key request reqd =
     rl_headers @
     cors_headers origin
   ) in
-  Httpun.Reqd.respond_with_string reqd
-    (Httpun.Response.create ~headers `Too_many_requests) body;
+  let acceptance =
+    Http_reqd.try_respond_with_string reqd
+      (Httpun.Response.create ~headers `Too_many_requests) body
+  in
   Transport_metrics.record_http_rate_limit_response
-    ~acceptance:Transport_metrics.Accepted_by_writer
+    ~acceptance
     ~protocol:Transport_metrics.H1
     ~scope:Transport_metrics.Agent
 

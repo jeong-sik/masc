@@ -332,7 +332,7 @@ let handle_post_graphql request reqd =
           :: graphql_headers origin
         ) in
         let http_response = Httpun.Response.create ~headers status in
-        Httpun.Reqd.respond_with_string reqd http_response response.body
+        Http_reqd.respond_with_string reqd http_response response.body
   )
 
 let handle_graphql request reqd =

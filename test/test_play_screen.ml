@@ -62,7 +62,7 @@ let dispatch_get ~state ~token =
     let response_buf = Buffer.create 8192 in
     let conn =
       Httpun.Server_connection.create (fun reqd ->
-        Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+        Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd))
     in
     let request_str =
       Printf.sprintf "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: http://127.0.0.1:8935\r\n%s\r\n"

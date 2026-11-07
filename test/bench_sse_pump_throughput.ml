@@ -18,6 +18,7 @@
 
 module Pump = Server_sse_pump
 module Sse = Server_sse_response
+module Reqd = Masc.Http_reqd
 
 let frames_per_run = 20_000
 let runs = 3
@@ -48,7 +49,7 @@ let serve_once ~sw env ~on_response =
         Eio.Promise.resolve resolve_listening (port, fun () -> Eio.Switch.fail server_sw Server_stopped);
         Server_bootstrap_http.serve ~sw:server_sw ~clock ~socket ~addr_label:"sse pump bench"
           ~request_handler:(fun _addr (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) ->
-            Eio.Fiber.fork ~sw:server_sw (fun () -> on_response gluten_reqd.Gluten.Reqd.reqd)))
+            Eio.Fiber.fork ~sw:server_sw (fun () -> on_response (Reqd.of_gluten gluten_reqd))))
     with
     | () -> ()
     | exception Server_stopped -> ());
@@ -76,15 +77,15 @@ let waits ~clock frame reqd =
 ;;
 
 let flush_only frame reqd =
-  let writer = Httpun.Reqd.respond_with_streaming reqd (Httpun.Response.create ~headers `OK) in
+  let writer = Reqd.respond_with_streaming reqd (Httpun.Response.create ~headers `OK) in
   for _ = 1 to frames_per_run do
-    Httpun.Body.Writer.write_string writer frame;
+    Reqd.Body_writer.write_string writer frame;
     let p, r = Eio.Promise.create () in
-    Httpun.Body.Writer.flush writer (fun _ -> Eio.Promise.resolve r ());
+    Reqd.Body_writer.flush writer (fun _ -> Eio.Promise.resolve r ());
     Eio.Promise.await p
   done;
-  Httpun.Body.Writer.write_string writer last_frame;
-  Httpun.Body.Writer.close writer
+  Reqd.Body_writer.write_string writer last_frame;
+  Reqd.Body_writer.close writer
 ;;
 
 let send_only ~clock frame reqd =
@@ -97,13 +98,13 @@ let send_only ~clock frame reqd =
 ;;
 
 let fire_and_forget frame reqd =
-  let writer = Httpun.Reqd.respond_with_streaming reqd (Httpun.Response.create ~headers `OK) in
+  let writer = Reqd.respond_with_streaming reqd (Httpun.Response.create ~headers `OK) in
   for _ = 1 to frames_per_run do
-    Httpun.Body.Writer.write_string writer frame;
-    Httpun.Body.Writer.flush writer (fun _ -> ())
+    Reqd.Body_writer.write_string writer frame;
+    Reqd.Body_writer.flush writer (fun _ -> ())
   done;
-  Httpun.Body.Writer.write_string writer last_frame;
-  Httpun.Body.Writer.close writer
+  Reqd.Body_writer.write_string writer last_frame;
+  Reqd.Body_writer.close writer
 ;;
 
 let ends_with_last buf =

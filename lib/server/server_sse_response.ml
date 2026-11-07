@@ -1,5 +1,5 @@
 type t =
-  { writer : Httpun.Body.Writer.t
+  { writer : Http_reqd.Body_writer.t
   ; closed : unit Eio.Promise.t
   ; resolve_closed : unit Eio.Promise.u
   ; stall : unit -> unit
@@ -19,21 +19,21 @@ let target_path target =
 
 let respond ~clock ~stalled_after_s ?flush_headers_immediately reqd response =
   let closed, resolve_closed = Eio.Promise.create () in
-  { writer = Httpun.Reqd.respond_with_streaming ?flush_headers_immediately reqd response
+  { writer = Http_reqd.respond_with_streaming ?flush_headers_immediately reqd response
   ; closed
   ; resolve_closed
   ; stall = (fun () -> Eio.Time.sleep clock stalled_after_s)
   ; stalled_after_s
-  ; path = target_path (Httpun.Reqd.request reqd).target
+  ; path = target_path (Http_reqd.request reqd).target
   }
 ;;
 
-let is_closed t = Httpun.Body.Writer.is_closed t.writer
+let is_closed t = Http_reqd.Body_writer.is_closed t.writer
 
 (* Closing the body answers no waiting flush (httpun body.ml [close]), so
    [closed] is what wakes the sends still waiting. *)
 let close t =
-  if not (Httpun.Body.Writer.is_closed t.writer) then Httpun.Body.Writer.close t.writer;
+  if not (Http_reqd.Body_writer.is_closed t.writer) then Http_reqd.Body_writer.close t.writer;
   ignore (Eio.Promise.try_resolve t.resolve_closed () : bool)
 ;;
 
@@ -43,14 +43,14 @@ let close t =
    body or the connection writer was drained shut ([`Closed]) (httpun body.ml
    [flush] and [transfer_to_writer]). *)
 let send t frame =
-  if Httpun.Body.Writer.is_closed t.writer
+  if Http_reqd.Body_writer.is_closed t.writer
   then (
     close t;
     Closed)
   else (
-    Httpun.Body.Writer.write_string t.writer frame;
+    Http_reqd.Body_writer.write_string t.writer frame;
     let flushed, resolve = Eio.Promise.create () in
-    Httpun.Body.Writer.flush t.writer (Eio.Promise.resolve resolve);
+    Http_reqd.Body_writer.flush t.writer (Eio.Promise.resolve resolve);
     (* Both ways the response can end without the frame wait on the watcher
        side. A race nested inside the work would raise the outer race's
        cancellation even after the flush answered (eio core fiber.ml

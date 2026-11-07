@@ -355,6 +355,7 @@ let request ~router ?if_none_match ?token ~meth ~body path =
        ~bind_host:"127.0.0.1" ~bind_port:8935 ~explicit_base_url:None) in
   let connection = Httpun.Server_connection.create (fun reqd ->
     let request = Httpun.Reqd.request reqd in
+    let reqd = Http_reqd.of_httpun reqd in
     match Server_request_authority.classify_http1_request ~trust_policy request with
     | Server_request_authority.Single authority ->
       Server_request_authority.with_current authority (fun () ->

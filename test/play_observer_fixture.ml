@@ -70,7 +70,7 @@ let with_server env ~handler body =
     Eio.Fiber.fork_daemon ~sw (fun () ->
       Server_bootstrap_http.serve ~sw ~clock ~socket ~addr_label:"play observer fixture"
         ~request_handler:(fun _addr (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) ->
-          handler gluten_reqd.Gluten.Reqd.reqd);
+          handler gluten_reqd);
       `Stop_daemon);
     Eio.Switch.run (fun pool_sw ->
       Masc_http_client.with_scoped_pool ~sw:pool_sw ~env (fun () -> body ~port)))
@@ -120,8 +120,9 @@ let with_fixture env ?(ready = fun () -> true) fn =
         ; verify_operator_mcp_auth = admit
         ; verify_seat_mcp_auth = admit
         } in
-      let handler reqd =
-        let request = Httpun.Reqd.request reqd in
+      let handler (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) =
+        let request = Httpun.Reqd.request gluten_reqd.Gluten.Reqd.reqd in
+        let reqd = Masc.Http_reqd.of_gluten gluten_reqd in
         Server_request_authority.with_current authority (fun () ->
           Transport.handle_get_mcp ~deps ~sse_kind:Masc.Sse.Observer request reqd) in
       let auth = Masc_test_deps.make_sse_auth workspace "play-observer" in

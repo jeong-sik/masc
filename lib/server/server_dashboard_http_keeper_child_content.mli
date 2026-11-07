@@ -6,4 +6,4 @@ val route : string -> route option
 val permission : Masc_domain.permission
 val response : Mcp_server.server_state -> Httpun.Request.t -> route ->
   Httpun.Status.t * Yojson.Safe.t
-val handle_get : Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> route -> unit
+val handle_get : Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> route -> unit

@@ -10,7 +10,7 @@ val respond_error :
   ?status:Httpun.Status.t ->
   ?request:Httpun.Request.t ->
   ?ok:bool ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   string ->
   unit
 
@@ -21,13 +21,13 @@ val respond_error :
     the tool's own defaults; validation stays in the tool so this endpoint
     cannot drift from what a keeper-side call would accept. *)
 val handle_keeper_fusion_post :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 
 val handle_keeper_operator_note_post :
   Mcp_server.server_state ->
   string ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   string ->
   unit
 
@@ -35,7 +35,7 @@ val handle_keeper_board_attention_quarantine_recovery_post :
   Mcp_server.server_state ->
   string ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   keeper_name:string ->
   raw_partition_id:string ->
   string ->
@@ -64,7 +64,7 @@ val keeper_runtime_trace_json :
   [ `Not_found | `OK ] * Yojson.Safe.t
 
 val handle_keeper_checkpoints_post :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 
 val refresh_keeper_execution_surfaces :
   config:Workspace_utils.config ->
@@ -117,33 +117,33 @@ val handle_keeper_config_post :
   Mcp_server.server_state ->
   string ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   string ->
   unit
 
 val handle_keeper_secrets_post :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 
 val handle_keeper_github_login_post :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 
 val handle_keeper_github_token_post :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 
 val handle_keeper_oauth_login_post :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 
 val handle_keeper_identity_refresh_post :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 
 val handle_keeper_identity_switch_post :
   Mcp_server.server_state ->
   actor:string ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   string ->
   unit
 
@@ -156,7 +156,7 @@ val handle_keeper_lifecycle_post :
   Mcp_server.server_state ->
   string ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
 
 val handle_keeper_directive_post :
@@ -165,7 +165,7 @@ val handle_keeper_directive_post :
   Mcp_server.server_state ->
   string ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   string ->
   unit
 (** A resume body requires a stable [operator_operation_id]; raw
@@ -177,7 +177,7 @@ val handle_keeper_bulk_directive_post :
   Mcp_server.server_state ->
   string ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   string ->
   unit
 (** Pause/wakeup accept a [names] list. Resume accepts a [targets] list whose
@@ -186,7 +186,7 @@ val handle_keeper_bulk_directive_post :
 module For_testing : sig
   val respond_config_refusal :
     request:Httpun.Request.t ->
-    Httpun.Reqd.t ->
+    Http_reqd.t ->
     name:string ->
     refusal:Keeper_turn_up_update.refusal ->
     receipt:Yojson.Safe.t option ->

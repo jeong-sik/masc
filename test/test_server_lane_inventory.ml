@@ -246,7 +246,7 @@ let http_read ~sw ~clock ~state token =
     Fun.protect ~finally:Server_auth.clear_server_state (fun () ->
       let output = Buffer.create 1024 in
       let connection = Httpun.Server_connection.create (fun reqd ->
-        Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+        Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd)) in
       let request = Printf.sprintf
         "GET /api/v1/lanes HTTP/1.1\r\nHost: 127.0.0.1:8935\r\nOrigin: http://127.0.0.1:8935\r\n%s\r\n"
         (match token with None -> "" | Some token -> "Authorization: Bearer " ^ token ^ "\r\n") in

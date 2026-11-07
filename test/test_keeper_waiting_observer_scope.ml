@@ -22,6 +22,7 @@ let request state headers =
   let output = Buffer.create 1024 in
   let connection = Httpun.Server_connection.create (fun reqd ->
     let req = Httpun.Reqd.request reqd in
+    let reqd = Http_reqd.of_httpun reqd in
     Server_dashboard_http_keeper_api.handle_keeper_get_subroutes state req req reqd) in
   let request_headers =
     headers |> List.map (fun (name, value) -> name ^ ": " ^ value ^ "\r\n")

@@ -39,7 +39,7 @@ val handle_post :
   actor:string ->
   approval_id:string ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   string ->
   unit
 (** One recover POST: [action:"rearm"] delegates to
@@ -56,7 +56,7 @@ val handle_post :
 
 val uncertain_path : string
 val uncertain_response : Mcp_server.server_state -> Httpun.Status.t * Yojson.Safe.t
-val handle_uncertain_get : Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+val handle_uncertain_get : Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 (** CanAdmin listing of exact attempts in the authenticated workspace; unavailable
     journals return 503, never an empty successful list. ack requires consume_id. *)
 
@@ -64,7 +64,7 @@ val parse_ack_fields : (string * Yojson.Safe.t) list -> ((string * string), stri
 (** Exact keeper/consume ID; no original argument reconstruction required. *)
 
 val journal_restore_path : string
-val handle_journal_restore : Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+val handle_journal_restore : Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 (** [POST /api/v1/keepers/hitl/late-approval-restore] — the explicit
     un-fence for the late-approval journal (design D4's "명시적 재복원").
     [CanAdmin], no body. Runs the same synchronous rebind-and-re-restore the

@@ -8,7 +8,7 @@ val handle_keeper_lifecycle_post :
   tool_name:string ->
   action:String.t ->
   Mcp_server.server_state ->
-  string -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  string -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Generic handler for boot / up / shutdown / reset / clear posts; the
     [action] parameter selects the keeper FSM event. Boot rejects an ordinary
     paused owner instead of implicitly resuming it, and wakes an already-live

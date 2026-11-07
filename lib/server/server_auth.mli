@@ -13,7 +13,7 @@
 type agent_quota = Exempt_observation | Metered_operation
 val read_request_quota : Httpun.Method.t -> agent_quota
 val check_agent_rate_limit :
-  quota:agent_quota -> Httpun.Request.t -> Httpun.Reqd.t -> (unit, unit) result
+  quota:agent_quota -> Httpun.Request.t -> Http_reqd.t -> (unit, unit) result
 (** Consumes the caller's agent operation bucket when [quota] is
     [Metered_operation]; on refusal the 429 response is already written and
     [Error ()] is returned. *)
@@ -273,12 +273,12 @@ val cors_headers : string -> (string * string) list
 
 val respond_json_with_cors :
   ?status:Httpun.Status.t ->
-  Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Send a JSON body with CORS headers attached. *)
 
 val respond_json_value_with_cors :
   ?status:Httpun.Status.t ->
-  Httpun.Request.t -> Httpun.Reqd.t -> Yojson.Safe.t -> unit
+  Httpun.Request.t -> Http_reqd.t -> Yojson.Safe.t -> unit
 (** Send a structured JSON body with CORS headers attached. *)
 
 val public_read_cors_headers :
@@ -288,13 +288,13 @@ val public_read_cors_headers :
 
 val respond_public_read_json_value :
   ?status:Httpun.Status.t ->
-  Httpun.Request.t -> Httpun.Reqd.t -> Yojson.Safe.t -> unit
+  Httpun.Request.t -> Http_reqd.t -> Yojson.Safe.t -> unit
 (** Structured public-read JSON responder. *)
 
 val respond_no_store_json_value :
   ?cors:(string * Httpun.Headers.value) list ->
   ?status:Httpun.Status.t ->
-  Httpun.Request.t -> Httpun.Reqd.t -> Yojson.Safe.t -> unit
+  Httpun.Request.t -> Http_reqd.t -> Yojson.Safe.t -> unit
 (** {!respond_public_read_json_value} for bodies that must not be cached:
     adds [cache-control: private, no-store]. [cors] replaces the public-read
     headers computed from the request. *)
@@ -338,7 +338,7 @@ val auth_refusal_response :
     it to [Httpun.Status.t] or [H2.Status.t] at the use site. *)
 
 val respond_auth_error :
-  Httpun.Request.t -> Httpun.Reqd.t -> Masc_domain.masc_error -> unit
+  Httpun.Request.t -> Http_reqd.t -> Masc_domain.masc_error -> unit
 (** Compose [http_status_of_auth_error] + [auth_error_json] + generic Bearer
     challenge + CORS, and log the refused path and status once for both
     protocols. *)
@@ -470,56 +470,56 @@ val read_workspace_precondition_error_response :
 val with_read_workspace_precondition :
   Mcp_server.server_state ->
   (Mcp_server.server_state ->
-   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
+   Httpun.Request.t -> Http_reqd.t -> unit) ->
+  Httpun.Request.t -> Http_reqd.t -> unit
 
 val with_public_read :
   (Mcp_server.server_state ->
-   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
+   Httpun.Request.t -> Http_reqd.t -> unit) ->
+  Httpun.Request.t -> Http_reqd.t -> unit
 (** Public-read combinator (no auth, looser CORS). *)
 
 val with_public_read_open_when_strict :
   (Mcp_server.server_state ->
-   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
+   Httpun.Request.t -> Http_reqd.t -> unit) ->
+  Httpun.Request.t -> Http_reqd.t -> unit
 (** [with_public_read] that stays open when strict auth is on: 503 before the
     server is ready, then the read workspace precondition, then the handler. *)
 
 val with_read_auth :
   (Mcp_server.server_state ->
-   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
+   Httpun.Request.t -> Http_reqd.t -> unit) ->
+  Httpun.Request.t -> Http_reqd.t -> unit
 (** Read-tier auth combinator. *)
 
 val with_permission_auth :
   permission:Masc_domain.permission ->
   (Mcp_server.server_state ->
-   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
+   Httpun.Request.t -> Http_reqd.t -> unit) ->
+  Httpun.Request.t -> Http_reqd.t -> unit
 (** Permission-tier combinator. *)
 
 val with_tool_auth :
   tool_name:string ->
   (Mcp_server.server_state ->
-   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
+   Httpun.Request.t -> Http_reqd.t -> unit) ->
+  Httpun.Request.t -> Http_reqd.t -> unit
 (** Tool-call auth combinator for handlers that do not need caller attribution.
     Use [with_tool_actor_auth] when a handler records or checks caller identity;
     consume its resolved actor rather than reading identity headers. *)
 
 val with_tool_observation_auth :
   tool_name:string ->
-  (Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
+  (Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit) ->
+  Httpun.Request.t -> Http_reqd.t -> unit
 (** The same tool authorization and origin checks. GET/HEAD use observation
     quota; other methods remain metered operations. *)
 
 val with_tool_actor_auth :
   tool_name:string ->
   (Mcp_server.server_state ->
-   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
+   string -> Httpun.Request.t -> Http_reqd.t -> unit) ->
+  Httpun.Request.t -> Http_reqd.t -> unit
 (** Tool-call auth combinator that threads the principal used for authorization
     into the handler. Identity resolution follows
     [authorize_tool_request_with_actor], including supplied local attribution
@@ -528,14 +528,14 @@ val with_tool_actor_auth :
 val with_token_permission_auth :
   permission:Masc_domain.permission ->
   (Mcp_server.server_state ->
-   string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
+   string -> Httpun.Request.t -> Http_reqd.t -> unit) ->
+  Httpun.Request.t -> Http_reqd.t -> unit
 (** Like [with_permission_auth] but threads the token id into the
     handler so the handler can audit the call. *)
 val with_private_token_permission_auth :
   permission:Masc_domain.permission ->
-  (Mcp_server.server_state -> string -> Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
-  Httpun.Request.t -> Httpun.Reqd.t -> unit
+  (Mcp_server.server_state -> string -> Httpun.Request.t -> Http_reqd.t -> unit) ->
+  Httpun.Request.t -> Http_reqd.t -> unit
 (** The same token-bound permission and operation quota, with fixed refusal
     bodies, no reflected CORS and no-store on every auth/startup/quota response.
     Handlers still own their private body/response policy. *)

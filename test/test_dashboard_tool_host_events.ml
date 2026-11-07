@@ -326,7 +326,7 @@ let with_report_route ~auth_enabled f =
             authorization actor_header (String.length body) body in
           let output = Buffer.create 256 in
           let connection = Httpun.Server_connection.create (fun reqd ->
-            Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd) in
+            Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd)) in
           let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in
           ignore (Httpun.Server_connection.read_eof connection input ~off:0
             ~len:(Bigstringaf.length input));

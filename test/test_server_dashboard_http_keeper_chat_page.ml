@@ -244,6 +244,7 @@ let get_history state name =
   let output = Buffer.create 1024 in
   let connection = Httpun.Server_connection.create (fun reqd ->
     let req = Httpun.Reqd.request reqd in
+    let reqd = Http_reqd.of_httpun reqd in
     Keeper_api.handle_keeper_get_subroutes state req req reqd) in
   let wire = Printf.sprintf
       "GET /api/v1/keepers/%s/chat/history HTTP/1.1\r\nHost: localhost\r\n\r\n" name in

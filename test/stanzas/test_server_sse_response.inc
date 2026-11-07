@@ -8,4 +8,4 @@
 (test
  (name test_server_sse_response)
  (modules test_server_sse_response)
- (libraries masc_server alcotest eio eio.mock eio_main httpun gluten cstruct bigstringaf))
+ (libraries masc masc_server alcotest eio eio.mock eio_main httpun gluten cstruct bigstringaf))

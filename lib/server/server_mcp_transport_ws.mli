@@ -262,7 +262,7 @@ val ws_upgrade_accept : Httpun.Request.t -> (string, string) result
 
 val respond_and_drive_upgrade :
   upgrade:(Gluten.impl -> unit) ->
-  reqd:Httpun.Reqd.t ->
+  reqd:Http_reqd.t ->
   max_message:int ->
   max_frame:int ->
   handler:(Ws_direct_core.Endpoint.Wsd.t -> Ws_direct_core.Endpoint.handlers) ->
@@ -279,7 +279,7 @@ val upgrade_connection :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?on_message:(string -> string -> unit) ->
   upgrade:(Gluten.impl -> unit) ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   (unit, string) result
 (** Handles an HTTP/1.1 [GET /ws] upgrade on the main HTTP origin using the
     shared MCP session protocol ([mcp_websocket_handler]) and attachment

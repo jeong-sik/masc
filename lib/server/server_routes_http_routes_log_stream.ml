@@ -72,18 +72,18 @@ type ending =
 let serve ~sw ~clock ~config ~(query : Server_logs_query.t) reqd =
   let response = Httpun.Response.create ~headers:(response_headers ()) `OK in
   let writer =
-    Httpun.Reqd.respond_with_streaming ~flush_headers_immediately:true reqd response
+    Http_reqd.respond_with_streaming ~flush_headers_immediately:true reqd response
   in
   (* Waits until the bytes reach the socket, so a client that stops reading
      holds the loop here instead of the writer's buffer growing. Nothing in
      this path writes a log entry: an entry would wake the loop again. *)
   let send data =
-    if Httpun.Body.Writer.is_closed writer
+    if Http_reqd.Body_writer.is_closed writer
     then false
     else (
-      Httpun.Body.Writer.write_string writer data;
+      Http_reqd.Body_writer.write_string writer data;
       let flushed, resolve = Eio.Promise.create () in
-      Httpun.Body.Writer.flush writer (Eio.Promise.resolve resolve);
+      Http_reqd.Body_writer.flush writer (Eio.Promise.resolve resolve);
       match Eio.Promise.await flushed with
       | `Written -> true
       | `Closed -> false)
@@ -123,7 +123,7 @@ let serve ~sw ~clock ~config ~(query : Server_logs_query.t) reqd =
     Eio.Switch.run (fun stream_sw ->
       Server_bootstrap_http.with_cleanups_on_release ~sw:stream_sw
         [ (fun () ->
-            if not (Httpun.Body.Writer.is_closed writer) then Httpun.Body.Writer.close writer)
+            if not (Http_reqd.Body_writer.is_closed writer) then Http_reqd.Body_writer.close writer)
         ];
       (* One line when the stream ends badly; the loop has stopped, so it
          wakes only the other streams, once. *)

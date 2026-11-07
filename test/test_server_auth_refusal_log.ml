@@ -84,6 +84,7 @@ let test_respond_auth_error_emits_line () =
     ignore (Httpun.Server_connection.read conn bs ~off:0 ~len);
     let reqd = Option.get !reqd_ref in
     let request = Httpun.Reqd.request reqd in
+    let reqd = Masc.Http_reqd.of_httpun reqd in
     Server_auth.respond_auth_error request reqd
       (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken "stale-token-x")));
   check bool "respond_auth_error left a refusal line" true

@@ -44,9 +44,9 @@ let serve env ~sw ~router ~posts =
   Eio.Fiber.fork_daemon ~sw (fun () ->
     Server_bootstrap_http.serve ~sw ~clock:(Eio.Stdenv.clock env) ~socket
       ~addr_label:"Board publication test"
-      ~request_handler:(fun _ (request : Httpun.Reqd.t Gluten.Reqd.t) ->
-        let reqd = request.Gluten.Reqd.reqd in
-        let request = Httpun.Reqd.request reqd in
+      ~request_handler:(fun _ (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) ->
+        let request = Httpun.Reqd.request gluten_reqd.Gluten.Reqd.reqd in
+        let reqd = Masc.Http_reqd.of_gluten gluten_reqd in
         if request.meth = `POST && String.equal request.target "/api/v1/tools/masc_board_post"
         then incr posts;
         Server_request_authority.with_current authority (fun () ->

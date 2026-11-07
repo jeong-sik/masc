@@ -1,48 +1,6 @@
 (** Server_mcp_transport_http_respond — HTTP MCP error / not-ready /
     rate-limit response factories. *)
 
-(** [safe_respond_with_string] guards [Httpun.Reqd.respond_with_string]
-    against the [Failure "invalid state, currently handling error"] race
-    that occurs when a client disconnects while a long AGENT_CORE turn is in
-    progress and httpun's error_handler has already started responding
-    (2026-05-05 cycle9 FATAL incident). *)
-let safe_respond_with_string reqd response body =
-  (* #13102 follow-up: backtraces are enabled at process start in
-     [bin/main_eio.ml] (Printexc.record_backtrace true), so the
-     unexpected-exception arm attaches the backtrace whenever it is
-     available.  The known-race arm (Failure path) keeps its compact
-     one-line format because the failure mode is well-classified and
-     the surrounding incident note already captures the diagnostic
-     intent — adding a backtrace there would just churn parsers.
-
-     RFC-0106 P1: routed via [Cancel_safe.protect] so the Cancelled
-     re-raise discipline lives in one place. The [Failure] arm is
-     preserved inside [on_exn] because it is a typed boundary
-     (2026-05-05 AGENT_CORE cancel race), not a catch-all. *)
-  Cancel_safe.protect
-    ~on_exn:(function
-      | Failure msg ->
-          Log.Server.warn
-            "[mcp-http] respond_with_string skipped (reqd invalid state; \
-             2026-05-05 AGENT_CORE cancel race): %s"
-            msg;
-          Transport_metrics.Rejected_by_writer
-      | exn ->
-          let backtrace = Printexc.get_backtrace () in
-          let summary = Printexc.to_string exn in
-          if String.trim backtrace = "" then
-            Log.Server.warn
-              "[mcp-http] respond_with_string unexpected exception: %s"
-              summary
-          else
-            Log.Server.warn
-              "[mcp-http] respond_with_string unexpected exception: %s\n%s"
-              summary backtrace;
-          Transport_metrics.Rejected_by_writer)
-    (fun () ->
-      Httpun.Reqd.respond_with_string reqd response body;
-      Transport_metrics.Accepted_by_writer)
-
 let mcp_headers = Server_mcp_transport_http_headers.mcp_headers
 
 let json_headers = Server_mcp_transport_http_headers.json_headers
@@ -51,7 +9,7 @@ let json_headers = Server_mcp_transport_http_headers.json_headers
 
 (** Pure-JSON body builder shared by [respond_mcp_error] and
     SSE batch builders. Splitting it out makes the wire shape diffable
-    and testable without instantiating an [Httpun.Reqd.t]. *)
+    and testable without instantiating an [Http_reqd.t]. *)
 let error_body ?(id = `Null) ?data ~(code : Mcp_error_code.t) msg :
     Yojson.Safe.t =
   let error_fields =
@@ -106,7 +64,7 @@ let respond_mcp_error ?(extra_headers = []) ?data ?id
   let response =
     Httpun.Response.create ~headers (Mcp_error_code.to_http_status code)
   in
-  ignore (safe_respond_with_string reqd response body)
+  Http_reqd.respond_with_string reqd response body
 
 let mcp_auth_reject_reason_label
     (failure : Server_mcp_transport_http_types.auth_failure) =
@@ -209,7 +167,7 @@ let respond_not_ready ~(deps : Server_mcp_transport_http_types.deps) request req
       @ deps.cors_headers origin)
   in
   let response = Httpun.Response.create ~headers `Service_unavailable in
-  ignore (safe_respond_with_string reqd response body)
+  Http_reqd.respond_with_string reqd response body
 
 (** [respond_sse_register_error] — SSE GET register 검증(unknown/expired session) 실패 시,
     200 스트림을 열기 전에 404 + 새 [Mcp-Session-Id] 로 응답한다. 기존엔 200 송출 후
@@ -228,9 +186,7 @@ let respond_sse_register_error ~(deps : Server_mcp_transport_http_types.deps)
       ( ("content-length", string_of_int (String.length body))
       :: json_headers ~deps new_session_id protocol_version origin )
   in
-  ignore
-    (safe_respond_with_string reqd
-       (Httpun.Response.create ~headers `Not_found) body)
+  Http_reqd.respond_with_string reqd (Httpun.Response.create ~headers `Not_found) body
 
 let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~origin ~session_id ~protocol_version
     ~reason ~retry_after_s reqd =
@@ -255,7 +211,7 @@ let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~ori
   in
   let response = Httpun.Response.create ~headers `Too_many_requests in
   Transport_metrics.inc_sse_reject ~reason:reason_label;
-  let acceptance = safe_respond_with_string reqd response body in
+  let acceptance = Http_reqd.try_respond_with_string reqd response body in
   Transport_metrics.record_http_rate_limit_response
     ~acceptance
     ~protocol:Transport_metrics.H1

@@ -84,7 +84,7 @@ let start_server ?response_clock ~sw env ~stalled_after_s ~on_response =
                  [ "content-type", "text/event-stream"; "connection", "close" ]
              in
              let response =
-               Sse.respond ~clock:response_clock ~stalled_after_s gluten_reqd.Gluten.Reqd.reqd
+               Sse.respond ~clock:response_clock ~stalled_after_s (Masc.Http_reqd.of_gluten gluten_reqd)
                  (Httpun.Response.create ~headers `OK)
              in
              Eio.Fiber.fork ~sw:server_sw (fun () -> on_response response)))
@@ -255,7 +255,7 @@ let test_a_frame_answered_as_the_time_runs_out_is_written () =
         Httpun.Server_connection.create (fun reqd ->
           let headers = Httpun.Headers.of_list [ "content-type", "text/event-stream" ] in
           let response =
-            Sse.respond ~clock ~stalled_after_s:mock_stalled_after_s reqd
+            Sse.respond ~clock ~stalled_after_s:mock_stalled_after_s (Masc.Http_reqd.of_httpun reqd)
               (Httpun.Response.create ~headers `OK)
           in
           Eio.Fiber.fork ~sw (fun () ->

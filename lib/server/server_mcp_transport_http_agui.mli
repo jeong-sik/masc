@@ -13,7 +13,7 @@
 val handle_ag_ui_events :
   deps:Server_mcp_transport_http_types.deps ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
 (** [handle_ag_ui_events ~deps request reqd] handles
     [GET /ag-ui/events].
@@ -78,7 +78,7 @@ val handle_ag_ui_events :
 val handle_presence_events :
   deps:Server_mcp_transport_http_types.deps ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
 (** [handle_presence_events ~deps request reqd] handles
     [GET /events/presence].

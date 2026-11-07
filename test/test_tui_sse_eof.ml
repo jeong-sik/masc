@@ -76,7 +76,7 @@ let test_execute_output_route_eof env =
              let router = Server_routes_http_routes_dashboard.add_routes ~sw:route_sw ~clock
                  (Masc.Http_server_eio.Router.create ()) in
              Eio.Promise.resolve publish_route (fun reqd ->
-               Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd);
+               Masc.Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd));
              Eio.Promise.await stop;
              Eio.Switch.fail route_sw Stop_dashboard_route)
            with Stop_dashboard_route -> ());
@@ -140,6 +140,7 @@ let presence_handler env ~workspace ~runtime_sw =
   in
   fun reqd ->
     let request = Httpun.Reqd.request reqd in
+    let reqd = Masc.Http_reqd.of_httpun reqd in
     Server_request_authority.with_current authority (fun () ->
       Server_mcp_transport_http_agui.handle_presence_events ~deps request reqd)
 

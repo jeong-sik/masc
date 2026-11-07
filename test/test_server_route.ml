@@ -241,7 +241,7 @@ let dispatch ?(host = "127.0.0.1") ?(method_ = "GET") ?(origin = Same_origin)
     let output = Buffer.create 256 in
     let connection =
       Httpun.Server_connection.create (fun reqd ->
-        Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+        Router.dispatch router (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd))
     in
     let authorization =
       Option.fold ~none:"" ~some:(fun token -> "Authorization: Bearer " ^ token ^ "\r\n") token

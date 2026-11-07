@@ -99,12 +99,12 @@ val asks_payload :
     declaration id and then in the order asked, with the Keeper question and
     resolution wire form. Only open questions unless [include_resolved]. *)
 
-val handle_asks : Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+val handle_asks : Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 (** The list route after its read gate. It takes [include_resolved] and the
     {!live_workspace_precondition} pair, and refuses any other parameter. *)
 
 val handle_ask_answer :
-  actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> unit
+  actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 (** [POST /api/v1/lane-addons/ask-answer] after its admin gate. The body is
     [declaration_id], [ask_id], [answers] and an optional [session_id]; the
     responder is the Dashboard surface with [actor]. A missing question is 404,

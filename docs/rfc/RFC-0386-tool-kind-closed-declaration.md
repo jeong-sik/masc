@@ -42,6 +42,7 @@ constitution feature_surface 용어와의 매핑:
 |---|---|---|
 | Multitools | `Composition_tool` | 카탈로그 `keeper_compose_*` (inline) |
 | AsyncTools | `Async_composition_tool` | async 카탈로그 엔트리 + `keeper_composition_status` / `keeper_composition_cancel` |
+| Batch Tools | (tool_kind 가 아니다) | 한 턴의 여러 tool_use 를 `Agent_tool_batch_plan` 이 Serial/Concurrent 로 묶는다. `execution` 축이다 |
 | (기본) | `Atomic_tool` | 나머지 모든 descriptor-backed 툴 |
 
 feature_surface 의 Batch Tools 에 대응하는 `tool_kind` 는 없다.

@@ -1,0 +1,37 @@
+{
+ "low/librarian": {
+  "n_dataset": 17,
+  "n_rows": 17,
+  "http_errors": 0,
+  "formats": {
+   "none": 17
+  },
+  "json_schema_rejected": 0,
+  "finish": {
+   "stop": 17
+  },
+  "json_forms": {
+   "bare": 17
+  },
+  "valid": 17,
+  "errors": {},
+  "wall_p50": 5.75,
+  "wall_p90": 14.06,
+  "wall_max": 15.18,
+  "cloud_wall_p50": 150.33583784103394,
+  "prompt_tokens_p50": 24158,
+  "completion_tokens_p50": 1166,
+  "reasoning_chars_p50": 1836,
+  "cost_usd": 0.034,
+  "retained_jaccard_mean": 0.932,
+  "dropped_exact": 8,
+  "action_agree": 12,
+  "pass_valid_all": true
+ },
+ "spent_usd": 0.034,
+ "pass_lines": {
+  "librarian_valid_all": true,
+  "board_agree_min": 0.9,
+  "board_burst_p50_max_s": 42.0
+ }
+}

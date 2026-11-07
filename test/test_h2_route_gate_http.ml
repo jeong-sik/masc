@@ -558,10 +558,10 @@ let test_bound_goal_timeout_answers_while_read_pool_is_busy () =
 
 (* Strict auth still opens a [Credential_when_strict] route whose path is on
    [Server_auth.is_public_read_path]. Every production route that stays open says
-   [Open_when_strict] instead, except the published-artifacts prefix, which the
-   list opens for a well-formed artifact id. A prefix route is probed under a
-   plain segment and under such an id. *)
-let test_the_public_read_list_opens_only_published_artifacts () =
+   [Open_when_strict] instead, so the list opens none of them. A prefix route is
+   probed under a plain segment and under a well-formed artifact id, the one
+   shape the list opened under the published-artifacts prefix. *)
+let test_the_public_read_list_opens_no_credential_route () =
   let module Router = Masc.Http_server_eio.Router in
   let captured = ref None in
   with_gateway ~on_routes:(fun routes -> captured := Some routes) ~make_routes:production
@@ -589,7 +589,7 @@ let test_the_public_read_list_opens_only_published_artifacts () =
          else None)
       (Router.effective_routes routes)
   in
-  check (list string) "credential routes the list opens" [ "/api/v1/published-artifacts/" ] opened
+  check (list string) "credential routes the list opens" [] opened
 
 let () =
   run "H2 route gate"
@@ -607,7 +607,7 @@ let () =
         ; test_case "physical Skill turn evidence" `Quick test_physical_skill_turn_evidence
         ; test_case "bound Goal tree bypasses stale cache" `Quick test_goal_tree_bound_read_bypasses_stale_cache
         ; test_case "bound Goal timeout answers while read pool is busy" `Quick test_bound_goal_timeout_answers_while_read_pool_is_busy
-        ; test_case "the public-read list opens only published artifacts" `Quick
-            test_the_public_read_list_opens_only_published_artifacts
+        ; test_case "the public-read list opens no credential route" `Quick
+            test_the_public_read_list_opens_no_credential_route
         ] )
     ]

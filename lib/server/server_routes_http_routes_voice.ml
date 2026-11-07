@@ -232,6 +232,9 @@ let handle_voice_catalogue request reqd body =
 
 let add_routes router =
   router
+  (* Voice TTS audio clips stay open under strict auth: the unguessable token
+     file name is the capability, and the browser <audio> element cannot send
+     a bearer token in its request headers. *)
   |> Server_route.prefix_get Server_route.Public_read_open_when_strict Masc_network_defaults.voice_audio_path_prefix
        (fun _state request reqd ->
            let path = Http.Request.path request in

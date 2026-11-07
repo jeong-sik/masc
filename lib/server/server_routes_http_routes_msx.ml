@@ -533,6 +533,10 @@ let add_routes router =
   router
   |> Server_route.get Server_route.Public_read "/api/v1/msx/activity" (fun state req reqd -> Http.Response.json_value ~compress:true ~request:req
            (activity_json ~config:(Mcp_server.workspace_config state)) reqd)
+  (* The cartridge inventory the TUI load menu reads before it can pick a game
+     (RFC-0439 §3.7): file names under <.masc>/msx/carts, not workspace state,
+     so it stays open under strict auth. Loading a game stays a write, gated
+     like the MSX tools. *)
   |> Server_route.get Server_route.Public_read_open_when_strict "/api/v1/msx/carts" (fun state req reqd ->
            let status, json = carts_response ~config:(Mcp_server.workspace_config state) in
            respond_json_value_with_cors ~status:(status :> Httpun.Status.t) req reqd json)

@@ -228,7 +228,11 @@ let add_routes router =
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/published-artifacts" (fun state _actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     respond_operation request reqd (list ~base_path))
-  |> Server_route.prefix_get Server_route.Public_read "/api/v1/published-artifacts/" (capability_read (fun state actor request reqd ->
+  (* A capability-addressed link: the 128-bit random artifact-<32hex> id is the
+     capability, so the read stays open under strict auth and [capability_read]
+     takes an optional token. A private artifact still answers 401, and the
+     catalog listing above needs CanAdmin. *)
+  |> Server_route.prefix_get Server_route.Public_read_open_when_strict "/api/v1/published-artifacts/" (capability_read (fun state actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     match read ~base_path ~actor ~request with
     | Response response -> respond_operation request reqd response

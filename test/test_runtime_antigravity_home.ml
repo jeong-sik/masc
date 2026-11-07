@@ -86,10 +86,10 @@ let test_prepares_private_home_with_oauth_seed () =
      [ "mcp(masc/*)"
      ; "read_file(" ^ Filename.concat (Filename.dirname paths.settings_path) "mcp/masc" ^ ")" ]
      (rules "allow");
-   check (list string) "default row denies the secrets by name, effects and network"
+   check (list string) "default row denies the secrets by name, all reads, effects and network"
      [ "read_file(" ^ Filename.dirname paths.mcp_config_path ^ ")"
      ; "read_file(" ^ paths.oauth_path ^ ")"
-     ; "write_file(*)"; "command(*)"; "read_url(*)"; "execute_url(*)" ]
+     ; "read_file(*)"; "write_file(*)"; "command(*)"; "read_url(*)"; "execute_url(*)" ]
      (rules "deny"));
   (match Runtime_antigravity_home.For_testing.settings_json layout |> require_ok with
    | `Assoc fields ->
@@ -669,18 +669,23 @@ let test_native_permissions_match_posture_and_workspace () =
     check bool "no workspace-wide root read" false
       (List.mem ("read_file(" ^ runtime_root ^ ")") (rules "allow"));
     check bool "no all-files read" false (List.mem "read_file(*)" (rules "allow"));
-    check bool "no all-files read deny to shadow the schema allow" false
-      (List.mem "read_file(*)" (rules "deny"));
+    (match posture with
+     | Runtime_native_tools.Native_none ->
+       check bool "Native_none keeps the all-files deny until the hook lands" true
+         (List.mem "read_file(*)" (rules "deny"))
+     | Native_read | Native_full ->
+       check bool "post-hook postures do not shadow the schema allow" false
+         (List.mem "read_file(*)" (rules "deny")));
     check bool "no command grant can authorize sandbox escape" false
       (List.mem "command(*)" (rules "allow"));
     check bool "no unsupported unsandboxed rule" false
       (List.mem "unsandboxed(*)" (rules "deny")) in
   let network_denies = ["read_url(*)"; "execute_url(*)"] in
-  (* agy allows workspace reads no rule matches, so Native_none names its
-     workspace root in a deny. *)
+  (* Until L3, the all-files deny keeps an unmatched read from becoming an
+     Ask. The workspace deny remains for when L3 removes the broader rule. *)
   check_policy Runtime_native_tools.Native_none
     ["mcp(masc/*)"; schema_allow]
-    (secret_denies @ ["read_file(" ^ workspace ^ ")"; "write_file(*)"; "command(*)"] @ network_denies);
+    (secret_denies @ ["read_file(*)"; "read_file(" ^ workspace ^ ")"; "write_file(*)"; "command(*)"] @ network_denies);
   check_policy Runtime_native_tools.Native_read
     ["mcp(masc/*)"; schema_allow; "read_file(" ^ workspace ^ ")"]
     (secret_denies @ ["write_file(*)"; "command(*)"] @ network_denies);

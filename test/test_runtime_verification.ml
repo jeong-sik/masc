@@ -1282,7 +1282,7 @@ home = Path(os.environ["HOME"])
 settings = json.loads((home / ".gemini/antigravity-cli/settings.json").read_text())
 assert settings["permissions"]["allow"] == ["mcp(masc/*)", "read_file(" + str(home / ".gemini/antigravity-cli/mcp/masc") + ")"]
 assert "command(*)" in settings["permissions"]["deny"]
-assert "read_file(*)" not in settings["permissions"]["deny"]
+assert "read_file(*)" in settings["permissions"]["deny"]
 assert os.getcwd() == str(home / "native-workspace")
 assert "read_file(" + os.getcwd() + ")" in settings["permissions"]["deny"]
 assert "read_file(" + str(home / ".gemini/config") + ")" in settings["permissions"]["deny"]

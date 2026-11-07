@@ -348,6 +348,8 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Cancel_owner_unknown _ -> "Cancel_owner_unknown"
   | Authz_state.Registration_unreadable _ -> "Registration_unreadable"
   | Authz_state.Registration _ -> "Registration"
+  | Authz_state.Session_unreadable _ -> "Session_unreadable"
+  | Authz_state.Session _ -> "Session"
 ;;
 
 let error_name : Z.error -> string = function

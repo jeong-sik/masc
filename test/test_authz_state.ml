@@ -63,7 +63,8 @@ let other_kinds =
       && kind <> K.Admin_assignment
       && kind <> K.Principal
       && kind <> K.Revocation_cancel
-      && kind <> K.Registration)
+      && kind <> K.Registration
+      && kind <> K.Session)
     K.all
 
 let mode = Alcotest.testable (fun fmt m -> Format.pp_print_string fmt (Mode.to_string m)) Mode.equal
@@ -1231,6 +1232,132 @@ let test_an_invitation_admission_spends_the_entry () =
   | Some _ | None -> Alcotest.fail "the entry is not spent by the invitation admission"
 ;;
 
+(* ---- browser sessions ---- *)
+
+module Se = Authz_session_event
+module Sessions = Authz_session_state
+
+let session_of text = id_of_string Authz_types.Session_id.of_string text
+let first_session = session_of "session-1"
+let second_session = session_of "session-2"
+
+let session_record ?(closes = []) ~by event =
+  match Se.to_body event with
+  | Error _ -> Alcotest.fail "fixture session body refused"
+  | Ok body ->
+    R.closing (record_by ~author:(human by) K.Session body) ~closes:(List.map (fun held -> held.S.aborted) closes)
+;;
+
+let issued ?replaces ~by session_id =
+  Se.Issued { session_id; user_id = by; secret_digest = Se.Secret_digest.of_secret "secret"; replaces }
+;;
+
+let session_status state session_id =
+  match Sessions.find state.S.sessions session_id with
+  | None -> "none"
+  | Some { Sessions.status = Sessions.Open; user_id; _ } -> "open for " ^ Authz_types.User_id.to_string user_id
+  | Some { Sessions.status = Sessions.Revoked; _ } -> "revoked"
+  | Some { Sessions.status = Sessions.Replaced by; _ } -> "replaced by " ^ Authz_types.Session_id.to_string by
+;;
+
+(* A sign-in that ends nothing takes no intent. A sign-in that ends the session
+   its browser held, and a sign-out, are Revoke intents on the session they
+   end (design 8.1 and 8.2). *)
+let test_sessions_and_their_intents () =
+  let signed_in =
+    applied_change "a sign-in" (two_admins ()) (session_record ~by:user (issued ~by:user first_session)) None
+  in
+  Alcotest.(check string) "the session" "open for user-1" (session_status signed_in first_session);
+  let acts_at now_ms =
+    match Sessions.find_active signed_in.S.sessions first_session ~now_ms with
+    | Ok (_ : Sessions.session) -> "acts"
+    | Error Sessions.Expired -> "expired"
+    | Error (Sessions.Unknown | Sessions.Ended) -> "not open"
+  in
+  Alcotest.(check string) "the last moment of its 7 days" "acts" (acts_at (at_ms + Sessions.lifetime_ms - 1));
+  Alcotest.(check string) "7 days after its record" "expired" (acts_at (at_ms + Sessions.lifetime_ms));
+  let again =
+    applied_change
+      "the same browser signs in as bob"
+      signed_in
+      (session_record ~by:bob (issued ~by:bob ~replaces:first_session second_session))
+      (Some "revoke of session:session-1")
+  in
+  Alcotest.(check string) "the old one" "replaced by session-2" (session_status again first_session);
+  Alcotest.(check string) "the new one" "open for user-2" (session_status again second_session);
+  let out =
+    applied_change
+      "a sign-out"
+      again
+      (session_record ~by:bob (Se.Revoked { session_id = second_session }))
+      (Some "revoke of session:session-2")
+  in
+  Alcotest.(check string) "signed out" "revoked" (session_status out second_session)
+;;
+
+let step_word state record =
+  match S.step state record with
+  | Ok (_ : S.t) -> "taken"
+  | Error refusal -> S.refusal_to_string refusal
+;;
+
+let test_a_session_record_that_is_refused () =
+  let state = step_ok (two_admins ()) (session_record ~by:user (issued ~by:user first_session)) in
+  List.iter
+    (fun (label, record, expected) -> Alcotest.(check string) label (S.refusal_to_string expected) (step_word state record))
+    [ ( "an unreadable body"
+      , record_by ~author:(human user) K.Session (body_of_json (`Assoc []))
+      , S.Session_unreadable Se.Wrong_members )
+    ; ( "a sign-out of another's session"
+      , session_record ~by:bob (Se.Revoked { session_id = first_session })
+      , S.Session (Sessions.Not_the_owner { session_id = first_session; author = bob }) )
+    ; ( "a person who never joined"
+      , session_record ~by:carol (issued ~by:carol second_session)
+      , S.Session (Sessions.User_not_active carol) )
+    ; ( "the id again"
+      , session_record ~by:bob (issued ~by:bob first_session)
+      , S.Session (Sessions.Already_issued first_session) )
+    ];
+  let disabled = step_ok state (principal_record ~by:bob (Pe.Disabled { user_id = user })) in
+  match S.step disabled (session_record ~by:user (Se.Revoked { session_id = first_session })) with
+  | Error (S.Author_inactive id) ->
+    Alcotest.(check string) "a disabled principal writes no session record" "user-1" (Authz_types.User_id.to_string id)
+  | other -> Alcotest.failf "a disabled principal: %s" (step_label other)
+;;
+
+let test_a_session_record_by_mode () =
+  let record = session_record ~by:user (issued ~by:user first_session) in
+  (match S.step S.empty record with
+   | Error (S.Before_bootstrap K.Session) -> ()
+   | other -> Alcotest.failf "before the bootstrap: %s" (step_label other));
+  match S.step (step_ok (two_admins ()) (mode_record M.Off workspace)) record with
+  | Error (S.Accounts_off K.Session) -> ()
+  | other -> Alcotest.failf "while the accounts are off: %s" (step_label other)
+;;
+
+(* A session whose revocation the store gave up stays blocked: no Admin cancels
+   the block, and a sign-out by its owner or a new sign-in of its browser
+   closes it. *)
+let test_a_blocked_session () =
+  let state = step_ok (two_admins ()) (session_record ~by:user (issued ~by:user first_session)) in
+  let subject = Authz_records.Subject.Session first_session in
+  let blocked = held subject in
+  let state = S.hold_revocations state [ blocked ] in
+  Alcotest.(check string) "blocked" "pending" (revocation_word state subject);
+  Alcotest.(check string)
+    "an Admin does not cancel it"
+    (S.refusal_to_string (S.Cancel_owner_unknown subject))
+    (cancel_word state (cancel_record blocked));
+  let out = step_ok state (session_record ~closes:[ blocked ] ~by:user (Se.Revoked { session_id = first_session })) in
+  Alcotest.(check string) "a sign-out closes it" "clear" (revocation_word out subject);
+  Alcotest.(check string) "and ends the session" "revoked" (session_status out first_session);
+  let again =
+    step_ok state (session_record ~closes:[ blocked ] ~by:bob (issued ~by:bob ~replaces:first_session second_session))
+  in
+  Alcotest.(check string) "a new sign-in closes it" "clear" (revocation_word again subject);
+  Alcotest.(check string) "and ends the session" "replaced by session-2" (session_status again first_session)
+;;
+
 let () =
   Alcotest.run
     "authz_state"
@@ -1295,6 +1422,12 @@ let () =
     ; ( "principal records"
       , [ Alcotest.test_case "disable, enable, delete" `Quick test_a_principal_record
         ; Alcotest.test_case "by mode" `Quick test_a_principal_record_by_mode
+        ] )
+    ; ( "sessions"
+      , [ Alcotest.test_case "and their intents" `Quick test_sessions_and_their_intents
+        ; Alcotest.test_case "refused" `Quick test_a_session_record_that_is_refused
+        ; Alcotest.test_case "by mode" `Quick test_a_session_record_by_mode
+        ; Alcotest.test_case "blocked" `Quick test_a_blocked_session
         ] )
     ; "log", [ Alcotest.test_case "of a real bootstrap" `Quick test_fresh_bootstrap_log ]
     ]

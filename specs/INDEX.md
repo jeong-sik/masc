@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-11-07T09:45:11Z (HEAD: 4702816b627)
+Generated: 2026-11-07T17:36:53Z (HEAD: 07c4382eb6d3)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 38 |
-| Manual specs | 38 |
+| Total .tla files | 39 |
+| Manual specs | 39 |
 | TTrace (auto-generated) | 0 |
 | Directories | 9 |
-| Total .cfg files | 123 |
-| Buggy .cfg (bug-model pair) | 79 |
+| Total .cfg files | 127 |
+| Buggy .cfg (bug-model pair) | 82 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -41,7 +41,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | SandboxDispatch.tla | SandboxDispatch | manual | 2 | 1 | clean={inv:TypeOK, inv:BackendImpliesBackendVia, inv:RemoteSshImpliesSshVia} buggy={inv:BackendImpliesBackendVia, inv:RemoteSshImpliesSshVia} | 4c6c55a9e9eb |
 | TurnEvidenceChain.tla | TurnEvidenceChain | manual | 2 | 1 | clean={inv:TypeOK, inv:TerminalHasFullEvidence, inv:TerminalVisibleInRuntimeLens, inv:AgentCoreBoundaryGeneric} buggy={inv:TerminalHasFullEvidence} | ae0c4b3f330f |
 
-### specs/bug-models (14 specs)
+### specs/bug-models (15 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
@@ -57,6 +57,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | LibrarianContinuityWidth.tla | LibrarianContinuityWidth | manual | 5 | 4 | clean={inv:TypeOK, inv:NoRefusedUnitOffered, inv:LearnedWidthHolds} narrow-on-other-buggy={inv:TypeOK} no-carry-buggy={inv:TypeOK} release-on-commit-buggy={inv:TypeOK, inv:LearnedWidthHolds} release-on-unreadable-buggy={inv:TypeOK, inv:LearnedWidthHolds} | f23a79f08a08 |
 | LibrarianRead.tla | LibrarianRead | manual | 19 | 13 | clean={inv:TypeOK, inv:NoAtomPassedUnread} buggy={inv:TypeOK, inv:NoAtomPassedUnread} first-refused-only-buggy={inv:TypeOK, inv:NoAtomPassedUnread} foreign-source-buggy={inv:TypeOK, inv:UnreadEvidenceTyped, inv:NoAtomPassedUnread} live-without-bad-lines={inv:TypeOK, inv:NoAtomPassedUnread} one-record-for-atom-buggy={inv:TypeOK, inv:UnreadEvidenceTyped, inv:NoAtomPassedUnread} position-first-buggy={inv:TypeOK, inv:NoAtomPassedUnread} purge-split-buggy={inv:TypeOK, inv:NoAtomPassedUnread} purge-trim-anywhere-live-buggy={inv:TypeOK, inv:NoAtomPassedUnread} purge-trim-at-end-live={inv:TypeOK, inv:NoAtomPassedUnread} purge-trim-at-end={inv:TypeOK, inv:NoAtomPassedUnread} purge-trim-buggy={inv:TypeOK, inv:NoAtomPassedUnread} purge-trim-by-turns-buggy={inv:TypeOK, inv:NoAtomPassedUnread} purge-trim-counting-lines-buggy={inv:TypeOK, inv:NoAtomPassedUnread} recorded-messages={inv:TypeOK, inv:UnreadEvidenceTyped, inv:NoAtomPassedUnread} stop-forever-live={inv:TypeOK} unexhausted-slots-buggy={inv:TypeOK, inv:UnreadEvidenceTyped, inv:NoAtomPassedUnread} unknown-cause-buggy={inv:TypeOK, inv:UnreadEvidenceTyped, inv:NoAtomPassedUnread} unrecorded-message-buggy={inv:TypeOK, inv:UnreadEvidenceTyped, inv:NoAtomPassedUnread} | 1140e1106dbf |
 | OllamaBodyIntegrity.tla | OllamaBodyIntegrity | manual | 2 | 1 | clean={inv:BalancedNeverFails, inv:ParseErrorImpliesUnbalanced} buggy={inv:BalancedNeverFails} | 08e878c2fde0 |
+| RetainedResultCarrier.tla | RetainedResultCarrier | manual | 4 | 3 | clean={inv:TypeOK, inv:NoLockWhileFloorFits, inv:SwitchBeforeShrink, prop:ReceiptsLeaveOnlyOnAccept, prop:RunEnds} buggy={inv:TypeOK, inv:NoLockWhileFloorFits} shrink-first-buggy={inv:TypeOK, inv:SwitchBeforeShrink} switch-back-buggy={inv:TypeOK, prop:RunEnds} | ff559a0803e3 |
 | SSEBroadcastBlock.tla | SSEBroadcastBlock | manual | 2 | 1 | clean={inv:TypeOK, inv:NoPermanentBlock} buggy={inv:TypeOK, inv:NoPermanentBlock} | baa8b016ef40 |
 | SlotScheduler.tla | SlotScheduler | manual | 2 | 1 | clean={inv:TypeOK, inv:MutualExclusion, inv:NeverStuck} buggy={inv:TypeOK, inv:NeverStuck} | 71a2d144944a |
 

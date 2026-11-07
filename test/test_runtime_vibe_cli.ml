@@ -2,7 +2,7 @@ open Alcotest
 
 (* Fixtures are the sanitized Vibe 3.1.0 captures in fixtures/vibe_headless/.
    Each case pairs an export.json with the exit code and stdout its run had:
-   runs that ended before a session started wrote nothing to stdout. *)
+   the runs that did not finish wrote nothing to stdout. *)
 
 module Cli = Runtime_vibe_cli
 module Vibe = Runtime_vibe_headless
@@ -15,8 +15,8 @@ let classify ~exit_code ?export ?(stdout = "") ?(stderr = "") () =
   Cli.classify ~exit_code ~export_json:(Option.map read export) ~stdout ~stderr
 ;;
 
-let completed = function
-  | Ok completed -> completed
+let run_of = function
+  | Ok (run : Cli.run) -> run
   | Error error -> fail (Cli.error_to_string error)
 ;;
 
@@ -26,22 +26,22 @@ let error = function
 ;;
 
 let test_outcomes () =
-  (match completed (classify ~exit_code:0 ~export:"export-finished.json"
-                      ~stdout:(read "entries-first-call.json") ()) with
-   | Cli.Finished { transcript = Cli.Entries entries; _ } ->
+  (match run_of (classify ~exit_code:0 ~export:"export-finished.json"
+                   ~stdout:(read "entries-first-call.json") ()) with
+   | { export = { outcome = Vibe.Finished; _ }; transcript = Cli.Entries entries; _ } ->
      check int "m0 entries" 3 (List.length entries)
-   | _ -> fail "m0 is Finished with entries");
-  (match completed (classify ~exit_code:1 ~export:"export-usage-error.json" ()) with
-   | Cli.Usage_error { transcript = Cli.No_output; _ } -> ()
-   | _ -> fail "m3 is Usage_error without output");
-  (match completed (classify ~exit_code:2 ~export:"export-infrastructure-failure.json" ()) with
-   | Cli.Infrastructure_failure { export; _ } ->
+   | _ -> fail "m0 is finished with entries");
+  (match run_of (classify ~exit_code:1 ~export:"export-usage-error.json" ()) with
+   | { export = { outcome = Vibe.Usage_error; _ }; transcript = Cli.No_output; _ } -> ()
+   | _ -> fail "m3 is usage_error without output");
+  (match run_of (classify ~exit_code:2 ~export:"export-infrastructure-failure.json" ()) with
+   | { export = { outcome = Vibe.Infrastructure_failure; error; _ }; _ } ->
      check (option string) "m4 provider refusal" (Some "backend_error")
-       (Option.bind export.error (fun (e : Vibe.run_error) -> e.code))
-   | _ -> fail "m4 is Infrastructure_failure");
-  match completed (classify ~exit_code:3 ~export:"export-deadline.json" ()) with
-  | Cli.Stopped_at_limit { limit = Cli.Deadline; run = { transcript = Cli.No_output; _ } } -> ()
-  | _ -> fail "m5 is Stopped_at_limit Deadline without output"
+       (Option.bind error (fun (e : Vibe.run_error) -> e.code))
+   | _ -> fail "m4 is infrastructure_failure");
+  match run_of (classify ~exit_code:3 ~export:"export-deadline.json" ()) with
+  | { export = { outcome = Vibe.Deadline; _ }; transcript = Cli.No_output; _ } -> ()
+  | _ -> fail "m5 is deadline without output"
 ;;
 
 let test_disagreements () =
@@ -71,9 +71,7 @@ let config =
   ; workdir = Filename.get_temp_dir_name ()
   ; trust_workdir = false
   ; model = None
-  ; max_turns = 3
-  ; time_limit_s = 120
-  ; process_timeout_s = 150.
+  ; time_limit_s = Some 120
   }
 ;;
 
@@ -83,13 +81,14 @@ let test_child_process () =
       [| "HOME=/home/k"; "PATH=/bin"; "MISTRAL_API_KEY=secret"; "VIBE_CLI_OIDC_ENABLED=1" |]
   in
   check (list string) "allowlist" [ "HOME=/home/k"; "PATH=/bin" ] (Array.to_list env);
-  let argv = Cli.argv config ~output_dir:"/tmp/out" in
-  check (option string) "prompt from stdin" (Some "-p") (List.nth_opt argv (List.length argv - 1));
-  check bool "ask agent" true (List.mem "ask" argv);
-  check bool "no --trust" false (List.mem "--trust" argv);
-  check bool "timeout above limit" true (Result.is_ok (Cli.validate_config config));
-  check bool "timeout at limit refused" true
-    (Result.is_error (Cli.validate_config { config with process_timeout_s = 120. }))
+  check (list string) "argv"
+    [ "/opt/vibe/bin/vibe"; "--workdir"; config.workdir; "--output-dir"; "/c/out"
+    ; "--agent"; "ask"; "--output"; "json"; "--prompt-file"; "/c/prompt.txt"
+    ; "--time-limit"; "120" ]
+    (Cli.argv config ~output_dir:"/c/out" ~prompt_file:"/c/prompt.txt");
+  check bool "limit 120 accepted" true (Result.is_ok (Cli.validate_config config));
+  check bool "limit 0 refused" true
+    (Result.is_error (Cli.validate_config { config with time_limit_s = Some 0 }))
 ;;
 
 let () =

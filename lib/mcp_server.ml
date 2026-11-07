@@ -923,29 +923,6 @@ let settle_publication_recovery_initialization resolver =
   then raise Publication_recovery_initialization_settled_twice
 ;;
 
-let agent_session_bound_or_observe_failure state ~agent_name =
-  match
-    Workspace.is_agent_session_bound
-      (workspace_config state)
-      ~agent_name
-  with
-  | is_bound -> is_bound
-  | exception ((Sys_error _ | Not_found | Invalid_argument _) as exception_) ->
-    let backtrace = Printexc.get_raw_backtrace () in
-    Log.Server.emit
-      Log.Warn
-      ~category:Log.Boundary
-      ~details:
-        (`Assoc
-           [ "agent_name", `String agent_name
-           ; "exception", `String (Printexc.to_string exception_)
-           ; ( "backtrace"
-             , `String (Printexc.raw_backtrace_to_string backtrace) )
-           ])
-      "board agent-session lookup failed";
-    false
-;;
-
 module For_testing = struct
   type health_count_sum_observation =
     | Health_count_sum of int
@@ -1028,8 +1005,6 @@ module For_testing = struct
       ; net = None
       }
     in
-    Board_tool.set_agent_lookup (fun name ->
-      agent_session_bound_or_observe_failure state ~agent_name:name);
     state
   ;;
 
@@ -1216,9 +1191,6 @@ let create_state_eio ~sw ~proc_mgr ~fs ~clock ~mono_clock ~net ~base_path =
                , `String (Printexc.raw_backtrace_to_string backtrace) )
              ])
         "publication recovery registry initialization crashed; publication filesystem tools fail closed");
-  (* Agent-to-agent board feedback lookup follows the active workspace. *)
-  Board_tool.set_agent_lookup (fun name ->
-    agent_session_bound_or_observe_failure state ~agent_name:name);
   state
 
 (** Register SSE broadcast callback *)

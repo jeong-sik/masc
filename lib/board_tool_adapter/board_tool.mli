@@ -2,9 +2,6 @@
 (** Board_tool — MCP tool family for the internal board.
 
     Owns:
-    - the {b agent-lookup callback} ({!set_agent_lookup} /
-      {!set_agent_lookup_none} / {!is_agent}) wired at
-      server bootstrap for optional agent-to-agent feedback hooks,
     - the {b post / comment / vote handlers} routed
       through {!handle_tool} (one entry per
       [masc_board_*] tool name),
@@ -17,7 +14,6 @@
 
     Internal helpers stay private at this boundary
     ([format_expiry],
-    [agent_lookup_hook] atomic ref,
     [resolve_board_post_kind], [format_post] /
     [format_post_compact] / [format_comment] /
     [format_comment_tree], [assoc_replace],
@@ -26,9 +22,7 @@
     [_get] / [_comment_add] / [_vote] / [_stats] /
     [_search] / [_comment_vote] / [_profile] /
     [_hearth_list] / [_delete] / [_board_cleanup],
-    [evolution_callback] type,
-    [evolution_hook] atomic ref,
-    [register_evolution_callback], [tool_post_list],
+    [tool_post_list],
     [tool_post_get], [tool_comment_add], [tool_vote],
     [tool_stats], [tool_search], [tool_comment_vote],
     [tool_profile], [tool_hearth_list], [tool_delete],
@@ -85,21 +79,6 @@ val visibility_of_string : string -> Board.visibility option
     this boundary so callers reach it via
     [Board_tool.visibility_of_string] without importing
     {!Board} directly. *)
-
-(** {1 Agent lookup callback} *)
-
-val set_agent_lookup : (string -> bool) -> unit
-(** Wires the [is_agent_session_bound] check used by optional
-    agent-to-agent feedback hooks. Installed once at
-    server bootstrap from [server_state.workspace_config]. *)
-
-val set_agent_lookup_none : unit -> unit
-(** Clears the previously-installed callback.  Used by
-    test isolation; production paths leave the hook set. *)
-
-val is_agent : string -> bool
-(** Returns the result of the registered hook, [false]
-    when no hook is installed. *)
 
 (** {1 Tools advertised to MCP} *)
 

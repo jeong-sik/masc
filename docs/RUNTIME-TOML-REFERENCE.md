@@ -83,6 +83,7 @@ Protocol inventory (`lib/runtime/runtime_protocol.ml`):
 | `codex-app-server` | CLI | Codex app server | official client |
 | `antigravity-cli` | CLI | Antigravity CLI | official client |
 | `muse-serve` | CLI | Muse serve | official client |
+| `vibe-cli` | CLI | Mistral Vibe headless (`--output json`) | official client; not offered in the editor |
 | `messages-cli`, `openai-compatible-cli` | CLI | internal | not editable |
 
 Optional:
@@ -96,7 +97,7 @@ Optional:
 | `max-context` | positive int | provider-level window default (precedence in spec/14 §3) |
 | `connect-timeout-s` | positive float | bound on the phase before response headers. **No default**: absent means unbounded. Keeper turns remain bounded by the keeper's first-event budget |
 | `exact-body-timeout-s` | positive float | bound on the whole exact-output request (connect, headers, body). See §7 for when it matters |
-| `is-non-interactive` | bool, default `false` | **required `true`** for every official-client protocol (`claude-code`, `codex-app-server`, `antigravity-cli`, `muse-serve`); otherwise the runtime does not materialize |
+| `is-non-interactive` | bool, default `false` | **required `true`** for every official-client protocol (`claude-code`, `codex-app-server`, `antigravity-cli`, `muse-serve`, `vibe-cli`); otherwise the runtime does not materialize |
 | `timeout-s` (+ `agent`, `effort`, `add-dirs`) | positive float (string; `low`\|`medium`\|`high`; absolute paths) | `antigravity-cli` only — refused on every other protocol. `timeout-s` is **required**; `effort` and `add-dirs` are optional |
 | `account-home` | non-empty absolute path | **required** for `muse-serve`; accepted for `claude-code`/`codex-app-server`; refused elsewhere |
 | `admission-priority-run-limit` | positive int | bounds consecutive judgment-lane Priority grants while a Standard Keeper request waits, and combined Priority/Standard grants while Background Librarian work waits. Omitted means one FIFO. Refused on official-client providers and when none of the provider's bindings declares `max-concurrent`. See [provider admission fairness](guides/provider-admission-fairness.md) |
@@ -106,6 +107,23 @@ environment when the binding is materialized. Execution, probes and verification
 retain that selection until reload; changing the process environment does not
 retarget an existing binding. See [Native account selection](guides/native-account-selection.md)
 for inherited versus explicit homes and Codex configuration requirements.
+
+`vibe-cli` runs Mistral Vibe once per call in headless mode. `command` is the
+`vibe` binary, spawned as written: unlike the other official clients it gets
+no installer-directory lookup, so a bare `vibe` resolves only through the
+server's `PATH`. The binding's `api-name` becomes Vibe's `--model`. Vibe
+reads the operator's own `~/.vibe` config and keychain login, so the provider
+declares neither credentials nor `account-home`. A Vibe runtime answers
+Fusion panel calls and `masc-lane-cli-probe` only:
+
+- A Keeper turn on it is refused before dispatch.
+- It stands in no exact-output list, because the headless call takes no
+  output schema.
+- Its calls have no MASC time limit. A binding whose model declares
+  `turn-timeout-s` (even `0`) or `reasoning-effort` does not materialize, and
+  a Fusion group that declares `timeout_s` refuses the panelist.
+
+See [RFC-vibe-official-client-lane](rfc/RFC-vibe-official-client-lane.md) §4.3.
 
 ### `[providers.<id>.credentials]`
 
@@ -126,8 +144,8 @@ Resolution (`lib/runtime/runtime_adapter.ml` and `lib/runtime/runtime_toml.ml`):
   falls back to `OLLAMA_API_KEY`.
 - `file`: must be absolute, owned by the current user, with no group/other
   permission bits, and contain a raw key — a JSON document is refused.
-- Official clients: `claude-code`, `codex-app-server` and `muse-serve` must
-  **not** declare credentials (the client owns subscription login);
+- Official clients: `claude-code`, `codex-app-server`, `muse-serve` and
+  `vibe-cli` must **not** declare credentials (the client owns subscription login);
   `antigravity-cli` requires a `file` credential naming the operator-owned
   OAuth source.
 
@@ -304,7 +322,8 @@ An uncatalogued Anthropic-dialect endpoint instead states `kind =
 | unknown key in provider/model/binding tables | only declared fields are accepted |
 | missing `[providers.<id>.credentials]` on a keyed catalogued provider | keyed providers must declare their credential source explicitly (#42927, #42933) |
 | credential file relative / not owner-private / JSON | file credentials must be a raw, private, owned key |
-| credentials on `claude-code`/`codex-app-server`/`muse-serve` | the official client owns subscription login |
+| credentials on `claude-code`/`codex-app-server`/`muse-serve`/`vibe-cli` | the official client owns subscription login |
+| `turn-timeout-s` or `reasoning-effort` on the model of a `vibe-cli` binding | a Vibe call has no MASC time limit and no effort control |
 | missing `is-non-interactive = true` on an official-client protocol | the runtime does not materialize without it |
 | missing `timeout-s`, or non-file credential, on `antigravity-cli` | the CLI's deadline and OAuth source are mandatory |
 | missing `account-home` on `muse-serve`; `account-home` outside the three account clients | the client cannot be addressed / the key belongs elsewhere |

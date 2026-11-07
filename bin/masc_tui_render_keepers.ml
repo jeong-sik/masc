@@ -613,20 +613,35 @@ let render_keeper_list (state : state) =
          else if Masc_tui_fleet_line.status_is_ok fleet.fs_status then (Theme.ok ())
          else (Theme.warn ())
        in
-       let blocker =
-         match Masc_tui_fleet_line.blocker_text fleet with
-         | None -> ""
-         | Some text -> "   " ^ text
+       (* Segments joined right-to-left so a narrow frame drops whole
+          readings from the right instead of cutting a number in half:
+          "turn capacity 20/36" stays readable where "20/3…" would not. *)
+       let segments =
+         [ Printf.sprintf "running %d/%d" fleet.fs_running_count
+             fleet.fs_bootable_count;
+           Printf.sprintf "turn capacity %d/%d"
+             (fleet.fs_target_reaction_capacity
+             - fleet.fs_reaction_capacity_shortfall)
+             fleet.fs_target_reaction_capacity ]
+         @ (match Masc_tui_fleet_line.blocker_text fleet with
+           | None -> []
+           | Some text -> [ text ])
+       in
+       let joined =
+         let rec fit acc = function
+           | [] -> acc
+           | seg :: rest ->
+               let candidate = seg ^ acc in
+               if Message_layout.display_width candidate <= inner then
+                 fit ("   " ^ candidate) rest
+               else acc
+         in
+         fit "" (List.rev segments)
        in
        box_line buf cols
-         (Printf.sprintf
-            "%s  fleet %s%s   running %d/%d   turn capacity %d/%d%s%s%s" tone
+         (Printf.sprintf "%s  fleet %s%s%s%s" tone
             (Masc_tui_fleet_line.status_text fleet.fs_status)
-            Ansi.reset fleet.fs_running_count
-            fleet.fs_bootable_count
-            (fleet.fs_target_reaction_capacity
-            - fleet.fs_reaction_capacity_shortfall)
-            fleet.fs_target_reaction_capacity Ansi.dim blocker Ansi.reset);
+            Ansi.reset joined Ansi.reset);
        (* Its own row under the fleet line rather than a tail on it: the
           frame cuts a row from the right, and the counts are what a narrow
           screen keeps. *)

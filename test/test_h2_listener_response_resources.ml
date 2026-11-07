@@ -1,6 +1,10 @@
 open Alcotest
 
-module Helpers = Server_h2_gateway_helpers
+module Response = Masc.Http_server_eio.Response
+
+let reqd_of_h2 ~sw h2_reqd =
+  Masc.Http_reqd.of_h2 ~stream_sw:sw
+    ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd
 module Subs = Mcp_subscriptions
 module Protocol = Mcp_transport_protocol
 
@@ -64,8 +68,7 @@ let with_listener mode ~capacity make_handler run =
         ~bind_host:"localhost" ~bind_port:port ~explicit_base_url:None with
         | Ok policy -> policy
         | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-      let gateway=Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~sw
-        ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. in
+      let gateway=Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy in
       let handler=make_handler ~gateway in
       let clients=ref [] in
       let connect ?(window=65535l) () =
@@ -179,8 +182,8 @@ let test_listener_shares_capacity mode () =
     match (H2.Reqd.request reqd).target with
     | "/held" ->
       Eio.Switch.on_release request_sw (fun () -> Eio.Promise.resolve release ());
-      Helpers.h2_respond_json ~compress:false reqd payload
-    | "/large" -> Helpers.h2_respond_json ~compress:false reqd payload
+      Response.json ~compress:false payload (reqd_of_h2 ~sw:request_sw reqd)
+    | "/large" -> Response.json ~compress:false payload (reqd_of_h2 ~sw:request_sw reqd)
     | _ -> fail "unexpected fixture route" in
   with_listener mode ~capacity:(String.length payload) make_handler (fun ~connect ~port ->
     let blocked=connect () and sibling=connect () in

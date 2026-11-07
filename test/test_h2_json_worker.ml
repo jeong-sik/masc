@@ -1,5 +1,5 @@
 open Alcotest
-module Response = Server_h2_gateway_helpers
+module Response = Masc.Http_server_eio.Response
 
 let wire_response ~handler ~headers target =
   Eio.Switch.run (fun sw ->
@@ -24,7 +24,9 @@ let wire_response ~handler ~headers target =
           consume ()) in
       consume ()) in
   H2.Body.Writer.close writer;
-  let server = H2.Server_connection.create handler in
+  let server = H2.Server_connection.create (fun h2_reqd ->
+    handler (Masc.Http_reqd.of_h2 ~stream_sw:sw
+      ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd)) in
   let transfer next_write report_write read =
     let rec drain progressed = match next_write () with
       | `Write iovecs ->
@@ -88,10 +90,10 @@ let test_wire_parity () =
   let serve encoder ~compress encoding json =
     wire_response ~headers:["accept-encoding", encoding] "/json"
       ~handler:(fun reqd -> match encoder with
-        | Inline -> Response.h2_respond_json_value
-            ~status:`Accepted ~extra_headers ~compress reqd json
-        | Worker -> Response.h2_respond_json_value_on_cpu
-            ~status:`Accepted ~extra_headers ~compress reqd json) in
+        | Inline -> Response.json_value
+            ~status:`Accepted ~extra_headers ~compress json reqd
+        | Worker -> Response.json_value_on_cpu
+            ~status:`Accepted ~extra_headers ~compress json reqd) in
   List.iter (fun installed ->
     Executor_pool_ref.For_testing.with_pool_option installed @@ fun () ->
     List.iter (fun (encoding, compress, expected_encoding) ->
@@ -144,10 +146,10 @@ let test_timeout_status_on_wire () =
               ~handler:(fun reqd ->
                 let extra_headers = ["access-control-allow-origin", "https://dashboard.example"] in
                 match encoder with
-                | Inline -> Response.h2_respond_json_value
-                    ?status:explicit_status ~extra_headers reqd json
-                | Worker -> Response.h2_respond_json_value_on_cpu
-                    ?status:explicit_status ~extra_headers reqd json) in
+                | Inline -> Response.json_value
+                    ?status:explicit_status ~extra_headers json reqd
+                | Worker -> Response.json_value_on_cpu
+                    ?status:explicit_status ~extra_headers json reqd) in
             check int "wire status reflects timeout or explicit refusal" expected status;
             check (option string) "timeout keeps CORS" (Some "https://dashboard.example")
               (List.assoc_opt "access-control-allow-origin" headers);
@@ -160,7 +162,7 @@ let test_timeout_status_on_wire () =
               | Some other -> fail ("unexpected encoding: " ^ other) in
             check string "envelope body is preserved" (Yojson.Safe.to_string json) decoded
           ) [None, envelope, 504; Some `OK, envelope, 504;
-             Some `Bad_request, envelope, 400; Some `Misdirected_request, envelope, 421;
+             Some `Bad_request, envelope, 400; Some (`Code 421), envelope, 421;
              None, `Assoc ["ok", `Bool true], 200]
         ) ["identity"; "gzip"]
       ) [Inline; Worker]

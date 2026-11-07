@@ -2,7 +2,8 @@
 
     Shared module used by:
     - QCheck PBT (test_keeper_state_machine_pbt.ml)
-    - Trace validator (keeper_trace_validate.ml)
+    - the sweep in keeper_supervisor.ml, which logs a warning per
+      [check_snapshot_invariants] violation
 
     Checks the safety properties mirrored by KeeperStateMachine.tla. *)
 

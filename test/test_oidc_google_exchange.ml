@@ -227,7 +227,7 @@ let failures_are_named () =
       , (let g = google () in
          g.discovery <- answer ~status:500 discovery_document;
          error_name (run g)) )
-    ; "the document is too long", "discovery unavailable", with_discovery (String.make (X.max_document_bytes + 1) ' ')
+    ; "the document is too long", "discovery unavailable", with_discovery (String.make (Login_transport.max_answer_bytes + 1) ' ')
     ; "the document is not JSON", "discovery malformed JSON object", with_discovery "<html>"
     ; "the document is a list", "discovery malformed JSON object", with_discovery "[]"
     ; ( "another issuer"
@@ -259,7 +259,7 @@ let failures_are_named () =
     ; "an answer that is not JSON", "token answer malformed", with_token (answer "id_token=x")
     ; ( "an id_token too long"
       , "token answer malformed"
-      , with_token (answer (Printf.sprintf {|{"id_token":"%s"}|} (String.make (X.max_document_bytes + 1) 'a'))) )
+      , with_token (answer (Printf.sprintf {|{"id_token":"%s"}|} (String.make (Login_transport.max_answer_bytes + 1) 'a'))) )
     ; ( "the keys cannot be read"
       , "keys unavailable"
       , (let g = google () in

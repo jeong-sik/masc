@@ -12,3 +12,17 @@ type response =
 
 type get = url:string -> headers:(string * string) list -> (response, string) result
 type post = url:string -> headers:(string * string) list -> body:string -> (response, string) result
+
+(** 64 KiB. A login refuses a longer answer. The documents of Google and of
+    GitHub that a login reads are a few KiB. The server transport of plan C3
+    is to pass the same bound to the shared HTTP client. *)
+val max_answer_bytes : int
+
+(** An [https] URL with a host and no query or fragment. Provider endpoints and
+    the redirect URI of a client follow this rule. *)
+val is_https_url : string -> bool
+
+(** [key=value] pairs joined by [&], with every byte that is not unreserved
+    (RFC 3986 section 2.3) percent-encoded. An authorization query and an
+    [application/x-www-form-urlencoded] token request both read it. *)
+val form : (string * string) list -> string

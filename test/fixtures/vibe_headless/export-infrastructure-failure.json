@@ -131,5 +131,15 @@
     "voice_mode_enabled",
     "worktree_copy_on_write",
     "worktree_limit"
-  ]
+  ],
+  "config_kept_values": {
+    "routed_default_model": "",
+    "default_agent": "accept-edits",
+    "enabled_tools": [],
+    "disabled_tools": [
+      "ask_user_question",
+      "cron"
+    ],
+    "tools": {}
+  }
 }

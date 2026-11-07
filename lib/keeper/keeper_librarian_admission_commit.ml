@@ -54,6 +54,22 @@ let receipt_marker (record : Owner.retained) ~gate_request_id accepted committed
     "execution_id",`String record.request_id;"execution_digest",`String record.request_digest;
     "gate_root_id",`String gate_request_id;"committed",`Bool committed;
     "candidates",`List (List.map receipt_json accepted.Keeper_librarian_runtime.explicit_candidate_ids)])
+(* The conflict an original admission ends with when the locked Memory plan
+   no longer holds a destination its accepted proposal writes into (#46372).
+   It names the execution so a copy under another record cannot pass. *)
+let destination_absent_evidence (record : Owner.retained) ~memory_id =
+  canonical (`Assoc ["version",`Int 1;"kind",`String "librarian-admission-destination-absent";
+    "execution_id",`String record.request_id;"execution_digest",`String record.request_digest;
+    "memory_id",`String memory_id])
+let destination_absent_of_json (record : Owner.retained) json =
+  let* memory_id=match json with
+    | `Assoc fields -> (match List.assoc_opt "memory_id" fields with
+      | Some (`String id) when Keeper_memory_os_types.is_memory_id id -> Ok id
+      | Some _ | None -> Error "Original admission conflict names no Memory identity")
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error "Original admission conflict is not an object" in
+  let* expected=destination_absent_evidence record ~memory_id in
+  let+ ()=same expected json in memory_id
 let validate ~store ~owner ~capture ~(record : Owner.retained) =
   let* ()=same record.request (Capture.to_json capture) in
   let* exact=Capture.request capture in
@@ -75,7 +91,7 @@ let validate ~store ~owner ~capture ~(record : Owner.retained) =
      | None ->
        let* root=Gate_journal.root ~store ~owner ~capture in
        require (Option.is_none root) "Original gate exists without its full parent preparation intent")
-  | Committing commit | Commit_unknown (commit,_) | Finished commit ->
+  | Committing commit | Commit_unknown (commit,_) | Finished commit | Conflicted (commit,_) ->
     let* ()=match Progress.preparation record.progress with
       | Some (Preparation_confirmed _) -> Gate_journal.validate_root_preparation ~store ~owner ~capture
       | None | Some (Preparation_pending _) -> Error "Memory disposition precedes original gate publication acknowledgement" in
@@ -107,8 +123,15 @@ let validate ~store ~owner ~capture ~(record : Owner.retained) =
        let* settled=receipt_state ~keepers_dir:(Capture.keepers_dir owner)
          ~keeper_id:(Capture.keeper_id owner) proposal.explicit_candidate_ids in
        require settled "Finished original admission lacks actual committed candidate receipts"
+     | Conflicted (_,conflict) ->
+       let* memory_id=destination_absent_of_json record conflict in
+       let* ()=require (List.mem memory_id proposal.required_memory_ids)
+         "Original admission conflict names a Memory its proposal does not write into" in
+       let* settled=receipt_state ~keepers_dir:(Capture.keepers_dir owner)
+         ~keeper_id:(Capture.keeper_id owner) proposal.explicit_candidate_ids in
+       require (not settled) "Conflicted original admission has committed candidate receipts"
      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _
-     | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> Ok ())
+     | Rejected _ | Subdividing _ | Subdivided _ -> Ok ())
   | Rejected {stage=Progress.Execution;evidence} ->
     let* retained=Exact.retained_final_of_json ~schema evidence in
     let final=Exact.delivered retained in
@@ -117,7 +140,7 @@ let validate ~store ~owner ~capture ~(record : Owner.retained) =
      | Exact.Call_final (Answered _) -> Error "Original refusal contains an answered proposal"
      | Call_final (Invalid_output _ | Input_refused _ | Output_limit_reached _)
      | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok ())
-  | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ ->
+  | Rejected {stage=Progress.Before_dispatch;_} | Subdividing _ | Subdivided _ ->
     Error "Original Librarian execution has an unsupported domain phase"
 type preparation = Prepared of Owner.retained | Reload_original
 let begin_gate ~store ~owner ~capture ~(record : Owner.retained) ~gate_root_id ~authority =
@@ -207,7 +230,7 @@ let settle ~store ~owner ~capture ~(record : Owner.retained) ~gate_request_id =
     let committed=ref None in
     let applied=io (fun () ->
       let* ()=live_owner owner in
-      Current.apply_disposition ~on_committed:(fun disposition -> committed:=Some disposition)
+      Ok (Current.apply_disposition_guarded ~on_committed:(fun disposition -> committed:=Some disposition)
         ~dropped_statements:accepted.selection.dropped
         ~explicit_candidate_ids:accepted.explicit_candidate_ids
         ~admission_recall:{decided_at_revision=Capture.expected_revision capture;
@@ -215,7 +238,7 @@ let settle ~store ~owner ~capture ~(record : Owner.retained) ~gate_request_id =
         ~required_memory_ids:accepted.required_memory_ids
         ~absorbed:(Gate.absorbed_of_run gate) ~revisions:accepted.selection.revisions
         ~keepers_dir ~keeper_id ~now:(Capture.now capture) ~source
-        ~new_claims:(Gate.without_copies gate accepted.selection.new_claims) ()) in
+        ~new_claims:(Gate.without_copies gate accepted.selection.new_claims) ())) in
     (* Secondary journal/unlock failure can follow snapshot publication. Only
        the same independently verified receipts settle the domain effect. *)
     let* proved=read_receipts () in
@@ -232,11 +255,23 @@ let settle ~store ~owner ~capture ~(record : Owner.retained) ~gate_request_id =
             (Keeper_memory_os_events.append_error_to_string error)) in
       confirm record)
     else
-      let detail=match applied with
-        | Error detail -> detail
-        | Ok _ -> "Disposition returned without matching original candidate receipts" in
-      let* _new,_record=publish record (Progress.Commit_uncertain (`Assoc ["detail",`String detail])) in
-      Ok (Pending detail) in
+      let uncertain detail =
+        let* _new,_record=publish record (Progress.Commit_uncertain (`Assoc ["detail",`String detail])) in
+        Ok (Pending detail) in
+      match applied with
+      | Ok (Error (Current.Destination_absent {memory_id;current=_})) ->
+        (* The locked plan refused a destination this proposal writes into,
+           before any effect, and the receipts above are absent. The same input
+           against the same Memory would refuse again, so the execution ends
+           here; the queue judges its candidates again against the Memory
+           that refused them (#46372). *)
+        let* evidence=destination_absent_evidence record ~memory_id in
+        let* _new,_record=publish record (Progress.Commit_conflicted evidence) in
+        Ok (Pending "Original admission destination is no longer in Memory; its candidates are judged again")
+      | Ok (Error (Current.Basis_superseded _ | Current.Disposition_store_failed _ as refusal)) ->
+        uncertain (Current.disposition_error_to_string refusal)
+      | Error detail -> uncertain detail
+      | Ok (Ok _) -> uncertain "Disposition returned without matching original candidate receipts" in
   let* proved=read_receipts () in
   if proved then confirm current else
   match Progress.phase current.progress with

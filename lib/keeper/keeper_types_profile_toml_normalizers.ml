@@ -23,15 +23,6 @@ let normalize_board_interests items =
   normalize_name_list items |> List.sort_uniq String.compare
 ;;
 
-let normalize_name_list_opt items =
-  match normalize_name_list items with
-  | [] -> None
-  | xs -> Some xs
-
-let lower_string_list_opt = function
-  | [] -> None
-  | xs -> Some (List.map String.lowercase_ascii xs)
-
 let first_some = Dashboard_utils.first_some
 
 (* ================================================================ *)

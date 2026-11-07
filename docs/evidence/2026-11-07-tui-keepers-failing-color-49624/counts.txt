@@ -1,0 +1,16 @@
+## before
+80x24-color: rows 15/15 · summary items kept 5/6 (attention,failing,active,waiting,inactive) · layout label no · failing rows with ◂ 7/7 · cause word whole 3/7 · age whole 7/7 · Mode column aligned None
+80x24-nocolor: rows 15/15 · summary items kept 5/6 (attention,failing,active,waiting,inactive) · layout label no · failing rows with ◂ 7/7 · cause word whole 3/7 · age whole 7/7 · Mode column aligned None
+120x35-color: rows 15/15 · summary items kept 6/6 (attention,failing,active,waiting,inactive,unknown) · layout label yes · failing rows with ◂ 7/7 · cause word whole 7/7 · age whole 7/7 · Mode column aligned True
+120x35-nocolor: rows 15/15 · summary items kept 6/6 (attention,failing,active,waiting,inactive,unknown) · layout label yes · failing rows with ◂ 7/7 · cause word whole 7/7 · age whole 7/7 · Mode column aligned True
+200x45-color: rows 15/15 · summary items kept 6/6 (attention,failing,active,waiting,inactive,unknown) · layout label yes · failing rows with ◂ 7/7 · cause word whole 7/7 · age whole 7/7 · Mode column aligned True
+200x45-nocolor: rows 15/15 · summary items kept 6/6 (attention,failing,active,waiting,inactive,unknown) · layout label yes · failing rows with ◂ 7/7 · cause word whole 7/7 · age whole 7/7 · Mode column aligned True
+
+## after
+80x24-color: rows 15/15 · summary items kept 5/6 (attention,failing,active,waiting,inactive) · layout label no · failing rows with ◂ 7/7 · cause word whole 3/7 · age whole 7/7 · Mode column aligned None
+80x24-nocolor: rows 15/15 · summary items kept 5/6 (attention,failing,active,waiting,inactive) · layout label no · failing rows with ◂ 7/7 · cause word whole 3/7 · age whole 7/7 · Mode column aligned None
+120x35-color: rows 15/15 · summary items kept 6/6 (attention,failing,active,waiting,inactive,unknown) · layout label yes · failing rows with ◂ 7/7 · cause word whole 7/7 · age whole 7/7 · Mode column aligned True
+120x35-nocolor: rows 15/15 · summary items kept 6/6 (attention,failing,active,waiting,inactive,unknown) · layout label yes · failing rows with ◂ 7/7 · cause word whole 7/7 · age whole 7/7 · Mode column aligned True
+200x45-color: rows 15/15 · summary items kept 6/6 (attention,failing,active,waiting,inactive,unknown) · layout label yes · failing rows with ◂ 7/7 · cause word whole 7/7 · age whole 7/7 · Mode column aligned True
+200x45-nocolor: rows 15/15 · summary items kept 6/6 (attention,failing,active,waiting,inactive,unknown) · layout label yes · failing rows with ◂ 7/7 · cause word whole 7/7 · age whole 7/7 · Mode column aligned True
+

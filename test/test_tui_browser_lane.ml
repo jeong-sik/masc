@@ -736,7 +736,8 @@ let test_backend_report_discovery () =
   let unreadable = success (decode_discovery (answer ["unavailable",`String "invalid"])) in
   expect "an unreadable backend report does not discard the client list"
     (unreadable.listed=[firefox] && match unreadable.unavailable with
-      | Backends_unreadable _ -> true | Backends_not_reported | Backends_unavailable _ -> false);
+      | Backends_unreadable _ -> true | Backends_not_reported | Backends_unavailable _ -> false)
+
 (* One value per operation constructor. [expected_refresh] names every
    constructor with no catch-all, so a new operation breaks this build until
    its class here is decided, like it does in [operation_is_refresh]. *)

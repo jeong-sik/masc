@@ -451,8 +451,8 @@ let test_a_document_read_goes_to_the_service_of_its_source () =
     [B.Backend.Ego;Owned_firefox];
   check bool "an unready live sibling also blocks an Ego read" true
     (Result.is_error (read ~unready:[B.Backend.Ego] [ego_worker] (route ego)));
-  check bool "an exact extension read remains usable with an unknown live controller" true
-    (read [native;hidden B.Backend.Ego] (route extension)=Ok ["native"]);
+  check bool "an exact BiDi read remains usable with an unknown live controller" true
+    (read [native;hidden B.Backend.Ego] (route firefox)=Ok ["native"]);
   check bool "unreadable single live source is not empty-client success" true
     (Result.is_error (read [hidden B.Backend.Ego] (B.Live_route None)));
   check bool "a read without a client cannot choose between workers" true

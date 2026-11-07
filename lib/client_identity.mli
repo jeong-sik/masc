@@ -49,13 +49,10 @@ val generate_session_key : unit -> string
 (** Generate a 32-character cryptographically random hex key. Its random
     prefix remains suitable for fallback display-name derivation. *)
 val from_mcp_params : Yojson.Safe.t -> t
-val anonymous : unit -> t
 
 (** {1 Utilities} *)
 
-val has_capability : t -> string -> bool
 val to_display_string : t -> string
-val same_agent : t -> t -> bool
 
 (** {1 JSON Serialization} *)
 

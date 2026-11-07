@@ -98,8 +98,8 @@ let column_legend =
   let words word values = String.concat " / " (List.map word values) in
   [ now_header, "what the keeper is doing at this moment"
   ; ( age_header
-    , "time since it last moved: the open turn's latest update, else the later of \
-       its last turn and the start of its wait" )
+    , "time since it last moved: the open turn's latest update (its start before it \
+       reports one), else the later of its last turn and the start of its wait" )
   ; "LIFECYCLE", "the keeper process"
   ; ( failing_glyph
     , "a failing keeper's last failure, in place of its runtime or first in DETAIL: \

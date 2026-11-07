@@ -53,7 +53,9 @@
    (:standard -w +4+32+69 -warn-error +a)))
  (release
   (flags
-   (:standard -w +4+32+69 -warn-error +a)))
+   (:standard -w +4+32+69 -warn-error +a))
+  (ocamlopt_flags
+   (:standard -O3 -unbox-closures)))
  (ci
   (flags
    (:standard -w +4+32+69 -warn-error +a))

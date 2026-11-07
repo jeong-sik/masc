@@ -71,6 +71,14 @@ val assoc : Yojson.Safe.t -> string -> (string * Yojson.Safe.t) list extraction
 (** [list json key] reads [key] and accepts [`List items]. *)
 val list : Yojson.Safe.t -> string -> Yojson.Safe.t list extraction
 
+(** Fast direct optional extractors without intermediate [Found] allocation *)
+val string_opt : Yojson.Safe.t -> string -> string option
+val int_opt : Yojson.Safe.t -> string -> int option
+val bool_opt : Yojson.Safe.t -> string -> bool option
+val float_opt : Yojson.Safe.t -> string -> float option
+val assoc_opt : Yojson.Safe.t -> string -> (string * Yojson.Safe.t) list option
+val list_opt : Yojson.Safe.t -> string -> Yojson.Safe.t list option
+
 (** [to_option r] collapses both [Field_absent] and [Wrong_shape]
     into [None]. Use for mechanical replacement of the legacy
     [| _ -> None] catch-all where the caller already swallows

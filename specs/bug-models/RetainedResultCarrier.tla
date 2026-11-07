@@ -18,8 +18,19 @@
 (* The clean model gives the carrier a second form whose size does not     *)
 (* depend on the receipt count. A size refusal switches a run to it once,  *)
 (* and only when it is strictly shorter; the run then asks again at the    *)
-(* same capacity. The buggy model is the walk before this RFC: a size      *)
-(* refusal goes to history alone.                                          *)
+(* same capacity. Three ways to get this wrong are modelled, each as its   *)
+(* own Next:                                                               *)
+(*                                                                         *)
+(*  - the walk before this RFC: a size refusal goes to history alone, and  *)
+(*    the floor is refused while the address floor would fit;              *)
+(*  - halving before the switch (the RFC's rejected alternative 2): no     *)
+(*    lock, but a refused request for every halving the switch saves;      *)
+(*  - a hook that switches back: a run may refuse forever.                 *)
+(*                                                                         *)
+(* Every refusal here is a typed size refusal that came before any tool    *)
+(* effect. A refusal after an effect is fenced by design and stays the     *)
+(* operator's, and an untyped refusal never reaches the hook; the RFC      *)
+(* lists both (sections 7 and 9). Neither is modelled.                     *)
 (*                                                                         *)
 (* Measured 2026-11-07 (masc#49634): 248 receipts, about 11.8 MB in the    *)
 (* system prompt, about 9.8M tokens against a 1M window. The floor was     *)
@@ -150,7 +161,7 @@ Next ==
   \/ RefuseAndShrink
   \/ RefuseAtFloor
 
-SpecClean == Init /\ [][Next]_vars
+SpecClean == Init /\ [][Next]_vars /\ WF_vars(Next)
 
 (***************************************************************************)
 (* Properties                                                              *)
@@ -165,6 +176,14 @@ NoLockWhileFloorFits == (phase = "locked") => ~FloorFits
    fix never drops results to make room. *)
 ReceiptsLeaveOnlyOnAccept ==
   [][(receipts' < receipts) => (phase = "sending" /\ phase' = "idle")]_vars
+
+(* The carrier hook comes before any halving: a run shrinks history only
+   once switching has nothing left to shorten. *)
+SwitchBeforeShrink ==
+  (phase = "sending" /\ history < HistoryBytes) => ~SwitchShortens
+
+(* Every run ends: the provider takes it or the floor fences it. *)
+RunEnds == [](phase = "sending" => <>(phase # "sending"))
 
 (***************************************************************************)
 (* The walk before this RFC: a size refusal goes to history alone.         *)
@@ -181,5 +200,33 @@ RefuseIgnoringCarrier ==
 NextBuggy == Next \/ RefuseIgnoringCarrier
 
 SpecBuggy == Init /\ [][NextBuggy]_vars
+
+(***************************************************************************)
+(* Halving before the switch: the hook is asked only at the floor.         *)
+(***************************************************************************)
+ShrinkBeforeSwitch ==
+  /\ phase = "sending"
+  /\ Request > Window
+  /\ history > 0
+  /\ history' = history \div 2
+  /\ UNCHANGED << receipts, fixed, form, phase >>
+
+NextShrinkFirst == Next \/ ShrinkBeforeSwitch
+
+SpecShrinkFirst == Init /\ [][NextShrinkFirst]_vars
+
+(***************************************************************************)
+(* A hook that switches back to inline: nothing makes the run end.         *)
+(***************************************************************************)
+SwitchBack ==
+  /\ phase = "sending"
+  /\ Request > Window
+  /\ form = "address"
+  /\ form' = "inline"
+  /\ UNCHANGED << receipts, fixed, history, phase >>
+
+NextSwitchBack == Next \/ SwitchBack
+
+SpecSwitchBack == Init /\ [][NextSwitchBack]_vars /\ WF_vars(NextSwitchBack)
 
 =============================================================================

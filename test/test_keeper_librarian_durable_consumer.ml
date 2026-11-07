@@ -2565,7 +2565,11 @@ let test_counterpart_range_reads_beyond_recent_windows () =
          ~speaker
          ())
     (List.init 105 Fun.id);
-  let payload = String.make (1024 * 1024) 'x' in
+  (* Five rows of this size render to roughly 922 KB past the admission
+     cursor, inside the 1 MiB counterpart capture cap (#48001). The original
+     1 MiB payload predates that cap: its single rendered row already crossed
+     it, so the prescan refused the whole wake before any read. *)
+  let payload = String.make (180 * 1024) 'x' in
   let external_contents =
     List.init 5 (fun index -> Printf.sprintf "external-%d:%s" index payload)
   in

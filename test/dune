@@ -2405,6 +2405,13 @@
  (modules test_keeper_stream_tool_accum)
  (libraries alcotest masc masc.masc_types masc.agent_core unix))
 
+; The stream phase rules the SSE bridge and the tool accumulator share.
+
+(test
+ (name test_keeper_stream_phase)
+ (modules test_keeper_stream_phase)
+ (libraries alcotest masc masc.agent_core))
+
 ; The keeper loop's side of the same collector: a continuation turn's tool
 ; rows reach the chat store under the approval's delivery identity (#33127).
 

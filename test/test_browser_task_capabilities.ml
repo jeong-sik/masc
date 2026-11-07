@@ -326,6 +326,28 @@ let test_native_input_admission_surface () =
   check bool "nonholding insertion retains ordinary Add-on lookup" true
     (Tool_result.failure_class (invoke [fill;safe])=Some Tool_result.Dependency_unavailable)
 
+(* The catalog answer keeps one row per operation. A Conditional row lists its
+   constraints only for an operation the caller named; an Available or
+   Unsupported row never does. *)
+let test_constraints_follow_required_actions () =
+  let backend = Cap.Connected Lane.Ego_task_space in
+  let rows constraints_for =
+    Yojson.Safe.Util.(Cap.to_json backend ~constraints_for |> member "operations" |> to_list) in
+  let name row = Yojson.Safe.Util.(row |> member "operation" |> to_string) in
+  let listing constraints_for =
+    List.filter_map (fun row -> match Yojson.Safe.Util.member "constraints" row with
+      | `Null -> None
+      | `List (_::_) -> Some (name row)
+      | `List [] | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ ->
+        failf "%s lists constraints that are not a non-empty array" (name row)) (rows constraints_for) in
+  check (list string) "every operation keeps its row" (List.map Cap.operation_name Cap.operations)
+    (List.map name (rows []));
+  check (list string) "no operation named" [] (listing []);
+  check (list string) "only the named conditional operations, in catalog order" ["hover";"type_text"]
+    (listing [Cap.Type_text; Cap.Hover]);
+  check (list string) "an available operation has none" [] (listing [Cap.List_tabs]);
+  check (list string) "an unsupported operation has none" [] (listing [Cap.Close_window])
+
 let () = run "task-aware browser choice" ["scenarios",[
   test_case "a bound request is not reselected by required actions" `Quick test_bound_request_keeps_its_browser;
   test_case "HTML5, frames/downloads, hover/typing and zoom choose their browser" `Quick test_task_choice;
@@ -347,4 +369,5 @@ let () = run "task-aware browser choice" ["scenarios",[
   test_case "native loading recovery is exposed only by Ego" `Quick test_loading_recovery_table;
   test_case "the ego snapshot is claimed by the ego connection alone" `Quick test_snapshot_table;
   test_case "native input availability is truthful and preflights the entire workflow" `Quick test_native_input_admission_surface;
-  test_case "discovery schemas list every operation" `Quick test_required_actions_schema_lists_every_operation]]
+  test_case "discovery schemas list every operation" `Quick test_required_actions_schema_lists_every_operation;
+  test_case "constraints are listed only for the operations the caller named" `Quick test_constraints_follow_required_actions]]

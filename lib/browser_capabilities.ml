@@ -368,13 +368,16 @@ let tool_name = function Tabs -> "masc_browser_tabs" | Read -> "masc_browser_rea
 let invocation_fields invocation = ["tool",`String (tool_name invocation.tool)]
   @ (match invocation.action with None -> [] | Some value -> ["action",`String value])
   @ (match invocation.mode with None -> [] | Some value -> ["mode",`String value])
-let entry_json {operation;support} =
+let entry_json ~with_constraints {operation;support} =
   let fields = match support with
     | Available invocation -> ("status",`String "available")::invocation_fields invocation
     | Conditional {invocation;constraints} -> ("status",`String "conditional")::invocation_fields invocation
-        @ ["constraints",`List (List.map (fun value -> `String value) constraints)]
+        @ (if with_constraints then ["constraints",`List (List.map (fun value -> `String value) constraints)] else [])
     | Unsupported reason -> ["status",`String "unsupported";"reason",`String reason] in
   `Assoc (("operation",`String (operation_name operation))::fields)
-let to_json backend = `Assoc [
-  "scope",`String "implemented public tools for this browser; not readiness, effect success or dispatch authority";
-  "operations",`List (List.map entry_json (catalog backend))]
+(* The constraints are long and the same text on every call, so a Conditional
+   row carries them only for an operation the caller named. *)
+let to_json backend ~constraints_for = `Assoc [
+  "scope",`String "implemented public tools for this browser; not readiness, effect success or dispatch authority; a conditional row lists its constraints only when its operation is in requiredActions";
+  "operations",`List (List.map (fun entry ->
+    entry_json ~with_constraints:(List.mem entry.operation constraints_for) entry) (catalog backend))]

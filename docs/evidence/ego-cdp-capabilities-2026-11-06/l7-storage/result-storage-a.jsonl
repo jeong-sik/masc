@@ -1,0 +1,25 @@
+{"step":"space","at":"2026-11-07T02:07:21.306Z","value":4}
+{"step":"a.precheck","at":"2026-11-07T02:07:21.320Z","value":[]}
+{"step":"a.goto","at":"2026-11-07T02:07:21.411Z","value":{}}
+{"step":"a.seed","at":"2026-11-07T02:07:21.463Z","value":{"documentCookieNames":["masc_l7_js","masc_l7_persist"],"opened":true}}
+{"step":"a.noUrls","at":"2026-11-07T02:07:21.465Z","value":{"ms":2,"rows":[{"name":"masc_l7_js","domain":"127.0.0.1","path":"/","httpOnly":false,"secure":false,"session":true,"expiresPositive":false,"sameSite":"(absent)","valueLength":15,"keys":["domain","expires","httpOnly","name","path","priority","secure","session","size","sourcePort","sourceScheme","value"]},{"name":"masc_l7_http","domain":"127.0.0.1","path":"/","httpOnly":true,"secure":false,"session":true,"expiresPositive":false,"sameSite":"Strict","valueLength":17,"keys":["domain","expires","httpOnly","name","path","priority","sameSite","secure","session","size","sourcePort","sourceScheme","value"]},{"name":"masc_l7_persist","domain":"127.0.0.1","path":"/","httpOnly":false,"secure":false,"session":false,"expiresPositive":true,"sameSite":"(absent)","valueLength":20,"keys":["domain","expires","httpOnly","name","path","priority","secure","session","size","sourcePort","sourceScheme","value"]}]}}
+{"step":"a.urlsTop","at":"2026-11-07T02:07:21.467Z","value":["masc_l7_http","masc_l7_js","masc_l7_persist"]}
+{"step":"a.urlsSub","at":"2026-11-07T02:07:21.468Z","value":["masc_l7_http","masc_l7_js","masc_l7_persist","masc_l7_sub"]}
+{"step":"b.setFrameCookie","at":"2026-11-07T02:07:21.470Z","value":{"error":"page label not found: p2. Managed Pages in task space 4: p1. task.page(label) only refers to an existing Page; create one with await task.newPage()"}}
+{"step":"b.addFrame","at":"2026-11-07T02:07:21.501Z","value":true}
+{"step":"b.frameSees","at":"2026-11-07T02:07:21.803Z","value":[{"frameCookieNames":[]}]}
+{"step":"b.noUrls","at":"2026-11-07T02:07:21.805Z","value":["masc_l7_http","masc_l7_js","masc_l7_persist"]}
+{"step":"b.urlsTop","at":"2026-11-07T02:07:21.807Z","value":["masc_l7_http","masc_l7_js","masc_l7_persist"]}
+{"step":"b.p2noUrls","at":"2026-11-07T02:07:21.808Z","value":{"error":"page label not found: p2. Managed Pages in task space 4: p1. task.page(label) only refers to an existing Page; create one with await task.newPage()"}}
+{"step":"c.asyncAwaited","at":"2026-11-07T02:07:21.861Z","value":7}
+{"step":"c.names","at":"2026-11-07T02:07:21.862Z","value":{"origin":"http://127.0.0.1:18774","local":["masc_l7_local"],"session":["masc_l7_session"],"idb":["masc_l7_db"]}}
+{"step":"d.busy1","at":"2026-11-07T02:07:24.866Z","value":{"evaluateMs":2800,"getCookiesMs":2802}}
+{"step":"d.busy2","at":"2026-11-07T02:07:27.867Z","value":{"evaluateMs":2799,"getCookiesMs":2}}
+{"step":"d.busy3","at":"2026-11-07T02:07:30.869Z","value":{"evaluateMs":2799,"getCookiesMs":2800}}
+{"step":"e.goto","at":"2026-11-07T02:07:30.871Z","value":{"error":"page label not found: p2. Managed Pages in task space 4: p1. task.page(label) only refers to an existing Page; create one with await task.newPage()"}}
+{"step":"e.cookies","at":"2026-11-07T02:07:30.872Z","value":{"error":"page label not found: p2. Managed Pages in task space 4: p1. task.page(label) only refers to an existing Page; create one with await task.newPage()"}}
+{"step":"e.storage","at":"2026-11-07T02:07:30.873Z","value":{"error":"page label not found: p2. Managed Pages in task space 4: p1. task.page(label) only refers to an existing Page; create one with await task.newPage()"}}
+{"step":"z.cleanStorage","at":"2026-11-07T02:07:30.897Z","value":true}
+{"step":"z.deleteCookies","at":"2026-11-07T02:07:30.941Z","value":["masc_l7_http@127.0.0.1/","masc_l7_js@127.0.0.1/","masc_l7_persist@127.0.0.1/","masc_l7_sub@127.0.0.1/sub"]}
+{"step":"z.after","at":"2026-11-07T02:07:30.942Z","value":[]}
+{"step":"z.finish","at":"2026-11-07T02:07:30.948Z","value":{"spaceId":4,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1"],"preservedUnmanagedCount":0}}

@@ -113,6 +113,6 @@ let target ~verb ~snapshot route =
 let bound = function
   | Lane.Page_read {tab_id;_} | Lane.Page_elements {tab_id;_} -> Option.is_some tab_id
   | Lane.Page_act (Lane.Action.Open_tab _ | Lane.Action.Control _) | Lane.Tabs_list -> false
-  | Lane.Page_document _ | Lane.Page_downloads _ | Lane.Page_capture _
+  | Lane.Page_document _ | Lane.Page_downloads _ | Lane.Page_cookies _ | Lane.Page_capture _
   | Lane.Page_scene _ | Lane.Page_snapshot _ | Lane.Page_native_workflow _ | Lane.Page_interact _ | Lane.Page_goto _ | Lane.Page_act (Lane.Action.On_tab _)
   | Lane.Page_context _ -> true

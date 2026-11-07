@@ -132,6 +132,7 @@ work by it and the Keeper tools build their rejection from it.
 | `file_upload` | `BrowserAct upload` with the Keeper's files | yes, one CSS-matched file input on a native managed Page, or with `opener` the one control whose click opens the page's file chooser; the connection keeps the copies until its space ends |
 | `environment_emulation` | `BrowserAct set_emulation`, `clear_emulation` | yes, CDP overrides of a native managed Page's location, locale (Intl only) and time zone while the ego SDK process that set them runs; a location also grants that origin geolocation in the ego profile |
 | `request_blocking` | `BrowserAct block_requests`, `unblock_requests` | yes, a CDP setting that fails a native managed Page's subresource requests to exact hosts, and those of its same-origin frames, while the ego SDK process that set it runs; navigations and cross-site frames are not blocked |
+| `storage_listing` | `BrowserRead mode=cookies` with `tabId` | yes, the names and scoping attributes of the cookies a native managed Page's top document sees, and its origin's web storage keys and IndexedDB database names; never a value |
 | `point_scroll` | `scroll_at` | yes, on a native managed Page, ego's wheel |
 | `trusted_hover` | `hover`, `hover_at` | yes, on a native managed Page |
 | `trusted_drag` | `drag_to`, `drag` | yes, zero duration on native managed Pages |

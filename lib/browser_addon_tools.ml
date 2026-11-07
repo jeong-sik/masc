@@ -46,18 +46,18 @@ let prepare_read json =
   let* filter=Browser_page_script.elements_filter_of_json (fun key -> List.assoc_opt key fields) in
   let* ()=match mode,(filter.within,filter.selector) with
     | `Elements,((None|Some _),(None|Some _))
-    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Dialog),(None,None) -> Ok ()
-    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Dialog),((Some _,_)|(_,Some _)) ->
+    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Cookies|`Dialog),(None,None) -> Ok ()
+    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Cookies|`Dialog),((Some _,_)|(_,Some _)) ->
         Error "within and selector apply to mode elements only" in
   let elements_projection=match filter.within,filter.selector with None,None -> Raw | (Some _,_|_,Some _) -> Scoped_elements filter in
   let top_scene=(match mode with `Scene|`Regions -> true
-    | `Text|`Html|`Elements|`Snapshot|`Screenshot|`Downloads|`Dialog -> false) in
+    | `Text|`Html|`Elements|`Snapshot|`Screenshot|`Downloads|`Cookies|`Dialog -> false) in
   let* ()=if not top_scene && List.exists (fun key -> List.mem_assoc key fields)
       ["scope";"expectedUrl";"navigationSource"] then
       Error "scope, expectedUrl and navigationSource support top-document scene or regions only" else Ok () in
   let* ()=match mode with
     | `Snapshot -> Ok ()
-    | `Text|`Html|`Elements|`Scene|`Regions|`Screenshot|`Downloads|`Dialog ->
+    | `Text|`Html|`Elements|`Scene|`Regions|`Screenshot|`Downloads|`Cookies|`Dialog ->
       if List.exists (fun key -> List.mem_assoc key fields) ["snapshotScope";"root"]
       then Error "snapshotScope and root apply to mode snapshot only" else Ok () in
   match mode with
@@ -88,6 +88,12 @@ let prepare_read json =
       let* ()=match request.route with Browser_selection.Exact (B.Live_route _) -> Ok ()
         | Automatic -> Error "downloads require an explicit live browser" in
       let* tab_id=tab request in prepared request Raw (B.Page_downloads {tab_id})
+  (* Names and attributes only, never a value. A connection that does not
+     list them refuses at selection (Browser_lane.live_transport_serves). *)
+  | `Cookies ->
+      let* ()=match request.route with Browser_selection.Exact (B.Live_route _) -> Ok ()
+        | Automatic -> Error "cookie and storage names require an explicit live browser" in
+      let* tab_id=tab request in prepared request Raw (B.Page_cookies {tab_id})
   | `Text -> prepared request Raw (B.Page_read {tab_id=request.tab_id;max_chars=Some max_chars})
   (* The source of the top document, never cut: when the JSON reply would
      pass 1 MiB it says htmlComplete false instead. A browser that cannot read it refuses at
@@ -202,7 +208,7 @@ let initial_goal_space initial_goal_ids config request =
      | [goal_id] -> Browser_goal_space.find config ~goal_id |> Result.map_error Browser_goal_space.error_message
      | _::_::_ -> Error "current Task belongs to multiple Goals; choose an explicit browser lane and clientId")
   | (Automatic|Exact (B.Live_route _)),
-    (Tabs_list|Page_read _|Page_document _|Page_downloads _
+    (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_cookies _
     | Page_capture _|Page_scene _|Page_snapshot _
     |Page_native_workflow _|Page_interact _|Page_goto _|Page_elements _|Page_act _|Page_context _) -> Ok None
 let annotate_goal binding = function

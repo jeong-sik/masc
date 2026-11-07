@@ -1124,6 +1124,187 @@ let block_requests t id hosts =
   | Error failure -> Error (effect_failure ~unknown failure)
   | Ok value -> request_block_receipt ~id ~action ~kind ~unknown value
 
+(* Cookie and storage names (RFC-browser-ego-cdp-capabilities §3.3
+   read_storage). The page reads its web storage keys and IndexedDB database
+   names and answers its URL; the Page's CDP session then lists the cookies
+   for that URL. Network.getCookies without a URL also lists the cookies of
+   every frame's URL, a cross-site frame's own cookies included, which that
+   frame cannot see (L7 evidence), so the step names the top document's URL.
+   A cookie value is a credential: the script drops it inside the SDK
+   process, and the answer keeps the name and the attributes that scope the
+   cookie. Web storage values are never read. A page that does not answer
+   its IndexedDB names within [storage_indexed_db_wait_ms] answers a timeout
+   for them. *)
+let storage_indexed_db_wait_ms = 2000
+let storage_limits = obj ["cookies",`Int Browser_lane.storage_cookies_limit;"names",`Int Browser_lane.storage_names_limit;
+  "nameChars",`Int Browser_lane.storage_name_chars;"indexedDbWaitMs",`Int storage_indexed_db_wait_ms]
+
+let storage_names_script = {js|async function(page, args, reason) {
+  let seen;
+  try {
+    seen = await page.evaluate(async limits => {
+      const cut = text => String(text).slice(0, limits.nameChars);
+      const failure = error => ({error: cut(error && error.name || error)});
+      const area = name => {
+        try {
+          const store = window[name];
+          const count = store.length;
+          const keys = [];
+          for (let index = 0; index < Math.min(count, limits.names); index++) keys.push(cut(store.key(index)));
+          return {count, keys, truncated: count > limits.names};
+        } catch (error) { return failure(error); }
+      };
+      const databases = async () => {
+        try {
+          if (typeof indexedDB === "undefined" || typeof indexedDB.databases !== "function") return {unsupported: true};
+          let timer;
+          const listed = await Promise.race([indexedDB.databases(),
+            new Promise(resolve => { timer = setTimeout(() => resolve(null), limits.indexedDbWaitMs); })]);
+          clearTimeout(timer);
+          if (listed === null) return {error: "timeout"};
+          return {count: listed.length, names: listed.slice(0, limits.names).map(database => cut(database.name)),
+            truncated: listed.length > limits.names};
+        } catch (error) { return failure(error); }
+      };
+      return {url: location.href, origin: location.origin, localStorage: area("localStorage"),
+        sessionStorage: area("sessionStorage"), indexedDb: await databases()};
+    }, args.limits);
+  } catch (error) {
+    return {ok: false, error: "the page's storage names were not read: " + reason(error)};
+  }
+  if (seen === null || typeof seen !== "object" || typeof seen.url !== "string")
+    return {ok: false, error: "the page answered its storage names without its URL"};
+  let listed;
+  try {
+    listed = await page.cdp("Network.getCookies", {urls: [seen.url]});
+  } catch (error) {
+    return {ok: false, error: "Network.getCookies failed: " + reason(error)};
+  }
+  if (listed === null || typeof listed !== "object" || !Array.isArray(listed.cookies))
+    return {ok: false, error: "Network.getCookies answered without a cookie list"};
+  const cookies = listed.cookies.map(cookie => ({
+    name: cookie.name, domain: cookie.domain, path: cookie.path, secure: cookie.secure, httpOnly: cookie.httpOnly,
+    ...(cookie.sameSite === undefined ? {} : {sameSite: cookie.sameSite}),
+    ...(cookie.session === false ? {expiry: Math.floor(cookie.expires)} : {})}));
+  return {ok: true, value: {cookies: cookies.slice(0, args.limits.cookies), total: cookies.length,
+    storage: {origin: seen.origin, localStorage: seen.localStorage, sessionStorage: seen.sessionStorage,
+      indexedDb: seen.indexedDb}}};
+}|js}
+
+type same_site = Same_site_strict | Same_site_lax | Same_site_none
+let same_site_to_wire = function
+  | Same_site_strict -> "Strict" | Same_site_lax -> "Lax" | Same_site_none -> "None"
+let same_site_of_wire = function
+  | "Strict" -> Some Same_site_strict | "Lax" -> Some Same_site_lax | "None" -> Some Same_site_none
+  | _ -> None
+type listed_cookie = { cookie_name : string; cookie_domain : string; cookie_path : string; cookie_secure : bool;
+  cookie_http_only : bool; cookie_same_site : same_site option; cookie_expiry : int option }
+type listed_names = { names_held : int; names_listed : string list; names_truncated : bool }
+type storage_area = Area_names of listed_names | Area_unreadable of string
+type database_listing = Database_names of listed_names | Databases_unsupported | Databases_unreadable of string
+
+let storage_shape what = "ego answered " ^ what ^ " in another shape"
+let unique_keys fields = let keys = List.map fst fields in
+  List.length keys = List.length (List.sort_uniq String.compare keys)
+let has_keys expected fields =
+  unique_keys fields && List.sort String.compare (List.map fst fields) = List.sort String.compare expected
+let strings items = List.fold_right (fun item collected ->
+    let* collected = collected in
+    match item with `String text -> Ok (text :: collected) | _ -> Error ()) items (Ok [])
+
+let listed_cookie = function
+  | `Assoc fields when unique_keys fields
+      && List.for_all (fun (key, _) -> List.mem key ["name";"domain";"path";"secure";"httpOnly";"sameSite";"expiry"]) fields ->
+    let refused () = Error (storage_shape "a cookie") in
+    (match List.assoc_opt "name" fields, List.assoc_opt "domain" fields, List.assoc_opt "path" fields,
+           List.assoc_opt "secure" fields, List.assoc_opt "httpOnly" fields with
+     | Some (`String cookie_name), Some (`String cookie_domain), Some (`String cookie_path), Some (`Bool cookie_secure),
+       Some (`Bool cookie_http_only) ->
+       let* cookie_same_site = match List.assoc_opt "sameSite" fields with
+         | None -> Ok None
+         | Some (`String wire) -> (match same_site_of_wire wire with Some value -> Ok (Some value) | None -> refused ())
+         | Some _ -> refused () in
+       let* cookie_expiry = match List.assoc_opt "expiry" fields with
+         | None -> Ok None
+         | Some (`Int seconds) -> Ok (Some seconds)
+         | Some _ -> refused () in
+       Ok {cookie_name; cookie_domain; cookie_path; cookie_secure; cookie_http_only; cookie_same_site; cookie_expiry}
+     | _ -> refused ())
+  | _ -> Error (storage_shape "a cookie")
+
+(* [names_held] is how many the page held, [names_listed] the first of them. *)
+let listed_names ~what ~key = function
+  | `Assoc fields when has_keys ["count";key;"truncated"] fields ->
+    (match List.assoc "count" fields, List.assoc key fields, List.assoc "truncated" fields with
+     | `Int count, `List items, `Bool truncated
+       when count >= 0 && List.length items = min count Browser_lane.storage_names_limit
+            && Bool.equal truncated (count > Browser_lane.storage_names_limit) ->
+       Result.map_error (fun () -> storage_shape what) (strings items)
+       |> Result.map (fun names_listed -> {names_held = count; names_listed; names_truncated = truncated})
+     | _ -> Error (storage_shape what))
+  | _ -> Error (storage_shape what)
+
+let storage_area ~what = function
+  | `Assoc ["error",`String reason] -> Ok (Area_unreadable reason)
+  | json -> Result.map (fun names -> Area_names names) (listed_names ~what ~key:"keys" json)
+
+let database_listing = function
+  | `Assoc ["unsupported",`Bool true] -> Ok Databases_unsupported
+  | `Assoc ["error",`String reason] -> Ok (Databases_unreadable reason)
+  | json -> Result.map (fun names -> Database_names names) (listed_names ~what:"IndexedDB names" ~key:"names" json)
+
+let listed_names_json ~key {names_held; names_listed; names_truncated} =
+  obj ["count",`Int names_held; key,`List (List.map str names_listed);"truncated",`Bool names_truncated]
+let storage_area_json = function
+  | Area_names names -> listed_names_json ~key:"keys" names
+  | Area_unreadable reason -> obj ["error",str reason]
+let database_listing_json = function
+  | Database_names names -> listed_names_json ~key:"names" names
+  | Databases_unsupported -> obj ["unsupported",`Bool true]
+  | Databases_unreadable reason -> obj ["error",str reason]
+let listed_cookie_json {cookie_name; cookie_domain; cookie_path; cookie_secure; cookie_http_only; cookie_same_site; cookie_expiry} =
+  obj (["name",str cookie_name;"domain",str cookie_domain;"path",str cookie_path;"secure",`Bool cookie_secure;
+        "httpOnly",`Bool cookie_http_only]
+    @ Option.to_list (Option.map (fun value -> "sameSite",str (same_site_to_wire value)) cookie_same_site)
+    @ Option.to_list (Option.map (fun seconds -> "expiry",`Int seconds) cookie_expiry))
+
+(* The answer is rebuilt from what was parsed, so a field the script did not
+   name, a cookie value included, never reaches the caller. *)
+let storage_receipt ~tab = function
+  | `Assoc fields when has_keys ["cookies";"total";"storage"] fields ->
+    (match List.assoc "cookies" fields, List.assoc "total" fields, List.assoc "storage" fields with
+     | `List rows, `Int total, `Assoc storage
+       when List.length rows = min total Browser_lane.storage_cookies_limit
+            && has_keys ["origin";"localStorage";"sessionStorage";"indexedDb"] storage ->
+       let* cookies = List.fold_right (fun row collected ->
+           let* collected = collected in
+           let* cookie = listed_cookie row in
+           Ok (cookie :: collected)) rows (Ok []) in
+       let* origin = match List.assoc "origin" storage with
+         | `String origin -> Ok origin
+         | _ -> Error (storage_shape "the page origin") in
+       let* local = storage_area ~what:"localStorage names" (List.assoc "localStorage" storage) in
+       let* session = storage_area ~what:"sessionStorage names" (List.assoc "sessionStorage" storage) in
+       let* databases = database_listing (List.assoc "indexedDb" storage) in
+       Ok (obj ["tabId",`Int tab;"cookies",`List (List.map listed_cookie_json cookies);"total",`Int total;
+                "valuesWithheld",`Bool true;
+                "storage",obj ["origin",str origin;"localStorage",storage_area_json local;
+                               "sessionStorage",storage_area_json session;"indexedDb",database_listing_json databases];
+                "storageValuesWithheld",`Bool true])
+     | _ -> Error (storage_shape "cookie and storage names"))
+  | _ -> Error (storage_shape "cookie and storage names")
+
+let storage_names t args =
+  let* tab = match field "tabId" args with
+    | Some (`Int tab) -> Ok tab
+    | Some _ | None -> Error "cookie and storage names are read for one tab; give its tabId" in
+  let* label = target t args in
+  let* value = ask t ~step:"page.cookies" ~args:(obj ["label",label;"limits",storage_limits])
+      (on_page (String.concat "\n" [
+         "    const reason = " ^ message ^ ";";
+         "    emit(await (" ^ storage_names_script ^ ")(page, args, reason));" ])) in
+  storage_receipt ~tab value
+
 (* ego's Page API has no back or forward, so the step goes through the
    page's CDP session: it reads the tab's history, refuses before acting when
    there is no entry that way, moves to the entry, and waits until the tab's
@@ -2322,6 +2503,7 @@ let dispatch_raw ?actor t ~verb args =
   | Page_context -> pre (dialog_read t args)
   | Page_snapshot -> pre (snapshot t args)
   | Page_downloads -> pre (downloads t args)
+  | Page_cookies -> pre (storage_names t args)
   | Page_act -> act ?actor t args
   | Page_interact -> interact ?actor t args
   | Page_native_workflow -> workflow ?actor t args
@@ -2337,7 +2519,7 @@ let admit_after_finish t ~verb args =
         | Ok (Open_tab _|Control (Hand_off|Take_over|Wait_for_control _|Adopt_tab _|Release_tab _)|On_tab _)
         | Error _ -> Error (Live.Before_effect "Space completion is terminal or uncertain; former Page/control work is refused; use space_status to reconcile"))
     | Tabs_list|Page_read|Page_elements|Page_scene|Page_capture|Page_goto|Page_context|Page_snapshot
-    | Page_downloads|Page_interact|Page_native_workflow ->
+    | Page_downloads|Page_cookies|Page_interact|Page_native_workflow ->
       Error (Live.Before_effect "Space completion is terminal or uncertain; former Page work is refused; use space_status to reconcile")
 
 let dispatch ?command_id ?actor t ~verb args =

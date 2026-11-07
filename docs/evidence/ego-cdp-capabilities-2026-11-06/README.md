@@ -66,3 +66,4 @@ CDP 로 바꾼 설정은 바꾼 SDK 프로세스가 끝나면 모두 사라졌�
 - L4 터치: [l4-touch/](l4-touch/README.md)
 - L5 창: [l5-windows/](l5-windows/README.md)
 - L6 요청 차단: [l6-requests/](l6-requests/README.md)
+- L7 쿠키·저장소 이름: [l7-storage/](l7-storage/README.md)

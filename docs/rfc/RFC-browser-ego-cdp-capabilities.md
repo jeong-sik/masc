@@ -105,7 +105,7 @@ CDP 로 바꾼 설정(화면 크기, 터치 흉내, 언어·시간대·위치, �
 | resize_viewport | `setDeviceMetricsOverride` 로 크기를 바꾸고, 빈 요청은 `clearDeviceMetricsOverride` 로 되돌린다. 범위는 BiDi 와 같은 100–4096 이다. 해제 직후 읽으면 옛 크기가 보일 때가 있어서(100번 중 13번), 해제는 크기가 바뀌거나 2초가 지날 때까지 기다린 뒤 receipt 를 읽는다 |
 | touch (tap_at, swipe) | touch 흉내 없이 `dispatchTouchEvent` 로 누르고 뗀다. 흉내를 켜면 페이지의 `maxTouchPoints` 와 pointer media 가 바뀐다. swipe 는 BiDi 와 같은 구간마다 `durationMs` 동안 16 ms 간격으로 `touchMove` 를 보낸다. 누른 뒤 실패하면 `touchCancel` 로 떼고, 뗐는지를 답에 적는다. 남은 touch 는 그 SDK 프로세스 안에서만 남는다. touch 는 SDK 입력 추적 밖이라 `inputReadiness` 를 바꾸지 않는다(L4 측정) |
 | list_windows | `task.tabs()` 의 각 탭에 `Browser.getWindowForTarget` 을 한꺼번에 불러 `windowId` 를 붙인다. 같은 windowId 는 같은 창이다. task space 하나가 창 하나이고, agent 가 연 popup 도 그 창의 탭이 된다. 답이 없는 탭(읽는 사이에 닫힌 탭 등)은 `windowId` 없이 둔다. 창 정보는 renderer 가 바빠도 바로 온다(L5 측정) |
-| read_storage | `Network.getCookies` 로 그 페이지가 보는 쿠키의 이름·도메인·속성만 준다. 값은 지워진 Firefox 처럼 돌려주지 않는다. localStorage·sessionStorage 키 이름과 IndexedDB 이름은 `page.evaluate` 로 읽는다 |
+| read_storage | 페이지가 `page.evaluate` 로 자기 URL 과 localStorage·sessionStorage 키 이름, IndexedDB 이름을 읽는다. 그 URL 로 `Network.getCookies({urls})` 를 불러, 그 탭의 최상위 문서가 보는 쿠키의 이름·도메인·경로·secure·httpOnly·sameSite·expiry 만 준다. URL 없이 부르면 다른 site frame 의 주소에 걸린 쿠키까지 온다. 그 frame 도 보지 못하는 쿠키다. 쿠키 값은 SDK 프로세스 안에서 버리고, 저장소 값은 읽지 않는다. 한도는 지워진 Firefox 와 같다(쿠키 200, 이름 100, 이름 200자)(L7 측정) |
 | emulate_environment | locale·timezone·좌표를 `Emulation.*Override` 로 건다. locale 은 Intl 만 바뀐다는 것을 답에 적는다. 좌표를 주면 지워진 Firefox 처럼 그 origin 에 위치 권한도 준다(§4 D3). 권한은 `page.cdp("Browser.setPermission")` 로 준다. task 세션에는 이 명령이 없다. 그 권한은 ego 프로필에서 같은 origin 의 모든 탭에 걸리고, 덮어쓰기와 함께 SDK 프로세스가 끝나면 사라진다. 시간대는 모르는 이름에도 CDP 오류가 없어서, 페이지의 Intl 로 이름을 먼저 고치고 덮어쓴 뒤 다시 읽는다 |
 | intercept_network | `Network.setBlockedURLs` 의 `urlPatterns` 에 호스트마다 `*://<host>:*/*` 하나를 넣는다. 이 패턴은 기본 포트와 다른 포트에 모두 맞고, 다른 호스트나 질의 문자열 안의 호스트에는 맞지 않는다. deprecated `urls` 는 질의 문자열 안의 호스트까지 막아서 쓰지 않는다. 하위 도메인은 따로 적어야 한다는 지워진 Firefox 의 규칙을 그대로 둔다. setBlockedURLs 는 목록을 통째로 바꾼다. 그래서 SDK 프로세스 안에 Page label 마다 막은 호스트를 두고, 부를 때마다 합친 목록을 보낸다. 막히는 것은 그 Page 와 같은 origin frame 의 하위 요청뿐이다. 이동과 다른 site frame 의 요청은 막히지 않아서 답과 설명에 적는다(L6 측정) |
 | read_network | 아래 §3.4 |
@@ -162,7 +162,7 @@ gh stack 한 스택에 층을 쌓는다. 층마다 기능 목록(`lib/browser_ca
 | L4 | touch (tap_at, swipe) | 페이지가 기록한 pointerType 과 touch 이벤트를 본다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l4-touch/README.md)) |
 | L5 | list_windows | 탭마다 windowId 를 본다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l5-windows/README.md)) |
 | L6 | intercept_network (D5) | 차단한 호스트의 fetch 실패와 풀린 뒤 성공을 본다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l6-requests/README.md)) |
-| L7 | read_storage (D5) | 쿠키 이름과 저장소 키 이름. 값이 없는지 본다 |
+| L7 | read_storage (D5) | 쿠키 이름과 저장소 키 이름. 값이 없는지 본다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l7-storage/README.md)) |
 | L8 | events 버퍼 함수 하나와 read_network (D5) | workflow `events` 와 read_network 를 번갈아 불러 이벤트가 사라지지 않는지 본다 |
 | L9 | read_console (D1·D5) | 페이지가 쓴 줄과 되돌린 뒤 숨김 상태 |
 | L10 | create_window·close_window | 새 창 탭의 label 과 관리 여부를 먼저 잰다 |

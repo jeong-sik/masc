@@ -185,9 +185,13 @@ let located_store ~config_dir ~base_path =
      | Ok (Some store) -> Ok (store : I.Store_path.t :> string))
 ;;
 
-let invite ~base_path ~config_dir ~anonymous_mutations ~now_ms =
+let active_store ~base_path ~config_dir ~anonymous_mutations =
   let* () = active ~base_path ~config_dir ~anonymous_mutations in
-  let* external_store = located_store ~config_dir ~base_path in
+  located_store ~config_dir ~base_path
+;;
+
+let invite ~base_path ~config_dir ~anonymous_mutations ~now_ms =
+  let* external_store = active_store ~base_path ~config_dir ~anonymous_mutations in
   Result.map_error
     (fun error -> Invite_not_written error)
     (write_invitation ~base_path ~external_store ~now_ms)

@@ -30,6 +30,12 @@ type rotation_policy =
   | Allow_endpoint_rotation
 [@@deriving show, eq, yojson]
 
+(* Which selected reasoning the target wire cannot do without. A consumer
+   decision like {!rotation_policy}, so it is not a field of {!t} either. *)
+type replay_obligation =
+  | Every_selected_message
+  | Open_exchange_messages
+
 type content_carrier = Canonical_blocks | Inline_chat_content
 [@@deriving show, eq, yojson]
 

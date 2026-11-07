@@ -60,7 +60,10 @@ type options = Agent_types.options =
     (** Defaults to [Reject_incompatible]. [Exclude_unselected] admits a
         provider/model change without deleting canonical reasoning. Resume is
         provisional; dispatch requires each foreign artifact to be outside the
-        target's replay selection. Active mandatory reasoning stays protected. *)
+        target's replay obligation
+        ([Llm_provider.Reasoning_replay_contract.replay_obligation]). One
+        inside it is refused before dispatch as
+        [Api (InvalidRequest { reason = Attempt_rejected })]. *)
   ; stream_idle_timeout_s : float option
   ; first_event_timeout_s : float option
   ; body_timeout_s : float option
@@ -694,7 +697,9 @@ val run_with_handoffs_blocks
     default. [options.reasoning_source_change = Exclude_unselected] explicitly
     provisionally restores valid foreign artifacts while retaining the complete
     checkpoint. Dispatch uses the actual prepared tool presence after codec
-    suppression and excludes only reasoning the target does not select.
+    suppression and excludes only reasoning outside the target's replay
+    obligation; reasoning inside it is refused as
+    [Api (InvalidRequest { reason = Attempt_rejected })].
     [preserve_thinking = Some false] alone admits exclusion
     only when the resolved dialect actually excludes replay. Dispatch
     revalidates the effective messages and target after hooks. Provider-unconfigured

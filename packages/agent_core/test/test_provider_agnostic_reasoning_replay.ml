@@ -2404,6 +2404,65 @@ let test_rotation_policy_is_declared_per_dialect () =
        ())
 ;;
 
+(* RFC-0507: only the Anthropic Messages wire lets a request omit selected
+   reasoning, and only before the latest caller query. Every other wire keeps
+   the whole selection required until its documents are read again. *)
+let test_replay_obligation_is_declared_per_dialect () =
+  let obligation ?request_path ~kind ~model_id ~base_url () =
+    Provider_config.make ?request_path ~kind ~model_id ~base_url ()
+    |> Reasoning_dialect.for_provider_config
+    |> Reasoning_dialect.replay_obligation
+  in
+  let check label ~open_exchange actual =
+    check_bool
+      (Printf.sprintf "%s requires %s" label
+         (if open_exchange then "only the open exchange" else "every selected message"))
+      open_exchange
+      (match actual with
+       | Reasoning_replay_contract.Open_exchange_messages -> true
+       | Every_selected_message -> false)
+  in
+  check "anthropic thinking" ~open_exchange:true
+    (obligation
+       ~kind:Provider_config.Anthropic
+       ~model_id:"claude-sonnet-5"
+       ~base_url:"https://api.anthropic.com"
+       ());
+  check "gemini thought signatures" ~open_exchange:false
+    (obligation
+       ~kind:Provider_config.Gemini
+       ~model_id:"gemini-3-pro"
+       ~base_url:"https://generativelanguage.googleapis.com"
+       ());
+  check "openai responses opaque state" ~open_exchange:false
+    (obligation
+       ~request_path:"/v1/responses"
+       ~kind:Provider_config.OpenAI_compat
+       ~model_id:"gpt-5.4"
+       ~base_url:"https://api.openai.com"
+       ());
+  check "deepseek chat reasoning_content" ~open_exchange:false
+    (obligation
+       ~kind:Provider_config.OpenAI_compat
+       ~model_id:"deepseek-v4.1-flash"
+       ~base_url:"https://api.deepseek.com"
+       ());
+  check "glm reasoning_content side channel" ~open_exchange:false
+    (obligation ~kind:Provider_config.Glm ~model_id:"glm-5" ~base_url:"https://api.z.ai" ());
+  check "ollama thinking side channel" ~open_exchange:false
+    (obligation
+       ~kind:Provider_config.Ollama
+       ~model_id:"qwen3"
+       ~base_url:"http://localhost:11434"
+       ());
+  check "kimi reasoning_content side channel" ~open_exchange:false
+    (obligation
+       ~kind:Provider_config.Kimi
+       ~model_id:"kimi-k2.6"
+       ~base_url:"https://api.moonshot.ai"
+       ())
+;;
+
 let incompatible_drop_count (projection : Reasoning_history_projection.t) =
   List.length
     (List.filter
@@ -2812,6 +2871,10 @@ let () =
             "rotation policy declared per dialect"
             `Quick
             test_rotation_policy_is_declared_per_dialect
+        ; Alcotest.test_case
+            "replay obligation declared per dialect"
+            `Quick
+            test_replay_obligation_is_declared_per_dialect
         ; Alcotest.test_case
             "rotation policy drives incompatible drop"
             `Quick

@@ -124,6 +124,11 @@ val replay_contract : t -> Reasoning_replay_contract.t
     only. See {!Reasoning_replay_contract.rotation_policy}. *)
 val rotation_policy : t -> Reasoning_replay_contract.rotation_policy
 
+(** Declared scope of selected reasoning the [dialect]'s wire requires back,
+    derived from its typed wire facts only. See
+    {!Reasoning_replay_contract.replay_obligation}. *)
+val replay_obligation : t -> Reasoning_replay_contract.replay_obligation
+
 (** Provenance stamped on a response produced by [config]. Derived from the
     stable provider/model/transport shape, so request-local knobs never change
     the identity of an already-produced artifact. *)

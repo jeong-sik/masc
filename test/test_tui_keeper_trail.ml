@@ -31,6 +31,7 @@ let runtime ?last_failure ?lane_observation () : Decode.keeper_runtime =
   ; kr_runtime_lane_observation = lane_observation
   ; kr_runtime_path_rest = Ok None
   ; kr_operator_disposition = Ok None
+  ; kr_failing_since = None
   }
 
 let reported_at = 1_000.

@@ -841,7 +841,7 @@ or completion.
 | Keys | What it does |
 |---|---|
 | `NOW` | what the keeper is doing at this moment |
-| `AGE` | time since it last moved: the open turn's latest update, else the later of its last turn and the start of its wait |
+| `AGE` | time since it last moved: the open turn's latest update (its start before it reports one), else the later of its last turn and the start of its wait |
 | `LIFECYCLE` | the keeper process |
 | `◂` | a failing keeper's last failure, in place of its runtime or first in DETAIL: how long ago · cause · the runtime that ended it · candidates tried |
 | `Mode M/D/A` | manual / on demand / autonomous |

@@ -154,8 +154,8 @@ let keeper_row_trail_sentence ~age (row : Keeper_list_model.row) =
    usable time has no age piece, here as in the drawn sentence. *)
 let widest_age_text = String.make Render_schedule.keeper_last_turn_width '0'
 
-(* The cell is styled here: the sentence about the past is the one text on a
-   row drawn in the warning colour, and the runtime identity stays receded. *)
+(* The cell is styled here: the sentence about the past is drawn in the warning
+   colour, and the runtime identity stays receded. *)
 let keeper_runtime_cell ~width ?failure_context (runtime : keeper_runtime option) =
   match failure_context with
   | Some text -> Theme.warn () ^ fit_width text width ^ Ansi.reset
@@ -325,17 +325,19 @@ let keeper_detail_text (row : Keeper_list_model.row) =
 
 (* The DETAIL cell. When the RUNTIME column is not drawn, the sentence about
    the past leads this cell in the warning colour and the rest stays receded.
-   Each part is fitted as plain text, so a cut mark takes the colour of the
-   text it cuts. *)
+   The text is fitted as plain text, so a cut mark takes the colour of the text
+   it cuts. A sentence that fills the cell is fitted together with the rest, so
+   the rest it pushes out is still marked by the cut. *)
 let keeper_detail_cell ~width ~failure_context row =
   let rest = keeper_detail_text row in
   match failure_context with
   | None -> Theme.recede () ^ fit_width rest width ^ Ansi.reset
   | Some sentence ->
       let sentence_cells = Message_layout.display_width sentence in
-      if sentence_cells >= width then Theme.warn () ^ fit_width sentence width ^ Ansi.reset
+      let tail = if String.equal rest "" then "" else " · " ^ rest in
+      if sentence_cells >= width then
+        Theme.warn () ^ fit_width (sentence ^ tail) width ^ Ansi.reset
       else
-        let tail = if String.equal rest "" then "" else " · " ^ rest in
         Theme.warn () ^ sentence ^ Theme.recede ()
         ^ fit_width tail (width - sentence_cells)
         ^ Ansi.reset

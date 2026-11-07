@@ -851,14 +851,17 @@ whose tool gate is YOLO draws its name in red; the stance has no column of its
 own. `NOW` is what the keeper is doing at this moment, a glyph and a word. `!`
 in the error colour is a held call, which waits for a person. `✗` in the warning
 colour is an attempt of the open turn that failed; the turn is still open. `AGE`
-is the time since the keeper last moved: the open turn's latest update, else the
-later of its last turn and the start of its wait (the lifetime turn count moved to
-the detail pane; a keeper with neither shows a dash). The metadata list needs no
-server, so names, last-turn times, and tasks stay readable while the runtime is
-down. `NOW`, `LIFECYCLE / RUNTIME`, and lifecycle actions come from
-`GET /api/v1/gate/keepers`; a keeper whose live roster row was not read shows
-`- unknown` in `NOW` and `health unread` in `DETAIL` rather than a status guessed
-from metadata. The glyph is the primary colour cue. The runtime cell joins
+is the time since the keeper last moved: the open turn's latest update (its start
+before it reports one), else the later of its last turn and the start of its wait
+(the lifetime turn count moved to the detail pane; a keeper with neither shows a
+dash). The metadata list needs no server, so names, last-turn times, and tasks
+stay readable while the runtime is down. `NOW` is read from the keeper's turns,
+waiting inventory, held calls, questions and async requests, so it does not wait
+for the roster; a keeper that none of them describes shows `- unknown`.
+`LIFECYCLE / RUNTIME`, the health word in `DETAIL`, and lifecycle actions come
+from `GET /api/v1/gate/keepers`; a keeper whose live roster row was not read shows
+`health unread` in `DETAIL` rather than a status guessed from metadata. The glyph
+is the primary colour cue. The runtime cell joins
 that phase to the producer's full canonical `runtime_id`; the TUI does not split
 the opaque id to guess a model. If the fixed-width column cannot hold a long id,
 it keeps both the shared head and distinguishing tail around a middle ellipsis.
@@ -868,14 +871,16 @@ strip of competing colours.
 A keeper whose health is failing also carries a sentence about its past, opened
 by `◂`: `◂ 3m · rate limited · <runtime_id> · 2 candidates` says how long ago the
 last turn failed, why, which runtime ended it and how many candidates the walk
-reached. It replaces the runtime identity in the `LIFECYCLE / RUNTIME` column when
+reached. It takes the whole `LIFECYCLE / RUNTIME` cell, phase word included, when
 that column is drawn and leads `DETAIL` otherwise, in the warning colour. `NOW`
 says what the keeper does now and the sentence says why its health is failing, so
 a failing keeper that has started a new turn shows both. The sentence has one
-source: the last execution receipt when it holds facts about the turn, else the
-server's own cause word with a note on what the receipt lacks (`no receipt`,
-`candidate walk was not captured`, `historical evidence unreadable`). The time
-piece is left out when the failure has no usable time.
+source: the last execution receipt when it holds facts about the turn (a walk
+with no recorded end reads `terminal not observed` and the candidates tried),
+else the server's own cause word with a note on what the receipt lacks (`no
+receipt`, `candidate walk was not captured`, `historical evidence unreadable`,
+`no candidate failure recorded`). A failure that is not a turn failure carries the
+cause word alone. The time piece is left out when the failure has no usable time.
 
 Roster reads and pause/resume/wakeup requests bind to the complete workspace
 identity observed in `/health`: `paths.effective_base_path` and
@@ -3018,9 +3023,10 @@ A delegate-result mark represents a queued terminal result; its sentence may
 name the other Keeper and outcome, but it is not an inventory of active delegations.
 The recent and oldest orders use the observed turn or waiting-inventory time;
 they are not measures of how long a Keeper has been blocked. The attention group
-holds held calls, questions and confirmations. A Keeper whose health is failing,
-or whose open turn has a failed attempt, is in the failing group unless it is
-waiting on a person, and a failing Keeper that has started a new turn stays there.
+holds held calls, questions and confirmations. A Keeper whose health is failing
+is in the failing group unless it is waiting on a person, and it stays there after
+it starts a new turn. A Keeper whose open turn has a failed attempt is in the
+failing group too, unless it is waiting on a person, paused or offline.
 
 ## Navigation
 
@@ -3164,7 +3170,8 @@ what that keeper is doing. When `DETAIL` says `health unread`, the live roster a
 `GET /api/v1/gate/keepers` has not been read for that keeper - the first load
 is still out, the read failed (the reason is printed above the list), or the
 roster came back short and did not carry that keeper. It is not a status the
-keeper is in. The summary line's `? N unknown` counts the rows that show it.
+keeper is in. The summary line's `? N unknown` counts the rows that show it,
+except a failing keeper, which counts under `◂ N failing`.
 
 **A surface shows a count of `0` next to `data unreliable`.** The read failed;
 the count is not an observation. The failing call is printed on the same row and

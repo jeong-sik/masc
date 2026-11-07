@@ -3168,7 +3168,7 @@ let add_routes ~sw ~clock router =
                | Ok goal_id when goal_id = "" -> Error "goal_id must not be blank"
                | Ok goal_id ->
                  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-                   match Candle_hold_release.release ~now:clock ~config ~goal_id with
+                   match Candle_hold_release.release ~now:(fun () -> Eio.Time.now clock) ~config ~goal_id with
                    | Ok outcome ->
                      (match outcome with
                       | Candle_hold_release.Released _ -> Candle_payout_worker.wake ()

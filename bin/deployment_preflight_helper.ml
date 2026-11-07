@@ -903,6 +903,7 @@ type tool_request_consumer =
   | Workspace_curator
   | Verifier_review
   | Goal_proof_review
+  | Candle_appraisal
 
 let tool_request_consumer scope =
   match Masc.Keeper_librarian_store_preflight.purpose scope with
@@ -913,6 +914,7 @@ let tool_request_consumer scope =
       [ Masc.Workspace_memory_execution_capture.scope, Workspace_curator
       ; Masc.Verifier_review_owner.scope, Verifier_review
       ; Masc.Goal_verifier_worker.scope, Goal_proof_review
+      ; Server_candle_appraiser.scope, Candle_appraisal
       ]
 ;;
 
@@ -924,9 +926,11 @@ let validate_tool_request () =
     | Some Workspace_curator -> Masc.Workspace_memory_execution_capture.check_retained record
     | Some Verifier_review -> Masc.Verifier_review_owner.check_retained record
     | Some Goal_proof_review -> Masc.Goal_verifier_worker.check_retained record
-    (* Candle appraisal originals, which Candle reads by ID only, and scopes
-       no consumer of this build writes still pass here (#49587). *)
-    | None -> Ok ()
+    (* Candle reads its originals back by request ID and decodes nothing of
+       the owner record past what the scan's owner reader already checked. *)
+    | Some Candle_appraisal -> Ok ()
+    (* No reader of this build reads this scope, so fresh state deletes it. *)
+    | None -> Error "no consumer of this build reads tool request originals of this scope"
 ;;
 
 let run_scan ~base_path = function

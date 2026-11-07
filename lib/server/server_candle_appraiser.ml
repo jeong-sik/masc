@@ -184,6 +184,7 @@ let run_with ~registry ~base_path ~retain ~call ~identity request =
     | Exact.Request_id_reused ->
       reject ~slot:None ~code:"candle_appraisal_request_id_reused"
         (A.Execution_rejected "Candle appraisal request ID already belongs to different input") (Exact.final_to_json final)
+let scope = "candle-appraisals"
 let run ~config ~identity request =
   let reserved = Unified_tool_registry.reserved_tool_names () in
   let* export = resolve ~config ~reserved |> Result.map_error (fun detail -> A.Transport_unavailable detail) in
@@ -193,6 +194,6 @@ let run ~config ~identity request =
   (* Candle reads its originals by ID only, so it keeps no summary of them. *)
   let retain ~request_id ~request = Lane_addon_runtime.retain_tool_request_owner
     ~config ~access:Lane_addon_sources.Operator_configuration ~reserved ~export
-    ~scope:"candle-appraisals" ~request_id ~summary:`Null ~request in
+    ~scope ~request_id ~summary:`Null ~request in
   run_with ~registry:(Runs.global ()) ~base_path:config.base_path ~retain ~call ~identity request
 module For_testing = struct let run = run_with end

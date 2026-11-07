@@ -298,7 +298,7 @@ let non_empty_string_member name input =
 ;;
 
 (* #23469 (task-1733 completion): keeper file tools resolve relative paths
-   against the keeper's playground sandbox root ([keeper_default_read_root]),
+   against the keeper's playground sandbox root ([keeper_playground_root]),
    never against the server base path. The observation join mirrors that
    contract, otherwise the emitted partition describes a file the tool never
    touched: a sandbox-rooted [repos/<id>/…] edit used to be re-anchored at

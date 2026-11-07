@@ -72,10 +72,6 @@ let keeper_default_write_root ~(config : Workspace.config) ~(meta : keeper_meta)
   keeper_playground_root ~config ~meta
 ;;
 
-let keeper_default_read_root ~(config : Workspace.config) ~(meta : keeper_meta) =
-  keeper_playground_root ~config ~meta
-;;
-
 (* #23469 (task-1733): observation partitions must interpret keeper-relative
    tool paths against the same root the file tools resolve against — the
    keeper's playground sandbox — never the server base path. Unlike

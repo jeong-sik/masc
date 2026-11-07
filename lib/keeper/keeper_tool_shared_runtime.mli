@@ -36,15 +36,10 @@ val keeper_default_write_root
   -> meta:Keeper_meta_contract.keeper_meta
   -> string
 
-val keeper_default_read_root
-  :  config:Workspace.config
-  -> meta:Keeper_meta_contract.keeper_meta
-  -> string
-
 (** [keeper_observation_sandbox_root ~config ~meta] is the keeper's
     playground sandbox root anchored at the normalised project root.
     Pure path computation for the observation write path — unlike
-    {!keeper_default_read_root} it never creates the sandbox bundle. *)
+    [keeper_playground_root] it never creates the sandbox bundle. *)
 val keeper_observation_sandbox_root
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta

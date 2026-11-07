@@ -30,7 +30,7 @@ type attribution = {
   grade_trace : Candle_appraisal.trace;
   relations : Candle_appraisal.task_relation list;
 }
-type unattributed_reason = No_candidates | All_unrelated of attribution | No_related_keepers of attribution
+type unattributed_reason = No_candidates | All_unrelated of attribution | No_related_keepers of attribution | Window_released
 
 type equipment_choice = Default | Item of Keeper_portrait_item.t
 
@@ -77,6 +77,11 @@ type body =
       ; tasks : (string * task_lookup) list
       ; task_keepers : (string * keeper_observation) list
       }
+  | Candidate_window_released of
+      { goal_id : string
+      ; request_id : string
+      ; verification_run_id : string
+      }
   | Unattributed of
       { goal_id : string
       ; request_id : string
@@ -102,6 +107,7 @@ let kind = function
   | Payout_owed _ -> "payout_owed"
   | Candidates _ | Candidates_fenced _ -> "candidates"
   | Candidate_window_held _ -> "candidate_window_held"
+  | Candidate_window_released _ -> "candidate_window_released"
   | Unattributed _ -> "unattributed"
   | Paid _ -> "paid"
   | Purchased _ -> "purchased"
@@ -178,10 +184,11 @@ let unattributed_reason_text = function
   | No_candidates -> "no_candidates"
   | All_unrelated _ -> "all_unrelated"
   | No_related_keepers _ -> "no_related_keepers"
+  | Window_released -> "window_released"
 ;;
 
 let attribution_fields = function
-  | No_candidates -> []
+  | No_candidates | Window_released -> []
   | All_unrelated a | No_related_keepers a ->
     ["grade", `String (Candle_grade.to_string a.grade);
      "grade_trace", Candle_appraisal.trace_json a.grade_trace;
@@ -233,6 +240,11 @@ let body_fields : body -> (string * Yojson.Safe.t) list = function
     ; "confirmed_at", Candle_time.to_yojson h.confirmed_at
     ; "tasks", `List (List.map (fun (task_id, lookup) -> `Assoc (lookup_fields task_id lookup)) h.tasks)
     ; "task_keepers", `List (List.map keeper_observation_json h.task_keepers)
+    ]
+  | Candidate_window_released r ->
+    [ "goal_id", `String r.goal_id
+    ; "request_id", `String r.request_id
+    ; "verification_run_id", `String r.verification_run_id
     ]
   | Unattributed u ->
     [ "goal_id", `String u.goal_id
@@ -473,6 +485,15 @@ let candidate_window_held_of_fields ~context fields =
   Ok (Candidate_window_held { goal_id; request_id; verification_run_id; passed_at; confirmed_at; tasks; task_keepers })
 ;;
 
+let candidate_window_released_of_fields ~context fields =
+  let field key decode fields = Candle_json.field ~context key decode fields in
+  let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
+  let* request_id, fields = field "request_id" Candle_json.as_non_blank fields in
+  let* verification_run_id, fields = field "verification_run_id" Candle_json.as_non_blank fields in
+  let* () = Candle_json.finish ~context fields in
+  Ok (Candidate_window_released { goal_id; request_id; verification_run_id })
+;;
+
 let unattributed_of_fields ~context fields =
   let field key decode fields = Candle_json.field ~context key decode fields in
   let* goal_id, fields = field "goal_id" Candle_json.as_non_blank fields in
@@ -487,6 +508,7 @@ let unattributed_of_fields ~context fields =
   in
   let* reason, fields = match reason_text with
     | "no_candidates" -> Ok (No_candidates, fields)
+    | "window_released" -> Ok (Window_released, fields)
     | "all_unrelated" -> attributed (fun attribution -> All_unrelated attribution) fields
     | "no_related_keepers" -> attributed (fun attribution -> No_related_keepers attribution) fields
     | _ -> Error "unknown unattributed reason" in
@@ -591,6 +613,7 @@ let of_yojson json =
     | "payout_owed" -> payout_owed_of_fields ~context fields
     | "candidates" -> candidates_of_fields ~context fields
     | "candidate_window_held" -> candidate_window_held_of_fields ~context fields
+    | "candidate_window_released" -> candidate_window_released_of_fields ~context fields
     | "unattributed" -> unattributed_of_fields ~context fields
     | "paid" -> Result.map (fun p -> Paid p) (Candle_payment.of_yojson (`Assoc fields))
     | "purchased" -> purchased_of_fields ~context fields

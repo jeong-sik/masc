@@ -1242,7 +1242,8 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
           field "Payout" ((match reason with
             | No_candidates -> "no payable candidates"
             | All_unrelated -> "candidate tasks unrelated"
-            | No_related_keepers -> "no related Keepers") ^ " (" ^ Candle_time.to_rfc3339 recorded_at ^ ")")
+            | No_related_keepers -> "no related Keepers"
+            | Window_released -> "released window stayed ambiguous") ^ " (" ^ Candle_time.to_rfc3339 recorded_at ^ ")")
           @ identity id
         | Payout_failed {identity=id} ->
           field ~tone:Planning_detail.Refused "Payout" "failure recorded as unreadable due date" @ identity id in

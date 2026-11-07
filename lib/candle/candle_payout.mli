@@ -119,7 +119,12 @@ type held_window =
   }
 
 val held_window_of : waiting -> Candle_event.t list -> held_window option
-(** The frozen observation for an unresolved payout window, if one exists. *)
+(** The frozen observation for an unresolved payout window, if one exists.
+    A window closed by an operator release returns [None]. *)
+
+val released_of : waiting -> Candle_event.t list -> bool
+(** Whether an operator release row closed this payout's held window
+    (RFC-0513). *)
 
 val candidate_observations_of :
   waiting -> Candle_event.t list -> ((string * Candle_event.task_lookup) list * observation_provenance) option
@@ -157,10 +162,12 @@ val validate_settlement : waiting -> Candle_event.t list -> Candle_event.body ->
     atomic append. *)
 
 val validate_record : Candle_event.t list -> Candle_event.body -> (unit, string) result
-(** Admit a new settlement or candidate-window observation against preceding
-    rows in file order, under today's rules. A hold must match the open payout
+(** Admit a new settlement, candidate-window observation or release against
+    preceding rows in file order, under today's rules. A hold must match the open payout
     and complete linked-Task observations; later Candidates, replacement
-    obligations and settlements for that Goal are refused. A settlement otherwise requires a matching Snapshot
+    obligations and settlements for that Goal are refused, and a hold cannot
+    be written again for a released window. A release closes an open hold and
+    admits fresh observations and settlements again. A settlement otherwise requires a matching Snapshot
     and durable Candidates whose list equals today's eligible subset. *)
 
 val validate_replay : Candle_event.t list -> Candle_event.body -> (unit, string) result

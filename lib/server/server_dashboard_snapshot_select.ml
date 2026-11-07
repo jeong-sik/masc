@@ -105,11 +105,9 @@ let select_telemetry_summary_json
       (Server_timing.Custom "snapshot_read")
       (fun () -> snap.telemetry_summary)
   | None ->
-    (* RFC-0138 Phase 3 Step 5 — Dashboard_cache retired from the
-       read path.  Cold-start fallback (snapshot=None) computes the
-       summary fresh; the refresh fiber takes ownership within ~2s.
-       The narrow window without dedup is acceptable for a per-process
-       once-only path. *)
+    (* Cold-start fallback (snapshot=None) computes the summary fresh;
+       the refresh fiber takes ownership within ~2s. The narrow window
+       without dedup is acceptable for a per-process once-only path. *)
     let base_path = config.base_path in
     let masc_root = Workspace.masc_dir config in
     let keeper_keepalive_interval_s =

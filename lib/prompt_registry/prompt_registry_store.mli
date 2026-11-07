@@ -13,15 +13,7 @@
     field without making the abstraction any richer.
 
     Internal helper [default_state] (the cached singleton) is
-    hidden — callers consume it through the {!default} accessor.
-
-    #29545: a fourth Hashtbl, [registry] (keyed by
-    [Prompt_registry_types.prompt_entry]), lived here until this
-    field was removed. Nothing ever wrote to it ([Hashtbl.replace
-    registry] / [Hashtbl.add registry] had zero call sites), so
-    every read through it was vacuously empty and it was not
-    exposed by [prompt_registry.mli]. Deleted along with the now-
-    fully-unused [prompt_entry] type. *)
+    hidden — callers consume it through the {!default} accessor. *)
 
 type t = {
   version_index : (string, string list) Hashtbl.t;

@@ -13,10 +13,8 @@
 
     Prompts enter the registry from markdown files, not from code: point
     [set_markdown_dir] at the directory and the pin loads it, parsing each
-    [*.md] frontmatter and its [### marker] slots and registering them. The
-    in-code registration API ([register] / [get] / [render] and the rest of
-    the mutable entry surface) was removed once nothing called it; do not
-    reintroduce it to add a prompt — add the markdown file instead.
+    [*.md] frontmatter and its [### marker] slots and registering them. To
+    add a prompt, add the markdown file.
 
     Usage:
     {[

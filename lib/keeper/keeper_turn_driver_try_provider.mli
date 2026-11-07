@@ -747,7 +747,7 @@ val aged_result_min_bytes : int
 (** The least text, in bytes, of a result of an ended turn that goes as its
     marker; a smaller result stays readable in the prompt. A retained
     official-client receipt is a result of an ended vendor turn and uses the
-    same floor ([Keeper_client_tool_outbox.Host_bodies_as_markers]). *)
+    same floor ([Keeper_client_tool_outbox.host_response]). *)
 
 val current_turn_demotion_sequence :
   same_run_retry_authorized:(unit -> bool) ->

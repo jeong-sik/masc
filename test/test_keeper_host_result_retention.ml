@@ -43,67 +43,102 @@ let load base_path = get (Outbox.load ~base_path ~keeper_name)
 let returned () = Ok {Agent_core.Types.content=marker;
   content_blocks=Some [Llm_provider.Types.Text "original-block-bytes"];_meta=None}
 
-let reader base_path =
-  let schema = Keeper_runtime_schemas_toml.artifact_read in
-  Tool_bridge.agent_core_tool_of_masc_with_execution_env ~base_path
-    ~descriptor:(Agent_core.Tool.ordinary_descriptor Agent_core.Tool_contract.Concurrent)
-    ~model_projection:(fun () -> Tool_output.bounded_inline_model_projection)
-    ~name:schema.name ~description:schema.description ~input_schema:schema.input_schema
-    (fun _ args ->
-      let execution = Keeper_artifact_read.handle ~base_path ~args in
-      match execution.disposition with
-      | Tool_result.Completed () -> Tool_result.make_ok ~tool_name:schema.name
-          ~start_time:(Tool_timing.start ()) ?data:execution.data ()
-      | Tool_result.Failed class_ -> Tool_result.make_err ~tool_name:schema.name ~class_
-          ~start_time:(Tool_timing.start ()) execution.raw_output
-      | Tool_result.Deferred () -> fail "the canonical reader cannot defer")
+let blob_store base_path = Tool_blob_store.create ~base_path
+
+let held store sha256 = match Tool_blob_store.fetch store ~sha256 with
+  | Ok held -> held
+  | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
 
 (* The masc_dos_screen result of #49634: a few KB of text and a PNG. Every
    later request re-reads a retained receipt, so it names the bytes by blob
-   address and the store holds them. A Keeper without the artifact reader
-   keeps its text, which it could not read back from a marker; its image
-   still goes by address, because base64 inside text is not an image. *)
-let test_screenshot_receipt_names_bytes_by_address () = List.iter (fun with_reader ->
-  with_workspace (fun base_path ->
-    let screen = String.concat " " (List.init 512 (Printf.sprintf "cell-%03d")) in
-    let png = "\x89PNG\r\n\x1a\n" ^ String.make 4096 '\x07' in
-    let payload = Base64.encode_string png in
-    let tool = Agent_core.Tool.create ~name:"Screenshot" ~description:"Return the screen"
-        ~parameters:[] (fun _ -> Ok {Agent_core.Types.content=screen;
-          content_blocks=Some [Llm_provider.Types.Text screen;
-            Llm_provider.Types.Image {media_type="image/png";
-              source=Llm_provider.Types.Base64 payload}];_meta=None}) in
-    let tools = if with_reader then [tool; reader base_path] else [tool] in
-    let terminal_error = ref None in
-    let screenshot = match Host.dynamic_tools ~result_scope:None ~base_path
-        ~content_transport:Runtime_official_client_tool.Mcp ~accepts_image_input:true
-        ~tool_approval:None ~runtime_label:"host-result-fixture" ~keeper_name ~turn_count:7
-        ~tools ~loading_plan:Host.All_on_demand ~hooks:Agent_core.Hooks.empty
-        ~event_bus:None ~context_injector:None ~context:(Some (Agent_core.Context.create_sync ()))
-        ~terminal_effect_state:(fun () -> Keeper_tools_agent_core.Terminal_effect_open)
-        ~terminal_error ~pre_tool_rejects:(ref []) ~on_tool_boundary:(fun ~tool_name:_ -> Ok None)
-        ~raw_trace_run:None () with
-      | Ok (screenshot :: _, _) -> screenshot
-      | Ok ([], _) -> fail "the screenshot tool is projected"
-      | Error error -> fail (Agent_core.Error.to_string error) in
-    ignore (screenshot.call ~call_id:"screen-call" (`Assoc []));
-    check (option string) "retention reports no failure" None !terminal_error;
-    let pending = load base_path in
-    check int "the result is retained" 1 (List.length (Outbox.receipt_ids pending));
-    let context = String.concat "\n" (Outbox.developer_context pending) in
-    let contains = String_util.contains_substring context in
-    let address bytes = Agent_core_sha256.(digest_string bytes |> to_hex) in
-    let store = Tool_blob_store.create ~base_path in
-    let held bytes = match Tool_blob_store.fetch store ~sha256:(address bytes) with
-      | Ok held -> held
-      | Error error -> fail (Tool_blob_store.fetch_error_to_string error) in
-    check bool "no base64 payload rides in the receipt" false (contains payload);
-    check bool "the receipt names the image by its address" true (contains (address png));
-    check (option string) "the store holds the image bytes" (Some png) (held png);
-    check bool "text stays inline only without the reader" (not with_reader) (contains screen);
-    if with_reader then
-      check (option string) "the store holds the text bytes" (Some screen) (held screen)))
-  [true; false]
+   address and the store holds them. *)
+let test_screenshot_receipt_names_bytes_by_address () = with_workspace (fun base_path ->
+  let screen = String.concat " " (List.init 512 (Printf.sprintf "cell-%03d")) in
+  let png = "\x89PNG\r\n\x1a\n" ^ String.make 4096 '\x07' in
+  let payload = Base64.encode_string png in
+  let tool = Agent_core.Tool.create ~name:"Screenshot" ~description:"Return the screen"
+      ~parameters:[] (fun _ -> Ok {Agent_core.Types.content=screen;
+        content_blocks=Some [Llm_provider.Types.Text screen;
+          Llm_provider.Types.Image {media_type="image/png";
+            source=Llm_provider.Types.Base64 payload}];_meta=None}) in
+  let terminal_error = ref None in
+  let screenshot = match Host.dynamic_tools ~result_scope:None ~base_path
+      ~content_transport:Runtime_official_client_tool.Mcp ~accepts_image_input:true
+      ~tool_approval:None ~runtime_label:"host-result-fixture" ~keeper_name ~turn_count:7
+      ~tools:[tool] ~loading_plan:Host.All_on_demand ~hooks:Agent_core.Hooks.empty
+      ~event_bus:None ~context_injector:None ~context:(Some (Agent_core.Context.create_sync ()))
+      ~terminal_effect_state:(fun () -> Keeper_tools_agent_core.Terminal_effect_open)
+      ~terminal_error ~pre_tool_rejects:(ref []) ~on_tool_boundary:(fun ~tool_name:_ -> Ok None)
+      ~raw_trace_run:None () with
+    | Ok ([screenshot], _) -> screenshot
+    | Ok _ -> fail "one screenshot tool is projected"
+    | Error error -> fail (Agent_core.Error.to_string error) in
+  ignore (screenshot.call ~call_id:"screen-call" (`Assoc []));
+  check (option string) "retention reports no failure" None !terminal_error;
+  let pending = load base_path in
+  check int "the result is retained" 1 (List.length (Outbox.receipt_ids pending));
+  let context = String.concat "\n" (Outbox.developer_context pending) in
+  let contains = String_util.contains_substring context in
+  let address bytes = Agent_core_sha256.(digest_string bytes |> to_hex) in
+  let store = blob_store base_path in
+  check bool "no base64 payload rides in the receipt" false (contains payload);
+  check bool "no text body rides in the receipt" false (contains screen);
+  check bool "the receipt names the image by its address" true (contains (address png));
+  check (option string) "the store holds the image bytes" (Some png) (held store (address png));
+  check (option string) "the store holds the text bytes" (Some screen) (held store (address screen)))
+
+(* What [Outbox.host_response] writes for each payload. An undecodable payload
+   is still what the tool returned, so it is kept by address instead of
+   failing the retention. Media is labelled octet-stream whatever type the
+   tool names, so blob maintenance never expands it as an artifact manifest. *)
+let test_host_response_names_each_payload () = with_workspace (fun base_path ->
+  let open Yojson.Safe.Util in
+  let producer = get (Outbox.host_producer ~base_path ~keeper_name
+      ~runtime_label:"host-result-fixture" ~turn_count:7) in
+  let respond ~min_result_bytes content content_blocks =
+    get (Outbox.host_response producer ~min_result_bytes ~success:true ~content ~content_blocks) in
+  let store = blob_store base_path in
+  let blob json = match Tool_output.normalized_artifact_ref_of_json json with
+    | Tool_output.Decoded_normalized_artifact_ref reference -> reference
+    | Tool_output.Not_normalized_artifact_ref | Tool_output.Invalid_normalized_artifact_ref _ ->
+      fail "a blob address is expected" in
+  let marker text = match Tool_output.decode_from_agent_core text with
+    | Tool_output.Decoded reference -> reference
+    | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> fail "a blob marker is expected" in
+  let wrapped = "aGVs\nbG8=" and document = "bytes that are not a manifest" in
+  let media = respond ~min_result_bytes:0 "small" (Some [
+      Llm_provider.Types.Image {media_type="image/png"; source=Llm_provider.Types.Base64 wrapped};
+      Llm_provider.Types.Document {media_type=Tool_output.artifact_manifest_mime;
+        source=Llm_provider.Types.Base64 (Base64.encode_string document)}]) in
+  (match media |> member "content_blocks" |> to_list with
+   | [undecodable; named] ->
+     check bool "an undecodable payload names no media" true (member "artifact" undecodable = `Null);
+     check (option string) "its exact string is held" (Some wrapped)
+       (held store (blob (member "undecodable_base64" undecodable)).Tool_output.sha256);
+     check bool "the decoder's reason is kept" true (member "detail" undecodable <> `Null);
+     let reference = blob (member "artifact" named) in
+     check string "media blobs never carry the tool's type" "application/octet-stream"
+       reference.Tool_output.mime;
+     check string "the block keeps the tool's type" Tool_output.artifact_manifest_mime
+       (member "media_type" named |> to_string);
+     check (option string) "the decoded bytes are held" (Some document)
+       (held store reference.Tool_output.sha256)
+   | _ -> fail "two media blocks are expected");
+  check string "a body shorter than its marker stays inline" "small"
+    (member "content" media |> to_string);
+  let long = String.make 3000 'x' in
+  check string "a result under the floor stays inline" long
+    (respond ~min_result_bytes:4096 long None |> member "content" |> to_string);
+  let shared = respond ~min_result_bytes:0 long (Some [Llm_provider.Types.Text long]) in
+  let content = member "content" shared |> to_string in
+  check (option string) "the marker names the exact body" (Some long)
+    (held store (marker content).Tool_output.sha256);
+  (match member "content_blocks" shared |> to_list with
+   | [block] -> check string "a body content and a block share is one marker" content
+       (member "text" block |> to_string)
+   | _ -> fail "one text block is expected");
+  check string "a marker already in the result stays as it is" content
+    (respond ~min_result_bytes:0 content None |> member "content" |> to_string))
 
 let test_stop_retains_before_transport_return () = with_workspace (fun base_path ->
   let terminal_error = ref None and effects = ref 0 in
@@ -624,6 +659,7 @@ let () = run "Original official-client host result retention"
     test_case "host invocation index schema is strict" `Quick test_host_invocation_index_validation;
     test_case "original that reads back different creates no receipt" `Quick test_original_that_reads_back_different_creates_no_receipt;
     test_case "screenshot receipt names its bytes by blob address" `Quick test_screenshot_receipt_names_bytes_by_address;
+    test_case "host response names each payload by address" `Quick test_host_response_names_each_payload;
     test_case "source identity deduplicates exact originals across mixed producers" `Quick test_producer_identity_and_vendor_coexistence;
     test_case "shared context preserves retained originals in order" `Quick test_shared_context_preserves_each_retained_result;
     test_case "carrier names retained media by identity" `Quick test_carrier_names_media_by_identity;

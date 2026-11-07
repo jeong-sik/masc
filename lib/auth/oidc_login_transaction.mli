@@ -97,6 +97,14 @@ type 'held taken =
   ; code_verifier : string  (** Sent with the code to the token endpoint. *)
   ; invite : Invite_token.t option
   ; return_to : Local_path.t
+  ; replaces : Authz_types.Session_id.t option
+        (** The browser session that the browser held at the start, its
+            cookie checked there (plan C3-8). The sign-in ends it in the
+            record that issues the new session. The callback cannot read
+            the session cookie itself: it is [SameSite=Strict], and the
+            redirect back from the provider is a cross-site navigation that
+            does not carry it, while the start is a same-origin [POST] that
+            does. *)
   }
 
 type t
@@ -113,6 +121,7 @@ val start
   -> 'held flow
   -> invite:Invite_token.t option
   -> return_to:Local_path.t
+  -> replaces:Authz_types.Session_id.t option
   -> ('held started, start_error) result
 
 type take_error =

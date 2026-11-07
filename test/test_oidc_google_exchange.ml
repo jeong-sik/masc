@@ -31,7 +31,7 @@ let discovery_document =
 ;;
 
 let taken ?(nonce = "nonce-1") () =
-  { T.held = { T.nonce }; code_verifier = "verifier-1"; invite = None; return_to = T.Local_path.root }
+  { T.held = { T.nonce }; code_verifier = "verifier-1"; invite = None; return_to = T.Local_path.root; replaces = None }
 ;;
 
 let answer ?(status = 200) ?(headers = []) body = Ok { Login_transport.status; headers; body }
@@ -118,7 +118,7 @@ let a_code_becomes_the_identity_it_names () =
 
 let the_authorization_url_asks_for_this_login () =
   let store = T.create ~capacity:1 in
-  match T.start store ~now_ms:0 T.Google ~invite:None ~return_to:T.Local_path.root with
+  match T.start store ~now_ms:0 T.Google ~invite:None ~return_to:T.Local_path.root ~replaces:None with
   | Error T.Full -> Alcotest.fail "full"
   | Ok started ->
     (match X.endpoints ~get:(get (google ())) (X.cache ()) ~now_ms:0 with

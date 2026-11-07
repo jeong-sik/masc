@@ -13,14 +13,20 @@ let invite_of text =
   | None -> Alcotest.fail "fixture token refused"
 ;;
 
+let session_of text =
+  match Authz_types.Session_id.of_string text with
+  | Ok session_id -> session_id
+  | Error (_ : Authz_id.error) -> Alcotest.fail "fixture session id refused"
+;;
+
 let path_of text =
   match T.Local_path.of_string text with
   | Some path -> path
   | None -> Alcotest.fail "fixture path refused"
 ;;
 
-let started store ~now_ms ?invite ?(return_to = T.Local_path.root) () =
-  match T.start store ~now_ms T.Google ~invite ~return_to with
+let started store ~now_ms ?invite ?(return_to = T.Local_path.root) ?replaces () =
+  match T.start store ~now_ms T.Google ~invite ~return_to ~replaces with
   | Ok started -> started
   | Error T.Full -> Alcotest.fail "the store is full"
 ;;
@@ -35,7 +41,15 @@ let outcome = function
 
 let a_login_takes_back_what_it_started () =
   let store = T.create ~capacity:4 in
-  let s = started store ~now_ms:0 ~invite:(invite_of token) ~return_to:(path_of "/board?tab=1") () in
+  let s =
+    started
+      store
+      ~now_ms:0
+      ~invite:(invite_of token)
+      ~return_to:(path_of "/board?tab=1")
+      ~replaces:(session_of "session-1")
+      ()
+  in
   match T.take store ~now_ms:1 T.Google s.id ~state:s.state with
   | Error error -> Alcotest.failf "refused: %s" (T.take_error_to_string error)
   | Ok taken ->
@@ -45,6 +59,10 @@ let a_login_takes_back_what_it_started () =
       s.code_challenge
       (Auth_oauth.pkce_s256 taken.code_verifier);
     Alcotest.(check string) "the return path" "/board?tab=1" (T.Local_path.to_string taken.return_to);
+    Alcotest.(check (option string))
+      "the session of the browser that started"
+      (Some "session-1")
+      (Option.map Authz_types.Session_id.to_string taken.replaces);
     (match taken.invite with
      | Some invite ->
        Alcotest.(check string)
@@ -99,7 +117,7 @@ let a_transaction_expires () =
 let a_transaction_of_another_flow_is_not_taken () =
   let store = T.create ~capacity:4 in
   let github ~invite =
-    match T.start store ~now_ms:0 T.Github ~invite ~return_to:(path_of "/keepers") with
+    match T.start store ~now_ms:0 T.Github ~invite ~return_to:(path_of "/keepers") ~replaces:None with
     | Ok (started : unit T.started) -> started
     | Error T.Full -> Alcotest.fail "the store is full"
   in
@@ -125,7 +143,11 @@ let a_transaction_of_another_flow_is_not_taken () =
       "the GitHub challenge is S256 of the verifier"
       second.code_challenge
       (Auth_oauth.pkce_s256 taken.code_verifier);
-    Alcotest.(check string) "the return path" "/keepers" (T.Local_path.to_string taken.return_to)
+    Alcotest.(check string) "the return path" "/keepers" (T.Local_path.to_string taken.return_to);
+    Alcotest.(check (option string))
+      "no session at the start"
+      None
+      (Option.map Authz_types.Session_id.to_string taken.replaces)
 ;;
 
 let a_full_store_refuses_a_start () =
@@ -133,7 +155,7 @@ let a_full_store_refuses_a_start () =
   let first = started store ~now_ms:0 () in
   let (_ : T.google T.started) = started store ~now_ms:5 () in
   let full () =
-    match T.start store ~now_ms:10 T.Google ~invite:None ~return_to:T.Local_path.root with
+    match T.start store ~now_ms:10 T.Google ~invite:None ~return_to:T.Local_path.root ~replaces:None with
     | Error T.Full -> true
     | Ok _ -> false
   in
@@ -146,7 +168,7 @@ let a_full_store_refuses_a_start () =
   Alcotest.(check bool) "a taken one frees a place" false (full ());
   Alcotest.(check bool) "full again" true (full ());
   Alcotest.(check int) "none live after the lifetime" 0 (T.live store ~now_ms:(10 + T.lifetime_ms));
-  match T.start store ~now_ms:(10 + T.lifetime_ms) T.Google ~invite:None ~return_to:T.Local_path.root with
+  match T.start store ~now_ms:(10 + T.lifetime_ms) T.Google ~invite:None ~return_to:T.Local_path.root ~replaces:None with
   | Ok _ -> ()
   | Error T.Full -> Alcotest.fail "expired transactions were counted"
 ;;

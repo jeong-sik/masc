@@ -112,6 +112,7 @@ type 'held taken =
   ; code_verifier : string
   ; invite : Invite_token.t option
   ; return_to : Local_path.t
+  ; replaces : Authz_types.Session_id.t option
   }
 
 type entry =
@@ -153,9 +154,10 @@ let start
     -> held flow
     -> invite:Invite_token.t option
     -> return_to:Local_path.t
+    -> replaces:Authz_types.Session_id.t option
     -> (held started, start_error) result
   =
-  fun t ~now_ms flow ~invite ~return_to ->
+  fun t ~now_ms flow ~invite ~return_to ~replaces ->
   Mutex.protect t.mutex (fun () ->
     let live = live_entries t ~now_ms in
     t.entries <- live;
@@ -166,7 +168,7 @@ let start
       let state = Random_id.hex ~bytes:random_bytes in
       let code_verifier = Random_id.hex ~bytes:random_bytes in
       let held = draw_held flow in
-      let taken = { held; code_verifier; invite; return_to } in
+      let taken = { held; code_verifier; invite; return_to; replaces } in
       t.entries <- Id_map.add id (Entry { flow; started_at_ms = now_ms; state; taken }) live;
       Ok { id; state; code_challenge = Auth_oauth.pkce_s256 code_verifier; held }))
 ;;

@@ -1712,6 +1712,13 @@ let self_hosted_template_cases =
     , false
     , false
     , false )
+  ; ( "tinker.tinker-inkling-2-small"
+    , 262144
+      (* Thinking Machines Tinker OpenAI-compatible surface for Inkling-2-Small
+         and fine-tuned tinker://.../sampler_weights/<step> checkpoints *)
+    , true
+    , true
+    , true )
   ]
 ;;
 

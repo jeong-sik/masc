@@ -204,8 +204,51 @@ let emit_invisible ~copy ~replace text =
   walk 0 ~after_pictograph:false ~base:None
 ;;
 
+let[@inline] is_all_ascii text =
+  let len = String.length text in
+  let rec loop i =
+    if i >= len then true
+    else if Char.code (String.unsafe_get text i) < 0x80 then loop (i + 1)
+    else false
+  in
+  loop 0
+;;
+
+let[@inline] is_ascii_printable text =
+  let len = String.length text in
+  let rec loop i =
+    if i >= len then true
+    else
+      let c = String.unsafe_get text i in
+      if c >= ' ' && c <= '~' then loop (i + 1)
+      else false
+  in
+  loop 0
+;;
+
+let[@inline] is_all_plain_text text =
+  let len = String.length text in
+  let rec loop i =
+    if i >= len then true
+    else
+      let b = Char.code (String.unsafe_get text i) in
+      if b >= 0x20 && b <= 0x7E then loop (i + 1)
+      else if b >= 0xEA && b <= 0xED && i + 2 < len then
+        let b1 = Char.code (String.unsafe_get text (i + 1)) in
+        let b2 = Char.code (String.unsafe_get text (i + 2)) in
+        if b1 >= 0x80 && b1 <= 0xBF && b2 >= 0x80 && b2 <= 0xBF then
+          let code = ((b land 0x0F) lsl 12) lor ((b1 land 0x3F) lsl 6) lor (b2 land 0x3F) in
+          if code >= 0xAC00 && code <= 0xD7A3 then loop (i + 3)
+          else false
+        else false
+      else false
+  in
+  loop 0
+;;
+
 let escape_invisible text =
-  if String.for_all (fun byte -> byte < '\x80') text then text
+  if is_all_ascii text then text
+  else if is_all_plain_text text then text
   else
     let output = Buffer.create (String.length text) in
     emit_invisible text
@@ -214,14 +257,20 @@ let escape_invisible text =
     Buffer.contents output
 ;;
 
+let escaped_byte_table =
+  Array.init 256 (fun i -> Printf.sprintf "\\x%02X" i)
+;;
+
+let escaped_c1_codepoint_table =
+  Array.init 256 (fun i -> Printf.sprintf "\\u00%02X" i)
+;;
+
 (* Printable ASCII (0x20..0x7E) is the one input both passes below copy
    byte for byte: no control to escape, no multi-byte sequence to check and,
    through [escape_invisible], no scalar a terminal draws as nothing. It is
    returned as it came; DEL and every other control still take the escape
    table. *)
 let emit_terminal_controls ~copy ~replace text =
-  let escaped_byte byte = Printf.sprintf "\\x%02X" byte in
-  let escaped_codepoint byte = Printf.sprintf "\\u00%02X" byte in
   let byte_at index = Char.code text.[index] in
   let is_continuation byte = byte >= 0x80 && byte <= 0xBF in
   let valid_utf8_length index =
@@ -274,7 +323,7 @@ let emit_terminal_controls ~copy ~replace text =
       if
         byte < 0x20 || (byte >= 0x7F && byte <= 0x9F)
       then (
-        replace index (escaped_byte byte);
+        replace index (escaped_byte_table.(byte));
         append (index + 1))
       else if byte < 0x80
       then (
@@ -286,7 +335,7 @@ let emit_terminal_controls ~copy ~replace text =
         && let next = Char.code text.[index + 1] in
            next >= 0x80 && next <= 0x9F
       then (
-        replace index (escaped_codepoint (Char.code text.[index + 1]));
+        replace index (escaped_c1_codepoint_table.(Char.code text.[index + 1]));
         append (index + 2))
       else
         match valid_utf8_length index with
@@ -294,14 +343,15 @@ let emit_terminal_controls ~copy ~replace text =
           copy index length;
           append (index + length)
         | None ->
-          replace index (escaped_byte byte);
+          replace index (escaped_byte_table.(byte));
           append (index + 1))
   in
   append 0
 ;;
 
 let sanitize_terminal_text text =
-  if String.for_all (fun byte -> byte >= ' ' && byte <= '~') text then text
+  if is_ascii_printable text then text
+  else if is_all_plain_text text then text
   else
     (* Invisible-character decisions must see the original neighbours. A
        control escape such as [\x09] ends in an emoji-capable digit; running
@@ -383,6 +433,17 @@ let sanitize_terminal_lines_with_source text =
   {text=Buffer.contents output; source_bytes=Array.of_list (List.rev !positions)}
 ;;
 
+let[@inline] has_line_controls text =
+  let len = String.length text in
+  let rec loop i =
+    if i >= len then false
+    else match String.unsafe_get text i with
+    | '\r' | '\n' | '\t' -> true
+    | _ -> loop (i + 1)
+  in
+  loop 0
+;;
+
 (* One row of a text that has rows. The terminal boundary escapes control
    bytes because an external value may carry them by mistake or on purpose;
    a file's newline is neither, it is the text's own shape, and a list cell
@@ -391,28 +452,31 @@ let sanitize_terminal_lines_with_source text =
    every other external value. The mark is neutral-width (U+23CE), so a
    preview grows by one cell per line, never by six. *)
 let preview_line text =
-  let return_mark = "\xe2\x8f\x8e" in
-  let output = Buffer.create (String.length text) in
-  let length = String.length text in
-  let rec walk index =
-    if index < length
-    then (
-      match text.[index] with
-      | '\r' when index + 1 < length && text.[index + 1] = '\n' ->
-        Buffer.add_string output return_mark;
-        walk (index + 2)
-      | '\n' | '\r' ->
-        Buffer.add_string output return_mark;
-        walk (index + 1)
-      | '\t' ->
-        Buffer.add_char output ' ';
-        walk (index + 1)
-      | byte ->
-        Buffer.add_char output byte;
-        walk (index + 1))
-  in
-  walk 0;
-  sanitize_terminal_text (Buffer.contents output)
+  if not (has_line_controls text) && (is_ascii_printable text || is_all_plain_text text)
+  then text
+  else
+    let return_mark = "\xe2\x8f\x8e" in
+    let output = Buffer.create (String.length text) in
+    let length = String.length text in
+    let rec walk index =
+      if index < length
+      then (
+        match text.[index] with
+        | '\r' when index + 1 < length && text.[index + 1] = '\n' ->
+          Buffer.add_string output return_mark;
+          walk (index + 2)
+        | '\n' | '\r' ->
+          Buffer.add_string output return_mark;
+          walk (index + 1)
+        | '\t' ->
+          Buffer.add_char output ' ';
+          walk (index + 1)
+        | byte ->
+          Buffer.add_char output byte;
+          walk (index + 1))
+    in
+    walk 0;
+    sanitize_terminal_text (Buffer.contents output)
 ;;
 
 let short_timestamp_of_unix_for_terminal ~localtime unix_seconds =

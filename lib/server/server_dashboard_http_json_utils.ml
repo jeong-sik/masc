@@ -32,12 +32,12 @@ let json_member key = function
   | _ -> `Null
 ;;
 
-let json_number key json =
-  Json_field.float json key |> Json_field.to_option
+let[@inline always] json_number key json =
+  Json_field.float_opt json key
 ;;
 
-let json_assoc key json =
-  Json_field.assoc json key
-  |> Json_field.to_option
-  |> Option.map (fun fields -> `Assoc fields)
+let[@inline always] json_assoc key json =
+  match Json_field.assoc_opt json key with
+  | Some fields -> Some (`Assoc fields)
+  | None -> None
 ;;

@@ -143,6 +143,9 @@ let refused_for_binding_rest = function
     antigravity_error_is_binding_rest error
   | Execution_failed { cause = Fusion_official_client.Muse_failure error; runtime_id = _ } ->
     muse_error_is_binding_rest error
+  (* Vibe 3.1.0 has no typed quota outcome: MASC passes no [--max-price], and
+     how a spent subscription ends a headless run is not measured. *)
+  | Execution_failed { cause = Fusion_official_client.Vibe_failure _; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Missing_reply; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Setup_failure _; runtime_id = _ }
   | Unknown_runtime _
@@ -233,6 +236,8 @@ let refused_for_input_size = function
     antigravity_error_is_input_size error
   | Execution_failed { cause = Fusion_official_client.Muse_failure error; runtime_id = _ } ->
     muse_error_is_input_size error
+  (* No Vibe outcome names an oversized input; [length] is the output's. *)
+  | Execution_failed { cause = Fusion_official_client.Vibe_failure _; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Missing_reply; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Setup_failure _; runtime_id = _ }
   | Unknown_runtime _
@@ -460,7 +465,8 @@ let input_capacity = function
           | Fusion_official_client.Claude_failure _
           | Fusion_official_client.Claude_admission_failure _
           | Fusion_official_client.Antigravity_failure _
-          | Fusion_official_client.Muse_failure _ )
+          | Fusion_official_client.Muse_failure _
+          | Fusion_official_client.Vibe_failure _ )
       ; _
       }
   | Unknown_runtime _ | Not_an_official_client _ | Invalid_json_output _

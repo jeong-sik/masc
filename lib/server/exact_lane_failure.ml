@@ -181,6 +181,46 @@ let muse_error = function
   | Runtime_muse_serve.Process_exited _
   | Runtime_muse_serve.Timeout _ -> Transient
 
+(* Vibe's own outcome decides where it can: a limit is [Output_limit], a
+   refused answer is [Output_unusable], and an outcome this decoder does not
+   know reads as [Configuration_refused] like any failure with no named
+   cause. A process that ended outside an agreeing [export.json] is transient
+   only when it was killed or timed out, or its call directory could not be
+   made. *)
+let vibe_outcome = function
+  | Runtime_vibe_headless.Usage_error | Runtime_vibe_headless.Config_error
+  | Runtime_vibe_headless.Unrecognized_outcome _ -> Configuration_refused
+  | Runtime_vibe_headless.Turn_limit | Runtime_vibe_headless.Token_limit
+  | Runtime_vibe_headless.Price_limit | Runtime_vibe_headless.Length -> Output_limit
+  | Runtime_vibe_headless.Refusal -> Output_unusable
+  | Runtime_vibe_headless.Finished
+  | Runtime_vibe_headless.Infrastructure_failure
+  | Runtime_vibe_headless.Deadline
+  | Runtime_vibe_headless.Terminated
+  | Runtime_vibe_headless.Aborted -> Transient
+
+let vibe_error = function
+  | Fusion_official_client.Vibe_run_failed error ->
+    (match error with
+     | Runtime_vibe_cli.Invalid_config _
+     | Runtime_vibe_cli.Process_runtime_unavailable
+     | Runtime_vibe_cli.Spawn_refused _
+     | Runtime_vibe_cli.No_export _ -> Configuration_refused
+     | Runtime_vibe_cli.Export_unreadable _
+     | Runtime_vibe_cli.Transcript_unreadable _
+     | Runtime_vibe_cli.Exit_code_mismatch _
+     | Runtime_vibe_cli.Outcome_exit_mismatch _ -> Output_unusable
+     | Runtime_vibe_cli.Call_dir_failed _
+     | Runtime_vibe_cli.Timed_out _
+     | Runtime_vibe_cli.Signaled _
+     | Runtime_vibe_cli.Stopped _ -> Transient)
+  | Fusion_official_client.Vibe_not_answered error ->
+    (match error with
+     | Runtime_vibe_answer.Not_finished { outcome; _ } -> vibe_outcome outcome
+     | Runtime_vibe_answer.No_output
+     | Runtime_vibe_answer.No_assistant_reply
+     | Runtime_vibe_answer.Unrecognized_reply_part _ -> Output_unusable)
+
 let cli_failure = function
   | Keeper_lane_cli_oneshot.Unknown_runtime _
   | Keeper_lane_cli_oneshot.Not_an_official_client _ -> Configuration_refused
@@ -194,4 +234,5 @@ let cli_failure = function
      | Fusion_official_client.Claude_failure error
      | Fusion_official_client.Claude_admission_failure error -> claude_error error
      | Fusion_official_client.Antigravity_failure error -> antigravity_error error
-     | Fusion_official_client.Muse_failure error -> muse_error error)
+     | Fusion_official_client.Muse_failure error -> muse_error error
+     | Fusion_official_client.Vibe_failure error -> vibe_error error)

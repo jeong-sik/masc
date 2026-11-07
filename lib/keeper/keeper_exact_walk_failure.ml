@@ -298,6 +298,7 @@ let native_cause (cause : Fusion_official_client.failure) =
   | Claude_admission_failure _ -> Native_failed Claude_admission
   | Antigravity_failure _ -> Native_failed Antigravity
   | Muse_failure _ -> Native_failed Muse
+  | Vibe_failure _ -> Native_failed Vibe
 ;;
 
 

@@ -4476,6 +4476,7 @@
   alcotest
   masc
   masc.masc_types
+  masc.masc_schedule
   masc_tui_types
   masc_tui_agenda
   masc_tui_keeper_axis_cell

@@ -81,7 +81,7 @@ let of_snapshot ~freshness ?runner ~keeper_name (snapshot : Masc_tui_types.sched
             | None ->
                 (match Schedule_domain.schedule_status_of_string r.sch_status with
                  | Ok Due -> 1
-                 | _ -> 2)
+                 | Ok (Scheduled | Running | Succeeded | Failed | Cancelled | Expired) | Error _ -> 2)
           in
           let compare_priority r1 r2 =
             let p1 = priority_val r1 in
@@ -102,7 +102,7 @@ type index =
   ; ind_table : (string, t) Hashtbl.t
   }
 
-let index_of_agenda ~freshness ?runner snapshot_opt =
+let index_of_agenda ~freshness ?runner (snapshot_opt : Masc_tui_types.schedule_snapshot option) =
   let table = Hashtbl.create 16 in
   (match snapshot_opt with
    | Some snapshot when Option.is_none snapshot.scs_read_error ->

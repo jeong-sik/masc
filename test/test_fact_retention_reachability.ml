@@ -94,9 +94,9 @@ let write_fixture ?(stamp = float_of_int) ?(surface_for = fun _ -> "discord") ~p
       (Yojson.Safe.to_string
          (`Assoc
            [
-             (* keeper_chat_store drops any row without a nonblank id
-                (keeper_chat_store.ml:1579), so a fixture that omits it yields
-                empty pages and every planted fact reads as unreachable. *)
+             (* keeper_chat_store drops any row without a nonblank id, so a
+                fixture that omits it yields empty pages and every planted
+                fact reads as unreachable. *)
              ("id", `String (Printf.sprintf "fact-retention-%04d" i));
              ("role", `String (if i mod 2 = 1 then "user" else "assistant"));
              ("content", `String content);

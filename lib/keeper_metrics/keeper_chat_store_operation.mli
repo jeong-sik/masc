@@ -1,8 +1,6 @@
 (** Keeper_chat_store_operation — closed sum for the [operation] label on
-    [masc_keeper_chat_store_failures_total].
-
-    Replaces 2 hardcoded literals in [keeper_chat_store.ml]
-    (`"append"` / `"load"`). *)
+    [masc_keeper_chat_store_failures_total]. [to_label] gives ["append"] for
+    [Append] and ["load"] for [Load]. *)
 
 type t =
   | Append (** Append-to-chat-store I/O failure. *)

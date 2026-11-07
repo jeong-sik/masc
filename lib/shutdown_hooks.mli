@@ -32,9 +32,9 @@ val register_lane_addon_shutdown : (unit -> unit) -> unit
 
 val run_lane_addon_shutdown : unit -> unit
 (** Run the registered Lane Add-on native detach, or log that none is
-    registered. The server calls it after {!run_all} and the Board flush and
-    before it cancels its switch, with no phase timeout of its own: the process
-    deadline bounds it (RFC lane-addon-shutdown-detaches-native-instances §3). *)
+    registered. The HTTP server runs it alongside {!run_all}, each under the
+    same cleanup timeout, so shutdown takes no longer than before (RFC
+    lane-addon-shutdown-detaches-native-instances §3). *)
 
 val run_all : unit -> unit
 (** Run the shutdown sequence in order:

@@ -411,13 +411,16 @@ end
 
 (** Graceful stop (RFC lane-addon-shutdown-detaches-native-instances §3). Stop
     this workspace's configuration maintenance, Detach every live native
-    instance that is not Detached and wait for each cleanup to settle. The next
-    server then attaches its declarations without reading a cleanup
-    descriptor another binary wrote. Container instances are left to the next
-    server's label sweep. No timeout is added: the shutdown process deadline
-    bounds the wait, and an instance it cuts short is recovered from its
-    binding by the next server. [Error] means the server background owner is
-    unavailable and nothing was detached. *)
+    instance that is not Detached and wait for each cleanup to settle. The
+    configuration mutex is held for the whole wait. A settled instance leaves
+    a Detached record, so the next server's reconciliation attaches its
+    declaration instead of retiring the record. The new attach still reopens
+    the installation claim slot when one remains, and that slot's cleanup
+    descriptor is read then. Container instances are left to the next server's
+    label sweep. The caller bounds the wait; an instance it cuts short stays
+    Detaching or attached and the next server recovers it from its binding.
+    [Error] means the server background owner is unavailable and nothing was
+    detached. *)
 val detach_native_for_shutdown : config:Workspace.config ->
   (Shutdown_detach.t list, string) result
 

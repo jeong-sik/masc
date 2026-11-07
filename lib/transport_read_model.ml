@@ -65,28 +65,6 @@ let make_http_context
   }
 ;;
 
-let context_from_env ?(include_configured = false) () =
-  let default_host = configured_http_host () |> normalize_advertised_host in
-  let default_base_url =
-    Printf.sprintf "http://%s:%d" default_host (configured_http_port ())
-  in
-  let base_url =
-    match Sys.getenv_opt Env_config_core.http_base_url_env_key with
-    | Some raw ->
-      (match String_util.trim_nonempty raw with
-       | Some value -> normalize_loopback_base_url value
-       | None -> default_base_url)
-    | None -> default_base_url
-  in
-  let uri = Uri.of_string base_url in
-  let host =
-    match Uri.host uri with
-    | Some value -> normalize_advertised_host value
-    | None -> default_host
-  in
-  make_http_context ~include_configured ~base_url ~host ()
-;;
-
 let maybe_configured_fields ~include_configured enabled =
   if include_configured then [ "configured", `Bool enabled ] else []
 ;;

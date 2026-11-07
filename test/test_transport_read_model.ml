@@ -36,20 +36,6 @@ let with_ws_same_origin_ready f =
   TM.set_ws_same_origin_runtime_ready true;
   Fun.protect ~finally:(fun () -> TM.set_ws_same_origin_runtime_ready false) f
 
-(* [Uri.host] reads the leading dotted quad of "127.0.0.1.example.com" as an
-   IPv4 literal and pushes the rest into the path, so the host field derived
-   from it can name a different machine than the base_url the same context
-   publishes. Every URL this module emits is built by appending to base_url,
-   so a client reaches whatever base_url says (#29806). *)
-let test_context_from_env_host_matches_the_published_base_url () =
-  with_env "MASC_HTTP_BASE_URL" (Some "http://127.0.0.1.example.com/root") (fun () ->
-      let ctx = TRM.context_from_env () in
-      check string "host is what the URL check ran on" "127.0.0.1" ctx.host;
-      check string
-        "base_url names that same host; the rest folds into the path"
-        "http://127.0.0.1/.example.com/root"
-        ctx.base_url)
-
 let test_websocket_discovery_http_shape_extends_tool_shape () =
   let tool_json = TRM.websocket_discovery_json (make_context ()) in
   let http_json =
@@ -241,15 +227,6 @@ let test_advertised_base_url_uses_typed_trusted_scheme () =
       check string "typed authority host" "masc.example.com" host;
       check int "typed HTTPS default port" 443 port)
 
-let test_context_from_env_uses_default_loopback_base_url () =
-  with_env "MASC_HTTP_BASE_URL" None (fun () ->
-      with_env "MASC_HOST" (Some "0.0.0.0") (fun () ->
-          with_env "MASC_HTTP_PORT" (Some "8935") (fun () ->
-              let ctx = TRM.context_from_env () in
-              check string "normalized host" "127.0.0.1" ctx.host;
-              check string "default base_url" "http://127.0.0.1:8935"
-                ctx.base_url)))
-
 let test_explicit_base_url_opt_never_derives_from_bind_env () =
   with_env "MASC_HTTP_BASE_URL" None (fun () ->
       with_env "MASC_HOST" (Some "0.0.0.0") (fun () ->
@@ -270,19 +247,6 @@ let test_explicit_base_url_opt_normalizes_only_explicit_value () =
          "explicit public identity is normalized"
          (Some "https://example.com/root")
          (Env_config_core.masc_http_base_url_opt ()))
-
-let test_context_from_env_trims_explicit_base_url () =
-  with_env "MASC_HTTP_BASE_URL" (Some "https://example.com/root/") (fun () ->
-      let ctx = TRM.context_from_env () in
-      check string "host derived from base url" "example.com" ctx.host;
-      check string "base_url trimmed" "https://example.com/root" ctx.base_url)
-
-let test_context_from_env_normalizes_loopback_alias_base_url () =
-  with_env "MASC_HTTP_BASE_URL" (Some "http://localhost:8935/root/") (fun () ->
-      let ctx = TRM.context_from_env () in
-      check string "loopback alias host canonicalized" "127.0.0.1" ctx.host;
-      check string "loopback alias base_url canonicalized"
-        "http://127.0.0.1:8935/root" ctx.base_url)
 
 (* [Env_config_runtime.Local_runtime.mcp_url] used to answer this question
    too, by appending "/mcp" to an unfolded MASC_HTTP_BASE_URL. It had no
@@ -355,16 +319,10 @@ let () =
          ] );
       ( "env",
         [
-          test_case "default loopback base url" `Quick
-            test_context_from_env_uses_default_loopback_base_url;
           test_case "explicit base URL does not derive bind env" `Quick
             test_explicit_base_url_opt_never_derives_from_bind_env;
           test_case "explicit base URL normalizes explicit value" `Quick
             test_explicit_base_url_opt_normalizes_only_explicit_value;
-          test_case "trim explicit base url" `Quick
-            test_context_from_env_trims_explicit_base_url;
-          test_case "normalize loopback alias base url" `Quick
-            test_context_from_env_normalizes_loopback_alias_base_url;
           test_case "mcp url comes from the folded base" `Quick
             test_transport_status_derives_the_mcp_url_from_the_folded_base;
           test_case "normalize localhost" `Quick
@@ -373,7 +331,5 @@ let () =
             test_normalize_advertised_host_canonicalizes_ipv6_loopback;
           test_case "preserve noncanonical 127 alias" `Quick
             test_normalize_advertised_host_preserves_noncanonical_127_alias;
-          test_case "env host matches the published base url" `Quick
-            test_context_from_env_host_matches_the_published_base_url;
         ] );
     ]

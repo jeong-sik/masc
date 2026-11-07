@@ -59,25 +59,6 @@ val make_http_context :
     strip) and [host] normalised through {!normalize_advertised_host}.
     [include_configured] defaults to [false]. *)
 
-val context_from_env :
-  ?include_configured:bool ->
-  unit ->
-  http_context
-(** [context_from_env ?include_configured ()] builds a context from the
-    runtime environment:
-
-    1. Default host from {!Env_config_core.masc_host} (then
-       canonicalised).
-    2. Default base URL [http://<host>:<port>] using
-       {!Env_config_core.masc_http_port_int}.
-    3. If {!Env_config_core.http_base_url_env_key} env var is
-       set to a non-empty value, override the base URL with it
-       (then re-normalise).
-    4. The [host] field is re-extracted from the final
-       [base_url] so a custom env-var URL like
-       [http://example.com:8000/] propagates correctly into
-       JSON output. *)
-
 (** {1 Configured endpoint readers} *)
 
 val configured_http_port : unit -> int

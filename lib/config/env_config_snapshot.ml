@@ -218,14 +218,6 @@ let board_entries =
       "Flush interval for board persistence (seconds)";
   ]
 
-let cache_entries =
-  [
-    entry ~default:"1000" "MASC_CACHE_MAX_ENTRIES"
-      "Maximum total number of cache entries";
-    entry ~default:"102400" "MASC_CACHE_MAX_ENTRY_SIZE"
-      "Maximum size of a single cache entry value in bytes (100KB)";
-  ]
-
 let channel_gate_entries =
   [
     entry ~default:"4000" "MASC_CHANNEL_GATE_MAX_CONTENT_LENGTH"
@@ -373,7 +365,7 @@ let category_specs () =
       @ declared_entries "server" );
     "auth", auth_entries;
     "transport", transport_entries @ declared_entries "transport";
-    "storage", storage_entries @ cache_entries @ board_entries;
+    "storage", storage_entries @ board_entries;
     ( "runtime"
     , runtime_entries
       @ message_gc_entries @ internal_timer_entries

@@ -4483,6 +4483,18 @@
   masc_tui_keeper_next_run))
 
 (test
+ (name test_tui_keeper_axis)
+ (modules test_tui_keeper_axis)
+ (libraries
+  alcotest
+  masc
+  masc.masc_types
+  masc_tui_types
+  masc_tui_agenda
+  masc_tui_keeper_axis_cell
+  masc_tui_keeper_axis))
+
+(test
  (name test_tui_editor)
  (modules test_tui_editor)
  (libraries alcotest unix masc_tui_editor))

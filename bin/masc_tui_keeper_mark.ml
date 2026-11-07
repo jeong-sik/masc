@@ -110,4 +110,5 @@ let column_legend =
   ; "S " ^ letters sandbox_letter sandboxes, "sandbox: " ^ words sandbox_word sandboxes
   ; ( "쉬는 중"
     , "resting path: relative duration (제공자 stated / 상한 bounded); ▹ prefixes next candidate after turn failure" )
+  ; badge_glyph Badge_schedule, "next scheduled run or hold status (Detailed second row)"
   ]

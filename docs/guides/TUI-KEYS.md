@@ -847,6 +847,7 @@ or completion.
 | `Mode M/D/A` | manual / on demand / autonomous |
 | `S D/M/R` | sandbox: docker / microvm / remote_ssh |
 | `쉬는 중` | resting path: relative duration (제공자 stated / 상한 bounded); ▹ prefixes next candidate after turn failure |
+| `◷` | next scheduled run or hold status (Detailed second row) |
 
 ## Memory marks
 

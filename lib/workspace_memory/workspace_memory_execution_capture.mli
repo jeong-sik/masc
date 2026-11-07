@@ -18,13 +18,7 @@ val observe_workspace : base_path:string -> (workspace, string) result
     so a reboot that renumbers the device keeps the identity). Run the complete
     scope on a system thread in Eio contexts. Missing/replaced roots are errors.
     A successful observation is not a process lease or permission to execute. *)
-type destination = {
-  installation_id : string;
-  package_id : string;
-  tool : string;
-  source_revision : string;
-  configuration_revision : string;
-}
+type destination = Lane_addon_captured_destination.t
 type work = private
   | Classification of {
       ledger : Workspace_memory_ledger.t;

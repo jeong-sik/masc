@@ -3,6 +3,7 @@ module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Exact = Lane_addon_exact
 module Runtime = Lane_addon_runtime
+module Destination = Lane_addon_captured_destination
 module Binding = Server_workspace_memory_addon_validation
 module Ledger = Workspace_memory_ledger
 module Briefing = Workspace_memory_briefing
@@ -26,17 +27,11 @@ let resolve ~config ~reserved =
           (Lane_addon_unready.declaring ~name:Binding.tool snapshot.unready) with
         | Some reason -> reason
         | None -> "No attached Add-on provides curate")))
-let same_semantic_destination (actual:Runtime.tool_request_destination) (expected:Capture.destination) =
-  actual.installation_id=expected.installation_id && actual.package_id=expected.package_id
-  && actual.tool=expected.tool && actual.configuration_revision=expected.configuration_revision
 let destination ~config =
   let reserved=Unified_tool_registry.reserved_tool_names () in
   let* export=resolve ~config ~reserved in
   Runtime.with_tool_request_destination ~config ~access:Lane_addon_sources.Operator_configuration
     ~reserved ~export ~publish:(fun destination -> Ok destination) |> Result.map_error runtime_error
-let captured_destination (destination : Runtime.tool_request_destination) : Capture.destination = {
-  installation_id=destination.installation_id;package_id=destination.package_id;tool=destination.tool;
-  source_revision=destination.source_revision;configuration_revision=destination.configuration_revision}
 let capture ~config ~request_id make =
   let reserved=Unified_tool_registry.reserved_tool_names () in
   let* export=resolve ~config ~reserved in
@@ -55,7 +50,7 @@ let capture_classification ~config ~request_id ~prompt ~ledger ~batch =
     Workspace_memory_revision.write_ledger ~base_path:config.Workspace.base_path ledger)
     |> Result.map_error (fun error -> Unavailable (Workspace_memory_revision.write_error_to_string error)) in
   capture ~config ~request_id (fun ~workspace ~destination ->
-    let* capture=Capture.classification ~request_id ~workspace ~destination:(captured_destination destination)
+    let* capture=Capture.classification ~request_id ~workspace ~destination:(Destination.of_runtime destination)
       ~prompt ~ledger ~stored_ledger ~batch in
     (* The batch was sized against this destination's frame before capture.
        A package changed since then is refused here; the next pass sizes again. *)
@@ -69,7 +64,7 @@ let capture_briefing ~config ~prompt ~batch =
     then Ok () else Error (Rejected "Confirm the original prepared briefing state before capturing model work") in
   let request_id=Capture.Request_id.fresh () in
   capture ~config ~request_id (fun ~workspace ~destination ->
-    Capture.briefing ~request_id ~workspace ~destination:(captured_destination destination) ~prompt ~batch)
+    Capture.briefing ~request_id ~workspace ~destination:(Destination.of_runtime destination) ~prompt ~batch)
 
 type wait = Submit.wait = Capacity | Worker_pending | Worker_unknown | Worker_unreachable
   | Missing_after_dispatch | Journal_recheck
@@ -194,7 +189,8 @@ let successor_is_current ~config ~capture =
   let reserved=Unified_tool_registry.reserved_tool_names () in
   let* export=resolve ~config ~reserved in
   let* matching=Runtime.with_tool_request_destination ~config ~access:Lane_addon_sources.Operator_configuration
-    ~reserved ~export ~publish:(fun actual -> Ok (same_semantic_destination actual (Capture.destination capture)))
+    ~reserved ~export ~publish:(fun actual ->
+      Ok (Destination.same_semantic (Destination.of_runtime actual) (Capture.destination capture)))
     |> Result.map_error runtime_error in
   if not matching then Ok false else
   let base_path=config.Workspace.base_path in
@@ -415,7 +411,7 @@ let narrow ~config ~request_id =
     Runtime.with_tool_request_destination ~config ~access:Lane_addon_sources.Operator_configuration
       ~reserved ~export ~publish:(fun actual ->
         let expected=Capture.destination original in
-        if not (same_semantic_destination actual expected) then
+        if not (Destination.same_semantic (Destination.of_runtime actual) expected) then
           Error (Runtime.Host_refusal (Lane_addon_call_context.Rejected
             "New Curator successor requires its original configured installation inputs"))
         else publish () |> Result.map_error (function

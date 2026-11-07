@@ -35,7 +35,6 @@
   masc
   masc.watched_work
   masc.masc_goal
-  masc.keeper_toml
   masc.keeper_types_profile_sandbox
   ; setup writes imp's sandbox_profile into its keeper TOML, and the line
   ; editor is what keeps the seed's comments above that key.
@@ -60,20 +59,17 @@
   masc.embedded_config
   masc.host_config
   masc.time_codec
-  masc.mcp_session
   masc.mcp_transport_protocol
   masc.board_tool_adapter
   masc_eio_context
   cmdliner
   eio
   eio_main
-  h2
   h2-eio
   httpun-eio
   gluten-eio
   gluten
   httpun
-  dune-build-info
   masc_core
   masc_types
   fs_compat
@@ -83,13 +79,10 @@
   masc_backend
   masc_process
   unix
-  fmt
   yojson
-  str
   uri
   cohttp
   cohttp-eio
-  masc.prompt_registry
   masc.masc_schedule
   masc.agent_core
   masc.agent_core.llm_provider))
@@ -111,26 +104,12 @@
   cmdliner
   eio
   eio_main
-  dune-build-info
-  masc_types
   fs_compat
   time_compat
   masc_log
   masc_workspace
-  masc_backend
-  masc_process
-  masc_eio_context
   unix
-  fmt
-  yojson
-  str
-  httpun
-  cohttp
-  cohttp-eio
-  masc.prompt_registry
-  masc.mcp_transport_protocol
-  masc.agent_core
-  masc.agent_core.llm_provider))
+  cohttp-eio))
 
 (executable
  (name masc_cost)
@@ -138,33 +117,17 @@
  (public_name masc-cost)
  (package masc)
  (libraries
-  masc
-  masc_core
-  masc.host_config
   masc.config_dir_resolver
   masc.cost_ledger
   dated_jsonl
-  unix
   yojson
   masc_types
   fs_compat
   time_compat
   masc_log
-  masc_workspace
-  masc_backend
-  masc_process
-  masc_eio_context
-  fmt
-  str
   eio_main
   eio
-  httpun
-  cohttp
-  cohttp-eio
-  masc.prompt_registry
-  masc.mcp_transport_protocol
-  masc.agent_core
-  masc.agent_core.llm_provider))
+  cohttp-eio))
 
 (executable
  (name keeper_store_layout_manifest)
@@ -175,8 +138,6 @@
  (name public_tool_manifest)
  (modules public_tool_manifest)
  (libraries
-  masc
-  masc.masc_tool_dispatch
   masc.tool_catalog_surfaces
   yojson))
 
@@ -188,9 +149,7 @@
  (modules gen_board_tool_registry)
  (libraries
   masc.masc_tool_surface
-  masc.masc_tool_dispatch
-  masc.tool_types
-  masc_types))
+  masc.masc_tool_dispatch))
 
 ;; runtime_materialize (RFC-0058 §9 Phase 9.3): retired. The CLI's only
 ;; purpose was to pre-write the old derived JSON artifact.
@@ -265,7 +224,6 @@
   masc.prompt_registry
   masc.server
   masc.runtime
-  masc.fusion_core
   masc.tool_catalog_surfaces
   masc.masc_tool_surface
   masc_eio_context
@@ -299,7 +257,6 @@
   masc.prompt_registry
   masc.server
   masc.runtime
-  masc.fusion_core
   masc_eio_context
   masc_lane_cli_probe_args
   agent_core
@@ -332,9 +289,7 @@
   masc.masc_types
   masc.masc_core
   masc.config_dir_resolver
-  masc.board_handlers
   masc.skill_config
-  fs_compat
   cmdliner
   mtime.clock.os
   unix
@@ -559,7 +514,7 @@
  (name masc_tui_lane_inventory)
  (wrapped false)
  (modules masc_tui_lane_inventory)
- (libraries masc masc.runtime masc_tui_lane_standing yojson))
+ (libraries masc masc.runtime masc_tui_lane_standing))
 
 ;; How a lane or a Lane Add-on stands, as a mark and a status colour the
 ;; Lanes list and the Lane Add-ons screen both draw.
@@ -652,13 +607,13 @@
  (name masc_tui_mcp)
  (wrapped false)
  (modules masc_tui_mcp)
- (libraries masc masc_tui_keeper_chat_projection yojson))
+ (libraries masc_tui_keeper_chat_projection yojson))
 
 (library
  (name masc_tui_resource_catalog)
  (wrapped false)
  (modules masc_tui_resource_catalog)
- (libraries masc_tui_mcp masc masc.tool_types masc.time_codec unix yojson  masc.agent_core.digest))
+ (libraries masc_tui_mcp masc masc.time_codec unix yojson  masc.agent_core.digest))
 
 (library
  (name masc_tui_artifact_checks)
@@ -1035,7 +990,7 @@
  (name masc_tui_paste_spill)
  (wrapped false)
  (modules masc_tui_paste_spill)
- (libraries masc_tui_message_layout masc.keeper_paste_naming masc.string_util))
+ (libraries masc_tui_message_layout masc.keeper_paste_naming))
 
 (library
  (name masc_tui_image_viewport)
@@ -1158,7 +1113,7 @@
  (name masc_tui_execute_terminal)
  (wrapped false)
  (modules masc_tui_execute_terminal)
- (libraries masc masc_tui_message_layout unix yojson))
+ (libraries masc unix yojson))
 
 (library
  (name masc_tui_keeper_chat_diff)
@@ -1217,7 +1172,7 @@
  (name masc_tui_keeper_activity)
  (wrapped false)
  (modules masc_tui_keeper_activity)
- (libraries masc masc.time_codec unix))
+ (libraries masc masc.time_codec))
 
 (library
  (name masc_tui_metrics_tail)
@@ -1242,9 +1197,7 @@
  ; direct read would work only when the TUI runs on the server's host.
  (libraries
    masc.agent_core.digest
-  masc
   masc.agent_core.llm_provider
-  masc.masc_tool_blob_store
   masc.masc_types
   masc.string_util
   masc_tui_message_layout
@@ -1283,7 +1236,7 @@
  (name masc_tui_execute_stream)
  (wrapped false)
  (modules masc_tui_execute_stream masc_tui_execute_stream_job)
- (libraries masc masc.dashboard masc.sse_wire yojson eio))
+ (libraries masc.dashboard masc.sse_wire yojson eio))
 
 (library
  (name masc_tui_table)
@@ -1297,8 +1250,7 @@
 (library
  (name masc_tui_layout)
  (wrapped false)
- (modules masc_tui_layout)
- (libraries masc_tui_message_layout))
+ (modules masc_tui_layout))
 
 (library
  (name masc_tui_render_schedule)
@@ -1569,7 +1521,7 @@
  (name masc_tui_keeper_control)
  (wrapped false)
  (modules masc_tui_keeper_control)
- (libraries masc masc.keeper_types masc.masc_workspace masc.masc_random_id masc_tui_credential yojson))
+ (libraries masc masc.masc_workspace masc.masc_random_id masc_tui_credential yojson))
 
 (library
  (name masc_tui_keeper_trail)
@@ -1674,7 +1626,7 @@
  (name masc_tui_board_upload)
  (wrapped false)
  (modules masc_tui_board_upload)
- (libraries masc.masc_tool_blob_store masc_tui_types yojson eio unix))
+ (libraries masc.masc_tool_blob_store masc_tui_types unix))
 
 (library
  (name masc_tui_magnitude)
@@ -1716,8 +1668,7 @@
 (library
  (name masc_tui_board_hearth)
  (wrapped false)
- (modules masc_tui_board_hearth)
- (libraries masc_tui_types))
+ (modules masc_tui_board_hearth))
 
 (library
  (name masc_tui_board_composer)
@@ -1836,13 +1787,13 @@
  (name masc_tui_task_document_observation)
  (wrapped false)
  (modules masc_tui_task_document_observation)
- (libraries masc masc.masc_core masc_tui_task_document masc_tui_response_decode mtime.clock.os uuidm unix eio masc_log yojson))
+ (libraries masc.masc_core masc_tui_task_document masc_tui_response_decode mtime.clock.os uuidm unix eio masc_log yojson))
 
 (library
  (name masc_tui_local_read_observation)
  (wrapped false)
  (modules masc_tui_local_read_observation)
- (libraries masc masc.masc_core masc_tui_response_decode masc_log yojson mtime.clock.os uuidm unix eio))
+ (libraries masc.masc_core masc_tui_response_decode masc_log yojson mtime.clock.os uuidm unix eio))
 
 (library
  (name masc_tui_task_payloads)
@@ -1885,7 +1836,7 @@
   ;; workspace identity composes the local masc root with the function the
   ;; server reports its own root from.
   masc.config masc.keeper_chat_operations masc_tui_message_input masc_tui_play_room masc_tui_collab masc_tui_evidence_picture
-  masc_tui_machine_activity masc.machine_configuration masc_tui_exact_activity masc_tui_memory_usage masc_tui_lane_inventory masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_runtime_evidence masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login  masc.agent_core.digest mtime.clock.os masc_tui_command masc_tui_features masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
+  masc_tui_machine_activity masc_tui_exact_activity masc_tui_memory_usage masc_tui_lane_inventory masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_runtime_evidence masc.masc_core masc.masc_candle masc_tui_identity_model masc_tui_voice_wizard_session masc.keeper_registry masc_tui_config masc_tui_account_login  masc.agent_core.digest mtime.clock.os masc_tui_command masc_tui_features masc_tui_play_card masc_tui_pick_list masc_tui_esc_interrupt masc_tui_planning_detail
   ;; [threshold_cols] is the width two panes need: the Board read layout is
   ;; decided here so the footer and the frame cannot disagree about it.
   masc_tui_roster_pane
@@ -2040,7 +1991,7 @@
  (name masc_tui_resource_export)
  (wrapped false)
  (modules masc_tui_resource_export)
- (libraries masc_tui_resource_catalog masc masc.config masc.masc_tool_blob_store masc.fs_compat  masc.agent_core.digest uri ipaddr eio unix))
+ (libraries masc_tui_resource_catalog masc masc.config masc.fs_compat  masc.agent_core.digest uri ipaddr eio unix))
 
 (library
  (name masc_tui_resource_document)
@@ -2067,7 +2018,7 @@
  (name masc_tui_resources_updates)
  (wrapped false)
  (modules masc_tui_resources_updates)
- (libraries masc_tui_artifact_share_pending masc_tui_resource_reading masc_tui_scroll masc_tui_artifact_check_action masc_tui_resource_document masc_tui_resource_catalog masc_tui_artifact_checks masc_tui_fetched masc_tui_types masc_tui_mcp masc))
+ (libraries masc_tui_artifact_share_pending masc_tui_resource_reading masc_tui_scroll masc_tui_artifact_check_action masc_tui_resource_document masc_tui_resource_catalog masc_tui_artifact_checks masc_tui_fetched masc_tui_types masc_tui_mcp))
 
 (library
  (name masc_tui_board_updates)
@@ -2167,7 +2118,7 @@
  (wrapped false)
  (modules masc_tui_palette)
  (libraries masc.runtime masc_tui_overview_providers masc_tui_fetched masc_tui_types masc_tui_pick_list masc_tui_rows masc_tui_task_dispatch
-  masc_tui_message_layout masc_tui_code_lexer masc_tui_lane_addons masc.keeper_contract masc unix))
+  masc_tui_message_layout masc_tui_code_lexer masc_tui_lane_addons masc unix))
 
 (library
  (name masc_tui_task_document)
@@ -2221,7 +2172,6 @@
   masc_tui_press
   masc_tui_task_flow
   masc
-  masc_types
   masc_tui_ansi
   masc_tui_chart
   masc_tui_context_inspector
@@ -2244,7 +2194,6 @@
   masc_tui_roster_pane
   masc_tui_press
   masc
-  masc_types
   masc_tui_ansi
   masc_tui_detail_reading
   masc_tui_fetched
@@ -2303,7 +2252,7 @@
  (name masc_tui_msx_tick)
  (wrapped false)
  (modules masc_tui_msx_tick)
- (libraries masc.msx_wire masc_tui_types masc_tui_machine_live yojson base64 threads))
+ (libraries masc.msx_wire masc_tui_types masc_tui_machine_live yojson base64))
 
 ;; The spectator's typed read of GET /api/v1/lane-addons/live: one route for
 ;; every machine with a screen (MSX and DOS). Pure decoding, no I/O.
@@ -2523,7 +2472,7 @@
  (name masc_tui_workspace_read)
  (wrapped false)
  (modules masc_tui_workspace_read)
- (libraries masc masc.masc_core masc.http_client masc.fs_compat masc_tui_types
+ (libraries masc masc.http_client masc.fs_compat masc_tui_types
   masc_tui_kept_reads masc_tui_response_decode masc_tui_http_error eio uri yojson))
 
 ;; The loader, its HTTP surface, and schedule decoding turn the local
@@ -2549,7 +2498,6 @@
   masc.string_util
   masc.masc_process
   masc.http_client
-  masc.fs_compat
   masc.masc_tool_blob_store
   masc.skill_reference
   masc.skill_config
@@ -2558,7 +2506,6 @@
   masc_goal
   browser_lane
   masc_workspace
-  masc.masc_candle
   masc_server
   masc_eio_context
   masc_auth
@@ -2634,7 +2581,6 @@
   masc
   masc.keeper_chat_operations
   masc.runtime
-  masc_skill_reference
   masc.sse_wire
   eio
   yojson
@@ -3054,27 +3000,18 @@
  (package masc)
  (libraries
   masc
-  masc.server
   masc.crypto_rng
   masc.fusion_core
   masc.runtime
   masc.config_dir_resolver
   masc.masc_process
-  masc_core
   unix
   yojson
-  fmt
   eio
   eio_main
   time_compat
   masc_eio_context
-  httpun
-  cohttp
-  cohttp-eio
-  masc.prompt_registry
-  masc.mcp_transport_protocol
-  masc.agent_core
-  masc.agent_core.llm_provider))
+  cohttp-eio))
 
 ;; E6 continuity evidence harness (task-11, M1 PR1): drives an existing
 ;; keeper's live chat surface over HTTP (unlike fusion_run.ml, which calls
@@ -3270,7 +3207,7 @@
  (name masc_tui_queue_inspection)
  (wrapped false)
  (modules masc_tui_queue_inspection)
- (libraries masc masc.keeper_runtime masc.keeper_chat_operations masc.keeper_operation_identity
+ (libraries masc masc.keeper_runtime masc.keeper_chat_operations
   masc.masc_schedule masc.masc_types masc_tui_command masc_tui_message_layout unix yojson))
 
 ;; Offline replay of the Librarian read rules over a live workspace (RFC
@@ -3286,7 +3223,7 @@
  (modules masc_librarian_replay)
  (public_name masc-librarian-replay)
  (package masc)
- (libraries masc masc_core masc.config_dir_resolver masc.agent_core masc.masc_types masc.keeper_registry yojson unix))
+ (libraries masc masc_core masc.config_dir_resolver masc.agent_core masc.keeper_registry yojson unix))
 
 (executable
  (name masc_librarian_continuity)
@@ -3295,7 +3232,7 @@
  (package masc)
  (libraries masc masc_core masc.prompt_registry masc.runtime masc.server masc.config masc.config_dir_resolver
   masc.masc_eio_context masc.http_client masc.masc_tool_blob_store
-  masc.agent_core masc.agent_core.llm_provider masc.masc_log masc.fs_compat  masc.agent_core.digest eio eio_main yojson))
+  masc.agent_core masc.masc_log masc.fs_compat  masc.agent_core.digest eio eio_main yojson))
 
 (library
  (name masc_tui_input_decoder)
@@ -3419,7 +3356,7 @@
  (public_name masc-librarian-preflight-eval)
  (package masc)
  (libraries masc masc.runtime masc.server masc.config masc.config_dir_resolver
-  masc.masc_eio_context masc.http_client masc.masc_log masc.fs_compat
+  masc.masc_eio_context masc.http_client masc.fs_compat
   masc.agent_core masc.prompt_registry masc.time_compat masc.masc_types  masc.agent_core.digest eio eio_main yojson))
 
 (executable
@@ -3466,7 +3403,7 @@
  (modules masc_tui_ask_followup_observation)
  (libraries masc masc.masc_types masc.masc_log masc_tui_types
   masc_tui_async_protocol masc_tui_ask_projection masc_tui_workspace_job
-  masc_tui_observation_origin masc_tui_observation_store yojson mtime.clock.os))
+  masc_tui_observation_origin masc_tui_observation_store mtime.clock.os))
 
 (library
  (name masc_tui_observation_store)
@@ -3478,7 +3415,7 @@
  (name masc_tui_system_logs)
  (wrapped false)
  (modules masc_tui_system_logs)
- (libraries masc masc.masc_log yojson))
+ (libraries masc masc.masc_log))
 
 (library
  (name masc_tui_system_log_stream)
@@ -3497,7 +3434,7 @@
  (modules masc_browser_addon_worker)
  (public_name masc-browser-addon-worker)
  (package masc)
- (libraries masc masc.time_compat masc.fs_compat masc.browser_configuration masc.browser_lane mcp_protocol.eio yojson eio eio.unix eio_main))
+ (libraries masc masc.time_compat masc.browser_configuration masc.browser_lane mcp_protocol.eio eio eio.unix eio_main))
 
 (library
  (name masc_tui_code_draft)
@@ -3507,8 +3444,7 @@
 (library
  (name masc_tui_board_preview_work)
  (wrapped false)
- (modules masc_tui_board_preview_work)
- (libraries threads))
+ (modules masc_tui_board_preview_work))
 
 (library
  (name masc_tui_board_reader)

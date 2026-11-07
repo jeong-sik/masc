@@ -613,35 +613,47 @@ let render_keeper_list (state : state) =
          else if Masc_tui_fleet_line.status_is_ok fleet.fs_status then (Theme.ok ())
          else (Theme.warn ())
        in
-       (* Segments joined right-to-left so a narrow frame drops whole
-          readings from the right instead of cutting a number in half:
-          "turn capacity 20/36" stays readable where "20/3…" would not. *)
-       let segments =
-         [ Printf.sprintf "running %d/%d" fleet.fs_running_count
-             fleet.fs_bootable_count;
-           Printf.sprintf "turn capacity %d/%d"
-             (fleet.fs_target_reaction_capacity
-             - fleet.fs_reaction_capacity_shortfall)
-             fleet.fs_target_reaction_capacity ]
+       let running =
+         Printf.sprintf "running %d/%d" fleet.fs_running_count
+           fleet.fs_bootable_count
+       in
+       let turn_capacity =
+         Printf.sprintf "turn capacity %d/%d"
+           (fleet.fs_target_reaction_capacity
+           - fleet.fs_reaction_capacity_shortfall)
+           fleet.fs_target_reaction_capacity
+       in
+       let readings =
+         [ Masc_tui_fleet_summary.Running, running
+         ; Masc_tui_fleet_summary.Turn_capacity, turn_capacity
+         ]
          @ (match Masc_tui_fleet_line.blocker_text fleet with
            | None -> []
-           | Some text -> [ text ])
+           | Some text -> [ Masc_tui_fleet_summary.Blocker, text ])
+       in
+       let lead =
+         Printf.sprintf "  fleet %s"
+           (Masc_tui_fleet_line.status_text fleet.fs_status)
+       in
+       let separator = "   " in
+       let selected =
+         readings
+         |> List.map (fun (reading, text) ->
+                (reading, Message_layout.display_width text))
+         |> Masc_tui_fleet_summary.select ~cells:inner
+              ~lead_cells:(Message_layout.display_width lead)
+              ~separator_cells:(Message_layout.display_width separator)
        in
        let joined =
-         let rec fit acc = function
-           | [] -> acc
-           | seg :: rest ->
-               let candidate = seg ^ acc in
-               if Message_layout.display_width candidate <= inner then
-                 fit ("   " ^ candidate) rest
-               else acc
-         in
-         fit "" (List.rev segments)
+         match selected with
+         | [] -> ""
+         | _ ->
+             separator
+             ^ String.concat separator
+                 (List.map (fun reading -> List.assoc reading readings) selected)
        in
        box_line buf cols
-         (Printf.sprintf "%s  fleet %s%s%s%s" tone
-            (Masc_tui_fleet_line.status_text fleet.fs_status)
-            Ansi.reset joined Ansi.reset);
+         (Printf.sprintf "%s%s%s%s%s" tone lead Ansi.reset joined Ansi.reset);
        (* Its own row under the fleet line rather than a tail on it: the
           frame cuts a row from the right, and the counts are what a narrow
           screen keeps. *)

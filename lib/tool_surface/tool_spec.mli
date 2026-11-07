@@ -34,7 +34,6 @@ type t = {
   mcp_context_required : bool;
   is_idempotent : bool;
   visibility : Tool_catalog.visibility;
-  implementation_status : Tool_catalog.implementation_status;
   reason : string option;
   allow_direct_call_when_hidden : bool;
   title : string option;
@@ -52,15 +51,13 @@ val create :
   ?mcp_context_required:bool ->
   ?is_idempotent:bool ->
   ?visibility:Tool_catalog.visibility ->
-  ?implementation_status:Tool_catalog.implementation_status ->
   ?reason:string ->
   ?allow_direct_call_when_hidden:bool ->
   ?title:string ->
   unit -> t
 (** Build a tool spec. The first five arguments are required (compile error
     if omitted). All optional arguments default to fail-closed values:
-    booleans to [false], options to [None], visibility to [Default],
-    implementation_status to [Real]. *)
+    booleans to [false], options to [None], visibility to [Default]. *)
 
 (** {1 Registration} *)
 

@@ -490,7 +490,7 @@ let keeper_secondary_row_content ?now ~inner (row : Keeper_list_model.row) =
   let runtime =
     match row.reading.Keeper_control.liveness with
     | Keeper_control.Present r -> Some r
-    | _ -> None
+    | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
   in
   let attempts = Masc_tui_keeper_trail.attempts_of_runtime runtime in
   let chain_opt = render_attempt_chain ~max_cells:available attempts in

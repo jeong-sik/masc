@@ -1323,6 +1323,7 @@ let with_read_workspace_precondition state handler request reqd =
       ~headers:(public_read_cors_headers request @ encoding_headers)
       ~content_type:"application/json; charset=utf-8" body reqd
 
+(* HIGH-RISK-UNREVIEWED: opens a route without a credential when strict auth is on. *)
 let with_public_read_open_when_strict handler request reqd =
   match ready_server_state () with
   | None -> respond_not_initialized request reqd

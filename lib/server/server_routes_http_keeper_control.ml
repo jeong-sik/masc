@@ -22,9 +22,8 @@ let handle_keeper_tool_approval ~actor state request reqd =
     let config = Mcp_server.workspace_config state in
     let base_path = config.base_path in
     let parsed =
-      try
-        match Yojson.Safe.from_string body_str with
-        | `Assoc fields as json ->
+      Result.bind (Server_json_object_body.fields body_str) (fun fields ->
+          let json = `Assoc fields in
           let open Result.Syntax in
           let* stripped_json =
             match Workspace.validate_expected_workspace ~config json with
@@ -58,10 +57,7 @@ let handle_keeper_tool_approval ~actor state request reqd =
            | None ->
              Error
                (Printf.sprintf "decision must be approve or deny, got %S"
-                  decision_raw))
-        | _ -> Error "JSON object body required"
-      with
-      | Yojson.Json_error msg -> Error ("invalid json: " ^ msg)
+                  decision_raw)))
     in
     match parsed with
     | Error msg ->
@@ -269,9 +265,7 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     let parsed =
-      try
-        match Yojson.Safe.from_string body_str with
-        | `Assoc fields ->
+      Result.bind (Server_json_object_body.fields body_str) (fun fields ->
           let field name =
             match List.assoc_opt name fields with
             | Some (`String value) -> Ok (String.trim value)
@@ -285,10 +279,7 @@ let handle_keeper_tool_approval_mode_set ~actor state request reqd =
            | Some mode -> Ok (keeper_name, mode)
            | None ->
              Error
-               (Printf.sprintf "mode must be auto or yolo, got %S" mode_raw))
-        | _ -> Error "JSON object body required"
-      with
-      | Yojson.Json_error msg -> Error ("invalid json: " ^ msg)
+               (Printf.sprintf "mode must be auto or yolo, got %S" mode_raw)))
     in
     match parsed with
     | Error msg ->
@@ -424,9 +415,7 @@ let handle_keeper_turn_interrupt ~actor state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in
     let target_result =
-      try
-        match Yojson.Safe.from_string body_str with
-        | `Assoc fields ->
+      Result.bind (Server_json_object_body.fields body_str) (fun fields ->
           (match List.assoc_opt "name" fields with
            | Some (`String s) when String.trim s <> "" ->
              let request_id_result =
@@ -456,10 +445,7 @@ let handle_keeper_turn_interrupt ~actor state request reqd =
               keeper, so the caller saw 404 for what is a bad request. The
               request_id check below already worked this way. *)
            | Some (`String _) -> Error "name must be non-blank"
-           | _ -> Error "name (string) is required")
-        | _ -> Error "JSON object body required"
-      with
-      | Yojson.Json_error msg -> Error ("invalid json: " ^ msg)
+           | _ -> Error "name (string) is required"))
     in
     match target_result with
     | Error msg ->

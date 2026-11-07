@@ -88,9 +88,7 @@ let handle_keeper_ask_answer ~actor state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
       let base_path = (Mcp_server.workspace_config state).base_path in
       let parsed =
-        try
-          match Yojson.Safe.from_string body_str with
-          | `Assoc fields ->
+        Result.bind (Server_json_object_body.fields body_str) (fun fields ->
               let string_field name =
                 match List.assoc_opt name fields with
                 | Some (`String value) -> Ok (String.trim value)
@@ -109,9 +107,7 @@ let handle_keeper_ask_answer ~actor state request reqd =
                 | Some (`String value) -> Some (String.trim value)
                 | Some _ | None -> None
               in
-              Ok (keeper_name, ask_id, submissions, session_id)
-          | _ -> Error "JSON object body required"
-        with Yojson.Json_error message -> Error ("invalid json: " ^ message)
+              Ok (keeper_name, ask_id, submissions, session_id))
       in
       match parsed with
       | Error message ->

@@ -448,9 +448,7 @@ let runtime_config_line_count = Server_skill_write_audit.line_count
    revision it read with the settings; the edit re-checks it inside the config
    lock, so a write that landed in between is refused rather than overwritten. *)
 let parse_fusion_edit_body body_str =
-  match Yojson.Safe.from_string body_str with
-  | exception Yojson.Json_error err -> Error ("invalid json: " ^ err)
-  | `Assoc fields ->
+  Result.bind (Server_json_object_body.fields body_str) (fun fields ->
     (match
        List.find_opt
          (fun (key, _) -> not (List.mem key [ "expected_revision"; "operation" ]))
@@ -465,42 +463,35 @@ let parse_fusion_edit_body body_str =
             (Fusion_config_edit.operation_of_yojson operation)
         | Some (`String _), None -> Error "operation required"
         | Some _, _ -> Error "expected_revision must be a string"
-        | None, _ -> Error "expected_revision required"))
-  | _ -> Error "JSON object body required"
+        | None, _ -> Error "expected_revision required")))
 ;;
 
+let runtime_config_source_text fields =
+  match List.filter (fun (key, _) -> String.equal key "source_text") fields with
+  | [_, `String source_text] -> Ok source_text
+  | [_] -> Error "source_text must be a string"
+  | [] -> Error "source_text required"
+  | _ -> Error "source_text must occur exactly once"
+
 let parse_runtime_config_raw_body body_str =
-  try
-    match Yojson.Safe.from_string body_str with
-    | `Assoc fields ->
-      (match List.filter (fun (key, _) -> String.equal key "source_text") fields with
-       | [_, `String source_text] -> Ok source_text
-       | [_] -> Error "source_text must be a string"
-       | [] -> Error "source_text required"
-       | _ -> Error "source_text must occur exactly once")
-    | _ -> Error "JSON object body required"
-  with
-  | Yojson.Json_error err -> Error ("invalid json: " ^ err)
+  Result.bind (Server_json_object_body.fields body_str) runtime_config_source_text
 
 let parse_runtime_config_raw_save_body body_str =
   let open Result.Syntax in
-  let* source_text = parse_runtime_config_raw_body body_str in
-  (* The source parser has already established a valid JSON object. Require
-     one revision: duplicate revision fields cannot identify an editor base. *)
-  match Yojson.Safe.from_string body_str with
-  | `Assoc fields ->
-    let* revision = match List.filter (fun (key, _) -> String.equal key "expected_source_revision") fields with
-     | [_, `String revision] when String_util.is_lowercase_sha256_hex revision -> Ok revision
-     | [] -> Error "expected_source_revision required"
-     | [_] -> Error "expected_source_revision must be lowercase SHA-256 hex"
-     | _ -> Error "expected_source_revision must occur exactly once" in
-    let* path = match List.filter (fun (key, _) -> String.equal key "expected_source_path") fields with
-     | [_, `String path] when path <> "" && not (String.contains path '\000') -> Ok path
-     | [] -> Error "expected_source_path required"
-     | [_] -> Error "expected_source_path must be a nonempty path without NUL"
-     | _ -> Error "expected_source_path must occur exactly once" in
-    Ok (source_text, revision, path)
-  | _ -> Error "JSON object body required"
+  let* fields = Server_json_object_body.fields body_str in
+  let* source_text = runtime_config_source_text fields in
+  (* Require one revision: duplicate revision fields cannot identify an editor base. *)
+  let* revision = match List.filter (fun (key, _) -> String.equal key "expected_source_revision") fields with
+   | [_, `String revision] when String_util.is_lowercase_sha256_hex revision -> Ok revision
+   | [] -> Error "expected_source_revision required"
+   | [_] -> Error "expected_source_revision must be lowercase SHA-256 hex"
+   | _ -> Error "expected_source_revision must occur exactly once" in
+  let* path = match List.filter (fun (key, _) -> String.equal key "expected_source_path") fields with
+   | [_, `String path] when path <> "" && not (String.contains path '\000') -> Ok path
+   | [] -> Error "expected_source_path required"
+   | [_] -> Error "expected_source_path must be a nonempty path without NUL"
+   | _ -> Error "expected_source_path must occur exactly once" in
+  Ok (source_text, revision, path)
 ;;
 
 type skill_editor_body =
@@ -510,9 +501,8 @@ type skill_editor_body =
   }
 
 let parse_skill_editor_body body_str =
-  try
-    match Yojson.Safe.from_string body_str with
-    | `Assoc _ as json ->
+  Result.bind (Server_json_object_body.fields body_str) (fun fields ->
+      let json = `Assoc fields in
       (match Json_util.assoc_member_opt "reference" json with
        | None -> Error "reference required"
        | Some reference_json ->
@@ -532,10 +522,7 @@ let parse_skill_editor_body body_str =
               | Some (`Bool confirmed) -> Ok (Some confirmed)
               | Some _ -> Error "confirmed must be a boolean"
             in
-            Ok { reference; source_text; confirmed }))
-    | _ -> Error "JSON object body required"
-  with
-  | Yojson.Json_error err -> Error ("invalid json: " ^ err)
+            Ok { reference; source_text; confirmed })))
 
 type skill_create_body =
   { expected_kind : Server_skill_editor.expected_kind
@@ -545,9 +532,8 @@ type skill_create_body =
   }
 
 let parse_skill_create_body body_str =
-  try
-    match Yojson.Safe.from_string body_str with
-    | `Assoc _ as json ->
+  Result.bind (Server_json_object_body.fields body_str) (fun fields ->
+      let json = `Assoc fields in
       let ( let* ) = Result.bind in
       let required name =
         match Json_util.assoc_member_opt name json with
@@ -574,10 +560,7 @@ let parse_skill_create_body body_str =
         | Some _ -> Error "source_text must be a string"
         | None -> Error "source_text required"
       in
-      Ok { expected_kind; source_id; package_id; source_text }
-    | _ -> Error "JSON object body required"
-  with
-  | Yojson.Json_error err -> Error ("invalid json: " ^ err)
+      Ok { expected_kind; source_id; package_id; source_text })
 
 let skill_editor_error_status = function
   | Server_skill_editor.Source_read_only -> `Forbidden

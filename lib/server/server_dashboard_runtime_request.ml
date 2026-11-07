@@ -257,9 +257,8 @@ let parse_append_route_body json lane =
   | Error _ as err -> err
 
 let parse_runtime_route_body body_str =
-  try
-    match Yojson.Safe.from_string body_str with
-    | `Assoc _ as json ->
+  Result.bind (Server_json_object_body.fields body_str) (fun fields ->
+      let json = `Assoc fields in
       (match required_string_field json "lane", parse_runtime_lane_action json with
        | (Error _ as err), _ -> err
        | Ok _, (Error _ as err) -> err
@@ -280,15 +279,11 @@ let parse_runtime_route_body body_str =
          parse_exact_slot_route_body json lane ~verb:"replace" ~build:(fun exact runtime_id ->
            match required_string_field json "replacement_runtime_id" with
            | Error _ as err -> err
-           | Ok replacement -> Ok (Runtime_route_exact_slot_replaced (exact, runtime_id, replacement))))
-    | _ -> Error "JSON object body required"
-  with
-  | Yojson.Json_error err -> Error ("invalid json: " ^ err)
+           | Ok replacement -> Ok (Runtime_route_exact_slot_replaced (exact, runtime_id, replacement)))))
 
 let parse_runtime_assignment_body body_str =
-  try
-    match Yojson.Safe.from_string body_str with
-    | `Assoc _ as json ->
+  Result.bind (Server_json_object_body.fields body_str) (fun fields ->
+      let json = `Assoc fields in
       (match required_string_field json "keeper_name" with
        | Error _ as err -> err
        | Ok keeper_name ->
@@ -301,7 +296,4 @@ let parse_runtime_assignment_body body_str =
              | None -> Error "expected_assignment_revision required"
              | Some value ->
                Runtime.keeper_assignment_revision_of_yojson value
-               |> Result.map (fun expected -> keeper_name, runtime_id, expected))))
-    | _ -> Error "JSON object body required"
-  with
-  | Yojson.Json_error err -> Error ("invalid json: " ^ err)
+               |> Result.map (fun expected -> keeper_name, runtime_id, expected)))))

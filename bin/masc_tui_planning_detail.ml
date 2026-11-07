@@ -43,13 +43,14 @@ let wrapped ~width tone text =
   |> List.map (fun row -> { tone; text = row })
 
 (* The confirmation read answers with the metadata projection of each
-   submitted original, not the originals: identity, size and integrity reach
-   the operator while contents stay on the server. Each kind is parsed into
-   its own shape, and a kind this build does not know keeps its name on
-   screen instead of disappearing -- a newer server can add one without
-   stranding an older reader mid-confirmation. *)
+   submitted original, not the originals: identity and size reach the
+   operator, with the file digest for a binary original, while contents stay
+   on the server. Each kind is parsed into its own shape, and a kind this
+   build does not know keeps its name on screen instead of disappearing -- a
+   newer server can add one without stranding an older reader
+   mid-confirmation. *)
 type submitted_original =
-  | Original_collaboration of { reference : string; sha256 : string; bytes : int }
+  | Original_collaboration of { reference : string; bytes : int }
   | Original_note of { bytes : int }
   | Original_artifact of { reference : string; bytes : int; truncated : bool }
   | Original_binary of { reference : string; bytes : int; sha256 : string; format : string }
@@ -125,9 +126,8 @@ let decode_submitted_original (item : Yojson.Safe.t) : (submitted_original, stri
   match kind with
   | "collaboration" ->
       let* reference = (let* value = field "reference" item in string "reference" value) in
-      let* sha256 = (let* value = field "sha256" item in string "sha256" value) in
       let* bytes = (let* value = field "bytes" item in int "bytes" value) in
-      Ok (Original_collaboration { reference; sha256; bytes })
+      Ok (Original_collaboration { reference; bytes })
   | "note" ->
       let* bytes = (let* value = field "bytes" item in int "bytes" value) in
       Ok (Original_note { bytes })
@@ -333,9 +333,8 @@ let sha256_prefix sha256 =
 
 let submitted_original_text (original : submitted_original) =
   match original with
-  | Original_collaboration { reference; sha256; bytes } ->
-      Printf.sprintf "collaboration %s · %s · sha256 %s"
-        reference (humanized_bytes bytes) (sha256_prefix sha256)
+  | Original_collaboration { reference; bytes } ->
+      Printf.sprintf "collaboration %s · %s" reference (humanized_bytes bytes)
   | Original_note { bytes } ->
       Printf.sprintf "note · %s" (humanized_bytes bytes)
   | Original_artifact { reference; bytes; truncated } ->

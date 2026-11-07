@@ -222,8 +222,7 @@ let submitted_originals_json =
       ; "format", `String "png" ]
   ; `Assoc
       [ "kind", `String "collaboration"; "reference", `String "board:p-1"
-      ; "sha256", `String (String.make 64 'b'); "bytes", `Int 987
-      ; "content_omitted", `Bool true ]
+      ; "bytes", `Int 987; "content_omitted", `Bool true ]
   ; `Assoc [ "kind", `String "note"; "bytes", `Int 240 ]
   ; `Assoc
       [ "kind", `String "artifact_unreadable"; "reference", `String "gone.log"
@@ -397,9 +396,10 @@ let test_confirmation_reads_in_layers () =
     (last.Detail.tone = Detail.Plain
      && last.Detail.text = "  Observed result retained")
 
-(* The submitted originals arrive as metadata -- identity, size, integrity,
-   no contents. They draw as one labelled list under the evidence paragraph,
-   and a kind this build does not know stays on screen. *)
+(* The submitted originals arrive as metadata -- identity and size, a binary
+   original's file digest, no contents. They draw as one labelled list under
+   the evidence paragraph, and a kind this build does not know stays on
+   screen. *)
 let test_confirmation_lists_submitted_originals () =
   let read = confirmation_exn (confirmation_fixture ~submitted:submitted_originals_json ()) in
   let rows = Detail.confirmation_lines ~width:80 ~ko:false read in
@@ -408,7 +408,7 @@ let test_confirmation_lists_submitted_originals () =
     (List.for_all (fun needle -> List.exists (contains needle) rendered)
        [ "artifact run.log · 12.4 KB · truncated"
        ; "binary screen.png · png · 1.2 MB · sha256 aaaaaaaaaaaa"
-       ; "collaboration board:p-1 · 987 B · sha256 bbbbbbbbbbbb"
+       ; "collaboration board:p-1 · 987 B"
        ; "note · 240 B"
        ; "unreadable gone.log · ev_read_error"
        ; "unknown kind hologram" ]);

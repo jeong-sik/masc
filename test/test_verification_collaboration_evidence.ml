@@ -299,6 +299,24 @@ let test_capture_failures_and_corruption () = with_fixture (fun config ->
   let metadata = List.hd items |> Store.submitted_evidence_item_metadata_to_yojson in
   check bool "metadata does not carry full source body" true
     (Yojson.Safe.Util.member "content" metadata = `Null);
+  (* Both summaries name the capture by its reference; the digest is a member
+     of the durable record alone (#49650). *)
+  let members = function
+    | `Assoc fields -> List.sort String.compare (List.map fst fields)
+    | _ -> fail "evidence item is not an object" in
+  let summary_members = List.sort String.compare ["kind"; "reference"; "bytes"; "content_omitted"] in
+  check (list string) "metadata summary members" summary_members (members metadata);
+  let transport =
+    Store.submitted_evidence_access_transport_to_yojson
+      (Store.Evidence_available
+         { request = { Store.id = "vr-1"; task_id = "task-1"; worker = "producer"; created_at = 0. }
+         ; items }) in
+  (match Yojson.Safe.Util.member "items" transport with
+   | `List [transported] ->
+     check (list string) "transport summary members" summary_members (members transported)
+   | _ -> fail "transport carries one item");
+  check bool "durable record keeps the digest" true
+    (List.mem "sha256" (members item_json));
   let task = VAT.create ~config ~producer:"producer" ~submitted_evidence:items |> require "restored surface" in
   ignore (read task "masc_board_post_get" (post_args p));
   let item = List.hd items |> Store.submitted_evidence_item_to_yojson in

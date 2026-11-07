@@ -32,9 +32,9 @@ To confirm a proven completion, the operator needs five answers:
 
 ## The originals are one decode away
 
-The confirmation read (`GET /api/v1/goals/confirmation`, `server_routes_http_routes_verification.ml:216`) returns `record_to_yojson_for_goal`, whose `submitted_evidence` is the metadata projection (`workspace_verification_snapshot.ml:419`):
+The confirmation read (`GET /api/v1/goals/confirmation`, `server_routes_http_routes_verification.ml:216`) returns `record_to_yojson_for_goal`, whose `submitted_evidence` is the metadata projection (`workspace_verification_snapshot.ml:424`):
 
-- `collaboration` → reference, sha256, bytes, `content_omitted: true`
+- `collaboration` → reference, bytes, `content_omitted: true`
 - `note` → bytes (no content)
 - `artifact` → reference, bytes, truncated
 - `artifact_binary` → reference, bytes, sha256, format
@@ -50,7 +50,7 @@ The confirmation read (`GET /api/v1/goals/confirmation`, `server_routes_http_rou
 2. **Submitted originals list.** Decode the metadata list already on the wire
    and render it under the evidence paragraph (`artifact run.log · 12.4 KB ·
    truncated`, `binary screen.png · png · 1.2 MB · sha256 ab12cd34…`,
-   `collaboration board:1234 · sha256 ab12cd34…`). The list goes after the
+   `collaboration board:1234 · 987 B`). The list goes after the
    evidence paragraph so the presented-frame receipt keeps meaning "the end of
    the block". An empty list draws nothing. No server change.
 3. **Reach the original.** An open action on artifact rows through the

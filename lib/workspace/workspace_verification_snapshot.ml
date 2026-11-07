@@ -115,10 +115,15 @@ let collaboration_reference reference =
      | Some _ as value -> value
      | None -> parse "task:" Task_source)
 
-let collaboration_metadata ~reference ~content ~sha256 =
+(* A summary names a captured collaboration source by its reference, the
+   handle the judge and Keepers open it with. The capture's digest guards the
+   durable record and is verified when that record is parsed. A summary
+   reader cannot act on it, and the Keeper prompt uses [sha256] for blob
+   addresses, so a digest under that name sends a model to a blob that does
+   not exist (#49650). *)
+let collaboration_metadata ~reference ~content =
   `Assoc ["kind", `String "collaboration"; "reference", `String reference;
-    "sha256", `String sha256; "bytes", `Int (String.length content);
-    "content_omitted", `Bool true]
+    "bytes", `Int (String.length content); "content_omitted", `Bool true]
 
 let submitted_evidence_item_fields = function
   | Evidence_collaboration {reference; content; sha256} ->
@@ -231,8 +236,8 @@ let submitted_evidence_access_to_yojson = function
    stays in the store; the judge receives the size, the fact, and how to read
    the real file. *)
 let submitted_evidence_item_transport_to_yojson = function
-  | Evidence_collaboration {reference; content; sha256} ->
-    collaboration_metadata ~reference ~content ~sha256
+  | Evidence_collaboration {reference; content; _} ->
+    collaboration_metadata ~reference ~content
   | Evidence_note note ->
     `Assoc [ "kind", `String "note"; "content", `String note ]
   | Evidence_artifact { reference; content; bytes; truncated } ->
@@ -417,8 +422,8 @@ let submitted_evidence_access_transport_to_yojson = function
 ;;
 
 let submitted_evidence_item_metadata_to_yojson = function
-  | Evidence_collaboration {reference; content; sha256} ->
-    collaboration_metadata ~reference ~content ~sha256
+  | Evidence_collaboration {reference; content; _} ->
+    collaboration_metadata ~reference ~content
   | Evidence_note note ->
     `Assoc [ "kind", `String "note"; "bytes", `Int (String.length note) ]
   | Evidence_artifact { reference; bytes; truncated; _ } ->

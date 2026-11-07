@@ -10,11 +10,9 @@
   masc.runtime_toml_namespace
   otoml
   yojson
-  masc_log
   masc.config_dir_resolver
   masc.fs_compat
   masc.masc_core
   masc.tool_types
-  masc.config
   masc.host_config
   masc.masc_workspace))

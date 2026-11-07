@@ -53,6 +53,7 @@ let env_key entry =
    Vibe takes a key in the process env before the keyring, so passing
    MISTRAL_API_KEY would send the call to the API budget (m4). *)
 let child_environment_key_allowed = function
+  | "ALL_PROXY"
   | "COLORTERM"
   | "HOME"
   | "HTTPS_PROXY"
@@ -76,6 +77,7 @@ let child_environment_key_allowed = function
   | "XDG_CONFIG_HOME"
   | "XDG_DATA_HOME"
   | "XDG_RUNTIME_DIR"
+  | "all_proxy"
   | "http_proxy"
   | "https_proxy"
   | "no_proxy" -> true
@@ -154,22 +156,6 @@ type error =
       ; exit_code : int
       }
 
-let outcome_to_string : Headless.outcome -> string = function
-  | Headless.Finished -> "finished"
-  | Headless.Usage_error -> "usage_error"
-  | Headless.Config_error -> "config_error"
-  | Headless.Infrastructure_failure -> "infrastructure_failure"
-  | Headless.Turn_limit -> "turn_limit"
-  | Headless.Token_limit -> "token_limit"
-  | Headless.Price_limit -> "price_limit"
-  | Headless.Deadline -> "deadline"
-  | Headless.Terminated -> "terminated"
-  | Headless.Length -> "length"
-  | Headless.Refusal -> "refusal"
-  | Headless.Aborted -> "aborted"
-  | Headless.Unrecognized_outcome value -> value
-;;
-
 let error_to_string = function
   | Invalid_config detail -> "invalid Vibe config: " ^ detail
   | Process_runtime_unavailable -> "Eio process runtime is not initialized"
@@ -199,7 +185,7 @@ let error_to_string = function
   | Outcome_exit_mismatch { outcome; exit_code } ->
     Printf.sprintf
       "Vibe outcome %s came with exit %d"
-      (outcome_to_string outcome)
+      (Headless.outcome_to_wire outcome)
       exit_code
 ;;
 
@@ -254,7 +240,11 @@ let prepare_call_dir call_dir ~prompt =
       [ Open_wronly; Open_creat; Open_excl; Open_binary ]
       private_file_perm
       prompt_file
-      (fun channel -> Out_channel.output_string channel prompt)
+      (fun channel ->
+        Out_channel.output_string channel prompt;
+        (* [with_open_gen] closes with [close_out_noerr], which would swallow
+           a failed final flush and leave Vibe a cut-off prompt. *)
+        Out_channel.flush channel)
   with
   | () -> Ok (output_dir, prompt_file)
   | exception Sys_error detail -> Error (Call_dir_failed detail)
@@ -304,13 +294,14 @@ let run config ~prompt =
   | Error detail -> Error (Invalid_config detail)
   | Ok () when not (Process_eio.is_initialized ()) -> Error Process_runtime_unavailable
   | Ok () ->
+    (* The directory is made inside the switch and its removal registered
+       with no effect in between: [Switch.run] can raise [Cancelled] before
+       its callback runs, and Eio runs release hooks with cancellation off. *)
+    Eio.Switch.run
+    @@ fun sw ->
     (match Filename.temp_dir ~perms:private_dir_perm call_dir_prefix "" with
      | exception Sys_error detail -> Error (Call_dir_failed detail)
      | call_dir ->
-       (* Eio runs release hooks with cancellation off, so a cancelled call
-          still removes the directory. *)
-       Eio.Switch.run
-       @@ fun sw ->
        Eio.Switch.on_release sw (fun () -> remove_call_dir call_dir);
        (match prepare_call_dir call_dir ~prompt with
         | Error error -> Error error

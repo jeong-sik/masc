@@ -77,7 +77,11 @@ type outcome =
   | Aborted
   | Unrecognized_outcome of string
 
-(* [RunOutcome.exit_code] in vibe/app_server/run_export.py, 3.1.0. *)
+(* The [vibe -p] process is the Rust [vibe-rs], which writes export.json
+   with the same twelve outcome strings in the same order as Vibe's Python
+   [RunOutcome]. The exit codes are read from that Python mirror,
+   [RunOutcome.exit_code] in vibe/app_server/run_export.py, 3.1.0; the Rust
+   binary's own table is compiled in and was not read. *)
 let exit_code_of_outcome = function
   | Finished -> Some 0
   | Usage_error | Config_error -> Some 1
@@ -118,6 +122,22 @@ type export =
   }
 
 let export_schema_version = 1
+
+let outcome_to_wire = function
+  | Finished -> "finished"
+  | Usage_error -> "usage_error"
+  | Config_error -> "config_error"
+  | Infrastructure_failure -> "infrastructure_failure"
+  | Turn_limit -> "turn_limit"
+  | Token_limit -> "token_limit"
+  | Price_limit -> "price_limit"
+  | Deadline -> "deadline"
+  | Terminated -> "terminated"
+  | Length -> "length"
+  | Refusal -> "refusal"
+  | Aborted -> "aborted"
+  | Unrecognized_outcome value -> value
+;;
 
 let outcome_of_wire = function
   | "finished" -> Finished

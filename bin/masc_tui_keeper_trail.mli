@@ -71,3 +71,22 @@ val of_readings :
   trail
 (** [Trail_failed] exactly when the health reading is failing. A health reading
     that is absent, healthy, idle or offline gives [Trail_sound]. *)
+
+type attempt =
+  { ordinal : int
+  ; runtime_id : string
+  ; dispatch : Runtime_attempt_dispatch.t option
+  ; cause : cause_group
+  ; fault : string option
+  ; terminal : bool
+  }
+
+val attempts_of_runtime :
+  Masc.Tui_decode.keeper_runtime option ->
+  attempt list
+(** Ordered candidate and terminal attempts recorded in the last execution
+    receipt for a failing turn. Returns an empty list when the last failure is
+    sound or not a turn failure. The number of attempts matches the candidate
+    count reported in [Walk_ended] or [Walk_no_terminal]. The terminal attempt
+    takes its cause from the terminal error and keeps the dispatch and the API
+    fact of the candidate failure recorded for the same ordinal. *)

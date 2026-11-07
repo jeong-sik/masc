@@ -1527,7 +1527,7 @@
  (name masc_tui_keeper_trail)
  (wrapped false)
  (modules masc_tui_keeper_trail)
- (libraries masc masc.masc_types masc.keeper_runtime agent_core))
+ (libraries masc masc.masc_types masc.keeper_runtime agent_core masc.agent_core.llm_provider))
 
 (library
  (name masc_tui_keeper_list_model)

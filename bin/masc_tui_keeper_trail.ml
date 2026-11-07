@@ -1,6 +1,7 @@
 module Decode = Masc.Tui_decode
 module Receipt = Masc.Keeper_execution_receipt
 module Evidence = Keeper_runtime_walk_evidence
+module Fault = Llm_provider.Candidate_fault
 module Request_failure = Keeper_request_failure
 module Core_failure = Keeper_request_failure_core
 module Internal_error = Keeper_internal_error
@@ -189,3 +190,101 @@ let of_readings ~health ~runtime =
       match Decode.keeper_health_reading value with
       | Decode.Health_failing -> failed runtime
       | Decode.Health_running | Decode.Health_idle | Decode.Health_offline -> Trail_sound)
+
+type attempt =
+  { ordinal : int
+  ; runtime_id : string
+  ; dispatch : Runtime_attempt_dispatch.t option
+  ; cause : cause_group
+  ; fault : string option
+  ; terminal : bool
+  }
+
+(* The word an attempt's API fact reads as. [Local_admission] is the wait that
+   ended in MASC's own queue, so nothing reached the runtime; it is kept apart
+   from the runtime's own [Admission] refusal. *)
+let binding_word : Fault.binding_fact -> string = function
+  | Fault.Credential -> "credential"
+  | Fault.Account_access -> "account access"
+  | Fault.Account -> "account"
+  | Fault.Model_absent -> "model absent"
+  | Fault.Rate_limit -> "rate limit"
+  | Fault.Capacity -> "capacity"
+  | Fault.Server -> "server"
+  | Fault.Window -> "context window"
+  | Fault.Body_limit -> "body limit"
+  | Fault.Admission -> "admission"
+  | Fault.Deadline -> "deadline"
+  | Fault.Output_dialect -> "dialect"
+  | Fault.Refusal_unread -> "refusal unread"
+
+let fault_word : Fault.t option -> string option = function
+  | None -> None
+  | Some (Fault.Binding binding) -> Some (binding_word binding)
+  | Some Fault.Unattributed -> Some "unattributed"
+  | Some Fault.Unknown_after_dispatch -> Some "uncertain"
+  | Some Fault.Local_admission -> Some "MASC admission wait"
+
+let attempt_of_failure (failure : Evidence.failure) : attempt =
+  { ordinal = failure.attempt
+  ; runtime_id = failure.runtime_id
+  ; dispatch = Some failure.dispatch
+  ; cause = cause_group_of_failure failure.failure
+  ; fault = fault_word failure.api_candidate_fault
+  ; terminal = false
+  }
+
+(* An ordinal may repeat across failures; the first one recorded is kept. *)
+let first_per_ordinal (attempts : attempt list) : attempt list =
+  List.rev
+    (List.fold_left
+       (fun kept (candidate : attempt) ->
+         if List.exists (fun (seen : attempt) -> seen.ordinal = candidate.ordinal) kept
+         then kept
+         else candidate :: kept)
+       [] attempts)
+
+(* The terminal carries the error the lane ended on, which effect fencing may
+   have changed, so its cause is read from it. The dispatch and the API fact
+   are not in the terminal: they belong to the candidate failure recorded for
+   the same ordinal, and the terminal keeps them. *)
+let with_terminal (terminal : Evidence.terminal) (candidates : attempt list) : attempt list =
+  match terminal with
+  | Evidence.Terminal_not_observed -> candidates
+  | Evidence.Candidate_terminal { runtime_id; attempt = ordinal; failure } ->
+      let same_ordinal = List.find_opt (fun (a : attempt) -> a.ordinal = ordinal) candidates in
+      let ended =
+        { ordinal
+        ; runtime_id
+        ; dispatch = Option.bind same_ordinal (fun (a : attempt) -> a.dispatch)
+        ; cause = cause_group_of_failure failure
+        ; fault = Option.bind same_ordinal (fun (a : attempt) -> a.fault)
+        ; terminal = true
+        }
+      in
+      ended :: List.filter (fun (a : attempt) -> a.ordinal <> ordinal) candidates
+
+let attempts_of_evidence (evidence : Evidence.t) : attempt list =
+  evidence.failures
+  |> List.map attempt_of_failure
+  |> first_per_ordinal
+  |> with_terminal evidence.terminal
+  |> List.sort (fun (a : attempt) (b : attempt) -> Int.compare a.ordinal b.ordinal)
+
+let attempts_of_runtime (runtime : Decode.keeper_runtime option) : attempt list =
+  match runtime with
+  | None -> []
+  | Some row -> (
+      let last_cause =
+        Option.map (fun (failure : Decode.keeper_failure) -> failure.kf_cause)
+          row.kr_last_failure
+      in
+      match last_cause with
+      | None -> []
+      | Some cause when not (is_turn_failure cause) -> []
+      | Some _ -> (
+          match row.kr_runtime_lane_observation with
+          | Some (Receipt.Runtime_lane_observed { evidence; _ }) ->
+              attempts_of_evidence evidence
+          | Some (Receipt.Runtime_lane_not_observed _ | Receipt.Runtime_lane_unreadable _)
+          | None -> []))

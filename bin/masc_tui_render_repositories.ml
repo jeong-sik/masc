@@ -821,7 +821,9 @@ let render_changes_list (state : state) =
     let empty =
       match empty_page_of ~snapshot:state.changes ~error:state.changes_error with
       | Page_failed -> page_failed_note
-      | Page_unread -> "  (pick a keeper on the Keepers surface, then press r)"
+      | Page_unread ->
+          if state.changes_inflight then page_reading_note
+          else "  (pick a keeper on the Keepers surface, then press r)"
       | Page_empty -> "  (this keeper wrote no files in the window)"
     in
     box_line_styled buf cols ~style:(Theme.recede ()) empty;

@@ -10708,6 +10708,10 @@ type state = {
   mutable changes_keeper: string option;
   mutable changes: Tui_decode.file_change_snapshot option;
   mutable changes_error: string option;
+  (* Set when a read for [changes_keeper] goes out, cleared when its answer
+     arrives or the keeper changes. [changes] is [None] before the read and
+     while it runs, so only this tells the page which of the two it is. *)
+  mutable changes_inflight: bool;
   (* Which keeper surface [f] was pressed on. Esc leaves Changes for that
      one: the roster and the detail both name a keeper through the same
      cursor, and returning a reader from the detail to the roster drops them
@@ -20324,6 +20328,7 @@ let create_state
   changes_keeper = None;
   changes = None;
   changes_error = None;
+  changes_inflight = false;
   changes_return = Changes_return_list;
   changes_cursor = 0;
   changes_scroll = 0;

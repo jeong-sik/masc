@@ -6923,6 +6923,7 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
+  state.changes_inflight <- true;
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
       enqueue_async mailbox (File_changes_loaded (keeper_name, result)))
@@ -7096,6 +7097,7 @@ let cycle_changes_keeper state ~mailbox ~delta =
         state.changes_keeper <- Some keeper.k_name;
         state.changes <- None;
         state.changes_error <- None;
+        state.changes_inflight <- false;
         state.changes_cursor <- 0;
         state.changes_scroll <- 0;
         state.changes_diff_row <- None;
@@ -8710,6 +8712,7 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
            state.changes_keeper <- Some name;
            state.changes <- None;
            state.changes_error <- None;
+           state.changes_inflight <- false;
            state.changes_cursor <- 0;
            state.changes_scroll <- 0;
            state.changes_diff_row <- None;
@@ -16413,6 +16416,7 @@ type reads_in_flight =
   ; rif_verification : bool
   ; rif_memory_health : bool
   ; rif_repositories : bool
+  ; rif_changes : bool
   ; rif_system_log : bool
   ; rif_schedules : bool
   ; rif_fusion_runs : bool
@@ -16428,6 +16432,7 @@ let reads_in_flight (state : state) =
   ; rif_verification = state.verification_inflight
   ; rif_memory_health = state.memory_health_inflight
   ; rif_repositories = state.repositories_inflight
+  ; rif_changes = state.changes_inflight
   ; rif_system_log = Option.is_some state.system_log_stream
   ; rif_schedules = Snapshot_read.in_flight state.schedules_read
   ; rif_fusion_runs = view_is_loading (Masc_tui_fusion_model.fusion_runs_view state)
@@ -17759,6 +17764,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.changes_keeper <- None;
   state.changes <- None;
   state.changes_error <- None;
+  state.changes_inflight <- false;
   state.changes_tree_diff <- None;
   state.changes_tree_diff_error <- None;
   state.changes_tree_diff_path <- None;
@@ -28423,6 +28429,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          surface's answer. Dropping it keeps one keeper's files from being
          drawn under another's name. *)
       if Option.equal String.equal state.changes_keeper (Some keeper_name) then (
+        state.changes_inflight <- false;
         match result with
         | Ok snapshot ->
             (* The open row indexes the snapshot it was opened against. A new

@@ -126,7 +126,7 @@ let start_server ~sw env ?port ?subscribe ?scope_is_current ?scope_replaced
                ~ping_interval_s
                ~stalled_after_s
                ~max_queued_events:queue_bound
-               gluten_reqd.Gluten.Reqd.reqd))
+               (Masc.Http_reqd.of_gluten gluten_reqd)))
      with
      | () -> ()
      | exception Server_stopped -> ());

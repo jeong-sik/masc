@@ -339,7 +339,7 @@ let test_goal_tree_bound_read_bypasses_stale_cache () =
         let response = Buffer.create 1024 in
         let conn = Httpun.Server_connection.create (fun reqd ->
           Server_request_authority.with_current authority (fun () ->
-            Masc.Http_server_eio.Router.dispatch routes (Httpun.Reqd.request reqd) reqd)) in
+            Masc.Http_server_eio.Router.dispatch routes (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd))) in
         let request = Printf.sprintf
             "GET %s HTTP/1.0\r\nHost: localhost:8935\r\nAuthorization: Bearer %s\r\nIf-None-Match: *\r\n%s\r\n"
             path player accept_encoding in
@@ -503,7 +503,7 @@ let test_bound_goal_timeout_answers_while_read_pool_is_busy () =
         let output = Buffer.create 256 in
         let conn = Httpun.Server_connection.create (fun reqd ->
           Server_request_authority.with_current authority (fun () ->
-            Masc.Http_server_eio.Router.dispatch routes (Httpun.Reqd.request reqd) reqd)) in
+            Masc.Http_server_eio.Router.dispatch routes (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd))) in
         let request = Printf.sprintf
           "GET %s HTTP/1.0\r\nHost: localhost:8935\r\nAuthorization: Bearer %s\r\nAccept-Encoding: zstd;q=0\r\nAccept-Encoding: *;q=1\r\n%s\r\n"
           path player origin in

@@ -134,6 +134,7 @@ let h1_request gateway ~meth ~path ~headers ~body =
   let output = Buffer.create 2048 in
   let connection = Httpun.Server_connection.create (fun reqd ->
     let request = Httpun.Reqd.request reqd in
+    let reqd = Masc.Http_reqd.of_httpun reqd in
     Server_request_authority.with_current gateway.authority (fun () ->
       Server_workspace_precondition.guard_http1 ~path:(Http.Request.path request) request reqd
         ~admitted:(fun () -> match request.Httpun.Request.meth with

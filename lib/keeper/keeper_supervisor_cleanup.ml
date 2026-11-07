@@ -13,7 +13,7 @@ let lifecycle_event_bus_ready () =
   | Some _ -> Ok ()
 ;;
 
-let handle_completion _config operation = function
+let handle_completion operation = function
   | Keeper_shutdown_types.Supervisor_cleaned ->
     (match lifecycle_event_bus_ready () with
      | Error _ as error -> error

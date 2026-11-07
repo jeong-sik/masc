@@ -93,7 +93,7 @@ let set_turn_selected_runtime ~observation_token ~base_path name selected_runtim
 let mark_turn_finished ~observation_token ~base_path name =
   (* Terminal turn lifecycle step: freeze [current_turn_observation] into
      [last_completed_turn] and clear the live observation.  This is
-     intentionally NOT routed through [set_turn_phase_with]: it mutates the
+     intentionally NOT routed through [set_turn_phase_direct]: it mutates the
      turn container (Some -> None) rather than transitioning the turn_phase
      sub-FSM.  It remains a separate, justified channel; the drift audit
      concern is the phase-transition setters that were duplicating resolver
@@ -661,7 +661,7 @@ let execute_entry_action_observability =
 
 
 (** Registry mutation is still non-yielding (StringMap lookup + CAS).
-    Entry actions run only after [install_entry_if_current], so their
+    Entry actions run only after [install_entry_if_current_internal], so their
     observability side effects happen after the registry state is
     consistent. *)
 let rec dispatch_event_with_audit_internal

@@ -2073,7 +2073,8 @@ let result_turn_id ~expected_session_id fields =
    (rateLimitType), and a later event of a window replaces what an earlier
    one said about it. An allowed five-hour event therefore does not hide a
    seven-day window that is still rejected. Events without a type all speak
-   for one unnamed window. *)
+   for one unnamed window. The list is newest first, so its head is the
+   turn's last event. *)
 let note_rate_limit (limit : rate_limit) rate_limits =
   limit
   :: List.filter
@@ -2094,20 +2095,29 @@ let reopens_at (first : rate_limit) rest =
     rest
 ;;
 
-(* The one place a blocked turn is told apart. A window whose last event is
-   rejected means the account's window is used up. A 429 with no such window
-   is a throttle, and nothing says how long it lasts. *)
+(* The one place a blocked turn is told apart. Only a turn that ended in a
+   rate-limit refusal is blocked: a 429, or a last event that was rejected.
+   A turn whose last event allowed it ends as its result frame says, even
+   while an earlier window is still rejected, because that frame is what
+   happened to this turn. A refusal with a window whose last event is
+   rejected means the account's window is used up. A 429 with no such
+   window is a throttle, and nothing says how long it lasts. *)
 let quota_block ~api_error_status rate_limits =
-  let rejected =
-    List.filter
-      (fun (limit : rate_limit) ->
-         match limit.status with
-         | Rejected -> true
-         | Allowed | Allowed_warning -> false)
-      rate_limits
+  let is_rejected (limit : rate_limit) =
+    match limit.status with
+    | Rejected -> true
+    | Allowed | Allowed_warning -> false
   in
-  match rejected, api_error_status with
-  | (first :: rest as rejected), (Some _ | None) ->
+  let refused =
+    Option.equal Int.equal api_error_status (Some 429)
+    ||
+    match rate_limits with
+    | latest :: _ -> is_rejected latest
+    | [] -> false
+  in
+  match refused, List.filter is_rejected rate_limits with
+  | false, ([] | _ :: _) -> None
+  | true, (first :: rest as rejected) ->
     Some
       (Quota_spent
          { resets_at = reopens_at first rest
@@ -2115,8 +2125,7 @@ let quota_block ~api_error_status rate_limits =
              List.map (fun (limit : rate_limit) -> limit.window) rejected
              |> List.sort compare_window
          })
-  | [], Some 429 -> Some Rate_throttled
-  | [], (Some _ | None) -> None
+  | true, [] -> Some Rate_throttled
 ;;
 
 let parse_result ~rate_limits ~tool_effect_attempted ~response_emitted ~turn_id ~usage

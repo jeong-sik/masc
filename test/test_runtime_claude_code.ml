@@ -1606,6 +1606,48 @@ let test_a_window_is_spent_only_while_its_last_event_is_rejected () =
        (named [ "seven_day" ] @ [ Runtime_claude_code.Unnamed_window ]))
 ;;
 
+(* A window still rejected from earlier in the turn does not decide a turn
+   whose last event allowed it: the result frame does. A last event that
+   rejected decides it, whatever the frame says. *)
+let test_the_result_frame_decides_a_turn_its_last_event_allowed () =
+  let earlier_rejection =
+    [ Emit
+        (window_event ~uuid:"rejected-seven_day" ~status:"rejected" ~window:"seven_day"
+           ~resets_at:seven_day_reset ())
+    ; Emit
+        (window_event ~uuid:"allowed-five_hour" ~status:"allowed" ~window:"five_hour"
+           ~resets_at:five_hour_reset ())
+    ]
+  in
+  with_fixture (earlier_rejection @ [ Emit assistant; Emit result ]) (fun path ->
+    match run_fixture path with
+    | Ok turn -> check string "the answer is kept" "MASC_CLAUDE_OK" turn.text
+    | Error error -> fail (Runtime_claude_code.error_to_string error));
+  with_fixture (earlier_rejection @ [ Emit prompt_too_long_typed_result ]) (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Context_window_exceeded _) -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "an overflow completed the turn");
+  with_fixture
+    [ Emit
+        (window_event ~uuid:"allowed-five_hour" ~status:"allowed" ~window:"five_hour"
+           ~resets_at:five_hour_reset ())
+    ; Emit
+        (window_event ~uuid:"rejected-seven_day" ~status:"rejected" ~window:"seven_day"
+           ~resets_at:seven_day_reset ())
+    ; Emit quota_result_with_success_flag
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Error
+           (Runtime_claude_code.Quota_blocked
+             { block = Runtime_claude_code.Quota_spent { windows; _ }; _ }) ->
+         check string "the last event's window is spent" "seven_day"
+           (Runtime_claude_code.quota_windows_label windows)
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok _ -> fail "a rejected last event completed the turn")
+;;
+
 let mcp_initialize =
   {|{"type":"control_request","request_id":"mcp-init-1","request":{"subtype":"mcp_message","server_name":"masc","message":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"claude-code-fixture","version":"1"}}}}}|}
 ;;
@@ -4855,6 +4897,8 @@ let () =
             test_quota_is_structurally_classified
         ; test_case "a window is spent only while its last event is rejected" `Quick
             test_a_window_is_spent_only_while_its_last_event_is_rejected
+        ; test_case "the result frame decides a turn its last event allowed" `Quick
+            test_the_result_frame_decides_a_turn_its_last_event_allowed
         ; test_case "quota after native tool records effect" `Quick
             test_quota_after_native_tool_records_effect
         ; test_case "quota refusal still reports the turn's spend" `Quick

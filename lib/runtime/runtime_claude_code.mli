@@ -102,8 +102,15 @@ type rate_limit_window =
   | Unnamed_window
 
 (** Why the client blocked a turn, read once from the turn's rate-limit
-    events so that no consumer reads an event's status itself. Each window
-    counts by the last event the turn saw for it.
+    events so that no consumer reads an event's status itself.
+
+    A turn is blocked only when it ended in a rate-limit refusal: the result
+    frame reports a 429, or the last rate-limit event of the turn was
+    [rejected]. Any other turn ends as its result frame says, even while an
+    earlier window is still [rejected]: a success completes and an overflow
+    is an overflow.
+
+    A blocked turn reads each window by the last event the turn saw for it.
     - [Quota_spent]: at least one window's last event was [rejected], so
       the account's window is used up. [resets_at] is the latest reset
       among the rejected windows, when all of them are open again, and

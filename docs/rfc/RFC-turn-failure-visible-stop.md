@@ -135,6 +135,9 @@ MASC direct-provider HTTP 레인은 내부 재시도 루프가 없어 턴당 한
   2. `usable_retry_after retry_after` 가 `Some` 이다. 값이 있고, 유한하고, 0보다 크다.
      claude_code 레인은 `Runtime_claude_code` 가 rate-limit event 로 1과 2를 한 번만
      가른다(`quota_block`). 소비자(Keeper·Fusion·verification)는 그 생성자만 본다.
+     - 턴이 rate-limit 거절로 끝났을 때만 막는다. result frame 이 429 를 말했거나,
+       턴의 마지막 rate-limit event 가 `rejected` 일 때다. 그 밖의 턴은 result frame
+       대로 끝난다. 앞에서 거절된 창이 남아 있어도 성공은 성공이고 넘침은 넘침이다.
      - 창(`rateLimitType`)마다 그 턴에 온 마지막 event 만 센다. type 이 없는 event 는
        모두 이름 없는 한 창이다.
      - 마지막 event 가 `rejected` 인 창이 하나라도 있으면 `Quota_spent` 다. 이름 없는

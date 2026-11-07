@@ -66,7 +66,13 @@ module Effect : sig
     | Admin_disable_block
     | Read_audit_metadata
 
+  (** The label of an effect, such as [read_state]. A scoped PAT record holds
+      it on disk (plan C4-1b), so renaming one orphans every record written
+      with it. *)
   val to_string : t -> string
+
+  (** The effect of a label of {!to_string}. *)
+  val of_string : string -> t option
 
   (** The five [Manage_*] effects and [Admin_disable_block]: the ones that
       change who may do what, or whether something runs. A PAT that asks for
@@ -91,6 +97,14 @@ module Channel : sig
     | Vision
     | Verifier
     | Autonomous
+
+  (** The label of a channel, such as [board_trigger]. A scoped PAT record
+      holds it on disk (plan C4-1b), so renaming one orphans every record
+      written with it. *)
+  val to_string : t -> string
+
+  (** The channel of a label of {!to_string}. *)
+  val of_string : string -> t option
 
   val equal : t -> t -> bool
 

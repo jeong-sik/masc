@@ -83,6 +83,20 @@ module Effect = struct
     | Read_audit_metadata -> "read_audit_metadata"
   ;;
 
+  let of_string = function
+    | "read_state" -> Some Read_state
+    | "invoke_model" -> Some Invoke_model
+    | "use_tool" -> Some Use_tool
+    | "manage_own_provider" -> Some Manage_own_provider
+    | "manage_own_runtime" -> Some Manage_own_runtime
+    | "manage_own_grant" -> Some Manage_own_grant
+    | "manage_own_keeper" -> Some Manage_own_keeper
+    | "manage_machine_shared" -> Some Manage_machine_shared
+    | "admin_disable_block" -> Some Admin_disable_block
+    | "read_audit_metadata" -> Some Read_audit_metadata
+    | _ -> None
+  ;;
+
   (* By label. [to_string] is an exhaustive match, so a new effect, or a
      constructor that carries data, fails to compile here instead of changing
      the order silently. *)
@@ -129,6 +143,20 @@ module Channel = struct
     | Vision -> "vision"
     | Verifier -> "verifier"
     | Autonomous -> "autonomous"
+  ;;
+
+  let of_string = function
+    | "direct" -> Some Direct
+    | "delegate" -> Some Delegate
+    | "schedule" -> Some Schedule
+    | "board_trigger" -> Some Board_trigger
+    | "retry" -> Some Retry
+    | "resume" -> Some Resume
+    | "fusion" -> Some Fusion
+    | "vision" -> Some Vision
+    | "verifier" -> Some Verifier
+    | "autonomous" -> Some Autonomous
+    | _ -> None
   ;;
 
   (* By label, for the same reason as [Effect.compare]. *)

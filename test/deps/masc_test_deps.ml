@@ -694,6 +694,13 @@ let antigravity_id_token_email_fixture ?(revision = "initial") account =
    [login]. *)
 let antigravity_keychain_value login = "go-keyring-base64:" ^ Base64.encode_string login
 
+(* The older go-keyring hex form, which its macOS [Get] still reads. *)
+let antigravity_keychain_hex_value login =
+  "go-keyring-encoded:"
+  ^ String.concat ""
+      (List.map (fun byte -> Printf.sprintf "%02x" (Char.code byte))
+         (List.of_seq (String.to_seq login)))
+
 (** Write [checkpoint] at [path] as the Keeper checkpoint store lays it out
     (RFC-0476 §3.2): its messages as one closed-turn bundle under
     [session_dir]'s objects, then a head that names it. Answers the head bytes.

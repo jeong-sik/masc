@@ -12,9 +12,12 @@ val environment : t -> string array
 val import_signed_in : source_home:string -> t -> (unit, error) result
 (** Read only the canonical CLI OAuth file or the explicitly named macOS
     gemini/antigravity keychain item, then copy its login JSON into this
-    private HOME. A keychain value is go-keyring's [go-keyring-base64:]
-    encoding of that JSON; any other value is [Unrecognized_credential], and
-    one that decodes to blank text is [Sign_in_required], as a blank file is.
+    private HOME. A keychain value is read as go-keyring reads it
+    ({!Runtime_antigravity_oauth_credential.login_of_keychain_value}); one
+    that does not decode is [Unrecognized_credential], and one that decodes
+    to blank text is [Sign_in_required], as a blank file is. A stored value
+    that is blank before decoding reads as [Unavailable]
+    ({!Apple_keychain.read}), so setup stops with [Keychain_unavailable].
     Never modify the source; call only after account selection. *)
 val capture_login : t -> (unit, error) result
 (** Capture authentication created by an explicit interactive [agy] sign-in. *)

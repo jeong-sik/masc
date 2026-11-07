@@ -64,19 +64,40 @@ type rejection =
 val account_email : string -> (Runtime_account_email_text.t, rejection) result
 (** The email one login JSON document names. *)
 
+type undecodable =
+  | Not_printable
+      (** holds a byte outside printable ASCII, so [security -w] hands the
+          CLI the bytes as hex text, which is no login *)
+  | Not_hex  (** [go-keyring-encoded:] followed by no even count of hex digits *)
+  | Not_base64
+      (** [go-keyring-base64:] followed by text that is not whole groups of
+          standard base64 with at most two [=] at the end *)
+
 type keychain_rejection =
-  | Not_go_keyring_base64
-      (** not [go-keyring-base64:] followed by text that decodes as padded
-          standard base64 *)
+  | Undecodable of undecodable
   | Keychain_login of rejection  (** the decoded login JSON *)
 
-val login_of_keychain_value : string -> string option
-(** The login JSON inside a keychain value. go-keyring's macOS [Set] stores
-    [go-keyring-base64:] and the padded standard base64 of the given text;
-    the operator's agy 1.5.1 item had that prefix on 2026-11-06. [None] for
-    any other value. go-keyring's [Get] also reads a hex
-    [go-keyring-encoded:] value and a value with no prefix, but [Set], which
-    agy writes through, writes neither, so those are [None] too. *)
+val login_of_keychain_value : string -> (string, undecodable) result
+(** The login JSON a keychain value holds, as the CLI's go-keyring [Get]
+    reads it. Read at go-keyring tag v0.2.8 and master 85eb737c1258 on
+    2026-11-06T12:50Z:
+    https://github.com/zalando/go-keyring/blob/85eb737c1258e4849bfba6456dc0c48228ca8242/keyring_darwin.go#L43-L67
+    [Get] reads the value through [security find-generic-password -w], which
+    prints the stored bytes as they are only when every byte is printable
+    ASCII and prints lowercase hex otherwise:
+    https://github.com/apple-oss-distributions/Security/blob/ef677c3d667a44e1737c1b0245e9ed04d11c51c1/SecurityTool/macOS/keychain_find.c#L408-L443
+    - A value with any other byte is [Not_printable].
+    - Spaces around the value are trimmed, as [strings.TrimSpace] does.
+    - [go-keyring-encoded:] is followed by an even count of hex digits in
+      either case.
+    - [go-keyring-base64:] is followed by padded standard base64, [+] and
+      [/] included.
+    - Any other value is the login itself.
+
+    [Set], which agy writes through, always writes [go-keyring-base64:]; the
+    operator's agy 1.5.1 item had that prefix on 2026-11-06. The other two
+    are what [Get] still reads. [security] is taken to run in the C locale,
+    where [isprint] admits bytes 0x20 to 0x7E. *)
 
 val keychain_account_email :
   string -> (Runtime_account_email_text.t, keychain_rejection) result

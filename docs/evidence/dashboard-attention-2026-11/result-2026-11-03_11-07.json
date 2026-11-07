@@ -1,0 +1,65 @@
+{
+  "above_ceiling_after": {
+    "16384": 18,
+    "32768": 0,
+    "65536": 0
+  },
+  "above_ceiling_before": {
+    "16384": 33,
+    "32768": 0,
+    "65536": 0
+  },
+  "above_ceiling_by_ledger_result_bytes": {
+    "16384": 33,
+    "32768": 0,
+    "65536": 0
+  },
+  "attention_items": {
+    "max": 29,
+    "min": 23,
+    "p50": 25
+  },
+  "attention_runs": {
+    "max": 2,
+    "min": 2,
+    "p50": 2
+  },
+  "bytes_after": {
+    "max": 17451,
+    "min": 15596,
+    "p50": 16441,
+    "sum": 544264
+  },
+  "bytes_before": {
+    "max": 18719,
+    "min": 16789,
+    "p50": 17654,
+    "sum": 586312
+  },
+  "calls": 33,
+  "checks_failed": {},
+  "held_items": {
+    "max": 27,
+    "min": 21,
+    "p50": 23
+  },
+  "keepers": {
+    "wkbl-data": 3,
+    "wkbl-front": 25,
+    "wkbl-growth": 5
+  },
+  "measured_calls": 33,
+  "not_split": {},
+  "repeated_title_bytes": {
+    "max": 3405,
+    "min": 2771,
+    "p50": 2938
+  },
+  "unreadable": {},
+  "window": {
+    "ledger_files": 44,
+    "since": "2026-11-03T00:00:00+00:00",
+    "until": "2026-11-07T14:00:00+00:00"
+  },
+  "window_result_bytes_any_tool": 532524855
+}

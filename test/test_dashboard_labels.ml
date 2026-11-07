@@ -363,6 +363,34 @@ let test_attention_grades_the_operators_tasks () =
     [ Dashboard_attention.Warning; Dashboard_attention.Warning ]
     (List.map (fun (item : Dashboard_attention.attention_item) -> item.severity) items)
 
+(* Neighbouring items that share a suggested action list it once, after the run. *)
+let test_attention_lists_a_shared_action_once () =
+  let item severity summary suggested_tool : Dashboard_attention.attention_item =
+    { severity; summary; suggested_tool }
+  in
+  Alcotest.(check (list string)) "runs, a single item and a repeated action after another"
+    [ "[!] stuck a"
+    ; "[!] stuck b"
+    ; "    -> masc_agent_timeline (2 items above)"
+    ; "[~] held 1"
+    ; "[~] held 2"
+    ; "[~] held 3"
+    ; "    -> inspect (3 items above)"
+    ; "[~] lone"
+    ; "    -> recover"
+    ; "[!] stuck c"
+    ; "    -> masc_agent_timeline"
+    ]
+    (Dashboard_attention.format_items
+       [ item Critical "stuck a" "masc_agent_timeline"
+       ; item Critical "stuck b" "masc_agent_timeline"
+       ; item Warning "held 1" "inspect"
+       ; item Warning "held 2" "inspect"
+       ; item Warning "held 3" "inspect"
+       ; item Warning "lone" "recover"
+       ; item Critical "stuck c" "masc_agent_timeline"
+       ])
+
 let test_attention_compact_empty () =
   let result = Dashboard_attention.compact_summary [] in
   Alcotest.(check string) "no action" "No action needed" result
@@ -413,6 +441,7 @@ let () =
           ("empty attention", `Quick, test_attention_empty);
           ("attention grades the operator's tasks", `Quick,
            test_attention_grades_the_operators_tasks);
+          ("a shared action is listed once", `Quick, test_attention_lists_a_shared_action_once);
           ("compact empty", `Quick, test_attention_compact_empty);
         ] );
     ]

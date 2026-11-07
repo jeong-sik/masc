@@ -38,7 +38,9 @@ val detect_operator_tasks :
 
 (** {1 Presentation} *)
 
-(** One rendered line per item, prefixed with {!severity_icon}. *)
+(** One rendered line per item, prefixed with {!severity_icon}, in item order.
+    The suggested action follows a run of neighbouring items that share it,
+    once, with the number of items above it when the run has more than one. *)
 val format_items : attention_item list -> string list
 
 (** Compact single-line summary, e.g. ["[!] 2 critical, [~] 1 warning"].

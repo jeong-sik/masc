@@ -5,18 +5,24 @@ let data_payload_line line =
     then line_len - 1
     else line_len
   in
-  let prefix = "data:" in
-  let prefix_len = String.length prefix in
-  if line_len >= prefix_len
-     && String.equal (String.sub line 0 prefix_len) prefix
+  if line_len >= 5
+     && Char.equal line.[0] 'd'
+     && Char.equal line.[1] 'a'
+     && Char.equal line.[2] 't'
+     && Char.equal line.[3] 'a'
+     && Char.equal line.[4] ':'
   then
     let payload_start =
-      if line_len > prefix_len && Char.equal line.[prefix_len] ' '
-      then prefix_len + 1
-      else prefix_len
+      if line_len > 5 && Char.equal line.[5] ' '
+      then 6
+      else 5
     in
     Some (String.sub line payload_start (line_len - payload_start))
-  else if line_len = 4 && String.equal (String.sub line 0 line_len) "data"
+  else if line_len = 4
+     && Char.equal line.[0] 'd'
+     && Char.equal line.[1] 'a'
+     && Char.equal line.[2] 't'
+     && Char.equal line.[3] 'a'
   then Some ""
   else None
 
@@ -86,16 +92,33 @@ let add_header buf name value =
   Buffer.add_char buf '\n'
 ;;
 
+let add_header_sub buf name s off len =
+  Buffer.add_string buf name;
+  Buffer.add_string buf ": ";
+  Buffer.add_substring buf s off len;
+  Buffer.add_char buf '\n'
+;;
+
 let add_optional_headers buf ?id ?event_type () =
   Option.iter (fun event_id -> add_header buf "id" (string_of_int event_id)) id;
   Option.iter (add_header buf "event") event_type
 ;;
 
 let format_event ?id ?event_type data =
-  let buf = Buffer.create 64 in
+  let data_len = String.length data in
+  let buf = Buffer.create (data_len + 32) in
   add_optional_headers buf ?id ?event_type ();
-  String.split_on_char '\n' data
-  |> List.iter (fun line -> add_header buf "data" line);
+  let rec add_lines start =
+    match String.index_from_opt data start '\n' with
+    | None ->
+      let len = data_len - start in
+      add_header_sub buf "data" data start len
+    | Some idx ->
+      let len = idx - start in
+      add_header_sub buf "data" data start len;
+      add_lines (idx + 1)
+  in
+  add_lines 0;
   Buffer.add_char buf '\n';
   Buffer.contents buf
 ;;

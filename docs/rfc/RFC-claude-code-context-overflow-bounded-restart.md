@@ -183,6 +183,7 @@ full view가 거부됐을 때 시도 순서는 다음과 같다.
 
 ```text
 full
+  -> optional same-capacity view with the carrier By_address
   -> optional midpoint 1
   -> optional midpoint 2
   -> mandatory floor
@@ -193,6 +194,8 @@ full
 - floor와 현재 view가 같으면 provider를 다시 호출하지 않는다.
 - provider dispatch 수는 strictly smaller view의 수로 bounded다. halving이면 history
   바이트의 log2 이고, view마다 atom을 하나 이상 버리므로 atom 수를 넘지 않는다.
+  carrier를 `By_address`로 바꾼 view는 atom을 버리지 않는다. 그 view는 run마다 한 번뿐이라
+  이 bound에 하나를 더한다.
 - 마지막 dispatch가 floor가 아니면 “attempts exhausted”를 선언할 수 없다.
 
 floor 성공은 durable history가 불필요하다는 뜻이 아니다. 그 turn의 provider bootstrap
@@ -326,7 +329,8 @@ generic untyped `tool_call(name, json)`로 policy boundary를 우회하는 설�
 
 1. full + shrink retries 전체에서 preparation hook은 한 번만 실행된다.
 2. source projection과 operator-note consumption은 한 번만 실행된다.
-3. tool surface와 system prompt는 모든 view에서 동일하다.
+3. tool surface와 base system prompt는 모든 view에서 동일하다. Start의 system prompt에
+   실리는 retained tool-result carrier만 꼴에 따라 달라진다.
 4. capacity만 달라지고 `episode_sha256`은 동일하다.
 
 ### 10.3 Floor convergence

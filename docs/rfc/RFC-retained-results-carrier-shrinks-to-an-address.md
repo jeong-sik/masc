@@ -21,15 +21,16 @@ related: ["claude-code-context-overflow-bounded-restart", "official-client-conve
 - `Inline`: 지금 묶음이다. receipt를 전부 글로 싣는다.
 - `By_address`: receipt가 몇 개든 길이가 도구 종류와 개수의 자릿수로만 달라진다. 이미 실행된 호출 수, 도구별 개수, 목록 blob 하나의 주소를 싣는다.
 
-run(Keeper 턴 하나의 provider 시도 전부)은 `Inline`으로 시작한다. typed 크기 거절이 오면 이미 있는 재투영 hook `on_memory_capacity_refusal`이 묶음을 `By_address`로 한 번 바꾼다. `By_address` 글이 엄격히 짧을 때만 바꾼다. 그러면 기존 `on_memory_retry`가 거절을 풀고 같은 capacity로 다시 보낸다. 그다음 거절은 지금처럼 history를 줄인다. 그 view와 floor에도 `By_address`가 실린다.
+run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은 `Inline`으로 시작한다. lane이 다른 후보로 넘어가면 새 run이 다시 `Inline`으로 시작한다. typed 크기 거절이 오면 이미 있는 재투영 hook `on_memory_capacity_refusal`이 묶음을 `By_address`로 한 번 바꾼다. `By_address` 글이 엄격히 짧을 때만 바꾼다. 그러면 같은 capacity로 다시 보낸다(§5.2). 그다음 거절은 지금처럼 history를 줄인다. 그 view와 floor에도 `By_address`가 실린다.
 
 줄이기 단계(walk), floor 계산, tail window, blob 정리, ACK 규칙은 바꾸지 않는다.
 
-결과는 이렇다.
+결과는 이렇다. typed 크기 거절이 hook에 닿는 경로(§7)에서만 그렇다.
 
-- 고정부(system prompt, 도구, 목표)와 `By_address` 묶음이 창에 들어가면, receipt가 몇 개든 그 Keeper는 잠기지 않는다.
+- 고정부(system prompt, 도구, 목표)와 `By_address` 묶음이 창에 들어가면, 효과 전에 온 크기 거절로 그 Keeper가 floor에서 잠기지 않는다(`Bootstrap_floor_exceeded`). receipt 개수와 상관없다.
 - 넘친 턴은 같은 턴 안에서 사람 손 없이 다시 보내진다. 그 턴의 `Completed`가 receipt를 지운다.
 - 모델은 무엇이 이미 실행됐는지 안다. 「효과를 반복하지 말라」는 안내는 두 꼴 모두에 있다.
+- 효과 뒤에 턴 안에서 넘치는 경우(`Effect_fenced`)는 지금처럼 운영자 몫이다(§9).
 
 ## 2. 일어난 일
 
@@ -64,7 +65,9 @@ run(Keeper 턴 하나의 provider 시도 전부)은 `Inline`으로 시작한다.
 
 **1. receipt는 상한 없이 쌓인다.**
 
-- 끝나지 못한 vendor 턴은 도구 호출마다 receipt를 하나씩 남긴다. vendor가 받은 결과도 남긴다(`test/test_keeper_claude_code_runtime.ml:6927-6929`).
+- host는 도구 결과를 받을 때마다 receipt를 하나씩 쓴다(`keeper_official_client_host.ml:1694-1718`). receipt를 지우는 것은 받아들여진 `Completed`뿐이다(아래 3).
+- 그래서 받아들여지지 않은 턴은 그 턴에 쓴 receipt와 이미 있던 receipt를 모두 남긴다. vendor가 받은 결과도 남는다.
+  - 시험 `test/test_keeper_claude_code_runtime.ml:6915-6929`가 이를 확인한다. vendor가 결과를 낸 턴을 caller가 받아들이지 않은 경우다.
 - 남기는 것은 맞는 동작이다. 모델이 이미 일어난 효과를 다시 일으키지 않게 한다.
 
 **2. 묶음은 크기를 잰 뒤에 붙는다.**
@@ -84,7 +87,7 @@ run(Keeper 턴 하나의 provider 시도 전부)은 `Inline`으로 시작한다.
 - `resolve_recovery`는 `session.json`만 쓴다. `restart_fresh` 뒤의 run은 같은 묶음을 다시 싣는다.
 - floor가 거절되면 `plan_claim`이 같은 runtime을 막는다(`keeper_official_client_session_store.ml:1493-1503`).
 
-셋이 겹치면, 창을 한 번 넘은 Keeper는 사람 없이 못 빠져나온다. bounded-restart RFC는 floor가 거절되면 운영자가 고정부를 줄이라고 한다(§8). 그 RFC의 floor 목록(§5)에 receipt 묶음은 없다. 11-07에 운영자가 손으로 한 일이 그것이다.
+셋이 겹치면, 창을 한 번 넘은 Keeper는 사람 없이 못 빠져나온다. bounded-restart RFC는 floor가 거절되면 운영자가 고정부를 줄이라고 한다(§8). 이 RFC 전에는 그 RFC의 floor 목록(§5)에 receipt 묶음이 없었다. 11-07에 운영자가 손으로 한 일이 그것이다.
 
 관련 RFC 넷(bounded-restart, official-client-conversation-in-masc, context-overflow-semantic-recovery, 0473) 가운데 receipt 묶음의 자리·크기·비우기를 정한 것은 없다.
 
@@ -128,6 +131,9 @@ run(Keeper 턴 하나의 provider 시도 전부)은 `Inline`으로 시작한다.
   - 이 process가 이미 쓴 주소는 읽어서 비교만 한다.
   - 없거나 깨졌으면 다시 쓴다.
 - 길이만 잴 때는 `Tool_blob_store.address`를 쓴다. 파일을 읽지도 쓰지도 않는다(`tool_blob_store.mli:87`).
+- 쓰기가 실패하면 `put_durable_reuse`는 `Sys_error`를 던진다. 이 예외를 run 밖으로 내보내지 않는다.
+  - hook은 꼴을 바꾸기 전에 blob을 먼저 쓴다. 실패하면 `Error`를 돌려준다(§5.1).
+  - 렌더도 `result`를 돌려준다. 실패하면 그 attempt는 internal error로 끝난다. 크기 거절이 아니니 walk는 이어지지 않는다.
 - blob 삭제는 배포 helper가 BasePath lease를 쥐고 오프라인에서 두 번 검사할 때만 일어난다(`tool_blob_maintenance.mli:35-41`).
   - 목록 blob과 receipt blob은 정리 작업이 보는 저장소에서 참조되지 않는다. 그래서 배포 때 지워질 수 있다.
   - 다음 렌더가 같은 주소로 다시 쓴다. 주소는 바이트에서 나오기 때문이다.
@@ -150,10 +156,11 @@ run(Keeper 턴 하나의 provider 시도 전부)은 `Inline`으로 시작한다.
 묶음 hook은 run마다 하나인 carrier 값을 가진다. 그 값은 지금 꼴과, 마지막에 렌더한 snapshot을 안다.
 
 - 꼴이 `Inline`이고, receipt가 있고, `By_address` 글이 `Inline` 글보다 엄격히 짧다.
+  - 길이는 `Tool_blob_store.address`로 계산한 주소로 잰다.
+  - blob을 `put_durable_reuse`로 쓴다. 쓰기가 실패하면 `Error`를 돌려준다.
   - 꼴을 `By_address`로 바꾸고 `Reprojected`를 돌려준다.
 - 그 밖에는 `Unchanged`를 돌려준다. 이미 바꾼 뒤에도 `Unchanged`다.
   - hook에는 반복을 막는 장치가 없다. 그래서 묶음 쪽이 한 번만 바뀌게 한다.
-- 길이 비교에 쓰는 주소는 `Tool_blob_store.address`로 계산한다.
 
 묶음 hook을 caller가 넘긴 memory hook 앞에 이어 붙인다.
 
@@ -163,9 +170,10 @@ run(Keeper 턴 하나의 provider 시도 전부)은 `Inline`으로 시작한다.
 
 ### 5.2 다시 보내기
 
-- Claude Code와 Codex의 `on_memory_retry`는 `resolve_input_rejected_for_shrink_retry`다.
-  - 방금 거절로 기록된 `Input_rejected Bootstrap_floor_exceeded`를 `Restart_fresh`로 푼다.
-  - 그래서 다시 보내는 요청은 fresh Start다(`keeper_claude_code_runtime.ml:681-684`).
+- Claude Code와 Codex의 `on_memory_retry`는 `resolve_input_rejected_for_shrink_retry`다(`keeper_claude_code_runtime.ml:681-710`).
+  - Claude Code의 크기 거절과 Codex의 `contextWindowExceeded`는 `Input_rejected Bootstrap_floor_exceeded`로 기록된다. `on_memory_retry`가 이것을 `Restart_fresh`로 푼다.
+  - Codex의 `input_too_large`는 `Protocol_failed`로 기록된다(`keeper_codex_runtime.ml:826-828`). `on_memory_retry`는 아무것도 하지 않고, 다음 `plan_claim`이 fresh plan을 낸다(`keeper_official_client_session_store.ml:1520-1532`).
+  - 어느 쪽이든 다시 보내는 요청은 fresh Start다.
 - 같은 capacity로 다시 보내니 history는 그대로이고 묶음만 짧아진다.
 - 그다음 거절은 history를 줄인다. 그 view와 floor에도 `By_address`가 실린다.
 - floor는 history만 재니(§3) floor 계산은 그대로 맞다.
@@ -184,7 +192,7 @@ run(Keeper 턴 하나의 provider 시도 전부)은 `Inline`으로 시작한다.
 - Gate continuation Resume은 같은 run에서 다시 보내지 않는다. 그래서 hook이 불리지 않는다.
   - Claude Code: `keeper_claude_code_runtime.ml:1531-1539`
   - Codex: `keeper_codex_runtime.ml:2106-2114`
-- 묶음 때문에 넘치면 `Vendor_session_full`로 기록된다(`keeper_claude_code_runtime.ml:534-552`, `keeper_codex_runtime.ml:846-852`).
+- 묶음 때문에 넘치면 `Vendor_session_full`로 기록된다(`keeper_claude_code_runtime.ml:534-552`, `keeper_codex_runtime.ml:846-861`).
   - 실제로는 vendor 세션이 아니라 묶음이 넘친 것이다.
   - 다음 일반 턴이 fresh 세션을 열고, 그 턴에서 hook이 꼴을 바꾼다.
 - 같은 세션에서 다시 보내려면 실측이 먼저다. CLI가 거절된 resume prompt를 세션 기록에 남기지 않는지 봐야 한다. 이 RFC는 그 일을 하지 않는다.
@@ -206,49 +214,91 @@ run(Keeper 턴 하나의 provider 시도 전부)은 `Inline`으로 시작한다.
 - memory recall은 reader가 없으면 inline으로 돌아간다. receipt 묶음은 길이를 묶는 곳이 없어서 그렇게 하지 않는다.
 - 11-07 17:55 KST에 마지막 프롬프트가 남은 Keeper 36명은 모두 `keeper_artifact_read`를 받고 있었다(#49698).
 
-## 7. runtime 범위
+## 7. 닿는 경로와 닿지 않는 경로
 
-- 이 RFC는 Claude Code, Codex, agent_core를 다룬다. 셋 다 typed 크기 거절이 있고 hook을 받는다.
-- antigravity와 muse는 hook을 받지 않는다. `rg on_memory_capacity_refusal lib/keeper/`에 두 runtime이 없다. 넘침을 typed로 가리지도 않는다.
-  - 각 parse 경계에 typed overflow가 생기면 같은 hook으로 꼴 바꾸기를 이어받는다.
-  - 이슈로 남긴다(§12의 4).
+hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거절로 가리면 문자열 분류기가 된다. 그래서 그렇게 넓히지 않는다.
 
-## 8. 따라 풀리는 것
+**닿는 경로**
 
-- 이미 쌓인 옛 모양 receipt(그림 base64가 글 안에 있는 것): receipt JSON을 통째로 blob에 넣으니 변환 코드가 필요 없다.
-- Codex receipt의 data URL(#49697): 같은 이유로 풀린다. #49697에는 「쓸 때 줄이기」만 남는다.
-- Codex 문자열 상한(10,485,760자): `By_address` 글은 도구 종류 수와 개수 자릿수로만 길어지니 receipt 개수로는 이 상한에 닿지 않는다.
+- Claude Code: `prompt_too_long`이 `Context_window_exceeded`로 온다. Start와 Resume에서 닿고, Gate continuation에서는 닿지 않는다(§5.4).
+- Codex: `turn/start`가 돌려준 `contextWindowExceeded`와 `input_too_large`다.
+- agent_core: provider가 parse 경계에서 크기 거절을 typed로 줄 때만 닿는다.
+
+**닿지 않는 경로** (이슈로 남긴다. §12의 4)
+
+- Codex `thread/inject_items` 거절
+  - 묶음은 `turn/start` 전에 `thread/inject_items`로 들어가 developer item이 된다(`runtime_codex_app_server.ml:2655-2671`).
+  - typed 크기 거절은 `turn/start`만 본다(`runtime_codex_app_server.ml:447-449`).
+  - inject가 거절되면 `ProviderReportedError`가 되고(`keeper_codex_runtime.ml:729-740`), `Protocol_failed`로 기록된다(`:826-828`).
+  - 그러면 hook이 불리지 않는다. 다음 `plan_claim`은 fresh plan을 내고, run마다 같은 `Inline`을 다시 보내 실패한다. 잠기지는 않지만 나아가지도 않는다.
+  - Codex는 문자열 하나가 10,485,760자를 넘으면 거절한다(RFC-official-client-conversation-in-masc §2.5, #37353). 그 거절이 어떤 꼴로 오는지는 재지 않았다.
+  - PR B는 이것부터 잰다. 크기 거절이면 parse 경계에서 typed로 만든다.
+- agent_core의 문장만 있는 400
+  - 지금까지 잰 live 크기 거절은 모두 typed 이유 없이 문장만 있는 400이다(`keeper_turn_driver_try_provider.ml:3112-3118`).
+  - `is_size_refusal`은 이런 거절을 크기 거절로 보지 않는다(`:2988-2999`). 그래서 hook에 닿지 않는다.
+  - turn boundary resend가 이 거절에 답하지만 history 앞자리만 옮긴다. 묶음은 run마다 `Inline` 그대로다.
+- antigravity와 muse
+  - hook을 받지 않는다. `rg on_memory_capacity_refusal lib/keeper/`에 두 runtime이 없다. 넘침을 typed로 가리지도 않는다.
+
+어느 경로든 parse 경계에 typed 크기 거절이 생기면 같은 hook으로 꼴 바꾸기를 이어받는다.
+
+## 8. 따라 풀리는 것과 남는 것
+
+- 넘쳐서 꼴이 바뀌면, 이미 쌓인 옛 모양 receipt(그림 base64가 글 안에 있는 것)와 Codex receipt의 data URL(#49697)도 변환 없이 주소로 간다. receipt JSON을 통째로 blob에 넣기 때문이다.
+- 들어갈 때는 지금처럼 `Inline`으로 간다. 그림 base64가 글자로 실려 창을 쓴다. 그래서 #49697(쓸 때 줄이기)은 그대로 남는다.
+- `By_address` 글은 도구 종류 수와 개수 자릿수로만 길어진다. receipt 개수로는 Codex 문자열 상한에 닿지 않는다. `Inline`이 그 상한을 넘을 때의 거절은 아직 typed가 아니다(§7).
 
 ## 9. 남는 대가
 
-- receipt가 남아 있는 동안 run마다 첫 요청이 한 번 거절될 수 있다. run이 `Inline`으로 시작하기 때문이다.
+- receipt가 남아 있는 동안 run마다 첫 요청이 한 번 거절될 수 있다. run이 `Inline`으로 시작하기 때문이다. lane이 후보를 바꾸면 후보마다 되풀이된다.
   - typed 거절이고 effect·response 전이라 효과는 반복되지 않는다.
   - provider 요청 하나와 CLI process 하나를 쓴다. 거절된 요청의 과금과 rate limit 계산은 확인하지 않았다.
   - 꼴을 run 사이에 기억하면 이 거절이 사라진다. 그러려면 새 durable 상태가 필요하다. 그 상태가 없어도 durable truth는 손상되지 않으니 두지 않는다(§11의 7).
+- 효과 뒤의 넘침은 막지 않는다.
+  - `Inline` 묶음이 첫 요청에는 들어가도, 턴 안에서 도구 결과가 쌓이면 다음 요청이 넘칠 수 있다.
+  - 효과나 응답이 나온 뒤라 같은 run에서 다시 보내지 않는다(`keeper_claude_code_runtime.ml:1537-1550`, `keeper_codex_runtime.ml:2114-2116`). hook도 불리지 않는다.
+  - `Input_rejected Effect_fenced`로 기록되고(`keeper_claude_code_runtime.ml:527-530`, `keeper_codex_runtime.ml:838-841`), `plan_claim`이 막는다. bounded-restart RFC §7대로 운영자가 풀어야 한다.
+  - 이 RFC 전에도 있던 경로다. 다만 `Inline` 묶음이 그 턴의 여유를 줄인다.
+  - 풀린 뒤 다음 run도 `Inline`으로 시작한다. 그래서 첫 요청이 들어가는 동안은 되풀이될 수 있다.
+  - §11의 7(꼴 기억)이 효과 뒤 넘침에서도 배우게 하면, 다음 run을 `By_address`로 시작할 수 있다.
 - Resume이 `Inline`으로 넘치면 vendor 세션을 버린다(§5.3). receipt가 남아 있는 동안 Resume 턴마다 되풀이될 수 있다.
+- Codex inject 거절과 agent_core의 문장만 있는 400에서는 꼴이 바뀌지 않는다(§7).
 - Gate continuation이 묶음 때문에 넘치면 `Vendor_session_full`로 잘못 기록된다(§5.4).
-- Completion review 요청은 같은 run에서 다시 보내지 않는다(`keeper_claude_code_runtime.ml:1768`, `keeper_codex_runtime.ml:2112`). 이 요청이 묶음을 싣는지는 PR B의 시험으로 확인한다.
+- Completion review 요청은 같은 run에서 다시 보내지 않는다(`keeper_claude_code_runtime.ml:1768`, `keeper_codex_runtime.ml:2112`). 그래도 묶음 때문에 넘치지는 않는다. review는 Keeper가 아닌 임시 base path에서 돌아서(`lib/workspace_metric_hooks.ml:369-394`) 그 Keeper의 receipt를 싣지 않는다.
 - ACK된 뒤의 blob은 배포 때 오프라인 검사 두 번이 지나면 지워질 수 있다. 그 뒤에 vendor 대화에 남은 주소로 읽으면 실패한다.
 - reader가 없는 요청은 호출 수와 도구별 개수만 본다.
 - `By_address`를 처음 렌더하면 blob을 receipt 개수 + 1개 쓴다. 쓸 때마다 파일과 부모 폴더를 fsync한다. 248개면 249개다. 비용은 재지 않았다.
 - 이 RFC가 배포되기 전에는 #49698이 receipt 하나를 흉내 값 기준 약 36분의 1로 줄인다. 그 사이 다시 잠기면 11-07처럼 receipt를 옮긴다.
-  - 배포 뒤 이미 잠긴 Keeper는 `restart_fresh` 한 번이면 풀린다. 다음 run에서 hook이 꼴을 바꾼다. receipt를 옮길 필요가 없다.
+  - 배포 뒤 floor 거절로 이미 잠긴 Keeper는 `restart_fresh` 한 번이면 풀린다. 다음 run의 첫 요청이 넘치면 hook이 꼴을 바꾼다. receipt를 옮길 필요가 없다.
 
 ## 10. TLA+ 모델
 
 `specs/bug-models/RetainedResultCarrier.tla`
 
 - 요청 = 고정부 + history + 묶음이다. 묶음은 `Inline`이면 receipt 수 × `ReceiptBytes`, `By_address`면 `AddressBytes`다.
-- 정상(`Next`)
+- 정상(`Next`, 약한 공정성)
   - 크기 거절이 오면, 아직 `Inline`이고 receipt가 있고 `By_address`가 엄격히 짧을 때 꼴을 바꾼다.
   - 그렇지 않으면 history를 반으로 줄인다. history가 0이면 잠근다.
   - run마다 `Inline`으로 다시 시작한다. 고정부 크기는 run마다 `FixedSizes` 가운데 하나다.
-- 버그(`NextBuggy == Next \/ RefuseIgnoringCarrier`): 크기 거절이 history만 줄인다. 이 RFC 전의 동작이다.
-- 불변식 `NoLockWhileFloorFits`: 가장 작은 요청(history 0, 짧은 꼴)이 창을 넘을 때만 잠긴다.
-- 성질 `ReceiptsLeaveOnlyOnAccept`: receipt는 provider가 받은 요청 뒤에만 준다. 고침이 결과를 버려서 자리를 만들지 않는다는 뜻이다.
-- TLC 1.8.0(로컬)
-  - `RetainedResultCarrier.cfg`: 155 상태, 위반 없음. 동작 6개를 모두 지난다. 고정부 98에서는 주소 floor도 넘쳐 잠기는데, 이것은 운영자 몫이라 불변식을 지킨다.
-  - `RetainedResultCarrier-buggy.cfg`: 고정부 40, receipt 7개에서 잠긴다. 주소 floor(55)는 들어가니 위반이다(exit 12).
+- 지키는 것
+  - 불변식 `NoLockWhileFloorFits`: 가장 작은 요청(history 0, 짧은 꼴)이 창을 넘을 때만 잠긴다.
+  - 불변식 `SwitchBeforeShrink`: 꼴을 바꿀 수 있는 동안에는 history를 줄이지 않는다.
+  - 성질 `RunEnds`: 모든 run이 끝난다. 받아들여지거나 floor에서 잠긴다.
+  - 성질 `ReceiptsLeaveOnlyOnAccept`: receipt는 provider가 받은 요청 뒤에만 준다. 결과를 버려서 자리를 만들지 않는다는 뜻이다.
+- 버그는 셋이다. 각각 `Next \/ 버그 동작`이다.
+  - `RefuseIgnoringCarrier`: 크기 거절이 history만 줄인다. 이 RFC 전의 동작이다.
+  - `ShrinkBeforeSwitch`: 꼴을 바꿀 수 있는데 history부터 줄인다. §11의 2(floor에서만 바꾸기)다.
+  - `SwitchBack`: hook이 꼴을 `Inline`으로 되돌린다.
+- 모델에 없는 것: 효과 뒤의 거절과 typed가 아닌 거절이다. 둘 다 hook에 닿지 않는다(§7, §9).
+
+TLC 1.8.0(로컬, `-workers 1`) 결과는 이렇다.
+
+| cfg | 결과 |
+|---|---|
+| `RetainedResultCarrier.cfg` | 상태 155개, 위반 없음(exit 0). 동작 6개를 모두 지난다. 고정부 98에서는 주소 floor도 넘쳐 잠긴다. 운영자 몫이라 불변식을 지킨다 |
+| `RetainedResultCarrier-buggy.cfg` | `NoLockWhileFloorFits` 위반(exit 12). 고정부 40, receipt 7개에서 잠긴다. 주소 floor(55)는 들어간다 |
+| `RetainedResultCarrier-shrink-first-buggy.cfg` | `SwitchBeforeShrink` 위반(exit 12) |
+| `RetainedResultCarrier-switch-back-buggy.cfg` | `RunEnds` 위반(exit 13). 두 꼴을 오가며 끝없이 거절된다 |
 
 ## 11. 버린 방법
 
@@ -271,7 +321,7 @@ run(Keeper 턴 하나의 provider 시도 전부)은 `Inline`으로 시작한다.
    - 장점: hook도, run마다의 꼴 값도 필요 없다. 가장 단순하다.
    - 단점: receipt가 몇 개뿐인 보통 경우에도 모델이 결과를 보려면 reader를 불러야 한다. reader가 없는 Keeper는 결과를 전혀 못 본다.
 7. **꼴을 run 사이에 기억하기**
-   - 장점: receipt가 남아 있는 동안 run마다 한 번씩 거절받지 않는다. Resume이 vendor 세션을 버리는 일도 줄어든다.
+   - 장점: receipt가 남아 있는 동안 run마다 한 번씩 거절받지 않는다. Resume이 vendor 세션을 버리는 일도 줄어든다. 효과 뒤 넘침(§9)에서도 배우게 하면, 운영자가 풀어 준 다음 run을 `By_address`로 시작할 수 있다.
    - 단점: 새 durable 상태(예: session store의 carried context 종류 하나 더)다. 없어도 durable truth는 손상되지 않는다. 거절이 실제로 얼마나 되풀이되는지 잰 뒤에 다시 본다.
 8. **세션이 가진 해시로 Resume 꼴 정하기**
    - 내용: 세션이 지금 snapshot의 `By_address` 글의 sha256을 `Tool_result_receipts`로 이미 가지고 있으면(`held_context_for_resume`, `keeper_official_client_session_store.mli:427-431`) Resume을 `By_address`로 시작한다.
@@ -288,7 +338,7 @@ run(Keeper 턴 하나의 provider 시도 전부)은 `Inline`으로 시작한다.
 
 **1. 이 문서 PR**
 
-- 이 RFC, bounded-restart RFC 고침, TLA+ 모델과 cfg 둘, `specs/INDEX.md`.
+- 이 RFC, bounded-restart RFC 고침, TLA+ 모델과 cfg 넷, `specs/INDEX.md`.
 
 **2. PR A — outbox 꼴과 hook** (`keeper_client_tool_outbox.ml/.mli`, 시험)
 
@@ -298,19 +348,23 @@ run(Keeper 턴 하나의 provider 시도 전부)은 `Inline`으로 시작한다.
   - `By_address`가 엄격히 짧지 않으면 `Unchanged`다.
   - 한 번 바꾼 뒤에도 `Unchanged`다.
   - receipt가 없으면 `Unchanged`다.
+- blob 쓰기가 실패하면 hook이 `Error`를 돌려주고 꼴을 바꾸지 않는다.
 - reader가 없으면 글에 읽을 수 없다는 줄이 있고 reader 이름이 없다.
 - 옛 모양 receipt(base64가 글 안에 있는 것)도 주소로 간다. `By_address` 글에 base64가 없다.
 - 목록 blob이 있는 base path에서 blob 정리를 두 번 돌려도 멈추지 않는다.
 
 **3. PR B — runtime 연결** (`keeper_claude_code_runtime.ml`, `keeper_codex_runtime.ml`, `keeper_turn_driver_try_provider.ml`, 주석)
 
+- 먼저 잰다: Codex `thread/inject_items`에 10,485,760자를 넘는 developer item을 넣으면 무엇이 오는가.
+  - 크기 거절이면 parse 경계에서 typed로 만들고, 아래 Codex 시험에 넣는다.
+  - 크기 거절이 아니면 §7의 닿지 않는 경로로 남긴다.
 - 가짜 provider가 창 W를 넘는 요청을 typed overflow로 거절한다. 옛 모양 receipt 248개를 넣는다.
   - Claude Code Start: 두 번째 시도가 받아들여진다. `Input_rejected`가 남지 않는다. `Completed` 뒤 outbox가 빈다.
   - Codex(`contextWindowExceeded`)와 agent_core도 같다.
 - 묶음을 바꿔도 창을 넘으면 history 줄이기가 이어지고, floor까지 `By_address`가 실린다.
 - Claude Code Resume: `Inline` 묶음이 넘치면 꼴을 바꾸고 fresh Start로 다시 보내 받아들여진다.
 - Gate continuation: 묶음 넘침에 다시 보내지 않고 `Vendor_session_full`로 끝난다. 지금 동작을 고정한다.
-- Completion review 요청이 묶음을 싣는지 본다. 싣는다면 그 요청이 넘치는 경우를 시험에 더한다.
+- 효과 뒤 넘침은 지금처럼 `Effect_fenced`로 끝나고 hook이 불리지 않는다. 지금 동작을 고정한다.
 - 기존 시험 「거절돼도 receipt는 남는다」(`test/test_keeper_claude_code_runtime.ml:6927-6929`)는 그대로 통과한다.
 
 PR A와 PR B는 이 PR 위에 `gh stack`으로 쌓는다.
@@ -318,6 +372,8 @@ PR A와 PR B는 이 PR 위에 `gh stack`으로 쌓는다.
 **4. 이슈**
 
 - antigravity·muse의 typed overflow와 hook.
+- agent_core provider의 문장만 있는 크기 거절. parse 경계에서 typed 이유를 주게 한다.
+- Codex `thread/inject_items` 거절. PR B에서 잰 결과가 크기 거절이 아닐 때만 남긴다.
 - `keeper_turn_driver_try_provider.ml:2953`의 주석이 없는 함수 `Runtime_instance.prompt_capacity_bytes`를 가리킨다.
 
 **5. 배포 뒤(운영자 승인)**

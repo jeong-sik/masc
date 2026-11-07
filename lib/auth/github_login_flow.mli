@@ -20,13 +20,15 @@ type started =
 (** Holds a GitHub transaction. GitHub has no discovery document, so a start
     reads nothing first and fails only when as many logins as the store
     holds are under way. [invite] is the token that the invitation link
-    posted, if any. *)
+    posted, if any. [replaces] is the session of the browser that started,
+    which the sign-in ends. *)
 val start
   :  Oidc_login_transaction.t
   -> Login_client.t
   -> now:(unit -> Ptime.t)
   -> invite:Oidc_login_transaction.Invite_token.t option
   -> return_to:Oidc_login_transaction.Local_path.t
+  -> replaces:Authz_types.Session_id.t option
   -> (started, Oidc_login_transaction.start_error) result
 
 (** What GitHub sent the browser back with. *)
@@ -39,6 +41,9 @@ type answer =
 type completed =
   { outcome : Authz_login.outcome
   ; return_to : Oidc_login_transaction.Local_path.t
+  ; replaces : Authz_types.Session_id.t option
+        (** The session that the browser held at the start
+            ({!Oidc_login_transaction.taken}). *)
   }
 
 type callback_error =

@@ -26,12 +26,12 @@ let ms_of instant = Float.to_int (Ptime.to_float_s instant *. 1000.)
 (* The clock is read again after the endpoints, because their read can take a
    round trip to Google and the ten minutes of the transaction start when it
    is held. *)
-let start ~get cache transactions client ~now ~invite ~return_to =
+let start ~get cache transactions client ~now ~invite ~return_to ~replaces =
   let* endpoints =
     Exchange.endpoints ~get cache ~now_ms:(ms_of (now ()))
     |> Result.map_error (fun error -> Google_unavailable error)
   in
-  match Transaction.start transactions ~now_ms:(ms_of (now ())) Transaction.Google ~invite ~return_to with
+  match Transaction.start transactions ~now_ms:(ms_of (now ())) Transaction.Google ~invite ~return_to ~replaces with
   | Error Transaction.Full -> Error Transactions_full
   | Ok started ->
     Ok { id = started.id; authorization_url = Exchange.authorization_url endpoints client started }
@@ -44,6 +44,7 @@ type answer =
 type completed =
   { outcome : Authz_login.outcome
   ; return_to : Transaction.Local_path.t
+  ; replaces : Authz_types.Session_id.t option
   }
 
 type callback_error =
@@ -83,5 +84,5 @@ let callback ~get ~post cache transactions zone client ~now ~draw id ~state answ
       ~invite:(Option.map Transaction.Invite_token.digest taken.invite)
     |> Result.map_error (fun refusal -> Login_refused refusal)
   in
-  Ok { outcome; return_to = taken.return_to }
+  Ok { outcome; return_to = taken.return_to; replaces = taken.replaces }
 ;;

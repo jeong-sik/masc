@@ -26,7 +26,8 @@ val start_error_to_string : start_error -> string
 
 (** Reads the endpoints first and then holds a transaction, so a start that
     fails at Google leaves no transaction behind. [invite] is the token that
-    the invitation link posted, if any. *)
+    the invitation link posted, if any. [replaces] is the session of the
+    browser that started, which the sign-in ends. *)
 val start
   :  get:Login_transport.get
   -> Oidc_google_exchange.cache
@@ -35,6 +36,7 @@ val start
   -> now:(unit -> Ptime.t)
   -> invite:Oidc_login_transaction.Invite_token.t option
   -> return_to:Oidc_login_transaction.Local_path.t
+  -> replaces:Authz_types.Session_id.t option
   -> (started, start_error) result
 
 (** What Google sent the browser back with. *)
@@ -47,6 +49,9 @@ type answer =
 type completed =
   { outcome : Authz_login.outcome
   ; return_to : Oidc_login_transaction.Local_path.t
+  ; replaces : Authz_types.Session_id.t option
+        (** The session that the browser held at the start
+            ({!Oidc_login_transaction.taken}). *)
   }
 
 type callback_error =

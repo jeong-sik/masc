@@ -1,0 +1,7 @@
+error: unexpected argument '--no-such-flag' found
+
+  tip: to pass '--no-such-flag' as a value, use '-- --no-such-flag'
+
+Usage: vibe --workdir <CWD> --output-dir <DIR> [INITIAL_PROMPT]
+
+For more information, try '--help'.

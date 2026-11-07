@@ -1,0 +1,113 @@
+[
+  {
+    "id": "user-turn-37bc43ce175b6609e86686b36851e78f-1",
+    "sessionId": "86eacb90-8792-e89c-365c-3d7d4478e3b0",
+    "turnId": "turn-37bc43ce175b6609e86686b36851e78f",
+    "inputEntryId": null,
+    "createdAt": 1794043354670,
+    "updatedAt": 1794043354670,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "message",
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "Use your bash tool to run the command: echo hi. Then report exactly what it printed."
+      }
+    ],
+    "source": "turn_start",
+    "userDisplayContent": null,
+    "outcome": null
+  },
+  {
+    "id": "reasoning-5573d05a-0fc3-5148-9542-175cbadc2a5d-0",
+    "sessionId": "86eacb90-8792-e89c-365c-3d7d4478e3b0",
+    "turnId": "turn-37bc43ce175b6609e86686b36851e78f",
+    "inputEntryId": "user-turn-37bc43ce175b6609e86686b36851e78f-1",
+    "createdAt": 1794043359256,
+    "updatedAt": 1794043359256,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "reasoning",
+    "text": "The user wants me to run `echo hi` with the bash tool and report the output. Simple task, do it directly.",
+    "summary": [],
+    "outcome": {
+      "type": "committed"
+    }
+  },
+  {
+    "id": "effect-70b4e9dd-11ef-562f-ba31-1527735d62e8",
+    "sessionId": "86eacb90-8792-e89c-365c-3d7d4478e3b0",
+    "turnId": "turn-37bc43ce175b6609e86686b36851e78f",
+    "inputEntryId": "user-turn-37bc43ce175b6609e86686b36851e78f-1",
+    "createdAt": 1794043359275,
+    "updatedAt": 1794043359481,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "effect",
+    "title": "file_system.bash",
+    "detail": {
+      "toolName": "file_system.bash",
+      "display": {
+        "summary": "bash: echo hi",
+        "content": null,
+        "suffix": "",
+        "verb": "Running",
+        "message": "echo hi",
+        "settledVerb": "Ran",
+        "settledMessage": "echo hi",
+        "statusText": "Running command"
+      },
+      "kind": "shell",
+      "input": {
+        "command": "echo hi"
+      }
+    },
+    "state": {
+      "status": "completed",
+      "output": {
+        "stdout": "hi\n",
+        "stderr": "",
+        "output": "",
+        "truncated": false
+      },
+      "outputText": "hi\n",
+      "durationMs": 0.0,
+      "display": {
+        "success": true,
+        "verb": "Ran",
+        "message": "echo hi",
+        "warnings": [],
+        "approvalNote": null,
+        "suffix": ""
+      },
+      "decision": "execute",
+      "approvalType": "always",
+      "approvalSource": "config"
+    }
+  },
+  {
+    "id": "assistant-5115db5e-8622-58fc-af0f-3d60af3a99d7",
+    "sessionId": "86eacb90-8792-e89c-365c-3d7d4478e3b0",
+    "turnId": "turn-37bc43ce175b6609e86686b36851e78f",
+    "inputEntryId": "user-turn-37bc43ce175b6609e86686b36851e78f-1",
+    "createdAt": 1794043360829,
+    "updatedAt": 1794043360829,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "It printed exactly:\n\n```\nhi\n```\n\n(stdout was `hi\\n`, exit code 0, no stderr.)"
+      }
+    ],
+    "source": "harness",
+    "userDisplayContent": null,
+    "outcome": {
+      "type": "committed"
+    }
+  }
+]

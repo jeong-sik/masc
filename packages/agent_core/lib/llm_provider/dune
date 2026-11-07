@@ -12,6 +12,7 @@
   openai_error_envelope
   openai_stream_state
   ollama_stream
+  gemini_stream
   model_catalog_embedded
   provider_http_codec
   tool_result_projection

@@ -257,7 +257,7 @@ them into a final `Types.api_response`.
 | OpenAI `response.output_text.delta` | `ContentBlockDelta(TextDelta)` |
 | OpenAI `response.output_item.added` | `ContentBlockStart` |
 | OpenAI `response.completed` | `MessageStop` |
-| Gemini `streamGenerateContent` chunks | Parsed per chunk by `gemini_chunk_to_events` (`streaming.ml`) into `ContentBlockStart` / `ContentBlockDelta(TextDelta\|ThinkingDelta)` / `MessageDelta` / `MessageStop` |
+| Gemini `streamGenerateContent` chunks | Parsed per chunk by `gemini_chunk_to_events` (`gemini_stream.ml`) into `ContentBlockStart` / `ContentBlockDelta(TextDelta\|ThinkingDelta)` / `MessageDelta` / `MessageStop` |
 
 `emit_synthetic_events` has no production callers (test-only fallback that
 synthesizes a pseudo-stream from a final `api_response`); it is not how any

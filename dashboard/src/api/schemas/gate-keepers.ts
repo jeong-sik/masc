@@ -32,6 +32,13 @@ const KeeperLastFailureWireSchema = Schema.Struct({
 
 // Mirror of the healthy row built by keeper_list_row_json in
 // lib/keeper/keeper_tool_surface_ops.ml. RFC-0393 removed the agent_name
+const RecentTurnsWireSchema = Schema.Struct({
+  truncated: Schema.Boolean,
+  turns: Schema.Array(
+    Schema.Tuple(Schema.Number, Schema.Literal('ok', 'rested', 'failed'))
+  ),
+})
+
 // echo key; phase/health/paused/next_action ride the same row.
 const GateKeeperWireSchema = Schema.Struct({
   runtime_class: Schema.Literal('keeper'),
@@ -55,6 +62,7 @@ const GateKeeperWireSchema = Schema.Struct({
   operator_disposition: Schema.optional(Schema.NullOr(Schema.String)),
   operator_disposition_reason: Schema.optional(Schema.NullOr(Schema.String)),
   failing_since: Schema.optional(Schema.NullOr(Schema.Number)),
+  recent_turns: Schema.optional(Schema.NullOr(RecentTurnsWireSchema)),
   runtime_path_rest: Schema.optional(Schema.Unknown),
   keepalive_running: Schema.Boolean,
   activation_mode: Schema.Literal(...KEEPER_ACTIVATION_MODES),

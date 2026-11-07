@@ -91,4 +91,95 @@ let seed ?(override = false) ~base_path ~keeper_name ~samples ~truncated () =
   loop ()
 ;;
 
+let sample_of_decision_line line =
+  match Yojson.Safe.from_string line with
+  | exception _ -> None
+  | json ->
+    (match Json_util.get_string json "event" with
+     | Some "turn" ->
+       let ts_opt =
+         match Json_util.get_member "ts_unix" json with
+         | Some (`Float f) when Float.is_finite f -> Some f
+         | Some (`Int i) -> Some (Float.of_int i)
+         | _ -> None
+       in
+       let outcome_opt =
+         match Json_util.get_string json "outcome" with
+         | Some out_str ->
+           (match Keeper_decision_outcome.of_string out_str with
+            | Some (Success | Checkpoint | Input_required) -> Some Turn_ok
+            | Some Failed -> Some Turn_failed
+            | None -> None)
+         | None -> None
+       in
+       (match ts_opt, outcome_opt with
+        | Some at, Some outcome -> Some { at; outcome }
+        | _ -> None)
+     | _ -> None)
+;;
+
+let read_tail_window_samples ~now ~window_seconds path =
+  if not (Fs_compat.file_exists path)
+  then [], false
+  else (
+    match
+      Keeper_memory.read_file_tail_lines_with_completion
+        path
+        ~max_bytes:1048576
+        ~max_lines:1000
+    with
+    | Error _ -> [], false
+    | Ok (lines, completion) ->
+      let window_start = now -. window_seconds in
+      let reversed_lines = List.rev lines in
+      let rec collect acc truncated_by_bytes = function
+        | [] -> List.rev acc, truncated_by_bytes
+        | line :: rest ->
+          (match sample_of_decision_line line with
+           | Some s when s.at >= window_start ->
+             collect (s :: acc) truncated_by_bytes rest
+           | Some _ ->
+             (* Reached an entry older than the window *)
+             List.rev acc, false
+           | None -> collect acc truncated_by_bytes rest)
+      in
+      let truncated_input =
+        match completion with
+        | Keeper_memory.Partial_last_line -> true
+        | Keeper_memory.Complete -> false
+      in
+      collect [] truncated_input reversed_lines)
+;;
+
+let seed_from_decision_log ?(now = Time_compat.now ()) ~config ~keeper_name =
+  let base_path = config.Workspace.base_path in
+  let primary_path = Keeper_types_support.keeper_decision_log_path config keeper_name in
+  let rotated_path = primary_path ^ ".1" in
+  let window_seconds = 12.0 *. 3600.0 in
+  let primary_samples, primary_trunc =
+    read_tail_window_samples ~now ~window_seconds primary_path
+  in
+  let rotated_samples, rotated_trunc =
+    read_tail_window_samples ~now ~window_seconds rotated_path
+  in
+  let combined_samples = primary_samples @ rotated_samples in
+  let file_truncated = primary_trunc || rotated_trunc in
+  let is_truncated =
+    file_truncated || List.length combined_samples > max_samples_per_keeper
+  in
+  let bounded =
+    if List.length combined_samples > max_samples_per_keeper
+    then take max_samples_per_keeper combined_samples
+    else combined_samples
+  in
+  seed ~base_path ~keeper_name ~samples:bounded ~truncated:is_truncated ()
+;;
+
+let seed_all_from_decision_logs ?(now = Time_compat.now ()) ~config =
+  match Keeper_meta_store.keeper_names_result config with
+  | Ok names ->
+    List.iter (fun keeper_name -> seed_from_decision_log ~now ~config ~keeper_name) names
+  | Error _ -> ()
+;;
+
 let reset_for_tests () = Atomic.set state KeyMap.empty

@@ -116,6 +116,25 @@ let test_outcome_string_roundtrip () =
   Alcotest.(check bool) "of unknown" true (Pulse.outcome_of_string "cancelled" = None)
 ;;
 
+let test_sample_of_decision_line () =
+  let valid_turn = {|{"event":"turn","ts_unix":1794037335.0,"outcome":"success"}|} in
+  (match Pulse.sample_of_decision_line valid_turn with
+   | None -> Alcotest.fail "expected sample"
+   | Some s ->
+     Alcotest.(check (float 0.001)) "ts" 1794037335.0 s.at;
+     Alcotest.(check bool) "outcome ok" true (s.outcome = Pulse.Turn_ok));
+  let failed_turn = {|{"event":"turn","ts_unix":1794036000.0,"outcome":"error"}|} in
+  (match Pulse.sample_of_decision_line failed_turn with
+   | None -> Alcotest.fail "expected sample"
+   | Some s ->
+     Alcotest.(check (float 0.001)) "ts" 1794036000.0 s.at;
+     Alcotest.(check bool) "outcome failed" true (s.outcome = Pulse.Turn_failed));
+  let non_turn = {|{"event":"heartbeat","ts_unix":1794035000.0,"outcome":"success"}|} in
+  Alcotest.(check bool) "ignore non-turn" true (Pulse.sample_of_decision_line non_turn = None);
+  let bad_json = "not json" in
+  Alcotest.(check bool) "ignore bad json" true (Pulse.sample_of_decision_line bad_json = None)
+;;
+
 let () =
   Alcotest.run
     "keeper_turn_pulse"
@@ -125,6 +144,7 @@ let () =
         ; Alcotest.test_case "capacity truncation" `Quick test_capacity_truncation
         ; Alcotest.test_case "isolation" `Quick test_isolation
         ; Alcotest.test_case "seed" `Quick test_seed
+        ; Alcotest.test_case "sample of decision line" `Quick test_sample_of_decision_line
         ; Alcotest.test_case "outcome string roundtrip" `Quick test_outcome_string_roundtrip
         ] )
     ]

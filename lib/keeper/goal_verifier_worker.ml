@@ -183,6 +183,13 @@ let read_all ~store =
     Ok (retained::acc)) (Ok []) records in
   Ok (List.rev reversed)
 
+(* The record's own destination stands in for the caller's, as [read_all]
+   does: a preflight has no live destination to compare. *)
+let check_retained (record : Owner.retained) =
+  validate_record ~installation_id:record.installation_id ~package_id:record.package_id record
+  |> Result.map (fun (_ : retained) -> ())
+  |> Result.map_error error_to_string
+
 let inventory ~store ~installation_id ~package_id =
   let* records = read_all ~store in
   Ok (List.filter (fun retained -> retained.record.installation_id = installation_id

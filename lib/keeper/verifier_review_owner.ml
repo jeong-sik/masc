@@ -132,6 +132,15 @@ let load ~store ~verification_id ~attempt =
                  attempt))
      | Error detail -> Error (Corrupt_original detail))
 
+(* The tool, request digest and summary an owner record keeps for this
+   original. The destination is the caller's to compare. *)
+let bound_to (record : Owner.retained) original =
+  let* expected_summary = summary_of original in
+  let+ expected_digest = V.digest original in
+  String.equal record.tool tool_name
+  && String.equal record.request_digest expected_digest
+  && Yojson.Safe.equal record.summary expected_summary
+
 let load_for_destination ~store ~verification_id ~attempt ~installation_id ~package_id =
   let* original = load ~store ~verification_id ~attempt in
   let* request_id = attempt_request_id ~verification_id ~attempt
@@ -141,16 +150,20 @@ let load_for_destination ~store ~verification_id ~attempt ~installation_id ~pack
   match existing with
   | None -> Error Not_found
   | Some record ->
-    let* expected_summary = summary_of original
-      |> Result.map_error (fun detail -> Corrupt_original detail) in
-    let* expected_digest = V.digest original
+    let* bound = bound_to record original
       |> Result.map_error (fun detail -> Corrupt_original detail) in
     if String.equal record.installation_id installation_id
-      && String.equal record.package_id package_id && String.equal record.tool tool_name
-      && String.equal record.request_digest expected_digest
-      && Yojson.Safe.equal record.summary expected_summary
+      && String.equal record.package_id package_id && bound
     then Ok original
     else Error (Corrupt_original "retained verifier destination or summary does not match")
+
+let check_retained (record : Owner.retained) =
+  let* original = V.of_json record.request in
+  let* request_id = attempt_request_id ~verification_id:(V.verification_id original)
+      ~attempt:(V.attempt original) in
+  let* bound = bound_to record original in
+  if String.equal record.request_id request_id && bound then Ok ()
+  else Error "retained verifier original differs from the owner record it is stored under"
 
 module Progress = Lane_addon_request_progress
 module AR = Task.Anti_rationalization

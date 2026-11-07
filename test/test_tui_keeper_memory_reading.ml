@@ -178,8 +178,8 @@ let test_cells_formatting () =
   Alcotest.(check int) "produces 4 cells (gap, lag, clock, stale)" 4 (List.length cells);
   Alcotest.(check string) "first cell is gap 5" "gap 5" (List.nth cells 0).text;
   Alcotest.(check string) "second cell is lag 3" "lag 3" (List.nth cells 1).text;
-  Alcotest.(check bool) "third cell contains clock +47m +1 -0" true
-    (String.starts_with ~prefix:"+47m +1 -0" (List.nth cells 2).text);
+  Alcotest.(check string) "third cell is the clock +47m00s +1 -0" "+47m00s +1 -0"
+    (List.nth cells 2).text;
   Alcotest.(check string) "fourth cell is stale ×2" "stale ×2" (List.nth cells 3).text
 ;;
 

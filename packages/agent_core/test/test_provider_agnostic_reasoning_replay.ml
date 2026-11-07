@@ -2842,6 +2842,60 @@ let test_native_context_stored_role_is_not_on_the_wire () =
     [System; User]
 ;;
 
+(* #49450: an Anthropic turn leaves its context in the history. An Anthropic
+   request sends the row back in place; a request to any other provider sends
+   only the current context, with the other messages at their canonical
+   coordinates. *)
+let test_other_providers_omit_historical_context () =
+  let module Lower = Message_origin_lowering in
+  let open Yojson.Safe.Util in
+  let openai = Provider_config.make ~kind:OpenAI_compat ~model_id:"preserve-fixture"
+      ~base_url:"https://openai.example" ~max_tokens:1024 () in
+  let kimi = Provider_config.make ~kind:Kimi ~model_id:"kimi-fixture"
+      ~base_url:"https://kimi.example" ~max_tokens:1024 () in
+  let anthropic = anthropic_build_config () in
+  let caller = message User [Text "inspect workspace"] in
+  let historical = message ~origin:Historical_system_context User [Text "old workspace context"] in
+  let answer = message Assistant [Text "inspected"] in
+  let next = message User [Text "inspect again"] in
+  let current = message ~origin:System_context User [Text "current workspace context"] in
+  let history = [caller; historical; answer; next; current] in
+  let policy config =
+    match Lower.policy_for_provider_config config with
+    | Ok policy -> policy
+    | Error error -> Alcotest.fail (Lower.error_to_string error)
+  in
+  check_bool "an OpenAI-compatible request omits historical context" true
+    (policy openai = Lower.Omit_historical_context);
+  check_bool "a Kimi request omits it although Kimi speaks Anthropic Messages" true
+    (policy kimi = Lower.Omit_historical_context);
+  check_bool "an Anthropic request keeps it in place" true
+    (policy anthropic = Lower.Preserve_positions);
+  (match Lower.lower Lower.Omit_historical_context history with
+   | Error error -> Alcotest.fail (Lower.error_to_string error)
+   | Ok lowered ->
+     Alcotest.(check (list int)) "the other messages keep their canonical coordinates"
+       [0; 2; 3; 4] lowered.source_indices);
+  let texts body =
+    Yojson.Safe.from_string body |> member "messages" |> to_list
+    |> List.concat_map (fun item ->
+      match member "content" item with
+      | `String text -> [text]
+      | `List parts ->
+        List.filter_map (fun part ->
+          match member "text" part with `String text -> Some text | _ -> None) parts
+      | _ -> [])
+  in
+  let openai_texts = texts (Backend_openai_request.build_request ~config:openai ~messages:history ()) in
+  check_bool "the OpenAI-compatible wire has no historical context" false
+    (List.mem "old workspace context" openai_texts);
+  check_bool "the OpenAI-compatible wire keeps the current context" true
+    (List.mem "current workspace context" openai_texts);
+  check_bool "the Anthropic wire keeps the historical context" true
+    (List.mem "old workspace context"
+       (texts (Backend_anthropic.build_request ~config:anthropic ~messages:history ())))
+;;
+
 let test_native_context_placement_and_removed_assistant () =
   let module Lower = Message_origin_lowering in
   let policy = Lower.Turn_scoped_system_context in
@@ -2882,6 +2936,8 @@ let () =
             test_native_context_stored_role_is_not_on_the_wire
         ; Alcotest.test_case "native context validates post-filter placement" `Quick
             test_native_context_placement_and_removed_assistant
+        ; Alcotest.test_case "other providers omit historical context" `Quick
+            test_other_providers_omit_historical_context
         ; Alcotest.test_case "initial System preserves the native caller boundary" `Quick
             test_initial_system_control_lowering
         ; Alcotest.test_case "request tools select full-history replay" `Quick

@@ -172,6 +172,18 @@ describe('keeperDisplayRuntime', () => {
       }),
     ).toBeNull()
   })
+
+  it('does not use raw model fields as runtime evidence', () => {
+    expect(
+      keeperDisplayRuntime(
+        makeKeeper({
+          active_model_label: 'deepseek-v4-flash',
+          active_model: 'claude-sonnet-4',
+          model: 'fallback',
+        }),
+      ),
+    ).toBeNull()
+  })
 })
 
 describe('keeperRuntimeBlockerLabel', () => {

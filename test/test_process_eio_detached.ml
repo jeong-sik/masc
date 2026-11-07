@@ -1,4 +1,4 @@
-(* Tick 5: integration tests for [Process_eio.spawn_detached] and
+(* Integration tests for [Process_eio.spawn_detached] and
    [tree_kill]. These spawn real child processes so they stay under
    [`Quick] time budget by using tiny payloads. *)
 
@@ -187,15 +187,13 @@ let test_tree_kill_escalates_to_sigkill () =
           check bool "waitpid proves SIGKILL reached the TERM-ignoring process" true
             (!status = Some (Unix.WSIGNALED Sys.sigkill)))
 
-(* TODO (Tick 7): grandchild reach test.  A naive
+(* No grandchild reach test.  A naive
    [sh -c 'sleep 30 & wait'] keeps the shell as a zombie after
    SIGTERM, and [kill(-pgid, 0)] on macOS returns 0 on zombie
    pgroups, which makes [is_pgid_alive] report the group "alive"
-   indefinitely until someone waitpid's the leader.  Tick 7 will
-   introduce a dedicated waitpid reaper which resolves this
-   naturally; for Tick 5, the primitive layer has
-   been validated via the single-process SIGTERM and SIGKILL cases
-   above. *)
+   indefinitely until someone waitpid's the leader.  The
+   single-process SIGTERM and SIGKILL cases above cover the
+   primitive layer. *)
 
 let test_empty_argv_rejected () =
   match P.spawn_detached ~argv:[] ~env:(env_of_current ()) ~cwd:"" with
@@ -279,6 +277,5 @@ let () =
           test_case "SIGTERM kills pgroup" `Quick test_tree_kill_sigterm;
           test_case "SIGKILL escalation after grace" `Quick
             test_tree_kill_escalates_to_sigkill;
-          (* grandchild coverage deferred to Tick 7 — see module-level TODO. *)
         ] );
     ]

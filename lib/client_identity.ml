@@ -195,31 +195,7 @@ let from_mcp_params params =
     metadata = [];
   }
 
-(** Create anonymous/unknown identity *)
-let anonymous () =
-  let now = Time_compat.now () in
-  let key = generate_session_key () in
-  let name = Printf.sprintf "anon-%s" (String.sub key 0 8) in
-  {
-    uuid = generate_uuid ~agent_name:name;
-    session_key = key;
-    agent_name = name;
-    (* [anonymous] mints its own ["anon-…"] name; the caller supplied
-       nothing, so the provenance is a system fallback. *)
-    agent_name_origin = `System_fallback;
-    channel = None;
-    user_id = None;
-    capabilities = [];
-    registered_at = now;
-    last_seen = now;
-    metadata = [];
-  }
-
 (** {1 Utilities} *)
-
-(** Check if identity has a specific capability *)
-let has_capability identity cap =
-  List.mem cap identity.capabilities
 
 (** Get display string for logging *)
 let to_display_string identity =
@@ -237,7 +213,3 @@ let to_display_string identity =
     identity.agent_name
     prefix_str
     channel_str
-
-(** Check if two identities refer to the same agent *)
-let same_agent a b =
-  String.equal a.session_key b.session_key || String.equal a.agent_name b.agent_name

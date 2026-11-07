@@ -23,8 +23,8 @@ let test_identity_from_mcp_params () =
   let identity = Client_registry_eio.get_or_create_identity params in
   
   check string "agent_name" "claude-code-agent" identity.agent_name;
-  check bool "has code cap" true (Client_identity.has_capability identity "code");
-  check bool "no admin cap" false (Client_identity.has_capability identity "admin")
+  check bool "has code cap" true (List.mem "code" identity.capabilities);
+  check bool "no admin cap" false (List.mem "admin" identity.capabilities)
 
 (** Test MCP session persistence *)
 let test_mcp_session_persistence () =

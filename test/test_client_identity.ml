@@ -4,19 +4,6 @@ open Alcotest
 open Masc
 open Types_core
 
-let identity_for ?session_key agent_name =
-  let session_key =
-    match session_key with
-    | Some value -> value
-    | None -> "session-" ^ agent_name
-  in
-  Client_identity.from_mcp_params
-    (`Assoc
-      [
-        ("_agent_name", `String agent_name);
-        ("_session_key", `String session_key);
-      ])
-
 let test_generate_session_key () =
   let key1 = Client_identity.generate_session_key () in
   let key2 = Client_identity.generate_session_key () in
@@ -45,7 +32,7 @@ let test_from_mcp_params () =
   check string "agent_name" "mcp-agent-001" identity.agent_name;
   check (option string) "user_id" (Some "12345") identity.user_id;
   check int "capabilities count" 2 (List.length identity.capabilities);
-  check bool "has code capability" true (Client_identity.has_capability identity "code")
+  check bool "has code capability" true (List.mem "code" identity.capabilities)
 
 let test_from_mcp_params_minimal () =
   let params = `Assoc [] in
@@ -87,11 +74,6 @@ let test_from_mcp_params_long_session_key_prefix () =
   let identity = Client_identity.from_mcp_params params in
   check string "long session_key trimmed to 8 chars"
     "agent-abcdefgh" identity.agent_name
-
-let test_anonymous () =
-  let identity = Client_identity.anonymous () in
-  check bool "agent_name starts with anon-" true
-    (String.sub identity.agent_name 0 5 = "anon-")
 
 let test_channel_roundtrip () =
   let channels = [
@@ -146,15 +128,6 @@ let test_channel_yojson () =
     (Yojson.Safe.to_string
        (Client_identity.channel_to_yojson
           (Client_identity.External "  Custom-Edge  ")))
-
-let test_same_agent () =
-  let id1 = identity_for ~session_key:"session-agent-a-1" "agent-a" in
-  let id2 = { id1 with Client_identity.last_seen = Unix.gettimeofday () +. 100.0 } in
-  let id3 = identity_for ~session_key:"session-agent-a-2" "agent-a" in
-  let id4 = identity_for "agent-b" in
-  check bool "same session_key" true (Client_identity.same_agent id1 id2);
-  check bool "same agent_name" true (Client_identity.same_agent id1 id3);
-  check bool "different agents" false (Client_identity.same_agent id1 id4)
 
 let str_contains haystack needle =
   let len_h = String.length haystack in
@@ -213,12 +186,10 @@ let () =
       test_case "from_mcp_params_blank_session_key" `Quick test_from_mcp_params_blank_session_key;
       test_case "from_mcp_params_short_session_key" `Quick test_from_mcp_params_short_session_key;
       test_case "from_mcp_params_long_session_key_prefix" `Quick test_from_mcp_params_long_session_key_prefix;
-      test_case "anonymous" `Quick test_anonymous;
       test_case "channel_roundtrip" `Quick test_channel_roundtrip;
       test_case "channel_normalization" `Quick test_channel_normalization;
       test_case "channel_yojson" `Quick
         test_channel_yojson;
-      test_case "same_agent" `Quick test_same_agent;
       test_case "to_display_string" `Quick test_to_display_string;
       test_case "to_display_string_empty_session_key" `Quick test_to_display_string_empty_session_key;
     ];

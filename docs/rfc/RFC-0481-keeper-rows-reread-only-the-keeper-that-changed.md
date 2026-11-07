@@ -68,6 +68,7 @@ RFC-0477 의 fleet 처럼 행을 타입 스트림으로 보내면, 지금 경로
 | provider 쉼(`runtime_path_rest`) | 그 키퍼 경로의 runtime 마다 쌓인 쉼 기록과 읽는 시각(`keeper_turn_driver.ml:345~404`). runtime 하나의 기록이 그 runtime 을 지나는 모든 키퍼에 닿는다 | 없음 |
 | 턴 자리, chat control token | 턴 자리는 `publish_turn_in_flight`(`keeper_owner.ml:610~615`)가 Atomic 으로 바꾸고 meta 를 쓰지 않는다. token 은 pause 전이(`:931~933`)와 `Pause_and_interrupt`(`:2529`)에서 바뀐다 | pause 전이만 Owner observer |
 | turn ref | `Keeper_autonomous_stream.create`(`:82`)·`finish`(`:195`). Owner 가 턴 자리를 알린 뒤에 생긴다(`keeper_unified_turn_execution.ml:176`, `keeper_owner.ml:2917`) | 없음 |
+| recent_turns (맥박) | `Keeper_turn_pulse` (RFC-0511 §2.3 S1a, 사이클 종료/크래시 기록) | `Keeper_row_broadcast.changed` |
 
 지금은 2초 읽기가 이 빈틈을 가린다. 신호로 바꾸면 빈틈마다 화면이 멈춘다.
 

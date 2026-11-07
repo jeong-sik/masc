@@ -540,7 +540,13 @@ let record_crashed_cycle_failure
     let _turn_fail_count =
       Keeper_turn_failure_streak.increment ~base_path ~keeper_name
     in
-    Health.record_failure ~agent_name:keeper_name ~reason:detail);
+    Health.record_failure ~agent_name:keeper_name ~reason:detail;
+    Keeper_turn_pulse.record
+      ~base_path
+      ~keeper_name
+      ~at:(Time_compat.now ())
+      Keeper_turn_pulse.Turn_failed;
+    Keeper_row_broadcast.changed ~base_path ~keeper_name);
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string CycleExceptions)
     ~labels:[ "keeper", keeper_name ]

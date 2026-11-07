@@ -11,5 +11,4 @@
   (:standard -w +33 -w +37))
  (name masc_tool_catalog_surfaces)
  (public_name masc.tool_catalog_surfaces)
- (wrapped false)
- (libraries masc.agent_core))
+ (wrapped false))

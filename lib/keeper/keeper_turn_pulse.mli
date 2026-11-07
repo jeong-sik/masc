@@ -53,12 +53,14 @@ val seed_from_decision_log :
   ?now:float ->
   config:Workspace.config ->
   keeper_name:string ->
+  unit ->
   unit
 (** Seeds a keeper's pulse history from [decisions.jsonl] and [.1] within a 12-hour window. *)
 
 val seed_all_from_decision_logs :
   ?now:float ->
   config:Workspace.config ->
+  unit ->
   unit
 (** Seeds all persisted keepers in [config] from their respective decision logs. *)
 

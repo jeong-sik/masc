@@ -176,6 +176,7 @@ val carry
   -> front:Keeper_carried_front.seed option
   -> accepted:Keeper_carried_front.seed option
   -> turn_start:Keeper_carried_front.turn_start
+  -> history_at_start:Keeper_turn_boundaries.history_at_start
   -> counted_tokens:int option
   -> Agent_core.Types.message list
   -> carried
@@ -196,6 +197,8 @@ type range_reads =
         (** {!Keeper_turn_driver_try_provider.read_keeper_continuity}; its
             notes are not logged. *)
   ; turn_start : Keeper_carried_front.turn_start
+  ; history_at_start : Keeper_turn_boundaries.history_at_start
+        (** Where the next turn begins: the history before the wake line. *)
   ; seed : Keeper_carried_front.seed option Lazy.t
         (** {!Keeper_carried_front.read_seed}, read when first forced. *)
   }

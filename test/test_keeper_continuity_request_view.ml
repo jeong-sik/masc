@@ -413,6 +413,30 @@ let test_absorbed_history_starts_at_the_librarians_position () =
    | Error _ -> () | Ok () -> fail "a history that changed under the position passed its check")
 ;;
 
+(* Rule 8 names its front after the continuity it ran on, with a label of
+   its own: rule 7 bounds that front by where this turn began, and rule 1's
+   front at the turn boundary by the boundary. A snapshot and a read
+   position are both a Librarian point. *)
+let test_a_rule_8_front_is_named_after_the_continuity () =
+  let messages = source @ [text T.User "Fresh unsummarized work"] in
+  let digest_at = Window.atom_opening_digest messages in
+  let snapshot, lines = capture_source source in
+  let summarized = match Driver.prepare_continuity ~trace_id ~lines ~messages snapshot with
+    | Ok continuity -> continuity | Error error -> fail (Snapshot.error_to_string error) in
+  let absorbed =
+    match Driver.absorbed_history ~trace_id ~messages
+            (progress ~trace_id ~end_atom:1 ~last_atom_digest:(Option.get (digest_at 0))) with
+    | Some (_, continuity) -> continuity
+    | None -> fail "a position that matches this history was refused" in
+  let name continuity =
+    Front.source_to_string (Driver.For_testing.this_turn_front_source continuity) in
+  check string "a turn with a snapshot" "this_turn_start_after_librarian_refusal" (name summarized);
+  check string "a turn at the read position" "this_turn_start_after_librarian_refusal"
+    (name absorbed);
+  check string "a turn without a snapshot" "this_turn_start_after_seed_refusal"
+    (name Driver.without_snapshot)
+;;
+
 (* The forecast asks the driver's own chooser, so every start the driver
    can take shows up in the forecast unchanged: the origin, the atom the
    range opens on and its bytes. The first three cases hold a seed this
@@ -470,7 +494,8 @@ let test_the_forecast_takes_the_drivers_start () =
         ~materialize:(fun ~pending:_ messages -> messages) messages in
     let forecast =
       Masc.Keeper_next_request_forecast.carry ~measure ~continuity:(Some continuity) ~accepted ~front
-        ~turn_start:turn_boundary ~counted_tokens:None messages in
+        ~turn_start:turn_boundary ~history_at_start:Boundary.Continued_history
+        ~counted_tokens:None messages in
     check bool (name ^ ": the driver takes the start this case names") true
       (expected driver.composed.origin);
     check bool (name ^ ": the forecast names the driver's origin") true
@@ -944,7 +969,9 @@ let () = run "continuity request projection"
         test_case "the reader says unknown when the boundary store is unreadable" `Quick test_turn_start_reader_says_unknown_when_the_store_is_unreadable;
         test_case "the reader says unknown when no end line matches the history" `Quick test_turn_start_is_unknown_when_no_end_line_matches_the_history;
         test_case "absorbed history starts at the Librarian's position" `Quick
-                 test_absorbed_history_starts_at_the_librarians_position; test_case "the forecast takes the driver's start" `Quick
+                 test_absorbed_history_starts_at_the_librarians_position;
+        test_case "a rule-8 front is named after the continuity" `Quick
+                 test_a_rule_8_front_is_named_after_the_continuity; test_case "the forecast takes the driver's start" `Quick
                  test_the_forecast_takes_the_drivers_start; test_case "a start past the snapshot keeps the working state" `Quick
                  test_a_start_past_the_snapshot_keeps_the_working_state; test_case "an unusable snapshot starts without it" `Quick
                  test_an_unusable_snapshot_starts_without_it; test_case "official lanes take the same choice" `Quick

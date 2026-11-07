@@ -8,6 +8,7 @@ module Ledger = Masc.Keeper_model_input_ledger
 module Front = Masc.Keeper_carried_front
 module Window = Runtime_model_input_tail_window
 module Types = Agent_core.Types
+module Boundary = Masc.Keeper_turn_boundaries
 
 open Alcotest
 
@@ -398,6 +399,203 @@ let test_a_refused_boundary_resend_ends_the_turn () =
   check bool "no accepted start is recorded" true (Option.is_none recorded)
 ;;
 
+(* Where a turn began when it started from the first [start] atoms of
+   [history], as the turn computes it before its input. *)
+let began_at ~start history =
+  Boundary.history_at_start_of_messages (List.filteri (fun index _ -> index < start) history)
+;;
+
+(* Rules 7 and 8 read where this turn began from its start state, and only
+   while the history in hand opens the atom before it with the message the
+   turn started on. *)
+let test_this_turn_start_reads_the_start_state () =
+  let history = exchanges ~from:0 10 in
+  let start ?(on = history) state =
+    Try_provider.For_testing.this_turn_start ~history_digest_at:(Window.atom_opening_digest on) state
+  in
+  check (option int) "a fresh history began at atom 0" (Some 0) (start Boundary.Fresh_history);
+  check (option int) "a start state with no position names none" None
+    (start Boundary.Continued_history);
+  check (option int) "the start state names the atom the turn began at" (Some 14)
+    (start (began_at ~start:14 history));
+  let rewritten = exchanges ~from:100 7 @ List.filteri (fun index _ -> index >= 14) history in
+  check (option int) "a history that opens the atom before it with another message names none"
+    None (start ~on:rewritten (began_at ~start:14 history));
+  check (option int) "a history shorter than the start names none" None
+    (start ~on:(exchanges ~from:0 5) (began_at ~start:14 history))
+;;
+
+(* The turn hands rules 7 and 8 where it began only when it records its own
+   input: a resumed checkpoint already holds that input and maybe its
+   progress, so its length names no start. *)
+let test_a_resumed_turn_names_no_start () =
+  let history = exchanges ~from:0 10 in
+  let began_at_14 = began_at ~start:14 history in
+  let start record =
+    Try_provider.For_testing.this_turn_start
+      ~history_digest_at:(Window.atom_opening_digest history)
+      (Masc.Keeper_run_prompt.range_turn_start record ~history_at_start:began_at_14)
+  in
+  check (option int) "a turn that records its input began where its start state says" (Some 14)
+    (start Masc.Keeper_run_prompt.Record_user_turn);
+  check (option int) "a resumed turn names no start" None
+    (start Masc.Keeper_run_prompt.Skip_already_checkpointed_user_turn)
+;;
+
+let accepted_at ?(source = Front.Turn_record { turn = 1 }) history first_atom : Front.seed =
+  { first_atom
+  ; front = Model_input_front.At_atom (Option.get (Window.atom_opening_digest history first_atom))
+  ; source
+  }
+;;
+
+let past_point_start = function
+  | Try_provider.Past_librarian_point { accepted; _ } -> Some accepted.Front.first_atom
+  | Try_provider.From_snapshot _ | Try_provider.From_read_position _
+  | Try_provider.From_seed _ | Try_provider.From_turn_boundary _ -> None
+;;
+
+(* Rule 7: an accepted start opens at most at the turn boundary, so the
+   atoms since the last completed turn ride. A turn saved atoms 8 to 13 and
+   failed, so it wrote no end line: the turn boundary is 8 and this turn
+   began at 14. The Librarian stands at 2. A start a turn record or a ledger
+   names is bounded by the boundary even when it lies before this turn's
+   start; only a front rule 8 moved to where this turn began keeps its place
+   past the boundary, and is bounded by where this turn began. *)
+let test_an_accepted_start_is_bounded_by_the_turn_boundary () =
+  let history = exchanges ~from:0 10 in
+  let continuity = absorbed_at ~point:2 history in
+  let start ?source ~history_at_start accepted =
+    (Try_provider.choose_range_start ~continuity:(Some continuity) ~front:None
+       ~accepted:(Some (accepted_at ?source history accepted))
+       ~history_digest_at:(Window.atom_opening_digest history)
+       ~turn_boundary:(Front.Turn_boundary { end_atom = 8 }) ~history_at_start)
+      .Try_provider.start
+    |> past_point_start
+  in
+  let began_at_14 = began_at ~start:14 history in
+  check (option int) "a recorded start past the boundary moves back to it" (Some 8)
+    (start ~history_at_start:began_at_14 12);
+  check (option int) "a recorded start where this turn began moves back to the boundary" (Some 8)
+    (start ~history_at_start:began_at_14 14);
+  check (option int) "a recorded start before the boundary stays" (Some 6)
+    (start ~history_at_start:began_at_14 6);
+  check (option int) "a ledger start past the boundary moves back to it" (Some 8)
+    (start ~source:Front.Ledger ~history_at_start:began_at_14 12);
+  check (option int) "a rule-1 front past the boundary moves back to it" (Some 8)
+    (start ~source:Front.Turn_start_after_librarian_refusal ~history_at_start:began_at_14 12);
+  check (option int) "a rule-1 front without a Librarian point moves back too" (Some 8)
+    (start ~source:Front.Turn_start_after_seed_refusal ~history_at_start:began_at_14 12);
+  let this_turn = Front.This_turn_start_after_librarian_refusal in
+  check (option int) "a rule-8 front past the boundary and before this turn stays" (Some 12)
+    (start ~source:this_turn ~history_at_start:began_at_14 12);
+  check (option int) "a rule-8 front where this turn began stays" (Some 14)
+    (start ~source:this_turn ~history_at_start:began_at_14 14);
+  check (option int) "a rule-8 front inside this turn moves back to where it began" (Some 14)
+    (start ~source:this_turn ~history_at_start:began_at_14 16);
+  check (option int) "a rule-8 front without a seed is bounded the same way" (Some 12)
+    (start ~source:Front.This_turn_start_after_seed_refusal ~history_at_start:began_at_14 12);
+  check (option int) "with no known start the boundary bounds a rule-8 front" (Some 8)
+    (start ~source:this_turn ~history_at_start:Boundary.Continued_history 12);
+  check (option int) "a start state behind the boundary does not lower the bound" (Some 8)
+    (start ~source:this_turn ~history_at_start:(began_at ~start:6 history) 12)
+;;
+
+(* Rule 8 over injected rungs: [first] stands for rules 1 and 6, and the
+   front rule 1 held is at the turn boundary 8. This turn began at 14. *)
+let entry_rung ?(authorized = true) ?(refused = Some 8) ?(this_turn = Some 14)
+      ?(held = ref (Some (accepted_at (exchanges ~from:0 10) 8)))
+      ~first ~resend () =
+  let resends = ref 0 and told = ref 0 in
+  let outcome =
+    Try_provider.this_turn_start_resend_sequence
+      ~same_run_retry_authorized:(fun () -> authorized)
+      ~refused_first_atom:(fun () -> refused)
+      ~this_turn_front:(fun () -> Option.map (accepted_at (exchanges ~from:0 10)) this_turn)
+      ~held_front:(fun () -> !held)
+      ~restore_front:(fun prior -> held := prior)
+      ~hold_front:(fun seed -> held := Some seed)
+      ~on_this_turn_start:(fun _ _ -> incr told)
+      ~first
+      ~attempt:(fun () -> incr resends; resend ())
+      ()
+  in
+  outcome, !resends, !told, Option.map (fun (seed : Front.seed) -> seed.first_atom) !held
+;;
+
+let test_a_refused_ladder_resends_from_where_this_turn_began () =
+  let outcome, resends, told, held =
+    entry_rung ~first:(fun () -> Error overflow) ~resend:(fun () -> Ok 14) ()
+  in
+  check (result int reject) "the resend's answer is the turn's" (Ok 14) outcome;
+  check int "one resend" 1 resends;
+  check int "the move is told once" 1 told;
+  check (option int) "the front is held where this turn began" (Some 14) held
+;;
+
+let test_an_accepted_ladder_asks_nothing_more () =
+  let outcome, resends, told, held =
+    entry_rung ~first:(fun () -> Ok 8) ~resend:(fun () -> fail "an accepted request was resent") ()
+  in
+  check (result int reject) "the ladder's answer is the turn's" (Ok 8) outcome;
+  check int "no resend" 0 resends;
+  check int "nothing is told" 0 told;
+  check (option int) "the front stays at the boundary" (Some 8) held
+;;
+
+(* Rule 8 has no later start to try when this turn began where the refused
+   request opened, when its start is not known, or when nothing was sent. *)
+let test_no_resend_without_a_start_after_the_refused_one () =
+  List.iter
+    (fun (name, refused, this_turn) ->
+       let outcome, resends, told, held =
+         entry_rung ~refused ~this_turn ~first:(fun () -> Error overflow)
+           ~resend:(fun () -> fail "rule 8 resent without a later start") ()
+       in
+       check bool (name ^ ": the refusal is the turn's error") true (outcome = Error overflow);
+       check int (name ^ ": no resend") 0 resends;
+       check int (name ^ ": nothing is told") 0 told;
+       check (option int) (name ^ ": the front stays at the boundary") (Some 8) held)
+    [ "this turn began at the refused start", Some 14, Some 14
+    ; "this turn began before the refused start", Some 14, Some 8
+    ; "where this turn began is not known", Some 8, None
+    ; "no request was sent", None, Some 14
+    ]
+;;
+
+(* Only a size refusal the lane may answer on the same run moves the front. *)
+let test_no_resend_after_a_refusal_not_about_size () =
+  List.iter
+    (fun (name, authorized, error) ->
+       let outcome, resends, _, held =
+         entry_rung ~authorized ~first:(fun () -> Error error)
+           ~resend:(fun () -> fail "rule 8 answered a refusal it does not answer") ()
+       in
+       check bool (name ^ ": the refusal is the turn's error") true (outcome = Error error);
+       check int (name ^ ": no resend") 0 resends;
+       check (option int) (name ^ ": the front stays at the boundary") (Some 8) held)
+    [ "a refusal not about size", true, unattributed_refusal
+    ; "a run that may not retry", false, overflow
+    ]
+;;
+
+(* A refused resend keeps the smaller front only when the refusal was about
+   size, as rule 1 does. *)
+let test_a_refused_resend_gives_the_front_back_only_when_not_about_size () =
+  let outcome, resends, _, held =
+    entry_rung ~first:(fun () -> Error overflow) ~resend:(fun () -> Error unattributed_refusal) ()
+  in
+  check bool "the resend's refusal is the turn's error" true (outcome = Error unattributed_refusal);
+  check int "one resend" 1 resends;
+  check (option int) "the front goes back to the boundary" (Some 8) held;
+  let outcome, resends, _, held =
+    entry_rung ~first:(fun () -> Error overflow) ~resend:(fun () -> Error overflow) ()
+  in
+  check bool "the size refusal is the turn's error" true (outcome = Error overflow);
+  check int "one resend, and nothing after" 1 resends;
+  check (option int) "the front stays where this turn began" (Some 14) held
+;;
+
 (* The pair table sits behind an Eio mutex. *)
 let test_memory_feedback_precedes_history_recovery () =
   List.iter (fun error ->
@@ -487,6 +685,23 @@ let () =
             test_a_refusal_not_about_size_ends_the_turn_after_one_resend
         ; test_case "a size-refused boundary keeps the front" `Quick
             test_a_size_refused_boundary_keeps_the_front
+        ] )
+    ; ( "this turn's start"
+      , [ test_case "this turn's start is read from its start state" `Quick
+            test_this_turn_start_reads_the_start_state
+        ; test_case "a resumed turn names no start" `Quick test_a_resumed_turn_names_no_start
+        ; test_case "an accepted start is bounded by the turn boundary" `Quick
+            test_an_accepted_start_is_bounded_by_the_turn_boundary
+        ; test_case "a refused ladder resends from where this turn began" `Quick
+            test_a_refused_ladder_resends_from_where_this_turn_began
+        ; test_case "an accepted ladder asks nothing more" `Quick
+            test_an_accepted_ladder_asks_nothing_more
+        ; test_case "no resend without a start after the refused one" `Quick
+            test_no_resend_without_a_start_after_the_refused_one
+        ; test_case "no resend after a refusal not about size" `Quick
+            test_no_resend_after_a_refusal_not_about_size
+        ; test_case "a refused resend gives the front back only when not about size" `Quick
+            test_a_refused_resend_gives_the_front_back_only_when_not_about_size
         ] )
     ]
 ;;

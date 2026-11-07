@@ -374,6 +374,11 @@ val run_named :
   ?argument_demotion_seed:Agent_core.Types.message list ->
   (* Raw pre-admission history; native continuations supply their retained
      initial seed. Absence leaves ToolUse inputs verbatim. *)
+  ?history_at_start:Keeper_turn_boundaries.history_at_start ->
+  (* Where this turn began, as the turn computed it before its input. Rule 8
+     resends from it, and rule 7 bounds the front rule 8 held by it (RFC
+     librarian-lifecycle §4.10). Absence is [Continued_history]: no start is
+     known, so rule 8 has no step. *)
   ?model_input_projection:Keeper_history_projection.t ->
   ?temperature:float ->
   ?accept:(Agent_core.Types.api_response -> bool) ->

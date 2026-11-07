@@ -60,7 +60,7 @@ let test_absorbed_freeze_and_forecast () =
   check int "the turn reads unread evidence once after choosing progress" 1 !reads;
   let forecast=Masc.Keeper_next_request_forecast.carry ~measure ~continuity:(Some continuity)
     ~front:None ~accepted:(Some accepted) ~turn_start:(Front.Turn_boundary {end_atom=2})
-    ~counted_tokens:None messages in
+    ~history_at_start:Masc.Keeper_turn_boundaries.Continued_history ~counted_tokens:None messages in
   check int "forecast charges the exact transmitted carrier bytes" result.transmitted_bytes forecast.transmitted_bytes;
   check int "accepted later front preserves the same atom vocabulary" 2 forecast.first_atom;
   check bool "pinned evidence does not create an atom" true

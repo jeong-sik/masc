@@ -23,8 +23,9 @@
     provider response, whichever runtime observed it -- an official client's
     record counts the same history as an Agent Core one -- read as
     [total_atoms - transmitted_atoms]. A front a refusal moved in this turn
-    ({!Turn_start_after_seed_refusal}, {!Turn_start_after_librarian_refusal})
-    belongs to the turn and takes
+    ({!Turn_start_after_seed_refusal}, {!Turn_start_after_librarian_refusal},
+    {!This_turn_start_after_seed_refusal},
+    {!This_turn_start_after_librarian_refusal}) belongs to the turn and takes
     precedence over an older front in a later candidate's ledger.
 
     A front is a position witnessed by an opening-message digest
@@ -49,6 +50,16 @@ type source =
           that opened before the turn boundary -- at the point, or at the
           accepted start past it: the front moved to the turn boundary for
           the rest of the turn (RFC librarian-lifecycle §4.10, rule 1). *)
+  | This_turn_start_after_seed_refusal
+      (** With no Librarian point, the range opened at the turn boundary was
+          refused as too large too: the front moved to where this turn began
+          (RFC librarian-lifecycle §4.10, rule 8), and the turn shares that
+          position with its later candidates and lanes. *)
+  | This_turn_start_after_librarian_refusal
+      (** With a Librarian point, the range opened at the turn boundary was
+          refused as too large too: the front moved to where this turn began
+          for the rest of the turn (rule 8). Rule 7 bounds it by where this
+          turn began, not by the turn boundary. *)
 
 type seed =
   { first_atom : int
@@ -276,6 +287,8 @@ val origin_to_json : origin -> Yojson.Safe.t
 (** One object with a [kind], one per constructor: [ledger];
     [turn_record] with [turn]; [turn_start_after_seed_refusal];
     [turn_start_after_librarian_refusal];
+    [this_turn_start_after_seed_refusal];
+    [this_turn_start_after_librarian_refusal];
     [librarian_snapshot] with [end_atom] and [boundary_line];
     [librarian_progress] with [end_atom]; [past_librarian_point] with
     [librarian_end_atom] and [front], the {!Carried} object of its source;

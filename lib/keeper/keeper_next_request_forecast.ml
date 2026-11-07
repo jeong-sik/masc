@@ -142,7 +142,8 @@ let measure (message : Agent_core.Types.message) =
     (Yojson.Safe.to_string (Keeper_context_core.message_to_json message))
 ;;
 
-let carry ~measure ~continuity ~front ~accepted ~turn_start ~counted_tokens messages =
+let carry ~measure ~continuity ~front ~accepted ~turn_start ~history_at_start ~counted_tokens
+      messages =
   let _labelled, atom_count = Runtime_model_input_tail_window.annotate messages in
   let { Keeper_turn_driver_try_provider.start; outlived_seed = _ } =
     Keeper_turn_driver_try_provider.choose_range_start
@@ -151,6 +152,7 @@ let carry ~measure ~continuity ~front ~accepted ~turn_start ~counted_tokens mess
       ~accepted
       ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest messages)
       ~turn_boundary:turn_start
+      ~history_at_start
   in
   (* The ledger's count describes the range its front opened; any other
      start carries a range nothing has counted. *)
@@ -410,6 +412,7 @@ type range_reads =
   ; digest_at : int -> string option
   ; continuity : Keeper_turn_driver_try_provider.continuity
   ; turn_start : Keeper_carried_front.turn_start
+  ; history_at_start : Keeper_turn_boundaries.history_at_start
   ; seed : Keeper_carried_front.seed option Lazy.t
   }
 
@@ -431,6 +434,9 @@ let read_range ~config ~keeper_name ~trace_id history =
     turn_start =
       Keeper_turn_driver_try_provider.turn_start
         ~config ~keeper_name ~trace_id ~messages:history
+  ; (* The next turn begins from the history as it is stored now, before the
+       wake line. *)
+    history_at_start = Keeper_turn_boundaries.history_at_start_of_messages history
   ; (* Stdlib lazy: private to the synchronous reader of these values, never
        shared across fibers. A ledger that holds needs no store scan unless a
        Librarian point weighs the accepted start; candidates share the one
@@ -474,6 +480,7 @@ let first_request ~keeper_name ~trace_id ~runtime_id reads =
         ~front
         ~accepted
         ~turn_start:reads.turn_start
+        ~history_at_start:reads.history_at_start
         ~counted_tokens
         reads.messages
   ; ledger_front

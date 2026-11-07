@@ -187,6 +187,14 @@ type forecast_carried_origin =
       (** A Librarian point, and the range it opened -- at the point or past
           it -- was refused as too large: the turn's front moved to the turn
           boundary. *)
+  | Carried_this_turn_start_after_seed_refusal
+      (** No Librarian point, and the range opened at the turn boundary was
+          refused as too large too: the turn's front moved to where this turn
+          began, past atoms a failed turn saved without an end line. *)
+  | Carried_this_turn_start_after_librarian_refusal
+      (** A Librarian point, and the range opened at the turn boundary was
+          refused as too large too: the turn's front moved to where this turn
+          began, past atoms a failed turn saved without an end line. *)
   | Carried_turn_start of { end_atom : int }
       (** No front to start from: this turn's own atoms, from the end of the
           last completed turn. *)

@@ -27,6 +27,16 @@ type user_turn_record =
     checkpoint that already contains the exact current input, so replay does
     not append a duplicate. The distinction is typed, not inferred from text. *)
 
+val range_turn_start :
+  user_turn_record ->
+  history_at_start:Keeper_turn_boundaries.history_at_start ->
+  Keeper_turn_boundaries.history_at_start
+(** Where this turn began, for rules 7 and 8 of RFC librarian-lifecycle
+    §4.10: [history_at_start] for [Record_user_turn], and
+    [Continued_history] for [Skip_already_checkpointed_user_turn]. A resumed
+    checkpoint already holds this turn's input and maybe its progress, so its
+    length is not where the turn began. *)
+
 type extra_system_context_assembly = Keeper_context_assembly.t
 
 val sanitize_user_message : string -> string

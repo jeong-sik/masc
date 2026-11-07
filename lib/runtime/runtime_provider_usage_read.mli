@@ -233,7 +233,9 @@ type account_refusal_skip =
       (** A read already found the scope's gating window spent with no reset
           ({!Runtime_quota_window.note_read_without_reset}); another read
           would find the same while that rest lasts. *)
-  | Already_reading  (** A read for this scope is running. *)
+  | Running_read_rested_nothing
+      (** A read for this scope was running. This call waited for it, and it
+          left no quota mark. *)
   | No_net_or_clock  (** No Eio net or clock is installed. *)
 
 type account_refusal_outcome =
@@ -251,6 +253,9 @@ val read_runtime_after_account_refusal :
     usage read its provider declares ({!http_read_of_runtime}), in the
     caller's fiber, at most one per scope at a time (shared with
     {!read_codex_after_spent_usage_refusal}). A runtime whose provider
-    declares none has no [http_read] and never reaches this read. [fetch]
+    declares none has no [http_read] and never reaches this read. A call that
+    finds a read running for the scope waits for it, then reports the quota
+    mark it left ([Scope_rest_dated] or [Scope_read_found_no_reset]) or that it
+    left none ([Running_read_rested_nothing]); it does not read again. [fetch]
     defaults to one GET on the process's Eio net and clock. The outcome is
     logged without the body or the key, and returned. *)

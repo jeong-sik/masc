@@ -3670,7 +3670,7 @@ let outcome_label : Usage_read.account_refusal_outcome -> string = function
   | Read_raised name -> "raised " ^ name
   | Skipped Scope_rest_dated -> "skipped: scope rest already dated"
   | Skipped Scope_read_found_no_reset -> "skipped: a read found no reset"
-  | Skipped Already_reading -> "skipped: already reading"
+  | Skipped Running_read_rested_nothing -> "skipped: the running read rested nothing"
   | Skipped No_net_or_clock -> "skipped: no net or clock"
 ;;
 
@@ -4125,7 +4125,8 @@ let test_a_turn_cancelled_during_the_read_still_records_the_refusal () =
 ;;
 
 (* The seams of the production read: no Eio context, a raising GET, one read
-   per scope at a time, and no second read once the scope rests. *)
+   per scope at a time that a second caller waits for, and no second read once
+   the scope rests. *)
 let test_the_read_after_a_403_skips_and_contains_its_failures () =
   with_refusal_lane ~toml:runtime_toml_quota_lane_with_usage_read (fun () ->
     let refused = Option.get (Runtime.get_runtime_by_id "other.test_model") in
@@ -4141,16 +4142,39 @@ let test_the_read_after_a_403_skips_and_contains_its_failures () =
       (read ~fetch:(fun ~api_key:_ _ -> failwith "boom with a secret") ());
     Alcotest.(check bool) "a raising GET rests nothing" false
       (Runtime_quota_window.is_exhausted ~scope ~now:(Unix.gettimeofday ()));
-    let inner = ref "" in
     let resets_at = Float.round (Unix.gettimeofday () +. 3600.0) in
-    let fetch ~api_key:_ _ =
-      inner :=
-        read ~fetch:(fun ~api_key:_ _ -> Alcotest.fail "a second read ran while one held the scope") ();
-      Ok (kimi_usages_body ~five_hour_used:100 ~five_hour_reset:(rfc3339_of_epoch resets_at))
+    (* 2026-11-06 06:04:32Z: a Keeper refused while a sibling read the same
+       account skipped the read, waited the 60 s floor and was refused again
+       (#49193). The second caller now waits for the running read. *)
+    let race ~five_hour_used =
+      let entered, enter = Eio.Promise.create () in
+      let finish, allow_finish = Eio.Promise.create () in
+      let first = ref "" and second = ref "" in
+      Eio_main.run (fun _env ->
+        Eio.Fiber.both
+          (fun () ->
+            first := read ~fetch:(fun ~api_key:_ _ ->
+              Eio.Promise.resolve enter ();
+              Eio.Promise.await finish;
+              Ok (kimi_usages_body ~five_hour_used ~five_hour_reset:(rfc3339_of_epoch resets_at)))
+              ())
+          (fun () ->
+            Eio.Promise.await entered;
+            Eio.Fiber.both
+              (fun () ->
+                second := read ~fetch:(fun ~api_key:_ _ ->
+                  Alcotest.fail "a second read ran while one held the scope") ())
+              (fun () -> Eio.Promise.resolve allow_finish ())));
+      !first, !second
     in
-    Alcotest.(check string) "the first read rests the scope" "read: spent until" (read ~fetch ());
-    Alcotest.(check string) "a read for the same scope while one runs is skipped"
-      "skipped: already reading" !inner;
+    let first, second = race ~five_hour_used:20 in
+    Alcotest.(check string) "a read with headroom rests nothing" "read: no window spent" first;
+    Alcotest.(check string) "the waiting caller does not read again after a read that rested nothing"
+      "skipped: the running read rested nothing" second;
+    let first, second = race ~five_hour_used:100 in
+    Alcotest.(check string) "the first read rests the scope" "read: spent until" first;
+    Alcotest.(check string) "a read for the same scope while one runs waits and sees its rest"
+      "skipped: scope rest already dated" second;
     Alcotest.(check string) "a scope whose rest is dated is not read again"
       "skipped: scope rest already dated"
       (read ~fetch:(fun ~api_key:_ _ -> Alcotest.fail "a resting scope was read again") ()))

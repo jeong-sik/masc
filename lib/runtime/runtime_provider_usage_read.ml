@@ -360,25 +360,43 @@ let watch_declared ~mgr ~net ~clock ~cwd =
     ~await_change:Runtime.await_catalogue_change
 ;;
 
-(* Scopes a background read is running for. Keepers sharing one account are
-   refused around the same moment; one read answers all of them. *)
-let reading : Runtime_quota_window.scope list Atomic.t = Atomic.make []
+(* Scopes a read is running for, each with the promise its end resolves.
+   Keepers sharing one account are refused around the same moment; one read
+   answers all of them. *)
+type held =
+  { scope : Runtime_quota_window.scope
+  ; ended : unit Eio.Promise.t
+  ; end_read : unit Eio.Promise.u
+  }
+
+let reading : held list Atomic.t = Atomic.make []
+
+type claim =
+  | Claimed of held
+  | Running of unit Eio.Promise.t
 
 let rec claim scope =
   let current = Atomic.get reading in
-  if List.exists (Runtime_quota_window.scope_equal scope) current
-  then false
-  else if Atomic.compare_and_set reading current (scope :: current)
-  then true
-  else claim scope
+  match
+    List.find_opt (fun held -> Runtime_quota_window.scope_equal held.scope scope) current
+  with
+  | Some running -> Running running.ended
+  | None ->
+    let ended, end_read = Eio.Promise.create () in
+    let held = { scope; ended; end_read } in
+    if Atomic.compare_and_set reading current (held :: current)
+    then Claimed held
+    else claim scope
 ;;
 
-let rec release scope =
+(* The entry leaves the list before its promise resolves, so a woken caller
+   never finds the read it waited for still running. *)
+let rec release held =
   let current = Atomic.get reading in
-  let rest =
-    List.filter (fun held -> not (Runtime_quota_window.scope_equal held scope)) current
-  in
-  if not (Atomic.compare_and_set reading current rest) then release scope
+  let rest = List.filter (fun other -> other != held) current in
+  if Atomic.compare_and_set reading current rest
+  then ignore (Eio.Promise.try_resolve held.end_read () : bool)
+  else release held
 ;;
 
 type background =
@@ -392,16 +410,16 @@ type background =
    turn's switch would be cancelled when the turn returns, so the read runs
    on the server's root switch, forked on the domain that owns it. *)
 let start_background ~scope ~fork ~read =
-  if not (claim scope)
-  then Already_reading
-  else (
-    match fork (fun () -> Fun.protect ~finally:(fun () -> release scope) read) with
+  match claim scope with
+  | Running _ -> Already_reading
+  | Claimed held ->
+    (match fork (fun () -> Fun.protect ~finally:(fun () -> release held) read) with
     | () -> Started
     | exception (Eio.Cancel.Cancelled _ as cancelled) ->
-      release scope;
+      release held;
       raise cancelled
     | exception exn ->
-      release scope;
+      release held;
       Log.Runtime_agent.warn
         "provider usage read could not be scheduled for %s: %s"
         (Runtime_quota_window.scope_to_string scope)
@@ -610,7 +628,7 @@ let http_read_of_runtime (rt : Runtime_instance.t) =
 type account_refusal_skip =
   | Scope_rest_dated
   | Scope_read_found_no_reset
-  | Already_reading
+  | Running_read_rested_nothing
   | No_net_or_clock
 
 type account_refusal_outcome =
@@ -622,7 +640,7 @@ type account_refusal_outcome =
 let account_refusal_skip_to_string = function
   | Scope_rest_dated -> "the scope already rests until a stated reset"
   | Scope_read_found_no_reset -> "a read already found the scope spent with no reset"
-  | Already_reading -> "a read for the scope is already running"
+  | Running_read_rested_nothing -> "the read that was running for the scope rested nothing"
   | No_net_or_clock -> "no Eio net or clock"
 ;;
 
@@ -653,11 +671,21 @@ let read_runtime_after_account_refusal ?fetch (rt : Runtime_instance.t) http =
         match fetch with
         | None -> Skipped No_net_or_clock
         | Some fetch ->
-          if not (claim scope)
-          then Skipped Already_reading
-          else
+          (match claim scope with
+           | Running ended ->
+             (* A sibling on the same account is reading it now, and its
+                answer is this walk's answer too. Waiting for it keeps this
+                walk from dispatching again into a window the sibling is about
+                to record. A read that rested nothing is not repeated: the
+                same account would answer the same way. *)
+             Eio.Promise.await ended;
+             (match Runtime_quota_window.answered_rest ~scope ~now:(Time_compat.now ()) with
+              | Some Runtime_quota_window.Stated_reset_ahead -> Skipped Scope_rest_dated
+              | Some Runtime_quota_window.Read_found_no_reset -> Skipped Scope_read_found_no_reset
+              | None -> Skipped Running_read_rested_nothing)
+           | Claimed held ->
             Fun.protect
-              ~finally:(fun () -> release scope)
+              ~finally:(fun () -> release held)
               (fun () ->
                 match read_after_account_refusal ~fetch ~scope http with
                 | Ok read -> Read read
@@ -666,7 +694,7 @@ let read_runtime_after_account_refusal ?fetch (rt : Runtime_instance.t) http =
                 (* The request carried the key and nothing bounds what an
                    HTTP client's exception message quotes: keep the
                    constructor only. *)
-                | exception exn -> Read_raised (Printexc.exn_slot_name exn))
+                | exception exn -> Read_raised (Printexc.exn_slot_name exn)))
   in
   let scope_label = Runtime_quota_window.scope_to_string scope in
   (match outcome with

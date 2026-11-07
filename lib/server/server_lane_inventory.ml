@@ -145,11 +145,6 @@ let read_declarations ~config =
         Eio_unix.run_in_systhread (fun () -> Config.load ~directory) in
   directory, declarations
 
-let browser_presence ~config ~access =
-  let _directory, declarations = read_declarations ~config in
-  Browser_addon_presence.lane (Browser_addon_presence.read ~config ~access ~declarations)
-    Browser_lane.Lane_name.Live
-
 let project ~config ~exact ~machine_configuration ~directory ~declarations
     ~(inventory : Addon.inventory) ~browser_observations =
   let browser_publication = Browser_addon_presence.of_observations ~declarations

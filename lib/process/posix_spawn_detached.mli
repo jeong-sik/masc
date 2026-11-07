@@ -45,7 +45,3 @@ val group_id_has_members : int -> bool
     not yet reaped still reads. [None] when no such process is there, or
     the platform gives neither. It starts no process, so it never yields. *)
 val process_start : int -> string option
-
-(** The process group [pid] is in now (getpgid(2)). [Error] when it cannot be
-    told, a process that no longer runs among them. *)
-val group_of_pid : int -> (int, string) result

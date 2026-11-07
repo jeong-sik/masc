@@ -10,7 +10,7 @@ val route : string -> string option
 val permission : Masc_domain.permission
 
 val handle_get :
-  Mcp_server.server_state -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 
 (** [expected_workspace] is an optional query binding to the canonical base path
     emitted by health. A bound mismatch is 409 before Keeper/account reads;

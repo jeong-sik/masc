@@ -45,7 +45,7 @@ val handle_post :
   Mcp_server.server_state ->
   actor:string ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   target ->
   string ->
   unit

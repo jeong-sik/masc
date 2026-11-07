@@ -91,33 +91,6 @@ let test_audit_events_filter_severity_before_paging () =
   check string "older error retained" "keeper-a" (row |> member "actor" |> to_string);
   check string "severity" "error" (row |> member "severity" |> to_string)
 
-(* ── get_stats ─────────────────────────────────────────────────────
-   [get_stats] projects each row to its timestamp during the read instead of
-   materialising the window. The reader hands rows over oldest-first, so the
-   first timestamp seen is the oldest and the last is the newest; a projection
-   that folded the other way would swap these two silently. *)
-
-let test_get_stats_reports_oldest_and_newest_in_read_order () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      let config = Workspace.default_config base_dir in
-      List.iter
-        (fun ts ->
-          Audit_log.append_entry config
-            (entry ~timestamp:ts ~agent_id:"keeper-a"
-               ~action:Audit_log.AuthSuccess ~outcome:Audit_log.Success))
-        [ 100.0; 200.0; 300.0 ];
-      let stats = Audit_log.get_stats config in
-      check int "counts every row" 3 stats.Audit_log.total_entries;
-      check (option (float 0.001)) "oldest is the first row read" (Some 100.0)
-        stats.Audit_log.oldest_timestamp;
-      check (option (float 0.001)) "newest is the last row read" (Some 300.0)
-        stats.Audit_log.newest_timestamp)
-
 (* [read_entries] decodes rows during the read. The reader calls its
    projection newest-first while returning the rows oldest-first, so the
    caller-visible order is what needs pinning; the rate-limited corrupt-entry
@@ -506,8 +479,6 @@ let () =
             test_non_public_details_deduplicate_canonical_keys;
           test_case "audit event severity filters before paging" `Quick
             test_audit_events_filter_severity_before_paging;
-          test_case "get_stats reports oldest and newest in read order" `Quick
-            test_get_stats_reports_oldest_and_newest_in_read_order;
           test_case "day bounds match the written day file" `Quick
             test_day_bounds_match_the_written_day_file;
           test_case "read_entries is chronological and drops corrupt rows"

@@ -8,13 +8,13 @@
     {!audit_entry}), wire-format converters, the per-event
     [log_*] convenience wrappers (each one composes the right
     [action] + [details] payload before delegating to {!log_action}),
-    plus reader / pruner / stats helpers.
+    plus reader helpers.
 
     Internal helpers ([preview], [outcome_to_json]
     decoders, the [audit_store_cache] and its mutex,
     [get_audit_store], [collect_entries], [max_logged_errors],
     [remove_assoc_keys]) are hidden — callers use the typed log
-    helpers and the read / prune / stats accessors only.
+    helpers and the read accessors only.
 
     Security basis:
       - Open Challenges in MAS Security (arxiv:2505.02077v1)
@@ -230,15 +230,3 @@ val write_result_to_json : (unit, string) result -> Yojson.Safe.t
     [Ok ()] becomes [{"recorded": true}]; [Error detail] becomes
     [{"recorded": false, "error": <detail>}] with the detail passed through
     {!Observability_redact.redact_text}. *)
-
-(** {1 Statistics} *)
-
-type stats = {
-  total_entries : int;
-  file_size_bytes : int;
-  oldest_timestamp : float option;
-  newest_timestamp : float option;
-}
-
-val get_stats : config -> stats
-(** [file_size_bytes] is always [0] under the date-split layout. *)

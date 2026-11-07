@@ -1,0 +1,84 @@
+{
+  "params": {
+    "threshold": 2048,
+    "marker_bytes": 596,
+    "since": 1793958720.0,
+    "until": 1793963826.0
+  },
+  "requests": {
+    "counted": 136,
+    "cold": 0,
+    "bad_lines": 0,
+    "bad_message_entries": 0,
+    "no_boundary": 0,
+    "outside_window": 1248
+  },
+  "prompt_bytes": 256749933,
+  "saved": {
+    "bytes": 4422851,
+    "share_of_prompt": 0.0172
+  },
+  "rewrite": {
+    "bytes": 8887036,
+    "share_of_prompt": 0.0346,
+    "requests_with_rewrite": 75,
+    "share_of_requests_with_predecessor": 0.5515,
+    "per_request_share": {
+      "p50": 0.0002,
+      "p90": 0.0737,
+      "p99": 0.6998,
+      "max": 0.7353
+    }
+  },
+  "aged_results_without_digest": 0,
+  "by_keeper": [
+    {
+      "keeper": "code-reviewer",
+      "prompt_bytes": 80759723,
+      "saved_share": 0.0104,
+      "rewrite_share": 0.0032
+    },
+    {
+      "keeper": "context-reviewer",
+      "prompt_bytes": 49709602,
+      "saved_share": 0.0064,
+      "rewrite_share": 0.0073
+    },
+    {
+      "keeper": "pr-updater",
+      "prompt_bytes": 35860958,
+      "saved_share": 0.0033,
+      "rewrite_share": 0.0295
+    },
+    {
+      "keeper": "you-never-change",
+      "prompt_bytes": 24188548,
+      "saved_share": 0.013,
+      "rewrite_share": 0.0535
+    },
+    {
+      "keeper": "code-reviewer-mother",
+      "prompt_bytes": 13609942,
+      "saved_share": 0.0098,
+      "rewrite_share": 0.0819
+    },
+    {
+      "keeper": "wkbl-web-leader",
+      "prompt_bytes": 9448833,
+      "saved_share": 0.0168,
+      "rewrite_share": 0.0069
+    },
+    {
+      "keeper": "e-masc-the-leader",
+      "prompt_bytes": 7724242,
+      "saved_share": 0.0319,
+      "rewrite_share": 0.0165
+    },
+    {
+      "keeper": "code-reviewer-brother",
+      "prompt_bytes": 7663817,
+      "saved_share": 0.0223,
+      "rewrite_share": 0.0353
+    }
+  ]
+}

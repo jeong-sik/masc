@@ -1,0 +1,117 @@
+{
+  "params": {
+    "from_date": "2026-11-01",
+    "to_date": "2026-11-06",
+    "since": 1793491200.0,
+    "until": 1793971800.0,
+    "follow_seconds": 600.0
+  },
+  "files": {
+    "ledger": 64,
+    "days_without_file": [],
+    "raw_traces": 5863
+  },
+  "skipped": {
+    "bad_lines": 0,
+    "bad_outputs": 0
+  },
+  "reads": {
+    "total": 17299,
+    "missing": 299,
+    "missing_share": 0.0173,
+    "by_day": {
+      "2026-11-01": {
+        "reads": 10070,
+        "missing": 96,
+        "traced": 0
+      },
+      "2026-11-02": {
+        "reads": 6320,
+        "missing": 145,
+        "traced": 1
+      },
+      "2026-11-03": {
+        "reads": 389,
+        "missing": 27,
+        "traced": 2
+      },
+      "2026-11-04": {
+        "reads": 267,
+        "missing": 20,
+        "traced": 3
+      },
+      "2026-11-05": {
+        "reads": 177,
+        "missing": 6,
+        "traced": 2
+      },
+      "2026-11-06": {
+        "reads": 76,
+        "missing": 5,
+        "traced": 5
+      }
+    }
+  },
+  "missed_calls": {
+    "traced_to_answer_sha256": 13,
+    "not_traced": 286
+  },
+  "missed_hashes": {
+    "distinct": 294,
+    "traced_to_answer_sha256": 13,
+    "not_traced": 281
+  },
+  "after_a_miss": {
+    "read_other_hash": 182,
+    "read_same_hash": 21,
+    "missed_again": 45,
+    "failed_otherwise": 3,
+    "no_next_read": 48,
+    "read_other_hash_seconds": {
+      "p50": 4.5,
+      "p90": 150.5
+    }
+  },
+  "by_keeper": [
+    {
+      "keeper": "code-reviewer",
+      "reads": 10397,
+      "missing": 59
+    },
+    {
+      "keeper": "context-reviewer",
+      "reads": 1715,
+      "missing": 57
+    },
+    {
+      "keeper": "code-reviewer-brother",
+      "reads": 1057,
+      "missing": 36
+    },
+    {
+      "keeper": "code-reviewer-mother",
+      "reads": 1010,
+      "missing": 31
+    },
+    {
+      "keeper": "you-never-change",
+      "reads": 360,
+      "missing": 25
+    },
+    {
+      "keeper": "code-reviewer-sister",
+      "reads": 539,
+      "missing": 19
+    },
+    {
+      "keeper": "e-masc-the-leader",
+      "reads": 139,
+      "missing": 13
+    },
+    {
+      "keeper": "pr-updater",
+      "reads": 426,
+      "missing": 11
+    }
+  ]
+}

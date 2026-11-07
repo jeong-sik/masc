@@ -37,8 +37,6 @@ val create_from_env :
   env:Eio_unix.Stdenv.base ->
   t
 
-(** {1 Unary RPCs} *)
-
 (** {1 Streaming RPCs} *)
 
 (** Open a bidirectional heartbeat stream.

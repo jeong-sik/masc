@@ -271,5 +271,3 @@ val handle_keeper_get_subroutes :
   Httpun.Request.t -> Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Dispatch [GET /api/v1/keepers/<name>/<sub>] sub-routes
     (status / tools / checkpoints listing / etc.). *)
-
-(** {1 Memory-OS dashboard JSON} *)

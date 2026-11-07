@@ -227,8 +227,6 @@ val start_execution_trust_refresh_loop :
     proactive-refresh circuit breaker; no additional operator env knob
     is introduced for the interval. *)
 
-(** {1 Snapshot accessors} *)
-
 (** {1 HTTP route entries} *)
 
 type execution_http_request

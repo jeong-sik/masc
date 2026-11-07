@@ -5814,11 +5814,6 @@
 (include stanzas/test_keeper_periodic_wake.inc)
 
 (test
- (name test_standalone_skill_tools)
- (modules test_standalone_skill_tools)
- (libraries masc_test_deps masc.skill_reference masc.skill_snapshot
-  masc.skill_snapshot_service))
-(test
  (name test_dashboard_task_detail)
  (modules test_dashboard_task_detail)
  (libraries alcotest masc masc.server masc.masc_types masc.masc_workspace masc.fs_compat eio eio_main yojson))

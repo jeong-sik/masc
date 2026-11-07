@@ -95,10 +95,12 @@ type observation =
       ; claim_count : int
       ; conflict_count : int
       ; classified_count : int
+      ; excluded_count : int
       ; briefing : (Workspace_memory_briefing.observation, string) result
             (** Last complete Curator synthesis, with source and current
                 prompt/schema-contract freshness.
                 An unreadable briefing does not hide readable ledger metadata. *)
+      ; building : (Workspace_memory_briefing.pass option, string) result
       }
 
 val observe : base_path:string -> observation

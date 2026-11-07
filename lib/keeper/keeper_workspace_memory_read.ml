@@ -6,7 +6,7 @@ let handle ~base_path ~args =
   match args with
   | `Assoc [] ->
     (match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-       Workspace_memory_ledger_view.inventory ~base_path) with
+       Workspace_memory_ledger_view.inventory ~base_path ()) with
      | Ok json -> Keeper_tool_execution.success_data
          (`Assoc ["ok", `Bool true; "workspace_memory", json])
      | Error detail -> failure ~failure_class:Tool_result.Dependency_unavailable detail)
@@ -18,7 +18,7 @@ let handle ~base_path ~args =
      | Error detail -> failure ~failure_class:Tool_result.Dependency_unavailable detail)
   | `Assoc ["view", `String "briefing"] ->
     (match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-       Workspace_memory_ledger_view.briefing ~base_path) with
+       Workspace_memory_ledger_view.briefing ~base_path ()) with
      | Ok json -> Keeper_tool_execution.success_data
          (`Assoc ["ok", `Bool true; "workspace_memory", json])
      | Error detail -> failure ~failure_class:Tool_result.Dependency_unavailable detail)

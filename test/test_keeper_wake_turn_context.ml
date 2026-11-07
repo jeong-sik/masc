@@ -847,6 +847,7 @@ let test_direct_turn_discovers_published_workspace_memory () =
 let test_shared_retrieval_route_follows_actual_request_access () =
   let memory = Masc.Workspace_memory_ledger.Available
     {ledger_sha256="request-ledger";claim_count=1;conflict_count=0;classified_count=1;
+     excluded_count=0;building=Ok None;
      briefing=Ok (Masc.Workspace_memory_briefing.Current {source_ids=["c1"];text="UNSELECTED_SHARED_BODY"})} in
   let render offered deferred loader_alive =
     Prompt.format_workspace_memory_observation
@@ -875,7 +876,7 @@ let test_workspace_memory_observation_distinguishes_briefing_states () =
     Prompt.format_workspace_memory_observation ~access:(direct_shared_reader ())
       (Ledger.Available
          { ledger_sha256 = "briefing-sha"; claim_count = 1; conflict_count = 0;
-           classified_count = 1; briefing })
+           classified_count = 1; excluded_count = 0; building = Ok None; briefing })
     |> Option.get in
   let current = render (Ok (Briefing.Current summary)) in
   check bool "current briefing body waits for explicit retrieval" false (contains ~needle:text current);
@@ -1472,6 +1473,7 @@ let test_prepared_prompt_keeps_turn_inputs_and_request_authority () =
     let fresh_decision = WO.keeper_cycle_decision ~meta base_observation in
     let memory = Masc.Workspace_memory_ledger.Available
       {ledger_sha256="original-ledger";claim_count=1;conflict_count=0;classified_count=1;
+       excluded_count=0;building=Ok None;
        briefing=Ok (Masc.Workspace_memory_briefing.Current {source_ids=["c1"];text="UNSELECTED_PRIVATE_BODY"})} in
     let prepared = Prompt.prepare_prompt ~turn_decision:decision ~current_task:(held "task-original-owner")
         ~workspace_memory:memory ~wiki_contents:one_wiki_page ~observation () in
@@ -1542,6 +1544,7 @@ let test_prepared_direct_context_keeps_original_work_and_request_routes () =
     let memory = Masc.Workspace_memory_ledger.Available
       { ledger_sha256 = "direct-original-ledger"; claim_count = 1;
         conflict_count = 0; classified_count = 1;
+        excluded_count = 0; building = Ok None;
         briefing = Error "PRIVATE_BRIEFING_READ_FAILURE" } in
     let prepare ~task_id ~conversation ~workspace_memory ~wiki_contents =
       let task =

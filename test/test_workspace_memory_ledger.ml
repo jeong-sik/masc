@@ -172,9 +172,17 @@ let test_observe_reads_published_briefing_and_reports_staleness () =
       | Briefing.Prepared batch -> batch
       | Briefing.Unchanged | Briefing.Cleanup _ -> Alcotest.fail "unsummarized ledger prepared no work" in
     Briefing.save ~directory (Briefing.prepared_state batch) |> require;
+    (match Ledger.observe ~base_path with
+     | Ledger.Available { building = Ok (Some pass); _ } ->
+       Alcotest.(check int) "building pass target matches" 1 pass.target;
+       Alcotest.(check int) "building pass remaining matches" 1 pass.remaining
+     | _ -> Alcotest.fail "active briefing pass was not observed");
     let text = "Owner review is pending; completion has not been confirmed." in
     let accepted = Briefing.accept batch ~text |> require in
     Briefing.save ~directory accepted |> require;
+    (match Ledger.observe ~base_path with
+     | Ledger.Available { building = Ok None; _ } -> ()
+     | _ -> Alcotest.fail "completed pass still observed as building");
     let observe_current () = match Ledger.observe ~base_path with
       | Ledger.Available { briefing = Ok (Briefing.Current summary); claim_count = 1; _ } ->
         Alcotest.(check string) "actual saved semantic text reaches the observation" text summary.text;

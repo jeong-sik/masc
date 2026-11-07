@@ -16,7 +16,12 @@ let emit_validation_telemetry ~tool ~result ~reason =
     ()
 ;;
 
-let validate_with_contract ~contract ?schema ~name ~args () =
+(* [name] is the name the caller used, and the message shows it. The
+   rejection, its telemetry and its log line belong to [internal_name]: a
+   Keeper calls [tool_execute] as [Execute], and every tool counter is keyed
+   by the internal name. *)
+let validate_with_contract ~contract ?internal_name ?schema ~name ~args () =
+  let tool = Option.value internal_name ~default:name in
   let checked =
     try
       let schema =
@@ -42,15 +47,16 @@ let validate_with_contract ~contract ?schema ~name ~args () =
   in
   match checked with
   | Ok (prepared_args, accepted) ->
-    emit_validation_telemetry ~tool:name ~result:"pass" ~reason:(accepted_reason accepted);
+    emit_validation_telemetry ~tool ~result:"pass" ~reason:(accepted_reason accepted);
     (match accepted with
      | Accepted_normalized ->
-       Log.Tool_validation.debug "tool_input_validation normalized args for %s" name
+       Log.Tool_validation.debug "tool_input_validation normalized args for %s" tool
      | Accepted_empty_schema | Accepted_valid | Accepted_external_subset -> ());
     Ok prepared_args
   | Error rejection ->
+    let rejection = { rejection with tool_name = tool } in
     emit_validation_telemetry
-      ~tool:name
+      ~tool
       ~result:"fail"
       ~reason:(violation_reason rejection.violation);
     (match rejection.violation with
@@ -60,13 +66,13 @@ let validate_with_contract ~contract ?schema ~name ~args () =
      | Schema_bound_malformed _ ->
        Log.Tool_validation.error
          "tool_input_validation rejected %s (server schema defect): %s"
-         name
+         tool
          rejection.message
      | Schema_not_registered
      | Retired_transition_alias _ ->
        Log.Tool_validation.warn
          "tool_input_validation rejected %s (unknown or retired schema): %s"
-         name
+         tool
          rejection.message
      | Arguments_for_fieldless_schema
      | Arguments_did_not_arrive
@@ -77,17 +83,17 @@ let validate_with_contract ~contract ?schema ~name ~args () =
      | Argument_out_of_range _ ->
        Log.Tool_validation.info
          "tool_input_validation rejected %s: %s"
-         name
+         tool
          rejection.message);
     Error rejection
 ;;
 
-let validate ?schema ~name ~args () =
-  validate_with_contract ~contract:Host_tool ?schema ~name ~args ()
+let validate ?internal_name ?schema ~name ~args () =
+  validate_with_contract ~contract:Host_tool ?internal_name ?schema ~name ~args ()
 ;;
 
-let validate_args ?schema ~name ~args () =
-  match validate ?schema ~name ~args () with
+let validate_args ?internal_name ?schema ~name ~args () =
+  match validate ?internal_name ?schema ~name ~args () with
   | Ok prepared_args -> Ok prepared_args
   | Error rejection -> Error (rejection_result rejection)
 ;;

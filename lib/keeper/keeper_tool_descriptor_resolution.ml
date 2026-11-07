@@ -86,6 +86,7 @@ let validate_descriptor_input ~tool_name
       (descriptor : Keeper_tool_descriptor.t) input
   =
   Tool_input_validation.validate_args
+    ~internal_name:descriptor.internal_name
     ~schema:descriptor.input_schema
     ~name:tool_name
     ~args:input

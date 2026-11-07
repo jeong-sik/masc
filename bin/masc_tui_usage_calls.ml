@@ -15,6 +15,11 @@ let window_of_days = function
   | 14 -> Some Last_fortnight
   | _ -> None
 
+let days = function
+  | Last_day -> 1
+  | Last_week -> 7
+  | Last_fortnight -> 14
+
 let bucket_count = function
   | Last_day -> 24
   | Last_week -> 7
@@ -460,3 +465,53 @@ let lines ~width:cells ~rows t =
     let spaced = top @ [ "" ] @ chart @ legend ~cells ~at_most:2 @ [ "" ] @ table in
     if List.length spaced <= rows then spaced
     else top @ chart @ legend ~cells ~at_most:1 @ table
+
+(* The Dashboard's row names its window in as few cells as the row can spare. *)
+let short_span = function
+  | Last_day -> "24h"
+  | Last_week -> "7d"
+  | Last_fortnight -> "14d"
+
+let summary_label window = Printf.sprintf " Tool calls %s" (short_span window)
+let summary_gap = "  "
+
+(* The label, the calls as one glyph per bucket, then the total and the failed
+   calls. The chart goes first when the row is too narrow for it, then the
+   rest is cut. *)
+let summary_line ~cells t =
+  let label = summary_label t.window in
+  let buckets = t.series.Series.tsr_buckets in
+  let calls, failures, _deferred = totals buckets in
+  if calls = 0 then
+    Theme.recede ()
+    ^ Layout.take_cells (label ^ summary_gap ^ "no calls") cells
+    ^ Ansi.reset
+  else
+    let figures =
+      Printf.sprintf "%s · %s failed" (grouped_digits calls) (grouped_digits failures)
+    in
+    let without_chart =
+      Layout.display_width label + String.length summary_gap
+      + Layout.display_width figures
+    in
+    let chart_room = List.length buckets + String.length summary_gap in
+    if without_chart + chart_room <= cells then
+      let _, drawn =
+        chart_cells
+          ~value:(fun active -> float_of_int active.Series.tsc_calls)
+          buckets
+      in
+      Theme.recede () ^ label ^ Ansi.reset ^ summary_gap
+      ^ draw_cells ~stretch:1 ~gap:0 drawn
+      ^ summary_gap ^ figures
+    else if without_chart <= cells then
+      Theme.recede () ^ label ^ Ansi.reset ^ summary_gap ^ figures
+    else
+      Theme.recede ()
+      ^ Layout.take_cells (label ^ summary_gap ^ figures) cells
+      ^ Ansi.reset
+
+let summary_note ~cells window note =
+  Theme.recede ()
+  ^ Layout.take_cells (summary_label window ^ summary_gap ^ note) cells
+  ^ Ansi.reset

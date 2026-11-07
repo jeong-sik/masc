@@ -90,7 +90,7 @@ let test_seven_branches () =
   let hold : Masc.Tui_decode.schedule_runner_hold =
     { srh_occurrence_id = "occ-1"
     ; srh_due_at_iso = "2026-11-07T10:00:00Z"
-    ; srh_reason = Masc.Tui_decode.Hold_target_shutdown_fenced { target = "alpha"; fence_owner = "shutdown-test" }
+    ; srh_reason = Masc.Tui_decode.Hold_previous_wake_untaken
     ; srh_observed_at = hold_observed
     }
   in
@@ -334,7 +334,7 @@ let test_hold_reading_variations () =
   let hold : Masc.Tui_decode.schedule_runner_hold =
     { srh_occurrence_id = "occ-1"
     ; srh_due_at_iso = "2026-11-07T10:00:00Z"
-    ; srh_reason = Masc.Tui_decode.Hold_target_shutdown_fenced { target = "alpha"; fence_owner = "shutdown-test" }
+    ; srh_reason = Masc.Tui_decode.Hold_previous_wake_untaken
     ; srh_observed_at = 1794049000.0
     }
   in

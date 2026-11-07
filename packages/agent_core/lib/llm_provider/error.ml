@@ -103,7 +103,12 @@ let provider_name = function
   | _ -> "unknown"
 ;;
 
-let affected_provider provider = if provider = "unknown" then [] else [ provider ]
+(* Takes the provider before [provider_name] flattens it, so the absence is
+   read from the option instead of re-detected from the "unknown" sentinel. *)
+let affected_provider = function
+  | Some provider when String.trim provider <> "" -> [ provider ]
+  | _ -> []
+;;
 
 let capacity_scope_to_string = function
   | CapacityModel -> "model"
@@ -223,6 +228,7 @@ let to_string = function
 ;;
 
 let of_retry_api_error ?provider err =
+  let affected = affected_provider provider in
   let provider = provider_name provider in
   match err with
   | Retry.RateLimited r ->
@@ -230,7 +236,7 @@ let of_retry_api_error ?provider err =
   | Retry.Overloaded r ->
     CapacityExhausted
       { scope = CapacityProvider
-      ; affected = affected_provider provider
+      ; affected
       ; retry_after = None
       ; detail = r.message
       }
@@ -273,13 +279,14 @@ let capacity_scope_of_http = function
 ;;
 
 let of_provider_failure ?provider kind message =
+  let affected_default = affected_provider provider in
   let provider = provider_name provider in
   match kind with
   | Http_client.Capacity_exhausted { scope; retry_after; model } ->
     let affected =
       match model with
       | Some model -> [ model ]
-      | None -> affected_provider provider
+      | None -> affected_default
     in
     CapacityExhausted
       { scope = capacity_scope_of_http scope; affected; retry_after; detail = message }

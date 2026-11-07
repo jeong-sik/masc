@@ -90,13 +90,17 @@ end
     [Registration] is an entry of the allowlist, which lets its identity in
     until it is removed or spent (plan C2d), so its removal is one too. The
     subject is the id of the entry, not the identity: the identity is only in
-    the records of the log (design 4.1). *)
+    the records of the log (design 4.1). [Session] is a browser session, which
+    acts as its principal until it ends (design 5.2, plan C3), so its
+    revocation is one too: a sign-out, or a new sign-in of the same browser
+    that ends the session it held. *)
 module Subject : sig
   type t =
     | Grant of Grant_id.t
     | Credential of Provider_account_id.t
     | Principal of Principal.t
     | Runtime of Runtime_id.t
+    | Session of Session_id.t
     | Invite of Invite_id.t
     | Registration of Registration_id.t
 

@@ -776,6 +776,4 @@ let get_protocol_version_for_session ?session_id request =
        | None -> get_protocol_version request)
   | None -> get_protocol_version request
 
-let query_param request key =
-  let uri = Uri.of_string request.Httpun.Request.target in
-  Uri.get_query_param uri key
+let query_param = Server_utils.query_param

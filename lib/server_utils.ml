@@ -2,9 +2,48 @@
 (** Parse query param from request target *)
 let goal_tree_direct_read_header = "x-masc-goal-tree-read", "direct-v1"
 
+let query_param_from_target target key =
+  match String.index_opt target '?' with
+  | None -> None
+  | Some qpos ->
+    let tlen = String.length target in
+    let klen = String.length key in
+    let rec scan pos =
+      if pos >= tlen then None
+      else
+        let next_delim =
+          let rec find_delim i =
+            if i >= tlen then tlen
+            else match String.unsafe_get target i with
+            | '&' | ';' -> i
+            | _ -> find_delim (i + 1)
+          in
+          find_delim pos
+        in
+        let key_match =
+          if pos + klen <= next_delim
+             && String.sub target pos klen = key
+             && (pos + klen = next_delim || String.unsafe_get target (pos + klen) = '=')
+          then true
+          else false
+        in
+        if key_match then begin
+          let val_start = pos + klen in
+          if val_start = next_delim then Some ""
+          else
+            let v_start = val_start + 1 in
+            let v_len = next_delim - v_start in
+            let raw_val = String.sub target v_start v_len in
+            Some (Uri.pct_decode raw_val)
+        end else
+          scan (next_delim + 1)
+    in
+    scan (qpos + 1)
+;;
+
 let query_param request key =
-  let uri = Uri.of_string request.Httpun.Request.target in
-  Uri.get_query_param uri key
+  query_param_from_target request.Httpun.Request.target key
+;;
 
 let int_query_param request key ~default =
   match query_param request key with

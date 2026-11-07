@@ -66,6 +66,24 @@ let test_disagreements () =
   | other -> fail (Cli.error_to_string other)
 ;;
 
+(* The answer a one-shot caller reads: the last assistant text of a
+   finished run, and the outcome otherwise. *)
+let test_answer () =
+  let run ~exit_code ?stdout export = run_of (classify ~exit_code ~export ?stdout ()) in
+  (match
+     Runtime_vibe_answer.of_run
+       (run ~exit_code:0 ~stdout:(read "entries-first-call.json") "export-finished.json")
+   with
+   | Ok text -> check bool "m0 reply" true (String.length text > 0)
+   | Error error -> fail (Runtime_vibe_answer.error_to_string error));
+  (match Runtime_vibe_answer.of_run (run ~exit_code:0 "export-finished.json") with
+   | Error Runtime_vibe_answer.No_output -> ()
+   | Ok _ | Error _ -> fail "finished with an empty stdout has no answer");
+  match Runtime_vibe_answer.of_run (run ~exit_code:3 "export-deadline.json") with
+  | Error (Runtime_vibe_answer.Not_finished { outcome = Vibe.Deadline; _ }) -> ()
+  | Ok _ | Error _ -> fail "m5 stopped at its deadline"
+;;
+
 let config =
   { Cli.cli_path = "/opt/vibe/bin/vibe"
   ; workdir = Filename.get_temp_dir_name ()
@@ -98,6 +116,7 @@ let () =
       , [ test_case "outcomes" `Quick test_outcomes
         ; test_case "disagreements" `Quick test_disagreements
         ] )
+    ; "answer", [ test_case "last assistant text" `Quick test_answer ]
     ; "child process", [ test_case "env and argv" `Quick test_child_process ]
     ]
 ;;

@@ -1812,6 +1812,79 @@ let test_mistral_large_4_declares_measured_effort_ladder () =
             (cfg Reasoning_effort.None_))))
 ;;
 
+(* The same row carries its measured replay contract (#49352): the trace
+   rides back inside assistant content as the endpoint's own chunk list --
+   the live API answers 422 to a reasoning_content member and 200 to the
+   chunk-list resend (probed 2026-11-06) -- and every assistant message
+   keeps its trace. *)
+let test_mistral_large_4_replays_chunks_not_reasoning_content () =
+  with_repository_model_catalog (fun () ->
+    let config =
+      Provider_config.make
+        ~kind:OpenAI_compat
+        ~provider_id:"mistral"
+        ~model_id:"mistral-large-4"
+        ~base_url:"https://api.mistral.ai/v1"
+        ()
+    in
+    (match Provider_config.capabilities_for_config_model config with
+     | Some caps ->
+       check_bool
+         "row carries the chunk carrier"
+         true
+         (caps.Capabilities.content_inline_reasoning = Capabilities.Content_chunks);
+       check_bool
+         "row preserves every assistant trace"
+         true
+         (caps.Capabilities.reasoning_replay_override
+          = Capabilities.Force_preserve_always)
+     | None -> Alcotest.fail "mistral-large-4 should resolve in the repository catalog");
+    let metadata =
+      match Reasoning_dialect.reasoning_source_for_provider_config config with
+      | Ok source -> Types.Reasoning_source.metadata source
+      | Error detail -> Alcotest.failf "mistral-large-4 must resolve a reasoning source: %s" detail
+    in
+    let messages =
+      [ Types.
+          { origin = Types.Conversation
+          ; role = Types.Assistant
+          ; content =
+              [ Types.Thinking { signature = None; content = "I should say ok." }
+              ; Types.Text "ok"
+              ]
+          ; name = None
+          ; tool_call_id = None
+          ; metadata
+          }
+      ]
+    in
+    let body =
+      Backend_openai.build_request ~config ~messages () |> Yojson.Safe.from_string
+    in
+    let open Yojson.Safe.Util in
+    let assistant = body |> member "messages" |> index 0 in
+    Alcotest.(check string)
+      "assistant role survives"
+      "assistant"
+      (assistant |> member "role" |> to_string);
+    Alcotest.(check bool)
+      "content replays as the endpoint's own chunk list"
+      true
+      (assistant |> member "content"
+       = `List
+           [ `Assoc
+               [ "type", `String "thinking"
+               ; ( "thinking"
+                 , `List [ `Assoc [ "type", `String "text"; "text", `String "I should say ok." ] ] )
+               ]
+           ; `Assoc [ "type", `String "text"; "text", `String "ok" ]
+           ]);
+    Alcotest.(check bool)
+      "no reasoning_content member on this wire"
+      true
+      (assistant |> member "reasoning_content" = `Null))
+;;
+
 let test_validate_output_schema_openai_unscoped_catalog_not_inferred () =
   with_repository_model_catalog (fun () ->
     let cfg =
@@ -3233,6 +3306,10 @@ let () =
             "mistral-large-4 declares the measured effort ladder"
             `Quick
             test_mistral_large_4_declares_measured_effort_ladder
+        ; Alcotest.test_case
+            "mistral-large-4 replays chunks not reasoning content"
+            `Quick
+            test_mistral_large_4_replays_chunks_not_reasoning_content
         ; Alcotest.test_case
             "reasoning effort undeclared fails closed"
             `Quick

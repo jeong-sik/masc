@@ -91,6 +91,9 @@ type content_inline_reasoning =
     (** Split tagged content for display; no original Chat carrier authority. *)
   | Think_tags_with_chat_replay
     (** Also retain/replay the original scalar Chat content through a validated witness. *)
+  | Content_chunks
+    (** Structured chunk objects carry the trace inside chat content; replay
+        resends the assistant content as that same chunk list. *)
 
 type reasoning_streaming_format =
   | Default_reasoning_streaming

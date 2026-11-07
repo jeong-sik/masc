@@ -5,6 +5,15 @@
     @stability Internal
     @since 0.93.1 *)
 
+(** Read one chunk object's visible text: a plain string, or a block's
+    "text" member. Chunk-list models (mistral-large-4, #49352) stream the
+    answer inside such blocks; the streaming parser shares this read. *)
+val text_of_openai_content_block : Yojson.Safe.t -> string option
+
+(** Concatenate the thinking text a list-shaped content carries under
+    thinking[].text. Empty string when the shape carries none. *)
+val chunk_list_thinking_of_openai_content : Yojson.Safe.t -> string
+
 (** Parse a partial streaming usage update without filling absent counters. *)
 val delta_usage_of_openai_json : Yojson.Safe.t -> Types.delta_usage option
 

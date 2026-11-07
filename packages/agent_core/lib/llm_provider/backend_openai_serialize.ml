@@ -330,6 +330,58 @@ let assistant_reasoning_details_of_blocks blocks =
   | _ :: _ -> Some details
 ;;
 
+(* Replay carrier for content_chunks rows (mistral-large-4): the endpoint
+   takes the assistant trace back as the same chunk-object list it produced
+   and answers 422 to a reasoning_content member (probed live 2026-11-06),
+   so replay renders Thinking as a thinking chunk ahead of the text chunks
+   instead of using the reasoning side-channel. *)
+let assistant_chunk_list_content_of_blocks blocks =
+  let thinking =
+    blocks
+    |> List.filter_map (function
+         | Thinking { content; _ } when not (Api_common.string_is_blank content) ->
+           Some (Utf8_sanitize.sanitize content)
+         | Thinking _ -> None
+         | ReasoningDetails _
+         | RedactedThinking _
+         | Text _
+         | ToolUse _
+         | ToolResult _
+         | Image _
+         | Document _
+         | Audio _ -> None)
+    |> String.concat ""
+  in
+  let text_chunks =
+    blocks
+    |> List.filter_map (function
+         | Text text when not (Api_common.string_is_blank text) ->
+           Some (`Assoc [ "type", `String "text"; "text", `String (Utf8_sanitize.sanitize text) ])
+         | Text _ -> None
+         | Thinking _
+         | ReasoningDetails _
+         | RedactedThinking _
+         | ToolUse _
+         | ToolResult _
+         | Image _
+         | Document _
+         | Audio _ -> None)
+  in
+  if thinking = "" && text_chunks = [] then None
+  else
+    let thinking_chunk =
+      if thinking = ""
+      then []
+      else
+        [ `Assoc
+            [ "type", `String "thinking"
+            ; "thinking", `List [ `Assoc [ "type", `String "text"; "text", `String thinking ] ]
+            ]
+        ]
+    in
+    Some (`List (thinking_chunk @ text_chunks))
+;;
+
 let tool_result_content_string ~content ~content_blocks =
   match content_blocks with
   | Some blocks ->
@@ -621,14 +673,18 @@ let render_history_projection
            | Capabilities.No_content_inline_reasoning | Capabilities.Think_tags -> None
            | Capabilities.Think_tags_with_chat_replay ->
              (match Inline_content_replay.of_metadata ~content:msg.content msg.metadata with
-              | Ok replay -> replay | Error detail -> invalid_arg detail) in
+              | Ok replay -> replay | Error detail -> invalid_arg detail)
+           | Capabilities.Content_chunks -> None in
          let wire_message = match inline_replay with
            | None -> msg
            | Some replay -> {msg with content=List.filter_map (fun (index,block) ->
                if List.mem index replay.Inline_content_replay.block_indices then None else Some block)
                (List.mapi (fun index block -> index,block) msg.content)} in
          let tool_calls = tool_calls_to_openai_json wire_message.content in
-         let include_reasoning = content_has_reasoning wire_message.content in
+         let chunk_carrier = content_inline_reasoning = Capabilities.Content_chunks in
+         let include_reasoning =
+           (not chunk_carrier) && content_has_reasoning wire_message.content
+         in
          let include_reasoning_details =
            include_reasoning
            && replays_reasoning_details dialect
@@ -648,6 +704,18 @@ let render_history_projection
                | `Assoc fields -> `Assoc (("content",`String replay.Inline_content_replay.raw_content)
                    :: List.remove_assoc "content" fields)
                | other -> other) rendered in
+         let rendered =
+           if not chunk_carrier then rendered
+           else
+             match assistant_chunk_list_content_of_blocks wire_message.content with
+             | Some chunks ->
+               List.map (function
+                   | `Assoc fields when List.assoc_opt "role" fields = Some (`String "assistant") ->
+                     `Assoc (("content", chunks) :: List.remove_assoc "content" fields)
+                   | other -> other)
+                 rendered
+             | None -> rendered
+         in
          let rendered =
            match Message_origin_lowering.encode_user_boundary control_lowering ~message:msg rendered with
            | Ok messages -> messages

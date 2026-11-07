@@ -2277,15 +2277,21 @@ supports_native_streaming = true
 # list-shaped ThinkChunk/TextChunk message.content -- this model has no
 # plain-string mode, so the disable that mistral-small encodes as "none"
 # (#38564) is not sayable here and the ladder carries no "none".
-# Streaming stays off for the same measured reason: a streamed turn at
-# effort "low" (captured 2026-11-06) delivered the whole answer inside
-# list-shaped delta.content and no plain-string delta at all, and the
-# streaming consumer reads only plain-string deltas -- turning streaming
-# on silently drops the entire answer (#49352 covers the delta parser).
+# Streaming answers arrive the same chunk-list way (captured 2026-11-06,
+# effort low): thinking fragments as thinking chunks, the answer in the
+# final chunk that carries finish_reason stop, and no plain-string delta
+# with answer text at all. The streaming consumer now reads that shape, so
+# native streaming is back on (#49352).
+# Replay takes the trace back the same way (probed live 2026-11-06): the
+# endpoint answers 200 to the assistant content resent as its own chunk
+# list and 422 to a reasoning_content member, so the row declares
+# content_chunks as the carrier and always preserves the trace (#49352).
 [[models]]
 model_id = "mistral-large-4"
 base = "openai_chat_extended"
 accepted_reasoning_efforts = ["low", "medium", "high"]
+content_inline_reasoning = "content_chunks"
+reasoning_replay = "preserve_always"
 provider_name = "mistral"
 max_context_tokens = 1000000
 input_per_million = 0.7
@@ -2299,7 +2305,7 @@ supports_response_format_json = true
 supports_structured_output = true
 supports_multimodal_inputs = true
 supports_image_input = true
-supports_native_streaming = false
+supports_native_streaming = true
 
 # Cohere Command Models
 [[models]]

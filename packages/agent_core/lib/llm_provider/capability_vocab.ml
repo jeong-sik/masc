@@ -90,6 +90,12 @@ type content_inline_reasoning =
   | No_content_inline_reasoning
   | Think_tags
   | Think_tags_with_chat_replay
+  (* Reasoning travels as structured chunk objects inside chat content: the
+     response's message.content is a list whose thinking chunks carry the
+     trace (mistral-large-4, recorded live 2026-11-06, #49352), and replay
+     resends the assistant content as that same chunk list -- the endpoint
+     answers 422 to a reasoning_content member. *)
+  | Content_chunks
 
 (** Structured-output tier a resolved model/provider capability advertises.
 
@@ -634,7 +640,8 @@ let reasoning_output_format_of_string raw =
 
 let content_inline_reasoning_table =
   [ "none", No_content_inline_reasoning; "think_tags", Think_tags
-  ; "think_tags_with_chat_replay", Think_tags_with_chat_replay ]
+  ; "think_tags_with_chat_replay", Think_tags_with_chat_replay
+  ; "content_chunks", Content_chunks ]
 ;;
 
 let content_inline_reasoning_values = List.map fst content_inline_reasoning_table

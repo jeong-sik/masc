@@ -643,7 +643,7 @@ let test_minimax_native_catalog_replay_for_model model_id =
     let dialect = Reasoning_dialect.for_provider_config config in
     let inline_reasoning = match caps.content_inline_reasoning with
       | Capabilities.Think_tags | Capabilities.Think_tags_with_chat_replay -> true
-      | Capabilities.No_content_inline_reasoning -> false
+      | Capabilities.No_content_inline_reasoning | Capabilities.Content_chunks -> false
     in
     let state = Streaming.create_openai_stream_state ~inline_reasoning
         ~preserve_inline_content:(caps.content_inline_reasoning=Capabilities.Think_tags_with_chat_replay) () in

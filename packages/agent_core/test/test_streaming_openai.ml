@@ -2228,6 +2228,61 @@ let test_reported_prelude_is_request_local () =
   Alcotest.(check bool) "terminal sentinel closed the prelude window" true (later=[])
 ;;
 
+(* mistral-large-4 streams the whole answer inside list-shaped
+   delta.content: thinking fragments as thinking chunks (some with a
+   "closed" marker, one without) and the visible text in the final chunk
+   that also carries finish_reason stop -- no plain-string delta ever
+   carries answer text. Recorded live 2026-11-06, reasoning_effort=low,
+   api.mistral.ai (#49352); the trailing "p" members are the endpoint's
+   prefix-cache hints and mean nothing to the parser. *)
+let test_mistral_chunk_list_stream_finalizes () =
+  let data_lines =
+    [ {|{"id":"mistral-stream","object":"chat.completion.chunk","model":"mistral-large-4","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}|}
+    ; {|{"id":"mistral-stream","object":"chat.completion.chunk","model":"mistral-large-4","choices":[{"index":0,"delta":{"content":""},"finish_reason":null}],"p":"abcdefghijkl"}|}
+    ; {|{"id":"mistral-stream","object":"chat.completion.chunk","model":"mistral-large-4","choices":[{"index":0,"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":"The user wants"}],"closed":true}]},"finish_reason":null}],"p":"abcd"}|}
+    ; {|{"id":"mistral-stream","object":"chat.completion.chunk","model":"mistral-large-4","choices":[{"index":0,"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":" me to reply with"}],"closed":true}]},"finish_reason":null}],"p":"abcdefghijklmn"}|}
+    ; {|{"id":"mistral-stream","object":"chat.completion.chunk","model":"mistral-large-4","choices":[{"index":0,"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":" the single word \""}],"closed":true}]},"finish_reason":null}],"p":"abcde"}|}
+    ; {|{"id":"mistral-stream","object":"chat.completion.chunk","model":"mistral-large-4","choices":[{"index":0,"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":"ok\". I should"}],"closed":true}]},"finish_reason":null}],"p":"abcdefghijkl"}|}
+    ; {|{"id":"mistral-stream","object":"chat.completion.chunk","model":"mistral-large-4","choices":[{"index":0,"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":" just"}]}]},"finish_reason":null}],"p":"abcdefghijklmnopqrstuvwxyz012345"}|}
+    ; {|{"id":"mistral-stream","object":"chat.completion.chunk","model":"mistral-large-4","choices":[{"index":0,"delta":{"content":[{"type":"thinking","thinking":[{"type":"text","text":" output exactly that."}],"closed":true}]},"finish_reason":null}],"p":"a"}|}
+    ; {|{"id":"mistral-stream","object":"chat.completion.chunk","model":"mistral-large-4","choices":[{"index":0,"delta":{"content":[{"type":"thinking","thinking":[]},{"type":"text","text":"ok"}]},"finish_reason":"stop"}],"usage":{"prompt_tokens":22,"total_tokens":46,"completion_tokens":24,"prompt_tokens_details":{"cached_tokens":0},"completion_tokens_details":{"reasoning_tokens":20},"service_tier":"standard"},"p":"abcdefghijklmnopqrstuvwxyz01234"}|}
+    ]
+  in
+  let state = S.create_openai_stream_state ~provider:"mistral" ~model:"mistral-large-4" () in
+  let acc = Acc.create_stream_acc () in
+  List.iter
+    (fun data ->
+       match S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning data with
+       | S.Openai_chunk _ as parsed ->
+         let events, _telemetry = S.openai_sse_parse_result_to_events state parsed in
+         List.iter (Acc.accumulate_event acc) events
+       | S.Openai_empty -> ()
+       | S.Openai_done
+       | S.Openai_provider_error _
+       | S.Openai_parse_failed _
+       | S.Openai_undeclared_reasoning_member _ ->
+         Alcotest.failf "captured stream must parse: %s" data)
+    data_lines;
+  (match Acc.finalize_stream_acc acc with
+   | Ok { content; usage = Some usage; _ } ->
+     (match content with
+      | [ Thinking { signature; content = trace }; Text text ] ->
+        Alcotest.(check bool) "thinking unsigned" true (signature = None);
+        Alcotest.(check string)
+          "thinking fragments concatenate in arrival order"
+          "The user wants me to reply with the single word \"ok\". I should just output exactly that."
+          trace;
+        Alcotest.(check string) "visible answer from the last chunk" "ok" text;
+        Alcotest.(check int) "usage input" 22 usage.input_tokens;
+        Alcotest.(check int) "usage output counts the thinking tokens" 24 usage.output_tokens
+      | _ ->
+        Alcotest.failf
+          "expected [Thinking; Text] from the chunk-list stream, got %d block(s)"
+          (List.length content))
+   | Ok _ -> Alcotest.fail "expected usage on the terminal chunk"
+   | Error _ -> Alcotest.fail "captured chunk-list stream must finalize")
+;;
+
 
 let () =
   let open Alcotest in
@@ -2434,6 +2489,12 @@ let () =
             "id-less complete calls stay distinct across chunks"
             `Quick
             test_ollama_idless_complete_calls_are_distinct_across_chunks
+        ] )
+    ; ( "mistral_chunk_list_stream"
+      , [ test_case
+            "chunk-list stream finalizes thinking then answer"
+            `Quick
+            test_mistral_chunk_list_stream_finalizes
         ] )
     ]
 ;;

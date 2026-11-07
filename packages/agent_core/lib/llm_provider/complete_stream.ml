@@ -145,7 +145,7 @@ let%test "OpenAI-compatible parser reads only the declared reasoning member" =
    Only the explicit content contract authorizes parsing reply bytes as tags. *)
 let inline_reasoning_enabled = function
   | Capabilities.Think_tags | Capabilities.Think_tags_with_chat_replay -> true
-  | Capabilities.No_content_inline_reasoning -> false
+  | Capabilities.No_content_inline_reasoning | Capabilities.Content_chunks -> false
 ;;
 
 (* Per-provider clean-stream regression guards for the phantom-completion check
@@ -736,7 +736,8 @@ let complete_stream_http
                       ~inline_reasoning
                       ~preserve_inline_content:(match content_inline_reasoning with
                         | Capabilities.Think_tags_with_chat_replay -> true
-                        | Capabilities.Think_tags | Capabilities.No_content_inline_reasoning -> false)
+                        | Capabilities.Think_tags | Capabilities.No_content_inline_reasoning
+                        | Capabilities.Content_chunks -> false)
                       ()
                   in
                   openai_state := Some s;

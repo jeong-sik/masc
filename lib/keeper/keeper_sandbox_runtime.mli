@@ -375,21 +375,8 @@ val image_preflight_start_error : classified_error -> string
 val ensure_keeper_sandbox_runtime : timeout_sec:float -> (string list, string) result
 val ensure_keeper_sandbox_runtime_optional : ?timeout_sec:float -> unit -> (string list, string) result
 
-(** Internals exposed for unit testing the docker inspect output
-    parser (#10488 regression coverage).  The parser result is
-    projected onto a tuple
-    [(owner_pid, started_at, running, ttl_sec, container_kind)] so the test
-    does not need a re-exported record type. *)
+(** Exposed for the #10488 trailing-tab test: [parse_live_container_line]
+    needs the empty last field that [nonempty_lines] keeps. *)
 module For_testing : sig
   val nonempty_lines : string -> string list
-
-  val parse_inspect_line
-    :  string
-    -> ( int option
-       * float option
-       * bool option
-       * float option
-       * string option
-       , string )
-       result
 end

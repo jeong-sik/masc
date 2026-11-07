@@ -5079,7 +5079,7 @@ let startup_http_response router path =
   let output = Buffer.create 512 in
   let connection =
     Httpun.Server_connection.create (fun reqd ->
-      Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+      Http_server_eio.Router.dispatch router (Httpun.Reqd.request reqd) (Http_reqd.of_httpun reqd))
   in
   let wire =
     Printf.sprintf "GET %s HTTP/1.1\r\nHost: 127.0.0.1:8935\r\n\r\n" path

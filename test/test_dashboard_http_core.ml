@@ -70,11 +70,11 @@ module Auth = Auth
 module Workspace = Masc.Workspace
 module Dashboard_http_keeper = Dashboard_http_keeper
 
-(* [Server_dashboard_http_keeper_api.tool_call_entries] answers
+(* [Server_dashboard_http_keeper_tool_calls.tool_call_entries] answers
    [Error Index_unavailable] when the read index cannot be read (audit F397);
    the cases here are about rows, so that failure fails the case. *)
 let tool_call_entries_exn ~keeper_name ~limit =
-  match Server_dashboard_http_keeper_api.tool_call_entries ~keeper_name ~limit with
+  match Server_dashboard_http_keeper_tool_calls.tool_call_entries ~keeper_name ~limit with
   | Ok rows -> rows
   | Error (Masc.Keeper_tool_call_log.Index_unavailable detail) -> Alcotest.fail detail
 

@@ -10,7 +10,8 @@
 | agent heartbeat, subscribe, fast fanout | `gRPC` (`:8936`) | 양방향 스트림, backlog replay, typed contract | `gRPC subscribers`, `active streams` |
 | browser/operator duplex bridge | `WebSocket` (`/ws` same-origin upgrade) **Experimental** | request/response를 한 socket에서 처리하기 좋음 | `WebSocket sessions` |
 | stateless scripting, queue trigger, worker bootstrap | `Streamable HTTP` (`POST /mcp`) | curl/harness에서 가장 단순하고 canonical | `primary path`, `recent messages`, `active ops` |
-| 브라우저 다중 탭 / 다중 stream | `HTTP/2 h2c` (`MASC_USE_H2=1` 또는 `auto`) | SSE multiplexing으로 브라우저 connection limit 회피 | `HTTP listener_mode`, `multiplex_ready` |
+| 브라우저 다중 탭 / 다중 stream | `HTTPS :8938` (TLS, ALPN h2) | 브라우저는 TLS 에서만 HTTP/2 를 말한다. 한 연결에 SSE 스트림 여럿, origin 당 6연결 상한 밖 | `https_listener.alpn_h2_total`, `multiplex_ready` |
+| 스크립트·harness 의 HTTP/2 | `h2c` (8935, `--http2-prior-knowledge`) | TLS 없이 한 연결 멀티플렉스. 경로 표는 8938 과 같다 | `HTTP listener_mode` |
 
 ## Dashboard
 
@@ -111,6 +112,28 @@ curl --http2-prior-knowledge -sS http://127.0.0.1:8935/mcp \
   }'
 ```
 
+### 3b. HTTPS path (TLS, ALPN h2)
+
+```bash
+curl -k --http2 -sv https://127.0.0.1:8938/health 2>&1 | rg 'ALPN|HTTP/2 200'
+
+curl -k --http2 -sS https://127.0.0.1:8938/mcp \
+  -H 'Content-Type: application/json' \
+  -H 'Accept: application/json, text/event-stream' \
+  -d '{
+    "jsonrpc":"2.0",
+    "id":1,
+    "method":"initialize",
+    "params":{
+      "protocolVersion":"2025-03-26",
+      "capabilities":{},
+      "clientInfo":{"name":"https-playbook","version":"1.0"}
+    }
+  }'
+```
+
+같은 경로 표라 응답은 8935 와 같다. 자체 서명 인증서면 `-k`. 포트·인증서·cloudflared 설정은 `docs/guides/https-and-http2.md`.
+
 ### 4. gRPC health and subscribe
 
 ```bash
@@ -134,3 +157,4 @@ curl -sS http://127.0.0.1:8935/ws
 - `gRPC subscribers`가 높고 `broadcast avg`도 같이 오르면 fanout source는 SSE bridge일 가능성이 크다.
 - multi-node / distributed mode에서는 transport 자체보다 `managed_units`, `active_operations`, `stale_units`를 같이 봐야 한다.
 - canonical public control path는 여전히 `POST /mcp`다. WS/gRPC는 특정 latency/duplex 문제가 있을 때 올린다.
+- 브라우저 탭이 HTTP/2 로 붙었는지는 DevTools 의 Protocol 열이나 `https_listener.alpn_h2_total` 로 본다. `https_listener.status` 가 `bind_failed` 면 cleartext 8935 만 산다.

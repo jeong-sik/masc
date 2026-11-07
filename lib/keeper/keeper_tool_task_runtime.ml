@@ -846,9 +846,8 @@ let handle_keeper_task_tool_with_outcome
           , Keeper_tool_outcome.to_json
               (Keeper_tool_outcome.Error
                  { reason = Printf.sprintf "keeper_task_claim rejected: %s" e }) )
-      (* A claimed task carries no typed_outcome field. Keeper_tool_outcome
-         .is_nonprogress reads its absence the same as Progress, and adding the
-         field here would change the tool payload. *)
+      (* A claimed task carries no typed_outcome field, and adding the field
+         here would change the tool payload. *)
       | Workspace.Claim_next_claimed _ -> None
     in
     let payload =

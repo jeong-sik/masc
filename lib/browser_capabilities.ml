@@ -298,7 +298,7 @@ let support backend operation = match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~mode:"cookies" Read
           [observed;Printf.sprintf "Explicit tabId and an explicit ego browser. Lists the cookies the tab's top document sees, at most %d with the total: name, domain, path, secure and httpOnly, and sameSite and expiry when the cookie has them. A cookie value is never returned (valuesWithheld)." Browser_lane.storage_cookies_limit;
            Printf.sprintf "Also lists the page origin's localStorage and sessionStorage keys and its IndexedDB database names under storage, at most %d each with their count, each name cut at %d characters. An area the page may not use answers its error instead. Storage values are never read (storageValuesWithheld)." Browser_lane.storage_names_limit Browser_lane.storage_name_chars;
-           "The cookies a frame of another site holds for its own site are not listed.";
+           "The cookies a frame of another site holds for its own site are not listed. Names come back as the site wrote them, and a name can carry an account, user or session id.";
            ego_pages]
       | Safari_unavailable -> missing)
     | Read_network -> (match backend with

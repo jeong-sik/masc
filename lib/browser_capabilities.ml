@@ -38,6 +38,7 @@ let viewport_bounds = Printf.sprintf "width and height are CSS pixels between %d
 let observed = "Keep the observed browser identity and tabId; re-read after an effect or an unknown outcome."
 let target = "Use one freshly observed selector or documentId/nodeId; the target must be visible and unobstructed."
 let geometry = "Use the current documentId and viewport geometry; stale URL/document/viewport is refused."
+let window_scope = "windowId is opaque and only comparable within one connection. There is no window title, size or position."
 let ego_pages = "Only a Page the ego task space manages, including an explicitly adopted Page; an unmanaged operator tab must be adopted before a read or effect."
 (* A read every connection serves, which an ego connection serves only on its own pages. *)
 let read backend invocation constraints = match backend with
@@ -86,7 +87,11 @@ let support backend operation = match backend with
           [observed;ego_agent_pages;"Requires expectedUrl. Uses native TaskSpace CDP to activate this Page and restore its window only when minimized. Reports native active/window state; it does not prove rendered UI or OS focus. Use before hand_off, never while delegated to the operator."]
       | Safari_unavailable -> missing)
     | List_windows -> (match backend with
-      | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
+      | Connected Browser_lane.Ego_task_space -> conditional Tabs
+          ["Every list_tabs row carries windowId when ego places the tab in a window; tabs with the same windowId share a window, and the distinct values are the windows.";
+           "An ego task space is one browser window: popups the agent opens become tabs of it.";
+           window_scope]
+      | Safari_unavailable -> missing)
     | Create_window -> (match backend with
       | Connected Browser_lane.Ego_task_space | Safari_unavailable -> missing)
     | Close_window -> missing

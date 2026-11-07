@@ -315,6 +315,35 @@ let test_tabs_are_numbered_by_label () =
   let unreadable = opened (fun _ -> answered (`List [obj ["label",`Null;"title",str "x";"url",str "y";"active",`Bool true]])) in
   ignore (before_effect "a tab without a label or target" (dispatch unreadable Live.Tabs_list (obj [])))
 
+(* The inventory script asks ego for each tab's window; a tab ego does not
+   place in a window comes back without windowId. The tab surface that reads
+   project their tab list through keeps the window. *)
+let test_tabs_carry_the_window_ego_names () =
+  let module Surface=Masc.Browser_surface in
+  let with_window window = function
+    | `Assoc fields -> `Assoc (fields @ ["windowId",window])
+    | _ -> fail "a tab row is an object" in
+  let slack = tab_row ~label:(str "p1") ~target:"T1" ~title:"Slack" ~url:"https://app.slack.com/" ~active:true () in
+  let blank = tab_row ~label:(str "p2") ~target:"T2" ~title:"" ~url:"about:blank" ~active:false () in
+  let listing = ref (`List [with_window (`Int 7) slack; blank]) in
+  let peer = opened (fun sent -> match sent.step with
+    | "tabs.list" -> answered !listing
+    | other -> failf "unexpected step %s" other) in
+  (match dispatch peer Live.Tabs_list (obj []) with
+   | Ok rows ->
+     check (list (option int)) "the window ego named, and none for the tab it did not place" [Some 7; None]
+       (List.map (fun row -> Yojson.Safe.Util.(row |> member "windowId" |> to_int_option)) (Yojson.Safe.Util.to_list rows));
+     let surface tab_id = match Surface.inventory_tab ~tab_id rows with
+       | Ok tab -> tab.Surface.window_id
+       | Error detail -> failf "the tab surface refused tab %d: %s" tab_id detail in
+     check (list (option int)) "the tab surface keeps it" [Some 7; None]
+       (List.map (fun row -> surface Yojson.Safe.Util.(row |> member "id" |> to_int)) (Yojson.Safe.Util.to_list rows))
+   | Error _ -> fail "tabs were not listed");
+  List.iter (fun (label, window) ->
+    listing := `List [with_window window slack];
+    ignore (before_effect label (dispatch peer Live.Tabs_list (obj []))))
+    ["a negative window",`Int (-1); "a window named by text",str "7"; "a null window",`Null]
+
 let test_page_provenance_survives_document_projection () =
   let module Surface=Masc.Browser_surface in
   let peer=opened (fun sent -> match sent.step with
@@ -1440,10 +1469,14 @@ let test_the_scripts_parse_as_modules () =
     | _, Unix.WEXITED 0 -> ()
     | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> failf "the %s script does not parse as a module" step)
     !scripts;
-  List.iter (fun (step, script) -> if String.equal step "page.touch" then begin
+  List.iter (fun (step, script) -> match step with
+    | "page.touch" ->
       check bool "touch is CDP touch events" true (contains script "Input.dispatchTouchEvent");
       check bool "a failed touch is cancelled" true (contains script "touchCancel");
-      check bool "with no touch emulation" false (contains script "setTouchEmulationEnabled") end)
+      check bool "with no touch emulation" false (contains script "setTouchEmulationEnabled")
+    | "tabs.list" ->
+      check bool "the tab list asks the browser for each tab's window" true (contains script "Browser.getWindowForTarget")
+    | _ -> ())
     !scripts
 
 let test_capture_reads_and_removes_the_file () =
@@ -4115,6 +4148,7 @@ let () =
       test_case "space inspection preserves user ownership and uncertain listings" `Quick test_space_name_inspection_is_read_only_and_requires_evidence;
       test_case "a claim reclaims only the Space that was asked for" `Quick test_a_claim_reclaims_only_the_space_that_was_asked_for;
       test_case "tabs are numbered by page label" `Quick test_tabs_are_numbered_by_label;
+      test_case "tabs carry the window ego names" `Quick test_tabs_carry_the_window_ego_names;
       test_case "a tab that left the listing loses its number" `Quick test_a_tab_that_left_the_listing_loses_its_number;
       test_case "an ego error is cut" `Quick test_an_ego_error_is_cut;
       test_case "taps and swipes are CDP touch events on the page" `Quick test_touch_is_cdp_touch_on_the_page;

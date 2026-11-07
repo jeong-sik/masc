@@ -1,0 +1,9 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>masc L5 window probe</title></head>
+<body>
+<p><a id="blank" href="/index.html?child" target="_blank">new tab</a></p>
+<p><button id="popup" onclick="window.open('/index.html?popup', 'masc-l5-popup', 'popup,width=480,height=360')">popup window</button></p>
+<script>
+window.busy = (ms) => setTimeout(() => { const until = performance.now() + ms; while (performance.now() < until) {} }, 0);
+</script>
+</body></html>

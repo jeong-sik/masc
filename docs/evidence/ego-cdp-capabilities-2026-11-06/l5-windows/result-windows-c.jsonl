@@ -1,0 +1,19 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"space","at":"2026-11-06T12:13:31.926Z","value":41}
+{"step":"goto","at":"2026-11-06T12:13:32.030Z","value":{}}
+{"step":"r1.busy","at":"2026-11-06T12:13:32.032Z","value":true}
+{"step":"r1.settle","at":"2026-11-06T12:13:32.233Z","value":true}
+{"step":"r1.window","at":"2026-11-06T12:13:32.234Z","value":{"value":{"windowId":1426150659,"bounds":{"left":0,"top":33,"width":1728,"height":1031,"windowState":"maximized"}},"ms":1}}
+{"step":"r1.tabs","at":"2026-11-06T12:13:32.235Z","value":{"value":1,"ms":2}}
+{"step":"r1.page","at":"2026-11-06T12:13:35.033Z","value":{"value":1793967215032,"ms":2800}}
+{"step":"r2.busy","at":"2026-11-06T12:13:35.034Z","value":true}
+{"step":"r2.settle","at":"2026-11-06T12:13:35.235Z","value":true}
+{"step":"r2.window","at":"2026-11-06T12:13:35.235Z","value":{"value":{"windowId":1426150659,"bounds":{"left":0,"top":33,"width":1728,"height":1031,"windowState":"maximized"}},"ms":0}}
+{"step":"r2.tabs","at":"2026-11-06T12:13:35.237Z","value":{"value":1,"ms":2}}
+{"step":"r2.page","at":"2026-11-06T12:13:38.034Z","value":{"value":1793967218034,"ms":2799}}
+{"step":"r3.busy","at":"2026-11-06T12:13:38.035Z","value":true}
+{"step":"r3.settle","at":"2026-11-06T12:13:38.236Z","value":true}
+{"step":"r3.window","at":"2026-11-06T12:13:38.236Z","value":{"value":{"windowId":1426150659,"bounds":{"left":0,"top":33,"width":1728,"height":1031,"windowState":"maximized"}},"ms":0}}
+{"step":"r3.tabs","at":"2026-11-06T12:13:38.237Z","value":{"value":1,"ms":1}}
+{"step":"r3.page","at":"2026-11-06T12:13:41.036Z","value":{"value":1793967221035,"ms":2800}}
+{"step":"finish","at":"2026-11-06T12:13:41.039Z","value":{"spaceId":41,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1"],"preservedUnmanagedCount":0}}

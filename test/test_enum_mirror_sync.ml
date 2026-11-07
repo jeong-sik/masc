@@ -549,7 +549,7 @@ let test_capability_table_sharing_is_listed () =
   let module Cap = Masc.Browser_capabilities in
   let allowed =
     [ [ "list_tabs"; "list_windows"; "read_dialog" ] (* BrowserTabs list_tabs rows carry windowId and dialog *)
-    ; [ "list_tabs"; "read_dialog" ] (* ego list_tabs rows carry the dialog and no windowId *)
+    ; [ "list_tabs"; "list_windows" ] (* ego list_tabs rows carry windowId; its dialog is a separate read *)
     ; [ "middle_click"; "right_click" ] (* click_at with a button *)
     ; [ "key_chord"; "press_key" ] (* press_key with modifiers *)
     ; [ "html5_drop"; "pointer_drag" ] (* drag_to on an ego connection *)

@@ -402,15 +402,24 @@ let ego_dialog json : (Browser_surface.dialog, string) result =
   | _ -> Error "ego reported a JavaScript dialog without its type or message"
 
 (* Native inventory is independent of renderer-backed Page.info. A modal
-   retained across SDK-session replacement must not hide its Page identity. *)
+   retained across SDK-session replacement must not hide its Page identity.
+   The window comes from the browser process as well: Browser.getWindowForTarget
+   answered while the Page's renderer was busy. A tab ego does not place in a
+   window, such as one closing during the read, is listed without windowId. *)
 let tab_inventory_script = {js|async function(task) {
-  return (await task.tabs()).map(tab => ({
+  const windowOf = async tab => {
+    try {
+      const found = await task.cdp("Browser.getWindowForTarget", {targetId: tab.targetId});
+      return found && Number.isSafeInteger(found.windowId) && found.windowId >= 0 ? {windowId: found.windowId} : {};
+    } catch (error) { return {}; }
+  };
+  return Promise.all((await task.tabs()).map(async tab => ({
     label: tab.label ?? null, targetId: tab.targetId, openedBy: tab.openedBy,
-    title: tab.title, url: tab.url, active: tab.active
-  }));
+    title: tab.title, url: tab.url, active: tab.active, ...(await windowOf(tab))
+  })));
 }|js}
 type listed_tab = { page : page; title : string; url : string; active : bool;
-  provenance : Browser_surface.ego_page }
+  window_id : int option; provenance : Browser_surface.ego_page }
 let tab_rows t =
   let* listed = ask t ~step:"tabs.list" ~args:`Null
       ("  emit({ok: true, value: await (" ^ tab_inventory_script ^ ")(task)});") in
@@ -423,9 +432,13 @@ let tab_rows t =
           (obj ["label",label;"targetId",target_id;"openedBy",opened_by])
       | _ -> Error "ego listed a tab without Page provenance" in
     let page=match provenance.label with Some label -> Managed label | None -> Unmanaged provenance.target_id in
+    let* window_id=match field "windowId" json with
+      | None -> Ok None
+      | Some (`Int id) when id >= 0 -> Ok (Some id)
+      | Some _ -> Error "ego listed a tab whose window is not a nonnegative integer" in
     match field "title" json, field "url" json, field "active" json with
     | Some (`String title), Some (`String url), Some (`Bool active) ->
-        Ok {page;title;url;active;provenance}
+        Ok {page;title;url;active;window_id;provenance}
     | _ -> Error "ego listed a tab without its title, URL or active state" in
   let* rows = match listed with
     | `List rows ->
@@ -437,8 +450,9 @@ let tab_rows t =
   let numbered = List.map (fun row -> remember t row.page, row) rows in
   t.pages <- List.filter (fun (page, _) -> List.exists (fun row -> row.page=page) rows) t.pages;
   Ok (`List (List.mapi (fun index (id,row) ->
-    obj (["id",`Int id;"index",`Int index;"url",str row.url;"title",str row.title;"active",`Bool row.active;
-      "egoPage",Browser_surface.ego_page_to_json row.provenance]
+    obj (["id",`Int id;"index",`Int index;"url",str row.url;"title",str row.title;"active",`Bool row.active]
+      @ (match row.window_id with Some window_id -> ["windowId",`Int window_id] | None -> [])
+      @ ["egoPage",Browser_surface.ego_page_to_json row.provenance]
       @ Browser_surface.dialog_observation_fields Unobserved)) numbered))
 
 let unmanaged_refused = "is unmanaged in the ego task space; this connection reads only the pages the space manages"

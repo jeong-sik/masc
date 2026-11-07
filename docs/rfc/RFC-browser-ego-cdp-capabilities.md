@@ -104,7 +104,7 @@ CDP 로 바꾼 설정(화면 크기, 터치 흉내, 언어·시간대·위치, �
 | read_html | 다른 연결이 쓰는 문서 함수(`Browser_lane.Document.runtime` 의 `browserDocument()`)를 그대로 돌린다. doctype 없이 `outerHTML` 을 준다. 1 MiB 를 넘으면 다른 연결처럼 `html: null`, `htmlComplete: false` 로 답한다 |
 | resize_viewport | `setDeviceMetricsOverride` 로 크기를 바꾸고, 빈 요청은 `clearDeviceMetricsOverride` 로 되돌린다. 범위는 BiDi 와 같은 100–4096 이다. 해제 직후 읽으면 옛 크기가 보일 때가 있어서(100번 중 13번), 해제는 크기가 바뀌거나 2초가 지날 때까지 기다린 뒤 receipt 를 읽는다 |
 | touch (tap_at, swipe) | touch 흉내 없이 `dispatchTouchEvent` 로 누르고 뗀다. 흉내를 켜면 페이지의 `maxTouchPoints` 와 pointer media 가 바뀐다. swipe 는 BiDi 와 같은 구간마다 `durationMs` 동안 16 ms 간격으로 `touchMove` 를 보낸다. 누른 뒤 실패하면 `touchCancel` 로 떼고, 뗐는지를 답에 적는다. 남은 touch 는 그 SDK 프로세스 안에서만 남는다. touch 는 SDK 입력 추적 밖이라 `inputReadiness` 를 바꾸지 않는다(L4 측정) |
-| list_windows | `task.tabs()` 의 각 탭에 `Browser.getWindowForTarget` 을 불러 `windowId` 를 붙인다. 같은 windowId 는 같은 창이다 |
+| list_windows | `task.tabs()` 의 각 탭에 `Browser.getWindowForTarget` 을 한꺼번에 불러 `windowId` 를 붙인다. 같은 windowId 는 같은 창이다. task space 하나가 창 하나이고, agent 가 연 popup 도 그 창의 탭이 된다. 답이 없는 탭(읽는 사이에 닫힌 탭 등)은 `windowId` 없이 둔다. 창 정보는 renderer 가 바빠도 바로 온다(L5 측정) |
 | read_storage | `Network.getCookies` 로 그 페이지가 보는 쿠키의 이름·도메인·속성만 준다. 값은 지워진 Firefox 처럼 돌려주지 않는다. localStorage·sessionStorage 키 이름과 IndexedDB 이름은 `page.evaluate` 로 읽는다 |
 | emulate_environment | locale·timezone·좌표를 `Emulation.*Override` 로 건다. locale 은 Intl 만 바뀐다는 것을 답에 적는다. 좌표를 주면 지워진 Firefox 처럼 그 origin 에 위치 권한도 준다(§4 D3). 권한은 `page.cdp("Browser.setPermission")` 로 준다. task 세션에는 이 명령이 없다. 그 권한은 ego 프로필에서 같은 origin 의 모든 탭에 걸리고, 덮어쓰기와 함께 SDK 프로세스가 끝나면 사라진다. 시간대는 모르는 이름에도 CDP 오류가 없어서, 페이지의 Intl 로 이름을 먼저 고치고 덮어쓴 뒤 다시 읽는다 |
 | intercept_network | `Network.setBlockedURLs` 에 정확한 호스트를 `*://<host>/*` 와 `*://<host>:*/*` 로 넣는다. 하위 도메인은 따로 적어야 한다는 지워진 Firefox 의 규칙을 그대로 둔다 |
@@ -147,7 +147,7 @@ CDP 로 바꾼 설정(화면 크기, 터치 흉내, 언어·시간대·위치, �
 | D1 | console 을 읽으려면 ego 의 자동화 숨김을 잠깐 꺼야 한다. 그동안 사이트가 자동화를 알아챌 수 있다 | 붙인다. 한 명령 안에서 끄고, 읽고, `Runtime.disable` 과 `egoAutomated.enable` 로 되돌린다. 답에 숨김을 끈 구간을 적는다. 되돌리기가 실패하면 그 사실을 답에 적는다 |
 | D2 | 쿠키 쓰기·지우기는 운영자의 실제 로그인을 바꾼다 | 붙인다. 답과 도구 설명에 운영자 프로필의 쿠키가 바뀐다고 적는다 |
 | D3 | 위치 권한을 주면 운영자 프로필의 사이트 권한이 바뀐다 | 권한도 준다. `clear_emulation` 은 지워진 Firefox 처럼 그 권한을 그대로 둔다. 권한이 브라우저를 다시 켠 뒤에도 남는지는 L3 에서 재서 설명에 적는다. L3 측정: CDP 로 준 권한은 SDK 프로세스가 끝나면 사라진다. 프로필에 저장되지 않는다 |
-| D4 | `Target.createTarget({newWindow: true})` 로 만든 탭을 ego task space 가 관리하는지 모른다. close_window 는 어떤 연결에도 없는 새 동작이다 | 붙인다. L10 에서 먼저 잰다. 관리되지 않으면 그 결과를 들고 운영자에게 다시 묻는다. close_window 는 agent 가 연 탭만 있는 창에만 붙이고, 그 창의 탭을 `page.close()` 로 닫는다 |
+| D4 | `Target.createTarget({newWindow: true})` 로 만든 탭을 ego task space 가 관리하는지 모른다. close_window 는 어떤 연결에도 없는 새 동작이다 | 붙인다. L10 에서 먼저 잰다. 관리되지 않으면 그 결과를 들고 운영자에게 다시 묻는다. close_window 는 agent 가 연 탭만 있는 창에만 붙이고, 그 창의 탭을 `page.close()` 로 닫는다. L5 측정: ego 의 `task.cdp` 는 `Target.createTarget` 을 막는다(`not allowed`). agent 가 연 `window.open` popup 도 task space 창의 탭이 된다. L10 앞에 이 결과로 운영자에게 다시 묻는다 |
 | D5 | #49064 가 automation Firefox 와 함께 지운 6개를 어떻게 할지 | ego 전용으로 다시 붙인다. 지워진 동작 이름과 인자를 되살리고, ego 만 받는다(§3.5) |
 
 ## 5. 구현 순서
@@ -160,7 +160,7 @@ gh stack 한 스택에 층을 쌓는다. 층마다 기능 목록(`lib/browser_ca
 | L2 | `sdkProcessStartedAt` 과 `lifetime` 필드. resize_viewport | 크기를 바꾸고 scene viewport 로 확인한다. 세션 프로세스를 바꾼 뒤 시각이 바뀌고 크기가 돌아오는지 본다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l2-viewport/README.md)) |
 | L3 | emulate_environment (D3·D5 반영) | Intl locale·시간대를 읽는다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l3-environment/README.md)) |
 | L4 | touch (tap_at, swipe) | 페이지가 기록한 pointerType 과 touch 이벤트를 본다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l4-touch/README.md)) |
-| L5 | list_windows | 탭마다 windowId 를 본다 |
+| L5 | list_windows | 탭마다 windowId 를 본다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l5-windows/README.md)) |
 | L6 | intercept_network (D5) | 차단한 호스트의 fetch 실패와 풀린 뒤 성공을 본다 |
 | L7 | read_storage (D5) | 쿠키 이름과 저장소 키 이름. 값이 없는지 본다 |
 | L8 | events 버퍼 함수 하나와 read_network (D5) | workflow `events` 와 read_network 를 번갈아 불러 이벤트가 사라지지 않는지 본다 |

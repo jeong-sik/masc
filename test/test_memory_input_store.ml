@@ -126,7 +126,7 @@ let test_valid_store_reaches_input_summary () =
         check int "all valid requests counted" 2 distribution.samples)
 
 module Inspector = Masc_tui_context_inspector
-module Api = Server_dashboard_http_keeper_api
+module Turn_reads = Server_dashboard_http_keeper_turn_reads
 
 let encoded_record record = Yojson.Safe.to_string (Turn_record.to_json record)
 
@@ -201,7 +201,7 @@ let with_exact_api fn =
       let lookup ?(keeper = "omega") query =
         let target = Uri.make ~path:("/api/v1/keepers/" ^ keeper ^ "/turn-records") ~query ()
           |> Uri.to_string in
-        Api.keeper_turn_record_lookup_response ~config ~keeper_name:keeper
+        Turn_reads.keeper_turn_record_lookup_response ~config ~keeper_name:keeper
           (Httpun.Request.create `GET target) in
       fn path lookup))
 

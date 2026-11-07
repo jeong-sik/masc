@@ -22,28 +22,6 @@ val keeper_metrics_response :
     and invalid metric records count as skipped; valid heartbeat rows belong
     to the summary. Missing stores are empty, read failures are 503. *)
 
-val keeper_turn_record_lookup_response :
-  config:Workspace.config ->
-  keeper_name:string ->
-  Httpun.Request.t ->
-  ([ `OK | `Bad_request | `Not_found | `Service_unavailable ]
-   * Yojson.Safe.t) option
-(** Exact [GET /turn-records?turn_ref=...] lookup. [None] means no exact query
-    was supplied, so the existing recent-page handler owns the request.
-    Malformed/repeated queries return 400; a canonical match returns 200,
-    readable absence 404, and unreadable or indeterminate history 503.
-    The shared I/O pool owns the scan; failures never rerun it inline. *)
-
-val keeper_turn_transcript_lookup_response :
-  config:Workspace.config ->
-  keeper_name:string ->
-  Httpun.Request.t ->
-  [ `OK | `Bad_request | `Service_unavailable ] * Yojson.Safe.t
-(** Required, unique Turn_ref query. Strict retained-history read through the
-    shared I/O pool: malformed query 400, unreadable/incomplete observation 503,
-    and a readable transcript (including explicit absence) 200. The successful
-    envelope includes the v2 schema identifying the retained-history contract. *)
-
 val file_changes_default_window_hours : float
 val file_changes_max_window_hours : float
 (** Shared read-cost bounds for durable file-change projections. The

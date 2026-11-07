@@ -21,40 +21,10 @@
 
 open Keeper_approval_lifecycle
 
-let sanitize_name name =
-  Workspace_utils_backend_setup.sanitize_namespace_segment name
-
-let chat_dirname = "keeper_chat"
-
-let chat_dir base_dir =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) chat_dirname
-
-let chat_path ~base_dir ~keeper_name =
-  Filename.concat (chat_dir base_dir) (sanitize_name keeper_name ^ ".jsonl")
-
-let persistence_surface = "keeper_chat_store"
-
-let record_persistence_read_drop ~reason () =
-  Otel_metric_store.inc_counter
-    Otel_metric_store.metric_persistence_read_drops
-    ~labels:[("surface", persistence_surface); ("reason", reason)]
-    ()
-
-let report_persistence_read_drop ~reason ~path ~detail =
-  let reason_wire = Read_drop_reason.to_wire reason in
-  Safe_ops.report_persistence_read_drop
-    ~on_drop:(fun () -> record_persistence_read_drop ~reason:reason_wire ())
-    ~surface:persistence_surface
-    ~reason
-    ~path
-    ~detail
-
-let ensure_dir_once ~base_dir =
-  ignore (Keeper_fs.ensure_dir (chat_dir base_dir))
-
 include Keeper_chat_types
 
 open Keeper_chat_projection
+include Keeper_chat_store_paths
 
 (* The GitHub CLI credential ([hosts.yml]) lives outside the generic keeper
    secret projection roots (see [Keeper_github_identity]), so the plain
@@ -3219,7 +3189,6 @@ type turn_transcript = Keeper_chat_projection.turn_transcript = {
 
 let transcript_of_messages = Keeper_chat_projection.transcript_of_messages
 let turn_transcript_to_json = Keeper_chat_projection.turn_transcript_to_json
-
 
 let exact_transcript_row_identity line =
   let open Result.Syntax in

@@ -679,6 +679,43 @@ let all =
       ~category:Transport
       "Maximum retained application response payload bytes across one listener"
   ; setting
+      ~range:(int_range ~min:0 ~max:65535 ())
+      ~effective:
+        (Reader
+           (fun () ->
+              (match Env_config_runtime.Transport.https_port () with
+               | Some port -> display_int port
+               | None -> "0")))
+      ~env_name:"MASC_HTTPS_PORT"
+      ~exposure:(Toml_and_env "transport.https_port")
+      ~value_kind:Integer
+      ~default:(display_int Env_config_runtime.Transport.https_port_default)
+      ~consumers:["Server_bootstrap_http TLS listener"]
+      ~category:Transport
+      "HTTPS listener port (TLS 1.3, ALPN h2 and http/1.1); 0 turns the listener off"
+  ; setting
+      ~effective:
+        (Reader
+           (fun () -> display_string_option (Env_config_runtime.Transport.tls_cert_file ())))
+      ~env_name:"MASC_TLS_CERT_FILE"
+      ~exposure:(Toml_and_env "transport.tls_cert_file")
+      ~value_kind:String
+      ~default:"(none)"
+      ~consumers:["Server_tls_material"]
+      ~category:Transport
+      "PEM certificate chain for the HTTPS listener; unset, a self-signed pair under <base-path>/.masc/tls is used"
+  ; setting
+      ~effective:
+        (Reader
+           (fun () -> display_string_option (Env_config_runtime.Transport.tls_key_file ())))
+      ~env_name:"MASC_TLS_KEY_FILE"
+      ~exposure:(Toml_and_env "transport.tls_key_file")
+      ~value_kind:String
+      ~default:"(none)"
+      ~consumers:["Server_tls_material"]
+      ~category:Transport
+      "PEM private key for MASC_TLS_CERT_FILE; set both or neither"
+  ; setting
       ~range:(float_range ~min:1.0 ~max:60.0 ())
       ~effective:(Reader (fun () -> display_float Env_config_keeper.KeeperGrpc.reconnect_backoff_sec))
       ~env_name:"MASC_KEEPER_GRPC_RECONNECT_BACKOFF_SEC"

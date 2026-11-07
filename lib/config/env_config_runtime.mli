@@ -89,6 +89,26 @@ module Transport : sig
   val grpc_enabled : unit -> bool
   val grpc_target_opt : unit -> string option
   val ws_enabled : unit -> bool
+
+  val https_port_default : int
+  (** 8938. The WebSocket listener holds 8937. *)
+
+  val https_port : unit -> int option
+  (** The HTTPS listener port (TLS 1.3, ALPN [h2] and [http/1.1]), from
+      [MASC_HTTPS_PORT] or TOML [transport.https_port]. [None] when the value
+      is ["0"]: no HTTPS listener. A value that is not a port falls back to
+      {!https_port_default}. *)
+
+  val tls_cert_file : unit -> string option
+  (** [MASC_TLS_CERT_FILE] or TOML [transport.tls_cert_file]: a PEM
+      certificate chain for the HTTPS listener. Set together with
+      {!tls_key_file}; unset, the server uses a self-signed pair under
+      [<base-path>/.masc/tls/]. *)
+
+  val tls_key_file : unit -> string option
+  (** [MASC_TLS_KEY_FILE] or TOML [transport.tls_key_file]: the PEM private
+      key that belongs to {!tls_cert_file}. *)
+
   val serving_domain_enabled : unit -> bool
   val http_auth_strict_env_enabled : unit -> bool
   val startup_watchdog_sec : unit -> float

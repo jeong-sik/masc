@@ -88,6 +88,7 @@ type report =
   ; blobs_observed : int
   ; candidates_recorded : int
   ; deleted : int
+  ; unclassified : string list
   }
 
 let error_to_string = function
@@ -1243,6 +1244,10 @@ let holds_history_media references ~sha256 =
 let run ~base_path ~scope ~mode =
   let open Result.Syntax in
   let store = Tool_blob_store.create ~base_path in
+  let* unclassified =
+    let* entries = unclassified_entries ~base_path scope in
+    Ok (List.map unclassified_entry_to_string entries)
+  in
   let* live_references = live_references ~base_path ~scope in
   let live =
     Live_reference_set.fold
@@ -1268,7 +1273,9 @@ let run ~base_path ~scope ~mode =
     match mode with
     | Observe_only -> String_set.empty
     | Delete_previous_candidates ->
-      String_set.inter previous_candidates current_candidates
+      if unclassified = []
+      then String_set.inter previous_candidates current_candidates
+      else String_set.empty
   in
   let* deleted =
     String_set.fold
@@ -1286,5 +1293,6 @@ let run ~base_path ~scope ~mode =
     ; blobs_observed = String_set.cardinal blobs
     ; candidates_recorded = String_set.cardinal current_candidates
     ; deleted
+    ; unclassified
     }
 ;;

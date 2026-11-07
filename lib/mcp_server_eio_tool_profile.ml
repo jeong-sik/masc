@@ -168,7 +168,7 @@ let label_words_from_identifier ident =
     second parse would read the same bytes to the same answer. A file that
     does not parse raises rather than answering "no title": a misplaced
     declaration and no declaration are the same answer at every call site. *)
-let declared_title_table : string StringMap.t Atomic.t = Atomic.make None
+let declared_title_table : string StringMap.t option Atomic.t = Atomic.make None
 
 (* Memo on first ask. Concurrent askers never sit on a [Lazy] cell:
    [Lazy.force] from concurrent fibers can raise [Lazy.Undefined] or block

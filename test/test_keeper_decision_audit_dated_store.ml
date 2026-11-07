@@ -103,6 +103,58 @@ let test_flushed_records_are_store_readable () =
   check int "every buffered record is readable back" 12 (Dated_jsonl.count_entries store)
 ;;
 
+(* Appends that land while a flush batch is yielding through
+   [Dated_jsonl.append] must keep their unflushed count: the flush tail
+   accounting subtracts only the records that reached the store. The previous
+   clobber-to-zero flush marked such a record flushed without writing it, so
+   it only resurfaced (or was silently lost) at ring overflow. *)
+let test_appends_during_a_flush_batch_stay_unflushed () =
+  with_base "decision-audit-race" @@ fun base_path ->
+  let keeper_name = "decision-audit-race" in
+  (* Pre-open the store so the flush below takes the cached [store_for] path
+     and its first suspension points are the yielding writes. *)
+  let _warm = Dated_jsonl.open_store (audit_location ~base_path ~keeper_name) in
+  for i = 1 to 12 do
+    Audit.append ~keeper_name (record ~keeper_name ~wall_clock:(float_of_int i))
+  done;
+  Eio.Switch.run @@ fun sw ->
+  Eio.Fiber.fork ~sw (fun () ->
+      (* parks at the yields, resumes inside the flush's yielding writes *)
+      Eio.Fiber.yield ();
+      Eio.Fiber.yield ();
+      Audit.append ~keeper_name (record ~keeper_name ~wall_clock:13.0));
+  Audit.flush_if_needed ~base_path ~keeper_name;
+  for i = 14 to 22 do
+    Audit.append ~keeper_name (record ~keeper_name ~wall_clock:(float_of_int i))
+  done;
+  (* the surviving concurrent record plus nine fresh appends trip the batch
+     condition again *)
+  Audit.flush_if_needed ~base_path ~keeper_name;
+  let store = Dated_jsonl.open_store (audit_location ~base_path ~keeper_name) in
+  let read_back = Dated_jsonl.read_recent store 22 in
+  check int
+    "every appended record is readable back, including the one appended \
+     during the flush"
+    22
+    (List.length read_back);
+  check bool
+    "the record appended during the flush is in the store"
+    true
+    (List.exists
+       (function
+         | `Assoc fields ->
+           List.exists
+             (fun (key, value) ->
+               String.equal key "wall_clock"
+               &&
+               match value with
+               | `Float f -> Float.equal f 13.0
+               | _ -> false)
+             fields
+         | _ -> false)
+       read_back)
+;;
+
 let () =
   run
     "Keeper decision audit dated store"
@@ -115,6 +167,10 @@ let () =
             "flushed records read back through the store"
             `Quick
             test_flushed_records_are_store_readable
+        ; test_case
+            "appends during a flush batch stay unflushed"
+            `Quick
+            test_appends_during_a_flush_batch_stay_unflushed
         ] )
     ]
 ;;

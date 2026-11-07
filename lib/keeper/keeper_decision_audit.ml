@@ -184,10 +184,15 @@ let flush_if_needed ~base_path ~keeper_name =
       else begin
         let store = store_for ~base_path ~keeper_name in
         let cap = Array.length ring.buf in
-        let start = ((ring.pos - ring.unflushed) mod cap + cap) mod cap in
+        (* Snapshot the batch before the yielding writes below. Appends that
+           land while [Dated_jsonl.append] yields bump [unflushed] and must
+           keep that count: clobbering the tail to zero here marked records
+           flushed without ever writing them. *)
+        let batch = ring.unflushed in
+        let start = ((ring.pos - batch) mod cap + cap) mod cap in
         let pending =
           let rec gather i acc =
-            if i >= ring.unflushed then List.rev acc
+            if i >= batch then List.rev acc
             else
               let idx = (start + i) mod cap in
               match ring.buf.(idx) with
@@ -196,15 +201,28 @@ let flush_if_needed ~base_path ~keeper_name =
           in
           gather 0 []
         in
-        (try
-          List.iter (Dated_jsonl.append store) pending;
-          ring.unflushed <- 0
-        with Eio.Cancel.Cancelled _ as e -> raise e
-           | e ->
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string DecisionAuditFlushFailures)
-               ~labels:[("keeper", keeper_name)]
-               ();
-             Log.Keeper.warn "decision_audit flush failed: %s" (Printexc.to_string e));
+        let written = ref 0 in
+        Fun.protect
+          ~finally:(fun () ->
+            (* Pure bookkeeping, safe on every exit path: only the snapshot
+               tail that actually reached the store leaves the unflushed
+               region, and records appended during the yielding writes above
+               stay accounted. *)
+            ring.unflushed <- max 0 (ring.unflushed - !written))
+          (fun () ->
+            try
+              List.iter
+                (fun json ->
+                  Dated_jsonl.append store json;
+                  written := !written + 1)
+                pending
+            with Eio.Cancel.Cancelled _ as ex -> raise ex
+               | ex ->
+                 Otel_metric_store.inc_counter
+                   Keeper_metrics.(to_string DecisionAuditFlushFailures)
+                   ~labels:[("keeper", keeper_name)]
+                   ();
+                 Log.Keeper.warn "decision_audit flush failed: %s"
+                   (Printexc.to_string ex));
         ring.last_flush_ts <- now
       end

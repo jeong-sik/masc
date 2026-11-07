@@ -362,12 +362,18 @@ let path text =
   | None -> Alcotest.failf "%S is not a local path" text
 ;;
 
-let start ?(invite = None) t ~return_to =
-  Flow.start ~get:(get t.google) t.cache t.transactions t.client ~now:(now t) ~invite ~return_to
+let session_of text =
+  match Session_id.of_string text with
+  | Ok session_id -> session_id
+  | Error (_ : Authz_id.error) -> Alcotest.failf "%S is not a session id" text
 ;;
 
-let started ?invite t ~return_to =
-  match start ?invite t ~return_to with
+let start ?(invite = None) ?(replaces = None) t ~return_to =
+  Flow.start ~get:(get t.google) t.cache t.transactions t.client ~now:(now t) ~invite ~return_to ~replaces
+;;
+
+let started ?invite ?replaces t ~return_to =
+  match start ?invite ?replaces t ~return_to with
   | Ok started -> started
   | Error error -> Alcotest.fail (Flow.start_error_to_string error)
 ;;
@@ -396,8 +402,8 @@ let callback t id ~state answer =
 ;;
 
 (* The whole way: start, Google, callback. *)
-let login ?invite t ~sub ~return_to =
-  let started = started ?invite t ~return_to in
+let login ?invite ?replaces t ~sub ~return_to =
+  let started = started ?invite ?replaces t ~return_to in
   let code, state = sign_in_at_google t.google ~sub started.authorization_url in
   callback t started.Flow.id ~state (Flow.Code code)
 ;;
@@ -410,10 +416,24 @@ let refusal_of label = function
 let an_invited_person_joins_and_signs_in_later () =
   with_installation (fun t ->
     let joined =
-      match login ~invite:admin_invite t ~sub:"google-sub-1" ~return_to:(path "/keepers?tab=board") with
-      | Ok { Flow.outcome = Login.Admitted { user_id; role = E.Admin; previously_deleted = false }; return_to }
-        ->
+      match
+        login
+          ~invite:admin_invite
+          ~replaces:(Some (session_of "session-1"))
+          t
+          ~sub:"google-sub-1"
+          ~return_to:(path "/keepers?tab=board")
+      with
+      | Ok
+          { Flow.outcome = Login.Admitted { user_id; role = E.Admin; previously_deleted = false }
+          ; return_to
+          ; replaces
+          } ->
         Alcotest.(check string) "back where it started" "/keepers?tab=board" (T.Local_path.to_string return_to);
+        Alcotest.(check (option string))
+          "the session of the browser that started"
+          (Some "session-1")
+          (Option.map Session_id.to_string replaces);
         user_id
       | Ok _ -> Alcotest.fail "not admitted as the invited Admin"
       | Error error -> Alcotest.fail (Flow.callback_error_to_string error)
@@ -531,8 +551,8 @@ let invite_of token =
   | None -> Alcotest.fail "the fixture token is not a token"
 ;;
 
-let github_started ?(invite = None) t ~return_to =
-  match Gh_flow.start t.transactions t.github_client ~now:(now t) ~invite ~return_to with
+let github_started ?(invite = None) ?(replaces = None) t ~return_to =
+  match Gh_flow.start t.transactions t.github_client ~now:(now t) ~invite ~return_to ~replaces with
   | Ok started -> started
   | Error T.Full -> Alcotest.fail "the store is full"
 ;;
@@ -552,8 +572,8 @@ let github_callback t id ~state answer =
 ;;
 
 (* The whole way: start, GitHub, callback. *)
-let github_login ?invite t ~user_id ~return_to =
-  let started = github_started ?invite t ~return_to in
+let github_login ?invite ?replaces t ~user_id ~return_to =
+  let started = github_started ?invite ?replaces t ~return_to in
   let code, state = sign_in_at_github t.github ~user_id started.Gh_flow.authorization_url in
   github_callback t started.Gh_flow.id ~state (Gh_flow.Code code)
 ;;
@@ -578,10 +598,24 @@ let github_signed_in label = function
 let a_github_person_joins_and_signs_in_later () =
   with_installation (fun t ->
     let joined =
-      match github_login ~invite:admin_invite t ~user_id:583231 ~return_to:(path "/keepers?tab=board") with
-      | Ok { Gh_flow.outcome = Login.Admitted { user_id; role = E.Admin; previously_deleted = false }; return_to }
-        ->
+      match
+        github_login
+          ~invite:admin_invite
+          ~replaces:(Some (session_of "session-2"))
+          t
+          ~user_id:583231
+          ~return_to:(path "/keepers?tab=board")
+      with
+      | Ok
+          { Gh_flow.outcome = Login.Admitted { user_id; role = E.Admin; previously_deleted = false }
+          ; return_to
+          ; replaces
+          } ->
         Alcotest.(check string) "back where it started" "/keepers?tab=board" (T.Local_path.to_string return_to);
+        Alcotest.(check (option string))
+          "the session of the browser that started"
+          (Some "session-2")
+          (Option.map Session_id.to_string replaces);
         user_id
       | Ok _ -> Alcotest.fail "not admitted as the invited Admin"
       | Error error -> Alcotest.fail (Gh_flow.callback_error_to_string error)

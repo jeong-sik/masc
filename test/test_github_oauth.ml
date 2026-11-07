@@ -18,7 +18,7 @@ let client =
   | Error error -> failwith (Login_client.error_to_string error)
 ;;
 
-let taken = { T.held = (); code_verifier = verifier; invite = None; return_to = T.Local_path.root }
+let taken = { T.held = (); code_verifier = verifier; invite = None; return_to = T.Local_path.root; replaces = None }
 let answer ?(status = 200) body = Ok { Login_transport.status; headers = []; body }
 
 type github =
@@ -81,7 +81,7 @@ let a_code_becomes_the_numeric_user_id () =
 
 let the_authorization_url_asks_for_this_login () =
   let store = T.create ~capacity:1 in
-  match T.start store ~now_ms:0 T.Github ~invite:None ~return_to:T.Local_path.root with
+  match T.start store ~now_ms:0 T.Github ~invite:None ~return_to:T.Local_path.root ~replaces:None with
   | Error T.Full -> Alcotest.fail "full"
   | Ok started ->
     Alcotest.(check string)

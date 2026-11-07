@@ -13,8 +13,8 @@ type started =
    hundred thousand years. *)
 let ms_of instant = Float.to_int (Ptime.to_float_s instant *. 1000.)
 
-let start transactions client ~now ~invite ~return_to =
-  Transaction.start transactions ~now_ms:(ms_of (now ())) Transaction.Github ~invite ~return_to
+let start transactions client ~now ~invite ~return_to ~replaces =
+  Transaction.start transactions ~now_ms:(ms_of (now ())) Transaction.Github ~invite ~return_to ~replaces
   |> Result.map (fun (started : unit Transaction.started) ->
     { id = started.id; authorization_url = Github_oauth.authorization_url client started })
 ;;
@@ -26,6 +26,7 @@ type answer =
 type completed =
   { outcome : Authz_login.outcome
   ; return_to : Transaction.Local_path.t
+  ; replaces : Authz_types.Session_id.t option
   }
 
 type callback_error =
@@ -64,5 +65,5 @@ let callback ~get ~post transactions zone client ~now ~draw id ~state answer =
       ~invite:(Option.map Transaction.Invite_token.digest taken.invite)
     |> Result.map_error (fun refusal -> Login_refused refusal)
   in
-  Ok { outcome; return_to = taken.return_to }
+  Ok { outcome; return_to = taken.return_to; replaces = taken.replaces }
 ;;

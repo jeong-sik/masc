@@ -173,6 +173,9 @@ backend, and the receipt claims neither.
   not examined. A bound on active runs would be a new gate, and there is no
   measurement yet to choose its number from; whether runs pile up is read from
   the ledger after deploy, and the bound is decided then.
+- If the write of the receipt of a finished run fails, such as on a disk error,
+  the model has only the start result. The failure is in the log and in the
+  result `Keeper_msg_async` keeps for a poller; nothing retries the write.
 - If the startup receipt write fails, recovery settles the record as lost
   anyway. The log line is the only trace of that run.
 - Receipt writes run inside a cancellation guard. Whether the executor pool is

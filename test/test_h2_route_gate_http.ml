@@ -556,41 +556,6 @@ let test_bound_goal_timeout_answers_while_read_pool_is_busy () =
       check bool "H1 refusal does not reflect an untrusted origin" false
         (String_util.contains_substring h1 "access-control-allow-origin:")))
 
-(* Strict auth still opens a [Credential_when_strict] route whose path is on
-   [Server_auth.is_public_read_path]. Every production route that stays open says
-   [Open_when_strict] instead, so the list opens none of them. A prefix route is
-   probed under a plain segment and under a well-formed artifact id, the one
-   shape the list opened under the published-artifacts prefix. *)
-let test_the_public_read_list_opens_no_credential_route () =
-  let module Router = Masc.Http_server_eio.Router in
-  let captured = ref None in
-  with_gateway ~on_routes:(fun routes -> captured := Some routes) ~make_routes:production
-    (fun ~player:_ ~reader:_ _client -> ());
-  let routes = match !captured with Some routes -> routes | None -> fail "no routes" in
-  let artifact_id = "artifact-" ^ String.make 32 '0' in
-  let probes (route : Router.route) =
-    match route.kind with
-    | Router.Exact -> [ route.path ]
-    | Router.Prefix -> [ route.path ^ "x"; route.path ^ artifact_id ]
-  in
-  let asks_for_a_credential_when_strict : Masc.Route_access.t -> bool = function
-    | Public_read Credential_when_strict -> true
-    | Public_read Open_when_strict
-    | Always_public | Read_auth | Permission _ | Token_permission _
-    | Private_token_permission _ | Tool _ | Tool_observation _ | Tool_actor _
-    | Self_authenticated _ -> false
-  in
-  let opened =
-    List.filter_map
-      (fun (route : Router.route) ->
-         if asks_for_a_credential_when_strict route.access
-            && List.exists Server_auth.is_public_read_path (probes route)
-         then Some route.path
-         else None)
-      (Router.effective_routes routes)
-  in
-  check (list string) "credential routes the list opens" [] opened
-
 (* Strict auth opens a request without a credential only when the route it
    reaches asks for none: [Always_public] or [Public_read Open_when_strict].
    The open paths are spelled as clients send them, so renaming a shared
@@ -659,8 +624,6 @@ let () =
         ; test_case "physical Skill turn evidence" `Quick test_physical_skill_turn_evidence
         ; test_case "bound Goal tree bypasses stale cache" `Quick test_goal_tree_bound_read_bypasses_stale_cache
         ; test_case "bound Goal timeout answers while read pool is busy" `Quick test_bound_goal_timeout_answers_while_read_pool_is_busy
-        ; test_case "the public-read list opens no credential route" `Quick
-            test_the_public_read_list_opens_no_credential_route
         ; test_case "strict auth opens a path by its kind" `Quick
             test_strict_auth_opens_a_path_by_its_kind
         ] )

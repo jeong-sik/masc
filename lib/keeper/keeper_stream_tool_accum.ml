@@ -371,7 +371,13 @@ let finalize_block t index =
   | None -> ()
   | Some block ->
     drop_block t index;
-    let args = String.concat "" (List.rev block.args_fragments) in
+    let args =
+      match block.args_fragments with
+      | [] -> ""
+      | [ single ] -> single
+      | [ y; x ] -> x ^ y
+      | many -> String.concat "" (List.rev many)
+    in
     let call : Keeper_chat_store.tool_call =
       { call_id = block.call_id
       ; execution_id = block.execution_id

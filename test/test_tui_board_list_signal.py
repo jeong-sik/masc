@@ -132,10 +132,11 @@ class BoardListSignalTest(unittest.TestCase):
 
         self.run_list(scenario)
 
-    def test_an_entry_read_superseded_by_the_cadence_is_read_again(self) -> None:
-        # The cadence reads no Board. A full refresh it starts while the
-        # entry read is held takes a newer ticket, so the held answer is
-        # dropped and only the list debt can read the Board again.
+    def test_an_entry_read_superseded_by_a_refresh_is_read_again(self) -> None:
+        # A full refresh that starts while the entry read is held takes a
+        # newer ticket, so the held answer is dropped. Since #48677 that
+        # refresh asks for the Board itself, so the list is read again
+        # while the old answer is still held, not after it is released.
         owed.ChatServer = ListServer
         owed.ChatOwedHistoryTest.binary = self.binary
 
@@ -152,26 +153,28 @@ class BoardListSignalTest(unittest.TestCase):
                 step(
                     "wait",
                     lambda: listing.response_count("superseded", "/health") >= 2,
-                    "the cadence did not run while the entry read was held",
+                    "no refresh ran while the entry read was held",
+                )
+                step(
+                    "wait",
+                    lambda: listing.response_count("superseded", LIST_PATH) >= 1,
+                    "the superseded entry read was not read again",
                 )
                 listing.set_phase("released")
                 listing.release_list.set()
-                step(
-                    "wait",
-                    lambda: listing.response_count("released", LIST_PATH) >= 1,
-                    "the superseded entry read was not read again",
-                )
                 step("drain", 2.0)
-                # The second read can itself be superseded by a cadence pass
-                # and read once more; it does not repeat without end.
-                reads = listing.count("released", LIST_PATH)
+                # The re-read can itself be superseded by a later refresh and
+                # read once more; it does not repeat without end.
+                reads = listing.count("superseded", LIST_PATH) + listing.count(
+                    "released", LIST_PATH
+                )
                 self.assertGreaterEqual(reads, 1)
                 self.assertLessEqual(reads, 3)
             finally:
                 listing.release_list.set()
 
         owed.ChatOwedHistoryTest.run_chat(
-            cast(owed.ChatOwedHistoryTest, self), opened, refresh_seconds=1.0
+            cast(owed.ChatOwedHistoryTest, self), opened
         )
 
 

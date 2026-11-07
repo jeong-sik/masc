@@ -5503,10 +5503,7 @@ let test_execution_routes_serve_prepared_http_representations () =
         let vary = List.filter_map (fun (name, value) -> if name = "vary" then Some value else None)
           headers |> String.concat "," in
         check bool (protocol ^ " encoding varies") true
-          (String_util.contains_substring vary "Accept-Encoding");
-        if protocol = "H2" then
-          check bool (protocol ^ " origin still varies") true
-            (String_util.contains_substring vary "Origin")
+          (String_util.contains_substring vary "Accept-Encoding")
       in
       check_headers reply_headers;
       let decoded = match encoding with

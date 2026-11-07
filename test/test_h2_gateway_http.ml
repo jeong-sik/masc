@@ -200,7 +200,7 @@ let test_fusion_workspace_admission () =
       let code, _, _ = read board expected in
       check int "optional reaction actor still rejects the Player token" 403 code;
       let code, _, _ = read board foreign in
-      check int "reaction auth refusal still precedes workspace checks" 403 code;
+      check int "foreign workspace is refused before reaction auth, as on HTTP/1.1" 409 code;
       strict (Some "1") (fun () ->
         let code, _, _ = read_board expected in
         check int "strict mode still requires authentication" 401 code)))

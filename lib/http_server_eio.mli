@@ -327,7 +327,6 @@ module Request : sig
 
   type body_read_error = Http_reqd.body_read_error =
     | Too_large of int
-    | Malformed_length
     | Internal of exn
 
   val read_body_async_with_limit :

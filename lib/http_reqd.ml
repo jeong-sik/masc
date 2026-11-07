@@ -224,20 +224,27 @@ module Body_writer = struct
          H2.Body.Writer.close writer)
   ;;
 
+  let is_closed = function
+    | H1 writer -> Httpun.Body.Writer.is_closed writer
+    | H2 { writer; _ } -> H2.Body.Writer.is_closed writer
+  ;;
+
+  (* Both libraries answer a flush on a closed body from the connection
+     writer: [`Written] once nothing is pending, and nothing at all for an h2
+     stream that was reset, because a closed stream is never drained. The
+     caller asks about bytes the peer will not get, so answer [`Closed]. *)
   let flush t f =
-    match t with
-    | H1 writer -> Httpun.Body.Writer.flush writer f
-    | H2 { writer; _ } -> H2.Body.Writer.flush writer f
+    if is_closed t
+    then f `Closed
+    else (
+      match t with
+      | H1 writer -> Httpun.Body.Writer.flush writer f
+      | H2 { writer; _ } -> H2.Body.Writer.flush writer f)
   ;;
 
   let close = function
     | H1 writer -> Httpun.Body.Writer.close writer
     | H2 { writer; _ } -> Http_h2_stream.close_after_flush writer
-  ;;
-
-  let is_closed = function
-    | H1 writer -> Httpun.Body.Writer.is_closed writer
-    | H2 { writer; _ } -> H2.Body.Writer.is_closed writer
   ;;
 end
 
@@ -254,7 +261,6 @@ let respond_with_streaming ?flush_headers_immediately t response =
 
 type body_read_error =
   | Too_large of int
-  | Malformed_length
   | Internal of exn
 
 let deliver_body ~on_body ~on_error body =
@@ -263,10 +269,16 @@ let deliver_body ~on_body ~on_error body =
   | exn -> on_error (Internal exn)
 ;;
 
-let body_buffer ~declared ~max_bytes =
+(* The declared length is the peer's claim, and HTTP/2 admits up to
+   max_concurrent_streams requests on one connection, so allocating the claim
+   up front would let one connection hold streams x max_bytes before a byte
+   arrives. The buffer doubles as bytes come in. *)
+let body_buffer_initial_capacity_limit = 64 * 1024
+
+let body_buffer ~declared =
   let initial_capacity =
     match declared with
-    | Some len when len > 0 && len < max_bytes -> len
+    | Some len when len > 0 -> min len body_buffer_initial_capacity_limit
     | Some _ | None -> 1024
   in
   Http_body_buffer.create initial_capacity
@@ -297,7 +309,7 @@ let read_body_h1 reqd ~max_bytes ~on_body ~on_error =
     stop ();
     on_error (Too_large max_bytes)
   | Some _ | None ->
-    let buf = body_buffer ~declared ~max_bytes in
+    let buf = body_buffer ~declared in
     let rec read_loop () =
       Httpun.Body.Reader.schedule_read
         body
@@ -332,7 +344,11 @@ let read_body_h2 reqd ~ledger ~stream_sw ~max_bytes ~on_body ~on_error =
     dispatch (fun () -> on_error error)
   in
   match H2.Request.body_length (H2.Reqd.request reqd) with
-  | `Error `Bad_request -> reject Malformed_length
+  | `Error `Bad_request ->
+    (* h2 answers 400 to an unparsable length before it calls the request
+       handler (Server_connection, Message.body_length), so no stream reaches
+       this arm; the error keeps the match total without inventing a reply. *)
+    reject (Internal (Failure "h2 delivered a request whose body length it rejects"))
   | `Fixed declared when Int64.compare declared (Int64.of_int max_bytes) > 0 ->
     reject (Too_large max_bytes)
   | (`Fixed _ | `Unknown) as length ->
@@ -341,7 +357,7 @@ let read_body_h2 reqd ~ledger ~stream_sw ~max_bytes ~on_body ~on_error =
       | `Fixed declared -> Some (Int64.to_int declared)
       | `Unknown -> None
     in
-    let buf = body_buffer ~declared ~max_bytes in
+    let buf = body_buffer ~declared in
     let rec read_loop () =
       H2.Body.Reader.schedule_read
         body

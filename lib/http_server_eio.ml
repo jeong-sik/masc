@@ -464,7 +464,6 @@ module Request = struct
 
   type body_read_error = Http_reqd.body_read_error =
     | Too_large of int
-    | Malformed_length
     | Internal of exn
 
   let read_body_async_with_limit reqd ~max_bytes ~on_body ~on_error =
@@ -476,7 +475,6 @@ module Request = struct
       ~on_body:callback
       ~on_error:(function
         | Too_large max_bytes -> respond_too_large reqd max_bytes
-        | Malformed_length -> respond_error reqd `Bad_request "Malformed request body length"
         | Internal exn -> respond_internal_error reqd exn)
 
   (** Get path from request target *)

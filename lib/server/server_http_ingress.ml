@@ -184,20 +184,9 @@ let admitted ~routes ~client_addr ~request_authority request reqd =
           Server_workspace_precondition.guard ~path request reqd ~admitted:(fun () ->
             dispatch_route ~router:routes ~request ~path reqd)
       with
-      (* GitHub login wraps a failed [send_event] in [Cancelled]. Only unwrap
-         these typed writer failures; an actually cancelled request must still
-         propagate its cancellation. *)
-      | Eio.Cancel.Cancelled
-          ((Http_h2_response_ledger.Response_capacity_exhausted
-           | Http_h2_response_ledger.Response_writer_closed) as resource_error) ->
-        Eio.Fiber.check ();
-        Http_reqd.report_exn reqd resource_error
       (* Cancellation propagates through the connection switch without
          attempting a response from a cancelled handler. *)
       | Eio.Cancel.Cancelled _ as exn -> raise exn
-      | (Http_h2_response_ledger.Response_capacity_exhausted
-        | Http_h2_response_ledger.Response_writer_closed) as resource_error ->
-        Http_reqd.report_exn reqd resource_error
       | Auth.Auth_config_error _ -> try_auth_config_error_response reqd
       | exn ->
         let msg = Printexc.to_string exn in

@@ -25,11 +25,6 @@ let read_oauth_body request reqd callback =
           request
           reqd
           (Auth_oauth.Invalid_request "request body is too large")
-      | Http.Request.Malformed_length ->
-        respond_oauth_error
-          request
-          reqd
-          (Auth_oauth.Invalid_request "malformed request body length")
       | Http.Request.Internal exn ->
         respond_oauth_error request reqd (Auth_oauth.Store_error (Printexc.to_string exn)))
 ;;

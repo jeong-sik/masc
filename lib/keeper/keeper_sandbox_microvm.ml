@@ -2787,12 +2787,48 @@ let build_argv_command script name fields =
     script; name; string_of_int (List.length fields) ] @ fields
 ;;
 
-let build_link_apply_request_for backend ~container_name ~keeper_work_root ~uid ~gid ~actions =
-  exec_argv_for backend ~container_name ~uid ~gid ~container_cwd:keeper_work_root
-    ~stdin:false
-    ~command_argv:
-      (build_argv_command build_link_apply_script "masc-build-link"
-         (List.concat_map (fun (checkout, target) -> [ checkout; target ]) actions))
+(* 128 KiB. Nothing bounds how many checkouts a scan finds, so the paths are
+   split across requests. macOS counts argv and the environment together
+   against ARG_MAX (1 MiB, [getconf ARG_MAX]); a Linux guest counts them
+   against a quarter of its stack limit (2 MiB at the default 8 MiB) and each
+   string against MAX_ARG_STRLEN (128 KiB). The exec flags, the helper script
+   and the server's environment fit in what this leaves. *)
+let build_argv_values_budget_bytes = 128 * 1024
+
+(* What execve counts for [values]: each string and its terminating NUL. *)
+let argv_bytes values = List.fold_left (fun total value -> total + String.length value + 1) 0 values
+
+(* [items] in order, in groups whose [values] fit the budget. A group holds at
+   least one item, so an item over the budget is a request of its own, which
+   the exec then refuses as a failed effect. *)
+let build_argv_batches ~values items =
+  let close current batches =
+    match current with
+    | [] -> batches
+    | _ :: _ -> List.rev current :: batches
+  in
+  let rec group batches current size = function
+    | [] -> List.rev (close current batches)
+    | item :: rest ->
+      let bytes = argv_bytes (values item) in
+      (match current with
+       | _ :: _ when size + bytes > build_argv_values_budget_bytes ->
+         group (close current batches) [ item ] bytes rest
+       | [] | _ :: _ -> group batches (item :: current) (size + bytes) rest)
+  in
+  group [] [] 0 items
+;;
+
+let pair_values (checkout, target) = [ checkout; target ]
+
+let build_link_apply_requests_for backend ~container_name ~keeper_work_root ~uid ~gid ~actions =
+  List.map
+    (fun batch ->
+      exec_argv_for backend ~container_name ~uid ~gid ~container_cwd:keeper_work_root
+        ~stdin:false
+        ~command_argv:
+          (build_argv_command build_link_apply_script "masc-build-link" (List.concat_map pair_values batch)))
+    (build_argv_batches ~values:pair_values actions)
 ;;
 
 (** Create the link targets inside the guest.
@@ -2808,10 +2844,10 @@ let build_link_apply_request_for backend ~container_name ~keeper_work_root ~uid 
     as root with an explicit writable mode. The mode applies only to newly created
     directories: existing keeper-owned targets remain untouched, which matters
     because Apple Container's user namespace refuses even guest root changing
-    their mode. One command covers every target and is idempotent. *)
+    their mode. Each request is idempotent. *)
 let build_target_dir_mode = "0777"
 
-let build_target_mkdir_request ~container_name ~targets =
+let build_target_mkdir_requests ~container_name ~targets =
   let script = checked_build_argv_script
       (Printf.sprintf {py|os.umask(0)
 failed = False
@@ -2821,14 +2857,17 @@ for target in fields:
     except OSError:
         failed = True
 sys.exit(1 if failed else 0)|py} build_target_dir_mode) in
-  exec_argv_for
-    Backend.Apple_container
-    ~container_name
-    ~uid:0
-    ~gid:0
-    ~container_cwd:build_volume_guest_root
-    ~stdin:false
-    ~command_argv:(build_argv_command script "masc-build-mkdir" targets)
+  List.map
+    (fun batch ->
+      exec_argv_for
+        Backend.Apple_container
+        ~container_name
+        ~uid:0
+        ~gid:0
+        ~container_cwd:build_volume_guest_root
+        ~stdin:false
+        ~command_argv:(build_argv_command script "masc-build-mkdir" batch))
+    (build_argv_batches ~values:(fun target -> [ target ]) targets)
 ;;
 
 (** The keeper's root on the work volume, created inside the guest.

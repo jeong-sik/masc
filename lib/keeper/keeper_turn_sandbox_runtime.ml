@@ -860,6 +860,19 @@ let run_build_link_effect ?timeout_sec argv =
     status)
 ;;
 
+(* Every request runs, as one helper keeps going past a path that fails, and
+   the first failure is the status. A raised failure stops the rest. *)
+let run_build_link_effects ?timeout_sec argvs =
+  List.fold_left
+    (fun status argv ->
+      let next = run_build_link_effect ?timeout_sec argv in
+      match status with
+      | Unix.WEXITED 0 -> next
+      | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> status)
+    (Unix.WEXITED 0)
+    argvs
+;;
+
 let run_argv_with_stdin_and_status_split
       ?timeout_sec
       ?on_stdout_chunk
@@ -1520,8 +1533,8 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~container_name ~generation 
         | [] -> prepared ~expected:Build_links_not_prepared
         | _ :: _ as targets ->
           if mark ~expected:Build_links_not_prepared Build_links_effect_unverified then (
-          let mkdir = Keeper_sandbox_microvm.build_target_mkdir_request ~container_name ~targets in
-          (try match run_build_link_effect ?timeout_sec mkdir, actions with
+          let mkdir = Keeper_sandbox_microvm.build_target_mkdir_requests ~container_name ~targets in
+          (try match run_build_link_effects ?timeout_sec mkdir, actions with
            | Unix.WEXITED 0, [] -> prepared ~expected:Build_links_effect_unverified
            | Unix.WEXITED 0, _ :: _ ->
              (* This is a local check only: it cannot cancel an already sent
@@ -1533,7 +1546,7 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~container_name ~generation 
                | None -> false in
              if not generation_retained then effect_unverified () else
              let apply =
-               Keeper_sandbox_microvm.build_link_apply_request_for
+               Keeper_sandbox_microvm.build_link_apply_requests_for
                  backend
                  ~container_name
                  ~keeper_work_root
@@ -1545,7 +1558,7 @@ let ensure_microvm_build_links ?timeout_sec (t : t) ~container_name ~generation 
                  (fun entry -> if entry.links_unverified then None
                    else Some {entry with links_unverified=true}) in
              if not reserved then effect_unverified () else
-             (match run_build_link_effect ?timeout_sec apply with
+             (match run_build_link_effects ?timeout_sec apply with
               | Unix.WEXITED 0 ->
                 ignore (update_microvm_work_effects ~backend ~keeper_name:t.meta.name
                   (fun entry -> Some {entry with links_unverified=false}));

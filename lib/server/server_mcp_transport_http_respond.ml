@@ -214,5 +214,5 @@ let respond_sse_rate_limited ~(deps : Server_mcp_transport_http_types.deps) ~ori
   let acceptance = Http_reqd.try_respond_with_string reqd response body in
   Transport_metrics.record_http_rate_limit_response
     ~acceptance
-    ~protocol:Transport_metrics.H1
+    ~protocol:(Http_reqd.protocol reqd)
     ~scope:Transport_metrics.Sse_connection

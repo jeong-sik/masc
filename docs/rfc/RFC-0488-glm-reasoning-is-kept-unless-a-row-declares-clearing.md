@@ -3,7 +3,7 @@ rfc: "0488"
 title: "GLM 의 이전 reasoning 은 모델 행이 지우라고 선언할 때만 지운다"
 status: Implemented
 created: 2026-11-05
-updated: 2026-11-06
+updated: 2026-11-07
 author: claude
 supersedes: []
 superseded_by: null
@@ -35,12 +35,28 @@ GLM Keeper 의 run 첫 요청은 입력의 56.5% 를 캐시에서 못 읽는다.
 - #48714: 대시보드가 runtime 선언에서 사라진 clear thinking 두 키를 읽지 않는다.
 - #48722: 기본 설정 `config/runtime.toml` 의 GLM 행이 `preserve-thinking = true` 를 적는다(§3.3).
 
-§6 의 배포 뒤 측정은 아직 하지 않았다. 라이브 설정의 `glm-5.3-flash`·`glm-5-3`·`glm-5-2`·`glm-5-1` 행이 `preserve-thinking = false` 라서, 이전 턴의 reasoning 은 지금도 빠진다. 2026-11-06 01:03Z~07:20Z 시스템 로그의 `reasoning_replay_dropped` 는 3,889건이다.
+라이브 설정의 `glm-5.3-flash`·`glm-5-3`·`glm-5-2`·`glm-5-1` 행이 `preserve-thinking = false` 인 동안은 이전 턴의 reasoning 이 빠졌다. 2026-11-06 01:03Z~07:20Z 시스템 로그의 `reasoning_replay_dropped` 는 3,889건이다.
 
 | 모델 | replay 정책 | 요청 | 뺀 reasoning 블록 |
 |---|---|---|---|
 | `glm-5.3-flash` | `Tool_call_assistant_messages_latest_user_turn` | 2,971 | 363,102 |
 | `glm-5.3` | `No_replay` | 918 | 105,063 |
+
+### 배포 뒤 (2026-11-06)
+
+2026-11-06 11:48:27Z 에 라이브 네 행을 `preserve-thinking = true` 로 바꿨다. 서버는 `runtime.toml` 을 부팅 때 읽으므로(#49362), 12:08:32Z 부팅부터 반영됐다.
+
+- `reasoning_replay_dropped` 는 12:07:40Z 가 마지막이다. 12:08:32Z~16:10Z 에는 0건이다.
+- run 첫 요청 미적중은 §1.2 방법으로 셌다. 같은 방법이 §1.2 의 11-05 표를 그대로 다시 낸다. 바꾼 뒤 구간은 부팅 직후 30분을 뺐다. 재시작은 모든 run 의 첫 요청을 미적중으로 만들기 때문이다.
+
+| 구간 | 라이브 설정 | run | 첫 요청 미적중 | 뒤 요청 미적중 | 첫 요청이 차지한 미적중 토큰 |
+|---|---|---|---|---|---|
+| 11-05 00:00:01Z~10:41:57Z(§1.2) | false | 269 | 56.5% | 1.4% | 82.9% |
+| 11-06 00:00Z~12:08Z | false | 315 | 49.8% | 5.1% | 52.2% |
+| 11-06 12:38:32Z~16:10Z | true | 67 | 27.8% | 8.7% | 11.2% |
+
+- 요청 하나의 평균 입력은 502,800 토큰에서 473,439 토큰이 됐다. 미적중 토큰은 48,032 에서 44,539 가 됐다(전체 미적중률 9.6% → 9.4%). reasoning 을 남겨도 요청은 커지지 않았다.
+- 뒤 요청 미적중이 5.1% 에서 8.7% 로 오른 이유는 재지 않았다. 바꾼 뒤 구간은 3.5시간, 67 run 이다.
 
 운영자가 그 줄을 지우거나 `true` 로 바꾼 시각부터 §6 대로 잰다.
 

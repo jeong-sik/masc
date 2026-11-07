@@ -114,6 +114,14 @@ val narrow : request_id:Request_id.t -> final:Lane_addon_exact.final -> t -> (t 
     classification only. Every other terminal is rejected. [Ok None] means one
     indivisible row remains. Does not mint IDs, save state or establish that
     [final] actually belongs to this original request; the host journal does. *)
+val check_retained : Lane_addon_tool_request_owner.retained -> (unit, string) result
+(** What a deploy preflight checks of one original without a workspace: its
+    request ID and summary decode as a pass's discovery decodes them, and its
+    captured request names this build's capture schema and has exactly the
+    fields {!restore} reads. One record that fails discovery stops every pass, so a
+    hard cut of either schema is refused here before the server starts.
+    Workspace identity, ancestry, the ledger revision and the rendered prompt
+    stay with {!restore}. *)
 val restore : workspace:workspace ->
   load:(request_id:string -> (Lane_addon_tool_request_owner.retained option, string) result) ->
   Lane_addon_tool_request_owner.retained -> (t, string) result

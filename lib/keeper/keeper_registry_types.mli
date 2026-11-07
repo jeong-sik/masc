@@ -329,6 +329,7 @@ type registry_entry = {
   last_error : string option;
   last_failure_reason : failure_reason option;
   last_failure_at : float option;
+  failing_since : float option;
   turn_consecutive_failures : int;
   turn_attempt_state : turn_attempt_state option Atomic.t;
       (** Objective per-Keeper turn-attempt history, updated via CAS on this

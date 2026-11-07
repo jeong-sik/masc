@@ -176,6 +176,7 @@ type keeper_runtime = {
   kr_operator_disposition :
     ((Keeper_execution_receipt.operator_disposition_kind
      * Keeper_execution_receipt.operator_disposition_reason) option, string) result;
+  kr_failing_since : float option;
 }
 
 type keeper_lane_phase =
@@ -3340,6 +3341,11 @@ let decode_keeper_runtime ~account_revision json =
     ; kr_runtime_lane_observation
     ; kr_runtime_path_rest = decode_keeper_path_rest json
     ; kr_operator_disposition = decode_operator_disposition json
+    ; kr_failing_since =
+        (match member "failing_since" json with
+         | `Float f when Float.is_finite f -> Some f
+         | `Int i -> Some (Float.of_int i)
+         | `Null | _ -> None)
     }
 
 (* [truncated] is carried out rather than dropped: the route clamps its own

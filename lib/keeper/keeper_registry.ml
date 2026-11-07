@@ -744,6 +744,12 @@ let rec dispatch_event_with_audit_internal
        let to_phase_str = Keeper_state_machine.phase_to_string tr.new_phase in
        let event_str = Keeper_state_machine.event_to_string event in
        let new_seq = entry.transition_seq + 1 in
+       let failing_since =
+         match tr.new_phase, tr.prev_phase with
+         | Failing, Failing -> entry.failing_since
+         | Failing, _ -> Some now
+         | _, _ -> None
+       in
        (match
           install_entry_if_current_internal
             ?lifecycle_token
@@ -753,6 +759,7 @@ let rec dispatch_event_with_audit_internal
             ; conditions = tr.updated_conditions
             ; transition_seq = new_seq
             ; pending_turn_measurement
+            ; failing_since
             }
         with
         | Entry_install_invalid err ->

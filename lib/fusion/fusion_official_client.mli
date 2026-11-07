@@ -173,7 +173,12 @@ type failure =
   | Vibe_failure of vibe_failure
 and vibe_failure =
   | Vibe_run_failed of Runtime_vibe_cli.error
-      (** The process did not end in an [export.json] that agreed with it. *)
+      (** {!Runtime_vibe_cli.run} returned an error: nothing ran (invalid
+          config, no call directory, spawn refused), the process was
+          killed or ran out of time, or its outputs did not agree (no or
+          unreadable [export.json], an unreadable transcript, an exit code
+          that disagrees). The last three come after the export was read,
+          but the error does not carry its usage, so none is reported. *)
   | Vibe_not_answered of Runtime_vibe_answer.error
       (** Vibe ended the run, but not with a reply this caller can use. *)
 

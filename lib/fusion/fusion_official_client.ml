@@ -411,19 +411,15 @@ let remove_muse_panel_root root =
 
 (* A Vibe panelist starts in an empty private directory, passed as its
    [--workdir] without [--trust], so the [ask] agent finds no operator files
-   and Vibe loads no project [.vibe] from it. *)
+   and Vibe loads no project [.vibe] from it. The path is kept as
+   [Filename.temp_dir] gives it: without [--trust] nothing compares it with
+   a resolved form, and resolving it after creation could fail with the
+   directory already made and no cleanup registered yet. *)
 let create_vibe_panel_root () =
-  match Filename.temp_dir ~perms:0o700 "masc-vibe-panelist-" "" |> Unix.realpath with
+  match Filename.temp_dir ~perms:0o700 "masc-vibe-panelist-" "" with
   | root -> Ok root
-  | exception (Sys_error detail) ->
+  | exception Sys_error detail ->
     Error (Setup_failure ("cannot create the Mistral Vibe panelist workdir: " ^ detail))
-  | exception Unix.Unix_error (error, _, path) ->
-    Error
-      (Setup_failure
-         (Printf.sprintf
-            "cannot resolve the Mistral Vibe panelist workdir %s: %s"
-            path
-            (Unix.error_message error)))
 ;;
 
 let remove_vibe_panel_root root =

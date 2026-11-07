@@ -13,7 +13,7 @@ let typed_ok input =
 ;;
 
 let mk_argv ?cwd ?timeout_sec argv : Execute_input.execute_input =
-  { source = Argv argv; cwd; timeout_sec; intent = Auto }
+  { source = Argv argv; cwd; timeout_sec; intent = Auto; background = false }
 ;;
 
 let mk_exec executable argv = mk_argv (executable :: argv)
@@ -303,6 +303,43 @@ let test_of_json_rejects_invalid_explicit_timeout () =
            message
            "finite and greater than zero"))
     [ `Float 0.0; `Float (-1.0) ]
+;;
+
+(* [run_in_background] is read in one place. A caller who left it out has
+   named the schema's default, and anything that is not a boolean is refused
+   with the field's name. *)
+let test_of_json_run_in_background_is_a_boolean_defaulting_to_false () =
+  let argv = `List [ `String "sleep" ] in
+  let background fields =
+    (parse_json_exn (`Assoc (("argv", argv) :: fields))).Execute_input.background
+  in
+  Alcotest.(check bool) "omitted is the foreground" false (background []);
+  Alcotest.(check bool)
+    "false is the foreground"
+    false
+    (background [ "run_in_background", `Bool false ]);
+  Alcotest.(check bool)
+    "true is the background"
+    true
+    (background [ "run_in_background", `Bool true ]);
+  Alcotest.(check bool)
+    "requests_background reads the same field"
+    true
+    (Execute_input.requests_background
+       (`Assoc [ "argv", argv; "run_in_background", `Bool true ]));
+  let message =
+    parse_json_error
+      (`Assoc [ "argv", argv; "run_in_background", `String "yes" ])
+  in
+  Alcotest.(check bool)
+    "a string is refused with the field's name"
+    true
+    (String_util.contains_substring_ci message "run_in_background must be boolean");
+  Alcotest.(check bool)
+    "arguments of_json refuses are not a background request"
+    false
+    (Execute_input.requests_background
+       (`Assoc [ "argv", argv; "run_in_background", `String "yes" ]))
 ;;
 
 let test_of_json_accepts_single_argv_ssot () =
@@ -1217,6 +1254,10 @@ let suite =
           "of_json_rejects_invalid_explicit_timeout"
           `Quick
           test_of_json_rejects_invalid_explicit_timeout
+      ; Alcotest.test_case
+          "of_json_run_in_background_is_a_boolean_defaulting_to_false"
+          `Quick
+          test_of_json_run_in_background_is_a_boolean_defaulting_to_false
       ; Alcotest.test_case
           "of_json_accepts_single_argv_ssot"
           `Quick

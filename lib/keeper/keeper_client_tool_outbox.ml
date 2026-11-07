@@ -315,6 +315,17 @@ let receipt_ids snapshot = List.map id_of_entry snapshot.entries
 let contains_receipt snapshot ~receipt_id =
   List.exists (fun entry -> String.equal receipt_id (id_of_entry entry)) snapshot.entries
 
+let contains_call snapshot ~call_id =
+  List.exists
+    (fun entry ->
+       match entry.json with
+       | `Assoc fields ->
+         (match List.assoc_opt "call_id" fields with
+          | Some (`String id) -> String.equal id call_id
+          | Some _ | None -> false)
+       | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> false)
+    snapshot.entries
+
 let developer_context snapshot =
   match snapshot.entries with
   | [] -> []

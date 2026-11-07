@@ -21,6 +21,7 @@ type execute_input = {
   source : source;
   cwd : string option;
   timeout_sec : float option;
+  background : bool;
 }
 
 type validation_error =
@@ -78,6 +79,18 @@ let optional_string ~path fields key =
   | Some value ->
     result_errorf
       "%s.%s must be string, got %s"
+      path
+      key
+      (json_type_name value)
+;;
+
+let optional_bool ~path fields key =
+  match member fields key with
+  | None | Some `Null -> Ok None
+  | Some (`Bool value) -> Ok (Some value)
+  | Some value ->
+    result_errorf
+      "%s.%s must be boolean, got %s"
       path
       key
       (json_type_name value)
@@ -180,7 +193,8 @@ let of_json (json : Yojson.Safe.t) =
   let* () =
     reject_unknown_fields
       ~path:"$"
-      ~allowed:[ "argv"; "command"; "shell"; "cwd"; "timeout_sec"; "intent" ]
+      ~allowed:
+        [ "argv"; "command"; "shell"; "cwd"; "timeout_sec"; "intent"; "run_in_background" ]
       fields
   in
   let* intent = match member fields "intent" with
@@ -190,8 +204,18 @@ let of_json (json : Yojson.Safe.t) =
   in
   let* cwd = optional_string ~path:"$" fields "cwd" in
   let* timeout_sec = optional_positive_float ~path:"$" fields "timeout_sec" in
+  let* background = optional_bool ~path:"$" fields "run_in_background" in
+  (* DET-OK: an omitted run_in_background is the schema's declared default
+     ([run_in_background] in config/tools/tool_execute.toml), not a guess. *)
+  let background = Option.value background ~default:false in
   let* source = source_of_fields ~path:"$" fields in
-  Ok { source; cwd; timeout_sec; intent }
+  Ok { source; cwd; timeout_sec; intent; background }
+;;
+
+let requests_background json =
+  match of_json json with
+  | Ok { background; _ } -> background
+  | Error _ -> false
 ;;
 
 let check_argv argv =
@@ -231,7 +255,7 @@ let check_exec ~argv ~cwd =
     check_cwd cwd
 ;;
 
-let validate { source; cwd; timeout_sec = _; intent = _ } =
+let validate { source; cwd; timeout_sec = _; intent = _; background = _ } =
   let open Result.Syntax in
   let* () = check_cwd cwd in
   match source with
@@ -309,7 +333,7 @@ let command_to_shell ~sandbox ~cwd { shell; text } =
 
 let to_shell_ir_unvalidated
       ?(sandbox = Masc_exec.Sandbox_target.host ())
-      { source; cwd; timeout_sec = _; intent = _ }
+      { source; cwd; timeout_sec = _; intent = _; background = _ }
   =
   (* RFC execute-boundary-is-the-sandbox §4.1. An argv whose program is a
      shell with [-c] is a command line wearing an argv costume: it takes the

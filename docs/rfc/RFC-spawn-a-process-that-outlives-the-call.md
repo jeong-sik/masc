@@ -3,11 +3,11 @@ rfc: "spawn-a-process-that-outlives-the-call"
 title: "Spawn: a process that outlives the call"
 status: Draft
 created: 2026-08-25
-updated: 2026-08-25
+updated: 2026-11-08
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["execute-subset-dispositions"]
+related: ["execute-subset-dispositions", "execute-background-through-the-tool-outbox"]
 ---
 
 # Spawn: a process that outlives the call
@@ -271,9 +271,11 @@ so `test_subset_rewrite` compares the two.
   and it touches fourteen non-test consumers to give twelve of them a case
   that cannot occur for them. Execute stays synchronous; the new shape lives
   where it is the only shape.
-- **`Execute` with a `background: true` flag.** One call returning either a
-  result or a handle, matched everywhere. This is the shape codex#34115
-  reports on.
+- **`Execute` with a `background: true` flag that returns a handle.** One call
+  returning either a result or a handle, matched everywhere. This is the shape
+  codex#34115 reports on. `RFC-execute-background-through-the-tool-outbox`
+  adds `run_in_background` for a command that ends: the call returns a request
+  id and the result arrives as a receipt, so no caller matches on a handle.
 - **Poll with a default interval.** Any interval is a number with no defence,
   and the two failure modes are both silent: too short burns cycles, too long
   reports a state that has already changed. §3.3 waits on the event instead.

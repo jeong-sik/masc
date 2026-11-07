@@ -5,7 +5,7 @@ import {
 } from './keeper-composite'
 
 // Minimal snapshot carrying every required key of
-// `KeeperCompositeSnapshotSchema`. Optional keys (keeper, collapsed_from,
+// `KeeperCompositeSnapshotSchema`. Optional keys (keeper,
 // phase_diagnosis, execution, recommended_actions) are added per-test.
 // Value shapes here mirror what `keeper_composite_observer.ml`
 // `snapshot_to_json` emits plus the `runtime_attention` the composite
@@ -46,7 +46,6 @@ describe('parseKeeperCompositeSnapshot', () => {
   it('parses a valid snapshot', () => {
     const result = parseKeeperCompositeSnapshot(VALID_SNAPSHOT)
     expect(result.phase).toBe('running')
-    expect(result.collapsed_from).toBeUndefined()
     expect(result.turn_phase).toBe('idle')
     expect(result.is_live).toBe(true)
     expect(result.last_outcome).toBeNull()
@@ -421,20 +420,6 @@ describe('parseKeeperCompositeSnapshot', () => {
     })
     expect(result.measurement.context_actions).toBeDefined()
     expect(result.measurement.context_actions!.handoff).toBe(false)
-  })
-
-  it('parses collapsed_from when Stable hides a raw keeper phase', () => {
-    // `Stable` is the TLA+ composite projection of seven raw keeper phases
-    // (Offline/Paused/Stopped/Crashed/Restarting). The runtime
-    // observer does not emit it today; the schema supports it for a planned
-    // backend that surfaces the collapse with the raw phase in `collapsed_from`.
-    const result = parseKeeperCompositeSnapshot({
-      ...VALID_SNAPSHOT,
-      phase: 'Stable',
-      collapsed_from: 'paused',
-    })
-    expect(result.phase).toBe('Stable')
-    expect(result.collapsed_from).toBe('paused')
   })
 
   it('throws CompositeSchemaDriftError for missing required field', () => {

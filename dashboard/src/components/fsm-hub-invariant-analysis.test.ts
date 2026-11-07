@@ -146,27 +146,6 @@ describe('deriveOperationalInsight', () => {
     expect(insight.tone).toBe('warn')
   })
 
-  // Backend wire format (keeper_state_machine.ml:21-35) emits the 13 raw KSM
-  // phases lowercase. A 7-phase composite projection with a 'Stable' carrier
-  // is specced (KeeperCompositeLifecycle.tla:143) but not currently emitted,
-  // so the dashboard surfaces `collapsed_from` directly whenever the backend
-  // sets it — see deriveOperationalInsight + nextExpectedStep.
-
-  it('reports raw collapsed_from source in detail, evidence, and nextStep', () => {
-    const insight = deriveOperationalInsight(
-      makeSnapshot({
-        phase: 'draining',
-        collapsed_from: 'paused',
-      }),
-      noObservations,
-      now,
-    )
-    expect(insight.tone).toBe('warn')
-    expect(insight.detail).toContain('raw keeper phase is paused')
-    expect(insight.evidence).toContain('raw paused')
-    expect(insight.nextStep).toContain('paused')
-  })
-
   it('reports ok when not live with last_outcome', () => {
     const insight = deriveOperationalInsight(
       makeSnapshot({

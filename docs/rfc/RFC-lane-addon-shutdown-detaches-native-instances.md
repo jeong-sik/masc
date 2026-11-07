@@ -34,7 +34,8 @@ related: ["browser-backends-end-alone", "0497"]
 - `bin/main_eio.ml` 의 종료는 4단계예요. NOTIFY → HOOKS(`Shutdown_hooks.run_all`, 3초, 951행) → BOARD(2초, 972행) → CANCEL(997행).
 - 전체는 `force_timeout_s`(10초) watchdog 이 끝내요. 넘기면 exit 124 로 나가요.
 - Lane Add-on 은 어느 단계에도 없어요. CANCEL 에서 서버 switch 가 취소될 때 worker 가 같이 끝나요. binding 은 `attached` 로 남아요.
-- 11-06 종료 4번 중 3번은 HOOKS 에서 Keeper 정지가 2.0~6.6초 걸렸어요. 세 번의 전체 시간은 2.2~6.8초예요(system_log `[Shutdown]` 줄). 09:10:57Z 종료는 HOOKS 시작 뒤 로그가 없어요.
+- 11-06 종료 4번 중 3번은 HOOKS 에서 Keeper 정지가 2.0~6.6초 걸렸어요. 세 번 모두 CANCEL 에 닿을 때 전체 시간이 2.2~6.8초였어요(system_log `[Shutdown]` 줄). 09:10:57Z 종료는 HOOKS 시작 뒤 로그가 없어요.
+- 11-05 종료 7번은 CANCEL 에서 `Shutdown complete` 까지 3~6초 걸렸어요. 두 값은 날이 달라 같은 종료의 값은 아니에요. 더하면 5.2~12.8초예요. BOARD 뒤에는 10초 안에 기다림을 더할 자리가 없어요.
 
 **선언이 지난 기록을 다루는 방식**
 - `reconcile_configuration`(`lib/lane_addon/lane_addon_runtime.ml:4035`)은 켜진 선언에 살아 있는 entry 가 없을 때 지난 기록을 봐요.
@@ -63,22 +64,26 @@ related: ["browser-backends-end-alone", "0497"]
 
 ## 3. 결정
 
-서버가 SIGTERM·SIGINT 로 멈출 때 BOARD 다음, CANCEL 전에 LANE 단계를 둬요.
+서버가 SIGTERM·SIGINT 로 멈출 때 HOOKS 단계에서 LANE 을 같이 돌려요. `Shutdown_hooks.run_all` 과 LANE 은 서로 다른 fiber 에서 돌아요. 둘 다 같은 `cleanup_timeout_s`(3초) 안에서 끝나요.
 
 1. 이 서버의 Lane Add-on 설정 서비스를 멈춰요. 그 뒤로는 reconcile 이 돌지 않아요. `release_detached` 의 nudge 도 아무것도 띄우지 않아요.
-2. 설정 잠금 안에서 entry 를 골라요. 고르는 기준은 `package.execution = Host_process _` 이고 `Detached` 가 아닌 것이에요. 고른 entry 마다 `detach_entry` 를 불러요.
-3. 고른 entry 의 `await_settled` 를 병렬로 기다려요.
-4. instance 마다 결과(`Detached`, 또는 `Failed` 와 그 원인)와 걸린 시간을 로그에 남겨요.
+2. 설정 잠금을 잡고 entry 를 골라요. 고르는 기준은 `package.execution = Host_process _` 이고 `Detached` 가 아닌 것이에요. 고른 entry 마다 `detach_entry` 를 불러요.
+3. 고른 entry 의 `await_settled` 를 병렬로 기다려요. 잠금은 모두 끝날 때까지 쥐어요. API `Detach` 도 그렇게 해요. 기다리는 사이에 Attach 가 끼면 이번에 Detach 하지 않는 instance 가 생겨요.
+4. instance 마다 정리 결과(`Detached`, 또는 `Failed` 와 그 원인)와 걸린 시간을 로그에 남겨요. `Detaching` 기록을 못 쓴 것은 따로 남겨요.
 
-새 타임아웃은 두지 않아요. LANE 이 끝나기 전에 10초 watchdog 이 프로세스를 끝낼 수 있어요. 그러면 binding 은 `Detaching` 이나 `attached` 로 남고, 다음 서버가 지금처럼 lease 로 정리해요. 지금보다 나빠지지 않아요.
+새 상한은 두지 않고 HOOKS 의 상한을 같이 써요. BOARD 다음에 두지 않는 이유는 2절의 시간이에요. CANCEL 뒤에도 3~6초가 더 걸려요. BOARD 뒤에서 기다리면 10초 watchdog 이 exit 124 로 끝낼 수 있고, 그러면 마지막 종료 줄이 남지 않아요. HOOKS 와 같이 돌리면 전체 종료 시간이 늘지 않아요.
+
+상한에 걸린 instance 는 `Detaching` 이나 `attached` 로 남아요. 다음 서버가 지금처럼 lease 로 정리해요. 지금보다 나빠지지 않아요.
 
 선언 파일은 지우지 않아요. 원하는 상태는 선언의 `enabled` 가 정해요. `Detached` 는 그 instance 가 자원을 돌려줬다는 사실만 뜻해요. 다음 서버는 지난 기록이 모두 `Detached` 라서 바로 새 instance 를 붙여요.
 
-그러면 정상 종료 뒤의 배포에서는 정리 정보를 그것을 쓴 바이너리만 읽어요. 정리 정보 모양을 바꾸는 hard cut 의 Fresh state 는 "서버를 멈추고, 지우고, 설치한다" 로 충분해요. 슬롯을 지워도 그 슬롯을 가리키는 `attached` binding 이 없어요.
+그러면 정상 종료 뒤의 배포에서 binding 은 다른 바이너리가 쓴 정리 정보를 기다리지 않아요. claim 슬롯은 그대로 남아요. lease inode 를 지우지 않는 계약 때문이에요. 새 instance 를 붙일 때 `prepare_native`(1540행)가 남은 슬롯을 다시 열고 그 정리 정보를 읽어요.
+
+그래서 정리 정보 모양을 바꾸는 hard cut 의 Fresh state 는 "서버를 멈추고, claim 슬롯을 지우고, 설치한다" 예요. 이 RFC 전에는 슬롯을 지우면 그 슬롯을 가리키는 `attached` binding 이 정리에 멈췄어요(11-06). 이제는 그런 binding 이 없어서 슬롯을 지워도 돼요. 모양이 그대로면 아무것도 지우지 않아요.
 
 이 동작은 이 RFC 를 넣은 바이너리가 멈출 때부터예요. 그 바이너리를 처음 배포할 때의 종료는 옛 바이너리가 하므로 지금과 같아요.
 
-container 는 고르지 않아요. 정리 권한이 engine label 이라 바이너리가 바뀌어도 읽을 수 있어요. 7개를 멈추는 시간이 10초 안에 들어간다는 측정도 없어요.
+container 는 고르지 않아요. 정리 권한이 engine label 이라 바이너리가 바뀌어도 읽을 수 있어요. 7개를 멈추는 시간이 3초 상한 안에 들어간다는 측정도 없어요.
 
 ## 4. 버린 방법
 
@@ -89,6 +94,7 @@ container 는 고르지 않아요. 정리 권한이 engine label 이라 바이�
 | 슬롯이 없을 때 `Retain` 이 그냥 넘겨받기 | 보지 못한 것은 추정하지 않는다는 `Retain` 규칙을 어겨요. 옛 프로세스가 살아 있으면 새 instance 와 겹쳐요 |
 | hard cut 절차만 문서로 고정 | 10-22·11-06 두 번 빠뜨렸어요 |
 | container 까지 모두 Detach | 정리 정보 문제와 관계없어요. 종료 시간이 10초를 넘길 수 있어요 |
+| BOARD 다음, CANCEL 전에 LANE 단계를 따로 두기 | CANCEL 뒤에도 3~6초가 남아야 해요. 기다림이 길면 watchdog 이 exit 124 로 끝내요(2절) |
 
 ## 5. 비슷한 제품
 
@@ -112,7 +118,8 @@ container 는 고르지 않아요. 정리 권한이 engine label 이라 바이�
   - `Lane_addon_runtime.detach_native_for_shutdown ~config` 와 mli: 3절 1~4.
   - `Shutdown_hooks` 에 Lane 자리(`register_lane_addon_shutdown`, `run_lane_addon_shutdown`).
   - `lib/server/server_bootstrap_maintenance.ml` 에서 설정 서비스를 띄운 뒤 등록해요.
-  - `bin/main_eio.ml` 종료를 5단계로 바꿔요. NOTIFY → HOOKS → BOARD → LANE → CANCEL.
+  - `bin/main_eio.ml` 2단계에서 `run_all` 과 LANE 을 `Eio.Fiber.both` 로 같이 돌려요. 단계 번호(1/4~4/4)는 그대로예요.
+  - stdio 서버(`bin/main_stdio_eio.ml`)에는 연결하지 않아요(8절).
   - 시험(`test/test_lane_addon_native_runtime.ml`)은 11-06 순서를 그대로 밟아요.
     1. 선언으로 native fixture 를 붙여요.
     2. 종료 단계를 불러요.
@@ -128,10 +135,12 @@ container 는 고르지 않아요. 정리 권한이 engine label 이라 바이�
   - `[Shutdown]` LANE 줄에 browser-ego 의 `Detached` 와 걸린 시간이 나와요.
   - 새 서버 로그에 그 instance 의 `cleanup was not confirmed` 가 없어요.
   - 새 browser-ego 가 붙어요.
-- LANE 단계 시간을 재요. 10초에서 HOOKS·BOARD 가 쓰고 남은 시간(11-06 은 3.2~7.8초)과 비교해요. 남는 시간을 넘기면 LANE 을 HOOKS 와 같이 돌리는 순서 조정을 다음 RFC 로 올려요.
+- LANE 시간을 재요. `[Shutdown] Phase 2/4 LANE: done (x.xxs)` 와 instance 마다의 `detached (x.xxs)` 를 봐요. 3초 상한에 걸리면 `LANE: timeout` 줄이 나와요. 그때는 오래 걸린 instance 와 원인을 보고 다음 RFC 로 올려요.
 
 ## 8. 범위 밖
 
 - 크래시나 watchdog 종료 뒤에 판이 바뀌는 배포는 지금 복구를 그대로 써요. 그때의 Fresh state 는 `browser-backends-end-alone` §7 처럼 binding 까지 적어야 해요.
 - container instance 의 종료 처리.
 - Keeper 정지가 HOOKS 3초를 넘기는 문제(11-06 08:52Z 6.61초).
+- stdio 서버(`bin/main_stdio_eio.ml`)의 종료. 이 서버에는 프로세스 watchdog 이 없어요. 기다림에 끝이 없어서 연결하지 않아요.
+- API `Detach` 의 경쟁 조건(#49359). 정리 fiber 가 `Failed` 를 쓰고 끝나기 전에 `detach_entry` 가 `Detaching` 으로 덮을 수 있어요. 그러면 `stop_entry`(832행)는 아무것도 하지 않고 `await_settled` 는 끝나지 않아요. 원래 있던 문제예요. 종료에서는 3초 상한이 끊어요.

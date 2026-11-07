@@ -139,10 +139,10 @@ let add_routes ?sw ?clock ~port router =
   |> Server_route.ws_get "/ws" (websocket_handler ?sw ?clock)
   |> Server_route.get (Server_route.Self_authenticated Route_access.Mcp_transport) "/ag-ui/events" handle_ag_ui_events
   |> Server_route.get (Server_route.Self_authenticated Route_access.Mcp_transport) "/events/presence" handle_presence_events
-  |> Server_route.get Server_route.Public_read "/favicon.ico" (fun _state req reqd ->
+  |> Server_route.get Server_route.Public_read_open_when_strict "/favicon.ico" (fun _state req reqd ->
          serve_favicon req reqd
        )
-  |> Server_route.get Server_route.Public_read "/favicon.svg" (fun _state req reqd ->
+  |> Server_route.get Server_route.Public_read_open_when_strict "/favicon.svg" (fun _state req reqd ->
          serve_favicon req reqd
        )
   (* Dashboard SPA: static assets — prefix match for /dashboard/assets/* *)
@@ -161,17 +161,17 @@ let add_routes ?sw ?clock ~port router =
      carried a kind. *)
   |> Server_route.get
        (Server_route.Public_read_on_canonical_host
-          { port; when_strict = Route_access.Credential_when_strict })
+          { port; when_strict = Route_access.Open_when_strict })
        "/dashboard"
        (fun _state req reqd -> serve_dashboard_index req reqd)
   |> Server_route.get
        (Server_route.Public_read_on_canonical_host
-          { port; when_strict = Route_access.Credential_when_strict })
+          { port; when_strict = Route_access.Open_when_strict })
        "/dashboard/"
        (fun _state req reqd -> serve_dashboard_index req reqd)
   |> Server_route.prefix_get
        (Server_route.Public_read_on_canonical_host
-          { port; when_strict = Route_access.Credential_when_strict })
+          { port; when_strict = Route_access.Open_when_strict })
        "/dashboard/"
        (fun _state req reqd ->
          let req_path = Http.Request.path req in

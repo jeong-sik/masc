@@ -860,15 +860,15 @@ let add_routes ~sw ~clock router =
          handle_gate_message ~clock state request reqd
        )
 
-  |> Server_route.get Server_route.Public_read "/api/v1/gate/health" (fun state request reqd ->
+  |> Server_route.get Server_route.Public_read_open_when_strict "/api/v1/gate/health" (fun state request reqd ->
          handle_gate_health state request reqd
        )
 
-  |> Server_route.get Server_route.Public_read "/api/v1/gate/status" (fun state request reqd ->
+  |> Server_route.get Server_route.Public_read_open_when_strict "/api/v1/gate/status" (fun state request reqd ->
           handle_gate_status state request reqd
         )
 
-  |> Server_route.get Server_route.Public_read "/api/v1/gate/connectors" (fun state request reqd ->
+  |> Server_route.get Server_route.Public_read_open_when_strict "/api/v1/gate/connectors" (fun state request reqd ->
          handle_gate_connectors state request reqd
        )
 
@@ -876,11 +876,11 @@ let add_routes ~sw ~clock router =
          handle_gate_connector_names state request reqd
        )
 
-  |> Server_route.get Server_route.Public_read "/api/v1/gate/connector/status" (fun state request reqd ->
+  |> Server_route.get Server_route.Public_read_open_when_strict "/api/v1/gate/connector/status" (fun state request reqd ->
          handle_gate_connector_status state request reqd
        )
 
-  |> Server_route.get Server_route.Public_read "/api/v1/gate/events" (fun state request reqd ->
+  |> Server_route.get Server_route.Public_read_open_when_strict "/api/v1/gate/events" (fun state request reqd ->
          handle_gate_events state request reqd
        )
 

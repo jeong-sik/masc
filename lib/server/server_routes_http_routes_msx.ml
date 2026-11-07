@@ -533,7 +533,7 @@ let add_routes router =
   router
   |> Server_route.get Server_route.Public_read "/api/v1/msx/activity" (fun state req reqd -> Http.Response.json_value ~compress:true ~request:req
            (activity_json ~config:(Mcp_server.workspace_config state)) reqd)
-  |> Server_route.get Server_route.Public_read "/api/v1/msx/carts" (fun state req reqd ->
+  |> Server_route.get Server_route.Public_read_open_when_strict "/api/v1/msx/carts" (fun state req reqd ->
            let status, json = carts_response ~config:(Mcp_server.workspace_config state) in
            respond_json_value_with_cors ~status:(status :> Httpun.Status.t) req reqd json)
   |> Server_route.post Server_route.Read_auth "/api/v1/msx/checkpoint-operation" (fun state request reqd ->

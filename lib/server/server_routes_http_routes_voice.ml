@@ -232,7 +232,7 @@ let handle_voice_catalogue request reqd body =
 
 let add_routes router =
   router
-  |> Server_route.prefix_get Server_route.Public_read Masc_network_defaults.voice_audio_path_prefix
+  |> Server_route.prefix_get Server_route.Public_read_open_when_strict Masc_network_defaults.voice_audio_path_prefix
        (fun _state request reqd ->
            let path = Http.Request.path request in
            match

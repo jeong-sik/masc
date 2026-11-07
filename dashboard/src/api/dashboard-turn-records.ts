@@ -322,7 +322,7 @@ export type TurnRecordsResponse = TelemetryFreshnessMetadata & {
   dashboard_surface: '/api/v1/keepers/:name/turn-records'
   freshness_slo_s: number
   // Emitted unconditionally by the turn-records handler
-  // (server_dashboard_http_keeper_api.ml): live_turn_in_progress is true iff a
+  // (server_dashboard_http_keeper_turn_reads.ml): live_turn_in_progress is true iff a
   // turn is mid-flight for this keeper, in which case both timestamps are
   // non-null wall-clock seconds; all three are null/false together otherwise.
   live_turn_in_progress: boolean

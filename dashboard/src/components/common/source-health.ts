@@ -47,7 +47,7 @@ function nonEmpty(value?: string | null): string | null {
 
 // Backends emit `coverage_gaps` in oldest→newest order (see
 // `lib/dashboard/dashboard_http_keeper.ml`, `lib/dashboard_tool_source_freshness.ml`,
-// `lib/server/server_dashboard_http_keeper_api.ml` — each derives "latest" via
+// `lib/server/server_dashboard_http_keeper_tool_calls.ml` — each derives "latest" via
 // `List.rev coverage_gaps |> List.find_opt`). Pick the tail so the UI surfaces
 // provenance for the *current* incident, not a stale one.
 function latestCoverageGap(d: TelemetryFreshnessMetadata): TelemetryCoverageGap | null {

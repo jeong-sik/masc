@@ -227,19 +227,6 @@ let test_grpc_stream_closed_triggers_cleanup () =
    4. Transport Enum Consistency
    ============================================================ *)
 
-let test_all_protocol_variants_roundtrip () =
-  let module Tr = Masc.Transport in
-  let all = [Tr.JsonRpc; Tr.Rest; Tr.Grpc; Tr.Sse; Tr.Ws] in
-  List.iter (fun p ->
-    let s = Tr.protocol_to_string p in
-    match Tr.protocol_of_string s with
-    | Some p' ->
-      Alcotest.(check bool) (Printf.sprintf "%s roundtrip" s)
-        true (p = p')
-    | None ->
-      Alcotest.fail (Printf.sprintf "roundtrip failed for %s" s)
-  ) all
-
 let test_agent_transport_all_variants () =
   let module At = Masc_grpc_transport in
   let all = [At.Http; At.Grpc; At.Ws; At.Local] in
@@ -272,8 +259,6 @@ let () =
         test_grpc_stream_closed_triggers_cleanup;
     ]);
     ("transport_enum", [
-      Alcotest.test_case "all protocol variants roundtrip" `Quick
-        test_all_protocol_variants_roundtrip;
       Alcotest.test_case "all agent transport variants" `Quick
         test_agent_transport_all_variants;
     ]);

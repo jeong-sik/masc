@@ -248,6 +248,14 @@ let is_shutting_down_global () = Atomic.get shutting_down_flag
    making the keeper supervisor's graceful-shutdown branch unreachable. *)
 let mark_shutting_down () = Atomic.set shutting_down_flag true
 
+type signal =
+  | Sigterm
+  | Sigint
+
+let signal_name = function
+  | Sigterm -> "SIGTERM"
+  | Sigint -> "SIGINT"
+
 let hooks : hook list Atomic.t = Atomic.make []
 
 let register ~name ?(priority = 50) action =

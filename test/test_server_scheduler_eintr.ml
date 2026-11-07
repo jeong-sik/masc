@@ -53,7 +53,7 @@ let test_report_names_pending_signal_and_unknown_git () =
   let report =
     Eintr.describe
       (context
-         ~pending_shutdown:(Some Eintr.Sigterm)
+         ~pending_shutdown:(Some Shutdown.Sigterm)
          ~git_commit:None
          ~ws_sessions:None)
       ~syscall:"read"
@@ -66,8 +66,8 @@ let test_report_names_pending_signal_and_unknown_git () =
 ;;
 
 let test_shutdown_signal_names () =
-  check string "sigterm" "SIGTERM" (Eintr.shutdown_signal_name Eintr.Sigterm);
-  check string "sigint" "SIGINT" (Eintr.shutdown_signal_name Eintr.Sigint)
+  check string "sigterm" "SIGTERM" (Shutdown.signal_name Shutdown.Sigterm);
+  check string "sigint" "SIGINT" (Shutdown.signal_name Shutdown.Sigint)
 ;;
 
 let () =

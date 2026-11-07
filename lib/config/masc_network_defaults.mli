@@ -3,10 +3,6 @@
     All hardcoded network defaults live here. Other modules reference
     these constants instead of inlining magic strings/numbers.
 
-    {!local_llm_default_url} follows the same env override chain that
-    AGENT_CORE discovery uses before falling back to the current local runtime
-    URL.
-
     @since 2.241.0 *)
 
 (** {1 Ollama defaults} *)
@@ -42,12 +38,6 @@ val openai_chat_completions_path : string
     [base_url] already includes the version segment.  Matches the AGENT_CORE
     Agent Core's internal default in [api_openai.ml]. *)
 val chat_completions_path : string
-
-(** {1 Local LLM URL} *)
-
-(** Override order:
-    [AGENT_CORE_LOCAL_LLM_URL] -> {!ollama_default_url}. *)
-val local_llm_default_url : string
 
 (** {1 MASC HTTP server} *)
 

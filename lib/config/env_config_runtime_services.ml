@@ -143,5 +143,3 @@ module Dashboard_config = struct
     Sys.getenv_opt "MASC_DASHBOARD_FIXTURE" |> trim_opt
 
 end
-
-(** {1 Endpoint Configuration} *)

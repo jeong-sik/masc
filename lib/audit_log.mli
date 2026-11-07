@@ -231,8 +231,6 @@ val write_result_to_json : (unit, string) result -> Yojson.Safe.t
     [{"recorded": false, "error": <detail>}] with the detail passed through
     {!Observability_redact.redact_text}. *)
 
-(** {1 Maintenance} *)
-
 (** {1 Statistics} *)
 
 type stats = {

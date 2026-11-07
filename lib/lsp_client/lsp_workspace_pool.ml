@@ -260,10 +260,13 @@ let ensure t ~language ~workspace_root =
     match find t key with
     | Some proc -> Ok proc
     | None ->
-      (* [~protect:false]: [initialize] can take seconds, and a Keeper whose
-         turn is cancelled must not wait it out. The process is torn down on
-         the way out either way. *)
-      Eio.Mutex.use_rw ~protect:false (spawn_lock_for t key) (fun () ->
+      (* [initialize] can take seconds, and a Keeper whose turn is cancelled
+         must not wait it out: cancellation propagates straight through
+         [use_ro], which also releases the lock so the next caller can retry.
+         [use_rw ~protect:false] would instead disable this workspace's spawn
+         lock for the rest of the process. The half-started process is torn
+         down on the way out either way. *)
+      Eio.Mutex.use_ro (spawn_lock_for t key) (fun () ->
         match find t key with
         | Some proc -> Ok proc (* another caller won the race *)
         | None -> start_locked t ~key ~language ~workspace_root))

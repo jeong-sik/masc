@@ -788,7 +788,10 @@ let announce ~author content () =
 let flush_announcements () =
   let next () = Mutex.protect announcements_lock (fun () -> Queue.take_opt announcements) in
   try
-    Eio.Mutex.use_rw ~protect:false posting (fun () ->
+    (* [use_ro] so a failed or cancelled drain releases [posting] instead of
+       disabling it: the "goes out with the next one" contract below needs the
+       next call to reach the queue again. *)
+    Eio.Mutex.use_ro posting (fun () ->
       let rec drain () =
         match next () with
         | None -> ()

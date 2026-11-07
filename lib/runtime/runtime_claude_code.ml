@@ -2073,14 +2073,37 @@ let result_turn_id ~expected_session_id fields =
    (rateLimitType), and a later event of a window replaces what an earlier
    one said about it. An allowed five-hour event therefore does not hide a
    seven-day window that is still rejected. Events without a type all speak
-   for one unnamed window. The list is newest first, so its head is the
-   turn's last event. *)
-let note_rate_limit (limit : rate_limit) rate_limits =
-  limit
-  :: List.filter
-       (fun (earlier : rate_limit) -> not (same_window earlier.window limit.window))
-       rate_limits
-;;
+   for one unnamed window.
+
+   The value is newest first, so its head is the turn's last event. Only
+   [empty] and [note_rate_limit] build one, so that order holds by
+   construction. *)
+module Turn_rate_limits : sig
+  type t
+
+  val empty : t
+  val note_rate_limit : rate_limit -> t -> t
+  val latest : t -> rate_limit option
+  val newest_first : t -> rate_limit list
+end = struct
+  type t = rate_limit list
+
+  let empty = []
+
+  let note_rate_limit (limit : rate_limit) rate_limits =
+    limit
+    :: List.filter
+         (fun (earlier : rate_limit) -> not (same_window earlier.window limit.window))
+         rate_limits
+  ;;
+
+  let latest = function
+    | latest :: _ -> Some latest
+    | [] -> None
+  ;;
+
+  let newest_first rate_limits = rate_limits
+end
 
 (* Every rejected window is open again only once the last of them resets.
    A rejected window that stated no reset says nothing about when that is,
@@ -2110,12 +2133,9 @@ let quota_block ~api_error_status rate_limits =
   in
   let refused =
     Option.equal Int.equal api_error_status (Some 429)
-    ||
-    match rate_limits with
-    | latest :: _ -> is_rejected latest
-    | [] -> false
+    || Option.exists is_rejected (Turn_rate_limits.latest rate_limits)
   in
-  match refused, List.filter is_rejected rate_limits with
+  match refused, List.filter is_rejected (Turn_rate_limits.newest_first rate_limits) with
   | false, ([] | _ :: _) -> None
   | true, (first :: rest as rejected) ->
     Some
@@ -2627,7 +2647,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limits:(note_rate_limit rate_limit rate_limits) ~assistant_model ~assistant_texts
+      ~rate_limits:(Turn_rate_limits.note_rate_limit rate_limit rate_limits) ~assistant_model ~assistant_texts
       ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event
       ~input_observer ~partial_stream ~stream_started ~response_emitted
   | Frame_result ->
@@ -3040,7 +3060,7 @@ let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~
       (match session_mode with
        | Start -> false
        | Resume _ -> true)
-    ~rate_limits:[]
+    ~rate_limits:Turn_rate_limits.empty
     ~assistant_model:None
     ~assistant_texts:[]
     ~native_tool_calls:{invocation=Input_attribution.ticket input_observer.input_state;

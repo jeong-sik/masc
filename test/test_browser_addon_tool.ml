@@ -176,7 +176,7 @@ let scenario () = Eio_main.run (fun env ->
       (Masc.Browser_selection.Connected client) in
     let projected=Masc.Browser_binding.annotate binding (`Assoc [
       "clientId",`String "forged";"clientId",`String "forged-again";
-      "transport",`String "web_extension";"lane",`String "forged"]) in
+      "transport",`String "webdriver_bidi";"lane",`String "forged"]) in
     check string "page fields cannot forge the admitted client" (B.client_id_to_string client_id)
       Yojson.Safe.Util.(projected |> member "clientId" |> to_string);
     check string "page fields cannot forge its transport" "webdriver_bidi"

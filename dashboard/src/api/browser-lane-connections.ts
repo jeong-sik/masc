@@ -19,7 +19,7 @@ const work = Schema.Struct({
   phase: Schema.Literal('queued', 'running'),
 })
 const common = {
-  clientId: text, browser: Schema.Literal('firefox', 'zen', 'ego_lite'),
+  clientId: text, browser: Schema.Literal('firefox', 'ego_lite'),
   version: text, engineVersion: text,
   interactions: Schema.Array(work),
   lastActivities: Schema.Array(Schema.Struct({
@@ -32,7 +32,7 @@ const client = Schema.Union(
     spacePresence: Schema.NullOr(spacePresence),
   }).pipe(Schema.filter(client => (client.spaceObservation === null || client.spaceObservation.spaceId === client.space.id)
     && (client.spacePresence === null || client.spacePresence.spaceId === client.space.id))),
-  Schema.Struct({ ...common, transport: Schema.Literal('web_extension', 'webdriver_bidi'), space: Schema.Null,
+  Schema.Struct({ ...common, transport: Schema.Literal('webdriver_bidi'), space: Schema.Null,
     spaceObservation: Schema.Null, spacePresence: Schema.Null }),
 )
 const unavailable = Schema.Struct({

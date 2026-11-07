@@ -416,7 +416,7 @@ let suffix_only_declaration_is_editable () = with_fixture (fun _ _ config root d
    when there is none. *)
 let browser_rows_read_the_addon_observation () =
   let client id = `Assoc ["clientId",`String id;"browser",`String "firefox";"version",`String "158.0.1";
-    "engineVersion",`String "158.0.1";"transport",`String "web_extension";"space",`Null;"interactions",`List [];"lastActivities",`List [];"spaceObservation",`Null;"spacePresence",`Null] in
+    "engineVersion",`String "158.0.1";"transport",`String "webdriver_bidi";"space",`Null;"interactions",`List [];"lastActivities",`List [];"spaceObservation",`Null;"spacePresence",`Null] in
   let output = match Browser_addon_observation.of_snapshot ~observed_at:1.
       (`Assoc ["state",`String "serving";
         "clients",`List [client "01a16363-ef67-7000-ad62-05bcd0320d99"; client "01a16363-ef68-7000-aee1-37e1be230202"]]) with
@@ -428,8 +428,8 @@ let browser_rows_read_the_addon_observation () =
   let reading observations = Browser_addon_presence.of_observations ~declarations
       ~applications:(fun () -> fail "only an Add-on declared on and not running asks how it was applied")
       observations in
-  (* The external host worker publishes this observation. *)
-  let every observation = [{Addon.backend=Browser_lane.Backend.External_host;observation}] in
+  (* The owned Firefox worker publishes this observation. *)
+  let every observation = [{Addon.backend=Browser_lane.Backend.Owned_firefox;observation}] in
   let read observation lane = Browser_addon_presence.lane (reading (every observation)) lane in
   let state observation lane = Inventory.For_testing.browser_state
       (read observation lane) lane in
@@ -440,31 +440,12 @@ let browser_rows_read_the_addon_observation () =
     (state (Ok None) Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Inventory.Browser_addon_absent));
   let failed : Lane_addon_unready.t = {installation="browser-work";instance_id="browser-worker";package_id="browser";
-    declared_tools=[];service=Lane_addon_types.Browser_service Browser_lane.Backend.External_host;reason=Failed {Lane_addon_lifecycle.cause=Cleanup_unconfirmed "cleanup incomplete";first=None}} in
+    declared_tools=[];service=Lane_addon_types.Browser_service Browser_lane.Backend.Owned_firefox;reason=Failed {Lane_addon_lifecycle.cause=Cleanup_unconfirmed "cleanup incomplete";first=None}} in
   let refusal = Addon.Unready_installations (failed, []) in
   check bool "a failed browser Add-on shows the operator its failure" true
     (state (Error refusal) Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (
-         Inventory.Browser_addon_unavailable (Addon.export_refusal_operator_message refusal)));
-  (* The browser lane check reads the same observation: the clients the
-     Add-on published are the hosts that poll this server. *)
-  check bool "the published clients are the polling hosts" true
-    (let observed = read observed Browser_lane.Lane_name.Live in
-     match Browser_addon_presence.polling observed, observed with
-     | Browser_lane_launcher.Polling clients, Browser_addon_presence.Observed published ->
-         clients = published.clients && List.length clients = 2
-     | Browser_lane_launcher.(Polling _ | Unlisted _ | Not_observed),
-       Browser_addon_presence.(Observed _ | Absent | Off | Not_running _ | Unavailable _) -> false);
-  List.iter (fun (name, presence, unlisted) ->
-      check bool name true (Browser_addon_presence.polling presence = Browser_lane_launcher.Unlisted unlisted))
-    [ "no Add-on lists no host", Browser_addon_presence.Absent, Browser_lane_launcher.No_browser_addon
-    ; "an Add-on switched off lists no host", Browser_addon_presence.Off, Browser_lane_launcher.Browser_addon_off
-    ; "an Add-on not running lists no host, with what is known of why",
-      Browser_addon_presence.Not_running Browser_lane_launcher.Attach_failed,
-      Browser_lane_launcher.Browser_addon_not_running Browser_lane_launcher.Attach_failed
-    ; "a refused observation is said as any caller may read it",
-      Browser_addon_presence.Unavailable (Browser_addon_presence.Refused refusal),
-      Browser_lane_launcher.Browser_addon_unreadable (Addon.export_refusal_message refusal) ]
+         Inventory.Browser_addon_unavailable (Addon.export_refusal_operator_message refusal)))
 
 (* Several browser installations, each serving the sources its package
    names: a lane reads only the installations that answer for it, as the
@@ -475,7 +456,7 @@ let browser_lanes_read_their_own_sources () =
       | Ok id -> id | Error detail -> fail detail in
     let browser,space=match transport with
       | Browser_lane.Ego_task_space -> Browser_lane.Ego_lite,Some {Browser_lane.id=51;name="Inventory fixture"}
-      | Web_extension | Webdriver_bidi -> Browser_lane.Firefox,None in
+      | Webdriver_bidi -> Browser_lane.Firefox,None in
     let client : Browser_lane.client_info =
       {client_id;browser;version="158.0.1";engine_version="158.0.1";transport;space} in
     Browser_addon_observation.publish_client client ~space_observation:None ~space_presence:None in
@@ -493,10 +474,10 @@ let browser_lanes_read_their_own_sources () =
          ~applications:(fun () -> fail "no browser Add-on is declared") observations) lane) lane in
   let ego = serving Browser_lane.Backend.Ego
       (published [client "01a16363-ef67-7000-ad62-05bcd0320d99" Browser_lane.Ego_task_space])
-  and extension = serving Browser_lane.Backend.External_host
-      (published [client "01a16363-ef68-7000-aee1-37e1be230202" Browser_lane.Web_extension;
-                  client "01a16363-ef69-7000-aee1-37e1be230203" Browser_lane.Web_extension]) in
-  let workers = [ego; extension] in
+  and firefox = serving Browser_lane.Backend.Owned_firefox
+      (published [client "01a16363-ef68-7000-aee1-37e1be230202" Browser_lane.Webdriver_bidi;
+                  client "01a16363-ef69-7000-aee1-37e1be230203" Browser_lane.Webdriver_bidi]) in
+  let workers = [ego; firefox] in
   check bool "the live row counts the clients of every live installation" true
     (state workers Browser_lane.Lane_name.Live = Inventory.Browser_clients (Inventory.Browser_observed 3));
   (* Two installations of one source reach presence as one ambiguous
@@ -509,16 +490,16 @@ let browser_lanes_read_their_own_sources () =
                               | Observed _ | Absent | Off | Not_running _) -> false in
   let lane_of observations lane = Browser_addon_presence.lane
       (Browser_addon_presence.of_observations ~declarations ~applications:(fun () -> []) observations) lane in
-  (* Two installations of ego beside one of external hosts: the host uses
-     no ego client and every external one, and the live row says the same. *)
-  let ego_twice = [serving Browser_lane.Backend.Ego ambiguous; extension] in
+  (* Two installations of ego beside one owned Firefox: the host uses no ego
+     client and every Firefox one, and the live row says the same. *)
+  let ego_twice = [serving Browser_lane.Backend.Ego ambiguous; firefox] in
   check bool "a doubled live source leaves out only its own clients" true
     (state ego_twice Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Inventory.Browser_observed 2));
-  check bool "the browser lane check lists the hosts of the source that still answers" true
-    (match Browser_addon_presence.polling (lane_of ego_twice Browser_lane.Lane_name.Live) with
-     | Browser_lane_launcher.Polling clients -> List.length clients = 2
-     | Browser_lane_launcher.(Unlisted _ | Not_observed) -> false);
+  check bool "the source that still answers lists its clients" true
+    (match lane_of ego_twice Browser_lane.Lane_name.Live with
+     | Browser_addon_presence.Observed published -> List.length published.clients = 2
+     | Browser_addon_presence.(Absent | Off | Not_running _ | Unavailable _) -> false);
   check bool "a live lane whose only source is doubled says so" true
     (is_ambiguous (lane_of [serving Browser_lane.Backend.Ego ambiguous]
                      Browser_lane.Lane_name.Live));
@@ -528,7 +509,7 @@ let browser_lanes_read_their_own_sources () =
     declared_tools=[];service=Lane_addon_types.Browser_service Browser_lane.Backend.Ego;
     reason=Failed {Lane_addon_lifecycle.cause=Cleanup_unconfirmed "cleanup incomplete";first=None}} in
   let refusal = Addon.Unready_installations (failed, []) in
-  let withheld = [serving Browser_lane.Backend.Ego (Error refusal); extension] in
+  let withheld = [serving Browser_lane.Backend.Ego (Error refusal); firefox] in
   check bool "a withheld live installation leaves out only its own clients" true
     (state withheld Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Inventory.Browser_observed 2));
@@ -553,7 +534,7 @@ revision = "1"
 title = "Browser"
 runtime = "host_process"
 service = "browser"
-browser_backend = "external_host"
+browser_backend = "owned_firefox"
 command = ["masc-browser-addon-worker"]
 contributions = ["observe"]
 [resources]
@@ -573,7 +554,7 @@ max_reply_bytes = 4096
     (read ("enabled = false\n" ^ declaration browser "browser-work") = Browser_addon_presence.Off);
   check bool "a browser Add-on declared on with no observation is not running" true
     (read (declaration browser "browser-work")
-     = Browser_addon_presence.Not_running Browser_lane_launcher.Not_known);
+     = Browser_addon_presence.Not_running Browser_addon_presence.Not_known);
   (* How the maintenance pass applied that declaration says why it is not
      running; an observation of another revision says nothing. *)
   let on = Config.load ~directory in
@@ -586,19 +567,19 @@ max_reply_bytes = 4096
   List.iter (fun (name, applications, reason) ->
       check bool name true (not_running applications = Browser_addon_presence.Not_running reason))
     [ "a failed application is a failed attach",
-      applied (Lane_addon_application.Failed ["package image missing"]), Browser_lane_launcher.Attach_failed
+      applied (Lane_addon_application.Failed ["package image missing"]), Browser_addon_presence.Attach_failed
     ; "a worker being started is attaching", applied Lane_addon_application.Starting_worker,
-      Browser_lane_launcher.Attaching
+      Browser_addon_presence.Attaching
     ; "a worker being replaced is attaching", applied Lane_addon_application.Cleaning_workers,
-      Browser_lane_launcher.Attaching
-    ; "no application yet is not known", [], Browser_lane_launcher.Not_known
+      Browser_addon_presence.Attaching
+    ; "no application yet is not known", [], Browser_addon_presence.Not_known
     ; "a failure of an older revision is not this declaration's",
       applied ~revision:(fun _ -> "older") (Lane_addon_application.Failed ["package image missing"]),
-      Browser_lane_launcher.Not_known ];
+      Browser_addon_presence.Not_known ];
   check bool "a failed application in an incomplete read is not taken for a failed attach" true
     (live_presence ~declarations:{on with complete=false}
        ~applications:(fun () -> applied (Lane_addon_application.Failed ["package image missing"]))
-     = Browser_addon_presence.Not_running Browser_lane_launcher.Not_known);
+     = Browser_addon_presence.Not_running Browser_addon_presence.Not_known);
   (* A switched-off browser Add-on beside a declaration that could not be read
      is not proof that none is on: the unread one may be a browser switched on. *)
   write path ("enabled = false\n" ^ declaration browser "browser-work");
@@ -622,27 +603,27 @@ max_reply_bytes = 4096
    its own sources. *)
 let browser_rows_follow_the_declarations () = with_fixture (fun _env _sw config root directory ->
   let browser = Filename.concat root "browser.toml" in
-  write browser {|id = "browser-external"
+  write browser {|id = "browser-firefox"
 revision = "1"
 title = "Browser"
 runtime = "host_process"
 service = "browser"
-browser_backend = "external_host"
+browser_backend = "owned_firefox"
 command = ["masc-browser-addon-worker"]
 contributions = ["observe"]
 [resources]
 max_reply_bytes = 4096
 |};
-  let path = Filename.concat directory "browser-external.toml" in
+  let path = Filename.concat directory "browser-firefox.toml" in
   let reading lane =
     let id = Lane_id.to_wire (Lane_id.Builtin (Lane_id.Browser lane)) in
     match List.find_opt (fun row -> text "id" row = id)
             (values "rows" (Inventory.snapshot ~config |> Inventory.to_json)) with
     | Some row -> text "kind" (member "addon" (member "state" row))
     | None -> failf "no %s row" id in
-  write path (declaration browser "browser-external");
+  write path (declaration browser "browser-firefox");
   check string "a live source declared on waits for its worker" "not_running" (reading Browser_lane.Lane_name.Live);
-  write path ("enabled = false\n" ^ declaration browser "browser-external");
+  write path ("enabled = false\n" ^ declaration browser "browser-firefox");
   check string "switching its declaration off turns the lane off" "off" (reading Browser_lane.Lane_name.Live))
 
 let () = run "operator lane inventory" ["read boundaries",[

@@ -102,7 +102,7 @@ jobs:
           # pipefail keeps Dune's exit status through tee; the log feeds
           # the failure digest and the fixed issue below.
           opam exec -- dune build --root . \
-            bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
+            bin/main_eio.exe bin/masc_tui.exe \
             bin/deployment_preflight_helper.exe 2>&1 | tee "$RUNNER_TEMP/main-build.log"
 
       # Type-check the whole tree, tests included, so a broken test tree is
@@ -144,7 +144,7 @@ jobs:
               echo 'This skip is not compilation evidence for the checked SHA.'
             else
               echo "Build job status: $BUILD_STATUS"
-              echo "Product build (server, TUI, browser host, deployment preflight): $PRODUCT_OUTCOME"
+              echo "Product build (server, TUI, deployment preflight): $PRODUCT_OUTCOME"
               echo "Type-check of the whole tree (dune build @check; tests compiled, not run): $CHECK_OUTCOME"
             fi
           } >> "$GITHUB_STEP_SUMMARY"

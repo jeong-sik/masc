@@ -19,7 +19,7 @@ value = { lane = "live", clientId = "0c000000-0000-4000-8000-000000000007", tabI
 let client : Browser_lane.client_info =
   {client_id=expect (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000007");
    browser=Browser_lane.Firefox;version="fixture";engine_version="fixture";
-   transport=Browser_lane.Web_extension;space=None}
+   transport=Browser_lane.Webdriver_bidi;space=None}
 let scene = `Assoc [
   "schema",`String "masc.browser.scene.v1"; "tabId",`Int 7;
   "documentId",`String "observed-document"; "url",`String "https://example.org/page";

@@ -212,9 +212,9 @@ jobs:
         if: runner.os == 'macOS'
         run: |
           opam exec -- dune build --release bin/main_eio.exe bin/masc_tui.exe \
-            bin/masc_browser_host.exe bin/deployment_preflight_helper.exe
+            bin/deployment_preflight_helper.exe
           mkdir -p "$PROBE_OUT"
-          cp _build/default/bin/{main_eio,masc_tui,masc_browser_host,deployment_preflight_helper}.exe "$PROBE_OUT/"
+          cp _build/default/bin/{main_eio,masc_tui,deployment_preflight_helper}.exe "$PROBE_OUT/"
           test "$("$PROBE_OUT/main_eio.exe" build-commit)" = "$GITHUB_SHA"
           test "$("$PROBE_OUT/masc_tui.exe" --build-commit)" = "$GITHUB_SHA"
           otool -L "$PROBE_OUT/main_eio.exe" > "$PROBE_OUT/native-dependencies.txt"
@@ -229,7 +229,7 @@ jobs:
         run: |
           set -euo pipefail
           cd "$PROBE_OUT"
-          shasum -a 256 deployment_preflight_helper.exe main_eio.exe masc_browser_host.exe masc_tui.exe > SHA256SUMS
+          shasum -a 256 deployment_preflight_helper.exe main_eio.exe masc_tui.exe > SHA256SUMS
           shasum -a 256 --check SHA256SUMS
 
       - name: Upload runtime probe
@@ -358,7 +358,7 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           scripts/check-version-truth.sh
           opam exec -- dune build --release \
-            bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
+            bin/main_eio.exe bin/masc_tui.exe \
             bin/deployment_preflight_helper.exe bin/masc_exec_ssh_bootstrap.exe
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           git diff --exit-code HEAD --
@@ -367,7 +367,6 @@ jobs:
           mkdir -p "$PROBE_OUT"
           cp _build/default/bin/main_eio.exe "$PROBE_OUT/masc-macos-arm64"
           cp _build/default/bin/masc_tui.exe "$PROBE_OUT/masc-tui-macos-arm64"
-          cp _build/default/bin/masc_browser_host.exe "$PROBE_OUT/masc-browser-host-macos-arm64"
           cp _build/default/bin/deployment_preflight_helper.exe "$PROBE_OUT/masc-deployment-preflight-helper-macos-arm64"
           cp _build/default/bin/masc_exec_ssh_bootstrap.exe "$PROBE_OUT/masc-exec-ssh-bootstrap-macos-arm64"
           cp scripts/check-runtime-deployment-preflight.sh "$PROBE_OUT/masc-check-runtime-deployment-preflight-macos-arm64"
@@ -395,7 +394,7 @@ jobs:
             opam list --installed --columns=name,version
             brew list --versions
             for binary in "$PROBE_STAGE"/masc "$PROBE_STAGE"/masc-tui \
-              "$PROBE_STAGE"/masc-browser-host "$PROBE_STAGE"/masc-deployment-preflight-helper \
+              "$PROBE_STAGE"/masc-deployment-preflight-helper \
               "$PROBE_STAGE"/lib/*; do
               otool -L "$binary"
             done

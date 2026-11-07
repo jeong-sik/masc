@@ -13,7 +13,7 @@ import tempfile
 import urllib.request
 import zipfile
 
-NAMES = ('masc', 'masc-tui', 'masc-browser-host', 'masc-deployment-preflight-helper',
+NAMES = ('masc', 'masc-tui', 'masc-deployment-preflight-helper',
          'masc-check-runtime-deployment-preflight', 'masc-exec-ssh-bootstrap')
 MACH = {b'\xcf\xfa\xed\xfe', b'\xce\xfa\xed\xfe', b'\xca\xfe\xba\xbe', b'\xca\xfe\xba\xbf'}
 

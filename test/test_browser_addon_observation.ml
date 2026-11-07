@@ -18,7 +18,7 @@ let invalid_time () = check bool "invalid time rejected before publication" true
 let invalid_snapshot () = check bool "non-object snapshot rejected before publication" true
   (Result.is_error (Observation.of_snapshot ~observed_at:0. (`List [])))
 let client id browser = `Assoc ["clientId",`String id;"browser",`String browser;
-  "version",`String "158.0.1";"engineVersion",`String "158.0.1";"transport",`String "web_extension";"space",`Null;
+  "version",`String "158.0.1";"engineVersion",`String "158.0.1";"transport",`String "webdriver_bidi";"space",`Null;
   "interactions",`List [];"lastActivities",`List [];"spaceObservation",`Null;"spacePresence",`Null]
 let serving clients = `Assoc ["state",`String "serving";"clients",`List clients]
 (* The server reads the browser rows of the Lanes list from this cached
@@ -26,7 +26,7 @@ let serving clients = `Assoc ["state",`String "serving";"clients",`List clients]
 let published_reads_back () =
   let output=ok (Observation.of_snapshot ~observed_at:1.
     (serving [client "01a16363-ef67-7000-ad62-05bcd0320d99" "firefox";
-              client "01a16363-ef68-7000-aee1-37e1be230202" "zen"])) in
+              client "01a16363-ef68-7000-aee1-37e1be230202" "firefox"])) in
   let published=ok (Observation.read output) in
   check int "both connected clients read back" 2 (List.length published.clients)
 (* The runtime keeps an observation with its row renamed under the
@@ -118,7 +118,7 @@ let publisher_binds_original_client_space () = Eio_main.run (fun _ ->
   check bool "foreign numeric ID cannot leak to this client" true
     (published {base with space=Some {id=33;name="Another"}} (Some native)=`Null);
   check bool "non-Ego client cannot borrow the cache" true
-    (published {base with browser=Firefox;transport=Web_extension;space=None} (Some native)=`Null))
+    (published {base with browser=Firefox;transport=Webdriver_bidi;space=None} (Some native)=`Null))
 let published_space_presence () =
   let module O=Masc.Browser_ego_space_observation in
   let set key value = function `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)

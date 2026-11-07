@@ -212,10 +212,10 @@ let of_json value =
          | _ -> Error "unknown download transfer operation")
     | "poll" -> let* () = exact ["client";"window_sec"] in let* raw = required fields "client" in
         let* client = client_of_json raw in
-        (* The ego connection polls from inside the worker; no native host speaks for it. *)
+        (* The ego connection polls from inside the worker. *)
         let* () = match client.transport with
-          | B.Ego_task_space -> Error "an ego_task_space connection is run by the browser Add-on worker, not by a native host"
-          | B.Web_extension | B.Webdriver_bidi -> Ok () in
+          | B.Ego_task_space -> Error "an ego_task_space connection is run by the browser Add-on worker, not polled over the socket"
+          | B.Webdriver_bidi -> Ok () in
         let* raw = required fields "window_sec" in let* window_sec = positive raw in Ok (Poll {client;window_sec})
     | "deliver" -> let* () = exact ["clientId";"id";"payload"] in let* client_id = client_id () in
         let* id = text_field fields "id" in let* payload = required fields "payload" in Ok (Deliver {client_id;id;payload})

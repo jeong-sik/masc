@@ -58,7 +58,7 @@ val cleanup_downloads : t -> (unit, string) result
 (** Invoke only after confirmed owned backend teardown. Retain unresolved bytes. *)
 (** A live connection this worker runs: its next command, or [None] once the
     window passed or the owner retired; its result for one command; and its
-    end. Each is the request a native host sends, made inside the worker. *)
+    end. Each is a wire command, made inside the worker. *)
 val poll_live : t -> client:Browser_lane.client_info -> window_sec:float ->
   (Browser_lane.issued option, string) result
 val live_request_window : t -> client_id:Browser_lane.client_id -> id:string ->

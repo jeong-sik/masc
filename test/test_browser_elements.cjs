@@ -1,4 +1,4 @@
-// Execute both shipped observation scripts against the same small DOM fixture.
+// Execute the shipped elements observation script against a small DOM fixture.
 // Firefox behavior and native action effects belong to the browser smoke test.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
@@ -10,8 +10,6 @@ const root = path.resolve(__dirname, '..');
 const nativeSource = fs.readFileSync(path.join(root, 'lib/browser_page_script.ml'), 'utf8');
 const nativeScript = nativeSource.match(/let elements = \{\|([\s\S]*?)\|\}/)?.[1];
 assert.ok(nativeScript, 'native elements script exists');
-const extensionSource = fs.readFileSync(
-  path.join(root, 'connectors/browser/extension/background.js'), 'utf8');
 
 function fixture() {
   function element(tag, attrs = {}, properties = {}) {
@@ -72,25 +70,6 @@ function runNative(context, args = {}) {
   return plain(vm.runInNewContext(`(function () {${nativeScript}})(${JSON.stringify(args)})`, context));
 }
 
-async function runExtension(context, args = {}) {
-  const api = {
-    runtime: {
-      connectNative() {
-        return { onMessage: { addListener() {} }, onDisconnect: { addListener() {} } };
-      },
-    },
-    tabs: {
-      async executeScript(tabId, { code }) {
-        assert.equal(tabId, 37);
-        return [vm.runInNewContext(code, context)];
-      },
-    },
-  };
-  const extension = vm.createContext({ browser: api, setTimeout, clearTimeout });
-  vm.runInContext(extensionSource, extension);
-  return plain(await extension.pageElements({ tabId: 37, ...args }));
-}
-
 function checkControls(observation) {
   assert.equal(observation.total, 8);
   assert.equal(observation.truncated, false);
@@ -123,16 +102,7 @@ test('native elements expose actionable current states without sensitive values'
   assert.equal(runNative(context).elements[0].value, 'later edit');
 });
 
-test('live elements retain tab identity and match native control observations', async () => {
-  const { context } = fixture();
-  const result = await runExtension(context);
-  assert.equal(result.tabId, 37);
-  checkControls(result);
-  const { tabId, ...page } = result;
-  assert.deepEqual(page, runNative(context));
-});
-
-test('shared ancestor visibility stays correct and is refreshed for each observation', async () => {
+test('ancestor visibility stays correct and is refreshed for each observation', () => {
   const { context, text } = fixture();
   const body = text.parentElement;
   const html = body.parentElement;
@@ -147,12 +117,9 @@ test('shared ancestor visibility stays correct and is refreshed for each observa
     hidden = ancestor;
     calls.clear();
     const native = runNative(context);
-    const nativeCalls = [...calls.values()].reduce((a, b) => a + b, 0);
-    calls.clear();
-    const { tabId, ...extension } = await runExtension(context);
-    assert.deepEqual(native, extension, 'ancestor display and later changes preserve observations');
+    assert.equal(native.total, ancestor ? 0 : 8, 'ancestor display and later changes reach the observation');
     console.log(JSON.stringify({ hiddenAncestor: ancestor?.localName ?? null,
-      nativeStyleReads: nativeCalls, extensionStyleReads: [...calls.values()].reduce((a, b) => a + b, 0) }));
+      nativeStyleReads: [...calls.values()].reduce((a, b) => a + b, 0) }));
   }
   visibility = body;
   assert.equal(runNative(context).total, 8, 'a descendant can override inherited visibility');
@@ -166,22 +133,22 @@ test('shared ancestor visibility stays correct and is refreshed for each observa
 
 // A cut through a surrogate pair leaves half a character. JSON then carries
 // an escape that a strict reader refuses, and the whole inventory is lost.
-test('element text is cut by code point, never through a surrogate pair', async () => {
+test('element text is cut by code point, never through a surrogate pair', () => {
   const { context, text } = fixture();
-  const cuts = async () => [runNative(context), await runExtension(context)]
-    .map(observation => observation.elements[0].text);
+  const cut = () => runNative(context).elements[0].text;
   text.innerText = 'a'.repeat(499) + '\u{1F600}' + 'tail';
-  for (const cut of await cuts()) {
-    assert.equal(cut.isWellFormed(), true);
-    assert.equal(Array.from(cut).length, 500);
-    assert.equal(cut.endsWith('\u{1F600}'), true);
+  {
+    const value = cut();
+    assert.equal(value.isWellFormed(), true);
+    assert.equal(Array.from(value).length, 500);
+    assert.equal(value.endsWith('\u{1F600}'), true);
   }
   // 500 two-unit characters fill the 1000 units that are split, and a 501st
   // starts right after them.
   text.innerText = '\u{1F600}'.repeat(501);
-  for (const cut of await cuts()) assert.equal(cut, '\u{1F600}'.repeat(500));
+  assert.equal(cut(), '\u{1F600}'.repeat(500));
   text.innerText = 'short \u{1F600}';
-  for (const cut of await cuts()) assert.equal(cut, 'short \u{1F600}');
+  assert.equal(cut(), 'short \u{1F600}');
 });
 
 // [within] is read by the page's CSS engine. The fixture stands in for it with
@@ -195,7 +162,7 @@ function scope(context, containers) {
   };
 }
 
-test('within keeps the controls inside the matched elements, in both readers', async () => {
+test('within keeps the controls inside the matched elements', () => {
   const { context, text } = fixture();
   const body = text.parentElement;
   const controls = body.children;
@@ -206,24 +173,19 @@ test('within keeps the controls inside the matched elements, in both readers', a
   second.parentElement = nav;
   body.children = [nav, ...rest];
   scope(context, { nav: [nav], '#agree': [second], '#missing': [] });
-  const read = async within => {
-    const native = runNative(context, { within });
-    const { tabId, ...extension } = await runExtension(context, { within });
-    assert.deepEqual(extension, native, 'both readers apply the same scope');
-    return native;
-  };
+  const read = within => runNative(context, { within });
 
-  const inNav = await read('nav');
+  const inNav = read('nav');
   assert.equal(inNav.within, 'nav');
   assert.equal(inNav.withinMatches, 1);
   assert.equal(inNav.total, 2);
   assert.deepEqual(inNav.elements.map(item => item.value), ['current edit', 'agree']);
 
-  const itself = await read('#agree');
+  const itself = read('#agree');
   assert.equal(itself.total, 1, 'a control that matches within counts');
   assert.equal(itself.elements[0].value, 'agree');
 
-  const none = await read('#missing');
+  const none = read('#missing');
   assert.equal(none.withinMatches, 0);
   assert.equal(none.total, 0);
 
@@ -233,12 +195,10 @@ test('within keeps the controls inside the matched elements, in both readers', a
   assert.equal(whole.total, 8);
 });
 
-test('an invalid within is refused, never read as the whole page', async () => {
+test('an invalid within is refused, never read as the whole page', () => {
   const { context } = fixture();
   scope(context, {});
   assert.throws(() => runNative(context, { within: 'nav((' }), /invalid_css_selector/);
-  await assert.rejects(runExtension(context, { within: 'nav((' }), /invalid_css_selector/);
-  await assert.rejects(runExtension(context, { within: '' }), /invalid_within/);
 });
 
 // The page's CSS engine answers which elements an id selects. The fixture
@@ -250,7 +210,7 @@ function ids(context, byId) {
     selector.startsWith('#') ? (byId[selector.slice(1)] ?? []) : controls;
 }
 
-test('a selector starts at the nearest id no other element carries', async () => {
+test('a selector starts at the nearest id no other element carries', () => {
   const { context, text } = fixture();
   const body = text.parentElement;
   const [first, second, third] = body.children;
@@ -260,8 +220,6 @@ test('a selector starts at the nearest id no other element carries', async () =>
   third.id = 'twice';
   ids(context, { form: [body], agree: [second], twice: [first, third] });
   const native = runNative(context);
-  const { tabId, ...extension } = await runExtension(context);
-  assert.deepEqual(extension, native, 'both readers anchor the same way');
   assert.equal(native.elements[0].selector, '#form > input:nth-of-type(1)', 'a shared id is not an anchor');
   assert.equal(native.elements[1].selector, '#agree', 'a control with its own unique id needs no path');
   assert.equal(native.elements[2].selector, '#form > input:nth-of-type(3)');
@@ -269,7 +227,7 @@ test('a selector starts at the nearest id no other element carries', async () =>
 });
 
 
-test('explicit selectors observe custom rows inside within without exposing hidden nodes or values', async () => {
+test('explicit selectors observe custom rows inside within without exposing hidden nodes or values', () => {
   const {context, text} = fixture();
   const body = text.parentElement;
   const row = (label, parent = body) => ({
@@ -288,8 +246,6 @@ test('explicit selectors observe custom rows inside within without exposing hidd
       {within:'#missing',selector:'[role=row]'}, {selector:'#missing'},
       {selector:'input[type=password]'}]) {
     const native = runNative(context,args);
-    const {tabId,...extension} = await runExtension(context,args);
-    assert.deepEqual(extension,native);
     if (args.selector === '[role=row]') {
       assert.equal(native.selectorMatches,3);
       assert.deepEqual(native.elements.map(e=>e.text),
@@ -298,7 +254,4 @@ test('explicit selectors observe custom rows inside within without exposing hidd
     else assert.equal(Object.hasOwn(native.elements[0],'value'),false);
   }
   assert.throws(()=>runNative(context,{selector:'nav(('}),/invalid_css_selector/);
-  await assert.rejects(runExtension(context,{selector:'nav(('}),/invalid_css_selector/);
-  for (const selector of ['',null,7,{}])
-    await assert.rejects(runExtension(context,{selector}),/invalid_selector/);
 });

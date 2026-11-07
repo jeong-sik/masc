@@ -55,11 +55,11 @@ let publish_client (client : Browser_lane.client_info) ~(space_observation : Bro
   let observation=match client.transport,client.space,space_observation with
     | Ego_task_space,Some space,Some observation when space.id=observation.space.id ->
         Browser_ego_space_observation.to_json observation
-    | (Ego_task_space|Web_extension|Webdriver_bidi),(Some _|None),(Some _|None) -> `Null in
+    | (Ego_task_space|Webdriver_bidi),(Some _|None),(Some _|None) -> `Null in
   let presence=match client.transport,client.space,space_presence with
     | Ego_task_space,Some space,Some presence when space.id=presence.space_id ->
       Browser_ego_space_observation.presence_to_json presence
-    | (Ego_task_space|Web_extension|Webdriver_bidi),(Some _|None),(Some _|None) -> `Null in
+    | (Ego_task_space|Webdriver_bidi),(Some _|None),(Some _|None) -> `Null in
   let `Assoc fields=Browser_lane.client_json client in
   `Assoc (("spacePresence",presence)::("spaceObservation",observation)::fields)
 
@@ -91,8 +91,8 @@ let decode_snapshot = function
                  let* ()=match client.transport,client.space,List.assoc_opt "spaceObservation" row with
                    | Ego_task_space,Some space,Some value when value<>`Null ->
                        Browser_ego_space_observation.of_json ~expected_id:space.id value |> Result.map (fun _ -> ())
-                   | (Ego_task_space|Web_extension|Webdriver_bidi),(Some _|None),Some `Null -> Ok ()
-                   | (Ego_task_space|Web_extension|Webdriver_bidi),(Some _|None),(None|Some _) ->
+                   | (Ego_task_space|Webdriver_bidi),(Some _|None),Some `Null -> Ok ()
+                   | (Ego_task_space|Webdriver_bidi),(Some _|None),(None|Some _) ->
                        Error "invalid browser Space observation" in
                  if List.exists (fun (known : Browser_lane.client_info) -> known.client_id=client.client_id) acc
                  then Error "duplicate browser inventory client" else decode (client::acc) rest
@@ -105,8 +105,8 @@ let decode_snapshot = function
                  | Ego_task_space,Some space,Some value when value<>`Null ->
                    Browser_ego_space_observation.presence_of_json ~expected_id:space.id value
                    |> Result.map (fun presence -> Some (client.client_id,presence))
-                 | (Ego_task_space|Web_extension|Webdriver_bidi),(Some _|None),Some `Null -> Ok None
-                 | (Ego_task_space|Web_extension|Webdriver_bidi),(Some _|None),(None|Some _) ->
+                 | (Ego_task_space|Webdriver_bidi),(Some _|None),Some `Null -> Ok None
+                 | (Ego_task_space|Webdriver_bidi),(Some _|None),(None|Some _) ->
                    Error "invalid browser Space presence" in
                presences (match presence with None -> acc | Some value -> value::acc) clients rows
              | [],_::_ | _::_,([]|_::_) -> Error "invalid browser inventory presence alignment" in
@@ -136,7 +136,7 @@ module Client_map = Map.Make (struct type t=Browser_lane.client_id let compare=c
 module Space_map = Map.Make (Int)
 let ego_space_id (client:Browser_lane.client_info) = match client.transport,client.space with
   | Browser_lane.Ego_task_space,Some space -> Some space.id
-  | (Ego_task_space|Web_extension|Webdriver_bidi),(None|Some _) -> None
+  | (Ego_task_space|Webdriver_bidi),(None|Some _) -> None
 let live_conflicts clients =
   let duplicate = function None -> Some false | Some _ -> Some true in
   let client_counts,space_counts=List.fold_left (fun (client_counts,space_counts) (client:Browser_lane.client_info) ->
@@ -165,8 +165,8 @@ let check_ego_identity knowledge (client:Browser_lane.client_info) =
   match knowledge,client.transport with
   | Unknown_ego_identities,Browser_lane.Ego_task_space ->
       Error "live browser controller identities are incomplete; the Ego Space may have another controller, so no browser command was dispatched"
-  | Known_ego_identities,(Ego_task_space|Web_extension|Webdriver_bidi)
-  | Unknown_ego_identities,(Web_extension|Webdriver_bidi) -> Ok ()
+  | Known_ego_identities,(Ego_task_space|Webdriver_bidi)
+  | Unknown_ego_identities,Webdriver_bidi -> Ok ()
 let merge workers =
   let live=List.filter_map (fun (backend,published) -> if serves_live backend then published else None) workers in
   let clients=List.concat_map (fun published -> published.clients) live in

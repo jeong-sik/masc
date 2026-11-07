@@ -50,8 +50,8 @@ cookies, so use a profile limited to the sites the agent needs.
    For an existing installation, detach it and attach a new instance to capture
    changed backend settings.
 3. Inspect the installation's `desired_revision`, `applied_revision`, `phase`,
-   and configuration issues. A saved TOML or configured `bidiHost` status alone
-   does not establish an attached worker or usable connection.
+   and configuration issues. A saved TOML alone does not establish an attached
+   worker or usable connection.
 4. Discover connections and tabs with `BrowserTabs`. Keep the observed
    `clientId` and `tabId` for subsequent reads and interactions. Read a normal
    HTTP(S) page and capture a fresh viewport before pointer input.
@@ -78,16 +78,6 @@ outcome. Profile contents and stable claim files are preserved. A retired
 connection cannot be reused; discover the new instance's connection after
 reattachment. An uncertain input is never replayed automatically.
 
-## External Firefox connections
-
-A manually started Firefox and standalone
-`masc-browser-host --bidi-url ws://127.0.0.1:9222/session` remain an explicit
-external connection. Install its launcher with
-`masc browser-lane-setup --mode host --base-path /path/to/workspace` and connect
-it to an attached browser Addon. The operator owns that browser's process
-lifetime. This host's manual connection diagnostics are separate from the
-managed Addon's readiness.
-
 ## Interaction scope
 
 BiDi provides native hover, pointer input, keyboard input, and guarded semantic
@@ -100,6 +90,6 @@ existing one.
 After hover, read or capture again to find newly exposed controls. Verify the
 application state after a drag: a successful input receipt does not prove the
 page accepted the drop. Check the connection's reported capabilities for other
-actions; browser zoom, uploads, and other features are not interchangeable
-between transports. The Addon lifecycle scenarios use a scripted BiDi peer;
+actions; uploads and other features are not interchangeable between
+transports. The Addon lifecycle scenarios use a scripted BiDi peer;
 they do not establish operation on every installed Firefox build or website.

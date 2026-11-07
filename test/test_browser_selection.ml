@@ -5,7 +5,7 @@ let empty : Selection.snapshot = {live_activity=Lane.Enabled;live_clients=[];liv
 let client digit transport : Lane.client_info =
   let id="00000000-0000-4000-8000-00000000000" ^ digit in
   let client_id = match Lane.client_id_of_string id with Ok id -> id | Error error -> fail error in
-  {client_id;browser=Lane.Firefox;version="fixture";engine_version="fixture";transport;space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Web_extension|Webdriver_bidi -> None)}
+  {client_id;browser=Lane.Firefox;version="fixture";engine_version="fixture";transport;space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Webdriver_bidi -> None)}
 let route info = Lane.Live_route (Some info.Lane.client_id)
 let choose ?(verb=Lane.Tabs_list) ?(bound=false) snapshot = Selection.choose ~verb ~bound ~snapshot Selection.Automatic
 let selected (expected : Selection.selected) = function
@@ -30,9 +30,8 @@ let test_space_presence () =
     (Selection.target ~verb:Lane.Tabs_list ~snapshot:empty (route ego)=Error (Lane.Selected_client_disconnected ego.client_id));
   selected {route=route ego;reason=Selection.Existing_login} (choose (snapshot O.Present))
 let test_connections () =
-  let bidi=client "1" Lane.Webdriver_bidi and extension=client "2" Lane.Web_extension in
-  selected {route=route bidi;reason=Selection.Existing_login} (choose {empty with live_clients=[extension;bidi]});
-  selected {route=route extension;reason=Selection.Available_connected_browser} (choose {empty with live_clients=[extension]});
+  let bidi=client "1" Lane.Webdriver_bidi in
+  selected {route=route bidi;reason=Selection.Existing_login} (choose {empty with live_clients=[bidi]});
   check bool "no connection is no browser" true (choose empty=Error Selection.No_available_browser);
   let second=client "3" Lane.Webdriver_bidi in
   check bool "connected identity ambiguity needs a browser choice" true
@@ -77,10 +76,10 @@ let test_native_workflow_binding () =
     (Selection.choose ~verb ~bound ~snapshot (Selection.Exact (route second)))
 
 let test_eligibility () =
-  let extension=client "1" Lane.Web_extension in
-  let hover=Lane.Page_interact {frame_path=[];tab_id=0;expected_url=None;action=Lane.Hover (Lane.Selector "#observed")} in
-  check bool "extension cannot be silently selected for trusted hover" true
-    (choose ~verb:hover {empty with live_clients=[extension]}=Error Selection.No_available_browser);
+  let bidi=client "1" Lane.Webdriver_bidi in
+  let downloads=Lane.Page_downloads {tab_id=0} in
+  check bool "BiDi cannot be silently selected for a download list" true
+    (choose ~verb:downloads {empty with live_clients=[bidi]}=Error Selection.No_available_browser);
   check bool "disabled login is not selected" true
     (choose {empty with live_activity=Lane.Disabled;live_clients=[client "1" Lane.Webdriver_bidi]}=Error Selection.No_available_browser);
   let timing=Lane.Page_interact {frame_path=[];tab_id=0;expected_url=None;action=Lane.Drag_to {
@@ -90,7 +89,7 @@ let test_eligibility () =
 let test_wire () =
   List.iter (fun reason -> check bool "typed reason round trip" true
     (Selection.reason_of_wire (Selection.reason_to_wire reason)=Some reason))
-    [Selection.Explicit_browser;Existing_login;Available_connected_browser];
+    [Selection.Explicit_browser;Existing_login];
   check bool "unknown selection reason is not defaulted" true (Selection.reason_of_wire "unknown"=None);
   check string "wire gives exact backend identity and reason"
     {|{"lane":"live","clientId":"00000000-0000-4000-8000-000000000001","reason":"existing_login"}|}
@@ -113,7 +112,7 @@ let test_bind_chosen_identity () =
 (* The host names the browser from the worker's snapshot with the refusals the
    worker gives for the same route. *)
 let test_target_from_snapshot () =
-  let first=client "1" Lane.Webdriver_bidi and second=client "2" Lane.Web_extension in
+  let first=client "1" Lane.Webdriver_bidi and second=client "2" Lane.Webdriver_bidi in
   let target ?(verb=Lane.Tabs_list) snapshot route=Selection.target ~verb ~snapshot route in
   check bool "no connected client" true (target empty (Lane.Live_route None)=Error Lane.No_live_client);
   check bool "several connected clients need a clientId" true

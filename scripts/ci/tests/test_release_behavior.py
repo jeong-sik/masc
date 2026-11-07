@@ -42,7 +42,7 @@ class ReleaseCollection(unittest.TestCase):
         names = {'masc-exec-shim-linux-amd64', 'masc-exec-shim-linux-arm64'}
         for arch in publication.PLATFORMS:
             names.update(name + '-' + arch for name in (
-                'masc', 'masc-tui', 'masc-browser-host', 'masc-deployment-preflight-helper',
+                'masc', 'masc-tui', 'masc-deployment-preflight-helper',
                 'masc-check-runtime-deployment-preflight', 'masc-exec-ssh-bootstrap'))
             names.update({f'masc-dashboard-{arch}.tar.gz',
                           f'masc-release-dashboard-bundle-{arch}.py',

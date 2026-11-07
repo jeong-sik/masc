@@ -1,7 +1,7 @@
 (** Browser choice before dispatch. Selection performs no browser command and
     grants no authority: the selected route is rechecked at normal admission. *)
 type preference = Automatic | Exact of Browser_lane.route
-type reason = Explicit_browser | Existing_login | Available_connected_browser
+type reason = Explicit_browser | Existing_login
 type selected = { route : Browser_lane.route; reason : reason }
 type error = Binding_required | No_available_browser
   | Ambiguous_browsers of Browser_lane.route list

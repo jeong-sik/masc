@@ -22,7 +22,7 @@ type failure =
           makes no phase claim. Connection handling belongs to the host.
           [receipt] preserves native diagnostics but never authorizes replay. *)
 
-(** Native host verbs, decoded once from the MASC poll wire. *)
+(** Live peer verbs, decoded once from the MASC poll wire. *)
 type verb = Browser_info | Tabs_list | Page_read | Page_elements | Page_capture | Page_scene | Page_interact | Page_act
   | Page_goto | Page_context | Page_snapshot | Page_downloads | Page_native_workflow
 

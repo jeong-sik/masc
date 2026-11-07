@@ -7,13 +7,6 @@
  (libraries masc_test_deps masc.server masc.build_commit mcp_protocol eio_main cohttp-eio unix))
 
 (executable
- (name masc_browser_host)
- (modules masc_browser_host)
- (public_name masc-browser-host)
- (package masc)
- (libraries masc masc.browser_host masc.masc_log eio eio_main unix))
-
-(executable
  (name masc_reliable_change_g1_check)
  (modules masc_reliable_change_g1_check)
  (public_name masc-reliable-change-g1-check)

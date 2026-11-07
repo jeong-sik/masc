@@ -403,9 +403,6 @@ let stage_release_mirror base_path =
   let tui = Filename.concat dir ("masc-tui-" ^ suffix) in
   unlink_if_exists tui;
   Unix.symlink (Unix.realpath (real_masc_binary ())) tui;
-  let browser_host = Filename.concat dir ("masc-browser-host-" ^ suffix) in
-  unlink_if_exists browser_host;
-  Unix.symlink (Unix.realpath (real_masc_binary ())) browser_host;
   let helper =
     Filename.concat
       dir
@@ -506,7 +503,7 @@ with tarfile.open(archive, 'w:gz') as output:
   let companion_args =
     List.concat_map
       (fun (name, path) -> [ "--companion"; name; path ])
-      [ "masc-tui", tui; "masc-browser-host", browser_host
+      [ "masc-tui", tui
       ; "masc-deployment-preflight-helper", helper
       ; "masc-check-runtime-deployment-preflight", gate
       ; "masc-exec-ssh-bootstrap", ssh_bootstrap ]
@@ -571,7 +568,6 @@ let install_real_masc_binary prefix mirror_dir =
   let mirror_tag_dir = Filename.concat mirror_dir (release_tag ()) in
   let companion_spec =
     [ "masc-tui", "masc-tui-" ^ suffix
-    ; "masc-browser-host", "masc-browser-host-" ^ suffix
     ; "masc-deployment-preflight-helper",
       "masc-deployment-preflight-helper-" ^ suffix
     ; "masc-check-runtime-deployment-preflight",

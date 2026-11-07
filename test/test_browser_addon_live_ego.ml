@@ -651,7 +651,7 @@ let scenario mode =
           Yojson.Safe.Util.(member "active" activation_data = `Bool true
             && member "stateAfter" (member "window" activation_data) = `String "normal");
         check bool "an input the table refuses never reaches ego" true
-          (match issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Set_zoom {factor=1.5}}) with
+          (match issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Tap_at {point={x=0.5;y=0.5};viewport={document_id="d1";width=800.;height=600.;scroll_x=0.;scroll_y=0.}}}) with
            | W.Issue_result (Error (B.Transport_unsupported _)) -> true
            | W.Issue_result (Ok _ | Error _) | Snapshot_result _ | Download_reply _
            | Poll_result _ | Receipt | Service_refusal _ -> false);

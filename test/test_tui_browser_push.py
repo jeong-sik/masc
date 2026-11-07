@@ -37,7 +37,7 @@ def client_payload(client: str) -> dict:
         "browser": "firefox",
         "version": "158.0.1",
         "engineVersion": "158.0.1",
-        "transport": "web_extension",
+        "transport": "webdriver_bidi",
         "space": None,
         "interactions": [],
         "lastActivities": [],

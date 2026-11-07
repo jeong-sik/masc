@@ -1,9 +1,4 @@
 (test
- (name test_browser_addon_registration)
- (modules test_browser_addon_registration)
- (libraries masc masc.browser_lane masc.fs_compat alcotest yojson uuidm unix))
-
-(test
  (name test_browser_addon_observation)
  (modules test_browser_addon_observation)
  (libraries masc masc.browser_lane alcotest eio_main yojson))

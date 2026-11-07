@@ -156,19 +156,19 @@ class Distribution(unittest.TestCase):
         tui = self.prefix / "masc-tui"
         tui.write_text("old tui")
         original = os.replace
-        def reject_browser(source, target):
-            if Path(source).name == "next" and Path(target).name == "masc-browser-host":
+        def reject_bootstrap(source, target):
+            if Path(source).name == "next" and Path(target).name == "masc-exec-ssh-bootstrap":
                 raise OSError("injected companion publication failure")
             return original(source, target)
         self.package(self.binary, self.assets, COMMIT, self.asset, self.archive,
-                       [("masc-tui", self.binary), ("masc-browser-host", self.binary)])
-        with patch.object(bundle.os, "replace", side_effect=reject_browser):
+                       [("masc-tui", self.binary), ("masc-exec-ssh-bootstrap", self.binary)])
+        with patch.object(bundle.os, "replace", side_effect=reject_bootstrap):
             with self.assertRaisesRegex(OSError, "companion publication"):
                 self.install_bundle(self.binary, self.archive, self.prefix, self.asset,
-                               [("masc-tui", self.binary), ("masc-browser-host", self.binary)])
+                               [("masc-tui", self.binary), ("masc-exec-ssh-bootstrap", self.binary)])
         self.assertEqual(tui.read_text(), "old tui")
         self.assertEqual((self.prefix / "masc").read_bytes(), previous)
-        self.assertFalse((self.prefix / "masc-browser-host").exists())
+        self.assertFalse((self.prefix / "masc-exec-ssh-bootstrap").exists())
         self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
 
     def test_wrong_binary_does_not_replace_old_install(self):
@@ -199,7 +199,7 @@ class Distribution(unittest.TestCase):
     def mirror(self):
         mirror = self.root / "release" / "v9.9.9"
         mirror.mkdir(parents=True)
-        for name in [self.asset, "masc-tui-" + self.arch, "masc-browser-host-" + self.arch, "masc-deployment-preflight-helper-" + self.arch,
+        for name in [self.asset, "masc-tui-" + self.arch, "masc-deployment-preflight-helper-" + self.arch,
                      "masc-check-runtime-deployment-preflight-" + self.arch,
                      "masc-exec-ssh-bootstrap-" + self.arch]:
             shutil.copy2(self.binary, mirror / name)
@@ -593,7 +593,7 @@ class Distribution(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual((self.prefix / "masc").read_bytes(), previous)
         self.assertEqual(tui.read_text(), "old tui")
-        self.assertFalse((self.prefix / "masc-browser-host").exists())
+        self.assertFalse((self.prefix / "masc-exec-ssh-bootstrap").exists())
         self.assertFalse((self.prefix / bundle.TRANSACTION).exists())
 
     def test_no_replace_smoke_failure_rolls_back_its_own_publications(self):
@@ -663,7 +663,7 @@ class Distribution(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual((self.prefix / "masc").read_bytes(), previous)
         self.assertEqual(tui.read_text(), "old tui")
-        self.assertFalse((self.prefix / "masc-browser-host").exists())
+        self.assertFalse((self.prefix / "masc-exec-ssh-bootstrap").exists())
 
 
 if __name__ == "__main__":

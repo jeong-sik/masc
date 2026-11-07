@@ -7,8 +7,6 @@ const vm = require('node:vm');
 const root = path.resolve(__dirname, '..');
 const source = readFileSync(path.join(root, 'lib/browser_scene_script.ml'), 'utf8')
   .split('let runtime = {js|')[1].split('|js}')[0];
-assert.ok(readFileSync(path.join(root, 'connectors/browser/extension/background.js'), 'utf8')
-  .startsWith(source + '\n'), 'driver and extension must execute identical scene code');
 const limit = 1024 * 1024;
 const rect = {x:0, y:0, width:10, height:10, right:10, bottom:10};
 
@@ -160,7 +158,7 @@ const firstDense=denseScene.nodes[0];
 dense.context.reference={mode:'resolve_link',documentId:denseScene.documentId,nodeId:firstDense.nodeId};
 assert.equal(vm.runInContext('browserScene(reference)',dense.context),dense.link,
   'partial payload retains usable observed node identity');
-console.log('scene resources: shared runtime parity, exact UTF-8 byte accounting, identity overflow refusal and partial usable dense-node payload passed');
+console.log('scene resources: exact UTF-8 byte accounting, identity overflow refusal and partial usable dense-node payload passed');
 
 // Run the shipped scene text walk against explicit DOM boundaries. Geometry
 // fixtures expose every text node; actual browser innerText parity is exercised

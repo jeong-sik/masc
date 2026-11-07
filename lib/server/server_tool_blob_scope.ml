@@ -99,7 +99,6 @@ let workspace =
     ; no_reference (Board.persisted_filename Board.Sub_boards)
     ; no_reference (Board.persisted_filename Board.Votes)
     ; no_reference Common.auth_dirname
-    ; no_reference Common.browser_lane_dirname
     ; no_reference Common.searxng_dirname
     ; no_reference Common.tui_dirname
     ; no_reference Common.tui_music_dirname

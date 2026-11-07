@@ -216,9 +216,7 @@ let check_scoped_elements ~(filter : Browser_lane.elements_filter) reply =
          | Some value ->
              match List.assoc_opt key fields, List.assoc_opt (key ^ "Matches") fields with
              | Some (`String applied), Some (`Int count) when applied = value && count >= 0 -> check rest
-             | _ -> Error ("the connected browser did not confirm " ^ key ^
-                 "; update browser-lane, then reload the extension in this browser \
-                  (reconnecting its native host alone does not reload background.js)")) in
+             | _ -> Error ("the connected browser did not confirm " ^ key)) in
   check ["within", filter.within; "selector", filter.selector]
 ;;
 

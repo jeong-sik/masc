@@ -425,18 +425,18 @@ let test_a_document_read_goes_to_the_service_of_its_source () =
   let info id space : B.client_info = {client_id=id;browser=B.Ego_lite;version="fixture";engine_version="fixture";
     transport=B.Ego_task_space;space=Some {id=space;name="fixture"}} in
   let ego=info (client 1) 51 and second=info (client 3) 52 in
-  let extension={ego with client_id=client 2;browser=B.Zen;transport=B.Web_extension;space=None} in
+  let firefox={ego with client_id=client 2;browser=B.Firefox;transport=B.Webdriver_bidi;space=None} in
   let service name backend listed = name,backend,Browser_addon_observation.Observed_clients listed in
   let read ?(unready=[]) services route = T.document_route_services ~services ~unready ~backend:(fun (_,backend,_) -> backend)
       ~clients:(fun (_,_,listed) -> listed) route |> Result.map (List.map (fun (name,_,_) -> name)) in
   let ego_worker=service "ego" B.Backend.Ego [ego]
   and second_worker=service "second ego" B.Backend.Ego [second]
-  and native=service "native" B.Backend.External_host [extension] in
+  and native=service "native" B.Backend.Owned_firefox [firefox] in
   let all=[ego_worker;second_worker;native] in
   let route client=B.Live_route (Some client.B.client_id) in
   check bool "first Ego publisher is exact" true (read all (route ego)=Ok ["ego"]);
   check bool "second Ego publisher is exact" true (read all (route second)=Ok ["second ego"]);
-  check bool "another live source remains exact" true (read all (route extension)=Ok ["native"]);
+  check bool "another live source remains exact" true (read all (route firefox)=Ok ["native"]);
   check bool "unknown client is never assigned to the only worker" true
     (read [service "empty ego" B.Backend.Ego []] (route ego)=Ok []);
   check bool "duplicate client is refused" true
@@ -448,7 +448,7 @@ let test_a_document_read_goes_to_the_service_of_its_source () =
   List.iter (fun backend ->
     check bool "unreadable live sibling cannot hide a native Space controller from an Ego read" true
       (Result.is_error (read [ego_worker;hidden backend] (route ego))))
-    [B.Backend.Ego;Owned_firefox;External_host];
+    [B.Backend.Ego;Owned_firefox];
   check bool "an unready live sibling also blocks an Ego read" true
     (Result.is_error (read ~unready:[B.Backend.Ego] [ego_worker] (route ego)));
   check bool "an exact extension read remains usable with an unknown live controller" true

@@ -53,12 +53,10 @@ a source-URL observation from the original document is still pending.
 
 When an observed live tab is inactive and its body still shows pending or previous
 content after a channel transition, `BrowserInteract action=activate_tab` can select
-that exact tab. On a web_extension connection this requires extension 0.6.0 or
-newer and the currently advertised action schema. Preserve the observed clientId,
-tabId and expectedUrl. This is an explicit action, not an automatic step in every
-read or composition. It does not change the URL or reload. The extension does not
-focus the browser window; a webdriver_bidi connection does, which can take focus
-from what the operator is doing.
+that exact tab. Preserve the observed clientId, tabId and expectedUrl. This is an
+explicit action, not an automatic step in every read or composition. It does not
+change the URL or reload. A webdriver_bidi connection also focuses the browser
+window, which can take focus from what the operator is doing.
 
 An active=true receipt confirms tab selection only. Read the same tab again and
 verify the requested channel body and scope before collecting context. If activation

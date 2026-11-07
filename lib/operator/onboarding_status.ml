@@ -10,7 +10,6 @@ type check_id =
   | Keeper_declaration
   | Sandbox
   | Keeper_persistence
-  | Browser_lane
   | Browser_bidi_host
 
 type role = Required_to_open | Advisory
@@ -56,7 +55,6 @@ let check_id_name = function
   | Keeper_declaration -> "keeper_declaration"
   | Sandbox -> "sandbox"
   | Keeper_persistence -> "keeper_persistence"
-  | Browser_lane -> "browser_lane"
   | Browser_bidi_host -> "browser_bidi_host"
 
 (* Existing history opens on what every Keeper in the workspace shares: the
@@ -67,11 +65,11 @@ let check_id_name = function
    and the journey's model step is the repair. imp's model binding, declaration and
    sandbox concern the Keeper the journey creates: the server skips an imp it
    cannot load and boots every other Keeper, so a workspace whose history
-   belongs to other Keepers opens and reports them beside it. A browser lane
-   is a separate surface; its drift is reported the same way. *)
+   belongs to other Keepers opens and reports them beside it. The live
+   Firefox is a separate surface; it is reported the same way. *)
 let role = function
   | Workspace | Runtime_configuration | Keeper_persistence -> Required_to_open
-  | Model_connection | Keeper_declaration | Sandbox | Browser_lane | Browser_bidi_host -> Advisory
+  | Model_connection | Keeper_declaration | Sandbox | Browser_bidi_host -> Advisory
 
 let role_name = function
   | Required_to_open -> "required_to_open"
@@ -253,25 +251,16 @@ let keeper_checks ~sandbox base_path =
        [Start_imp];
      sandbox_check ~sandbox ~base_path]
 
-(* The BiDi host is read from its own record on disk, so this answers with
-   no server running. A workspace with no browser lane installed and no host
-   record has nothing to say about one. A running host is satisfied only
-   where the observed server lists its client: that is where hover and drag
-   are served. *)
-let browser_bidi_host_check (host:Browser_bidi_host_status.observation) =
-  let report condition =
-    [check Browser_bidi_host condition (Browser_bidi_host_status.message host)
+(* The Browser Addon's Firefox is read from runtime.toml and the Lane Add-on
+   declarations on disk, so this answers with no server running. Only a
+   Firefox the Addon starts has anything to report: its readiness is the
+   Addon's observation, which this file reading cannot confirm. *)
+let browser_bidi_host_check ~configuration base_path =
+  match Browser_bidi_host_status.observe ~base_path ~configuration with
+  | Browser_bidi_host_status.Addon_managed _ as keeper ->
+    [check Browser_bidi_host Needs_verification (Browser_bidi_host_status.message keeper)
        [Inspect_configuration]]
-  in
-  match host.keeper with
-  | Browser_bidi_host_status.Addon_managed _ -> report Needs_verification
-  | Addon_off | Not_configured | Not_known ->
-  match Browser_bidi_host_status.verdict host with
-  | Browser_bidi_host_status.Host_absent -> []
-  | Browser_bidi_host_status.Host_serving -> report Satisfied
-  | Browser_bidi_host_status.Host_unverified -> report Needs_verification
-  | Browser_bidi_host_status.Host_not_running -> report Needs_setup
-  | Browser_bidi_host_status.Host_unreadable -> report Invalid
+  | Addon_off | Not_configured | Not_known -> []
 
 (* The browser tables of the workspace's runtime.toml, for a reader with no
    server: only when the whole file loads, as a server loads it, since a
@@ -283,36 +272,6 @@ let browser_configuration config_path =
     match Runtime.load_list ~config_path with
     | Error _ -> None
     | Ok _ -> Result.to_option (Browser_configuration.of_file config_path)
-
-(* One observation answers both checks, so they say of one launcher and one
-   list of connections. Both are the operator's ([masc doctor] and the
-   CanAdmin setup status), so the Add-on is read as the native host poll
-   reads it. *)
-let browser_lane_check ~configuration base_path =
-  let host =
-    Browser_bidi_host_status.observe ~access:Lane_addon_sources.Operator_configuration
-      ~base_path ~configuration
-  in
-  let observation = host.lane in
-  let message = Browser_lane_launcher.message observation in
-  let report condition = [check Browser_lane condition message [Inspect_configuration]] in
-  (* No browser Add-on, or one switched off, is a step the operator has not
-     taken yet. One declared on whose attach failed is broken, and so, once
-     the Add-on can take a host, is a lane the launcher misdescribes. One
-     declared on that is being started, or that this check knows nothing
-     more of, may still attach: it and an Add-on this server cannot read
-     leave the lane unconfirmed, as no server does. *)
-  (match Browser_lane_launcher.verdict observation with
-   | Browser_lane_launcher.Absent -> []
-   | Browser_lane_launcher.Connected | Browser_lane_launcher.Aligned -> report Satisfied
-   | Browser_lane_launcher.Addon_missing | Browser_lane_launcher.Addon_off -> report Needs_setup
-   | Browser_lane_launcher.Addon_not_running
-       (Browser_lane_launcher.Attaching | Browser_lane_launcher.Not_known)
-   | Browser_lane_launcher.Addon_unreadable | Browser_lane_launcher.Unverified ->
-     report Needs_verification
-   | Browser_lane_launcher.Addon_not_running Browser_lane_launcher.Attach_failed
-   | Browser_lane_launcher.Misconfigured -> report Invalid)
-  @ browser_bidi_host_check host
 
 let inspected ~sandbox ~browser ~base_path =
   match base_path with
@@ -334,7 +293,7 @@ let inspected ~sandbox ~browser ~base_path =
       { base_path = Some base_path; selected_runtime; selected_model;
         checks = check Workspace Satisfied "Workspace found." [Choose_workspace]
           :: (models @ keeper_checks ~sandbox base_path @ [persistence_check base_path]
-              @ browser_lane_check ~configuration:(browser config_path) base_path) }
+              @ browser_bidi_host_check ~configuration:(browser config_path) base_path) }
 
 let inspect ~sandbox ~base_path =
   inspected ~sandbox ~browser:browser_configuration ~base_path

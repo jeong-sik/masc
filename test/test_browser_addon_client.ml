@@ -84,9 +84,9 @@ let transport_policy () = Eio_main.run (fun env ->
           let call command=Client.call client ~on_cancel_after_dispatch:(fun () -> ()) command in
           let info suffix transport : Browser_lane.client_info = {
             client_id=ok (Browser_lane.client_id_of_string ("0c000000-0000-4000-8000-00000000000" ^ suffix));
-            browser=(match transport with Browser_lane.Ego_task_space -> Ego_lite | Web_extension|Webdriver_bidi -> Firefox);
-            transport;version="test";engine_version="test";space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Web_extension|Webdriver_bidi -> None)} in
-          let ego=info "1" Ego_task_space and extension=info "2" Web_extension and bidi=info "3" Webdriver_bidi in
+            browser=(match transport with Browser_lane.Ego_task_space -> Ego_lite | Webdriver_bidi -> Firefox);
+            transport;version="test";engine_version="test";space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Webdriver_bidi -> None)} in
+          let ego=info "1" Ego_task_space and firefox=info "2" Webdriver_bidi and bidi=info "3" Webdriver_bidi in
           let snapshot clients =
             W.Snapshot_result (`Assoc ["state",`String "serving";
               "clients",`List (List.map W.client_to_json clients)]) in
@@ -130,9 +130,9 @@ let transport_policy () = Eio_main.run (fun env ->
             (fun () ->
               refused "unobserved exact live transport refused" (issue (Live_route (Some ego.client_id)) click);
               refused "unselected live transport refused" (issue (Live_route None) click);
-              read [ego;extension;bidi];
+              read [ego;firefox;bidi];
               List.iter (fun route -> List.iter (bounded route) [click;goto;reload;open_tab])
-                [Browser_lane.Live_route (Some extension.client_id);Live_route (Some bidi.client_id)];
+                [Browser_lane.Live_route (Some firefox.client_id);Live_route (Some bidi.client_id)];
               List.iter (fun verb ->
                 issue_entered := Eio.Promise.create ();
                 match Eio.Fiber.first
@@ -140,7 +140,7 @@ let transport_policy () = Eio_main.run (fun env ->
                 (fun () -> Eio.Promise.await (fst !issue_entered);Eio.Time.sleep clock 0.3;`Waiting) with
                | `Waiting -> () | `Returned _ -> fail "observed Ego SDK operation lost its owner wait")
                 [click;goto;reload;open_tab];
-              read [extension;bidi];
+              read [firefox;bidi];
               refused "replacement snapshot removes old client" (issue (Live_route (Some ego.client_id)) click);
               List.iter (fun reply ->
                 read [ego]; snapshot_reply := reply;
@@ -181,8 +181,8 @@ let transport_policy () = Eio_main.run (fun env ->
               let malformed=W.Snapshot_result (`Assoc ["state",`String "serving"]) in
               List.iter (fun newest_first ->
                 overlap (snapshot [ego]) malformed ~newest_first [];
-                overlap (snapshot [ego]) (snapshot [extension]) ~newest_first [extension]) [true;false];
-              overlap malformed (snapshot [extension]) ~newest_first:true [extension];
+                overlap (snapshot [ego]) (snapshot [firefox]) ~newest_first [firefox]) [true;false];
+              overlap malformed (snapshot [firefox]) ~newest_first:true [firefox];
               read [ego]; Client.revoke client;
               refused "revoked client cannot use prior metadata" (issue (Live_route (Some ego.client_id)) click)))))))
 let private_reply_boundary () = Eio_main.run (fun env ->

@@ -102,8 +102,7 @@ Add-on 실행 파일 3개(`masc-native-addon-launcher`, `masc-browser-addon-work
 `masc browser-lane-setup --mode addon`을 실행한다. 이 명령은 masc 바이너리에 들어 있는
 패키지를 workspace 가 쓰는 browser 출처마다 `.masc/packages/browser-<출처>`에 쓰고, 그 출처의
 선언이 없으면 `browser-<출처>.toml`을 만든다. workspace 가 쓰는 출처는 runtime.toml 에 자기 표가
-있거나 이번 실행이 그 표를 쓰는 출처, 그리고 native host 가 설치돼 있을 때의 외부 호스트다. 출처를
-켜고 끄는 것은 그 선언의 `enabled` 하나다. runtime.toml 의 `[browser.*]` 표는 어떻게 띄울지만 담고
+있거나 이번 실행이 그 표를 쓰는 출처다. 출처를 켜고 끄는 것은 그 선언의 `enabled` 하나다. runtime.toml 의 `[browser.*]` 표는 어떻게 띄울지만 담고
 `enabled` 키를 받지 않는다. 표가 없는 출처의 선언은 시작하지 못하고, 패키지 줄이 그 이유를 보여
 준다. 이미 있는 선언은 바꾸지 않는다. Add-on이 필요 없으면 `--no-browser-addon`을 준다. 그러면 실행
 파일을 빌드·설치하지 않고 선언도 그대로 두며, 브라우저 경로는 동작하지 않는다. 선택한 prefix를
@@ -302,9 +301,8 @@ detach가 확인되면 해당 source는 이후 discovery에서 빠진다. 이미
 공개 도구가 아니라서 이 목록에 오르지 않는다. Keeper 는 host 의 `Browser*` 도구를 쓰고,
 host 가 고른 설치의 export 를 그 신원으로 부른다.
 Browser 서비스 패키지는 `browser_backend` 로 자기 worker 가 맡는 browser 출처 하나를 적는다
-(`owned_firefox`, `ego`, `external_host`). 이 키가 없는 browser 패키지는
-manifest 오류다. masc 가 가진 패키지는 출처마다 하나다(`browser-firefox`, `browser-ego`,
-`browser-external`). 한 출처는 붙은 설치 하나만 맡는다. 맡은 설치가 없거나 둘이면 그 출처만 쓰지 못하고, 다른
+(`owned_firefox`, `ego`). 이 키가 없는 browser 패키지는
+manifest 오류다. masc 가 가진 패키지는 출처마다 하나다(`browser-firefox`, `browser-ego`). 한 출처는 붙은 설치 하나만 맡는다. 맡은 설치가 없거나 둘이면 그 출처만 쓰지 못하고, 다른
 출처는 그대로 쓴다. live 출처를 두 설치가 맡으면 그 두 설치가 올린 연결은 쓰지 않는다. 연결은 자기가
 어느 출처에서 왔는지 말하지 않기 때문이다.
 설치별 도구 접근 권한과 Keeper의 `tool_deny`는 검색 전에 적용한다.

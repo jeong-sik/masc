@@ -6,8 +6,7 @@ import re
 import subprocess
 import zipfile
 
-BINARIES = {"main_eio.exe", "masc_tui.exe", "masc_browser_host.exe",
-            "deployment_preflight_helper.exe"}
+BINARIES = {"main_eio.exe", "masc_tui.exe", "deployment_preflight_helper.exe"}
 
 
 def digest(path):
@@ -43,7 +42,7 @@ def verify(root, *, source, run_id, artifact_id, repository_id):
             and "sha256:" + digest(archive) == meta["digest"], "ZIP digest/size mismatch")
     with zipfile.ZipFile(archive) as zipped:
         members = zipped.infolist()
-        require(len(members) == 5 and {x.filename for x in members} == BINARIES | {"SHA256SUMS"},
+        require(len(members) == len(BINARIES) + 1 and {x.filename for x in members} == BINARIES | {"SHA256SUMS"},
                 "unexpected or duplicate ZIP member")
         require(all(not x.is_dir() and (x.external_attr >> 16) & 0o170000 != 0o120000
                     for x in members), "ZIP contains a directory or symlink")

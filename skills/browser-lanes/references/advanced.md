@@ -9,8 +9,7 @@
 `framePath`는 `BrowserRead` text/elements/frames 읽기, `BrowserAct upload`,
 `BrowserInteract`의 selector 기반 click/fill/select_option/scroll에 사용한다.
 `BrowserInteract`의 `expectedUrl`은 안쪽 frame 문서의 URL이다. live BiDi 연결이
-처리한다. 확장은 `framePath`가 있는 요청을 효과 전에
-거절하므로 최상위 문서만 조작할 수 있다.
+처리한다.
 
 ego 연결은 `framePath` 를 받지 않는다. `BrowserRead mode=snapshot` 의 viewport
 snapshot 에 iframe 내용이 ref 와 함께 들어 있고, 다른 출처 프레임도 같다. 한 프레임만

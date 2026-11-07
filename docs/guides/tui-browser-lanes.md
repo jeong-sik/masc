@@ -19,7 +19,7 @@ including a transcript awaiting delivery. An existing Keeper draft is preserved.
 | Key | Action |
 | --- | --- |
 | `b` | Choose Automatic or a connected browser by its actual identity |
-| `A` | Show transport limits and BiDi host diagnostics in the browser picker |
+| `A` | Show transport limits in the browser picker |
 | `[` / `]` | Previous / next tab and read its page |
 | `1` … `9` | Select the corresponding observed tab directly when it is listed |
 | `j` / `k`, arrows | Scroll page text |
@@ -67,8 +67,8 @@ An unreadable issue report preserves validated client rows and refuses automatic
 fallback. `inventoryComplete` is the server's derived summary of its issue list.
 
 The picker lists **Automatic** and the connected browser identities. Press `A`
-in the picker to show what each connection's transport does not serve and where
-the BiDi host stands. Safari is not currently an implemented browser choice.
+in the picker to show what each connection's transport does not serve. Safari
+is not currently an implemented browser choice.
 
 The current browser is marked; choosing it again retains the current tab and
 scroll. Switching to another browser clears old page and screenshot references.
@@ -97,39 +97,26 @@ Ego's native cursor label still identifies pointer actions. This activity list
 does not add a native Ego label for reads or waits; that browser-side visibility
 remains a separate gap.
 
-A live browser is reached over its WebExtension or an attached BiDi connection,
-and the two serve different work
+A live browser is reached over the owned Firefox's BiDi connection or an ego
+lite task space, and the two serve different work
 ([the table](../design/browser-lane.md#what-each-live-connection-serves)). The
 TUI reads that table in four places:
 
 - The selected connection row names the actual browser and client identity.
   Transport names and capability differences belong to advanced details.
-- The row under the picker, for the highlighted connection: `WebExtension: no
-  hover, drag · BiDi serves them`.
+- The row under the picker, for the highlighted connection, names the work its
+  transport does not serve and the transport that serves it.
 - The screenshot footer: `drag: move` when the connection the screenshot came
-  from takes a drag, `drag: needs a BiDi connection` when it does not.
+  from takes a drag, and the connection that serves it when it does not.
 - A pointer gesture on a screenshot whose connection does not serve it is not
-  sent. The screenshot closes and a row under the status says so:
-  `Not sent · WebExtension: no drag · BiDi serves it · b:choose browser` when a
-  BiDi connection is listed. When none is, the row ends `no BiDi connection is
-  listed` and one more row follows. For a drag, which a BiDi connection
-  serves, it says where the BiDi host stood and points at the picker, for
-  example `BiDi host: ended 2026-10-03T04:01:00Z · b:why and what next`. From
-  a server that does not report the host it names where attaching a BiDi host
-  is written (`Setup: docs/design/browser-bidi-live-host.md`). The
-  read badge does not change, because nothing was requested. The rows stay
-  through the lane's own refreshes and go with the next key or click. What
-  they say of the host is what the connection list said when it was last
-  read before the gesture.
+  sent. The screenshot closes and a row under the status says so, with
+  `b:choose browser` when a serving connection is listed. The read badge does
+  not change, because nothing was requested. The rows stay through the lane's
+  own refreshes and go with the next key or click.
 
-These rows fit an 80-column terminal up to the `b:choose browser` key, and a
-refused gesture never takes more than two.
-
-The picker also says where the BiDi host stands, under its choices. These rows describe the external host the operator starts. A configured
-`[browser.live.bidi]` instead belongs to the attached browser Add-on, whose
-observation reports its owned Firefox and in-process peer
-([how](../design/browser-bidi-live-host.md)). The external host record remains
-independent of that worker. Rows refresh with the connection list (`r`).
+A configured `[browser.live.bidi]` belongs to the attached `browser-firefox`
+Add-on, whose observation reports its owned Firefox and in-process peer
+([how](../design/browser-bidi-live-host.md)).
 
 An ego lite connection also belongs to the attached browser Add-on. On a Mac
 with ego lite installed and its onboarding finished,
@@ -196,107 +183,6 @@ save after a later step or snapshot failed. This inventory lasts only for the
 same SDK process. Remaining SDK/Space gaps are listed in the
 [SDK inventory](ego-sdk-coverage.md).
 
-| The host | First row |
-|---|---|
-| never ran for this workspace | `BiDi host: none has run for this workspace` |
-| is starting | `BiDi host: connecting · pid 4242` |
-| is attached | `BiDi host: attached · pid 4242` |
-| is attached, and the server lists no BiDi connection | `BiDi host: attached, not listed by this server · pid 4242` |
-| is attached, and the server lists a BiDi connection under another ID | `BiDi host: attached, not listed under its recorded ID · pid 4242` |
-| left in order | `BiDi host: ended 2026-10-03T04:01:00Z · pid 4242` |
-| left no reason | `BiDi host: pid 4242 is gone · no reason recorded` |
-| runs, and its record cannot be read | `BiDi host: one runs, and its record cannot be read` |
-| does not run, and the record cannot be read | `BiDi host: none runs, and the last record cannot be read` |
-| cannot be checked | `BiDi host: could not check whether one runs` |
-| is reported in a layout this TUI does not read | `BiDi host: this TUI cannot read the server's report` |
-
-The rows under it:
-
-- A running host: `At:` and the address it was given.
-  - Attached, with no BiDi connection listed: hover and drag stay refused on
-    this server. The following rows say what may be behind it and what to do:
-    `A fixed --server or MASC_HTTP_PORT may point elsewhere`,
-    `Older hosts can use MASC_HTTP_BASE_URL · update the host`, and
-    `If none appears, restart it without a fixed override`.
-    A host is also missing for a moment after this server starts, and after
-    120 seconds without a poll. Its next poll lists it again.
-  - Attached, with a BiDi connection listed under another ID: that
-    connection is this host's if it registered again under an ID it could
-    not write to its record, and another host's otherwise. Hover and drag
-    are sent to it either way, so nothing is said to be refused.
-- A host that ended: what comes before the next host, then `Reason:` and the
-  reason it gave. The step comes first so that a short screen keeps it.
-  - Its session was ended: `That Firefox takes the next host if it still
-    runs`.
-  - It ended before Firefox gave it a session: `It got no session · check
-    that Firefox answers at that address first`.
-  - Firefox did not confirm the end: `Session end not confirmed · restart
-    that Firefox before attaching`.
-  - The connection was gone before the host could ask: `Could not ask
-    Firefox to end the session · restart it if it still runs`.
-  - Firefox refused the host a session: `Firefox refused this host a session
-    · it held one then`, then `Stop a host still attached there · restart
-    that Firefox if refused again`. The record says Firefox held a session
-    when the host asked, not that it holds one now.
-- A host that left no reason: `Its session may be left in Firefox · restart
-  Firefox if a host is refused`.
-- A record that cannot be read: `Detail:` and why. While a host still runs
-  the row before it says to stop that host first.
-- A report this TUI cannot read: `masc doctor reads the host's record and
-  says where the host stands`, then `Detail:` and why, then the paragraph the
-  server wrote for the operator, as `Server:`. The paragraph is longer than
-  most screens have rows for, and `masc doctor` prints the host's state in
-  full.
-- Results the host holds no acknowledgement for add two rows: how many, and
-  the last one's verb and what became of the command, then its time and
-  request ID. `, refused` or `, not sent` follows when the server does not
-  have the result; with neither, it may have arrived.
-- The command that starts a host:
-  `Attach: '<workspace>/.masc/browser-lane/host/launch'`, then `--bidi-url`
-  and the address. After a host that is the address it was given. Before any
-  host it is `ws://127.0.0.1:PORT/session`, with a row saying PORT is the
-  `--remote-debugging-port` Firefox was started with. The path and a recorded
-  address are written as one shell word each, in single quotes. When the
-  workspace has no launcher, or one that is not as an installation wrote it,
-  the row says to install the browser lane first. The last row names where
-  the steps are written. Four states show no command, because there is
-  none to run or none to trust: a running host, an unreadable record a host
-  still holds, a lock that could not be asked, and a report this TUI cannot
-  read.
-- With `[browser.live.bidi]` configured and an enabled `browser-firefox`
-  declaration, the details name the configured Addon-managed port and
-  profile and point to that Addon's observation for actual readiness. Manual host records remain
-  independent. Attaching the Addon starts its own Firefox; detaching joins
-  cleanup and preserves the profile. An occupied port or profile requires
-  the operator to close the existing browser before attachment.
-- With `[browser.live.bidi]` configured and no enabled `browser-firefox`
-  declaration, the details say the table is set but no enabled
-  `browser-firefox` declaration runs it, beside the steps to attach a host. With no `[browser.live.bidi]`, no
-  Addon-managed live Firefox is configured.
-- A server that does not report the host draws none of these rows.
-
-The first row of each state is this TUI's own words and fits 80 columns.
-What another program wrote, a reason, an address, a path, is on rows of its
-own and goes on to the next row where it is longer than the screen, so none
-of it is cut.
-
-The host's rows cannot be scrolled to. On a terminal too short for
-everything, rows are cut from the end and the frame says how many are not
-shown. What keeps its place depends on whether the rows report a host:
-
-- A host that runs or ran, or a record or report that cannot be read: the
-  first two rows and the row that counts the rest keep their place while at
-  least three choices fit beside them, or every choice when there are fewer
-  than three. Where that does not fit, the first row and the count keep
-  theirs. With no live connection listed, the three rows on the extension
-  are drawn too. On a screen that holds everything they follow the host's
-  rows. On a shorter one they follow the host's first two rows, and the rest
-  of the host's rows are what is cut: from 20 rows up all three are there.
-- No host yet: the rows only say how one is started. They take no row from
-  the choices or from the rows on the extension, and are drawn where the
-  screen has rows left. A workspace that has not run a BiDi host sees every
-  row it saw before these existed.
-
 Keepers use `BrowserInteract` to click, fill, or scroll an explicitly selected live tab;
 the TUI scene supports observed-element clicks, and the screenshot view supports
 mouse clicks and scrolling. Text entry into the page remains a Keeper tool action.
@@ -314,9 +200,8 @@ existing image support; unsupported terminals receive an explanation in Browser.
 In screenshot view, click a visible link to activate it. Mouse wheel, arrows and
 `j`/`k` scroll the actual page, and `r` refreshes the screenshot. A live BiDi
 connection also supports pressing the left button, moving, and releasing to drag
-with trusted browser pointer actions. A live WebExtension
-connection refuses a drag and names the connection that serves it; the footer
-says which applies to the screenshot on screen.
+with trusted browser pointer actions; the footer says what the connection of
+the screenshot on screen takes.
 Each completed action captures the resulting page again in the same Lane.
 
 Mouse coordinates require the terminal's measured cell size. If that measurement
@@ -331,8 +216,8 @@ All Lanes shows each Browser row from its browser Add-on alone: the clients the
 live worker last published. With no observation the row says why: no browser Add-on serves the
 lane (not set up), every one that serves it is switched off (off), one is
 declared on and its worker is not running (waiting), or the declarations could
-not all be read (failing). Executable, extension and profile paths in
-`runtime.toml` apply at server startup.
+not all be read (failing). Executable and profile paths in `runtime.toml`
+apply at server startup.
 
 A source is switched on or off from its `browser-<source>` package row in All
 Lanes: `Enter` opens its declaration, `Space` changes `enabled`, and `s` saves.
@@ -351,7 +236,7 @@ current UI.
 
 Live Browser Lane discovers the server's active native connections on entry and
 `r`. A single fresh connection is selected automatically. With several connections,
-choose Firefox or Zen using `b`, `j/k`, and Enter. The chooser displays the backend's
+choose one using `b`, `j/k`, and Enter. The chooser displays the backend's
 browser identity and each connection UUID; the reader header names the selected
 browser. `r` inside the chooser reloads connections, and Esc returns to the reader.
 
@@ -368,7 +253,7 @@ and screenshot ownership. No local Dune build was run.
 
 ## Gecko scene view
 
-After reading a connected Firefox or Zen tab, press `s` to observe its viewport
+After reading a connected browser tab, press `s` to observe its viewport
 as real text and numbered elements. `Tab`/`Shift-Tab` move directly between enabled
 clickable controls and readable regions. `n`/`p` select any observed element,
 including text and images for copying context. Selection reveals the element's
@@ -448,15 +333,8 @@ TUI scene controls support clicking; literal text filling is available through
 `masc_browser_interact` with `documentId`/`nodeId` from `masc_browser_read` mode
 `scene`. A detached element or document reload requires a fresh observation.
 
-Scene support requires the updated coordinator/native host and extension 0.5.0
-in the selected browser profile: 0.5.0 is the first version whose injected
-script sends the `view` and `scope` a scene read is answered against, and a
-0.4.0 build fails every scene read with `scene missing view`. 0.5.0 also carries
-live `scroll_at`. After upgrading, reload the extension in `about:debugging`
-and confirm its version there. The
-Browser Lane client list reports the browser version, not the extension version.
-Source changes and script-level Gecko evidence
-alone do not establish that an installed TUI has been updated.
+Source changes and script-level Gecko evidence alone do not establish that an
+installed TUI has been updated.
 
 
 ## Selected element to source
@@ -510,10 +388,10 @@ per-region viewport/DOM content, not a channel-wide history collection.
 
 ### Explicit live tab activation
 
-Extension 0.6.0 adds `BrowserInteract action=activate_tab` for an explicit live
-clientId/tabId with required expectedUrl. It selects the tab without focusing its
-browser window or changing/reloading its URL. This is a tool action; reads do not
-automatically activate tabs and no TUI shortcut is added. A successful receipt
+`BrowserInteract action=activate_tab` takes an explicit live clientId/tabId with
+required expectedUrl. It selects the tab without changing or reloading its URL;
+on a BiDi connection it also focuses the browser window. This is a tool action;
+reads do not automatically activate tabs and no TUI shortcut is added. A successful receipt
 includes active=true, but callers must read again to verify rendered content.
 
 Action traversal follows [w3m's hyperlink navigation](https://w3m.sourceforge.net/eng/MANUAL.html)

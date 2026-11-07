@@ -6364,7 +6364,7 @@ type palette_mode =
    different source or tab after the operator moves. *)
 module Browser_lane_view = struct
   type source = Browser_lane.Lane_name.t = Live
-  type browser = Browser_lane.browser = Firefox | Zen | Ego_lite
+  type browser = Browser_lane.browser = Firefox | Ego_lite
   type client = { client_id : string; browser : browser; transport : Browser_lane.live_transport;
     space : Browser_lane.ego_space option;
     (* Dated native metadata for this original Space, never input authority.
@@ -6487,15 +6487,6 @@ module Browser_lane_view = struct
   type read_continuation = No_read_continuation | Deferred_read
   type read_view = Text_view | Scene_view of {
     scene_view : Browser_lane.scene_view; scope : Browser_lane.node_ref option }
-  (* What the server said of the BiDi host when it listed the connections:
-     the host's own record, read by the server. Nothing is reported before a
-     discovery answers, after one that failed, and by a server from before
-     the report existed. A report this build cannot read keeps the paragraph
-     the server wrote for the operator, when it has one. *)
-  type bidi_host =
-    | Host_not_reported
-    | Host_reported of Masc.Browser_bidi_host_status.report
-    | Host_report_unreadable of { detail : string; message : string option }
   (* The backend startup observation from the last successful discovery.
      Pending and failed list reads retain it as dated recovery evidence;
      every successful reply replaces it, including an absent/unreadable report.
@@ -6506,17 +6497,14 @@ module Browser_lane_view = struct
     | Backends_unreadable of string
   (* A pointer gesture that was not sent, because the connection the
      screenshot came from does not serve it. [serving_listed] is whether a
-     listed connection does, and [host] what was known of the BiDi host then:
-     the rows say why it was not sent as of the moment it was not. *)
+     listed connection does: the rows say why it was not sent as of the
+     moment it was not. *)
   type unserved_gesture = {
     asked : Browser_lane.live_transport;
     capability : Browser_lane.live_capability;
     serving_listed : bool;
-    host : bidi_host;
   }
-  (* One answer of the connection list: the connections and the BiDi host
-     are as of the same read. *)
-  type automatic_reason = Explicit_browser | Existing_login | Available_connected_browser
+  type automatic_reason = Explicit_browser | Existing_login
   type recommendation = { lane : source; client_id : string option; reason : automatic_reason }
   type selection_error_kind = No_available_browser | Ambiguous_browsers | Binding_required
     | Automatic_unavailable | Invalid_automatic_response | Unrecognized_selection_error
@@ -6531,7 +6519,7 @@ module Browser_lane_view = struct
     | Inventory_not_reported
     | Inventory_reported of Masc.Browser_connection_inventory.issue list
     | Inventory_report_unreadable of string
-  type discovered = { listed : client list; bidi_host : bidi_host;
+  type discovered = { listed : client list;
     inventory_report : inventory_report; automatic : automatic option;
     unavailable : backend_unavailability }
   (* [clients] is what the last discovery answered, and [None] until one has:
@@ -6553,14 +6541,13 @@ module Browser_lane_view = struct
     refresh_pending : int option;
     read_continuation : read_continuation;
     unserved_gesture : unserved_gesture option;
-    bidi_host : bidi_host;
     inventory_report : inventory_report;
     unavailable : backend_unavailability;
     automatic : automatic option; selection : selection; advanced_choices : bool;
   }
 
   let source_name = Browser_lane.Lane_name.to_wire
-  let browser_name = function Firefox -> "Firefox" | Zen -> "Zen" | Ego_lite -> "ego lite"
+  let browser_name = function Firefox -> "Firefox" | Ego_lite -> "ego lite"
   let client_id t = match t.source, t.selected_client with
     | Live, Some client -> Some client.client_id
     | Live, None -> None
@@ -6576,7 +6563,7 @@ module Browser_lane_view = struct
       reading = None; load = Idle; scene = None; scene_cursor = 0; scene_scope = None;
       scene_guard = None; scene_delta = None; read_view = Text_view; refresh_pending = None;
       read_continuation = No_read_continuation; unserved_gesture = None;
-      bidi_host = Host_not_reported; inventory_report = Inventory_not_reported;
+      inventory_report = Inventory_not_reported;
       unavailable = Backends_not_reported; automatic = None; selection = Unbound;
       advanced_choices = false }
   let switch_source source t = { (create ()) with source; unavailable=t.unavailable;
@@ -6653,7 +6640,6 @@ module Browser_lane_view = struct
     | Automatic_browser -> t.selection = Unbound || t.selection = Bound_automatic
     | Connected_browser client -> t.source = Live && same_selected_client t.selected_client (Some client)
   let transport_label = function
-    | Browser_lane.Web_extension -> "WebExtension"
     | Browser_lane.Webdriver_bidi -> "BiDi"
     | Browser_lane.Ego_task_space -> "ego"
   let transport_names transports = String.concat " or " (List.map transport_label transports)
@@ -6678,7 +6664,6 @@ module Browser_lane_view = struct
     | Trusted_double_click -> "double click"
     | Trusted_button_click -> "middle/right click"
     | Trusted_keyboard -> "native keys"
-    | Browser_zoom -> "browser zoom"
     | Viewport_resize -> "viewport size"
     | Touch_input -> "touch"
     | Tab_history -> "tab history"
@@ -6703,7 +6688,7 @@ module Browser_lane_view = struct
     List.filter (fun transport ->
       List.for_all (Browser_lane.live_transport_serves transport) capabilities)
       Browser_lane.all_of_live_transport
-  (* "WebExtension: no hover, drag". Every row that says what a connection
+  (* "ego: no touch, frame read". Every row that says what a connection
      leaves out says it through here: the connection row, the picker's detail
      row, a refused gesture and a refused Keeper call. *)
   let lacking_clause transport capabilities =
@@ -6736,7 +6721,7 @@ module Browser_lane_view = struct
           (Masc.Tui_terminal_text.sanitize_terminal_text observed.ownership)
           timestamp)
     | Browser_lane.Ego_task_space, None -> Some "SDK Space control: not observed"
-    | (Browser_lane.Web_extension | Browser_lane.Webdriver_bidi), (Some _ | None) -> None
+    | Browser_lane.Webdriver_bidi, (Some _ | None) -> None
   let connection_name (client : client) =
     browser_name client.browser ^ " · " ^ transport_label client.transport
   (* The title names the connection; the connection row adds what it leaves
@@ -6815,305 +6800,16 @@ module Browser_lane_view = struct
               List.exists (fun (other : client) ->
                 Browser_lane.live_transport_serves other.transport capability)
                 (listed_clients t) in
-            Pointer_unserved {asked = client.transport; capability; serving_listed; host = t.bidi_host}
+            Pointer_unserved {asked = client.transport; capability; serving_listed}
   let refuse_gesture unserved t = {t with unserved_gesture = Some unserved}
   let withdraw_unserved_gesture t = match t.unserved_gesture with
     | None -> t
     | Some _ -> {t with unserved_gesture = None}
-  (* The BiDi host in the operator's words, as lines: what a line opens
-     with, and what it says. A line this file writes whole fits 74 cells,
-     which is an 80-column surface behind its two-cell indent. What another
-     program wrote, a reason, an address, a path, is a line of its own. *)
-  type host_breaks = At_spaces | At_slashes
-  type host_line = { lead : string; said : string; breaks : host_breaks }
-  let host_line said = { lead = ""; said; breaks = At_spaces }
-  let host_said lead said = { lead; said; breaks = At_spaces }
-  let host_time seconds = Time_codec.rfc3339_of_unix seconds
-  (* Where a running host stands beside the connection list. A host serves
-     hover and drag on the server that lists the client its record names, as
-     a BiDi connection. Only a host that has its session polls, so a listed
-     client is an attached host whatever its record has caught up to. A BiDi
-     connection under another ID may be this host, registered again under an
-     ID it could not write down, so hover and drag are not said to be
-     refused beside one. *)
-  type host_standing =
-    | Host_serving
-    | Host_unlisted
-    | Host_beside_another_bidi
-    | Host_connecting
-  let host_standing (clients : client list) (entry : Masc.Browser_bidi_host_record.entry) =
-    let named = Browser_lane.client_id_to_string entry.client_id in
-    let bidi =
-      List.filter (fun (client : client) -> client.transport = Browser_lane.Webdriver_bidi) clients in
-    match
-      List.exists (fun (client : client) -> String.equal client.client_id named) bidi,
-      bidi, entry.attached_at
-    with
-    | true, _, (Some _ | None) -> Host_serving
-    | false, [], Some _ -> Host_unlisted
-    | false, _ :: _, Some _ -> Host_beside_another_bidi
-    | false, _, None -> Host_connecting
-  (* These session diagnostics concern the external manual host record.
-     Addon-managed Firefox readiness is observed separately. *)
-  let host_session_lines (entry : Masc.Browser_bidi_host_record.entry)
-      (ending : Masc.Browser_bidi_host_record.ending) =
-    match ending.because with
-    | Profile_not_kept { expected; found = Some found } ->
-        [host_line "Another Firefox holds that port · the operator checks it before manual attach";
-         { lead = "It runs: "; said = found; breaks = At_slashes };
-         { lead = "Kept: "; said = expected; breaks = At_slashes }]
-    | Profile_not_kept { expected; found = None } ->
-        [host_line "The external Firefox did not say its profile · check it before manual attach";
-         { lead = "Kept: "; said = expected; breaks = At_slashes }]
-    | Reason_only ->
-        List.map host_line
-          (match entry.attached_at, ending.session with
-           | Some _, No_session_left -> ["That Firefox takes the next manual host if it still runs"]
-           | None, No_session_left ->
-               ["It got no session · check that Firefox answers at that address first"]
-           | (Some _ | None), Session_left ->
-               ["Session end not confirmed · the operator restarts it before manual attach"]
-           | (Some _ | None), Session_unknown ->
-               ["Could not end the session · the operator checks the external Firefox"]
-           | (Some _ | None), Session_refused ->
-               ["Firefox refused this manual host a session · it held one then";
-                "Stop a host still attached there · restart that Firefox if refused again"])
-  (* The results the host holds no acknowledgement for: how many, and the
-     last one. Without an acknowledgement the server may still have taken it,
-     so the cause is said only when it settles that. *)
-  let host_unacknowledged_lines (entry : Masc.Browser_bidi_host_record.entry) =
-    match List.rev entry.unacknowledged with
-    | [] -> []
-    | last :: earlier ->
-        let count = 1 + List.length earlier in
-        let verb = match last.verb with
-          | Some verb -> Masc.Browser_bidi_peer.verb_to_wire verb
-          | None -> "unknown verb" in
-        let outcome = match last.outcome with
-          | Succeeded -> "ran" | Not_started -> "not started" | Failed -> "partially failed" | Unknown -> "outcome unknown" in
-        let cause = match last.cause with
-          | Refused -> ", refused" | Not_sent -> ", not sent" | Unconfirmed -> "" in
-        let request = match last.request_id with
-          | Some id -> Masc.Browser_bidi_host_record.request_id_to_wire id
-          | None -> "not a UUID" in
-        [host_line (Printf.sprintf "%d result%s unacknowledged · last: %s, %s%s"
-           count (if count = 1 then "" else "s") verb outcome cause);
-         host_line (Printf.sprintf "at %s · request %s" (host_time last.at) request)]
-  let host_addon_lines ~port ~profile =
-    [host_line (Printf.sprintf "Browser Addon manages its own Firefox · configured port %d" port);
-     { lead = "Profile: "; said = profile; breaks = At_slashes };
-     host_line "Check the Addon observation for readiness · this manual host record is independent";
-     host_line "Existing external Firefox is not adopted or restarted"]
-  (* How a host is started. [address] is the one the last host was given,
-     which is the one to give again while that Firefox runs; with none the
-     launcher's own words stand, and say PORT for the port. A launcher that
-     is not there, or not as an installation wrote it, is not one to run.
-     The path and the address come from files: each is written as one shell
-     word, so neither reads as more of the command than it is. *)
-  let host_attach_lines ~address (attach : Masc.Browser_bidi_host_status.attach) =
-    let lead = "Attach: " in
-    let under = String.make (String.length lead) ' ' in
-    (match attach.standing with
-     | Launcher_installed ->
-         { lead; said = Filename.quote attach.launcher; breaks = At_slashes }
-         :: (match address with
-             | Some address ->
-                 [host_said under (Masc.Browser_bidi_host_status.bidi_url_flag ^ " " ^ Filename.quote address)]
-             | None ->
-                 [host_said under attach.arguments;
-                  host_said under
-                    ("PORT: the " ^ Masc.Browser_bidi_host_status.firefox_flag ^ " Firefox was started with")])
-     | Launcher_not_installed -> [host_said lead "install the browser lane in this workspace first"]
-     | Launcher_needs_reinstall ->
-         [host_said lead "install the browser lane again first (launcher not as installed)"])
-    @ [host_line (transport_setup_row [Browser_lane.Webdriver_bidi])]
-  (* The listed connection can outlive its host, or belong to another
-     host. Keep that distinction visible beside a report that says none ran
-     here or that this host ended. *)
-  let host_connection_note t =
-    let bidi_listed =
-      List.exists (fun (client : client) -> client.transport = Browser_lane.Webdriver_bidi)
-        (listed_clients t) in
-    match t.bidi_host with
-    | Host_reported { state = (Never_started | Ended _ | Died _); _ } when bidi_listed ->
-        [host_line "A listed BiDi connection may be stale or belong to another host"]
-    | Host_not_reported | Host_report_unreadable _
-    | Host_reported
-        { state =
-            ( Never_started | Record_missing_but_locked | Running _ | Ended _
-            | Died _ | Unreadable _ )
-        ; _ } -> []
-  (* Manual host diagnostics and Addon configuration are shown separately. *)
-  let bidi_host_lines t =
-    match t.bidi_host with
-    | Host_not_reported -> []
-    | Host_report_unreadable { detail; message } ->
-        (* The server's paragraph is longer than most screens have rows for,
-           so where the host's state is said in full comes before it. *)
-        [host_line "Manual BiDi host: this TUI cannot read the server's report";
-         host_line "masc doctor reads the host's record and says where the host stands";
-         host_said "Detail: " detail]
-        @ (match message with None -> [] | Some message -> [host_said "Server: " message])
-    | Host_reported report ->
-        let attach ~address =
-          match report.keeper with
-          | Addon_managed _ -> []
-          | Addon_off ->
-              host_attach_lines ~address report.attach
-              @ [host_line "[browser.live.bidi] is set; no enabled browser-firefox declaration runs it"]
-          | Not_configured ->
-              host_attach_lines ~address report.attach
-              @ [host_line "No Addon-managed live Firefox is configured in [browser.live.bidi]"]
-          | Not_known -> host_attach_lines ~address report.attach in
-        (match report.state with
-         | Never_started ->
-             [host_line "Manual BiDi host: none has run for this workspace"]
-             @ host_connection_note t @ attach ~address:None
-         | Record_missing_but_locked ->
-             [host_line "Manual BiDi host: one holds the workspace lock, but its record is missing";
-              host_line "Do not start another host · inspect the existing process"]
-         | Running entry ->
-             (* The first row is the one a short screen keeps, so it says
-                where the host stands beside the list, not only that it runs. *)
-             let state name = host_line (Printf.sprintf "Manual BiDi host: %s · pid %d" name entry.pid) in
-             let at = host_said "At: " entry.bidi_url in
-             (match host_standing (listed_clients t) entry with
-              | Host_serving -> [state "attached"; at]
-              | Host_unlisted ->
-                  state "attached, not listed by this server"
-                  :: List.map host_line
-                       ["No BiDi connection is listed · hover and drag stay refused";
-                        "A fixed --server or MASC_HTTP_PORT may point elsewhere";
-                        "Older hosts can use MASC_HTTP_BASE_URL · update the host";
-                        "If none appears, restart it without a fixed override"]
-                  @ [at]
-              | Host_beside_another_bidi ->
-                  state "attached, not listed under its recorded ID"
-                  :: List.map host_line
-                       ["Another BiDi connection is listed · this host's if it registered again";
-                        "Otherwise that is another host, and this one polls elsewhere or stopped"]
-                  @ [at]
-              | Host_connecting -> [state "connecting"; at])
-             @ host_unacknowledged_lines entry
-         | Ended (entry, ending) ->
-             (* What to do comes before why: on a screen that holds two of
-                these rows, the step is the one that has to be there. *)
-             [host_line (Printf.sprintf "Manual BiDi host: ended %s · pid %d" (host_time ending.at) entry.pid)]
-             @ host_session_lines entry ending
-             @ host_connection_note t
-             @ [host_said "Reason: " ending.reason]
-             @ host_unacknowledged_lines entry
-             @ attach ~address:(Some entry.bidi_url)
-         | Died entry ->
-             [host_line (Printf.sprintf "Manual BiDi host: pid %d is gone · no reason recorded" entry.pid)]
-             @ [host_line "Its session may be left in external Firefox · the operator checks it"]
-             @ host_connection_note t
-             @ host_unacknowledged_lines entry
-             @ attach ~address:(Some entry.bidi_url)
-         | Unreadable { detail; held = Some true } ->
-             (* What to do comes before why, as for a host that ended. *)
-             [host_line "Manual BiDi host: one runs, and its record cannot be read";
-              host_line "Stop that host before starting another · it refuses a second one";
-              host_said "Detail: " detail]
-         | Unreadable { detail; held = Some false } ->
-             [host_line "Manual BiDi host: none runs, and the last record cannot be read";
-              host_said "Detail: " detail]
-             @ attach ~address:None
-         | Unreadable { detail; held = None } ->
-             [host_line "Manual BiDi host: could not check whether one runs";
-              host_said "Detail: " detail])
-        @ (match report.keeper with
-           | Addon_managed { port; profile } -> host_addon_lines ~port ~profile
-           | Addon_off | Not_configured | Not_known -> [])
-  (* A path on rows of [max_cells], broken before a slash so each name
-     stays whole. A single name longer than a row has nowhere better to
-     break and is cut where the row ends, with every cell of it kept: a
-     space in a name is part of the path. *)
-  let host_path_rows ~max_cells path =
-    let cells = Masc_tui_message_layout.display_width in
-    let pieces =
-      let length = String.length path in
-      let rec cut start index pieces =
-        if index >= length then
-          if index > start then String.sub path start (index - start) :: pieces else pieces
-        else if Char.equal path.[index] '/' && index > start then
-          cut index (index + 1) (String.sub path start (index - start) :: pieces)
-        else cut start (index + 1) pieces
-      in
-      List.rev (cut 0 0 [])
-    in
-    let close current rows = if String.equal current "" then rows else current :: rows in
-    let rows, current =
-      List.fold_left (fun (rows, current) piece ->
-          if cells (current ^ piece) <= max_cells then rows, current ^ piece
-          else if cells piece <= max_cells then close current rows, piece
-          else
-            match List.rev (Masc_tui_message_layout.split_cells ~max_cells piece) with
-            | [] -> close current rows, ""
-            | last :: earlier -> earlier @ close current rows, last)
-        ([], "") pieces
-    in
-    List.rev (close current rows)
-  (* A line on as many rows as it needs at [width] cells: the first behind
-     its lead, the rest under what the lead opened. Nothing is cut, so a
-     reason or a path longer than the screen is still read whole. What is
-     said is made printable first, so the rows are measured as they are
-     drawn. *)
-  let host_line_rows ~width { lead; said; breaks } =
-    let said = Masc.Tui_terminal_text.sanitize_terminal_text said in
-    let rows_of ~max_cells = match breaks with
-      | At_spaces -> Masc_tui_message_layout.wrap_words ~max_cells said
-      | At_slashes -> host_path_rows ~max_cells said in
-    let beside = width - String.length lead in
-    (* A screen so narrow that the lead takes more of a row than it leaves
-       gives the lead a row of its own and what is said the whole width. *)
-    if beside < String.length lead then
-      (match String.trim lead with "" -> [] | lead -> [lead]) @ rows_of ~max_cells:(Int.max 1 width)
-    else
-      let under = String.make (String.length lead) ' ' in
-      match rows_of ~max_cells:beside with
-      | [] -> [lead]
-      | first :: rest -> (lead ^ first) :: List.map (fun row -> under ^ row) rest
-  let bidi_host_rows ~width t = List.concat_map (host_line_rows ~width) (bidi_host_lines t)
-  (* The one row a refused gesture has for the BiDi host. It is this file's
-     words only, so it fits whatever the record holds; the picker says the
-     rest. *)
-  let bidi_host_brief = function
-    | Host_not_reported -> None
-    | Host_report_unreadable _ ->
-        Some "Manual BiDi host: this TUI cannot read the server's report · b:details"
-    | Host_reported report ->
-        Some (match report.state with
-          | Never_started ->
-              (match report.keeper with
-               | Addon_managed _ ->
-                   "Manual BiDi host: none has run · check Addon readiness · b:details"
-               | Addon_off | Not_configured | Not_known ->
-                   "Manual BiDi host: none has run for this workspace · b:how to attach")
-          | Record_missing_but_locked ->
-              "Manual BiDi host: lock held, record missing · b:inspect the existing process"
-          (* A gesture is refused for want of a listed BiDi connection, so a
-             host that runs is one this server does not list. *)
-          | Running { attached_at = Some _; pid; _ } ->
-              Printf.sprintf "Manual BiDi host: pid %d attached, not listed by this server · b:details" pid
-          | Running { attached_at = None; pid; _ } ->
-              Printf.sprintf "Manual BiDi host: pid %d is connecting · b:details" pid
-          | Ended (_, ending) ->
-              Printf.sprintf "Manual BiDi host: ended %s · b:why and what next" (host_time ending.at)
-          | Died entry ->
-              Printf.sprintf "Manual BiDi host: pid %d is gone, no reason recorded · b:what next" entry.pid
-          | Unreadable { held = Some true; _ } ->
-              "Manual BiDi host: one runs, and its record cannot be read · b:details"
-          | Unreadable { held = Some false; _ } ->
-              "Manual BiDi host: none runs, and the last record cannot be read · b:details"
-          | Unreadable { held = None; _ } -> "Manual BiDi host: could not check whether one runs · b:details")
   (* The rows a refused gesture draws: what was not sent and why, then the
      operator's next step. With a serving connection listed the step is the
-     picker and fits the same row. With none listed, a gesture a BiDi
-     connection serves says where the BiDi host stood and points at the
-     picker for the rest; without a report, and for other work, the second
-     row is where attaching a connection is written. Each row fits 80
-     columns, and there are never more than two. *)
+     picker and fits the same row. With none listed, the second row is where
+     attaching a connection is written. Each row fits 80 columns, and there
+     are never more than two. *)
   let unserved_gesture_rows (unserved : unserved_gesture) =
     let cause = "Not sent · " ^ lacking_clause unserved.asked [unserved.capability] in
     match Browser_lane.live_transports_serving unserved.capability with
@@ -7121,58 +6817,14 @@ module Browser_lane_view = struct
     | serving when unserved.serving_listed ->
         [cause ^ " · " ^ transport_names serving ^ " serves it · b:choose browser"]
     | serving ->
-        let host =
-          if List.mem Browser_lane.Webdriver_bidi serving then bidi_host_brief unserved.host else None
-        in
         [cause ^ " · no " ^ transport_names serving ^ " connection is listed";
-         Option.value host ~default:(transport_setup_row serving)]
+         transport_setup_row serving]
   (* The rows of the gesture the view holds as refused. They are drawn from
-     what the gesture kept, so what is learned of the host afterwards does
-     not rewrite why it was not sent. *)
+     what the gesture kept, so what is listed afterwards does not rewrite why
+     it was not sent. *)
   let unserved_rows t = match t.unserved_gesture with
     | None -> []
     | Some unserved -> unserved_gesture_rows unserved
-  (* Whether the BiDi host's rows report a host: one that runs or ran, or
-     a record or report that cannot be read. With no host yet they only say
-     how one is started. *)
-  let host_rows_report_a_host t = match t.bidi_host with
-    | Host_not_reported -> false
-    | Host_report_unreadable _ -> true
-    | Host_reported report ->
-        (match report.state with
-         | Never_started -> false
-         | Record_missing_but_locked -> true
-         | Running _ | Ended _ | Died _ | Unreadable _ -> true)
-  (* The rows of a host report a short screen reads first: where the host
-     stands, and what that asks of the operator. *)
-  let picker_host_head_rows = 2
-  let picker_host_head rows =
-    List.filteri (fun index _ -> index < picker_host_head_rows) rows,
-    List.filteri (fun index _ -> index >= picker_host_head_rows) rows
-  (* What the picker keeps for the rows under its choices, which the cursor
-     cannot reach, when there are more of them than this: the first two, and
-     the row that says how many more the screen could not hold. *)
-  let picker_rows_below_wanted = picker_host_head_rows + 1
-  (* What it keeps when the screen has no room for those beside the choices:
-     the first row and the row that counts the rest. *)
-  let picker_rows_below_least = 2
-  (* Choosing is what the picker is for. On a terminal that would be left
-     with fewer choices than this beside the rows below, or fewer than there
-     are when there are fewer than this, the choices keep the room. *)
-  let picker_least_choices = 3
-  (* How many of [rows] the picker gives its choices. [rows] is what the
-     screen has for the choices and all that is drawn after them, and
-     [below] how many rows that is. *)
-  let picker_choice_rows ~rows ~choices ~below =
-    let rows = Int.max 1 rows in
-    let least = Int.min picker_least_choices choices in
-    let kept_below kept = Int.min below kept in
-    match
-      List.find_opt (fun kept -> rows - kept_below kept >= least)
-        [picker_rows_below_wanted; picker_rows_below_least]
-    with
-    | Some kept -> rows - kept_below kept
-    | None -> rows
   let request_body t =
     `Assoc ([ "lane", `String (source_name t.source) ]
             @ (match client_id t with None -> [] | Some id -> ["clientId", `String id])
@@ -7261,7 +6913,7 @@ module Browser_lane_view = struct
     | Live_unbound -> Some (Discover Choose_client)
     | Bound_automatic | Bound_explicit ->
         if browser_choice_selected before choice then None else Some Read
-  let withdraw_discovery t = { t with clients = None; bidi_host = Host_not_reported;
+  let withdraw_discovery t = { t with clients = None;
     inventory_report = Inventory_not_reported; automatic = None }
   let bind_recommendation recommendation t =
     match recommendation.lane, recommendation.client_id with
@@ -7280,7 +6932,7 @@ module Browser_lane_view = struct
         | Some original ->
           (match List.find_opt (same_client original) observed.listed with
            | Some current -> Some current | None -> Some original) in
-      {t with clients=Some observed.listed;selected_client;bidi_host=observed.bidi_host;
+      {t with clients=Some observed.listed;selected_client;
         inventory_report=observed.inventory_report;automatic=observed.automatic;activity_error=None}
 
   let accept_clients ~generation result t =
@@ -7288,15 +6940,15 @@ module Browser_lane_view = struct
     | Loading (current, Discover purpose) when current = generation ->
         (match result with
          | Error detail ->
-             { t with clients = None; bidi_host = Host_not_reported;
+             { t with clients = None;
                inventory_report = Inventory_not_reported; automatic = None;
                client_picker = Some 0; load = Failed detail }, false
-         | Ok { listed = clients; bidi_host; inventory_report; automatic; unavailable } ->
+         | Ok { listed = clients; inventory_report; automatic; unavailable } ->
              let selected_client = Option.map (fun selected ->
                match List.find_opt (same_client selected) clients with
                | Some current -> current
                | None -> selected) t.selected_client in
-             let next = { t with clients = Some clients; selected_client; bidi_host; inventory_report; automatic; unavailable;
+             let next = { t with clients = Some clients; selected_client; inventory_report; automatic; unavailable;
                activity_error=None;load = Idle } in
              if purpose = Choose_client then { next with client_picker = Some 0 }, false
              else match t.selection with
@@ -7357,7 +7009,7 @@ module Browser_lane_view = struct
            | Browser_lane.Ego_task_space, Some original ->
                Masc.Browser_ego_space_observation.of_json ~expected_id:original.id value
                |> Result.map Option.some
-           | (Browser_lane.Ego_task_space | Browser_lane.Web_extension | Browser_lane.Webdriver_bidi),
+           | (Browser_lane.Ego_task_space | Browser_lane.Webdriver_bidi),
              (Some _ | None) -> Error "Space observation requires the original Ego Space"))
       "spaceObservation" json in
     if String.trim client_id = "" then Error "empty browser client ID"
@@ -7394,22 +7046,6 @@ module Browser_lane_view = struct
                 else loop (client :: acc) rest
           in loop [] rows
       | _ -> Error "expected browser clients array"
-  (* The BiDi host's part of the same answer. A report this TUI cannot read
-     does not cost the operator the connection list, nor the paragraph the
-     server wrote for them. *)
-  let decode_bidi_host = function
-    | None | Some `Null -> Host_not_reported
-    | Some report ->
-        (match Masc.Browser_bidi_host_status.report_of_json report with
-         | Ok report -> Host_reported report
-         | Error detail ->
-             let message = match report with
-               | `Assoc fields ->
-                   (match List.assoc_opt "message" fields with
-                    | Some (`String message) -> Some message
-                    | Some _ | None -> None)
-               | _ -> None in
-             Host_report_unreadable { detail; message })
   let decode_recommendation json =
     let* ok = get boolean "ok" json in
     if not ok then
@@ -7433,7 +7069,6 @@ module Browser_lane_view = struct
       let* reason = get (function
         | `String "explicit_browser" -> Ok Explicit_browser
         | `String "existing_login" -> Ok Existing_login
-        | `String "available_connected_browser" -> Ok Available_connected_browser
         | _ -> Error "unknown automatic browser reason") "reason" data in
       match lane, client_id with
       | Live, Some _ -> Ok (Ok {lane;client_id;reason})
@@ -7491,9 +7126,9 @@ module Browser_lane_view = struct
     (* The same [data] the connections were read from. A server from before
        the report has no such field. *)
     let* data = field "data" json in
-    let* reported,inventory_report,unavailable =
+    let* inventory_report,unavailable =
       match data with
-      | `Assoc fields -> Ok (List.assoc_opt "bidiHost" fields,decode_inventory_report fields,List.assoc_opt "unavailable" fields)
+      | `Assoc fields -> Ok (decode_inventory_report fields,List.assoc_opt "unavailable" fields)
       | _ -> Error "expected object"
     in
     (* Invalid automatic policy refuses automatic work without hiding the
@@ -7527,7 +7162,7 @@ module Browser_lane_view = struct
       | Inventory_reported (_::_),(Some {browse=(Ok _|Error _)}|None) ->
           invalid_automatic "Browser inventory is incomplete; choose an observed browser explicitly"
       | (Inventory_not_reported|Inventory_reported []),(Some {browse=(Ok _|Error _)}|None) -> automatic in
-    Ok { listed; bidi_host = decode_bidi_host reported; inventory_report; automatic;
+    Ok { listed; inventory_report; automatic;
       unavailable=decode_unavailable unavailable }
   let parse_client_id source json =
     let* value = field "clientId" json in
@@ -8083,7 +7718,7 @@ module Browser_lane_view = struct
                                           { action =
                                               Browser_lane.(
                                                 Activate_tab | Click _ | Fill _ | Select_option _
-                                                | Set_zoom _ | Set_viewport _ | Double_click _ | Double_click_at _
+                                                | Set_viewport _ | Double_click _ | Double_click_at _
                                                 | Type_text _ | Press_key _
                                                 | Hover _ | Drag_to _
                                                 | Scroll _ | Hover_at _

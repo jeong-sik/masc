@@ -245,7 +245,7 @@ let test_read_only_install () = with_fixture (fun _ root binary _ ->
       List.iter (fun dir -> Unix.chmod dir 0o555) dirs;
       check (result string error) "read-only installed release serves" (Ok "<p>exact release</p>")
         (Installed.load (bound binary) "index.html")))
-let companion_fixture = ["masc-tui", "fixture tui"; "masc-browser-host", "fixture browser";
+let companion_fixture = ["masc-tui", "fixture tui";
   "masc-deployment-preflight-helper", "fixture preflight";
   "masc-check-runtime-deployment-preflight", "fixture gate";
   "masc-exec-ssh-bootstrap", "fixture ssh bootstrap"]
@@ -319,7 +319,7 @@ let test_v2_payload_corruption () =
   List.iter (fun path -> with_payload_fixture (fun _ root binary _ ->
     write (Filename.concat root path) "changed bytes";
     check bool (path ^ " corruption rejected") true (unavailable (inspect binary))))
-    ["masc-browser-host"; "lib/runtime.dylib"; "runtime-provenance.json"];
+    ["masc-exec-ssh-bootstrap"; "lib/runtime.dylib"; "runtime-provenance.json"];
   with_payload_fixture (fun _ root binary _ ->
     Unix.chmod (Filename.concat root "python/bin/python3") 0o644;
     check bool "runtime mode change rejected" true (unavailable (inspect binary)))

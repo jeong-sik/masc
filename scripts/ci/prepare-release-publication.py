@@ -117,7 +117,7 @@ def validate_distribution(directory, checkout):
     expected = {'install.sh', 'install-runtime-setup.py', 'SHA256SUMS',
                 'masc-exec-shim-linux-amd64', 'masc-exec-shim-linux-arm64'}
     for arch in PLATFORMS:
-        expected.update({f'masc-{arch}', f'masc-tui-{arch}', f'masc-browser-host-{arch}',
+        expected.update({f'masc-{arch}', f'masc-tui-{arch}',
                          f'masc-deployment-preflight-helper-{arch}',
                          f'masc-check-runtime-deployment-preflight-{arch}',
                          f'masc-exec-ssh-bootstrap-{arch}',

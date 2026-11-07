@@ -214,8 +214,8 @@ let profile_state profile =
 
 (* The directory that would hold the new profile is the nearest one that
    exists, and a profile is made there only when it can be written. Asked at
-   the plan, so a profile that cannot be made refuses before the host is
-   installed. *)
+   the plan, so a profile that cannot be made refuses before anything is
+   written. *)
 let creatable profile =
   let rec nearest path =
     if Sys.file_exists path || String.equal (Filename.dirname path) path

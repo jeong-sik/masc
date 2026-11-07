@@ -1333,7 +1333,7 @@ class ImpTools(unittest.TestCase):
     def test_a_found_firefox_makes_route_rows_that_name_their_commands(self):
         with patch.object(SETUP.subprocess, 'run', side_effect=self.catalogs('firefox')):
             rows = SETUP.imp_tool_rows('/bin/masc', '/work space')
-        self.assertEqual([row.key for row in rows], ['bidi', 'extension', 'github', 'web-search'])
+        self.assertEqual([row.key for row in rows], ['bidi', 'github', 'web-search'])
         self.assertEqual(rows[0].command,
                          "masc browser-lane-setup --mode bidi --base-path '/work space'")
 
@@ -1354,9 +1354,9 @@ class ImpTools(unittest.TestCase):
         self.assertEqual([row.key for row in confirmed], ['bidi'])
         title, labels = picker.call_args.args[:2]
         self.assertTrue(title.startswith('5 ·'))
-        self.assertEqual(len(labels), 4)
+        self.assertEqual(len(labels), 3)
         # Only the recommended rows start marked: the GitHub login and the web
-        # search check. The two Firefox routes are a thing to choose.
+        # search check. The Firefox route is a thing to choose.
         recommended = [i for i, label in enumerate(labels)
                        if any(word in label for word in ('GitHub', 'Web search'))]
         self.assertEqual(len(recommended), 2)
@@ -1374,7 +1374,7 @@ class ImpTools(unittest.TestCase):
         # The GitHub login needs imp, which `masc setup` has not created yet:
         # confirming it runs nothing here.
         with patch.object(SETUP.subprocess, 'run', side_effect=self.catalogs('firefox')) as run, \
-                patch.object(SETUP, 'pick', return_value=[2]), \
+                patch.object(SETUP, 'pick', return_value=[1]), \
                 contextlib.redirect_stderr(io.StringIO()):
             confirmed = SETUP.select_imp_tools('/bin/masc', '/workspace')
         self.assertEqual([row.key for row in confirmed], ['github'])
@@ -1507,7 +1507,7 @@ class ImpTools(unittest.TestCase):
         # marked and is still the reader's answer.
         replies = self.catalogs('firefox') + [completed(browser_catalog('firefox', ready=False))]
         with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
-                patch.object(SETUP, 'pick', return_value=[0, 2]), \
+                patch.object(SETUP, 'pick', return_value=[0, 1]), \
                 patch.object(SETUP, 'prerequisite_menu', side_effect=SETUP.SetupError('setup cancelled')), \
                 contextlib.redirect_stderr(io.StringIO()) as printed:
             confirmed = SETUP.select_imp_tools('/bin/masc', '/workspace')
@@ -1613,7 +1613,7 @@ class ImpTools(unittest.TestCase):
         with patch.object(SETUP.subprocess, 'run', side_effect=[completed('', 1)]), \
                 contextlib.redirect_stderr(io.StringIO()) as printed:
             SETUP.show_imp_tools('/bin/masc', '/workspace')
-        self.assertIn('Run masc browser-lane-setup --mode bidi --mode extension', printed.getvalue())
+        self.assertIn('Run masc browser-lane-setup --mode bidi --base-path /workspace', printed.getvalue())
         self.assertIn('to connect Firefox later', printed.getvalue())
         self.assertIn('masc keeper-github login --keeper imp', printed.getvalue())
 
@@ -2253,11 +2253,10 @@ class PickAllowingNothing(unittest.TestCase):
 
 
 class FirefoxRoutes(unittest.TestCase):
-    """The BiDi and extension rows: the first request, a browser connected at install time.
+    """The BiDi row: the first request, a browser connected at install time.
 
-    Both start unmarked (RFC section 4.3): BiDi opens a debugging port with no
-    authentication and the extension has to be loaded again after every browser
-    start. They are shown only when Firefox was found.
+    It starts unmarked (RFC section 4.3): BiDi opens a debugging port with no
+    authentication. It is shown only when Firefox was found.
     """
 
     def setUp(self):
@@ -2274,15 +2273,13 @@ class FirefoxRoutes(unittest.TestCase):
         with patch.object(SETUP.subprocess, 'run', side_effect=replies):
             return SETUP.imp_tool_rows('/bin/masc', '/work space')
 
-    def test_firefox_found_shows_both_routes_unmarked_with_their_commands(self):
+    def test_firefox_found_shows_the_bidi_route_unmarked_with_its_command(self):
         rows = {row.key: row for row in self.rows()}
-        self.assertEqual([key for key in rows], ['bidi', 'extension', 'github', 'web-search'])
+        self.assertEqual([key for key in rows], ['bidi', 'github', 'web-search'])
         self.assertTrue(rows['github'].checked)
-        self.assertEqual((rows['bidi'].checked, rows['extension'].checked), (False, False))
+        self.assertFalse(rows['bidi'].checked)
         self.assertEqual(rows['bidi'].command,
                          "masc browser-lane-setup --mode bidi --base-path '/work space'")
-        self.assertEqual(rows['extension'].command,
-                         "masc browser-lane-setup --mode extension --base-path '/work space'")
 
     def test_the_bidi_notice_names_the_unauthenticated_port_and_the_one_login(self):
         notice = {row.key: row for row in self.rows()}['bidi'].notice
@@ -2290,14 +2287,9 @@ class FirefoxRoutes(unittest.TestCase):
                          'Log in once', 'profile keeps the login'):
             self.assertIn(sentence, notice)
 
-    def test_the_extension_notice_says_the_add_on_has_to_be_loaded_again(self):
-        notice = {row.key: row for row in self.rows()}['extension'].notice
-        self.assertIn('removes the add-on', notice)
-        self.assertIn('about:debugging', notice)
-
     def test_no_firefox_means_no_route_is_offered(self):
-        # Recommending a browser is not this step's job, and a Zen-only computer
-        # is not detected: with nothing to attach to there is nothing to ask.
+        # Recommending a browser is not this step's job: with nothing to start
+        # there is nothing to ask.
         rows = self.rows(ready_firefox=False)
         self.assertEqual([row.key for row in rows], ['github', 'web-search'])
 
@@ -2324,14 +2316,6 @@ class FirefoxRoutes(unittest.TestCase):
         self.assertEqual(self.setup_calls(run),
                          [['/bin/masc', 'browser-lane-setup', '--mode', 'bidi', '--base-path', '/workspace']])
 
-    def test_every_chosen_route_goes_to_one_command_in_a_fixed_order(self):
-        # One call plans all of them before writing any, and a refused one writes none.
-        confirmed, run, _ = self.run_modes([1, 0])
-        self.assertEqual([row.key for row in confirmed], ['extension', 'bidi'])
-        self.assertEqual(self.setup_calls(run),
-                         [['/bin/masc', 'browser-lane-setup', '--mode', 'bidi',
-                           '--mode', 'extension', '--base-path', '/workspace']])
-
     def test_a_refused_route_does_not_end_setup_and_names_the_command(self):
         replies = [completed(browser_catalog('firefox', ready=True)),
                    completed(browser_catalog('firefox', ready=True)),
@@ -2356,48 +2340,41 @@ class FirefoxRoutes(unittest.TestCase):
         text, labels = shown[0]
         self.assertIn('That port has no authentication', text)
         self.assertIn('any program on this computer', text)
-        self.assertIn('removes the add-on', text)
         # What the list line itself says, which is all a quick setup shows.
         self.assertTrue(any('open debugging port' in label for label in labels))
-        self.assertTrue(any('load the add-on after each restart' in label for label in labels))
 
-    def test_the_restart_note_is_for_the_routes_that_write_a_table(self):
-        # The extension route writes no table of runtime.toml, and the lane token
-        # is read for each request: telling the reader to restart a live server
-        # for it would be advice that does nothing.
-        for modes, expected in ((('extension',), False), (('bidi',), True), (('bidi', 'extension'), True)):
-            with self.subTest(modes=modes):
-                replies = [completed(browser_catalog('firefox', ready=True)), completed(),
-                           completed(json.dumps(dict(status='same_workspace')))]
-                with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
-                        contextlib.redirect_stderr(io.StringIO()) as printed:
-                    SETUP.prepare_browser_lane('/bin/masc', '/workspace', modes, 8945)
-                asked = any(call.args[0][1] == 'setup-server' for call in run.call_args_list)
-                self.assertEqual(asked, expected)
-                self.assertEqual('already running' in printed.getvalue(), expected)
+    def test_the_bidi_route_writes_a_table_so_a_running_server_is_told_to_restart(self):
+        replies = [completed(browser_catalog('firefox', ready=True)), completed(),
+                   completed(json.dumps(dict(status='same_workspace')))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                contextlib.redirect_stderr(io.StringIO()) as printed:
+            SETUP.prepare_browser_lane('/bin/masc', '/workspace', ('bidi',), 8945)
+        self.assertTrue(any(call.args[0][1] == 'setup-server' for call in run.call_args_list))
+        self.assertIn('already running', printed.getvalue())
 
     def test_a_missing_firefox_that_is_not_installed_writes_no_route(self):
         replies = [completed(browser_catalog('firefox', ready=False))]
         with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
                 patch.object(SETUP, 'prerequisite_menu', return_value=False), \
                 contextlib.redirect_stderr(io.StringIO()) as printed:
-            SETUP.prepare_browser_lane('/bin/masc', '/workspace', ('bidi', 'extension'))
+            SETUP.prepare_browser_lane('/bin/masc', '/workspace', ('bidi',))
         self.assertEqual(self.setup_calls(run), [])
         self.assertIn('Firefox is missing, so this is left out', printed.getvalue())
-        self.assertIn('--mode bidi --mode extension', printed.getvalue())
+        self.assertIn('--mode bidi --base-path /workspace', printed.getvalue())
 
     def test_a_refused_call_with_several_routes_points_at_what_was_written_and_offers_each(self):
         # The command commits its tables one after another, so a refusal can
         # come after a route was written; it lists those itself. The reader
         # can run the call again, or the routes one at a time.
-        replies = [completed(browser_catalog('firefox', ready=True)), completed('', 1)]
+        replies = [completed(browser_catalog('firefox', ready=True)),
+                   completed(browser_page_catalog('ego-browser', ready=True)), completed('', 1)]
         with patch.object(SETUP.subprocess, 'run', side_effect=replies), \
                 contextlib.redirect_stderr(io.StringIO()) as printed:
-            SETUP.prepare_browser_lane('/bin/masc', '/workspace', ('bidi', 'extension'), 8945)
+            SETUP.prepare_browser_lane('/bin/masc', '/workspace', ('bidi', 'ego'), 8945)
         text = printed.getvalue()
-        self.assertIn('masc browser-lane-setup --mode bidi --mode extension --base-path /workspace', text)
+        self.assertIn('masc browser-lane-setup --mode bidi --mode ego --base-path /workspace', text)
         self.assertIn('one route at a time: masc browser-lane-setup --mode bidi --base-path /workspace; '
-                      'masc browser-lane-setup --mode extension --base-path /workspace', text)
+                      'masc browser-lane-setup --mode ego --base-path /workspace', text)
 
     def test_an_unreadable_firefox_catalog_offers_no_route(self):
         replies = [completed('', 1)]
@@ -2430,10 +2407,9 @@ class FirefoxRoutes(unittest.TestCase):
         lines = printed.getvalue().splitlines()
         marked = [line for line in lines if line.startswith('  [x] ')]
         unmarked = [line for line in lines if line.startswith('  [ ] ')]
-        self.assertEqual((len(marked), len(unmarked)), (2, 2))
-        self.assertTrue(all('(BiDi)' in line or 'add-on' in line for line in unmarked))
+        self.assertEqual((len(marked), len(unmarked)), (2, 1))
+        self.assertTrue(all('(BiDi)' in line for line in unmarked))
         self.assertIn('--mode bidi', printed.getvalue())
-        self.assertIn('--mode extension', printed.getvalue())
 
 
 class EgoRoute(unittest.TestCase):
@@ -2493,7 +2469,7 @@ class EgoRoute(unittest.TestCase):
                 contextlib.redirect_stderr(io.StringIO()) as printed:
             rows = {row.key for row in SETUP.imp_tool_rows('/bin/masc', '/workspace')}
         self.assertNotIn('ego', rows)
-        self.assertTrue({'bidi', 'extension', 'github'} <= rows)
+        self.assertTrue({'bidi', 'github'} <= rows)
         self.assertIn('masc browser-lane-setup --mode ego --base-path /workspace', printed.getvalue())
 
     def test_marking_the_row_runs_the_ego_mode_and_asks_for_no_firefox(self):
@@ -2510,6 +2486,20 @@ class EgoRoute(unittest.TestCase):
         self.assertEqual(self.setup_calls(run),
                          [['/bin/masc', 'browser-lane-setup', '--mode', 'ego', '--base-path', '/workspace']])
 
+    def test_every_chosen_route_goes_to_one_command_in_a_fixed_order(self):
+        # One call plans all of them before writing any, and a refused one writes none.
+        replies = self.looks() + [completed(browser_catalog('firefox', ready=True)),
+                                  completed(browser_page_catalog('ego-browser', ready=True)),
+                                  completed(), completed(json.dumps(dict(status='free')))]
+        with patch.object(SETUP.subprocess, 'run', side_effect=replies) as run, \
+                patch.object(SETUP, 'pick', return_value=[1, 0]), \
+                contextlib.redirect_stderr(io.StringIO()):
+            confirmed = SETUP.select_imp_tools('/bin/masc', '/workspace', 8945)
+        self.assertEqual([row.key for row in confirmed], ['ego', 'bidi'])
+        self.assertEqual(self.setup_calls(run),
+                         [['/bin/masc', 'browser-lane-setup', '--mode', 'bidi',
+                           '--mode', 'ego', '--base-path', '/workspace']])
+
     def test_a_firefox_left_missing_keeps_the_ego_route(self):
         run, printed = self.prepare(('bidi', 'ego'), [completed(browser_catalog('firefox', ready=False)),
                                                       completed(browser_page_catalog('ego-browser', ready=True)),
@@ -2518,12 +2508,12 @@ class EgoRoute(unittest.TestCase):
                          [['/bin/masc', 'browser-lane-setup', '--mode', 'ego', '--base-path', '/workspace']])
         self.assertIn('Firefox is missing, so this is left out. Run masc browser-lane-setup --mode bidi ', printed)
 
-    def test_an_ego_browser_left_missing_keeps_the_firefox_routes(self):
-        run, printed = self.prepare(('extension', 'ego'), [completed(browser_catalog('firefox', ready=True)),
-                                                           completed(browser_page_catalog('ego-browser', ready=False)),
-                                                           completed()])
+    def test_an_ego_browser_left_missing_keeps_the_firefox_route(self):
+        run, printed = self.prepare(('bidi', 'ego'), [completed(browser_catalog('firefox', ready=True)),
+                                                      completed(browser_page_catalog('ego-browser', ready=False)),
+                                                      completed()])
         self.assertEqual(self.setup_calls(run),
-                         [['/bin/masc', 'browser-lane-setup', '--mode', 'extension', '--base-path', '/workspace']])
+                         [['/bin/masc', 'browser-lane-setup', '--mode', 'bidi', '--base-path', '/workspace']])
         self.assertIn('ego-browser is missing, so this is left out. Run masc browser-lane-setup --mode ego ', printed)
 
     def test_the_ego_route_writes_a_table_so_a_running_server_is_told_to_restart(self):
@@ -2821,15 +2811,6 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
         (root / 'home').mkdir()
         return tools, base
 
-    def with_host_on_path(self, root, tools):
-        """The command installs the host from a `masc-browser-host` beside it or on PATH."""
-        built = Path(BINARY).parent / 'masc_browser_host.exe'
-        if not built.is_file():
-            self.skipTest('the built masc_browser_host.exe is not beside the executable')
-        host = tools / 'masc-browser-host'
-        host.write_bytes(built.read_bytes())
-        host.chmod(0o755)
-
     def run_routes(self, root, base, tools, modes):
         with open(root / 'stderr.txt', 'w') as sink, \
                 patch.dict(os.environ, isolated_environment(root, tools), clear=True), \
@@ -2837,43 +2818,18 @@ class ImpToolsAgainstTheBinary(unittest.TestCase):
             SETUP.prepare_browser_lane(BINARY, str(base), modes)
         return (root / 'stderr.txt').read_text()
 
-    def test_the_bidi_route_writes_the_firefox_table_and_the_host_and_no_other_table(self):
+    def test_the_bidi_route_writes_the_firefox_table_and_no_other_table(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory).resolve()
             tools, base = self.workspace(root)
-            self.with_host_on_path(root, tools)
             printed = self.run_routes(root, base, tools, ('bidi',))
             written = (base / '.masc/config/runtime.toml').read_text()
             self.assertIn('[browser.live.bidi]', written.splitlines())
             self.assertIn('firefox = "' + str(tools / 'firefox') + '"', written)
             self.assertNotIn('[browser.live.ego]', written.splitlines())
-            self.assertTrue((base / '.masc/browser-lane/host/masc-browser-host').is_file())
             self.assertNotIn('was not saved', printed)
             # The command's own sentence about the port with no authentication.
             self.assertIn('no authentication', printed)
-
-    def test_the_extension_route_writes_the_add_on_and_no_runtime_table(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            tools, base = self.workspace(root)
-            self.with_host_on_path(root, tools)
-            before = (base / '.masc/config/runtime.toml').read_text()
-            printed = self.run_routes(root, base, tools, ('extension',))
-            self.assertTrue((base / '.masc/browser-lane/extension/manifest.json').is_file())
-            self.assertEqual((base / '.masc/config/runtime.toml').read_text(), before)
-            self.assertIn('about:debugging', printed)
-            self.assertNotIn('was not saved', printed)
-
-    def test_two_routes_in_one_run_are_written_through_one_command(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory).resolve()
-            tools, base = self.workspace(root)
-            self.with_host_on_path(root, tools)
-            printed = self.run_routes(root, base, tools, ('bidi', 'extension'))
-            written = (base / '.masc/config/runtime.toml').read_text().splitlines()
-            self.assertIn('[browser.live.bidi]', written)
-            self.assertTrue((base / '.masc/browser-lane/extension/manifest.json').is_file())
-            self.assertNotIn('was not saved', printed)
 
     def run_web_search_check(self, root, base, tools, **extra_environment):
         with open(root / 'stderr.txt', 'w') as sink, \

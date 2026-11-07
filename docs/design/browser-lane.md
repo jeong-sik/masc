@@ -1,19 +1,8 @@
 # Browser Lane
 
-Browser Lane has one source, `live`: a browser the operator runs, reached
-through the Firefox/Zen WebExtension, an attached WebDriver BiDi connection or
-an ego lite task space.
+Browser Lane has one source, `live`: the Firefox the browser Add-on starts and
+reaches over WebDriver BiDi, or an ego lite task space.
 
-The live extension bridges typed tab reads, viewport capture and explicit-tab interaction commands through
-native messaging. Its host polls `/browser-lane/poll` and returns results to
-`/browser-lane/result`; these transport endpoints require the lane token.
-`/browser-lane/ping` answers `{ok:true}` to the same token without registering
-a client. After a failed request, a host that takes its port from the workspace
-connection moves to a newly named port only when its current server no longer
-answers the ping and the new address does. A result is sent again only when
-its request may not have reached the server (no connection, a broken exchange
-or no answer in time); a result the server answered with any status is logged
-as undelivered and the host returns to polling.
 A live BiDi connection navigates only a tab it opened with `open_tab` (`BrowserGoto` with
 `lane = "live"`, its `clientId` and that `tabId`). On the operator's own tabs
 the live lane can follow an observed same-tab HTTP(S) anchor through
@@ -79,7 +68,7 @@ checking rendered application state, and gathering evidence across tabs.
 | `tap_at`, `swipe` | like `click_at` and `drag` (`point`, or `from`/`to` with `via` and `durationMs`), sent by a touch pointer | live BiDi |
 | `set_viewport` | `expectedUrl`, and `width`/`height` in CSS pixels (100 to 4096) given together; with neither, live BiDi restores the browser's own size | live BiDi |
 | `select_option` | `expectedUrl` is optional; a `selector` for one single-choice `<select>` and the exact `value` of one enabled option. A multiple select, a missing, repeated or disabled option, or a non-select element is refused before any effect. Sets the option and emits `input` and `change`; it is not a trusted click on the list | live |
-| `activate_tab` | the selected live `clientId`/`tabId` | live WebExtension only |
+| `activate_tab` | the selected live `clientId`/`tabId` | live; BiDi also focuses the window |
 
 `BrowserRead mode=scene` supplies document-scoped node references and visible
 content; `mode=regions` supplies semantic regions for a scoped scene read.
@@ -104,12 +93,8 @@ page accepts a click or another action on it. Inspect the resulting page after
 an interaction. Keepers must not infer selectors from names alone.
 
 The browser must echo each requested filter and its nonnegative match count.
-An older running extension that ignores a filter is refused before its controls
-reach the caller. Updating installed extension files or reconnecting a native
-host does not itself reload an already-running background script; reload the
-add-on in the connected browser after setup. Live BiDi and ego use the same
-page observation script; their existing frame and interaction limits still
-apply.
+Live BiDi and ego use the same page observation script; their existing frame
+and interaction limits still apply.
 
 Use those observations rather than inventing selectors or node IDs. A node
 reference and a CSS selector are alternative targets and cannot be combined.
@@ -117,53 +102,49 @@ reference and a CSS selector are alternative targets and cannot be combined.
 Set `expectedUrl` to the observed URL to refuse an action after navigation.
 Point actions also check the captured document and viewport. Semantic hover and drag resolve current rectangles and hit-test before any pointer input; they reject hidden, offscreen or obstructed targets without scrolling. Scroll and read again before retrying. Scene references reject replacement or a different document. Both drag targets must be in the same top document and current viewport. The result is an
 action receipt; read or capture again to verify the site's resulting state.
-On a WebExtension connection a click is DOM activation, not a trusted
-hardware input event. Changing sources would select a different browser
-session and is not an automatic fallback for a logged-in tab.
+Changing sources would select a different browser session and is not an
+automatic fallback for a logged-in tab.
 
 ### What each live connection serves
 
-The three live transports reach the browser differently, so each serves a
+The two live transports reach the browser differently, so each serves a
 different part of the live lane's work. `Browser_lane.live_transport_serves`
 is the one table; the server admits live work by it and the Keeper tools
 build their rejection from it.
 
-| Live work | Reached by | WebExtension | BiDi | ego |
-|---|---|---|---|---|
-| `tab_listing` | `BrowserTabs` | yes | yes | yes, every tab in the task space |
-| `text_read` | `BrowserRead mode=text` | yes | yes | yes, only the pages the task space manages |
-| `scene_read` | `BrowserRead mode=scene`/`regions` | yes | yes | yes, only the pages the task space manages |
-| `viewport_capture` | `BrowserRead mode=screenshot` | yes | yes | yes, only the pages the task space manages |
-| `element_inventory` | `BrowserRead mode=elements` | yes | yes | yes, only the pages the task space manages |
-| `document_source` | the `browser_document` Lane Add-on source | yes | yes | yes, only the pages the task space manages |
-| `dom_interaction` | `click`, `fill`, `scroll`, `follow_link` | yes | yes | yes, on a native managed Page |
-| `point_click` | `click_at` | yes, the element's own `click()` | yes, a trusted pointer | yes, on a native managed Page, ego's mouse |
-| `trusted_button_click` | `click_at` with `button` `middle` or `secondary` | no | yes | yes, on a native managed Page |
-| `trusted_double_click` | `double_click`, `double_click_at` | no | yes | yes, on a native managed Page |
-| `trusted_keyboard` | `type_text`, `press_key` | no | yes | yes, on a native managed Page, ego's keyboard |
-| `touch_input` | `tap_at`, `swipe` | no | yes | no |
-| `viewport_resize` | `set_viewport` | no | yes | yes, a CDP override on a native managed Page that lasts while the ego SDK process that set it runs |
-| `tab_history` | `back`, `forward`, `reload`, subject to the transport's Page authority | no | yes | yes, native managed Pages in the task space; back and forward through the page's CDP history |
-| `tab_navigation` | `BrowserGoto`, subject to the transport's Page authority | no | yes | yes, native managed Pages in the task space |
-| `tab_closing` | `close_tab`, subject to the transport's Page authority | no | yes | yes, only agent-created Pages; unknown-origin Pages use release_tab |
-| `tab_creation` | `open_tab` | no | yes | yes |
-| `dialog_answer` | `accept_dialog`, `dismiss_dialog`, subject to the transport's Page authority; the dialog is read from the tab's `list_tabs` row (`dialog`: type, message, defaultValue) | no | yes | yes, native managed Pages in the task space; an input that opens one answers with it |
-| `frame_read` | `BrowserRead` text, elements and frames modes with `framePath` (observed outer-to-inner iframe selectors); a dialog is not read this way | no | yes | no; ego reads frames through `accessibility_snapshot` (its snapshot holds iframe content, and a subtree rooted at the iframe's ref reads one frame) and acts in them through `snapshot_target_input` |
-| `download_listing` | `BrowserRead mode=downloads` with `tabId` | no | no, its downloads are the person's own | yes, the downloads a native managed Page started, saved in the worker's folder and returned as artifacts |
-| `file_upload` | `BrowserAct upload` with the Keeper's files | no | no | yes, one CSS-matched file input on a native managed Page, or with `opener` the one control whose click opens the page's file chooser; the connection keeps the copies until its space ends |
-| `environment_emulation` | `BrowserAct set_emulation`, `clear_emulation` | no | no | yes, CDP overrides of a native managed Page's location, locale (Intl only) and time zone while the ego SDK process that set them runs; a location also grants that origin geolocation in the ego profile |
-| `point_scroll` | `scroll_at` | yes | yes, a trusted wheel | yes, on a native managed Page, ego's wheel |
-| `trusted_hover` | `hover`, `hover_at` | no | yes | yes, on a native managed Page |
-| `trusted_drag` | `drag_to`, `drag` | no | yes | yes, zero duration on native managed Pages |
-| `tab_activation` | `activate_tab` | yes | yes, and it also focuses the window | yes, native managed Page and expectedUrl; native active/window observation without rendered UI or OS-focus proof |
-| `browser_zoom` | `set_zoom` | yes | no | no |
+| Live work | Reached by | BiDi | ego |
+|---|---|---|---|
+| `tab_listing` | `BrowserTabs` | yes | yes, every tab in the task space |
+| `text_read` | `BrowserRead mode=text` | yes | yes, only the pages the task space manages |
+| `scene_read` | `BrowserRead mode=scene`/`regions` | yes | yes, only the pages the task space manages |
+| `viewport_capture` | `BrowserRead mode=screenshot` | yes | yes, only the pages the task space manages |
+| `element_inventory` | `BrowserRead mode=elements` | yes | yes, only the pages the task space manages |
+| `document_source` | the `browser_document` Lane Add-on source | yes | yes, only the pages the task space manages |
+| `dom_interaction` | `click`, `fill`, `scroll`, `follow_link` | yes | yes, on a native managed Page |
+| `point_click` | `click_at` | yes, a trusted pointer | yes, on a native managed Page, ego's mouse |
+| `trusted_button_click` | `click_at` with `button` `middle` or `secondary` | yes | yes, on a native managed Page |
+| `trusted_double_click` | `double_click`, `double_click_at` | yes | yes, on a native managed Page |
+| `trusted_keyboard` | `type_text`, `press_key` | yes | yes, on a native managed Page, ego's keyboard |
+| `touch_input` | `tap_at`, `swipe` | yes | no |
+| `viewport_resize` | `set_viewport` | yes | yes, a CDP override on a native managed Page that lasts while the ego SDK process that set it runs |
+| `tab_history` | `back`, `forward`, `reload`, subject to the transport's Page authority | yes | yes, native managed Pages in the task space; back and forward through the page's CDP history |
+| `tab_navigation` | `BrowserGoto`, subject to the transport's Page authority | yes | yes, native managed Pages in the task space |
+| `tab_closing` | `close_tab`, subject to the transport's Page authority | yes | yes, only agent-created Pages; unknown-origin Pages use release_tab |
+| `tab_creation` | `open_tab` | yes | yes |
+| `dialog_answer` | `accept_dialog`, `dismiss_dialog`, subject to the transport's Page authority; the dialog is read from the tab's `list_tabs` row (`dialog`: type, message, defaultValue) | yes | yes, native managed Pages in the task space; an input that opens one answers with it |
+| `frame_read` | `BrowserRead` text, elements and frames modes with `framePath` (observed outer-to-inner iframe selectors); a dialog is not read this way | yes | no; ego reads frames through `accessibility_snapshot` (its snapshot holds iframe content, and a subtree rooted at the iframe's ref reads one frame) and acts in them through `snapshot_target_input` |
+| `download_listing` | `BrowserRead mode=downloads` with `tabId` | no, its downloads are the person's own | yes, the downloads a native managed Page started, saved in the worker's folder and returned as artifacts |
+| `file_upload` | `BrowserAct upload` with the Keeper's files | no | yes, one CSS-matched file input on a native managed Page, or with `opener` the one control whose click opens the page's file chooser; the connection keeps the copies until its space ends |
+| `environment_emulation` | `BrowserAct set_emulation`, `clear_emulation` | no | yes, CDP overrides of a native managed Page's location, locale (Intl only) and time zone while the ego SDK process that set them runs; a location also grants that origin geolocation in the ego profile |
+| `point_scroll` | `scroll_at` | yes, a trusted wheel | yes, on a native managed Page, ego's wheel |
+| `trusted_hover` | `hover`, `hover_at` | yes | yes, on a native managed Page |
+| `trusted_drag` | `drag_to`, `drag` | yes | yes, zero duration on native managed Pages |
+| `tab_activation` | `activate_tab` | yes, and it also focuses the window | yes, native managed Page and expectedUrl; native active/window observation without rendered UI or OS-focus proof |
 
-The extension acts through DOM calls inside the page and has no pointer the
-browser treats as the operator's. The BiDi peer sends pointer and wheel input
-through the browser. Its `activate_tab` uses
+The BiDi peer sends pointer and wheel input through the browser. Its
+`activate_tab` uses
 [`browsingContext.activate`](https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi/Modules/browsingContext/activate),
-which also gives the tab's window system focus; the extension's activation
-does not take window focus.
+which also gives the tab's window system focus.
 
 The ego connection runs one fixed script per command in an ego lite task space
 with `ego-browser nodejs` (RFC-browser-live-ego). Its reads run the same page
@@ -213,16 +194,14 @@ rejection carries the refused `clientId`, its `transport` and the
 `capability`. With a serving browser connected, the Keeper lists that
 connection's tabs, observes the page again and retries there. With none, the
 operator attaches one ([Live BiDi browser host](browser-bidi-live-host.md)).
-The extension and the BiDi peer keep
-their own refusals for work outside their vocabulary; the server does not
-send it to them.
+The BiDi peer keeps its own refusals for work outside its vocabulary; the
+server does not send it to the peer.
 
 Fill supports text inputs and textareas through the native value setter plus
 input/change events; it never sends Enter or calls submit. The website's own
 event handlers may react. Missing, ambiguous, disabled and unsupported targets
 return errors. This interface accepts no arbitrary script. `framePath` (selector-based click,
-fill, select_option and scroll) is served by a live BiDi connection; the extension
-refuses it before any effect.
+fill, select_option and scroll) is served by a live BiDi connection.
 Frame reads, JS dialogs and file selection use
 the separate `BrowserRead`/`BrowserAct` contracts described in the
 [advanced browser instruction](../../skills/browser-lanes/references/advanced.md).
@@ -261,50 +240,22 @@ facts still need to be checked against the returned content.
 
 ## Live browser connection identity
 
-Every native host process creates a fresh UUID and asks its extension for
-`browser.info` before polling. Zen reports a Firefox engine name, so the host
-uses the explicit `zen.version` field for Zen identity and keeps the engine
-version separately. Browser identity is observed, not guessed from a manifest
-location or a configured label.
+The browser Add-on worker gives each connection it runs a client UUID and
+reads the browser's name and version from the browser itself. Browser identity
+is observed, not guessed from a configured label.
 
 `GET /api/v1/dashboard/browser-lane/clients` (read-state permission) returns
-`{ok:true,data:{clients:[{clientId,browser,version,engineVersion,transport}],bidiHost:{state,record,lock_held,detail,attach,message}}}`.
-`clients` are the live connections whose poll lease is current, whose delivered
-executor-owned work is still running, or that the browser Add-on worker holds, and `bidiHost` is what the
-BiDi host's record says ([Live BiDi browser host](browser-bidi-live-host.md)). Browser reads, screenshots, and
+`{ok:true,data:{clients:[{clientId,browser,version,engineVersion,transport}]}}`.
+`clients` are the live connections the browser Add-on workers hold. Browser reads, screenshots, and
 interactions accept `clientId`. With no ID, only one connected live client can
 be selected; multiple connections return `ambiguous_browser_clients`, and none
 returns `no_live_client`. An explicit missing/retired ID returns
 `selected_client_disconnected`; it never selects a replacement.
 
-`masc doctor` and the dashboard's setup check (`GET /api/v1/setup/status`)
-report the lane as one `browser_lane` line. Hosts register with the browser
-Add-on's worker, so a server reads which hosts poll it from the Add-on's last
-published observation, the same reading the Lanes screen's browser rows show.
-`masc doctor` runs outside a server and does not read it. The line is
-`satisfied` while a host polls, or while none does and the installed launcher
-follows the port the server bound. Before the launcher and the port it names a
-browser Add-on that cannot take a host: none declared or one switched off is
-`needs_setup` (the first is fixed by
-`masc browser-lane-setup --mode addon --base-path <path>`). For one declared
-on that the server does not run now, the check reads how the configuration
-maintenance pass last applied its declaration: a failed attach is `invalid`,
-and a worker being started or replaced, or a declaration the pass has not
-applied yet, is `needs_verification`, as is an Add-on the server cannot read.
-The Lane Add-ons screen shows why an attach failed. A workspace with no
-launcher installed has no such line.
-
-The setup check reads the Add-on as the operator, as the native host poll
-does. The dashboard's client list (`GET /api/v1/dashboard/browser-lane/clients`)
-is a read-state route: its clients and its BiDi host paragraph both read the
-Add-on as an unauthenticated caller, so they name only Shared installations.
-
-`transport` is `web_extension`, `webdriver_bidi` or `ego_task_space`. The TUI
-browser picker displays WebExtension, BiDi or ego beside the browser name. When both hosts attach
-to the same Firefox, select the BiDi client for trusted `hover_at` or `drag`,
-then read its tabs and capture its viewport. Tab IDs do not transfer between
-those connections. [What each live connection serves](#what-each-live-connection-serves)
-lists the rest.
+`transport` is `webdriver_bidi` or `ego_task_space`. The TUI browser picker
+displays BiDi or ego beside the browser name. Tab IDs do not transfer between
+connections. [What each live connection serves](#what-each-live-connection-serves)
+lists what each one does.
 
 Tab IDs belong to their selected client. The operator read resolves that client
 once before listing tabs and keeps it for the subsequent page request. Successful
@@ -329,28 +280,12 @@ Page-provided Space metadata is discarded with the other connection fields.
 Read composition rejects a changed Space ID even if its client UUID is reused.
 Missing, duplicate or cross-transport Space context is rejected at decoding.
 
-Native transport requires `x-lane: live`, the lane token, and the identity
-headers: `x-browser-client-id`, `x-browser-name`, `x-browser-version`, and
-`x-browser-engine-version`. Hosts also declare `x-browser-transport` as
-`web_extension` or `webdriver_bidi`; an omitted transport identifies the
-WebExtension poll contract. The `ego_task_space` connection runs inside the
-browser Add-on worker and polls there, not over this route. The worker holds
-the connections it runs itself, its own Firefox over BiDi and ego: the poll
-lease does not apply to them, and they end when the worker disconnects them or
-its owner is retired. Empty or unknown transports, missing required
-identity headers, and a transport change on an existing client ID are rejected. Each client
-has its own queue and pending response owners. An HTTP result from a different
-client cannot settle another client's command. Native EOF attempts a bounded
-`POST /browser-lane/disconnect`; after a native host crashes without cleanup the
-120-second poll lease detects idle connection loss. A delivered executor-owned
-request retains its original connection while its SDK operation is running;
-queued work alone does not. For a native host its result renews the idle lease. Explicit
-disconnect overrides running work, and cancellation removes the original
-waiter and its execution ownership. Closed/expired clients release queued
-payloads; only their retired IDs remain until server restart. Retired native
-hosts exit on registration rejection so the extension can reconnect with a
-fresh process identity. The lane token remains the transport authorization;
-client UUIDs provide routing identity, not a separate credential.
+The worker holds the connections it runs, its own Firefox over BiDi and ego.
+They end when the worker disconnects them or its owner is retired. Each client
+has its own queue and pending response owners, and a result from a different
+client cannot settle another client's command. Closed clients release queued
+payloads; only their retired IDs remain until server restart. Client UUIDs
+provide routing identity, not a credential.
 
 BrowserTabs resolution failures include the current typed `clients` inventory and
 a retry instruction in both structured error data and the model-facing message.
@@ -360,7 +295,7 @@ choose a returned `clientId` and retry explicitly.
 
 ## Terminal visual viewport
 
-After choosing and reading a Browser Lane tab, `Ctrl-O` opens Zen/Firefox's
+After choosing and reading a Browser Lane tab, `Ctrl-O` opens the browser's
 rendered PNG in the terminal. The browser owns DOM, CSS layout, fonts and page
 painting; MASC transports the resulting viewport via the terminal image protocol.
 This is not a second CSS engine or DOM-to-terminal layout conversion.
@@ -394,35 +329,5 @@ covers live Keeper navigation and shared textual TUI observations. It does not
 establish live drag support, and its captured PNGs are not evidence that a model
 inspected those images.
 
-
-### Followed document readiness
-
-The live extension records `follow_link` immediately and delays only the next
-semantic scene read until Firefox commits a new top document. Fragment navigation
-requires the source native document ID and the observed destination URL. The
-existing `executeScript` call still uses `runAt: document_end`, so images and other
-load-completion work do not delay visible content extraction.
-
-Firefox native document IDs identify lifecycle events; MASC scene document IDs
-identify observed DOM targets. They are separate identities. Navigation errors
-can name the source document during both a successful transition and a failed
-destination. Neither error text nor the first tab `complete` update determines
-readiness. After commit, a rejected injection remains a read failure and the
-completed follow receipt is retained. A transition with no commit or matching
-fragment event can wait until the existing native transport deadline; this is
-not a guarantee of immediate recovery from every navigation failure.
-
-A follow observation is removed on consumption, completion, tab closure,
-superseding follow, disconnect, or its original transport deadline. Read waiters
-also use their command's remaining deadline. Cancellation during preflight is
-checked before registering observations and immediately before injecting an
-action. No browser action is replayed by this mechanism.
-
-The native host now supplies `deadlineMs` from its existing extension timeout.
-Install the matching host and extension together. Extension 0.7.0 adds the
-`webNavigation` permission for these document events.
-
-References: [Firefox navigation events](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/webNavigation),
-[document replacement during injection](https://bugzilla.mozilla.org/show_bug.cgi?id=2047009).
 
 Actual live viewport evidence: [owned Firefox click and nested scroll](../evidence/browser-live-viewport-20260913/README.md). Live drag is not covered.

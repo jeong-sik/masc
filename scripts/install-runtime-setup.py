@@ -2652,14 +2652,13 @@ def quick_sandbox(binary, base_path, backend):
 # is installed or written until the reader confirms the list, and a quick
 # setup only prints it.
 #
-# The three browser keys are also the `--mode` names of `masc browser-lane-setup`,
+# The two browser keys are also the `--mode` names of `masc browser-lane-setup`,
 # so a confirmed row is the argument the command takes.
 BIDI_TOOL = 'bidi'
-EXTENSION_TOOL = 'extension'
 EGO_TOOL = 'ego'
-BROWSER_MODES = (BIDI_TOOL, EXTENSION_TOOL, EGO_TOOL)
-# The routes that start or attach a Firefox. The ego route runs ego lite.
-FIREFOX_MODES = (BIDI_TOOL, EXTENSION_TOOL)
+BROWSER_MODES = (BIDI_TOOL, EGO_TOOL)
+# The routes that start a Firefox. The ego route runs ego lite.
+FIREFOX_MODES = (BIDI_TOOL,)
 WEB_SEARCH_TOOL = 'web-search'
 ZAI_TOOL = 'zai'
 # The value `web_search.provider` takes for z.ai, and what `--provider` is given.
@@ -2769,7 +2768,7 @@ def browser_tool(binary, program):
 
 
 def browser_rows(binary, base):
-    """The Firefox routes, shown only when Firefox was found (RFC section 4.3):
+    """The Firefox route, shown only when Firefox was found (RFC section 4.3):
     recommending a browser is not this step's job, so with none there is
     nothing to attach to and nothing to ask."""
     readiness, _ = browser_tool(binary, FIREFOX_PROGRAM)
@@ -2779,24 +2778,18 @@ def browser_rows(binary, base):
 
 
 def firefox_route_rows(base):
-    """The two ways to connect a Firefox the reader already uses or MASC starts.
+    """The Firefox MASC starts for imp.
 
-    Both start unmarked. BiDi opens a debugging port with no authentication;
-    the extension has to be loaded by the reader again after every browser
-    start. Each is a thing to choose, not a thing to find ready.
+    It starts unmarked: BiDi opens a debugging port with no authentication.
+    It is a thing to choose, not a thing to find ready.
     """
     bidi_notice = ('\nThe BiDi route has MASC start a Firefox of its own with remote debugging on a local port. '
                    'That port has no authentication: any program on this computer can drive that browser and read '
                    'its cookies. Log in once, after the server starts, to the sites imp works on; its profile keeps '
                    'the login.')
-    extension_notice = ('\nThe extension route attaches the Firefox you use every day. Firefox removes the add-on '
-                        'when it restarts, so you load it again from about:debugging each time. A request that names '
-                        'no browser connection goes to this Firefox only while no BiDi or ego lite connection is up.')
     return [
         ToolRow(BIDI_TOOL, "Firefox of its own that MASC starts for imp (BiDi) · log in once · open debugging port",
                 browser_lane_command(base, (BIDI_TOOL,)), checked=False, notice=bidi_notice),
-        ToolRow(EXTENSION_TOOL, 'Your everyday Firefox through the MASC add-on · load the add-on after each restart',
-                browser_lane_command(base, (EXTENSION_TOOL,)), checked=False, notice=extension_notice),
     ]
 
 
@@ -2999,10 +2992,6 @@ def imp_tool_rows(binary, base):
 
 
 SETUP_SERVER_PROBE_TIMEOUT_SECONDS = 20
-# The routes that write a table of runtime.toml, which the server reads when it
-# starts. The extension route writes none: it installs the host, the manifest
-# and the add-on files, and the lane token is read for each request.
-RUNTIME_TABLE_MODES = (BIDI_TOOL, EGO_TOOL)
 
 
 def note_running_server(binary, base, port):
@@ -3089,7 +3078,8 @@ def prepare_browser_lane(binary, base, modes, port=None):
                   ', or one route at a time: ' + '; '.join(browser_lane_command(base, (mode,)) for mode in modes)
                   if len(modes) > 1 else '') + '.', file=sys.stderr)
         return
-    if port is not None and any(mode in RUNTIME_TABLE_MODES for mode in modes):
+    # Every route writes a table of runtime.toml, which the server reads when it starts.
+    if port is not None:
         note_running_server(binary, base, port)
 
 

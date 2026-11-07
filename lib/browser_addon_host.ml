@@ -209,7 +209,7 @@ let bind_goal_space t ~goal_id ~client_id =
   match List.find_opt (fun (client:Browser_lane.client_info) -> client.client_id=client_id) gathered.published.clients with
   | None -> Error (Browser_goal_space.Unavailable "clientId is not an observed browser connection")
   | Some {transport=Ego_task_space;space=None;_}
-  | Some {transport=(Web_extension|Webdriver_bidi);_} ->
+  | Some {transport=Webdriver_bidi;_} ->
       Error (Browser_goal_space.Invalid "Goal Space binding requires an observed Ego Space connection")
   | Some ({transport=Browser_lane.Ego_task_space;space=Some space;_} as client) ->
     let* ()=Browser_addon_observation.check_ego_identity gathered.ego_identities client

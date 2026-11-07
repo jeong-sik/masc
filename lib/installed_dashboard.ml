@@ -62,7 +62,7 @@ let parse_companions = function
       let* acc = result in
       match value with
       | `String digest when hex 64 digest
-          && List.mem name ["masc-tui"; "masc-browser-host";
+          && List.mem name ["masc-tui";
                "masc-deployment-preflight-helper"; "masc-check-runtime-deployment-preflight";
                "masc-exec-ssh-bootstrap"] ->
         Ok ((name, digest) :: acc)

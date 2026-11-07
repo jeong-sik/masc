@@ -73,7 +73,7 @@ class RuntimeInstallArtifact(unittest.TestCase):
         env["MASC_DUNE_LOCK_HELD"] = "1"
         installed = subprocess.run(["bash", str(extracted / artifact.SOURCES[0]),
                                    "--skip-build", "--build-dir", str(extracted / "bin"),
-                                   "--prefix", str(prefix), "--manifest-dir", str(self.root / "manifests"),
+                                   "--prefix", str(prefix),
                                    "--base-path", str(self.root / "new-workspace"), "--no-guest-shim"],
                                   env=env, capture_output=True, text=True)
         self.assertEqual(installed.returncode, 0, installed.stdout + installed.stderr)

@@ -4,7 +4,7 @@ let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Ena
 open Alcotest
 module Lane = Browser_lane
 let serial = ref 0
-let info ?(transport=Browser_lane.Web_extension) browser : Lane.client_info =
+let info ?(transport=Browser_lane.Webdriver_bidi) browser : Lane.client_info =
   incr serial;
   let raw = Printf.sprintf "00000000-0000-4000-8000-%012d" !serial in
   let client_id = match Lane.client_id_of_string raw with Ok id -> id | Error error -> fail error in
@@ -27,18 +27,18 @@ let answered promise expected = match Eio.Promise.await promise with
   | Ok (Ok (Lane.Answered value)) -> check bool "owned response" true (value = payload expected)
   | _ -> fail "request did not receive its owned response"
 let test_colliding_tabs_are_isolated () = with_clients (fun sw connect ->
-  let firefox = connect Lane.Firefox and zen = connect Lane.Zen in
+  let firefox = connect Lane.Firefox and other = connect Lane.Firefox in
   check bool "multiple clients require selection" true
     (Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route None)
-     = Error (Lane.Ambiguous_clients [firefox.client_id; zen.client_id]));
+     = Error (Lane.Ambiguous_clients [firefox.client_id; other.client_id]));
   let result = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None
     ~target:(target firefox.client_id)
     ~verb:(Lane.Page_interact {frame_path=[];tab_id=1; expected_url=None; action=Lane.Click "#button"}) ~timeout_sec:1.) in
-  check bool "Zen cannot consume Firefox's tab-1 click" true
-    (Lane.take_command ~client_info:zen ~window_sec:0.01 = Ok None);
+  check bool "another client cannot consume Firefox's tab-1 click" true
+    (Lane.take_command ~client_info:other ~window_sec:0.01 = Ok None);
   let command = take firefox in
   check bool "another client's result cannot settle Firefox" true
-    (Lane.deliver_result ~client_id:zen.client_id ~id:command.id ~payload:(payload "wrong")
+    (Lane.deliver_result ~client_id:other.client_id ~id:command.id ~payload:(payload "wrong")
      = Error "request_not_owned_by_client");
   ignore (Lane.deliver_result ~client_id:firefox.client_id ~id:command.id ~payload:(payload "firefox"));
   answered result "firefox")
@@ -67,7 +67,7 @@ let test_single_and_stale_selection () = with_clients (fun _ connect ->
     (Result.is_ok (Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route None)));
   let pinned = target old.client_id in
   ignore (Lane.disconnect_client ~client_id:old.client_id);
-  ignore (connect Lane.Zen);
+  ignore (connect Lane.Firefox);
   check bool "old identity never selects new single client" true
     (Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route (Some old.client_id))
      = Error (Lane.Selected_client_disconnected old.client_id));
@@ -82,16 +82,13 @@ let test_single_and_stale_selection () = with_clients (fun _ connect ->
    retires a polled client and still serves the held one, and neither a poll
    nor a delivered result turns the held client back into a timed one. *)
 let test_worker_held_client_outlives_the_poll_window () = with_clients (fun sw connect ->
-  let polled = connect ~transport:Lane.Webdriver_bidi Lane.Firefox
-  and held = connect ~transport:Lane.Webdriver_bidi Lane.Zen
-  and extension = connect Lane.Firefox in
+  let polled = connect Lane.Firefox
+  and held = connect Lane.Firefox in
   let live (info : Lane.client_info) = match target info.client_id with
     | Lane.Live_client client -> client in
   let polled_client = live polled and held_client = live held in
   let is_held () = match held_client.liveness with Lane.Worker_held -> true | Lane.Polled _ -> false in
   check bool "the worker holds its own connected client" true (Lane.hold_client ~client_id:held.client_id = Ok ());
-  check bool "no worker runs a browser extension, so it is not held" true
-    (Result.is_error (Lane.hold_client ~client_id:extension.client_id));
   polled_client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
   Hashtbl.replace polled_client.executor_work "running" Lane.Interaction_running;
   check bool "a client past its window is not held, even while its request runs" true
@@ -110,7 +107,7 @@ let test_worker_held_client_outlives_the_poll_window () = with_clients (fun sw c
   check bool "a delivered result leaves it held" true (is_held ());
   check bool "the retired polled client is no longer connected" true
     (List.map (fun (client : Lane.client_info) -> client.client_id) (Lane.connected_clients ())
-     |> List.sort compare = List.sort compare [held.client_id; extension.client_id]);
+     = [held.client_id]);
   check bool "a retired client cannot be held" true
     (Result.is_error (Lane.hold_client ~client_id:polled.client_id)))
 let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connect ->
@@ -190,7 +187,7 @@ let test_waiter_interruption_is_not_reply_timeout ?(held=false) () = with_client
       (Lane.take_command ~client_info:client ~window_sec:0.001 = Error Lane.Client_retired));
   ignore (Eio.Promise.await disconnected))
 let test_disconnect_releases_waiter () = with_clients (fun sw connect ->
-  let client = connect Lane.Zen in
+  let client = connect Lane.Firefox in
   let result = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None
     ~target:(target client.client_id) ~verb:Lane.Tabs_list ~timeout_sec:1.) in
   let command = take client in
@@ -204,13 +201,13 @@ let test_disconnect_releases_waiter () = with_clients (fun sw connect ->
 let test_sources_and_live_policy () = with_clients (fun _ connect ->
   let client = connect Lane.Firefox in
   check bool "missing transport UUID rejected" true (Result.is_error (Lane.client_id_of_string ""));
-  (* Navigation is BiDi work on a tab that connection opened; the extension is
-     refused as a selection, with nothing queued. *)
-  check bool "extension navigation is refused as a selection" true
-    (Lane.issue_for_actor ~actor:None ~target:(target client.client_id) ~verb:(Lane.Page_goto {url="https://example.org";tab_id=Some 2})
+  (* A download list is ego work; a BiDi connection is refused as a
+     selection, with nothing queued. *)
+  check bool "a BiDi download listing is refused as a selection" true
+    (Lane.issue_for_actor ~actor:None ~target:(target client.client_id) ~verb:(Lane.Page_downloads {tab_id=2})
        ~timeout_sec:0.1
      = Error (Lane.Transport_unsupported
-         {client_id=client.client_id; transport=client.transport; capability=Lane.Tab_navigation})))
+         {client_id=client.client_id; transport=client.transport; capability=Lane.Download_listing})))
 
 (* One live verb for each capability, so a capability added to the lane has
    to be given a verb here before this file's table checks pass. *)
@@ -241,7 +238,6 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Viewport_resize -> interact (Set_viewport (Fit {width=800;height=600}))
   | Touch_input -> interact (Tap_at {point;viewport})
   | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
-  | Browser_zoom -> interact (Set_zoom {factor=1.5})
   | Page_recovery -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Stop_loading})
   | Tab_history -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Back})
   | Tab_closing -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Close_tab})
@@ -263,12 +259,10 @@ let capability = testable
 let test_transport_table () =
   let unserved transport = List.filter (fun capability ->
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
-  check (list capability) "the extension has no pointer the browser trusts"
-    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Page_recovery; Trusted_hover; Trusted_drag; Trusted_double_click; Trusted_button_click; Touch_input; Trusted_keyboard; Viewport_resize; Tab_history; Tab_navigation; Tab_closing; Tab_creation; Dialog_read; Dialog_answer; Frame_read; Operator_handoff; Page_management; Download_listing; File_upload; Environment_emulation] (unserved Lane.Web_extension);
-  check (list capability) "the BiDi peer has no ego snapshot, browser zoom, hand-off, download list, upload or environment emulation"
-    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Page_recovery; Browser_zoom; Dialog_read; Operator_handoff; Page_management; Download_listing; File_upload; Environment_emulation] (unserved Lane.Webdriver_bidi);
-  check (list capability) "the ego connection has no touch, zoom or frame reads"
-    Lane.[Touch_input; Browser_zoom; Frame_read]
+  check (list capability) "the BiDi peer has no ego snapshot, hand-off, download list, upload or environment emulation"
+    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Page_recovery; Dialog_read; Operator_handoff; Page_management; Download_listing; File_upload; Environment_emulation] (unserved Lane.Webdriver_bidi);
+  check (list capability) "the ego connection has no touch or frame reads"
+    Lane.[Touch_input; Frame_read]
     (unserved Lane.Ego_task_space);
   check bool "native Ego activation uses SDK execution ownership" true
     (Lane.ego_reply_policy (Lane.Page_interact {tab_id=1;frame_path=[];
@@ -283,10 +277,7 @@ let test_transport_table () =
 (* Every transport and capability: served work reaches that connection's
    queue, and unserved work is answered before anything is queued. *)
 let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
-  let extension = connect Lane.Firefox in
-  let bidi = { (info Lane.Firefox) with transport=Lane.Webdriver_bidi } in
-  ignore (Lane.take_command ~client_info:bidi ~window_sec:0.001);
-  Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:bidi.client_id));
+  let bidi = connect Lane.Firefox in
   let ego = { (info Lane.Ego_lite) with transport=Lane.Ego_task_space;space=Some {id=51;name="fixture Space"} } in
   ignore (Lane.take_command ~client_info:ego ~window_sec:0.001);
   Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:ego.client_id));
@@ -320,9 +311,9 @@ let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
         check int (name ^ " left no waiter") 0 (Hashtbl.length client.waiters);
         check int (name ^ " queued no command") 0 (Eio.Stream.length client.commands)
       end) Lane.all_of_live_capability)
-    [extension; bidi; ego];
-  (* The optional document read asks the same table. The extension and BiDi
-     serve it, so on BiDi it reaches that connection's queue. *)
+    [bidi; ego];
+  (* The optional document read asks the same table. BiDi serves it, so it
+     reaches that connection's queue. *)
   let bidi_target = target bidi.client_id in
   let document = Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_document_if_idle ~target:bidi_target ~tab_id:2 ~timeout_sec:1.) in
@@ -336,16 +327,11 @@ let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
    browser's client ID and transport. Where an answer is rebuilt around those fields, a value the page
    or browser supplied under the same names is dropped. *)
 let test_answers_state_their_connection () = with_clients (fun sw connect ->
-  let extension = connect Lane.Firefox in
-  let bidi = { (info Lane.Firefox) with transport=Lane.Webdriver_bidi } in
-  ignore (Lane.take_command ~client_info:bidi ~window_sec:0.001);
-  Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:bidi.client_id));
+  let bidi = connect Lane.Firefox in
   let stated (client : Lane.client_info) = Lane.target_connection_fields (target client.client_id) in
   let expected (client : Lane.client_info) transport =
     ["clientId", `String (Lane.client_id_to_string client.client_id); "transport", `String transport] in
-  check bool "an extension answer names its client and its transport" true
-    (stated extension = expected extension "web_extension");
-  check bool "a BiDi answer names its own" true (stated bidi = expected bidi "webdriver_bidi");
+  check bool "a BiDi answer names its client and its transport" true (stated bidi = expected bidi "webdriver_bidi");
   let supplied = ["transport", `String "carrier_pigeon"; "tabId", `Int 2; "clientId", `String "forged";
     "browserSpace",`Assoc ["id",`Int 999;"name",`String "forged"]] in
   check bool "a value supplied under those names is replaced, not kept beside the route's" true
@@ -355,7 +341,7 @@ let test_answers_state_their_connection () = with_clients (fun sw connect ->
   List.iter (fun (name, written) ->
     check bool (name ^ " reads back as written") true
       (Lane.connection_fields_of_json (written @ ["tabId", `Int 2]) = Ok written))
-    ["an extension connection", stated extension; "a BiDi connection", stated bidi;
+    ["a BiDi connection", stated bidi;
      "an answer that states no connection", []];
   let client_id = `String (Lane.client_id_to_string bidi.client_id) in
   List.iter (fun (name, fields, expected) ->
@@ -384,16 +370,16 @@ let test_answers_state_their_connection () = with_clients (fun sw connect ->
 
 let test_unsupported_message_names_the_serving_transport () =
   let client_id = (info Lane.Firefox).client_id in
-  check string "hover on the extension points at BiDi and ego"
-    "live_transport_unsupported: this browser is connected over web_extension, which does not serve \
-     trusted_hover; a webdriver_bidi or ego_task_space connection does"
+  check string "touch on ego points at BiDi"
+    "live_transport_unsupported: this browser is connected over ego_task_space, which does not serve \
+     touch_input; a webdriver_bidi connection does"
     (Lane.selection_error_message (Lane.Transport_unsupported
-       {client_id; transport=Web_extension; capability=Trusted_hover}));
-  check string "browser zoom on BiDi points at the extension"
+       {client_id; transport=Ego_task_space; capability=Touch_input}));
+  check string "a download list on BiDi points at ego"
     "live_transport_unsupported: this browser is connected over webdriver_bidi, which does not serve \
-     browser_zoom; a web_extension connection does"
+     download_listing; a ego_task_space connection does"
     (Lane.selection_error_message (Lane.Transport_unsupported
-       {client_id; transport=Webdriver_bidi; capability=Browser_zoom}))
+       {client_id; transport=Webdriver_bidi; capability=Download_listing}))
 
 let test_optional_document_preserves_existing_work () = with_clients (fun sw connect ->
   let info = connect Lane.Firefox in
@@ -606,8 +592,7 @@ let test_native_control_wait_contract () =
   check string "wait activity names the Space operation" "wait_for_control" (Lane.activity_name verb);
   check (option int) "wait has Space scope" None (Lane.activity_scope verb);
   check bool "other live transports refuse Space waits" true
-    (not (Lane.live_transport_serves Lane.Web_extension Lane.Operator_handoff)
-      && not (Lane.live_transport_serves Lane.Webdriver_bidi Lane.Operator_handoff));
+    (not (Lane.live_transport_serves Lane.Webdriver_bidi Lane.Operator_handoff));
   List.iter (fun fields -> check bool "invalid wait input fails before dispatch" true
     (Result.is_error (parse fields)))
     [ ["tabId",`Int 1];["controlOptions",`Null];
@@ -629,8 +614,7 @@ let test_native_page_management_contract () =
     check bool "only Ego serves Page management" true
       (Lane.live_capability verb=Lane.Page_management
         && Lane.live_transport_serves Ego_task_space Page_management
-        && not (Lane.live_transport_serves Webdriver_bidi Page_management)
-        && not (Lane.live_transport_serves Web_extension Page_management)))
+        && not (Lane.live_transport_serves Webdriver_bidi Page_management)))
     [Lane.Action.Control (Adopt_tab {tab_id=2;label=None});Control (Adopt_tab {tab_id=2;label=Some "login"});Control (Release_tab 2)];
   List.iter (fun (action,fields) -> check bool "invalid lifecycle input is refused" true
     (Result.is_error (parse action fields)))

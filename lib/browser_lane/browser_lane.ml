@@ -20,7 +20,6 @@ module Document = Browser_document
 module Capture = Browser_capture_options
 module Lane_name = Browser_lane_name
 module Backend = Browser_backend
-module Lane_token = Browser_lane_token
 
 (* Shared default for ordinary browser transport requests, in core and workers. *)
 let default_timeout_sec = 20.
@@ -67,7 +66,6 @@ type option_selection = Single_option of string | Multiple_options of string lis
 
 type interaction = Activate_tab | Click of string | Fill of { selector : string; text : string }
   | Select_option of { selector : string; selection : option_selection }
-  | Set_zoom of { factor : float }
   | Set_viewport of viewport_size
   | Double_click of pointer_target
   | Double_click_at of { point : Pointer.point; viewport : Pointer.viewport }
@@ -101,7 +99,7 @@ let ego_input_contract = function
   | Double_click _ | Double_click_target _ -> Native_input.contract Native_input.Double_click
   | Click_at _ | Double_click_at _ -> Native_input.contract Native_input.Mouse_click
   | Press_key _ -> Native_input.contract Native_input.Keyboard_press
-  | Activate_tab | Fill _ | Select_option _ | Set_zoom _ | Set_viewport _
+  | Activate_tab | Fill _ | Select_option _ | Set_viewport _
   | Scroll _ | Hover _ | Hover_at _ | Tap_at _ | Swipe _ | Scroll_at _
   | Follow_link _ | Fill_node _ | Fill_target _ | Hover_target _ -> Native_input.No_hold
 
@@ -181,7 +179,7 @@ let ego_reply_policy = function
            | [] | _::_ -> Reply_window)
         | Scene_node _,(Selector _|Scene_node _) | Selector _,Scene_node _ -> Reply_window)
      | Hover (Scene_node _) | Double_click (Scene_node _)
-     | Set_zoom _ | Set_viewport _ | Double_click_at _ | Type_text _
+     | Set_viewport _ | Double_click_at _ | Type_text _
      | Press_key _ | Scroll _ | Hover_at _ | Tap_at _ | Swipe _ | Click_at _
      | Scroll_at _ | Drag _ | Follow_link _ | Click_node _ | Fill_node _ -> Reply_window)
   | (Tabs_list | Page_read _ | Page_document _ | Page_downloads _
@@ -220,7 +218,6 @@ let verb_to_string = function
    thing that crosses a boundary. *)
 let interaction_verb = function
   | Activate_tab -> "activate_tab"
-  | Set_zoom _ -> "set_zoom"
   | Set_viewport _ -> "set_viewport"
   | Select_option _ -> "select_option"
   | Double_click _ | Double_click_target _ -> "double_click"
@@ -302,7 +299,6 @@ let interaction_args ~tab_id ~frame_path ~expected_url action =
   let verb = "action", `String (interaction_verb action) in
   let fields = match action with
     | Activate_tab -> [verb]
-    | Set_zoom {factor} -> [verb;"factor",`Float factor]
     | Set_viewport Browser_default -> [verb]
     | Set_viewport (Fit {width;height}) -> [verb;"width",`Int width;"height",`Int height]
     | Double_click target -> verb :: target_fields target
@@ -460,7 +456,6 @@ type live_capability =
   | Trusted_button_click
   | Touch_input
   | Trusted_keyboard
-  | Browser_zoom
   | Viewport_resize
   | Tab_activation
   | Tab_history
@@ -499,7 +494,6 @@ let live_capability_to_wire = function
   | Trusted_button_click -> "trusted_button_click"
   | Touch_input -> "touch_input"
   | Trusted_keyboard -> "trusted_keyboard"
-  | Browser_zoom -> "browser_zoom"
   | Viewport_resize -> "viewport_resize"
   | Tab_activation -> "tab_activation"
   | Tab_history -> "tab_history"
@@ -522,7 +516,6 @@ let live_capability_of_wire raw =
 
 let live_capability_of_interaction = function
   | Activate_tab -> Tab_activation
-  | Set_zoom _ -> Browser_zoom
   | Set_viewport _ -> Viewport_resize
   | Double_click _ | Double_click_at _ -> Trusted_double_click
   | Type_text _ | Press_key _ -> Trusted_keyboard
@@ -605,26 +598,24 @@ let activity_refusal lane verb =
   Option.map (fun rejection -> Rejected_before_effect (activity_rejection_message rejection))
     (activity_rejection lane verb)
 
-type browser = Firefox | Zen | Ego_lite
-let browser_name = function Firefox -> "firefox" | Zen -> "zen" | Ego_lite -> "ego_lite"
+type browser = Firefox | Ego_lite
+let browser_name = function Firefox -> "firefox" | Ego_lite -> "ego_lite"
 let browser_of_string = function
-  | "firefox" -> Ok Firefox | "zen" -> Ok Zen | "ego_lite" -> Ok Ego_lite | _ -> Error "unsupported_browser"
+  | "firefox" -> Ok Firefox | "ego_lite" -> Ok Ego_lite | _ -> Error "unsupported_browser"
 type client_id = Uuidm.t
 let client_id_to_string = Uuidm.to_string
 let client_id_of_string value =
   match Uuidm.of_string value with
   | Some id when String.equal (Uuidm.to_string id) value -> Ok id
   | _ -> Error "invalid_client_id"
-type live_transport = Web_extension | Webdriver_bidi | Ego_task_space [@@deriving enumerate]
+type live_transport = Webdriver_bidi | Ego_task_space [@@deriving enumerate]
 let live_reply_policy transport verb = match transport with
   | Ego_task_space -> ego_reply_policy verb
-  | Web_extension | Webdriver_bidi -> reply_policy verb
+  | Webdriver_bidi -> reply_policy verb
 let live_transport_to_string = function
-  | Web_extension -> "web_extension"
   | Webdriver_bidi -> "webdriver_bidi"
   | Ego_task_space -> "ego_task_space"
 let live_transport_of_string = function
-  | "web_extension" -> Ok Web_extension
   | "webdriver_bidi" -> Ok Webdriver_bidi
   | "ego_task_space" -> Ok Ego_task_space
   | _ -> Error "unsupported_browser_transport"
@@ -632,14 +623,10 @@ let live_transport_of_string = function
 (* Which live work each transport serves. Every pair is spelled out, so a new
    capability or transport does not compile until this table answers for it.
 
-   The extension acts through DOM calls inside the page, so it has no pointer
-   the browser treats as the operator's: it cannot hover or drag, and its
-   point click is the element's own [click()]. The BiDi peer sends pointer
-   and wheel input through the browser. Both switch the active tab; BiDi's
-   activation also gives the browser window system focus. The BiDi peer's
-   history, close and navigation act only on tabs it opened; the extension
-   opens none. test_browser_bidi_peer holds this table to what that peer
-   does.
+   The BiDi peer sends pointer and wheel input through the browser. Its
+   tab activation also gives the browser window system focus. Its history,
+   close and navigation act only on tabs it opened. test_browser_bidi_peer
+   holds this table to what that peer does.
 
    The ego connection runs fixed scripts in one ego lite task space
    (RFC-browser-live-ego). It reads that space's pages, their document source
@@ -652,20 +639,13 @@ let live_transport_of_string = function
    test_browser_ego_peer holds its column to what Browser_ego_peer does. *)
 let live_transport_serves transport capability =
   match transport, capability with
-  | ( (Web_extension | Webdriver_bidi)
+  | ( Webdriver_bidi
     , ( Tab_listing | Text_read | Document_source | Element_inventory | Viewport_capture
-      | Scene_read | Dom_interaction | Point_click | Point_scroll ) ) -> true
-  | (Web_extension | Webdriver_bidi), Tab_activation -> true
-  | Web_extension, Browser_zoom -> true
-  | Web_extension, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
-                    | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
-                    | Tab_closing | Dialog_read | Dialog_answer | Frame_read | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Page_recovery
-                    | Operator_handoff | Page_management | Download_listing | File_upload
-                    | Environment_emulation) -> false
+      | Scene_read | Dom_interaction | Point_click | Point_scroll | Tab_activation ) ) -> true
   | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
                     | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
                     | Tab_closing | Dialog_answer | Frame_read) -> true
-  | Webdriver_bidi, (Dialog_read | Browser_zoom | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing
+  | Webdriver_bidi, (Dialog_read | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing
                     | File_upload | Environment_emulation) -> false
   | Ego_task_space, (Tab_listing | Text_read | Document_source | Element_inventory | Viewport_capture | Scene_read
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
@@ -673,7 +653,7 @@ let live_transport_serves transport capability =
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_read | Dialog_answer
                     | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing | File_upload | Tab_activation
                     | Viewport_resize | Environment_emulation) -> true
-  | Ego_task_space, (Touch_input | Browser_zoom | Frame_read) -> false
+  | Ego_task_space, (Touch_input | Frame_read) -> false
 ;;
 
 let live_transports_serving capability =
@@ -682,7 +662,6 @@ let live_transports_serving capability =
 
 (* Where the steps for attaching a connection of this transport are written. *)
 let live_transport_setup_doc = function
-  | Web_extension -> "connectors/browser/host/README.md"
   | Webdriver_bidi -> "docs/design/browser-bidi-live-host.md"
   | Ego_task_space -> "docs/rfc/RFC-browser-live-ego.md"
 ;;
@@ -698,8 +677,8 @@ let ego_space_of_json = function
 let client_space_to_json = function None -> `Null | Some space -> ego_space_to_json space
 let client_space_of_json ~transport value = match transport,value with
   | Ego_task_space,value -> Result.map Option.some (ego_space_of_json value)
-  | (Web_extension|Webdriver_bidi),`Null -> Ok None
-  | (Web_extension|Webdriver_bidi),_ -> Error "Space context requires an Ego connection"
+  | Webdriver_bidi,`Null -> Ok None
+  | Webdriver_bidi,_ -> Error "Space context requires an Ego connection"
 let same_space_id left right =
   Option.map (fun (space : ego_space) -> space.id) left
   = Option.map (fun (space : ego_space) -> space.id) right
@@ -777,8 +756,8 @@ let activity_result = function
      | Some (`Bool false),Some (`String "partial") -> Activity_partial
      | (None|Some _),(None|Some _) -> Activity_unknown)
   | _ -> Activity_unknown
-(* How the lane learns a client is gone. A native host that stops polling
-   says nothing, so it is gone once its window without a poll passes. A
+(* How the lane learns a client is gone. A client that stops polling says
+   nothing, so it is gone once its window without a poll passes. A
    connection this worker runs itself (owned Firefox, ego) is disconnected by
    the worker when it ends; elapsed time, which on macOS includes system
    sleep, says nothing about it. *)
@@ -902,8 +881,8 @@ let connection_fields_of_json fields =
         let parsed=match transport,space with
           | Ego_task_space,Some value -> Result.map Option.some (ego_space_of_json value)
           | Ego_task_space,None -> Error "ego_connection_without_space"
-          | (Web_extension|Webdriver_bidi),None -> Ok None
-          | (Web_extension|Webdriver_bidi),Some _ -> Error "space_requires_ego_connection" in
+          | Webdriver_bidi,None -> Ok None
+          | Webdriver_bidi,Some _ -> Error "space_requires_ego_connection" in
         Result.map (fun space -> live_connection_fields ~client_id ~transport ~space) parsed))
   | Some (`String client_id), None,None ->
     Result.bind (client_id_of_string client_id) (fun _ -> Error "client_without_transport")
@@ -1079,7 +1058,7 @@ let take_command ~client_info ~window_sec =
   | Error _ as error -> error
   | Ok client -> take_registered_command ~client ~window_sec
 (* This is a local observation of the original waiting issuer, not part of
-   the external host wire. A missing waiter cannot authorize a new effect. *)
+   the wire. A missing waiter cannot authorize a new effect. *)
 let live_request_window ~client_id ~id =
   match Eio.Mutex.use_ro clients_mutex (fun () ->
       Hashtbl.find_opt clients (client_id_to_string client_id)) with
@@ -1120,8 +1099,7 @@ let disconnect_client ~client_id =
 (* The worker that runs this connection disconnects it itself when it ends,
    so the lane stops timing it. Only a client still inside its window is
    held: one retired, unknown or past its window is not brought back, even
-   while a request it took is still running. A browser extension is a native
-   host that no worker runs, so it stays timed. *)
+   while a request it took is still running. *)
 let hold_client ~client_id =
   Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
     match Hashtbl.find_opt clients (client_id_to_string client_id) with
@@ -1129,7 +1107,6 @@ let hold_client ~client_id =
     | Some client ->
       Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
         match client.info.transport, client.liveness with
-        | Web_extension, (Polled _ | Worker_held) -> Error "client_not_worker_run"
         | (Webdriver_bidi | Ego_task_space), _ when client.closed -> Error "client_not_connected"
         | (Webdriver_bidi | Ego_task_space), Worker_held -> Ok ()
         | (Webdriver_bidi | Ego_task_space), Polled until ->
@@ -1200,15 +1177,6 @@ let issue_live_with ~activity_check ?actor ?(only_if_idle = false) client ~verb 
            ignore (Eio.Promise.try_resolve interrupt ()); raise exn)))
 let issue_live ?only_if_idle client ~verb ~timeout_sec =
   issue_live_with ~activity_check:(activity_refusal Lane_name.Live) ?only_if_idle client ~verb ~timeout_sec
-(* The port this process serves the browser-lane routes on: the port its HTTP
-   listener actually bound, installed once it is bound and withdrawn when that
-   listener's switch ends. Before that, and in a process that serves no
-   routes, the port is unknown rather than any number. *)
-type serving_port = Serving_port of int | Serving_port_unknown
-let serving_port_cell : serving_port Atomic.t = Atomic.make Serving_port_unknown
-let install_serving_port port = Atomic.set serving_port_cell (Serving_port port)
-let withdraw_serving_port () = Atomic.set serving_port_cell Serving_port_unknown
-let serving_port () = Atomic.get serving_port_cell
 type backend_observation = Live_clients of int
 type inventory_observation = { activity : activity; backend : backend_observation }
 (* Reading inventory must not prune clients or resolve their waiting requests. *)

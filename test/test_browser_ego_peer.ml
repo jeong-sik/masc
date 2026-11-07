@@ -651,7 +651,7 @@ let test_input_acts_through_the_shared_page_scripts () =
     check bool (Lane.interaction_verb action ^ " is not served") true
       (String_util.contains_substring (before_effect "an input ego does not serve" (interact action)) "not served by an ego connection"))
     [Lane.Tap_at {point;viewport}; Lane.Swipe {from=point;to_=elsewhere;viewport;via=[];duration_ms=0};
-     Lane.Set_zoom {factor=1.5}; Lane.Set_viewport Lane.Browser_default];
+     Lane.Set_viewport Lane.Browser_default];
   check int "none of those ran a script" before (runs ())
 
 (* Selector requests must reach ego unchanged, without a MASC target/DOM run.
@@ -682,7 +682,7 @@ let test_selector_input_uses_ego_sdk () =
       check string "explicit result identifies the locator" selector (text (field "selector" receipt));
       (match action with
        | Lane.Select_option _ -> check bool "selection is returned" true (field "selectedValues" receipt = `List [str "b"])
-       | Lane.Activate_tab | Lane.Click _ | Lane.Fill _ | Lane.Set_zoom _ | Lane.Set_viewport _
+       | Lane.Activate_tab | Lane.Click _ | Lane.Fill _ | Lane.Set_viewport _
        | Lane.Double_click _ | Lane.Double_click_at _ | Lane.Type_text _ | Lane.Press_key _
        | Lane.Scroll _ | Lane.Hover _ | Lane.Drag_to _ | Lane.Hover_at _ | Lane.Tap_at _
        | Lane.Swipe _ | Lane.Click_at _ | Lane.Scroll_at _ | Lane.Drag _ | Lane.Follow_link _
@@ -1497,7 +1497,6 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Trusted_keyboard ->
       let key=match Keyboard.of_wire ~key:"Enter" ~modifiers:[] with Ok key->key|Error message->fail message in
       interact (Press_key {document_id=viewport.document_id;key})
-    | Browser_zoom -> interact (Set_zoom {factor=1.5})
     | Page_recovery -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Stop_loading})
     | Tab_history -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Back})
     | Tab_closing -> Page_act (Action.On_tab {tab_id=3;frame_path=[];interaction=Action.Close_tab})

@@ -16,7 +16,7 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
 
 ## 레인 오류
 
-- live의 연결 부재는 브라우저 프로세스, 확장, native host, 서버 연결 중 어디서나
+- live의 연결 부재는 브라우저 프로세스, 브라우저 Add-on, 서버 연결 중 어디서나
   발생할 수 있다. “브라우저가 꺼졌다”로 단정하지 않는다. 결과의 `error`가 경우를
   나눈다.
   - `ambiguous_browser_clients`: `clients`에서 하나를 골라 그 clientId로 다시 부른다.
@@ -26,10 +26,9 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
     운영자뿐이라 같은 호출을 되풀이해도 답은 같다. 운영자에게 알린다.
   - `live_transport_unsupported`: 고른 연결(`clientId`, `transport`)이 그 일
     (`capability`)을 못 한다. live 연결은 방식(`transport`)에 따라 할 수 있는 일이
-    다르다. `drag`는 `webdriver_bidi`·`ego_task_space` 연결이 하고, `set_zoom`은
-    `web_extension` 연결만 한다. `activate_tab`은 `web_extension`·`webdriver_bidi`
-    둘 다 하지만 `webdriver_bidi`는 브라우저 창에 포커스도 준다. 읽기
-    (`mode=text`·`elements`·`scene`·`screenshot`)는 셋 다 한다. `mode=snapshot`
+    다르다. `drag`는 `webdriver_bidi`·`ego_task_space` 연결이 한다.
+    `webdriver_bidi`의 `activate_tab`은 브라우저 창에 포커스도 준다. 읽기
+    (`mode=text`·`elements`·`scene`·`screenshot`)는 둘 다 한다. `mode=snapshot`
     (ego 자신의 접근성 트리와 ref)과 click·fill 의 `target`(그 ref, 또는 role·이름이나
     보이는 글로 고른 대상)은 `ego_task_space` 연결만 한다. `ego_task_space`
     연결은 읽기, `open_tab`, `close_tab`, `back`·`forward`·`reload`, `accept_dialog`·`dismiss_dialog`,
@@ -43,7 +42,7 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
     연결의 다음 입력이 거절된다. 입력을 보내기 전에 거절된 드래그는 입력을 그대로 쓸 수 있다.
     프레임은 `framePath`
     없이 다룬다: snapshot 이 iframe 내용을 ref 와 함께 담고, 그 ref 나 role·글 `target` 으로
-    프레임 안을 누르고 채운다. 터치·`set_zoom`·`set_viewport`·`activate_tab` 은 하지
+    프레임 안을 누르고 채운다. 터치·`set_viewport`·`activate_tab` 은 하지
     않는다. `press_key` 는
     이름 있는 키와 ASCII 문자만 누르고, 다른 글자는 `type_text` 로 친다. 이동·닫기·
     입력은 그 공간에서 에이전트가 연 페이지만 한다(첫 페이지 `p1` 포함). 그 공간에서
@@ -54,9 +53,8 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
     읽은 뒤 거기서 다시 한다. 탭 ID와 관측은 연결마다 따로다. 그런 연결이 없으면
     운영자에게 알린다.
 - live 응답은 성공했을 때도 `clientId` 옆에 `transport`를 싣는다. hover나 drag가 필요한
-  일이면 시작할 때 이 값을 본다. `web_extension`이면 그 연결로는 못 하므로, 연결 목록에
-  `webdriver_bidi` 연결이 있는지 먼저 확인한다.
-- 특정 탭의 확장 권한이 없으면 그 권한 문제를 알린다. 요청된 탭 대신 무관한
+  일이면 시작할 때 이 값을 본다.
+- 특정 탭을 읽을 수 없으면 그 문제를 알린다. 요청된 탭 대신 무관한
   다른 탭을 읽어 같은 작업을 완료했다고 하지 않는다.
 
 탭 목록이 `complete=false`이면 일부 탭의 메타데이터를 읽지 못한 것이다.
@@ -132,7 +130,7 @@ task가 끝나 사용자 소유로 남으면 live lane은 그 Space를 열지 �
 이름을 쓰면 worker가 하나를 고르지 않고 거부하므로, 운영자에게 어느
 Space인지 확인한 뒤 그 Space만 정리한다.
 
-연결이 끊긴 다른 원인(브라우저 종료, 확장 미설치, native host 문제)과
+연결이 끊긴 다른 원인(브라우저 종료, 브라우저 Add-on 문제)과
 이 케이스를 구분하는 근거는 `inventoryIssues`다. 해당 이슈가 없는데
 client가 없으면 `no_live_client` 절차를 따른다.
 

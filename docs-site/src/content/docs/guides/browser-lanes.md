@@ -1,24 +1,18 @@
 ---
 title: Browser Lane Guide
-description: Connect Firefox, Zen or ego lite as an Addon, select validation hooks, and use the Browser Lane TUI.
+description: Connect the owned Firefox or ego lite as a browser Addon, select validation hooks, and use the Browser Lane TUI.
 ---
 
 Each browser source is its own Lane Addon package with its own worker:
-`browser-firefox`, `browser-ego` and `browser-external`.
-A worker runs only its source, so a failure of one source
-ends only that worker. Select the input/output validation hooks per
-installation. Browser names and connection transports describe
+`browser-firefox` and `browser-ego`. A worker runs only its source, so a failure
+of one source ends only that worker. Select the input/output validation hooks
+per installation. Browser names and connection transports describe
 capabilities; they are not separate installation systems.
 
-All three sources serve live connections:
-
-- `browser-external` serves an existing Firefox or Zen through its
-  WebExtension, or a Firefox you start with its own BiDi host.
-- `browser-firefox` starts a dedicated Firefox with its own BiDi peer.
-- `browser-ego` serves an ego lite task space.
-
-Existing extension tabs keep their logins; the dedicated Firefox uses its own
-profile. Native hover and drag require a compatible connection such as BiDi.
+- **live** has two sources. `browser-firefox` starts a dedicated Firefox with
+  its own BiDi peer and profile. `browser-ego` serves an ego lite task space
+  with the cookies of your ego lite profile. Native hover and drag require a
+  connection that serves them.
 
 For an unbound request, automatic selection considers the available browsers
 and required actions. Keep the returned browser identity for tab/document work;
@@ -30,10 +24,9 @@ supports every action. Safari is not a backend in this package.
 
 `scripts/install-local-build.sh` installs `masc-browser-addon-worker`,
 `masc-native-addon-launcher` and `masc-browser-process-owner` beside masc, then
-runs `masc browser-lane-setup --mode addon` for the workspace. Every other
-`browser-lane-setup` mode does the same step for the sources the workspace
-runs: firefox and ego when `runtime.toml` has their table or the run writes
-it, and external when a native host is installed. For each, it
+runs `masc browser-lane-setup --mode addon` for the workspace. The `bidi` and
+`ego` modes do the same step for the sources the workspace runs: firefox and
+ego when `runtime.toml` has their table or the run writes it. For each, it
 writes the package masc carries to
 `<base-path>/.masc/packages/browser-<source>/` and, when the workspace has no
 declaration of that source, saves `lane-addons/browser-<source>.toml` in the
@@ -69,10 +62,11 @@ and browser `clientId` are separate identities.
 | `tool_hooks = ["validate_input", "validate_output"]` | Enable both tool checks |
 | `tool_hooks = []` | Disable the optional tool checks |
 
-Omitting `tool_hooks` uses that package default. These are named middleware;
-arbitrary executable hooks are not loaded. With `tool_hooks = []`, caller
+Omitting the array uses the package default. These are named middleware;
+arbitrary executable hooks are not loaded. With the array empty, caller
 authorization, worker incarnation, wire decoding, document/viewport binding,
-artifact ownership, and cleanup checks still apply.
+artifact ownership, and cleanup checks still apply. A browser package declares
+no model outputs, so a browser worker holds no model configuration.
 
 Backend settings below are loaded from the resolved `runtime.toml` at server
 startup and captured when an installation attaches. They say how a source
@@ -89,27 +83,12 @@ the TUI's package row or the TOML file, and verify detachment and cleanup. Only
 that source's worker stops. Removing a declaration takes effect after a
 complete config scan. The worker fences input before joining its original owned
 resources; unconfirmed cleanup remains a failure. A replacement has a fresh
-incarnation and connection IDs. External extension/manual browsers retain
-operator ownership. Persistent profile contents are preserved.
+incarnation and connection IDs. Persistent profile contents are preserved.
 
-## Setup: live
+## Setup: the owned Firefox
 
-Install the OCaml native host and the extension on the browser's machine.
 `--base-path` is the workspace containing `.masc`, not the `.masc` directory
-itself. The host is the `masc-browser-host` installed beside `masc`; `--binary`
-names another one, and is never the Firefox or Zen executable.
-
-```bash
-masc browser-lane-setup --mode extension --base-path /path/to/workspace
-```
-
-The launcher records no server address: the host reads the port from the
-workspace's `.masc/config/connection.toml`. After a failed poll it reads that
-file again and moves to the port it names only when the current server no
-longer answers and the new port does, so a server restarted on another port is
-found without reinstalling.
-
-For a dedicated Firefox without the extension, configure the `browser-firefox` source:
+itself.
 
 ```bash
 masc browser-lane-setup --mode bidi --base-path /path/to/workspace
@@ -118,14 +97,18 @@ masc browser-lane-setup --mode bidi --base-path /path/to/workspace
 This prepares `[browser.live.bidi]` and the dedicated profile. Explicit
 `--firefox`, `--profile`, and `--port` replace their keys; omitted keys retain
 their values. Follow the [Firefox BiDi guide](../browser-bidi/) to attach and
-verify the managed connection. `--mode host` installs the standalone host and
-launcher for an external connection; it does not attach an Addon or start a browser.
+verify the managed connection.
 
-The `--mode extension` command supports macOS and Linux and registers a
-Mozilla native-messaging manifest. `--manifest-dir` selects a different manifest directory when needed.
-It also writes the extension to `<base-path>/.masc/browser-lane/extension/`. In
-Firefox or Zen, open `about:debugging` → **Load Temporary Add-on** and select
-`manifest.json` there. Temporary loading ends when that browser exits.
+## Setup: ego lite
+
+```bash
+masc browser-lane-setup --mode ego --base-path /path/to/workspace
+```
+
+This finds `ego-browser`, checks that it answers, and writes `[browser.live.ego]`
+with the task space name (`--ego-space`, `masc-keepers` by default). Restart the
+server afterwards. Keepers act only on the pages that space opens, with the
+cookies of your ego lite profile.
 
 Each running connection reports its browser identity and a `clientId` UUID. One
 live connection can be selected automatically; with several, choose the desired
@@ -137,14 +120,14 @@ UUID, so discover and select it again.
 
 Keeper-facing names use CamelCase; the MCP registration names use `masc_browser_*`.
 
-| Keeper tool | MCP name | Behavior |
+| Keeper tool | MCP name | Source and behavior |
 | --- | --- | --- |
 | `BrowserTabs` | `masc_browser_tabs` | List tabs and discover the live connection identity |
-| `BrowserRead` | `masc_browser_read` | Text, visible elements, scene or regions, or a viewport PNG. Document source (`mode = "html"`, explicit tab, `html: null` when the reply would pass 1 MiB) |
-| `BrowserInteract` | `masc_browser_interact` | Click, fill, scroll and other input in one explicit tab; native hover/drag/keyboard and zoom depend on transport capabilities |
-| `BrowserSession` | `masc_browser_session` | Bind an observed ego Space to a shared Goal: `bind_goal`, `goal_status`, `unbind_goal` (experimental) |
-| `BrowserGoto` | `masc_browser_goto` | Navigate a tab to an HTTP(S) URL: a BiDi tab opened with `open_tab`, or an ego managed Page. The WebExtension does not navigate |
-| `BrowserAct` | `masc_browser_act` | BiDi: `open_tab`, `open_window`, and top-level `back`, `forward`, `reload`, `close_tab` on a tab it opened. Ego: `open_tab`, `close_tab`, `back`, `forward`, `reload` and task-space actions such as `hand_off` |
+| `BrowserRead` | `masc_browser_read` | Text, visible elements, scene or regions, or a viewport PNG. Document source (`mode = "html"`, explicit tab, `html: null` when the reply would pass 1 MiB). Frames and dialogs on BiDi; snapshots and downloads on ego |
+| `BrowserInteract` | `masc_browser_interact` | Click, fill, scroll and other input in one explicit tab; native hover/drag/keyboard depend on transport capabilities |
+| `BrowserSession` | `masc_browser_session` | Bind an observed ego Space to a Goal, or read that binding |
+| `BrowserGoto` | `masc_browser_goto` | Navigate a tab the connection opened to an HTTP(S) URL |
+| `BrowserAct` | `masc_browser_act` | Tab, window, history, dialog and upload actions; ego Space handoff |
 
 After discovery, pass the observed `clientId` and `tabId` to live reads and
 interactions. A `clientId` is required when several live browsers are connected.
@@ -162,40 +145,34 @@ a selector must match exactly one element. For `BrowserInteract`, pass
 `expectedUrl` from the last read to reject intervening navigation. Fill emits page
 events and does not itself press Enter or submit. Read or capture the page after
 an action, including an error, before deciding whether to retry.
-On BiDi, guarded semantic clicks use native pointer input, and on ego the SDK's
-native click. The WebExtension uses DOM click. Fill and native typing are
-distinct actions.
-Check transport capabilities and read the page after input to verify the
-application effect.
+On BiDi and ego, guarded semantic clicks use native pointer input. Fill and
+native typing are distinct actions. Check transport capabilities and read the
+page after input to verify the application effect.
 
 ## TUI reader
 
 Press `Ctrl-^` (Ctrl-Shift-6), use `:` → `go Browser Lane`, or press `B` from
 Connectors. The reader starts with **Automatic** selection. Press `b` to choose
-Automatic or an observed connection with existing logins. Move with `j`/`k`,
-confirm with Enter, refresh the chooser with `r`, and return with Esc. Reads and
-captures keep the selected connection; a disconnected selection requires an
-explicit new choice.
-
-To use an existing login, choose that connection with `b` and select one of its
-observed tabs. Press `A` to show transport limits and BiDi host diagnostics in
-the chooser.
+Automatic or an observed connection. Move with `j`/`k`, confirm with Enter,
+refresh the chooser with `r`, and return with Esc. Reads and captures keep the
+selected connection; a disconnected selection requires an explicit new choice.
 
 | Key | Action |
 | --- | --- |
-| `b` | Choose Automatic or an observed connection |
-| `A` | Open the chooser with transport limits and BiDi host diagnostics |
-| `h` | Open the selected Keeper's browser observation history (`[`/`]` switches saved pages, `y` copies receipt/artifact ref) |
+| `b` | Choose Automatic or a connected browser by its actual identity |
+| `A` | Show transport limits in the browser picker |
 | `[` / `]` | Previous / next tab and read its page |
 | `j` / `k`, arrows | Scroll page text |
 | Page Up / Page Down, Home | Page scroll / top |
 | `r` | Rediscover and refresh |
-| `Ctrl-O` | Preview the selected tab's PNG; any key returns |
+| `Ctrl-O` | Preview the selected tab's PNG; Esc or q returns |
 | `Ctrl-^` / Esc / Left | Hide the reader and return |
 
 PNG previews require terminal image support; otherwise the reader explains the
 limitation. A preview is not sent to a Keeper. TUI keys provide reading and
-capture; use the tools above for other interactions.
+capture; use the tools above for other interactions. The
+[TUI browser guide](https://github.com/jeong-sik/masc/blob/main/docs/guides/tui-browser-lanes.md)
+lists every key.
 
 Hiding preserves the selected tab, text scroll, and unsent chat draft in this TUI
 session. Entering Browser ends continuous voice mode and discards pending voice

@@ -17,7 +17,7 @@ let work registered = `Assoc
 let client id = `Assoc
   [ "clientId", `String id; "browser", `String "firefox"
   ; "version", `String "158.0.1"; "engineVersion", `String "158.0.1"
-  ; "transport", `String "web_extension"; "space", `Null
+  ; "transport", `String "webdriver_bidi"; "space", `Null
   ; "interactions", `List []; "lastActivities", `List []
   ; "spaceObservation", `Null; "spacePresence", `Null ]
 
@@ -31,7 +31,7 @@ let browser clients =
         ; "clients", `List (List.map client clients)
         ; "owned_backends", `Assoc [ "automation", work true ] ])
   with Ok output -> output | Error detail -> fail detail in
-  { Addon.backend = Browser_lane.Backend.External_host
+  { Addon.backend = Browser_lane.Backend.Owned_firefox
   ; observation = Ok (Some { instance_id = "worker"; observation_seq = 1
       ; max_bytes = 4096; refreshing = false; output }) }
 

@@ -1508,12 +1508,6 @@ let start_post_ready_owner_lanes
     ~base_path:(Mcp_server.workspace_config state).base_path
     ~resume:resume_model_configuration;
   Candle_status.install_appraiser_check (Server_candle_appraiser.available ~config:(Mcp_server.workspace_config state));
-  (* Browser hosts register with the browser Add-on's worker, so the browser
-     lane check reads which hosts poll this server from the Add-on, as the
-     surface that asks may see it. *)
-  Browser_lane_launcher.install_browser_addon_reader (Some (fun access ->
-    Server_lane_inventory.browser_presence ~config:(Mcp_server.workspace_config state) ~access
-    |> Browser_addon_presence.polling));
   Candle_status.report_at_start ~base_path:(Mcp_server.workspace_config state).base_path;
   Server_librarian_addon_wake.install ~sw ~config:(Mcp_server.workspace_config state);
   let start_authority () =
@@ -2150,15 +2144,6 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
   let run_serving ~sw ~socket ~routes:_ ~request_handler ~h2_request_handler
       ~h2_error_handler =
     Eio.Promise.resolve publish_listener_bound ();
-    (* The browser lane check compares an installed host's port with the port
-       this listener actually bound, which differs from [config.port] when that
-       asks for any free port. A Unix-domain listener has no port to compare,
-       so the port stays unknown. *)
-    (match Eio.Net.listening_addr socket with
-     | `Tcp (_, port) ->
-       Browser_lane.install_serving_port port;
-       Eio.Switch.on_release sw Browser_lane.withdraw_serving_port
-     | `Unix _ -> ());
     (* The listener is bound. Persist only the desired connection, not readiness. *)
     (match Workspace_connection.port config.port with
      | Error error -> Log.Server.warn "%s" (Workspace_connection.error_message error)

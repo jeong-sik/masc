@@ -26,8 +26,7 @@ let route_and_wait () =
   check bool "native options require Ego capability" true
     (B.live_capability native=B.Native_workflow
       && B.live_transport_serves B.Ego_task_space B.Native_workflow
-      && not (B.live_transport_serves B.Webdriver_bidi B.Native_workflow)
-      && not (B.live_transport_serves B.Web_extension B.Native_workflow));
+      && not (B.live_transport_serves B.Webdriver_bidi B.Native_workflow));
   check bool "ordinary capture remains supported by BiDi" true
     (B.live_capability ordinary=B.Viewport_capture
       && B.live_transport_serves B.Webdriver_bidi B.Viewport_capture)

@@ -22,9 +22,6 @@ type self_authenticated_reason =
           credential before it upgrades. [/ws] checks it for an upgrade only: a
           [GET /ws] that does not ask to upgrade gets the discovery document
           without one. The IDE LSP proxy checks every request. *)
-  | Browser_lane
-      (** The browser lane add-on's endpoints: the handler checks the lane token
-          and answers 403 without it. *)
   | Loopback_dev_token
       (** [/api/v1/dashboard/dev-token]: the handler answers 404 unless the bind
           is loopback and strict auth is off. Past that it runs [with_public_read]

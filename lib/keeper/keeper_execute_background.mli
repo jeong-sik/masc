@@ -13,12 +13,17 @@
     - the command exited, timed out or was refused: [outcome] is the
       disposition of the foreground call ([completed], [deferred] or
       [failed]) and [result] is the payload that call would have returned;
-    - the run did not finish ([unfinished]): the server stopped, the run was
-      cancelled, or the handler raised. The exit status was not recorded, so
+    - the run did not finish ([unfinished]): the server stopped, an operator
+      cancelled it, or the handler raised. The exit status was not recorded, so
       the command may have run to its end, stopped partway or never started.
 
-    A receipt is written once per run. The file name is the digest of its
-    content, so writing the same receipt twice leaves one file. *)
+    A receipt is written when the run ends, when {!Keeper_msg_async} cuts the
+    worker off, and at startup for a run that never recorded an end. The file
+    name is the digest of its content, so writing the same receipt twice
+    leaves one file. A crash after a receipt is written and before the request
+    is settled leaves the request open, and the next start writes an
+    [unfinished] receipt for it; the Keeper can then hold two receipts with
+    one [request_id]. *)
 
 val defer
   :  config:Workspace.config
@@ -33,20 +38,25 @@ val defer
     factory is created with [config] and [meta] as they are at the call and is
     cleaned up when the worker ends, as the async composition worker does.
 
+    The started result has the members the Execute output schema requires
+    ([status] with a [kind] of [started], [typed], the call time), so a
+    composition plan node that sets [run_in_background] completes with it.
+
     Nothing starts, and the result is a failure, when the Keeper's runtime route
     cannot receive tool-result receipts, when the server-lifetime switch is not
     available, or when the request is not accepted. When acceptance is
     uncertain ([Reconciliation_required]) the command may start, and the result
-    says so. [args] are kept in the request record and copied into the receipt.
-    *)
+    says so. A copy of [args] with credential patterns masked is kept in the
+    request record and copied into receipts; [run] has [args] unchanged. *)
 
 val deliver_unfinished_runs : base_path:string -> unit
 (** Startup, before {!Keeper_msg_async.recover_lost_disk_records}. Every
     non-terminal request of this producer left by an earlier server process
     gets an [unfinished] receipt, and its Keeper is woken. Recovery then
     settles the record as lost, so a request is visited once; a second visit
-    after a crash between the two writes the same receipt bytes. Failures are
-    logged and leave the record for recovery. *)
+    after a crash between the two writes the same receipt bytes. A failed write
+    is logged and recovery settles the record anyway, so that run gets no
+    receipt. *)
 
 (** Pure parts, exposed for tests. *)
 module For_testing : sig
@@ -62,7 +72,7 @@ module For_testing : sig
     -> Keeper_tool_execution.t
     -> Keeper_client_tool_outbox.receipt
 
-  val started_json : request_id:string -> Yojson.Safe.t
+  val started_json : request_id:string -> elapsed_ms:int -> Yojson.Safe.t
 
   val restart_cause : string
 end

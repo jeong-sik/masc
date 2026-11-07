@@ -27,6 +27,13 @@ let text = function
   | other -> failf "expected a string, got %s" (Yojson.Safe.to_string other)
 ;;
 
+let fields_of = function
+  | `Assoc fields -> fields
+  | other -> failf "expected an object, got %s" (Yojson.Safe.to_string other)
+;;
+
+let tool_execute_name = "tool_execute"
+
 let arguments =
   `Assoc [ "command", `String "sleep 30; echo done"; "run_in_background", `Bool true ]
 ;;
@@ -36,9 +43,47 @@ let payload =
 ;;
 
 let test_started_result_names_the_request () =
-  let json = Background.started_json ~request_id:"req-1" in
-  check string "status" "started" (text (member "status" json));
+  let json = Background.started_json ~request_id:"req-1" ~elapsed_ms:7 in
+  check string "kind" "started" (text (member "kind" (member "status" json)));
   check string "request_id" "req-1" (text (member "request_id" json))
+;;
+
+(* A composition plan node that sets [run_in_background] completes with the
+   start result, and the executor validates a completed node against the
+   schema its descriptor declares. The members that schema requires come from
+   the descriptor, so a change to the schema fails here. *)
+let test_started_result_has_the_members_the_execute_schema_requires () =
+  let descriptor =
+    match
+      List.find_opt
+        (fun descriptor ->
+           String.equal descriptor.Keeper_tool_descriptor.internal_name tool_execute_name)
+        (Keeper_tool_descriptor.all_descriptors ())
+    with
+    | Some descriptor -> descriptor
+    | None -> failf "no descriptor named %s" tool_execute_name
+  in
+  let schema =
+    match descriptor.Keeper_tool_descriptor.composable_output with
+    | Keeper_tool_descriptor.Json_output { schema } -> schema
+    | Keeper_tool_descriptor.Opaque_output -> fail "Execute declares no output schema"
+  in
+  let json = Background.started_json ~request_id:"req-1" ~elapsed_ms:7 in
+  (match member "required" schema with
+   | `List names ->
+     List.iter
+       (fun name ->
+          let name = text name in
+          check bool (name ^ " is present") true (List.mem_assoc name (fields_of json)))
+       names
+   | other -> failf "required is not a list: %s" (Yojson.Safe.to_string other));
+  check
+    bool
+    "status is an object"
+    true
+    (match member "status" json with
+     | `Assoc _ -> true
+     | _ -> false)
 ;;
 
 let test_receipt_names_the_producer_and_the_request () =
@@ -141,6 +186,10 @@ let () =
     "keeper_execute_background"
     [ ( "receipt"
       , [ test_case "started result names the request" `Quick test_started_result_names_the_request
+        ; test_case
+            "started result has the members the Execute schema requires"
+            `Quick
+            test_started_result_has_the_members_the_execute_schema_requires
         ; test_case
             "receipt names the producer and the request"
             `Quick

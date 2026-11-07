@@ -48,12 +48,18 @@ Delegate.
 `true`, the call returns at once:
 
 ```json
-{"ok":true,"status":"started","request_id":"…","delivery":"async: …"}
+{"ok":true,"status":{"kind":"started"},"request_id":"…","delivery":"async: …",
+ "typed":true,"execution_time_ms":12}
 ```
 
 `argv`, `command`, `shell`, `cwd`, `timeout_sec` and `intent` mean what they
 mean in the foreground. `timeout_sec` is the only bound on the run; the async
 transport has no deadline of its own.
+
+The start result is an Execute payload: it has the members the Execute output
+schema requires (`status` with a `kind`, `typed`, `execution_time_ms`). A
+composition plan node that sets `run_in_background` therefore completes with the
+start result, and the result of the command arrives as a receipt.
 
 ### 2.2 What is checked before it returns
 
@@ -66,6 +72,15 @@ unchanged.
 
 The Gate decision, the sandbox and the process belong to the rest. They run in
 the worker.
+
+Two things differ from a foreground call because the run outlives the turn:
+
+- A `masc` stage in a shell line is refused, as in a lane without a turn
+  (`Keeper_shell_tool_command.refuse_reserved_command`). The stage routes through
+  the context of the calling turn, which the worker must not hold.
+- The request record and the receipts are files. They keep the arguments with
+  credential patterns masked (`Observability_redact.redact_json_value`), as the
+  tool-call ledger does; the command runs with the arguments as sent.
 
 ### 2.3 Where the run lives
 
@@ -108,11 +123,16 @@ starts.
 
 ### 2.5 When the run does not finish
 
-- The worker is cancelled, by an operator or by a server stop: the cancel arm
-  writes an `unfinished` receipt, then re-raises, so the receipt exists before
-  `Keeper_msg_async` records the request as cancelled.
-- The handler raises: an `unfinished` receipt, and the request ends as a
-  failure.
+- The worker is cut off, by an operator or by the runtime, whether the command
+  is running or has not started: `Keeper_msg_async` calls the abort callback of
+  `defer` before it records the request as cancelled. The callback writes an
+  `unfinished` receipt that names who cancelled. If the callback returns an
+  error, the request is recorded as `Persistence_failed`.
+- The command has ended and its result is in hand: the receipt write is
+  protected from cancellation, so a cancellation during the write does not
+  turn a finished run into an `unfinished` one.
+- The handler raises: a protected `unfinished` receipt, and the request ends as
+  a failure.
 - The process dies without a clean stop: the record stays non-terminal. At
   startup, `deliver_unfinished_runs` writes an `unfinished` receipt for each
   such record of this producer, then `recover_lost_disk_records` settles the
@@ -137,8 +157,18 @@ backend, and the receipt claims neither.
 - The outbox frames receipts as "retained after the previous vendor turn
   ended". For this producer they are results that arrived after the turn
   ended.
-- The worker and the startup path are not covered by tests in this change. The
-  receipt builders and the outbox round trip are.
+- A crash after a receipt is written and before the request is settled leaves
+  the request open, and the next start writes an `unfinished` receipt for it.
+  The Keeper can then hold a `completed` and an `unfinished` receipt with one
+  `request_id`.
+- If the startup receipt write fails, recovery settles the record as lost
+  anyway. The log line is the only trace of that run.
+- Receipt writes run inside a cancellation guard. Whether the executor pool is
+  still alive while the server stops, and how long the guard holds the stop,
+  were not examined.
+- The worker, the abort callback and the startup path are not covered by tests
+  in this change. The receipt builders, the start result against the Execute
+  schema, and the outbox round trip are.
 
 ## 4. Rejected alternatives
 

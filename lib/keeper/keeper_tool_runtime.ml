@@ -185,6 +185,17 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
                ~args)
         else None
       in
+      (* [dispatch] routes a [masc] stage through this turn's context. A
+         background run outlives the turn, so it has no turn to look a tool up
+         in, and it refuses the stage as a lane without a turn does. *)
+      let shell_ir_rewrite =
+        match defer with
+        | Some _ -> Keeper_shell_tool_command.refuse_reserved_command
+        | None ->
+          Keeper_shell_tool_command.rewrite
+            ~lookup:descriptor_for_internal
+            ~dispatch
+      in
       Some
         (Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
            ~turn_sandbox_factory:ctx.turn_sandbox_factory
@@ -194,10 +205,7 @@ let handle_shell_ir ctx ~(dispatch : Keeper_shell_tool_command.dispatch) descrip
          ?gate_context:ctx.gate_context
          ?gate_grant:ctx.gate_grant
          ?defer
-         ~shell_ir_rewrite:
-           (Keeper_shell_tool_command.rewrite
-              ~lookup:descriptor_for_internal
-              ~dispatch)
+         ~shell_ir_rewrite
          ~result_projection:(result_projection_for ctx descriptor)
          ~args
          ())

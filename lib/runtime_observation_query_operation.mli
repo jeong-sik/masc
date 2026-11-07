@@ -1,5 +1,5 @@
 (** Runtime_observation_query_operation — closed sum for the [operation] label on
-    [metric_keeper_observation_query_failures].
+    [masc_keeper_observation_query_failures_total].
 
     Replaces 5 hardcoded literals in [keeper_world_observation.ml].
     Each value names a distinct read-path failure mode of the

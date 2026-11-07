@@ -1,5 +1,5 @@
 (** Keeper_chat_store_operation — closed sum for the [operation] label on
-    [metric_keeper_chat_store_failures].
+    [masc_keeper_chat_store_failures_total].
 
     Replaces 2 hardcoded literals in [keeper_chat_store.ml]
     (`"append"` / `"load"`). *)

@@ -1,5 +1,5 @@
 (** Keeper_turn_metrics_snapshot_failure_site — closed sum for [site] label on
-    [metric_keeper_turn_metrics_snapshot_failures]. *)
+    [masc_keeper_turn_metrics_snapshot_failures_total]. *)
 
 type t = Post_cycle
 

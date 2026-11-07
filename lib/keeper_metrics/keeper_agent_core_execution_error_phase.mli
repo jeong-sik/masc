@@ -1,5 +1,5 @@
 (** Keeper_agent_core_execution_error_phase — closed sum for the [phase] label on
-    [metric_keeper_agent_core_execution_errors].
+    [masc_keeper_agent_core_execution_errors_total].
 
     Each phase has one producer: [keeper_unified_turn] ([Cycle_failed]),
     [keeper_unified_turn_execution] ([Provider_context_overflow]) and

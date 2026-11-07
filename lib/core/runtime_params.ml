@@ -39,16 +39,14 @@ type 'a param_entry = {
   override : 'a option Atomic.t;
 }
 
-(** Type-erased wrapper for the registry.
-    [clear_override] is used internally by typed {!clear} but set-only
-    from this module's perspective, hence the warning suppression. *)
+(** Type-erased wrapper for the registry. *)
 type erased = {
   key : string;
   current_json : unit -> Yojson.Safe.t;
   default_json : unit -> Yojson.Safe.t;
   has_override : unit -> bool;
   set_from_json : Yojson.Safe.t -> (unit, string) result;
-  clear_override : unit -> unit; [@warning "-69"]
+  clear_override : unit -> unit;
   meta : param_meta option;
 }
 

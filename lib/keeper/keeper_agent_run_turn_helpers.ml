@@ -70,8 +70,6 @@ let task_link_already_recorded ~keeper ~task_id ~trace_id =
   let key = (keeper, task_id, trace_id) in
   Link_task_cache_map.mem key (Atomic.get link_task_cache_state).entries
 
-[@@@warning "-11"]
-
 let agent_core_stream_event_is_first_token =
   Agent_core.Llm_provider.Streaming.sse_event_is_first_token_signal
 
@@ -145,8 +143,6 @@ let sse_event_progress_kind (event : Agent_core.Types.sse_event) =
   | Agent_core.Types.StreamIncomplete _ -> Some "sse_stream_incomplete"
   | Agent_core.Types.Connected -> Some "sse_connected"
   | Agent_core.Types.Timeout _ -> Some "sse_timeout"
-
-[@@@warning "+11"]
 
 (* The attempt watchdog asks one question of the stream: is the provider
    still producing? A token of reasoning answers it as a token of text does,

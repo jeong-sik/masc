@@ -93,7 +93,7 @@ let masc_http_default_max_connections_s = string_of_int masc_http_default_max_co
 let is_loopback_host host =
   let normalized = String.trim host |> String.lowercase_ascii in
   match normalized with
-  | "localhost" -> true
+  | "localhost" | "127.0.0.1" | "::1" -> true
   | _ -> (
       match Ipaddr.of_string normalized with
       | Ok ip -> (
@@ -119,10 +119,15 @@ let is_loopback_host_opt = function
     unspecified and loopback are decided in the same place because the callers
     that ask one almost always ask the other. *)
 let is_unspecified_host host =
-  match Ipaddr.of_string (String.trim host) with
-  | Ok (Ipaddr.V4 addr) -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0
-  | Ok (Ipaddr.V6 addr) -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
-  | Error _ -> false
+  let trimmed = String.trim host in
+  match trimmed with
+  | "0.0.0.0" | "::" -> true
+  | "127.0.0.1" | "localhost" | "::1" -> false
+  | _ -> (
+      match Ipaddr.of_string trimmed with
+      | Ok (Ipaddr.V4 addr) -> Ipaddr.V4.compare addr Ipaddr.V4.any = 0
+      | Ok (Ipaddr.V6 addr) -> Ipaddr.V6.compare addr Ipaddr.V6.unspecified = 0
+      | Error _ -> false)
 
 (* Sole owner of URL-shaped trailing-slash trimming. This is the lowest
    layer that needs it ([Env_config_core] depends on this module, not the
@@ -161,10 +166,11 @@ let trim_trailing_slashes value =
     [is_loopback_host] would rewrite that choice without saying so. *)
 let normalize_advertised_host host =
   let trimmed = String.trim host in
-  if is_unspecified_host trimmed then masc_http_default_host
+  if String.equal trimmed masc_http_default_host then masc_http_default_host
+  else if is_unspecified_host trimmed then masc_http_default_host
   else
     match String.lowercase_ascii trimmed with
-    | "localhost" -> masc_http_default_host
+    | "localhost" | "::1" -> masc_http_default_host
     | normalized -> (
         match Ipaddr.of_string normalized with
         | Ok (Ipaddr.V6 addr) when Ipaddr.V6.compare addr Ipaddr.V6.localhost = 0

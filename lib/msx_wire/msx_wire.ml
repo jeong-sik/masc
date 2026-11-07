@@ -14,8 +14,13 @@ let code_to_wire = function
   | Outcome_unknown -> "outcome_unknown"
 ;;
 
-let code_of_wire wire =
-  List.find_opt (fun code -> String.equal (code_to_wire code) wire) all_of_code
+let code_of_wire = function
+  | "activity_disabled" -> Some Activity_disabled
+  | "activity_unobserved" -> Some Activity_unobserved
+  | "workspace_precondition_failed" -> Some Workspace_precondition_failed
+  | "worker_unavailable" -> Some Worker_unavailable
+  | "outcome_unknown" -> Some Outcome_unknown
+  | _ -> None
 ;;
 
 type refusal = { code : code option; message : string option }

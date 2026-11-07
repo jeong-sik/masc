@@ -6,6 +6,7 @@
 
 open Masc
 module Keeper_api = Server_dashboard_http_keeper_api
+module Chat_history = Server_dashboard_http_keeper_chat_history
 
 let rec remove_tree path =
   if Sys.file_exists path then
@@ -110,7 +111,7 @@ let cursor_of body =
   | _ -> Alcotest.fail "missing next_cursor"
 
 let page ?max_total config name cursor =
-  match Keeper_api.keeper_chat_history_page_json ?max_total config name ~cursor with
+  match Chat_history.keeper_chat_history_page_json ?max_total config name ~cursor with
   | Ok page -> page
   | Error error -> Alcotest.fail (Keeper_chat_history_page.error_to_string error)
 
@@ -155,7 +156,7 @@ let test_atomic_replacement_refuses_old_cursor () =
     output_string oc (Yojson.Safe.to_string (row ~content:"replacement" (`At 0.)) ^ "\n");
     close_out oc;
     Unix.rename replacement path;
-    match Keeper_api.keeper_chat_history_page_json config name ~cursor with
+    match Chat_history.keeper_chat_history_page_json config name ~cursor with
     | Error Keeper_chat_history_page.Stale_cursor -> ()
     | Error error -> Alcotest.fail (Keeper_chat_history_page.error_to_string error)
     | Ok _ -> Alcotest.fail "a replaced transcript accepted its old cursor")
@@ -165,7 +166,7 @@ let test_malformed_row_fails_the_whole_page () =
   with_lane "chat-exact-malformed"
     [ row ~content:"valid" (`At 1.); `Assoc ["id", `String "invalid"; "role", `String "invented"] ]
     (fun config name ->
-      match Keeper_api.keeper_chat_history_page_json config name ~cursor:None with
+      match Chat_history.keeper_chat_history_page_json config name ~cursor:None with
       | Error (Keeper_chat_history_page.Invalid_row _) -> ()
       | Error error -> Alcotest.fail (Keeper_chat_history_page.error_to_string error)
       | Ok _ -> Alcotest.fail "partial decode advanced an exact page")
@@ -200,7 +201,7 @@ let test_changed_anchor_and_truncation_refuse_cursor () =
     let cursor = cursor_of (page config name None) in
     let path = chat_path ~base_dir:config.Workspace.base_path ~keeper_name:name in
     let expect_stale () =
-      match Keeper_api.keeper_chat_history_page_json config name ~cursor with
+      match Chat_history.keeper_chat_history_page_json config name ~cursor with
       | Error Keeper_chat_history_page.Stale_cursor -> ()
       | _ -> Alcotest.fail "changed physical prefix accepted its old cursor"
     in
@@ -221,7 +222,7 @@ let test_oversize_row_is_an_error_instead_of_exhaustion () =
     output_string oc (String.make (4 * 1024 * 1024 + 1) 'x');
     output_char oc '\n';
     close_out oc;
-    match Keeper_api.keeper_chat_history_page_json config name ~cursor:None with
+    match Chat_history.keeper_chat_history_page_json config name ~cursor:None with
     | Error Keeper_chat_history_page.Row_exceeds_window -> ()
     | _ -> Alcotest.fail "oversize row was skipped or reported as exhaustion")
 ;;

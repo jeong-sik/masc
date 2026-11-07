@@ -178,7 +178,19 @@ let test_outbox_keeps_the_receipt () =
   check int "two receipts" 2 (List.length (Outbox.receipt_ids snapshot));
   let context = String.concat "\n" (Outbox.developer_context snapshot) in
   check bool "first request id is readable" true (String_util.contains_substring context "req-1");
-  check bool "second request id is readable" true (String_util.contains_substring context "req-2")
+  check bool "second request id is readable" true (String_util.contains_substring context "req-2");
+  (* A start after a crash between the end of a run and the settle of its
+     request finds the receipt, and writes no [unfinished] one beside it. *)
+  check
+    bool
+    "a written request is held"
+    true
+    (get (Background.holds_receipt ~base_path ~keeper_name ~request_id:"req-1"));
+  check
+    bool
+    "an unwritten request is not held"
+    false
+    (get (Background.holds_receipt ~base_path ~keeper_name ~request_id:"req-3"))
 ;;
 
 let () =

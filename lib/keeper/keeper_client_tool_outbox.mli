@@ -112,6 +112,10 @@ val receipt_ids : snapshot -> string list
 (** Exact SHA256 identities of the validated committed receipts. Staging files
     and provider execution cell numbers are not receipt identities. *)
 val contains_receipt : snapshot -> receipt_id:string -> bool
+val contains_call : snapshot -> call_id:string -> bool
+(** Whether a retained receipt, vendor or host, carries this [call_id]. A
+    producer that mints its own call ids uses it to see that the Keeper already
+    holds a receipt for a call before it writes a second one. *)
 val developer_context : snapshot -> string list
 (** The retained receipts as model-facing text, in snapshot order. Base64
     media in a response is shown by its identity

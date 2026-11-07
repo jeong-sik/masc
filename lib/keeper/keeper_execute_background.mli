@@ -18,12 +18,14 @@
       the command may have run to its end, stopped partway or never started.
 
     A receipt is written when the run ends, when {!Keeper_msg_async} cuts the
-    worker off, and at startup for a run that never recorded an end. The file
-    name is the digest of its content, so writing the same receipt twice
-    leaves one file. A crash after a receipt is written and before the request
-    is settled leaves the request open, and the next start writes an
-    [unfinished] receipt for it; the Keeper can then hold two receipts with
-    one [request_id]. *)
+    worker off, and at startup for a run that never recorded an end. An
+    [unfinished] receipt is not written when the Keeper's outbox already holds a
+    receipt with the same [request_id]: a crash after the end was written and
+    before the request was settled leaves the request open, and the next start
+    finds that receipt. If the Keeper had acknowledged it before the crash, the
+    outbox no longer shows it and the next start writes [unfinished]. The file
+    name of a receipt is the digest of its content, so writing the same receipt
+    twice leaves one file. *)
 
 val defer
   :  config:Workspace.config
@@ -75,4 +77,10 @@ module For_testing : sig
   val started_json : request_id:string -> elapsed_ms:int -> Yojson.Safe.t
 
   val restart_cause : string
+
+  val holds_receipt
+    :  base_path:string
+    -> keeper_name:string
+    -> request_id:string
+    -> (bool, string) result
 end

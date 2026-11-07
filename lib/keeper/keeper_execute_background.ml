@@ -136,8 +136,28 @@ let async_result ~start_time (execution : Keeper_tool_execution.t) =
       execution.Keeper_tool_execution.raw_output
 ;;
 
+(* The Keeper holds a receipt for the run when the end of the command was
+   written before the request was settled. An [unfinished] receipt after that
+   would tell the model the command ended and also that it may not have
+   started. *)
+let holds_receipt ~base_path ~keeper_name ~request_id =
+  Result.map
+    (fun snapshot -> Outbox.contains_call snapshot ~call_id:request_id)
+    (Outbox.load ~base_path ~keeper_name)
+;;
+
+let deliver_unfinished_unless_held ~base_path ~keeper_name ~request_id ~arguments ~cause =
+  match holds_receipt ~base_path ~keeper_name ~request_id with
+  | Error detail -> Error detail
+  | Ok true -> Ok ()
+  | Ok false ->
+    deliver ~base_path ~keeper_name ~request_id ~arguments (Unfinished { cause })
+;;
+
 let record_unfinished ~base_path ~keeper_name ~request_id ~arguments ~cause =
-  match deliver ~base_path ~keeper_name ~request_id ~arguments (Unfinished { cause }) with
+  match
+    deliver_unfinished_unless_held ~base_path ~keeper_name ~request_id ~arguments ~cause
+  with
   | Ok () -> ()
   | Error detail ->
     Log.Keeper.warn
@@ -202,12 +222,12 @@ let abort_receipt ~base_path ~keeper_name ~arguments ~accepted
   match Atomic.get accepted with
   | None -> Error "the request id of the background run was not recorded at acceptance"
   | Some request_id ->
-    deliver
+    deliver_unfinished_unless_held
       ~base_path
       ~keeper_name
       ~request_id
       ~arguments
-      (Unfinished { cause = cancelled_cause cancelled_by })
+      ~cause:(cancelled_cause cancelled_by)
 ;;
 
 let refusal ~class_ ?(effect_disposition = Tool_result.Proven_pre_effect) fields message =
@@ -331,4 +351,5 @@ module For_testing = struct
 
   let started_json = started_json
   let restart_cause = restart_cause
+  let holds_receipt = holds_receipt
 end

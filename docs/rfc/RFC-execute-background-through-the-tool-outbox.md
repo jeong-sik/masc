@@ -136,8 +136,11 @@ starts.
 - The process dies without a clean stop: the record stays non-terminal. At
   startup, `deliver_unfinished_runs` writes an `unfinished` receipt for each
   such record of this producer, then `recover_lost_disk_records` settles the
-  records. A crash between the two repeats the receipt with the same bytes, and
-  the outbox names a receipt by its digest, so the file is the same file.
+  records. A record whose end was already written as a receipt (the crash fell
+  between that write and the settle) has a receipt with its request id in the
+  outbox, and no `unfinished` one is written. A crash between the `unfinished`
+  write and the settle repeats the receipt with the same bytes, and the outbox
+  names a receipt by its digest, so the file is the same file.
 
 An `unfinished` receipt says the exit status was not recorded and the command
 may have run to its end, stopped partway or never started. Whether a process
@@ -157,10 +160,19 @@ backend, and the receipt claims neither.
 - The outbox frames receipts as "retained after the previous vendor turn
   ended". For this producer they are results that arrived after the turn
   ended.
-- A crash after a receipt is written and before the request is settled leaves
-  the request open, and the next start writes an `unfinished` receipt for it.
-  The Keeper can then hold a `completed` and an `unfinished` receipt with one
-  `request_id`.
+- If the Keeper acknowledged a receipt before a crash that left the request
+  open, the outbox no longer shows the receipt, and the next start writes
+  `unfinished` for the same `request_id`. A receipt is acknowledged only after a
+  completed turn, and the settle follows the receipt write directly.
+- No bound on the number of background runs of one Keeper. In the
+  2026-11-05..07 ledger no Keeper had more than one Execute call of 1 s or
+  longer running at once (22 Keepers), so this change is the first source of
+  parallel Execute within a Keeper. A run ends at `timeout_sec`, and the docker
+  sandbox sets `--pids-limit` and `--memory` on its container
+  (`keeper_sandbox_docker.ml`). The limits of the other sandbox backends were
+  not examined. A bound on active runs would be a new gate, and there is no
+  measurement yet to choose its number from; whether runs pile up is read from
+  the ledger after deploy, and the bound is decided then.
 - If the startup receipt write fails, recovery settles the record as lost
   anyway. The log line is the only trace of that run.
 - Receipt writes run inside a cancellation guard. Whether the executor pool is

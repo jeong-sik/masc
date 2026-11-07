@@ -260,10 +260,14 @@ let ensure t ~language ~workspace_root =
     match find t key with
     | Some proc -> Ok proc
     | None ->
-      (* [~protect:false]: [initialize] can take seconds, and a Keeper whose
-         turn is cancelled must not wait it out. The process is torn down on
-         the way out either way. *)
-      Eio.Mutex.use_rw ~protect:false (spawn_lock_for t key) (fun () ->
+      (* [~protect:true]: [initialize] can take seconds, and cancellation used
+         to be delivered mid-initialize under [~protect:false], leaving this
+         spawn lock locked forever — every later [ensure] for the workspace
+         hung. Deferring cancellation lets the cancelled caller finish the
+         initialize it started, so the ready server is installed and the next
+         caller reuses it instead of paying the seconds again. [await_answer]
+         bounds the wait with [initialize_timeout_sec]. *)
+      Eio.Mutex.use_rw ~protect:true (spawn_lock_for t key) (fun () ->
         match find t key with
         | Some proc -> Ok proc (* another caller won the race *)
         | None -> start_locked t ~key ~language ~workspace_root))

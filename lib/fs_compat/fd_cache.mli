@@ -29,10 +29,10 @@ val with_writer : string -> (out_channel -> 'a) -> 'a
 (** [invalidate path] flushes, closes, and drops the cached writer for
     [path] when present (a no-op otherwise). Call it after the inode at
     [path] is replaced (e.g. an atomic-rename save) so a later
-    [get_writer] reopens the new file rather than appending to the
+    [with_writer] reopens the new file rather than appending to the
     orphaned pre-replacement inode. This module only guards cache state;
     callers that compose [invalidate] with append operations must hold
-    the same per-path append mutex used around [get_writer] and
+    the same per-path append mutex used around [with_writer] and
     [output_string]/[flush]. *)
 val invalidate : string -> unit
 

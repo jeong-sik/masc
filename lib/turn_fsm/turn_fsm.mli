@@ -120,9 +120,6 @@ val assert_transition_allowed :
   unit ->
   (transition_action, transition_violation) result
 
-(* [require_active_state] lives in the keeper-side shim [Keeper_turn_fsm], not
-   here: its [@@fsm_guard] ppx expansion references [Keeper_fsm_guard_runtime]. *)
-
 val all_symbols : string list
 val active_symbols : string list
 val terminal_symbols : string list

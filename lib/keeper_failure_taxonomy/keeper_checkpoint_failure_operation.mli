@@ -1,5 +1,5 @@
 (** Keeper_checkpoint_failure_operation — closed sum for the [operation] label
-    on [metric_keeper_checkpoint_failures].
+    on [masc_keeper_checkpoint_failures_total].
 
     Each value names a distinct
     checkpoint-related failure mode in keeper context loading/saving. *)

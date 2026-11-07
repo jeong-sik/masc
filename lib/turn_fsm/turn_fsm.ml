@@ -362,9 +362,3 @@ let assert_transition_allowed ?ctx ~(from_state: _ turn_state) ~(to_state: _ tur
   | Some action -> Ok action
   | None ->
       Error { from_state = Any from_state; to_state = Any to_state }
-
-(* NOTE: [require_active_state] is NOT here — its [@@fsm_guard] ppx_tla
-   expansion injects a call to [Keeper_fsm_guard_runtime], which would couple
-   this pure library to the keeper. It stays in the keeper-side shim
-   ([Keeper_turn_fsm]) alongside the other emission glue. The pure FSM
-   (states + transition matrix) is the entire contents of this module. *)

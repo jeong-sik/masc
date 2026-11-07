@@ -7,8 +7,6 @@
      - [guard_transition] / [observe_phase_dwell] / [emit_transition]: telemetry
        / audit / metrics emission (Log.Keeper, Keeper_transition_audit,
        Otel_metric_store + Keeper_metrics, Keeper_fsm_guard_runtime).
-     - [require_active_state]: identity guard whose [@@fsm_guard] ppx_tla
-       expansion injects [Keeper_fsm_guard_runtime].
 
    All existing [Keeper_turn_fsm.X] call sites resolve unchanged: pure surface
    via the [include], glue via the local definitions below. Dependency
@@ -191,13 +189,3 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
         ("keeper", keeper_name);
       ]
     ()
-
-(* Cycle 12 / Tier I3 smoke test: first real-module use of [@@fsm_guard].
-
-   [require_active_state] is the identity on its argument; the [@@fsm_guard]
-   payload is parsed by [ppx_tla] and injected as a runtime [assert] at
-   the function body entry. The invariant — turn states that have
-   already terminated must not re-enter execution paths — was previously
-   only guarded by reviewer-eye inspection of call sites. Stays here (not in
-   the pure [Turn_fsm] lib) because the ppx expansion references
-   [Keeper_fsm_guard_runtime]. *)

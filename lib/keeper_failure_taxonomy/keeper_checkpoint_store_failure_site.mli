@@ -1,5 +1,5 @@
 (** Keeper_checkpoint_store_failure_site — closed sum for [site] label on
-    [metric_keeper_checkpoint_failures] when emitted from the
+    [masc_keeper_checkpoint_failures_total] when emitted from the
     checkpoint-store layer. *)
 
 type t =

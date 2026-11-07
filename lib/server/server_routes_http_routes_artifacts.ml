@@ -86,6 +86,7 @@ type upload_refusal =
   | Empty_upload
   | Truncated_upload of { declared : int; received : int }
   | Upload_too_large of { maximum : int }
+  | Upload_malformed_length
   | Upload_store_failed
 
 let upload_refusal_response = function
@@ -103,6 +104,8 @@ let upload_refusal_response = function
         ; "maximum_bytes", `Int maximum
         ]
     , `Payload_too_large )
+  | Upload_malformed_length ->
+    `Assoc [ "error", `String "upload declared a body length the server cannot read" ], `Bad_request
   | Upload_store_failed ->
     `Assoc [ "error", `String "artifact upload failed" ], `Internal_server_error
 ;;
@@ -261,7 +264,8 @@ let add_routes router =
                       ; "bytes", `Int reference.Tool_output.bytes
                       ]))
              ~on_error:(function
-               | `Too_large maximum -> refuse (Upload_too_large { maximum })
-               | `Internal exn ->
+               | Http.Request.Too_large maximum -> refuse (Upload_too_large { maximum })
+               | Http.Request.Malformed_length -> refuse Upload_malformed_length
+               | Http.Request.Internal exn ->
                  Log.Misc.error "artifact upload failed: %s" (Printexc.to_string exn);
                  refuse Upload_store_failed))

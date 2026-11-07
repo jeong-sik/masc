@@ -83,6 +83,8 @@ type upload_refusal =
   | Empty_upload
   | Truncated_upload of { declared : int; received : int }
   | Upload_too_large of { maximum : int }
+  | Upload_malformed_length
+      (** HTTP/2 only: the stream declared a body length the server cannot read. *)
   | Upload_store_failed
 
 val store_upload :

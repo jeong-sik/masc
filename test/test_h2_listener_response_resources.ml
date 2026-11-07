@@ -41,9 +41,11 @@ let with_listener mode ~capacity make_handler run =
   let base_path=Filename.temp_file "masc-h2-listener-resources" "" in
   Sys.remove base_path; Unix.mkdir base_path 0o700;
   let previous=Server_auth.For_testing.snapshot_server_state () in
+  let previous_startup=Masc.Server_startup_state.snapshot () in
   let previous_fs=Fs_compat.get_fs_opt () in
   Fun.protect ~finally:(fun () ->
     Server_auth.For_testing.restore_server_state previous;
+    Masc.Server_startup_state.For_testing.restore previous_startup;
     (match previous_fs with Some fs -> Fs_compat.set_fs fs | None -> Fs_compat.clear_fs ());
     remove_tree base_path) (fun () ->
     Eio_main.run @@ fun env ->
@@ -53,13 +55,20 @@ let with_listener mode ~capacity make_handler run =
     Eio.Switch.run @@ fun sw ->
     Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
       ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw (fun () ->
-      let state=Masc.Mcp_server.For_testing.create_state ~base_path in
+      Masc.Board.reset_global_for_test ();
+      Masc.Board_dispatch.reset_for_test ();
+      let state=Masc.Mcp_server_eio.create_state_eio ~sw
+          ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
+          ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+          ~net:(Eio.Stdenv.net env) ~base_path in
       ignore (Masc.Workspace.init (Masc.Mcp_server.workspace_config state) ~agent_name:None);
       Auth.save_auth_config base_path
         {Masc_domain.default_auth_config with enabled=true;require_token=true};
       let token=match Auth.create_token base_path ~agent_name:"resource-fixture" ~role:Masc_domain.Admin with
         | Ok (token,_) -> token | Error _ -> fail "fixture authentication could not be created" in
       Server_auth.For_testing.restore_server_state (Some state);
+      (* The shared ingress answers 503 until the server is marked ready. *)
+      Masc.Server_startup_state.mark_state_ready () |> Result.get_ok;
       let socket=Eio.Net.listen ~sw ~backlog:8 (Eio.Stdenv.net env)
         (`Tcp (Eio.Net.Ipaddr.V4.loopback,0)) in
       let addr=Eio.Net.listening_addr socket in
@@ -151,30 +160,27 @@ let reset client exchange response =
 let payload=String.init 131070 (fun i -> Char.chr (97+i mod 26))
 
 let test_bound_goal_tree_compresses_before_capacity_reservation () =
-  let previous = Masc.Server_startup_state.snapshot () in
-  Fun.protect ~finally:(fun () -> Masc.Server_startup_state.For_testing.restore previous) (fun () ->
-    Masc.Server_startup_state.mark_state_ready () |> Result.get_ok;
-    with_listener H2_only ~capacity:4096 (fun ~gateway -> gateway) (fun ~connect ~port ->
-      let state = match Server_auth.For_testing.snapshot_server_state () with
-        | Some state -> state | None -> fail "fixture server has no workspace" in
-      let config = Masc.Mcp_server.workspace_config state in
-      (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:(String.make 32768 'g')
-         ~metric:"count" ~target_value:"1" () with
-       | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
-      let base = Unix.realpath config.base_path in
-      let root = Unix.realpath (Masc.Workspace.masc_dir config) in
-      let path = Uri.with_query (Uri.of_string "/api/v1/dashboard/goals")
-          [ "expected_base_path", [base]; "expected_masc_root", [root] ] |> Uri.to_string in
-      let client = connect () in
-      let raw = request client ~port path |> response in
-      check int "uncompressed tree exceeds listener capacity" 503 (H2.Status.to_code raw.response.status);
-      ignore (read_complete raw);
-      let zipped = request ~headers:["accept-encoding", "gzip"] client ~port path |> response in
-      check int "compressed tree fits listener capacity" 200 (H2.Status.to_code zipped.response.status);
-      check (option string) "selected gzip" (Some "gzip") (H2.Headers.get zipped.response.headers "content-encoding");
-      let body = read_complete zipped in
-      check bool "gzip stream is present" true
-        (String.length body >= 2 && Char.code body.[0] = 0x1f && Char.code body.[1] = 0x8b)))
+  with_listener H2_only ~capacity:4096 (fun ~gateway -> gateway) (fun ~connect ~port ->
+    let state = match Server_auth.For_testing.snapshot_server_state () with
+      | Some state -> state | None -> fail "fixture server has no workspace" in
+    let config = Masc.Mcp_server.workspace_config state in
+    (match Goal_store.upsert_goal_with_events ~actor:"test" config ~title:(String.make 32768 'g')
+       ~metric:"count" ~target_value:"1" () with
+     | Ok _ -> () | Error error -> fail (Goal_store.write_error_to_string error));
+    let base = Unix.realpath config.base_path in
+    let root = Unix.realpath (Masc.Workspace.masc_dir config) in
+    let path = Uri.with_query (Uri.of_string "/api/v1/dashboard/goals")
+        [ "expected_base_path", [base]; "expected_masc_root", [root] ] |> Uri.to_string in
+    let client = connect () in
+    let raw = request client ~port path |> response in
+    check int "uncompressed tree exceeds listener capacity" 503 (H2.Status.to_code raw.response.status);
+    ignore (read_complete raw);
+    let zipped = request ~headers:["accept-encoding", "gzip"] client ~port path |> response in
+    check int "compressed tree fits listener capacity" 200 (H2.Status.to_code zipped.response.status);
+    check (option string) "selected gzip" (Some "gzip") (H2.Headers.get zipped.response.headers "content-encoding");
+    let body = read_complete zipped in
+    check bool "gzip stream is present" true
+      (String.length body >= 2 && Char.code body.[0] = 0x1f && Char.code body.[1] = 0x8b))
 
 let test_listener_shares_capacity mode () =
   let released,release=Eio.Promise.create () in
@@ -314,7 +320,10 @@ let test_actual_modern_admission_errors () =
       let discover id version = `Assoc
         [ "jsonrpc", `String "2.0"; "id", id; "method", `String "server/discover"
         ; "params", `Assoc [ "_meta", meta version ] ] in
-      check_error "unsupported version" ~status:400 ~code:(-32022) ~id:(`Int 81)
+      (* The shared ingress refuses an unsupported mcp-protocol-version header
+         before the handler runs, with the HTTP/1.1 code. *)
+      check_error "unsupported version" ~status:400
+        ~code:(Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_request) ~id:(`Int 81)
         (post ~header_version:"2099-01-01" ~method_:"server/discover"
            (discover (`Int 81) "2099-01-01"));
       check_error "mismatched version" ~status:400 ~code:(-32020) ~id:(`Int 82)

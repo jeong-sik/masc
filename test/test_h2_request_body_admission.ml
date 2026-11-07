@@ -429,7 +429,14 @@ let with_gateway_and_switch ?(prepare_workspace=Fun.id) f =
         ~sw
         (fun () ->
           let workspace_path = prepare_workspace base_path in
-          let state = Masc.Mcp_server.For_testing.create_state ~base_path:workspace_path in
+          (* The shared MCP POST path runs each request on the state's own
+             switch and clock, so the fixture builds the state the server does. *)
+          Masc.Board.reset_global_for_test ();
+          Masc.Board_dispatch.reset_for_test ();
+          let state = Masc.Mcp_server_eio.create_state_eio ~sw
+              ~proc_mgr:(Eio.Stdenv.process_mgr env) ~fs:(Eio.Stdenv.fs env)
+              ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env)
+              ~net:(Eio.Stdenv.net env) ~base_path:workspace_path in
           ignore
             (Masc.Workspace.init (Masc.Mcp_server.workspace_config state)
                ~agent_name:None);

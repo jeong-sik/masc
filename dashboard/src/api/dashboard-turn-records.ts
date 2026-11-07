@@ -269,7 +269,7 @@ export function parseMemoryOsFactCategory(raw: string): MemoryOsFactCategory | n
     : null
 }
 
-// One fact row as projected by memory_os_fact_json (server_dashboard_http_keeper_api.ml).
+// One fact row as projected by memory_os_fact_json (server_dashboard_http_keeper_memory_reads.ml).
 // Carries only the structure RFC-0247 left on the record — there is no salience /
 // uses / confidence field to decode because the backend has none to emit.
 export type MemoryOsFact = {

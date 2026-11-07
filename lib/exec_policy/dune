@@ -5,7 +5,6 @@
  (public_name masc.exec_policy)
  (wrapped false)
  (libraries
-  masc.attribution
   masc.masc_exec
   masc.masc_exec_bash_parser
   masc.masc_exec_command_gate
@@ -18,5 +17,4 @@
   masc.prompt_registry
   masc.masc_log
   masc.config_dir_resolver
-  unix
-  yojson))
+  unix))

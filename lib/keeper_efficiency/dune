@@ -9,8 +9,6 @@
   dated_jsonl
   fs_compat
   masc_cost_ledger
-  masc_core
   masc_tool_types
-  masc_types
   unix
   yojson))

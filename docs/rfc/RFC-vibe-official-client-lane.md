@@ -312,14 +312,10 @@ official-client lane 후보의 종류·자격 증명·계약·관측·실패 처
 - 준비 검사는 `masc-lane-cli-probe --vibe-acp PATH` 가 시도 전에 한 번 한다.
   budget 을 모르면 그렇다고 찍고 진행한다(운영자 결정, 11-08). 다른 이유로
   준비가 안 됐으면 exit 3 으로 멈춘다.
-- 실패 분류(`Exact_lane_failure`):
-  - limit 계열 outcome(`turn_limit`·`token_limit`·`price_limit`·`length`)은
-    `Output_limit` 이다.
-  - `refusal` 과 읽을 수 없는 출력은 `Output_unusable` 이다.
-  - `usage_error`·`config_error`·모르는 outcome·실행 파일 없음은
-    `Configuration_refused` 다.
-  - 시그널·시간 초과·`infrastructure_failure`·`aborted` 는 `Transient` 다.
-  - 구독 몫 소진은 아직 typed 로 나누지 않는다(§2.5).
+- 패널 실패는 MASC 가 정한 시한이나 Vibe 자신의 `deadline` 만 `Timeout` 이고,
+  나머지는 `Provider_error` 다. exact-output 실패 분류는 두지 않는다. Vibe 가
+  그 목록에 못 서서, 분류해도 부르는 곳이 없다. 구독 몫 소진은 아직 typed 로
+  나누지 않는다(§2.5).
 - 남은 것: 소비 곡선 실측과 keeper 시범 배정, 몫 소진 출력 실측.
 
 ## 5. 리스크

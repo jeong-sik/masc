@@ -76,6 +76,21 @@ let reap t set_exit_status =
       Some ())
 ;;
 
+(* How often a TERM grace looks again at its group. A grandchild's exit
+   sends this process no SIGCHLD, so the end of the group is seen only by
+   looking. *)
+let group_exit_poll_seconds = 0.05
+
+(* The TERM grace is for members still running a handler. Once the leader
+   has exited -- unreaped, so its PID and group id stay this owner's -- and no
+   member is alive, nobody is left to wait for and nobody can fork a new
+   member. A group whose membership cannot be read counts as present, so its
+   grace runs out. *)
+let group_has_let_go t =
+  exited_without_reaping t.pid
+  && not (Posix_spawn_detached.group_id_has_members t.pid)
+;;
+
 (* WNOWAIT holds the leader's PID until the last group signal. No numeric
    PGID escapes this owner. Normal completion kills remaining foreground
    descendants before reaping immediately; detached work uses another API. *)
@@ -88,7 +103,8 @@ let rec reap_group t owner set_exit_status =
         let delay = match owner.phase with
           | Terminating deadline -> Monotonic_deadline.remaining_seconds deadline
           | Running | Killed | Reaping -> 0. in
-        if delay > 0. then Some (`Sleep delay)
+        if delay > 0. && not (group_has_let_go t) then
+          Some (`Sleep (Float.min delay group_exit_poll_seconds))
         else (
           (match owner.phase with
            | Terminating _ -> kill_group t Sys.sigkill; owner.phase <- Killed

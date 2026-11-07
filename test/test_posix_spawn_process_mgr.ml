@@ -289,11 +289,36 @@ let test_group_term_keeps_owner_after_leader_exit ~mode () =
       let requested_at = Eio.Time.now clock in
       Eio.Process.signal proc Sys.sigterm;
       ignore (Eio.Process.await proc);
-      check bool "leader exit does not retire the group TERM grace" true
+      check bool "a live descendant keeps the group TERM grace after leader exit" true
         (Eio.Time.now clock -. requested_at >= 2.);
       assert_descendant_stopped env descendant;
       Unix.kill (Eio.Process.pid sibling) 0;
       Eio.Process.signal sibling Sys.sigkill))
+;;
+
+(* The leader is the whole group: once TERM ends it, nobody is left to give
+   the grace to. *)
+let leader_only_fixture = {|import os, signal, sys
+signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
+with open(sys.argv[1], "w") as f:
+    f.write(str(os.getpid()))
+while True:
+    signal.pause()
+|}
+
+let test_group_term_ends_once_the_group_has_exited () =
+  with_group_fixture (fun env marker ->
+    let clock = Eio.Stdenv.clock env in
+    let grace_seconds = 2. in
+    let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock ~grace_seconds in
+    Eio.Switch.run (fun sw ->
+      let proc = Eio.Process.spawn ~sw mgr [ "python3"; "-c"; leader_only_fixture; marker ] in
+      ignore (wait_for_marker clock marker : int);
+      let requested_at = Eio.Time.now clock in
+      Eio.Process.signal proc Sys.sigterm;
+      check bool "the leader exited on TERM" true (Eio.Process.await proc = `Exited 0);
+      check bool "a group with no member left is reaped before its TERM grace ends" true
+        (Eio.Time.now clock -. requested_at < grace_seconds)))
 ;;
 
 let test_group_explicit_kill_reaps_leader_and_stops_descendant () =
@@ -597,6 +622,8 @@ let () =
             (test_group_term_keeps_owner_after_leader_exit ~mode:"wait")
         ; test_case "TERM-ignoring leader still reaches group escalation" `Quick
             (test_group_term_keeps_owner_after_leader_exit ~mode:"ignore")
+        ; test_case "TERM ends the grace once the group has exited" `Quick
+            test_group_term_ends_once_the_group_has_exited
         ; test_case "explicit group SIGKILL reaps leader and stops descendant" `Quick
             test_group_explicit_kill_reaps_leader_and_stops_descendant
         ; test_case "normal leaders reap inside a long-lived switch" `Quick

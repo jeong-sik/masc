@@ -20,13 +20,13 @@ let data document text = `Assoc [
     "rects", `List [`Assoc ["x", `Int 0; "y", `Int 0; "width", `Int 600; "height", `Int 20]]]]]
 (* The live connection the scripted worker lists, and the route a read names it by. *)
 let client_id = ok (Browser_lane.client_id_of_string "0c000000-0000-4000-8000-000000000007")
-let client : Browser_lane.client_info = {client_id;browser=Browser_lane.Firefox;version="fixture";
-  engine_version="fixture";transport=Browser_lane.Webdriver_bidi;space=None}
+let client : Browser_lane.client_info = {client_id;browser=Browser_lane.Ego_lite;version="fixture";
+  engine_version="fixture";transport=Browser_lane.Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"}}
 let client_wire = Browser_lane.client_id_to_string client_id
 let read_args mode = `Assoc ["lane",`String "live";"clientId",`String client_wire;"tabId",`Int 7;"mode",`String mode]
 let routed json = match json with
   | `Assoc fields -> `Assoc (fields @ ["source",`String "live";"clientId",`String client_wire;
-      "transport",`String "webdriver_bidi"])
+      "transport",`String "ego_task_space"])
   | _ -> fail "fixture object required"
 let retained_reference result = match Tool_result.retained_artifacts result with
   | [reference] -> reference | _ -> fail "one retained observation required"
@@ -76,7 +76,7 @@ let test_runtime_retains_inline_scene_and_log_roots () = with_base (fun base ->
       check bool "backend cannot replace the routed client" true
         (List.assoc "clientId" fields = `String client_wire);
       check bool "nor its transport" true
-        (List.assoc "transport" fields = `String "webdriver_bidi");
+        (List.assoc "transport" fields = `String "ego_task_space");
       check bool "elapsed time belongs to the local read" true
         (match List.assoc "elapsed_ms" fields with `Float value -> value >= 0. | _ -> false);
       let canonical = Observation.of_json (Yojson.Safe.from_string original) |> ok in

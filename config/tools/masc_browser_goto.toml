@@ -1,6 +1,6 @@
 name = "masc_browser_goto"
 description = """
-Navigate a tab to HTTP(S); returns landing URL/title. A live BiDi connection navigates only a tab it opened with BrowserAct/masc_browser_act open_tab: pass lane live, its clientId and that tabId. A tab the operator opened is refused before any effect; use BrowserInteract/masc_browser_interact there."""
+Navigate a tab to HTTP(S); returns landing URL/title. An ego connection navigates only a managed Page in its task space: pass lane live, its clientId and that tabId. An unmanaged tab the operator opened is refused before any effect; adopt it with BrowserAct/masc_browser_act adopt_tab first."""
 additional_properties = false
 
 [[params]]
@@ -24,4 +24,4 @@ minimum = 0
 [[params]]
 name = "clientId"
 type = "string"
-description = "lane live: the exact observed clientId of the BiDi connection that opened tabId."
+description = "lane live: the exact observed clientId of the ego connection that manages tabId."

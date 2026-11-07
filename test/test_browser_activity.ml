@@ -9,9 +9,7 @@ let rejects text = check bool "invalid browser setting refused" true (Result.is_
 
 let test_config () =
   check bool "no browser table configures nothing" true (Config.equal Config.none (parsed ""));
-  let config = parsed "[browser.live.bidi]\nfirefox = '/fixture/firefox'\nprofile = '/fixture/profile'\n" in
-  check bool "live BiDi paths" true
-    (config.live_bidi = Some {firefox="/fixture/firefox";profile="/fixture/profile";port=Config.default_live_bidi_port})
+  rejects "[browser.live.bidi]\nfirefox = '/fixture/firefox'\nprofile = '/fixture/profile'\n"
 
 let invalid = [
   "a lane switch", "[browser.live]\nenabled=false";
@@ -44,7 +42,7 @@ let test_off_preselection () = with_lane (fun _ current ->
 let test_off_preselected_stale () = with_lane (fun sw current ->
   let client_id = match Lane.client_id_of_string "00000000-0000-4000-8000-000000000002" with
     | Ok id -> id | Error detail -> fail detail in
-  let client_info : Lane.client_info = {client_id;browser=Firefox;version="fixture";transport=Browser_lane.Webdriver_bidi; engine_version="fixture";space=None} in
+  let client_info : Lane.client_info = {client_id;browser=Ego_lite;version="fixture";transport=Browser_lane.Ego_task_space; engine_version="fixture";space=Some {Browser_lane.id=61;name="fixture Space"}} in
   ignore (Lane.take_command ~client_info ~window_sec:0.001);
   Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id));
   let target = match Lane.resolve_target ~verb:Lane.Tabs_list (Live_route (Some client_id)) with
@@ -61,7 +59,7 @@ let test_off_preselected_stale () = with_lane (fun sw current ->
 let test_live_retains_accepted () = with_lane (fun sw current ->
   let client_id = match Lane.client_id_of_string "00000000-0000-4000-8000-000000000001" with
     | Ok id -> id | Error detail -> fail detail in
-  let client_info : Lane.client_info = {client_id;browser=Firefox;version="fixture";transport=Browser_lane.Webdriver_bidi; engine_version="fixture";space=None} in
+  let client_info : Lane.client_info = {client_id;browser=Ego_lite;version="fixture";transport=Browser_lane.Ego_task_space; engine_version="fixture";space=Some {Browser_lane.id=61;name="fixture Space"}} in
   ignore (Lane.take_command ~client_info ~window_sec:0.001);
   Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id));
   let target = match Lane.resolve_target ~verb:Lane.Tabs_list (Live_route (Some client_id)) with Ok target -> target | Error _ -> fail "target" in

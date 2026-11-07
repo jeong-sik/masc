@@ -19,20 +19,6 @@
  (modules test_browser_addon_owner_cleanup)
  (libraries masc masc.browser_lane masc.time_compat masc.fs_compat alcotest eio eio_main eio.unix unix))
 
-(executable
- (name test_browser_process_owner)
- (modules test_browser_process_owner)
- (libraries masc.browser_process_owner masc.native_addon_lease masc_process alcotest yojson unix))
-
-(rule
- (alias runtest-browser-process-owner)
- (action (run %{exe:test_browser_process_owner.exe}
-   %{exe:../bin/masc_native_addon_launcher.exe} %{exe:../bin/masc_browser_process_owner.exe})))
-
-(alias
- (name runtest)
- (deps (alias runtest-browser-process-owner)))
-
 (test
  (name test_browser_addon_wire)
  (modules test_browser_addon_wire)
@@ -65,15 +51,6 @@
  (modules test_browser_addon_live_ego)
  (libraries masc masc.browser_lane masc.browser_configuration masc.time_compat
   masc.fs_compat masc.string_util masc_process alcotest base64 otoml eio eio_main yojson unix))
-
-(test
- (name test_browser_addon_live_bidi)
- (modules test_browser_addon_live_bidi)
- (libraries masc masc.browser_lane masc.browser_configuration masc.time_compat
-  masc.monotonic_deadline masc.fs_compat masc_process alcotest eio eio_main yojson unix)
- (deps ../bin/masc_native_addon_launcher.exe ../bin/masc_browser_process_owner.exe)
- (action (run %{test} %{dep:../bin/masc_native_addon_launcher.exe}
-   %{dep:../bin/masc_browser_process_owner.exe})))
 
 (test
  (name test_browser_addon_reply_policy)

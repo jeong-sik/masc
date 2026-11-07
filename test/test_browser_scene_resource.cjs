@@ -161,8 +161,8 @@ assert.equal(vm.runInContext('browserScene(reference)',dense.context),dense.link
 console.log('scene resources: exact UTF-8 byte accounting, identity overflow refusal and partial usable dense-node payload passed');
 
 // Run the shipped scene text walk against explicit DOM boundaries. Geometry
-// fixtures expose every text node; actual browser innerText parity is exercised
-// by test_browser_scene.py, independently of this offline execution seam.
+// fixtures expose every text node; this does not compare against a real
+// browser's innerText.
 const textWalk = source.split('  const visibleText = element => {')[1].split('  const regionLabel =')[0];
 const textContext = vm.createContext({
   NodeFilter,

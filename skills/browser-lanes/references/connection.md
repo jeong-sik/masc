@@ -25,13 +25,10 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
   - `no_live_client`: 이 lane에 연결된 브라우저가 없다. 고칠 수 있는 사람은
     운영자뿐이라 같은 호출을 되풀이해도 답은 같다. 운영자에게 알린다.
   - `live_transport_unsupported`: 고른 연결(`clientId`, `transport`)이 그 일
-    (`capability`)을 못 한다. live 연결은 방식(`transport`)에 따라 할 수 있는 일이
-    다르다. `drag`는 `webdriver_bidi`·`ego_task_space` 연결이 한다.
-    `webdriver_bidi`의 `activate_tab`은 브라우저 창에 포커스도 준다. 읽기
-    (`mode=text`·`elements`·`scene`·`screenshot`)는 둘 다 한다. `mode=snapshot`
+    (`capability`)을 못 한다. `mode=snapshot`
     (ego 자신의 접근성 트리와 ref)과 click·fill 의 `target`(그 ref, 또는 role·이름이나
-    보이는 글로 고른 대상)은 `ego_task_space` 연결만 한다. `ego_task_space`
-    연결은 읽기, `open_tab`, `close_tab`, `back`·`forward`·`reload`, `accept_dialog`·`dismiss_dialog`,
+    보이는 글로 고른 대상)을 쓸 수 있다. `ego_task_space`
+    연결은 읽기(`mode=text`·`elements`·`scene`·`screenshot`), `open_tab`, `close_tab`, `back`·`forward`·`reload`, `accept_dialog`·`dismiss_dialog`,
     `hand_off`·`take_over`, `upload`(`selector` 의 파일 입력, 또는 `opener` 로 뜨는 파일 선택 창),
     `mode=downloads`, `BrowserGoto`,
     그리고 click·`click_at`·`double_click`·hover·drag·`scroll`·`scroll_at`·fill·
@@ -40,8 +37,8 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
     풀린 것으로 본다. 좌표 `drag`, `via` 가 있는 `drag_to`, `scene` 노드로 고른 드래그는 입력을
     보낸 뒤에는 끝까지 실행돼도 결과를 알 수 없다고 답하고, 운영자가 입력을 초기화할 때까지 그
     연결의 다음 입력이 거절된다. 입력을 보내기 전에 거절된 드래그는 입력을 그대로 쓸 수 있다.
-    프레임은 `framePath`
-    없이 다룬다: snapshot 이 iframe 내용을 ref 와 함께 담고, 그 ref 나 role·글 `target` 으로
+    프레임은 snapshot 으로
+    다룬다: snapshot 이 iframe 내용을 ref 와 함께 담고, 그 ref 나 role·글 `target` 으로
     프레임 안을 누르고 채운다. 터치·`set_viewport`·`activate_tab` 은 하지
     않는다. `press_key` 는
     이름 있는 키와 ASCII 문자만 누르고, 다른 글자는 `type_text` 로 친다. 이동·닫기·

@@ -132,28 +132,22 @@ masc prerequisite-actions pdf-tools --execute poppler_install
 나타내며, PDF 검사나 검증 통과를 뜻하지 않습니다. MASC를 서비스로 실행한다면 PDF
 검증을 요청하기 전에 서비스의 PATH에서도 두 명령을 찾을 수 있게 설정하세요.
 
-### 브라우저 도구 (Firefox)
+### 브라우저 도구 (ego lite)
 
-attached-Firefox(BiDi) 레인은 Firefox 를 띄웁니다. Firefox 는 portable 릴리스에
-들어 있지 않습니다.
+ego lite 레인은 ego lite 를 씁니다. ego lite 는 portable 릴리스에 들어 있지 않습니다.
 
 ```bash
-masc prerequisite-actions firefox                           # 상태와 동작 확인
-masc prerequisite-actions firefox --execute firefox_brew_install
+masc prerequisite-actions ego-browser                       # 상태와 동작 확인
+masc prerequisite-actions ego-browser --execute ego_lite_download
 ```
 
-macOS에서는 기존 Homebrew의 [`firefox`](https://formulae.brew.sh/cask/firefox) cask를 사용합니다.
-Linux에서는 배포판마다 패키지 이름이 달라서 프로젝트의 다운로드·설치 안내 페이지를
-엽니다. 기본 MASC 설치 과정은 Homebrew나 Firefox를 자동으로 설치하지 않습니다.
-`/Applications`에 `Firefox.app`이 이미 있으면 Homebrew가 Firefox cask 설치를
-거절합니다. 그때는 `firefox` 결과가 그 Firefox를 이미 보여 주므로 설치가 필요
-없습니다.
+macOS에서는 이 동작이 ego lite 다운로드 페이지를 엽니다. ego lite 는 앱으로 설치되고,
+첫 실행 안내를 마치면 `ego-browser` 가 `~/.local/bin` 에 연결됩니다. ego lite 에는 Linux 빌드가 없습니다.
 
-결과는 현재 프로세스 환경에서 프로그램이 `--version`에 답하는지와 그 절대 경로를
+결과는 현재 프로세스 환경에서 `ego-browser` 가 `--version`에 답하는지와 그 절대 경로를
 알려 줍니다. 프로그램은 PDF 검사와 같이 일부만 남긴 환경 변수로 실행합니다.
-버전을 출력하는 데 `DISPLAY` 같은 변수가 필요한 프로그램은 답하지 않는 것으로
-나옵니다. `runtime.toml`은 고치지 않습니다. `[browser.live.bidi]`에 실행 파일을
-적는 일과 서버 재시작은 별도 단계입니다.
+`runtime.toml`은 고치지 않습니다. `masc browser-lane-setup --mode ego` 로
+`[browser.live.ego]` 를 쓰는 일과 서버 재시작은 별도 단계입니다.
 
 ## 설치
 
@@ -411,7 +405,7 @@ MCP 서버만 필요하면 `masc start --base-path "$HOME/masc-workspace"`를 �
 ### `imp`에게 브라우저와 GitHub 로그인 주기
 
 setup 여정은 샌드박스 다음에 **5 · Give imp tools (optional)** 를 묻습니다. 체크 목록 하나이고
-GitHub, 웹 검색 줄은 체크된 채로, 직접 고르는 Firefox 연결 두 줄과 ego lite 줄,
+GitHub, 웹 검색 줄은 체크된 채로, ego lite 줄,
 z.ai 줄, SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에는 아무것도 설치하거나 쓰지 않습니다.
 모든 줄의 체크를 해제하면 아무것도 하지 않고 넘어갑니다(번호로 고르는 화면에서는 `0`을 입력하세요).
 
@@ -452,23 +446,15 @@ z.ai 줄, SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에�
   JSON 에 답하지 않거나, 일시정지, 재시작 중이거나, Docker 가 시작할 수 없는 상태일 때입니다.
   컨테이너가 이런 상태면 다음에 실행할 Docker 명령(`docker logs`, `docker unpause`,
   `docker inspect`)을 화면에 알려 줍니다.
-- **Firefox 연결 줄(체크 안 됨).** Firefox 를 찾았을 때만 한 줄이 더 나옵니다. MASC 가
-  `imp` 전용 Firefox 를 로컬 포트의 원격 디버깅으로 직접 띄웁니다(*BiDi*,
-  `masc browser-lane-setup --mode bidi`). `imp`가 일하는 사이트에 한 번 로그인하면 됩니다.
-  그 포트에는 인증이 없어서 이 컴퓨터의 어떤 프로그램이든 그 브라우저를 움직이고 쿠키를
-  읽을 수 있습니다. 이 줄은 `masc setup` 이 서버를 시작하기 전에 씁니다. Firefox 를 못 찾으면
-  나오지 않습니다.
 - **ego lite(체크 안 됨).** `ego-browser` 가 `PATH` 나 `~/.local/bin`(ego lite 첫 실행이 두는 곳)에서
   답하면 [ego lite](https://lite.ego.app/) 를 연결하는 줄이 하나 더 나옵니다. 고르면
   `masc browser-lane-setup --mode ego` 를 실행해서 `runtime.toml` 에 `[browser.live.ego]` 표를 씁니다.
   그러면 browser Add-on 이 ego lite 에 `masc-keepers` 라는 작업 공간을 열고 live 연결로 붙입니다.
   ego lite 에 사용자가 만든 같은 이름의 공간이 있으면 setup 이 거절하고, ego lite 가 공간 목록을
-  주지 않으면 아무것도 쓰지 않습니다. ego lite 를 켜 두세요. 거절되면 같은 실행의 다른 browser 줄도
-  쓰지 않습니다. `imp` 는
+  주지 않으면 아무것도 쓰지 않습니다. ego lite 를 켜 두세요. `imp` 는
   그 공간의 탭만 보고, 그 안에서 자기가 연 페이지에만 클릭하고 입력합니다. 그 페이지들은 ego lite
   프로필의 쿠키를 같이 써서, `imp` 가 로그인된 사이트에서 사용자 이름으로 읽고 움직입니다.
-  Firefox 는 필요 없습니다. BiDi 줄과 같이 고르면 연결을 지정하지 않은 요청은 모호하다고
-  거절됩니다. 서버는 시작할 때 이 표를 읽어서, 이미 떠 있는 서버는 다시 시작해야 하고 여정이
+  서버는 시작할 때 이 표를 읽어서, 이미 떠 있는 서버는 다시 시작해야 하고 여정이
   그렇게 알려 줍니다.
 
 빠른 설치는 모든 줄과 줄마다 명령, 체크됐을 줄인지를 보여 주기만 합니다. 프로그램의 `--version`과
@@ -476,8 +462,6 @@ z.ai 줄, SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에�
 확인합니다. 설치하거나 쓰는 것은 없습니다. 나중에 직접 실행하려면 다음과 같이 합니다.
 
 ```bash
-# BiDi 줄: MASC 가 띄우는 전용 Firefox
-masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
 # ego lite 줄: ego lite 안의 작업 공간
 masc browser-lane-setup --mode ego --base-path "$HOME/masc-workspace"
 # 웹 검색 줄: 어느 공급자에 키가 있는지(아무것도 쓰지 않음)

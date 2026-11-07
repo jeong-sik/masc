@@ -559,8 +559,7 @@ let scenario mode =
           let first=answered (issue (workflow "#dialog")) in
           check bool "original dialog input retains its partial outcome" true
             (field "ok" first=`Bool false && field "effectPhase" first=`String "partial");
-          ignore(answered (issue (B.Page_act (B.Action.On_tab {tab_id=1;frame_path=[];
-            interaction=B.Action.Accept_dialog None}))));
+          ignore(answered (issue (B.Page_act (B.Action.On_tab {tab_id=1;interaction=B.Action.Accept_dialog None}))));
           check string "the interrupted input is reported unconfirmed" "release_uncertain"
             (Yojson.Safe.Util.to_string (field "inputReadiness" (field "data" first)));
           let continued=answered (issue (workflow "#continue")) in
@@ -593,7 +592,7 @@ let scenario mode =
         check string "a move on it" {|{"ok":true,"data":{"inputReadiness":"command_settled","tabId":2,"action":"goto","url":"https://fixture.test/next","title":"Moved"}}|}
           moved;
         let clicked_at, clicked = process_and_rest "a click"
-            (answered (issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Click "#send"}))) in
+            (answered (issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";action=B.Click "#send"}))) in
         check string "a click" {|{"ok":true,"data":{"inputReadiness":"command_settled","tabId":1,"action":"click","selector":"#send","urlBefore":"https://fixture.test/","url":"https://fixture.test/","title":"Fixture"}}|}
           clicked;
         check bool "one SDK process ran the three commands, and every answer says when it started" true
@@ -630,7 +629,7 @@ let scenario mode =
            worker's own copies, and they stay until the space has ended. *)
         let source = Filename.concat root "note.txt" in
         write source "hello"; Unix.chmod source 0o600;
-        let upload = B.Page_act (B.Action.On_tab {tab_id=1;frame_path=[];interaction=B.Action.Upload {target=B.Action.File_input "#file";paths=[source]}}) in
+        let upload = B.Page_act (B.Action.On_tab {tab_id=1;interaction=B.Action.Upload {target=B.Action.File_input "#file";paths=[source]}}) in
         let grant = "0b000000-0000-4000-8000-000000000072" in
         check bool "the upload is staged for this connection" true
           (dispatch (W.Upload_stage {id=grant;actor;route;verb=upload}) = W.Receipt);
@@ -645,13 +644,13 @@ let scenario mode =
             (Yojson.Safe.Util.to_list (Yojson.Safe.from_string (read (Filename.concat root "uploaded")))) in
         check bool "ego was given the worker's copies" true
           (copies <> [source] && List.for_all Sys.file_exists copies);
-        let activated=answered (issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Activate_tab})) in
+        let activated=answered (issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";action=B.Activate_tab})) in
         let activation_data=Yojson.Safe.Util.member "data" activated in
         check bool "native activation crosses the worker boundary with its observed window" true
           Yojson.Safe.Util.(member "active" activation_data = `Bool true
             && member "stateAfter" (member "window" activation_data) = `String "normal");
         check bool "an input the table refuses never reaches ego" true
-          (match issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";frame_path=[];action=B.Tap_at {point={x=0.5;y=0.5};viewport={document_id="d1";width=800.;height=600.;scroll_x=0.;scroll_y=0.}}}) with
+          (match issue (B.Page_interact {tab_id=1;expected_url=Some "https://fixture.test/";action=B.Tap_at {point={x=0.5;y=0.5};viewport={document_id="d1";width=800.;height=600.;scroll_x=0.;scroll_y=0.}}}) with
            | W.Issue_result (Error (B.Transport_unsupported _)) -> true
            | W.Issue_result (Ok _ | Error _) | Snapshot_result _ | Download_reply _
            | Poll_result _ | Receipt | Service_refusal _ -> false);

@@ -1,5 +1,3 @@
-type live_bidi = { firefox : string; profile : string; port : int }
-[@@deriving show, eq]
 type ego_space = Named_space of string | Existing_space of int
 [@@deriving show, eq]
 let validate_ego_space = function
@@ -10,15 +8,12 @@ let validate_ego_space = function
 type live_ego = { command : string; space : ego_space }
 [@@deriving show, eq]
 type t = {
-  live_bidi : live_bidi option;
   live_ego : live_ego option;
 }
 [@@deriving show, eq]
 
 let browser_table = Runtime_toml_namespace.(key Browser)
-let default_live_bidi_port = 9222
-let max_port = 65535
-let none = { live_bidi = None; live_ego = None }
+let none = { live_ego = None }
 open Result.Syntax
 
 let table ~path ~keys = function
@@ -48,30 +43,6 @@ let absolute ~path entries key =
         | TomlLocalTime _ | TomlArray _ | TomlTable _ | TomlInlineTable _
         | TomlTableArray _) ->
     Error (path ^ "." ^ key ^ " must be a non-empty absolute path")
-
-let port ~path entries =
-  match List.assoc_opt "port" entries with
-  | None -> Ok default_live_bidi_port
-  | Some (Otoml.TomlInteger value) when value >= 1 && value <= max_port -> Ok value
-  | Some
-      Otoml.(
-        TomlString _ | TomlInteger _ | TomlFloat _ | TomlBoolean _
-        | TomlOffsetDateTime _ | TomlLocalDateTime _ | TomlLocalDate _
-        | TomlLocalTime _ | TomlArray _ | TomlTable _ | TomlInlineTable _
-        | TomlTableArray _) ->
-    Error (Printf.sprintf "%s.port must be an integer from 1 to %d" path max_port)
-
-(* A table that is there names a Firefox to start, so both paths are needed. *)
-let parse_live_bidi ~path = function
-  | None -> Ok None
-  | Some entries ->
-    let* firefox = absolute ~path entries "firefox" in
-    let* profile = absolute ~path entries "profile" in
-    let* port = port ~path entries in
-    (match firefox, profile with
-     | Some firefox, Some profile -> Ok (Some { firefox; profile; port })
-     | None, _ -> Error (path ^ ".firefox is required when the table is configured")
-     | Some _, None -> Error (path ^ ".profile is required when the table is configured"))
 
 let space ~path entries =
   match List.assoc_opt "space" entries with
@@ -104,7 +75,6 @@ let parse_live_ego ~path = function
      | Some _, None -> Error (path ^ ".space is required when the table is configured"))
 
 let live_path = browser_table ^ ".live"
-let live_bidi_path = live_path ^ ".bidi"
 let live_ego_path = live_path ^ ".ego"
 
 let parse toml =
@@ -112,26 +82,20 @@ let parse toml =
     ~keys:["live"]
     (Otoml.find_opt toml Fun.id [browser_table]) in
   let root = fields root in
-  let* live_table = table ~path:live_path ~keys:["bidi"; "ego"] (List.assoc_opt "live" root) in
-  let* live_bidi_table = table ~path:live_bidi_path
-    ~keys:["firefox"; "profile"; "port"] (List.assoc_opt "bidi" (fields live_table)) in
-  let* live_bidi = parse_live_bidi ~path:live_bidi_path live_bidi_table in
+  let* live_table = table ~path:live_path ~keys:["ego"] (List.assoc_opt "live" root) in
   let* live_ego_table = table ~path:live_ego_path
     ~keys:["command"; "space"] (List.assoc_opt "ego" (fields live_table)) in
   let* live_ego = parse_live_ego ~path:live_ego_path live_ego_table in
-  Ok { live_bidi; live_ego }
+  Ok { live_ego }
 
 type _ source =
-  | Live_bidi : live_bidi source
   | Live_ego : live_ego source
 
 let source_path : type a. a source -> string = function
-  | Live_bidi -> live_bidi_path
   | Live_ego -> live_ego_path
 
 let source_table : type a. a source -> t -> a option = fun source t ->
   match source with
-  | Live_bidi -> t.live_bidi
   | Live_ego -> t.live_ego
 
 (* The file parser returns most syntax errors but raises on a repeated

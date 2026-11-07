@@ -113,36 +113,6 @@ let test_presentation_install_is_workspace_owned () =
   check int "venv failure cannot install a package into another Python" 1 (List.length !calls);
   check bool "failed environment creation remains failed" true (match outcome with P.Failed _ -> true | _ -> false)
 
-(* Firefox is the program the live BiDi lane starts. On a mac it is one
-   Homebrew step and needs no administrator; on Linux the package names differ
-   by distribution, so the catalog opens the project's own page rather than
-   guess one. *)
-let test_browser_tools_use_the_selected_package_manager () =
-  List.iter (fun (dependency, id, expected) ->
-    let action = find id (P.catalog ~host:(mac S.Arm64 26) ~distribution:P.Other dependency) in
-    check bool "Homebrew needs no administrator" false action.requires_admin;
-    match action.action_effect with
-    | P.Run_commands steps -> check (list (list string)) "explicit Homebrew command" expected steps
-    | _ -> fail "a mac install must be a command")
-    [P.Firefox, "firefox_brew_install", [["brew";"install";"--cask";"firefox"]]];
-  List.iter (fun distribution ->
-    List.iter (fun (dependency, id) ->
-      let actions = P.catalog ~host:(S.Linux S.X64) ~distribution dependency in
-      check int "one action and no guessed package command" 1 (List.length actions);
-      let action = find id actions in
-      check bool "opening a page needs no administrator" false action.requires_admin;
-      match action.action_effect with
-      | P.Open_official_installer {url; argv} ->
-        check bool "an https page" true (String.starts_with ~prefix:"https://" url);
-        check (list string) "URL passed as one argv item" ["xdg-open"; url] argv
-      | _ -> fail "Linux must open the project's page")
-      [P.Firefox, "firefox_install_instructions"])
-    [P.Debian; P.Ubuntu; P.Other];
-  List.iter (fun dependency ->
-    check int "nothing is offered on an unsupported host" 0
-      (List.length (P.catalog ~host:S.Unsupported ~distribution:P.Other dependency)))
-    [P.Firefox]
-
 (* ego lite installs as a macOS app whose onboarding puts ego-browser on PATH,
    so a mac gets its download page and nothing to run; it has no Linux build. *)
 let test_ego_lite_is_a_download_page_on_a_mac_only () =
@@ -167,7 +137,7 @@ let test_browser_tool_actions_write_no_file () =
         check (option string) "no file is left behind" None action.writes)
         (P.catalog ~host ~distribution:P.Ubuntu dependency))
       [mac S.Arm64 26; S.Linux S.X64])
-    [P.Firefox; P.Ego_browser]
+    [P.Ego_browser]
 
 module B = Masc.Browser_runtime_dependencies
 
@@ -240,7 +210,7 @@ let test_a_name_on_path_resolves_to_an_absolute_path () =
     (fun dir path ->
        let inherited = Option.value (Sys.getenv_opt "PATH") ~default:"/usr/bin:/bin" in
        with_env "PATH" (dir ^ ":" ^ inherited) (fun () ->
-         match B.observe B.Firefox with
+         match B.first_answer ~label:"firefox" ["firefox"] with
          | B.Started {path = answered; _} ->
            check string "the PATH entry's file" path answered;
            check bool "the path is absolute" false (Filename.is_relative answered)
@@ -260,7 +230,7 @@ let test_a_relative_path_is_reported_by_its_absolute_path () =
            | B.Missing _ | B.Failed _ -> fail (label ^ ": must start") in
          expect_absolute "relative command" (B.probe "./firefox");
          with_env "PATH" ".:/usr/bin:/bin" (fun () ->
-           expect_absolute "relative PATH entry" (B.observe B.Firefox))))
+           expect_absolute "relative PATH entry" (B.first_answer ~label:"firefox" ["firefox"]))))
 
 (* A shell searching PATH skips a file it may not execute, and so does the
    check: such a file is not a program, and a directory is not one either. *)
@@ -329,28 +299,6 @@ let test_the_first_program_that_answers_ends_the_walk () =
      | B.Missing command -> check string "an empty list names the program" "fx" command
      | B.Started _ | B.Failed _ -> fail "no candidate is missing"))
 
-(* Firefox on macOS is inside its application bundle, system-wide or in the
-   user's own Applications folder. A HOME that is not absolute lists nothing
-   that would only mean something from one directory. *)
-let test_firefox_bundle_locations_follow_an_absolute_home () =
-  with_env "HOME" "/Users/fixture" (fun () ->
-    check bool "the user's Applications folder is listed" true
-      (List.mem "/Users/fixture/Applications/Firefox.app/Contents/MacOS/firefox"
-         (B.candidates B.Firefox)));
-  List.iter (fun home ->
-    with_env "HOME" home (fun () ->
-      check bool "only absolute bundle locations" true
-        (List.for_all (fun c -> String.equal c "firefox" || not (Filename.is_relative c))
-           (B.candidates B.Firefox))))
-    [""; "relative/home"];
-  with_env "HOME" "/Users/fixture" (fun () ->
-    check (list string) "ego-browser on PATH, then where ego lite's onboarding links it"
-      ["ego-browser"; "/Users/fixture/.local/bin/ego-browser"] (B.candidates B.Ego_browser));
-  List.iter (fun home ->
-    with_env "HOME" home (fun () ->
-      check (list string) "no relative place for ego-browser" ["ego-browser"] (B.candidates B.Ego_browser)))
-    [""; "relative/home"]
-
 let finished_ego = "#!/bin/sh\necho 'ego-browser 0.6.0.16'\necho '  chromium 154.0.8037.44'\n"
 (* What an ego lite whose onboarding is not finished is taken to print. *)
 let unfinished_ego = "#!/bin/sh\necho 'ego-browser 0.6.0.16'\n"
@@ -379,8 +327,6 @@ let test_an_ego_browser_answers_only_with_its_versions () =
        check bool "it says which versions were missing" true
          (String.starts_with ~prefix:"ego-browser --version named no ego lite" detail)
      | B.Started _ | B.Failed _ | B.Missing _ -> fail "an ego-browser without its versions answered");
-    check bool "the same output answers for Firefox" true
-      (B.available (B.probe_program B.Firefox unfinished));
     with_directory (fun home ->
       let local = Filename.concat home ".local" in
       let bin = Filename.concat local "bin" in
@@ -401,7 +347,7 @@ let test_an_ego_browser_answers_only_with_its_versions () =
 let test_the_readiness_json_uses_the_shared_status_words () =
   with_executable ~name:"firefox" "#!/bin/sh\necho 'Mozilla Firefox 7.7.7'\n"
     (fun _ path ->
-       let json = B.to_json B.Firefox (B.probe path) in
+       let json = B.to_json B.Ego_browser (B.probe path) in
        let member key value = Yojson.Safe.Util.member key value in
        check string "schema" "masc.browser_tools_readiness.v1"
          (Yojson.Safe.Util.to_string (member "schema" json));
@@ -412,7 +358,7 @@ let test_the_readiness_json_uses_the_shared_status_words () =
          check string "row status" "started" (Yojson.Safe.Util.to_string (member "status" row));
          check string "row path" path (Yojson.Safe.Util.to_string (member "path" row))
        | _ -> fail "one program is one row");
-  let missing = B.to_json B.Firefox (B.Missing "firefox") in
+  let missing = B.to_json B.Ego_browser (B.Missing "ego-browser") in
   check string "unavailable" "unavailable"
     (Yojson.Safe.Util.to_string (Yojson.Safe.Util.member "status" missing))
 
@@ -1030,8 +976,6 @@ let () = run "prerequisite actions" ["user-selected plans",[
   test_case "official client install selection" `Quick test_official_clients_are_explicit_and_not_ready;
   test_case "presentation workspace parser and host renderer" `Quick test_presentation_install_is_workspace_owned;
   test_case "PDF package manager selection" `Quick test_pdf_tools_reuse_selected_package_managers;
-  test_case "browser tool package manager selection" `Quick
-    test_browser_tools_use_the_selected_package_manager;
   test_case "browser tool actions write no file" `Quick test_browser_tool_actions_write_no_file;
   test_case "a program that answers is available at an absolute path" `Quick
     test_a_program_that_answers_is_available_at_an_absolute_path;
@@ -1049,8 +993,6 @@ let () = run "prerequisite actions" ["user-selected plans",[
     test_a_file_that_cannot_be_executed_is_missing;
   test_case "the first program that answers ends the walk" `Quick
     test_the_first_program_that_answers_ends_the_walk;
-  test_case "Firefox bundle locations follow an absolute HOME" `Quick
-    test_firefox_bundle_locations_follow_an_absolute_home;
   test_case "ego lite is a download page on a mac only" `Quick
     test_ego_lite_is_a_download_page_on_a_mac_only;
   test_case "an ego-browser answers only with its versions" `Quick

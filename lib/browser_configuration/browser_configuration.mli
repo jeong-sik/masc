@@ -1,21 +1,12 @@
 (** The [\[browser\]] table of [runtime.toml]. No process is started and no
     file is read while parsing.
 
-    [live_bidi] ([\[browser.live.bidi\]], RFC-browser-keeper-firefox §3.1):
-    the Keeper Firefox the browser Add-on starts with its own BiDi peer. [firefox]
-    is the Firefox executable, [profile] the operator-owned profile it opens,
-    which keeps the operator's logins, and [port] its
-    [--remote-debugging-port]. Both paths are required; [port] defaults to
-    {!default_live_bidi_port}.
-
     [live_ego] ([\[browser.live.ego\]], RFC-browser-live-ego §7): the ego
     lite task space the browser Add-on serves as a live connection.
     [command] is the absolute path of [ego-browser]; [space] is a name to
     create/resume, or an existing numeric Space ID to resume exactly.
     Both are required. Neither grants takeover or claim authority. *)
 
-type live_bidi = { firefox : string; profile : string; port : int }
-[@@deriving show, eq]
 type ego_space = Named_space of string | Existing_space of int
 [@@deriving show, eq]
 val validate_ego_space : ego_space -> (unit, string) result
@@ -24,16 +15,12 @@ val validate_ego_space : ego_space -> (unit, string) result
 type live_ego = { command : string; space : ego_space }
 [@@deriving show, eq]
 type t = {
-  live_bidi : live_bidi option;
   live_ego : live_ego option;
 }
 [@@deriving show, eq]
 
 (** How each source starts, never whether it runs: a source runs while its
     Lane Add-on declaration is switched on. *)
-
-(** The port the attach steps have always used (docs/design/browser-bidi-live-host.md). *)
-val default_live_bidi_port : int
 
 (** No backend configured. *)
 val none : t
@@ -52,7 +39,6 @@ val of_text : string -> (t, string) result
 (** A source that starts from a runtime.toml table, with what that table
     parses to. *)
 type _ source =
-  | Live_bidi : live_bidi source
   | Live_ego : live_ego source
 
 (** Where runtime.toml writes [source]'s table. *)

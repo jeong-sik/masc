@@ -1,11 +1,9 @@
 (** Host-selected socket resource of a native browser installation. Blocking
     filesystem operations must be offloaded by the server caller. *)
 type t
-(** The one browser source an allocation's worker serves, with the browser it
-    starts: a live Firefox for the owned BiDi connection. Ego's settings ride
-    the worker's arguments. *)
+(** The one browser source an allocation's worker serves. Ego's settings
+    ride the worker's arguments. *)
 type source =
-  | Owned_firefox of Browser_addon_live_bidi.configuration
   | Ego
 val context : instance_id:string -> source:source -> (Yojson.Safe.t, string) result
 (** Selects a private per-instance socket directory without creating it. Persist
@@ -16,8 +14,8 @@ val check_retained : instance_id:string -> slot:string -> Yojson.Safe.t option -
     envelope and socket acquisition record in [slot]. An operator-retained
     allocation needs no backend decoding or child inspection: its resources
     belong to the operator. An explicit released record instead requires its
-    original allocation path to be absent. Other states compare each live BiDi
-    child claim with its original descriptor. [None] permits no
+    original allocation path to be absent. Other states decode the original
+    descriptor. [None] permits no
     allocation record except an explicit released record. *)
 val acquire : admission:Native_addon_lease.t -> directory:string -> (t, string) result
 (** Before payload spawn, acquire the directory selected by the original native
@@ -59,8 +57,7 @@ val cleanup : admission:Native_addon_lease.t -> directory:string -> kept_root:st
     backend configuration or inspecting its children or contents. The original
     claim, descriptor envelope and acquisition record must still agree.
 
-    Once the browser's child claims are settled and the directory is the one
-    acquired, any regular single-link file of this user under [uploads],
+    Once the directory is the one acquired, any regular single-link file of this user under [uploads],
     [download-snapshots] or [downloads] moves every one of those trees by
     rename into [kept_root/<instance id>], and the release goes on. Nothing
     the browser left for the Keeper is copied or deleted. [kept_root] and the
@@ -82,14 +79,13 @@ type retain_error =
           it finds. *)
 val retain : admission:Native_addon_lease.t -> directory:string -> (settlement, retain_error) result
 (** The operator takes over an allocation whose release could not be confirmed.
-    The claim must be Settled and each live BiDi child claim must
-    already be Settled; unlike {!cleanup}, nothing is retired or signalled.
+    The claim must be Settled; unlike {!cleanup}, nothing is retired or
+    signalled.
     The allocation's contents are not read or removed: the acquisition record
     becomes [retained] with the recorded directory identity, or, with no
     record, the identity of the private directory found at this instance's own
-    path. Only the child configurations needed to confirm settlement are
-    decoded; browser and model payloads are not execution authority for this
-    handoff. A repeated retain reads only the envelope and retained record.
+    path. Only the source's backend name is decoded; browser payloads are not
+    execution authority for this handoff. A repeated retain reads only the envelope and retained record.
     With no acquisition record, the full current descriptor is still required.
     An allocation already released is reported as [Allocation_released] and
     left as it is. *)

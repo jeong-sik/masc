@@ -5,15 +5,15 @@ let expect message condition = if not condition then failwith message
 let success = function Ok value -> value | Error detail -> failwith detail
 let tab id title = `Assoc ["id", `Int id; "title", `String title;
                            "url", `String "https://example.org/"; "active", `Bool (id = 2)]
-let firefox = { client_id = "11111111-1111-4111-8111-111111111111"; browser = Firefox;
-                transport = Browser_lane.Webdriver_bidi; space = None; space_observation = None; interactions = []; last_activities = [] }
+let firefox = { client_id = "11111111-1111-4111-8111-111111111111"; browser=Ego_lite;
+                transport=Browser_lane.Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"}; space_observation = None; interactions = []; last_activities = [] }
 let other = { firefox with client_id = "22222222-2222-4222-8222-222222222222" }
 let pinned () = choose_client firefox { (create ()) with clients = Some [firefox; other] }
 (* A connection list with no inventory report. *)
 let found listed = { listed;
   inventory_report = Inventory_not_reported; automatic = None; unavailable = Backends_not_reported }
 
-(* A second BiDi connection. *)
+(* A second connection in the same ego space. *)
 let bidi = { firefox with client_id = "33333333-3333-4333-8333-333333333333" }
 let response ?(source="live") ?(client=firefox.client_id) ?(page_id=2) () =
   `Assoc ["ok", `Bool true; "data", `Assoc [
@@ -165,15 +165,13 @@ let test_pointer_decision () =
   let on_ego = shot ego.client_id and on_bidi = shot bidi.client_id in
   let unserved serving_listed =
     {asked = Browser_lane.Ego_task_space; capability = Browser_lane.Touch_input; serving_listed} in
-  expect "a tap on ego is not sent, and a listed BiDi connection is known"
-    (pointer_decision both on_ego (tap on_ego) = Pointer_unserved (unserved true));
-  expect "with no BiDi connection listed the decision says so"
-    (pointer_decision alone on_ego (tap on_ego) = Pointer_unserved (unserved false));
-  expect "a point click, a wheel notch and a drag are sent on either connection"
+  expect "a tap on ego is not sent, and no listed connection serves it"
+    (pointer_decision both on_ego (tap on_ego) = Pointer_unserved (unserved false)
+     && pointer_decision alone on_ego (tap on_ego) = Pointer_unserved (unserved false));
+  expect "a point click, a wheel notch and a drag are sent on each connection"
     (List.for_all (fun (shot : screenshot) ->
        sends both shot (click shot) && sends both shot (wheel shot) && sends both shot (drag shot))
        [on_ego; on_bidi]);
-  expect "a tap is sent on BiDi" (sends both on_bidi (tap on_bidi));
   expect "a connection the view no longer holds is left to the server"
     (sends (create ()) on_ego (tap on_ego));
   let busy_view = { both with load = Loading (3, Read) } in
@@ -464,14 +462,15 @@ let test_page_context_decode () =
     ((success (parse_tab value)).ego_page=Some unknown)
 
 let test_clients_decode () =
-  let row ?(transport="webdriver_bidi") ?(space=`Null) ?(observation=`Null) id browser =
+  let row ?(transport="ego_task_space") ?(space=`Assoc ["id",`Int 61;"name",`String "fixture Space"])
+      ?(observation=`Null) id browser =
     `Assoc ["clientId", `String id; "browser", `String browser; "transport", `String transport; "space",space;
       "spaceObservation",observation; "interactions", `List []; "lastActivities", `List []] in
   let envelope rows = `Assoc ["ok", `Bool true; "data", `Assoc ["clients", `List rows]] in
   let bidi = other in
   let clients = success (decode_clients (envelope
-    [row firefox.client_id "firefox"; row bidi.client_id "firefox"])) in
-  expect "one Firefox retains two distinct clients" (clients = [firefox; bidi]);
+    [row firefox.client_id "ego_lite"; row bidi.client_id "ego_lite"])) in
+  expect "one ego space retains two distinct clients" (clients = [firefox; bidi]);
   let space : Browser_lane.ego_space = {id=51;name="SDK Space"} in
   let ego={bidi with browser=Ego_lite;transport=Browser_lane.Ego_task_space;space=Some space} in
   expect "Ego inventory preserves the observed Space identity"
@@ -491,8 +490,6 @@ let test_clients_decode () =
      Masc.Browser_ego_space_observation.to_json {observed with observed_at=infinity};
      Masc.Browser_ego_space_observation.to_json {observed with ownership=" "};
      (match observed_json with `Assoc fields -> `Assoc (("ownership",`String "other")::fields) | _ -> assert false)];
-  expect "non Ego transport cannot publish Space control metadata"
-    (Result.is_error (decode_clients (envelope [row ~observation:observed_json firefox.client_id "firefox"])));
   expect "missing metadata field is not silently treated as unknown"
     (Result.is_error (decode_clients (envelope [match observed_row observed_json with
       | `Assoc fields -> `Assoc (List.remove_assoc "spaceObservation" fields) | _ -> assert false])));
@@ -527,16 +524,17 @@ let test_clients_decode () =
     (not read && changed.selected_tab=None && changed.selected_client=Some ego);
   List.iter (fun value -> expect "invalid Space identity is refused by the TUI inventory"
     (Result.is_error (decode_clients (envelope [value]))))
-    [row ~transport:"ego_task_space" ego.client_id "ego_lite";
+    [row ~space:`Null ego.client_id "ego_lite";
      row ~space:(Browser_lane.ego_space_to_json space) firefox.client_id "firefox"];
   expect "picker identifies the trusted hover connection"
-    (browser_choice_label (Connected_browser bidi) = "Firefox · " ^ bidi.client_id ^ " · existing login");
+    (browser_choice_label (Connected_browser bidi)
+     = "ego lite · " ^ bidi.client_id ^ " · Space #61 · fixture Space · existing login");
   List.iter (fun rows -> expect "invalid client inventory rejected" (Result.is_error (decode_clients (envelope rows))))
-    [[row "" "firefox"]; [row other.client_id "unknown"]; [row other.client_id "other"];
-     [row other.client_id "firefox"; row other.client_id "firefox"];
-     [row ~transport:"unknown" firefox.client_id "firefox"];
-     [row ~transport:"web_extension" firefox.client_id "firefox"];
-     [`Assoc ["clientId", `String firefox.client_id; "browser", `String "firefox"]]];
+    [[row "" "ego_lite"]; [row other.client_id "unknown"]; [row other.client_id "other"];
+     [row other.client_id "ego_lite"; row other.client_id "ego_lite"];
+     [row ~transport:"unknown" firefox.client_id "ego_lite"];
+     [row ~transport:"webdriver_bidi" firefox.client_id "ego_lite"];
+     [`Assoc ["clientId", `String firefox.client_id; "browser", `String "ego_lite"]]];
   let missing_id = `Assoc ["ok", `Bool true; "data", `Assoc [
     "source", `String "live"; "clientId", `Null; "elapsed_ms", `Int 0;
     "tabs", `List []; "page", `Null]] in
@@ -711,8 +709,9 @@ let test_failed_discovery_retains_startup_observation () =
     (failed.unavailable=unreadable)
 
 let test_backend_report_discovery () =
-  let row id = `Assoc ["clientId", `String id; "browser", `String "firefox";
-                       "interactions", `List []; "lastActivities", `List []; "transport", `String "webdriver_bidi";"space",`Null;"spaceObservation",`Null] in
+  let row id = `Assoc ["clientId", `String id; "browser", `String "ego_lite";
+                       "interactions", `List []; "lastActivities", `List []; "transport", `String "ego_task_space";
+                       "space",`Assoc ["id",`Int 61;"name",`String "fixture Space"];"spaceObservation",`Null] in
   let answer extra =
     `Assoc ["ok", `Bool true; "data", `Assoc (("clients", `List [row firefox.client_id]) :: extra)] in
   expect "a server that says nothing more still lists its connections"

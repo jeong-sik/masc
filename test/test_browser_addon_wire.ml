@@ -16,18 +16,17 @@ let roundtrips () =
     Page_snapshot {tab_id=7;max_chars=1000;scope=B.Snapshot_viewport};
     Page_snapshot {tab_id=7;max_chars=1000;scope=B.Snapshot_full_page};
     Page_snapshot {tab_id=7;max_chars=1000;scope=B.Snapshot_subtree 12};
-    Page_interact {frame_path=[];tab_id=7;expected_url=Some "https://example.org";action=B.Fill_node {target={document_id="doc";node_id="edit"};text=""}};
+    Page_interact {tab_id=7;expected_url=Some "https://example.org";action=B.Fill_node {target={document_id="doc";node_id="edit"};text=""}};
     Page_goto {url="https://example.org";tab_id=Some 7};Page_elements {tab_id=Some 7;filter={within=None;selector=None}};
     Page_elements {tab_id=None;filter={within=Some "nav[aria-label=\"Channels\"] > ul";selector=Some "[role=row]"}};
-    Page_context {tab_id=7;frame_path=["#frame"];mode=`Elements {within=Some "#sidebar";selector=None}};
-    Page_act (B.Action.On_tab {tab_id=7;frame_path=["#frame"];interaction=B.Action.Upload {target=B.Action.File_input "#edit";paths=["/staged/a.txt"]}});
+    Page_context {tab_id=7};
+    Page_act (B.Action.On_tab {tab_id=7;interaction=B.Action.Upload {target=B.Action.File_input "#edit";paths=["/staged/a.txt"]}});
     Page_act (B.Action.Control B.Action.Space_status);
     Page_act (B.Action.Control (B.Action.Finish_space (B.Action.Keep_labels ["p2"])));
     Page_act (B.Action.Control (B.Action.Finish_space B.Action.Keep_all));
     Page_act (B.Action.Control (B.Action.Wait_for_control {interval_ms=Some 0.5;timeout_ms=Some 100000.}));
     Page_act (B.Action.Control (B.Action.Adopt_tab {tab_id=7;label=Some "login"}));
-    Page_act (B.Action.Control (B.Action.Release_tab 7));
-    Page_context {tab_id=7;frame_path=["#frame"];mode=`Text 1000}] in
+    Page_act (B.Action.Control (B.Action.Release_tab 7))] in
   let hooks = ok (Masc.Lane_addon_tool_hooks.prepare
     ~hooks:[Validate_input] Masc.Browser_addon_tool.definition) in
   let public command = `Assoc ["lane",`String "live";
@@ -41,14 +40,13 @@ let roundtrips () =
   check bool "the same input hook rejects an unsupported wire verb" true
     (Result.is_error (Masc.Lane_addon_tool_hooks.before_call hooks
       (public (`Assoc ["verb",`String "page.unsupported";"args",`Assoc []]))))
-(* A native host may poll as the extension or a BiDi host; the ego
-   connection polls only from inside the worker. *)
+(* The ego connection polls only from inside the worker, never over the
+   socket. *)
 let a_native_host_cannot_poll_as_ego () =
   let poll transport =
-    let client = {B.client_id=id;browser=B.Ego_lite;version="0.6.0.16";engine_version="154.0.8037.44";transport;space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Webdriver_bidi -> None)} in
+    let client = {B.client_id=id;browser=B.Ego_lite;version="0.6.0.16";engine_version="154.0.8037.44";transport;space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space))} in
     W.of_json (W.to_json {W.incarnation;command=W.Poll {client;window_sec=1.}}) in
-  check bool "ego_task_space is refused" true (Result.is_error (poll B.Ego_task_space));
-  check bool "a BiDi host still polls" true (Result.is_ok (poll B.Webdriver_bidi))
+  check bool "ego_task_space is refused" true (Result.is_error (poll B.Ego_task_space))
 
 let rejections () =
   check bool "caller cannot choose a screenshot path" true
@@ -95,7 +93,7 @@ let results () =
      Ok (B.Rejected_before_effect "guard failed");Error (B.Selected_client_disconnected id);
      Error (B.Activity_rejected (B.Lane_off B.Lane_name.Live));Error (B.Activity_rejected B.Activity_unavailable);
      Error B.No_live_client;Error (B.Ambiguous_clients [id]);
-     Error (B.Transport_unsupported {client_id=id;transport=B.Webdriver_bidi;capability=B.Download_listing})];
+     Error (B.Transport_unsupported {client_id=id;transport=B.Ego_task_space;capability=B.Touch_input})];
   List.iter (fun reply -> check bool "service reply retained" true
     (ok (W.reply_of_json (W.reply_to_json reply))=reply))
     [W.Poll_result {command=None;state_id="snapshot-1"};
@@ -113,7 +111,7 @@ let commands_that_change_nothing () =
   List.iter (fun (name,command,expected) -> check bool name expected (W.changes_nothing command))
     ["snapshot",W.Snapshot,true;
      "idle document read",issue true,true;"browser command",issue false,false;"retire",W.Retire,false;
-     "native poll",W.Poll {client={B.client_id=id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi;space=None};window_sec=0.},false;
+     "native poll",W.Poll {client={B.client_id=id;browser=B.Ego_lite;version="158";engine_version="158";transport=B.Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"}};window_sec=0.},false;
      "disconnect",W.Disconnect id,false;
      "upload stage",W.Upload_stage {id="up";actor="keeper";route;verb=B.Tabs_list},false;
      "upload discard",W.Upload_discard "up",false;
@@ -133,7 +131,7 @@ let client_space_context () =
       (Result.is_error (W.client_of_json (`Assoc fields))))
       [List.remove_assoc "space" fields;("space",`Null)::fields;
        ("space",if transport=B.Ego_task_space then `Null else B.ego_space_to_json space)::List.remove_assoc "space" fields])
-    [B.Webdriver_bidi;B.Ego_task_space]
+    [B.Ego_task_space]
 
 let () = run "browser addon wire" ["boundary",[
   test_case "private client preserves strict Space context" `Quick client_space_context;

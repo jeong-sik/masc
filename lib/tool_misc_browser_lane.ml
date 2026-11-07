@@ -28,13 +28,12 @@ let required_actions args = match args with
   | _ -> Error "body must be a JSON object"
 
 (* The [mode] argument of BrowserRead, read once. The top-level reads take
-   the page as a whole; [frames] and [dialog] read a live connection's page
-   context. The tool schema's enum names the same values. *)
+   the page as a whole; [dialog] reads a live connection's open dialog. The tool schema's enum names the same values. *)
 type top_level_read =
   [ `Text | `Html | `Elements | `Scene | `Regions | `Snapshot | `Screenshot | `Downloads ]
 [@@deriving enumerate]
 
-type read_mode = [ top_level_read | `Frames | `Dialog ] [@@deriving enumerate]
+type read_mode = [ top_level_read | `Dialog ] [@@deriving enumerate]
 
 let read_mode_to_string : read_mode -> string = function
   | `Text -> "text"
@@ -45,7 +44,6 @@ let read_mode_to_string : read_mode -> string = function
   | `Snapshot -> "snapshot"
   | `Screenshot -> "screenshot"
   | `Downloads -> "downloads"
-  | `Frames -> "frames"
   | `Dialog -> "dialog"
 ;;
 
@@ -73,7 +71,7 @@ let retain_read_result ~base_path ~tool_name ~start_time args result =
   let retained = match read_mode_of_args args with
     | Ok `Scene -> Browser_observation.retain ~base_path ~view:Browser_lane.Content result
     | Ok `Regions -> Browser_observation.retain ~base_path ~view:Browser_lane.Regions result
-    | Ok (`Text | `Html | `Elements | `Snapshot | `Screenshot | `Downloads | `Frames | `Dialog) | Error _ -> Ok result in
+    | Ok (`Text | `Html | `Elements | `Snapshot | `Screenshot | `Downloads | `Dialog) | Error _ -> Ok result in
   match retained with
   | Ok result -> result
   | Error detail ->

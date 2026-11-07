@@ -97,9 +97,9 @@ Ego's native cursor label still identifies pointer actions. This activity list
 does not add a native Ego label for reads or waits; that browser-side visibility
 remains a separate gap.
 
-A live browser is reached over the owned Firefox's BiDi connection or an ego
-lite task space, and the two serve different work
-([the table](../design/browser-lane.md#what-each-live-connection-serves)). The
+A live browser is reached over an ego lite task space, and the connection
+serves the work in
+[the table](../design/browser-lane.md#what-each-live-connection-serves). The
 TUI reads that table in four places:
 
 - The selected connection row names the actual browser and client identity.
@@ -113,10 +113,6 @@ TUI reads that table in four places:
   `b:choose browser` when a serving connection is listed. The read badge does
   not change, because nothing was requested. The rows stay through the lane's
   own refreshes and go with the next key or click.
-
-A configured `[browser.live.bidi]` belongs to the attached `browser-firefox`
-Add-on, whose observation reports its owned Firefox and in-process peer
-([how](../design/browser-bidi-live-host.md)).
 
 An ego lite connection also belongs to the attached browser Add-on. On a Mac
 with ego lite installed and its onboarding finished,
@@ -148,7 +144,7 @@ reloaded. Ego does not reconnect automatically in that worker. To recheck a decl
 browser Add-on without removing its declaration, switch it off, wait until
 its application reports `Inactive` and cleanup is confirmed, then switch it on
 again ([package activity](lane-package-activity.md)). This restarts the whole
-worker, including its managed Firefox. A list refresh alone does not restart
+worker, including its ego SDK process. A list refresh alone does not restart
 it. After the restart, `b` opens and refreshes the Browser connection list;
 use `r` if the picker is already open.
 The list reports the worker's startup observation. If the listing itself fails,
@@ -168,7 +164,7 @@ of that one task space. It opens Pages and operates on native managed Pages
 there, including explicit adoption. Unknown-origin Pages are released rather
 than closed. It uses Ego's native snapshots, selectors and input, including hover,
 double-click, drag and option selection. Snapshot refs also address iframe
-content; explicit `framePath` and touch input are not supported. Keeper workflows
+content; touch input is not supported. Keeper workflows
 can focus an editor, type or insert text, paste text/HTML through Ego's native
 clipboard restoration, and wait for the result before returning a final snapshot
 ([what it serves](../design/browser-lane.md#what-each-live-connection-serves)).
@@ -198,10 +194,8 @@ The image is not staged or sent to a Keeper. PNG preview uses the terminal's
 existing image support; unsupported terminals receive an explanation in Browser.
 
 In screenshot view, click a visible link to activate it. Mouse wheel, arrows and
-`j`/`k` scroll the actual page, and `r` refreshes the screenshot. A live BiDi
-connection also supports pressing the left button, moving, and releasing to drag
-with trusted browser pointer actions; the footer says what the connection of
-the screenshot on screen takes.
+`j`/`k` scroll the actual page, and `r` refreshes the screenshot. The footer
+says what the connection of the screenshot on screen takes.
 Each completed action captures the resulting page again in the same Lane.
 
 Mouse coordinates require the terminal's measured cell size. If that measurement
@@ -251,7 +245,7 @@ fixtures, including equal tab IDs across clients, stale discovery, disconnected 
 and screenshot ownership. No local Dune build was run.
 
 
-## Gecko scene view
+## Scene view
 
 After reading a connected browser tab, press `s` to observe its viewport
 as real text and numbered elements. `Tab`/`Shift-Tab` move directly between enabled
@@ -333,7 +327,7 @@ TUI scene controls support clicking; literal text filling is available through
 `masc_browser_interact` with `documentId`/`nodeId` from `masc_browser_read` mode
 `scene`. A detached element or document reload requires a fresh observation.
 
-Source changes and script-level Gecko evidence alone do not establish that an
+Source changes and script-level evidence alone do not establish that an
 installed TUI has been updated.
 
 
@@ -389,8 +383,8 @@ per-region viewport/DOM content, not a channel-wide history collection.
 ### Explicit live tab activation
 
 `BrowserInteract action=activate_tab` takes an explicit live clientId/tabId with
-required expectedUrl. It selects the tab without changing or reloading its URL;
-on a BiDi connection it also focuses the browser window. This is a tool action;
+required expectedUrl. It selects the tab without changing or reloading its URL.
+This is a tool action;
 reads do not automatically activate tabs and no TUI shortcut is added. A successful receipt
 includes active=true, but callers must read again to verify rendered content.
 

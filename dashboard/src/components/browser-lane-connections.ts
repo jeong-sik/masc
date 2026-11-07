@@ -3,9 +3,9 @@ import type { LaneAddonInstance, LaneAddonRow } from '../api/lane-addons'
 import { parseBrowserConnections, type BrowserConnection, type BrowserInteraction } from '../api/browser-lane-connections'
 import { formatLaneTime } from './lane-addons-timeline'
 
-const browsers: Record<BrowserConnection['browser'], string> = { firefox: 'Firefox', ego_lite: 'Ego Lite' }
+const browsers: Record<BrowserConnection['browser'], string> = { ego_lite: 'Ego Lite' }
 const transports: Record<BrowserConnection['transport'], string> = {
-  ego_task_space: 'Ego TaskSpace', webdriver_bidi: 'WebDriver BiDi',
+  ego_task_space: 'Ego TaskSpace',
 }
 const outcomes: Record<BrowserConnection['lastActivities'][number]['outcome'], string> = {
   returned: 'Returned', refused: 'Not performed', partial: 'Partly performed', unknown: 'Outcome unknown',

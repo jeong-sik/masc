@@ -160,8 +160,7 @@ list is the slot directory together with the binding and observations of the
 instance it holds. A detached binding that names its declaration passes even
 when it does not parse, as declaration application passes it and keeps its
 fields as evidence; only a read of that one instance (Inspect by id, Observe,
-Detach) still fails on it. A Chrome or live BiDi child slot is read through the
-installation that holds it, so a child slot of an earlier instance is not read.
+Detach) still fails on it.
 The preflight only reads; it never moves these files.
 
 ## Containment and Rollback

@@ -121,19 +121,6 @@ check_runtime_config() {
     || fail "$RUNTIME_CONFIG_REJECTED (the helper verdict above names the key and the file); $next_step"
 }
 
-# An owned browser source declared by more than one enabled browser Add-on
-# declaration is used by none of them. The declarations are the operator's to
-# change, so the gate refuses and writes nothing. This runs before the stop
-# step, where a refusal stops nothing.
-check_browser_addon() {
-  # A helper built before this check answers an unknown command with a usage
-  # error, which must not read as a refusal of this workspace.
-  "$PREFLIGHT_HELPER" validate-browser-addon --help >/dev/null 2>&1 \
-    || fail "the preflight helper predates the browser Add-on check (it has no validate-browser-addon command): build the helper from this tree, then run this again"
-  "$PREFLIGHT_HELPER" validate-browser-addon --base-path "$BASE_PATH" \
-    || fail "more than one enabled browser Add-on declaration serves the same browser source (the helper verdict above names them); nothing was stopped or installed: disable or delete all but one through the running server's lane Add-on editor, then run this again"
-}
-
 run_gate() {
   local runtime_root="$BASE_PATH/.masc"
   local keepers_root="$runtime_root/keepers"
@@ -295,7 +282,6 @@ if [[ "$RUNTIME_CONFIG_ONLY" -eq 1 ]]; then
   [[ -d "$BASE_PATH" && ! -L "$BASE_PATH" ]] \
     || fail "base path is not an exact directory: $BASE_PATH"
   check_runtime_config "$RUNTIME_CONFIG_NEXT_BEFORE_STOP"
-  check_browser_addon
   printf '[runtime-deployment-preflight] OK: base_path=%s runtime_config_only=1%s\n' \
     "$BASE_PATH" "$(helper_identity)"
   exit 0

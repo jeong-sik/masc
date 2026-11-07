@@ -13,15 +13,11 @@ type check_id =
   | Keeper_declaration
   | Sandbox
   | Keeper_persistence
-  | Browser_bidi_host
-      (** Whether the Browser Addon starts the workspace's live Firefox
-          ([\[browser.live.bidi\]] and an enabled [browser-firefox]
-          declaration), and where its readiness is observed. *)
 
 (** Whether an [Invalid] check keeps the workspace's existing history from opening.
     [Required_to_open]: the workspace, a loadable runtime.toml and Keeper
     metadata the boot admits. [Advisory] checks — imp's model binding,
-    declaration and sandbox, and the live Firefox — are reported but never
+    declaration and sandbox — are reported but never
     send the operator back into setup. *)
 type role = Required_to_open | Advisory
 
@@ -66,13 +62,10 @@ type sandbox_observation =
     issues none. *)
 val inspect : sandbox:sandbox_observation -> base_path:string option -> t
 
-(** {!inspect} for a running server: who starts the Keeper Firefox is read
-    from the browser configuration it loaded, which its other answers use,
-    and not from the file. {!inspect} reads the workspace's [runtime.toml]
-    and uses its browser tables only when the whole file loads. It never
-    probes the sandbox ([Not_probed]): the server answers requests, and
-    [masc doctor] is where the backend's state is read. *)
-val inspect_loaded : configuration:Browser_configuration.t option -> base_path:string option -> t
+(** {!inspect} for a running server. It never probes the sandbox
+    ([Not_probed]): the server answers requests, and [masc doctor] is where
+    the backend's state is read. *)
+val inspect_loaded : base_path:string option -> t
 
 (** How the doctor reports one probed sandbox backend. [Service_ready] is
     [Needs_verification]: the service answered and no guest was booted.

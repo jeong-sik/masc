@@ -7377,8 +7377,8 @@ let browser_fixture_client : Browser_lane.client_info =
       (match Browser_lane.client_id_of_string browser_fixture_client_id with
        | Ok id -> id
        | Error detail -> failwith detail)
-  ; browser = Browser_lane.Firefox; version = "158.0.1"; engine_version = "158.0.1"
-  ; transport = Browser_lane.Webdriver_bidi; space = None }
+  ; browser=Browser_lane.Ego_lite; version = "158.0.1"; engine_version = "158.0.1"
+  ; transport=Browser_lane.Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"} }
 
 let test_composition_read_failure_preserves_same_turn
     ?(break_evidence = false) ~observe ~break_receipt ~terminal ~unknown_write () =

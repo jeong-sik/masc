@@ -21,17 +21,16 @@ let window_s verb = Browser_lane.reply_timeout_sec verb -. delivery_margin_s
 let read_window_s = window_s Browser_lane.Tabs_list
 (* page.goto and page.reload wait for the page's load within ego's own bound
    unless the call names one, and the server sets no deadline on these steps
-   (Browser_lane.ego_reply_policy). They name the command's reply window, the
-   wait the same command has on the extension and BiDi connections. *)
+   (Browser_lane.ego_reply_policy). They name the command's reply window. *)
 let navigation_timeout_ms verb = Float.to_int (Browser_lane.reply_timeout_sec verb *. 1000.)
 
-(* The same answers as the BiDi connection: what a page script reads on one
-   live connection it reads on the other. ego 0.6.0.16 carried a 3,000,003
-   unit answer line whole (2026-10-22). *)
-let answer_limit_units = Browser_bidi_peer.script_answer_limit_units
+(* A page script answers at most this many UTF-16 units; a longer answer is
+   refused in the page, which answers with its length instead. ego 0.6.0.16
+   carried a 3,000,003 unit answer line whole (2026-10-22). *)
+let answer_limit_units = 2 * 1024 * 1024
 (* The answer line carries the page's JSON text as one JSON string, at most
-   three bytes a UTF-16 unit, as on the BiDi socket. The rest is the frame
-   and ego's own lines, such as its update notice. *)
+   three bytes a UTF-16 unit. The rest is the frame and ego's own lines, such
+   as its update notice. *)
 let output_frame_bytes = 65_536
 let output_limit_bytes = 3 * answer_limit_units + output_frame_bytes
 
@@ -605,7 +604,7 @@ let downloads t args =
       let* collected = collected in
       let* row = download_row ~root:t.downloads.root ~tab json in
       Ok (row :: collected)) (Ok []) rows in
-  let verify = Browser_bidi_downloads.verify_file ~root:t.downloads.root in
+  let verify = Browser_downloads.verify_file ~root:t.downloads.root in
   let* records=List.fold_left (fun records (row,source) ->
     let* records=records in
     match Browser_downloads.published_json ~verify ~publish:t.downloads.publish ~published:t.published row with
@@ -621,7 +620,7 @@ let remove path = match Unix.unlink path with
     Error (Printf.sprintf "the screenshot file %s was not removed: %s" path (Unix.error_message code))
 
 (* ego writes the screenshot to a file and answers its path. The page's URL
-   and viewport are read on each side of it, as the BiDi capture does. *)
+   and viewport are read on each side of it. *)
 let capture t args =
   let* options=Browser_lane.Capture.of_optional_json (field "options" args) in
   let* label = target t args in
@@ -859,8 +858,8 @@ let open_tab t url =
 
 (* A step that moves a page answers where the page is now. The script catches
    what the page step threw and reads the tab's row after it, so a failure
-   with a row is a known partial effect, as the BiDi connection settles a
-   navigation; without a row the outcome is unknown. *)
+   with a row is a known partial effect; without a row the outcome is
+   unknown. *)
 let moved_page_answer = String.concat "\n" [
   "    const after = " ^ row_after ^ ";";
   "    emit({ok: true, value: {error: failure, tab: after === undefined ? null : {url: after.url, title: after.title}}});" ]
@@ -910,11 +909,11 @@ let stop_loading t id =
       |> Result.map_error (fun detail -> Live.Outcome_unknown (detail ^ "; " ^ unknown))
 
 let tab_window id interaction =
-  window_s (Browser_lane.Page_act (Browser_lane.Action.On_tab {tab_id = id; frame_path = []; interaction}))
+  window_s (Browser_lane.Page_act (Browser_lane.Action.On_tab {tab_id = id; interaction}))
 
 let reload t id =
   let* label = label_of t id in
-  let timeout = navigation_timeout_ms (Browser_lane.Page_act (Browser_lane.Action.On_tab {tab_id = id; frame_path = []; interaction = Browser_lane.Action.Reload})) in
+  let timeout = navigation_timeout_ms (Browser_lane.Page_act (Browser_lane.Action.On_tab {tab_id = id; interaction = Browser_lane.Action.Reload})) in
   settled ~id ~action:"reload" (run_native_step t ~step:"page.reload" ~args:(obj ["label",str label;"tabId",`Int id;"timeoutMs",`Int timeout]) (String.concat "\n" [
       "  const reason = " ^ message ^ ";";
       unblocked_managed_page;
@@ -1159,10 +1158,9 @@ let dialog_answer_script = {js|async function(task, args, resolve, watchDownload
 let dialog_args t id label = ["spaceId",`Int t.space.id;"label",str label;"tabId",`Int id]
 let dialog_read t args =
   let* id=match field "tabId" args with Some (`Int id) -> Ok id | _ -> Error "an observed tabId is required" in
-  let* frame_path=Browser_lane.Action.parse_frame_path args in
-  let* ()=match field "mode" args,frame_path with
-    | Some (`String "dialog"),[] -> Ok ()
-    | (None|Some _),([]|_::_) -> Error "an ego contextual read serves mode dialog without framePath only" in
+  let* ()=match field "mode" args with
+    | Some (`String "dialog") -> Ok ()
+    | None|Some _ -> Error "an ego contextual read serves mode dialog only" in
   let* label=label_of t id |> Result.map_error (function
     | Live.Before_effect detail|Outcome_unknown detail -> detail
     | Partial_failure {message;_}|Observed_failure {message;_} -> message) in
@@ -1192,8 +1190,7 @@ let answer_dialog t id ~accept text =
       @ Browser_surface.dialog_observation_fields Unobserved))
 
 (* ego shows a mouse step's [label] beside its own cursor highlight. It says
-   who acts and what, from the same pieces as the BiDi connection's overlay
-   badge (Browser_pointer_feedback): MASC, the actor, the interaction. *)
+   who acts and what: MASC, the actor, the interaction. *)
 let cursor_label ~actor ~verb = String.concat " · " ["MASC"; Option.value actor ~default:"agent"; verb]
 
 (* Ego resolves the file input, including labels, containers, refs and shadow
@@ -1312,21 +1309,15 @@ let choose_files ?actor t id ~opener ~paths =
     | _ -> Error (Live.Outcome_unknown "ego answered an upload outside its frame")
 
 (* Input acts on a native managed Page, checked in the run that acts.
-   The page scripts the BiDi connection runs find the
-   target, check that the document, URL and viewport are the observed ones,
-   and make the DOM edits, so a selector or node means the same on both;
-   ego moves the mouse and presses the keys. *)
+   The shared page scripts find the target, check that the document, URL and
+   viewport are the observed ones, and make the DOM edits; ego moves the mouse
+   and presses the keys. *)
 
-(* ego reads and acts inside frames without a frame path: its viewport
+(* ego reads and acts inside frames through its snapshot: the viewport
    snapshot holds each iframe's content with refs, a subtree snapshot rooted
    at the iframe's ref reads one frame, a ref from it acts inside that frame,
    and a role or text target is looked for in frames when the top document
-   has none (cross-origin frames included, 0.6.0.16). Input frame paths are
-   refused here with the supported route. Frame_read is refused by the live
-   transport gate before this peer; the tool description explains snapshots. *)
-let frame_input_refused =
-  "an ego connection acts inside frames through target, with no framePath: a ref from the frame's snapshot, or a role or text target, which ego also finds inside frames"
-let frame_upload_refused = "an ego connection uploads through a native selector or snapshot ref, without framePath; use a locator or ref from that frame"
+   has none (cross-origin frames included, 0.6.0.16). *)
 
 (* Finding a target and acting on it are two runs, and the command has one
    window for both: a later run gets what is left of it. *)
@@ -1726,7 +1717,7 @@ let native_type t ~id ~label ~expected_url ~document_id ~text =
     | Ok context->Ok context
     | Error _ -> let* ()=before (Input.not_started t.input ~generation:pending.generation) in
       Error (Live.Before_effect "native typing context could not be prepared") in
-  let input=Browser_lane.interaction_args ~tab_id:id ~frame_path:[] ~expected_url
+  let input=Browser_lane.interaction_args ~tab_id:id ~expected_url
     (Browser_lane.Type_text {document_id;text}) in
   let arguments=obj ["label",str label;"text",str text;"nativeInputWindows",Raw_type.arguments context;
     "expectedSourcePage",source_page_json source;
@@ -1790,15 +1781,12 @@ let interact ?actor t args =
   let* () = match Browser_lane.Native_input.unavailable (Browser_lane.ego_input_contract request.action) with
     | None -> Ok ()
     | Some reason -> unavailable_input reason in
-  let* () = match request.frame_path with
-    | [] -> Ok ()
-    | _ :: _ -> Error (Live.Before_effect frame_input_refused) in
   let id = request.tab_id in
   let verb = Browser_lane.interaction_verb request.action in
   let refused = Error (Live.Before_effect (verb ^ " is not served by an ego connection")) in
   let* label = label_of t id in
-  let deadline = command_deadline t (Browser_lane.Page_interact {tab_id = id; frame_path = []; expected_url = request.expected_url; action = request.action}) in
-  let input ~expected_url action = Browser_lane.interaction_args ~tab_id:id ~frame_path:[] ~expected_url action in
+  let deadline = command_deadline t (Browser_lane.Page_interact {tab_id = id; expected_url = request.expected_url; action = request.action}) in
+  let input ~expected_url action = Browser_lane.interaction_args ~tab_id:id ~expected_url action in
   let* () = match request.action with
     | Browser_lane.Drag_to {duration_ms;_} when duration_ms <> 0 ->
         Error (Live.Before_effect "ego drag requires durationMs=0; movement timing is not exposed by its mouse API")
@@ -2049,28 +2037,24 @@ let act ?actor t args =
   | Ok (Browser_lane.Action.Control (Browser_lane.Action.Finish_space keep)) -> finish_space t keep
   | Ok (Browser_lane.Action.Control (Browser_lane.Action.Adopt_tab {tab_id;label})) -> manage_tab t ~tab_id (Adopt label)
   | Ok (Browser_lane.Action.Control (Browser_lane.Action.Release_tab tab_id)) -> manage_tab t ~tab_id Release
-  | Ok (Browser_lane.Action.Open_window _) ->
-    Error (Live.Before_effect "an ego connection does not open windows")
-  | Ok (Browser_lane.Action.On_tab {frame_path = _ :: _; _}) ->
-    Error (Live.Before_effect frame_upload_refused)
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Close_tab}) -> close_tab t tab_id
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Stop_loading}) -> stop_loading t tab_id
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Reload}) -> reload t tab_id
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Back as interaction}) ->
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Close_tab}) -> close_tab t tab_id
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Stop_loading}) -> stop_loading t tab_id
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Reload}) -> reload t tab_id
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Back as interaction}) ->
     traverse t tab_id ~action:"back" ~delta:(-1) ~side:"earlier" interaction
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Forward as interaction}) ->
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Forward as interaction}) ->
     traverse t tab_id ~action:"forward" ~delta:1 ~side:"later" interaction
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Accept_dialog text}) ->
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Accept_dialog text}) ->
     answer_dialog t tab_id ~accept:true text
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Dismiss_dialog}) ->
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Dismiss_dialog}) ->
     answer_dialog t tab_id ~accept:false None
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Upload {target = Browser_lane.Action.File_input selector; paths}}) ->
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Upload {target = Browser_lane.Action.File_input selector; paths}}) ->
     upload t tab_id ~selector ~paths
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Upload {target = Browser_lane.Action.Chooser_opener opener; paths}}) ->
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Upload {target = Browser_lane.Action.Chooser_opener opener; paths}}) ->
     choose_files ?actor t tab_id ~opener ~paths
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Set_emulation emulation}) ->
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Set_emulation emulation}) ->
     emulate t tab_id (Some emulation)
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Clear_emulation}) ->
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Clear_emulation}) ->
     emulate t tab_id None
 
 let workflow ?actor t args =
@@ -2211,7 +2195,7 @@ let admit_after_finish t ~verb args =
     | Browser_info -> Ok ()
     | Page_act -> (match Browser_lane.Action.parse args with
         | Ok (Control (Space_status|Finish_space _)) -> Ok ()
-        | Ok (Open_tab _|Open_window _|Control (Hand_off|Take_over|Wait_for_control _|Adopt_tab _|Release_tab _)|On_tab _)
+        | Ok (Open_tab _|Control (Hand_off|Take_over|Wait_for_control _|Adopt_tab _|Release_tab _)|On_tab _)
         | Error _ -> Error (Live.Before_effect "Space completion is terminal or uncertain; former Page/control work is refused; use space_status to reconcile"))
     | Tabs_list|Page_read|Page_elements|Page_scene|Page_capture|Page_goto|Page_context|Page_snapshot
     | Page_downloads|Page_interact|Page_native_workflow ->

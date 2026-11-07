@@ -18,7 +18,7 @@ let target = function
       Error "Ego installation binding requires an object"
 let validate service binding = match service with
   | Lane_addon_types.Browser_service Browser_lane.Backend.Ego -> target binding |> Result.map (fun _ -> ())
-  | Mcp_tools | Browser_service Owned_firefox -> Ok ()
+  | Mcp_tools -> Ok ()
 let resolve ~(default : Browser_configuration.live_ego) = function
   | Workspace_default -> default
   | Installation_space space -> {default with space}

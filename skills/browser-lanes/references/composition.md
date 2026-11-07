@@ -55,8 +55,7 @@ When an observed live tab is inactive and its body still shows pending or previo
 content after a channel transition, `BrowserInteract action=activate_tab` can select
 that exact tab. Preserve the observed clientId, tabId and expectedUrl. This is an
 explicit action, not an automatic step in every read or composition. It does not
-change the URL or reload. A webdriver_bidi connection also focuses the browser
-window, which can take focus from what the operator is doing.
+change the URL or reload.
 
 An active=true receipt confirms tab selection only. Read the same tab again and
 verify the requested channel body and scope before collecting context. If activation

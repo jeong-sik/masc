@@ -2,7 +2,7 @@
     connecting or a page being read: it says a program answers, not that
     runtime.toml names it or that the server has restarted since. *)
 
-type program = Firefox | Ego_browser
+type program = Ego_browser
 
 val name : program -> string
 (** The name the program carries in the readiness JSON and in
@@ -10,8 +10,7 @@ val name : program -> string
 
 val candidates : program -> string list
 (** Executables tried in order. A bare name is looked up on [PATH]; a path is
-    used as written. Firefox on macOS lives inside its application bundle and
-    is on no [PATH], so its bundle locations are listed. ego lite's onboarding
+    used as written. ego lite's onboarding
     links [ego-browser] into [~/.local/bin], which is listed after [PATH]. A
     [HOME] that is not an absolute path contributes no location. *)
 
@@ -22,7 +21,7 @@ type check =
           searching [PATH]. *)
   | Started of { command : string; path : string; output : string }
       (** The executable at [path] answered its version entry point. [path] is
-          always absolute: [\[browser.live.bidi\]] takes absolute paths
+          always absolute: [\[browser.live.ego\]] takes absolute paths
           only. A program found through a relative [PATH]
           entry is reported under the current working directory. *)
   | Failed of { command : string; path : string; status : Unix.process_status; detail : string }
@@ -51,8 +50,8 @@ val ego_versions : string -> (string * string, string) result
     [ego-browser --version] printed. *)
 
 val probe_program : program -> string -> check
-(** {!probe}, and what [program]'s answer must say. Firefox answers by
-    exiting 0. An [ego-browser] must also name ego lite's and
+(** {!probe}, and what [program]'s answer must say. An [ego-browser] must
+    exit 0 and name ego lite's and
     Chromium's versions ({!ego_versions}); one that exits 0 without them is
     [Failed], as an ego lite whose onboarding is not finished is. *)
 

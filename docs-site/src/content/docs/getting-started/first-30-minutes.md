@@ -168,15 +168,12 @@ needed only to view or click inside a logged-in site.
 
 - Screen: press `:` and type `go Browser Lane`.
 - Setup: in the installer's "5 · Give imp tools (optional)" checklist, mark the
-  browser row you need. None of them starts marked. If you have already
-  finished setup, run `masc browser-lane-setup --mode <mode>` for that row and
-  restart the server.
-  - BiDi row (`bidi`): a Firefox MASC starts.
-  - Add-on row (`extension`): your everyday Firefox.
-  - ego lite row (`ego`): a task space in your ego lite, shown when
-    `ego-browser` answers.
+  ego lite row (a task space in your ego lite, shown when `ego-browser`
+  answers). It is unmarked by default — choose it only when needed. Otherwise
+  run `masc browser-lane-setup --mode ego` before starting the server. If you
+  have already finished setup, run the same command and restart the server.
 - The Browser Lane screen's connection list shows:
-  - `No active native browser connections` — the list was read and no Firefox is
+  - `No active native browser connections` — the list was read and no browser is
     connected.
   - `(nothing here is a reading)` — the list could not be read; the red line
     just above is why.

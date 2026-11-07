@@ -1,5 +1,5 @@
 // Execute the shipped elements observation script against a small DOM fixture.
-// Firefox behavior and native action effects belong to the browser smoke test.
+// Real browser behavior and native action effects are not exercised here.
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');

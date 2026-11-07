@@ -8,7 +8,7 @@ type searxng_container =
   | Searxng_unusable of string
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
   | Muse_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
-  | Firefox | Ego_browser | Searxng of { config_dir : string }
+  | Ego_browser | Searxng of { config_dir : string }
 type action_effect = Open_official_installer of { url : string; argv : string list }
   | Run_commands of string list list
   | Install_official_cli of Runtime_official_cli_install.client
@@ -56,8 +56,6 @@ let whisper_models_source = "https://huggingface.co/ggerganov/whisper.cpp"
 let sox_formula_source = "https://formulae.brew.sh/formula/sox"
 let sox_source = "https://sourceforge.net/projects/sox/"
 let searxng_docker_source = "https://docs.searxng.org/admin/installation-docker.html"
-let firefox_cask_source = "https://formulae.brew.sh/cask/firefox"
-let firefox_linux_source = "https://support.mozilla.org/en-US/kb/install-firefox-linux"
 let ego_lite_source = "https://lite.ego.app/"
 
 (* The model masc asks whisper for by default. Measured 2026-09-12: this file
@@ -292,19 +290,6 @@ let rec catalog ?model_dir ?(apple_builder=Builder_unchecked)
           ~source_url:"https://www.libreoffice.org/installation-instructions/" "https://www.libreoffice.org/installation-instructions/"]
       | Unsupported, _ -> [] in
     renderer @ [parser] @ catalog ?model_dir ~host ~distribution Pdf_tools
-  (* The live BiDi connection starts Firefox itself. The action is not a
-     service and does not write runtime.toml -- naming the executable there is
-     a separate step, which needs the absolute path this install leaves behind
-     and so has to follow it. *)
-  | Firefox, Macos _ ->
-    [commands ~id:"firefox_brew_install" ~label:"Install Firefox with Homebrew"
-       ~detail:"Install the Firefox cask through the existing Homebrew package manager. Homebrew must already be installed; MASC does not install Homebrew or developer tools. Homebrew stops without changing anything when Firefox.app is already in /Applications; that Firefox is used as it is. The executable is checked after installation."
-       ~source_url:firefox_cask_source ~requires_admin:false
-       [[homebrew;"install";"--cask";"firefox"]]]
-  | Firefox, Linux _ ->
-    [open_ ~id:"firefox_install_instructions" ~label:"Open Firefox installation instructions"
-       ~detail:"Install Firefox the way this distribution packages it, then refresh detection."
-       ~source_url:firefox_linux_source firefox_linux_source]
   (* ego lite installs as a macOS app, and its onboarding puts ego-browser on
      PATH; there is no package to run. It has no Linux build. *)
   | Ego_browser, Macos _ ->

@@ -61,8 +61,8 @@ type control = Hand_off | Take_over | Space_status | Finish_space of keep_pages 
     Space under the SDK Page lifecycle; [None] lets Ego assign its label.
     [Release_tab] returns an unknown-origin managed Page without closing it.
     Neither transfers Space control or changes the Page's origin. *)
-type t = Open_tab of string | Open_window of string | Control of control
-  | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
+type t = Open_tab of string | Control of control
+  | On_tab of { tab_id : int; interaction : interaction }
 val is_take_over : t -> bool
 (** The one control a live lane answers without a client: reclaiming the ego
     task space whose task ended while the operator held it. *)
@@ -73,4 +73,3 @@ val parse : Yojson.Safe.t -> (t, string) result
 val to_json : t -> Yojson.Safe.t
 val key_name : key -> string
 val webdriver_key : key -> string
-val parse_frame_path : Yojson.Safe.t -> (string list, string) result

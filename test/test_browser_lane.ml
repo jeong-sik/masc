@@ -4,11 +4,12 @@ let () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Ena
 open Alcotest
 module Lane = Browser_lane
 let serial = ref 0
-let info ?(transport=Browser_lane.Webdriver_bidi) browser : Lane.client_info =
+let info ?(transport=Browser_lane.Ego_task_space) browser : Lane.client_info =
   incr serial;
   let raw = Printf.sprintf "00000000-0000-4000-8000-%012d" !serial in
   let client_id = match Lane.client_id_of_string raw with Ok id -> id | Error error -> fail error in
-  {client_id; browser; version="1.0"; transport; engine_version="155.0.1";space=None}
+  {client_id; browser; version="1.0"; transport; engine_version="155.0.1";
+   space=Some {id= !serial; name="fixture Space"}}
 let target id = match Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route (Some id)) with
   | Ok value -> value | Error error -> fail (Lane.selection_error_code error)
 let with_clients f = Eio_main.run (fun env ->
@@ -27,17 +28,17 @@ let answered promise expected = match Eio.Promise.await promise with
   | Ok (Ok (Lane.Answered value)) -> check bool "owned response" true (value = payload expected)
   | _ -> fail "request did not receive its owned response"
 let test_colliding_tabs_are_isolated () = with_clients (fun sw connect ->
-  let firefox = connect Lane.Firefox and other = connect Lane.Firefox in
+  let firefox = connect Lane.Ego_lite and other = connect Lane.Ego_lite in
   check bool "multiple clients require selection" true
     (Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route None)
      = Error (Lane.Ambiguous_clients [firefox.client_id; other.client_id]));
   let result = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None
     ~target:(target firefox.client_id)
-    ~verb:(Lane.Page_interact {frame_path=[];tab_id=1; expected_url=None; action=Lane.Click "#button"}) ~timeout_sec:1.) in
-  check bool "another client cannot consume Firefox's tab-1 click" true
+    ~verb:(Lane.Page_interact {tab_id=1; expected_url=None; action=Lane.Click "#button"}) ~timeout_sec:1.) in
+  check bool "another client cannot consume the first client's tab-1 click" true
     (Lane.take_command ~client_info:other ~window_sec:0.01 = Ok None);
   let command = take firefox in
-  check bool "another client's result cannot settle Firefox" true
+  check bool "another client's result cannot settle the first client" true
     (Lane.deliver_result ~client_id:other.client_id ~id:command.id ~payload:(payload "wrong")
      = Error "request_not_owned_by_client");
   ignore (Lane.deliver_result ~client_id:firefox.client_id ~id:command.id ~payload:(payload "firefox"));
@@ -45,7 +46,7 @@ let test_colliding_tabs_are_isolated () = with_clients (fun sw connect ->
 (* A result that arrives after its caller stopped waiting is refused, and the
    next command's caller gets only its own result: each issue has its own id. *)
 let test_late_result_reaches_no_other_waiter () = with_clients (fun sw connect ->
-  let client = connect Lane.Firefox in
+  let client = connect Lane.Ego_lite in
   let first = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None
     ~target:(target client.client_id) ~verb:Lane.Tabs_list ~timeout_sec:0.05) in
   let late = take client in
@@ -62,12 +63,12 @@ let test_late_result_reaches_no_other_waiter () = with_clients (fun sw connect -
 let test_single_and_stale_selection () = with_clients (fun _ connect ->
   check bool "no connected browser is its own answer" true
     (Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route None) = Error Lane.No_live_client);
-  let old = connect Lane.Firefox in
+  let old = connect Lane.Ego_lite in
   check bool "one live client auto-resolves" true
     (Result.is_ok (Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route None)));
   let pinned = target old.client_id in
   ignore (Lane.disconnect_client ~client_id:old.client_id);
-  ignore (connect Lane.Firefox);
+  ignore (connect Lane.Ego_lite);
   check bool "old identity never selects new single client" true
     (Lane.resolve_target ~verb:Lane.Tabs_list (Lane.Live_route (Some old.client_id))
      = Error (Lane.Selected_client_disconnected old.client_id));
@@ -82,8 +83,8 @@ let test_single_and_stale_selection () = with_clients (fun _ connect ->
    retires a polled client and still serves the held one, and neither a poll
    nor a delivered result turns the held client back into a timed one. *)
 let test_worker_held_client_outlives_the_poll_window () = with_clients (fun sw connect ->
-  let polled = connect Lane.Firefox
-  and held = connect Lane.Firefox in
+  let polled = connect Lane.Ego_lite
+  and held = connect Lane.Ego_lite in
   let live (info : Lane.client_info) = match target info.client_id with
     | Lane.Live_client client -> client in
   let polled_client = live polled and held_client = live held in
@@ -111,29 +112,29 @@ let test_worker_held_client_outlives_the_poll_window () = with_clients (fun sw c
   check bool "a retired client cannot be held" true
     (Result.is_error (Lane.hold_client ~client_id:polled.client_id)))
 let test_expired_resolved_target_is_pre_dispatch () = with_clients (fun _ connect ->
-  let info = connect Lane.Firefox in
+  let info = connect Lane.Ego_lite in
   let pinned = target info.client_id in
   let client = match pinned with Lane.Live_client client -> client in
   (* Expire the captured target between resolution and issue, without sleeps
      or a clock-dependent scheduling race. No command has been dispatched. *)
   client.liveness <- Lane.Polled (Monotonic_deadline.after ~seconds:0.);
   let answer = Lane.issue_for_actor ~actor:None ~target:pinned
-    ~verb:(Lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org";
+    ~verb:(Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org";
       action=Lane.Scroll {x=0;y=120}}) ~timeout_sec:1. in
   check bool "expiry after target resolution is the same selection failure" true
     (answer = Error (Lane.Selected_client_disconnected info.client_id));
   check int "no waiter was installed" 0 (Hashtbl.length client.waiters);
   check bool "no command was enqueued" true (Eio.Stream.take_nonblocking client.commands = None))
 let test_timed_out_queue_is_not_executed () = with_clients (fun _ connect ->
-  let client = connect Lane.Firefox in
+  let client = connect Lane.Ego_lite in
   check bool "unconsumed action times out" true
     (Lane.issue_for_actor ~actor:None ~target:(target client.client_id)
-      ~verb:(Lane.Page_interact {frame_path=[];tab_id=1; expected_url=None; action=Lane.Scroll {x=0;y=10}})
+      ~verb:(Lane.Page_interact {tab_id=1; expected_url=None; action=Lane.Scroll {x=0;y=10}})
       ~timeout_sec:0.001 = Ok Lane.Timed_out);
   check bool "later poll drops timed-out queued action" true
     (Lane.take_command ~client_info:client ~window_sec:0.002 = Ok None))
 let test_queued_time_reduces_the_original_window () = with_clients (fun sw connect ->
-  let client = connect Lane.Firefox in
+  let client = connect Lane.Ego_lite in
   let selected = target client.client_id in
   let result = Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for_actor ~actor:None ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:2.) in
@@ -149,8 +150,8 @@ let test_queued_time_reduces_the_original_window () = with_clients (fun sw conne
   check bool "a settled request has no remaining authority" true
     (Lane.live_request_window ~client_id:client.client_id ~id:command.id = Lane.No_live_waiter))
 let test_waiter_interruption_is_not_reply_timeout ?(held=false) () = with_clients (fun sw connect ->
-  let client = if held then connect ~transport:Lane.Webdriver_bidi Lane.Firefox else connect Lane.Firefox in
-  if held then check bool "the worker holds the BiDi client" true (Lane.hold_client ~client_id:client.client_id = Ok ());
+  let client = if held then connect ~transport:Lane.Ego_task_space Lane.Ego_lite else connect Lane.Ego_lite in
+  if held then check bool "the worker holds the client" true (Lane.hold_client ~client_id:client.client_id = Ok ());
   let connected () = List.exists (fun (info : Lane.client_info) -> info.client_id = client.client_id) (Lane.connected_clients ()) in
   let selected = target client.client_id in
   let interruption (command : Lane.issued) = match Lane.live_request_window ~client_id:client.client_id ~id:command.id with
@@ -187,7 +188,7 @@ let test_waiter_interruption_is_not_reply_timeout ?(held=false) () = with_client
       (Lane.take_command ~client_info:client ~window_sec:0.001 = Error Lane.Client_retired));
   ignore (Eio.Promise.await disconnected))
 let test_disconnect_releases_waiter () = with_clients (fun sw connect ->
-  let client = connect Lane.Firefox in
+  let client = connect Lane.Ego_lite in
   let result = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None
     ~target:(target client.client_id) ~verb:Lane.Tabs_list ~timeout_sec:1.) in
   let command = take client in
@@ -199,7 +200,7 @@ let test_disconnect_releases_waiter () = with_clients (fun sw connect ->
   check bool "late result refused" true
     (Result.is_error (Lane.deliver_result ~client_id:client.client_id ~id:command.id ~payload:(payload "late"))))
 let test_sources_and_live_policy () = with_clients (fun _ connect ->
-  let client = connect Lane.Firefox in
+  let client = connect Lane.Ego_lite in
   check bool "missing transport UUID rejected" true (Result.is_error (Lane.client_id_of_string ""));
   (* A download list is ego work; a BiDi connection is refused as a
      selection, with nothing queued. *)
@@ -214,7 +215,7 @@ let test_sources_and_live_policy () = with_clients (fun _ connect ->
 let viewport : Lane.Pointer.viewport =
   {document_id="observed-page"; width=800.; height=600.; scroll_x=0.; scroll_y=0.}
 let point : Lane.Pointer.point = {x=0.5;y=0.5}
-let interact action = Lane.Page_interact {frame_path=[];tab_id=2; expected_url=Some "https://example.org"; action}
+let interact action = Lane.Page_interact {tab_id=2; expected_url=Some "https://example.org"; action}
 let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Tab_listing -> Tabs_list
   | Text_read -> Page_read {tab_id=Some 2; max_chars=None}
@@ -238,20 +239,19 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Viewport_resize -> interact (Set_viewport (Fit {width=800;height=600}))
   | Touch_input -> interact (Tap_at {point;viewport})
   | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
-  | Page_recovery -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Stop_loading})
-  | Tab_history -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Back})
-  | Tab_closing -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Close_tab})
+  | Page_recovery -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Stop_loading})
+  | Tab_history -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Back})
+  | Tab_closing -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Close_tab})
   | Tab_navigation -> Page_goto {url="https://example.test/next";tab_id=Some 2}
   | Tab_activation -> interact Activate_tab
   | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")
-  | Dialog_read -> Page_context {tab_id=2;frame_path=[];mode=`Dialog}
-  | Dialog_answer -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Dismiss_dialog})
-  | Frame_read -> Page_context {tab_id=2;frame_path=["#frame"];mode=`Frames}
+  | Dialog_read -> Page_context {tab_id=2}
+  | Dialog_answer -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Dismiss_dialog})
   | Operator_handoff -> Page_act (Action.Control Action.Hand_off)
     | Page_management -> Page_act (Action.Control (Action.Adopt_tab {tab_id=2;label=None}))
   | Download_listing -> Page_downloads {tab_id=2}
-  | File_upload -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Upload {target=Action.File_input "#file";paths=["/tmp/note.txt"]}})
-  | Environment_emulation -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}}))
+  | File_upload -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Upload {target=Action.File_input "#file";paths=["/tmp/note.txt"]}})
+  | Environment_emulation -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}}))
 
 let capability = testable
   (fun ppf value -> Format.pp_print_string ppf (Lane.live_capability_to_wire value)) ( = )
@@ -259,17 +259,15 @@ let capability = testable
 let test_transport_table () =
   let unserved transport = List.filter (fun capability ->
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
-  check (list capability) "the BiDi peer has no ego snapshot, hand-off, download list, upload or environment emulation"
-    Lane.[Accessibility_snapshot; Snapshot_target_input; Native_workflow; Page_recovery; Dialog_read; Operator_handoff; Page_management; Download_listing; File_upload; Environment_emulation] (unserved Lane.Webdriver_bidi);
-  check (list capability) "the ego connection has no touch or frame reads"
-    Lane.[Touch_input; Frame_read]
+  check (list capability) "the ego connection has no touch"
+    Lane.[Touch_input]
     (unserved Lane.Ego_task_space);
   check bool "native Ego activation uses SDK execution ownership" true
-    (Lane.ego_reply_policy (Lane.Page_interact {tab_id=1;frame_path=[];
-      expected_url=Some "https://example.org/";action=Lane.Activate_tab})=Lane.Executor_owned);
+    (Lane.ego_reply_policy (Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org/";action=Lane.Activate_tab})=Lane.Executor_owned);
+  check (list capability) "no connection serves touch"
+    Lane.[Touch_input]
+    (List.filter (fun capability -> Lane.live_transports_serving capability = []) Lane.all_of_live_capability);
   List.iter (fun capability ->
-    check bool (Lane.live_capability_to_wire capability ^ " is reachable on some connection") true
-      (Lane.live_transports_serving capability <> []);
     check bool (Lane.live_capability_to_wire capability ^ " is what its verb asks for") true
       (Lane.live_capability (verb_asking_for capability) = capability))
     Lane.all_of_live_capability
@@ -277,10 +275,7 @@ let test_transport_table () =
 (* Every transport and capability: served work reaches that connection's
    queue, and unserved work is answered before anything is queued. *)
 let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
-  let bidi = connect Lane.Firefox in
-  let ego = { (info Lane.Ego_lite) with transport=Lane.Ego_task_space;space=Some {id=51;name="fixture Space"} } in
-  ignore (Lane.take_command ~client_info:ego ~window_sec:0.001);
-  Eio.Switch.on_release sw (fun () -> ignore (Lane.disconnect_client ~client_id:ego.client_id));
+  let ego = connect Lane.Ego_lite in
   List.iter (fun (info : Lane.client_info) ->
     let selected = target info.client_id in
     let client = match selected with Lane.Live_client client -> client in
@@ -311,78 +306,74 @@ let test_unserved_work_queues_nothing () = with_clients (fun sw connect ->
         check int (name ^ " left no waiter") 0 (Hashtbl.length client.waiters);
         check int (name ^ " queued no command") 0 (Eio.Stream.length client.commands)
       end) Lane.all_of_live_capability)
-    [bidi; ego];
-  (* The optional document read asks the same table. BiDi serves it, so it
+    [ego];
+  (* The optional document read asks the same table. ego serves it, so it
      reaches that connection's queue. *)
-  let bidi_target = target bidi.client_id in
+  let ego_target = target ego.client_id in
   let document = Eio.Fiber.fork_promise ~sw (fun () ->
-    Lane.issue_document_if_idle ~target:bidi_target ~tab_id:2 ~timeout_sec:1.) in
-  let command = take bidi in
-  check bool "the optional document read reaches the BiDi connection" true
+    Lane.issue_document_if_idle ~target:ego_target ~tab_id:2 ~timeout_sec:1.) in
+  let command = take ego in
+  check bool "the optional document read reaches the ego connection" true
     (command.verb_json = Lane.verb_json (Lane.Page_document {tab_id=2}));
-  ignore (Lane.deliver_result ~client_id:bidi.client_id ~id:command.id ~payload:(payload "document"));
+  ignore (Lane.deliver_result ~client_id:ego.client_id ~id:command.id ~payload:(payload "document"));
   answered document "document")
 
 (* A successful answer states its connection through one function: a live
    browser's client ID and transport. Where an answer is rebuilt around those fields, a value the page
    or browser supplied under the same names is dropped. *)
 let test_answers_state_their_connection () = with_clients (fun sw connect ->
-  let bidi = connect Lane.Firefox in
+  let ego = connect Lane.Ego_lite in
   let stated (client : Lane.client_info) = Lane.target_connection_fields (target client.client_id) in
   let expected (client : Lane.client_info) transport =
-    ["clientId", `String (Lane.client_id_to_string client.client_id); "transport", `String transport] in
-  check bool "a BiDi answer names its client and its transport" true (stated bidi = expected bidi "webdriver_bidi");
+    ["clientId", `String (Lane.client_id_to_string client.client_id); "transport", `String transport]
+    @ Option.to_list (Option.map (fun space -> "browserSpace", Lane.ego_space_to_json space) client.space) in
+  check bool "an ego answer names its client and its transport" true (stated ego = expected ego "ego_task_space");
   let supplied = ["transport", `String "carrier_pigeon"; "tabId", `Int 2; "clientId", `String "forged";
     "browserSpace",`Assoc ["id",`Int 999;"name",`String "forged"]] in
   check bool "a value supplied under those names is replaced, not kept beside the route's" true
-    (Lane.with_connection_fields (target bidi.client_id) supplied = expected bidi "webdriver_bidi" @ ["tabId", `Int 2]);
+    (Lane.with_connection_fields (target ego.client_id) supplied = expected ego "ego_task_space" @ ["tabId", `Int 2]);
   (* A holder that keeps only checked fields reads back exactly what was
      stated, and refuses half a live connection. *)
   List.iter (fun (name, written) ->
     check bool (name ^ " reads back as written") true
       (Lane.connection_fields_of_json (written @ ["tabId", `Int 2]) = Ok written))
-    ["a BiDi connection", stated bidi;
+    ["an ego connection", stated ego;
      "an answer that states no connection", []];
-  let client_id = `String (Lane.client_id_to_string bidi.client_id) in
+  let client_id = `String (Lane.client_id_to_string ego.client_id) in
   List.iter (fun (name, fields, expected) ->
     check (result reject string) name (Error expected) (Lane.connection_fields_of_json fields))
     ["a client without its transport", ["clientId", client_id], "client_without_transport";
-     "a transport without its client", ["transport", `String "webdriver_bidi"], "invalid_connection_fields";
+     "a transport without its client", ["transport", `String "ego_task_space"], "invalid_connection_fields";
      "a transport on a null client",
-     ["clientId", `Null; "transport", `String "webdriver_bidi"], "invalid_connection_fields";
+     ["clientId", `Null; "transport", `String "ego_task_space"], "invalid_connection_fields";
      "a transport no connection has",
      ["clientId", client_id; "transport", `String "carrier_pigeon"], "unsupported_browser_transport";
      "a client that is not an ID",
-     ["clientId", `String "forged"; "transport", `String "webdriver_bidi"], "invalid_client_id";
+     ["clientId", `String "forged"; "transport", `String "ego_task_space"], "invalid_client_id";
      "a client of another JSON type", ["clientId", `Int 7], "invalid_connection_fields"];
   (* The live optional document read attaches the same fields. *)
   let document = Eio.Fiber.fork_promise ~sw (fun () ->
-    Lane.issue_document_if_idle ~target:(target bidi.client_id) ~tab_id:2 ~timeout_sec:1.) in
-  let command = take bidi in
-  ignore (Lane.deliver_result ~client_id:bidi.client_id ~id:command.id
+    Lane.issue_document_if_idle ~target:(target ego.client_id) ~tab_id:2 ~timeout_sec:1.) in
+  let command = take ego in
+  ignore (Lane.deliver_result ~client_id:ego.client_id ~id:command.id
     ~payload:(`Assoc ["ok", `Bool true; "data", `Assoc ["html", `String "<html></html>"; "transport", `String "forged"]]));
   match Eio.Promise.await document with
   | Ok (Ok (Lane.Answered (`Assoc fields))) ->
-    check bool "the document answer states the BiDi connection once" true
+    check bool "the document answer states the ego connection once" true
       (List.assoc_opt "data" fields
-       = Some (`Assoc (expected bidi "webdriver_bidi" @ ["html", `String "<html></html>"])))
+       = Some (`Assoc (expected ego "ego_task_space" @ ["html", `String "<html></html>"])))
   | _ -> fail "the document read did not answer")
 
 let test_unsupported_message_names_the_serving_transport () =
-  let client_id = (info Lane.Firefox).client_id in
-  check string "touch on ego points at BiDi"
+  let client_id = (info Lane.Ego_lite).client_id in
+  check string "touch on ego names the transports that serve it, here none"
     "live_transport_unsupported: this browser is connected over ego_task_space, which does not serve \
-     touch_input; a webdriver_bidi connection does"
+     touch_input; no connection serves it"
     (Lane.selection_error_message (Lane.Transport_unsupported
-       {client_id; transport=Ego_task_space; capability=Touch_input}));
-  check string "a download list on BiDi points at ego"
-    "live_transport_unsupported: this browser is connected over webdriver_bidi, which does not serve \
-     download_listing; a ego_task_space connection does"
-    (Lane.selection_error_message (Lane.Transport_unsupported
-       {client_id; transport=Webdriver_bidi; capability=Download_listing}))
+       {client_id; transport=Ego_task_space; capability=Touch_input}))
 
 let test_optional_document_preserves_existing_work () = with_clients (fun sw connect ->
-  let info = connect Lane.Firefox in
+  let info = connect Lane.Ego_lite in
   let selected = target info.client_id in
   let primary = Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for_actor ~actor:None ~target:selected ~verb:Lane.Tabs_list ~timeout_sec:1.) in
@@ -412,7 +403,7 @@ let test_optional_document_preserves_existing_work () = with_clients (fun sw con
   check int "optional waiter was released" 0 (Hashtbl.length client.waiters))
 
 let test_inventory_does_not_prune () = with_clients (fun sw connect ->
-  let info = connect Lane.Firefox in
+  let info = connect Lane.Ego_lite in
   let selected = target info.client_id in
   let client = match selected with Lane.Live_client client -> client in
   let pending = Eio.Fiber.fork_promise ~sw (fun () ->
@@ -429,7 +420,7 @@ let test_inventory_does_not_prune () = with_clients (fun sw connect ->
   | _ -> fail "explicit disconnect must still settle the request")
 
 let test_duplicate_result_after_lost_ack_is_accepted () = with_clients (fun sw connect ->
-  let info = connect Lane.Firefox in
+  let info = connect Lane.Ego_lite in
   let pending = Eio.Fiber.fork_promise ~sw (fun () ->
     Lane.issue_for_actor ~actor:None ~target:(target info.client_id) ~verb:Lane.Tabs_list ~timeout_sec:1.) in
   let command = take info in
@@ -446,11 +437,11 @@ let test_duplicate_result_after_lost_ack_is_accepted () = with_clients (fun sw c
 let activity_ok = function Ok x -> x | Error _ -> failwith "unexpected refusal"
 let test_agent_activity () = Browser_lane.install_activity_observer (Some (fun _ -> Browser_lane.Enabled));
  Eio_main.run @@ fun env -> Time_compat.set_clock (Eio.Stdenv.clock env); Eio.Switch.run @@ fun sw ->
- let info : Browser_lane.client_info = {client_id=activity_ok (Browser_lane.client_id_of_string "11111111-1111-4111-8111-111111111118");browser=Firefox;version="fixture";engine_version="fixture";transport=Webdriver_bidi;space=None} in
+ let info : Browser_lane.client_info = {client_id=activity_ok (Browser_lane.client_id_of_string "11111111-1111-4111-8111-111111111118");browser=Ego_lite;version="fixture";engine_version="fixture";transport=Ego_task_space;space=Some {id=7;name="fixture Space"}} in
  let client=activity_ok (Browser_lane.register info) in
  let viewport : Browser_lane.Pointer.viewport = {document_id="owned";width=100.;height=100.;scroll_x=0.;scroll_y=0.} in
  let point : Browser_lane.Pointer.point = {x=0.5;y=0.5} in
- let verb=Browser_lane.Page_interact {frame_path=[];tab_id=1;expected_url=Some "https://example.org/";action=Hover_at {point;viewport}} in
+ let verb=Browser_lane.Page_interact {tab_id=1;expected_url=Some "https://example.org/";action=Hover_at {point;viewport}} in
  let queued=Eio.Fiber.fork_promise ~sw (fun () -> Browser_lane.issue_for_actor ~actor:(Some "fixture-keeper") ~target:(Live_client client) ~verb ~timeout_sec:20.) in
  let rec admitted () = match Browser_lane.client_interactions client with [] -> Eio.Fiber.yield ();admitted () | _::_ -> () in admitted ();
  let activity=Browser_lane.client_interactions client in
@@ -550,7 +541,6 @@ let test_space_connection_context () =
     (Result.is_error (Lane.connection_fields_of_json fields)))
     [List.remove_assoc "browserSpace" fields;
      ("browserSpace",json)::fields;
-     ("transport",`String "webdriver_bidi")::List.remove_assoc "transport" fields;
      ["browserSpace",json];["clientId",`Null;"browserSpace",json]]
 
 let test_native_control_wait_contract () =
@@ -591,8 +581,8 @@ let test_native_control_wait_contract () =
   check bool "native wait owns its reply clock" true (Lane.ego_reply_policy verb=Lane.Executor_owned);
   check string "wait activity names the Space operation" "wait_for_control" (Lane.activity_name verb);
   check (option int) "wait has Space scope" None (Lane.activity_scope verb);
-  check bool "other live transports refuse Space waits" true
-    (not (Lane.live_transport_serves Lane.Webdriver_bidi Lane.Operator_handoff));
+  check bool "the ego connection serves Space waits" true
+    (Lane.live_transport_serves Lane.Ego_task_space Lane.Operator_handoff);
   List.iter (fun fields -> check bool "invalid wait input fails before dispatch" true
     (Result.is_error (parse fields)))
     [ ["tabId",`Int 1];["controlOptions",`Null];
@@ -613,8 +603,7 @@ let test_native_page_management_contract () =
     check bool "native SDK owns management execution" true (Lane.ego_reply_policy verb=Lane.Executor_owned);
     check bool "only Ego serves Page management" true
       (Lane.live_capability verb=Lane.Page_management
-        && Lane.live_transport_serves Ego_task_space Page_management
-        && not (Lane.live_transport_serves Webdriver_bidi Page_management)))
+        && Lane.live_transport_serves Ego_task_space Page_management))
     [Lane.Action.Control (Adopt_tab {tab_id=2;label=None});Control (Adopt_tab {tab_id=2;label=Some "login"});Control (Release_tab 2)];
   List.iter (fun (action,fields) -> check bool "invalid lifecycle input is refused" true
     (Result.is_error (parse action fields)))
@@ -649,7 +638,7 @@ let test_action_context_arguments () =
   List.iter (fun input -> match Lane.Action.parse input with
     | Ok action -> check bool "context round trip" true (Lane.Action.parse (Lane.Action.to_json action) = Ok action)
     | Error detail -> fail detail)
-    [valid "upload" ["selector",`String "#apply";"paths",`List [`String "a.txt"];"framePath",`List [`String "iframe";`String "#nested"]];
+    [valid "upload" ["selector",`String "#apply";"paths",`List [`String "a.txt"]];
      valid "accept_dialog" ["text",`String "한글"];
      valid "dismiss_dialog" [];
      valid "upload" ["selector",`String "input";"paths",`List [`String "relative.txt"]];
@@ -685,7 +674,7 @@ let test_emulation_arguments () =
   let emulation : Lane.Action.emulation = {geolocation=Some {latitude=37.5;longitude=127.;accuracy_m=25.};
     locale=Some "ko-KR"; timezone=Some "Asia/Seoul"} in
   List.iter (fun interaction ->
-    let round = Lane.Action.On_tab {tab_id=1;frame_path=[];interaction} in
+    let round = Lane.Action.On_tab {tab_id=1;interaction} in
     check bool "emulation survives the wire" true (Lane.Action.parse (Lane.Action.to_json round) = Ok round))
     [Lane.Action.Set_emulation emulation; Lane.Action.Clear_emulation]
 

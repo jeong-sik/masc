@@ -1,10 +1,7 @@
-type program = Firefox | Ego_browser
+type program = Ego_browser
 
 let name = function
-  | Firefox -> "firefox"
   | Ego_browser -> "ego-browser"
-
-let firefox_bundle_executable = "Firefox.app/Contents/MacOS/firefox"
 
 (* A relative HOME would name a place relative to wherever this runs, and the
    lane takes absolute paths only. *)
@@ -21,17 +18,6 @@ let candidates = function
     :: (match absolute_home () with
         | Some home -> [ Filename.concat (Filename.concat (Filename.concat home ".local") "bin") "ego-browser" ]
         | None -> [])
-  | Firefox ->
-    let user_applications =
-      match absolute_home () with
-      | Some home ->
-        [ Filename.concat (Filename.concat home "Applications") firefox_bundle_executable ]
-      | None -> []
-    in
-    [ "firefox"
-    ; Filename.concat "/Applications" firefox_bundle_executable
-    ]
-    @ user_applications
 
 type check =
   | Missing of string
@@ -44,7 +30,7 @@ type check =
    reported as a failed probe, which is what an unusable program is. *)
 let probe_timeout_sec = 10.
 
-(* The lane takes absolute paths only ([browser.live.bidi] firefox). A program found through a relative
+(* The lane takes absolute paths only ([browser.live.ego] command). A program found through a relative
    PATH entry, or given as a relative path, is reported where it is on disk
    rather than as a path that only means something from this directory. A
    working directory that cannot be read leaves no such path to report. *)
@@ -130,14 +116,12 @@ let ego_versions output =
        ^ excerpt
        ^ if String.length excerpt < String.length printed then "..." else "")
 
-(* Firefox answers by exiting 0. An ego-browser that exits 0
-   without naming its versions belongs to an ego lite whose onboarding is not
+(* An ego-browser that exits 0 without naming its versions belongs to an ego lite whose onboarding is not
    finished, and the worker cannot start it, so it has not answered. *)
 let probe_program program command =
   match probe command with
   | Started { command; path; output } as check ->
     (match program with
-     | Firefox -> check
      | Ego_browser ->
        (match ego_versions output with
         | Ok _ -> check

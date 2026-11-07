@@ -12,7 +12,7 @@ val with_worker :
   env:Eio_unix.Stdenv.base -> config:Masc.Workspace.config ->
   respond:(route:Browser_lane.route -> Browser_lane.verb -> Browser_lane.answer) ->
   (t -> 'a) -> 'a
-(** One scripted worker of the owned-Firefox source that lists [clients],
+(** One scripted worker of the ego source that lists [clients],
     with its own one-source package and answered by [respond].
     Owns attachment and confirmed detach of every one, and restores the prior
     PATH and Runtime snapshot. Owns the Eio test context, an inert browser

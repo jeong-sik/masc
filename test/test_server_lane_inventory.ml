@@ -415,11 +415,12 @@ let suffix_only_declaration_is_editable () = with_fixture (fun _ _ config root d
    browser rows read the browser Add-on's cached observation, and say why
    when there is none. *)
 let browser_rows_read_the_addon_observation () =
-  let client id = `Assoc ["clientId",`String id;"browser",`String "firefox";"version",`String "158.0.1";
-    "engineVersion",`String "158.0.1";"transport",`String "webdriver_bidi";"space",`Null;"interactions",`List [];"lastActivities",`List [];"spaceObservation",`Null;"spacePresence",`Null] in
+  let client id space = `Assoc ["clientId",`String id;"browser",`String "ego_lite";"version",`String "0.6.2.7";
+    "engineVersion",`String "154.0.8037.44";"transport",`String "ego_task_space";
+    "space",`Assoc ["id",`Int space;"name",`String "Inventory fixture"];"interactions",`List [];"lastActivities",`List [];"spaceObservation",`Null;"spacePresence",`Null] in
   let output = match Browser_addon_observation.of_snapshot ~observed_at:1.
       (`Assoc ["state",`String "serving";
-        "clients",`List [client "01a16363-ef67-7000-ad62-05bcd0320d99"; client "01a16363-ef68-7000-aee1-37e1be230202"]]) with
+        "clients",`List [client "01a16363-ef67-7000-ad62-05bcd0320d99" 51; client "01a16363-ef68-7000-aee1-37e1be230202" 52]]) with
     | Ok output -> output | Error detail -> fail detail in
   let snapshot : Addon.export_observation = {instance_id="browser-worker";observation_seq=2;
     max_bytes=4096;refreshing=false;output} in
@@ -428,8 +429,8 @@ let browser_rows_read_the_addon_observation () =
   let reading observations = Browser_addon_presence.of_observations ~declarations
       ~applications:(fun () -> fail "only an Add-on declared on and not running asks how it was applied")
       observations in
-  (* The owned Firefox worker publishes this observation. *)
-  let every observation = [{Addon.backend=Browser_lane.Backend.Owned_firefox;observation}] in
+  (* The ego worker publishes this observation. *)
+  let every observation = [{Addon.backend=Browser_lane.Backend.Ego;observation}] in
   let read observation lane = Browser_addon_presence.lane (reading (every observation)) lane in
   let state observation lane = Inventory.For_testing.browser_state
       (read observation lane) lane in
@@ -440,7 +441,7 @@ let browser_rows_read_the_addon_observation () =
     (state (Ok None) Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (Inventory.Browser_addon_absent));
   let failed : Lane_addon_unready.t = {installation="browser-work";instance_id="browser-worker";package_id="browser";
-    declared_tools=[];service=Lane_addon_types.Browser_service Browser_lane.Backend.Owned_firefox;reason=Failed {Lane_addon_lifecycle.cause=Cleanup_unconfirmed "cleanup incomplete";first=None}} in
+    declared_tools=[];service=Lane_addon_types.Browser_service Browser_lane.Backend.Ego;reason=Failed {Lane_addon_lifecycle.cause=Cleanup_unconfirmed "cleanup incomplete";first=None}} in
   let refusal = Addon.Unready_installations (failed, []) in
   check bool "a failed browser Add-on shows the operator its failure" true
     (state (Error refusal) Browser_lane.Lane_name.Live
@@ -455,8 +456,7 @@ let browser_lanes_read_their_own_sources () =
     let client_id=match Browser_lane.client_id_of_string id with
       | Ok id -> id | Error detail -> fail detail in
     let browser,space=match transport with
-      | Browser_lane.Ego_task_space -> Browser_lane.Ego_lite,Some {Browser_lane.id=51;name="Inventory fixture"}
-      | Webdriver_bidi -> Browser_lane.Firefox,None in
+      | Browser_lane.Ego_task_space -> Browser_lane.Ego_lite,Some {Browser_lane.id=51;name="Inventory fixture"} in
     let client : Browser_lane.client_info =
       {client_id;browser;version="158.0.1";engine_version="158.0.1";transport;space} in
     Browser_addon_observation.publish_client client ~space_observation:None ~space_presence:None in
@@ -473,13 +473,9 @@ let browser_lanes_read_their_own_sources () =
       (Browser_addon_presence.lane (Browser_addon_presence.of_observations ~declarations
          ~applications:(fun () -> fail "no browser Add-on is declared") observations) lane) lane in
   let ego = serving Browser_lane.Backend.Ego
-      (published [client "01a16363-ef67-7000-ad62-05bcd0320d99" Browser_lane.Ego_task_space])
-  and firefox = serving Browser_lane.Backend.Owned_firefox
-      (published [client "01a16363-ef68-7000-aee1-37e1be230202" Browser_lane.Webdriver_bidi;
-                  client "01a16363-ef69-7000-aee1-37e1be230203" Browser_lane.Webdriver_bidi]) in
-  let workers = [ego; firefox] in
-  check bool "the live row counts the clients of every live installation" true
-    (state workers Browser_lane.Lane_name.Live = Inventory.Browser_clients (Inventory.Browser_observed 3));
+      (published [client "01a16363-ef67-7000-ad62-05bcd0320d99" Browser_lane.Ego_task_space]) in
+  check bool "the live row counts the clients of the live installation" true
+    (state [ego] Browser_lane.Lane_name.Live = Inventory.Browser_clients (Inventory.Browser_observed 1));
   (* Two installations of one source reach presence as one ambiguous
      observation. *)
   let ambiguous = Error (Addon.Ambiguous_installations ["first"; "second"]) in
@@ -490,16 +486,6 @@ let browser_lanes_read_their_own_sources () =
                               | Observed _ | Absent | Off | Not_running _) -> false in
   let lane_of observations lane = Browser_addon_presence.lane
       (Browser_addon_presence.of_observations ~declarations ~applications:(fun () -> []) observations) lane in
-  (* Two installations of ego beside one owned Firefox: the host uses no ego
-     client and every Firefox one, and the live row says the same. *)
-  let ego_twice = [serving Browser_lane.Backend.Ego ambiguous; firefox] in
-  check bool "a doubled live source leaves out only its own clients" true
-    (state ego_twice Browser_lane.Lane_name.Live
-     = Inventory.Browser_clients (Inventory.Browser_observed 2));
-  check bool "the source that still answers lists its clients" true
-    (match lane_of ego_twice Browser_lane.Lane_name.Live with
-     | Browser_addon_presence.Observed published -> List.length published.clients = 2
-     | Browser_addon_presence.(Absent | Off | Not_running _ | Unavailable _) -> false);
   check bool "a live lane whose only source is doubled says so" true
     (is_ambiguous (lane_of [serving Browser_lane.Backend.Ego ambiguous]
                      Browser_lane.Lane_name.Live));
@@ -509,10 +495,6 @@ let browser_lanes_read_their_own_sources () =
     declared_tools=[];service=Lane_addon_types.Browser_service Browser_lane.Backend.Ego;
     reason=Failed {Lane_addon_lifecycle.cause=Cleanup_unconfirmed "cleanup incomplete";first=None}} in
   let refusal = Addon.Unready_installations (failed, []) in
-  let withheld = [serving Browser_lane.Backend.Ego (Error refusal); firefox] in
-  check bool "a withheld live installation leaves out only its own clients" true
-    (state withheld Browser_lane.Lane_name.Live
-     = Inventory.Browser_clients (Inventory.Browser_observed 2));
   check bool "a live lane whose only installation withholds says why" true
     (state [serving Browser_lane.Backend.Ego (Error refusal)] Browser_lane.Lane_name.Live
      = Inventory.Browser_clients (

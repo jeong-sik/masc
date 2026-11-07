@@ -110,7 +110,7 @@ let verb_of_json ~route value =
   | "page.interact" ->
       let* fields = object_fields Browser_interaction.wire_fields args in
       let* request = Browser_interaction.parse (`Assoc (route_fields route @ fields)) in
-      Ok (B.Page_interact {tab_id=request.tab_id;frame_path=request.frame_path;expected_url=request.expected_url;action=request.action})
+      Ok (B.Page_interact {tab_id=request.tab_id;expected_url=request.expected_url;action=request.action})
   | "page.goto" -> let* fields = fields ["url";"tabId"] in let* url = text_field fields "url" in
       let* tab_id = optional_tab fields in Ok (B.Page_goto {url;tab_id})
   | "page.act" ->
@@ -121,17 +121,10 @@ let verb_of_json ~route value =
         | _ -> Error "page.act arguments cannot override browser routing" in
       B.Action.parse args |> Result.map (fun action -> B.Page_act action)
   | "page.context" ->
-      let* fields = fields ["tabId";"framePath";"mode";"maxChars";"within";"selector"] in
+      let* fields = fields ["tabId";"mode"] in
       let* raw = required fields "tabId" in let* tab_id = tab raw in
-      let* frame_path = B.Action.parse_frame_path args in
       let* name = text_field fields "mode" in
-      let* filter = Browser_page_script.elements_filter_of_json (fun key -> List.assoc_opt key fields) in
-      let* mode = match name,List.assoc_opt "maxChars" fields,filter.within,filter.selector with
-        | "text",Some raw,None,None -> let* cap = integer raw in let* _ = Browser_page_script.text_cap (Some cap) in Ok (`Text cap)
-        | "elements",None,_,_ -> Ok (`Elements filter)
-        | "frames",None,None,None -> Ok `Frames | "dialog",None,None,None -> Ok `Dialog
-        | _ -> Error "invalid context read mode" in
-      Ok (B.Page_context {tab_id;frame_path;mode})
+      if name = "dialog" then Ok (B.Page_context {tab_id}) else Error "invalid context read mode"
   | _ -> Error "unknown browser verb"
 
 type command = Snapshot | Retire
@@ -214,8 +207,7 @@ let of_json value =
         let* client = client_of_json raw in
         (* The ego connection polls from inside the worker. *)
         let* () = match client.transport with
-          | B.Ego_task_space -> Error "an ego_task_space connection is run by the browser Add-on worker, not polled over the socket"
-          | B.Webdriver_bidi -> Ok () in
+          | B.Ego_task_space -> Error "an ego_task_space connection is run by the browser Add-on worker, not polled over the socket" in
         let* raw = required fields "window_sec" in let* window_sec = positive raw in Ok (Poll {client;window_sec})
     | "deliver" -> let* () = exact ["clientId";"id";"payload"] in let* client_id = client_id () in
         let* id = text_field fields "id" in let* payload = required fields "payload" in Ok (Deliver {client_id;id;payload})

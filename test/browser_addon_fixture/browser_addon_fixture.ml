@@ -148,9 +148,8 @@ let with_env ~env ~config run =
         Fs_compat.mkdir_p (Workspace.masc_dir config);
         let saved=Runtime.For_testing.snapshot () in
         Fun.protect ~finally:(fun () -> Runtime.For_testing.restore saved) (fun () ->
-          let profile=Filename.concat root "firefox-profile" in Unix.mkdir profile 0o700;
           let path=Filename.concat root "runtime.toml" in
-          write path (Printf.sprintf {|[providers.codex]
+          write path {|[providers.codex]
 protocol = "codex-app-server"
 command = "/bin/false"
 is-non-interactive = true
@@ -160,13 +159,10 @@ max-context = 400000
 [codex.codex]
 [runtime]
 default = "codex.codex"
-[browser.live.bidi]
-firefox = "/bin/false"
-profile = %S
 [browser.live.ego]
 command = "/bin/false"
 space = 0
-|} profile);
+|};
           require (Runtime.init_default ~config_path:path);
           run ~sw ~root ~settle:(fun () -> settled:=true)))))
 let dispatch ~config operation fields=R.dispatch ~caller:"browser-fixture"
@@ -302,11 +298,11 @@ let run_workers ~env ~config ~downloads ~received ~respond workers run =
       let attached=List.rev_map fst !started in
       List.iter (fun (worker:attached) -> wait ~env (fun () -> serving ~config worker.instance_id)) attached;
       run ~stop attached))
-(* One owned-Firefox worker that lists [clients], answered by [respond]. *)
+(* One ego worker that lists [clients], answered by [respond]. *)
 let with_worker ?(clients=[]) ?(downloads=[]) ~env ~config ~respond run =
   run_workers ~env ~config ~downloads ~received:(fun ~serves:_ ~route:_ -> ())
     ~respond:(fun ~serves:_ -> respond)
-    [{serves=B.Backend.Owned_firefox;clients;exports=true}]
+    [{serves=B.Backend.Ego;clients;exports=true}]
     (fun ~stop _ -> run {stop})
 let with_workers ?(received=fun ~serves:_ ~route:_ -> ()) ~env ~config ~workers ~respond run =
   run_workers ~env ~config ~downloads:[] ~received ~respond workers (fun ~stop:_ attached -> run attached)

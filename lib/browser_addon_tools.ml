@@ -32,11 +32,10 @@ let absolute_url = function
        | (None|Some _),(None|Some _) -> Error "url must be an absolute HTTP(S) URL")
   | None|Some _ -> Error "url is required"
 let prepare_read json =
-  let* fields=fields ["lane";"clientId";"tabId";"maxChars";"mode";"framePath";
+  let* fields=fields ["lane";"clientId";"tabId";"maxChars";"mode";
     "scope";"expectedUrl";"navigationSource";"within";"selector";"snapshotScope";"root";"screenshotOptions"] json in
   let* request=surface fields in
   let* ()=bound request in
-  let* frame_path=B.Action.parse_frame_path json in
   let* mode=Legacy.read_mode_of_args json in
   let* options=B.Capture.of_optional_json (List.assoc_opt "screenshotOptions" fields) in
   let* ()=match mode,options with
@@ -47,41 +46,31 @@ let prepare_read json =
   let* filter=Browser_page_script.elements_filter_of_json (fun key -> List.assoc_opt key fields) in
   let* ()=match mode,(filter.within,filter.selector) with
     | `Elements,((None|Some _),(None|Some _))
-    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Frames|`Dialog),(None,None) -> Ok ()
-    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Frames|`Dialog),((Some _,_)|(_,Some _)) ->
+    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Dialog),(None,None) -> Ok ()
+    | (`Text|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads|`Dialog),((Some _,_)|(_,Some _)) ->
         Error "within and selector apply to mode elements only" in
   let elements_projection=match filter.within,filter.selector with None,None -> Raw | (Some _,_|_,Some _) -> Scoped_elements filter in
-  let top_scene=frame_path=[] && (match mode with `Scene|`Regions -> true
-    | `Text|`Html|`Elements|`Snapshot|`Screenshot|`Downloads|`Frames|`Dialog -> false) in
+  let top_scene=(match mode with `Scene|`Regions -> true
+    | `Text|`Html|`Elements|`Snapshot|`Screenshot|`Downloads|`Dialog -> false) in
   let* ()=if not top_scene && List.exists (fun key -> List.mem_assoc key fields)
       ["scope";"expectedUrl";"navigationSource"] then
       Error "scope, expectedUrl and navigationSource support top-document scene or regions only" else Ok () in
   let* ()=match mode with
     | `Snapshot -> Ok ()
-    | `Text|`Html|`Elements|`Scene|`Regions|`Screenshot|`Downloads|`Frames|`Dialog ->
+    | `Text|`Html|`Elements|`Scene|`Regions|`Screenshot|`Downloads|`Dialog ->
       if List.exists (fun key -> List.mem_assoc key fields) ["snapshotScope";"root"]
       then Error "snapshotScope and root apply to mode snapshot only" else Ok () in
-  let contextual=frame_path<>[] || (match mode with `Frames|`Dialog -> true
-    | `Text|`Html|`Elements|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads -> false) in
-  if contextual then
-    let* ()=match request.route,mode with
-      | Browser_selection.Exact (Live_route _),(`Text|`Elements|`Frames|`Dialog) -> Ok ()
-      | Exact (Live_route _),(`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads) ->
-          Error "a live contextual read supports text, elements, frames, or a top-level native dialog"
-      | Automatic,_ -> Error "frame and dialog reads require an explicit live browser" in
-    let* tab_id=tab request in
-    let* mode=match mode with
-      | `Text -> Ok (`Text max_chars) | `Elements -> Ok (`Elements filter) | `Frames -> Ok `Frames
-      | `Dialog when frame_path=[] -> Ok `Dialog
-      | `Dialog|`Html|`Scene|`Regions|`Snapshot|`Screenshot|`Downloads -> Error "framePath supports text, elements and frames" in
-    let projection=match mode with `Elements _ -> elements_projection
-      | `Text _|`Frames|`Dialog -> Raw in
-    prepared request projection (B.Page_context {tab_id;frame_path;mode})
-  else match mode with
+  match mode with
+  | `Dialog ->
+      let* ()=match request.route with
+        | Browser_selection.Exact (Live_route _) -> Ok ()
+        | Automatic -> Error "dialog reads require an explicit live browser" in
+      let* tab_id=tab request in
+      prepared request Raw (B.Page_context {tab_id})
   | (`Scene|`Regions as scene_mode) ->
       let view=match scene_mode with `Regions -> "regions" | `Scene -> "content" in
       let* scene=Browser_scene.parse_request (`Assoc (("view",`String view)::
-        List.filter (fun (key,_) -> not (List.mem key ["mode";"framePath"])) fields)) in
+        List.filter (fun (key,_) -> key<>"mode") fields)) in
       let* tab_id=tab request in
       prepared request (Scene scene) (B.Page_scene {tab_id;max_chars;view=scene.view;scope=scene.scope})
   | `Snapshot ->
@@ -107,7 +96,6 @@ let prepare_read json =
       let* ()=match cap with None -> Ok () | Some _ -> Error "maxChars applies to text; html returns the document source uncut, or none when the reply would pass 1 MiB" in
       let* tab_id=tab request in prepared request Raw (B.Page_document {tab_id})
   | `Elements -> prepared request elements_projection (B.Page_elements {tab_id=request.tab_id;filter})
-  | `Frames|`Dialog -> Error "contextual read requires a frame or dialog mode"
 let prepare ~upload_paths tool json =
   let* _=Lane_addon_action.canonical json in
   match tool with
@@ -132,21 +120,21 @@ let prepare ~upload_paths tool json =
      | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) ->
       let* request=Browser_interaction.parse json in
       Ok {preference=request.route;required_actions=[];projection=Raw;
-        verb=B.Page_interact {tab_id=request.tab_id;frame_path=request.frame_path;expected_url=request.expected_url;action=request.action}})
+        verb=B.Page_interact {tab_id=request.tab_id;expected_url=request.expected_url;action=request.action}})
   | Act ->
       let* action=B.Action.parse json in
       let* action=match action,upload_paths with
         | B.Action.On_tab ({interaction=Upload {target=upload;_};_} as target),Some paths ->
             Ok (B.Action.On_tab {target with interaction=Upload {target=upload;paths}})
         | On_tab {interaction=Upload _;_},None -> Error "upload requires an authoritative Keeper file context"
-        | (Open_tab _|Open_window _|Control _|On_tab {interaction=(Back|Forward|Reload
+        | (Open_tab _|Control _|On_tab {interaction=(Back|Forward|Reload
             |Close_tab|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_emulation _|Clear_emulation);_}),(None|Some _) -> Ok action in
       let* request=Legacy.tool_request json in
       let* ()=match action,request.route with
-        | (B.Action.Open_tab _|Open_window _|Control _),Browser_selection.Exact (B.Live_route None)
+        | (B.Action.Open_tab _|Control _),Browser_selection.Exact (B.Live_route None)
         | Control _,Automatic ->
             Error "live creation, control and Page management actions require an explicit observed clientId"
-        | (Open_tab _|Open_window _|On_tab _),(Automatic|Exact (Live_route _))
+        | (Open_tab _|On_tab _),(Automatic|Exact (Live_route _))
         | Control _,Exact (Live_route (Some _)) -> Ok () in
       prepared request Raw (B.Page_act action)
 

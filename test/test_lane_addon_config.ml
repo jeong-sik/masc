@@ -977,7 +977,6 @@ let ui_category_is_strict_display_metadata () = with_directory (fun _root packag
     (Lane_addon_types.same_execution_package original.package package))
     [{changed with command=["different-worker"]};
      {changed with model_access=Lane_addon_types.Host_sampling};
-     {changed with worker_service=Lane_addon_types.Browser_service Browser_lane.Backend.Owned_firefox};
      {changed with worker_service=Lane_addon_types.Browser_service Browser_lane.Backend.Ego};
      {changed with tool_hooks=[Lane_addon_types.Validate_input]}];
   List.iter (fun category ->

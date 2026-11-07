@@ -12,7 +12,7 @@ scene의 documentId/nodeId와 다른 식별자다.
 
 click·fill·hover·double_click은 관측한 `target: {ref: 12}`를 우선 쓴다. role/name이나
 text target도 사용할 수 있으나, 같은 이름이 프레임 안팎에 있으면 ref로 구분한다.
-`expectedUrl`은 snapshot에 나온 최상위 탭 URL이며 `framePath`를 섞지 않는다.
+`expectedUrl`은 snapshot에 나온 최상위 탭 URL이다.
 조작 뒤나 stale/unknown ref 오류 뒤에는 같은 탭의 새 snapshot으로 이어간다.
 
 Ego의 `selector` 입력도 SDK가 직접 처리한다. 관측한 `@12`, `loc=role:…`, `text=…`,
@@ -140,7 +140,7 @@ Ego 연결이 돌려주는 모든 결과 객체와 실패에는 `inputReadiness`
 
 - `expectedUrl`·`scope`·`navigationSource`는 최상위 문서의 `mode=scene` 또는
   `mode=regions` 읽기에서만 지원된다. 이 읽기에서는 받은 `url`을 expectedUrl로 쓴다.
-  text/elements/screenshot/frames/dialog/downloads 및 `framePath`로 프레임 내부를 읽을 때는
+  text/elements/screenshot/dialog/downloads 읽기에는
   이 세 필드를 넣지 않는다. 이 범위를 벗어나면 인자 오류로 거절된다. 반환 스키마에 URL이 있는 관측만 받은 URL과 대조하고, 제공된 탭·문맥·범위를 확인한다.
   dialog/downloads처럼 페이지 URL이 없는 응답에 URL 비교를 요구하거나 URL을 만들어 넣지 않는다.
   페이지 정체성 확인이 별도로 필요할 때만 지원되는 페이지 읽기를 추가한다.
@@ -224,25 +224,15 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
 
 `click_at`·`scroll_at`은 현재 screenshot의 `viewport`와 정규화된 `point`를 쓴다.
 `click_at`은 `button`(`primary` 기본, `middle`, `secondary`)으로 가운데·오른쪽 클릭도 한다.
-`webdriver_bidi` 연결이 눌러 준다.
-`tap_at`·`swipe`는 마우스가 아니라 터치 포인터로 `click_at`·`drag`와 같은 좌표를 쓴다. `webdriver_bidi` 연결만 된다.
 `set_viewport`는 `expectedUrl`과 함께 `width`·`height`(100~4096 CSS px)를 같이 주면 그 탭의 viewport 크기를 바꾼다.
-`webdriver_bidi` 연결에서는 둘 다 빼면 브라우저 원래 크기로 돌아간다.
+둘 다 빼면 브라우저 원래 크기로 돌아간다.
 바꾼 뒤에는 screenshot을 다시 찍는다.
-`hover_at`과 `drag`의 trusted 입력은 live의 `webdriver_bidi`
-연결이 한다. `live_transport_unsupported`로 거절되면 `references/connection.md`의
+`hover_at`이나 `drag`가 `live_transport_unsupported`로 거절되면 `references/connection.md`의
 같은 항목대로 한다. 같은 요청을 같은 연결에 반복하지 않는다. 필요한 조작을 지원하는 현재 페이지의 관측된 컨트롤이 있으면
 요청 범위 안에서 사용하고, 그렇지 않으면 미수행 상태를 남긴다.
 
-Ego 이외의 연결에서 `select_option`은 CSS로 고른 `<select>` 하나를 조작한다.
-단일 선택에는 `value`, 다중 선택에는 중복 없는 `values` 배열을 쓰며 둘을 섞지 않는다.
-`values: []`는 다중 선택을 모두 해제한다. 요청한 옵션이 없거나 모호하거나 비활성이면
-어느 옵션도 바꾸지 않고 거절한다. 선택을 교체하고 `input`·`change`를 한 번씩 보낸 뒤
-실제 `selectedValues`를 돌려준다. 페이지 이벤트가 선택을 다시 바꾸면 부분 효과로
-실패하므로 현재 폼을 다시 읽는다. 이는 DOM 값 변경이며 trusted 포인터 클릭이 아니다.
-
-마우스를 올려야 나타나는 컨트롤(예: 메시지 줄의 리액션 버튼)은 `webdriver_bidi`
-연결 하나에서 이 순서로 한다. 올리기 전에 읽은 목록에 그 컨트롤이 없는 것은 정상이다.
+마우스를 올려야 나타나는 컨트롤(예: 메시지 줄의 리액션 버튼)은 연결 하나에서
+이 순서로 한다. 올리기 전에 읽은 목록에 그 컨트롤이 없는 것은 정상이다.
 
 1. 그 연결의 탭을 읽고 screenshot을 찍는다.
 2. 그 screenshot의 `viewport`와 대상 줄 위의 `point`로 `hover_at` 한다.
@@ -250,7 +240,7 @@ Ego 이외의 연결에서 `select_option`은 CSS로 고른 `<select>` 하나를
 4. 새 screenshot의 `viewport`와 그 컨트롤 위의 `point`로 `click_at` 한다.
 5. 다시 읽어 결과를 확인한다.
 
-`webdriver_bidi` 연결이 없으면 이 일은 할 수 없다. 그 연결이 필요하다고 운영자에게 알린다.
+그 연결이 `hover_at`을 `live_transport_unsupported`로 거절하면 이 일은 할 수 없다. 운영자에게 알린다.
 
 화면 확인이 필요하면 관측된 `tabId`로 `BrowserRead mode=screenshot`을 호출한다.
 현재 런타임에 `keeper_image_read`가 제공되면 Keeper 응답의 이미지 `artifact`를

@@ -17,3 +17,8 @@ val published_json
   -> published:(string, Yojson.Safe.t) Hashtbl.t
   -> download
   -> Yojson.Safe.t
+
+(** [verify_file ~root path] is [path]'s canonical name and size when it is a
+    regular file inside [root]. A symlink, a directory or a file outside
+    [root] is an [Error]. *)
+val verify_file : root:string -> string -> (string * int, string) result

@@ -6,7 +6,6 @@
 
 type t =
   | Launcher  (** Starts every native Add-on worker inside its admission. *)
-  | Browser_process_owner  (** Owns the browsers a browser Add-on starts. *)
 
 val all : t list
 (** Every program, in declaration order. *)

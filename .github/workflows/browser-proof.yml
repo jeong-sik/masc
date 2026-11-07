@@ -50,35 +50,11 @@ jobs:
       - name: Install OCaml dependencies
         run: opam install ./masc.opam --deps-only --with-test -y
 
-      - name: Build the BiDi peer tests
-        run: opam exec -- dune build --release test/test_browser_bidi_peer.exe
-
-      - name: Exercise the BiDi peer
+      - name: Verify bounded upload byte transfer
         run: |
           set -euo pipefail
           mkdir -p proof
-          _build/default/test/test_browser_bidi_peer.exe 2>&1 | tee proof/bidi-peer-tests.log
-
-      - name: Install Firefox and geckodriver
-        run: |
-          brew install geckodriver
-          if [[ ! -x /Applications/Firefox.app/Contents/MacOS/firefox ]]; then
-            brew install --cask firefox
-          fi
-
-      - name: Verify bounded upload byte transfer
-        run: opam exec -- python3 scripts/probe-browser-upload-bytes.py --out proof/upload-bytes
-
-      # The scene contract is what the scene runtime this repository builds
-      # says the page looks like, and the probe asserts it against a real
-      # Gecko. The pull-request gate skips it (no dune rule declares
-      # runtest-test_browser_scene) and the nightly names it nowhere.
-      - name: Exercise the real Gecko scene contract
-        run: |
-          python3 test/test_browser_scene.py \
-            --driver "$(command -v geckodriver)" \
-            --browser /Applications/Firefox.app/Contents/MacOS/firefox \
-            --out proof/scene
+          opam exec -- python3 scripts/probe-browser-upload-bytes.py --out proof/upload-bytes
 
       - name: Record the source identity
         working-directory: proof

@@ -326,13 +326,11 @@ val check_inventory_record : path:string -> Yojson.Safe.t -> (unit, string) resu
 val native_claims_directory : string
 (** The directory below the Lane Add-on store root that holds the native claim
     slots. *)
-type native_claim_slot = Installation_slot | Live_bidi_child_slot
-(** Who reads a native claim slot: the host recovering an installation reads
-    its cleanup descriptor through {!Browser_addon_socket}; a live BiDi child
-    slot is compared with the descriptor its parent recomputes. *)
-val native_claim_slot_of_name : string -> native_claim_slot option
-(** The slot a directory name below {!native_claims_directory} names, as this
-    module creates it; [None] for a name it never creates. *)
+val is_installation_slot : string -> bool
+(** Whether a directory name below {!native_claims_directory} is an
+    installation's claim slot as this module creates it. The host recovering
+    an installation reads its cleanup descriptor through
+    {!Browser_addon_socket}. *)
 type retained_owner = Owned_by of configuration_owner | Unowned | Owner_unreadable
 (** Whose record it is. [Unowned] is a manual attach, which belongs to no
     declaration. [Owner_unreadable] is a record whose configuration cannot be

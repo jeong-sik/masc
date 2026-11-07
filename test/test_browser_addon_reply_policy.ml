@@ -29,8 +29,8 @@ let policy_at_the_actual_tool_boundary () =
       Eio.Switch.on_release sw (fun () -> Owner.revoke owner);
       let delay = ref 0. and received = ref [] in
       let client_id = ok (B.client_id_of_string "0c000000-0000-4000-8000-000000000071") in
-      let client = {B.client_id;browser=B.Firefox;version="fixture";engine_version="fixture";
-        transport=B.Webdriver_bidi;space=None} in
+      let client = {B.client_id;browser=B.Ego_lite;version="fixture";engine_version="fixture";
+        transport=B.Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"}} in
       let send command = Owner.dispatch owner {W.incarnation=Owner.incarnation owner;command} in
       (* Each command is answered after [delay] on its own fiber, so a late
          answer to one case never holds up the next. *)

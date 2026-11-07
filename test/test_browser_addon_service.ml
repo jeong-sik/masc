@@ -6,8 +6,8 @@ module B = Browser_lane
 let ok = function Ok value -> value | Error message -> fail message
 let incarnation = "0b000000-0000-4000-8000-000000000001"
 let client_id = ok (B.client_id_of_string "0c000000-0000-4000-8000-000000000101")
-let client = {B.client_id;browser=B.Firefox;version="test";engine_version="test";
-  transport=B.Webdriver_bidi;space=None}
+let client = {B.client_id;browser=B.Ego_lite;version="test";engine_version="test";
+  transport=B.Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"}}
 let live_request = {W.incarnation;command=W.Issue {route=B.Live_route (Some client_id);
   verb=B.Page_document {tab_id=7};actor=None;timeout_sec=30.;only_if_idle=true}}
 let raw_request = Yojson.Safe.to_string (W.to_json live_request)

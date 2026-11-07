@@ -2261,27 +2261,25 @@ status: reference
 
 **Trusted Hover (신뢰 호버)**
 : 브라우저 연결에서 클릭 없이 포인터를 올리는 `hover_at` 조작이, 관측된 URL과 뷰포트
-  (`expectedUrl`·`viewport`) 가드를 통과한 뒤에만 실행되는 계약(#41620). 첨부된 live
-  Firefox BiDi 탭에서 동작하며, 가드가 낡은 URL이나 뷰포트에서 실패하면
+  (`expectedUrl`·`viewport`) 가드를 통과한 뒤에만 실행되는 계약(#41620). live 연결의
+  탭에서 동작하며, 가드가 낡은 URL이나 뷰포트에서 실패하면
   입력을 보내기 전에 `Rejected_before_effect`로 거절한다 — 포인터 움직임도 효과이므로
   조용한 실패 대신 거절 사유를 남긴다. 경계: 가드 검증과 입력 주입은 원자적 트랜잭션이 아니어서 검증 직후 조작자가
   페이지를 변경할 수 있고, 결과 불확실(`unknown outcome`) 시 재시도(write replay) 없이
   클라이언트를 중단한다.
   → [Browser_lane](../../lib/browser_lane/browser_lane.ml) ·
-  [Browser_interaction](../../lib/browser_interaction.mli) ·
-  [browser-bidi-live-host 설계](../../docs/design/browser-bidi-live-host.md)
+  [Browser_interaction](../../lib/browser_interaction.mli)
 
 **Live Transport (라이브 전송 방식)**
 : MASC 실시간 브라우저 연결(`live client`)이 브라우저와 통신하는 물리적·프로토콜 전송 수단(#41795, #41839).
-  닫힌 두 값 `Webdriver_bidi`(`"webdriver_bidi"`), `Ego_task_space`(`"ego_task_space"`)이다(`Browser_lane.live_transport`).
+  닫힌 값은 `Ego_task_space`(`"ego_task_space"`) 하나다(`Browser_lane.live_transport`).
   각 전송 방식이 제공할 수 있는 작업 역량(`Browser_lane.live_capability`)은 타입 표(`live_transport_serves`)로 엄격히 고정된다.
-  - **역량 33종**: `Tab_listing`·`Text_read`·`Document_source`·`Element_inventory`·`Viewport_capture`·`Scene_read`·`Accessibility_snapshot`·`Snapshot_target_input`·`Native_workflow`·`Page_recovery`·`Dom_interaction`·`Point_click`·`Point_scroll`·`Trusted_hover`·`Trusted_drag`·`Trusted_double_click`·`Trusted_button_click`·`Touch_input`·`Trusted_keyboard`·`Viewport_resize`·`Tab_activation`·`Tab_history`·`Tab_navigation`·`Tab_closing`·`Tab_creation`·`Dialog_read`·`Dialog_answer`·`Frame_read`·`Operator_handoff`·`Page_management`·`Download_listing`·`File_upload`·`Environment_emulation`.
-  - **`webdriver_bidi`**: browser Lane Addon 이 `[browser.live.bidi]` 로 띄운 Firefox 를 W3C WebDriver BiDi 프로토콜로 직접 제어한다. 신뢰 포인터·키보드 역량(`Trusted_hover`·`Trusted_drag`·`Trusted_double_click`·`Trusted_button_click`·`Touch_input`·`Trusted_keyboard`), 뷰포트 크기(`Viewport_resize`), 탭 기록·닫기(`Tab_history`·`Tab_closing`: 이 연결이 연 탭만), 기본 탭 생성(`Tab_creation`), JS 대화상자 수락·거절(`Dialog_answer`: 이 연결이 연 탭만), iframe 안 text·elements·frames 읽기(`Frame_read`)를 제공한다. 탭 활성화(`Tab_activation`)는 브라우저 창 포커스도 함께 가져간다. 브라우저 줌(`Browser_zoom`)은 제공하지 않는다.
-  - **`ego_task_space`**: ego lite 작업 공간 하나를 browser Lane Addon worker 가 `ego-browser nodejs` 로 다룬다(RFC-browser-live-ego). 읽기 다섯 종(`Tab_listing`·`Text_read`·`Element_inventory`·`Viewport_capture`·`Scene_read`)과 접근성 snapshot(`Accessibility_snapshot`), 탭 열기·이동·닫기·히스토리(`Tab_creation`·`Tab_navigation`·`Tab_closing`·`Tab_history`), 입력(`Dom_interaction`·`Point_click`·`Point_scroll`·`Trusted_hover`·`Trusted_drag`·`Trusted_double_click`·`Trusted_button_click`·`Trusted_keyboard`·`Snapshot_target_input`), 대화상자 응답(`Dialog_answer`), 사람에게 넘기기(`Operator_handoff`), 다운로드 목록(`Download_listing`), 업로드(`File_upload`)를 제공한다. 탭 번호는 ego 가 붙인 페이지 라벨(`p1`, `p2`)을 따른다. 이동·닫기·입력은 그 공간에서 에이전트가 연 페이지에만 한다. 프레임은 frame 경로(`Frame_read`) 없이 snapshot 의 ref 와 role·글 대상으로 읽고 다룬다. 운영자가 그 공간에 연 탭은 목록에만 나오고 읽기·이동·입력은 효과 없이 거절된다. 입력의 대상 찾기·화면 확인·DOM 편집은 BiDi 와 같은 페이지 스크립트가 하고, 마우스와 키는 ego 가 보낸다.
-  - 두 전송 방식의 제공·비제공 조합은 코드가 전부 나열해 고정한다(`Browser_lane.live_transport_serves`).
+  - **역량 32종**: `Tab_listing`·`Text_read`·`Document_source`·`Element_inventory`·`Viewport_capture`·`Scene_read`·`Accessibility_snapshot`·`Snapshot_target_input`·`Native_workflow`·`Page_recovery`·`Dom_interaction`·`Point_click`·`Point_scroll`·`Trusted_hover`·`Trusted_drag`·`Trusted_double_click`·`Trusted_button_click`·`Touch_input`·`Trusted_keyboard`·`Viewport_resize`·`Tab_activation`·`Tab_history`·`Tab_navigation`·`Tab_closing`·`Tab_creation`·`Dialog_read`·`Dialog_answer`·`Operator_handoff`·`Page_management`·`Download_listing`·`File_upload`·`Environment_emulation`.
+  - **`ego_task_space`**: ego lite 작업 공간 하나를 browser Lane Addon worker 가 `ego-browser nodejs` 로 다룬다(RFC-browser-live-ego). 읽기 다섯 종(`Tab_listing`·`Text_read`·`Element_inventory`·`Viewport_capture`·`Scene_read`)과 접근성 snapshot(`Accessibility_snapshot`), 탭 열기·이동·닫기·히스토리(`Tab_creation`·`Tab_navigation`·`Tab_closing`·`Tab_history`), 입력(`Dom_interaction`·`Point_click`·`Point_scroll`·`Trusted_hover`·`Trusted_drag`·`Trusted_double_click`·`Trusted_button_click`·`Trusted_keyboard`·`Snapshot_target_input`), 대화상자 응답(`Dialog_answer`), 사람에게 넘기기(`Operator_handoff`), 다운로드 목록(`Download_listing`), 업로드(`File_upload`)를 제공한다. 탭 번호는 ego 가 붙인 페이지 라벨(`p1`, `p2`)을 따른다. 이동·닫기·입력은 그 공간에서 에이전트가 연 페이지에만 한다. 프레임은 snapshot 의 ref 와 role·글 대상으로 읽고 다룬다. 운영자가 그 공간에 연 탭은 목록에만 나오고 읽기·이동·입력은 효과 없이 거절된다. 입력의 대상 찾기·화면 확인·DOM 편집은 masc 페이지 스크립트가 하고, 마우스와 키는 ego 가 보낸다.
+  - 전송 방식의 제공·비제공 조합은 코드가 전부 나열해 고정한다(`Browser_lane.live_transport_serves`).
   선택된 연결의 전송 방식이 요청된 역량을 제공하지 못하면 브라우저 Add-on 은 명령을 큐에 넣기 전에 `live_transport_unsupported` 거절 코드로 차단하고, 거절된 연결(`clientId`)과 그 전송 방식(`transport`), 요청된 역량(`capability`)을 함께 돌려준다. 어느 경우에도 브라우저 명령은 발송되지 않는다. 선택한 연결에서 성공한 실시간 브라우저 응답(`BrowserRead` 등)과 탭·연결 목록(`BrowserTabs`)의 각 항목은 `clientId`와 함께 `transport` 필드를 노출하며, 연결 선택 이전의 오류 응답(`No_live_client` 등)과는 구분된다(#41839).
   - **이름 경계**: `transport`는 이 문서에서 여러 축으로 쓰인다. 이 항목은 연결된 브라우저와
-    통신하는 수단(`Browser_lane.live_transport`, `Webdriver_bidi`·`Ego_task_space`)만 가리킨다.
+    통신하는 수단(`Browser_lane.live_transport`, `Ego_task_space`)만 가리킨다.
     서버·MCP 계층의 전송 통로는 `lib/transport.ml`과 `09-server-transport.md`의
     HTTP·WebSocket·gRPC가 다루는 별개 축이고, 악기 재생을 앞으로 진행시키는 운반은
     `tools/alphatex/ARRANGEMENT.md`의 "WAV arrangement transport"·"Expressive MIDI
@@ -2289,9 +2287,7 @@ status: reference
     명령 실행 결과에서 원격 런타임 전송 장애만 가리키는 코드다. 문장에서 축이 정해지지
     않으면 `transport`만 쓰지 않고 "라이브 전송 방식"·"서버 전송 계층"·"어레인지먼트 재생
     운반"으로 적는다.
-  → [Browser_lane](../../lib/browser_lane/browser_lane.ml) ·
-  [Browser_host](../../lib/browser_host/browser_host.mli) ·
-  [browser-bidi-live-host 설계](../../docs/design/browser-bidi-live-host.md)
+  → [Browser_lane](../../lib/browser_lane/browser_lane.ml)
 
 **Browser Action Catalog (브라우저 동작 카탈로그)**
 : 한 브라우저 어댑터가 공개 도구로 닿을 수 있는 동작의 표(`Browser_capabilities.catalog`).
@@ -2334,12 +2330,6 @@ status: reference
   → [Browser_scene](../../lib/browser_scene.mli) ·
   [Browser_lane](../../lib/browser_lane/browser_lane.ml) ·
   [Browser_capabilities](../../lib/browser_capabilities.ml)
-
-**Addon-managed Firefox (Addon 소유 Firefox)**
-: `[browser.live.bidi]`로 지정한 Firefox와 BiDi 연결을 browser Lane Addon이 소유한다. 원래 native claim과 child birth/group, Firefox의 프로필 및 `moz:processID`를 확인한 뒤 고정 client UUID로 worker 내부에 등록한다. detach는 입력을 철회하고 원래 browser 종료와 claim settlement를 기다린다. 사용자 지정 프로필의 로그인 데이터는 보존한다. `keeper.kind = addon_managed`의 포트·프로필은 설정 관측이며 실제 준비 여부는 해당 Addon 관측에서 확인한다.
-  → [Browser_addon_live_bidi](../../lib/browser_addon_live_bidi.mli) ·
-  [Browser_bidi_host_status](../../lib/browser_bidi_host_status.mli) ·
-  [Browser Addon lifecycle](../design/browser-addon-lifecycle.md)
 
 **Ego Task Space Connection (ego 작업 공간 연결)**
 : `[browser.live.ego]`의 `command`(ego-browser 절대 경로)와 `space`(생성·재개할 이름 또는 재개할 기존 숫자 ID)로 Browser Lane Addon worker가 여는 live 연결이다. 이름은 `--live-ego-space`, 숫자 ID는 `--live-ego-space-id`로 worker에 전달한다.
@@ -3771,7 +3761,7 @@ status: reference
 : 릴리스 노트의 Added 불릿 끝에 달아, 그 기능을 다루는 사용 가이드가 아직 없음을
   숨기지 않고 남기는 표식이다. `가이드 없음(` 으로 열고 두 갈래로 닫는다.
   - 형식: 고치려는 대상 문서가 정해져 있으면 `가이드 없음(대상 문서:
-    docs/design/browser-bidi-live-host.md)` 처럼 경로를 적고, 그런 문서 자체가
+    docs/design/browser-lane.md)` 처럼 경로를 적고, 그런 문서 자체가
     없으면 `가이드 없음(문서 없음)` 이라고 적는다. 줄이 72칸쯤에 접혀도
     계수는 불릿 전체에서 표기를 찾는다. 계수기는 표기가 들었는지를 세는
     도구지, 두 형식의 문법 검증기는 아니다.

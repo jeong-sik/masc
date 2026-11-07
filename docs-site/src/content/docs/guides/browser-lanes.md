@@ -1,18 +1,12 @@
 ---
 title: Browser Lane Guide
-description: Connect the owned Firefox or ego lite as a browser Addon, select validation hooks, and use the Browser Lane TUI.
+description: Connect ego lite as a browser Addon, select validation hooks, and use the Browser Lane TUI.
 ---
 
-Each browser source is its own Lane Addon package with its own worker:
-`browser-firefox` and `browser-ego`. A worker runs only its source, so a failure
-of one source ends only that worker. Select the input/output validation hooks
-per installation. Browser names and connection transports describe
-capabilities; they are not separate installation systems.
-
-- **live** has two sources. `browser-firefox` starts a dedicated Firefox with
-  its own BiDi peer and profile. `browser-ego` serves an ego lite task space
-  with the cookies of your ego lite profile. Native hover and drag require a
-  connection that serves them.
+The browser source is the `browser-ego` Lane Addon package with its own
+worker. It serves an ego lite task space on the **live** lane, with the cookies
+of your ego lite profile. Select the input/output validation hooks per
+installation.
 
 For an unbound request, automatic selection considers the available browsers
 and required actions. Keep the returned browser identity for tab/document work;
@@ -22,15 +16,14 @@ supports every action. Safari is not a backend in this package.
 
 ## Install the browser Addons
 
-`scripts/install-local-build.sh` installs `masc-browser-addon-worker`,
-`masc-native-addon-launcher` and `masc-browser-process-owner` beside masc, then
-runs `masc browser-lane-setup --mode addon` for the workspace. The `bidi` and
-`ego` modes do the same step for the sources the workspace runs: firefox and
-ego when `runtime.toml` has their table or the run writes it. For each, it
-writes the package masc carries to
-`<base-path>/.masc/packages/browser-<source>/` and, when the workspace has no
-declaration of that source, saves `lane-addons/browser-<source>.toml` in the
-active config root. An existing declaration is left as it is. Keep the install
+`scripts/install-local-build.sh` installs `masc-browser-addon-worker` and
+`masc-native-addon-launcher` beside masc, then runs
+`masc browser-lane-setup --mode addon` for the workspace. The `ego` mode does
+the same step. When `runtime.toml` has `[browser.live.ego]` or the run writes
+it, setup writes the package masc carries to
+`<base-path>/.masc/packages/browser-ego/` and, when the workspace has no
+declaration of it, saves `lane-addons/browser-ego.toml` in the active config
+root. An existing declaration is left as it is. Keep the install
 prefix on the server's PATH. `--no-browser-addon` (installer) and `--no-addon`
 (setup) leave the Addons out; without them no browser route works.
 
@@ -68,38 +61,26 @@ authorization, worker incarnation, wire decoding, document/viewport binding,
 artifact ownership, and cleanup checks still apply. A browser package declares
 no model outputs, so a browser worker holds no model configuration.
 
-Backend settings below are loaded from the resolved `runtime.toml` at server
-startup and captured when an installation attaches. They say how a source
-starts, never whether it runs: a source whose table is missing does not start,
-and its package row says so. Restart after changing those settings, and
+The `[browser.live.ego]` settings are loaded from the resolved `runtime.toml` at server
+startup and captured when an installation attaches. They say how the source
+starts, never whether it runs: without the table it does not start, and its
+package row says so. Restart after changing those settings, and
 detach/reattach an existing installation to capture them. Installation
 declaration edits are reconciled at startup and on the existing maintenance
 pulse. Saving TOML is not an attachment receipt: inspect `desired_revision`,
 `applied_revision`, `phase`, and configuration issues. Dashboard Refresh reads
 that state rather than forcing reconciliation.
 
-To stop a source, set the top-level `enabled = false` in its declaration, from
-the TUI's package row or the TOML file, and verify detachment and cleanup. Only
-that source's worker stops. Removing a declaration takes effect after a
+To stop the source, set the top-level `enabled = false` in its declaration,
+from the TUI's package row or the TOML file, and verify detachment and cleanup. Removing a declaration takes effect after a
 complete config scan. The worker fences input before joining its original owned
 resources; unconfirmed cleanup remains a failure. A replacement has a fresh
 incarnation and connection IDs. Persistent profile contents are preserved.
 
-## Setup: the owned Firefox
+## Setup: ego lite
 
 `--base-path` is the workspace containing `.masc`, not the `.masc` directory
 itself.
-
-```bash
-masc browser-lane-setup --mode bidi --base-path /path/to/workspace
-```
-
-This prepares `[browser.live.bidi]` and the dedicated profile. Explicit
-`--firefox`, `--profile`, and `--port` replace their keys; omitted keys retain
-their values. Follow the [Firefox BiDi guide](../browser-bidi/) to attach and
-verify the managed connection.
-
-## Setup: ego lite
 
 ```bash
 masc browser-lane-setup --mode ego --base-path /path/to/workspace
@@ -112,8 +93,8 @@ cookies of your ego lite profile.
 
 Each running connection reports its browser identity and a `clientId` UUID. One
 live connection can be selected automatically; with several, choose the desired
-UUID. Tab IDs belong to a connection and can overlap between browsers. A stale
-UUID is refused instead of selecting another browser. Reconnecting creates a new
+UUID. Tab IDs belong to a connection and can overlap between connections. A
+stale UUID is refused instead of selecting another connection. Reconnecting creates a new
 UUID, so discover and select it again.
 
 ## Keeper and MCP tools
@@ -123,7 +104,7 @@ Keeper-facing names use CamelCase; the MCP registration names use `masc_browser_
 | Keeper tool | MCP name | Source and behavior |
 | --- | --- | --- |
 | `BrowserTabs` | `masc_browser_tabs` | List tabs and discover the live connection identity |
-| `BrowserRead` | `masc_browser_read` | Text, visible elements, scene or regions, or a viewport PNG. Document source (`mode = "html"`, explicit tab, `html: null` when the reply would pass 1 MiB). Frames and dialogs on BiDi; snapshots and downloads on ego |
+| `BrowserRead` | `masc_browser_read` | Text, visible elements, scene or regions, or a viewport PNG. Document source (`mode = "html"`, explicit tab, `html: null` when the reply would pass 1 MiB). Accessibility snapshots (frames included), dialogs and downloads |
 | `BrowserInteract` | `masc_browser_interact` | Click, fill, scroll and other input in one explicit tab; native hover/drag/keyboard depend on transport capabilities |
 | `BrowserSession` | `masc_browser_session` | Bind an observed ego Space to a Goal, or read that binding |
 | `BrowserGoto` | `masc_browser_goto` | Navigate a tab the connection opened to an HTTP(S) URL |
@@ -145,7 +126,7 @@ a selector must match exactly one element. For `BrowserInteract`, pass
 `expectedUrl` from the last read to reject intervening navigation. Fill emits page
 events and does not itself press Enter or submit. Read or capture the page after
 an action, including an error, before deciding whether to retry.
-On BiDi and ego, guarded semantic clicks use native pointer input. Fill and
+Guarded semantic clicks use native pointer input. Fill and
 native typing are distinct actions. Check transport capabilities and read the
 page after input to verify the application effect.
 

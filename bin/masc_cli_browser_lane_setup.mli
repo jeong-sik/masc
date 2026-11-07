@@ -1,12 +1,11 @@
-(** [masc browser-lane-setup]: connect this workspace's browser lane to a
-    Firefox MASC starts, to an ego lite task space, or both.
+(** [masc browser-lane-setup]: connect this workspace's browser lane to an
+    ego lite task space.
 
-    Without a mode it writes nothing and says who starts the live Firefox.
-    [--mode bidi] writes the [\[browser.live.bidi\]] table of runtime.toml, so
-    the MASC server starts a Firefox of its own. [--mode ego] writes the
-    [\[browser.live.ego\]] table, so the browser Add-on serves an ego lite task
-    space ({!Masc.Browser_lane_ego_setup}). Besides asking [ego-browser] for
-    its versions and for ego lite's list of task spaces, it starts no browser.
+    Without a mode it writes nothing and says which task space runtime.toml
+    names. [--mode ego] writes the [\[browser.live.ego\]] table, so the
+    browser Add-on serves an ego lite task space
+    ({!Masc.Browser_lane_ego_setup}). Besides asking [ego-browser] for its
+    versions and for ego lite's list of task spaces, it starts no browser.
 
     [--mode addon] writes, for each browser source the workspace runs, the
     package this masc carries to [.masc/packages/browser-<source>] and
@@ -22,7 +21,7 @@
 
     An option that the chosen modes do not use is refused, not ignored. *)
 
-type mode = Addon | Bidi | Ego
+type mode = Addon | Ego
 
 val all_modes : mode list
 
@@ -37,9 +36,6 @@ val run
   -> agent_named:bool
   -> modes:mode list
   -> no_addon:bool
-  -> firefox:string option
-  -> profile:string option
-  -> port:int option
   -> ego_command:string option
   -> ego_space:string option
   -> int

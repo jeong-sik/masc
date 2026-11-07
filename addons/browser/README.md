@@ -1,31 +1,29 @@
 # Browser workers
 
-Each browser source has its own package here: `firefox/` and `ego/`, with the
-ids `browser-firefox` and `browser-ego`.
-Every package runs `masc-browser-addon-worker` as a native Add-on for the one
-source its `lane.toml` names in `browser_backend`, so a failure of one source
-ends only its own worker. The server finds the worker on its PATH, and `masc-native-addon-launcher` and
-`masc-browser-process-owner` beside the masc executable or on its PATH.
+The browser source has its package here: `ego/`, with the id `browser-ego`.
+The package runs `masc-browser-addon-worker` as a native Add-on for the
+source its `lane.toml` names in `browser_backend`. The server finds the worker
+on its PATH, and `masc-native-addon-launcher` beside the masc executable or on
+its PATH.
 The host supplies the private socket, incarnation and message bound; package
 bindings cannot choose them. Native execution uses a foreground process group
 and durable resource claims. It is not a container sandbox.
 
-`scripts/install-local-build.sh` builds and installs the three programs with
+`scripts/install-local-build.sh` builds and installs the two programs with
 masc, into the same prefix (`~/.local/bin` by default; `--prefix DIR` chooses
 another). Ensure the server process receives that prefix on its actual `PATH`,
 including when started by a service manager. `--skip-build --build-dir DIR`
-requires all three executable inputs alongside the ordinary installer inputs;
+requires both executable inputs alongside the ordinary installer inputs;
 missing or non-executable inputs are refused before installed programs or guest
-shims change. `--no-browser-addon` leaves the three programs out and the
+shims change. `--no-browser-addon` leaves the two programs out and the
 workspace's Add-ons as they are; without them no browser route works. The release
 download installer does not supply these programs.
 
 masc carries these packages. After installing, the script runs
 `masc browser-lane-setup --mode addon` for the workspace, and every other
-`browser-lane-setup` mode does the same, for each source the workspace runs:
-firefox and ego when `runtime.toml` has their table or the run
-writes it. A source whose table the mode writes is declared once that table is
-written.
+`browser-lane-setup` mode does the same, when `runtime.toml` has
+`[browser.live.ego]` or the run writes it. The source is declared once its
+table is written.
 
 - It writes each package to `<base-path>/.masc/packages/browser-<source>/`. An
   upgraded masc rewrites the files there, so the declaration does not change.
@@ -34,8 +32,7 @@ written.
   (`<base-path>/.masc/config/lane-addons/`, or the one under
   `MASC_CONFIG_DIR`). An existing declaration is left as it is; setup reports
   it, and names the `manifest_path` line to use when it points at another copy.
-  The owned Firefox source requires one enabled declaration. Ego
-  installations may name independent Spaces in `binding.space`; setup retains
+  Ego installations may name independent Spaces in `binding.space`; setup retains
   the workspace-default declaration instead of replacing a Goal installation.
 
 Setup attaches nothing. The server attaches the declared Add-ons when it starts
@@ -185,12 +182,6 @@ tool_hooks = ["validate_input", "validate_output"]
 sources = []
 ```
 
-Each worker owns only its own source's browser. The firefox worker starts its
-configured live
-Firefox during attachment, on its dedicated existing owner-only profile. Its reported profile
-and process ID must match the original process owner. A busy port is refused;
-no external Firefox is adopted. See the [Firefox setup guide](../../docs/design/browser-bidi-live-host.md).
-
 Backend settings are captured at attachment from the loaded `runtime.toml`. A
 source whose table is missing does not start, and its package row says so.
 `runtime.toml` says how a source starts, never whether it runs: that is its
@@ -214,7 +205,7 @@ refuses either, so the worker opens no host request port and holds no model
 configuration, credentials or provider route.
 
 The host passes an explicit operational environment to the browser launcher,
-worker and its browser/driver children: process paths and temporary directories,
+worker and its children: process paths and temporary directories,
 locale, desktop display/session settings, font configuration and certificate
 paths. Other host environment entries, including provider API keys, are omitted.
 Allowed values are preserved; `HOME` is not rewritten. Browser configuration
@@ -222,8 +213,7 @@ still comes from the private admission. This prevents unnecessary environment
 inheritance; the native worker runs as the same OS user and is not a sandbox
 against reading that user's files.
 
-Scripted protocol cases, actual isolated BiDi/Gecko cases and installed
-browser behavior are separate evidence scopes. New production changes require
+Scripted protocol cases and installed browser behavior are separate evidence scopes. New production changes require
 their own recorded verification; a historical passing run does not prove the
 current installed runtime. Follow the
 [lifecycle evidence](../../docs/design/browser-addon-lifecycle.md#completion-evidence)

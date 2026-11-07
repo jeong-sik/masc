@@ -1,13 +1,11 @@
 # Browser execution as optional Lane Add-ons
 
-Each browser source is its own optional Lane Add-on with its own worker:
-`browser-firefox` (the Keeper live Firefox) and `browser-ego` (an ego lite
-connection). A worker runs only its source, from that source's `runtime.toml`
-table: `[browser.live.bidi]` or `[browser.live.ego]`.
-Whether a source runs is its declaration's `enabled`. Attaching an Add-on acquires
-its browser resources; detaching it revokes input and joins their cleanup. A
-failure of one source ends only its own worker. The configured Firefox profile
-keeps its logins across attachments.
+The browser source is the optional Lane Add-on `browser-ego` (an ego lite
+connection) with its own worker. The worker runs from the `[browser.live.ego]`
+table of `runtime.toml`. Whether it runs is its declaration's `enabled`.
+Attaching the Add-on acquires its browser resources; detaching it revokes input
+and joins their cleanup. The ego lite profile keeps its logins across
+attachments.
 
 The ego connection owns no browser process. The worker receives its command
 and task space reference as startup arguments: `--live-ego-command` and either
@@ -35,22 +33,6 @@ its `keepPages` policy and native receipt identify which Pages and Space remain.
 A user-owned name is published as unavailable; attachment to a user-owned
 numeric ID is refused. A handed-off agent Space may attach, while Page reads
 and input still require agent control.
-
-The live Firefox path starts a new browser through the native process owner.
-It checks the original kernel lease and child identity, the configured profile
-and Firefox's `moz:processID` before publishing a connection. An occupied port
-or an already used profile is a startup refusal. Existing browser processes
-remain under their operator's control. Polls and results go directly to the
-original worker and client UUID. Normal detach sends `browser.close` once to
-that verified browser and waits for its original owner. Failed shutdown stays
-unconfirmed. Persistent profile contents and shared lease files remain in place.
-Failure to start a configured live Firefox prevents the `browser-firefox`
-worker from becoming ready and joins its resources during failed-start cleanup.
-An unexpected connection failure revokes that worker rather than publishing a
-dead client; the other sources' workers keep running.
-
-Read the `browser-firefox` Add-on's observation for the worker-owned Firefox
-connection and startup errors.
 
 The operator selects tool-contract hooks: validate commands before dispatch and
 successful structured replies after dispatch. Input and output hooks can be
@@ -118,7 +100,7 @@ receipts remain distinct from successful contract validation.
    execution is not container isolation. This follows
    [POSIX exec/descriptor semantics](https://pubs.opengroup.org/onlinepubs/9799919799/functions/exec.html):
    closing a descriptor for a process-owned lease inode releases its locks.
-4. A browser worker that owns BiDi and ego command queues. Core
+4. A browser worker that owns the ego command queue. Core
    admission and artifact brokers remain host edges;
    built-in browser execution and tool fallback are removed.
    `masc-browser-addon-worker` publishes `browser_command` and `lane_observe`
@@ -133,7 +115,7 @@ receipts remain distinct from successful contract validation.
    the command names the lane, and for live the client ID, that the host chose
    from the worker's snapshot, and a route to a client that is not connected
    or a browser the worker does not run is refused before dispatch. There is
-   no retry. Strict codecs retain existing document, viewport, frame and
+   no retry. Strict codecs retain existing document, viewport and
    keyboard guards plus partial-effect result bodies. A nested service switch
    owns every accepted connection so idle clients cannot prevent shutdown.
    Retirement fences admission before disconnecting clients and cancelling waits.
@@ -216,8 +198,8 @@ receipts remain distinct from successful contract validation.
    replacement.
    Replacement stays refused until the operator takes the retained allocation
    over with `POST /api/v1/lane-addons/retain` (operator credential only). The
-   host first confirms what it can observe: the admission and each live BiDi
-   child claim are already Settled, and the allocation keeps its
+   host first confirms what it can observe: the admission is already Settled,
+   and the allocation keeps its
    recorded identity. Retain itself retires no claim and signals no process. It
    then records the acquisition as `retained` and the instance as detached with
    `Native_retained`. It infers nothing it cannot observe and removes nothing.
@@ -230,9 +212,7 @@ receipts remain distinct from successful contract validation.
    cleanup and a repeated Retain validate the original descriptor envelope and
    instance-bound acquisition record, then leave an operator-retained allocation
    alone even if its backend payload no longer decodes or the operator moved
-   its contents. The first Retain still decodes the live BiDi child
-   configuration needed to confirm its settlement; it does not interpret other
-   backend contents. Acquired resources still require the full
+   its contents. Acquired resources still require the full
    current backend contract for automatic cleanup. An explicit released record
    requires its original path to remain absent; a missing acquisition record
    cannot bypass backend validation or silently confer retained ownership.
@@ -278,43 +258,6 @@ receipts remain distinct from successful contract validation.
    assertions. It also saves and reloads an image-evicting checkpoint and checks
    that its bytes belong to the served Workspace. Source changes do not establish scenario execution. File-transfer
    broker and real browser evidence remain separate requirements.
-
-   The browser ownership component is a dedicated
-   `masc-browser-process-owner` executable. It runs behind the native launcher
-   and keeps the launcher's inherited lease descriptors in its own process;
-   the browser child receives only its standard streams, so a browser is not
-   required to preserve MASC's lease descriptors itself.
-   This owner refuses to run outside its own foreground group. Its bootstrap
-   receipt names the original instance, owner and child, but grants no authority:
-   the caller must independently observe that instance's native kernel lease.
-
-   A stdin keepalive pipe carries no commands. EOF, any byte or TERM/INT stops
-   admission to the owner lifetime and requests group TERM. The owner remains
-   alive through the existing five-second resource grace and then kills its
-   own group, including itself. Normal browser-child exit ends that group
-   promptly. The running owner occupies the group ID until the final signal;
-   no recorded PID or command-line lookup authorizes orphan signalling. An
-   actual child that closes extra descriptors therefore cannot drop the owner's
-   lease, and losing the sole keepalive writer requests cleanup without another
-   browser command. The native claim still needs durable retirement and observed
-   settlement before resource reuse. A child that deliberately leaves the group
-   needs its own ownership; this component is not a sandbox or proof about such
-   children. Abrupt loss of the owner with a surviving group remains unconfirmed.
-
-   Bootstrap output runs concurrently with child/keepalive/termination
-   observation. Stopping cancels a backpressured bootstrap write before group
-   teardown; no arbitrary timeout is added. A partial bootstrap reply does not
-   establish browser readiness or a completed operation.
-
-   The `runtest-browser-process-owner` alias defines actual launcher/owner/lease
-   scenarios for TERM, keepalive-writer crash, normal child exit, non-owner
-   refusal, descriptor closure, descendant cleanup and fresh admission. They
-   also fill the actual stdout pipe to EAGAIN and separately exercise TERM,
-   EOF and child exit without reading the bootstrap reply. They
-   use Python process trees, not an actual browser session. The exact
-   `fded0927497803bfc463324e3fcfddef51581d14` process-owner head passed all
-   seven scenarios in [run 39465959754](https://github.com/jeong-sik/masc/actions/runs/39465959754).
-   That result does not establish browser/UI or whole-stack execution.
 
 5. Scoped model-generation middleware using the existing exact-output authority,
    with retained request/terminal evidence and installation-selected routes. The
@@ -483,7 +426,7 @@ Record attach, real browser startup, observation, input, in-flight detach,
 confirmed owned-process cleanup and reattach. An old incarnation's requests,
 results and tab handles must be refused by the replacement.
 
-Exercise live BiDi and ego. Preserve trusted
+Exercise ego. Preserve trusted
 hover, drag, clicks, typing, keys, scrolling, navigation and tab receipts.
 Do not present unimplemented browser/action families as supported.
 

@@ -1,16 +1,11 @@
 ---
 title: 브라우저 레인 매뉴얼
-description: masc 가 띄우는 Firefox 와 ego lite 를 브라우저 Addon 으로 연결하고, 검증 Hook 을 고르고, Browser Lane TUI 를 쓰는 법.
+description: ego lite 를 브라우저 Addon 으로 연결하고, 검증 Hook 을 고르고, Browser Lane TUI 를 쓰는 법.
 ---
 
-브라우저 출처마다 Lane Addon 패키지와 worker가 따로 있습니다: `browser-firefox`,
-`browser-ego`. worker는 자기 출처만 띄우므로, 한 출처가 실패해도 그 worker만 끝납니다.
-입력·응답 검증 Hook은 설치마다 고릅니다. 브라우저 이름과 transport는 지원 기능을
-설명하며, 서로 다른 설치 체계는 아닙니다.
-
-- **live**에는 출처가 둘 있습니다. `browser-firefox`는 전용 Firefox를 전용 프로필로 띄우고
-  자기 BiDi peer로 붙습니다. `browser-ego`는 ego lite 작업 공간을 쓰고, ego lite 프로필의
-  쿠키로 일합니다. native hover·drag는 그 일을 하는 연결이 필요합니다.
+브라우저 출처는 `browser-ego` Lane Addon 패키지 하나이고, worker도 따로 있습니다.
+이 출처는 **live** lane에서 ego lite 작업 공간을 쓰고, ego lite 프로필의 쿠키로 일합니다.
+입력·응답 검증 Hook은 설치마다 고릅니다.
 
 아직 탭에 결속되지 않은 요청은 사용 가능한 브라우저와 필요한 동작에 따라 자동 선택할
 수 있습니다. 이후 탭·문서 작업에는 반환된 브라우저 identity를 유지합니다. 결속된 탭이나
@@ -19,13 +14,11 @@ description: masc 가 띄우는 Firefox 와 ego lite 를 브라우저 Addon 으�
 
 ## 브라우저 Addon 설치
 
-`scripts/install-local-build.sh`가 `masc-browser-addon-worker`, `masc-native-addon-launcher`,
-`masc-browser-process-owner`를 masc 옆에 설치합니다. 그다음 workspace에 대해
-`masc browser-lane-setup --mode addon`을 실행합니다. `bidi`·`ego` 모드도 같은 일을 합니다.
-이 명령은 workspace가 쓰는 출처마다 일합니다. firefox·ego는 `runtime.toml`에 표가 있거나
-이번 실행이 그 표를 쓸 때입니다. 출처마다 masc에 들어 있는 패키지를
-`<base-path>/.masc/packages/browser-<출처>/`에 쓰고, 그 출처의 선언이 없으면 활성 설정 루트에
-`lane-addons/browser-<출처>.toml`을 저장합니다. 이미 있는 선언은 그대로 둡니다. 설치 prefix를
+`scripts/install-local-build.sh`가 `masc-browser-addon-worker`와 `masc-native-addon-launcher`를
+masc 옆에 설치합니다. 그다음 workspace에 대해 `masc browser-lane-setup --mode addon`을
+실행합니다. `ego` 모드도 같은 일을 합니다. `runtime.toml`에 `[browser.live.ego]`가 있거나
+이번 실행이 그 표를 쓰면, masc에 들어 있는 패키지를 `<base-path>/.masc/packages/browser-ego/`에
+씁니다. 선언이 없으면 활성 설정 루트에 `lane-addons/browser-ego.toml`을 저장합니다. 이미 있는 선언은 그대로 둡니다. 설치 prefix를
 서버 PATH에 포함합니다. Add-on이 필요 없으면 설치 스크립트에는 `--no-browser-addon`, setup에는
 `--no-addon`을 줍니다. 그러면 브라우저 경로는 동작하지 않습니다.
 
@@ -60,8 +53,8 @@ incarnation·브라우저 `clientId`는 서로 다른 identity입니다.
 wire decode·문서/viewport 결속·아티팩트 소유권·정리 검사는 유지됩니다. 브라우저 패키지는
 모델 출력을 선언하지 않으므로, 브라우저 worker는 모델 설정을 갖지 않습니다.
 
-아래 backend 설정은 서버 시작 때 실제 `runtime.toml`에서 읽고 설치 부착 때 캡처합니다.
-이 설정은 출처를 어떻게 띄울지만 말하고, 띄울지 말지는 말하지 않습니다. 표가 없는 출처는
+`[browser.live.ego]` 설정은 서버 시작 때 실제 `runtime.toml`에서 읽고 설치 부착 때 캡처합니다.
+이 설정은 출처를 어떻게 띄울지만 말하고, 띄울지 말지는 말하지 않습니다. 표가 없으면
 시작하지 못하고, 그 패키지 줄이 이유를 보여 줍니다. 변경 후 서버를 재시작하며 기존 설치는
 detach 후 재부착해야 새 설정을 캡처합니다. 설치 선언 변경은 시작과 기존 maintenance
 pulse에서 reconciliation합니다. TOML 저장만으로 부착됐다고 볼 수 없으므로
@@ -69,24 +62,14 @@ pulse에서 reconciliation합니다. TOML 저장만으로 부착됐다고 볼 �
 상태를 읽으며 reconciliation을 강제하지 않습니다.
 
 출처를 끄려면 그 선언의 최상위 `enabled = false`를 TUI의 패키지 줄이나 TOML 파일에서
-설정하고, detach·정리 결과를 확인합니다. 그 출처의 worker만 멈춥니다. 선언 삭제는 완전한
+설정하고, detach·정리 결과를 확인합니다. 선언 삭제는 완전한
 설정 목록을 읽은 뒤 반영합니다. worker는 새 입력을 차단한 뒤 원래 소유한 자원을 정리하며,
 확인되지 않은 정리는 실패로 남깁니다. 교체 인스턴스는 새로운 incarnation·연결 ID를
 가집니다. 영속 프로필 내용은 보존합니다.
 
-## 설정: masc 가 띄우는 Firefox
+## 설정: ego lite
 
 `--base-path`는 `.masc` 자체가 아닌 `.masc`를 포함하는 워크스페이스 경로입니다.
-
-```bash
-masc browser-lane-setup --mode bidi --base-path /path/to/workspace
-```
-
-이 명령은 `[browser.live.bidi]`와 전용 프로필을 준비합니다. 명시한 `--firefox`,
-`--profile`, `--port`는 해당 키를 바꾸고 생략한 키는 유지합니다.
-[Firefox BiDi 안내](../browser-bidi/)에 따라 관리되는 연결을 부착하고 확인합니다.
-
-## 설정: ego lite
 
 ```bash
 masc browser-lane-setup --mode ego --base-path /path/to/workspace
@@ -96,7 +79,7 @@ masc browser-lane-setup --mode ego --base-path /path/to/workspace
 `masc-keepers`)과 함께 `[browser.live.ego]`를 씁니다. 그 뒤 서버를 다시 시작합니다. Keeper는
 그 작업 공간이 연 페이지에서만, ego lite 프로필의 쿠키로 일합니다.
 
-각 연결은 브라우저 종류와 `clientId` UUID를 보고합니다. live 연결이 하나면 자동으로 선택할 수 있고, 여러 개면 원하는 UUID를 선택해야 합니다. 탭 ID는 연결마다 별개이므로 서로 다른 브라우저에서 같은 숫자일 수 있습니다. 끊어진 UUID는 다른 브라우저로 대체하지 않고 거부합니다. 재연결하면 새 UUID를 탐색해 다시 선택합니다.
+각 연결은 브라우저 종류와 `clientId` UUID를 보고합니다. live 연결이 하나면 자동으로 선택할 수 있고, 여러 개면 원하는 UUID를 선택해야 합니다. 탭 ID는 연결마다 별개이므로 서로 다른 연결에서 같은 숫자일 수 있습니다. 끊어진 UUID는 다른 연결로 대체하지 않고 거부합니다. 재연결하면 새 UUID를 탐색해 다시 선택합니다.
 
 ## Keeper와 MCP 도구
 
@@ -105,7 +88,7 @@ Keeper에 보이는 이름은 CamelCase이고, MCP 등록 이름은 `masc_browse
 | Keeper 도구 | MCP 이름 | 소스와 동작 |
 | --- | --- | --- |
 | `BrowserTabs` | `masc_browser_tabs` | 탭 목록과 live 연결 식별자 탐색 |
-| `BrowserRead` | `masc_browser_read` | 텍스트·보이는 요소·scene·regions·viewport PNG 읽기와 문서 원문(`mode = "html"`). frame·대화상자는 BiDi, snapshot·다운로드는 ego |
+| `BrowserRead` | `masc_browser_read` | 텍스트·보이는 요소·scene·regions·viewport PNG 읽기와 문서 원문(`mode = "html"`). 접근성 snapshot(frame 포함)·대화상자·다운로드 |
 | `BrowserInteract` | `masc_browser_interact` | 명시한 탭의 click·fill·scroll 등. native hover·drag·키보드는 transport capability에 따름 |
 | `BrowserSession` | `masc_browser_session` | 관측한 ego Space를 Goal에 묶거나 그 결속을 읽기 |
 | `BrowserGoto` | `masc_browser_goto` | 그 연결이 연 탭을 HTTP(S) URL로 이동 |
@@ -117,7 +100,7 @@ Keeper에 보이는 이름은 CamelCase이고, MCP 등록 이름은 `masc_browse
 
 `BrowserInteract`의 click/fill 같은 페이지 입력에는 관측한 selector를 사용하며, 정확히 하나의 요소와 일치해야 합니다. `BrowserInteract`의 `expectedUrl`에 직전에 읽은 URL을 넣으면 중간에 페이지가 이동한 경우 거부합니다. fill은 페이지 이벤트를 발생시키지만 자체적으로 Enter를 누르거나 submit하지 않습니다. 오류가 발생한 경우도 포함해 조작 후에는 페이지를 읽거나 캡처한 뒤 재시도 여부를 결정합니다.
 
-BiDi·ego의 관측한 요소 click은 native 포인터 입력을 사용합니다. fill과 native typing은 별도 동작입니다. transport capability를 확인하고 입력 후 페이지를 다시 읽어 애플리케이션의 효과를 확인합니다.
+관측한 요소 click은 native 포인터 입력을 사용합니다. fill과 native typing은 별도 동작입니다. transport capability를 확인하고 입력 후 페이지를 다시 읽어 애플리케이션의 효과를 확인합니다.
 
 ## TUI 리더
 

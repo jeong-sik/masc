@@ -18,8 +18,8 @@ let test_live_scene_and_capture_state_their_connection () =
   let client_id = match Browser_lane.client_id_of_string "40000000-0000-4000-8000-000000000001" with
     | Ok id -> id | Error detail -> fail detail in
   let info : Browser_lane.client_info =
-    {client_id;browser=Browser_lane.Firefox;version="fixture";transport=Browser_lane.Webdriver_bidi;
-     engine_version="fixture";space=None} in
+    {client_id;browser=Browser_lane.Ego_lite;version="fixture";transport=Browser_lane.Ego_task_space;
+     engine_version="fixture";space=Some {Browser_lane.id=61;name="fixture Space"}} in
   let binding = Masc.Browser_binding.of_browser
     {Browser_selection.route=Browser_lane.Live_route (Some client_id);reason=Browser_selection.Explicit_browser}
     (Browser_selection.Connected info) in
@@ -34,7 +34,7 @@ let test_live_scene_and_capture_state_their_connection () =
     List.iter (fun (key, expected) ->
       check bool (name ^ " states its " ^ key ^ " once, the route's") true
         (List.filter (fun (field, _) -> field = key) fields = [key, `String expected]))
-      ["clientId", Browser_lane.client_id_to_string client_id; "transport", "webdriver_bidi"] in
+      ["clientId", Browser_lane.client_id_to_string client_id; "transport", "ego_task_space"] in
   let scene = match Masc.Browser_scene.parse_request (`Assoc ["lane",`String "live";
       "clientId",`String (Browser_lane.client_id_to_string client_id);"tabId",`Int 7;"maxChars",`Int 1000]) with
     | Ok request -> request | Error detail -> fail detail in
@@ -47,16 +47,20 @@ let test_live_scene_and_capture_state_their_connection () =
     ["tabId",`Int 7;"url",`String "https://example.org";"title",`String "Page";
      "mimeType",`String "image/png";"viewport",viewport;
      "data",`String (Base64.encode_string "\137PNG\r\n\026\nfixture")] @ forged)))
+(* Each tab carries the ego Page provenance the connected ego space reports. *)
+let provenance id = `Assoc ["label",`String ("p" ^ string_of_int id);
+  "targetId",`String ("target-" ^ string_of_int id);"openedBy",`String "agent"]
 let tab id url active = `Assoc ["id", `Int id; "title", `String "Page";
-  "url", `String url; "active", `Bool active]
-(* A connected extension: a browser whose tabs carry no ego Page provenance. *)
+  "url", `String url; "active", `Bool active; "egoPage", provenance id]
+(* A connected ego task space. *)
 let connected =
   let client_id = match Browser_lane.client_id_of_string "40000000-0000-4000-8000-000000000002" with
     | Ok id -> id | Error detail -> fail detail in
   Masc.Browser_binding.of_browser
     {Browser_selection.route=Browser_lane.Live_route (Some client_id);reason=Browser_selection.Explicit_browser}
-    (Browser_selection.Connected {client_id;browser=Browser_lane.Firefox;version="fixture";
-      transport=Browser_lane.Webdriver_bidi;engine_version="fixture";space=None})
+    (Browser_selection.Connected {client_id;browser=Browser_lane.Ego_lite;version="fixture";
+      transport=Browser_lane.Ego_task_space;engine_version="fixture";
+      space=Some {Browser_lane.id=62;name="fixture Space"}})
 let page_of id = `Assoc ["tabId", `Int id; "url", `String "https://example.org/page";
   "title", `String "Page"; "text", `String "Observed page"; "chars", `Int 13; "truncated", `Bool false]
 (* What the host's tab read does with the browser's two answers
@@ -75,10 +79,8 @@ let with_browser ?unavailable tabs f =
 let read_ok read tab_id = match read tab_id with Ok data -> data | Error detail -> fail detail
 let selection data = Yojson.Safe.Util.member "selection" data
 let test_exact_inventory_tab () =
-  let provenance=`Assoc ["label",`String "p1";"targetId",`String "owned-source";"openedBy",`String "agent"] in
-  let source=match tab 41 "https://example.org/source" false with
-    | `Assoc fields -> `Assoc (fields @ ["egoPage",provenance])
-    | `Null|`Bool _|`Int _|`Intlit _|`Float _|`String _|`List _ -> fail "fixture tab must be an object" in
+  let provenance=provenance 41 in
+  let source=tab 41 "https://example.org/source" false in
   let other=tab 7 "https://example.org/active" true in
   (match Surface.inventory_tab ~tab_id:41 (`List [other;source]) with
    | Ok observed ->
@@ -87,7 +89,7 @@ let test_exact_inventory_tab () =
      check bool "canonical Page provenance is retained" true
        (Option.map Surface.ego_page_to_json observed.ego_page=Some provenance)
    | Error detail -> fail detail);
-  let unavailable=`Assoc ["id",`Int 41;"error",`String "native Page metadata unavailable"] in
+  let unavailable=`Assoc ["id",`Int 41;"error",`String "native Page metadata unavailable";"egoPage",provenance 41] in
   let partial rows=`Assoc ["tabs",`List rows;"complete",`Bool false;"unavailableTabs",`List [unavailable]] in
   List.iter (fun (description,inventory) ->
     match Surface.inventory_tab ~tab_id:41 inventory with
@@ -99,7 +101,7 @@ let test_exact_inventory_tab () =
      "source listed as both visible and unreadable",partial [other;source]]
 
 let test_partial_inventory_preserves_requested_work () =
-  let unavailable = [`Assoc ["id",`Int 12;"error",`String "unsupported operation"]] in
+  let unavailable = [`Assoc ["id",`Int 12;"error",`String "unsupported operation";"egoPage",provenance 12]] in
   with_browser ~unavailable [tab 41 "https://example.org/page" true] (fun read reads ->
     let data = read_ok read (Some 41) in
     check bool "successful read retains incomplete inventory" true

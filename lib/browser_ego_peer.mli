@@ -240,9 +240,7 @@ val input_status : t -> Browser_ego_input.status
     Frames are read
     through the snapshot. Snapshot-target click, fill, hover and double-click
     use ego's native element resolver, including iframe refs; expectedUrl still
-    identifies the top-level page. Explicit input framePath is refused here
-    with guidance to snapshot targets; frame-path reads are rejected by the
-    live transport gate before this peer.
+    identifies the top-level page.
     [adopt_tab] explicitly gives an observed unmanaged tab to the native Page
     lifecycle, optionally with [pageLabel] as the SDK's [as] option.
     [release_tab] unmanages an unknown-origin Page without closing its tab.

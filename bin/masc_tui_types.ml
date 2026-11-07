@@ -6364,7 +6364,7 @@ type palette_mode =
    different source or tab after the operator moves. *)
 module Browser_lane_view = struct
   type source = Browser_lane.Lane_name.t = Live
-  type browser = Browser_lane.browser = Firefox | Ego_lite
+  type browser = Browser_lane.browser = Ego_lite
   type client = { client_id : string; browser : browser; transport : Browser_lane.live_transport;
     space : Browser_lane.ego_space option;
     (* Dated native metadata for this original Space, never input authority.
@@ -6547,7 +6547,7 @@ module Browser_lane_view = struct
   }
 
   let source_name = Browser_lane.Lane_name.to_wire
-  let browser_name = function Firefox -> "Firefox" | Ego_lite -> "ego lite"
+  let browser_name = function Ego_lite -> "ego lite"
   let client_id t = match t.source, t.selected_client with
     | Live, Some client -> Some client.client_id
     | Live, None -> None
@@ -6640,7 +6640,6 @@ module Browser_lane_view = struct
     | Automatic_browser -> t.selection = Unbound || t.selection = Bound_automatic
     | Connected_browser client -> t.source = Live && same_selected_client t.selected_client (Some client)
   let transport_label = function
-    | Browser_lane.Webdriver_bidi -> "BiDi"
     | Browser_lane.Ego_task_space -> "ego"
   let transport_names transports = String.concat " or " (List.map transport_label transports)
   (* The operator's word for a piece of live work. They are short because a
@@ -6673,7 +6672,6 @@ module Browser_lane_view = struct
     | Tab_creation -> "new tab"
     | Dialog_read -> "dialog read"
     | Dialog_answer -> "dialog answer"
-    | Frame_read -> "frame read"
     | Operator_handoff -> "hand to operator"
     | Page_management -> "adopt/release tab"
     | Download_listing -> "downloads"
@@ -6688,7 +6686,7 @@ module Browser_lane_view = struct
     List.filter (fun transport ->
       List.for_all (Browser_lane.live_transport_serves transport) capabilities)
       Browser_lane.all_of_live_transport
-  (* "ego: no touch, frame read". Every row that says what a connection
+  (* "ego: no touch". Every row that says what a connection
      leaves out says it through here: the connection row, the picker's detail
      row, a refused gesture and a refused Keeper call. *)
   let lacking_clause transport capabilities =
@@ -6721,7 +6719,6 @@ module Browser_lane_view = struct
           (Masc.Tui_terminal_text.sanitize_terminal_text observed.ownership)
           timestamp)
     | Browser_lane.Ego_task_space, None -> Some "SDK Space control: not observed"
-    | Browser_lane.Webdriver_bidi, (Some _ | None) -> None
   let connection_name (client : client) =
     browser_name client.browser ^ " · " ^ transport_label client.transport
   (* The title names the connection; the connection row adds what it leaves
@@ -7009,8 +7006,8 @@ module Browser_lane_view = struct
            | Browser_lane.Ego_task_space, Some original ->
                Masc.Browser_ego_space_observation.of_json ~expected_id:original.id value
                |> Result.map Option.some
-           | (Browser_lane.Ego_task_space | Browser_lane.Webdriver_bidi),
-             (Some _ | None) -> Error "Space observation requires the original Ego Space"))
+           | Browser_lane.Ego_task_space, None ->
+               Error "Space observation requires the original Ego Space"))
       "spaceObservation" json in
     if String.trim client_id = "" then Error "empty browser client ID"
     else
@@ -7690,7 +7687,7 @@ module Browser_lane_view = struct
     | _ -> None
 
   let viewport_request ~tab_id ~expected_url ~action t =
-    let fields = match Browser_lane.interaction_args ~tab_id ~frame_path:[] ~expected_url:(Some expected_url) action with
+    let fields = match Browser_lane.interaction_args ~tab_id ~expected_url:(Some expected_url) action with
       | `Assoc fields -> fields | _ -> [] in
     `Assoc (("lane",`String (source_name t.source)) :: fields @
       (match client_id t with None -> [] | Some id -> ["clientId",`String id]))

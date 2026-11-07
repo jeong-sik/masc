@@ -5608,7 +5608,6 @@
  (libraries alcotest eio eio.mock yojson masc.browser_lane masc.time_compat masc.monotonic_deadline))
 
 (include stanzas/test_browser_lane_setup_cli.inc)
-(include stanzas/test_browser_addon_preflight.inc)
 
 (test
  (name test_shell_ir_with_sandbox)
@@ -5685,7 +5684,6 @@
 
 (include stanzas/test_browser_selection.inc)
 (include stanzas/test_browser_task_capabilities.inc)
-(include stanzas/test_browser_addon_decoders.inc)
 (include stanzas/test_browser_keyboard.inc)
 
 (include stanzas/test_browser_surface.inc)
@@ -5854,8 +5852,6 @@
  (name runtest)
  (deps (alias runtest-test_setup_cli)))
 
-; A local install replaces every registered browser lane host copy, so the
-; lane Firefox starts is the build that was just installed.
 (rule
  (alias runtest-test_install_local_build)
  (deps
@@ -6046,9 +6042,7 @@
 (include stanzas/test_sandbox_prerequisites.inc)
 (include stanzas/test_native_addon_program.inc)
 (include stanzas/test_browser_addon_setup.inc)
-(include stanzas/test_browser_lane_bidi_setup.inc)
 (include stanzas/test_browser_lane_ego_setup.inc)
-(include stanzas/test_browser_lane_table_writes.inc)
 
 (include stanzas/test_apple_container_install.inc)
 
@@ -6478,7 +6472,6 @@
  (modules test_runtime_official_cli_install)
  (libraries masc_test_deps))
 
-(include stanzas/test_browser_bidi_peer.inc)
 (include stanzas/test_browser_ego_peer.inc)
 
 ; An attempt that published its answer must not publish a failure over it:

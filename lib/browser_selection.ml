@@ -59,8 +59,7 @@ let choose_candidates ~verb ~bound ~snapshot preference =
     let capability = Lane.live_capability verb in
     List.filter_map (fun (info : Lane.client_info) ->
       let space_available=match info.transport with
-        | Lane.Webdriver_bidi -> true
-        | Ego_task_space ->
+        | Lane.Ego_task_space ->
           (match info.space,List.assoc_opt info.client_id snapshot.live_space_presence with
            | Some space,Some {space_id;state=Present;_} -> space.id=space_id
            | (Some _|None),(Some {state=Missing|Unknown _;_}|None)
@@ -73,10 +72,9 @@ let choose_candidates ~verb ~bound ~snapshot preference =
       Ok {route;reason=Explicit_browser}
   | Automatic when bound -> Error Binding_required
   | Automatic ->
-    (* Both carry a login: the Keeper's own Firefox over BiDi, and the
-       operator's ego profile, whose cookies every task space shares. With
-       one of each connected the choice is the caller's. *)
-    one Existing_login (connected Lane.Webdriver_bidi @ connected Lane.Ego_task_space)
+    (* An ego connection carries the operator's ego profile, whose cookies
+       every task space shares. *)
+    one Existing_login (connected Lane.Ego_task_space)
 let effective_missing backend required =
   let missing=Browser_capabilities.missing_operations backend required in
   List.filter (fun operation -> List.mem operation missing) required
@@ -114,7 +112,7 @@ let target ~verb ~snapshot route =
           |> List.sort (fun left right -> String.compare (Lane.client_id_to_string left) (Lane.client_id_to_string right))))
 let bound = function
   | Lane.Page_read {tab_id;_} | Lane.Page_elements {tab_id;_} -> Option.is_some tab_id
-  | Lane.Page_act (Lane.Action.Open_tab _ | Lane.Action.Open_window _ | Lane.Action.Control _) | Lane.Tabs_list -> false
+  | Lane.Page_act (Lane.Action.Open_tab _ | Lane.Action.Control _) | Lane.Tabs_list -> false
   | Lane.Page_document _ | Lane.Page_downloads _ | Lane.Page_capture _
   | Lane.Page_scene _ | Lane.Page_snapshot _ | Lane.Page_native_workflow _ | Lane.Page_interact _ | Lane.Page_goto _ | Lane.Page_act (Lane.Action.On_tab _)
   | Lane.Page_context _ -> true

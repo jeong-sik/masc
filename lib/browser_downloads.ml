@@ -28,3 +28,16 @@ let published_json ~verify ~publish ~published d =
     | Some (Ok value) -> ("artifact", value) :: fields
     | Some (Error reason) -> ("artifactError", `String reason) :: fields
     | None -> fields)
+
+let verify_file ~root path =
+  try
+    let root = Unix.realpath root in
+    let stat = Unix.lstat path in
+    let canonical = Unix.realpath path in
+    if stat.Unix.st_kind <> Unix.S_REG then Error "download is not a regular file"
+    else if not (String.starts_with ~prefix:(root ^ Filename.dir_sep) canonical)
+    then Error "download path is outside session staging"
+    else Ok (canonical, stat.Unix.st_size)
+  with
+  | Unix.Unix_error (code, _, _) -> Error (Unix.error_message code)
+  | Sys_error detail -> Error detail

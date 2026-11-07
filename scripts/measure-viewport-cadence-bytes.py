@@ -172,8 +172,8 @@ def fixture_server(fixture: Fixture) -> Iterator[int]:
                            "startup": {"state_ready": True}}
                 fixture.record_setup("GET", path, None, payload, self.reply(payload))
             elif path == "/api/v1/dashboard/browser-lane/clients":
-                client = {"clientId": CLIENT, "browser": "firefox", "transport": "webdriver_bidi",
-                          "space": None, "spaceObservation": None, "interactions": [],
+                client = {"clientId": CLIENT, "browser": "ego_lite", "transport": "ego_task_space",
+                          "space": {"id": 1, "name": "masc-keepers"}, "spaceObservation": None, "interactions": [],
                           "lastActivities": []}
                 browse = {"ok": True, "data": {"lane": "live", "clientId": CLIENT,
                                                 "reason": "existing_login"}}

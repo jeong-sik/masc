@@ -6,7 +6,7 @@ let ok = function Ok value -> value | Error message -> fail message
 let incarnation = "0b000000-0000-4000-8000-000000000001"
 let other_incarnation = "0b000000-0000-4000-8000-000000000002"
 let id = ok (B.client_id_of_string "0c000000-0000-4000-8000-000000000001")
-let client = {B.client_id=id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi;space=None}
+let client = {B.client_id=id;browser=B.Ego_lite;version="158";engine_version="158";transport=B.Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"}}
 let receipt = function
   | W.Receipt -> true
   | W.Snapshot_result _|Download_reply _|Poll_result _|Issue_result _|Service_refusal _ -> false
@@ -27,7 +27,7 @@ let scenario () = Eio_main.run (fun env ->
     let rec registered () = if B.connected_clients ()=[] then (Eio.Fiber.yield ();registered ()) in
     registered ();
     let issue () = send (W.Issue {route=B.Live_route (Some id);
-      verb=B.Page_interact {frame_path=[];tab_id=7;expected_url=Some "https://example.org/";action=B.Hover (B.Selector "#row")};
+      verb=B.Page_interact {tab_id=7;expected_url=Some "https://example.org/";action=B.Hover (B.Selector "#row")};
       actor=Some "keeper";timeout_sec=2.;only_if_idle=false}) in
     let pending = Eio.Fiber.fork_promise ~sw issue in
     let issued = command (Eio.Promise.await_exn poll) in

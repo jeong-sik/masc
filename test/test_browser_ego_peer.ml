@@ -284,8 +284,8 @@ let test_a_tab_that_left_the_listing_loses_its_number () =
     check string (Printf.sprintf "tab %d" id) "browser tab is no longer present"
       (before_effect "a tab that left" (dispatch peer Live.Page_read (obj ["tabId",`Int id]))))
     [2; 3];
-  ignore (before_effect "an unsupported browser window" (dispatch peer Live.Page_act
-    (Lane.Action.to_json (Lane.Action.Open_window "https://example.test/window"))));
+  ignore (before_effect "an unknown browser action" (dispatch peer Live.Page_act
+    (obj ["action",str "open_window";"url",str "https://example.test/window"])));
   check (list string) "no script ran" [] !ran
 
 (* What ego threw reaches the Keeper cut, where a character starts. *)
@@ -336,7 +336,7 @@ let test_page_provenance_survives_document_projection () =
       =List.map (field "egoPage") (Yojson.Safe.Util.to_list rows));
   check bool "document read retains its Space binding" true
     (field "browserSpace" result=Lane.ego_space_to_json space);
-  let info={info with transport=Lane.Webdriver_bidi;space=None} in
+  let info={info with transport=Lane.Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"}} in
   let other=Masc.Browser_binding.of_browser selected (Masc.Browser_selection.Connected info) in
   check bool "Page provenance cannot masquerade as another transport" true
     (Result.is_error (Surface.project_read plan ~binding:other ~started:0L ~page:(Some page)));
@@ -507,7 +507,7 @@ let test_effects_answer_what_happened () =
        (Yojson.Safe.to_string receipt)
    | Error _ -> fail "goto failed");
   check (float 0.) "goto uses the SDK-owned runner" 0. (last ()).window_s;
-  (match dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Reload})) with
+  (match dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Reload})) with
    | Ok _ -> () | Error _ -> fail "reload failed");
   check (float 0.) "reload uses the SDK-owned runner" 0. (last ()).window_s;
   reply := (fun _ -> answered (obj ["error",str "page.goto failed: net::ERR_UNSAFE_PORT";
@@ -523,9 +523,9 @@ let test_effects_answer_what_happened () =
     (failure_kind (dispatch peer Live.Page_goto (obj ["tabId",`Int 1;"url",str "https://slack.com/"])));
   reply := (fun _ -> failed "Target closed");
   check string "a close that may have happened" "unknown"
-    (failure_kind (dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab}))));
+    (failure_kind (dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=3;interaction=Lane.Action.Close_tab}))));
   reply := (fun _ -> answered (obj ["closed",`Bool true]));
-  (match dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab})) with
+  (match dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=3;interaction=Lane.Action.Close_tab})) with
    | Ok receipt -> check string "the close" {|{"inputReadiness":"command_settled","tabId":3,"action":"close_tab","closed":true}|} (Yojson.Safe.to_string receipt)
    | Error _ -> fail "close failed");
   let before = runs () in
@@ -535,9 +535,9 @@ let test_effects_answer_what_happened () =
 
 let viewport : Lane.Pointer.viewport = {document_id="d1"; width=800.; height=600.; scroll_x=0.; scroll_y=0.}
 let observed_url = "https://app.slack.com/"
-let interact_args ?(tab_id=1) ?(frame_path=[]) action =
+let interact_args ?(tab_id=1) action =
   Yojson.Safe.Util.member "args"
-    (Lane.verb_json (Lane.Page_interact {tab_id;frame_path;expected_url=Some observed_url;action}))
+    (Lane.verb_json (Lane.Page_interact {tab_id;expected_url=Some observed_url;action}))
 (* What the guard and the receipt scripts read: the page, its title and scroll. *)
 let page_summary = in_page (obj ["url",str observed_url;"title",str "Slack";"scrollX",`Int 0;"scrollY",`Int 0])
 (* What the DOM input script answers: the shared script's own answer. *)
@@ -640,8 +640,6 @@ let test_input_acts_through_the_shared_page_scripts () =
   (* Refused before any run. *)
   let elsewhere = {Lane.Pointer.x=0.75;y=0.5} in
   let before = runs () in
-  check string "inside a frame" "before effect"
-    (failure_kind (dispatch peer Live.Page_interact (interact_args ~frame_path:["iframe"] (Lane.Click_node {document_id="d1";node_id="send"}))));
   check string "the operator's tab" "before effect"
     (failure_kind (dispatch peer Live.Page_interact (interact_args ~tab_id:2 (Lane.Click_node {document_id="d1";node_id="send"}))));
   check string "control characters" "before effect" (failure_kind (interact (Lane.Type_text {document_id="d1";text="a\nb"})));
@@ -1038,7 +1036,7 @@ let test_target_dialog_keeps_release_uncertain_until_a_clean_receipt () =
     check bool "pending input belongs to the original command and Page" true
       (pending.command_id="original-target-gesture" && pending.page_label="p1");
     check string "answering the dialog succeeds" "served" (failure_kind (dispatch peer Live.Page_act
-      (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None}))));
+      (act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Accept_dialog None}))));
     check bool "answering the dialog preserves the exact pending generation" true
       (Peer.input_status peer=Input.Uncertain pending);
     List.iter (fun refused_reply ->
@@ -1176,7 +1174,7 @@ let test_emulation_is_a_cdp_override_on_the_page () =
   ignore (dispatch peer Live.Tabs_list (obj []));
   let environment ~locale ~zone ~permission = obj ["origin",str "https://app.slack.com";"locale",str locale;
     "timeZone",str zone;"geolocationPermission",str permission] in
-  let emulate interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})) in
+  let emulate interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;interaction})) in
   let seoul = Lane.Action.Set_emulation {geolocation=Some {latitude=37.5665;longitude=126.978;accuracy_m=25.};
     locale=Some "fr-FR";timezone=Some "America/New_York"} in
   reply := answered (obj ["applied",`List [str "locale";str "timezone";str "geolocation_grant";str "geolocation"];
@@ -1227,7 +1225,7 @@ let test_emulation_is_a_cdp_override_on_the_page () =
        "Mars/Olympus");
   reply := answered (obj ["before",`Null]);
   check string "a receipt without its steps leaves the change unknown" "unknown" (failure_kind (emulate Lane.Action.Clear_emulation));
-  let unmanaged = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=2;frame_path=[];interaction=seoul})) in
+  let unmanaged = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=2;interaction=seoul})) in
   check string "an operator tab is refused before any change" "before effect" (failure_kind unmanaged)
 
 (* What leaves the peer says where input stands and which SDK process ran
@@ -1297,7 +1295,7 @@ let test_chooser_upload_runs_after_uncertain_pointer_release () =
     check string (name ^ " leaves release uncertain") "unknown"
       (failure_kind (dispatch peer Live.Page_interact (interact_args drag)));
     let upload target = dispatch peer Live.Page_act
-      (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target;paths=[path]}})) in
+      (act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Upload {target;paths=[path]}})) in
     (match upload (Lane.Action.Chooser_opener "#attach") with
      | Ok receipt -> check string (name ^ " chooser upload reports release as uncertain") "release_uncertain"
          (text (field "inputReadiness" receipt))
@@ -1370,16 +1368,16 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_interact, interact_args (Lane.Fill_node {target={document_id="d1";node_id="message"};text="hi"});
       Live.Page_interact, interact_args (Lane.Fill_target {target=Lane.Target_ref 5;text="hi"});
       Live.Page_interact, interact_args (Lane.Set_viewport (Lane.Fit {width=800;height=600}));
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=3;frame_path=[];interaction=Lane.Action.Close_tab});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Reload});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Stop_loading});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog (Some "hi")});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Dismiss_dialog});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.File_input "#file";paths=[upload_file]}});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener "#attach";paths=[upload_file]}});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Set_emulation {geolocation=Some {latitude=1.;longitude=2.;accuracy_m=10.};locale=Some "fr-FR";timezone=Some "UTC"}});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Clear_emulation});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=3;interaction=Lane.Action.Close_tab});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Reload});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Stop_loading});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Back});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Accept_dialog (Some "hi")});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Dismiss_dialog});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Upload {target=Lane.Action.File_input "#file";paths=[upload_file]}});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener "#attach";paths=[upload_file]}});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Set_emulation {geolocation=Some {latitude=1.;longitude=2.;accuracy_m=10.};locale=Some "fr-FR";timezone=Some "UTC"}});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Clear_emulation});
       (* Known-unavailable raw drag is refused before the runner. *)
       Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
@@ -1471,7 +1469,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
   ignore (dispatch peer Live.Tabs_list (obj []));
   let viewport : Lane.Pointer.viewport = {document_id="observed"; width=800.; height=600.; scroll_x=0.; scroll_y=0.} in
   let point : Lane.Pointer.point = {x=0.5;y=0.5} in
-  let interact action = Lane.Page_interact {tab_id=1; expected_url=Some "https://app.slack.com/"; frame_path=[]; action} in
+  let interact action = Lane.Page_interact {tab_id=1; expected_url=Some "https://app.slack.com/"; action} in
   let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
     | Tab_listing -> Tabs_list
     | Text_read -> Page_read {tab_id=Some 1; max_chars=None}
@@ -1497,20 +1495,19 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Trusted_keyboard ->
       let key=match Keyboard.of_wire ~key:"Enter" ~modifiers:[] with Ok key->key|Error message->fail message in
       interact (Press_key {document_id=viewport.document_id;key})
-    | Page_recovery -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Stop_loading})
-    | Tab_history -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Back})
-    | Tab_closing -> Page_act (Action.On_tab {tab_id=3;frame_path=[];interaction=Action.Close_tab})
+    | Page_recovery -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Stop_loading})
+    | Tab_history -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Back})
+    | Tab_closing -> Page_act (Action.On_tab {tab_id=3;interaction=Action.Close_tab})
     | Tab_navigation -> Page_goto {url="https://example.test/next";tab_id=Some 1}
     | Tab_activation -> interact Activate_tab
     | Tab_creation -> Page_act (Action.Open_tab "https://example.test/new")
-    | Dialog_read -> Page_context {tab_id=1;frame_path=[];mode=`Dialog}
-    | Dialog_answer -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Dismiss_dialog})
-    | Frame_read -> Page_context {tab_id=1;frame_path=[];mode=`Frames}
+    | Dialog_read -> Page_context {tab_id=1}
+    | Dialog_answer -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Dismiss_dialog})
     | Operator_handoff -> Page_act (Action.Control Action.Hand_off)
     | Page_management -> Page_act (Action.Control (Action.Adopt_tab {tab_id=2;label=None}))
     | Download_listing -> Page_downloads {tab_id=1}
-    | File_upload -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Upload {target=Action.File_input "#file";paths=[upload_file]}})
-    | Environment_emulation -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}})) in
+    | File_upload -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Upload {target=Action.File_input "#file";paths=[upload_file]}})
+    | Environment_emulation -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}})) in
   List.iter (fun capability ->
     let name = Lane.live_capability_to_wire capability in
     let asked = verb_asking_for capability in
@@ -2126,11 +2123,11 @@ const taskSpace=async reference=>{
   ignore (served "list original unmanaged Page" (dispatch peer Live.Tabs_list (obj [])));
   let control peer action=dispatch peer Live.Page_act (act_args (Lane.Action.Control action)) in
   let interact peer action=dispatch peer Live.Page_interact
-    (field "args" (Lane.verb_json (Lane.Page_interact {tab_id=1;frame_path=[];expected_url=Some !url;action}))) in
+    (field "args" (Lane.verb_json (Lane.Page_interact {tab_id=1;expected_url=Some !url;action}))) in
   let workflow peer=dispatch peer Live.Page_native_workflow (obj ["tabId",`Int 1;"expectedUrl",str !url;"maxChars",`Int 100;
     "steps",`List [obj ["method",str "click";"selector",str "#submit"]]]) in
   let close peer=dispatch peer Live.Page_act
-    (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Close_tab})) in
+    (act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Close_tab})) in
   let effects peer=[(fun ()->dispatch peer Live.Page_goto (obj ["tabId",`Int 1;"url",str "https://fixture.test/moved"]));
     (fun ()->interact peer (Lane.Fill {selector="#editor";text="changed"}));
     (fun ()->workflow peer);(fun ()->interact peer Lane.Activate_tab);(fun ()->close peer)] in
@@ -2266,7 +2263,7 @@ let test_history_moves_one_entry () =
   let peer = match Peer.open_space ~downloads:no_downloads ~run ~run_native:(run ~window_s:0.) ~now ~space:(Browser_configuration.Named_space "SDK Space") ~version:"0.6.0.16" ~capture_directory:(capture_directory ()) with
     | Ok peer -> peer | Error detail -> fail detail in
   ignore (dispatch peer Live.Tabs_list (obj []));
-  let on_tab ?(tab_id=1) interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id;frame_path=[];interaction})) in
+  let on_tab ?(tab_id=1) interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id;interaction})) in
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
     | Some line -> Yojson.Safe.Util.(to_list (Yojson.Safe.from_string (after ~prefix:"seen " line)) |> List.map to_string)
     | None -> fail "the stand-in did not say what it saw" in
@@ -2276,7 +2273,7 @@ let test_history_moves_one_entry () =
   check bool "it moved to the entry" true (List.mem "Page.navigateToHistoryEntry" (seen ()));
   check string "and waited for the load once the tab was on it" "load at 0" (List.hd (List.rev (seen ())));
   check bool "back runs within the action window" true ((List.hd !steps).window_s
-    < Lane.reply_timeout_sec (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back})));
+    < Lane.reply_timeout_sec (Lane.Page_act (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Back})));
   let load_timeout () = match List.find_opt (String.starts_with ~prefix:"loads ") (String.split_on_char '\n' !output) with
     | Some line -> Yojson.Safe.Util.(Yojson.Safe.from_string (after ~prefix:"loads " line)
         |> to_list |> List.hd |> member "options" |> member "timeout" |> to_int)
@@ -2383,7 +2380,7 @@ let test_sdk_timed_navigation_waits_the_reply_window () =
   let waits call verb =
     Printf.sprintf {|[{"call":"%s","options":{"timeout":%d}}]|} call
       (Float.to_int (Lane.reply_timeout_sec verb *. 1000.)) in
-  let reload = Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Reload} in
+  let reload = Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Reload} in
   check string "a reload waits the command's reply window"
     (waits "reload" (Lane.Page_act reload)) (seen Live.Page_act (act_args reload));
   check string "a move waits the command's reply window"
@@ -2409,7 +2406,7 @@ let test_dialog_inventory_and_answers_do_not_require_info () =
   let selected=Result.get_ok (Masc.Browser_surface.inventory_tab ~tab_id:1 (`List rows)) in
   check string "unknown dialog coverage does not invalidate selection" "https://app.slack.com/" selected.url;
   let runs ()=List.length !asked and last ()=List.hd !asked in
-  let context= obj ["tabId",`Int 1;"mode",str "dialog";"framePath",`List []] in
+  let context= obj ["tabId",`Int 1;"mode",str "dialog"] in
   let read ()=dispatch peer Live.Page_context context in
   let prompt=ego_dialog ~default:"def" "prompt" "name?" in
   reply := (fun _ -> answered (obj ["dialog",prompt]));
@@ -2428,7 +2425,7 @@ let test_dialog_inventory_and_answers_do_not_require_info () =
   check string "native metadata failure stays a read failure" "CDP request timed out: Runtime.evaluate"
     (before_effect "explicit dialog read" (read ()));
   check bool "failed metadata cannot erase inventory" true (listed ()=rows);
-  let act ?(tab_id=1) interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id;frame_path=[];interaction})) in
+  let act ?(tab_id=1) interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id;interaction})) in
   reply := (fun _ -> answered (obj ["answered",`Bool true]));
   (match act (Lane.Action.Accept_dialog (Some "Vincent")) with
    | Ok receipt -> check bool "native true answers without invented metadata" true
@@ -2546,7 +2543,7 @@ let test_dialog_scripts_in_node () =
   let seen () = match List.find_opt (String.starts_with ~prefix:"seen ") (String.split_on_char '\n' !output) with
     | Some line -> Yojson.Safe.Util.(to_list (Yojson.Safe.from_string (after ~prefix:"seen " line)) |> List.map to_string)
     | None -> fail "the stand-in did not say what it saw" in
-  let act interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction})) in
+  let act interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;interaction})) in
   let interact action = dispatch peer Live.Page_interact (interact_args action) in
   let blocked detail = check bool ("refused as blocked: " ^ detail) true (String_util.contains_substring detail "is blocked on a JavaScript dialog") in
   let prompt = ego_dialog ~default:"def" "prompt" "name?" and alert = ego_dialog "alert" "saved" in
@@ -2786,7 +2783,7 @@ let test_an_upload_keeps_its_files_until_the_space_ends () =
     | other -> failf "unexpected step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let upload ?(selector="#file") paths = dispatch peer Live.Page_act
-      (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.File_input selector;paths}})) in
+      (act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Upload {target=Lane.Action.File_input selector;paths}})) in
   let row = obj ["url",str "https://app.slack.com/";"title",str "Slack"] in
   reply := (fun _ -> answered (obj ["error",`Null;"dialog",`Null;"tab",row]));
   (match upload paths with
@@ -2837,7 +2834,7 @@ let test_an_upload_through_a_file_chooser_answers_what_it_handed () =
     | other -> failf "unexpected step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let choose ?actor ?(opener="#attach") paths = dispatch ?actor peer Live.Page_act
-      (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener opener;paths}})) in
+      (act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener opener;paths}})) in
   let row = obj ["url",str "https://app.slack.com/";"title",str "Slack"] in
   let last () = List.hd !asked in
   reply := (fun _ -> answered (obj ["error",`Null;"dialog",`Null;"tab",row]));
@@ -2916,7 +2913,7 @@ let test_the_upload_script_runs_in_node () =
     | Some line -> Yojson.Safe.Util.(to_list (Yojson.Safe.from_string (after ~prefix:"seen " line)) |> List.map to_string)
     | None -> fail "the stand-in did not say what it saw" in
   let upload ?(selector="#file") paths = dispatch peer Live.Page_act
-      (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.File_input selector;paths}})) in
+      (act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Upload {target=Lane.Action.File_input selector;paths}})) in
   (match upload [path] with
    | Ok receipt -> check string "the staged files handed to the SDK" {|[{"name":"note.txt","size":5}]|} (Yojson.Safe.to_string (field "chosen" receipt))
    | other -> failf "the upload was %s" (failure_kind other));
@@ -2935,31 +2932,6 @@ let test_the_upload_script_runs_in_node () =
    | Ok receipt -> check string "the dialog it opened" {|{"type":"alert","message":"too big"}|} (Yojson.Safe.to_string (field "dialog" receipt))
    | other -> failf "an upload that opened a dialog was %s" (failure_kind other));
   check (list string) "the dialog requires no DOM readback" ["set #file 1"] (seen ())
-
-(* Input and upload frame paths reach the peer and are refused before any
-   effect. Frame_read is refused by the live transport gate, so a direct
-   peer call would not prove which message the public tool receives. *)
-let test_input_frame_paths_are_refused_with_the_way_that_works () =
-  let runs = ref 0 in
-  let peer = opened (fun sent ->
-    incr runs;
-    match sent.step with
-    | "tabs.list" -> answered tabs
-    | other -> failf "unexpected step %s" other) in
-  ignore (dispatch peer Live.Tabs_list (obj []));
-  let before = !runs in
-  let says label needle result =
-    check bool label true (String_util.contains_substring (before_effect label result) needle) in
-  let frame_click = interact_args ~frame_path:["#frame"] (Lane.Click "#send") in
-  (match Masc.Browser_interaction.parse frame_click with
-   | Ok _ -> ()
-   | Error detail -> failf "the frame fixture must reach the peer: %s" detail);
-  says "frame input names target" "acts inside frames through target"
-    (dispatch peer Live.Page_interact frame_click);
-  says "an upload frame path names the native route" "without framePath"
-    (dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=1;frame_path=["#frame"];
-      interaction=Lane.Action.Upload {target=Lane.Action.File_input "#file";paths=["/tmp/note.txt"]}})));
-  check int "neither refused frame request dispatches an SDK script" before !runs
 
 (* The chooser SDK stand-in has no DOM evaluator. Its native click
    opens a file chooser when [opens] holds, one that takes several files when
@@ -3035,7 +3007,7 @@ let test_the_chooser_script_runs_in_node () =
     | Some line -> Yojson.Safe.Util.(to_list (Yojson.Safe.from_string (after ~prefix:"seen " line)) |> List.map to_string)
     | None -> fail "the stand-in did not say what it saw" in
   let choose ?(opener="#attach") paths = dispatch peer Live.Page_act
-      (act_args (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener opener;paths}})) in
+      (act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener opener;paths}})) in
   let unknown label result = match result with
     | Error (Live.Outcome_unknown detail | Live.Observed_failure {disposition=Live.Uncertain;message=detail;_}) -> detail
     | other -> failf "%s was %s" label (failure_kind other) in
@@ -3678,18 +3650,18 @@ let test_dialog_interrupted_workflow_stays_uncertain_until_a_new_click_settles (
     | Ready _ -> fail "dialog lost its pending input" in
   check string "pending input names original command" "original-input-command" pending.command_id;
   let accepted=answer "answer dialog" (dispatch peer Live.Page_act (Lane.Action.to_json
-    (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Accept_dialog None}))) in
+    (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Accept_dialog None}))) in
   check string "a result read while input is pending says so" "release_uncertain"
     Yojson.Safe.Util.(accepted |> member "inputReadiness" |> to_string);
   check bool "native true leaves the exact pending generation untouched" true (Peer.input_status peer=Input.Uncertain pending);
   List.iter (fun response ->
     dialog_reply := response;
     ignore (dispatch peer Live.Page_act (Lane.Action.to_json
-      (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Dismiss_dialog})));
+      (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Dismiss_dialog})));
     check bool "false, malformed and lost dialog answers preserve exact pending" true (Peer.input_status peer=Input.Uncertain pending))
     [refused "no dialog is open in this tab";answered (obj ["answered",`Null]);failed "Target closed"];
   ignore (before_effect "unavailable dialog metadata" (dispatch peer Live.Page_context
-    (obj ["tabId",`Int 1;"mode",str "dialog";"framePath",`List []])));
+    (obj ["tabId",`Int 1;"mode",str "dialog"])));
   check bool "failed native read preserves exact pending" true (Peer.input_status peer=Input.Uncertain pending);
   let observed=answer "an observation workflow while release is uncertain" (dispatch peer Live.Page_native_workflow (args [])) in
   check string "the observation reports release as uncertain" "release_uncertain"
@@ -4122,5 +4094,4 @@ let () =
       test_case "the upload script runs against a stand-in in node" `Quick test_the_upload_script_runs_in_node;
       test_case "an upload through a file chooser answers what it handed" `Quick test_an_upload_through_a_file_chooser_answers_what_it_handed;
       test_case "the chooser script runs against a stand-in in node" `Quick test_the_chooser_script_runs_in_node;
-      test_case "input frame paths name the supported route" `Quick test_input_frame_paths_are_refused_with_the_way_that_works;
       test_case "the peer serves what the lane table says" `Quick test_the_peer_serves_what_the_lane_table_says ] ]

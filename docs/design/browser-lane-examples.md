@@ -8,36 +8,23 @@ Browser는 사이트 구분 없이 페이지를 읽는 공통 도구다. Keeper�
 
 ## 연결
 
-Browser 의 출처는 `live` 하나다. masc 가 띄운 Firefox 의 BiDi 연결과 ego lite 의 task
-space 가 모두 `live` 연결이다. TUI에서는 `:` → `go Browser Lane`으로 연다.
+Browser 의 출처는 `live` 하나이고, ego lite 의 task space 가 그 연결이다. TUI에서는
+`:` → `go Browser Lane`으로 연다.
 
-## 출처별 설정과 켜고 끄기
+## 설정과 켜고 끄기
 
-browser 출처마다 Lane Add-on 패키지와 worker 가 따로 있다(`browser-firefox`,
-`browser-ego`). `runtime.toml` 의 표는 출처를 어떻게 띄울지만 담는다.
+browser 출처는 Lane Add-on 패키지 `browser-ego` 와 그 worker 다. `runtime.toml` 의
+`[browser.live.ego]` 표는 출처를 어떻게 띄울지만 담는다.
 
-출처를 켜고 끄는 것은 그 출처 선언(`browser-<출처>.toml`)의 최상위 `enabled` 하나다.
-TUI 의 Lanes 화면에서 `browser-<출처>` 패키지 줄을 골라 선언 편집기로 바꾸거나, 웹 All Lanes
-의 그 패키지 상세에서 바꾼다([package activity](../guides/lane-package-activity.md)). 끄면 그 출처의 worker 만 멈추고 다른 출처는 그대로다. 표가 없는
-출처의 선언은 시작하지 못하고, 패키지 줄이 그 이유를 보여 준다.
+출처를 켜고 끄는 것은 선언(`browser-ego.toml`)의 최상위 `enabled` 하나다.
+TUI 의 Lanes 화면에서 `browser-ego` 패키지 줄을 골라 선언 편집기로 바꾸거나, 웹 All Lanes
+의 그 패키지 상세에서 바꾼다([package activity](../guides/lane-package-activity.md)). 표가 없으면
+선언은 시작하지 못하고, 패키지 줄이 그 이유를 보여 준다.
 
-Live lane 의 BiDi 연결(hover·drag)을 쓰려면 `[browser.live.bidi]` 를 더한다.
-`browser-firefox` worker 가 시작할 때 그 프로필로 Firefox 를 `--remote-debugging-port`
-로 띄우고 자기 BiDi peer 로 붙는다. 자세한 것은 [BiDi peer](browser-bidi-live-host.md)에
-있다.
+`masc browser-lane-setup --mode ego --base-path /path/to/workspace` 가 이 표를 쓴다.
+서버를 다시 띄워야 표를 읽는다.
 
-`masc browser-lane-setup --mode bidi --base-path /path/to/workspace` 가 lane 을
-설치하고 이 표를 쓴다. 표가 이미 있으면 값을 바꾸지 않고, 값을 지정한 옵션
-(`--firefox`, `--profile`, `--port`)만 바꾼다. 서버를 다시 띄워야 표를 읽는다.
-
-```toml
-[browser.live.bidi]
-firefox = "/Applications/Firefox.app/Contents/MacOS/firefox"
-profile = "/absolute/path/to/keeper-profile"
-# port = 9222
-```
-
-실행 파일·프로필 경로는 worker 가 붙을 때 읽으므로, 경로를 바꾼 뒤에는 서버를
+표의 값은 worker 가 붙을 때 읽으므로, 값을 바꾼 뒤에는 서버를
 재시작하고 기존 설치를 detach 한 뒤 다시 붙인다. All Lanes 의 browser 줄은 그 lane 의
 출처 중 켜진 선언이 있는지와, 관측한 연결 수를 따로 보여 준다.
 연결이 보인다는 표시는 브라우저 프로세스의 정상 동작을 보장하지 않는다.
@@ -70,7 +57,7 @@ BrowserRead {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"maxChars":120
 
 ## 직접 URL을 열어 조사
 
-BiDi 연결과 ego 연결은 `open_tab` 으로 작업용 탭을 연다.
+ego 연결은 `open_tab` 으로 작업용 탭을 연다.
 
 ```text
 BrowserTabs {"lane":"live"}
@@ -80,7 +67,7 @@ BrowserRead {"lane":"live","clientId":<관측한 UUID>,"tabId":<반환된 id>,"m
 
 여러 Keeper가 동시에 조사할 수 있으므로 작업별 탭을 열고, 반환된 `tabId`를
 읽기와 조작에 계속 사용한다. 같은 탭의 URL을 바꿀 때는 `BrowserGoto`에도
-해당 id를 전달한다. BiDi 연결은 자기가 연 탭만 이동한다. 이동 후 실제 읽기
+해당 id를 전달한다. ego 연결은 task space 가 관리하는 페이지만 이동한다. 이동 후 실제 읽기
 결과로 내용을 확인하고 출처를 붙인다. 작업이 끝나면 `BrowserAct close_tab`으로
 해당 탭을 닫는다.
 
@@ -117,7 +104,7 @@ query를 전달한다. 정상 제외는 deferred/discovery 목록에도 적용�
 계정 한도 오류도 이미지 미지원의 근거가 아니다.
 
 `live`는 `BrowserTabs`에서 받은 `clientId`와 `tabId`를 한 쌍으로 유지한다.
-Firefox와 Zen이 동시에 연결된 경우 읽기·캡처·조작마다 해당 `clientId`를
+연결이 둘 이상이면 읽기·캡처·조작마다 해당 `clientId`를
 전달한다. 아래 예제의 `clientId`는 실제 관측한 연결 UUID로 채운다.
 
 ## 화면과 상호작용
@@ -143,8 +130,7 @@ BrowserInteract {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"action":"
 텍스트나 이미지에서 selector를 추측하지 않는다. `BrowserRead mode=elements`로
 현재 DOM 컨트롤과 selector를 관측하거나 `mode=scene`의 documentId/nodeId를 쓴다.
 좌표 클릭·스크롤은 screenshot의 현재 `viewport`와 정규화된 `point`를 전달하는
-`click_at`·`scroll_at`으로 수행한다. trusted `hover_at`·`drag`는 live의 `webdriver_bidi` 연결이 한다. fill은
-input/change 이벤트를 발생시키며 Enter나 submit을 호출하지 않는다.
+`click_at`·`scroll_at`으로 수행한다. fill은 Enter나 submit을 호출하지 않는다.
 페이지의 이벤트 핸들러는 동작할 수 있으므로 결과를 다시 읽거나 캡처한다.
 
 ## 반복 관측
@@ -155,20 +141,6 @@ input/change 이벤트를 발생시키며 Enter나 submit을 호출하지 않는
 탭을 감시하거나 특정 웹앱을 주기적으로 수집하지는 않는다.
 
 ## 관측 범위
-
-| 기능 | live Firefox BiDi |
-|---|---|
-| 탭 목록·텍스트·컨트롤 관측 | 지원 |
-| 명시한 탭의 viewport 캡처 | 지원 |
-| 직접 URL 이동·탭 열기/닫기 | 이 연결이 연 탭만 |
-| 관측된 같은 탭 링크 따라가기 | 지원 |
-| 클릭·입력·스크롤 (`BrowserInteract`) | 지원 |
-| screenshot 좌표 클릭·스크롤 | 지원 |
-| trusted pointer drag | 지원 |
-| framePath로 중첩 iframe 대상 지정 | 지원 |
-| JavaScript 대화상자 | 이 연결이 연 탭만 |
-| 파일 업로드·다운로드 artifact 읽기 | 미지원 |
-| 전용 shadow-root locator | 미지원 |
 
 ego 연결이 하는 일은 [ego SDK coverage](../guides/ego-sdk-coverage.md)에 있다.
 
@@ -184,6 +156,6 @@ ego 연결에서 다운로드 링크를 클릭한 뒤 `BrowserRead`에 그 `clie
 `artifact.arguments`로 `keeper_artifact_read`를 호출하고 `next_offset`부터
 `eof=true`까지 이어 읽는다. 바이너리 페이지는 `encoding`을 확인한다.
 
-동작별 필드와 검증 범위는 [Firefox interaction support](firefox-controls.md)를
+동작별 필드와 검증 범위는 [Browser Lane](browser-lane.md#browser-controls)을
 참고한다. CI 통과, 배포된 실행 파일, 실제 Keeper/Vision 모델의 성공은 각각
 별도로 확인해야 한다.

@@ -2736,48 +2736,9 @@ let browser_lane_setup_cmd =
             "How to connect a browser: addon writes the browser Add-on package of each \
              browser source the workspace runs to .masc/packages/browser-<source> and \
              declares it when no declaration of that source exists, which every other \
-             mode also does; bidi writes the [browser.live.bidi] table so the MASC server \
-             starts a Firefox of its own; ego writes the [browser.live.ego] table so the \
-             browser Add-on serves an ego lite task space. Give it more than once for \
-             more than one. Without a mode nothing is written and the current state is \
-             printed.")
-  in
-  let firefox =
-    Arg.(
-      value
-      & opt (some string) None
-      & info
-          [ "firefox" ]
-          ~docv:"FILE"
-          ~doc:
-            "With --mode bidi, the Firefox executable, an absolute path. By default the \
-             first Firefox that answers --version, on PATH or in the macOS application \
-             bundle. An existing table keeps its value unless this is given.")
-  in
-  let profile =
-    Arg.(
-      value
-      & opt (some string) None
-      & info
-          [ "profile" ]
-          ~docv:"DIR"
-          ~doc:
-            "With --mode bidi, the profile directory that Firefox opens, an absolute path. \
-             It keeps the logins Keepers use. By default masc-keeper-firefox-profile in \
-             the home directory, made when it is missing. An existing table keeps its \
-             value unless this is given.")
-  in
-  let port =
-    Arg.(
-      value
-      & opt (some int) None
-      & info
-          [ "port" ]
-          ~docv:"PORT"
-          ~doc:
-            "With --mode bidi, the port Firefox answers BiDi on. By default none is \
-             written and the server uses 9222. An existing table keeps its value unless \
-             this is given.")
+             mode also does; ego writes the [browser.live.ego] table so the browser \
+             Add-on serves an ego lite task space. Give it more than once for more than \
+             one. Without a mode nothing is written and the current state is printed.")
   in
   let ego_command =
     Arg.(
@@ -2828,18 +2789,13 @@ let browser_lane_setup_cmd =
              "Every route runs in a browser Lane Add-on, one per browser source, so every \
               mode also writes the package of each source the workspace runs to \
               .masc/packages/browser-<source> and, when the workspace has no declaration of \
-              that source, creates browser-<source>.toml in its Lane directory: firefox \
-              and ego when runtime.toml has their table or the mode writes it. A source \
+              that source, creates browser-<source>.toml in its Lane directory: ego \
+              when runtime.toml has its table or the mode writes it. A source \
               whose table the mode writes is declared once that table is written. A declaration's enabled switches its source on or off. An existing \
               declaration is left as it is. \
               The server attaches the Add-ons when it starts and on its maintenance pass. \
               Outside --mode addon a refusal of that step is reported and the mode goes on; \
               --no-addon skips it."
-         ; `P
-             "--mode bidi writes [browser.live.bidi] into runtime.toml without touching \
-              its comments or other tables. A table that is already there keeps its \
-              values, because its profile holds the logins; a value changes only when it \
-              is named. The server reads the table when it starts."
          ; `P
              "--mode ego writes [browser.live.ego]: the ego-browser the browser Add-on runs \
               and the ego lite task space it serves, after checking that ego-browser \
@@ -2848,15 +2804,15 @@ let browser_lane_setup_cmd =
               existing table keeps its values unless they are named. \
               The server reads the table when it starts."
          ; `P
-             "While this workspace's server answers on its port, the bidi and ego tables \
-              are planned against the runtime.toml the server holds and saved \
-              through it; with no server answering they are written to the file. The \
-              server's port is MASC_HTTP_PORT, the workspace's saved port or the default: \
-              --port names the BiDi port. While the server is still starting, or no \
-              sign-in is stored for --agent (masc login), nothing is set up."
+             "While this workspace's server answers on its port, the ego table is \
+              planned against the runtime.toml the server holds and saved through it; \
+              with no server answering it is written to the file. The server's port is \
+              MASC_HTTP_PORT, the workspace's saved port or the default. While the server \
+              is still starting, or no sign-in is stored for --agent (masc login), nothing \
+              is set up."
          ])
     Term.(
-      const (fun base_path requested_base_path named_agent modes no_addon firefox profile port
+      const (fun base_path requested_base_path named_agent modes no_addon
                   ego_command ego_space ->
         let base_path = Env_config.normalize_masc_base_path_input base_path in
         Masc_cli_browser_lane_setup.run
@@ -2864,27 +2820,24 @@ let browser_lane_setup_cmd =
           (* The file the server and masc doctor read: it honors MASC_CONFIG_DIR,
              which the helper the other setup commands use does not. *)
           ~runtime_config_path:(Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
-          (* --port here is the BiDi port, so the server's is resolved without
-             a flag: MASC_HTTP_PORT, the workspace's saved port, the default. *)
+          (* The server's port is resolved without a flag: MASC_HTTP_PORT, the
+             workspace's saved port, the default. *)
           ~server_port:
             (resolve_connection_port requested_base_path None
              |> Result.map Workspace_connection.to_int
              |> Result.map_error Workspace_connection.error_message)
           ~agent:(Option.value named_agent ~default:default_login_agent)
           ~agent_named:(Option.is_some named_agent)
-          ~modes ~no_addon ~firefox ~profile ~port ~ego_command ~ego_space)
+          ~modes ~no_addon ~ego_command ~ego_space)
       $ base_path
       $ run_base_path
       $ Arg.(
           value
           & opt (some string) None
           & info [ "agent" ] ~docv:"AGENT"
-              ~doc:"The sign-in a bidi or ego table is saved through the workspace's running server with (masc login --agent). Defaults to local-admin.")
+              ~doc:"The sign-in an ego table is saved through the workspace's running server with (masc login --agent). Defaults to local-admin.")
       $ modes
       $ no_addon
-      $ firefox
-      $ profile
-      $ port
       $ ego_command
       $ ego_space)
 

@@ -1,15 +1,12 @@
-module Bidi_setup = Masc.Browser_lane_bidi_setup
 module Addon_setup = Masc.Browser_addon_setup
 module Ego_setup = Masc.Browser_lane_ego_setup
-module Table_writes = Masc.Browser_lane_table_writes
 
-type mode = Addon | Bidi | Ego
+type mode = Addon | Ego
 
-let all_modes = [ Addon; Bidi; Ego ]
+let all_modes = [ Addon; Ego ]
 
 let mode_name = function
   | Addon -> "addon"
-  | Bidi -> "bidi"
   | Ego -> "ego"
 
 let refuse_with status message =
@@ -39,21 +36,6 @@ let misplaced ~modes options =
        else None)
     options
 
-let bidi_plan ~modes ~store ~firefox ~profile ~port =
-  if not (List.mem Bidi modes)
-  then Ok None
-  else
-    Bidi_setup.plan
-      ~find_firefox:Bidi_setup.installed_firefox
-      { Bidi_setup.store
-      ; home = Sys.getenv_opt "HOME"
-      ; firefox
-      ; profile
-      ; port
-      }
-    |> Result.map Option.some
-    |> Result.map_error Bidi_setup.error_message
-
 let ego_plan ~modes ~store ~ego_command ~ego_space =
   if not (List.mem Ego modes)
   then Ok None
@@ -64,65 +46,26 @@ let ego_plan ~modes ~store ~ego_command ~ego_space =
     |> Result.map Option.some
     |> Result.map_error Ego_setup.error_message
 
-let key_names keys = String.concat ", " (List.map Bidi_setup.key_name keys)
-
-let print_table ~runtime_config_path plan (applied : Bidi_setup.applied) =
-  let { Browser_configuration.firefox; profile; port } = Bidi_setup.table plan in
-  print_endline "";
-  (match Bidi_setup.change plan with
-   | Bidi_setup.Created ->
-     Printf.printf "Wrote [browser.live.bidi] to %s:\n" runtime_config_path
-   | Bidi_setup.Updated keys ->
-     Printf.printf "Changed %s in [browser.live.bidi] of %s:\n" (key_names keys)
-       runtime_config_path
-   | Bidi_setup.Unchanged ->
-     Printf.printf
-       "[browser.live.bidi] in %s was already there and is left as it is. To change a value, \
-        name it with --firefox, --profile or --port:\n"
-       runtime_config_path);
-  Printf.printf "  firefox  %s\n" firefox;
-  Printf.printf "  profile  %s%s\n" profile (if applied.profile_created then " (created)" else "");
-  Printf.printf "  port     %d\n" port;
-  Option.iter (Printf.printf "Note: %s\n") (Bidi_setup.firefox_note plan)
-
-let print_bidi_steps plan =
-  let { Browser_configuration.port; _ } = Bidi_setup.table plan in
-  print_endline "";
-  print_endline "Next, for the Firefox MASC starts:";
-  print_endline
-    "  1. Restart the MASC server to load runtime.toml. A browser Add-on that was attached \
-     before keeps its old settings until it is detached; the server attaches its declaration \
-     again on the next maintenance pass. While an enabled browser-firefox declaration runs \
-     it, the Add-on owns this Firefox and its BiDi connection, and its observation reports \
-     readiness or the startup refusal.";
-  print_endline
-    "  2. In that Firefox, log in once to the sites the Keepers work on. The profile keeps \
-     the logins.";
-  if Bidi_setup.port_answers plan
-  then
-    Printf.printf
-      "Something already answers on 127.0.0.1:%d. Close the browser using that port before \
-       attaching the Add-on. The Add-on starts its own Firefox and preserves the profile.\n"
-      port;
-  print_endline
-    "Firefox's remote debugging port has no authentication: any program on this computer \
-     can drive that browser and read its cookies. Keep this profile to the logins the \
-     Keepers need."
-
-let print_bidi_state ~base_path ~(store : Masc.Runtime_table_edit.store) =
-  let configuration =
-    match store.observe () with
-    | Ok observation -> Result.to_option (Browser_configuration.of_text observation.Runtime.source_text)
-    | Error (Masc.Runtime_table_edit.Missing _ | Masc.Runtime_table_edit.Unreadable _) -> None
-  in
-  print_endline
-    (Masc.Browser_bidi_host_status.message
-       (Masc.Browser_bidi_host_status.observe ~base_path ~configuration))
-
-(* Without a mode nothing is written: this says who starts the live Firefox. *)
-let show ~base_path ~store =
+(* Without a mode nothing is written: this says which ego lite task space
+   runtime.toml names. *)
+let show ~base_path ~(store : Masc.Runtime_table_edit.store) =
   Printf.printf "Browser lane for %s\n" base_path;
-  print_bidi_state ~base_path ~store;
+  (match store.observe () with
+   | Error (Masc.Runtime_table_edit.Missing _) ->
+     Printf.printf "%s is not there yet; --mode ego writes its [browser.live.ego] table.\n" store.path
+   | Error (Masc.Runtime_table_edit.Unreadable { reason; _ }) ->
+     Printf.printf "%s cannot be read: %s\n" store.path reason
+   | Ok observation ->
+     (match Browser_configuration.of_text observation.Runtime.source_text with
+      | Error detail -> Printf.printf "%s does not parse: %s\n" store.path detail
+      | Ok { Browser_configuration.live_ego = None } ->
+        Printf.printf "%s has no [browser.live.ego] table; --mode ego writes it.\n" store.path
+      | Ok { Browser_configuration.live_ego = Some { command; space } } ->
+        Printf.printf "[browser.live.ego] in %s:\n" store.path;
+        Printf.printf "  command  %s\n" command;
+        (match space with
+         | Browser_configuration.Named_space name -> Printf.printf "  space    %s\n" name
+         | Existing_space id -> Printf.printf "  space    #%d (existing ID)\n" id)));
   0
 
 let ego_key_names keys = String.concat ", " (List.map Ego_setup.key_name keys)
@@ -245,10 +188,8 @@ let addon_plan_status : Addon_setup.error -> int = function
    only once this run writes their table. *)
 let addon_sources ~(configuration : Browser_configuration.t) ~modes =
   let table_present : Browser_lane.Backend.t -> bool = function
-    | Owned_firefox -> Option.is_some configuration.live_bidi
     | Ego -> Option.is_some configuration.live_ego in
   let written_here : Browser_lane.Backend.t -> bool = function
-    | Owned_firefox -> List.mem Bidi modes
     | Ego -> List.mem Ego modes in
   let sources = List.filter (fun backend -> table_present backend || written_here backend)
       Browser_lane.Backend.all in
@@ -289,9 +230,6 @@ let install
       ~(store : Masc.Runtime_table_edit.store)
       ~modes
       ~addon_choice
-      ~firefox
-      ~profile
-      ~port
       ~ego_command
       ~ego_space
   =
@@ -301,57 +239,28 @@ let install
   let planned =
     let refused result = Result.map_error (fun message -> 1, message) result in
     let* addon = plan_addon ~base_path ~store ~modes addon_choice in
-    let* bidi = refused (bidi_plan ~modes ~store ~firefox ~profile ~port) in
     let* ego = refused (ego_plan ~modes ~store ~ego_command ~ego_space) in
-    Ok (addon, bidi, ego)
+    Ok (addon, ego)
   in
   match planned with
   | Error (status, message) -> refuse_with status message
-  | Ok (addon, bidi, ego) ->
-    (* Write the configuration tables, then each browser source's package and
-       declaration. A source whose table this run writes is declared only once
-       that table is written, since its worker fails without it. A later
-       refusal retains what was completed before it. Setup does not attach the
-       browser Add-ons or start their browsers.
-
-       The tables are committed one after another. A refusal leaves the ones
-       before it written, so they are printed with their next steps before the
-       refusal, and a run of the same command keeps them. A table planned
-       against the file before an earlier table was written is planned again
-       against the file as it is now: nothing is looked for or run again, and
-       it is refused only if that file no longer takes the edit or the same
-       table changed meanwhile. *)
-    let bidi_step =
-      Option.map
-        (fun plan () ->
-           Bidi_setup.apply plan
-           |> Result.map (fun applied -> plan, applied)
-           |> Result.map_error Bidi_setup.error_message)
-        bidi
+  | Ok (addon, ego) ->
+    (* Write the ego table, then the browser source's package and declaration.
+       A source whose table this run writes is declared only once that table
+       is written, since its worker fails without it. A refusal retains what
+       was completed before it. Setup does not attach the browser Add-on or
+       start its browser. *)
+    let written, refusal =
+      match ego with
+      | None -> None, None
+      | Some plan ->
+        (match Ego_setup.apply plan with
+         | Ok () -> Some plan, None
+         | Error error -> None, Some (Ego_setup.error_message error))
     in
-    let ego_step =
-      Option.map
-        (fun plan ~after_write ->
-           (let* plan = if after_write then Ego_setup.replan plan else Ok plan in
-            Ego_setup.apply plan |> Result.map (fun () -> plan))
-           |> Result.map_error Ego_setup.error_message)
-        ego
-    in
-    let { Table_writes.written; refusal } =
-      Table_writes.write ~bidi:bidi_step ~ego:ego_step
-    in
-    Option.iter
-      (fun (plan, applied) ->
-         print_table ~runtime_config_path:store.path plan applied;
-         print_bidi_steps plan)
-      written.bidi;
-    Option.iter (print_ego ~runtime_config_path:store.path) written.ego;
-    (* A source whose table this run was to write and did not is left out.
-       The others are declared even after a table refusal, since their
-       workers do not start from that table. *)
+    Option.iter (print_ego ~runtime_config_path:store.path) written;
     let table_written : Browser_lane.Backend.t -> bool = function
-      | Owned_firefox -> Option.is_some written.bidi
-      | Ego -> Option.is_some written.ego
+      | Ego -> Option.is_some written
     in
     let addon =
       match addon with
@@ -385,14 +294,11 @@ let install
        prerr_endline addon_message;
        refuse message
      | None, Error message -> refuse message
-     | None, Ok () ->
-       if Option.is_some written.bidi
-       then (print_endline ""; print_bidi_state ~base_path ~store);
-       0)
+     | None, Ok () -> 0)
 
 (* The modes that write a table of runtime.toml. *)
 let writes_a_table = function
-  | Bidi | Ego -> true
+  | Ego -> true
   | Addon -> false
 
 let run
@@ -403,9 +309,6 @@ let run
       ~agent_named
       ~modes:requested
       ~no_addon
-      ~firefox
-      ~profile
-      ~port
       ~ego_command
       ~ego_space
   =
@@ -413,13 +316,10 @@ let run
   match
     misplaced
       ~modes
-      [ "--firefox", Option.is_some firefox, [ Bidi ]
-      ; "--profile", Option.is_some profile, [ Bidi ]
-      ; "--port", Option.is_some port, [ Bidi ]
-      ; "--ego-command", Option.is_some ego_command, [ Ego ]
+      [ "--ego-command", Option.is_some ego_command, [ Ego ]
       ; "--ego-space", Option.is_some ego_space, [ Ego ]
-      ; "--no-addon", no_addon, [ Bidi; Ego ]
-      ; "--agent", agent_named, [ Bidi; Ego ]
+      ; "--no-addon", no_addon, [ Ego ]
+      ; "--agent", agent_named, [ Ego ]
       ]
   with
   | Some message -> refuse message
@@ -438,9 +338,6 @@ let run
              (if List.mem Addon modes then Require_addon
               else if no_addon then Skip_addon
               else Offer_addon)
-           ~firefox
-           ~profile
-           ~port
            ~ego_command
            ~ego_space
        in

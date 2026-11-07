@@ -98,9 +98,9 @@ let sample_of_decision_line line =
     (match Json_util.get_string json "event" with
      | Some "turn" ->
        let ts_opt =
-         match Json_util.get_member "ts_unix" json with
-         | Some (`Float f) when Float.is_finite f -> Some f
-         | Some (`Int i) -> Some (Float.of_int i)
+         match Yojson.Safe.Util.member "ts_unix" json with
+         | `Float f when Float.is_finite f -> Some f
+         | `Int i -> Some (Float.of_int i)
          | _ -> None
        in
        let outcome_opt =

@@ -91,36 +91,59 @@ let read_vibe_readiness env ~acp_path =
 (* A missing budget is reported and the probe goes on (owner decision, 11-08).
    Any other reason stops it before the first trial, which would only measure
    the refusal. *)
+let budget_line (budget : Runtime_vibe_acp_readiness.budget) =
+  Printf.sprintf
+    "Vibe Code allowance %.2f%% used, pay-as-you-go %s, resets %s"
+    budget.usage_percentage
+    (if budget.payg_enabled then "on" else "off")
+    (Option.value budget.reset_at ~default:"(not given)")
+;;
+
+(* The readiness binary is the flag's, the trials spawn the runtime's
+   command; nothing ties the two to one Vibe install, so the line names
+   both. *)
 let require_vibe_ready env ~runtime_id ~acp_path =
-  (match
-     Option.map
-       (fun runtime -> runtime.Runtime_instance.execution)
-       (Runtime.get_runtime_by_id runtime_id)
-   with
-   | Some (Runtime_execution.Vibe_cli _) -> ()
-   | Some
-       ( Runtime_execution.Agent_core _
-       | Runtime_execution.Codex_app_server _
-       | Runtime_execution.Antigravity_cli _
-       | Runtime_execution.Claude_code _
-       | Runtime_execution.Muse_serve _ ) ->
-     Printf.eprintf "--vibe-acp applies to a vibe-cli runtime only; %s is not one\n%!" runtime_id;
-     exit 2
-   | None ->
-     Printf.eprintf "--vibe-acp: runtime %s is not declared\n%!" runtime_id;
-     exit 2);
+  let cli_path =
+    match
+      Option.map
+        (fun runtime -> runtime.Runtime_instance.execution)
+        (Runtime.get_runtime_by_id runtime_id)
+    with
+    | Some (Runtime_execution.Vibe_cli execution) -> execution.cli_path
+    | Some
+        ( Runtime_execution.Agent_core _
+        | Runtime_execution.Codex_app_server _
+        | Runtime_execution.Antigravity_cli _
+        | Runtime_execution.Claude_code _
+        | Runtime_execution.Muse_serve _ ) ->
+      Printf.eprintf "--vibe-acp applies to a vibe-cli runtime only; %s is not one\n%!" runtime_id;
+      exit 2
+    | None ->
+      Printf.eprintf
+        "--vibe-acp: no runtime %s materialized (it is not declared, or its binding \
+         was refused at load)\n%!"
+        runtime_id;
+      exit 2
+  in
   match read_vibe_readiness env ~acp_path with
   | Error detail ->
-    Printf.eprintf "vibe-acp readiness read failed: %s\n%!" detail;
+    Printf.eprintf "vibe-acp readiness read failed (%s): %s\n%!" acp_path detail;
     exit 3
   | Ok readiness ->
     (match Runtime_vibe_acp_readiness.verdict readiness with
-     | Ok (Runtime_vibe_acp_readiness.Known _) -> print_endline "vibe-acp ready: budget known"
+     | Ok (Runtime_vibe_acp_readiness.Known budget) ->
+       Printf.printf "vibe-acp ready (%s): %s; trials run %s\n%!" acp_path (budget_line budget)
+         cli_path
      | Ok Runtime_vibe_acp_readiness.Unknown ->
-       print_endline "vibe-acp ready: Vibe gave no budget; the probe goes on without one"
+       Printf.printf
+         "vibe-acp ready (%s): Vibe gave no budget, so the probe goes on without one; \
+          trials run %s\n%!"
+         acp_path
+         cli_path
      | Error reasons ->
        Printf.eprintf
-         "vibe-acp not ready: %s\n%!"
+         "vibe-acp not ready (%s): %s\n%!"
+         acp_path
          (String.concat "; " (List.map Runtime_vibe_acp_readiness.not_ready_to_string reasons));
        exit 3)
 ;;

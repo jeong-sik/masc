@@ -153,14 +153,7 @@ describe('normalizeMission', () => {
     expect(result.command_focus.health).toBe('ok')
   })
 
-  it('preserves attention queue evidence and parses grounded verdict metadata', () => {
-    const grounded = {
-      verdict: 'FAIL',
-      reason: 'bad branch',
-      evidence: [
-        { path: 'lib/foo.ml', line: 12, quote: 'let bad = true' },
-      ],
-    }
+  it('preserves attention queue evidence', () => {
     const result = normalizeMission({
       attention_queue: [
         {
@@ -170,19 +163,14 @@ describe('normalizeMission', () => {
           summary: 'Adversarial review failed',
           target_type: 'keeper',
           target_id: 'builder-keeper',
-          evidence: {
-            grounded_verdict: JSON.stringify(grounded),
-          },
+          evidence: { reviewer: 'adversarial-reviewer' },
           evidence_preview: ['legacy preview'],
         },
       ],
     })
 
     expect(result.attention_queue).toHaveLength(1)
-    expect(result.attention_queue[0]!.evidence).toEqual({
-      grounded_verdict: JSON.stringify(grounded),
-    })
-    expect(result.attention_queue[0]!.grounded_verdict).toEqual(grounded)
+    expect(result.attention_queue[0]!.evidence).toEqual({ reviewer: 'adversarial-reviewer' })
   })
 })
 

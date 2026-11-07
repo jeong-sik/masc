@@ -31,7 +31,7 @@ let writers_of =
     [ Runtime_grant, authenticated
     ; Delegate_policy, authenticated
     ; Principal, authenticated
-    ; Internal_service_credential, authenticated
+    ; Internal_service_credential, [ "local operator" ]
     ; Permission_revocation, authenticated
     ; Trigger_evidence, [ "system cron" ]
     ; Lease_terminal_evidence, [ "system maintenance" ]
@@ -45,6 +45,7 @@ let writers_of =
     ; Revocation_cancel, authenticated
     ; Registration, authenticated
     ; Session, authenticated
+    ; Pat, authenticated
     ]
 ;;
 
@@ -79,6 +80,7 @@ let ordinal = function
   | R.Kind.Revocation_cancel -> 14
   | R.Kind.Registration -> 15
   | R.Kind.Session -> 16
+  | R.Kind.Pat -> 17
 ;;
 
 let kinds_are_all_listed () =
@@ -406,6 +408,7 @@ let kind_labels_are_the_names_on_disk () =
     ; "revocation_cancel"
     ; "registration"
     ; "session"
+    ; "pat"
     ]
     (List.map R.Kind.to_string R.Kind.all)
 ;;

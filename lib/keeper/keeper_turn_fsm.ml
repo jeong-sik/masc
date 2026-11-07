@@ -110,43 +110,18 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
        guard_transition ?ctx ~keeper_name ~turn_id ~from_state ~to_state:state ()
    | None -> ());
   let state_label = turn_state_label state in
-  (* [action_label] used to be a single "unknown" marker for two
-     distinct cases:
-       1. [prev = None] — the first emit for a turn; there is no
-          [from_state] to classify against, so "initial" is the
-          accurate label.
-       2. [prev = Some _] with [classified = None] — the transition
-          is *allowed* (otherwise [guard_transition] would have
-          raised above) but {!classify_transition} has no arm for the
-          (from, to) pair, so the audit trail loses the action.
-          This is a *classifier gap* the operator can fix by adding
-          an arm; surface it as a separate label + WARN so it is
-          discoverable from the same log line as the transition. *)
+  (* [assert_transition_allowed] IS [classify_transition] (lib/turn_fsm/
+     turn_fsm.ml: it wraps the same call and turns [None] into a
+     violation), so by the time this match runs, [guard_transition] has
+     already raised for any (from, to) pair without a classify arm.
+     [None, Some _] cannot occur here; the arm exists only to keep the
+     match total. The emit above used to WARN inside it, describing a
+     "classifier gap" path that could never run. *)
   let action_label =
     match classified, prev with
     | Some action, _ -> transition_action_label action
     | None, None -> "initial"
-    | None, Some _ ->
-        Log.Keeper.emit
-          Log.Warn
-          ~keeper_name
-          ~turn_id
-          ~category:Log.Fsm
-          ~details:
-            (`Assoc
-              [ "from_state", `String prev_label
-              ; "to_state", `String state_label
-              ; "action", `String "unclassified"
-              ; "reason", `String "classify_transition has no arm for this (from, to) pair"
-              ])
-          (Printf.sprintf
-             "[fsm:transition:unclassified] %s -> %s — classify_transition \
-              has no arm for this (from, to) pair; add one in \
-              lib/turn_fsm/turn_fsm.ml::classify_transition so the \
-              audit trail captures the action"
-             prev_label
-             state_label);
-        "unclassified"
+    | None, Some _ -> "unclassified"
   in
   let stop_signaled_before, stop_signaled_after, stop_label =
     match ctx with

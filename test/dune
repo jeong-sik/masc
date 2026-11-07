@@ -6015,6 +6015,11 @@
  (libraries alcotest yojson masc masc.fs_compat masc.string_util unix))
 
 (test
+ (name test_lane_addon_superseded)
+ (modules test_lane_addon_superseded)
+ (libraries alcotest masc))
+
+(test
  (name test_server_settled_original_census)
  (modules test_server_settled_original_census)
  (libraries alcotest yojson masc masc.server unix))

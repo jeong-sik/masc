@@ -217,6 +217,9 @@ type configuration_reading = {
   directory : string;
   snapshot : Lane_addon_config.snapshot;
   issues : Lane_addon_config.issue list;
+  superseded : Lane_addon_superseded.count option;
+      (** RFC-0497 section 4.1 over the bindings this reconciliation read;
+          [None] when it could not read them. *)
 }
 type cleanup_publication = {
   fields : (string * Yojson.Safe.t) list;
@@ -2585,9 +2588,11 @@ let is_live m (binding : retained_binding) =
   match List.assoc_opt "instance_id" binding.binding_fields with
   | Some (`String id) -> Hashtbl.mem m.entries id
   | _ -> false
+let without_live m reading =
+  { reading with readable = List.filter (fun binding -> not (is_live m binding)) reading.readable }
 let historical m =
   let* reading = read_retained_bindings m in
-  Ok { reading with readable = List.filter (fun binding -> not (is_live m binding)) reading.readable }
+  Ok (without_live m reading)
 (* The record decoder the inventory applies to one retained binding file.
    [recovering] names the instances this process is still cleaning up; it only
    changes the projected phase, never whether a record is read. *)
@@ -3040,13 +3045,19 @@ let configuration_json m ~access =
               | Unowned | Owner_unreadable -> issue.issue_path, `Null in
             `Assoc ["source_path", `String source_path; "id", id;
               "message", `String (inventory_issue_message issue)]) inventory.issues in
-      `Assoc ["directory", `String reading.directory; "complete", `Bool reading.snapshot.complete;
+      let superseded = match operator, reading.superseded with
+        | true, Some (count : Lane_addon_superseded.count) ->
+            ["superseded", `Assoc ["eligible", `Int (List.length count.eligible);
+              "protected", `Int count.protected; "diverging_bindings", `Int count.diverging_bindings;
+              "diverging_groups", `Int count.diverging_groups]]
+        | true, None | false, (None | Some _) -> [] in
+      `Assoc (["directory", `String reading.directory; "complete", `Bool reading.snapshot.complete;
         "issues", `List (reading.issues |> List.filter (fun (issue : Lane_addon_config.issue) ->
           operator || Option.exists visible issue.id) |> List.map (fun (issue : Lane_addon_config.issue) ->
             `Assoc ["source_path", `String issue.source_path; "id", nullable issue.id; "message", `String issue.message])
           |> fun listed -> listed @ unreadable);
         "declarations", `List (reading.snapshot.declarations |> List.filter (fun (d : Lane_addon_config.declaration) -> visible d.id)
-          |> List.map declaration)]
+          |> List.map declaration)] @ superseded)
 let snapshot m ~access ?instance_id () =
   let* reading = historical m in
   let live = entries m |> List.filter (fun e ->
@@ -3238,6 +3249,44 @@ let fault_is_terminal fault = owner_is_terminal fault.fault_owner fault.fault_fi
 let blocking_faults ~id ~source_path faults =
   List.filter (fun fault -> owner_concerns ~id ~source_path fault.fault_owner
     && not (fault_is_terminal fault)) faults
+(* One retained binding as RFC-0497 section 4.1 reads it. *)
+let superseded_binding (binding : retained_binding) =
+  let fields = binding.binding_fields in
+  let identity = match text fields "instance_id" with
+    | Error _ -> Lane_addon_superseded.Unminted
+    | Ok instance_id -> (match Random_id.uuid_v7_time_ms instance_id with
+        | Ok minted_ms -> Lane_addon_superseded.Minted { instance_id; minted_ms }
+        | Error _ -> Lane_addon_superseded.Unminted) in
+  let release = match lifecycle_of_fields fields with
+    | Ok (Lifecycle.Detached (Lifecycle.Never_created | Lifecycle.Released _ | Lifecycle.Native_released _)) ->
+        Lane_addon_superseded.Released
+    | Ok (Lifecycle.Detached (Lifecycle.Native_retained _) | Lifecycle.Attached | Lifecycle.Observing
+         | Lifecycle.Failed _ | Lifecycle.Detaching _)
+    | Error _ -> Lane_addon_superseded.Not_released in
+  let persistence =
+    let package = match List.assoc_opt "package" fields with
+      | Some json -> object_ json | None -> Error "missing retained package" in
+    match package with
+    | Error _ -> Lane_addon_superseded.Package_unreadable
+    | Ok package -> (match List.assoc_opt "state_storage" package with
+        | Some (`String "ephemeral") -> Lane_addon_superseded.Ephemeral
+        | Some (`String "persistent") -> (match text package "id", retained_runtime package with
+            | Ok package_id, Ok runtime -> Lane_addon_superseded.Persistent { package_id; runtime }
+            | Error _, (Ok _ | Error _) | Ok _, Error _ -> Lane_addon_superseded.Package_unreadable)
+        | Some _ | None -> Lane_addon_superseded.Package_unreadable) in
+  { Lane_addon_superseded.identity; release; persistence;
+    owner = Option.map (fun (o : configuration_owner) ->
+      { Lane_addon_superseded.id = o.id; source_path = o.source_path; revision = o.revision }) binding.binding_owner;
+    visibility = binding.read_visibility }
+(* RFC-0497 layer one: what section 4.1 would delete from one whole reading,
+   with the instances this process holds or cleans up now. *)
+let superseded_count m (reading : retained_reading) =
+  Lane_addon_superseded.plan
+    ~now_ms:(Int64.of_float (Time_compat.now () *. 1000.))
+    ~live:(fun id -> Hashtbl.mem m.entries id || Hashtbl.mem m.recovering id)
+    ~owner_faulted:(fun (o : Lane_addon_superseded.owner) ->
+      blocking_faults ~id:o.id ~source_path:o.source_path reading.faults <> [])
+    (List.map superseded_binding reading.readable)
 (* What a refusal says about one record: why it cannot be read and, when the
    record names it, its instance id. Without this the operator sees only a
    count and has to read every file of the store to find the one. *)
@@ -4121,7 +4170,9 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
     (* A store whose directory cannot be listed stops reconciliation. A record
        that cannot be read is a fault that holds back the declarations it may
        belong to; every other declaration proceeds. *)
-    let past = historical m in
+    let reading = read_retained_bindings m in
+    let superseded = Result.to_option (Result.map (superseded_count m) reading) in
+    let past = Result.map (without_live m) reading in
     let histories, faults = match past with
       | Error message -> add_issue directory message; [], []
       | Ok reading ->
@@ -4444,7 +4495,7 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
      | Some publish ->
          (match publish ~config exports with
           | Ok () -> () | Error message -> add_issue directory message));
-    let reading={directory;snapshot;issues=List.rev !issues} in
+    let reading={directory;snapshot;issues=List.rev !issues;superseded} in
     let changed=configuration_event_packages m m.configuration_status reading in
     m.configuration_status <- Some reading;
     Ok (configuration_json m ~access:Lane_addon_sources.Operator_configuration,changed)) in
@@ -4490,7 +4541,7 @@ let start_configuration_service ~config ~sw ~clock =
             let issue = {Lane_addon_config.source_path=directory; id=None;
               message=String.concat "; " resolution.warnings} in
             let snapshot = {Lane_addon_config.declarations=[];issues=[issue];paths=[];complete=false} in
-            (manager config).configuration_status <- Some {directory;snapshot;issues=[issue]};
+            (manager config).configuration_status <- Some {directory;snapshot;issues=[issue];superseded=None};
             Ok ()
         | Ready | Warn | Missing_status ->
             Result.map (fun _ -> ()) (reconcile_configuration ~config ~directory)

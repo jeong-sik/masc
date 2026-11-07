@@ -15,6 +15,16 @@ module Policy_id : Authz_id.S
     secret of the session; the log names the session by it. *)
 module Session_id : Authz_id.S
 
+(** The id of a scoped PAT (plan C4). The token carries it with the secret of
+    the PAT; the log names the PAT by it. *)
+module Pat_id : Authz_id.S
+
+(** The id of a Service credential (plan C4). The token carries it with the
+    secret of the credential; the log names the credential by it. A
+    {!Service_id} names the service, and one service may hold several
+    credentials over time. *)
+module Service_credential_id : Authz_id.S
+
 module Workspace_id : Authz_id.S
 module Invite_id : Authz_id.S
 

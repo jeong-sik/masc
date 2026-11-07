@@ -87,4 +87,6 @@ val attempts_of_runtime :
 (** Ordered candidate and terminal attempts recorded in the last execution
     receipt for a failing turn. Returns an empty list when the last failure is
     sound or not a turn failure. The number of attempts matches the candidate
-    count reported in [Walk_ended] or [Walk_no_terminal]. *)
+    count reported in [Walk_ended] or [Walk_no_terminal]. The terminal attempt
+    takes its cause from the terminal error and keeps the dispatch and the API
+    fact of the candidate failure recorded for the same ordinal. *)

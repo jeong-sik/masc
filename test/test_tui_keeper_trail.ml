@@ -2,6 +2,7 @@ module Trail = Masc_tui_keeper_trail
 module Decode = Masc.Tui_decode
 module Receipt = Masc.Keeper_execution_receipt
 module Evidence = Keeper_runtime_walk_evidence
+module Fault = Llm_provider.Candidate_fault
 module Request_failure = Keeper_request_failure
 
 let health raw = Option.get (Decode.keeper_health_of_string raw)
@@ -244,72 +245,100 @@ let test_a_receipt_time_that_does_not_parse_does_not_borrow_the_server_time () =
          ; walk = Trail.Walk_no_terminal { tried = 1 }
          })
 
-let test_attempts_of_runtime_extracts_ordered_candidates_and_terminal () =
-  let failure_a : Evidence.failure =
-    { attempt = 0
-    ; runtime_id = "provider.runtime-a"
-    ; dispatch = Runtime_attempt_dispatch.Dispatched
-    ; failure = { cause = Request_failure.Provider_rate_limited "throttled" }
-    ; api_candidate_fault = Some (Llm_provider.Candidate_fault.Binding Llm_provider.Candidate_fault.Rate_limit)
-    }
-  in
-  let failure_b : Evidence.failure =
-    { attempt = 1
-    ; runtime_id = "provider.runtime-b"
-    ; dispatch = Runtime_attempt_dispatch.Dispatched
-    ; failure = { cause = Request_failure.Provider_network "timeout" }
-    ; api_candidate_fault = None
-    }
-  in
-  let terminal : Evidence.terminal =
-    Evidence.Candidate_terminal
-      { runtime_id = "provider.runtime-c"
-      ; attempt = 2
-      ; failure = { cause = Request_failure.Input_capacity }
-      }
-  in
-  let evidence : Evidence.t = { failures = [failure_a; failure_b]; terminal } in
-  let lane_observation = Some (Receipt.Runtime_lane_observed { turn = receipt_turn; evidence }) in
-  let r = runtime ~last_failure:(reported Decode.Keeper_failure_provider) ~lane_observation () in
-  let attempts = Trail.attempts_of_runtime (Some r) in
-  Alcotest.(check int) "extracts all three attempts" 3 (List.length attempts);
-  let ordinals = List.map (fun (a : Trail.attempt) -> a.ordinal) attempts in
-  Alcotest.(check (list int)) "ordinals in order" [0; 1; 2] ordinals;
-  let terminals = List.map (fun (a : Trail.attempt) -> a.terminal) attempts in
-  Alcotest.(check (list bool)) "only the last is terminal" [false; false; true] terminals;
-  let last_attempt = List.nth attempts 2 in
-  Alcotest.(check string) "terminal runtime_id" "provider.runtime-c" last_attempt.runtime_id;
-  Alcotest.(check bool) "terminal cause matches" true (last_attempt.cause = Trail.Input)
 
-let test_attempts_of_runtime_walk_no_terminal () =
-  let failure_a : Evidence.failure =
-    { attempt = 0
-    ; runtime_id = "provider.runtime-a"
-    ; dispatch = Runtime_attempt_dispatch.Dispatched
-    ; failure = { cause = Request_failure.Provider_server "overloaded" }
-    ; api_candidate_fault = Some Llm_provider.Candidate_fault.Capacity
-    }
+(* The attempts a failing Keeper's last receipt records, read the way the list
+   reads them: [failures] are the candidate failures, [terminal] the error the
+   lane ended on. *)
+let attempts_of ?terminal failures =
+  Trail.attempts_of_runtime
+    (Some
+       (runtime ~last_failure:(reported Decode.Keeper_failure_provider)
+          ~lane_observation:(observed ?terminal failures) ()))
+
+let with_fault fault (failure : Evidence.failure) =
+  { failure with Evidence.api_candidate_fault = Some fault }
+
+let ended_by ~runtime_id ~attempt cause =
+  Evidence.Candidate_terminal { runtime_id; attempt; failure = { Request_failure.cause } }
+
+let ordinals_of attempts = List.map (fun (a : Trail.attempt) -> a.ordinal) attempts
+let runtimes_of attempts = List.map (fun (a : Trail.attempt) -> a.runtime_id) attempts
+let terminals_of attempts = List.map (fun (a : Trail.attempt) -> a.terminal) attempts
+let faults_of attempts = List.map (fun (a : Trail.attempt) -> a.fault) attempts
+let causes_of attempts = List.map (fun (a : Trail.attempt) -> a.cause) attempts
+
+let test_attempts_are_ordered_and_the_terminal_ends_them () =
+  let attempts =
+    attempts_of
+      ~terminal:(ended_by ~runtime_id:"c" ~attempt:2 Request_failure.Input_capacity)
+      [ with_fault (Fault.Binding Fault.Rate_limit)
+          (candidate ~attempt:0 ~runtime_id:"a" rate_limited)
+      ; candidate ~attempt:1 ~runtime_id:"b" Request_failure.Server_restarted
+      ]
   in
-  let failure_b : Evidence.failure =
-    { attempt = 1
-    ; runtime_id = "provider.runtime-b"
-    ; dispatch = Runtime_attempt_dispatch.Dispatched
-    ; failure = { cause = Request_failure.Provider_network "timeout" }
-    ; api_candidate_fault = None
-    }
+  Alcotest.(check (list int)) "ordinals" [ 0; 1; 2 ] (ordinals_of attempts);
+  Alcotest.(check (list string)) "runtimes" [ "a"; "b"; "c" ] (runtimes_of attempts);
+  Alcotest.(check (list bool)) "only the last is the terminal" [ false; false; true ]
+    (terminals_of attempts);
+  Alcotest.(check (list (option string))) "API facts" [ Some "rate limit"; None; None ]
+    (faults_of attempts);
+  Alcotest.(check bool) "causes" true
+    (causes_of attempts = [ Trail.Rate_limited; Trail.Server; Trail.Input ])
+
+let test_a_walk_without_a_terminal_has_no_terminal_attempt () =
+  let attempts =
+    attempts_of
+      [ with_fault (Fault.Binding Fault.Capacity)
+          (candidate ~attempt:0 ~runtime_id:"a" Request_failure.Server_restarted)
+      ; with_fault Fault.Local_admission (candidate ~attempt:1 ~runtime_id:"b" rate_limited)
+      ; with_fault (Fault.Binding Fault.Admission)
+          (candidate ~attempt:2 ~runtime_id:"c" rate_limited)
+      ]
   in
-  let evidence : Evidence.t = { failures = [failure_a; failure_b]; terminal = Evidence.Terminal_not_observed } in
-  let lane_observation = Some (Receipt.Runtime_lane_observed { turn = receipt_turn; evidence }) in
-  let r = runtime ~last_failure:(reported Decode.Keeper_failure_provider) ~lane_observation () in
-  let attempts = Trail.attempts_of_runtime (Some r) in
-  Alcotest.(check int) "extracts candidate attempts" 2 (List.length attempts);
-  let ordinals = List.map (fun (a : Trail.attempt) -> a.ordinal) attempts in
-  Alcotest.(check (list int)) "ordinals in order" [0; 1] ordinals;
-  let terminals = List.map (fun (a : Trail.attempt) -> a.terminal) attempts in
-  Alcotest.(check (list bool)) "no terminal attempt" [false; false] terminals;
-  let first = List.nth attempts 0 in
-  Alcotest.(check (option string)) "fault word extracted" (Some "capacity") first.fault;
-  Alcotest.(check bool) "cause matches" true (first.cause = Trail.Provider)
+  Alcotest.(check (list int)) "ordinals" [ 0; 1; 2 ] (ordinals_of attempts);
+  Alcotest.(check (list bool)) "no terminal attempt" [ false; false; false ]
+    (terminals_of attempts);
+  Alcotest.(check (list (option string))) "MASC's own wait is not the runtime's refusal"
+    [ Some "capacity"; Some "MASC admission wait"; Some "admission" ]
+    (faults_of attempts)
+
+let test_the_terminal_keeps_the_dispatch_and_api_fact_of_its_candidate () =
+  let attempts =
+    attempts_of
+      ~terminal:(ended_by ~runtime_id:"b" ~attempt:1 Request_failure.Server_restarted)
+      [ candidate ~attempt:0 ~runtime_id:"a" rate_limited
+      ; with_fault (Fault.Binding Fault.Server) (candidate ~attempt:1 ~runtime_id:"b" rate_limited)
+      ]
+  in
+  Alcotest.(check (list int)) "the terminal replaces its candidate" [ 0; 1 ]
+    (ordinals_of attempts);
+  match List.rev attempts with
+  | (ended : Trail.attempt) :: _ ->
+      Alcotest.(check bool) "terminal" true ended.terminal;
+      Alcotest.(check bool) "the cause is the terminal's" true (ended.cause = Trail.Server);
+      Alcotest.(check (option string)) "the API fact is the candidate's" (Some "server")
+        ended.fault;
+      Alcotest.(check bool) "the dispatch is the candidate's" true
+        (ended.dispatch = Some Runtime_attempt_dispatch.Dispatched)
+  | [] -> Alcotest.fail "no attempts"
+
+let test_the_first_failure_of_a_repeated_ordinal_is_kept () =
+  let attempts =
+    attempts_of
+      [ candidate ~attempt:0 ~runtime_id:"first" rate_limited
+      ; candidate ~attempt:0 ~runtime_id:"second" rate_limited
+      ]
+  in
+  Alcotest.(check (list string)) "runtimes" [ "first" ] (runtimes_of attempts)
+
+let test_a_failure_that_is_not_a_turn_failure_has_no_attempts () =
+  let attempts =
+    Trail.attempts_of_runtime
+      (Some
+         (runtime ~last_failure:(reported Decode.Keeper_failure_heartbeat)
+            ~lane_observation:(observed two_candidates) ()))
+  in
+  Alcotest.(check (list int)) "ordinals" [] (ordinals_of attempts)
 
 let () =
   Alcotest.run "tui_keeper_trail"
@@ -334,9 +363,15 @@ let () =
             test_an_observed_walk_with_no_failure_and_no_terminal_names_no_cause
         ; Alcotest.test_case "a receipt time that does not parse is not replaced" `Quick
             test_a_receipt_time_that_does_not_parse_does_not_borrow_the_server_time
-        ; Alcotest.test_case "attempts_of_runtime extracts ordered candidates and terminal" `Quick
-            test_attempts_of_runtime_extracts_ordered_candidates_and_terminal
-        ; Alcotest.test_case "attempts_of_runtime extracts ordered candidates without terminal" `Quick
-            test_attempts_of_runtime_walk_no_terminal
+        ; Alcotest.test_case "attempts are ordered and the terminal ends them" `Quick
+            test_attempts_are_ordered_and_the_terminal_ends_them
+        ; Alcotest.test_case "a walk without a terminal has no terminal attempt" `Quick
+            test_a_walk_without_a_terminal_has_no_terminal_attempt
+        ; Alcotest.test_case "the terminal keeps the dispatch and API fact of its candidate" `Quick
+            test_the_terminal_keeps_the_dispatch_and_api_fact_of_its_candidate
+        ; Alcotest.test_case "the first failure of a repeated ordinal is kept" `Quick
+            test_the_first_failure_of_a_repeated_ordinal_is_kept
+        ; Alcotest.test_case "a failure that is not a turn failure has no attempts" `Quick
+            test_a_failure_that_is_not_a_turn_failure_has_no_attempts
         ] )
     ]

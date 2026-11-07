@@ -4461,7 +4461,7 @@
 (test
  (name test_tui_keeper_trail)
  (modules test_tui_keeper_trail)
- (libraries alcotest masc masc.masc_types masc.keeper_runtime agent_core masc_tui_keeper_trail))
+ (libraries alcotest masc masc.masc_types masc.keeper_runtime agent_core masc.agent_core.llm_provider masc_tui_keeper_trail))
 
 (test
  (name test_tui_keeper_columns)

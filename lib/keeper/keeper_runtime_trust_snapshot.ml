@@ -239,20 +239,9 @@ let approval_queue_attention_of_projection
 
 (* A receipt writes both fields from one typed pair
    ([Keeper_execution_receipt.to_json_with_operator_disposition]), so the pair
-   is parsed here once. A kind or a reason the writer does not write, or a
-   kind without its reason, is a damaged record: it relays nothing rather than
-   a guessed kind or an invented reason. *)
-let receipt_operator_disposition receipt =
-  match
-    ( Option.bind
-        (json_string_opt_member "operator_disposition" receipt)
-        Keeper_execution_receipt.operator_disposition_kind_of_string,
-      Option.bind
-        (json_string_opt_member "operator_disposition_reason" receipt)
-        Keeper_execution_receipt.operator_disposition_reason_of_string )
-  with
-  | Some kind, Some reason -> Some (kind, reason)
-  | Some _, None | None, Some _ | None, None -> None
+   is parsed via [Keeper_execution_receipt.receipt_operator_disposition]. *)
+let receipt_operator_disposition =
+  Keeper_execution_receipt.receipt_operator_disposition
 
 let approval_queue_state_of_projection
     (projection : pending_approval_projection) =

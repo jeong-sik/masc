@@ -382,12 +382,20 @@ let keeper_list_row_json ~runtime_class config name =
       let runtime_blocker_signature =
         Option.bind runtime_blocker (fun blocker -> blocker.Keeper_status_bridge.signature)
       in
+      let latest_receipt = Keeper_execution_receipt.latest_json config meta.name in
       let runtime_lane_observation =
-        match Keeper_execution_receipt.latest_json config meta.name with
+        match latest_receipt with
         | None -> `Null
         | Some receipt ->
           Keeper_execution_receipt.runtime_lane_observation_of_receipt_json receipt
           |> Keeper_execution_receipt.runtime_lane_observation_to_yojson
+      in
+      let operator_disposition, operator_disposition_reason =
+        match Option.bind latest_receipt Keeper_execution_receipt.receipt_operator_disposition with
+        | Some (kind, reason) ->
+            ( `String (Keeper_execution_receipt.operator_disposition_kind_to_string kind)
+            , `String (Keeper_execution_receipt.operator_disposition_reason_to_string reason) )
+        | None -> (`Null, `Null)
       in
       let keepalive_running =
         Keeper_status_runtime.keepalive_running_of_phase registry_phase
@@ -448,6 +456,8 @@ let keeper_list_row_json ~runtime_class config name =
             , runtime_path_rest_json
                 ~now:now_ts
                 (Keeper_meta_contract.runtime_id_of_meta meta) );
+            ("operator_disposition", operator_disposition);
+            ("operator_disposition_reason", operator_disposition_reason);
             ("keepalive_running", `Bool keepalive_running);
             ("activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));

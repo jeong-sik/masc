@@ -1267,10 +1267,6 @@ let token_agent_arg =
   let doc = "Agent whose credential to retire." in
   Arg.(required & pos 0 (some string) None & info [] ~docv:"AGENT" ~doc)
 
-let token_credentials base_path =
-  let base_path = Env_config.normalize_masc_base_path_input base_path in
-  (base_path, Auth.list_credentials base_path)
-
 let token_list_cmd_exit base_path =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   let creds, failures = Auth.list_credential_results base_path |> List.partition_map

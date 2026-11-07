@@ -2158,11 +2158,6 @@ let chat_timeline_rows timeline =
   |> List.map (fun projected -> projected.pcr_row)
 ;;
 
-(* String membership without polymorphic compare. Request ids are strings and
-   these lookups run per message per held log on every frame. *)
-let string_mem needle haystack = List.exists (String.equal needle) haystack
-;;
-
 let string_set_of_list (ids : string list) : (string, unit) Hashtbl.t =
   let set = Hashtbl.create (Int.max 8 (List.length ids)) in
   List.iter (fun id -> Hashtbl.replace set id ()) ids;
@@ -4063,13 +4058,6 @@ let planning_filter_label = function
   | Planning_filter_completed -> "completed"
   | Planning_filter_dropped -> "dropped"
 
-let planning_filter_explanation = function
-  | Planning_filter_all -> "all phases"
-  | Planning_filter_active -> "all nonterminal goals (including suspended)"
-  | Planning_filter_completed -> "completed only"
-  | Planning_filter_dropped -> "dropped only"
-;;
-
 let next_planning_filter = function
   | Planning_filter_all -> Planning_filter_active
   | Planning_filter_active -> Planning_filter_completed
@@ -4087,12 +4075,6 @@ let planning_sort_label = function
   | Planning_sort_phase_priority -> "phase/P1-P5"
   | Planning_sort_updated -> "updated"
   | Planning_sort_due -> "due"
-
-let planning_sort_explanation = function
-  | Planning_sort_phase_priority -> "phase order, then P1→P5"
-  | Planning_sort_updated -> "most recently updated first"
-  | Planning_sort_due -> "earliest due date first; undated last"
-;;
 
 let next_planning_sort = function
   | Planning_sort_phase_priority -> Planning_sort_updated
@@ -25285,33 +25267,6 @@ let conversation_urls (state : state) : string list =
    position even when an arrival changed it since the previous paint. *)
 let keeper_message_reading_back ?scroll (state : state) =
   Option.value scroll ~default:state.msg_scroll > 0
-
-type keeper_message_pending_preview_row =
-  | Pending_preview_item of int * Masc_tui_keeper_chat_queue.item
-  | Pending_preview_omitted of int
-
-let keeper_message_pending_preview items =
-  let count = List.length items in
-  if count <= 3
-  then List.mapi (fun index item -> Pending_preview_item (index + 1, item)) items
-  else
-    let first = List.nth items 0 in
-    let second = List.nth items 1 in
-    let newest = List.nth items (count - 1) in
-    [ Pending_preview_item (1, first)
-    ; Pending_preview_item (2, second)
-    ; Pending_preview_omitted (count - 3)
-    ; Pending_preview_item (count, newest)
-    ]
-;;
-
-let keeper_message_pending_status_rows items =
-  List.fold_left
-    (fun rows -> function
-      | Pending_preview_item _ -> rows + 2
-      | Pending_preview_omitted _ -> rows + 1)
-    0 (keeper_message_pending_preview items)
-;;
 
 (* External effects this Keeper handed to the Gate and has not got back.
 

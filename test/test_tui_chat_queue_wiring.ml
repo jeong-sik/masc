@@ -4723,41 +4723,6 @@ let test_chat_visibility_defaults_and_cycles () =
 
 ;;
 
-let test_pending_preview_is_bounded_and_keeps_the_newest_submission () =
-  let queue =
-    List.fold_left
-      (fun queue index ->
-        let request =
-          Keeper_chat.create_request ~keeper_name:"alpha"
-            ~message:(string_of_int index) ()
-        in
-        match
-          Masc_tui_keeper_chat_queue.push queue
-            ~submitted_at:(float_of_int index) request
-        with
-        | Ok (queue, _) -> queue
-        | Error detail -> fail detail)
-      Masc_tui_keeper_chat_queue.empty
-      [ 1; 2; 3; 4; 5; 6 ]
-  in
-  let preview =
-    Masc_tui_keeper_chat_queue.waiting queue
-    |> Tui_types.keeper_message_pending_preview
-  in
-  check int "bounded rows including omission" 4 (List.length preview);
-  match preview with
-  | [ Tui_types.Pending_preview_item (1, first)
-    ; Tui_types.Pending_preview_item (2, second)
-    ; Tui_types.Pending_preview_omitted 3
-    ; Tui_types.Pending_preview_item (6, newest)
-    ] ->
-      check (list string) "first dispatch positions and newest input"
-        [ "1"; "2"; "6" ]
-        [ first.request.message; second.request.message; newest.request.message ]
-  | _ -> fail "pending preview shape changed"
-
-;;
-
 let test_composing_holds_only_while_the_composer_is_live () =
   let state =
     Tui_types.create_state ~workspace:"test" ~port:8935 ()
@@ -6295,9 +6260,5 @@ let () =
             test_roster_starts_hidden_until_explicitly_opened
         ; test_case "hidden roster releases focus and retains the conversation" `Quick
             test_hidden_chat_roster_releases_focus_without_changing_conversation ] )
-    ; ( "queue"
-      , [ test_case "pending preview is bounded" `Quick
-            test_pending_preview_is_bounded_and_keeps_the_newest_submission
-        ] )
     ]
 ;;

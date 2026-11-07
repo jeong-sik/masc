@@ -28,8 +28,9 @@ val column_width : cols:int -> int
 val sheet : ?header:string list -> cols:int -> string list -> string list
 (** The rows drawn at this width: optional full-width header rows, followed by
     the lines as written, or -- once a terminal is wide enough to hold two
-    columns -- the sections between blank lines set side by side two at a
-    time, each whole, with a blank row between pairs. *)
+    columns -- the sections between blank lines, each whole and in the order
+    written, set under whichever column is shorter (the left one when they are
+    as tall), with a blank row between two sections of a column. *)
 
 val filter_sections :
   query:string ->

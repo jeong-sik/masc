@@ -32,6 +32,42 @@ let sections lines =
   in
   gather [] [] lines
 
+(* One column of the folded sheet: the sections set in it, the last first, and
+   the rows they take with a blank row between two sections. *)
+type column = { sections : string list list; height : int }
+
+let empty_column = { sections = []; height = 0 }
+
+let add_section column section =
+  let gap = match column.sections with [] -> 0 | _ :: _ -> 1 in
+  { sections = section :: column.sections;
+    height = column.height + gap + List.length section }
+
+let column_rows column =
+  List.concat
+    (List.mapi
+       (fun index section -> if index = 0 then section else "" :: section)
+       (List.rev column.sections))
+
+(* Each section, whole and in the order written, goes under the shorter column,
+   the left one when they are as tall. A heading stays above its own rows; a
+   column cut at a line count starts under no heading, partway through someone
+   else's keys.
+
+   The sections were set two to a row, left then right, so the shorter of each
+   pair stood beside blank rows. Measured at 100x30 on the Dashboard, the slash
+   commands (138 rows) stood beside the surface's own keys (20 rows), and 32%
+   of the sheet's cells were blank. *)
+let fold_sections sections =
+  let left, right =
+    List.fold_left
+      (fun (left, right) section ->
+        if right.height < left.height then (left, add_section right section)
+        else (add_section left section, right))
+      (empty_column, empty_column) sections
+  in
+  zip (column_rows left) (column_rows right)
+
 let sheet ?(header = []) ~cols lines =
   let body =
     if cols < two_column_minimum_cols then lines
@@ -40,18 +76,7 @@ let sheet ?(header = []) ~cols lines =
       let row (l, r) =
         Message_layout.fit_width l width ^ "  " ^ Message_layout.fit_width r width
       in
-      (* Two sections to a row, each whole, read left then right then down.
-         A heading stays above its own rows; a column cut at a line count
-         starts under no heading, partway through someone else's keys. *)
-      let rec pairs = function
-        | [] -> []
-        | [ last ] -> List.map (fun line -> row (line, "")) last
-        | left :: right :: rest ->
-            List.map row (zip left right)
-            @ (match rest with [] -> [] | _ :: _ -> [ row ("", "") ])
-            @ pairs rest
-      in
-      pairs (sections lines)
+      List.map row (fold_sections (sections lines))
     end
   in
   header @ body

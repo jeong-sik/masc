@@ -87,15 +87,7 @@ class BrowserHandler(lane_fixture.LaneHandler):
                             "data": {
                                 "lane": "live",
                                 "clientId": CLIENT_A,
-                                "reason": "available_connected_browser",
-                            },
-                        },
-                        "work": {
-                            "ok": True,
-                            "data": {
-                                "lane": "automation",
-                                "clientId": None,
-                                "reason": "existing_work_session",
+                                "reason": "existing_login",
                             },
                         },
                     },

@@ -697,9 +697,9 @@ let browser_read_output_schema = `Assoc ["type",`String "object";
 (* The live connection observes the landing document after Page_goto. Its URL
    can differ from the requested URL after a redirect. Browser_addon_tools
    returns that receipt with the browser that served it (Browser_binding.annotate:
-   [source], [lane], [browserSelection], and the connection's [clientId] and
-   [transport]). Only the page receipt is required; the browser fields are
-   declared so the object stays closed. *)
+   [source], [lane], [browserSelection], and the connection's [clientId],
+   [transport] and the ego [browserSpace]). Only the page receipt is required;
+   the browser fields are declared so the object stays closed. *)
 let browser_goto_output_schema =
   let object_value = `Assoc [ "type", `String "object" ] in
   `Assoc
@@ -712,6 +712,7 @@ let browser_goto_output_schema =
         ; "clientId", `Assoc [ "type", `String "string" ]
         ; "transport", `Assoc [ "type", `String "string" ]
         ; "browserSelection", object_value
+        ; Browser_lane.space_field, object_value
         ]
     ; "required", `List [ `String "url"; `String "title" ]
     ; "additionalProperties", `Bool false

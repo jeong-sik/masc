@@ -311,7 +311,7 @@ GitHub 사용자 로그인은 OIDC가 아니라서 ID token이 없다. 신원은
 - 요청 하나는 `Browser_session`, `Scoped_pat`, `Service_credential`, `Mcp_oauth_token` 중 정확히 하나로 인증하고, 모두 같은 인증 투영(principal + `auth_binding` + `Pat_scope`)으로 풀어 §6.2 판정을 거친다. 두 번째 권한표를 두지 않는다. `Service_credential`은 `Not_pat`이고 범위는 Delegated grant와 DelegatePolicy가 정한다. PAT·Service·OAuth token의 레코드는 `principal`과 `Pat_scope`를 가진 새 형식이고, `agent_name`과 `role`을 가진 `agent_credential`은 다계정에서 읽지 않고, 옛 bearer를 든 요청은 `Legacy_credential_forbidden`으로 Reject한다. Admin은 `Admin_assignment`에서만 온다.
 - MCP OAuth는 loopback 전용 승인 화면에서 기존 bearer를 제시하게 한다. 다계정에서는 이 승인을 해당 Human의 OIDC session에 결속하고, 발급한 token은 `Pat_scope`와 같은 범위 필터를 가진다. 이 결속은 OAuth 스택이 main에 들어간 뒤 별도 층에서 구현한다. 그 층이 들어오기 전까지 `Mcp_oauth_token`은 Reject한다.
 - `auth disabled`, `require_token=false`, `MASC_ALLOW_ANONYMOUS_MUTATIONS=true`는 다계정 부팅·활성화를 거부한다. 이 검사는 기존 기능이 아니라 새 요구사항이다.
-- HTTP `http_auth_strict_enabled`와 MCP 호출자 token 해석을 `Auth_gate.decide = Allow(principal) | Reject(reason) | Log_only(evidence)`로 통합한다. 다계정은 Reject가 실제 응답일 때만 허용하고 token 해석 실패 후 caller alias 유지 경로는 제거한다. 다계정에서 `Log_only` 처분은 금지한다. route 표의 모든 항목이 `Reject`를 반환함을 보이는 시험이 있어야 다계정을 연다.
+- 다계정 요청의 HTTP strict 판정과 MCP 호출자 token 해석은 `Auth_gate.decide = Allow(principal) | Reject(reason)` 하나가 한다. 다계정은 Reject가 실제 응답일 때만 허용하고 token 해석 실패 후 caller alias 유지 경로를 쓰지 않는다. `Log_only` 처분은 두지 않는다. Single_user 요청은 지금 함수(`http_auth_strict_enabled`와 MCP 호출자 해석)가 판정한다. 두 모드를 한 함수로 합치는 일은 Single_user의 legacy 경로를 지울 때 한다(2026-11-07 결정). route 표의 모든 항목이 `Reject`를 반환함을 보이는 시험이 있어야 다계정을 연다.
 - session cookie가 조금이라도 있으면 bearer 유무와 무관하게 same-origin과 session-bound CSRF token을 모두 요구한다. `Option.is_some token` 우회와 GET mutation은 금지한다. credentialed cross-origin CORS는 기본 거부다.
 - agent query/header와 `x-masc-keeper-name`은 Actor_hint다. 제시한 service hint가 credential의 service_id와 다르면 거부한다. 익명 rate-limit은 직접 접속 peer IP이며 Actor_hint로 나누지 않는다. 인증 진단 endpoint는 Admin 전용이며 token·hash·credential 본문을 반환하지 않는다.
 - route 표에 모든 HTTP/WS/SSE/MCP 경로의 인증·인가·CSRF·query credential 처분을 열거하고, legacy workspace secret을 쓰는 기존 호출자와 대체 `InternalServiceCredential.service_id`도 열거한다. legacy 사용 목록이 0이어야 다계정을 연다.
@@ -401,7 +401,7 @@ System_maintenance -> 실행/lease 종단 evidence와 사전 승인된 만료만
 System_migration   -> migration 진단 record만
 ```
 
-`RuntimeGrant`, `DelegatePolicy`, `Principal`, `InternalServiceCredential`, 명시적 permission revocation은 인증된 author가 필요하다. owner는 자기 자산, Admin은 허용된 관리 행위, 로컬 복구와 `Fresh_bootstrap`은 `Local_operator`만 쓴다. migration 기동은 호스트 로컬 운영자/런처 전용이며 actor·run_id를 남긴다.
+`RuntimeGrant`, `DelegatePolicy`, `Principal`, 명시적 permission revocation은 인증된 author가 필요하다. scoped PAT는 그 PAT의 Human이 쓴다. `InternalServiceCredential`은 호스트 CLI의 `Local_operator`가 발급하고 폐기한다(2026-11-07 결정). Keeper처럼 호스트가 띄우는 서비스의 credential이라서다. owner는 자기 자산, Admin은 허용된 관리 행위, 로컬 복구와 `Fresh_bootstrap`은 `Local_operator`만 쓴다. migration 기동은 호스트 로컬 운영자/런처 전용이며 actor·run_id를 남긴다.
 
 자동 만료는 `Preauthorized_expiry(cause_event_id)`로 닫고 author는 System_maintenance다. 원 승인자와 원 승인 사건을 보존하고, 원 승인자가 삭제된 뒤에도 새 서명 없이 만료를 적용한다. revalidation 성공 증거나 새 grant·owner 변경·임의 회수에는 쓰지 않는다.
 

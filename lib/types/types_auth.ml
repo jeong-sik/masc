@@ -209,6 +209,7 @@ type auth_config = {
   token_expiry_hours: int; [@default 24]
   account_mode: account_mode option; [@default None]
   google: login_client option; [@default None]
+  github: login_client option; [@default None]
 } [@@deriving show]
 
 let default_auth_config = {
@@ -218,7 +219,19 @@ let default_auth_config = {
   token_expiry_hours = 24;
   account_mode = None;
   google = None;
+  github = None;
 }
+
+let login_client_member name = function
+  | None -> []
+  | Some client ->
+    [ ( name
+      , `Assoc
+          [ ("client_id", `String client.client_id)
+          ; ("redirect_uri", `String client.redirect_uri)
+          ; ("client_secret_env", `String client.client_secret_env)
+          ] )
+    ]
 
 let auth_config_to_yojson c =
   `Assoc ([
@@ -230,19 +243,11 @@ let auth_config_to_yojson c =
   @ (match c.account_mode with
      | None -> []
      | Some mode -> [ ("account_mode", `String (account_mode_label mode)) ])
-  @ (match c.google with
-     | None -> []
-     | Some client ->
-       [ ( "google"
-         , `Assoc
-             [ ("client_id", `String client.client_id)
-             ; ("redirect_uri", `String client.redirect_uri)
-             ; ("client_secret_env", `String client.client_secret_env)
-             ] )
-       ]))
+  @ login_client_member "google" c.google
+  @ login_client_member "github" c.github)
 
 let auth_config_field_names =
-  [ "enabled"; "workspace_secret_hash"; "require_token"; "token_expiry_hours"; "account_mode"; "google" ]
+  [ "enabled"; "workspace_secret_hash"; "require_token"; "token_expiry_hours"; "account_mode"; "google"; "github" ]
 
 let login_client_field_names = [ "client_id"; "redirect_uri"; "client_secret_env" ]
 
@@ -337,6 +342,7 @@ let member_context member = Printf.sprintf "auth_config_of_yojson: field %S" mem
 
 let login_client_string ~context fields name =
   match List.assoc_opt name fields with
+  | Some (`String "") -> Error (Printf.sprintf "%s: field %S is empty" context name)
   | Some (`String value) -> Ok value
   | None -> Error (Printf.sprintf "%s: field %S is missing" context name)
   | Some value ->
@@ -395,12 +401,14 @@ let auth_config_of_yojson json =
          Error
            "auth_config_of_yojson: field \"account_mode\" must be the string \"Single_user\" or \"Multi_account\"")
   in
-  let* google =
-    match List.assoc_opt "google" fields with
+  let login_client_member member =
+    match List.assoc_opt member fields with
     | None -> Ok None
-    | Some json -> Result.map Option.some (login_client_of_json ~member:"google" json)
+    | Some json -> Result.map Option.some (login_client_of_json ~member json)
   in
-  Ok { enabled; workspace_secret_hash; require_token; token_expiry_hours; account_mode; google }
+  let* google = login_client_member "google" in
+  let* github = login_client_member "github" in
+  Ok { enabled; workspace_secret_hash; require_token; token_expiry_hours; account_mode; google; github }
 
 (** Permission matrix - what each role can do *)
 type permission =

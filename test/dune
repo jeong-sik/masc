@@ -70,7 +70,7 @@
 (include stanzas/test_oidc_google.inc)
 (include stanzas/test_oidc_login_transaction.inc)
 (include stanzas/test_authz_login.inc)
-(include stanzas/test_auth_config_google.inc)
+(include stanzas/test_auth_config_login_clients.inc)
 (include stanzas/test_google_login_flow.inc)
 (include stanzas/test_github_oauth.inc)
 (include stanzas/test_keeper_chat_store_announces.inc)

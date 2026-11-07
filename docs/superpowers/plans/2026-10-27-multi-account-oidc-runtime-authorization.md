@@ -112,7 +112,10 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - b1 `Route_access.Public_read`가 구분을 든다. 지금 등록 종류는 모두 `Credential_when_strict`로 적히고, HTTP/2 게이트가 구분을 받는다. `Open_when_strict`는 바로 열고, `Credential_when_strict`는 아직 목록을 본다. 이 구분을 쓰는 등록이 없어서 동작은 같다.
   - b2 등록 종류 `Public_read_open_when_strict`와 정규 호스트의 `when_strict`, HTTP/1 래퍼. 동작은 같다.
   - b3 published-artifacts를 뺀 12곳을 `Open_when_strict`로 옮긴다. 목록이 여는 `Credential_when_strict` 등록이 published-artifacts 하나뿐이라는 시험을 둔다. 동작은 같다.
-  - b4 published-artifacts를 옮기고 목록과 b3의 시험을 지운다. `Credential_when_strict`는 strict에서 늘 자격을 요구한다. 목록을 부르던 시험은 경로 표의 종류를 읽는다.
+  - b4는 15개 파일이라 셋으로 나눈다.
+    - b4a published-artifacts를 옮긴다. 목록이 붙이던 "왜 여는지" 주석은 등록 자리로 간다. b3의 시험은 목록이 여는 credential 등록이 없다고 본다.
+    - b4b 목록을 부르던 시험은 실제 경로 표에서 경로가 닿는 등록의 종류를 읽는 시험 하나로 모은다.
+    - b4c 목록과 b3의 시험을 지운다. `Credential_when_strict`는 strict에서 늘 자격을 요구한다.
 - 하지 않는 것: 다른 경로의 종류 바꾸기, `Subpath_dispatch` 하위 경로 나누기, 서버를 띄운 A1 재측정.
 
 ### B. 권한 저장소

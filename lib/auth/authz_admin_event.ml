@@ -47,20 +47,13 @@ type error =
   | Invalid_user_id of Authz_id.error
   | Unknown_cause of string
 
-let id_error_to_string : Authz_id.error -> string = function
-  | Authz_id.Empty -> "empty"
-  | Authz_id.Too_long -> "too long"
-  | Authz_id.Invalid_byte { index } -> Printf.sprintf "invalid byte at %d" index
-  | Authz_id.Path_segment -> "a path segment"
-;;
-
 let error_to_string = function
   | Not_an_object -> "the body of an Admin assignment record is an object"
   | Unknown_event label -> Printf.sprintf "%S is not an event of an Admin assignment" label
   | Wrong_members ->
     "a revocation of an Admin assignment has the members event, user_id, and cause, all \
      strings, in this order"
-  | Invalid_user_id error -> Printf.sprintf "the user id is not valid: %s" (id_error_to_string error)
+  | Invalid_user_id error -> Printf.sprintf "the user id is not valid: %s" (Authz_id.error_to_string error)
   | Unknown_cause label -> Printf.sprintf "%S is not a cause of a revocation" label
 ;;
 

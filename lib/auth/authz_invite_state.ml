@@ -61,14 +61,6 @@ type refusal =
   | Author_is_not_an_admin of Principal.t
   | Not_an_invite_author of Author.t
 
-let author_label : Author.t -> string = function
-  | Author.Authenticated principal -> "the principal " ^ Principal.to_string principal
-  | Author.Local_operator -> "the local operator"
-  | Author.System_cron -> "the system cron"
-  | Author.System_maintenance -> "the system maintenance"
-  | Author.System_migration -> "the system migration"
-;;
-
 let refusal_to_string = function
   | Already_issued id -> Printf.sprintf "the invitation %s was issued before" (Invite_id.to_string id)
   | Token_digest_taken id ->
@@ -85,7 +77,7 @@ let refusal_to_string = function
     Printf.sprintf
       "the principal %s is not an Admin, and only an Admin writes invitations"
       (Principal.to_string principal)
-  | Not_an_invite_author author -> author_label author ^ " does not write invitations"
+  | Not_an_invite_author author -> Author.label author ^ " does not write invitations"
 ;;
 
 let issue t ~issuer ~invite_id ~token_digest ~expires_at_ms ~role =

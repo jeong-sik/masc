@@ -77,20 +77,13 @@ type error =
   | Invalid_workspace_id of Authz_id.error
   | Invalid_account_home_namespace of Authz_id.error
 
-let id_error_to_string : Authz_id.error -> string = function
-  | Authz_id.Empty -> "empty"
-  | Authz_id.Too_long -> "too long"
-  | Authz_id.Invalid_byte { index } -> Printf.sprintf "invalid byte at %d" index
-  | Authz_id.Path_segment -> "a path segment"
-;;
-
 let error_to_string = function
   | Not_an_object -> "the body of an admission is an object"
   | Wrong_members ->
     "the body of an admission has the members user_id, a string, identity, an object, \
      through, an object of the strings type and id, and membership, an object of the \
      strings workspace_id and account_home_namespace, in this order"
-  | Invalid_user_id error -> Printf.sprintf "the user id is not valid: %s" (id_error_to_string error)
+  | Invalid_user_id error -> Printf.sprintf "the user id is not valid: %s" (Authz_id.error_to_string error)
   | Invalid_identity error ->
     "the identity is not valid: " ^ Authz_external_identity.body_error_to_string error
   | Unknown_through label ->
@@ -98,13 +91,13 @@ let error_to_string = function
       "%S is not a way into the installation, which is an invite or a registration"
       label
   | Invalid_invite_id error ->
-    Printf.sprintf "the invite id is not valid: %s" (id_error_to_string error)
+    Printf.sprintf "the invite id is not valid: %s" (Authz_id.error_to_string error)
   | Invalid_registration_id error ->
-    Printf.sprintf "the registration id is not valid: %s" (id_error_to_string error)
+    Printf.sprintf "the registration id is not valid: %s" (Authz_id.error_to_string error)
   | Invalid_workspace_id error ->
-    Printf.sprintf "the workspace id is not valid: %s" (id_error_to_string error)
+    Printf.sprintf "the workspace id is not valid: %s" (Authz_id.error_to_string error)
   | Invalid_account_home_namespace error ->
-    Printf.sprintf "the account home namespace is not valid: %s" (id_error_to_string error)
+    Printf.sprintf "the account home namespace is not valid: %s" (Authz_id.error_to_string error)
 ;;
 
 let through_of ~label ~id =

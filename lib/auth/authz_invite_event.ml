@@ -101,13 +101,6 @@ type error =
   | Invalid_token_digest
   | Unknown_role of string
 
-let id_error_to_string : Authz_id.error -> string = function
-  | Authz_id.Empty -> "empty"
-  | Authz_id.Too_long -> "too long"
-  | Authz_id.Invalid_byte { index } -> Printf.sprintf "invalid byte at %d" index
-  | Authz_id.Path_segment -> "a path segment"
-;;
-
 let error_to_string = function
   | Not_an_object -> "the body of an invite record is an object"
   | Unknown_event label -> Printf.sprintf "%S is not an event of an invitation" label
@@ -116,7 +109,7 @@ let error_to_string = function
      expires_at_ms, and role, and that of a revoked one event and invite_id, in this order, \
      expires_at_ms a number and the others strings"
   | Invalid_invite_id error ->
-    Printf.sprintf "the invite id is not valid: %s" (id_error_to_string error)
+    Printf.sprintf "the invite id is not valid: %s" (Authz_id.error_to_string error)
   | Invalid_token_digest -> "the token digest is not 64 lowercase hex characters"
   | Unknown_role label -> Printf.sprintf "%S is not a role of an invitation" label
 ;;

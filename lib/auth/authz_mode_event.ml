@@ -47,20 +47,13 @@ type error =
   | Unknown_event of string
   | Invalid_workspace_id of Authz_id.error
 
-let id_error_to_string : Authz_id.error -> string = function
-  | Authz_id.Empty -> "empty"
-  | Authz_id.Too_long -> "too long"
-  | Authz_id.Invalid_byte { index } -> Printf.sprintf "invalid byte at %d" index
-  | Authz_id.Path_segment -> "a path segment"
-;;
-
 let error_to_string = function
   | Not_an_object -> "the body of a mode event is an object"
   | Wrong_members ->
     "the body of a mode event has the members event and workspace_id, in this order, both strings"
   | Unknown_event label -> Printf.sprintf "%S is not an event of the mode" label
   | Invalid_workspace_id error ->
-    Printf.sprintf "the workspace id is not valid: %s" (id_error_to_string error)
+    Printf.sprintf "the workspace id is not valid: %s" (Authz_id.error_to_string error)
 ;;
 
 let of_body (body : Authz_body.t) =

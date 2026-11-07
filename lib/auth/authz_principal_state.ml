@@ -87,19 +87,11 @@ type refusal =
       ; user_id : User_id.t
       }
 
-let author_label : Author.t -> string = function
-  | Author.Authenticated principal -> "the principal " ^ Principal.to_string principal
-  | Author.Local_operator -> "the local operator"
-  | Author.System_cron -> "the system cron"
-  | Author.System_maintenance -> "the system maintenance"
-  | Author.System_migration -> "the system migration"
-;;
-
 let refusal_to_string = function
   | Author_is_not_the_person { author; user_id } ->
     Printf.sprintf
       "%s wrote the admission of %s, which only that person writes"
-      (author_label author)
+      (Author.label author)
       (User_id.to_string user_id)
   | Invitation refusal -> Authz_invite_state.consume_refusal_to_string refusal
   | Registration refusal -> Authz_registration_state.consume_refusal_to_string refusal
@@ -210,7 +202,7 @@ type revocation_refusal =
 
 let revocation_refusal_to_string = function
   | Revoker_is_not_an_admin author ->
-    Printf.sprintf "%s is not an Admin, and only an Admin revokes an Admin assignment" (author_label author)
+    Printf.sprintf "%s is not an Admin, and only an Admin revokes an Admin assignment" (Author.label author)
   | Not_an_admin user_id -> Printf.sprintf "%s has no Admin assignment" (User_id.to_string user_id)
   | Last_admin user_id ->
     Printf.sprintf "%s is the last Admin, so the assignment stays" (User_id.to_string user_id)
@@ -250,7 +242,7 @@ type principal_refusal =
 
 let principal_refusal_to_string = function
   | Writer_is_not_an_admin author ->
-    Printf.sprintf "%s is not an Admin, and only an Admin disables, enables, or deletes a principal" (author_label author)
+    Printf.sprintf "%s is not an Admin, and only an Admin disables, enables, or deletes a principal" (Author.label author)
   | No_principal user_id -> Printf.sprintf "there is no principal %s" (User_id.to_string user_id)
   | Already_disabled user_id -> Printf.sprintf "%s is disabled already" (User_id.to_string user_id)
   | Not_disabled user_id -> Printf.sprintf "%s is not disabled" (User_id.to_string user_id)

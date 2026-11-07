@@ -70,8 +70,7 @@ export type KeeperActionKey =
  *   verb    — fleet-level row 의 full 버튼 텍스트. "하기" suffix 가 붙은 동사.
  *   compact — KEEPER OPERATIONS 인라인 행에 들어가는 좁은 버튼 텍스트.
  *
- * RFC-0135 §1.2 와의 호환: `keeperPauseDisplay` 의 verb-suffix 규약 ("하기") 을
- * 따른다. 한 라벨을 변경하려면 *모든 어형* 을 함께 검토해 라벨 어휘와 어형
+ * 한 라벨을 변경하려면 *모든 어형* 을 함께 검토해 라벨 어휘와 어형
  * 규약이 분리되지 않게 한다.
  */
 type IconComponent = typeof Play
@@ -260,8 +259,8 @@ export function KeeperActionButtons({
     }
   }
 
-  // Verb labels match keeperPauseDisplay verb conventions. Compact mode
-  // drops the "하기" suffix so the buttons fit inside a narrow row cell.
+  // Compact mode drops the "하기" suffix so the buttons fit inside a narrow
+  // row cell.
   const text = (action: KeeperActionKey): string =>
     compact ? KEEPER_ACTION_LABELS[action].compact : KEEPER_ACTION_LABELS[action].verb
 

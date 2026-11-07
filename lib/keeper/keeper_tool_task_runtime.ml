@@ -1008,7 +1008,7 @@ let handle_keeper_task_tool_with_outcome
            "task_id is required.")
     else if result_text = ""
     then
-      (* Schema (tool_shard_types.ml:1447) declares [result] as a
+      (* Schema (config/tools/keeper_task_done.toml) declares [result] as a
          required, minLength:1 field. Other agents verify completion
          from this field, so an empty result hides the audit trail.
          Previously the handler accepted an empty result and either

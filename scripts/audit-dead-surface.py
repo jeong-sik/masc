@@ -84,7 +84,7 @@ scan makes for you. Categories found so far, each from an actual candidate:
   calls it yet; the doc says it is the intended route. `--exports` reports
   these separately via `odoc_referenced`.
 
-  Callback registration. `dashboard.ml:604` wires `generate` into the
+  Callback registration. `lib/dashboard/dashboard.ml` wires `generate` into the
   `masc_dashboard` MCP tool through `Tool_misc.register_dashboard_handler`, so
   a grep for `Dashboard.generate` finds only tests and the module looks
   abandoned when it is not. This one is not detected -- check for a

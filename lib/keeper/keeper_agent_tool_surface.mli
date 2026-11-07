@@ -9,8 +9,8 @@ type turn_lane =
   | Lane_pre_dispatch
       (** Pre-turn placeholder before [compute_tool_surface] runs.
           Emitted only by [keeper_turn_helpers.pre_dispatch_tool_surface];
-          never produced by the per-turn lane logic at
-          keeper_run_tools.ml:963-973. *)
+          never produced by the per-turn lane logic in [compute_tool_surface]
+          (keeper_run_tools_setup.ml). *)
   | Lane_text_only
   | Lane_tool_optional
   | Lane_tool_disabled

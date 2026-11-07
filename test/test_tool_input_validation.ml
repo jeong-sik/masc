@@ -1905,7 +1905,7 @@ let test_validation_telemetry_records_pass_and_fail_counters () =
 (* One binding for the two tests below, which reach the same producer by
    different routes (validate_args directly, and the registered pre-hook).
    Hand-copying the sentence into both would make a wording change at
-   lib/tool_input_validation.ml:966-975 a two-site edit in one file. *)
+   lib/tool_input_contract/tool_input_contract.ml a two-site edit in one file. *)
 let retired_alias_rejection_message =
   "Tool 'masc_transition' received retired transition alias field(s): note, \
    to; use action and notes"

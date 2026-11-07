@@ -111,8 +111,8 @@ Current code cross-check: `keeper_unified_turn.ml` still calls these helpers dir
 | `set_turn_selected_runtime` | runtime attempt result path (success and terminal error) | stores `selected_runtime` (runtime id and model): the runtime that completed the turn, or the candidate whose error ended it | Yes, when a live turn exists |
 | `mark_turn_finished` | turn finally block | clears `current_turn_observation`, ending the live turn snapshot and freezing `last_completed_turn` | Yes, when a live turn exists |
 
-By contrast, the nearby `dispatch_keeper_phase_event` calls in the overflow-retry path
-(`keeper_unified_turn.ml:1939-1946`) eventually go through
+By contrast, `dispatch_keeper_phase_event` (the history-clear path in `keeper_tool_surface.ml` calls it)
+goes through `Keeper_registry.dispatch_event` into
 `Keeper_registry.dispatch_event_with_audit`, so those phase-machine events *do* emit
 `keeper_composite_changed`. Direct turn-mutation helpers and state-machine dispatch now both produce the same signal-only tick, while consumers still re-fetch `/api/v1/keepers/:name/composite` for the authoritative payload.
 

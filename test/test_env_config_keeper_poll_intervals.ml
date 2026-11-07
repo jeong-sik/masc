@@ -31,7 +31,7 @@ let with_env key value f =
 (* --- 1. Defaults pin the hardcoded literals before the extraction --- *)
 
 let test_default_drain_interval () =
-  (* Pre-extraction value at [keeper_crash_persistence.ml:125]
+  (* Pre-extraction value in [keeper_crash_persistence.ml]
      (literal 2.0). Reducing this means more, smaller writes;
      raising it risks losing the in-memory tail on a hard kill. *)
   with_env "MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC" None (fun () ->

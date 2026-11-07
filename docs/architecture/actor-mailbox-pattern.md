@@ -25,10 +25,10 @@ producer fiber ─── Stream.add ──▶  [bounded mailbox]
 
 | File | Mailbox | Pattern shape |
 |------|---------|---------------|
-| `lib/session.ml:56,90,271-278` | `registry.mailbox` (Eio.Stream, cap 10000) + per-session notification queue (cap 1000) | **Request-response.** Each message carries an `Eio.Promise` resolver; consumer resolves it to return data to the caller. |
-| `lib/board_dispatch.ml:35,71-89` | `store.flusher_inbox` (cap 1000), commands `Flush` / `Sweep` | **Fire-and-forget.** No resolver — caller does not block on the consumer's progress. |
+| `lib/session.ml` | `registry.mailbox` (Eio.Stream, cap 10000) + per-session notification queue (cap 1000) | **Request-response.** Each message carries an `Eio.Promise` resolver; consumer resolves it to return data to the caller. |
+| `lib/board/board_dispatch.ml`, `lib/board/board_core_persist.ml` | `store.flusher_inbox` (cap 1000), commands `Flush` / `Sweep` | **Fire-and-forget.** No resolver — caller does not block on the consumer's progress. |
 | `lib/pulse/pulse.ml` | Adaptive tick + per-consumer registration | **Pub-sub-with-tick.** Consumers register first-class modules, receive each beat. |
-| `lib/sse.ml:304` | per-client `event_stream` (cap 64) | **Per-subscriber broadcast.** A snapshot of the registry is taken, each subscriber receives via its own stream. |
+| `lib/sse.ml` | per-client `event_stream` (cap `stream_capacity`, default 256) | **Per-subscriber broadcast.** A snapshot of the registry is taken, each subscriber receives via its own stream. |
 
 ## When to use this pattern
 
@@ -62,7 +62,7 @@ producer fiber ─── Stream.add ──▶  [bounded mailbox]
 2. **Split atomic increment then read** — `Atomic.incr; Atomic.get`
    produces duplicate IDs under contention. Use
    `Atomic.fetch_and_add` / `Atomic.compare_and_set` instead. See
-   `lib/metrics_store_eio.ml:72-75`.
+   `metric_counter` in `lib/metrics_store_eio.ml`.
 3. **`Eio.Mutex` across domains** — Eio.Mutex is fiber-scoped within
    a single domain. Cross-domain locking needs `Stdlib.Mutex` or
    `Cross_context_mutex`.

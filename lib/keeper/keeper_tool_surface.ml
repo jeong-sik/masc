@@ -265,11 +265,6 @@ let keeper_sandbox_stop_body ~(config : Workspace.config) args : tool_result =
 let handle_keeper_sandbox_stop ctx args : tool_result =
   keeper_sandbox_stop_body ~config:ctx.config args
 
-(* masc_keeper_reconcile tool removed along with the manual_reconcile
-   blocker mechanism. Failed turns record evidence via Keeper_registry;
-   recovery is autonomous (next turn's observation) or operator-driven
-   (keeper_chat/board), not blocker-driven. *)
-
 (** Keeper tools are scoped to the caller's current base_path.
     Do not retarget requests across other base_path registries. *)
 let resolve_ctx ctx ~name:_ = ctx

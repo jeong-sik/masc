@@ -127,8 +127,6 @@ module Voice = struct
       (get_float ~default:2.0 "VOICE_AUDIO_TEST_TONE_TIMEOUT_SEC")
 end
 
-(** {1 Message GC Configuration} *)
-
 (** {1 Transport Configuration} *)
 
 module Transport = struct
@@ -580,5 +578,3 @@ module Workspace_file = struct
          ~default:(Env_setting.Int_knob.default Workspace_file_max_read_bytes)
          (Env_setting.Int_knob.env_name Workspace_file_max_read_bytes))
 end
-
-(** {1 Internal Safety Configuration} *)

@@ -97,9 +97,6 @@ let record_execute_stream_end ~keeper_name ~stream_id ~task_id ~status =
 
 let register_record_execute_stream_end f = Atomic.set record_execute_stream_end_callback f
 
-(* Skip log throttle removed with manual_reconcile blocker — no more
-   sticky reconcile state means no flood of "reconcile pending" skip logs. *)
-
 let format_since_last_scheduled_autonomous = function
   | Some s when s = max_int -> "never"
   | Some s -> string_of_int s

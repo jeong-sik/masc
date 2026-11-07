@@ -274,7 +274,3 @@ val telemetry_enabled_env_key : string
 val parse_warn_env_key : string
 
 val telemetry_enabled : unit -> bool
-
-(** Whether malformed env parses are escalated to {!Config_error} (fail-fast)
-    instead of warn + default. Controlled by [MASC_PARSE_WARN]. Default: false. *)
-(** {1 Keeper defaults} *)

@@ -116,12 +116,11 @@ val rollback_openai_projection : openai_projection_tx -> unit
 
 (** {1 Tool block resolution} *)
 
-(** Which block index a newly opened tool block takes: the next unused index,
-    the one after it, or the provider's wire index itself. *)
+(** Which block index a newly opened tool block takes: the next unused index
+    or the one after it. *)
 type tool_block_index_policy =
   | Next_available
   | Next_after_carrier
-  | Wire_index
 
 type idless_tool_semantics =
   (* Argument fragments continue the one call selected by the wire index. *)
@@ -137,7 +136,7 @@ type tool_block_resolution =
       }
   | Tool_block_rejected of sse_event
       (** An [SSEParseFailed] naming the conflict: a late provider identity, an
-          ambiguous id-less continuation, a block index collision and so on. *)
+          ambiguous id-less continuation and so on. *)
 
 (** [Some id] for a non-blank provider tool id, [None] for a blank or missing one. *)
 val non_blank_provider_tool_id : string option -> string option

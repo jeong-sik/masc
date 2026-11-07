@@ -136,7 +136,7 @@ module Client_map = Map.Make (struct type t=Browser_lane.client_id let compare=c
 module Space_map = Map.Make (Int)
 let ego_space_id (client:Browser_lane.client_info) = match client.transport,client.space with
   | Browser_lane.Ego_task_space,Some space -> Some space.id
-  | Ego_task_space,(None|Some _) -> None
+  | Ego_task_space,None -> None
 let live_conflicts clients =
   let duplicate = function None -> Some false | Some _ -> Some true in
   let client_counts,space_counts=List.fold_left (fun (client_counts,space_counts) (client:Browser_lane.client_info) ->

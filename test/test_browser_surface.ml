@@ -89,7 +89,7 @@ let test_exact_inventory_tab () =
      check bool "canonical Page provenance is retained" true
        (Option.map Surface.ego_page_to_json observed.ego_page=Some provenance)
    | Error detail -> fail detail);
-  let unavailable=`Assoc ["id",`Int 41;"error",`String "native Page metadata unavailable";"egoPage",provenance 41] in
+  let unavailable=`Assoc ["id",`Int 41;"error",`String "native Page metadata unavailable";"egoPage",provenance] in
   let partial rows=`Assoc ["tabs",`List rows;"complete",`Bool false;"unavailableTabs",`List [unavailable]] in
   List.iter (fun (description,inventory) ->
     match Surface.inventory_tab ~tab_id:41 inventory with

@@ -95,8 +95,9 @@ official-client lane 후보의 종류·자격 증명·계약·관측·실패 처
   요청을 보내지 않아 용량에 닿지 않는다. 초판은 이 실측을 코드 전 조건으로
   두었다. 운영자가 2026-11-07 에 구현을 진행하라고 정한 뒤 배정 앞으로 옮겼다.
   shared pool 로 확인되면 배정을 멈추고 lane 필요성을 다시 검토한다.
-  Vibe 쪽 절반은 §4.2 에서 한 번 쟀다. API 쪽은 API 키 예산이 바닥나 소비를 만들
-  수 없었다. 다음 달 초기화 뒤에 API-only 호출로 잰다.
+  지금 있는 것은 Vibe-only 호출 한 번의 전후 값 하나다(§4.2). 대조 읽기가 없어서
+  곡선이 아니다. API-only 호출은 API 키 예산이 바닥나 만들 수 없었다. API 쪽 예산이
+  다시 열린 뒤에 두 쪽을 반복해 잰다.
 - **우회의 금지는 문서화되지 않은 TTY 조종에 한한다**(초판은 문서화된
   --resume 까지 금지했다 — 리뷰 S3). 문서화된 programmatic 표면이면 resume
   도 lane 의 정당한 원시다.
@@ -116,23 +117,40 @@ official-client lane 후보의 종류·자격 증명·계약·관측·실패 처
   프롬프트를 보내지 않아 모델을 부르지 않는다. 이 메서드는 공개 문서에 없는
   3.1.0 소스의 표면이다. 그래서 lane 이 고정한 Vibe 버전에서만 믿는다.
   - 준비됨: `authenticated=true`, `authState=os_keyring`, `status=ready`,
-    `apiKey.scope=vibe` 가 모두 맞을 때다.
+    `apiKey.scope=vibe` 가 모두 맞고, budget 을 읽었다면 100% 미만일 때다. PAYG 가
+    켜져 있으면 100% 를 넘긴 호출은 청구되고, 꺼져 있으면 멈춘다(Vibe 소스
+    `AccountBudgetView`). lane 은 둘 다 받지 않는다.
+  - Vibe 가 billing 을 못 읽으면 budget 은 `null` 이다(시간 초과, 권한, 공급자). 그때
+    준비 검사는 "budget 모름"을 따로 돌려준다. 남은 몫이 있다고 적지 않는다.
+  - `authenticated` 는 저장된 값이 있다는 뜻일 뿐이다. Vibe 는 이 값을 서버에 묻지
+    않는다(`can_use_active_provider`). 만료되거나 취소된 키는 `_account/read` 의
+    `status=unauthorized` 로 드러난다(`/whoami` 의 401·403).
+  - `_account/read` 는 Vibe 의 활성 공급자를 따른다. 공급자가 Mistral 이 아니면
+    `status=unavailable` 이다. 그래서 준비 검사는 lane 호출과 같은 config 로 돈다.
+  - 준비 검사는 읽기만 하지 않는다. `_account/read` 가 성공하면 `~/.vibe` 의 whoami
+    캐시를 다시 쓰고, tenant URL 을 `config.toml` 에 고칠 수 있다. `session/new` 는
+    세션 lease 를 잡는다.
   - 그 밖의 값은 갈래마다 typed 로 남긴다. 모르는 값은 `Unrecognized_*` 로 그대로
     남긴다.
 - setup 은 자격 증명을 macOS keychain(`svce=ai.mistral.vibe`,
   `acct=MISTRAL_API_KEY`)에 둔다. env 의 `MISTRAL_API_KEY` 가 keychain 보다
   먼저다(§4.1 m4). masc 서버 환경에는 mistral HTTP 레인용 같은 이름의 변수가
   있으므로, lane 은 Vibe 자식 프로세스 환경에서 이 변수를 뺀다. 빼지 않으면
-  Vibe 는 env 키를 쓴다(m4 는 그 키로 402 를 받았다). Vibe 소스의 순서는 프로세스
-  env → `~/.vibe/.env` → OS keyring 이다(§4.2). 그래서 env 를 빼도 `~/.vibe/.env` 에
-  키가 있으면 그 키가 먼저다. 준비 검사가 `authState=os_keyring` 을 확인한다.
+  Vibe 는 env 키를 쓴다(m4 는 그 키로 402 를 받았다).
+- `vibe -p` 는 Rust 바이너리(`vibe/_bin/vibe-rs`)를 실행한다. 그 자격 증명 순서는
+  m4(env 가 keychain 보다 먼저)만 쟀다. 준비 검사의 `vibe-acp` 는 Python 이다. 그
+  `assess_auth_state` 는 프로세스 env → `~/.vibe/.env` → OS keyring 순서이고, OIDC 를
+  켜면(`VIBE_CLI_OIDC_ENABLED`) OIDC 토큰이 그보다 먼저다(`utils/api_keys.py`). lane
+  의 자식 env 에는 `VIBE_*` 이름이 없다. `vibe -p` 가 `~/.vibe/.env` 를 어떻게 읽는지,
+  두 프로그램이 같은 keychain 항목을 읽는지는 재지 않았다(§5).
 - 다계정: Vibe CLI 의 profile 기능(config.toml `[[providers]]`, api-keys
   페이지의 profile)이 있는지 실측 뒤 #49200 C2a 계열(계정 스택)에 합류
   여부를 정한다. 이 RFC 는 단일 계정만 약속한다.
 - env 의 API 키(`MISTRAL_API_KEY`)는 이 lane 의 자격 증명이 아니다 — 그
   경로는 기존 mistral HTTP 레인의 API 사용량 경로다. setup 이 keychain 에 둔
-  자격 증명도 이름이 `MISTRAL_API_KEY` 라서 이름으로는 둘을 가를 수 없다. 키
-  scope 로는 가른다. keychain 자격 증명은 `vibe`, env 키는 `workspace` 였다(§4.2).
+  자격 증명도 이름이 `MISTRAL_API_KEY` 라서 이름으로는 둘을 가를 수 없다. Vibe 의
+  whoami 캐시는 둘을 `plan_type` 으로 갈랐다(keychain 자격 증명 `chat`, env 키
+  `api`, §4.2).
   $30 전용 pool 이라고 단정하지 않고 pool 관계는 배정 전에 실측한다(§2.1).
 
 ### 2.3 모델·thinking 계약
@@ -159,9 +177,12 @@ official-client lane 후보의 종류·자격 증명·계약·관측·실패 처
   `vibe_usage` 는 Enterprise 전용이라 Pro 운영에서 못 쓴다. 콘솔의 두 막대는
   사람이 읽는 원장으로 남기고, lane 이 예측 비용 모델을 발명하지 않는다.
 - Vibe 몫 계량기는 `_account/read` 의 `budget.usagePercentage` 다. Vibe 소스는 이
-  값을 `/v1/billing/budget` 의 `vibe_budget` 에서 읽는다. m12 는 `cost_usd 0.0` 이었는데
-  호출 뒤에 이 값이 올랐다(§4.2). 그래서 lane 의 사용량 관측은 `cost_usd` 가 아니라
-  이 계량기를 읽고, 토큰 수는 `export.json` 에서 읽는다.
+  값을 `/v1/billing/budget` 의 `vibe_budget` 에서 읽는다. 계정(조직) 전체 값이고,
+  읽으려면 `see_org_inference_usage` 권한이 있어야 한다. m12 는 `cost_usd 0.0` 이었는데
+  호출 뒤에 이 값이 올랐다(§4.2, 한 번, 대조 읽기 없음).
+- 그래서 lane 은 호출 단위 사용량을 `export.json` 의 토큰으로 적는다. 계량기는 남은
+  몫을 보는 계정 단위 값으로만 쓴다. 여러 Keeper 가 겹치면 어느 호출이 값을 올렸는지
+  가를 수 없어서, 호출에 나눠 붙이지 않는다.
 - 이 keychain 자격 증명에서 `cost_usd` 는 매번 0.0 이었다(§4.1). m6 의
   `--max-price 0.000001` 은 걸리지 않았다. 비용이 0 이어서인지, 상한을 턴
   사이에만 보는지는 한 번의 실행으로 가를 수 없다.
@@ -179,10 +200,11 @@ official-client lane 후보의 종류·자격 증명·계약·관측·실패 처
   기존 분류에 붙인다)로 매핑한다. 실측 전에는 미분류로 두고 추측 분류를
   만들지 않는다. 플랜 쪽 소진은 아직 못 봤다. env 키로 간 API 경로의 402 는
   exit 2 `infrastructure_failure` 였다(§4.1 m4).
-- 로그아웃·세션 만료는 준비 검사(§2.2)의 `authenticated=false`(`signed_out`)로
-  드러날 것으로 본다. 실제 `signed_out` 응답은 만들지 않았다(keychain 을 건드리지
-  않았다). 그 응답을 보기 전에는 이것을 만료 감지로 단정하지 않는다. 자동
-  재로그인은 시도하지 않는다.
+- 로그아웃은 준비 검사의 `authenticated=false`(`signed_out`)다. `signed_out` 은
+  env·`~/.vibe/.env`·keyring 어디에도 값이 없을 때만 나온다(`auth_state.py`).
+- 만료되거나 취소된 키는 keyring 에 남아 `os_keyring` 으로 읽힌다. 그 키는
+  `_account/read` 의 `status=unauthorized` 로 드러난다(`/whoami` 401·403). 실제
+  `unauthorized` 응답은 만들지 않았다. 자동 재로그인은 시도하지 않는다.
 
 ## 3. 변경되는 것
 
@@ -198,11 +220,13 @@ official-client lane 후보의 종류·자격 증명·계약·관측·실패 처
 1. 구현 Task(MASC 별도 등록)의 첫 층: **lane 코드 작성 전 선행 실측** —
    programmatic fixture(`--output json`,
    `streaming`, `export.json`, exit code 0-3, `off`/`none` 수용), 최소 tool
-   권한·trust·거부 양상, `/whoami` 무인 argv 와 세션 만료 구분. 코덱을 세울 수
+   권한·trust·거부 양상, 무인 준비 검사(§4.2)와 키 만료 구분. 코덱을 세울 수
    없으면 이 RFC 를 Deferred 로 되돌린다.
 2. 실측 후 lane 을 유지하기로 결정하면: 출력 코덱(json/streaming/export.json)
    → exit code typed 분류와 준비 검사 → 카탈로그·배정 표면 → API-only/
    Vibe-only 소비 곡선 실측(배정 조건) → keeper 1곳 시범 배정.
+   층 이름: L0 = 1의 실측, L1 = 출력 코덱, L2 = 실행과 결과 분류, L2b = 준비 검사,
+   L3 = 카탈로그·배정 표면.
 3. 각 층은 스택 PR 이고, 계약 시험은 코덱 파싱·분류·인자 조립만 둔다
    (TUI 문구·화면 시험 금지 규칙 그대로).
 4. 연기 항목의 소유: 다계정 스택은 첫 층 실측 뒤 #49200 계열로 MASC task
@@ -233,31 +257,35 @@ official-client lane 후보의 종류·자격 증명·계약·관측·실패 처
 - 판단: 코덱을 세울 fixture 가 있으므로 §4 의 2 로 간다. pool 관계 실측은
   §2.1 배정 조건대로 Keeper 배정 전에 한다. 두 레인의 용량은 합산하지 않는다.
 - 남은 실측
-  - 배정 전: API 쪽 계량기와의 관계(§2.1 배정 조건, §4.2)
+  - 배정 전: API-only/Vibe-only 소비 곡선(§2.1 배정 조건)
   - 그 밖: 플랜 소진·세션 만료의 실패 모양, thinking `off`/`none` 수용,
     `--resume`, `--enabled-tools`·per-tool permission, `--disabled-tools` 의
     효과, 기본 허용 목록, 각 모델 별칭의 실제 응답, 토큰을 쓴 뒤 시간 상한이
     걸릴 때의 usage, MCP 브리지, `vibe-acp` 로 세션을 돌리는 경로,
-    `vibe-app-server`(3.1.0 에 함께 설치된다), `signed_out` 응답
+    `vibe-app-server`(3.1.0 에 함께 설치된다), `unauthorized` 응답
 
 ### 4.2 L0 뒤 실측: 준비 검사와 Vibe 몫 계량기 (2026-11-07)
 
 기록: 같은 묶음 README 의 「L0 뒤 실측」 절, `acp/`, `fixtures/m12/`,
-`repro/acp-probe.py`. 계정 값(플랜 이름, budget 수치, 키 끝자리)은 넣지 않았다.
+`repro/acp-probe.py`. 이 절은 계정 값(플랜 이름, budget 수치, 키 끝자리)을 더하지
+않았다.
 
 - 준비 검사: `MISTRAL_API_KEY` 를 뺀 환경으로 `vibe-acp` 를 띄운다. 그리고
   `initialize` → `_auth/status` → `session/new` → `_account/read` 를 보낸다.
-  두 번 돌려 5.0초와 7.4초가 걸렸고 둘 다 exit 0 이었다. 결과는
+  다섯 번 돌렸고(처음, m12 앞, m12 뒤, 스크립트를 고친 뒤 두 번) 모두
+  `_account/read` 의 답을 받았다. 잰 시간은 5.0초, 7.4초, 5.8초다. 결과는
   `authState=os_keyring`, `status=ready`, `plan.kind=chat`, `apiKey.scope=vibe` 다.
-- 자격 증명 순서: 프로세스 env → `~/.vibe/.env` → OS keyring
-  (`vibe/setup/auth/auth_state.py`).
+- 자격 증명 순서(`vibe-acp`, `vibe/setup/auth/auth_state.py`): 프로세스 env →
+  `~/.vibe/.env` → OS keyring. `vibe -p` 의 Rust 바이너리에는 이 소스가 해당하지
+  않는다(§2.2).
 - 키 종류: Vibe 의 whoami 캐시에서 keychain 자격 증명은 `plan_type=chat`, env 키는
-  `plan_type=api` 였다. Vibe 소스는 plan_type 이 키 scope 에서 온다고 적는다
-  (`chat`↔`vibe`, `api`↔`workspace`). `_account/read` 도 keychain 쪽을 `vibe` 로 보였다.
+  `plan_type=api` 였다. Vibe 소스 주석은 plan_type 이 키 scope 에서 온다고 적는다
+  (`chat`↔`vibe`, `api`↔`workspace`). 서버 쪽은 확인하지 않았다. `_account/read` 의
+  `apiKey.scope` 는 Vibe 가 `plan.kind` 에서 표로 바꾼 값이라 따로 본 근거가 아니다.
 - Vibe 몫 계량기: m12(입력 7,938·출력 342 토큰, `cost_usd 0.0`) 앞뒤로
   `budget.usagePercentage` 를 읽었다. 호출 뒤에 값이 올랐다.
-- 판단: L2 의 준비 검사는 이 경로로 한다. Vibe 호출은 Vibe 몫 계량기에 잡힌다.
-  API 쪽 계량기와의 관계는 아직 모른다.
+- 판단: 준비 검사(L2b)는 이 경로로 한다. Vibe 호출이 Vibe 몫 계량기를 올린 것을
+  한 번 봤다. API 쪽 계량기와의 관계는 아직 모른다.
 
 ## 5. 리스크
 
@@ -273,3 +301,6 @@ official-client lane 후보의 종류·자격 증명·계약·관측·실패 처
   lane 은 버전을 고정해 시작하고 변경 시 실측을 다시 돌린다.
 - 준비 검사가 기대는 `vibe-acp` 확장 메서드(`_auth/status`, `_account/read`)는 공개
   문서에 없다. Vibe 버전을 바꾸면 이 응답 모양부터 다시 잰다.
+- 준비 검사(`vibe-acp`, Python)와 실행(`vibe -p`, Rust `vibe-rs`)은 다른 프로그램이다.
+  준비 검사가 ready 여도 실행이 다른 키를 쓸 수 있다. lane 은 실행 결과를
+  `export.json` 의 outcome 으로 따로 본다.

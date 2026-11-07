@@ -3172,7 +3172,9 @@ let add_routes ~sw ~clock router =
                    | Ok outcome ->
                      (match outcome with
                       | Candle_hold_release.Released _ -> Candle_payout_worker.wake ()
-                      | _ -> ());
+                      | Candle_hold_release.Not_waiting _ | Candle_hold_release.Not_held _
+                      | Candle_hold_release.Unknown_goal _
+                      | Candle_hold_release.Superseded _ -> ());
                      Ok outcome
                    | Error detail -> Error detail)
              with Yojson.Json_error detail ->

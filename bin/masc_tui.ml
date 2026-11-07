@@ -8033,7 +8033,9 @@ let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) 
   (* The voice pane is lines the frame lays out; its wizard takes its own keys
      while open. *)
   | Config when state.config_pane = Config_voice -> pane (fun v -> Voice_scroll v)
-  | Config when state.config_pane = Config_params -> pane (fun v -> Runtime_params_scroll v)
+  | Config when state.config_pane = Config_params ->
+      pane (fun scroll ->
+        Runtime_params_scroll { scroll; max_scroll = state.runtime_params_max_scroll })
   | Config when state.config_pane = Config_presets -> pane (fun v -> Preset_detail_scroll (v, None))
   (* Surfaces whose whole body is a row list, which [row_list] answers for,
      and the two panes that own every key while they are open. *)
@@ -40311,6 +40313,9 @@ Use relative paths for resources already held in the package. -->
                 if next_cursor <> state.runtime_params_cursor then begin
                   state.runtime_params_cursor <- next_cursor;
                   state.config_scroll <- 0;
+                  (* The next frame measures the new document; until then a
+                     notch goes to the list. *)
+                  state.runtime_params_max_scroll <- 0;
                   state.runtime_params_notice <- None
                 end
             | Approvals when state.approval_detail_open ->
@@ -40649,6 +40654,9 @@ Use relative paths for resources already held in the package. -->
                 if next_cursor <> state.runtime_params_cursor then begin
                   state.runtime_params_cursor <- next_cursor;
                   state.config_scroll <- 0;
+                  (* The next frame measures the new document; until then a
+                     notch goes to the list. *)
+                  state.runtime_params_max_scroll <- 0;
                   state.runtime_params_notice <- None
                 end
             | Approvals when state.approval_detail_open ->

@@ -335,7 +335,12 @@ let render_runtime_params (state : state) =
           | Some { rpe_mode = Advanced_json; _ } ->
             ui_text state ~ko:"JSON 입력  Enter:적용  Ctrl-U:지우기  Esc:취소" ~en:"type JSON  Enter:apply  Ctrl-U:clear  Esc:cancel"
           | None -> Masc_tui_keys.footer_hints_config ~lang:state.ui_language ~pane:Config_params));
-  finish_surface state ~clamped:(Runtime_params_scroll scroll)
+  finish_surface state
+    ~clamped:(Runtime_params_scroll
+                { scroll;
+                  max_scroll =
+                    Masc_tui_scroll.maximum ~count:(List.length selected_lines)
+                      ~height:(max 1 detail_height) })
     ~surface_key:"config-params" ~rows:terminal_rows ~cols buf
 ;;
 

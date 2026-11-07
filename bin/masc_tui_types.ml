@@ -9977,6 +9977,10 @@ type state = {
      PgUp/PgDn still move by a visible page. *)
   mutable runtime_config_cursor: int;
   mutable config_scroll: int;
+  (* How far the Parameters document can scroll, as the last frame drew it:
+     0 when the document fits. A wheel notch moves the document only while
+     it has a row to move to. *)
+  mutable runtime_params_max_scroll: int;
   mutable detail_tab: keeper_detail_tab;
   mutable item_cursor: int;
   mutable item_filter: Masc_tui_keeper_items.filter;
@@ -20076,6 +20080,7 @@ let create_state
   runtime_config_view_error = None;
   runtime_config_cursor = 0;
   config_scroll = 0;
+  runtime_params_max_scroll = 0;
   detail_tab = Detail_info;
   item_cursor = 0;
   item_filter = Masc_tui_keeper_items.All;
@@ -21783,7 +21788,11 @@ type clamped_scroll =
   | Harness_detail_scroll of int
   | Fusion_detail_scroll of int
   | Runtime_detail_scroll of int
-  | Runtime_params_scroll of int
+  (* The Parameters pane draws its list and the selected value's document
+     together, so a wheel notch has two places to go. The frame reports how
+     far the document can scroll: the notch moves the document while it can
+     move that way, and reaches the list as [j] / [k] when it cannot. *)
+  | Runtime_params_scroll of { scroll : int; max_scroll : int }
   | System_log_detail_scroll of int
   | Planning_confirmation_scroll of int * Masc_tui_planning_detail.confirmation option
   | Planning_detail_scroll of int
@@ -21979,7 +21988,9 @@ let apply_clamped_scroll (state : state) = function
   | Harness_detail_scroll value -> state.harness_detail_scroll <- value
   | Fusion_detail_scroll value -> state.fusion_scroll <- value
   | Runtime_detail_scroll value -> state.runtime_detail_scroll <- value
-  | Runtime_params_scroll value -> state.config_scroll <- value
+  | Runtime_params_scroll { scroll; max_scroll } ->
+      state.config_scroll <- scroll;
+      state.runtime_params_max_scroll <- max_scroll
   | System_log_detail_scroll value -> edit_system_logs_page state (fun page -> {page with lp_detail_scroll=value})
   | Keeper_logs_scroll { scroll; cols } ->
       state.log_scroll <- scroll;

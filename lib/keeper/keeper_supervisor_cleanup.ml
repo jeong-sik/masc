@@ -2,33 +2,10 @@
 
     Meta mutation, lane join, and registry removal are owned by
     [Keeper_shutdown_finalize]. The [Supervisor_cleaned] lifecycle
-    event and hook are delivered from the durable completion receipt after
+    event is delivered from the durable completion receipt after
     finalization, never from the sweep that observed the old entry. *)
 
 open Keeper_shutdown_types
-
-let completion_meta_for_coverage config operation =
-  match Keeper_meta_store.read_meta config operation.Keeper_shutdown_types.keeper_name with
-  | Ok (Some meta)
-    when Keeper_id.Trace_id.equal meta.runtime.trace_id operation.trace_id ->
-    Some meta
-  | Ok (Some _) ->
-    Log.Keeper.warn
-      "%s: supervisor cleanup completion coverage meta identity changed"
-      operation.keeper_name;
-    None
-  | Ok None ->
-    Log.Keeper.warn
-      "%s: supervisor cleanup completion coverage meta is absent"
-      operation.keeper_name;
-    None
-  | Error detail ->
-    Log.Keeper.warn
-      "%s: supervisor cleanup completion coverage meta read failed: %s"
-      operation.keeper_name
-      detail;
-    None
-;;
 
 let lifecycle_event_bus_ready () =
   match Event_bus_slots.get_masc () with
@@ -36,7 +13,7 @@ let lifecycle_event_bus_ready () =
   | Some _ -> Ok ()
 ;;
 
-let handle_completion config operation = function
+let handle_completion _config operation = function
   | Keeper_shutdown_types.Supervisor_cleaned ->
     (match lifecycle_event_bus_ready () with
      | Error _ as error -> error
@@ -51,12 +28,6 @@ let handle_completion config operation = function
          operation.keeper_name
          ("shutdown_operation=" ^ operation_id)
          ();
-       let meta = completion_meta_for_coverage config operation in
-       Keeper_lifecycle_hooks.run
-         ~masc_root:(Workspace.masc_dir config)
-         ?meta
-         ~keeper_id:operation.keeper_name
-         Keeper_lifecycle_hooks.Supervisor_cleaned;
        Log.Keeper.info
          "%s: supervisor cleanup finalization delivered operation=%s"
          operation.keeper_name

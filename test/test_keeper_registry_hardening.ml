@@ -10,7 +10,6 @@ module KET = struct
   include Masc.Keeper_tool_dispatch_runtime
   include Masc.Keeper_tool_dispatch_runtime.Compatibility
 end
-module KLH = Masc.Keeper_lifecycle_hooks
 module Keeper_lifecycle_admission = Masc.Keeper_lifecycle_admission
 module Reservation = Masc.Keeper_lifecycle_reservation
 module KSM = Keeper_state_machine
@@ -513,25 +512,16 @@ let test_lane_fork_rejects_cancelling_switch () =
   | None -> fail "lane exit promise remained unresolved"
 ;;
 
-let test_dispatch_write_failure_skips_phase_side_effects () =
+let test_dispatch_write_failure_is_rejected () =
   KR.For_testing.clear ();
-  KLH.reset_for_testing ();
-  Fun.protect
-    ~finally:(fun () -> KLH.reset_for_testing ())
-    (fun () ->
-       let hook_calls = ref 0 in
-       KLH.register (fun ~keeper_id:_ _ -> incr hook_calls);
-       let entry = register "alice" in
-       let corrupted = { entry with meta = { entry.meta with name = "bob" } } in
-       KR.For_testing.unsafe_put_entry ~base_path "alice" corrupted;
-       match KR.dispatch_event ~base_path "alice" KSM.Fiber_started with
-       | Ok _ -> fail "dispatch accepted a transition whose registry write failed"
-       | Error (KSM.Invalid_transition _ | KSM.Precondition_violation _) ->
-         check int "phase hook skipped before failed write" 0 !hook_calls
-       | Error other ->
-         fail
-           ( "unexpected dispatch error: "
-           ^ KSM.transition_error_to_string other ))
+  let entry = register "alice" in
+  let corrupted = { entry with meta = { entry.meta with name = "bob" } } in
+  KR.For_testing.unsafe_put_entry ~base_path "alice" corrupted;
+  match KR.dispatch_event ~base_path "alice" KSM.Fiber_started with
+  | Ok _ -> fail "dispatch accepted a transition whose registry write failed"
+  | Error (KSM.Invalid_transition _ | KSM.Precondition_violation _) -> ()
+  | Error other ->
+    fail ("unexpected dispatch error: " ^ KSM.transition_error_to_string other)
 ;;
 
 let test_get_filters_corrupted_entry () =
@@ -800,46 +790,6 @@ let cleanup_dir path =
   match rm path with
   | () -> ()
   | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ()
-;;
-
-(* A hook that raises on a phase change leaves a coverage-gap row. The
-   registry handed the hook runner its base path where the runner takes the
-   [.masc] directory, so the row landed at the top of the workspace, where
-   no reader looks. *)
-let test_failed_phase_hook_records_its_gap_under_the_masc_directory () =
-  let dir = temp_dir "registry_hook_gap_root" in
-  Fun.protect
-    ~finally:(fun () ->
-      KR.For_testing.clear ();
-      KLH.reset_for_testing ();
-      cleanup_dir dir)
-    (fun () ->
-       Eio_main.run @@ fun env ->
-       Fs_compat.set_fs (Eio.Stdenv.fs env);
-       KR.For_testing.clear ();
-       KLH.reset_for_testing ();
-       let meta = make_meta "hook-gap" in
-       (* Registered offline, so [Fiber_started] is a real phase change. *)
-       let _registered = KR.register_offline ~base_path:dir meta.name meta in
-       let hook_calls = ref 0 in
-       KLH.register (fun ~keeper_id:_ _ ->
-         incr hook_calls;
-         failwith "synthetic phase hook failure");
-       (match KR.dispatch_event ~base_path:dir "hook-gap" KSM.Fiber_started with
-        | Ok _ -> ()
-        | Error error -> fail (KSM.transition_error_to_string error));
-       check int "the phase change ran the hook" 1 !hook_calls;
-       let masc_root = Filename.concat dir ".masc" in
-       check
-         int
-         "the row is where coverage gaps are read"
-         1
-         (List.length (Telemetry_coverage_gap.read_recent ~masc_root ~n:10));
-       check
-         bool
-         "nothing is written at the top of the workspace"
-         false
-         (Sys.file_exists (Filename.concat dir "telemetry-coverage-gaps")))
 ;;
 
 let test_tool_usage_restore_uses_lifecycle_authority () =
@@ -1213,17 +1163,13 @@ let () =
         ] )
     ; ( "dispatch_event"
       , [ test_case
-            "skips phase side effects when validated write fails"
+            "rejects a transition when the validated write fails"
             `Quick
-            test_dispatch_write_failure_skips_phase_side_effects
+            test_dispatch_write_failure_is_rejected
         ; test_case
             "exact dispatch preserves replacement lane"
             `Quick
             test_dispatch_event_exact_preserves_replacement_lane
-        ; test_case
-            "a failed phase hook records its gap under .masc"
-            `Quick
-            test_failed_phase_hook_records_its_gap_under_the_masc_directory
         ] )
     ; ( "keeper_lane"
       , [ test_case

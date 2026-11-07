@@ -745,7 +745,6 @@
   test_keeper_state_machine
   test_keeper_state_machine_mermaid
   test_keeper_state_machine_tla_correspondence
-  test_keeper_lifecycle_hooks
   test_telemetry_unified
   test_telemetry_unified_source
   test_warn_root_causes
@@ -1084,7 +1083,6 @@
   test_keeper_state_machine_mermaid
   test_keeper_state_machine_preconditions
   test_keeper_state_machine_tla_correspondence
-  test_keeper_lifecycle_hooks
   test_telemetry_unified
   test_telemetry_unified_source
   test_warn_root_causes

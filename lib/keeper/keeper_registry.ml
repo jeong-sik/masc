@@ -814,12 +814,6 @@ let rec dispatch_event_with_audit_internal
             ; transition_outcome = "applied"
             ; wall_clock_at_decision = now
             };
-          Keeper_lifecycle_hooks.run
-            ~masc_root:(Common.masc_dir_from_base_path ~base_path)
-            ~meta:entry.meta
-            ~keeper_id:name
-            (Keeper_lifecycle_hooks.Phase_transition
-               { from_phase = tr.prev_phase; to_phase = tr.new_phase });
           (* Broadcast phase transition to SSE subscribers *)
           (try
              Sse.broadcast

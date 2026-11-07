@@ -16,7 +16,6 @@ module KR = Masc.Keeper_runtime
 module AQ = Masc.Keeper_approval_queue
 module AQT = Keeper_approval_queue_rules_types
 module KSM = Keeper_state_machine
-module KLH = Masc.Keeper_lifecycle_hooks
 module KA = Masc.Keeper_keepalive
 module KSR = Masc.Keeper_supervisor_reconcile_keepalive
 module KSS = Masc.Keeper_supervisor_supervise_keepalive

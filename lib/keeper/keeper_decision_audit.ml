@@ -202,29 +202,27 @@ let flush_if_needed ~base_path ~keeper_name =
           gather 0 []
         in
         let written = ref 0 in
-        match
-          Fun.protect
-            ~finally:(fun () ->
-              (* Pure bookkeeping, safe on every exit path: only the
-                 snapshot tail that actually reached the store leaves the
-                 unflushed region, and records appended during the yielding
-                 writes above stay accounted. *)
-              ring.unflushed <- max 0 (ring.unflushed - !written))
-            (fun () ->
+        Fun.protect
+          ~finally:(fun () ->
+            (* Pure bookkeeping, safe on every exit path: only the snapshot
+               tail that actually reached the store leaves the unflushed
+               region, and records appended during the yielding writes above
+               stay accounted. *)
+            ring.unflushed <- max 0 (ring.unflushed - !written))
+          (fun () ->
+            try
               List.iter
                 (fun json ->
                   Dated_jsonl.append store json;
                   written := !written + 1)
-                pending)
-        with
-        | () -> ring.last_flush_ts <- now
-        | exception Eio.Cancel.Cancelled _ as e -> raise e
-        | exception e ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string DecisionAuditFlushFailures)
-            ~labels:[("keeper", keeper_name)]
-            ();
-          Log.Keeper.warn "decision_audit flush failed: %s"
-            (Printexc.to_string e);
-          ring.last_flush_ts <- now
+                pending
+            with Eio.Cancel.Cancelled _ as ex -> raise ex
+               | ex ->
+                 Otel_metric_store.inc_counter
+                   Keeper_metrics.(to_string DecisionAuditFlushFailures)
+                   ~labels:[("keeper", keeper_name)]
+                   ();
+                 Log.Keeper.warn "decision_audit flush failed: %s"
+                   (Printexc.to_string ex));
+        ring.last_flush_ts <- now
       end

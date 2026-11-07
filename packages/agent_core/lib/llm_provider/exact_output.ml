@@ -631,9 +631,7 @@ let candidate_rejection_measurement_outcome (receipt : candidate_rejection_recei
 
 let target_selection_error_disposition = function
   | Missing_target_credential _
-  | Missing_declared_target_credential _
-  | Target_credential_invalid _
-  | Target_credential_read_failed _ -> Runtime_slot_unavailable
+  | Missing_declared_target_credential _ -> Runtime_slot_unavailable
 ;;
 
 let wire_admission_error_disposition = function
@@ -784,16 +782,6 @@ let target_selection_error_reason = function
       "missing_declared_target_credential(target_ref=%s provider_id=%s)"
       (quoted_dynamic target_ref)
       (quoted_dynamic provider_id)
-  | Target_credential_invalid { target_ref; environment_variable } ->
-    Printf.sprintf
-      "target_credential_invalid(target_ref=%s environment_variable=%s)"
-      (quoted_dynamic target_ref)
-      (quoted_dynamic environment_variable)
-  | Target_credential_read_failed { target_ref; environment_variable } ->
-    Printf.sprintf
-      "target_credential_read_failed(target_ref=%s environment_variable=%s)"
-      (quoted_dynamic target_ref)
-      (quoted_dynamic environment_variable)
 ;;
 
 let candidate_rejection_reason (receipt : candidate_rejection_receipt) =

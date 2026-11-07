@@ -141,14 +141,6 @@ type target_selection_error =
       { target_ref : string
       ; provider_id : string
       }
-  | Target_credential_invalid of
-      { target_ref : string
-      ; environment_variable : string
-      }
-  | Target_credential_read_failed of
-      { target_ref : string
-      ; environment_variable : string
-      }
 
 type target_catalog_admission_error =
   | Target_ref_rejected of target_ref_error
@@ -235,11 +227,10 @@ val admit_target_ref
 val projection_target : admitted_target -> projection_target
 
 val resolve_target : admitted_target -> (selected_target, target_selection_error) result
-(** Demand and freeze the credential: a binding-wire target's environment
-    variable is read through the snapshot's [io] and a missing, empty, or
-    unread value fails with {!Missing_target_credential},
-    {!Target_credential_invalid}, or {!Target_credential_read_failed}. A
-    catalog-wire target on a keyed provider row names no credential source,
-    so it fails with {!Missing_declared_target_credential} carrying the
-    provider id. On success the key is frozen into the [selected_target];
-    later stages never re-read the environment. *)
+(** Demand and freeze the credential: a binding-wire target carries the key its
+    binding resolved, and one whose environment variable resolved to nothing
+    fails with {!Missing_target_credential}. A catalog-wire target on a keyed
+    provider row names no credential source, so it fails with
+    {!Missing_declared_target_credential} carrying the provider id. On success
+    the key is frozen into the [selected_target]; later stages never re-read
+    the environment. *)

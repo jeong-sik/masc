@@ -87,7 +87,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 | A4a | 경로 인증 종류의 닫힌 타입을 만든다. `Route_access.t`는 라우터의 `route.access`가 들고 있는 데이터이고, `Server_route.auth`는 핸들러 타입을 나르는 GADT이며, 종류를 필수로 받는 등록 함수(`Server_route.get` 등)가 종류에 맞는 래퍼를 씌운다(`docs/rfc/RFC-typed-route-auth.md` §3). 변환 도구 `route_auth_codemod`를 함께 넣는다. 도구는 서버 코드와 닿지 않아 별도 PR로 낸다. 컴파일러 파서로 등록을 읽고 해당 글자 범위만 고쳐 쓰며(나머지 서식은 그대로), `--write`는 파일을 바꾸고 `--strict`는 바꾸지 못한 등록이 남으면 실패한다. 같은 경로라고 말할 수 있는 모양만 바꾸고 나머지는 이유와 함께 목록에 남긴다. 도구는 시험이 있다. 인벤토리 도구가 `access`를 출력한다. 동작은 바꾸지 않는다. | §5.3 | A1 |
 | A4b | 도구로 만든 변환 한 층. 2026-10-28의 등록 383곳과 당시 도구 변환 296곳·수동 결정 87곳은 과거 집계다. 사용하려는 도구의 정확한 head에서 열린 변경 요청을 해소하고 독립 소스 리뷰를 받은 뒤, 고정한 서버 source와 도구 head에서 전체 등록·변환·보류 수를 다시 센다. 도구가 남긴 곳과 수동 변경은 결정표에 종류(`Self_authenticated`의 사유, `Always_public`, 도우미 안쪽 래퍼의 종류)와 사유를 적는다. 이름 붙은 핸들러는 다른 파일의 사용까지 확인하고, 모든 변환 diff에서 원래 래퍼와 인증 종류·식별자 바인딩을 검토한다. `--allow-early-evaluation`은 각 계산식의 호출 간 값 불변성, 부작용·예외 및 정의·등록 위치의 동일 바인딩 근거를 기록한 경우에만 쓴다. 근거가 없으면 자동 변환을 수락하지 않고 수동으로 결정한다. 바꾼 뒤 안 쓰게 된 `open Server_auth`를 지우고 A1 상태 코드를 다시 측정하며 인증된 허용·권한 부족 거부와 관련 prefix 및 H1/H2 시험을 확인한다. A1의 무자격 상태 코드 일치만으로 전체 권한 동등성을 주장하지 않는다. `GET /api/v1/board/flairs`(#46569)의 종류를 정하고, 병합 직전에 main 위에서 도구를 다시 돌려 새 등록을 반영한다. | §5.3 | A4a |
 | A4c | HTTP/2 게이트웨이(`server_h2_gateway.ml`, `server_h2_gateway_routes_extra.ml`)가 갈래마다 인증 래퍼를 고르지 않고, HTTP/1 라우터가 같은 요청에 돌려주는 종류(`Router.resolve`의 `route.access`)를 읽어 종류에 맞는 H2 게이트를 건다(`docs/rfc/RFC-typed-route-auth.md` §3.3). 종류를 적는 곳이 HTTP/1 등록 하나라서 둘이 어긋날 수 없다. H2가 구현하지 않은 종류와 갈래 모양이 맞지 않는 경우는 거절한다. HTTP/1에 없는 경로는 404, 없는 메서드는 405다. `/api/v1/keepers/`의 `Subpath_dispatch`는 하위 경로의 종류가 표에 없어서 열지 않고, 그 아래 H2 갈래 5곳은 권한을 갈래가 직접 적는다(§3.3). HTTP/2 응답이 HTTP/1에 맞춰 바뀌는 첫 층이라, A1 기준선의 HTTP/2 전체를 변환 전후로 돌려 바뀐 응답 목록을 근거로 남기고(#46675, #46676) 모든 줄이 HTTP/1과 같아지는 쪽인지 읽는다. | §5.3 | A4b |
-| A4d | 두 번에 나눠 낸다. 앞부분은 옛 등록 함수와 `Unclassified`를 지운다. HTTP/2 게이트웨이는 이 함수들을 부르지 않아서 A4c를 기다리지 않고, 이 부분이 들어가면 새 등록은 종류 없이 컴파일되지 않는다. 뒷부분은 `is_public_read_path`와 결정표를 지운다. A4c 뒤에도 `is_public_read_path`를 부르는 곳은 HTTP/1 `with_public_read`와 HTTP/2 `with_h2_public_read` 둘이라서 같이 고친다. 엄격 설정에서도 열리는 `Public_read` 등록은 133개 중 15개를 쟀고(`docs/evidence/2026-10-29-h2-route-gate/public-read-open-in-strict.txt`), 유효한 id에만 열리는 published-artifacts 하나를 목록에서 읽어 더하면 16개이다. 이 16곳은 `Always_public`이 아니라 `Public_read`의 "엄격에서도 열림" 구분으로 옮긴다. 인벤토리의 route 표를 C4가 읽는다. A4a는 2026-10-28에 먼저 병합됐다(#46590). 층마다 병합 시점에 컴파일되고 동작이 같아야 한다. 변환 도구는 열려 있던 PR이 새 등록 함수로 옮겨진 뒤 따로 지운다. | §5.3, §11-1 | A4b (뒷부분은 A4c) |
+| A4d | 두 번에 나눠 낸다. 앞부분은 옛 등록 함수와 `Unclassified`를 지운다. HTTP/2 게이트웨이는 이 함수들을 부르지 않아서 A4c를 기다리지 않고, 이 부분이 들어가면 새 등록은 종류 없이 컴파일되지 않는다. 뒷부분은 `is_public_read_path`와 결정표를 지운다. A4c 뒤에도 `is_public_read_path`를 부르는 곳은 HTTP/1 `with_public_read`와 HTTP/2 `with_h2_public_read` 둘이라서 같이 고친다. 엄격 설정에서도 열리는 `Public_read` 등록은 133개 중 15개를 쟀고(`docs/evidence/2026-10-29-h2-route-gate/public-read-open-in-strict.txt`), 유효한 id에만 열리는 published-artifacts 하나를 목록에서 읽어 더하면 16개이다. 이 16곳은 `Always_public`이 아니라 `Public_read`의 "엄격에서도 열림" 구분으로 옮긴다. 2026-11-07에 다시 재면 13곳이다(아래 A4d 뒷부분 범위). 인벤토리의 route 표를 C4가 읽는다. A4a는 2026-10-28에 먼저 병합됐다(#46590). 층마다 병합 시점에 컴파일되고 동작이 같아야 한다. 변환 도구는 열려 있던 PR이 새 등록 함수로 옮겨진 뒤 따로 지운다. | §5.3, §11-1 | A4b (뒷부분은 A4c) |
 
 **A2 범위**
 
@@ -99,6 +99,20 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - 부팅 코드가 `Authz_log.open_at_start`를 부르는 것은 BasePath lease를 쥔 뒤다. B1b는 lease 증거를 인자로 받지 않으므로 이 순서는 문장이 지킨다.
 - 외부 고수위는 부팅이 설치 기록에서 외부 저장소의 위치를 읽을 수 있을 때만 `있음`으로 볼 수 있다. 설치 기록은 §6의 결정 2가 정했고, 읽고 쓰는 코드는 B2가 만든다. A2는 B2 다음에 쌓으므로 그 코드를 쓴다. 설치 기록을 잃은 설치의 구멍은 §7의 위험 2에 적었다.
 - 시험은 A2가 `off`가 없는 행(1~3, 5~8, 11)을 하나씩 보고, `off`가 있는 행(4, 9, 10)은 F3이 본다. 5행은 `Activation_requested`로 나온다. 그 밖에 다섯 가지를 본다. 거부 사유가 둘 이상일 때 모두 돌려주는지, 필드가 든 `config.json`을 `enable_auth`·`disable_auth`·`prepare_login_auth`가 다시 써도 필드가 남는지, 잘린 `config.json`과 마지막 모드 사건이 만든 모드 `Multi_account`를 짝지어 3행 거부가 나오는지, `account_mode`가 알 수 없는 값인 `config.json`이 다른 필드가 틀려도 부팅을 거부하는지, `account_mode`의 입력 모양이다. 입력 모양은 멤버가 두 번 나오거나 `null`·숫자·객체거나 대소문자가 다르면 부팅을 거부하고, 최상위가 배열이나 `null`이면 설정 없음으로 읽는지 본다.
+
+
+**A4d 뒷부분 범위** (strict 설정의 공개 읽기, 2026-11-07)
+
+- 지금 strict 설정의 `with_public_read`(HTTP/1)와 `with_h2_public_read`(HTTP/2)는 `Server_auth.is_public_read_path`가 참인 경로만 자격 없이 연다. 경로가 열리는지 정하는 곳이 등록의 종류와 이 목록 둘이다.
+- 2026-11-07 main(`82ef0dcb730`)에서 소스를 읽어 다시 쟀다. `Public_read` 등록 130개 중 13개가 strict에서도 열린다(`docs/evidence/2026-11-07-public-read-open-in-strict/`). 10-29의 16개 중 multimodal 세 경로는 그 사이 목록에서 빠져 strict에서 닫힌다.
+- 종류. `Route_access.Public_read`가 strict 설정에서 요구하는 것을 데이터로 든다. `Credential_when_strict`는 read 자격이고, `Open_when_strict`는 자격 없음이다. 등록 종류는 `Public_read`(자격), `Public_read_open_when_strict`, `Public_read_on_canonical_host { port; when_strict }`다. 경로 표 JSON은 `{"kind":"public_read","when_strict":"credential"}`이나 `"open"`이다. `Always_public`으로는 옮기지 않는다. 그 종류의 핸들러는 서버 상태를 받지 않고 준비 확인(503)도 거치지 않는다.
+- published-artifacts prefix(`GET /api/v1/published-artifacts/<id>`)는 strict에서도 연다(2026-11-07 사용자 결정). 지금 목록은 형식이 맞는 artifact id만 연다. 처리기는 스스로 인증한다(선택 token, 비공개 artifact는 401). 바뀌는 것은 형식이 틀린 id를 자격 없이 보낼 때 401 대신 처리기의 400이 나오는 것 하나다. 데이터는 나가지 않는다.
+- 층.
+  - b0 이 범위와 측정.
+  - b1a 종류와 래퍼. 두 래퍼가 종류의 구분을 받는다. `Open_when_strict`는 바로 열고, `Credential_when_strict`는 아직 목록을 본다. 이 구분을 쓰는 등록이 없어서 동작은 같다.
+  - b1b published-artifacts를 뺀 12곳을 `Open_when_strict`로 옮긴다. 목록이 여는 `Credential_when_strict` 등록이 published-artifacts 하나뿐이라는 시험을 둔다. 동작은 같다.
+  - b2 published-artifacts를 옮기고 목록과 b1b의 시험을 지운다. `Credential_when_strict`는 strict에서 늘 자격을 요구한다. 목록을 부르던 시험은 경로 표의 종류를 읽는다.
+- 하지 않는 것: 다른 경로의 종류 바꾸기, `Subpath_dispatch` 하위 경로 나누기, 서버를 띄운 A1 재측정.
 
 ### B. 권한 저장소
 

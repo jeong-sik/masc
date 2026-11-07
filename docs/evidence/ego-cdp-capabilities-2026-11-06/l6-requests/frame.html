@@ -1,0 +1,12 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>masc L6 frame</title></head>
+<body>
+<script>
+addEventListener('message', async (event) => {
+  let result;
+  try { await fetch(event.data.url, { mode: 'no-cors', cache: 'no-store' }); result = 'ok'; }
+  catch (error) { result = 'failed: ' + error.message; }
+  event.source.postMessage({ id: event.data.id, result }, '*');
+});
+</script>
+</body></html>

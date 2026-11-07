@@ -1301,6 +1301,56 @@ let test_emulation_is_a_cdp_override_on_the_page () =
   let unmanaged = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id=2;interaction=seoul})) in
   check string "an operator tab is refused before any change" "before effect" (failure_kind unmanaged)
 
+(* Request blocking is one CDP setting on the Page. The script keeps the
+   hosts it blocked, so the receipt lists every host blocked on the tab and an
+   unblock counts the hosts it lifted. *)
+let test_request_blocking_is_a_cdp_setting_on_the_page () =
+  let asked = ref [] in
+  let reply = ref (refused "no reply set") in
+  let peer = opened (fun sent ->
+    asked := sent :: !asked;
+    match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.block_requests" -> !reply
+    | other -> failf "unexpected request blocking step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let act ?(tab_id=1) interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id;interaction})) in
+  reply := answered (obj ["blocked",`List [str "ads.example.com";str "cdn.example.com"]]);
+  (match act (Lane.Action.Block_requests ["cdn.example.com"]) with
+   | Ok receipt ->
+     check string "the action" "block_requests" (text (field "action" receipt));
+     check int "the tab" 1 (Yojson.Safe.Util.to_int (field "tabId" receipt));
+     check (list string) "every host blocked on the tab" ["ads.example.com";"cdn.example.com"]
+       (List.map text (Yojson.Safe.Util.to_list (field "blocked" receipt)));
+     check string "the blocks live with the SDK process" "ego_sdk_process" (text (field "lifetime" receipt));
+     check bool "snapshot refs are stale" true (field "refsInvalidated" receipt = `Bool true);
+     check bool "the note says navigations still load" true (contains (text (field "note" receipt)) "Navigations")
+   | other -> failf "block_requests was %s" (failure_kind other));
+  let sent = List.hd !asked in
+  check string "the Page it names" "p1" (text (field "label" sent.args));
+  check (list string) "the hosts of this call" ["cdn.example.com"] (List.map text (Yojson.Safe.Util.to_list (field "hosts" sent.args)));
+  reply := answered (obj ["unblocked",`Int 2]);
+  (match act Lane.Action.Unblock_requests with
+   | Ok receipt ->
+     check string "the action" "unblock_requests" (text (field "action" receipt));
+     check int "the hosts it lifted" 2 (Yojson.Safe.Util.to_int (field "unblocked" receipt));
+     check bool "nothing lives on after an unblock" true (field "lifetime" receipt = `Null)
+   | other -> failf "unblock_requests was %s" (failure_kind other));
+  check bool "an unblock names no hosts" true (field "hosts" (List.hd !asked).args = `Null);
+  List.iter (fun (label, value) ->
+    reply := answered value;
+    check string label "unknown" (failure_kind (act (Lane.Action.Block_requests ["ads.example.com"]))))
+    ["a receipt with no hosts leaves the change unknown", obj ["blocked",`List []];
+     "an unblock count for a block leaves the change unknown", obj ["unblocked",`Int 0];
+     "a receipt with more fields leaves the change unknown", obj ["blocked",`List [str "ads.example.com"];"extra",`Null]];
+  reply := failed "Network.setBlockedURLs failed: CDP request timed out";
+  check string "a CDP call that threw leaves the change unknown" "unknown"
+    (failure_kind (act (Lane.Action.Block_requests ["ads.example.com"])));
+  let runs = List.length !asked in
+  check string "an operator tab is refused before any change" "before effect"
+    (failure_kind (act ~tab_id:2 (Lane.Action.Block_requests ["ads.example.com"])));
+  check int "and runs no script" runs (List.length !asked)
+
 (* What leaves the peer says where input stands and which SDK process ran
    it, failures included. *)
 let test_every_answer_carries_the_input_state () =
@@ -1453,13 +1503,15 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Upload {target=Lane.Action.Chooser_opener "#attach";paths=[upload_file]}});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Set_emulation {geolocation=Some {latitude=1.;longitude=2.;accuracy_m=10.};locale=Some "fr-FR";timezone=Some "UTC"}});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Clear_emulation});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Block_requests ["ads.example.com"]});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Unblock_requests});
       (* Known-unavailable raw drag is refused before the runner. *)
       Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.document";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.capture";
      "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";"page.target_input";"page.viewport";"page.touch";"page.touch";
-     "page.close";"page.reload";"page.stop_loading";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"page.emulation";"page.emulation";"space.finish"]
+     "page.close";"page.reload";"page.stop_loading";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"page.emulation";"page.emulation";"page.block_requests";"page.block_requests";"space.finish"]
     (List.rev_map fst !scripts);
   List.iter (fun (step, script) ->
     let file = Filename.concat directory (step ^ ".mjs") in
@@ -1476,6 +1528,10 @@ let test_the_scripts_parse_as_modules () =
       check bool "with no touch emulation" false (contains script "setTouchEmulationEnabled")
     | "tabs.list" ->
       check bool "the tab list asks the browser for each tab's window" true (contains script "Browser.getWindowForTarget")
+    | "page.block_requests" ->
+      check bool "a block is a URLPattern on the Page's CDP session" true
+        (contains script "Network.setBlockedURLs" && contains script "urlPatterns" && contains script ":*/*");
+      check bool "with no glob that also matches a URL carrying the host in its query" false (contains script "urls:")
     | _ -> ())
     !scripts
 
@@ -1546,6 +1602,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.downloads" -> answered (obj ["since",`Null;"rows",`List []])
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.emulation" -> answered (obj ["applied",`List [str "locale"];"before",`Null;"observed",`Null])
+    | "page.block_requests" -> answered (obj ["blocked",`List [str "ads.example.com"]])
     | "page.target" -> answered resolved
     | "page.pointer" | "page.keyboard" | "page.viewport" | "page.touch" -> input_answer ()
     | "page.input" -> dom_answer (obj ["action",str "fill"])
@@ -1591,7 +1648,8 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Page_management -> Page_act (Action.Control (Action.Adopt_tab {tab_id=2;label=None}))
     | Download_listing -> Page_downloads {tab_id=1}
     | File_upload -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Upload {target=Action.File_input "#file";paths=[upload_file]}})
-    | Environment_emulation -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}})) in
+    | Environment_emulation -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}})
+    | Request_blocking -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Block_requests ["ads.example.com"]})) in
   List.iter (fun capability ->
     let name = Lane.live_capability_to_wire capability in
     let asked = verb_asking_for capability in
@@ -4135,6 +4193,7 @@ let () =
       test_case "every answer carries the input state" `Quick test_every_answer_carries_the_input_state;
       test_case "an ego viewport is a CDP override on its Page" `Quick test_viewport_is_a_cdp_override_on_the_page;
       test_case "ego location, locale and time zone are CDP overrides on its Page" `Quick test_emulation_is_a_cdp_override_on_the_page;
+      test_case "ego request blocking is a CDP setting on its Page" `Quick test_request_blocking_is_a_cdp_setting_on_the_page;
       test_case "a dialog-interrupted workflow stays uncertain until a new click settles, without replay" `Quick test_dialog_interrupted_workflow_stays_uncertain_until_a_new_click_settles;
       test_case "native workflows retain input ownership after a lost result" `Quick test_native_workflow_pointer_ownership;
       test_case "a workflow that never held input keeps the previous readiness" `Quick test_a_workflow_that_never_held_input_keeps_the_previous_readiness;

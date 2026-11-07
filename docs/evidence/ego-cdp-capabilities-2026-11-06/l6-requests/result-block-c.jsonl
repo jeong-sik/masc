@@ -1,0 +1,18 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"space","at":"2026-11-06T12:52:04.474Z","value":44}
+{"step":"goto","at":"2026-11-06T12:52:04.567Z","value":{}}
+{"step":"enable","at":"2026-11-06T12:52:04.569Z","value":{}}
+{"step":"block","at":"2026-11-06T12:52:04.570Z","value":{}}
+{"step":"drain","at":"2026-11-06T12:52:04.571Z","value":0}
+{"step":"j.frame","at":"2026-11-06T12:52:04.629Z","value":"loaded"}
+{"step":"j.frameReachable","at":"2026-11-06T12:52:04.649Z","value":"ok"}
+{"step":"k.image","at":"2026-11-06T12:52:04.650Z","value":"error"}
+{"step":"jk.why","at":"2026-11-06T12:52:04.651Z","value":[{"url":"http://blocked.localhost:18773/x.txt?image","type":"Image","errorText":"","blockedReason":"inspector"}]}
+{"step":"l.assign","at":"2026-11-06T12:52:04.652Z","value":true}
+{"step":"l.wait","at":"2026-11-06T12:52:05.654Z","value":true}
+{"step":"l.where","at":"2026-11-06T12:52:05.657Z","value":{"url":"http://blocked.localhost:18773/x.txt?assigned","text":"hello\n"}}
+{"step":"l.why","at":"2026-11-06T12:52:05.658Z","value":[{"url":"http://blocked.localhost:18773/favicon.ico","type":"Other","errorText":"","blockedReason":"inspector"}]}
+{"step":"back","at":"2026-11-06T12:52:05.735Z","value":{}}
+{"step":"clear","at":"2026-11-06T12:52:05.736Z","value":{}}
+{"step":"disable","at":"2026-11-06T12:52:05.737Z","value":{}}
+{"step":"finish","at":"2026-11-06T12:52:05.741Z","value":{"spaceId":44,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1"],"preservedUnmanagedCount":0}}

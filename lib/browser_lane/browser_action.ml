@@ -8,6 +8,8 @@ type interaction =
   | Upload of { target : upload_target; paths : string list }
   | Set_emulation of emulation
   | Clear_emulation
+  | Block_requests of string list
+  | Unblock_requests
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload | Stop_loading | Close_tab
 type control_wait = { interval_ms : float option; timeout_ms : float option }
@@ -89,6 +91,22 @@ let parse_emulation fields =
   if geolocation = None && locale = None && timezone = None
   then Error "set_emulation needs a location, a locale or a timezone"
   else Ok {geolocation; locale; timezone}
+(* A blocked host is compared for equality with the request URL's host,
+   which is lowercase, so only a lowercase host name or IPv4 address can ever
+   match. A host of any other shape is refused rather than sent to match
+   nothing. *)
+let is_host text =
+  List.for_all (fun label -> label <> ""
+      && String.for_all (fun c -> (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c = '-') label)
+    (String.split_on_char '.' text)
+let parse_hosts fields = match List.assoc_opt "hosts" fields with
+  | None -> Error "block_requests needs hosts"
+  | Some value ->
+    let* hosts = string_list "hosts" value in
+    if hosts = [] then Error "block_requests needs at least one host"
+    else match List.find_opt (fun host -> not (is_host host)) hosts with
+      | Some host -> Error ("hosts must be lowercase host names or IPv4 addresses such as ads.example.com, not " ^ host)
+      | None -> Ok hosts
 let control_wait_of_json = function
   | `Assoc fields when List.for_all (fun (key,_) -> List.mem key ["interval";"timeout"]) fields
       && List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) ->
@@ -173,6 +191,8 @@ let parse = function
        let* emulation = parse_emulation fields in
        on_tab ["latitude";"longitude";"accuracyMeters";"locale";"timezone"] (Set_emulation emulation)
      | "clear_emulation" -> on_tab [] Clear_emulation
+     | "block_requests" -> let* hosts = parse_hosts fields in on_tab ["hosts"] (Block_requests hosts)
+     | "unblock_requests" -> on_tab [] Unblock_requests
      | "dismiss_dialog" -> on_tab [] Dismiss_dialog
      | "back" -> on_tab [] Back | "forward" -> on_tab [] Forward
      | "stop_loading" -> on_tab [] Stop_loading
@@ -200,6 +220,8 @@ let to_json = function
       | Accept_dialog text -> "accept_dialog", Option.to_list (Option.map (fun s -> "text",`String s) text)
       | Dismiss_dialog -> "dismiss_dialog", []
       | Clear_emulation -> "clear_emulation", []
+      | Block_requests hosts -> "block_requests", ["hosts",`List (List.map (fun host -> `String host) hosts)]
+      | Unblock_requests -> "unblock_requests", []
       | Set_emulation {geolocation;locale;timezone} ->
         "set_emulation",
         (match geolocation with

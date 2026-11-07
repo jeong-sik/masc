@@ -195,6 +195,15 @@ let test_list_windows_table () =
   List.iter (fun (label,backend) -> check bool (label ^ " does not") false (reaches backend))
     ["Safari",Cap.Safari_unavailable]
 
+let test_intercept_network_table () =
+  let invocation backend = match Cap.support backend Cap.Intercept_network with
+    | Cap.Available invocation | Cap.Conditional {invocation; _} -> Some (invocation.Cap.tool, invocation.Cap.action)
+    | Cap.Unsupported _ -> None in
+  check bool "ego blocks requests through BrowserAct" true
+    (invocation (Cap.Connected Lane.Ego_task_space) = Some (Cap.Act, Some "block_requests"));
+  List.iter (fun (label,backend) -> check bool (label ^ " does not") true (invocation backend = None))
+    ["Safari",Cap.Safari_unavailable]
+
 (* The catalog claims on an Ego connection only what its peer does
    (Browser_lane.live_transport_serves Ego_task_space). Page operations retain
    explicit conditions; the peer tests exercise their actual admission. *)
@@ -211,10 +220,10 @@ let test_ego_table () =
    | Cap.Available _|Cap.Conditional _|Cap.Unsupported _ -> fail "Ego HTML5 drop must use the selector-to-selector drag_to");
   let reachable = List.filter (fun operation -> match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
-  check (list string) "reads, capture, the tab list and its windows, its own tabs, their history, input, touch, dialogs, uploads and downloads on them, their viewport size and environment, and the space handed to the operator and back"
+  check (list string) "reads, capture, the tab list and its windows, its own tabs, their history, input, touch, dialogs, uploads and downloads on them, their viewport size, environment and blocked hosts, and the space handed to the operator and back"
     ["list_tabs";"open_tab";"close_tab";"activate_tab";"list_windows";"navigate";"follow_link";"back";"forward";"reload";"stop_loading";"read_text";"read_html";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"native_workflow";"click_snapshot_target";"fill_snapshot_target";
      "hover_snapshot_target";"double_click_snapshot_target";"click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"html5_drop";"scroll_page";"scroll_at";
-     "fill";"type_text";"press_key";"key_chord";"select_option";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads";"resize_viewport";"touch";"emulate_environment"]
+     "fill";"type_text";"press_key";"key_chord";"select_option";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads";"resize_viewport";"touch";"emulate_environment";"intercept_network"]
     (List.map Cap.operation_name reachable);
   List.iter (fun operation -> match Cap.support backend operation with
     | Cap.Conditional {constraints=_::_;_} -> ()
@@ -293,6 +302,7 @@ let () = run "task-aware browser choice" ["scenarios",[
   test_case "touch is claimed only where a touch pointer is sent" `Quick test_touch_table;
   test_case "select_option is claimed where the shared script runs" `Quick test_select_option_table;
   test_case "window listing is claimed only where tabs name their window" `Quick test_list_windows_table;
+  test_case "request blocking is claimed only on ego" `Quick test_intercept_network_table;
   test_case "an ego connection is claimed only for what its peer does" `Quick test_ego_table;
   test_case "native loading recovery is exposed only by Ego" `Quick test_loading_recovery_table;
   test_case "the ego snapshot is claimed by the ego connection alone" `Quick test_snapshot_table;

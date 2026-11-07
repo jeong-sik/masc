@@ -19,6 +19,14 @@ type interaction =
   | Upload of { target : upload_target; paths : string list }
   | Set_emulation of emulation
   | Clear_emulation
+  | Block_requests of string list
+      (** Exact lowercase host names or IPv4 addresses, at least one. On an
+          ego connection the Page's CDP session blocks its own and its
+          same-origin frames' subresource requests to them; navigations and
+          cross-site frames are not blocked. The block adds to the Page's
+          earlier ones and ends with the ego SDK process. *)
+  | Unblock_requests
+      (** Lifts every block on the tab. *)
   | Accept_dialog of string option | Dismiss_dialog
   | Back | Forward | Reload
   | Stop_loading

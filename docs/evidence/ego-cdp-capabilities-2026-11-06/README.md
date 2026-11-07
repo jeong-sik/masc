@@ -63,3 +63,6 @@ CDP 로 바꾼 설정은 바꾼 SDK 프로세스가 끝나면 모두 사라졌�
 - L1 read mode html: [l1-read-html/](l1-read-html/README.md)
 - L2 화면 크기: [l2-viewport/](l2-viewport/README.md)
 - L3 위치·언어·시간대: [l3-environment/](l3-environment/README.md)
+- L4 터치: [l4-touch/](l4-touch/README.md)
+- L5 창: [l5-windows/](l5-windows/README.md)
+- L6 요청 차단: [l6-requests/](l6-requests/README.md)

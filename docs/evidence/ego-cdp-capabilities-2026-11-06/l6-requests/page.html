@@ -1,0 +1,26 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>masc L6 request blocking probe</title></head>
+<body>
+<script>
+// A no-cors fetch succeeds with an opaque answer when the request is sent and
+// fails with a TypeError when the browser blocks it before sending.
+window.probeFetch = async (url) => {
+  try { await fetch(url, { mode: 'no-cors', cache: 'no-store' }); return 'ok'; }
+  catch (error) { return 'failed: ' + error.message; }
+};
+window.addFrame = (src) => new Promise((resolve) => {
+  const frame = document.createElement('iframe');
+  frame.src = src;
+  frame.onload = () => resolve('loaded');
+  document.body.appendChild(frame);
+  setTimeout(() => resolve('timeout'), 3000);
+});
+window.frameFetch = (index, url) => new Promise((resolve) => {
+  const id = String(Math.random());
+  const on = (event) => { if (event.data && event.data.id === id) { removeEventListener('message', on); resolve(event.data.result); } };
+  addEventListener('message', on);
+  document.querySelectorAll('iframe')[index].contentWindow.postMessage({ id, url }, '*');
+  setTimeout(() => resolve('timeout'), 3000);
+});
+</script>
+</body></html>

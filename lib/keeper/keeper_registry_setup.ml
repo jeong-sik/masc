@@ -551,6 +551,7 @@ let register_with_state_result
     ; last_error = None
     ; last_failure_reason = initial_failure_reason
     ; last_failure_at = None
+    ; failing_since = None
     ; turn_consecutive_failures = initial_turn_failure_streak
     ; turn_attempt_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
@@ -859,6 +860,7 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; last_error = None
     ; last_failure_reason = initial_failure_reason
     ; last_failure_at = None
+    ; failing_since = None
     ; turn_consecutive_failures = initial_turn_failure_streak
     ; turn_attempt_state = Atomic.make None
     ; current_turn_switch = Atomic.make None

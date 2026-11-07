@@ -813,6 +813,9 @@ type keeper_runtime = {
   (** Historical receipt operator disposition: [Ok (Some (kind, reason))]
       when present and typed; [Ok None] when null or absent; [Error] when an unmapped
       or broken wire pair was received. *)
+  kr_failing_since : float option;
+  (** If currently failing, when this continuous failing spell began (Unix seconds).
+      [None] when healthy, or when unrecorded. *)
 }
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.

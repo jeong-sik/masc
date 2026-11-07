@@ -1,30 +1,82 @@
-type upgrade = Gluten.impl -> unit
+type upgrade =
+  { switch_protocols : Httpun.Headers.t -> (unit -> unit) -> unit
+  ; drive : Gluten.impl -> unit
+  }
 
 type acceptance = Transport_metrics.response_write_acceptance =
   | Accepted_by_writer
   | Rejected_by_writer
 
-(* One constructor per transport that carries requests. RFC-0512 S3 adds
-   [Http2]; every function below gains one arm then. *)
+(* One constructor per transport that carries requests. *)
 type t =
   | Http1 of
       { reqd : Httpun.Reqd.t
       ; upgrade : upgrade option
       }
+  | Http2 of
+      { reqd : H2.Reqd.t
+      ; request : Httpun.Request.t
+      ; ledger : Http_h2_response_ledger.request
+      ; stream_sw : Eio.Switch.t
+      }
 
 let of_gluten (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) =
+  let reqd = gluten_reqd.Gluten.Reqd.reqd in
   Http1
-    { reqd = gluten_reqd.Gluten.Reqd.reqd
-    ; upgrade = Some gluten_reqd.Gluten.Reqd.upgrade
+    { reqd
+    ; upgrade =
+        Some
+          { switch_protocols = Httpun.Reqd.respond_with_upgrade reqd
+          ; drive = gluten_reqd.Gluten.Reqd.upgrade
+          }
     }
 ;;
 
 let of_httpun reqd = Http1 { reqd; upgrade = None }
-let request (Http1 { reqd; _ }) = Httpun.Reqd.request reqd
-let upgrade (Http1 { upgrade; _ }) = upgrade
 
-(* The [Failure] payloads are the only way httpun and its Faraday writer
-   report these two states, so matching their text (warning 52) is the
+let http2_version = { Httpun.Version.major = 2; minor = 0 }
+
+(* The method and target are the shared [Httpun_types] values; the pseudo
+   fields h2 keeps in the header block stay there. A request without [host]
+   gets one from [:authority], so handlers that read the host (canonical-host
+   redirect, OAuth metadata) see the same field on both transports. *)
+let request_of_h2 (h2_request : H2.Request.t) =
+  let fields = H2.Headers.to_list h2_request.H2.Request.headers in
+  let fields =
+    match
+      H2.Headers.get h2_request.headers "host", H2.Headers.get h2_request.headers ":authority"
+    with
+    | None, Some authority -> fields @ [ "host", authority ]
+    | Some _, (Some _ | None) | None, None -> fields
+  in
+  Httpun.Request.create
+    ~version:http2_version
+    ~headers:(Httpun.Headers.of_list fields)
+    h2_request.meth
+    h2_request.target
+;;
+
+let of_h2 ~stream_sw ~ledger reqd =
+  Http2 { reqd; request = request_of_h2 (H2.Reqd.request reqd); ledger; stream_sw }
+;;
+
+let request = function
+  | Http1 { reqd; _ } -> Httpun.Reqd.request reqd
+  | Http2 { request; _ } -> request
+;;
+
+let protocol = function
+  | Http1 _ -> Transport_metrics.H1
+  | Http2 _ -> Transport_metrics.H2
+;;
+
+let upgrade = function
+  | Http1 { upgrade; _ } -> upgrade
+  | Http2 _ -> None
+;;
+
+(* The [Failure] payloads are the only way httpun, h2 and their Faraday
+   writers report these states, so matching their text (warning 52) is the
    dependency, kept in this one place. If a library version rewords them, a
    late write logs at warn instead of debug; nothing else changes. *)
 [@@@warning "-52"]
@@ -36,6 +88,10 @@ module Late_response = struct
       Some msg
     | Failure msg when String.equal msg "cannot write to closed writer" ->
       Some "cannot write to closed writer"
+    | Failure msg when String.starts_with msg ~prefix:"h2.Reqd.respond_with_*: response already" ->
+      Some msg
+    | Failure msg when String.equal msg "h2.Reqd.request_body: Stream already closed" ->
+      Some msg
     | _ -> None
   ;;
 end
@@ -54,14 +110,86 @@ let log_rejected_write exn =
     else Log.Http.warn "[http] response failed: %s\n%s" summary backtrace
 ;;
 
-let try_respond_with_string (Http1 { reqd; _ }) response body =
+(* RFC 9113 §8.2.2: connection-specific fields do not exist in HTTP/2, and
+   field names are lowercase on the wire. *)
+let connection_specific_fields =
+  [ "connection"; "keep-alive"; "proxy-connection"; "transfer-encoding"; "upgrade" ]
+;;
+
+let h2_headers_of_fields fields =
+  List.filter_map
+    (fun (name, value) ->
+       let name = String.lowercase_ascii name in
+       if List.mem name connection_specific_fields then None else Some (name, value))
+    fields
+  |> H2.Headers.of_list
+;;
+
+let h2_response_of (response : Httpun.Response.t) =
+  H2.Response.create
+    ~headers:(h2_headers_of_fields (Httpun.Headers.to_list response.headers))
+    (H2.Status.of_code (Httpun.Status.to_code response.status))
+;;
+
+(* The fields that described the refused payload go; the rest (CORS, vary,
+   rate-limit fields) still describe this answer. *)
+let payload_description_fields =
+  [ "content-encoding"; "content-length"; "content-type"; "etag"; "last-modified"; "cache-control" ]
+;;
+
+let h2_refuse_for_capacity reqd (response : Httpun.Response.t) =
+  let retained =
+    List.filter
+      (fun (name, _) -> not (List.mem (String.lowercase_ascii name) payload_description_fields))
+      (Httpun.Headers.to_list response.headers)
+  in
+  let headers =
+    h2_headers_of_fields (("content-length", "0") :: ("cache-control", "no-store") :: retained)
+  in
+  let writer =
+    H2.Reqd.respond_with_streaming
+      reqd
+      ~flush_headers_immediately:true
+      (H2.Response.create ~headers `Service_unavailable)
+  in
+  Http_h2_stream.close_after_flush writer
+;;
+
+let h2_respond_with_string reqd ledger response body =
+  (* A request whose body nobody read must still release its stream. *)
+  H2.Body.Reader.discard (H2.Reqd.request_body reqd);
+  match Http_h2_response_ledger.reserve ledger ~bytes:(String.length body) with
+  | Error (Capacity_exhausted | Request_closed) ->
+    h2_refuse_for_capacity reqd response;
+    Rejected_by_writer
+  | Ok lease ->
+    (try
+       let writer =
+         H2.Reqd.respond_with_streaming
+           reqd
+           ~flush_headers_immediately:true
+           (h2_response_of response)
+       in
+       Http_h2_response_ledger.write_reserved lease writer body;
+       Http_h2_stream.close_after_flush writer;
+       Accepted_by_writer
+     with
+     | exn ->
+       Http_h2_response_ledger.release lease;
+       raise exn)
+;;
+
+let try_respond_with_string t response body =
   Cancel_safe.protect
     ~on_exn:(fun exn ->
       log_rejected_write exn;
       Rejected_by_writer)
     (fun () ->
-       Httpun.Reqd.respond_with_string reqd response body;
-       Accepted_by_writer)
+       match t with
+       | Http1 { reqd; _ } ->
+         Httpun.Reqd.respond_with_string reqd response body;
+         Accepted_by_writer
+       | Http2 { reqd; ledger; _ } -> h2_respond_with_string reqd ledger response body)
 ;;
 
 let respond_with_string t response body =
@@ -70,30 +198,180 @@ let respond_with_string t response body =
 ;;
 
 module Body_writer = struct
-  type t = H1 of Httpun.Body.Writer.t
+  type t =
+    | H1 of Httpun.Body.Writer.t
+    | H2 of
+        { reqd : H2.Reqd.t
+        ; writer : H2.Body.Writer.t
+        ; ledger : Http_h2_response_ledger.request
+        }
 
-  let write_string (H1 writer) s = Httpun.Body.Writer.write_string writer s
-  let flush (H1 writer) f = Httpun.Body.Writer.flush writer f
-  let close (H1 writer) = Httpun.Body.Writer.close writer
-  let is_closed (H1 writer) = Httpun.Body.Writer.is_closed writer
-end
-
-let respond_with_streaming ?flush_headers_immediately (Http1 { reqd; _ }) response =
-  Body_writer.H1 (Httpun.Reqd.respond_with_streaming ?flush_headers_immediately reqd response)
-;;
-
-module Body_reader = struct
-  type t = H1 of Httpun.Body.Reader.t
-
-  let schedule_read (H1 reader) ~on_eof ~on_read =
-    Httpun.Body.Reader.schedule_read reader ~on_eof ~on_read
+  (* Exhausted capacity resets this stream, as the ledger's own drain did
+     (RFC-0493 §3): the client sees a cut, never a frame reported as sent. *)
+  let write_string t s =
+    match t with
+    | H1 writer -> Httpun.Body.Writer.write_string writer s
+    | H2 { reqd; writer; ledger } ->
+      (match Http_h2_response_ledger.reserve ledger ~bytes:(String.length s) with
+       | Ok lease -> Http_h2_response_ledger.write_reserved lease writer s
+       | Error refusal ->
+         let exn =
+           match refusal with
+           | Capacity_exhausted -> Http_h2_response_ledger.Response_capacity_exhausted
+           | Request_closed -> Http_h2_response_ledger.Response_writer_closed
+         in
+         H2.Reqd.report_exn reqd exn;
+         H2.Body.Writer.close writer)
   ;;
 
-  let close (H1 reader) = Httpun.Body.Reader.close reader
+  let flush t f =
+    match t with
+    | H1 writer -> Httpun.Body.Writer.flush writer f
+    | H2 { writer; _ } -> H2.Body.Writer.flush writer f
+  ;;
+
+  let close = function
+    | H1 writer -> Httpun.Body.Writer.close writer
+    | H2 { writer; _ } -> Http_h2_stream.close_after_flush writer
+  ;;
+
+  let is_closed = function
+    | H1 writer -> Httpun.Body.Writer.is_closed writer
+    | H2 { writer; _ } -> H2.Body.Writer.is_closed writer
+  ;;
 end
 
-let request_body (Http1 { reqd; _ }) = Body_reader.H1 (Httpun.Reqd.request_body reqd)
+let respond_with_streaming ?flush_headers_immediately t response =
+  match t with
+  | Http1 { reqd; _ } ->
+    Body_writer.H1 (Httpun.Reqd.respond_with_streaming ?flush_headers_immediately reqd response)
+  | Http2 { reqd; ledger; _ } ->
+    let writer =
+      H2.Reqd.respond_with_streaming reqd ?flush_headers_immediately (h2_response_of response)
+    in
+    Body_writer.H2 { reqd; writer; ledger }
+;;
 
-let respond_with_upgrade (Http1 { reqd; _ }) headers k =
-  Httpun.Reqd.respond_with_upgrade reqd headers k
+type body_read_error =
+  | Too_large of int
+  | Malformed_length
+  | Internal of exn
+
+let deliver_body ~on_body ~on_error body =
+  try on_body body with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn -> on_error (Internal exn)
+;;
+
+let body_buffer ~declared ~max_bytes =
+  let initial_capacity =
+    match declared with
+    | Some len when len > 0 && len < max_bytes -> len
+    | Some _ | None -> 1024
+  in
+  Http_body_buffer.create initial_capacity
+;;
+
+let read_body_h1 reqd ~max_bytes ~on_body ~on_error =
+  let request = Httpun.Reqd.request reqd in
+  let declared =
+    match Httpun.Headers.get request.headers "content-length" with
+    | Some v ->
+      (match int_of_string_opt v with
+       | Some n when n > 0 -> Some n
+       | Some _ | None -> None)
+    | None -> None
+  in
+  let body = Httpun.Reqd.request_body reqd in
+  let stopped = ref false in
+  let stop () =
+    if not !stopped
+    then (
+      stopped := true;
+      try Httpun.Body.Reader.close body with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn -> Log.Misc.error "[http] body close failed: %s" (Printexc.to_string exn))
+  in
+  match declared with
+  | Some len when len > max_bytes ->
+    stop ();
+    on_error (Too_large max_bytes)
+  | Some _ | None ->
+    let buf = body_buffer ~declared ~max_bytes in
+    let rec read_loop () =
+      Httpun.Body.Reader.schedule_read
+        body
+        ~on_eof:(fun () -> deliver_body ~on_body ~on_error (Http_body_buffer.contents buf))
+        ~on_read:(fun buffer ~off ~len ->
+          if !stopped
+          then ()
+          else if Http_body_buffer.length buf + len > max_bytes
+          then (
+            stop ();
+            on_error (Too_large max_bytes))
+          else (
+            Http_body_buffer.add_bigstring buf buffer ~off ~len;
+            read_loop ()))
+    in
+    read_loop ()
+;;
+
+(* RFC-0350: body callbacks arrive on the connection reader, so the delivery
+   and every refusal are deferred to the stream switch through
+   [Http_h2_stream.dispatch]; completion is checked again after the deferral
+   because the parser can observe a reset after EOF, before the request fiber
+   gets its turn. Aborted readers never reach [on_body]. *)
+let read_body_h2 reqd ~ledger ~stream_sw ~max_bytes ~on_body ~on_error =
+  let dispatch work =
+    Http_h2_response_ledger.with_current ledger (fun () ->
+      Http_h2_stream.dispatch ~sw:stream_sw reqd work)
+  in
+  let body = H2.Reqd.request_body reqd in
+  let reject error =
+    H2.Body.Reader.discard body;
+    dispatch (fun () -> on_error error)
+  in
+  match H2.Request.body_length (H2.Reqd.request reqd) with
+  | `Error `Bad_request -> reject Malformed_length
+  | `Fixed declared when Int64.compare declared (Int64.of_int max_bytes) > 0 ->
+    reject (Too_large max_bytes)
+  | (`Fixed _ | `Unknown) as length ->
+    let declared =
+      match length with
+      | `Fixed declared -> Some (Int64.to_int declared)
+      | `Unknown -> None
+    in
+    let buf = body_buffer ~declared ~max_bytes in
+    let rec read_loop () =
+      H2.Body.Reader.schedule_read
+        body
+        ~on_eof:(fun () ->
+          match H2.Body.Reader.completion body with
+          | Pending | Aborted -> ()
+          | Complete ->
+            dispatch (fun () ->
+              match H2.Body.Reader.completion body with
+              | Pending | Aborted -> ()
+              | Complete -> deliver_body ~on_body ~on_error (Http_body_buffer.contents buf)))
+        ~on_read:(fun bigstring ~off ~len ->
+          if Http_body_buffer.length buf + len > max_bytes
+          then reject (Too_large max_bytes)
+          else (
+            Http_body_buffer.add_bigstring buf bigstring ~off ~len;
+            read_loop ()))
+    in
+    read_loop ()
+;;
+
+let read_body t ~max_bytes ~on_body ~on_error =
+  match t with
+  | Http1 { reqd; _ } -> read_body_h1 reqd ~max_bytes ~on_body ~on_error
+  | Http2 { reqd; ledger; stream_sw; _ } ->
+    read_body_h2 reqd ~ledger ~stream_sw ~max_bytes ~on_body ~on_error
+;;
+
+let report_exn t exn =
+  match t with
+  | Http1 { reqd; _ } -> Httpun.Reqd.report_exn reqd exn
+  | Http2 { reqd; _ } -> H2.Reqd.report_exn reqd exn
 ;;

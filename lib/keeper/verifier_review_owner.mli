@@ -86,6 +86,12 @@ val load_for_destination :
 (** Strict load plus the original installation, package, tool and summary
     binding. A different destination is refused before reviewer dispatch. *)
 
+val check_retained : Lane_addon_tool_request_owner.retained -> (unit, string) result
+(** What a deploy preflight checks of one stored record without a
+    destination: its body decodes as an original, it is stored under that
+    original's attempt key, and it keeps the tool, request digest and summary
+    {!load_for_destination} requires. *)
+
 val next_attempt :
   store:store -> verification_id:string -> installation_id:string -> package_id:string ->
   (int, load_error) result

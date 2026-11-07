@@ -50,6 +50,13 @@ val inventory :
     original rejects the inventory; partial results are not a complete list.
     Neither function creates an original, authorizes dispatch or picks a retry. *)
 
+val check_retained : Lane_addon_tool_request_owner.retained -> (unit, string) result
+(** What a deploy preflight checks of one stored record: the strict check
+    {!inventory} applies to every record of the scope, against the record's
+    own installation and package. One record that fails it rejects the
+    inventory, so a hard cut of the original or summary is refused before the
+    server starts. *)
+
 val inventory_for_goal :
   store:Lane_addon_store.t -> installation_id:string -> package_id:string ->
   goal_id:string -> (retained list, error) result

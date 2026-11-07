@@ -894,14 +894,45 @@ let scan_on_refusal = function
   | Lane_addon_scan store -> L.on_refusal store
 ;;
 
+(* The consumers that keep tool request originals, told apart by the scope
+   their records are stored under. Each check is the decoding that consumer's
+   own reader applies, so a hard cut of its records stops the install instead
+   of stopping that consumer on its first pass after the deploy (#49587). *)
+type tool_request_consumer =
+  | Librarian
+  | Workspace_curator
+  | Verifier_review
+  | Goal_proof_review
+
+let tool_request_consumer scope =
+  match Masc.Keeper_librarian_store_preflight.purpose scope with
+  | Some _ -> Some Librarian
+  | None ->
+    List.find_map
+      (fun (owned, consumer) -> if String.equal scope owned then Some consumer else None)
+      [ Masc.Workspace_memory_execution_capture.scope, Workspace_curator
+      ; Masc.Verifier_review_owner.scope, Verifier_review
+      ; Masc.Goal_verifier_worker.scope, Goal_proof_review
+      ]
+;;
+
+let validate_tool_request () =
+  let librarian = Masc.Keeper_librarian_store_preflight.validator () in
+  fun ~read ~read_scope ~read_body (record : Masc.Lane_addon_tool_request_owner.retained) ->
+    match tool_request_consumer record.scope with
+    | Some Librarian -> librarian ~read ~read_scope ~read_body record
+    | Some Workspace_curator -> Masc.Workspace_memory_execution_capture.check_retained record
+    | Some Verifier_review -> Masc.Verifier_review_owner.check_retained record
+    | Some Goal_proof_review -> Masc.Goal_verifier_worker.check_retained record
+    (* Candle appraisal originals, which Candle reads by ID only, and scopes
+       no consumer of this build writes still pass here (#49587). *)
+    | None -> Ok ()
+;;
+
 let run_scan ~base_path = function
   | Durable_scan (_, scan) -> Durable_outcome (D.run scan ~base_path)
   | Lane_addon_scan store ->
-    Lane_addon_outcome
-      (L.scan
-         ~validate_tool_request:Masc.Keeper_librarian_store_preflight.validator
-         store
-         ~base_path)
+    Lane_addon_outcome (L.scan ~validate_tool_request store ~base_path)
 ;;
 
 (* A scan whose process ended without an answer failed: the store was not read. *)
@@ -923,7 +954,7 @@ let timed_scan ~base_path job =
 (* Every store [Keeper_durable_store.preflight_scan] names: a deploy is where
    the operator watches, so any file or row this build cannot read stops it.
    The Lane Add-on records follow, with current consumer payload checks for
-   Librarian originals. Refusals name the file and its store-specific fresh
+   the originals of each consumer [tool_request_consumer] names. Refusals name the file and its store-specific fresh
    state requirements; a coupled original is not repaired by moving one file. *)
 let validate_stores ~jobs base_path =
   let print_store (name, on_refusal, result) =

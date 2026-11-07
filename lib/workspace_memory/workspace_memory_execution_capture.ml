@@ -241,12 +241,19 @@ let summary t =
       let prepared_state = Workspace_memory_revision.(briefing_sha256 (of_briefing (Brief.prepared_state batch))) in
       Ok (Summary.Briefing {selected_count=Brief.selected_count batch; prepared_state}) in
   Ok {Summary.predecessor=t.predecessor; workspace=t.workspace; batch}
-let restore_record ~workspace (retained : Owner.retained) =
+let capture_fields (retained : Owner.retained) =
   let* f = fields ["schema";"request_id";"predecessor";"workspace";"destination";"prompt";"work";
                    "rendered_prompt_sha256";"output_schema"] retained.request in
-  let* () = match List.assoc "schema" f with
-    | `String schema when String.equal schema capture_schema -> Ok ()
-    | _ -> Error "unknown Curator execution capture schema" in
+  match List.assoc "schema" f with
+  | `String schema when String.equal schema capture_schema -> Ok f
+  | _ -> Error "unknown Curator execution capture schema"
+let check_retained (retained : Owner.retained) =
+  let* _ = Request_id.of_string retained.request_id in
+  let* _ = Summary.of_json retained.summary in
+  let* _ = capture_fields retained in
+  Ok ()
+let restore_record ~workspace (retained : Owner.retained) =
+  let* f = capture_fields retained in
   let* id_text = text (List.assoc "request_id" f) in
   let* id = Request_id.of_string id_text in
   let* predecessor = match List.assoc "predecessor" f with

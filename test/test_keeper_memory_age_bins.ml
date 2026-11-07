@@ -29,7 +29,6 @@ let test_classify () =
 let test_of_first_seen () =
   let hour = Masc_time_constants.hour in
   let day = Masc_time_constants.day in
-  let week = Masc_time_constants.days_to_seconds 7 in
   let empty = Age_bins.of_first_seen ~now [] in
   Alcotest.(check int) "empty under_hour" 0 empty.under_hour;
   Alcotest.(check int) "empty under_day" 0 empty.under_day;

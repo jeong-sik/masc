@@ -1,24 +1,24 @@
 ---
 title: Browser Lane Guide
-description: Connect Firefox or Zen as an Addon, select validation and model hooks, and use the Browser Lane TUI.
+description: Connect Firefox, Zen or ego lite as an Addon, select validation hooks, and use the Browser Lane TUI.
 ---
 
 Each browser source is its own Lane Addon package with its own worker:
-`browser-automation`, `browser-firefox`, `browser-ego` and `browser-external`.
+`browser-firefox`, `browser-ego` and `browser-external`.
 A worker runs only its source, so a failure of one source
-ends only that worker. Select the input/output validation hooks and model
-consumers per installation. Browser names and connection transports describe
+ends only that worker. Select the input/output validation hooks per
+installation. Browser names and connection transports describe
 capabilities; they are not separate installation systems.
 
-- **live** has three sources. `browser-external` serves an existing Firefox or
-  Zen through its WebExtension, or a Firefox you start with its own BiDi host.
-  `browser-firefox` starts a dedicated Firefox with its own BiDi peer.
-  `browser-ego` serves an ego lite task space. Existing extension tabs keep
-  their logins; the dedicated Firefox uses its own profile. Native hover and
-  drag require a compatible connection such as BiDi.
-- **automation** (`browser-automation`) uses the worker's OCaml WebDriver client
-  and geckodriver for an isolated Gecko session. The worker owns the driver,
-  browser, and private profile.
+All three sources serve live connections:
+
+- `browser-external` serves an existing Firefox or Zen through its
+  WebExtension, or a Firefox you start with its own BiDi host.
+- `browser-firefox` starts a dedicated Firefox with its own BiDi peer.
+- `browser-ego` serves an ego lite task space.
+
+Existing extension tabs keep their logins; the dedicated Firefox uses its own
+profile. Native hover and drag require a compatible connection such as BiDi.
 
 For an unbound request, automatic selection considers the available browsers
 and required actions. Keep the returned browser identity for tab/document work;
@@ -32,8 +32,8 @@ supports every action. Safari is not a backend in this package.
 `masc-native-addon-launcher` and `masc-browser-process-owner` beside masc, then
 runs `masc browser-lane-setup --mode addon` for the workspace. Every other
 `browser-lane-setup` mode does the same step for the sources the workspace
-runs: automation, firefox and ego when `runtime.toml` has their table or the
-run writes it, and external when a native host is installed. For each, it
+runs: firefox and ego when `runtime.toml` has their table or the run writes
+it, and external when a native host is installed. For each, it
 writes the package masc carries to
 `<base-path>/.masc/packages/browser-<source>/` and, when the workspace has no
 declaration of that source, saves `lane-addons/browser-<source>.toml` in the
@@ -41,17 +41,15 @@ active config root. An existing declaration is left as it is. Keep the install
 prefix on the server's PATH. `--no-browser-addon` (installer) and `--no-addon`
 (setup) leave the Addons out; without them no browser route works.
 
-To choose hooks or model outputs, add them to the declaration setup wrote;
-setup never rewrites an existing declaration. `locate` belongs to
-`browser-automation`:
+To choose hooks, add them to the declaration setup wrote; setup never rewrites
+an existing declaration:
 
 ```toml
-id = "browser-automation"
+id = "browser-ego"
 enabled = true
-run_id = "browser-automation"
-manifest_path = "/absolute/path/to/workspace/.masc/packages/browser-automation/lane.toml"
+run_id = "browser-ego"
+manifest_path = "/absolute/path/to/workspace/.masc/packages/browser-ego/lane.toml"
 tool_hooks = ["validate_input", "validate_output"]
-exact_outputs = ["locate"]
 
 [binding]
 sources = []
@@ -70,22 +68,11 @@ and browser `clientId` are separate identities.
 | `tool_hooks = ["validate_output"]` | Validate the final successful structured reply after artifact mediation |
 | `tool_hooks = ["validate_input", "validate_output"]` | Enable both tool checks |
 | `tool_hooks = []` | Disable the optional tool checks |
-| `exact_outputs = ["locate"]` in `browser-automation` | Select the Gecko scene-node model consumer |
-| `exact_outputs = []` | Disable that package's model consumer |
 
-Omitting either array uses that package default. These are named middleware
-and declared model outputs; arbitrary executable hooks are not loaded. With
-both arrays empty, caller authorization, worker incarnation, wire decoding,
-document/viewport binding, artifact ownership, and cleanup checks still apply.
-Non-model actions remain available where the backend supports them.
-
-Selecting an output does not configure a model provider. Configure existing
-model slots separately in `runtime.toml` under
-`runtime.addon_exact_lanes.browser-automation.locate`. The Lanes screen shows
-each declared output with the state of its table. Model availability and
-consumer inventory are separate observations. A missing or unavailable route
-uses the shared Exact Output waiting/cancellation policy; it does not authorize
-a different browser or input replay.
+Omitting `tool_hooks` uses that package default. These are named middleware;
+arbitrary executable hooks are not loaded. With `tool_hooks = []`, caller
+authorization, worker incarnation, wire decoding, document/viewport binding,
+artifact ownership, and cleanup checks still apply.
 
 Backend settings below are loaded from the resolved `runtime.toml` at server
 startup and captured when an installation attaches. They say how a source
@@ -146,44 +133,21 @@ UUID. Tab IDs belong to a connection and can overlap between browsers. A stale
 UUID is refused instead of selecting another browser. Reconnecting creates a new
 UUID, so discover and select it again.
 
-## Setup: automation
-
-To inspect or install the host browser binaries first, run `masc prerequisite-actions firefox` and `masc prerequisite-actions geckodriver`. Then `masc browser-lane-setup --mode automation` writes the `[browser.automation]` configuration for you. It names the
-`geckodriver` that `PATH` finds first, when it answers `--version` (`--geckodriver` names
-another; `--browser` writes `binary`), keeps values that are already there, and
-installs no host or extension. Or set the geckodriver executable in the resolved
-configuration directory's `runtime.toml` yourself, then restart MASC:
-
-```toml
-[browser.automation]
-geckodriver = "/absolute/path/to/geckodriver"
-# Optional: select an installed Firefox or Zen executable.
-# binary = "/path/to/Zen.app/Contents/MacOS/zen"
-```
-
-The attached worker starts geckodriver on a free loopback port and joins its
-owned resources on detach, so there is no driver to run or port to choose.
-`geckodriver` must be an absolute path. `binary` must be an absolute path and
-requires `geckodriver`. When omitted, geckodriver discovers the browser; set it
-explicitly to select Firefox or Zen. Changing it does not select a live
-connection. Automation opens headless by default.
-
 ## Keeper and MCP tools
 
 Keeper-facing names use CamelCase; the MCP registration names use `masc_browser_*`.
 
-| Keeper tool | MCP name | Source and behavior |
+| Keeper tool | MCP name | Behavior |
 | --- | --- | --- |
-| `BrowserTabs` | `masc_browser_tabs` | Both: list tabs and discover the live connection identity |
-| `BrowserRead` | `masc_browser_read` | Both: text, visible elements, scene or regions, or a viewport PNG. Document source (`mode = "html"`, explicit tab, `html: null` when the reply would pass 1 MiB): live extension or BiDi, and automation. Frames, dialogs and downloads: automation |
+| `BrowserTabs` | `masc_browser_tabs` | List tabs and discover the live connection identity |
+| `BrowserRead` | `masc_browser_read` | Text, visible elements, scene or regions, or a viewport PNG. Document source (`mode = "html"`, explicit tab, `html: null` when the reply would pass 1 MiB) |
 | `BrowserInteract` | `masc_browser_interact` | Click, fill, scroll and other input in one explicit tab; native hover/drag/keyboard and zoom depend on transport capabilities |
-| `BrowserSession` | `masc_browser_session` | Automation: open, close, or check the session |
-| `BrowserGoto` | `masc_browser_goto` | Automation: navigate to an HTTP(S) URL |
-| `BrowserAct` | `masc_browser_act` | Automation: tab, form and history actions; live BiDi: open_tab |
+| `BrowserSession` | `masc_browser_session` | Bind an observed ego Space to a shared Goal: `bind_goal`, `goal_status`, `unbind_goal` (experimental) |
+| `BrowserGoto` | `masc_browser_goto` | Navigate a tab to an HTTP(S) URL: a BiDi tab opened with `open_tab`, or an ego managed Page. The WebExtension does not navigate |
+| `BrowserAct` | `masc_browser_act` | BiDi: `open_tab`, `open_window`, and top-level `back`, `forward`, `reload`, `close_tab` on a tab it opened. Ego: `open_tab`, `close_tab`, `back`, `forward`, `reload` and task-space actions such as `hand_off` |
 
 After discovery, pass the observed `clientId` and `tabId` to live reads and
-interactions. A `clientId` is required when several live browsers are connected;
-omit it for automation.
+interactions. A `clientId` is required when several live browsers are connected.
 
 `BrowserRead` defaults to `mode="text"`, `format="text"`, and 50,000 Unicode code
 points; `maxChars` can rise to 100,000. Inspect `truncated` in the result.
@@ -198,8 +162,9 @@ a selector must match exactly one element. For `BrowserInteract`, pass
 `expectedUrl` from the last read to reject intervening navigation. Fill emits page
 events and does not itself press Enter or submit. Read or capture the page after
 an action, including an error, before deciding whether to retry.
-On BiDi and owned WebDriver, guarded semantic clicks use native pointer input.
-The WebExtension uses DOM click. Fill and native typing are distinct actions.
+On BiDi, guarded semantic clicks use native pointer input, and on ego the SDK's
+native click. The WebExtension uses DOM click. Fill and native typing are
+distinct actions.
 Check transport capabilities and read the page after input to verify the
 application effect.
 
@@ -207,35 +172,30 @@ application effect.
 
 Press `Ctrl-^` (Ctrl-Shift-6), use `:` → `go Browser Lane`, or press `B` from
 Connectors. The reader starts with **Automatic** selection. Press `b` to choose
-Automatic, a separate **Work browser**, or an observed connection with existing
-logins. Move with `j`/`k`, confirm with Enter, refresh the chooser with `r`, and
-return with Esc. Reads and captures keep the selected connection; a disconnected
-selection requires an explicit new choice.
+Automatic or an observed connection with existing logins. Move with `j`/`k`,
+confirm with Enter, refresh the chooser with `r`, and return with Esc. Reads and
+captures keep the selected connection; a disconnected selection requires an
+explicit new choice.
 
-To open a separate work session, press `o`, then `g` and enter a URL. To use an
-existing login, choose that connection with `b` and select one of its observed
-tabs. Press `A` to expose the advanced backend choices when a specific transport
-is needed. The `l`/`a` shortcuts are available only in advanced mode.
+To use an existing login, choose that connection with `b` and select one of its
+observed tabs. Press `A` to show transport limits and BiDi host diagnostics in
+the chooser.
 
 | Key | Action |
 | --- | --- |
-| `b` | Choose Automatic, Work browser, or an observed connection |
-| `A` | Open the chooser with advanced backend choices |
-| `l` / `a` | Advanced mode only: live / automation |
+| `b` | Choose Automatic or an observed connection |
+| `A` | Open the chooser with transport limits and BiDi host diagnostics |
 | `h` | Open the selected Keeper's browser observation history (`[`/`]` switches saved pages, `y` copies receipt/artifact ref) |
 | `[` / `]` | Previous / next tab and read its page |
 | `j` / `k`, arrows | Scroll page text |
 | Page Up / Page Down, Home | Page scroll / top |
 | `r` | Rediscover and refresh |
 | `Ctrl-O` | Preview the selected tab's PNG; any key returns |
-| `g` | Enter a URL for an owned work session; Enter navigates, Esc cancels |
-| `o` / `x` | Open a work session / close the selected owned work session |
 | `Ctrl-^` / Esc / Left | Hide the reader and return |
 
 PNG previews require terminal image support; otherwise the reader explains the
-limitation. A preview is not sent to a Keeper. TUI keys provide reading,
-capture and work-session navigation; use the tools above for other interactions.
-Coordinate use before closing a shared work session.
+limitation. A preview is not sent to a Keeper. TUI keys provide reading and
+capture; use the tools above for other interactions.
 
 Hiding preserves the selected tab, text scroll, and unsent chat draft in this TUI
 session. Entering Browser ends continuous voice mode and discards pending voice

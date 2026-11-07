@@ -112,6 +112,7 @@ let printable_ascii_range text start_offset end_offset =
 let scalar_cell_width scalar =
   let code = Uchar.to_int scalar in
   if code >= 0x20 && code <= 0x7E then 1
+  else if (code >= 0xAC00 && code <= 0xD7A3) || (code >= 0x4E00 && code <= 0x9FFF) then 2
   else if Uucp.Func.is_regional_indicator scalar then 1
   else if Uucp.Emoji.is_emoji_presentation scalar then 2
   else Int.max 0 (Uucp.Break.tty_width_hint scalar)

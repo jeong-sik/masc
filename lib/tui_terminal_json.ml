@@ -5,21 +5,23 @@ type context = Outside_string | In_string
    sanitizer's supplementary-plane escapes can therefore be written as JSON
    surrogate-pair escapes without confusing them with input literals. *)
 let json_supplementary_escapes text =
-  let out = Buffer.create (String.length text) in
-  let length = String.length text in
-  let rec loop i =
-    if i < length then
-      if text.[i] = '\\' && i + 10 <= length && text.[i + 1] = 'U' then
-        let hex = String.sub text (i + 2) 8 in
-        match int_of_string_opt ("0x" ^ hex) with
-        | Some code when code > 0xffff && code <= 0x10ffff ->
-          let value = code - 0x10000 in
-          Buffer.add_string out (Printf.sprintf "\\u%04X\\u%04X"
-            (0xd800 + (value lsr 10)) (0xdc00 + (value land 0x3ff)));
-          loop (i + 10)
-        | Some _ | None -> Buffer.add_char out text.[i]; loop (i + 1)
-      else (Buffer.add_char out text.[i]; loop (i + 1)) in
-  loop 0; Buffer.contents out
+  if not (String.contains text '\\') then text
+  else
+    let out = Buffer.create (String.length text) in
+    let length = String.length text in
+    let rec loop i =
+      if i < length then
+        if text.[i] = '\\' && i + 10 <= length && text.[i + 1] = 'U' then
+          let hex = String.sub text (i + 2) 8 in
+          match int_of_string_opt ("0x" ^ hex) with
+          | Some code when code > 0xffff && code <= 0x10ffff ->
+            let value = code - 0x10000 in
+            Buffer.add_string out (Printf.sprintf "\\u%04X\\u%04X"
+              (0xd800 + (value lsr 10)) (0xdc00 + (value land 0x3ff)));
+            loop (i + 10)
+          | Some _ | None -> Buffer.add_char out text.[i]; loop (i + 1)
+        else (Buffer.add_char out text.[i]; loop (i + 1)) in
+    loop 0; Buffer.contents out
 
 let sanitize_canonical_preview text =
   let out = Buffer.create (String.length text) in

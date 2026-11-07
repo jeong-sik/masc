@@ -1097,7 +1097,8 @@ let test_admission_capture_keeps_original_policy ()=with_fixture (fun ~sw:_ fixt
     refuse "capture-without-retirement-field" "Original Librarian capture has unknown, missing or repeated fields"
       (`Assoc (("preparation",`Assoc (List.remove_assoc "retirement_prompt" prepared_fields))::
       List.remove_assoc "preparation" fields));
-    refuse "capture-with-malformed-unused-policy" "Original Librarian capture has unknown, missing or repeated fields"
+    refuse "capture-with-malformed-unused-policy"
+      "Original Librarian capture: prompt resolution has unknown, duplicate or missing members"
       (`Assoc (("preparation",`Assoc (("retirement_prompt",`Assoc [])::
         List.remove_assoc "retirement_prompt" prepared_fields))::List.remove_assoc "preparation" fields));
     refuse "capture-with-old-schema" "Unknown original Librarian execution schema/kind"

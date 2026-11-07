@@ -527,6 +527,21 @@ let test_revision_shape_is_strict_without_inline_ledger_fallback () = with_works
     rejected (restore store ~workspace
       (retain ~summary:(summary_of capture) ~request:(replace "work" changed original) store))) [inline;mixed;wrong_kind])
 
+(* The deploy preflight asks what a pass's discovery and restore ask first,
+   with no workspace: a record of an earlier summary or capture schema is
+   refused, so the install stops before the Curator would (#49587). *)
+let test_preflight_check_refuses_an_earlier_schema () = with_workspace (fun root _ ->
+  let workspace = get (C.observe_workspace ~base_path:root) in
+  let _,_,_,capture = classification ~base_path:root workspace in
+  let summary = summary_of capture and request = C.to_json capture in
+  let checked name ~summary ~request =
+    C.check_retained (retain ~summary ~request (Store.create ~root:(Filename.concat root name))) in
+  get (checked "current" ~summary ~request);
+  rejected (checked "summary-v1" ~request
+    ~summary:(replace "schema" (`String "workspace.memory.execution-summary.v1") summary));
+  rejected (checked "capture-v4" ~summary
+    ~request:(replace "schema" (`String "workspace.memory.execution-capture.v4") request)))
+
 let () = Alcotest.run "Curator trusted host capture" ["capture",[
   Alcotest.test_case "capture and child share the written revision" `Quick test_capture_and_child_share_the_written_revision;
   Alcotest.test_case "no substitution for missing, damaged or unreadable revision" `Quick test_restore_never_substitutes_a_missing_or_damaged_revision;
@@ -534,6 +549,7 @@ let () = Alcotest.run "Curator trusted host capture" ["capture",[
   Alcotest.test_case "strict revision shape without inline fallback" `Quick test_revision_shape_is_strict_without_inline_ledger_fallback;
   Alcotest.test_case "canonical storage preserves exact original prompt and judgment" `Quick test_canonical_storage_preserves_original_prompt_and_selected_judgment;
   Alcotest.test_case "changed provenance, schema and original owner" `Quick test_changed_capture_provenance_and_owner_are_refused;
+  Alcotest.test_case "deploy preflight refuses an earlier schema" `Quick test_preflight_check_refuses_an_earlier_schema;
   Alcotest.test_case "physical root copy and replacement" `Quick test_physical_root_replacement_and_copy_are_refused;
   Alcotest.test_case "briefing original contract and partial publication" `Quick test_briefing_contract_and_partial_publication_are_original;
   Alcotest.test_case "a changed input that still decodes" `Quick test_a_restore_refuses_a_changed_input_that_still_decodes;

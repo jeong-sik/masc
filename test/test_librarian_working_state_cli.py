@@ -16,7 +16,13 @@ from typing import Any
 
 def message(role: str, text: str) -> dict[str, Any]:
     # Agent_core.Checkpoint.message_to_json / Api_common.content_block_to_json.
-    return {"role": role, "content": [{"type": "text", "text": text}]}
+    # keeper_context_core_message_json.ml requires the origin field on every
+    # persisted checkpoint message.
+    return {
+        "role": role,
+        "origin": "user" if role == "user" else "assistant",
+        "content": [{"type": "text", "text": text}],
+    }
 
 
 def main() -> None:

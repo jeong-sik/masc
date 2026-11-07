@@ -876,21 +876,11 @@ let handle_provider_input_get state req reqd ~name ~surface ~read =
                  reqd)))
 ;;
 
+module Route = Server_dashboard_http_keeper_get_route
+
 let handle_keeper_get_subroutes state req request reqd =
-  let req_path = Http.Request.path req in
-  let prefix = keeper_api_prefix in
-  let plen = String.length prefix in
-  let tlen = String.length req_path in
-  let ends_with suffix =
-    tlen > plen + String.length suffix
-    && String.ends_with ~suffix req_path
-  in
-  let extract_name suffix =
-    let slen = String.length suffix in
-    String.trim (String.sub req_path plen (tlen - plen - slen))
-  in
-  if ends_with "/metrics" then (
-    let name = extract_name "/metrics" in
+  match Route.of_path (Http.Request.path req) with
+  | Some Route.(Keeper (Metrics, name)) -> (
     let status, json =
       keeper_metrics_response ~config:(Mcp_server.workspace_config state)
         ~keeper_name:name req
@@ -898,8 +888,7 @@ let handle_keeper_get_subroutes state req request reqd =
     Http.Response.json_value_on_cpu ~status ~request
       ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request))
       json reqd)
-  else if ends_with keeper_suffix_github_identity then (
-    let name = extract_name keeper_suffix_github_identity in
+  | Some Route.(Keeper (Github_identity, name)) -> (
     if name = "" then
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json "missing keeper name")
@@ -930,12 +919,11 @@ let handle_keeper_get_subroutes state req request reqd =
          | Ok observation ->
            Server_auth.respond_json_value_with_cors ~status:`OK request reqd
              (Keeper_github_identity.observation_to_yojson observation)))
-  else if ends_with keeper_suffix_board_attention_quarantines then (
+  | Some Route.(Keeper (Board_attention_quarantines, name)) -> (
     (* One Keeper's rows of the inventory the operator snapshot already serves
        for the fleet, under the same public-read policy: same rows, same
        gate. The snapshot only builds them with [include_keepers], which the
        TUI's summary read turns off, so a Keeper detail asks here instead. *)
-    let name = extract_name keeper_suffix_board_attention_quarantines in
     if name = "" then
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json "missing keeper name")
@@ -948,11 +936,7 @@ let handle_keeper_get_subroutes state req request reqd =
         (Keeper_board_attention_quarantine_command.inventory_json
            ~base_path:config.Workspace.base_path
            ~keeper_names:[ name ]))
-  else if ends_with "/chat/history/page" then
-    (* Checked before "/chat/history": [ends_with] would not confuse the two,
-       but keeping the longer suffix first means adding a third sub-route later
-       cannot silently shadow this one. *)
-    let name = extract_name "/chat/history/page" in
+  | Some Route.(Keeper (Chat_history_page, name)) -> (
     if name = "" then
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json "missing keeper name")
@@ -988,9 +972,8 @@ let handle_keeper_get_subroutes state req request reqd =
              | Page.Invalid_row _ | Page.Row_exceeds_window | Page.Io_error _ -> `Internal_server_error
            in
            Server_auth.respond_json_value_with_cors ~status request reqd
-             (error_json (Page.error_to_string error))))
-  else if ends_with "/chat/history" then
-    let name = extract_name "/chat/history" in
+             (error_json (Page.error_to_string error)))))
+  | Some Route.(Keeper (Chat_history, name)) -> (
     if name = "" then
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json "missing keeper name")
@@ -1023,9 +1006,8 @@ let handle_keeper_get_subroutes state req request reqd =
              `Service_unavailable
          in
          Server_auth.respond_json_value_with_cors ~status request reqd
-           (error_json (Server_keeper_chat_history_read.error_to_string error)))
-  else if ends_with keeper_suffix_checkpoints then
-    let name = extract_name keeper_suffix_checkpoints in
+           (error_json (Server_keeper_chat_history_read.error_to_string error))))
+  | Some Route.(Keeper (Checkpoints, name)) -> (
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
@@ -1033,9 +1015,8 @@ let handle_keeper_get_subroutes state req request reqd =
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
-      Http.Response.json_value ~status ~compress:true ~request:req json reqd
-  else if ends_with keeper_suffix_file_changes then
-    let name = extract_name keeper_suffix_file_changes in
+      Http.Response.json_value ~status ~compress:true ~request:req json reqd)
+  | Some Route.(Keeper (File_changes, name)) -> (
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else if not (Keeper_config.validate_name name) then
@@ -1106,11 +1087,10 @@ let handle_keeper_get_subroutes state req request reqd =
               ; ("malformed", `Int tally.Keeper_tool_call_file_change.malformed)
               ]))
       in
-      Server_cached_read_http.respond ~request:req reqd payload
-  else if ends_with keeper_suffix_paused_work then
+      Server_cached_read_http.respond ~request:req reqd payload)
+  | Some Route.(Keeper (Paused_work, _)) ->
     Server_dashboard_http_keeper_paused_work.handle_get state req reqd
-  else if ends_with keeper_suffix_runtime_trace then
-    let name = extract_name keeper_suffix_runtime_trace in
+  | Some Route.(Keeper (Runtime_trace, name)) -> (
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
@@ -1131,9 +1111,8 @@ let handle_keeper_get_subroutes state req request reqd =
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
-      Http.Response.json_value ~status ~compress:true ~request:req json reqd
-  else if ends_with "/config" then
-    let name = extract_name "/config" in
+      Http.Response.json_value ~status ~compress:true ~request:req json reqd)
+  | Some Route.(Keeper (Config, name)) -> (
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
@@ -1144,9 +1123,8 @@ let handle_keeper_get_subroutes state req request reqd =
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
-      Http.Response.json_value ~status ~compress:true ~request:req json reqd
-  else if ends_with "/tool-stats" then
-    let name = extract_name "/tool-stats" in
+      Http.Response.json_value ~status ~compress:true ~request:req json reqd)
+  | Some Route.(Keeper (Tool_stats, name)) -> (
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else if not (Keeper_config.validate_name name) then
@@ -1246,15 +1224,13 @@ let handle_keeper_get_subroutes state req request reqd =
             ("timeline", `List (List.map Trajectory.hourly_bucket_to_json timeline));
           ]))
       in
-      Server_cached_read_http.respond ~request:req reqd payload
-  else if ends_with "/tool-result" then
-    let keeper = extract_name "/tool-result" in
+      Server_cached_read_http.respond ~request:req reqd payload)
+  | Some Route.(Keeper (Tool_result, keeper)) ->
     let status,json = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
       Server_keeper_tool_result.response ~config:(Mcp_server.workspace_config state) ~keeper req) in
     Http.Response.json_value ~status:(status :> Httpun.Status.t)
       ~compress:true ~request:req json reqd
-  else if ends_with "/tool-calls" then
-    let name = extract_name "/tool-calls" in
+  | Some Route.(Keeper (Tool_calls, name)) -> (
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else if not (Keeper_config.validate_name name) then
@@ -1353,9 +1329,8 @@ let handle_keeper_get_subroutes state req request reqd =
                 ("entries", `List entries);
               ])
       in
-      Http.Response.json_value ~status ~compress:true ~request:req json reqd
-  else if ends_with "/waiting-inventory" then
-    let name = extract_name "/waiting-inventory" in
+      Http.Response.json_value ~status ~compress:true ~request:req json reqd)
+  | Some Route.(Keeper (Waiting_inventory, name)) -> (
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else if not (Keeper_config.validate_name name) then
@@ -1379,13 +1354,12 @@ let handle_keeper_get_subroutes state req request reqd =
            | Server_observer_scope.Ambiguous_instance -> `Bad_request, "observer_instance_ambiguous"
            | Instance_mismatch | Scope_changed -> `Conflict, "observer_instance_changed" in
          Http.Response.json_value ~status ~request:req
-           (`Assoc ["code", `String code; "error", `String "observer generation unavailable"]) reqd)
-  else if ends_with "/feedback" then
+           (`Assoc ["code", `String code; "error", `String "observer generation unavailable"]) reqd))
+  | Some Route.(Keeper (Feedback, name)) -> (
     (* keeper-v2 #9: aggregated response-feedback tally (read API).
        GET /api/v1/keepers/:name/feedback. The per-keeper feedback log is the
        SSOT; the view renders this tally (no view-side derivation). A read IO
        fault surfaces as 500, never a silently-empty success. *)
-    let name = extract_name "/feedback" in
     if String.length name = 0 then respond_error reqd "keeper name is required"
     else if not (Keeper_config.validate_name name) then
       Http.Response.json_value ~status:`Bad_request
@@ -1400,9 +1374,8 @@ let handle_keeper_get_subroutes state req request reqd =
            (Keeper_response_feedback.tally_to_json tally) reqd
        | Error (`Io msg) ->
          Http.Response.json_value ~status:`Internal_server_error
-           (`Assoc [ ("error", `String msg) ]) reqd)
-  else if ends_with keeper_suffix_working_context then
-    let name = extract_name keeper_suffix_working_context in
+           (`Assoc [ ("error", `String msg) ]) reqd))
+  | Some Route.(Keeper (Working_context, name)) -> (
     if not (Keeper_config.validate_name name)
     then
       Http.Response.json_value ~status:`Bad_request
@@ -1439,15 +1412,14 @@ let handle_keeper_get_subroutes state req request reqd =
             ; "snapshot", Keeper_librarian_context.snapshot_json snapshot
             ]
       in
-      Http.Response.json_value ~status ~compress:true ~request:req json reqd
-  else if ends_with "/memory-facts" then
+      Http.Response.json_value ~status ~compress:true ~request:req json reqd)
+  | Some Route.(Keeper (Memory_facts, name)) -> (
     (* What this keeper remembers, fact by fact. The store keeps a closed
        taxonomy and provenance on every row, and the health
        projection reports only counts. Ordinary and source-bound stores are
        two readings and stay two fields, each with its own read error, so
        one failing store never blanks the other. The ordinary reading exposes
        the exact stored-byte SHA-256 beside its revision for admin cleanup CAS. *)
-    let name = extract_name "/memory-facts" in
     if not (Keeper_config.validate_name name)
     then
       Http.Response.json_value ~status:`Bad_request
@@ -1593,13 +1565,12 @@ let handle_keeper_get_subroutes state req request reqd =
                | None -> `Null
                | Some detail -> `String detail )
            ])
-        reqd)
-  else if ends_with "/memory-journal" then
+        reqd))
+  | Some Route.(Keeper (Memory_journal, name)) -> (
     (* Why this keeper's memory looks the way it does. The librarian's passes
        reach disk here — committed and failed alike since RFC-0361 Part 5 — and
        the internal-agents monitor could show that a pass ran but not what it
        decided. A failed pass is the case an operator actually opens. *)
-    let name = extract_name "/memory-journal" in
     if not (Keeper_config.validate_name name)
     then
       Http.Response.json_value ~status:`Bad_request
@@ -1637,12 +1608,11 @@ let handle_keeper_get_subroutes state req request reqd =
              "undecodable_lines", `Int undecodable
            ; "entries", `List entries
            ])
-        reqd)
-  else if ends_with "/operator-note" then
+        reqd))
+  | Some Route.(Keeper (Operator_note, name)) -> (
     (* RFC-0366. Read-only here: the operator asks whether a note is pending or
        which turn consumed it. The write surface belongs to the operator control
        plane and is a separate change. *)
-    let name = extract_name "/operator-note" in
     (match
        Keeper_operator_note.read ~config:(Mcp_server.workspace_config state) ~keeper:name
      with
@@ -1666,11 +1636,10 @@ let handle_keeper_get_subroutes state req request reqd =
        Http.Response.json_value ~status:`Bad_request
          (`Assoc
             [ "error", `String (Keeper_operator_note.read_error_to_string error) ])
-         reqd)
-  else if ends_with "/next-request" then
+         reqd))
+  | Some Route.(Keeper (Next_request, name)) -> (
     (* What the next Agent Core request would carry, computed from the values
        a turn uses and nothing a turn owns: no dispatch, no cursor, no note. *)
-    let name = extract_name "/next-request" in
     (match
        Keeper_next_request_forecast.forecast
          ~config:(Mcp_server.workspace_config state)
@@ -1688,12 +1657,11 @@ let handle_keeper_get_subroutes state req request reqd =
      | Error detail ->
        Http.Response.json_value ~status:`Not_found
          (`Assoc [ "error", `String detail ])
-         reqd)
-  else if ends_with "/last-prompt" then
+         reqd))
+  | Some Route.(Keeper (Last_prompt, name)) -> (
     (* What this keeper was actually told, as text. The turn record keeps each
        block's bytes and digest — how much, never what. The blocks are stable
        turn to turn, so the last assembly is also the preview of the next. *)
-    let name = extract_name "/last-prompt" in
     (match
        Keeper_prompt_capture.read ~config:(Mcp_server.workspace_config state) ~keeper:name
      with
@@ -1718,19 +1686,19 @@ let handle_keeper_get_subroutes state req request reqd =
        Http.Response.json_value ~status:`Bad_request
          (`Assoc
             [ "error", `String (Keeper_prompt_capture.read_error_to_string error) ])
-         reqd)
-  else if ends_with keeper_suffix_provider_input_continuity then
+         reqd))
+  | Some Route.(Keeper (Provider_input_continuity, name)) ->
     handle_provider_input_get state req reqd
-      ~name:(extract_name keeper_suffix_provider_input_continuity)
+      ~name
       ~surface:("/api/v1/keepers/:name" ^ keeper_suffix_provider_input_continuity)
       ~read:(fun ~config ~keeper ~turn_ref ->
         Ok (fun () -> Keeper_continuity_evidence.read ~config ~keeper ~turn_ref))
-  else if ends_with "/provider-input/part" then
+  | Some Route.(Keeper (Provider_input_part, name)) -> (
     handle_provider_input_get
       state
       req
       reqd
-      ~name:(extract_name "/provider-input/part")
+      ~name
       ~surface:"/api/v1/keepers/:name/provider-input/part"
       ~read:(fun ~config ~keeper ~turn_ref ->
         match Server_utils.query_param req "index" with
@@ -1747,13 +1715,13 @@ let handle_keeper_get_subroutes state req request reqd =
                    ~index
                  |> Result.map Keeper_provider_input_snapshot.part_content_to_json)
            | Some _ | None ->
-             Error (Printf.sprintf "invalid index: %s" raw_index)))
-  else if ends_with "/provider-input" then
+             Error (Printf.sprintf "invalid index: %s" raw_index))))
+  | Some Route.(Keeper (Provider_input, name)) ->
     handle_provider_input_get
       state
       req
       reqd
-      ~name:(extract_name "/provider-input")
+      ~name
       ~surface:"/api/v1/keepers/:name/provider-input"
       ~read:(fun ~config ~keeper ~turn_ref ->
         Ok
@@ -1763,12 +1731,11 @@ let handle_keeper_get_subroutes state req request reqd =
               ~keeper
               ~turn_ref
             |> Result.map Keeper_provider_input_snapshot.manifest_to_json))
-  else if ends_with "/raw-traces" then
+  | Some Route.(Keeper (Raw_traces, name)) -> (
     (* The turn record already carries a raw_trace_run_ref naming this file;
        until now nothing served it, so the pointer reached the dashboard type
        and the content had no route. Listing is separate from reading because a
        turn file runs to hundreds of records and an operator picks one first. *)
-    let name = extract_name "/raw-traces" in
     let limit =
       Server_utils.int_query_param req "limit" ~default:25 |> max 1 |> min 200
     in
@@ -1791,12 +1758,11 @@ let handle_keeper_get_subroutes state req request reqd =
               , `List (List.map Keeper_raw_trace_reader.turn_summary_to_json turns) )
             ; "dashboard_surface", `String "/api/v1/keepers/:name/raw-traces"
             ])
-         reqd)
-  else if ends_with "/raw-trace" then
+         reqd))
+  | Some Route.(Keeper (Raw_trace, name)) -> (
     (* One turn's records. [file] is a handle from the listing, never a path;
        the reader rejects anything that could leave the keeper's directory
        rather than normalizing it. *)
-    let name = extract_name "/raw-trace" in
     let offset = Server_utils.int_query_param req "offset" ~default:0 |> max 0 in
     let limit =
       Server_utils.int_query_param req "limit" ~default:200 |> max 1 |> min 2000
@@ -1841,12 +1807,11 @@ let handle_keeper_get_subroutes state req request reqd =
                :: ("dashboard_surface", `String "/api/v1/keepers/:name/raw-trace")
                :: fields)
           | json -> json)
-         reqd))
-  else if ends_with "/turn-records" then
+         reqd)))
+  | Some Route.(Keeper (Turn_records, name)) -> (
     (* RFC-0233 §2.3 PR-4: serve TurnRecords with server-side
        consecutive-pair block diffs so the dashboard stays a renderer
        of the tested OCaml diff (views derive; no view-side repair). *)
-    let name = extract_name "/turn-records" in
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else if not (Keeper_config.validate_name name) then
@@ -1972,8 +1937,8 @@ let handle_keeper_get_subroutes state req request reqd =
             ~keeper_id:name );
         ("entries", `List entries);
       ] in
-      Http.Response.json_value ~compress:true ~request:req json reqd)
-  else if ends_with "/turn-transcript" then
+      Http.Response.json_value ~compress:true ~request:req json reqd))
+  | Some Route.(Keeper (Turn_transcript, name)) ->
     (* RFC-0233 §7: serve one keeper turn's operator request + keeper
        response by an exact join on the persisted chat row turn_ref
        ("<trace_id>#<absolute_turn>"). Lazily fetched by the turn
@@ -1981,7 +1946,6 @@ let handle_keeper_get_subroutes state req request reqd =
        turn-records list. Content is the load-time redacted view the chat
        history endpoint already serves (RFC-0132); an unmatched turn_ref
        returns [found:false] rather than a fabricated transcript. *)
-    let name = extract_name "/turn-transcript" in
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else if not (Keeper_config.validate_name name) then
@@ -1993,8 +1957,7 @@ let handle_keeper_get_subroutes state req request reqd =
       let status, json = keeper_turn_transcript_lookup_response
           ~config:(Mcp_server.workspace_config state) ~keeper_name:name req in
       Http.Response.json_value ~status ~compress:true ~request:req json reqd
-  else if ends_with "/trajectory" then
-    let name = extract_name "/trajectory" in
+  | Some Route.(Keeper (Trajectory, name)) -> (
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else if not (Keeper_config.validate_name name) then
@@ -2079,9 +2042,8 @@ let handle_keeper_get_subroutes state req request reqd =
                  (Trajectory.trajectory_line_to_json ~result_max_len) recent));
              ]))
          in
-         Server_cached_read_http.respond ~request:req reqd payload)
-  else if ends_with "/transitions" then
-    let name = extract_name "/transitions" in
+         Server_cached_read_http.respond ~request:req reqd payload))
+  | Some Route.(Keeper (Transitions, name)) -> (
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
@@ -2105,10 +2067,9 @@ let handle_keeper_get_subroutes state req request reqd =
         "count", `Int (json_list_length transitions);
         "transitions", transitions;
       ] in
-      Http.Response.json_value ~compress:true ~request:req json reqd
+      Http.Response.json_value ~compress:true ~request:req json reqd)
   (* #12798 Dashboard Gaps: lifecycle event timeline per keeper. *)
-  else if ends_with "/lifecycle" then
-    let name = extract_name "/lifecycle" in
+  | Some Route.(Keeper (Lifecycle, name)) ->
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
@@ -2125,8 +2086,7 @@ let handle_keeper_get_subroutes state req request reqd =
         "events", events;
       ] in
       Http.Response.json_value ~compress:true ~request:req json reqd
-  else if ends_with "/eval" then
-    let name = extract_name "/eval" in
+  | Some Route.(Keeper (Eval, name)) -> (
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
@@ -2157,9 +2117,8 @@ let handle_keeper_get_subroutes state req request reqd =
         ("snapshots",
           `List (List.map Dashboard_eval_feed.snapshot_to_json snapshots));
       ] in
-      Http.Response.json_value ~compress:true ~request:req json reqd
-  else if ends_with "/state-diagram" then
-    let name = extract_name "/state-diagram" in
+      Http.Response.json_value ~compress:true ~request:req json reqd)
+  | Some Route.(Keeper (State_diagram, name)) -> (
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
@@ -2175,8 +2134,8 @@ let handle_keeper_get_subroutes state req request reqd =
           ; "mermaid", `String mermaid
           ]
       in
-      Http.Response.json_value ~compress:true ~request:req json reqd
-  else if req_path = prefix ^ "composite" then
+      Http.Response.json_value ~compress:true ~request:req json reqd)
+  | Some Route.Fleet_composite ->
     (* LT-16a: fleet-wide composite snapshot. Enumerates every
        registered keeper via [Keeper_registry.all] and projects each
        through [Keeper_composite_observer.observe]. Same purity
@@ -2194,11 +2153,10 @@ let handle_keeper_get_subroutes state req request reqd =
         ~config:(Mcp_server.workspace_config state) ()
     in
     Http.Response.json_value ~compress:true ~request:req json reqd
-  else if ends_with "/composite" then
+  | Some Route.(Keeper (Composite, name)) -> (
     (* RFC-0003 §7: composite lifecycle snapshot derived from the
        registry entry via the [Keeper_composite_observer] pure
        projection. No mutation, no I/O, no provider/token access. *)
-    let name = extract_name "/composite" in
     if String.length name = 0 then
       respond_error reqd "keeper name is required"
     else
@@ -2210,6 +2168,6 @@ let handle_keeper_get_subroutes state req request reqd =
         | `Not_found -> `Not_found
         | `Internal_server_error -> `Internal_server_error
       in
-      Http.Response.json_value ~status ~compress:true ~request:req json reqd
-  else
+      Http.Response.json_value ~status ~compress:true ~request:req json reqd)
+  | None ->
     respond_error ~status:`Not_found reqd "not found"

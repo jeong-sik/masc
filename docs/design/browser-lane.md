@@ -134,6 +134,7 @@ work by it and the Keeper tools build their rejection from it.
 | `request_blocking` | `BrowserAct block_requests`, `unblock_requests` | yes, a CDP setting that fails a native managed Page's subresource requests to exact hosts, and those of its same-origin frames, while the ego SDK process that set it runs; navigations and cross-site frames are not blocked |
 | `storage_listing` | `BrowserRead mode=cookies` with `tabId` | yes, the names and scoping attributes of the cookies a native managed Page's top document sees, and its origin's web storage keys and IndexedDB database names; never a value, though a name can carry an account, user or session id |
 | `request_listing` | `BrowserRead mode=network` with `tabId` | yes, the requests the current ego SDK process saw for a native managed Page, oldest first and at most 200, with method, address without query values, header names and state; never a header value, cookie or body |
+| `console_reading` | `BrowserRead mode=console` with `tabId` | yes, what a native managed Page's current document wrote to its console and the errors it did not catch, oldest first and at most 200, each text cut at 4000 bytes and as the page wrote it, so it can carry a token; the read turns ego's console hiding off and back on in one step and says how long it was off |
 | `point_scroll` | `scroll_at` | yes, on a native managed Page, ego's wheel |
 | `trusted_hover` | `hover`, `hover_at` | yes, on a native managed Page |
 | `trusted_drag` | `drag_to`, `drag` | yes, zero duration on native managed Pages |

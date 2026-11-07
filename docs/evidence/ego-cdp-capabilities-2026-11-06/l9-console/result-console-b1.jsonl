@@ -1,0 +1,8 @@
+{"step":"space","at":"2026-11-07T06:48:07.078Z","value":{"spaceId":16,"name":"masc-l9-console-b","ownership":"agent"}}
+{"step":"b1.goto","at":"2026-11-07T06:48:07.174Z","value":{}}
+{"step":"b1.p2goto","at":"2026-11-07T06:48:07.360Z","value":{}}
+{"step":"b1.disableOnP1","at":"2026-11-07T06:48:07.369Z","value":{}}
+{"step":"b1.p2cycle","at":"2026-11-07T06:48:07.378Z","value":[]}
+{"step":"b1.p1cycle","at":"2026-11-07T06:48:07.384Z","value":["load-line","load-warn","load-error"]}
+{"step":"b1.say","at":"2026-11-07T06:48:07.385Z","value":2}
+{"step":"b1.exit","at":"2026-11-07T06:48:07.385Z","value":{"p2":"p2","note":"left hiding off and Runtime on for p1"}}

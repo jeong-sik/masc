@@ -6,6 +6,7 @@ module Decision = Workspace_memory_decision
 module Owner = Lane_addon_tool_request_owner
 module Progress = Lane_addon_request_progress
 module Exact = Lane_addon_exact
+module Destination = Lane_addon_captured_destination
 open Result.Syntax
 module Request_id = struct
   type t = string
@@ -26,10 +27,7 @@ let observe_workspace ~base_path =
     Ok (Identity.of_stat ~path:(Fs_compat.owned_inventory_root_path root)
           (Fs_compat.owned_inventory_root_stat root)))
   |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string
-type destination = {
-  installation_id : string; package_id : string; tool : string;
-  source_revision : string; configuration_revision : string;
-}
+type destination = Destination.t
 type work = Classification of {ledger : Ledger.t; revision : Revision.ledger; batch : Request.batch} | Briefing of Brief.batch
 type t = {id : Request_id.t; predecessor : Request_id.t option; workspace : workspace; destination : destination;
   prompt : Prompt_registry.prompt_resolution; work : work}
@@ -57,17 +55,7 @@ let optional = Option.fold ~none:`Null ~some:(fun value -> `String value)
 let workspace_json = Identity.to_json
 let workspace_of_json json =
   Identity.of_json json |> Result.map_error (fun detail -> "captured Curator workspace: " ^ detail)
-let destination_json d = `Assoc ["installation_id",`String d.installation_id;
-  "package_id",`String d.package_id;"tool",`String d.tool;
-  "source_revision",`String d.source_revision;"configuration_revision",`String d.configuration_revision]
-let destination_of_json json =
-  let* f = fields ["installation_id";"package_id";"tool";"source_revision";"configuration_revision"] json in
-  let* installation_id = text (List.assoc "installation_id" f) in
-  let* package_id = text (List.assoc "package_id" f) in
-  let* tool = text (List.assoc "tool" f) in
-  let* source_revision = text (List.assoc "source_revision" f) in
-  let* configuration_revision = text (List.assoc "configuration_revision" f) in
-  Ok {installation_id;package_id;tool;source_revision;configuration_revision}
+let destination_of_json = Destination.of_json ~context:"captured Curator destination"
 let prompt_json (p : Prompt_registry.prompt_resolution) = `Assoc [
   "effective",`String p.effective;"source",`String (Prompt_registry.prompt_source_to_string p.source);
   "file_value",optional p.file_value;"override_value",optional p.override_value;
@@ -140,7 +128,7 @@ let check ~prompt work =
     if String.equal original_contract (Brief.contract ~template:prompt.effective) then Ok ()
     else Error "captured briefing pass has a different prompt/schema contract"
 let make ~request_id ~workspace ~destination ~prompt work =
-  let* destination = destination_of_json (destination_json destination) in
+  let* destination = destination_of_json (Destination.to_json destination) in
   let* prompt = prompt_of_json (prompt_json prompt) in
   (* The typed work is the canonical snapshot a restore reads, so a fresh and a
      restored capture narrow to the same child. The prompt the caller rendered
@@ -170,7 +158,7 @@ let capture_schema = "workspace.memory.execution-capture.v5"
 let to_json t = `Assoc ["schema",`String capture_schema;
   "request_id",`String (Request_id.to_string t.id);
   "predecessor",optional (Option.map Request_id.to_string t.predecessor);"workspace",workspace_json t.workspace;
-  "destination",destination_json t.destination;"prompt",prompt_json t.prompt;
+  "destination",Destination.to_json t.destination;"prompt",prompt_json t.prompt;
   "work",work_json t.work;"rendered_prompt_sha256",`String (sha256 (rendered t.work));
   "output_schema",schema t.work]
 (* What a pass reads about an original without restoring it. It is derived

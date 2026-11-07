@@ -382,8 +382,6 @@ val create_compiled : descriptors:Keeper_tool_descriptor.t list ->
     Canonical unique nodes and their resolved contracts are indexed once for
     this immutable plan. Validation retains its original node/error order;
     reconstructed or parameter-bound plans build their own index. *)
-val compiled_children : t -> child_nodes list
-
 type execution_target =
   | Descriptor_target of Keeper_tool_descriptor.t
   | Child_arguments of inline_arguments
@@ -458,8 +456,6 @@ val validate_output
   -> node_id:Node_id.t
   -> Yojson.Safe.t
   -> (output, execution_error) result
-
-val output_node_id : output -> Node_id.t
 
 type export_resolution_error =
   | Producer_unavailable of Node_id.t

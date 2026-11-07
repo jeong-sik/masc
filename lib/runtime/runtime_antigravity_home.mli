@@ -145,10 +145,11 @@ val prepare_native_tools
     prepared under is refused, and so is an additional root inside it. For a
     Keeper that root is the masc state directory, which holds every Keeper's
     credentials. A refusal leaves the published settings unchanged.
-    Every posture reads the masc tool schema folder and denies the config
-    folder and the token file by exact path (RFC-0490 2.2). [Native_none]
-    also denies each workspace root, since agy allows workspace reads no rule
-    matches, and refuses a root that holds the HOME.
+    Every posture names the masc tool schema folder and denies the config
+    folder and the token file by exact path (RFC-0490 2.2). Until L3,
+    [Native_none] also keeps [read_file(*)], so its schema allow remains
+    shadowed and no read becomes an Ask. Its workspace root denies remain
+    for L3, and a root that holds the HOME is refused.
     Read posture denies commands and writes; full permits sandboxed effects.
     Both deny native network tools. The caller must enable the CLI sandbox;
     no command allow rule is emitted because it would grant sandbox escapes

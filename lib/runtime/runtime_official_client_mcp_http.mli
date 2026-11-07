@@ -71,9 +71,9 @@ val endpoint : t -> endpoint
 
     [eager_tools] are declared [tools.<name>.eager = true]. An eager tool is
     registered with its schema (agy 1.2.9, measured 2026-09-24). Antigravity
-    lists a tool without that declaration by name only; the model reads its
-    schema file from the folder the masc home's settings open
-    ([Runtime_antigravity_home.settings_json]) and calls it through
+    lists a tool without that declaration by name only; after L3 opens the
+    schema folder for [Native_none], the model reads its schema file from
+    the folder named in the masc home's settings and calls it through
     [call_mcp_tool]. agy 1.5.1 keeps eager tools only up to a size budget and
     drops the rest (RFC-0490 1.2). *)
 val mcp_config_json : t -> eager_tools:string list -> Yojson.Safe.t

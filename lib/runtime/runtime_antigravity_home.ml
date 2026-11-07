@@ -295,12 +295,15 @@ let path_is_within ~root path =
    boundary (RFC-0490 2.2). Plan mode merely adds an instruction.
    Directory arguments (without glob suffixes) are recursive CLI grants:
    https://antigravity.google/docs/permissions?tab=cli .
-   - Deny beats allow, so an all-files read deny would also refuse the schema
-     folder. Every posture opens that folder and denies the two secret paths
-     by name instead. A denied read fails only that call; a read no rule
-     matches is an Ask, which print mode refuses by ending the run.
+   - Deny beats allow. Every posture names the schema folder and the two
+     secret paths. Until L3, Native_none also keeps the all-files read deny,
+     so its schema allow stays shadowed and no read can become an Ask. L3
+     removes the broad deny to open the schema folder. A denied read fails
+     only that call; a read no rule matches is an Ask, which print mode
+     refuses by ending the run.
    - agy allows reads inside the workspace (cwd and --add-dir) when no rule
-     matches. Native_none therefore denies each workspace root by name.
+     matches. Native_none keeps each workspace root denied for when L3
+     removes the broader rule.
    - agy's own appDataDir boundary already refuses the token file. That rule
      is undocumented and agy updates itself, so the token keeps its own deny;
      login still works with it (RFC-0490 measurement 8b).
@@ -313,7 +316,7 @@ let native_settings_json ~policy ~posture ~workspaces =
   let read = List.map (fun path -> "read_file(" ^ path ^ ")") workspaces in
   let write = List.map (fun path -> "write_file(" ^ path ^ ")") workspaces in
   let allow, deny = match (posture : Runtime_native_tools.posture) with
-    | Native_none -> [], read @ ["write_file(*)"; "command(*)"]
+    | Native_none -> [], "read_file(*)" :: (read @ ["write_file(*)"; "command(*)"])
     | Native_read -> read, ["write_file(*)"; "command(*)"]
     | Native_full -> read @ write, [] in
   let strings values = `List (List.map (fun value -> `String value) values) in

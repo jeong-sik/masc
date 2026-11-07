@@ -8035,8 +8035,11 @@ let reading_pane (state : state) ~cols : (int -> Masc_tui_types.clamped_scroll) 
   | Config when state.config_pane = Config_voice -> pane (fun v -> Voice_scroll v)
   | Config when state.config_pane = Config_params ->
       pane (fun scroll ->
-        Runtime_params_scroll { scroll; max_scroll = state.runtime_params_max_scroll })
-  | Config when state.config_pane = Config_presets -> pane (fun v -> Preset_detail_scroll (v, None))
+        Runtime_params_scroll { scroll; max_scroll = state.config_document_max_scroll })
+  | Config when state.config_pane = Config_presets ->
+      pane (fun scroll ->
+        Preset_detail_scroll
+          { scroll; max_scroll = state.config_document_max_scroll; confirmation = None })
   (* Surfaces whose whole body is a row list, which [row_list] answers for,
      and the two panes that own every key while they are open. *)
   | Keepers Keeper_detail | Keepers Keeper_list | Keepers Keeper_logs
@@ -29860,7 +29863,7 @@ let main
         state.resource_share_recovery_prompt
     in
     let preset_confirmation_changed = match reader with
-      | Some (Preset_detail_scroll (_, Some confirmation)) ->
+      | Some (Preset_detail_scroll { confirmation = Some confirmation; _ }) ->
         preset_confirmation_needs_present state confirmation
       | None | Some (Task_detail _ | Planning_list_page_rows _ | Board_read _ | Message_scroll _
         | Schedule_detail_scroll _ | Keeper_detail _ | Keeper_terminal_scroll _ | Keeper_calls _
@@ -29871,7 +29874,8 @@ let main
         | Lane_run_detail_scroll _ | Changes_diff_scroll _ | Repository_changes_diff_scroll _
         | Resource_scroll _ | Metrics_scroll _ | Approval_detail_scroll _ | Patch_modal_scroll _
         | Link_modal_scroll _ | Play_invite_scroll _ | Voice_scroll _
-        | Preset_detail_scroll (_, None) | Keeper_list_scroll _ | Context_inspector_scroll _
+        | Preset_detail_scroll { confirmation = None; _ } | Keeper_list_scroll _
+        | Context_inspector_scroll _
         | Context_inspector_response_scroll _ | Queue_panel_presented _ | Help_presented) -> false in
     let activity_authority_changed =
       not (same_acting_pane_authority state.acting_pane_presented acting_pane)
@@ -29961,7 +29965,7 @@ let main
         (match reader with
          | Some (Planning_confirmation_scroll (_, Some confirmation)) ->
              state.goal_confirmation_presented <- Some confirmation
-         | Some (Preset_detail_scroll (_, Some confirmation)) ->
+         | Some (Preset_detail_scroll { confirmation = Some confirmation; _ }) ->
              let was_ready = Masc_tui_render_config.preset_confirmation_ready state in
              record_preset_confirmation_frame state confirmation;
              if not was_ready && Masc_tui_render_config.preset_confirmation_ready state then
@@ -40293,6 +40297,9 @@ Use relative paths for resources already held in the package. -->
                 if state.presets_cursor < count - 1 then begin
                   state.presets_cursor <- state.presets_cursor + 1;
                   state.config_scroll <- 0;
+                  (* The next frame measures the new document; until then a
+                     notch goes to the list. *)
+                  state.config_document_max_scroll <- 0;
                   state.preset_armed <- None;
                   ensure_preset_detail state ~mailbox:async_messages
                 end
@@ -40315,7 +40322,7 @@ Use relative paths for resources already held in the package. -->
                   state.config_scroll <- 0;
                   (* The next frame measures the new document; until then a
                      notch goes to the list. *)
-                  state.runtime_params_max_scroll <- 0;
+                  state.config_document_max_scroll <- 0;
                   state.runtime_params_notice <- None
                 end
             | Approvals when state.approval_detail_open ->
@@ -40637,6 +40644,9 @@ Use relative paths for resources already held in the package. -->
                 if next <> state.presets_cursor then begin
                   state.presets_cursor <- next;
                   state.config_scroll <- 0;
+                  (* The next frame measures the new document; until then a
+                     notch goes to the list. *)
+                  state.config_document_max_scroll <- 0;
                   state.preset_armed <- None;
                   ensure_preset_detail state ~mailbox:async_messages
                 end
@@ -40656,7 +40666,7 @@ Use relative paths for resources already held in the package. -->
                   state.config_scroll <- 0;
                   (* The next frame measures the new document; until then a
                      notch goes to the list. *)
-                  state.runtime_params_max_scroll <- 0;
+                  state.config_document_max_scroll <- 0;
                   state.runtime_params_notice <- None
                 end
             | Approvals when state.approval_detail_open ->

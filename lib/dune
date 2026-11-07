@@ -127,6 +127,7 @@
   keeper_chat_store_transcript_load
   keeper_chat_store_approval_lifecycle
   keeper_chat_store_audio_clip
+  keeper_chat_store_turn_transcript
   keeper_runtime_trust_snapshot_core)
  (libraries
   masc.sse_queue_inventory

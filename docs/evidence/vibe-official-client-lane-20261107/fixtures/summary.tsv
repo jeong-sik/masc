@@ -1,12 +1,12 @@
-run	exit	seconds	env_key
-m1-streaming	0	14.6	drop
-m2-unknown-flag	1	0.1	drop
-m3-unknown-model	1	8.9	drop
-m4-env-api-key	2	14.2	keep
-m5-time-limit	3	3.2	drop
-m6-max-price	0	12.7	drop
-m7-max-tokens	3	19.7	drop
-m8-ask-tool-refusal	0	17.1	drop
-m9-whoami	3	28.4	drop
-m10-ask-write	0	n/a	drop
-m11-disabled-bash	0	n/a	drop
+run	exit	seconds	env_key	export_seconds
+m1-streaming	0	14.6	drop	14.4
+m2-unknown-flag	1	0.1	drop	n/a
+m3-unknown-model	1	8.9	drop	8.7
+m4-env-api-key	2	14.2	keep	14.0
+m5-time-limit	3	3.2	drop	3.1
+m6-max-price	0	12.7	drop	12.6
+m7-max-tokens	3	19.7	drop	19.6
+m8-ask-tool-refusal	0	17.1	drop	17.0
+m9-whoami	3	28.4	drop	28.3
+m10-ask-write	0	n/a	drop	14.8
+m11-disabled-bash	0	n/a	drop	20.3

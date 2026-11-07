@@ -128,5 +128,16 @@
     "voice_mode_enabled",
     "worktree_copy_on_write",
     "worktree_limit"
-  ]
+  ],
+  "config_kept_values": {
+    "routed_default_model": "mistral-large-4-0-3",
+    "default_agent": "accept-edits",
+    "enabled_tools": [],
+    "disabled_tools": [
+      "file_system.bash",
+      "ask_user_question",
+      "cron"
+    ],
+    "tools": {}
+  }
 }

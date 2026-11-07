@@ -6,6 +6,7 @@
 set -u
 root=$1
 mkdir -p "$root"
+root=$(cd "$root" && pwd)
 summary="$root/summary.tsv"
 printf 'run\texit\tseconds\tenv_key\n' > "$summary"
 
@@ -21,6 +22,7 @@ probe() {
     (cd "$dir/work" && env -u MISTRAL_API_KEY vibe --workdir "$dir/work" --output-dir "$dir/out" "$@" > "$dir/stdout" 2> "$dir/stderr")
   fi
   status=$?
+  ls -A "$dir/work" > "$dir/work.ls"
   end=$(python3 -c 'import time; print(time.time())')
   printf '%s\t%s\t%.1f\t%s\n' "$name" "$status" "$(python3 -c "print($end-$start)")" "$env_key" >> "$summary"
 }

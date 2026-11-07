@@ -20,13 +20,6 @@ type goal_detail_keeper = {
   runtime_trust : Yojson.Safe.t;
 }
 
-(** [Some ()] when the link table places this Task under this Goal. Replaces
-    [task_linkage_source_opt], which returned a constant "explicit" and made
-    three unreachable linkage kinds look like real cases. *)
-val task_is_linked_opt :
-  ?goal_task_index:(string, string list) Hashtbl.t ->
-  Masc_domain.task -> string -> unit option
-
 val task_is_linked_to_goal :
   ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> bool
 val task_assignee : Masc_domain.task -> string option
@@ -37,7 +30,6 @@ val task_updated_at : Masc_domain.task -> string
 val dedupe_sort : string list -> string list
 
 val receipt_error_kind : Yojson.Safe.t -> string option
-val receipt_error_message : Yojson.Safe.t -> string option
 val receipt_runtime_id : Yojson.Safe.t -> string option
 val receipt_runtime_outcome : Yojson.Safe.t -> string option
 val receipt_outcome : Yojson.Safe.t -> string option

@@ -15,12 +15,6 @@ let approval_matches_goal goal_id approval_json =
   | Some pending_goal_id -> String.equal pending_goal_id goal_id
   | None -> false
 
-let keeper_name_matches_meta metas name =
-  List.exists (fun (meta : Keeper_meta_contract.keeper_meta) -> String.equal meta.name name) metas
-
-let keeper_name_of_assignee metas assignee =
-  if keeper_name_matches_meta metas assignee then Some assignee else None
-
 let goal_fsm_state_kind = Goal_phase.to_string
 
 let goal_fsm_next_actions ~goal_phase =

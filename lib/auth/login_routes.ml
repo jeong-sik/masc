@@ -473,11 +473,17 @@ let logout t request =
      | Error error -> json_refused (issue_failure error) (Bs.error_to_string error))
 ;;
 
-let session t request =
+let acting t request =
   match Q.check (state t) ~now_ms:(ms_of (t.now ())) request with
-  | Error refusal -> json_refused (request_failure refusal) (Q.refusal_to_string refusal)
-  | Ok Q.No_session -> json_refused Unauthorized no_session
-  | Ok (Q.Session { cookie; signed_in = { Bs.user_id; session_id = _; expires_at_ms } }) ->
+  | Error refusal -> Error (json_refused (request_failure refusal) (Q.refusal_to_string refusal))
+  | Ok Q.No_session -> Error (json_refused Unauthorized no_session)
+  | Ok (Q.Session { cookie; signed_in }) -> Ok (cookie, signed_in)
+;;
+
+let session t request =
+  match acting t request with
+  | Error answer -> answer
+  | Ok (cookie, { Bs.user_id; session_id = _; expires_at_ms }) ->
     json
       Ok_200
       [ "user_id", `String (Authz_types.User_id.to_string user_id)
@@ -485,3 +491,5 @@ let session t request =
       ; "csrf_token", `String (Bs.csrf_token cookie)
       ]
 ;;
+
+let json status fields = json status fields

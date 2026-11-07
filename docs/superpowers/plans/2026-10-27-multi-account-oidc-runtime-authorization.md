@@ -385,7 +385,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - 세션 레코드.
   - Kind `Session`. 쓰는 이는 인증된 Human이다.
   - 사건은 `Issued { session_id; user_id; secret_digest; replaces }`와 `Revoked { session_id }`다. `secret_digest`는 쿠키 secret의 SHA-256이다. secret은 쿠키에만 있고 레코드와 로그에 싣지 않는다.
-  - 발급은 그 세션의 `user_id`가 쓴다. `replaces`는 callback이 받은 기존 세션이다. 새 발급과 옛 세션 폐기가 레코드 하나라서 한 번에 일어난다(설계 §5.2). 옛 세션은 다른 사람의 것이어도 된다. 서버는 쿠키의 secret을 맞춰 본 세션만 `replaces`에 넣는다.
+  - 발급은 그 세션의 `user_id`가 쓴다. `replaces`는 로그인을 시작한 브라우저의 기존 세션이다. 새 발급과 옛 세션 폐기가 레코드 하나라서 한 번에 일어난다(설계 §5.2). 옛 세션은 다른 사람의 것이어도 된다. 서버는 쿠키의 secret을 맞춰 본 세션만 `replaces`에 넣는다. 세션 쿠키가 `SameSite=Strict`라서 provider에서 돌아오는 callback에는 실리지 않는다. 그래서 같은 출처 `POST`인 start가 세션을 맞춰 보고 transaction에 넣는다(C3-8a).
   - 폐기는 그 세션의 `user_id`가 쓴다(로그아웃). Admin이 남의 세션을 끊는 길은 principal `Disable`이다. 세션을 읽을 때 principal이 Active인지 본다.
   - 폐기와 `replaces`가 있는 발급은 끊는 세션을 subject로 한 `Revoke` intent를 쓴다(설계 §8.1 `auth_binding_epoch`, §8.2). 복원이 폐기를 되감으면 끊은 세션이 다시 살아나기 때문이다. `replaces`가 없는 발급은 intent를 쓰지 않는다. 되감기면 그 세션이 사라져 로그아웃될 뿐이다.
   - 만료는 레코드에 쓰지 않는다. 발급 레코드의 `at_ms`에 7일을 더한 시각이 지나면 읽을 때 거절한다.
@@ -398,7 +398,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - 경로. 등록 함수 하나가 구역, transaction 저장소, 두 login client, 전송, 시계, 뽑기를 받는다. S1이 부팅에서 부른다.
   - `POST /auth/oidc/start`, `POST /auth/github/start`. 폼으로 초대 token(선택)과 `return_to`를 받는다. 같은 출처 Origin을 요구한다. 남의 초대 token을 담은 로그인을 피해자 브라우저에서 시작시키지 못하게 하려는 것이다. transaction ID를 `__Host-masc_oidc_txn`에 싣고 인가 URL로 303을 보낸다.
   - `GET /auth/oidc/callback`, `GET /auth/github/callback`. transaction 쿠키만 인증 입력이다. 다른 흐름의 transaction은 401이다.
-    - 입장 판정이 로그인이면 세션을 발급한다. 맞춰 본 기존 세션은 `replaces`로 같이 끊는다.
+    - 입장 판정이 로그인이면 세션을 발급한다. start가 transaction에 넣은 기존 세션이 아직 동작하면 `replaces`로 같이 끊는다.
     - 답은 비공개 데이터가 없는 200 HTML 완료 화면이다. 거절은 일반 문구의 HTML이고, 409(`Authz_login.is_conflict`)와 401·403·503을 가린다.
     - transaction 쿠키는 어느 답에서나 지운다.
   - `POST /auth/logout`. CSRF 검사를 받고, 폐기를 쓰고, 세션 쿠키를 지운다.
@@ -413,8 +413,8 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - C3-5 `Authz_state`가 Kind를 읽는다.
   - C3-6 세션 발급·인증·폐기와 CSRF token(`lib/auth`).
   - C3-7 쿠키와 요청 검사 함수.
-  - C3-8 전송 연결과 로그인 경로(start·callback·logout·session, 완료 화면).
-  - C3-9 Admin allowlist 경로. C2d가 main에 들어간 뒤 쌓는다.
+  - C3-8 로그인 경로. 8a는 transaction이 기존 세션을 든다. 8b는 start·callback·logout·session의 답과 완료 화면(`Login_routes`)이다. 8c는 서버 쪽 연결이다(`Masc_http_client` 전송, 요청 읽기, 답 쓰기).
+  - C3-9 Admin allowlist 경로의 답(`Login_allowlist_routes`). C2d가 main에 들어간 뒤 쌓았다(2026-11-07).
 - 옮긴 것.
   - WS/SSE의 세션 결속과 폐기 때 닫기는 C4로 옮긴다. 연결은 C4의 `Auth_gate.decide`가 요청을 세션으로 인증한 뒤에야 세션을 안다. C3에 두면 아무도 채우지 않는 필드가 남는다. `__Host-masc_mcp_session`도 transport 결속과 함께 C4가 만든다.
   - 경로를 `make_routes`에 다는 일과 HTTP/2 갈래는 S1이 한다. S1 전에는 서버에 구역이 없다.

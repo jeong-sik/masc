@@ -454,7 +454,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - PAT 만료는 `Pat_scope.expires_at`이다. 레코드에 따로 쓰지 않고 읽을 때 거절한다.
   - Service principal은 Service credential의 첫 발급이 만든다. Service principal의 Disable과 삭제 사건은 이 층에 없다. 끊는 일은 credential 폐기로 한다.
 - 층. C4-1~5는 C3처럼 한 층에 하나씩 더한다.
-  - C4-1 PAT·Service credential ID, token 형식, 사건 본문.
+  - C4-1 PAT·Service credential ID, token 형식, 사건 본문. 넷으로 나눈다. C4-1a는 두 ID와 token 형식(`mpat_`·`msvc_` 접두사, secret digest)이다. C4-1b는 `Authorization_scope`의 본문이다. C4-1c는 PAT 사건, C4-1d는 Service credential 사건이다.
   - C4-2 Kind `Pat`와 `Internal_service_credential` 작성자 규칙. 상태는 아직 `Kind_not_read`로 거절한다.
   - C4-3 Subject `Pat`·`Service_credential`과 설계 §4.5·§8.2 문장.
   - C4-4 두 credential의 상태(목록, 폐기, 만료).

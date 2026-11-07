@@ -550,8 +550,11 @@ let test_worker_ending_during_the_commit_stays_failed () = with_fixture (fun clo
    its cleanup, which the worker refuses once. A Detach that lands while that
    refusal is being written finds the cleanup still running and starts none.
    The cleanup that ends starts the one the Detach asked for, so the Detach
-   returns with the instance detached instead of waiting for good. *)
-let test_detach_during_a_refused_cleanup_write_runs_its_own_cleanup () = with_fixture (fun clock fixture ->
+   returns with the instance detached instead of waiting for good. The held
+   write either lands or raises; a cleanup that raises after its verdict
+   answers the Detach too. *)
+let test_detach_during_a_refused_cleanup_write_runs_its_own_cleanup () =
+  List.iter (fun raises -> with_fixture (fun clock fixture ->
   let stops = ref 0 and refused = Atomic.make false and entered = Atomic.make false in
   let gate = Mutex.create () and opened = Condition.create () and released = ref false in
   let refusing_once (c : Runtime.For_testing.connection) = {c with
@@ -577,8 +580,13 @@ let test_detach_during_a_refused_cleanup_write_runs_its_own_cleanup () = with_fi
       Atomic.set entered true;
       Mutex.lock gate;
       while not !released do Condition.wait opened gate done;
-      Mutex.unlock gate);
+      Mutex.unlock gate;
+      if raises then failwith "fixture binding write raised");
     Store.save_binding_staged store ~instance_id json in
+  (* The gate opens on every way out, so a failing run ends instead of
+     leaving the system thread parked. *)
+  let open_gate () =
+    Mutex.lock gate; released := true; Condition.broadcast opened; Mutex.unlock gate in
   Runtime.For_testing.with_backend {base with start} (fun () ->
   Runtime.For_testing.with_binding_writer writer (fun () ->
     let id = attach clock fixture ~acting:false in
@@ -591,17 +599,16 @@ let test_detach_during_a_refused_cleanup_write_runs_its_own_cleanup () = with_fi
          fail "the operator call must end with an unknown outcome");
     await clock (fun () -> Atomic.get entered);
     let detached = ref None in
-    Eio.Fiber.both
-      (fun () -> detached := Some (dispatch fixture Runtime.Detach ["instance_id",str id]))
-      (fun () ->
-        await clock (fun () -> phase () = "detaching");
-        Mutex.lock gate; released := true; Condition.broadcast opened; Mutex.unlock gate);
+    Fun.protect ~finally:open_gate (fun () ->
+      Eio.Fiber.both
+        (fun () -> detached := Some (dispatch fixture Runtime.Detach ["instance_id",str id]))
+        (fun () -> await clock (fun () -> phase () = "detaching"); open_gate ()));
     (match !detached with
      | Some (Ok _) -> ()
      | Some (Error detail) -> fail ("the Detach must report its own cleanup: " ^ detail)
      | None -> fail "the Detach did not return");
     await clock (fun () -> phase () = "detached");
-    check int "the refused cleanup, then the one the Detach asked for" 2 !stops)))
+    check int "the refused cleanup, then the one the Detach asked for" 2 !stops)))) [false;true]
 
 let test_confirmed_receipt_requires_result () = with_fixture (fun clock fixture ->
   let id = attach clock fixture ~acting:true in

@@ -47,7 +47,6 @@ module Fusion_config_loader = Masc.Fusion_config_loader
 module Keeper_lifecycle_reservation = Masc.Keeper_lifecycle_reservation
 module Keeper_types_support = Masc.Keeper_types_support
 module Keeper_fs = Masc.Keeper_fs
-module Subprocess_registry = Masc.Keeper_subprocess_registry
 module Supervisor_cleanup = Masc.Keeper_supervisor_cleanup
 module Dashboard_purge = Masc.Keeper_dashboard_purge
 module Dashboard_delete = Server_dashboard_http_delete_actions

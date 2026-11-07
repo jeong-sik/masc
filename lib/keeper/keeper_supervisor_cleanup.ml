@@ -36,17 +36,9 @@ let lifecycle_event_bus_ready () =
   | Some _ -> Ok ()
 ;;
 
-let cleanup_sinks_ready () =
-  match lifecycle_event_bus_ready () with
-  | Error _ as error -> error
-  | Ok () when not (Keeper_subprocess_registry.default_cleanup_hook_registered ()) ->
-    Error "default Keeper subprocess cleanup hook is not registered"
-  | Ok () -> Ok ()
-;;
-
 let handle_completion config operation = function
   | Keeper_shutdown_types.Supervisor_cleaned ->
-    (match cleanup_sinks_ready () with
+    (match lifecycle_event_bus_ready () with
      | Error _ as error -> error
      | Ok () ->
        let operation_id =

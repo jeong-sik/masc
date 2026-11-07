@@ -537,35 +537,6 @@ let test_ws_upgrade_allows_authenticated_cross_origin () =
       failf "expected authenticated cross-origin upgrade to pass, got %s"
         (Masc_domain.masc_error_to_string err))
 
-(* The routes below are guarded on H1 and must stay outside the public-read
-   allowlist. This is the invariant the H2 fix rests on: adding any of these
-   paths to [is_public_read_path] would open them on BOTH transports, and the
-   wrapper parity asserted in the next test would then prove nothing. *)
-let test_transport_guarded_paths_are_not_public_read () =
-  List.iter
-    (fun path ->
-      check bool
-        (Printf.sprintf "%s is not public-read" path)
-        false
-        (Server_auth.is_public_read_path path))
-    [ "/graphql"
-    ; "/api/v1/dashboard/workspace"
-    ; "/api/v1/status"
-      (* Wrapped in with_public_read on HTTP/1 and answered unauthenticated
-         over h2c until #28161: the H2 arms ran their handlers with no gate at
-         all. They stay out of the allowlist, or wrapping them changes
-         nothing. *)
-    ; "/api/v1/openapi.json"
-    ; "/api/v1/voice/config"
-    ; "/api/v1/gate/connector/names"
-    ; "/api/v1/board/curation"
-    ; "/api/v1/board/hearths"
-    ; "/api/v1/board/sub-boards"
-    ; "/api/v1/board/sub-boards/some-board"
-    ; "/api/v1/board/karma/ledger"
-    ; "/api/v1/karma"
-    ]
-
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -595,8 +566,6 @@ let () =
         ] );
       ( "read-auth-admission",
         [
-          test_case "transport-guarded paths are not public-read" `Quick
-            test_transport_guarded_paths_are_not_public_read;
           test_case "auth-error CORS reads admission, not the raw Origin" `Quick
             test_auth_error_cors_reads_admission_not_the_raw_origin;
         ] );

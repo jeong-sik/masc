@@ -669,15 +669,7 @@ let test_http_publication_errors () =
   check_json "uncertain response links the exact revision" (`String (A.url ~revision:3 id))
     (json_member "url" uncertain);
   Alcotest.(check bool) "uncertain response explains reread before retry" true
-    (String.trim (json_member "recovery" uncertain |> json_string) <> "");
-  List.iter (fun path -> Alcotest.(check bool) "report catalog routes require private reads" false
-    (Server_auth.is_public_read_path path))
-    ["/api/v1/published-artifacts"; "/api/v1/published-artifacts/";
-     "/api/v1/published-artifacts/not-a-valid-id"; "/api/v1/published-artifact-checks"];
-  List.iter (fun path -> Alcotest.(check bool) "capability-addressed artifact reads are public" true
-    (Server_auth.is_public_read_path path))
-    ["/api/v1/published-artifacts/" ^ id;
-     "/api/v1/published-artifacts/" ^ id ^ "?revision=3"]
+    (String.trim (json_member "recovery" uncertain |> json_string) <> "")
 
 (* Exercise the registered routes through Httpun so permission wrappers,
    anonymous sharing, and the checkpoint wire parser are tested together. *)

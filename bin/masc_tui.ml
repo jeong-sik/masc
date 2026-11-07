@@ -29492,9 +29492,9 @@ let main
   let resize_generation = Atomic.make 0 in
 
   let restore_terminal_outcome () =
-    (* No tracking-off here: suspend runs this too, and a terminal that
-       re-enters raw mode after Ctrl-Z would silently lose the wheel. The
-       off byte is written once, in [cleanup], at real process exit. *)
+    (* No tracking-off here. [cleanup] writes the off byte once, at real
+       process exit, after the farewell. [suspend] writes it before the stop
+       and takes the mode again when the process continues. *)
     Frame_presenter.cleanup frame_presenter ~write:(output_string stdout)
       ~flush:(fun () -> flush stdout);
     if Terminal_profile.dynamic_title terminal_profile then
@@ -29579,6 +29579,12 @@ let main
     Masc_tui_exit_signals.request_interrupt exit_signals
   in
   let rec suspend _ =
+    (* The shell has the terminal while this process is stopped. It does not
+       read mouse reports, so the wheel would print as characters at its
+       prompt and a drag would not select. Tracking is a terminal mode, not
+       part of the alternate screen, so leaving that screen does not clear it. *)
+    output_string stdout mouse_tracking_disable;
+    flush stdout;
     restore_terminal ();
     Sys.set_signal Sys.sigtstp Sys.Signal_default;
     Fun.protect
@@ -29590,6 +29596,10 @@ let main
            frame lands on top of whatever the user did meanwhile. *)
         Frame_presenter.setup frame_presenter ~write:(output_string stdout)
           ~flush:(fun () -> flush stdout);
+        (* F2 hands the mouse back to the terminal; a stop in that state
+           continues in it. [enable_bracketed_paste] flushes. *)
+        if Atomic.get mouse_tracking_on then
+          output_string stdout mouse_tracking_enable;
         enable_bracketed_paste ();
         request_full_repaint 0)
       (fun () -> Unix.kill (Unix.getpid ()) Sys.sigtstp)

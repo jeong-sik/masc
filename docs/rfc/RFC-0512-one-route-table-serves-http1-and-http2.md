@@ -115,14 +115,14 @@ piaf 0.2.0 은 HTTP/1.1·HTTP/2·TLS 를 한 API 로 주지만 핸들러가 `Res
 - Cloudflare 터널로 HTTP/2 를 쓰려면 운영자가 `config.yml` 의 `service` 를 `https://127.0.0.1:8938` 로 바꾸고 `originRequest.http2Origin: true` 와 `noTLSVerify: true`(또는 `caPool`)를 적는다. 이 RFC 는 그 파일을 건드리지 않는다. 절차는 `docs/guides/https-and-http2.md` 에 적는다.
 - `/health` `http_listener` 에 `https` 섹션(`port`, `alpn` 별 연결 수, `tls_source: configured | self_signed`)이 생긴다. `Transport_metrics` 의 `mode` 라벨에 `tls` 가 더해진다. 대시보드 transport-health 카드가 그것을 보인다.
 - TOML 키 5개가 생긴다: `transport.https_port`, `transport.tls_cert_file`, `transport.tls_key_file`, `transport.h2_initial_window_size`, `transport.h2_max_frame_size`(마지막 둘은 S5).
-- HTTP/2 응답이 바뀌는 곳: 손 등록에 없던 경로가 HTTP/1.1 과 같은 답을 준다(fleet 스트림 200 등). 게이트웨이에만 있던 별명 경로가 있으면 404 가 된다. A1 비교로 목록을 만들어 S3 PR 본문에 적는다.
+- HTTP/2 응답이 바뀌는 곳: 손 등록에 없던 경로가 HTTP/1.1 과 같은 답을 준다(fleet 스트림 200 등). 게이트웨이에만 있던 별명 경로는 없다: 지운 H2 모듈 세 개가 맞추던 경로 리터럴 89개가 모두 살아 있는 등록에 있다(S3 PR 본문의 정적 비교). A1 의 전·후 비교는 이 가지로 만든 바이너리가 있어야 하므로 S5 에서 한다.
 
 ## 5. 측정
 
 - 전(이미 있음): `docs/evidence/http2-one-table-2026-11/baseline/`.
 - 후(S5 끝에): 같은 인자로 `after/`. 전송 `h1-6`, `h1`, `h2c` 에 TLS 리스너의 `h2` 를 더한다.
 - 비교할 것: SSE 50개가 h2·h2c 에서 50개 열리는지. burst req/s·p99 가 HTTP/1.1 에서 기준선보다 나빠지지 않았는지(회귀 검사). h2 다운로드 MB/s 가 curl 기준 h1 의 0.84 배에서 어디로 갔는지. 한 요청 왕복에서 h2c 의 2~3 ms 추가 비용이 어디로 갔는지.
-- 전송별 경로 차이: `scripts/auth-route-baseline/run.sh` 를 S3 전·후에 돌려 `compare.py` 차이 0건.
+- 전송별 경로 차이: `scripts/auth-route-baseline/run.sh` 를 S3 전(기준선 바이너리)·후(S5 의 바이너리)에 돌려 `compare.py` 차이 0건.
 - 브라우저: DevTools Network 의 Protocol 열이 `h2` 인 스크린샷, 대시보드 한 탭의 연결 수(`lsof -nP -iTCP:8935,8938`) 전·후.
 
 ## 6. 열린 질문
@@ -146,9 +146,9 @@ piaf 0.2.0 은 HTTP/1.1·HTTP/2·TLS 를 한 API 로 주지만 핸들러가 `Res
 | S0 | `research/http-transport-ecosystem` | 조사 문서, 벤치 도구, 기준선(들어 있음) |
 | S1 | `rfc/one-route-table-both-transports` | 이 문서 |
 | S2 | `http/neutral-reqd` | `Http_reqd`, `Http_server_eio` 의 `Response`·`Request`·`Router`·`Wrappers`·`Typed`, `Server_sse_response`, 직접 호출 ~25곳, 시험 픽스처 `Http_reqd.of_httpun`. H2 쪽은 안 건드림 |
-| S3 | `http/shared-ingress-and-gateway-fold` | `Server_http_ingress`, H2 어댑터 ~150줄, 삭제 목록(D4), 혼자 덮던 H2 시험을 두 전송 공용 픽스처로 |
+| S3 | `http/shared-ingress-and-gateway-fold` | `Server_http_ingress`, H2 어댑터 55줄, 삭제 목록(D4). H2 end-to-end 시험은 접힌 어댑터를 그대로 치고, H2 역학 시험은 `Http_reqd.of_h2` 손잡이 위의 공용 `Response` 를 친다. 두 전송 공용 픽스처는 만들지 않는다: 표가 하나라 같은 케이스를 두 번 돌려도 잡을 차이가 없다 |
 | S4 | `http/tls-alpn-listener` | D6, health·메트릭·대시보드 카드, `docs/guides/https-and-http2.md` |
 | S5 | `http/h2-engine-tuning` | D7, `after/` 측정 |
 | S6 | `docs/http2-one-table` | `docs/spec/09-server-transport.md`, `01-system-overview.md`(OQ-SYS-002), `TRANSPORT-PRACTICAL-PLAYBOOK.md`, `guides/h2-response-resources.md`, `verify_h2c_autodetect.sh` |
 
-S3 병합으로 닫는 이슈: #35592, #46676, #47609, #47348, #47534, #47551, #47255. #40063·#35579 는 HTTP/2 부분만 코멘트. 새 이슈: h2 포크 stream id(#39050 후속), WebSocket over HTTP/2, gRPC 를 TLS 리스너로, Q1.
+S3 병합으로 닫는 이슈: #35592, #46676, #47609, #47255. #47348, #47534, #47551 은 S5 의 `after/` 측정(fleet SSE 가 h2c 로 열리는지, 전송별 경로 차이 0건)이 보여 준 뒤 닫는다. #40063·#35579 는 HTTP/2 부분만 코멘트. 새 이슈: h2 포크 stream id(#39050 후속), WebSocket over HTTP/2, gRPC 를 TLS 리스너로, Q1.

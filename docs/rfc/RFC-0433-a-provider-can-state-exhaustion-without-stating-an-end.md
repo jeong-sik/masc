@@ -3,7 +3,7 @@ rfc: "0433"
 title: "고갈은 말하고 끝나는 때는 안 말하는 provider — 그래서 하루 종일 죽은 곳으로 보낸다"
 status: Implemented
 created: 2026-09-06
-updated: 2026-09-07
+updated: 2026-11-06
 author: vincent
 supersedes: null
 superseded_by: null
@@ -66,6 +66,9 @@ RFC-0370 이 거부한 것은 **지어낸 기간**이다. 이 RFC 는 기간을 
 ### 3.1 언제 지워지는가
 
 시계가 아니라 **다음 성공**이 지운다.
+
+> 2026-11-06 개정(RFC-provider-path-rest §3.3): 표시는 기록 시각 +
+> `rate_limit_backoff_cap_sec`(900초)까지만 순서에서 뒤로 민다. 성공은 그 전에도 지운다.
 
 ```
 mark   : 고갈 거절, retry_after 없음  → scope 를 "관찰된 고갈" 로 표시

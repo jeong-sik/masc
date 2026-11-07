@@ -1,9 +1,11 @@
-(** Server_dashboard_http_keeper_api_types — pure routing types + helpers
+(** Server_dashboard_http_keeper_api_types — routing types + shared helpers
     extracted from Server_dashboard_http_keeper_api (3136 LoC godfile).
 
     Holds the [keeper_post_route_kind] ADT + path classification helpers
-    + URL prefix/suffix string constants. State-touching HTTP handlers
-    remain in Server_dashboard_http_keeper_api. Re-included by that module
+    + URL prefix/suffix string constants + the error envelope
+    ([error_json], [respond_error]) that the dashboard handlers share.
+    State-touching HTTP handlers remain in
+    Server_dashboard_http_keeper_api. Re-included by that module
     so existing callers continue to use
     [Server_dashboard_http_keeper_api.classify_keeper_post_route] etc.
     unchanged. *)
@@ -203,3 +205,13 @@ val runtime_manifest_public_json :
 val error_json : ?ok:bool -> string -> Yojson.Safe.t
 (** [error_json ?ok message] builds [`Assoc] with an ["error"] field holding
     [message], prefixed by an ["ok"] boolean field when [ok] is supplied. *)
+
+val respond_error :
+  ?status:Httpun.Status.t ->
+  ?request:Httpun.Request.t ->
+  ?ok:bool ->
+  Http_reqd.t ->
+  string ->
+  unit
+(** [respond_error ?status ?request ?ok reqd message] answers [reqd] with
+    {!error_json} as the JSON body. [status] defaults to [`Bad_request]. *)

@@ -153,7 +153,7 @@ let run_attempt_with ~advance_events ?prepare_observer_registration ?on_verdict 
           | Preparation_intended _ | Preparation_observed _ | Replacement_intended _
           | Replacement_observed _ | Commit_intended _ | Commit_uncertain _
           | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _ | Refused _
-          | Successor_intended _ | Successor_observed _ | Observer _),Some _ -> [event] in
+          | Refusal_settled _ | Successor_intended _ | Successor_observed _ | Observer _),Some _ -> [event] in
       (match advance_events ~store !current events |> Result.map_error map_load_error with
        | Error error -> raise (Retention_failed error)
        | Ok saved -> current := saved);

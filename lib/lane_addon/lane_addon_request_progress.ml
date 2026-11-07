@@ -14,21 +14,22 @@ type event = Dispatch_intended | Admission_declined of Yojson.Safe.t | Execution
   | Replacement_observed of string | Commit_intended of change
   | Commit_uncertain of Yojson.Safe.t | Commit_retry_observed of Yojson.Safe.t
   | Commit_observed of Yojson.Safe.t | Commit_conflicted of Yojson.Safe.t
-  | Refused of refusal | Successor_intended of successor | Successor_observed of string
-  | Observer of Lane_addon_request_receipt.event
+  | Refused of refusal | Refusal_settled of Yojson.Safe.t | Successor_intended of successor
+  | Successor_observed of string | Observer of Lane_addon_request_receipt.event
 type phase = Captured | Admission_wait of Yojson.Safe.t | Dispatch_pending of observation option
   | Judged of Yojson.Safe.t | Committing of commit
   | Commit_unknown of commit * Yojson.Safe.t | Finished of commit
   | Conflicted of commit * Yojson.Safe.t | Rejected of refusal
   | Subdividing of refusal * successor | Subdivided of refusal * successor
 type t = { events_rev : event list; phase : phase; preparation:preparation option;
-  replacement:preparation option;
+  replacement:preparation option; settlement:Yojson.Safe.t option;
   observer:Lane_addon_request_receipt.t }
-let captured = {events_rev=[];phase=Captured;preparation=None;replacement=None;observer=Lane_addon_request_receipt.empty}
+let captured = {events_rev=[];phase=Captured;preparation=None;replacement=None;settlement=None;observer=Lane_addon_request_receipt.empty}
 let phase t = t.phase
 let events t = List.rev t.events_rev
 let preparation t = t.preparation
 let replacement t = t.replacement
+let settlement t = t.settlement
 let observer t = t.observer
 let object_fields names = function
   | `Assoc fields when List.sort String.compare (List.map fst fields) =
@@ -55,6 +56,7 @@ let event_to_json = function
   | Commit_retry_observed before -> envelope "commit_retry_observed" ["before",before]
   | Commit_observed after -> envelope "commit_observed" ["after",after]
   | Commit_conflicted observed -> envelope "commit_conflicted" ["observed",observed]
+  | Refusal_settled evidence -> evidence_event "refusal_settled" evidence
   | Successor_intended successor -> envelope "successor_intended"
       ["request_id",`String successor.request_id;"request_digest",`String successor.request_digest]
   | Successor_observed request_id -> envelope "successor_observed" ["request_id",`String request_id]
@@ -108,6 +110,7 @@ let event_of_json json =
   | "commit_retry_observed" -> value "before" (fun value -> Commit_retry_observed value)
   | "commit_observed" -> value "after" (fun value -> Commit_observed value)
   | "commit_conflicted" -> value "observed" (fun value -> Commit_conflicted value)
+  | "refusal_settled" -> evidence (fun value -> Refusal_settled value)
   | "successor_intended" ->
     let* fields = fields ["request_id";"request_digest"] in
     (match List.assoc "request_id" fields, List.assoc "request_digest" fields with
@@ -188,6 +191,11 @@ let step phase = function
       | (Captured | Admission_wait _),Execution | Dispatch_pending _,Before_dispatch
       | (Judged _ | Committing _ | Commit_unknown _ | Finished _ | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _),
         (Before_dispatch | Execution) -> invalid ())
+  | Refusal_settled _ -> (match phase with
+      | Rejected {stage=Execution;_} -> Ok phase
+      | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
+      | Commit_unknown _ | Finished _ | Conflicted _ | Rejected {stage=Before_dispatch;_}
+      | Subdividing _ | Subdivided _ -> invalid ())
   | Successor_intended successor -> (match phase with
       | Rejected ({stage=Execution;_} as refusal) -> Ok (Subdividing (refusal,successor))
       | Captured | Admission_wait _ | Dispatch_pending _ | Judged _ | Committing _
@@ -213,8 +221,8 @@ let append_validated t event =
       Error "domain commit cannot precede original prerequisite publication acknowledgement"
     | (Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
       | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
-      | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _ | Observer _
-      | Replacement_intended _ | Replacement_observed _),
+      | Commit_conflicted _ | Refused _ | Refusal_settled _ | Successor_intended _
+      | Successor_observed _ | Observer _ | Replacement_intended _ | Replacement_observed _),
       (None | Some (Preparation_pending _ | Preparation_confirmed _)) -> Ok t.preparation in
   let* replacement = match event,t.replacement with
     | Replacement_intended successor,None -> Ok (Some (Preparation_pending successor))
@@ -226,16 +234,26 @@ let append_validated t event =
     | (Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
       | Preparation_intended _ | Preparation_observed _ | Commit_intended _ | Commit_uncertain _
       | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _ | Refused _
-      | Successor_intended _ | Successor_observed _ | Observer _),
+      | Refusal_settled _ | Successor_intended _ | Successor_observed _ | Observer _),
       (None | Some (Preparation_pending _ | Preparation_confirmed _)) -> Ok t.replacement in
+  let* settlement = match event,t.settlement with
+    | Refusal_settled evidence,None -> Ok (Some evidence)
+    | Refusal_settled _,Some _ -> Error "a refusal can be settled only once"
+    | Successor_intended _,Some _ -> Error "a settled refusal cannot be subdivided"
+    | (Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
+      | Preparation_intended _ | Preparation_observed _ | Replacement_intended _
+      | Replacement_observed _ | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _
+      | Commit_observed _ | Commit_conflicted _ | Refused _ | Successor_intended _
+      | Successor_observed _ | Observer _),(None | Some _) -> Ok t.settlement in
   let* phase = step t.phase event in
   let* observer = match event with
     | Observer event -> Lane_addon_request_receipt.append t.observer event
     | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
     | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
     | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
-    | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _ -> Ok t.observer in
-  Ok {events_rev=event :: t.events_rev;phase;preparation;replacement;observer}
+    | Commit_conflicted _ | Refused _ | Refusal_settled _ | Successor_intended _
+    | Successor_observed _ -> Ok t.observer in
+  Ok {events_rev=event :: t.events_rev;phase;preparation;replacement;settlement;observer}
 let append t event =
   let* event = match event with
     (* Receipt construction is opaque. Its append checks ACK text and ordering;
@@ -244,7 +262,8 @@ let append t event =
     | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
     | Preparation_intended _ | Preparation_observed _ | Replacement_intended _ | Replacement_observed _
     | Commit_intended _ | Commit_uncertain _ | Commit_retry_observed _ | Commit_observed _
-    | Commit_conflicted _ | Refused _ | Successor_intended _ | Successor_observed _ ->
+    | Commit_conflicted _ | Refused _ | Refusal_settled _ | Successor_intended _
+    | Successor_observed _ ->
       event_of_json (event_to_json event) in
   append_validated t event
 let to_json t = `List (List.map event_to_json (events t))

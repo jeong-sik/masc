@@ -36,7 +36,7 @@ let protect_record marked record =
     | Dispatch_intended | Admission_declined _ | Execution_observed _ | Judgment_retained _
     | Preparation_observed _ | Replacement_observed _ | Commit_intended _ | Commit_uncertain _
     | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _ | Refused _
-    | Successor_observed _ | Observer _ -> Ok digests)
+    | Refusal_settled _ | Successor_observed _ | Observer _ -> Ok digests)
     (Ok digests) (Progress.events (Owner.Record.progress record)) in
   Ok {digests;active_bodies}
 

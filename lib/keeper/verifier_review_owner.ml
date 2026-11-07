@@ -180,7 +180,7 @@ let advance_events_with ~publish ~store retained events =
       | Preparation_intended _ | Preparation_observed _ | Replacement_intended _
       | Replacement_observed _ | Commit_intended _ | Commit_uncertain _
       | Commit_retry_observed _ | Commit_observed _ | Commit_conflicted _ | Refused _
-      | Successor_intended _ | Successor_observed _ | Observer _ -> false) events ->
+      | Refusal_settled _ | Successor_intended _ | Successor_observed _ | Observer _ -> false) events ->
     Error (Load_store_unavailable "dispatch intention was already retained; dispatch outcome must be restored")
   | Ok (Owner.Stored record | Owner.Already_stored record) -> Ok {retained with record}
 

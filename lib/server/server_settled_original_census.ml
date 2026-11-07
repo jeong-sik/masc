@@ -49,7 +49,8 @@ let progress_ids progress =
       | Progress.Execution_observed _ | Progress.Judgment_retained _
       | Progress.Commit_intended _ | Progress.Commit_uncertain _
       | Progress.Commit_retry_observed _ | Progress.Commit_observed _
-      | Progress.Commit_conflicted _ | Progress.Refused _ | Progress.Observer _ -> [])
+      | Progress.Commit_conflicted _ | Progress.Refused _ | Progress.Refusal_settled _
+      | Progress.Observer _ -> [])
     (Progress.events progress)
 
 (* The function each gate inventory groups its records by. *)

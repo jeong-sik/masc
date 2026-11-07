@@ -10,7 +10,8 @@ module Edge = Keeper_librarian_durable_edge
 module Current = Keeper_memory_os_current
 open Result.Syntax
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
-type t = {request_id:string;destination:Request.destination;refusal:Consumer.error}
+type t = {request_id:string;destination:Request.destination;refusal:Consumer.error;
+  original:Retained.retained*Request.t}
 type retained = {record:Retained.retained;request:Request.t;
   selection:Sources.counterpart_selection Lazy.Mutexed.t}
 type inventory = retained list
@@ -107,7 +108,7 @@ let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
   let source=Request.source request in
   match Progress.phase record.progress with
   | Rejected {stage=Progress.Execution;evidence} ->
-    if not (counterpart_only source) then Ok None else
+    if not (counterpart_only source) || Option.is_some (Progress.settlement record.progress) then Ok None else
     let* exact=Request.request request in
     let* schema=Option.to_result ~none:"Original history refusal lacks its schema" exact.schema in
     let* retained=Exact.retained_final_of_json ~schema evidence in
@@ -125,7 +126,7 @@ let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
             if not past then Ok false else
             Ok (List.exists (completed_covers ~original:request ~original_selection:original.selection) completed)) in
           Ok (if committed then None else Some {request_id=record.request_id;
-            destination=Request.destination request;refusal})
+            destination=Request.destination request;refusal;original=(record,request)})
         | Error ((Consumer.Keeper_meta_absent
                  | Original_publication_blocked _ | Source_capture_failed _
                  | Keeper_meta_unreadable _ | Boundary_log_unreadable _
@@ -139,7 +140,7 @@ let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
                  | Official_progress_boundary_missing _
                  | Committed_official_range_mismatch | Official_range_stopped _
                  | Fragment_store_unreadable _ | Fragment_line_unreadable _) as refusal) ->
-          Ok (Some {request_id=record.request_id;destination=Request.destination request;refusal})
+          Ok (Some {request_id=record.request_id;destination=Request.destination request;refusal;original=(record,request)})
         | Ok _ -> Ok None)
      | Call_final (Answered _ | Invalid_output _ | Input_refused Invalid_request | Output_limit_reached _)
      | Outcome_unknown | Not_allowed _ | Request_id_reused -> Ok None)
@@ -147,6 +148,35 @@ let retained_stop ~store ~completed ~(record:Retained.retained) ~request =
   | Finished _ | Conflicted _ | Rejected {stage=Progress.Before_dispatch;_}
   | Subdividing _ | Subdivided _ -> Ok None
 let request_id stop=stop.request_id
+let original stop=stop.original
+(* The coordinates a settled refusal keeps: what was abandoned and what the
+   settlement applied, so the record alone says why this range was never read. *)
+let diagnosis stop = match stop.refusal with
+  | Consumer.Counterpart_input_capacity_refused
+      {atom_range;official_range;counterpart_digest;observation_count;observation_bytes;reports;_} ->
+    let ((record:Retained.retained),_)=stop.original in
+    let optional encode=Option.fold ~none:`Null ~some:encode in
+    Some (`Assoc ["version",`Int 1;"kind",`String "librarian-capacity-refusal-settled";
+      "refused_request_id",`String record.request_id;"refused_request_digest",`String record.request_digest;
+      "counterpart_digest",`String counterpart_digest;
+      "observation_count",`Int observation_count;"observation_bytes",`Int observation_bytes;
+      "atom",optional Current.durable_range_id_to_json atom_range;
+      "official",optional Current.official_range_id_to_json official_range;
+      (* Each read position moves only when the refused range has that part
+         (Commit.atom_target / official_target are Option.map over the range). *)
+      "applied",`List ([`String "memory range receipts, no claims";`String "external ACK through the refused frontier"]
+        @ (if Option.is_some atom_range then [`String "atom read position to the refused range end"] else [])
+        @ (if Option.is_some official_range then [`String "official read position to the refused range end"] else []));
+      "reports",`List (List.map (fun (report:Runtime.not_committed) -> `String report.detail) reports)])
+  | Consumer.Keeper_meta_absent | Original_publication_blocked _ | Source_capture_failed _
+  | Keeper_meta_unreadable _ | Boundary_log_unreadable _ | Progress_unreadable _
+  | Checkpoint_unreadable _ | Position_in_other_trace _ | Position_not_in_history _
+  | Range_stopped _ | Range_end_boundary_missing _ | Progress_boundary_missing _
+  | Memory_snapshot_unreadable _ | Counterpart_interval_non_monotone _
+  | Counterpart_observations_unreadable _ | Progress_write_failed _
+  | Official_progress_unreadable _ | Official_progress_write_failed _
+  | Official_progress_boundary_missing _ | Committed_official_range_mismatch
+  | Official_range_stopped _ | Fragment_store_unreadable _ | Fragment_line_unreadable _ -> None
 let blocks_destination stops current =
   List.find_map (fun stop -> if Edge.same_destination current stop.destination
     then Some stop.refusal else None) stops

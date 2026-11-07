@@ -560,6 +560,31 @@ let test_replacement_strict_codec_rejects_malformed_and_changed_intents () =
   List.iter (fun tail -> match Progress.of_json (`List (history@tail)) with
     | Error _ -> () | Ok _ -> Alcotest.fail "malformed replacement history became valid") malformed
 
+let test_refusal_settlement_is_one_orthogonal_fact_on_an_execution_refusal () =
+  let fold events=get (List.fold_left (fun state event ->
+    Result.bind state (fun state -> Progress.append state event)) (Ok Progress.captured) events) in
+  let dispatch=[Progress.Dispatch_intended] in
+  let refusal=Progress.Refused {stage=Progress.Execution;evidence=evidence "capacity refusal"} in
+  let diagnosis=`Assoc ["applied_effects",`List [];"range",`String "atoms 3..9"] in
+  let child:Progress.successor={request_id="must-not-dispatch";request_digest=String.make 64 'a'} in
+  let refused=fold (dispatch@[refusal]) in
+  Alcotest.(check bool) "an unsettled refusal has no settlement" true (Progress.settlement refused=None);
+  let settled=get (Progress.append refused (Progress.Refusal_settled diagnosis)) in
+  Alcotest.(check bool) "settlement keeps the refusal phase and its evidence" true
+    (Progress.phase settled=Progress.phase refused && Progress.settlement settled=Some diagnosis);
+  (match Progress.append settled (Progress.Refusal_settled diagnosis) with
+   | Error _ -> () | Ok _ -> Alcotest.fail "a refusal was settled twice");
+  (match Progress.append settled (Progress.Successor_intended child) with
+   | Error _ -> () | Ok _ -> Alcotest.fail "a settled refusal was subdivided");
+  let reopened=get (Progress.of_json (Progress.to_json settled)) in
+  Alcotest.(check bool) "settlement survives the strict codec round trip" true
+    (Progress.settlement reopened=Some diagnosis && Progress.phase reopened=Progress.phase settled);
+  List.iter (fun history ->
+    match Progress.append (fold history) (Progress.Refusal_settled diagnosis) with
+    | Error _ -> () | Ok _ -> Alcotest.fail "settlement attached to a non-execution-refusal original")
+    [[];dispatch;dispatch@[Progress.Judgment_retained judgment];
+     [Progress.Refused {stage=Progress.Before_dispatch;evidence=evidence "before dispatch"}]]
+
 let test_staged_successor_input_survives_publication_cuts () = with_store (fun root store ->
   let child_id="one-retry-child" in
   let child_request=`Assoc ["parent",request;"authority",`String "original replay"] in
@@ -603,6 +628,8 @@ let () = Alcotest.run "Original Add-on request progress" ["owner",[
     test_conflicted_replacement_survives_partial_child_publication;
   Alcotest.test_case "replacement cannot infer away unknown or non-conflicted work" `Quick
     test_replacement_cannot_infer_away_unknown_or_other_phases;
+  Alcotest.test_case "refusal settlement is one orthogonal fact on an execution refusal" `Quick
+    test_refusal_settlement_is_one_orthogonal_fact_on_an_execution_refusal;
   Alcotest.test_case "replacement strict codec refuses malformed changed or duplicate intents" `Quick
     test_replacement_strict_codec_rejects_malformed_and_changed_intents;
   Alcotest.test_case "opaque receipt reuse and strict replay" `Quick

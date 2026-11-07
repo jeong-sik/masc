@@ -378,6 +378,32 @@ let rec consume_one ~config ~keeper_name ~wake =
     match stops with
     | Error detail -> error ("Original history capacity stop did not resolve: " ^ detail)
     | Ok stops ->
+    (* A permanent capacity refusal has no smaller form and its input is
+       append-only, so nothing can ever cover it. Abandon its exact range with a
+       typed diagnosis; the next inventory read finds it settled and releases
+       the destination. A settlement that fails leaves only that stop in place:
+       it keeps blocking its own destination as before, the reason is logged,
+       and the next wake retries (settling is idempotent). The rest of this
+       Keeper's work does not wait on it. *)
+    let abandoned,stops=List.fold_left (fun (count,kept) stop ->
+      match Refusal.diagnosis stop with
+      | None -> count,stop::kept
+      | Some diagnosis ->
+        let record,request=Refusal.original stop in
+        (match io (fun () -> Commit.settle_refused ~store ~request ~record ~diagnosis) with
+         | Ok _ ->
+           Log.Keeper.warn ~keeper_name
+             "durable Librarian abandoned a permanently over-capacity counterpart range: request=%s"
+             (Refusal.request_id stop);
+           count+1,kept
+         | Error detail ->
+           Log.Keeper.warn ~keeper_name
+             "durable Librarian could not settle a permanently over-capacity counterpart range, \
+              its destination stays blocked: request=%s: %s"
+             (Refusal.request_id stop) detail;
+           count,stop::kept)) (0,[]) stops in
+    let stops=List.rev stops in
+    if abandoned>0 then consume_one ~config ~keeper_name ~wake else
     let is_candidate ((record:Retained.retained),_) =
       List.exists (fun candidate -> (Descent.record candidate).request_id=record.request_id) candidates in
     let is_stopped ((record:Retained.retained),_) =

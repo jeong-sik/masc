@@ -71,3 +71,16 @@ module For_testing : sig
       and before source ACK/read-position settlement, so tests can interrupt or
       fault the real filesystem without fabricating domain success. *)
 end
+
+val settle_refused : store:Lane_addon_store.t -> request:Keeper_librarian_durable_request.t ->
+  record:Lane_addon_tool_request_owner.retained -> diagnosis:Yojson.Safe.t ->
+  (Lane_addon_tool_request_owner.retained, string) result
+(** End a permanent execution refusal by abandoning its exact range, then record
+    [Progress.Refusal_settled diagnosis] on the original. Writes the range's
+    Memory receipts with an empty disposition unless they are already proved,
+    runs the same unread archive, external ACK and atom/official position
+    settlement a finished original uses, and only then appends the fact. Refuses
+    any record that is not an unsettled execution refusal, and refuses if the
+    read positions moved outside this original's settlement. A cut re-enters
+    safely. This relaxes fail-closed on purpose: the refused input is never
+    read. Blocking; offload it in an Eio caller. *)

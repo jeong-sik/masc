@@ -262,7 +262,6 @@
   masc.dashboard_tla_specs
   masc.sse_event
   masc.tool_call_quality_benchmark
-  masc.bounded_event_dedupe
   masc.tool_catalog_surfaces
   masc.config_dir_resolver
   masc.skill_config

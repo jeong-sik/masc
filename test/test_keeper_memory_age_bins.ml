@@ -3,9 +3,9 @@ module Age_bins = Masc.Keeper_memory_age_bins
 let now = 1_000_000.0
 
 let test_classify () =
-  let hour = Masc.Masc_time_constants.hour in
-  let day = Masc.Masc_time_constants.day in
-  let week = Masc.Masc_time_constants.days_to_seconds 7 in
+  let hour = Masc_time_constants.hour in
+  let day = Masc_time_constants.day in
+  let week = Masc_time_constants.days_to_seconds 7 in
   Alcotest.(check bool) "future treated as under_hour" true
     (Age_bins.classify ~now (now +. 100.0) = Age_bins.Under_hour);
   Alcotest.(check bool) "now is under_hour" true
@@ -27,9 +27,9 @@ let test_classify () =
 ;;
 
 let test_of_first_seen () =
-  let hour = Masc.Masc_time_constants.hour in
-  let day = Masc.Masc_time_constants.day in
-  let week = Masc.Masc_time_constants.days_to_seconds 7 in
+  let hour = Masc_time_constants.hour in
+  let day = Masc_time_constants.day in
+  let week = Masc_time_constants.days_to_seconds 7 in
   let empty = Age_bins.of_first_seen ~now [] in
   Alcotest.(check int) "empty under_hour" 0 empty.under_hour;
   Alcotest.(check int) "empty under_day" 0 empty.under_day;

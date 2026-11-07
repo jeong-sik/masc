@@ -523,7 +523,6 @@ type slot =
   | Previous_autosave  (** {!autosave_prev_slot}, in any letter case *)
 
 val classify_slot : Machine_checkpoint.slot -> slot
-val named_slot_to_string : named_slot -> string
 
 type replaced =
   | Fresh_slot

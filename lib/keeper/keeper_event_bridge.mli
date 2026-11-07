@@ -46,14 +46,6 @@ module For_testing : sig
   (** The production log projection. The envelope owns the Keeper turn;
       the payload owns the agent. Session-local ordinals are never substituted. *)
 
-  val start_with_retry_interval :
-    interval_s:float ->
-    sw:Eio.Switch.t ->
-    clock:_ Eio.Time.clock ->
-    config:Workspace.config ->
-    bus:Agent_core.Event_bus.t ->
-    unit
-
   val start_with_preparation_hook :
     before_prepare:(unit -> unit) ->
     interval_s:float ->

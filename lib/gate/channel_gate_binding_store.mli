@@ -69,7 +69,6 @@ val create :
 (** Every committed binding change, and a failed audit whose rollback also
     failed, calls [Gate_connector_announce.changed ~connector_id]. *)
 
-val read_json_file_opt : string -> Yojson.Safe.t option
 val normalize_bindings_json :
   Yojson.Safe.t -> (binding list, binding_decode_error) result
 val binding_store_error_to_string : binding_store_error -> string

@@ -758,8 +758,6 @@ let classify_slot slot =
   else Named slot
 ;;
 
-let named_slot_to_string = Machine_checkpoint.slot_to_string
-
 (* The file a classified slot names. A lane-owned slot names its canonical
    file however the caller spelled it: on a case-sensitive filesystem
    "AUTOSAVE.ckpt" is another file, and on a case-folding one a write counter

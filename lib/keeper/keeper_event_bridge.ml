@@ -904,7 +904,5 @@ let start ~sw ~clock ~(config : Workspace.config) ~bus =
 
 module For_testing = struct
   let emit_native_event_log = emit_native_event_log
-  let start_with_retry_interval ~interval_s ~sw ~clock ~config ~bus =
-    start_impl ~before_prepare:(fun () -> ()) ~interval_s ~sw ~clock ~config ~bus
   let start_with_preparation_hook = start_impl
 end

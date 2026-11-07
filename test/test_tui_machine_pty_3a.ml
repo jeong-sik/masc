@@ -301,7 +301,7 @@ let main env =
       (match classified with
        | Some request_authority ->
          Server_request_authority.with_current request_authority (fun () ->
-           Masc.Http_server_eio.Router.dispatch router request reqd;
+           Masc.Http_server_eio.Router.dispatch router request (Masc.Http_reqd.of_httpun reqd);
            (match Httpun.Reqd.response reqd with
             | Some resp ->
               log "http done %s -> %d" request.Httpun.Request.target
@@ -310,7 +310,7 @@ let main env =
        | None ->
          Masc.Http_server_eio.Response.json_value ~status:`Bad_request
            (`Assoc [ "error_code", `String "request_authority_untrusted" ])
-           reqd)
+           (Masc.Http_reqd.of_httpun reqd))
     in
     (* Live-read orchestration state, owned by the request handler. *)
     let live_seen = ref 0 in
@@ -444,7 +444,7 @@ let main env =
           Eio.Time.sleep clock 5.0;
           log "live #1: releasing the stale pre-advance answer now";
           stale_released := true;
-          Masc.Http_server_eio.Response.json ~status:`OK stale reqd
+          Masc.Http_server_eio.Response.json ~status:`OK stale (Masc.Http_reqd.of_httpun reqd)
           (* The held connection has been answered; the handler must not fall
              through to dispatch (a second respond would corrupt it). *)
         end

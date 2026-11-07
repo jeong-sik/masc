@@ -32,10 +32,11 @@ python3 -I docs/evidence/vibe-official-client-lane-20261107/repro/sanitize.py \
 - m10·m11 은 run-l0.sh 의 첫 실행 뒤에 같은 플래그로 손으로 돌렸다. `repro/run-l0.sh`
   에는 둘 다 들어 있다.
 - `summary.tsv` 의 `seconds` 는 run-l0.sh 가 잰 벽시계 시간이다. 손으로 돌린 m10·m11 은
-  이 칸이 `n/a` 다. `export_seconds` 는 `export.json` 의 `ended_at - started_at` 이다.
+  이 칸이 `n/a` 다. run-l0.sh 로 다시 돌리면 m10·m11 에도 이 칸이 찍힌다. `export_seconds`
+  는 `export.json` 의 `ended_at - started_at` 이다.
 - run-l0.sh 는 지금 실행마다 `work.ls`(work 폴더의 `ls -A`)를 남긴다. 이 묶음의 원본은
   그 줄을 넣기 전에 찍었다. 그래서 m1~m11 의 work 폴더는 실행 뒤에 손으로 `ls -A` 했고,
-  모두 비어 있었다.
+  모두 비어 있었다. 이 확인은 묶음에 파일로 남지 않았다.
 
 ## 관찰
 
@@ -47,7 +48,7 @@ python3 -I docs/evidence/vibe-official-client-lane-20261107/repro/sanitize.py \
 | m3 | 모르는 `--model` | 1 | usage_error | `error.message` 가 쓸 수 있는 별칭으로 glm-5-3, mistral-large-4-0-3, mistral-medium-3.5, zai-glm-5-3-flash 를 나열한다 |
 | m4 | env `MISTRAL_API_KEY` 를 남김 | 2 | infrastructure_failure | env 키가 keychain 보다 먼저다. m1·m8 의 stderr 첫 줄 `Reading API keys from the macOS Keychain …` 이 m4 에는 없다. `error.code=backend_error`, message 에 공급자 402 본문 |
 | m5 | `--time-limit 1` | 3 | deadline | stderr `Stopped: deadline`. 1초 한도에 3.05초 돌았다(`export_seconds`). stdout 은 비었다 |
-| m6 | `--max-price 0.000001` | 0 | finished | `cost_usd 0.0` 이라 가격 상한이 걸리지 않는다 |
+| m6 | `--max-price 0.000001` | 0 | finished | `cost_usd 0.0` 이었고 가격 상한은 걸리지 않았다. 2 step 에 끝나서, 비용이 0 이어서인지 상한 검사가 턴 사이에만 도는지는 가를 수 없다 |
 | m7 | `--max-tokens 200` | 3 | token_limit | 한도 200 에 `output_tokens` 845. 답은 1~400 을 다 적었다. `stop_reason=interrupted`. 한도는 넘은 뒤에 멈춘다 |
 | m8 | `--agent ask`, bash `echo hi` | 0 | finished | 승인 없이 실행됐다. effect `completed`, `state.decision=execute`, `approvalType=always`, `approvalSource=config` |
 | m9 | `-p "/whoami"` | 3 | turn_limit | slash 명령으로 처리되지 않고 모델 프롬프트가 됐다. 모델이 `skill.read`, bash `pwd && ls -la`(m8 과 같은 승인 값)와 도구 검색으로 3턴을 썼다. 입력 64,027 토큰 |

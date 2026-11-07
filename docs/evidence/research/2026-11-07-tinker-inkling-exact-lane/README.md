@@ -32,9 +32,10 @@ R의 입력과 채점기는 `~/me/.masc/benchmarks/local-llm-2026-09/`에서 읽
 데이터셋 행위자는 개인·시험용 Keeper뿐이다.
 `kidsnote`, `키즈노트`, `slack-reader`, `familynote`, `smartorder` 문자열은 0건이었다.
 
-R의 요청은 MASC `openai_chat` 경로가 보내는 모양을 따른다.
-`response_format`은 `{"type":"json_schema","json_schema":{"name":…,"schema":…,"strict":true}}`이다
-(`packages/agent_core/lib/llm_provider/backend_openai_request.ml:149`).
+R의 요청은 `response_format`에 `{"type":"json_schema","json_schema":{"name":…,"schema":…,"strict":true}}`을 실었다.
+MASC가 native schema를 선언한 모델에 보내는 모양이다(`packages/agent_core/lib/llm_provider/backend_openai_request.ml:149`).
+MASC exact 레인은 `Json_syntax`를 요청하므로 실제로는 `json_schema`를 보내지 않는다.
+대신 스키마 지시를 마지막 사용자 메시지로 덧붙인다(`exact_output_ready_admission.ml`). R에는 그 지시가 없다.
 `temperature`는 0.0이고, `max_tokens`는 레인 답 예산에 effort별 여유를 더한 값이다.
 여유는 none 0, low 4,096, medium 12,288 토큰이다.
 board는 8건씩 동시에 보냈다. 8은 관측된 가장 큰 board 묶음이다(`LIVE-WIRING-ROLLBACK.md`).
@@ -97,6 +98,6 @@ R (`replay-summary.json`):
 - 표본이 작다(librarian 17, board 20). 일치율 차이 0.1은 board 2건이다.
 - 데이터셋은 2026-09 모양이다. librarian 프롬프트 p50이 64KB인데,
   2026-11-07 라이브 librarian 입력 p50은 12.9KB였다. 지금 프롬프트로는 다시 재지 않았다.
-- MASC 런타임으로 보낸 요청은 없다. 요청 모양만 MASC를 따랐고, 슬롯·폴백·검증 경로는 돌리지 않았다.
+- MASC 런타임으로 보낸 요청은 없다. 요청 모양도 MASC exact 레인과 다르다(위 R 설명). 슬롯·폴백·검증 경로는 돌리지 않았다.
 - Beta 엔드포인트의 한도는 문서에 숫자가 없다. 동시 8건 넘는 부하는 재지 않았다.
 - `:peft:262144` ID는 창 크기만 쟀다.

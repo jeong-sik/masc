@@ -10,16 +10,6 @@
 
    See host_config.mli for the contract. *)
 
-type coreutils =
-  { ls : string
-  ; cat : string
-  ; pwd : string
-  ; head : string
-  ; tail : string
-  ; wc : string
-  }
-[@@deriving show, eq]
-
 type test_mode_kind =
   | Test
   | Production
@@ -35,7 +25,6 @@ type t =
   ; host_bash : string
   ; host_zsh : string
   ; host_sh : string
-  ; coreutils : coreutils
   ; agent_runtime_root : string
   ; sandbox_workspace_root : string
   ; test_mode : test_mode_kind
@@ -50,16 +39,6 @@ type t =
   ; assets_dir : string option
   }
 [@@deriving show, eq]
-
-let coreutils_defaults =
-  { ls = "/bin/ls"
-  ; cat = "/bin/cat"
-  ; pwd = "/bin/pwd"
-  ; head = "/usr/bin/head"
-  ; tail = "/usr/bin/tail"
-  ; wc = "/usr/bin/wc"
-  }
-;;
 
 let base_path_lease_dir_env_key = "MASC_BASE_PATH_LEASE_DIR"
 
@@ -91,7 +70,6 @@ let host () =
   ; host_bash = "/bin/bash"
   ; host_zsh = "/bin/zsh"
   ; host_sh = "/bin/sh"
-  ; coreutils = coreutils_defaults
   ; agent_runtime_root = tmp
   ; sandbox_workspace_root = default_workspace_root (Filename.concat tmp "masc-fleet")
   ; test_mode =

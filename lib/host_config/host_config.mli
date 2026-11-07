@@ -15,18 +15,6 @@
     use the auto-generated [pp_t], [show_t], [equal] without writing
     bespoke formatters. *)
 
-(** Coreutils binary paths.  [host ()] fills every field from the
-    [coreutils_defaults] record. *)
-type coreutils =
-  { ls : string
-  ; cat : string
-  ; pwd : string
-  ; head : string
-  ; tail : string
-  ; wc : string
-  }
-[@@deriving show, eq]
-
 (** Test-mode token (replaces [String.starts_with "test_" executable]
     at the historical 5 detection sites). *)
 type test_mode_kind =
@@ -52,8 +40,6 @@ type t =
   ; host_bash : string  (** Absolute path to [bash] binary. *)
   ; host_zsh : string  (** Absolute path to [zsh] binary. *)
   ; host_sh : string  (** Absolute path to POSIX [sh] binary. *)
-  ; coreutils : coreutils
-        (** ls / cat / pwd / head / tail / wc absolute paths. *)
   ; agent_runtime_root : string
         (** Runtime root for cross-process agent identity files.
             [<tmp>] from [host ()]. *)
@@ -102,8 +88,7 @@ type t =
 
 (** [host ()] returns the canonical default [t].  Used by 60+ keeper /
     dispatch / shell call-sites.  Tmp-directory roots are resolved via
-    [Filename.get_temp_dir_name ()] (honours [TMPDIR]).  Binary paths
-    fall back to the [coreutils_defaults] record.
+    [Filename.get_temp_dir_name ()] (honours [TMPDIR]).
 
     The path env-var-derived fields, including [base_path_lease_root] from
     [MASC_BASE_PATH_LEASE_DIR], are populated from [Sys.getenv_opt] at call

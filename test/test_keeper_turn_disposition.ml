@@ -283,13 +283,48 @@ let test_registry_failure_reason_preserves_typed_configuration_error () =
       (Agent_core.Error.InvalidConfig
          { field = "user_blocks"; detail = marker_shaped_detail })
   in
+  (* A field can carry an external JSON key name (Agent_card). Only the name
+     is shown, within the preview limit, and a marker-shaped name is not read
+     back as an internal error. *)
+  let marker_shaped_field =
+    Keeper_internal_error.core_error_of_masc_internal_error
+      (Keeper_internal_error.Resumable_cli_session
+         { runtime_id = "runtime.field-injection"
+         ; detail = "field-name"
+         ; exit_code = None
+         })
+    |> Agent_core.Error.to_string
+  in
+  (match
+     classify
+       (Agent_core.Error.Config
+          (Agent_core.Error.InvalidConfig { field = marker_shaped_field; detail = secret }))
+   with
+   | Some (Registry.Provider_runtime_error { detail; _ }) ->
+     Alcotest.(check bool)
+       "a marker-shaped field is shown as a field name"
+       true
+       (String.starts_with ~prefix:"provider configuration failed (field " detail);
+     Alcotest.(check bool)
+       "the shown field stays within the preview limit"
+       true
+       (String.length detail <= 220 + String.length "...");
+     Alcotest.(check bool)
+       "the free-text detail stays out next to a marker-shaped field"
+       false
+       (String_util.contains_substring detail secret)
+   | Some other ->
+     Alcotest.failf
+       "a marker-shaped field must stay a runtime error, got %s"
+       (Registry.failure_reason_to_string other)
+   | None -> Alcotest.fail "expected a runtime error for the marker-shaped field");
   match classify broad_invalid with
   | Some (Registry.Turn_configuration_error _) ->
     Alcotest.fail "broad InvalidConfig was misclassified as terminal configuration"
   | Some (Registry.Provider_runtime_error { detail; _ } as reason) ->
     Alcotest.(check string)
-      "broad InvalidConfig detail is redacted"
-      "provider configuration failed"
+      "broad InvalidConfig keeps its field and redacts its detail"
+      "provider configuration failed (field user_blocks)"
       detail;
     let surface =
       (Status_blocker.runtime_blocker_surface_of_failure_reason

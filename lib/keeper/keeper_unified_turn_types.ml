@@ -246,6 +246,10 @@ let registry_failure_reason_of_raw_error ~detail raw_error =
     (registry_failure_reason_of_internal_error ~detail)
 ;;
 
+(* What the registry says for a provider configuration failure whose own
+   text #32106 withholds. *)
+let provider_configuration_failed = "provider configuration failed"
+
 (* Exhaustive match on [Keeper_turn_disposition.t]. [of_failure] emits
    [Provider_error (Agent_core_error _)] for the agent-core error fallback,
    so this routing is a variant match with no substring classifier. *)
@@ -263,7 +267,17 @@ let registry_failure_reason_of_terminal_reason
   in
   let detail =
     match core_error with
-    | Some (Agent_core.Error.Config _) -> "provider configuration failed"
+    | Some (Agent_core.Error.Config (InvalidConfig { field; detail = _ })) ->
+      (* #32106 keeps the free-text detail out: it can carry configuration
+         values. The field is the setting's name, which the operator needs to
+         tell one refusal from another. A field can carry an external JSON
+         key name (Agent_card), never its value, and the preview caps it. *)
+      Keeper_types_profile.short_preview
+        (Printf.sprintf "%s (field %s)" provider_configuration_failed field)
+    | Some
+        (Agent_core.Error.Config
+           ( MissingEnvVar _ | UnsupportedProvider _ | CredentialUnavailable _
+           | SensitiveValueInConfig _ )) -> provider_configuration_failed
     | Some
         (( Agent_core.Error.Api _
          | Agent_core.Error.Provider _

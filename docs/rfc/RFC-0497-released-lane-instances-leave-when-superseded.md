@@ -3,7 +3,7 @@ rfc: "0497"
 title: "자원을 돌려준 Lane instance 는 같은 owner 의 새 instance 가 생기면 기록을 남기지 않는다"
 status: Draft
 created: 2026-11-06
-updated: 2026-11-06
+updated: 2026-11-07
 author: claude
 supersedes: []
 superseded_by: null
@@ -95,7 +95,6 @@ instance id 의 SHA-256 을 이름으로 쓰는 폴더를 binding 상태별로 �
 | `reconcile_configuration` `retained_visibility` | 같은 `(id, source_path, revision)` 의 과거 binding 의 visibility. 서로 다르면 "ambiguous retained ownership" 으로 거절한다 | 묶음의 visibility 값마다 하나. 대표와 같은 값만 지우면 값의 집합이 그대로다 |
 | `attach_entry`, `reconcile_configuration` → `preserve_state_runtime` | 같은 owner·package 의 persistent binding 이 적은 container runtime. 다르면 거절한다 | 묶음의 runtime 값마다 하나. 대표와 같은 runtime 만 지우면 같은 거절이 나온다 |
 | `reconcile_configuration` `runtimes_in_use` | 과거 binding 이 적은 runtime. 죽은 서버가 남긴 container 를 label 로 찾아 훑을 engine 목록에 넣는다 | 없음. 죽은 서버가 남긴 instance 의 기록은 `Attached`·`Detaching` 등이라 남고, 그 runtime 도 목록에 남는다 |
-| `gecko_sweepable` | 자원을 돌려준 instance 는 profile 을 지워도 된다고 본다. binding 이 없는 instance 도 지워도 된다고 본다 | 없음. binding 을 지워도 결과가 같다 |
 | `snapshot` (대시보드 Add-on 화면), `slice`, `freeze`(`masc_lane_evidence`) | 과거 instance 의 binding 과 관측 | 없음(D7). 이전 run 이 필요하면 살아 있을 때 `freeze` 로 고정한다 |
 | `persisted_binding` (Observe·Detach·Retain·Act·Action_status 의 visibility 확인, `retain_unconfirmed`) | instance 하나의 binding | 없음. 지워진 instance 에는 "Lane instance is unavailable to this caller" 로 답한다. 지금도 binding 이 없는 instance 에 같은 답을 한다 |
 
@@ -134,21 +133,21 @@ instance 하나는 binding → 관측 폴더 → action 폴더 순서로 지운�
 
 - binding 이 그 instance 를 읽을 수 있게 하는 기록이다. binding 을 먼저 지우면, 지우는 중에 멈춰도 읽는 쪽은 "없는 instance" 로 본다. 반쯤 지운 관측을 읽는 일이 없다.
 - 관측·action 폴더 이름(instance id 의 SHA-256)이 `R` 의 어떤 binding 과도, `L` 의 어떤 instance 와도 맞지 않으면 그 pass 에서 지운다. 폴더 목록은 잠금 안에서, binding 을 읽기 전에 만든다. 목록을 만든 뒤 생긴 폴더는 목록에 없다. 목록에 있는 폴더의 binding 은 그 폴더보다 먼저 써졌으므로(다음 항목의 전제) `R` 에 들어 있다. 그래서 막 생긴 instance 의 폴더가 orphan 으로 보이지 않는다. 직접 Attach 가 configuration 잠금을 잡지 않아도 이 순서는 맞다.
-- 읽지 못한 binding(fault)이 있으면 폴더 규칙도 `gecko_sweepable` 과 같이 막는다. fault 가 이름을 댄 instance 의 폴더는 지우지 않는다. 어느 instance 인지 모르는 fault 가 하나라도 있으면 그 pass 는 binding 없는 폴더를 하나도 지우지 않는다. 읽지 못한 binding 의 instance 는 `R` 에 없어서, 이 규칙이 없으면 그 폴더가 orphan 으로 보인다. binding 을 지우고 멈춘 instance 는 다음 pass 에서 마저 지워진다. 지금 binding 없이 남은 관측 폴더 2개와 action 폴더 5개도 이 규칙으로 지워진다.
+- 읽지 못한 binding(fault)이 있으면 폴더 규칙도 막는다. fault 가 이름을 댄 instance 의 폴더는 지우지 않는다. 어느 instance 인지 모르는 fault 가 하나라도 있으면 그 pass 는 binding 없는 폴더를 하나도 지우지 않는다. 읽지 못한 binding 의 instance 는 `R` 에 없어서, 이 규칙이 없으면 그 폴더가 orphan 으로 보인다. binding 을 지우고 멈춘 instance 는 다음 pass 에서 마저 지워진다. 지금 binding 없이 남은 관측 폴더 2개와 action 폴더 5개도 이 규칙으로 지워진다.
 - 관측 기록은 binding 이 커밋을 정한다(RFC "lane-addon-observation-commits-at-the-binding"). 이 RFC 는 새 instance 의 binding 이 그 instance 의 관측보다 먼저 써진다고 전제한다. 그러면 binding 없는 관측 폴더는 진행 중인 instance 의 것이 아니다. 이 전제는 아직 코드로 확인하지 않았다. 구현 층이 L1 에서 확인한다(§7). 전제가 틀리면 binding 없는 폴더는 지우지 않는다.
 
 ### 4.4 어디서 도나
 
-`reconcile_configuration` 의 configuration 잠금 안에서 정한다. 잠금 안에서 관측·action 폴더 목록을 먼저 만들고, 그다음 이 pass 가 이미 하는 `historical` 읽기를 쓴다. 대상은 그 reading 과 계획을 만드는 순간의 `m.entries`·`m.recovering` 으로 정한다. 파일 지우기는 잠금을 놓은 뒤 `offload` 에서 한다. gecko sweep 이 같은 방식으로 돈다. instance id 는 다시 쓰지 않으므로, 잠금을 놓은 뒤에도 계획이 맞다.
+`reconcile_configuration` 의 configuration 잠금 안에서 정한다. 잠금 안에서 관측·action 폴더 목록을 먼저 만들고, 그다음 이 pass 가 이미 하는 `historical` 읽기를 쓴다. 대상은 그 reading 과 계획을 만드는 순간의 `m.entries`·`m.recovering` 으로 정한다. 파일 지우기는 잠금을 놓은 뒤, 같은 pass 안에서 기록 하나마다 `offload` 를 따로 불러 한다. 그래서 서버가 멈추면 pass 가 기록 사이에서 끝난다. configuration pass 는 pulse 하나에서 차례로 돌고 지우기가 그 pass 안에서 끝나므로, 두 pass 의 지우기가 겹치지 않는다. instance id 는 다시 쓰지 않으므로, 잠금을 놓은 뒤에도 계획이 맞다.
 
 지우기는 이 pass 가 자기 계획대로만 한다. 횟수 제한이나 대기 시간은 두지 않는다. 첫 pass 는 3,522개를 지운다. 그 뒤로는 서버를 다시 켤 때마다 Add-on 마다 하나씩 지운다.
 
-### 4.5 60초마다 두 번 읽는 문제
+### 4.5 60초마다 읽는 비용
 
-pass 하나가 binding 전체를 두 번 읽는다(`historical`, gecko sweep). 키퍼 리뷰는 이것을 캐시로 먼저 고치자고 했다. 이 RFC 는 캐시를 두지 않는다.
+pass 하나가 binding 전체를 읽는다(`historical`). 키퍼 리뷰는 이 읽기를 캐시로 먼저 줄이자고 했다. 이 RFC 는 캐시를 두지 않는다.
 
-- gecko sweep 주석은 "the bindings and liveness read now" 로 정한다고 적는다. 그 pass 안에서 instance 가 붙거나 떨어질 수 있다. 앞선 reading 을 다시 쓰면 이 전제가 깨진다.
-- §4.1 이 적용되면 읽는 binding 이 3,540개에서 약 18개로 준다. 두 번 읽어도 비용이 작다. 캐시는 무효화 규칙만 더한다.
+- 그 pass 안에서 instance 가 붙거나 떨어질 수 있다. 앞선 reading 을 다시 쓰면 지금 liveness 와 어긋난다.
+- §4.1 이 적용되면 읽는 binding 이 3,540개에서 약 18개로 준다. 캐시는 무효화 규칙만 더한다.
 
 ## 5. 이 RFC 가 하지 않는 것
 
@@ -164,17 +163,17 @@ pass 하나가 binding 전체를 두 번 읽는다(`historical`, gecko sweep). �
    - L1a: `reconcile_configuration` 이 pass 마다 대상 수와 남는 수를 inventory(`GET /api/v1/lane-addons` 의 configuration 부분, 운영자에게만)에 싣는다. visibility 나 runtime 이 대표와 달라 남는 binding 수, 그런 묶음 수도 같이 싣는다. 수는 그 pass 가 이미 읽은 binding 으로 센다.
    - L1b: 바이트는 시작 정비(worker domain)에서 한 번 센다. 대상의 바이트, 남는 것의 바이트, `observations` 전체 바이트를 로그 한 줄에 남긴다. pass 마다 세지 않는 까닭: 2026-11-06 관측 파일이 27만 개라 60초마다 그만큼 lstat 해야 한다. 대상 바이트는 서버를 다시 켤 때만 늘어서, 시작마다 세면 충분하다. 시작 시점의 liveness 는 pass 의 liveness 와 다를 수 있으므로 이 바이트는 근사다. Keeper 리뷰가 이 방식을 골랐다(2026-11-06).
    - 확인: 배포 뒤 inventory 의 대상 수가 §4.2 의 수치(그 사이 늘어난 만큼 더한 값)와 맞는다.
-   - L1 만 배포된 동안에는 pass 마다 binding 3,540개(그 사이 늘어난 만큼 더)를 계속 두 번 읽는다. §4.5 의 비용 감소는 L2 부터다.
+   - L1 만 배포된 동안에는 pass 마다 binding 3,540개(그 사이 늘어난 만큼 더)를 계속 읽는다. §4.5 의 비용 감소는 L2 부터다.
    - §2.3 의 0번에는 `Execute` 안의 호출과 대시보드·TUI 화면 조회가 빠져 있다. L1 배포 전후로 서버 요청 로그에서 `GET /api/v1/lane-addons` 수를 세어 운영자에게 같이 보인다.
 2. 운영자 확인: 운영자가 L1 의 수치를 보고 L2 를 병합한다. 설정 스위치는 두지 않는다.
-3. L2 지우기: §4.3 순서로 지운다. 지운 수와 바이트를 pass 마다 한 줄 info 로그에 남긴다.
+3. L2 지우기: §4.3 순서로 지운다. 계획한 수와 지운 수를 pass 마다 한 줄 info 로그에 남긴다. 지울 것이 없는 pass 는 남기지 않는다. 지우지 못한 기록은 경로와 이유를 warn 으로 남기고, 다음 pass 가 다시 계획한다. 바이트는 pass 에서 세지 않는다. L1b 의 시작 정비 한 줄이 서버를 켤 때 대상 바이트를 세고, 첫 pass 가 그 대상을 지운다.
    - 확인: 첫 pass 뒤 `bindings` 가 약 18개, `observations` 가 약 85MB 다. 서버를 다시 켠 뒤에도 binding 수가 Add-on 수만큼만 늘었다가 다음 pass 에 돌아온다.
 
-## 7. 구현 층이 코드로 닫을 것
+## 7. 구현 층이 코드로 확인한 것
 
-- 새 instance 의 binding 이 그 instance 의 관측보다 먼저 디스크에 써지는지 확인한다(§4.3 의 세 번째 항목).
-- `lane_addon_store_preflight.ml` 은 부팅 때 `actions` 폴더를 검사한다. binding 없이 남은 action 폴더를 거부하는지 확인한다. 거부하면 §4.3 순서가 부팅을 막지 않는지 본다.
-- `Lane_addon_store` 에 instance 하나의 관측·action 폴더를 지우는 함수가 아직 없다. `remove_binding_with` 처럼 부모 디렉터리를 sync 한다.
+- 새 instance 의 binding 은 그 instance 의 관측·action 보다 먼저 써진다(§4.3 의 세 번째 항목). instance id 를 만드는 곳은 `attach_entry` 하나다. 그 함수는 binding 을 쓰고(`persist`), 그다음 `m.entries` 에 넣고 worker 를 띄운다. 관측과 action 은 worker 가 돈 뒤에 써진다.
+- `lane_addon_store_preflight.ml` 은 부팅 때 action 기록마다 자기 이름(instance·요청 digest)과 맞는지만 본다. binding 이 있는지는 보지 않는다. 그래서 binding 을 먼저 지운 순서가 부팅을 막지 않는다.
+- `Lane_addon_store.remove_instance_folder` 가 관측·action 폴더 하나를 지운다. 심볼릭 링크를 따라가지 않고, 남아 있는 첫 부모 디렉터리를 sync 한다. `Lane_addon_store.instance_folders` 가 두 폴더 아래의 디렉터리를 나열한다.
 
 ## 8. 리뷰
 

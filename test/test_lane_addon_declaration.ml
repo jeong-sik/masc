@@ -370,6 +370,46 @@ let test_conflicts_and_invalid_candidates_preserve_active () = with_fixture (fun
   ignore (reconcile config directory);
   check string "invalid edits never retire active worker" instance_id (one_live config |> text "instance_id"))
 
+(* RFC-0497 layer two through the real configuration pass. *)
+let test_superseded_instance_records_leave () = with_fixture (fun clock config directory root _started ->
+  let store = Filename.concat root ".masc/lane-addons" in
+  let at relative = Filename.concat store relative in
+  let path = Filename.concat directory "observer.toml" in
+  let attach () =
+    write path (declaration ());
+    ignore (reconcile config directory);
+    await clock (fun () -> live config <> []);
+    one_live config |> text "instance_id" in
+  let folder folder = at (Lane_addon_store.instance_folder_path folder) in
+  let fill relative =
+    Fs_compat.mkdir_p (at relative);
+    write (Filename.concat (at relative) "00000000000000000001.json") "{}" in
+  let first = attach () in
+  Unix.unlink path;
+  ignore (reconcile config directory);
+  await clock (fun () -> live config = []);
+  let second = attach () in
+  let key = Lane_addon_store.instance_key in
+  let first_observations = Lane_addon_store.Observation_folder (key first)
+  and second_actions = Lane_addon_store.Action_folder (key second)
+  and orphan_observations = Lane_addon_store.Observation_folder (key "no-binding-observations")
+  and orphan_actions = Lane_addon_store.Action_folder (key "no-binding-actions") in
+  List.iter (fun f -> fill (Lane_addon_store.instance_folder_path f))
+    [first_observations; second_actions; orphan_observations; orphan_actions];
+  check bool "the detached first instance keeps its binding before the pass" true
+    (Sys.file_exists (at (Lane_addon_store.binding_path first)));
+  ignore (reconcile config directory);
+  check bool "the superseded binding is removed" false
+    (Sys.file_exists (at (Lane_addon_store.binding_path first)));
+  List.iter (fun (name, f) -> check bool name false (Sys.file_exists (folder f)))
+    ["the superseded instance's observations are removed", first_observations;
+     "observations no binding claims are removed", orphan_observations;
+     "actions no binding claims are removed", orphan_actions];
+  check bool "the live instance keeps its binding" true
+    (Sys.file_exists (at (Lane_addon_store.binding_path second)));
+  check bool "the live instance keeps its actions" true (Sys.file_exists (folder second_actions));
+  check string "the live instance is untouched" second (one_live config |> text "instance_id"))
+
 let test_invalid_existing_source_can_be_repaired () = with_fixture (fun _clock config directory root _started ->
   let path = Filename.concat directory "broken.toml" in
   write path "id = [";
@@ -546,6 +586,7 @@ let () = run "Lane declaration editing" ["shared TOML owner",[
     test_case "Keeper creates and operator edits the same TOML" `Quick test_keeper_create_operator_read_and_edit;
   test_case "conflict and invalid candidate preserve active installation" `Quick test_conflicts_and_invalid_candidates_preserve_active;
   test_case "invalid source and missing package remain repairable" `Quick test_invalid_existing_source_can_be_repaired;
+  test_case "superseded instance records leave in the configuration pass" `Quick test_superseded_instance_records_leave;
   test_case "mode, create-only and direct-child path boundaries" `Quick test_request_paths_and_create_are_exact;
   test_case "create publication collision preserves the competing file" `Quick test_create_publication_collision_preserves_competing_bytes;
   test_case "concurrent editors and visible post-rename failure" `Quick test_two_writers_and_post_rename_failure]]

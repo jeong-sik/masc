@@ -1,8 +1,7 @@
 (** Which retained Lane instances a newer binding of the same owner supersedes
-    (RFC-0497 section 4.1). The caller reads the bindings and says which
-    instances this process holds; this module only decides.
-
-    Layer one counts the decision. Nothing reads it to delete. *)
+    (RFC-0497 section 4.1), and which instance folders no instance claims
+    (section 4.3). The caller reads the bindings and the folders and says which
+    instances this process holds; this module only decides. *)
 
 type owner = { id : string; source_path : string; revision : string }
 
@@ -52,3 +51,20 @@ val plan :
     binding with the greatest instance id whose time is not after [now_ms]; any
     other binding is never a representative and never eligible. Visibility and
     runtime are compared structurally. *)
+
+(** Who may own an instance folder, read under the same lock as the bindings. *)
+type claims =
+  | Claimed of string list
+      (** Instance ids whose folders stay: each readable binding [plan] keeps,
+          each instance an unreadable record names, and each instance this
+          process holds. *)
+  | Unattributed
+      (** An unreadable record names no instance, so any folder may be its
+          instance's. *)
+
+val unclaimed :
+  folder_key:('folder -> string) -> instance_key:(string -> string) -> claims -> 'folder list -> 'folder list
+(** The folders no claimed instance names, in their order. [Unattributed]
+    leaves none. The caller lists the folders before it reads the bindings: an
+    instance's binding is written before its first folder, so a folder listed
+    first belongs to a binding the reading holds, unless that binding is gone. *)

@@ -2276,15 +2276,15 @@ let test_mistral_chunk_list_stream_finalizes () =
   let acc = Acc.create_stream_acc () in
   List.iter
     (fun data ->
-       match S.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning data with
-       | S.Openai_chunk _ as parsed ->
+       match OW.parse_openai_sse_chunk ~streaming_reasoning:RD.No_streaming_reasoning data with
+       | OW.Openai_chunk _ as parsed ->
          let events, _telemetry = S.openai_sse_parse_result_to_events state parsed in
          List.iter (Acc.accumulate_event acc) events
-       | S.Openai_empty -> ()
-       | S.Openai_done
-       | S.Openai_provider_error _
-       | S.Openai_parse_failed _
-       | S.Openai_undeclared_reasoning_member _ ->
+       | OW.Openai_empty -> ()
+       | OW.Openai_done
+       | OW.Openai_provider_error _
+       | OW.Openai_parse_failed _
+       | OW.Openai_undeclared_reasoning_member _ ->
          Alcotest.failf "captured stream must parse: %s" data)
     data_lines;
   (match Acc.finalize_stream_acc acc with

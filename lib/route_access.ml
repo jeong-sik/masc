@@ -6,9 +6,13 @@ type self_authenticated_reason =
   | Loopback_dev_token
   | Subpath_dispatch
 
+type strict_reading =
+  | Credential_when_strict
+  | Open_when_strict
+
 type t =
   | Always_public
-  | Public_read
+  | Public_read of strict_reading
   | Read_auth
   | Permission of Masc_domain.permission
   | Token_permission of Masc_domain.permission
@@ -34,7 +38,13 @@ let to_json t =
   in
   match t with
   | Always_public -> kind "always_public" []
-  | Public_read -> kind "public_read" []
+  | Public_read when_strict ->
+    let reading =
+      match when_strict with
+      | Credential_when_strict -> "credential"
+      | Open_when_strict -> "open"
+    in
+    kind "public_read" [ "when_strict", `String reading ]
   | Read_auth -> kind "read_auth" []
   | Permission p -> permission "permission" p
   | Token_permission p -> permission "token_permission" p

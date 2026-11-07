@@ -7,7 +7,7 @@
 
 type gate =
   | Open  (** Nothing to run: the route is public, or its handler authenticates. *)
-  | Public_read
+  | Public_read of Route_access.strict_reading
   | Read_auth
   | Token_permission of Masc_domain.permission
 

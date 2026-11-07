@@ -1,6 +1,6 @@
 type gate =
   | Open
-  | Public_read
+  | Public_read of Route_access.strict_reading
   | Read_auth
   | Token_permission of Masc_domain.permission
 
@@ -27,7 +27,7 @@ let plan (kind : Route_access.t) =
   | Self_authenticated (Mcp_transport | Oauth_protocol | Websocket_upgrade) -> Ok Open
   | Self_authenticated (Browser_session | Loopback_dev_token | Subpath_dispatch) ->
     Error (Kind_not_served kind)
-  | Public_read -> Ok Public_read
+  | Public_read when_strict -> Ok (Public_read when_strict)
   | Read_auth -> Ok Read_auth
   | Token_permission permission -> Ok (Token_permission permission)
   | Permission _ | Private_token_permission _ | Tool _ | Tool_observation _ | Tool_actor _ ->
@@ -37,7 +37,7 @@ let plan (kind : Route_access.t) =
 let plan_actor kind =
   match plan kind with
   | Ok (Token_permission permission) -> Ok permission
-  | Ok (Open | Public_read | Read_auth) -> Error (Actor_not_provided kind)
+  | Ok (Open | Public_read _ | Read_auth) -> Error (Actor_not_provided kind)
   | Error _ as refusal -> refusal
 ;;
 

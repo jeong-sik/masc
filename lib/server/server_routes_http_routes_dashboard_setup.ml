@@ -4,7 +4,6 @@ open Server_routes_http_common
 module Http = Http_server_eio
 module Mcp_eio = Mcp_server_eio
 module Pages = Server_routes_http_pages
-module Keeper_api = Server_dashboard_http_keeper_api
 
 
 (* RFC-0138 Phase 3 Step 5 — [telemetry_summary_cache_key] deleted

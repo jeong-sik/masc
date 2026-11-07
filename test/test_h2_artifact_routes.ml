@@ -1005,7 +1005,7 @@ let open_pending_stream gateway ~worker path =
 
 type capacity_mode = Overflow | Peer_reset
 let test_sse_capacity mode () =
-  let module Resources = Server_h2_response_resources in
+  let module Resources = Masc.Http_h2_response_ledger in
   let capacity = match mode with Overflow -> 1 | Peer_reset -> 256 * 1024 in
   let resources = Resources.create ~max_pending_bytes:capacity in
   with_gateway ~runtime:true ~resources ~zero_window:(mode = Peer_reset)

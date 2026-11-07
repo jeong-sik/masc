@@ -4,7 +4,7 @@ module Draft_live = Server_routes_http_routes_artifact_draft_live
 module App_data = Server_routes_http_routes_artifact_app_data
 module Store = Artifact_draft_store
 module Live = Artifact_draft_live
-module Resources = Server_h2_response_resources
+module Resources = Http_h2_response_ledger
 open Server_h2_gateway_helpers
 
 type admission =

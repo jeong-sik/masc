@@ -23,11 +23,11 @@ let make_error_handler () =
     Log.Http.error "Error: %s" message;
     let headers = H2.Headers.of_list [("content-type", "text/plain")] in
     let body = respond headers in
-    (match Server_h2_response_resources.current () with
+    (match Http_h2_response_ledger.current () with
      | Some context ->
-       (match Server_h2_response_resources.reserve context ~bytes:(String.length message) with
+       (match Http_h2_response_ledger.reserve context ~bytes:(String.length message) with
         | Error (Capacity_exhausted | Request_closed) -> ()
-        | Ok lease -> Server_h2_response_resources.write_reserved lease body message)
+        | Ok lease -> Http_h2_response_ledger.write_reserved lease body message)
      | None ->
        (* Parser failures have no admitted application scope. Their fixed
           diagnostic is bounded separately from application payloads. *)
@@ -41,7 +41,7 @@ let make_error_handler () =
   h2_error_handler
 
 let make_request_handler ~trust_policy ~routes ~sw ~clock ~server_start_time:_ =
-  let embedded_resources = Server_h2_response_resources.create
+  let embedded_resources = Http_h2_response_ledger.create
     ~max_pending_bytes:(H2_response_limits.max_pending_bytes ()) in
   (* ═══════════════════════════════════════════════════════════════════════
      Route-local query helpers
@@ -93,8 +93,8 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd
         (H2.Response.create ~headers `OK)
     in
-    let stream = Server_h2_response_resources.stream writer in
-    let write_frame = Server_h2_response_resources.offer stream in
+    let stream = Http_h2_response_ledger.stream writer in
+    let write_frame = Http_h2_response_ledger.offer stream in
     let send json =
       write_frame (Printf.sprintf "data: %s\n\n" (Yojson.Safe.to_string json))
     in
@@ -112,7 +112,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       Eio.Switch.on_release sw (fun () -> Mcp_subscriptions.unregister token);
       Eio.Fiber.fork_daemon ~sw (fun () ->
         let rec beat () =
-          if not (Server_h2_response_resources.is_closed stream) then (
+          if not (Http_h2_response_ledger.is_closed stream) then (
             Eio.Time.sleep clock 15.0;
             if write_frame ": keepalive\n\n" then beat ())
         in
@@ -120,9 +120,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       (* This drain runs outside [Mcp_subscriptions]' shared publisher lock.
          Overflow interrupts a flush blocked by flow control and raises to the
          request boundary, producing a reset instead of a successful short SSE. *)
-      (try Server_h2_response_resources.run stream with
-       | Server_h2_response_resources.Response_writer_closed -> ())
-     | None -> raise Server_h2_response_resources.Response_capacity_exhausted);
+      (try Http_h2_response_ledger.run stream with
+       | Http_h2_response_ledger.Response_writer_closed -> ())
+     | None -> raise Http_h2_response_ledger.Response_capacity_exhausted);
     (* Cancellation travels as an exception in Eio, so a wildcard that ate it
        here would report a clean exit from a fiber the switch had cancelled. *)
     (try h2_close_after_flush writer with
@@ -146,9 +146,9 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
   in
 
   let h2_request_handler ~request_sw client_addr h2_reqd =
-    let within_request work = match Server_h2_response_resources.current () with
-      | Some context -> Server_h2_response_resources.with_current context work
-      | None -> Server_h2_response_resources.with_request embedded_resources
+    let within_request work = match Http_h2_response_ledger.current () with
+      | Some context -> Http_h2_response_ledger.with_current context work
+      | None -> Http_h2_response_ledger.with_request embedded_resources
           ~sw:request_sw work in
     within_request (fun () ->
     let h2_req = H2.Reqd.request h2_reqd in
@@ -1860,7 +1860,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
                        response
                    in
                    let send_event event json =
-                     Server_h2_response_resources.write_and_flush
+                     Http_h2_response_ledger.write_and_flush
                        writer
                        (Printf.sprintf
                           "event: %s\ndata: %s\n\n"
@@ -2128,16 +2128,16 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
       | Request_workspace_precondition.Precondition_met ->
         (try dispatch_h2_route () with
          | Eio.Cancel.Cancelled
-             ((Server_h2_response_resources.Response_capacity_exhausted
-              | Server_h2_response_resources.Response_writer_closed) as resource_error) ->
+             ((Http_h2_response_ledger.Response_capacity_exhausted
+              | Http_h2_response_ledger.Response_writer_closed) as resource_error) ->
            (* GitHub login wraps a failed [send_event] in [Cancelled]. Only
               unwrap these typed writer failures; an actually cancelled
               request must still propagate its cancellation. *)
            Eio.Fiber.check ();
            H2.Reqd.report_exn h2_reqd resource_error
          | Eio.Cancel.Cancelled _ as e -> raise e
-         | (Server_h2_response_resources.Response_capacity_exhausted
-           | Server_h2_response_resources.Response_writer_closed) as resource_error ->
+         | (Http_h2_response_ledger.Response_capacity_exhausted
+           | Http_h2_response_ledger.Response_writer_closed) as resource_error ->
            H2.Reqd.report_exn h2_reqd resource_error
          | Auth.Auth_config_error _ ->
            h2_respond_text

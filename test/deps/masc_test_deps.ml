@@ -333,8 +333,6 @@ let read_file path =
          path
          msg)
 
-let sorted_strings = List.sort String.compare
-
 (** Create an isolated temporary workspace for tests that need credentials.
     The directory and its [.masc/] subtree are removed by
     {!cleanup_test_workspace}. *)
@@ -426,27 +424,6 @@ let make_sse_auth workspace agent_name =
         (Printf.sprintf "make_sse_auth failed for %s: %s"
            agent_name
            (Masc_domain.masc_error_to_string e))
-
-let assert_same_string_set ~label ~expected ~actual =
-  let expected = sorted_strings expected in
-  let actual = sorted_strings actual in
-  if actual <> expected then begin
-    Printf.printf "Expected %s : [%s]\n" label
-      (String.concat "; " expected);
-    Printf.printf "Actual   %s : [%s]\n" label
-      (String.concat "; " actual);
-    let only_expected =
-      List.filter (fun s -> not (List.mem s actual)) expected
-    in
-    let only_actual =
-      List.filter (fun s -> not (List.mem s expected)) actual
-    in
-    Printf.printf "Only expected : [%s]\n"
-      (String.concat "; " only_expected);
-    Printf.printf "Only actual   : [%s]\n"
-      (String.concat "; " only_actual);
-    failwith (label ^ " differs")
-  end
 
 (* Which sandbox a fixture's keeper runs in.
 

@@ -241,6 +241,14 @@ let[@inline] is_all_plain_text text =
           if code >= 0xAC00 && code <= 0xD7A3 then loop (i + 3)
           else false
         else false
+      else if b >= 0xE4 && b <= 0xE9 && i + 2 < len then
+        let b1 = Char.code (String.unsafe_get text (i + 1)) in
+        let b2 = Char.code (String.unsafe_get text (i + 2)) in
+        if b1 >= 0x80 && b1 <= 0xBF && b2 >= 0x80 && b2 <= 0xBF then
+          let code = ((b land 0x0F) lsl 12) lor ((b1 land 0x3F) lsl 6) lor (b2 land 0x3F) in
+          if code >= 0x4E00 && code <= 0x9FFF then loop (i + 3)
+          else false
+        else false
       else false
   in
   loop 0

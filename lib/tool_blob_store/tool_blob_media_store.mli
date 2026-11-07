@@ -7,6 +7,12 @@
     {!Tool_blob_maintenance} through the [Stored] sources the checkpoints
     carry. *)
 
+val blob_mime : string -> string
+(** The mime a blob of media of [media_type] is labelled with: the type and
+    subtype before any parameter, or application/octet-stream when that part
+    is empty or not encodable in an artifact address. The block that names the
+    blob keeps its full media type. *)
+
 val create : Tool_blob_store.t -> Agent_core_base.History.media_store
 
 (** [create (Tool_blob_store.create ~base_path)]: the store of one BasePath,

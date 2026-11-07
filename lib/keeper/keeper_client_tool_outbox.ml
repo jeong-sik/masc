@@ -110,6 +110,100 @@ let retain_host_result producer ~invocation_index ~call_id ~tool_name ~arguments
   retain_host_result_with_delivery producer ~invocation_index ~call_id ~tool_name ~arguments ~response
   |> Result.map (fun _ -> ())
 
+(* Receipts are re-read as one system text on every request until a completed
+   turn ACKs them. #49634: one ended vendor turn left 248 receipts, 11.8 MB of
+   JSON, 8.5 MB of it screenshot PNG base64 and the rest text bodies of about
+   5 to 12 KB each; the request was refused on every turn. *)
+type host_bodies =
+  | Host_bodies_verbatim
+  | Host_bodies_as_markers of { min_result_bytes : int }
+
+let host_text_mime = "text/plain"
+
+let json_string_bytes text = String.length (Yojson.Safe.to_string (`String text))
+
+let host_marker reference = Tool_output.encode_for_agent_core (Tool_output.Stored reference)
+
+(* The text one result carries, as Keeper_model_input_demotion measures it:
+   [content], or the longer of [content] and the sum of its [Text] blocks. *)
+let host_result_text_bytes ~content = function
+  | None -> String.length content
+  | Some blocks ->
+    max (String.length content)
+      (List.fold_left (fun sum (block : Llm_provider.Types.content_block) ->
+         match block with
+         | Llm_provider.Types.Text text -> sum + String.length text
+         | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _
+         | Image _ | Document _ | Audio _ -> sum) 0 blocks)
+
+(* [text] as its blob marker when the marker is shorter in the receipt's JSON.
+   The planned marker is the real one, digest included, so a body that stays
+   inline writes no blob. A marker already names its bytes; marker-shaped text
+   that does not parse stays visible rather than getting a permanent address,
+   as in Keeper_model_input_demotion. *)
+let host_text_body store text =
+  match Tool_output.decode_from_agent_core text with
+  | Tool_output.Decoded _ | Tool_output.Invalid_marker _ -> Ok text
+  | Tool_output.Not_marker ->
+    let* planned =
+      Tool_output.make_artifact_ref ~sha256:Agent_core_sha256.(digest_string text |> to_hex)
+        ~bytes:(String.length text) ~preview:(Tool_blob_store.make_preview text)
+        ~mime:host_text_mime
+      |> Result.map_error Tool_output.make_error_to_string in
+    if json_string_bytes (host_marker planned) >= json_string_bytes text then Ok text
+    else
+      match Tool_blob_store.put_durable_reuse store ~bytes:text ~mime:host_text_mime with
+      | reference -> Ok (host_marker reference)
+      | exception Sys_error detail -> Error detail
+
+let host_media store ~kind ~media_type encoded =
+  let* raw = Base64.decode encoded
+    |> Result.map_error (fun (`Msg detail) -> kind ^ " " ^ media_type ^ " is not base64: " ^ detail) in
+  match Tool_blob_store.put_durable_reuse store ~bytes:raw
+          ~mime:(Tool_blob_media_store.blob_mime media_type) with
+  | reference ->
+    Ok (`Assoc ["type", `String kind; "media_type", `String media_type;
+                "artifact", Tool_output.normalized_artifact_ref_to_json reference])
+  | exception Sys_error detail -> Error detail
+
+let host_response producer ~bodies ~success ~content ~content_blocks =
+  let store = Tool_blob_store.create ~base_path:producer.base_path in
+  let text_body = match bodies with
+    | Host_bodies_as_markers {min_result_bytes}
+      when host_result_text_bytes ~content content_blocks >= min_result_bytes ->
+      host_text_body store
+    | Host_bodies_as_markers _ | Host_bodies_verbatim -> Result.ok in
+  let provider_json block =
+    Agent_core.Checkpoint.wire_content_block_to_json_result
+      ~scope:"official_client_original_tool_result" block
+    |> Result.map_error Agent_core.Error.to_string in
+  let block_json (block : Llm_provider.Types.content_block) =
+    match block with
+    | Llm_provider.Types.Text text ->
+      let* text = text_body text in
+      provider_json (Llm_provider.Types.Text text)
+    | Image {media_type; source=Llm_provider.Types.Base64 encoded} ->
+      host_media store ~kind:"image" ~media_type encoded
+    | Document {media_type; source=Llm_provider.Types.Base64 encoded} ->
+      host_media store ~kind:"document" ~media_type encoded
+    | Audio {media_type; source=Llm_provider.Types.Base64 encoded} ->
+      host_media store ~kind:"audio" ~media_type encoded
+    | Image {source=Llm_provider.Types.Url _ | Llm_provider.Types.File_id _; _}
+    | Document {source=Llm_provider.Types.Url _ | Llm_provider.Types.File_id _; _}
+    | Audio {source=Llm_provider.Types.Url _ | Llm_provider.Types.File_id _; _}
+    | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | ToolResult _ ->
+      provider_json block in
+  let* content = text_body content in
+  let* content_blocks = match content_blocks with
+    | None -> Ok `Null
+    | Some blocks ->
+      List.fold_left (fun acc block ->
+        let* encoded = acc in
+        let* block = block_json block in
+        Ok (block :: encoded)) (Ok []) blocks
+      |> Result.map (fun blocks -> `List (List.rev blocks)) in
+  Ok (`Assoc ["success", `Bool success; "content", `String content; "content_blocks", content_blocks])
+
 let rec mark_response_sent delivery =
   let current = Atomic.get delivery.producer.delivery in
   match current with

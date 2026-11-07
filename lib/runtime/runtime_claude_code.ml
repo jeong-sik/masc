@@ -125,18 +125,46 @@ type rate_limit_status =
   | Allowed_warning
   | Rejected
 
+type rate_limit_window =
+  | Named_window of string
+  | Unnamed_window
+
 type rate_limit =
   { status : rate_limit_status
-  ; rate_limit_type : string option
+  ; window : rate_limit_window
   ; resets_at : int option
   }
 
 type quota_block =
   | Quota_spent of
       { resets_at : int option
-      ; windows : string list
+      ; windows : rate_limit_window list
       }
   | Rate_throttled
+
+let same_window left right =
+  match left, right with
+  | Named_window left, Named_window right -> String.equal left right
+  | Unnamed_window, Unnamed_window -> true
+  | Named_window _, Unnamed_window | Unnamed_window, Named_window _ -> false
+;;
+
+(* Named windows in name order, then the unnamed one. *)
+let compare_window left right =
+  match left, right with
+  | Named_window left, Named_window right -> String.compare left right
+  | Unnamed_window, Unnamed_window -> 0
+  | Named_window _, Unnamed_window -> -1
+  | Unnamed_window, Named_window _ -> 1
+;;
+
+let quota_windows_label windows =
+  windows
+  |> List.map (function
+    | Named_window name -> name
+    | Unnamed_window -> "unnamed")
+  |> String.concat "+"
+;;
 
 type request_input =
   { input_tokens : int
@@ -444,9 +472,7 @@ let error_to_string = function
       | Quota_spent { resets_at; windows } ->
         Printf.sprintf
           "spent windows=%s resets_at=%s"
-          (match windows with
-           | [] -> "unnamed"
-           | _ :: _ -> String.concat "+" windows)
+          (quota_windows_label windows)
           (Option.fold ~none:"unknown" ~some:string_of_int resets_at)
       | Rate_throttled -> "throttled"
     in
@@ -1286,8 +1312,13 @@ let parse_rate_limit ~expected_session_id fields =
     | unknown -> protocol_error stage (Printf.sprintf "unknown status %S" unknown)
   in
   let* rate_limit_type = optional_string stage "rateLimitType" info_fields in
+  let window =
+    match rate_limit_type with
+    | Some name -> Named_window name
+    | None -> Unnamed_window
+  in
   let* resets_at = optional_int stage "resetsAt" info_fields in
-  Ok { status; rate_limit_type; resets_at }
+  Ok { status; window; resets_at }
 ;;
 
 type assistant_block =
@@ -2041,13 +2072,12 @@ let result_turn_id ~expected_session_id fields =
 (* A turn can see several rate-limit events, one window at a time
    (rateLimitType), and a later event of a window replaces what an earlier
    one said about it. An allowed five-hour event therefore does not hide a
-   seven-day window that is still rejected. An event without a type is a
-   window of its own. *)
+   seven-day window that is still rejected. Events without a type all speak
+   for one unnamed window. *)
 let note_rate_limit (limit : rate_limit) rate_limits =
   limit
   :: List.filter
-       (fun (earlier : rate_limit) ->
-          not (Option.equal String.equal earlier.rate_limit_type limit.rate_limit_type))
+       (fun (earlier : rate_limit) -> not (same_window earlier.window limit.window))
        rate_limits
 ;;
 
@@ -2082,8 +2112,8 @@ let quota_block ~api_error_status rate_limits =
       (Quota_spent
          { resets_at = reopens_at first rest
          ; windows =
-             List.filter_map (fun (limit : rate_limit) -> limit.rate_limit_type) rejected
-             |> List.sort String.compare
+             List.map (fun (limit : rate_limit) -> limit.window) rejected
+             |> List.sort compare_window
          })
   | [], Some 429 -> Some Rate_throttled
   | [], (Some _ | None) -> None

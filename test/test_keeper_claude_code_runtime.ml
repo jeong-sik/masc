@@ -3041,7 +3041,10 @@ let test_only_a_spent_window_is_a_hard_quota () =
             ; response_emitted = false
             }))
   in
-  let spent resets_at = Runtime_claude_code.Quota_spent { resets_at; windows = [ "five_hour" ] } in
+  let spent resets_at =
+    Runtime_claude_code.Quota_spent
+      { resets_at; windows = [ Runtime_claude_code.Named_window "five_hour" ] }
+  in
   (match route_of (spent (Some (an_hour_from_now ()))) with
    | Route.Retry_after_observed { retry_class = Route.Hard_quota; retry_after = Some wait } ->
      check bool "a spent window waits until the reset it states" true

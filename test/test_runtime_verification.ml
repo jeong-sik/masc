@@ -1060,7 +1060,8 @@ default = "fixture.%s"
    real client does before its first provider request, and then plays the
    steps the case names, in order: [retry:N] reports a provider retry with
    HTTP status N, [text] sends an assistant answer,
-   [limit:STATUS:WINDOW:RESET] sends a rate-limit event for that window,
+   [limit:STATUS:WINDOW:RESET] sends a rate-limit event for that window
+   (an empty WINDOW sends no rateLimitType),
    [terminal:N] ends the turn with a result carrying status N. After the
    last step it goes quiet. *)
 let claude_refusal_fixture ~steps = Printf.sprintf {|#!/usr/bin/env python3
@@ -1105,10 +1106,11 @@ for index, step in enumerate(%S.split(",")):
     elif kind == "limit":
         status, _, rest = value.partition(":")
         window, _, resets = rest.partition(":")
+        info = {"status": status, "resetsAt": int(resets)}
+        if window:
+            info["rateLimitType"] = window
         emit({"type": "rate_limit_event", "session_id": session,
-            "uuid": "refusal-limit-" + str(index),
-            "rate_limit_info": {"status": status, "rateLimitType": window,
-                "resetsAt": int(resets)}})
+            "uuid": "refusal-limit-" + str(index), "rate_limit_info": info})
     elif kind == "terminal":
         emit({"type": "result", "subtype": "success", "is_error": True, "session_id": session,
             "uuid": "refusal-result", "result": "provider refused the request",
@@ -1217,7 +1219,8 @@ let test_claude_verification_names_a_refused_credential () =
 
 (* Only a window whose last event is rejected is a spent quota, named with
    the time it reopens. A 429 with no event, or after an allowed one that
-   also states a reset, is a throttle. *)
+   also states a reset, is a throttle. Every rejected window is named, the
+   one with no type too. *)
 let test_claude_verification_tells_a_spent_window_from_a_throttle () =
   let cases =
     [ "a 429 with no event", "terminal:429", None
@@ -1225,6 +1228,12 @@ let test_claude_verification_tells_a_spent_window_from_a_throttle () =
     ; ( "a 429 after a rejected event"
       , "limit:rejected:seven_day:1786356000,terminal:429"
       , Some [ "window seven_day"; "reopens 2026-08-10T10:00:00" ] )
+    ; ( "a 429 after two rejected events"
+      , "limit:rejected:seven_day:1786960800,limit:rejected:five_hour:1786356000,terminal:429"
+      , Some [ "window five_hour+seven_day"; "reopens 2026-08-17T10:00:00" ] )
+    ; ( "a 429 after a rejected event with no type"
+      , "limit:rejected::1786356000,limit:rejected:seven_day:1786356000,terminal:429"
+      , Some [ "window seven_day+unnamed" ] )
     ] in
   let failures = claude_refusal_verifications (List.map (fun (_, steps, _) -> steps) cases) in
   List.iter2

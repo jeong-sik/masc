@@ -507,7 +507,7 @@ let claude_quota_failure (block : Runtime_claude_code.quota_block) detail =
     let window =
       match windows with
       | [] -> None
-      | _ :: _ -> Some ("window " ^ String.concat "+" windows)
+      | _ :: _ -> Some ("window " ^ Runtime_claude_code.quota_windows_label windows)
     in
     let reopens =
       Option.bind resets_at (fun seconds ->

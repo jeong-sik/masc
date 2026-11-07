@@ -1371,7 +1371,9 @@ let test_quota_is_structurally_classified () =
           { api_error_status = Some 429
           ; block =
               Runtime_claude_code.Quota_spent
-                { resets_at = Some 1786356000; windows = [ "seven_day" ] }
+                { resets_at = Some 1786356000
+                ; windows = [ Runtime_claude_code.Named_window "seven_day" ]
+                }
           ; tool_effect_attempted = false
           ; response_emitted = false
           }) -> ()
@@ -1489,8 +1491,9 @@ let test_rejected_rate_limit_overrides_success_flag () =
     | Ok _ -> fail "typed quota rejection was overridden by is_error=false")
 ;;
 
-(* Each rate-limit window counts by the last event the turn saw for it. *)
-let window_event ~uuid ~status ~window ?resets_at () =
+(* Each rate-limit window counts by the last event the turn saw for it. An
+   event with no [window] names no rateLimitType. *)
+let rate_limit_event ~uuid ~status ?window ?resets_at () =
   Yojson.Safe.to_string
     (`Assoc
        [ "type", `String "rate_limit_event"
@@ -1498,7 +1501,10 @@ let window_event ~uuid ~status ~window ?resets_at () =
        ; "uuid", `String uuid
        ; ( "rate_limit_info"
          , `Assoc
-             ([ "status", `String status; "rateLimitType", `String window ]
+             ([ "status", `String status ]
+              @ (match window with
+                 | None -> []
+                 | Some window -> [ "rateLimitType", `String window ])
               @
               match resets_at with
               | None -> []
@@ -1506,11 +1512,18 @@ let window_event ~uuid ~status ~window ?resets_at () =
        ])
 ;;
 
+let window_event ~uuid ~status ~window ?resets_at () =
+  rate_limit_event ~uuid ~status ~window ?resets_at ()
+;;
+
+let named = List.map (fun name -> Runtime_claude_code.Named_window name)
+
 let quota_block =
   Alcotest.testable
     (fun ppf -> function
        | Runtime_claude_code.Quota_spent { resets_at; windows } ->
-         Format.fprintf ppf "spent %s until %s" (String.concat "+" windows)
+         Format.fprintf ppf "spent %s until %s"
+           (Runtime_claude_code.quota_windows_label windows)
            (Option.fold ~none:"unknown" ~some:string_of_int resets_at)
        | Runtime_claude_code.Rate_throttled -> Format.pp_print_string ppf "throttled")
     ( = )
@@ -1542,26 +1555,55 @@ let test_a_window_is_spent_only_while_its_last_event_is_rejected () =
     (block_after [ rejected "five_hour" five_hour_reset; allowed "five_hour" ]);
   check quota_block "an allowed event of another window does not hide a rejected one"
     (Runtime_claude_code.Quota_spent
-       { resets_at = Some seven_day_reset; windows = [ "seven_day" ] })
+       { resets_at = Some seven_day_reset; windows = named [ "seven_day" ] })
     (block_after [ rejected "seven_day" seven_day_reset; allowed "five_hour" ]);
   List.iter
     (fun (label, events) ->
        check quota_block label
          (Runtime_claude_code.Quota_spent
-            { resets_at = Some seven_day_reset; windows = [ "five_hour"; "seven_day" ] })
+            { resets_at = Some seven_day_reset; windows = named [ "five_hour"; "seven_day" ] })
          (block_after events))
     [ ( "two rejected windows reopen at the later reset"
       , [ rejected "seven_day" seven_day_reset; rejected "five_hour" five_hour_reset ] )
     ; ( "the later reset wins in either order"
       , [ rejected "five_hour" five_hour_reset; rejected "seven_day" seven_day_reset ] )
     ];
-  check quota_block "a rejected window with no reset leaves the time unknown"
-    (Runtime_claude_code.Quota_spent
-       { resets_at = None; windows = [ "five_hour"; "seven_day" ] })
+  let rejected_without_reset window =
+    window_event ~uuid:("rejected-" ^ window) ~status:"rejected" ~window ()
+  in
+  List.iter
+    (fun (label, events) ->
+       check quota_block label
+         (Runtime_claude_code.Quota_spent
+            { resets_at = None; windows = named [ "five_hour"; "seven_day" ] })
+         (block_after events))
+    [ ( "a rejected window with no reset leaves the time unknown"
+      , [ rejected "five_hour" five_hour_reset; rejected_without_reset "seven_day" ] )
+    ; ( "the unknown time holds when the window with no reset came first"
+      , [ rejected_without_reset "seven_day"; rejected "five_hour" five_hour_reset ] )
+    ];
+  let unnamed ~uuid ~status =
+    rate_limit_event ~uuid ~status ~resets_at:five_hour_reset ()
+  in
+  check quota_block "events without a type speak for one window"
+    Runtime_claude_code.Rate_throttled
     (block_after
-       [ rejected "five_hour" five_hour_reset
-       ; window_event ~uuid:"rejected-seven_day" ~status:"rejected" ~window:"seven_day" ()
-       ])
+       [ unnamed ~uuid:"unnamed-rejected" ~status:"rejected"
+       ; unnamed ~uuid:"unnamed-allowed" ~status:"allowed"
+       ]);
+  check quota_block "a rejected window with no type is listed after the named ones"
+    (Runtime_claude_code.Quota_spent
+       { resets_at = Some seven_day_reset
+       ; windows = named [ "seven_day" ] @ [ Runtime_claude_code.Unnamed_window ]
+       })
+    (block_after
+       [ unnamed ~uuid:"unnamed-rejected" ~status:"rejected"
+       ; rejected "seven_day" seven_day_reset
+       ]);
+  check string "the label joins the windows the operator reads"
+    "seven_day+unnamed"
+    (Runtime_claude_code.quota_windows_label
+       (named [ "seven_day" ] @ [ Runtime_claude_code.Unnamed_window ]))
 ;;
 
 let mcp_initialize =
@@ -1658,7 +1700,9 @@ let check_quota_observation ~tool_effect_attempted ~response_emitted = function
   | Error
       (Runtime_claude_code.Quota_blocked
          { api_error_status = Some 429
-         ; block = Quota_spent { resets_at = Some 1786356000; windows = [ "seven_day" ] }
+         ; block =
+             Quota_spent
+               { resets_at = Some 1786356000; windows = [ Named_window "seven_day" ] }
          ; tool_effect_attempted = actual_effect
          ; response_emitted = actual_response
          }) ->

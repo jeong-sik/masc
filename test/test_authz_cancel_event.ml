@@ -31,6 +31,8 @@ let subjects =
   ; Subject.Principal (Principal.Service (get (Service_id.of_string "keeper-1")))
   ; Subject.Runtime (get (Runtime_id.of_string "runtime-1"))
   ; Subject.Session (get (Session_id.of_string "session-1"))
+  ; Subject.Pat (get (Pat_id.of_string "pat-1"))
+  ; Subject.Service_credential (get (Service_credential_id.of_string "cred-1"))
   ; invite
   ; Subject.Registration (get (Registration_id.of_string "registration-1"))
   ]
@@ -127,6 +129,8 @@ let a_cancel_reads_back () =
     ; "principal:service:keeper-1"
     ; "runtime:runtime-1"
     ; "session:session-1"
+    ; "pat:pat-1"
+    ; "service_credential:cred-1"
     ; "invite:invite-1"
     ; "registration:registration-1"
     ]

@@ -350,6 +350,10 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Registration _ -> "Registration"
   | Authz_state.Session_unreadable _ -> "Session_unreadable"
   | Authz_state.Session _ -> "Session"
+  | Authz_state.Pat_unreadable _ -> "Pat_unreadable"
+  | Authz_state.Pat _ -> "Pat"
+  | Authz_state.Service_credential_unreadable _ -> "Service_credential_unreadable"
+  | Authz_state.Service_credential _ -> "Service_credential"
 ;;
 
 let error_name : Z.error -> string = function

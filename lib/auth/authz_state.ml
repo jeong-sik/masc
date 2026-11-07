@@ -23,6 +23,8 @@ type t =
   ; principals : Authz_principal_state.t
   ; registrations : Authz_registration_state.t
   ; sessions : Authz_session_state.t
+  ; pats : Authz_pat_state.t
+  ; service_credentials : Authz_service_credential_state.t
   ; revocation_pending : held list
   ; latest_at_ms : int option
   }
@@ -33,6 +35,8 @@ let empty =
   ; principals = Authz_principal_state.empty
   ; registrations = Authz_registration_state.empty
   ; sessions = Authz_session_state.empty
+  ; pats = Authz_pat_state.empty
+  ; service_credentials = Authz_service_credential_state.empty
   ; revocation_pending = []
   ; latest_at_ms = None
   }
@@ -108,6 +112,10 @@ type refusal =
   | Registration of Authz_registration_state.refusal
   | Session_unreadable of Authz_session_event.error
   | Session of Authz_session_state.refusal
+  | Pat_unreadable of Authz_pat_event.error
+  | Pat of Authz_pat_state.refusal
+  | Service_credential_unreadable of Authz_service_credential_event.error
+  | Service_credential of Authz_service_credential_state.refusal
 
 let refusal_to_string = function
   | Before_bootstrap kind ->
@@ -177,6 +185,12 @@ let refusal_to_string = function
   | Session_unreadable error ->
     "the session record cannot be read: " ^ Authz_session_event.error_to_string error
   | Session refusal -> Authz_session_state.refusal_to_string refusal
+  | Pat_unreadable error -> "the PAT record cannot be read: " ^ Authz_pat_event.error_to_string error
+  | Pat refusal -> Authz_pat_state.refusal_to_string refusal
+  | Service_credential_unreadable error ->
+    "the Service credential record cannot be read: "
+    ^ Authz_service_credential_event.error_to_string error
+  | Service_credential refusal -> Authz_service_credential_state.refusal_to_string refusal
 ;;
 
 type applied =
@@ -499,6 +513,60 @@ let session state (record : R.t) =
        Ok { state = { state with sessions }; high_water })
 ;;
 
+(* The revocation of a PAT or a Service credential raises auth_binding_epoch
+   (design 8.1), so it is a [Revoke] intent on the credential: a log restored
+   from before it disagrees with the store, and the credential does not act
+   again. An issue takes no intent: cut back, the credential is gone and its
+   token reads as no credential. *)
+let pat state (record : R.t) =
+  match Authz_pat_event.of_body record.R.body with
+  | Error error -> Error (Pat_unreadable error)
+  | Ok event ->
+    (match
+       Authz_pat_state.apply
+         state.pats
+         ~author:record.R.author
+         ~at_ms:record.R.at_ms
+         ~is_active:(Authz_principal_state.is_active state.principals)
+         event
+     with
+     | Error refusal -> Error (Pat refusal)
+     | Ok pats ->
+       let high_water =
+         match event with
+         | Authz_pat_event.Issued _ -> None
+         | Authz_pat_event.Revoked { pat_id } ->
+           Some (C.Authz { event = C.Revoke; subject = Authz_records.Subject.Pat pat_id })
+       in
+       Ok { state = { state with pats }; high_water })
+;;
+
+let service_credential state (record : R.t) =
+  match Authz_service_credential_event.of_body record.R.body with
+  | Error error -> Error (Service_credential_unreadable error)
+  | Ok event ->
+    (match
+       Authz_service_credential_state.apply
+         state.service_credentials
+         ~author:record.R.author
+         ~at_ms:record.R.at_ms
+         event
+     with
+     | Error refusal -> Error (Service_credential refusal)
+     | Ok service_credentials ->
+       let high_water =
+         match event with
+         | Authz_service_credential_event.Issued _ -> None
+         | Authz_service_credential_event.Revoked { credential_id } ->
+           Some
+             (C.Authz
+                { event = C.Revoke
+                ; subject = Authz_records.Subject.Service_credential credential_id
+                })
+       in
+       Ok { state = { state with service_credentials }; high_water })
+;;
+
 (* Every kind but a mode event is matched with the mode, so the branch of a
    kind says what a record of it means before the bootstrap, and a layer gets
    the workspace of the bootstrap only from a branch that has one. *)
@@ -520,6 +588,11 @@ let read state (record : R.t) =
   | K.Registration, Authz_mode_state.Off _ -> Error (Accounts_off K.Registration)
   | K.Session, Authz_mode_state.Multi_account _ -> session state record
   | K.Session, Authz_mode_state.Off _ -> Error (Accounts_off K.Session)
+  | K.Pat, Authz_mode_state.Multi_account _ -> pat state record
+  | K.Pat, Authz_mode_state.Off _ -> Error (Accounts_off K.Pat)
+  | K.Internal_service_credential, Authz_mode_state.Multi_account _ -> service_credential state record
+  | K.Internal_service_credential, Authz_mode_state.Off _ ->
+    Error (Accounts_off K.Internal_service_credential)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
       | K.Principal
@@ -540,14 +613,12 @@ let read state (record : R.t) =
     , Authz_mode_state.Not_bootstrapped -> Error (Before_bootstrap kind)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
-      | K.Internal_service_credential
       | K.Permission_revocation
       | K.Trigger_evidence
       | K.Lease_terminal_evidence
       | K.Preauthorized_expiry
       | K.Migration_diagnostic
-      | K.Local_recovery
-      | K.Pat ) as kind )
+      | K.Local_recovery ) as kind )
     , (Authz_mode_state.Multi_account _ | Off _) -> Error (Kind_not_read kind)
 ;;
 

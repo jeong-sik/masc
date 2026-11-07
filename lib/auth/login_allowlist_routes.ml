@@ -60,7 +60,11 @@ let state_status = function
   | S.Canceller_owns_the_subject _
   | S.Cancel_owner_unknown _
   | S.Session_unreadable _
-  | S.Session _ -> R.Internal_error_500
+  | S.Session _
+  | S.Pat_unreadable _
+  | S.Pat _
+  | S.Service_credential_unreadable _
+  | S.Service_credential _ -> R.Internal_error_500
 ;;
 
 let error_status = function

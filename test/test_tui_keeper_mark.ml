@@ -42,7 +42,7 @@ let test_the_column_legend_explains_every_letter_the_cell_draws () =
     (mode_letters @ sandbox_letters);
   List.iter
     (fun header -> check_bool ("the legend names " ^ header) true (contains keys header))
-    [ "HEALTH"; "LIFECYCLE"; "TURN"; "Mode"; "S " ]
+    [ Mark.now_header; Mark.age_header; "LIFECYCLE"; Mark.failing_glyph; "Mode"; "S " ]
 
 let () =
   Alcotest.run "tui_keeper_mark"

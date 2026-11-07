@@ -87,9 +87,7 @@ let keeper_failure_cause_word = function
   | Keeper_failure_exception -> "exception"
   | Keeper_failure_operator_interrupt -> "operator interrupt"
 
-(* Opens every line about the past: the FAILING heading, its count in the
-   summary, and the sentence that says what a failing Keeper last failed at. *)
-let failing_glyph = "\xe2\x97\x82" (* ◂ *)
+let failing_glyph = Masc_tui_keeper_mark.failing_glyph
 
 (* The detail window and the failure sentence name a receipt's state with the
    same words. *)
@@ -156,22 +154,26 @@ let keeper_row_trail_sentence ~age (row : Keeper_list_model.row) =
    usable time has no age piece, here as in the drawn sentence. *)
 let widest_age_text = String.make Render_schedule.keeper_last_turn_width '0'
 
+(* The cell is styled here: the sentence about the past is the one text on a
+   row drawn in the warning colour, and the runtime identity stays receded. *)
 let keeper_runtime_cell ~width ?failure_context (runtime : keeper_runtime option) =
   match failure_context with
-  | Some text -> fit_width text width
+  | Some text -> Theme.warn () ^ fit_width text width ^ Ansi.reset
   | None ->
-      (match runtime with
-       | None -> fit_width Masc_tui_theme.Glyph.no_value width
-       | Some row ->
-           (* Running is the normal lifecycle and stays silent; the cell goes
-              to the runtime identity unless failure context takes priority. *)
-           let phase, runtime_id = keeper_runtime_parts row in
-           let phase_width = Message_layout.display_width phase in
-           if phase_width >= width then fit_width (keeper_runtime_label runtime) width
-           else
-             fit_width
-               (phase ^ fit_runtime_id (width - phase_width) runtime_id)
-               width)
+      Theme.recede ()
+      ^ (match runtime with
+         | None -> fit_width Masc_tui_theme.Glyph.no_value width
+         | Some row ->
+             (* Running is the normal lifecycle and stays silent; the cell goes
+                to the runtime identity unless failure context takes priority. *)
+             let phase, runtime_id = keeper_runtime_parts row in
+             let phase_width = Message_layout.display_width phase in
+             if phase_width >= width then fit_width (keeper_runtime_label runtime) width
+             else
+               fit_width
+                 (phase ^ fit_runtime_id (width - phase_width) runtime_id)
+                 width)
+      ^ Ansi.reset
 
 (* One activation mode and the sandbox declaration from the roster row. The
    cell fills the whole flags field, so the columns to its right line up with
@@ -219,8 +221,8 @@ let keeper_activity_word (activity : Keeper_list_model.activity) =
 
 let keeper_activity_style (activity : Keeper_list_model.activity) =
   match activity with
-  | Held_call | Attempt_failed -> Theme.bad ()
-  | Question | Confirmation | Offline -> Theme.warn ()
+  | Held_call -> Theme.bad ()
+  | Question | Confirmation | Offline | Attempt_failed -> Theme.warn ()
   | Preparing | Streaming | Running | Async_working _ | Deferred -> Theme.info ()
   | Tool_waiting -> Theme.warn ()
   | Model_waiting -> Theme.info ()
@@ -297,7 +299,7 @@ let keeper_path_rest_detail (row : Keeper_list_model.row) =
   | Keeper_control.Present _ | Keeper_control.Absent | Keeper_control.Unobserved
   | Keeper_control.Invalid _ -> None
 
-let keeper_detail_text ?(failure_context = None) (row : Keeper_list_model.row) =
+let keeper_detail_text (row : Keeper_list_model.row) =
   let approval =
     Option.map
       (fun (approval : Tui_decode.keeper_tool_approval) ->
@@ -315,25 +317,44 @@ let keeper_detail_text ?(failure_context = None) (row : Keeper_list_model.row) =
     | "" -> None
     | word -> Some ("health " ^ word)
   in
-  Option.to_list failure_context
-  @ List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
+  List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
   @ List.filter_map Fun.id
       [ approval; questions; keeper_path_rest_detail row; keeper_waiting_detail row
       ; keeper_task_detail row; health ]
   |> String.concat " · "
+
+(* The DETAIL cell. When the RUNTIME column is not drawn, the sentence about
+   the past leads this cell in the warning colour and the rest stays receded.
+   Each part is fitted as plain text, so a cut mark takes the colour of the
+   text it cuts. *)
+let keeper_detail_cell ~width ~failure_context row =
+  let rest = keeper_detail_text row in
+  match failure_context with
+  | None -> Theme.recede () ^ fit_width rest width ^ Ansi.reset
+  | Some sentence ->
+      let sentence_cells = Message_layout.display_width sentence in
+      if sentence_cells >= width then Theme.warn () ^ fit_width sentence width ^ Ansi.reset
+      else
+        let tail = if String.equal rest "" then "" else " · " ^ rest in
+        Theme.warn () ^ sentence ^ Theme.recede ()
+        ^ fit_width tail (width - sentence_cells)
+        ^ Ansi.reset
 
 let keeper_column_header (columns : Render_schedule.keeper_columns) =
   String.concat ""
     [ String.make Render_schedule.keeper_marker_width ' '
     ; Message_layout.fit_width "KEEPER" columns.kcol_name
     ; " "
-    ; Message_layout.fit_width "NOW" Render_schedule.keeper_status_width
+    ; Message_layout.fit_width Masc_tui_keeper_mark.now_header
+        Render_schedule.keeper_status_width
     ; (if columns.kcol_show_flags then
          " "
          ^ Message_layout.fit_width Render_schedule.keeper_flags_header
              Render_schedule.keeper_flags_width
        else "")
-    ; " " ^ Message_layout.pad_left "AGE" Render_schedule.keeper_last_turn_width
+    ; " "
+      ^ Message_layout.pad_left Masc_tui_keeper_mark.age_header
+          Render_schedule.keeper_last_turn_width
     ; (if columns.kcol_show_runtime then
          " " ^ fit_width "LIFECYCLE / RUNTIME" columns.kcol_runtime
        else "")
@@ -385,20 +406,14 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
       ^ Message_layout.pad_left age Render_schedule.keeper_last_turn_width
       ^ Ansi.reset
     ; (if columns.kcol_show_runtime then
-         " " ^ Theme.recede ()
-         ^ keeper_runtime_cell ~width:columns.kcol_runtime ?failure_context runtime
-         ^ Ansi.reset
+         " " ^ keeper_runtime_cell ~width:columns.kcol_runtime ?failure_context runtime
        else "")
     ; " "
-    ; Theme.recede ()
-      ^ fit_width
-          (keeper_detail_text
-             ~failure_context:
-               (Render_schedule.keeper_failure_context_for_detail
-                  ~show_runtime:columns.kcol_show_runtime failure_context)
-             row)
-          columns.kcol_task
-      ^ Ansi.reset
+    ; keeper_detail_cell ~width:columns.kcol_task
+        ~failure_context:
+          (Render_schedule.keeper_failure_context_for_detail
+             ~show_runtime:columns.kcol_show_runtime failure_context)
+        row
     ]
 
 let keeper_secondary_row_content ~inner (row : Keeper_list_model.row) =

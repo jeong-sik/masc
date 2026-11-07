@@ -9,9 +9,15 @@
 val glyph : paused:bool -> Masc.Tui_decode.keeper_health_reading option -> string
 (** [None] is a roster that was not read -- not a health nothing could name. *)
 
+val failing_glyph : string
+(** Opens every line about a failing keeper's past: the FAILING group heading,
+    its count in the summary, and the sentence of its last failure. *)
+
 val activity_glyph : Masc_tui_keeper_list_model.activity -> string
 (** The compact list's activity mark. The renderer adds the activity word and
-    substitutes its existing animated mark for preparing/running turns. *)
+    substitutes its existing animated mark for preparing/running turns. [!]
+    belongs to a held call alone; a failed attempt in an open turn has its own
+    mark. *)
 
 val badge_glyph : Masc_tui_keeper_list_model.badge -> string
 (** The mark beside a secondary activity badge; the badge always keeps its
@@ -36,6 +42,12 @@ val sandbox_of_profile : string -> sandbox option
 val sandbox_letter : sandbox -> string
 (** The S letter the roster draws for a known sandbox. *)
 
+val now_header : string
+val age_header : string
+(** The list's header words over the activity and age columns. The list draws
+    them and {!column_legend} names them from these two values. *)
+
 val column_legend : (string * string) list
-(** The Keepers header words and the Mode S letters, each with what it means.
-    The sheet prints it; the roster does not repeat it above its rows. *)
+(** The Keepers header words, the sentence about a failing keeper's past and
+    the Mode S letters, each with what it means. The sheet prints it; the
+    roster does not repeat it above its rows. *)

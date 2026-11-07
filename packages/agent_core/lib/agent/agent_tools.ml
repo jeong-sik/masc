@@ -779,11 +779,34 @@ let find_and_execute_tool_with_index
        | Ok exact_input ->
          let t0 = Unix.gettimeofday () in
          let result =
-           Agent_tool_terminal_boundary.execute_handler ~tool ~name (fun () ->
-             match prepared_call with
-             | Some prepared -> Tool.execute_prepared ~context ~invocation prepared
-             | None -> Tool.execute ~context ~invocation tool exact_input)
-           |> repair_utf8_tool_result
+           match
+             Agent_tool_terminal_boundary.execute_handler ~tool ~name (fun () ->
+               match prepared_call with
+               | Some prepared -> Tool.execute_prepared ~context ~invocation prepared
+               | None -> Tool.execute ~context ~invocation tool exact_input)
+           with
+           | result -> repair_utf8_tool_result result
+           | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+             (* No result exists, so [post_tool_use] and the deferred observers
+                never run. Without this call the call leaves no trace at all,
+                although its effect may already have happened. *)
+             let backtrace = Printexc.get_raw_backtrace () in
+             let duration_ms = (Unix.gettimeofday () -. t0) *. 1000.0 in
+             Eio.Cancel.protect (fun () ->
+               emit_post_tool_use_failure
+                 ~input:exact_input
+                 ~stage:Hooks.Cancelled_during_execution
+                 ~duration_ms
+                 (Printexc.to_string cancelled)
+               |> Option.iter (fun failure ->
+                 Log.error
+                   _log
+                   "cancelled tool failure hook failed"
+                   [ Log.S ("tool", name)
+                   ; Log.S ("tool_use_id", id)
+                   ; Log.S ("failure", deferred_failure_summary failure)
+                   ]));
+             Printexc.raise_with_backtrace cancelled backtrace
          in
          let duration_ms = (Unix.gettimeofday () -. t0) *. 1000.0 in
          let result_bytes =

@@ -1228,6 +1228,41 @@ let test_lifecycle_surfaces_share_exact_tool_invocation () =
   check (list string) "result exact occurrences" expected_all result_invocations
 ;;
 
+let test_cancelled_handler_reaches_the_failure_hook () =
+  Eio_main.run
+  @@ fun env ->
+  let post_calls = ref 0 in
+  let failure_stages = ref [] in
+  let hooks =
+    { Hooks.empty with
+      post_tool_use = Some (fun _ -> incr post_calls; Hooks.Continue)
+    ; post_tool_use_failure =
+        Some
+          (function
+            | Hooks.PostToolUseFailure { stage; _ } ->
+              failure_stages := stage :: !failure_stages;
+              Hooks.Continue
+            | _ -> fail "expected PostToolUseFailure")
+    }
+  in
+  let cancelled_tool =
+    Tool.create ~name:"cut" ~description:"cancelled while running" ~parameters:[]
+      (fun _ -> raise (Eio.Cancel.Cancelled Exit))
+  in
+  (match
+     execute_result_with_tools_in_env
+       env
+       ~tools:[ cancelled_tool ]
+       ~hooks
+       [ ToolUse { id = "t1"; name = "cut"; input = `Assoc [] } ]
+   with
+   | exception Eio.Cancel.Cancelled Exit -> ()
+   | _ -> fail "the cancellation did not reach the caller");
+  check int "no result reaches PostToolUse" 0 !post_calls;
+  check bool "the failure hook saw the call end under cancellation" true
+    (!failure_stages = [ Hooks.Cancelled_during_execution ])
+;;
+
 let test_tool_exception_still_publishes_tool_completed () =
   Eio_main.run
   @@ fun env ->
@@ -1599,6 +1634,10 @@ let () =
             "tool exception still publishes ToolCompleted"
             `Quick
             test_tool_exception_still_publishes_tool_completed
+        ; test_case
+            "a cancelled handler reaches the failure hook"
+            `Quick
+            test_cancelled_handler_reaches_the_failure_hook
         ] )
     ; ( "terminal"
       , [ test_case

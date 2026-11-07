@@ -1538,6 +1538,29 @@ let test_an_executed_failure_is_not_written_twice () =
   check int "post_tool_use owns that row, this hook adds none" 0 (List.length rows)
 ;;
 
+let test_a_cancelled_call_leaves_an_unsettled_row () =
+  let announced = ref false in
+  let rows =
+    rejected_rows_for
+      ~stage:Agent_core.Hooks.Cancelled_during_execution
+      ~on_tool_result_ready:(fun ~tool_call_id:_ ~turn:_ ~planned_index:_ ~execution_id:_ ->
+        announced := true)
+      ()
+  in
+  match rows with
+  | [ row ] ->
+    check string "the call that was cancelled" "keeper_broadcast"
+      (Option.value ~default:"<absent>" (Safe_ops.json_string_opt "tool" row));
+    check (option string) "no outcome was observed" (Some "unknown")
+      (Safe_ops.json_string_opt "wire_outcome" row);
+    check (option string) "no disposition is claimed" None
+      (Safe_ops.json_string_opt "disposition" row);
+    check bool "reads back as unsettled, not as a failure" true
+      (Tool_result.recorded_call_outcome row = Tool_result.Recorded_unsettled);
+    check bool "no result is announced to the cancelled turn" false !announced
+  | rows -> failf "expected one row for the cancelled call, got %d" (List.length rows)
+;;
+
 let test_validation_rejection_notifies_after_exact_log_commit () =
   let observed = ref None in
   let rows =
@@ -2441,6 +2464,10 @@ let () =
             "an executed failure is not written twice"
             `Quick
             test_an_executed_failure_is_not_written_twice
+        ; test_case
+            "a cancelled call leaves an unsettled row"
+            `Quick
+            test_a_cancelled_call_leaves_an_unsettled_row
         ; test_case
             "validation callback follows exact log commit"
             `Quick

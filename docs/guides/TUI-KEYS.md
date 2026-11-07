@@ -846,6 +846,7 @@ or completion.
 | `◂` | a failing keeper's last failure, in place of its runtime or first in DETAIL: how long ago · cause · the runtime that ended it · candidates tried |
 | `Mode M/D/A` | manual / on demand / autonomous |
 | `S D/M/R` | sandbox: docker / microvm / remote_ssh |
+| `쉬는 중` | resting path: relative duration (제공자 stated / 상한 bounded); ▹ prefixes next candidate after turn failure |
 
 ## Memory marks
 

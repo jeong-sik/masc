@@ -324,7 +324,7 @@ let keeper_next_text ?now (row : Keeper_list_model.row) =
   | Keeper_control.Present _ | Keeper_control.Absent | Keeper_control.Unobserved
   | Keeper_control.Invalid _ -> None
 
-let keeper_detail_text (row : Keeper_list_model.row) =
+let keeper_detail_text ?now (row : Keeper_list_model.row) =
   let approval =
     Option.map
       (fun (approval : Tui_decode.keeper_tool_approval) ->
@@ -345,7 +345,7 @@ let keeper_detail_text (row : Keeper_list_model.row) =
   List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
   @ List.filter_map Fun.id
       [ approval; questions; keeper_waiting_detail row
-      ; keeper_task_detail row; health; keeper_next_text row ]
+      ; keeper_task_detail row; health; keeper_next_text ?now row ]
   |> String.concat " · "
 
 (* The DETAIL cell. When the RUNTIME column is not drawn, the sentence about
@@ -353,8 +353,8 @@ let keeper_detail_text (row : Keeper_list_model.row) =
    The text is fitted as plain text, so a cut mark takes the colour of the text
    it cuts. A sentence that fills the cell is fitted together with the rest, so
    the rest it pushes out is still marked by the cut. *)
-let keeper_detail_cell ~width ~failure_context row =
-  let rest = keeper_detail_text row in
+let keeper_detail_cell ?now ~width ~failure_context row =
+  let rest = keeper_detail_text ?now row in
   match failure_context with
   | None -> Theme.recede () ^ fit_width rest width ^ Ansi.reset
   | Some sentence ->
@@ -436,7 +436,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
          " " ^ keeper_runtime_cell ~width:columns.kcol_runtime ?failure_context runtime
        else "")
     ; " "
-    ; keeper_detail_cell ~width:columns.kcol_task
+    ; keeper_detail_cell ~now ~width:columns.kcol_task
         ~failure_context:
           (Render_schedule.keeper_failure_context_for_detail
              ~show_runtime:columns.kcol_show_runtime failure_context)
@@ -942,7 +942,19 @@ let render_keeper_list (state : state) =
   let widest_detail =
     List.fold_left
       (fun widest (row : Keeper_list_model.row) ->
-        max widest (failure_sentence_cells row))
+        let failure_width = failure_sentence_cells row in
+        let next_width =
+          match keeper_next_text ~now:now_unix row with
+          | None -> 0
+          | Some text ->
+            let task_w =
+              match keeper_task_detail row with
+              | None -> 0
+              | Some t -> Message_layout.display_width t + 3
+            in
+            task_w + Message_layout.display_width text
+        in
+        max widest (max failure_width next_width))
       0 model_rows
   in
   let widest_runtime =

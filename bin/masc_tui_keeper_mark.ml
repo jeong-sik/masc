@@ -106,4 +106,6 @@ let column_legend =
        how long ago · cause · the runtime that ended it · candidates tried" )
   ; "Mode " ^ letters activation_letter activations, words activation_word activations
   ; "S " ^ letters sandbox_letter sandboxes, "sandbox: " ^ words sandbox_word sandboxes
+  ; ( "쉬는 중"
+    , "resting path: relative duration (제공자 stated / 상한 bounded); ▹ prefixes next candidate after turn failure" )
   ]

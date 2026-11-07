@@ -28,7 +28,7 @@ val respond_keeper_tool_json :
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   Mcp_server.server_state ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   tool_name:string ->
   args:Yojson.Safe.t ->
   unit

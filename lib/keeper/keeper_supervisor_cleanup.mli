@@ -1,4 +1,4 @@
-(** Deliver the typed post-finalization event/hook. Registered by server boot
+(** Deliver the typed post-finalization event. Registered by server boot
     before shutdown recovery starts. *)
 val handle_completion :
   Workspace.config ->

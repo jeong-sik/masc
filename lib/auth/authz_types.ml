@@ -194,6 +194,12 @@ module Authorization_scope = struct
     ; allowed_effects = Effect_scope.inter a.allowed_effects b.allowed_effects
     }
   ;;
+
+  let equal a b =
+    Runtime_scope.equal a.runtimes b.runtimes
+    && Channel_scope.equal a.channels b.channels
+    && Effect_scope.equal a.allowed_effects b.allowed_effects
+  ;;
 end
 
 module Pat_scope = struct

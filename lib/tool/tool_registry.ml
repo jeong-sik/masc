@@ -6,7 +6,7 @@
 
     Usage:
     - record_call is called on every tools/call dispatch
-    - get_stats / get_top_n / get_never_called provide reporting
+    - get_stats / total_calls provide reporting
     - Data resets on server restart (the date-split Telemetry_eio store is durable)
 *)
 
@@ -148,33 +148,11 @@ let get_stats () : (string * call_stats) list =
     Int.compare b.call_count a.call_count)
 ;;
 
-(** Get top N tools by call count *)
-let get_top_n n : (string * call_stats) list =
-  let all = get_stats () in
-  let rec take acc n = function
-    | [] -> List.rev acc
-    | _ when n <= 0 -> List.rev acc
-    | x :: xs -> take (x :: acc) (n - 1) xs
-  in
-  take [] n all
-;;
-
-(** Get tools that have never been called (not in registry at all)
-    compared against a list of all known tool names *)
-let get_never_called (all_tool_names : string list) : string list =
-  with_registry_ro (fun () ->
-    List.filter (fun name -> not (Hashtbl.mem registry name)) all_tool_names)
-  |> List.sort String.compare
-;;
-
 (** Total calls across all tools *)
 let total_calls () : int =
   with_registry_ro (fun () ->
     Hashtbl.fold (fun _ stats acc -> acc + (Atomic.get stats).call_count) registry 0)
 ;;
-
-(** Number of distinct tools that have been called *)
-let distinct_tools_called () : int = with_registry_ro (fun () -> Hashtbl.length registry)
 
 (** Reset all counters (for testing) *)
 let reset () = with_registry_rw (fun () -> Hashtbl.clear registry)

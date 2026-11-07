@@ -47,7 +47,7 @@ let dispatch_response ?(meth = "POST") ?token ~router ~path ~body () =
       let output = Buffer.create 1024 in
       let connection =
         Httpun.Server_connection.create (fun reqd ->
-          Http.Router.dispatch router (Httpun.Reqd.request reqd) reqd)
+          Http.Router.dispatch router (Httpun.Reqd.request reqd) (Masc.Http_reqd.of_httpun reqd))
       in
       let authorization =
         Option.fold

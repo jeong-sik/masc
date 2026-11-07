@@ -53,6 +53,7 @@ let get ?router ?token state target =
   let output = Buffer.create 1024 in
   let connection = Httpun.Server_connection.create (fun reqd ->
     let req = Httpun.Reqd.request reqd in
+    let reqd = Http_reqd.of_httpun reqd in
     match router with
     | Some router -> Http_server_eio.Router.dispatch router req reqd
     | None -> Api.handle_keeper_get_subroutes state req req reqd)

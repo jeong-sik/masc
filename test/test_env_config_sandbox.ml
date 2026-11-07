@@ -39,7 +39,6 @@ let sandbox_env_names =
   ; "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
   ; "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
   ; "MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC"
-  ; "MASC_KEEPER_DOCKER_PLAYGROUND"
   ; "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED"
   ; "MASC_KEEPER_SHELL_TIMEOUT_IO_SEC"
   ; "MASC_KEEPER_SHELL_TIMEOUT_READ_SEC"
@@ -83,9 +82,6 @@ let test_defaults_pinned () =
   check bool "Hardening.require_userns default" false
     (S.Hardening.require_userns ());
   (* Cleanup *)
-  (* Runtime *)
-  check bool "Runtime.docker_playground_enabled default" false
-    (S.Runtime.docker_playground_enabled ());
   (* Preflight *)
   check bool "Preflight.enabled default" true (S.Preflight.enabled ());
   check int "Preflight SSH TTL default" 60 (S.Preflight.ssh_ttl_sec ());

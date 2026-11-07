@@ -297,9 +297,6 @@ module Runtime = struct
       "MASC_KEEPER_MICROVM_PAYLOAD_PATH"
   ;;
 
-  let docker_playground_enabled () =
-    get_bool ~default:false "MASC_KEEPER_DOCKER_PLAYGROUND"
-
   (** @category Sandbox
       @ops_class operator *)
   let docker_playground_container_root () =

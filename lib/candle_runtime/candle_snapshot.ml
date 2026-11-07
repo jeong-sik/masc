@@ -2,20 +2,6 @@
 
 open Result.Syntax
 
-(* The link registry is read from its primary file only. A registry that cannot
-   be read, or whose primary file is gone while a recovery copy remains, refuses
-   the step: linked Tasks are what the payout is shared among. The registry
-   lists only Goals that have links, so a Goal missing from it has none. *)
-let linked_task_ids config ~goal_id =
-  match Workspace_goal_index.read_goal_task_links_authoritative_r config with
-  | Error detail ->
-    Error (Printf.sprintf "the goal-task links could not be read: %s" detail)
-  | Ok links ->
-    (match List.assoc_opt goal_id links with
-     | Some task_ids -> Ok task_ids
-     | None -> Ok [])
-;;
-
 let event ~at ~linked_task_ids (goal : Goal_store.goal) (verdict : Goal_verification.verdict)
   =
   let* passed_at = Candle_stamp.copied ~what:"the verdict's recorded_at" verdict.recorded_at in
@@ -40,7 +26,7 @@ let event ~at ~linked_task_ids (goal : Goal_store.goal) (verdict : Goal_verifica
 ;;
 
 let write ~now (config : Workspace_utils_backend_setup.config) goal verdict =
-  let* linked_task_ids = linked_task_ids config ~goal_id:goal.Goal_store.id in
+  let* linked_task_ids = Candle_tasks.linked_task_ids config ~goal_id:goal.Goal_store.id in
   let* at = Candle_stamp.at ~now in
   let* row = event ~at ~linked_task_ids goal verdict in
   Result.map_error

@@ -17,11 +17,11 @@ an agent through a public tool.
 
 ## Workflows
 
-- Native BiDi and ego support observed scene → hover → fresh scene → click →
+- Ego supports observed scene → hover → fresh scene → click →
   inspect application state.
 - Pointer dragging and HTML5 DataTransfer/drop acceptance are different. Ego has
   a passing native HTML5 fixture; application acceptance still
-  requires a fresh read. Firefox's tested HTML5 case fails despite pointer drag working.
+  requires a fresh read.
 - Fill replaces an input/textarea value and emits input/change; it does not mean
   trusted typing or submission. Native adapters expose typed double click,
   focused Unicode text, and modifier chords; text controls are refused, and

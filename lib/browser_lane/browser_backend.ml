@@ -1,11 +1,10 @@
-type t = Owned_firefox | Ego [@@deriving enumerate]
+type t = Ego [@@deriving enumerate]
 
 let lane = function
-  | Owned_firefox | Ego -> Browser_lane_name.Live
+  | Ego -> Browser_lane_name.Live
 ;;
 
 let to_wire = function
-  | Owned_firefox -> "owned_firefox"
   | Ego -> "ego"
 ;;
 

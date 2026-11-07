@@ -1,9 +1,9 @@
 (** Closed browser interactions. Caller strings are values, never script source. *)
-type request = { route : Browser_selection.preference; tab_id : int; frame_path : string list;
+type request = { route : Browser_selection.preference; tab_id : int;
   expected_url : string option; action : Browser_lane.interaction }
 open Result.Syntax
 let route_names = ["lane"; "clientId"]
-let wire_fields = ["tabId"; "framePath"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "width"; "height"; "value"; "values"; "target"]
+let wire_fields = ["tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "width"; "height"; "value"; "values"; "target"]
 let parse = function
   | `Assoc fields ->
     let allowed = route_names @ wire_fields in
@@ -254,28 +254,7 @@ let parse = function
           let* via,duration_ms = drag_options () in
           Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
       | _ -> Error "action must be set_viewport, activate_tab, tap_at, swipe, click, double_click, double_click_at, type_text, press_key, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at, drag or drag_to" in
-    let* frame_path = match List.assoc_opt "framePath" fields with
-      | None -> Ok []
-      | Some (`List values) when values <> [] ->
-        let rec loop acc = function
-          | [] -> Ok (List.rev acc)
-          | `String selector :: rest when String.trim selector <> "" ->
-            loop (selector :: acc) rest
-          | _ :: _ -> Error "framePath must list nonempty frame selectors"
-        in
-        loop [] values
-      | Some _ -> Error "framePath must list nonempty frame selectors" in
-    let* () = match frame_path, action with
-      | [], _ | _ :: _, (Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Scroll _) -> Ok ()
-      | _ :: _, (Browser_lane.Activate_tab | Browser_lane.Set_viewport _
-        | Browser_lane.Double_click _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _
-        | Browser_lane.Press_key _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Scroll_at _
-        | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _ | Browser_lane.Click_at _
-        | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _ | Browser_lane.Fill_node _
-        | Browser_lane.Click_target _ | Browser_lane.Fill_target _
-        | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _) ->
-        Error "framePath applies only to click, fill, select_option and scroll with a selector" in
-    Ok { route = base.route; tab_id; frame_path; expected_url; action }
+    Ok { route = base.route; tab_id; expected_url; action }
   | _ -> Error "browser interaction arguments must be an object"
 
 let script = {js|function interactInPage(args) {

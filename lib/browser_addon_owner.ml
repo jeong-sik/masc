@@ -125,7 +125,7 @@ let attach_live ?ego_space t ~client_id ~cleanup =
     | Serving ->
       if not (List.mem client_id t.clients) then Error "live client was not registered by this owner"
       else match List.find_opt (fun (client:B.client_info) -> client.client_id=client_id) (B.active_clients ()) with
-        | Some {transport=(B.Webdriver_bidi | B.Ego_task_space) as transport;_} ->
+        | Some {transport=B.Ego_task_space as transport;_} ->
           let name = "live " ^ B.live_transport_to_string transport in
           (* One connection per transport at a time. One that ended, as a
              connection whose ego Space went missing does, keeps its cleanup
@@ -137,8 +137,7 @@ let attach_live ?ego_space t ~client_id ~cleanup =
             (* This worker disconnects its own connection when it ends, so
                the lane stops timing it. *)
             (match transport,ego_space with
-             | B.Webdriver_bidi,Some _ -> Error "Space observations require an Ego connection"
-             | (Webdriver_bidi|Ego_task_space),None | Ego_task_space,Some _ ->
+             | B.Ego_task_space,(None | Some _) ->
                Result.map (fun () ->
                  t.live <- (transport, owned_cleanup name cleanup) :: t.live;
                  t.ego_space <- (match ego_space with None -> t.ego_space | Some ego_space -> Some (client_id,ego_space));
@@ -207,7 +206,7 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
         Error (refusal "upload requires its private host snapshot grant")
     | (B.Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
       | Page_goto _|Page_elements _
-      |Page_act (Open_tab _|Open_window _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_emulation _|Clear_emulation;_})
+      |Page_act (Open_tab _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_emulation _|Clear_emulation;_})
       |Page_context _),(Ordinary|Scoped_upload)
     | Page_act (On_tab {interaction=Upload _;_}),Scoped_upload -> Ok () in
   match allowed with Error reply -> reply | Ok () ->

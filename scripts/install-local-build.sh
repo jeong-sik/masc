@@ -39,7 +39,7 @@
 #   --skip-build    install what --build-dir already holds
 #   --build-dir     directory holding main_eio.exe, masc_tui.exe,
 #                   masc_native_addon_launcher.exe, masc_browser_addon_worker.exe,
-#                   masc_browser_process_owner.exe, deployment_preflight_helper.exe,
+#                   deployment_preflight_helper.exe,
 #                   and masc_exec_ssh_bootstrap.exe
 #                   (default <repo>/_build/default/bin)
 #   --base-path     workspace whose runtime.toml the new build must accept, and
@@ -62,7 +62,7 @@ guest_shim=true
 # Every browser route runs in the browser Add-on, so its programs are installed with masc, from the same build, unless
 # --no-browser-addon says the workspace needs no browser.
 browser_addon=true
-browser_addon_programs=(masc_native_addon_launcher masc_browser_addon_worker masc_browser_process_owner)
+browser_addon_programs=(masc_native_addon_launcher masc_browser_addon_worker)
 print_build_targets=false
 base_path=""
 workspace_root=""
@@ -443,7 +443,7 @@ install -m 755 "$build_dir/deployment_preflight_helper.exe" "$prefix/masc-deploy
 install -m 755 "$build_dir/masc_exec_ssh_bootstrap.exe" "$prefix/masc-exec-ssh-bootstrap"
 install -m 755 "$repo/scripts/check-runtime-deployment-preflight.sh" "$prefix/masc-check-runtime-deployment-preflight"
 if [ "$browser_addon" = true ]; then
-  echo "installed masc, masc-tui, masc-native-addon-launcher, masc-browser-addon-worker, masc-browser-process-owner, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight, masc-exec-ssh-bootstrap into $prefix"
+  echo "installed masc, masc-tui, masc-native-addon-launcher, masc-browser-addon-worker, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight, masc-exec-ssh-bootstrap into $prefix"
 else
   echo "installed masc, masc-tui, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight, masc-exec-ssh-bootstrap into $prefix (no browser Add-on)"
 fi

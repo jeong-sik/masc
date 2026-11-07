@@ -159,16 +159,12 @@ Keeper 에게 이렇게 부탁해 한 장으로 남깁니다.
 보거나 클릭해야 할 때만 브라우저 레인이 필요합니다.
 
 - 화면: `:` 를 누르고 `go Browser Lane` 을 칩니다.
-- 설치: 설치 과정의 "5 · Give imp tools (optional)" 체크리스트에서 필요한 브라우저
-  줄을 표시합니다. 브라우저 줄은 처음에 모두 표시되어 있지 않습니다. 설치를 이미
-  끝냈다면 그 줄의 모드로 `masc browser-lane-setup --mode <모드>` 를 실행하고
-  서버를 다시 시작합니다.
-  - BiDi 줄(`bidi`): MASC 가 띄우는 Firefox 를 씁니다.
-  - 부가 기능(add-on) 줄(`extension`): 평소 쓰는 Firefox 를 붙입니다.
-  - ego lite 줄(`ego`): ego lite 안의 작업 공간을 씁니다. `ego-browser` 가 답할 때만
-    나옵니다.
+- 설치: 설치 과정의 "5 · Give imp tools (optional)" 체크리스트에서 ego lite 줄
+  (ego lite 안의 작업 공간, `ego-browser` 가 답할 때만 나옴)을 고릅니다. 처음에는 표시되어
+  있지 않으니 필요할 때만 고릅니다. 아니면 서버 시작 전에 `masc browser-lane-setup --mode ego` 를
+  실행합니다. 설치를 이미 끝냈다면 같은 명령을 직접 실행하고 서버를 다시 시작합니다.
 - Browser Lane 화면의 연결 목록에는 이런 줄이 보입니다.
-  - `No active native browser connections` — 목록을 읽었고, 연결된 Firefox 가
+  - `No active native browser connections` — 목록을 읽었고, 연결된 브라우저가
     없습니다.
   - `(nothing here is a reading)` — 목록을 읽지 못했습니다. 바로 위의 빨간 줄이
     이유입니다.

@@ -478,8 +478,7 @@ let test_capability_table_names_advertised_values () =
     | Cap.Act -> "BrowserAct" | Cap.Session -> "BrowserSession" | Cap.Goto -> "BrowserGoto"
   in
   let backends =
-    [ Cap.Connected Browser_lane.Webdriver_bidi
-    ; Cap.Connected Browser_lane.Ego_task_space
+    [ Cap.Connected Browser_lane.Ego_task_space
     ; Cap.Safari_unavailable
     ]
   in
@@ -505,7 +504,6 @@ let test_capability_table_names_advertised_values () =
                     (Printf.sprintf "%s on %s: %s %S is advertised by %s"
                        (Cap.operation_name entry.operation)
                        (match backend with
-                        | Cap.Connected Browser_lane.Webdriver_bidi -> "live BiDi"
                         | Cap.Connected Browser_lane.Ego_task_space -> "ego"
                         | Cap.Safari_unavailable -> "Safari")
                        property value (tool_label inv.tool))
@@ -555,7 +553,6 @@ let test_capability_table_sharing_is_listed () =
     ; [ "middle_click"; "right_click" ] (* click_at with a button *)
     ; [ "key_chord"; "press_key" ] (* press_key with modifiers *)
     ; [ "html5_drop"; "pointer_drag" ] (* drag_to on an ego connection *)
-    ; [ "click"; "frame_interaction" ] (* click with framePath *)
     ; [ "click"; "click_snapshot_target" ] (* click with target on an ego connection *)
     ; [ "click"; "click_snapshot_target"; "frame_interaction" ] (* click with target on an ego connection, inside frames too *)
     ; [ "read_frames"; "read_snapshot" ] (* an ego connection reads frames through its snapshot *)
@@ -593,8 +590,7 @@ let test_capability_table_sharing_is_listed () =
                 true
                 (List.mem sorted allowed))
          by_call)
-    [ Cap.Connected Browser_lane.Webdriver_bidi
-    ; Cap.Connected Browser_lane.Ego_task_space
+    [ Cap.Connected Browser_lane.Ego_task_space
     ; Cap.Safari_unavailable
     ]
 ;;

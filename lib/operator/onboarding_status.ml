@@ -10,7 +10,6 @@ type check_id =
   | Keeper_declaration
   | Sandbox
   | Keeper_persistence
-  | Browser_bidi_host
 
 type role = Required_to_open | Advisory
 
@@ -55,7 +54,6 @@ let check_id_name = function
   | Keeper_declaration -> "keeper_declaration"
   | Sandbox -> "sandbox"
   | Keeper_persistence -> "keeper_persistence"
-  | Browser_bidi_host -> "browser_bidi_host"
 
 (* Existing history opens on what every Keeper in the workspace shares: the
    workspace, a runtime.toml the server can load, and Keeper metadata its boot
@@ -65,11 +63,10 @@ let check_id_name = function
    and the journey's model step is the repair. imp's model binding, declaration and
    sandbox concern the Keeper the journey creates: the server skips an imp it
    cannot load and boots every other Keeper, so a workspace whose history
-   belongs to other Keepers opens and reports them beside it. The live
-   Firefox is a separate surface; it is reported the same way. *)
+   belongs to other Keepers opens and reports them beside it. *)
 let role = function
   | Workspace | Runtime_configuration | Keeper_persistence -> Required_to_open
-  | Model_connection | Keeper_declaration | Sandbox | Browser_bidi_host -> Advisory
+  | Model_connection | Keeper_declaration | Sandbox -> Advisory
 
 let role_name = function
   | Required_to_open -> "required_to_open"
@@ -251,29 +248,7 @@ let keeper_checks ~sandbox base_path =
        [Start_imp];
      sandbox_check ~sandbox ~base_path]
 
-(* The Browser Addon's Firefox is read from runtime.toml and the Lane Add-on
-   declarations on disk, so this answers with no server running. Only a
-   Firefox the Addon starts has anything to report: its readiness is the
-   Addon's observation, which this file reading cannot confirm. *)
-let browser_bidi_host_check ~configuration base_path =
-  match Browser_bidi_host_status.observe ~base_path ~configuration with
-  | Browser_bidi_host_status.Addon_managed _ as keeper ->
-    [check Browser_bidi_host Needs_verification (Browser_bidi_host_status.message keeper)
-       [Inspect_configuration]]
-  | Addon_off | Not_configured | Not_known -> []
-
-(* The browser tables of the workspace's runtime.toml, for a reader with no
-   server: only when the whole file loads, as a server loads it, since a
-   server that refuses the file has no browser configuration either. [None]
-   otherwise: who starts the Keeper Firefox is then not known. *)
-let browser_configuration config_path =
-  if not (Sys.file_exists config_path) then None
-  else
-    match Runtime.load_list ~config_path with
-    | Error _ -> None
-    | Ok _ -> Result.to_option (Browser_configuration.of_file config_path)
-
-let inspected ~sandbox ~browser ~base_path =
+let inspected ~sandbox ~base_path =
   match base_path with
   | None ->
     { base_path = None; selected_runtime = None; selected_model = None;
@@ -292,14 +267,13 @@ let inspected ~sandbox ~browser ~base_path =
       let selected_runtime, selected_model, models = model_checks config_path in
       { base_path = Some base_path; selected_runtime; selected_model;
         checks = check Workspace Satisfied "Workspace found." [Choose_workspace]
-          :: (models @ keeper_checks ~sandbox base_path @ [persistence_check base_path]
-              @ browser_bidi_host_check ~configuration:(browser config_path) base_path) }
+          :: (models @ keeper_checks ~sandbox base_path @ [persistence_check base_path]) }
 
 let inspect ~sandbox ~base_path =
-  inspected ~sandbox ~browser:browser_configuration ~base_path
+  inspected ~sandbox ~base_path
 
-let inspect_loaded ~configuration ~base_path =
-  inspected ~sandbox:Not_probed ~browser:(fun _ -> configuration) ~base_path
+let inspect_loaded ~base_path =
+  inspected ~sandbox:Not_probed ~base_path
 
 let optional_string = function None -> `Null | Some value -> `String value
 

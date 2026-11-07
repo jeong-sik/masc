@@ -19,22 +19,18 @@ const work = Schema.Struct({
   phase: Schema.Literal('queued', 'running'),
 })
 const common = {
-  clientId: text, browser: Schema.Literal('firefox', 'ego_lite'),
+  clientId: text, browser: Schema.Literal('ego_lite'),
   version: text, engineVersion: text,
   interactions: Schema.Array(work),
   lastActivities: Schema.Array(Schema.Struct({
     work, outcome: Schema.Literal('returned', 'refused', 'partial', 'unknown'),
   })),
 }
-const client = Schema.Union(
-  Schema.Struct({ ...common, transport: Schema.Literal('ego_task_space'), space: Schema.Struct({ id, name: text }),
-    spaceObservation: Schema.NullOr(spaceObservation),
-    spacePresence: Schema.NullOr(spacePresence),
-  }).pipe(Schema.filter(client => (client.spaceObservation === null || client.spaceObservation.spaceId === client.space.id)
-    && (client.spacePresence === null || client.spacePresence.spaceId === client.space.id))),
-  Schema.Struct({ ...common, transport: Schema.Literal('webdriver_bidi'), space: Schema.Null,
-    spaceObservation: Schema.Null, spacePresence: Schema.Null }),
-)
+const client = Schema.Struct({ ...common, transport: Schema.Literal('ego_task_space'), space: Schema.Struct({ id, name: text }),
+  spaceObservation: Schema.NullOr(spaceObservation),
+  spacePresence: Schema.NullOr(spacePresence),
+}).pipe(Schema.filter(client => (client.spaceObservation === null || client.spaceObservation.spaceId === client.space.id)
+  && (client.spacePresence === null || client.spacePresence.spaceId === client.space.id)))
 const unavailable = Schema.Struct({
   backend: Schema.Literal('ego'), reason: Schema.Literal('user_owned_name'),
   space: Schema.NonEmptyString,

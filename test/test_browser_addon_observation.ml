@@ -18,22 +18,23 @@ let invalid_time () = check bool "invalid time rejected before publication" true
 let invalid_snapshot () = check bool "non-object snapshot rejected before publication" true
   (Result.is_error (Observation.of_snapshot ~observed_at:0. (`List [])))
 let client id browser = `Assoc ["clientId",`String id;"browser",`String browser;
-  "version",`String "158.0.1";"engineVersion",`String "158.0.1";"transport",`String "webdriver_bidi";"space",`Null;
+  "version",`String "0.6.2.7";"engineVersion",`String "154.0.8037.44";"transport",`String "ego_task_space";
+  "space",`Assoc ["id",`Int (Hashtbl.hash id mod 1000);"name",`String "fixture Space"];
   "interactions",`List [];"lastActivities",`List [];"spaceObservation",`Null;"spacePresence",`Null]
 let serving clients = `Assoc ["state",`String "serving";"clients",`List clients]
 (* The server reads the browser rows of the Lanes list from this cached
    observation, so what the worker published must read back whole. *)
 let published_reads_back () =
   let output=ok (Observation.of_snapshot ~observed_at:1.
-    (serving [client "01a16363-ef67-7000-ad62-05bcd0320d99" "firefox";
-              client "01a16363-ef68-7000-aee1-37e1be230202" "firefox"])) in
+    (serving [client "01a16363-ef67-7000-ad62-05bcd0320d99" "ego_lite";
+              client "01a16363-ef68-7000-aee1-37e1be230202" "ego_lite"])) in
   let published=ok (Observation.read output) in
   check int "both connected clients read back" 2 (List.length published.clients)
 (* The runtime keeps an observation with its row renamed under the
    installation (Lane_addon_runtime.namespace); the reader must find it. *)
 let namespaced_row_reads_back () =
   let output=ok (Observation.of_snapshot ~observed_at:1.
-    (serving [client "01a16363-ef67-7000-ad62-05bcd0320d99" "firefox"])) in
+    (serving [client "01a16363-ef67-7000-ad62-05bcd0320d99" "ego_lite"])) in
   let cached={output with rows=List.map (fun (row:Types.row) ->
     {row with id="browser-work/7/" ^ row.id;lane_id="browser-work/" ^ row.lane_id}) output.rows} in
   let published=ok (Observation.read cached) in
@@ -46,7 +47,7 @@ let retired_is_not_connected () =
 let duplicate_client () =
   let id="01a16363-ef67-7000-ad62-05bcd0320d99" in
   check bool "the same client twice is refused" true
-    (Result.is_error (Observation.decode_snapshot (serving [client id "firefox"; client id "firefox"])))
+    (Result.is_error (Observation.decode_snapshot (serving [client id "ego_lite"; client id "ego_lite"])))
 let sdk_observation id ownership = `Assoc ["spaceId",`Int id;"spaceName",`String "Renamed native Space";
   "ownership",`String ownership;"observedAt",`Float 42.]
 let native_space_presence () =
@@ -100,7 +101,7 @@ let published_space_observation () =
     [sdk_observation 33 "agent";sdk_observation 32 " ";
      `Assoc ["spaceId",`Int 32;"spaceName",`String "name";"ownership",`String "agent";"observedAt",`Float nan];
      `Assoc ["spaceId",`Int 32;"spaceName",`String "name";"ownership",`String "agent";"observedAt",`Int 1;"observedAt",`Int 2]];
-  let forged=match client "01a16363-ef67-7000-ad62-05bcd0320d99" "firefox" with
+  let forged=match client "01a16363-ef67-7000-ad62-05bcd0320d99" "ego_lite" with
     | `Assoc fields -> `Assoc (("spaceObservation",native)::List.remove_assoc "spaceObservation" fields)
     | _ -> fail "fixture client is not an object" in
   check bool "non-Ego client cannot carry native Space metadata" true
@@ -118,7 +119,7 @@ let publisher_binds_original_client_space () = Eio_main.run (fun _ ->
   check bool "foreign numeric ID cannot leak to this client" true
     (published {base with space=Some {id=33;name="Another"}} (Some native)=`Null);
   check bool "non-Ego client cannot borrow the cache" true
-    (published {base with browser=Firefox;transport=Webdriver_bidi;space=None} (Some native)=`Null))
+    (published {base with browser=Ego_lite;transport=Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"}} (Some native)=`Null))
 let published_space_presence () =
   let module O=Masc.Browser_ego_space_observation in
   let set key value = function `Assoc fields -> `Assoc ((key,value)::List.remove_assoc key fields)
@@ -136,7 +137,7 @@ let published_space_presence () =
       (Result.is_error (Observation.decode_snapshot (serving [set "spacePresence" foreign row])));
     check bool "a non-Ego connection cannot borrow Space presence" true
       (Result.is_error (Observation.decode_snapshot
-        (serving [client "01a16363-ef67-7000-ad62-05bcd0320d99" "firefox" |> set "spacePresence" encoded]))))
+        (serving [client "01a16363-ef67-7000-ad62-05bcd0320d99" "ego_lite" |> set "spacePresence" encoded]))))
     [O.Missing;O.Unknown (O.Transport_unavailable "offline")]
 let unavailable_reads_back () =
   let unavailable = Observation.Ego_user_owned_name {space="masc";ids=[36];observed_at=42.} in
@@ -186,10 +187,8 @@ let merge_keeps_the_live_workers_unavailability () =
   let unavailable = Observation.Ego_user_owned_name {space="masc";ids=[36];observed_at=42.} in
   let published unavailable =
     { (ok (Observation.read (ok (Observation.of_snapshot ~observed_at:1. (serving []))))) with unavailable } in
-  let ego = published [unavailable] and firefox = published [] in
+  let ego = published [unavailable] in
   let module B = Browser_lane.Backend in
-  let merged = Observation.merge [B.Ego, Some ego; B.Owned_firefox, Some firefox] in
-  check bool "the live Ego worker's unavailability survives the merge" true (merged.unavailable=[unavailable]);
   let doubled = Observation.merge [B.Ego, Some ego; B.Ego, None] in
   check bool "another live worker does not suppress known unavailability" true (doubled.unavailable=[unavailable])
 let ()=run "browser addon observation" ["publication",[

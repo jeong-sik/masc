@@ -1,5 +1,0 @@
-(include_subdirs no)
-(library
- (name browser_process_owner)
- (public_name masc.browser_process_owner)
- (libraries masc_process eio eio.unix yojson cstruct unix))

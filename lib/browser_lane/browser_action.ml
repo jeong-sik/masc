@@ -18,16 +18,16 @@ let keep_pages_to_json = function
 type control = Hand_off | Take_over | Space_status | Finish_space of keep_pages | Wait_for_control of control_wait
   | Adopt_tab of { tab_id : int; label : string option }
   | Release_tab of int
-type t = Open_tab of string | Open_window of string | Control of control
-  | On_tab of { tab_id : int; frame_path : string list; interaction : interaction }
+type t = Open_tab of string | Control of control
+  | On_tab of { tab_id : int; interaction : interaction }
 (* The one control a live lane answers without a client: reclaiming the ego
    task space whose task ended while the operator held it. *)
 let is_take_over = function
   | Control Take_over -> true
   | Control (Hand_off|Space_status|Finish_space _|Wait_for_control _|Adopt_tab _|Release_tab _)
-  | Open_tab _|Open_window _|On_tab _ -> false
+  | Open_tab _|On_tab _ -> false
 let reply_timeout_sec = function
-  | Open_tab _ | Open_window _ | Control _ | On_tab _ -> 60.
+  | Open_tab _ | Control _ | On_tab _ -> 60.
 open Result.Syntax
 let key_name = function
   | Enter -> "Enter" | Tab -> "Tab" | Escape -> "Escape" | Backspace -> "Backspace"
@@ -47,10 +47,6 @@ let string_list label = function
       | _ -> Error (label ^ " must contain nonempty strings") in
     collect [] values
   | _ -> Error (label ^ " must be an array")
-let parse_frame_path = function
-  | `Assoc fields -> (match List.assoc_opt "framePath" fields with
-      | None -> Ok [] | Some value -> string_list "framePath" value)
-  | _ -> Error "browser arguments must be an object"
 (* Locale and time zone names are checked for shape only; the page's own Intl
    on the ego connection decides which ones exist and refuses the rest before
    any change. *)
@@ -121,21 +117,13 @@ let parse = function
       else if List.for_all (fun key -> List.mem key ("action" :: "lane" :: "clientId" :: allowed)) keys then Ok ()
       else Error "argument is not valid for this browser action" in
     let on_tab allowed interaction =
-      let* () = exact ("tabId" :: "framePath" :: allowed) in
-      let* frame_path = parse_frame_path (`Assoc fields) in
-      let* () = match interaction, frame_path with
-        | (Back | Forward | Reload | Stop_loading | Close_tab | Accept_dialog _ | Dismiss_dialog
-          | Set_emulation _ | Clear_emulation), _ :: _ -> Error "this action operates on the top-level tab"
-        | (Back | Forward | Reload | Stop_loading | Close_tab | Accept_dialog _ | Dismiss_dialog
-          | Set_emulation _ | Clear_emulation), []
-        | Upload _, _ -> Ok () in
+      let* () = exact ("tabId" :: allowed) in
       let* tab_id = integer "tabId" in
       if tab_id < 0 then Error "tabId must be nonnegative"
-      else Ok (On_tab {tab_id;frame_path;interaction}) in
+      else Ok (On_tab {tab_id;interaction}) in
     let* action = string "action" in
     (match action with
      | "open_tab" -> let* () = exact ["url"] in let* url = string "url" in Ok (Open_tab url)
-     | "open_window" -> let* () = exact ["url"] in let* url = string "url" in Ok (Open_window url)
      | "hand_off" -> let* () = exact [] in Ok (Control Hand_off)
      | "take_over" -> let* () = exact [] in Ok (Control Take_over)
      | "space_status" -> let* () = exact [] in Ok (Control Space_status)
@@ -193,7 +181,6 @@ let parse = function
   | _ -> Error "browser action must be an object"
 let to_json = function
   | Open_tab url -> `Assoc ["action",`String "open_tab";"url",`String url]
-  | Open_window url -> `Assoc ["action",`String "open_window";"url",`String url]
   | Control Hand_off -> `Assoc ["action",`String "hand_off"]
   | Control Take_over -> `Assoc ["action",`String "take_over"]
   | Control Space_status -> `Assoc ["action",`String "space_status"]
@@ -203,7 +190,7 @@ let to_json = function
   | Control (Adopt_tab {tab_id;label}) -> `Assoc (["action",`String "adopt_tab";"tabId",`Int tab_id]
       @ Option.to_list (Option.map (fun value -> "pageLabel",`String value) label))
   | Control (Release_tab tab_id) -> `Assoc ["action",`String "release_tab";"tabId",`Int tab_id]
-  | On_tab {tab_id;frame_path;interaction} ->
+  | On_tab {tab_id;interaction} ->
     let action, args = match interaction with
       | Upload {target;paths} ->
         "upload", [(match target with
@@ -222,5 +209,4 @@ let to_json = function
         @ Option.to_list (Option.map (fun l -> "locale",`String l) locale)
         @ Option.to_list (Option.map (fun z -> "timezone",`String z) timezone)
       | Back -> "back", [] | Forward -> "forward", [] | Reload -> "reload", [] | Stop_loading -> "stop_loading", [] | Close_tab -> "close_tab", [] in
-    `Assoc (["action",`String action;"tabId",`Int tab_id] @
-      (if frame_path = [] then [] else ["framePath",`List (List.map (fun s -> `String s) frame_path)]) @ args)
+    `Assoc (["action",`String action;"tabId",`Int tab_id] @ args)

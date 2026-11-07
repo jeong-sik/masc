@@ -104,9 +104,9 @@ the event log says which of the two happened.
 
 ## Browser
 
-Use `:`, then `go Browser Lane` (or `B` from Connectors). `l` / `a` select
-live / automation Firefox. `[` / `]` choose among open tabs and `r` refreshes.
-Live reads use the operator's browser login; automation owns an isolated session.
+Use `:`, then `go Browser Lane` (or `B` from Connectors). `[` / `]` choose
+among open tabs and `r` refreshes. Live reads use the cookies of the operator's
+ego lite profile.
 See the [Browser guide](guides/tui-browser-lanes.md) for setup and controls.
 
 To revisit what a Keeper read, select that Keeper, open Browser Lane, and press

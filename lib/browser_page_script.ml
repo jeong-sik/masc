@@ -1,4 +1,4 @@
-(* Fixed observation script shared by the native Firefox reader's callers.
+(* Fixed observation script shared by the native browser reader's callers.
    Selectors are generated from the observed DOM, never inferred from text. *)
 
 (* A text read: the page's visible text up to [arguments[0]] Unicode code

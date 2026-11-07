@@ -109,7 +109,7 @@ let resolve binding ~installation clients =
   else match List.filter (fun (client:Browser_lane.client_info) ->
     match client.transport,client.space with
     | Browser_lane.Ego_task_space,Some space -> space.id = binding.space.id
-    | Ego_task_space,None | Webdriver_bidi,(None|Some _) -> false) clients with
+    | Ego_task_space,None -> false) clients with
   | [client] -> Ok client.client_id
   | [] -> Error (Unavailable "Goal's Ego Space is not connected; resume its numeric Space ID before continuing")
   | _::_::_ -> Error (Conflict "multiple connections advertise the Goal's Ego Space; select an explicit browser")

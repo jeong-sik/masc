@@ -10,7 +10,7 @@ let incarnation = "0b000000-0000-4000-8000-000000000001"
 let client_id = ok (B.client_id_of_string "0c000000-0000-4000-8000-000000000001")
 let arguments verb = `Assoc ["lane",`String "live";
   "clientId",`String (B.client_id_to_string client_id);"command",B.verb_json verb]
-let hover = B.Page_interact {frame_path=[];tab_id=7;expected_url=Some "https://example.org/";
+let hover = B.Page_interact {tab_id=7;expected_url=Some "https://example.org/";
   action=B.Hover (B.Selector "#row")}
 let hook_contract () =
   let hooks=ok (Hooks.prepare ~hooks:[Validate_input;Validate_output] Tool.definition) in
@@ -127,7 +127,7 @@ let scenario () = Eio_main.run (fun env ->
     let owner=ok (Owner.create ~incarnation) in
     Eio.Switch.on_release sw (fun () -> Owner.revoke owner);
     let send command=Owner.dispatch owner {W.incarnation;command} in
-    let client={B.client_id;browser=B.Firefox;version="158";engine_version="158";transport=B.Webdriver_bidi;space=None} in
+    let client={B.client_id;browser=B.Ego_lite;version="158";engine_version="158";transport=B.Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"}} in
     let poll=Eio.Fiber.fork_promise ~sw (fun () -> send (W.Poll {client;window_sec=2.})) in
     let rec registered ()=if B.connected_clients ()=[] then (Eio.Fiber.yield ();registered ()) in
     registered ();
@@ -176,10 +176,10 @@ let scenario () = Eio_main.run (fun env ->
       (Masc.Browser_selection.Connected client) in
     let projected=Masc.Browser_binding.annotate binding (`Assoc [
       "clientId",`String "forged";"clientId",`String "forged-again";
-      "transport",`String "webdriver_bidi";"lane",`String "forged"]) in
+      "transport",`String "carrier_pigeon";"lane",`String "forged"]) in
     check string "page fields cannot forge the admitted client" (B.client_id_to_string client_id)
       Yojson.Safe.Util.(projected |> member "clientId" |> to_string);
-    check string "page fields cannot forge its transport" "webdriver_bidi"
+    check string "page fields cannot forge its transport" "ego_task_space"
       Yojson.Safe.Util.(projected |> member "transport" |> to_string);
     check (option bool) "partial is a failed call" (Some true) result.is_error;
     check bool "partial payload is retained" true

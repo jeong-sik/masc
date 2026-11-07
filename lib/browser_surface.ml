@@ -166,8 +166,8 @@ let project_read plan ~binding ~started ~page =
   let check_provenance provenance=match Browser_binding.backend binding,provenance with
     | Browser_capabilities.Connected Browser_lane.Ego_task_space,Some _ -> Ok ()
     | Connected Ego_task_space,None -> Error "Ego tab is missing its Page provenance"
-    | (Connected Webdriver_bidi|Safari_unavailable),None -> Ok ()
-    | (Connected Webdriver_bidi|Safari_unavailable),Some _ ->
+    | Safari_unavailable,None -> Ok ()
+    | Safari_unavailable,Some _ ->
       Error "Ego Page provenance requires an Ego connection" in
   let rec check_tabs = function
     | [] -> Ok ()

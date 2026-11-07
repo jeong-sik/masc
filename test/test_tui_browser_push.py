@@ -34,11 +34,11 @@ def browser_event(*, client: str = CLIENT_A, tab: int = 2, revision: str) -> dic
 def client_payload(client: str) -> dict:
     return {
         "clientId": client,
-        "browser": "firefox",
-        "version": "158.0.1",
-        "engineVersion": "158.0.1",
-        "transport": "webdriver_bidi",
-        "space": None,
+        "browser": "ego_lite",
+        "version": "0.6.2.7",
+        "engineVersion": "154.0.8037.44",
+        "transport": "ego_task_space",
+        "space": {"id": 1, "name": "masc-keepers"},
         "interactions": [],
         "lastActivities": [],
         "spaceObservation": None,

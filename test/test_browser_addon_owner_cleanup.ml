@@ -37,8 +37,8 @@ let scenario () =
     let client_id=ok (B.client_id_of_string "0b000000-0000-4000-8000-000000000004") in
     check bool "unregistered clients grant no owned cleanup" true
       (Result.is_error (Owner.attach_live owner ~client_id ~cleanup:(fun () -> fail "foreign cleanup")));
-    let client:B.client_info={client_id;browser=B.Firefox;version="fixture";
-      engine_version="fixture";transport=B.Webdriver_bidi;space=None} in
+    let client:B.client_info={client_id;browser=B.Ego_lite;version="fixture";
+      engine_version="fixture";transport=B.Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"}} in
     (match Owner.dispatch owner {W.incarnation;command=W.Poll {client;window_sec=0.001}} with
      | W.Poll_result _ -> ()
      | Service_refusal _|Snapshot_result _|Download_reply _|Receipt|Issue_result _ -> fail "live registration refused");
@@ -50,7 +50,9 @@ let scenario () =
        | Ok (B.Live_client attached) ->
          (match attached.liveness with B.Worker_held -> true | B.Polled _ -> false)
        | Error _ -> false);
-    (* A second connection this worker runs, on the other transport. *)
+    (* The first connection ends, as one whose ego Space went missing does, and
+       keeps its cleanup; a second connection of the same transport attaches. *)
+    Owner.disconnect_live owner client_id;
     let ego_id=ok (B.client_id_of_string "0b000000-0000-4000-8000-000000000008") in
     let ego:B.client_info={client_id=ego_id;browser=B.Ego_lite;version="fixture";
       engine_version="fixture";transport=B.Ego_task_space;space=Some {B.id=51;name="cleanup Space"}} in
@@ -106,8 +108,8 @@ let an_ended_live_connection_yields_its_transport () =
     Eio.Switch.on_release sw (fun () -> Owner.revoke owner);
     let register id =
       let client_id=ok (B.client_id_of_string id) in
-      let client:B.client_info={client_id;browser=B.Firefox;version="fixture";
-        engine_version="fixture";transport=B.Webdriver_bidi;space=None} in
+      let client:B.client_info={client_id;browser=B.Ego_lite;version="fixture";
+        engine_version="fixture";transport=B.Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"}} in
       (match Owner.dispatch owner {W.incarnation;command=W.Poll {client;window_sec=0.001}} with
        | W.Poll_result _ -> ()
        | Service_refusal _|Snapshot_result _|Download_reply _|Receipt|Issue_result _ ->

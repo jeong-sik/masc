@@ -124,11 +124,11 @@ type verb =
      element actions accept (an ego task space; RFC-browser-live-ego). *)
   | Page_snapshot of { tab_id : int; max_chars : int; scope : snapshot_scope }
   | Page_native_workflow of Native_workflow.t
-  | Page_interact of { tab_id : int; frame_path : string list; expected_url : string option; action : interaction }
+  | Page_interact of { tab_id : int; expected_url : string option; action : interaction }
   | Page_goto of { url : string; tab_id : int option }
   | Page_elements of { tab_id : int option; filter : elements_filter }
   | Page_act of Browser_action.t
-  | Page_context of { tab_id : int; frame_path : string list; mode : [ `Text of int | `Elements of elements_filter | `Frames | `Dialog ] }
+  | Page_context of { tab_id : int }
 
 (** Shared reply observation policy for built-in and Add-on callers. A timed-out
     observation does not establish that the browser effect did not happen. *)
@@ -144,7 +144,7 @@ let reply_policy = function
   | Page_act action ->
     (match action with
      | Action.Control (Action.Space_status|Action.Finish_space _|Action.Wait_for_control _|Action.Adopt_tab _|Action.Release_tab _) -> Executor_owned
-     | Action.Open_tab _ | Action.Open_window _ | Action.Control (Action.Hand_off|Action.Take_over) -> Reply_window
+     | Action.Open_tab _ | Action.Control (Action.Hand_off|Action.Take_over) -> Reply_window
      | Action.On_tab {interaction;_} ->
        (match interaction with
         | Action.Upload _ -> Executor_owned
@@ -163,7 +163,7 @@ let ego_reply_policy = function
     (match action with
      | Action.Open_tab _ -> Executor_owned
      | Action.On_tab {interaction=(Action.Reload|Action.Stop_loading);_} -> Executor_owned
-     | (Action.Open_window _ | Action.Control _
+     | (Action.Control _
        | Action.On_tab {interaction=(Action.Upload _ | Action.Set_emulation _ | Action.Clear_emulation
          | Action.Accept_dialog _ | Action.Dismiss_dialog
          | Action.Back | Action.Forward | Action.Close_tab);_}) -> reply_policy (Page_act action))
@@ -187,12 +187,11 @@ let ego_reply_policy = function
     | Page_native_workflow _
     | Page_elements _ | Page_context _) as verb -> reply_policy verb
 
-(* The CSS scope an elements read carries, top-level or in a frame. Every
-   caller that relays such a read checks the answer against it. *)
+(* The CSS scope an elements read carries. Every caller that relays such a
+   read checks the answer against it. *)
 let elements_filter = function
   | Page_elements { filter; _ } -> filter
-  | Page_context { mode = `Elements filter; _ } -> filter
-  | Page_context { mode = (`Text _ | `Frames | `Dialog); _ }
+  | Page_context _
   | Tabs_list | Page_read _ | Page_document _ | Page_downloads _
   | Page_capture _ | Page_scene _ | Page_snapshot _ | Page_interact _ | Page_native_workflow _
   | Page_goto _ | Page_act _ -> unfiltered_elements
@@ -292,7 +291,7 @@ let snapshot_target_of_json = function
      | _ -> Error "target is {ref}, {role, name, exact} or {text, exact}")
   | _ -> Error "target must be an object"
 
-let interaction_args ~tab_id ~frame_path ~expected_url action =
+let interaction_args ~tab_id ~expected_url action =
   let node_fields target = ["documentId",`String target.document_id; "nodeId",`String target.node_id] in
   let target_fields = function Selector selector -> ["selector",`String selector]
     | Scene_node target -> node_fields target in
@@ -340,7 +339,6 @@ let interaction_args ~tab_id ~frame_path ~expected_url action =
     | Fill_target {target;text} -> [verb;"target",snapshot_target_to_json target;"text",`String text]
     | Scroll {x; y} -> [verb; "x", `Int x; "y", `Int y] in
   `Assoc (("tabId", `Int tab_id) :: fields @
-    (if frame_path = [] then [] else ["framePath", `List (List.map (fun s -> `String s) frame_path)]) @
     (Option.map (fun url -> "expectedUrl", `String url) expected_url |> Option.to_list))
 
 let scene_args ~tab_id ~max_chars ~view ~scope =
@@ -400,8 +398,8 @@ let verb_json = function
       @ Option.to_list (Option.map (fun value -> "options",Capture.to_json value) options))]
   | Page_native_workflow workflow ->
     `Assoc ["verb",`String "page.native_workflow";"args",Native_workflow.to_json workflow]
-  | Page_interact { tab_id; frame_path; expected_url; action } ->
-    `Assoc ["verb", `String "page.interact"; "args", interaction_args ~tab_id ~frame_path ~expected_url action]
+  | Page_interact { tab_id; expected_url; action } ->
+    `Assoc ["verb", `String "page.interact"; "args", interaction_args ~tab_id ~expected_url action]
   | Page_goto { url; tab_id } ->
     `Assoc ["verb", `String "page.goto"; "args", `Assoc
       (["url", `String url] @ Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id))]
@@ -409,13 +407,8 @@ let verb_json = function
     `Assoc ["verb", `String "page.elements"; "args", `Assoc
       (Option.to_list (Option.map (fun id -> "tabId", `Int id) tab_id)
        @ elements_filter_fields filter)]
-  | Page_context {tab_id;frame_path;mode} ->
-    let name, extra = match mode with
-      | `Text cap -> "text", ["maxChars",`Int cap]
-      | `Elements filter -> "elements", elements_filter_fields filter
-      | `Frames -> "frames", [] | `Dialog -> "dialog", [] in
-    `Assoc ["verb",`String "page.context";"args",`Assoc
-      (["tabId",`Int tab_id;"framePath",`List (List.map (fun s -> `String s) frame_path);"mode",`String name] @ extra)]
+  | Page_context {tab_id} ->
+    `Assoc ["verb",`String "page.context";"args",`Assoc ["tabId",`Int tab_id;"mode",`String "dialog"]]
   | Page_act action ->
     `Assoc ["verb", `String "page.act"; "args", Browser_action.to_json action]
 ;;
@@ -464,7 +457,6 @@ type live_capability =
   | Tab_creation
   | Dialog_read
   | Dialog_answer
-  | Frame_read
   | Operator_handoff
   | Page_management
   | Download_listing
@@ -502,7 +494,6 @@ let live_capability_to_wire = function
   | Tab_creation -> "tab_creation"
   | Dialog_read -> "dialog_read"
   | Dialog_answer -> "dialog_answer"
-  | Frame_read -> "frame_read"
   | Download_listing -> "download_listing"
   | File_upload -> "file_upload"
   | Environment_emulation -> "environment_emulation"
@@ -540,7 +531,7 @@ let live_capability = function
   | Page_native_workflow _ -> Native_workflow
   | Page_snapshot _ -> Accessibility_snapshot
   | Page_interact { action; _ } -> live_capability_of_interaction action
-  | Page_act (Action.Open_tab _ | Action.Open_window _) -> Tab_creation
+  | Page_act (Action.Open_tab _) -> Tab_creation
   | Page_act (Action.Control (Action.Hand_off | Action.Take_over | Action.Space_status | Action.Finish_space _ | Action.Wait_for_control _)) -> Operator_handoff
   | Page_act (Action.Control (Action.Adopt_tab _|Action.Release_tab _)) -> Page_management
   | Page_act (Action.On_tab {interaction = (Action.Back | Action.Forward | Action.Reload); _}) -> Tab_history
@@ -548,9 +539,8 @@ let live_capability = function
   | Page_act (Action.On_tab {interaction = Action.Close_tab; _}) -> Tab_closing
   | Page_goto _ -> Tab_navigation
   | Page_act (Action.On_tab {interaction = (Action.Accept_dialog _ | Action.Dismiss_dialog); _}) -> Dialog_answer
-  | Page_context { mode = (`Text _ | `Elements _ | `Frames); _ } -> Frame_read
   | Page_downloads _ -> Download_listing
-  | Page_context { mode = `Dialog; _ } -> Dialog_read
+  | Page_context _ -> Dialog_read
   | Page_act (Action.On_tab {interaction = Action.Upload _; _}) -> File_upload
   | Page_act (Action.On_tab {interaction = (Action.Set_emulation _ | Action.Clear_emulation); _}) -> Environment_emulation
 ;;
@@ -598,35 +588,27 @@ let activity_refusal lane verb =
   Option.map (fun rejection -> Rejected_before_effect (activity_rejection_message rejection))
     (activity_rejection lane verb)
 
-type browser = Firefox | Ego_lite
-let browser_name = function Firefox -> "firefox" | Ego_lite -> "ego_lite"
+type browser = Ego_lite
+let browser_name = function Ego_lite -> "ego_lite"
 let browser_of_string = function
-  | "firefox" -> Ok Firefox | "ego_lite" -> Ok Ego_lite | _ -> Error "unsupported_browser"
+  | "ego_lite" -> Ok Ego_lite | _ -> Error "unsupported_browser"
 type client_id = Uuidm.t
 let client_id_to_string = Uuidm.to_string
 let client_id_of_string value =
   match Uuidm.of_string value with
   | Some id when String.equal (Uuidm.to_string id) value -> Ok id
   | _ -> Error "invalid_client_id"
-type live_transport = Webdriver_bidi | Ego_task_space [@@deriving enumerate]
+type live_transport = Ego_task_space [@@deriving enumerate]
 let live_reply_policy transport verb = match transport with
   | Ego_task_space -> ego_reply_policy verb
-  | Webdriver_bidi -> reply_policy verb
 let live_transport_to_string = function
-  | Webdriver_bidi -> "webdriver_bidi"
   | Ego_task_space -> "ego_task_space"
 let live_transport_of_string = function
-  | "webdriver_bidi" -> Ok Webdriver_bidi
   | "ego_task_space" -> Ok Ego_task_space
   | _ -> Error "unsupported_browser_transport"
 
 (* Which live work each transport serves. Every pair is spelled out, so a new
    capability or transport does not compile until this table answers for it.
-
-   The BiDi peer sends pointer and wheel input through the browser. Its
-   tab activation also gives the browser window system focus. Its history,
-   close and navigation act only on tabs it opened. test_browser_bidi_peer
-   holds this table to what that peer does.
 
    The ego connection runs fixed scripts in one ego lite task space
    (RFC-browser-live-ego). It reads that space's pages, their document source
@@ -639,21 +621,13 @@ let live_transport_of_string = function
    test_browser_ego_peer holds its column to what Browser_ego_peer does. *)
 let live_transport_serves transport capability =
   match transport, capability with
-  | ( Webdriver_bidi
-    , ( Tab_listing | Text_read | Document_source | Element_inventory | Viewport_capture
-      | Scene_read | Dom_interaction | Point_click | Point_scroll | Tab_activation ) ) -> true
-  | Webdriver_bidi, (Trusted_hover | Trusted_drag | Trusted_double_click | Trusted_button_click | Touch_input
-                    | Trusted_keyboard | Tab_creation | Viewport_resize | Tab_history | Tab_navigation
-                    | Tab_closing | Dialog_answer | Frame_read) -> true
-  | Webdriver_bidi, (Dialog_read | Accessibility_snapshot | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing
-                    | File_upload | Environment_emulation) -> false
   | Ego_task_space, (Tab_listing | Text_read | Document_source | Element_inventory | Viewport_capture | Scene_read
                     | Tab_creation | Tab_navigation | Tab_closing | Dom_interaction | Point_click
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_read | Dialog_answer
                     | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing | File_upload | Tab_activation
                     | Viewport_resize | Environment_emulation) -> true
-  | Ego_task_space, (Touch_input | Frame_read) -> false
+  | Ego_task_space, Touch_input -> false
 ;;
 
 let live_transports_serving capability =
@@ -662,7 +636,6 @@ let live_transports_serving capability =
 
 (* Where the steps for attaching a connection of this transport are written. *)
 let live_transport_setup_doc = function
-  | Webdriver_bidi -> "docs/design/browser-bidi-live-host.md"
   | Ego_task_space -> "docs/rfc/RFC-browser-live-ego.md"
 ;;
 
@@ -677,8 +650,6 @@ let ego_space_of_json = function
 let client_space_to_json = function None -> `Null | Some space -> ego_space_to_json space
 let client_space_of_json ~transport value = match transport,value with
   | Ego_task_space,value -> Result.map Option.some (ego_space_of_json value)
-  | Webdriver_bidi,`Null -> Ok None
-  | Webdriver_bidi,_ -> Error "Space context requires an Ego connection"
 let same_space_id left right =
   Option.map (fun (space : ego_space) -> space.id) left
   = Option.map (fun (space : ego_space) -> space.id) right
@@ -735,7 +706,7 @@ let activity_scope = function
   | Page_act (Action.On_tab {tab_id;_}) -> Some tab_id
   | Page_read {tab_id;_} | Page_elements {tab_id;_} | Page_goto {tab_id;_} -> tab_id
   | Tabs_list
-  | Page_act (Action.Open_tab _|Open_window _|Control (Hand_off|Take_over|Space_status|Finish_space _|Wait_for_control _)) -> None
+  | Page_act (Action.Open_tab _|Control (Hand_off|Take_over|Space_status|Finish_space _|Wait_for_control _)) -> None
 let activity_name = function
   | Page_act (Action.Control Action.Space_status) -> "space_status"
   | Page_act (Action.Control (Action.Finish_space _)) -> "finish_space"
@@ -746,7 +717,7 @@ let activity_name = function
   | Page_native_workflow _ -> "workflow"
   | (Tabs_list|Page_read _|Page_document _|Page_downloads _
     |Page_capture _|Page_scene _|Page_snapshot _|Page_goto _
-    |Page_elements _|Page_act (Action.Open_tab _|Open_window _|Control (Hand_off|Take_over)|On_tab _)
+    |Page_elements _|Page_act (Action.Open_tab _|Control (Hand_off|Take_over)|On_tab _)
     |Page_context _) as verb -> verb_to_string verb
 let activity_result = function
   | `Assoc fields ->
@@ -758,7 +729,7 @@ let activity_result = function
   | _ -> Activity_unknown
 (* How the lane learns a client is gone. A client that stops polling says
    nothing, so it is gone once its window without a poll passes. A
-   connection this worker runs itself (owned Firefox, ego) is disconnected by
+   connection this worker runs itself (ego) is disconnected by
    the worker when it ends; elapsed time, which on macOS includes system
    sleep, says nothing about it. *)
 type liveness = Polled of Monotonic_deadline.t | Worker_held
@@ -880,9 +851,7 @@ let connection_fields_of_json fields =
       Result.bind (live_transport_of_string transport) (fun transport ->
         let parsed=match transport,space with
           | Ego_task_space,Some value -> Result.map Option.some (ego_space_of_json value)
-          | Ego_task_space,None -> Error "ego_connection_without_space"
-          | Webdriver_bidi,None -> Ok None
-          | Webdriver_bidi,Some _ -> Error "space_requires_ego_connection" in
+          | Ego_task_space,None -> Error "ego_connection_without_space" in
         Result.map (fun space -> live_connection_fields ~client_id ~transport ~space) parsed))
   | Some (`String client_id), None,None ->
     Result.bind (client_id_of_string client_id) (fun _ -> Error "client_without_transport")
@@ -971,10 +940,13 @@ let choice_case_of_code code =
 let selection_error_message = function
   | Activity_rejected rejection -> activity_rejection_message rejection
   | Transport_unsupported { transport; capability; _ } as error ->
-    Printf.sprintf "%s: this browser is connected over %s, which does not serve %s; a %s connection does"
+    let serving = match live_transports_serving capability with
+      | [] -> "no connection serves it"
+      | transports ->
+        "a " ^ String.concat " or " (List.map live_transport_to_string transports) ^ " connection does" in
+    Printf.sprintf "%s: this browser is connected over %s, which does not serve %s; %s"
       (selection_error_code error) (live_transport_to_string transport)
-      (live_capability_to_wire capability)
-      (String.concat " or " (List.map live_transport_to_string (live_transports_serving capability)))
+      (live_capability_to_wire capability) serving
   | (No_live_client | Selected_client_disconnected _ | Ambiguous_clients _) as error ->
     selection_error_code error
 
@@ -1107,9 +1079,9 @@ let hold_client ~client_id =
     | Some client ->
       Eio.Mutex.use_rw ~protect:true client.mutex (fun () ->
         match client.info.transport, client.liveness with
-        | (Webdriver_bidi | Ego_task_space), _ when client.closed -> Error "client_not_connected"
-        | (Webdriver_bidi | Ego_task_space), Worker_held -> Ok ()
-        | (Webdriver_bidi | Ego_task_space), Polled until ->
+        | Ego_task_space, _ when client.closed -> Error "client_not_connected"
+        | Ego_task_space, Worker_held -> Ok ()
+        | Ego_task_space, Polled until ->
           if Monotonic_deadline.passed until then Error "client_not_connected"
           else (client.liveness <- Worker_held; Ok ())))
 (* A browser whose lease ended after its target was resolved is the same

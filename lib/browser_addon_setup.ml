@@ -62,8 +62,7 @@ let error_message = function
    folder under packages/, the declaration's id and its file name. The
    manifest's own id and source must be the same; [apply] checks them. *)
 let package_folder = function
-  | Browser_lane.Backend.Owned_firefox -> "firefox"
-  | Ego -> "ego"
+  | Browser_lane.Backend.Ego -> "ego"
 let package_name backend = "browser-" ^ package_folder backend
 let packages_dirname = "packages"
 let manifest_name = "lane.toml"
@@ -250,8 +249,7 @@ let browser_declaration backend (snapshot : Lane_addon_config.snapshot) =
           Browser_ego_installation.target declared.binding=Ok Browser_ego_installation.Workspace_default) declared in
         (match defaults with
          | _::_ -> defaults
-         | [] -> List.filter (fun (declared:Lane_addon_config.declaration) -> declared.id=package_name backend) declared)
-    | Owned_firefox -> declared in
+         | [] -> List.filter (fun (declared:Lane_addon_config.declaration) -> declared.id=package_name backend) declared) in
   match List.filter (fun (d : Lane_addon_config.declaration) -> d.enabled) declared with
   | [ enabled ] -> Ok (Some enabled)
   | _ :: _ :: _ as enabled ->

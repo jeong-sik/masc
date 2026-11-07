@@ -7368,7 +7368,7 @@ let composition_failure_output_exn ~base_path content =
   | _ -> failf "composition failure has no effect evidence: %s" (Yojson.Safe.to_string payload)
 ;;
 
-(* The live BiDi connection the browser compositions and output probes go
+(* The live ego connection the browser compositions and output probes go
    through. The scripted worker lists it, so the host resolves an explicit
    route to it as it would to any connected browser. *)
 let browser_fixture_client_id = "01a16363-ef6b-7000-aee1-37e1be230205"
@@ -7377,8 +7377,8 @@ let browser_fixture_client : Browser_lane.client_info =
       (match Browser_lane.client_id_of_string browser_fixture_client_id with
        | Ok id -> id
        | Error detail -> failwith detail)
-  ; browser = Browser_lane.Firefox; version = "158.0.1"; engine_version = "158.0.1"
-  ; transport = Browser_lane.Webdriver_bidi; space = None }
+  ; browser=Browser_lane.Ego_lite; version = "158.0.1"; engine_version = "158.0.1"
+  ; transport=Browser_lane.Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"} }
 
 let test_composition_read_failure_preserves_same_turn
     ?(break_evidence = false) ~observe ~break_receipt ~terminal ~unknown_write () =
@@ -9432,7 +9432,7 @@ let test_composable_outputs_satisfy_declared_schema () =
     ~always_allow:true
     ~bind_eio_context:true
     ~with_browser:(fun ~env ~config run ->
-       (* The scripted live BiDi connection answers each browser probe with
+       (* The scripted live ego connection answers each browser probe with
           the page fields that adapter returns. What the probe observes is
           the receipt the host and the browser tool build from that answer:
           the browser identity, the selection and the declared shape. *)

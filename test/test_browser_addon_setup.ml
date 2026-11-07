@@ -66,7 +66,6 @@ let packages_directory base = Filename.concat base ".masc/packages"
 (* The folder of each source's package in addons/browser, as this test knows
    it independently of setup; setup names the package [browser-<folder>]. *)
 let folder = function
-  | B.Owned_firefox -> "firefox"
   | B.Ego -> "ego"
 
 let declaration_path base backend =
@@ -245,23 +244,21 @@ let test_a_changed_package_file_is_rewritten_and_the_declaration_kept () =
 
 let test_an_existing_declaration_of_a_source_is_left_as_it_is () =
   with_workspace (fun base ->
-    let manifest_path = copy_package base B.Owned_firefox in
+    let manifest_path = copy_package base B.Ego in
     let own = Filename.concat (lane_directory base) "browser-work.toml" in
     let text = declaration_text ~id:"browser-work" ~manifest_path () in
     write own text;
-    (match installed ~sources:[ B.Owned_firefox; B.Ego ] base with
-     | [ firefox; ego ] ->
-       (match firefox.declaration with
-        | S.Created _ -> fail "a second declaration of the firefox source was created"
+    (match installed ~sources:[ B.Ego ] base with
+     | [ ego ] ->
+       (match ego.declaration with
+        | S.Created _ -> fail "a second declaration of the ego source was created"
         | S.Present { path; manifest_path = named; this_build; _ } ->
           check string "the operator's declaration" own path;
           check string "its own package" (Unix.realpath manifest_path) named;
-          check bool "not this build's package" false this_build);
-       check string "the other source is declared beside it" (declaration_path base B.Ego)
-         (created ego)
-     | installed -> failf "expected two packages, got [%s]" (String.concat "; " (wire installed)));
-    check bool "no declaration of the firefox package was written" false
-      (Sys.file_exists (declaration_path base B.Owned_firefox));
+          check bool "not this build's package" false this_build)
+     | installed -> failf "expected one package, got [%s]" (String.concat "; " (wire installed)));
+    check bool "no declaration of the ego package was written" false
+      (Sys.file_exists (declaration_path base B.Ego));
     check string "the operator's file is unchanged" text (read own))
 
 let test_distinct_ego_installations_preserve_workspace_declaration () =
@@ -277,22 +274,20 @@ let test_distinct_ego_installations_preserve_workspace_declaration () =
      | S.Present {path;_} -> check string "setup retains the workspace-default installation" original path
      | S.Created _ -> fail "setup created another default");
     check string "default declaration unchanged" original_text (read original);
-    check string "Goal declaration unchanged" target_text (read target);
-    check bool "deployment does not blanket-disable multiple Ego Spaces" true
-      (Masc.Browser_addon_preflight.doubled_sources ~base_path:base=[]))
+    check string "Goal declaration unchanged" target_text (read target))
 
 let test_two_enabled_declarations_of_one_source_are_refused () =
   with_workspace (fun base ->
-    let manifest_path = copy_package base B.Owned_firefox in
+    let manifest_path = copy_package base B.Ego in
     List.iter
       (fun id ->
          write (Filename.concat (lane_directory base) (id ^ ".toml"))
            (declaration_text ~id ~manifest_path ()))
       [ "browser-one"; "browser-two" ];
-    match install ~sources:[ B.Owned_firefox; B.Ego ] base with
+    match install ~sources:[ B.Ego ] base with
     | _, None -> fail "two declarations of one source were accepted"
     | _, Some (S.Declared_more_than_once { backend; paths }) ->
-      check string "the doubled source" (B.to_wire B.Owned_firefox) (B.to_wire backend);
+      check string "the doubled source" (B.to_wire B.Ego) (B.to_wire backend);
       check int "both are named" 2 (List.length paths);
       check bool "nothing was written for any source" false
         (Sys.file_exists (packages_directory base))
@@ -302,13 +297,13 @@ let test_two_enabled_declarations_of_one_source_are_refused () =
    the enabled one does not double the source. *)
 let test_a_disabled_declaration_beside_the_enabled_one_is_not_counted () =
   with_workspace (fun base ->
-    let manifest_path = copy_package base B.Owned_firefox in
+    let manifest_path = copy_package base B.Ego in
     let enabled = Filename.concat (lane_directory base) "browser-one.toml" in
     let disabled = Filename.concat (lane_directory base) "browser-two.toml" in
     write enabled (declaration_text ~id:"browser-one" ~manifest_path ());
     let disabled_text = declaration_text ~enabled:false ~id:"browser-two" ~manifest_path () in
     write disabled disabled_text;
-    (match (installed_one base B.Owned_firefox).declaration with
+    (match (installed_one base B.Ego).declaration with
      | S.Present { path; enabled = on; _ } ->
        check string "the enabled declaration" enabled path;
        check bool "enabled" true on
@@ -317,24 +312,24 @@ let test_a_disabled_declaration_beside_the_enabled_one_is_not_counted () =
 
 let test_a_disabled_declaration_alone_keeps_the_addon_detached () =
   with_workspace (fun base ->
-    let manifest_path = copy_package base B.Owned_firefox in
+    let manifest_path = copy_package base B.Ego in
     let disabled = Filename.concat (lane_directory base) "browser-work.toml" in
     write disabled (declaration_text ~enabled:false ~id:"browser-work" ~manifest_path ());
-    (match (installed_one base B.Owned_firefox).declaration with
+    (match (installed_one base B.Ego).declaration with
      | S.Present { path; enabled; _ } ->
        check string "the disabled declaration" disabled path;
        check bool "still disabled" false enabled
      | S.Created _ -> fail "an enabled declaration was created beside the disabled one");
-    check bool "no declaration of the firefox package" false
-      (Sys.file_exists (declaration_path base B.Owned_firefox)))
+    check bool "no declaration of the ego package" false
+      (Sys.file_exists (declaration_path base B.Ego)))
 
 let test_a_declaration_whose_package_was_removed_is_kept () =
   with_workspace (fun base ->
-    let first = installed_one base B.Owned_firefox in
+    let first = installed_one base B.Ego in
     let path = created first in
     let declared = read path in
     remove_tree first.package_directory;
-    (match (installed_one base B.Owned_firefox).declaration with
+    (match (installed_one base B.Ego).declaration with
      | S.Present { path = present; this_build; enabled; _ } ->
        check string "the same declaration" path present;
        check bool "it names this build's package" true this_build;
@@ -346,50 +341,20 @@ let test_an_unloadable_declaration_of_the_id_is_left_and_reported () =
   with_workspace (fun base ->
     let broken = Filename.concat (lane_directory base) "browser-checkout.toml" in
     let text =
-      declaration_text ~id:(S.package_name B.Owned_firefox)
+      declaration_text ~id:(S.package_name B.Ego)
         ~manifest_path:(Filename.concat base "gone/lane.toml") ()
     in
     write broken text;
-    (match install ~sources:[ B.Owned_firefox ] base with
+    (match install ~sources:[ B.Ego ] base with
      | _, Some (S.Declaration_unloadable { path; _ }) -> check string "the broken file" broken path
      | _, None -> fail "a second declaration with the same id was accepted"
      | _, Some error -> failf "refused for another reason: %s" (S.error_message error));
-    check bool "no declaration of the firefox package" false
-      (Sys.file_exists (declaration_path base B.Owned_firefox));
+    check bool "no declaration of the ego package" false
+      (Sys.file_exists (declaration_path base B.Ego));
     check string "the broken file is unchanged" text (read broken))
 
 (* Sources are applied in order. A refusal of a later one leaves the earlier
    ones written and declared, and says which they are. *)
-let test_a_refusal_returns_the_sources_declared_before_it () =
-  with_workspace (fun base ->
-    write (Filename.concat (lane_directory base) "browser-checkout.toml")
-      (declaration_text ~id:(S.package_name B.Ego)
-         ~manifest_path:(Filename.concat base "gone/lane.toml") ());
-    match install ~sources:[ B.Ego; B.Owned_firefox ] base with
-    | installed, Some (S.Declaration_unloadable _) ->
-      check (list string) "the source applied before the refusal" [ B.to_wire B.Owned_firefox ]
-        (wire installed);
-      check bool "and its declaration is written" true
-        (Sys.file_exists (declaration_path base B.Owned_firefox));
-      check bool "the refused source is not declared" false
-        (Sys.file_exists (declaration_path base B.Ego))
-    | _, None -> fail "an unloadable declaration of ego was accepted"
-    | _, Some error -> failf "refused for another reason: %s" (S.error_message error))
-
-(* A source left out of the plan is neither written nor declared. *)
-let test_a_source_left_out_of_the_plan_is_not_declared () =
-  with_workspace (fun base ->
-    match S.plan ~base_path:base ~sources:[ B.Ego; B.Owned_firefox ] with
-    | Error error -> failf "plan refused: %s" (S.error_message error)
-    | Ok plan ->
-      let { S.installed; refusal } = S.apply (S.without [ B.Owned_firefox ] plan) in
-      check bool "nothing refused" true (Option.is_none refusal);
-      check (list string) "only the source kept" [ B.to_wire B.Ego ] (wire installed);
-      check bool "the left-out source has no package" false
-        (Sys.file_exists (S.package_directory ~base_path:base B.Owned_firefox));
-      check bool "nor a declaration" false
-        (Sys.file_exists (declaration_path base B.Owned_firefox)))
-
 let test_a_workspace_without_a_config_root_is_refused () =
   with_workspace ~config:false (fun base ->
     (match S.plan ~base_path:base ~sources:B.all with
@@ -463,10 +428,6 @@ let () =
             test_a_declaration_whose_package_was_removed_is_kept
         ; test_case "an unloadable declaration of the id is left and reported" `Quick
             test_an_unloadable_declaration_of_the_id_is_left_and_reported
-        ; test_case "a refusal returns the sources declared before it" `Quick
-            test_a_refusal_returns_the_sources_declared_before_it
-        ; test_case "a source left out of the plan is not declared" `Quick
-            test_a_source_left_out_of_the_plan_is_not_declared
         ; test_case "a workspace without a config root is refused" `Quick
             test_a_workspace_without_a_config_root_is_refused
         ; test_case "a file this build does not carry is removed" `Quick

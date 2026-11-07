@@ -169,13 +169,13 @@ run. If the workspace cannot be resolved or observed, installation stops before
 replacement; pass `--base-path DIR` or set `MASC_BASE_PATH` when
 no workspace is found. A configuration or stored-state rejection also stops installation.
 
-Every browser route runs in a browser Lane Add-on, one per browser source, so
-the script also builds and installs `masc-native-addon-launcher`,
-`masc-browser-addon-worker` and `masc-browser-process-owner` into the same
-prefix. The masc it installed then runs `masc browser-lane-setup --mode addon`
-for the workspace: for each source the workspace runs, it writes the package
-that build carries to `.masc/packages/browser-<source>` and declares it in
-`browser-<source>.toml` when the workspace has no declaration of that source.
+The browser route runs in the browser Lane Add-on, so the script also builds
+and installs `masc-native-addon-launcher` and `masc-browser-addon-worker` into
+the same prefix. The masc it installed then runs
+`masc browser-lane-setup --mode addon` for the workspace: when the workspace
+runs ego lite, it writes the package that build carries to
+`.masc/packages/browser-ego` and declares it in `browser-ego.toml` when the
+workspace has no declaration of it.
 The server attaches them when it starts. Pass `--no-browser-addon` to leave the
 Add-ons out: the programs are not built or installed, the workspace's
 declarations are left as they are, and no browser route works. See
@@ -341,7 +341,7 @@ Use MASC's tools to change tasks, records and approval state.
 | `masc start --base-path <dir>` | Run the server explicitly |
 | `masc-tui --base-path <dir>` | Open the TUI explicitly |
 | `masc doctor --base-path <dir>` | Check workspace and `imp` readiness without starting them |
-| `masc browser-lane-setup` | Configure the browser lane (`addon`, `bidi` or `ego`) |
+| `masc browser-lane-setup` | Configure the browser lane (`addon` or `ego`) |
 | `masc web-search-setup --base-path <dir>` | Inspect or configure workspace web search (`searxng`, `zai`, etc.) |
 | `masc --help` | List commands; use `<command> --help` for details |
 

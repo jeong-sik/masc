@@ -2,22 +2,13 @@
 
 ## 프레임
 
-`BrowserRead mode=frames`에서 바깥 frame selector를 관측한다. 그 값을 `framePath`
-배열에 넣어 안쪽 frames를 읽고, 필요한 깊이까지 바깥→안쪽 순으로 이어간다.
-같은 경로의 `text`와 `elements`를 읽은 뒤 해당 탭·프레임에서 조작한다.
-
-`framePath`는 `BrowserRead` text/elements/frames 읽기, `BrowserAct upload`,
-`BrowserInteract`의 selector 기반 click/fill/select_option/scroll에 사용한다.
-`BrowserInteract`의 `expectedUrl`은 안쪽 frame 문서의 URL이다. live BiDi 연결이
-처리한다.
-
-ego 연결은 `framePath` 를 받지 않는다. `BrowserRead mode=snapshot` 의 viewport
+`BrowserRead mode=snapshot` 의 viewport
 snapshot 에 iframe 내용이 ref 와 함께 들어 있고, 다른 출처 프레임도 같다. 한 프레임만
 읽으려면 `snapshotScope: "subtree"` 와 그 iframe 의 ref 를 `root` 로 준다.
 조작은 `BrowserInteract` click/fill 의 `target` 으로 한다. 프레임 snapshot 의 ref 는
 그 프레임 안에서 행동하고, role·text 대상은 최상위 문서에 없으면 프레임까지 찾는다.
 `expectedUrl` 은 최상위 페이지의 URL 이다.
-탭 이동, 히스토리, JS 대화상자와 screenshot에는 넣지 않는다. screenshot은
+screenshot은
 최상위 viewport를 캡처하므로 스크롤한 프레임의 입력란이 화면 밖일 수 있다.
 
 ## JavaScript 대화상자
@@ -26,10 +17,9 @@ alert/confirm/prompt를 여는 클릭은 실제로 대화상자를 연 뒤 오�
 클릭을 반복하지 말고 `BrowserRead mode=dialog`로 현재 대화상자를 확인한다.
 `BrowserAct accept_dialog` 또는 `dismiss_dialog`를 사용하며 prompt 입력은
 `accept_dialog`의 `text`로 전달한다. 처리 후 페이지에서 결과를 확인한다.
-`webdriver_bidi` 연결에서는 `BrowserTabs list_tabs`의 해당 탭 행이 `dialog`(`type`, `message`, prompt면 `defaultValue`)를
-싣고, `BrowserAct accept_dialog`·`dismiss_dialog`는 그 연결이 `open_tab`으로 연 탭에서만 된다.
+`BrowserTabs list_tabs`의 해당 탭 행이 `dialog`(`type`, `message`, prompt면 `defaultValue`)를
+싣고, `accept_dialog`·`dismiss_dialog`는 에이전트가 연 페이지에서 한다.
 사용자가 쓰는 탭의 대화상자는 사용자가 답한다. 연결 전에 이미 열려 있던 대화상자는 목록에 나오지 않는다.
-`ego_task_space` 연결도 같은 `dialog`를 탭 행에 싣고, 에이전트가 연 페이지에서 `accept_dialog`·`dismiss_dialog`를 한다.
 ego에서는 클릭·키 입력이 대화상자를 열면 그 영수증에 `dialog`가 바로 온다. fill처럼 페이지 스크립트로 하는 입력이
 대화상자를 열면 부분 효과(`dialog` 포함)로 온다. 대화상자가 열린 동안 그 페이지의 읽기·이동·입력은 효과 없이 거절된다.
 탭 닫기는 된다.
@@ -75,6 +65,4 @@ ego 연결은 그 연결이 한 번이라도 다룬 agent 페이지(연 탭 포�
 클릭·파일명·디렉터리 존재만으로 완료를 추측하지 않는다. 완료 상태와 파일 증거가
 다르면 그대로 보고하며, 사용자의 실제 다운로드 폴더를 광범위하게 탐색하지 않는다.
 
-공식 계약: [WebDriver](https://www.w3.org/TR/webdriver/),
-[WebDriver BiDi](https://w3c.github.io/webdriver-bidi/),
-[CSS selector의 escape](https://developer.mozilla.org/en-US/docs/Web/API/Document/querySelectorAll).
+공식 계약: [CSS selector의 escape](https://developer.mozilla.org/en-US/docs/Web/API/Document/querySelectorAll).

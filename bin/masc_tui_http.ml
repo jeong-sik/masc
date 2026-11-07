@@ -4762,7 +4762,7 @@ let observe_keeper_ask_followup ~clock ~(expected_workspace : Masc.Tui_decode.se
   with Ask_followup_protocol_error detail -> Error detail
 
 (** Browser Lane shares the authenticated TUI transport. Reads are POST because
-    selecting the Firefox tab belongs to the request body. *)
+    selecting the tab belongs to the request body. *)
 let fetch_browser_lane_clients ~host ~port =
   let open Masc_tui_types.Browser_lane_view in
   let* json = get_json ~host ~port ~path:"/api/v1/dashboard/browser-lane/clients" in

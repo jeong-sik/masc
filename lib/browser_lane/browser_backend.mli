@@ -7,7 +7,6 @@
 
 (** [all] (derived) lists every source in constructor order. *)
 type t =
-  | Owned_firefox  (** the live Firefox masc launches and reaches over BiDi *)
   | Ego  (** the ego lite task space masc opens *)
 [@@deriving enumerate]
 

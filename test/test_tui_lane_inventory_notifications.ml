@@ -15,9 +15,10 @@ let work registered = `Assoc
   ; "session", `String "closed"; "locate", `Bool false ]
 
 let client id = `Assoc
-  [ "clientId", `String id; "browser", `String "firefox"
-  ; "version", `String "158.0.1"; "engineVersion", `String "158.0.1"
-  ; "transport", `String "webdriver_bidi"; "space", `Null
+  [ "clientId", `String id; "browser", `String "ego_lite"
+  ; "version", `String "0.6.2.7"; "engineVersion", `String "154.0.8037.44"
+  ; "transport", `String "ego_task_space"
+  ; "space", `Assoc [ "id", `Int (Hashtbl.hash id mod 1000); "name", `String "fixture Space" ]
   ; "interactions", `List []; "lastActivities", `List []
   ; "spaceObservation", `Null; "spacePresence", `Null ]
 
@@ -31,7 +32,7 @@ let browser clients =
         ; "clients", `List (List.map client clients)
         ; "owned_backends", `Assoc [ "automation", work true ] ])
   with Ok output -> output | Error detail -> fail detail in
-  { Addon.backend = Browser_lane.Backend.Owned_firefox
+  { Addon.backend = Browser_lane.Backend.Ego
   ; observation = Ok (Some { instance_id = "worker"; observation_seq = 1
       ; max_bytes = 4096; refreshing = false; output }) }
 

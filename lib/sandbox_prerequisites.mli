@@ -19,11 +19,10 @@ type searxng_container =
     ([{{.State.Status}}]), as far as an action can tell. *)
 type dependency = Sandbox of Sandbox_readiness.backend | Codex_cli | Claude_cli | Antigravity_cli
   | Muse_cli | Pdf_tools | Presentation_tools of {base_path:string} | Whisper_cli
-  | Firefox | Ego_browser
-  (** The programs the browser lanes start: [\[browser.live.bidi\]] names
-      Firefox; [\[browser.live.ego\]] names
-      ego lite's [ego-browser]. None is installed with MASC, and no action here
-      edits runtime.toml. *)
+  | Ego_browser
+  (** The program the browser lane starts: [\[browser.live.ego\]] names
+      ego lite's [ego-browser]. It is not installed with MASC, and no action
+      here edits runtime.toml. *)
   | Searxng of { config_dir : string }
   (** A SearXNG instance in a Docker container, the one search provider that
       needs no key. [config_dir] is the directory mounted as the container's

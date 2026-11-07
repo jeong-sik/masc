@@ -1493,27 +1493,15 @@ let run ~sw ~read_browser_document backend m e =
         release_detached m e; raise exn)
 let native_claims_directory = "native-claims"
 let native_claim_root store = Filename.concat (Lane_addon_store.root store) native_claims_directory
-(* Every directory under [native_claim_root] is one claim slot: an
-   installation's, or the live BiDi child slot of one instance. Its
-   name is the digest of that id after the slot's prefix. *)
-type native_claim_slot = Installation_slot | Live_bidi_child_slot
-[@@deriving enumerate]
-let native_claim_slot_prefix = function
-  | Installation_slot -> ""
-  | Live_bidi_child_slot -> "live-bidi-"
-let native_claim_directory store slot ~id =
-  Filename.concat (native_claim_root store) (native_claim_slot_prefix slot ^ Lane_addon_store.digest id)
-let native_claim_slot_of_name name =
-  let digest_length = String.length (Lane_addon_store.digest "") in
-  let digest text = String.length text = digest_length
-    && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) text in
-  List.find_opt (fun slot ->
-    let prefix = native_claim_slot_prefix slot in
-    String.starts_with ~prefix name
-    && digest (String.sub name (String.length prefix) (String.length name - String.length prefix)))
-    all_of_native_claim_slot
+(* Every directory under [native_claim_root] is one installation's claim
+   slot, named by the digest of the installation id. *)
+let native_claim_directory store ~id =
+  Filename.concat (native_claim_root store) (Lane_addon_store.digest id)
+let is_installation_slot name =
+  String.length name = String.length (Lane_addon_store.digest "")
+  && String.for_all (function '0'..'9' | 'a'..'f' -> true | _ -> false) name
 let native_directories store installation_id =
-  [native_claim_directory store Installation_slot ~id:installation_id]
+  [native_claim_directory store ~id:installation_id]
 let native_result result = Result.map_error (fun error ->
   Lifecycle.Cleanup_unconfirmed (Native_addon_lease.error_to_string error)) result
 (* Where a released browser allocation's files for the Keeper go, one folder
@@ -1661,12 +1649,6 @@ let backend ~store ~artifact_store () = match !override with
                   let table source =
                     browser_source_table (Runtime.browser_configuration ()) ~backend source in
                   let* source,live_ego=match backend with
-                    | Browser_lane.Backend.Owned_firefox ->
-                      let* browser=table Browser_configuration.Live_bidi in
-                      let* guardian=Native_addon_program.(locate Browser_process_owner) in
-                      let* configuration=Browser_addon_live_bidi.configuration ~browser ~launcher ~guardian
-                        ~claim_directory:(native_claim_directory store Live_bidi_child_slot ~id:instance_id) in
-                      Ok (Browser_addon_socket.Owned_firefox configuration,None)
                     (* Ego owns its browser; the SDK session follows the
                        worker's IPC lifetime. Its configuration rides the
                        worker's arguments, not the cleanup descriptor. *)

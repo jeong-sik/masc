@@ -1,11 +1,9 @@
 type t =
   | Launcher
-  | Browser_process_owner
 [@@deriving enumerate]
 
 let name = function
   | Launcher -> "masc-native-addon-launcher"
-  | Browser_process_owner -> "masc-browser-process-owner"
 
 let locate program =
   let name = name program in

@@ -28,26 +28,30 @@ let test_bound_request_keeps_its_browser () =
 let operations names = List.map (fun name -> match Cap.operation_of_wire name with
   | Some operation -> operation | None -> failf "%s is not a browser operation" name) names
 let client transport : Lane.client_info =
-  {client_id=Uuidm.v4_gen (Random.State.make_self_init ()) ();transport;browser=Lane.Firefox;
-   version="0.8.0";engine_version="fixture";space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Webdriver_bidi -> None)}
+  {client_id=Uuidm.v4_gen (Random.State.make_self_init ()) ();transport;browser=Lane.Ego_lite;
+   version="0.8.0";engine_version="fixture";space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space))}
 
 (* What a browser Add-on worker reports in its snapshot and the host chooses
-   from (lib/browser_addon_host.ml): a connected BiDi host. Choosing must
+   from (lib/browser_addon_host.ml): a connected ego task space. Choosing must
    queue it no command. *)
 let with_browsers run = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
-  let bidi=client Lane.Webdriver_bidi in
+  let ego=client Lane.Ego_task_space in
   Lane.install_activity_observer (Some (fun _ -> Lane.Enabled));
   Fun.protect ~finally:(fun () ->
     Lane.install_activity_observer None;
     List.iter (fun (info:Lane.client_info) -> ignore (Lane.disconnect_client ~client_id:info.client_id))
-      [bidi]) (fun () ->
-    List.iter (fun info -> ignore (Lane.take_command ~client_info:info ~window_sec:0.001)) [bidi];
-    run ~bidi;
+      [ego]) (fun () ->
+    List.iter (fun info -> ignore (Lane.take_command ~client_info:info ~window_sec:0.001)) [ego];
+    run ~ego;
     List.iter (fun info -> check bool "choosing a browser sends it no command" true
-      (Lane.take_command ~client_info:info ~window_sec:0.001=Ok None)) [bidi]))
+      (Lane.take_command ~client_info:info ~window_sec:0.001=Ok None)) [ego]))
+(* An ego connection is chosen only while its task space is observed present. *)
 let snapshot () : Selection.snapshot =
-  {live_activity=Lane.Enabled;live_clients=Lane.connected_clients ();live_space_presence=[]}
+  let clients=Lane.connected_clients () in
+  {live_activity=Lane.Enabled;live_clients=clients;
+   live_space_presence=List.filter_map (fun (info:Lane.client_info) -> Option.map (fun (space:Lane.ego_space) ->
+     info.client_id,{Masc.Browser_ego_space_observation.space_id=space.id;observed_at=0.;state=Present}) info.space) clients}
 let automatic ?(verb=Lane.Tabs_list) names =
   Selection.choose ~required_actions:(operations names) ~verb ~bound:false
     ~snapshot:(snapshot ()) Selection.Automatic
@@ -76,25 +80,23 @@ let unsupported = function
   | Ok () | Error (Selection.Binding_required | No_available_browser | Ambiguous_browsers _
     | Required_actions_unavailable _) -> false
 
-let test_task_choice () = with_browsers (fun ~bidi ->
-  check bool "no browser this fixture connects drops HTML5 data, so none is chosen" true
-    (none_serves (automatic ["html5_drop"]));
-  check bool "only an ego connection lists downloads, and this fixture connects none" true
-    (none_serves (automatic ["read_frames";"list_downloads"]));
-  check bool "hover and typing choose the BiDi host" true
-    (chosen (automatic ["hover";"type_text"]) = live bidi);
+let test_task_choice () = with_browsers (fun ~ego ->
+  check bool "no connection touches the page, so none is chosen" true
+    (none_serves (automatic ["touch"]));
+  check bool "hover and typing choose the ego connection" true
+    (chosen (automatic ["hover";"type_text"]) = live ego);
   check bool "no browser zooms the page, so none is chosen" true
     (none_serves (automatic ["page_zoom"])))
 
-let test_impossible_and_explicit () = with_browsers (fun ~bidi ->
+let test_impossible_and_explicit () = with_browsers (fun ~ego ->
   (match automatic ["page_zoom";"type_text"] with
    | Error (Selection.Required_actions_unavailable {required;candidates}) ->
      check bool "the refusal names what was required" true (required = operations ["page_zoom";"type_text"]);
      check int "it lists every connected browser as a candidate" 1 (List.length candidates)
    | Ok _ | Error (Selection.Binding_required | No_available_browser | Ambiguous_browsers _
      | Unsupported_required_actions _) -> fail "no browser zooms and types, so none is chosen");
-  check bool "an explicit BiDi host that cannot list downloads is refused, not replaced" true
-    (unsupported (admitted ["list_downloads"] (Lane.Live_route (Some bidi.client_id)))))
+  check bool "an explicit ego connection that cannot touch is refused, not replaced" true
+    (unsupported (admitted ["touch"] (Lane.Live_route (Some ego.client_id)))))
 
 (* Required actions are parsed before any browser is chosen. A refused list
    fails as the caller's input, before the tool looks for a browser Add-on;
@@ -145,11 +147,11 @@ let test_button_click_table () =
   let reaches backend operation = match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
   List.iter (fun operation ->
-    check bool (Cap.operation_name operation ^ " on live BiDi") true
-      (reaches (Cap.Connected Lane.Webdriver_bidi) operation);
+    check bool (Cap.operation_name operation ^ " on ego") true
+      (reaches (Cap.Connected Lane.Ego_task_space) operation);
     check bool (Cap.operation_name operation ^ " is not claimed for Safari") false
       (reaches Cap.Safari_unavailable operation);
-    match Cap.support (Cap.Connected Lane.Webdriver_bidi) operation with
+    match Cap.support (Cap.Connected Lane.Ego_task_space) operation with
     | Cap.Conditional {invocation;_} ->
       check bool (Cap.operation_name operation ^ " is invoked through click_at") true
         (invocation.action = Some "click_at" && invocation.tool = Cap.Interact)
@@ -159,7 +161,6 @@ let test_button_click_table () =
 let test_resize_viewport_table () =
   let reaches backend = match Cap.support backend Cap.Resize_viewport with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
-  check bool "live BiDi sets the viewport" true (reaches (Cap.Connected Lane.Webdriver_bidi));
   check bool "ego sets the page viewport through its CDP session" true (reaches (Cap.Connected Lane.Ego_task_space));
   check bool "Safari does not" false (reaches Cap.Safari_unavailable)
 
@@ -167,7 +168,6 @@ let test_tab_history_and_close_table () =
   let reaches backend operation = match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
   List.iter (fun operation ->
-    check bool (Cap.operation_name operation ^ " on live BiDi") true (reaches (Cap.Connected Lane.Webdriver_bidi) operation);
     check bool (Cap.operation_name operation ^ " on ego") true (reaches (Cap.Connected Lane.Ego_task_space) operation);
     check bool (Cap.operation_name operation ^ " is not claimed for Safari") false (reaches Cap.Safari_unavailable operation))
     [Cap.Back; Cap.Forward; Cap.Reload; Cap.Close_tab]
@@ -175,7 +175,7 @@ let test_tab_history_and_close_table () =
 let test_touch_table () =
   let reaches backend = match Cap.support backend Cap.Touch with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
-  check bool "live BiDi sends touch" true (reaches (Cap.Connected Lane.Webdriver_bidi));
+  check bool "ego sends no touch" false (reaches (Cap.Connected Lane.Ego_task_space));
   check bool "Safari has no touch" false (reaches Cap.Safari_unavailable)
 
 let test_select_option_table () =
@@ -185,15 +185,14 @@ let test_select_option_table () =
   List.iter (fun (label,backend) ->
     check bool (label ^ " selects through BrowserInteract") true
       (invocation backend = Some (Cap.Interact, Some "select_option")))
-    ["live BiDi",Cap.Connected Lane.Webdriver_bidi];
+    ["ego",Cap.Connected Lane.Ego_task_space];
   check bool "Safari has no select" true (invocation Cap.Safari_unavailable = None)
 
 let test_list_windows_table () =
   let reaches backend = match Cap.support backend Cap.List_windows with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
-  check bool "live BiDi names each tab's window" true (reaches (Cap.Connected Lane.Webdriver_bidi));
   List.iter (fun (label,backend) -> check bool (label ^ " does not") false (reaches backend))
-    ["Safari",Cap.Safari_unavailable]
+    ["ego",Cap.Connected Lane.Ego_task_space;"Safari",Cap.Safari_unavailable]
 
 (* The catalog claims on an Ego connection only what its peer does
    (Browser_lane.live_transport_serves Ego_task_space). Page operations retain
@@ -211,10 +210,10 @@ let test_ego_table () =
    | Cap.Available _|Cap.Conditional _|Cap.Unsupported _ -> fail "Ego HTML5 drop must use the selector-to-selector drag_to");
   let reachable = List.filter (fun operation -> match Cap.support backend operation with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false) Cap.operations in
-  check (list string) "reads, capture, the tab list, its own tabs, their history, input, frames, dialogs, uploads and downloads on them, their viewport size and environment, and the space handed to the operator and back"
+  check (list string) "reads, capture, the tab list, its own tabs, their history, input, dialogs, uploads and downloads on them, their viewport size and environment, and the space handed to the operator and back"
     ["list_tabs";"open_tab";"close_tab";"activate_tab";"navigate";"follow_link";"back";"forward";"reload";"stop_loading";"read_text";"read_html";"read_elements";"read_scene";"read_regions";"read_snapshot";"screenshot";"native_workflow";"click_snapshot_target";"fill_snapshot_target";
      "hover_snapshot_target";"double_click_snapshot_target";"click";"double_click";"right_click";"middle_click";"hover";"pointer_drag";"html5_drop";"scroll_page";"scroll_at";
-     "fill";"type_text";"press_key";"key_chord";"select_option";"read_frames";"frame_interaction";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads";"resize_viewport";"emulate_environment"]
+     "fill";"type_text";"press_key";"key_chord";"select_option";"read_dialog";"accept_dialog";"dismiss_dialog";"hand_off";"take_over";"space_status";"finish_space";"wait_for_control";"adopt_tab";"release_tab";"upload_file";"list_downloads";"resize_viewport";"emulate_environment"]
     (List.map Cap.operation_name reachable);
   List.iter (fun operation -> match Cap.support backend operation with
     | Cap.Conditional {constraints=_::_;_} -> ()
@@ -237,7 +236,6 @@ let test_loading_recovery_table () =
        | Cap.Available _ -> fail "recovery must retain native Page authority constraints"
        | Cap.Unsupported _ -> false))
     [Cap.Connected Lane.Ego_task_space, "Ego", true;
-     Cap.Connected Lane.Webdriver_bidi, "BiDi", false;
      Cap.Safari_unavailable, "Safari", false]
 
 let test_snapshot_table () =
@@ -249,7 +247,6 @@ let test_snapshot_table () =
       [Cap.Read_snapshot; Cap.Click_snapshot_target; Cap.Fill_snapshot_target;
        Cap.Hover_snapshot_target; Cap.Double_click_snapshot_target])
     [Cap.Connected Lane.Ego_task_space, "ego", true;
-     Cap.Connected Lane.Webdriver_bidi, "BiDi", false;
      Cap.Safari_unavailable, "Safari", false]
 
 let test_native_input_admission_surface () =
@@ -267,9 +264,6 @@ let test_native_input_admission_surface () =
        (invocation.Cap.tool=Cap.Interact && invocation.Cap.action=Some "type_text")
    | Conditional {constraints=[];_} | Available _ | Unsupported _ ->
      fail "native-window typing must retain its Page and focus conditions");
-  List.iter (fun backend -> check bool "other native backends retain type_text" true
-    (match Cap.support backend Cap.Type_text with Cap.Available _|Conditional _->true|Unsupported _->false))
-    [Cap.Connected Lane.Webdriver_bidi];
   let config=Masc.Workspace.default_config
     (Filename.concat (Filename.get_temp_dir_name ()) "masc-browser-raw-input-no-workspace") in
   let invoke steps=Tools.handle ~config ~access:Masc.Lane_addon_sources.Operator_configuration

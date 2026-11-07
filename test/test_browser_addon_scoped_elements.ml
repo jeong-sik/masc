@@ -24,11 +24,11 @@ let scoped_answers_need_their_match_count () =
       let owner = ok (Owner.create ~incarnation:"0b000000-0000-4000-8000-000000000072") in
       Eio.Switch.on_release sw (fun () -> Owner.revoke owner);
       let answer = ref `Null in
-      (* A BiDi connection this worker polls: it answers every command with
+      (* A live connection this worker polls: it answers every command with
          [answer] until the owner retires. *)
       let client_id = ok (B.client_id_of_string "0c000000-0000-4000-8000-000000000072") in
-      let client = {B.client_id;browser=B.Firefox;version="fixture";engine_version="fixture";
-        transport=B.Webdriver_bidi;space=None} in
+      let client = {B.client_id;browser=B.Ego_lite;version="fixture";engine_version="fixture";
+        transport=B.Ego_task_space;space=Some {Browser_lane.id=61;name="fixture Space"}} in
       let send command = Owner.dispatch owner {W.incarnation=Owner.incarnation owner;command} in
       Eio.Fiber.fork_daemon ~sw (fun () ->
         let rec serve () = match send (W.Poll {client;window_sec=3600.}) with
@@ -50,7 +50,6 @@ let scoped_answers_need_their_match_count () =
       let scoped = `Assoc ["tabId", `Int 7; "within", `String "nav"; "withinMatches", `Int 1;
         "total", `Int 1; "truncated", `Bool false; "elements", `List []] in
       let top = B.Page_elements {tab_id = Some 7;filter={within=Some "nav";selector=None}} in
-      let framed = B.Page_context {tab_id = 7; frame_path = ["#frame"]; mode = `Elements {within=Some "nav";selector=None}} in
       List.iter (fun (label, verb) ->
         answer := every_control;
         let refused = invoke verb in
@@ -60,11 +59,10 @@ let scoped_answers_need_their_match_count () =
              refused.structured_content);
         answer := scoped;
         check (option bool) (label ^ ": a scoped answer succeeds") (Some false) (invoke verb).is_error)
-        ["top document", top; "frame", framed];
+        ["top document", top];
       List.iter (fun (within, selector) ->
         let filter = B.{within; selector = Some selector} in
-        let verbs = [B.Page_elements {tab_id=Some 7;filter};
-          B.Page_context {tab_id=7;frame_path=["#frame"];mode=`Elements filter}] in
+        let verbs = [B.Page_elements {tab_id=Some 7;filter}] in
         List.iter (fun verb ->
           List.iter (fun reply ->
             answer := reply;

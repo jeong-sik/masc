@@ -1334,37 +1334,6 @@ let allow_empty_workspace =
   Arg.(value & flag & info [ "allow-empty-workspace" ] ~doc)
 ;;
 
-(* An owned browser source declared more than once is used by none of its
-   declarations. The declarations are the operator's to change, so this only
-   reports them. *)
-let validate_browser_addon base_path =
-  match Unix.realpath base_path with
-  | exception Unix.Unix_error (error, _, _) ->
-    errorf
-      "workspace BasePath cannot be resolved base_path=%s: %s"
-      base_path
-      (Unix.error_message error)
-  | base_path ->
-    (match
-       Masc.Browser_addon_preflight.report_doubled
-         (Masc.Browser_addon_preflight.doubled_sources ~base_path)
-     with
-     | Ok () ->
-       Printf.printf "browser Add-on declarations: each enabled source is declared once\n%!";
-       Ok ()
-     | Error message -> errorf "%s" message)
-;;
-
-let validate_browser_addon_cmd =
-  let doc =
-    "refuse a workspace where more than one enabled browser Add-on declaration \
-     serves the same owned browser source, since that source is then not used"
-  in
-  Cmd.v
-    (Cmd.info "validate-browser-addon" ~doc)
-    Term.(ret (const (fun base_path -> cmdliner_result (validate_browser_addon base_path)) $ base_path))
-;;
-
 let validate_runtime_config_cmd =
   let doc =
     "judge the runtime.toml this BasePath's server reads with the raw save \
@@ -1612,7 +1581,6 @@ let () =
           ; cut_run_registries_cmd
           ; validate_stores_cmd
           ; validate_runtime_config_cmd
-          ; validate_browser_addon_cmd
           ; resolve_workspace_cmd
           ]))
 ;;

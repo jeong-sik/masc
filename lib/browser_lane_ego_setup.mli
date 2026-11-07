@@ -113,14 +113,6 @@ val plan
   -> request
   -> (plan, error) result
 
-(** The same plan against the file as it is now, for when another table was
-    written to it since. Nothing is looked for or started again; the edit is
-    made on the file, read back and validated, and the revision is taken from
-    it. A [\[browser.live.ego\]] that changed since the plan was written by
-    someone else, and is refused as [Configuration_changed] rather than
-    overwritten. *)
-val replan : plan -> (plan, error) result
-
 (** Commits the table under the configuration write lock. A table that is
     unchanged is not rewritten. *)
 val apply : plan -> (unit, error) result

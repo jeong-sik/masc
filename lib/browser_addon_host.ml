@@ -208,8 +208,7 @@ let bind_goal_space t ~goal_id ~client_id =
     | None -> Ok () in
   match List.find_opt (fun (client:Browser_lane.client_info) -> client.client_id=client_id) gathered.published.clients with
   | None -> Error (Browser_goal_space.Unavailable "clientId is not an observed browser connection")
-  | Some {transport=Ego_task_space;space=None;_}
-  | Some {transport=Webdriver_bidi;_} ->
+  | Some {transport=Ego_task_space;space=None;_} ->
       Error (Browser_goal_space.Invalid "Goal Space binding requires an observed Ego Space connection")
   | Some ({transport=Browser_lane.Ego_task_space;space=Some space;_} as client) ->
     let* ()=Browser_addon_observation.check_ego_identity gathered.ego_identities client
@@ -255,14 +254,14 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
     | Browser_selection.Exact (Browser_lane.Live_route None),
       Browser_lane.Page_act (Browser_lane.Action.Control Browser_lane.Action.Take_over) -> Ok ()
     | Browser_selection.Exact (Browser_lane.Live_route None),
-      Browser_lane.Page_act (Browser_lane.Action.Open_tab _|Open_window _|
+      Browser_lane.Page_act (Browser_lane.Action.Open_tab _|
         Control (Hand_off|Space_status|Finish_space _|Wait_for_control _|Adopt_tab _|Release_tab _))
     | Automatic,Browser_lane.Page_act (Browser_lane.Action.Control _) ->
         refuse "live creation, control and Page management actions require an explicit observed clientId"
     | Exact (Browser_lane.Live_route (Some _)),Browser_lane.Page_act (Browser_lane.Action.Control _) -> Ok ()
     | (Automatic|Exact (Live_route _)),
       (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
-      | Page_goto _|Page_elements _|Page_act (Browser_lane.Action.Open_tab _|Open_window _|On_tab _)|Page_context _) -> Ok () in
+      | Page_goto _|Page_elements _|Page_act (Browser_lane.Action.Open_tab _|On_tab _)|Page_context _) -> Ok () in
   match preference,required_actions with
     | Browser_selection.Exact (Browser_lane.Live_route None),[]
       when (match verb with
@@ -424,7 +423,7 @@ let issue ?goal_space ?upload_paths ?(required_actions=[]) t ~preference verb =
     | Browser_lane.Page_act (Browser_lane.Action.On_tab {interaction=Upload {paths;_};_}) -> Some paths
     | Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
     | Page_goto _|Page_elements _
-    |Page_act (Open_tab _|Open_window _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_emulation _|Clear_emulation;_})
+    |Page_act (Open_tab _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_emulation _|Clear_emulation;_})
     |Page_context _ -> None in
   (* The grant is staged for the exact route the command goes to: a live
      connection the worker runs, which the selection names. *)

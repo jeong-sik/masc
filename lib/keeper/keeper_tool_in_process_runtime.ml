@@ -548,7 +548,7 @@ let handle_browser_act_with_outcome ~turn_sandbox_factory ~(config : Workspace.c
          (Keeper_tool_shared_runtime.error_json message))
   | Ok (Browser_lane.Action.On_tab { interaction = (Browser_lane.Action.Dismiss_dialog | Browser_lane.Action.Back | Browser_lane.Action.Forward | Browser_lane.Action.Reload | Browser_lane.Action.Stop_loading | Browser_lane.Action.Close_tab | Browser_lane.Action.Accept_dialog _
       | Browser_lane.Action.Set_emulation _ | Browser_lane.Action.Clear_emulation); _ })
-  | Ok (Browser_lane.Action.Open_tab _ | Browser_lane.Action.Open_window _ | Browser_lane.Action.Control _) | Error _ -> invoke ()
+  | Ok (Browser_lane.Action.Open_tab _ | Browser_lane.Action.Control _) | Error _ -> invoke ()
 ;;
 
 let handle_wiki_search_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args =

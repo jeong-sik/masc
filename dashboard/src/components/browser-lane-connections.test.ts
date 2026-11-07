@@ -46,11 +46,10 @@ describe('browser caller observations', () => {
   })
 
   it('preserves healthy clients alongside a dated Ego connection refusal', () => {
-    const firefox = { ...client, clientId: 'firefox', browser: 'firefox', transport: 'webdriver_bidi',
-      space: null, interactions: [], lastActivities: [] }
-    const view = show({ ...row.fields, clients: [firefox], unavailable: [unavailable] }, 'retained')
-    expect(view.getByLabelText('Browser client firefox')).toBeTruthy()
-    expect(view.getByText('Firefox · WebDriver BiDi')).toBeTruthy()
+    const other = { ...client, clientId: 'other', space: { id: 40, name: 'Other' }, interactions: [], lastActivities: [] }
+    const view = show({ ...row.fields, clients: [other], unavailable: [unavailable] }, 'retained')
+    expect(view.getByLabelText('Browser client other')).toBeTruthy()
+    expect(view.getByText('Ego Lite · Ego TaskSpace')).toBeTruthy()
     expect(view.queryByText(/observation unreadable/)).toBeNull()
     const refusal = view.getByLabelText('Ego connection unavailable')
     expect(refusal.textContent).toContain('Research')
@@ -142,17 +141,17 @@ describe('browser caller observations', () => {
   })
   it('distinguishes empty connection/activity lists from unreadable data', () => {
     const view = show({ ...row.fields, clients: [{ ...client, interactions: [], lastActivities: [] },
-      { ...client, clientId: 'firefox', browser: 'firefox', transport: 'webdriver_bidi', space: null,
+      { ...client, clientId: 'other', space: { id: 40, name: 'Other' },
         interactions: [], lastActivities: [] }] })
     expect(view.getAllByText('No pending requests recorded.')).toHaveLength(2)
     expect(view.getAllByText('No previous result recorded.')).toHaveLength(2)
-    expect(view.getByText('Firefox · WebDriver BiDi')).toBeTruthy()
+    expect(view.getAllByText('Ego Lite · Ego TaskSpace')).toHaveLength(2)
     view.unmount()
     expect(show({ ...row.fields, clients: [] }).getByText('No live connections recorded in this observation.')).toBeTruthy()
   })
   it.each([
     { ...client, space: null }, { ...client, space: { id: Number.MAX_SAFE_INTEGER + 1, name: 'unsafe' } },
-    { ...client, transport: 'webdriver_bidi' }, { ...client, interactions: [{ ...work, phase: 'done' }] },
+    { ...client, transport: 'unknown_transport' }, { ...client, interactions: [{ ...work, phase: 'done' }] },
     { ...client, lastActivities: [{ work, outcome: 'success' }] },
     { ...client, interactions: [{ ...work, tabId: -1 }] },
     ...[
@@ -168,8 +167,6 @@ describe('browser caller observations', () => {
       { spaceId: 32, observedAt: 42, state: 'unknown' },
       { spaceId: 32, observedAt: 42, state: 'unknown', reason: { kind: 'unrecognized' } },
     ].map(spacePresence => ({ ...client, spacePresence })),
-    { ...client, transport: 'webdriver_bidi', browser: 'firefox', space: null,
-      spaceObservation: { spaceId: 32, spaceName: 'same', ownership: 'agent', observedAt: 42 } },
   ])('refuses a malformed or inconsistent nested connection without hiding raw row data', malformed => {
     const view = show({ ...row.fields, clients: [malformed] })
     expect(view.getByRole('status').textContent).toContain('observation unreadable')

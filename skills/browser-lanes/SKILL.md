@@ -31,7 +31,7 @@ snapshot에 나온 최상위 탭의 URL이다. 조작 뒤에는 새 snapshot으�
 관측한 ref(`@12`), role·text locator, CSS를 사용할 수 있다. click·fill·hover는 SDK가
 대상을 화면 안으로 스크롤하므로 먼저 좌표를 찾거나 수동 스크롤하지 않는다.
 CSS는 열린 shadow root를 찾고, locator는 최상위 문서에 실행 가능한 대상이 없으면
-iframe을 찾는다. 프레임 안의 대상은 snapshot의 ref로 구분하며 `framePath`를 넣지 않는다.
+iframe을 찾는다. 프레임 안의 대상은 snapshot의 ref로 구분한다.
 
 본문만 필요하면 text, 시각적 확인에는 screenshot을 고른다. scene/regions와
 documentId/nodeId는 TUI 관측을 이어가거나 좌표가 필요할 때 사용하며 Ego ref와 섞지 않는다.
@@ -148,7 +148,7 @@ scene/regions 읽기에서도 유지한다. 탭이 사라졌을 때만 같은 �
 운영자의 화면·로그인 세션은 live다. 연결 정보가 없으면 BrowserTabs로 선택해
 clientId/tabId 쌍을 유지한다. `complete=false`이면 `unavailableTabs`의 ID와 오류를
 확인한다. 목록의 다른 탭은 계속 사용할 수 있고, 읽지 못한 탭을 닫힌 탭으로 해석하지 않는다.
-live BiDi 연결의 로그인을 써야 하면 BrowserAct `open_tab`(그 clientId)으로 탭을 열고,
+ego 연결의 로그인을 써야 하면 BrowserAct `open_tab`(그 clientId)으로 탭을 열고,
 그 탭에서만 BrowserGoto(`lane=live`, clientId, tabId)로 URL을 옮긴다. 운영자가 연 탭은
 URL로 옮기지 않는다.
 live 인증 화면을 연결 오류 때문에 별도 API·수집 버퍼로 대체하지 않는다.

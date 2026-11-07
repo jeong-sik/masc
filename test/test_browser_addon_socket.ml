@@ -356,44 +356,6 @@ let retain_reports_a_released_allocation () =
       released (cleanup ~admission ~directory);
       check "a released allocation is reported released" true (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_released);
       check "a released allocation stays released" true (acquisition_state directory = "released"))
-(* The Firefox profile a live BiDi child claim pins: beside the slot, so the
-   slot holds only its claim. *)
-let firefox_profile directory = directory ^ "-firefox-profile"
-let firefox directory =
-  let profile = firefox_profile directory in
-  (try Unix.mkdir profile 0o700 with Unix.Unix_error (Unix.EEXIST,_,_) -> ());
-  ok (Masc.Browser_addon_live_bidi.configuration
-    ~browser:{Browser_configuration.firefox="/fixture/firefox";profile;port=9222}
-    ~launcher:"/fixture/launcher" ~guardian:"/fixture/guardian"
-    ~claim_directory:(Filename.concat directory "firefox-slot"))
-let with_firefox_claim work =
-  let profile = ref None in
-  Fun.protect ~finally:(fun () -> Option.iter (fun path -> if Sys.file_exists path then remove path) !profile)
-    (fun () -> with_claim
-      ~source:(fun directory -> profile := Some (firefox_profile directory); Socket.Owned_firefox (firefox directory))
-      (fun admission directory root -> work (firefox directory) admission directory root))
-(* The descriptor the Firefox controller records on its child claim; a
-   different shape would make the claim foreign. *)
-let firefox_child_context c ~incarnation ~root =
-  match Masc.Browser_addon_live_bidi.configuration_to_json c with
-  | `Assoc fields -> `Assoc ["kind",`String "browser_addon_live_bidi";"incarnation",`String incarnation;
-      "directory",`String root;"profile",List.assoc "profile" fields;"root",List.assoc "root" fields]
-  | _ -> Alcotest.fail "expected a Firefox configuration object"
-let retain_requires_a_settled_child_without_signalling () =
-  with_firefox_claim (fun c admission directory root ->
-    ignore (ok (Socket.acquire ~admission ~directory));
-    let slot = Filename.concat directory "firefox-slot" in
-    Unix.mkdir slot 0o700;
-    let child = lease (Lease.prepare ~directories:[slot]
-      ~instance_id:(Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())))
-      ~cleanup_context:(Some (firefox_child_context c ~incarnation:(Lease.instance_id admission) ~root))) in
-    lease (Lease.retire admission);
-    refused "an unsettled Firefox child refuses the retain" (Socket.retain ~admission ~directory);
-    check "the refused retain did not retire the child" true (lease (Lease.status child) = Lease.Awaiting_exec);
-    check "the refused retain kept the acquisition" true (acquisition_state directory = "acquired");
-    lease (Lease.retire child);
-    check "the operator retains the allocation" true (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained))
-(* Only a failure before the rename says the record did not change. *)
 let retain_reports_where_a_record_write_failed () =
   let failing stage _path _contents = Error {Fs_compat.path="record";stage;
     exception_=Failure "disk full";backtrace=Printexc.get_callstack 0} in
@@ -413,39 +375,6 @@ let retain_reports_where_a_record_write_failed () =
   let outcome, state = attempt (failing Fs_compat.Before_rename) in
   refused "a write that failed before its rename is refused" outcome;
   check "the record is unchanged after a write that failed before its rename" true (state = "acquired")
-(* A Firefox child claim recorded for another allocation is never read as this
-   allocation's settlement. *)
-let retain_refuses_a_foreign_child () =
-  with_firefox_claim (fun c admission directory root ->
-    ignore (ok (Socket.acquire ~admission ~directory));
-    let slot = Filename.concat directory "firefox-slot" in
-    Unix.mkdir slot 0o700;
-    let child = lease (Lease.prepare ~directories:[slot]
-      ~instance_id:(Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())))
-      ~cleanup_context:(Some (firefox_child_context c ~incarnation:"another-allocation" ~root))) in
-    lease (Lease.retire child);
-    lease (Lease.retire admission);
-    refused "a child claim of another allocation refuses the retain" (Socket.retain ~admission ~directory);
-    check "the refused retain kept the acquisition" true (acquisition_state directory = "acquired"))
-(* A child reservation that was never published is fenced only by the cleanup
-   pass. Retain refuses it without fencing; once a cleanup pass settled the
-   child, the retain succeeds. *)
-let retain_waits_for_an_unpublished_child_to_be_fenced () =
-  with_firefox_claim (fun c admission directory root ->
-    ignore (ok (Socket.acquire ~admission ~directory));
-    let slot = Filename.concat directory "firefox-slot" in
-    Unix.mkdir slot 0o700;
-    ignore (lease (Lease.prepare ~directories:[slot]
-      ~instance_id:(Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())))
-      ~cleanup_context:(Some (firefox_child_context c ~incarnation:(Lease.instance_id admission) ~root))));
-    (* The reservation exists but its intent was never published. *)
-    Out_channel.with_open_bin (Filename.concat slot "intent.json") (fun _ -> ());
-    lease (Lease.retire admission);
-    refused "an unpublished child reservation refuses the retain" (Socket.retain ~admission ~directory);
-    check "the refused retain kept the acquisition" true (acquisition_state directory = "acquired");
-    ok (Masc.Browser_addon_live_bidi.settle c ~incarnation:(Lease.instance_id admission) ~directory:root);
-    check "the operator retains the allocation once the child is fenced" true
-      (retain_ok (Socket.retain ~admission ~directory) = Socket.Allocation_retained))
 (* A reservation keeps its producer's backend payloads. Settlement must not
    require interpreting them after an explicit operator handoff. The ego
    source below carries a configuration an ego source never has, so only a
@@ -565,10 +494,7 @@ let () = Alcotest.run "browser addon socket ownership" ["recovery",[
   Alcotest.test_case "the operator retains an unconfirmed allocation in place" `Quick operator_retains_unconfirmed_allocation;
   Alcotest.test_case "retain refuses a replaced allocation directory" `Quick retain_refuses_replaced_directory;
   Alcotest.test_case "retain reports an allocation already released" `Quick retain_reports_a_released_allocation;
-  Alcotest.test_case "retain requires a settled Firefox child and signals nothing" `Quick retain_requires_a_settled_child_without_signalling;
   Alcotest.test_case "retain reports where a record write failed" `Quick retain_reports_where_a_record_write_failed;
-  Alcotest.test_case "retain refuses a child claim of another allocation" `Quick retain_refuses_a_foreign_child;
-  Alcotest.test_case "retain waits until an unpublished child is fenced" `Quick retain_waits_for_an_unpublished_child_to_be_fenced;
   Alcotest.test_case "operator handoff makes backend payloads opaque" `Quick opaque_payload_handoff;
   Alcotest.test_case "retention remains bound to the original host record" `Quick retained_record_binding;
   Alcotest.test_case "published handoff survives an unconfirmed fsync" `Quick retained_publication_readback;

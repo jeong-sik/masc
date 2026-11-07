@@ -2224,9 +2224,7 @@ let add_routes ~sw ~clock router =
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/setup/status" (fun state _agent_name req reqd ->
            let config = Mcp_server.workspace_config state in
            let observed =
-             Onboarding_status.inspect_loaded
-               ~configuration:(Runtime.browser_configuration ())
-               ~base_path:(Some config.base_path) in
+             Onboarding_status.inspect_loaded ~base_path:(Some config.base_path) in
            Http.Response.json_value ~request:req (Onboarding_status.to_json observed) reqd)
   |> Server_route.get (Server_route.Permission runtime_probe_read_permission) "/api/v1/dashboard/runtime-probe" (fun _state req reqd ->
        let force = Server_utils.bool_query_param req "force" ~default:false in

@@ -132,30 +132,24 @@ current process environment; it does not claim that a PDF has been inspected or
 accepted. If MASC runs as a service, make the tools available on that service's
 PATH before requesting PDF verification.
 
-### Browser tools (Firefox)
+### Browser tools (ego lite)
 
-The attached-Firefox (BiDi) lane starts Firefox, which the portable release does
-not include.
+The ego lite lane uses ego lite, which the portable release does not include.
 
 ```bash
-masc prerequisite-actions firefox                           # state and actions
-masc prerequisite-actions firefox --execute firefox_brew_install
+masc prerequisite-actions ego-browser                       # state and actions
+masc prerequisite-actions ego-browser --execute ego_lite_download
 ```
 
-On macOS the action uses an existing Homebrew: the
-[`firefox`](https://formulae.brew.sh/cask/firefox) cask. On Linux it opens the
-project's own download or instruction page, because the package names differ by
-distribution. The default MASC bootstrap does not install Homebrew or Firefox.
-Homebrew refuses the Firefox cask when `Firefox.app` is already in
-`/Applications`; the `firefox` result then reports that copy and no install is
-needed.
+On macOS the action opens the ego lite download page. ego lite installs as an
+app; its first-run onboarding links `ego-browser` into `~/.local/bin`. ego lite
+has no Linux build.
 
-The result says whether the program answers `--version` in the current process
+The result says whether `ego-browser` answers `--version` in the current process
 environment, and at which absolute path. The program runs with the same reduced
-environment the PDF check uses, so a program that needs a display variable to
-print its version is reported as not answering. It does not edit `runtime.toml`: naming
-the executable in `[browser.live.bidi]` and restarting the server are separate
-steps.
+environment the PDF check uses. It does not edit `runtime.toml`: writing
+`[browser.live.ego]` with `masc browser-lane-setup --mode ego` and restarting the
+server are separate steps.
 
 ## Install
 
@@ -439,9 +433,8 @@ For an MCP-only server, use `masc start --base-path "$HOME/masc-workspace"` and 
 ### Giving `imp` a browser and a GitHub login
 
 After the sandbox, the setup journey asks **5 · Give imp tools (optional)**. It is
-one checklist. The GitHub and Web search rows start marked; the rows
-that connect a Firefox you choose, the ego lite row, the z.ai row and the
-SearXNG row do not.
+one checklist. The GitHub and Web search rows start marked; the ego lite
+row, the z.ai row and the SearXNG row do not.
 Nothing is installed or written until you confirm it. Unmark every row to continue without any of them (on a terminal
 that shows numbers, type `0`).
 
@@ -492,13 +485,6 @@ that shows numbers, type `0`).
   answering JSON, paused, restarting, or in a state Docker will not start from.
   For the container cases the setup prints the Docker command to run next
   (`docker logs`, `docker unpause` or `docker inspect`).
-- **Firefox route (not marked).** When Firefox is found, one more row has
-  MASC start a Firefox of its own for `imp`, with remote debugging on a local
-  port (*BiDi*, `masc browser-lane-setup --mode bidi`). You log in once to the
-  sites `imp` works on. The port has no authentication: any program on this
-  computer can drive that browser and read its cookies. The row writes before
-  `masc setup` starts the server. With no Firefox found the journey does not
-  show it.
 - **ego lite (not marked).** When `ego-browser` answers on `PATH` or in
   `~/.local/bin`, where ego lite's onboarding puts it, one more row connects
   your [ego lite](https://lite.ego.app/). Confirming it runs
@@ -506,13 +492,10 @@ that shows numbers, type `0`).
   table of `runtime.toml`. The browser Add-on then opens a task space named
   `masc-keepers` in ego lite and serves it as a live connection. Setup refuses
   that name when a task space you made in ego lite already has it, and writes
-  nothing when ego lite does not list its spaces, so keep ego lite open; a
-  refusal leaves the other browser rows of the same run unwritten too. `imp` sees only the
+  nothing when ego lite does not list its spaces, so keep ego lite open. `imp` sees only the
   tabs in that space, and clicks and types only on the pages it opened there.
   Those pages share the cookies of your ego lite profile, so `imp` reads and
-  acts as you on the sites you are logged in to. The row needs no Firefox.
-  Chosen with the BiDi row, a request that names no connection is refused as
-  ambiguous. The server reads the table when it starts, so a server that is
+  acts as you on the sites you are logged in to. The server reads the table when it starts, so a server that is
   already running needs a restart, and the journey says so.
 
 Quick setup lists every row with the command for each and whether it would be
@@ -521,8 +504,6 @@ asks Docker about the `masc-searxng` container and the local address for an
 answer, and installs and writes nothing. To run them later:
 
 ```bash
-# BiDi row: a Firefox of its own that MASC starts
-masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
 # ego lite row: a task space in your ego lite
 masc browser-lane-setup --mode ego --base-path "$HOME/masc-workspace"
 # Web search row: which providers have a key (writes nothing)

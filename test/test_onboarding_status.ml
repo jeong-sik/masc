@@ -181,93 +181,6 @@ let workspace_fixture f =
   List.iter (fun path -> Unix.mkdir path 0o700) [root; Filename.concat root "config"];
   f base
 
-module Status = Masc.Browser_bidi_host_status
-
-let bidi_check observed =
-  List.find_opt (fun (c : Onboarding_status.check) -> c.id = Onboarding_status.Browser_bidi_host)
-    observed.Onboarding_status.checks
-
-let bidi_message observed = message Onboarding_status.Browser_bidi_host observed
-
-let has text fragments =
-  List.iter (fun fragment ->
-      check bool ("says " ^ fragment) true (String_util.contains_substring text fragment))
-    fragments
-
-let live_firefox_configuration_is_observed_without_starting_it () =
-  let asked = ref 0 in
-  let keeper ?(firefox = Some true) configuration =
-    Status.keeper ~configuration ~firefox:(fun () -> incr asked; firefox) in
-  let live_bidi : Browser_configuration.live_bidi =
-    { firefox = "/Apps/firefox"; port = 9444; profile = "/keeper/profile" } in
-  let configured = { Browser_configuration.none with live_bidi = Some live_bidi } in
-  check bool "the Addon configuration preserves its selected endpoint and profile" true
-    (keeper (Some configured)
-     = Status.Addon_managed { port = live_bidi.port; profile = live_bidi.profile });
-  check bool "no enabled browser-firefox declaration is told apart from no table" true
-    (keeper ~firefox:(Some false) (Some configured) = Status.Addon_off);
-  check bool "unread declarations do not say who starts Firefox" true
-    (keeper ~firefox:None (Some configured) = Status.Not_known);
-  check int "each table asks the declarations once" 3 !asked;
-  check bool "no table" true (keeper (Some Browser_configuration.none) = Status.Not_configured);
-  check bool "nothing loaded" true (keeper None = Status.Not_known);
-  check int "with no table the declarations are not read" 3 !asked;
-  check bool "no table changes the paragraph" false
-    (String.equal (Status.message Status.Not_configured) (Status.message Status.Not_known));
-  check bool "a table nothing runs is not said to be no table" false
-    (String.equal (Status.message Status.Addon_off) (Status.message Status.Not_configured));
-  check bool "a table nothing runs changes the paragraph" false
-    (String.equal (Status.message Status.Addon_off) (Status.message Status.Not_known))
-
-(* Doctor reads Addon configuration from runtime.toml without starting it. *)
-let doctor_reads_addon_firefox_configuration_from_runtime_toml () =
-  workspace_fixture @@ fun base ->
-  let runtime = Filename.concat base ".masc/config/runtime.toml" in
-  let profile = "/keeper/profile" in
-  let table = "\n[browser.live.bidi]\nfirefox = \"/Apps/firefox\"\nprofile = \"" ^ profile ^ "\"\n" in
-  write runtime (read "../scripts/fixtures/release-evidence/runtime.toml" ^ table);
-  (* The Addon owns the Firefox only while a declaration runs its source. *)
-  let manifest = Filename.concat base "browser-firefox.toml" in
-  write manifest {|id = "browser-firefox"
-revision = "1"
-title = "Browser"
-runtime = "host_process"
-service = "browser"
-browser_backend = "owned_firefox"
-command = ["masc-browser-addon-worker"]
-contributions = ["observe"]
-[resources]
-max_reply_bytes = 4096
-|};
-  let directory = Filename.concat base ".masc/config/lane-addons" in
-  Unix.mkdir directory 0o700;
-  let declaration enabled = Printf.sprintf
-    "id = \"browser-firefox\"\nrun_id = \"world\"\nenabled = %b\nmanifest_path = %S\n[binding]\nsources = []\n"
-    enabled manifest in
-  let declaration_path = Filename.concat directory "browser-firefox.toml" in
-  let keeper () =
-    Status.observe ~base_path:base
-      ~configuration:(Result.to_option (Browser_configuration.of_file runtime)) in
-  check bool "with no declaration nothing runs the table" true (keeper () = Status.Addon_off);
-  check bool "a table nothing runs has nothing to verify" true
-    (bidi_check (inspect ~base_path:(Some base)) = None);
-  write declaration_path (declaration false);
-  check bool "a declaration switched off runs nothing" true (keeper () = Status.Addon_off);
-  write declaration_path (declaration true);
-  check bool "a declaration switched on runs the table" true
-    (keeper () = Status.Addon_managed { port = Browser_configuration.default_live_bidi_port; profile });
-  let observed = inspect ~base_path:(Some base) in
-  has (bidi_message observed) [ profile ];
-  check bool "offline Addon readiness needs verification" true
-    (condition Onboarding_status.Browser_bidi_host observed = Onboarding_status.Needs_verification);
-  check bool "offline Addon readiness is advisory" true
-    (Onboarding_status.role Onboarding_status.Browser_bidi_host = Onboarding_status.Advisory);
-  (* A server refuses a file that does not load, and so has no browser
-     configuration either: doctor does not read its table. *)
-  write runtime table;
-  check bool "a runtime.toml that does not load says nothing of the table" true
-    (bidi_check (inspect ~base_path:(Some base)) = None)
-
 (* A workspace whose Keepers were declared by hand never had imp, and bare
    `masc` walked it back into setup (measured 2026-09-23: sixteen persisted
    Keepers, opening needs_journey, "Your first Keeper, imp, has not been
@@ -335,14 +248,13 @@ let only_shared_checks_hold_history_closed () =
      decided in this test too. *)
   let expected : Onboarding_status.check_id -> Onboarding_status.role = function
     | Workspace | Runtime_configuration | Keeper_persistence -> Required_to_open
-    | Model_connection | Keeper_declaration | Sandbox | Browser_bidi_host -> Advisory
+    | Model_connection | Keeper_declaration | Sandbox -> Advisory
   in
   List.iter (fun id ->
       check bool (Onboarding_status.check_id_name id) true
         (Onboarding_status.role id = expected id))
     Onboarding_status.[ Workspace; Runtime_configuration; Keeper_persistence;
-                        Model_connection; Keeper_declaration; Sandbox;
-                        Browser_bidi_host ];
+                        Model_connection; Keeper_declaration; Sandbox ];
   check bool "no workspace never opens history" true
     (Onboarding_status.opening (inspect ~base_path:None)
      = Onboarding_status.Needs_journey)
@@ -562,7 +474,7 @@ let a_server_inspection_does_not_probe_the_backend () = with_workspace @@ fun ba
   let probed = sandbox_check_of
       (Onboarding_status.inspect ~sandbox:(Onboarding_status.Probe_with run) ~base_path:(Some base)) in
   let served = sandbox_check_of
-      (Onboarding_status.inspect_loaded ~configuration:None ~base_path:(Some base)) in
+      (Onboarding_status.inspect_loaded ~base_path:(Some base)) in
   check bool "the CLI probe reads a stopped service as needing setup" true
     (probed.condition = Onboarding_status.Needs_setup);
   check bool "the server answer is unverified, not setup" true
@@ -627,8 +539,4 @@ let () = run "Onboarding observations"
                      test_case "a server inspection does not probe the backend" `Quick
                        a_server_inspection_does_not_probe_the_backend;
                      test_case "an unreadable declaration is setup even when not probed" `Quick
-                       an_unreadable_declaration_is_setup_even_when_not_probed];
-   "live Firefox", [test_case "live Firefox configuration is observed without starting it" `Quick
-                      live_firefox_configuration_is_observed_without_starting_it;
-                    test_case "doctor reads Addon Firefox configuration from runtime.toml" `Quick
-                      doctor_reads_addon_firefox_configuration_from_runtime_toml]]
+                       an_unreadable_declaration_is_setup_even_when_not_probed]]

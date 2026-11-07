@@ -23,14 +23,15 @@ let info browser : Lane.client_info =
     | Ok id -> id
     | Error error -> fail error
   in
-  { client_id; browser; version = "1.0"; transport = Browser_lane.Webdriver_bidi; engine_version = "155.0.1" ;space=None}
+  { client_id; browser; version = "1.0"; transport = Browser_lane.Ego_task_space; engine_version = "155.0.1"
+  ; space = Some {Browser_lane.id = 61; name = "fixture Space"} }
 ;;
 
 let payload = `Assoc [ "ok", `Bool true; "data", `String "the answer" ]
 
 (* Under the mock clock a take window only passes when the clock is moved,
    so registering a client is a take whose window this function passes. *)
-let connect ?(transport=Lane.Webdriver_bidi) ~sw ~clock browser =
+let connect ?(transport=Lane.Ego_task_space) ~sw ~clock browser =
   let client = { (info browser) with transport } in
   let registered =
     Eio.Fiber.fork_promise ~sw (fun () ->
@@ -64,7 +65,7 @@ let with_lane f =
 let test_an_answer_delivered_as_the_timeout_passed_is_the_answer () =
   with_lane
   @@ fun ~sw ~clock ->
-  let client = connect ~sw ~clock Lane.Firefox in
+  let client = connect ~sw ~clock Lane.Ego_lite in
   let issued =
     Eio.Fiber.fork_promise ~sw (fun () ->
       Lane.issue_for_actor ~actor:None ~target:(live client) ~verb:Lane.Tabs_list ~timeout_sec:window_s)
@@ -91,7 +92,7 @@ let test_an_answer_delivered_as_the_timeout_passed_is_the_answer () =
 let test_a_command_taken_as_the_window_passed_is_delivered () =
   with_lane
   @@ fun ~sw ~clock ->
-  let client = connect ~sw ~clock Lane.Firefox in
+  let client = connect ~sw ~clock Lane.Ego_lite in
   (* The client is waiting for a command with nothing queued; its window
      passes first, then a command is issued. *)
   let taken =
@@ -118,8 +119,7 @@ let test_a_command_taken_as_the_window_passed_is_delivered () =
     fail "the issuer did not get the answer to the command its client took"
 ;;
 
-let native_click = Lane.Page_interact {tab_id=1;frame_path=[];
-  expected_url=Some "https://example.test/";action=Lane.Click "#save"}
+let native_click = Lane.Page_interact {tab_id=1;expected_url=Some "https://example.test/";action=Lane.Click "#save"}
 
 let expect_answer promise = match Eio.Promise.await_exn promise with
   | Ok (Lane.Answered value) -> check bool "original result" true (value=payload)
@@ -214,16 +214,14 @@ let test_only_native_ego_inputs_delegate_waits () =
   let verify transport verb expected =
     check bool "transport-specific execution policy" true (Lane.live_reply_policy transport verb=expected) in
   List.iter (fun verb ->
-    verify Lane.Ego_task_space verb Lane.Executor_owned;
-    verify Lane.Webdriver_bidi verb Lane.Reply_window)
+    verify Lane.Ego_task_space verb Lane.Executor_owned)
     [Lane.Page_goto {url="https://example.test/";tab_id=Some 1};
      Lane.Page_act (Lane.Action.Open_tab "https://example.test/");
-     Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Reload});
-     Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Stop_loading})];
-  verify Lane.Ego_task_space (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back})) Lane.Reply_window;
+     Lane.Page_act (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Reload});
+     Lane.Page_act (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Stop_loading})];
+  verify Lane.Ego_task_space (Lane.Page_act (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Back})) Lane.Reply_window;
   verify Lane.Ego_task_space native_click Lane.Executor_owned;
-  verify Lane.Webdriver_bidi native_click Lane.Reply_window;
-  let guarded=Lane.Page_interact {tab_id=1;frame_path=[];expected_url=None;action=Lane.Scroll {x=0;y=1}} in
+  let guarded=Lane.Page_interact {tab_id=1;expected_url=None;action=Lane.Scroll {x=0;y=1}} in
   verify Lane.Ego_task_space guarded Lane.Reply_window
 
 let () =

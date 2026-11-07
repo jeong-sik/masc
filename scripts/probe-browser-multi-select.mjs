@@ -1,22 +1,18 @@
 #!/usr/bin/env node
 // Actual DOM execution of the production interaction script, without an OCaml build.
-// Usage: node scripts/probe-browser-multi-select.mjs firefox FIREFOX OUT
-//        node scripts/probe-browser-multi-select.mjs ego EGO_BROWSER OUT SPACE_NAME_OR_ID
+// Usage: node scripts/probe-browser-multi-select.mjs ego EGO_BROWSER OUT SPACE_NAME_OR_ID
 // Ego reuses one goal-owned space; the caller finishes it when the whole goal ends.
 import assert from 'node:assert/strict';
-import {readFileSync, writeFileSync, mkdirSync, mkdtempSync, rmSync} from 'node:fs';
+import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {createServer} from 'node:http';
-import {createServer as portServer} from 'node:net';
 import {spawn} from 'node:child_process';
 import {once} from 'node:events';
-import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
 import {createHash} from 'node:crypto';
 
 const [mode, executable, output, space] = process.argv.slice(2);
-assert(['firefox','ego'].includes(mode) && executable && output,
-  'expected firefox|ego, executable, output directory, and ego goal space');
-assert(mode !== 'ego' || space, 'ego requires the one goal-owned space name or id');
+assert(mode === 'ego' && executable && output && space,
+  'expected ego, executable, output directory, and the one goal-owned space name or id');
 mkdirSync(output,{recursive:true});
 const root = resolve(new URL('..',import.meta.url).pathname);
 const source = readFileSync(join(root,'lib/browser_interaction.ml'),'utf8');
@@ -72,37 +68,8 @@ const exercise = async evaluate => {
     observations.push({behavior,result,observed});
   }
 };
-let child, socket, profile;
 try {
-  if(mode==='firefox') {
-    profile=mkdtempSync(join(tmpdir(),'masc-multi-select-firefox-'));
-    const reserve=portServer(); reserve.listen(0,'127.0.0.1'); await once(reserve,'listening');
-    const port=reserve.address().port; await new Promise(done=>reserve.close(done));
-    child=spawn(executable,['--headless','--no-remote','--profile',profile,'--remote-debugging-port',String(port)],{stdio:['ignore','pipe','pipe']});
-    let log=''; child.stdout.on('data',chunk=>{log+=chunk;}); child.stderr.on('data',chunk=>{log+=chunk;});
-    let spawnError;
-    child.once('error',error=>{spawnError=error;log+=String(error);});
-    const deadline=performance.now()+20000;
-    for(;;) {
-      try { await fetch(`http://127.0.0.1:${port}/`);break; }
-      catch(error) { if(spawnError || child.exitCode!==null || child.signalCode!==null || performance.now()>deadline) throw new Error(`owned Firefox failed: ${log}`,{cause:spawnError ?? error});
-        await new Promise(done=>setTimeout(done,50)); }
-    }
-    socket=new WebSocket(`ws://127.0.0.1:${port}/session`); await once(socket,'open');
-    let next=0;const pending=new Map();
-    socket.addEventListener('message',event=>{const message=JSON.parse(event.data);if(message.id!==undefined){const p=pending.get(message.id);if(p){pending.delete(message.id);clearTimeout(p.timer);message.type==='error'?p.reject(new Error(JSON.stringify(message))):p.resolve(message.result);}}});
-    const call=(method,params)=>new Promise((resolve,reject)=>{const id=++next;const timer=setTimeout(()=>{pending.delete(id);reject(new Error(`no response: ${method}`));},20000);pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params}));});
-    const session=await call('session.new',{capabilities:{}});
-    const {context}=await call('browsingContext.create',{type:'tab'});
-    await call('browsingContext.navigate',{context,url,wait:'complete'});
-    const evaluate=async script=>{const result=await call('script.evaluate',{expression:`JSON.stringify((()=>{return (${script});})())`,target:{context},awaitPromise:true});
-      if(result.type!=='success') throw new Error(JSON.stringify(result));return JSON.parse(result.result.value??'null');};
-    // Statements and expressions are both used by the shared scenario.
-    await exercise(async code=>{if(code.startsWith('window.')){const r=await call('script.evaluate',{expression:code,target:{context},awaitPromise:true});assert.equal(r.type,'success');return null;}return evaluate(code);});
-    writeFileSync(join(output,'browser.json'),JSON.stringify(session.capabilities,null,2));
-    writeFileSync(join(output,'firefox.log'),log);
-    await call('session.end',{});
-  } else {
+  {
     // Send one complete goal-owned invocation, with no shell interpolation.
     const spaceKey=/^\d+$/.test(space)?Number(space):space;
     const code=`const task=await taskSpace(${JSON.stringify(spaceKey)});const page=task.page('p1');console.log('MASC_SPACE '+JSON.stringify({spaceId:task.spaceId,info:await page.info()}));await page.goto(${JSON.stringify(url)});
@@ -129,8 +96,5 @@ await exercise(async code=>page.evaluate(code));console.log('MASC_MULTI_SELECT '
     scope:'Actual owned browser DOM executing extracted production JS. Not OCaml parse/wire, host/Add-on integration, installed change, or Keeper model benchmark.'},null,2));
   console.log(JSON.stringify({mode,scenarios:observations.length,script_sha256:scriptDigest}));
 } finally {
-  socket?.close();
-  if(child?.pid && child.exitCode===null && child.signalCode===null){const exited=once(child,'exit');child.kill('SIGTERM');const timeout=setTimeout(()=>child.kill('SIGKILL'),5000);await exited;clearTimeout(timeout);}
-  if(profile)rmSync(profile,{recursive:true,force:true});
   await new Promise(done=>server.close(done));
 }

@@ -50,8 +50,7 @@ val end_session : session -> unit
     Task completion requires explicit [finish_space]. Retained/uncertain Spaces
     preserve browser-backed files and report unconfirmed backend cleanup. The
     caller's work starts once that client is attached. A configured ego that
-    cannot start fails this worker's start, as the owned BiDi Firefox does,
-    except when the space is configured by name and a read-only listing
+    cannot start fails this worker's start, except when the space is configured by name and a read-only listing
     confirms a user-owned space with that name. Then the space is untouched
     and Ego is published as unavailable. A connection whose bound Space ego
     no longer lists ends after that answer and is published as missing; a

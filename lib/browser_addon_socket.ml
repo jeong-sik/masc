@@ -1,12 +1,10 @@
 open Result.Syntax
 module Requirement = Resource_requirement
-(* The one browser source an allocation's worker serves, with the browser it
-   starts. Ego's settings ride the worker's arguments. *)
+(* The one browser source an allocation's worker serves. Ego's settings ride
+   the worker's arguments. *)
 type source =
-  | Owned_firefox of Browser_addon_live_bidi.configuration
   | Ego
 let source_backend = function
-  | Owned_firefox _ -> Browser_lane.Backend.Owned_firefox
   | Ego -> Browser_lane.Backend.Ego
 type t = {path:string;incarnation:string;backend:Browser_lane.Backend.t;device:int;inode:int}
 type acquisition = Missing | Acquired of int * int | Cleaning of int * int | Retained of int * int | Released
@@ -31,14 +29,9 @@ let leaf instance_id =
 let source_to_json source =
   let backend=Browser_lane.Backend.to_wire (source_backend source) in
   `Assoc (("backend",`String backend) :: match source with
-    | Owned_firefox c -> ["configuration",Browser_addon_live_bidi.configuration_to_json c]
     | Ego -> [])
 let source_of_json = function
   | `Assoc fields ->
-    let configuration decode = match List.sort String.compare (List.map fst fields) with
-      | ["backend";"configuration"] -> decode (List.assoc "configuration" fields)
-      | keys -> Error ("browser source descriptor keys must be backend and configuration; they are "
-          ^ String.concat ", " keys) in
     let alone source = match List.map fst fields with
       | ["backend"] -> Ok source
       | keys -> Error ("browser source descriptor of a source without a browser has only backend; it has "
@@ -46,8 +39,6 @@ let source_of_json = function
     (match List.assoc_opt "backend" fields with
      | Some (`String wire) ->
        (match Browser_lane.Backend.of_wire wire with
-        | Some Browser_lane.Backend.Owned_firefox ->
-          let* c=configuration Browser_addon_live_bidi.configuration_of_json in Ok (Owned_firefox c)
         | Some Browser_lane.Backend.Ego -> alone Ego
         | None -> Error ("browser source descriptor backend must be one of " ^ Browser_lane.Backend.expected))
      | Some found -> Error ("browser source descriptor backend must be a string; it is " ^ Yojson.Safe.to_string found)
@@ -79,8 +70,7 @@ let context_envelope_of_json ~instance_id = function
   | Some value ->
     Error (Printf.sprintf "%s must be a JSON object; it is %s" cleanup_descriptor_label (Yojson.Safe.to_string value))
 let decode_source fields = source_of_json (List.assoc "source" fields)
-(* Only the source's name, without its configuration: a handoff reads no
-   browser payload. *)
+(* Only the source's name: a handoff reads no browser payload. *)
 let decode_backend fields = match List.assoc "source" fields with
   | `Assoc source ->
     (match List.assoc_opt "backend" source with
@@ -130,10 +120,6 @@ let acquire ~admission ~directory = protect (fun () ->
   let info=Unix.lstat root in
   sync root;sync (Filename.dirname root);
   let* ()=Fs_compat.save_file_atomic_strict file (Yojson.Safe.to_string (acquired_json admission root info ~state:"acquired")) in
-  let* ()=match source with
-    | Owned_firefox c -> Fs_compat.save_file_atomic_strict (Filename.concat root "live-bidi.json")
-        (Yojson.Safe.to_string (Browser_addon_live_bidi.configuration_to_json c))
-    | Ego -> Ok () in
   Ok {path=Filename.concat root "s";incarnation=Native_addon_lease.instance_id admission;
     backend=source_backend source;
     device=info.st_dev;inode=info.st_ino})
@@ -252,12 +238,7 @@ let move_keeper_files ~kept_root ~into ~root (allocation : Unix.stats) =
 (* What an allocation of [source] may hold besides its socket: the files and
    folders its browser writes. [None] is an allocation whose acquisition was
    never confirmed, which may hold only its socket. *)
-let cleanup_contents ~admission ~root ~source ~confirmed ~confirm =
-  let read name =
-    let* text=Fs_compat.load_owned_regular_file ~ownership_root:root (Filename.concat root name)
-      |> Result.map_error Fs_compat.owned_regular_file_read_error_to_string in
-    let* text=Option.to_result ~none:("missing " ^ name) text in
-    Ok (Yojson.Safe.from_string text) in
+let cleanup_contents ~root ~source ~confirm =
   let* ()=empty_tree (Filename.concat root "uploads") in
   let* ()=empty_tree (Filename.concat root "download-snapshots") in
   let names=Sys.readdir root |> Array.to_list in
@@ -265,14 +246,6 @@ let cleanup_contents ~admission ~root ~source ~confirmed ~confirm =
     else Error (what ^ " allocation contains unknown resources") in
   let* ()=match source with
     | None -> only [] "browser socket"
-    | Some (Owned_firefox configuration) ->
-      let* ()=only ["live-bidi.json";"live-firefox.log"] "live BiDi" in
-      let* ()=if confirmed && not (List.mem "live-bidi.json" names) then Ok () else
-        let* value=read "live-bidi.json" in
-        let* actual=Browser_addon_live_bidi.configuration_of_json value in
-        if Browser_addon_live_bidi.configuration_to_json actual=Browser_addon_live_bidi.configuration_to_json configuration
-        then Ok () else Error "live BiDi configuration changed" in
-      Browser_addon_live_bidi.cleanup configuration ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
     (* Ego's downloads land in this allocation; its browser is ego lite's own. *)
     | Some Ego ->
       let* ()=only ["downloads"] "ego" in
@@ -283,9 +256,6 @@ let cleanup_contents ~admission ~root ~source ~confirmed ~confirm =
     let info=Unix.lstat path in
     match info.Unix.st_kind with
     | Unix.S_SOCK when name="s" -> Unix.unlink path;Ok ()
-    | Unix.S_REG when List.mem name ["live-bidi.json";"live-firefox.log"] ->
-        let* ()=Requirement.check ~label:"owned browser file" socket_record ~path info in
-        Unix.unlink path;Ok ()
     | Unix.S_DIR|Unix.S_REG|Unix.S_LNK|Unix.S_CHR|Unix.S_BLK|Unix.S_FIFO|Unix.S_SOCK as kind ->
         Error (Printf.sprintf "browser socket directory entry %s is an unexpected %s"
           path (Requirement.kind_name kind))) (Ok ())
@@ -351,10 +321,8 @@ let check_retained ~instance_id ~slot context = protect (fun () ->
     | Retained _ -> Ok ()
     | Released -> released_directory_absent root
     | Missing|Acquired _|Cleaning _ ->
-    let* _,source=decode_context (root,fields) in
-    match source with
-    | Owned_firefox c -> Browser_addon_live_bidi.check_retained_child c ~incarnation:instance_id ~directory:root
-    | Ego -> Ok ())
+    let* _=decode_context (root,fields) in
+    Ok ())
 let cleanup ~admission ~directory ~kept_root = protect (fun () ->
   let* directory=slot admission directory in
   let* status=Native_addon_lease.status admission |> Result.map_error Native_addon_lease.error_to_string in
@@ -375,9 +343,6 @@ let cleanup ~admission ~directory ~kept_root = protect (fun () ->
     | Released -> let* ()=released_directory_absent root in Ok Cleanup_released
     | Missing|Acquired _|Cleaning _ ->
     let* _,source=decode_context (root,fields) in
-    let* ()=match source with
-      | Owned_firefox c -> Browser_addon_live_bidi.settle c ~incarnation:(Native_addon_lease.instance_id admission) ~directory:root
-      | Ego -> Ok () in
     let release ()=
       sync (Filename.dirname root);
       Fs_compat.save_file_atomic_strict file (Yojson.Safe.to_string (`Assoc ["state",`String "released"])) in
@@ -394,7 +359,7 @@ let cleanup ~admission ~directory ~kept_root = protect (fun () ->
             if info.st_dev=device && info.st_ino=inode then Ok ()
             else Error (Requirement.replaced ~label:socket_directory_label ~path:root
               ~expected:{Requirement.device;inode} ~observed:(Requirement.identity info)) in
-        (* The worker's group and child claims settled and the directory is
+        (* The worker's group claim settled and the directory is
            the one acquired. Files the browser left for the Keeper move out
            whole to [kept_root], named for this instance, and the release
            goes on without them. *)
@@ -411,20 +376,15 @@ let cleanup ~admission ~directory ~kept_root = protect (fun () ->
             (Yojson.Safe.to_string (acquired_json admission root info ~state:"cleaning")) in
         let source=match identity with Missing -> None | Acquired _|Cleaning _|Retained _|Released -> Some source in
         let finish ()=
-          let* ()=cleanup_contents ~admission ~root ~source ~confirmed ~confirm in
+          let* ()=cleanup_contents ~root ~source ~confirm in
           Unix.rmdir root;release () in
         (match moved with
          | None -> let* ()=finish () in Ok Cleanup_released
          | Some files -> let* ()=after_move ~into finish in Ok (Cleanup_kept {directory=into;files}))
       | exception Unix.Unix_error (Unix.ENOENT,_,_) ->
-        (* A source that starts a browser keeps its resources in the
-           allocation; one acquired and gone was never confirmed released. *)
-        let starts_browser=match source with
-          | Owned_firefox _ -> true | Ego -> false in
-        (match identity,starts_browser with
-         | Acquired _,true -> Error "owned browser allocation vanished without confirmed cleanup"
-         | (Missing|Cleaning _|Retained _|Released),_ | Acquired _,false ->
-           let* ()=release () in Ok Cleanup_released))
+        (* No source starts a browser of its own, so an allocation acquired
+           and gone holds nothing to settle. *)
+        let* ()=release () in Ok Cleanup_released)
 type retain_error = Retain_refused of string | Retained_record_unconfirmed of string
 (* What [retain] decided before writing anything. *)
 type retain_plan =
@@ -453,17 +413,7 @@ let retain_with ~(save:string -> string -> (unit, Fs_compat.atomic_replace_failu
       let* ()=match identity with
         | Missing -> let* _=decode_context (root,fields) in Ok ()
         | Acquired _|Cleaning _|Retained _|Released -> Ok () in
-      (* Only a source with a child claim is decoded, to confirm that claim
-         settled. *)
-      let* backend=decode_backend fields in
-      let* ()=match backend with
-        | Browser_lane.Backend.Ego -> Ok ()
-        | Browser_lane.Backend.Owned_firefox ->
-          let* source=decode_source fields in
-          (match source with
-           | Owned_firefox c -> Browser_addon_live_bidi.check_settled c ~incarnation ~directory:root
-           | Ego ->
-             Error "browser source descriptor names one backend and decodes as another") in
+      let* (_ : Browser_lane.Backend.t)=decode_backend fields in
       let retained ~device ~inode = Ok (Write_retained {file;root;device;inode}) in
       match identity,Unix.lstat root with
       | Released,_ -> Ok (Already Allocation_released)

@@ -373,31 +373,6 @@ let test_a_change_after_the_plan_is_refused_and_not_overwritten () =
      | Ok () | Error _ -> fail "a file that changed after the plan is refused as changed");
     check string "the other writer's file is kept" changed (read fixture.runtime))
 
-(* Another table of the same command was written since the plan: replanning
-   takes the file as it is now and keeps both. *)
-let test_a_replan_writes_beside_what_was_written_since () =
-  with_fixture (fun fixture ->
-    let plan = plan_ok ~find:(found fixture) (request fixture) in
-    write fixture.runtime (read fixture.runtime ^ "\n[browser.live.bidi]\nfirefox = \"/bin/sh\"\nprofile = \"/tmp\"\n");
-    Sys.remove fixture.started;
-    let plan = match E.replan plan with Ok plan -> plan | Error error -> fail (E.error_message error) in
-    check bool "nothing is started again" false (Sys.file_exists fixture.started);
-    apply_ok plan;
-    ignore (configured fixture);
-    check bool "the other table stays" true (contains (read fixture.runtime) "firefox = \"/bin/sh\""))
-
-(* The table itself was written since the plan, by someone else: a replan
-   refuses rather than overwrite it. *)
-let test_a_replan_refuses_a_table_written_since () =
-  with_fixture (fun fixture ->
-    let plan = plan_ok ~find:(found fixture) (request fixture) in
-    let theirs = read fixture.runtime ^ "\n[browser.live.ego]\ncommand = \"/bin/sh\"\nspace = \"theirs\"\n" in
-    write fixture.runtime theirs;
-    (match E.replan plan with
-     | Error E.Configuration_changed -> ()
-     | Ok _ | Error _ -> fail "a table written since the plan is refused as changed");
-    check string "their table is kept" theirs (read fixture.runtime))
-
 let () =
   run "browser_lane_ego_setup"
     [ ( "a new table"
@@ -424,9 +399,5 @@ let () =
         ; test_case "a space the loader refuses" `Quick test_a_space_the_loader_refuses_is_not_written
         ; test_case "a missing runtime.toml" `Quick test_a_missing_runtime_toml_is_refused ] )
     ; ( "after the plan"
-      , [ test_case "a change after the plan" `Quick test_a_change_after_the_plan_is_refused_and_not_overwritten
-        ; test_case "a replan writes beside what was written since" `Quick
-            test_a_replan_writes_beside_what_was_written_since
-        ; test_case "a replan refuses a table written since" `Quick
-            test_a_replan_refuses_a_table_written_since ] )
+      , [ test_case "a change after the plan" `Quick test_a_change_after_the_plan_is_refused_and_not_overwritten ] )
     ]

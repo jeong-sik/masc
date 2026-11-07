@@ -405,6 +405,20 @@
  (modules masc_tui_usage_trend)
  (libraries masc masc_tui_chart masc_tui_message_layout unix))
 
+;; Usage's Calls section: the tool-call series of one window, kept to the
+;; buckets the window draws when its answer arrives.
+(library
+ (name masc_tui_usage_calls)
+ (wrapped false)
+ (modules masc_tui_usage_calls)
+ (libraries
+  masc
+  masc_tui_ansi
+  masc_tui_chart
+  masc_tui_message_layout
+  masc_tui_table
+  unix))
+
 (library
  (name masc_tui_ask_projection)
  (wrapped false)

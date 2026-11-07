@@ -161,26 +161,6 @@ type keepalive_turn_outcome = {
           the plain cadence. *)
 }
 
-(** Whether the lifecycle has admitted one of the loop's cycles yet. *)
-type loop_start =
-  | Loop_starting
-  | Loop_started
-
-(** A cycle that runs no turn. [Lifecycle_holds]: the lifecycle denied
-    intake. [Wait_at_loop_start]: the first admitted cycle found the walk it
-    would send resting (a quota window read back at boot) and waits until
-    [release_at]; [waiting_on] owns that release. *)
-type held_cycle =
-  | Lifecycle_holds
-  | Wait_at_loop_start of
-      { release_at : float
-      ; waiting_on : string
-      }
-
-type cycle_entry =
-  | Take_input
-  | Hold of held_cycle
-
 (** Record a swallowed keepalive-cycle exception as a turn failure:
     increments the registry turn-failure counter (shared with
     [Keeper_unified_turn_failure]), bumps the CycleExceptions counter
@@ -378,29 +358,6 @@ module For_testing : sig
     assignment_id:string ->
     Keeper_unified_turn.turn_failure ->
     after_failure option
-
-  (** The rest of the walk the next dispatch starts: the deferred suffix the
-      loop holds for [assignment_id], else a fresh walk of it. *)
-  val next_walk_rest :
-    now:float ->
-    assignment_id:string ->
-    deferred_runtime_lane:Keeper_turn_driver.deferred_runtime_lane option ->
-    Keeper_turn_driver.walk_rest
-
-  (** How a cycle enters. The first cycle the lifecycle admits reads
-      [walk_rest] once and moves [loop_start] to [Loop_started]; a resting
-      head holds it in [Wait_at_loop_start]. A lifecycle-denied cycle reads
-      nothing and leaves [loop_start] as it was. *)
-  val cycle_entry :
-    loop_start:loop_start ref ->
-    intake_admission:turn_intake_admission ->
-    walk_rest:(unit -> Keeper_turn_driver.walk_rest) ->
-    cycle_entry
-
-  (** The outcome of a cycle that ran no turn. A wait at loop start sleeps on
-      the observed rest, so {!provider_wait_interrupt} ends it when the walk
-      serves. *)
-  val held_cycle_outcome : meta:keeper_meta -> held_cycle -> keepalive_turn_outcome
 
   (** Whether the loop starts another cycle without sleeping. A serving
       deferred suffix is itself unfinished input and starts immediately;

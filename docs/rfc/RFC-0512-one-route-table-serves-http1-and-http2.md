@@ -147,7 +147,7 @@ piaf 0.2.0 은 HTTP/1.1·HTTP/2·TLS 를 한 API 로 주지만 핸들러가 `Res
 | S1 | `rfc/one-route-table-both-transports` | 이 문서 |
 | S2 | `http/neutral-reqd` | `Http_reqd`, `Http_server_eio` 의 `Response`·`Request`·`Router`·`Wrappers`·`Typed`, `Server_sse_response`, 직접 호출 ~25곳, 시험 픽스처 `Http_reqd.of_httpun`. H2 쪽은 안 건드림 |
 | S3 | `http/shared-ingress-and-gateway-fold` | `Server_http_ingress`, H2 어댑터 55줄, 삭제 목록(D4). H2 end-to-end 시험은 접힌 어댑터를 그대로 치고, H2 역학 시험은 `Http_reqd.of_h2` 손잡이 위의 공용 `Response` 를 친다. 두 전송 공용 픽스처는 만들지 않는다: 표가 하나라 같은 케이스를 두 번 돌려도 잡을 차이가 없다 |
-| S4 | `http/tls-alpn-listener` | D6, health·메트릭·대시보드 카드, `docs/guides/https-and-http2.md` |
+| S4 | `http/tls-alpn-listener` | D6. `Server_tls_material`(설정 파일 쌍 또는 `.masc/tls/` 자체 서명 P-256, 365일, 만료 30일 전 재생성), `Tls_stream_socket`(TLS 세션을 h2-eio·httpun-eio 가 받는 소켓으로), `Server_bootstrap_http.serve_tls`(ALPN 결과로 h2·httpun 선택, accept 루프는 네 리스너가 `run_accept_loop` 하나를 씀), `Https_listener_metrics`(`/health`·transport-health 의 `https_listener`, OTel `masc_https_*`), 대시보드 HTTPS 카드, `docs/guides/https-and-http2.md`. 포트가 잡혀 있으면 부팅은 계속되고 `bind_failed` 로 보인다 |
 | S5 | `http/h2-engine-tuning` | D7, `after/` 측정 |
 | S6 | `docs/http2-one-table` | `docs/spec/09-server-transport.md`, `01-system-overview.md`(OQ-SYS-002), `TRANSPORT-PRACTICAL-PLAYBOOK.md`, `guides/h2-response-resources.md`, `verify_h2c_autodetect.sh` |
 

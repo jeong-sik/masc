@@ -23,8 +23,6 @@ import {
 export type GoalVerificationReviewKind = 'proof'
 export type GoalVerificationRunStatus = 'running' | 'reviewed' | 'committed' | 'deferred' | 'raised' | 'superseded' | 'review_cancelled'
 
-export type { GoalStoreMirrorStatus, GoalStoreResetStep, GoalStoreUnavailableReason } from '../types/goal-store-unavailable'
-
 // A verifier pass the goal store refused: it reviewed nothing and carries the
 // goal_store_unavailable envelope's members.
 export interface GoalVerificationScanSkippedRecord {

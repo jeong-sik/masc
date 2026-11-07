@@ -392,7 +392,3 @@ export function App() {
     <//>
   `
 }
-
-// Re-export state surfaces from the app root so downstream consumers have a
-// single import surface.
-export { EmptyState, ErrorState, LoadingState } from './components/state-surfaces'

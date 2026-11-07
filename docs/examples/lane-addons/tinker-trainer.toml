@@ -1,0 +1,17 @@
+# Workspace declaration for addons/tinker-trainer.
+# Place in <resolved-config-root>/lane-addons/tinker-trainer.toml.
+
+id = "tinker-trainer"
+run_id = "tinker-post-training"
+manifest_path = "../../../addons/tinker-trainer/lane.toml"
+
+[binding]
+base_model = "thinkingmachines/Inkling-2-Small"
+target_loss = "cispo"
+default_effort = 0.8
+min_eval_gain = 0.05
+
+[[binding.sources]]
+source_id = "tinker-snapshot"
+kind = "snapshot_file"
+path = ".masc/tinker/latest_snapshot.json"

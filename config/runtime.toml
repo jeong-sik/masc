@@ -564,6 +564,49 @@ path = "/api/tags"
 #
 # [mlx_server.mlx-served-model]
 # max-concurrent = 1
+#
+# Thinking Machines Tinker (tinker.thinkingmachines.dev). OpenAI-compatible HTTP
+# surface for Inkling, Qwen3.8, GLM-5.3-Flash and fine-tuned LoRA sampler
+# checkpoints (`tinker://<run-id>:train:0/sampler_weights/<step>`).
+# [providers.tinker]
+# display-name = "Thinking Machines Tinker"
+# protocol = "openai-compatible-http"
+# endpoint = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
+# connect-timeout-s = 1200.0
+# exact-body-timeout-s = 1200.0
+#
+# [providers.tinker.credentials]
+# type = "env"
+# key = "TINKER_API_KEY"
+#
+# [providers.tinker.healthcheck]
+# path = "/models"
+#
+# [models.tinker-inkling-2-small]
+# api-name = "thinkingmachines/Inkling-2-Small"
+# max-context = 262144
+# tools-support = true
+# thinking-support = true
+# streaming = true
+# reasoning-effort = "high"
+#
+# [models.tinker-inkling-2-small.capabilities]
+# supports-tool-choice = true
+# supports-named-tool-choice = true
+# supports-required-tool-choice = true
+# supports-parallel-tool-calls = true
+# thinking-control-format = "reasoning-effort"
+# accepted-reasoning-efforts = ["none", "minimal", "low", "medium", "high", "xhigh"]
+# reasoning-streaming-format = "delta:reasoning_content"
+# supports-response-format-json = true
+# supports-structured-output = true
+# supports-image-input = true
+# supports-audio-input = true
+# supports-multimodal-inputs = true
+# supports-system-prompt = true
+#
+# [tinker.tinker-inkling-2-small]
+# max-concurrent = 4
 
 # ── Official client runtimes ──────────────────────────────────────────────────
 # Claude Code, Codex and Antigravity are catalog entries like every provider

@@ -10,13 +10,13 @@ type t =
   | Stop_reason_seen of Agent_core.Types.stop_reason
   | Message_stopped
 
-val admits_block_open_or_delta : t -> bool
-(** [ContentBlockStart] and [ContentBlockDelta] are accepted only before the
-    first stop reason. *)
+val admits_new_content : t -> bool
+(** [MessageStart], [ContentBlockStart] and [ContentBlockDelta] are accepted
+    only before the first stop reason. *)
 
-val admits_block_stop : t -> bool
-(** [ContentBlockStop] is accepted until the message stops, so a block that was
-    open at the stop reason can still close. *)
+val admits_trailing_events : t -> bool
+(** [ContentBlockStop] and tool progress are accepted until the message stops,
+    so a block that was open at the stop reason can still close. *)
 
 (** What a [MessageDelta] means in the current phase. *)
 type stop_reason_event =

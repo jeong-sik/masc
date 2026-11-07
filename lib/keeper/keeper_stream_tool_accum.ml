@@ -235,12 +235,12 @@ let current_scope_has_tool_occurrence t =
 
 let prepare_message_start t ~id ~model ~usage =
   let exact_open_replay =
-    t.stream_phase = Keeper_stream_phase.Accepting_content
+    Keeper_stream_phase.admits_new_content t.stream_phase
     && current_message_start_equal t ~id ~model ~usage
   in
   if
     t.message_presence <> Message_unseen
-    && t.stream_phase = Keeper_stream_phase.Accepting_content
+    && Keeper_stream_phase.admits_new_content t.stream_phase
     && not t.current_scope_progress_seen
     && not exact_open_replay
     && not (current_scope_is_invalid t)
@@ -257,7 +257,7 @@ let prepare_message_start t ~id ~model ~usage =
 
 let start_message_scope t ~id ~model ~usage =
   if
-    t.stream_phase = Keeper_stream_phase.Accepting_content
+    Keeper_stream_phase.admits_new_content t.stream_phase
     && t.message_presence <> Message_unseen
     && current_message_start_equal t ~id ~model ~usage
   then
@@ -284,7 +284,7 @@ let ensure_message_scope t =
   match t.message_presence with
   | Message_open -> ()
   | Message_unseen -> t.message_presence <- Message_open
-  | Message_closed when t.stream_phase = Keeper_stream_phase.Accepting_content ->
+  | Message_closed when Keeper_stream_phase.admits_new_content t.stream_phase ->
     t.message_presence <- Message_open
   | Message_closed -> invalidate_current_scope t
 ;;
@@ -835,9 +835,9 @@ let finalize_open_blocks t =
 let content_event_allowed t (evt : Agent_core.Types.sse_event) =
   match evt with
   | Agent_core.Types.ContentBlockStart _ | Agent_core.Types.ContentBlockDelta _ ->
-    Keeper_stream_phase.admits_block_open_or_delta t.stream_phase
+    Keeper_stream_phase.admits_new_content t.stream_phase
   | Agent_core.Types.ContentBlockStop _ ->
-    Keeper_stream_phase.admits_block_stop t.stream_phase
+    Keeper_stream_phase.admits_trailing_events t.stream_phase
   | ( Llm_provider.Types.MessageStop | Llm_provider.Types.InlineContentReplay _ | Llm_provider.Types.ResponsesOutputItems _ | Llm_provider.Types.Ping
     | Llm_provider.Types.Connected | Llm_provider.Types.MessageStart _
     | Llm_provider.Types.MessageDelta _ | Llm_provider.Types.SSEError _

@@ -5,12 +5,12 @@ type t =
   | Stop_reason_seen of Agent_core.Types.stop_reason
   | Message_stopped
 
-let admits_block_open_or_delta = function
+let admits_new_content = function
   | Accepting_content -> true
   | Stop_reason_seen _ | Message_stopped -> false
 ;;
 
-let admits_block_stop = function
+let admits_trailing_events = function
   | Accepting_content | Stop_reason_seen _ -> true
   | Message_stopped -> false
 ;;

@@ -72,20 +72,20 @@ let named name_of =
 let stop_reason_event = named stop_reason_event_name
 let message_stop_event = named message_stop_event_name
 
-let test_content_admission () =
+let test_admission_windows () =
   List.iter
     (fun phase ->
        let name = phase_name phase in
        check
          bool
-         (name ^ ": block start and delta")
+         (name ^ ": new content")
          (phase = P.Accepting_content)
-         (P.admits_block_open_or_delta phase);
+         (P.admits_new_content phase);
        check
          bool
-         (name ^ ": block stop")
+         (name ^ ": trailing events")
          (phase <> P.Message_stopped)
-         (P.admits_block_stop phase))
+         (P.admits_trailing_events phase))
     phases
 ;;
 
@@ -144,7 +144,7 @@ let () =
   run
     "keeper_stream_phase"
     [ ( "phase rules"
-      , [ test_case "content admission by phase" `Quick test_content_admission
+      , [ test_case "admission windows by phase" `Quick test_admission_windows
         ; test_case "stop reason: first, replay, conflict" `Quick test_stop_reason
         ; test_case
             "message stop: without reason, after reason, replay"

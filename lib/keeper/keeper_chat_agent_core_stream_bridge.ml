@@ -764,10 +764,10 @@ let tool_args_event ~redact_text ~stream_scope ~snapshot bridge_state index args
 let content_event_allowed state (evt : Agent_core.Types.sse_event) =
   match evt with
   | Agent_core.Types.ContentBlockStart {index; _} | Agent_core.Types.ContentBlockDelta {index; _} ->
-      Keeper_stream_phase.admits_block_open_or_delta state.stream_phase
+      Keeper_stream_phase.admits_new_content state.stream_phase
       && not (List.exists (fun (closed_index,_,active) -> closed_index=index && not active) state.model_content)
   | Agent_core.Types.ContentBlockStop _ ->
-      Keeper_stream_phase.admits_block_stop state.stream_phase
+      Keeper_stream_phase.admits_trailing_events state.stream_phase
   | (Agent_core.Types.MessageStart _
     | Agent_core.Types.MessageDelta _
     | Agent_core.Types.MessageStop
@@ -883,7 +883,7 @@ let event_channel_conflicts state = function
 let progress_native_tool ~redact_text ~stream_scope ~block_index ~tool_call_id progress state =
   match state.current_stream_scope, state.scope_disposition, stream_block_for_index state block_index with
   | Some current, Scope_live, Some (Active_native_tool tool)
-    when current=stream_scope && state.stream_phase <> Keeper_stream_phase.Message_stopped
+    when current=stream_scope && Keeper_stream_phase.admits_trailing_events state.stream_phase
          && Option.equal String.equal tool.tool_call_id tool_call_id ->
       {bridge_state=state; chat_events=[Keeper_chat_events.Native_tool_progress
         (tool, Runtime_native_tools.redact_progress redact_text progress)]}
@@ -972,7 +972,7 @@ let translate ~redact_text ~base_dir ~stream_scope bridge_state
         Agent_core_stream_message_start
           { content_generation=Some bridge_state.content_generation; stream_scope; provider_message_id = id; model; usage }
       in
-      if bridge_state.stream_phase <> Keeper_stream_phase.Accepting_content
+      if not (Keeper_stream_phase.admits_new_content bridge_state.stream_phase)
       then
         poison_scope bridge_state ~kind:Stream_event_after_terminal
           ~reason:"MessageStart arrived after the provider message became terminal"

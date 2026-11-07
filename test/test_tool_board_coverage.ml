@@ -3277,6 +3277,68 @@ let test_comment_add_anonymous_author_rejected () =
   Alcotest.(check bool) "error mentions author" true
     (String_util.contains_substring body "author")
 
+(* The write answers with where the comment landed. A reader that wrote a
+   comment and wanted the replies after it used to count the offset itself and
+   asked one past the end. The offset is the one [masc_board_post_get] takes, so
+   reading at it returns the comment that was just written. *)
+let test_comment_add_reports_its_position () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:2 in
+  let result =
+    dispatch_result
+      "masc_board_comment"
+      (make_args
+         [ "post_id", `String post_id
+         ; "content", `String "third-comment-text"
+         ; "author", `String "commenter-003"
+         ])
+  in
+  Alcotest.(check bool) "comment ok" true (Tool_result.is_success result);
+  let written = parse_create_response_json (Tool_result.message result) in
+  let int_field name = Yojson.Safe.Util.(written |> member name |> to_int) in
+  Alcotest.(check int) "the third comment sits at offset 2" 2 (int_field "comment_offset");
+  Alcotest.(check int) "the thread has three comments" 3 (int_field "comments_total");
+  Alcotest.(check bool)
+    "the unresolved list stays beside the position"
+    true
+    (Yojson.Safe.Util.member "unresolved" written <> `Null);
+  let ok, page =
+    dispatch
+      "masc_board_post_get"
+      (post_get_args post_id [ "comment_offset", `Int (int_field "comment_offset") ])
+  in
+  Alcotest.(check bool) "read at the reported offset ok" true ok;
+  Alcotest.(check bool) "the page holds the new comment" true (contains page "third-comment-text");
+  Alcotest.(check bool)
+    "the page does not repeat the comment before it"
+    false
+    (contains page "comment-002")
+
+(* A second writer's position counts the comment the first one wrote. *)
+let test_comment_add_position_follows_the_thread () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:0 in
+  let add author =
+    let result =
+      dispatch_result
+        "masc_board_comment"
+        (make_args
+           [ "post_id", `String post_id
+           ; "content", `String ("by " ^ author)
+           ; "author", `String author
+           ])
+    in
+    let json = parse_create_response_json (Tool_result.message result) in
+    ( Yojson.Safe.Util.(json |> member "comment_offset" |> to_int)
+    , Yojson.Safe.Util.(json |> member "comments_total" |> to_int) )
+  in
+  Alcotest.(check (pair int int)) "first writer" (0, 1) (add "writer-a");
+  Alcotest.(check (pair int int)) "second writer" (1, 2) (add "writer-b")
+
 (* #39448: masc_board_post and masc_board_post_update already take [body] as an
    alias for [content]; the comment handler took only [content], so a caller
    that sent [body] was refused (38 ledger calls, 0 successes). The comment
@@ -3762,6 +3824,10 @@ let () =
             test_comment_add_anonymous_author_rejected;
           Alcotest.test_case "comment accepts body alias" `Quick
             test_comment_add_accepts_body;
+          Alcotest.test_case "comment write reports its position" `Quick
+            test_comment_add_reports_its_position;
+          Alcotest.test_case "comment write position follows the thread" `Quick
+            test_comment_add_position_follows_the_thread;
           Alcotest.test_case "comment vote missing" `Quick test_comment_vote_missing;
           Alcotest.test_case "comment vote not found" `Quick
             test_comment_vote_not_found;

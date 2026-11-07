@@ -104,9 +104,11 @@ let with_body reqd f =
     ~max_bytes:max_request_bytes
     ~on_body:f
     ~on_error:(function
-      | `Too_large max_bytes ->
+      | Http.Request.Too_large max_bytes ->
         Http.Response.text ~status:`Payload_too_large (Http.Request.too_large_body max_bytes) reqd
-      | `Internal exn ->
+      | Http.Request.Malformed_length ->
+        Http.Response.text ~status:`Bad_request "Malformed request body length" reqd
+      | Http.Request.Internal exn ->
         Log.Misc.warn "login_http: the request body was not read: %s" (Printexc.to_string exn);
         Http.Response.internal_error "the request body was not read" reqd)
 ;;

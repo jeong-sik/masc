@@ -1966,6 +1966,16 @@
   masc_tui_keeper_next_run))
 
 (library
+ (name masc_tui_keeper_memory_reading)
+ (wrapped false)
+ (modules masc_tui_keeper_memory_reading)
+ (libraries
+  masc
+  masc_tui_types
+  masc_tui_keeper_axis_cell
+  masc_tui_message_layout))
+
+(library
  (name masc_tui_composer_projection)
  (wrapped false)
  (modules masc_tui_composer_projection)
@@ -2209,6 +2219,7 @@
   masc_tui_theme
   masc_tui_token_scale
   masc_tui_types
+  masc_tui_keeper_memory_reading
   masc_tui_message_layout
   masc_tui_fleet_stream
   masc_tui_fleet_line
@@ -2233,6 +2244,7 @@
   masc_tui_rows
   masc_tui_theme
   masc_tui_types
+  masc_tui_keeper_memory_reading
   masc_tui_message_layout
   masc_tui_render_schedule
   unix))
@@ -2724,6 +2736,7 @@
   masc_tui_keeper_axis_cell
   masc_tui_keeper_next_run
   masc_tui_keeper_axis
+  masc_tui_keeper_memory_reading
   masc_tui_lane_standing
   masc_tui_async_protocol
   masc_tui_board_requests

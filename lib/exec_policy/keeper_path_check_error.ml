@@ -52,11 +52,3 @@ let message_prefix = function
   | Cwd_not_directory _ -> "cwd_not_directory:"
 ;;
 
-let parse_prefix msg =
-  let trimmed = String.trim msg in
-  if String_util.starts_with_ci ~prefix:"path blocked:" trimmed
-  then Some (Path_outside_whitelist { path = ""; for_keeper_command = false })
-  else if String_util.starts_with_ci ~prefix:"cwd_not_directory:" trimmed
-  then Some (Cwd_not_directory { path = ""; hint = None })
-  else None
-;;

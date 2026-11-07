@@ -422,6 +422,8 @@ let owner_behind state = function
   | Authz_records.Subject.Principal (Authz_types.Principal.Service _)
   | Authz_records.Subject.Grant _
   | Authz_records.Subject.Session _
+  | Authz_records.Subject.Pat _
+  | Authz_records.Subject.Service_credential _
   | Authz_records.Subject.Credential _
   | Authz_records.Subject.Runtime _ -> None
 ;;

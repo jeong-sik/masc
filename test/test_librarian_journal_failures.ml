@@ -167,7 +167,7 @@ let test_unknown_outer_field_is_an_error () =
         bool
         "closed journal shape reports the rejected field set"
         true
-        (Astring.String.is_infix ~affix:"unknown" reason)
+        (Astring.String.is_infix ~affix:"unexpected" reason)
     | [ Ok _ ] -> fail "an unknown outer field crossed the journal boundary"
     | entries ->
       fail (Printf.sprintf "expected exactly one line, got %d" (List.length entries)))

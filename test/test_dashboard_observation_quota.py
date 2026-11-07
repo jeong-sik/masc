@@ -81,9 +81,15 @@ def main():
                     assert status == 200, (status, raw)
                 # This GET uses CanReadState permission auth, not with_read_auth.
                 # More reads than the operation burst must leave all four MCP slots.
+                # No browser Add-on is attached in this fixture, so the route
+                # honestly answers 503 dependency_unavailable; the read still
+                # counts as an observation either way.
                 for _ in range(8):
                     status, raw = http('/api/v1/dashboard/browser-lane/clients')
-                    assert status == 200 and 'clients' in json.loads(raw)['data'], (status, raw)
+                    if status == 200:
+                        assert 'clients' in json.loads(raw)['data'], (status, raw)
+                    else:
+                        assert status == 503 and json.loads(raw)['error'] == 'no browser Add-on is attached', (status, raw)
                 meta = {'io.modelcontextprotocol/protocolVersion': '2026-07-28',
                         'io.modelcontextprotocol/clientInfo': {'name': 'quota-fixture', 'version': '1'},
                         'io.modelcontextprotocol/clientCapabilities': {}}
@@ -112,14 +118,25 @@ def main():
                 for path in permission_reads:
                     status, raw = http(path)
                     assert status == 200, (path, status, raw)
-                for path in ('/dashboard/assets/fixture.js', '/api/v1/providers',
-                             '/api/v1/dashboard/browser-lane/clients'):
+                for path in ('/dashboard/assets/fixture.js', '/api/v1/providers'):
                     status, raw = http(path)
                     assert status == 200, (path, status, raw)
+                status, raw = http('/api/v1/dashboard/browser-lane/clients')
+                if status == 200:
+                    assert 'clients' in json.loads(raw)['data'], (status, raw)
+                else:
+                    assert status == 503 and json.loads(raw)['error'] == 'no browser Add-on is attached', (status, raw)
                 status, _ = http('/api/v1/providers', credential='invalid-fixture-token')
                 assert status in (401, 403), status
                 status, _ = http('/api/v1/dashboard/browser-lane/clients', credential='invalid-fixture-token')
                 assert status in (401, 403), status
+                # The 503-without-addon answer is still an observation: it must
+                # not spend the operation bucket either.
+                status, raw = http('/api/v1/dashboard/browser-lane/clients')
+                if status == 200:
+                    assert 'clients' in json.loads(raw)['data'], (status, raw)
+                else:
+                    assert status == 503 and json.loads(raw)['error'] == 'no browser Add-on is attached', (status, raw)
                 # CanReadState does not exempt POST operations from metering.
                 status, raw = http('/api/v1/dashboard/browser-lane/read', {})
                 assert status == 429 and json.loads(raw)['message'] == 'Per-agent rate limit exceeded', (status, raw)

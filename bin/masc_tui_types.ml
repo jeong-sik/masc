@@ -20514,6 +20514,27 @@ let visible_system_log_entries (state : state) = System_logs_view.visible (syste
    reader on the others learned there was nothing to learn. *)
 let page_unread_note = "  (not loaded yet \xe2\x80\x94 press r)"
 
+(* The same row once the first read has been asked and has not answered. [r]
+   asks for what is already being asked, so the row stops sending the reader
+   to it. Each surface keeps its own record of a read on the wire, so the
+   caller passes that fact. *)
+let page_reading_note = "  (reading\xe2\x80\xa6)"
+
+let page_unread_note_while ~reading =
+  if reading then page_reading_note else page_unread_note
+
+(* The sources the status line names after "reading": reads dispatched for the
+   surface on screen that have not answered yet. Dispatch is intent until the
+   workspace identity is confirmed, so nothing is named before that. The line
+   and the page bodies ask here, so they cannot disagree. *)
+let surface_reads_pending (state : state) =
+  match state.workspace_identity with
+  | Workspace_identity_match ->
+      Surface_read_order.pending_scoped
+        ~needs:(surface_needs_of_surface state.view) state.http_surface_reads
+  | Workspace_identity_unread | Workspace_identity_match_unconfirmed _
+  | Workspace_identity_mismatch _ -> []
+
 (* The note says what the blank body is, not what happened: the surface draws
    the failure reason above it, so the words it used to lead with -- "load
    failed;" -- repeated that verdict. Some titles carry it as well. What the

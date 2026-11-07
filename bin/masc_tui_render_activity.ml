@@ -296,7 +296,10 @@ let render_system_logs (state : state) =
          shared note holds in both, and the staleness is already said twice
          above -- by the badge and by the error row this listing draws. *)
       | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note
+      | Page_unread ->
+          (* The server page reads through a stream that stays open while the
+             page is on screen, and its first frame is the first answer. *)
+          page_unread_note_while ~reading:(Option.is_some state.system_log_stream)
       | Page_empty when loaded_entries > 0 ->
           "  (no entries match the current category filter)"
       | Page_empty -> "  (no entries)"

@@ -1703,12 +1703,10 @@ let connection_status_badge status =
    explains are the ones drawing nothing. *)
 let refresh_progress_badge (state : state) =
   let foreground =
-    if state.workspace_identity <> Workspace_identity_match then ""
-    else match Surface_read_order.pending_scoped
-      ~needs:(surface_needs_of_surface state.view) state.http_surface_reads with
-      | [] -> ""
-      | source :: rest -> " · reading " ^ Surface_read_order.source_name source
-          ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))
+    match surface_reads_pending state with
+    | [] -> ""
+    | source :: rest -> " · reading " ^ Surface_read_order.source_name source
+        ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))
   in
   match state.http_refresh_progress with
   | Some (authority, progress) when authority = state.workspace_authority ->
@@ -1806,9 +1804,7 @@ let compact_connection_state (state : state) =
         failed || counts.failed > 0, counts.partial > 0,
         interrupted || counts.interrupted > 0, unfinished,
         (match progress.phase with In_flight -> true | Finished _ -> false) in
-  let scoped_reading = state.workspace_identity = Workspace_identity_match
-    && Surface_read_order.pending_scoped
-         ~needs:(surface_needs_of_surface state.view) state.http_surface_reads <> [] in
+  let scoped_reading = surface_reads_pending state <> [] in
   match state.workspace_identity with
   | Workspace_identity_mismatch _ -> Compact_workspace_mismatch
   | Workspace_identity_match_unconfirmed _ -> Compact_workspace_unconfirmed

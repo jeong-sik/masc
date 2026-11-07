@@ -747,8 +747,10 @@ let rec dispatch_event_with_audit_internal
        let failing_since =
          match tr.new_phase, tr.prev_phase with
          | Failing, Failing -> entry.failing_since
-         | Failing, _ -> Some now
-         | _, _ -> None
+         | Failing, (Offline | Running | Draining | Paused | Stopped | Crashed | Restarting) -> Some now
+         | (Offline | Running | Draining | Paused | Stopped | Crashed | Restarting),
+           (Offline | Running | Failing | Draining | Paused | Stopped | Crashed | Restarting) ->
+           None
        in
        (match
           install_entry_if_current_internal

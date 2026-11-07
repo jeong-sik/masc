@@ -904,7 +904,7 @@ let execute_with_tool_use_id
           Fun.protect ~finally:release (fun () ->
             if exclusive then Exclusive_gate.acquire_exclusive gate
             else Exclusive_gate.acquire_shared gate;
-            if halted () then ()
+            if halted () then skip ()
             else (
               let dispatch = match ready_files, binding with
                 | Some ready, Some binding -> ready.dispatch binding

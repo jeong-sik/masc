@@ -95,12 +95,18 @@ let test_resolve_overrides_keeps_env_precedence () =
 let test_h2_listener_capacity_maps_from_toml () =
   let count, overrides = K.resolve_overrides ~env_lookup:empty_env
     ["transport.h2_max_concurrent_streams", T.Toml_int 100;
-     "transport.h2_max_pending_response_bytes", T.Toml_int 67108864] in
-  check int "both capacities reach the boot overlay" 2 count;
+     "transport.h2_max_pending_response_bytes", T.Toml_int 67108864;
+     "transport.h2_initial_window_size", T.Toml_int 1048576;
+     "transport.h2_max_frame_size", T.Toml_int 65536] in
+  check int "all four H2 settings reach the boot overlay" 4 count;
   check (option string) "peer stream capacity" (Some "100")
     (List.assoc_opt "MASC_H2_MAX_CONCURRENT_STREAMS" overrides);
   check (option string) "listener payload capacity" (Some "67108864")
-    (List.assoc_opt "MASC_H2_MAX_PENDING_RESPONSE_BYTES" overrides)
+    (List.assoc_opt "MASC_H2_MAX_PENDING_RESPONSE_BYTES" overrides);
+  check (option string) "initial window" (Some "1048576")
+    (List.assoc_opt "MASC_H2_INITIAL_WINDOW_SIZE" overrides);
+  check (option string) "largest frame" (Some "65536")
+    (List.assoc_opt "MASC_H2_MAX_FRAME_SIZE" overrides)
 ;;
 
 let test_h2_listener_capacity_rejects_invalid_values () =
@@ -114,6 +120,23 @@ let test_h2_listener_capacity_rejects_invalid_values () =
       | _ -> failf "invalid transport capacity accepted: %S" value
       | exception Env_config_core.Config_error _ -> ())
       [""; "0"; "-1"; "not-an-integer"; "2147483648"])
+;;
+
+let test_h2_frame_size_rejects_values_outside_rfc_bounds () =
+  let name = "MASC_H2_MAX_FRAME_SIZE" in
+  Fun.protect ~finally:Config_boot_overrides.reset_for_tests (fun () ->
+    List.iter (fun value ->
+      Config_boot_overrides.reset_for_tests ();
+      Config_boot_overrides.declare_file_owned [name];
+      Config_boot_overrides.set name value;
+      match H2_response_limits.max_frame_size () with
+      | _ -> failf "frame size outside RFC 9113 bounds accepted: %S" value
+      | exception Env_config_core.Config_error _ -> ())
+      [""; "16383"; "16777216"; "not-an-integer"];
+    Config_boot_overrides.reset_for_tests ();
+    Config_boot_overrides.declare_file_owned [name];
+    Config_boot_overrides.set name "16777215";
+    check int "largest RFC frame size accepted" 16777215 (H2_response_limits.max_frame_size ()))
 ;;
 
 let test_vision_max_output_tokens_maps_from_toml () =
@@ -196,6 +219,8 @@ let () =
             test_h2_listener_capacity_maps_from_toml
         ; test_case "invalid H2 capacity fails startup" `Quick
             test_h2_listener_capacity_rejects_invalid_values
+        ; test_case "H2 frame size outside RFC bounds fails startup" `Quick
+            test_h2_frame_size_rejects_values_outside_rfc_bounds
         ] )
     ; ( "setting_registry"
       , [ test_case "registry identities and consumers are valid" `Quick

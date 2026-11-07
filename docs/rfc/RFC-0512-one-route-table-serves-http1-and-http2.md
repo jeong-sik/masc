@@ -120,7 +120,7 @@ piaf 0.2.0 은 HTTP/1.1·HTTP/2·TLS 를 한 API 로 주지만 핸들러가 `Res
 ## 5. 측정
 
 - 전(이미 있음): `docs/evidence/http2-one-table-2026-11/baseline/`.
-- 후(S5 끝에): 같은 인자로 `after/`. 전송 `h1-6`, `h1`, `h2c` 에 TLS 리스너의 `h2` 를 더한다.
+- 후(S5 끝에): 같은 인자로 `after/`. 전송 `h1-6`, `h1`, `h2c` 에 TLS 리스너의 `tls-h1`·`tls-h2` 를 더한다(`--transports h1-6,h1,h2c,tls-h1,tls-h2`). 절차는 `docs/evidence/http2-one-table-2026-11/README.md` 에 있다. 스택으로 만든 바이너리를 같은 호스트에 설치한 뒤에 잰다.
 - 비교할 것: SSE 50개가 h2·h2c 에서 50개 열리는지. burst req/s·p99 가 HTTP/1.1 에서 기준선보다 나빠지지 않았는지(회귀 검사). h2 다운로드 MB/s 가 curl 기준 h1 의 0.84 배에서 어디로 갔는지. 한 요청 왕복에서 h2c 의 2~3 ms 추가 비용이 어디로 갔는지.
 - 전송별 경로 차이: `scripts/auth-route-baseline/run.sh` 를 S3 전(기준선 바이너리)·후(S5 의 바이너리)에 돌려 `compare.py` 차이 0건.
 - 브라우저: DevTools Network 의 Protocol 열이 `h2` 인 스크린샷, 대시보드 한 탭의 연결 수(`lsof -nP -iTCP:8935,8938`) 전·후.
@@ -148,7 +148,7 @@ piaf 0.2.0 은 HTTP/1.1·HTTP/2·TLS 를 한 API 로 주지만 핸들러가 `Res
 | S2 | `http/neutral-reqd` | `Http_reqd`, `Http_server_eio` 의 `Response`·`Request`·`Router`·`Wrappers`·`Typed`, `Server_sse_response`, 직접 호출 ~25곳, 시험 픽스처 `Http_reqd.of_httpun`. H2 쪽은 안 건드림 |
 | S3 | `http/shared-ingress-and-gateway-fold` | `Server_http_ingress`, H2 어댑터 55줄, 삭제 목록(D4). H2 end-to-end 시험은 접힌 어댑터를 그대로 치고, H2 역학 시험은 `Http_reqd.of_h2` 손잡이 위의 공용 `Response` 를 친다. 두 전송 공용 픽스처는 만들지 않는다: 표가 하나라 같은 케이스를 두 번 돌려도 잡을 차이가 없다 |
 | S4 | `http/tls-alpn-listener` | D6. `Server_tls_material`(설정 파일 쌍 또는 `.masc/tls/` 자체 서명 P-256, 365일, 만료 30일 전 재생성), `Tls_stream_socket`(TLS 세션을 h2-eio·httpun-eio 가 받는 소켓으로), `Server_bootstrap_http.serve_tls`(ALPN 결과로 h2·httpun 선택, accept 루프는 네 리스너가 `run_accept_loop` 하나를 씀), `Https_listener_metrics`(`/health`·transport-health 의 `https_listener`, OTel `masc_https_*`), 대시보드 HTTPS 카드, `docs/guides/https-and-http2.md`. 포트가 잡혀 있으면 부팅은 계속되고 `bind_failed` 로 보인다 |
-| S5 | `http/h2-engine-tuning` | D7, `after/` 측정 |
+| S5 | `http/h2-engine-tuning` | D7: `Server_bootstrap_http.h2_config`(push 끔, `H2_response_limits` 의 윈도·프레임), TOML 키 2개와 registry 2행, 프로브의 `tls-h1`·`tls-h2` 전송(소유 서버는 `MASC_HTTPS_PORT` 로 TLS 리스너를 염), 측정 절차 `docs/evidence/http2-one-table-2026-11/README.md`. `after/` 는 설치 뒤 같은 호스트에서 |
 | S6 | `docs/http2-one-table` | `docs/spec/09-server-transport.md`, `01-system-overview.md`(OQ-SYS-002), `TRANSPORT-PRACTICAL-PLAYBOOK.md`, `guides/h2-response-resources.md`, `verify_h2c_autodetect.sh` |
 
 S3 병합으로 닫는 이슈: #35592, #46676, #47609, #47255. #47348, #47534, #47551 은 S5 의 `after/` 측정(fleet SSE 가 h2c 로 열리는지, 전송별 경로 차이 0건)이 보여 준 뒤 닫는다. #40063·#35579 는 HTTP/2 부분만 코멘트. 새 이슈: h2 포크 stream id(#39050 후속), WebSocket over HTTP/2, gRPC 를 TLS 리스너로, Q1.

@@ -8,4 +8,3 @@ let metric_auth_credential_unreadable_index_miss =
   Otel_identity_metric_names.metric_auth_credential_unreadable_index_miss
 
 let inc_counter name ?labels ?delta () = Otel_metric_store_core.inc_counter name ?labels ?delta ()
-let set_gauge name ?labels value = Otel_metric_store_core.set_gauge name ?labels value

@@ -50,12 +50,6 @@ type sandbox_context = {
 
 let host_sandbox : sandbox_context = { target = ST.host () }
 
-(* Flatten an IR AST into ordered simple stages.
-
-   A non-nested pipeline produced by the bash subset parser has shape
-   [Pipeline [Simple _; Simple _; ...]]. A nested pipeline would be
-   [Pipeline [Pipeline _; ...]]; the [Nested_pipeline] result keeps
-   that case distinguishable from a regular non-nested pipeline. *)
 (* The gate walks the IR rather than flattening it, because the shape decides
    which rule applies: the pipe rule belongs to a [Pipeline] node and to
    nothing else. Flattening to a list of stages loses that -- [a && b] would

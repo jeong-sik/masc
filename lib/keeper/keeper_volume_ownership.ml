@@ -11,7 +11,7 @@
    The marker is a single file at the guest-visible volume root:
    [.masc-volume-owner]. It records the owning workspace's identity as the
    runtime writes it at first boot, and nothing else. Old volumes created
-   before this convention carry no marker; they answer [Legacy_unmarked] and
+   before this convention carry no marker; they answer [Unmarked] and
    callers must keep treating them as unverified rather than guessing. *)
 
 type owner_marker =

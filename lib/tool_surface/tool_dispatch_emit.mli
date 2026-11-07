@@ -10,9 +10,8 @@
     unchanged.
 
     [outcome] should be the typed {!Dispatch_outcome.t} chosen by the
-    caller — [Handled] when the handler returned a result, [No_handler] /
-    [Rejected_by_pre_hook] / [Rejected_by_capability] / [Handler_error]
-    for the corresponding arms. *)
+    caller — [Handled] when the handler returned a result, [No_handler]
+    when the handler registry had none. *)
 val finalize
   :  outcome:Dispatch_outcome.t
   -> Tool_result.result option

@@ -102,12 +102,11 @@ let test_buggy_thunk_reraises () =
   Unix.putenv "MASC_FSM_GUARD_ASSERT" ""
 
 let test_non_assert_exception_propagates_unchanged () =
-  (* RFC-0072 Phase 5 widened the catch to all exceptions so typed
-     transition violations (Runtime_transition_violation /
-     Turn_phase_transition_violation, which would otherwise create a
-     Keeper_registry → this-module dependency cycle if named) are also
-     captured. That means any exception escaping the thunk bumps the
-     counter and re-raises with the backtrace intact — the no-bump
+  (* RFC-0072 Phase 5 widened the catch to all exceptions so the typed
+     transition violation (Turn_phase_transition_violation, which would
+     otherwise create a Keeper_registry → this-module dependency cycle if
+     named) is also captured. That means any exception escaping the thunk
+     bumps the counter and re-raises with the backtrace intact — the no-bump
      guarantee from the pre-Phase-5 narrow catch no longer holds. *)
   let action = "TestAction" in
   let stage = "non_assert" in

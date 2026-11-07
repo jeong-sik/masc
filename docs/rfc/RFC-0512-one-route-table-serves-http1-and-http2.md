@@ -1,5 +1,5 @@
 ---
-rfc: "0511"
+rfc: "0512"
 title: "경로 표 하나가 HTTP/1.1 과 HTTP/2 를 다 받고, TLS·ALPN 리스너가 HTTP/2 를 실제로 쓰이게 한다"
 status: Draft
 created: 2026-11-07
@@ -10,7 +10,7 @@ superseded_by: null
 related: ["typed-route-auth", "0493", "0350", "0281", "0204"]
 ---
 
-# RFC-0511: 경로 표 하나가 HTTP/1.1 과 HTTP/2 를 다 받고, TLS·ALPN 리스너가 HTTP/2 를 실제로 쓰이게 한다
+# RFC-0512: 경로 표 하나가 HTTP/1.1 과 HTTP/2 를 다 받고, TLS·ALPN 리스너가 HTTP/2 를 실제로 쓰이게 한다
 
 - 상태: 초안
 - 이슈: #35592, #46676, #47255, #47348, #47534, #47551, #47609, #28161, #40063, #48713(전송별 경로 차이), #39050(h2 stream id)

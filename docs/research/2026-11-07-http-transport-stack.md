@@ -2,7 +2,7 @@
 
 - 확인 시각: 2026-11-07 09:00Z ~ 09:45Z. 설치된 opam switch `5.5.1` 의 `.mli` 를 직접 읽었다. 외부 문서는 §6 에 링크했다.
 - 판정 대상 head: `origin/main` `f8dbd356759`. 라이브 서버 바이너리는 `~/.local/bin/masc` 0.68.0, build-commit `6afc364dd90`.
-- 이 문서는 조사이고 결정이 아니다. 결정은 RFC-0511 에 적는다. 기준선 측정 기록은 `docs/evidence/http2-one-table-2026-11/baseline/` 에 있다.
+- 이 문서는 조사이고 결정이 아니다. 결정은 RFC-0512 에 적는다. 기준선 측정 기록은 `docs/evidence/http2-one-table-2026-11/baseline/` 에 있다.
 
 ## 0. 요약
 

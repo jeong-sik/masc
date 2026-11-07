@@ -2782,23 +2782,12 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                 | Ok target_chat_guid ->
                   fork_adapter (fun () ->
                     let rec loop reply =
-                      match Keeper_chat_events.subscribe events with
-                      | Keeper_chat_events.Closed ->
+                      match Keeper_chat_run_signal.read events with
+                      | Keeper_chat_run_signal.Closed ->
                         settle_delivery (Error no_terminal_before_close)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Reply_details details) ->
-                        loop
-                          (match details.turn_outcome with
-                           | Keeper_turn_outcome.Visible_reply
-                             when String.trim details.reply <> "" ->
-                             Some details.reply
-                           (* The turn spoke somewhere else or said nothing;
-                              either way there is no text to send. *)
-                           | Keeper_turn_outcome.Visible_reply
-                           | Keeper_turn_outcome.Continuation_checkpoint
-                           | Keeper_turn_outcome.Terminal_effect_settled
-                           | Keeper_turn_outcome.Awaiting_gate_approval
-                           | Keeper_turn_outcome.No_visible_reply -> None)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Run_finished _) ->
+                      | Keeper_chat_run_signal.Reply details ->
+                        loop (Keeper_chat_run_signal.visible_text details)
+                      | Keeper_chat_run_signal.Finished ->
                         settle_delivery
                           (match reply with
                            (* A run that produced no visible reply has been
@@ -2810,45 +2799,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                                ~chat_guid:target_chat_guid ~content:reply ()
                              |> Result.map_error
                                   Imessage_applescript.error_to_string)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Event_error { message }) ->
+                      | Keeper_chat_run_signal.Failed message ->
                         settle_delivery (Error message)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Run_started _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Batch_bound _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Text_message_start _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Text_delta _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Text_message_end)
-                      | Keeper_chat_events.Next (Keeper_chat_events.External_effect_completed _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Continuation_checkpoint _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_connected)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Provider_retry_observed _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_runtime_attempt_started _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_message_start _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_message_delta _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_message_stop _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_ping)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_content_block_start _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_content_block_stop _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Model_content_activity _)
-                      | Keeper_chat_events.Next ((Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _))
-                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_thinking_signature_delta _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_media_delta _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_protocol_error _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_args _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_args_snapshot _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_end _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Native_tool_start _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Native_tool_end (_, _))
-                      | Keeper_chat_events.Next (Keeper_chat_events.Native_tool_progress (_, _))
-                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_approval_requested _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_approval_settled _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_result_ready _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_transcript_committed _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Link_block _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Image_block _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Status_block _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Audio_block _)
-                      | Keeper_chat_events.Next (Keeper_chat_events.Tool_context_block _) -> loop reply
+                      | Keeper_chat_run_signal.Progress -> loop reply
                     in
                     loop None))
              | Keeper_continuation_channel.Keeper { keeper_name = asked_by } ->
@@ -2865,23 +2818,12 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                        | Ok (), result -> result) (Ok ()) member_ids)
                  in
                  let rec loop reply =
-                   match Keeper_chat_events.subscribe events with
-                   | Keeper_chat_events.Closed ->
+                   match Keeper_chat_run_signal.read events with
+                   | Keeper_chat_run_signal.Closed ->
                      settle_delivery (Error no_terminal_before_close)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Reply_details details) ->
-                     loop
-                       (match details.turn_outcome with
-                        | Keeper_turn_outcome.Visible_reply
-                          when String.trim details.reply <> "" ->
-                          Some details.reply
-                        (* The turn spoke somewhere else or said nothing;
-                           either way there is no text to hand back. *)
-                        | Keeper_turn_outcome.Visible_reply
-                        | Keeper_turn_outcome.Continuation_checkpoint
-                        | Keeper_turn_outcome.Terminal_effect_settled
-                        | Keeper_turn_outcome.Awaiting_gate_approval
-                        | Keeper_turn_outcome.No_visible_reply -> None)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Run_finished _) ->
+                   | Keeper_chat_run_signal.Reply details ->
+                     loop (Keeper_chat_run_signal.visible_text details)
+                   | Keeper_chat_run_signal.Finished ->
                      (match pending_continuation () with
                       | Ok (Some _) -> settle_delivery (Ok ())
                       | Error detail -> settle_delivery (Error detail)
@@ -2889,45 +2831,9 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                           (match reply with
                            | Some reply -> Keeper_event_queue.Delegate_replied reply
                            | None -> Keeper_event_queue.Delegate_no_reply))
-                   | Keeper_chat_events.Next (Keeper_chat_events.Event_error { message }) ->
+                   | Keeper_chat_run_signal.Failed message ->
                      commit (Keeper_event_queue.Delegate_failed message)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Run_started _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Batch_bound _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Text_message_start _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Text_delta _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Text_message_end)
-                   | Keeper_chat_events.Next (Keeper_chat_events.External_effect_completed _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Continuation_checkpoint _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_connected)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Provider_retry_observed _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_runtime_attempt_started _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_message_start _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_message_delta _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_message_stop _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_ping)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_content_block_start _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_content_block_stop _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Model_content_activity _)
-                   | Keeper_chat_events.Next ((Keeper_chat_events.Agent_core_thinking_delta _ | Keeper_chat_events.Agent_core_thinking_snapshot _))
-                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_thinking_signature_delta _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_media_delta _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Agent_core_stream_protocol_error _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_start _ | Keeper_chat_events.Tool_call_admitted _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_args _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_args_snapshot _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_call_end _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Native_tool_start _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Native_tool_end (_, _))
-                   | Keeper_chat_events.Next (Keeper_chat_events.Native_tool_progress (_, _))
-                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_approval_requested _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_approval_settled _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_result_ready _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_transcript_committed _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Link_block _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Image_block _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Status_block _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Audio_block _)
-                   | Keeper_chat_events.Next (Keeper_chat_events.Tool_context_block _) -> loop reply
+                   | Keeper_chat_run_signal.Progress -> loop reply
                  in
                  loop None)
              | Keeper_continuation_channel.Unrouted { reason } ->

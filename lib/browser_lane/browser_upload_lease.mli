@@ -1,6 +1,6 @@
-(** Private upload snapshots are owned by a browser session once WebDriver may
+(** Private upload snapshots are owned by a browser session once the browser may
     have exposed them to a File object. Selection completion does not end that
-    ownership: Firefox can open the file lazily during a later read/submit. *)
+    ownership: the browser can open the file lazily during a later read/submit. *)
 val max_file_bytes : int
 (** Existing per-file upload resource bound, shared by host staging and worker copies. *)
 

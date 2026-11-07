@@ -1,4 +1,4 @@
-(** Closed Firefox interactions. Arguments are parsed before any browser effect. *)
+(** Closed browser interactions. Arguments are parsed before any browser effect. *)
 type key = Enter | Tab | Escape | Backspace | Delete | ArrowUp | ArrowDown | ArrowLeft | ArrowRight | Home | End
 type geolocation = { latitude : float; longitude : float; accuracy_m : float }
 (** A tab's reported environment. Each part is optional, at least one is set;

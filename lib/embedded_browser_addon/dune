@@ -7,7 +7,7 @@
  (wrapped false))
 
 ; The browser Lane Add-on package, written into the binary the way
-; embedded_browser_extension carries the Firefox extension. -m plain produces
+; embedded_config carries config/ and skills/. -m plain produces
 ;   val read : string -> string option
 ;   val file_list : string list
 ; with each path relative to addons/browser. Only .toml, .json and .md files

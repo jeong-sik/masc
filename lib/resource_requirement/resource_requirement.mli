@@ -29,7 +29,7 @@ val kind_name : Unix.file_kind -> string
 
 val check : label:string -> t -> path:string -> Unix.stats -> (unit, string) result
 (** Decide [stats], read from [path] by [lstat] or [fstat]. A refusal reads,
-    for example, "Firefox profile /p must be a directory owned by uid 502 with
+    for example, "profile /p must be a directory owned by uid 502 with
     mode 0700; it is a directory owned by uid 502 with mode 0755". *)
 
 val lstat : label:string -> t -> string -> (Unix.stats, string) result
@@ -46,9 +46,9 @@ val identity : Unix.stats -> identity
 
 val replaced : label:string -> path:string -> expected:identity -> observed:identity -> string
 (** The refusal for a pinned path whose device or inode differs, for example
-    "Firefox profile /p was replaced: it was device 1 inode 2 and is now
+    "profile /p was replaced: it was device 1 inode 2 and is now
     device 1 inode 3". *)
 
 val keys : label:string -> found:string list -> required:string list -> string
 (** The refusal for an object whose keys differ from [required], for example
-    "owned Firefox configuration must have exactly the keys a, b; it has a, c". *)
+    "ego configuration must have exactly the keys a, b; it has a, c". *)

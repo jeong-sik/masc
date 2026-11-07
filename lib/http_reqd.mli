@@ -89,7 +89,8 @@ module Body_writer : sig
 
   val flush : t -> ([ `Written | `Closed ] -> unit) -> unit
   (** [flush t f] calls [f `Written] once every byte written so far reached
-      the output channel, or [f `Closed] once that channel closed first. *)
+      the output channel, or [f `Closed] once that channel closed first. On a
+      writer that is already closed it calls [f `Closed] at once. *)
 
   val close : t -> unit
   (** On HTTP/2 the close waits for the bytes written so far
@@ -109,10 +110,10 @@ val respond_with_streaming
 (** Why a request body was not delivered. *)
 type body_read_error =
   | Too_large of int  (** The limit, in bytes, that the body exceeded. *)
-  | Malformed_length
-      (** HTTP/2 only: the stream declared a body length h2 cannot parse.
-          httpun refuses such a request before a handler sees it. *)
-  | Internal of exn  (** [on_body] raised. *)
+  | Internal of exn
+      (** [on_body] raised, or the transport handed over a request whose body
+          length it had already refused; both libraries answer such a request
+          before a handler sees it. *)
 
 val read_body
   :  t

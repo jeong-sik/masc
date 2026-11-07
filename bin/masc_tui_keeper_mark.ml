@@ -40,6 +40,8 @@ let activity_glyph : Masc_tui_keeper_list_model.activity -> string = function
   | Offline -> "\xc3\x97" (* × *)
   | Unknown -> unread_glyph
 
+let attempt_glyph = "\xe2\x9c\x97" (* ✗: an attempt failed *)
+
 let badge_glyph : Masc_tui_keeper_list_model.badge -> string = function
   | Badge_read_error -> "!"
   | Badge_waiting_unavailable -> "!"

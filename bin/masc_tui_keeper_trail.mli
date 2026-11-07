@@ -75,7 +75,7 @@ val of_readings :
 type attempt =
   { ordinal : int
   ; runtime_id : string
-  ; dispatch : Runtime_attempt_dispatch.t option
+  ; dispatch : Masc.Runtime_attempt_dispatch.t option
   ; cause : cause_group
   ; fault : string option
   ; terminal : bool

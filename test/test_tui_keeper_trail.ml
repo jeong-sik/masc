@@ -281,6 +281,36 @@ let test_attempts_of_runtime_extracts_ordered_candidates_and_terminal () =
   Alcotest.(check string) "terminal runtime_id" "provider.runtime-c" last_attempt.runtime_id;
   Alcotest.(check bool) "terminal cause matches" true (last_attempt.cause = Trail.Input)
 
+let test_attempts_of_runtime_walk_no_terminal () =
+  let failure_a : Evidence.failure =
+    { attempt = 0
+    ; runtime_id = "provider.runtime-a"
+    ; dispatch = Runtime_attempt_dispatch.Dispatched
+    ; failure = { cause = Request_failure.Provider_server "overloaded" }
+    ; api_candidate_fault = Some Evidence.Api_candidate_fault.Capacity
+    }
+  in
+  let failure_b : Evidence.failure =
+    { attempt = 1
+    ; runtime_id = "provider.runtime-b"
+    ; dispatch = Runtime_attempt_dispatch.Dispatched
+    ; failure = { cause = Request_failure.Provider_network "timeout" }
+    ; api_candidate_fault = None
+    }
+  in
+  let evidence : Evidence.t = { failures = [failure_a; failure_b]; terminal = Evidence.Terminal_not_observed } in
+  let lane_observation = Some (Receipt.Runtime_lane_observed { turn = receipt_turn; evidence }) in
+  let r = runtime ~last_failure:(reported Decode.Keeper_failure_provider) ~lane_observation () in
+  let attempts = Trail.attempts_of_runtime (Some r) in
+  Alcotest.(check int) "extracts candidate attempts" 2 (List.length attempts);
+  let ordinals = List.map (fun (a : Trail.attempt) -> a.ordinal) attempts in
+  Alcotest.(check (list int)) "ordinals in order" [0; 1] ordinals;
+  let terminals = List.map (fun (a : Trail.attempt) -> a.terminal) attempts in
+  Alcotest.(check (list bool)) "no terminal attempt" [false; false] terminals;
+  let first = List.nth attempts 0 in
+  Alcotest.(check (option string)) "fault word extracted" (Some "capacity") first.fault;
+  Alcotest.(check bool) "cause matches" true (first.cause = Trail.Provider)
+
 let () =
   Alcotest.run "tui_keeper_trail"
     [ ( "decisions"
@@ -306,5 +336,7 @@ let () =
             test_a_receipt_time_that_does_not_parse_does_not_borrow_the_server_time
         ; Alcotest.test_case "attempts_of_runtime extracts ordered candidates and terminal" `Quick
             test_attempts_of_runtime_extracts_ordered_candidates_and_terminal
+        ; Alcotest.test_case "attempts_of_runtime extracts ordered candidates without terminal" `Quick
+            test_attempts_of_runtime_walk_no_terminal
         ] )
     ]

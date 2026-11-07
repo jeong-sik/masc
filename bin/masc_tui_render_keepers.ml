@@ -460,7 +460,7 @@ let render_attempt_chain ~max_cells (attempts : Masc_tui_keeper_trail.attempt li
       let sep_len = Message_layout.display_width sep in
       let rev_attempts = List.rev attempts in
       let rec fit acc omitted remaining_cells = function
-        | [] -> (List.rev acc, omitted)
+        | [] -> (acc, omitted)
         | a :: rest ->
             let node = format_attempt_node a in
             let node_cells = Message_layout.display_width node in
@@ -473,18 +473,18 @@ let render_attempt_chain ~max_cells (attempts : Masc_tui_keeper_trail.attempt li
             if remaining_cells >= cost + omit_cost then
               fit (node :: acc) omitted (remaining_cells - cost) rest
             else
-              (List.rev acc, List.length (a :: rest))
+              (acc, List.length (a :: rest))
       in
-      let fitted_rev, omitted_count = fit [] 0 max_cells rev_attempts in
-      if fitted_rev = [] then None
+      let fitted, omitted_count = fit [] 0 max_cells rev_attempts in
+      if fitted = [] then None
       else
         let prefix =
           if omitted_count > 0 then Printf.sprintf "+%d%s" omitted_count sep else ""
         in
-        let chain = prefix ^ String.concat sep fitted_rev in
+        let chain = prefix ^ String.concat sep fitted in
         Some (Theme.warn () ^ chain ^ Ansi.reset)
 
-let keeper_secondary_row_content ~inner (row : Keeper_list_model.row) =
+let keeper_secondary_row_content ?now ~inner (row : Keeper_list_model.row) =
   let indent_cells = Render_schedule.keeper_marker_width + 2 in
   let available = max 0 (inner - indent_cells) in
   let runtime =
@@ -495,7 +495,7 @@ let keeper_secondary_row_content ~inner (row : Keeper_list_model.row) =
   let attempts = Masc_tui_keeper_trail.attempts_of_runtime runtime in
   let chain_opt = render_attempt_chain ~max_cells:available attempts in
   let detail =
-    match keeper_detail_text row with
+    match keeper_detail_text ?now row with
     | "" -> Masc_tui_theme.Glyph.no_value
     | text -> text
   in
@@ -1196,7 +1196,7 @@ let render_keeper_list (state : state) =
           emit primary;
           (* Only the detailed layout draws the second row, so only it builds one. *)
           (match state.keeper_list_layout with
-           | Keeper_list_model.Detailed -> emit (keeper_secondary_row_content ~inner row)
+           | Keeper_list_model.Detailed -> emit (keeper_secondary_row_content ~now:now_unix ~inner row)
            | Keeper_list_model.Compact | Keeper_list_model.Grouped -> ()))
     entries_window;
 

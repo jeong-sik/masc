@@ -1540,13 +1540,18 @@ let block_after events =
 let five_hour_reset = 1786356000
 let seven_day_reset = 1786960800
 
+(* An allowed event's reset is when a still-open window ends. It is set after
+   every rejected reset here, so a reading that counted it would move the
+   reopening time and fail the check. *)
+let allowed_window_reset = seven_day_reset + 86_400
+
 let test_a_window_is_spent_only_while_its_last_event_is_rejected () =
   let rejected window resets_at =
     window_event ~uuid:("rejected-" ^ window) ~status:"rejected" ~window ~resets_at ()
   in
   let allowed window =
     window_event ~uuid:("allowed-" ^ window) ~status:"allowed" ~window
-      ~resets_at:five_hour_reset ()
+      ~resets_at:allowed_window_reset ()
   in
   check quota_block "a 429 with no event is a throttle" Runtime_claude_code.Rate_throttled
     (block_after []);
@@ -1616,13 +1621,27 @@ let test_the_result_frame_decides_a_turn_its_last_event_allowed () =
            ~resets_at:seven_day_reset ())
     ; Emit
         (window_event ~uuid:"allowed-five_hour" ~status:"allowed" ~window:"five_hour"
-           ~resets_at:five_hour_reset ())
+           ~resets_at:allowed_window_reset ())
     ]
   in
   with_fixture (earlier_rejection @ [ Emit assistant; Emit result ]) (fun path ->
     match run_fixture path with
     | Ok turn -> check string "the answer is kept" "MASC_CLAUDE_OK" turn.text
     | Error error -> fail (Runtime_claude_code.error_to_string error));
+  with_fixture
+    [ Emit
+        (window_event ~uuid:"rejected-seven_day" ~status:"rejected" ~window:"seven_day"
+           ~resets_at:seven_day_reset ())
+    ; Emit
+        (window_event ~uuid:"warning-five_hour" ~status:"allowed_warning" ~window:"five_hour"
+           ~resets_at:allowed_window_reset ())
+    ; Emit assistant
+    ; Emit result
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Ok turn -> check string "a warning last event keeps the answer" "MASC_CLAUDE_OK" turn.text
+       | Error error -> fail (Runtime_claude_code.error_to_string error));
   with_fixture (earlier_rejection @ [ Emit prompt_too_long_typed_result ]) (fun path ->
     match run_fixture path with
     | Error (Runtime_claude_code.Context_window_exceeded _) -> ()
@@ -1631,7 +1650,7 @@ let test_the_result_frame_decides_a_turn_its_last_event_allowed () =
   with_fixture
     [ Emit
         (window_event ~uuid:"allowed-five_hour" ~status:"allowed" ~window:"five_hour"
-           ~resets_at:five_hour_reset ())
+           ~resets_at:allowed_window_reset ())
     ; Emit
         (window_event ~uuid:"rejected-seven_day" ~status:"rejected" ~window:"seven_day"
            ~resets_at:seven_day_reset ())
@@ -1641,9 +1660,11 @@ let test_the_result_frame_decides_a_turn_its_last_event_allowed () =
        match run_fixture path with
        | Error
            (Runtime_claude_code.Quota_blocked
-             { block = Runtime_claude_code.Quota_spent { windows; _ }; _ }) ->
+             { block = Runtime_claude_code.Quota_spent { resets_at; windows }; _ }) ->
          check string "the last event's window is spent" "seven_day"
-           (Runtime_claude_code.quota_windows_label windows)
+           (Runtime_claude_code.quota_windows_label windows);
+         check (option int) "it reopens at its own reset, not the allowed window's"
+           (Some seven_day_reset) resets_at
        | Error error -> fail (Runtime_claude_code.error_to_string error)
        | Ok _ -> fail "a rejected last event completed the turn")
 ;;

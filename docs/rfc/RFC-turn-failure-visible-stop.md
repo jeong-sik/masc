@@ -140,10 +140,15 @@ MASC direct-provider HTTP 레인은 내부 재시도 루프가 없어 턴당 한
        대로 끝난다. 앞에서 거절된 창이 남아 있어도 성공은 성공이고 넘침은 넘침이다.
      - 창(`rateLimitType`)마다 그 턴에 온 마지막 event 만 센다. type 이 없는 event 는
        모두 이름 없는 한 창이다.
-     - 마지막 event 가 `rejected` 인 창이 하나라도 있으면 `Quota_spent` 다. 이름 없는
-       창도 목록에 든다. route 는
+     - 막힌 턴에서 마지막 event 가 `rejected` 인 창이 하나라도 있으면 `Quota_spent` 다.
+       이름 없는 창도 목록에 든다. route 는
        `Hard_quota` 이고, `retry_after` 는 rejected 창들의 리셋 시각 중 가장 늦은 것이다.
        리셋 시각을 말하지 않은 rejected 창이 있으면 시각은 없다.
+     - 그래서 seven_day 가 `rejected` 였고 마지막 event 가 `allowed` five_hour 인
+       턴이 429 로 끝나면, seven_day 리셋까지(최대 7일) 쉰다. 창은 저마다 따로 한도를
+       건다. seven_day 에 더 새 event 가 없으면 seven_day 는 아직 `rejected` 이고, 그
+       상태에서 온 429 는 그 창의 한도로 본다. 같은 턴이 성공으로 끝나면 result
+       frame 이 먼저라서 이 규칙은 쓰이지 않는다.
      - 그런 창 없이 429 만 있으면 `Rate_throttled` 다. route 는 `Rate_limited` 다.
        `allowed` event 의 시각은 아직 열린 창이 끝나는 때라서 쓰지 않는다.
   3. `next_dispatch_after_failure` 가 `Wait_until` 을 돌려준다. 쉬는 시각은 그

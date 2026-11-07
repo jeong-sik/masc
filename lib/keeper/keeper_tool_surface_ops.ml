@@ -373,6 +373,27 @@ let keeper_list_row_json ~runtime_class config name =
         | Some { Keeper_registry.phase = (Offline | Running | Draining | Paused | Stopped | Crashed | Restarting); _ } -> `Null
         | None -> `Null
       in
+      let recent_turns =
+        match
+          Keeper_turn_pulse.get
+            ~base_path:config.Workspace.base_path
+            ~keeper_name:meta.name
+        with
+        | None -> `Null
+        | Some pulse ->
+          `Assoc
+            [ ( "truncated", `Bool pulse.truncated )
+            ; ( "turns"
+              , `List
+                  (List.map
+                     (fun (s : Keeper_turn_pulse.sample) ->
+                        `List
+                          [ `Float s.at
+                          ; `String (Keeper_turn_pulse.outcome_to_string s.outcome)
+                          ])
+                     pulse.samples) )
+            ]
+      in
       let runtime_blocker =
         Option.bind registry_entry (fun entry ->
           Option.bind entry.Keeper_registry.last_failure_reason
@@ -466,6 +487,7 @@ let keeper_list_row_json ~runtime_class config name =
             ("operator_disposition", operator_disposition);
             ("operator_disposition_reason", operator_disposition_reason);
             ("failing_since", failing_since);
+            ("recent_turns", recent_turns);
             ("keepalive_running", `Bool keepalive_running);
             ("activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));

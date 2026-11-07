@@ -606,10 +606,12 @@ let count_chip group count text =
 
 (* The chips of the count row that fit [room] cells, each a count and its text
    in the order they are drawn. When the row is too short for all of them,
-   every chip with a count stays and the zeros take what is left, front to
-   back. A zero says nothing is there. At 80 columns the five zeros fit and
-   the "? 3 unknown" behind them did not, so a list of three Keepers sat under
-   a row of zeros. *)
+   the chips with a count stay and the zeros take what is left, front to
+   back. When the chips with a count are too long for the row on their own,
+   they are returned as they are and [join_fitting] leaves out the ones that
+   do not fit whole. A zero says nothing is there. At 80 columns the five
+   zeros fit and the "? 3 unknown" behind them did not, so a list of three
+   Keepers sat under a row of zeros. *)
 let count_chips_that_fit ~sep ~room chips =
   let sep_cells = Message_layout.display_width sep in
   (* A chip and the separator in front of it. A row has one separator fewer

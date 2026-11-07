@@ -54,7 +54,6 @@ reader 는 `error` 문자열을 substring 매칭하여 `fd_exhaustion` 인지 �
 | `dashboard/src/components/fleet-health-panel.ts` | dashboard UI | `CoverageGapBlock` 사용 | 동일 (block 내부에서 lookup) | 동일 |
 | dashboard `*.test.ts` fixture (8 파일) | test | v1 fixture | v1 + v2 fixture 병행 | v2 fixture only |
 | `lib/otel_metric_store*.ml` | metric 이름 | 영향 없음 (metric 이름만 참조) | 동일 | 동일 |
-| `test/test_keeper_lifecycle_hooks.ml` | backend test | v1 emit assertion | v2 emit assertion | v2 only |
 
 repo 외부 consumer 는 §6 의 grep 결과로는 잡히지 않는다. 외부 reader 가 있을 경우 PR-4 머지 전 별도 공지가 필요하다 (§7 sunset criteria 참조).
 

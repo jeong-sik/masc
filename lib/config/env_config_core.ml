@@ -734,5 +734,3 @@ let jsonl_retention_days_env_key = "MASC_JSONL_RETENTION_DAYS"
 
 let jsonl_retention_days () =
   get_int ~default:default_jsonl_retention_days jsonl_retention_days_env_key
-
-(** {1 Keeper Defaults} *)

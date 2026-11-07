@@ -3,6 +3,7 @@ module K = Llm_provider.Backend_glm
 module PC = Llm_provider.Provider_config
 module RD = Llm_provider.Reasoning_dialect
 module S = Llm_provider.Streaming
+module OW = Llm_provider.Openai_wire
 module T = Llm_provider.Types
 
 let member key json = Yojson.Safe.Util.member key json
@@ -247,11 +248,12 @@ let test_parse_stream_chunk_uses_resolved_reasoning_dialect () =
   match
     K.parse_stream_chunk ~streaming_reasoning:(RD.Delta_field "reasoning_content") data
   with
-  | S.Openai_chunk chunk ->
+  | OW.Openai_chunk chunk ->
     check (option string) "content" (Some "token") chunk.delta_content;
     check (option string) "reasoning" (Some "thinking") chunk.delta_reasoning
-  | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
-  | S.Openai_undeclared_reasoning_member _
+  | OW.Openai_done | OW.Openai_empty | OW.Openai_provider_error _
+  | OW.Openai_parse_failed _
+  | OW.Openai_undeclared_reasoning_member _
     -> fail "expected stream chunk"
 ;;
 
@@ -260,11 +262,12 @@ let test_parse_stream_chunk_does_not_invent_missing_dialect () =
     {|{"id":"chunk-1","model":"glm-5.1","choices":[{"delta":{"reasoning_content":"thinking","content":"token"},"index":0}]}|}
   in
   match K.parse_stream_chunk ~streaming_reasoning:RD.No_streaming_reasoning data with
-  | S.Openai_chunk chunk ->
+  | OW.Openai_chunk chunk ->
     check (option string) "content" (Some "token") chunk.delta_content;
     check (option string) "reasoning stays absent" None chunk.delta_reasoning
-  | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
-  | S.Openai_undeclared_reasoning_member _
+  | OW.Openai_done | OW.Openai_empty | OW.Openai_provider_error _
+  | OW.Openai_parse_failed _
+  | OW.Openai_undeclared_reasoning_member _
     -> fail "expected stream chunk"
 ;;
 

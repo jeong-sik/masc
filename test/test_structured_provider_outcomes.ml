@@ -6,6 +6,7 @@ module Keeper_tool_call_log = Masc.Keeper_tool_call_log
 module Parse = Llm_provider.Backend_openai_parse
 module Responses = Llm_provider.Backend_openai_responses
 module Streaming = Llm_provider.Streaming
+module Openai_wire = Llm_provider.Openai_wire
 module Acc = Llm_provider.Complete_stream_acc
 
 let answer = {|{"text":"visible answer"}|}
@@ -111,13 +112,13 @@ let chat_stream deltas =
            ; "choices", `List
                [ `Assoc [ "index", `Int 0; "delta", `Assoc delta
                          ; "finish_reason", finish ] ] ] in
-       let result = Streaming.parse_openai_sse_chunk
+       let result = Openai_wire.parse_openai_sse_chunk
            ~streaming_reasoning:Llm_provider.Reasoning_dialect.No_streaming_reasoning
            (Yojson.Safe.to_string json) in
        let events, _ = Streaming.openai_sse_parse_result_to_events state result in
        List.iter (Acc.accumulate_event acc) events)
     deltas;
-  let events, _ = Streaming.openai_sse_parse_result_to_events state Streaming.Openai_done in
+  let events, _ = Streaming.openai_sse_parse_result_to_events state Openai_wire.Openai_done in
   List.iter (Acc.accumulate_event acc) events;
   match Acc.finalize_stream_acc acc with
   | Ok response -> response

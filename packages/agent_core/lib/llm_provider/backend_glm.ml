@@ -402,7 +402,7 @@ let parse_response ?content_inline_reasoning body =
 (** Parse a GLM SSE chunk using the resolved model/provider dialect.
     The catalog is the sole authority for reasoning-field interpretation. *)
 let parse_stream_chunk ~streaming_reasoning data =
-  Streaming.parse_openai_sse_chunk ~streaming_reasoning data
+  Openai_wire.parse_openai_sse_chunk ~streaming_reasoning data
 ;;
 
 (* ── Inline tests ────────────────────────────────── *)
@@ -744,12 +744,12 @@ let%test "parse_stream_chunk delegates to openai" =
       ~streaming_reasoning:(Reasoning_dialect.Delta_field "reasoning_content")
       data
   with
-  | Streaming.Openai_chunk chunk -> chunk.delta_content = Some "hi"
-  | Streaming.Openai_done
-  | Streaming.Openai_empty
-  | Streaming.Openai_provider_error _
-  | Streaming.Openai_parse_failed _
-  | Streaming.Openai_undeclared_reasoning_member _ -> false
+  | Openai_wire.Openai_chunk chunk -> chunk.delta_content = Some "hi"
+  | Openai_wire.Openai_done
+  | Openai_wire.Openai_empty
+  | Openai_wire.Openai_provider_error _
+  | Openai_wire.Openai_parse_failed _
+  | Openai_wire.Openai_undeclared_reasoning_member _ -> false
 ;;
 
 let%test "build_request strips chat_template_kwargs from Glm body" =

@@ -112,6 +112,7 @@ let test_terminal_cancelled_roundtrip () =
 (* Agent Core contract TTFT helper tests *)
 
 module Streaming = Llm_provider.Streaming
+module Openai_wire = Llm_provider.Openai_wire
 module Types = Llm_provider.Types
 
 let make_openai_chunk
@@ -120,7 +121,7 @@ let make_openai_chunk
       ?delta_reasoning_details
       ?(delta_tool_calls = [])
       ()
-  : Streaming.openai_chunk
+  : Openai_wire.openai_chunk
   =
   { chunk_id = "c1"
   ; chunk_model = "m"
@@ -140,7 +141,7 @@ let test_chunk_has_non_empty_delta_content () =
   Alcotest.(check bool)
     "non-empty content is a token signal"
     true
-    (Streaming.chunk_has_non_empty_delta c)
+    (Openai_wire.chunk_has_non_empty_delta c)
 ;;
 
 let test_chunk_empty_delta_is_not_token () =
@@ -148,7 +149,7 @@ let test_chunk_empty_delta_is_not_token () =
   Alcotest.(check bool)
     "empty string content is not a token"
     false
-    (Streaming.chunk_has_non_empty_delta c)
+    (Openai_wire.chunk_has_non_empty_delta c)
 ;;
 
 let test_chunk_only_reasoning_is_token () =
@@ -156,7 +157,7 @@ let test_chunk_only_reasoning_is_token () =
   Alcotest.(check bool)
     "reasoning-only chunk is a token"
     true
-    (Streaming.chunk_has_non_empty_delta c)
+    (Openai_wire.chunk_has_non_empty_delta c)
 ;;
 
 let test_chunk_reasoning_details_is_token () =
@@ -172,7 +173,7 @@ let test_chunk_reasoning_details_is_token () =
   Alcotest.(check bool)
     "reasoning_details chunk is a token"
     true
-    (Streaming.chunk_has_non_empty_delta c)
+    (Openai_wire.chunk_has_non_empty_delta c)
 ;;
 
 let test_chunk_empty_reasoning_details_is_not_token () =
@@ -184,22 +185,22 @@ let test_chunk_empty_reasoning_details_is_not_token () =
   Alcotest.(check bool)
     "empty reasoning_details chunk is not a token"
     false
-    (Streaming.chunk_has_non_empty_delta c)
+    (Openai_wire.chunk_has_non_empty_delta c)
 ;;
 
 let test_chunk_tool_call_is_token () =
-  let tc : Streaming.openai_tool_call_delta =
+  let tc : Openai_wire.openai_tool_call_delta =
     { tc_index = 0
     ; tc_id = Some "call_1"
     ; tc_name = Some "fetch"
-    ; tc_arguments = Some (Streaming.Args_complete "{}")
+    ; tc_arguments = Some (Openai_wire.Args_complete "{}")
     }
   in
   let c = make_openai_chunk ~delta_tool_calls:[ tc ] () in
   Alcotest.(check bool)
     "tool_call delta is a token"
     true
-    (Streaming.chunk_has_non_empty_delta c)
+    (Openai_wire.chunk_has_non_empty_delta c)
 ;;
 
 let test_chunk_finish_only_is_not_token () =
@@ -207,7 +208,7 @@ let test_chunk_finish_only_is_not_token () =
   Alcotest.(check bool)
     "finish-only / empty chunk is not a token"
     false
-    (Streaming.chunk_has_non_empty_delta c)
+    (Openai_wire.chunk_has_non_empty_delta c)
 ;;
 
 let test_sse_event_message_start_is_not_token () =

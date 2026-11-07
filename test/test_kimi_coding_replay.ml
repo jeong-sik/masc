@@ -73,7 +73,7 @@ let assistant ~stream (config : Provider.Provider_config.t) ~tool ~reasoning ~co
       let state = Provider.Streaming.create_openai_stream_state () in
       let acc = Provider.Complete_stream_acc.create_stream_acc () in
       let feed wire =
-        let parsed = Provider.Streaming.parse_openai_sse_chunk
+        let parsed = Provider.Openai_wire.parse_openai_sse_chunk
             ~streaming_reasoning:dialect.streaming wire in
         let events, _ = Provider.Streaming.openai_sse_parse_result_to_events state parsed in
         List.iter (Provider.Complete_stream_acc.accumulate_event acc) events in

@@ -16,6 +16,7 @@ module MC = Llm_provider.Model_catalog
 module RD = Llm_provider.Reasoning_dialect
 module RE = Llm_provider.Reasoning_effort
 module S = Llm_provider.Streaming
+module OW = Llm_provider.Openai_wire
 open Alcotest
 open Llm_provider.Types
 open Yojson.Safe.Util
@@ -716,10 +717,11 @@ let test_ollama_cloud_openai_compat_streams_reasoning_delta () =
     {|{"id":"chatcmpl-ollama-minimax","object":"chat.completion.chunk","created":1782812554,"model":"minimax-m3","system_fingerprint":"fp_ollama","choices":[{"index":0,"delta":{"role":"assistant","content":"","reasoning":"9.9 is bigger."},"finish_reason":null}]}|}
   in
   let chunk =
-    match S.parse_openai_sse_chunk ~streaming_reasoning:dialect.streaming live_shape with
-    | S.Openai_chunk chunk -> chunk
-    | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
-    | S.Openai_undeclared_reasoning_member _
+    match OW.parse_openai_sse_chunk ~streaming_reasoning:dialect.streaming live_shape with
+    | OW.Openai_chunk chunk -> chunk
+    | OW.Openai_done | OW.Openai_empty | OW.Openai_provider_error _
+    | OW.Openai_parse_failed _
+    | OW.Openai_undeclared_reasoning_member _
       -> fail "expected Ollama Cloud OpenAI-compatible reasoning chunk"
   in
   check
@@ -925,10 +927,11 @@ let test_declared_reasoning_content_accumulates_as_typed_thinking () =
    | RD.No_streaming_reasoning | RD.Delta_field_and_details _ | RD.Template_parser ->
      fail "catalog qwen3.6 row must resolve the reasoning_content streaming dialect");
   let parse raw =
-    match S.parse_openai_sse_chunk ~streaming_reasoning:dialect.streaming raw with
-    | S.Openai_chunk chunk -> chunk
-    | S.Openai_done | S.Openai_empty | S.Openai_provider_error _ | S.Openai_parse_failed _
-    | S.Openai_undeclared_reasoning_member _
+    match OW.parse_openai_sse_chunk ~streaming_reasoning:dialect.streaming raw with
+    | OW.Openai_chunk chunk -> chunk
+    | OW.Openai_done | OW.Openai_empty | OW.Openai_provider_error _
+    | OW.Openai_parse_failed _
+    | OW.Openai_undeclared_reasoning_member _
       -> fail "expected Qwen reasoning_content SSE chunk"
   in
   let chunk1 =

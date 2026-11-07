@@ -597,7 +597,7 @@ let test_minimax_native_catalog_replay_for_model model_id =
         ~preserve_inline_content:(caps.content_inline_reasoning=Capabilities.Think_tags_with_chat_replay) () in
     let acc = Complete_stream_acc.create_stream_acc () in
     let feed wire =
-      let parsed = Streaming.parse_openai_sse_chunk
+      let parsed = Openai_wire.parse_openai_sse_chunk
           ~streaming_reasoning:dialect.streaming wire in
       let events, _ = Streaming.openai_sse_parse_result_to_events state parsed in
       List.iter (Complete_stream_acc.accumulate_event acc) events
@@ -1694,7 +1694,7 @@ let test_reported_openai_cost_reaches_sync_and_stream_usage () =
     let state = Streaming.create_openai_stream_state () in
     let acc = Complete_stream_acc.create_stream_acc () in
     let feed raw =
-      let parsed = Streaming.parse_openai_sse_chunk
+      let parsed = Openai_wire.parse_openai_sse_chunk
           ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning raw in
       let events, _ = Streaming.openai_sse_parse_result_to_events state parsed in
       List.iter (Complete_stream_acc.accumulate_event acc) events in
@@ -1733,7 +1733,7 @@ let test_partial_stream_usage_preserves_counter_presence () =
     let state = Streaming.create_openai_stream_state () in
     let acc = Complete_stream_acc.create_stream_acc () in
     let feed raw =
-      let parsed = Streaming.parse_openai_sse_chunk
+      let parsed = Openai_wire.parse_openai_sse_chunk
           ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning raw in
       let events, _ = Streaming.openai_sse_parse_result_to_events state parsed in
       List.iter (Complete_stream_acc.accumulate_event acc) events

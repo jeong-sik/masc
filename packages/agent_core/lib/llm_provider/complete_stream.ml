@@ -68,49 +68,49 @@ let record_streaming_metrics (metrics : Metrics.t) = function
 
 let%test "OpenAI-compatible parser preserves a typed provider error" =
   match
-    Streaming.parse_openai_sse_chunk
+    Openai_wire.parse_openai_sse_chunk
       ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning
       {|{"error":{"type":"rate_limit_exceeded","message":"slow down"}}|}
   with
-  | Streaming.Openai_provider_error { message; error_type; _ } ->
+  | Openai_wire.Openai_provider_error { message; error_type; _ } ->
     String.equal message "slow down"
     &&
       (match error_type with
       | Some "rate_limit_exceeded" -> true
       | Some _ | None -> false)
-  | Streaming.Openai_chunk _
-  | Streaming.Openai_done
-  | Streaming.Openai_empty
-  | Streaming.Openai_parse_failed _
-  | Streaming.Openai_undeclared_reasoning_member _ -> false
+  | Openai_wire.Openai_chunk _
+  | Openai_wire.Openai_done
+  | Openai_wire.Openai_empty
+  | Openai_wire.Openai_parse_failed _
+  | Openai_wire.Openai_undeclared_reasoning_member _ -> false
 ;;
 
 let%test "OpenAI-compatible parser classifies the DONE sentinel" =
   match
-    Streaming.parse_openai_sse_chunk
+    Openai_wire.parse_openai_sse_chunk
       ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning
       "[DONE]"
   with
-  | Streaming.Openai_done -> true
-  | Streaming.Openai_chunk _
-  | Streaming.Openai_empty
-  | Streaming.Openai_provider_error _
-  | Streaming.Openai_parse_failed _
-  | Streaming.Openai_undeclared_reasoning_member _ -> false
+  | Openai_wire.Openai_done -> true
+  | Openai_wire.Openai_chunk _
+  | Openai_wire.Openai_empty
+  | Openai_wire.Openai_provider_error _
+  | Openai_wire.Openai_parse_failed _
+  | Openai_wire.Openai_undeclared_reasoning_member _ -> false
 ;;
 
 let%test "OpenAI-compatible parser classifies a normal content chunk" =
   match
-    Streaming.parse_openai_sse_chunk
+    Openai_wire.parse_openai_sse_chunk
       ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning
       {|{"id":"c","choices":[{"delta":{"content":"hi"}}]}|}
   with
-  | Streaming.Openai_chunk _ -> true
-  | Streaming.Openai_done
-  | Streaming.Openai_empty
-  | Streaming.Openai_provider_error _
-  | Streaming.Openai_parse_failed _
-  | Streaming.Openai_undeclared_reasoning_member _ -> false
+  | Openai_wire.Openai_chunk _ -> true
+  | Openai_wire.Openai_done
+  | Openai_wire.Openai_empty
+  | Openai_wire.Openai_provider_error _
+  | Openai_wire.Openai_parse_failed _
+  | Openai_wire.Openai_undeclared_reasoning_member _ -> false
 ;;
 
 let%test "OpenAI-compatible parser reads only the declared reasoning member" =
@@ -118,27 +118,27 @@ let%test "OpenAI-compatible parser reads only the declared reasoning member" =
      documented member is not read in its place; it surfaces as the typed
      misdeclaration so the row gets corrected (F111). *)
   let parse field =
-    Streaming.parse_openai_sse_chunk
+    Openai_wire.parse_openai_sse_chunk
       ~streaming_reasoning:(Reasoning_dialect.Delta_field "reasoning_content")
       (Printf.sprintf {|{"id":"c","model":"m","choices":[{"delta":{%s}}]}|} field)
   in
   (match parse {|"reasoning":"pondering"|} with
-   | Streaming.Openai_undeclared_reasoning_member
+   | Openai_wire.Openai_undeclared_reasoning_member
        { declared = "reasoning_content"; member = "reasoning"; _ } -> true
-   | Streaming.Openai_undeclared_reasoning_member _
-   | Streaming.Openai_chunk _
-   | Streaming.Openai_done
-   | Streaming.Openai_empty
-   | Streaming.Openai_provider_error _
-   | Streaming.Openai_parse_failed _ -> false)
+   | Openai_wire.Openai_undeclared_reasoning_member _
+   | Openai_wire.Openai_chunk _
+   | Openai_wire.Openai_done
+   | Openai_wire.Openai_empty
+   | Openai_wire.Openai_provider_error _
+   | Openai_wire.Openai_parse_failed _ -> false)
   &&
   match parse {|"reasoning_content":"declared","reasoning":"shadowed"|} with
-  | Streaming.Openai_chunk chunk -> chunk.delta_reasoning = Some "declared"
-  | Streaming.Openai_undeclared_reasoning_member _
-  | Streaming.Openai_done
-  | Streaming.Openai_empty
-  | Streaming.Openai_provider_error _
-  | Streaming.Openai_parse_failed _ -> false
+  | Openai_wire.Openai_chunk chunk -> chunk.delta_reasoning = Some "declared"
+  | Openai_wire.Openai_undeclared_reasoning_member _
+  | Openai_wire.Openai_done
+  | Openai_wire.Openai_empty
+  | Openai_wire.Openai_provider_error _
+  | Openai_wire.Openai_parse_failed _ -> false
 ;;
 
 (* Native reasoning dialect and inline content framing are independent axes.
@@ -161,7 +161,7 @@ let accumulate_events acc events =
 
 let accumulate_openai_payload acc state payload =
   let events, _telemetry =
-    Streaming.parse_openai_sse_chunk
+    Openai_wire.parse_openai_sse_chunk
       ~streaming_reasoning:Reasoning_dialect.No_streaming_reasoning
       payload
     |> Streaming.openai_sse_parse_result_to_events state
@@ -1009,20 +1009,20 @@ let complete_stream_http
                                  data
                              | Provider_http_codec.Openai_chat ->
                                let parsed =
-                                 Streaming.parse_openai_sse_chunk
+                                 Openai_wire.parse_openai_sse_chunk
                                    ~streaming_reasoning
                                    data
                                in
                                (match parsed with
-                                | Streaming.Openai_chunk
+                                | Openai_wire.Openai_chunk
                                     { chunk_timings = Some _ as t; _ } ->
                                   stream_timings := t
-                                | Streaming.Openai_chunk { chunk_timings = None; _ }
-                                | Streaming.Openai_done
-                                | Streaming.Openai_empty
-                                | Streaming.Openai_provider_error _
-                                | Streaming.Openai_parse_failed _
-                                | Streaming.Openai_undeclared_reasoning_member _ -> ());
+                                | Openai_wire.Openai_chunk { chunk_timings = None; _ }
+                                | Openai_wire.Openai_done
+                                | Openai_wire.Openai_empty
+                                | Openai_wire.Openai_provider_error _
+                                | Openai_wire.Openai_parse_failed _
+                                | Openai_wire.Openai_undeclared_reasoning_member _ -> ());
                                Streaming.openai_sse_parse_result_to_events
                                  (get_state ())
                                  parsed
@@ -1074,15 +1074,15 @@ let complete_stream_http
                                    data
                                in
                                (match parsed with
-                                | Streaming.Openai_chunk
+                                | Openai_wire.Openai_chunk
                                     { chunk_timings = Some _ as t; _ } ->
                                   stream_timings := t
-                                | Streaming.Openai_chunk { chunk_timings = None; _ }
-                                | Streaming.Openai_done
-                                | Streaming.Openai_empty
-                                | Streaming.Openai_provider_error _
-                                | Streaming.Openai_parse_failed _
-                                | Streaming.Openai_undeclared_reasoning_member _ -> ());
+                                | Openai_wire.Openai_chunk { chunk_timings = None; _ }
+                                | Openai_wire.Openai_done
+                                | Openai_wire.Openai_empty
+                                | Openai_wire.Openai_provider_error _
+                                | Openai_wire.Openai_parse_failed _
+                                | Openai_wire.Openai_undeclared_reasoning_member _ -> ());
                                Streaming.openai_sse_parse_result_to_events
                                  (get_state ())
                                  parsed

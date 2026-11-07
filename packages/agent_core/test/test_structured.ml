@@ -522,6 +522,7 @@ let test_multiple_text_blocks_are_ambiguous_even_at_whitespace_boundaries () =
 (* #27868: exercise wire parser -> canonical response -> structured outcome,
    rather than constructing the terminal stop reason in the fixture. *)
 module Wire_stream = Llm_provider.Streaming
+module Wire_openai = Llm_provider.Openai_wire
 module Wire_gemini = Llm_provider.Gemini_wire
 module Wire_acc = Llm_provider.Complete_stream_acc
 
@@ -567,7 +568,7 @@ let test_chat_wire_states_reach_structured () =
     let state = Wire_stream.create_openai_stream_state () in
     let acc = Wire_acc.create_stream_acc () in
     let feed wire =
-      let parsed = Wire_stream.parse_openai_sse_chunk
+      let parsed = Wire_openai.parse_openai_sse_chunk
           ~streaming_reasoning:Llm_provider.Reasoning_dialect.No_streaming_reasoning wire in
       let events, _ = Wire_stream.openai_sse_parse_result_to_events state parsed in
       List.iter (Wire_acc.accumulate_event acc) events in

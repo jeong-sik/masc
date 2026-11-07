@@ -1221,8 +1221,52 @@ let auth_cmd =
           Masc_cli_auth.invite ~base_path:(Env_config.normalize_masc_base_path_input base_path))
         $ base_path)
   in
+  let preview_cmd =
+    let doc =
+      "Serve a localhost preview of multi-account login on 127.0.0.1, while no \
+       server runs on the workspace."
+    in
+    let man =
+      [ `S Manpage.s_description
+      ; `P
+          "A person signs in with GitHub, sees who the server takes them for, \
+           and signs out. The preview serves the login routes, two pages and \
+           GET /api/v1/auth/whoami, and no Keeper, Runtime, MCP or Board route. \
+           It takes the workspace lease until it stops."
+      ; `P
+          "The workspace must be activated with masc auth bootstrap. Make the \
+           invitation link with MASC_HTTP_BASE_URL=http://127.0.0.1:PORT so it \
+           opens the preview."
+      ; `P
+          ("The GitHub OAuth App needs the callback URL \
+            http://127.0.0.1/auth/github/callback; GitHub takes a loopback \
+            redirect on any port. Its client secret is read from "
+           ^ Masc_cli_auth.github_client_secret_env
+           ^ ".")
+      ]
+    in
+    let port =
+      let doc = "The port on 127.0.0.1." in
+      Arg.(value & opt int Masc_cli_auth.default_preview_port & info [ "port" ] ~docv:"PORT" ~doc)
+    in
+    let github_client_id =
+      let doc = "The client ID of the GitHub OAuth App." in
+      Arg.(required & opt (some string) None & info [ "github-client-id" ] ~docv:"ID" ~doc)
+    in
+    Cmd.v
+      (Cmd.info "preview" ~doc ~man)
+      Term.(
+        const (fun base_path port github_client_id ->
+          Masc_cli_auth.preview
+            ~base_path:(Env_config.normalize_masc_base_path_input base_path)
+            ~port
+            ~github_client_id)
+        $ base_path
+        $ port
+        $ github_client_id)
+  in
   let doc = "Set up multi-account authorization on this workspace." in
-  Cmd.group (Cmd.info "auth" ~doc) [ bootstrap_cmd; invite_cmd ]
+  Cmd.group (Cmd.info "auth" ~doc) [ bootstrap_cmd; invite_cmd; preview_cmd ]
 
 let login_cmd =
   let doc =

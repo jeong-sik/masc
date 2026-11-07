@@ -167,15 +167,66 @@ let remove t request reqd =
 ;;
 
 let access = Server_route.Self_authenticated Route_access.Browser_session
+let github_callback_path = "/auth/github/callback"
 
 let add_routes t router =
   router
   |> Server_route.post access "/auth/oidc/start" (start t R.Google)
   |> Server_route.get access "/auth/oidc/callback" (callback t R.Google)
   |> Server_route.post access "/auth/github/start" (start t R.Github)
-  |> Server_route.get access "/auth/github/callback" (callback t R.Github)
+  |> Server_route.get access github_callback_path (callback t R.Github)
   |> Server_route.post access "/auth/logout" (logout t)
   |> Server_route.get access "/auth/session" (session t)
   |> Server_route.post access allowlist_path (register t)
   |> Server_route.prefix_delete access allowlist_entry_prefix (remove t)
+;;
+
+(* ---- the localhost preview (plan, preview scope P3) ---- *)
+
+let whoami_path = "/api/v1/auth/whoami"
+let ms_per_second = 1000.
+
+(* Every value of a session cookie, so that two of them are several
+   credentials; [cookie] gives only the first. *)
+let session_cookie_values (request : Httpun.Request.t) =
+  Httpun.Headers.get_multi request.headers "cookie"
+  |> List.concat_map (fun raw ->
+    Cohttp.Header.init_with "cookie" raw |> Cohttp.Cookie.Cookie_hdr.extract)
+  |> List.filter_map (fun (name, value) ->
+    match String.equal name Q.session_cookie, String.trim value with
+    | false, (_ : string) | true, "" -> None
+    | true, value -> Some value)
+;;
+
+let gate_request ~request_authority (request : Httpun.Request.t) =
+  { Auth_gate.credentials =
+      { Authz_credential_presentation.authorization =
+          Httpun.Headers.get_multi request.headers Server_auth.authorization_header_name
+      ; internal_token = Httpun.Headers.get_multi request.headers Server_auth.internal_token_header_name
+      ; session_cookies = session_cookie_values request
+      ; query_credential = Server_auth.request_carries_query_credential request
+      }
+  ; method_ = method_of request
+  ; origin = origin_of ~request_authority request
+  ; csrf = Http.Request.header request Q.csrf_header
+  }
+;;
+
+let page answer_of (t : R.t) (_ : Httpun.Request.t) reqd = respond reqd (answer_of ~nonce:(t.draw ()))
+
+let whoami (t : R.t) request reqd =
+  with_authority reqd (fun request_authority ->
+    respond
+      reqd
+      (Auth_preview.whoami
+         (Authz_zone.snapshot t.zone).Authz_zone.state
+         ~now_ms:(int_of_float (Ptime.to_float_s (t.now ()) *. ms_per_second))
+         (gate_request ~request_authority request)))
+;;
+
+let add_preview_routes t router =
+  router
+  |> Server_route.get Server_route.Always_public "/" (page Auth_preview.home_page t)
+  |> Server_route.get Server_route.Always_public Authz_activation.invitation_path (page Auth_preview.invite_page t)
+  |> Server_route.get access whoami_path (whoami t)
 ;;

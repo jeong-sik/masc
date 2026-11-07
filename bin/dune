@@ -65,6 +65,7 @@
   cmdliner
   eio
   eio_main
+  ptime.clock
   h2-eio
   httpun-eio
   gluten-eio

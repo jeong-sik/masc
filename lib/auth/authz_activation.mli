@@ -113,6 +113,15 @@ type invite_error =
 
 val invite_error_to_string : invite_error -> string
 
+(** The external store of an installation where a boot finds [Multi_account]
+    with an external store that matches the log, as {!invite} needs it. The
+    localhost preview opens its zone over this store (plan, preview scope). *)
+val active_store
+  :  base_path:string
+  -> config_dir:string option
+  -> anonymous_mutations:bool
+  -> (string, invite_error) result
+
 (** [masc auth invite]: one more Admin invitation, written by the host-local
     operator, on an installation that {!activate} activated. A first invitation
     may expire before it is spent, or its link may be lost. It goes on only

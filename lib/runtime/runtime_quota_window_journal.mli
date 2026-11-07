@@ -16,9 +16,9 @@
     not taken; it is never replaced by a default.
 
     Only stated windows reach the store ({!Runtime_quota_window.set_stated_window_sink}).
-    An observation without a reset ends with the next success, which the
-    store does not see, so keeping one would let a restart bring back a
-    refusal that a later success had already answered. *)
+    An observation without a reset ends at its fallback cap or with the next
+    success, which the store does not see, so keeping one would let a restart
+    bring back a refusal that a later success had already answered. *)
 
 val path : base_path:string -> string
 (** [<base_path>/.masc/provider-quota-windows.jsonl]. *)

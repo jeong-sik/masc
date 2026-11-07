@@ -3613,7 +3613,8 @@ let render_repository_changes_diff (state : state) ~path =
    provider side is refusing work for quota is "alive on paper" and the
    operator asked to see that distinction (2026-09-12). [resets_at] is the
    provider-stated deadline; its absence means a hard-quota rejection that
-   claimed no reset -- cleared by the next success on the scope. *)
+   claimed no reset -- it rests until the fallback cap after it was noted,
+   and the next success on the scope clears it sooner. *)
 let runtime_quota_badge (runtime : Masc.Tui_decode.runtime_option) =
   Option.map (fun label -> Theme.warn () ^ label ^ Ansi.reset)
     (runtime_quota_label runtime)

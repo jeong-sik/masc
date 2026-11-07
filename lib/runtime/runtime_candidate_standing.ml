@@ -5,7 +5,10 @@ type walk_start =
   | Every_mark_demotes
 
 type policy =
-  | Keeper_walk of walk_start
+  | Keeper_walk of
+      { start : walk_start
+      ; rest_sec : retry_after:float option -> float
+      }
   | Rate_rest_only of { rest_sec : retry_after:float option -> float }
 
 type demotion = Not_demoted | Failed_without_rest | Told_to_rest
@@ -21,18 +24,18 @@ let order ~now ~policy ~quota_scope_of ~candidate_backpressure_of candidates =
     else match observed with
     | None -> Not_demoted
     | Some {Backpressure.rate_limit; failed_attempt} ->
+      let rest_sec = match policy with
+        | Keeper_walk {rest_sec; start = _} | Rate_rest_only {rest_sec} -> rest_sec in
       let rate_rests = match rate_limit with
         | None -> false
         | Some (Backpressure.Unknown_scope_rate_limit {noted_at; retry_after}) ->
-          (match policy with
-           | Keeper_walk (Fresh_walk_by _ | Every_mark_demotes) -> true
-           | Rate_rest_only {rest_sec} ->
-             Float.compare now (noted_at +. rest_sec ~retry_after) < 0) in
+          Float.compare now (noted_at +. rest_sec ~retry_after) < 0 in
       if rate_rests then Told_to_rest
       else match policy, failed_attempt with
         | Rate_rest_only _, (Some _ | None)
-        | Keeper_walk (Fresh_walk_by _ | Every_mark_demotes), None -> Not_demoted
-        | Keeper_walk walk, Some (Backpressure.Failed_attempt {recorded_by; _}) ->
+        | Keeper_walk _, None -> Not_demoted
+        | Keeper_walk {start = walk; rest_sec = _},
+          Some (Backpressure.Failed_attempt {recorded_by; _}) ->
           (match walk with
            | Fresh_walk_by walker when Backpressure.same_recorder walker recorded_by -> Not_demoted
            | Fresh_walk_by _ | Every_mark_demotes -> Failed_without_rest)

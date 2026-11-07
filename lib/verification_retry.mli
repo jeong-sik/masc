@@ -7,5 +7,6 @@ val provider_rest : string -> Task.Anti_rationalization.provider_rest
 (** Whether a review candidate's path rests until a time its provider stated,
     read now from the stores the provider walk writes — the same rest
     {!delay} dates the retry from. [Rests_until_stated_end] while that time is
-    ahead; [No_stated_rest] for a serving path, a rest with no stated end, and
-    an id the runtime table cannot resolve. *)
+    ahead; [No_stated_rest] for a serving path, a rest whose end MASC bounded
+    because the provider stated none, and an id the runtime table cannot
+    resolve. *)

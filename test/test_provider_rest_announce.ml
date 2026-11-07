@@ -151,6 +151,46 @@ let test_moved_rests_announce_their_keepers () =
          | Error `Timeout -> ())))
 ;;
 
+(* A quota observation without a reset stops showing the runtime exhausted
+   at its fallback cap, and nothing is written then. The time the runtime
+   document names for its next change must be that end, or the loop sleeps
+   past it and the Usage view keeps the stale standing. *)
+let test_an_observation_without_a_reset_names_its_end_as_the_next_change () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Unix.realpath (Filename.temp_dir "provider-rest-standing-" "") in
+  let original = Runtime.For_testing.snapshot () in
+  Runtime_quota_window.reset_for_testing ();
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore original;
+      Runtime_quota_window.reset_for_testing ();
+      Fs_compat.remove_tree base_path)
+    (fun () ->
+      let path = Filename.concat base_path "runtime.toml" in
+      Out_channel.with_open_bin path (fun oc -> output_string oc runtime_toml);
+      (match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error error -> failf "runtime.toml did not load: %s" error);
+      let runtime =
+        match Runtime.get_runtime_by_id "p.m1" with
+        | Some (runtime : Runtime_instance.t) -> runtime
+        | None -> fail "the default runtime is not loaded"
+      in
+      (* A rate limit an earlier case left would name its own end first. *)
+      Runtime_candidate_backpressure.note_candidate_success
+        ~candidate:runtime.candidate_backpressure;
+      let scope = Runtime_instance.quota_scope_of_runtime runtime in
+      Runtime_quota_window.note_observed_exhausted ~scope;
+      let now = Unix.gettimeofday () in
+      match Runtime_quota_window.rest ~scope ~now with
+      | Some (Runtime_quota_window.Observed_until ends_at) ->
+        check (option (float 0.0)) "the next change is the observation's end" (Some ends_at)
+          (Server_dashboard_runtime_resolved_json.next_standing_change_at ~now)
+      | Some (Runtime_quota_window.Reset_stated _) | None ->
+        fail "an observation without a reset rests until its fallback cap")
+;;
+
 let () =
   run "provider_rest_announce"
     [ ( "records"
@@ -159,5 +199,8 @@ let () =
     ; ( "rows"
       , [ test_case "moved rests announce their Keepers" `Quick
             test_moved_rests_announce_their_keepers ] )
+    ; ( "standing"
+      , [ test_case "an observation without a reset names its end as the next change" `Quick
+            test_an_observation_without_a_reset_names_its_end_as_the_next_change ] )
     ]
 ;;

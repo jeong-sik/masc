@@ -190,13 +190,13 @@ type account_refusal_read =
       (** Spent gating windows belong to more than one limit (their limit
           ids, sorted; [None] for a window that names none). A refusal does
           not name the limit that refused it, so no reset is the rest: the
-          scope rests until its next success, as [Spent_without_reset]. *)
+          scope rests on the hard-quota fallback, as [Spent_without_reset]. *)
   | No_window_spent
       (** Every gating window has headroom, and the read rests nothing.
           After a 403 the refusal is not a spent quota (a blocked client, a
           suspended account); after a 429 it is a throttle, which the walk
           rests on the throttle floor; after a hard quota the refusal's own
-          observation rests the scope until its next success. *)
+          observation rests the scope on the hard-quota fallback. *)
 
 val account_refusal_read_of_report :
   Runtime_provider_usage_window.report -> account_refusal_read
@@ -232,7 +232,7 @@ type account_refusal_skip =
   | Scope_read_found_no_reset
       (** A read already found the scope's gating window spent with no reset
           ({!Runtime_quota_window.note_read_without_reset}); another read
-          would find the same until a success clears it. *)
+          would find the same while that rest lasts. *)
   | Already_reading  (** A read for this scope is running. *)
   | No_net_or_clock  (** No Eio net or clock is installed. *)
 

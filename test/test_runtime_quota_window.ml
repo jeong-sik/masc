@@ -54,27 +54,38 @@ let test_later_reset_extends_earlier_is_ignored () =
 let candidates =
   [ "claude_code.sonnet"; "ollama.qwen"; "claude_code.opus"; "codex.spark" ]
 
-(* An observation is a fact without an end time. Both metered providers this
-   fleet reaches 429 without Retry-After (2026-09-06), so a table that only
-   records stated windows stays empty while every lane re-dispatches into a
-   spent account. *)
+(* An observation is a fact the provider gave no end time. Both metered
+   providers this fleet reaches 429 without Retry-After (2026-09-06), so a
+   table that only records stated windows stays empty while every lane
+   re-dispatches into a spent account. *)
 let test_an_observation_demotes_and_a_success_clears_it () =
   reset ();
   let scope = provider_scope "ollama_cloud" in
+  let cap = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
   Alcotest.(check bool) "nothing recorded" false (Q.is_exhausted ~scope ~now:100.0);
+  let before_the_note = Unix.gettimeofday () in
   Q.note_observed_exhausted ~scope;
+  let after_the_note = Unix.gettimeofday () in
   Alcotest.(check bool) "an observation holds it back" true
     (Q.is_exhausted ~scope ~now:100.0);
-  (* No time is claimed, so no time answers when it ends. *)
+  (* The provider claimed no time, so no reset answers when it ends. *)
   Alcotest.(check (option (float 0.0)))
     "an observation names no reset"
     None
     (Q.active_until ~scope ~now:100.0);
-  (* And it does not age out: a clock cannot know a quota came back. *)
-  Alcotest.(check bool) "time alone does not clear it" true
-    (Q.is_exhausted ~scope ~now:1_000_000.0);
+  (* MASC ends it at the fallback cap after it was noted
+     (RFC-provider-path-rest §3.3, 2026-11-06). *)
+  Alcotest.(check bool) "it rests until the cap after it was noted" true
+    (match Q.rest ~scope ~now:100.0 with
+     | Some (Q.Observed_until rests_until) ->
+       Float.compare rests_until (before_the_note +. cap) >= 0
+       && Float.compare rests_until (after_the_note +. cap) <= 0
+     | Some (Q.Reset_stated _) | None -> false);
+  Alcotest.(check bool) "after the cap it holds nothing back" false
+    (Q.is_exhausted ~scope ~now:(after_the_note +. cap));
+  Q.note_observed_exhausted ~scope;
   Q.note_succeeded ~scope;
-  Alcotest.(check bool) "a call getting through clears it" false
+  Alcotest.(check bool) "a call getting through clears it sooner" false
     (Q.is_exhausted ~scope ~now:100.0)
 ;;
 
@@ -148,7 +159,16 @@ let test_a_read_without_reset_answers_what_a_refusal_asks () =
   Alcotest.(check string) "a success clears the answer" "open" (answered ());
   Q.note_exhausted ~scope ~resets_at:500.0;
   Alcotest.(check string) "a stated reset still ahead is an answer" "stated reset ahead"
-    (answered ())
+    (answered ());
+  let read_scope = provider_scope "api_z_ai_read" in
+  Q.note_read_without_reset ~scope:read_scope;
+  Alcotest.(check bool) "a read's answer lasts only as long as its rest" true
+    (Option.is_none
+       (Q.answered_rest ~scope:read_scope
+          ~now:
+            (Unix.gettimeofday ()
+             +. Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec
+             +. 1.0)))
 ;;
 
 (* The safety line. Demotion is ordering, not admission: an observed scope is

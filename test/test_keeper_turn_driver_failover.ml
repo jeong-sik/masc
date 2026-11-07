@@ -2191,9 +2191,11 @@ let test_lane_media_reroute_stays_in_lane () =
             ~first_candidate:head
             ~remaining_runtimes:[ runtime "lanevision.vision_model" ])))
 
-(* A lane candidate whose account answered a hard quota rejection moves behind
-   the live lane candidates, so the reroute picks a live one and the image walk
-   visits the exhausted one last. A text turn keeps its lane order. *)
+(* A lane candidate whose account answered a hard quota rejection with no
+   stated reset rests until the fallback cap. Until then the reroute picks the
+   live candidate, the image walk leaves the resting one out, and the turn
+   reaches it only in the degrade tail; after the cap it is back in the image
+   walk. A text turn keeps its lane order. *)
 let test_lane_media_reroute_walks_past_exhausted_candidate () =
   with_runtime_config runtime_toml_media_lane_with_two_vision_candidates (fun () ->
     Runtime_quota_window.reset_for_testing ();
@@ -2209,19 +2211,18 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
       let backupvision = runtime "backupvision.vision_model" in
       Runtime_quota_window.note_observed_exhausted
         ~scope:(Runtime_instance.quota_scope_of_runtime lanevision);
-      let candidates =
+      let now = Unix.gettimeofday () in
+      let candidates_at now =
         Driver.For_testing.modality_reroute_candidates ~walk:(Driver.Fresh_walk_by test_recorder)
-          ~now:(Unix.gettimeofday ())
+          ~now
           ~deferred_runtime_lane:None
           ~first_candidate:head
           ~remaining_runtimes:[ lanevision; backupvision ]
       in
+      let candidates = candidates_at now in
       Alcotest.(check (list string))
-        "the exhausted lane candidate moves behind the live one"
-        [ "primary.text_model"
-        ; "backupvision.vision_model"
-        ; "lanevision.vision_model"
-        ]
+        "the resting lane candidate is left out until the cap"
+        [ "primary.text_model"; "backupvision.vision_model" ]
         (ids candidates);
       let image_block =
         Agent_core.Types.Image
@@ -2248,23 +2249,32 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
          Alcotest.fail "two image-capable candidates are in the lane");
       let media_walk = Runtime_agent.media_walk ~candidates [ image_block ] in
       Alcotest.(check (list string))
-        "the image walk holds the image-capable candidates, live first"
-        [ "backupvision.vision_model"; "lanevision.vision_model" ]
+        "the image walk holds only the live image-capable candidate"
+        [ "backupvision.vision_model" ]
         (ids media_walk);
       (* The text-only head is still walked after the image candidates, where
          per-attempt projection turns the image into a reading, so a turn whose
          media candidates all answer 402 degrades instead of ending in an
-         error. *)
+         error. The resting candidate keeps its lane place in that tail. *)
       Alcotest.(check (list string))
-        "the turn walks the live candidate, then the exhausted one, then degrades"
+        "the turn walks the live candidate, degrades on the head, then reaches the resting one"
         [ "backupvision.vision_model"
-        ; "lanevision.vision_model"
         ; "primary.text_model"
+        ; "lanevision.vision_model"
         ]
         (ids
            (Driver.For_testing.attempt_runtimes_for_turn
               ~media_walk
               ~lane:[ head; lanevision; backupvision ]));
+      let after_the_cap =
+        now +. Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec +. 1.0
+      in
+      Alcotest.(check (list string))
+        "after the cap the image walk holds both candidates in lane order"
+        [ "lanevision.vision_model"; "backupvision.vision_model" ]
+        (ids
+           (Runtime_agent.media_walk ~candidates:(candidates_at after_the_cap)
+              [ image_block ]));
       (* The degrade tail keeps the lane's declared order. Stand-ins: the
          function orders by identity, so any three runtimes show it. *)
       Alcotest.(check (list string))
@@ -2294,7 +2304,9 @@ let test_lane_media_reroute_walks_past_exhausted_candidate () =
    decision reads capability, not the account -- so the exhausted head is still
    the head after the decision. The turn must start from the walk anyway, or
    every image turn calls the dead account first while a live lane candidate
-   sits behind it. *)
+   sits behind it. The head's quota observation states no reset, so it rests
+   until the fallback cap: the walk leaves it out, and the turn reaches it at
+   its lane place after the live candidate. *)
 let test_media_turn_starts_from_the_live_walk_head () =
   with_runtime_config runtime_toml_media_lane_with_two_vision_candidates (fun () ->
     Runtime_quota_window.reset_for_testing ();
@@ -2340,8 +2352,8 @@ let test_media_turn_starts_from_the_live_walk_head () =
          Alcotest.fail "the assigned runtime takes the image");
       let media_walk = Runtime_agent.media_walk ~candidates [ image_block ] in
       Alcotest.(check (list string))
-        "the walk puts the live candidate ahead of the exhausted head"
-        [ "backupvision.vision_model"; "lanevision.vision_model" ]
+        "the walk leaves the resting head out and leads with the live candidate"
+        [ "backupvision.vision_model" ]
         (ids media_walk);
       Alcotest.(check (list string))
         "the turn starts from the live candidate, not the exhausted head"
@@ -2356,13 +2368,12 @@ let test_media_turn_starts_from_the_live_walk_head () =
 
 (* A text-only lane head and one image-capable candidate whose path rests: the
    lane shape that sent every image turn to a weekly-limited account and back
-   to the head (2026-10-20). A rest that ends at a known time -- a rate limit
-   with or without a stated wait, or a quota window with a stated reset --
-   keeps the candidate out of the reroute until then, so the turn degrades on
-   the serving head and reaches the resting one only after it; at the release
-   the candidate leads image turns again. A quota observation names no end and
-   only an answer clears it, so it never keeps the candidate out: the image
-   turn still leads with it, which is the dispatch that can clear it. *)
+   to the head (2026-10-20). Every rest ends at a known time -- a rate limit
+   with or without a stated wait, a quota window with a stated reset, a quota
+   observation at the fallback cap -- and keeps the candidate out of the
+   reroute until then, so the turn degrades on the serving head and reaches
+   the resting one only after it; at the release the candidate leads image
+   turns again. *)
 let test_image_turn_degrades_while_its_capable_candidate_rests () =
   let stated_sec = 3600.0 in
   let rests =
@@ -2371,24 +2382,24 @@ let test_image_turn_degrades_while_its_capable_candidate_rests () =
           Runtime_candidate_backpressure.note_rate_limit
             ~candidate:runtime.candidate_backpressure
             ~retry_after:(Some stated_sec))
-      , Some stated_sec )
+      , stated_sec )
     ; ( "unstated rate limit"
       , (fun (runtime : Runtime_instance.t) ->
           Runtime_candidate_backpressure.note_rate_limit
             ~candidate:runtime.candidate_backpressure
             ~retry_after:None)
-      , Some Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec )
+      , Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec )
     ; ( "dated quota window"
       , (fun (runtime : Runtime_instance.t) ->
           Runtime_quota_window.note_exhausted
             ~scope:(Runtime_instance.quota_scope_of_runtime runtime)
             ~resets_at:(Unix.gettimeofday () +. stated_sec))
-      , Some stated_sec )
+      , stated_sec )
     ; ( "quota observation"
       , (fun (runtime : Runtime_instance.t) ->
           Runtime_quota_window.note_observed_exhausted
             ~scope:(Runtime_instance.quota_scope_of_runtime runtime))
-      , None )
+      , Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec )
     ]
   in
   List.iter
@@ -2460,27 +2471,24 @@ let test_image_turn_degrades_while_its_capable_candidate_rests () =
                Alcotest.failf "%s: %s, the candidate must lead the image turn" store what
            in
            let now = Unix.gettimeofday () in
-           match release_after with
-           | None -> candidate_leads now "with no end to wait for"
-           | Some release_after ->
-             (match turn_at now with
-              | Runtime_agent.No_capable_runtime { required }, attempts ->
-                Alcotest.(check (list string))
-                  (store ^ ": the turn degrades for the image")
-                  [ "image" ]
-                  required;
-                Alcotest.(check (list string))
-                  (store ^ ": the serving head runs first, the resting candidate after it")
-                  [ "primary.text_model"; "lanevision.vision_model" ]
-                  attempts
-              | Runtime_agent.Reroute { target; _ }, _ ->
-                Alcotest.failf
-                  "%s: the image turn rerouted to %s while it rests"
-                  store
-                  target.Runtime_instance.id
-              | Runtime_agent.No_reroute_needed, _ ->
-                Alcotest.failf "%s: a text-only head must not claim the image" store);
-             candidate_leads (now +. release_after +. 1.0) "after its release")))
+           (match turn_at now with
+            | Runtime_agent.No_capable_runtime { required }, attempts ->
+              Alcotest.(check (list string))
+                (store ^ ": the turn degrades for the image")
+                [ "image" ]
+                required;
+              Alcotest.(check (list string))
+                (store ^ ": the serving head runs first, the resting candidate after it")
+                [ "primary.text_model"; "lanevision.vision_model" ]
+                attempts
+            | Runtime_agent.Reroute { target; _ }, _ ->
+              Alcotest.failf
+                "%s: the image turn rerouted to %s while it rests"
+                store
+                target.Runtime_instance.id
+            | Runtime_agent.No_reroute_needed, _ ->
+              Alcotest.failf "%s: a text-only head must not claim the image" store);
+           candidate_leads (now +. release_after +. 1.0) "after its release")))
     rests
 
 (* RFC-0440 §3: a 402 belongs to the candidate's account, so the walk moves to
@@ -3831,9 +3839,13 @@ let test_a_429_without_a_wait_and_a_spent_window_rests_until_its_reset () =
         (Some resets_at)
         (Runtime_quota_window.active_until ~scope:refused_scope ~now);
       match Driver.path_rest ~now refused with
-      | Driver.Path_resting { release_at; walk_promotes_at_release = _ } ->
+      | Driver.Path_resting { release_at; release_basis } ->
         Alcotest.(check (float 0.0)) "the path rests until the reset, not the throttle floor"
-          resets_at release_at
+          resets_at release_at;
+        Alcotest.(check bool) "the reset the read found is the provider's" true
+          (match release_basis with
+           | Driver.Stated_by_provider -> true
+           | Driver.Bounded_by_masc -> false)
       | Driver.Path_serving -> Alcotest.fail "the refused path serves again")
 ;;
 
@@ -3846,13 +3858,47 @@ let test_a_429_without_a_wait_and_headroom_rests_only_the_floor () =
       Alcotest.(check bool) "a throttle with headroom is not a spent quota" false
         (Runtime_quota_window.is_exhausted ~scope:refused_scope ~now);
       match Driver.path_rest ~now refused with
-      | Driver.Path_resting { release_at; walk_promotes_at_release = _ } ->
+      | Driver.Path_resting { release_at; release_basis = _ } ->
         Alcotest.(check bool) "the path rests the throttle floor" true
           (Float.compare
              release_at
              (now +. Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec)
            <= 0)
       | Driver.Path_serving -> Alcotest.fail "a throttled path serves at once")
+;;
+
+(* Who set a path's release is read from the rest that ends last, because
+   that end is the release. A 429 that states a wait past the fallback cap
+   outlasts a quota observation, so the provider set the release; a shorter
+   stated wait is outlasted by the cap, so MASC bounded it. *)
+let test_the_rest_that_ends_last_names_who_set_the_release () =
+  let cap = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_cap_sec in
+  let basis_name = function
+    | Driver.Stated_by_provider -> "stated_by_provider"
+    | Driver.Bounded_by_masc -> "bounded_by_masc"
+  in
+  List.iter
+    (fun (stated_sec, expected, label) ->
+       with_runtime_config runtime_toml_quota_lane (fun () ->
+         reset_quota_lane_rests ();
+         Fun.protect ~finally:reset_quota_lane_rests (fun () ->
+           let id = "shared_a.test_model" in
+           let runtime = Option.get (Runtime.get_runtime_by_id id) in
+           Runtime_candidate_backpressure.note_rate_limit
+             ~candidate:runtime.candidate_backpressure ~retry_after:(Some stated_sec);
+           Runtime_quota_window.note_observed_exhausted
+             ~scope:(Option.get (Runtime.quota_scope_of_runtime_id id));
+           match Driver.path_rest ~now:(Unix.gettimeofday ()) id with
+           | Driver.Path_resting { release_basis; release_at = _ } ->
+             Alcotest.(check string) label (basis_name expected) (basis_name release_basis)
+           | Driver.Path_serving -> Alcotest.failf "%s: the path serves" label)))
+    [ ( cap +. 3600.0
+      , Driver.Stated_by_provider
+      , "a stated wait past the cap: the provider set the release" )
+    ; ( cap /. 2.0
+      , Driver.Bounded_by_masc
+      , "a stated wait inside the cap: MASC bounded the release" )
+    ]
 ;;
 
 let test_a_429_that_states_its_wait_reads_nothing () =
@@ -3953,7 +3999,7 @@ let quota_lane_wait ~now =
 
 (* 2026-11-06 06:04:32Z: GLM refused wkbl-front's chain with 1308 and came back
    at 06:20:44Z, but the failed cycle planned a 323,727 s wait for the resting
-   head, because GLM's rest named no time and the walk does not promote such a
+   head: GLM's rest named no time, and the walk then did not promote such a
    path at its release. The usage read dates GLM's rest, so the wait ends when
    GLM's window resets. *)
 let test_a_hard_quota_without_a_reset_waits_for_the_dated_usage_window () =
@@ -3968,13 +4014,39 @@ let test_a_hard_quota_without_a_reset_waits_for_the_dated_usage_window () =
       Alcotest.(check (list string)) "the declared usage endpoint is read once"
         [ "https://127.0.0.1/api/monitor/usage/quota/limit" ] (List.rev !fetched);
       (match Driver.path_rest ~now glm with
-       | Driver.Path_resting { release_at; walk_promotes_at_release } ->
+       | Driver.Path_resting { release_at; release_basis } ->
          Alcotest.(check (float 0.0)) "GLM rests until its window resets" glm_resets_at
            release_at;
-         Alcotest.(check bool) "the walk promotes GLM at that reset" true
-           walk_promotes_at_release
+         Alcotest.(check bool) "the reset is the one Z.AI stated" true
+           (match release_basis with
+            | Driver.Stated_by_provider -> true
+            | Driver.Bounded_by_masc -> false)
        | Driver.Path_serving -> Alcotest.fail "the refused path serves again");
       Alcotest.(check string) "the failed cycle waits for GLM, not for the resting head"
+        (Printf.sprintf "wait %.0fs for %s" (glm_resets_at -. now) glm)
+        (quota_lane_wait ~now))
+;;
+
+(* The same chain when GLM first answered a 429 that named no wait (a throttle
+   such as 1302) and then the 1308. Until 2026-11-06 the throttle's mark held
+   GLM behind the resting head until GLM answered, so the window the read
+   dated did not shorten the wait and the cycle waited for the head. The
+   throttle now holds GLM back only for the floor. *)
+let test_a_429_without_a_wait_before_the_1308_still_waits_for_the_dated_window () =
+  with_glm_refusing_behind_a_resting_head
+    (fun ~now ~head:_ ~glm ~glm_scope:_ ~glm_resets_at ~walk ~reported:_ ->
+      walk
+        ~refusal:
+          (Agent_core.Error.Api
+             (Agent_core.Retry.RateLimited { retry_after = None; message = "Glm error 1302" }))
+        ~read:(fun _ -> ())
+        ();
+      walk
+        ~read:
+          (read_usage_with ~fetch:(fun ~api_key:_ _ ->
+             Ok (zai_spent_five_hour_body ~resets_at:glm_resets_at)))
+        ();
+      Alcotest.(check string) "the failed cycle waits for GLM's reset, not for the resting head"
         (Printf.sprintf "wait %.0fs for %s" (glm_resets_at -. now) glm)
         (quota_lane_wait ~now))
 ;;
@@ -4342,16 +4414,26 @@ let test_a_deferred_suffix_waits_only_while_its_walk_head_rests () =
       Alcotest.(check string) "a stated quota reset is a release too"
         "resting other.test_model for 30s"
         (describe (Driver.deferred_lane_rest ~now (quota_lane_suffix all_three)));
-      (* An unstated rest ends the wait but not the demotion, so the walk keeps
-         that path behind the resting head: waiting for its shorter release
-         would dispatch the head while it still rests. *)
+      (* An unstated rest ends at the throttle floor, and the walk promotes the
+         path then (RFC-provider-path-rest §3.3, 2026-11-06): its release
+         shortens the wait as a stated one does. *)
       Runtime_candidate_backpressure.note_candidate_success
         ~candidate:(quota_lane_candidate "shared_b.test_model");
       Runtime_candidate_backpressure.note_rate_limit
         ~candidate:(quota_lane_candidate "shared_b.test_model") ~retry_after:None;
-      Alcotest.(check string) "an unstated rest behind the head does not shorten the wait"
-        "resting shared_a.test_model for 300s"
+      Alcotest.(check string) "an unstated rest behind the head shortens the wait to its floor"
+        (Printf.sprintf "resting shared_b.test_model for %.0fs"
+           Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec)
         (describe (Driver.deferred_lane_rest ~now (quota_lane_suffix both_shared)));
+      Alcotest.(check (list string)) "and at the floor the walk leads with that path"
+        [ "shared_b.test_model"; "shared_a.test_model" ]
+        (match
+           Driver.assignment_walk_order ~walk:Driver.Every_mark_demotes
+             ~now:(now +. Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec +. 1.0)
+             "quota_lane"
+         with
+         | Ok walk -> walk.Driver.order
+         | Error _ -> Alcotest.fail "the lane resolves");
       let decision =
         Masc.Keeper_heartbeat_loop.For_testing.after_failure
           ~now
@@ -4406,8 +4488,8 @@ let test_provider_resets_outlive_the_fallback_cap () =
 
 (* The Keeper list publishes the same walk the failed-cycle wait reads, so a
    Keeper whose lane is out of quota no longer looks the same as one that can
-   dispatch. The row carries no release time: a quota the provider did not date
-   rests from "now", which would move on every read. *)
+   dispatch. The row carries no release time: for a quota the provider did not
+   date, the release is MASC's own cap, a time no provider stated. *)
 let quota_lane_path_rest_json ~now =
   Yojson.Safe.to_string
     (Masc.Keeper_tool_surface_ops.runtime_path_rest_json ~now "quota_lane")
@@ -4480,13 +4562,14 @@ let test_a_failure_without_a_suffix_waits_until_a_fresh_walk_head_serves () =
       Runtime_quota_window.note_exhausted
         ~scope:(Option.get (Runtime.quota_scope_of_runtime_id "other.test_model"))
         ~resets_at:(now +. 900.);
-      Alcotest.(check string) "a resting fresh walk head extends the wait to its release"
-        "wait 600s for shared_a.test_model"
+      let floor = Env_config_keeper.KeeperKeepalive.rate_limit_backoff_floor_sec in
+      Alcotest.(check string) "a resting fresh walk waits for its earliest release"
+        (Printf.sprintf "wait %.0fs for shared_b.test_model" floor)
         (decide ());
       let last_quota = Keeper_runtime_failure_route.Retry_after_observed
         {retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after = Some 3600.} in
       Alcotest.(check string) "last candidate quota cannot outlast the next walk's release"
-        "wait 600s for shared_a.test_model"
+        (Printf.sprintf "wait %.0fs for shared_b.test_model" floor)
         (describe_dispatch ~now
           (Driver.next_dispatch_after_failure ~now ~route:last_quota
             ~assignment_id:"quota_lane" None));
@@ -7712,11 +7795,16 @@ let () =
             test_a_429_without_a_wait_and_a_spent_window_rests_until_its_reset;
           Alcotest.test_case "a 429 without a wait and headroom rests only the floor" `Quick
             test_a_429_without_a_wait_and_headroom_rests_only_the_floor;
+          Alcotest.test_case "the rest that ends last names who set the release" `Quick
+            test_the_rest_that_ends_last_names_who_set_the_release;
           Alcotest.test_case "a 429 that states its wait reads nothing" `Quick
             test_a_429_that_states_its_wait_reads_nothing;
           Alcotest.test_case "a hard quota without a reset waits for the dated usage window"
             `Quick
             test_a_hard_quota_without_a_reset_waits_for_the_dated_usage_window;
+          Alcotest.test_case "a 429 without a wait before the 1308 still waits for the dated window"
+            `Quick
+            test_a_429_without_a_wait_before_the_1308_still_waits_for_the_dated_window;
           Alcotest.test_case "an undated rest from a failed read is dated by the next refusal"
             `Quick
             test_an_undated_rest_from_a_failed_read_is_dated_by_the_next_refusal;

@@ -77,9 +77,8 @@ let walk_sentence ~safe (walk : Inspector.forecast_walk)
   let rest =
     match candidate.place.rest with
     | Inspector.Rest_serving -> ""
-    | Inspector.Rest_resting { release_at; walk_promotes_at_release } ->
-        Printf.sprintf "; resting until %s%s" (clock release_at)
-          (if walk_promotes_at_release then ", when the walk promotes it" else "")
+    | Inspector.Rest_resting { release_at } ->
+        Printf.sprintf "; resting until %s" (clock release_at)
   in
   Printf.sprintf "Walks %s: %s%s." (ordinal candidate.place.walks_at) why rest
 ;;

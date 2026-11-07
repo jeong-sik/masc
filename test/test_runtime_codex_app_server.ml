@@ -2653,8 +2653,8 @@ let read_after_spent_usage_refusal ~provider_id read_result =
   scope
 ;;
 
-(* The observation the refusal left: no end time, still holding the account
-   back. *)
+(* The observation the refusal left: no stated reset, still holding the
+   account back until its fallback cap. *)
 let check_refusal_observation_kept ~scope =
   let now = Unix.gettimeofday () in
   check (option (float 0.0)) "no reset is planted" None

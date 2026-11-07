@@ -235,7 +235,7 @@ type forecast_slot =
 (** Whether a candidate's path rests now, as the server read it. *)
 type forecast_rest =
   | Rest_serving
-  | Rest_resting of { release_at : float; walk_promotes_at_release : bool }
+  | Rest_resting of { release_at : float }
 
 (** Where a candidate stands in the walk the next fresh cycle takes. *)
 type forecast_place =

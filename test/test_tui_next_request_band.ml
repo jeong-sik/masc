@@ -42,7 +42,7 @@ let measured : Inspector.forecast =
 let test_a_refused_seed_origin_decodes () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":1,"wake_line_bytes":1,
+      {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":1,
          "walk":{"lane_id":"r","declared":["r"]},
          "candidates":[{"runtime_id":"r","lane":{"agent_core":true},
            "parts":{"error":"not measured"},"history_atoms":4,
@@ -67,7 +67,7 @@ let test_a_start_past_the_librarian_point_decodes () =
     Inspector.decode_forecast
       (Yojson.Safe.from_string
          (Printf.sprintf
-            {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":1,"wake_line_bytes":1,
+            {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":1,
                "walk":{"lane_id":"r","declared":["r"]},
                "candidates":[{"runtime_id":"r","lane":{"agent_core":true},
                  "parts":{"error":"not measured"},"history_atoms":12,
@@ -104,7 +104,7 @@ let test_a_start_past_the_librarian_point_decodes () =
 let test_a_turn_start_origin_decodes () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":1,"wake_line_bytes":1,
+      {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":1,
          "walk":{"lane_id":"r","declared":["r"]},
          "candidates":[{"runtime_id":"r","lane":{"agent_core":true},
            "parts":{"error":"not measured"},"history_atoms":4,
@@ -125,7 +125,7 @@ let test_a_turn_start_origin_decodes () =
    | Error detail -> Alcotest.fail ("the turn start origin decodes: " ^ detail));
   let unknown =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":1,"wake_line_bytes":1,
+      {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":1,
          "walk":{"lane_id":"r","declared":["r"]},
          "candidates":[{"runtime_id":"r","lane":{"agent_core":true},
            "parts":{"error":"not measured"},"history_atoms":4,
@@ -145,7 +145,7 @@ let test_a_turn_start_origin_decodes () =
   let with_origin origin =
     Yojson.Safe.from_string
       (Printf.sprintf
-         {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":1,"wake_line_bytes":1,
+         {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":1,
             "walk":{"lane_id":"r","declared":["r"]},
             "candidates":[{"runtime_id":"r","lane":{"agent_core":true},
               "parts":{"error":"not measured"},"history_atoms":4,
@@ -188,7 +188,7 @@ let test_a_turn_start_origin_decodes () =
    | Error detail -> Alcotest.fail ("the read-position origin decodes: " ^ detail));
   let without_atom =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":1,"wake_line_bytes":1,
+      {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":1,
          "walk":{"lane_id":"r","declared":["r"]},
          "candidates":[{"runtime_id":"r","lane":{"agent_core":true},
            "parts":{"error":"not measured"},"history_atoms":4,
@@ -203,7 +203,7 @@ let test_the_forecast_decodes_the_servers_shape () =
   let json =
     Yojson.Safe.from_string
       {|{"dashboard_surface":"/api/v1/keepers/:name/next-request",
-         "schema":"masc.keeper.next-request-forecast.v6","keeper":"lane-smith",
+         "schema":"masc.keeper.next-request-forecast.v7","keeper":"lane-smith",
          "trace_id":"trace-1","checkpoint_messages":6012,"wake_line_bytes":131,
          "walk":{"lane_id":"ollama_cloud.deepseek-v4-1-flash","declared":["ollama_cloud.deepseek-v4-1-flash"]},
          "candidates":[{"runtime_id":"ollama_cloud.deepseek-v4-1-flash",
@@ -226,7 +226,7 @@ let test_the_forecast_decodes_the_servers_shape () =
 let test_count_a_record_origin_and_a_layout_decode () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":1,"wake_line_bytes":131,
+      {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":131,
          "walk":{"lane_id":"r","declared":["r"]},
          "candidates":[{"runtime_id":"r","lane":{"agent_core":true},
            "parts":{"error":"no completed turn on this runtime carried a composition in the newest 200 records"},
@@ -272,7 +272,7 @@ let test_count_a_record_origin_and_a_layout_decode () =
 let test_a_not_applicable_lane_decodes_as_such () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":1,"wake_line_bytes":131,
+      {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":131,
          "walk":{"lane_id":"glm-coding.glm-5.3-flash","declared":["glm-coding.glm-5.3-flash","claude_code.claude-sonnet-5"]},
          "candidates":[{"runtime_id":"claude_code.claude-sonnet-5",
            "lane":{"not_applicable":"claude_code.claude-sonnet-5 is an official-client runtime"},
@@ -293,7 +293,7 @@ let test_a_not_applicable_lane_decodes_as_such () =
 let test_a_malformed_forecast_fails_the_reading () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":1,"wake_line_bytes":131,
+      {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":131,
          "walk":{"lane_id":"r","declared":["r"]},
          "candidates":[{"runtime_id":"r","lane":{"agent_core":true},
            "parts":{"error":"x"},"history_atoms":1,
@@ -307,7 +307,7 @@ let test_a_malformed_forecast_fails_the_reading () =
 let test_an_unknown_slot_fails_the_reading () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":1,"wake_line_bytes":131,
+      {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":131,
          "walk":{"lane_id":"r","declared":["r"]},
          "candidates":[{"runtime_id":"r","lane":{"agent_core":true},
            "parts":{"error":"x"},"history_atoms":1,"carried":null,
@@ -320,7 +320,7 @@ let test_an_unknown_slot_fails_the_reading () =
 let test_the_old_schema_is_refused () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v4","checkpoint_messages":1,"wake_line_bytes":131,"candidates":[]}|}
+      {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":1,"wake_line_bytes":131,"candidates":[]}|}
   in
   match Inspector.decode_forecast json with
   | Error _ -> ()
@@ -329,11 +329,11 @@ let test_the_old_schema_is_refused () =
 let test_the_walk_and_the_place_decode () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":1,"wake_line_bytes":131,
+      {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":1,"wake_line_bytes":131,
          "walk":{"lane_id":"l","declared":["a","b"]},
          "candidates":[{"runtime_id":"b","lane":{"agent_core":true},"parts":{"error":"x"},
            "history_atoms":1,"carried":null,"assembly":null,
-           "place":{"walks_at":0,"declared_at":1,"rest":{"kind":"resting","release_at":60000,"walk_promotes_at_release":false}}},
+           "place":{"walks_at":0,"declared_at":1,"rest":{"kind":"resting","release_at":60000,"release_basis":"bounded_by_masc"}}},
           {"runtime_id":"z","lane":{"agent_core":true},"parts":{"error":"x"},
            "history_atoms":1,"carried":null,"assembly":null,
            "place":{"walks_at":1,"declared_at":null,"rest":{"kind":"serving"}}}]}|}
@@ -347,7 +347,7 @@ let test_the_walk_and_the_place_decode () =
       (first.place
        = { walks_at = 0
          ; declared_at = Some 1
-         ; rest = Inspector.Rest_resting { release_at = 60_000.; walk_promotes_at_release = false }
+         ; rest = Inspector.Rest_resting { release_at = 60_000. }
          });
     Alcotest.(check bool) "an undeclared id has no declared place" true
       (second.place = { walks_at = 1; declared_at = None; rest = Inspector.Rest_serving })
@@ -356,7 +356,7 @@ let test_the_walk_and_the_place_decode () =
 let test_a_refused_walk_keeps_the_reason () =
   let json =
     Yojson.Safe.from_string
-      {|{"schema":"masc.keeper.next-request-forecast.v6","checkpoint_messages":7,"wake_line_bytes":131,
+      {|{"schema":"masc.keeper.next-request-forecast.v7","checkpoint_messages":7,"wake_line_bytes":131,
          "walk":{"refusal":"the assignment names no configured lane or runtime"},"candidates":[]}|}
   in
   match Inspector.decode_forecast json with

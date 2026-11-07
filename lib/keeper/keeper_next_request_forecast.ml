@@ -641,11 +641,15 @@ let place_to_json (place : place) =
     ; ( "rest"
       , match place.rest with
         | Keeper_turn_driver.Path_serving -> `Assoc [ "kind", `String "serving" ]
-        | Keeper_turn_driver.Path_resting { release_at; walk_promotes_at_release } ->
+        | Keeper_turn_driver.Path_resting { release_at; release_basis } ->
           `Assoc
             [ "kind", `String "resting"
             ; "release_at", `Float release_at
-            ; "walk_promotes_at_release", `Bool walk_promotes_at_release
+            ; ( "release_basis"
+              , `String
+                  (match release_basis with
+                   | Keeper_turn_driver.Stated_by_provider -> "stated_by_provider"
+                   | Keeper_turn_driver.Bounded_by_masc -> "bounded_by_masc") )
             ] )
     ]
 ;;
@@ -689,7 +693,7 @@ let walk_to_json (walk : walk) =
 
 let to_json forecast =
   `Assoc
-    [ "schema", `String "masc.keeper.next-request-forecast.v6"
+    [ "schema", `String "masc.keeper.next-request-forecast.v7"
     ; "keeper", `String forecast.keeper
     ; "trace_id", `String forecast.trace_id
     ; "checkpoint_messages", `Int forecast.checkpoint_messages

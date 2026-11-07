@@ -72,9 +72,12 @@ A Keeper assignment (`[runtime.assignments]`, or a lane id in
 takes a declared lane first; an id naming a bare runtime resolves to a lane
 holding that runtime alone. A lane walks exactly the candidates it declares,
 in declaration order — an explicit ordered membership, not a health tier,
-score, or vendor-specific branch. A candidate that failed on timeout, 5xx,
-network, or quota exhaustion is deprioritized behind remaining healthy
-candidates until it answers (`#36935`, `#43375`). Keyed HTTP providers must
+score, or vendor-specific branch. A candidate that failed on timeout, 5xx or
+network is deprioritized behind remaining healthy candidates until it answers
+(`#36935`, `#43375`). One refused for a rate limit or quota stays behind them
+until the time the provider stated, or the fallback floor (429) or cap (quota)
+when it stated none (RFC-provider-path-rest §3.3); an answer ends a rate limit
+or an unstated quota sooner. Keyed HTTP providers must
 declare `[providers.<id>.credentials]` explicitly (`#42927`, `#42933`). An
 assignment pointing at a slot the lane does not list falls back to declaration
 order (`#39037`). Provider outcomes are recorded and returned to the

@@ -73,8 +73,9 @@ let runtime_resolution_json ~now ~scope_label (rt : Runtime_instance.t) : Yojson
      provider side of this runtime is currently refusing work (2026-09-12
      operator ask: the runtime list shows what exists, not what is alive).
      [Until] is a provider-stated reset deadline; [Observed] is a hard-quota
-     rejection that claimed no reset -- the next success on the scope clears
-     it. A numeric "remaining" is not honest: providers do not expose it,
+     rejection that claimed no reset -- it rests the scope until the fallback
+     cap after it was noted, and the next success on the scope clears it
+     sooner. A numeric "remaining" is not honest: providers do not expose it,
      and the window's own contract is these two facts. *)
   let quota_scope = Runtime_instance.quota_scope_of_runtime rt in
   let quota_exhausted = Runtime_quota_window.is_exhausted ~scope:quota_scope ~now in
@@ -415,8 +416,15 @@ let next_standing_change_at ~now =
   let snapshot = Runtime.dashboard_runtime_resolved_snapshot () in
   Option.to_list snapshot.rs_default_runtime @ snapshot.rs_runtimes
   |> List.concat_map (fun (rt : Runtime_instance.t) ->
+       (* An observation without a reset stops counting as exhausted at its
+          fallback cap with no write, so its end wakes the loop like a stated
+          reset does. *)
        let quota =
-         Runtime_quota_window.active_until ~scope:(Runtime_instance.quota_scope_of_runtime rt) ~now
+         Option.map
+           (function
+             | Runtime_quota_window.Reset_stated ends_at
+             | Runtime_quota_window.Observed_until ends_at -> ends_at)
+           (Runtime_quota_window.rest ~scope:(Runtime_instance.quota_scope_of_runtime rt) ~now)
        in
        let observed =
          Runtime_candidate_backpressure.candidate_backpressure ~now

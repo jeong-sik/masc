@@ -561,6 +561,42 @@ let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.r
             ()))
 ;;
 
+(* Where a comment landed, for the writer that wants the replies after it: the
+   offset [masc_board_post_get] takes as [comment_offset] to read the comment,
+   and the thread's size at this read. The write used to answer with the
+   comment alone, so that writer counted the offset itself and asked for the
+   thread size plus one. The list is the one [handle_post_get] pages through,
+   so an offset here is an offset there. A failed read leaves both fields out
+   and is logged: the comment is already stored. *)
+let thread_position_fields ~post_id (comment : Board.comment) =
+  match Board_dispatch.get_post_and_comments ~post_id with
+  | Error error ->
+    Log.BoardLog.warn
+      "comment position unavailable for %s: %s"
+      post_id
+      (Board_tool_format.board_error_to_string error);
+    []
+  | Ok (_, comments) ->
+    let id = Board.Comment_id.to_string comment.id in
+    (match
+       List.find_index
+         (fun (found : Board.comment) ->
+            String.equal (Board.Comment_id.to_string found.id) id)
+         comments
+     with
+     | Some offset ->
+       [ "comment_offset", `Int offset; "comments_total", `Int (List.length comments) ]
+     | None ->
+       Log.BoardLog.warn "comment %s is not in the comments of %s" id post_id;
+       [])
+;;
+
+let with_thread_position json fields =
+  match json with
+  | `Assoc existing -> `Assoc (existing @ fields)
+  | other -> `Assoc (("result", other) :: fields)
+;;
+
 let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
   let post_id = get_string args "post_id" "" in
   let content = body_or_content_arg args in
@@ -611,7 +647,9 @@ let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
        with
        | Ok (comment, unresolved) ->
          let json =
-           Board_tool_format.with_unresolved (Board.comment_to_yojson comment) unresolved
+           with_thread_position
+             (Board_tool_format.with_unresolved (Board.comment_to_yojson comment) unresolved)
+             (thread_position_fields ~post_id comment)
          in
          Tool_result.make_ok ~tool_name ~start_time ~data:json ()
        | Error e ->

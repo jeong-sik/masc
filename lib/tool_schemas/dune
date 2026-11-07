@@ -36,13 +36,10 @@
   (:standard -w +4 -w +33 -w +37))
  (libraries
   masc.tool_schemas_specs
-  masc_schedule
   masc_types
-  masc_core
   masc.task_handlers
   masc.masc_tool_surface
   ; Tool_name owns the Goal vocabulary the schema list is built from.
   masc.masc_tool_dispatch
   masc.machine_controller_contract
-  masc.msx_tool
-  masc.masc_goal))
+  masc.msx_tool))

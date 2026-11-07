@@ -305,14 +305,26 @@ let keeper_failure_cause = function
    It is a reading beside [status], not part of it: a resting path is an
    expected state, not a fault.
 
-   No release time is published. For a rest the provider did not date, the
-   walk's release is MASC's own floor or cap, a time no provider stated. *)
+   [release_at] is when the walk releases. It can differ from a time a
+   provider stated: a later path the walk promotes can release first, and a
+   path holding a rate limit and a quota window releases at the later of the
+   two. [release_basis] is who set that time on the path that owns it. A rest
+   the provider gave no end ends at MASC's own floor or cap, fixed when the
+   rest was noted, so the time does not move between reads. *)
 let runtime_path_rest_json ~now assignment_id =
   match Keeper_turn_driver.assignment_walk_rest ~now assignment_id with
   | Keeper_turn_driver.Walk_head_serving { runtime_id } ->
-    `Assoc [ "status", `String "serving"; "runtime_id", `String runtime_id ]
-  | Keeper_turn_driver.Walk_waits_until { release_at = _; resting_runtime_id } ->
-    `Assoc [ "status", `String "resting"; "runtime_id", `String resting_runtime_id ]
+    `Assoc
+      [ "status", `String Keeper_turn_driver.walk_rest_serving_wire
+      ; "runtime_id", `String runtime_id
+      ]
+  | Keeper_turn_driver.Walk_waits_until { release_at; release_basis; resting_runtime_id } ->
+    `Assoc
+      [ "status", `String Keeper_turn_driver.walk_rest_resting_wire
+      ; "runtime_id", `String resting_runtime_id
+      ; "release_at", `Float release_at
+      ; "release_basis", `String (Keeper_turn_driver.release_basis_to_wire release_basis)
+      ]
 
 let keeper_list_row_json ~runtime_class config name =
   let effective_meta, persisted_meta =

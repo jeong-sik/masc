@@ -652,11 +652,7 @@ let place_to_json (place : place) =
           `Assoc
             [ "kind", `String "resting"
             ; "release_at", `Float release_at
-            ; ( "release_basis"
-              , `String
-                  (match release_basis with
-                   | Keeper_turn_driver.Stated_by_provider -> "stated_by_provider"
-                   | Keeper_turn_driver.Bounded_by_masc -> "bounded_by_masc") )
+            ; "release_basis", `String (Keeper_turn_driver.release_basis_to_wire release_basis)
             ] )
     ]
 ;;

@@ -38,6 +38,7 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
   ; kr_last_failure = last_failure
   ; kr_runtime_blocker_signature = None
   ; kr_runtime_lane_observation = None
+  ; kr_runtime_path_rest = Ok None
   }
 
 let running_turn activity : Decode.keeper_turn_state =
@@ -1324,6 +1325,71 @@ let test_roster_decodes_an_error_row_without_refusing_the_rest () =
         ["broken-meta", "Keeper metadata unavailable; the server supplied no error detail"] errors;
       Alcotest.(check string) "healthy row retained" "healthy-one" (List.hd rows).Decode.kr_name
 
+(* The row's [runtime_path_rest] is the walk the heartbeat waits on. A
+   resting walk keeps the time it releases and who set it. A malformed rest is
+   an error beside a row that still decodes. *)
+let test_roster_decodes_the_walk_rest_beside_the_row () =
+  let decode rest =
+    let fields =
+      match Yojson.Safe.from_string (gate_row "rester") with
+      | `Assoc fields -> fields
+      | _ -> Alcotest.fail "the fixture row is an object"
+    in
+    let row = `Assoc (fields @ [ "runtime_path_rest", rest ]) in
+    match
+      Decode.decode_keeper_runtime_list
+        (`Assoc
+           [ "candle", `Assoc [ "status", `String "off" ]; "keepers", `List [ row ]
+           ; "total", `Int 1; "truncated", `Bool false ])
+    with
+    | Ok ([ runtime ], [], false, 1, _) -> runtime.Decode.kr_runtime_path_rest
+    | Ok _ -> Alcotest.fail "the row was hidden"
+    | Error reason -> Alcotest.fail reason
+  in
+  let path = "glm.glm-5" in
+  let resting fields =
+    `Assoc ([ "status", `String "resting"; "runtime_id", `String path ] @ fields)
+  in
+  let release_at at = "release_at", at in
+  let stated = "release_basis", `String "stated_by_provider" in
+  Alcotest.(check bool) "a serving walk names its head" true
+    (decode (`Assoc [ "status", `String "serving"; "runtime_id", `String path ])
+     = Ok (Some (Decode.Path_rest_serving { runtime_id = path })));
+  Alcotest.(check bool) "a resting walk keeps its release and who set it" true
+    (decode (resting [ release_at (`Float 1_790_000_000.5); stated ])
+     = Ok
+         (Some
+            (Decode.Path_rest_resting
+               { runtime_id = path
+               ; release_at = 1_790_000_000.5
+               ; release_basis = Decode.Stated_by_provider
+               })));
+  Alcotest.(check bool) "a whole-second release is read as a time" true
+    (decode
+       (resting [ release_at (`Int 1_790_000_000); "release_basis", `String "bounded_by_masc" ])
+     = Ok
+         (Some
+            (Decode.Path_rest_resting
+               { runtime_id = path
+               ; release_at = 1_790_000_000.
+               ; release_basis = Decode.Bounded_by_masc
+               })));
+  Alcotest.(check bool) "a null rest is no reading" true (decode `Null = Ok None);
+  List.iter
+    (fun (label, rest) -> Alcotest.(check bool) label true (Result.is_error (decode rest)))
+    [ "a rest that is not an object is an error", `String "resting"
+    ; "an unknown status is an error", `Assoc [ "status", `String "asleep"; "runtime_id", `String path ]
+    ; "a resting walk without a release is an error", resting [ stated ]
+    ; "a release that is not a number is an error", resting [ release_at (`String "soon"); stated ]
+    ; "a release that is not finite is an error", resting [ release_at (`Float infinity); stated ]
+    ; "a release that is not a number at all is an error", resting [ release_at (`Float nan); stated ]
+    ; ( "a finite release no local calendar holds is an error"
+      , resting [ release_at (`Float 1e300); stated ] )
+    ; "a resting walk without a basis is an error", resting [ release_at (`Float 1_790_000_000.) ]
+    ; ( "an unknown basis is an error"
+      , resting [ release_at (`Float 1_790_000_000.); "release_basis", `String "guessed" ] )
+    ]
+
 let test_actual_producer_error_is_isolated () =
   let producer_row = Yojson.Safe.from_string
     {|{"status":"error","runtime_class":"keeper","name":"broken-meta",
@@ -1680,6 +1746,8 @@ let () =
             test_roster_decode_rejects_an_unknown_phase
         ; Alcotest.test_case "an error row decodes without refusing the rest" `Quick
             test_roster_decodes_an_error_row_without_refusing_the_rest
+        ; Alcotest.test_case "the walk rest decodes beside the row" `Quick
+            test_roster_decodes_the_walk_rest_beside_the_row
         ; Alcotest.test_case "actual producer error stays isolated" `Quick
             test_actual_producer_error_is_isolated
         ; Alcotest.test_case "present unknown health on an error row is rejected" `Quick

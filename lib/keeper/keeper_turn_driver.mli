@@ -135,6 +135,22 @@ type release_basis =
   | Stated_by_provider
   | Bounded_by_masc
 
+val release_basis_to_wire : release_basis -> string
+(** ["stated_by_provider"] or ["bounded_by_masc"], the spelling the roster
+    row and the next-request forecast send. *)
+
+val release_basis_of_wire : string -> release_basis option
+(** The inverse of {!release_basis_to_wire}, read through the same
+    spellings; [None] for any other string. *)
+
+val walk_rest_serving_wire : string
+(** The [status] the roster row's [runtime_path_rest] gives a
+    {!Walk_head_serving} walk. The server writes it and the TUI reads it. *)
+
+val walk_rest_resting_wire : string
+(** The [status] the roster row's [runtime_path_rest] gives a
+    {!Walk_waits_until} walk. The server writes it and the TUI reads it. *)
+
 (** Whether one runtime path is resting at a given instant
     (RFC-provider-path-rest §3.3). Read from the 429 candidate observation and
     the quota window; a failed attempt is no rest (RFC-0458 §3.4). At
@@ -155,12 +171,13 @@ val path_rest : now:float -> string -> path_rest
 (** What a walk dispatches first. [Walk_head_serving]: the head in walk order
     is not resting and takes the input. [Walk_waits_until]: the head rests; the
     wait ends at the head's release, or at an earlier release of a later path,
-    which the walk order promotes at that moment, and [resting_runtime_id] owns
-    that release. *)
+    which the walk order promotes at that moment. [resting_runtime_id] owns
+    that release and [release_basis] is who set it on that path. *)
 type walk_rest =
   | Walk_head_serving of { runtime_id : string }
   | Walk_waits_until of
       { release_at : float
+      ; release_basis : release_basis
       ; resting_runtime_id : string
       }
 

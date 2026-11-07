@@ -109,6 +109,7 @@ let keeper_phase_category :
       `Other
 
 let keeper_phase_is_running phase = keeper_phase_category phase = `Running
+let keeper_phase_executes_turns = Keeper_state_machine.can_execute_turn
 let keeper_phase_is_paused phase = keeper_phase_category phase = `Paused
 let keeper_phase_is_transitioning phase =
   keeper_phase_category phase = `Transitioning
@@ -136,6 +137,15 @@ type keeper_failure = {
   kf_at_unix : float option;
 }
 
+type keeper_rest_basis = Keeper_turn_driver.release_basis =
+  | Stated_by_provider
+  | Bounded_by_masc
+
+type keeper_path_rest =
+  | Path_rest_serving of { runtime_id : string }
+  | Path_rest_resting of
+      { runtime_id : string; release_at : float; release_basis : keeper_rest_basis }
+
 type keeper_runtime = {
   kr_name : string;
   kr_identity : (keeper_identity, string) result;
@@ -162,6 +172,7 @@ type keeper_runtime = {
       blocker and on no blocker. The detail pane draws it as a dimmed
       follow-on line, so the wire a log search keys on stays on screen. *)
   kr_runtime_lane_observation : Keeper_execution_receipt.runtime_lane_observation option;
+  kr_runtime_path_rest : (keeper_path_rest option, string) result;
 }
 
 type keeper_lane_phase =
@@ -3145,6 +3156,51 @@ let decode_keeper_roster_identity ~name json =
     Error "Keeper brief identity fields must not be empty"
   else Ok { k_trace_id; k_created_at; k_updated_at }
 
+(* A release time the Keepers list can draw. The list draws it with
+   [Tui_terminal_text.short_timestamp_of_unix_for_terminal] in local time,
+   and [Unix.localtime] refuses a time past what the host's calendar holds,
+   so the same conversion is tried here and a refusal is a decode error. *)
+let drawable_release_at at =
+  match
+    Tui_terminal_text.short_timestamp_of_unix_for_terminal ~localtime:Unix.localtime at
+  with
+  | _drawn -> Ok at
+  | exception Unix.Unix_error (error, _, _) ->
+    Error
+      (Printf.sprintf "field 'runtime_path_rest.release_at' %.0f is not a local time: %s" at
+         (Unix.error_message error))
+;;
+
+(* The row's [runtime_path_rest]. A null or absent field is no reading. A
+   malformed one is kept as an error beside the row rather than refusing it:
+   the rest is a reading beside the Keeper's status, not part of it. *)
+let decode_keeper_path_rest json =
+  match member "runtime_path_rest" json with
+  | `Null -> Ok None
+  | `Assoc _ as rest ->
+    let* status = required_string_field rest "status" in
+    let* runtime_id = required_string_field rest "runtime_id" in
+    if String.equal status Keeper_turn_driver.walk_rest_serving_wire
+    then Ok (Some (Path_rest_serving { runtime_id }))
+    else if String.equal status Keeper_turn_driver.walk_rest_resting_wire
+    then (
+      let* release_at =
+        match Json_util.assoc_member_opt "release_at" rest with
+        | Some (`Float at) when Float.is_finite at -> drawable_release_at at
+        | Some (`Int at) -> drawable_release_at (Float.of_int at)
+        | None -> Error "field 'runtime_path_rest.release_at' is missing"
+        | Some other -> field_type_error "runtime_path_rest.release_at" "a finite number" other
+      in
+      let* raw_basis = required_string_field rest "release_basis" in
+      let* release_basis =
+        match Keeper_turn_driver.release_basis_of_wire raw_basis with
+        | Some basis -> Ok basis
+        | None -> Error (Printf.sprintf "unknown runtime_path_rest release_basis %S" raw_basis)
+      in
+      Ok (Some (Path_rest_resting { runtime_id; release_at; release_basis })))
+    else Error (Printf.sprintf "unknown runtime_path_rest status %S" status)
+  | other -> field_type_error "runtime_path_rest" "an object or null" other
+
 let decode_keeper_runtime ~account_revision json =
   let* kr_name = required_string_field json "name" in
   let* kr_portrait = Keeper_portrait_equipment.reading_of_json (member "portrait" json) in
@@ -3258,6 +3314,7 @@ let decode_keeper_runtime ~account_revision json =
     ; kr_last_failure
     ; kr_runtime_blocker_signature
     ; kr_runtime_lane_observation
+    ; kr_runtime_path_rest = decode_keeper_path_rest json
     }
 
 (* [truncated] is carried out rather than dropped: the route clamps its own

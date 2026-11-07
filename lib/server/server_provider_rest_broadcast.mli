@@ -2,9 +2,9 @@
     (RFC-0481 §3.2, §3.7).
 
     A roster row shows [runtime_path_rest]: whether the Keeper's walk is
-    serving or resting, and on which runtime. It moves when one of the six
-    rest-record writers runs ({!Runtime_path_rest_signal}) and when a dated
-    rest ends, with no write.
+    serving or resting, on which runtime, and when a resting walk releases.
+    It moves when one of the six rest-record writers runs
+    ({!Runtime_path_rest_signal}) and when a dated rest ends, with no write.
 
     [install ~sw ~clock ~config] installs the rest-record observer, which only
     wakes a fiber forked on [sw]. On each wake the fiber recomputes every

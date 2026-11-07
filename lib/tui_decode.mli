@@ -691,6 +691,11 @@ val keeper_phase_is_running : keeper_phase -> bool
     silences the word for it and spells out every other phase; exhaustive in
     the implementation so a new phase cannot silently count as not-running. *)
 
+val keeper_phase_executes_turns : keeper_phase -> bool
+(** Whether a Keeper in the phase takes turns: [Running] and [Failing]
+    ({!Keeper_state_machine.can_execute_turn}). Only such a Keeper's next
+    dispatch waits on a resting path. *)
+
 val keeper_phase_is_paused : keeper_phase -> bool
 (** Whether the phase is the operator-paused lifecycle ([Paused]). A keeper in
     this phase still has a live keepalive fiber sleeping on its condition, even
@@ -751,6 +756,24 @@ type keeper_failure = {
   kf_at_unix : float option;
 }
 
+(** Who set the time a resting walk releases
+    ({!Keeper_turn_driver.release_basis}): the provider stated it, or MASC
+    bounded a rest the provider gave no end. *)
+type keeper_rest_basis = Keeper_turn_driver.release_basis =
+  | Stated_by_provider
+  | Bounded_by_masc
+
+(** The row's [runtime_path_rest]: whether the Keeper's next dispatch would
+    wait on a resting runtime path, read from the walk the heartbeat waits on.
+    [runtime_id] is the path that serves, or the one whose release ends the
+    wait. [release_at] is when the walk releases, a Unix time fixed when the
+    rest was noted. It is finite and [Unix.localtime] converts it, so the
+    list can draw it. *)
+type keeper_path_rest =
+  | Path_rest_serving of { runtime_id : string }
+  | Path_rest_resting of
+      { runtime_id : string; release_at : float; release_basis : keeper_rest_basis }
+
 type keeper_runtime = {
   kr_name : string;
   kr_identity : (keeper_identity, string) result;
@@ -781,6 +804,9 @@ type keeper_runtime = {
   (** Historical receipt evidence, independent of the live blocker and control
       authority. [None] means explicit no receipt; malformed or missing evidence
       is an unreadable observation without invalidating this roster row. *)
+  kr_runtime_path_rest : (keeper_path_rest option, string) result;
+  (** [Ok None]: the row carried no rest. [Error]: the rest did not decode,
+      without invalidating this roster row. *)
 }
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.

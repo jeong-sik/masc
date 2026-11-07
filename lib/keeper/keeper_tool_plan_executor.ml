@@ -283,8 +283,14 @@ module Exclusive_gate = struct
     }
   ;;
 
+  (* The two acquire bodies wait on [changed], so cancellation can strike
+     inside the critical section. [use_rw] would then disable the mutex for
+     the rest of the process (eio 1.3 poisons on any escape); [use_ro]
+     releases it and lets the cancellation through — the waiting-loop shape
+     Eio.Condition's own contract shows. The release bodies never suspend
+     nor raise, so they keep the non-cancelling [use_rw ~protect:false]. *)
   let acquire_shared gate =
-    Eio.Mutex.use_rw ~protect:false gate.mutex (fun () ->
+    Eio.Mutex.use_ro gate.mutex (fun () ->
       while gate.writer || gate.waiting_writers > 0 do
         Eio.Condition.await gate.changed gate.mutex
       done;
@@ -302,7 +308,7 @@ module Exclusive_gate = struct
   ;;
 
   let acquire_exclusive gate =
-    Eio.Mutex.use_rw ~protect:false gate.mutex (fun () ->
+    Eio.Mutex.use_ro gate.mutex (fun () ->
       gate.waiting_writers <- gate.waiting_writers + 1;
       (try
          while gate.writer || gate.readers > 0 do

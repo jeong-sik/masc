@@ -162,27 +162,38 @@ let issue_result t ~admin ~invite_id ~token =
 
 let not_invited_text = Login.refusal_to_string Login.Not_invited
 
+module Allowlist = Authz_allowlist
+
+let register_result t ~admin ~registration_id identity =
+  Allowlist.register t.zone ~admin ~draw:(drawing [ registration_id ]) identity
+;;
+
 (* An entry of the allowlist that [admin] writes for [identity] (plan C2d). *)
 let register t ~admin ~registration_id identity =
-  commit
-    t
-    ~by:admin
-    Authz_record.Kind.Registration
-    (get
-       (Authz_registration_event.to_body
-          (Authz_registration_event.Registered
-             { registration_id = get (Registration_id.of_string registration_id); identity })))
+  match register_result t ~admin ~registration_id identity with
+  | Ok (_ : Allowlist.registered) -> ()
+  | Error error -> Alcotest.failf "fixture registration refused: %s" (Allowlist.error_to_string error)
 ;;
 
 let remove t ~admin ~registration_id =
-  commit
-    t
-    ~by:admin
-    Authz_record.Kind.Registration
-    (get
-       (Authz_registration_event.to_body
-          (Authz_registration_event.Removed
-             { registration_id = get (Registration_id.of_string registration_id) })))
+  match Allowlist.remove t.zone ~admin (get (Registration_id.of_string registration_id)) with
+  | Ok () -> ()
+  | Error error -> Alcotest.failf "fixture removal refused: %s" (Allowlist.error_to_string error)
+;;
+
+let allowlist_word = function
+  | Ok { Allowlist.registration_id; previously_deleted } ->
+    Registration_id.to_string registration_id ^ if previously_deleted then ", previously deleted" else ""
+  | Error error -> Allowlist.error_to_string error
+;;
+
+let refused refusal = Allowlist.error_to_string (Allowlist.Commit_failed (Z.Refused refusal))
+let store_lines t = List.length (String.split_on_char '\n' (In_channel.with_open_bin t.store_path In_channel.input_all))
+
+let contains ~sub text =
+  let n = String.length sub in
+  let rec go i = i + n <= String.length text && (String.equal (String.sub text i n) sub || go (i + 1)) in
+  go 0
 ;;
 
 let principal_event t ~admin event =
@@ -406,6 +417,77 @@ let an_invitation_and_an_entry_race_for_one_identity () =
     | Error refusal -> Alcotest.(check bool) "the invitation is a conflict" true (Login.is_conflict refusal))
 ;;
 
+(* Only an Admin that acts writes the allowlist; an identity has one open
+   entry and a bound identity none (plan C2d). A registration writes nothing to
+   the external store, and a removal writes its [Revoke] intent there first
+   (design 8.2). *)
+let an_admin_writes_the_allowlist () =
+  with_installation (fun t ->
+    let admin = admitted_id (sign_in t ~identity:(google "111") ~invite:(digest t.admin_token)) in
+    issue t ~admin ~invite_id:"invite-2" ~token:(String.make 64 'b');
+    let member = admitted_id (sign_in t ~identity:(google "222") ~invite:(digest (String.make 64 'b'))) in
+    let lines = store_lines t in
+    Alcotest.(check string)
+      "an Admin registers"
+      "registration-1"
+      (allowlist_word (register_result t ~admin ~registration_id:"registration-1" (google "333")));
+    Alcotest.(check int) "no intent for a registration" lines (store_lines t);
+    Alcotest.(check string)
+      "a Member"
+      (refused (Authz_state.Registration (Authz_registration_state.Author_is_not_an_admin (Principal.Human member))))
+      (allowlist_word (register_result t ~admin:member ~registration_id:"registration-2" (google "444")));
+    Alcotest.(check string)
+      "the identity again"
+      (refused
+         (Authz_state.Registration
+            (Authz_registration_state.Identity_registered (get (Registration_id.of_string "registration-1")))))
+      (allowlist_word (register_result t ~admin ~registration_id:"registration-2" (google "333")));
+    Alcotest.(check string)
+      "a bound identity"
+      (refused (Authz_state.Registration Authz_registration_state.Identity_bound))
+      (allowlist_word (register_result t ~admin ~registration_id:"registration-2" (google "222")));
+    let entry = get (Registration_id.of_string "registration-1") in
+    (match Allowlist.remove t.zone ~admin entry with
+     | Ok () -> ()
+     | Error error -> Alcotest.failf "the removal was refused: %s" (Allowlist.error_to_string error));
+    let store = In_channel.with_open_bin t.store_path In_channel.input_all in
+    Alcotest.(check bool)
+      "the removal is an intent of the store"
+      true
+      (contains ~sub:{|"event":"revoke","subject":{"type":"registration","id":"registration-1"}|} store);
+    Alcotest.(check string)
+      "removed twice"
+      (refused (Authz_state.Registration (Authz_registration_state.Already_removed entry)))
+      (match Allowlist.remove t.zone ~admin entry with
+       | Ok () -> "removed"
+       | Error error -> Allowlist.error_to_string error))
+;;
+
+(* A drawn id that names an entry already is drawn again. The identity of a
+   deleted principal is registered, marked as previously deleted (design
+   5.1-6). *)
+let a_taken_registration_id_is_drawn_again () =
+  with_installation (fun t ->
+    let admin = admitted_id (sign_in t ~identity:(google "111") ~invite:(digest t.admin_token)) in
+    issue t ~admin ~invite_id:"invite-2" ~token:(String.make 64 'b');
+    let member = admitted_id (sign_in t ~identity:(google "222") ~invite:(digest (String.make 64 'b'))) in
+    register t ~admin ~registration_id:"registration-1" (google "333");
+    principal_event t ~admin (Authz_principal_event.Deleted { user_id = member; identity = google "222" });
+    Alcotest.(check string)
+      "drawn again, previously deleted"
+      "registration-2, previously deleted"
+      (allowlist_word
+         (Allowlist.register
+            t.zone
+            ~admin
+            ~draw:(drawing [ "registration-1"; "registration-2" ])
+            (google "222")));
+    Alcotest.(check string)
+      "an id that is not one"
+      "a drawn id was refused: empty"
+      (allowlist_word (Allowlist.register t.zone ~admin ~draw:(fun () -> "") (google "444"))))
+;;
+
 (* Both logins check the invitation before either commits: the draw yields,
    so the other fiber runs its check in between. One joins; the other finds
    the invitation spent on its second look. *)
@@ -547,6 +629,8 @@ let () =
         ; Alcotest.test_case "deleted, then a new entry" `Quick a_deleted_member_needs_a_new_entry
         ; Alcotest.test_case "an invitation and an entry race" `Quick
             an_invitation_and_an_entry_race_for_one_identity
+        ; Alcotest.test_case "an Admin writes the allowlist" `Quick an_admin_writes_the_allowlist
+        ; Alcotest.test_case "a taken registration id" `Quick a_taken_registration_id_is_drawn_again
         ; Alcotest.test_case "blocked" `Quick a_blocked_principal_does_not_sign_in
         ; Alcotest.test_case "a stopped log" `Quick a_stopped_log_signs_nobody_in
         ; Alcotest.test_case "conflicts" `Quick conflicts_are_the_writer_races

@@ -153,22 +153,9 @@ let revision_of_string value =
 let content_revision_of_string = Skill_reference.content_revision_of_string
 let snapshot_revision_of_string value = revision_of_string value
 
-let digest_fields fields =
-  let buffer = Buffer.create (List.length fields) in
-  List.iter
-    (fun (tag, value) ->
-       Buffer.add_string buffer (string_of_int (String.length tag));
-       Buffer.add_char buffer ':';
-       Buffer.add_string buffer tag;
-       Buffer.add_string buffer (string_of_int (String.length value));
-       Buffer.add_char buffer ':';
-       Buffer.add_string buffer value)
-    fields;
-  Agent_core_sha256.(to_hex (digest_string (Buffer.contents buffer)))
-;;
-
 let content_revision = Skill_reference.content_revision_of_source_text
-let config_source_revision source_text = digest_fields [ "skill_config_source", source_text ]
+let config_source_revision source_text =
+  Skill_reference.digest_fields [ "skill_config_source", source_text ]
 
 let identity_key (identity : identity) =
   ( Skill_source_config.source_id_to_string identity.source_id
@@ -464,10 +451,10 @@ let make ~config_state sources =
   let catalog_revision =
     catalog_projection ~sources ~entries ~rejections ~shadows
     |> Yojson.Safe.to_string
-    |> fun value -> digest_fields [ "skill_catalog", value ]
+    |> fun value -> Skill_reference.digest_fields [ "skill_catalog", value ]
   in
   let snapshot_revision =
-    digest_fields
+    Skill_reference.digest_fields
       [ ( "skill_config_state"
         , Yojson.Safe.to_string (config_state_private_yojson config_state) )
       ; "skill_catalog_revision", catalog_revision
@@ -551,7 +538,7 @@ let configured ~config scans =
     let revision =
       Skill_source_config.to_yojson config
       |> Yojson.Safe.to_string
-      |> fun value -> digest_fields [ "skill_config", value ]
+      |> fun value -> Skill_reference.digest_fields [ "skill_config", value ]
     in
     Ok (make ~config_state:(Configured { config; revision }) ordered))
 ;;

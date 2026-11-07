@@ -65,6 +65,11 @@ val package_id_to_string : package_id -> string
 val package_id_error_to_string : package_id_error -> string
 
 val validate_revision_string : string -> (unit, revision_error) result
+
+val digest_fields : (string * string) list -> string
+(** SHA-256 hex digest of the fields in order. Each tag and each value is
+    hashed as its byte length, [':'] and its bytes. *)
+
 val content_revision_of_string : string -> (content_revision, revision_error) result
 val content_revision_of_source_text : string -> content_revision
 val content_revision_to_string : content_revision -> string

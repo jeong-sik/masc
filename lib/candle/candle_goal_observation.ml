@@ -5,7 +5,7 @@ type stage = Candidates_unrecorded | Candidates_consistent | Candidates_inconsis
 type hold_origin = Stored | Derived_candidates
 type issue_observation = Complete_issues of Candle_payout.window_issue list
   | Snapshot_independent_issues of Candle_payout.window_issue list | Issues_unavailable
-type unattributed_reason = No_candidates | All_unrelated | No_related_keepers
+type unattributed_reason = No_candidates | All_unrelated | No_related_keepers | Window_released
 type identity = { request_id : string; verification_run_id : string }
 type allocation = { keeper : string; weight : int; amount_milli : int }
 
@@ -57,7 +57,8 @@ let payout_waiting events (waiting : Candle_payout.waiting) =
        | Candle_event.Candidates _ | Candle_event.Candidates_fenced _ | Candle_event.Unattributed _
        | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _
        | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _
-       | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> stored_issues (event :: preceding) rest) in
+       | Candle_event.Gifted_item _ | Candle_event.Candidate_window_released _
+       | Candle_event.Payout_failed _ -> stored_issues (event :: preceding) rest) in
   let identity = identity waiting in
   match Candle_payout.held_window_of waiting events with
   | Some _ -> Held { identity; snapshot; origin = Stored;
@@ -94,13 +95,15 @@ let settlement ~goal_id events =
       let reason = match u.reason with
         | Candle_event.No_candidates -> No_candidates
         | All_unrelated _ -> All_unrelated
-        | No_related_keepers _ -> No_related_keepers in
+        | No_related_keepers _ -> No_related_keepers
+        | Window_released -> Window_released in
       Some (Unattributed {identity = {request_id = u.request_id;
                                       verification_run_id = u.verification_run_id};
                           recorded_at = event.at; reason})
     | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Snapshot _
     | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
-    | Candle_event.Candidate_window_held _ | Candle_event.Half_life_set _ | Candle_event.Equipped _
+    | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
+    | Candle_event.Half_life_set _ | Candle_event.Equipped _
     | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _
     | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> None) events
 ;;
@@ -161,7 +164,7 @@ let payout_json = function
             @ identity_fields identity)
   | Unattributed {identity; recorded_at; reason} ->
     `Assoc (["state", `String "unattributed"; "recorded_at", `String (Candle_time.to_rfc3339 recorded_at);
-             "reason", `String (match reason with No_candidates -> "no_candidates" | All_unrelated -> "all_unrelated" | No_related_keepers -> "no_related_keepers")] @ identity_fields identity)
+             "reason", `String (match reason with No_candidates -> "no_candidates" | All_unrelated -> "all_unrelated" | No_related_keepers -> "no_related_keepers" | Window_released -> "window_released")] @ identity_fields identity)
   | Payout_failed {identity} ->
     `Assoc (["state", `String "payout_failed"; "reason", `String "recorded_unreadable_due_date"] @ identity_fields identity)
   | Inconsistent -> `Assoc ["state", `String "inconsistent"]
@@ -298,7 +301,8 @@ let of_yojson ~goal_id json =
          let* recorded_at = time (get "recorded_at" entries) in
          let* reason = match get "reason" entries with
            | `String "no_candidates" -> Ok No_candidates | `String "all_unrelated" -> Ok All_unrelated
-           | `String "no_related_keepers" -> Ok No_related_keepers | _ -> invalid () in
+           | `String "no_related_keepers" -> Ok No_related_keepers
+           | `String "window_released" -> Ok Window_released | _ -> invalid () in
          Ok (Unattributed {identity; recorded_at; reason})
        | Some (`String "payout_failed") ->
          let* entries, identity = with_identity ["reason"] json in

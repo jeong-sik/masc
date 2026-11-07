@@ -210,7 +210,7 @@ let purchases config =
     | E.Snapshot _
     | E.Payout_owed _
     | E.Candidates _ | E.Candidates_fenced _
-    | E.Candidate_window_held _
+    | E.Candidate_window_held _ | E.Candidate_window_released _
     | E.Unattributed _
     | E.Paid _
     | E.Granted _ | E.Gifted _ | E.Gifted_item _
@@ -708,7 +708,7 @@ let test_policy_intervals_preserve_purchase_and_equipped_ownership () =
     check int "explicit Off preserves the money after its fact" 300 (account ()).balance_milli;
     let policy_facts = events config |> List.filter_map (fun (event : E.t) -> match event.body with
       | E.Half_life_set policy -> Some policy
-      | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Candidates_fenced _ | E.Candidate_window_held _ | E.Unattributed _ | E.Paid _
+      | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Candidates_fenced _ | E.Candidate_window_held _ | E.Candidate_window_released _ | E.Unattributed _ | E.Paid _
       | E.Payout_failed _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Equipped _ -> None) in
     check int "only historical Off, Hours and restored Off are recorded" 3 (List.length policy_facts))
 ;;

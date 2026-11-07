@@ -111,6 +111,7 @@ let record_goal (event : Candle_event.t) =
   | Candle_event.Payout_owed p -> Some p.goal_id
   | Candle_event.Candidates c | Candle_event.Candidates_fenced c -> Some c.goal_id
   | Candle_event.Candidate_window_held held -> Some held.goal_id
+  | Candle_event.Candidate_window_released released -> Some released.goal_id
   | Candle_event.Paid p -> Some p.identity.goal_id
   | Candle_event.Unattributed u -> Some u.goal_id
   | Candle_event.Payout_failed f -> Some f.goal_id
@@ -141,6 +142,7 @@ let validate_record ~admission records (event : Candle_event.t) =
   let verdict = match event.body with
     | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Payout_failed _
     | Candle_event.Candidates _ | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _
+    | Candle_event.Candidate_window_released _
     | Candle_event.Payout_owed _ ->
       let preceding = match record_goal event with
         | None -> []
@@ -250,7 +252,7 @@ let encode ~preceding events =
       let arithmetic = match event.body with
         | Candle_event.Paid payment -> Candle_payment.validate_for_append payment
         | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
-        | Candle_event.Candidate_window_held _
+        | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
         | Candle_event.Unattributed _ | Candle_event.Payout_failed _
         | Candle_event.Half_life_set _ | Candle_event.Purchased _ | Candle_event.Equipped _
         | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> Ok () in

@@ -105,6 +105,7 @@ let rows config =
        | Candle_event.Candidates { goal_id; request_id; _ }
        | Candle_event.Candidates_fenced { goal_id; request_id; _ }
        | Candle_event.Candidate_window_held { goal_id; request_id; _ }
+       | Candle_event.Candidate_window_released { goal_id; request_id; _ }
        | Candle_event.Unattributed { goal_id; request_id; _ }
        | Candle_event.Payout_failed { goal_id; request_id; _ } ->
          Some (Candle_event.kind event.body, goal_id, request_id)
@@ -741,7 +742,7 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
   let payment () =
     match List.filter_map (fun (event : Candle_event.t) -> match event.body with
       | Candle_event.Paid payment -> Some payment
-      | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _
+      | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
       | Candle_event.Unattributed _ | Candle_event.Payout_failed _
       | Candle_event.Half_life_set _ | Candle_event.Purchased _ | Candle_event.Granted _
       | Candle_event.Gifted _ | Candle_event.Gifted_item _
@@ -847,7 +848,7 @@ let test_a_confirmed_goal_pays_its_keeper_once_across_reopen_and_restart () =
       ; "paid",goal_id,first_verdict.request_id ] (rows config);
     let payout_events = List.filter (fun (event : Candle_event.t) -> match event.body with
       | Candle_event.Half_life_set _ -> false
-      | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _
+      | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
       | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Payout_failed _
       | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Equipped _ -> true) (ledger_events config) in
     (match payout_events with

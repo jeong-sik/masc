@@ -607,6 +607,54 @@ let test_goal_observation_wire_is_closed_and_goal_bound () =
     Alcotest.(check bool) "missing execution axis rejected" true (Result.is_error (of_yojson ~goal_id:"goal-1" incomplete))) values
 ;;
 
+let test_a_release_closes_the_held_window_once () =
+  let task = E.Found {title="task"; assignee=Some "keeper-a";
+                      status=E.Done {completed_at=at "2026-09-20T01:00:00Z"}} in
+  let linked_snapshot = match snapshot () with
+    | {E.at; body=E.Snapshot s} -> {E.at; body=E.Snapshot {s with linked_task_ids=["task-1"]}}
+    | _ -> Alcotest.fail "snapshot fixture" in
+  let linked_base = [linked_snapshot; owed ()] in
+  let w : Candle_payout.waiting = {goal_id="goal-1"; request_id="req-1"; verification_run_id="run-1";
+    passed_at=at pass_text; confirmed_at=at "2026-09-29T05:00:00Z"} in
+  let held = {E.at=at "2026-09-29T05:10:00Z"; body=E.Candidate_window_held
+    {goal_id="goal-1"; request_id="req-1"; verification_run_id="run-1";
+     passed_at=at pass_text; confirmed_at=at "2026-09-29T05:00:00Z";
+     tasks=["task-1", task]; task_keepers=["task-1", E.Keeper_name "keeper-a"]}} in
+  let released = {E.at=at "2026-09-29T05:20:00Z"; body=E.Candidate_window_released
+    {goal_id="goal-1"; request_id="req-1"; verification_run_id="run-1"}} in
+  let after_hold = linked_base @ [held] in
+  let after_release = after_hold @ [released] in
+  Alcotest.(check bool) "the open hold is found" true
+    (Option.is_some (Candle_payout.held_window_of w after_hold));
+  Alcotest.(check bool) "a release is accepted against the open hold" true
+    (Result.is_ok (Candle_payout.validate_record after_hold released.body));
+  Alcotest.(check bool) "a release without a hold is refused" true
+    (Result.is_error (Candle_payout.validate_record linked_base released.body));
+  Alcotest.(check bool) "the released window returns no hold" true
+    (Option.is_none (Candle_payout.held_window_of w after_release));
+  Alcotest.(check bool) "the release is recorded" true
+    (Candle_payout.released_of w after_release);
+  let second_hold = {held with E.at=at "2026-09-29T05:30:00Z"} in
+  Alcotest.(check bool) "a released window cannot hold again" true
+    (Result.is_error (Candle_payout.validate_record after_release second_hold.body));
+  let fresh = {E.at=at "2026-09-29T05:35:00Z"; body=E.Candidates_fenced
+    {goal_id="goal-1"; request_id="req-1"; verification_run_id="run-1";
+     tasks=["task-1", task]; candidate_task_ids=["task-1"];
+     candidate_keepers=["keeper-a"]; candidate_task_keepers=["task-1", Some "keeper-a"]}} in
+  Alcotest.(check bool) "a fresh observation is admitted after the release" true
+    (Result.is_ok (Candle_payout.validate_record after_release fresh.body));
+  let closure = {E.at=at "2026-09-29T05:40:00Z"; body=E.Unattributed
+    {goal_id="goal-1"; request_id="req-1"; verification_run_id="run-1"; reason=E.Window_released}} in
+  Alcotest.(check bool) "window_released settles the released window" true
+    (Result.is_ok (Candle_payout.validate_record after_release closure.body));
+  Alcotest.(check bool) "window_released without a release is refused" true
+    (Result.is_error (Candle_payout.validate_record after_hold closure.body));
+  Alcotest.(check bool) "hold release and closure replay in file order" true
+    (Result.is_ok (Candle_payout.validate_replay linked_base held.body)
+     && Result.is_ok (Candle_payout.validate_replay after_hold released.body)
+     && Result.is_ok (Candle_payout.validate_replay after_release closure.body))
+;;
+
 let () =
   Alcotest.run
     "candle_payout"
@@ -656,6 +704,10 @@ let () =
             test_a_goal_that_owes_already_owes_no_more
         ; Alcotest.test_case "another goal's payout does not block" `Quick
             test_another_goals_payout_does_not_block
+        ] )
+    ; ( "released_window"
+      , [ Alcotest.test_case "a release closes the held window once" `Quick
+            test_a_release_closes_the_held_window_once
         ] )
     ]
 ;;

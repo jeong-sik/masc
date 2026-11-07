@@ -3150,6 +3150,53 @@ let add_routes ~sw ~clock router =
            ~headers:(["cache-control", "private, no-store"] @ Server_dashboard_goal_candle.generation_headers @ public_read_cors_headers req)
            ~content_type:"application/json; charset=utf-8" (Yojson.Safe.to_string json) reqd
        )
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/goals/candle/hold/release" (fun state _actor req reqd ->
+         Http.Request.read_body_async reqd (fun body ->
+           let answer =
+             try
+               let json = Yojson.Safe.from_string body in
+               let config = Mcp_server.workspace_config state in
+               let goal_id = match json with
+                 | `Assoc fields ->
+                   (match List.assoc_opt "goal_id" fields with
+                    | Some (`String goal_id) -> Ok (String.trim goal_id)
+                    | Some _ -> Error "goal_id must be a string"
+                    | None -> Error "goal_id field is required")
+                 | _ -> Error "the body must be a JSON object" in
+               match goal_id with
+               | Error message -> Error message
+               | Ok goal_id when goal_id = "" -> Error "goal_id must not be blank"
+               | Ok goal_id ->
+                 Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+                   match Candle_hold_release.release ~now:clock ~config ~goal_id with
+                   | Ok outcome ->
+                     (match outcome with
+                      | Candle_hold_release.Released _ -> Candle_payout_worker.wake ()
+                      | _ -> ());
+                     Ok outcome
+                   | Error detail -> Error detail)
+             with Yojson.Json_error detail ->
+               Error ("invalid JSON: " ^ detail)
+           in
+           match answer with
+           | Error message ->
+             respond_json_value_with_cors ~status:`Bad_request req reqd
+               (dashboard_error_json ~ok:false message)
+           | Ok (Candle_hold_release.Released { goal_id }) ->
+             respond_json_value_with_cors req reqd
+               (`Assoc ["ok", `Bool true; "outcome", `String "released"; "goal_id", `String goal_id])
+           | Ok (Candle_hold_release.Not_waiting { goal_id }) ->
+             respond_json_value_with_cors ~status:`Conflict req reqd
+               (`Assoc ["ok", `Bool false; "outcome", `String "not_waiting"; "goal_id", `String goal_id])
+           | Ok (Candle_hold_release.Not_held { goal_id }) ->
+             respond_json_value_with_cors ~status:`Conflict req reqd
+               (`Assoc ["ok", `Bool false; "outcome", `String "not_held"; "goal_id", `String goal_id])
+           | Ok (Candle_hold_release.Unknown_goal { goal_id }) ->
+             respond_json_value_with_cors ~status:`Bad_request req reqd
+               (`Assoc ["ok", `Bool false; "outcome", `String "unknown_goal"; "goal_id", `String goal_id])
+           | Ok (Candle_hold_release.Superseded { goal_id }) ->
+             respond_json_value_with_cors ~status:`Conflict req reqd
+               (`Assoc ["ok", `Bool false; "outcome", `String "superseded"; "goal_id", `String goal_id])))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/dashboard/goals/measurements" (fun state actor req reqd ->
            Http.Request.read_body_async reqd (fun body ->
              let answer =

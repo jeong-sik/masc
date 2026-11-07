@@ -8,7 +8,7 @@ let candidate_tasks (w : Candle_payout.waiting) events =
   List.find_map (fun (event : E.t) -> match event.body with
     | (E.Candidates c | E.Candidates_fenced c) when c.goal_id = w.goal_id && c.request_id = w.request_id
         && c.verification_run_id = w.verification_run_id -> Some c.tasks
-    | E.Half_life_set _ | E.Candidates _ | E.Candidates_fenced _ | E.Candidate_window_held _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Equipped _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Payout_failed _ -> None) events
+    | E.Half_life_set _ | E.Candidates _ | E.Candidates_fenced _ | E.Candidate_window_held _ | E.Candidate_window_released _ | E.Snapshot _ | E.Payout_owed _ | E.Unattributed _ | E.Paid _ | E.Equipped _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Payout_failed _ -> None) events
 let call ~(appraise : A.runner) ~identity request =
   let* answer = appraise ~identity request in
   let* decision = A.decode request (A.decision_json answer.decision) |> Result.map_error (fun detail -> A.Invalid_response detail) in
@@ -57,6 +57,8 @@ let validate_due_date (waiting : Candle_payout.waiting) events body =
       Error "Paid cannot settle a Snapshot with an unreadable due_date"
     | E.Unattributed {reason = E.No_candidates; _}, (Ok _ | Error _) ->
       Ok ()
+    | E.Unattributed {reason = E.Window_released; _}, (Ok _ | Error _) ->
+      Ok ()
     | E.Unattributed {reason = (E.All_unrelated _ | E.No_related_keepers _); _}, Ok _ ->
       Ok ()
     | E.Unattributed {reason = (E.All_unrelated _ | E.No_related_keepers _); _}, Error _ ->
@@ -68,7 +70,7 @@ let validate_due_date (waiting : Candle_payout.waiting) events body =
       Error "Payout_failed cannot settle a Snapshot with a readable due_date"
     | (E.Half_life_set _ | E.Equipped _ | E.Purchased _ | E.Granted _
       | E.Gifted _ | E.Gifted_item _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Candidates_fenced _
-      | E.Candidate_window_held _), _ ->
+      | E.Candidate_window_held _ | E.Candidate_window_released _), _ ->
       Error "settlement does not name the confirmed verifier run"
 let decide ~appraise ~(policy : Candle_config.payout_policy) events (waiting : Candle_payout.waiting) =
   let identity = identity waiting in
@@ -169,7 +171,7 @@ let settle ~now ~appraise ~policy ~base_path events (waiting : Candle_payout.wai
         |> Result.map_error (fun detail -> A.Invalid_response detail) in
       let credit = match body with
         | E.Paid payment -> Candle_balance.credit prepared.balance ~at payment |> Result.map (fun _ -> ())
-        | E.Half_life_set _ | E.Unattributed _ | E.Equipped _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Candidates_fenced _ | E.Candidate_window_held _ -> Ok () in
+        | E.Half_life_set _ | E.Unattributed _ | E.Equipped _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Payout_failed _ | E.Snapshot _ | E.Payout_owed _ | E.Candidates _ | E.Candidates_fenced _ | E.Candidate_window_held _ | E.Candidate_window_released _ -> Ok () in
       (match credit, current_policy.half_life with
        | Ok (), (Candle_decay.Off | Candle_decay.Hours _) ->
          Ok (prepared.policy_events @ [{E.at;body}], Settled waiting.goal_id)

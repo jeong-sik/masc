@@ -12,7 +12,7 @@ type issue_observation = Complete_issues of Candle_payout.window_issue list
 (** [Complete_issues] covers the recorded Task observations against the
     applicable time window. It does not by itself establish that historical
     Candidates cover every linked Task or that their candidate sets agree. *)
-type unattributed_reason = No_candidates | All_unrelated | No_related_keepers
+type unattributed_reason = No_candidates | All_unrelated | No_related_keepers | Window_released
 
 type identity = { request_id : string; verification_run_id : string }
 type allocation = { keeper : string; weight : int; amount_milli : int }

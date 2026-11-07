@@ -749,12 +749,10 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
      keeper-runtime calls used to land in their own public-name rows with
      zero successes. Normalize to the canonical internal name (the telemetry
      SSOT, cf. keeper_tools_agent_core_bundle) so every attempt on the same
-     tool counts under one key. Public MCP surface tools (masc_*) have no
-     descriptor and keep their name. *)
+     tool counts under one key. Unresolvable names (e.g. public MCP surface
+     tools like masc_*) come back unchanged. *)
   let telemetry_tool_name =
-    match Keeper_tool_descriptor_resolution.canonical_internal_name_for_tool_name name with
-    | Some internal_name -> internal_name
-    | None -> name
+    Keeper_tool_descriptor_resolution.canonical_tool_name name
   in
   (* Track tool call in telemetry (controlled by MASC_TELEMETRY_ENABLED) *)
   let telemetry_enabled = Env_config_core.telemetry_enabled () in

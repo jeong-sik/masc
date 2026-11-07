@@ -1,6 +1,6 @@
 # Vibe 3.1.0 headless 실측 (RFC-vibe-official-client-lane §4 1단계)
 
-`docs/rfc/RFC-vibe-official-client-lane.md` 가 lane 코드보다 먼저 하라고 정한 실측의
+`docs/rfc/RFC-vibe-official-client-lane.md` 가 lane 코드보다 먼저 하라고 정한 실측(L0)의
 기록이다. 해석과 결정은 RFC 에 있고, 이 문서는 무엇을 돌려 무엇을 봤는지만 적는다.
 
 ## 환경
@@ -70,29 +70,38 @@ journal_dir, started_at, ended_at, limits, exit_code.
     `enabled_tools`, `disabled_tools`, `tools`)는 `config_kept_values` 로 남겼다.
   - m9 stdout(90 KB, 대부분 Vibe 가 읽어 들인 skill 문서)은 `stdout.summary.json` 으로
     바꿨다. 메시지 종류·도구 제목·도구 입력·상태·승인 값만 남겼다.
+  - 세션·턴 UUID 는 그대로 남겼다. 그 UUID 가 가리키는 journal 은 넣지 않았다.
+    `repro/acp-probe.py` 는 콘솔에 찍을 때만 세션 ID 를 가린다.
   - 세션 journal(`session/`)과 `meta.json` 은 계정 사용자 이름과 경로를 담아 넣지 않았다.
 
 ## L0 뒤 실측: vibe-acp 준비 검사와 Vibe 몫 계량기 (2026-11-07 12:1xZ)
 
 - 근거: vibe 3.1.0 설치본의 Python 소스와 아래 두 번의 호출이다. 소스 파일은
   `vibe/setup/auth/auth_state.py`, `vibe/acp/agent.py`, `vibe/app_server/_account.py`,
-  `vibe/app_server/_billing.py` 다. 아래 확장 메서드는 공개 문서에 없다.
-- 자격 증명 순서(`assess_auth_state`): 프로세스 env → `~/.vibe/.env` → OS keyring.
+  `vibe/app_server/_billing.py` 다. 아래 확장 메서드는 공개 문서에 없다. 이 Python
+  소스는 `vibe-acp` 의 것이다. `vibe -p` 는 Rust 바이너리(`vibe/_bin/vibe-rs`)를
+  실행하고, 그 하위 명령은 `mcp`·`config`·`update` 뿐이다(`vibe --help`).
+- `vibe-acp` 의 자격 증명 순서(`assess_auth_state`): 프로세스 env → `~/.vibe/.env` →
+  OS keyring. OIDC 를 켜면 OIDC 토큰이 그보다 먼저다(`utils/api_keys.py`).
   상태 종류는 `signed_out`, `auth_not_required`, `os_keyring`, `vibe_home_env_file`,
   `process_env`, `unsupported_provider` 다. 이 계정에는 `~/.vibe/.env` 가 없었다.
 - `repro/acp-probe.py` 는 `vibe-acp` 에 `initialize`, `_auth/status`, `session/new`,
-  `_account/read` 를 보낸다. 프롬프트를 보내지 않는다. 두 번 돌려 5.0초와 7.4초가
-  걸렸고 둘 다 exit 0 이었다. work 폴더는 비어 있었다.
+  `_account/read` 를 보낸다. 프롬프트를 보내지 않는다. 다섯 번 돌렸고(처음, m12 앞,
+  m12 뒤, 스크립트를 고친 뒤 두 번) 모두 `_account/read` 의 답을 받았다. 잰 시간은
+  5.0초, 7.4초, 5.8초다. work 폴더는 비어 있었다.
+  - 이 호출은 읽기만 하지 않는다. `_account/read` 는 `~/.vibe` 의 whoami 캐시를 다시
+    쓰고, `session/new` 는 세션 lease 를 잡는다.
   - `acp/auth-status.json`: `authenticated=true`, `authState=os_keyring`
   - `acp/account-read.shape.json`: `status=ready`, `plan.kind=chat`, `apiKey.scope=vibe`.
     플랜 이름, 키 끝자리, budget 값은 계정 값이라 남기지 않았다.
 - 키 종류: Vibe 의 whoami 캐시(`~/.vibe/whoami_cache.json`)에 같은 날 두 항목이 있었다.
   m0 시각(09:14:45Z)의 항목은 `plan_type=chat`, m4 시각(09:21:45Z, env 키)의 항목은
-  `plan_type=api` 다. Vibe 소스는 plan_type 이 키 scope 에서 온다고 적는다
-  (`chat`↔`vibe`, `api`↔`workspace`). 그래서 keychain 자격 증명은 Vibe scope 키이고,
-  env 키는 workspace scope API 키다. 캐시 파일은 묶음에 넣지 않았다.
-- m12(12:17Z, `--agent ask --max-turns 1 --time-limit 120`,
-  `-p "Write the numbers from 1 to 300, one per line."`): 호출 앞뒤로 `_account/read`
+  `plan_type=api` 다. Vibe 소스 주석은 plan_type 이 키 scope 에서 온다고 적는다
+  (`chat`↔`vibe`, `api`↔`workspace`). 서버 쪽은 확인하지 않았다. 캐시는 첫
+  `vibe-acp` 호출보다 먼저 읽었다. 캐시 파일은 묶음에 넣지 않았다.
+- m12(12:17Z, 손으로 돌림, run-l0.sh 에 없음): `env -u MISTRAL_API_KEY vibe --workdir
+  <work> --output-dir <out> --trust --agent ask --max-turns 1 --time-limit 120 --output
+  json -p "Write the numbers from 1 to 300, one per line."`. 호출 앞뒤로 `_account/read`
   를 읽었다. `budget.usagePercentage` 가 호출 뒤에 올랐다. `export.json` 의 `cost_usd`
   는 0.0 이었다. exit 3 `turn_limit`, 입력 7,938·출력 342 토큰. 계량기 값은 묶음에
   넣지 않았다.
@@ -109,7 +118,10 @@ journal_dir, started_at, ended_at, limits, exit_code.
 - 한도 소진·세션 만료의 Vibe 쪽 실패 모양(exit·outcome)은 보지 못했다. 거절을
   만들 방법이 없었다.
 - `--disabled-tools` 의 올바른 도구 이름, bash 기본 허용 목록의 범위,
-  `--resume`/`--continue`, MCP 브리지, `vibe-acp`·`vibe-app-server` 는 재지 않았다.
-- `-p` 로 부르는 준비 검사 argv 는 없다. `vibe-acp` 확장 메서드는 공개 문서에 없어서
-  Vibe 버전이 바뀌면 다시 재야 한다. `signed_out` 상태의 실제 응답은 만들지 않았다
-  (keychain 을 건드리지 않았다).
+  `--resume`/`--continue`, MCP 브리지, `vibe-acp` 로 세션을 돌리는 경로,
+  `vibe-app-server` 는 재지 않았다.
+- `-p` 로 부르는 준비 검사 argv 는 찾지 못했다. `vibe-acp` 확장 메서드는 공개 문서에
+  없어서 Vibe 버전이 바뀌면 다시 재야 한다. 만료·취소된 키의 `unauthorized` 응답은
+  만들지 않았다(keychain 을 건드리지 않았다).
+- `vibe -p`(Rust)가 `~/.vibe/.env` 를 어떻게 읽는지, `vibe-acp` 와 같은 keychain
+  항목을 읽는지는 재지 않았다.

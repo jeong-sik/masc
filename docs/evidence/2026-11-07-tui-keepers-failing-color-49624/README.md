@@ -46,6 +46,8 @@ key v        # next layout; capture
 
 tmux started with `COLORTERM=truecolor`. The tool renders the `.ansi` capture to PNG with its own 16-colour palette, Menlo with Apple fallback fonts (Pillow 12.1.1), on macOS 27.2. The layout the tab starts in differs between sessions, so each session visits all three with two `v` presses and names the files by the layout label on the summary line (at 80 columns the label is cut off, so by the shape of the screen). A session whose first screen shows a failed read is run again. The driver, the synthetic server and the renderer are scratch tools and are not retained: the server depends on the private recording.
 
+Not retained: every 120×35 capture, the grouped layout at every size, and every other combination of size, layout and colour mode that is not listed below. Their numbers exist only in `counts.txt`, and the statements below about 120 columns, the grouped layout and the 18 `NO_COLOR=1` captures rest on those numbers and on the unretained `.ansi` files, not on a retained image.
+
 Retained files: `{before,after}-{200x45-compact-color, 200x45-detailed-color, 80x24-compact-color, 200x45-compact-nocolor}.png` and the matching `.ansi.gz` (the unmodified tmux capture with escape codes, gzip), `colour-spans.txt` (style of chosen rows decoded from the `.ansi` captures), `counts.txt` (the counts below for every size and colour mode).
 
 ## 검증 (Verification)

@@ -84,6 +84,7 @@ let ring_capacity () =
            "MASC_DECISION_AUDIT_RING_CAPACITY"))
 
 type ring = {
+  mu : Eio.Mutex.t;
   buf : decision_record option array;
   mutable pos : int;
   mutable count : int;
@@ -92,20 +93,23 @@ type ring = {
 }
 
 let rings : (string, ring) Hashtbl.t = Hashtbl.create 8
+let rings_mu = Mutex.create ()
 
 let flush_interval_sec () = 60.0
 
 let flush_batch_size () = 10
 
 let get_or_create_ring name =
-  match Hashtbl.find_opt rings name with
-  | Some r -> r
-  | None ->
-    let cap = ring_capacity () in
-    let r = { buf = Array.make cap None; pos = 0; count = 0;
-              unflushed = 0; last_flush_ts = Time_compat.now () } in
-    Hashtbl.replace rings name r;
-    r
+  Mutex.protect rings_mu (fun () ->
+    match Hashtbl.find_opt rings name with
+    | Some r -> r
+    | None ->
+      let cap = ring_capacity () in
+      let r = { mu = Eio.Mutex.create ();
+                buf = Array.make cap None; pos = 0; count = 0;
+                unflushed = 0; last_flush_ts = Time_compat.now () } in
+      Hashtbl.replace rings name r;
+      r)
 
 (* Observability for ring overflow.  When [ring.unflushed = cap] at
    append time, the slot we are about to write into already holds an
@@ -130,16 +134,22 @@ let () =
 
 let append ~keeper_name (rec_ : decision_record) =
   let ring = get_or_create_ring keeper_name in
-  let cap = Array.length ring.buf in
-  if ring.unflushed >= cap then
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string DecisionAuditRingOverflows)
-      ~labels:[("keeper", keeper_name)]
-      ();
-  ring.buf.(ring.pos mod cap) <- Some rec_;
-  ring.pos <- (ring.pos + 1) mod cap;
-  ring.count <- min (ring.count + 1) cap;
-  ring.unflushed <- min (ring.unflushed + 1) cap
+  (* Pure counter/slot moves with no suspension point, so the
+     non-cancelling eio writer idiom applies. The lock is what a
+     concurrent flush needs: its file writes yield, and an append
+     landing in that window would otherwise count a record the flush's
+     reset then erases. *)
+  Eio.Mutex.use_rw ~protect:false ring.mu (fun () ->
+    let cap = Array.length ring.buf in
+    if ring.unflushed >= cap then
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string DecisionAuditRingOverflows)
+        ~labels:[("keeper", keeper_name)]
+        ();
+    ring.buf.(ring.pos mod cap) <- Some rec_;
+    ring.pos <- (ring.pos + 1) mod cap;
+    ring.count <- min (ring.count + 1) cap;
+    ring.unflushed <- min (ring.unflushed + 1) cap)
 
 (* ================================================================ *)
 (* JSONL flush                                                      *)
@@ -174,37 +184,43 @@ let flush_if_needed ~base_path ~keeper_name =
   match Hashtbl.find_opt rings keeper_name with
     | None -> ()
     | Some ring ->
-      let now = Time_compat.now () in
-      let should_flush =
-        ring.unflushed >= flush_batch_size ()
-        || (ring.unflushed > 0
-            && now -. ring.last_flush_ts >= flush_interval_sec ())
-      in
-      if not should_flush then ()
-      else begin
-        let store = store_for ~base_path ~keeper_name in
-        let cap = Array.length ring.buf in
-        let start = ((ring.pos - ring.unflushed) mod cap + cap) mod cap in
-        let pending =
-          let rec gather i acc =
-            if i >= ring.unflushed then List.rev acc
-            else
-              let idx = (start + i) mod cap in
-              match ring.buf.(idx) with
-              | Some r -> gather (i + 1) (to_json r :: acc)
-              | None -> gather (i + 1) acc
-          in
-          gather 0 []
+      (* Gather, write and reset sit under the ring's mutex together, so
+         an append either lands before the gather (it is in [pending])
+         or after the reset (it stays counted). [use_ro]: the writes
+         yield and a failure must leave the lock usable for the retry,
+         with [unflushed] untouched so nothing is reported as written. *)
+      Eio.Mutex.use_ro ring.mu (fun () ->
+        let now = Time_compat.now () in
+        let should_flush =
+          ring.unflushed >= flush_batch_size ()
+          || (ring.unflushed > 0
+              && now -. ring.last_flush_ts >= flush_interval_sec ())
         in
-        (try
-          List.iter (Dated_jsonl.append store) pending;
-          ring.unflushed <- 0
-        with Eio.Cancel.Cancelled _ as e -> raise e
-           | e ->
-             Otel_metric_store.inc_counter
-               Keeper_metrics.(to_string DecisionAuditFlushFailures)
-               ~labels:[("keeper", keeper_name)]
-               ();
-             Log.Keeper.warn "decision_audit flush failed: %s" (Printexc.to_string e));
-        ring.last_flush_ts <- now
-      end
+        if not should_flush then ()
+        else begin
+          let store = store_for ~base_path ~keeper_name in
+          let cap = Array.length ring.buf in
+          let start = ((ring.pos - ring.unflushed) mod cap + cap) mod cap in
+          let pending =
+            let rec gather i acc =
+              if i >= ring.unflushed then List.rev acc
+              else
+                let idx = (start + i) mod cap in
+                match ring.buf.(idx) with
+                | Some r -> gather (i + 1) (to_json r :: acc)
+                | None -> gather (i + 1) acc
+            in
+            gather 0 []
+          in
+          (try
+            List.iter (Dated_jsonl.append store) pending;
+            ring.unflushed <- 0
+          with Eio.Cancel.Cancelled _ as e -> raise e
+             | e ->
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string DecisionAuditFlushFailures)
+                 ~labels:[("keeper", keeper_name)]
+                 ();
+               Log.Keeper.warn "decision_audit flush failed: %s" (Printexc.to_string e));
+          ring.last_flush_ts <- now
+        end)

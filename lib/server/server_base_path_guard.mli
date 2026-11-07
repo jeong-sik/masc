@@ -24,3 +24,11 @@ val canonicalize_existing :
     never converted to an error. *)
 
 val format_canonicalization_error : canonicalization_error -> string
+
+val enter : string -> (unit, string) result
+(** Make the canonical workspace root the process working directory. The
+    directory a server is launched from can be removed while it runs, as a
+    git worktree is, and every later [Sys.getcwd] then fails; the workspace
+    root outlives the server. Call it after the runtime-events re-exec, which
+    reads the original argv against the launch directory. [Error] is the
+    message to print before exiting. *)

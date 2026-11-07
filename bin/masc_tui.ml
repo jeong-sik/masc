@@ -16470,12 +16470,20 @@ let apply_provider_history_load state { phr_days = days; phr_requested_at; phr_r
    answer sets the moment the series is owed again; a failure leaves the owed
    read to try again after its wait ([settle_pushed_dataset]). *)
 let apply_tool_series_load state { tsl_days = days; tsl_result = result } =
-  if Some days = Masc_tui_types.tool_series_days state then
+  if Some days = Masc_tui_types.tool_series_days state then begin
     match result with
     | Ok calls ->
         state.tool_series <- Tool_series_read calls;
         Masc_tui_types.note_tool_series_read state ~now:(monotonic_now_s ())
     | Error reason -> state.tool_series <- Tool_series_error reason
+  end else
+    (* The reply is for a window the screen has left, and the read it was
+       settled as answered nothing for the window the screen draws now: a
+       move from Calls to the Dashboard while Calls' read was out leaves the
+       Dashboard with no reading and no read on the way. That window is owed
+       (a screen that draws no series drops the debt in
+       [launch_owed_pushed_reads]). *)
+    owe_pushed_read state Surface_read_source.Tool_series
 
 (* A failed read replaces the last good one, as the quota reading does: goals
    drawn after the read that listed them stopped arriving would be rows nobody

@@ -698,6 +698,20 @@ type untried_progress =
   | No_untried_attempted
   | Untried_attempted
 
+(* The usage read after an account refusal, for a runtime whose provider
+   declares one; a provider that declares none has nothing to ask. The outcome
+   is logged where it is read; the walk reads only the quota window it may
+   have written. *)
+let read_runtime_usage_after_account_refusal runtime =
+  match Runtime_provider_usage_read.http_read_of_runtime runtime with
+  | None -> ()
+  | Some http ->
+    let (_ : Runtime_provider_usage_read.account_refusal_outcome) =
+      Runtime_provider_usage_read.read_runtime_after_account_refusal runtime http
+    in
+    ()
+;;
+
 let attempt_runtime_candidates
     ?(pre_tool_rejects = ref [])
     ?(allow_retry = fun ~runtime_id:_ ~attempt:_ _error -> true)
@@ -744,14 +758,8 @@ let attempt_runtime_candidates
     | Some read -> read
     | None ->
       fun candidate ->
-        (* The outcome is logged where it is read; the walk reads only the
-           quota window it may have written. *)
         Option.iter
-          (fun runtime ->
-            let (_ : Runtime_provider_usage_read.account_refusal_outcome) =
-              Runtime_provider_usage_read.read_runtime_after_account_refusal runtime
-            in
-            ())
+          read_runtime_usage_after_account_refusal
           (Runtime.get_runtime_by_id (runtime_id_of candidate))
   in
   let candidate_backpressure_of =
@@ -902,7 +910,8 @@ let attempt_runtime_candidates
            ~boundary:Keeper_runtime_failure_route.Agent_core_execution
            error
        in
-       (match route with
+       let record_route_evidence () =
+        match route with
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Rate_limited; retry_after } ->
           note_rate_limit retry_after;
@@ -919,7 +928,30 @@ let attempt_runtime_candidates
            | None -> read_usage_after_account_refusal candidate)
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Hard_quota; retry_after } ->
-          note_quota retry_after
+          (* A spent quota that states no reset rests the scope until an
+             answer, and the walk does not promote a path at that release:
+             behind a head that rests for days, the walk waits for the head.
+             GLM's 1308 states its reset only in prose. The provider's
+             declared [usage-read] dates the rest, as after a 429 without a
+             wait. The refusal is recorded first, so a turn cancelled during
+             the read, and a walk that runs meanwhile, still see the path
+             rest; a dated window the read finds replaces that observation. A
+             failed read leaves the observation, and the next refusal reads
+             again. A payment refusal (402) names no usage window and is not
+             read. *)
+          note_quota retry_after;
+          (match
+             ( Keeper_runtime_failure_route.usable_retry_after retry_after
+             , Keeper_runtime_failure_route.hard_quota_source error )
+           with
+           | None, Some Keeper_runtime_failure_route.Provider_quota_refused ->
+             read_usage_after_account_refusal candidate
+           | ( Some _
+             , ( Some
+                   ( Keeper_runtime_failure_route.Payment_refused
+                   | Keeper_runtime_failure_route.Provider_quota_refused )
+               | None ) )
+           | None, (Some Keeper_runtime_failure_route.Payment_refused | None) -> ())
         | Keeper_runtime_failure_route.Retry_after_observed
             { retry_class = Keeper_runtime_failure_route.Server_error; retry_after = _ } ->
           note_failed_attempt Runtime_candidate_backpressure.Server_error
@@ -993,15 +1025,30 @@ let attempt_runtime_candidates
           note_failed_attempt Runtime_candidate_backpressure.Server_error
         (* The turn's input or MASC itself failed; another candidate would not
            do better, so this is no evidence about this one. *)
-        | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> ());
+        | Keeper_runtime_failure_route.Exhausted_visible_alive _ -> ()
+       in
+       let report_attempt_error () =
+         on_attempt_error
+           ~runtime_id:attempt_runtime_id
+           ~attempt:idx
+           ~dispatch
+           error
+       in
        (* Let observers retain this failure's stated rest before a later
           candidate outlives it. The quota/usage read above owns that evidence;
-          a callback before it cannot observe the refusal's newly stated end. *)
-       on_attempt_error
-         ~runtime_id:attempt_runtime_id
-         ~attempt:idx
-         ~dispatch
-         error;
+          a callback before it cannot observe the refusal's newly stated end.
+          A turn cancelled during that read still reports the failure, with
+          the rest recorded before the read, and then ends as cancelled. In
+          a fiber the report runs shielded from that cancellation, so a report
+          that suspends cannot raise a new [Cancelled] over the original. *)
+       (match record_route_evidence () with
+        | () -> report_attempt_error ()
+        | exception (Eio.Cancel.Cancelled _ as cancelled) ->
+          let backtrace = Printexc.get_raw_backtrace () in
+          (match Fs_compat.execution_context () with
+           | Fs_compat.Eio_fiber -> Eio.Cancel.protect report_attempt_error
+           | Fs_compat.Non_eio -> report_attempt_error ());
+          Printexc.raise_with_backtrace cancelled backtrace);
        (* Stable demotion retains every declared candidate, including when
           all are observed unavailable. Neither hint causes a wait or gate. *)
        let rest = demote_rest rest in
@@ -2450,11 +2497,7 @@ let run_named
       | Resolved_runtime runtime -> Some runtime.Runtime_instance.candidate_backpressure
       | Missing_runtime _ -> None)
     ~read_usage_after_account_refusal:(function
-      | Resolved_runtime runtime ->
-        let (_ : Runtime_provider_usage_read.account_refusal_outcome) =
-          Runtime_provider_usage_read.read_runtime_after_account_refusal runtime
-        in
-        ()
+      | Resolved_runtime runtime -> read_runtime_usage_after_account_refusal runtime
       | Missing_runtime _ -> ())
     ~candidate_dispatchable:(function
       (* A materialized snapshot stays dispatchable even if a runtime.toml

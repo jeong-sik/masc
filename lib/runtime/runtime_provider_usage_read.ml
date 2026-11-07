@@ -566,13 +566,13 @@ let rest_on_account_refusal_read ~scope ~observed_at read =
   in
   (match read with
    | Spent_until resets_at -> Runtime_quota_window.note_exhausted ~scope ~resets_at
-   | Spent_without_reset -> Runtime_quota_window.note_observed_exhausted ~scope
+   | Spent_without_reset -> Runtime_quota_window.note_read_without_reset ~scope
    | Spent_in_several_limits _ ->
      Log.Runtime_agent.info
        "provider usage read for %s: %s; the scope rests until its next success"
        (Runtime_quota_window.scope_to_string scope)
        (account_refusal_read_to_string read);
-     Runtime_quota_window.note_observed_exhausted ~scope
+     Runtime_quota_window.note_read_without_reset ~scope
    | No_window_spent -> ());
   read
 ;;
@@ -608,8 +608,8 @@ let http_read_of_runtime (rt : Runtime_instance.t) =
 ;;
 
 type account_refusal_skip =
-  | No_usage_read
-  | Scope_already_resting
+  | Scope_rest_dated
+  | Scope_read_found_no_reset
   | Already_reading
   | No_net_or_clock
 
@@ -620,8 +620,8 @@ type account_refusal_outcome =
   | Skipped of account_refusal_skip
 
 let account_refusal_skip_to_string = function
-  | No_usage_read -> "the provider declares no usage-read"
-  | Scope_already_resting -> "the scope already rests"
+  | Scope_rest_dated -> "the scope already rests until a stated reset"
+  | Scope_read_found_no_reset -> "a read already found the scope spent with no reset"
   | Already_reading -> "a read for the scope is already running"
   | No_net_or_clock -> "no Eio net or clock"
 ;;
@@ -632,17 +632,19 @@ let fetch_of_context () =
   | None, _ | _, None -> None
 ;;
 
-let read_runtime_after_account_refusal ?fetch (rt : Runtime_instance.t) =
+let read_runtime_after_account_refusal ?fetch (rt : Runtime_instance.t) http =
   let scope = Runtime_instance.quota_scope_of_runtime rt in
   let outcome =
-    match http_read_of_runtime rt with
-    | None -> Skipped No_usage_read
-    | Some http ->
-      (* A sibling on the same account refused a moment ago and its read
-         already rests the scope; the walk has nothing more to learn. *)
-      if Runtime_quota_window.is_exhausted ~scope ~now:(Time_compat.now ())
-      then Skipped Scope_already_resting
-      else (
+    (* A provider answer already rests the scope -- a sibling's read a moment
+       ago dated it, or found it spent with no reset -- and another read has
+       nothing to add. A refusal's own undated rest does not stop the read:
+       the refusal that asks has usually just recorded one, and the read is
+       what dates it. A read that failed left only that rest, so the next
+       refusal reads again. *)
+    match Runtime_quota_window.answered_rest ~scope ~now:(Time_compat.now ()) with
+    | Some Runtime_quota_window.Stated_reset_ahead -> Skipped Scope_rest_dated
+    | Some Runtime_quota_window.Read_found_no_reset -> Skipped Scope_read_found_no_reset
+    | None ->
         let fetch =
           match fetch with
           | Some fetch -> Some fetch
@@ -664,7 +666,7 @@ let read_runtime_after_account_refusal ?fetch (rt : Runtime_instance.t) =
                 (* The request carried the key and nothing bounds what an
                    HTTP client's exception message quotes: keep the
                    constructor only. *)
-                | exception exn -> Read_raised (Printexc.exn_slot_name exn)))
+                | exception exn -> Read_raised (Printexc.exn_slot_name exn))
   in
   let scope_label = Runtime_quota_window.scope_to_string scope in
   (match outcome with

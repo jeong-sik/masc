@@ -15,12 +15,19 @@ type scope =
   | Official_client_home of string * string
 
 (* Two facts, not one duration. [Until] is the provider's own reset time.
-   [Observed] is a hard-quota rejection that stated no reset. It claims no end
-   time; the next success on the scope clears it. Coarse 429 evidence does not
-   establish this credential ownership and uses candidate backpressure. *)
+   [Observed] is a spent quota that stated no reset. It claims no end time;
+   the next success on the scope clears it. Coarse 429 evidence does not
+   establish this credential ownership and uses candidate backpressure.
+   Who stated no reset is kept apart: a refusal leaves a question a usage read
+   may still answer with a date, and a read that found no reset has answered
+   it. *)
+type observation =
+  | Refusal_named_no_reset
+  | Read_named_no_reset
+
 type window =
   | Until of float
-  | Observed
+  | Observed of observation
 
 let windows : (scope, window) Hashtbl.t = Hashtbl.create 4
 let mu = Stdlib.Mutex.create ()
@@ -39,7 +46,7 @@ let note_exhausted ~scope ~resets_at =
       match Hashtbl.find_opt windows scope with
       | Some (Until existing) when Float.compare existing resets_at >= 0 -> false
       (* A stated reset is more than an observation, so it replaces one. *)
-      | Some (Until _) | Some Observed | None ->
+      | Some (Until _) | Some (Observed _) | None ->
         Hashtbl.replace windows scope (Until resets_at);
         true)
   in
@@ -48,13 +55,25 @@ let note_exhausted ~scope ~resets_at =
      signal already hold the window whatever the write does. *)
   if taken then (Atomic.get stated_window_sink) { scope; resets_at }
 
-let note_observed_exhausted ~scope =
+let note_observed ~scope observation =
+  (* NDT-OK: the wall clock only tells whether a held reset has passed. A
+     passed reset that no read has pruned yet names no rest, and keeping it
+     over this observation would leave the scope looking available. *)
+  let now = Unix.gettimeofday () in
   Stdlib.Mutex.protect mu (fun () ->
-    match Hashtbl.find_opt windows scope with
-    (* A stated window already says more; do not weaken it. *)
-    | Some (Until _) -> ()
-    | Some Observed | None -> Hashtbl.replace windows scope Observed);
+    match Hashtbl.find_opt windows scope, observation with
+    (* A stated window still ahead says more; do not weaken it. *)
+    | Some (Until resets_at), (Refusal_named_no_reset | Read_named_no_reset)
+      when Float.compare now resets_at < 0 -> ()
+    (* A read already answered the question a refusal asks. *)
+    | Some (Observed Read_named_no_reset), Refusal_named_no_reset -> ()
+    | ( (Some (Until _) | Some (Observed _) | None)
+      , (Refusal_named_no_reset | Read_named_no_reset) ) ->
+      Hashtbl.replace windows scope (Observed observation));
   Runtime_path_rest_signal.recorded ()
+
+let note_observed_exhausted ~scope = note_observed ~scope Refusal_named_no_reset
+let note_read_without_reset ~scope = note_observed ~scope Read_named_no_reset
 
 let note_succeeded ~scope =
   Stdlib.Mutex.protect mu (fun () ->
@@ -62,14 +81,14 @@ let note_succeeded ~scope =
     (* Only an observation is cleared by a call getting through. A stated
        window is the provider's own answer about a time, and one success
        inside it does not make it untrue. *)
-    | Some Observed -> Hashtbl.remove windows scope
+    | Some (Observed _) -> Hashtbl.remove windows scope
     | Some (Until _) | None -> ());
   Runtime_path_rest_signal.recorded ()
 
 let active_until ~scope ~now =
   Stdlib.Mutex.protect mu (fun () ->
     match Hashtbl.find_opt windows scope with
-    | None | Some Observed -> None
+    | None | Some (Observed _) -> None
     | Some (Until resets_at) ->
       if Float.compare now resets_at < 0
       then Some resets_at
@@ -85,13 +104,34 @@ let is_exhausted ~scope ~now =
   Stdlib.Mutex.protect mu (fun () ->
     match Hashtbl.find_opt windows scope with
     | None -> false
-    | Some Observed -> true
+    | Some (Observed _) -> true
     | Some (Until resets_at) ->
       if Float.compare now resets_at < 0
       then true
       else begin
         Hashtbl.remove windows scope;
         false
+      end)
+
+type answered_rest =
+  | Stated_reset_ahead
+  | Read_found_no_reset
+
+(* What a provider answer already says about [scope]'s rest, as a usage read
+   asks it: a stated reset still ahead, or a read that found the window spent
+   with no reset. A refusal's own observation is no answer. Prunes a passed
+   window the way [active_until] does. *)
+let answered_rest ~scope ~now =
+  Stdlib.Mutex.protect mu (fun () ->
+    match Hashtbl.find_opt windows scope with
+    | None | Some (Observed Refusal_named_no_reset) -> None
+    | Some (Observed Read_named_no_reset) -> Some Read_found_no_reset
+    | Some (Until resets_at) ->
+      if Float.compare now resets_at < 0
+      then Some Stated_reset_ahead
+      else begin
+        Hashtbl.remove windows scope;
+        None
       end)
 
 let demote_order ~now ~quota_scope_of candidates =

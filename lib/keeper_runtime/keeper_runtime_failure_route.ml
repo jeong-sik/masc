@@ -62,11 +62,14 @@ type route =
   | Rotate_now of { rotate : rotate_class }
   | Exhausted_visible_alive of { terminal : terminal_class }
 
-let core_error_is_hard_quota (err : Agent_core.Error.t) =
+type hard_quota_source =
+  | Payment_refused
+  | Provider_quota_refused
+
+let hard_quota_source (err : Agent_core.Error.t) =
   match err with
-  | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _)
-  | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) ->
-    true
+  | Agent_core.Error.Api (Llm_provider.Retry.PaymentRequired _) -> Some Payment_refused
+  | Agent_core.Error.Provider (Llm_provider.Error.HardQuota _) -> Some Provider_quota_refused
   | Agent_core.Error.Api (Llm_provider.Retry.RateLimited _)
   | Agent_core.Error.Api (Llm_provider.Retry.Overloaded _)
   | Agent_core.Error.Api (Llm_provider.Retry.ServerError _)
@@ -103,8 +106,10 @@ let core_error_is_hard_quota (err : Agent_core.Error.t) =
   | Agent_core.Error.Io _
   | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _
   | Agent_core.Error.Internal _ | Agent_core.Error.Internal_carried _ ->
-    false
+    None
 ;;
+
+let core_error_is_hard_quota err = Option.is_some (hard_quota_source err)
 
 let core_error_is_model_absent : Agent_core.Error.t -> bool = function
   | Agent_core.Error.Api (Llm_provider.Retry.NotFound _)

@@ -3,8 +3,9 @@
 
     {!Runtime_candidate_backpressure} calls {!recorded} after
     [note_rate_limit], [note_failed_attempt] and [note_candidate_success];
-    {!Runtime_quota_window} after [note_exhausted], [note_observed_exhausted]
-    and [note_succeeded]. Those six functions are the only writers. The call
+    {!Runtime_quota_window} after [note_exhausted], [note_observed_exhausted],
+    [note_read_without_reset] and [note_succeeded]. Those seven functions are
+    the only writers. The call
     carries nothing: the server recomputes the rests it shows and compares.
 
     The observer runs on the writer's fiber, after the write and outside the

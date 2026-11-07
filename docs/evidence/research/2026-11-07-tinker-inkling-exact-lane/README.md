@@ -54,7 +54,7 @@ librarian은 4건씩 동시에 보냈다.
 | `wire-probe.jsonl` | `artifacts/tinker/probe-20261107T064924Z/probe.jsonl` | `1e1133581e2a399396f3153446a83cd172ebd5ee92d96522248932e4e2608c6e` | 그대로. 프롬프트는 모두 합성이다 |
 | `wire-sse-low.txt` | 같은 폴더 `sse-low.txt` | `b83119a674442cb63ca988db9f0f257f84019f96f1859cdf162cd334d42c3ce9` | 그대로 |
 | `structured-output-preflight.json` | `artifacts/tinker/replay-20261107T071501Z/preflight.json` | `7dac6ce3335fceccf24ba7a6e73fe9aff22fbeff457ca74c006364b29390255b` | 그대로 |
-| `replay-rows.jsonl` | 같은 폴더 `rows.jsonl` | `db38ab88d2ac3c4d1acebbfae562280ebdcca0db0c6acb9ec62d7b6dd4e5a48f` | 파생본. 행마다 `content_head`(모델 답 앞 400자)를 지웠다. 나머지 칸은 같다 |
+| `replay-rows.jsonl` | 같은 폴더 `rows.jsonl` | `db38ab88d2ac3c4d1acebbfae562280ebdcca0db0c6acb9ec62d7b6dd4e5a48f` | 파생본. 행마다 `content_head`(모델 답 앞 400자)를 지웠다. 나머지 칸은 같다. 올린 파생본의 sha256은 `468483f2e6a363b2ba08a580eddaba9665e0770a5cdcf47cb8fb7bfc4041caba`이다 |
 | `replay-summary.json` | 같은 폴더 `summary.json` | `8984fccbaf184751fb17db900cde5927c6c5ea19ff7c1d1b1fb545e05cdd5b06` | 그대로 |
 | `wire_probe.py`, `replay_tinker.py` | `artifacts/tinker/` | — | 재현용 사본. 출력은 `--out`으로 준 새 폴더에만 쓴다 |
 

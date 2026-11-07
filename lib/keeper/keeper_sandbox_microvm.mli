@@ -939,36 +939,47 @@ val build_link_warning : build_link_plan -> string option
 
 val build_link_actions : build_link_row list -> (string * string) list
 (** The [(checkout, target)] pairs that actually need a guest command --
-    input to {!build_link_apply_request_for}. A row already correct, or
+    input to {!build_link_apply_requests_for}. A row already correct, or
     refused, needs none. *)
 
 val build_link_targets : build_link_row list -> string list
 (** Every target that must exist before a build runs: the targets of
     {!build_link_actions} and of rows already linked. A fresh boot recreates
     the build volume empty, so an already-correct link dangles until its
-    target is created again -- input to {!build_target_mkdir_request}. *)
+    target is created again -- input to {!build_target_mkdir_requests}. *)
 
-val build_link_apply_request_for
+val build_argv_values_budget_bytes : int
+(** 128 KiB: the most path bytes one build helper request carries, counting
+    each path with the NUL that [execve] counts after it. Nothing bounds how
+    many checkouts a scan finds, so a longer list becomes several requests.
+    macOS counts argv and the environment together against ARG_MAX (1 MiB);
+    a Linux guest counts them against a quarter of its stack limit and each
+    string against MAX_ARG_STRLEN (128 KiB). *)
+
+val build_link_apply_requests_for
   :  Keeper_microvm_backend.t
   -> container_name:string
   -> keeper_work_root:string
   -> uid:int
   -> gid:int
   -> actions:(string * string) list
-  -> string list * string
-(** The exec argv and its NUL-framed stdin, with checkout and target payload
-    paths absent from argv; the working root is still an argv value. Python 3
-    in isolated mode verifies the complete payload length, field count and
-    SHA-256 before attempting any symlink. The first of [/usr/bin/python3] and
+  -> string list list
+(** The exec argvs, in order and without [-i]: each checkout and its target
+    are guest argv values after the field count, so the VM runtime keeps no
+    stdin pipe end for the call. The pairs are split across requests by
+    {!build_argv_values_budget_bytes}, and a pair stays in one request; no
+    actions is no request. Python 3 in isolated mode checks the count, that
+    the fields are pairs, and that no field is empty before attempting any
+    symlink. The first of [/usr/bin/python3] and
     [/usr/local/bin/python3] that passes the shell's [-x] check is selected.
     If neither passes, the helper exits 127. A selected interpreter that fails
     is not followed by another. An existing destination is not replaced.
     Checkout parents are not fenced. A failed effect may be partial. *)
 
-val build_target_mkdir_request : container_name:string -> targets:string list -> string list * string
-(** The exec argv and NUL-framed stdin for creating each target with mode 0777,
-    run as root inside the guest after payload verification by the Python 3
-    helper described in {!build_link_apply_request_for}.
+val build_target_mkdir_requests : container_name:string -> targets:string list -> string list list
+(** The exec argvs, without [-i], for creating each target with mode 0777, run
+    as root inside the guest after the argument check of the Python 3 helper
+    described in {!build_link_apply_requests_for}, and split the same way.
     Necessary because dune does not create the directory a [_build] symlink
     points at -- it [lstat]s [_build], sees the link, and opens
     [_build/.lock] straight away, and the host cannot create the target

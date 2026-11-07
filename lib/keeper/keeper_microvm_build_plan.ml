@@ -80,7 +80,7 @@ let build_scan_rows_of_output raw =
 
 (** Every scanned checkout's target and plan, decided purely so the refusal
     stays testable (see {!plan_build_link}) -- deciding never touches the
-    guest; only [Keeper_sandbox_microvm.build_link_apply_request_for] does. *)
+    guest; only [Keeper_sandbox_microvm.build_link_apply_requests_for] does. *)
 type build_link_row =
   { checkout : string
   ; target : string option
@@ -114,7 +114,7 @@ let build_link_actions rows =
     on every fresh guest boot while the work volume keeps the old links, so a
     link that is already correct points at a directory that no longer exists
     until it is created again -- and dune does not create it
-    ([Keeper_sandbox_microvm.build_target_mkdir_request]). *)
+    ([Keeper_sandbox_microvm.build_target_mkdir_requests]). *)
 let build_link_targets rows =
   List.filter_map
     (fun { checkout = _; target; plan } ->

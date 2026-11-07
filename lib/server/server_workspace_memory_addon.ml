@@ -16,10 +16,6 @@ let error_to_string = Submit.error_to_string
 let runtime_error = Submit.error_of_runtime
 let owned value = Result.map_error (fun error -> Unavailable (Owner.error_to_string error)) value
 let rejected value = Result.map_error (fun detail -> Rejected detail) value
-let reserved () =
-  List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas
-  @ (Keeper_tool_descriptor.all_descriptors () |> List.concat_map Keeper_tool_descriptor.registered_names)
-  |> List.sort_uniq String.compare
 let resolve ~config ~reserved =
   let snapshot=Runtime.tool_export_snapshot ~config ~access:Lane_addon_sources.Operator_configuration ~reserved in
   match List.find_opt (fun (conflict : Lane_addon_tool_export.conflict) -> conflict.name=Binding.tool) snapshot.conflicts with
@@ -34,7 +30,7 @@ let same_semantic_destination (actual:Runtime.tool_request_destination) (expecte
   actual.installation_id=expected.installation_id && actual.package_id=expected.package_id
   && actual.tool=expected.tool && actual.configuration_revision=expected.configuration_revision
 let destination ~config =
-  let reserved=reserved () in
+  let reserved=Unified_tool_registry.reserved_tool_names () in
   let* export=resolve ~config ~reserved in
   Runtime.with_tool_request_destination ~config ~access:Lane_addon_sources.Operator_configuration
     ~reserved ~export ~publish:(fun destination -> Ok destination) |> Result.map_error runtime_error
@@ -42,7 +38,7 @@ let captured_destination (destination : Runtime.tool_request_destination) : Capt
   installation_id=destination.installation_id;package_id=destination.package_id;tool=destination.tool;
   source_revision=destination.source_revision;configuration_revision=destination.configuration_revision}
 let capture ~config ~request_id make =
-  let reserved=reserved () in
+  let reserved=Unified_tool_registry.reserved_tool_names () in
   let* export=resolve ~config ~reserved in
   let* workspace=Systhread_host.run (fun () -> Capture.observe_workspace ~base_path:config.Workspace.base_path)
     |> Result.map_error (fun detail -> Unavailable detail) in
@@ -124,7 +120,7 @@ let resume_with ~store ~base_path ~request_id ~prepare ~call =
   | Submit.Commit_pending record -> Ok (Commit_pending record)
   | Submit.Settled record -> Ok (Settled record)
 let resume ~config ~request_id =
-  let reserved=reserved () in
+  let reserved=Unified_tool_registry.reserved_tool_names () in
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
   let rebind () =
     let* export=resolve ~config ~reserved in
@@ -195,7 +191,7 @@ let eligible ~base_path ~briefing_contract capture = match Capture.work capture 
       Briefing.batch_is_current ~sources:(Ledger.briefing_sources ledger) ~contract batch
       |> rejected)
 let successor_is_current ~config ~capture =
-  let reserved=reserved () in
+  let reserved=Unified_tool_registry.reserved_tool_names () in
   let* export=resolve ~config ~reserved in
   let* matching=Runtime.with_tool_request_destination ~config ~access:Lane_addon_sources.Operator_configuration
     ~reserved ~export ~publish:(fun actual -> Ok (same_semantic_destination actual (Capture.destination capture)))
@@ -414,7 +410,7 @@ let recover_successor ~store ~base_path ~request_id =
 let narrow ~config ~request_id =
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
   let admit original publish =
-    let reserved=reserved () in
+    let reserved=Unified_tool_registry.reserved_tool_names () in
     let* export=resolve ~config ~reserved in
     Runtime.with_tool_request_destination ~config ~access:Lane_addon_sources.Operator_configuration
       ~reserved ~export ~publish:(fun actual ->

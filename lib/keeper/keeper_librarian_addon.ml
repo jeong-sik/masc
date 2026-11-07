@@ -3,10 +3,7 @@ let all = [Admission; Durable]
 let package_id = "keeper-librarian"
 let tool = function Admission -> "admit_memory" | Durable -> "derive_memory"
 let output = function Admission -> "admission" | Durable -> "durable"
-let reserved () =
-  List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas
-  @ (Keeper_tool_descriptor.all_descriptors () |> List.concat_map Keeper_tool_descriptor.registered_names)
-  |> List.sort_uniq String.compare
+let reserved = Unified_tool_registry.reserved_tool_names
 
 type unavailable =
   | Unattached

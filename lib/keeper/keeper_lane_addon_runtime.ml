@@ -1,12 +1,7 @@
-let reserved_names () =
-  List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas
-  @ (Keeper_tool_descriptor.all_descriptors ()
-     |> List.concat_map Keeper_tool_descriptor.registered_names)
-  |> List.sort_uniq String.compare
-
 let snapshot ~config ~keeper_name =
   let snapshot = Lane_addon_runtime.tool_export_snapshot ~config
-    ~access:(Lane_addon_sources.Keeper keeper_name) ~reserved:(reserved_names ()) in
+    ~access:(Lane_addon_sources.Keeper keeper_name)
+    ~reserved:(Unified_tool_registry.reserved_tool_names ()) in
   List.iter (fun conflict -> Log.Keeper.warn
     "Keeper Add-on export quarantined keeper=%s: %s" keeper_name
     (Lane_addon_tool_export.conflict_to_string conflict)) snapshot.conflicts;
@@ -27,7 +22,8 @@ let call ~config ~keeper_name ~(export : Lane_addon_tool_export.t) ~arguments =
   let start_time = Tool_timing.start () in
   let tool_name = export.tool.name in
   let result = match Machine_addon_host.call ~principal:(Lane_addon_call_context.Keeper keeper_name) ~config
-      ~access:(Lane_addon_sources.Keeper keeper_name) ~reserved:(reserved_names ())
+      ~access:(Lane_addon_sources.Keeper keeper_name)
+      ~reserved:(Unified_tool_registry.reserved_tool_names ())
       ~export ~arguments with
     | Error (Lane_addon_runtime.Host_refusal refusal) ->
         let class_, message = match refusal with

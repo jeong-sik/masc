@@ -465,11 +465,7 @@ let require_expected_revision reference actual =
 
 let authoring_descriptors ~config ~access =
   let static = Keeper_tool_descriptor.all_descriptors () in
-  let reserved =
-    List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) Config.raw_all_tool_schemas
-    @ List.concat_map Keeper_tool_descriptor.registered_names static
-    |> List.sort_uniq String.compare
-  in
+  let reserved = Unified_tool_registry.reserved_tool_names () in
   let reading = Lane_addon_runtime.tool_export_snapshot ~config ~access ~reserved in
   static @ List.map Keeper_lane_addon_descriptor.create reading.exports
 ;;

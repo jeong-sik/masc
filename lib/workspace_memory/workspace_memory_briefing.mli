@@ -7,6 +7,9 @@ type source = { id : string; kind : kind; text : string }
 type summary = { source_ids : string list; text : string }
 type t
 type observation = Missing | Current of summary | Stale of summary
+type pass = { target : int; remaining : int }
+
+val pass : t -> pass option
 
 val empty : t
 val is_empty : t -> bool

@@ -389,12 +389,25 @@ let observe ~base_path =
          let ledger_sha256 = sha256 ledger in
          let resolution = Prompt_registry.resolve_prompt Prompt_names.workspace_memory_briefing in
          let contract = Workspace_memory_briefing.contract ~template:resolution.effective in
-         let briefing = Workspace_memory_briefing.load ~directory:(directory ~base_path)
+         let briefing_loaded = Workspace_memory_briefing.load ~directory:(directory ~base_path) in
+         let briefing = briefing_loaded
            |> Result.map (Workspace_memory_briefing.observe ~sources:(briefing_sources ledger) ~contract) in
+         let building = briefing_loaded
+           |> Result.map Workspace_memory_briefing.pass in
+         let excluded_count =
+           Fact_map.fold
+             (fun _ disposition count ->
+               match disposition with
+               | Excluded _ -> count + 1
+               | Claim_member _ | Conflict_member _ -> count)
+             ledger.dispositions 0
+         in
          Available { ledger_sha256; claim_count = List.length (claims ledger);
                      conflict_count = List.length (conflicts ledger);
                      classified_count = List.length (dispositions ledger);
-                     briefing })
+                     excluded_count;
+                     briefing;
+                     building })
     | { Unix.st_kind = Unix.(S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
       Unavailable (ledger_path ^ ": not a regular file")
   with

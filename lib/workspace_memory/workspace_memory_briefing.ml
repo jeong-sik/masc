@@ -18,6 +18,12 @@ type batch =
   ; rendered_prompt : string
   }
 type preparation = Unchanged | Cleanup of t | Prepared of batch
+type pass = { target : int; remaining : int }
+
+let pass t =
+  match t.building with
+  | None -> None
+  | Some b -> Some { target = List.length b.target; remaining = List.length b.remaining }
 
 open Result.Syntax
 let empty = { published = None; building = None }

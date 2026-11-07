@@ -142,25 +142,53 @@ let briefing_fields = function
   | Ok (Workspace_memory_briefing.Stale summary) ->
     ["status", `String "stale"; "text", `String summary.text]
 
-let observation ~include_briefing ~base_path =
+let schema = "workspace.memory.inventory.v1"
+
+let observation ?(now = Unix.gettimeofday ()) ~include_briefing ~base_path =
   match Ledger.observe ~base_path with
-  | Ledger.Missing -> Ok (`Assoc ["status", `String "missing"])
+  | Ledger.Missing ->
+    Ok
+      (`Assoc
+        [ "schema", `String schema
+        ; "generated_at", `Float now
+        ; "status", `String "missing"
+        ])
   | Ledger.Unavailable detail -> Error detail
   | Ledger.Available descriptor ->
-    let briefing = briefing_fields descriptor.briefing in
-    let briefing = if include_briefing then briefing
-      else List.filter (fun (key, _) -> key <> "text") briefing in
-    Ok (`Assoc
-      ["status", `String "available";
-       "semantic_verification", `String "not_performed";
-       "ledger_sha256", `String descriptor.ledger_sha256;
-       "claim_count", `Int descriptor.claim_count;
-       "conflict_count", `Int descriptor.conflict_count;
-       "classified_count", `Int descriptor.classified_count;
-       "briefing", `Assoc briefing])
+    let briefing_base = briefing_fields descriptor.briefing in
+    let briefing =
+      if include_briefing
+      then briefing_base
+      else
+        let filtered = List.filter (fun (key, _) -> key <> "text") briefing_base in
+        match descriptor.briefing with
+        | Error _ -> filtered
+        | Ok _ ->
+          let building_json =
+            match descriptor.building with
+            | Ok (Some (pass : Workspace_memory_briefing.pass)) ->
+              `Assoc [ "target", `Int pass.target; "remaining", `Int pass.remaining ]
+            | Ok None | Error _ -> `Null
+          in
+          filtered @ [ "building", building_json ]
+    in
+    Ok
+      (`Assoc
+        [ "schema", `String schema
+        ; "generated_at", `Float now
+        ; "status", `String "available"
+        ; "semantic_verification", `String "not_performed"
+        ; "ledger_sha256", `String descriptor.ledger_sha256
+        ; "claim_count", `Int descriptor.claim_count
+        ; "conflict_count", `Int descriptor.conflict_count
+        ; "excluded_count", `Int descriptor.excluded_count
+        ; "classified_count", `Int descriptor.classified_count
+        ; "briefing", `Assoc briefing
+        ])
+;;
 
-let inventory ~base_path = observation ~include_briefing:false ~base_path
-let briefing ~base_path = observation ~include_briefing:true ~base_path
+let inventory ?now ~base_path = observation ?now ~include_briefing:false ~base_path
+let briefing ?now ~base_path = observation ?now ~include_briefing:true ~base_path
 
 let ranking_failure_logged = Atomic.make false
 

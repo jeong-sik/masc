@@ -136,6 +136,18 @@ let container_name_of meta =
        ; started_ms = int_of_float (Unix.gettimeofday () *. 1000.0)
        })
 
+(* A program that exits non-zero and is still accepted says why on stderr: rg
+   exits 2 after an error and prints it there. The docker lane returns both
+   streams in one string, so a Grep failure there carries rg's message. This
+   lane returns the two apart, and an accepted exit used to keep stdout alone,
+   so a Grep on a missing path came back as exit 2 with nothing else. The error
+   text goes first so a cut at [max_bytes] keeps it. *)
+let error_text_then_stdout ~stderr ~stdout =
+  if String.ends_with ~suffix:"\n" stderr
+  then stderr ^ stdout
+  else stderr ^ "\n" ^ stdout
+;;
+
 (* One runner, two ways of getting the endpoint. A turn hands in the lane's
    [endpoint], which may start the guest it owns; a caller with no turn hands
    in [attached_guest_endpoint], which cannot. Path translation and status
@@ -143,8 +155,9 @@ let container_name_of meta =
 (* The read backend's translation of a [run_outcome] into a read result.
    [Transport_failed] is always an error -- this is what stops a down lane
    from reading as an empty [Ok] on the Grep lane, whose [ok_exit_codes]
-   accepts exit 1. Pure and exported so the distinction is tested directly
-   (test_keeper_sandbox_read_backend, the differential test). *)
+   accepts exit 1. Exit 0 returns stdout alone; an accepted non-zero exit
+   returns stderr, then stdout. Pure and exported so the distinction is tested
+   directly (test_keeper_sandbox_read_backend, the differential test). *)
 let classify_read_outcome_with_limit ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome =
   match (outcome : Masc_exec.Sandbox_target.run_outcome) with
   | Transport_failed { reason; stderr; _ } ->
@@ -158,8 +171,14 @@ let classify_read_outcome_with_limit ~lane ~endpoint_name ~ok_exit_codes ~max_by
        when List.exists (fun allowed -> allowed = code) ok_exit_codes ->
        let output =
          match max_bytes with
-         | Some limit when String.length stdout > limit -> String.sub stdout 0 limit
-         | Some _ | None -> stdout
+         | None -> stdout
+         | Some limit ->
+           let text =
+             if code = 0 || String.equal stderr ""
+             then stdout
+             else error_text_then_stdout ~stderr ~stdout
+           in
+           if String.length text > limit then String.sub text 0 limit else text
        in
        Ok (status, output)
      | Unix.WEXITED code ->

@@ -244,7 +244,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 | C1 | OIDC ID token 검증 의존성 결정. `jose`와 `jwto`를 현재 pin(x509 >= 1.0, < 1.2), OCaml 5.5, RS256, `alg=none` 거부, JWKS `kid` 선택으로 비교한 근거를 남기고 하나를 추가한다. 고정한 JWKS와 token 벡터로만 시험하고 네트워크를 쓰지 않는다. | §5.2 | - |
 | C2a | Google OIDC code + PKCE 로그인, `External_identity.Google` 결속, 입장 (b) 초대 소비(동시 소비는 409). (a) allowlist는 C2d다. 삭제된 principal의 `(iss, sub)`로 초대를 소비하면 Admin 화면과 감사 기록에 `previously_deleted`를 보인다. 입장을 막지 않는다. 이 표시는 `authz.jsonl`을 읽어 만들고 principal 레코드에는 저장하지 않는다(§5.1-6). 1단계에는 입장 요청(c)이 없어서 미등록 사용자의 로그인은 상태를 만들지 않고 거절한다. 시험 벡터에 잘못된 서명·`iss`·`aud`·`nonce`·`state`, 만료됐거나 취소된 초대 token, 초대 동시 소비(409), `Disabled` 등록 사용자의 로그인, 미등록 사용자의 거절을 넣는다. | §5.1, §5.2 | A2, B3, C1 |
 | C2b | GitHub 로그인(설계 §5.2.1). OAuth App의 code + PKCE(S256) + `state`이고, code를 서버에서 client secret으로 바꾼 access token으로 `GET /user`를 한 번 읽어 숫자 `id`를 `External_identity.Github`로 결속한다. scope 없이 요청하고 access token은 저장하지 않는다. `login`과 email은 표시 자료다. 입장은 (b)다. (a)는 C2d가 두 흐름에 함께 더하고, (c)는 없다. 시험은 고정한 응답을 내는 전송 함수로 하고 GitHub에 접속하지 않는다(아래 C2b 범위). 시험 벡터에 `state` 불일치, 토큰 교환 오류 응답, `GET /user` 실패와 `id` 없는 응답, 같은 사람의 Google·GitHub 로그인이 서로 다른 principal로 남는 경우(계정 링크 금지, 설계 §5.1-5), 만료됐거나 취소된 초대 token을 넣는다. | §5.1, §5.2.1 | A2, B3, C2a |
-| C2d | 입장 (a) allowlist(2026-11-06 사용자 결정으로 C2a에서 떼어 C2b 뒤에 둔다). Admin이 `External_identity.t`를 등록하고 지우는 사건, 등록된 신원의 첫 로그인이 입장 레코드 하나로 User를 만드는 갈래(초대 대신 등록 항목을 가리킨다)다. 입장은 §5.1-3의 같은 구역에서 같은 신원의 User가 있는지 보고, 있으면 409다. 등록을 지우는 사건이 epoch를 올려 intent를 쓰는지는 이 층이 §8.1·§8.2의 목록을 다시 읽고 정한다. 삭제된 principal의 신원을 등록하면 `previously_deleted`를 보인다(§5.1-6). 등록한 신원은 purge 대상이 아닌 `authz.jsonl`에 남는다. masc Admin은 개인 Gmail의 `sub`를 미리 알 수 없어서, Google 쪽은 주로 삭제된 신원을 다시 들일 때 쓴다. GitHub 숫자 `id`는 공개 API로 알 수 있다. 시험 벡터에 등록 안 된 신원의 거절, 등록을 지운 뒤의 로그인 거절, 같은 신원의 등록 입장과 초대 입장이 겹친 경우(409), 삭제된 신원의 재등록을 넣는다. | §5.1 | B3, C2a, C2b |
+| C2d | 입장 (a) allowlist(2026-11-06 사용자 결정으로 C2a에서 떼어 C2b 뒤에 둔다). Admin이 `External_identity.t`를 등록하고 지우는 사건, 등록된 신원의 첫 로그인이 입장 레코드 하나로 User를 만드는 갈래(초대 대신 등록 항목을 가리킨다)다. 입장은 §5.1-3의 같은 구역에서 같은 신원의 User가 있는지 보고, 있으면 409다. 등록을 지우는 사건은 intent를 쓰고, 등록은 쓰지 않는다(아래 C2d 범위, 2026-11-06 사용자 결정). 삭제된 principal의 신원을 등록하면 `previously_deleted`를 보인다(§5.1-6). 등록한 신원은 purge 대상이 아닌 `authz.jsonl`에 남는다. masc Admin은 개인 Gmail의 `sub`를 미리 알 수 없어서, Google 쪽은 주로 삭제된 신원을 다시 들일 때 쓴다. GitHub 숫자 `id`는 공개 API로 알 수 있다. 시험 벡터에 등록 안 된 신원의 거절, 등록을 지운 뒤의 로그인 거절, 같은 신원의 등록 입장과 초대 입장이 겹친 경우(409), 삭제된 신원의 재등록을 넣는다. | §5.1 | B3, C2a, C2b |
 | C2c | 2단계. 입장 요청(c). 도메인 정책(`oidc.admission_request_domains`)이 있으면 미등록 `(iss, sub)`의 입장 요청 조건(`hd`·`email_verified`)과 입장 요청 기록·Admin 승인(§5.1-2c, §5.1-7)을 함께 낸다. 입장 요청의 개수 상한과 상한을 넘었을 때의 동작, 만료 시간, 종단 요청의 보존 기간을 이 층에서 정한다. 시험 벡터에 `hd` 없음, `hd` 불일치, `email_verified=false`, 정책 아래에서 (a)나 (b)로 들어오는 `hd` 없는 사용자의 로그인 허용, `hd` 대소문자(`A.com`), 승인 때 요청의 도메인이 정책에 없거나 정책이 비어 있는 경우(승인 거부), `Pending` 중 재로그인(새 요청 없음), 두 Admin의 동시 승인(409)과 승인·거절이 겹친 경우(User가 생긴 쪽이 이김), (a)나 (b)로 User가 생긴 뒤 같은 `(iss, sub)`의 `Pending`이 `Superseded`로 읽히고 승인 대기 목록에 나오지 않는 경우, 거절 뒤 재로그인(새 요청 없음)과 (a)로의 입장, 만료된 요청의 승인 거부와 새 요청 허용, 시계가 되감겨 `Expired`가 `Pending`으로 돌아와도 승인 검사가 같은 시계를 쓰는 경우, 이미 입장한 요청에 거절을 누르면 409, 승인된 요청의 User 삭제 뒤 승인 대기 목록에 되살아나지 않는 경우와 새 요청 허용, `Superseded`였던 요청의 User 삭제 뒤 `previously_deleted`와 함께 `Pending`으로 보이는 경우, 복원으로 요청 저장소가 뒤처져 `Pending`이 남은 경우(User가 있으면 승인 대기 목록에 나오지 않는다), `previously_deleted` 표지가 있는 `(iss, sub)`의 입장 요청 화면, `Disabled` 등록 사용자의 로그인(정책 면제가 §4.1 Disabled 규칙을 덮지 않는다), 만료됐거나 취소된 초대 token을 넣는다. | §5.1, §5.2 | C2a, C6 |
 | C3 | Google·GitHub 로그인 HTTP 경로(`POST /auth/oidc/start`, `GET /auth/oidc/callback`, `POST /auth/github/start`, `GET /auth/github/callback`, 비공개 데이터가 없는 200 HTML 완료 화면, `Masc_http_client` 연결). 경로 등록은 구역을 받는 함수 하나이고 S1이 부팅에서 연 구역으로 부른다. 다계정에서 `__Host-` 세션·transaction·mcp 쿠키, 세션에 결속한 CSRF 토큰, 출처 검사, cookie와 Bearer가 함께 오면 거부, WS/SSE 결속과 폐기 때 닫기, 원격 query credential 차단. | §5.2, §5.3 | A2, C2a, C2b |
 | C4 | scoped PAT와 Service credential 레코드(principal + `Pat_scope`), 새 `Auth_gate.decide`로 HTTP strict와 MCP 호출자 token 해석 통합, 다계정에서 caller alias 유지·workspace secret(HTTP 복구 grace 포함, `auth.ml:216`)·auth disabled 경로 제거, `agent_credential` 읽기 거부. `Mcp_oauth_token`은 C5 전까지 Reject. | §5.3 | A2, A3, A4d, C3 |
@@ -333,6 +333,41 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - C2b-2: token 오류 응답(200과 400 모두), `GET /user` 실패, `id` 없는 응답, `id`가 문자열인 응답, 큰 `id`, 오류 문구에 token과 secret이 없음.
   - C2b-3: 같은 사람의 Google·GitHub 로그인이 서로 다른 principal로 남는다(설계 §5.1-5). 만료됐거나 취소된 초대는 C2a-4의 판정으로 거절된다.
 - 하지 않는 것: HTTP 경로 `/auth/github/start`·`/auth/github/callback`과 쿠키(C3), allowlist(C2d), GitHub Enterprise Server, `keeper_github_app_broker.ml`의 버전 헤더 변경.
+
+**C2d 범위** (allowlist 입장, 2026-11-06)
+
+- 사용자 결정(2026-11-06).
+  - 등록으로 들어온 사람은 Member다. 등록에는 역할이 없다. Admin은 초대 (b)로만 들인다.
+  - 등록을 지우는 사건은 그 등록을 subject로 한 `Revoke`로 쓰고 Intent/Committed를 남긴다. 복원이 지우기를 되감으면 그 신원이 다시 들어올 수 있어서다. 초대 취소와 같은 까닭이다.
+  - 등록은 intent를 쓰지 않는다. 되감으면 등록이 사라져서 막히는 쪽이 된다.
+  - 초대로 들어와도 그 신원의 열린 등록을 같이 쓴다. 그래서 나중에 삭제된 사람이 옛 등록으로 다시 들어오지 못한다. 다시 들이려면 Admin이 새로 등록한다.
+  - Admin이 등록하고 지우는 서버 함수는 C2d가 만든다. C6은 이 함수를 부르기만 한다.
+- 지금 있는 것.
+  - 초대 입장은 `Kind.Invite`, `Authz_invite_event`(`Issued`·`Revoked`), `Authz_invite_state`, 입장 레코드의 `invite_id`로 이어진다. `Authz_login.sign_in`은 초대 token도 결속도 없으면 `Not_invited`로 거절한다.
+  - 초대 취소는 이미 `Revoke`(subject는 초대)로 intent를 쓰고, 발급은 쓰지 않는다(설계 §8.2).
+  - 다계정 부팅은 아직 `Multi_account_not_served`로 멈춘다. 그래서 어느 로그에도 입장 레코드가 없다. 입장 본문을 바꾸는 일은 hard cut이고, 옛 본문을 읽는 코드를 두지 않는다.
+- 새로 두는 것.
+  - Kind `Registration`. 쓰는 이는 인증된 principal이고, 그중 Admin만 받는다. 로컬 운영자는 등록하지 않는다. 로컬 운영자의 길은 `masc auth invite` 하나다.
+  - 사건은 `Registered { registration_id; identity }`와 `Removed { registration_id }`다. id는 `Authz_types.Registration_id`다.
+  - 등록 상태. 한 신원에 열린 등록은 하나다. 이미 결속된 신원은 등록하지 않는다. 등록은 열림, 지워짐, 쓰임(누가 썼는지) 중 하나다.
+  - Subject `Registration of registration_id`(설계 §4.5). intent의 subject는 신원이 아니라 id다. 신원은 `authz.jsonl` 사건에만 둔다(설계 §4.1).
+  - 입장 본문의 `invite_id`를 `through : Invite of invite_id | Registration of registration_id`로 바꾼다.
+  - `sign_in`의 시그니처는 그대로다. 초대 token이 없고 결속도 없을 때, 열린 등록이 있으면 그 등록으로 입장한다. 같은 신원의 등록 입장과 초대 입장이 겹치면 먼저 쓴 쪽이 들어가고 뒤의 것은 409다(§5.1-3).
+  - Admin의 `register`·`remove`. 등록할 신원이 삭제된 principal의 것이면 `previously_deleted`를 함께 돌려준다(§5.1-6).
+- 층. 층마다 Kind 하나나 사건 하나를 더한다(B3c와 같은 방식).
+  - C2d-1 id와 사건 본문.
+  - C2d-2 Kind `Registration`. 상태는 아직 `Kind_not_read`로 거절한다.
+  - C2d-3 Subject `Registration`과 설계 §4.5·§8.2의 문장.
+  - C2d-4 등록 상태.
+  - C2d-5 `Authz_state`가 Kind를 읽는다. 등록은 intent가 없고 지우기는 있다. 지우기의 append가 실패하면 그 등록은 잡혀 있다(§8.3).
+  - C2d-6 입장이 등록을 쓴다. 입장 본문을 hard cut으로 바꿔서 파일이 10개를 넘는다. 시작할 때 범위를 다시 알린다.
+  - C2d-7 `sign_in`의 등록 갈래.
+  - C2d-8 Admin의 `register`·`remove`.
+- 시험은 표의 C2d 행을 따른다.
+  - C2d-4·5: 한 신원의 두 번째 열린 등록은 거절, 결속된 신원의 등록은 거절, 삭제 뒤 재등록은 받음, 지우기의 intent.
+  - C2d-6·7: 등록 안 된 신원은 거절되고 아무것도 쓰지 않음, 지운 뒤의 로그인은 거절, 등록 입장과 초대 입장이 겹치면 409, 초대 입장이 열린 등록을 같이 씀.
+  - C2d-8: 삭제된 신원을 다시 등록하면 `previously_deleted`가 보인다.
+- 하지 않는 것: HTTP 경로(C3), 화면(C6), 입장 요청(C2c), Google `sub`를 email로 찾기.
 
 ### D. 소유권과 실행 게이트
 

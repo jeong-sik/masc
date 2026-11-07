@@ -12,6 +12,10 @@ val goal_tree_direct_read_header : string * string
 (** A workspace-bound Goal tree was generated for this request, rather than
     served by the stale-while-revalidate tree cache. *)
 
+val query_param_from_target : string -> string -> string option
+(** [query_param_from_target target key] returns [Some value] when the
+    request target string has the named query parameter, [None] otherwise. *)
+
 val query_param : Httpun.Request.t -> string -> string option
 (** [query_param request key] returns [Some value] when the
     request URL has the named query parameter, [None] otherwise.

@@ -55,6 +55,7 @@ type t = private
   ; invites : Authz_invite_state.t  (** Plan B3c-1. *)
   ; principals : Authz_principal_state.t  (** Plan B3c-2. *)
   ; registrations : Authz_registration_state.t  (** Plan C2d. *)
+  ; sessions : Authz_session_state.t  (** Plan C3. *)
   ; revocation_pending : held list
         (** The reductions whose intent the external store gave up (design
             8.3). No record adds one: the writer zone does, from the store
@@ -148,9 +149,14 @@ type refusal =
       (** No invitation or registration stands behind the subject, so this
           layer cannot tell its owner or its approver, and no Admin is known to
           be eligible. A block of a grant, a credential, a runtime, or a service
-          stays until the layer that reads them. *)
+          stays until the layer that reads them. A block of a browser
+          session is never cancelled: its owner closes it by signing out
+          again, or a new sign-in of the browser by ending the session (plan
+          C3). *)
   | Registration_unreadable of Authz_registration_event.error
   | Registration of Authz_registration_state.refusal
+  | Session_unreadable of Authz_session_event.error
+  | Session of Authz_session_state.refusal
 
 val refusal_to_string : refusal -> string
 
@@ -169,7 +175,9 @@ val refusal_to_string : refusal -> string
     log restored from before it brings the block back. A registration has
     none, as a log restored from before it keeps the identity out, and its
     removal is a [Revoke] of the registration, so the entry does not come back
-    open (plan C2d). *)
+    open (plan C2d). A sign-out is a [Revoke] on its session, and so is a
+    sign-in that ends the session its browser held, on that session; a sign-in
+    that ends nothing has none (plan C3). *)
 type applied =
   { state : t
   ; high_water : Authz_external_store.Change.t option

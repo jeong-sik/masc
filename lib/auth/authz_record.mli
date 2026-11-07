@@ -52,6 +52,8 @@ module Kind : sig
       (** A human principal is disabled, enabled, or deleted (design 4.1 and
           5.1-5, plan B3c-5). The body is that of {!Authz_principal_event}. *)
     | Internal_service_credential
+      (** A Service credential is issued or revoked (design 5.3, plan C4). The
+          body is that of {!Authz_service_credential_event}. *)
     | Permission_revocation
     | Trigger_evidence
     | Lease_terminal_evidence
@@ -82,6 +84,9 @@ module Kind : sig
     | Session
       (** A person signs in and gets a browser session, or ends one (design
           5.2, plan C3). The body is that of {!Authz_session_event}. *)
+    | Pat
+      (** A person issues or revokes a scoped PAT (design 4.4, plan C4). The
+          body is that of {!Authz_pat_event}. *)
 
   val all : t list
   val to_string : t -> string
@@ -89,8 +94,7 @@ module Kind : sig
 end
 
 (** Whether [author] may write a record of this kind (design 6.3).
-    [Runtime_grant], [Delegate_policy], [Principal],
-    [Internal_service_credential], [Permission_revocation], [Admission],
+    [Runtime_grant], [Delegate_policy], [Principal], [Permission_revocation], [Admission],
     [Admin_assignment], [Revocation_cancel], and [Registration] need an
     authenticated principal: the person who joins writes their own admission,
     and an Admin writes the revocation of an Admin assignment, the cancel of a
@@ -102,7 +106,10 @@ end
     the local operator and every later one by an Admin. Which authenticated
     principal may invite is a question of the state, so {!Authz_state} answers
     it. A [Session] record needs an authenticated principal too: the person
-    whose session it is. *)
+    whose session it is, and so does a [Pat] record: the person whose PAT it
+    is. An [Internal_service_credential] record is written by the local
+    operator: the host CLI issues and revokes the credentials of the services
+    the host starts (user decision 2026-11-07). *)
 val admits : Kind.t -> Author.t -> bool
 
 (** Where the next record goes: its position and the hash it must carry. *)

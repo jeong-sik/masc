@@ -450,6 +450,14 @@ type artifact_read_error =
   | Artifact_missing
   | Storage_failed of Tool_blob_store.fetch_error
 
+(* A stored result's marker carries two hashes, and a caller that passes the
+   answer fingerprint finds no artifact (#49396). The refusal names the one
+   this tool reads. *)
+let artifact_missing_message =
+  "artifact does not exist. A stored result's marker names its artifact in \
+   sha256=; its answer_sha256= value is an answer fingerprint and names no \
+   artifact."
+
 let read_page ~base_path (request : request) =
   let store = Tool_blob_store.create ~base_path in
   match
@@ -460,7 +468,7 @@ let read_page ~base_path (request : request) =
       ~max_bytes:request.max_bytes
   with
   | Error error -> storage_failure (Tool_blob_store.fetch_error_to_string error), None
-  | Ok None -> invalid_input "artifact does not exist", None
+  | Ok None -> invalid_input artifact_missing_message, None
   | Ok (Some { content; total_bytes }) ->
     (match page_of_slice_within_output_budget request ~total_bytes content with
      | Error message -> invalid_input message, None
@@ -484,7 +492,7 @@ let search_artifact ~base_path (search : search) =
   in
   match Keeper_artifact_search.scan ~read spec with
   | Error (Keeper_artifact_search.Read_failed Artifact_missing) ->
-    invalid_input "artifact does not exist"
+    invalid_input artifact_missing_message
   | Error (Keeper_artifact_search.Read_failed (Storage_failed error)) ->
     storage_failure (Tool_blob_store.fetch_error_to_string error)
   | Error (Keeper_artifact_search.Offset_past_end { offset; total_bytes }) ->

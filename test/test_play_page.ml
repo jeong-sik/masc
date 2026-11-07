@@ -311,8 +311,7 @@ let test_the_guide_over_h2 () =
             | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
           in
           let handler =
-            Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~sw
-              ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.0 ~request_sw:sw
+            Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~request_sw:sw
               (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
           in
           let get target = exchange_h2 ~handler target in

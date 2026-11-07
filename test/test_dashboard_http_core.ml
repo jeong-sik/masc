@@ -4910,8 +4910,10 @@ let test_h2_cached_payload_timeout_is_504 () =
   let read payload =
     Masc.Http_h2_response_ledger.with_request resources ~sw (fun () ->
     tools_h2_wire_response
-      ~handler:(fun reqd ->
-        Server_h2_gateway_helpers.h2_respond_cached_payload reqd payload)
+      ~handler:(fun h2_reqd ->
+        let reqd = Masc.Http_reqd.of_h2 ~stream_sw:sw
+          ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd in
+        Server_cached_read_http.respond ~request:(Masc.Http_reqd.request reqd) reqd payload)
       ~headers:[] "/cached")
   in
   let envelope =
@@ -4978,10 +4980,9 @@ let test_tools_routes_serve_prepared_http_representations () =
       ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
       | Ok policy -> policy
       | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-    let h2_handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~sw ~request_sw:sw
-      (* A real client address: the handler charges the per-client-IP bucket
-         with it, which is the limit H2 was missing. *)
-      ~clock:(Eio.Stdenv.clock env) ~server_start_time:0.
+    let h2_handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~request_sw:sw
+      (* A real client address: the shared ingress charges the per-client-IP
+         bucket with it on HTTP/2 as on HTTP/1.1. *)
       (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
     let request_headers = [ "origin", "http://localhost:8935";
       "authorization", "Bearer " ^ token ] in
@@ -5046,8 +5047,7 @@ let test_tools_routes_serve_prepared_http_representations () =
        the request, so comparing consecutive reads of it is timing-dependent. *)
     let check_first_h2_charge label headers target expected_status =
       let client_addr = `Unix (Filename.basename config.base_path ^ "-" ^ label) in
-      let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~sw ~request_sw:sw
-        ~clock:(Eio.Stdenv.clock env) ~server_start_time:0. client_addr in
+      let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~request_sw:sw client_addr in
       let rl_key = Masc.Rate_limit.key_of_sockaddr client_addr in
       let before = Masc.Rate_limit.remaining_global ~key:rl_key in
       let status, _, _ = tools_h2_wire_response ~handler ~headers target in
@@ -5485,8 +5485,8 @@ let test_execution_routes_serve_prepared_http_representations () =
     ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
     | Ok policy -> policy
     | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
-  let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock) ~trust_policy ~sw ~request_sw:sw ~clock
-    ~server_start_time:0. (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
+  let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock) ~trust_policy ~request_sw:sw
+    (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) in
   List.iter (fun (protocol, send) ->
     List.iter (fun encoding ->
       let headers = ("accept-encoding", encoding) :: request_headers in

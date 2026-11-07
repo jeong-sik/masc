@@ -70,7 +70,17 @@ let make_snapshot ?(refusals = []) keepers : Masc.Tui_decode_memory_health.memor
   ; mhs_total_snapshot_bytes = 1024
   ; mhs_total_source_facts = 5
   ; mhs_total_source_invalidations = 0
-  ; mhs_execution = None
+  ; mhs_total_source_snapshot_bytes = 512
+  ; mhs_total_librarian_failures = 0
+  ; mhs_total_librarian_unread_turns = Some 0
+  ; mhs_total_librarian_continuity_unread_atoms = 0
+  ; mhs_total_librarian_continuity_unmeasured = 0
+  ; mhs_total_vision_ingest_errors = 0
+  ; mhs_total_read_errors = 0
+  ; mhs_total_source_read_errors = 0
+  ; mhs_warn_alerts = 0
+  ; mhs_error_alerts = 0
+  ; mhs_starving_keepers = 0
   }
 ;;
 

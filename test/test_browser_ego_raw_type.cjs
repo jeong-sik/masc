@@ -2,7 +2,8 @@ const fs=require('node:fs'),vm=require('node:vm');
 const [argsPath,scriptPath,outPath]=process.argv.slice(2);
 const args=JSON.parse(fs.readFileSync(argsPath,'utf8'));
 const source=fs.readFileSync(scriptPath,'utf8');
-const run=vm.runInNewContext('('+source+')');
+const pageEvents=require('./browser_ego_page_events_source.cjs')();
+const run=vm.runInNewContext(pageEvents+'\n('+source+')',{URL});
 async function simulate(mode){
  const queue=[],calls=[];const current=args.source;
  const page={spaceId:current.spaceId,label:current.label,targetId:current.targetId,openedBy:current.openedBy};

@@ -7,11 +7,12 @@ const vm=require('node:vm');
 const test=require('node:test');
 const source=fs.readFileSync(require('node:path').join(__dirname,'../lib/browser_ego_workflow.ml'),'utf8').split('let script = {js|')[1].split('|js}')[0];
 const nativeErrorSource=fs.readFileSync(path.join(__dirname,'../lib/browser_ego_workflow.ml'),'utf8').split('let native_error_script = {js|')[1].split('|js}')[0];
-const run=vm.runInNewContext(nativeErrorSource+'\n('+source+')');
+const pageEvents=require('./browser_ego_page_events_source.cjs')();
+const run=vm.runInNewContext(nativeErrorSource+'\n'+pageEvents+'\n('+source+')',{URL});
 const initial='https://fixture.test/start',destination='https://fixture.test/done';
 function fixture({fail,dialog,snapshot='native result'}={}) {
  const calls=[];let url=initial,value='';
- const page={
+ const page={label:'p1',
   async url(){calls.push('url');return url;},async title(){calls.push('title');return 'Fixture';},
   async info(){return {};},
   async snapshot(options){
@@ -37,7 +38,7 @@ function cancelFixture({state='pending',source:provenance='native_download',rowL
  const row={id:downloadId,label:rowLabel,source:provenance,state,path:null,reason:null};
  const context={mascDownloads:{rows:[row],handles:new Map([[downloadId,{label:handleLabel,
   download:{async cancel(){cancellations++;if(cancel)await cancel(row);}}}]])}};
- const invoke=vm.runInNewContext(nativeErrorSource+'\n('+source+')',context);
+ const invoke=vm.runInNewContext(nativeErrorSource+'\n'+pageEvents+'\n('+source+')',Object.assign(context,{URL}));
  return {...f,row,context,cancellations:()=>cancellations,
   invoke:steps=>invoke(f.page,{...request(steps),label:'p1'})};
 }

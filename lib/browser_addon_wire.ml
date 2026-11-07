@@ -77,6 +77,7 @@ let verb_of_json ~route value =
        | Some _ -> Error "invalid document request")
   | "page.downloads" -> one_tab (fun tab_id -> B.Page_downloads {tab_id})
   | "page.cookies" -> one_tab (fun tab_id -> B.Page_cookies {tab_id})
+  | "page.network" -> one_tab (fun tab_id -> B.Page_network {tab_id})
   | "page.capture" ->
       let* fields=fields ["tabId";"options"] in
       let* value=required fields "tabId" in let* tab_id=tab value in
@@ -143,7 +144,7 @@ let ends_with_caller = function
   | Issue {route=B.Live_route (Some _);verb;_} ->
     (match verb with
      | B.Page_downloads _ -> false
-     | B.Tabs_list | Page_read _ | Page_document _ | Page_cookies _
+     | B.Tabs_list | Page_read _ | Page_document _ | Page_cookies _ | Page_network _
      | Page_capture _ | Page_scene _
      | Page_snapshot _ | Page_native_workflow _ | Page_interact _
      | Page_goto _
@@ -220,7 +221,7 @@ let of_json value =
         let* raw = required fields "timeout_sec" in let* timeout_sec = positive raw in
         let* raw = required fields "only_if_idle" in let* only_if_idle = boolean raw in
         let* () = if only_if_idle then (match verb with B.Page_document _ -> Ok ()
-          | B.Tabs_list|Page_read _|Page_downloads _|Page_cookies _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _|Page_goto _|Page_elements _|Page_act _|Page_context _ -> Error "idle admission supports document reads only") else Ok () in
+          | B.Tabs_list|Page_read _|Page_downloads _|Page_cookies _|Page_network _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _|Page_goto _|Page_elements _|Page_act _|Page_context _ -> Error "idle admission supports document reads only") else Ok () in
         Ok (Issue {route;verb;actor;timeout_sec;only_if_idle})
     | _ -> Error "unknown browser worker operation" in
   Ok {incarnation;command}

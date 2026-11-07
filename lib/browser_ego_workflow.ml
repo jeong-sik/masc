@@ -299,9 +299,9 @@ let script = {js|async function nativeWorkflow(page, args, task, watchPage) {
         case 'waitForTimeout': await page.waitForTimeout(step.milliseconds); break;
         case 'events':
           // Draining consumes observations even though it does not change the site.
+          // Network events go to the tab's network log (Browser_ego_page_events).
           effect = effectStarted = pageResult = true;
-          receipt = await page.events();
-          if (!Array.isArray(receipt)) throw new Error('ego returned a non-array event buffer');
+          receipt = await mascPageEvents(page);
           break;
         default: return failure(index, step.method, 'unsupported native Page method');
       }

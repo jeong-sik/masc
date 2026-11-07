@@ -10,7 +10,7 @@ let roundtrips () =
   let native=ok (B.Native_workflow.of_json (`Assoc ["tabId",`Int 7;"expectedUrl",`String "https://example.org";
     "steps",`List [`Assoc ["method",`String "waitForSelector";"selector",`String "@12";"state",`String "visible"]];"maxChars",`Int 1000])) in
   let verbs = [B.Page_native_workflow native;B.Tabs_list; Page_read {tab_id=None;max_chars=None};Page_document {tab_id=7};
-    Page_downloads {tab_id=7};Page_cookies {tab_id=7};Page_capture {tab_id=7;options=None};
+    Page_downloads {tab_id=7};Page_cookies {tab_id=7};Page_network {tab_id=7};Page_capture {tab_id=7;options=None};
     Page_capture {tab_id=7;options=Some (ok (B.Capture.of_json (`Assoc ["fullPage",`Bool true;"raw",`Bool false])))};
     Page_scene {tab_id=7;max_chars=1000;view=B.Regions;scope=Some {document_id="doc";node_id="region"}};
     Page_snapshot {tab_id=7;max_chars=1000;scope=B.Snapshot_viewport};

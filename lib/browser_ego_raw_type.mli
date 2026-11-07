@@ -13,7 +13,9 @@ val script : string
 (** Fixed [nativeTypeWindow(task, page, binding, index, text, options,
     sourceIdentity, currentIdentity, guard)] procedure. Both public routes use
     this code. [guard] is fixed Host code, never a caller-supplied function.
-    The result keeps its private [capture] separate from any native error. *)
+    The result keeps its private [capture] separate from any native error.
+    It drains the Page's events with [mascPageEvents], so its step includes
+    [Browser_ego_page_events.script] too. *)
 
 val expected : context -> index:int -> current:Browser_ego_native_window.page ->
   (Browser_ego_native_window.expected, string) result

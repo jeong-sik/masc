@@ -1,0 +1,13 @@
+{"step":"space","at":"2026-11-07T05:22:16.953Z","value":{"spaceId":9,"name":"masc-l8-network-b","ownership":"agent"}}
+{"step":"b2.resumedEvents","at":"2026-11-07T05:22:16.955Z","value":{"length":0,"tags":{}}}
+{"step":"b2.fire","at":"2026-11-07T05:22:16.960Z","value":{"ok":2,"failed":0}}
+{"step":"b2.events","at":"2026-11-07T05:22:17.262Z","value":{"b2":2}}
+{"step":"c.fire","at":"2026-11-07T05:22:19.905Z","value":{"ok":2926,"failed":74}}
+{"step":"c.events","at":"2026-11-07T05:22:20.414Z","value":{"length":10000,"firstMethod":"Network.responseReceived","starts":1632,"minI":1368,"maxI":2999}}
+{"step":"c.again","at":"2026-11-07T05:22:20.416Z","value":0}
+{"step":"d.link","at":"2026-11-07T05:22:20.418Z","value":true}
+{"step":"d.drain","at":"2026-11-07T05:22:20.419Z","value":0}
+{"step":"d.click","at":"2026-11-07T05:22:20.505Z","value":"p2"}
+{"step":"d.popupEvents","at":"2026-11-07T05:22:21.310Z","value":{"length":0,"tags":{}}}
+{"step":"d.openerEvents","at":"2026-11-07T05:22:21.310Z","value":{}}
+{"step":"z.finish","at":"2026-11-07T05:22:21.315Z","value":{"spaceId":9,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1","p2"],"preservedUnmanagedCount":0}}

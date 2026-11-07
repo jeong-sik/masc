@@ -11,7 +11,7 @@ type operation =
   | Read_frames | Frame_interaction | Read_dialog | Accept_dialog | Dismiss_dialog
   | Hand_off | Take_over | Space_status | Finish_space | Wait_for_control | Adopt_tab | Release_tab
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
-  | Read_clipboard | Write_clipboard | Emulate_environment | Intercept_network | Read_storage
+  | Read_clipboard | Write_clipboard | Emulate_environment | Intercept_network | Read_storage | Read_network
 [@@deriving enumerate]
 type tool = Tabs | Read | Interact | Act | Session | Goto
 type invocation = { tool : tool; action : string option; mode : string option }
@@ -298,7 +298,14 @@ let support backend operation = match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~mode:"cookies" Read
           [observed;Printf.sprintf "Explicit tabId and an explicit ego browser. Lists the cookies the tab's top document sees, at most %d with the total: name, domain, path, secure and httpOnly, and sameSite and expiry when the cookie has them. A cookie value is never returned (valuesWithheld)." Browser_lane.storage_cookies_limit;
            Printf.sprintf "Also lists the page origin's localStorage and sessionStorage keys and its IndexedDB database names under storage, at most %d each with their count, each name cut at %d characters. An area the page may not use answers its error instead. Storage values are never read (storageValuesWithheld)." Browser_lane.storage_names_limit Browser_lane.storage_name_chars;
-           "The cookies a frame of another site holds for its own site are not listed.";
+           "The cookies a frame of another site holds for its own site are not listed. Names come back as the site wrote them, and a name can carry an account, user or session id.";
+           ego_pages]
+      | Safari_unavailable -> missing)
+    | Read_network -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~mode:"network" Read
+          [observed;Printf.sprintf "Explicit tabId and an explicit ego browser. Lists the tab's requests oldest first; at most %d are kept and dropped says how many older ones were removed." Browser_ego_page_events.requests_limit;
+           Printf.sprintf "Each row has method, address, timestamp and state: pending; responded with status and mimeType when the response came but its body has not finished loading, as when the page never reads a fetch body; completed with status, mimeType and bytesReceived; or failed with its error. Header values, cookies and bodies are never returned, only header names, at most %d with the total. The address keeps its path, cut at %d bytes (urlCut), and replaces every query value with %s. A path can still carry a token." Browser_ego_page_events.header_names_limit Browser_ego_page_events.path_bytes_limit Browser_ego_page_events.redacted_value;
+           Printf.sprintf "A request is listed once ego held it for the tab in the SDK process named by sdkProcessStartedAt. Missing: requests from before that process held the tab, often the first document load of a popup, and requests a frame of another site makes. fullBufferReads counts reads that found ego's buffer for the tab full at %d events, when older ones may be lost." Browser_ego_page_events.ego_buffer_events;
            ego_pages]
       | Safari_unavailable -> missing)
 let catalog backend = List.map (fun operation -> {operation;support=support backend operation}) operations
@@ -324,7 +331,7 @@ let operation_name = function
   | List_downloads -> "list_downloads" | Page_zoom -> "page_zoom" | Resize_viewport -> "resize_viewport"
   | Touch -> "touch" | Read_clipboard -> "read_clipboard" | Write_clipboard -> "write_clipboard"
   | Emulate_environment -> "emulate_environment" | Intercept_network -> "intercept_network"
-  | Read_storage -> "read_storage"
+  | Read_storage -> "read_storage" | Read_network -> "read_network"
 let operation_of_wire name = List.find_opt (fun operation -> String.equal (operation_name operation) name) operations
 let parse_required_actions = function
   | `List values ->

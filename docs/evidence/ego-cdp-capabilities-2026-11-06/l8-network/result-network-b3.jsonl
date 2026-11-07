@@ -1,0 +1,15 @@
+{"step":"space","at":"2026-11-07T05:22:41.548Z","value":{"spaceId":10,"name":"masc-l8-network-b3","ownership":"agent"}}
+{"step":"e.goto","at":"2026-11-07T05:22:41.650Z","value":{}}
+{"step":"e.link","at":"2026-11-07T05:22:41.652Z","value":true}
+{"step":"e.drain","at":"2026-11-07T05:22:41.653Z","value":64}
+{"step":"e.click","at":"2026-11-07T05:22:41.728Z","value":"p2"}
+{"step":"e.popupLoad","at":"2026-11-07T05:22:41.737Z","value":null}
+{"step":"e.popupFirst","at":"2026-11-07T05:22:41.737Z","value":{"length":6,"methods":{"Network.requestWillBeSent":1,"Network.requestWillBeSentExtraInfo":1,"Network.responseReceivedExtraInfo":1,"Network.responseReceived":1,"Network.dataReceived":1,"Network.loadingFinished":1}}}
+{"step":"e.popupFire","at":"2026-11-07T05:22:41.741Z","value":{"ok":2,"failed":0}}
+{"step":"e.popupAfterFire","at":"2026-11-07T05:22:42.043Z","value":{"tags":{"popupfire":2},"methods":{"Network.requestWillBeSent":2,"Network.requestWillBeSentExtraInfo":2,"Network.responseReceivedExtraInfo":2,"Network.responseReceived":2,"Network.dataReceived":2,"Network.loadingFinished":2}}}
+{"step":"e.popupReload","at":"2026-11-07T05:22:42.117Z","value":{}}
+{"step":"e.popupAfterReload","at":"2026-11-07T05:22:42.118Z","value":{"tags":{"popup":1,"/favicon.ico":1},"methods":{"Page.frameStartedNavigating":1,"Page.frameStartedLoading":1,"Network.requestWillBeSent":2,"Network.requestWillBeSentExtraInfo":2,"Network.responseReceivedExtraInfo":2,"Network.responseReceived":2,"Page.frameNavigated":1,"Network.policyUpdated":1,"Network.dataReceived":2,"Network.loadingFinished":2,"Page.domContentEventFired":1,"Page.loadEventFired":1,"Page.frameStoppedLoading":1}}}
+{"step":"e.viaTask","at":"2026-11-07T05:22:42.323Z","value":{"viatask":1}}
+{"step":"e.p3goto","at":"2026-11-07T05:22:42.417Z","value":{}}
+{"step":"e.p3events","at":"2026-11-07T05:22:42.418Z","value":{"newpage":1,"/favicon.ico":1}}
+{"step":"z.finish","at":"2026-11-07T05:22:42.422Z","value":{"spaceId":10,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1","p2","p3"],"preservedUnmanagedCount":0}}

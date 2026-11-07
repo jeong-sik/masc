@@ -1,5 +1,6 @@
 module Live = Browser_live_peer
 module Raw_type = Browser_ego_raw_type
+module Page_events = Browser_ego_page_events
 open Result.Syntax
 let field name = function `Assoc fields -> List.assoc_opt name fields | _ -> None
 let obj fields = `Assoc fields
@@ -1305,6 +1306,27 @@ let storage_names t args =
          "    emit(await (" ^ storage_names_script ^ ")(page, args, reason));" ])) in
   storage_receipt ~tab value
 
+(* The tab's network log (RFC-browser-ego-cdp-capabilities §3.4). ego's Page
+   session already has the Network domain on, so the step only drains the
+   Page's event buffer through the shared Page_events script and answers the
+   log it keeps for the Page in this SDK process. The drain keeps every other
+   event for the next workflow events step or native typing, so the read
+   takes nothing from them. *)
+let network_log t args =
+  let* tab = match field "tabId" args with
+    | Some (`Int tab) -> Ok tab
+    | Some _ | None -> Error "a network log is read for one tab; give its tabId" in
+  let* label = target t args in
+  let* value = ask t ~step:"page.network" ~args:(obj ["label",label])
+      (on_page (String.concat "\n" [
+         Page_events.script;
+         "    const reason = " ^ message ^ ";";
+         "    let log;";
+         "    try { log = await mascNetworkLog(page); }";
+         "    catch (error) { log = {failed: \"the tab's network log was not read: \" + reason(error)}; }";
+         "    emit(log.failed === undefined ? {ok: true, value: log} : {ok: false, error: log.failed});" ])) in
+  Page_events.receipt ~tab value
+
 (* ego's Page API has no back or forward, so the step goes through the
    page's CDP session: it reads the tab's history, refuses before acting when
    there is no entry that way, moves to the entry, and waits until the tab's
@@ -2018,7 +2040,7 @@ let native_type t ~id ~label ~expected_url ~document_id ~text =
     "guard",str (page_function Browser_interaction.keyboard_guard_script);
     "input",str (Yojson.Safe.to_string input)] in
   let response=run_native_step t ~step:"page.native_type" ~args:arguments (String.concat "\n" [
-    Browser_ego_workflow.native_error_script;Raw_type.script;page_call;native_type_guard_script;unblocked_managed_page;
+    Browser_ego_workflow.native_error_script;Page_events.script;Raw_type.script;page_call;native_type_guard_script;unblocked_managed_page;
     "    const guard = page => nativeTypeGuard(page, args);";
     "    const outcome = await nativeTypeWindow(task, task.page(args.label), args.nativeInputWindows, 0, args.text, undefined, args.expectedSourcePage, args.expectedSourcePage, guard);";
     "    const nativeError = nativeErrorObservation(outcome.error);";
@@ -2428,7 +2450,7 @@ let workflow ?actor t args =
         "label",str label;"cursor",str (cursor_label ~actor ~verb:"workflow")] @ fields)
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> args in
   let result = run_native_step t ~step:"page.native_workflow" ~args:arguments
-      (String.concat "\n" [Browser_ego_workflow.native_error_script;Raw_type.script;Browser_ego_workflow.script;unblocked_managed_page;
+      (String.concat "\n" [Browser_ego_workflow.native_error_script;Page_events.script;Raw_type.script;Browser_ego_workflow.script;unblocked_managed_page;
         "    const outcome = await nativeWorkflow(task.page(args.label), args, task, watchDownloads);";
         "    emit({ok: true, value: outcome});";"  }"]) in
   match result with
@@ -2504,6 +2526,7 @@ let dispatch_raw ?actor t ~verb args =
   | Page_snapshot -> pre (snapshot t args)
   | Page_downloads -> pre (downloads t args)
   | Page_cookies -> pre (storage_names t args)
+  | Page_network -> pre (network_log t args)
   | Page_act -> act ?actor t args
   | Page_interact -> interact ?actor t args
   | Page_native_workflow -> workflow ?actor t args
@@ -2519,7 +2542,7 @@ let admit_after_finish t ~verb args =
         | Ok (Open_tab _|Control (Hand_off|Take_over|Wait_for_control _|Adopt_tab _|Release_tab _)|On_tab _)
         | Error _ -> Error (Live.Before_effect "Space completion is terminal or uncertain; former Page/control work is refused; use space_status to reconcile"))
     | Tabs_list|Page_read|Page_elements|Page_scene|Page_capture|Page_goto|Page_context|Page_snapshot
-    | Page_downloads|Page_cookies|Page_interact|Page_native_workflow ->
+    | Page_downloads|Page_cookies|Page_network|Page_interact|Page_native_workflow ->
       Error (Live.Before_effect "Space completion is terminal or uncertain; former Page work is refused; use space_status to reconcile")
 
 let dispatch ?command_id ?actor t ~verb args =

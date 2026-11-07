@@ -7,7 +7,7 @@ updated: 2026-11-07
 author: vincent + claude
 supersedes: []
 superseded_by: null
-related: ["0477", "0481", "0482", "0461", "observe-by-waking-not-polling"]
+related: ["0477", "0481", "0486", "0461", "observe-by-waking-not-polling"]
 ---
 
 # RFC-0480 — TUI 는 서버가 알릴 때 읽는다
@@ -231,7 +231,7 @@ PR 열의 번호 중 #47994·#47997 만 병합됐고 나머지(#48003 부터 #48
 | 원본 Task 보기 | 본문은 `execution_snapshot` 으로 된다. 이력은 하위 라이브러리의 activity 기록에 알림 자리가 없다 | backlog 를 바꾸지 않는 이력 줄이 있는지 확인 |
 | ask follow-up | 끝 조건이 정해지지 않았다(§8) | 끝 조건 |
 | 로컬 Keeper 목록·로컬 작업 | 서버가 쓰는 경우만 알린다. CLI·손 편집은 진입과 `r` | 쓰는 곳 조사 |
-| 브라우저 lane 미러링, MSX·DOS 관전 | 프레임 스트림 RFC-0482 | RFC-0482 |
+| 브라우저 lane 미러링, MSX·DOS 관전 | 프레임 스트림 RFC-0486 | RFC-0486 |
 
 화면에 "N초 전"을 다시 그리는 타이머는 데이터를 읽지 않으므로 남긴다. Lz 가 지우는 것은 읽기를 일으키는 2초 블록과 `--refresh` 다.
 
@@ -264,4 +264,4 @@ PR 열의 번호 중 #47994·#47997 만 병합됐고 나머지(#48003 부터 #48
 1. SSE 버퍼에 들어가기 전에 실패한 알림(§3.4 끝)을 클라이언트가 알 방법. 서버가 실패를 세는 것만으로는 화면이 멈춘 것을 메우지 못한다.
 2. ask follow-up 관찰을 언제 끝낼지. 지금은 답이 기록된 뒤 2초 tick 이 관찰을 다시 연다.
 
-정한 것(2026-11-04, 운영자): runtime.toml·로컬 Keeper 목록은 서버 쓰기만 알린다. Usage 측정값은 서버가 증분 집계 후 알린다. OAuth 로그인 복구는 알림에 Keeper 이름만 싣고 사람 보안 리뷰를 받는다. 화면 갱신 타이머는 남기고 미러링·관전은 RFC-0482 로 뺀다. Clients 는 heartbeat 를 알리지 않는다. Memory health 는 서버가 Keeper 별로 증분 유지한다. Lanes 는 그리는 값 비교, Add-ons 는 열린 instance 만. Skill 원장 쓰기는 Keeper 이름을 받는다.
+정한 것(2026-11-04, 운영자): runtime.toml·로컬 Keeper 목록은 서버 쓰기만 알린다. Usage 측정값은 서버가 증분 집계 후 알린다. OAuth 로그인 복구는 알림에 Keeper 이름만 싣고 사람 보안 리뷰를 받는다. 화면 갱신 타이머는 남기고 미러링·관전은 RFC-0486 로 뺀다. Clients 는 heartbeat 를 알리지 않는다. Memory health 는 서버가 Keeper 별로 증분 유지한다. Lanes 는 그리는 값 비교, Add-ons 는 열린 instance 만. Skill 원장 쓰기는 Keeper 이름을 받는다.

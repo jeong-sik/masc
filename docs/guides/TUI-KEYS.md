@@ -848,6 +848,7 @@ or completion.
 | `S D/M/R` | sandbox: docker / microvm / remote_ssh |
 | `쉬는 중` | resting path: relative duration (제공자 stated / 상한 bounded); ▹ prefixes next candidate after turn failure |
 | `◷` | next scheduled run or hold status (Detailed second row) |
+| `mem · lag · stale` | keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second row) |
 
 ## Memory marks
 

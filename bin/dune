@@ -1960,10 +1960,12 @@
  (wrapped false)
  (modules masc_tui_keeper_axis)
  (libraries
+  masc
   masc_tui_types
   masc_tui_agenda
   masc_tui_keeper_axis_cell
-  masc_tui_keeper_next_run))
+  masc_tui_keeper_next_run
+  masc_tui_keeper_memory_reading))
 
 (library
  (name masc_tui_keeper_memory_reading)

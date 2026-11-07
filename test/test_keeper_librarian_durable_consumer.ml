@@ -6,6 +6,7 @@ module Consumer = Masc.Keeper_librarian_durable_consumer
 module Queue_refresh = Masc.Keeper_librarian_queue_refresh
 module Boundaries = Masc.Keeper_turn_boundaries
 module Progress = Masc.Keeper_librarian_progress
+module Progress_file = Masc.Keeper_librarian_progress_file
 module Store = Masc.Keeper_checkpoint_store
 module Keeper_chat_store = Masc.Keeper_chat_store
 module Keeper_external_attention = Masc.Keeper_external_attention
@@ -675,7 +676,7 @@ let test_committed_range_recovers_after_progress_write_failure () =
   in
   let fail_progress ~keepers_dir:_ ~keeper_id:_ _ =
     Error
-      (Progress.Write_failed
+      (Progress_file.Write_failed
          { path = "injected-progress-write"; message = "post-commit failure" })
   in
   (match
@@ -817,7 +818,7 @@ let test_committed_wide_range_recovers_before_retry_narrowing () =
   in
   let fail_progress ~keepers_dir:_ ~keeper_id:_ _ =
     Error
-      (Progress.Write_failed
+      (Progress_file.Write_failed
          { path = "injected-progress-write"; message = "post-commit failure" })
   in
   (match
@@ -998,7 +999,7 @@ let test_receipt_does_not_cross_restarted_history_with_repeated_endpoint () =
   in
   let fail_progress ~keepers_dir:_ ~keeper_id:_ _ =
     Error
-      (Progress.Write_failed
+      (Progress_file.Write_failed
          { path = "injected-progress-write"; message = "post-commit failure" })
   in
   (match
@@ -3311,7 +3312,7 @@ let test_official_commit_recovers_without_resynthesis ?(through_queue = false) ?
     Consumer.Memory_committed
   in
   let fail_official ~keepers_dir:_ ~keeper_id:_ _ =
-    Error (Official.Write_failed { path = "injected-official-progress"; message = "write failed after Memory commit" })
+    Error (Progress_file.Write_failed { path = "injected-official-progress"; message = "write failed after Memory commit" })
   in
   (match Consumer.For_testing.consume_one_with_progress_writer
       ~write_progress_store:Progress.write ~write_official_progress_store:fail_official
@@ -3639,7 +3640,7 @@ let test_runtime_checkpoint_memory_floor ?native case () =
             (Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get=expected_holes);
           check bool "the completed pending external receipt is cleared before atom progress" true
             (U.member "pending" (external_state ())=`Null);
-          Error (Progress.Write_failed {path="injected-checkpoint-progress";message="fixture interrupted after checkpoint Memory"}))
+          Error (Progress_file.Write_failed {path="injected-checkpoint-progress";message="fixture interrupted after checkpoint Memory"}))
         ~config ~keeper_name ()
     else run () in
   let expected_calls = match native with
@@ -3945,7 +3946,7 @@ let test_runtime_official_memory_floor ?native case () =
             ~messages:source ~reasons:[Keeper_librarian_input_refusal.Request_body_refused] |> get in
           check bool "exact unread evidence is archived before external acknowledgement and official progress"
             true (Current.read_unread_messages ~keepers_dir ~keeper_id:keeper_name |> get = [hole]);
-          Error (Official.Write_failed {path="injected-official-progress";message="fixture interrupted after Memory"}))
+          Error (Progress_file.Write_failed {path="injected-official-progress";message="fixture interrupted after Memory"}))
         ~config ~keeper_name ()
     | Partial_official_hole | All_official_holes | All_official_holes_without_observations | Unknown_official_refusal
     | Late_official_failure | Rewritten_official_message | Rewritten_official_observation
@@ -4196,7 +4197,7 @@ let test_untagged_turn_preserves_counterparts ~fail_position_after_commit () =
       ~range_id:(Original.range_id original) ~official_range_id:(Original.official_range_id original) input in
   if fail_position_after_commit then (
     let fail_official ~keepers_dir:_ ~keeper_id:_ _ =
-      Error (Official.Write_failed { path = "injected-official-progress"; message = "write failed" }) in
+      Error (Progress_file.Write_failed { path = "injected-official-progress"; message = "write failed" }) in
     (match Consumer.For_testing.consume_one_with_progress_writer
         ~write_progress_store:Progress.write ~write_official_progress_store:fail_official
         ~config ~keeper_name ~commit with

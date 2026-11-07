@@ -570,46 +570,10 @@ let test_graph_json_reports_kind_counts_and_heatmap_totals () =
       check bool "heatmap rows expose 24 hours" true
         (List.for_all (fun row -> List.length (to_list row) = 24) matrix))
 
-let test_agent_spans_json_honors_since_ms () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  with_config (fun config ->
-      ignore
-        (Activity_graph.emit config ~kind:"task.started"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
-           ~subject:(Activity_graph.entity ~kind:"task" "task-old")
-           ~tags:[ "task"; "task.started" ]
-           ~payload:(`Assoc [ ("task_id", `String "task-old") ])
-           ());
-      ignore (Unix.select [] [] [] 0.02);
-      let cutoff_ms = int_of_float (Time_compat.now () *. 1000.0) in
-      ignore
-        (Activity_graph.emit config ~kind:"task.started"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
-           ~subject:(Activity_graph.entity ~kind:"task" "task-new")
-           ~tags:[ "task"; "task.started" ]
-           ~payload:(`Assoc [ ("task_id", `String "task-new") ])
-           ());
-      ignore
-        (Activity_graph.emit config ~kind:"task.done"
-           ~actor:(Activity_graph.entity ~kind:"agent" "claude")
-           ~subject:(Activity_graph.entity ~kind:"task" "task-new")
-           ~tags:[ "task"; "task.done" ]
-           ~payload:(`Assoc [ ("task_id", `String "task-new") ])
-           ());
-      let json =
-        Activity_graph.agent_spans_json config          ~since_ms:cutoff_ms ~limit:20 ()
-      in
-      let open Yojson.Safe.Util in
-      let spans = json |> member "spans" |> to_list in
-      check int "only recent span remains" 1 (List.length spans);
-      check string "recent span label kept" "task-new"
-        (List.hd spans |> member "label" |> to_string))
-
 (* RFC-0323 G-3: approve-produced Done must complete the task in the graph
-   projection exactly like task.done — node status, the ASSIGNEE's works_on
-   edge (the event actor is the verifier), and the task span. *)
-let test_task_approved_completes_graph_and_span () =
+   projection exactly like task.done — node status and the ASSIGNEE's works_on
+   edge (the event actor is the verifier). *)
+let test_task_approved_completes_graph () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   with_config (fun config ->
@@ -664,24 +628,7 @@ let test_task_approved_completes_graph_and_span () =
       | Some e ->
           check bool "assignee works_on deactivated" false
             (e |> member "active" |> to_bool)
-      | None -> Alcotest.fail "assignee works_on edge missing");
-      let spans_json =
-        Activity_graph.agent_spans_json config ~since_ms:0 ~limit:20 ()
-      in
-      let spans = spans_json |> member "spans" |> to_list in
-      match
-        List.find_opt
-          (fun s -> String.equal (s |> member "label" |> to_string) "task-901")
-          spans
-      with
-      | Some s ->
-          check string "task span completed" "completed"
-            (s |> member "status" |> to_string);
-          (* the span belongs to the assignee (worker-a) who did the work,
-             not the verifier (verifier-b) whose task.approved closed it *)
-          check string "task span attributed to assignee" "worker-a"
-            (s |> member "agent" |> to_string)
-      | None -> Alcotest.fail "task span missing")
+      | None -> Alcotest.fail "assignee works_on edge missing"))
 
 (* ── P0-4 current-day incremental parse cache (masc perf root-cause
    report 2026-07-15, item (1)) ──────────────────────────────────── *)
@@ -1333,20 +1280,6 @@ let test_parse_since_ms_supports_minutes () =
   check (option int) "1h still parses" (Some (3600 * 1000))
     (Server_activity_http.parse_since_ms "1h")
 
-let test_span_status_of_string_opt_returns_none_for_unknown () =
-  (* #8605 family: strict variant exposes unknown wires explicitly so
-     callers can react instead of being silently coerced to Span_ended. *)
-  check (option string) "unknown -> None" None
-    (Activity_graph.span_status_of_string_opt "definitely-not-a-status"
-     |> Option.map Activity_graph.span_status_to_string);
-  check (option string) "ended -> Some ended" (Some "ended")
-    (Activity_graph.span_status_of_string_opt "ended"
-     |> Option.map Activity_graph.span_status_to_string);
-  check (option string) "open -> Some open" (Some "open")
-    (Activity_graph.span_status_of_string_opt "open"
-     |> Option.map Activity_graph.span_status_to_string)
-
-
 (* Node accumulators are values, not cells. A record read out of the table
    before a later event keeps what it was read with, while the table itself
    advances. Against the previous in-place form both checks on [first] would
@@ -1421,14 +1354,10 @@ let () =
             test_graph_json_tracks_runtime_activity_kinds;
           test_case "graph summary exposes kind counts and full heatmap totals"
             `Quick test_graph_json_reports_kind_counts_and_heatmap_totals;
-          test_case "agent spans honor since filter" `Quick
-            test_agent_spans_json_honors_since_ms;
-          test_case "task.approved completes graph and span" `Quick
-            test_task_approved_completes_graph_and_span;
+          test_case "task.approved completes graph" `Quick
+            test_task_approved_completes_graph;
           test_case "parse_since_ms supports minutes" `Quick
             test_parse_since_ms_supports_minutes;
-          test_case "span_status_opt None for unknown" `Quick
-            test_span_status_of_string_opt_returns_none_for_unknown;
         ] );
       ( "current_day_cache",
         [

@@ -6,11 +6,11 @@
     Type identity is preserved end-to-end across the runtime
     via the [include module type of struct include M end] form
     (cycle 187 [workspace_utils.mli] rationale): the [event],
-    [entity_ref], [client], and [agent_span] types reachable
+    [entity_ref], and [client] types reachable
     via {!Activity_graph} are the same nominal types as those
     reachable via the source modules.
 
-    On top of the runtime, six locally-defined helpers
+    On top of the runtime, five locally-defined helpers
     persist event JSONL files under [Workspace_utils.masc_dir]
     and project the log into JSON views consumed by the SSE
     activity stream and the dashboard graph endpoint:
@@ -23,8 +23,6 @@
       dashboard.
     - {!graph_json} — folded graph (nodes / edges / kind
       counts / 7×24 heatmap) used by the live view.
-    - {!agent_spans_json} — derived agent-span timeline
-      reconstructed from start / end event pairs.
 
     Internal helpers stay private at this boundary
     ([root_dir], [month_dir], [day_path], [seq_path],
@@ -32,8 +30,7 @@
     [write_current_seq], [append_line], [parse_event_line],
     [collect_event_files], [read_all_events],
     [matches_filters], [list_events_with_total],
-    [window_meta], [span_start_kind],
-    [span_end_classification], [StringMap]). *)
+    [window_meta], [StringMap]). *)
 
 include module type of struct
   include Activity_graph_types
@@ -138,19 +135,6 @@ val graph_json :
     capped at [timeline_limit] (default 80), and a [window]
     metadata record (limit / events_shown / events_store_total
     / has_more). *)
-
-val agent_spans_json :
-  Workspace_utils.config ->
-  ?limit:int ->
-  ?since_ms:int ->
-  unit ->
-  Yojson.Safe.t
-(** Reconstructs agent-span timelines from the event log by
-    pairing span-start kinds with their classified span-end
-    kinds.  Open spans (start without matching end in the
-    window) are reported with [Span_open] and [end_ms] set
-    to "now".  Returns [`Assoc [agents; spans; time_range;
-    window]]. *)
 
 type default_projections = {
   events_default : Yojson.Safe.t;

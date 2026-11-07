@@ -95,6 +95,7 @@ val plan
   :  ?completed_arguments:completed_arguments
   -> ?min_result_bytes:int
   -> measure_message_bytes:(Agent_core.Types.message -> int)
+  -> measure_wire_bytes:(Agent_core.Types.message -> int option)
   -> demote_before:int
   -> Agent_core.Types.message list
   -> plan_result
@@ -104,11 +105,11 @@ val plan
 
     A tool result is demoted only when all of these hold:
 
-    - it is a [ToolResult] whose [content_blocks] is [None]. When
-      [content_blocks] is [Some], the provider encoder emits the blocks and
-      never serializes [content], so replacing [content] would free nothing
-      while this function credited a reduction — an under-estimate, the
-      direction that lets a materialized request exceed the cap.
+    - it is a text body of a [ToolResult]: its [content], and each [Text]
+      block of one whose [content_blocks] is [Some]. Image, document and
+      audio blocks keep their place; they have no marker form (RFC-0363
+      §3.1.2). The floor below is checked for the whole result; the other
+      conditions for each body.
     - {!Tool_output.decode_from_agent_core} reports [Not_marker]. [Decoded] is already
       demoted; [Invalid_marker] is marker-shaped content that failed to parse
       and is left exactly as-is rather than being stored as a blob, which would
@@ -124,17 +125,30 @@ val plan
       back, and the refused request's atom count for the
       one resend that answers a size refusal, so every result in the refused
       request leaves as a marker rather than failing the turn (#28845).
-    - its body has at least [min_result_bytes] bytes. The floor is 0 when the
-      argument is omitted, so a result is demoted whenever the next bullet
-      allows it. It applies to results only; [completed_arguments] are chosen
-      by their own eligibility.
-    - the placeholder measures strictly smaller than the message does now.
-      This is the rule that decides whether a marker saves bytes at all: the
-      encoded marker runs from about 125 bytes to 1,154 depending on the
-      preview's bytes, because {!Tool_output.encode_for_agent_core} escapes the
-      preview and the JSON encoder escapes it again, so a fixed floor cannot
-      stand in for it. [min_result_bytes] is a floor on what the caller wants
-      to trade for a marker, checked in addition to this rule.
+    - its result carries at least [min_result_bytes] bytes of text on one
+      lane: [content], or with [Some] the longer of [content] and the sum of
+      its [Text] blocks. The floor checks the whole result, not each body.
+      It is 0 when the argument is omitted, so a result is demoted whenever
+      the next bullets allow it. It applies to results only;
+      [completed_arguments] are chosen by their own eligibility.
+    - [measure_wire_bytes] of the result alone in its message is strictly
+      smaller with the placeholder in that body than without it, each body
+      measured on top of the bodies already chosen. Providers send different
+      bodies of one result, and OpenAI chat, Responses, GLM and Ollama escape
+      the blocks twice, so this is a question for the lane's own encoder
+      ({!Keeper_model_input_wire_bytes.measurer}): a body the lane does not
+      send leaves the measure equal, and a short body can grow into a longer
+      marker once escaped twice. [None] keeps the body. Applies to results
+      only.
+    - the placeholder message measures strictly smaller under
+      [measure_message_bytes] than the message does now, so the window's
+      count of it never grows. The encoded marker runs from about 125 bytes
+      to 1,154 under one JSON escape and to about 1,530 under two, depending
+      on the preview's bytes, because {!Tool_output.encode_for_agent_core}
+      escapes the preview with [%S] before any JSON encoder escapes it again;
+      a fixed floor cannot stand in for either. [min_result_bytes] is a floor
+      on what the caller wants to trade for a marker, checked in addition to
+      these rules.
 
     [measure_message_bytes] must be the encoder the window will use. The bound
     is obtained by measuring a real placeholder message through it rather than
@@ -152,8 +166,8 @@ val plan
 type materialize_outcome =
   { messages : Agent_core.Types.message list
   ; reverted : int
-        (** Planned demotions whose blob write failed and whose body was
-            restored. Non-zero means the list is larger than the plan
+        (** Planned demotions whose blob write failed, so the body stayed in
+            its slot. Non-zero means the list is larger than the plan
             measured. The range is a position, not a size, so the same atoms
             go out and the caller reports the failure. *)
   }
@@ -164,7 +178,7 @@ val capture_materialized :
   pending:pending list -> before:Agent_core.Types.message list ->
   after:Agent_core.Types.message list -> materialized_replay option
 (** Capture the actual retained slot replacements, including failed writes
-    restored to their originals. [None] rejects a changed message/block shape
+    that kept their original bodies. [None] rejects a changed message/block shape
     or changes outside planned placeholders. Pure; no store retry. *)
 
 val replay_materialized :
@@ -209,9 +223,13 @@ val materialize
     each one repeated it, and doing it on the calling fiber held the main Eio
     domain for one uninterrupted run of 0.7 to 1.6 seconds (rtev, 2026-09-16).
 
-    A write failure restores that message's body instead of emitting a marker
-    for bytes that were never persisted, and is counted in [reverted]; no write
-    failure raises and none leaves a dangling reference. A cancelled fiber still
+    A planned block is built again from its original, with a real marker in
+    each body whose bytes were written. A body whose write failed keeps its
+    original text instead of a marker for bytes that were never persisted,
+    and is counted in [reverted]; the result's other bodies keep the markers
+    that were written. No write failure raises and none leaves a dangling
+    reference. A planned body its original block no longer has raises
+    [Invalid_argument]: [plan] read every body from that block. A cancelled fiber still
     propagates [Eio.Cancel.Cancelled], as the addressing awaits the pool.
 
     On blob lifetime: these blobs have no durable referrer, because the copy

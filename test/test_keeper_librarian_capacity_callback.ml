@@ -446,6 +446,7 @@ let test_prefit_real_continuity ~base_path () =
     ~continuity ~provider_config
     ~measure_message_bytes:(fun message -> String.length
       (Yojson.Safe.to_string (Agent_core.Checkpoint.message_to_json message)))
+    ~measure_wire_bytes:(Keeper_model_input_wire_bytes.measurer ~config:provider_config)
     ~accepted:None ~front:None ~history_digest_at:(Runtime_model_input_tail_window.atom_opening_digest canonical)
     ~current_turn_results:Driver.Current_turn_verbatim ~base_path
     ~turn_boundary:(Masc.Keeper_carried_front.Turn_boundary { end_atom = completed_end })

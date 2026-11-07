@@ -856,8 +856,12 @@ let plan_arguments argument_projection ~measure_message_bytes messages =
       Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
         let completed_arguments = Option.map
           (Keeper_model_input_demotion.prepend_argument_messages ~prefix:history_prefix) arguments in
+        (* [demote_before:0] plans no result body, so no lane is asked
+           whether one shrinks. *)
         Keeper_model_input_demotion.plan ?completed_arguments
-          ~measure_message_bytes ~demote_before:0 messages)
+          ~measure_message_bytes
+          ~measure_wire_bytes:(fun (_ : Agent_core.Types.message) -> None)
+          ~demote_before:0 messages)
 ;;
 
 type selected_start_range =

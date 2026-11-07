@@ -3,7 +3,7 @@ rfc: "tui-operator-workbench"
 title: "TUI 작업대 — 모든 화면에 같은 클릭·스크롤·복사·추이 부품을 쓴다"
 status: Draft
 created: 2026-09-26
-updated: 2026-09-28
+updated: 2026-11-06
 author: dancer + claude
 supersedes: []
 superseded_by: null
@@ -555,6 +555,24 @@ GET /api/v1/dashboard/usage/series?range=1h|24h|7d|14d&by=keeper|provider|runtim
 - 계정 사용 비율은 #38801 의 `server_provider_usage_history` 에서 읽는다.
 - 읽기 비용: 지난 날의 일 파일은 바뀌지 않으므로 날짜별로 한 번 읽어 계산해 둔다. 새로고침마다 다시 읽는 것은 오늘 파일뿐이다.
   24시간 상한이 있는 `keeper-costs` 는 이 조회와 별개로 둔다.
+
+#### 6.3.1 운영자 질문 6개와 지금 있는 조회 (2026-11-06 코드 확인)
+
+Goal `goal-tui-operator-stats-20261106`(이슈 #49175)의 질문 6개가 지금 어디서 답이 나오는지와, 서버에 이미 있는 조회를 코드에서 읽어 적었다.
+
+| 질문 | TUI 가 지금 답하는 곳 | 서버에 이미 있는 조회 | 없는 것 |
+|---|---|---|---|
+| 토큰 | Usage › Keepers, 마지막 1일 합 | `GET /api/v1/dashboard/keeper-costs?window=1440` | 시간 칸 |
+| 비용 | Usage › Keepers, 마지막 1일 합 | 같음 | 시간 칸 |
+| Keeper별 사용 | Usage › Keepers | 같음 | 시간 칸 |
+| 도구 실패율 | Tools › 전체 도구의 FAIL 열, 도구별 합계(#49482, `tool_usage.by_tool`) | `GET /api/v1/tool-metrics/series` 의 칸별 `failure_count` | TUI 가 이 조회를 부르지 않는다 |
+| 지연 p95 | Tools › 전체 도구의 P95 열, 도구별 합계(#49482) | 같은 조회의 칸별 `p95_ms` | 같음 |
+| 추세 | Usage › Trend, 제공자 쿼터 사용 비율(UTC 일, 1·7·14일)뿐 | 없음 | 토큰·비용·도구 추세 |
+
+- 도구 호출·실패·p95 의 시간 칸은 서버를 바꾸지 않고 `tool-metrics/series` 로 그린다. 이 조회는 시간 또는 일 칸(`bucket=hour|day`), 최대 31일(`max_window_days`), `utc_offset_min` 을 받고, 칸마다 `call_count`·`failure_count`·`p50_ms`·`p95_ms`·`max_ms` 를 준다. 호출이 없는 칸은 `p95_ms` 가 없다(`lib/tool_metrics_store/tool_metrics_series.mli`).
+- 그래서 위의 `usage/series` 는 토큰과 비용 두 계열만 맡는다. 호출·실패·p95 는 뺀다.
+- 구현 순서는 S5-3a(Usage 에 도구 호출·실패·p95 추이 구간, 서버 변경 없음), S5-2(`usage/series` 토큰·비용), S5-3b(토큰·비용 추이를 같은 차트로)다.
+- S5-3a 의 자리는 Usage 의 `v` 로 도는 구간 목록 끝에 `Calls` 를 더하는 것이다(Plan, Trend, Keepers, Calls). `V` 로 거꾸로 돌게 해서 Dashboard 에서 `m`, `V` 두 번에 닿는다. 범위는 Trend 가 쓰는 `w`(1·7·14일)를 그대로 쓴다. 1일은 시간 칸 24개이고 7·14일은 일 칸이다. Keepers 의 토큰·비용·Keeper별 사용은 지금처럼 `m`, `v`, `v` 세 번이다.
 
 ### 6.4 Dashboard 에 올리는 것
 

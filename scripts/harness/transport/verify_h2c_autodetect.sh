@@ -8,6 +8,8 @@
 #   1. HTTP/1.1 health check works (baseline)
 #   2. HTTP/2 h2c health check works
 #   3. The runtime reports the exact auto listener mode
+#   6. The TLS listener answers --http2 (ALPN h2) and --http1.1 on the same
+#      route table; skipped when transport-health says it is off
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/harness/transport/common.sh
@@ -125,6 +127,28 @@ if [ "$success" -eq 4 ]; then
   pass "concurrent HTTP/1.1 connections (4/4)"
 else
   fail "concurrent connections" "${success}/4 succeeded"
+fi
+
+# Test 6: TLS listener (RFC-0512). ALPN picks h2 for --http2 and http/1.1 for
+# --http1.1 on the same route table. Skipped when the listener is off.
+https_status="$(jq -er '.https_listener.status' <<<"$transport_health_json" 2>/dev/null || echo missing)"
+https_port="$(jq -er '.https_listener.port' <<<"$transport_health_json" 2>/dev/null || true)"
+if [[ "$https_status" == "listening" && -n "$https_port" ]]; then
+  https_base="${MASC_HTTPS_BASE_URL:-https://127.0.0.1:${https_port}}"
+  tls_h2_proto="$(curl -k -sf --max-time 5 -o /dev/null -w '%{http_version}' --http2 "${https_base}/health" 2>/dev/null || echo fail)"
+  if [[ "$tls_h2_proto" == "2" || "$tls_h2_proto" == "2.0" ]]; then
+    pass "HTTPS health over ALPN h2 (proto: ${tls_h2_proto})"
+  else
+    fail "HTTPS ALPN h2" "proto=${tls_h2_proto}"
+  fi
+  tls_h1_proto="$(curl -k -sf --max-time 5 -o /dev/null -w '%{http_version}' --http1.1 "${https_base}/health" 2>/dev/null || echo fail)"
+  if [[ "$tls_h1_proto" == "1.1" ]]; then
+    pass "HTTPS health over ALPN http/1.1"
+  else
+    fail "HTTPS ALPN http/1.1" "proto=${tls_h1_proto}"
+  fi
+else
+  skip "HTTPS listener" "status=${https_status}"
 fi
 
 summary

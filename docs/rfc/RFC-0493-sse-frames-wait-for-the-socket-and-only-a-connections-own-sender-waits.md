@@ -1,9 +1,9 @@
 ---
 rfc: "0493"
 title: "SSE frame 은 앞 frame 이 소켓에 닿은 뒤에 보내고, 느린 클라이언트를 기다리는 일은 그 연결의 송신 fiber 만 한다"
-status: Draft
+status: Implemented
 created: 2026-11-05
-updated: 2026-11-06
+updated: 2026-11-07
 author: claude
 supersedes: []
 superseded_by: null
@@ -15,6 +15,29 @@ related: ["0412", "0477"]
 - 날짜는 UTC 다.
 - 코드는 `origin/main` `ee4dd9d1118` 기준이다.
 - 라이브러리 소스는 opam switch `5.5.1` 의 httpun 0.2.0, faraday, gluten-eio, eio 1.3 이다.
+
+## Implementation summary
+
+§7 의 층이 모두 main 에 병합됐다.
+
+| 층 | PR | 한 일 |
+|---|---|---|
+| 1 | #48778 | 이 RFC |
+| 2 | #48807 | `Server_sse_response` 를 만들고 artifact draft, Keeper 실행 출력, 로그인 둘, Ask follow-up 을 옮겼다 |
+| 3 | #48820 | fleet pump 를 `Server_sse_pump` 로 일반화하고 fleet 스트림을 응답 모듈로 옮겼다 |
+| 4a | #48836 | pump 가 queue 를 받고 이벤트마다 쓸 것을 정한다 |
+| 4b | #48844 | Keeper chat 스트림을 그 연결의 송신 fiber 가 보낸다 |
+| 5a | #48849 | MCP `subscriptions/listen` 을 pump 로 옮겼다 |
+| 5b | #48857 | pump 가 이미 쌓인 frame 을 한 `send` 로 쓴다 |
+| 5c | #48893, #48995 | MCP 스트림이 `Server_sse_response.send` 를 쓰고 자기 fiber 에서 닫힌다. stall 이 남긴 것을 닫고 `send` 앞에서 쌓임을 본다 |
+| 5d | #49213, #49318 | MCP GET·AG-UI·presence drain 이 `Server_sse_pump.run` 으로 쌓인 frame 을 묶어 쓴다. pump 는 queue 대신 꺼내는 쪽(`source`)을 받는다 |
+
+1~5c 는 2026-11-06 01:03:35Z 부팅, 5d 는 2026-11-07 부팅(`d523427a2ec`)부터 서버에 있다.
+
+§6 의 5d 배포 뒤 확인(2026-11-07):
+
+- Observer 스트림(`GET /mcp?sse_kind=observer`)을 받는 대로 버리는 curl 이 120초를 다 채웠다(02:01:25Z~02:03:25Z). 이벤트 33,175개, 9,285,645B 를 받았고 끊기지 않았다. 5c 뒤에는 같은 방법으로 5초, frame 308개에서 끊겼다(§1.5). 시험 세션은 끝난 뒤 DELETE 로 지웠다(204).
+- `Broadcast skip … stream full` 은 11-06 에 962건(01시 183, 11시 186 등)이었다. 11-07 00:00Z~02:03Z 에는 0건이다. 이 구간에 masc-tui Observer 가 붙어 있었는지는 확인하지 못했다. 그래서 하루 값은 다음 날 로그로 다시 본다.
 
 ## 0. 요약
 

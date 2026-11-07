@@ -60,7 +60,6 @@ A continuity claim is accepted only when the matching CI-owned artifact passes:
 | replay uses the expected agent core checkpoint prefix and typed blocks | `test_keeper_replay_checkpoint.ml`, `test_pbt_context_overflow.ml` |
 | domain mutations carry tool outcomes or transition receipts | `test_keeper_unified_verification_surface.ml`, `test_keeper_state_machine.ml` |
 | a checkpoint save is durable, monotone, and reloadable | `test_keeper_checkpoint_stale_guard.ml` |
-| retired prose/introspection protocols cannot return to active source | `test_keeper_sandbox_boundary_policy.ml` |
 
 Tests must not ask a model to echo a state template or inspect prose for a
 transition.

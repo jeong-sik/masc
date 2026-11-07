@@ -215,7 +215,7 @@ in JavaScript:
 |-------------------|------------------------------|--------------|
 | Mermaid `classDef` / `style` | Mermaid renders SVG strings; CSS vars in attribute values are not resolved by the rendering pipeline | `harness-health.ts`, `composite-fsm-flowchart.ts` |
 | Cytoscape style API | Style objects are JS literals; `'#xxxxxx'` required | `common/cytoscape-fsm.ts` |
-| Canvas 2D / SVG `fill` set via JS | When fill is set programmatically, the browser does not resolve CSS vars from the JS string | `git-graph-view.ts`, `activity-heatmap-draw.ts` |
+| Canvas 2D / SVG `fill` set via JS | When fill is set programmatically, the browser does not resolve CSS vars from the JS string | `common/sparkline.ts` |
 
 For these surfaces, the convention is:
 

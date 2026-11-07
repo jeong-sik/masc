@@ -70,7 +70,7 @@ graph LR
 | Prompt | `keeper_prompt.ml`, `keeper_unified_prompt.ml`, `keeper_run_context.ml` |
 | Turn Execution | `keeper_agent_run.ml`, `keeper_unified_turn.ml`, `keeper_tools_agent_core.ml`, `keeper_hooks_agent_core.ml` |
 | Supervision | `keeper_supervisor.ml`, `keeper_keepalive.ml`, `keeper_world_observation.ml` |
-| MCP Surface | `keeper_turn.ml`, `keeper_status.ml`, `keeper_keeper.ml`, `keeper_schema.ml` |
+| MCP Surface | `keeper_turn.ml`, `keeper_schema.ml` |
 | Alerting / Metrics | `keeper_alerting*.ml`, `keeper_status_runtime*.ml`, `keeper_status_detail.ml` |
 
 ---

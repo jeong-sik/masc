@@ -34,13 +34,13 @@ let kinds : (string * (Router.t -> Router.t) * Route_access.t) list =
     , Route_access.Always_public )
   ; ( "public_read"
     , Server_route.get Server_route.Public_read "/x" state_handler
-    , Route_access.Public_read )
+    , Route_access.Public_read Route_access.Credential_when_strict )
   ; ( "public_read_on_canonical_host"
     , Server_route.get
         (Server_route.Public_read_on_canonical_host { port = 8935 })
         "/x"
         state_handler
-    , Route_access.Public_read )
+    , Route_access.Public_read Route_access.Credential_when_strict )
   ; ( "read_auth"
     , Server_route.get Server_route.Read_auth "/x" state_handler
     , Route_access.Read_auth )
@@ -708,7 +708,7 @@ let effective_rows routes =
 ;;
 
 let rows_t = list (triple string (list string) string)
-let public_read = access_json Route_access.Public_read
+let public_read = access_json (Route_access.Public_read Route_access.Credential_when_strict)
 let read_auth = access_json Route_access.Read_auth
 let admin = access_json (Route_access.Permission Masc_domain.CanAdmin)
 

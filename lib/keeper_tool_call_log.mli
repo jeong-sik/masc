@@ -89,7 +89,9 @@ val set_retained_artifacts : invocation:Agent_core.Tool_contract.Invocation.t ->
 val peek_retained_artifacts : invocation:Agent_core.Tool_contract.Invocation.t -> unit -> Tool_output.artifact_ref list
 val clear_retained_artifacts : invocation:Agent_core.Tool_contract.Invocation.t -> unit -> unit
 (** Observer-owned references cross the model projection without entering its
-    data. The logging hook clears them only after its durable row commits. *)
+    data. The Agent Core logging hook clears them only after its durable row
+    commits. A composition executor takes a child call's references as soon
+    as the handler returns and carries them to that node's row. *)
 
 type turn_ctx_cell = Keeper_tool_call_log_context.cell
 (** Per-run turn-context carrier (RFC-0225 §3.3). Created once per

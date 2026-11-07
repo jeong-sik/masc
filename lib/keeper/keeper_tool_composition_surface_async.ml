@@ -171,7 +171,7 @@ let rec async_worker_result
                   ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
                   (Keeper_composition_child_exports.error_to_string error)) in
          Executor.dispatch_result ~failure_effect_disposition:observed.failure_effect_disposition
-           ?deferred_kind:observed.deferred_kind
+           ?deferred_kind:observed.deferred_kind ~retained_artifacts:observed.retained_artifacts
            (Tool_result.with_retained_artifacts observed.retained_artifacts result)) in
   let on_node_result = Option.map (fun turn_context ->
       observe_node_result

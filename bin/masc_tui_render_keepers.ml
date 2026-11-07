@@ -594,28 +594,59 @@ let keeper_group_heading_style = function
   | Keeper_list_model.Inactive -> Theme.recede ()
   | Keeper_list_model.Unobserved -> Theme.warn ()
 
+(* The chips of the count row that fit [room] cells, each a count and its text
+   in the order they are drawn. When the row is too short for all of them,
+   every chip with a count stays and the zeros take what is left, front to
+   back. A zero says nothing is there. At 80 columns the five zeros fit and
+   the "? 3 unknown" behind them did not, so a list of three Keepers sat under
+   a row of zeros. *)
+let count_chips_that_fit ~sep ~room chips =
+  let sep_cells = Message_layout.display_width sep in
+  (* A chip and the separator in front of it. A row has one separator fewer
+     than it has chips, hence the start below zero. *)
+  let cost (_, text) = sep_cells + Message_layout.display_width text in
+  let held chips = List.fold_left (fun cells chip -> cells + cost chip) (- sep_cells) chips in
+  let nonzero (count, _) = count > 0 in
+  let counted = List.filter nonzero chips in
+  if held chips <= room then chips
+  else if held counted > room then counted
+  else
+    let rec fill left = function
+      | [] -> []
+      | ((count, _) as chip) :: later ->
+          if count > 0 then chip :: fill left later
+          else if cost chip <= left then chip :: fill (left - cost chip) later
+          else List.filter nonzero later
+    in
+    fill (room - held counted) chips
+
 (* The frame cuts a row from the right. The counts are what a narrow screen
    needs, so they lead and the layout and sort name trail. An item that does
    not fit whole is left out, because "0 inactiv…" reads as a number. *)
 let keeper_view_summary ~cells rows layout sort =
   let mode = Keeper_list_model.layout_label layout ^ " · " ^ Keeper_list_model.sort_label sort in
-  let items =
+  let sep = "   " in
+  let lead = "  " in
+  let room = cells - Message_layout.display_width lead in
+  let texts =
     match layout with
     | Keeper_list_model.Grouped -> [ mode ]
     | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
         let counts : Keeper_list_model.group_counts = Keeper_list_model.group_counts rows in
-        [ Printf.sprintf "! %d attention" counts.attention_rows
-        ; Printf.sprintf "%s %d failing" failing_glyph counts.failing_rows
-        ; Printf.sprintf "\xe2\x96\xb6 %d active" counts.active_rows
-        ; Printf.sprintf "\xe2\x97\x8c %d waiting" counts.waiting_rows
-        ; Printf.sprintf "\xe2\x97\x8b %d inactive" counts.inactive_rows
-        ; Printf.sprintf "? %d unknown" counts.unobserved_rows
-        ; mode
-        ]
+        let chips =
+          [ counts.attention_rows, Printf.sprintf "! %d attention" counts.attention_rows
+          ; counts.failing_rows, Printf.sprintf "%s %d failing" failing_glyph counts.failing_rows
+          ; counts.active_rows, Printf.sprintf "\xe2\x96\xb6 %d active" counts.active_rows
+          ; counts.waiting_rows, Printf.sprintf "\xe2\x97\x8c %d waiting" counts.waiting_rows
+          ; counts.inactive_rows, Printf.sprintf "\xe2\x97\x8b %d inactive" counts.inactive_rows
+          ; counts.unobserved_rows, Printf.sprintf "? %d unknown" counts.unobserved_rows
+          ]
+        in
+        let whole = List.map snd chips @ [ mode ] in
+        if Message_layout.display_width (String.concat sep whole) <= room then whole
+        else List.map snd (count_chips_that_fit ~sep ~room chips)
   in
-  let lead = "  " in
-  lead ^ Message_layout.join_fitting ~sep:"   "
-           ~cells:(cells - Message_layout.display_width lead) items
+  lead ^ Message_layout.join_fitting ~sep ~cells:room texts
 
 let render_keeper_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in

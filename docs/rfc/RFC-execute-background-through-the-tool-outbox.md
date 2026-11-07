@@ -17,13 +17,14 @@ related: ["spawn-a-process-that-outlives-the-call", "keeper-async-fleet-continui
 An Execute call holds the Keeper's turn until the command exits or reaches
 `timeout_sec`. Nothing else the Keeper has queued starts in that time.
 
-Measured in the tool-call ledger (`~/me/.masc/tool_calls/2026-11/05*.jsonl`
-through `07*.jsonl`; rows with `record_kind == "tool_call"` and
-`tool == "Execute"`):
+Measured in the tool-call ledger (`~/me/.masc/tool_calls/2026-11/`, rows with
+`record_kind == "tool_call"`, `tool == "Execute"` and `ts` in
+[2026-11-05T00:00Z, 2026-11-08T00:00Z)). The script and its output are in
+`docs/evidence/execute-background-2026-11/`.
 
 | Execute calls | count | time |
 |---|---|---|
-| all Keepers | 26,713 | 67.78 h |
+| all Keepers | 26,733 | 67.79 h |
 | `github-pr-checker` and `pr-updater`, command contains `sleep N`, 60 s or longer | 159 | 18.68 h |
 | ended with exit code 124 (the timeout), any duration | 34 | 2.86 h |
 
@@ -35,9 +36,8 @@ one kind of wait. A build, a test run or a download has no watcher, and the
 only way to wait for it is a call that blocks.
 
 What the measurement does not show: a latency gain. Of 288 Keeper-to-Keeper
-delegations that ended between 2026-11-05 and 2026-11-08 (UTC), 1 completed
-while its submitter was inside an Execute of 60 s or longer, and 13 s of that
-Execute remained. Freeing the turn is worth the held time above, not a faster
+delegations that ended in the same window, 1 completed while its submitter was
+inside an Execute of 60 s or longer, and 13.1 s of that Execute remained. Freeing the turn is worth the held time above, not a faster
 Delegate.
 
 ## 2. Design

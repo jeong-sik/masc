@@ -163,6 +163,7 @@ type memory_keeper_health = {
   mkh_added : int;
   mkh_removed : int;
   mkh_snapshot_present : bool;
+  mkh_age_bins : Keeper_memory_age_bins.t option;
   mkh_context_cycle : memory_context_cycle;
   mkh_librarian : memory_librarian_health;
   mkh_librarian_failures : int;

@@ -31,6 +31,7 @@ function makeEntry(
     added: 2,
     removed: 1,
     snapshot_present: true,
+    age_bins: null,
     context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared: null, synthesis: null },
     librarian: { state: 'drained', detail: null, measured_at: 1_699_999_950,
       unread_atom_turns: 0, unread_official_turns: 0,
@@ -73,7 +74,7 @@ function makeResponse(
   alertSummary = makeAlertSummary(),
 ): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v8',
+    schema: 'keeper.memory_os.current_health.v9',
     generated_at: 1_700_000_000,
     keepers,
     totals: {

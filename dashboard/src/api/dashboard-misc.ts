@@ -155,6 +155,13 @@ export interface ContextCycle {
   } | null
 }
 
+export interface KeeperMemoryAgeBins {
+  under_hour: number
+  under_day: number
+  under_week: number
+  older: number
+}
+
 export interface KeeperMemoryHealthKeeperEntry {
   keeper_id: string
   revision: number
@@ -167,6 +174,7 @@ export interface KeeperMemoryHealthKeeperEntry {
   added: number
   removed: number
   snapshot_present: boolean
+  age_bins: KeeperMemoryAgeBins | null
   librarian: KeeperMemoryHealthLibrarian
   context_cycle: ContextCycle
   librarian_failures: number
@@ -183,7 +191,7 @@ export interface KeeperMemoryHealthKeeperEntry {
 }
 
 export interface KeeperMemoryHealthResponse {
-  schema: 'keeper.memory_os.current_health.v8'
+  schema: 'keeper.memory_os.current_health.v9'
   generated_at: number
   keepers: KeeperMemoryHealthKeeperEntry[]
   totals: {
@@ -520,6 +528,17 @@ function decodeContextCycle(raw: unknown): ContextCycle | null {
   return result
 }
 
+function decodeKeeperMemoryAgeBins(raw: unknown, expectedFacts: number): KeeperMemoryAgeBins | null {
+  if (!isRecord(raw) || !exactKeys(raw, ['under_hour', 'under_day', 'under_week', 'older'])) return null
+  const under_hour = nonNegativeInteger(raw.under_hour)
+  const under_day = nonNegativeInteger(raw.under_day)
+  const under_week = nonNegativeInteger(raw.under_week)
+  const older = nonNegativeInteger(raw.older)
+  if (under_hour === null || under_day === null || under_week === null || older === null) return null
+  if (under_hour + under_day + under_week + older !== expectedFacts) return null
+  return { under_hour, under_day, under_week, older }
+}
+
 function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEntry | null {
   if (!isRecord(raw) || !exactKeys(raw, [
     'keeper_id',
@@ -533,6 +552,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     'added',
     'removed',
     'snapshot_present',
+    'age_bins',
     'librarian',
     'context_cycle',
     'librarian_failures',
@@ -581,6 +601,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
   const alerts = Array.isArray(raw.alerts)
     ? raw.alerts.map(decodeKeeperMemoryHealthAlert)
     : null
+  const age_bins = raw.age_bins === null ? null : decodeKeeperMemoryAgeBins(raw.age_bins, facts)
   if (
     keeper_id === null
     || revision === null
@@ -596,6 +617,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     || (raw.updated_at !== null && updated_at === null)
     || (updated_at !== null && updated_at < 0)
     || (updated_at !== null) !== snapshot_present
+    || (raw.age_bins !== null && age_bins === null)
     || context_cycle === null
     || librarian === null
     || librarian_failures === null
@@ -629,6 +651,7 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
     added,
     removed,
     snapshot_present,
+    age_bins,
     librarian,
     context_cycle,
     librarian_failures,
@@ -646,14 +669,14 @@ function decodeKeeperMemoryHealthEntry(raw: unknown): KeeperMemoryHealthKeeperEn
 }
 
 function decodeKeeperMemoryHealth(raw: unknown): KeeperMemoryHealthResponse | null {
-  if (!isRecord(raw) || !exactKeys(raw, [
-    'schema',
-    'generated_at',
-    'keepers',
-    'totals',
-    'alert_summary',
-  ])) return null
-  if (raw.schema !== 'keeper.memory_os.current_health.v8') return null
+  if (!isRecord(raw)) return null
+  const keys = Object.keys(raw)
+  const hasExecution = keys.includes('execution')
+  const expectedKeys = hasExecution
+    ? ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary', 'execution']
+    : ['schema', 'generated_at', 'keepers', 'totals', 'alert_summary']
+  if (!exactKeys(raw, expectedKeys)) return null
+  if (raw.schema !== 'keeper.memory_os.current_health.v9') return null
   const generated_at = finiteNumber(raw.generated_at)
   const keepers = Array.isArray(raw.keepers)
     ? raw.keepers.map(decodeKeeperMemoryHealthEntry)

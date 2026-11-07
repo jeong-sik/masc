@@ -209,7 +209,7 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   let keeper = keeper_obj "solo" json in
   Alcotest.(check string)
     "schema"
-    "keeper.memory_os.current_health.v8"
+    "keeper.memory_os.current_health.v9"
     (string_field "schema" json);
   Alcotest.(check int) "revision" 2 (int_field "revision" keeper);
   Alcotest.(check int) "facts" 2 (int_field "facts" keeper);
@@ -220,6 +220,8 @@ let test_reports_revision_snapshot_bytes_and_latest_delta () =
   Alcotest.(check bool) "snapshot bytes" true (int_field "snapshot_bytes" keeper > 0);
   Alcotest.(check int) "added" 2 (int_field "added" keeper);
   Alcotest.(check int) "removed" 1 (int_field "removed" keeper);
+  Alcotest.(check bool) "age_bins present" true (member "age_bins" keeper <> `Null);
+  Alcotest.(check int) "age_bins older" 2 (int_field "older" (member "age_bins" keeper));
   Alcotest.(check int) "no alerts" 0 (List.length (list_field "alerts" keeper));
   Alcotest.(check int) "total facts" 2 (int_field "facts" (totals json));
   Alcotest.(check int) "total observed facts" 2
@@ -1250,7 +1252,7 @@ let test_one_keepers_row_is_its_fleet_row () =
   let fleet = Health.keeper_memory_health_http_json ~base_path:base in
   let answer = Health.keeper_memory_health_row_http_json ~base_path:base ~keeper:"solo" in
   Alcotest.(check string) "the row answer names the fleet schema"
-    "keeper.memory_os.current_health.v8" (string_field "schema" answer);
+    "keeper.memory_os.current_health.v9" (string_field "schema" answer);
   Alcotest.(check bool) "the row is the fleet's row for the Keeper" true
     (Yojson.Safe.equal (keeper_obj "solo" fleet) (member "keeper" answer));
   let row_of keeper =

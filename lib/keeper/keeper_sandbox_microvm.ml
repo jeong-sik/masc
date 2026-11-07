@@ -223,6 +223,14 @@ let policy_network_name ~keeper_name =
     Printf.sprintf "%s%s-%s" policy_network_prefix kept digest)
 ;;
 
+let boot_plan_network ~keeper_name (mode : Keeper_types_profile_sandbox.network_mode) =
+  match mode with
+  | Keeper_types_profile_sandbox.Network_none -> Keeper_microvm_boot_plan.Network_none
+  | Keeper_types_profile_sandbox.Network_inherit -> Keeper_microvm_boot_plan.Network_inherit
+  | Keeper_types_profile_sandbox.Network_policy ->
+    Keeper_microvm_boot_plan.Network_policy {name = policy_network_name ~keeper_name}
+;;
+
 (* The proxy a policy guest is pointed at: the gateway it sees the host at,
    and the port that keeper's listener bound. Both are discovered at boot --
    the gateway from the network, the port from the listener -- so neither is
@@ -296,13 +304,7 @@ let network_args_for
   =
   match (backend : Backend.t) with
   | Backend.Apple_container ->
-    let network = match mode with
-      | Keeper_types_profile_sandbox.Network_none -> Keeper_microvm_boot_plan.Network_none
-      | Keeper_types_profile_sandbox.Network_inherit -> Keeper_microvm_boot_plan.Network_inherit
-      | Keeper_types_profile_sandbox.Network_policy ->
-        Keeper_microvm_boot_plan.Network_policy {name = policy_network_name ~keeper_name}
-    in
-    apple_network_args ~dns ~policy_proxy network
+    apple_network_args ~dns ~policy_proxy (boot_plan_network ~keeper_name mode)
   | Backend.Nerdctl_kata ->
     (match mode with
      | Keeper_types_profile_sandbox.Network_none -> Ok [ "--network"; "none" ]

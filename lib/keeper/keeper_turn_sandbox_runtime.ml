@@ -1792,11 +1792,7 @@ let requested_apple_plan (t : t) ~delivery ~image ~guest_size ~identity_host_dir
   let config_mount = match config_mount with
     | None -> []
     | Some (source, destination) -> [Plan.Host_dir {source; destination; read_only=true}] in
-  let network = match t.network_mode with
-    | Keeper_types_profile_sandbox.Network_none -> Plan.Network_none
-    | Keeper_types_profile_sandbox.Network_inherit -> Plan.Network_inherit
-    | Keeper_types_profile_sandbox.Network_policy ->
-      Plan.Network_policy {name=Keeper_sandbox_microvm.policy_network_name ~keeper_name:t.meta.name} in
+  let network = Keeper_sandbox_microvm.boot_plan_network ~keeper_name:t.meta.name t.network_mode in
   let exec_plan =
     { Plan.image; guest_size; user=Printf.sprintf "%d:%d" t.uid t.gid
     ; working_directory=Keeper_sandbox_microvm.work_volume_guest_root

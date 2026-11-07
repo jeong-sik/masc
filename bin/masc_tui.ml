@@ -16395,9 +16395,10 @@ let reconcile_system_log_stream state ~mailbox =
 
 (* The reads on the wire that the pages tell the reader about: the facts each
    page hands [page_unread_note_while], and the sources the status line names.
-   A read the loop starts after this iteration's frame was chosen is not on
-   that frame, and nothing else asks for a frame until an answer or a key
-   arrives, so the page kept saying "press r" while its read ran. The loop
+   An iteration starts its reads, then handles the key, then draws. The key
+   that opens a page is drawn before that page's first read starts, and the
+   read starts on the next iteration, which draws nothing until an answer or a
+   key arrives. The page kept saying "press r" while its read ran. The loop
    compares this around its launches and asks for a frame when it moved. *)
 let reads_in_flight (state : state) =
   ( ( state.clients_surface_inflight

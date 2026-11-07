@@ -1,7 +1,7 @@
 (** Lock-free atomic update helpers built on [Atomic.compare_and_set].
 
     Consolidates the CAS-loop pattern shared by current lock-free state owners
-    such as [Sse] and [Cache_eio].
+    such as [Sse].
 
     @since 0.11.x *)
 

@@ -814,8 +814,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
            (* SSE replay-buffer eviction is periodic housekeeping; failed
                sends and stale connection reaping remain visible elsewhere. *)
            Log.Server.routine "Evicted %d expired SSE buffer events" evicted_events;
-         let evicted = Cache_eio.evict_expired (Mcp_server.workspace_config state) in
-         if evicted > 0 then Log.Server.info "Cache: evicted %d expired entries" evicted;
          let sse_guards_reaped = Server_mcp_transport_http_conn.reap_stale_guards () in
          let http_guards_reaped = Server_mcp_transport_http.reap_stale_guards () in
          let is_active sid =

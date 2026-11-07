@@ -20,7 +20,6 @@
   test_dashboard_coverage
   test_rate_limit_coverage
   test_session_coverage
-  test_cache_eio_coverage
   test_run_eio_coverage
   test_mcp_server_eio_coverage
   test_http_server_eio_coverage
@@ -58,7 +57,6 @@
   test_dashboard_coverage
   test_rate_limit_coverage
   test_session_coverage
-  test_cache_eio_coverage
   test_run_eio_coverage
   test_mcp_server_eio_coverage
   test_http_server_eio_coverage

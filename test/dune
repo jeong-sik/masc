@@ -1854,7 +1854,6 @@
   test_board_explicit_writes
   test_keeper_path_check_error
   test_agent_core_adapters
-  test_cache_eio
   test_metrics_store_eio
   test_planning_eio
   test_safe_ops
@@ -1997,7 +1996,6 @@
   test_board_explicit_writes
   test_keeper_path_check_error
   test_agent_core_adapters
-  test_cache_eio
   test_metrics_store_eio
   test_planning_eio
   test_safe_ops

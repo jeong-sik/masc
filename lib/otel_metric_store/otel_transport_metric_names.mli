@@ -117,10 +117,9 @@ val metric_dashboard_snapshot_latency_seconds_bucket : string
 val metric_dashboard_metric_all_zeros : string
 
 (** PR-0.2.A (RFC 2026-04-masc-ide-strategy): cache lookup hit/miss
-    counters. Labels: [cache] with values
-    - ["eio"]      - [Cache_eio.get] (filesystem-backed key/value cache).
-    - ["dashboard"] - [Dashboard_cache.get_or_compute] (in-memory
-                     stale-while-revalidate cache for dashboard responses).
+    counters. Labels: [cache] with the value
+    ["dashboard"] - [Dashboard_cache.get_or_compute] (in-memory
+    stale-while-revalidate cache for dashboard responses).
     Operator query: [hit_ratio = hits / (hits + misses)] per [cache] label
     quantifies cache effectiveness. Pure observation - registering or
     incrementing these counters never changes cache logic. *)

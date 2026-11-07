@@ -405,7 +405,25 @@ let trust_policy () =
   | Error error ->
     fail (Server_request_authority.trust_policy_error_to_string error)
 
-let graphql_body = {|{"query":"{ status { project paused } }"}|}
+(* The shared transport streams a 200 reply as SSE when the request accepts
+   text/event-stream, as it does on HTTP/1.1; the reply is the last message. *)
+let json_of_reply body =
+  if String.starts_with ~prefix:"retry:" body
+  then (
+    match
+      List.rev
+        (List.filter_map
+           (fun line ->
+             if String.starts_with ~prefix:"data: " line
+             then Some (String.sub line 6 (String.length line - 6))
+             else None)
+           (String.split_on_char '\n' body))
+    with
+    | [] -> fail "SSE reply carried no data line"
+    | last :: _ -> Yojson.Safe.from_string last)
+  else Yojson.Safe.from_string body
+
+let graphql_body = {|{"query":"{ status { project } }"}|}
 
 (* A workspace whose auth config requires a token, published as the running
    server's state, and the H2 gateway's own request handler serving it. *)
@@ -661,7 +679,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
   let non_public_reply = await_reply session pending in
   check int "non-public tool retains its tool-level response" 200 non_public_reply.status;
   check (option string) "non-public tool has no OAuth scope challenge" None !non_public_challenge;
-  let non_public_response = Yojson.Safe.from_string non_public_reply.body in
+  let non_public_response = json_of_reply non_public_reply.body in
   check bool "non-public refusal keeps the request id" true
     Yojson.Safe.Util.(non_public_response |> member "id" = `Int 20);
   check bool "non-public tool reports a permission failure" true
@@ -767,7 +785,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
   let reply = await_reply public_session pending in
   check (option string) "public listener does not advertise unavailable OAuth" None !challenge;
   check int "public listener retains the tool-level response" 200 reply.status;
-  let response = Yojson.Safe.from_string reply.body in
+  let response = json_of_reply reply.body in
   check bool "public listener refusal echoes the request id" true
     Yojson.Safe.Util.(response |> member "id" = `Int 19);
   check bool "public listener retains the permission refusal" true

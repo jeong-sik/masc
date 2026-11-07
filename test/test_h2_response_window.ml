@@ -60,9 +60,9 @@ let transfer lane next_write report_write read =
 let exchange ?error_handler
     ?(capacity=H2_response_limits.default_max_pending_bytes) ~handler target =
   Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->
-  let resources=Server_h2_response_resources.create
+  let resources=Masc.Http_h2_response_ledger.create
     ~max_pending_bytes:capacity in
-  Server_h2_response_resources.with_request resources ~sw (fun () ->
+  Masc.Http_h2_response_ledger.with_request resources ~sw (fun () ->
   let status = ref None in
   let headers = ref H2.Headers.empty in
   let body = Buffer.create response_size in

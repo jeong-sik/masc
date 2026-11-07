@@ -4897,7 +4897,7 @@ let tools_h2_wire_response ~handler ~headers target =
    cache keeps as a computed page. *)
 let test_h2_cached_payload_timeout_is_504 () =
   with_test_env @@ fun ~env:_ ~sw ~config:_ ->
-  let resources=Server_h2_response_resources.create
+  let resources=Masc.Http_h2_response_ledger.create
     ~max_pending_bytes:H2_response_limits.default_max_pending_bytes in
   let payload origin json =
     { Dashboard_cache.json
@@ -4908,7 +4908,7 @@ let test_h2_cached_payload_timeout_is_504 () =
     }
   in
   let read payload =
-    Server_h2_response_resources.with_request resources ~sw (fun () ->
+    Masc.Http_h2_response_ledger.with_request resources ~sw (fun () ->
     tools_h2_wire_response
       ~handler:(fun reqd ->
         Server_h2_gateway_helpers.h2_respond_cached_payload reqd payload)

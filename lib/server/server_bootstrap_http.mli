@@ -83,7 +83,7 @@ val serve :
 
 val serve_h2_connection :
   ?streams:Server_h2_stream_registry.t ->
-  ?resources:Server_h2_response_resources.t ->
+  ?resources:Http_h2_response_ledger.t ->
   sw:Eio.Switch.t ->
   h2_request_handler:(request_sw:Eio.Switch.t -> Eio.Net.Sockaddr.stream -> H2.Reqd.t -> unit) ->
   h2_error_handler:

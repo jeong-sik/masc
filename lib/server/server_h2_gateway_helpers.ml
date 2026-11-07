@@ -1,5 +1,5 @@
 let dispatch_request ~sw reqd work =
-  let context = Server_h2_response_resources.current () in
+  let context = Http_h2_response_ledger.current () in
   Eio.Fiber.fork_daemon ~sw (fun () ->
     (* fork starts its child immediately. Return to h2's parser before any
        request computation, pool wait, or response mutation starts. *)
@@ -10,7 +10,7 @@ let dispatch_request ~sw reqd work =
       | exn -> H2.Reqd.report_exn reqd exn
     in
     (match context with
-     | Some context -> Server_h2_response_resources.with_current context run
+     | Some context -> Http_h2_response_ledger.with_current context run
      | None -> run ());
     `Stop_daemon)
 
@@ -54,8 +54,8 @@ let h2_respond_body
     body =
   H2.Body.Reader.discard (H2.Reqd.request_body h2_reqd);
   let final_body, compression_headers = maybe_compress ~compress h2_reqd body in
-  match Server_h2_response_resources.reserve
-    (Server_h2_response_resources.current_exn ()) ~bytes:(String.length final_body) with
+  match Http_h2_response_ledger.reserve
+    (Http_h2_response_ledger.current_exn ()) ~bytes:(String.length final_body) with
   | Error (Capacity_exhausted | Request_closed) ->
     let extra_headers = List.filter (fun (name,_) ->
       match String.lowercase_ascii name with
@@ -75,9 +75,9 @@ let h2_respond_body
   let response = H2.Response.create ~headers status in
   (try
      let writer = H2.Reqd.respond_with_streaming ~flush_headers_immediately:true h2_reqd response in
-     Server_h2_response_resources.write_reserved lease writer final_body;
+     Http_h2_response_ledger.write_reserved lease writer final_body;
      h2_close_after_flush writer
-   with exn -> Server_h2_response_resources.release lease; raise exn)
+   with exn -> Http_h2_response_ledger.release lease; raise exn)
 
 let h2_respond_json_string ?status ?extra_headers ?(compress = true) h2_reqd body =
   h2_respond_body
@@ -167,8 +167,8 @@ let h2_respond_empty ?(status = `No_content) ?(extra_headers = []) h2_reqd =
 
 let h2_read_body_with_limit ~sw ~max_bytes ~on_too_large ~on_bad_request
     h2_reqd callback =
-  let context = Server_h2_response_resources.current_exn () in
-  let dispatch work = Server_h2_response_resources.with_current context
+  let context = Http_h2_response_ledger.current_exn () in
+  let dispatch work = Http_h2_response_ledger.with_current context
     (fun () -> dispatch_request ~sw h2_reqd work) in
   let body = H2.Reqd.request_body h2_reqd in
   let reject respond =

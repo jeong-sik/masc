@@ -675,7 +675,7 @@ let all =
       ~exposure:(Toml_only "transport.h2_max_pending_response_bytes")
       ~value_kind:Integer
       ~default:(display_int H2_response_limits.default_max_pending_bytes)
-      ~consumers:["Server_h2_response_resources listener payload admission"]
+      ~consumers:["Http_h2_response_ledger listener payload admission"]
       ~category:Transport
       "Maximum retained application response payload bytes across one listener"
   ; setting

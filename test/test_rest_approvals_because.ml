@@ -11,7 +11,7 @@ let approvals_response ~state =
         Server_routes_http_keeper_control.handle_keeper_tool_approvals_list
           state
           (Httpun.Reqd.request reqd)
-          reqd)
+          (Http_reqd.of_httpun reqd))
   in
   let request = "GET /api/v1/keepers/tool-approvals HTTP/1.1\r\nHost: x\r\n\r\n" in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length request) request in

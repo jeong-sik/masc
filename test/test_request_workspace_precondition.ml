@@ -280,6 +280,7 @@ let http1_exchange ~env:_ headers =
   let connection =
     Httpun.Server_connection.create (fun reqd ->
       let request = Httpun.Reqd.request reqd in
+      let reqd = Http_reqd.of_httpun reqd in
       Guard.guard_http1 ~path:(Http.Request.path request) request reqd ~admitted:(fun () ->
         Http.Response.json_value ~status:`Not_found (`Assoc [ "routed", `Bool true ]) reqd))
   in

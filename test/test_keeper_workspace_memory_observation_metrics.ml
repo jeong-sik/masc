@@ -16,7 +16,9 @@ let available ~claim_count briefing =
     ; claim_count
     ; conflict_count = 0
     ; classified_count = 0
+    ; excluded_count = 0
     ; briefing
+    ; building = Ok None
     }
 
 (* Both gauges are workspace values, so each is one unlabeled series. *)

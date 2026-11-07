@@ -58,7 +58,7 @@ let observe ~sources ~contract t =
 let input batch = batch.input
 let rendered_prompt batch = batch.rendered_prompt
 let selected_count batch = List.length batch.selected
-let remaining_count batch = List.length batch.remaining
+let remaining_count (batch : batch) = List.length batch.remaining
 let prepared_state batch = batch.state
 let batch_contract batch = match batch.state.building with
   | Some building -> Ok building.contract

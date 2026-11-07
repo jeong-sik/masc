@@ -2484,7 +2484,7 @@ let add_routes ~sw ~clock router =
              let cache_key = "workspace_memory_inventory:" ^ base_path in
              respond_cached_read ~request:req ~reqd ~cache_key ~ttl:standard_cache_ttl_s
                (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-                 match Workspace_memory_ledger_view.inventory ~base_path with
+                 match Workspace_memory_ledger_view.inventory ~base_path () with
                  | Ok json -> json
                  | Error detail -> `Assoc [ "error", `String detail ])))
   |> Server_route.get (Server_route.Permission Masc_domain.CanReadState) "/api/v1/dashboard/workspace-memory-context" (fun state req reqd ->

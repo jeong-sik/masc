@@ -370,7 +370,9 @@ type observation =
       ; claim_count : int
       ; conflict_count : int
       ; classified_count : int
+      ; excluded_count : int
       ; briefing : (Workspace_memory_briefing.observation, string) result
+      ; building : (Workspace_memory_briefing.pass option, string) result
       }
 
 let observe ~base_path =

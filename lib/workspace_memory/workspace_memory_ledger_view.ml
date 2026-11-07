@@ -144,7 +144,7 @@ let briefing_fields = function
 
 let schema = "workspace.memory.inventory.v1"
 
-let observation ?(now = Unix.gettimeofday ()) ~include_briefing ~base_path =
+let observation ?(now = Unix.gettimeofday ()) ~include_briefing ~base_path () =
   match Ledger.observe ~base_path with
   | Ledger.Missing ->
     Ok
@@ -187,8 +187,8 @@ let observation ?(now = Unix.gettimeofday ()) ~include_briefing ~base_path =
         ])
 ;;
 
-let inventory ?now ~base_path = observation ?now ~include_briefing:false ~base_path
-let briefing ?now ~base_path = observation ?now ~include_briefing:true ~base_path
+let inventory ?now ~base_path () = observation ?now ~include_briefing:false ~base_path ()
+let briefing ?now ~base_path () = observation ?now ~include_briefing:true ~base_path ()
 
 let ranking_failure_logged = Atomic.make false
 

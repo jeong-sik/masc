@@ -7,10 +7,10 @@ val summary : base_path:string -> (Yojson.Safe.t, string) result
 (** Claim/conflict summaries with member fact references only. No original
     bodies or workspace-sized fact array is returned. *)
 
-val inventory : ?now:float -> base_path:string -> (Yojson.Safe.t, string) result
+val inventory : ?now:float -> base_path:string -> unit -> (Yojson.Safe.t, string) result
 (** Availability, counts and briefing freshness, without memory bodies. *)
 
-val briefing : ?now:float -> base_path:string -> (Yojson.Safe.t, string) result
+val briefing : ?now:float -> base_path:string -> unit -> (Yojson.Safe.t, string) result
 (** Explicitly retrieve the shared briefing with its freshness status. *)
 
 val search : base_path:string -> query:string -> limit:int -> (Yojson.Safe.t, string) result

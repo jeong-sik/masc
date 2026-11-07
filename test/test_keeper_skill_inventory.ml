@@ -445,6 +445,12 @@ let test_lane_addon_surface_binds_incarnation_and_deny () =
     (Surface.find_descriptor_by_name denied "machine_screen" = None);
   check bool "denied export retains reason" true
     (Surface.tool_row_availability_for_name denied "machine_screen" = Some Surface.Denied_by_profile);
+  check (list string) "the inventory files the denied export under its reason"
+    [ "machine_screen" ]
+    Yojson.Safe.Util.(
+      Surface.inventory_to_yojson denied
+      |> member "tools" |> member "denied_by_profile" |> to_list
+      |> List.map (fun row -> row |> member "name" |> to_string));
   let replacement = capability_surface ~lane_addon_exports:[export "replacement"] frozen in
   check bool "replacement changes frozen surface digest" false
     (String.equal (Surface.digest surface) (Surface.digest replacement));
@@ -1013,7 +1019,14 @@ let test_composition_follows_node_tool_admission () =
   let row = Masc.Keeper_capability_surface.skill_capability_to_yojson capability in
   check (list string) "operator row carries the node tools"
     [ "keeper_lane_status" ]
-    Yojson.Safe.Util.(row |> member "outside_node_tools" |> to_list |> filter_string)
+    Yojson.Safe.Util.(row |> member "outside_node_tools" |> to_list |> filter_string);
+  check (list string) "the inventory row of the withheld composition carries the node tools"
+    [ "keeper_lane_status" ]
+    Yojson.Safe.Util.(
+      Masc.Keeper_capability_surface.inventory_to_yojson withheld
+      |> member "skills" |> member "node_tools_outside_surface" |> to_list
+      |> List.concat_map (fun skill ->
+        skill |> member "outside_node_tools" |> to_list |> filter_string))
 ;;
 
 let test_surface_digest_binds_exact_tool_reference () =

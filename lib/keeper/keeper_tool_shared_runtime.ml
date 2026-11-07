@@ -435,41 +435,13 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
        ])
 ;;
 
+(* The full rows of a 203 Tool and 52 Skill surface were 292,804 bytes, above
+   every lane's inline ceiling (16,384 to 65,536), so all 53 calls between
+   2026-11-06T09:52Z and 11-07T09:52Z reached the model as a blob marker and a
+   200 character preview. The inventory lists names and availability, 9,888
+   bytes for the same surface. *)
 let keeper_tools_list_json_for_surface ~capability_surface =
-  let descriptors = Keeper_capability_surface.descriptors capability_surface in
-  let active_name_set, _ = active_descriptor_names_for_descriptors descriptors in
-  let descriptor_surface =
-    Keeper_capability_surface.tool_capabilities capability_surface
-    |> List.map (fun (capability : Keeper_capability_surface.tool_capability) ->
-      `Assoc
-        (Keeper_tool_descriptor.discovery_fields capability.descriptor
-         @ [ ( "active_names"
-             , Json_util.json_string_list
-                 (descriptor_active_names active_name_set capability.descriptor) )
-           ; ( "availability"
-             , `String
-                 (Keeper_capability_surface.capability_availability_to_string
-                    capability.availability) )
-           ]
-         @ Keeper_capability_surface.availability_detail_fields
-             capability.availability))
-  in
-  let skills =
-    Keeper_capability_surface.skill_capabilities capability_surface
-    |> List.map Keeper_capability_surface.skill_capability_to_yojson
-  in
-  Yojson.Safe.to_string
-    (`Assoc
-       [ "schema", `String "masc.keeper.capability_surface.v1"
-          ; ( "skill_snapshot_revision"
-            , `String
-                (Keeper_capability_surface.skill_snapshot_revision capability_surface
-                 |> Skill_catalog_snapshot.snapshot_revision_to_string) )
-          ; ( "surface_digest"
-            , `String (Keeper_capability_surface.digest capability_surface) )
-       ; "descriptor_surface", `List descriptor_surface
-       ; "skills", `List skills
-       ])
+  Yojson.Safe.to_string (Keeper_capability_surface.inventory_to_yojson capability_surface)
 ;;
 
 let keeper_capability_search_json_for_surface ~capability_surface ~query =

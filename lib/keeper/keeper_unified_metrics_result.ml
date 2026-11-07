@@ -165,9 +165,9 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
               else "unified:text_response")
            else
              (* A successful reactive cycle supersedes a prior typed proactive
-                error. [last_reason] remains display detail only. *)
+                error or rest. [last_reason] remains display detail only. *)
              match rt.proactive_rt.last_outcome with
-             | Proactive_error -> "unified:reactive_success"
+             | Proactive_error | Proactive_rested -> "unified:reactive_success"
              | Proactive_never_started
              | Proactive_unknown
              | Proactive_silent

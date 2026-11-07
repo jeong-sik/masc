@@ -94,18 +94,41 @@ type session_mode =
   | Start
   | Resume of { session_id : string }
 
-type rate_limit_status =
-  | Allowed
-  | Allowed_warning
-  | Rejected
+(** A rate-limit window a [rate_limit_event] spoke for: the event's
+    [rateLimitType], or [Unnamed_window] when the event named none. Every
+    event without a name speaks for the same unnamed window. *)
+type rate_limit_window =
+  | Named_window of string
+  | Unnamed_window
 
-type rate_limit =
-  { status : rate_limit_status
-  ; rate_limit_type : string option
-  ; resets_at : int option
-  ; overage_status : string option
-  ; overage_disabled_reason : string option
-  }
+(** Why the client blocked a turn, read once from the turn's rate-limit
+    events so that no consumer reads an event's status itself.
+
+    A turn is blocked only when it ended in a rate-limit refusal: the result
+    frame reports a 429, or the last rate-limit event of the turn was
+    [rejected]. Any other turn ends as its result frame says, even while an
+    earlier window is still [rejected]: a success completes and an overflow
+    is an overflow.
+
+    A blocked turn reads each window by the last event the turn saw for it.
+    - [Quota_spent]: at least one window's last event was [rejected], so
+      the account's window is used up. [resets_at] is the latest reset
+      among the rejected windows, when all of them are open again, and
+      [None] when any of them stated no reset. [windows] lists every
+      rejected window, the unnamed one included, named ones first in name
+      order.
+    - [Rate_throttled]: the client reported a 429 and no window's last
+      event was [rejected]. Nothing states how long it lasts. *)
+type quota_block =
+  | Quota_spent of
+      { resets_at : int option
+      ; windows : rate_limit_window list
+      }
+  | Rate_throttled
+
+val quota_windows_label : rate_limit_window list -> string
+(** The windows of a [Quota_spent] as one word for a log or report line:
+    each name, [unnamed] for {!Unnamed_window}, joined with [+]. *)
 
 (** Input side of one provider request, read from an assistant frame, in
     the same exclusive wire convention as {!turn_usage}. The frame's
@@ -155,7 +178,6 @@ type turn_result =
   ; text : string
   ; dynamic_tool_calls : int
   ; subscription : subscription
-  ; rate_limit : rate_limit option
   ; resumed : bool
   ; usage : observed_usage
   }
@@ -461,7 +483,7 @@ type error =
       }
   | Quota_blocked of
       { api_error_status : int option
-      ; rate_limit : rate_limit option
+      ; block : quota_block
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }

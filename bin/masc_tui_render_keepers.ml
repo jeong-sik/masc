@@ -1157,6 +1157,7 @@ let proactive_outcome_word = function
   | Masc.Keeper_meta_contract.Proactive_tool_use -> "used tools"
   | Masc.Keeper_meta_contract.Proactive_mixed_response -> "text and tools"
   | Masc.Keeper_meta_contract.Proactive_error -> "error"
+  | Masc.Keeper_meta_contract.Proactive_rested -> "rested on a provider quota"
 
 (* The Terminal tab: a Keeper's Execute output as a terminal draws it, oldest
    row first. [terminal_rows] scroll; [terminal_status] is the row under them

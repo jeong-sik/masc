@@ -270,6 +270,36 @@ val next_dispatch_after_failure :
   deferred_runtime_lane option ->
   next_dispatch option
 
+(** A Keeper resting on a provider's own dated quota refusal: no dispatch
+    until [release_at], and [waiting_on] names the runtime or assignment whose
+    release that is. [basis] is the wait's evidence, as in
+    {!next_dispatch}. *)
+type provider_rest =
+  { release_at : float
+  ; waiting_on : string
+  ; basis : wait_basis
+  }
+
+val provider_rest_of_failure :
+  now:float ->
+  route:Keeper_runtime_failure_route.route ->
+  assignment_id:string ->
+  deferred_runtime_lane option ->
+  provider_rest option
+(** [Some] when the failed turn's route is
+    [Retry_after_observed { retry_class = Hard_quota; retry_after }] with a
+    usable [retry_after]
+    ({!Keeper_runtime_failure_route.usable_retry_after}), and
+    {!next_dispatch_after_failure} waits. The rest carries that wait.
+
+    [None] for a quota refusal with no stated time (an account out of
+    credit needs an operator), for every other retry class, rotation and
+    terminal class, and when the next dispatch does not wait. [Rate_limited]
+    is [None] too: a throttle that keeps stating a short wait would rest the
+    Keeper forever with no failure on record (#31958). An attempt that
+    attempted a tool effect, or could not observe one, is fenced and routes
+    as [Exhausted_visible_alive], so it is [None]. *)
+
 val equal_deferred_runtime_lane :
   deferred_runtime_lane -> deferred_runtime_lane -> bool
 

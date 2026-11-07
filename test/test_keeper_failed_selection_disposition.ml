@@ -41,6 +41,20 @@ let failed_outcome ?deferred_runtime_lane route =
     }
 ;;
 
+(* A provider's dated quota refusal: the turn neither finished nor failed,
+   and the input it carried waits for the turn after the rest. *)
+let rested_outcome meta =
+  Cycle.Rested
+    { meta
+    ; rest =
+        { Masc.Keeper_turn_driver.release_at = 1060.0
+        ; waiting_on = "lane-a"
+        ; basis = Masc.Keeper_turn_driver.Failure_response
+        }
+    ; deferred_runtime_lane = None
+    }
+;;
+
 let deferred_lane =
   Masc.Keeper_turn_driver.For_testing.make_deferred_runtime_lane
     ~assignment_id:"assignment-1"
@@ -397,12 +411,39 @@ let test_recorded_settlement_follows_the_batch_disposition () =
        | Loop.Continuation_unsettled -> ()
        | Loop.Continuation_settled_recorded | Loop.Continuation_settled_failed _ ->
          fail "an unfinished turn settled the continuation")
-    [ None; Some (Cycle.Input_required meta); Some (Cycle.Cancelled meta); Some (Cycle.Skipped meta) ]
+    [ None
+    ; Some (Cycle.Input_required meta)
+    ; Some (Cycle.Cancelled meta)
+    ; Some (Cycle.Skipped meta)
+    ; Some (rested_outcome meta)
+    ]
+;;
+
+(* A rested cycle sleeps until the release its rest names, with the same
+   evidence basis; the heartbeat does not decide the wait again. *)
+let test_rested_cycle_waits_for_its_rest () =
+  match Loop.after_failure_of_cycle_outcome ~now (Some (rested_outcome (test_meta ()))) with
+  | Some
+      (Loop.Wait_for_path_release
+         { release_at; waiting_on; basis = Masc.Keeper_turn_driver.Failure_response }) ->
+    check (float 0.001) "the wait ends at the rest's release" 1060.0 release_at;
+    check string "the wait names the resting path" "lane-a" waiting_on
+  | Some
+      (Loop.Wait_for_path_release
+         { basis = Masc.Keeper_turn_driver.Observed_path_rest; release_at = _; waiting_on = _ }) ->
+    fail "the rest's evidence basis was replaced"
+  | Some (Loop.Continue_on_deferred_lane _) | None ->
+    fail "a rested cycle did not wait for its rest"
 ;;
 
 let test_nonterminal_outcomes_preserve_batch () =
   let meta = test_meta () in
-  [ None; Some (Cycle.Input_required meta); Some (Cycle.Cancelled meta); Some (Cycle.Skipped meta) ]
+  [ None
+  ; Some (Cycle.Input_required meta)
+  ; Some (Cycle.Cancelled meta)
+  ; Some (Cycle.Skipped meta)
+  ; Some (rested_outcome meta)
+  ]
   |> List.iter (fun outcome ->
     match Loop.batch_disposition_of_cycle_outcome outcome with
     | Loop.Batch_no_action -> ()
@@ -450,6 +491,10 @@ let () =
             "nonterminal outcomes leave the batch pending"
             `Quick
             test_nonterminal_outcomes_preserve_batch
+        ; test_case
+            "a rested cycle waits for its rest"
+            `Quick
+            test_rested_cycle_waits_for_its_rest
         ; test_case
             "durable-stimulus yield advances the admitted batch"
             `Quick

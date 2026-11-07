@@ -521,6 +521,17 @@ let prepare_antigravity_panel_home ~runtime_root ~oauth_source =
   Ok (home, cwd)
 ;;
 
+(* A spent window is the account's, until the reset it states. A throttle
+   belongs to the dispatched candidate only, and states no wait, the same
+   observation a Codex rate refusal makes. *)
+let claude_quota_standing : Runtime_claude_code.quota_block -> Runtime_candidate_standing.observation
+  = function
+  | Runtime_claude_code.Quota_spent { resets_at; windows = _ } ->
+    Runtime_candidate_standing.Hard_quota { resets_at = Option.map float_of_int resets_at }
+  | Runtime_claude_code.Rate_throttled ->
+    Runtime_candidate_standing.Rate_limited { retry_after = None }
+;;
+
 let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runtime_instance.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
   let open Result.Syntax in
   (* The Codex and Claude adapters take the system prompt as an option and
@@ -546,10 +557,8 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
   in
   let claude_failed ~admission error =
     (match error with
-     | Runtime_claude_code.Quota_blocked { rate_limit; _ } ->
-       let resets_at = Option.bind rate_limit
-         (fun limit -> Option.map float_of_int limit.Runtime_claude_code.resets_at) in
-       observe (Runtime_candidate_standing.Hard_quota {resets_at})
+     | Runtime_claude_code.Quota_blocked { block; _ } ->
+       observe (claude_quota_standing block)
      | Runtime_claude_code.Invalid_config _ | Runtime_claude_code.Spawn_failed _
      | Runtime_claude_code.Protocol_error _ | Runtime_claude_code.Subscription_required _
      | Runtime_claude_code.Unsupported_control_request _
@@ -830,4 +839,5 @@ module For_testing = struct
   let claude_usage = claude_usage
   let codex_usage = codex_usage
   let antigravity_panel_root_owner_pid = antigravity_panel_root_owner_pid
+  let claude_quota_standing = claude_quota_standing
 end

@@ -16,6 +16,10 @@ type proactive_cycle_outcome =
   | Proactive_tool_use
   | Proactive_mixed_response
   | Proactive_error
+  | Proactive_rested
+      (** The provider refused on its own quota and stated when it resets, so
+          the cycle rests until then; not a failure
+          (RFC-turn-failure-visible-stop §2.4). *)
 (** Outcome variants for a single proactive (autonomous) cycle. *)
 
 (** {1 Runtime state types} *)
@@ -226,7 +230,7 @@ val proactive_cycle_outcome_to_string :
   proactive_cycle_outcome -> string
 (** Canonical lowercase labels: ["never_started"], ["unknown"],
     ["silent"], ["text_response"], ["tool_use"],
-    ["mixed_response"], ["error"]. *)
+    ["mixed_response"], ["error"], ["rested"]. *)
 
 val proactive_cycle_outcome_of_string :
   string -> proactive_cycle_outcome option

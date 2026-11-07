@@ -1369,7 +1369,11 @@ let test_quota_is_structurally_classified () =
     | Error
         (Runtime_claude_code.Quota_blocked
           { api_error_status = Some 429
-          ; rate_limit = Some { status = Runtime_claude_code.Rejected; _ }
+          ; block =
+              Runtime_claude_code.Quota_spent
+                { resets_at = Some 1786356000
+                ; windows = [ Runtime_claude_code.Named_window "seven_day" ]
+                }
           ; tool_effect_attempted = false
           ; response_emitted = false
           }) -> ()
@@ -1479,12 +1483,190 @@ let test_rejected_rate_limit_overrides_success_flag () =
     | Error
         (Runtime_claude_code.Quota_blocked
           { api_error_status = None
-          ; rate_limit = Some { status = Runtime_claude_code.Rejected; _ }
+          ; block = Runtime_claude_code.Quota_spent _
           ; tool_effect_attempted = false
           ; response_emitted = false
           }) -> ()
     | Error error -> fail (Runtime_claude_code.error_to_string error)
     | Ok _ -> fail "typed quota rejection was overridden by is_error=false")
+;;
+
+(* Each rate-limit window counts by the last event the turn saw for it. An
+   event with no [window] names no rateLimitType. *)
+let rate_limit_event ~uuid ~status ?window ?resets_at () =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "type", `String "rate_limit_event"
+       ; "session_id", `String "__SESSION__"
+       ; "uuid", `String uuid
+       ; ( "rate_limit_info"
+         , `Assoc
+             ([ "status", `String status ]
+              @ (match window with
+                 | None -> []
+                 | Some window -> [ "rateLimitType", `String window ])
+              @
+              match resets_at with
+              | None -> []
+              | Some at -> [ "resetsAt", `Int at ]) )
+       ])
+;;
+
+let window_event ~uuid ~status ~window ?resets_at () =
+  rate_limit_event ~uuid ~status ~window ?resets_at ()
+;;
+
+let named = List.map (fun name -> Runtime_claude_code.Named_window name)
+
+let quota_block =
+  Alcotest.testable
+    (fun ppf -> function
+       | Runtime_claude_code.Quota_spent { resets_at; windows } ->
+         Format.fprintf ppf "spent %s until %s"
+           (Runtime_claude_code.quota_windows_label windows)
+           (Option.fold ~none:"unknown" ~some:string_of_int resets_at)
+       | Runtime_claude_code.Rate_throttled -> Format.pp_print_string ppf "throttled")
+    ( = )
+;;
+
+let block_after events =
+  with_fixture (List.map (fun event -> Emit event) events @ [ Emit quota_result ]) (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Quota_blocked { block; _ }) -> block
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "a 429 completed the turn")
+;;
+
+let five_hour_reset = 1786356000
+let seven_day_reset = 1786960800
+
+(* An allowed event's reset is when a still-open window ends. It is set after
+   every rejected reset here, so a reading that counted it would move the
+   reopening time and fail the check. *)
+let allowed_window_reset = seven_day_reset + 86_400
+
+let test_a_window_is_spent_only_while_its_last_event_is_rejected () =
+  let rejected window resets_at =
+    window_event ~uuid:("rejected-" ^ window) ~status:"rejected" ~window ~resets_at ()
+  in
+  let allowed window =
+    window_event ~uuid:("allowed-" ^ window) ~status:"allowed" ~window
+      ~resets_at:allowed_window_reset ()
+  in
+  check quota_block "a 429 with no event is a throttle" Runtime_claude_code.Rate_throttled
+    (block_after []);
+  check quota_block "a window rejected and then allowed again is not spent"
+    Runtime_claude_code.Rate_throttled
+    (block_after [ rejected "five_hour" five_hour_reset; allowed "five_hour" ]);
+  check quota_block "an allowed event of another window does not hide a rejected one"
+    (Runtime_claude_code.Quota_spent
+       { resets_at = Some seven_day_reset; windows = named [ "seven_day" ] })
+    (block_after [ rejected "seven_day" seven_day_reset; allowed "five_hour" ]);
+  List.iter
+    (fun (label, events) ->
+       check quota_block label
+         (Runtime_claude_code.Quota_spent
+            { resets_at = Some seven_day_reset; windows = named [ "five_hour"; "seven_day" ] })
+         (block_after events))
+    [ ( "two rejected windows reopen at the later reset"
+      , [ rejected "seven_day" seven_day_reset; rejected "five_hour" five_hour_reset ] )
+    ; ( "the later reset wins in either order"
+      , [ rejected "five_hour" five_hour_reset; rejected "seven_day" seven_day_reset ] )
+    ];
+  let rejected_without_reset window =
+    window_event ~uuid:("rejected-" ^ window) ~status:"rejected" ~window ()
+  in
+  List.iter
+    (fun (label, events) ->
+       check quota_block label
+         (Runtime_claude_code.Quota_spent
+            { resets_at = None; windows = named [ "five_hour"; "seven_day" ] })
+         (block_after events))
+    [ ( "a rejected window with no reset leaves the time unknown"
+      , [ rejected "five_hour" five_hour_reset; rejected_without_reset "seven_day" ] )
+    ; ( "the unknown time holds when the window with no reset came first"
+      , [ rejected_without_reset "seven_day"; rejected "five_hour" five_hour_reset ] )
+    ];
+  let unnamed ~uuid ~status =
+    rate_limit_event ~uuid ~status ~resets_at:five_hour_reset ()
+  in
+  check quota_block "events without a type speak for one window"
+    Runtime_claude_code.Rate_throttled
+    (block_after
+       [ unnamed ~uuid:"unnamed-rejected" ~status:"rejected"
+       ; unnamed ~uuid:"unnamed-allowed" ~status:"allowed"
+       ]);
+  check quota_block "a rejected window with no type is listed after the named ones"
+    (Runtime_claude_code.Quota_spent
+       { resets_at = Some seven_day_reset
+       ; windows = named [ "seven_day" ] @ [ Runtime_claude_code.Unnamed_window ]
+       })
+    (block_after
+       [ unnamed ~uuid:"unnamed-rejected" ~status:"rejected"
+       ; rejected "seven_day" seven_day_reset
+       ]);
+  check string "the label joins the windows the operator reads"
+    "seven_day+unnamed"
+    (Runtime_claude_code.quota_windows_label
+       (named [ "seven_day" ] @ [ Runtime_claude_code.Unnamed_window ]))
+;;
+
+(* A window still rejected from earlier in the turn does not decide a turn
+   whose last event allowed it: the result frame does. A last event that
+   rejected decides it, whatever the frame says. *)
+let test_the_result_frame_decides_a_turn_its_last_event_allowed () =
+  let earlier_rejection =
+    [ Emit
+        (window_event ~uuid:"rejected-seven_day" ~status:"rejected" ~window:"seven_day"
+           ~resets_at:seven_day_reset ())
+    ; Emit
+        (window_event ~uuid:"allowed-five_hour" ~status:"allowed" ~window:"five_hour"
+           ~resets_at:allowed_window_reset ())
+    ]
+  in
+  with_fixture (earlier_rejection @ [ Emit assistant; Emit result ]) (fun path ->
+    match run_fixture path with
+    | Ok turn -> check string "the answer is kept" "MASC_CLAUDE_OK" turn.text
+    | Error error -> fail (Runtime_claude_code.error_to_string error));
+  with_fixture
+    [ Emit
+        (window_event ~uuid:"rejected-seven_day" ~status:"rejected" ~window:"seven_day"
+           ~resets_at:seven_day_reset ())
+    ; Emit
+        (window_event ~uuid:"warning-five_hour" ~status:"allowed_warning" ~window:"five_hour"
+           ~resets_at:allowed_window_reset ())
+    ; Emit assistant
+    ; Emit result
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Ok turn -> check string "a warning last event keeps the answer" "MASC_CLAUDE_OK" turn.text
+       | Error error -> fail (Runtime_claude_code.error_to_string error));
+  with_fixture (earlier_rejection @ [ Emit prompt_too_long_typed_result ]) (fun path ->
+    match run_fixture path with
+    | Error (Runtime_claude_code.Context_window_exceeded _) -> ()
+    | Error error -> fail (Runtime_claude_code.error_to_string error)
+    | Ok _ -> fail "an overflow completed the turn");
+  with_fixture
+    [ Emit
+        (window_event ~uuid:"allowed-five_hour" ~status:"allowed" ~window:"five_hour"
+           ~resets_at:allowed_window_reset ())
+    ; Emit
+        (window_event ~uuid:"rejected-seven_day" ~status:"rejected" ~window:"seven_day"
+           ~resets_at:seven_day_reset ())
+    ; Emit quota_result_with_success_flag
+    ]
+    (fun path ->
+       match run_fixture path with
+       | Error
+           (Runtime_claude_code.Quota_blocked
+             { block = Runtime_claude_code.Quota_spent { resets_at; windows }; _ }) ->
+         check string "the last event's window is spent" "seven_day"
+           (Runtime_claude_code.quota_windows_label windows);
+         check (option int) "it reopens at its own reset, not the allowed window's"
+           (Some seven_day_reset) resets_at
+       | Error error -> fail (Runtime_claude_code.error_to_string error)
+       | Ok _ -> fail "a rejected last event completed the turn")
 ;;
 
 let mcp_initialize =
@@ -1581,7 +1763,9 @@ let check_quota_observation ~tool_effect_attempted ~response_emitted = function
   | Error
       (Runtime_claude_code.Quota_blocked
          { api_error_status = Some 429
-         ; rate_limit = Some { status = Rejected; resets_at = Some 1786356000; _ }
+         ; block =
+             Quota_spent
+               { resets_at = Some 1786356000; windows = [ Named_window "seven_day" ] }
          ; tool_effect_attempted = actual_effect
          ; response_emitted = actual_response
          }) ->
@@ -4732,6 +4916,10 @@ let () =
             "quota is structurally classified"
             `Quick
             test_quota_is_structurally_classified
+        ; test_case "a window is spent only while its last event is rejected" `Quick
+            test_a_window_is_spent_only_while_its_last_event_is_rejected
+        ; test_case "the result frame decides a turn its last event allowed" `Quick
+            test_the_result_frame_decides_a_turn_its_last_event_allowed
         ; test_case "quota after native tool records effect" `Quick
             test_quota_after_native_tool_records_effect
         ; test_case "quota refusal still reports the turn's spend" `Quick

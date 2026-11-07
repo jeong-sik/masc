@@ -106,6 +106,11 @@ type turn_success =
   | Turn_input_required of keeper_meta
   | Turn_cancelled of keeper_meta
   | Turn_skipped of keeper_meta
+  | Turn_rested of
+      { meta : keeper_meta
+      ; rest : Keeper_turn_driver.provider_rest
+      ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
+      }
 
 let turn_success_of_stop_reason ~meta = function
   | Runtime_agent.Completed _ -> Turn_completed { meta }
@@ -912,6 +917,23 @@ let run_keeper_cycle
                        trajectory_acc
                        (Trajectory.Failed (Agent_core.Error.to_string err));
                   let e_str = Agent_core.Error.to_string err in
+                  (* Route the failure (total over core_error). A provider's
+                     dated quota refusal whose next dispatch waits is a rest,
+                     not a turn failure: the turn-level records below keep
+                     the refusal, and the Keeper's failure accounting is left
+                     as it was. *)
+                  let failure_route =
+                    Keeper_runtime_failure_route.route_of_error
+                      ~boundary:(execution_boundary_of_turn_failure err)
+                      err
+                  in
+                  let provider_rest =
+                    Keeper_turn_driver.provider_rest_of_failure
+                      ~now:(Time_compat.now ())
+                      ~route:failure_route
+                      ~assignment_id:(Keeper_meta_contract.runtime_id_of_meta meta)
+                      turn_state.deferred_runtime_lane
+                  in
                   let is_transient = EC.is_transient_network_error err in
                   (match err with
                       | Agent_core.Error.Api (Timeout _) ->
@@ -929,7 +951,13 @@ let run_keeper_cycle
                   let is_provider_wire_error = EC.is_provider_wire_error err in
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string Turns)
-                    ~labels:[ "keeper", meta.name; "outcome", "failure" ]
+                    ~labels:
+                      [ "keeper", meta.name
+                      ; ( "outcome"
+                        , match provider_rest with
+                          | Some _ -> "rested"
+                          | None -> "failure" )
+                      ]
                     ();
                   (if EC.is_provider_timeout_error err
                    then
@@ -1009,10 +1037,19 @@ let run_keeper_cycle
                          ~turn_id:keeper_turn_id
                          ~prev:Keeper_turn_fsm.Streaming
                          (Keeper_turn_fsm.Failed fsm_failure_reason));
-                  let log_keeper_cycle_failed =
-                    if EC.should_warn_keeper_cycle_failed err
-                    then Log.Keeper.warn
-                    else Log.Keeper.error
+                  let log_keeper_cycle_end, cycle_end =
+                    match provider_rest with
+                    | Some rest ->
+                      ( Log.Keeper.info
+                      , Printf.sprintf
+                          "rested until=%.0f waiting_on=%s"
+                          rest.Keeper_turn_driver.release_at
+                          rest.Keeper_turn_driver.waiting_on )
+                    | None ->
+                      ( (if EC.should_warn_keeper_cycle_failed err
+                         then Log.Keeper.warn
+                         else Log.Keeper.error)
+                      , "FAILED" )
                   in
                   (* [final_execution.runtime_id] names the assignment this
                      cycle was budgeted under, except on a cycle that took a
@@ -1041,15 +1078,16 @@ let run_keeper_cycle
                       ~runtime_attempt_errors:turn_state.runtime_attempt_errors
                       ~lane_terminal_error:turn_state.lane_terminal_error
                   in
-                  log_keeper_cycle_failed
+                  log_keeper_cycle_end
                     ~keeper_name:meta.name
                     ~category:Log.Turn
-                    "%s: keeper cycle FAILED runtime=%s lane=%s error_origin=%s \
+                    "%s: keeper cycle %s runtime=%s lane=%s error_origin=%s \
                      attempts=%s deferred_next_runtime=%s \
                      max_context=%d context_budget=%d \
                      primary_budget=%d requested_override=%s system_and_user_bytes=%s \
                      cycle_latency=%dms%s error=%s"
                     meta.name
+                    cycle_end
                     (keeper_cycle_failed_runtime_to_string
                        runtime_attribution.reported_runtime)
                     runtime_attribution.lane_runtime_id
@@ -1079,7 +1117,10 @@ let run_keeper_cycle
                           + String.length user_message)
                      | None -> "not_sent")
                     latency_ms
-                    (if is_provider_wire_error
+                    (if Option.is_some provider_rest
+                     then " (provider-stated quota, the refused attempt had no \
+                           tool effect; not counted as a turn failure)"
+                     else if is_provider_wire_error
                     then " (provider wire error, counts toward crash threshold)"
                     else if is_server_parse_rejection
                       then " (server parse rejection, counts toward crash threshold)"
@@ -1089,16 +1130,23 @@ let run_keeper_cycle
                      then " (policy handled)"
                      else "")
                     (short_preview e_str);
-                  Otel_metric_store.inc_counter
-                    Keeper_metrics.(to_string Agent_coreExecutionErrors)
-                    ~labels:[ "keeper", meta.name; "phase", Keeper_agent_core_execution_error_phase.(to_label Cycle_failed) ]
-                    ();
+                  (match provider_rest with
+                   | Some _ -> ()
+                   | None ->
+                     Otel_metric_store.inc_counter
+                       Keeper_metrics.(to_string Agent_coreExecutionErrors)
+                       ~labels:[ "keeper", meta.name; "phase", Keeper_agent_core_execution_error_phase.(to_label Cycle_failed) ]
+                       ());
                   let updated_meta =
                     Keeper_unified_metrics.update_metrics_from_failure
                       meta
                       ~latency_ms
                       ~observation
                       ~reason:e_str
+                      ~ended:
+                        (match provider_rest with
+                         | Some _ -> Keeper_unified_metrics.Rested_cycle
+                         | None -> Keeper_unified_metrics.Failed_cycle)
                       ~core_error:err
                       ()
                   in
@@ -1129,41 +1177,15 @@ let run_keeper_cycle
                        | Dispatched_candidate runtime_id -> Some runtime_id
                        | No_candidate_dispatched -> None)
                     ();
-                  commit_turn_with_attempt_spend
-                    ~config
-                    ~keeper_turn_id
-                    ~before:meta
-                    ~attempt_spend
-                    ~settled_start
-                    updated_meta
-                  |> ignore;
-                  Otel_metric_store.inc_counter
-                    Keeper_metrics.(to_string WriteMetaCycleFailures)
-                    ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]
-                    ();
-                  (* Route the failure (total over core_error), retain the exact
-                     final execution identity, and record typed failure plus
-                     telemetry here. Exhausted failures remain visible without
-                     dispatching a second LLM call. *)
-                  let failure_route =
-                    Keeper_runtime_failure_route.route_of_error
-                      ~boundary:(execution_boundary_of_turn_failure err)
-                      err
+                  let committed =
+                    commit_turn_with_attempt_spend
+                      ~config
+                      ~keeper_turn_id
+                      ~before:meta
+                      ~attempt_spend
+                      ~settled_start
+                      updated_meta
                   in
-                  (* Every failure follows the ordinary typed route, including
-                     an incomplete tool transcript: a past structural defect is
-                     evidence, not a scheduling gate. Boot-time
-                     [Keeper_transcript_tail_recovery] closes the open cycles a
-                     process death leaves behind. Capacity failures (context
-                     overflow, request-body caps, serving-input rejection) also
-                     route here. #26545 bounds conversation history;
-                     whole-request provider fit is tracked separately in #26551. *)
-                  let source_disposition = Follow_failure_route in
-                  exact_failure_execution :=
-                    Some
-                      ( final_execution.runtime_id
-                      , failure_route
-                      , source_disposition );
                   Otel_metric_store.inc_counter
                     Keeper_metrics.(to_string FailureRoute)
                     ~labels:
@@ -1174,15 +1196,50 @@ let run_keeper_cycle
                       ; "class", Keeper_runtime_failure_route.route_class_label failure_route
                       ]
                     ();
-                  (* The Owner commit above must finish before this live
-                     observation replaces the registry's failure cause. *)
-                  Keeper_unified_turn_failure.record_failure_observation
-                    ~config
-                    ~meta
-                    ~terminal_reason
-                    ~err
-                    ~error_text:e_str
-                    ~terminal_error_origin:runtime_attribution.terminal_error_origin;
+                  let turn_result =
+                    match provider_rest with
+                    | Some rest ->
+                      (* The streak, the registry failure cause and Health
+                         stay as they were: a rest is not a failure, and not a
+                         success either. *)
+                      Ok
+                        (Turn_rested
+                           { meta = committed
+                           ; rest
+                           ; deferred_runtime_lane = turn_state.deferred_runtime_lane
+                           })
+                    | None ->
+                      Otel_metric_store.inc_counter
+                        Keeper_metrics.(to_string WriteMetaCycleFailures)
+                        ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]
+                        ();
+                      (* Every failure follows the ordinary typed route, including
+                         an incomplete tool transcript: a past structural defect is
+                         evidence, not a scheduling gate. Boot-time
+                         [Keeper_transcript_tail_recovery] closes the open cycles a
+                         process death leaves behind. Capacity failures (context
+                         overflow, request-body caps, serving-input rejection) also
+                         route here. #26545 bounds conversation history;
+                         whole-request provider fit is tracked separately in #26551.
+                         Exhausted failures remain visible without dispatching a
+                         second LLM call. *)
+                      let source_disposition = Follow_failure_route in
+                      exact_failure_execution :=
+                        Some
+                          ( final_execution.runtime_id
+                          , failure_route
+                          , source_disposition );
+                      (* The Owner commit above must finish before this live
+                         observation replaces the registry's failure cause. *)
+                      Keeper_unified_turn_failure.record_failure_observation
+                        ~config
+                        ~meta
+                        ~terminal_reason
+                        ~err
+                        ~error_text:e_str
+                        ~terminal_error_origin:runtime_attribution.terminal_error_origin;
+                      Error err
+                  in
                   (* RFC-0221 §3.4: emit turn_completed telemetry on all exit paths
                      after Agent.run() — success path emits via
                      Keeper_unified_turn_success → keeper_unified_metrics_snapshot;
@@ -1191,7 +1248,7 @@ let run_keeper_cycle
                     Keeper_metrics.(to_string TurnCompleted)
                     ~labels:[("keeper", meta.name)]
                     ();
-                  Error err, turn_state)
+                  turn_result, turn_state)
                 | Ok result ->
                   (match
                      require_last_execution_for_finalize

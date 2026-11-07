@@ -351,11 +351,23 @@ let claude_stream_callback ?on_provider_retry ?on_child_content_observation ?on_
           emit Agent_core.Types.MessageStop)
 ;;
 
-let retry_after_of_rate_limit = function
-  | None -> None
-  | Some ({ resets_at = None; _ } : Runtime_claude_code.rate_limit) -> None
-  | Some { resets_at = Some timestamp; _ } ->
-    Some (Float.max 0.0 (Float.of_int timestamp -. Time_compat.now ()))
+(* [Runtime_claude_code] has already told a spent window from a throttle.
+   A spent window waits until the reset it states; a throttle states no
+   wait. *)
+let provider_error_of_quota_block ~detail
+  : Runtime_claude_code.quota_block -> Llm_provider.Error.provider_error
+  = function
+  | Runtime_claude_code.Quota_spent { resets_at; windows = _ } ->
+    Llm_provider.Error.HardQuota
+      { provider = "claude_code"
+      ; retry_after =
+          Option.map
+            (fun timestamp -> Float.max 0.0 (Float.of_int timestamp -. Time_compat.now ()))
+            resets_at
+      ; detail
+      }
+  | Runtime_claude_code.Rate_throttled ->
+    Llm_provider.Error.RateLimit { provider = "claude_code"; retry_after = None; detail }
 ;;
 
 (* Where an unexpected exception left the Claude Code runtime; the internal
@@ -368,13 +380,11 @@ let claude_error_to_core_error = function
   | Runtime_claude_code.Subscription_required detail ->
     Agent_core.Error.Provider
       (Llm_provider.Error.AuthError { provider = "claude_code"; detail })
-  | Runtime_claude_code.Quota_blocked ({ rate_limit; _ } as blocked) ->
+  | Runtime_claude_code.Quota_blocked ({ block; _ } as blocked) ->
     Agent_core.Error.Provider
-      (Llm_provider.Error.HardQuota
-         { provider = "claude_code"
-         ; retry_after = retry_after_of_rate_limit rate_limit
-         ; detail = Runtime_claude_code.error_to_string (Quota_blocked blocked)
-         })
+      (provider_error_of_quota_block
+         ~detail:(Runtime_claude_code.error_to_string (Quota_blocked blocked))
+         block)
   (* The CLI reports these denials in a terminal result, even when its
      process subtype is [success]. Preserve the provider's HTTP distinction:
      the existing account-access route asks for operator action after the

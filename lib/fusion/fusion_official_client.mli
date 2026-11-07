@@ -47,6 +47,13 @@ module For_testing : sig
   val antigravity_panel_root_owner_pid : string -> int option
   (** Parse the decimal creator PID from a [masc-antigravity-panelist-<pid>-*]
       directory basename, or [None] for non-panelist or unattributed names. *)
+
+  val claude_quota_standing
+    :  Runtime_claude_code.quota_block
+    -> Runtime_candidate_standing.observation
+  (** What a blocked Claude Code panel turn records about its candidate: a
+      spent window is a hard quota until its stated reset, a throttle is a
+      rate limit with no stated wait. *)
 end
 
 val sweep_stale_antigravity_panel_roots : ?temp_dir:string -> unit -> unit

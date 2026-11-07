@@ -90,6 +90,10 @@ type keepalive_cycle_status =
   | Turn_cycle_interrupted
   | Turn_cycle_crashed
   | Turn_cycle_busy of Keeper_owner.autonomous_block
+  | Turn_cycle_rested
+      (** The turn ended as {!Keeper_unified_turn.Turn_rested}: the provider
+          stated when its quota resets and the refused attempt had no tool
+          effect. *)
 
 type work_heartbeat_action =
   | Refresh_work_heartbeat
@@ -99,6 +103,7 @@ type keepalive_cycle_action =
   | Defer_autonomous_work of Keeper_owner.autonomous_block
   | Skip_interrupted_turn
   | Record_turn_status of work_heartbeat_action
+  | Rest_without_turn_status
 
 val decide_keepalive_cycle_action :
   keepalive_cycle_status -> keepalive_cycle_action
@@ -106,7 +111,9 @@ val decide_keepalive_cycle_action :
     cycles record and refresh. Operator-interrupted cycles record no turn
     status and do not refresh the work-health lease. Crashed cycles record
     while preserving the existing lease, and busy cycles retain their typed
-    admission block without recording a turn. *)
+    admission block without recording a turn. Rested cycles refresh the
+    lease and dispatch neither [Turn_succeeded] nor [Turn_failed], so the
+    Keeper's phase and registry failure cause stay as they were. *)
 
 val owner_turn_rejection_cycle_status :
   Keeper_owner_registry.command_error -> keepalive_cycle_status
@@ -157,8 +164,9 @@ type keepalive_turn_outcome = {
           every entry of that batch on completion. The loop reads it to
           skip the cadence sleep while more entries are pending. *)
   after_failure : after_failure option;
-      (** What the cycle's turn failure leaves the next cycle; [None] keeps
-          the plain cadence. *)
+      (** What the cycle's turn failure or provider rest leaves the next
+          cycle; [None] keeps the plain cadence. A rested cycle carries the
+          [Wait_for_path_release] its rest names. *)
 }
 
 (** Record a swallowed keepalive-cycle exception as a turn failure:
@@ -232,9 +240,18 @@ val continuation_settlement_of_cycle_outcome :
     turn whose route satisfies {!Keeper_runtime_failure_route.response_observed}:
     the provider answered the request that carried the replay evidence, so
     the evidence is not carried into the next cycle (#32956). Every other
-    failure, and every cancelled, input-required, or skipped outcome, leaves
-    the continuation unsettled. The queue disposition of a failed turn stays
+    failure, and every cancelled, input-required, skipped, or rested outcome,
+    leaves the continuation unsettled. The queue disposition of a failed turn stays
     [Batch_no_action] either way. *)
+
+val after_failure_of_cycle_outcome :
+  now:float ->
+  Keeper_heartbeat_loop_cycle.cycle_outcome option ->
+  after_failure option
+(** What a cycle leaves the next one. A failed turn's next dispatch is decided
+    at [now] from its route ({!Keeper_turn_driver.next_dispatch_after_failure}).
+    A rested turn waits for the release its rest names, decided when the turn
+    ended. Every other outcome keeps the plain cadence ([None]). *)
 
 (** Pure: post-turn status event derived from the registry
     turn-failure counter. [turn_fail_count > 0] maps to [Turn_failed];

@@ -105,11 +105,16 @@ val update_metrics_from_result :
   Keeper_agent_run.run_result ->
   Keeper_meta_contract.keeper_meta
 
+type unanswered_end = Keeper_unified_metrics_failure.unanswered_end =
+  | Failed_cycle
+  | Rested_cycle
+
 val update_metrics_from_failure :
   Keeper_meta_contract.keeper_meta ->
   latency_ms:int ->
   observation:Keeper_world_observation.world_observation ->
   reason:string ->
+  ended:unanswered_end ->
   ?core_error:Agent_core.Error.t ->
   unit ->
   Keeper_meta_contract.keeper_meta

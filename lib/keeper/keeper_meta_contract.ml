@@ -18,6 +18,7 @@ type proactive_cycle_outcome =
   | Proactive_tool_use
   | Proactive_mixed_response
   | Proactive_error
+  | Proactive_rested
 [@@deriving enumerate]
 
 (* -- Runtime types (moved into agent_runtime_state) -- *)
@@ -433,6 +434,7 @@ let proactive_cycle_outcome_to_string = function
   | Proactive_tool_use -> "tool_use"
   | Proactive_mixed_response -> "mixed_response"
   | Proactive_error -> "error"
+  | Proactive_rested -> "rested"
 ;;
 
 (* The inverse of [proactive_cycle_outcome_to_string] over every variant, so

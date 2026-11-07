@@ -930,11 +930,13 @@ let test_operator_interrupt_skips_turn_accounting () =
        | KHL.Turn_cycle_interrupted -> ()
        | KHL.Turn_cycle_completed
        | KHL.Turn_cycle_crashed
-       | KHL.Turn_cycle_busy _ ->
+       | KHL.Turn_cycle_busy _
+       | KHL.Turn_cycle_rested ->
          fail "operator interrupt did not retain its typed cycle status");
       match KHL.decide_keepalive_cycle_action outcome.cycle_status with
       | KHL.Skip_interrupted_turn -> ()
-      | KHL.Defer_autonomous_work _ | KHL.Record_turn_status _ ->
+      | KHL.Defer_autonomous_work _ | KHL.Record_turn_status _
+      | KHL.Rest_without_turn_status ->
         fail "operator interrupt must not emit turn success or failure")
 
 (* ══════════════════════════════════════════════════════════

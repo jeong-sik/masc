@@ -186,8 +186,9 @@ let test_codex_error_info_lands_in_its_class () =
 ;;
 
 (* A Codex head out of weekly usage must reach the quota route the turn
-   driver records as candidate evidence, the same route Claude Code's
-   [Quota_blocked] takes, not the rotation that records nothing. *)
+   driver records as candidate evidence, the same route a Claude Code
+   [Quota_blocked] with a rejected rate-limit event takes, not the rotation
+   that records nothing. *)
 let test_usage_limit_routes_to_hard_quota () =
   let error =
     Map.codex_error_to_core_error

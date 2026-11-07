@@ -614,6 +614,69 @@ let next_dispatch_after_failure ~now ~route ~assignment_id deferred =
     observed_walk_rest ()
 ;;
 
+type provider_rest =
+  { release_at : float
+  ; waiting_on : string
+  ; basis : wait_basis
+  }
+
+(* The route carries every fact the rest needs. [Hard_quota] comes only from
+   the typed [PaymentRequired] and [HardQuota] constructors. An attempt whose
+   tool effect was attempted, or could not be observed, is fenced, and a
+   fenced attempt routes as [Exhausted_visible_alive] at either boundary. A
+   usable [retry_after] is the time the provider stated. The wait is the one
+   [next_dispatch_after_failure] gives, so the rest names the time the
+   heartbeat sleeps until. *)
+let provider_rest_of_failure ~now ~route ~assignment_id deferred =
+  let module Route = Keeper_runtime_failure_route in
+  let rest_of_wait () =
+    match next_dispatch_after_failure ~now ~route ~assignment_id deferred with
+    | Some (Wait_until { release_at; waiting_on; basis }) ->
+      Some { release_at; waiting_on; basis }
+    | Some (Dispatch_now _) | None -> None
+  in
+  match route with
+  | Route.Retry_after_observed { retry_class = Route.Hard_quota; retry_after } ->
+    (match Route.usable_retry_after retry_after with
+     | Some _ -> rest_of_wait ()
+     | None -> None)
+  | Route.Retry_after_observed
+      { retry_class =
+          ( Route.Rate_limited | Route.Provider_capacity | Route.Empty_completion _
+          | Route.Server_error | Route.Network_transient | Route.Provider_timeout
+          | Route.Local_admission_timeout )
+      ; retry_after = _
+      }
+  | Route.Rotate_now
+      { rotate =
+          ( Route.Auth_failed | Route.Authorization_refused | Route.Model_unavailable
+          | Route.Resumable_cli_session | Route.Candidates_filtered
+          | Route.Runtime_exhausted | Route.No_progress_empty
+          | Route.No_progress_thinking_only | Route.No_progress_truncated
+          | Route.Refusal_body_not_received | Route.Admission
+          | Route.Provider_reported_failure | Route.Request_refused
+          | Route.Provider_wire_defect | Route.Server_error_not_transient
+          | Route.Context_window_exceeded )
+      }
+  | Route.Exhausted_visible_alive
+      { terminal =
+          ( Route.Deterministic_request | Route.Session_claim_refused
+          | Route.Transcript_refused | Route.Contract_violation | Route.Protocol_error
+          | Route.Config_mismatch | Route.Provider_integration
+          | Route.Unmodeled_empty_completion
+          | Route.Terminal_effect_dependency_unavailable
+          | Route.Terminal_effect_policy_rejection
+          | Route.Terminal_effect_runtime_failure
+          | Route.Terminal_effect_workflow_rejection
+          | Route.Terminal_effect_operator_cancelled
+          | Route.Provider_attempt_effect_fenced
+              (Route.Fenced_effect_attempted | Route.Fenced_observation_unavailable)
+          | Route.Tool_correction_lost
+              (Route.Fenced_effect_attempted | Route.Fenced_observation_unavailable)
+          | Route.Internal_opaque )
+      } -> None
+;;
+
 (* Two lanes name the same hint. The order a resumed lane fixed is not part of
    the hint. *)
 let equal_deferred_runtime_lane left right =

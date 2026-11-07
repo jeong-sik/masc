@@ -3,7 +3,7 @@ rfc: "turn-failure-visible-stop"
 title: "턴 실패를 숨기지 않고 상태로 보여준다 — 실패 면제와 예산 계정을 걷어낸다"
 status: Implemented
 created: 2026-08-31
-updated: 2026-09-01
+updated: 2026-11-06
 author: claude
 supersedes: []
 superseded_by: null
@@ -121,7 +121,61 @@ MASC direct-provider HTTP 레인은 내부 재시도 루프가 없어 턴당 한
 케이던스(5초)당 1회의 실패 기록은 유한하고 가시적이다. 재시도 속도를 더
 줄이고 싶다면 그때 계약 supersession을 별도로 제안한다.
 
-### 2.4 결정론 경계
+### 2.4 provider 가 리셋 시각을 말한 한도 거절 (2026-11-06, MASC task-3264)
+
+이 경우는 실패를 면제하는 것이 아니라 턴의 다른 끝이다.
+
+- 조건 세 가지가 모두 맞으면 턴은 실패가 아니라 `Turn_rested` 로 끝난다.
+  - provider 가 자기 한도를 이유로 요청을 거절했고, 리셋 시각을 말했다.
+  - 거절된 시도는 도구 효과를 내지 않았다.
+  - 다음 dispatch 가 그 경로가 쉬는 동안 기다린다.
+- 판정은 typed 값 네 개로 한다. 넷이 모두 맞아야 쉬는 중이다
+  (`Keeper_turn_driver.provider_rest_of_failure`).
+  1. route 가 `Retry_after_observed { retry_class = Hard_quota; retry_after }` 이다.
+  2. `usable_retry_after retry_after` 가 `Some` 이다. 값이 있고, 유한하고, 0보다 크다.
+     claude_code 레인은 `Runtime_claude_code` 가 rate-limit event 로 1과 2를 한 번만
+     가른다(`quota_block`). 소비자(Keeper·Fusion·verification)는 그 생성자만 본다.
+     - 턴이 rate-limit 거절로 끝났을 때만 막는다. result frame 이 429 를 말했거나,
+       턴의 마지막 rate-limit event 가 `rejected` 일 때다. 그 밖의 턴은 result frame
+       대로 끝난다. 앞에서 거절된 창이 남아 있어도 성공은 성공이고 넘침은 넘침이다.
+     - 창(`rateLimitType`)마다 그 턴에 온 마지막 event 만 센다. type 이 없는 event 는
+       모두 이름 없는 한 창이다.
+     - 막힌 턴에서 마지막 event 가 `rejected` 인 창이 하나라도 있으면 `Quota_spent` 다.
+       이름 없는 창도 목록에 든다. route 는
+       `Hard_quota` 이고, `retry_after` 는 rejected 창들의 리셋 시각 중 가장 늦은 것이다.
+       리셋 시각을 말하지 않은 rejected 창이 있으면 시각은 없다.
+     - 그래서 seven_day 가 `rejected` 였고 마지막 event 가 `allowed` five_hour 인
+       턴이 429 로 끝나면, seven_day 리셋까지(최대 7일) 쉰다. 창은 저마다 따로 한도를
+       건다. seven_day 에 더 새 event 가 없으면 seven_day 는 아직 `rejected` 이고, 그
+       상태에서 온 429 는 그 창의 한도로 본다. 같은 턴이 성공으로 끝나면 result
+       frame 이 먼저라서 이 규칙은 쓰이지 않는다.
+     - 그런 창 없이 429 만 있으면 `Rate_throttled` 다. route 는 `Rate_limited` 다.
+       `allowed` event 의 시각은 아직 열린 창이 끝나는 때라서 쓰지 않는다.
+  3. `next_dispatch_after_failure` 가 `Wait_until` 을 돌려준다. 쉬는 시각은 그
+     `release_at` 이다. `Dispatch_now` 나 `None` 이면 쉬는 중이 아니다.
+  4. 거절된 시도에 fence 가 없다. 효과를 냈거나 효과를 관측하지 못한 시도는
+     fence 가 걸리고, 그 route 는 `Exhausted_visible_alive` 라서 1에서 이미 빠진다.
+- 쉬는 중인 cycle 은 streak 를 올리지도 지우지도 않는다.
+  - 상태머신에 `Turn_succeeded` 도 `Turn_failed` 도 보내지 않는다.
+  - registry 실패 원인과 `Health` 도 그대로다.
+  - 앞선 실패가 있었다면 다음 성공까지 Failing 으로 남는다.
+- 옛 면제와 다른 점은 두 가지다.
+  - 옛 면제는 실패를 성공(`Turn_succeeded`)으로 보고했다. 쉬는 중은 상태머신에
+    턴 event 를 보내지 않는다.
+  - 옛 면제는 바로 다시 시도했다(#31958). 쉬는 중은 provider 가 말한 시각까지
+    잔다. 그동안 그 경로로 요청을 보내지 않는다.
+- 조건에 들지 않아 계속 실패로 세는 것:
+  - 시각이 없는 한도 거절. 크레딧 부족처럼 운영자가 손써야 한다.
+  - `Rate_limited`. 짧은 대기를 계속 말하는 throttle 은 실패 기록 없이
+    영원히 쉬게 된다.
+  - fence 가 걸린 거절. Muse 레인은 호스트가 턴을 시작하면 늘 fence 를 건다(#49369).
+- 턴 수준 기록은 거절 사실이라 그대로 남는다. turn FSM `Failed`,
+  decision record `Failed`, `FailureRoute` 지표가 그렇다.
+- 예약된 자율 cycle 의 proactive outcome 은 이 목록에 들지 않는다. 쉬는 cycle 은
+  `Proactive_error` 가 아니라 `Proactive_rested` 를 남긴다. 그래서 화면은 이 cycle 을
+  error 로 그리지 않는다.
+
+### 2.5 결정론 경계
 
 - 결정론: streak 카운트, 리셋, 상태머신 전이. 전부 순수 계산이며 단위
   테스트로 증명한다.

@@ -527,7 +527,9 @@ let run_keeper_turn ?(tools = []) ?(tools_support = true) ?(initial_messages = [
                        invalid_arg "event_capture requires event_bus"))))))
 ;;
 
-let run_unified_autonomous_read_cycles ~base_path ~cli_path =
+(* One registered autonomous Keeper on the fixture CLI, inside the real Owner
+   child: [f] receives [run], which runs one unified cycle on a meta. *)
+let with_unified_autonomous_cycle ~base_path ~cli_path f =
   let keeper_name = "claude-fixture" in
   let meta =
     match
@@ -662,10 +664,19 @@ let run_unified_autonomous_read_cycles ~base_path ~cli_path =
                       | Ok `Interrupted -> fail "fixture autonomous child was interrupted"
                       | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
                     in
+                    f ~config ~keeper_name ~meta ~trace_id ~checkpoint_path
+                      ~shared_context ~run)))))
+;;
+
+let run_unified_autonomous_read_cycles ~base_path ~cli_path =
+  with_unified_autonomous_cycle ~base_path ~cli_path
+    (fun ~config:_ ~keeper_name ~meta ~trace_id ~checkpoint_path
+         ~shared_context ~run ->
                     let completed meta = match run meta with
                       | Error failure -> fail (Agent_core.Error.to_string failure.error)
                       | Ok (Keeper_unified_turn.Turn_completed {meta; _}) -> meta
-                      | Ok (Turn_checkpointed _ | Turn_input_required _ | Turn_cancelled _ | Turn_skipped _) ->
+                      | Ok (Turn_checkpointed _ | Turn_input_required _ | Turn_cancelled _ | Turn_skipped _
+                           | Turn_rested _) ->
                         fail "provider terminal did not complete the autonomous cycle" in
                     let next_meta = completed meta in
                     check bool "first official cycle writes no AGENT_CORE checkpoint" false
@@ -689,7 +700,7 @@ let run_unified_autonomous_read_cycles ~base_path ~cli_path =
                     List.iter (fun field -> match List.map (Yojson.Safe.Util.member field) rows with
                       | [first;second;third] -> check bool ("same actual " ^ field ^ " is retained across cycles")
                           true (first=second && second=third)
-                      | _ -> fail "expected three actual retained reads") ["input";"output"])))))
+                      | _ -> fail "expected three actual retained reads") ["input";"output"])
 ;;
 
 let check_usage_scope ~frames ~expected_scope ~input_tokens ~output_tokens
@@ -2859,6 +2870,192 @@ let test_quota_enters_typed_recovery () =
              (Option.is_some required.observed_session_id);
            check (option string) "no fabricated turn" None required.observed_turn_id
          | _ -> fail "quota rejection did not require explicit recovery"))
+;;
+
+(* The CLI's rate-limit event with [status] and a reset at [resets_at] (Unix
+   seconds). [rate_limit_rejected] dates its reset in 2026-08, already past, so
+   it states no wait. *)
+let rate_limit_event ~status resets_at =
+  Printf.sprintf
+    {|{"type":"rate_limit_event","session_id":"__SESSION__","uuid":"limit-1","rate_limit_info":{"status":%S,"rateLimitType":"seven_day","resetsAt":%d,"overageStatus":"rejected","overageDisabledReason":"org_level_disabled_until"}}|}
+    status
+    resets_at
+;;
+
+(* One autonomous cycle whose CLI answers [frames] after the MCP handshake.
+   [seed] runs first, with the Keeper registered, so a test can leave a
+   streak or a failure cause the cycle has to keep. [check_cycle] reads the
+   cycle's result; the Keeper's registry entry is still there, so it can read
+   the turn-failure streak and the failure cause. *)
+let run_refused_autonomous_cycle
+      ?(seed = fun ~base_path:_ ~keeper_name:_ -> ())
+      frames
+      check_cycle
+  =
+  let base_path = temp_workspace () in
+  Runtime_quota_window.reset_for_testing ();
+  Masc_test_deps.with_process_env
+    "MASC_KEEPER_AUTONOMOUS_ENABLED"
+    (Some "true")
+    (fun () ->
+       Fun.protect
+         ~finally:(fun () ->
+           Runtime_quota_window.reset_for_testing ();
+           cleanup_tree base_path)
+         (fun () ->
+            with_fixture
+              ([ Emit_and_read mcp_initialize
+               ; Emit mcp_initialized_notification
+               ; Emit_and_read mcp_list
+               ]
+               @ frames)
+              (fun cli_path ->
+                 with_unified_autonomous_cycle ~base_path ~cli_path
+                   (fun ~config ~keeper_name ~meta ~trace_id:_ ~checkpoint_path:_
+                        ~shared_context:_ ~run ->
+                      let base_path = config.Workspace.base_path in
+                      seed ~base_path ~keeper_name;
+                      check_cycle ~base_path ~keeper_name (run meta)))))
+;;
+
+let an_hour_from_now () = int_of_float (Unix.gettimeofday ()) + 3600
+
+let earlier_failure = Keeper_registry.Exception "an earlier failed turn"
+
+(* A failed turn before this cycle: a streak of one and its cause. *)
+let seed_an_earlier_failure ~base_path ~keeper_name =
+  check int "the earlier failure starts a streak of one" 1
+    (Keeper_turn_failure_streak.increment ~base_path ~keeper_name);
+  Keeper_registry.set_failure_reason ~base_path keeper_name (Some earlier_failure)
+;;
+
+(* A quota refusal whose reset the CLI states, before any tool ran, rests the
+   Keeper; it is not a turn failure (RFC-turn-failure-visible-stop §2.4). The
+   cycle ends as [Turn_rested] at that reset, and the turn-failure streak and
+   the registry failure cause an earlier turn left stay as they were. *)
+let test_dated_quota_refusal_rests_the_keeper () =
+  let resets_at = an_hour_from_now () in
+  run_refused_autonomous_cycle
+    ~seed:seed_an_earlier_failure
+    [ Emit (rate_limit_event ~status:"rejected" resets_at); Emit quota_result ]
+    (fun ~base_path ~keeper_name cycle ->
+       (match cycle with
+        | Ok (Keeper_unified_turn.Turn_rested { rest; meta; deferred_runtime_lane = _ }) ->
+          check bool "the rest ends at the reset the CLI stated" true
+            (Float.abs (rest.Keeper_turn_driver.release_at -. float_of_int resets_at) < 5.0);
+          check bool "the cycle's proactive outcome is a rest, not an error" true
+            (meta.Keeper_meta_contract.runtime.proactive_rt.last_outcome
+             = Keeper_meta_contract.Proactive_rested)
+        | Ok
+            ( Keeper_unified_turn.Turn_completed _
+            | Keeper_unified_turn.Turn_checkpointed _
+            | Keeper_unified_turn.Turn_input_required _
+            | Keeper_unified_turn.Turn_cancelled _
+            | Keeper_unified_turn.Turn_skipped _ ) ->
+          fail "a refused turn did not end as a rest"
+        | Error failure ->
+          fail
+            ("a dated quota refusal ended as a turn failure: "
+             ^ Agent_core.Error.to_string failure.Keeper_unified_turn.error));
+       check int "the turn-failure streak stays as it was" 1
+         (Keeper_registry.get_turn_failures ~base_path keeper_name);
+       match Keeper_registry.get ~base_path keeper_name with
+       | Some { Keeper_registry.last_failure_reason = Some reason; _ } ->
+         check string "the registry failure cause stays as it was"
+           (Keeper_registry.failure_reason_to_string earlier_failure)
+           (Keeper_registry.failure_reason_to_string reason)
+       | Some { Keeper_registry.last_failure_reason = None; _ } ->
+         fail "a rest cleared the registry failure cause"
+       | None -> fail "the fixture Keeper left the registry")
+;;
+
+(* A refusal that does not meet every rest condition stays a turn failure:
+   it takes the route [check_route] names, advances the streak, and leaves
+   the cycle's proactive outcome an error. *)
+let expect_turn_failure label ~check_route ~base_path ~keeper_name = function
+  | Error (failure : Keeper_unified_turn.turn_failure) ->
+    check_route failure.route;
+    check int (label ^ ": the turn-failure streak advances") 1
+      (Keeper_registry.get_turn_failures ~base_path keeper_name);
+    (match Keeper_meta_store.read_meta (Workspace.default_config base_path) keeper_name with
+     | Ok (Some meta) ->
+       check bool (label ^ ": the cycle's proactive outcome is an error") true
+         (meta.Keeper_meta_contract.runtime.proactive_rt.last_outcome
+          = Keeper_meta_contract.Proactive_error)
+     | Ok None -> fail (label ^ ": the Keeper meta is gone")
+     | Error detail -> fail (label ^ ": the Keeper meta did not read: " ^ detail))
+  | Ok (Keeper_unified_turn.Turn_rested _) -> fail (label ^ ": the refusal ended as a rest")
+  | Ok
+      ( Keeper_unified_turn.Turn_completed _
+      | Keeper_unified_turn.Turn_checkpointed _
+      | Keeper_unified_turn.Turn_input_required _
+      | Keeper_unified_turn.Turn_cancelled _
+      | Keeper_unified_turn.Turn_skipped _ ) ->
+    fail (label ^ ": the refusal completed the turn")
+;;
+
+(* The CLI dates allowed events too: there [resetsAt] ends a window that still
+   serves, so a 429 after one is a throttle and states no reset. *)
+let test_a_429_after_an_allowed_event_is_a_turn_failure () =
+  let module Route = Keeper_runtime_failure_route in
+  run_refused_autonomous_cycle
+    [ Emit (rate_limit_event ~status:"allowed" (an_hour_from_now ())); Emit quota_result ]
+    (expect_turn_failure "a 429 after an allowed event" ~check_route:(function
+       | Route.Retry_after_observed { retry_class = Route.Rate_limited; retry_after = None } ->
+         ()
+       | route ->
+         failf "a 429 after an allowed event routed as %s" (Route.route_class_label route)))
+;;
+
+(* Response text reached the operator before the refusal, so the attempt is
+   fenced: whether it had an effect is not known, and a dated refusal does not
+   rest it. *)
+let test_a_fenced_dated_quota_refusal_is_a_turn_failure () =
+  let module Route = Keeper_runtime_failure_route in
+  run_refused_autonomous_cycle
+    [ Emit (response_text ~turn_id:"turn-quota-1" ~message_id:"msg-quota-1" "partial answer")
+    ; Emit (rate_limit_event ~status:"rejected" (an_hour_from_now ()))
+    ; Emit quota_result
+    ]
+    (expect_turn_failure "a dated refusal after response text" ~check_route:(function
+       | Route.Exhausted_visible_alive
+           { terminal = Route.Provider_attempt_effect_fenced Route.Fenced_observation_unavailable }
+         -> ()
+       | route ->
+         failf "a dated refusal after response text routed as %s" (Route.route_class_label route)))
+;;
+
+(* The runtime tells a spent window from a throttle. A spent window routes as
+   a hard quota and waits until the reset it states; a throttle states no
+   wait. *)
+let test_only_a_spent_window_is_a_hard_quota () =
+  let module Route = Keeper_runtime_failure_route in
+  let route_of block =
+    Route.route_of_error
+      ~boundary:Route.Agent_core_execution
+      (Keeper_claude_code_runtime.For_testing.claude_error_to_core_error
+         (Runtime_claude_code.Quota_blocked
+            { api_error_status = Some 429
+            ; block
+            ; tool_effect_attempted = false
+            ; response_emitted = false
+            }))
+  in
+  let spent resets_at =
+    Runtime_claude_code.Quota_spent
+      { resets_at; windows = [ Runtime_claude_code.Named_window "five_hour" ] }
+  in
+  (match route_of (spent (Some (an_hour_from_now ()))) with
+   | Route.Retry_after_observed { retry_class = Route.Hard_quota; retry_after = Some wait } ->
+     check bool "a spent window waits until the reset it states" true
+       (Float.abs (wait -. 3600.0) < 5.0)
+   | route -> failf "a spent window routed as %s" (Route.route_class_label route));
+  (match route_of (spent None) with
+   | Route.Retry_after_observed { retry_class = Route.Hard_quota; retry_after = None } -> ()
+   | route -> failf "a spent window with no reset routed as %s" (Route.route_class_label route));
+  match route_of Runtime_claude_code.Rate_throttled with
+  | Route.Retry_after_observed { retry_class = Route.Rate_limited; retry_after = None } -> ()
+  | route -> failf "a throttle routed as %s" (Route.route_class_label route)
 ;;
 
 let test_access_refusal_uses_status_and_keeps_pre_effect_rotation () =
@@ -6913,6 +7110,14 @@ let () =
             `Quick
             test_pre_effect_provider_rejection_keeps_failover_open
         ; test_case "quota enters recovery" `Quick test_quota_enters_typed_recovery
+        ; test_case "a dated quota refusal rests the Keeper" `Quick
+            test_dated_quota_refusal_rests_the_keeper
+        ; test_case "a 429 after an allowed event is a turn failure" `Quick
+            test_a_429_after_an_allowed_event_is_a_turn_failure
+        ; test_case "only a spent window is a hard quota" `Quick
+            test_only_a_spent_window_is_a_hard_quota
+        ; test_case "a fenced dated quota refusal is a turn failure" `Quick
+            test_a_fenced_dated_quota_refusal_is_a_turn_failure
         ; test_case "access refusal preserves structured status and rotation" `Quick
             test_access_refusal_uses_status_and_keeps_pre_effect_rotation
         ; test_case "access refusal after native tool remains fenced" `Quick

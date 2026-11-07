@@ -10,6 +10,13 @@ type cycle_outcome =
       { meta : Keeper_meta_contract.keeper_meta
       ; failure : Keeper_unified_turn.turn_failure
       }
+  | Rested of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; rest : Keeper_turn_driver.provider_rest
+      ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
+      }
+      (** {!Keeper_unified_turn.Turn_rested}: the Keeper rests until
+          [rest.release_at] and records no turn status. *)
 
 val disposition_token : cycle_outcome -> string
 (** Canonical lowercase token for how the cycle ended, for evidence that has to

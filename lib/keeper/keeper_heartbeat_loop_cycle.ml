@@ -45,6 +45,11 @@ type cycle_outcome =
       { meta : keeper_meta
       ; failure : Keeper_unified_turn.turn_failure
       }
+  | Rested of
+      { meta : keeper_meta
+      ; rest : Keeper_turn_driver.provider_rest
+      ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
+      }
 
 let disposition_token = function
   | Completed _ -> "completed"
@@ -53,6 +58,7 @@ let disposition_token = function
   | Cancelled _ -> "cancelled"
   | Skipped _ -> "skipped"
   | Failed _ -> "failed"
+  | Rested _ -> "rested"
 ;;
 
 let meta = function
@@ -61,12 +67,14 @@ let meta = function
   | Input_required meta
   | Cancelled meta
   | Skipped meta
-  | Failed { meta; _ } ->
+  | Failed { meta; _ }
+  | Rested { meta; _ } ->
     meta
 ;;
 
 let deferred_runtime_lane = function
   | Failed { failure; _ } -> failure.Keeper_unified_turn.deferred_runtime_lane
+  | Rested { deferred_runtime_lane; _ } -> deferred_runtime_lane
   | Completed _ | Checkpointed _ | Input_required _ | Cancelled _ | Skipped _ ->
     None
 ;;
@@ -171,6 +179,8 @@ let run_keeper_cycle_admitted
   | Ok (Keeper_unified_turn.Turn_input_required updated) -> Input_required updated
   | Ok (Keeper_unified_turn.Turn_cancelled meta) -> Cancelled meta
   | Ok (Keeper_unified_turn.Turn_skipped meta) -> Skipped meta
+  | Ok (Keeper_unified_turn.Turn_rested { meta; rest; deferred_runtime_lane }) ->
+    Rested { meta; rest; deferred_runtime_lane }
 ;;
 
 let run_keeper_cycle

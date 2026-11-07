@@ -1572,6 +1572,7 @@ let test_owner_inventory_stopping_completes_the_cycle () =
     | Keeper_heartbeat_loop.Turn_cycle_interrupted -> "interrupted"
     | Keeper_heartbeat_loop.Turn_cycle_crashed -> "crashed"
     | Keeper_heartbeat_loop.Turn_cycle_busy _ -> "busy"
+    | Keeper_heartbeat_loop.Turn_cycle_rested -> "rested"
   in
   check string "inventory stopping completes the cycle" "completed"
     (name
@@ -1606,7 +1607,8 @@ let test_owner_inventory_stopping_refreshes_work_heartbeat () =
     | Keeper_heartbeat_loop.Record_turn_status
         Keeper_heartbeat_loop.Preserve_work_heartbeat
     | Keeper_heartbeat_loop.Skip_interrupted_turn
-    | Keeper_heartbeat_loop.Defer_autonomous_work _ -> false
+    | Keeper_heartbeat_loop.Defer_autonomous_work _
+    | Keeper_heartbeat_loop.Rest_without_turn_status -> false
   in
   check bool "shutdown boundary does not preserve the lease as a crash would" true
     refreshes

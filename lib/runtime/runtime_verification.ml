@@ -496,22 +496,29 @@ let with_retry_after retry_after detail =
     Printf.sprintf "%s (provider asks to retry after %.0fs)" detail (Float.ceil seconds)
 ;;
 
-(* Claude Code reports which usage window refused and when it reopens; the
-   operator is told the time instead of "hours or days". *)
-let with_usage_window (rate_limit : Runtime_claude_code.rate_limit option) detail =
-  match rate_limit with
-  | None -> detail
-  | Some { Runtime_claude_code.rate_limit_type; resets_at; _ } ->
-    let window = Option.map (Printf.sprintf "window %s") rate_limit_type in
+(* Claude Code reports which usage windows refused and when they reopen; the
+   operator is told the time instead of "hours or days". A spent window can
+   be hours or days, so it reads as a used-up quota; a throttle is a short
+   rate limit. *)
+let claude_quota_failure (block : Runtime_claude_code.quota_block) detail =
+  match block with
+  | Runtime_claude_code.Rate_throttled -> Rate_limited detail
+  | Runtime_claude_code.Quota_spent { resets_at; windows } ->
+    let window =
+      match windows with
+      | [] -> None
+      | _ :: _ -> Some ("window " ^ Runtime_claude_code.quota_windows_label windows)
+    in
     let reopens =
       Option.bind resets_at (fun seconds ->
         Option.map
           (fun time -> "reopens " ^ Ptime.to_rfc3339 ~tz_offset_s:0 time)
           (Ptime.of_float_s (float_of_int seconds)))
     in
-    (match List.filter_map Fun.id [ window; reopens ] with
-     | [] -> detail
-     | parts -> Printf.sprintf "%s (%s)" detail (String.concat ", " parts))
+    Quota_exhausted
+      (match List.filter_map Fun.id [ window; reopens ] with
+       | [] -> detail
+       | parts -> Printf.sprintf "%s (%s)" detail (String.concat ", " parts))
 ;;
 
 (* HTTP 401 and 403 from the provider are a refused credential or account.
@@ -959,15 +966,8 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
             | Some status ->
               Error (claude_auth_refusal ~account_home:execution.account_home ~status detail)
             | None -> Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
-         | Error (Runtime_claude_code.Quota_blocked { rate_limit; _ } as error) ->
-           (* The subscription's usage window refused the turn. It reopens on
-              its own, but the window can be hours or days, so it reads as a
-              used-up quota rather than a short rate limit. *)
-           Error
-             (Quota_exhausted
-                (with_usage_window
-                   rate_limit
-                   (Runtime_claude_code.error_to_string error)))
+         | Error (Runtime_claude_code.Quota_blocked { block; _ } as error) ->
+           Error (claude_quota_failure block (Runtime_claude_code.error_to_string error))
          | Error
              (( Runtime_claude_code.Protocol_error _
               | Runtime_claude_code.Unsupported_control_request _

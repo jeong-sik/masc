@@ -125,19 +125,46 @@ type rate_limit_status =
   | Allowed_warning
   | Rejected
 
-let rate_limit_status_to_string = function
-  | Allowed -> "allowed"
-  | Allowed_warning -> "allowed_warning"
-  | Rejected -> "rejected"
-;;
+type rate_limit_window =
+  | Named_window of string
+  | Unnamed_window
 
 type rate_limit =
   { status : rate_limit_status
-  ; rate_limit_type : string option
+  ; window : rate_limit_window
   ; resets_at : int option
-  ; overage_status : string option
-  ; overage_disabled_reason : string option
   }
+
+type quota_block =
+  | Quota_spent of
+      { resets_at : int option
+      ; windows : rate_limit_window list
+      }
+  | Rate_throttled
+
+let same_window left right =
+  match left, right with
+  | Named_window left, Named_window right -> String.equal left right
+  | Unnamed_window, Unnamed_window -> true
+  | Named_window _, Unnamed_window | Unnamed_window, Named_window _ -> false
+;;
+
+(* Named windows in name order, then the unnamed one. *)
+let compare_window left right =
+  match left, right with
+  | Named_window left, Named_window right -> String.compare left right
+  | Unnamed_window, Unnamed_window -> 0
+  | Named_window _, Unnamed_window -> -1
+  | Unnamed_window, Named_window _ -> 1
+;;
+
+let quota_windows_label windows =
+  windows
+  |> List.map (function
+    | Named_window name -> name
+    | Unnamed_window -> "unnamed")
+  |> String.concat "+"
+;;
 
 type request_input =
   { input_tokens : int
@@ -191,7 +218,6 @@ type turn_result =
   ; text : string
   ; dynamic_tool_calls : int
   ; subscription : subscription
-  ; rate_limit : rate_limit option
   ; resumed : bool
   ; usage : observed_usage
   }
@@ -399,7 +425,7 @@ type error =
       }
   | Quota_blocked of
       { api_error_status : int option
-      ; rate_limit : rate_limit option
+      ; block : quota_block
       ; tool_effect_attempted : bool
       ; response_emitted : bool
       }
@@ -440,19 +466,22 @@ let error_to_string = function
   | Stopped_by_host { stop = Terminal_tool_boundary { tool_name; _ }; _ } ->
     Printf.sprintf "Claude Code stopped at terminal tool boundary: tool=%s" tool_name
   | Quota_blocked
-      { api_error_status; rate_limit; tool_effect_attempted; response_emitted } ->
-    let status =
-      Option.fold
-        ~none:"unknown"
-        ~some:(fun value -> rate_limit_status_to_string value.status)
-        rate_limit
+      { api_error_status; block; tool_effect_attempted; response_emitted } ->
+    let block =
+      match block with
+      | Quota_spent { resets_at; windows } ->
+        Printf.sprintf
+          "spent windows=%s resets_at=%s"
+          (quota_windows_label windows)
+          (Option.fold ~none:"unknown" ~some:string_of_int resets_at)
+      | Rate_throttled -> "throttled"
     in
     let api_status =
       Option.fold ~none:"unknown" ~some:string_of_int api_error_status
     in
     Printf.sprintf
-      "Claude Code quota blocked (rate_limit=%s api_status=%s tool_effect_attempted=%b response_emitted=%b)"
-      status
+      "Claude Code quota blocked (%s api_status=%s tool_effect_attempted=%b response_emitted=%b)"
+      block
       api_status
       tool_effect_attempted
       response_emitted
@@ -1282,19 +1311,14 @@ let parse_rate_limit ~expected_session_id fields =
     | "rejected" -> Ok Rejected
     | unknown -> protocol_error stage (Printf.sprintf "unknown status %S" unknown)
   in
-    let* rate_limit_type = optional_string stage "rateLimitType" info_fields in
-    let* resets_at = optional_int stage "resetsAt" info_fields in
-    let* overage_status = optional_string stage "overageStatus" info_fields in
-    let* overage_disabled_reason =
-      optional_string stage "overageDisabledReason" info_fields
-    in
-    Ok
-      { status
-      ; rate_limit_type
-      ; resets_at
-      ; overage_status
-      ; overage_disabled_reason
-      }
+  let* rate_limit_type = optional_string stage "rateLimitType" info_fields in
+  let window =
+    match rate_limit_type with
+    | Some name -> Named_window name
+    | None -> Unnamed_window
+  in
+  let* resets_at = optional_int stage "resetsAt" info_fields in
+  Ok { status; window; resets_at }
 ;;
 
 type assistant_block =
@@ -2045,7 +2069,86 @@ let result_turn_id ~expected_session_id fields =
   else required_string stage "uuid" fields
 ;;
 
-let parse_result ~rate_limit ~tool_effect_attempted ~response_emitted ~turn_id ~usage
+(* A turn can see several rate-limit events, one window at a time
+   (rateLimitType), and a later event of a window replaces what an earlier
+   one said about it. An allowed five-hour event therefore does not hide a
+   seven-day window that is still rejected. Events without a type all speak
+   for one unnamed window.
+
+   The value is newest first, so its head is the turn's last event. Only
+   [empty] and [note_rate_limit] build one, so that order holds by
+   construction. *)
+module Turn_rate_limits : sig
+  type t
+
+  val empty : t
+  val note_rate_limit : rate_limit -> t -> t
+  val latest : t -> rate_limit option
+  val newest_first : t -> rate_limit list
+end = struct
+  type t = rate_limit list
+
+  let empty = []
+
+  let note_rate_limit (limit : rate_limit) rate_limits =
+    limit
+    :: List.filter
+         (fun (earlier : rate_limit) -> not (same_window earlier.window limit.window))
+         rate_limits
+  ;;
+
+  let latest = function
+    | latest :: _ -> Some latest
+    | [] -> None
+  ;;
+
+  let newest_first rate_limits = rate_limits
+end
+
+(* Every rejected window is open again only once the last of them resets.
+   A rejected window that stated no reset says nothing about when that is,
+   so the answer is unknown. *)
+let reopens_at (first : rate_limit) rest =
+  List.fold_left
+    (fun reopens (limit : rate_limit) ->
+       match reopens, limit.resets_at with
+       | Some reopens, Some resets_at -> Some (Int.max reopens resets_at)
+       | None, (Some _ | None) | Some _, None -> None)
+    first.resets_at
+    rest
+;;
+
+(* The one place a blocked turn is told apart. Only a turn that ended in a
+   rate-limit refusal is blocked: a 429, or a last event that was rejected.
+   A turn whose last event allowed it ends as its result frame says, even
+   while an earlier window is still rejected, because that frame is what
+   happened to this turn. A refusal with a window whose last event is
+   rejected means the account's window is used up. A 429 with no such
+   window is a throttle, and nothing says how long it lasts. *)
+let quota_block ~api_error_status rate_limits =
+  let is_rejected (limit : rate_limit) =
+    match limit.status with
+    | Rejected -> true
+    | Allowed | Allowed_warning -> false
+  in
+  let refused =
+    Option.equal Int.equal api_error_status (Some 429)
+    || Option.exists is_rejected (Turn_rate_limits.latest rate_limits)
+  in
+  match refused, List.filter is_rejected (Turn_rate_limits.newest_first rate_limits) with
+  | false, ([] | _ :: _) -> None
+  | true, (first :: rest as rejected) ->
+    Some
+      (Quota_spent
+         { resets_at = reopens_at first rest
+         ; windows =
+             List.map (fun (limit : rate_limit) -> limit.window) rejected
+             |> List.sort compare_window
+         })
+  | true, [] -> Some Rate_throttled
+;;
+
+let parse_result ~rate_limits ~tool_effect_attempted ~response_emitted ~turn_id ~usage
     fields =
   let stage = "result message" in
   let* subtype = required_string stage "subtype" fields in
@@ -2072,12 +2175,6 @@ let parse_result ~rate_limit ~tool_effect_attempted ~response_emitted ~turn_id ~
     match List.assoc_opt "structured_output" fields with
     | None | Some `Null -> result
     | Some value -> Some (Yojson.Safe.to_string value)
-  in
-  let structurally_quota_blocked =
-    Option.equal Int.equal api_error_status (Some 429)
-    || Option.exists
-         (fun (limit : rate_limit) -> limit.status = Rejected)
-         rate_limit
   in
   let terminal_failure_detail () =
     (* [terminal_reason] decides whether an overflow is typed as one, and it
@@ -2112,40 +2209,41 @@ let parse_result ~rate_limit ~tool_effect_attempted ~response_emitted ~turn_id ~
     | Some (Prompt_too_long | Blocking_limit | Rapid_refill_breaker) -> true
     | Some (Other_terminal_reason _) | None -> false
   in
-  if structurally_quota_blocked
-  then
+  match quota_block ~api_error_status rate_limits with
+  | Some block ->
     Error
       (Quota_blocked
          { api_error_status
-         ; rate_limit
+         ; block
          ; tool_effect_attempted
          ; response_emitted
          })
-  else if is_error && provider_reported_context_window_exceeded
-  then
-    Error
-      (Context_window_exceeded
-         { message = terminal_failure_detail ()
-         ; tool_effect_attempted
-         ; response_emitted
-         })
-  else if is_error
-  then
-    (* [result] is the one field on this frame that says why the turn failed.
-       The prompt-too-long verdict above (typed [terminal_reason]) has its
-       own typed path; unrelated 400s and every other terminal rejection
-       still retain the provider's sentence instead of collapsing to the
-       status code (#28071). *)
-    Error
-      (Turn_failed_with_observation
-         { detail = terminal_failure_detail ()
-         ; api_error_status
-         ; tool_effect_attempted
-         ; response_emitted
-         })
-  else if subtype <> "success"
-  then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
-  else Ok (turn_id, result, usage)
+  | None ->
+    if is_error && provider_reported_context_window_exceeded
+    then
+      Error
+        (Context_window_exceeded
+           { message = terminal_failure_detail ()
+           ; tool_effect_attempted
+           ; response_emitted
+           })
+    else if is_error
+    then
+      (* [result] is the one field on this frame that says why the turn failed.
+         The prompt-too-long verdict above (typed [terminal_reason]) has its
+         own typed path; unrelated 400s and every other terminal rejection
+         still retain the provider's sentence instead of collapsing to the
+         status code (#28071). *)
+      Error
+        (Turn_failed_with_observation
+           { detail = terminal_failure_detail ()
+           ; api_error_status
+           ; tool_effect_attempted
+           ; response_emitted
+           })
+    else if subtype <> "success"
+    then Error (Turn_failed (Printf.sprintf "terminal subtype=%s" subtype))
+    else Ok (turn_id, result, usage)
 ;;
 
 (* Partial SDK frames precede the complete assistant block. Keep the current
@@ -2416,7 +2514,7 @@ let observe_partial_input observer ~session_id fields =
 
 let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     ~expected_session_id
-    ~subscription ~resumed ~rate_limit ~assistant_model ~assistant_texts
+    ~subscription ~resumed ~rate_limits ~assistant_model ~assistant_texts
     ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event
     ~input_observer ~partial_stream ~stream_started ~response_emitted =
   let* json = io.receive () in
@@ -2437,7 +2535,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~rate_limits ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_control_cancel_request ->
@@ -2445,7 +2543,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~rate_limits ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_control_response ->
@@ -2459,7 +2557,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       | Child_response _ -> child_partial_stream_event ~expected_session_id fields in
     observe_partial_input input_observer ~session_id:expected_session_id fields;
     await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
-      ~expected_session_id ~subscription ~resumed ~rate_limit ~assistant_model
+      ~expected_session_id ~subscription ~resumed ~rate_limits ~assistant_model
       ~assistant_texts ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started
       ~on_stream_event ~input_observer ~partial_stream ~stream_started ~response_emitted
   | Frame_assistant ->
@@ -2530,7 +2628,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit ~assistant_model
+      ~rate_limits ~assistant_model
       ~assistant_texts:(assistant_texts @ texts)
       ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event
       ~input_observer ~partial_stream ~stream_started ~response_emitted
@@ -2538,7 +2636,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     let* rate_limit = parse_rate_limit ~expected_session_id fields in
     (* The usage windows ride the same event. They are an observation for
        operators: a shape this client cannot read is logged and the turn goes
-       on, with [rate_limit] above still governing the turn as before. *)
+       on, with [rate_limit] above still counted in [rate_limits]. *)
     (match Runtime_provider_usage_window.decode_claude_rate_limit_event json with
      | Ok { Runtime_provider_usage_window.windows = []; _ } -> ()
      | Ok report -> emit_stream_event on_stream_event (Usage_windows_reported report)
@@ -2549,7 +2647,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit:(Some rate_limit) ~assistant_model ~assistant_texts
+      ~rate_limits:(Turn_rate_limits.note_rate_limit rate_limit rate_limits) ~assistant_model ~assistant_texts
       ~native_tool_calls ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event
       ~input_observer ~partial_stream ~stream_started ~response_emitted
   | Frame_result ->
@@ -2578,7 +2676,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
      | (Some _ | None), None -> ());
     let parsed_result =
       parse_result
-        ~rate_limit
+        ~rate_limits
         ~tool_effect_attempted:(!tool_call_count > 0 || !native_tool_attempted)
         ~response_emitted:!response_emitted
         ~turn_id
@@ -2648,7 +2746,6 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
       ; text
       ; dynamic_tool_calls = !tool_call_count
       ; subscription
-      ; rate_limit
       ; resumed
       ; usage
       }
@@ -2662,7 +2759,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit ~assistant_model ~assistant_texts ~native_tool_calls
+      ~rate_limits ~assistant_model ~assistant_texts ~native_tool_calls
       ~native_tool_attempted ~on_terminal_received ~on_turn_started ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_system ->
@@ -2685,7 +2782,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~rate_limits ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_tool_progress ->
@@ -2705,7 +2802,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~rate_limits ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_command_lifecycle ->
@@ -2717,7 +2814,7 @@ let rec await_terminal io ~mcp_session ~tools ~tool_call_count ~assistant_usage
     await_terminal
       io ~mcp_session ~tools ~tool_call_count ~assistant_usage ~expected_session_id
       ~subscription ~resumed
-      ~rate_limit ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
+      ~rate_limits ~assistant_model ~assistant_texts ~on_terminal_received ~on_turn_started
       ~native_tool_calls ~native_tool_attempted ~on_stream_event ~input_observer ~partial_stream ~stream_started
       ~response_emitted
   | Frame_other tag ->
@@ -2963,7 +3060,7 @@ let run_protocol io ~native_posture ~dynamic_tools ~subscription ~session_mode ~
       (match session_mode with
        | Start -> false
        | Resume _ -> true)
-    ~rate_limit:None
+    ~rate_limits:Turn_rate_limits.empty
     ~assistant_model:None
     ~assistant_texts:[]
     ~native_tool_calls:{invocation=Input_attribution.ticket input_observer.input_state;

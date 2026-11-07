@@ -1059,8 +1059,11 @@ default = "fixture.%s"
 (* The child speaks the stream-json handshake, lists the host's tools as the
    real client does before its first provider request, and then plays the
    steps the case names, in order: [retry:N] reports a provider retry with
-   HTTP status N, [text] sends an assistant answer, [terminal:N] ends the turn
-   with a result carrying status N. After the last step it goes quiet. *)
+   HTTP status N, [text] sends an assistant answer,
+   [limit:STATUS:WINDOW:RESET] sends a rate-limit event for that window
+   (an empty WINDOW sends no rateLimitType),
+   [terminal:N] ends the turn with a result carrying status N. After the
+   last step it goes quiet. *)
 let claude_refusal_fixture ~steps = Printf.sprintf {|#!/usr/bin/env python3
 import json
 import sys
@@ -1100,6 +1103,14 @@ for index, step in enumerate(%S.split(",")):
         emit({"type": "assistant", "parent_tool_use_id": None, "session_id": session,
             "uuid": "refusal-assistant-" + str(index), "message": {"role": "assistant",
             "model": "claude-sonnet-5-5", "content": [{"type": "text", "text": "working"}]}})
+    elif kind == "limit":
+        status, _, rest = value.partition(":")
+        window, _, resets = rest.partition(":")
+        info = {"status": status, "resetsAt": int(resets)}
+        if window:
+            info["rateLimitType"] = window
+        emit({"type": "rate_limit_event", "session_id": session,
+            "uuid": "refusal-limit-" + str(index), "rate_limit_info": info})
     elif kind == "terminal":
         emit({"type": "result", "subtype": "success", "is_error": True, "session_id": session,
             "uuid": "refusal-result", "result": "provider refused the request",
@@ -1202,6 +1213,38 @@ let test_claude_verification_names_a_refused_credential () =
        | Deadline, Some Verify.Timed_out -> ()
        | Rejected, Some (Verify.Provider_rejected _) -> ()
        | (Refused _ | Deadline | Rejected), _ -> fail (label ^ ": " ^ refusal_summary failure))
+    cases
+    failures
+;;
+
+(* Only a window whose last event is rejected is a spent quota, named with
+   the time it reopens. A 429 with no event, or after an allowed one that
+   also states a reset, is a throttle. Every rejected window is named, the
+   one with no type too. *)
+let test_claude_verification_tells_a_spent_window_from_a_throttle () =
+  let cases =
+    [ "a 429 with no event", "terminal:429", None
+    ; "a 429 after an allowed event", "limit:allowed:five_hour:1786356000,terminal:429", None
+    ; ( "a 429 after a rejected event"
+      , "limit:rejected:seven_day:1786356000,terminal:429"
+      , Some [ "window seven_day"; "reopens 2026-08-10T10:00:00" ] )
+    ; ( "a 429 after two rejected events"
+      , "limit:rejected:seven_day:1786960800,limit:rejected:five_hour:1786356000,terminal:429"
+      , Some [ "window five_hour+seven_day"; "reopens 2026-08-17T10:00:00" ] )
+    ; ( "a 429 after a rejected event with no type"
+      , "limit:rejected::1786356000,limit:rejected:seven_day:1786356000,terminal:429"
+      , Some [ "window seven_day+unnamed" ] )
+    ] in
+  let failures = claude_refusal_verifications (List.map (fun (_, steps, _) -> steps) cases) in
+  List.iter2
+    (fun (label, _, spent) failure ->
+       match spent, failure with
+       | None, Some (Verify.Rate_limited _) -> ()
+       | Some parts, Some (Verify.Quota_exhausted detail) ->
+         List.iter
+           (fun part -> check bool (label ^ " names " ^ part) true (contains detail part))
+           parts
+       | (None | Some _), _ -> fail (label ^ ": " ^ refusal_summary failure))
     cases
     failures
 ;;
@@ -1787,6 +1830,8 @@ let () =
             test_official_probes_preserve_selected_effort
         ; test_case "a refused Claude Code credential is named, not timed out" `Quick
             test_claude_verification_names_a_refused_credential
+        ; test_case "a spent Claude Code window is a quota, a 429 alone a throttle" `Quick
+            test_claude_verification_tells_a_spent_window_from_a_throttle
         ; test_case "assigned lane selects initial target" `Quick test_assigned_lane_selects_initial_target
         ; test_case "actual tool-result roundtrip" `Quick test_roundtrip
         ; test_case "no tool cannot claim ready" `Quick test_no_tool_cannot_claim_success

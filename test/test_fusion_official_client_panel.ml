@@ -1624,6 +1624,85 @@ let test_each_absent_handle_is_named () =
     (mentions neither "env" && mentions neither "clock")
 ;;
 
+(* A spent Claude Code window holds the account until the reset it states. A
+   throttle holds only the candidate and states no wait. *)
+let test_a_claude_throttle_is_not_a_spent_quota () =
+  let standing = Masc.Fusion_official_client.For_testing.claude_quota_standing in
+  check bool "a spent window is a hard quota until its reset" true
+    (standing
+       (Runtime_claude_code.Quota_spent
+          { resets_at = Some 1786356000; windows = [ Runtime_claude_code.Named_window "seven_day" ] })
+     = Runtime_candidate_standing.Hard_quota { resets_at = Some 1786356000. });
+  check bool "a spent window with no reset is a hard quota with no time" true
+    (standing
+       (Runtime_claude_code.Quota_spent
+          { resets_at = None; windows = [ Runtime_claude_code.Unnamed_window ] })
+     = Runtime_candidate_standing.Hard_quota { resets_at = None });
+  check bool "a throttle is a rate limit with no stated wait" true
+    (standing Runtime_claude_code.Rate_throttled
+     = Runtime_candidate_standing.Rate_limited { retry_after = None })
+;;
+
+(* The client answers initialize and ends the turn with a 429 that no
+   rate-limit event explains. *)
+let claude_throttle_panel_fixture = {|#!/usr/bin/env python3
+import json, sys
+args = sys.argv[1:]
+def emit(frame):
+    print(json.dumps(frame), flush=True)
+if "auth" in args and "status" in args:
+    emit({"loggedIn": True, "authMethod": "claude.ai", "apiProvider": "firstParty", "subscriptionType": "max"})
+    sys.exit(0)
+session = next(arg.split("=", 1)[1] for arg in args if arg.startswith("--session-id="))
+request = json.loads(sys.stdin.readline())
+assert request["type"] == "control_request" and request["request"]["subtype"] == "initialize"
+emit({"type": "control_response", "response": {"subtype": "success", "request_id": request["request_id"], "response": {}}})
+assert json.loads(sys.stdin.readline())["type"] == "user"
+emit({"type": "system", "subtype": "init", "session_id": session})
+emit({"type": "result", "subtype": "success", "is_error": True, "session_id": session,
+    "uuid": "throttle-result", "result": "rate limited", "api_error_status": 429,
+    "terminal_reason": "api_error"})
+for line in sys.stdin:
+    pass
+|}
+;;
+
+(* A 429 without a rate-limit event goes through the panel's own failure
+   path as a throttle: the dispatched candidate is rate limited and the
+   account's quota window stays open. *)
+let test_a_claude_429_without_events_throttles_only_the_candidate () =
+  let base_dir = Filename.temp_dir "claude-panel-throttle-" "" |> Unix.realpath in
+  let snapshot = Runtime.For_testing.snapshot () in
+  let eio_state = Eio_context.snapshot_state () in
+  Fun.protect ~finally:(fun () ->
+    Runtime.For_testing.restore snapshot;
+    Eio_context.restore_state eio_state;
+    Runtime_quota_window.reset_for_testing ();
+    Fs_compat.remove_tree base_dir) @@ fun () ->
+  Runtime_quota_window.reset_for_testing ();
+  let cli_path = Filename.concat base_dir "claude-throttle-fixture" in
+  write_file ~path:cli_path ~perm:0o700 claude_throttle_panel_fixture;
+  with_initialized_runtime ~claude_cli:cli_path (fun () ->
+    let selected = match Runtime.get_runtime_by_id official_client_runtime with
+      | Some runtime -> runtime
+      | None -> fail "Claude panel fixture must resolve" in
+    (match in_eio_context (fun () -> Masc.Fusion_official_client.run_with_images
+       ~images:[] ~base_dir ~runtime:selected ~system_prompt:"" ~prompt:"ping" ()) with
+     | Error (Masc.Fusion_official_client.Claude_failure
+         (Runtime_claude_code.Quota_blocked { block = Runtime_claude_code.Rate_throttled; _ })) -> ()
+     | Error failure -> fail (Masc.Fusion_official_client.failure_detail
+         ~runtime_id:official_client_runtime failure)
+     | Ok _ -> fail "a 429 completed the panel turn");
+    let now = Unix.gettimeofday () in
+    check bool "the account's quota window stays open" false
+      (Runtime_quota_window.is_exhausted ~scope:selected.quota_scope ~now);
+    match Runtime_candidate_backpressure.candidate_backpressure ~now
+            ~candidate:selected.candidate_backpressure with
+    | Some { Runtime_candidate_backpressure.rate_limit = Some _; _ } -> ()
+    | Some { Runtime_candidate_backpressure.rate_limit = None; _ } | None ->
+      fail "the dispatched candidate carries no rate limit")
+;;
+
 let test_official_client_usage_preserves_vendor_cache_conventions () =
   let module Usage = Masc.Fusion_official_client.For_testing in
   let claude = Usage.claude_usage
@@ -2185,6 +2264,16 @@ let () =
             "setup failures attribute the runtime once"
             `Quick
             test_setup_failure_attribution_is_single
+        ] )
+    ; ( "claude quota standing"
+      , [ test_case
+            "a Claude throttle is not a spent quota"
+            `Quick
+            test_a_claude_throttle_is_not_a_spent_quota
+        ; test_case
+            "a Claude 429 without events throttles only the candidate"
+            `Quick
+            test_a_claude_429_without_events_throttles_only_the_candidate
         ] )
     ; ( "eio context diagnostics"
       , [ test_case

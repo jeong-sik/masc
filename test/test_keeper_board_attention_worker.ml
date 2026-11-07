@@ -2189,7 +2189,7 @@ let claude_quota_blocked =
         Masc.Fusion_official_client.Claude_failure
           (Runtime_claude_code.Quota_blocked
              { api_error_status = Some 429
-             ; rate_limit = None
+             ; block = Runtime_claude_code.Rate_throttled
              ; tool_effect_attempted = false
              ; response_emitted = false
              })

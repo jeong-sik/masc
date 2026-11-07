@@ -74,11 +74,22 @@ type turn_success =
   | Turn_input_required of Keeper_meta_contract.keeper_meta
   | Turn_cancelled of Keeper_meta_contract.keeper_meta
   | Turn_skipped of Keeper_meta_contract.keeper_meta
+  | Turn_rested of
+      { meta : Keeper_meta_contract.keeper_meta
+      ; rest : Keeper_turn_driver.provider_rest
+      ; deferred_runtime_lane : Keeper_turn_driver.deferred_runtime_lane option
+      }
+      (** The provider refused the request for its own quota and stated when
+          it resets ({!Keeper_turn_driver.provider_rest_of_failure}). The
+          Keeper rests until [rest.release_at]: the turn-failure streak, the
+          registry failure reason and fleet health are left as they were.
+          [deferred_runtime_lane] is the suffix the walk left, kept for the
+          dispatch after the rest. *)
 (** Typed non-error result of the unified turn boundary. Only
     [Turn_completed] proves that the requested action path finished.
     [Turn_checkpointed] and [Turn_input_required] are healthy runtime exits.
     [Turn_skipped] is a turn that did no work in a non-executable phase.
-    Its source stays pending.
+    Its source stays pending. So does a [Turn_rested] turn's.
     The checkpoint reason lets the heartbeat retire an admitted attention
     batch when a newer durable source caused the yield or the typed
     repeated-assistant loop guard durably preserved the already-projected

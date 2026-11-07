@@ -66,6 +66,42 @@ let test_persistent_representative_stays () =
 let test_unreadable_package_stays () =
   check_eligible [] (plan [ binding ~persistence:S.Package_unreadable "0001"; binding "0002" ])
 
+module Census = Lane_addon_superseded_census
+
+let rec mkdir_p path =
+  if not (Sys.file_exists path) then (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o700)
+
+let write_file ~root relative size =
+  let path = Filename.concat root relative in
+  mkdir_p (Filename.dirname path);
+  Out_channel.with_open_bin path (fun channel -> output_string channel (String.make size 'x'))
+
+(* An eligible and a kept instance, a directory with no binding, a symbolic
+   link and a kept instance with no files at all. *)
+let test_census_counts_each_instance_files () =
+  let root = Filename.temp_dir "lane-superseded-census" "" in
+  let observation id name = Filename.concat (Lane_addon_store.observation_dir id) name in
+  write_file ~root (Lane_addon_store.binding_path "0001") 10;
+  write_file ~root (observation "0001" "a.jsonl") 100;
+  write_file ~root (observation "0001" "nested/b.jsonl") 50;
+  write_file ~root (Lane_addon_store.action_path ~instance_id:"0001" ~request_id:"r") 5;
+  write_file ~root (Lane_addon_store.binding_path "0002") 20;
+  write_file ~root (observation "0002" "a.jsonl") 7;
+  write_file ~root (observation "unbound" "a.jsonl") 1000;
+  Unix.symlink
+    (Filename.concat root (observation "unbound" "a.jsonl"))
+    (Filename.concat root (observation "0001" "link.jsonl"));
+  match Census.count ~root ~eligible:[ "0001" ] ~kept:[ "0002"; "0003" ] with
+  | Error detail -> Alcotest.fail detail
+  | Ok report ->
+    Alcotest.(check (pair int int)) "instances" (1, 2) (report.eligible, report.kept);
+    Alcotest.(check int64) "eligible binding, observations and actions" 165L report.eligible_bytes;
+    Alcotest.(check int64) "kept instances, the one without files as zero" 27L report.kept_bytes;
+    Alcotest.(check int64) "every observation file, the link not followed" 1157L
+      report.observations_bytes
+
 let () =
   Alcotest.run "lane addon superseded"
     [ ( "section 4.1",
@@ -81,4 +117,7 @@ let () =
           Alcotest.test_case "a persistent binding of another runtime diverges" `Quick
             test_persistent_other_runtime_diverges;
           Alcotest.test_case "the persistent representative stays" `Quick test_persistent_representative_stays;
-          Alcotest.test_case "an unreadable package stays" `Quick test_unreadable_package_stays ] ) ]
+          Alcotest.test_case "an unreadable package stays" `Quick test_unreadable_package_stays ] );
+      ( "layer one bytes",
+        [ Alcotest.test_case "each instance's files are counted once" `Quick
+            test_census_counts_each_instance_files ] ) ]

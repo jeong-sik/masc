@@ -190,6 +190,27 @@ let startup_sweep_unowned_exact (state : Mcp_server.server_state) =
       report.removed_exact_record_bytes
 ;;
 
+(* RFC-0497 section 6, layer one: the pass counts instances every minute; the
+   bytes are read here once, because the observation tree holds hundreds of
+   thousands of files. *)
+let startup_count_superseded_lanes (state : Mcp_server.server_state) =
+  let config = Mcp_server.workspace_config state in
+  match Lane_addon_runtime.superseded_reading ~config with
+  | Error detail -> Log.Server.warn "[Startup] superseded Lane census: %s" detail
+  | Ok { root; eligible; kept } ->
+    (match
+       Domain_pool_ref.submit_cpu_or_inline ~name:__FUNCTION__ (fun () ->
+         Lane_addon_superseded_census.count ~root ~eligible ~kept)
+     with
+     | Error detail -> Log.Server.warn "[Startup] superseded Lane census: %s" detail
+     | Ok report ->
+       Log.Server.info
+         "[Startup] superseded Lane census: eligible=%d eligible_bytes=%Ld kept=%d \
+          kept_bytes=%Ld observations_bytes=%Ld"
+         report.eligible report.eligible_bytes report.kept report.kept_bytes
+         report.observations_bytes)
+;;
+
 (* [typesafeai].excluded_keepers names keepers by name, so a misspelt name
    excludes nobody and looks as if it did. The keepers of a base path are
    declared by <keepers_dir>/<name>.toml; each excluded name with no such
@@ -282,12 +303,17 @@ let report_unarmed_typesafeai_destinations () =
     (Typesafeai_config.unarmed_destinations ())
 ;;
 
-type task = Jsonl_retention | Microvm_guest_sweep | Unowned_exact_sweep
+type task =
+  | Jsonl_retention
+  | Microvm_guest_sweep
+  | Unowned_exact_sweep
+  | Superseded_lane_census
 
 let task_name = function
   | Jsonl_retention -> "jsonl_prune"
   | Microvm_guest_sweep -> "microvm_guest_sweep"
   | Unowned_exact_sweep -> "unowned_exact_sweep"
+  | Superseded_lane_census -> "superseded_lane_census"
 
 let start_maintenance ~sw ~task ~run =
   Eio.Fiber.fork ~sw (fun () ->

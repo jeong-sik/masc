@@ -290,6 +290,13 @@ val register_skill_export_handler :
 val reconcile_configuration : config:Workspace.config -> directory:string ->
   (Yojson.Safe.t, string) result
 val configuration_directory : Workspace.config -> string
+type superseded_reading = { root : string; eligible : string list; kept : string list }
+val superseded_reading : config:Workspace.config -> (superseded_reading, string) result
+(** RFC-0497 layer one, read once at server start: the store root, the
+    instances section 4.1 would delete, and every other readable binding's
+    instance. One whole reading with the instances this process holds now,
+    outside the configuration lock. A binding without an instance id is in
+    neither list. The error is a store that cannot be listed. *)
 type configuration_owner = { id : string; source_path : string; revision : string }
 type inventory_presence = Live | Retained
 type inventory_instance = {

@@ -3268,6 +3268,21 @@ let superseded_count m (reading : retained_reading) =
     ~owner_faulted:(fun (o : Lane_addon_superseded.owner) ->
       blocking_faults ~id:o.id ~source_path:o.source_path reading.faults <> [])
     (List.map superseded_binding reading.readable)
+type superseded_reading = { root : string; eligible : string list; kept : string list }
+(* RFC-0497 layer one at server start: the whole reading once, with the
+   instances this process holds now. Not under the configuration lock: a
+   binding a pass writes meanwhile may fall on either side. *)
+let superseded_reading ~config = Eio_context.run_on_owner_domain (fun () ->
+  let m = manager config in
+  let* reading = read_retained_bindings m in
+  let eligible = (superseded_count m reading).Lane_addon_superseded.eligible in
+  let leaving = Hashtbl.create (List.length eligible) in
+  List.iter (fun id -> Hashtbl.replace leaving id ()) eligible;
+  let kept = List.filter_map (fun (binding : retained_binding) ->
+    match text binding.binding_fields "instance_id" with
+    | Ok id when not (Hashtbl.mem leaving id) -> Some id
+    | Ok _ | Error _ -> None) reading.readable in
+  Ok { root = Lane_addon_store.root m.store; eligible; kept })
 (* What a refusal says about one record: why it cannot be read and, when the
    record names it, its instance id. Without this the operator sees only a
    count and has to read every file of the store to find the one. *)

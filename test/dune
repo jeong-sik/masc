@@ -6001,7 +6001,7 @@
 (test
  (name test_lane_addon_superseded)
  (modules test_lane_addon_superseded)
- (libraries alcotest masc))
+ (libraries alcotest masc unix))
 
 (test
  (name test_server_settled_original_census)

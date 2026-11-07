@@ -3,11 +3,10 @@
 type t
 (** The one browser source an allocation's worker serves, with the browser it
     starts: a live Firefox for the owned BiDi connection. Ego's settings ride
-    the worker's arguments, and an external host worker starts no browser. *)
+    the worker's arguments. *)
 type source =
   | Owned_firefox of Browser_addon_live_bidi.configuration
   | Ego
-  | External_host
 val context : instance_id:string -> source:source -> (Yojson.Safe.t, string) result
 (** Selects a private per-instance socket directory without creating it. Persist
     this immutable descriptor through Native_addon_lease.prepare before mkdir. *)

@@ -87,7 +87,7 @@ def install(root, build, releases, base=None, *more, env=None):
     named = [] if base is None else ["--base-path", str(base)]
     return subprocess.run(
         ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-         "--prefix", str(root / "prefix"), "--manifest-dir", str(root / "absent"),
+         "--prefix", str(root / "prefix"),
          *named, *more],
         env=dict(os.environ if env is None else env, MASC_RELEASE_BASE_URL=releases),
         cwd=root, capture_output=True, text=True)
@@ -132,7 +132,7 @@ class GuestShim(unittest.TestCase):
                     for path, content in before.items():
                         self.assertEqual(path.read_bytes(), content, str(path))
                     self.assertEqual(local_build.helper_calls(build), [])
-                    self.assertEqual(local_build.lane_calls(prefix), [])
+                    self.assertEqual(local_build.addon_calls(prefix), [])
 
     # #42726: the release installer was the only thing that placed the shim, so
     # a workspace deployed from local builds kept the shim of its last release
@@ -322,7 +322,7 @@ class GuestShim(unittest.TestCase):
         self.assertEqual(result.stderr, "")
         lines = result.stdout.splitlines()
         self.assertTrue(lines[0].startswith("# Usage: scripts/install-local-build.sh"), lines[0])
-        for option in ("--prefix", "--manifest-dir", "--skip-build", "--build-dir",
+        for option in ("--prefix", "--skip-build", "--build-dir",
                        "--base-path", "--no-guest-shim", "--print-build-targets"):
             self.assertEqual(sum(line.startswith(f"#   {option} ") for line in lines), 1, option)
 

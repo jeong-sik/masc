@@ -337,7 +337,7 @@ let test_lane_addon_native_claims () = with_lane_store (fun base root ->
                @ match version with Some v -> ["version", `Int v] | None -> []));
     history in
   let descriptor instance_id =
-    match Browser_addon_socket.context ~instance_id ~source:Browser_addon_socket.External_host with
+    match Browser_addon_socket.context ~instance_id ~source:Browser_addon_socket.Ego with
     | Ok json -> json
     | Error detail -> fail detail in
   let directory_of descriptor = match descriptor with

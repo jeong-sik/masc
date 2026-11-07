@@ -1,11 +1,8 @@
-# Attached Firefox BiDi peer
+# Owned Firefox BiDi peer
 
-`masc-browser-host --bidi-url ws://127.0.0.1:9222/session` opts into a
-Firefox Remote Agent that the operator explicitly enabled. Without this option
-the executable continues using WebExtension native messaging stdin/stdout.
-The endpoint must be loopback. The browser Add-on can own a configured Firefox
-and its in-process BiDi peer (below). The standalone host is an explicit external
-connection; neither mode copies a login profile or obtains application tokens.
+The `browser-firefox` Lane Add-on starts a Firefox with its Remote Agent on a
+loopback port and reaches it through an in-process BiDi peer. It copies no
+login profile and obtains no application tokens.
 
 ## Inspecting unavailable tabs
 
@@ -19,8 +16,6 @@ tab or opening a fresh one on the same connection. Never replace a user's
 existing tab merely to make the listing complete.
 
 ## Attaching a connection
-
-### Let the browser Add-on own Firefox
 
 The attached `browser-firefox` Lane Add-on starts Firefox when its declaration
 is enabled and the workspace's `runtime.toml` contains:
@@ -65,370 +60,10 @@ declaration's `enabled = false` stops this worker; the other browser sources
 keep running. Existing instances retain their captured configuration until
 detached.
 
-### By hand
-
-Without the table the operator does both steps.
-
-1. Start a Firefox with its Remote Agent on a loopback port, on a profile
-   kept for this.
-
-   ```sh
-   FIREFOX=/Applications/Firefox.app/Contents/MacOS/firefox
-   PROFILE="$HOME/masc-keeper-firefox-profile"
-   mkdir -p "$PROFILE"
-   "$FIREFOX" --no-remote --profile "$PROFILE" --remote-debugging-port 9222
-   ```
-
-   `FIREFOX` is the Firefox executable. The path above is the macOS one, the
-   only platform this was run on. On Linux it is the `firefox` on the `PATH`.
-   `PROFILE` is any directory kept for this. It is not under a hidden
-   directory because a Firefox installed as a Snap reaches only non-hidden
-   files in the home directory
-   ([Snap home interface](https://snapcraft.io/docs/reference/interfaces/home-interface/),
-   read 2026-10-08).
-
-   This is a second Firefox beside the one in everyday use, which keeps
-   running without the flag. Log in there once, only to the sites a Keeper
-   works on. Any local process can connect to that port, drive that browser
-   and read its cookies; there is no authentication. The dedicated profile is
-   what keeps that to those sites (RFC browser-live-one-connection, decision
-   1). The command-line flag is the only way to enable the Remote Agent, so it
-   cannot be turned on in a Firefox that is already running.
-
-2. Run the host for the workspace the MASC server serves.
-
-   ```sh
-   BASE_PATH="$HOME/masc-workspace"
-   "$BASE_PATH/.masc/browser-lane/host/launch" --bidi-url ws://127.0.0.1:9222/session
-   ```
-
-   `BASE_PATH` is the directory that holds that workspace's `.masc`; the path
-   above is an example.
-
-   The browser lane has to be installed for that workspace first.
-   `masc browser-lane-setup --mode host` writes the lane token the host and the
-   server share (`<base-path>/.masc/browser-lane/token`), a copy of the host
-   executable, and the `launch` script used here, and nothing else. (`--mode bidi`
-   writes the same and the table above, so MASC starts the Firefox; `--mode
-   extension` writes the same and the extension.) The launcher runs that copy
-   with this workspace's `--base-path` and token file and passes on what
-   follows it, so it does not depend on the `PATH`.
-
-   Adding `--firefox-profile <profile>` makes the host end a session with a
-   Firefox on any other profile, before accepting any page input.
-
-   `masc-browser-host --base-path "$BASE_PATH" --bidi-url ...` is the same
-   host when the executable is on the `PATH`. Set `BASE_PATH` before it: an
-   empty `--base-path` is taken as the current directory, not as "use the
-   default". Leaving the option out uses `MASC_BASE_PATH`.
-
-   The host finds the server's port in the workspace's `connection.toml`. An
-   exported `MASC_HTTP_PORT` overrides that file; `--server` fixes the origin.
-   `MASC_HTTP_BASE_URL` is an advertised address and does not select the local
-   connection. An older installed host may still use it: rerun browser lane
-   setup and restart the host to use the current executable.
-   If a loopback `MASC_HTTP_BASE_URL` previously pinned the host, verify both
-   the `MASC_HOST` and `MASC_HTTP_PORT`, workspace or default port `8935` before
-   updating: the selected address receives the lane token. With `MASC_HOST`
-   unset, the host is `127.0.0.1`. A later candidate port also receives the
-   token in the ping before it has answered the lane. A positive ping does not
-   authenticate the peer ([issue #36534](https://github.com/jeong-sik/masc/issues/36534)).
-   The workspace-derived host
-   maps `localhost`, `::1` and wildcard binds to `127.0.0.1`; use `--server`
-   when a manually started host needs an IPv6-only listener.
-
-The connection is attached when the TUI's Browser Lane picker (`b`) lists a
-`Firefox · BiDi` row, and `/api/v1/dashboard/browser-lane/clients` reports a
-client with `transport: "webdriver_bidi"`.
-
-If the everyday Firefox also has the extension connected, the live lane has
-two browsers. A request that names no `clientId` is then refused as
-`ambiguous_browser_clients`; a Keeper picks the `webdriver_bidi` connection
-from the list and keeps its `clientId` for the task.
-
-The host runs in the foreground until it is stopped with Ctrl-C or SIGTERM,
-or its terminal is closed (SIGHUP). It then finishes and answers a command in
-flight, tells the server, ends the BiDi session it asked for, and exits 0. A
-SIGTERM that arrives after another handled signal has already requested this
-graceful shutdown ends it at once, leaving the session in Firefox. A second
-Ctrl-C also ends it at once. A stop that comes before the WebSocket is up
-abandons the attempt. One that comes while the session request is unanswered
-waits for that answer, up to twenty seconds, and then ends the session.
-
-A host started ignoring one of these signals keeps ignoring it. Under
-`nohup` it therefore outlives its terminal, and is stopped with SIGTERM.
-
-Exit status 0 says the host stopped as asked and the same Firefox takes the
-next one. A host that was stopped and could not end its session exits 1, as
-does one that ends by itself. A result the server did not acknowledge is
-logged and does not change the status.
-
-Restarting the MASC server does not end it. A poll the server did not answer is asked again after
-five seconds, at the port the workspace's `connection.toml` names once that
-port answers, and a result that may not have arrived is sent again before the
-next poll. The restarted server sees the same client ID, and Firefox is not
-asked for a new session.
-
-Sending a result again delivers it only when the first attempt was never
-handled. The server takes a result once, so when the first attempt arrived
-and only its answer was lost, the second is refused and the host logs that.
-A restarted server does not know requests the earlier process issued; a
-result for one of those is lost whichever attempt arrives.
-
-It ends by itself in three cases, and says which in its own log output:
-
-- Firefox closed the BiDi connection, or the connection failed. This ends a
-  host that is waiting for work too; a command the connection ended under is
-  answered first.
-- A command's outcome is unknown.
-- The server refuses the client's registration for a reason that asking
-  again would not change: the request is one it cannot read, it holds the
-  client ID as another browser, or it calls a client ID ended on the first
-  poll that ID ever sent.
-
-The reason is not reported to the server. It is written to the host's
-record, described below.
-
-A server that has ended the host's connection for its silence does not end
-the host. The server ends a connection after two minutes without a poll,
-which is what a host meets after its machine slept or it was suspended in
-the terminal, and it serves that client ID no more. The host then registers
-again under a new `clientId` and keeps its BiDi session, so Firefox is not
-asked for another. The one case that does end it is the last one above: an
-ID that had sent no poll before cannot have fallen silent, and another new
-ID would be told the same.
-A Keeper that held the old `clientId` reads the list of connections again
-and takes the new one; requests under the old one are refused as
-`selected_client_disconnected`.
-
-## What the host leaves on disk
-
-The host keeps two files under `<base-path>/.masc/browser-lane/`, so that
-whether a host is running, and why the last one ended, can be read without a
-server:
-
-- `bidi-host.lock`. The host holds a lock on it from start to exit. The
-  kernel drops the lock however the host dies, so nothing has to be kept
-  fresh. A workspace has one BiDi host: a second one finds the lock held,
-  does not connect to Firefox, names the first one's pid and exits.
-- `bidi-host.json`. The host's pid, when it started, the BiDi address
-  without its query, the `clientId` it polls as now, and when Firefox gave
-  it its session. Every change replaces the whole file.
-  - `unacknowledged` lists each result the host holds no acknowledgement
-    for: the request's UUID, the verb, and two answers.
-    - `outcome`: the command `succeeded`, was refused before any effect
-      (`not_started`), or is `unknown`.
-    - `cause`: the server answered with a status that refuses the result
-      (`refused`), the host never sent it (`not_sent`), or no
-      acknowledgement reached the host (`unconfirmed`). The server takes a
-      result before it answers, so an `unconfirmed` one may have arrived:
-      that is also what an answer the host could not read is, and a result
-      that went out once and could not be sent again.
-  - After successful archival, the snapshot keeps the newest 64 results.
-    Before removing older entries, the host durably appends their complete
-    metadata to the private `browser-lane/bidi-host-unacknowledged.jsonl`
-    beneath the workspace `.masc` directory. Each schema-1 archive row names
-    the host pid, start time and client ID alongside the unchanged result
-    fields. This archive is append-only; the ordinary diagnostic log is not
-    a durable backup. Archive rows may repeat after uncertain writes.
-  - A host that starts appends the previous record's results to the same
-    archive, under the previous host's pid, before it writes its own record.
-    When that append fails it does not start, and the previous record stays.
-  - If archival fails, the host reports the failure and retains every
-    unarchived entry in its snapshot, even above the normal window, then
-    retries on a later addition. A snapshot write failure retains its state
-    in memory for the next write; it does not undo a committed archive.
-    The archive and snapshot together carry the metadata; archived entries
-    are diagnostic receipts and are never replayed as commands.
-  - Readers report the actual snapshot count, including a longer record
-    from another writer. Reaching 64 alone does not prove whether older entries exist
-    or archival succeeded; the status names the archive without claiming
-    that it exists or succeeded from the count alone.
-  - A host that leaves in order adds `ended`: when, why,
-    `session_in_firefox`, and `because`. A host that could not attach leaves
-    its reason the same way. `because` is the cause a next step turns on:
-    `profile_not_kept` with `expected`, the profile the host was given with
-    `--firefox-profile`, and `found`, the one Firefox said it runs or null
-    when it did not say, for a host that ended a session on another profile;
-    `reason_only` otherwise. Its paths are written as the reason is.
-    - `none`: nothing of this host's is left. Firefox confirmed the end or
-      said the connection has no session (`invalid session id`), the host
-      never got as far as asking for one, or Firefox answered its request
-      for one with an error other than `session not created`.
-    - `refused`: Firefox refused the host a session with `session not
-      created`. It does that while it holds one: another host's that is
-      attached, or one a host that died left there. That session was there
-      when this host asked. It stays until its own host ends it or that
-      Firefox is restarted, and the record does not say whether it is there
-      now.
-    - `left`: Firefox was asked and did not confirm: it answered with
-      another error, or not in time. It is taken to keep the session, and
-      then refuses the next host until it is restarted.
-    - `unknown`: the connection was gone before the host could ask. A
-      Firefox that quit took the session along; one still running keeps it.
-
-Read together they say one of these:
-
-| Record | Lock | Meaning |
-|---|---|---|
-| none | free | No BiDi host has run for this workspace. |
-| none | held | A host holds the workspace lock before writing its first record; the state is `record_missing_but_locked`. |
-| no ending | held | A host is running. It is attached once the record has its session time; a server that is down does not change this. |
-| an ending | | The host left in order and said why. |
-| no ending | free | The host was killed or crashed, or it left in order and could not write its ending. Its BiDi session may be left in Firefox. |
-| unreadable | | The record is not one the reader takes. The reader still says whether a host holds the lock: one that does refuses the next host, which then cannot replace the record. |
-| none | cannot be asked | Whether a host started cannot be known. The state is unreadable, with why the lock could not be asked. |
-| no ending | cannot be asked | Whether the host runs is not known. The state is unreadable, with why the lock could not be asked. |
-
-A reader looks at the record and then at the lock, so it can be wrong for
-as long as one write of the record takes: while a starting host has the
-lock and not yet its record, the reader still sees the host before it; and
-a host that wrote its ending and exited between the two looks reads as
-killed. The next read is right.
-
-A host that starts replaces the record, once the previous record's results
-are archived. A previous record it reads and cannot load (another layout, or
-damaged) is first copied to `bidi-host.json.unloadable-<pid>-<time>`, named
-by the new host; one it cannot read at all is left in place, and that host
-does not start. The record carries no lane token, no
-request's arguments and nothing read from a page. A request is named only by
-the UUID the server issued and by a verb the host knows; for anything else
-the field is `null`. A reader built before a verb was added reads that verb
-as unnamed and the rest of the record as it is. The reason for ending is the
-one free sentence, and it is written as printable ASCII: other bytes appear
-as `\xNN`, and a reason longer than 512 bytes is cut.
-
-A reader takes these three only in the form a host writes them: a reason in
-printable ASCII, with `\xNN` only for a byte a host does not write as it
-is, that is within that length or cut there and marked, an
-address as a host records it, and a client ID the lane would take. Anything
-else makes the record unreadable to it. What a reader passes on to an
-operator, a terminal and a model is then one line of known bytes and length;
-what the line says is not judged. Times are written to the nearest
-millisecond, and one a host wrote is written back as the same text.
-
-The host does not start when it cannot take the lock or write its first
-record: a host that held the lock under its predecessor's record would be
-read as that predecessor. A record that could not be written later does not
-stop a serving host; the next write that succeeds carries it.
-
-Three places read the record and say what it says, with what the operator
-does next:
-
-- `masc doctor` prints a `browser_bidi_host` line. It reads the files, so it
-  answers with no server running. The dashboard's setup check
-  (`GET /api/v1/setup/status`) is the same check inside a server.
-  - `satisfied`: a host runs and the server that answers lists its client.
-    That is where hover and drag are served.
-  - `needs_verification`: a host runs and that is all that is known. It is
-    still connecting, the check runs outside a server as `masc doctor` does,
-    or the answering server does not list the host's client: its browser
-    Add-on lists another client, lists none, or cannot be read.
-  - `needs_setup`: none runs.
-  - `invalid`: the record or its lock cannot be read.
-
-  A workspace with no browser lane installed and no record has no such line.
-- `GET /api/v1/dashboard/browser-lane/clients` adds `bidiHost` beside
-  `clients`:
-  - `state`: `never_started`, `record_missing_but_locked`, `running`, `ended`, `died` or `unreadable`.
-  - What the state was read from: the `record`, whether the host's lock was
-    held as `lock_held`, and why either cannot be read as `detail`. A reader
-    works the state out again from these and refuses a report whose `state`
-    is another.
-  - `attach`: the host command as `launcher` and `arguments`, and
-    `launcher_state` (`installed`, `not_installed`, `needs_reinstall`).
-  - `keeper`: the configured browser ownership, by `kind`.
-    `addon_managed` carries the configured `port` and `profile`. The attached
-    Add-on observation supplies actual worker and connection readiness.
-    `addon_off` (`[browser.live.bidi]` is set, but no enabled declaration
-    runs `browser-firefox`), `not_configured` (no `[browser.live.bidi]`) and
-    `not_known` (no configuration was read, or the declarations could not
-    all be read) carry nothing more.
-  - `message`: the paragraph the doctor prints.
-- The TUI's Browser Lane picker draws it from the server's `bidiHost`:
-  whether a host runs and whether the server lists it, why the last one
-  ended, what comes before the next, the results the host holds no
-  acknowledgement for, and the command that starts one, or, where MASC
-  starts it, that MASC does and what its last start left
-  ([the rows](../guides/tui-browser-lanes.md)).
-
-The doctor and the connection list each read the record first and ask the
-server for its connections once, after that. What
-an answer says of the host and the connections it lists are of that one
-list. The TUI draws what the connection list answered.
-
-The paragraph says what comes before the next host. That follows what became
-of the last one's session. Once a host has run, the host command in the
-paragraph names the address that host was given, and the Firefox flag names
-that address's port:
-
-| The last host | Before the next one |
-|---|---|
-| ended, session `none`, after it was attached | Nothing: the host command, while that Firefox still runs. |
-| ended, session `none`, before Firefox gave it a session | Check that a Firefox answers at that address, then the host command. |
-| ended, session `left` | Restart the Firefox at that address. |
-| ended, session `unknown` | Start that Firefox again, restarting it if it still runs. |
-| ended, session `refused` | Stop a host still attached to that Firefox, then the host command. When that host is refused too with none attached, restart that Firefox first. |
-| died | Run the host. When Firefox refuses it a session, restart that Firefox and run it again. |
-
-When the workspace has no launcher, or one that is not as an installation
-wrote it, the paragraph says to install the lane first. A paragraph of a
-running host, and of a record that cannot be read while a host holds the
-lock, names no command: there is none to run.
-
-A path and an address in a command are written as one shell word each, in
-single quotes. The reason for ending is the host's own words: it is set in
-double quotes, and a double quote in it is written `\"`.
-
-A host can run and be attached while the answering server does not list its
-client:
-
-- The server lists no BiDi connection. Hover and drag are refused on that
-  server, and the paragraph names what makes the two differ: the host polls
-  another server (a fixed `--server` or `MASC_HTTP_PORT`; older hosts may
-  also use `MASC_HTTP_BASE_URL`), it has not polled for 120 seconds and the server ended its
-  connection, or the server started moments ago.
-- The server lists another BiDi connection. That connection is this host's
-  when it registered again under a new ID that it could not write to its
-  record; otherwise it is another host's. The paragraph says both and does
-  not say that hover and drag are refused.
-
-The record can also say that no host runs while the server lists a BiDi
-connection: a host that died stays listed until 120 seconds pass without a
-poll, the live Firefox this server's browser worker runs stays listed while
-that worker runs, and a host started for another workspace can poll this
-server. The
-paragraph says so beside what the record says.
-
-Attaching again is the host command alone. A host that is stopped, or ends
-by itself, first ends the BiDi session it asked for; Firefox keeps running
-with its tabs and takes the next host, which registers as a new client. Without that step the
-session would stay in Firefox after the host is gone, and Firefox takes one
-session at a time (RFC browser-live-one-connection, section 2.4).
-
-These do leave the session behind. A host started after them is refused
-with `session not created` and exits; quit that Firefox, start it with the
-same command and profile, then start the host.
-
-- The host was killed with SIGKILL, a second Ctrl-C, or a SIGTERM after graceful shutdown had already been requested, or crashed.
-- Firefox did not answer the session's end within two seconds, or its socket
-  was already closed. The host logs `the BiDi session was not ended` with the
-  reason. If the socket closed because Firefox quit, there is nothing to
-  restart.
-
-A host refused with `session not created` asked for a session and got none,
-so it leaves none: stopping it changes nothing in Firefox.
-
-Measured on Firefox 157.0.1 on 2026-10-08: a host stopped with SIGTERM was
-followed by a second host on the same Firefox, and a host stopped with
-SIGKILL was not.
-
-The peer attaches only to a browser that reports itself as `firefox`. Zen has
-not been tried.
+The peer attaches only to a browser that reports itself as `firefox`.
 
 The BiDi connection owns its opaque context to integer tab mapping. IDs are not
-recycled during the client lifetime and are never joined to extension IDs or
-URLs. Tab visibility and Firefox version are observed, not inferred from index.
+recycled during the client lifetime and are never joined to URLs. Tab visibility and Firefox version are observed, not inferred from index.
 Unsupported verbs fail explicitly. Fixed repository scripts provide DOM reads,
 scenes, document references, and semantic interactions; command arguments are
 JSON data, never supplied JavaScript.
@@ -447,24 +82,15 @@ the gesture with synthetic DOM events when a drop is absent.
 Pointer receipts read only the URL, title and scroll position. Screenshot
 validation also reads tab metadata instead of the document body, so a large
 page does not turn completed input or capture into a body-size failure.
-The server refuses `hover_at` and `drag` on a WebExtension connection before
-it queues a command, as `live_transport_unsupported`; the operator must
-explicitly attach the already-enabled loopback Remote Agent with `--bidi-url`.
 [What each live connection serves](browser-lane.md#what-each-live-connection-serves)
-is the whole table. Live-client
-discovery reports `transport: "web_extension"` or `"webdriver_bidi"` alongside
-each `clientId`, including the ambiguity response and
-`/api/v1/dashboard/browser-lane/clients`. Select the `webdriver_bidi` client,
-read that client's tabs, and capture again; extension tab IDs are not converted
-to BiDi tab IDs. The host declares its mode with `x-browser-transport`. An
-installed host that omits this header uses the WebExtension poll contract;
-BiDi hosts declare `webdriver_bidi`. The server rejects empty or unknown values
-and a transport change on an existing client ID. Interaction receipts identify
-the resolved tab with `tabId`.
+is the whole table. Live-client discovery reports `transport` alongside each
+`clientId`, including the ambiguity response and
+`/api/v1/dashboard/browser-lane/clients`. Interaction receipts identify the
+resolved tab with `tabId`.
 This is not an atomic snapshot/input
 transaction: the operator can still change the page after validation. There is
 no write replay. An unknown outcome stops this live client. Reads and interactions
-share the existing host command deadline; connection setup has that same bound.
+share the existing command deadline; connection setup has that same bound.
 Protected pointer-release cleanup can additionally run up to one transport
 deadline after the outer command deadline. A timeout is not an instantaneous
 release guarantee.
@@ -475,8 +101,6 @@ The element inventory shares computed styles and ancestor display/opacity checks
 within one synchronous observation; later observations recompute them.
 Pointer receipts use the shared URL/title/scroll observation, also without a
 whole-document text read after input.
-Ending the host issues `session.end` and neither browser.close nor
-browsingContext.close.
 
 A tab whose metadata cannot be read is retained in `unavailableTabs` alongside
 `complete: false`; readable tabs keep their IDs. This partial listing does not
@@ -485,10 +109,7 @@ selection also continues past unreadable tabs using metadata only, and includes
 their refusal details when no readable active tab is found. Closing an unreadable
 tab is not required to use another tab.
 
-This initial peer does not implement live activate_tab, uploads, download
-collection, or the extension's navigation commit barrier. The server refuses
-activate_tab on a BiDi connection before it queues a command, by the same
-table. page.elements runs the shared element script in the
+The peer does not implement uploads or download collection. page.elements runs the shared element script in the
 requested tab, so its selectors are the ones the DOM interactions take. A
 page.read with includeHtml runs the shared document helper, which
 leaves the HTML out and says why when the result passes 1 MiB. Both reads
@@ -509,11 +130,6 @@ and must not be exposed beyond loopback.
 
 Validation: `test_browser_bidi_peer` exercises opaque identity, the element
 inventory, the document source and the lane table against the peer.
-`python3 test/test_browser_bidi_host.py HOST FIREFOX` uses an owned temporary
-profile and actual Firefox to exercise native HTTP poll/result, screenshot,
-trusted pointer-capture drag, stale viewport rejection, large-document pointer
-receipts, and two identical-URL contexts.
-The latter requires the CI-built host and Firefox; no local build is needed.
 
 Protocol references: [Mozilla direct connection](https://developer.mozilla.org/en-US/docs/Web/WebDriver/How_to/Create_BiDi_connection),
 [BiDi input](https://developer.mozilla.org/en-US/docs/Web/WebDriver/Reference/BiDi/Modules/input/performActions),
@@ -523,7 +139,7 @@ Protocol references: [Mozilla direct connection](https://developer.mozilla.org/e
 
 BiDi interactions display a non-interactive MASC badge with the authenticated
 Keeper/calling-agent label and operation. While the page channel remains available it settles to Finished, Not performed,
-or Outcome unknown when the host completes or unwinds the request. A lost
+or Outcome unknown when the peer completes or unwinds the request. A lost
 transport cannot update an existing badge; inspect the connection before treating
 a retained Working badge as current. Navigation does not create a new badge for
 an old request's cleanup. A page refusing
@@ -551,10 +167,9 @@ browser's reason, including stale-document/viewport refusals.
 ## Open a tab on the selected BiDi connection
 
 Use `masc_browser_act` with `action:"open_tab"`, `lane:"live"`, the exact
-observed `clientId`, and an absolute HTTP(S) `url`. The WebExtension
-connection does not serve new-tab creation.
+observed `clientId`, and an absolute HTTP(S) `url`.
 
-The host creates a background tab in the selected Firefox profile, navigates
+The peer creates a background tab in the selected Firefox profile, navigates
 only that new context, and returns `tabId`, `created:true`, `url`, and `title`
 with the server's connection identity. Use this returned tab ID and client ID
 for page reads and hover; new tabs share that profile's default user context.
@@ -565,12 +180,12 @@ A refused creation or a command never written is a pre-effect failure. When
 creation is confirmed but navigation is refused or the page summary fails,
 the response remains a failure with `effectPhase:"partial"` and a structured
 `created:true`/`tabId` receipt. The server adds the selected connection identity
-and keeps that receipt in the Keeper's error output. The host keeps serving
+and keeps that receipt in the Keeper's error output. The peer keeps serving
 this connection, so the caller can list or read the same tab before deciding
 what to do next. This is a confirmed effect, never permission to replay creation.
 
 A lost reply or broken session remains an unknown outcome and ends the
-connection. The host never creates another tab or closes the created context
+connection. The peer never creates another tab or closes the created context
 to recover. List current connections and observe their tabs again; old
 connection tab IDs must not be reused on a replacement connection.
 
@@ -589,7 +204,7 @@ fresh observation first.
 `expectedUrl` remains optional for semantic click. If omitted, resolution
 captures the current URL and the native input guard checks that URL and the
 resolved viewport before dispatch. There is no DOM-click fallback or automatic
-replay after native input. The WebExtension's DOM-click behavior is unchanged.
+replay after native input.
 
 ### Drag movement and acceptance
 
@@ -626,8 +241,7 @@ visibility, disabled-control, document, viewport, and URL guards as native click
 
 `click_at` takes an optional `button`: `primary` (the default), `middle` or
 `secondary`. BiDi presses and releases the matching pointer button
-(0, 1 or 2) at the observed point. The WebExtension clicks through the DOM and refuses a non-primary button before any
-input is sent. A
+(0, 1 or 2) at the observed point. A
 `secondary` click opens whatever the page binds to the context menu; observe the
 page afterwards, the receipt does not say what it did.
 
@@ -642,12 +256,11 @@ way to create or close a window yet.
 and `drag`, from a pointer whose `pointerType` is `touch`. Firefox 158 reported
 `pointerdown`, `touchstart`, `pointerup` and `touchend` to the page for a tap,
 each trusted, followed by the mouse events and a click (probed 2026-10-22), and
-`pointermove` events through a swipe. The WebExtension clicks through the DOM,
-so it refuses before any effect.
+`pointermove` events through a swipe.
 
 `back`, `forward`, `reload` and `close_tab` act on a top-level tab only if this
 connection opened it with `open_tab`. A tab the operator opened is refused before
-any browser call: it holds pages and unsaved state this host never saw, and these
+any browser call: it holds pages and unsaved state this peer never saw, and these
 actions carry no `expectedUrl` that says which page the caller observed. The
 commands are `browsingContext.traverseHistory` (delta -1 or 1),
 `browsingContext.reload` (waiting for the document) and `browsingContext.close`
@@ -662,8 +275,7 @@ BiDi connection sends `browsingContext.setViewport` with the size, or with
 Firefox 158 reports the new `innerWidth` and `innerHeight` right after the
 command (probed 2026-10-22), and it accepts widths of 0 and 100000 without an
 error, so the lane bounds each side to 100 to 4096 CSS pixels itself. The
-override stays on the tab until it is cleared. Firefox 158 keeps it after the session ends (probed 2026-10-22: a new session read the old size), so the peer gives each tab it sized its own size back when it ends the session. A host that dies without ending its session leaves the size on the tab. The
-WebExtension refuses the action before any effect.
+override stays on the tab until it is cleared. Firefox 158 keeps it after the session ends (probed 2026-10-22: a new session read the old size), so the peer gives each tab it sized its own size back when it ends the session. A peer that dies without ending its session leaves the size on the tab.
 
 `type_text` sends Unicode text into the currently focused editable control.
 `press_key` sends one named key or Unicode scalar, optionally with explicit
@@ -681,41 +293,10 @@ reserved special-key scalars U+E000 through U+E05D are refused as text instead o
 becoming commands. An unanswered input remains uncertain and is never replayed.
 Receipts report the original action and page identity without echoing typed text.
 
-WebExtension does not serve these native actions. Actual browser zoom is a
-separate WebExtension-only action described below.
 `test/fixtures/browser-native-input.html` records trusted double-click and keyboard
 input for isolated native browser probes. Source tests and protocol fixtures do
 not establish that an installed browser has completed these interactions.
 
-
-### Actual browser zoom
-
-`masc_browser_interact` action `set_zoom` requires the observed WebExtension
-`clientId`, `tabId`, `expectedUrl`, and an explicit numeric `factor` from 0.3
-through 5. The extension must be version 0.8.0 or later. BiDi and ego refuse
-this action before input; the server does not switch
-browsers to perform it.
-
-The extension reads the tab URL, current zoom, and zoom settings, checks the URL
-again immediately before one `tabs.setZoom` call, then reads the resulting zoom
-and URL. The receipt reports `requestedFactor`, measured `zoomBefore` and
-`zoomFactor`, plus actual `zoomScope` and `zoomMode`. Manual or disabled zoom
-modes are refused because this action requires the browser to apply the zoom.
-It never changes zoom settings or uses CSS zoom or viewport resizing.
-
-Firefox normally uses automatic, per-origin zoom. Thus the explicit tab selects
-the origin being changed, but the change can affect other same-origin tabs and
-persist for the site. The receipt retains this scope instead of promising a
-per-tab effect. See [MDN setZoom](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/setZoom),
-[zoom settings](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/getZoomSettings),
-and [Firefox zoom behavior](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Working_with_the_Tabs_API).
-
-After zoom, obtain a fresh scene or screenshot before using viewport geometry.
-A failure after dispatch, including failed measurement or navigation during the
-command, leaves an unknown outcome and is never automatically replayed. The
-API's zero-to-reset shorthand is deliberately excluded: callers supply an
-explicit factor. [Isolated native evidence](../evidence/2026-10-19-browser-zoom/README.md)
-records actual 150% and 75% browser zoom and the exact execution boundary.
 
 ### JavaScript dialogs on a BiDi connection
 
@@ -723,17 +304,17 @@ A BiDi session answers a page's `alert`, `confirm` and `prompt` itself unless it
 is created with `unhandledPromptBehavior`. Probed 2026-10-22 on Firefox 158: a
 session made with empty capabilities returned `false` from `confirm()` at once,
 with no person involved, and `browsingContext.handleUserPrompt` then answered
-`no such alert`. The host now creates the session with
+`no such alert`. The peer creates the session with
 `alwaysMatch.unhandledPromptBehavior.default = "ignore"`, so a dialog stays open
 for the person using the browser, and subscribes to
 `browsingContext.userPromptOpened` and `browsingContext.userPromptClosed`.
 
 The two events say which dialog (`alert`, `confirm`, `prompt`, `beforeunload`),
-its message and a prompt's default. The host keeps one per context and shows it
+its message and a prompt's default. The peer keeps one per context and shows it
 as `dialog` on that tab's `list_tabs` row. It knows only what happened since it
 subscribed: a dialog already open then is not listed. `accept_dialog` and
 `dismiss_dialog` send `browsingContext.handleUserPrompt` (`accept`, and
 `userText` for a prompt) and answer only for a tab this connection opened; the
 person answers a dialog on their own tab. A tab with no dialog gets the
-browser's `no such alert`, which the host reports before any effect. The
+browser's `no such alert`, which the peer reports before any effect. The
 receipt names the dialog that was answered. A dialog's message is page text.

@@ -80,9 +80,6 @@ let browser_lane_fixed_rows ~connection_rows view =
    connection rows drawn before the picker. *)
 let browser_picker_frame_rows connection_rows = 4 + List.length connection_rows
 
-(* The cells a BiDi host row has behind the surface's two-cell indent. *)
-let browser_host_row_cells ~cols = max 1 (framed_inner_width cols - 2)
-
 let browser_lane_visible_rows (state : state) ~terminal_rows view =
   let body_rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let connection_rows = browser_lane_connection_rows view in
@@ -158,7 +155,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             ( _
             , Viewport_pointer
                 { action =
-                    ( Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
+                    ( Browser_lane.Set_viewport _ | Browser_lane.Double_click _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
                     | Browser_lane.Activate_tab | Browser_lane.Click _
                     | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Scroll _
                     | Browser_lane.Hover _ | Browser_lane.Drag_to _
@@ -211,30 +208,10 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
       | Some cursor ->
           c.push_styled ~style:(Theme.info ()) "  Choose browser";
           c.push_divider ();
-          (* The rows under the choices cannot be scrolled to. Where they
-             report a BiDi host, one that runs or ran, the first of them
-             keep a place however many choices there are, with the row that
-             says more is hidden, unless that would leave too few choices to
-             choose from. *)
-          let host_rows =
-            (if view.advanced_choices then
-               Browser_lane_view.bidi_host_rows ~width:(browser_host_row_cells ~cols) view
-             else []) in
           let empty_line = browser_lane_picker_empty_line view in
-          let extension_rows =
-            if view.advanced_choices && Option.is_some empty_line && awaiting_browser view then
-              [ Theme.info (), "  The MASC extension and its registered native host connect a live browser."
-              ; Theme.recede (), "  " ^ transport_setup_row [Browser_lane.Web_extension]
-              ; Theme.recede (), "  Enable the extension in your Zen/Firefox profile, then r:refresh." ]
-            else [] in
           let choices = browser_choices view in
-          let reports_a_host = Browser_lane_view.host_rows_report_a_host view in
           let room =
-            Browser_lane_view.picker_choice_rows
-              ~rows:(budget - picker_frame_rows - List.length (Option.to_list empty_line))
-              ~choices:(List.length choices)
-              ~below:(if reports_a_host
-                      then List.length host_rows + List.length extension_rows else 0) in
+            Int.max 1 (budget - picker_frame_rows - List.length (Option.to_list empty_line)) in
           let start = max 0 (cursor - room + 1) in
           choices |> List.iteri (fun index choice ->
             if index >= start && index < start + room then
@@ -249,34 +226,7 @@ let render_browser_lane (state : state) (view : Browser_lane_view.t) =
             [Option.bind choice browser_choice_observation;
              (if view.advanced_choices then Option.bind choice browser_choice_detail else None)] in
           c.push_styled ~style:(Theme.recede ()) ("  " ^ String.concat " · " details);
-          Option.iter (c.push_styled ~style:(Theme.recede ())) empty_line;
-          (* A terminal too short for everything loses rows from the end.
-             With no host yet, the host's rows only say how one is started:
-             they take no row from what is above them, and are drawn where
-             the screen has rows left. Rows that report a host come before
-             the rows on the extension. On a screen that holds all of both
-             the host's rows stay together; on a shorter one the host's
-             first rows are followed by the extension's, and what is cut
-             from the end is the rest of the host's. *)
-          let draw_host rows =
-            List.iter (fun row -> c.push_styled ~style:(Theme.recede ()) ("  " ^ row)) rows in
-          let draw_extension () =
-            List.iter (fun (style, row) -> c.push_styled ~style row) extension_rows in
-          let above =
-            picker_frame_rows + min room (List.length choices)
-            + List.length (Option.to_list empty_line) in
-          let extension = List.length extension_rows in
-          if not reports_a_host then (
-            draw_extension ();
-            if budget > above + extension then draw_host host_rows)
-          else if above + List.length host_rows + extension <= budget then (
-            draw_host host_rows;
-            draw_extension ())
-          else (
-            let head, rest = Browser_lane_view.picker_host_head host_rows in
-            draw_host head;
-            draw_extension ();
-            draw_host rest)
+          Option.iter (c.push_styled ~style:(Theme.recede ())) empty_line
       | None ->
       List.iter (fun row -> c.push_styled ~style:(Theme.warn ()) ("  " ^ row))
         (Browser_lane_view.unserved_rows view);

@@ -5607,15 +5607,7 @@
  (modules test_browser_lane_watched_work)
  (libraries alcotest eio eio.mock yojson masc.browser_lane masc.time_compat masc.monotonic_deadline))
 
-; Mock clock as the native host's clock: a reply that lands as the extension
-; window closes is the reply, not the host's timeout.
-(test
- (name test_browser_host)
- (modules test_browser_host)
- (libraries alcotest eio eio.mock cstruct yojson masc.browser_host masc))
-
-(include stanzas/test_browser_native_host.inc)
-(include stanzas/test_browser_lane_routes.inc)
+(include stanzas/test_browser_lane_setup_cli.inc)
 (include stanzas/test_browser_addon_preflight.inc)
 
 (test
@@ -5759,8 +5751,7 @@
  (alias runtest-test_browser_elements)
  (deps
   test_browser_elements.cjs
-  ../lib/browser_page_script.ml
-  ../connectors/browser/extension/background.js)
+  ../lib/browser_page_script.ml)
  (action (run node --test %{dep:test_browser_elements.cjs})))
 
 (alias
@@ -5768,15 +5759,6 @@
  (deps (alias runtest-test_browser_elements)))
 
 (include stanzas/test_browser_interaction.inc)
-
-(rule
- (alias runtest-test_browser_screenshot)
- (deps test_browser_screenshot.cjs ../connectors/browser/extension/background.js)
- (action (run node --test %{dep:test_browser_screenshot.cjs})))
-
-(alias
- (name runtest)
- (deps (alias runtest-test_browser_screenshot)))
 
 (include stanzas/test_keeper_nerdctl_image_admission.inc)
 
@@ -6062,7 +6044,6 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_sandbox_prerequisites.inc)
-(include stanzas/test_browser_lane_setup.inc)
 (include stanzas/test_native_addon_program.inc)
 (include stanzas/test_browser_addon_setup.inc)
 (include stanzas/test_browser_lane_bidi_setup.inc)
@@ -6499,7 +6480,6 @@
 
 (include stanzas/test_browser_bidi_peer.inc)
 (include stanzas/test_browser_ego_peer.inc)
-(include stanzas/test_browser_bidi_host_record.inc)
 
 ; An attempt that published its answer must not publish a failure over it:
 ; the light body refresh, and the window around the attempt, run after it.

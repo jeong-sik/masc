@@ -250,7 +250,6 @@ change existing Keeper configurations in bulk.
 |---|---|
 | `<prefix>/masc` | HTTP/MCP server and the CLI for configuration, login, and Keeper management. Run on a terminal, it opens the TUI |
 | `<prefix>/masc-tui` | Terminal UI for Keepers, chat, tasks, the board, approvals, and logs |
-| `<prefix>/masc-browser-host` | Executable for the Firefox-family native messaging connection. Installing it alone does not register it with the browser |
 | `<prefix>/masc-deployment-preflight-helper` | Helper binary for the execution-environment preflight |
 | `<prefix>/masc-check-runtime-deployment-preflight` | Script that runs the preflight |
 | `<prefix>/.masc-releases/<receipt-hash>/` | Dashboard from the same commit as the server, the server executable, and the verification receipt |
@@ -493,23 +492,13 @@ that shows numbers, type `0`).
   answering JSON, paused, restarting, or in a state Docker will not start from.
   For the container cases the setup prints the Docker command to run next
   (`docker logs`, `docker unpause` or `docker inspect`).
-- **Firefox routes (not marked).** When Firefox is found, two more rows connect
-  a Firefox that `imp` can log in with, the same two routes
-  [`masc browser-lane-setup`](../connectors/browser/host/README.md) offers:
-  - *BiDi*: MASC starts a Firefox of its own with remote debugging on a local
-    port. Nothing to reload, and you log in once to the sites `imp` works on.
-    The port has no authentication: any program on this computer can drive that
-    browser and read its cookies.
-  - *Add-on*: your everyday Firefox, through the MASC add-on. Firefox removes the
-    add-on when it restarts, so you load it again from `about:debugging` each
-    time.
-
-  Both write before `masc setup` starts the server, and
-  both can be chosen together: a request that names no connection then goes to
-  the BiDi Firefox. With no Firefox found the journey shows neither. A Zen
-  browser is not detected: connect it by hand with
-  `masc browser-lane-setup --mode extension --manifest-dir <Zen's native
-  messaging folder>`, which this guide does not verify.
+- **Firefox route (not marked).** When Firefox is found, one more row has
+  MASC start a Firefox of its own for `imp`, with remote debugging on a local
+  port (*BiDi*, `masc browser-lane-setup --mode bidi`). You log in once to the
+  sites `imp` works on. The port has no authentication: any program on this
+  computer can drive that browser and read its cookies. The row writes before
+  `masc setup` starts the server. With no Firefox found the journey does not
+  show it.
 - **ego lite (not marked).** When `ego-browser` answers on `PATH` or in
   `~/.local/bin`, where ego lite's onboarding puts it, one more row connects
   your [ego lite](https://lite.ego.app/). Confirming it runs
@@ -534,8 +523,6 @@ answer, and installs and writes nothing. To run them later:
 ```bash
 # BiDi row: a Firefox of its own that MASC starts
 masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
-# Add-on row: your everyday Firefox
-masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
 # ego lite row: a task space in your ego lite
 masc browser-lane-setup --mode ego --base-path "$HOME/masc-workspace"
 # Web search row: which providers have a key (writes nothing)
@@ -690,8 +677,8 @@ several Keepers together. `constitution.xml` is a development contract, not a
 Keeper's system prompt.
 
 `browser-lanes` holds the procedures for connecting to, navigating,
-controlling, and verifying a browser. It does not install a browser, an
-extension, or authentication. An existing skill package is not overwritten,
+controlling, and verifying a browser. It does not install a browser or
+authentication. An existing skill package is not overwritten,
 so on upgrade compare your changes with the new guidance and merge them in.
 Before a first browser task, read the browser-lanes skill and confirm a
 connection that supports the requested work. Keep the lane returned in
@@ -700,8 +687,6 @@ calls. When a refusal such as browser_binding_required occurs, inspect that
 response and the original connection receipt, then follow the skill's
 matching recovery procedure. Do not repeat the same call without confirming
 the cause.
-The Gecko scene features need the native host together with browser
-extension 0.5.0 or later. Update an existing browser extension separately.
 
 Choosing `--team classic` adds the following four Keeper TOMLs.
 

@@ -23,14 +23,14 @@ let info browser : Lane.client_info =
     | Ok id -> id
     | Error error -> fail error
   in
-  { client_id; browser; version = "1.0"; transport = Browser_lane.Web_extension; engine_version = "155.0.1" ;space=None}
+  { client_id; browser; version = "1.0"; transport = Browser_lane.Webdriver_bidi; engine_version = "155.0.1" ;space=None}
 ;;
 
 let payload = `Assoc [ "ok", `Bool true; "data", `String "the answer" ]
 
 (* Under the mock clock a take window only passes when the clock is moved,
    so registering a client is a take whose window this function passes. *)
-let connect ?(transport=Lane.Web_extension) ~sw ~clock browser =
+let connect ?(transport=Lane.Webdriver_bidi) ~sw ~clock browser =
   let client = { (info browser) with transport } in
   let registered =
     Eio.Fiber.fork_promise ~sw (fun () ->
@@ -215,7 +215,6 @@ let test_only_native_ego_inputs_delegate_waits () =
     check bool "transport-specific execution policy" true (Lane.live_reply_policy transport verb=expected) in
   List.iter (fun verb ->
     verify Lane.Ego_task_space verb Lane.Executor_owned;
-    verify Lane.Web_extension verb Lane.Reply_window;
     verify Lane.Webdriver_bidi verb Lane.Reply_window)
     [Lane.Page_goto {url="https://example.test/";tab_id=Some 1};
      Lane.Page_act (Lane.Action.Open_tab "https://example.test/");
@@ -223,7 +222,6 @@ let test_only_native_ego_inputs_delegate_waits () =
      Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Stop_loading})];
   verify Lane.Ego_task_space (Lane.Page_act (Lane.Action.On_tab {tab_id=1;frame_path=[];interaction=Lane.Action.Back})) Lane.Reply_window;
   verify Lane.Ego_task_space native_click Lane.Executor_owned;
-  verify Lane.Web_extension native_click Lane.Reply_window;
   verify Lane.Webdriver_bidi native_click Lane.Reply_window;
   let guarded=Lane.Page_interact {tab_id=1;frame_path=[];expected_url=None;action=Lane.Scroll {x=0;y=1}} in
   verify Lane.Ego_task_space guarded Lane.Reply_window

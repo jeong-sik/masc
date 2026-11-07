@@ -39,11 +39,9 @@ let protect ~module_name ~finally_label ~finally f =
 
 let masc_dirname = ".masc"
 let owner_lease_dirname = ".masc-owner"
-let browser_lane_dirname = "browser-lane"
 let searxng_dirname = "searxng"
 let dos_dirname = "dos"
 let msx_dirname = "msx"
-let browser_lane_token_name = "token"
 
 (* OUTPUT root segment for server-written keeper runtime state (meta json +
    metrics/memory/decisions/receipts sidecars). The SINGLE literal behind both

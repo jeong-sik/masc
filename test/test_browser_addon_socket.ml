@@ -10,9 +10,9 @@ let rec remove path = match (Unix.lstat path).Unix.st_kind with
    slot, so the slot holds only its claim. *)
 let kept_root directory = directory ^ "-kept"
 let cleanup ~admission ~directory = Socket.cleanup ~admission ~directory ~kept_root:(kept_root directory)
-(* Without a [source], the allocation is an external host worker's: it starts
-   no browser and may hold only its socket. *)
-let with_claim ?(source=fun _ -> Socket.External_host) ?(context=Fun.id) work =
+(* Without a [source], the allocation is an ego worker's: masc starts no
+   browser for it. *)
+let with_claim ?(source=fun _ -> Socket.Ego) ?(context=Fun.id) work =
   let directory=Filename.temp_file "browser-addon-slot-" "" in
   Unix.unlink directory;Unix.mkdir directory 0o700;
   let instance_id=Uuidm.(to_string (v4_gen (Random.State.make_self_init ()) ())) in
@@ -108,8 +108,7 @@ let foreign_source_resources () =
       Unix.unlink path;
       released (cleanup ~admission ~directory);
       check "the allocation of its own source's resources is released" false (Sys.file_exists root)))
-    [Socket.Ego,"live-bidi.json";
-     Socket.External_host,"live-bidi.json"]
+    [Socket.Ego,"live-bidi.json"]
 let acquisition_state directory =
   match List.filter (fun name -> String.starts_with ~prefix:"browser-" name) (Array.to_list (Sys.readdir directory)) with
   | [name] -> (match Yojson.Safe.from_file (Filename.concat directory name) with
@@ -161,7 +160,7 @@ let every_source_moves_keeper_files () =
          | Ok (Socket.Cleanup_kept {files;_}) -> files=1
          | Ok (Socket.Cleanup_released|Cleanup_retained) | Error _ -> false);
       check "the allocation is gone" false (Sys.file_exists root)))
-    [Socket.Ego;Socket.External_host]
+    [Socket.Ego]
 (* A directory that is not the one acquired moves nothing out of it. *)
 let a_replaced_directory_moves_nothing () = with_claim (fun admission directory root ->
   ignore (ok (Socket.acquire ~admission ~directory));

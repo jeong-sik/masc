@@ -37,15 +37,8 @@ let view ~config ~principal operation json =
   match shared_host ~config ~principal with
   | Ok host -> operation host json
   | Error error -> Browser_addon_host.error_result ~start_time error
-(* The manual BiDi host record is on this server's disk, not in the Add-on
-   worker: it is read here and answered beside the Add-on's clients, where the
-   TUI connection list reads it. It reads the Add-on with the access the
-   clients do, so the response never names an installation they cannot see. *)
 let clients_listing ~config =
-  let bidi_host=Browser_bidi_host_status.observe ~access:view_access
-    ~base_path:config.Workspace.base_path
-    ~configuration:(Runtime.browser_configuration ()) in
-  Browser_addon_view.connection_inventory ~config ~access:view_access ~bidi_host
+  Browser_addon_view.connection_inventory ~config ~access:view_access
 let reply_view request reqd result = match result with
   | Tool_result.Completed _ -> respond_json_value_with_cors request reqd
       (`Assoc ["ok",`Bool true;"data",Tool_result.data result])

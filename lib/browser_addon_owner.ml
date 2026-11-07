@@ -134,11 +134,11 @@ let attach_live ?ego_space t ~client_id ~cleanup =
             && other.transport = transport && List.mem other.client_id t.clients in
           if List.exists serving (B.active_clients ()) then Error ("an owned " ^ name ^ " connection is already attached")
           else
-            (* This worker disconnects its own connection when it ends; the
-               lane's no-poll window is for native hosts only. *)
+            (* This worker disconnects its own connection when it ends, so
+               the lane stops timing it. *)
             (match transport,ego_space with
-             | (B.Webdriver_bidi|Web_extension),Some _ -> Error "Space observations require an Ego connection"
-             | (Webdriver_bidi|Web_extension|Ego_task_space),None | Ego_task_space,Some _ ->
+             | B.Webdriver_bidi,Some _ -> Error "Space observations require an Ego connection"
+             | (Webdriver_bidi|Ego_task_space),None | Ego_task_space,Some _ ->
                Result.map (fun () ->
                  t.live <- (transport, owned_cleanup name cleanup) :: t.live;
                  t.ego_space <- (match ego_space with None -> t.ego_space | Some ego_space -> Some (client_id,ego_space));
@@ -146,7 +146,7 @@ let attach_live ?ego_space t ~client_id ~cleanup =
                     owner published about the lane. *)
                  t.unavailable <- [])
                (B.hold_client ~client_id))
-        | None | Some {transport=B.Web_extension;_} -> Error "owned live client is not an active connection this worker runs")
+        | None -> Error "owned live client is not an active connection this worker runs")
 let revoke t =
   Eio.Mutex.use_rw ~protect:true t.gate (fun () ->
     match t.phase with
@@ -362,8 +362,8 @@ let dispatch t (request : W.request) =
     issue t ~incarnation:request.incarnation ~upload_admission:Ordinary
       ~route ~verb ~actor ~timeout_sec ~only_if_idle
 
-(* A live connection this worker runs asks the owner as a native host asks the
-   server, without leaving the process. *)
+(* A live connection this worker runs asks the owner with the wire commands,
+   without leaving the process. *)
 let live t command = dispatch t {W.incarnation=t.incarnation;command}
 let poll_live t ~client ~window_sec = match live t (W.Poll {client;window_sec}) with
   | W.Poll_result {command;_} -> Ok command

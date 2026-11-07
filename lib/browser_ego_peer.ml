@@ -1803,7 +1803,7 @@ let interact ?actor t args =
     | Browser_lane.Drag_to {duration_ms;_} when duration_ms <> 0 ->
         Error (Live.Before_effect "ego drag requires durationMs=0; movement timing is not exposed by its mouse API")
     | Browser_lane.Drag_to _ | Browser_lane.Drag _
-    | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Set_zoom _
+    | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
     | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
     | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
     | Browser_lane.Click_at _ | Browser_lane.Scroll_at _ | Browser_lane.Follow_link _
@@ -1815,7 +1815,7 @@ let interact ?actor t args =
       | Browser_lane.Hover target | Browser_lane.Double_click target ->
         (match target with Browser_lane.Selector _ -> false | Browser_lane.Scene_node _ -> true)
       | Browser_lane.Drag_to _ -> false
-      | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Set_zoom _
+      | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
       | Browser_lane.Set_viewport _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
       | Browser_lane.Scroll _ | Browser_lane.Hover_at _
       | Browser_lane.Tap_at _ | Browser_lane.Swipe _ | Browser_lane.Click_at _ | Browser_lane.Double_click_at _
@@ -1904,8 +1904,7 @@ let interact ?actor t args =
   | Browser_lane.Hover_target target -> on_target ~target Target_hover
   | Browser_lane.Double_click_target target -> on_target ~target Target_double_click
   | Browser_lane.Set_viewport size -> viewport size
-  | Browser_lane.Tap_at _ | Browser_lane.Swipe _
-  | Browser_lane.Set_zoom _ -> refused
+  | Browser_lane.Tap_at _ | Browser_lane.Swipe _ -> refused
 
 (* The whole space goes to the operator for a step only a person can take;
    from then on the frame refuses every step until take_over. A handOff that

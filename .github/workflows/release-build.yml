@@ -153,7 +153,6 @@ jobs:
           opam exec -- dune build --release \
             bin/main_eio.exe \
             bin/masc_tui.exe \
-            bin/masc_browser_host.exe \
             bin/deployment_preflight_helper.exe \
             bin/masc_exec_ssh_bootstrap.exe
 
@@ -195,7 +194,7 @@ jobs:
           out = Path('runtime-probe')
           out.mkdir()
           files = {}
-          for name in ('main_eio', 'masc_tui', 'masc_browser_host'):
+          for name in ('main_eio', 'masc_tui'):
               source = Path(os.environ['MASC_BIN_DIR']) / (name + '.exe')
               target = out / (name + '.exe')
               shutil.copy2(source, target)
@@ -305,7 +304,6 @@ jobs:
           mkdir -p dist
           cp "$MASC_BIN_DIR"/main_eio.exe dist/masc-${{ matrix.arch }}
           cp "$MASC_BIN_DIR"/masc_tui.exe dist/masc-tui-${{ matrix.arch }}
-          cp "$MASC_BIN_DIR"/masc_browser_host.exe dist/masc-browser-host-${{ matrix.arch }}
           cp "$MASC_BIN_DIR"/deployment_preflight_helper.exe \
             dist/masc-deployment-preflight-helper-${{ matrix.arch }}
           cp "$MASC_BIN_DIR"/masc_exec_ssh_bootstrap.exe \
@@ -314,7 +312,6 @@ jobs:
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}
           chmod +x dist/masc-${{ matrix.arch }}
           chmod +x dist/masc-tui-${{ matrix.arch }}
-          chmod +x dist/masc-browser-host-${{ matrix.arch }}
           chmod +x \
             dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
             dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }} \
@@ -337,7 +334,6 @@ jobs:
           scripts/check-glibc-floor.sh "$floor" \
             dist/masc-${{ matrix.arch }} \
             dist/masc-tui-${{ matrix.arch }} \
-            dist/masc-browser-host-${{ matrix.arch }} \
             dist/masc-deployment-preflight-helper-${{ matrix.arch }} \
             dist/masc-exec-ssh-bootstrap-${{ matrix.arch }}
 
@@ -367,7 +363,6 @@ jobs:
             --source-commit "$(git rev-parse HEAD)" \
             --archive "dist/masc-dashboard-${{ matrix.arch }}.tar.gz" \
             --companion masc-tui "dist/masc-tui-${{ matrix.arch }}" \
-            --companion masc-browser-host "dist/masc-browser-host-${{ matrix.arch }}" \
             --companion masc-exec-ssh-bootstrap "dist/masc-exec-ssh-bootstrap-${{ matrix.arch }}" \
             --companion masc-deployment-preflight-helper "dist/masc-deployment-preflight-helper-${{ matrix.arch }}" \
             --companion masc-check-runtime-deployment-preflight "dist/masc-check-runtime-deployment-preflight-${{ matrix.arch }}" \
@@ -534,7 +529,6 @@ jobs:
             for asset in \
               "masc-$arch" \
               "masc-tui-$arch" \
-              "masc-browser-host-$arch" \
               "masc-deployment-preflight-helper-$arch" \
               "masc-check-runtime-deployment-preflight-$arch" \
               "masc-exec-ssh-bootstrap-$arch" \

@@ -1,7 +1,6 @@
 (** The [\[browser.live.bidi\]] table of [runtime.toml]: the Firefox the MASC
     server starts at a server start, with the profile it opens and the port it
-    answers BiDi on. [masc browser-lane-setup --mode bidi] writes it, beside
-    the lane installation {!Browser_lane_setup} makes.
+    answers BiDi on. [masc browser-lane-setup --mode bidi] writes it.
 
     The table belongs to the operator. A table that is there keeps its values:
     the profile it names holds the logins Keepers use, and replacing it would
@@ -79,8 +78,7 @@ val firefox_note : plan -> string option
 
 val port_answers : plan -> bool
 (** Something already answers on the table's port on the loopback interface.
-    Firefox's Remote Agent refuses a second one on that port. A host also
-    refuses a session on a Firefox that runs another profile. *)
+    Firefox's Remote Agent refuses a second one on that port. *)
 
 (** The first Firefox that answers [--version]: {!request}'s [firefox] default. *)
 val installed_firefox : unit -> Browser_runtime_dependencies.check

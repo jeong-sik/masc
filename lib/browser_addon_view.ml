@@ -69,26 +69,10 @@ let goto host json=run (fun () ->
     | None|Some _ -> Error "url is required") in
   let* receipt=Host.issue host ~preference:request.route (B.Page_goto {url;tab_id=request.tab_id}) in
   Ok (Browser_binding.annotate receipt.binding receipt.data))
-let clients ~bidi_host host=run (fun () ->
-  let* published,snapshot=Host.selection_snapshot host |> Result.map_error (function
-    | Host.Snapshot_unavailable detail ->
-        failure ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect detail
-    | Snapshot_unreadable detail ->
-        failure ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect detail) in
-  let decision verb=match Browser_selection.choose ~verb ~bound:false ~snapshot Browser_selection.Automatic with
-    | Ok selected -> `Assoc ["ok",`Bool true;"data",Browser_selection.to_json selected]
-    | Error error -> `Assoc ["ok",`Bool false;"error",Browser_selection.error_to_json error] in
-  Ok (`Assoc (["clients",`List published.client_rows;"automatic",`Assoc ["browse",decision B.Tabs_list];
-    "bidiHost",Browser_bidi_host_status.to_json bidi_host]
-    @ (match published.unavailable with [] -> [] | items ->
-        ["unavailable",`List (List.map Browser_addon_observation.unavailable_to_json items)]))))
-let connection_inventory ~config ~access ~bidi_host=run (fun () ->
+let connection_inventory ~config ~access=run (fun () ->
   let* inventory=Host.connection_inventory ~config ~access |> Result.map_error (function
     | Host.Snapshot_unavailable detail ->
         failure ~class_:Tool_result.Dependency_unavailable ~effect_disposition:Tool_result.Proven_pre_effect detail
     | Snapshot_unreadable detail ->
         failure ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect detail) in
-  match Browser_connection_inventory.to_json inventory with
-  | `Assoc fields -> Ok (`Assoc (("bidiHost",Browser_bidi_host_status.to_json bidi_host)::fields))
-  | _ -> Error (failure ~class_:Tool_result.Runtime_failure ~effect_disposition:Tool_result.Proven_pre_effect
-      "browser connection inventory is unreadable"))
+  Ok (Browser_connection_inventory.to_json inventory))

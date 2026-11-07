@@ -37,7 +37,7 @@ def client_payload(client: str) -> dict:
         "browser": "firefox",
         "version": "158.0.1",
         "engineVersion": "158.0.1",
-        "transport": "web_extension",
+        "transport": "webdriver_bidi",
         "space": None,
         "interactions": [],
         "lastActivities": [],
@@ -87,15 +87,7 @@ class BrowserHandler(lane_fixture.LaneHandler):
                             "data": {
                                 "lane": "live",
                                 "clientId": CLIENT_A,
-                                "reason": "available_connected_browser",
-                            },
-                        },
-                        "work": {
-                            "ok": True,
-                            "data": {
-                                "lane": "automation",
-                                "clientId": None,
-                                "reason": "existing_work_session",
+                                "reason": "existing_login",
                             },
                         },
                     },

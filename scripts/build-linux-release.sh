@@ -65,7 +65,6 @@ repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 release_binaries=(
   bin/main_eio.exe
   bin/masc_tui.exe
-  bin/masc_browser_host.exe
   bin/deployment_preflight_helper.exe
   bin/masc_exec_ssh_bootstrap.exe
 )

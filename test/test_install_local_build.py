@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
-"""A local install brings every registered browser lane host to the new build."""
+"""A local install puts one build into the prefix and declares its browser Add-on."""
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import signal
 import subprocess
@@ -24,20 +23,14 @@ def executable(path, text):
 
 
 # Stands in for the masc the script installs. A browser-lane-setup call is
-# recorded as one JSON list of its arguments per line in lane-calls beside it,
-# so an argument that holds a space stays one argument. What it does stands for
-# what the real command does to a workspace: it copies the host it was given
-# beside the launcher and leaves the registration as it was. A workspace whose
-# path holds "fails" makes it exit 3; one that holds "stale" makes it exit 0
-# without copying the host; one that holds "moves" makes it register the lane
-# somewhere else, as the real command does with a path it trims or strips a
-# trailing .masc from. A --mode addon call is recorded in addon-calls instead,
-# and exits 5 for a workspace whose path holds "addon-refused" and 3, as for a
-# workspace with no config root yet, for one that holds "addon-unconfigured". The real
-# command is run by test_browser_lane_setup_cli.py. Any other call only says
-# which binary it is.
+# recorded as one JSON list of its arguments per line in addon-calls beside it,
+# so an argument that holds a space stays one argument. It exits 5 for a
+# workspace whose path holds "addon-refused" and 3, as for a workspace with no
+# config root yet, for one that holds "addon-unconfigured". The real command is
+# run by test_browser_lane_setup_cli.py. Any other call only says which binary
+# it is.
 FAKE_MASC = '''#!{python}
-import json, shutil, sys
+import json, sys
 from pathlib import Path
 here = Path(sys.argv[0]).resolve().parent
 if sys.argv[1:2] != ["browser-lane-setup"]:
@@ -46,34 +39,11 @@ if sys.argv[1:2] != ["browser-lane-setup"]:
 args = sys.argv[1:]
 options = dict(zip(args[1::2], args[2::2]))
 base = Path(options["--base-path"])
-if options["--mode"] == "addon":
-    with open(here / "addon-calls", "a") as log:
-        log.write(json.dumps(args) + "\\n")
-    if "addon-refused" in str(base):
-        sys.exit(5)
-    sys.exit(3 if "addon-unconfigured" in str(base) else 0)
-with open(here / "lane-calls", "a") as log:
+with open(here / "addon-calls", "a") as log:
     log.write(json.dumps(args) + "\\n")
-if "fails" in str(base):
-    sys.exit(3)
-if "stale" in str(base):
-    sys.exit(0)
-if options["--mode"] == "host":
-    # The host and the launcher only: no registration to read or write. A path
-    # that holds "partial" fails after the host was written, as masc does when a
-    # later step cannot be.
-    host = base / ".masc/browser-lane/host/masc-browser-host"
-    host.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copyfile(options["--binary"], host)
-    sys.exit(4 if "partial" in str(base) else 0)
-registration = Path(options["--manifest-dir"]) / (options["--host-name"] + ".json")
-if "moves" in str(base):
-    registration.write_text(json.dumps({{"name": options["--host-name"],
-                                        "path": "/elsewhere/.masc/browser-lane/host/launch"}}))
-    sys.exit(0)
-host = base / ".masc/browser-lane/host/masc-browser-host"
-host.parent.mkdir(parents=True, exist_ok=True)
-shutil.copyfile(options["--binary"], host)
+if "addon-refused" in str(base):
+    sys.exit(5)
+sys.exit(3 if "addon-unconfigured" in str(base) else 0)
 '''
 
 
@@ -83,49 +53,9 @@ def fake_masc(path):
     return path
 
 
-def lane_calls(prefix):
-    calls = prefix / "lane-calls"
-    return [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
-
-
 def addon_calls(prefix):
     calls = prefix / "addon-calls"
     return [json.loads(line) for line in calls.read_text().splitlines()] if calls.exists() else []
-
-
-def host_call(prefix, base):
-    return ["browser-lane-setup", "--mode", "host", "--binary", str(prefix / "masc-browser-host"),
-            "--base-path", str(base)]
-
-
-# A lane installed for a workspace as masc reads it: the launcher and the
-# declaration beside it, with the host copy an older build left.
-def install_lane(base, host_text="old", launcher=True, extension=False):
-    host_directory = base / ".masc/browser-lane/host"
-    host_directory.mkdir(parents=True, exist_ok=True)
-    if launcher:
-        (host_directory / "launch").write_text("#!/bin/sh\n")
-    (host_directory / "launch.json").write_text("{}")
-    (host_directory / "masc-browser-host").write_text(host_text)
-    if extension:
-        (base / ".masc/browser-lane/extension").mkdir(parents=True, exist_ok=True)
-        (base / ".masc/browser-lane/extension/manifest.json").write_text("{}")
-
-
-def lane_call(prefix, base, name, manifests):
-    return ["browser-lane-setup", "--mode", "extension", "--binary", str(prefix / "masc-browser-host"),
-            "--base-path", str(base), "--host-name", name, "--manifest-dir", str(manifests)]
-
-
-# A workspace whose lane is registered with Firefox under [name]: the native
-# messaging manifest whose launcher lives under the workspace's
-# .masc/browser-lane/host, which is what the script looks for.
-def register(manifests, base, name):
-    host_directory = base / ".masc/browser-lane/host"
-    host_directory.mkdir(parents=True, exist_ok=True)
-    manifests.mkdir(exist_ok=True)
-    (manifests / f"{name}.json").write_text(
-        json.dumps({"name": name, "path": str(host_directory / "launch")}))
 
 
 # Stands in for the new build's deployment preflight helper and records every
@@ -191,7 +121,7 @@ def browser_addon_programs(build):
 
 
 def binaries(build):
-    for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe", "masc_exec_ssh_bootstrap.exe"):
+    for exe in ("main_eio.exe", "masc_tui.exe", "masc_exec_ssh_bootstrap.exe"):
         executable(build / exe, exe)
     browser_addon_programs(build)
 
@@ -226,7 +156,7 @@ class LocalBuildInstall(unittest.TestCase):
             base = workspace(root)
             result = subprocess.run(
                 ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                 "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                 "--prefix", str(prefix),
                  "--base-path", str(base)],
                 env=unnamed_env(root), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -245,31 +175,28 @@ class LocalBuildInstall(unittest.TestCase):
             root = Path(temporary).resolve()
             build = root / "build"
             build.mkdir()
-            for exe in ("masc_tui.exe", "masc_browser_host.exe", "masc_exec_ssh_bootstrap.exe"):
+            for exe in ("masc_tui.exe", "masc_exec_ssh_bootstrap.exe"):
                 executable(build / exe, exe)
             fake_masc(build / "main_eio.exe")
             preflight_helper(build)
             prefix = root / "prefix"
             base = workspace(root)
-            install_lane(base)
             result = subprocess.run(
                 ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                 "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                 "--prefix", str(prefix),
                  "--base-path", str(base), "--no-browser-addon"],
                 env=unnamed_env(root), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
             for program in BROWSER_ADDON_PROGRAMS:
                 self.assertFalse((prefix / program.replace("_", "-")).exists())
             self.assertEqual(addon_calls(prefix), [])
-            # The host refresh carries the choice, so setup does not declare it.
-            self.assertEqual(lane_calls(prefix), [host_call(prefix, base) + ["--no-addon"]])
 
     def test_no_browser_addon_names_programs_an_earlier_install_left(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             build = root / "build"
             build.mkdir()
-            for exe in ("main_eio.exe", "masc_tui.exe", "masc_browser_host.exe", "masc_exec_ssh_bootstrap.exe"):
+            for exe in ("main_eio.exe", "masc_tui.exe", "masc_exec_ssh_bootstrap.exe"):
                 executable(build / exe, exe)
             preflight_helper(build)
             prefix = root / "prefix"
@@ -278,7 +205,7 @@ class LocalBuildInstall(unittest.TestCase):
             before = left.read_bytes()
             result = subprocess.run(
                 ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                 "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                 "--prefix", str(prefix),
                  "--base-path", str(workspace(root)), "--no-browser-addon"],
                 env=unnamed_env(root), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -298,13 +225,12 @@ class LocalBuildInstall(unittest.TestCase):
             guard.chmod(0o755)
             result = subprocess.run(
                 ["bash", str(scripts / SCRIPT.name), "--no-browser-addon", "--prefix",
-                 str(root / "prefix"), "--manifest-dir", str(root / "absent")],
+                 str(root / "prefix")],
                 env=dict(unnamed_env(root), RECORD=str(record)), capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertEqual(record.read_text().splitlines(), [
                 "build", "--root", str(checkout), "./bin/main_eio.exe", "./bin/masc_tui.exe",
-                "./bin/masc_browser_host.exe", "./bin/deployment_preflight_helper.exe",
-                "./bin/masc_exec_ssh_bootstrap.exe"])
+                "./bin/deployment_preflight_helper.exe", "./bin/masc_exec_ssh_bootstrap.exe"])
 
     def test_missing_ssh_bootstrap_installs_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -319,7 +245,7 @@ class LocalBuildInstall(unittest.TestCase):
             previous = executable(prefix / "masc", "old masc").read_bytes()
             result = subprocess.run(
                 ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                 "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                 "--prefix", str(prefix),
                  "--base-path", str(workspace(root)), "--no-browser-addon"],
                 env=unnamed_env(root), capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
@@ -339,7 +265,7 @@ class LocalBuildInstall(unittest.TestCase):
                 prefix = root / "prefix"
                 result = subprocess.run(
                     ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                     "--prefix", str(prefix),
                      "--base-path", str(workspace(root))],
                     env=unnamed_env(root), capture_output=True, text=True)
                 self.assertNotEqual(result.returncode, 0)
@@ -357,20 +283,15 @@ class LocalBuildInstall(unittest.TestCase):
             prefix = root / "prefix"
             base = root / "addon-refused workspace"
             base.mkdir()
-            install_lane(base)
             result = subprocess.run(
                 ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                 "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                 "--prefix", str(prefix),
                  "--base-path", str(base)],
                 env=unnamed_env(root), capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("browser Add-on", result.stderr)
             self.assertTrue((prefix / "masc").is_file(), "the programs stay installed")
-            # The refusal waits for the host refresh, so the lane still gets
-            # the new host.
-            self.assertEqual(lane_calls(prefix), [host_call(prefix, base)])
-            self.assertEqual((base / ".masc/browser-lane/host/masc-browser-host").read_bytes(),
-                             (prefix / "masc-browser-host").read_bytes())
+            self.assertIn(f"the browser Add-on of {base} is not set up", result.stderr)
 
     def run_addon_install(self, root, base):
         build = root / "build"
@@ -381,7 +302,7 @@ class LocalBuildInstall(unittest.TestCase):
         prefix = root / "prefix"
         result = subprocess.run(
             ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-             "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+             "--prefix", str(prefix),
              "--base-path", str(base)],
             env=unnamed_env(root), capture_output=True, text=True)
         return result, prefix
@@ -399,17 +320,6 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertIn("browser Add-on is not declared yet", result.stdout)
             self.assertIn(f"--mode addon --base-path {base}", result.stdout)
 
-    def test_a_refused_addon_and_a_failed_refresh_are_both_reported(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            base = root / "addon-refused fails workspace"
-            base.mkdir()
-            install_lane(base)
-            result, _ = self.run_addon_install(root, base)
-            self.assertEqual(result.returncode, 1, result.stdout)
-            self.assertIn(f"could not refresh browser lane host for {base}", result.stderr)
-            self.assertIn(f"the browser Add-on of {base} is not set up", result.stderr)
-
     def test_a_workspace_that_does_not_exist_yet_gets_no_addon_declaration(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
@@ -422,7 +332,7 @@ class LocalBuildInstall(unittest.TestCase):
             base = root / "not created yet"
             result = subprocess.run(
                 ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                 "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                 "--prefix", str(prefix),
                  "--base-path", str(base)],
                 env=unnamed_env(root), capture_output=True, text=True)
             self.assertEqual(result.returncode, 0, result.stderr)
@@ -462,8 +372,7 @@ class LocalBuildInstall(unittest.TestCase):
                     'if [ "$1" = clean ]; then rm -rf "$repo/_build"; fi\n')
                 wrapper.chmod(0o755)
                 prefix = root / "prefix"
-                command = ["bash", str(scripts / SCRIPT.name), "--prefix", str(prefix),
-                           "--manifest-dir", str(root / "absent-manifests")]
+                command = ["bash", str(scripts / SCRIPT.name), "--prefix", str(prefix)]
                 if helper_kind != "no_workspace":
                     command += ["--base-path", str(selected)]
                 result = subprocess.run(
@@ -519,8 +428,7 @@ class LocalBuildInstall(unittest.TestCase):
                         'if [ "$1" = clean ]; then rm -rf "$repo/_build"; fi\n')
                     wrapper.chmod(0o755)
                     prefix = root / "prefix"
-                    command = ["bash", str(scripts / SCRIPT.name), "--prefix", str(prefix),
-                               "--manifest-dir", str(root / "absent-manifests")]
+                    command = ["bash", str(scripts / SCRIPT.name), "--prefix", str(prefix)]
                     if explicit:
                         command += ["--base-path", str(selected)]
                     env = {key: value for key, value in unnamed_env(root).items()
@@ -539,8 +447,7 @@ class LocalBuildInstall(unittest.TestCase):
     def test_install_preserves_incremental_output(self):
         for flags, fail_build in (
                 ([], False), (["--skip-build"], False), ([], True),
-                (["--prefix", "BUILD_PREFIX"], False),
-                (["--manifest-dir", "BUILD_MANIFESTS"], False)):
+                (["--prefix", "BUILD_PREFIX"], False)):
             with self.subTest(flags=flags, fail_build=fail_build), \
                     tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary).resolve()
@@ -565,13 +472,11 @@ class LocalBuildInstall(unittest.TestCase):
                 wrapper.chmod(0o755)
                 prefix = root / "prefix"
                 flags = [str(checkout / "_build/installed") if flag == "BUILD_PREFIX"
-                         else str(checkout / "_build/manifests") if flag == "BUILD_MANIFESTS"
                          else flag for flag in flags]
                 if "--prefix" in flags:
                     prefix = Path(flags[flags.index("--prefix") + 1])
                 result = subprocess.run(
                     ["bash", str(scripts / SCRIPT.name), "--prefix", str(prefix),
-                     "--manifest-dir", str(root / "absent"),
                      "--base-path", str(workspace(root)), *flags],
                     env={key: value for key, value in unnamed_env(root).items()
                          if key not in ("DUNE_BUILD_DIR", "MASC_DUNE_DRY_RUN")},
@@ -590,369 +495,6 @@ class LocalBuildInstall(unittest.TestCase):
                 else:
                     self.assertIn("--skip-build", flags)
 
-    def test_every_registered_host_gets_the_new_copy_under_its_own_name(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            manifests = root / "native manifests"
-            # Two workspaces registered with Firefox, one under the default
-            # host name and one under an isolated, dotted name. The second
-            # workspace's path holds a space, a quote and a dollar sign.
-            first, second = root / "workspace one", root / "workspace ' two $x"
-            lanes = ((first, "masc_browser_host"), (second, "masc.browser.host_second"))
-            for base, name in lanes:
-                register(manifests, base, name)
-            # A host that is not a workspace browser lane must be left alone.
-            unrelated = manifests / "com.example.password.json"
-            unrelated.write_text(json.dumps({"name": "com.example.password", "path": str(root / "elsewhere/launch")}))
-            before_unrelated = unrelated.read_text()
-
-            build = root / "build"
-            build.mkdir()
-            fake_masc(build / "main_eio.exe")
-            executable(build / "masc_tui.exe", "tui")
-            executable(build / "masc_browser_host.exe", "new")
-            executable(build / "masc_exec_ssh_bootstrap.exe", "ssh bootstrap")
-            browser_addon_programs(build)
-            preflight_helper(build)
-            prefix = root / "prefix"
-
-            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(manifests),
-                                     "--base-path", str(workspace(root))],
-                                    check=True, capture_output=True, text=True)
-
-            for name, marker in (("masc", "masc"), ("masc-tui", "tui"), ("masc-browser-host", "new")):
-                self.assertIn(marker, (prefix / name).read_text())
-            # Each registered workspace is brought to the new host by the masc
-            # that was just installed, under the host name it was registered
-            # with; the unrelated host is not asked about.
-            self.assertEqual(sorted(lane_calls(prefix)),
-                             sorted(lane_call(prefix, base, name, manifests) for base, name in lanes))
-            for base, name in lanes:
-                self.assertIn(f"refreshed browser lane host {name} for {base}", result.stdout)
-                self.assertIn("new", (base / ".masc/browser-lane/host/masc-browser-host").read_text())
-            self.assertEqual(unrelated.read_text(), before_unrelated)
-            self.assertFalse((root / "elsewhere").exists())
-
-    def run_script_with_registered_lanes(self, root, lanes):
-        manifests = root / "native manifests"
-        for base, name in lanes:
-            register(manifests, base, name)
-        build = root / "build"
-        build.mkdir()
-        fake_masc(build / "main_eio.exe")
-        executable(build / "masc_tui.exe", "tui")
-        executable(build / "masc_browser_host.exe", "new")
-        executable(build / "masc_exec_ssh_bootstrap.exe", "ssh bootstrap")
-        browser_addon_programs(build)
-        preflight_helper(build)
-        prefix = root / "prefix"
-        result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                 "--prefix", str(prefix), "--manifest-dir", str(manifests),
-                                 "--base-path", str(workspace(root))],
-                                capture_output=True, text=True)
-        return result, prefix, manifests
-
-    def test_a_workspace_that_cannot_be_refreshed_does_not_stop_the_others(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            # Manifests are walked in file name order: the one that fails is first.
-            failing = (root / "ws fails", "masc_a_failing")
-            others = ((root / "ws b", "masc_b"), (root / "ws c", "masc_c"))
-            result, prefix, _ = self.run_script_with_registered_lanes(root, (failing, *others))
-            self.assertEqual(result.returncode, 1, result.stderr)
-            self.assertEqual(len(lane_calls(prefix)), 3)
-            self.assertIn("could not refresh browser lane host masc_a_failing", result.stderr)
-            self.assertIn("exited 3", result.stderr)
-            self.assertNotIn("refreshed browser lane host masc_a_failing", result.stdout)
-            for base, name in others:
-                self.assertIn(f"refreshed browser lane host {name} for {base}", result.stdout)
-                self.assertIn("new", (base / ".masc/browser-lane/host/masc-browser-host").read_text())
-            # The binaries were installed before any workspace was refreshed.
-            self.assertTrue((prefix / "masc-browser-host").is_file())
-
-    def test_a_refresh_that_registers_another_workspace_is_refused_and_undone(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            moved = (root / "ws moves", "masc_moved")
-            result, prefix, manifests = self.run_script_with_registered_lanes(root, (moved,))
-            registration = manifests / "masc_moved.json"
-            self.assertEqual(result.returncode, 1, result.stdout)
-            self.assertIn("another workspace", result.stderr)
-            self.assertNotIn("refreshed browser lane host masc_moved", result.stdout)
-            # The registration is as it was before masc rewrote it.
-            self.assertEqual(json.loads(registration.read_text()),
-                             {"name": "masc_moved",
-                              "path": str(moved[0] / ".masc/browser-lane/host/launch")})
-
-    def test_a_refresh_that_leaves_the_old_host_is_reported_not_trusted(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            stale = root / "ws stale"
-            old_copy = stale / ".masc/browser-lane/host/masc-browser-host"
-            old_copy.parent.mkdir(parents=True)
-            old_copy.write_text("old")
-            result, _, _ = self.run_script_with_registered_lanes(root, ((stale, "masc_stale"),))
-            self.assertEqual(result.returncode, 1, result.stdout)
-            self.assertIn("is not the host just installed", result.stderr)
-            self.assertNotIn("refreshed browser lane host masc_stale", result.stdout)
-            self.assertEqual(old_copy.read_text(), "old")
-
-    @unittest.skipUnless(shutil.which("zsh"), "zsh's zsystem flock holds the fcntl lock a BiDi host holds")
-    def test_the_extension_host_is_stopped_and_the_running_bidi_host_is_kept(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            manifests = root / "native manifests"
-            base = root / "workspace one"
-            register(manifests, base, "masc_browser_host")
-            host = base / ".masc/browser-lane/host/masc-browser-host"
-            lock = base / ".masc/browser-lane/bidi-host.lock"
-            lock.touch()
-
-            # Each runs as the workspace's copy of the host with the arguments
-            # it was given, which is what ps shows. A shell builtin waits on
-            # stdin, so no other process is started.
-            def running_as_host(*arguments):
-                return subprocess.Popen(["bash", "-c", 'exec -a "$0" /bin/bash -c "read line" "$0" "$@"',
-                                         str(host), *arguments], stdin=subprocess.PIPE)
-
-            # The BiDi host holds the workspace's host lock, a lockf (fcntl)
-            # lock (lib/browser_bidi_host_record.ml); zsystem flock takes the
-            # same kind.
-            bidi = subprocess.Popen(
-                ["bash", "-c",
-                 """exec -a "$0" zsh -c 'zmodload zsh/system; zsystem flock -f fd "$1"; print locked; read line' "$0" "$1" """,
-                 str(host), str(lock)],
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-            # ps joins arguments with spaces, so a path can read as a flag.
-            extension = running_as_host(str(root / "native manifests --bidi-url x/masc_browser_host.json"),
-                                        "masc@yousleepwhen")
-            # Given --bidi-url, but another holds the lock: such a host is
-            # refused and ends; nothing marks it as the workspace's host.
-            unlocked = running_as_host("--bidi-url", "ws://127.0.0.1:9222/session")
-            processes = (bidi, extension, unlocked)
-            try:
-                self.assertEqual(bidi.stdout.readline(), b"locked\n")
-                # A host that was killed leaves its record without an ending,
-                # and its pid may now be another process's.
-                (base / ".masc/browser-lane/bidi-host.json").write_text(
-                    json.dumps({"pid": extension.pid, "ended": None}))
-                build = root / "build"
-                build.mkdir()
-                for exe in ("masc_tui.exe", "masc_browser_host.exe", "masc_exec_ssh_bootstrap.exe"):
-                    executable(build / exe, exe)
-                browser_addon_programs(build)
-                fake_masc(build / "main_eio.exe")
-                preflight_helper(build)
-                result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                         "--prefix", str(root / "prefix"), "--manifest-dir", str(manifests),
-                                         "--base-path", str(workspace(root))],
-                                        check=True, capture_output=True, text=True)
-                self.assertEqual(extension.wait(timeout=10), -15, result.stdout)
-                self.assertEqual(unlocked.wait(timeout=10), -15, result.stdout)
-                self.assertIsNone(bidi.poll(), "the BiDi host was stopped")
-                stopped = re.search(r"stopped host pid ([0-9, ]+); Firefox starts the new copy", result.stdout)
-                self.assertIsNotNone(stopped, result.stdout)
-                self.assertEqual(sorted(stopped.group(1).split(", ")), sorted([str(extension.pid), str(unlocked.pid)]))
-                self.assertIn(f"kept BiDi host pid {bidi.pid}, which nothing would start again", result.stdout)
-            finally:
-                for process in processes:
-                    if process.poll() is None:
-                        process.kill()
-                        process.wait()
-                    process.stdin.close()
-                bidi.stdout.close()
-
-    # A lane set up with --mode bidi or --mode host registers no manifest, so
-    # the manifests cannot lead to it; the workspace the install works with is
-    # looked at as well.
-    def run_script_for_workspace(self, root, base, lanes=()):
-        manifests = root / "native manifests"
-        for lane_base, name in lanes:
-            register(manifests, lane_base, name)
-        build = root / "build"
-        build.mkdir()
-        fake_masc(build / "main_eio.exe")
-        executable(build / "masc_tui.exe", "tui")
-        executable(build / "masc_browser_host.exe", "new")
-        executable(build / "masc_exec_ssh_bootstrap.exe", "ssh bootstrap")
-        browser_addon_programs(build)
-        preflight_helper(build)
-        prefix = root / "prefix"
-        result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                 "--prefix", str(prefix), "--manifest-dir", str(manifests),
-                                 "--base-path", str(base)],
-                                capture_output=True, text=True)
-        return result, prefix
-
-    def test_the_selected_workspaces_lane_with_no_manifest_gets_the_new_host(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            base = workspace(root)
-            install_lane(base)
-            result, prefix = self.run_script_for_workspace(root, base)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(lane_calls(prefix), [host_call(prefix, base)])
-            self.assertIn("new", (base / ".masc/browser-lane/host/masc-browser-host").read_text())
-            self.assertIn(f"refreshed browser lane host for {base} (no host running)", result.stdout)
-            self.assertNotIn("no browser lane host is registered", result.stdout)
-
-    def test_a_selected_workspace_that_is_registered_is_refreshed_once_by_its_manifest(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            base = workspace(root)
-            install_lane(base)
-            result, prefix = self.run_script_for_workspace(root, base, lanes=((base, "masc_browser_host"),))
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(lane_calls(prefix),
-                             [lane_call(prefix, base, "masc_browser_host", root / "native manifests")])
-
-    def test_registered_lanes_and_the_selected_workspace_are_all_refreshed(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            base, other = workspace(root), root / "other workspace"
-            install_lane(base)
-            result, prefix = self.run_script_for_workspace(root, base, lanes=((other, "masc_other"),))
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(sorted(lane_calls(prefix)),
-                             sorted([host_call(prefix, base),
-                                     lane_call(prefix, other, "masc_other", root / "native manifests")]))
-
-    def test_a_selected_workspace_with_no_installed_lane_is_left_alone(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            base = workspace(root)
-            # A host copy with no declaration is not an installed lane.
-            host = base / ".masc/browser-lane/host/masc-browser-host"
-            host.parent.mkdir(parents=True)
-            host.write_text("old")
-            result, prefix = self.run_script_for_workspace(root, base)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(lane_calls(prefix), [])
-            self.assertEqual(host.read_text(), "old")
-            self.assertIn("no browser lane host is registered", result.stdout)
-
-    def test_a_host_refresh_that_leaves_the_old_copy_is_reported_and_fails_the_install(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            base = root / "stale workspace"
-            base.mkdir()
-            install_lane(base)
-            result, prefix = self.run_script_for_workspace(root, base)
-            self.assertEqual(result.returncode, 1, result.stdout)
-            self.assertIn(f"could not refresh browser lane host for {base}", result.stderr)
-            self.assertIn("is not the host just installed", result.stderr)
-            self.assertNotIn("refreshed browser lane host", result.stdout)
-            self.assertTrue((prefix / "masc-browser-host").is_file(), "the binaries were installed first")
-
-    def test_a_launcher_without_its_declaration_or_the_reverse_is_not_an_installed_lane(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            base = workspace(root)
-            install_lane(base, launcher=False)
-            result, prefix = self.run_script_for_workspace(root, base)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(lane_calls(prefix), [])
-            self.assertFalse((base / ".masc/browser-lane/host/launch").exists())
-
-    def test_a_lane_with_an_extension_and_no_manifest_here_is_named_and_left_alone(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            base = workspace(root)
-            install_lane(base, extension=True)
-            result, prefix = self.run_script_for_workspace(root, base)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(lane_calls(prefix), [])
-            self.assertIn("old", (base / ".masc/browser-lane/host/masc-browser-host").read_text())
-            self.assertIn(f"WARN the browser lane of {base} has an extension and no manifest", result.stderr)
-
-    def test_a_manifest_covers_the_selected_workspace_under_another_spelling_of_its_path(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            real = root / "real workspace"
-            real.mkdir()
-            link = root / "link workspace"
-            link.symlink_to(real)
-            install_lane(real)
-            # Registered under a path that leads there through a link, and
-            # selected as the exact directory, which is all the preflight check
-            # accepts.
-            result, prefix = self.run_script_for_workspace(root, real, lanes=((link, "masc_browser_host"),))
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(lane_calls(prefix),
-                             [lane_call(prefix, link, "masc_browser_host", root / "native manifests")])
-
-    def test_a_manifest_that_cannot_name_a_path_is_skipped_and_the_rest_are_refreshed(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            base = workspace(root)
-            install_lane(base)
-            manifests = root / "native manifests"
-            manifests.mkdir()
-            (manifests / "nul.json").write_text(json.dumps(
-                {"name": "nul", "path": "/nowhere\u0000/.masc/browser-lane/host/launch"}))
-            result, prefix = self.run_script_for_workspace(root, base)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertEqual(lane_calls(prefix), [host_call(prefix, base)])
-
-    def test_a_host_refresh_that_masc_fails_is_named_by_its_exit_status(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            base = root / "fails workspace"
-            base.mkdir()
-            install_lane(base)
-            result, _ = self.run_script_for_workspace(root, base)
-            self.assertEqual(result.returncode, 1, result.stdout)
-            self.assertIn(f"could not refresh browser lane host for {base}: masc browser-lane-setup exited 3",
-                          result.stderr)
-
-    def test_a_refresh_that_writes_the_host_and_then_fails_is_still_a_failure(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            base = root / "partial workspace"
-            base.mkdir()
-            install_lane(base)
-            result, _ = self.run_script_for_workspace(root, base)
-            self.assertIn("new", (base / ".masc/browser-lane/host/masc-browser-host").read_text())
-            self.assertEqual(result.returncode, 1, result.stdout)
-            self.assertIn("masc browser-lane-setup exited 4", result.stderr)
-            self.assertNotIn("refreshed browser lane host", result.stdout)
-
-    def test_the_selected_workspaces_running_host_is_stopped(self):
-        with tempfile.TemporaryDirectory(prefix="local build ' ") as temporary:
-            root = Path(temporary).resolve()
-            base = workspace(root)
-            install_lane(base)
-            host = base / ".masc/browser-lane/host/masc-browser-host"
-            # A host runs as the copy its launcher names, with the arguments it
-            # was given, which is what ps shows.
-            running = subprocess.Popen(["bash", "-c", 'exec -a "$0" /bin/bash -c "read line" "$0"', str(host)],
-                                       stdin=subprocess.PIPE)
-            try:
-                result, _ = self.run_script_for_workspace(root, base)
-                self.assertEqual(running.wait(timeout=10), -15, result.stdout)
-                self.assertIn(f"refreshed browser lane host for {base} (stopped host pid {running.pid}; "
-                              "Firefox starts the new copy)", result.stdout)
-            finally:
-                if running.poll() is None:
-                    running.kill()
-                    running.wait()
-                running.stdin.close()
-
-    def test_no_registered_host_installs_binaries_and_says_so(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            build = root / "build"
-            build.mkdir()
-            binaries(build)
-            preflight_helper(build)
-            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(root / "prefix"), "--manifest-dir", str(root / "absent"),
-                                     "--base-path", str(workspace(root))],
-                                    check=True, capture_output=True, text=True)
-            self.assertTrue((root / "prefix/masc-browser-host").is_file())
-            self.assertIn("no browser lane host is registered", result.stdout)
-
     # #39311: the new build refuses the live runtime.toml before any binary is
     # replaced, so the running server and its editor are left as they were.
     def test_a_refused_runtime_toml_installs_nothing(self):
@@ -964,7 +506,7 @@ class LocalBuildInstall(unittest.TestCase):
             preflight_helper(build, verdict_exit=1)
             prefix = root / "prefix"
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--prefix", str(prefix),
                                      "--base-path", str(workspace(root))],
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
@@ -987,7 +529,7 @@ class LocalBuildInstall(unittest.TestCase):
             prefix = root / "prefix"
             base = workspace(root)
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--prefix", str(prefix),
                                      "--base-path", str(base)],
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
@@ -997,31 +539,9 @@ class LocalBuildInstall(unittest.TestCase):
             self.assertIn(f"validate-stores --base-path {base}", helper_calls(build))
             self.assertFalse(prefix.exists(), "a build that cannot read the stored state was installed")
 
-    # An install that leaves the declaration as it is (--no-browser-addon) onto a
-    # workspace with a browser lane host and no browser Add-on declaration is
-    # refused before anything is replaced: its host polls would all get 503.
-    def test_a_browser_host_without_its_addon_declaration_installs_nothing_when_the_install_declares_nothing(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            root = Path(temporary).resolve()
-            build = root / "build"
-            build.mkdir()
-            binaries(build)
-            preflight_helper(build, browser_addon_exit=1)
-            prefix = root / "prefix"
-            base = workspace(root)
-            result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
-                                     "--base-path", str(base), "--no-browser-addon"],
-                                    capture_output=True, text=True)
-            self.assertNotEqual(result.returncode, 0)
-            self.assertIn("browser Add-on fixture verdict", result.stderr)
-            self.assertIn("nothing was stopped or installed", result.stderr)
-            self.assertIn(f"validate-browser-addon --base-path {base}", helper_calls(build))
-            self.assertFalse(prefix.exists(), "a workspace without its browser Add-on declaration was installed")
-
-    # The same workspace installs when this install declares the Add-on right
-    # after the swap: the first install on a workspace has no declaration yet.
-    def test_an_install_that_declares_the_addon_is_not_refused_for_the_declaration_it_writes(self):
+    # A workspace where two enabled declarations serve one browser source is
+    # refused before anything is replaced: that source would be used by none.
+    def test_a_browser_source_declared_twice_installs_nothing(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve()
             build = root / "build"
@@ -1032,13 +552,13 @@ class LocalBuildInstall(unittest.TestCase):
             prefix = root / "prefix"
             base = workspace(root)
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
-                                     "--base-path", str(base)],
+                                     "--prefix", str(prefix), "--base-path", str(base)],
                                     env=unnamed_env(root), capture_output=True, text=True)
-            self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertNotIn(f"validate-browser-addon --base-path {base}", helper_calls(build))
-            self.assertEqual(addon_calls(prefix),
-                             [["browser-lane-setup", "--mode", "addon", "--base-path", str(base)]])
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("browser Add-on fixture verdict", result.stderr)
+            self.assertIn("nothing was stopped or installed", result.stderr)
+            self.assertIn(f"validate-browser-addon --base-path {base}", helper_calls(build))
+            self.assertFalse(prefix.exists(), "a workspace with a doubled browser source was installed")
 
     # The stored state is read after runtime.toml passes and before anything
     # is replaced; a readable state lets the install go ahead.
@@ -1052,7 +572,7 @@ class LocalBuildInstall(unittest.TestCase):
             prefix = root / "prefix"
             base = workspace(root)
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--prefix", str(prefix),
                                      "--base-path", str(base)],
                                     check=True, capture_output=True, text=True)
             self.assertIn(f"checking stored state of {base}", result.stdout)
@@ -1073,7 +593,7 @@ class LocalBuildInstall(unittest.TestCase):
             preflight_helper(build, unnamed_workspace=(recorded, "persisted_default"))
             prefix = root / "prefix"
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent")],
+                                     "--prefix", str(prefix)],
                                     env=unnamed_env(root), cwd=root, check=True, capture_output=True, text=True)
             self.assertIn(f"checking runtime.toml of {recorded} (workspace from persisted_default)", result.stdout)
             self.assertIn(f"validate-runtime-config --base-path {recorded}", helper_calls(build))
@@ -1090,7 +610,7 @@ class LocalBuildInstall(unittest.TestCase):
             preflight_helper(build, verdict_exit=1)
             prefix = root / "prefix"
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent")],
+                                     "--prefix", str(prefix)],
                                     env=unnamed_env(root), cwd=root, capture_output=True, text=True)
             self.assertEqual(result.returncode, 2, result.stderr)
             self.assertIn("--base-path DIR or set MASC_BASE_PATH", result.stderr)
@@ -1107,7 +627,7 @@ class LocalBuildInstall(unittest.TestCase):
             binaries(build)
             prefix = root / "prefix"
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--prefix", str(prefix),
                                      "--base-path", str(workspace(root))],
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 2, result.stderr)
@@ -1126,7 +646,7 @@ class LocalBuildInstall(unittest.TestCase):
             preflight_helper(build, old=True)
             prefix = root / "prefix"
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--prefix", str(prefix),
                                      "--base-path", str(workspace(root))],
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 2, result.stderr)
@@ -1147,7 +667,7 @@ class LocalBuildInstall(unittest.TestCase):
             prefix = root / "prefix"
             named = workspace(root)
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--prefix", str(prefix),
                                      "--base-path", str(named)],
                                     capture_output=True, text=True)
             self.assertEqual(result.returncode, 2, result.stderr)
@@ -1165,7 +685,7 @@ class LocalBuildInstall(unittest.TestCase):
             preflight_helper(build, resolve_failure=True)
             prefix = root / "prefix"
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--prefix", str(prefix),
                                      "--base-path", str(workspace(root))],
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
@@ -1180,7 +700,7 @@ class LocalBuildInstall(unittest.TestCase):
         scratch.mkdir()
         env = dict(unnamed_env(root), TMPDIR=str(scratch))
         result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                 "--prefix", str(root / "prefix"), "--manifest-dir", str(root / "absent"),
+                                 "--prefix", str(root / "prefix"),
                                  *arguments],
                                 env=env, cwd=root, capture_output=True, text=True)
         return result, sorted(path.name for path in scratch.glob("masc-resolve-workspace.*"))
@@ -1223,7 +743,7 @@ class LocalBuildInstall(unittest.TestCase):
                                    for name in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP)]
                 process = subprocess.Popen(
                     ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                     "--prefix", str(root / "prefix"), "--manifest-dir", str(root / "absent"),
+                     "--prefix", str(root / "prefix"),
                      "--base-path", str(workspace(root))],
                     env=env, cwd=root, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                     start_new_session=True, preexec_fn=restore)
@@ -1294,7 +814,7 @@ class LocalBuildInstall(unittest.TestCase):
                 prefix = root / "prefix"
                 prefix.mkdir()
                 installed = {name: ("installed " + name).encode() for name in
-                             ("masc", "masc-tui", "masc-browser-host",
+                             ("masc", "masc-tui",
                               "masc-deployment-preflight-helper", "masc-check-runtime-deployment-preflight")}
                 for name, content in installed.items():
                     (prefix / name).write_bytes(content)
@@ -1316,7 +836,7 @@ class LocalBuildInstall(unittest.TestCase):
                 try:
                     result = subprocess.run(
                         ["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                         "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                         "--prefix", str(prefix),
                          "--base-path", str(selected), "--no-guest-shim"],
                         capture_output=True, text=True)
                 finally:
@@ -1341,7 +861,7 @@ class LocalBuildInstall(unittest.TestCase):
             preflight_helper(build, verdict_exit=1)
             prefix = root / "prefix"
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--prefix", str(prefix),
                                      "--base-path", str(root / "not yet")],
                                     check=True, capture_output=True, text=True)
             self.assertIn("does not exist yet", result.stdout)
@@ -1360,7 +880,7 @@ class LocalBuildInstall(unittest.TestCase):
             preflight_helper(build, unnamed_workspace="workspace=resolved\\nsource=persisted_default\\n")
             prefix = root / "prefix"
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent")],
+                                     "--prefix", str(prefix)],
                                     env=unnamed_env(root), cwd=root, capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("resolved the workspace but returned no root", result.stderr)
@@ -1376,7 +896,7 @@ class LocalBuildInstall(unittest.TestCase):
             preflight_helper(build, unnamed_workspace="workspace=resolved\\nroot=\\nsource=persisted_default\\n")
             prefix = root / "prefix"
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent")],
+                                     "--prefix", str(prefix)],
                                     env=unnamed_env(root), cwd=root, capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("resolved the workspace but returned no root", result.stderr)
@@ -1407,8 +927,7 @@ class LocalBuildInstall(unittest.TestCase):
                              "exit 1\n")
             guard.chmod(0o755)
             prefix = root / "prefix"
-            result = subprocess.run(["bash", str(checkout / "scripts/install-local-build.sh"), "--prefix", str(prefix),
-                                     "--manifest-dir", str(root / "absent")],
+            result = subprocess.run(["bash", str(checkout / "scripts/install-local-build.sh"), "--prefix", str(prefix)],
                                     env=dict(os.environ, RECORD=str(record)), capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)
             self.assertIn("this repo requires exactly 5.5.1", result.stderr)
@@ -1416,7 +935,7 @@ class LocalBuildInstall(unittest.TestCase):
             cwd, *arguments = record.read_text().splitlines()
             self.assertEqual(Path(cwd).resolve(), checkout)
             self.assertEqual(arguments, ["build", "--root", str(checkout), "./bin/main_eio.exe",
-                                         "./bin/masc_tui.exe", "./bin/masc_browser_host.exe",
+                                         "./bin/masc_tui.exe",
                                          "./bin/deployment_preflight_helper.exe",
                                          "./bin/masc_exec_ssh_bootstrap.exe",
                                          *[f"./bin/{program}.exe" for program in BROWSER_ADDON_PROGRAMS]])
@@ -1431,11 +950,11 @@ class LocalBuildInstall(unittest.TestCase):
             # A dry run prints the Dune command and runs nothing, so the real
             # script is checked for taking these arguments without a switch.
             result = subprocess.run(["bash", str(SCRIPT), "--build-dir", str(build), "--prefix", str(root / "prefix"),
-                                     "--manifest-dir", str(root / "absent"), "--base-path", str(workspace(root))],
+                                     "--base-path", str(workspace(root))],
                                     env=dict(os.environ, MASC_DUNE_DRY_RUN="1"),
                                     check=True, capture_output=True, text=True)
             self.assertIn("[dune-local] command: dune build --root", result.stderr)
-            self.assertIn("./bin/masc_browser_host.exe", result.stderr)
+            self.assertIn("./bin/masc_exec_ssh_bootstrap.exe", result.stderr)
             self.assertTrue((root / "prefix/masc").is_file())
 
     # #39224: the gate resolves its helper beside itself first, so a prefix
@@ -1450,7 +969,7 @@ class LocalBuildInstall(unittest.TestCase):
             preflight_helper(build)
             prefix = root / "prefix"
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--prefix", str(prefix),
                                      "--base-path", str(workspace(root))],
                                     check=True, capture_output=True, text=True)
             self.assertTrue((prefix / "masc-deployment-preflight-helper").is_file())
@@ -1474,7 +993,7 @@ class LocalBuildInstall(unittest.TestCase):
             before_masc, before_gate, before_helper = (
                 old_masc.read_text(), old_gate.read_text(), old_helper.read_text())
             result = subprocess.run(["bash", str(SCRIPT), "--skip-build", "--build-dir", str(build),
-                                     "--prefix", str(prefix), "--manifest-dir", str(root / "absent"),
+                                     "--prefix", str(prefix),
                                      "--base-path", str(workspace(root))],
                                     capture_output=True, text=True)
             self.assertNotEqual(result.returncode, 0)

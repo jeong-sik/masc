@@ -478,8 +478,7 @@ let test_capability_table_names_advertised_values () =
     | Cap.Act -> "BrowserAct" | Cap.Session -> "BrowserSession" | Cap.Goto -> "BrowserGoto"
   in
   let backends =
-    [ Cap.Connected Browser_lane.Web_extension
-    ; Cap.Connected Browser_lane.Webdriver_bidi
+    [ Cap.Connected Browser_lane.Webdriver_bidi
     ; Cap.Connected Browser_lane.Ego_task_space
     ; Cap.Safari_unavailable
     ]
@@ -506,7 +505,6 @@ let test_capability_table_names_advertised_values () =
                     (Printf.sprintf "%s on %s: %s %S is advertised by %s"
                        (Cap.operation_name entry.operation)
                        (match backend with
-                        | Cap.Connected Browser_lane.Web_extension -> "extension"
                         | Cap.Connected Browser_lane.Webdriver_bidi -> "live BiDi"
                         | Cap.Connected Browser_lane.Ego_task_space -> "ego"
                         | Cap.Safari_unavailable -> "Safari")
@@ -595,8 +593,7 @@ let test_capability_table_sharing_is_listed () =
                 true
                 (List.mem sorted allowed))
          by_call)
-    [ Cap.Connected Browser_lane.Web_extension
-    ; Cap.Connected Browser_lane.Webdriver_bidi
+    [ Cap.Connected Browser_lane.Webdriver_bidi
     ; Cap.Connected Browser_lane.Ego_task_space
     ; Cap.Safari_unavailable
     ]

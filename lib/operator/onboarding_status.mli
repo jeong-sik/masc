@@ -13,15 +13,15 @@ type check_id =
   | Keeper_declaration
   | Sandbox
   | Keeper_persistence
-  | Browser_lane
   | Browser_bidi_host
-      (** Whether a BiDi browser host runs for the workspace and why the last
-          one ended, from that host's record on disk. *)
+      (** Whether the Browser Addon starts the workspace's live Firefox
+          ([\[browser.live.bidi\]] and an enabled [browser-firefox]
+          declaration), and where its readiness is observed. *)
 
 (** Whether an [Invalid] check keeps the workspace's existing history from opening.
     [Required_to_open]: the workspace, a loadable runtime.toml and Keeper
     metadata the boot admits. [Advisory] checks — imp's model binding,
-    declaration and sandbox, and the browser lane — are reported but never
+    declaration and sandbox, and the live Firefox — are reported but never
     send the operator back into setup. *)
 type role = Required_to_open | Advisory
 

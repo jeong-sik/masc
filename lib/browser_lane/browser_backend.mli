@@ -2,16 +2,13 @@
     serves (RFC browser-backends-end-alone, invariant 1). A failure stays
     with the one who owns the browser, so the worker boundary follows it.
 
-    The transport stays on the client: [Owned_firefox] and [External_host]
-    both speak WebDriver BiDi, and only who launched the browser tells them
-    apart. A new source is a new constructor, and every reader matches on
-    [t] without a catch-all. *)
+    The transport stays on the client. A new source is a new constructor,
+    and every reader matches on [t] without a catch-all. *)
 
 (** [all] (derived) lists every source in constructor order. *)
 type t =
   | Owned_firefox  (** the live Firefox masc launches and reaches over BiDi *)
   | Ego  (** the ego lite task space masc opens *)
-  | External_host  (** the clients an outside native host brings: a browser extension or a BiDi host *)
 [@@deriving enumerate]
 
 (** The lane a Keeper names for this source. *)

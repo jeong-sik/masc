@@ -2392,9 +2392,9 @@ let test_browser_screenshot_reaches_vision_reader () =
           let client suffix browser =
             let raw="30000000-0000-4000-8000-" ^ suffix in
             {Browser_lane.client_id=Result.get_ok (Browser_lane.client_id_of_string raw);
-              browser;version="fixture";transport=Browser_lane.Web_extension;engine_version="155.0.1";space=None} in
+              browser;version="fixture";transport=Browser_lane.Webdriver_bidi;engine_version="155.0.1";space=None} in
           let first=client "000000000001" Browser_lane.Firefox in
-          let second=client "000000000002" Browser_lane.Zen in
+          let second=client "000000000002" Browser_lane.Firefox in
           let live_calls=ref [] in
           let respond ~route verb =
             (match route with
@@ -2409,7 +2409,7 @@ let test_browser_screenshot_reaches_vision_reader () =
               | _ -> failwith "unexpected screenshot command" in
             Browser_lane.Answered (`Assoc ["ok",`Bool true;"data",data]) in
           Browser_addon_fixture.with_workers ~env ~config
-            ~workers:[{serves=Browser_lane.Backend.External_host;clients=[first;second];exports=true}]
+            ~workers:[{serves=Browser_lane.Backend.Owned_firefox;clients=[first;second];exports=true}]
             ~respond:(fun ~serves:_ ~route verb -> respond ~route verb) (fun _workers ->
           let client_id = Browser_lane.client_id_to_string first.client_id in
           let screenshot = `Assoc ["lane",`String "live";"clientId",`String client_id;
@@ -2521,7 +2521,7 @@ let test_browser_screenshot_reaches_vision_reader () =
             assert (assoc_string "clientId" data = client_id);
             (* The stored screenshot is rebuilt from checked fields; the
                connection's transport is one of them. *)
-            assert (assoc_string "transport" data = "web_extension");
+            assert (assoc_string "transport" data = "webdriver_bidi");
             if mode = "screenshot" then verify_pointer_receipt "live" data) ["elements";"screenshot"]))))))
 
 let test_native_browser_screenshot_artifact_scope () =
@@ -2550,7 +2550,7 @@ let test_native_browser_screenshot_artifact_scope () =
     Eio_main.run (fun env ->
       Time_compat.set_clock (Eio.Stdenv.clock env);
       Browser_addon_fixture.with_workers ~env ~config
-        ~workers:[{serves=Browser_lane.Backend.External_host;clients=[client];exports=true}]
+        ~workers:[{serves=Browser_lane.Backend.Owned_firefox;clients=[client];exports=true}]
         ~respond:(fun ~serves:_ ~route verb -> respond ~route verb) (fun _workers ->
         let capture options = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
           ~config ~meta ~args:(`Assoc ["lane",`String "live";
@@ -2631,7 +2631,7 @@ let test_browser_screenshot_rejects_invalid_client () =
      ["clientId",`Int 73], "invalid_connection_fields";
      ["clientId",live_id], "client_without_transport";
      ["clientId",live_id;"transport",`String "carrier_pigeon"], "unsupported_browser_transport";
-     ["transport",`String "web_extension"], "invalid_connection_fields";
+     ["transport",`String "webdriver_bidi"], "invalid_connection_fields";
      ["clientId",live_id;"transport",`String "ego_task_space"], "ego_connection_without_space";
      ["clientId",live_id;"transport",`String "webdriver_bidi";
        "browserSpace",`Assoc ["id",`Int 51;"name",`String "SDK Space"]], "space_requires_ego_connection"]

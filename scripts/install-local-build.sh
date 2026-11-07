@@ -1,32 +1,8 @@
 #!/usr/bin/env bash
-# Build this checkout's masc, masc-tui and masc-browser-host, install them into
-# a prefix, and bring every registered Firefox browser lane host up to the same
-# build. The deployment preflight helper and gate are installed into the prefix
-# too, so the preflight an operator runs there is the one this build produced
+# Build this checkout's masc and masc-tui and install them into a prefix. The
+# deployment preflight helper and gate are installed into the prefix too, so
+# the preflight an operator runs there is the one this build produced
 # (#39224).
-#
-# masc browser-lane-setup copies the host executable into
-# <workspace>/.masc/browser-lane/host so a moved checkout cannot break it, and
-# writes the extension beside it. That copy is what Firefox starts, and
-# nothing else replaces it, so a local install that only refreshed the prefix
-# left the lane on whatever build was copied first. Every native messaging
-# manifest whose launcher lives under a workspace's browser-lane/host is
-# reinstalled from the new prefix binary under its own host name, and the host
-# processes started from that workspace are stopped; the extension reconnects
-# after five seconds and starts the new copy. The host holding the workspace's
-# BiDi host lock (a BiDi host) is left running on its old copy, because
-# nothing would start it again.
-#
-# A lane set up with `masc browser-lane-setup --mode bidi` or `--mode host`
-# registers no manifest, so the manifests cannot lead to it. The workspace this
-# install works with (--base-path, or the one masc would use) is brought up as
-# well when its lane is installed (a launcher and its declaration) and no
-# manifest already covers it, through
-# `masc browser-lane-setup --mode host`, which writes the host and the launcher
-# and leaves runtime.toml alone. A lane that has an extension and no manifest
-# here is named on stderr and left as it is: a host replaced beside an old
-# extension would put the two on different builds. Other workspaces with such a
-# lane are not found; run that command for them.
 #
 # Before anything is replaced, the new build judges the runtime.toml of the
 # workspace its server runs on (#39311) and reads every durable store there,
@@ -52,24 +28,22 @@
 # MASC_RELEASE_BASE_URL and MASC_REPO name the release the way
 # scripts/install.sh does; --no-guest-shim skips the step.
 #
-# Usage: scripts/install-local-build.sh [--prefix DIR] [--manifest-dir DIR]
+# Usage: scripts/install-local-build.sh [--prefix DIR]
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
 #                                       [--no-guest-shim]
 #                                       [--no-browser-addon]
 #                                       [--print-build-targets]
-#   --prefix        where masc, masc-tui, masc-browser-host, the browser Add-on
-#                   programs, SSH bootstrap and deployment preflight pair go (default
+#   --prefix        where masc, masc-tui, the browser Add-on programs, SSH
+#                   bootstrap and deployment preflight pair go (default
 #                   ~/.local/bin)
-#   --manifest-dir  Firefox native messaging manifests (default: the per-user directory)
 #   --skip-build    install what --build-dir already holds
-#   --build-dir     directory holding main_eio.exe, masc_tui.exe, masc_browser_host.exe,
+#   --build-dir     directory holding main_eio.exe, masc_tui.exe,
 #                   masc_native_addon_launcher.exe, masc_browser_addon_worker.exe,
 #                   masc_browser_process_owner.exe, deployment_preflight_helper.exe,
 #                   and masc_exec_ssh_bootstrap.exe
 #                   (default <repo>/_build/default/bin)
 #   --base-path     workspace whose runtime.toml the new build must accept, and
-#                   whose browser lane host is brought up to this build when no
-#                   manifest covers it
+#                   whose browser Add-on is declared
 #                   (default: the one masc would use -- MASC_BASE_PATH, a current
 #                   directory holding .masc/config, then the recorded default)
 #   --no-browser-addon do not build or install the browser Add-on programs, and
@@ -85,8 +59,7 @@ prefix="$HOME/.local/bin"
 build_dir="$repo/_build/default/bin"
 skip_build=false
 guest_shim=true
-# Every browser route and every native browser host's polls run in the browser
-# Add-on, so its programs are installed with masc, from the same build, unless
+# Every browser route runs in the browser Add-on, so its programs are installed with masc, from the same build, unless
 # --no-browser-addon says the workspace needs no browser.
 browser_addon=true
 browser_addon_programs=(masc_native_addon_launcher masc_browser_addon_worker masc_browser_process_owner)
@@ -96,15 +69,13 @@ workspace_root=""
 workspace_kind=""
 install_args=("$@")
 case "$(uname -s)" in
-  Darwin) manifest_dir="$HOME/Library/Application Support/Mozilla/NativeMessagingHosts" ;;
-  Linux) manifest_dir="$HOME/.mozilla/native-messaging-hosts" ;;
+  Darwin|Linux) ;;
   *) echo "install-local-build: macOS and Linux only" >&2; exit 2 ;;
 esac
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --prefix) prefix=${2:?--prefix needs a directory}; shift 2 ;;
-    --manifest-dir) manifest_dir=${2:?--manifest-dir needs a directory}; shift 2 ;;
     --build-dir) build_dir=${2:?--build-dir needs a directory}; shift 2 ;;
     --no-guest-shim) guest_shim=false; shift ;;
     --no-browser-addon) browser_addon=false; shift ;;
@@ -118,7 +89,7 @@ done
 
 # CI artifacts use the same target list as a default local install. Keep this
 # read-only query before the transaction lock and every workspace operation.
-build_targets=(./bin/main_eio.exe ./bin/masc_tui.exe ./bin/masc_browser_host.exe
+build_targets=(./bin/main_eio.exe ./bin/masc_tui.exe
   ./bin/deployment_preflight_helper.exe ./bin/masc_exec_ssh_bootstrap.exe)
 if [ "$browser_addon" = true ]; then
   for program in "${browser_addon_programs[@]}"; do
@@ -287,19 +258,10 @@ PY
       fi
       if [ "$workspace_kind" = directory ]; then
         echo "install-local-build: checking runtime.toml of $workspace_root (workspace from $workspace_source)"
-        # The browser Add-on declaration is written after the swap below, so a
-        # workspace that has none yet is not a refusal for an install that
-        # declares it. --no-browser-addon leaves the declaration as it is, and
-        # then the gate checks it.
-        preflight_addon_args=()
-        if [ "$browser_addon" = true ]; then
-          preflight_addon_args=(--browser-addon-declared-by-caller)
-        fi
         MASC_DEPLOYMENT_PREFLIGHT_HELPER="$preflight_helper" \
           "$repo/scripts/check-runtime-deployment-preflight.sh" \
           --base-path "$workspace_root" \
-          --runtime-config-only \
-          ${preflight_addon_args[@]+"${preflight_addon_args[@]}"}
+          --runtime-config-only
         # Boot reads only the stores it refuses on; a Preflight_only store is
         # read before a start by the deploy preflight alone (RFC
         # every-durable-store-has-one-boot-policy). This install read
@@ -356,8 +318,8 @@ fi
 # working one release apart (#33425), which is why a release that cannot be
 # read is a line here and not a refusal.
 
-# python3 already refreshes the browser lane hosts below, so hashing through
-# it adds no tool this script has to look for.
+# python3 already classifies the workspace above, so hashing through it adds
+# no tool this script has to look for.
 sha256_of() {
   python3 -c 'import hashlib, sys; print(hashlib.sha256(open(sys.argv[1], "rb").read()).hexdigest())' "$1"
 }
@@ -463,7 +425,6 @@ refresh_guest_shim
 mkdir -p "$prefix"
 install -m 755 "$build_dir/main_eio.exe" "$prefix/masc"
 install -m 755 "$build_dir/masc_tui.exe" "$prefix/masc-tui"
-install -m 755 "$build_dir/masc_browser_host.exe" "$prefix/masc-browser-host"
 if [ "$browser_addon" = true ]; then
   for program in "${browser_addon_programs[@]}"; do
     install -m 755 "$build_dir/$program.exe" "$prefix/${program//_/-}"
@@ -482,9 +443,9 @@ install -m 755 "$build_dir/deployment_preflight_helper.exe" "$prefix/masc-deploy
 install -m 755 "$build_dir/masc_exec_ssh_bootstrap.exe" "$prefix/masc-exec-ssh-bootstrap"
 install -m 755 "$repo/scripts/check-runtime-deployment-preflight.sh" "$prefix/masc-check-runtime-deployment-preflight"
 if [ "$browser_addon" = true ]; then
-  echo "installed masc, masc-tui, masc-browser-host, masc-native-addon-launcher, masc-browser-addon-worker, masc-browser-process-owner, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight, masc-exec-ssh-bootstrap into $prefix"
+  echo "installed masc, masc-tui, masc-native-addon-launcher, masc-browser-addon-worker, masc-browser-process-owner, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight, masc-exec-ssh-bootstrap into $prefix"
 else
-  echo "installed masc, masc-tui, masc-browser-host, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight, masc-exec-ssh-bootstrap into $prefix (no browser Add-on)"
+  echo "installed masc, masc-tui, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight, masc-exec-ssh-bootstrap into $prefix (no browser Add-on)"
 fi
 echo "install-local-build: a running server keeps its old build; masc restart replaces it with this one"
 
@@ -493,9 +454,7 @@ echo "install-local-build: a running server keeps its old build; masc restart re
 # attaches a package of this build. An existing declaration is left as it is
 # and reported. A workspace that does not exist yet is not created here, and
 # one without a config root yet (setup exits 3) is left for the first server
-# start to create it. A failure is reported after the browser hosts below are
-# refreshed, so one workspace's Lane directory never leaves every host on the
-# old build.
+# start to create it.
 addon_failed=false
 addon_no_config_root_status=3
 if [ "$browser_addon" = false ]; then
@@ -512,224 +471,8 @@ else
   echo "install-local-build: the browser Add-on is not declared: workspace $workspace_root does not exist yet; run masc browser-lane-setup --mode addon --base-path $workspace_root once it does"
 fi
 
-refresh_failed=false
-if ! python3 - "$prefix/masc" "$prefix/masc-browser-host" "$manifest_dir" "$workspace_root" "$browser_addon" <<'PY'
-import fcntl
-import filecmp
-import json
-import os
-from pathlib import Path
-import signal
-import struct
-import subprocess
-import sys
-
-masc, binary, manifest_dir = sys.argv[1], sys.argv[2], Path(sys.argv[3])
-# The answer of masc's own lookup (the deployment preflight helper), which trims
-# and normalizes the path as every masc command does; a path this shell was
-# merely given is not the one masc would write to.
-workspace = Path(sys.argv[4])
-# --no-browser-addon reaches the host refresh too: setup would otherwise
-# declare the Add-on the operator left out.
-addon_choice = [] if sys.argv[5] == "true" else ["--no-addon"]
-launcher_suffix = Path(".masc/browser-lane/host/launch")
-
-registered = []
-if manifest_dir.is_dir():
-    for manifest in sorted(manifest_dir.glob("*.json")):
-        try:
-            declared = json.loads(manifest.read_text())
-        except (OSError, ValueError):
-            continue
-        name, launcher = declared.get("name"), declared.get("path")
-        if not isinstance(name, str) or not isinstance(launcher, str):
-            continue
-        if "\0" in name or "\0" in launcher:
-            # Neither can be a host name or a path, and a process cannot be
-            # started with one.
-            continue
-        launcher = Path(launcher)
-        if launcher.parts[-len(launcher_suffix.parts):] != launcher_suffix.parts:
-            continue
-        base = Path(*launcher.parts[:-len(launcher_suffix.parts)])
-        registered.append((name, base, declared["path"]))
-
-# A lane set up with `masc browser-lane-setup --mode bidi` or `--mode host`
-# registers no manifest, so the manifests above cannot lead to it. The one
-# workspace this install works with is looked at as well: when its lane is
-# installed and no registration already covers it, its host is brought up too.
-def same_directory(a, b):
-    try:
-        return os.path.realpath(a) == os.path.realpath(b)
-    except (OSError, ValueError):
-        return False
-
-# Installed as masc reads it (lib/browser_lane_launcher.ml): the launcher and
-# the declaration beside it, both written by one installation. A directory that
-# cannot be read holds no lane this script can refresh.
-def lane_installed(base):
-    host_directory = base / ".masc/browser-lane/host"
-    try:
-        return (host_directory / "launch").is_file() and (host_directory / "launch.json").is_file()
-    except OSError:
-        return False
-
-def lane_has_extension(base):
-    try:
-        return (base / ".masc/browser-lane/extension/manifest.json").is_file()
-    except OSError:
-        return False
-
-unregistered = []
-if lane_installed(workspace) and not any(same_directory(workspace, base) for _, base, _ in registered):
-    if lane_has_extension(workspace):
-        # Its manifest is in another directory than this one. A host replaced
-        # beside an extension that is not would put the two on different
-        # builds, and the extension is written for the host that comes with it.
-        print(f"install-local-build: WARN the browser lane of {workspace} has an extension and no "
-              f"manifest in {manifest_dir}, so neither its host nor its extension is refreshed; run "
-              "masc browser-lane-setup --mode extension with that lane's --manifest-dir",
-              file=sys.stderr)
-    else:
-        unregistered.append(workspace)
-
-if not registered and not unregistered:
-    print(f"no browser lane host is registered in {manifest_dir}")
-    sys.exit(0)
-
-def bidi_host_pid(base):
-    # Firefox starts an extension host again once it stops; nothing starts a
-    # stopped BiDi host again. A BiDi host holds a lockf lock on
-    # bidi-host.lock while it runs (lib/browser_bidi_host_record.ml), and
-    # F_GETLK names the holder without taking the lock, so a host starting
-    # meanwhile is not refused. Its record's pid can outlive it, and ps joins
-    # arguments with spaces that a path may hold, so neither names it.
-    try:
-        fd = os.open(base / ".masc/browser-lane/bidi-host.lock", os.O_RDONLY)
-    except FileNotFoundError:
-        return None
-    try:
-        # struct flock orders its fields differently on the two platforms.
-        if sys.platform == "darwin":
-            layout = "@qqihh"
-            asked = struct.pack(layout, 0, 0, 0, fcntl.F_WRLCK, os.SEEK_SET)
-            _, _, holder, kind, _ = struct.unpack(layout, fcntl.fcntl(fd, fcntl.F_GETLK, asked))
-        elif sys.platform.startswith("linux"):
-            layout = "@hhqqi4x"
-            asked = struct.pack(layout, fcntl.F_WRLCK, os.SEEK_SET, 0, 0, 0)
-            kind, _, _, _, holder = struct.unpack(layout, fcntl.fcntl(fd, fcntl.F_GETLK, asked))
-        else:
-            sys.exit(f"cannot read the BiDi host lock's holder on {sys.platform}")
-    finally:
-        os.close(fd)
-    return None if kind == fcntl.F_UNLCK else str(holder)
-
-# -ww: whole commands, so a long host path is matched in full.
-running = subprocess.run(["ps", "-ww", "-axo", "pid=,command="], capture_output=True, text=True, check=True).stdout
-stopped_pids = set()
-# The masc just installed brings a workspace's lane to the build it was built
-# from, and this says what is left wrong when it did not. masc resolves
-# --base-path as it does for every command (it trims the value and drops a
-# trailing .masc), so a registration whose workspace path does not survive that
-# would be written somewhere else and still look refreshed: the manifest it
-# rewrites is compared with the one it replaced, and the host copy with the
-# binary just installed.
-def refresh(name, base, declared_path):
-    registration = manifest_dir / f"{name}.json"
-    previous = registration.read_text() if registration.is_file() else None
-    result = subprocess.run(
-        [masc, "browser-lane-setup", "--mode", "extension", "--binary", binary,
-         "--base-path", str(base), "--host-name", name, "--manifest-dir", str(manifest_dir),
-         *addon_choice],
-        stdout=subprocess.DEVNULL)
-    if result.returncode != 0:
-        return f"masc browser-lane-setup exited {result.returncode}"
-    try:
-        now = json.loads(registration.read_text()).get("path")
-    except (OSError, ValueError):
-        now = None
-    if not isinstance(now, str) or os.path.realpath(now) != os.path.realpath(declared_path):
-        if previous is None:
-            registration.unlink(missing_ok=True)
-        else:
-            registration.write_text(previous)
-        return (f"masc resolved {base} to another workspace (it wrote {now}); "
-                "the registration is as it was")
-    copy = base / ".masc/browser-lane/host/masc-browser-host"
-    if not copy.is_file() or not filecmp.cmp(binary, copy, shallow=False):
-        return f"{copy} is not the host just installed"
-    return None
-
-# A lane with no registration is brought up the same way, without a manifest
-# to compare: the host copy beside its launcher must be the one just installed.
-# masc writes the copy where it resolves --base-path, so a path it would resolve
-# elsewhere leaves this copy as it was and is reported.
-def refresh_host(base):
-    result = subprocess.run(
-        [masc, "browser-lane-setup", "--mode", "host", "--binary", binary, "--base-path", str(base),
-         *addon_choice],
-        stdout=subprocess.DEVNULL)
-    if result.returncode != 0:
-        return f"masc browser-lane-setup exited {result.returncode}"
-    copy = base / ".masc/browser-lane/host/masc-browser-host"
-    if not copy.is_file() or not filecmp.cmp(binary, copy, shallow=False):
-        return f"{copy} is not the host just installed"
-    return None
-
-def stop_running_hosts(base):
-    host = str(base / ".masc/browser-lane/host/masc-browser-host")
-    bidi_host = bidi_host_pid(base)
-    stopped, kept = [], []
-    for line in running.splitlines():
-        pid, _, command = line.strip().partition(" ")
-        if (command == host or command.startswith(host + " ")) and pid not in stopped_pids:
-            if pid == bidi_host:
-                kept.append(pid)
-                continue
-            try:
-                os.kill(int(pid), signal.SIGTERM)
-                stopped.append(pid)
-                stopped_pids.add(pid)
-            except ProcessLookupError:
-                pass
-    said = []
-    if stopped:
-        said.append(f"stopped host pid {', '.join(stopped)}; Firefox starts the new copy")
-    if kept:
-        # The installer replaced the file, so the running host keeps the copy
-        # it started with.
-        said.append(f"kept BiDi host pid {', '.join(kept)}, which nothing would start again; "
-                    "it runs its old copy until it is restarted")
-    return "; ".join(said) or "no host running"
-
-failures = []
-# The workspaces after a failed one are still brought up to date, and the failed
-# one's running host is left alone: it still runs the copy it has.
-for name, base, declared_path in registered:
-    problem = refresh(name, base, declared_path)
-    if problem:
-        failures.append(f"browser lane host {name} for {base}: {problem}")
-        continue
-    print(f"refreshed browser lane host {name} for {base} ({stop_running_hosts(base)})")
-for base in unregistered:
-    problem = refresh_host(base)
-    if problem:
-        failures.append(f"browser lane host for {base}: {problem}")
-        continue
-    print(f"refreshed browser lane host for {base} ({stop_running_hosts(base)})")
-if failures:
-    for failure in failures:
-        print(f"install-local-build: could not refresh {failure}", file=sys.stderr)
-    sys.exit(1)
-PY
-then
-  refresh_failed=true
-fi
-
 if [ "$addon_failed" = true ]; then
   echo "install-local-build: the browser Add-on of $workspace_root is not set up; the programs above are installed" >&2
-fi
-if [ "$addon_failed" = true ] || [ "$refresh_failed" = true ]; then
   exit 1
 fi
 

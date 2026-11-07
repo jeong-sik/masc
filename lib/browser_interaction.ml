@@ -3,7 +3,7 @@ type request = { route : Browser_selection.preference; tab_id : int; frame_path 
   expected_url : string option; action : Browser_lane.interaction }
 open Result.Syntax
 let route_names = ["lane"; "clientId"]
-let wire_fields = ["tabId"; "framePath"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "factor"; "width"; "height"; "value"; "values"; "target"]
+let wire_fields = ["tabId"; "framePath"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "width"; "height"; "value"; "values"; "target"]
 let parse = function
   | `Assoc fields ->
     let allowed = route_names @ wire_fields in
@@ -42,9 +42,6 @@ let parse = function
          | _ -> Error "pointer target requires selector or documentId/nodeId")
       | _ -> Error "pointer target requires selector or documentId/nodeId" in
     let excludes keys =
-      let keys = match List.assoc_opt "action" fields with
-        | Some (`String "set_zoom") -> keys
-        | _ -> "factor" :: keys in
       let keys = (match List.assoc_opt "action" fields with
         | Some (`String "press_key") -> keys
         | _ -> "key" :: "modifiers" :: keys) in
@@ -110,16 +107,6 @@ let parse = function
            let* height = side "height" in
            Ok (Browser_lane.Set_viewport (Browser_lane.Fit {width;height}))
          | true, false | false, true -> Error "set_viewport takes width and height together, or neither to restore the browser's size")
-      | Some (`String "set_zoom") ->
-        let* () = excludes ["selector";"text";"documentId";"nodeId";"x";"y";"point";"from";"to";"viewport"] in
-        let* () = match expected_url with Some _ -> Ok () | None -> Error "set_zoom requires expectedUrl" in
-        let* factor = match List.assoc_opt "factor" fields with
-          | Some (`Int value) -> Ok (float_of_int value)
-          | Some (`Float value) when Float.is_finite value -> Ok value
-          | Some _ | None -> Error "set_zoom requires a finite factor" in
-        let* () = if factor >= 0.3 && factor <= 5. then Ok ()
-          else Error "set_zoom factor must be between 0.3 and 5" in
-        Ok (Browser_lane.Set_zoom {factor})
       | Some (`String ("type_text" | "press_key" as action)) ->
         let* () = excludes (["selector";"nodeId";"x";"y";"point";"from";"to";"viewport"] @
           if action = "press_key" then ["text"] else []) in
@@ -266,7 +253,7 @@ let parse = function
           let* to_ = geometry Browser_lane.Pointer.point_of_json "to" in
           let* via,duration_ms = drag_options () in
           Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
-      | _ -> Error "action must be set_zoom, set_viewport, activate_tab, tap_at, swipe, click, double_click, double_click_at, type_text, press_key, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at, drag or drag_to" in
+      | _ -> Error "action must be set_viewport, activate_tab, tap_at, swipe, click, double_click, double_click_at, type_text, press_key, follow_link, fill, scroll, click_at, scroll_at, hover, hover_at, drag or drag_to" in
     let* frame_path = match List.assoc_opt "framePath" fields with
       | None -> Ok []
       | Some (`List values) when values <> [] ->
@@ -280,7 +267,7 @@ let parse = function
       | Some _ -> Error "framePath must list nonempty frame selectors" in
     let* () = match frame_path, action with
       | [], _ | _ :: _, (Browser_lane.Click _ | Browser_lane.Fill _ | Browser_lane.Select_option _ | Browser_lane.Scroll _) -> Ok ()
-      | _ :: _, (Browser_lane.Activate_tab | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _
+      | _ :: _, (Browser_lane.Activate_tab | Browser_lane.Set_viewport _
         | Browser_lane.Double_click _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _
         | Browser_lane.Press_key _ | Browser_lane.Hover _ | Browser_lane.Drag_to _ | Browser_lane.Scroll_at _
         | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _ | Browser_lane.Click_at _
@@ -683,7 +670,7 @@ try {
 
 let needs_pointer_resolution = function
   | Browser_lane.Click _ | Click_node _ | Double_click _ | Hover _ | Drag_to _ -> true
-  | Browser_lane.Activate_tab | Fill _ | Select_option _ | Set_zoom _ | Set_viewport _
+  | Browser_lane.Activate_tab | Fill _ | Select_option _ | Set_viewport _
   | Double_click_at _ | Type_text _ | Press_key _ | Scroll _ | Hover_at _ | Tap_at _
   | Swipe _ | Click_at _ | Scroll_at _ | Drag _ | Follow_link _ | Fill_node _
   | Click_target _ | Fill_target _ | Hover_target _ | Double_click_target _ -> false
@@ -708,7 +695,7 @@ let resolve_pointer_input action = function
      | Browser_lane.Drag_to {via;duration_ms;_} -> let* from = point "from" in let* to_ = point "to" in
        Ok (Browser_lane.Drag {from;to_;viewport;via;duration_ms})
      | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
-     | Browser_lane.Set_zoom _ | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
+     | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
      | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Click_at _
      | Browser_lane.Tap_at _ | Browser_lane.Swipe _
      | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _

@@ -18,8 +18,7 @@ an agent through a public tool.
 ## Workflows
 
 - Native BiDi and ego support observed scene → hover → fresh scene → click →
-  inspect application state. WebExtension does not serve
-  trusted hover; its DOM click does not provide native pointerdown menus.
+  inspect application state.
 - Pointer dragging and HTML5 DataTransfer/drop acceptance are different. Ego has
   a passing native HTML5 fixture; application acceptance still
   requires a fresh read. Firefox's tested HTML5 case fails despite pointer drag working.
@@ -27,9 +26,8 @@ an agent through a public tool.
   trusted typing or submission. Native adapters expose typed double click,
   focused Unicode text, and modifier chords; text controls are refused, and
   Chromium supplementary keys require type_text.
-- WebExtension 0.8.0+ exposes genuine browser zoom (factor 0.3–5) with measured
-  scale and scope. Per-origin zoom can affect same-origin tabs. Refresh the scene
-  and screenshot afterward; native adapters explicitly refuse zoom.
+- No connection serves browser zoom. Ego's CDP offers only a pinch scale, so its
+  zoom row is a reasoned refusal.
 - Safari has no MASC adapter. Installing Safari or having its driver executable
   does not create a connected browser. Its current catalog is unsupported.
 

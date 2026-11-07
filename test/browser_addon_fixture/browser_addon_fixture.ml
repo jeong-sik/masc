@@ -302,12 +302,11 @@ let run_workers ~env ~config ~downloads ~received ~respond workers run =
       let attached=List.rev_map fst !started in
       List.iter (fun (worker:attached) -> wait ~env (fun () -> serving ~config worker.instance_id)) attached;
       run ~stop attached))
-(* The external hosts that list [clients], in one worker answered by
-   [respond]. *)
+(* One owned-Firefox worker that lists [clients], answered by [respond]. *)
 let with_worker ?(clients=[]) ?(downloads=[]) ~env ~config ~respond run =
   run_workers ~env ~config ~downloads ~received:(fun ~serves:_ ~route:_ -> ())
     ~respond:(fun ~serves:_ -> respond)
-    [{serves=B.Backend.External_host;clients;exports=true}]
+    [{serves=B.Backend.Owned_firefox;clients;exports=true}]
     (fun ~stop _ -> run {stop})
 let with_workers ?(received=fun ~serves:_ ~route:_ -> ()) ~env ~config ~workers ~respond run =
   run_workers ~env ~config ~downloads:[] ~received ~respond workers (fun ~stop:_ attached -> run attached)

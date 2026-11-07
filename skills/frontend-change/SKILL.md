@@ -1,6 +1,6 @@
 ---
 name: frontend-change
-description: Design, implement and verify a web UI change from a live Firefox/Zen page, a selected Browser Lane element or a visual brief. Use for layout, hierarchy, typography and interaction alternatives grounded in the existing product, for source edits and component reuse in the existing repository, and for before/after browser checks of responsive or state regressions.
+description: Design, implement and verify a web UI change from a live browser page, a selected Browser Lane element or a visual brief. Use for layout, hierarchy, typography and interaction alternatives grounded in the existing product, for source edits and component reuse in the existing repository, and for before/after browser checks of responsive or state regressions.
 ---
 
 # Change a web interface

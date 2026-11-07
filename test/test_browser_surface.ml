@@ -56,7 +56,7 @@ let connected =
   Masc.Browser_binding.of_browser
     {Browser_selection.route=Browser_lane.Live_route (Some client_id);reason=Browser_selection.Explicit_browser}
     (Browser_selection.Connected {client_id;browser=Browser_lane.Firefox;version="fixture";
-      transport=Browser_lane.Web_extension;engine_version="fixture";space=None})
+      transport=Browser_lane.Webdriver_bidi;engine_version="fixture";space=None})
 let page_of id = `Assoc ["tabId", `Int id; "url", `String "https://example.org/page";
   "title", `String "Page"; "text", `String "Observed page"; "chars", `Int 13; "truncated", `Bool false]
 (* What the host's tab read does with the browser's two answers

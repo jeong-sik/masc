@@ -29,9 +29,8 @@ separate capability increment. Frame and dialog behavior is described below.
 ## Read a screenshot
 
 `BrowserRead {"lane":"live","clientId":<id>,"tabId":73,"mode":"screenshot"}`
-captures the selected viewport as PNG. On the WebExtension it uses
-`tabs.captureTab`, without switching the operator's active tab. A changed URL across
-capture is rejected. Live capture also compares document identity, viewport
+captures the selected viewport as PNG. A changed URL across capture is
+rejected. Live capture also compares document identity, viewport
 dimensions and scroll position before and after capture. Changes to pixels
 without a corresponding viewport-identity change are not detected by that
 guard. For a Keeper, the tool returns URL/title, dimensions and a Keeper-local
@@ -51,12 +50,8 @@ An unloaded schema or unsuccessful tool search alone does not establish this
 exclusion. Model/provider names, older skill guidance, file/artifact failures and
 account quota errors do not establish unsupported image input either.
 
-The native host retains Mozilla's 1 MiB command limit and accepts bounded 8 MiB
-replies, enough for the default 5 MiB Vision image after base64 encoding. The
-extension rejects oversized replies before writing a frame. Vision image size
-and format validation apply before persistence. This is a viewport capture,
-not a stitched full-page screenshot. See [Mozilla captureTab](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/captureTab)
-and [native message framing](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/Native_messaging).
+Vision image size and format validation apply before persistence. This is a
+viewport capture, not a stitched full-page screenshot.
 
 Screenshots require the authenticated in-process Keeper context. Generic tool
 dispatch does not treat an agent display name as Keeper ownership. The live

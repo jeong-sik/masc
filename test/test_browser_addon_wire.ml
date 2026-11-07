@@ -45,7 +45,7 @@ let roundtrips () =
    connection polls only from inside the worker. *)
 let a_native_host_cannot_poll_as_ego () =
   let poll transport =
-    let client = {B.client_id=id;browser=B.Ego_lite;version="0.6.0.16";engine_version="154.0.8037.44";transport;space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Web_extension|Webdriver_bidi -> None)} in
+    let client = {B.client_id=id;browser=B.Ego_lite;version="0.6.0.16";engine_version="154.0.8037.44";transport;space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Webdriver_bidi -> None)} in
     W.of_json (W.to_json {W.incarnation;command=W.Poll {client;window_sec=1.}}) in
   check bool "ego_task_space is refused" true (Result.is_error (poll B.Ego_task_space));
   check bool "a BiDi host still polls" true (Result.is_ok (poll B.Webdriver_bidi))
@@ -95,7 +95,7 @@ let results () =
      Ok (B.Rejected_before_effect "guard failed");Error (B.Selected_client_disconnected id);
      Error (B.Activity_rejected (B.Lane_off B.Lane_name.Live));Error (B.Activity_rejected B.Activity_unavailable);
      Error B.No_live_client;Error (B.Ambiguous_clients [id]);
-     Error (B.Transport_unsupported {client_id=id;transport=B.Web_extension;capability=B.Trusted_hover})];
+     Error (B.Transport_unsupported {client_id=id;transport=B.Webdriver_bidi;capability=B.Download_listing})];
   List.iter (fun reply -> check bool "service reply retained" true
     (ok (W.reply_of_json (W.reply_to_json reply))=reply))
     [W.Poll_result {command=None;state_id="snapshot-1"};
@@ -133,7 +133,7 @@ let client_space_context () =
       (Result.is_error (W.client_of_json (`Assoc fields))))
       [List.remove_assoc "space" fields;("space",`Null)::fields;
        ("space",if transport=B.Ego_task_space then `Null else B.ego_space_to_json space)::List.remove_assoc "space" fields])
-    [B.Web_extension;B.Webdriver_bidi;B.Ego_task_space]
+    [B.Webdriver_bidi;B.Ego_task_space]
 
 let () = run "browser addon wire" ["boundary",[
   test_case "private client preserves strict Space context" `Quick client_space_context;

@@ -1,6 +1,6 @@
 module Lane = Browser_lane
 type preference = Automatic | Exact of Lane.route
-type reason = Explicit_browser | Existing_login | Available_connected_browser
+type reason = Explicit_browser | Existing_login
 [@@deriving enumerate]
 type selected = { route : Lane.route; reason : reason }
 type error = Binding_required | No_available_browser | Ambiguous_browsers of Lane.route list
@@ -12,7 +12,6 @@ type snapshot = { live_activity : Lane.activity; live_clients : Lane.client_info
 
 let reason_to_wire = function
   | Explicit_browser -> "explicit_browser" | Existing_login -> "existing_login"
-  | Available_connected_browser -> "available_connected_browser"
 let reason_of_wire s = List.find_opt (fun v -> String.equal (reason_to_wire v) s) all_of_reason
 let route_fields = function
   | Lane.Live_route client -> ["lane",`String "live";"clientId",(match client with
@@ -60,7 +59,7 @@ let choose_candidates ~verb ~bound ~snapshot preference =
     let capability = Lane.live_capability verb in
     List.filter_map (fun (info : Lane.client_info) ->
       let space_available=match info.transport with
-        | Lane.Web_extension|Webdriver_bidi -> true
+        | Lane.Webdriver_bidi -> true
         | Ego_task_space ->
           (match info.space,List.assoc_opt info.client_id snapshot.live_space_presence with
            | Some space,Some {space_id;state=Present;_} -> space.id=space_id
@@ -77,9 +76,7 @@ let choose_candidates ~verb ~bound ~snapshot preference =
     (* Both carry a login: the Keeper's own Firefox over BiDi, and the
        operator's ego profile, whose cookies every task space shares. With
        one of each connected the choice is the caller's. *)
-    match connected Lane.Webdriver_bidi @ connected Lane.Ego_task_space with
-    | _::_ as browsers -> one Existing_login browsers
-    | [] -> one Available_connected_browser (connected Lane.Web_extension)
+    one Existing_login (connected Lane.Webdriver_bidi @ connected Lane.Ego_task_space)
 let effective_missing backend required =
   let missing=Browser_capabilities.missing_operations backend required in
   List.filter (fun operation -> List.mem operation missing) required

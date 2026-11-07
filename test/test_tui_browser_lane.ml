@@ -6,36 +6,15 @@ let success = function Ok value -> value | Error detail -> failwith detail
 let tab id title = `Assoc ["id", `Int id; "title", `String title;
                            "url", `String "https://example.org/"; "active", `Bool (id = 2)]
 let firefox = { client_id = "11111111-1111-4111-8111-111111111111"; browser = Firefox;
-                transport = Browser_lane.Web_extension; space = None; space_observation = None; interactions = []; last_activities = [] }
-let zen = { client_id = "22222222-2222-4222-8222-222222222222"; browser = Zen;
-            transport = Browser_lane.Web_extension; space = None; space_observation = None; interactions = []; last_activities = [] }
-let pinned () = choose_client firefox { (create ()) with clients = Some [firefox; zen] }
-(* A connection list that came with no word of the BiDi host. *)
-let found listed = { listed; bidi_host = Host_not_reported;
+                transport = Browser_lane.Webdriver_bidi; space = None; space_observation = None; interactions = []; last_activities = [] }
+let other = { firefox with client_id = "22222222-2222-4222-8222-222222222222" }
+let pinned () = choose_client firefox { (create ()) with clients = Some [firefox; other] }
+(* A connection list with no inventory report. *)
+let found listed = { listed;
   inventory_report = Inventory_not_reported; automatic = None; unavailable = Backends_not_reported }
 
-module Record = Masc.Browser_bidi_host_record
-module Status = Masc.Browser_bidi_host_status
-
-(* The BiDi connection of the host the record below names. *)
-let bidi = { firefox with client_id = "33333333-3333-4333-8333-333333333333";
-             transport = Browser_lane.Webdriver_bidi }
-let host_entry : Record.entry =
-  { pid = 4242; started_at = 1_791_000_000.; bidi_url = "ws://127.0.0.1:9222/session"
-  ; client_id = success (Browser_lane.client_id_of_string bidi.client_id)
-  ; attached_at = Some 1_791_000_002.; unacknowledged = []; ended = None }
-let host_attach : Status.attach =
-  { launcher = "/workspace/.masc/browser-lane/host/launch"
-  ; arguments = "--bidi-url ws://127.0.0.1:PORT/session"
-  ; standing = Status.Launcher_installed }
-let host_report state : Status.report =
-  { state; attach = host_attach; keeper = Status.Not_known; message = "the server's own sentence" }
-let host state = Host_reported (host_report state)
-let host_ending ?(reason = "stopped by SIGINT") session : Record.ending =
-  { at = 1_791_000_060.; reason; session; because = Record.Reason_only }
-let host_ended ?reason session =
-  let ending = host_ending ?reason session in
-  host (Record.Ended ({ host_entry with ended = Some ending }, ending))
+(* A second BiDi connection. *)
+let bidi = { firefox with client_id = "33333333-3333-4333-8333-333333333333" }
 let response ?(source="live") ?(client=firefox.client_id) ?(page_id=2) () =
   `Assoc ["ok", `Bool true; "data", `Assoc [
     "source", `String source; "clientId", `String client; "elapsed_ms", `Float 12.5;
@@ -80,7 +59,7 @@ let test_raw_refresh_scroll_identity () =
     expect "changed or absent prior identity resets raw scroll"
       ((refresh previous reading).scroll=0))
     [None;Some {reading with page=None};
-     Some {reading with client_id=Some zen.client_id};
+     Some {reading with client_id=Some other.client_id};
      Some {reading with page=Option.map (fun (page : page) -> {page with tab_id=1}) reading.page}];
   expect "missing returned page resets raw scroll"
     ((refresh (Some reading) {reading with page=None;tabs=[]}).scroll=0)
@@ -93,7 +72,7 @@ let test_refresh_rediscovers_tabs () =
   expect "rediscovery retains previous content until reply" (retry.reading = previous.reading)
 
 let test_stale_response () =
-  let current = { (choose_client zen (create ())) with load = Loading (4, Read) } in
+  let current = { (choose_client other (create ())) with load = Loading (4, Read) } in
   let late = accept ~generation:3 (decode (response ())) current in
   expect "old generation cannot replace new client" (late = current);
   let wrong_client = accept ~generation:4 (decode (response ())) current in
@@ -160,9 +139,6 @@ let test_screenshot_drag_support () =
                         transport = Browser_lane.Ego_task_space; space = Some {id=51;name="fixture Space"} } in
   let view = { (create ()) with clients = Some [firefox; bidi; ego] } in
   let shot ?(source="live") client = success (decode_screenshot (screenshot_response ~source ~client ())) in
-  expect "an extension screenshot names the connection a drag needs"
-    (screenshot_drag_support view (shot firefox.client_id)
-     = Drag_needs [Browser_lane.Webdriver_bidi; Browser_lane.Ego_task_space]);
   List.iter (fun (client : client) ->
     expect "the screenshot's native connection takes the drag"
       (screenshot_drag_support view (shot client.client_id) = Drag_served);
@@ -181,51 +157,38 @@ let test_pointer_decision () =
   let sends view (shot : screenshot) action =
     pointer_decision view shot action
     = Pointer_send (Viewport_pointer {tab_id = shot.tab_id; expected_url = shot.url; action}) in
-  let both = { (create ()) with clients = Some [firefox; bidi] } in
-  let ended = host_ended Record.Session_left in
-  let alone = { (create ()) with clients = Some [firefox]; bidi_host = ended } in
-  let on_extension = shot firefox.client_id and on_bidi = shot bidi.client_id in
-  let unserved ?(host = Host_not_reported) serving_listed =
-    {asked = Browser_lane.Web_extension; capability = Browser_lane.Trusted_drag; serving_listed; host} in
-  expect "a drag on the extension is not sent, and a listed BiDi connection is known"
-    (pointer_decision both on_extension (drag on_extension) = Pointer_unserved (unserved true));
-  expect "with no BiDi connection listed the decision says so, with what was known of the host"
-    (pointer_decision alone on_extension (drag on_extension)
-     = Pointer_unserved (unserved ~host:ended false));
-  expect "a point click and a wheel notch are sent on either connection"
-    (List.for_all (fun (shot : screenshot) ->
-       sends both shot (click shot) && sends both shot (wheel shot))
-       [on_extension; on_bidi]);
-  expect "a drag is sent on BiDi" (sends both on_bidi (drag on_bidi));
+  let tap (shot : screenshot) = Browser_lane.Tap_at {point={x=0.1;y=0.1}; viewport=shot.viewport} in
   let ego = { bidi with client_id = "44444444-4444-4444-8444-444444444444";
                         transport = Browser_lane.Ego_task_space; space = Some {id=51;name="fixture Space"} } in
-  let ego_view = { (create ()) with clients = Some [firefox; ego] } in
-  let on_ego = shot ego.client_id in
-  expect "a drag is sent on the observed Ego connection"
-    (sends ego_view on_ego (drag on_ego));
-  expect "an Ego connection can serve the drag refused on an extension"
-    (pointer_decision ego_view on_extension (drag on_extension) = Pointer_unserved (unserved true));
+  let both = { (create ()) with clients = Some [ego; bidi] } in
+  let alone = { (create ()) with clients = Some [ego] } in
+  let on_ego = shot ego.client_id and on_bidi = shot bidi.client_id in
+  let unserved serving_listed =
+    {asked = Browser_lane.Ego_task_space; capability = Browser_lane.Touch_input; serving_listed} in
+  expect "a tap on ego is not sent, and a listed BiDi connection is known"
+    (pointer_decision both on_ego (tap on_ego) = Pointer_unserved (unserved true));
+  expect "with no BiDi connection listed the decision says so"
+    (pointer_decision alone on_ego (tap on_ego) = Pointer_unserved (unserved false));
+  expect "a point click, a wheel notch and a drag are sent on either connection"
+    (List.for_all (fun (shot : screenshot) ->
+       sends both shot (click shot) && sends both shot (wheel shot) && sends both shot (drag shot))
+       [on_ego; on_bidi]);
+  expect "a tap is sent on BiDi" (sends both on_bidi (tap on_bidi));
   expect "a connection the view no longer holds is left to the server"
-    (sends (create ()) on_extension (drag on_extension));
+    (sends (create ()) on_ego (tap on_ego));
   let busy_view = { both with load = Loading (3, Read) } in
   expect "a request in flight consumes the gesture, served or not"
-    (pointer_decision busy_view on_extension (drag on_extension) = Pointer_consumed
+    (pointer_decision busy_view on_ego (tap on_ego) = Pointer_consumed
      && pointer_decision busy_view on_bidi (click on_bidi) = Pointer_consumed)
 
 (* A refused gesture is not a failed read: the read state stays, a background
    refresh does not erase it, and the next input does. The rows' wording is
    not checked here; what another program wrote never reaches them. *)
 let test_unserved_gesture () =
-  let drag_unserved ?(serving_listed = false) host =
-    {asked = Browser_lane.Web_extension; capability = Browser_lane.Trusted_drag; serving_listed; host} in
-  let hostile = "A\027[2J\nINJECTED " ^ String.make 400 'x' in
-  let rows = unserved_gesture_rows (drag_unserved (host_ended ~reason:hostile Record.Session_left)) in
-  expect "a host's own words are not in the rows of a refused gesture"
-    (List.for_all (fun row ->
-       not (String.contains row '\027') && not (String_util.contains_substring row "INJECTED"))
-       rows);
+  let tap_unserved ?(serving_listed = false) () =
+    {asked = Browser_lane.Ego_task_space; capability = Browser_lane.Touch_input; serving_listed} in
   let ready = loaded () in
-  let unserved = drag_unserved (host_ended Record.Session_left) in
+  let unserved = tap_unserved () in
   let refused = refuse_gesture unserved ready in
   expect "a refused gesture is not a failed read"
     (refused.load = ready.load && read_status refused = Read_ok && not (busy refused));
@@ -234,16 +197,16 @@ let test_unserved_gesture () =
       { refused with load = Loading (5, Read_refresh) } in
   expect "a refresh that lands keeps the refusal"
     (refreshed.load = Idle && refreshed.unserved_gesture = Some unserved);
-  (* The rows read the host recorded with the refusal, not the current one, so
-     what is learned of the host afterwards does not rewrite them. *)
-  let later = { refreshed with bidi_host = host (Record.Running host_entry) } in
-  expect "a later word of the host leaves the refusal as it was"
+  (* The rows read what the refusal kept, so a later connection list does not
+     rewrite them. *)
+  let later = { refreshed with clients = Some [firefox; bidi] } in
+  expect "a later connection list leaves the refusal as it was"
     (unserved_rows later = unserved_rows refreshed);
   expect "a view with nothing refused draws no such rows" (unserved_rows ready = []);
   expect "the next input withdraws it"
     ((withdraw_unserved_gesture refreshed).unserved_gesture = None);
   expect "choosing a connection or the lane again leaves no refusal about the old one"
-    ((choose_client zen refreshed).unserved_gesture = None
+    ((choose_client other refreshed).unserved_gesture = None
      && (switch_source Live refreshed).unserved_gesture = None);
   expect "an input with nothing refused changes nothing"
     (withdraw_unserved_gesture ready == ready)
@@ -261,7 +224,7 @@ let test_screenshot_ownership () =
     let failed, preview = accept_screenshot ~generation:8 (decode_screenshot response) pending in
     expect "wrong screenshot ownership is visible, no overlay" (match failed.load with Failed _ -> preview = None | _ -> false);
     expect "failure retains source" (failed.reading = pending.reading))
-    [screenshot_response ~client:zen.client_id (); screenshot_response ~tab_id:1 ()];
+    [screenshot_response ~client:other.client_id (); screenshot_response ~tab_id:1 ()];
   let failed, preview = accept_screenshot ~generation:8 (Error "selected tab closed") pending in
   expect "closed tab failure does not fall back to active tab"
     (failed.selected_tab = Some 2 && failed.load = Failed "selected tab closed" && preview = None);
@@ -317,7 +280,7 @@ let test_viewport_cadence_skip_inputs () =
                                "scrollX", `Int 3; "scrollY", `Int 0 ]; "elapsed_ms", `Float 13. ] ]) ];
   List.iter (fun (field, changed) ->
     expect ("a changed " ^ field ^ " requires a redraw") (not (unchanged changed "PNG")))
-    [ "client", {shot with client_id = Some zen.client_id};
+    [ "client", {shot with client_id = Some other.client_id};
       "tab", {shot with tab_id = 3};
       "document", {shot with viewport = {shot.viewport with document_id = "another"}};
       "width", {shot with viewport = {shot.viewport with width = shot.viewport.width +. 1.}};
@@ -338,12 +301,12 @@ let test_observation_scope_tracks_exact_selection () =
   let expected = { source = Live; client_id = Some firefox.client_id; tab_id = 2; view = Read } in
   expect "text observation follows the selected live client and tab"
     (observation_scope initial = Some expected);
-  let changed = choose_client zen initial in
+  let changed = choose_client other initial in
   expect "choosing another client does not observe the previous client's tab"
     (observation_scope changed = None);
   expect "the next tab belongs to the new observation owner"
     (observation_scope { changed with selected_tab = Some 2 }
-     = Some { expected with client_id = Some zen.client_id });
+     = Some { expected with client_id = Some other.client_id });
   expect "an unselected live lane has no fabricated client id"
     (observation_scope { initial with selected_client = None } = None);
   let shot = success (decode_screenshot (screenshot_response ())) in
@@ -374,7 +337,7 @@ let test_activity_refresh_preserves_pending_read () =
      tab_id=Some 2;phase=Browser_lane.Interaction_running} in
   let current={firefox with interactions=[work];last_activities=[{
     Browser_lane.work;outcome=Browser_lane.Activity_returned}]} in
-  let updated=accept_activity (Ok (found [current;zen])) original in
+  let updated=accept_activity (Ok (found [current;other])) original in
   expect "activity settles independently from the original pending read"
     (updated.selected_client=Some current && updated.load=original.load
      && updated.refresh_pending=original.refresh_pending && updated.scroll=9
@@ -386,7 +349,7 @@ let test_activity_refresh_preserves_pending_read () =
     (failed.selected_client=updated.selected_client && failed.clients=updated.clients
      && failed.reading=updated.reading && failed.load=updated.load
      && failed.activity_error=Some "inventory disconnected");
-  let replaced=accept_activity (Ok (found [zen])) failed in
+  let replaced=accept_activity (Ok (found [other])) failed in
   expect "activity refresh cannot silently change the selected browser"
     (replaced.selected_client=failed.selected_client && not (selected_client_available replaced)
      && replaced.selected_tab=original.selected_tab && replaced.load=original.load
@@ -400,7 +363,7 @@ let test_client_activity_preserves_connection () =
   let discover selected = { selected with load=Loading (24, Discover Read_after_discovery) } in
   let refresh selected interactions =
     let current = { firefox with interactions } in
-    let next, read = accept_clients ~generation:24 (Ok (found [current;zen])) (discover selected) in
+    let next, read = accept_clients ~generation:24 (Ok (found [current;other])) (discover selected) in
     expect "transient activity retains the connection and authorizes its read"
       (read && next.selected_client=Some current && selected_client_available next);
     expect "activity refresh preserves tab, scroll and reading"
@@ -427,8 +390,8 @@ let test_client_activity_preserves_connection () =
       (not read && not (selected_client_available lost) && lost.selected_tab=None
        && lost.reading=None && lost.scroll=0 && lost.selected_client=running_view.selected_client
        && not (browser_choice_selected running_view (Connected_browser replacement))))
-    [{firefox with client_id=zen.client_id}; {firefox with browser=Zen};
-     {firefox with transport=Browser_lane.Webdriver_bidi}]
+    [{firefox with client_id=other.client_id}; {firefox with browser=Ego_lite};
+     {firefox with transport=Browser_lane.Ego_task_space; space=Some {id=51;name="fixture Space"}}]
 
 let test_client_connection_ownership () =
   let discover t = { t with load = Loading (20, Discover Read_after_discovery) } in
@@ -446,23 +409,23 @@ let test_client_connection_ownership () =
   let failed, read = accept_clients ~generation:20 (Error "HTTP 401") (discover (create ())) in
   expect "discovery errors stay errors, not missing-browser guidance"
     (not read && read_status failed = Read_failed && not (awaiting_browser failed));
-  let choose, read = accept_clients ~generation:20 (Ok (found [firefox; zen])) (discover (create ())) in
+  let choose, read = accept_clients ~generation:20 (Ok (found [firefox; other])) (discover (create ())) in
   expect "multiple clients without server policy require explicit choice" (not read && choose.selected_client = None && choose.client_picker = Some 0 && read_status choose = Read_failed);
   let first, read = accept_clients ~generation:20 (Ok (found [firefox])) (discover (create ())) in
   expect "a singleton without server policy is not silently inferred" (not read && first.selected_client=None && first.client_picker=Some 0);
   let old = { (loaded ()) with scroll = 8 } in
-  let disconnected, read = accept_clients ~generation:20 (Ok (found [zen])) (discover old) in
+  let disconnected, read = accept_clients ~generation:20 (Ok (found [other])) (discover old) in
   expect "missing pin never rebinds singleton with same tab ids"
     (not read && disconnected.selected_client = Some firefox && disconnected.selected_tab = None
      && disconnected.reading = None && disconnected.scroll = 0 && not (selected_client_available disconnected));
-  let chosen = choose_client zen disconnected in
+  let chosen = choose_client other disconnected in
   expect "explicit client choice clears old tab state" (chosen.selected_tab = None && chosen.reading = None && chosen.scroll = 0);
   expect "new read pins only client, never old tab" (request_body chosen =
-    `Assoc ["lane", `String "live"; "clientId", `String zen.client_id]);
+    `Assoc ["lane", `String "live"; "clientId", `String other.client_id]);
   let pending = { chosen with load = Loading (22, Read) } in
   let wrong = accept ~generation:22 (decode (response ())) pending in
   expect "same tab id from another client is refused" (wrong.reading = None && match wrong.load with Failed _ -> true | _ -> false);
-  let right = accept ~generation:22 (decode (response ~client:zen.client_id ())) pending in
+  let right = accept ~generation:22 (decode (response ~client:other.client_id ())) pending in
   expect "selected client response accepted" (right.selected_tab = Some 2 && right.load = Idle);
   let capture = { right with load = Loading (23, Screenshot 2) } in
   let refused, image = accept_screenshot ~generation:23 (decode_screenshot (screenshot_response ())) capture in
@@ -484,8 +447,8 @@ let test_picker_empty_row () =
   let empty, _ = accept_clients ~generation:30 (Ok (found [])) (discover (create ())) in
   expect "an answered discovery with nothing in it says so"
     (row empty = Some "  No active native browser connections");
-  let two, _ = accept_clients ~generation:30 (Ok (found [firefox; zen])) (discover (create ())) in
-  expect "connections to offer need no empty row" (two.clients = Some [firefox; zen] && row two = None)
+  let two, _ = accept_clients ~generation:30 (Ok (found [firefox; other])) (discover (create ())) in
+  expect "connections to offer need no empty row" (two.clients = Some [firefox; other] && row two = None)
 
 let test_page_context_decode () =
   let context : Masc.Browser_surface.ego_page =
@@ -501,16 +464,14 @@ let test_page_context_decode () =
     ((success (parse_tab value)).ego_page=Some unknown)
 
 let test_clients_decode () =
-  let row ?(transport="web_extension") ?(space=`Null) ?(observation=`Null) id browser =
+  let row ?(transport="webdriver_bidi") ?(space=`Null) ?(observation=`Null) id browser =
     `Assoc ["clientId", `String id; "browser", `String browser; "transport", `String transport; "space",space;
       "spaceObservation",observation; "interactions", `List []; "lastActivities", `List []] in
   let envelope rows = `Assoc ["ok", `Bool true; "data", `Assoc ["clients", `List rows]] in
-  expect "backend-normalized Zen identity preserved"
-    (decode_clients (envelope [row zen.client_id "zen"]) = Ok [zen]);
-  let bidi = {firefox with client_id=zen.client_id; transport=Browser_lane.Webdriver_bidi} in
+  let bidi = other in
   let clients = success (decode_clients (envelope
-    [row firefox.client_id "firefox"; row ~transport:"webdriver_bidi" bidi.client_id "firefox"])) in
-  expect "same Firefox retains two distinct transports" (clients = [firefox; bidi]);
+    [row firefox.client_id "firefox"; row bidi.client_id "firefox"])) in
+  expect "one Firefox retains two distinct clients" (clients = [firefox; bidi]);
   let space : Browser_lane.ego_space = {id=51;name="SDK Space"} in
   let ego={bidi with browser=Ego_lite;transport=Browser_lane.Ego_task_space;space=Some space} in
   expect "Ego inventory preserves the observed Space identity"
@@ -568,13 +529,13 @@ let test_clients_decode () =
     (Result.is_error (decode_clients (envelope [value]))))
     [row ~transport:"ego_task_space" ego.client_id "ego_lite";
      row ~space:(Browser_lane.ego_space_to_json space) firefox.client_id "firefox"];
-  expect "picker identifies the extension connection"
-    (browser_choice_label (Connected_browser firefox) = "Firefox · " ^ firefox.client_id ^ " · existing login");
   expect "picker identifies the trusted hover connection"
     (browser_choice_label (Connected_browser bidi) = "Firefox · " ^ bidi.client_id ^ " · existing login");
   List.iter (fun rows -> expect "invalid client inventory rejected" (Result.is_error (decode_clients (envelope rows))))
-    [[row "" "zen"]; [row zen.client_id "unknown"]; [row zen.client_id "zen"; row zen.client_id "firefox"];
+    [[row "" "firefox"]; [row other.client_id "unknown"]; [row other.client_id "other"];
+     [row other.client_id "firefox"; row other.client_id "firefox"];
      [row ~transport:"unknown" firefox.client_id "firefox"];
+     [row ~transport:"web_extension" firefox.client_id "firefox"];
      [`Assoc ["clientId", `String firefox.client_id; "browser", `String "firefox"]]];
   let missing_id = `Assoc ["ok", `Bool true; "data", `Assoc [
     "source", `String "live"; "clientId", `Null; "elapsed_ms", `Int 0;
@@ -673,10 +634,10 @@ let test_unified_browser_picker () =
   let same = choose_browser (Connected_browser firefox) current in
   expect "choosing current browser retains tab and scroll"
     (same = { current with client_picker = None });
-  let live = choose_browser (Connected_browser zen) current in
+  let live = choose_browser (Connected_browser other) current in
   expect "explicit live selection routes back to chosen connection"
-    (live.source = Live && live.selected_client = Some zen && live.selected_tab = None
-     && request_body live = `Assoc ["lane", `String "live"; "clientId", `String zen.client_id]);
+    (live.source = Live && live.selected_client = Some other && live.selected_tab = None
+     && request_body live = `Assoc ["lane", `String "live"; "clientId", `String other.client_id]);
   expect "stale discovery cannot overwrite explicit selection"
     (accept_clients ~generation:90 (Ok (found [firefox])) live = (live, false))
 
@@ -709,7 +670,7 @@ let test_failed_discovery_retains_startup_observation () =
       (pending.unavailable=unavailable);
     expect "pending discovery preserves its original list-admission boundary"
       (match purpose with
-       | Choose_client -> pending.clients=None && pending.bidi_host=Host_not_reported
+       | Choose_client -> pending.clients=None
            && pending.inventory_report=Inventory_not_reported && pending.automatic=None
            && not (selected_client_available pending)
        | Read_after_discovery -> pending.clients=observed.clients);
@@ -718,7 +679,7 @@ let test_failed_discovery_retains_startup_observation () =
       (failed.unavailable=unavailable);
     expect "failure remains a failure without an automatic continuation"
       (failed.load=Failed "connection refused" && not read
-       && failed.clients=None && failed.bidi_host=Host_not_reported
+       && failed.clients=None
        && failed.inventory_report=Inventory_not_reported && failed.automatic=None
        && not (selected_client_available failed));
     expect "the failed list cannot replace the selected connection or its tab"
@@ -749,20 +710,13 @@ let test_failed_discovery_retains_startup_observation () =
   expect "a previously unreadable report also retains its original provenance"
     (failed.unavailable=unreadable)
 
-let test_bidi_host_discovery () =
+let test_backend_report_discovery () =
   let row id = `Assoc ["clientId", `String id; "browser", `String "firefox";
-                       "interactions", `List []; "lastActivities", `List []; "transport", `String "web_extension";"space",`Null;"spaceObservation",`Null] in
+                       "interactions", `List []; "lastActivities", `List []; "transport", `String "webdriver_bidi";"space",`Null;"spaceObservation",`Null] in
   let answer extra =
     `Assoc ["ok", `Bool true; "data", `Assoc (("clients", `List [row firefox.client_id]) :: extra)] in
-  let ended = host_report (let ending = host_ending Record.Session_left in
-                           Record.Ended ({ host_entry with ended = Some ending }, ending)) in
-  expect "the server's report is read with the list"
-    (decode_discovery (answer ["bidiHost", Status.report_to_json ended])
-     = Ok { listed = [firefox]; bidi_host = Host_reported ended;
-         inventory_report=Inventory_not_reported; automatic=None; unavailable=Backends_not_reported });
-  expect "a server that says nothing of the host still lists its connections"
-    (decode_discovery (answer []) = Ok (found [firefox])
-     && decode_discovery (answer ["bidiHost", `Null]) = Ok (found [firefox]));
+  expect "a server that says nothing more still lists its connections"
+    (decode_discovery (answer []) = Ok (found [firefox]));
   let conflict = Masc.Browser_addon_observation.Ego_user_owned_name {space="masc";ids=[36];observed_at=42.} in
   let decoded = success (decode_discovery (answer ["unavailable",`List [Masc.Browser_addon_observation.unavailable_to_json conflict]])) in
   expect "the same discovery retains the unavailable backend and its original observation"
@@ -782,41 +736,7 @@ let test_bidi_host_discovery () =
   let unreadable = success (decode_discovery (answer ["unavailable",`String "invalid"])) in
   expect "an unreadable backend report does not discard the client list"
     (unreadable.listed=[firefox] && match unreadable.unavailable with
-      | Backends_unreadable _ -> true | Backends_not_reported | Backends_unavailable _ -> false);
-  (match decode_discovery (answer ["bidiHost", `Assoc ["state", `String "paused"]]) with
-   | Ok { listed; bidi_host = Host_report_unreadable { message = None; _ }; inventory_report=_; automatic=_; unavailable=_ } ->
-       expect "a report this TUI cannot read does not cost the list" (listed = [firefox])
-   | Ok _ | Error _ -> failwith "an unreadable host report was not kept apart from the list");
-  (* A server of another build may send a report this one cannot read. The
-     paragraph it wrote for the operator is still theirs to read. *)
-  (match
-     decode_discovery
-       (answer ["bidiHost", `Assoc ["state", `String "paused"; "message", `String "The host is paused."]])
-   with
-   | Ok { listed = _; bidi_host = Host_report_unreadable { message; _ }; inventory_report=_; automatic=_; unavailable=_ } ->
-       expect "the server's paragraph outlives a report this TUI cannot read"
-         (message = Some "The host is paused.")
-   | Ok _ | Error _ -> failwith "an unreadable host report lost the server's paragraph");
-  (match decode_discovery (answer ["bidiHost", `String "running"]) with
-   | Ok { listed; bidi_host = Host_report_unreadable { message = None; _ }; inventory_report=_; automatic=_; unavailable=_ } ->
-       expect "a report that is no object does not cost the list either" (listed = [firefox])
-   | Ok _ | Error _ -> failwith "a host report that is no object was not kept apart from the list");
-  let discover t = { t with load = Loading (40, Discover Choose_client) } in
-  let reported, _ =
-    accept_clients ~generation:40 (Ok { listed = [firefox]; bidi_host = Host_reported ended;
-        inventory_report=Inventory_not_reported; automatic=None; unavailable=Backends_not_reported })
-      (discover (create ())) in
-  expect "the view holds what the discovery said" (reported.bidi_host = Host_reported ended);
-  let again, _ = accept_clients ~generation:40 (Ok (found [firefox])) (discover reported) in
-  expect "the next discovery replaces it" (again.bidi_host = Host_not_reported);
-  let failed, _ = accept_clients ~generation:40 (Error "connection refused") (discover reported) in
-  expect "a discovery that failed holds no report, as it holds no list"
-    (failed.bidi_host = Host_not_reported && failed.clients = None);
-  let waiting = withdraw_discovery reported in
-  expect "a picker waiting on a discovery shows neither of the read before it"
-    (waiting.clients = None && bidi_host_rows ~width:74 waiting = []
-     && waiting = { reported with clients = None; bidi_host = Host_not_reported;
-         inventory_report=Inventory_not_reported; automatic=None })
+      | Backends_unreadable _ -> true | Backends_not_reported | Backends_unavailable _ -> false)
 
 (* One value per operation constructor. [expected_refresh] names every
    constructor with no catch-all, so a new operation breaks this build until
@@ -864,7 +784,7 @@ let test_operation_is_refresh () =
 
 (* Exercise the server recommendation boundary and concrete request owners,
    rather than screen copy or layout. *)
-let automatic_answer ?(listed=[firefox;zen]) browse =
+let automatic_answer ?(listed=[firefox;other]) browse =
   let row (client : client) = `Assoc ["clientId",`String client.client_id;
     "browser",`String (Browser_lane.browser_name client.browser);
     "transport",`String (Browser_lane.live_transport_to_string client.transport);"space",Browser_lane.client_space_to_json client.space;"spaceObservation",`Null;"interactions",`List [];"lastActivities",`List []] in
@@ -881,27 +801,27 @@ let automatic_discover ?(generation=101) view answer =
 
 let test_automatic_browser_binding () =
   let answer = automatic_answer
-    (recommended "live" (Some zen.client_id) "existing_login") in
+    (recommended "live" (Some other.client_id) "existing_login") in
   let bound, read = automatic_discover (create ()) answer in
   expect "server choice wins even with multiple connected browsers"
-    (read && bound.selection=Bound_automatic && bound.selected_client=Some zen);
+    (read && bound.selection=Bound_automatic && bound.selected_client=Some other);
   expect "all subsequent requests carry the concrete selected identity"
-    (request_body bound=`Assoc ["lane",`String "live";"clientId",`String zen.client_id]);
+    (request_body bound=`Assoc ["lane",`String "live";"clientId",`String other.client_id]);
   let changed = automatic_answer
-    (recommended "live" (Some firefox.client_id) "available_connected_browser") in
+    (recommended "live" (Some firefox.client_id) "existing_login") in
   let same, read = automatic_discover bound changed in
   expect "a recommendation refresh cannot transfer an existing binding"
-    (read && same.selected_client=Some zen);
+    (read && same.selected_client=Some other);
   let missing = automatic_answer ~listed:[firefox]
     (recommended "live" (Some firefox.client_id) "existing_login") in
   let lost, read = automatic_discover bound missing in
   expect "disconnect does not rebind or authorize a read against another browser"
-    (not read && lost.selected_client=Some zen && not (selected_client_available lost));
+    (not read && lost.selected_client=Some other && not (selected_client_available lost));
   let pending = {(create ()) with load=Loading (101,Discover Read_after_discovery)} in
   let manual = choose_client firefox pending in
   expect "a pending automatic reply cannot take an explicit selection"
     (accept_clients ~generation:101 (decode_discovery answer) manual=(manual,false));
-  let explicit = choose_browser (Connected_browser zen) bound in
+  let explicit = choose_browser (Connected_browser other) bound in
   expect "explicitly choosing the same browser pins it without dropping content"
     (explicit.selection=Bound_explicit && explicit.selected_client=bound.selected_client);
   let live_override, read = automatic_discover (switch_source Live (create ())) answer in
@@ -935,14 +855,14 @@ let test_automatic_refusals () =
     (not read && prompt.load=Failed "No connected browser" && prompt.client_picker=Some 0
      && prompt.reading=None && cadence_operation prompt=None);
   let without_client = recommended "live" None "existing_login" in
-  let unknown_reason = recommended "live" (Some zen.client_id) "unknown_reason" in
+  let unknown_reason = recommended "live" (Some other.client_id) "unknown_reason" in
   let unknown_lane = recommended "unknown" None "existing_login" in
   List.iter (fun invalid ->
     let decoded = success (decode_discovery (automatic_answer invalid)) in
     let refused, read = automatic_discover (create ()) (automatic_answer invalid) in
     expect "invalid automatic decision is refused without hiding manual choices"
-      (Result.is_error (decode_recommendation invalid) && decoded.listed=[firefox;zen]
-       && not read && refused.selection=Unbound && refused.clients=Some [firefox;zen]))
+      (Result.is_error (decode_recommendation invalid) && decoded.listed=[firefox;other]
+       && not read && refused.selection=Unbound && refused.clients=Some [firefox;other]))
     [without_client;unknown_reason;unknown_lane];
   let retry = {(create ()) with load=Failed "automatic decision unavailable"} in
   expect "explicitly choosing Automatic can retry an unbound refusal"
@@ -961,7 +881,7 @@ let test_inventory_report_preserves_request_owner () =
   let issues=I.[Source_unavailable {instance_id="worker-a";message="connection unavailable"};
     Source_unreadable {instance_id="worker-b";message="invalid snapshot"};
     Source_unready {instance_id="worker-c";message="starting"};
-    Duplicate_client {client_id=success (Browser_lane.client_id_of_string zen.client_id);
+    Duplicate_client {client_id=success (Browser_lane.client_id_of_string other.client_id);
       instances=["worker-a";"worker-b"]}] in
   let refusal=`Assoc ["ok",`Bool false;"error",`Assoc [
     "code",`String "browser_binding_required";"message",`String "Choose an observed client"]] in
@@ -969,12 +889,12 @@ let test_inventory_report_preserves_request_owner () =
     |> with_inventory_fields ["inventoryIssues",I.issues_to_json issues] in
   let discovered=success (decode_discovery answer) in
   expect "all typed inventory issues retain the separately valid client rows"
-    (discovered.inventory_report=Inventory_reported issues && discovered.listed=[firefox;zen]);
+    (discovered.inventory_report=Inventory_reported issues && discovered.listed=[firefox;other]);
   let original={(loaded ()) with load=Loading (77,Read_refresh);refresh_pending=Some 77;
     scroll=11} in
   let current=accept_activity (Ok discovered) original in
   expect "inventory activity cannot consume or retarget the pending page read"
-    (current.inventory_report=Inventory_reported issues && current.clients=Some [firefox;zen]
+    (current.inventory_report=Inventory_reported issues && current.clients=Some [firefox;other]
       && current.selected_client=original.selected_client && current.selected_tab=original.selected_tab
       && current.reading=original.reading && current.scene=original.scene
       && current.load=original.load && current.refresh_pending=original.refresh_pending
@@ -1000,7 +920,7 @@ let test_inventory_report_preserves_request_owner () =
   expect "failed discovery reports no inventory rather than an empty successful report"
     (failed.inventory_report=Inventory_not_reported && failed.selected_client=refreshed.selected_client
       && failed.selected_tab=refreshed.selected_tab && failed.reading=refreshed.reading);
-  let unreported=accept_activity (Ok (found [firefox;zen])) current in
+  let unreported=accept_activity (Ok (found [firefox;other])) current in
   expect "an absent next report withdraws only the previous inventory report"
     (unreported.inventory_report=Inventory_not_reported && unreported.reading=current.reading
       && unreported.load=current.load)
@@ -1014,13 +934,13 @@ let test_invalid_inventory_never_recommends_a_fallback () =
     let answer=with_inventory_fields extra automatic in
     let decoded=success (decode_discovery answer) in
     expect "unreadable inventory preserves valid rows and refuses the automatic decision"
-      (decoded.listed=[firefox;zen] && invalid decoded.automatic
+      (decoded.listed=[firefox;other] && invalid decoded.automatic
         && (match decoded.inventory_report with Inventory_report_unreadable _ -> true
           | Inventory_not_reported|Inventory_reported _ -> false));
     List.iter (fun view ->
       let refused,read=automatic_discover view answer in
       expect "unreadable inventory never becomes a fallback"
-        (not read && refused.source=Live && refused.clients=Some [firefox;zen]
+        (not read && refused.source=Live && refused.clients=Some [firefox;other]
           && refused.selected_client=None
           && (match refused.load with Failed _ -> true | Idle|No_browser|Loading _ -> false)))
       [create ()])
@@ -1034,7 +954,7 @@ let test_inventory_issues_guard_automatic_recommendations () =
   let module I=Masc.Browser_connection_inventory in
   let issue=I.Source_unready {instance_id="worker-a";message="starting"} in
   let reported answer=with_inventory_fields ["inventoryIssues",I.issues_to_json [issue]] answer in
-  let preferred=recommended "live" (Some zen.client_id) "existing_login" in
+  let preferred=recommended "live" (Some other.client_id) "existing_login" in
   List.iter (fun browse ->
     let answer=reported (automatic_answer browse) in
     let decoded=success (decode_discovery answer) in
@@ -1059,7 +979,7 @@ let test_inventory_issues_guard_automatic_recommendations () =
   expect "missing and explicitly empty inventory reports remain distinct"
     (absent.inventory_report=Inventory_not_reported && complete.inventory_report=Inventory_reported []);
   expect "an explicitly empty report preserves the server's normal concrete recommendation"
-    (read && complete.selected_client=Some zen)
+    (read && complete.selected_client=Some other)
 
 let test_inventory_summary_contract () =
   let module I=Masc.Browser_connection_inventory in
@@ -1073,13 +993,13 @@ let test_inventory_summary_contract () =
     let response=with_inventory_fields fields answer in
     let decoded=success (decode_discovery response) in
     expect "an invalid completeness summary preserves rows and refuses the automatic decision"
-      (decoded.listed=[firefox;zen] && invalid decoded.automatic
+      (decoded.listed=[firefox;other] && invalid decoded.automatic
         && match decoded.inventory_report with Inventory_report_unreadable _ -> true
           | Inventory_not_reported|Inventory_reported _ -> false);
     List.iter (fun view ->
       let refused,read=automatic_discover view response in
       expect "an incomplete or contradictory summary cannot choose a fallback browser"
-        (not read && refused.clients=Some [firefox;zen] && refused.source=Live
+        (not read && refused.clients=Some [firefox;other] && refused.source=Live
           && refused.selected_client=None
           && match refused.load with Failed _ -> true | Idle|No_browser|Loading _ -> false))
       [create ()])
@@ -1102,9 +1022,9 @@ let test_inventory_summary_contract () =
     [create ()];
   let complete,read=automatic_discover (create ())
     (with_inventory_fields ["inventoryComplete",`Bool true;"inventoryIssues",`List []]
-      (automatic_answer (recommended "live" (Some zen.client_id) "existing_login"))) in
+      (automatic_answer (recommended "live" (Some other.client_id) "existing_login"))) in
   expect "a consistent complete report preserves the concrete server recommendation"
-    (read && complete.inventory_report=Inventory_reported [] && complete.selected_client=Some zen);
+    (read && complete.inventory_report=Inventory_reported [] && complete.selected_client=Some other);
   (* A lane fact beside a complete inventory is not a contradiction: the
      server and this rule share the same completeness predicate. *)
   let refused_space=I.Ego_user_owned_space {instance_id="worker-a";space="masc";observed_at=42.} in
@@ -1134,7 +1054,7 @@ let () =
      "unified browser picker", test_unified_browser_picker;
      "failed discovery retains startup recovery", test_failed_discovery_retains_startup_observation;
      "an unavailable notice names its recovery", test_unavailable_notice_names_its_recovery;
-     "the BiDi host report rides the connection list", test_bidi_host_discovery;
+     "the backend report rides the connection list", test_backend_report_discovery;
      "raw refresh scroll identity", test_raw_refresh_scroll_identity;
      "scoped refresh failure and region recovery", test_scoped_refresh_failure_retains_read_intent;
      "visual pointer navigation", test_visual_pointer_navigation;

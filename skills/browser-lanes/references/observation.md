@@ -194,7 +194,7 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
   증명하지 않는다. 필요한 추가 문맥은 screenshot 또는 [고급 조작](advanced.md)으로 확인한다.
 - 스키마에 있는 mode라도 선택한 live 연결이 지원하지 않을 수 있다.
   `unsupported live browser verb`이면 그 연결의 기능 불일치를 남기고 지원되는
-  관측으로 이어간다. 연결·확장 기능이 바뀌었다는 근거 없이 같은 mode를 재시도하지 않는다.
+  관측으로 이어간다. 연결 기능이 바뀌었다는 근거 없이 같은 mode를 재시도하지 않는다.
 - selector는 같은 탭·프레임에서 반환된 **디코딩된 문자열 그대로** 사용한다.
   `>`와 따옴표, 기존 CSS escape를 보존한다. JSON 표시용 escape를 문자열에
   다시 삽입하거나 모든 backslash를 일괄 제거하지 않는다.
@@ -224,13 +224,12 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
 
 `click_at`·`scroll_at`은 현재 screenshot의 `viewport`와 정규화된 `point`를 쓴다.
 `click_at`은 `button`(`primary` 기본, `middle`, `secondary`)으로 가운데·오른쪽 클릭도 한다.
-`webdriver_bidi` 연결이 눌러 주고, 확장은 입력을 보내기 전에 거절한다.
-`tap_at`·`swipe`는 마우스가 아니라 터치 포인터로 `click_at`·`drag`와 같은 좌표를 쓴다. `webdriver_bidi` 연결만 되고 확장은 거절한다.
+`webdriver_bidi` 연결이 눌러 준다.
+`tap_at`·`swipe`는 마우스가 아니라 터치 포인터로 `click_at`·`drag`와 같은 좌표를 쓴다. `webdriver_bidi` 연결만 된다.
 `set_viewport`는 `expectedUrl`과 함께 `width`·`height`(100~4096 CSS px)를 같이 주면 그 탭의 viewport 크기를 바꾼다.
 `webdriver_bidi` 연결에서는 둘 다 빼면 브라우저 원래 크기로 돌아간다.
 바꾼 뒤에는 screenshot을 다시 찍는다.
-`web_extension` 연결의 클릭은 DOM activation이며 trusted 포인터 입력을 보장하지
-않는다. `hover_at`과 `drag`의 trusted 입력은 live의 `webdriver_bidi`
+`hover_at`과 `drag`의 trusted 입력은 live의 `webdriver_bidi`
 연결이 한다. `live_transport_unsupported`로 거절되면 `references/connection.md`의
 같은 항목대로 한다. 같은 요청을 같은 연결에 반복하지 않는다. 필요한 조작을 지원하는 현재 페이지의 관측된 컨트롤이 있으면
 요청 범위 안에서 사용하고, 그렇지 않으면 미수행 상태를 남긴다.
@@ -251,7 +250,7 @@ Ego 이외의 연결에서 `select_option`은 CSS로 고른 `<select>` 하나를
 4. 새 screenshot의 `viewport`와 그 컨트롤 위의 `point`로 `click_at` 한다.
 5. 다시 읽어 결과를 확인한다.
 
-연결이 `web_extension`뿐이면 이 일은 할 수 없다. `webdriver_bidi` 연결이 필요하다고 운영자에게 알린다.
+`webdriver_bidi` 연결이 없으면 이 일은 할 수 없다. 그 연결이 필요하다고 운영자에게 알린다.
 
 화면 확인이 필요하면 관측된 `tabId`로 `BrowserRead mode=screenshot`을 호출한다.
 현재 런타임에 `keeper_image_read`가 제공되면 Keeper 응답의 이미지 `artifact`를

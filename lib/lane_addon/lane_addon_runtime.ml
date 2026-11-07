@@ -1674,8 +1674,7 @@ let backend ~store ~artifact_store () = match !override with
                       let* default=table Browser_configuration.Live_ego in
                       let* target=Browser_ego_installation.target binding in
                       let ego=Browser_ego_installation.resolve ~default target in
-                      Ok (Browser_addon_socket.Ego,Some ego)
-                    | Browser_lane.Backend.External_host -> Ok (Browser_addon_socket.External_host,None) in
+                      Ok (Browser_addon_socket.Ego,Some ego) in
                   Browser_addon_socket.context ~instance_id ~source
                   |> Result.map (fun context -> Some context,live_ego))
                   |> Result.map_error (fun detail -> Lifecycle.Worker_failed detail) in

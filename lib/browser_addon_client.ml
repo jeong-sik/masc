@@ -36,7 +36,7 @@ let issue_policy t route verb =
           Option.bind t.live_transports (List.assoc_opt id)) in
         match transport with
         | Some Ego_task_space -> Ok Executor_owned
-        | Some (Web_extension | Webdriver_bidi) -> Ok Reply_window
+        | Some Webdriver_bidi -> Ok Reply_window
         | None -> Error (Unavailable "live browser transport is not observed; read this worker's snapshot before dispatch")
 let raw_exchange t ~settlement ~on_cancel_after_dispatch command =
   let available () = settlement || (not t.revoked && t.available ()) in

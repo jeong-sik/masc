@@ -2733,63 +2733,14 @@ let browser_lane_setup_cmd =
           [ "mode" ]
           ~docv:"MODE"
           ~doc:
-            "How to connect Firefox: addon writes the browser Add-on package of each \
+            "How to connect a browser: addon writes the browser Add-on package of each \
              browser source the workspace runs to .masc/packages/browser-<source> and \
              declares it when no declaration of that source exists, which every other \
-             mode also does; extension installs the native host \
-             and writes the MASC extension for Firefox to load; bidi installs the host and \
-             writes the \
-             [browser.live.bidi] table so the MASC server starts a Firefox of its own; \
-             host installs the host and its launcher only, for a browser you attach \
-             yourself or to bring an installed lane's host up to date; ego writes the \
-             [browser.live.ego] table so \
-             the browser Add-on serves an ego lite task space. Give it more than once for \
-             more than one. \
-             Without a mode nothing is written and the current state is printed.")
-  in
-  let binary =
-    Arg.(
-      value
-      & opt (some string) None
-      & info
-          [ "binary" ]
-          ~docv:"FILE"
-          ~doc:
-            "The built masc-browser-host to install. By default the one installed beside \
-             this masc, then the first on PATH.")
-  in
-  let token_file =
-    Arg.(
-      value
-      & opt (some string) None
-      & info
-          [ "token-file" ]
-          ~docv:"FILE"
-          ~doc:
-            "A lane token that is already provisioned. It must exist, hold a token, and \
-             equal the workspace's own lane token when that exists. A relative path is \
-             taken from the workspace.")
-  in
-  let manifest_dir =
-    Arg.(
-      value
-      & opt (some string) None
-      & info
-          [ "manifest-dir" ]
-          ~docv:"DIR"
-          ~doc:"Firefox's native messaging manifest directory. By default the per-user one.")
-  in
-  let host_name =
-    Arg.(
-      value
-      & opt (some string) None
-      & info
-          [ "host-name" ]
-          ~docv:"NAME"
-          ~doc:
-            "The native messaging host name, for an isolated Firefox profile that must not \
-             share the default host. Lowercase letters, digits and underscores, in segments \
-             separated by dots. Default: masc_browser_host.")
+             mode also does; bidi writes the [browser.live.bidi] table so the MASC server \
+             starts a Firefox of its own; ego writes the [browser.live.ego] table so the \
+             browser Add-on serves an ego lite task space. Give it more than once for \
+             more than one. Without a mode nothing is written and the current state is \
+             printed.")
   in
   let firefox =
     Arg.(
@@ -2868,26 +2819,18 @@ let browser_lane_setup_cmd =
   Cmd.v
     (Cmd.info
        "browser-lane-setup"
-       ~doc:"Connect this workspace's browser lane to Firefox."
+       ~doc:"Connect this workspace's browser lane to a browser."
        ~man:
          [ `S Manpage.s_description
          ; `P
-             "Installs the browser lane host and its launcher, and with --mode extension \
-              the MASC extension itself (so no source checkout is needed) and the manifest \
-              Firefox starts the host through. It starts no browser: Firefox loads a \
-              temporary add-on only from about:debugging, and the last thing --mode \
-              extension prints is what to do there."
-         ; `P
-             "Installing again replaces the host, launcher, manifest and extension files \
-              and keeps the workspace's lane token."
+             "It starts no browser: the browser Add-on the server attaches starts it."
          ; `P
              "Every route runs in a browser Lane Add-on, one per browser source, so every \
               mode also writes the package of each source the workspace runs to \
               .masc/packages/browser-<source> and, when the workspace has no declaration of \
               that source, creates browser-<source>.toml in its Lane directory: firefox \
-              and ego when runtime.toml has their table or the mode writes it, \
-              and external when a native host is installed. A source whose table the mode writes is declared once that table is \
-              written. A declaration's enabled switches its source on or off. An existing \
+              and ego when runtime.toml has their table or the mode writes it. A source \
+              whose table the mode writes is declared once that table is written. A declaration's enabled switches its source on or off. An existing \
               declaration is left as it is. \
               The server attaches the Add-ons when it starts and on its maintenance pass. \
               Outside --mode addon a refusal of that step is reported and the mode goes on; \
@@ -2901,8 +2844,8 @@ let browser_lane_setup_cmd =
              "--mode ego writes [browser.live.ego]: the ego-browser the browser Add-on runs \
               and the ego lite task space it serves, after checking that ego-browser \
               answers --version and that no task space you made in ego lite has that \
-              name. When ego lite does not list its spaces, nothing is written. It \
-              installs no host. An existing table keeps its values unless they are named. \
+              name. When ego lite does not list its spaces, nothing is written. An \
+              existing table keeps its values unless they are named. \
               The server reads the table when it starts."
          ; `P
              "While this workspace's server answers on its port, the bidi and ego tables \
@@ -2913,8 +2856,8 @@ let browser_lane_setup_cmd =
               sign-in is stored for --agent (masc login), nothing is set up."
          ])
     Term.(
-      const (fun base_path requested_base_path named_agent modes no_addon binary token_file manifest_dir
-                  host_name firefox profile port ego_command ego_space ->
+      const (fun base_path requested_base_path named_agent modes no_addon firefox profile port
+                  ego_command ego_space ->
         let base_path = Env_config.normalize_masc_base_path_input base_path in
         Masc_cli_browser_lane_setup.run
           ~base_path
@@ -2929,8 +2872,7 @@ let browser_lane_setup_cmd =
              |> Result.map_error Workspace_connection.error_message)
           ~agent:(Option.value named_agent ~default:default_login_agent)
           ~agent_named:(Option.is_some named_agent)
-          ~modes ~no_addon ~binary ~token_file ~manifest_dir ~host_name ~firefox ~profile
-          ~port ~ego_command ~ego_space)
+          ~modes ~no_addon ~firefox ~profile ~port ~ego_command ~ego_space)
       $ base_path
       $ run_base_path
       $ Arg.(
@@ -2940,10 +2882,6 @@ let browser_lane_setup_cmd =
               ~doc:"The sign-in a bidi or ego table is saved through the workspace's running server with (masc login --agent). Defaults to local-admin.")
       $ modes
       $ no_addon
-      $ binary
-      $ token_file
-      $ manifest_dir
-      $ host_name
       $ firefox
       $ profile
       $ port

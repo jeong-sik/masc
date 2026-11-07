@@ -279,11 +279,11 @@ let exercise_departure ~connect owner =
      | W.Issue_result (Error _) | W.Snapshot_result _ | W.Poll_result _ | W.Receipt
      | W.Service_refusal _ | W.Download_reply _ -> false)
 
-(* An independent extension-client fixture keeps A executing after its caller
+(* An independent polled-client fixture keeps A executing after its caller
    leaves. Queueing B cannot be mistaken for an idle or completed executor. *)
 let exercise_extension_departure ~sw ~connect owner =
   let extension_id=ok (B.client_id_of_string "0c000000-0000-4000-8000-000000000102") in
-  let extension={client with B.client_id=extension_id;transport=B.Web_extension} in
+  let extension={client with B.client_id=extension_id} in
   (match Owner.poll_live owner ~client:extension ~window_sec:0.001 with
    | Ok None -> () | Ok (Some _) -> fail "unexpected extension work" | Error detail -> fail detail);
   let request={W.incarnation;command=W.Issue {route=B.Live_route (Some extension_id);

@@ -68,7 +68,6 @@ let packages_directory base = Filename.concat base ".masc/packages"
 let folder = function
   | B.Owned_firefox -> "firefox"
   | B.Ego -> "ego"
-  | B.External_host -> "external"
 
 let declaration_path base backend =
   Filename.concat (lane_directory base) (S.package_name backend ^ ".toml")

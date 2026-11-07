@@ -1,10 +1,8 @@
 (** Whether the workspace has browser Add-ons and what their workers last
-    published, read per lane. Since #44295 browser hosts register with a
-    worker, not with the server process, so the Lanes rows and the browser
-    lane check both read here. *)
+    published, read per lane. The Lanes rows read here. *)
 
-(** Why the reading says nothing of the hosts, kept typed so each surface
-    renders it for whoever reads that surface. *)
+(** Why the reading says nothing of the connections, kept typed so each
+    surface renders it for whoever reads that surface. *)
 type unavailable =
   | Refused of Lane_addon_runtime.export_refusal
       (** The runtime refused the cached observation. *)
@@ -16,13 +14,26 @@ type unavailable =
           read: one that was not read may be a browser Add-on switched on, so
           which absence it is is not known. *)
 
+(** Why no installation of a browser Add-on declared on runs, as far as the
+    reader can tell from how the configuration maintenance pass last applied
+    its declaration. *)
+type not_running =
+  | Attach_failed
+      (** The pass applied every browser declaration that is on, and each
+          application failed. *)
+  | Attaching  (** The pass is starting or replacing a worker for one of them. *)
+  | Not_known
+      (** Nothing more is known: the pass has not applied the declaration
+          yet, the reader may not see how it went, or an installation runs
+          that the reader cannot see. *)
+
 type t =
   | Observed of Browser_addon_observation.published
   | Absent  (** No browser Add-on is declared. *)
   | Off
       (** A browser Add-on is declared and switched off, and every
           declaration was read, so none is switched on. *)
-  | Not_running of Browser_lane_launcher.not_running
+  | Not_running of not_running
       (** One is declared on and the runtime runs no installation of it that
           the reader can see, with what is known of why. *)
   | Unavailable of unavailable
@@ -44,10 +55,9 @@ val of_observations :
 (** Ask the runtime for the browser installations' cached observations. It
     runs on the Lane Add-on owner domain and waits for no browser command.
     [access] is the reader's: an installation it cannot see is not read, so
-    the reading never names one to a caller who could not list it. Native
-    browser hosts register with the installation
-    {!Lane_addon_sources.Operator_configuration} sees. Only that access reads
-    how a declaration was applied, which is operator metadata, so only it
+    the reading never names one to a caller who could not list it. Only
+    {!Lane_addon_sources.Operator_configuration} reads how a declaration was
+    applied, which is operator metadata, so only it
     tells a failed attach. *)
 val read :
   config:Workspace.config -> access:Lane_addon_sources.access ->
@@ -73,9 +83,3 @@ val unavailable_message : unavailable -> string
     {!Lane_addon_runtime.export_refusal_operator_message}. Only a surface
     served to the operator alone uses it, such as the lane inventory. *)
 val unavailable_operator_message : unavailable -> string
-
-(** The same reading as the browser lane launcher states it. The launcher's
-    texts reach [GET /api/v1/dashboard/browser-lane/clients], which a
-    read-state caller may read, so an unreadable Add-on carries
-    {!unavailable_message}. *)
-val polling : t -> Browser_lane_launcher.polling

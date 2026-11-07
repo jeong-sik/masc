@@ -1334,9 +1334,9 @@ let allow_empty_workspace =
   Arg.(value & flag & info [ "allow-empty-workspace" ] ~doc)
 ;;
 
-(* A browser lane host installed on a workspace whose server has no browser
-   Add-on declared is answered with HTTP 503 on every poll since #44295. The
-   declaration is the operator's to save, so this only reports it. *)
+(* An owned browser source declared more than once is used by none of its
+   declarations. The declarations are the operator's to change, so this only
+   reports them. *)
 let validate_browser_addon base_path =
   match Unix.realpath base_path with
   | exception Unix.Unix_error (error, _, _) ->
@@ -1346,21 +1346,19 @@ let validate_browser_addon base_path =
       (Unix.error_message error)
   | base_path ->
     (match
-       ( Masc.Browser_addon_preflight.report (Masc.Browser_addon_preflight.judge ~base_path)
-       , Masc.Browser_addon_preflight.report_doubled
-           (Masc.Browser_addon_preflight.doubled_sources ~base_path) )
+       Masc.Browser_addon_preflight.report_doubled
+         (Masc.Browser_addon_preflight.doubled_sources ~base_path)
      with
-     | Ok line, Ok () ->
-       Printf.printf "%s\n%!" line;
+     | Ok () ->
+       Printf.printf "browser Add-on declarations: each enabled source is declared once\n%!";
        Ok ()
-     | Error message, Ok () | Ok _, Error message -> errorf "%s" message
-     | Error host, Error doubled -> errorf "%s; %s" host doubled)
+     | Error message -> errorf "%s" message)
 ;;
 
 let validate_browser_addon_cmd =
   let doc =
-    "refuse a workspace that has a browser lane host installed and no browser \
-     Add-on declaration, since its host polls would all be answered with HTTP 503"
+    "refuse a workspace where more than one enabled browser Add-on declaration \
+     serves the same owned browser source, since that source is then not used"
   in
   Cmd.v
     (Cmd.info "validate-browser-addon" ~doc)

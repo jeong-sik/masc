@@ -129,9 +129,9 @@ let runtime = {js|function browserScene(args) {
   const maxChars = args.maxChars;
   if (!Number.isSafeInteger(maxChars) || maxChars < 1 || maxChars > 100000)
     throw new Error('invalid_scene_max_chars');
-  // Admit nodes by the complete scene's 1 MiB JSON/UTF-8 resource ceiling,
-  // below the native host's 8 MiB incoming reply bound. Count metadata and
-  // geometry as well as text, without imposing a separate node quota.
+  // Admit nodes by the complete scene's 1 MiB JSON/UTF-8 resource ceiling.
+  // Count metadata and geometry as well as text, without imposing a separate
+  // node quota.
   const responseByteLimit = 1024 * 1024;
   const nodes = [], styles = new WeakMap();
   let chars = 0, truncated = false, nodeBytes = 0;

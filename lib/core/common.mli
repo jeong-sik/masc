@@ -28,13 +28,6 @@ val owner_lease_dirname : string
 (** Directory beside [<base_path>/.masc] that holds the BasePath owner lease
     when no lease root is configured. Value is [".masc-owner"]. *)
 
-val browser_lane_dirname : string
-(** The browser lane's directory under the MASC directory: its token, the
-    BiDi host's record and lock, and the launcher. Value is
-    ["browser-lane"].
-    [masc browser-lane-setup] writes the token and the launcher under the same
-    name in every mode, so the two change together. *)
-
 val searxng_dirname : string
 (** The directory under [.masc] that is mounted into the SearXNG container as
     [/etc/searxng]. *)
@@ -46,10 +39,6 @@ val dos_dirname : string
 val msx_dirname : string
 (** The MSX machine's directory under [.masc]: its BIOS and cartridges.
     Value is ["msx"]. *)
-
-val browser_lane_token_name : string
-(** The lane token's file name in {!browser_lane_dirname}. Value is
-    ["token"]. [masc browser-lane-setup] writes it under the same name. *)
 
 val masc_dir_from_base_path : base_path:string -> string
 (** [masc_dir_from_base_path ~base_path] is

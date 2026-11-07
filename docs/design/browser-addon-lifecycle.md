@@ -1,10 +1,9 @@
 # Browser execution as optional Lane Add-ons
 
 Each browser source is its own optional Lane Add-on with its own worker:
-`browser-firefox` (the Keeper live Firefox), `browser-ego` (an ego lite
-connection) and `browser-external` (the native hosts of external browsers). A
-worker runs only its source, from that source's `runtime.toml` table:
-`[browser.live.bidi]` or `[browser.live.ego]`; external hosts need none.
+`browser-firefox` (the Keeper live Firefox) and `browser-ego` (an ego lite
+connection). A worker runs only its source, from that source's `runtime.toml`
+table: `[browser.live.bidi]` or `[browser.live.ego]`.
 Whether a source runs is its declaration's `enabled`. Attaching an Add-on acquires
 its browser resources; detaching it revokes input and joins their cleanup. A
 failure of one source ends only its own worker. The configured Firefox profile
@@ -50,9 +49,8 @@ worker from becoming ready and joins its resources during failed-start cleanup.
 An unexpected connection failure revokes that worker rather than publishing a
 dead client; the other sources' workers keep running.
 
-The external WebExtension/native-host bridge is the `browser-external` worker.
-Its observations describe those external hosts. Read the `browser-firefox`
-Add-on's observation for the worker-owned Firefox connection and startup errors.
+Read the `browser-firefox` Add-on's observation for the worker-owned Firefox
+connection and startup errors.
 
 The operator selects tool-contract hooks: validate commands before dispatch and
 successful structured replies after dispatch. Input and output hooks can be
@@ -120,7 +118,7 @@ receipts remain distinct from successful contract validation.
    execution is not container isolation. This follows
    [POSIX exec/descriptor semantics](https://pubs.opengroup.org/onlinepubs/9799919799/functions/exec.html):
    closing a descriptor for a process-owned lease inode releases its locks.
-4. A browser worker that owns WebExtension, BiDi and ego command queues. Core
+4. A browser worker that owns BiDi and ego command queues. Core
    admission and artifact brokers remain host edges;
    built-in browser execution and tool fallback are removed.
    `masc-browser-addon-worker` publishes `browser_command` and `lane_observe`
@@ -483,10 +481,10 @@ families, formal whole-stack approval and merge remain separate claims.
 Use isolated test pages and profiles, without operating on personal sites.
 Record attach, real browser startup, observation, input, in-flight detach,
 confirmed owned-process cleanup and reattach. An old incarnation's requests,
-results, tab handles and host registrations must be refused by the replacement.
+results and tab handles must be refused by the replacement.
 
-Exercise WebExtension, live BiDi and ego. Preserve trusted
-hover, drag, clicks, typing, keys, scrolling, zoom, navigation and tab receipts.
+Exercise live BiDi and ego. Preserve trusted
+hover, drag, clicks, typing, keys, scrolling, navigation and tab receipts.
 Do not present unimplemented browser/action families as supported.
 
 Transfer upload ownership explicitly: a pathname crossing a process boundary

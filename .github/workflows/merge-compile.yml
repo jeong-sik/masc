@@ -210,7 +210,7 @@ jobs:
         run: |
           set -euo pipefail
           opam exec -- dune build --root . \
-            bin/main_eio.exe bin/masc_tui.exe bin/masc_browser_host.exe \
+            bin/main_eio.exe bin/masc_tui.exe \
             bin/deployment_preflight_helper.exe
           # Record the SHA that was actually built: GITHUB_SHA is main's
           # (the dispatch ref), not the checked-out head.
@@ -244,7 +244,7 @@ jobs:
               echo 'Identical inputs mean an identical compile result, so this skip IS compilation evidence for the checked SHA.'
             else
               echo "Build job status: $BUILD_STATUS"
-              echo 'Scope: server, TUI, browser host, deployment preflight; no tests.'
+              echo 'Scope: server, TUI, deployment preflight; no tests.'
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 

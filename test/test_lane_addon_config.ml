@@ -898,7 +898,7 @@ max_reply_bytes = 4096
     (match Lane_addon_manifest.load ~path with
      | Ok _ -> false
      | Error error -> contains (Lane_addon_manifest.error_to_string error) "browser_backend");
-  let exported=match load "\"browser\"\nbrowser_backend = \"external_host\"" "[world.tools]\nexport = [\"browser_command\"]\ninvocation = \"host_context\"\nhooks = [\"validate_input\", \"validate_output\"]" with
+  let exported=match load "\"browser\"\nbrowser_backend = \"ego\"" "[world.tools]\nexport = [\"browser_command\"]\ninvocation = \"host_context\"\nhooks = [\"validate_input\", \"validate_output\"]" with
     | Ok package -> package | Error error -> fail (Lane_addon_manifest.error_to_string error) in
   check (list string) "browser exports require host caller context" ["browser_command"] exported.exported_tools;
   check bool "browser selects independent input/output middleware" true
@@ -908,9 +908,9 @@ max_reply_bytes = 4096
     (Result.is_error (load service extra)))
     (* Each browser case names its source, so it is refused for its own
        reason rather than for naming none. *)
-    ["\"unknown\"","";"true","";"\"browser\"\nbrowser_backend = \"external_host\"","[world.state]\nmode = \"persistent\"";
-     "\"browser\"\nbrowser_backend = \"external_host\"","[interface]\nmodel_access = \"host_sampling\"";
-     "\"browser\"\nbrowser_backend = \"external_host\"","[world.tools]\nexport = [\"arbitrary_tool\"]"])
+    ["\"unknown\"","";"true","";"\"browser\"\nbrowser_backend = \"ego\"","[world.state]\nmode = \"persistent\"";
+     "\"browser\"\nbrowser_backend = \"ego\"","[interface]\nmodel_access = \"host_sampling\"";
+     "\"browser\"\nbrowser_backend = \"ego\"","[world.tools]\nexport = [\"arbitrary_tool\"]"])
 
 let tool_exports_are_explicit_and_revisioned () = with_directory (fun _root packages directory ->
   let manifest = install_package packages in

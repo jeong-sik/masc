@@ -39,7 +39,6 @@ INSTALL_SH="$REPO_ROOT/scripts/install.sh"
 ASSETS=(
   "masc-$ARCH"
   "masc-tui-$ARCH"
-  "masc-browser-host-$ARCH"
   "masc-deployment-preflight-helper-$ARCH"
   "masc-check-runtime-deployment-preflight-$ARCH"
   "masc-exec-ssh-bootstrap-$ARCH"
@@ -121,12 +120,11 @@ case "$ARCH" in
   macos-*) PATH="$(dirname "$(readlink "$prefix/masc")")/python/bin:$PATH"; export PATH ;;
 esac
 
-for a in masc masc-tui masc-browser-host masc-deployment-preflight-helper masc-check-runtime-deployment-preflight masc-exec-ssh-bootstrap; do
+for a in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deployment-preflight masc-exec-ssh-bootstrap; do
   [ -x "$prefix/$a" ] || { echo "install-smoke: installer did not place $a" >&2; exit 1; }
 done
-echo "install-smoke: installer placed all six executables"
+echo "install-smoke: installer placed all five executables"
 "$prefix/masc-tui" --help > "$work/tui-help.txt"
-"$prefix/masc-browser-host" --help > "$work/browser-host-help.txt"
 "$prefix/masc-exec-ssh-bootstrap" --help > "$work/ssh-bootstrap-help.txt"
 grep -q -- '--endpoint' "$work/ssh-bootstrap-help.txt"
 grep -q -- '--keeper' "$work/ssh-bootstrap-help.txt"

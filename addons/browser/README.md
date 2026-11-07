@@ -1,8 +1,7 @@
 # Browser workers
 
-Each browser source has its own package here: `firefox/`, `ego/` and
-`external/`, with the ids `browser-firefox`, `browser-ego` and
-`browser-external`.
+Each browser source has its own package here: `firefox/` and `ego/`, with the
+ids `browser-firefox` and `browser-ego`.
 Every package runs `masc-browser-addon-worker` as a native Add-on for the one
 source its `lane.toml` names in `browser_backend`, so a failure of one source
 ends only its own worker. The server finds the worker on its PATH, and `masc-native-addon-launcher` and
@@ -25,8 +24,8 @@ masc carries these packages. After installing, the script runs
 `masc browser-lane-setup --mode addon` for the workspace, and every other
 `browser-lane-setup` mode does the same, for each source the workspace runs:
 firefox and ego when `runtime.toml` has their table or the run
-writes it, and external when a native host is installed. A source whose table the mode writes is declared
-once that table is written.
+writes it. A source whose table the mode writes is declared once that table is
+written.
 
 - It writes each package to `<base-path>/.masc/packages/browser-<source>/`. An
   upgraded masc rewrites the files there, so the declaration does not change.
@@ -35,7 +34,7 @@ once that table is written.
   (`<base-path>/.masc/config/lane-addons/`, or the one under
   `MASC_CONFIG_DIR`). An existing declaration is left as it is; setup reports
   it, and names the `manifest_path` line to use when it points at another copy.
-  Owned and external-host sources require one enabled declaration. Ego
+  The owned Firefox source requires one enabled declaration. Ego
   installations may name independent Spaces in `binding.space`; setup retains
   the workspace-default declaration instead of replacing a Goal installation.
 
@@ -44,15 +43,8 @@ and on its maintenance pass. Set `enabled = false` in a declaration to keep
 that source detached. `browser-lane-setup --no-addon` makes a mode other than
 `addon` leave the packages and the declarations as they are.
 
-The deployment preflight (`scripts/check-runtime-deployment-preflight.sh`) refuses a
-workspace that has a browser lane host installed and no enabled declaration of
-`browser-external`, because that server answers every native host poll with
-HTTP 503 (`no_browser_addon`). It also refuses duplicate owned/external-host
-source declarations. Distinct Ego installations are routed by their observed
-client and native Space identities. `scripts/install-local-build.sh` runs it with
-`--browser-addon-declared-by-caller` when it installs the Add-on, because the
-setup step above writes the declaration after the check. With
-`--no-browser-addon` the check applies.
+Distinct Ego installations are routed by their observed client and native
+Space identities.
 
 An Ego installation can select its own Space without changing the workspace's
 `[browser.live.ego]` table:
@@ -94,7 +86,7 @@ retirement alone preserves an active Space, and an unknown finish is never repla
 An unreadable or unready live-source publisher can hide another controller of
 the same native Space. Until every live publisher's identity is observed, Ego
 commands and Goal pins are refused before dispatch, including exact-client and
-stored Goal routes. Explicit extension clients remain usable. Cached
+stored Goal routes. Cached
 `browser_document` reads preserve the same unknown-identity refusal.
 The host rechecks topology after snapshot I/O; this admission observation does
 not provide an atomic native-Space lease against later lifecycle changes.
@@ -130,8 +122,7 @@ Workspace. The ego worker uses host-mediated upload and download brokers,
 independently of the optional validation hooks; the other sources have none.
 
 The worker publishes connection observations through MCP. Its separate private
-socket lets browser commands wait while client polls and results use other
-connections. Runtime reads its running observation through that private channel,
+socket lets browser commands wait while other connections are in use. Runtime reads its running observation through that private channel,
 independently of a waiting MCP command. Service handles name one original connection and cannot
 follow a replacement installation. Detach confirms both process settlement and
 socket cleanup before releasing that incarnation. Interrupted startup recovery
@@ -149,15 +140,6 @@ or running requests are labelled accordingly; Refresh reads newer observations.
 The readings do not report native Space ownership or window visibility, and a
 returned operation alone does not establish login success. Browser handoff
 remains a separate action.
-
-Authenticated native-host HTTP routes forward polls, results and disconnects to
-this Add-on. They use the served workspace's lane token, even when the process
-environment points elsewhere. A new client can register only when exactly one
-attached browser Add-on serves external hosts. Its ID and full identity are durably bound to that original
-worker under `<base-path>/.masc/browser-lane/registrations/`. Existing IDs are
-never assigned to a replacement. A temporary observation failure returns
-unavailable and requests an observation refresh; confirmed retirement tells the
-host to open a fresh connection. There is no built-in queue fallback.
 
 The authenticated `POST /api/v1/dashboard/browser-lane/command` endpoint accepts
 the same `browser_command` arguments. It requires the existing Dashboard admin
@@ -203,9 +185,8 @@ tool_hooks = ["validate_input", "validate_output"]
 sources = []
 ```
 
-The installed external native host and browser extension/BiDi peer use the
-workspace token. Each worker owns only its own source's browser. The firefox
-worker starts its configured live
+Each worker owns only its own source's browser. The firefox worker starts its
+configured live
 Firefox during attachment, on its dedicated existing owner-only profile. Its reported profile
 and process ID must match the original process owner. A busy port is refused;
 no external Firefox is adopted. See the [Firefox setup guide](../../docs/design/browser-bidi-live-host.md).
@@ -224,8 +205,8 @@ Retirement fences input before joining the cleanup of the worker's own
 source. Concurrent or repeated retire requests observe the same
 cleanup result; an error prevents a successful retirement receipt. Confirmed
 settlement releases the private allocation while persistent profile contents
-and stable claims are preserved. External extension/manual browsers remain
-operator-owned. Interrupted issued input stays uncertain and is never replayed.
+and stable claims are preserved. Interrupted issued input stays uncertain and is
+never replayed.
 
 Input/output middleware validates tool contracts without calling an LLM. A
 browser package declares no Exact Output and no operator asks; the manifest

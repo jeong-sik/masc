@@ -702,7 +702,7 @@ print_workspace_command() {
 
 print_install_summary() {
   printf '\n%smasc %s installed.%s\n' "$c_grn" "$VERSION" "$c_off"
-  printf 'Installed: server, TUI, dashboard, browser host and preflight tools\n'
+  printf 'Installed: server, TUI, dashboard and preflight tools\n'
   printf 'Workspace: %s\n\n' "$BASE_PATH"
   if [ "$RUN_SETUP_JOURNEY" -eq 1 ]; then
     printf 'Setup finished. Reopen this workspace:\n  '
@@ -1112,7 +1112,7 @@ uninstall_masc() {
     die "unfinished installation transaction at $uninstall_prefix/.masc-install-transaction; recover or roll back that installation before uninstalling"
   fi
   local targets=()
-  for name in masc masc-tui masc-browser-host masc-deployment-preflight-helper masc-check-runtime-deployment-preflight masc-exec-ssh-bootstrap; do
+  for name in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deployment-preflight masc-exec-ssh-bootstrap; do
     target="$uninstall_prefix/$name"
     [ ! -d "$target" ] || [ -L "$target" ] || die "refusing to remove unexpected executable directory: $target"
     targets+=("$target")
@@ -1305,7 +1305,6 @@ detect_asset() {
 ASSET=$(detect_asset)
 PLATFORM_SUFFIX="${ASSET#masc-}"
 TUI_ASSET="masc-tui-$PLATFORM_SUFFIX"
-BROWSER_HOST_ASSET="masc-browser-host-$PLATFORM_SUFFIX"
 PREFLIGHT_HELPER_ASSET="masc-deployment-preflight-helper-$PLATFORM_SUFFIX"
 PREFLIGHT_GATE_ASSET="masc-check-runtime-deployment-preflight-$PLATFORM_SUFFIX"
 SSH_BOOTSTRAP_ASSET="masc-exec-ssh-bootstrap-$PLATFORM_SUFFIX"
@@ -1438,7 +1437,6 @@ log "configuration and data: $BASE_PATH/.masc"
 URL="$RELEASE_BASE_URL/$VERSION/$ASSET"
 DEST="$PREFIX/masc"
 TUI_DEST="$PREFIX/masc-tui"
-BROWSER_HOST_DEST="$PREFIX/masc-browser-host"
 PREFLIGHT_HELPER_DEST="$PREFIX/masc-deployment-preflight-helper"
 PREFLIGHT_GATE_DEST="$PREFIX/masc-check-runtime-deployment-preflight"
 SSH_BOOTSTRAP_DEST="$PREFIX/masc-exec-ssh-bootstrap"
@@ -1560,7 +1558,6 @@ install_release_companion() {
 # installer that quietly delivers less than it was built to deliver is worse
 # than one that stops and says which asset was absent.
 install_release_companion "$TUI_ASSET" "$TUI_DEST"
-install_release_companion "$BROWSER_HOST_ASSET" "$BROWSER_HOST_DEST"
 install_release_companion "$PREFLIGHT_HELPER_ASSET" "$PREFLIGHT_HELPER_DEST"
 install_release_companion "$PREFLIGHT_GATE_ASSET" "$PREFLIGHT_GATE_DEST"
 install_release_companion "$SSH_BOOTSTRAP_ASSET" "$SSH_BOOTSTRAP_DEST"

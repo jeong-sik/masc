@@ -153,10 +153,8 @@ ln -sf "$PWD/_build/default/bin/main_eio.exe" ~/.local/bin/masc
 ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 ```
 
-대신 `scripts/install-local-build.sh`를 쓰면 `masc`, `masc-tui`, `masc-browser-host`와
-배포 사전점검 도구를 한 번에 빌드해 `~/.local/bin`에 복사합니다. `eval "$(opam env)"`를 적용한 셸에서 실행하세요. 이 스크립트는 등록된
-Firefox browser-lane host도 새 빌드로 다시 설치하고, 그 작업 공간에서 실행 중인 host 프로세스를
-종료합니다. 확장은 새 사본으로 다시 연결합니다.
+대신 `scripts/install-local-build.sh`를 쓰면 `masc`, `masc-tui`와
+배포 사전점검 도구를 한 번에 빌드해 `~/.local/bin`에 복사합니다. `eval "$(opam env)"`를 적용한 셸에서 실행하세요.
 아무것도 바꾸기 전에 새 빌드로 작업 공간의 `runtime.toml`과 저장 상태를 검사합니다.
 경로가 해석되고 아직 존재하지 않는다고 확인되면 새 작업 공간으로 취급하고 검사는
 미실행으로 표시합니다. 경로를 해석하거나 관측할 수 없으면 교체 전에

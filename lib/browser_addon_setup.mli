@@ -2,9 +2,8 @@
     from the packages this build carries.
 
     Each browser source has its own package and worker (RFC
-    browser-backends-end-alone): [browser-firefox], [browser-ego] and
-    [browser-external]. For each source it
-    is given, {!apply} does the two steps that used to be by hand:
+    browser-backends-end-alone): [browser-firefox] and [browser-ego]. For
+    each source it is given, {!apply} does the two steps that used to be by hand:
 
     - It writes the package this binary was built with to
       [<base>/.masc/packages/browser-<source>/] and removes the files there

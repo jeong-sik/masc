@@ -29,23 +29,23 @@ let operations names = List.map (fun name -> match Cap.operation_of_wire name wi
   | Some operation -> operation | None -> failf "%s is not a browser operation" name) names
 let client transport : Lane.client_info =
   {client_id=Uuidm.v4_gen (Random.State.make_self_init ()) ();transport;browser=Lane.Firefox;
-   version="0.8.0";engine_version="fixture";space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Web_extension|Webdriver_bidi -> None)}
+   version="0.8.0";engine_version="fixture";space=(match transport with Browser_lane.Ego_task_space -> Some ({id=51;name="fixture Space"} : Browser_lane.ego_space) | Webdriver_bidi -> None)}
 
 (* What a browser Add-on worker reports in its snapshot and the host chooses
-   from (lib/browser_addon_host.ml): a connected extension host and a
-   connected BiDi host. Choosing must queue neither a command. *)
+   from (lib/browser_addon_host.ml): a connected BiDi host. Choosing must
+   queue it no command. *)
 let with_browsers run = Eio_main.run (fun env ->
   Time_compat.set_clock (Eio.Stdenv.clock env);
-  let extension=client Lane.Web_extension and bidi=client Lane.Webdriver_bidi in
+  let bidi=client Lane.Webdriver_bidi in
   Lane.install_activity_observer (Some (fun _ -> Lane.Enabled));
   Fun.protect ~finally:(fun () ->
     Lane.install_activity_observer None;
     List.iter (fun (info:Lane.client_info) -> ignore (Lane.disconnect_client ~client_id:info.client_id))
-      [extension;bidi]) (fun () ->
-    List.iter (fun info -> ignore (Lane.take_command ~client_info:info ~window_sec:0.001)) [extension;bidi];
-    run ~extension ~bidi;
+      [bidi]) (fun () ->
+    List.iter (fun info -> ignore (Lane.take_command ~client_info:info ~window_sec:0.001)) [bidi];
+    run ~bidi;
     List.iter (fun info -> check bool "choosing a browser sends it no command" true
-      (Lane.take_command ~client_info:info ~window_sec:0.001=Ok None)) [extension;bidi]))
+      (Lane.take_command ~client_info:info ~window_sec:0.001=Ok None)) [bidi]))
 let snapshot () : Selection.snapshot =
   {live_activity=Lane.Enabled;live_clients=Lane.connected_clients ();live_space_presence=[]}
 let automatic ?(verb=Lane.Tabs_list) names =
@@ -76,25 +76,25 @@ let unsupported = function
   | Ok () | Error (Selection.Binding_required | No_available_browser | Ambiguous_browsers _
     | Required_actions_unavailable _) -> false
 
-let test_task_choice () = with_browsers (fun ~extension ~bidi ->
+let test_task_choice () = with_browsers (fun ~bidi ->
   check bool "no browser this fixture connects drops HTML5 data, so none is chosen" true
     (none_serves (automatic ["html5_drop"]));
   check bool "only an ego connection lists downloads, and this fixture connects none" true
     (none_serves (automatic ["read_frames";"list_downloads"]));
-  check bool "hover and typing choose the BiDi host, not the extension" true
+  check bool "hover and typing choose the BiDi host" true
     (chosen (automatic ["hover";"type_text"]) = live bidi);
-  check bool "page zoom chooses the extension host" true
-    (chosen (automatic ["page_zoom"]) = live extension))
+  check bool "no browser zooms the page, so none is chosen" true
+    (none_serves (automatic ["page_zoom"])))
 
-let test_impossible_and_explicit () = with_browsers (fun ~extension ~bidi:_ ->
+let test_impossible_and_explicit () = with_browsers (fun ~bidi ->
   (match automatic ["page_zoom";"type_text"] with
    | Error (Selection.Required_actions_unavailable {required;candidates}) ->
      check bool "the refusal names what was required" true (required = operations ["page_zoom";"type_text"]);
-     check int "it lists every connected browser as a candidate" 2 (List.length candidates)
+     check int "it lists every connected browser as a candidate" 1 (List.length candidates)
    | Ok _ | Error (Selection.Binding_required | No_available_browser | Ambiguous_browsers _
      | Unsupported_required_actions _) -> fail "no browser zooms and types, so none is chosen");
-  check bool "an explicit extension host that cannot hover is refused, not replaced" true
-    (unsupported (admitted ["hover"] (Lane.Live_route (Some extension.client_id)))))
+  check bool "an explicit BiDi host that cannot list downloads is refused, not replaced" true
+    (unsupported (admitted ["list_downloads"] (Lane.Live_route (Some bidi.client_id)))))
 
 (* Required actions are parsed before any browser is chosen. A refused list
    fails as the caller's input, before the tool looks for a browser Add-on;
@@ -147,8 +147,6 @@ let test_button_click_table () =
   List.iter (fun operation ->
     check bool (Cap.operation_name operation ^ " on live BiDi") true
       (reaches (Cap.Connected Lane.Webdriver_bidi) operation);
-    check bool (Cap.operation_name operation ^ " is not claimed for the extension") false
-      (reaches (Cap.Connected Lane.Web_extension) operation);
     check bool (Cap.operation_name operation ^ " is not claimed for Safari") false
       (reaches Cap.Safari_unavailable operation);
     match Cap.support (Cap.Connected Lane.Webdriver_bidi) operation with
@@ -163,7 +161,6 @@ let test_resize_viewport_table () =
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
   check bool "live BiDi sets the viewport" true (reaches (Cap.Connected Lane.Webdriver_bidi));
   check bool "ego sets the page viewport through its CDP session" true (reaches (Cap.Connected Lane.Ego_task_space));
-  check bool "the extension does not" false (reaches (Cap.Connected Lane.Web_extension));
   check bool "Safari does not" false (reaches Cap.Safari_unavailable)
 
 let test_tab_history_and_close_table () =
@@ -172,8 +169,6 @@ let test_tab_history_and_close_table () =
   List.iter (fun operation ->
     check bool (Cap.operation_name operation ^ " on live BiDi") true (reaches (Cap.Connected Lane.Webdriver_bidi) operation);
     check bool (Cap.operation_name operation ^ " on ego") true (reaches (Cap.Connected Lane.Ego_task_space) operation);
-    check bool (Cap.operation_name operation ^ " is not claimed for the extension") false
-      (reaches (Cap.Connected Lane.Web_extension) operation);
     check bool (Cap.operation_name operation ^ " is not claimed for Safari") false (reaches Cap.Safari_unavailable operation))
     [Cap.Back; Cap.Forward; Cap.Reload; Cap.Close_tab]
 
@@ -181,7 +176,6 @@ let test_touch_table () =
   let reaches backend = match Cap.support backend Cap.Touch with
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
   check bool "live BiDi sends touch" true (reaches (Cap.Connected Lane.Webdriver_bidi));
-  check bool "the extension has no touch" false (reaches (Cap.Connected Lane.Web_extension));
   check bool "Safari has no touch" false (reaches Cap.Safari_unavailable)
 
 let test_select_option_table () =
@@ -191,7 +185,7 @@ let test_select_option_table () =
   List.iter (fun (label,backend) ->
     check bool (label ^ " selects through BrowserInteract") true
       (invocation backend = Some (Cap.Interact, Some "select_option")))
-    ["live BiDi",Cap.Connected Lane.Webdriver_bidi;"the extension",Cap.Connected Lane.Web_extension];
+    ["live BiDi",Cap.Connected Lane.Webdriver_bidi];
   check bool "Safari has no select" true (invocation Cap.Safari_unavailable = None)
 
 let test_list_windows_table () =
@@ -199,7 +193,7 @@ let test_list_windows_table () =
     | Cap.Available _ | Cap.Conditional _ -> true | Cap.Unsupported _ -> false in
   check bool "live BiDi names each tab's window" true (reaches (Cap.Connected Lane.Webdriver_bidi));
   List.iter (fun (label,backend) -> check bool (label ^ " does not") false (reaches backend))
-    ["the extension",Cap.Connected Lane.Web_extension;"Safari",Cap.Safari_unavailable]
+    ["Safari",Cap.Safari_unavailable]
 
 (* The catalog claims on an Ego connection only what its peer does
    (Browser_lane.live_transport_serves Ego_task_space). Page operations retain
@@ -244,7 +238,6 @@ let test_loading_recovery_table () =
        | Cap.Unsupported _ -> false))
     [Cap.Connected Lane.Ego_task_space, "Ego", true;
      Cap.Connected Lane.Webdriver_bidi, "BiDi", false;
-     Cap.Connected Lane.Web_extension, "extension", false;
      Cap.Safari_unavailable, "Safari", false]
 
 let test_snapshot_table () =
@@ -257,7 +250,6 @@ let test_snapshot_table () =
        Cap.Hover_snapshot_target; Cap.Double_click_snapshot_target])
     [Cap.Connected Lane.Ego_task_space, "ego", true;
      Cap.Connected Lane.Webdriver_bidi, "BiDi", false;
-     Cap.Connected Lane.Web_extension, "the extension", false;
      Cap.Safari_unavailable, "Safari", false]
 
 let test_native_input_admission_surface () =

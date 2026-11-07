@@ -1475,7 +1475,6 @@ let test_peer_serves_what_the_lane_table_says () =
       | Viewport_resize -> interact (Set_viewport (Fit {width=800;height=600}))
       | Touch_input -> interact (Swipe {from=point;to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0})
       | Trusted_keyboard -> interact (Type_text {document_id=viewport.document_id;text="hello"})
-      | Browser_zoom -> interact (Set_zoom {factor=1.5})
       | Page_recovery -> Page_act (Action.On_tab {tab_id=1;frame_path=[];interaction=Action.Stop_loading})
       | Tab_history -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Back})
       | Tab_closing -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Close_tab})
@@ -1490,7 +1489,7 @@ let test_peer_serves_what_the_lane_table_says () =
       | Download_listing -> Page_downloads {tab_id=1}
       | File_upload -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Upload {target=Action.File_input "#file";paths=["/tmp/note.txt"]}})
       | Environment_emulation -> Page_act (Action.On_tab {tab_id=2;frame_path=[];interaction=Action.Set_emulation {geolocation=None;locale=Some "fr-FR";timezone=None}})) in
-    (* The names the native host forwards (Browser_host.decode_poll). *)
+    (* The verb names a poll carries (Browser_live_peer.decode). *)
     let peer_verb = function
       | "tabs.list" -> Peer.Tabs_list | "page.read" -> Peer.Page_read | "page.scene" -> Peer.Page_scene
       | "page.elements" -> Peer.Page_elements | "page.capture" -> Peer.Page_capture

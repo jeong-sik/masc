@@ -27,7 +27,7 @@ branch artifact before merge, integrate that dependency and then:
 4. Download the successful artifact into an isolated directory and verify
    `shasum -a 256 --check SHA256SUMS`. Extract the runtime archive there, then
    copy each executable asset to its suffix-free name beside `lib/` and
-   `python/` (for example `masc-tui-macos-arm64` to `masc-tui`), then explicitly run `chmod +x masc masc-tui masc-browser-host
+   `python/` (for example `masc-tui-macos-arm64` to `masc-tui`), then explicitly run `chmod +x masc masc-tui
    masc-deployment-preflight-helper masc-check-runtime-deployment-preflight`
    because downloaded artifacts do not retain executable bits. Run `./masc-tui --version` and
    `./masc-tui --build-commit` before the parent's isolated Home scenarios.

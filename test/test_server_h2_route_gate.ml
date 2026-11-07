@@ -66,10 +66,6 @@ let expected : (string * Route_access.t * string * string) list =
     , Route_access.Self_authenticated Route_access.Websocket_upgrade
     , "open"
     , "refused:actor_not_provided" )
-  ; ( "self_authenticated browser_lane"
-    , Route_access.Self_authenticated Route_access.Browser_lane
-    , "refused:kind_not_served"
-    , "refused:kind_not_served" )
   ; ( "self_authenticated loopback_dev_token"
     , Route_access.Self_authenticated Route_access.Loopback_dev_token
     , "refused:kind_not_served"

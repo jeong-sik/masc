@@ -736,7 +736,6 @@ let dispatch_with_window ?actor ?request_id t ~verb args =
                | _ -> Error (Outcome_unknown message))
             | None -> Ok result))
       | Browser_lane.Set_viewport size -> set_viewport t context id args size
-      | Browser_lane.Set_zoom _ -> Error (Before_effect "set_zoom requires a connected WebExtension browser")
       | Browser_lane.Click_target _ | Browser_lane.Fill_target _ | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Error (Before_effect Browser_lane.snapshot_target_refused)
       | Browser_lane.Activate_tab -> activate t context id args in
       let* receipt = Result.map_error (function
@@ -808,8 +807,7 @@ let with_connection_with_hook ~after_serialize ~env ~timeout ~url use =
       let authority=(if host="::1" then "[::1]" else host)^":"^string_of_int port in
       (* ws-direct reports an upgrade the peer refused, or a head that did not
          arrive in its own window, as [Failure]. That is this connection's
-         error, not an exception for the native host, which catches [Eio.Io]
-         alone and would exit without a log line. *)
+         error, so it is returned rather than raised. *)
       let* wsd=match Ws_direct_eio.Client.connect ~sw ~clock ~host:authority ~resource
           ~max_message:reply_limit_bytes flow builder with
         | wsd->Ok wsd

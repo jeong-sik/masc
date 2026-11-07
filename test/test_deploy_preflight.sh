@@ -52,7 +52,6 @@ cp "$ROOT_DIR/scripts/install-local-build.sh" \
 # --no-browser-addon, and this case means to reach the runtime.toml check.
 INSTALL_BINARIES=(
     "$FIXTURE_DIR/repo/_build/default/bin/masc_tui.exe"
-    "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_host.exe"
     "$FIXTURE_DIR/repo/_build/default/bin/masc_native_addon_launcher.exe"
     "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_addon_worker.exe"
     "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_process_owner.exe"
@@ -65,7 +64,6 @@ INSTALL_ERR="$FIXTURE_DIR/install-local-build.err"
 if bash "$FIXTURE_DIR/repo/scripts/install-local-build.sh" \
     --skip-build \
     --prefix "$FIXTURE_DIR/prefix" \
-    --manifest-dir "$FIXTURE_DIR/manifests" \
     --base-path "$FIXTURE_DIR/runtime" \
     >/dev/null 2>"$INSTALL_ERR"
 then
@@ -86,11 +84,11 @@ fi
 
 echo "local install refuses runtime.toml before replacing binaries"
 
-# A workspace with a browser lane host and no browser Add-on declaration is
-# refused in the same before-the-stop pass, with the helper standing in for one
-# that accepts runtime.toml and refuses the missing declaration. A helper that
+# A workspace where more than one enabled declaration serves one browser source
+# is refused in the same before-the-stop pass, with the helper standing in for
+# one that accepts runtime.toml and refuses the doubled source. A helper that
 # accepts both passes the pass.
-echo "deploy preflight refuses a browser host with no Add-on declaration"
+echo "deploy preflight refuses a browser source declared twice"
 
 write_helper() {
     cat > "$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe" <<HELPER
@@ -101,10 +99,10 @@ case "\$1" in
     validate-browser-addon)
         if [ "\$2" = --help ]; then exit 0; fi
         if [ "$1" = refuse ]; then
-            echo "a browser lane host is installed and no browser Add-on declaration is saved" >&2
+            echo "browser source owned_firefox is declared by browser-a and browser-b" >&2
             exit 1
         fi
-        echo "browser Add-on declared id=fixture"
+        echo "browser Add-on declarations: each enabled source is declared once"
         ;;
     *) echo "unexpected helper call: \$*" >&2; exit 2 ;;
 esac
@@ -120,12 +118,12 @@ if MASC_DEPLOYMENT_PREFLIGHT_HELPER="$FIXTURE_DIR/repo/_build/default/bin/deploy
     bash "$GATE" --base-path "$FIXTURE_DIR/runtime" --runtime-config-only \
     >/dev/null 2>"$BROWSER_ERR"
 then
-    echo "expected a browser host with no Add-on declaration to be refused" >&2
+    echo "expected a browser source declared twice to be refused" >&2
     exit 1
 fi
-if ! grep -q "no browser Add-on declaration" "$BROWSER_ERR" \
+if ! grep -q "serves the same browser source" "$BROWSER_ERR" \
     || ! grep -q "nothing was stopped or installed" "$BROWSER_ERR"; then
-    echo "the refusal does not say what is missing and that nothing was stopped" >&2
+    echo "the refusal does not say what is doubled and that nothing was stopped" >&2
     cat "$BROWSER_ERR" >&2
     exit 1
 fi
@@ -135,27 +133,12 @@ if ! MASC_DEPLOYMENT_PREFLIGHT_HELPER="$FIXTURE_DIR/repo/_build/default/bin/depl
     bash "$GATE" --base-path "$FIXTURE_DIR/runtime" --runtime-config-only \
     >/dev/null 2>"$BROWSER_ERR"
 then
-    echo "expected a declared browser Add-on to pass the before-the-stop pass" >&2
+    echo "expected browser sources declared once each to pass the before-the-stop pass" >&2
     cat "$BROWSER_ERR" >&2
     exit 1
 fi
 
-echo "deploy preflight accepts a declared browser Add-on"
-
-# A caller that writes the declaration itself after this check (the local
-# install) names that, and the check does not refuse the declaration the caller
-# is about to write.
-write_helper refuse
-if ! MASC_DEPLOYMENT_PREFLIGHT_HELPER="$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe" \
-    bash "$GATE" --base-path "$FIXTURE_DIR/runtime" --runtime-config-only --browser-addon-declared-by-caller \
-    >/dev/null 2>"$BROWSER_ERR"
-then
-    echo "expected a caller that declares the Add-on itself to pass the before-the-stop pass" >&2
-    cat "$BROWSER_ERR" >&2
-    exit 1
-fi
-
-echo "deploy preflight leaves the declaration to a caller that writes it"
+echo "deploy preflight accepts browser sources declared once each"
 
 # A helper built before the check has no such command. The gate says so rather
 # than reading cmdliner's usage error as a refusal of the workspace.
@@ -181,4 +164,5 @@ if ! grep -q "predates the browser Add-on check" "$BROWSER_ERR"; then
     cat "$BROWSER_ERR" >&2
     exit 1
 fi
-echo "deploy preflight names a helper that predates the browser Add-on check"
+
+echo "deploy preflight names a helper without the browser Add-on check"

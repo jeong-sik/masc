@@ -29,22 +29,6 @@ let test_native_keyboard_parser () =
      fields "press_key" @ bound @ ["key",`String "a";"modifiers",`List [`String "Meta";`String "Meta"]];
      fields "fill" @ ["selector",`String "#input";"text",`String "ok";"key",`String "Enter"];
      fields "type_text" @ bound @ ["text",`String "ok";"nodeId",`String "n"]]
-let test_browser_zoom_boundary () =
-  let base=fields "set_zoom" @ ["clientId",`String "00000000-0000-4000-8000-000000000001";
-    "expectedUrl",`String "https://example.org/form"] in
-  let request=parsed (base @ ["factor",`Float 1.5]) in
-  check bool "explicit factor is carried as browser zoom" true
-    (request.action=Browser_lane.Set_zoom {factor=1.5});
-  let wire=Browser_lane.interaction_args ~tab_id:request.tab_id ~frame_path:request.frame_path ~expected_url:request.expected_url request.action in
-  check bool "native host receives the requested scale" true
-    (Yojson.Safe.Util.member "factor" wire=`Float 1.5);
-  List.iter (fun factor -> check bool "invalid browser API factor never enters a request" true
-    (Result.is_error (Interaction.parse (`Assoc (base @ ["factor",factor])))))
-    [`Int 0;`Float 0.29;`Float 5.01;`Float nan;`Float infinity;`String "1.5"];
-  check bool "zoom requires URL ownership" true
-    (Result.is_error (Interaction.parse (`Assoc (fields "set_zoom" @ ["factor",`Int 1]))));
-  check bool "zoom cannot borrow a selector or geometry" true
-    (Result.is_error (Interaction.parse (`Assoc (base @ ["factor",`Int 1;"selector",`String "#other"]))))
 let test_activate_tab () =
   let args = fields "activate_tab" @ ["lane",`String "live";"expectedUrl",`String "https://example.org"] in
   let request = parsed args in
@@ -197,8 +181,6 @@ let test_click_button_capability () =
     check bool "middle and secondary ask for the button capability" true
       (Browser_lane.live_capability (click button) = Browser_lane.Trusted_button_click))
     [Browser_lane.Pointer.Middle;Browser_lane.Pointer.Secondary];
-  check bool "the extension cannot serve a non-primary button" false
-    (Browser_lane.live_transport_serves Browser_lane.Web_extension Browser_lane.Trusted_button_click);
   check bool "a live BiDi connection serves it" true
     (Browser_lane.live_transport_serves Browser_lane.Webdriver_bidi Browser_lane.Trusted_button_click)
 let test_click_button_wire_numbers () =
@@ -421,7 +403,6 @@ let test_frame_path () =
   rejected "key input cannot be framed" (fields "press_key" @ frame @ ["expectedUrl",`String "https://example.org";"documentId",`String "d";"key",`String "Enter"])
 
 let () = run "browser interaction" ["typed boundary", [
-  test_case "browser zoom boundary" `Quick test_browser_zoom_boundary;
   test_case "native keyboard and double click parser" `Quick test_native_keyboard_parser;
   test_case "observed semantic pointer targets" `Quick test_semantic_pointer_actions;
   test_case "drag path and timing contract" `Quick test_drag_options;

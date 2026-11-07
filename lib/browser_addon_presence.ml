@@ -3,11 +3,13 @@ type unavailable =
   | Observation_unreadable of string
   | Declarations_incomplete
 
+type not_running = Attach_failed | Attaching | Not_known
+
 type t =
   | Observed of Browser_addon_observation.published
   | Absent
   | Off
-  | Not_running of Browser_lane_launcher.not_running
+  | Not_running of not_running
   | Unavailable of unavailable
 
 (* How the maintenance pass last applied one declaration, when exactly one
@@ -24,25 +26,25 @@ let application_of applications (d : Lane_addon_config.declaration) =
 
 let not_running_of = function
   | Some (Lane_addon_application.Starting_worker | Lane_addon_application.Cleaning_workers) ->
-      Browser_lane_launcher.Attaching
-  | Some (Lane_addon_application.Failed _) -> Browser_lane_launcher.Attach_failed
+      Attaching
+  | Some (Lane_addon_application.Failed _) -> Attach_failed
   | Some (Lane_addon_application.Applied _ | Lane_addon_application.Inactive
-         | Lane_addon_application.Unknown _) | None -> Browser_lane_launcher.Not_known
+         | Lane_addon_application.Unknown _) | None -> Not_known
 
-(* A worker being started or replaced may still take the hosts. Only when
+(* A worker being started or replaced may still attach. Only when
    every declaration was read and each browser one that is on failed to
    apply has the attach failed. *)
 let not_running ~complete applications (first, rest) =
   let reasons = List.map (fun d -> not_running_of (application_of applications d)) (first :: rest) in
   let attaching = function
-    | Browser_lane_launcher.Attaching -> true
-    | Browser_lane_launcher.(Attach_failed | Not_known) -> false in
+    | Attaching -> true
+    | Attach_failed | Not_known -> false in
   let failed = function
-    | Browser_lane_launcher.Attach_failed -> true
-    | Browser_lane_launcher.(Attaching | Not_known) -> false in
-  if List.exists attaching reasons then Browser_lane_launcher.Attaching
-  else if complete && List.for_all failed reasons then Browser_lane_launcher.Attach_failed
-  else Browser_lane_launcher.Not_known
+    | Attach_failed -> true
+    | Attaching | Not_known -> false in
+  if List.exists attaching reasons then Attaching
+  else if complete && List.for_all failed reasons then Attach_failed
+  else Not_known
 
 (* A browser Add-on of a lane is a package whose worker serves one of that
    lane's sources. With no observation, the declarations say which absence it
@@ -108,14 +110,3 @@ let render_unavailable refusal_text = function
   | Declarations_incomplete -> "the Lane Add-on declarations could not all be read"
 let unavailable_message = render_unavailable Lane_addon_runtime.export_refusal_message
 let unavailable_operator_message = render_unavailable Lane_addon_runtime.export_refusal_operator_message
-
-let polling = function
-  | Observed (published : Browser_addon_observation.published) ->
-      Browser_lane_launcher.Polling published.clients
-  | Absent -> Browser_lane_launcher.Unlisted Browser_lane_launcher.No_browser_addon
-  | Off -> Browser_lane_launcher.Unlisted Browser_lane_launcher.Browser_addon_off
-  | Not_running reason ->
-      Browser_lane_launcher.Unlisted (Browser_lane_launcher.Browser_addon_not_running reason)
-  | Unavailable reason ->
-      Browser_lane_launcher.Unlisted
-        (Browser_lane_launcher.Browser_addon_unreadable (unavailable_message reason))

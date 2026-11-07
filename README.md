@@ -158,11 +158,8 @@ ln -sf "$PWD/_build/default/bin/masc_tui.exe" ~/.local/bin/masc-tui
 ```
 
 Alternatively, `scripts/install-local-build.sh` builds and copies `masc`,
-`masc-tui`, `masc-browser-host` and the deployment preflight tools into
-`~/.local/bin` in one step; run it in a
-shell where `eval "$(opam env)"` has been applied. It also reinstalls every
-registered Firefox browser-lane host from the new build and stops the host
-processes those workspaces started; the extension reconnects to the new copy.
+`masc-tui` and the deployment preflight tools into `~/.local/bin` in one step;
+run it in a shell where `eval "$(opam env)"` has been applied.
 A workspace that holds a release guest shim for microVM Keepers gets the shim
 of the release the build names (`docs/MICROVM-REMOTE-RUNBOOK.md`).
 Before it replaces anything, the script checks the workspace's `runtime.toml`
@@ -344,7 +341,7 @@ Use MASC's tools to change tasks, records and approval state.
 | `masc start --base-path <dir>` | Run the server explicitly |
 | `masc-tui --base-path <dir>` | Open the TUI explicitly |
 | `masc doctor --base-path <dir>` | Check workspace and `imp` readiness without starting them |
-| `masc browser-lane-setup` | Connect the workspace's browser lane (`addon`, `extension`, `bidi`, `ego`, or `host`) |
+| `masc browser-lane-setup` | Configure the browser lane (`addon`, `bidi` or `ego`) |
 | `masc web-search-setup --base-path <dir>` | Inspect or configure workspace web search (`searxng`, `zai`, etc.) |
 | `masc --help` | List commands; use `<command> --help` for details |
 

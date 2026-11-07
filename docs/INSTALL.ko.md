@@ -240,7 +240,6 @@ bash /tmp/masc-install.sh --version "$TAG" \
 |---|---|
 | `<prefix>/masc` | HTTP/MCP 서버, 설정·로그인·Keeper 관리 CLI. 터미널에서 실행하면 TUI 진입 |
 | `<prefix>/masc-tui` | Keeper, 채팅, 작업, 보드, 승인, 로그를 보는 터미널 UI |
-| `<prefix>/masc-browser-host` | Firefox 계열 native messaging 연결 실행 파일. 설치만으로 브라우저 등록되지는 않음 |
 | `<prefix>/masc-deployment-preflight-helper` | 실행 환경 사전점검 보조 바이너리 |
 | `<prefix>/masc-check-runtime-deployment-preflight` | 사전점검 실행 스크립트 |
 | `<prefix>/.masc-releases/<receipt-hash>/` | 서버와 같은 커밋의 대시보드, 서버 실행 파일, 검증 receipt |
@@ -453,19 +452,12 @@ z.ai 줄, SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에�
   JSON 에 답하지 않거나, 일시정지, 재시작 중이거나, Docker 가 시작할 수 없는 상태일 때입니다.
   컨테이너가 이런 상태면 다음에 실행할 Docker 명령(`docker logs`, `docker unpause`,
   `docker inspect`)을 화면에 알려 줍니다.
-- **Firefox 연결 두 줄(체크 안 됨).** Firefox 를 찾았을 때만 `imp`가 로그인해서 쓸 Firefox 를
-  연결하는 줄이 둘 더 나옵니다. `masc browser-lane-setup` 이 여는 두 길입니다.
-  - *BiDi*: MASC 가 전용 Firefox 를 로컬 포트의 원격 디버깅으로 직접 띄웁니다. 다시 불러올 것이
-    없고, `imp`가 일하는 사이트에 한 번 로그인하면 됩니다. 그 포트에는 인증이 없어서 이
-    컴퓨터의 어떤 프로그램이든 그 브라우저를 움직이고 쿠키를 읽을 수 있습니다.
-  - *부가기능*: 평소 쓰는 Firefox 에 MASC 부가기능으로 붙습니다. Firefox 를 다시 켜면 부가기능이
-    지워져서 그때마다 `about:debugging` 에서 다시 불러야 합니다.
-
-  둘 다 `masc setup` 이 서버를 시작하기 전에 씁니다. 같이 골라도 되고, 그러면
-  연결을 지정하지 않은 요청은 BiDi Firefox 로 갑니다. Firefox 를 못 찾으면 둘 다 나오지 않습니다.
-  Zen 은 감지하지 않습니다. 직접 연결하려면
-  `masc browser-lane-setup --mode extension --manifest-dir <Zen의 native messaging 폴더>` 를
-  실행하세요. 그 폴더 위치는 이 문서가 확인하지 않았습니다.
+- **Firefox 연결 줄(체크 안 됨).** Firefox 를 찾았을 때만 한 줄이 더 나옵니다. MASC 가
+  `imp` 전용 Firefox 를 로컬 포트의 원격 디버깅으로 직접 띄웁니다(*BiDi*,
+  `masc browser-lane-setup --mode bidi`). `imp`가 일하는 사이트에 한 번 로그인하면 됩니다.
+  그 포트에는 인증이 없어서 이 컴퓨터의 어떤 프로그램이든 그 브라우저를 움직이고 쿠키를
+  읽을 수 있습니다. 이 줄은 `masc setup` 이 서버를 시작하기 전에 씁니다. Firefox 를 못 찾으면
+  나오지 않습니다.
 - **ego lite(체크 안 됨).** `ego-browser` 가 `PATH` 나 `~/.local/bin`(ego lite 첫 실행이 두는 곳)에서
   답하면 [ego lite](https://lite.ego.app/) 를 연결하는 줄이 하나 더 나옵니다. 고르면
   `masc browser-lane-setup --mode ego` 를 실행해서 `runtime.toml` 에 `[browser.live.ego]` 표를 씁니다.
@@ -486,8 +478,6 @@ z.ai 줄, SearXNG 줄은 해제된 채로 시작합니다. 확정하기 전에�
 ```bash
 # BiDi 줄: MASC 가 띄우는 전용 Firefox
 masc browser-lane-setup --mode bidi --base-path "$HOME/masc-workspace"
-# 부가기능 줄: 평소 쓰는 Firefox
-masc browser-lane-setup --mode extension --base-path "$HOME/masc-workspace"
 # ego lite 줄: ego lite 안의 작업 공간
 masc browser-lane-setup --mode ego --base-path "$HOME/masc-workspace"
 # 웹 검색 줄: 어느 공급자에 키가 있는지(아무것도 쓰지 않음)
@@ -630,15 +620,13 @@ Task와 Goal 검증 에이전트도 `keeper_skill`을 통해 작업 공간에 �
 `constitution.xml`은 개발 계약이며 Keeper의 시스템 프롬프트가 아닙니다.
 
 `browser-lanes`는 브라우저 연결·탐색·조작·검증 절차를 담습니다.
-브라우저나 확장, 인증을 설치하지는 않습니다. 기존 스킬 패키지는 덮어쓰지 않으므로
+브라우저나 인증을 설치하지는 않습니다. 기존 스킬 패키지는 덮어쓰지 않으므로
 업그레이드할 때 사용자 변경과 새 안내를 비교해 반영하세요.
 첫 브라우저 작업 전에 browser-lanes 스킬을 읽고, 요청한 작업을 지원하는 연결을
 확인하세요. 도구가 반환한 browserSelection의 lane과 live 연결의 clientId, tabId를
 이후 호출에 유지하세요. browser_binding_required 등 거절이 발생하면 해당 응답과
 원래 연결 영수증을 확인하고 스킬의 해당 복구 절차를 따르세요. 원인을 확인하지 않은
 동일 호출을 반복하지 마세요.
-Gecko scene 기능은 native host와 브라우저 확장 0.5.0 이상이 함께 있어야 합니다.
-쓰던 브라우저 확장은 따로 갱신하세요.
 
 `--team classic`을 선택하면 다음 네 Keeper TOML을 추가합니다.
 

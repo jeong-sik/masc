@@ -50,7 +50,7 @@ val of_text : string -> (t, string) result
     running server. *)
 
 (** A source that starts from a runtime.toml table, with what that table
-    parses to. External hosts need none. *)
+    parses to. *)
 type _ source =
   | Live_bidi : live_bidi source
   | Live_ego : live_ego source

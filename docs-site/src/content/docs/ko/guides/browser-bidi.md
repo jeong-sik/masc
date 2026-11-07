@@ -46,7 +46,7 @@ Firefox를 닫습니다. 점유된 포트는 거부하며, 거기서 실행 중�
    `lane-addons/`에 번들 브라우저 패키지를 설치합니다. 기존 설치는 detach 후 새
    인스턴스로 부착해야 바뀐 backend 설정을 캡처합니다.
 3. 설치의 `desired_revision`, `applied_revision`, `phase`, 설정 오류를 확인합니다.
-   TOML 저장이나 `bidiHost` 설정 표시만으로 worker 부착·연결 준비가 증명되지는 않습니다.
+   TOML 저장만으로 worker 부착·연결 준비가 증명되지는 않습니다.
 4. `BrowserTabs`로 연결과 탭을 탐색합니다. 관측한 `clientId`와 `tabId`를 이후 읽기·조작에
    유지합니다. 일반 HTTP(S) 페이지를 읽고 새 viewport를 캡처한 뒤 포인터 입력을 보냅니다.
 
@@ -69,14 +69,6 @@ detach는 새 입력을 차단한 뒤 원래 peer와 자식의 정리를 기다�
 안정된 claim 파일은 유지합니다. 종료된 연결은 재사용할 수 없으므로 재부착 후 새
 인스턴스의 연결을 탐색합니다. 결과가 불확실한 입력은 자동 재실행하지 않습니다.
 
-## 외부 Firefox 연결
-
-직접 띄운 Firefox와
-`masc-browser-host --bidi-url ws://127.0.0.1:9222/session`은 명시적인 외부 연결입니다.
-`masc browser-lane-setup --mode host --base-path /path/to/workspace`로 launcher를
-설치한 뒤 부착된 브라우저 Addon에 연결합니다. 그 브라우저의 프로세스 수명은 운영자가
-관리합니다. 수동 host의 연결 진단과 관리되는 Addon의 준비 상태는 별개입니다.
-
 ## 조작 범위
 
 BiDi는 읽을 수 있는 페이지에서 native hover·포인터·키보드·관측한 요소 조작을 제공합니다.
@@ -87,6 +79,5 @@ URL로 `BrowserAct action="open_tab" lane="live"`를 명시하면 기존 탭을 
 
 hover 후 다시 읽거나 캡처해 드러난 컨트롤을 찾습니다. drag 후에는 애플리케이션 상태를
 확인합니다. 입력 영수증만으로 페이지가 drop을 수락했다고 볼 수는 없습니다. 다른 동작은
-연결이 보고한 capability로 확인합니다. 브라우저 zoom·upload 등의 기능은 transport마다
-같지 않습니다. Addon lifecycle 시나리오는 scripted BiDi peer를 사용하므로 모든 설치된
+연결이 보고한 capability로 확인합니다. upload 등의 기능은 transport마다 같지 않습니다. Addon lifecycle 시나리오는 scripted BiDi peer를 사용하므로 모든 설치된
 Firefox 빌드나 사이트에서의 동작을 증명하지 않습니다.

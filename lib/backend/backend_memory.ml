@@ -21,13 +21,20 @@ let create () = {
    Used by tests that create multiple Workspace.default_config for one tmpdir. *)
 let shared_instances : (string, t) Hashtbl.t = Hashtbl.create 8
 
+(* Serializes the find→create→replace below: OCaml 5 domains preempt
+   without suspension points, so pool-domain fibers can interleave here and
+   mint two instances for one directory, leaving the loser's state diverged
+   from the shared cache. *)
+let shared_instances_mutex = Eio.Mutex.create ()
+
 let get_or_create ~base_path =
-  match Hashtbl.find_opt shared_instances base_path with
-  | Some t -> t
-  | None ->
-    let t = create () in
-    Hashtbl.replace shared_instances base_path t;
-    t
+  Eio_guard.with_mutex shared_instances_mutex (fun () ->
+    match Hashtbl.find_opt shared_instances base_path with
+    | Some t -> t
+    | None ->
+      let t = create () in
+      Hashtbl.replace shared_instances base_path t;
+      t)
 
 let get t key =
   with_lock t (fun () ->

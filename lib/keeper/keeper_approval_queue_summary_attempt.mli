@@ -6,8 +6,7 @@
     [transition_summary_attempt] applies an update to the entry that a
     workspace, id, input hash and sequence name, under the store lock,
     persists the result, and publishes it; the update returns [None] to leave
-    the entry as it is. [publish_summary_attempt_transition] publishes the
-    summary update after a transition that wrote the entry.
+    the entry as it is.
     [mark_summary_attempt_identity_unbound],
     [mark_summary_attempt_persistence_uncertain] and
     [mark_summary_attempt_pre_worker_unavailable] set the matching

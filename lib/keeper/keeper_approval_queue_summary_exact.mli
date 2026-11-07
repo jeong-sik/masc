@@ -11,8 +11,10 @@
     [complete_summary_exact_attempt_with] validate the candidate, apply the
     matching transition of [Keeper_approval_queue_exact_transition] to its
     entry under the store lock, persist the result, and publish it once the
-    lock is released. The functions without [_with] fix the [Append_rows]
-    write mode and [Fs_compat.save_file_atomic_strict_staged].
+    lock is released. They share one body, [transition_exact_attempt], which
+    takes the transition as its first argument. The functions without [_with]
+    fix the [Append_rows] write mode and
+    [Fs_compat.save_file_atomic_strict_staged].
     [Keeper_approval_queue] includes this module. *)
 open Keeper_approval_queue_result
 open Keeper_approval_queue_registry

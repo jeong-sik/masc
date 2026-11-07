@@ -31,14 +31,6 @@ let mark_summary_pending ~id =
   publish_summary_transition ~id result
 ;;
 
-let publish_summary_attempt_transition ~id = function
-  | Ok true ->
-    publish_summary_update ~id;
-    Ok true
-  | Ok false -> Ok false
-  | Error error -> Error error
-;;
-
 let transition_summary_attempt
       ~base_path
       ~id
@@ -74,7 +66,7 @@ let transition_summary_attempt
            |> Result.map_error (fun error ->
              Exact_attempt_storage_error error)))
   in
-  publish_summary_attempt_transition ~id result
+  publish_summary_transition ~id result
 ;;
 
 let mark_summary_attempt_identity_unbound

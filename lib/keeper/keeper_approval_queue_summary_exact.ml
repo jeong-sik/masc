@@ -48,7 +48,13 @@ let persist_exact_attempt_entry_unlocked
     Ok { changed; write_outcome }
 ;;
 
-let bind_summary_exact_attempt_with
+(* The four exact-attempt transitions below share this body; [apply] is the
+   transition of Keeper_approval_queue_exact_transition they differ in. *)
+let transition_exact_attempt
+      (apply :
+         candidate:exact_attempt_binding
+         -> pending_approval
+         -> (Keeper_approval_queue_exact_transition.t, exact_attempt_error) result)
       ~write_mode
       ~save_file_atomic_strict_staged
       ~id
@@ -77,7 +83,7 @@ let bind_summary_exact_attempt_with
         match exact_attempt_entry_unlocked map candidate with
         | Error _ as error -> error
         | Ok entry ->
-          (match Keeper_approval_queue_exact_transition.bind ~candidate entry with
+          (match apply ~candidate entry with
            | Error _ as error -> error
            | Ok transition ->
              persist_exact_attempt_entry_unlocked
@@ -89,6 +95,10 @@ let bind_summary_exact_attempt_with
                transition.updated_entry))
   in
   publish_exact_attempt_transition ~id result
+;;
+
+let bind_summary_exact_attempt_with =
+  transition_exact_attempt Keeper_approval_queue_exact_transition.bind
 ;;
 
 let bind_summary_exact_attempt =
@@ -97,47 +107,8 @@ let bind_summary_exact_attempt =
     ~save_file_atomic_strict_staged:Fs_compat.save_file_atomic_strict_staged
 ;;
 
-let release_summary_exact_attempt_before_dispatch_with
-      ~write_mode
-      ~save_file_atomic_strict_staged
-      ~id
-      ~input_hash
-      ~sequence
-      ~slot_id
-      ~call_id
-      ~plan_fingerprint
-      ~request_body_sha256
-  =
-  let result =
-    match
-      validate_exact_attempt_candidate
-        ~id
-        ~input_hash
-        ~sequence
-        ~slot_id
-        ~call_id
-        ~plan_fingerprint
-        ~request_body_sha256
-    with
-    | Error _ as error -> error
-    | Ok candidate ->
-      with_pending_store_lock (fun () ->
-        let map = Atomic.get pending in
-        match exact_attempt_entry_unlocked map candidate with
-        | Error _ as error -> error
-        | Ok entry ->
-          (match Keeper_approval_queue_exact_transition.release ~candidate entry with
-           | Error _ as error -> error
-           | Ok transition ->
-             persist_exact_attempt_entry_unlocked
-               ~save_file_atomic_strict_staged
-               ~write_mode
-               ~changed:transition.changed
-               ~map
-               ~entry
-               transition.updated_entry))
-  in
-  publish_exact_attempt_transition ~id result
+let release_summary_exact_attempt_before_dispatch_with =
+  transition_exact_attempt Keeper_approval_queue_exact_transition.release
 ;;
 
 let release_summary_exact_attempt_before_dispatch =
@@ -158,36 +129,17 @@ let quarantine_summary_exact_attempt_with
       ~request_body_sha256
       ~cause
   =
-  let result =
-    match
-      validate_exact_attempt_candidate
-        ~id
-        ~input_hash
-        ~sequence
-        ~slot_id
-        ~call_id
-        ~plan_fingerprint
-        ~request_body_sha256
-    with
-    | Error _ as error -> error
-    | Ok candidate ->
-      with_pending_store_lock (fun () ->
-        let map = Atomic.get pending in
-        match exact_attempt_entry_unlocked map candidate with
-        | Error _ as error -> error
-        | Ok entry ->
-          (match Keeper_approval_queue_exact_transition.quarantine ~candidate ~cause entry with
-           | Error _ as error -> error
-           | Ok transition ->
-             persist_exact_attempt_entry_unlocked
-               ~save_file_atomic_strict_staged
-               ~write_mode
-               ~changed:transition.changed
-               ~map
-               ~entry
-               transition.updated_entry))
-  in
-  publish_exact_attempt_transition ~id result
+  transition_exact_attempt
+    (Keeper_approval_queue_exact_transition.quarantine ~cause)
+    ~write_mode
+    ~save_file_atomic_strict_staged
+    ~id
+    ~input_hash
+    ~sequence
+    ~slot_id
+    ~call_id
+    ~plan_fingerprint
+    ~request_body_sha256
 ;;
 
 let quarantine_summary_exact_attempt =
@@ -208,36 +160,17 @@ let complete_summary_exact_attempt_with
       ~request_body_sha256
       ~summary
   =
-  let result =
-    match
-      validate_exact_attempt_candidate
-        ~id
-        ~input_hash
-        ~sequence
-        ~slot_id
-        ~call_id
-        ~plan_fingerprint
-        ~request_body_sha256
-    with
-    | Error _ as error -> error
-    | Ok candidate ->
-      with_pending_store_lock (fun () ->
-        let map = Atomic.get pending in
-        match exact_attempt_entry_unlocked map candidate with
-        | Error _ as error -> error
-        | Ok entry ->
-          (match Keeper_approval_queue_exact_transition.complete ~candidate ~summary entry with
-           | Error _ as error -> error
-           | Ok transition ->
-             persist_exact_attempt_entry_unlocked
-               ~save_file_atomic_strict_staged
-               ~write_mode
-               ~changed:transition.changed
-               ~map
-               ~entry
-               transition.updated_entry))
-  in
-  publish_exact_attempt_transition ~id result
+  transition_exact_attempt
+    (Keeper_approval_queue_exact_transition.complete ~summary)
+    ~write_mode
+    ~save_file_atomic_strict_staged
+    ~id
+    ~input_hash
+    ~sequence
+    ~slot_id
+    ~call_id
+    ~plan_fingerprint
+    ~request_body_sha256
 ;;
 
 let complete_summary_exact_attempt =

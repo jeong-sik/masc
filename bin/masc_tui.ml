@@ -8566,9 +8566,15 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   | Lanes -> launch_lanes_load state ~mailbox
   | Clients -> owe_clients_read state
   (* The list draws nothing from the Keeper composite; Info and Secrets read
-     it on entry and when it changes. *)
+     it on entry and when it changes. Keeper_list reads memory health for its
+     second-row axis cells (RFC-0511 A4). *)
+  | Keepers Keeper_list ->
+      owe_tool_modes_read state;
+      owe_async_requests_read state;
+      owe_memory_health_read state;
+      launch_memory_health_load state ~mailbox
   | Keepers
-      ( Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message
+      ( Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message
       | Keeper_runtime_pick ) ->
       owe_tool_modes_read state;
       owe_async_requests_read state
@@ -9519,10 +9525,13 @@ let launch_owed_repositories state ~mailbox =
 
 let memory_health_on_screen state =
   match state.view with
-  | Memory | Metrics -> true
+  | Memory | Metrics | Keepers Keeper_list -> true
   | Overview | Approvals | Acting | Lanes | Clients | Board | Planning | Schedules
   | Verification | Harness | Repositories | Fusion | Code | Changes | Connectors | Runtime
-  | Config | Resources | Tools | System_logs | Keepers _ ->
+  | Config | Resources | Tools | System_logs
+  | Keepers
+      ( Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message
+      | Keeper_runtime_pick ) ->
       false
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving reads the
@@ -39813,7 +39822,8 @@ Use relative paths for resources already held in the package. -->
                   Masc_tui_code_requests.launch_entries_load state
                     ~host:server_peer_host
                     ~deliver:(deliver_code state async_messages)
-            | Keepers Keeper_list -> ()
+            | Keepers Keeper_list ->
+                launch_memory_health_load state ~mailbox:async_messages
             | Keepers Keeper_logs ->
                 ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Refresh)
             | Keepers Keeper_calls ->

@@ -21,19 +21,6 @@ let init_acc =
   ; ma_proactive_points = 0
   }
 
-let string_list_member_opt key json =
-  match Json_util.assoc_member_opt key json with
-  | Some (`List values) ->
-      let rec decode acc = function
-        | [] -> Some (List.rev acc)
-        | `String value :: rest ->
-            let value = String.trim value in
-            if value = "" then None else decode (value :: acc) rest
-        | _ -> None
-      in
-      decode [] values
-  | _ -> None
-
 let compute_metrics_window
     ~(parsed_metrics : Yojson.Safe.t list)
     ~(series_points : int)
@@ -73,7 +60,7 @@ let compute_metrics_window
                Safe_ops.json_string_nonempty_opt "trace_id" json,
                Safe_ops.json_int_opt "latency_ms" json,
                Safe_ops.json_int_opt "tool_call_count" json,
-               string_list_member_opt "tools_used" json,
+               Json_util.json_string_list_member_strict "tools_used" json,
                Keeper_unified_metrics.work_kind_of_json json,
                parsed_channel
              with

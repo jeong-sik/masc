@@ -2123,7 +2123,6 @@ let interact ?actor t args =
     | Some reason -> unavailable_input reason in
   let id = request.tab_id in
   let verb = Browser_lane.interaction_verb request.action in
-  let refused = Error (Live.Before_effect (verb ^ " is not served by an ego connection")) in
   let* label = label_of t id in
   let deadline = command_deadline t (Browser_lane.Page_interact {tab_id = id; expected_url = request.expected_url; action = request.action}) in
   let input ~expected_url action = Browser_lane.interaction_args ~tab_id:id ~expected_url action in

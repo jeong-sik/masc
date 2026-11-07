@@ -1,0 +1,24 @@
+{
+  "outcome": "usage_error",
+  "stop_reason": null,
+  "error": {
+    "message": "Unknown model: no-such-model-alias. Available: glm-5-3, mistral-large-4-0-3, mistral-medium-3.5, zai-glm-5-3-flash",
+    "code": null
+  },
+  "session_id": null,
+  "usage": null,
+  "cost_usd": null,
+  "steps": null,
+  "schema_version": 1,
+  "vibe_version": "3.1.0",
+  "journal_dir": null,
+  "started_at": "2026-11-07T09:21:25.552892Z",
+  "ended_at": "2026-11-07T09:21:34.268271Z",
+  "limits": {
+    "max_turns": 3,
+    "max_price": null,
+    "max_tokens": null,
+    "time_limit_s": 120.0
+  },
+  "exit_code": 1
+}

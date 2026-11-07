@@ -297,6 +297,7 @@ let serve_subscriptions_listen_h2 ~sw ~clock ~cors ~body_str h2_reqd =
             h2_respond_agent_rate_limited h2_reqd ~rl_key;
             Error ())
     in
+    (* HIGH-RISK-UNREVIEWED: decides whether an HTTP/2 public read needs a credential under strict auth. *)
     let with_h2_public_read ~when_strict h2_reqd f =
       let with_initialized_state f =
         match ready_server_state () with

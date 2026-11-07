@@ -840,7 +840,8 @@ sequenceDiagram
 | `mcp_server_eio_call_tool.ml` | 도구 호출 래퍼 |
 | `mcp_server_eio_tool_profile.ml` | Profile별 도구 필터링 |
 | `mcp_server_eio_resource.ml` | MCP Resource/Prompt 핸들러 |
-| `server_routes_http_routes_dashboard.ml` | Keeper Gate dashboard routes |
+| `server_routes_http_routes_dashboard.ml` | 대시보드 라우트 |
+| `server_routes_http_routes_keeper_gate.ml` | Keeper Gate 대시보드 라우트 |
 | `sse.ml` | SSE event registry + broadcast |
 | `keeper_event_bridge.ml` | Agent Core Event_bus -> SSE 이벤트 브릿지 |
 | `transport.ml` | 프로토콜 바인딩 추상화 + OpenAPI 생성 |

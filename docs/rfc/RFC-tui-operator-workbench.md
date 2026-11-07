@@ -584,8 +584,8 @@ measured-home RFC 의 Dashboard 에 다음 세 줄만 더한다.
 
 세 번째 줄은 턴 수 시리즈가 아직 없어서(`usage/series` 는 토큰·비용만 맡는다, §6.3.1) 도구 호출로 먼저 올린다(S5-3c).
 
-- 줄 하나에 지난 24시간(UTC 시간 칸 24개)의 호출 수 스파크라인과 합계·실패 수를 둔다. 예: `Tool calls  ▁▂▃▅▇▆▄▃▂▁▁▁▂▃▄▅▅▄▃▂▂▁▁▂  1,712 · 9 failed`.
-- 값은 Usage › Calls 가 읽는 `tool-metrics/series` 와 같은 조회라서 두 화면의 합계가 같다. Dashboard 는 Usage 의 `w` 창과 상관없이 24시간 칸을 따로 읽는다. 서버는 바꾸지 않는다.
+- 줄 하나에 지난 24시간(UTC 시간 칸 24개)의 호출 수 스파크라인과 합계·실패 수를 둔다. 예: `Tool calls 24h  ▁▂▃▅▇▆▄▃▂▁▁▁▂▃▄▅▅▄▃▂▂▁▁▂  1,712 · 9 failed`.
+- 값은 Usage › Calls 가 읽는 `tool-metrics/series` 와 같은 조회다. Dashboard 는 Usage 의 `w` 창과 상관없이 24시간 칸을 따로 읽는다. 그래서 `w` 가 1일일 때만 두 화면의 합계가 같고, 7·14일이면 Usage 가 더 긴 창을 합친다. 줄 앞의 `24h` 가 이 차이를 보여 준다. 서버는 바꾸지 않는다.
 - 읽기 전·읽는 중·읽기 실패·호출 0건은 숫자 대신 글(`reading…`, `unavailable`, `no calls`)로 보인다. 0 으로 채우지 않는다.
 - 줄을 누르면 Usage › Calls 로 간다.
 - 턴 수 스파크라인과 14일 완료 Task 막대는 `usage/series`(S5-2)가 생긴 뒤 같은 자리에 더한다.

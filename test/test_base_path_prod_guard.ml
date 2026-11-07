@@ -15,10 +15,6 @@
 
 module EC = Env_config_core
 
-(* Ensure no explicit MASC_BASE_PATH is set. *)
-let clear_base_path () =
-  Unix.putenv "MASC_BASE_PATH" ""
-
 let test_guard_raises_on_explicit_home_path () =
   let home = Option.value ~default:"/tmp" (Sys.getenv_opt "HOME") in
   Unix.putenv "MASC_BASE_PATH" home;

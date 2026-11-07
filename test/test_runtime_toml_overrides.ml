@@ -38,9 +38,6 @@ let write_toml base_path content =
 (* Fake env: always returns None (env is "empty"). *)
 let empty_env _name = None
 
-(* Fake env with specific vars set. *)
-let env_with vars name = List.assoc_opt name vars
-
 (* Parse TOML content into a doc, or fail the test. *)
 let parse_or_fail content =
   match Keeper_toml_loader.parse_toml content with

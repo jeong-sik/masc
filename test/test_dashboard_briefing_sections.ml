@@ -45,14 +45,6 @@ let check_string_field json key expected =
   in
   check string key expected actual
 
-let check_int_field json key expected =
-  let actual =
-    match get_field key json with
-    | `Int value -> value
-    | _ -> fail ("expected int field " ^ key)
-  in
-  check int key expected actual
-
 let check_list_field json key expected_len =
   let actual_len =
     match get_field key json with

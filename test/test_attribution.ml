@@ -2,14 +2,6 @@
 
 module A = Attribution
 
-let evidence_sample : Yojson.Safe.t =
-  `Assoc
-    [
-      ("check_id", `String "tool_limit");
-      ("observed", `Int 42);
-      ("threshold", `Int 30);
-    ]
-
 (* --- Wire format shape --- *)
 
 let outcome_kind_in_json json =

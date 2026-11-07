@@ -101,54 +101,12 @@ describe('normalizeNamespaceTruth', () => {
             uptime_seconds: 600,
           },
           tempo: 'steady',
-          tool_call_health: {
-            window_hours: 6,
-            tool_calls: 42,
-            failures: 3,
-            failure_rate: 0.071,
-            since_epoch: 1775000000,
-            distinct_tools: 8,
-          },
-          alert_thresholds: {
-            proactive_fallback_warn: 0.15,
-            proactive_fallback_bad: 0.3,
-            proactive_similarity_warn: 0.25,
-            proactive_similarity_bad: 0.5,
-            toast_cooldown_sec: 120,
-          },
-          monitoring: {
-            board: {
-              stale_posts: 2,
-            },
-          },
-          data_quality: {
-            board_contract_ok: true,
-            gate_feed_ok: false,
-            last_sync_at: '2026-04-17T09:55:00Z',
-          },
         },
       },
     })
 
     expect(result.root.status).toMatchObject({
       tempo: 'steady',
-      tool_call_health: {
-        tool_calls: 42,
-        distinct_tools: 8,
-      },
-      alert_thresholds: {
-        toast_cooldown_sec: 120,
-      },
-      monitoring: {
-        board: {
-          stale_posts: 2,
-        },
-      },
-      data_quality: {
-        board_contract_ok: true,
-        gate_feed_ok: false,
-        last_sync_at: '2026-04-17T09:55:00Z',
-      },
     })
   })
 

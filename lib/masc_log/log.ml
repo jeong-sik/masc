@@ -1262,7 +1262,6 @@ module Http = Make(struct let name = "Http" end)
 module Server = Make(struct let name = "Server" end)
 module TaskState = Make(struct let name = "TaskState" end)
 module KeeperExec = Make(struct let name = "KeeperExec" end)
-module LocalWorker = Make(struct let name = "LocalWorker" end)
 module Harness = Make(struct let name = "Harness" end)
 module Candle = Make(struct let name = "Candle" end)
 

@@ -64,12 +64,7 @@ module Executor : sig
       recommended count. *)
 end
 
-(** {1 Local runtime / llama.cpp} *)
-
-module Local_runtime : sig
-  val server_url : string
-  val worker_model_opt : unit -> string option
-end
+(** {1 Ollama} *)
 
 module Ollama : sig
   val server_url : string
@@ -145,13 +140,6 @@ module Rate_bucket : sig
   (** Per-agent requests per second ([MASC_AGENT_RATE_LIMIT], default [20.0]). *)
   val agent_burst : int
   (** Per-agent burst capacity ([MASC_AGENT_RATE_BURST], default [50]). *)
-end
-
-(** {1 Worker / local runtime} *)
-
-module Worker : sig
-  val local_runtime_debug : bool
-  val local_runtime_cooldown_sec_opt : unit -> string option
 end
 
 (** {1 AGENT_CORE SSE bridge} *)

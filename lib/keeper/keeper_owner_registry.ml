@@ -911,11 +911,31 @@ let begin_stopping_all ~base_path =
   | Some pool ->
     Atomic.set pool.stopping true;
     let owners = Atomic.get pool.owner_handles in
-    let results =
-      Eio.Fiber.List.map
-        (fun owner -> Keeper_owner.begin_stopping owner)
-        owners
+    (* Server shutdown waits here for every Owner whose turn is still running,
+       and it cannot be cut by the hook timeout (#49684). Each such stop names
+       its Keeper, the turn's lane and age, and how long the stop took. An
+       Owner without a turn answers at once and is not named. *)
+    let stop owner =
+      match Keeper_owner.turn_in_flight owner with
+      | None -> Keeper_owner.begin_stopping owner
+      | Some turn ->
+        (* NDT-OK: wall time only measures this stop for the operator log. *)
+        let requested_at = Unix.gettimeofday () in
+        let result = Keeper_owner.begin_stopping owner in
+        let keeper_name =
+          match (Keeper_owner.projection owner).Keeper_owner_reducer.meta with
+          | Some meta -> Some meta.name
+          | None -> None
+        in
+        Log.Keeper.info ?keeper_name
+          "keeper_owner: shutdown stopped a running turn lane=%s turn_age_s=%.1f stop_s=%.2f outcome=%s"
+          (Keeper_owner.turn_lane_to_string turn.Keeper_owner.lane)
+          (requested_at -. turn.Keeper_owner.started_at)
+          (Unix.gettimeofday () -. requested_at)
+          (match result with Ok () -> "ok" | Error _ -> "error");
+        result
     in
+    let results = Eio.Fiber.List.map stop owners in
     Ok results
 ;;
 

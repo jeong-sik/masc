@@ -340,7 +340,7 @@ let panel_failure ~runtime_id = function
   | Vibe_failure (Vibe_run_failed (Runtime_vibe_cli.Timed_out { after_s = Some _; _ }))
   | Vibe_failure
       (Vibe_not_answered
-         (Runtime_vibe_answer.Not_finished { outcome = Runtime_vibe_headless.Deadline; _ })) ->
+         (Runtime_vibe_answer.Not_finished { stop = Runtime_vibe_answer.Deadline; _ })) ->
     Fusion_types.Timeout
   | Vibe_failure
       (Vibe_run_failed
@@ -360,23 +360,24 @@ let panel_failure ~runtime_id = function
   | Vibe_failure
       (Vibe_not_answered
          (( Runtime_vibe_answer.Not_finished
-              { outcome =
-                  ( Runtime_vibe_headless.Finished
-                  | Runtime_vibe_headless.Usage_error
-                  | Runtime_vibe_headless.Config_error
-                  | Runtime_vibe_headless.Infrastructure_failure
-                  | Runtime_vibe_headless.Turn_limit
-                  | Runtime_vibe_headless.Token_limit
-                  | Runtime_vibe_headless.Price_limit
-                  | Runtime_vibe_headless.Terminated
-                  | Runtime_vibe_headless.Length
-                  | Runtime_vibe_headless.Refusal
-                  | Runtime_vibe_headless.Aborted
-                  | Runtime_vibe_headless.Unrecognized_outcome _ )
+              { stop =
+                  ( Runtime_vibe_answer.Usage_error
+                  | Runtime_vibe_answer.Config_error
+                  | Runtime_vibe_answer.Infrastructure_failure
+                  | Runtime_vibe_answer.Turn_limit
+                  | Runtime_vibe_answer.Token_limit
+                  | Runtime_vibe_answer.Price_limit
+                  | Runtime_vibe_answer.Terminated
+                  | Runtime_vibe_answer.Length
+                  | Runtime_vibe_answer.Refusal
+                  | Runtime_vibe_answer.Aborted
+                  | Runtime_vibe_answer.Unrecognized_outcome _ )
               ; _
               }
           | Runtime_vibe_answer.No_output
           | Runtime_vibe_answer.No_assistant_reply
+          | Runtime_vibe_answer.Unrecognized_last_role _
+          | Runtime_vibe_answer.Unrecognized_last_entry _
           | Runtime_vibe_answer.Unrecognized_reply_part _ ) as error)) ->
     provider_error ~runtime_id (Runtime_vibe_answer.error_to_string error)
 

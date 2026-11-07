@@ -125,10 +125,13 @@ let lower policy messages =
   | Preserve_positions ->
     Ok {messages; source_indices = List.mapi (fun index _ -> index) messages}
   | Turn_scoped_system_context ->
+    (* Context keeps its canonical role. Its native System role is the header
+       [anthropic_message_header] derives from policy and origin, so the wire
+       and the creation-prefix digest do not read the role. The lowered list
+       is also the request view a caller hands Agent Core, which retains the
+       transmitted carrier as history: a role rewritten here would be stored. *)
     Result.map (fun () ->
-      {messages=List.map (fun (message : _ Types.message_with) ->
-          if is_turn_scoped_context policy message then {message with role=System} else message) messages;
-       source_indices=List.mapi (fun index _ -> index) messages})
+      {messages; source_indices=List.mapi (fun index _ -> index) messages})
       (validate_turn_scoped_contexts policy messages)
   | Initial_system_native_tools | Initial_system_tool_response_media ->
     let latest_caller =

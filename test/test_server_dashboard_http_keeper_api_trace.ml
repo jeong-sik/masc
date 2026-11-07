@@ -936,6 +936,44 @@ let test_checkpoint_inventory_rows_come_from_the_heads () =
   | rows -> failf "expected the older archive entry alone, got %d rows" (List.length rows)
 ;;
 
+(* Collection saves a response before its tools run, so a checkpoint can end
+   with an assistant that holds only a tool call. The turn context row stored
+   in front of it has the User role, and the preview still names the caller. *)
+let test_checkpoint_preview_skips_the_retained_context () =
+  with_temp_dir @@ fun dir ->
+  let config = Workspace.default_config dir in
+  let keeper_name = "checkpoint-context-preview" in
+  let trace_id = "trace-checkpoint-context-preview" in
+  Keeper_meta_store.replace_snapshot config (make_checkpoint_inventory_meta ~name:keeper_name ~trace_id)
+  |> Result.map_error (fun detail -> fail ("checkpoint inventory meta write failed: " ^ detail))
+  |> Result.get_ok;
+  let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
+  let context =
+    { (Agent_core.Types.user_msg "[system context] world state") with
+      Agent_core.Types.origin = Agent_core.Types.Historical_system_context }
+  in
+  let call =
+    Agent_core.Types.
+      { origin = Llm_provider.Types.Conversation; role = Assistant
+      ; content = [ ToolUse { id = "call-1"; name = "masc_board_list"; input = `Assoc [] } ]
+      ; name = None; tool_call_id = None; metadata = [] }
+  in
+  let current =
+    { (make_inventory_checkpoint ~session_id:trace_id ~turn_count:1 ~created_at:1.0) with
+      Agent_core.Checkpoint.messages = [ Agent_core.Types.user_msg "inspect the board"; context; call ] }
+  in
+  ignore
+    (Masc_test_deps.write_checkpoint_head ~session_dir
+       ~path:(Keeper_checkpoint_store.agent_core_checkpoint_path ~session_dir ~session_id:trace_id)
+       current
+     : string);
+  let status, json = Checkpoints.inventory_json config keeper_name in
+  check bool "inventory is HTTP 200" true (status = `OK);
+  let open Yojson.Safe.Util in
+  check string "the preview names the caller, not the retained context" "inspect the board"
+    (json |> member "current" |> member "latest_preview" |> to_string)
+;;
+
 let test_checkpoint_inventory_projects_missing_current () =
   with_temp_dir @@ fun dir ->
   let config = Workspace.default_config dir in
@@ -1841,6 +1879,8 @@ let () =
             test_checkpoint_inventory_projects_missing_current
         ; test_case "rows come from the heads" `Quick
             test_checkpoint_inventory_rows_come_from_the_heads
+        ; test_case "preview skips the retained context" `Quick
+            test_checkpoint_preview_skips_the_retained_context
         ; test_case
             "input wait follows exact same-turn replacement and settlement"
             `Quick

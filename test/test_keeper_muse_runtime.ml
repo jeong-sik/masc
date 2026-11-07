@@ -590,7 +590,7 @@ let temp_workspace () =
    answer in decisions.log. The others each end the turn one way a real host
    can. *)
 let muse_host_script =
-  {|import json, os, sys, urllib.request
+  {|import json, os, sys, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 with open(os.path.join(HERE, "selected-home.txt"), "w") as handle:
@@ -980,6 +980,28 @@ if SCENARIO in ["turn_failed", "turn_failed_with_usage", "read_only_tool_failure
             "usage": {"inputTokens": 9, "outputTokens": 1,
                       "cachedTokens": 0, "reasoningTokens": 0}}, visible=False)
     notify("turn/completed", terminal, gap_after=gap_after)
+    drain()
+if SCENARIO == "turn_failed_quiet":
+    # The host takes the input and the model reasons, then the provider refuses
+    # the call for quota. Nothing outside the model ran.
+    item("item/completed", {"itemId": "u-1", "kind": "userMessage", "turnId": turn_id,
+                            "revision": 1, "status": "completed", "text": "fixture input"})
+    item("item/completed", {"itemId": "r-1", "kind": "reasoning", "turnId": turn_id,
+                            "revision": 1, "status": "completed"})
+    if FIXTURE.get("partial_answer"):
+        item("item/started", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
+                              "revision": 1, "status": "inProgress", "text": ""})
+        notify("item/delta", {"sessionId": SESSION, "itemId": "m-1", "field": "text",
+                              "delta": "partial"})
+    if FIXTURE.get("durable_answer"):
+        # The push queue lost the answer; only the durable log holds it.
+        notify("item/completed", {"sessionId": SESSION, "item": {
+            "itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
+            "revision": 1, "status": "completed", "text": "DURABLE_ONLY"}}, visible=False)
+    notify("turn/completed", {"sessionId": SESSION, "turnId": turn_id, "terminal": "failed",
+        "error": {"kind": "modelError", "message": "usage limit reached", "retryable": False,
+                  "quota": {"limitKind": "tierLimit",
+                            "resetsAtMs": int((time.time() + 3600) * 1000)}}})
     drain()
 if SCENARIO == "text_only":
     item("item/completed", {"itemId": "m-1", "kind": "agentMessage", "turnId": turn_id,
@@ -2048,6 +2070,32 @@ let test_a_failed_turn_after_a_built_in_tool_is_not_effect_free () =
       ["start"; "resume"]
       (read_text (Filename.concat base_path "sessions.log")
        |> String.split_on_char '\n' |> List.filter (fun line -> line <> "")))
+;;
+
+(* RFC-0509: the host took the turn and the provider refused it for quota.
+   Only the input and the model's reasoning reached the durable range, so
+   the attempt is effect-free, and the proof is the durable page MASC read.
+   An answer that reached the range or the stream, or a range MASC could not
+   read, keeps the effects unknown. *)
+let test_a_failed_turn_is_judged_by_its_durable_items () =
+  List.iter (fun (name, extra, expected) ->
+    with_scripted_host ~fixture:(scenario "turn_failed_quiet" @ extra) (fun ~base_path ->
+      let run = run_turn ~base_path ~tool:(masc_probe_tool (ref `Null)) in
+      check bool (name ^ ": the turn failed") true (Result.is_error run.outcome.result);
+      check_effect name expected run.outcome;
+      match expected with
+      | Keeper_provider_attempt_effect.No_effect_observed ->
+        check bool (name ^ ": proven by a durable page") true
+          (Sys.file_exists (Filename.concat base_path "view-pages.log"))
+      | Keeper_provider_attempt_effect.Observation_unavailable
+      | Keeper_provider_attempt_effect.Effect_attempted -> ()))
+    [ "input and reasoning only", [], Keeper_provider_attempt_effect.No_effect_observed
+    ; "durable range unreadable", ["history_error", `Bool true],
+      Keeper_provider_attempt_effect.Observation_unavailable
+    ; "answer only in the durable range", ["durable_answer", `Bool true],
+      Keeper_provider_attempt_effect.Observation_unavailable
+    ; "unfinished streamed answer", ["partial_answer", `Bool true],
+      Keeper_provider_attempt_effect.Observation_unavailable ]
 ;;
 
 (* The host answers turn/start with an error: it did not take the turn, so
@@ -4088,6 +4136,8 @@ let () =
             test_a_host_that_exits_mid_turn_leaves_recovery
         ; test_case "a failed turn after a built-in tool is not effect-free" `Quick
             test_a_failed_turn_after_a_built_in_tool_is_not_effect_free
+        ; test_case "a failed turn is judged by its durable items" `Quick
+            test_a_failed_turn_is_judged_by_its_durable_items
         ; test_case "a refused turn/start stays effect-free" `Quick
             test_a_refused_turn_start_stays_effect_free
         ; test_case "a queued turn/start is not effect-free" `Quick

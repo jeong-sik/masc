@@ -203,6 +203,11 @@ type turn_result =
   ; server_version : string
   }
 
+type turn_items =
+  | Turn_quiet
+  | Turn_item_may_have_acted of Runtime_muse_msp.item_kind
+  | Turn_items_unread of string
+
 type stream_event =
   | Turn_started of
       { session_id : string
@@ -227,6 +232,7 @@ type stream_event =
   | Compaction_observed of Runtime_muse_msp.compaction
   | View_gap_observed
   | Turn_terminal_received of Runtime_muse_msp.terminal
+  | Turn_items_read of turn_items
   | Model_call_reported of
       { session_id : string
       ; turn_id : string
@@ -1149,7 +1155,9 @@ let durable_turn_of_events ~turn_id ~open_items events =
   Ok { durable_final_text; durable_usage; durable_last_call; durable_models }
 ;;
 
-let read_durable_turn ?on_view_gap ?pending_decisions io ~session_id ~turn_id ~terminal_cursor ~open_items =
+(* The turn's events from its [turn/started] to its terminal, read backward
+   from the terminal cursor through pages that never skip a cursor. *)
+let read_durable_turn_events ?on_view_gap ?pending_decisions io ~session_id ~turn_id ~terminal_cursor =
   io.set_receive_phase Awaiting_history;
   let rec read ~cursor ~seen ~later =
     let* result =
@@ -1180,7 +1188,7 @@ let read_durable_turn ?on_view_gap ?pending_decisions io ~session_id ~turn_id ~t
          | Msp.Unhandled_notification _ -> boundary (event :: kept) rest)
     in
     match boundary [] (List.rev page.events) with
-    | Some current -> durable_turn_of_events ~turn_id ~open_items (current @ later)
+    | Some current -> Ok (current @ later)
     | None ->
       (match page.events, page.next_cursor with
        | (first : Msp.view_event) :: _, Some next
@@ -1190,6 +1198,54 @@ let read_durable_turn ?on_view_gap ?pending_decisions io ~session_id ~turn_id ~t
          protocol_error "view/page" "history ended before the current turn's start boundary")
   in
   read ~cursor:terminal_cursor ~seen:(View_cursors.singleton terminal_cursor) ~later:[]
+;;
+
+(* Whether an item of this kind can leave anything outside the host's own
+   session (RFC-0509). Only MASC's own input and the model's reasoning
+   cannot. An answer can: its text may already have reached a reader. *)
+let item_may_act : Msp.item_kind -> bool = function
+  | Msp.User_message | Msp.Reasoning -> false
+  | Msp.Agent_message | Msp.Tool_call | Msp.User_shell | Msp.Subagent | Msp.Workflow
+  | Msp.Reminder_child | Msp.Compaction | Msp.Unrecognized_item_kind _ -> true
+;;
+
+(* Live delivery only refuses quiet. A tool call already counted, or an
+   answer still open, settles the turn without a durable read; an answer
+   that never completed is not in the durable range at all. *)
+let live_item_that_may_have_acted (state : turn_state) =
+  if state.tool_calls > 0
+  then Some Msp.Tool_call
+  else
+    List.find_map
+      (fun (_, (kind : Msp.item_kind)) ->
+         match kind with
+         | Msp.Agent_message -> Some Msp.Agent_message
+         | Msp.User_message | Msp.Reasoning | Msp.Tool_call | Msp.User_shell
+         | Msp.Subagent | Msp.Workflow | Msp.Reminder_child | Msp.Compaction
+         | Msp.Unrecognized_item_kind _ -> None)
+      state.open_items
+;;
+
+let turn_items_of_events ~turn_id events =
+  List.fold_left
+    (fun found (event : Msp.view_event) ->
+       match found with
+       | Turn_item_may_have_acted _ | Turn_items_unread _ -> found
+       | Turn_quiet ->
+         (match event.notification with
+          | Msp.Item_started { item; _ } | Msp.Item_updated { item; _ }
+          | Msp.Item_completed { item; _ } ->
+            (* An event of a kind outside any turn may sit inside the range;
+               it is not this turn's item. *)
+            if item_in_turn ~turn_id item && item_may_act item.Msp.kind
+            then Turn_item_may_have_acted item.Msp.kind
+            else Turn_quiet
+          | Msp.View_gap _ -> Turn_items_unread "view/gap inside a durable page"
+          | Msp.Turn_started _ | Msp.Turn_completed _ | Msp.Item_delta _
+          | Msp.Usage_changed _ | Msp.Model_usage_reported _
+          | Msp.Unhandled_notification _ -> Turn_quiet))
+    Turn_quiet
+    events
 ;;
 
 let tool_completion (status : Msp.item_status) : Runtime_native_tools.completion =
@@ -1404,21 +1460,28 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
            Eio.Cancel.protect (fun () -> Option.iter (fun usage ->
              emit (Model_call_reported {session_id; turn_id; model=None});
              report_usage usage) usage) in
+       let on_view_gap sid = if gap_applies ~session_id sid then emit View_gap_observed in
        let complete () =
            let* state = match terminal with
              | Msp.Terminal_completed ->
                let pending_decisions = ref state.pending_decisions in
-               let* witness =
-                 read_durable_turn
-                   ~on_view_gap:(fun sid ->
-                     if gap_applies ~session_id sid then emit View_gap_observed)
+               let* events =
+                 read_durable_turn_events
+                   ~on_view_gap
                    ~pending_decisions
                    io
                    ~session_id
                    ~turn_id
                    ~terminal_cursor:view_cursor
-                   ~open_items:state.open_items
                in
+               let* witness =
+                 durable_turn_of_events ~turn_id ~open_items:state.open_items events
+               in
+               emit
+                 (Turn_items_read
+                    (match live_item_that_may_have_acted state with
+                     | Some kind -> Turn_item_may_have_acted kind
+                     | None -> turn_items_of_events ~turn_id events));
                (match witness.durable_models, state.call_models with
                 | call :: _, previous :: _ when same_call call previous -> ()
                 | (Named model :: _), ([] | _ :: _) ->
@@ -1430,8 +1493,31 @@ let rec await_terminal io (config : config) ~mcp_servers ~session_id ~turn_id ~o
                  pending_decisions = !pending_decisions;
                  observed_usage=Observing_usage witness.durable_usage;
                  last_call_usage=witness.durable_last_call; call_models=witness.durable_models}
-             | Msp.Terminal_failed _ | Msp.Terminal_host_died _
-             | Msp.Terminal_cancelled | Msp.Unrecognized_terminal _ -> Ok state in
+             | Msp.Terminal_failed _ ->
+               (* The failed turn's own durable range is the only witness
+                  that the host did nothing outside its session (RFC-0509).
+                  A read that fails proves nothing and changes no outcome. *)
+               let pending_decisions = ref state.pending_decisions in
+               let items =
+                 match live_item_that_may_have_acted state with
+                 | Some kind -> Turn_item_may_have_acted kind
+                 | None ->
+                   (match
+                      read_durable_turn_events
+                        ~on_view_gap
+                        ~pending_decisions
+                        io
+                        ~session_id
+                        ~turn_id
+                        ~terminal_cursor:view_cursor
+                    with
+                    | Ok events -> turn_items_of_events ~turn_id events
+                    | Error error -> Turn_items_unread (error_to_string error))
+               in
+               emit (Turn_items_read items);
+               Ok { state with pending_decisions = !pending_decisions }
+             | Msp.Terminal_host_died _ | Msp.Terminal_cancelled
+             | Msp.Unrecognized_terminal _ -> Ok state in
            let usage = match terminal with
              | Msp.Terminal_completed -> terminal_usage ~observed:state.observed_usage ~terminal:usage
              | Msp.Terminal_failed _ | Msp.Terminal_host_died _

@@ -366,10 +366,33 @@ let recovery_failure_for_attempt ~current ~admission error =
    state ({!Runtime_muse_serve.config}), and a subagent or workflow
    the turn starts runs its own tools in a child session this client does
    not read. Only the host's refusal of [turn/start] itself, an error answer
-   to the one request then outstanding, proves that no turn ran. *)
-let failure_leaves_effects_unknown ~admission (error : Serve.error) =
+   to the one request then outstanding, proves that no turn ran. After the
+   host acknowledged the turn, only that turn's own durable range read after
+   its typed failure can prove it quiet (RFC-0509); the [Turn_items_read]
+   event carries that proof, and every other ending stays unknown. *)
+let failure_leaves_effects_unknown ~admission ~turn_items (error : Serve.error) =
   match admission with
-  | Acknowledged -> true
+  | Acknowledged ->
+    (match turn_items with
+     | None | Some (Serve.Turn_item_may_have_acted _ | Serve.Turn_items_unread _) -> true
+     | Some Serve.Turn_quiet ->
+       (match error with
+        | Serve.Turn_failed _ | Serve.Auth_required _ -> false
+        | Serve.Invalid_config _
+        | Serve.Session_not_durable
+        | Serve.Spawn_failed _
+        | Serve.Turn_input_write_failed _
+        | Serve.Protocol_error _
+        | Serve.Rpc_error _
+        | Serve.Capability_not_granted _
+        | Serve.Session_model_mismatch _
+        | Serve.Session_workspace_mismatch _
+        | Serve.Session_approval_mode_mismatch _
+        | Serve.Turn_cancelled
+        | Serve.Unsupported_server_request _
+        | Serve.Runtime_shutting_down
+        | Serve.Process_exited _
+        | Serve.Timeout _ -> true))
   | Dispatched ->
     (match error with
      | Serve.Rpc_error _ -> false
@@ -803,7 +826,7 @@ let stream_projection ~quota_scope ~keeper_name ~runtime_id ~configured_model ~r
             quota_scope
         | Serve.Turn_terminal_received terminal ->
           Option.iter (fun scope -> Runtime_muse_usage.observe_terminal ~scope terminal) quota_scope
-        | Serve.View_gap_observed -> ()
+        | Serve.View_gap_observed | Serve.Turn_items_read _ -> ()
         (* The usage this turn reports belongs to the model its calls ran
            on, when the host names it, rather than the session's selection. *)
         | Serve.Model_call_reported { model; _ } -> reported_model := model
@@ -880,7 +903,8 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     ~turn_start ~pre_tool_rejects ~base_path ~workspace_root ~native_workspace_context ~goal ~goal_blocks ~system_prompt ~tools ~loading_plan
     ~initial_messages ~model_input_projection ~on_transmitted_model_input ~hooks
     ~context_injector ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event
-    ~observe_effect_attempted ~observe_transport_uncertain ~on_official_client_tool_boundary
+    ~observe_effect_attempted ~observe_transport_uncertain ~observe_quiet_turn
+    ~on_official_client_tool_boundary
     ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_usage_report ~on_tool_execution
     ~(config : Serve.config) =
   on_results_ready None;
@@ -1335,6 +1359,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     (* Capture the terminal before usage/stream callbacks, process cleanup or
        completion hooks can yield. A later stop cannot undo a terminal turn. *)
     let provider_terminal = ref None in
+    let turn_items = ref None in
     let turn_acknowledged, acknowledge_turn = Eio.Promise.create () in
     (* The host's turn id is durable from the moment the serve client reports
        it, so a failure or a restart mid-turn leaves the recovery row naming
@@ -1385,12 +1410,13 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
         ~on_native_tool_completion
         ~on_usage_report
         ~on_turn_started:(fun turn ->
-          (* From here the host runs the turn, and MASC cannot prove what it
-             did. A call the host's own rules allow runs without asking
-             MASC ({!Runtime_muse_serve.config}); a
-             subagent or workflow runs its tools in a child session this
-             client does not read. A failure after this point must not rotate
-             into a second run of the same goal. *)
+          (* From here the host runs the turn, and live delivery cannot
+             prove what it did. A call the host's own rules allow runs
+             without asking MASC ({!Runtime_muse_serve.config}); a subagent
+             or workflow runs its tools in a child session this client does
+             not read. A failure after this point must not rotate into a
+             second run of the same goal, unless the turn's own durable
+             range later proves it quiet ([Serve.Turn_items_read]). *)
           admission := Acknowledged;
           observe_transport_uncertain ();
           observed_turn := Some turn;
@@ -1626,6 +1652,11 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                        | Serve.Turn_terminal_received terminal ->
                          close_delivery_frontier ();
                          provider_terminal := Some terminal
+                       | Serve.Turn_items_read items ->
+                         turn_items := Some items;
+                         (match items with
+                          | Serve.Turn_quiet -> observe_quiet_turn ()
+                          | Serve.Turn_item_may_have_acted _ | Serve.Turn_items_unread _ -> ())
                        (* A host stop settles with the model the calls ran
                           on, as a completed turn does. *)
                        | Serve.Model_call_reported { model; _ } ->
@@ -1691,7 +1722,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
              | Serve.Turn_cancelled | Serve.Unsupported_server_request _
              | Serve.Runtime_shutting_down | Serve.Process_exited _
              | Serve.Timeout _ -> ());
-            if failure_leaves_effects_unknown ~admission:!admission error
+            if failure_leaves_effects_unknown ~admission:!admission ~turn_items:!turn_items error
             then observe_transport_uncertain ();
             recovery_failure := recovery_failure_for_attempt
                 ~current:!recovery_failure ~admission:!admission error;
@@ -1940,6 +1971,18 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
     with
     | true | false -> ()
   in
+  (* A quiet turn's own durable range proves the host did nothing outside
+     its session (RFC-0509). That settles the uncertainty its acknowledgement
+     raised; an effect MASC observed itself stays. *)
+  let observe_quiet_turn () =
+    match
+      Atomic.compare_and_set
+        effect_disposition
+        Keeper_provider_attempt_effect.Observation_unavailable
+        Keeper_provider_attempt_effect.No_effect_observed
+    with
+    | true | false -> ()
+  in
   let result =
     Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
@@ -1980,6 +2023,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
         ~on_event
         ~observe_effect_attempted
         ~observe_transport_uncertain
+        ~observe_quiet_turn
         ~on_official_client_tool_boundary
         ~on_official_client_result_handoff
         ~on_native_action

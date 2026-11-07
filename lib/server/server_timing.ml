@@ -66,20 +66,20 @@ let phase_token = function
 (* Entries are kept in insertion order so DevTools renders the bars in
    the order the handler actually executed phases. *)
 type entry = { token : string; mutable ms : float }
-type t = { mutable entries : entry list }
+type t = { mutable entries_rev : entry list }
 
-let create () = { entries = [] }
+let create () = { entries_rev = [] }
 
 let find_or_add t token =
   let rec loop = function
     | [] ->
       let e = { token; ms = 0.0 } in
-      t.entries <- t.entries @ [ e ];
+      t.entries_rev <- e :: t.entries_rev;
       e
     | e :: _ when String.equal e.token token -> e
     | _ :: rest -> loop rest
   in
-  loop t.entries
+  loop t.entries_rev
 ;;
 
 let record_ms t phase ms =
@@ -113,12 +113,19 @@ let format_ms ms =
 ;;
 
 let to_header_value t =
-  match t.entries with
+  match t.entries_rev with
   | [] -> ""
-  | _ ->
-    t.entries
-    |> List.map (fun e -> Printf.sprintf "%s;dur=%s" e.token (format_ms e.ms))
-    |> String.concat ", "
+  | [ e ] -> Printf.sprintf "%s;dur=%s" e.token (format_ms e.ms)
+  | entries ->
+    let entries = List.rev entries in
+    let buf = Buffer.create 128 in
+    List.iteri (fun i e ->
+      if i > 0 then Buffer.add_string buf ", ";
+      Buffer.add_string buf e.token;
+      Buffer.add_string buf ";dur=";
+      Buffer.add_string buf (format_ms e.ms)
+    ) entries;
+    Buffer.contents buf
 ;;
 
 let extra_header t =

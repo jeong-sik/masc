@@ -1,0 +1,265 @@
+{
+  "days_without_file": [],
+  "execute": {
+    "by_day": [
+      {
+        "calls": 13179,
+        "day": "2026-11-05",
+        "hours": 34.27,
+        "long_calls": 254,
+        "long_hours": 23.52,
+        "sleeping_long_hours": 15.25
+      }
+    ],
+    "calls": 13179,
+    "calls_without_command": 297,
+    "duration_buckets": [
+      {
+        "calls": 4653,
+        "hours": 0.58,
+        "hours_percent": 1.7,
+        "label": "<1s"
+      },
+      {
+        "calls": 4403,
+        "hours": 2.15,
+        "hours_percent": 6.3,
+        "label": "1-3s"
+      },
+      {
+        "calls": 3255,
+        "hours": 4.43,
+        "hours_percent": 12.9,
+        "label": "3-10s"
+      },
+      {
+        "calls": 614,
+        "hours": 3.59,
+        "hours_percent": 10.5,
+        "label": "10-60s"
+      },
+      {
+        "calls": 118,
+        "hours": 4.33,
+        "hours_percent": 12.6,
+        "label": "60-300s"
+      },
+      {
+        "calls": 136,
+        "hours": 19.18,
+        "hours_percent": 56.0,
+        "label": ">=300s"
+      }
+    ],
+    "hours": 34.27,
+    "long_calls": {
+      "by_kind": [
+        {
+          "calls": 80,
+          "hours": 9.88,
+          "hours_percent_of_long": 42.0,
+          "kind": "names_a_run",
+          "sleeping_calls": 79,
+          "sleeping_hours": 9.85,
+          "sleeping_hours_percent_of_sleeping": 64.6
+        },
+        {
+          "calls": 74,
+          "hours": 5.13,
+          "hours_percent_of_long": 21.8,
+          "kind": "gh_without_run",
+          "sleeping_calls": 30,
+          "sleeping_hours": 3.16,
+          "sleeping_hours_percent_of_sleeping": 20.7
+        },
+        {
+          "calls": 2,
+          "hours": 0.05,
+          "hours_percent_of_long": 0.2,
+          "kind": "build_or_test",
+          "sleeping_calls": 0,
+          "sleeping_hours": 0.0,
+          "sleeping_hours_percent_of_sleeping": 0.0
+        },
+        {
+          "calls": 98,
+          "hours": 8.46,
+          "hours_percent_of_long": 36.0,
+          "kind": "rest",
+          "sleeping_calls": 26,
+          "sleeping_hours": 2.24,
+          "sleeping_hours_percent_of_sleeping": 14.7
+        }
+      ],
+      "calls": 254,
+      "calls_percent": 1.9,
+      "calls_without_command": 0,
+      "github_calls": 154,
+      "github_hours": 15.0,
+      "github_hours_percent_of_long": 63.8,
+      "hours": 23.52,
+      "hours_percent_of_execute": 68.6,
+      "sleeping_calls": 135,
+      "sleeping_github_hours": 13.02,
+      "sleeping_github_percent_of_sleeping": 85.3,
+      "sleeping_hours": 15.25,
+      "sleeping_hours_percent_of_long": 64.9,
+      "threshold_seconds": 60
+    }
+  },
+  "executes_without_duration": 0,
+  "files_read": 10,
+  "keepers_in_both": [
+    {
+      "blocked_hours": 0.06,
+      "keeper": "e-masc-the-leader",
+      "self_wakes_naming_a_run": 8
+    }
+  ],
+  "rows_in_window": 21474,
+  "rows_without_timestamp": 0,
+  "run_waits": {
+    "blocked_hours": 9.9,
+    "blocked_hours_percent_of_execute": 28.9,
+    "blocked_hours_summed_over_waits": 10.12,
+    "blocked_minutes_per_wait": {
+      "max": 112.6,
+      "median": 6.2,
+      "p90": 16.5
+    },
+    "polls": 86,
+    "polls_naming_several_runs": 3,
+    "polls_per_wait": {
+      "max": 13.0,
+      "median": 1.0,
+      "p90": 3.0
+    },
+    "polls_summed_over_waits": 89,
+    "repos": {
+      "blocked_hours_without_a_repo": 2.85,
+      "by_repo": [
+        {
+          "blocked_hours": 5.98,
+          "repo": "jeong-sik/masc",
+          "waits": 19
+        },
+        {
+          "blocked_hours": 1.08,
+          "repo": "jeong-sik/wkbl",
+          "waits": 6
+        }
+      ],
+      "waits_without_a_repo": 27
+    },
+    "single_poll_waits": 42,
+    "top_keepers": [
+      {
+        "blocked_hours": 4.59,
+        "keeper": "github-pr-checker",
+        "waits": 8
+      },
+      {
+        "blocked_hours": 3.71,
+        "keeper": "sangsu",
+        "waits": 32
+      },
+      {
+        "blocked_hours": 0.79,
+        "keeper": "wkbl-data",
+        "waits": 4
+      },
+      {
+        "blocked_hours": 0.35,
+        "keeper": "pr-updater",
+        "waits": 3
+      },
+      {
+        "blocked_hours": 0.29,
+        "keeper": "wkbl-front",
+        "waits": 2
+      },
+      {
+        "blocked_hours": 0.12,
+        "keeper": "ocaml-agent-ic",
+        "waits": 2
+      },
+      {
+        "blocked_hours": 0.06,
+        "keeper": "e-masc-the-leader",
+        "waits": 1
+      }
+    ],
+    "waits": 52
+  },
+  "schedule_wakes": {
+    "creates": 29,
+    "distinct_keeper_run_pairs": 6,
+    "due_in_sec_of_those": {
+      "median": 2700.0,
+      "p10": 2100.0,
+      "p90": 7200.0
+    },
+    "self_wakes": 29,
+    "self_wakes_naming_a_run": 9,
+    "top_keepers": [
+      {
+        "keeper": "e-masc-the-leader",
+        "wakes": 8
+      },
+      {
+        "keeper": "masc-productor-owner",
+        "wakes": 1
+      }
+    ]
+  },
+  "skipped_lines": 0,
+  "turn_time": {
+    "build_or_test_calls": {
+      "calls": 2,
+      "hours": 0.05,
+      "inside_hours": 0.03,
+      "inside_percent_of_turn_time": 0.0,
+      "outside_hours": 0.02
+    },
+    "execute": {
+      "calls": 13179,
+      "hours": 34.27,
+      "inside_hours": 29.93,
+      "inside_percent_of_turn_time": 19.0,
+      "outside_hours": 4.35
+    },
+    "execute_of_keepers_without_turn_traces": {
+      "calls": 0,
+      "hours": 0.0,
+      "keepers": 0
+    },
+    "github_calls": {
+      "calls": 154,
+      "hours": 15.0,
+      "inside_hours": 13.35,
+      "inside_percent_of_turn_time": 8.5,
+      "outside_hours": 1.65
+    },
+    "hours": 157.6,
+    "keepers_with_turn_traces": 26,
+    "long_calls": {
+      "calls": 254,
+      "hours": 23.52,
+      "inside_hours": 21.03,
+      "inside_percent_of_turn_time": 13.3,
+      "outside_hours": 2.49
+    },
+    "poll_calls": {
+      "calls": 86,
+      "hours": 9.9,
+      "inside_hours": 9.07,
+      "inside_percent_of_turn_time": 5.8,
+      "outside_hours": 0.84
+    }
+  },
+  "window": {
+    "from": "2026-11-05",
+    "to": "2026-11-05",
+    "until": "2026-11-06T00:00:00+00:00"
+  }
+}

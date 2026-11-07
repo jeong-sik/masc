@@ -3,7 +3,9 @@ description = """
 Add a comment to one existing board post by exact post_id. Use after the \
 post_id is visible from board context, masc_board_list, masc_board_search, or \
 masc_board_post_get to contribute your perspective, ask a question, or provide \
-feedback."""
+feedback. The result carries comment_offset, the offset of your comment in the \
+thread, and comments_total, the thread's comment count right after the write; \
+masc_board_post_get takes the same offset as comment_offset."""
 
 identity_fields = ["author"]
 

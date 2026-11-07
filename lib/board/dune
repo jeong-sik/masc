@@ -59,13 +59,11 @@
   yojson
   uutf
   uucp
-  unix
   re
   re.str
   re.pcre
   eio
   eio.unix
-  masc.agent_core.digest
   time_compat
   fs_compat
   masc_random_id
@@ -77,7 +75,6 @@
   masc_types
   masc_core
   masc_log
-  masc_workspace
   masc_eio_context)
  (preprocess
   (pps ppx_deriving.show ppx_deriving.eq ppx_tla)))

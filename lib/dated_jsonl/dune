@@ -21,6 +21,5 @@
   masc.config
   masc.config_dir_resolver
   otel_metric_store
-  eio
   unix
   yojson))

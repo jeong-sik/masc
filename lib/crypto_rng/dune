@@ -7,4 +7,4 @@
  (modules crypto_rng)
  (flags
   (:standard -w +4 -w +33))
- (libraries threads mirage-crypto-rng mirage-crypto-rng.unix))
+ (libraries mirage-crypto-rng mirage-crypto-rng.unix))

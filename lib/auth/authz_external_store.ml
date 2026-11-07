@@ -245,6 +245,9 @@ let subject_text = function
     {|{"type":"principal","principal":|} ^ Authz_record.principal_text principal ^ "}"
   | Subject.Runtime id -> {|{"type":"runtime","id":|} ^ literal (Runtime_id.to_string id) ^ "}"
   | Subject.Session id -> {|{"type":"session","id":|} ^ literal (Session_id.to_string id) ^ "}"
+  | Subject.Pat id -> {|{"type":"pat","id":|} ^ literal (Pat_id.to_string id) ^ "}"
+  | Subject.Service_credential id ->
+    {|{"type":"service_credential","id":|} ^ literal (Service_credential_id.to_string id) ^ "}"
   | Subject.Invite id -> {|{"type":"invite","id":|} ^ literal (Invite_id.to_string id) ^ "}"
   | Subject.Registration id ->
     {|{"type":"registration","id":|} ^ literal (Registration_id.to_string id) ^ "}"
@@ -318,6 +321,12 @@ let subject_of_json = function
     Option.map (fun id -> Subject.Runtime id) (Result.to_option (Runtime_id.of_string id))
   | `Assoc [ ("type", `String "session"); ("id", `String id) ] ->
     Option.map (fun id -> Subject.Session id) (Result.to_option (Session_id.of_string id))
+  | `Assoc [ ("type", `String "pat"); ("id", `String id) ] ->
+    Option.map (fun id -> Subject.Pat id) (Result.to_option (Pat_id.of_string id))
+  | `Assoc [ ("type", `String "service_credential"); ("id", `String id) ] ->
+    Option.map
+      (fun id -> Subject.Service_credential id)
+      (Result.to_option (Service_credential_id.of_string id))
   | `Assoc [ ("type", `String "invite"); ("id", `String id) ] ->
     Option.map (fun id -> Subject.Invite id) (Result.to_option (Invite_id.of_string id))
   | `Assoc [ ("type", `String "registration"); ("id", `String id) ] ->

@@ -335,11 +335,19 @@ history refuses. Restoring completed gate evidence calls no provider.
 
 `Keeper_librarian_admission_commit` validates the original answer and gate chain,
 then passes the original disposition/support/required destinations and recall
-revision to `Current.apply_disposition`. It merges under the existing Memory
-locks instead of replacing a captured full snapshot. Actual matching committed
-candidate receipts alone authorize a Finished observation and sparse queue ACK.
-Unknown local disposition is reconciled against those same receipts before a
-local retry, without another model or gate evaluation.
+revision to `Current.apply_disposition_guarded` without a basis. It merges under
+the existing Memory locks instead of replacing a captured full snapshot. Actual
+matching committed candidate receipts alone authorize a Finished observation and
+sparse queue ACK. Unknown local disposition is reconciled against those same
+receipts before a local retry, without another model or gate evaluation.
+
+The locked plan can refuse a destination the answer writes into, for example a
+revision whose source another writer removed after the capture. That refusal
+precedes every effect, so the same input against the same Memory refuses again.
+With no committed candidate receipt, the original records `Conflicted` with
+evidence naming its execution and the absent Memory identity. The frontier
+treats its candidates as gaps, and a replacement root judges them against the
+current Memory (#46372).
 
 `Server_librarian_addon_wake` only subscribes to existing Runtime owner events.
 A switch-owned child restores the original owner after yielding, then signals
@@ -434,8 +442,9 @@ proposal decoding or publication.
 
 [`Keeper_librarian_durable_commit`](../../lib/keeper/keeper_librarian_durable_commit.mli)
 uses the original captured gate journal, holds actual source locks, and passes
-the original revision and full current facts to `Current.apply_disposition_guarded`.
-The latter compares both inside its actual Memory write locks. Only matching
+the original revision and full current facts as the basis of
+`Current.apply_disposition_guarded`. The latter compares both inside its actual
+Memory write locks. Only matching
 atom/official range receipts permit external ACK and original position
 settlement, followed by Finished. A post-Memory ACK failure recovers locally
 without a second inference or disposition. Changed checkpoint prefixes,

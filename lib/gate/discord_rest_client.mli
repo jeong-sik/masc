@@ -318,17 +318,6 @@ val build_embed_request :
 (** Embed variant of {!build_request}. Body contains [embeds] array
     when embeds are provided. Exposed for unit testing. *)
 
-val build_edit_embed_request :
-  token:string ->
-  channel_id:snowflake ->
-  message_id:snowflake ->
-  content:string ->
-  ?embeds:embed list ->
-  unit ->
-  string * (string * string) list * string
-(** Embed variant of {!build_edit_request}. Patches a message with
-    updated content and/or embeds. Exposed for unit testing. *)
-
 val parse_response :
   ?request_id:string ->
   status:int ->

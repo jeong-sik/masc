@@ -218,6 +218,25 @@ let skill_error_recovery error =
     , Server_skill_editor.recovery_disposition_to_string disposition ))
 ;;
 
+(* The authoring tool descriptors for an operator editing through the
+   dashboard. *)
+let authoring_descriptors state =
+  Server_skill_editor.authoring_descriptors
+    ~config:(Mcp_server.workspace_config state)
+    ~access:Lane_addon_sources.Operator_configuration
+;;
+
+(* Rebuilds the Skill catalog snapshot from the runtime config observation.
+   The write routes hand it to the editor as [refresh]; the refresh route
+   calls it directly. *)
+let refresh_skill_snapshot ~base_path =
+  match Runtime.load_config_observation () with
+  | Error message -> Error message
+  | Ok observation ->
+    Server_skill_snapshot_runtime.refresh_from_observation ~base_path observation
+    |> Result.map_error Server_skill_snapshot_runtime.error_to_string
+;;
+
 let add_routes router =
   router
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/skills/editor/sources" (fun state _agent_name req reqd ->
@@ -252,8 +271,7 @@ let add_routes router =
                     reference)
                  reqd))
   |> Server_route.get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/skills/editor/tools" (fun state _agent_name req reqd ->
-           let descriptors = Server_skill_editor.authoring_descriptors
-             ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration in
+           let descriptors = authoring_descriptors state in
            Http.Response.json_value ~compress:true ~request:req
              (Server_skill_editor.authoring_tools_to_yojson descriptors) reqd)
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/skills/editor/preview-new" (fun state _agent_name req reqd ->
@@ -263,8 +281,7 @@ let add_routes router =
              | Ok { expected_kind; source_id; package_id; source_text } ->
                (match Server_skill_editor.preview_new
                  ~expected_kind:(Some expected_kind)
-                 ~descriptors:(Server_skill_editor.authoring_descriptors
-                   ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration)
+                 ~descriptors:(authoring_descriptors state)
                  ~source_id ~package_id source_text with
                 | Error error -> respond_skill_editor_error ~request:req reqd error
                 | Ok preview -> Http.Response.json_value ~compress:true ~request:req
@@ -277,20 +294,11 @@ let add_routes router =
                Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd message
              | Ok { expected_kind; source_id; package_id; source_text } ->
                let base_path = (Mcp_server.workspace_config state).base_path in
-               let refresh () =
-                 match Runtime.load_config_observation () with
-                 | Error message -> Error message
-                 | Ok observation ->
-                   Server_skill_snapshot_runtime.refresh_from_observation
-                     ~base_path
-                     observation
-                   |> Result.map_error Server_skill_snapshot_runtime.error_to_string
-               in
+               let refresh () = refresh_skill_snapshot ~base_path in
                (match
                   Server_skill_editor.create
                     ~expected_kind:(Some expected_kind)
-                    ~descriptors:(Server_skill_editor.authoring_descriptors
-                      ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration)
+                    ~descriptors:(authoring_descriptors state)
                     ~base_path
                     ~source_id
                     ~package_id
@@ -345,15 +353,7 @@ let add_routes router =
                  Keeper_api_types.respond_error ~status:`Bad_request ~request:req reqd message
                | Ok { reference; source_text = _; confirmed } ->
                  let base_path = (Mcp_server.workspace_config state).base_path in
-                 let refresh () =
-                   match Runtime.load_config_observation () with
-                   | Error message -> Error message
-                   | Ok observation ->
-                     Server_skill_snapshot_runtime.refresh_from_observation
-                       ~base_path
-                       observation
-                     |> Result.map_error Server_skill_snapshot_runtime.error_to_string
-                 in
+                 let refresh () = refresh_skill_snapshot ~base_path in
                  let result =
                    Server_skill_editor.delete
                      ~base_path
@@ -414,8 +414,7 @@ let add_routes router =
              | Ok { reference; source_text = Some source_text; confirmed = _ } ->
                (match
                   Server_skill_editor.preview
-                    ~descriptors:(Server_skill_editor.authoring_descriptors
-                      ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration)
+                    ~descriptors:(authoring_descriptors state)
                     ~base_path:(Mcp_server.workspace_config state).base_path
                     reference
                     ~source_text
@@ -444,19 +443,10 @@ let add_routes router =
                  "source_text required"
              | Ok { reference; source_text = Some source_text; confirmed = _ } ->
                let base_path = (Mcp_server.workspace_config state).base_path in
-               let refresh () =
-                 match Runtime.load_config_observation () with
-                 | Error message -> Error message
-                 | Ok observation ->
-                   Server_skill_snapshot_runtime.refresh_from_observation
-                     ~base_path
-                     observation
-                   |> Result.map_error Server_skill_snapshot_runtime.error_to_string
-               in
+               let refresh () = refresh_skill_snapshot ~base_path in
                (match
                   Server_skill_editor.save
-                    ~descriptors:(Server_skill_editor.authoring_descriptors
-                      ~config:(Mcp_server.workspace_config state) ~access:Lane_addon_sources.Operator_configuration)
+                    ~descriptors:(authoring_descriptors state)
                     ~base_path
                     ~reference
                     ~source_text
@@ -493,55 +483,43 @@ let add_routes router =
                     reqd)))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/skills/refresh" (fun state agent_name req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
-           match Runtime.load_config_observation () with
+           match refresh_skill_snapshot ~base_path with
            | Error message ->
              Keeper_api_types.respond_error ~status:`Internal_server_error ~request:req reqd message
-           | Ok observation ->
-             (match
-                Server_skill_snapshot_runtime.refresh_from_observation
-                  ~base_path
-                  observation
-              with
-              | Error error ->
-                Keeper_api_types.respond_error
-                  ~status:`Internal_server_error
-                  ~request:req
-                  reqd
-                  (Server_skill_snapshot_runtime.error_to_string error)
-              | Ok publication ->
-                let snapshot =
-                  match publication with
-                  | Skill_catalog_snapshot_service.Published s
-                  | Skill_catalog_snapshot_service.Unchanged s -> Some s
-                  | Skill_catalog_snapshot_service.Workspace_retired -> None
-                in
-                let snapshot_revision =
-                  match snapshot with
-                  | Some s ->
-                    Skill_catalog_snapshot.snapshot_revision_to_string
-                      (Skill_catalog_snapshot.snapshot_revision s)
-                  | None -> ""
-                in
-                let publication_status =
-                  match publication with
-                  | Skill_catalog_snapshot_service.Published _ -> "published"
-                  | Skill_catalog_snapshot_service.Unchanged _ -> "unchanged"
-                  | Skill_catalog_snapshot_service.Workspace_retired -> "retired"
-                in
-                Log.Server.info
-                  "Skill snapshot refreshed by operator=%s revision=%s status=%s"
-                  agent_name
-                  snapshot_revision
-                  publication_status;
-                Http.Response.json_value
-                  ~compress:true
-                  ~request:req
-                  (`Assoc
-                     [ "ok", `Bool true
-                     ; "snapshot_revision", `String snapshot_revision
-                     ; "publication", `String publication_status
-                     ])
-                  reqd))
+           | Ok publication ->
+             let snapshot =
+               match publication with
+               | Skill_catalog_snapshot_service.Published s
+               | Skill_catalog_snapshot_service.Unchanged s -> Some s
+               | Skill_catalog_snapshot_service.Workspace_retired -> None
+             in
+             let snapshot_revision =
+               match snapshot with
+               | Some s ->
+                 Skill_catalog_snapshot.snapshot_revision_to_string
+                   (Skill_catalog_snapshot.snapshot_revision s)
+               | None -> ""
+             in
+             let publication_status =
+               match publication with
+               | Skill_catalog_snapshot_service.Published _ -> "published"
+               | Skill_catalog_snapshot_service.Unchanged _ -> "unchanged"
+               | Skill_catalog_snapshot_service.Workspace_retired -> "retired"
+             in
+             Log.Server.info
+               "Skill snapshot refreshed by operator=%s revision=%s status=%s"
+               agent_name
+               snapshot_revision
+               publication_status;
+             Http.Response.json_value
+               ~compress:true
+               ~request:req
+               (`Assoc
+                  [ "ok", `Bool true
+                  ; "snapshot_revision", `String snapshot_revision
+                  ; "publication", `String publication_status
+                  ])
+               reqd)
 
 module For_testing = struct
   let skill_delete_audit_of_outcome = skill_delete_audit_of_outcome

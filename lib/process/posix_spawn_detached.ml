@@ -116,10 +116,3 @@ let group_id_has_members group =
   | exception Unix.Unix_error (Unix.ESRCH, _, _) -> false
   | exception Unix.Unix_error (Unix.EPERM, _, _) ->
     Option.value ~default:true (Process_group_members.live_member_left group)
-
-external process_group_of : int -> int = "masc_process_group_of"
-
-let group_of_pid pid =
-  match process_group_of pid with
-  | group -> Ok group
-  | exception Unix.Unix_error (error, _, _) -> Error (Unix.error_message error)

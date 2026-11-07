@@ -45,12 +45,6 @@ let drop_unencodable_json = Checkpoint_codec.drop_unencodable_json
 let of_json = Checkpoint_codec.of_json
 let to_string = Checkpoint_codec.to_string
 
-let content_block_to_json_result ~scope block =
-  let open Result.Syntax in
-  let json = History.content_block_to_json block in
-  let+ () = Checkpoint_codec.validate_checkpoint_json ~context:scope json in
-  json
-
 let content_block_of_json json =
   let open Result.Syntax in
   let* () = Checkpoint_codec.validate_checkpoint_json ~context:"Checkpoint content block" json in

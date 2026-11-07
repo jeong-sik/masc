@@ -71,14 +71,6 @@ type reading = {
 
 let of_observations ~declarations ~applications observations = {observations; declarations; applications}
 
-let read ~config ~access ~declarations =
-  (* How each declaration was applied is operator metadata; another reader
-     cannot tell a failed attach from one not made yet. *)
-  let applications () = match access with
-    | Lane_addon_sources.Operator_configuration -> (Lane_addon_runtime.inventory ~config).applications
-    | Lane_addon_sources.Keeper _ | Lane_addon_sources.Unauthenticated -> [] in
-  of_observations ~declarations ~applications (Lane_addon_runtime.browser_observations ~config ~access)
-
 type published_or_not = Published of Browser_addon_observation.published | Unpublished | Withheld of unavailable
 let published_or_not = function
   | Error refusal -> Withheld (Refused refusal)

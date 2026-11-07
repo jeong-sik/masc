@@ -52,17 +52,6 @@ val of_observations :
   applications:(unit -> Lane_addon_runtime.configuration_application list) ->
   Lane_addon_runtime.browser_observation list -> reading
 
-(** Ask the runtime for the browser installations' cached observations. It
-    runs on the Lane Add-on owner domain and waits for no browser command.
-    [access] is the reader's: an installation it cannot see is not read, so
-    the reading never names one to a caller who could not list it. Only
-    {!Lane_addon_sources.Operator_configuration} reads how a declaration was
-    applied, which is operator metadata, so only it
-    tells a failed attach. *)
-val read :
-  config:Workspace.config -> access:Lane_addon_sources.access ->
-  declarations:Lane_addon_config.snapshot -> reading
-
 (** The lane as the installations of its sources say: their observations
     merged ({!Browser_addon_observation.merge}), the way the host uses them,
     or why there is none. A source whose observation is refused or

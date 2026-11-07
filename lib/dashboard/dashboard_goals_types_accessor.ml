@@ -25,14 +25,6 @@ type goal_detail_keeper = {
   runtime_trust : Yojson.Safe.t;
 }
 
-let task_is_linked_to_goal ?(goal_task_index = Hashtbl.create 0) (task : Masc_domain.task) goal_id =
-  let task_goal_ids =
-    (* DET-OK: an absent bucket means no recorded links; this is the same []
-       returned by the replaced [Not_found] handler. *)
-    Option.value (Hashtbl.find_opt goal_task_index task.id) ~default:[]
-  in
-  List.mem goal_id task_goal_ids
-
 (* The tree feeds the same Work surface as the execution payload, so it must
    answer the same question: who did or is doing the work. Using the ownership
    helper here made a completed Task show its performer via execution and

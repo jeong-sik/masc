@@ -20,8 +20,6 @@ type goal_detail_keeper = {
   runtime_trust : Yojson.Safe.t;
 }
 
-val task_is_linked_to_goal :
-  ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> bool
 val task_assignee : Masc_domain.task -> string option
 val task_is_terminal : Masc_domain.task -> bool
 val task_is_done : Masc_domain.task -> bool

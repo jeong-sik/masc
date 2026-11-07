@@ -70,15 +70,6 @@ val of_json : Yojson.Safe.t -> (t, Error.t) result
 (** Serialize checkpoint to a JSON string. *)
 val to_string : t -> string
 
-val content_block_to_json_result :
-  scope:string -> Types.content_block -> (Yojson.Safe.t, Error.t) result
-(** Encode one block under the current checkpoint content contract, including
-    failure provenance and nested media. [scope] names the diagnostic context.
-    The checkpoint wire does not retain [ToolResult.json]; callers needing that
-    optional parsed value must retain it separately. The unretained value is
-    not inspected, so a duplicate key or a non-finite number in it does not
-    refuse the encoding. *)
-
 val content_block_of_json : Yojson.Safe.t -> (Types.content_block, Error.t) result
 (** Decode one canonical checkpoint block. Duplicate/invalid JSON values,
     unknown fields, unsupported variants and malformed provenance are errors. *)

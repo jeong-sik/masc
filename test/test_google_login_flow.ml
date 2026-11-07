@@ -169,7 +169,7 @@ type installation =
   ; google : google
   ; transactions : T.t
   ; cache : X.cache
-  ; client : X.Client.t
+  ; client : Login_client.t
   ; log_path : string
   }
 
@@ -403,15 +403,15 @@ let the_client_needs_its_secret () =
    | Error error -> Alcotest.fail (Flow.client_error_to_string error)
    | Ok _ -> Alcotest.fail "made without a secret");
   (match made (fun _ -> Some "") redirect_uri with
-   | Error (Flow.Client_refused X.Client.Client_secret_empty) -> ()
+   | Error (Flow.Client_refused Login_client.Client_secret_empty) -> ()
    | Error error -> Alcotest.fail (Flow.client_error_to_string error)
    | Ok _ -> Alcotest.fail "made with an empty secret");
   (match made (fun _ -> Some client_secret) "http://masc.example/auth/oidc/callback" with
-   | Error (Flow.Client_refused X.Client.Redirect_uri_not_https) -> ()
+   | Error (Flow.Client_refused Login_client.Redirect_uri_not_https) -> ()
    | Error error -> Alcotest.fail (Flow.client_error_to_string error)
    | Ok _ -> Alcotest.fail "made with an http redirect");
   match made (fun name -> if String.equal name secret_variable then Some client_secret else None) redirect_uri with
-  | Ok client -> Alcotest.(check string) "redirect" redirect_uri (X.Client.redirect_uri client)
+  | Ok client -> Alcotest.(check string) "redirect" redirect_uri (Login_client.redirect_uri client)
   | Error error -> Alcotest.fail (Flow.client_error_to_string error)
 ;;
 

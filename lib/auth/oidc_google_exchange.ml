@@ -2,38 +2,6 @@
 
 let ( let* ) = Result.bind
 
-module Client = struct
-  type t =
-    { client_id : string
-    ; client_secret : string
-    ; redirect_uri : string
-    }
-
-  type error =
-    | Client_id_empty
-    | Client_secret_empty
-    | Redirect_uri_not_https
-
-  let make ~client_id ~client_secret ~redirect_uri =
-    if String.equal client_id ""
-    then Error Client_id_empty
-    else if String.equal client_secret ""
-    then Error Client_secret_empty
-    else if not (Login_transport.is_https_url redirect_uri)
-    then Error Redirect_uri_not_https
-    else Ok { client_id; client_secret; redirect_uri }
-  ;;
-
-  let error_to_string = function
-    | Client_id_empty -> "the client ID is empty"
-    | Client_secret_empty -> "the client secret is empty"
-    | Redirect_uri_not_https -> "the redirect URI is not an https URL with a host and no query or fragment"
-  ;;
-
-  let client_id t = t.client_id
-  let redirect_uri t = t.redirect_uri
-end
-
 type endpoints =
   { authorization_endpoint : string
   ; token_endpoint : string
@@ -171,15 +139,15 @@ let endpoints ~get cache ~now_ms =
 
 let authorization_url
   endpoints
-  (client : Client.t)
+  (client : Login_client.t)
   (started : Oidc_login_transaction.google Oidc_login_transaction.started)
   =
   endpoints.authorization_endpoint
   ^ "?"
   ^ Login_transport.form
       [ "response_type", "code"
-      ; "client_id", client.client_id
-      ; "redirect_uri", client.redirect_uri
+      ; "client_id", Login_client.client_id client
+      ; "redirect_uri", Login_client.redirect_uri client
       ; "scope", "openid"
       ; "state", started.state
       ; "nonce", started.held.nonce
@@ -195,16 +163,12 @@ let json_members body =
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 ;;
 
-let id_token_of_code ~(post : Login_transport.post) endpoints (client : Client.t) ~code ~code_verifier =
+let id_token_of_code ~(post : Login_transport.post) endpoints (client : Login_client.t) ~code ~code_verifier =
   let body =
     Login_transport.form
-      [ "grant_type", "authorization_code"
-      ; "code", code
-      ; "client_id", client.client_id
-      ; "client_secret", client.client_secret
-      ; "redirect_uri", client.redirect_uri
-      ; "code_verifier", code_verifier
-      ]
+      ([ "grant_type", "authorization_code"; "code", code ]
+       @ Login_client.token_request_fields client
+       @ [ "code_verifier", code_verifier ])
   in
   let headers = [ "content-type", "application/x-www-form-urlencoded"; "accept", "application/json" ] in
   match post ~url:endpoints.token_endpoint ~headers ~body with
@@ -268,7 +232,7 @@ let identity
   cache
   ~now
   ~now_ms
-  (client : Client.t)
+  (client : Login_client.t)
   ~code
   (taken : Oidc_login_transaction.google Oidc_login_transaction.taken)
   =
@@ -277,5 +241,5 @@ let identity
   let* payload = verified ~get cache ~now ~now_ms endpoints token in
   Result.map_error
     (fun error -> Claims_refused error)
-    (Oidc_google.identity ~client_id:client.client_id ~nonce:taken.held.nonce payload)
+    (Oidc_google.identity ~client_id:(Login_client.client_id client) ~nonce:taken.held.nonce payload)
 ;;

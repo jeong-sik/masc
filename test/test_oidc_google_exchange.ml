@@ -318,6 +318,34 @@ let errors_are_told_apart () =
        texts)
 ;;
 
+let a_loopback_client_returns_to_this_computer () =
+  let made ?(client_id = "Iv1.preview") ?(client_secret = "secret-1") ?(path = "/auth/github/callback") port =
+    match Login_client.loopback ~client_id ~client_secret ~port ~path with
+    | Ok client -> Ok (Login_client.redirect_uri client)
+    | Error error -> Error (Login_client.loopback_error_to_string error)
+  in
+  let refused error = Error (Login_client.loopback_error_to_string error) in
+  let rows =
+    [ "made", made 8940, Ok "http://127.0.0.1:8940/auth/github/callback"
+    ; "lowest port", made 1, Ok "http://127.0.0.1:1/auth/github/callback"
+    ; "highest port", made 65535, Ok "http://127.0.0.1:65535/auth/github/callback"
+    ; "port 0", made 0, refused Login_client.Port_out_of_range
+    ; "port 65536", made 65536, refused Login_client.Port_out_of_range
+    ; "no client ID", made ~client_id:"" 8940, refused Login_client.Loopback_client_id_empty
+    ; "no secret", made ~client_secret:"" 8940, refused Login_client.Loopback_client_secret_empty
+    ; "empty path", made ~path:"" 8940, refused Login_client.Path_not_plain
+    ; "relative path", made ~path:"auth" 8940, refused Login_client.Path_not_plain
+    ; "a host in the path", made ~path:"@evil.example/" 8940, refused Login_client.Path_not_plain
+    ; "a query", made ~path:"/cb?next=1" 8940, refused Login_client.Path_not_plain
+    ; "a fragment", made ~path:"/cb#here" 8940, refused Login_client.Path_not_plain
+    ]
+  in
+  List.iter
+    (fun (label, got, expected) ->
+       Alcotest.(check (result string string)) label expected got)
+    rows
+;;
+
 let a_client_that_cannot_work_is_not_made () =
   let made ?(client_id = "test-client.apps.example") ?(client_secret = "secret-1") redirect_uri =
     match Login_client.make ~client_id ~client_secret ~redirect_uri with
@@ -338,6 +366,7 @@ let a_client_that_cannot_work_is_not_made () =
          true
          (made redirect_uri = Some Login_client.Redirect_uri_not_https))
     [ "http://masc.example/auth/oidc/callback"
+    ; "http://127.0.0.1:8940/auth/github/callback"
     ; "https:///auth/oidc/callback"
     ; "/auth/oidc/callback"
     ; "https://masc.example/auth/oidc/callback#here"
@@ -359,6 +388,7 @@ let () =
         ; Alcotest.test_case "cache lifetimes" `Quick cache_lifetimes_are_read_by_grammar
         ; Alcotest.test_case "texts" `Quick errors_are_told_apart
         ; Alcotest.test_case "client" `Quick a_client_that_cannot_work_is_not_made
+        ; Alcotest.test_case "loopback client" `Quick a_loopback_client_returns_to_this_computer
         ] )
     ]
 ;;

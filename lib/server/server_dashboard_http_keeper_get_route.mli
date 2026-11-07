@@ -54,6 +54,10 @@ val suffix : keeper_route -> string
 (** The path tail that selects the route, such as ["/metrics"]. *)
 
 val of_path : string -> t option
-(** [None] when the path is outside [/api/v1/keepers/] or names no route. A
+(** [of_path path] takes the path as [Http_server_eio.Request.path] gives it:
+    the request target before any [?], not percent-decoded. The name of
+    [/api/v1/keepers/a%2Fb/metrics] is [a%2Fb].
+
+    [None] when the path is outside [/api/v1/keepers/] or names no route. A
     keeper route needs at least one character before its suffix. No suffix
     ends another, so at most one route fits a path. *)

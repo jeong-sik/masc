@@ -50,6 +50,8 @@ let test_keeper_name () =
   in
   metrics "a/b/metrics" "a/b";
   metrics " a /metrics" "a";
+  (* The name is not percent-decoded. The handler refuses what is no name. *)
+  metrics "a%2Fb/metrics" "a%2Fb";
   (* A blank name reaches the handler, which refuses it. *)
   metrics " /metrics" "";
   check routed "a route needs a name" None (R.of_path (prefix ^ "/metrics"))

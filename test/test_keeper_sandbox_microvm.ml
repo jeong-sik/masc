@@ -3059,15 +3059,31 @@ let test_build_link_targets_include_already_correct_links () =
     (M.build_link_targets rows)
 ;;
 
+let one_request = function
+  | [ argv ] -> argv
+  | requests -> Alcotest.failf "expected one build request, got %d" (List.length requests)
+;;
+
+(* The count and the fields a build helper request carries after its name. *)
+let build_fields_after name argv =
+  let rec find = function
+    | helper :: count :: fields when String.equal helper name -> count, fields
+    | _ :: rest -> find rest
+    | [] -> Alcotest.failf "the build helper %s is missing" name
+  in
+  find argv
+;;
+
 let test_build_link_apply_argv_carries_positional_pairs () =
-  let argv, input =
-    M.build_link_apply_request_for
-      Backend.Apple_container
-      ~container_name:"masc-keeper-vm-polisher-abc"
-      ~keeper_work_root:"/masc-work/polisher"
-      ~uid:501
-      ~gid:20
-      ~actions:[ "masc-t362", "/masc-build/masc-t362"; "repos/wt-370", "/masc-build/repos:wt-370" ]
+  let argv =
+    one_request
+      (M.build_link_apply_requests_for
+         Backend.Apple_container
+         ~container_name:"masc-keeper-vm-polisher-abc"
+         ~keeper_work_root:"/masc-work/polisher"
+         ~uid:501
+         ~gid:20
+         ~actions:[ "masc-t362", "/masc-build/masc-t362"; "repos/wt-370", "/masc-build/repos:wt-370" ])
   in
   Alcotest.(check bool) "goes through container exec" true (contains "exec" argv);
   Alcotest.(check bool)
@@ -3078,27 +3094,22 @@ let test_build_link_apply_argv_carries_positional_pairs () =
     "cwd is the keeper's work root"
     true
     (adjacent ~flag:"-w" ~value:"/masc-work/polisher" argv);
-  Alcotest.(check bool) "stdin is attached" true (contains "-i" argv);
-  Alcotest.(check string) "pairs are NUL framed on stdin"
-    "masc-t362\000/masc-build/masc-t362\000repos/wt-370\000/masc-build/repos:wt-370\000" input;
-  Alcotest.(check bool) "guest paths are absent from argv" false
-    (contains "masc-t362" argv || contains "/masc-build/masc-t362" argv)
+  Alcotest.(check bool) "stdin is not attached" false (contains "-i" argv);
+  Alcotest.(check (pair string (list string))) "the pairs follow the helper name and their count"
+    ("4", [ "masc-t362"; "/masc-build/masc-t362"; "repos/wt-370"; "/masc-build/repos:wt-370" ])
+    (build_fields_after "masc-build-link" argv)
 ;;
 
-let test_build_link_apply_argv_with_no_actions_is_still_a_valid_script () =
-  let argv, input =
-    M.build_link_apply_request_for
-      Backend.Apple_container
-      ~container_name:"masc-keeper-vm-polisher-abc"
-      ~keeper_work_root:"/masc-work/polisher"
-      ~uid:501
-      ~gid:20
-      ~actions:[]
-  in
-  Alcotest.(check bool)
-    "empty input is valid and the request carries no path arguments"
-    true
-    (String.equal input "" && List.mem "masc-build-link" argv)
+let test_build_link_apply_with_no_actions_is_no_request () =
+  Alcotest.(check int) "no guest exec" 0
+    (List.length
+       (M.build_link_apply_requests_for
+          Backend.Apple_container
+          ~container_name:"masc-keeper-vm-polisher-abc"
+          ~keeper_work_root:"/masc-work/polisher"
+          ~uid:501
+          ~gid:20
+          ~actions:[]))
 ;;
 
 (* The scan shell uses GNU readlink in the Linux guest. Skip its host test if
@@ -3119,7 +3130,7 @@ let gnu_tool names =
 
 let build_input_args_after marker argv =
   let rec find = function
-    | ("/bin/sh" :: "-c" :: _ :: helper :: _ :: name :: _ :: _ :: _ :: _ as command)
+    | ("/bin/sh" :: "-c" :: _ :: helper :: _ :: name :: _ :: _ as command)
       when String.equal helper "masc-build-helper" && String.equal name marker ->
       command
     | _ :: rest -> find rest
@@ -3128,29 +3139,29 @@ let build_input_args_after marker argv =
   find argv
 ;;
 
-let run_build_input ~root ~marker argv input =
-  let input_path = Filename.temp_file ~temp_dir:root "payload-" ".bin" in
-  Fun.protect ~finally:(fun () -> Sys.remove input_path) (fun () ->
-    Out_channel.with_open_bin input_path (fun output -> output_string output input);
-    let input_fd = Unix.openfile input_path [ Unix.O_RDONLY ] 0 in
-    let null_fd = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
-    let args = Array.of_list
-      ([ "/bin/sh"; "-c";
-         "cd \"$1\" || exit 1; shift; PYTHONPATH=\"$PWD\"; export PYTHONPATH; exec \"$@\"";
-         "fixture"; root ] @ build_input_args_after marker argv) in
-    let pid = Fun.protect ~finally:(fun () -> Unix.close input_fd; Unix.close null_fd)
-      (fun () -> Unix.create_process "/bin/sh" args input_fd null_fd null_fd) in
-    snd (Unix.waitpid [] pid))
+(* Runs the helper part of a request on the host, in [root], with stdin on
+   /dev/null as the request attaches none, and with [root] on PYTHONPATH so
+   that a module planted there would run if isolated mode did not stop it. *)
+let run_build_request ~root ~marker argv =
+  let null_fd = Unix.openfile "/dev/null" [ Unix.O_RDWR ] 0 in
+  let args = Array.of_list
+    ([ "/bin/sh"; "-c";
+       "cd \"$1\" || exit 1; shift; PYTHONPATH=\"$PWD\"; export PYTHONPATH; exec \"$@\"";
+       "fixture"; root ] @ build_input_args_after marker argv) in
+  let pid = Fun.protect ~finally:(fun () -> Unix.close null_fd)
+    (fun () -> Unix.create_process "/bin/sh" args null_fd null_fd null_fd) in
+  snd (Unix.waitpid [] pid)
 ;;
 
-let replace_build_input_metadata argv ~input ~count =
+(* The request with its count and fields replaced, as a guest would get a
+   request that does not hold to the helper's contract. *)
+let replace_build_fields argv ~count ~fields =
   let rec replace = function
-    | "/bin/sh" :: "-c" :: wrapper :: helper :: script :: marker :: _size :: _hash :: _count :: rest
+    | "/bin/sh" :: "-c" :: wrapper :: helper :: script :: marker :: _count :: _fields
       when String.equal helper "masc-build-helper" ->
-      [ "/bin/sh"; "-c"; wrapper; helper; script; marker; string_of_int (String.length input);
-        Agent_core_sha256.(digest_string input |> to_hex); string_of_int count ] @ rest
+      [ "/bin/sh"; "-c"; wrapper; helper; script; marker; count ] @ fields
     | first :: rest -> first :: replace rest
-    | [] -> Alcotest.fail "generated build input request not found"
+    | [] -> Alcotest.fail "generated build request not found"
   in
   replace argv
 ;;
@@ -3190,8 +3201,9 @@ let replace_build_input_paths argv ~python_primary ~python_secondary =
 let test_build_input_wrapper_selects_one_interpreter () =
   let root = temp_dir "build-input-selection-" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
-    let argv, input = M.build_link_apply_request_for Backend.Apple_container
-        ~container_name:"fixture" ~keeper_work_root:"/fixture" ~uid:1 ~gid:1 ~actions:[] in
+    let argv = one_request (M.build_link_apply_requests_for Backend.Apple_container
+        ~container_name:"fixture" ~keeper_work_root:"/fixture" ~uid:1 ~gid:1
+        ~actions:[ "a", "/fixture/a" ]) in
     let rec script_arg = function
       | "/bin/sh" :: "-c" :: _ :: "masc-build-helper" :: script :: _ -> script
       | _ :: rest -> script_arg rest
@@ -3204,8 +3216,8 @@ let test_build_input_wrapper_selects_one_interpreter () =
       Out_channel.with_open_bin path (fun output ->
         output_string output "#!/bin/sh\n";
         Printf.fprintf output
-          "[ \"$#\" = 8 ] && [ \"$1\" = '-I' ] && [ \"$2\" = '-S' ] && [ \"$3\" = '-c' ] && [ \"$4\" = %s ] && [ \"$5\" = 'masc-build-link' ] && [ \"$6\" = '0' ] && [ \"$7\" = %s ] && [ \"$8\" = '0' ] || exit 90\n"
-          (Filename.quote script) (Filename.quote Agent_core_sha256.(digest_string input |> to_hex));
+          "[ \"$#\" = 8 ] && [ \"$1\" = '-I' ] && [ \"$2\" = '-S' ] && [ \"$3\" = '-c' ] && [ \"$4\" = %s ] && [ \"$5\" = 'masc-build-link' ] && [ \"$6\" = '2' ] && [ \"$7\" = 'a' ] && [ \"$8\" = '/fixture/a' ] || exit 90\n"
+          (Filename.quote script);
         Printf.fprintf output "printf '%%s\\n' %s >> %s\nexit %d\n"
           (Filename.quote label) (Filename.quote marker) status);
       Unix.chmod path 0o755;
@@ -3221,7 +3233,7 @@ let test_build_input_wrapper_selects_one_interpreter () =
     let check_selection description ~python_primary ~python_secondary ~expected_status ~expected_marker =
       Out_channel.with_open_bin marker (fun _ -> ());
       let selected = replace_build_input_paths argv ~python_primary ~python_secondary in
-      let status = run_build_input ~root ~marker:"masc-build-link" selected input in
+      let status = run_build_request ~root ~marker:"masc-build-link" selected in
       Alcotest.(check bool) (description ^ " status") true (status = Unix.WEXITED expected_status);
       Alcotest.(check string) (description ^ " selection") expected_marker
         (In_channel.with_open_bin marker In_channel.input_all)
@@ -3242,20 +3254,20 @@ let test_build_input_wrapper_selects_one_interpreter () =
       ~expected_status:127 ~expected_marker:"python-failed\n";
     let checkout = Filename.concat root "checkout" in
     Unix.mkdir checkout 0o700;
-    let link_argv, link_input = M.build_link_apply_request_for Backend.Apple_container
+    let link_argv = one_request (M.build_link_apply_requests_for Backend.Apple_container
         ~container_name:"fixture" ~keeper_work_root:"/fixture" ~uid:1 ~gid:1
-        ~actions:[ "checkout", "/fixture/target" ] in
+        ~actions:[ "checkout", "/fixture/target" ]) in
     let link_argv = replace_build_input_paths link_argv ~python_primary:absent ~python_secondary:absent in
     Alcotest.(check bool) "missing Python fails the link request" true
-      (run_build_input ~root ~marker:"masc-build-link" link_argv link_input = Unix.WEXITED 127);
+      (run_build_request ~root ~marker:"masc-build-link" link_argv = Unix.WEXITED 127);
     Alcotest.(check bool) "missing Python creates no link" false
       (match Unix.lstat (Filename.concat checkout "_build") with
        | _ -> true | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false);
     let target = Filename.concat root "target" in
-    let mkdir_argv, mkdir_input = M.build_target_mkdir_request ~container_name:"fixture" ~targets:[ target ] in
+    let mkdir_argv = one_request (M.build_target_mkdir_requests ~container_name:"fixture" ~targets:[ target ]) in
     let mkdir_argv = replace_build_input_paths mkdir_argv ~python_primary:absent ~python_secondary:absent in
     Alcotest.(check bool) "missing Python fails the mkdir request" true
-      (run_build_input ~root ~marker:"masc-build-mkdir" mkdir_argv mkdir_input = Unix.WEXITED 127);
+      (run_build_request ~root ~marker:"masc-build-mkdir" mkdir_argv = Unix.WEXITED 127);
     Alcotest.(check bool) "missing Python creates no target" false (Sys.file_exists target))
 ;;
 
@@ -3323,9 +3335,9 @@ let test_build_link_apply_preserves_racing_entries_and_continues () =
     let inodes = List.map (fun path -> (Unix.lstat path).st_ino) paths in
     let actions = List.map (fun name -> name, "/fixture/result")
         [ "dir"; "file"; "linked"; "dangling"; "-leading" ] in
-    let argv, input = M.build_link_apply_request_for Backend.Apple_container
-        ~container_name:"fixture" ~keeper_work_root:"/fixture" ~uid:1 ~gid:1 ~actions in
-    let status = run_build_input ~root ~marker:"masc-build-link" argv input in
+    let argv = one_request (M.build_link_apply_requests_for Backend.Apple_container
+        ~container_name:"fixture" ~keeper_work_root:"/fixture" ~uid:1 ~gid:1 ~actions) in
+    let status = run_build_request ~root ~marker:"masc-build-link" argv in
     Alcotest.(check bool) "collisions are reported" true (status <> Unix.WEXITED 0);
     Alcotest.(check (list int)) "existing entries keep their inodes" inodes
       (List.map (fun path -> (Unix.lstat path).st_ino) paths);
@@ -3347,19 +3359,19 @@ let test_build_target_mkdir_argv_runs_as_root_for_every_target () =
      ("Error: open(_build/.lock): No such file or directory"). The host
      cannot create it either, since it lives inside the volume's ext4 image.
      So the guest creates as root with a mode that lets the keeper write. *)
-  let argv, input =
-    M.build_target_mkdir_request
-      ~container_name:"masc-keeper-vm-polisher-abc"
-      ~targets:[ "/masc-build/masc-t362"; "/masc-build/repos:wt-370" ]
+  let argv =
+    one_request
+      (M.build_target_mkdir_requests
+         ~container_name:"masc-keeper-vm-polisher-abc"
+         ~targets:[ "/masc-build/masc-t362"; "/masc-build/repos:wt-370" ])
   in
   Alcotest.(check bool) "goes through container exec" true (contains "exec" argv);
   Alcotest.(check bool) "names the guest" true (contains "masc-keeper-vm-polisher-abc" argv);
   Alcotest.(check bool) "creates as root" true (adjacent ~flag:"--user" ~value:"0:0" argv);
-  Alcotest.(check bool) "stdin is attached" true (contains "-i" argv);
-  Alcotest.(check bool) "target paths are not argv" false
-    (contains "/masc-build/masc-t362" argv || contains "/masc-build/repos:wt-370" argv);
-  Alcotest.(check string) "both targets are framed on stdin"
-    "/masc-build/masc-t362\000/masc-build/repos:wt-370\000" input
+  Alcotest.(check bool) "stdin is not attached" false (contains "-i" argv);
+  Alcotest.(check (pair string (list string))) "both targets follow the helper name and their count"
+    ("2", [ "/masc-build/masc-t362"; "/masc-build/repos:wt-370" ])
+    (build_fields_after "masc-build-mkdir" argv)
 ;;
 
 let test_build_link_input_is_checked_before_effects () =
@@ -3367,91 +3379,117 @@ let test_build_link_input_is_checked_before_effects () =
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let checkout = Filename.concat root "odd\nname\tvalue" in
     Unix.mkdir checkout 0o700;
-    let argv, input = M.build_link_apply_request_for Backend.Apple_container
+    let argv = one_request (M.build_link_apply_requests_for Backend.Apple_container
       ~container_name:"fixture" ~keeper_work_root:"/fixture" ~uid:1 ~gid:1
-      ~actions:[ "odd\nname\tvalue", "/fixture/target" ] in
-    let no_effect description invalid =
+      ~actions:[ "odd\nname\tvalue", "/fixture/target" ]) in
+    let linked () =
+      match Unix.lstat (Filename.concat checkout "_build") with
+      | _ -> true | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false in
+    List.iter (fun (description, count, fields) ->
       Alcotest.(check bool) description true
-        (run_build_input ~root ~marker:"masc-build-link" argv invalid <> Unix.WEXITED 0);
-      Alcotest.(check bool) "unverified input cannot create a link" false
-        (match Unix.lstat (Filename.concat checkout "_build") with
-         | _ -> true | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false) in
-    no_effect "short payload rejected" (String.sub input 0 (String.length input - 1));
-    no_effect "extra payload rejected" (input ^ "x");
-    no_effect "changed payload rejected" ("x" ^ String.sub input 1 (String.length input - 1));
-    let missing_nul = String.sub input 0 (String.length input - 1) in
-    let malformed_argv = replace_build_input_metadata argv ~input:missing_nul ~count:2 in
-    Alcotest.(check bool) "matching hash without final NUL is rejected" true
-      (run_build_input ~root ~marker:"masc-build-link" malformed_argv missing_nul <> Unix.WEXITED 0);
-    let odd = "odd\nname\tvalue\000" in
-    let odd_argv = replace_build_input_metadata argv ~input:odd ~count:1 in
-    Alcotest.(check bool) "matching hash with an odd field count is rejected" true
-      (run_build_input ~root ~marker:"masc-build-link" odd_argv odd <> Unix.WEXITED 0);
-    List.iter (fun (description, invalid, count) ->
-      let invalid_argv = replace_build_input_metadata argv ~input:invalid ~count in
-      Alcotest.(check bool) description true
-        (run_build_input ~root ~marker:"masc-build-link" invalid_argv invalid <> Unix.WEXITED 0))
-      [ "single NUL is not an empty payload", "\000", 0
-      ; "empty first field is rejected", "\000/fixture/target\000", 2
-      ; "empty last field is rejected", "odd\nname\tvalue\000\000", 2
-      ; "empty middle field is rejected", "odd\nname\tvalue\000\000/fixture/target\000", 3
+        (run_build_request ~root ~marker:"masc-build-link" (replace_build_fields argv ~count ~fields)
+         <> Unix.WEXITED 0);
+      Alcotest.(check bool) (description ^ ": no link") false (linked ()))
+      [ "a count above the fields is rejected", "3", [ "odd\nname\tvalue"; "/fixture/target" ]
+      ; "a count below the fields is rejected", "1", [ "odd\nname\tvalue"; "/fixture/target" ]
+      ; "a count that is not a number is rejected", "two", [ "odd\nname\tvalue"; "/fixture/target" ]
+      ; "an odd field count is rejected", "1", [ "odd\nname\tvalue" ]
+      ; "an empty first field is rejected", "2", [ ""; "/fixture/target" ]
+      ; "an empty last field is rejected", "2", [ "odd\nname\tvalue"; "" ]
+      ; "an empty middle field is rejected", "3", [ "odd\nname\tvalue"; ""; "/fixture/target" ]
       ];
-    Alcotest.(check bool) "malformed framing created no link" false
-      (match Unix.lstat (Filename.concat checkout "_build") with
-       | _ -> true | exception Unix.Unix_error (Unix.ENOENT, _, _) -> false);
+    (* site would import sitecustomize from PYTHONPATH without -I and -S. *)
     let marker = Filename.concat root "module-ran" in
-    Out_channel.with_open_bin (Filename.concat root "hashlib.py") (fun output ->
+    Out_channel.with_open_bin (Filename.concat root "sitecustomize.py") (fun output ->
       Printf.fprintf output "open(%S, 'w').write('bad')\n" marker);
-    Alcotest.(check bool) "complete payload succeeds" true
-      (run_build_input ~root ~marker:"masc-build-link" argv input = Unix.WEXITED 0);
-    Alcotest.(check bool) "cwd module is never imported" false (Sys.file_exists marker);
+    Alcotest.(check bool) "the request succeeds" true
+      (run_build_request ~root ~marker:"masc-build-link" argv = Unix.WEXITED 0);
+    Alcotest.(check bool) "no module from the cwd or PYTHONPATH runs" false (Sys.file_exists marker);
     Alcotest.(check string) "newline and tab are preserved" "/fixture/target"
       (Unix.readlink (Filename.concat checkout "_build")))
 ;;
+
+(* The authoritative limits a request meets: macOS counts argv and the
+   environment together against ARG_MAX, and Linux counts each string against
+   MAX_ARG_STRLEN (execve(2)). *)
+let macos_arg_max = 1_048_576
+let linux_max_arg_strlen = 131_072
 
 let test_build_target_input_is_checked_before_effects () =
   let root = temp_dir "build-target-input-" in
   Fun.protect ~finally:(fun () -> Fs_compat.remove_tree root) (fun () ->
     let target = Filename.concat root "target" in
-    let argv, input = M.build_target_mkdir_request ~container_name:"fixture" ~targets:[ target ] in
-    let short = String.sub input 0 (String.length input - 1) in
-    Alcotest.(check bool) "incomplete stdin fails" true
-      (run_build_input ~root ~marker:"masc-build-mkdir" argv short <> Unix.WEXITED 0);
-    Alcotest.(check bool) "no target made from incomplete input" false (Sys.file_exists target);
-    let malformed = replace_build_input_metadata argv ~input:short ~count:1 in
-    Alcotest.(check bool) "matching hash without final NUL still fails" true
-      (run_build_input ~root ~marker:"masc-build-mkdir" malformed short <> Unix.WEXITED 0);
-    Alcotest.(check bool) "complete target input succeeds" true
-      (run_build_input ~root ~marker:"masc-build-mkdir" argv input = Unix.WEXITED 0);
+    let mkdir targets = M.build_target_mkdir_requests ~container_name:"fixture" ~targets in
+    let run argv = run_build_request ~root ~marker:"masc-build-mkdir" argv in
+    let argv = one_request (mkdir [ target ]) in
+    List.iter (fun (description, count, fields) ->
+      Alcotest.(check bool) description true (run (replace_build_fields argv ~count ~fields) <> Unix.WEXITED 0);
+      Alcotest.(check bool) (description ^ ": no target") false (Sys.file_exists target))
+      [ "a count above the targets fails", "2", [ target ]
+      ; "a count below the targets fails", "0", [ target ]
+      ; "an empty target fails", "2", [ target; "" ]
+      ];
+    Alcotest.(check bool) "the target is made" true (run argv = Unix.WEXITED 0);
     Unix.chmod target 0o700;
-    Alcotest.(check bool) "existing target succeeds" true
-      (run_build_input ~root ~marker:"masc-build-mkdir" argv input = Unix.WEXITED 0);
+    Alcotest.(check bool) "existing target succeeds" true (run argv = Unix.WEXITED 0);
     Alcotest.(check int) "existing mode is preserved" 0o700 ((Unix.stat target).st_perm);
-    let many = List.init 50000 (fun _ -> target) in
-    let large_argv, large_input = M.build_target_mkdir_request ~container_name:"fixture" ~targets:many in
-    Alcotest.(check bool) "payload is larger than one MiB" true (String.length large_input > 1_048_576);
-    Alcotest.(check bool) "large payload is processed without argv expansion" true
-      (run_build_input ~root ~marker:"masc-build-mkdir" large_argv large_input = Unix.WEXITED 0);
+    (* More path bytes than one macOS execve can carry. *)
+    let many = List.init (macos_arg_max / (String.length target + 1) + 1) (fun _ -> target) in
+    let requests = mkdir many in
+    Alcotest.(check bool) "the paths are split across requests" true (List.length requests > 1);
+    Alcotest.(check (list string)) "the requests carry every path, in order" many
+      (List.concat_map (fun argv -> snd (build_fields_after "masc-build-mkdir" argv)) requests);
+    Alcotest.(check bool) "every request succeeds" true
+      (List.for_all (fun argv -> run argv = Unix.WEXITED 0) requests);
     let nested = Filename.concat root "nested/child" in
-    let nested_argv, nested_input = M.build_target_mkdir_request ~container_name:"fixture" ~targets:[ nested ] in
     Alcotest.(check bool) "missing parent directories are made" true
-      (run_build_input ~root ~marker:"masc-build-mkdir" nested_argv nested_input = Unix.WEXITED 0);
+      (run (one_request (mkdir [ nested ])) = Unix.WEXITED 0);
     Alcotest.(check bool) "nested target exists" true (Sys.is_directory nested);
     let alias = Filename.concat root "directory-alias" in
     Unix.symlink nested alias;
-    let alias_argv, alias_input = M.build_target_mkdir_request ~container_name:"fixture" ~targets:[ alias ] in
     Alcotest.(check bool) "an existing directory symlink succeeds" true
-      (run_build_input ~root ~marker:"masc-build-mkdir" alias_argv alias_input = Unix.WEXITED 0);
+      (run (one_request (mkdir [ alias ])) = Unix.WEXITED 0);
     let blocked = Filename.concat root "regular-file" in
     Out_channel.with_open_bin blocked (fun output -> output_string output "preserve");
     let later = Filename.concat root "later" in
-    let failed_argv, failed_input = M.build_target_mkdir_request ~container_name:"fixture"
-        ~targets:[ Filename.concat blocked "child"; later ] in
     Alcotest.(check bool) "a regular-file parent is reported" true
-      (run_build_input ~root ~marker:"masc-build-mkdir" failed_argv failed_input <> Unix.WEXITED 0);
+      (run (one_request (mkdir [ Filename.concat blocked "child"; later ])) <> Unix.WEXITED 0);
     Alcotest.(check string) "regular-file parent is preserved" "preserve"
       (In_channel.with_open_bin blocked In_channel.input_all);
     Alcotest.(check bool) "a later target is still made" true (Sys.is_directory later))
+;;
+
+(* The longest checkouts a scan reports are three segments of NAME_MAX (255)
+   bytes, as it walks three levels. Two thousand of them is far over ARG_MAX in
+   one argv. *)
+let test_build_requests_stay_under_the_exec_limits () =
+  let checkout i =
+    String.concat "/" [ String.make 255 'a'; String.make 255 'b'; Printf.sprintf "%0255d" i ] in
+  let actions = List.init 2000 (fun i ->
+    let checkout = checkout i in
+    checkout, ok_exn (M.build_link_target ~playground_relative:checkout)) in
+  let environment =
+    Array.fold_left (fun total entry -> total + String.length entry + 1) 0 (Unix.environment ()) in
+  let within label requests =
+    Alcotest.(check bool) (label ^ ": split") true (List.length requests > 1);
+    List.iter (fun argv ->
+      let bytes = List.fold_left (fun total value -> total + String.length value + 1) 0 argv in
+      Alcotest.(check bool) (label ^ ": argv and environment under ARG_MAX") true
+        (bytes + environment < macos_arg_max);
+      Alcotest.(check bool) (label ^ ": each string under MAX_ARG_STRLEN") true
+        (List.for_all (fun value -> String.length value < linux_max_arg_strlen) argv))
+      requests in
+  let links = M.build_link_apply_requests_for Backend.Apple_container
+      ~container_name:"fixture" ~keeper_work_root:"/fixture" ~uid:1 ~gid:1 ~actions in
+  within "link" links;
+  Alcotest.(check (list string)) "a pair stays in one request, in order"
+    (List.concat_map (fun (checkout, target) -> [ checkout; target ]) actions)
+    (List.concat_map (fun argv ->
+       let count, fields = build_fields_after "masc-build-link" argv in
+       Alcotest.(check bool) "the count is the even number of fields" true
+         (int_of_string count = List.length fields && List.length fields mod 2 = 0);
+       fields) links);
+  within "mkdir" (M.build_target_mkdir_requests ~container_name:"fixture" ~targets:(List.map snd actions))
 ;;
 
 let test_volume_create_argv_carries_a_size () =
@@ -6014,10 +6052,10 @@ let () =
             test_build_link_actions_only_includes_create
         ; Alcotest.test_case "build link targets include already-correct links" `Quick
             test_build_link_targets_include_already_correct_links
-        ; Alcotest.test_case "build link apply sends pairs on stdin" `Quick
+        ; Alcotest.test_case "build link apply sends pairs in argv" `Quick
             test_build_link_apply_argv_carries_positional_pairs
-        ; Alcotest.test_case "build link apply argv with no actions is still a valid script" `Quick
-            test_build_link_apply_argv_with_no_actions_is_still_a_valid_script
+        ; Alcotest.test_case "build link apply with no actions is no request" `Quick
+            test_build_link_apply_with_no_actions_is_no_request
         ; Alcotest.test_case "build input wrapper selects one interpreter" `Quick
             test_build_input_wrapper_selects_one_interpreter
         ; Alcotest.test_case "build scan preserves newlines and tabs as data" `Quick
@@ -6028,6 +6066,8 @@ let () =
             test_build_link_input_is_checked_before_effects
         ; Alcotest.test_case "build target input is checked before effects" `Quick
             test_build_target_input_is_checked_before_effects
+        ; Alcotest.test_case "build requests stay under the exec limits" `Quick
+            test_build_requests_stay_under_the_exec_limits
         ; Alcotest.test_case "build target mkdir argv runs as root for every target" `Quick
             test_build_target_mkdir_argv_runs_as_root_for_every_target
         ] )

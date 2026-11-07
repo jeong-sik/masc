@@ -5530,7 +5530,10 @@ let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   let write () =
     Mkdir_memo.mkdir_p_memoized ~mkdir_p:mkdir_p_unix
       (Stdlib.Filename.dirname path);
-    append_file_unix path (Yojson.Safe.to_string json ^ "\n")
+    let buf = Buffer.create 256 in
+    Yojson.Safe.to_buffer buf json;
+    Buffer.add_char buf '\n';
+    append_file_unix path (Buffer.contents buf)
   in
   (* Keep the path lock and cached-channel lease wholly inside the job.
      The joined result is also the caller's commit-acknowledgement boundary:
@@ -5550,7 +5553,7 @@ let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
         (Stdlib.Filename.dirname path);
       let buf = Buffer.create 4096 in
       List.iter (fun json ->
-        Buffer.add_string buf (Yojson.Safe.to_string json);
+        Yojson.Safe.to_buffer buf json;
         Buffer.add_char buf '\n'
       ) jsons;
       append_file_unix path (Buffer.contents buf)

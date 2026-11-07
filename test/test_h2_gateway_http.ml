@@ -1,11 +1,11 @@
-(** The HTTP/2 gateway asks the HTTP/1 router for the kind of each request and runs
-    the gate that goes with it. These tests drive the real gateway over an h2c
-    connection against the production route table, and against small tables that
-    disagree with an arm, which the gateway must refuse. *)
+(** HTTP/2 requests run the HTTP/1.1 route table through the shared ingress.
+    These tests drive the real adapter over an h2c connection against the
+    production route table and against small tables, and check that a request
+    gets the answer the table's registration kind gives it. *)
 
 open Alcotest
 
-(* [with_h2_public_read] answers 503 until the server state is marked ready. *)
+(* Public reads answer 503 until the server state is marked ready. *)
 let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
 
 let rec remove_tree path =
@@ -15,7 +15,7 @@ let rec remove_tree path =
   else Sys.remove path
 
 let with_gateway ?(on_routes = fun _ -> ()) ?(with_runtime = fun ~env:_ ~sw:_ run -> run ()) ~make_routes run =
-  let base_path = Filename.temp_dir "h2-route-gate-" "" in
+  let base_path = Filename.temp_dir "h2-gateway-" "" in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect ~finally:(fun () ->
     Masc.Board_dispatch.reset_for_test ();
@@ -59,8 +59,7 @@ let with_gateway ?(on_routes = fun _ -> ()) ?(with_runtime = fun ~env:_ ~sw:_ ru
         let routes = make_routes ~sw ~clock in
         on_routes routes;
         let handler =
-          Server_h2_gateway.make_request_handler ~trust_policy ~routes ~sw ~clock
-            ~server_start_time:0.
+          Server_h2_gateway.make_request_handler ~trust_policy ~routes
         in
         let server_flow, client_flow = Eio_unix.Net.socketpair_stream ~sw () in
         let server = Eio.Fiber.fork_promise ~sw (fun () ->
@@ -108,9 +107,8 @@ let production ~sw ~clock = Server_routes_http.make_routes ~port:0 ~host:"127.0.
 let strict value run =
   Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" value run
 
-(* A route HTTP/1 registers as [Public_read] asks for a credential under strict
-   auth. Before the gate read the router, the HTTP/2 arm of the agent card had no
-   gate and answered without one. *)
+(* A route registered as [Public_read] asks for a credential under strict auth
+   on HTTP/2 as on HTTP/1.1. *)
 let test_public_read_follows_the_router () =
   with_gateway ~make_routes:production (fun ~player:_ ~reader:_ client ->
     strict None (fun () ->
@@ -130,9 +128,9 @@ let test_token_permission_follows_the_router () =
     check int "a Player token lacks the CanAdmin the router records" 403
       (status ~token:player ~meth:`GET client "/api/v1/lanes"))
 
-(* The keepers prefix is [Subpath_dispatch]: the router holds no kind for its
-   sub-routes, so its arms keep their own token check. *)
-let test_subpath_arms_keep_their_own_gate () =
+(* The keepers prefix is [Subpath_dispatch]: the table holds no kind for its
+   sub-routes, so the handler checks the token itself. *)
+let test_subpath_routes_check_the_token_themselves () =
   with_gateway ~make_routes:production (fun ~player:_ ~reader:_ client ->
     check int "github identity needs a credential" 401
       (status ~meth:`GET client "/api/v1/keepers/someone/github-identity"))
@@ -152,28 +150,6 @@ let test_a_path_the_router_lacks_is_not_found () =
       |> Server_route.post Server_route.Always_public "/health" (fun _request _reqd -> ()))
     (fun ~player:_ ~reader:_ client ->
       check int "a method the table lacks" 405 (status ~meth:`GET client "/health"))
-
-(* The arm of [/api/v1/lanes] needs an actor. A table that records a kind with no
-   actor must not turn the route into an open one. *)
-let test_a_table_that_disagrees_with_an_arm_refuses () =
-  with_gateway
-    ~make_routes:(fun ~sw:_ ~clock:_ ->
-      Masc.Http_server_eio.Router.create ()
-      |> Server_route.get Server_route.Public_read "/api/v1/lanes"
-           (fun _state _request _reqd -> ()))
-    (fun ~player:_ ~reader:_ client ->
-      check int "public_read where the arm needs an actor" 500
-        (status ~meth:`GET client "/api/v1/lanes"));
-  with_gateway
-    ~make_routes:(fun ~sw:_ ~clock:_ ->
-      Masc.Http_server_eio.Router.create ()
-      |> Server_route.get
-           (Server_route.Self_authenticated Masc.Route_access.Subpath_dispatch)
-           "/api/v1/lanes"
-           (fun _request _reqd -> ()))
-    (fun ~player:_ ~reader:_ client ->
-      check int "a kind HTTP/2 does not serve" 500
-        (status ~meth:`GET client "/api/v1/lanes"))
 
 let test_fusion_workspace_admission () =
   with_gateway ~make_routes:production (fun ~player ~reader:_ client ->
@@ -609,17 +585,15 @@ let test_strict_auth_opens_a_path_by_its_kind () =
     ]
 
 let () =
-  run "H2 route gate"
-    [ ( "gate"
+  run "H2 gateway"
+    [ ( "one table"
       , [ test_case "public read follows the router" `Quick test_public_read_follows_the_router
         ; test_case "token permission follows the router" `Quick
             test_token_permission_follows_the_router
-        ; test_case "subpath arms keep their own gate" `Quick
-            test_subpath_arms_keep_their_own_gate
+        ; test_case "subpath routes check the token themselves" `Quick
+            test_subpath_routes_check_the_token_themselves
         ; test_case "a path the router lacks is not found" `Quick
             test_a_path_the_router_lacks_is_not_found
-        ; test_case "a table that disagrees with an arm refuses" `Quick
-            test_a_table_that_disagrees_with_an_arm_refuses
         ; test_case "Fusion workspace admission" `Quick test_fusion_workspace_admission
         ; test_case "physical Skill turn evidence" `Quick test_physical_skill_turn_evidence
         ; test_case "bound Goal tree bypasses stale cache" `Quick test_goal_tree_bound_read_bypasses_stale_cache

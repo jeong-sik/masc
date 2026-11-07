@@ -84,7 +84,7 @@ let form_of body = pairs (Uri.query_of_encoded body)
 
 let respond reqd { R.status; headers; body } =
   let headers = headers @ [ "content-length", string_of_int (String.length body) ] in
-  Httpun.Reqd.respond_with_string
+  Http_reqd.respond_with_string
     reqd
     (Httpun.Response.create
        ~headers:(Httpun.Headers.of_list headers)

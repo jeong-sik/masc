@@ -29,8 +29,8 @@ let with_eio_env f =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   let tmp_dir = make_test_dir () in
-  let config = { (Backend.default_config ()) with
-    base_path = tmp_dir;
+  let config = {
+    Backend.base_path = tmp_dir;
     node_id = "test_node";
   } in
   let backend = Backend.FileSystem.create ~fs config in

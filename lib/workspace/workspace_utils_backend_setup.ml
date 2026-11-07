@@ -328,7 +328,6 @@ let backend_config_for base_path =
   {
     Backend_types.base_path = Common.masc_dir_from_base_path ~base_path;
     Backend_types.node_id = Backend_types.generate_node_id ();
-    Backend_types.pubsub_max_messages = Backend_types.pubsub_max_messages;
   }
 
 let memory_backend_fallback (cfg : Backend_types.config) =

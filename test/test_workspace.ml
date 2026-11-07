@@ -641,7 +641,6 @@ let with_memory_test_env f =
   let backend_config : Backend_types.config = {
     base_path = Filename.concat tmp_dir Common.masc_dirname;
     node_id = "test-node";
-    pubsub_max_messages = 1000;
   } in
   let memory_backend = Backend.Memory.create () in
   let config : Workspace_utils.config = {

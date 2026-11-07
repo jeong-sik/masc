@@ -33,10 +33,7 @@ type health_result = {
 type config = {
   base_path: string;
   node_id: string;
-  pubsub_max_messages: int;
 }
-
-let pubsub_max_messages = 1000
 
 (* [node_id] is the owner recorded on a workspace lock, so two live processes
    holding the same one each read the other's lock as their own. Hostname and
@@ -59,7 +56,6 @@ let generate_node_id () =
 let default_config () = {
   base_path = Common.masc_dirname;
   node_id = generate_node_id ();
-  pubsub_max_messages = pubsub_max_messages;
 }
 
 (* ============================================ *)

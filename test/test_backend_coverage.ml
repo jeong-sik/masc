@@ -72,15 +72,6 @@ let test_validate_ttl_boundary () =
   check int "TTL at min boundary" 1 (Backend_types.validate_ttl 1)
 
 (* ============================================================ *)
-(* Backend_types - Config constants                          *)
-(* ============================================================ *)
-
-let test_pubsub_max_messages_constant () =
-  (* Test the fixed default value. *)
-  let result = Backend_types.pubsub_max_messages in
-  check bool "pubsub default >= 100" true (result >= 100)
-
-(* ============================================================ *)
 (* Backend.ml - Compression Tests                            *)
 (* ============================================================ *)
 
@@ -169,8 +160,7 @@ let with_eio_backend_and_dir f =
   let clock = Eio.Stdenv.clock env in
   let tmp_dir = make_test_dir "masc_eio" in
   let config =
-    { (Backend.default_config ()) with
-      base_path = tmp_dir
+    { Backend.base_path = tmp_dir
     ; node_id = "test"
     }
   in
@@ -464,9 +454,6 @@ let () =
       test_case "normal TTL" `Quick test_validate_ttl_normal;
       test_case "large TTL" `Quick test_validate_ttl_large;
       test_case "boundary TTL" `Quick test_validate_ttl_boundary;
-    ];
-    "config_constants", [
-      test_case "pubsub_max_messages" `Quick test_pubsub_max_messages_constant;
     ];
     "eio_compression", [
       test_case "small data" `Quick test_compression_small_data;

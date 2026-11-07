@@ -23,7 +23,7 @@ let test_record_and_ordering () =
     let newest = List.hd pulse.samples in
     Alcotest.(check (float 0.001)) "newest at" 110.0 newest.at;
     Alcotest.(check string) "newest outcome" "failed" (Pulse.outcome_to_string newest.outcome);
-    let outcomes = List.map (fun s -> Pulse.outcome_to_string s.outcome) pulse.samples in
+    let outcomes = List.map (fun (s : Pulse.sample) -> Pulse.outcome_to_string s.outcome) pulse.samples in
     Alcotest.(check (list string)) "outcomes newest first" [ "failed"; "rested"; "ok" ] outcomes
 ;;
 

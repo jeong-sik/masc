@@ -341,6 +341,7 @@ let decoded result = Result.map_error (fun error -> Failed error) result
 let rec await_response reader ~id ~meth =
   match Eio.Buf_read.line reader with
   | exception End_of_file -> Error Child_gone
+  | exception Eio.Io (_, _) -> Error Child_gone
   | exception Eio.Buf_read.Buffer_limit_exceeded ->
     protocol meth (Printf.sprintf "a line is longer than %d bytes" max_line_bytes)
   | line ->

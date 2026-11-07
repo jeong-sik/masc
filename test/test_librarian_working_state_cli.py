@@ -17,10 +17,14 @@ from typing import Any
 def message(role: str, text: str) -> dict[str, Any]:
     # Agent_core.Checkpoint.message_to_json / Api_common.content_block_to_json.
     # keeper_context_core_message_json.ml requires the origin field on every
-    # persisted checkpoint message.
+    # persisted checkpoint message, and message_origin_of_string
+    # (packages/agent_core/lib/llm_provider/types.ml) only accepts
+    # conversation/system_context/historical_system_context/
+    # recovery_instruction/tool_result_followup/agent_instruction —
+    # "user"/"assistant" are role values, not origins.
     return {
         "role": role,
-        "origin": "user" if role == "user" else "assistant",
+        "origin": "conversation",
         "content": [{"type": "text", "text": text}],
     }
 

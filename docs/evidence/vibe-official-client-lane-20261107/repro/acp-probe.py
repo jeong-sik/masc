@@ -5,10 +5,10 @@ Usage: python3 -I acp-probe.py <empty-workdir>
 Sends initialize, _auth/status, session/new and _account/read over stdio.
 No prompt is sent, so no model call is made. MISTRAL_API_KEY is removed from
 the child environment, as the lane does. Identifiers and the key suffix are
-masked; a JSON-RPC error prints its code only, since its message can name
-local paths. The plan title and budget numbers are printed for the
-operator's own console; the evidence bundle commits only their field names
-and kinds, written by hand from this output.
+masked, and so are the plan name and title; a JSON-RPC error prints its code
+only, since its message can name local paths. Budget numbers are printed for
+the operator's own console and are not to be shared; the evidence bundle
+commits only their field names and kinds, written by hand from this output.
 
 The call is not read-only for Vibe: _account/read rewrites Vibe's whoami
 cache under ~/.vibe, and session/new takes a session lease.
@@ -24,7 +24,7 @@ import time
 
 MASKED_KEYS = frozenset(
     {"customer_id", "sessionId", "session_id", "email", "userId", "user_id",
-     "organizationId", "workspaceId", "preview", "name"}
+     "organizationId", "workspaceId", "preview", "name", "title"}
 )
 CALL_TIMEOUT_S = 30.0
 EXIT_TIMEOUT_S = 10.0

@@ -94,6 +94,7 @@ journal_dir, started_at, ended_at, limits, exit_code.
   - `acp/auth-status.json`: `authenticated=true`, `authState=os_keyring`
   - `acp/account-read.shape.json`: `status=ready`, `plan.kind=chat`, `apiKey.scope=vibe`.
     플랜 이름, 키 끝자리, budget 값은 계정 값이라 남기지 않았다.
+  - probe 의 콘솔 출력에는 budget 수치가 남는다. 그 출력은 공유하지 않는다.
 - 키 종류: Vibe 의 whoami 캐시(`~/.vibe/whoami_cache.json`)에 같은 날 두 항목이 있었다.
   m0 시각(09:14:45Z)의 항목은 `plan_type=chat`, m4 시각(09:21:45Z, env 키)의 항목은
   `plan_type=api` 다. Vibe 소스 주석은 plan_type 이 키 scope 에서 온다고 적는다

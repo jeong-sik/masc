@@ -75,7 +75,12 @@
 2026-09 로컬 벤치 데이터셋을 그대로 다시 썼다
 (`~/me/.masc/benchmarks/local-llm-2026-09/`, 읽기만).
 채점기도 그 벤치의 `replay_exact.py` 것을 불러 썼다.
-요청 모양은 MASC `openai_chat` 경로를 따랐다. 통과선은 보내기 전에 정했다.
+요청에는 `json_schema` strict를 실었고, 400이 오면 `json_object`로 다시 보내게 했다.
+MASC exact 레인은 이와 다르다. `Json_syntax`를 요청하므로 `json_schema`를 보내지 않는다.
+대신 스키마 지시를 마지막 사용자 메시지로 덧붙인다(`exact_output_ready_admission.ml`).
+이 재생에는 그 지시가 없었고, Tinker는 `response_format`을 적용하지 않았다.
+모델이 본 형식 안내는 librarian 프롬프트에 원래 있던 것뿐이다.
+통과선은 보내기 전에 정했다.
 
 | effort | librarian 유효 | librarian 지연 p50 | board 일치 | board 생산 가중 | board 몰림 p50 | 비용 |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -157,11 +162,16 @@ no-op 여부가 클라우드와 같은 것은 11/17이다.
 ## 6. 다음에 해 볼 것
 
 1. **librarian 2순위 슬롯.** `low` 기준으로 클라우드 다음 순서에 둔다.
-   기본 ID와 `max-context = 65536`을 쓰고, effort 사다리를 적는다.
+   exact 슬롯은 AGENT_CORE 카탈로그의 provider 행과 모델 행에만 붙는다(`Exact_output_catalog_binding.resolve_exact`).
+   runtime.toml에만 적은 행은 부팅 때 exact 레지스트리에서 빠진다.
+   그래서 창 65,536과 effort 사다리는 카탈로그 행에 적고, runtime.toml은 그 행을 묶기만 한다.
+   카탈로그 행은 측정대로 JSON mode와 native schema를 둘 다 `false`로 둔다.
+   MASC exact 레인은 모두 `Json_syntax`라서 이 값으로도 레인에 들어간다.
    설정은 운영자 저장 경로(runtime.toml save channel)로 바꾸고, 모델 행이라 재시작이 필요하다.
-   librarian 입력의 15%는 회사 쪽 Keeper 몫이다. 이것을 Tinker로 보낼지는 따로 정해야 한다.
-2. **지금 프롬프트로 다시 재생.** 라이브 librarian 입력 p50이 12.9KB로 줄었으니,
-   최근 기록으로 표본을 새로 뽑아 같은 통과선으로 잰다.
+   librarian 입력의 15%는 회사 쪽 Keeper 몫이다. 운영자가 2026-11-07에 이것도 Tinker로 보내도 된다고 정했다.
+2. **지금 프롬프트와 MASC 경로로 다시 재생.** 라이브 librarian 입력 p50이 12.9KB로 줄었으니,
+   최근 기록으로 표본을 새로 뽑는다. 요청은 MASC exact 레인처럼 `response_format` 없이
+   스키마 지시를 덧붙여 보내고, 같은 통과선으로 잰다.
 3. **학습 파이프라인 확인.** cookbook `sl_basic`·`rl_basic`에 Inkling 2 렌더러와
    샘플링 logprob을 붙여 한 바퀴 돌린다. 기준은 고정한 평가 세트의 점수가 오르는가다.
 4. **librarian 처분 규칙 SFT.** 합성 입력, Tinker 교사 답, 결정론 검사로 데이터를 만든다.

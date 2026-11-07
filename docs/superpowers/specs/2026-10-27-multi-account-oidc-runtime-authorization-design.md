@@ -216,12 +216,15 @@ Subject =
   | Credential of provider_account_id
   | Principal of principal_id
   | Runtime of runtime_id
+  | Session of session_id
   | Invite of invite_id
   | Registration of registration_id
   | Workspace of workspace_id
 ```
 
 Intent는 대상 없이 digest만 남기지 않는다. 중단된 회수가 어느 `Grant`·`Credential`·`Principal`·`Runtime`·`Invite`·`Registration`에 대한 것인지 게이트가 식별할 수 있어야 한다. `Invite`는 초대 token 취소의 대상이다(§8.2). 중단된 취소의 초대는 입장에 쓰이지 않는다. `Registration`은 allowlist 등록 지우기의 대상이다. 대상은 신원이 아니라 등록 id이고, 신원은 `authz.jsonl` 사건에만 둔다(§4.1). 중단된 지우기의 등록도 입장에 쓰이지 않는다. 모드 사건(§5.1)은 회수가 아니라서 이 목록에 들지 않고, 대상은 `Workspace`다.
+
+`Session`은 브라우저 세션 폐기의 대상이다(§5.2). 로그아웃과, 같은 브라우저의 새 로그인이 끊는 옛 세션이 여기에 든다. 중단된 폐기의 세션은 인증에 쓰이지 않는다.
 
 ## 5. 인증과 Provider 등록
 
@@ -281,6 +284,8 @@ Authorization Code + PKCE(S256), state, nonce, exact redirect URI를 사용하�
 - `__Host-masc_session`: Secure, HttpOnly, host-only, Path=/, SameSite=Strict.
 - `__Host-masc_oidc_txn`: Secure, HttpOnly, host-only, Path=/, SameSite=Lax. state/nonce/PKCE와 서버 transaction에 결속한다.
 - `__Host-masc_mcp_session`: Secure, HttpOnly, host-only, Path=/, SameSite=Strict. `mcp-session-id` 헤더와 별개이며 **인증 수단이 아니다.**
+
+세션은 `authz.jsonl` 레코드다(계획 C3, 2026-11-07 사용자 결정). 그래서 서버가 다시 시작해도 남는다. 레코드에는 세션 secret의 digest만 둔다. 세션은 발급하고 7일 뒤 끝나고, 쓰는 동안 늘리지 않는다. 세션을 읽을 때 그 principal이 Active인지 함께 본다.
 
 transport는 `Browser_session(session_id) | Scoped_pat(pat_id)`에 결속하고 opaque transport ID는 auth session ID와 다르다. 매 요청에 독립 인증을 요구하고 transport ID만으로 principal을 만들지 않는다. auth session/PAT 폐기·재발급 시 transport와 WS/SSE를 닫는다.
 
@@ -472,6 +477,8 @@ resource_epoch   : Runtime/ProviderAccount Disable/Block/Quarantine/Purge/정책
 ### 8.2 고수위와 Intent/Committed
 
 backup 밖 append-only 저장소에는 객체의 scoped epoch 최고값·artifact별 `credential_generation`·Intent 상태를 기록한다. 이 저장소와 아래 Intent/Committed 규칙은 **scoped epoch를 올리거나 `credential_generation`을 바꾸는 사건**(Grant·Revoke·Disable·Delete·Block·Purge·정책 회수·credential 교체)과 모드 사건(`Fresh_bootstrap`, `off`, `reactivate`. §5.1)에만 적용한다. 초대 token 취소도 credential 무효화로 보고 `Revoke`(subject는 그 초대)로 쓴다. token을 가진 사람은 만료나 취소 전까지 들어오므로(§5.1-4), 복원이 취소를 되감으면 그 초대가 다시 열린다. 초대 발급은 epoch를 올리지 않아 이 규칙을 따르지 않는다. allowlist 등록 지우기도 같은 까닭으로 `Revoke`(subject는 그 등록)로 쓰고, 등록은 이 규칙을 따르지 않는다(계획 C2d). lease 발급·`Lease_dispatched`·`Completed`·`Revoked`는 `authz.jsonl`에만 쓰고 발급 때 읽은 epoch에 결속한다. replay 값과 외부 고수위가 다르거나 외부 저장소를 읽지 못하면 `AuthorizationUncertain`으로 시작하고 옛 lease·점유·grant를 승인하지 않는다. 고수위 일치는 무결성 조건이지 실행 승인 조건이 아니다.
+
+브라우저 세션 폐기는 `auth_binding_epoch`를 올리므로(§8.1) `Revoke`(subject는 그 세션)로 쓴다. 복원이 폐기를 되감으면 끊은 세션이 다시 살아나기 때문이다. 같은 브라우저의 새 로그인이 옛 세션을 끊는 발급도 그 옛 세션을 subject로 쓴다. 옛 세션이 없는 발급은 이 규칙을 따르지 않는다. 되감기면 그 세션이 사라져 로그아웃될 뿐이다(계획 C3).
 
 ```text
 Intent_pending {

@@ -13,13 +13,13 @@ type index
 
 val index_of_agenda :
   freshness:Masc_tui_agenda.schedule_freshness ->
-  ?runner:Tui_decode.schedule_runner_status ->
+  ?runner:Masc.Tui_decode.schedule_runner_status ->
   Masc_tui_types.schedule_snapshot option ->
   index
 
 val of_snapshot :
   freshness:Masc_tui_agenda.schedule_freshness ->
-  ?runner:Tui_decode.schedule_runner_status ->
+  ?runner:Masc.Tui_decode.schedule_runner_status ->
   keeper_name:string ->
   Masc_tui_types.schedule_snapshot ->
   t

@@ -1,3 +1,5 @@
+open Masc
+
 type t =
   | No_schedule
   | Scheduled_at of float

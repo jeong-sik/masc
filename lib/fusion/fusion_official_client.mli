@@ -177,8 +177,9 @@ and vibe_failure =
           config, no call directory, spawn refused), the process was
           killed or ran out of time, or its outputs did not agree (no or
           unreadable [export.json], an unreadable transcript, an exit code
-          that disagrees). The last three come after the export was read,
-          but the error does not carry its usage, so none is reported. *)
+          that disagrees). An unreadable transcript and a disagreeing exit
+          code come after the export was read, but the error does not carry
+          its usage, so none is reported. *)
   | Vibe_not_answered of Runtime_vibe_answer.error
       (** Vibe ended the run, but not with a reply this caller can use. *)
 
@@ -226,8 +227,9 @@ val run_with_images
     Vibe runs once in headless mode in an empty private workdir without
     [--trust], with [system_prompt] framed the same way; it refuses an output
     schema, nonempty image input and a declared [timeout_s], since its call
-    has none of those channels and no MASC time limit. Its answer is the last
-    assistant message of a [finished] run ({!Runtime_vibe_answer}).
+    has none of those channels and no MASC time limit. Its answer is the text
+    of a [finished] run's last entry when that entry is an assistant message
+    ({!Runtime_vibe_answer}).
     [on_usage] observes reported counts before terminal failure is projected;
     counts are snapshots, not additive deltas. [model] is the transport's
     response identity. [usage] carries reported token counts; absent counts are

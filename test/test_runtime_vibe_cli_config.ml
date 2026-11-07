@@ -21,6 +21,7 @@ let runtime_toml
      %s\n\
      [models.vibe-model]\n\
      api-name = \"vibe-model-alias\"\n\
+     max-context = 262144\n\
      %s\n\
      \n\
      [mistral_vibe.vibe-model]\n\

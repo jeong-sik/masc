@@ -111,7 +111,9 @@ for inherited versus explicit homes and Codex configuration requirements.
 `vibe-cli` runs Mistral Vibe once per call in headless mode. `command` is the
 `vibe` binary, spawned as written: unlike the other official clients it gets
 no installer-directory lookup, so a bare `vibe` resolves only through the
-server's `PATH`. The binding's `api-name` becomes Vibe's `--model`. Vibe
+server's `PATH`. The binding's `api-name` becomes Vibe's `--model`. No
+catalog row gives a Vibe model its window, so the binding, provider or model
+must declare `max-context`, or the load fails with `Max_context_absent`. Vibe
 reads the operator's own `~/.vibe` config and keychain login, so the provider
 declares neither credentials nor `account-home`. A Vibe runtime answers
 Fusion panel calls and `masc-lane-cli-probe` only:

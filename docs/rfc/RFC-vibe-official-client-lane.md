@@ -292,7 +292,8 @@ official-client lane 후보의 종류·자격 증명·계약·관측·실패 처
 
 - runtime.toml 에 `protocol = "vibe-cli"` 를 쓴다. `command` 는 `vibe` 실행
   파일이고, binding 의 `api-name` 이 Vibe 의 `--model` 이 된다. 편집기에는
-  나오지 않는다.
+  나오지 않는다. catalog 행이 없어서 binding·provider·모델 중 한 곳에
+  `max-context` 를 적어야 load 된다.
 - Vibe 는 운영자의 `~/.vibe/config.toml` 과 keychain 로그인을 그대로 쓴다.
   provider 는 credentials 와 `account-home` 을 적지 않는다. lane 전용
   `VIBE_HOME` 은 그 아래에서도 keyring 이 읽히는지 잰 뒤에 정한다.
@@ -308,7 +309,9 @@ official-client lane 후보의 종류·자격 증명·계약·관측·실패 처
   - Fusion 그룹이 `timeout_s` 를 적으면 그 패널리스트는 프로세스를 띄우기
     전에 거절한다. 이미지와 output schema 도 같다.
 - 패널리스트는 빈 임시 디렉터리를 `--workdir` 로 받고 `--trust` 는 받지
-  않는다. 답은 `finished` 로 끝난 실행의 마지막 assistant 메시지다.
+  않는다. 답은 `finished` 로 끝난 실행의 마지막 항목이다. 그 항목이
+  assistant 메시지가 아니면 답이 없다고 본다. 앞선 assistant 메시지를 답으로
+  잡지 않는다.
 - 준비 검사는 `masc-lane-cli-probe --vibe-acp PATH` 가 시도 전에 한 번 한다.
   budget 을 모르면 그렇다고 찍고 진행한다(운영자 결정, 11-08). 다른 이유로
   준비가 안 됐으면 exit 3 으로 멈춘다.

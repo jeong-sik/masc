@@ -290,7 +290,7 @@ let test_the_tool_series_is_a_source_of_its_own_that_no_surface_or_push_asks_for
        (Types.surface_needs_delta
           ~previous:{ (needs Types.Metrics) with Types.needs_tool_series = true }
           ~next:(needs Types.Metrics)));
-  check bool "no push owes it" false
+  check bool "its read is owed, so a failed read is tried again and a clock can owe it" true
     (List.mem Order.Tool_series Types.pushed_sources)
 
 let test_navigation_settles_while_a_full_reader_is_pending () =

@@ -650,7 +650,10 @@ one column per UTC hour (1d) or UTC day (7d, 14d), and a table of the same
 numbers with the newest bucket first. `·` is a bucket in which no call ran; it
 has no p95 and is not zero milliseconds. A column is red only when every call in
 it failed. The newest column is still open. `w` changes the window; the Calls
-section reads only while it is on screen.
+section reads only while it is on screen, reads again a minute after each
+answer, and tries again after a failed read. The server answers from a cache
+that it refreshes in the background, so a read shows the store as of the read
+before it. The heading names the time of the answer the bars were drawn from.
 
 Keeper rows show recorded 24-hour token and cost totals with the number of
 turns that reported each value and the number missing it. Transport delivery

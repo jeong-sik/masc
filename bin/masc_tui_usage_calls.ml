@@ -30,6 +30,8 @@ let hours_per_bucket = function
 
 let since_hours window = bucket_count window * hours_per_bucket (width window)
 
+let reread_s = 60.0
+
 type t = {
   window : window;
   series : Series.tool_series;

@@ -16459,13 +16459,16 @@ let apply_provider_history_load state { phr_days = days; phr_requested_at; phr_r
 
 (* A reply to a period the operator has since left is dropped. A failed read
    replaces the last good one, as the history's does: bars drawn from a read
-   that stopped arriving would be buckets nobody observed this refresh. *)
+   that stopped arriving would be buckets nobody observed this refresh. An
+   answer sets the moment the series is owed again; a failure leaves the owed
+   read to try again after its wait ([settle_pushed_dataset]). *)
 let apply_tool_series_load state { tsl_days = days; tsl_result = result } =
   if days = state.provider_history_days then
-    state.tool_series <-
-      (match result with
-       | Ok calls -> Tool_series_read calls
-       | Error reason -> Tool_series_error reason)
+    match result with
+    | Ok calls ->
+        state.tool_series <- Tool_series_read calls;
+        Masc_tui_types.note_tool_series_read state ~now:(monotonic_now_s ())
+    | Error reason -> state.tool_series <- Tool_series_error reason
 
 (* A failed read replaces the last good one, as the quota reading does: goals
    drawn after the read that listed them stopped arriving would be rows nobody
@@ -20323,6 +20326,8 @@ let start_http_scoped_refresh state ~host ~port ~refresh_inflight
 let launch_owed_pushed_reads state ~refresh_inflight ~full_refresh_inflight
     ~scoped_refresh_followup ~mailbox =
   owe_provider_history_day state ~now:(Unix.gettimeofday ());
+  if Masc_tui_types.take_tool_series_due state ~now:(monotonic_now_s ()) then
+    owe_pushed_read state Surface_read_source.Tool_series;
   let wanted = Surface_read_order.sources (current_surface_needs state) in
   let now = monotonic_now_s () in
   let due =

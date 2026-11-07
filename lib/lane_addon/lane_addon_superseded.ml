@@ -109,3 +109,13 @@ let plan ~now_ms ~live ~owner_faulted bindings =
     diverging_bindings = diverging;
     diverging_groups = List.length groups;
   }
+
+type claims = Claimed of string list | Unattributed
+
+let unclaimed ~folder_key ~instance_key claims folders =
+  match claims with
+  | Unattributed -> []
+  | Claimed ids ->
+      let claimed = Hashtbl.create (List.length ids) in
+      List.iter (fun id -> Hashtbl.replace claimed (instance_key id) ()) ids;
+      List.filter (fun folder -> not (Hashtbl.mem claimed (folder_key folder))) folders

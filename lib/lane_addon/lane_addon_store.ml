@@ -483,6 +483,40 @@ let save_sampling_outcome t ~instance_id ~request_id json =
     (Yojson.Safe.to_string json)
 let observations_directory = "observations"
 let observation_dir instance_id = Filename.concat observations_directory (digest instance_id)
+type instance_folder = Observation_folder of string | Action_folder of string
+let instance_key = digest
+let instance_folder_key = function Observation_folder key | Action_folder key -> key
+let instance_folder_path = function
+  | Observation_folder key -> Filename.concat observations_directory key
+  | Action_folder key -> Filename.concat actions_directory key
+let instance_folders t = protect (fun () ->
+  let listed directory folder =
+    let path = Filename.concat t.root directory in
+    match Fs_compat.exact_path_kind ~follow:false path with
+    | Fs_compat.Exact_missing -> Ok []
+    | Fs_compat.Exact_unknown -> Error (path ^ ": the directory cannot be classified")
+    | Fs_compat.Exact_kind _ ->
+      List.fold_left (fun acc name ->
+        let* folders = acc in
+        let entry = Filename.concat path name in
+        match Fs_compat.exact_path_kind ~follow:false entry with
+        | Fs_compat.Exact_kind Unix.S_DIR -> Ok (folder name :: folders)
+        (* Gone since the listing, or not a folder an instance writes. *)
+        | Fs_compat.Exact_missing
+        | Fs_compat.Exact_kind (Unix.S_REG | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK) ->
+          Ok folders
+        | Fs_compat.Exact_unknown -> Error (entry ^ ": the entry cannot be classified"))
+        (Ok []) (Fs_compat.read_dir path)
+      |> Result.map List.rev in
+  let* observations = listed observations_directory (fun key -> Observation_folder key) in
+  let* actions = listed actions_directory (fun key -> Action_folder key) in
+  Ok (observations @ actions))
+let remove_instance_folder_with ~sync_parent t folder = protect (fun () ->
+  let path = Filename.concat t.root (instance_folder_path folder) in
+  Fs_compat.remove_tree path;
+  sync_existing_parent ~sync_parent (Filename.dirname path);
+  Ok ())
+let remove_instance_folder = remove_instance_folder_with ~sync_parent:sync_parent_directory
 type record_verification = Visible | Durable
 (* [Republished]: the path names another file by the end of the read, so
    the bytes read belong to a file the path no longer names. *)

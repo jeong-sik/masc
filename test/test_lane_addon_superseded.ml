@@ -66,6 +66,16 @@ let test_persistent_representative_stays () =
 let test_unreadable_package_stays () =
   check_eligible [] (plan [ binding ~persistence:S.Package_unreadable "0001"; binding "0002" ])
 
+let test_unclaimed_folders () =
+  let unclaimed claims =
+    S.unclaimed ~folder_key:fst ~instance_key:(fun id -> "key-" ^ id) claims
+      [ ("key-kept", "observations"); ("key-gone", "observations"); ("key-kept", "actions"); ("key-none", "actions") ]
+    |> List.map snd in
+  Alcotest.(check (list string)) "a folder no claimed instance names goes, in listing order"
+    [ "observations"; "actions" ] (unclaimed (S.Claimed [ "kept" ]));
+  Alcotest.(check (list string)) "a record that names no instance keeps every folder" []
+    (unclaimed S.Unattributed)
+
 module Census = Lane_addon_superseded_census
 
 let rec mkdir_p path =
@@ -118,6 +128,8 @@ let () =
             test_persistent_other_runtime_diverges;
           Alcotest.test_case "the persistent representative stays" `Quick test_persistent_representative_stays;
           Alcotest.test_case "an unreadable package stays" `Quick test_unreadable_package_stays ] );
+      ( "section 4.3",
+        [ Alcotest.test_case "only folders no instance claims go" `Quick test_unclaimed_folders ] );
       ( "layer one bytes",
         [ Alcotest.test_case "each instance's files are counted once" `Quick
             test_census_counts_each_instance_files ] ) ]

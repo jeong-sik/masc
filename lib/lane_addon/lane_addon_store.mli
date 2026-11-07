@@ -80,6 +80,22 @@ val binding_path : string -> string
 (** One instance's binding record, relative to {!root}. *)
 val observation_dir : string -> string
 (** One instance's observation directory, relative to {!root}. *)
+type instance_folder = Observation_folder of string | Action_folder of string
+(** One instance's observation directory or action receipt directory, named by
+    {!instance_key} of its instance id. *)
+val instance_key : string -> string
+(** The name an instance's binding record and folders carry. *)
+val instance_folder_key : instance_folder -> string
+val instance_folder_path : instance_folder -> string
+(** Relative to {!root}. *)
+val instance_folders : t -> (instance_folder list, string) result
+(** Blocking. Every directory directly under [observations] and [actions]; an
+    entry of another kind is not an instance folder and is left out. A missing
+    parent lists nothing. A parent or entry that cannot be classified fails
+    the whole listing. *)
+val remove_instance_folder : t -> instance_folder -> (unit, string) result
+(** Blocking. Removes the folder's tree without following symbolic links and
+    syncs the first surviving parent. A folder that is already gone succeeds. *)
 val action_path : instance_id:string -> request_id:string -> string
 (** One action receipt, relative to {!root}. *)
 val binding_sequence : Yojson.Safe.t -> (string * int * (string * Yojson.Safe.t) list, string) result

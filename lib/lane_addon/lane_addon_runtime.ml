@@ -3268,6 +3268,55 @@ let superseded_count m (reading : retained_reading) =
     ~owner_faulted:(fun (o : Lane_addon_superseded.owner) ->
       blocking_faults ~id:o.id ~source_path:o.source_path reading.faults <> [])
     (List.map superseded_binding reading.readable)
+(* RFC-0497 sections 4.3 and 4.4: what one configuration pass removes, planned
+   under the configuration lock from the folders listed before [reading] and
+   the instances this process holds at that moment. *)
+type superseded_removal = { bindings : string list; folders : Lane_addon_store.instance_folder list }
+let no_removal = { bindings = []; folders = [] }
+let superseded_removal m ~folders ~(reading : retained_reading) (count : Lane_addon_superseded.count) =
+  let leaving = Hashtbl.create (List.length count.eligible) in
+  List.iter (fun id -> Hashtbl.replace leaving id ()) count.eligible;
+  let kept = List.fold_left (fun kept (binding : retained_binding) ->
+    match kept, text binding.binding_fields "instance_id" with
+    | Some ids, Ok id -> Some (if Hashtbl.mem leaving id then ids else id :: ids)
+    | Some _, Error _ | None, (Ok _ | Error _) -> None) (Some []) reading.readable in
+  let named = List.fold_left (fun named fault ->
+    match named, fault.fault_instance with
+    | Some ids, Some id -> Some (id :: ids)
+    | Some _, None | None, (Some _ | None) -> None) (Some []) reading.faults in
+  let claims = match kept, named with
+    | Some kept, Some named ->
+        Lane_addon_superseded.Claimed (kept @ named
+          @ List.of_seq (Hashtbl.to_seq_keys m.entries) @ List.of_seq (Hashtbl.to_seq_keys m.recovering))
+    | None, (Some _ | None) | Some _, None -> Lane_addon_superseded.Unattributed in
+  { bindings = count.eligible;
+    folders = Lane_addon_superseded.unclaimed ~folder_key:Lane_addon_store.instance_folder_key
+      ~instance_key:Lane_addon_store.instance_key claims folders }
+(* HIGH-RISK-UNREVIEWED: deletes retained Lane instance records. Bindings go
+   first: a reader then sees an instance that is gone, never one whose
+   observations are half removed, and a pass stopped after a binding leaves
+   folders the next pass finds unclaimed. Configuration passes run one after
+   another on one pulse, and this runs inside its pass, so two removals never
+   overlap. One offload per record lets a server stop end the pass between
+   records. *)
+let remove_superseded m removal =
+  match removal with
+  | { bindings = []; folders = [] } -> ()
+  | { bindings; folders } ->
+      let remove relative remove_record =
+        match offload remove_record with
+        | Ok () -> true
+        | Error detail ->
+            Log.Misc.warn "Superseded Lane instance record %s was not removed: %s" relative detail;
+            false in
+      let removed_bindings = List.length (List.filter (fun instance_id ->
+        remove (Lane_addon_store.binding_path instance_id)
+          (fun () -> Lane_addon_store.remove_binding m.store ~instance_id)) bindings) in
+      let removed_folders = List.length (List.filter (fun folder ->
+        remove (Lane_addon_store.instance_folder_path folder)
+          (fun () -> Lane_addon_store.remove_instance_folder m.store folder)) folders) in
+      Log.Misc.info "Superseded Lane instances removed: %d of %d bindings and %d of %d instance folders"
+        removed_bindings (List.length bindings) removed_folders (List.length folders)
 type superseded_reading = { root : string; eligible : string list; kept : string list }
 (* RFC-0497 layer one at server start: the whole reading once, with the
    instances this process holds now. Not under the configuration lock: a
@@ -4142,7 +4191,7 @@ let configuration_event_packages m previous (current : configuration_reading) =
     | None -> true | Some before -> identity package_id before <> identity package_id current) candidates
 let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain (fun () ->
   let m = manager config in
-  let* result,changed=Eio.Mutex.use_ro m.configuration_mutex (fun () ->
+  let* (result,changed),removal=Eio.Mutex.use_ro m.configuration_mutex (fun () ->
     let snapshot = offload (fun () -> Lane_addon_config.load ~directory) in
     let rec desired_visibility visiting (d : Lane_addon_config.declaration) =
       if List.mem d.id visiting then Error "Lane output connection cycle"
@@ -4163,11 +4212,23 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
     let live_for id = List.filter (fun e -> owned e id) (entries m) in
     let root_switch = match Eio_context.get_root_switch_opt () with
       | Some sw -> Ok sw | None -> Error "server background owner unavailable" in
+    (* RFC-0497 section 4.3: the folders are listed before the bindings are
+       read, so a folder listed here belongs to a binding this reading holds
+       unless that binding is gone. *)
+    let folders = offload (fun () -> Lane_addon_store.instance_folders m.store) in
     (* A store whose directory cannot be listed stops reconciliation. A record
        that cannot be read is a fault that holds back the declarations it may
        belong to; every other declaration proceeds. *)
     let reading = read_retained_bindings m in
-    let superseded = Result.to_option (Result.map (superseded_count m) reading) in
+    let counted = Result.map (fun reading -> reading, superseded_count m reading) reading in
+    let superseded = Result.to_option (Result.map snd counted) in
+    let removal = match counted with
+      | Error _ -> no_removal
+      | Ok (reading, count) ->
+          let folders = match folders with
+            | Ok folders -> folders
+            | Error message -> add_issue directory ("Lane instance folders cannot be listed: " ^ message); [] in
+          superseded_removal m ~folders ~reading count in
     let past = Result.map (without_live m) reading in
     let histories, faults = match past with
       | Error message -> add_issue directory message; [], []
@@ -4494,7 +4555,8 @@ let reconcile_configuration ~config ~directory = Eio_context.run_on_owner_domain
     let reading={directory;snapshot;issues=List.rev !issues;superseded} in
     let changed=configuration_event_packages m m.configuration_status reading in
     m.configuration_status <- Some reading;
-    Ok (configuration_json m ~access:Lane_addon_sources.Operator_configuration,changed)) in
+    Ok ((configuration_json m ~access:Lane_addon_sources.Operator_configuration,changed),removal)) in
+  remove_superseded m removal;
   List.iter (fun package_id -> publish_owner_event ~root:(Lane_addon_store.root m.store) ~package_id Configuration_observed) changed;
   notify_inventory m Configuration_changed;
   Ok result)

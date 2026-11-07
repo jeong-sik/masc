@@ -45,7 +45,9 @@ type t = Types.media_source lowered
 
 (** [Turn_scoped_system_context] keeps every message, including its role, and
     requires typed current/historical context to form a text-only group after a
-    native user and before an assistant or request end. Such context is native
+    native user and before an assistant or request end; a group the
+    composition cannot place that way is spent and lowers away
+    ({!drop_expired_turn_scoped_contexts}). Such context is native
     System through {!anthropic_message_header}, not through its stored role.
 
     Initial-system policies consolidate controls into a single initial frame. Fresh system context and
@@ -88,3 +90,14 @@ val is_turn_scoped_context : policy -> Types.message -> bool
 (** Validate the exact post-projection/post-prefix transcript again, since a
     removed empty assistant can otherwise invalidate System placement. *)
 val validate_turn_scoped_contexts : policy -> Types.message list -> (unit, error) result
+
+(** [drop_expired_turn_scoped_contexts policy messages] removes the
+    turn-scoped context groups the composition cannot place inside their own
+    turn — a native user span before, an assistant response or the request
+    end after. [clear_at = next_user_message] is the wire's own statement of
+    that scope: a later user message already cleared such a row, so a request
+    sends it nowhere instead of refusing, and one leftover row cannot stop a
+    lane's every retry (#49549). Groups the wire can carry keep their place,
+    so the current turn's carrier and answered history rows survive. Other
+    policies return the list unchanged. *)
+val drop_expired_turn_scoped_contexts : policy -> 'source Types.message_with list -> 'source Types.message_with list

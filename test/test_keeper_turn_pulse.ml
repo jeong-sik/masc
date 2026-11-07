@@ -135,6 +135,58 @@ let test_sample_of_decision_line () =
   Alcotest.(check bool) "ignore bad json" true (Pulse.sample_of_decision_line bad_json = None)
 ;;
 
+let rec remove_tree path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Array.iter (fun name -> remove_tree (Filename.concat path name)) (Sys.readdir path);
+      Sys.rmdir path)
+    else Sys.remove path
+;;
+
+(* A directory in place of a decision log exists, so the file-exists check
+   passes, and every read of it fails. That is a log the pulse cannot read, as
+   opposed to a log that is missing or holds no turns. *)
+let test_seed_from_decision_log_read_error () =
+  Pulse.reset_for_tests ();
+  let base_dir = Filename.temp_dir "keeper-turn-pulse-seed" "" in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let log_path keeper_name =
+         Masc.Keeper_types_support.keeper_decision_log_path config keeper_name
+       in
+       let seeded keeper_name =
+         Pulse.seed_from_decision_log ~now:1794037335.0 ~config ~keeper_name ();
+         Pulse.get ~base_path:config.Masc.Workspace.base_path ~keeper_name
+       in
+       let turn_line = {|{"event":"turn","ts_unix":1794037000.0,"outcome":"success"}|} in
+       let write_log path =
+         Out_channel.with_open_text path (fun oc -> output_string oc (turn_line ^ "\n"))
+       in
+       (match seeded "no-log" with
+        | Some { Pulse.samples = []; truncated = false } -> ()
+        | Some _ | None -> Alcotest.fail "a missing log must seed a known empty pulse");
+       write_log (log_path "readable");
+       (match seeded "readable" with
+        | Some { Pulse.samples = [ { Pulse.at; outcome = Pulse.Turn_ok } ]; _ } ->
+          Alcotest.(check (float 0.001)) "turn time" 1794037000.0 at
+        | Some _ | None -> Alcotest.fail "a readable log must seed its turns");
+       Sys.mkdir (log_path "unreadable-primary") 0o755;
+       Alcotest.(check bool)
+         "unreadable primary leaves the pulse unseeded"
+         true
+         (seeded "unreadable-primary" = None);
+       write_log (log_path "unreadable-rotated");
+       Sys.mkdir (log_path "unreadable-rotated" ^ ".1") 0o755;
+       Alcotest.(check bool)
+         "unreadable rotated log leaves the pulse unseeded"
+         true
+         (seeded "unreadable-rotated" = None))
+;;
+
 let () =
   Alcotest.run
     "keeper_turn_pulse"
@@ -145,6 +197,10 @@ let () =
         ; Alcotest.test_case "isolation" `Quick test_isolation
         ; Alcotest.test_case "seed" `Quick test_seed
         ; Alcotest.test_case "sample of decision line" `Quick test_sample_of_decision_line
+        ; Alcotest.test_case
+            "seed from decision log read error"
+            `Quick
+            test_seed_from_decision_log_read_error
         ; Alcotest.test_case "outcome string roundtrip" `Quick test_outcome_string_roundtrip
         ] )
     ]

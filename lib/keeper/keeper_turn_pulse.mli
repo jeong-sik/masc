@@ -55,7 +55,9 @@ val seed_from_decision_log :
   keeper_name:string ->
   unit ->
   unit
-(** Seeds a keeper's pulse history from [decisions.jsonl] and [.1] within a 12-hour window. *)
+(** Seeds a keeper's pulse history from [decisions.jsonl] and [.1] within a 12-hour window.
+    A missing log, or a log with no turns in the window, seeds an empty pulse. A log
+    that exists but cannot be read leaves the pulse unseeded, so [get] stays [None]. *)
 
 val seed_all_from_decision_logs :
   ?now:float ->

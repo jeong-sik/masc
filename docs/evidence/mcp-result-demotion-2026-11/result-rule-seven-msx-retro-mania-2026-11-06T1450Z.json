@@ -1,0 +1,13 @@
+{
+ "keeper": "msx-retro-mania",
+ "librarian_point_requests": 175,
+ "below_finished_end": 158,
+ "at_finished_end_and_turn_start": 0,
+ "at_finished_end_below_turn_start": 0,
+ "past_finished_end": 0,
+ "turn_wrote_no_line": 17,
+ "turn_wrote_no_line_at_or_past_finished_end": 14,
+ "before_first_line": 0,
+ "other_origin": 55,
+ "cases": []
+}

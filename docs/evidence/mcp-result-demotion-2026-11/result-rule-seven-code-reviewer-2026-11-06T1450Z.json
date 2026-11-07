@@ -1,0 +1,22 @@
+{
+ "keeper": "code-reviewer",
+ "librarian_point_requests": 128,
+ "below_finished_end": 94,
+ "at_finished_end_and_turn_start": 1,
+ "at_finished_end_below_turn_start": 1,
+ "past_finished_end": 0,
+ "turn_wrote_no_line": 32,
+ "turn_wrote_no_line_at_or_past_finished_end": 16,
+ "before_first_line": 0,
+ "other_origin": 79,
+ "cases": [
+  {
+   "ts": "2026-11-06T09:44:14Z",
+   "origin": "past_librarian_point:turn_start_after_librarian_refusal",
+   "first_atom": 8014,
+   "finished_end_atom": 8014,
+   "turn_start_atom": 8040,
+   "transmitted_bytes": 420381
+  }
+ ]
+}

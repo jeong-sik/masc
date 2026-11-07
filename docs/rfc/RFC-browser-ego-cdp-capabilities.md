@@ -111,7 +111,7 @@ CDP 로 바꾼 설정(화면 크기, 터치 흉내, 언어·시간대·위치, �
 | read_network | 탭을 명시한 ego 연결에서만 읽는다. ego 가 이미 모은 event 를 아래 §3.4 의 함수로 읽어, 요청마다 method·주소·시각·헤더 이름·상태를 준다. `Network.enable` 은 부르지 않는다(L8 측정) |
 | page_zoom | 붙이지 않는다. CDP 에는 브라우저 확대가 없고 핀치 배율만 있다. masc 의 확대 계약은 "측정한 브라우저 확대, CSS 배율은 쓰지 않음" 이다. `missing` 을 이유를 적은 `Unsupported` 로 바꾼다 |
 | read_console | 탭을 명시한 ego 연결에서만 읽는다. 한 명령 안에서 `egoAutomated.disable` 로 숨김을 끄고, `Runtime.disable` 과 `Runtime.enable` 로 브라우저가 모아 둔 줄을 다시 받고, `egoAutomated.enable` 로 숨김을 켠다. 다시 받은 event 는 §3.4 의 함수가 이 읽기에만 넘기고 workflow `events` 에는 남기지 않는다. 브라우저는 지금 문서가 쓴 줄과 잡지 않은 오류를 최근 1,000개까지 모아 두고, reload 하면 비운다. 같은 site frame 의 줄은 들어 있고 다른 site frame 의 줄은 없다. masc 는 그중 최근 200개를 주고, 줄마다 4,000 바이트에서 자른다. 숨김을 끈 시간은 `hiding.offMs` 로 준다. 바쁜 페이지에서는 몇 초다. 되돌리기에 실패하면 `hiding.restored: false` 와 그 오류를 준다(§4 D1, L9 측정) |
-| write_storage | `Network.setCookie`·`deleteCookies` 로 지워진 Firefox 와 같은 규칙을 따른다. 답에 운영자 프로필의 쿠키가 바뀐다고 적는다(§4 D2) |
+| write_storage | 탭을 명시한 ego 연결에서만 쓴다. `set_cookie` 는 탭 최상위 문서의 주소로 `Network.setCookie` 를 불러 그 호스트에만 가는 쿠키를 쓴다. 도메인은 인자로 받지 않는다. 쓰기 전과 뒤에 `Network.getCookies` 로 같은 이름·호스트·경로의 쿠키를 읽는다. 답은 바꿔 쓴 것인지(`replaced`)와 브라우저가 가진 속성이고, 값은 주지 않는다(`valueWithheld`). `delete_cookie` 는 탭이 보는 그 이름의 쿠키를 `getCookies` 가 준 도메인·경로로 하나씩 지우고, 다시 읽어 남은 것이 없는지 본다. 이름 256 바이트, 이름과 값을 합쳐 4,096 바이트, 경로 1,024 바이트를 넘으면 masc 가 먼저 거절한다. 답에 운영자 프로필의 쿠키가 바뀌고 SDK 프로세스가 끝나도 남는다고 적는다(§4 D2, L11 측정) |
 | create_window, close_window | 측정한 뒤 붙인다(§4 D4) |
 
 ### 3.4 network 기록
@@ -156,7 +156,7 @@ L8 에서 잰 버퍼의 모양은 이렇다([결과](../evidence/ego-cdp-capabil
 | 번호 | 질문 | 결정 |
 |---|---|---|
 | D1 | console 을 읽으려면 ego 의 자동화 숨김을 잠깐 꺼야 한다. 그동안 사이트가 자동화를 알아챌 수 있다 | 붙인다. 한 명령 안에서 끄고, 읽고, `Runtime.disable` 과 `egoAutomated.enable` 로 되돌린다. 답에 숨김을 끈 구간을 적는다. 되돌리기가 실패하면 그 사실을 답에 적는다. L9 측정: 숨김을 켠 채로는 Runtime 을 켜도 console event 가 오지 않는다. 그래서 읽기는 끝에 `Runtime.disable` 을 부르지 않고 `egoAutomated.enable` 만 부른다. Runtime 이 켜진 채 남는 것은 native 입력이 남기는 상태와 같다. 숨김을 끈 채 Runtime 을 켜도 `navigator.webdriver` 와 console stack getter 는 그대로였다 |
-| D2 | 쿠키 쓰기·지우기는 운영자의 실제 로그인을 바꾼다 | 붙인다. 답과 도구 설명에 운영자 프로필의 쿠키가 바뀐다고 적는다 |
+| D2 | 쿠키 쓰기·지우기는 운영자의 실제 로그인을 바꾼다 | 붙인다. 답과 도구 설명에 운영자 프로필의 쿠키가 바뀐다고 적는다. L11 측정: 쓴 쿠키는 SDK 프로세스가 끝나도 남았고 다른 task space 가 봤다. 지워진 Firefox 는 이름 하나를 지웠다. 이 층은 탭이 보는 그 이름의 쿠키를 도메인·경로마다 모두 지운다. 하나만 지우면 상위 도메인이나 다른 경로의 같은 이름이 남아 페이지가 계속 그 값을 보낸다. `url` 로 지우면 탭이 보지 않는 경로의 쿠키까지 지워서 쓰지 않는다. 값 한도도 바꿨다. Chromium 은 값만이 아니라 이름과 값을 합쳐 4,096 바이트를 넘으면 거절했다 |
 | D3 | 위치 권한을 주면 운영자 프로필의 사이트 권한이 바뀐다 | 권한도 준다. `clear_emulation` 은 지워진 Firefox 처럼 그 권한을 그대로 둔다. 권한이 브라우저를 다시 켠 뒤에도 남는지는 L3 에서 재서 설명에 적는다. L3 측정: CDP 로 준 권한은 SDK 프로세스가 끝나면 사라진다. 프로필에 저장되지 않는다 |
 | D4 | `Target.createTarget({newWindow: true})` 로 만든 탭을 ego task space 가 관리하는지 모른다. close_window 는 어떤 연결에도 없는 새 동작이다 | 붙인다. L10 에서 먼저 잰다. 관리되지 않으면 그 결과를 들고 운영자에게 다시 묻는다. close_window 는 agent 가 연 탭만 있는 창에만 붙이고, 그 창의 탭을 `page.close()` 로 닫는다. L5 측정: ego 의 `task.cdp` 는 `Target.createTarget` 을 막는다(`not allowed`). agent 가 연 `window.open` popup 도 task space 창의 탭이 된다. L10 앞에 이 결과로 운영자에게 다시 묻는다 |
 | D5 | #49064 가 automation Firefox 와 함께 지운 6개를 어떻게 할지 | ego 전용으로 다시 붙인다. 지워진 동작 이름과 인자를 되살리고, ego 만 받는다(§3.5) |
@@ -177,7 +177,7 @@ gh stack 한 스택에 층을 쌓는다. 층마다 기능 목록(`lib/browser_ca
 | L8 | events 버퍼 함수 하나와 read_network (D5) | workflow `events` 와 read_network 를 번갈아 불러 이벤트가 사라지지 않는지 본다([결과](../evidence/ego-cdp-capabilities-2026-11-06/l8-network/README.md)) |
 | L9 | read_console (D1·D5) | 페이지가 쓴 줄과 되돌린 뒤 숨김 상태([결과](../evidence/ego-cdp-capabilities-2026-11-06/l9-console/README.md)) |
 | L10 | create_window·close_window | 새 창 탭의 label 과 관리 여부를 먼저 잰다 |
-| L11 | write_storage (D2·D5) | 시험 origin 에 쿠키를 쓰고 지운 뒤 이름 목록 |
+| L11 | write_storage (D2·D5) | 시험 origin 에 쿠키를 쓰고 지운 뒤 이름 목록([결과](../evidence/ego-cdp-capabilities-2026-11-06/l11-cookies/README.md)) |
 
 시험은 헌법 `testing` 에 맞춰 기능 단위로 쓴다. ego 를 대신하는 시험 실행기가 스크립트 첫 줄의 단계 이름을 읽는 기존 방식을 쓴다(`lib/browser_ego_peer.ml` 의 `frame`).
 

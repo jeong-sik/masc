@@ -1,7 +1,6 @@
 (** Setup helpers consumed by the dashboard route builder. *)
 
 module Http = Http_server_eio
-module Keeper_api = Server_dashboard_http_keeper_api
 
 val trimmed_query_param : Httpun.Request.t -> string -> string option
 val agent_core_telemetry_limit_param : Httpun.Request.t -> int

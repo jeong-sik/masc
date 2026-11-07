@@ -1,4 +1,17 @@
 type key = Enter | Tab | Escape | Backspace | Delete | ArrowUp | ArrowDown | ArrowLeft | ArrowRight | Home | End
+type same_site = Strict | Lax | Same_site_none
+let same_site_to_wire = function Strict -> "Strict" | Lax -> "Lax" | Same_site_none -> "None"
+let same_site_of_wire = function
+  | "Strict" -> Some Strict | "Lax" -> Some Lax | "None" -> Some Same_site_none
+  | _ -> None
+type cookie = { name : string; value : string; path : string; secure : bool; http_only : bool;
+  same_site : same_site option; max_age_sec : int option }
+let max_cookie_age_sec = 7 * 24 * 60 * 60
+let max_cookie_name_bytes = 256
+(* Chromium refuses a cookie whose name and value pass 4,096 bytes together,
+   or whose path passes 1,024 bytes (L11 evidence a4, b3). *)
+let max_cookie_bytes = 4096
+let max_cookie_path_bytes = 1024
 type geolocation = { latitude : float; longitude : float; accuracy_m : float }
 type emulation = { geolocation : geolocation option; locale : string option; timezone : string option }
 let default_accuracy_m = 10.
@@ -6,6 +19,8 @@ let max_accuracy_m = 10_000.
 type upload_target = File_input of string | Chooser_opener of string
 type interaction =
   | Upload of { target : upload_target; paths : string list }
+  | Set_cookie of cookie
+  | Delete_cookie of string
   | Set_emulation of emulation
   | Clear_emulation
   | Block_requests of string list
@@ -107,6 +122,41 @@ let parse_hosts fields = match List.assoc_opt "hosts" fields with
     else match List.find_opt (fun host -> not (is_host host)) hosts with
       | Some host -> Error ("hosts must be lowercase host names or IPv4 addresses such as ads.example.com, not " ^ host)
       | None -> Ok hosts
+(* A cookie name or value is data for the browser, but a control character
+   or a semicolon would split it into other cookies in some paths, so they
+   are refused here instead of repaired; a name is also a token without a
+   space, comma or equals sign. *)
+let cookie_text_ok ~token text =
+  String.for_all (fun c -> Char.code c >= 0x20 && Char.code c <> 0x7f && c <> ';') text
+  && (not token || not (String.exists (fun c -> c = ',' || c = '=' || c = ' ') text))
+let cookie_name fields = match List.assoc_opt "cookieName" fields with
+  | Some (`String name) when name <> "" && String.length name <= max_cookie_name_bytes && cookie_text_ok ~token:true name -> Ok name
+  | _ -> Error (Printf.sprintf "cookieName must be a nonempty token (no space, comma, semicolon, equals sign or control character) of at most %d bytes" max_cookie_name_bytes)
+let parse_cookie fields =
+  let* name = cookie_name fields in
+  let* value = match List.assoc_opt "cookieValue" fields with
+    | Some (`String value) when String.length name + String.length value <= max_cookie_bytes && cookie_text_ok ~token:false value -> Ok value
+    | _ -> Error (Printf.sprintf "cookieValue must be a string without a control character or semicolon, at most %d bytes together with cookieName" max_cookie_bytes) in
+  let* path = match List.assoc_opt "cookiePath" fields with
+    | None -> Ok "/"
+    | Some (`String path) when String.length path > 0 && path.[0] = '/' && String.length path <= max_cookie_path_bytes
+                               && cookie_text_ok ~token:false path -> Ok path
+    | Some _ -> Error (Printf.sprintf "cookiePath must start with /, hold no control character or semicolon and be at most %d bytes" max_cookie_path_bytes) in
+  let boolean key = match List.assoc_opt key fields with
+    | None -> Ok false | Some (`Bool b) -> Ok b | Some _ -> Error (key ^ " must be a boolean") in
+  let* secure = boolean "cookieSecure" in
+  let* http_only = boolean "cookieHttpOnly" in
+  let* same_site = match List.assoc_opt "cookieSameSite" fields with
+    | None -> Ok None
+    | Some (`String wire) when same_site_of_wire wire <> None -> Ok (same_site_of_wire wire)
+    | Some _ -> Error "cookieSameSite must be Strict, Lax or None" in
+  let* () = if same_site = Some Same_site_none && not secure
+    then Error "a SameSite=None cookie must also be cookieSecure" else Ok () in
+  let* max_age_sec = match List.assoc_opt "cookieMaxAgeSec" fields with
+    | None -> Ok None
+    | Some (`Int n) when n >= 1 && n <= max_cookie_age_sec -> Ok (Some n)
+    | Some _ -> Error (Printf.sprintf "cookieMaxAgeSec must be an integer from 1 to %d" max_cookie_age_sec) in
+  Ok {name; value; path; secure; http_only; same_site; max_age_sec}
 let control_wait_of_json = function
   | `Assoc fields when List.for_all (fun (key,_) -> List.mem key ["interval";"timeout"]) fields
       && List.length fields=List.length (List.sort_uniq String.compare (List.map fst fields)) ->
@@ -187,6 +237,12 @@ let parse = function
        let* text = match List.assoc_opt "text" fields with
          | None -> Ok None | Some (`String text) -> Ok (Some text) | _ -> Error "text must be a string" in
        on_tab ["text"] (Accept_dialog text)
+     | "set_cookie" ->
+       let* cookie = parse_cookie fields in
+       on_tab ["cookieName";"cookieValue";"cookiePath";"cookieSecure";"cookieHttpOnly";"cookieSameSite";"cookieMaxAgeSec"] (Set_cookie cookie)
+     | "delete_cookie" ->
+       let* name = cookie_name fields in
+       on_tab ["cookieName"] (Delete_cookie name)
      | "set_emulation" ->
        let* emulation = parse_emulation fields in
        on_tab ["latitude";"longitude";"accuracyMeters";"locale";"timezone"] (Set_emulation emulation)
@@ -220,6 +276,12 @@ let to_json = function
       | Accept_dialog text -> "accept_dialog", Option.to_list (Option.map (fun s -> "text",`String s) text)
       | Dismiss_dialog -> "dismiss_dialog", []
       | Clear_emulation -> "clear_emulation", []
+      | Delete_cookie name -> "delete_cookie", ["cookieName",`String name]
+      | Set_cookie {name;value;path;secure;http_only;same_site;max_age_sec} ->
+        "set_cookie", ["cookieName",`String name;"cookieValue",`String value;"cookiePath",`String path;
+          "cookieSecure",`Bool secure;"cookieHttpOnly",`Bool http_only]
+          @ Option.to_list (Option.map (fun site -> "cookieSameSite",`String (same_site_to_wire site)) same_site)
+          @ Option.to_list (Option.map (fun n -> "cookieMaxAgeSec",`Int n) max_age_sec)
       | Block_requests hosts -> "block_requests", ["hosts",`List (List.map (fun host -> `String host) hosts)]
       | Unblock_requests -> "unblock_requests", []
       | Set_emulation {geolocation;locale;timezone} ->

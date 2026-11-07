@@ -1351,6 +1351,77 @@ let test_request_blocking_is_a_cdp_setting_on_the_page () =
     (failure_kind (act ~tab_id:2 (Lane.Action.Block_requests ["ads.example.com"])));
   check int "and runs no script" runs (List.length !asked)
 
+(* A cookie write goes into the operator's ego profile. The receipt is
+   rebuilt from what the browser holds for the asked name and path on the
+   page's host, never carries a value, and says the change outlives the SDK
+   process. *)
+let cookie_answer ?(name="session") ?(path="/") ?(domain="app.example.com") ?(extra=[]) () =
+  obj (["name",str name;"domain",str domain;"path",str path;"secure",`Bool true;"httpOnly",`Bool true;
+        "sameSite",str "Lax";"session",`Bool false;"expiry",`Int 1794043123;"replaced",`Bool false] @ extra)
+
+let test_cookie_writes_go_into_the_ego_profile () =
+  let asked = ref [] in
+  let reply = ref (refused "no reply set") in
+  let peer = opened (fun sent ->
+    asked := sent :: !asked;
+    match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.set_cookie" | "page.delete_cookie" -> !reply
+    | other -> failf "unexpected cookie step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let cookie = {Lane.Action.name="session";value="SECRET_VALUE";path="/";secure=true;http_only=true;
+                same_site=Some Lane.Action.Lax;max_age_sec=Some 3600} in
+  let act ?(tab_id=1) interaction = dispatch peer Live.Page_act (act_args (Lane.Action.On_tab {tab_id;interaction})) in
+  reply := answered (cookie_answer ());
+  (match act (Lane.Action.Set_cookie cookie) with
+   | Ok receipt ->
+     check string "the action" "set_cookie" (text (field "action" receipt));
+     check string "the host it went to" "app.example.com" (text (field "domain" receipt));
+     check bool "with its expiry" true (field "expiry" receipt = `Int 1794043123 && field "sessionCookie" receipt = `Bool false);
+     check bool "the value is withheld" true (field "valueWithheld" receipt = `Bool true);
+     check bool "and never in the receipt" false (contains (Yojson.Safe.to_string receipt) "SECRET_VALUE");
+     check string "the cookie lives in the ego profile" "ego_profile" (text (field "lifetime" receipt));
+     check bool "the note names the operator's profile" true (contains (text (field "note" receipt)) "operator's ego profile")
+   | other -> failf "set_cookie was %s" (failure_kind other));
+  let sent = List.hd !asked in
+  check string "the Page it names" "p1" (text (field "label" sent.args));
+  check string "a set" "set" (text (field "kind" sent.args));
+  check string "the value goes to the browser" "SECRET_VALUE" (text (field "value" sent.args));
+  check bool "with its lifetime and SameSite" true (field "maxAgeSec" sent.args = `Int 3600 && field "sameSite" sent.args = str "Lax");
+  check bool "and no domain" true (field "domain" sent.args = `Null);
+  reply := answered (obj ["deleted",`List [obj ["domain",str "app.example.com";"path",str "/"];obj ["domain",str ".example.com";"path",str "/"]]]);
+  (match act (Lane.Action.Delete_cookie "session") with
+   | Ok receipt ->
+     check string "the action" "delete_cookie" (text (field "action" receipt));
+     check (list string) "every cookie of that name it deleted" ["app.example.com/";".example.com/"]
+       (List.map (fun row -> text (field "domain" row) ^ text (field "path" row)) (Yojson.Safe.Util.to_list (field "deleted" receipt)))
+   | other -> failf "delete_cookie was %s" (failure_kind other));
+  check string "a delete" "delete" (text (field "kind" (List.hd !asked).args));
+  List.iter (fun (label, value) ->
+    reply := answered value;
+    check string label "unknown" (failure_kind (act (Lane.Action.Set_cookie cookie))))
+    ["another name leaves the write unknown", cookie_answer ~name:"other" ();
+     "another path leaves the write unknown", cookie_answer ~path:"/app" ();
+     "a domain cookie leaves the write unknown", cookie_answer ~domain:".example.com" ();
+     "a value in the answer leaves the write unknown", cookie_answer ~extra:["value",str "SECRET_VALUE"] ();
+     "an expiry on a session cookie leaves the write unknown", obj ["name",str "session";"domain",str "app.example.com";"path",str "/";"secure",`Bool true;"httpOnly",`Bool true;"session",`Bool true;"expiry",`Int 1;"replaced",`Bool false]];
+  List.iter (fun (label, value) ->
+    reply := answered value;
+    check string label "unknown" (failure_kind (act (Lane.Action.Delete_cookie "session"))))
+    ["a deleted row with a value leaves the delete unknown", obj ["deleted",`List [obj ["domain",str "a";"path",str "/";"value",str "x"]]];
+     "a delete without its list leaves it unknown", obj []];
+  reply := refused "the browser refused the cookie (Network.setCookie answered success false)";
+  check string "a refused cookie changed nothing" "before effect" (failure_kind (act (Lane.Action.Set_cookie cookie)));
+  reply := failed "Network.setCookie failed: CDP request timed out";
+  (match act (Lane.Action.Set_cookie cookie) with
+   | Error (Live.Outcome_unknown detail) ->
+     check bool "a CDP call that threw says how to find out" true (contains detail "read_storage")
+   | other -> failf "a thrown setCookie was %s" (failure_kind other));
+  let runs = List.length !asked in
+  check string "an operator tab is refused before any change" "before effect"
+    (failure_kind (act ~tab_id:2 (Lane.Action.Delete_cookie "session")));
+  check int "and runs no script" runs (List.length !asked)
+
 (* A page.cookies answer: the cookies, their total and the page's storage
    names, as storage_names_script emits them. *)
 let storage_answer ?(cookies=[]) ?total ?(local=obj ["count",`Int 1;"keys",`List [str "theme"];"truncated",`Bool false]) () =
@@ -1691,6 +1762,9 @@ let test_the_scripts_parse_as_modules () =
     | "page.cookies" -> answered (storage_answer ())
     | "page.network" -> answered (network_answer ())
     | "page.console" -> answered (console_answer ())
+    | "page.set_cookie" -> answered (obj ["name",str "n";"domain",str "app.example.com";"path",str "/";"secure",`Bool false;
+        "httpOnly",`Bool false;"session",`Bool true;"replaced",`Bool false])
+    | "page.delete_cookie" -> answered (obj ["deleted",`List []])
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.choose_files" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.emulation" -> answered (obj ["applied",`List [];"before",`Null;"observed",`Null])
@@ -1732,13 +1806,16 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Clear_emulation});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Block_requests ["ads.example.com"]});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Unblock_requests});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Set_cookie {name="n";value="v";path="/";secure=false;http_only=false;same_site=None;max_age_sec=None}});
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Delete_cookie "n"});
       (* Known-unavailable raw drag is refused before the runner. *)
       Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.document";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.cookies";"page.network";"page.console";"page.capture";
      "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";"page.target_input";"page.viewport";"page.touch";"page.touch";
-     "page.close";"page.reload";"page.stop_loading";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"page.emulation";"page.emulation";"page.block_requests";"page.block_requests";"space.finish"]
+     "page.close";"page.reload";"page.stop_loading";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"page.emulation";"page.emulation";"page.block_requests";"page.block_requests";
+     "page.set_cookie";"page.delete_cookie";"space.finish"]
     (List.rev_map fst !scripts);
   List.iter (fun (step, script) ->
     let file = Filename.concat directory (step ^ ".mjs") in
@@ -1766,6 +1843,12 @@ let test_the_scripts_parse_as_modules () =
     | "page.network" ->
       check bool "the log is read through the shared drain" true
         (contains script "mascNetworkLog(page)" && contains script Masc.Browser_ego_page_events.script)
+    | "page.set_cookie" | "page.delete_cookie" ->
+      check bool "a cookie is written and read back through the Page's CDP session" true
+        (contains script "Network.setCookie" && contains script "Network.deleteCookies" && contains script "Network.getCookies");
+      check bool "a delete names each cookie by its domain and path" true
+        (contains script "{name: cookie.name, domain: cookie.domain, path: cookie.path}");
+      check bool "and no value leaves the SDK process" false (contains script "held.value" || contains script "cookie.value")
     | "page.console" ->
       check bool "the console is read through the shared drain" true
         (contains script "mascConsoleRead(page, reason)" && contains script Masc.Browser_ego_page_events.script
@@ -1844,6 +1927,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.emulation" -> answered (obj ["applied",`List [str "locale"];"before",`Null;"observed",`Null])
     | "page.block_requests" -> answered (obj ["blocked",`List [str "ads.example.com"]])
+    | "page.set_cookie" -> answered (cookie_answer ~name:"n" ())
     | "page.target" -> answered resolved
     | "page.pointer" | "page.keyboard" | "page.viewport" | "page.touch" -> input_answer ()
     | "page.input" -> dom_answer (obj ["action",str "fill"])
@@ -1893,7 +1977,8 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Request_blocking -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Block_requests ["ads.example.com"]})
     | Storage_listing -> Page_cookies {tab_id=1}
     | Request_listing -> Page_network {tab_id=1}
-    | Console_reading -> Page_console {tab_id=1}) in
+    | Console_reading -> Page_console {tab_id=1}
+    | Cookie_writing -> Page_act (Action.On_tab {tab_id=1;interaction=Action.Delete_cookie "n"})) in
   List.iter (fun capability ->
     let name = Lane.live_capability_to_wire capability in
     let asked = verb_asking_for capability in
@@ -4438,6 +4523,7 @@ let () =
       test_case "an ego viewport is a CDP override on its Page" `Quick test_viewport_is_a_cdp_override_on_the_page;
       test_case "ego location, locale and time zone are CDP overrides on its Page" `Quick test_emulation_is_a_cdp_override_on_the_page;
       test_case "ego request blocking is a CDP setting on its Page" `Quick test_request_blocking_is_a_cdp_setting_on_the_page;
+      test_case "ego cookie writes go into the operator's ego profile" `Quick test_cookie_writes_go_into_the_ego_profile;
       test_case "ego storage names withhold every value" `Quick test_storage_names_withhold_every_value;
       test_case "ego network log rebuilds every row" `Quick test_network_log_rebuilds_every_row;
       test_case "one drain reads the ego event buffer" `Quick test_one_drain_reads_the_event_buffer;

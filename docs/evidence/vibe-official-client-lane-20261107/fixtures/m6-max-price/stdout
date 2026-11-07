@@ -1,0 +1,62 @@
+[
+  {
+    "id": "user-turn-423227775ecb521095fe2014ae722495-1",
+    "sessionId": "96fee794-bf4b-8853-44f1-02e5d7d3c22a",
+    "turnId": "turn-423227775ecb521095fe2014ae722495",
+    "inputEntryId": null,
+    "createdAt": 1794043319540,
+    "updatedAt": 1794043319540,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "message",
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "Write the numbers from 1 to 50, one per line."
+      }
+    ],
+    "source": "turn_start",
+    "userDisplayContent": null,
+    "outcome": null
+  },
+  {
+    "id": "reasoning-a4727f2e-cec2-54c3-8d29-23fd8c8572ef-0",
+    "sessionId": "96fee794-bf4b-8853-44f1-02e5d7d3c22a",
+    "turnId": "turn-423227775ecb521095fe2014ae722495",
+    "inputEntryId": "user-turn-423227775ecb521095fe2014ae722495-1",
+    "createdAt": 1794043321927,
+    "updatedAt": 1794043321927,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "reasoning",
+    "text": "The user wants numbers 1 to 50, one per line. Simple task.",
+    "summary": [],
+    "outcome": {
+      "type": "committed"
+    }
+  },
+  {
+    "id": "assistant-0b546a9d-8773-582d-af0e-f5676aa22611",
+    "sessionId": "96fee794-bf4b-8853-44f1-02e5d7d3c22a",
+    "turnId": "turn-423227775ecb521095fe2014ae722495",
+    "inputEntryId": "user-turn-423227775ecb521095fe2014ae722495-1",
+    "createdAt": 1794043323926,
+    "updatedAt": 1794043323926,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "1\n2\n3\n4\n5\n6\n7\n8\n9\n10\n11\n12\n13\n14\n15\n16\n17\n18\n19\n20\n21\n22\n23\n24\n25\n26\n27\n28\n29\n30\n31\n32\n33\n34\n35\n36\n37\n38\n39\n40\n41\n42\n43\n44\n45\n46\n47\n48\n49\n50"
+      }
+    ],
+    "source": "harness",
+    "userDisplayContent": null,
+    "outcome": {
+      "type": "committed"
+    }
+  }
+]

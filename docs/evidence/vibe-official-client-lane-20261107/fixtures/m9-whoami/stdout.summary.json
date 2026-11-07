@@ -1,0 +1,111 @@
+[
+  {
+    "type": "message",
+    "role": "user",
+    "title": null,
+    "input": null,
+    "status": null,
+    "decision": null,
+    "approvalType": null,
+    "approvalSource": null,
+    "generationStatus": "completed"
+  },
+  {
+    "type": "reasoning",
+    "role": null,
+    "title": null,
+    "input": null,
+    "status": null,
+    "decision": null,
+    "approvalType": null,
+    "approvalSource": null,
+    "generationStatus": "completed"
+  },
+  {
+    "type": "effect",
+    "role": null,
+    "title": "skill.read",
+    "input": {
+      "name": "vibe:vibe"
+    },
+    "status": "completed",
+    "decision": "execute",
+    "approvalType": "always",
+    "approvalSource": "config",
+    "generationStatus": "completed"
+  },
+  {
+    "type": "effect",
+    "role": null,
+    "title": "file_system.bash",
+    "input": {
+      "command": "pwd && ls -la"
+    },
+    "status": "completed",
+    "decision": "execute",
+    "approvalType": "always",
+    "approvalSource": "config",
+    "generationStatus": "completed"
+  },
+  {
+    "type": "reasoning",
+    "role": null,
+    "title": null,
+    "input": null,
+    "status": null,
+    "decision": null,
+    "approvalType": null,
+    "approvalSource": null,
+    "generationStatus": "completed"
+  },
+  {
+    "type": "effect",
+    "role": null,
+    "title": "Searching for relevant tools",
+    "input": {
+      "mode": "best_match"
+    },
+    "status": "completed",
+    "decision": null,
+    "approvalType": null,
+    "approvalSource": null,
+    "generationStatus": "completed"
+  },
+  {
+    "type": "reasoning",
+    "role": null,
+    "title": null,
+    "input": null,
+    "status": null,
+    "decision": null,
+    "approvalType": null,
+    "approvalSource": null,
+    "generationStatus": "completed"
+  },
+  {
+    "type": "effect",
+    "role": null,
+    "title": "Searching for relevant tools",
+    "input": {
+      "mode": "best_match"
+    },
+    "status": "completed",
+    "decision": null,
+    "approvalType": null,
+    "approvalSource": null,
+    "generationStatus": "completed"
+  },
+  {
+    "type": "effect",
+    "role": null,
+    "title": "Searching for relevant tools",
+    "input": {
+      "mode": "best_match"
+    },
+    "status": "completed",
+    "decision": null,
+    "approvalType": null,
+    "approvalSource": null,
+    "generationStatus": "completed"
+  }
+]

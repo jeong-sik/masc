@@ -1,0 +1,144 @@
+[
+  {
+    "id": "user-turn-d1820e0593cc59259c6b16bef9d57468-1",
+    "sessionId": "4954c499-ab5f-a5ab-1030-30043e7a8adb",
+    "turnId": "turn-d1820e0593cc59259c6b16bef9d57468",
+    "inputEntryId": null,
+    "createdAt": 1794043449575,
+    "updatedAt": 1794043449575,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "message",
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "Use your bash tool to run exactly this command: touch probe-created.txt && chmod 600 probe-created.txt. Then report what happened."
+      }
+    ],
+    "source": "turn_start",
+    "userDisplayContent": null,
+    "outcome": null
+  },
+  {
+    "id": "reasoning-24e78264-e668-5a5b-b89f-5737dacafb86-0",
+    "sessionId": "4954c499-ab5f-a5ab-1030-30043e7a8adb",
+    "turnId": "turn-d1820e0593cc59259c6b16bef9d57468",
+    "inputEntryId": "user-turn-d1820e0593cc59259c6b16bef9d57468-1",
+    "createdAt": 1794043451521,
+    "updatedAt": 1794043451521,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "reasoning",
+    "text": "The user wants me to run a specific bash command. Simple.",
+    "summary": [],
+    "outcome": {
+      "type": "committed"
+    }
+  },
+  {
+    "id": "effect-b70947f8-ca16-5454-b145-8f5d139842c8",
+    "sessionId": "4954c499-ab5f-a5ab-1030-30043e7a8adb",
+    "turnId": "turn-d1820e0593cc59259c6b16bef9d57468",
+    "inputEntryId": "user-turn-d1820e0593cc59259c6b16bef9d57468-1",
+    "createdAt": 1794043451533,
+    "updatedAt": 1794043451575,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "effect",
+    "title": "file_system.bash",
+    "detail": {
+      "toolName": "file_system.bash",
+      "display": {
+        "summary": "bash: touch probe-created.txt && chmod 600 probe-created.txt",
+        "content": null,
+        "suffix": "",
+        "verb": "Running",
+        "message": "touch probe-created.txt && chmod 600 probe-created.txt",
+        "settledVerb": "Ran",
+        "settledMessage": "touch probe-created.txt && chmod 600 probe-created.txt",
+        "statusText": "Running command"
+      },
+      "kind": "shell",
+      "input": {
+        "command": "touch probe-created.txt && chmod 600 probe-created.txt"
+      }
+    },
+    "state": {
+      "status": "failed",
+      "error": {
+        "message": "Tool execution denied by approval callback",
+        "code": "tool_denied",
+        "details": null
+      },
+      "output": {
+        "type": "failure",
+        "content": [],
+        "_meta": {
+          "approval": {
+            "approvalSource": "user",
+            "approvalType": "ask",
+            "decision": "skip"
+          }
+        },
+        "error": {
+          "code": "tool_denied",
+          "message": "Tool execution denied by approval callback",
+          "retryable": false
+        }
+      },
+      "outputText": "",
+      "durationMs": 0.0,
+      "display": {
+        "success": false,
+        "verb": "",
+        "message": "Tool execution denied by approval callback",
+        "warnings": [],
+        "approvalNote": null,
+        "suffix": ""
+      },
+      "decision": "skip",
+      "approvalType": "ask",
+      "approvalSource": "user"
+    }
+  },
+  {
+    "id": "reasoning-16fd8e9c-4ee7-5f8e-9e75-b0ce1d38b807-0",
+    "sessionId": "4954c499-ab5f-a5ab-1030-30043e7a8adb",
+    "turnId": "turn-d1820e0593cc59259c6b16bef9d57468",
+    "inputEntryId": "user-turn-d1820e0593cc59259c6b16bef9d57468-1",
+    "createdAt": 1794043454670,
+    "updatedAt": 1794043454670,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "reasoning",
+    "text": "The tool was denied by the approval callback. Let me report that. Maybe try again? The instruction says when a tool call needs approval, make the tool call and let the runtime's approval mechanism handle it. It was denied. I could retry once, but likely it will be denied again. Let me report what happened honestly. Maybe verify whether the file exists? Checking with ls would also be a tool call but read-only. Let me check if the file was created despite the denial — probably not, since the whole command was denied. I could run `ls -la probe-created.txt` to check, but that might also be denied. Let me just report. Actually, a quick read-only check is reasonable to confirm state. But it may also be denied. I'll just report the denial.",
+    "summary": [],
+    "outcome": {
+      "type": "committed"
+    }
+  },
+  {
+    "id": "assistant-16fd8e9c-4ee7-5f8e-9e75-b0ce1d38b807",
+    "sessionId": "4954c499-ab5f-a5ab-1030-30043e7a8adb",
+    "turnId": "turn-d1820e0593cc59259c6b16bef9d57468",
+    "inputEntryId": "user-turn-d1820e0593cc59259c6b16bef9d57468-1",
+    "createdAt": 1794043454670,
+    "updatedAt": 1794043454670,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "The command was denied by the runtime's approval mechanism — the tool call returned `tool_denied` (\"Tool execution denied by approval callback\"), so neither `touch probe-created.txt` nor `chmod 600 probe-created.txt` executed, and no file was created. If you'd like, I can retry, or you can approve the command in your approval prompt and I'll run it again."
+      }
+    ],
+    "source": "harness",
+    "userDisplayContent": null,
+    "outcome": {
+      "type": "committed"
+    }
+  }
+]

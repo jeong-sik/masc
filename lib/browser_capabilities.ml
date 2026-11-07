@@ -12,6 +12,7 @@ type operation =
   | Hand_off | Take_over | Space_status | Finish_space | Wait_for_control | Adopt_tab | Release_tab
   | Upload_file | List_downloads | Page_zoom | Resize_viewport | Touch
   | Read_clipboard | Write_clipboard | Emulate_environment | Intercept_network | Read_storage | Read_network | Read_console
+  | Write_storage
 [@@deriving enumerate]
 type tool = Tabs | Read | Interact | Act | Session | Goto
 type invocation = { tool : tool; action : string option; mode : string option }
@@ -315,6 +316,13 @@ let support backend operation = match backend with
            "To read them the step turns ego's console hiding off for this tab and back on; sites can detect automation while it is off, and hiding.offMs says for how long, seconds when the page is busy. hiding.restored false means it stayed off until the next console read or a new ego SDK process (sdkProcessStartedAt).";
            ego_pages]
       | Safari_unavailable -> missing)
+    | Write_storage -> (match backend with
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"set_cookie" Act
+          [observed;Printf.sprintf "Sets one cookie for the tab's top document host, which must be an http or https address; the domain is never a parameter: cookieName, cookieValue, optional cookiePath, cookieSecure, cookieHttpOnly, cookieSameSite and cookieMaxAgeSec. A cookie lives at most %d days and without a lifetime it is a session cookie. The name is at most %d bytes, the name and value together at most %d bytes, the path at most %d bytes." (Browser_lane.Action.max_cookie_age_sec / 86_400) Browser_lane.Action.max_cookie_name_bytes Browser_lane.Action.max_cookie_bytes Browser_lane.Action.max_cookie_path_bytes;
+           "delete_cookie removes every cookie of that name the tab's top document sees, of whatever domain or path, and the answer lists their domain and path. Web storage is not written.";
+           "Both change the operator's ego profile: the operator's own tabs and every task space on that profile see the change, and it stays after the ego SDK process ends. A set can replace a cookie the operator's sign-in uses (replaced), and a delete can sign the operator out. The value is never returned (valueWithheld).";
+           ego_pages]
+      | Safari_unavailable -> missing)
 let catalog backend = List.map (fun operation -> {operation;support=support backend operation}) operations
 let operation_name = function
   | List_tabs -> "list_tabs" | Open_tab -> "open_tab" | Close_tab -> "close_tab"
@@ -339,6 +347,7 @@ let operation_name = function
   | Touch -> "touch" | Read_clipboard -> "read_clipboard" | Write_clipboard -> "write_clipboard"
   | Emulate_environment -> "emulate_environment" | Intercept_network -> "intercept_network"
   | Read_storage -> "read_storage" | Read_network -> "read_network" | Read_console -> "read_console"
+  | Write_storage -> "write_storage"
 let operation_of_wire name = List.find_opt (fun operation -> String.equal (operation_name operation) name) operations
 let parse_required_actions = function
   | `List values ->

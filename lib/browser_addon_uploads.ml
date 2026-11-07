@@ -57,7 +57,7 @@ let upload_paths = function
   | B.Page_act (B.Action.On_tab {interaction=B.Action.Upload {paths;_};_}) -> Ok paths
   | Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_console _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
   | Page_goto _|Page_elements _
-  | Page_act (Open_tab _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
+  | Page_act (Open_tab _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
   | Page_context _ -> Error "grant requires one upload command"
 let release_failed t ~id exn =
   let backtrace=Printexc.get_raw_backtrace () in
@@ -121,7 +121,7 @@ let with_claim t ~id ~actor ~route ~verb f =
         Ok (f (B.Page_act (B.Action.On_tab {target with interaction=Upload {target=upload;paths=Lease.paths grant.snapshot}})))
     | Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_console _|Page_capture _|Page_scene _|Page_snapshot _|Page_interact _|Page_native_workflow _
     | Page_goto _|Page_elements _
-    | Page_act (Open_tab _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
+    | Page_act (Open_tab _|Control _|On_tab {interaction=Close_tab|Back|Forward|Reload|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests;_})
     | Page_context _ -> Error "grant command is not an upload")
 let discard t ~id =
   let snapshot=locked t (fun () -> match Hashtbl.find_opt t.grants id with

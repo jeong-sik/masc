@@ -1,0 +1,62 @@
+[
+  {
+    "id": "user-turn-02c43ef555a4c3ef2fb6f0c0d1e824ed-1",
+    "sessionId": "ae49d68a-1449-52da-f7f8-45376bc18fcb",
+    "turnId": "turn-02c43ef555a4c3ef2fb6f0c0d1e824ed",
+    "inputEntryId": null,
+    "createdAt": 1794042886940,
+    "updatedAt": 1794042886940,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "message",
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "Reply with exactly: ok"
+      }
+    ],
+    "source": "turn_start",
+    "userDisplayContent": null,
+    "outcome": null
+  },
+  {
+    "id": "reasoning-b41e6d1b-d3d7-5ad0-9938-210f1eaf5b80-0",
+    "sessionId": "ae49d68a-1449-52da-f7f8-45376bc18fcb",
+    "turnId": "turn-02c43ef555a4c3ef2fb6f0c0d1e824ed",
+    "inputEntryId": "user-turn-02c43ef555a4c3ef2fb6f0c0d1e824ed-1",
+    "createdAt": 1794042889006,
+    "updatedAt": 1794042889006,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "reasoning",
+    "text": "The user wants me to reply with exactly \"ok\". This is a simple request with no tool use needed.",
+    "summary": [],
+    "outcome": {
+      "type": "committed"
+    }
+  },
+  {
+    "id": "assistant-b41e6d1b-d3d7-5ad0-9938-210f1eaf5b80",
+    "sessionId": "ae49d68a-1449-52da-f7f8-45376bc18fcb",
+    "turnId": "turn-02c43ef555a4c3ef2fb6f0c0d1e824ed",
+    "inputEntryId": "user-turn-02c43ef555a4c3ef2fb6f0c0d1e824ed-1",
+    "createdAt": 1794042889006,
+    "updatedAt": 1794042889006,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "ok"
+      }
+    ],
+    "source": "harness",
+    "userDisplayContent": null,
+    "outcome": {
+      "type": "committed"
+    }
+  }
+]

@@ -64,7 +64,8 @@ Vibe CLI 는 **두 모드**로 문서화돼 있다(vibe/code/cli/work-with-cli.m
 - `--output-dir DIR` — `export.json`(Vibe 버전, 유효 config, 토큰 사용량, 비용,
   stop reason, outcome, subagent별 상태·모델·사용량·비용) 과 세션 사본.
 - exit code: 0 완료 / 1 시작 실패(플래그·config) / 2 모델 API·런타임 실패 /
-  3 한도 도달·중단·거절로 완료 전 정지.
+  3 한도 도달·중단·거절로 완료 전 정지. 실측(2026-11-07 m10)에서는 도구 거절이
+  exit 0 이었다(`docs/evidence/vibe-official-client-lane-20261107/`).
 - 무인 재개: `-p` + `--continue` 또는 `--resume SESSION_ID`(부분 ID 지원).
 
 **[정정] 이 문서 초판은 "headless 문서가 없다"고 적었다 — 틀렸다.** 초판 훑기가
@@ -99,6 +100,22 @@ llms.txt 색인을 `headless|continuous|github|ci|automation` 키워드로 걸�
   반영은 불가능할 수 있다 — lane 자체 usage 관찰(turn 단위)로 대체한다.
 
 ## 6. 미확인 목록 (구현 전에 채운다)
+
+2026-11-07 vibe 3.1.0 실측으로 일부를 채웠다.
+
+- 일부만 채운 것:
+  - 1: `export.json` 최상위 칸 목록과 출력 원소를 fixture 로 남겼다. 칸 단위
+    스키마 문서는 아직 없다.
+  - 2: 저장 위치(keychain 항목)만 봤다.
+  - 3: env API 키 경로의 402 만 봤다.
+  - 4: 모델 별칭 목록만 봤다.
+  - 5: `ask` agent 의 거절 모양과 `--disabled-tools` 한 이름만 봤다.
+  - 6: `-p "/whoami"` 한 형태만 해 봤고 쓸 수 없었다.
+- 못 채운 것: 7. 콘솔 두 막대의 수치는 재지 않았다. 같은 시각의 API 402 와 Vibe
+  성공이라는 대비 하나만 있다.
+
+기록은 `docs/evidence/vibe-official-client-lane-20261107/` 에 있다. 해석은 RFC §4.1 에
+있다.
 
 1. programmatic 호출의 실측: `--output json`/`streaming` 프레임의 필드 수준
    스키마와 `export.json` 스키마는 문서가 개요만 적는다 — 우리 계정에서

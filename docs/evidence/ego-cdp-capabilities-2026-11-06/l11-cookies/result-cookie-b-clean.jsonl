@@ -1,0 +1,5 @@
+{"step":"space","at":"2026-11-07T08:20:40.760Z","value":{"spaceId":21,"name":"masc-l11-cookies-b","ownership":"agent"}}
+{"step":"c0.goto","at":"2026-11-07T08:20:40.893Z","value":{}}
+{"step":"c1.found","at":"2026-11-07T08:20:40.897Z","value":["masc_l11_dom2 l11.localhost / session=true"]}
+{"step":"c2.clean","at":"2026-11-07T08:20:40.962Z","value":[]}
+{"step":"z.finish","at":"2026-11-07T08:20:40.967Z","value":{"spaceId":21,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1"],"preservedUnmanagedCount":0}}

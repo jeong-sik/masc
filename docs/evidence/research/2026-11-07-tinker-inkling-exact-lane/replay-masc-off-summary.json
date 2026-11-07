@@ -1,0 +1,72 @@
+{
+ "low/board": {
+  "n_dataset": 20,
+  "n_rows": 20,
+  "http_errors": 0,
+  "formats": {
+   "none": 20
+  },
+  "json_schema_rejected": 0,
+  "finish": {
+   "stop": 20
+  },
+  "json_forms": {
+   "bare": 20
+  },
+  "valid": 20,
+  "errors": {},
+  "wall_p50": 3.13,
+  "wall_p90": 3.85,
+  "wall_max": 5.77,
+  "cloud_wall_p50": 37.493634939193726,
+  "prompt_tokens_p50": 2582,
+  "completion_tokens_p50": 453,
+  "reasoning_chars_p50": 1062,
+  "cost_usd": 0.0251,
+  "agree": 15,
+  "agree_rate": 0.75,
+  "per_class_recall": {
+   "relevant": "6/10",
+   "not_relevant": "9/10"
+  },
+  "burst_p50": 3.13,
+  "burst_group_wall_max": 5.79,
+  "pass_agree": false,
+  "pass_burst": true
+ },
+ "low/librarian": {
+  "n_dataset": 17,
+  "n_rows": 17,
+  "http_errors": 0,
+  "formats": {
+   "none": 17
+  },
+  "json_schema_rejected": 0,
+  "finish": {
+   "stop": 17
+  },
+  "json_forms": {
+   "bare": 17
+  },
+  "valid": 17,
+  "errors": {},
+  "wall_p50": 6.34,
+  "wall_p90": 12.91,
+  "wall_max": 16.24,
+  "cloud_wall_p50": 150.33583784103394,
+  "prompt_tokens_p50": 24158,
+  "completion_tokens_p50": 1260,
+  "reasoning_chars_p50": 2402,
+  "cost_usd": 0.1186,
+  "retained_jaccard_mean": 0.936,
+  "dropped_exact": 8,
+  "action_agree": 11,
+  "pass_valid_all": true
+ },
+ "spent_usd": 0.1437,
+ "pass_lines": {
+  "librarian_valid_all": true,
+  "board_agree_min": 0.9,
+  "board_burst_p50_max_s": 42.0
+ }
+}

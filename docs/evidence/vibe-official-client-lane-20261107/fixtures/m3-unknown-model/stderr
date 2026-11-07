@@ -1,0 +1,2 @@
+Reading API keys from the macOS Keychain (set them as environment variables to skip this)
+Error: Unknown model: no-such-model-alias. Available: glm-5-3, mistral-large-4-0-3, mistral-medium-3.5, zai-glm-5-3-flash

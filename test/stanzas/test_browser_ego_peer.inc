@@ -51,6 +51,11 @@
  (action (run node --test %{dep:test_browser_ego_console.cjs})))
 
 (rule
+ (alias runtest-test_browser_ego_cookie_write)
+ (deps test_browser_ego_cookie_write.cjs browser_ego_cookie_write_source.cjs ../lib/browser_ego_cookie_write.ml)
+ (action (run node --test %{dep:test_browser_ego_cookie_write.cjs})))
+
+(rule
  (alias runtest-test_browser_ego_recovery)
  (deps test_browser_ego_recovery.cjs ../lib/browser_ego_recovery.ml)
  (action (run node --test %{dep:test_browser_ego_recovery.cjs})))
@@ -61,6 +66,7 @@
   (alias runtest-test_browser_ego_recovery)
   (alias runtest-test_browser_ego_page_events)
   (alias runtest-test_browser_ego_console)
+  (alias runtest-test_browser_ego_cookie_write)
   (alias runtest-ego-takeover-js)
   (alias runtest-test_browser_ego_target)
   (alias runtest-test_browser_ego_upload)

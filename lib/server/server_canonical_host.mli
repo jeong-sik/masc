@@ -5,7 +5,7 @@
     and [Server_routes_http_routes_frontend] uses the same helpers for the root
     redirect and exposes them to its tests. *)
 
-val respond_redirect : location:string -> Httpun.Reqd.t -> unit
+val respond_redirect : location:string -> Http_reqd.t -> unit
 (** A 302 to [location] with an empty body. *)
 
 val authority_host_port
@@ -25,9 +25,9 @@ val canonical_loopback_location
 
 val with_canonical_loopback_host
   :  port:int
-  -> (Httpun.Request.t -> Httpun.Reqd.t -> unit)
+  -> (Httpun.Request.t -> Http_reqd.t -> unit)
   -> Httpun.Request.t
-  -> Httpun.Reqd.t
+  -> Http_reqd.t
   -> unit
 (** Redirects when {!canonical_loopback_location} answers, and runs the handler
     otherwise. It reads the request authority bound to the current fiber, so it

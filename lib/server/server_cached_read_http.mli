@@ -4,7 +4,7 @@ val respond :
   ?compress:bool ->
   ?extra_headers:(string * string) list ->
   request:Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   Dashboard_cache.cached_payload ->
   unit
 (** [respond ~request reqd payload] sends [payload.raw_json], the string the

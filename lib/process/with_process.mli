@@ -34,11 +34,5 @@ val with_process_args_in :
     This helper intentionally avoids shell-string process APIs so callers
     cannot accidentally route command strings through a shell interpreter. *)
 
-val drain_to_buffer : ?chunk:int -> in_channel -> Buffer.t
-(** Read [ic] to EOF into a fresh buffer using [Buffer.add_channel].
-    Default chunk size 4096.  Raises anything other than [End_of_file]
-    (e.g. [Sys_error], [Unix.Unix_error]) to the caller — combine with
-    [with_process_args_in] to close on such faults. *)
-
 val drain_lines : in_channel -> string list
 (** Read [ic] to EOF with [input_line], returning lines in source order. *)

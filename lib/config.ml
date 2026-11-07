@@ -65,9 +65,6 @@ let all_tool_schemas : Masc_domain.tool_schema list =
 let all_tool_names () : string list =
   List.map (fun (s : Masc_domain.tool_schema) -> s.name) all_tool_schemas
 
-let is_tool_allowed tool_name =
-  Tool_catalog.is_visible tool_name
-
 module String_set = Set_util.StringSet
 
 (* Immutable membership lookup for "is this name in raw_all_tool_schemas?". *)

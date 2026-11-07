@@ -41,15 +41,6 @@ let with_process_args_in prog argv f =
           close_best_effort ic;
           raise exn)
 
-let drain_to_buffer ?(chunk = 4096) ic =
-  let buf = Buffer.create chunk in
-  (try
-     while true do
-       Buffer.add_channel buf ic chunk
-     done
-   with End_of_file -> ());
-  buf
-
 let drain_lines ic =
   let rec loop acc =
     match input_line ic with

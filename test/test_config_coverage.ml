@@ -63,10 +63,10 @@ let test_visible_tool_schemas_subset_of_all () =
   check bool "visible <= all" true
     (List.length visible <= List.length Config.all_tool_schemas)
 
-let test_is_tool_allowed_pause () =
+let test_pause_status_catalog_visibility () =
   (* masc_pause_status is an Operator_only control tool on the admin surface. *)
   check bool "pause status allowed on admin/catalog surface" true
-    (Config.is_tool_allowed "masc_pause_status");
+    (Tool_catalog.is_visible "masc_pause_status");
   check bool "pause status included with include_hidden" true
     (Tool_catalog.is_visible ~include_hidden:true "masc_pause_status")
 
@@ -123,7 +123,8 @@ let () =
             test_shard_base_tools_registered_for_help;
           test_case "visible is subset of all" `Quick
             test_visible_tool_schemas_subset_of_all;
-          test_case "pause public catalog allowed" `Quick test_is_tool_allowed_pause;
+          test_case "pause public catalog allowed" `Quick
+            test_pause_status_catalog_visibility;
         ] );
       ( "retention",
         [

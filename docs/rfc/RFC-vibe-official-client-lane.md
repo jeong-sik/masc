@@ -32,20 +32,32 @@ Vibe 제품 표면을 감싸는 official-client lane 이 필요하다. 이 RFC �
 
 ## 2. 결정
 
-### 2.1 lane 종류 — claude_code 패턴, 단 착수 조건이 있다
+### 2.1 lane 종류 — claude_code 패턴의 command transport 와 소유 코덱
 
-- lane 종류는 **command transport**(공식 CLI 감싸기)로 한다. 새 wire/HTTP
-  codec 을 만들지 않는다: 응답 해석·도구 실행은 Vibe CLI 가 하고, masc 는
-  프로세스 조종·턴 원장·관측만 소유한다. claude_code lane
-  (lib/runtime/runtime_claude_code.ml)이 참조 구현이다.
-- **착수 조건**: CLI 의 무인 1-shot 호출(`claude -p` 상당)이 존재해야 한다.
-  문서상 headless 는 확인되지 않았다(연구 §3). 구현 Task 의 첫 층은
-  `vibe --help` 전수 촬영과 1-shot 실행 실측이고, 무인 호출이 없으면 lane 을
-  만들지 않고 이 RFC 를 Deferred 로 되돌린다. 세션형(`/branch`, `--resume`)
-  조종을 masc 가 흉내 내는 우회는 만들지 않는다(워크어라운드 거부: 대화형
-  TTY 조종은 취약하고 문서화 안 된 내부다).
-- antigravity 패턴(OAuth 자격 증명 모듈 9개)은 Vibe CLI 가 자격 증명을 스스로
-  provisioning 하므로 채택하지 않는다. masc 는 로그인 절차를 소유하지 않는다.
+- lane 종류는 **command transport**(공식 CLI 감싸기)다. 새 HTTP codec 을
+  만들지 않는다. 단 "masc 는 프로세스 조종·관측만 한다"는 초판 문장은 옳지
+  않았다: 참조 구현 claude_code lane 자체가 stream_event 15-생성자 코덱,
+  MCP 도구 브리지, resume 세션을 소유한다. 소유 경계는 같은 선에 선다.
+- **masc 가 소유하는 계약** — programmatic 표면의 소비 계약(work-with-cli.md
+  Programmatic mode):
+  - `--output json`(종료 시 메시지 배열) / `--output streaming`(메시지별 한 줄)
+    프레임을 읽는 출력 코덱.
+  - `--output-dir` 의 `export.json`(토큰 사용량·비용·stop reason·outcome·
+    subagent별 기록) 파싱 — usage 관측(§2.4)의 1차 원천.
+  - exit code 0-3 의 typed 분류(0 완료 / 1 시작 실패 / 2 모델 API·런타임
+    실패 / 3 한도·중단·거절).
+  - 세션 재개: `-p --continue`·`-p --resume SESSION_ID`(문서화된 표면).
+- **착수 조건**: 무인 호출의 존재는 문서로 확정됐다(연구 §3). 구현 Task 의
+  첫 층은 우리 계정에서의 **호출 계약 실측**이다 — `--output json`/`streaming`
+  프레임과 `export.json` 을 fixture 로 촬영해 필드 수준 계약을 문서화한다.
+  문서와 실제가 어긋나 코덱을 세울 수 없으면 그 층에서 이 RFC 를 Deferred 로
+  되돌린다.
+- **우회의 금지는 문서화되지 않은 TTY 조종에 한한다**(초판은 문서화된
+  --resume 까지 금지했다 — 리뷰 S3). 문서화된 programmatic 표면이면 resume
+  도 lane 의 정당한 원시다.
+- antigravity 패턴(OAuth 자격 증명을 저마다 모듈로 소유하는 패밀리)은 Vibe
+  CLI 가 자격 증명을 스스로 provisioning 하므로 채택하지 않는다. masc 는
+  로그인 절차를 소유하지 않는다.
 
 ### 2.2 자격 증명 — CLI 소유, masc 는 준비 상태만 관측
 
@@ -65,15 +77,17 @@ Vibe 제품 표면을 감싸는 official-client lane 이 필요하다. 이 RFC �
   실측·구현됐다(#49350, #49554). lane 은 CLI 가 content 를 이미 해석해
   내주므로 우리 wire 파서를 재사용하지 않는다.
 - thinking 수준 매핑: Vibe `off/low/medium/high/xhigh/max` → masc
-  Reasoning_effort `none/low/medium/high/xhigh/max`. 이름만 다른 `off`↔`none`
-  은 lane 경계에서 한 번 바꾼다(문자열 비교 분기가 아니라 어휘표 한 줄).
+  Reasoning_effort(8값) 의 대응값. 이름만 다른 `off`↔`none` 은 lane 경계에서
+  어휘표 한 줄로 바꾼다(문자열 비교 분기가 아니다). 단 CLI 표면이 `off`/
+  `none` 을 실제로 받는지는 미실측이다(API wire 는 `none` 을 거부한다는
+  실측이 있다) — 첫 층 실측 항목에 넣는다.
 
 ### 2.4 사용량 관측
 
-- Admin usage API 의 `vibe_usage` 는 Enterprise 전용이라 Pro 운영에서 못
-  쓴다. lane 은 turn 단위 관측(세션/지연/출력 크기)으로 operator 뷰를 채우고,
-  콘솔의 두 막대는 사람이 읽는 원장으로 남긴다. 예측 비용 계산을 lane 이
-  발명하지 않는다.
+- usage 의 1차 원천은 `--output-dir` 의 `export.json`(토큰 사용량·비용·
+  subagent별 기록)이다 — 호출마다 확정적으로 얻는다. Admin usage API 의
+  `vibe_usage` 는 Enterprise 전용이라 Pro 운영에서 못 쓴다. 콘솔의 두 막대는
+  사람이 읽는 원장으로 남기고, lane 이 예측 비용 모델을 발명하지 않는다.
 
 ### 2.5 실패 양상의 typed 처리
 
@@ -95,15 +109,22 @@ Vibe 제품 표면을 감싸는 official-client lane 이 필요하다. 이 RFC �
 
 ## 4. 순서
 
-1. 구현 Task(MASC 별도 등록)의 첫 층: headless 실측. 없으면 이 RFC Deferred.
-2. 있으면: lane 뼈대(프로세스 조종+1-shot) → 준비 상태/실패 분류 →
-   카탈로그·배정 표면 → keeper 1곳 시범 배정.
-3. 각 층은 스택 PR 이고, 계약 시험은 준비 검사·실패 분류·인자 조립만 둔다
+1. 구현 Task(MASC 별도 등록)의 첫 층: programmatic 호출 계약 실측 —
+   fixture 촬영(`--output json`, `streaming`, `export.json`, exit code 0-3,
+   `off`/`none` 수용). 문서와 실제가 어긋나면 이 RFC Deferred.
+2. 있으면: 출력 코덱(json/streaming/export.json) → exit code typed 분류와
+   준비 검사 → 카탈로그·배정 표면 → keeper 1곳 시범 배정.
+3. 각 층은 스택 PR 이고, 계약 시험은 코덱 파싱·분류·인자 조립만 둔다
    (TUI 문구·화면 시험 금지 규칙 그대로).
+4. 연기 항목의 소유: 다계정 스택은 첫 층 실측 뒤 #49200 계열로 MASC task
+   를 따로 등록해 소유자를 정한다(이 RFC 는 단일 계정만 약속). 콘솔 막대
+   의미 확인은 운영자 확인 사항으로 연구 문서 §6 에 남긴다.
 
 ## 5. 리스크
 
-- headless 부재로 lane 전체가 Deferred 될 수 있다(가장 큰 리스크).
+- `--output json`/`streaming` 프레임과 `export.json` 의 필드 수준 스키마는
+  문서가 개요만 적는다 — 첫 층 fixture 없이 코덱을 세우면 계약이 상상이
+  된다(최대 리스크. 초판의 "headless 부재" 리스크는 문서 확인으로 해소).
 - 문서의 "shared usage" 문장이 참이면 pool 분리 전제가 흔들린다 — 실측
   (콘솔 두 막대의 소진 곡선)으로 1차 검증한다.
 - CLI 자동 업그레이드(`--check-upgrade`)로 인자·출력이 바뀔 수 있다 —

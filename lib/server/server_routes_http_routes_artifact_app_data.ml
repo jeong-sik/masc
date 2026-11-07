@@ -14,10 +14,6 @@ let error_response error =
   | Unavailable _ -> response `Service_unavailable "artifact_app_data_unavailable" []
   | Commit_uncertain attempted -> response `Service_unavailable "artifact_app_data_commit_uncertain"
       ["attempted", Data.to_json attempted; "recovery", `String "Read application inputs before retrying."]
-let respond ?cors ?(status = `OK) request reqd json =
-  let cors = match cors with Some headers -> headers | None -> public_read_cors_headers request in
-  Http.Response.json_value ~status
-    ~extra_headers:(["cache-control", "private, no-store"] @ cors) json reqd
 let decode_request ~config body =
   let open Result.Syntax in
   let* json = match Yojson.Safe.from_string body with
@@ -49,9 +45,11 @@ let set ~config ~actor ~body =
 let add_routes router = router
   |> Server_route.prefix_get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-app-data/" (fun state actor request reqd ->
     let base_path = (Mcp_server.workspace_config state).base_path in
-    let json, status = read ~base_path ~actor ~request in respond ~status request reqd json)
+    let json, status = read ~base_path ~actor ~request in
+    respond_no_store_json_value ~status request reqd json)
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/artifact-app-data" (fun state actor request reqd ->
     let config = Mcp_server.workspace_config state in
     let cors = public_read_cors_headers request in
     Http.Request.read_body_async reqd (fun body ->
-      let json, status = set ~config ~actor ~body in respond ~cors ~status request reqd json))
+      let json, status = set ~config ~actor ~body in
+      respond_no_store_json_value ~cors ~status request reqd json))

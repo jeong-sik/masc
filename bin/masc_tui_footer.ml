@@ -9,15 +9,8 @@ type task_creation_phase = Task_not_started | Task_reserved | Task_preparing | T
 
 type status_item =
   | Task_creation of { keeper : string; phase : task_creation_phase }
-  | Refresh_interval of float
-  | Server_build of
-      { version : string
-      ; commit : string
-      }
-  | Server_base_path of string
   (* The workspace the TUI itself resolved, said only when it is not the one
-     the server resolved. [Server_base_path] already names the server's, so
-     the pair reads as the disagreement it is. *)
+     the server resolved. *)
   | Workspace_mismatch of string
   | Workspace_unconfirmed
   (* Cached rows remain visible, but cannot authorize a new request. *)
@@ -32,24 +25,6 @@ type status_item =
       { tui : string
       ; server : string
       ; older : [ `Tui | `Server | `Unknown ]
-      }
-  (* Keepers mid-turn right now, first name first. The operator who sent a
-     message and walked to another surface reads the answer's progress here
-     instead of standing on the chat pane. Empty list draws nothing.
-     [lead_elapsed_s] is how long the first keeper's turn has been running,
-     derived by the caller against its own clock; a stalled turn shows up as
-     a badge that keeps counting instead of a name that never changes. *)
-  | Keeper_answering of
-      { names : string list
-      ; lead_elapsed_s : int option
-      }
-  (* A turn that just finished: the other half of the walked-away question.
-     [seconds_ago] is derived by the caller against its own clock; [more]
-     counts further finishes folded behind this one. *)
-  | Keeper_answered of
-      { name : string
-      ; seconds_ago : int
-      ; more : int
       }
   (* A destructive action armed and waiting for its key again, or one already
      running. Neither is a key hint: [?] cannot recover "press d again to delete
@@ -81,8 +56,7 @@ type status_item =
 let needs_operator = function
   | Workspace_mismatch _ | Workspace_unconfirmed | Server_worktree_binary | Tui_build_mismatch _
   | Keeper_action_armed _ | Keeper_action_running _ | Task_creation _ | Operator_action _ -> true
-  | Refresh_interval _ | Server_build _ | Server_base_path _
-  | Keeper_answering _ | Keeper_answered _ | Port _ -> false
+  | Port _ -> false
 
 (* Enough of the commit to tell two checkouts apart, which is the question
    this answers: [Port: 8935] alone is the same on every build that ever
@@ -96,11 +70,7 @@ let short_commit commit =
 
 type retention =
   | Endpoint_identity
-  | Workspace_identity
-  | Build_identity
-  | Refresh_context
-  (* Live turn activity outlasts the identity facts a keeper list can also
-     answer, but yields to the conflict notice and the port. *)
+  (* Live task activity yields to the conflict notice and the port. *)
   | Live_activity
   (* Ahead of every conflict. A conflict says the screen is reading the wrong
      thing, which stays true on the next frame; an armed action is a question
@@ -128,42 +98,12 @@ type projected_status =
   ; shorter : string list
   }
 
-(* Minute precision past the first minute: the footer refreshes with the
-   poll, and pretending to seconds it does not have would read as drift. *)
-let coarse_age seconds =
-  if seconds < 60 then Printf.sprintf "%ds" seconds
-  else Printf.sprintf "%dm" (seconds / 60)
-;;
-
 let status_item_projection = function
   | Task_creation {keeper;phase} ->
     let stage = match phase with
       | Task_not_started -> "not started" | Task_reserved -> "waiting to prepare" | Task_preparing -> "preparing"
       | Task_awaiting_reply -> "awaiting reply" | Task_awaiting_application -> "result awaiting UI" in
     Some {text=Printf.sprintf "Task for %s: %s" keeper stage;retention=Live_activity;shorter=[]}
-  | Refresh_interval seconds when Float.is_finite seconds && seconds > 0. ->
-    Some
-      { text = Printf.sprintf "Refresh: %.0fs" seconds
-      ; retention = Refresh_context
-      ; shorter = []
-      }
-  | Refresh_interval _ -> None
-  | Server_build { version; commit } ->
-    let version = String.trim version in
-    let commit = String.trim commit in
-    (match version, short_commit commit with
-     | "", "" -> None
-     | version, "" -> Some { text = "v" ^ version; retention = Build_identity; shorter = [] }
-     | "", commit -> Some { text = commit; retention = Build_identity; shorter = [] }
-     | version, commit ->
-       Some
-         { text = Printf.sprintf "v%s %s" version commit
-         ; retention = Build_identity
-         ; shorter = []
-         })
-  | Server_base_path "" -> None
-  | Server_base_path path ->
-    Some { text = "Base: " ^ path; retention = Workspace_identity; shorter = [] }
   | Workspace_mismatch "" -> None
   | Workspace_mismatch local ->
     Some
@@ -210,31 +150,6 @@ let status_item_projection = function
     Some
       { text = Printf.sprintf "%s %s\xe2\x80\xa6" gerund keeper
       ; retention = Armed_action
-      ; shorter = []
-      }
-  | Keeper_answering { names = []; _ } -> None
-  | Keeper_answering { names = name :: rest; lead_elapsed_s } ->
-    let elapsed =
-      match lead_elapsed_s with
-      | None -> ""
-      | Some seconds -> " " ^ coarse_age seconds
-    in
-    let tail =
-      match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)
-    in
-    Some
-      { text =
-          Printf.sprintf "\xe2\x97\x8c answering %s%s%s" name elapsed tail
-      ; retention = Live_activity
-      ; shorter = []
-      }
-  | Keeper_answered { name; seconds_ago; more } ->
-    let ago = coarse_age (max 0 seconds_ago) in
-    let tail = if more > 0 then Printf.sprintf " +%d" more else "" in
-    Some
-      { text =
-          Printf.sprintf "\xe2\x9c\x93 %s answered %s ago%s" name ago tail
-      ; retention = Live_activity
       ; shorter = []
       }
   | Port port when port > 0 ->
@@ -288,10 +203,7 @@ let build_mismatch_item ~tui_commit ~tui_age_s ~server_commit ~server_age_s =
 ;;
 
 let omission_order =
-  [ Refresh_context
-  ; Build_identity
-  ; Workspace_identity
-  ; Live_activity
+  [ Live_activity
   ; Endpoint_identity
   ]
 
@@ -313,8 +225,7 @@ let leads_the_row item =
   | Armed_action | Workspace_conflict | Build_conflict
   | Worktree_conflict | Operator_notice ->
     true
-  | Endpoint_identity | Workspace_identity | Build_identity | Refresh_context
-  | Live_activity -> false
+  | Endpoint_identity | Live_activity -> false
 
 (* An armed action first: it is the only one of these the next keypress can
    lose. Then the wrong-workspace read, which decides whether anything on the
@@ -694,8 +605,8 @@ let notices_in_their_shorter_text conflicts =
 (* Dropping a notice hands its cells back to everything that gave way for it,
    the status facts included, so each conflict set is fitted from the whole
    status list and the whole key row again. Shrinking in one pass left a row
-   carrying only [q:quit  ...?] where the refresh interval, the answering badge
-   and the port all fit once the notice was gone. *)
+   carrying only [q:quit  ...?] where the task line and the port all fit once
+   the notice was gone. *)
 let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~hints
     ~omissions statuses =
   let prefix_with_action action =
@@ -841,9 +752,9 @@ type question_place =
     outcome is cell-cut. A complete outcome is attempted before reserving an
     omission marker, and it cannot disappear as a droppable key hint.
     Key hints retain the row before status facts do. When the facts do not fit,
-    whole typed items are omitted in this order: refresh interval, build, base
-    path, live turn activity, port. Only an overlong surface-owned hint uses
-    cell-safe truncation as the final fallback.
+    whole typed items are omitted in this order: live task activity, port.
+    Only an overlong surface-owned hint uses cell-safe truncation as the
+    final fallback.
 
     A conflict notice is the exception: it is rendered in front of the hints
     ({!leads_the_row}) rather than left in the tail, so it outlives the keys

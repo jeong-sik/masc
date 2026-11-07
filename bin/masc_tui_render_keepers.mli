@@ -14,3 +14,12 @@ val render_keeper_detail :
 val render_keeper_logs :
   Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
+
+val keeper_next_text :
+  ?now:float ->
+  Masc_tui_keeper_list_model.row ->
+  string option
+(** The next step or resting path detail for the Keeper row, placed at the end
+    of the detail cell (right = next). Distinguishes provider stated resets vs
+    MASC upper bounds, uses relative span durations, and attaches [▹] only
+    when the previous turn failed. *)

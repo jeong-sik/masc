@@ -882,6 +882,16 @@ receipt`, `candidate walk was not captured`, `historical evidence unreadable`,
 `no candidate failure recorded`). A failure that is not a turn failure carries the
 cause word alone. The time piece is left out when the failure has no usable time.
 
+The rightmost piece of `DETAIL` shows where the Keeper's next dispatch will go,
+following the "right = next" axis. When a previous turn has failed, the next
+runtime or rest state is marked with `▹`. If a runtime is currently resting,
+its release time is drawn as a relative duration (`~2m14s`) alongside its
+runtime id and the release basis: `제공자` indicates the reset time was
+explicitly stated by the model provider (such as an API rate limit reset
+header), while `상한` indicates an upper-bound cap enforced by MASC when the
+provider did not state an explicit reset time. When the release time has
+already passed in a stale roster reading, the timestamp is omitted.
+
 Roster reads and pause/resume/wakeup requests bind to the complete workspace
 identity observed in `/health`: `paths.effective_base_path` and
 `paths.effective_masc_root`. API clients bind `GET /api/v1/gate/keepers` with

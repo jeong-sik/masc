@@ -813,6 +813,10 @@ module Router = struct
       :  (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
       -> request_handler
 
+    val with_public_read_open_when_strict
+      :  (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
+      -> request_handler
+
     val with_read_auth
       :  (state -> Httpun.Request.t -> Httpun.Reqd.t -> unit)
       -> request_handler
@@ -859,7 +863,12 @@ module Router = struct
     type _ auth =
       | Always_public : request_handler auth
       | Public_read : state_handler auth
-      | Public_read_on_canonical_host : { port : int } -> state_handler auth
+      | Public_read_open_when_strict : state_handler auth
+      | Public_read_on_canonical_host :
+          { port : int
+          ; when_strict : Route_access.strict_reading
+          }
+          -> state_handler auth
       | Read_auth : state_handler auth
       | Permission : Masc_domain.permission -> state_handler auth
       | Token_permission : Masc_domain.permission -> token_handler auth
@@ -899,7 +908,12 @@ module Router = struct
     type _ auth =
       | Always_public : request_handler auth
       | Public_read : state_handler auth
-      | Public_read_on_canonical_host : { port : int } -> state_handler auth
+      | Public_read_open_when_strict : state_handler auth
+      | Public_read_on_canonical_host :
+          { port : int
+          ; when_strict : Route_access.strict_reading
+          }
+          -> state_handler auth
       | Read_auth : state_handler auth
       | Permission : Masc_domain.permission -> state_handler auth
       | Token_permission : Masc_domain.permission -> token_handler auth
@@ -914,7 +928,8 @@ module Router = struct
     let access : type h. h auth -> Route_access.t = function
       | Always_public -> Route_access.Always_public
       | Public_read -> Route_access.Public_read Route_access.Credential_when_strict
-      | Public_read_on_canonical_host _ -> Route_access.Public_read Route_access.Credential_when_strict
+      | Public_read_open_when_strict -> Route_access.Public_read Route_access.Open_when_strict
+      | Public_read_on_canonical_host { when_strict; _ } -> Route_access.Public_read when_strict
       | Read_auth -> Route_access.Read_auth
       | Permission permission -> Route_access.Permission permission
       | Token_permission permission -> Route_access.Token_permission permission
@@ -933,8 +948,14 @@ module Router = struct
       | Always_public -> handler
       | Self_authenticated _ -> handler
       | Public_read -> W.with_public_read handler
-      | Public_read_on_canonical_host { port } ->
-        W.with_canonical_loopback_host ~port (W.with_public_read handler)
+      | Public_read_open_when_strict -> W.with_public_read_open_when_strict handler
+      | Public_read_on_canonical_host { port; when_strict } ->
+        let public_read =
+          match when_strict with
+          | Route_access.Credential_when_strict -> W.with_public_read handler
+          | Route_access.Open_when_strict -> W.with_public_read_open_when_strict handler
+        in
+        W.with_canonical_loopback_host ~port public_read
       | Read_auth -> W.with_read_auth handler
       | Permission permission -> W.with_permission_auth ~permission handler
       | Token_permission permission ->

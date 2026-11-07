@@ -482,6 +482,13 @@ val with_public_read :
   Httpun.Request.t -> Httpun.Reqd.t -> unit
 (** Public-read combinator (no auth, looser CORS). *)
 
+val with_public_read_open_when_strict :
+  (Mcp_server.server_state ->
+   Httpun.Request.t -> Httpun.Reqd.t -> unit) ->
+  Httpun.Request.t -> Httpun.Reqd.t -> unit
+(** [with_public_read] that stays open when strict auth is on: 503 before the
+    server is ready, then the read workspace precondition, then the handler. *)
+
 val with_read_auth :
   (Mcp_server.server_state ->
    Httpun.Request.t -> Httpun.Reqd.t -> unit) ->

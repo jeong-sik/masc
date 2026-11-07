@@ -143,8 +143,7 @@ let reconcile_keeper_attention_fields_with_trust fields trust =
 let dashboard_enrich_max_fibers = 8
 
 (** #9766: per-render phase timing record used to surface a breakdown
-    in the [slow render] WARN.  Pure values so a unit test can pin
-    the formatting / per-keeper averaging without booting Eio. *)
+    in the [slow render] WARN. *)
 type render_phase_timings_ms =
   { total_ms : float
   ; snapshot_ms : float

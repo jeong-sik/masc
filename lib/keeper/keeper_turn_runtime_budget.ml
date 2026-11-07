@@ -109,11 +109,6 @@ let capacity_refusal_of_error
     None
 ;;
 
-let current_keeper_meta ~(config : Workspace.config) ~(fallback_meta : keeper_meta) =
-  match Keeper_registry.get ~base_path:config.base_path fallback_meta.name with
-  | Some entry -> entry.meta
-  | None -> fallback_meta
-
 let runtime_budget_logged : unit StringMap.t Atomic.t =
   Atomic.make StringMap.empty
 

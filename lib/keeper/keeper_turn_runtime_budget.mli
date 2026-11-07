@@ -47,13 +47,6 @@ val capacity_refusal_of_error :
     axes. This function does not inspect rendered error prose and does not
     select a provider, model, or failover. *)
 
-val current_keeper_meta :
-  config:Workspace.config ->
-  fallback_meta:keeper_meta ->
-  keeper_meta
-(** Read the latest meta from the registry, falling back to the given
-    [fallback_meta] when the registry entry is missing. *)
-
 val resolved_max_context_for_turn
   :  meta:keeper_meta
   -> Keeper_context_runtime.max_context_resolution

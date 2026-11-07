@@ -36,9 +36,6 @@ type sources =
   }
 (** Where the Tasks and the Keepers are read from. *)
 
-val real_sources : Workspace_utils_backend_setup.config -> sources
-(** {!Candle_tasks}. *)
-
 val drain_with :
   sources:sources
   -> now:(unit -> float)
@@ -53,4 +50,5 @@ val drain_with :
 
 val drain_once :
   now:(unit -> float) -> Workspace_utils_backend_setup.config -> (outcome list, string) result
-(** {!drain_with} on {!real_sources}. *)
+(** {!drain_with} with the Tasks and the Keepers read through
+    {!Candle_tasks}. *)

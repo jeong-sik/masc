@@ -146,10 +146,6 @@ val read_agent :
 
 (** {1 Locking} *)
 
-(** Full-jitter backoff: returns a sleep duration uniformly
-    distributed in [[0, delay]]. *)
-val backoff_with_jitter : float -> float
-
 (** Acquire a distributed lock via the backend, retrying with
     full-jitter backoff. Raises [Invalid_argument] when the
     50-attempt budget is exhausted; bumps the

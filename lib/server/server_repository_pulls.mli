@@ -282,9 +282,6 @@ val lane_addon_github :
 
 (** {1 REST reads} *)
 
-val rest_api_url : string
-(** [https://api.github.com]: the REST endpoint of {!default_github_host}. *)
-
 type rest_failure =
   | Reader_not_ready of reader
       (** The declared reader cannot be used and the state says why. It is
@@ -297,7 +294,8 @@ type rest_failure =
 
 val rest_get :
   http_get:http_get -> config:Workspace.config -> path:string -> (response, rest_failure) result
-(** One GET of [rest_api_url ^ path] with the token of the reader declared in
+(** One GET of [path] on [https://api.github.com], the REST endpoint of
+    {!default_github_host}, with the token of the reader declared in
     runtime.toml [\[repositories\] pr_reader]. The reader is resolved again on
     every call, as {!refresh} does, and the token never leaves this module.
     [path] starts with ['/'] and the caller built it from parts that cannot

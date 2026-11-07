@@ -105,7 +105,8 @@ val reader_after_wheel :
   Masc_tui_types.clamped_scroll option
 (** Where one wheel notch leaves a reader, given its position now: one row, as
     [j] / [k] move it. [None] for the scrolls the wheel reaches as a key, and
-    for the Parameters document when it cannot move that way. *)
+    for the Parameters and Presets documents when they cannot move that way.
+    A Presets save warning always takes the notch. *)
 
 val navigation_rows : int
 

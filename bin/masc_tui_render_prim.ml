@@ -138,7 +138,7 @@ let clamped_scroll_now (state : state) = function
   | Runtime_params_scroll _ ->
       Runtime_params_scroll
         { scroll = state.config_scroll;
-          max_scroll = state.runtime_params_max_scroll }
+          max_scroll = state.config_document_max_scroll }
   | System_log_detail_scroll _ ->
       System_log_detail_scroll (system_logs_page state).lp_detail_scroll
   | Planning_detail_scroll _ | Planning_confirmation_scroll _ ->
@@ -164,7 +164,11 @@ let clamped_scroll_now (state : state) = function
   | Queue_panel_presented owner -> Queue_panel_presented owner
   | Help_presented -> Help_presented
   | Voice_scroll _ -> Voice_scroll state.config_scroll
-  | Preset_detail_scroll _ -> Preset_detail_scroll (state.config_scroll, None)
+  | Preset_detail_scroll { confirmation; _ } ->
+      Preset_detail_scroll
+        { scroll = state.config_scroll;
+          max_scroll = state.config_document_max_scroll;
+          confirmation }
   | Keeper_list_scroll _ -> Keeper_list_scroll state.keeper_list_scroll
   | Context_inspector_scroll _ ->
       Context_inspector_scroll state.context_inspector_scroll
@@ -188,6 +192,17 @@ let reader_after_wheel (reader : clamped_scroll)
     | Masc.Tui_mouse_protocol.Wheel_down -> Masc_tui_types.scroll_down_from value ~by:1
     | Masc.Tui_mouse_protocol.Wheel_up -> max 0 (value - 1)
   in
+  (* The row a document under a list moves to, or [None] when it has no row
+     to move to that way. *)
+  let within ~scroll ~max_scroll =
+    let from = min scroll max_scroll in
+    let moved =
+      match direction with
+      | Masc.Tui_mouse_protocol.Wheel_down -> min max_scroll (from + 1)
+      | Masc.Tui_mouse_protocol.Wheel_up -> max 0 (from - 1)
+    in
+    if moved = from then None else Some moved
+  in
   match reader with
   | Task_detail (value, viewport) -> Some (Task_detail (step value, viewport))
   | Schedule_detail_scroll value -> Some (Schedule_detail_scroll (step value))
@@ -203,14 +218,9 @@ let reader_after_wheel (reader : clamped_scroll)
      while it can move that way; at its ends, and when it fits whole, the
      notch reaches the list as the key. *)
   | Runtime_params_scroll { scroll; max_scroll } ->
-      let from = min scroll max_scroll in
-      let moved =
-        match direction with
-        | Masc.Tui_mouse_protocol.Wheel_down -> min max_scroll (from + 1)
-        | Masc.Tui_mouse_protocol.Wheel_up -> max 0 (from - 1)
-      in
-      if moved = from then None
-      else Some (Runtime_params_scroll { scroll = moved; max_scroll })
+      Option.map
+        (fun moved -> Runtime_params_scroll { scroll = moved; max_scroll })
+        (within ~scroll ~max_scroll)
   | System_log_detail_scroll value -> Some (System_log_detail_scroll (step value))
   | Planning_detail_scroll value | Planning_confirmation_scroll (value, _) ->
       Some (Planning_detail_scroll (step value))
@@ -235,7 +245,16 @@ let reader_after_wheel (reader : clamped_scroll)
   | Play_invite_scroll (card, value) -> Some (Play_invite_scroll (card, step value))
   | Queue_panel_presented _ | Help_presented -> None
   | Voice_scroll value -> Some (Voice_scroll (step value))
-  | Preset_detail_scroll (value, _) -> Some (Preset_detail_scroll (step value, None))
+  (* Presets draws its list beside the document the same way. While a save
+     warning is the document, a notch always reads it: any other key ends the
+     armed save, so a notch past the end must not reach the loop as one. *)
+  | Preset_detail_scroll { scroll; max_scroll; confirmation = (Some _ as confirmation) } ->
+      Some (Preset_detail_scroll { scroll = step scroll; max_scroll; confirmation })
+  | Preset_detail_scroll { scroll; max_scroll; confirmation = None } ->
+      Option.map
+        (fun moved ->
+          Preset_detail_scroll { scroll = moved; max_scroll; confirmation = None })
+        (within ~scroll ~max_scroll)
   | Context_inspector_scroll value ->
       Some (Context_inspector_scroll (step value))
   | Context_inspector_response_scroll value ->

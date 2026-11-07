@@ -9609,10 +9609,11 @@ type state = {
      PgUp/PgDn still move by a visible page. *)
   mutable runtime_config_cursor: int;
   mutable config_scroll: int;
-  (* How far the Parameters document can scroll, as the last frame drew it:
-     0 when the document fits. A wheel notch moves the document only while
-     it has a row to move to. *)
-  mutable runtime_params_max_scroll: int;
+  (* How far the document under a list can scroll, as the last frame drew it:
+     0 when the document fits. Parameters and Presets draw a list and the
+     selected row's document together, and a wheel notch moves the document
+     only while it has a row to move to. *)
+  mutable config_document_max_scroll: int;
   mutable detail_tab: keeper_detail_tab;
   mutable item_cursor: int;
   mutable item_filter: Masc_tui_keeper_items.filter;
@@ -19712,7 +19713,7 @@ let create_state
   runtime_config_view_error = None;
   runtime_config_cursor = 0;
   config_scroll = 0;
-  runtime_params_max_scroll = 0;
+  config_document_max_scroll = 0;
   detail_tab = Detail_info;
   item_cursor = 0;
   item_filter = Masc_tui_keeper_items.All;
@@ -21469,7 +21470,12 @@ type clamped_scroll =
      it -- later endpoints, the probe's last rows, the footer -- could not be
      reached. *)
   | Voice_scroll of int
-  | Preset_detail_scroll of int * preset_confirmation_frame option
+  (* The Presets pane draws its list and the selected preset's document
+     together, as Parameters does, and a notch goes the same way.
+     [confirmation] is the save warning the document shows while one is
+     armed. *)
+  | Preset_detail_scroll of
+      { scroll : int; max_scroll : int; confirmation : preset_confirmation_frame option }
   (* The Keepers list window, which the frame keeps still while the cursor
      is on it. Worked out from the cursor alone, the cursor sat on the bottom
      row once the list scrolled, and choosing a row above it moved the whole
@@ -21622,7 +21628,7 @@ let apply_clamped_scroll (state : state) = function
   | Runtime_detail_scroll value -> state.runtime_detail_scroll <- value
   | Runtime_params_scroll { scroll; max_scroll } ->
       state.config_scroll <- scroll;
-      state.runtime_params_max_scroll <- max_scroll
+      state.config_document_max_scroll <- max_scroll
   | System_log_detail_scroll value -> edit_system_logs_page state (fun page -> {page with lp_detail_scroll=value})
   | Keeper_logs_scroll { scroll; cols } ->
       state.log_scroll <- scroll;
@@ -21656,7 +21662,9 @@ let apply_clamped_scroll (state : state) = function
        | Some _ | None -> ())
   | Queue_panel_presented _ | Help_presented -> ()
   | Voice_scroll value -> state.config_scroll <- value
-  | Preset_detail_scroll (value, _) -> state.config_scroll <- value
+  | Preset_detail_scroll { scroll; max_scroll; confirmation = _ } ->
+      state.config_scroll <- scroll;
+      state.config_document_max_scroll <- max_scroll
   | Keeper_list_scroll value -> state.keeper_list_scroll <- value
   | Context_inspector_scroll value -> state.context_inspector_scroll <- value
   | Context_inspector_response_scroll value -> state.context_inspector_response_scroll <- value

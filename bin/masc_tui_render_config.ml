@@ -1096,7 +1096,11 @@ let render_presets (state : state) =
          | None ->
            Masc_tui_keys.footer_hints_config ~lang:state.ui_language
              ~pane:Config_presets));
-  finish_surface state ~clamped:(Preset_detail_scroll (scroll, confirmation))
+  finish_surface state
+    ~clamped:(Preset_detail_scroll
+      { scroll;
+        max_scroll = Masc_tui_scroll.maximum ~count ~height:(max 1 detail_height);
+        confirmation })
     ~surface_key:"presets" ~rows:terminal_rows ~cols buf
 
 let render_themes (state : state) =

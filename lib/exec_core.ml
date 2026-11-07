@@ -27,17 +27,3 @@ let process_status_of_json = function
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
     Error "process status: not an object"
 ;;
-
-let process_status_is_success = function
-  | Unix.WEXITED 0 -> true
-  | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
-;;
-
-let process_result_json ?(extra = []) ~status ~output () =
-  `Assoc
-    ([ "ok", `Bool (process_status_is_success status)
-     ; "status", process_status_to_json status
-     ; "output", `String output
-     ]
-     @ extra)
-;;

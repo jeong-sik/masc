@@ -129,6 +129,7 @@ module Authorization_scope : sig
   val all : t
 
   val inter : t -> t -> t
+  val equal : t -> t -> bool
 end
 
 module Pat_scope : sig

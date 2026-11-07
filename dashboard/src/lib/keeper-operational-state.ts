@@ -176,7 +176,6 @@ function computeKeeperOperationalAxes(
 function isPaused(k: Keeper, c: KeeperCompositeSnapshot | null): boolean {
   if (isKeeperPaused(k)) return true
   if (toKeeperPhase(c?.phase) === 'Paused') return true
-  if (toKeeperPhase(c?.collapsed_from) === 'Paused') return true
   if (c?.phase_diagnosis?.conditions.operator_paused === true) return true
   return false
 }
@@ -188,7 +187,6 @@ function derivePausedCause(k: Keeper, c: KeeperCompositeSnapshot | null): Paused
   if (k.phase === 'Paused') return 'operator'
   if (isKeeperPaused(k)) return 'operator'
   if (toKeeperPhase(c?.phase) === 'Paused') return 'operator'
-  if (toKeeperPhase(c?.collapsed_from) === 'Paused') return 'operator'
   return 'unknown'
 }
 

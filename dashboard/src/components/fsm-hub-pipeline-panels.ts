@@ -276,23 +276,9 @@ export function HeroPhase({
   const phaseStyle = getPhaseStyle(snapshot.phase)
   const color = `text-[${phaseStyle.color}]`
   const heldFor = phaseSince != null ? fmtDuration(Math.max(0, now - phaseSince)) : null
-  // `collapsed_from` is set by the backend only when phase has collapsed onto
-  // a parent projection (e.g. a 7-phase composite Stable). The backend
-  // currently emits the raw 13-state phase via `phase_to_string` and does
-  // not emit a 'Stable' carrier (see KeeperCompositeLifecycle.tla:143 spec
-  // vs lib/keeper/keeper_composite_observer.ml:628 emit). Surface
-  // `collapsed_from` whenever it is present rather than gating on a phase
-  // string that the backend never produces.
-  const collapsedSource = snapshot.collapsed_from ?? null
-  const collapsedSourceLabel = collapsedSource
-    ? `${displayState(collapsedSource)} (${collapsedSource})`
-    : null
-  const title = collapsedSource
-    ? `${STATE_DESCRIPTIONS[snapshot.phase] ?? snapshot.phase}\nCollapsed from raw keeper phase: ${collapsedSource}\n${STATE_DESCRIPTIONS[collapsedSource] ?? collapsedSource}`
-    : (STATE_DESCRIPTIONS[snapshot.phase] ?? snapshot.phase)
+  const title = STATE_DESCRIPTIONS[snapshot.phase] ?? snapshot.phase
   const ariaLabel = [
     `Keeper 상태: ${displayState(snapshot.phase)}`,
-    collapsedSourceLabel ? `collapsed from ${collapsedSourceLabel}` : null,
     heldFor,
   ].filter(Boolean).join(', ')
 
@@ -308,11 +294,6 @@ export function HeroPhase({
             ${displayState(snapshot.phase)}
           </div>
           <div class="mt-0.5 text-3xs font-mono text-[var(--color-fg-disabled)]">${snapshot.phase}</div>
-          ${collapsedSourceLabel ? html`
-            <div class="mt-1 text-3xs font-mono text-[var(--color-fg-disabled)]">
-              collapsed from <span class="text-[var(--color-fg-primary)]">${collapsedSourceLabel}</span>
-            </div>
-          ` : null}
           ${heldFor ? html`
             <div class="mt-1 text-3xs font-mono text-[var(--color-fg-disabled)]" aria-hidden="true">
               유지 <span class="text-[var(--color-fg-primary)]">${heldFor}</span>

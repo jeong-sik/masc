@@ -53,14 +53,6 @@ function nextExpectedStep(snapshot: KeeperCompositeSnapshot): string {
       ? '다음 live turn 이 시작되면 KTC/KDP/KCL 이 실제 turn 값으로 갱신되어야 함.'
       : '아직 완료된 turn 없음 — 첫 live turn 이 시작되면 관측값이 채워져야 함.'
   }
-  // `collapsed_from` carries the raw KSM phase when the composite has folded
-  // it under a parent projection. When present it is the operator-actionable
-  // signal — surface it before the surface-phase arms, since the surface
-  // phase is just the carrier label. See file header comment for the
-  // casing-SSOT background.
-  if (snapshot.collapsed_from) {
-    return `lifecycle 가 raw phase ${snapshot.collapsed_from} 에서 carrier phase 로 collapse 됨; 다음 meaningful edge 가 turn activity 재개 전에 그 underlying condition 을 clear 해야 함.`
-  }
   if (isFailingAfterRuntimeExhausted(snapshot)) {
     return '정상 provider path 또는 명시적 recovery clearance 가 failing 을 해제해야 running 재개 가능.'
   }
@@ -132,17 +124,13 @@ export function deriveOperationalInsight(
     }
   }
   if (snapshot.phase === 'draining') {
-    const collapsedDetail = snapshot.collapsed_from
-      ? ` raw keeper phase is ${snapshot.collapsed_from} — 이건 단순한 idleness 가 아님.`
-      : ''
     return {
       tone: 'warn',
       headline: `${snapshot.phase} 가 활성 lifecycle edge`,
-      detail: `keeper 가 stable lifecycle state 사이를 transitioning 중 — 지금은 parent FSM 이 sub-turn activity 보다 우선.${collapsedDetail}`,
+      detail: 'keeper 가 stable lifecycle state 사이를 transitioning 중 — 지금은 parent FSM 이 sub-turn activity 보다 우선.',
       nextStep: nextExpectedStep(snapshot),
       evidence: [
         `KSM ${snapshot.phase}`,
-        ...(snapshot.collapsed_from ? [`raw ${snapshot.collapsed_from}`] : []),
         `live ${String(snapshot.is_live)}`,
       ],
     }

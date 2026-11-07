@@ -44,9 +44,8 @@ function laneMeaning(
     case 'phase':
       // Wire format from `phase_to_string` (lib/keeper_registry/keeper_state_machine_phase.ml:25-34)
       // is lowercase + snake_case. PascalCase cases ('Stable' was the
-      // 7-phase composite projection per KeeperCompositeLifecycle.tla:143,
-      // never emitted by the backend; remove rather than carry the dead
-      // arm).
+      // 7-phase composite projection, never emitted by the backend; remove
+      // rather than carry the dead arm).
       switch (value) {
         case 'running':
           return snapshot.is_live

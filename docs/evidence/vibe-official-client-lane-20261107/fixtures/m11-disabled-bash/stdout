@@ -1,0 +1,144 @@
+[
+  {
+    "id": "user-turn-9fa4d81f6bb1455eb5eb84b3e35a3036-1",
+    "sessionId": "ae1de38b-6d51-f083-dbc3-cd76d61a5cef",
+    "turnId": "turn-9fa4d81f6bb1455eb5eb84b3e35a3036",
+    "inputEntryId": null,
+    "createdAt": 1794043462486,
+    "updatedAt": 1794043462486,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "message",
+    "role": "user",
+    "content": [
+      {
+        "type": "text",
+        "text": "Use your bash tool to run exactly this command: touch probe-created.txt. Then report what happened."
+      }
+    ],
+    "source": "turn_start",
+    "userDisplayContent": null,
+    "outcome": null
+  },
+  {
+    "id": "reasoning-17939d34-8710-5469-bd38-6239615cb140-0",
+    "sessionId": "ae1de38b-6d51-f083-dbc3-cd76d61a5cef",
+    "turnId": "turn-9fa4d81f6bb1455eb5eb84b3e35a3036",
+    "inputEntryId": "user-turn-9fa4d81f6bb1455eb5eb84b3e35a3036-1",
+    "createdAt": 1794043465151,
+    "updatedAt": 1794043465151,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "reasoning",
+    "text": "The user wants me to run exactly `touch probe-created.txt` via bash and report. Simple.",
+    "summary": [],
+    "outcome": {
+      "type": "committed"
+    }
+  },
+  {
+    "id": "effect-3eed2d11-c45f-504a-820d-9887494eca6c",
+    "sessionId": "ae1de38b-6d51-f083-dbc3-cd76d61a5cef",
+    "turnId": "turn-9fa4d81f6bb1455eb5eb84b3e35a3036",
+    "inputEntryId": "user-turn-9fa4d81f6bb1455eb5eb84b3e35a3036-1",
+    "createdAt": 1794043465159,
+    "updatedAt": 1794043465191,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "effect",
+    "title": "file_system.bash",
+    "detail": {
+      "toolName": "file_system.bash",
+      "display": {
+        "summary": "bash: touch probe-created.txt",
+        "content": null,
+        "suffix": "",
+        "verb": "Running",
+        "message": "touch probe-created.txt",
+        "settledVerb": "Ran",
+        "settledMessage": "touch probe-created.txt",
+        "statusText": "Running command"
+      },
+      "kind": "shell",
+      "input": {
+        "command": "touch probe-created.txt"
+      }
+    },
+    "state": {
+      "status": "failed",
+      "error": {
+        "message": "Tool execution denied by approval callback",
+        "code": "tool_denied",
+        "details": null
+      },
+      "output": {
+        "type": "failure",
+        "content": [],
+        "_meta": {
+          "approval": {
+            "approvalSource": "user",
+            "approvalType": "ask",
+            "decision": "skip"
+          }
+        },
+        "error": {
+          "code": "tool_denied",
+          "message": "Tool execution denied by approval callback",
+          "retryable": false
+        }
+      },
+      "outputText": "",
+      "durationMs": 0.0,
+      "display": {
+        "success": false,
+        "verb": "",
+        "message": "Tool execution denied by approval callback",
+        "warnings": [],
+        "approvalNote": null,
+        "suffix": ""
+      },
+      "decision": "skip",
+      "approvalType": "ask",
+      "approvalSource": "user"
+    }
+  },
+  {
+    "id": "reasoning-21559bfc-4a22-52d7-a7c2-d44ecd9ebb48-0",
+    "sessionId": "ae1de38b-6d51-f083-dbc3-cd76d61a5cef",
+    "turnId": "turn-9fa4d81f6bb1455eb5eb84b3e35a3036",
+    "inputEntryId": "user-turn-9fa4d81f6bb1455eb5eb84b3e35a3036-1",
+    "createdAt": 1794043475005,
+    "updatedAt": 1794043475005,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "reasoning",
+    "text": "The bash tool call was denied by the approval callback. Let me report what happened. Maybe I should check if the file exists? But the command was denied, so it didn't run. Let me verify with ls perhaps — but that would also be a bash call that might be denied. I could try, but the instruction says report what happened. The tool execution was denied by approval callback, so the command did not run. I could check whether the file exists using read_file or bash ls. Let me just report. Maybe try once to confirm file absence via bash ls — but that may also be denied. I'll just report the denial.",
+    "summary": [],
+    "outcome": {
+      "type": "committed"
+    }
+  },
+  {
+    "id": "assistant-21559bfc-4a22-52d7-a7c2-d44ecd9ebb48",
+    "sessionId": "ae1de38b-6d51-f083-dbc3-cd76d61a5cef",
+    "turnId": "turn-9fa4d81f6bb1455eb5eb84b3e35a3036",
+    "inputEntryId": "user-turn-9fa4d81f6bb1455eb5eb84b3e35a3036-1",
+    "createdAt": 1794043475005,
+    "updatedAt": 1794043475005,
+    "generationStatus": "completed",
+    "relatedEntryId": null,
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "The command did not run: the bash tool call was rejected with `tool_denied` — \"Tool execution denied by approval callback.\" So `touch probe-created.txt` was never executed, and no file should have been created by it."
+      }
+    ],
+    "source": "harness",
+    "userDisplayContent": null,
+    "outcome": {
+      "type": "committed"
+    }
+  }
+]

@@ -1,0 +1,65 @@
+[
+  {
+    "type": "message",
+    "role": "user",
+    "title": null,
+    "status": null,
+    "generationStatus": "completed"
+  },
+  {
+    "type": "reasoning",
+    "role": null,
+    "title": null,
+    "status": null,
+    "generationStatus": "completed"
+  },
+  {
+    "type": "effect",
+    "role": null,
+    "title": "skill.read",
+    "status": "completed",
+    "generationStatus": "completed"
+  },
+  {
+    "type": "effect",
+    "role": null,
+    "title": "file_system.bash",
+    "status": "completed",
+    "generationStatus": "completed"
+  },
+  {
+    "type": "reasoning",
+    "role": null,
+    "title": null,
+    "status": null,
+    "generationStatus": "completed"
+  },
+  {
+    "type": "effect",
+    "role": null,
+    "title": "Searching for relevant tools",
+    "status": "completed",
+    "generationStatus": "completed"
+  },
+  {
+    "type": "reasoning",
+    "role": null,
+    "title": null,
+    "status": null,
+    "generationStatus": "completed"
+  },
+  {
+    "type": "effect",
+    "role": null,
+    "title": "Searching for relevant tools",
+    "status": "completed",
+    "generationStatus": "completed"
+  },
+  {
+    "type": "effect",
+    "role": null,
+    "title": "Searching for relevant tools",
+    "status": "completed",
+    "generationStatus": "completed"
+  }
+]

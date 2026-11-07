@@ -100,6 +100,11 @@ llms.txt 색인을 `headless|continuous|github|ci|automation` 키워드로 걸�
 
 ## 6. 미확인 목록 (구현 전에 채운다)
 
+2026-11-07 vibe 3.1.0 실측으로 일부를 채웠다.
+- 다 채운 것: 1, 6(쓸 수 없다)
+- 일부만 채운 것: 2(저장 위치만), 3(API 경로만), 4(모델 목록만), 5(일부), 7(한 번의 대비) 기록은 `docs/evidence/vibe-official-client-lane-20261107/`, 해석은 RFC
+§4.1 에 있다.
+
 1. programmatic 호출의 실측: `--output json`/`streaming` 프레임의 필드 수준
    스키마와 `export.json` 스키마는 문서가 개요만 적는다 — 우리 계정에서
    fixture 로 촬영해 문서화한다(코덱의 계약이 된다).

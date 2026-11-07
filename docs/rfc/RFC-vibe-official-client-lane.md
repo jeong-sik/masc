@@ -48,8 +48,11 @@ Vibe-only 호출에 대한 콘솔 소비 곡선을 비교해 pool 관계를 확�
     프레임을 읽는 출력 코덱.
   - `--output-dir` 의 `export.json`(토큰 사용량·비용·stop reason·outcome·
     subagent별 기록) 파싱 — usage 관측(§2.4)의 1차 원천.
-  - exit code 0-3 의 typed 분류(0 완료 / 1 시작 실패 / 2 모델 API·런타임
-    실패 / 3 한도·중단·거절).
+  - exit code 0-3 의 typed 분류. 3.1.0 실측(§4.1): 0 은 `finished` 이고 도구
+    거절이 있어도 0 이다. 1 은 인자 오류(export 없음)와 `usage_error`(모르는
+    모델)다. 2 는 `infrastructure_failure`(공급자 402 를 `backend_error` 로
+    담음)다. 3 은 `deadline`·`token_limit`·`turn_limit` 이다. exit code 는 큰
+    갈래이고, 갈래 안의 원인은 `export.json` 의 `outcome` 으로 가른다.
   - 세션 재개: `-p --continue`·`-p --resume SESSION_ID`(문서화된 표면).
   - 도구 브리지: claude_code lane 이 MCP 브리지를 소유하듯, Vibe 도
     MCP servers 표면이 문서화돼 있다(vibe/code/cli/mcp-servers.md) — masc
@@ -62,9 +65,12 @@ Vibe-only 호출에 대한 콘솔 소비 곡선을 비교해 pool 관계를 확�
   - 실행에 필요한 최소 tool 만 `--enabled-tools` 로 제한하고, 허용할 tool 은
     per-tool `permission = "always"` 또는 bash command allowlist 로 명시한다.
     그 밖의 tool 은 `permission = "ask"`(무인 거부) 또는 `never` 로 둔다.
-  - programmatic mode 는 승인이 필요한 tool call 을 거부한다. 거부의 출력·stop
-    reason·exit code 를 실측하기 전까지 거부를 성공이나 특정 exit code 로
-    추정하지 않는다.
+  - headless 의 `ask` agent 는 승인이 필요한 tool call 을 거부한다(§4.1 m10).
+    거부는 그 effect 의 `state.status=failed`, `error.code=tool_denied` 로만
+    드러나고 실행 전체는 exit 0 `finished` 다. 그래서 lane 은 exit code 가
+    아니라 effect 상태를 읽어 거부를 안다. `ask` 에서도 `echo`, `pwd && ls -la`
+    같은 읽기 명령은 승인 없이 돌았다(m8·m9). 기본 허용 목록의 범위는 재지
+    않았다.
   - 운영자가 project 의 `.vibe`·skills·AGENTS.md 를 검토한 root 만 사전
     trust 하거나 그 invocation 에 `--trust` 를 부여한다. lane 이 임의 cwd 를
     자동 trust 하지 않고, 미신뢰 project config·skills·agent files 무시 경고를
@@ -85,10 +91,15 @@ Vibe-only 호출에 대한 콘솔 소비 곡선을 비교해 pool 관계를 확�
 ### 2.2 자격 증명 — CLI 소유, masc 는 준비 상태만 관측
 
 - 브라우저 로그인 자격 증명의 저장·수명·갱신은 Vibe CLI 소유다. masc 는
-  로그인 됨/플랜 준비 상태만 읽어 lane 상태로 노출한다. 단 `vibe /whoami`
-  는 문서상 세션 내 slash 명령이다 — 무인 준비 검사에 쓸 argv 형태가
-  있는지는 첫 층 실측 항목이고(연구 §6), 실측된 형태로만 노출한다. 토큰
-  파일을 직접 읽거나 재발급하지 않는다.
+  로그인 됨/플랜 준비 상태만 읽어 lane 상태로 노출한다. `vibe -p "/whoami"`
+  는 slash 명령으로 처리되지 않고 모델 프롬프트가 된다(§4.1 m9: 3턴, 입력
+  64,027 토큰). 그래서 준비 검사에 쓰지 않는다. 무인 준비 검사 argv 는 아직
+  없다. 토큰 파일을 직접 읽거나 재발급하지 않는다.
+- setup 은 자격 증명을 macOS keychain(`svce=ai.mistral.vibe`,
+  `acct=MISTRAL_API_KEY`)에 둔다. env 의 `MISTRAL_API_KEY` 가 keychain 보다
+  먼저다(§4.1 m4). masc 서버 환경에는 mistral HTTP 레인용 같은 이름의 변수가
+  있으므로, lane 은 Vibe 자식 프로세스 환경에서 이 변수를 뺀다. 빼지 않으면
+  Vibe 가 API 사용량 경로로 간다.
 - 다계정: Vibe CLI 의 profile 기능(config.toml `[[providers]]`, api-keys
   페이지의 profile)이 있는지 실측 뒤 #49200 C2a 계열(계정 스택)에 합류
   여부를 정한다. 이 RFC 는 단일 계정만 약속한다.
@@ -98,7 +109,10 @@ Vibe-only 호출에 대한 콘솔 소비 곡선을 비교해 pool 관계를 확�
 
 ### 2.3 모델·thinking 계약
 
-- lane 이 노출하는 모델은 CLI 내장 목록을 실측해 카탈로그에 옮긴다.
+- lane 이 노출하는 모델은 CLI 내장 목록을 실측해 카탈로그에 옮긴다. 3.1.0 이
+  이 계정에서 받는 별칭은 glm-5-3, mistral-large-4-0-3, mistral-medium-3.5,
+  zai-glm-5-3-flash 다(§4.1 m3 의 `usage_error` 문구). 기본은
+  `routed_default_model=mistral-large-4-0-3` 이다.
   mistral-large-4 의 chunk-list content/thinking 계약은 이미 HTTP 레인에서
   실측·구현됐다(#49350, #49554). lane 은 CLI 가 content 를 이미 해석해
   내주므로 우리 wire 파서를 재사용하지 않는다.
@@ -114,6 +128,10 @@ Vibe-only 호출에 대한 콘솔 소비 곡선을 비교해 pool 관계를 확�
   subagent별 기록)이다 — 호출마다 확정적으로 얻는다. Admin usage API 의
   `vibe_usage` 는 Enterprise 전용이라 Pro 운영에서 못 쓴다. 콘솔의 두 막대는
   사람이 읽는 원장으로 남기고, lane 이 예측 비용 모델을 발명하지 않는다.
+- 이 플랜 자격 증명에서 `cost_usd` 는 매번 0.0 이었다(§4.1). 그래서
+  `--max-price` 는 한 번도 걸리지 않았다(m6). lane 은 요청 크기를
+  `--max-tokens`·`--max-turns`·`--time-limit` 로 묶는다. 이 셋은 exit 3 으로
+  끝나는 것을 실측했다.
 
 ### 2.5 실패 양상의 typed 처리
 
@@ -122,7 +140,8 @@ Vibe-only 호출에 대한 콘솔 소비 곡선을 비교해 pool 관계를 확�
   settings" 다(admin/billing-usage/subscriptions.md). 따라서 제품 차단을 확정
   사실로 두지 않고, 실제 거절 출력을 실측해 typed 실패(Quota_exhausted 상당의
   기존 분류에 붙인다)로 매핑한다. 실측 전에는 미분류로 두고 추측 분류를
-  만들지 않는다.
+  만들지 않는다. 플랜 쪽 소진은 아직 못 봤다. env 키로 간 API 경로의 402 는
+  exit 2 `infrastructure_failure` 였다(§4.1 m4).
 - 세션 만료/재로그인 필요는 제안된 준비 검사의 후보 실패 신호다. 현재
   `vibe /whoami` 는 문서상 세션 내 slash 명령이고 무인 argv 는 미실측이므로,
   실측된 준비 검사가 만료를 다른 실패와 구분함을 확인하기 전까지 `/whoami`
@@ -155,13 +174,34 @@ Vibe-only 호출에 대한 콘솔 소비 곡선을 비교해 pool 관계를 확�
    를 따로 등록해 소유자를 정한다(이 RFC 는 단일 계정만 약속). 콘솔 막대
    의미와 pool 관계 확인은 연구 문서 §6 의 lane 구현 전 선행 실측으로 둔다.
 
+### 4.1 1단계 실측 결과 (2026-11-07, vibe 3.1.0)
+
+기록과 fixture: `docs/evidence/vibe-official-client-lane-20261107/`.
+
+- pool: 09:10:57Z 에 mistral HTTP 레인(env 키)이 402 `billing_api_budget_exhausted`
+  를 받았다. 09:14Z 의 Vibe 호출(keychain 자격 증명)은 exit 0, `cost_usd 0.0`
+  이었다. Vibe 경로는 바닥난 API 예산에 막히지 않는다. 대비는 한 번뿐이다.
+  공식 문서의 "shared" 와 어떻게 맞는지, 콘솔 두 막대의 소비 곡선은 재지
+  않았다.
+- 출력: `--output json` 은 메시지 배열이고 `streaming` 은 같은 원소를 한 줄에
+  하나씩 낸다. 원소 type 은 message·reasoning·effect 를 봤다. `export.json` 은
+  `schema_version=1` 이다.
+- exit code 와 `outcome`: 위 §2.1 의 분류대로다.
+- 도구: `ask` 에서 승인이 필요한 호출은 `tool_denied` 로 거절된다. 읽기 명령은
+  승인 없이 돈다. `--disabled-tools file_system.bash` 로는 bash 가 빠지지 않았다.
+- 준비 검사: `-p "/whoami"` 는 쓸 수 없다. 다른 argv 는 찾지 못했다.
+- 판단: 코덱을 세울 fixture 가 있고, Vibe 경로가 API 예산과 따로 돈다.
+  그래서 §4 의 2 로 간다. 두 레인의 용량은 계속 합산하지 않는다.
+- 남은 실측: 플랜 소진·세션 만료의 실패 모양, thinking `off`/`none` 수용,
+  `--resume`, 올바른 도구 이름과 기본 허용 목록, MCP 브리지,
+  `vibe-acp`·`vibe-app-server`(3.1.0 에 함께 설치된다).
+
 ## 5. 리스크
 
-- `--output json`/`streaming` 프레임과 `export.json` 의 필드 수준 스키마는
-  문서가 개요만 적는다 — 첫 층 fixture 없이 코덱을 세우면 계약이 상상이
-  된다(최대 리스크. 초판의 "headless 부재" 리스크는 문서 확인으로 해소).
-- 공식 Subscriptions 의 shared usage 와 콘솔 두 막대의 관계는 미확인이다 —
-  API-only/Vibe-only 소비 곡선을 lane 구현 전에 측정하고, shared pool 이면
-  별도 용량 전제와 lane 필요성을 다시 검토한다.
+- `--output json`/`streaming` 프레임과 `export.json` 의 필드는 문서가 개요만
+  적는다. §4.1 의 fixture 가 코덱의 계약이다. 보지 못한 원소 type 이 오면
+  코덱은 모르는 값으로 거절하고 추측하지 않는다.
+- 공식 Subscriptions 의 shared usage 와 콘솔 두 막대의 관계는 미확인이다.
+  §4.1 의 대비는 Vibe 경로가 API 예산과 따로 막힌다는 것만 보인다.
 - CLI 자동 업그레이드(`--check-upgrade`)로 인자·출력이 바뀔 수 있다 —
   lane 은 버전을 고정해 시작하고 변경 시 실측을 다시 돌린다.

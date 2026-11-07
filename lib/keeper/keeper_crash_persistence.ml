@@ -51,7 +51,7 @@ let write_event_reporting_failure event =
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string CrashPersistenceFailures)
       ~labels:
-        [ "site", Keeper_crash_persistence_failure_site.(to_label Crash_write) ]
+        [ "site", "crash_write" ]
       ();
     Log.Keeper.warn
       "crash persistence write failed for %s: %s"

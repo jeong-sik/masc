@@ -352,7 +352,7 @@ let test_boot_entry () =
     Alcotest.(check bool) "single user" true (Result.is_ok (boot ()));
     write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
     (match boot () with
-     | Ok () -> Alcotest.fail "a Multi_account request booted"
+     | Ok (_ : Read.single_user) -> Alcotest.fail "a Multi_account request booted"
      | Error (first, _) -> Alcotest.(check bool) "a reason" true (first <> ""));
     write_config dirs {|{"enabled":true,"require_token":true}|};
     Alcotest.(check bool) "anonymous mutations do not matter to a single user" true

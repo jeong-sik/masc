@@ -108,6 +108,11 @@ journal_dir, started_at, ended_at, limits, exit_code.
   넣지 않았다.
   - Vibe 소스 주석은 이 budget 을 `/v1/billing/budget` 의 `vibe_budget`, 곧
     "monthly Vibe Code allowance" 의 사용량이라 적는다.
+- m13(12:2xZ, `--agent ask --max-turns 3 --time-limit 120 --output json -p` 에 값 없이,
+  프롬프트 `Reply with exactly: ok` 를 stdin 으로): exit 0 `finished`. user 메시지는
+  stdin 의 글 그대로였고 답은 `ok` 였다. `vibe --help` 는 `-p, --prompt [<PROMPT>]` 와
+  `--prompt-file <PATH>` 를 적는다. masc 의 Vibe 실행은 이 stdin 형태를 쓴다
+  (`lib/runtime/runtime_vibe_cli.ml`).
 
 ## 확인하지 않은 것
 

@@ -2123,7 +2123,6 @@ let interact ?actor t args =
     | Some reason -> unavailable_input reason in
   let id = request.tab_id in
   let verb = Browser_lane.interaction_verb request.action in
-  let refused = Error (Live.Before_effect (verb ^ " is not served by an ego connection")) in
   let* label = label_of t id in
   let deadline = command_deadline t (Browser_lane.Page_interact {tab_id = id; expected_url = request.expected_url; action = request.action}) in
   let input ~expected_url action = Browser_lane.interaction_args ~tab_id:id ~expected_url action in
@@ -2418,9 +2417,9 @@ let act ?actor t args =
     emulate t tab_id (Some emulation)
   | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Clear_emulation}) ->
     emulate t tab_id None
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Block_requests hosts}) ->
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Block_requests hosts}) ->
     block_requests t tab_id (Some hosts)
-  | Ok (Browser_lane.Action.On_tab {tab_id; frame_path = []; interaction = Browser_lane.Action.Unblock_requests}) ->
+  | Ok (Browser_lane.Action.On_tab {tab_id; interaction = Browser_lane.Action.Unblock_requests}) ->
     block_requests t tab_id None
 
 let workflow ?actor t args =

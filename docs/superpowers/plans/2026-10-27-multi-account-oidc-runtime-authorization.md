@@ -109,9 +109,10 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 - published-artifacts prefix(`GET /api/v1/published-artifacts/<id>`)는 strict에서도 연다(2026-11-07 사용자 결정). 지금 목록은 형식이 맞는 artifact id만 연다. 처리기는 스스로 인증한다(선택 token, 비공개 artifact는 401). 바뀌는 것은 형식이 틀린 id를 자격 없이 보낼 때 401 대신 처리기의 400이 나오는 것 하나다. 데이터는 나가지 않는다.
 - 층.
   - b0 이 범위와 측정.
-  - b1a 종류와 래퍼. 두 래퍼가 종류의 구분을 받는다. `Open_when_strict`는 바로 열고, `Credential_when_strict`는 아직 목록을 본다. 이 구분을 쓰는 등록이 없어서 동작은 같다.
-  - b1b published-artifacts를 뺀 12곳을 `Open_when_strict`로 옮긴다. 목록이 여는 `Credential_when_strict` 등록이 published-artifacts 하나뿐이라는 시험을 둔다. 동작은 같다.
-  - b2 published-artifacts를 옮기고 목록과 b1b의 시험을 지운다. `Credential_when_strict`는 strict에서 늘 자격을 요구한다. 목록을 부르던 시험은 경로 표의 종류를 읽는다.
+  - b1 `Route_access.Public_read`가 구분을 든다. 지금 등록 종류는 모두 `Credential_when_strict`로 적히고, HTTP/2 게이트가 구분을 받는다. `Open_when_strict`는 바로 열고, `Credential_when_strict`는 아직 목록을 본다. 이 구분을 쓰는 등록이 없어서 동작은 같다.
+  - b2 등록 종류 `Public_read_open_when_strict`와 정규 호스트의 `when_strict`, HTTP/1 래퍼. 동작은 같다.
+  - b3 published-artifacts를 뺀 12곳을 `Open_when_strict`로 옮긴다. 목록이 여는 `Credential_when_strict` 등록이 published-artifacts 하나뿐이라는 시험을 둔다. 동작은 같다.
+  - b4 published-artifacts를 옮기고 목록과 b3의 시험을 지운다. `Credential_when_strict`는 strict에서 늘 자격을 요구한다. 목록을 부르던 시험은 경로 표의 종류를 읽는다.
 - 하지 않는 것: 다른 경로의 종류 바꾸기, `Subpath_dispatch` 하위 경로 나누기, 서버를 띄운 A1 재측정.
 
 ### B. 권한 저장소

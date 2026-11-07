@@ -72,6 +72,7 @@
 (include stanzas/test_authz_login.inc)
 (include stanzas/test_auth_config_google.inc)
 (include stanzas/test_google_login_flow.inc)
+(include stanzas/test_github_oauth.inc)
 (include stanzas/test_keeper_chat_store_announces.inc)
 (include stanzas/test_keeper_memory_journal_announces.inc)
 (include stanzas/test_keeper_composite_cleared_before_announce.inc)

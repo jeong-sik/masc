@@ -32,24 +32,33 @@ type completed_turn_ring =
 
 let completed_turn_rings : (string, completed_turn_ring) Hashtbl.t = Hashtbl.create 16
 
+(* Serializes both find→create→replace ring caches.  OCaml 5 domains preempt
+   without suspension points, so pool-domain fibers can interleave here and
+   mint two rings for one name, dropping the loser's records from the shared
+   view — the "non-yielding single-domain" assumption in the header comment
+   only holds within one domain. *)
+let rings_mutex = Eio.Mutex.create ()
+
 let get_or_create_ring name =
-  match Hashtbl.find_opt rings name with
-  | Some r -> r
-  | None ->
-    let r : ring = { buf = Array.make ring_capacity None; pos = 0; count = 0 } in
-    Hashtbl.replace rings name r;
-    r
+  Eio_guard.with_mutex rings_mutex (fun () ->
+    match Hashtbl.find_opt rings name with
+    | Some r -> r
+    | None ->
+      let r : ring = { buf = Array.make ring_capacity None; pos = 0; count = 0 } in
+      Hashtbl.replace rings name r;
+      r)
 ;;
 
 let get_or_create_completed_turn_ring name =
-  match Hashtbl.find_opt completed_turn_rings name with
-  | Some r -> r
-  | None ->
-    let r : completed_turn_ring =
-      { buf = Array.make ring_capacity None; pos = 0; count = 0 }
-    in
-    Hashtbl.replace completed_turn_rings name r;
-    r
+  Eio_guard.with_mutex rings_mutex (fun () ->
+    match Hashtbl.find_opt completed_turn_rings name with
+    | Some r -> r
+    | None ->
+      let r : completed_turn_ring =
+        { buf = Array.make ring_capacity None; pos = 0; count = 0 }
+      in
+      Hashtbl.replace completed_turn_rings name r;
+      r)
 ;;
 
 (* ================================================================ *)
@@ -86,7 +95,11 @@ let get_default_store () =
        in
        if Atomic.compare_and_set default_store None (Some store)
        then Some store
-       else Atomic.get default_store
+       else
+         (* Lost the first-store race.  Dated_jsonl exposes no close, so the
+            losing handle stays until process exit — a bounded one-time
+            artifact; adding a release API is tracked as audit follow-up. *)
+         Atomic.get default_store
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->

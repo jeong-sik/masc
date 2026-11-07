@@ -69,3 +69,4 @@ CDP 로 바꾼 설정은 바꾼 SDK 프로세스가 끝나면 모두 사라졌�
 - L7 쿠키·저장소 이름: [l7-storage/](l7-storage/README.md)
 - L8 요청 목록: [l8-network/](l8-network/README.md)
 - L9 console: [l9-console/](l9-console/README.md)
+- L11 쿠키 쓰기·지우기: [l11-cookies/](l11-cookies/README.md)

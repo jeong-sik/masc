@@ -35,8 +35,9 @@ val publish_keeper_lifecycle :
     - [Custom_event { verb; phase = Some p }] → [event=verb], [phase=p]
     - [Phase_event p] → [event=p], [phase=p]
 
-    Subscribe to {!Keeper_lifecycle_events.all_event_names} to
-    receive the full stream.  Issue #8575: prior docstring
+    A subscriber that wants the full stream takes both the custom verbs
+    ([Keeper_lifecycle_events.t]) and the phase-derived names
+    ([Keeper_state_machine.phase_to_string]).  Issue #8575: prior docstring
     listed only five names, so operators silently missed
     cleanup / recovery events ([reconciled], [supervisor_cleaned]) —
     exactly the events that signal supervisor recovery actions

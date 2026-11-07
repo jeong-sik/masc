@@ -38,7 +38,7 @@ let open_stream ~sw ~clock ~id =
         Listen.serve ~clock ~ping_interval_s ~stalled_after_s ~max_queued_events
           ~subscription_id:(`Int id) ~filter
           ~headers:(Httpun.Headers.of_list [ "content-type", "text/event-stream" ])
-          reqd))
+          (Masc.Http_reqd.of_httpun reqd)))
   in
   let raw = "GET /mcp HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n" in
   let input = Bigstringaf.of_string ~off:0 ~len:(String.length raw) raw in

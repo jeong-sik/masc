@@ -6,4 +6,4 @@
 (executable
  (name bench_sse_pump_throughput)
  (modules bench_sse_pump_throughput)
- (libraries masc_server eio eio_main httpun gluten cstruct unix))
+ (libraries masc masc_server eio eio_main httpun gluten cstruct unix))

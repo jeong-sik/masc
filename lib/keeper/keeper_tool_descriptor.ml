@@ -757,7 +757,8 @@ let object_output_schema ~properties ~required =
 
 (* Producers: Keeper_tool_filesystem_runtime.handle_read_file_with_outcome
    [payload_of_slice] and handle_owned_read_file_with_outcome
-   (lib/keeper/keeper_tool_filesystem_runtime.ml); the owned lane serves
+   (lib/keeper/keeper_tool_filesystem_runtime_read.ml and
+   keeper_tool_filesystem_runtime_owned_read.ml); the owned lane serves
    verification_authority_tools.ml, not composition, and always carries
    [file_bytes] but never [via]. On the dispatch lane [via] marks a
    backend-routed read and is absent on the host lane; [next_offset] appears

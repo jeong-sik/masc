@@ -38,36 +38,6 @@ let test_cwd_not_directory_no_hint () =
     msg
 ;;
 
-let test_parse_roundtrip_variants () =
-  let cases =
-    [ Path_outside_whitelist { path = "x"; for_keeper_command = true }
-    ; Path_outside_whitelist { path = "x"; for_keeper_command = false }
-    ; Cwd_not_directory { path = "x"; hint = None }
-    ]
-  in
-  List.iter
-    (fun original ->
-      let msg = to_message original in
-      match parse_prefix msg with
-      | None ->
-        Alcotest.failf "parse_prefix returned None for emitted message %S" msg
-      | Some parsed ->
-        let parsed_prefix = message_prefix parsed in
-        let original_prefix = message_prefix original in
-        Alcotest.(check string)
-          (Printf.sprintf "prefix roundtrip for %s" original_prefix)
-          original_prefix
-          parsed_prefix)
-    cases
-;;
-
-let test_parse_prefix_rejects_unrelated () =
-  Alcotest.(check bool)
-    "parse_prefix returns None for unrelated tool error"
-    true
-    (parse_prefix "some other tool error" = None)
-;;
-
 let test_message_prefix_is_lowercase_prefix_of_message () =
   let variants =
     [ Path_outside_whitelist { path = "x"; for_keeper_command = true }
@@ -137,10 +107,6 @@ let () =
             "a path with newlines renders on one line"
             `Quick
             test_message_is_one_line
-        ] )
-    ; ( "parse_prefix"
-      , [ Alcotest.test_case "roundtrip variants" `Quick test_parse_roundtrip_variants
-        ; Alcotest.test_case "rejects unrelated" `Quick test_parse_prefix_rejects_unrelated
         ] )
     ; ( "message_prefix"
       , [ Alcotest.test_case

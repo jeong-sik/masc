@@ -46,6 +46,7 @@ let empty_reasoning_summary =
 type tool_failure_stage =
   | Validation_before_execution
   | Execution
+  | Cancelled_during_execution
 
 (** Exact relationship between the tool schedule exposed to hooks and the
     provider ToolUse from which that scheduled call came. Admission may drop

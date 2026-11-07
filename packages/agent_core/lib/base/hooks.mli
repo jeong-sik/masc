@@ -33,6 +33,12 @@ val extract_reasoning : Types.message list -> reasoning_summary
 type tool_failure_stage =
   | Validation_before_execution
   | Execution
+  | Cancelled_during_execution
+      (** The handler was running when its fiber was cancelled. There is no
+          result and [post_tool_use] does not fire, so this is the only hook
+          that sees the call end. The dispatcher calls it under cancellation
+          protection, then re-raises the cancellation. Whether the tool's
+          effect happened is unknown. *)
 
 (** Admission owns name recovery. Original provider identity is retained when
     admission changed the name; consumers never repeat recovery. *)

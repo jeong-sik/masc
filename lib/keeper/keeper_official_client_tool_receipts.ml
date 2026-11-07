@@ -98,7 +98,7 @@ let hooks t (original : Agent_core.Hooks.hooks) =
             { invocation; stage = Agent_core.Hooks.Validation_before_execution; _ } ->
           committed t invocation
         | Agent_core.Hooks.PostToolUseFailure
-            { stage = Agent_core.Hooks.Execution; _ } -> ()
+            { stage = Agent_core.Hooks.Execution | Agent_core.Hooks.Cancelled_during_execution; _ } -> ()
         | Agent_core.Hooks.BeforeTurn _ | Agent_core.Hooks.BeforeTurnParams _
         | Agent_core.Hooks.AfterTurn _ | Agent_core.Hooks.PreToolUse _ | Agent_core.Hooks.OnStop _
         | Agent_core.Hooks.OnError _ | Agent_core.Hooks.OnToolError _ -> ())

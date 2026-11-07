@@ -119,6 +119,38 @@ let text_content_of_openai_content = function
   | `Assoc _ | `Int _ | `Intlit _ | `Float _ | `Bool _ -> ""
 ;;
 
+(* Mistral Large 4 (and mistral-small at effort "high", #38564) answer with a
+   list-shaped message.content of chunk objects. A ThinkChunk carries its text
+   inside a "thinking" array of {type:text} items and has no top-level "text"
+   member, so [text_of_openai_content_block] reads nothing from it -- the
+   visible answer survives alone. The chunk's own text is the reasoning trace.
+   Reading by member shape, not by the "type" string, mirrors how the text
+   block reader works and keeps this a structural parse. *)
+let thinking_text_of_openai_content_block = function
+  | `Assoc fields ->
+    (match List.assoc_opt "thinking" fields with
+     | Some (`List items) ->
+       items
+       |> List.filter_map (function
+            | `Assoc item_fields ->
+              (match List.assoc_opt "text" item_fields with
+               | Some (`String s) -> Some s
+               | Some (`List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null)
+               | None -> None)
+            | `List _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None)
+       |> String.concat ""
+       |> fun text -> if Api_common.string_is_blank text then None else Some text
+     | Some (`Assoc _ | `String _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null) | None
+       -> None)
+  | `String _ | `List _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> None
+;;
+
+let chunk_list_thinking_of_openai_content = function
+  | `List blocks ->
+    blocks |> List.filter_map thinking_text_of_openai_content_block |> String.concat ""
+  | `String _ | `Assoc _ | `Int _ | `Intlit _ | `Float _ | `Bool _ | `Null -> ""
+;;
+
 let parse_tool_call_string_field ~tool_index ~field json =
   let open Yojson.Safe.Util in
   match json |> member field |> to_string_option with
@@ -407,6 +439,16 @@ let parse_openai_response_result_json_raw
        redacted thinking channels. Other reasoning text stays [Thinking]. *)
     let* thinking_blocks =
       reasoning_content_blocks_of_message_result msg |> Result.map_error unreadable_response
+    in
+    (* Reasoning that arrived as ThinkChunk objects inside message.content
+       joins the same [Thinking] channel as reasoning_content: one trace, one
+       type. It reads regardless of the row's inline-reasoning declaration
+       because the chunk shape is the wire's own statement, not a policy. *)
+    let thinking_blocks =
+      let chunk_thinking = chunk_list_thinking_of_openai_content (msg |> member "content") in
+      if Api_common.string_is_blank chunk_thinking then thinking_blocks
+      else
+        thinking_blocks @ [ Thinking { signature = None; content = chunk_thinking } ]
     in
     (* Models declaring [Think_tags] (e.g. GLM served through ollama-cloud,
        Qwen3 chat-template runtimes) embed part of their reasoning inside

@@ -353,9 +353,9 @@ let test_parse_openai_response_reasoning_content () =
    reasoning_effort=low, api.mistral.ai; the API rejects "none" with code
    3051 so there is no plain-string mode). The thinking text lives under
    thinking[].text with no top-level "text" field, so it extracts no visible
-   text; the answer TextChunk carries the visible answer alone. The trace is
-   dropped rather than typed [Thinking] -- replaying it needs a follow-up that
-   feeds ThinkChunk through reasoning_content_blocks (#38564). *)
+   text; the answer TextChunk carries the visible answer alone. The trace
+   types as [Thinking] ahead of the answer, the same channel
+   reasoning_content uses (#38564, #49352). *)
 let test_parse_openai_response_mistral_chunk_list_content () =
   let json_str =
     {|{
@@ -382,11 +382,13 @@ let test_parse_openai_response_mistral_chunk_list_content () =
       ("unexpected error: " ^ Llm_provider.Backend_openai_parse.parse_error_to_string msg)
   | Ok resp ->
     (match resp.content with
-     | [ Types.Text text ] ->
+     | [ Types.Thinking { signature; content = thinking }; Types.Text text ] ->
+       check bool "thinking unsigned" true (signature = None);
+       check string "thinking from the chunk" "The user wants me to reply with the single word \"ok\"." thinking;
        check string "visible answer from the text chunk" "ok" text
      | _ ->
        Alcotest.failf
-         "expected the thinking chunk to extract no visible block, got %d block(s)"
+         "expected [Thinking; Text] from the chunk list, got %d block(s)"
          (List.length resp.content))
 ;;
 

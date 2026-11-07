@@ -10,8 +10,6 @@ let run_serialization agent f =
   | None -> f ()
 ;;
 
-let core_error_of_http_error = Http_error_agent_core.of_http_error
-
 let notify_attribution callback attribution =
   Option.iter (fun notify -> notify attribution) callback
 ;;

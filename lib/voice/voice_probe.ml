@@ -230,8 +230,6 @@ let probe_attempt_json attempt =
     ; "detail", `String detail
     ]
 
-let remove_quietly path = try Sys.remove path with Sys_error _ -> ()
-
 let string_member key = function
   | `Assoc fields ->
     (match List.assoc_opt key fields with

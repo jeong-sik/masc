@@ -9,7 +9,6 @@ include Voice_bridge_core
 
 open Result.Syntax
 
-let safe_agent_id = Voice_bridge_transport.safe_agent_id
 let make_audio_file = Voice_bridge_transport.make_audio_file
 let speak_via_http_tts_to_file = Voice_bridge_transport.speak_via_http_tts_to_file
 let cleanup_old_audio_files = Voice_player.cleanup_old_audio_files

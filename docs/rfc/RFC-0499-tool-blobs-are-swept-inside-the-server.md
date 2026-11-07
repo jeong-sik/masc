@@ -21,7 +21,7 @@ related: ["durable-tool-result-markers", "0476"]
 
 `<base>/.masc/tool_blobs` 에 blob 2,462,539개, 20.0GB 가 있다. 가장 오래된 파일은 07-28 이다. 8월 초에는 54MB 였다.
 
-정리 코드 `Tool_blob_maintenance.run` 은 있다. 두 번 스캔 규칙도 있다. 앞 스캔의 후보이면서 이번 스캔에서도 참조가 없는 blob 만 지운다. 하지만 이 코드는 BasePath lease 를 잡은 오프라인 명령에서만 돈다. 운영 서버는 lease 를 늘 쥐고 있다. 이 명령을 부르는 스크립트도 없다. 그래서 08-12 이후 한 번도 돌지 않았다.
+정리 코드 `Tool_blob_maintenance.run` 은 있다. 두 번 스캔 규칙도 있다. 앞 스캔의 후보이면서 이번 스캔에서도 참조가 없는 blob 만 지운다. 하지만 이 코드는 BasePath lease 를 잡은 오프라인 명령에서만 돈다. 운영 서버는 lease 를 늘 쥐고 있다. 이 명령을 부르는 스크립트도 없다. 그래서 08-12 이후 한 번도 돌지 않았다. 이 명령은 스캔을 끝낼 때마다 `<base>/.masc/tool_blob_maintenance/candidates.json` 을 쓴다(지우지 않는 모드도 같다). 운영 BasePath 에는 이 파일이 없다(11-06 확인, `tool_blobs/` 는 07-30 부터 있다).
 
 이 RFC 는 같은 규칙을 서버 안에서 돌린다. 서버가 쓰는 중에도 지우면 안 되는 blob 을 지우지 않도록 두 가지를 더한다.
 
@@ -38,8 +38,11 @@ related: ["durable-tool-result-markers", "0476"]
 - D4. 지우기는 `written_addresses` 에서 주소를 빼고, 파일을 다른 이름으로 옮긴 뒤, 건드린 주소인지와 옮긴 파일이 확인한 그 파일인지(inode·mtime) 다시 본다. 하나라도 어긋나면 되돌리고, 아니면 지운다. 잠금은 쓰지 않는다(§4.3).
 - D5. 스캔과 지우기는 Eio 메인 domain 밖에서 돈다. 스캔이 실패하면 지금처럼 후보를 기록하지 않고, 아무것도 지우지 않는다.
 - D6. 1층은 지우지 않는다. 후보 수, 지울 수 있는 수와 크기, 지웠다면 깨졌을 참조 수, 스캔 시간, 실패 종류를 로그와 후보 기록에 남긴다(§5).
-- D7. 2층은 지우기를 켜고, 오프라인 명령 `tool-blob-maintenance` 를 지운다. 정리하는 곳은 서버 하나만 남는다.
-- D8. 2층보다 먼저 스캔 범위를 닫는다. 범위는 값 하나로 둔다. `.masc`·`lane-addons`·config `keepers` 아래 항목마다 "범위"나 "이유 있는 제외" 중 하나에 속하지 않으면 스캔이 오류로 끝난다(§5.3).
+- D7. 오프라인 명령 `tool-blob-maintenance` 는 범위층의 `unreadable` PR 이 지운다. 그 명령은 서버 스윕과 같은 스캔으로 지우기 모드를 부른다. 스캔이 읽지 못한 것을 두고도 끝까지 돌게 되면, 그 모드가 더 작은 참조 집합으로 후보를 만들어 지울 수 있다. 그 뒤 2층이 서버 스윕에 처음으로 지우기를 켠다. 정리하는 곳은 서버 하나만 남는다.
+  - 같은 PR 에서 `Tool_blob_maintenance.live_references` 의 결과를 닫힌 합타입으로 바꾼다: 다 읽은 스캔(`Complete`)과 읽지 못한 것이 남은 스캔(`Partial`, `unreadable`·`reader_pending` 을 가짐). 이 참조 집합으로 무언가를 지우는 소비자는 `Partial` 에서 지우지 않는다. 타입이 갈라져 있어서, 지금 소비자와 나중 소비자 모두 컴파일러가 이 선택을 요구한다(§5.3 소비자 표).
+  - `Observe_only`·`Delete_previous_candidates`·`Tool_blob_maintenance.run` 을 쓰는 시험은 main 에 13개 파일이다(`git grep -l`, 11-06). `test_tool_blob_store` 가 가장 많다. 지우기 루프는 함수로 꺼내 2층 서버 스윕이 쓰고, 그 시험들은 꺼낸 함수로 옮긴다. 지우기 규칙의 시험을 지우고 다시 짜지 않는다.
+  - 명령 이름을 가리키는 주석(`deployment_preflight_helper.ml` 430행, 1465행 근처)도 같은 PR 에서 고친다.
+- D8. 2층보다 먼저 스캔 범위를 닫는다. 범위는 값 하나로 둔다. `.masc`·`lane-addons`·config `keepers` 아래 항목마다 "범위"나 "이유 있는 제외" 중 하나에 속하지 않으면 그 이름이 후보 기록의 `unclassified` 에 남고, 그 기록은 아무것도 지울 수 없다(§5.3).
 
 ## 2. 지금 모습
 
@@ -137,7 +140,30 @@ mtime 으로 센 주별 증가는 09-21 주가 3.41GB 로 가장 크다. 10-05 �
 
 ### 3.5 다른 정리 명령
 
-`vision-kept-maintenance` 와 `media-reading-maintenance` 도 lease 를 잡는 오프라인 명령이고, 부르는 곳이 없다. 이 둘은 `tool_blobs` 가 아닌 다른 저장소를 지운다. 비전 보관 이미지(`config/keepers/<keeper>.vision`)는 지금 약 700MB 다. 이 RFC 의 범위가 아니다. #39331, #46721 이 다룬다.
+`vision-kept-maintenance` 와 `media-reading-maintenance` 도 lease 를 잡는 오프라인 명령이고, 부르는 곳이 없다. 이 둘은 `tool_blobs` 가 아닌 다른 저장소를 지운다. 비전 보관 이미지(`config/keepers/<keeper>.vision`)는 지금 약 700MB 다. 그 저장소를 언제 어떻게 정리할지는 이 RFC 의 범위가 아니다. #39331, #46721 이 다룬다.
+
+다만 둘 다 이 RFC 가 바꾸는 스캔을 입력으로 쓴다.
+
+- `media-reading-maintenance` 는 `live_references ~scope:Server_tool_blob_scope.scope` 로 참조 집합을 만들고, `holds_history_media` 에 걸리지 않는 기록을 두 번 스캔의 교집합으로 지운다(`keeper_media_reading_maintenance.ml` `run`). 범위층이 스캔을 "읽지 못해도 끝까지 돈다"로 바꾸면, 이 명령도 더 작은 참조 집합으로 지울 수 있다. 그래서 D7 의 합타입이 이 명령에도 걸린다. `Partial` 이면 오류로 끝난다.
+- `vision-kept-maintenance` 는 `consumer_paths` 의 파일과 트리를 통째 바이트로 읽어 handle 문자열을 찾는다. 범위층이 범위에서 빼는 곳(CLI 홈 등)은 이 목록에서도 빠진다. 그래서 빼는 PR 은 그곳에 vision handle 이 몇 개 있는지 같이 센다. journal 같은 바이너리 파일에서 문자열 찾기가 맞는지는 확인하지 않았다. 이 명령의 문제이고, 이 RFC 는 그 목록에 무엇을 더하거나 빼는지만 적는다.
+
+### 3.6 1층 스캔이 끝나지 않는다
+
+1층(#48968)과 범위층 첫 조각(#49226)이 배포된 뒤 첫 스캔은 11-06 08:54:55Z 에 기록 없이 끝났다. `gate/late-approval.log.jsonl.lock` 을 풀지 못했다. 스캔은 범위 안 트리의 모든 일반 파일을 JSON 문서, JSONL 행, 표시 행 중 하나로 읽는다. 같은 규칙으로 범위 안 트리를 흉내 내 셌다(11-06 11시 UTC, 운영 workspace, 내용은 열지 않음).
+
+| 원인 | 위치 | 파일 |
+|---|---|---:|
+| 잠금 파일. private JSONL 잠금은 표시 바이트 `\xA5` 하나를 쓴다 | `gate/*.jsonl.lock` 2, `traces/*/skill-activation-events.jsonl.lock` 36 | 38 |
+| 실행 journal. `Execution_event_store` 의 `MACE` 프레임 이진 파일이다 | `keepers/*/request-executions/*/journal/events.v1.wal` 11,298, `traces/*/native-executions/*/events.v1.wal` 4,742 | 16,040 |
+| Keeper 폴더 안에 공식 CLI 가 쓰는 자기 홈 | `keepers/<k>/official-client-runtime/muse-storage/**` 956, `keepers/<k>/github-cli/*.yml` 54 | 1,010 |
+| macOS Finder 파일 | 트리 안 `.DS_Store` | 12 |
+| 만드는 코드가 없는 파일 | `wire-capture/*/manual-*.sse.txt` | 1 |
+
+- 실행 journal 은 blob 을 가리킨다. 표시를 가진 WAL 이 `keepers` 725개, `traces` 230개다. `_blob` 객체를 가진 WAL 은 1,049개, 275개다. 바이트 검색으로 셌고 프레임은 풀지 않았다. 그래서 범위에서 뺄 수 없다.
+- 큰 tool 결과의 표시는 `ToolResult` 내용으로 journal 에 들어간다(`execution_journal.ml` `Event.Tool_result`). 끝나지 않은 native 실행은 재개할 때 그 결과를 읽고 blob 을 열어 확인한다(`keeper_direct_native_continuation.ml` `restore` → `Keeper_native_repetition_recovery.reconcile` → `Keeper_tool_progress_identity.digest_tool_io` → `Keeper_tool_answer.verified_stored_answer`). blob 이 없으면 이 확인은 `None` 이고, 반복 판정의 identity 가 답 대신 blob 주소로 바뀐다. 재개는 이어지지만 같은 호출을 같은 호출로 알아보지 못한다. 끝난 journal 을 다시 읽는 곳은 verifier 뿐이고, blob 은 읽지 않는다. 하지만 끝났는지 알려면 journal 을 읽어야 하고, 읽는 곳이 없다는 것은 주인이 아니라는 증거가 못 된다.
+- 실행 journal 의 reader 는 `Execution_event_store.read_only_snapshot ~codec ~dir` 이다. `Eio.Path` 와 `Eio.Switch` 를 쓰고, codec 은 runtime 의 codec pool 을 쓴다. 스캔은 `Systhread_host.run` 으로 Eio 밖 system thread 에서 돈다(§4.4). 그 자리에서는 이 reader 를 부를 수 없다.
+- `keepers` 와 `traces` 는 범위에 통째로 `Tree` 로 들어 있다. 닫힌 분류는 세 곳의 직속 항목만 나눈다. 그래서 그 아래의 비기록 파일은 분류도 경고도 없이 스캔을 끝낸다.
+- `keepers/<k>/` 바로 아래 이름은 137가지, `traces/<t>/` 는 13가지다(11-06).
 
 ## 4. 설계
 
@@ -220,11 +246,23 @@ delete h:
 
 ### 4.4 메인 domain 밖에서
 
-스캔은 16GB 넘게 읽고 푼다. 메인 domain 에서 돌면 그동안 서버가 멈춘다. 정리 pass 전체를 system thread 에서 돌린다. 지금 `tool_blob_maintenance.ml` 은 Eio·Domain_pool·Mutex 를 부르지 않고 `Fs_compat` 의 blocking 함수와 Unix 호출만 쓴다. 그래서 그대로 system thread 에서 부를 수 있다. 구현 층에서 다시 확인한다.
+스캔은 16GB 넘게 읽고 푼다. 메인 domain 에서 돌면 그동안 서버가 멈춘다. 1층은 정리 pass 전체를 `Systhread_host` 의 system thread 에서 돌린다. 그때 `tool_blob_maintenance.ml` 은 Eio·Domain_pool·Mutex 를 부르지 않고 `Fs_compat` 의 blocking 함수와 Unix 호출만 썼다.
+
+실행 journal(§3.6)을 읽으면 이 전제가 바뀐다. journal reader 는 Eio 경로를 받는다.
+
+- 스캔은 두 단계다. 지금 system thread 가 일반 파일을 읽으면서 실행 journal 디렉터리는 열지 않고 목록만 모은다. 그다음 서버가 넘긴 reader 가 그 목록을 읽는다.
+- 스캔이 journal 을 읽은 뒤 그 journal 에 쓰인 사건은 이번 스캔에 보이지 않는다. 다음 스캔이 읽는다. 그 사이 사건이 가리키는 blob 은 건드린 주소로 빠진다(§4.2). 사건을 쓴 쪽은 서버 안에서 `Tool_blob_store` 의 쓰기 함수로 blob 을 다뤘다. 같은 sha256 이 이미 있어 파일을 다시 쓰지 않을 때도 `put` 은 쓰기를 건너뛰기 전에 건드림 표시를 남긴다(`tool_blob_store.ml` `mark_put`). blob 을 쓰지 않고 참조만 옮겨 쓰는 길은 §5.2 의 `u` 가 잰다.
+- reader 는 메인 domain 이 아닌 domain 의 Eio 루프 위 fiber 로 돈다. 메인 domain 은 스캔을 기다리지 않는다(D5).
+- reader 는 runtime 의 codec 으로 journal 을 읽고, 사건을 정규 JSON 인코딩으로 바꿔 돌려준다. 스캔은 그 JSON 에서 지금 규칙대로 참조를 찾는다. 사건 종류를 골라 필드를 꺼내지 않는다. 그래야 사건 종류가 늘어도 참조를 놓치지 않고, tool 결과 밖(요청 snapshot, checkpoint)에 있는 표시도 같은 길로 잡힌다.
+- `read_only_snapshot` 은 모든 사건을 목록으로 쥔다. 큰 journal 1만 6천 개를 날마다 그렇게 읽지 않도록, agent_core 가 확정된 사건을 하나씩 흘려 주는 함수를 내보낸다. commit authority 규칙은 `read_only_snapshot` 과 같은 코드를 쓴다.
+- blob 저장소 라이브러리는 agent_core 의 실행 저장소를 직접 부르지 않는다. 작업 맥락 디코더(§5.3)와 같은 방향이다.
+- reader 가 들어오는 PR 부터 reader 는 scope 의 필수 값이다. reader 없이 만든 scope 는 없다. 그래서 "reader 대기" 는 그 PR 이 지운다.
+- journal 하나를 읽는 시간에 상한을 둔다. 넘기면 그 journal 은 `unreadable`(시간 초과)로 남는다. 상한값은 reader 가 들어오기 전에 journal 읽기 시간 분포를 재고 정한다(§7).
+- 나머지 파일은 지금처럼 `Fs_compat` 로 읽는다.
 
 ### 4.5 후보 기록
 
-후보 기록 파일은 새 이름 `<base>/.masc/tool_blob_maintenance/candidates-v2` 에 새 모양으로 쓴다. 옛 파일 `candidates.json` 은 읽지 않는다. 옛 모양을 읽거나 옮기는 코드는 두지 않는다. 1층까지는 오프라인 명령이 옛 파일을 계속 쓴다. 2층이 그 명령을 지우면 옛 파일은 아무도 읽지 않으므로 지우고 설치한다(2층 changelog 의 Upgrade notes). 운영 workspace 에는 이 폴더가 없다.
+후보 기록 파일은 새 이름 `<base>/.masc/tool_blob_maintenance/candidates-v2` 에 새 모양으로 쓴다. 옛 파일 `candidates.json` 은 읽지 않는다. 옛 모양을 읽거나 옮기는 코드는 두지 않는다. 1층까지는 오프라인 명령이 옛 파일을 계속 쓴다. 범위층이 그 명령을 지우면(D7) 옛 파일은 아무도 읽지 않으므로 지우고 설치한다(그 PR changelog 의 Upgrade notes). 운영 workspace 에는 이 폴더가 없다.
 
 후보가 수백만 개일 수 있다. 그래서 JSON 배열 하나로 쓰지 않는다. 첫 줄은 머리, 그다음은 한 줄에 sha256 하나다.
 
@@ -237,13 +275,21 @@ u <sha256>
 
 `c` 는 후보, `d` 는 D3 의 집합(후보이면서 지울 수 있는 것), `u` 는 §5.2 의 "아무 흔적이 없다" 주소다. 머리의 개수와 줄 수가 다르면 그 파일을 읽지 않고 오류로 끝낸다. 1층은 `d` 를 지우지 않고 기록만 한다. 다음 스캔이 §5.2 의 수를 세는 데 쓴다.
 
+범위층(§5.3)은 머리에 두 칸을 더한다. 기록 이름은 `candidates-v3`, `schema_version` 은 3 이다.
+
+- `unreadable`: 트리 안에서 읽지 못한 파일과 journal 수다. 본문에 한 줄에 하나씩 `x <사유> <base 기준 경로>` 로 적는다. 사유는 닫힌 variant 의 이름이다(기록으로 풀지 못함, 읽기 실패, reader 거부). 운영자가 그 경로로 원인을 찾는다.
+- `reader_pending`: reader 가 들어오기 전에 읽지 않고 넘긴 journal 디렉터리 수다. 경로는 적지 않는다. 그 규칙에 든 디렉터리 전부라서 목록이 더 알려 주는 것이 없다.
+- `unclassified` 가 비지 않았거나 `unreadable`·`reader_pending` 이 0 이 아니면 `deletable` 은 0 이다. 머리를 풀 때 이 규칙을 어긴 기록은 거부한다. 지금 `unclassified` 를 검사하는 자리(`tool_blob_sweep.ml`)와 같다.
+- 앞 기록이 이 규칙으로 깨끗하지 않았으면 이번 기록의 `deletable` 도 0 이다. 머리만 읽는 쪽도 "지울 수 있다"로 읽지 않는다.
+- `candidates-v2` 는 읽지 않는다. 범위층의 Upgrade notes 에 "지우고 설치"로 적는다. 그 뒤 롤백한 서버는 앞 기록이 없는 것으로 보고 새로 시작한다. 잃는 것은 §5.2 비교 하루치다.
+
 ## 5. 층
 
 ### 5.1 1층: 세기만
 
 - §4.1~§4.5 를 넣는다. 지우는 줄만 없다.
 - pass 가 끝나면 로그 한 줄을 남긴다: 스캔 시간, 살아 있는 참조 수, blob 수, 후보 수, `deletable` 수와 크기, §5.2 의 수.
-- 실패하면 오류 종류(`Durable_source_read_failed`, `Durable_source_parse_failed` 등)와 경로를 남긴다. 서버가 쓰는 중이라 "읽는 도중 사라진 파일"이나 "덜 쓰인 끝 줄"로 멈추는 일이 생길 수 있다. 1층에서 얼마나 자주 생기는지 본다. 자주 생기면 그 규칙을 2층 전에 따로 정한다.
+- 실패하면 오류 종류(`Durable_source_read_failed`, `Durable_source_parse_failed` 등)와 경로를 남긴다. 서버가 쓰는 중이라 "읽는 도중 사라진 파일"이나 "덜 쓰인 끝 줄"로 멈추는 일이 생길 수 있다. 1층에서 얼마나 자주 생기는지 본다. 자주 생기면 그 규칙을 2층 전에 따로 정한다. 범위층부터는 트리 안 파일 하나를 풀지 못해도 스캔이 끝나지 않고 그 파일이 `unreadable` 에 남는다(§5.3).
 
 ### 5.2 지웠다면 깨졌을 참조
 
@@ -275,9 +321,41 @@ u <sha256>
 - Librarian 요청: owner 기록 안에 참조 목록을 구조로(`normalized_artifact_ref_to_json`) 둔다. 본문과 owner 기록은 다른 파일이고 본문이 먼저 게시된다. 그래서 조건은 "owner 기록이 보이면 그 안에 목록이 있다"다. 문자열 안을 훑어 참조를 찾는 코드는 두지 않는다. RFC-0498 이 settle 때 본문을 지우므로 보관 위치는 범위에 넣지 않는다.
   - 이미 있는 owner 기록에는 이 목록이 없다. 목록이 없는 살아 있는 기록을 만나면 스캔을 오류로 끝낸다.
   - 그런 기록이 하나라도 남으면 스캔이 기록을 쓰지 못한다. 그래서 이 층 PR 이 세 길 중 하나를 고른다. 지우고 설치한다. 끝난 요청이 settle 되기를 기다린다. 기존 typed decoder 로 캡처를 풀어 목록을 한 번 채운다.
-- 완료 검토 journal: `verifier-executions/*/.masc/keepers/*/request-executions` 를 고정된 깊이로 나열해 범위에 넣는다. 읽지 못한 항목은 스캔 오류다. journal 의 media 가 workspace 저장소에 있다는 것(§3.4)은 이 층 PR 이 코드로 확인한다. review_root 안에 따로 저장소가 있으면 그것은 이 정리의 범위가 아니다. `verifier-executions` 자체가 언제 지워지는지 이 층 PR 이 확인한다. 안 지워지면 그 참조가 blob 을 계속 붙잡는다. 안전한 쪽이지만 PR 에 적는다.
-- Librarian 작업 맥락: config 폴더의 `*.working-context.json` 을 범위에 넣는다. 참조는 같은 모듈의 디코더(`Keeper_chat_operation`)로 꺼낸다.
-- Librarian 작업 맥락 색인: config 폴더의 `*.working-context-recall.json` 을 범위에 넣는다. 참조는 `Keeper_librarian_context_recall` 의 색인 디코더로 꺼낸다. 접미사 규칙에서 `.working-context.json` 과 다른 항목이다.
+- 완료 검토 journal: `verifier-executions/*/.masc/keepers/*/request-executions` 를 고정된 깊이로 나열해 범위에 넣는다. 그 깊이의 디렉터리를 나열하지 못하면 스캔 오류다. review_root 안에 따로 저장소가 있으면 그것은 이 정리의 범위가 아니다.
+  - 이 journal 도 실행 journal 이다. 아래 "트리 안의 파일" 의 reader 로 읽고, 읽지 못한 journal 도 같은 규칙으로 다룬다.
+  - media 는 workspace 저장소에 있다. 검토 실행이 `~media_store:(Tool_blob_media_store.of_base_path ~base_path)` 로 workspace 저장소를 넘긴다(`workspace_metric_hooks.ml`, 11-06 확인).
+  - `verifier-executions` 를 지우는 코드는 없다(11-06 확인, 운영 462개). 그래서 그 참조는 blob 을 계속 붙잡는다. 안전한 쪽이다.
+- Librarian 작업 맥락: config 폴더의 `*.working-context.json` 을 범위에 넣는다. 참조는 같은 모듈의 디코더(`Keeper_librarian_context.read_committed_file`)로 꺼낸다. 풀리지 않는 바이트는 주인이 격리하고 원본 입력에서 다시 만드는 파생 바이트라 참조를 붙잡지 않는다. 읽기 실패는 스캔 오류다(#49294).
+- Librarian 작업 맥락 색인: 범위에서 뺀다. 이유는 `Repairable_pointer` 다(#49294).
+  - 색인이 가리키는 게시본은 범위 안 recall pin(`keepers/<k>/librarian-recall-current.json`)과 날짜별 recall 기록이 붙잡는다.
+  - 게시본이 없으면 recall 이 확정된 작업 맥락에서 다시 쓴다(§3.4).
+  - 색인을 주인으로 읽으면 퇴역한 맥락이 기록 보존 기간 뒤에도 남는다. 기존 시험 `confirmed empty context releases current pin after history retention` 이 이를 막는다.
+- 트리 안의 파일(§3.6): 범위 안 트리 아래의 파일도 기록이 아닌 것은 이름 규칙으로 나눈다.
+  - 잠금 파일은 읽지 않는다. 이름은 `Fs_compat.lock_suffix` 로 판정한다. private JSONL 잠금과 `File_lock_eio` 가 이 상수 하나를 쓴다(#49297).
+  - `.DS_Store` 는 트리 안에서도 읽지 않는다. 이름은 scope 의 Finder 항목과 같은 상수를 쓴다.
+  - 실행 journal 디렉터리는 §4.4 의 reader 로 읽는다. 그 안의 파일을 하나씩 기록으로 읽지 않고, 프레임 바이트를 문자열로 훑지 않는다.
+  - journal 디렉터리는 `Execution_event_store` 가 내보내는 판별 함수 하나로 알아본다. 이 판별은 디렉터리로 내려가기 전에 한다. 그래서 `.writer.lock` 은 잠금 이름 규칙보다 먼저 journal 표지로 읽힌다. 저장소가 쓰는 이름은 다섯이다: `events.v1.wal`, `events.v1.wal.initializing`, `events.v1.commit`, `events.v1.commit.initializing`, `.writer.lock`. 지금 `.mli` 는 이 이름을 내보내지 않는다. 함수는 다섯을 모두 덮는다. 초기화 중 이름만 있는 디렉터리도 journal 이다. 하나라도 빠지면 그 디렉터리가 일반 트리로 내려가 읽히고, 같은 증상으로 스캔이 끝난다.
+  - 읽지 못한 것 하나가 스캔 전체를 끝내지 않는다. 대상은 트리 안에서 기록으로 풀리지 않는 일반 파일과 reader 가 거부한 journal 이다. 옛 형식, 깨진 저장소, 초기화가 덜 된 저장소, 읽는 중에 사라진 저장소, 만드는 코드가 없는 잔여 파일이 섞여 있을 수 있다. 하나 때문에 스캔이 끝나면 지금 증상이 다른 파일로 옮겨 갈 뿐이다.
+    - 스캔은 끝까지 돌고 기록을 쓴다. 그 파일은 기록의 `unreadable` 에 사유와 경로로 남고, 그 기록의 `deletable` 은 0 이다(§4.5).
+    - 디렉터리를 나열하지 못하는 것은 그대로 스캔 오류다. 범위 안 트리의 하위 디렉터리도 같다(`EACCES` 등). 그 안에 무엇이 있는지 모르면 `unreadable` 에도 적을 수 없다.
+    - 쓰는 중인 파일의 덜 쓰인 끝 줄은 "기록으로 풀지 못함" 으로 남는다. 그날 기록은 지울 수 없고, 다음 스캔은 다 쓰인 파일을 읽는다. 따로 사유를 둘지는 1층의 사유별 개수를 보고 정한다.
+    - `unreadable` 이 비지 않는 한 2층은 지우지 않는다. 출구는 둘이다. 주인이 그 모양을 읽게 고치거나, 운영자가 그 파일을 지운다. 스캔이 읽지 못한 파일을 스스로 범위에서 빼지 않는다.
+  - reader 가 들어오기 전 중간 단계: 실행 journal 디렉터리를 "reader 대기" 범위로 분류한다. 스캔은 그 디렉터리를 읽지 않고 끝까지 돌며, 기록의 `reader_pending` 에 디렉터리 수를 남기고 `deletable` 을 0 으로 두고 경고를 남긴다. `Excluded` 와 다른 분류다. `Excluded` 는 "읽지 않아도 안전하다"는 뜻이고, 이 분류는 "2층 전에 반드시 읽어야 한다"는 뜻이다. 둘을 합치면 2층이 켜질 때 journal 이 붙잡는 blob 을 지울 수 있다.
+  - `keepers/<k>/` 와 `traces/<t>/` 의 직속 항목도 닫힌 분류에 넣는다. 주인 폴더 이름은 바뀌므로 "각 주인 폴더의 직속 항목" 한 단계를 더한다.
+  - 공식 CLI 가 쓰는 자기 홈(`official-client-runtime` 안의 CLI 저장소, `github-cli`)은 새 제외 이유로 뺀다. CLI 가 쓰는 자기 설정과 상태라 MASC 기록이 아니다. `official-client-runtime` 의 outbox 영수증은 범위에 남는다.
+  - `wire-capture/*/manual-*.sse.txt` 는 만드는 코드가 없다. 남아 있는 동안 `unreadable` 에 남는다. Upgrade notes 에 적고 운영자가 지운다.
+  - 작업 맥락이 격리한 `<keeper>.working-context.json.invalid-<hash>` 는 주인이 다시 읽지 않는다. 지금 운영에 0개다. 생기면 `unclassified` 로 남아 지우기를 계속 막는다. 이름 규칙을 주인이 내보내고, 다시 읽지 않는 사본이라는 제외 이유로 분류한다.
+  - 순서: 잠금 → Finder → `unreadable` 기록·journal "reader 대기"·주인 폴더 한 단계 분류·오프라인 명령 삭제(D7) → journal reader. 셋째가 들어가면 1층 스캔이 끝까지 돌아 기록이 쌓인다. 넷째가 들어가고 잔여 파일이 지워져야 `deletable` 이 0 을 벗어난다.
+  - `live_references` 소비자 표(D7). 범위층 PR 은 이 표의 모든 줄을 같은 PR 에서 고친다.
+
+    | 소비자 | 입력 | `Partial` 일 때 |
+    |---|---|---|
+    | 서버 스윕(`tool_blob_sweep.ml`) | `live_references` | 기록을 쓰고 `deletable` 은 0. 2층도 지우지 않는다 |
+    | `tool-blob-maintenance` | `live_references` | 명령을 지운다(D7) |
+    | `media-reading-maintenance` | `live_references` | 오류로 끝나고 아무것도 지우지 않는다 |
+    | `vision-kept-maintenance` | `consumer_paths` | 해당 없음. 목록이 바뀌는 것만 §3.5 대로 센다 |
+
+    표 밖의 소비자는 없다(11-06 `git grep`). `live_references` 는 서버 스윕(`tool_blob_sweep.ml`)과 `deployment_preflight_helper.ml` 의 두 명령만 부른다. `fold_live_sha256` 은 서버 스윕만, `holds_history_media` 는 `keeper_media_reading_maintenance.ml` 만 부른다.
 - Exact 기록: `lane-addons/exact-requests`, `host-results`, `evidence` 를 범위에 넣는다. Exact 호스트는 표시를 풀지 않는다. 하지만 지금 범위의 규칙은 "표시를 담은 기록은 살아 있는 동안 그 blob 을 붙잡는다"이고, `traces`·`wire-capture` 도 그 규칙으로 들어 있다. 같은 규칙을 따른다.
   - 비용: 스캔이 11GB 늘어 27GB 가 된다(§3.4). 1층 로그가 저장소마다 스캔 시간을 따로 남기게 이 층 PR 이 고친다. 시간이 문제면 먼저 `evidence`(6.4GB)를 줄인다. 이 폴더의 파일은 sha256 으로 이름 지은 불변 파일이라, 한 번 읽은 이름의 참조를 기억하면 다음 스캔은 새 파일만 읽는다. `exact-requests`·`host-results` 는 기록이 바뀌어서 이 방법이 맞지 않는다. 그쪽은 Librarian 요청처럼 owner 쪽 구조 목록으로 바꾼다. 범위에서 빼는 것으로 풀지 않는다(§6).
 - 제외는 이유를 variant 로 적는다. 11-06 에 확인한 것:
@@ -304,10 +382,10 @@ u <sha256>
 ### 5.4 2층: 지우기
 
 - 범위층의 두 끝 조건을 채운 뒤에 낸다.
-- 이번 스캔과 앞 기록의 `unclassified` 가 둘 다 비었을 때만 지운다. 앞 기록이 분류에 없는 항목을 두고 만든 후보는 그 항목의 참조를 몰랐을 수 있다.
+- 이번 스캔과 앞 기록 모두 `unclassified` 가 비고 `unreadable`·`reader_pending` 이 0 일 때만 지운다. 앞 기록이 읽지 않은 곳을 두고 만든 후보는 그곳의 참조를 몰랐을 수 있다. 2층 PR 은 두 기록 중 하나라도 이 조건을 어기면 아무것도 지우지 않는 시험을 둔다.
 - 운영자가 1층 수치를 보고 켠다. 코드에 켜는 기준값을 두지 않는다. 2층 PR 이 1층 수치를 근거로 든다. §5.2 의 "읽으려 했다"나 "아무 흔적이 없다"가 나오면, 그 producer 를 먼저 고치고 2층을 낸다.
 - §4.3 의 `delete` 와 `h.deleting` 되돌리기를 넣는다.
-- 오프라인 명령 `tool-blob-maintenance` 와 그 lease 경로를 지운다. `Tool_blob_maintenance.mode` 도 지운다.
+- 오프라인 명령과 `Tool_blob_maintenance.mode` 는 범위층에서 이미 지웠다(D7). 2층은 서버 스윕에 지우기를 넣는다.
 - 이미 쌓인 20GB 는 2층이 켜진 뒤 첫 스캔이 `deletable` 로 기록하고, 24시간 뒤 다음 스캔이 지운다.
 
 ## 6. 받아들이지 않은 것
@@ -321,6 +399,9 @@ u <sha256>
 - 저장소마다 자기 참조를 돌려주는 함수를 등록하고, GC 는 그 합집합만 쓰기. 방향은 맞다. 하지만 지금은 16곳을 모두 바꿔야 해서 2층이 오래 막힌다. 범위층의 닫힌 분류가 "등록하지 않은 저장소"를 실행 시점에 잡는다.
 - 스캔이 잘린 표시를 건너뛰고 `trajectories` 를 범위에 넣기. 다른 저장소의 진짜 깨진 표시까지 덮는다(§5.3).
 - 사람이 둔 파일을 받는 운영자 폴더를 `.masc` 아래에 새로 두기. `unclassified` 목록이 이미 측정을 이어 가게 한다. 새 폴더는 새 약속을 하나 더 만든다. 잔여 항목이 계속 생기는지 1층 경고 로그로 본 뒤 정한다.
+- 실행 journal 을 Eio 없이 푸는 reader 를 agent_core 에 하나 더 두기. 같은 형식의 reader 가 둘이 되면 commit authority 검사와 프레임 규칙이 어긋날 수 있다.
+- WAL 바이트에서 표시 문자열을 찾기. 프레임 안 JSON 은 escape 될 수 있고, commit authority 밖의 꼬리까지 읽는다.
+- 실행 journal 을 범위에서 빼기. 표시나 `_blob` 객체를 가진 WAL 이 1,000개 넘게 있다(§3.6).
 - 오래된 blob 만 지우기(나이 기준). 나이는 참조 여부를 말하지 않는다. §4.2 의 mtime 조건은 나이가 아니라 "앞 스캔 뒤에 누가 썼다"는 흔적이라, 오래됐다고 지우지 않고 새로 썼으면 남긴다.
 
 ## 7. 확인할 것
@@ -333,12 +414,21 @@ u <sha256>
 - `bin/` 이 `lib/` 를 거쳐 `Tool_blob_store` 에 쓰는 경로. 쓰기는 mtime 조건이 덮지만, 읽기만 하고 참조를 쓰는 서버 밖 경로가 있는지 같이 본다.
 - 스캔 범위 대조: 참조(`Tool_output` marker, `Stored` media source)를 기록하는 producer 마다 쓰는 위치가 `durable_consumer_basenames` 나 Board 글 파일 안에 있는지. 1층 PR 본문에 표로 남긴다.
 - `list_all_result` 가 sha256 이 아닌 이름(`.deleting`, 임시 파일)을 어떻게 다루는지.
+- 실행 journal 읽기 비용. WAL 은 3.4GB 다(11-06). 끝난 journal 은 덧붙이기만 하므로 바뀌지 않는다. `(경로, scope_id, correlation_id, committed_offset, last_seq)` 가 같으면 앞 스캔에서 꺼낸 참조를 다시 쓰는 방법은 1층 수치를 본 뒤 정한다. authority 가 뒤로 가거나 identity 가 바뀌었으면 다시 읽는다. 저장소가 이미 이 둘을 오류로 나눈다(`Commit_authority_regressed`, `Commit_authority_identity_changed`).
+- reader 를 메인 domain 밖에서 부를 때 codec pool 이 다른 domain 의 호출을 받는지.
+- `unreadable` 의 사유별 개수와, 끝나지 않은 journal 의 개수.
+- journal 하나를 읽는 시간의 분포. §4.4 의 상한값을 여기서 정한다.
 
 ## 8. 열린 질문
 
-없음. 2층을 켤지는 1층 수치를 본 뒤 정한다. 2층이 `unlink` 대신 하루 동안 `h.deleting` 으로 두어 되돌릴 여지를 남길지는 2층 PR 에서 정한다. 디스크 사용률이 96% 라 기간이 비용이다.
+- 스캔의 Eio 루프를 어느 domain 에서 돌릴지(§4.4). domain 수는 #49274 와 같이 본다. 후보는 셋이다.
+  - 스캔만 하는 domain 을 하나 더 둔다.
+  - `Systhread_host` 의 host domain 에 reader fiber 를 붙인다. 그 domain 은 이미 자기 Eio 루프를 돈다(`systhread_host.ml` `serve`). domain 은 늘지 않는다. 그 루프는 모든 system thread 작업을 받아 넘기는 자리라서, 사건을 푸는 동안 다른 작업 접수가 늦어지는지 재야 한다. 그 루프는 `env` 를 버리므로 reader 가 쓸 경로를 넘기는 방법도 정해야 한다.
+  - 이미 있는 다른 domain(Domain_pool)을 쓴다.
+
+2층을 켤지는 1층 수치를 본 뒤 정한다. 2층이 `unlink` 대신 하루 동안 `h.deleting` 으로 두어 되돌릴 여지를 남길지는 2층 PR 에서 정한다. 디스크 사용률이 96% 라 기간이 비용이다.
 
 ## 9. 범위 밖
 
 - 비전 보관 이미지와 media reading 저장소의 정리(§3.5).
-- 디스크 96%. 이 RFC 의 1층과 상관없이 운영자가 공간을 확보해야 할 수 있다. 오프라인 명령을 서버를 내린 틈에 한 번 돌리는 방법도 있지만, §3.3 의 위험을 재기 전이라 권하지 않는다.
+- 디스크 96%. 이 RFC 의 1층과 상관없이 운영자가 공간을 확보해야 할 수 있다. 범위층이 오프라인 명령을 지우기 전에는(D7) 서버를 내린 틈에 그 명령을 한 번 돌리는 방법도 있지만, §3.3 의 위험을 재기 전이라 권하지 않는다.

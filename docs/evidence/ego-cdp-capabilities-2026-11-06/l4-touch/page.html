@@ -1,0 +1,25 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>masc L4 touch probe</title>
+<style>body{margin:0;font:14px sans-serif} #pad{height:3000px;background:linear-gradient(#eef,#fee)}</style></head>
+<body><div id="pad">touch probe</div>
+<script>
+window.__events = [];
+window.__busyMs = 0;
+const pad = document.getElementById('pad');
+const point = (e) => {
+  const t = (e.changedTouches && e.changedTouches[0]) || e;
+  return { x: Math.round(t.clientX), y: Math.round(t.clientY) };
+};
+for (const kind of ['touchstart', 'touchmove', 'touchend', 'touchcancel', 'pointerdown', 'pointermove', 'pointerup', 'pointercancel', 'click']) {
+  pad.addEventListener(kind, (e) => {
+    const row = { kind, pointerType: e.pointerType || null, trusted: e.isTrusted, ...point(e), at: Date.now() };
+    if (kind === 'touchend' && window.__busyMs > 0) {
+      const until = performance.now() + window.__busyMs;
+      while (performance.now() < until) {}
+      row.busyDoneAt = Date.now();
+    }
+    window.__events.push(row);
+  }, { passive: kind !== 'touchend' });
+}
+window.addEventListener('scroll', () => { window.__lastScroll = { y: Math.round(scrollY), at: Date.now() }; });
+</script></body></html>

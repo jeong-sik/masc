@@ -1,0 +1,31 @@
+[ego-browser:notice] Ego Lite update is available (current 0.6.2.7). Finish the current browser task, then ask the user before running `ego-browser upgrade`; re-read the ego-browser Skill afterward.
+{"step":"space","at":"2026-11-06T11:19:30.626Z","value":33}
+{"step":"goto","at":"2026-11-06T11:19:30.737Z","value":{}}
+{"step":"stateBefore","at":"2026-11-06T11:19:30.763Z","value":{"maxTouchPoints":0,"pointerCoarse":false,"scrollY":0}}
+{"step":"f.touchStart","at":"2026-11-06T11:19:30.782Z","value":{"value":{},"ms":18}}
+{"step":"f.touchMove0","at":"2026-11-06T11:19:30.789Z","value":{"value":{},"ms":7}}
+{"step":"f.touchMove1","at":"2026-11-06T11:19:30.810Z","value":{"value":{},"ms":21}}
+{"step":"f.touchMove2","at":"2026-11-06T11:19:30.816Z","value":{"value":{},"ms":6}}
+{"step":"f.touchEnd","at":"2026-11-06T11:19:30.824Z","value":{"value":{},"ms":8}}
+{"step":"f.pause","at":"2026-11-06T11:19:31.629Z","value":null}
+{"step":"f.events","at":"2026-11-06T11:19:31.631Z","value":[{"kind":"pointerdown","pointerType":"touch","trusted":true,"x":200,"y":500,"at":1793963970783},{"kind":"touchstart","pointerType":null,"trusted":true,"x":200,"y":500,"at":1793963970783},{"kind":"pointermove","pointerType":"touch","trusted":true,"x":200,"y":400,"at":1793963970788},{"kind":"touchmove","pointerType":null,"trusted":true,"x":200,"y":400,"at":1793963970788},{"kind":"pointercancel","pointerType":"touch","trusted":true,"x":0,"y":0,"at":1793963970789},{"kind":"touchmove","pointerType":null,"trusted":true,"x":200,"y":300,"at":1793963970814},{"kind":"touchmove","pointerType":null,"trusted":true,"x":200,"y":200,"at":1793963970823},{"kind":"touchend","pointerType":null,"trusted":true,"x":200,"y":200,"at":1793963970824}]}
+{"step":"f.stateAfter","at":"2026-11-06T11:19:31.640Z","value":{"maxTouchPoints":0,"pointerCoarse":false,"scrollY":1585}}
+{"step":"g.scrollTop","at":"2026-11-06T11:19:31.645Z","value":0}
+{"step":"g.touchStart","at":"2026-11-06T11:19:31.706Z","value":{}}
+{"step":"g.touchEnd","at":"2026-11-06T11:19:37.990Z","value":{"value":{},"ms":7}}
+{"step":"g.pause","at":"2026-11-06T11:19:38.882Z","value":null}
+{"step":"g.eventKinds","at":"2026-11-06T11:19:38.884Z","value":"pointerdown touchstart pointermove pointermove touchmove pointercancel touchmove touchmove touchmove touchmove touchmove touchmove touchmove touchmove touchmove touchmove touchmove touchmove touchmove touchmove touchmove touchmove touchmove touchmove touchend"}
+{"step":"g.stateAfter","at":"2026-11-06T11:19:38.885Z","value":{"maxTouchPoints":0,"pointerCoarse":false,"scrollY":346}}
+{"step":"h.scrollTop","at":"2026-11-06T11:19:38.947Z","value":0}
+{"step":"h.touchStart","at":"2026-11-06T11:19:39.356Z","value":{}}
+{"step":"h.eventsHeld","at":"2026-11-06T11:19:39.357Z","value":[{"kind":"pointerdown","pointerType":"touch","trusted":true,"x":100,"y":100,"at":1793963979355},{"kind":"touchstart","pointerType":null,"trusted":true,"x":100,"y":100,"at":1793963979355}]}
+{"step":"h.nextTapStart","at":"2026-11-06T11:19:39.389Z","value":{"value":{},"ms":32}}
+{"step":"h.nextTapEnd","at":"2026-11-06T11:19:40.516Z","value":{"value":{},"ms":1127}}
+{"step":"h.eventsNextTap","at":"2026-11-06T11:19:40.518Z","value":[{"kind":"pointermove","pointerType":"touch","trusted":true,"x":300,"y":100,"at":1793963979388},{"kind":"touchmove","pointerType":null,"trusted":true,"x":300,"y":100,"at":1793963979388},{"kind":"pointercancel","pointerType":"touch","trusted":true,"x":0,"y":0,"at":1793963979389},{"kind":"touchend","pointerType":null,"trusted":true,"x":300,"y":100,"at":1793963980516}]}
+{"step":"i.touchStart","at":"2026-11-06T11:19:40.547Z","value":{}}
+{"step":"i.touchCancel","at":"2026-11-06T11:19:40.572Z","value":{"value":{},"ms":25}}
+{"step":"i.eventsCancel","at":"2026-11-06T11:19:40.575Z","value":[{"kind":"pointerdown","pointerType":"touch","trusted":true,"x":100,"y":100,"at":1793963980546},{"kind":"touchstart","pointerType":null,"trusted":true,"x":100,"y":100,"at":1793963980546},{"kind":"pointercancel","pointerType":"touch","trusted":true,"x":100,"y":100,"at":1793963980572},{"kind":"touchcancel","pointerType":null,"trusted":true,"x":100,"y":100,"at":1793963980572}]}
+{"step":"i.tapStart","at":"2026-11-06T11:19:41.580Z","value":{}}
+{"step":"i.tapEnd","at":"2026-11-06T11:19:42.583Z","value":{}}
+{"step":"i.eventsTap","at":"2026-11-06T11:19:42.585Z","value":[{"kind":"pointerdown","pointerType":"touch","trusted":true,"x":300,"y":100,"at":1793963981579},{"kind":"touchstart","pointerType":null,"trusted":true,"x":300,"y":100,"at":1793963981579},{"kind":"pointerup","pointerType":"touch","trusted":true,"x":300,"y":100,"at":1793963982581},{"kind":"touchend","pointerType":null,"trusted":true,"x":300,"y":100,"at":1793963982581},{"kind":"click","pointerType":"touch","trusted":true,"x":300,"y":100,"at":1793963982582}]}
+{"step":"finish","at":"2026-11-06T11:19:42.591Z","value":{"spaceId":33,"closedSpace":true,"keptManagedLabels":[],"closedManagedLabels":["p1"],"preservedUnmanagedCount":0}}

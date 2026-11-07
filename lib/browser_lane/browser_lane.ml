@@ -617,7 +617,8 @@ let live_transport_of_string = function
    to the operator and takes it back, lists downloads saved into the worker's
    own folder, sets files on their file inputs from the worker's upload
    copies, and sets a page's viewport, location, locale and time zone
-   through CDP overrides that last as long as the ego SDK process;
+   through CDP overrides that last as long as the ego SDK process. It taps
+   and swipes with CDP touch events and no touch emulation;
    test_browser_ego_peer holds its column to what Browser_ego_peer does. *)
 let live_transport_serves transport capability =
   match transport, capability with
@@ -626,8 +627,7 @@ let live_transport_serves transport capability =
                     | Point_scroll | Trusted_hover | Trusted_double_click | Trusted_button_click
                     | Trusted_drag | Trusted_keyboard | Tab_history | Accessibility_snapshot | Dialog_read | Dialog_answer
                     | Snapshot_target_input | Native_workflow | Page_recovery | Operator_handoff | Page_management | Download_listing | File_upload | Tab_activation
-                    | Viewport_resize | Environment_emulation) -> true
-  | Ego_task_space, Touch_input -> false
+                    | Viewport_resize | Environment_emulation | Touch_input) -> true
 ;;
 
 let live_transports_serving capability =

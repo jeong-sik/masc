@@ -63,7 +63,7 @@ checking rendered application state, and gathering evidence across tabs.
 | `hover_at` | normalized `point`, captured `viewport`, and `expectedUrl`; moves the trusted pointer without clicking | live |
 | `click_at`, `scroll_at` | normalized `point` and captured `viewport`; scroll adds `x`/`y`; `click_at` also takes `button` (`primary` by default, `middle`, `secondary`) | live |
 | `drag` | normalized `from`/`to` and captured `viewport`; trusted pointer press, move and release | live |
-| `tap_at`, `swipe` | like `click_at` and `drag` (`point`, or `from`/`to` with `via` and `durationMs`), sent by a touch pointer | — |
+| `tap_at`, `swipe` | like `click_at` and `drag` (`point`, or `from`/`to` with `via` and `durationMs`), sent by CDP touch events without touch emulation | live |
 | `set_viewport` | `expectedUrl`, and `width`/`height` in CSS pixels (100 to 4096) given together; with neither, the browser's own size returns | live |
 | `select_option` | `expectedUrl` is optional; a `selector` and the exact `value`, or distinct `values`. Ego passes them to native selectOption, which follows SDK selection semantics and may select disabled options. It is not a trusted click on the list | live |
 | `activate_tab` | the selected live `clientId`/`tabId` | live |
@@ -121,7 +121,7 @@ work by it and the Keeper tools build their rejection from it.
 | `trusted_button_click` | `click_at` with `button` `middle` or `secondary` | yes, on a native managed Page |
 | `trusted_double_click` | `double_click`, `double_click_at` | yes, on a native managed Page |
 | `trusted_keyboard` | `type_text`, `press_key` | yes, on a native managed Page, ego's keyboard |
-| `touch_input` | `tap_at`, `swipe` | no |
+| `touch_input` | `tap_at`, `swipe` | yes, CDP touch events on a native managed Page, without touch emulation |
 | `viewport_resize` | `set_viewport` | yes, a CDP override on a native managed Page that lasts while the ego SDK process that set it runs |
 | `tab_history` | `back`, `forward`, `reload`, subject to the transport's Page authority | yes, native managed Pages in the task space; back and forward through the page's CDP history |
 | `tab_navigation` | `BrowserGoto`, subject to the transport's Page authority | yes, native managed Pages in the task space |

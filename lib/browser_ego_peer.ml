@@ -1340,6 +1340,47 @@ let motion_fields = function
   | Press {button; count} -> ["button",str (button_name button);"count",`Int count]
   | Wheel {x; y} -> ["dx",`Int x;"dy",`Int y]
 
+(* Touch through the Page's CDP session, with no touch emulation. On ego lite
+   0.6.2.7 the page got trusted touch and pointer events without it, and
+   turning it on changed the page's maxTouchPoints and pointer media until it
+   was turned off (RFC-browser-ego-cdp-capabilities §3.3). A touch left down
+   turns the next touchStart into a move of it, so a gesture that fails after
+   its press sends touchCancel; a new SDK process starts with no touch down. *)
+let touch_lines = [
+  "        const touch = (type, points) => page.cdp(\"Input.dispatchTouchEvent\", {type, touchPoints: points.map(([x, y]) => ({x, y}))});";
+  "        try {";
+  "          await touch(\"touchStart\", [args.start]);";
+  "          for (const [x, y, waitMs] of args.moves) {";
+  "            if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));";
+  "            await touch(\"touchMove\", [[x, y]]);";
+  "          }";
+  "          await touch(\"touchEnd\", []);";
+  "        } catch (error) {";
+  "          let cancelled = true;";
+  "          try { await touch(\"touchCancel\", []); } catch (cancelError) { cancelled = false; }";
+  "          throw new Error((cancelled ? \"the touch was cancelled after \" : \"touchCancel failed, so a touch may stay down on this Page until its SDK process ends, after \") + String(error && error.message || error));";
+  "        }" ]
+
+(* CDP sends only the touch points it is given, while a WebDriver pointerMove
+   fills its segment in over its duration. A swipe takes the BiDi peer's
+   segments (Pointer.drag_waypoints, then the destination), each
+   [duration_ms] long, and fills each with a point every
+   [touch_move_interval_ms]; a 0 ms segment is one point. Each point carries
+   the wait before it, and a segment's waits add up to [duration_ms]. *)
+let touch_move_interval_ms = 16
+let touch_segments ~start ~via ~destination = Browser_lane.Pointer.drag_waypoints ~start ~destination via @ [destination]
+let touch_moves ~start ~via ~destination ~duration_ms =
+  let segment (from : Browser_lane.Pointer.point) (target : Browser_lane.Pointer.point) =
+    let steps = max 1 ((duration_ms + touch_move_interval_ms - 1) / touch_move_interval_ms) in
+    List.init steps (fun index ->
+      let fraction = float_of_int (index + 1) /. float_of_int steps in
+      let wait_ms = duration_ms * (index + 1) / steps - duration_ms * index / steps in
+      ({Browser_lane.Pointer.x = from.x +. (target.x -. from.x) *. fraction;
+        y = from.y +. (target.y -. from.y) *. fraction}, wait_ms)) in
+  let _, moves = List.fold_left (fun (from, moves) target -> (target, moves @ segment from target))
+      (start, []) (touch_segments ~start ~via ~destination) in
+  moves
+
 (* ego takes a chord as Playwright writes one: the modifiers, then the key,
    joined by "+". It presses the named keys and printable ASCII, up to "~";
    ego 0.6.0.16 refused é, ß and € as an unknown key (2026-10-23). *)
@@ -1849,6 +1890,27 @@ let interact ?actor t args =
     | `Assoc fields -> Ok (`Assoc (fields @ ("refsInvalidated",`Bool true) :: lifetime))
     | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
       Error (Live.Outcome_unknown (Printf.sprintf "the set_viewport receipt is not an object; read tab %d before another step" id)) in
+  (* Each Input.dispatchTouchEvent answer came after the page handled the
+     event; ego says raw CDP invalidates snapshot refs. *)
+  let touch (viewport : Browser_lane.Pointer.viewport) start moves =
+    let pixels ?(wait = []) point =
+      let x, y = Browser_lane.Pointer.viewport_pixels viewport point in `List ([`Int x; `Int y] @ wait) in
+    let* receipt = guarded_input t ~id ~label ~deadline ~verb ~step:"page.touch" ~guard:Browser_interaction.pointer_guard_script
+      ~receipt:Browser_interaction.pointer_receipt_script ~input:(input ~expected_url action) ~lines:touch_lines
+      ~fields:["start",pixels start;"moves",`List (List.map (fun (point, wait_ms) -> pixels ~wait:[`Int wait_ms] point) moves)] in
+    match receipt with
+    | `Assoc fields -> Ok (`Assoc (fields @ ["refsInvalidated",`Bool true]))
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      Error (Live.Outcome_unknown (Printf.sprintf "the %s receipt is not an object; read tab %d before another step" verb id)) in
+  (* The whole swipe runs inside the command's window, or not at all. *)
+  let swipe ~from ~to_ ~viewport ~via ~duration_ms =
+    let segments = List.length (touch_segments ~start:from ~via ~destination:to_) in
+    let total_s = float_of_int duration_ms *. float_of_int segments /. 1000. in
+    if total_s >= left t deadline then
+      Error (Live.Before_effect (Printf.sprintf
+        "this swipe takes %.3f s (%d segments of durationMs %d), not less than the %.3f s left in the command's window; use a shorter durationMs"
+        total_s segments duration_ms (left t deadline)))
+    else touch viewport from (touch_moves ~start:from ~via ~destination:to_ ~duration_ms) in
   let on_target ~target operation = match expected_url with
     | Some _ -> native_input t ~id ~label ~cursor:cursor_text ~expected_url
         ~locator:(ego_locator target) ~reference:["target",Browser_lane.snapshot_target_to_json target] ~operation
@@ -1892,7 +1954,8 @@ let interact ?actor t args =
   | Browser_lane.Hover_target target -> on_target ~target Target_hover
   | Browser_lane.Double_click_target target -> on_target ~target Target_double_click
   | Browser_lane.Set_viewport size -> viewport size
-  | Browser_lane.Tap_at _ | Browser_lane.Swipe _ -> refused
+  | Browser_lane.Tap_at {point; viewport} -> touch viewport point []
+  | Browser_lane.Swipe {from; to_; viewport; via; duration_ms} -> swipe ~from ~to_ ~viewport ~via ~duration_ms
 
 (* The whole space goes to the operator for a step only a person can take;
    from then on the frame refuses every step until take_over. A handOff that

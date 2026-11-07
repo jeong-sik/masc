@@ -261,15 +261,13 @@ let capability = testable
 let test_transport_table () =
   let unserved transport = List.filter (fun capability ->
     not (Lane.live_transport_serves transport capability)) Lane.all_of_live_capability in
-  check (list capability) "the ego connection has no touch"
-    Lane.[Touch_input]
-    (unserved Lane.Ego_task_space);
+  check (list capability) "the ego connection serves every listed capability"
+    Lane.[] (unserved Lane.Ego_task_space);
   check bool "native Ego activation uses SDK execution ownership" true
     (Lane.ego_reply_policy (Lane.Page_interact {tab_id=1;expected_url=Some "https://example.org/";action=Lane.Activate_tab})=Lane.Executor_owned);
-  check (list capability) "no connection serves touch"
-    Lane.[Touch_input]
-    (List.filter (fun capability -> Lane.live_transports_serving capability = []) Lane.all_of_live_capability);
   List.iter (fun capability ->
+    check bool (Lane.live_capability_to_wire capability ^ " is reachable on some connection") true
+      (Lane.live_transports_serving capability <> []);
     check bool (Lane.live_capability_to_wire capability ^ " is what its verb asks for") true
       (Lane.live_capability (verb_asking_for capability) = capability))
     Lane.all_of_live_capability

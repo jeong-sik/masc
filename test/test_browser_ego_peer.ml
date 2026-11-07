@@ -634,7 +634,6 @@ let test_input_acts_through_the_shared_page_scripts () =
   by_step ["page.input",(fun _ -> refusal ~started:true)];
   check string "a failure after the edit started" "unknown" (failure_kind (interact fill));
   (* Refused before any run. *)
-  let elsewhere = {Lane.Pointer.x=0.75;y=0.5} in
   let before = runs () in
   check string "the operator's tab" "before effect"
     (failure_kind (dispatch peer Live.Page_interact (interact_args ~tab_id:2 (Lane.Click_node {document_id="d1";node_id="send"}))));
@@ -644,8 +643,7 @@ let test_input_acts_through_the_shared_page_scripts () =
   List.iter (fun action ->
     check bool (Lane.interaction_verb action ^ " is not served") true
       (String_util.contains_substring (before_effect "an input ego does not serve" (interact action)) "not served by an ego connection"))
-    [Lane.Tap_at {point;viewport}; Lane.Swipe {from=point;to_=elsewhere;viewport;via=[];duration_ms=0};
-     Lane.Set_viewport Lane.Browser_default];
+    [];
   check int "none of those ran a script" before (runs ())
 
 (* Selector requests must reach ego unchanged, without a MASC target/DOM run.
@@ -1152,6 +1150,56 @@ let test_viewport_is_a_cdp_override_on_the_page () =
   reply := answered (obj ["guard",page_summary;"receipt",size 1548 990;"error",str "Emulation.setDeviceMetricsOverride failed"]);
   check string "a CDP failure leaves the size unknown" "unknown" (failure_kind (resize (Lane.Fit {width=800;height=600})))
 
+(* Taps and swipes are CDP touch events on an ego Page. A tap sends one
+   point; a swipe fills each BiDi segment with a point every 16 ms, each with
+   the wait before it. Both run the BiDi pointer guard, mark snapshot refs
+   stale, and a swipe longer than the command's window never runs. *)
+let test_touch_is_cdp_touch_on_the_page () =
+  let asked = ref [] in
+  let reply = ref (input_answer ()) in
+  let peer = opened (fun sent ->
+    asked := sent :: !asked;
+    match sent.step with
+    | "tabs.list" -> answered tabs
+    | "page.touch" -> !reply
+    | other -> failf "unexpected touch step %s" other) in
+  ignore (dispatch peer Live.Tabs_list (obj []));
+  let runs () = List.length !asked in
+  let gesture action = dispatch peer Live.Page_interact (interact_args action) in
+  let points json = List.map (fun point -> List.map to_int (Yojson.Safe.Util.to_list point)) (Yojson.Safe.Util.to_list json) in
+  (match gesture (Lane.Tap_at {point={x=0.5;y=0.25};viewport}) with
+   | Ok receipt ->
+     check string "the action" "tap_at" (text (field "action" receipt));
+     check string "the page it was sent to" observed_url (text (field "urlBefore" receipt));
+     check bool "snapshot refs are stale" true (field "refsInvalidated" receipt = `Bool true)
+   | other -> failf "the tap was %s" (failure_kind other));
+  let sent = List.hd !asked in
+  check (list int) "a tap presses at its pixel" [400; 150] (List.map to_int (Yojson.Safe.Util.to_list (field "start" sent.args)));
+  check (list (list int)) "and moves nowhere" [] (points (field "moves" sent.args));
+  check bool "the guard is the pointer guard the BiDi connection runs" true
+    (String_util.contains_substring (text (field "guard" sent.args)) Masc.Browser_interaction.pointer_guard_script);
+  let swipe ~duration_ms ~via = Lane.Swipe {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via;duration_ms} in
+  (match gesture (swipe ~duration_ms:32 ~via:[]) with
+   | Ok _ -> ()
+   | other -> failf "the swipe was %s" (failure_kind other));
+  check (list (list int)) "a straight swipe passes its midpoint, a point every 16 ms"
+    [[300;300;16]; [400;300;16]; [500;300;16]; [600;300;16]] (points (field "moves" (List.hd !asked).args));
+  (match gesture (swipe ~duration_ms:0 ~via:[{Lane.Pointer.x=0.5;y=0.25}]) with
+   | Ok _ -> ()
+   | other -> failf "the quick swipe was %s" (failure_kind other));
+  check (list (list int)) "a 0 ms segment is one point at once" [[400;150;0]; [600;300;0]]
+    (points (field "moves" (List.hd !asked).args));
+  let before = runs () in
+  check bool "a swipe longer than the window is refused before it starts" true
+    (contains (before_effect "a long swipe" (gesture (swipe ~duration_ms:100_000_000 ~via:[]))) "shorter durationMs");
+  check int "and runs nothing" before (runs ());
+  reply := refused "observed_viewport_changed";
+  check string "a page whose viewport moved is refused before the touch" "observed_viewport_changed"
+    (before_effect "a moved page" (gesture (Lane.Tap_at {point={x=0.5;y=0.25};viewport})));
+  reply := input_answer ~error:(str "the touch was cancelled after Target closed") ();
+  check string "a touch that failed after its press is unknown" "unknown"
+    (failure_kind (gesture (Lane.Tap_at {point={x=0.5;y=0.25};viewport})))
+
 (* Location, locale and time zone are CDP overrides on an ego Page. The
    peer sends what was asked with the label it names, passes the page's own
    before and after through, and says the overrides end with the SDK process
@@ -1327,7 +1375,7 @@ let test_the_scripts_parse_as_modules () =
     | "space.finish" -> answered (obj ["spaceId",`Int 51;"closedSpace",`Bool true;
         "keptManagedLabels",`List [];"closedManagedLabels",`List [];"preservedUnmanagedCount",`Int 0])
     | "page.target" -> answered resolved
-    | "page.pointer" | "page.keyboard" -> input_answer ()
+    | "page.pointer" | "page.keyboard" | "page.touch" -> input_answer ()
     | "page.input" -> dom_answer (obj ["action",str "fill"])
     | "page.open" -> answered (obj ["label",str "p4";"error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "New";"active",`Bool true]])
     | "page.goto" -> answered (obj ["error",`Null;"tab",obj ["url",str "https://example.test/";"title",str "Next"]])
@@ -1364,6 +1412,8 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_interact, interact_args (Lane.Fill_node {target={document_id="d1";node_id="message"};text="hi"});
       Live.Page_interact, interact_args (Lane.Fill_target {target=Lane.Target_ref 5;text="hi"});
       Live.Page_interact, interact_args (Lane.Set_viewport (Lane.Fit {width=800;height=600}));
+      Live.Page_interact, interact_args (Lane.Tap_at {point={x=0.5;y=0.5};viewport});
+      Live.Page_interact, interact_args (Lane.Swipe {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[{x=0.5;y=0.25}];duration_ms=32});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=3;interaction=Lane.Action.Close_tab});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Reload});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Stop_loading});
@@ -1379,7 +1429,7 @@ let test_the_scripts_parse_as_modules () =
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.document";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.capture";
-     "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";"page.target_input";"page.viewport";
+     "page.open";"page.goto";"page.target";"page.pointer";"page.pointer";"page.pointer";"page.keyboard";"page.input";"page.target_input";"page.viewport";"page.touch";"page.touch";
      "page.close";"page.reload";"page.stop_loading";"page.history";"page.dialog";"page.dialog";"page.upload";"page.choose_files";"page.emulation";"page.emulation";"space.finish"]
     (List.rev_map fst !scripts);
   List.iter (fun (step, script) ->
@@ -1389,6 +1439,11 @@ let test_the_scripts_parse_as_modules () =
     match Unix.waitpid [] pid with
     | _, Unix.WEXITED 0 -> ()
     | _, (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) -> failf "the %s script does not parse as a module" step)
+    !scripts;
+  List.iter (fun (step, script) -> if String.equal step "page.touch" then begin
+      check bool "touch is CDP touch events" true (contains script "Input.dispatchTouchEvent");
+      check bool "a failed touch is cancelled" true (contains script "touchCancel");
+      check bool "with no touch emulation" false (contains script "setTouchEmulationEnabled") end)
     !scripts
 
 let test_capture_reads_and_removes_the_file () =
@@ -1459,7 +1514,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | "page.upload" -> answered (obj ["error",`Null;"dialog",`Null;"tab",`Null])
     | "page.emulation" -> answered (obj ["applied",`List [str "locale"];"before",`Null;"observed",`Null])
     | "page.target" -> answered resolved
-    | "page.pointer" | "page.keyboard" | "page.viewport" -> input_answer ()
+    | "page.pointer" | "page.keyboard" | "page.viewport" | "page.touch" -> input_answer ()
     | "page.input" -> dom_answer (obj ["action",str "fill"])
     | other -> failf "unexpected step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
@@ -4062,6 +4117,7 @@ let () =
       test_case "tabs are numbered by page label" `Quick test_tabs_are_numbered_by_label;
       test_case "a tab that left the listing loses its number" `Quick test_a_tab_that_left_the_listing_loses_its_number;
       test_case "an ego error is cut" `Quick test_an_ego_error_is_cut;
+      test_case "taps and swipes are CDP touch events on the page" `Quick test_touch_is_cdp_touch_on_the_page;
       test_case "the scripts parse as modules" `Quick test_the_scripts_parse_as_modules;
       test_case "reads run the shared page scripts" `Quick test_reads_run_the_shared_page_scripts;
       test_case "refusals run no script" `Quick test_refusals_run_no_script;

@@ -156,7 +156,8 @@ let test_segments_extracts_scheduled_and_memory_cells () =
   (* When memory_health is None, memory reading is Unknown ("mem ?") *)
   let cells = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"edgar" in
   Alcotest.(check int) "has schedule cell + mem ?" 2 (List.length cells);
-  Alcotest.(check string) "first cell is schedule" "◷ 12:00:00"
+  (* The schedule cell counts down: the row is due at 12:00:00Z and now is 11:13:20Z. *)
+  Alcotest.(check string) "first cell is schedule" "◷ 46m40s"
     (List.hd cells).Masc_tui_keeper_axis_cell.text;
   Alcotest.(check string) "second cell is mem ?" "mem ?"
     (List.nth cells 1).Masc_tui_keeper_axis_cell.text;
@@ -172,11 +173,11 @@ let test_segments_extracts_scheduled_and_memory_cells () =
   state.memory_health <- Some (make_snapshot [ kh ]);
 
   let cells_with_memory = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"edgar" in
-  (* edgar has: schedule cell, lag 4, +1m +2 -1, stale ×1 = 4 cells *)
+  (* edgar has: schedule cell, lag 4, +1m00s +2 -1, stale ×1 = 4 cells *)
   Alcotest.(check int) "edgar has schedule + lag + clock + stale" 4 (List.length cells_with_memory);
   Alcotest.(check string) "edgar lag cell" "lag 4"
     (List.nth cells_with_memory 1).Masc_tui_keeper_axis_cell.text;
-  Alcotest.(check string) "edgar clock cell" "+1m +2 -1"
+  Alcotest.(check string) "edgar clock cell" "+1m00s +2 -1"
     (List.nth cells_with_memory 2).Masc_tui_keeper_axis_cell.text;
   Alcotest.(check string) "edgar stale cell" "stale ×1"
     (List.nth cells_with_memory 3).Masc_tui_keeper_axis_cell.text;

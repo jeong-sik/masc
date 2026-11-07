@@ -699,18 +699,25 @@ module McpSessionStore = struct
   let start_loop ~sw =
     if Atomic.compare_and_set loop_started false true then
     Eio.Fiber.fork ~sw (fun () ->
-      let rec loop store_state =
-        let msg = Eio.Stream.take mailbox in
-        let state' =
-          Stdlib.Mutex.protect state_mutex (fun () ->
-            let state' = process_msg store_state msg in
-            state := state';
-            state')
-        in
-        loop state'
-      in
-      loop !state
-    )
+      Fun.protect
+        ~finally:(fun () ->
+          (* The switch closed and the loop fibre is gone: without this reset,
+             [dispatch] keeps enqueueing into a mailbox nobody reads and every
+             session op in a later boot of this process hangs. Back on
+             [false], dispatch serves callers directly under [state_mutex]. *)
+          Atomic.set loop_started false)
+        (fun () ->
+          let rec loop store_state =
+            let msg = Eio.Stream.take mailbox in
+            let state' =
+              Stdlib.Mutex.protect state_mutex (fun () ->
+                let state' = process_msg store_state msg in
+                state := state';
+                state')
+            in
+            loop state'
+          in
+          loop !state))
 
   let generate_id () =
     let p, r = Eio.Promise.create () in

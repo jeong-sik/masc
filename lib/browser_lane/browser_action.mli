@@ -1,5 +1,18 @@
 (** Closed browser interactions. Arguments are parsed before any browser effect. *)
 type key = Enter | Tab | Escape | Backspace | Delete | ArrowUp | ArrowDown | ArrowLeft | ArrowRight | Home | End
+type same_site = Strict | Lax | Same_site_none
+val same_site_to_wire : same_site -> string
+val same_site_of_wire : string -> same_site option
+(** One cookie for the tab's top document host; the domain is never a
+    parameter. [max_age_sec] is from 1 to {!max_cookie_age_sec}; [None] is a
+    session cookie. *)
+type cookie = { name : string; value : string; path : string; secure : bool; http_only : bool;
+  same_site : same_site option; max_age_sec : int option }
+val max_cookie_age_sec : int
+val max_cookie_name_bytes : int
+val max_cookie_bytes : int
+(** The bytes of a cookie's name and value together. *)
+val max_cookie_path_bytes : int
 type geolocation = { latitude : float; longitude : float; accuracy_m : float }
 (** A tab's reported environment. Each part is optional, at least one is set;
     [Clear_emulation] restores its location, language and time zone overrides
@@ -17,6 +30,14 @@ val max_accuracy_m : float
 type upload_target = File_input of string | Chooser_opener of string
 type interaction =
   | Upload of { target : upload_target; paths : string list }
+  | Set_cookie of cookie
+      (** On an ego connection the cookie goes into the operator's ego
+          profile: the operator's own tabs and every task space on that
+          profile send it, and it stays after the ego SDK process ends. The
+          value is sent to the browser and never answered. *)
+  | Delete_cookie of string
+      (** Deletes every cookie of that name the tab's top document sees,
+          from the operator's ego profile on an ego connection. *)
   | Set_emulation of emulation
   | Clear_emulation
   | Block_requests of string list

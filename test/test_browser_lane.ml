@@ -257,7 +257,8 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Request_blocking -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Block_requests ["ads.example.com"]})
   | Storage_listing -> Page_cookies {tab_id=2}
   | Request_listing -> Page_network {tab_id=2}
-  | Console_reading -> Page_console {tab_id=2})
+  | Console_reading -> Page_console {tab_id=2}
+  | Cookie_writing -> Page_act (Action.On_tab {tab_id=2;interaction=Action.Delete_cookie "session"}))
 
 let capability = testable
   (fun ppf value -> Format.pp_print_string ppf (Lane.live_capability_to_wire value)) ( = )
@@ -705,12 +706,64 @@ let test_request_block_arguments () =
     check bool "a block survives the wire" true (Lane.Action.parse (Lane.Action.to_json round) = Ok round))
     [Lane.Action.Block_requests ["ads.example.com";"10.0.0.1"]; Lane.Action.Unblock_requests]
 
+(* A cookie write is parsed before any browser effect, with the limits the
+   L11 evidence measured Chromium refusing past, and never in a frame. *)
+let test_cookie_arguments () =
+  let parse ?(action="set_cookie") fields = Lane.Action.parse (`Assoc (["action",`String action;"tabId",`Int 1] @ fields)) in
+  let named = ["cookieName",`String "session";"cookieValue",`String "a b,c\"d"] in
+  check bool "a name and value parse with defaults" true
+    (parse named = Ok (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Set_cookie
+       {name="session";value="a b,c\"d";path="/";secure=false;http_only=false;same_site=None;max_age_sec=None}}));
+  check bool "every attribute parses" true
+    (parse (named @ ["cookiePath",`String "/app";"cookieSecure",`Bool true;"cookieHttpOnly",`Bool true;
+                     "cookieSameSite",`String "None";"cookieMaxAgeSec",`Int Lane.Action.max_cookie_age_sec])
+     = Ok (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Set_cookie
+       {name="session";value="a b,c\"d";path="/app";secure=true;http_only=true;same_site=Some Lane.Action.Same_site_none;
+        max_age_sec=Some Lane.Action.max_cookie_age_sec}}));
+  let long = String.make Lane.Action.max_cookie_bytes 'x' in
+  List.iter (fun (label, fields) -> check bool label true (Result.is_error (parse fields)))
+    [ "no name", ["cookieValue",`String "v"]
+    ; "no value", ["cookieName",`String "session"]
+    ; "an empty name", ["cookieName",`String "";"cookieValue",`String "v"]
+    ; "a name with a space", ["cookieName",`String "a b";"cookieValue",`String "v"]
+    ; "a name with an equals sign", ["cookieName",`String "a=b";"cookieValue",`String "v"]
+    ; "a name past its limit", ["cookieName",`String (String.make (Lane.Action.max_cookie_name_bytes + 1) 'n');"cookieValue",`String "v"]
+    ; "a semicolon in the value", ["cookieName",`String "session";"cookieValue",`String "v;x=1"]
+    ; "a control character in the value", ["cookieName",`String "session";"cookieValue",`String "v\001"]
+    ; "a name and value past 4096 bytes", ["cookieName",`String "s";"cookieValue",`String long]
+    ; "a path not starting with /", named @ ["cookiePath",`String "app"]
+    ; "a path past its limit", named @ ["cookiePath",`String ("/" ^ String.make Lane.Action.max_cookie_path_bytes 'p')]
+    ; "an unknown SameSite", named @ ["cookieSameSite",`String "lax"]
+    ; "SameSite None without Secure", named @ ["cookieSameSite",`String "None"]
+    ; "a zero lifetime", named @ ["cookieMaxAgeSec",`Int 0]
+    ; "a lifetime past seven days", named @ ["cookieMaxAgeSec",`Int (Lane.Action.max_cookie_age_sec + 1)]
+    ; "a string flag", named @ ["cookieSecure",`String "true"]
+    ; "a domain", named @ ["cookieDomain",`String "example.com"]
+    ; "inside a frame", named @ ["framePath",`List [`String "iframe"]] ];
+  check bool "the name and value fill the limit together" true
+    (Result.is_ok (parse ["cookieName",`String "s";"cookieValue",`String (String.sub long 1 (Lane.Action.max_cookie_bytes - 1))]));
+  check bool "a delete takes a name" true
+    (parse ~action:"delete_cookie" ["cookieName",`String "session"]
+     = Ok (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Delete_cookie "session"}));
+  List.iter (fun (label, fields) -> check bool label true (Result.is_error (parse ~action:"delete_cookie" fields)))
+    [ "a delete without a name", []
+    ; "a delete with a path", ["cookieName",`String "session";"cookiePath",`String "/"]
+    ; "a delete with a value", ["cookieName",`String "session";"cookieValue",`String "v"] ];
+  List.iter (fun interaction ->
+    let round = Lane.Action.On_tab {tab_id=1;interaction} in
+    check bool "a cookie write survives the wire" true (Lane.Action.parse (Lane.Action.to_json round) = Ok round))
+    [Lane.Action.Set_cookie {name="session";value="v";path="/app";secure=true;http_only=false;
+                             same_site=Some Lane.Action.Strict;max_age_sec=Some 60};
+     Lane.Action.Set_cookie {name="session";value="";path="/";secure=false;http_only=true;same_site=None;max_age_sec=None};
+     Lane.Action.Delete_cookie "session"]
+
 let () = run "browser client routing" ["ownership", [
   test_case "native Page management retains exact tab binding" `Quick test_native_page_management_contract;
   test_case "actions are parsed before effects" `Quick test_action_parser;
   test_case "context and file arguments are explicit" `Quick test_action_context_arguments;
   test_case "emulation arguments are parsed before effects" `Quick test_emulation_arguments;
   test_case "request block arguments are parsed before effects" `Quick test_request_block_arguments;
+  test_case "cookie write arguments are parsed before effects" `Quick test_cookie_arguments;
   test_case "native Space wait keeps SDK ownership and options" `Quick test_native_control_wait_contract;
   test_case "reads retain caller, scope and settled results" `Quick test_read_activity;
   test_case "agent activity follows queue ownership and cleanup" `Quick test_agent_activity;

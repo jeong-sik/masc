@@ -594,6 +594,16 @@ let keeper_group_heading_style = function
   | Keeper_list_model.Inactive -> Theme.recede ()
   | Keeper_list_model.Unobserved -> Theme.warn ()
 
+(* A chip with a count takes the colour of its group, the one the group
+   heading of the grouped list has; a zero stays in the dim colour of the row.
+   The row is drawn dim, so the chip puts the dim colour back after itself.
+   Style bytes are zero-width to [display_width], so the fit below is the same
+   with or without them. *)
+let count_chip group count text =
+  count,
+  if count > 0 then keeper_group_heading_style group ^ text ^ Ansi.reset ^ Theme.recede ()
+  else text
+
 (* The chips of the count row that fit [room] cells, each a count and its text
    in the order they are drawn. When the row is too short for all of them,
    every chip with a count stays and the zeros take what is left, front to
@@ -634,12 +644,18 @@ let keeper_view_summary ~cells rows layout sort =
     | Keeper_list_model.Compact | Keeper_list_model.Detailed ->
         let counts : Keeper_list_model.group_counts = Keeper_list_model.group_counts rows in
         let chips =
-          [ counts.attention_rows, Printf.sprintf "! %d attention" counts.attention_rows
-          ; counts.failing_rows, Printf.sprintf "%s %d failing" failing_glyph counts.failing_rows
-          ; counts.active_rows, Printf.sprintf "\xe2\x96\xb6 %d active" counts.active_rows
-          ; counts.waiting_rows, Printf.sprintf "\xe2\x97\x8c %d waiting" counts.waiting_rows
-          ; counts.inactive_rows, Printf.sprintf "\xe2\x97\x8b %d inactive" counts.inactive_rows
-          ; counts.unobserved_rows, Printf.sprintf "? %d unknown" counts.unobserved_rows
+          [ count_chip Keeper_list_model.Attention counts.attention_rows
+              (Printf.sprintf "! %d attention" counts.attention_rows)
+          ; count_chip Keeper_list_model.Failing counts.failing_rows
+              (Printf.sprintf "%s %d failing" failing_glyph counts.failing_rows)
+          ; count_chip Keeper_list_model.Active counts.active_rows
+              (Printf.sprintf "\xe2\x96\xb6 %d active" counts.active_rows)
+          ; count_chip Keeper_list_model.Waiting counts.waiting_rows
+              (Printf.sprintf "\xe2\x97\x8c %d waiting" counts.waiting_rows)
+          ; count_chip Keeper_list_model.Inactive counts.inactive_rows
+              (Printf.sprintf "\xe2\x97\x8b %d inactive" counts.inactive_rows)
+          ; count_chip Keeper_list_model.Unobserved counts.unobserved_rows
+              (Printf.sprintf "? %d unknown" counts.unobserved_rows)
           ]
         in
         let whole = List.map snd chips @ [ mode ] in

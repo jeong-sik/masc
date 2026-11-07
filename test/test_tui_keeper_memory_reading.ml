@@ -38,6 +38,9 @@ let make_keeper_health
       ; mcc_saved_unreadable = false
       ; mcc_read_position = None
       ; mcc_read_position_unreadable = false
+      ; mcc_rewriting_through = None
+      ; mcc_unread_snapshot = Ok []
+      ; mcc_unread_memory = Ok []
       ; mcc_prepared = None
       ; mcc_synthesis = None
       }

@@ -420,11 +420,6 @@ let write_config_root_keeper_toml ?(autoboot_enabled = true) config_root name =
        name
        (if autoboot_enabled then "autonomous" else "manual"))
 
-let fixture_runtime_id () =
-  match Runtime.get_default_runtime () with
-  | Some runtime -> Runtime_instance.id_of_binding runtime.binding
-  | None -> "test.runtime"
-
 let write_basepath_keeper_toml base_path name =
   let keepers_dir =
     Filename.concat (Filename.concat (Filename.concat base_path Common.masc_dirname) "config")
@@ -1200,21 +1195,6 @@ let test_otel_exporter_setup_does_not_block_maintenance_wiring () =
     !returned;
   Eio.Promise.resolve resolve_release ()
 
-let make_keeper_meta_json ?(name = "alpha")
-    ?(trace_id = "trace-alpha-live")
-    ?(updated_at = "2026-03-29T10:36:57Z") () =
-  match
-    Masc_test_deps.meta_of_json_fixture
-      (`Assoc
-        [
-          ("name", `String name);
-          ("trace_id", `String trace_id);
-          ("updated_at", `String updated_at);
-        ])
-  with
-  | Ok meta -> Keeper_meta_json.meta_to_json meta |> Yojson.Safe.pretty_to_string
-  | Error err -> Alcotest.fail ("meta_of_json failed: " ^ err)
-
 let make_keeper_meta ?(paused = false) ?(name = "alpha")
     ?(trace_id = "trace-alpha-live")
     ?(updated_at = "2026-03-29T10:36:57Z") () =
@@ -1248,8 +1228,6 @@ let make_task ?(title = "Task") ?(description = "") ~id ~status () : Types.task 
     execution_links = Masc_domain.no_execution_links;
     skills = [];
   }
-
-let terminal_fixture_epoch = 0.0
 
 let write_keeper_meta_exn config meta =
   match Keeper_meta_store.replace_snapshot config meta with
@@ -1301,53 +1279,6 @@ let dispatch_keeper_event config (meta : Keeper_meta_contract.keeper_meta) event
 let mark_keeper_failing config (meta : Keeper_meta_contract.keeper_meta) =
   dispatch_keeper_event config meta
     (Keeper_state_machine.Turn_failed { consecutive = 1 })
-
-let mark_keeper_stopped config (meta : Keeper_meta_contract.keeper_meta) =
-  dispatch_keeper_event config meta Keeper_state_machine.Stop_requested;
-  dispatch_keeper_event config meta Keeper_state_machine.Drain_complete
-
-
-let terminate_keeper_fiber config (meta : Keeper_meta_contract.keeper_meta) =
-  match
-    Keeper_registry.dispatch_event
-      ~base_path:config.Workspace.base_path
-      meta.name
-      (Keeper_state_machine.Fiber_terminated
-         { outcome = "stale_turn_timeout(idle_turn(2268s))" })
-  with
-  | Ok _ -> ()
-  | Error err ->
-    Alcotest.fail
-      ("keeper fiber termination failed: "
-       ^ Keeper_state_machine.transition_error_to_string err)
-
-let mark_keeper_dead_with_registry_cause config
-    (meta : Keeper_meta_contract.keeper_meta) =
-  let base_path = config.Workspace.base_path in
-  Keeper_registry.For_testing.record_restart ~base_path meta.name;
-  Keeper_registry.For_testing.record_restart ~base_path meta.name;
-  Keeper_registry.set_failure_reason ~base_path meta.name
-    (Some
-       (Keeper_registry.Provider_runtime_error
-          {
-            code = "provider_http_500";
-            detail =
-              Printf.sprintf
-                "provider cancelled with sk-testsecret at %s/private/provider.json"
-                base_path;
-            runtime_id = Some "runtime-a";
-            agent_core_timeout = None;
-            fenced_empty_turn_runtime = None;
-            reason = None;
-          }));
-  Keeper_registry.set_last_error_entry ~base_path ~name:meta.name
-    (Printf.sprintf
-       "synthetic cancelled by parent sk-testsecret at %s/private/state.json"
-       base_path);
-  Keeper_registry.record_crash ~base_path meta.name 1780000000.0
-    (Printf.sprintf
-       "synthetic crash record Bearer github_pat_secret at %s/crash.log"
-       base_path)
 
 let test_health_json_surfaces_durable_paused_keepers () =
   with_temp_dir "health-durable-paused-keepers" (fun dir ->

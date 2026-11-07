@@ -117,17 +117,6 @@ let outcome_kind_of = function
   | A.Partial_pass _ -> "partial_pass"
 ;;
 
-(** Helper: pin both the variant tag and the short stable reason. *)
-let expect_precondition_reason ~current_phase ~conditions ~event ~expected_reason =
-  match SM.apply_event ~current_phase ~conditions ~event ~now:1000.0 with
-  | Error (SM.Precondition_violation r) ->
-    check string "precondition reason" expected_reason r.reason
-  | Error e ->
-    fail
-      ("expected Precondition_violation, got " ^ SM.transition_error_to_string e)
-  | Ok _ -> fail "expected Precondition_violation, got Ok"
-;;
-
 let test_attribution_ok_passed () =
   let tr =
     apply_ok
@@ -224,22 +213,6 @@ let test_attribution_gate_and_origin_invariant () =
        check string "gate invariant" "keeper_fsm" attr.gate;
        check bool "origin=Det invariant" true (attr.origin = A.Det))
     cases
-;;
-
-(* [event_to_string] for payload-carrying events appends the payload
-   (e.g. "heartbeat_failed(3)"), so we use
-   prefix match rather than equality. *)
-let assert_precondition_violation ~event_name err =
-  match err with
-  | SM.Precondition_violation { event; reason = _ } ->
-    check
-      bool
-      ("event name prefix " ^ event_name ^ " in " ^ event)
-      true
-      (Astring.String.is_prefix ~affix:event_name event)
-  | other ->
-    Alcotest.fail
-      ("expected Precondition_violation, got " ^ SM.transition_error_to_string other)
 ;;
 
 let test_pre_operator_clear_no_extra_precondition () =

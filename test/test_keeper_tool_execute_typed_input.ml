@@ -201,9 +201,6 @@ let test_program_whitespace_is_preserved () =
       error
 ;;
 
-let validation_error_text error = Format.asprintf "%a" Execute_input.pp_validation_error error
-
-
 let test_of_json_exec () =
   let input =
     parse_json_exn
@@ -794,21 +791,6 @@ let test_exec_lowering_preserves_argument_equal_to_program () =
       error
 ;;
 
-let docker_test_sandbox () =
-  Masc_exec.Sandbox_target.docker
-    ~image:"typed-docker"
-    ~runner:(fun ~on_stdout_chunk:_ ~on_stderr_chunk:_ ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ->
-      Masc_exec.Sandbox_target.Ran { output_files = None; status = Unix.WEXITED 0; stdout = ""; stderr = "" })
-    ()
-;;
-
-let check_docker_sandbox label simple =
-  match simple.Masc_exec.Shell_ir.sandbox with
-  | Masc_exec.Sandbox_target.Host | Micro_vm _ | Ssh _ | Delegated _ ->
-    Alcotest.fail (label ^ ": expected Docker sandbox")
-  | Docker { image; _ } -> Alcotest.(check string) (label ^ " image") "typed-docker" image
-;;
-
 let test_pipe_character_in_exec_argv_is_literal () =
   let input =
     mk_argv [ "echo"; "foo|bar" ]
@@ -957,12 +939,6 @@ let test_legitimate_metachar_still_allowed () =
     ]
 ;;
 
-
-let redirect_at ir n =
-  match ir with
-  | Masc_exec.Shell_ir.Simple simple -> List.nth simple.redirects n
-  | _ -> Alcotest.fail "expected Simple IR"
-;;
 
 let test_cd_as_a_program_is_refused () =
   let input =

@@ -32,14 +32,6 @@ let descriptor name =
 
 let descriptors () = Descriptor.all_descriptors ()
 
-let replace_descriptor replacement =
-  descriptors ()
-  |> List.map (fun current ->
-    if String.equal current.Descriptor.id replacement.Descriptor.id
-    then replacement
-    else current)
-;;
-
 let node ?after ~id ~tool_name input =
   Plan.node ~id:(node_id id) ~tool_name ?after ~input ()
 ;;
@@ -1425,91 +1417,6 @@ let test_durable_request_encoding_rejects_unsubstituted_params () =
   | Ok _ -> fail "durable encoding admitted an unsubstituted parameter"
 ;;
 
-let recipe_skill_reference () =
-  let source_id = Skill_source_config.source_id_of_string "workspace" |> Result.get_ok in
-  let package_id = Skill_reference.package_id_of_directory "compose" |> Result.get_ok in
-  let identity =
-    Skill_reference.make_identity
-      ~source_id
-      ~package_id
-      ~name:"compose"
-  in
-  Skill_reference.make
-    ~identity
-    ~content_revision:(Skill_reference.content_revision_of_source_text "recipe fixture")
-;;
-
-let recipe_checkpoint () : Agent_core.Checkpoint.t =
-  { provider_binding = None; Agent_core.Checkpoint.version = Agent_core.Checkpoint.checkpoint_version
-  ; session_id = "accepted-session"
-  ; agent_name = "keeper-recipe"
-  ; model = "recipe-model"
-  ; system_prompt = Some "accepted system prompt"
-  ; messages =
-      [ { origin = Llm_provider.Types.Conversation;  Agent_core.Types.role = Agent_core.Types.User
-        ; content = [ Agent_core.Types.Text "accepted history" ]
-        ; name = None
-        ; tool_call_id = None
-        ; metadata = []
-        }
-      ]
-  ; usage = Agent_core.Types.empty_usage
-  ; turn_count = 7
-  ; created_at = 1_000.0
-  ; tools = []
-  ; tool_choice = None
-  ; disable_parallel_tool_use = false
-  ; temperature = None
-  ; top_p = None
-  ; top_k = None
-  ; min_p = None
-  ; enable_thinking = None
-  ; preserve_thinking = None
-  ; response_format = Agent_core.Types.Off
-  ; reasoning_effort = None
-  ; cache_system_prompt = false
-  ; context = Agent_core.Context.create_sync ()
-  ; pending_input = None; mcp_sessions = []
-  ; working_context = Some (`Assoc [ "accepted", `Bool true ])
-  }
-;;
-
-let recipe_invocation () =
-  let schedule : Agent_core.Tool_contract.schedule =
-    { planned_index = 4
-    ; batch_index = 2
-    ; batch_size = 3
-    ; execution_mode = Agent_core.Tool_contract.Concurrent
-    }
-  in
-  Agent_core.Tool_contract.Invocation.create
-    ~tool_use_id:"tool-use-parent"
-    ~turn:9
-    ~schedule
-    ~completion:Agent_core.Tool_contract.Continue_after_success
-;;
-
-let accepted_surface_digest_string = String.make 64 'b'
-
-let recipe_plan () =
-  match
-    parse_request
-      (request_of_string
-         {|{"nodes":[{"id":"lane","tool":"keeper_lane_status",
-              "input":{"kind":"literal","value":{}}}]}|})
-  with
-  | Ok plan -> plan
-  | Error error -> failf "recipe plan rejected: %s" (Request.error_message error)
-;;
-
-let poison_checkpoint_context (checkpoint : Agent_core.Checkpoint.t) =
-  Agent_core.Context.set checkpoint.context "non_finite" (`Float Float.nan);
-  Agent_core.Context.set
-    checkpoint.context
-    "duplicate"
-    (`Assoc [ "same", `Int 1; "same", `Int 2 ])
-;;
-
 let add_field name value = function
   | `Assoc fields -> `Assoc (fields @ [ name, value ])
   | json -> json
@@ -1525,32 +1432,7 @@ let update_field name update = function
   | json -> json
 ;;
 
-let update_recipe_schedule update =
-  update_field "invocation" (update_field "schedule" update)
-;;
-
 let replace_field name value = update_field name (fun _ -> value)
-
-let recipe_plan_with_literal value =
-  Plan.create
-    ~descriptors:(descriptors ())
-    [ Plan.node
-        ~id:(node_id "lane")
-        ~tool_name:"keeper_lane_status"
-        ~input:(Plan.Json_template.literal value)
-        ()
-    ]
-  |> Result.get_ok
-;;
-
-let replace_recipe_literal value =
-  update_field
-    "plan"
-    (update_field "nodes" (function
-       | `List [ node ] ->
-         `List [ update_field "input" (replace_field "value" value) node ]
-       | json -> json))
-;;
 
 let test_request_defaults_missing_input_to_empty_object () =
   let json = request_of_string {|{"nodes":[{"id":"lane","tool":"keeper_lane_status"}]}|} in

@@ -10,18 +10,6 @@ type trace_capability =
   | No_trace [@name "none"]
 [@@deriving yojson, show]
 
-type session_info =
-  { session_id : string
-  ; title : string option
-  ; tag : string option
-  ; goal : string
-  ; updated_at : float
-  ; phase : Runtime.phase
-  ; participant_count : int
-  ; path : string
-  }
-[@@deriving yojson, show]
-
 type telemetry_event_count =
   { name : string
   ; count : int
@@ -298,37 +286,6 @@ let%test "worker_status invalid string" =
   | Ok _ -> false
 ;;
 
-(* -- session_info round-trip -- *)
-let%test "session_info yojson round-trip" =
-  let v : session_info =
-    { session_id = "sid"
-    ; title = Some "t"
-    ; tag = Some "tg"
-    ; goal = "g"
-    ; updated_at = 1.0
-    ; phase = Runtime.Running
-    ; participant_count = 2
-    ; path = "/p"
-    }
-  in
-  session_info_of_yojson (session_info_to_yojson v) = Ok v
-;;
-
-let%test "session_info with None optionals" =
-  let v : session_info =
-    { session_id = "s"
-    ; title = None
-    ; tag = None
-    ; goal = "g"
-    ; updated_at = 0.0
-    ; phase = Runtime.Completed
-    ; participant_count = 0
-    ; path = "/x"
-    }
-  in
-  session_info_of_yojson (session_info_to_yojson v) = Ok v
-;;
-
 (* -- telemetry_event_count round-trip -- *)
 let%test "telemetry_event_count round-trip" =
   let v : telemetry_event_count = { name = "evt"; count = 5 } in
@@ -411,21 +368,6 @@ let%test "evidence_capabilities round-trip" =
 (* -- show functions produce non-empty strings -- *)
 let%test "show_trace_capability non-empty" = String.length (show_trace_capability Raw) > 0
 let%test "show_worker_status non-empty" = String.length (show_worker_status Completed) > 0
-
-let%test "show_session_info non-empty" =
-  let v : session_info =
-    { session_id = "s"
-    ; title = None
-    ; tag = None
-    ; goal = "g"
-    ; updated_at = 0.0
-    ; phase = Runtime.Bootstrapping
-    ; participant_count = 0
-    ; path = "/"
-    }
-  in
-  String.length (show_session_info v) > 0
-;;
 
 let%test "show_telemetry_event_count non-empty" =
   String.length (show_telemetry_event_count { name = "x"; count = 0 }) > 0

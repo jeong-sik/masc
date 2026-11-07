@@ -39,34 +39,6 @@ let test_trace_capability () =
     Sessions.[ Raw; Summary_only; No_trace ]
 ;;
 
-(* ── session_info ──────────────────────────────────────────────── *)
-
-let test_session_info () =
-  let v : Sessions.session_info =
-    { session_id = "sess-001"
-    ; title = Some "Test"
-    ; tag = Some "cov"
-    ; goal = "coverage"
-    ; updated_at = 1.7e9
-    ; phase = Runtime.Running
-    ; participant_count = 3
-    ; path = "/tmp/s/001"
-    }
-  in
-  roundtrip
-    ~to_yojson:Sessions.session_info_to_yojson
-    ~of_yojson:Sessions.session_info_of_yojson
-    ~show:Sessions.show_session_info
-    ~name:"session_info"
-    v;
-  roundtrip
-    ~to_yojson:Sessions.session_info_to_yojson
-    ~of_yojson:Sessions.session_info_of_yojson
-    ~show:Sessions.show_session_info
-    ~name:"session_info_minimal"
-    { v with title = None; tag = None }
-;;
-
 (* ── telemetry types ───────────────────────────────────────────── *)
 
 let test_telemetry_event_count () =
@@ -486,7 +458,6 @@ let () =
     "Sessions_types"
     [ ( "trace_capability"
       , [ Alcotest.test_case "roundtrip all variants" `Quick test_trace_capability ] )
-    ; "session_info", [ Alcotest.test_case "roundtrip" `Quick test_session_info ]
     ; ( "telemetry"
       , [ Alcotest.test_case "event_count" `Quick test_telemetry_event_count
         ; Alcotest.test_case "step" `Quick test_telemetry_step

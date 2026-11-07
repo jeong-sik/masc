@@ -119,6 +119,7 @@
   keeper_chat_store_provenance_index
   keeper_chat_store_append_primitives
   keeper_chat_store_turn_append
+  keeper_chat_store_append_once
   keeper_runtime_trust_snapshot_core)
  (libraries
   masc.sse_queue_inventory

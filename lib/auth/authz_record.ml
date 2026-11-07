@@ -45,6 +45,7 @@ module Kind = struct
     | Revocation_cancel
     | Registration
     | Session
+    | Pat
 
   let all =
     [ Runtime_grant
@@ -64,6 +65,7 @@ module Kind = struct
     ; Revocation_cancel
     ; Registration
     ; Session
+    ; Pat
     ]
   ;;
 
@@ -85,6 +87,7 @@ module Kind = struct
     | Revocation_cancel -> "revocation_cancel"
     | Registration -> "registration"
     | Session -> "session"
+    | Pat -> "pat"
   ;;
 
   let of_string label = List.find_opt (fun kind -> String.equal (to_string kind) label) all
@@ -117,17 +120,17 @@ let writers : Kind.t -> writer list = function
   | Kind.Runtime_grant
   | Kind.Delegate_policy
   | Kind.Principal
-  | Kind.Internal_service_credential
   | Kind.Permission_revocation
   | Kind.Admission
   | Kind.Admin_assignment
   | Kind.Revocation_cancel
   | Kind.Registration
-  | Kind.Session -> [ Authenticated_principal ]
+  | Kind.Session
+  | Kind.Pat -> [ Authenticated_principal ]
   | Kind.Trigger_evidence -> [ Cron ]
   | Kind.Lease_terminal_evidence | Kind.Preauthorized_expiry -> [ Maintenance ]
   | Kind.Migration_diagnostic -> [ Migration ]
-  | Kind.Local_recovery | Kind.Mode_event -> [ Host_operator ]
+  | Kind.Local_recovery | Kind.Mode_event | Kind.Internal_service_credential -> [ Host_operator ]
   | Kind.Invite -> [ Host_operator; Authenticated_principal ]
 ;;
 

@@ -533,7 +533,8 @@ let read state (record : R.t) =
       | K.Admin_assignment
       | K.Revocation_cancel
       | K.Registration
-      | K.Session ) as kind )
+      | K.Session
+      | K.Pat ) as kind )
     , Authz_mode_state.Not_bootstrapped -> Error (Before_bootstrap kind)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
@@ -543,7 +544,8 @@ let read state (record : R.t) =
       | K.Lease_terminal_evidence
       | K.Preauthorized_expiry
       | K.Migration_diagnostic
-      | K.Local_recovery ) as kind )
+      | K.Local_recovery
+      | K.Pat ) as kind )
     , (Authz_mode_state.Multi_account _ | Off _) -> Error (Kind_not_read kind)
 ;;
 
@@ -637,7 +639,8 @@ let closed_by (record : R.t) =
   | K.Admission
   | K.Admin_assignment
   | K.Registration
-  | K.Session -> record.R.closes
+  | K.Session
+  | K.Pat -> record.R.closes
 ;;
 
 let step state record =

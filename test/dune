@@ -351,6 +351,8 @@
 
 (include stanzas/test_keeper_waiting_observer_scope.inc)
 
+(include stanzas/test_server_dashboard_http_keeper_get_route.inc)
+
 (include stanzas/test_sse_queue_inventory.inc)
 
 (test

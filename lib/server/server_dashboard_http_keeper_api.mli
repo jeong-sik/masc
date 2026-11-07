@@ -269,5 +269,6 @@ val handle_keeper_bulk_directive_post :
 val handle_keeper_get_subroutes :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Request.t -> Http_reqd.t -> unit
-(** Dispatch [GET /api/v1/keepers/<name>/<sub>] sub-routes
-    (status / tools / checkpoints listing / etc.). *)
+(** Answer a [GET] under [/api/v1/keepers/] with the handler of the route that
+    [Server_dashboard_http_keeper_get_route.of_path] finds, or with 404 when
+    the path names none. *)

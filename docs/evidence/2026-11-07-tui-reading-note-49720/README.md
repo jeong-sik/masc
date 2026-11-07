@@ -93,29 +93,131 @@ Logs 의 스트림 요청은 Enter 뒤 0.03초에 나가는데, #49736 은 0.1·
 
 ## 화면
 
-모두 100x30 화면의 위쪽 10줄이에요. 왼쪽은 main, 오른쪽은 #49792 예요.
+모두 100x30 화면의 위쪽 10줄이에요. 화면마다 main 과 #49792 를 위아래로 놓았어요.
 
 Enter 뒤 1.5초예요. Work 는 머리줄이 `· reading Work +1` 이라고 말하는데 본문은 `press r` 이라고 해서 main 은 서로 어긋나요.
 
-| 화면 | main | #49792 |
-| --- | --- | --- |
-| Work | ![work before](work-before.png) | ![work after](work-after.png) |
-| Schedules | ![schedules before](schedules-before.png) | ![schedules after](schedules-after.png) |
-| Clients | ![clients before](clients-before.png) | ![clients after](clients-after.png) |
-| Task Verdicts | ![task-verdicts before](task-verdicts-before.png) | ![task-verdicts after](task-verdicts-after.png) |
-| Librarian history | ![librarian-history before](librarian-history-before.png) | ![librarian-history after](librarian-history-after.png) |
-| Logs | ![logs before](logs-before.png) | ![logs after](logs-after.png) |
-| Connectors | ![connectors before](connectors-before.png) | ![connectors after](connectors-after.png) |
-| Fusion | ![fusion before](fusion-before.png) | ![fusion after](fusion-after.png) |
-| Workspace | ![workspace before](workspace-before.png) | ![workspace after](workspace-after.png) |
+### Work
 
-Enter 뒤 3초예요. 읽기가 2.5초에 나가는 화면들이에요.
+main
 
-| 화면 | main | #49792 |
-| --- | --- | --- |
-| Task Review | ![task-review before](task-review-before.png) | ![task-review after](task-review-after.png) |
-| Runtime | ![runtime before](runtime-before.png) | ![runtime after](runtime-after.png) |
-| Memory | ![memory before](memory-before.png) | ![memory after](memory-after.png) |
+![work main](work-before.png)
+
+#49792
+
+![work #49792](work-after.png)
+
+### Schedules
+
+main
+
+![schedules main](schedules-before.png)
+
+#49792
+
+![schedules #49792](schedules-after.png)
+
+### Clients
+
+main
+
+![clients main](clients-before.png)
+
+#49792
+
+![clients #49792](clients-after.png)
+
+### Task Verdicts
+
+main
+
+![task-verdicts main](task-verdicts-before.png)
+
+#49792
+
+![task-verdicts #49792](task-verdicts-after.png)
+
+### Librarian history
+
+main
+
+![librarian-history main](librarian-history-before.png)
+
+#49792
+
+![librarian-history #49792](librarian-history-after.png)
+
+### Logs
+
+main
+
+![logs main](logs-before.png)
+
+#49792
+
+![logs #49792](logs-after.png)
+
+### Connectors
+
+main
+
+![connectors main](connectors-before.png)
+
+#49792
+
+![connectors #49792](connectors-after.png)
+
+### Fusion
+
+main
+
+![fusion main](fusion-before.png)
+
+#49792
+
+![fusion #49792](fusion-after.png)
+
+### Workspace
+
+main
+
+![workspace main](workspace-before.png)
+
+#49792
+
+![workspace #49792](workspace-after.png)
+
+Enter 뒤 3초예요. 이 세 화면은 읽기가 2.5초에 나가서 3초에도 읽는 중이에요.
+
+### Task Review
+
+main
+
+![task-review main](task-review-before.png)
+
+#49792
+
+![task-review #49792](task-review-after.png)
+
+### Runtime
+
+main
+
+![runtime main](runtime-before.png)
+
+#49792
+
+![runtime #49792](runtime-after.png)
+
+### Memory
+
+main
+
+![memory main](memory-before.png)
+
+#49792
+
+![memory #49792](memory-after.png)
 
 ## 못 잰 것
 

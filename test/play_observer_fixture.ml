@@ -122,6 +122,7 @@ let with_fixture env ?(ready = fun () -> true) fn =
         } in
       let handler reqd =
         let request = Httpun.Reqd.request reqd in
+        let reqd = Masc.Http_reqd.of_httpun reqd in
         Server_request_authority.with_current authority (fun () ->
           Transport.handle_get_mcp ~deps ~sse_kind:Masc.Sse.Observer request reqd) in
       let auth = Masc_test_deps.make_sse_auth workspace "play-observer" in

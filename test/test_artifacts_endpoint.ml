@@ -99,6 +99,7 @@ let dispatch router request =
     let conn =
       Httpun.Server_connection.create (fun reqd ->
         let request = Httpun.Reqd.request reqd in
+        let reqd = Masc.Http_reqd.of_httpun reqd in
         match Server_request_authority.classify_http1_request
           ~trust_policy:request_trust_policy request with
         | Server_request_authority.Single authority ->

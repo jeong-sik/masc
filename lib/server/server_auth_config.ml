@@ -39,12 +39,11 @@ let read_env () : raw =
 
 let parse_boolean ~name = function
   | None -> Ok false
+  | Some raw when String.trim raw = "" -> Ok false
   | Some raw ->
-    (match String.trim raw |> String.lowercase_ascii with
-     | "" -> Ok false
-     | "1" | "true" | "yes" | "on" -> Ok true
-     | "0" | "false" | "no" | "off" -> Ok false
-     | _ -> Error (Malformed_boolean { name; raw }))
+    (match String_util.bool_of_word raw with
+     | Some value -> Ok value
+     | None -> Error (Malformed_boolean { name; raw }))
 ;;
 
 let split_csv_nonempty raw =

@@ -3,25 +3,19 @@ module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 
 type deps = Server_mcp_transport_http_types.deps
 
+let truthy raw = Option.value ~default:false (String_util.bool_of_word raw)
+
 let env_flag name =
   match Sys.getenv_opt name with
-  | Some raw -> (
-      match String.lowercase_ascii (String.trim raw) with
-      | "1" | "true" | "yes" | "on" -> true
-      | _ -> false)
+  | Some raw -> truthy raw
   | None -> false
-
-let header_truthy_value value =
-  match String.lowercase_ascii (String.trim value) with
-  | "1" | "true" | "yes" | "on" -> true
-  | _ -> false
 
 let request_force_json_response (request : Httpun.Request.t) =
   match
     Server_mcp_transport_http_session.get_header_any_case request.headers
       "x-masc-force-json"
   with
-  | Some value -> header_truthy_value value
+  | Some value -> truthy value
   | None -> false
 
 let classify_mcp_accept (request : Httpun.Request.t) =

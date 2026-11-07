@@ -473,3 +473,11 @@ let is_lowercase_sha256_hex value =
          | '0' .. '9' | 'a' .. 'f' -> true
          | _ -> false)
        value
+
+(* The boolean words an operator writes in an environment variable, a header
+   or a config value. *)
+let bool_of_word raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "1" | "true" | "yes" | "on" -> Some true
+  | "0" | "false" | "no" | "off" -> Some false
+  | _ -> None

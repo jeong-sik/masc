@@ -39,10 +39,7 @@ let parse_warn_env_key = "MASC_PARSE_WARN"
    very key cannot recurse back into [reject_malformed_env]. *)
 let parse_strict_mode () =
   match raw_value_opt parse_warn_env_key with
-  | Some v ->
-    (match String.trim v |> String.lowercase_ascii with
-     | "true" | "1" | "yes" | "on" -> true
-     | _ -> false)
+  | Some v -> Option.value ~default:false (String_util.bool_of_word v)
   | None -> false
 
 (* A non-empty env value that does not parse to the expected type is an operator
@@ -154,19 +151,13 @@ let get_float_nonneg ~default name =
   if (not (Float.is_finite parsed)) || parsed < 0.0 then default
   else parsed
 
-let bool_of_raw_value raw =
-  match String.trim raw |> String.lowercase_ascii with
-  | "true" | "1" | "yes" | "on" -> Some true
-  | "false" | "0" | "no" | "off" -> Some false
-  | _ -> None
-
 let get_bool ~default name =
   match raw_value_opt name with
   | None -> default
   | Some raw ->
       if String.trim raw = "" then default
       else (
-        match bool_of_raw_value raw with
+        match String_util.bool_of_word raw with
         | Some value -> value
         | None ->
             reject_malformed_env ~name ~raw ~type_name:"bool";
@@ -178,7 +169,7 @@ let get_bool_strict ~default name =
   | Some raw ->
       if String.trim raw = "" then default
       else (
-        match bool_of_raw_value raw with
+        match String_util.bool_of_word raw with
         | Some value -> value
         | None ->
             raise

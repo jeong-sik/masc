@@ -4,6 +4,7 @@ Retained reports explain findings and link to supporting verification records.
 Generate new reports under `artifacts/`; retain selected reports here. See the
 [storage guide](../guides/WORKSPACE-STORAGE.md).
 
+- [Tools 효율: 11-07 배포 앞뒤와 남은 일 · 2026-11-08](2026-11-08-tool-efficiency-after-the-1107-deploy.md)
 - [Tools 효율: 낭비 측정을 런타임 프로필별로 나눠 본 값 · 2026-11-06](2026-11-06-tool-efficiency-by-profile.md)
 - [Tools 효율 점검: 낭비 측정, 고친 것, 못 고친 것 · 2026-11-05](2026-11-05-tool-efficiency.md)
 - [TTFT 전용 상한 폐지 · 2026-11-04](2026-11-04-first-event-ttft-budget-collapse.html)

@@ -22,6 +22,9 @@ val empty : t
 (** The owner of the account, if it was linked. *)
 val owner : t -> Authz_types.Provider_account_id.t -> Authz_types.User_id.t option
 
+(** The accounts this person owns, in the order of their ids. *)
+val owned_by : t -> Authz_types.User_id.t -> Authz_types.Provider_account_id.t list
+
 type refusal =
   | Already_linked of Authz_types.Provider_account_id.t
   | Linked_for_another of

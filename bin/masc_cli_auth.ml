@@ -192,7 +192,7 @@ let serve_preview ~base_path ~store ~port github =
       let router =
         Masc.Http_server_eio.Router.create ()
         |> Server_login_http.add_routes routes
-        |> Server_login_http.add_preview_routes routes
+        |> Server_login_http.add_preview_routes routes ~base_path
       in
       let address = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
       match Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:preview_backlog address with
@@ -203,7 +203,8 @@ let serve_preview ~base_path ~store ~port github =
         Printf.printf
           "The multi-account preview listens on %s. Open %s/ in a browser, or the link of \
            masc auth invite made with MASC_HTTP_BASE_URL=%s. It serves the login routes \
-           only, no Keeper or Runtime. Stop it with Ctrl-C.\n%!"
+           and the connection of a person's own subscription, no Keeper or Runtime. Stop it \
+           with Ctrl-C.\n%!"
           base_url
           base_url
           base_url;

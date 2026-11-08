@@ -257,6 +257,7 @@ type installation =
   { router : Http.Router.t
   ; routes : R.t
   ; github : github
+  ; base : string
   }
 
 let start_instant =
@@ -324,7 +325,12 @@ let with_installation f =
             ; draw
             }
           in
-          f { router = Server_login_http.add_routes routes (Http.Router.create ()); routes; github }))
+          f
+            { router = Server_login_http.add_routes routes (Http.Router.create ())
+            ; routes
+            ; github
+            ; base
+            }))
 ;;
 
 (* ---- a login, as a browser does it ---- *)
@@ -449,7 +455,7 @@ let whoami router browser ?(headers = []) () =
    pages, a GitHub login from the invitation, who-am-I, and the sign-out. *)
 let the_preview_follows_a_login () =
   with_installation (fun t ->
-    let router = Server_login_http.add_preview_routes t.routes t.router in
+    let router = Server_login_http.add_preview_routes t.routes ~base_path:t.base t.router in
     let admin = fresh_browser () in
     let home = send admin router ~meth:"GET" ~path:"/" in
     Alcotest.(check int) "the home page" 200 home.status;
@@ -472,6 +478,22 @@ let the_preview_follows_a_login () =
     let back = sign_in t admin ~user_id:583231 ~fields:[ "invite", admin_token; "return_to", "/" ] in
     Alcotest.(check int) ("signed in: " ^ back.body) 200 back.status;
     Alcotest.(check string) "the Admin" "200 admin human by session" (whoami router admin ());
+    let owned = send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path in
+    Alcotest.(check (pair int string))
+      "owns no subscription yet"
+      (200, {|{"provider_accounts":[]}|})
+      (owned.status, owned.body);
+    Alcotest.(check int)
+      "a connect without the CSRF token stops at the gate"
+      403
+      (send
+         admin
+         router
+         ~meth:"POST"
+         ~path:Masc.Auth_preview.connect_path
+         ~headers:[ "Origin", same_origin; "Content-Type", "application/json" ]
+         ~body:{|{"integration_id":"claude_code"}|})
+        .status;
     Alcotest.(check string)
       "a session and a bearer"
       ("401 " ^ Masc.Auth_gate.reason_to_string Masc.Auth_gate.Several_credentials)
@@ -482,7 +504,11 @@ let the_preview_follows_a_login () =
     Alcotest.(check string)
       "nobody again"
       ("401 " ^ Masc.Auth_gate.reason_to_string Masc.Auth_gate.Credential_required)
-      (whoami router admin ()))
+      (whoami router admin ());
+    Alcotest.(check int)
+      "and no subscriptions"
+      401
+      (send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path).status)
 ;;
 
 let what_the_server_reads () =

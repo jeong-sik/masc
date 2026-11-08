@@ -232,9 +232,54 @@ let whoami (t : R.t) request reqd =
          (gate_request ~request_authority request)))
 ;;
 
-let add_preview_routes t router =
+(* The person a subscription route acts for, judged on one snapshot of the
+   zone; the connect handler checks the session of a login against them again
+   on every status and control request. *)
+let as_person (t : R.t) request reqd f =
+  with_authority reqd (fun request_authority ->
+    let state = (Authz_zone.snapshot t.zone).Authz_zone.state in
+    match
+      Auth_preview.person
+        state
+        ~now_ms:(int_of_float (Ptime.to_float_s (t.now ()) *. ms_per_second))
+        (gate_request ~request_authority request)
+    with
+    | Error answer -> respond reqd answer
+    | Ok person -> f state person)
+;;
+
+let owner_of (t : R.t) { Auth_preview.user_id; namespace } =
+  Server_setup_account_login.Person { zone = t.zone; user_id; namespace }
+;;
+
+let connect t ~base_path request reqd =
+  as_person t request reqd (fun (_ : Authz_state.t) person ->
+    with_body reqd (fun body ->
+      Server_setup_account_login.start ~owner:(owner_of t person) ~base_path ~body request reqd))
+;;
+
+let login_status t ~base_path request reqd =
+  as_person t request reqd (fun (_ : Authz_state.t) person ->
+    Server_setup_account_login.status ~owner:(owner_of t person) ~base_path request reqd)
+;;
+
+let login_control t ~base_path request reqd =
+  as_person t request reqd (fun (_ : Authz_state.t) person ->
+    with_body reqd (fun body ->
+      Server_setup_account_login.control ~owner:(owner_of t person) ~base_path ~body request reqd))
+;;
+
+let provider_accounts t request reqd =
+  as_person t request reqd (fun state person -> respond reqd (Auth_preview.provider_accounts state person))
+;;
+
+let add_preview_routes t ~base_path router =
   router
   |> Server_route.get Server_route.Always_public "/" (page Auth_preview.home_page t)
   |> Server_route.get Server_route.Always_public Authz_activation.invitation_path (page Auth_preview.invite_page t)
   |> Server_route.get access whoami_path (whoami t)
+  |> Server_route.get access Auth_preview.provider_accounts_path (provider_accounts t)
+  |> Server_route.post access Auth_preview.connect_path (connect t ~base_path)
+  |> Server_route.prefix_get access Auth_preview.connect_prefix (login_status t ~base_path)
+  |> Server_route.prefix_post access Auth_preview.connect_prefix (login_control t ~base_path)
 ;;

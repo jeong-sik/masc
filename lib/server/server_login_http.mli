@@ -50,7 +50,22 @@ val github_callback_path : string
       [x-masc-internal-token] field and every session cookie, so two of them
       are several credentials.
 
+    - [GET /api/v1/auth/provider-accounts], the subscriptions of the person
+      ({!Auth_preview.provider_accounts})
+    - [POST /api/v1/setup/accounts/login] and [GET] and [POST] under
+      [/api/v1/setup/accounts/login/], the subscription connect route of the
+      server ({!Server_setup_account_login}) for the person, with the account
+      home under the workspace [base_path] (plan D1-4)
+
+    The last four are judged as [Manage_own_provider] by
+    {!Auth_preview.person} on one snapshot of the zone, and a request that does
+    not pass gets its 401 or 403 before the connect handler reads anything.
+
     Only the preview command registers them; {!add_routes} is what a server
     registers (S1). *)
-val add_preview_routes : Login_routes.t -> Http_server_eio.Router.t -> Http_server_eio.Router.t
+val add_preview_routes
+  :  Login_routes.t
+  -> base_path:string
+  -> Http_server_eio.Router.t
+  -> Http_server_eio.Router.t
 

@@ -84,14 +84,17 @@ let add_routes ~sw router =
                  (`Assoc ["error",`String (Server_runtime_setup_actions.error_message error)]) reqd))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/setup/accounts/login" (fun state actor req reqd ->
            Http.Request.read_body_async reqd (fun body ->
-             Server_setup_account_login.start ~actor
+             Server_setup_account_login.start
+               ~owner:(Server_setup_account_login.Operator { actor })
                ~base_path:(Mcp_server.workspace_config state).base_path ~body req reqd))
   |> Server_route.prefix_get (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/setup/accounts/login/" (fun state actor req reqd ->
-           Server_setup_account_login.status ~actor
+           Server_setup_account_login.status
+             ~owner:(Server_setup_account_login.Operator { actor })
              ~base_path:(Mcp_server.workspace_config state).base_path req reqd)
   |> Server_route.prefix_post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/setup/accounts/login/" (fun state actor req reqd ->
            Http.Request.read_body_async reqd (fun body ->
-             Server_setup_account_login.control ~actor
+             Server_setup_account_login.control
+               ~owner:(Server_setup_account_login.Operator { actor })
                ~base_path:(Mcp_server.workspace_config state).base_path ~body req reqd))
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/setup/accounts/select" (fun state _agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body ->

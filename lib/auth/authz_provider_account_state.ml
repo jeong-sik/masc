@@ -10,6 +10,15 @@ type t = User_id.t Account_map.t
 let empty = Account_map.empty
 let owner t provider_account_id = Account_map.find_opt provider_account_id t
 
+let owned_by t user_id =
+  Account_map.fold
+    (fun provider_account_id owner owned ->
+      if User_id.equal owner user_id then provider_account_id :: owned else owned)
+    t
+    []
+  |> List.rev
+;;
+
 type refusal =
   | Already_linked of Provider_account_id.t
   | Linked_for_another of

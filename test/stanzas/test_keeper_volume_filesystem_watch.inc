@@ -4,4 +4,4 @@
 (test
  (name test_keeper_volume_filesystem_watch)
  (modules test_keeper_volume_filesystem_watch)
- (libraries alcotest masc masc.server yojson))
+ (libraries alcotest masc))

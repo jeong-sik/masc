@@ -1135,6 +1135,10 @@ let keeper_request_terminal_status_is_routine = function
   | Request_stream (Stream_error | Stream_rejected) -> false
 ;;
 
+(* Events [push_worker_event] adds to the [worker_events] queue for
+   [consume_worker_events] to read in order. A terminal result is staged with
+   [stage_completion] and a client disconnect is signalled with
+   [signal_client_disconnected]; neither is queued. *)
 type keeper_stream_worker_event =
   | Stream_runtime_attempt_started of
       Keeper_chat_events.runtime_attempt_scope_disposition
@@ -1144,12 +1148,6 @@ type keeper_stream_worker_event =
   | Stream_native_tool_progress of int * int * string option * Runtime_native_tools.progress
   | Stream_native_tool_completion of int * int * string option * Runtime_native_tools.completion
   | Stream_chat_event of Keeper_chat_events.keeper_chat_event
-  | Stream_client_disconnected
-  | Stream_terminal of
-      { status : keeper_stream_terminal_status
-      ; body : string
-      ; queued_outcome : queued_turn_outcome option
-      }
 
 and keeper_stream_completion =
   | Completion_terminal of
@@ -1354,39 +1352,35 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
       ~labels:[ "reason", reason ]
       ()
   in
-  let push_worker_event event =
-    match event with
-    | Stream_terminal { status; body; queued_outcome } ->
-        stage_completion
-          (Completion_terminal { status; body; queued_outcome })
-    | Stream_client_disconnected ->
-      Atomic.set client_disconnected true;
-      let (_ : bool) = Eio.Promise.try_resolve client_disconnect_resolver () in
-      ()
-    | (Stream_runtime_attempt_started _ | Stream_event _ | Stream_native_tool_progress _ | Stream_native_tool_completion _ | Stream_chat_event _) as event ->
-        if !closed
-        then observe_stream_event_cutoff "writer_closed"
-        else if Atomic.get terminal_pushed
-        then observe_stream_event_cutoff "terminal"
-        else if Atomic.get client_disconnected
-        then observe_stream_event_cutoff "client_disconnected"
-        else (
-          match
-            Eio.Fiber.first
-              ~combine:(fun left right ->
-                match left, right with
-                | `Added, _ | _, `Added -> `Added
-                | `Terminal, _ | _, `Terminal -> `Terminal
-                | `Client_disconnected, `Client_disconnected -> `Client_disconnected)
-              (fun () ->
-                 Eio.Stream.add worker_events event;
-                 `Added)
-              await_projection_cutoff
-          with
-          | `Added -> ()
-          | `Terminal -> observe_stream_event_cutoff "terminal"
-          | `Client_disconnected ->
-            observe_stream_event_cutoff "client_disconnected")
+  let signal_client_disconnected () =
+    Atomic.set client_disconnected true;
+    let (_ : bool) = Eio.Promise.try_resolve client_disconnect_resolver () in
+    ()
+  in
+  let push_worker_event (event : keeper_stream_worker_event) =
+    if !closed
+    then observe_stream_event_cutoff "writer_closed"
+    else if Atomic.get terminal_pushed
+    then observe_stream_event_cutoff "terminal"
+    else if Atomic.get client_disconnected
+    then observe_stream_event_cutoff "client_disconnected"
+    else (
+      match
+        Eio.Fiber.first
+          ~combine:(fun left right ->
+            match left, right with
+            | `Added, _ | _, `Added -> `Added
+            | `Terminal, _ | _, `Terminal -> `Terminal
+            | `Client_disconnected, `Client_disconnected -> `Client_disconnected)
+          (fun () ->
+             Eio.Stream.add worker_events event;
+             `Added)
+          await_projection_cutoff
+      with
+      | `Added -> ()
+      | `Terminal -> observe_stream_event_cutoff "terminal"
+      | `Client_disconnected ->
+        observe_stream_event_cutoff "client_disconnected")
   in
   (* RFC-0232 P5: the typed surface is the write-side truth; the label
      [chat_source] is its derivation, used for metric labels. *)
@@ -1720,8 +1714,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                    ; detail = persist_error
                    })
           in
-          push_worker_event
-            (Stream_terminal
+          stage_completion
+            (Completion_terminal
                { status = Stream_error; body = detail; queued_outcome });
           Tool_result.error
             ~failure_class:Tool_result.Runtime_failure
@@ -1872,8 +1866,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                           ; detail = persist_error
                           })
                  in
-                 push_worker_event
-                   (Stream_terminal
+                 stage_completion
+                   (Completion_terminal
                       { status = Stream_error
                       ; body = err
                       ; queued_outcome
@@ -1993,8 +1987,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                              ; detail = persist_error
                              })
                       in
-                      push_worker_event
-                        (Stream_terminal
+                      stage_completion
+                        (Completion_terminal
                            { status = Stream_error
                            ; body = persist_error
                            ; queued_outcome
@@ -2007,8 +2001,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                   | Ok queued_outcome ->
                    (match queued_outcome with
                   | Some (Failed { detail; _ }) ->
-                      push_worker_event
-                        (Stream_terminal
+                      stage_completion
+                        (Completion_terminal
                            { status = Stream_error
                            ; body = detail
                            ; queued_outcome
@@ -2019,8 +2013,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                         ~start_time
                         detail
                   | Some (Delivered _) | None ->
-                      push_worker_event
-                        (Stream_terminal
+                      stage_completion
+                        (Completion_terminal
                            { status = Stream_done
                            ; body
                            ; queued_outcome
@@ -2061,8 +2055,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                      ; detail = persist_error
                      })
             in
-            push_worker_event
-              (Stream_terminal
+            stage_completion
+              (Completion_terminal
                  { status = Stream_error; body = err; queued_outcome });
             Tool_result.error
               ~failure_class:dispatch_failure_class
@@ -2082,8 +2076,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                      ; detail = persist_error
                      })
             in
-            push_worker_event
-              (Stream_terminal
+            stage_completion
+              (Completion_terminal
                  { status = Stream_error; body = err; queued_outcome });
             Tool_result.error
               ~failure_class:Tool_result.Runtime_failure
@@ -2137,8 +2131,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                  here — bare or combined ([Multiple]/[Finally_raised],
                  #28868 review). A cancelled turn, not a crash. *)
               let detail = Keeper_registry_types.operator_interrupt_detail in
-              push_worker_event
-                (Stream_terminal
+              stage_completion
+                (Completion_terminal
                    { status = Stream_error
                    ; body = detail
                    ; queued_outcome = Some (ended_turn_outcome Turn_cancelled detail)
@@ -2154,8 +2148,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                         }
                   }
               in
-              push_worker_event
-                (Stream_terminal
+              stage_completion
+                (Completion_terminal
                    { status = Stream_error
                    ; body = detail
                    ; queued_outcome = Some (ended_turn_outcome Turn_failed detail)
@@ -2216,7 +2210,7 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
                Log.Keeper.info
                  "keeper_stream: client disconnected keeper=%s request_id=%s; request continues for polling"
                  payload.name request_id;
-               push_worker_event Stream_client_disconnected
+               signal_client_disconnected ()
              end));
   let publish_terminal ~status ?(message = "") () =
     let message = redact_text message in
@@ -2377,8 +2371,6 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
         in
         Keeper_chat_events.publish events event;
         consume_worker_events bridge_state
-    | `Worker_event (Stream_terminal _ | Stream_client_disconnected) ->
-        assert false
     | `Completion
         (Completion_terminal
         { status = Stream_cancelled

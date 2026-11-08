@@ -237,7 +237,7 @@ let submit_worker_with_ops ops ?request_context ?on_accepted ?on_worker_aborted
       `Stop_daemon
     | Some (Status_settlement _) | None ->
       (* [f] owns any terminal signal it emits on its own side channels while
-         it runs (e.g. push_worker_event in server_routes_http_keeper_stream's
+         it runs (e.g. publish_completion in server_routes_http_keeper_stream's
          process_single_turn). Every catch arm below fires exactly when [f] was
          cut off before reaching that code, so the caller's channel would
          otherwise see nothing — see masc#23924. Eio.Cancel.protect matches

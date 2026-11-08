@@ -64,6 +64,14 @@ val shows_operator_disposition :
     (Paused, Offline), or where a person is already asked (Held_call, Question,
     Confirmation). *)
 
+val failing_since_word : string
+(** The word that opens the failing-for cell of the Detailed second row. *)
+
+val unknown_mark : string
+(** What the second row's server-value cells draw for a value that is not
+    known: the server did not record it, or it does not fit this screen's
+    clock. *)
+
 val column_legend : (string * string) list
 (** The Keepers header words, the sentence about a failing keeper's past and
     the Mode S letters, each with what it means. The sheet prints it; the

@@ -44,6 +44,10 @@ let test_the_column_legend_explains_every_letter_the_cell_draws () =
     (fun header -> check_bool ("the legend names " ^ header) true (contains keys header))
     [ Mark.now_header; Mark.age_header; "LIFECYCLE"; Mark.failing_glyph; "Mode"; "S "; Mark.(badge_glyph Badge_schedule); "mem"; "사람 몫" ]
 
+let test_the_column_legend_names_the_failing_cell () =
+  check_bool "the failing-for word is a legend key" true
+    (List.exists (fun (key, _) -> String.equal key Mark.failing_since_word) Mark.column_legend)
+
 let test_operator_disposition_words () =
   let kinds =
     [ Masc.Keeper_execution_receipt.Disp_operator_action_required
@@ -106,6 +110,8 @@ let () =
     [ ( "marks"
       , [ Alcotest.test_case "the column legend explains every letter" `Quick
             test_the_column_legend_explains_every_letter_the_cell_draws
+        ; Alcotest.test_case "the column legend names the failing cell" `Quick
+            test_the_column_legend_names_the_failing_cell
         ; Alcotest.test_case "operator disposition words are declared" `Quick
             test_operator_disposition_words
         ; Alcotest.test_case "operator disposition activity filter" `Quick

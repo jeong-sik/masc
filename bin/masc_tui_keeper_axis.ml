@@ -46,7 +46,21 @@ let get_memory_index (state : Masc_tui_types.state) =
       index
 ;;
 
-let segments (state : Masc_tui_types.state) ~now ~keeper_name : Masc_tui_keeper_axis_cell.t list =
+(* The cell that comes from the roster row of the keeper itself. A keeper the
+   roster did not read has no row to draw it from. *)
+let failing_cells ~now = function
+  | None -> []
+  | Some (runtime : Masc.Tui_decode.keeper_runtime) ->
+      let failing =
+        Masc_tui_keeper_pulse.failing_of_health
+          ~health:(Masc.Tui_decode.keeper_health_reading runtime.Masc.Tui_decode.kr_health)
+          ~failing_since:runtime.Masc.Tui_decode.kr_failing_since
+      in
+      Option.to_list (Masc_tui_keeper_pulse.failing_cell ~now failing)
+;;
+
+let segments (state : Masc_tui_types.state) ~now ~keeper_name ~runtime
+  : Masc_tui_keeper_axis_cell.t list =
   let next_run = Masc_tui_keeper_next_run.find (get_schedule_index state) ~keeper_name in
   let schedule_cells =
     match Masc_tui_keeper_next_run.cell ~now next_run with
@@ -57,5 +71,5 @@ let segments (state : Masc_tui_types.state) ~now ~keeper_name : Masc_tui_keeper_
     Masc_tui_keeper_memory_reading.find (get_memory_index state) ~keeper_name
   in
   let memory_cells = Masc_tui_keeper_memory_reading.cells ~now memory_reading in
-  schedule_cells @ memory_cells
+  failing_cells ~now runtime @ schedule_cells @ memory_cells
 ;;

@@ -123,6 +123,12 @@ let shows_operator_disposition ~(activity : Masc_tui_keeper_list_model.activity)
   | Delegate_result | Verifying | External_waiting -> false
 ;;
 
+(* The failing-for cell of the Detailed second row (RFC-0511 D1a) draws these
+   words and [column_legend] names them from the same values, so a word that
+   changes cannot keep its old meaning on the sheet. *)
+let failing_since_word = "failing"
+let unknown_mark = "?"
+
 let column_legend =
   let letters letter values = String.concat "/" (List.map letter values) in
   let words word values = String.concat " / " (List.map word values) in
@@ -134,6 +140,11 @@ let column_legend =
   ; ( failing_glyph
     , "a failing keeper's last failure, in place of its runtime or first in DETAIL: \
        how long ago · cause · the runtime that ended it · candidates tried" )
+  ; ( failing_since_word
+    , Printf.sprintf
+        "how long the keeper has been in the failing phase; %s when the server recorded \
+         no start, or the start is ahead of this screen's clock (Detailed second row)"
+        unknown_mark )
   ; "Mode " ^ letters activation_letter activations, words activation_word activations
   ; "S " ^ letters sandbox_letter sandboxes, "sandbox: " ^ words sandbox_word sandboxes
   ; ( "쉬는 중"

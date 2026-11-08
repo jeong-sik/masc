@@ -308,7 +308,7 @@ let presence_of t listed = match listed with
   | Error failure ->
     {Browser_ego_space_observation.space_id=t.space.id;observed_at=t.now ();
      state=Unknown (Transport_unavailable (step_failure_message failure))},None
-let space_missing_refused = "the original bound Space is missing from the native inventory; no replacement was opened; this connection ends, and take_over with lane=live and no clientId asks its worker to open the configured Space again"
+let space_missing_refused = "the original bound Space is missing from the native inventory; no replacement was opened; this connection ends, and take_over with lane=live and no clientId asks its worker to open the configured Space again, which works only when the worker names the Space rather than its number"
 let unknown_presence_message = function
   | Browser_ego_space_observation.Transport_unavailable detail | Invalid_inventory detail -> "Space presence is unknown: " ^ detail
   | Ambiguous_inventory -> "Space presence is unknown: the native inventory lists the original ID more than once"

@@ -235,7 +235,15 @@ let measure_health_phase timing phase f =
   | None -> f ()
   | Some timing -> Server_timing.measure timing phase f
 
-let make_health_probe_fields ?timing ?(listener = "http/1.1") ?full_health_url
+(* The [protocol.listener] label of a health body: the ALPN identifier of the
+   protocol the request came on. *)
+let listener_of_protocol = function
+  | Transport_metrics.H1 -> Server_tls_material.alpn_http1
+  | Transport_metrics.H2 -> Server_tls_material.alpn_h2
+
+let default_listener = listener_of_protocol Transport_metrics.H1
+
+let make_health_probe_fields ?timing ?(listener = default_listener) ?full_health_url
     ?(health_detail = "probe") ~request_authority request =
   let uptime_secs = health_uptime_secs () in
   let build =
@@ -286,7 +294,7 @@ let make_health_probe_fields ?timing ?(listener = "http/1.1") ?full_health_url
       ("scheduler", scheduler_json ());
     ]
 
-let make_health_probe_json ?timing ?(listener = "http/1.1") ?(extra_fields = [])
+let make_health_probe_json ?timing ?(listener = default_listener) ?(extra_fields = [])
     ~request_authority request =
   Tool_args.ok_assoc
     (make_health_probe_fields ?timing ~listener ~health_detail:"probe"
@@ -340,7 +348,7 @@ let compute_section ~name ?section_timings_ref f =
         ~status:"error"
         name
 
-let make_health_json ?(listener = "http/1.1") ?section_timings_ref
+let make_health_json ?(listener = default_listener) ?section_timings_ref
     ~request_authority request =
   let uptime_secs = health_uptime_secs () in
   let build = Build_identity.current () in
@@ -930,7 +938,7 @@ let unchanged_workspace_epoch before =
   then before, true
   else None, false
 
-let compute_full_health_snapshot ?(listener = "http/1.1")
+let compute_full_health_snapshot ?(listener = default_listener)
     ?(on_workspace_epoch = fun _ -> ()) ~request_authority
     request : Health_observation.snapshot =
   let workspace_epoch = current_workspace_epoch () in
@@ -1179,7 +1187,7 @@ let mark_full_health_refresh_wait_failure failure =
         note_waiting_scope_failure_if_unmeasured worker.completion
           ~failed_epoch:workspace_epoch ~since failure)
 
-let compute_full_health_snapshot_for_refresh ?(listener = "http/1.1")
+let compute_full_health_snapshot_for_refresh ?(listener = default_listener)
     ~request_authority request =
   let was_requested =
     with_full_health_snapshot_lock (fun () ->
@@ -1195,7 +1203,7 @@ let compute_full_health_snapshot_for_refresh ?(listener = "http/1.1")
             Health_refresh.cancel_direct ~was_requested !full_health_refresh);
       raise exn
 
-let refresh_full_health_snapshot_sync ?(listener = "http/1.1")
+let refresh_full_health_snapshot_sync ?(listener = default_listener)
     ~request_authority request =
   compute_full_health_snapshot_for_refresh ~listener ~request_authority request
   |> store_full_health_snapshot
@@ -1641,7 +1649,7 @@ let full_health_snapshot_state () =
             !full_health_observation
       ; refresh = !full_health_refresh })
 
-let make_cached_full_health_json_with ~after_selection ?timing ?(listener = "http/1.1")
+let make_cached_full_health_json_with ~after_selection ?timing ?(listener = default_listener)
     ~request_authority request =
   let now = Unix.gettimeofday () in
   let view = full_health_snapshot_state () in
@@ -1733,7 +1741,7 @@ module For_testing = struct
        cooperative yield: the rule that caught the unbounded drain loop this
        reset used to run. *)
 
-  let refresh_full_health_snapshot_now ?(listener = "http/1.1")
+  let refresh_full_health_snapshot_now ?(listener = default_listener)
       ~request_authority request =
     refresh_full_health_snapshot_sync ~listener ~request_authority request
 
@@ -1812,7 +1820,7 @@ let probe_operator_rollup_fields () =
       snapshot.Health_observation.fields
 ;;
 
-let make_health_response_json ?timing ?(listener = "http/1.1") ~request_authority
+let make_health_response_json ?timing ?(listener = default_listener) ~request_authority
     request =
   measure_health_phase timing Server_timing.Health_response (fun () ->
     if full_health_requested request
@@ -1833,7 +1841,10 @@ let make_health_response_body ?listener ~request_authority request =
 (** Health check handler *)
 let health_handler request reqd =
   let request_authority = Server_request_authority.current_exn () in
-  let body, extra_headers = make_health_response_body ~request_authority request in
+  let listener = listener_of_protocol (Http_reqd.protocol reqd) in
+  let body, extra_headers =
+    make_health_response_body ~listener ~request_authority request
+  in
   Http.Response.json ~extra_headers body reqd
 
 (** Liveness probe: responds 200 as soon as the HTTP accept loop is running.

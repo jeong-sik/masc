@@ -104,6 +104,11 @@ val health_path_diagnostics :
     [Mcp_server.workspace_config]; otherwise falls back to the
     default base path computed from env. *)
 
+val listener_of_protocol : Transport_metrics.http_protocol -> string
+(** The [protocol.listener] label of a health body: the ALPN identifier of the
+    protocol a request came on, ["http/1.1"] for {!Transport_metrics.H1} and
+    ["h2"] for {!Transport_metrics.H2}. *)
+
 val make_health_json :
   ?listener:string ->
   ?section_timings_ref:(string * int) list ref ->
@@ -111,8 +116,9 @@ val make_health_json :
   Httpun.Request.t ->
   Yojson.Safe.t
 (** [make_health_json ?listener ~request_authority request] builds the full health diagnostics
-    JSON body.  [listener] defaults to ["http/1.1"] and is overridden to
-    ["h2"] by the H2 gateway.  This is the force-compute diagnostic builder
+    JSON body.  [listener] defaults to ["http/1.1"]; {!health_handler} passes
+    {!listener_of_protocol} of the request's protocol, so a request that came
+    over HTTP/2 reports ["h2"].  This is the force-compute diagnostic builder
     used by tests and snapshot refreshes.  The public [/health] route uses
     {!make_health_response_json}; callers request cached full diagnostics with
     [/health?full=1].
@@ -358,7 +364,8 @@ val keeper_fleet_runtime_resolution_light_fields :
 
 val health_handler : Httpun.Request.t -> Http_reqd.t -> unit
 (** [health_handler request reqd] writes {!make_health_response_json} as the
-    response body. *)
+    response body. Its [protocol.listener] is {!listener_of_protocol} of the
+    protocol [reqd] came on. *)
 
 val liveness_handler : Httpun.Request.t -> Http_reqd.t -> unit
 (** [liveness_handler request reqd] always responds [200] as

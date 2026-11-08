@@ -3702,6 +3702,12 @@ let timed_health_body ~listener request =
     Yojson.Safe.Util.(json |> member "protocol" |> member "listener" |> to_string);
   json
 
+let test_health_listener_label_names_the_request_protocol () =
+  Alcotest.(check string) "an HTTP/1.1 request" "http/1.1"
+    (Server_routes_http_runtime.listener_of_protocol Transport_metrics.H1);
+  Alcotest.(check string) "an HTTP/2 request" "h2"
+    (Server_routes_http_runtime.listener_of_protocol Transport_metrics.H2)
+
 let test_health_request_timing_keeps_probe_shape () =
   List.iter (fun listener ->
     let request = Httpun.Request.create `GET "/health" in
@@ -7175,6 +7181,8 @@ let () =
             test_health_json_surfaces_internal_mcp_auth_diagnostics;
           Alcotest.test_case "default health response is light probe" `Quick
             test_health_response_default_is_light_probe;
+          Alcotest.test_case "listener label names the request protocol" `Quick
+            test_health_listener_label_names_the_request_protocol;
           Alcotest.test_case "request timings retain probe shape" `Quick
             test_health_request_timing_keeps_probe_shape;
           Alcotest.test_case "full health query uses snapshot cache" `Quick

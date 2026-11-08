@@ -1,0 +1,235 @@
+{
+  "by_conclusion": {
+    "cancelled": 4,
+    "failure": 11,
+    "success": 13
+  },
+  "by_keeper": {
+    "code-reviewer-father": {
+      "parked": {
+        "hours": 0.05,
+        "max_min": 3.0,
+        "median_min": 3.0,
+        "other_turns": 0,
+        "other_turns_per_wake": {
+          "max": 0.0,
+          "median": 0.0,
+          "n": 1,
+          "p90": 0.0
+        },
+        "p90_min": 3.0,
+        "wakes": 1,
+        "wakes_with_other_turns": 0
+      },
+      "wakes": 1
+    },
+    "code-reviewer-mother": {
+      "parked": {
+        "hours": 0.11,
+        "max_min": 3.5,
+        "median_min": 3.2,
+        "other_turns": 0,
+        "other_turns_per_wake": {
+          "max": 0.0,
+          "median": 0.0,
+          "n": 2,
+          "p90": 0.0
+        },
+        "p90_min": 3.5,
+        "wakes": 2,
+        "wakes_with_other_turns": 0
+      },
+      "wakes": 2
+    },
+    "masc-productor-owner": {
+      "parked": {
+        "hours": 9.06,
+        "max_min": 543.3,
+        "median_min": 543.3,
+        "other_turns": 11,
+        "other_turns_per_wake": {
+          "max": 11.0,
+          "median": 11.0,
+          "n": 1,
+          "p90": 11.0
+        },
+        "p90_min": 543.3,
+        "wakes": 1,
+        "wakes_with_other_turns": 1
+      },
+      "wakes": 1
+    },
+    "sangsu": {
+      "parked": {
+        "hours": 3.45,
+        "max_min": 128.4,
+        "median_min": 7.7,
+        "other_turns": 19,
+        "other_turns_per_wake": {
+          "max": 6.0,
+          "median": 1.0,
+          "n": 11,
+          "p90": 4.0
+        },
+        "p90_min": 11.3,
+        "wakes": 11,
+        "wakes_with_other_turns": 9
+      },
+      "wakes": 11
+    },
+    "wkbl-web-leader": {
+      "parked": {
+        "hours": 0.3,
+        "max_min": 14.9,
+        "median_min": 2.9,
+        "other_turns": 2,
+        "other_turns_per_wake": {
+          "max": 1.0,
+          "median": 1.0,
+          "n": 2,
+          "p90": 1.0
+        },
+        "p90_min": 14.9,
+        "wakes": 2,
+        "wakes_with_other_turns": 2
+      },
+      "wakes": 2
+    },
+    "you-never-change": {
+      "parked": {
+        "hours": 1.86,
+        "max_min": 19.7,
+        "median_min": 9.8,
+        "other_turns": 21,
+        "other_turns_per_wake": {
+          "max": 3.0,
+          "median": 2.0,
+          "n": 11,
+          "p90": 3.0
+        },
+        "p90_min": 15.8,
+        "wakes": 11,
+        "wakes_with_other_turns": 10
+      },
+      "wakes": 11
+    }
+  },
+  "delivered": 28,
+  "end_unknown": 0,
+  "idle_at_dispatch": {
+    "stages_s": {
+      "dispatch_to_delivered": {
+        "max": 7264.0,
+        "median": 0.0,
+        "n": 19,
+        "p90": 33.0
+      },
+      "end_to_delivered": {
+        "max": 7288.0,
+        "median": 23.0,
+        "n": 19,
+        "p90": 125.0
+      },
+      "end_to_woke": {
+        "max": 71.0,
+        "median": 12.0,
+        "n": 19,
+        "p90": 58.0
+      },
+      "woke_to_dispatch": {
+        "max": 21.0,
+        "median": 13.0,
+        "n": 19,
+        "p90": 21.0
+      }
+    },
+    "wakes": 19
+  },
+  "inside_a_turn_at_dispatch": {
+    "stages_s": {
+      "dispatch_to_delivered": {
+        "max": 31934.0,
+        "median": 253.0,
+        "n": 9,
+        "p90": 31934.0
+      },
+      "end_to_delivered": {
+        "max": 31951.0,
+        "median": 274.0,
+        "n": 9,
+        "p90": 31951.0
+      },
+      "end_to_woke": {
+        "max": 34.0,
+        "median": 16.0,
+        "n": 9,
+        "p90": 34.0
+      },
+      "woke_to_dispatch": {
+        "max": 29.0,
+        "median": 13.0,
+        "n": 9,
+        "p90": 29.0
+      }
+    },
+    "wakes": 9
+  },
+  "parked": {
+    "hours": 14.82,
+    "max_min": 543.3,
+    "median_min": 8.6,
+    "other_turns": 53,
+    "other_turns_per_wake": {
+      "max": 11.0,
+      "median": 1.0,
+      "n": 28,
+      "p90": 4.0
+    },
+    "p90_min": 19.7,
+    "wakes": 28,
+    "wakes_with_other_turns": 22
+  },
+  "probed_at": "2026-11-07T10:05:55+00:00",
+  "server_log": {
+    "days_without_file": [],
+    "files_read": 2
+  },
+  "stages_s": {
+    "dispatch_to_delivered": {
+      "max": 31934.0,
+      "median": 0.0,
+      "n": 28,
+      "p90": 781.0
+    },
+    "end_to_delivered": {
+      "max": 31951.0,
+      "median": 32.0,
+      "n": 28,
+      "p90": 795.0
+    },
+    "end_to_woke": {
+      "max": 71.0,
+      "median": 13.0,
+      "n": 28,
+      "p90": 34.0
+    },
+    "woke_to_dispatch": {
+      "max": 29.0,
+      "median": 13.0,
+      "n": 28,
+      "p90": 21.0
+    }
+  },
+  "turn_state_unknown": 0,
+  "unreadable_log_lines": 0,
+  "unrecognized_watcher_lines": 0,
+  "wakes": 28,
+  "watched_creates": 30,
+  "window": {
+    "from": "2026-11-06",
+    "to": "2026-11-07",
+    "until": "2026-11-07T09:52:00+00:00"
+  },
+  "without_create": 0,
+  "without_delivery_line": 0
+}

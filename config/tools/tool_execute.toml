@@ -46,6 +46,7 @@ description = "Which shell runs command. Defaults to sh."
 [[params]]
 name = "cwd"
 type = "string"
+role = "path"
 description = "Working directory for the command relative to workspace root. Defaults to '.'."
 
 [[params]]

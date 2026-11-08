@@ -107,12 +107,87 @@ let test_classify_exn_errno_priority_over_string () =
   check_tag "Unix_error errno path wins" "fd_exhaustion"
     (S.classify_exn (Unix.Unix_error (Unix.EMFILE, "syscall", "arg")))
 
-(* Falls back to string classify for non-Unix_error exceptions. *)
+(* String payloads ([Sys_error], [Failure]) are the one place the text is read:
+   the payload is a string by construction. *)
 let test_classify_exn_fallback_to_string () =
   check_tag "Sys_error falls through to string" "disk_exhaustion"
     (S.classify_exn (Sys_error "No space left on device"));
   check_tag "Failure falls through to other" "other"
     (S.classify_exn (Failure "unrelated"))
+
+(* ---- classify_exn: Eio structured paths (#49742) ---- *)
+
+let backtrace = Printexc.get_callstack 0
+
+let unix_backend code name arg = Eio_unix.Unix_error (code, name, arg)
+
+(* [Eio.Exn.context] is abstract; the only way to hold one is to take it from
+   an exception Eio built. *)
+let eio_context =
+  match Eio.Exn.create (Eio.Exn.X (unix_backend Unix.EIO "probe" "")) with
+  | Eio.Exn.Io (_, context) -> context
+  | _ -> failwith "Eio.Exn.create did not build an Io exception"
+
+let test_classify_exn_eio_bare_backend () =
+  check_tag "Io (X Unix_error EMFILE)" "fd_exhaustion"
+    (S.classify_exn (Eio.Exn.create (Eio.Exn.X (unix_backend Unix.EMFILE "open" "/tmp"))));
+  check_tag "Io (X Unix_error ENOSPC)" "disk_exhaustion"
+    (S.classify_exn (Eio.Exn.create (Eio.Exn.X (unix_backend Unix.ENOSPC "write" "/tmp"))));
+  check_tag "Io (X Unix_error ETIMEDOUT)" "timeout"
+    (S.classify_exn (Eio.Exn.create (Eio.Exn.X (unix_backend Unix.ETIMEDOUT "read" ""))))
+
+let test_classify_exn_eio_fs_vocabulary () =
+  check_tag "Fs Permission_denied EACCES" "permission_denied"
+    (S.classify_exn
+       (Eio.Exn.create
+          (Eio.Fs.E (Eio.Fs.Permission_denied (unix_backend Unix.EACCES "open" "/etc/shadow")))));
+  check_tag "Fs Not_found ENOENT is Other" "other"
+    (S.classify_exn
+       (Eio.Exn.create (Eio.Fs.E (Eio.Fs.Not_found (unix_backend Unix.ENOENT "open" "/missing")))));
+  check_tag "Fs File_too_large carries no errno" "other"
+    (S.classify_exn (Eio.Exn.create (Eio.Fs.E Eio.Fs.File_too_large)))
+
+let test_classify_exn_eio_net_vocabulary () =
+  check_tag "Net Refused ECONNREFUSED" "connection_refused"
+    (S.classify_exn
+       (Eio.Exn.create
+          (Eio.Net.E
+             (Eio.Net.Connection_failure
+                (Eio.Net.Refused (unix_backend Unix.ECONNREFUSED "connect" ""))))));
+  check_tag "Net Connection_reset EPIPE is Other" "other"
+    (S.classify_exn
+       (Eio.Exn.create (Eio.Net.E (Eio.Net.Connection_reset (unix_backend Unix.EPIPE "write" "")))))
+
+let test_classify_exn_eio_multiple () =
+  check_tag "Multiple: first errno member decides, cancellation skipped" "disk_exhaustion"
+    (S.classify_exn
+       (Eio.Exn.Multiple
+          [ (Eio.Cancel.Cancelled (Failure "race loser"), backtrace)
+          ; (Unix.Unix_error (Unix.ENOSPC, "write", "/tmp"), backtrace)
+          ]));
+  check_tag "Multiple_io inside Io" "fd_exhaustion"
+    (S.classify_exn
+       (Eio.Exn.create
+          (Eio.Exn.Multiple_io
+             [ (Eio.Exn.X (unix_backend Unix.ENFILE "accept" ""), eio_context, backtrace) ])))
+
+exception Needle_in_payload of string
+
+(* Regression for #49742: the rendered text of an exception is no longer a
+   classification input.  Each of these used to classify through
+   [Printexc.to_string]; none carries a structured errno of that class. *)
+let test_classify_exn_rendered_text_is_not_parsed () =
+  check_tag "ENOENT with a needle in its argument" "other"
+    (S.classify_exn
+       (Unix.Unix_error (Unix.ENOENT, "open", "/reports/no space left on device.txt")));
+  check_tag "cancellation wrapping needle text" "other"
+    (S.classify_exn (Eio.Cancel.Cancelled (Failure "no space left on device during cleanup")));
+  check_tag "custom exception with needle text" "other"
+    (S.classify_exn (Needle_in_payload "connection refused by upstream"))
+
+let test_classify_exn_string_payloads_keep_boundary_parse () =
+  check_tag "Sys_error payload" "fd_exhaustion" (S.classify_exn (Sys_error "Too many open files"));
+  check_tag "Failure payload" "timeout" (S.classify_exn (Failure "connect: timed out"))
 
 (* ---- errno_of_unix_error / errno_of_exn ---- *)
 
@@ -147,13 +222,15 @@ let test_errno_of_unix_error_other_keeps_code () =
 let test_errno_of_exn () =
   check (option errno) "Unix_error is typed" (Some S.Enospc)
     (S.errno_of_exn (Unix.Unix_error (Unix.ENOSPC, "write", "/tmp")));
+  check (option errno) "Io-wrapped Unix_error is typed" (Some S.Emfile)
+    (S.errno_of_exn (Eio.Exn.create (Eio.Exn.X (unix_backend Unix.EMFILE "open" "/tmp"))));
   check (option errno) "Sys_error text is not parsed" None
     (S.errno_of_exn (Sys_error "No space left on device"));
   check (option errno) "Failure is not an errno" None
     (S.errno_of_exn (Failure "unrelated"))
 
-(* ENOENT has no class of its own in [t]; classify_exn reads the text, which
-   names no class, so the result is [Other]. *)
+(* ENOENT has no class of its own in [t], and the errno is the answer: the
+   result is [Other] without the text ever being read. *)
 let test_classify_exn_enoent_is_other () =
   check_tag "ENOENT" "other"
     (S.classify_exn (Unix.Unix_error (Unix.ENOENT, "open", "/missing")))
@@ -196,6 +273,14 @@ let () =
         ; test_case "fallback to classify_string" `Quick
             test_classify_exn_fallback_to_string
         ; test_case "ENOENT is Other" `Quick test_classify_exn_enoent_is_other
+        ; test_case "Eio: bare backend errno" `Quick test_classify_exn_eio_bare_backend
+        ; test_case "Eio: Fs vocabulary" `Quick test_classify_exn_eio_fs_vocabulary
+        ; test_case "Eio: Net vocabulary" `Quick test_classify_exn_eio_net_vocabulary
+        ; test_case "Eio: Multiple / Multiple_io" `Quick test_classify_exn_eio_multiple
+        ; test_case "rendered text is not parsed" `Quick
+            test_classify_exn_rendered_text_is_not_parsed
+        ; test_case "string payloads keep boundary parse" `Quick
+            test_classify_exn_string_payloads_keep_boundary_parse
         ] )
     ; ( "errno"
       , [ test_case "named errnos" `Quick test_errno_of_unix_error_named

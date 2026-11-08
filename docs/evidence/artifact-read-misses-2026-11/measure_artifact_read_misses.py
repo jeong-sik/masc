@@ -13,7 +13,8 @@ Reads, and never writes:
   Fields used: `ts` (UTC seconds), `keeper`, `input.sha256` and `output`.
 - `<base-path>/.masc/keepers/<keeper>/raw-traces/*.jsonl`, scanned as bytes for
   `answer_sha256=<64 hex>`. Raw traces are deleted over time, so a miss without a trace file
-  is `not_traced`, which does not mean the hash was something else.
+  is `not_traced`, which does not mean the hash was something else. A trace file that is deleted
+  after the scan listed it is counted in `raw_traces_vanished` and not read.
 
 Definitions:
 
@@ -160,16 +161,21 @@ def raw_trace_paths(base: pathlib.Path) -> Iterator[pathlib.Path]:
     yield from sorted((base / ".masc" / "keepers").glob("*/raw-traces/*.jsonl"))
 
 
-def answer_fingerprints(base: pathlib.Path) -> tuple[set[str], int]:
-    """Every `answer_sha256=` value in the raw traces, and how many trace files were scanned."""
+def answer_fingerprints(base: pathlib.Path) -> tuple[set[str], int, int]:
+    """Every `answer_sha256=` value in the raw traces, the trace files scanned, and the files that vanished."""
     found: set[str] = set()
     scanned = 0
+    vanished = 0
     for path in raw_trace_paths(base):
+        try:
+            data = path.read_bytes()
+        except FileNotFoundError:
+            vanished += 1
+            continue
         scanned += 1
-        data = path.read_bytes()
         if ANSWER_MARK in data:
             found.update(match.decode("ascii") for match in ANSWER_FINGERPRINT.findall(data))
-    return found, scanned
+    return found, scanned, vanished
 
 
 def quantile(sorted_values: Sequence[float], q: float) -> float:
@@ -310,8 +316,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     skipped = Skipped()
     paths, without = ledger_files(base, first, last)
     reads = read_ledger(paths, bounds["since"], bounds["until"], skipped)
-    fingerprints, scanned = answer_fingerprints(base)
-    files: dict[str, object] = {"ledger": len(paths), "days_without_file": without, "raw_traces": scanned}
+    fingerprints, scanned, vanished = answer_fingerprints(base)
+    files: dict[str, object] = {
+        "ledger": len(paths),
+        "days_without_file": without,
+        "raw_traces": scanned,
+        "raw_traces_vanished": vanished,
+    }
     params: dict[str, object] = {
         "from_date": first.isoformat(),
         "to_date": last.isoformat(),

@@ -401,6 +401,7 @@ let to_json_with_operator_disposition
       ~duration_ms:(receipt_duration_ms receipt)
       ?error:receipt.error_message
       ~sandbox_target:(Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
+      ~path_params:[ "target_path" ]
       ()
   in
   `Assoc

@@ -42,8 +42,6 @@ type recommended_action = {
 
 (** {1 Thresholds and ranking} *)
 
-val stalled_session_threshold_sec : float
-
 (** [Sev_critical → 4], [Sev_bad → 3], [Sev_warn → 2], [Sev_info → 1]. Used
     for descending-severity comparators; 0 is reserved for a string that is
     not a severity. *)

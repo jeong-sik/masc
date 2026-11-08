@@ -43,8 +43,6 @@ type recommended_action = {
   suggested_payload : Yojson.Safe.t;
 }
 
-let stalled_session_threshold_sec = Env_config.InternalTimers.stalled_session_threshold_sec
-
 (* Every level ranks above 0, which [severity_rank_of_string] keeps for a
    string that is not a severity at all. An informational row that ranked with
    the unrecognized ones would sort as if the wire had said nothing. *)

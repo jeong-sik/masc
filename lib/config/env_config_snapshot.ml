@@ -269,8 +269,6 @@ let internal_timer_entries =
       "Dashboard label stuck threshold (seconds, 15 min)";
     entry ~default:"300.0" "MASC_SSE_BUFFER_TTL_SEC"
       "SSE buffer TTL (seconds, 5 min)";
-    entry ~default:"300.0" "MASC_STALLED_SESSION_THRESHOLD_SEC"
-      "Stalled session threshold (seconds, 5 min)";
   ]
 
 let local_runtime_entries =

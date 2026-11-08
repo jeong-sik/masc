@@ -272,23 +272,23 @@ let safe_filename name =
     name;
   Buffer.contents buf
 
+let sqlite_wal_suffix = "-wal"
+let sqlite_shm_suffix = "-shm"
+let sqlite_journal_suffix = "-journal"
+
 let tool_call_read_index_basename = "read-index.sqlite3"
 
 let tool_call_read_index_filenames =
   [ tool_call_read_index_basename
-  ; tool_call_read_index_basename ^ "-wal"
-  ; tool_call_read_index_basename ^ "-shm"
-  ; tool_call_read_index_basename ^ "-journal"
+  ; tool_call_read_index_basename ^ sqlite_wal_suffix
+  ; tool_call_read_index_basename ^ sqlite_shm_suffix
+  ; tool_call_read_index_basename ^ sqlite_journal_suffix
   ]
 
 let is_tool_call_read_index_file path =
   List.mem (Filename.basename path) tool_call_read_index_filenames
 
 let chat_operation_store_basename = "chat-operations.sqlite3"
-
-let sqlite_wal_suffix = "-wal"
-let sqlite_shm_suffix = "-shm"
-let sqlite_journal_suffix = "-journal"
 
 let chat_operation_store_sidecar_filenames =
   [ chat_operation_store_basename ^ sqlite_wal_suffix

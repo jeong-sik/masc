@@ -3,48 +3,62 @@
 
 type trace_id = string
 
-(* Precedence: the board surface, then the MCP surface, then the catalog, then
-   the name chain.
+(* Precedence: the board surface, then the MCP surface, then what the tool
+   declares about itself — in its descriptor first, else in the catalog.
 
-   The first two are surface labels and keep their existing meaning. The
-   catalog is the only place a tool declares what it *does*
-   ([Tool_catalog.metadata] carries [readonly : bool option]), so where that is
-   set it decides read-vs-write instead of the name.
+   The first two are surface labels and keep their existing meaning. A
+   descriptor is the tool's own declaration, in closed fields:
+   [policy.readonly_hint] for read-vs-write, and [executor = Shell_ir] without
+   a read-only declaration for a tool whose call is a process — the "execute"
+   label. It comes before the catalog so that Execute reads the same under
+   its public name and its internal one ([tool_execute], whose catalog row is
+   the generic [mutating_tool]). The catalog ([Tool_catalog.metadata.readonly])
+   is where a tool without a descriptor says whether it reads or writes;
+   keeper_tasks_list alone is 28% of recorded calls, so that declaration
+   decides for it.
 
-   Only four tools seen in live traffic declare it today, but one of them
-   (keeper_tasks_list) is 28% of all calls, so consulting the catalog moves the
-   "other" bucket from 57.0% to 27.6% of 94,784 recorded calls.
+   There is no name chain. A name that merely looks like a verb (an attached
+   service's read_file, a typo, a tool nobody declared) is "other", the honest
+   unknown; until #49742 this arm read [read]/[write]/[edit]/[execute]
+   prefixes and the "grep" literal off the name, which is the kind of
+   substring dispatch the constitution ([string_matching]) forbids. The way
+   to move a tool out of "other" is to declare it. *)
+let declared_kind (descriptor : Keeper_tool_descriptor.t) =
+  let open Keeper_tool_descriptor in
+  match descriptor.policy.readonly_hint, descriptor.executor with
+  | Some true, (Shell_ir | Filesystem | In_process) -> Some "read"
+  | Some false, (Shell_ir | Filesystem | In_process) -> Some "write"
+  | None, Shell_ir -> Some "execute"
+  | None, (Filesystem | In_process) -> None
+;;
 
-   The name chain stays as the last resort for tools the catalog has not
-   classified — including Read / Write / Edit / Grep / Execute, whose names
-   happen to be the verb and which it labels correctly today. Dropping it in
-   favour of the catalog alone would push those 21,192 calls into "other" and
-   make the dimension worse. The way out is to declare [readonly] for the
-   remaining tools, not to grow the prefix list. *)
+(* The model-visible name is the public one ([Read]); the MCP surface and the
+   runtime dispatcher carry the internal one ([tool_read_file]). *)
+let descriptor_of_name name =
+  match Keeper_tool_descriptor.find_public name with
+  | Some descriptor -> Some descriptor
+  | None ->
+    (match Keeper_tool_descriptor.descriptors_for_internal name with
+     | descriptor :: _ -> Some descriptor
+     | [] -> None)
+;;
+
 let tool_type_of_name name =
   let trimmed = String.trim name in
-  let name = String.lowercase_ascii trimmed in
-  match Tool_name.Board_name.of_string name with
+  let lower = String.lowercase_ascii trimmed in
+  match Tool_name.Board_name.of_string lower with
   | Some _ -> "board"
   | None ->
-    if String.starts_with ~prefix:"masc_" name
+    if String.starts_with ~prefix:"masc_" lower
     then "mcp"
     else (
-      match (Tool_catalog.metadata trimmed).readonly with
-      | Some true -> "read"
-      | Some false -> "write"
+      match Option.bind (descriptor_of_name trimmed) declared_kind with
+      | Some kind -> kind
       | None ->
-      if name = "grep"
-      then "read"
-      else if String.starts_with ~prefix:"read" name
-      then "read"
-      else if String.starts_with ~prefix:"write" name
-      then "write"
-      else if String.starts_with ~prefix:"edit" name
-      then "write"
-      else if String.starts_with ~prefix:"execute" name
-      then "execute"
-      else "other")
+        (match (Tool_catalog.metadata trimmed).readonly with
+         | Some true -> "read"
+         | Some false -> "write"
+         | None -> "other"))
 ;;
 
 let counter_name = "tool_dispatch_total"

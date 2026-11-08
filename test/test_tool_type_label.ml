@@ -12,7 +12,12 @@
     keeper_wiki_read, keeper_surface_read and keeper_surface_post carry a
     keeper_ prefix, so they land in "other". These cases pin that as the
     current answer rather than leaving it to be rediscovered — changing it
-    moves six tools to a different metric dimension value. *)
+    moves six tools to a different metric dimension value.
+
+    Since #49742 the remaining name chain (read/write/edit/execute prefixes
+    and the "grep" literal) is gone too: a label comes from the catalog's
+    [readonly] or the descriptor's [policy.readonly_hint] / [executor], and a
+    name that declares nothing is "other" however it is spelled. *)
 
 open Alcotest
 
@@ -89,12 +94,27 @@ let test_catalog_declaration_beats_the_name_chain () =
     ]
 ;;
 
-let test_external_tool_names_keep_their_labels () =
+(* The keeper's own tools are descriptors, not catalog rows; their labels come
+   from the descriptor's closed fields — [policy.readonly_hint] for read and
+   write, [executor = Shell_ir] without a read-only declaration for execute —
+   never from the verb their names happen to be. *)
+let test_descriptor_declarations_label_the_keeper_tools () =
   List.iter
     (fun (name, expected) -> check string name expected (T.tool_type_of_name name))
     [ "Grep", "read"; "Read", "read"; "Write", "write"; "Edit", "write"
-    ; "Execute", "execute"; "WebSearch", "other"
+    ; "Execute", "execute"
+    ; (* the same tools under their internal names, as the MCP surface sees them *)
+      "tool_read_file", "read"; "tool_write_file", "write"; "tool_execute", "execute"
     ]
+;;
+
+(* #49742: the name chain is gone. A name that only looks like a verb — an
+   attached service's read_file, a tool nobody declared — is "other", and a
+   catalog-declared read-only tool stays "read" whatever it is called. *)
+let test_undeclared_names_are_other_whatever_they_spell () =
+  List.iter
+    (fun name -> check string name "other" (T.tool_type_of_name name))
+    [ "read_file"; "write_notes"; "edit_page"; "execute_plan"; "grep"; "readme_fetch" ]
 ;;
 
 let () =
@@ -112,8 +132,10 @@ let () =
             test_keeper_prefixed_tools_fall_to_other
         ; test_case "catalog declaration beats the name chain" `Quick
             test_catalog_declaration_beats_the_name_chain
-        ; test_case "external tool names keep their labels" `Quick
-            test_external_tool_names_keep_their_labels
+        ; test_case "descriptor declarations label the keeper tools" `Quick
+            test_descriptor_declarations_label_the_keeper_tools
+        ; test_case "undeclared names are other whatever they spell" `Quick
+            test_undeclared_names_are_other_whatever_they_spell
         ] )
     ]
 ;;

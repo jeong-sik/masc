@@ -88,7 +88,7 @@
 
 - #49959 와 #49942 를 담은 서버 재시작(사용자). 그 뒤 `remote_ssh_disk_low` 가 읽기 호출에서 0이 되는지, 같은 19.7시간 창으로 이 표를 다시 채워요.
 - #49881(댓글 위치), #49887(원격 Grep 의 stderr) 병합(사용자).
-- 대시보드 번들 설치와 서버 재시작 여부(사용자). 원인과 두 선택지(번들 복사, `MASC_ASSETS_DIR`)는 #49980 에 적었어요.
+- 대시보드 번들 설치(사용자). 원인과 두 선택지(번들 복사, `MASC_ASSETS_DIR`)는 #49980 에 적었어요. `serve_dashboard_index` 와 `serve_dashboard_static` 이 요청마다 파일을 읽고 index.html 은 `no-store` 라서, 복사하면 재시작 없이 새로고침으로 반영될 것으로 보여요. 복사해서 확인하지는 않았어요.
 - 호스트 용량(79,672 KiB 이상)이나 `MASC_KEEPER_SSH_PREFLIGHT_DISK_FREE_MIN_KIB` 조정은 #49959 가 대신하지 못해요. `request_effect` 로 보낸 `rm` 은 계속 막혀요.
 
 ## 확인하지 못한 것

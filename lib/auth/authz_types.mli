@@ -9,6 +9,12 @@ module Service_id : Authz_id.S
 module Runtime_id : Authz_id.S
 module Provider_account_id : Authz_id.S
 module Grant_id : Authz_id.S
+
+(** The name of a Keeper (plan D1-5). It is the name of
+    [.masc/config/keepers/<name>.toml], and a Keeper record names its owner by
+    it. *)
+module Keeper_id : Authz_id.S
+
 module Policy_id : Authz_id.S
 
 (** The id of a browser session (plan C3). The cookie carries it with the

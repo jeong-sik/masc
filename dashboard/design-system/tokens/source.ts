@@ -2,10 +2,9 @@
  * MASC Cockpit Design System — Token Source (SSOT)
  *
  * Authoring source for the codegen pipeline. Edit this file, then run
- * `pnpm tokens:build` to emit the four downstream artifacts:
+ * `pnpm tokens:build` to emit the three downstream artifacts:
  *   - dashboard/design-system/source_styles/tokens.generated.css
  *   - dashboard/src/styles/tokens.generated.css      (Tailwind v4 @theme)
- *   - dashboard/src/styles/tokens.generated.ts       (Preact typed const)
  *   - dashboard/design-system/tokens/build/tokens.json (DTCG 2025.10)
  *
  * Design tier mapping (matches SPEC.md §3 Token Taxonomy):

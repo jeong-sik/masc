@@ -314,10 +314,9 @@ active named variant 테마는 **dark-fantasy + paper** 두 종이며 source.ts 
 
 1. 본 SPEC.md 에 token 항목 추가 PR 선행
 2. SPEC PR 머지 후 `dashboard/design-system/tokens/source.ts` 에 정의 (raw 또는 semantic 배열)
-3. `pnpm tokens:build` (`dashboard/` 에서) 실행 → 4 generated artifact emit:
+3. `pnpm tokens:build` (`dashboard/` 에서) 실행 → 3 generated artifact emit:
    - `dashboard/design-system/source_styles/tokens.generated.css` (preview)
    - `dashboard/src/styles/tokens.generated.css` (Tailwind v4 `@theme`)
-   - `dashboard/src/styles/tokens.generated.ts` (Preact typed)
    - `dashboard/design-system/tokens/build/tokens.json` (DTCG 2025.10)
 4. tier 결정: 같은 의미를 가진 raw 가 이미 있으면 Semantic 만 추가. 새 raw 추가는 active 테마 모두에서 override 가능해야 함
 5. CI 강제: `tokens-drift` workflow 가 idempotent build (재실행 후 git diff = ∅), tier integrity (generated artifact 직접 수정 차단), keeper OkLCH ΔE < 2, status canon pin 4 gate 검증

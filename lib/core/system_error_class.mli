@@ -62,13 +62,20 @@ val errno_of_unix_error : Unix.error -> errno
     implementation, with no catch-all arm. *)
 
 val errno_of_exn : exn -> errno option
-(** [Some _] for [Unix.Unix_error]; [None] for every other exception.  Text
-    carried by [Sys_error] or [Failure] is not parsed here; use
-    [classify_exn] for that. *)
+(** [Some _] for [Unix.Unix_error]; for the [Eio_unix.Unix_error] backend
+    payload Eio nests inside [Eio.Exn.Io] — bare as [Eio.Exn.X] or under the
+    [Eio.Fs.E] / [Eio.Net.E] vocabularies, including [Eio.Exn.Multiple_io]
+    members; and for the first such member of [Eio.Exn.Multiple].  [None] for
+    every other exception.  Text carried by [Sys_error] or [Failure] is not
+    parsed here; use [classify_exn] for that. *)
 
 val classify_exn : exn -> t
-(** Errno match on [Unix.Unix_error _] takes priority.  Other
-    exceptions fall through to [classify_string (Printexc.to_string exn)]. *)
+(** The errno found by [errno_of_exn] decides first.  Without one, only a
+    payload that is a string by construction — [Sys_error], [Failure] — is
+    read by [classify_string]; every other exception, cancellation included,
+    is [Other (Printexc.to_string exn)] verbatim.  The rendered text of an
+    errno-carrying exception is never scanned, so a file name that contains
+    ["disk full"] cannot turn an [ENOENT] into [Disk_exhaustion]. *)
 
 val classify_string : string -> t
 (** Case-insensitive substring match against the unified vocabulary.

@@ -956,10 +956,10 @@ let reading_of_type type_name =
         (fun fields ->
           decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_composite_changed { keeper; at }))
-  | type_name when String.equal type_name Masc.Keeper_metrics_broadcast.appended_event ->
+  | "keeper_metrics_appended" as event ->
       From_fields
         (fun fields ->
-          decode_named_keeper_event ~event:type_name fields (fun ~keeper ~at ->
+          decode_named_keeper_event ~event fields (fun ~keeper ~at ->
               Keeper_metrics_appended { keeper; at }))
   | "keeper_chat_operation_event" -> From_fields decode_keeper_chat_operation_event
   | "keeper_turn_stream_event" -> From_fields decode_keeper_turn_stream_event

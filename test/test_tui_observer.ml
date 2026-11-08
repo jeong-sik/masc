@@ -507,8 +507,7 @@ let test_a_metrics_append_names_its_keeper () =
     [ "metrics(lane-smith)" ]
     (List.map summary
        (decode_all
-          [ Printf.sprintf "data: {\"type\":\"%s\",\"name\":\"lane-smith\",\"ts_unix\":1.0}\n\n"
-              Masc.Keeper_metrics_broadcast.appended_event ]));
+          [ "data: {\"type\":\"keeper_metrics_appended\",\"name\":\"lane-smith\",\"ts_unix\":1.0}\n\n" ]));
   check (option string) "and the logs view reads that Keeper" (Some "lane-smith")
     (match decode_all
              [ "data: {\"type\":\"keeper_metrics_appended\",\"name\":\"lane-smith\",\"ts_unix\":1.0}\n\n" ]

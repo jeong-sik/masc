@@ -18,7 +18,9 @@ val append_keeper_metrics : Workspace.config -> string -> Yojson.Safe.t -> unit
 (** Canonical turn/heartbeat metric writer. Uses the same cached store as
     [keeper_metrics_store], with [metrics.store_max_bytes] captured at open.
     After the row is written it announces
-    {!Keeper_metrics_broadcast.appended_event} to the workspace's observers. *)
+    [Workspace_dataset_event.Keeper_metrics] for that keeper to the
+    workspace's observers, and [Workspace_dataset_event.Keeper_costs] too
+    unless the row is a heartbeat. *)
 
 (** Canonical base directory of {!keeper_metrics_store}. *)
 val keeper_metrics_dir : Workspace.config -> string -> string

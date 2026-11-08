@@ -357,12 +357,6 @@ module KeeperProactive : sig
   val stage_timing_ring_size : int
 end
 
-(** {1 Dashboard health thresholds} *)
-
-module DashboardHealth : sig
-  val runtime_warning_ctx_ratio : float
-end
-
 (** {1 Peer artifact handoff} *)
 
 module KeeperPeerArtifact : sig

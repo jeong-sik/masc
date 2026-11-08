@@ -3,9 +3,6 @@
 
     See dashboard_http_keeper_types.mli for rationale. *)
 
-let runtime_warning_ctx_ratio =
-  Env_config_keeper.DashboardHealth.runtime_warning_ctx_ratio
-
 let live_keeper_runtime_id_result (raw : string) :
     (string, [ `Unresolved of string ]) result =
   let trimmed = String.trim raw in

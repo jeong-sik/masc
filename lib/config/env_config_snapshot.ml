@@ -200,8 +200,6 @@ let dashboard_entries =
       "Mission card compute timeout (floor 1)";
     entry ~default:"60" "MASC_DASHBOARD_RENDER_TIMEOUT_SEC"
       "Dashboard render pipeline timeout (floor 5)";
-    entry ~default:"0.95" "MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO"
-      "Runtime warning context ratio threshold";
     entry ~default:"300.0" "MASC_DASHBOARD_SIGNAL_LIVE_SEC"
       "Duration for signal to count as live (seconds, 5 min)";
     entry ~default:"600.0" "MASC_DASHBOARD_SIGNAL_QUIET_SEC"

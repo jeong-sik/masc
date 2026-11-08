@@ -47,7 +47,7 @@ import synth_spec as S
 from eval_admission import PASS_LINES, schema_instruction
 
 # sha256 of pass_lines.json as fixed on 2026-11-09, before any training run.
-PASS_LINES_SHA256 = "f1a3d4ff5e0052fbf38d197cea8c2fe1d6cf0c50555dc22c1f0e95119040d1b4"
+PASS_LINES_SHA256 = "74bdc23c05dd04aa20a7e00f34600eb3b35b3ba317bbcd431691d665cc0602a5"
 MODEL = "thinkingmachines/Inkling-2-Small:peft:262144"
 EFFORT = 0.2
 RANK = 8

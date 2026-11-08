@@ -39,7 +39,7 @@ Board 에서 `/` 로 찾고 Enter 로 마친 글자가 `/` 가 열리지 않는 
 
 - Dashboard(80x24): 키 `p:requests` 가 다시 보여요.
 - Usage(100x30): 키 `f:account` 가 다시 보여요.
-- Keeper 상세(100x30): 키 `[ ]:tab`, `b:requeue board` 가 푸터에서 빠져요. `ACTION NEEDED` 가 숫자 뒤에 이유까지 길게 나오는 대신이에요(`?` 도움말에는 그대로 있어요).
+- Keeper 상세(100x30): 키 `[ ]:tab`, `b:requeue board` 가 푸터에서 빠져요. `ACTION NEEDED` 가 숫자 뒤에 이유까지 길게 나오는 대신이에요(`?` 도움말에는 그대로 있어요). 검색을 한 적 없는 세션도 같은 푸터예요.
 - Board 에서 Esc 로 나간 Dashboard(80x24): 키 `p:requests` 가 다시 보여요.
 
 아래는 두 빌드가 같아야 하는 단계이고, 실제로 같았어요.

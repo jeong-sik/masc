@@ -21,13 +21,9 @@ type visibility =
 type lifecycle =
   | Active
 
-type implementation_status =
-  | Real
-
 type metadata = {
   visibility : visibility;
   lifecycle : lifecycle;
-  implementation_status : implementation_status;
   reason : string option;
   allow_direct_call_when_hidden : bool;
   readonly : bool option;
@@ -99,7 +95,6 @@ let default_metadata ~required_permission =
   {
     visibility = Default;
     lifecycle = Active;
-    implementation_status = Real;
     reason = None;
     allow_direct_call_when_hidden = false;
     readonly = None;
@@ -112,7 +107,6 @@ let hidden_active ?(allow_direct_call_when_hidden = true) ~required_permission r
   {
     visibility = Hidden;
     lifecycle = Active;
-    implementation_status = Real;
     reason = Some reason;
     allow_direct_call_when_hidden;
     readonly = None;
@@ -655,9 +649,6 @@ let is_public_mcp name = String_set.mem name public_mcp_set
 (* Metadata lookup                                                  *)
 (* ================================================================ *)
 
-let implementation_status_to_string = function
-  | Real -> "real"
-
 let metadata name =
   match Hashtbl.find_opt metadata_table name with
   | Some meta -> meta
@@ -704,7 +695,7 @@ let metadata_to_fields name =
     [
       ("visibility", `String (visibility_to_string meta.visibility));
       ("lifecycle", `String (lifecycle_to_string meta.lifecycle));
-      ("implementationStatus", `String (implementation_status_to_string meta.implementation_status));
+      ("implementationStatus", `String "real");
       ( "requiredPermission"
       , `String (Masc_domain.permission_to_string meta.required_permission) );
     ]

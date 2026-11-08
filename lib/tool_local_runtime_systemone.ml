@@ -114,10 +114,12 @@ let validate_question_name name =
 ;;
 
 let validate_question (name, question) =
-  let instructions = nonblank ~field:(name ^ ".instructions") in
+  let instructions text =
+    Result.map ignore (nonblank ~field:(name ^ ".instructions") text)
+  in
   match question with
   | Choice { instructions = text; criteria } ->
-      let* text = instructions text in
+      let* () = instructions text in
       let count = List.length criteria in
       if count < choice_criteria_min || count > choice_criteria_max then
         Error
@@ -125,12 +127,10 @@ let validate_question (name, question) =
              choice_criteria_min choice_criteria_max count)
       else if List.exists (fun (option, _) -> option = "") criteria then
         Error (name ^ ": choice criteria keys must not be blank")
-      else Ok (Choice { instructions = text; criteria })
-  | Noul { instructions = text; true_description; false_description } ->
-      let* text = instructions text in
-      Ok (Noul { instructions = text; true_description; false_description })
+      else Ok ()
+  | Noul { instructions = text; _ } -> instructions text
   | Score { instructions = text; scale } ->
-      let* text = instructions text in
+      let* () = instructions text in
       let count = List.length scale in
       if count < score_scale_min || count > score_scale_max then
         Error
@@ -138,11 +138,11 @@ let validate_question (name, question) =
              score_scale_min score_scale_max count)
       else if List.exists (fun entry -> entry = "") scale then
         Error (name ^ ": score rubric entries must not be blank")
-      else Ok (Score { instructions = text; scale })
+      else Ok ()
 ;;
 
 let validate_request (request : request) : (unit, string) result =
-  let* state = nonblank ~field:"state" request.state in
+  let* _ = nonblank ~field:"state" request.state in
   let count = List.length request.questions in
   if count = 0 || count > max_questions then
     Error (Printf.sprintf "questions must number 1-%d, got %d" max_questions count)
@@ -158,17 +158,11 @@ let validate_request (request : request) : (unit, string) result =
           else Ok ())
         (Ok ()) names
     in
-    let* () =
-      List.fold_left
-        (fun acc entry ->
-          let* () = acc in
-          let* question = validate_question entry in
-          ignore question;
-          Ok ())
-        (Ok ()) request.questions
-    in
-    ignore state;
-    Ok ()
+    List.fold_left
+      (fun acc entry ->
+        let* () = acc in
+        validate_question entry)
+      (Ok ()) request.questions
 ;;
 
 (* ── Encode ─────────────────────────────────────────────── *)

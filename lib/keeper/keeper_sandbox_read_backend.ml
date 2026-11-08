@@ -302,7 +302,8 @@ let run_command_with_capture ?read_authority ?turn_sandbox_factory
     | Ok Remote_dispatch ->
       run_endpoint_command_with_status
         ~acquire_endpoint:(fun ~cwd ->
-          Keeper_sandbox_remote_lane.endpoint ?turn_sandbox_factory ~config ~meta ~cwd ())
+          Keeper_sandbox_remote_lane.endpoint ?turn_sandbox_factory
+            ~access:Keeper_sandbox_remote.Read_only ~config ~meta ~cwd ())
         ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
     | Ok Attached_guest ->
       (* Apple endpoint admission observes guest ownership and state before
@@ -311,7 +312,8 @@ let run_command_with_capture ?read_authority ?turn_sandbox_factory
       (match
          run_endpoint_command_with_status
            ~acquire_endpoint:(fun ~cwd:_ ->
-             Keeper_sandbox_remote_lane.attached_guest_endpoint ~timeout_sec ~config ~meta ())
+             Keeper_sandbox_remote_lane.attached_guest_endpoint ~timeout_sec
+               ~access:Keeper_sandbox_remote.Read_only ~config ~meta ())
            ~ok_exit_codes ~config ~meta ~command_argv ~max_bytes ~timeout_sec ()
        with
        | Ok _ as ok -> ok

@@ -245,8 +245,8 @@ type event =
   | Keeper_turn_observation of keeper_turn_observation
   | Keeper_composite_changed of { keeper : string; at : float }
   | Keeper_metrics_appended of { keeper : string; at : float }
-      (** The Keeper's metrics file gained a row ({!Masc.Keeper_metrics_broadcast}).
-          The logs view and the Info tab read it again. *)
+      (** A [keeper_metrics_appended] event for the Keeper. The logs view and the
+          Info tab read it again. *)
   | Keeper_chat_appended of { keeper : string; connector : string option; at : float }
   | Keeper_memory_journal_appended of { keeper : string; at : float }
       (** The keeper's memory journal gained a row. The chat pane shows that

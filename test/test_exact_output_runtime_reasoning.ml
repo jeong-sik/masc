@@ -84,14 +84,14 @@ reasoning-effort = %S
 (* The guide's checkpoint binding (docs/guides/tinker-integration.md,
    "Hot-Swapping a Fine-Tuned Checkpoint"): a tinker:// model the catalog has
    no row for, under the tinker provider row, whose block states the five
-   reads an exact slot needs. The Librarian lane declares an output budget
-   under the stated ceiling, the board lane one above it, and the HITL lane
+   reads an exact slot needs. The Librarian lane declares the guide's budget,
+   the board lane one above the stated output ceiling, and the HITL lane
    none. *)
 let tinker_checkpoint_toml effort = Printf.sprintf {|[runtime]
 default = "tinker.tinker-inkling-ckpt"
 [runtime.exact_output_lanes.librarian_exact]
 slots = ["tinker.tinker-inkling-ckpt"]
-max_output_tokens = 4096
+max_output_tokens = 32768
 [runtime.exact_output_lanes.hitl_auto_judge]
 slots = ["tinker.tinker-inkling-ckpt"]
 [runtime.exact_output_lanes.board_attention_exact]
@@ -331,12 +331,12 @@ let checkpoint_request_body ?lane_budget admitted =
   Printf.eprintf "checkpoint request: %s\n%!" serialized;
   Yojson.Safe.from_string serialized
 
-(* The guide's checkpoint binding on a Librarian lane: the request carries the
-   binding's effort and the lane's budget, and no response_format, since the
-   block states neither JSON mode nor native schema. On the board lane, whose
-   budget is above the stated output ceiling, the request carries the
-   ceiling. On the HITL lane, which declares no budget, the request carries no
-   max_tokens. *)
+(* The guide's checkpoint binding on its Librarian lane: the request carries
+   the binding's effort and the lane's budget, within the slot's stated output
+   ceiling, and no response_format, since the block states neither JSON mode
+   nor native schema. The lane decides max_tokens; the stated ceiling only
+   cuts it, as on the board lane, whose budget is above it. On the HITL lane,
+   which declares no budget, the request carries no max_tokens. *)
 let test_guide_checkpoint_request_carries_its_effort_and_lane_budget_and_no_envelope () =
   with_runtime ~toml:tinker_checkpoint_toml ~credential_env:"TINKER_API_KEY" @@ fun load ->
   List.iter (fun effort ->
@@ -349,11 +349,15 @@ let test_guide_checkpoint_request_carries_its_effort_and_lane_budget_and_no_enve
       capabilities.supports_structured_output;
     check (option int) "the slot has the stated output ceiling" (Some 32768)
       capabilities.max_output_tokens;
-    let body = checkpoint_request_body ~lane_budget:4096 admitted in
+    let body = checkpoint_request_body ~lane_budget:32768 admitted in
     check string "the request carries the binding's effort" effort_name
       Yojson.Safe.Util.(body |> member "reasoning_effort" |> to_string);
-    check int "the request max_tokens is the lane budget" 4096
-      Yojson.Safe.Util.(body |> member "max_tokens" |> to_int);
+    let max_tokens = Yojson.Safe.Util.(body |> member "max_tokens" |> to_int) in
+    check int "the request max_tokens is the lane budget" 32768 max_tokens;
+    check bool "the lane budget stays within the slot's output ceiling" true
+      (match capabilities.max_output_tokens with
+       | Some ceiling -> max_tokens <= ceiling
+       | None -> false);
     check bool "the request carries no response_format" true
       (Yojson.Safe.Util.member "response_format" body = `Null))
     [ Llm_provider.Reasoning_effort.Low; Llm_provider.Reasoning_effort.High ];

@@ -143,6 +143,11 @@ let refused_for_binding_rest = function
     antigravity_error_is_binding_rest error
   | Execution_failed { cause = Fusion_official_client.Muse_failure error; runtime_id = _ } ->
     muse_error_is_binding_rest error
+  (* No exact-output walk reaches a Vibe runtime: the load check refuses it in
+     [slots] and [cli_slots] (Client_without_output_schema). Vibe 3.1.0 has
+     no typed quota outcome either; how a spent subscription ends a headless
+     run is not measured. *)
+  | Execution_failed { cause = Fusion_official_client.Vibe_failure _; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Missing_reply; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Setup_failure _; runtime_id = _ }
   | Unknown_runtime _
@@ -233,6 +238,9 @@ let refused_for_input_size = function
     antigravity_error_is_input_size error
   | Execution_failed { cause = Fusion_official_client.Muse_failure error; runtime_id = _ } ->
     muse_error_is_input_size error
+  (* No exact-output walk reaches a Vibe runtime (see above), and no Vibe
+     outcome names an oversized input; [length] is the output's. *)
+  | Execution_failed { cause = Fusion_official_client.Vibe_failure _; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Missing_reply; runtime_id = _ }
   | Execution_failed { cause = Fusion_official_client.Setup_failure _; runtime_id = _ }
   | Unknown_runtime _
@@ -337,8 +345,8 @@ let prompt_with_schema ~requirement ~prompt =
   prompt ^ "\n\n" ^ Exact_output.schema_instruction_text requirement
 ;;
 
-(* The sentence has to say what this client accepts. Claude Code, Codex and
-   Muse Code return what the model writes, so they get the Agent Core sentence
+(* The sentence has to say what this client accepts. Claude Code, Codex,
+   Muse Code and Vibe return what the model writes, so they get the Agent Core sentence
    the HTTP path uses. Antigravity takes a schema-bound answer only through
    its [finish] tool; told to write the value, the model writes it, the CLI
    refuses, and the prompt goes out twice. *)
@@ -352,6 +360,7 @@ let prompt_for_execution ~(execution : Runtime_execution.t) ~requirement ~prompt
   | Runtime_execution.Claude_code _
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Muse_serve _
+  | Runtime_execution.Vibe_cli _
   | Runtime_execution.Agent_core _ -> prompt_with_schema ~requirement ~prompt
 ;;
 
@@ -459,7 +468,8 @@ let input_capacity = function
           | Fusion_official_client.Claude_failure _
           | Fusion_official_client.Claude_admission_failure _
           | Fusion_official_client.Antigravity_failure _
-          | Fusion_official_client.Muse_failure _ )
+          | Fusion_official_client.Muse_failure _
+          | Fusion_official_client.Vibe_failure _ )
       ; _
       }
   | Unknown_runtime _ | Not_an_official_client _ | Invalid_json_output _

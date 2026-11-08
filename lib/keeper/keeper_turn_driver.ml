@@ -2619,7 +2619,7 @@ let run_named
               Keeper_agent_tool_surface.on_the_wire ~agent_cell ~built:agent_core_tools
             | (Runtime_execution.Agent_core _, None)
             | ((Runtime_execution.Codex_app_server _ | Antigravity_cli _
-                | Claude_code _ | Muse_serve _), _) -> agent_core_tools in
+                | Claude_code _ | Muse_serve _ | Vibe_cli _), _) -> agent_core_tools in
           Runtime_agent.runtime_accepts_image_input ~runtime, tools, tools_on_wire, loading_plan
       in
       (* Freeze admission with this selected candidate, including tools loaded
@@ -2639,7 +2639,7 @@ let run_named
           | None, _ -> true
           | Some saved, Runtime_execution.Agent_core _ -> String.equal saved attempt_runtime_id
           | Some _, (Runtime_execution.Codex_app_server _ | Antigravity_cli _
-                    | Muse_serve _ | Claude_code _) -> false in
+                    | Muse_serve _ | Claude_code _ | Vibe_cli _) -> false in
         let execution_owner_ready = match on_request_execution_ready,native_binding with
           | Some _, Some _ -> false
           | None, _ | Some _, None -> true in
@@ -2662,7 +2662,8 @@ let run_named
         | Runtime_execution.Codex_app_server _
         | Runtime_execution.Antigravity_cli _
         | Runtime_execution.Muse_serve _ -> tools <> [], true
-        | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support in
+        | Runtime_execution.Claude_code _ -> tools <> [], runtime.model.tools_support
+        | Runtime_execution.Vibe_cli _ -> tools <> [], false in
       let complete_media () =
         match Runtime_agent.decide_modality_reroute_for_runtime_candidates
           ~assigned:runtime ~candidates:[] ~checkpoint_messages ~initial_messages
@@ -2684,18 +2685,26 @@ let run_named
       let bind_official_owner () =
         match runtime.Runtime_instance.execution,on_request_execution_ready with
         | Runtime_execution.Agent_core _, _
+        | Vibe_cli _, _
         | (Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _), None -> Ok ()
         | (Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _), Some ready ->
           ready ~runtime_id:attempt_runtime_id ~execution:Types_core.Official_session
           |> Result.map_error (fun detail -> Agent_core.Error.Config
             (Agent_core.Error.InvalidConfig {field="review.execution_owner";detail}))
       in
-      let admission = Result.bind verifier_ready (fun () ->
+      let execution_ready =
+        match runtime.Runtime_instance.execution with
+        | Runtime_execution.Vibe_cli _ -> Error Runtime_execution.vibe_keeper_turn_refused
+        | Runtime_execution.Agent_core _
+        | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ -> Ok ()
+      in
+      let admission = Result.bind execution_ready (fun () ->
+        Result.bind verifier_ready (fun () ->
         Result.bind source_reader_ready (fun () ->
           let tools_ready = Keeper_required_tools.check_surface tool_requirement
             ~runtime_id:attempt_runtime_id ~surface_enabled ~has_tools
             |> Result.map_error Keeper_required_tools.to_core_error in
-          Result.bind tools_ready bind_official_owner)) in
+          Result.bind tools_ready bind_official_owner))) in
       (match admission with
        | Error failure ->
          Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
@@ -2708,7 +2717,7 @@ let run_named
       let goal_blocks =
         match continue_from_checkpoint, runtime.Runtime_instance.execution with
         | true, Runtime_execution.Agent_core _ -> None
-        | (true, (Runtime_execution.Codex_app_server _ | (Runtime_execution.Antigravity_cli _ | (Runtime_execution.Claude_code _ | Runtime_execution.Muse_serve _))))
+        | (true, (Runtime_execution.Codex_app_server _ | (Runtime_execution.Antigravity_cli _ | (Runtime_execution.Claude_code _ | (Runtime_execution.Muse_serve _ | Runtime_execution.Vibe_cli _)))))
         | (false, _) -> goal_blocks
       in
       (* Shadows the caller's inputs with this candidate's dispatch view; the
@@ -2858,7 +2867,7 @@ let run_named
       in
       let official_argument_source =
         match runtime.Runtime_instance.execution with
-        | Runtime_execution.Agent_core _ -> None
+        | Runtime_execution.Agent_core _ | Vibe_cli _ -> None
         | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
           Keeper_official_client_host.create_argument_source
             ~base_path ~keeper_name ~seed:argument_demotion_seed
@@ -2866,7 +2875,7 @@ let run_named
             ~turn_start:(Eio.Lazy.force official_client_turn_boundary)
       in
       (match runtime.Runtime_instance.execution with
-       | Runtime_execution.Agent_core _ -> ()
+       | Runtime_execution.Agent_core _ | Vibe_cli _ -> ()
        | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
          Log.Keeper.info ~keeper_name
            "model input references runtime=%s context_owner=official_client argument_source_available=%b"
@@ -2882,6 +2891,12 @@ let run_named
         if !guidance_entry then Result.map_error Keeper_internal_error.without_guidance_preparation_authority result
         else result in
       match runtime.Runtime_instance.execution with
+      | Runtime_execution.Vibe_cli _ ->
+        Option.iter (fun consume -> consume ()) on_deferred_runtime_consumed;
+        ( Error Runtime_execution.vibe_keeper_turn_refused
+        , None
+        , Keeper_provider_attempt_effect.No_effect_observed
+        , Keeper_attempt_dispatch.Rejected_before_dispatch )
       | Runtime_execution.Codex_app_server config ->
         let ( reset_model_input_observation
             , on_model_input_window_observation

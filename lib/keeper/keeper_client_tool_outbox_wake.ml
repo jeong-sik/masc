@@ -10,6 +10,8 @@ let route_can_consume (meta : Keeper_meta_contract.keeper_meta) =
       | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
       | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ -> true
       | Runtime_execution.Agent_core _ -> true
+      (* No Keeper turn runs on a Vibe runtime, so none reads the receipt. *)
+      | Runtime_execution.Vibe_cli _ -> false
   in
   match Runtime.resolve_assignment route with
   | `Missing | `Unavailable _ -> false

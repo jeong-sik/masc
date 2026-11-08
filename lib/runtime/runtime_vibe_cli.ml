@@ -146,15 +146,35 @@ type error =
       ; stderr_tail : string
       }
   | Export_unreadable of Headless.error
-  | Transcript_unreadable of Headless.error
+  | Transcript_unreadable of
+      { error : Headless.error
+      ; usage : Headless.usage option
+      }
   | Exit_code_mismatch of
       { process : int
       ; export : int
+      ; usage : Headless.usage option
       }
   | Outcome_exit_mismatch of
       { outcome : Headless.outcome
       ; exit_code : int
+      ; usage : Headless.usage option
       }
+
+let reported_usage = function
+  | Transcript_unreadable { usage; _ }
+  | Exit_code_mismatch { usage; _ }
+  | Outcome_exit_mismatch { usage; _ } -> usage
+  | Invalid_config _
+  | Process_runtime_unavailable
+  | Call_dir_failed _
+  | Spawn_refused _
+  | Timed_out _
+  | Signaled _
+  | Stopped _
+  | No_export _
+  | Export_unreadable _ -> None
+;;
 
 let error_to_string = function
   | Invalid_config detail -> "invalid Vibe config: " ^ detail
@@ -179,10 +199,10 @@ let error_to_string = function
   | No_export { exit_code; stderr_tail } ->
     Printf.sprintf "Vibe exited %d without export.json: %s" exit_code stderr_tail
   | Export_unreadable error -> "export.json: " ^ Headless.error_to_string error
-  | Transcript_unreadable error -> "stdout: " ^ Headless.error_to_string error
-  | Exit_code_mismatch { process; export } ->
+  | Transcript_unreadable { error; usage = _ } -> "stdout: " ^ Headless.error_to_string error
+  | Exit_code_mismatch { process; export; usage = _ } ->
     Printf.sprintf "Vibe exited %d but export.json says %d" process export
-  | Outcome_exit_mismatch { outcome; exit_code } ->
+  | Outcome_exit_mismatch { outcome; exit_code; usage = _ } ->
     Printf.sprintf
       "Vibe outcome %s came with exit %d"
       (Headless.outcome_to_wire outcome)
@@ -197,10 +217,7 @@ let stderr_tail stderr =
 
 let transcript_of_stdout = function
   | "" -> Ok No_output
-  | stdout ->
-    (match Headless.decode_entries stdout with
-     | Ok entries -> Ok (Entries entries)
-     | Error error -> Error (Transcript_unreadable error))
+  | stdout -> Result.map (fun entries -> Entries entries) (Headless.decode_entries stdout)
 ;;
 
 let classify ~exit_code ~export_json ~stdout ~stderr =
@@ -211,15 +228,19 @@ let classify ~exit_code ~export_json ~stdout ~stderr =
     (match Headless.decode_export json with
      | Error error -> Error (Export_unreadable error)
      | Ok export when export.exit_code <> exit_code ->
-       Error (Exit_code_mismatch { process = exit_code; export = export.exit_code })
+       Error
+         (Exit_code_mismatch
+            { process = exit_code; export = export.exit_code; usage = export.usage })
      | Ok export ->
        (match Headless.exit_code_of_outcome export.outcome with
         | Some expected when expected <> exit_code ->
-          Error (Outcome_exit_mismatch { outcome = export.outcome; exit_code })
+          Error
+            (Outcome_exit_mismatch
+               { outcome = export.outcome; exit_code; usage = export.usage })
         | Some _ | None ->
-          Result.map
-            (fun transcript -> { export; transcript; stderr_tail })
-            (transcript_of_stdout stdout)))
+          (match transcript_of_stdout stdout with
+           | Ok transcript -> Ok { export; transcript; stderr_tail }
+           | Error error -> Error (Transcript_unreadable { error; usage = export.usage }))))
 ;;
 
 let read_export output_dir =

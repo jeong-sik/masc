@@ -623,6 +623,7 @@ let resolve_official_client_purge_artifacts config ~keeper_name =
                  , [] ))
             | Runtime_schema.Codex_app_server_runtime
             | Runtime_schema.Claude_code_runtime
+            | Runtime_schema.Vibe_cli_runtime
             | Runtime_schema.Messages_api
             | Runtime_schema.Chat_completions_api
             | Runtime_schema.Ollama_api

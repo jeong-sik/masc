@@ -47,7 +47,8 @@ let config ~base_path =
 let declared_provider (config:Runtime_schema.config) id =
   List.find_opt (fun (p:Runtime_schema.provider) -> p.id=id) config.providers
 (* Web setup drives the connection kinds Runtime_setup_spec renders; Gemini
-   needs its own setup path. Adding an api_format makes this a compile error. *)
+   needs its own setup path, and Vibe has no web setup. Adding an api_format
+   makes this a compile error. *)
 let choice_of_api_format : Runtime_schema.api_format -> (Runtime_setup_spec.choice,error) result = function
   | Runtime_schema.Chat_completions_api -> Ok Runtime_setup_spec.Openai_compatible
   | Runtime_schema.Messages_api -> Ok Runtime_setup_spec.Messages
@@ -56,7 +57,8 @@ let choice_of_api_format : Runtime_schema.api_format -> (Runtime_setup_spec.choi
   | Runtime_schema.Claude_code_runtime -> Ok Runtime_setup_spec.Claude_code
   | Runtime_schema.Antigravity_cli_runtime -> Ok Runtime_setup_spec.Antigravity
   | Runtime_schema.Muse_serve_runtime -> Ok Runtime_setup_spec.Muse
-  | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api -> Error Unsupported_connection
+  | Runtime_schema.Gemini_api | Runtime_schema.Vertex_gemini_api
+  | Runtime_schema.Vibe_cli_runtime -> Error Unsupported_connection
 let choice config ~id ~protocol =
   match declared_provider config id with
   | Some provider ->

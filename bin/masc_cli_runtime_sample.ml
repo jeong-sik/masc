@@ -41,7 +41,8 @@ let sample ~sw ~net ~scenario ~run_id ~sample_index ~runtime_id =
       | Runtime_execution.Claude_code _
       | Runtime_execution.Codex_app_server _
       | Runtime_execution.Antigravity_cli _
-      | Runtime_execution.Muse_serve _ ->
+      | Runtime_execution.Muse_serve _
+      | Runtime_execution.Vibe_cli _ ->
           report "not_supported"
             [ "reason", `String "This sampler requires Agent Core execution; CLI transports have separate session semantics" ];
           false

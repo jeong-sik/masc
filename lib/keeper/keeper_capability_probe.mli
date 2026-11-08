@@ -152,6 +152,9 @@ type invocation_error =
           client actually reads. Answering from the descriptor table instead
           would report advertisement as consumption — the distinction F1 of the
           2026-08-12 audit turned on. *)
+  | No_tool_channel of string
+      (** {!probe_official_client_invocation} was asked about a Vibe runtime,
+          which takes no MASC tools in any form, so no probe applies. *)
   | Not_muse_lane of string
   | Muse_home_unavailable of string
   | Not_antigravity_lane of string
@@ -232,7 +235,8 @@ val probe_official_client_invocation
     Antigravity and Muse are refused with {!Tools_only_via_mcp_bridge}: its entry point
     declares no tool list, so its surface exists only once the per-turn MCP
     bridge is up. Answering from MASC's descriptor table instead would repeat
-    the 2026-08-12 mistake of reading advertisement as consumption. *)
+    the 2026-08-12 mistake of reading advertisement as consumption. Vibe is
+    refused with {!No_tool_channel}. *)
 
 val probe_antigravity_invocation
   :  sw:Eio.Switch.t

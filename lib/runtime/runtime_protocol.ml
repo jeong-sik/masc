@@ -105,6 +105,7 @@ let protocol_declarations =
     ; api_format = Runtime_schema.Muse_serve_runtime
     ; editor = muse_serve_editor
     }
+  ; hidden_protocol "vibe-cli" Runtime_schema.Vibe_cli_runtime
   ]
 ;;
 

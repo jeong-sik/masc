@@ -1021,7 +1021,7 @@ let unavailable_assignments content assignments =
       | Some runtime ->
         match runtime.execution, Runtime_instance.capabilities_for_runtime runtime with
         | (Runtime_execution.Codex_app_server _ | Claude_code _
-          | Antigravity_cli _ | Muse_serve _), _ -> None
+          | Antigravity_cli _ | Muse_serve _ | Vibe_cli _), _ -> None
         | Runtime_execution.Agent_core _, Some _ -> None
         | Runtime_execution.Agent_core provider_config, None ->
           let missing : Runtime.missing_catalog_model =

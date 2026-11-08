@@ -288,6 +288,39 @@ official-client lane 후보의 종류·자격 증명·계약·관측·실패 처
 - 판단: 준비 검사(L2b)는 이 경로로 한다. Vibe 호출이 Vibe 몫 계량기를 올린 것을
   한 번 봤다. API 쪽 계량기와의 관계는 아직 모른다.
 
+### 4.3 L3 카탈로그 층 (2026-11-08)
+
+- runtime.toml 에 `protocol = "vibe-cli"` 를 쓴다. `command` 는 `vibe` 실행
+  파일이고, binding 의 `api-name` 이 Vibe 의 `--model` 이 된다. 편집기에는
+  나오지 않는다. catalog 행이 없어서 binding·provider·모델 중 한 곳에
+  `max-context` 를 적어야 load 된다.
+- Vibe 는 운영자의 `~/.vibe/config.toml` 과 keychain 로그인을 그대로 쓴다.
+  provider 는 credentials 와 `account-home` 을 적지 않는다. lane 전용
+  `VIBE_HOME` 은 그 아래에서도 keyring 이 읽히는지 잰 뒤에 정한다.
+- 부르는 곳은 Fusion 패널과 `masc-lane-cli-probe` 둘이다.
+  - Keeper 턴은 dispatch 전에 거절한다. Keeper 턴 경로는 시범 배정 층이
+    붙인다.
+  - exact-output 목록에는 설 수 없다. headless 호출에 output schema 를 넘길
+    자리가 없다.
+- 호출에는 MASC 시간 한도가 없다(운영자 결정, 11-08). 끝내는 방법은 부르는
+  fiber 를 취소하는 것뿐이다.
+  - 모델에 `turn-timeout-s`(`0` 포함)나 `reasoning-effort` 를 적은 binding 은
+    materialize 되지 않는다.
+  - Fusion 그룹이 `timeout_s` 를 적으면 그 패널리스트는 프로세스를 띄우기
+    전에 거절한다. 이미지와 output schema 도 같다.
+- 패널리스트는 빈 임시 디렉터리를 `--workdir` 로 받고 `--trust` 는 받지
+  않는다. 답은 `finished` 로 끝난 실행의 마지막 항목이다. 그 항목이
+  assistant 메시지가 아니면 답이 없다고 본다. 앞선 assistant 메시지를 답으로
+  잡지 않는다.
+- 준비 검사는 `masc-lane-cli-probe --vibe-acp PATH` 가 시도 전에 한 번 한다.
+  budget 을 모르면 그렇다고 찍고 진행한다(운영자 결정, 11-08). 다른 이유로
+  준비가 안 됐으면 exit 3 으로 멈춘다.
+- 패널 실패는 MASC 가 정한 시한이나 Vibe 자신의 `deadline` 만 `Timeout` 이고,
+  나머지는 `Provider_error` 다. exact-output 실패 분류는 두지 않는다. Vibe 가
+  그 목록에 못 서서, 분류해도 부르는 곳이 없다. 구독 몫 소진은 아직 typed 로
+  나누지 않는다(§2.5).
+- 남은 것: 소비 곡선 실측과 keeper 시범 배정, 몫 소진 출력 실측.
+
 ## 5. 리스크
 
 - `--output json`/`streaming` 프레임과 `export.json` 의 필드는 문서가 개요만

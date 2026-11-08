@@ -662,7 +662,8 @@ let apply_runtime_model_input_capabilities
 (* A model declaration cannot make its host transport carry a media block.
    The official-client adapters accept text plus inline images for Codex,
    Claude and Muse Code, and text only for Antigravity
-   (Keeper_official_client_host). *)
+   (Keeper_official_client_host). Vibe takes text only: Runtime_vibe_cli
+   hands it the prompt as one text file. *)
 let apply_execution_input_capabilities execution
     (caps : Llm_provider.Capabilities.capabilities) =
   match execution with
@@ -675,7 +676,7 @@ let apply_execution_input_capabilities execution
     ; supports_video_input = false
     ; supports_document_input = false
     }
-  | Runtime_execution.Antigravity_cli _ ->
+  | Runtime_execution.Antigravity_cli _ | Runtime_execution.Vibe_cli _ ->
     { caps with
       supports_multimodal_inputs = false
     ; supports_image_input = false
@@ -713,7 +714,8 @@ let input_capabilities_of_runtime (rt : Runtime_instance.t) =
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Claude_code _
     | Runtime_execution.Antigravity_cli _
-    | Runtime_execution.Muse_serve _ ->
+    | Runtime_execution.Muse_serve _
+    | Runtime_execution.Vibe_cli _ ->
       Llm_provider.Capabilities.default_capabilities
   in
   input_capabilities_with_runtime provider_caps rt

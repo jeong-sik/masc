@@ -12,7 +12,12 @@
     This runs [Masc.Keeper_lane_cli_oneshot.run] itself rather than reimplementing
     the invocation, so what it reports is what the lane would get.
 
-    Usage: masc-lane-cli-probe --lane <name> --runtime <id> [--trials N] *)
+    With [--vibe-acp PATH] on a Vibe runtime, the probe first asks
+    [vibe-acp] once whether Vibe can take the call
+    ({!Runtime_vibe_acp_readiness}).
+
+    Usage: masc-lane-cli-probe --lane <name> --runtime <id> [--trials N]
+    [--vibe-acp PATH] *)
 
 (* verifier_exact is absent on purpose: its channel is a report_review_verdict
    tool call, and this transport has no tool channel to offer. A CLI slot on
@@ -52,6 +57,96 @@ let hitl_case () =
 ;;
 
 let cases = [ "librarian", librarian_case; "hitl", hitl_case ]
+
+(* The ready read on Vibe 3.1.0 took 5.9 s (the #49849 smoke). This bound only
+   keeps a vibe-acp that never answers from holding the probe. *)
+let vibe_readiness_timeout_s = 30.0
+
+(* vibe-acp opens its session in an empty private directory, as the panelist
+   call runs in one, so neither loads a project [.vibe]. *)
+let read_vibe_readiness env ~acp_path =
+  match Filename.temp_dir ~perms:0o700 "masc-vibe-readiness-" "" with
+  | exception Sys_error detail -> Error ("cannot create the readiness workdir: " ^ detail)
+  | workdir ->
+    Eio.Switch.run
+    @@ fun sw ->
+    Eio.Switch.on_release sw (fun () ->
+      try Fs_compat.remove_tree workdir with
+      | (Sys_error _ | Unix.Unix_error _) as exn ->
+        Printf.eprintf
+          "vibe-acp readiness left %s behind: %s\n%!"
+          workdir
+          (Printexc.to_string exn));
+    Runtime_vibe_acp_readiness.read
+      ~mgr:(Eio.Stdenv.process_mgr env)
+      ~clock:(Eio.Stdenv.clock env)
+      ~fs:(Eio.Stdenv.fs env)
+      ~workdir
+      ~cli_path:acp_path
+      ~timeout_s:vibe_readiness_timeout_s
+      ()
+    |> Result.map_error Runtime_vibe_acp_readiness.error_to_string
+;;
+
+(* A missing budget is reported and the probe goes on (owner decision, 11-08).
+   Any other reason stops it before the first trial, which would only measure
+   the refusal. *)
+let budget_line (budget : Runtime_vibe_acp_readiness.budget) =
+  Printf.sprintf
+    "Vibe Code allowance %.2f%% used, pay-as-you-go %s, resets %s"
+    budget.usage_percentage
+    (if budget.payg_enabled then "on" else "off")
+    (Option.value budget.reset_at ~default:"(not given)")
+;;
+
+(* The readiness binary is the flag's, the trials spawn the runtime's
+   command; nothing ties the two to one Vibe install, so the line names
+   both. *)
+let require_vibe_ready env ~runtime_id ~acp_path =
+  let cli_path =
+    match
+      Option.map
+        (fun runtime -> runtime.Runtime_instance.execution)
+        (Runtime.get_runtime_by_id runtime_id)
+    with
+    | Some (Runtime_execution.Vibe_cli execution) -> execution.cli_path
+    | Some
+        ( Runtime_execution.Agent_core _
+        | Runtime_execution.Codex_app_server _
+        | Runtime_execution.Antigravity_cli _
+        | Runtime_execution.Claude_code _
+        | Runtime_execution.Muse_serve _ ) ->
+      Printf.eprintf "--vibe-acp applies to a vibe-cli runtime only; %s is not one\n%!" runtime_id;
+      exit 2
+    | None ->
+      Printf.eprintf
+        "--vibe-acp: no runtime %s materialized (it is not declared, or its binding \
+         was refused at load)\n%!"
+        runtime_id;
+      exit 2
+  in
+  match read_vibe_readiness env ~acp_path with
+  | Error detail ->
+    Printf.eprintf "vibe-acp readiness read failed (%s): %s\n%!" acp_path detail;
+    exit 3
+  | Ok readiness ->
+    (match Runtime_vibe_acp_readiness.verdict readiness with
+     | Ok (Runtime_vibe_acp_readiness.Known budget) ->
+       Printf.printf "vibe-acp ready (%s): %s; trials run %s\n%!" acp_path (budget_line budget)
+         cli_path
+     | Ok Runtime_vibe_acp_readiness.Unknown ->
+       Printf.printf
+         "vibe-acp ready (%s): Vibe gave no budget, so the probe goes on without one; \
+          trials run %s\n%!"
+         acp_path
+         cli_path
+     | Error reasons ->
+       Printf.eprintf
+         "vibe-acp not ready (%s): %s\n%!"
+         acp_path
+         (String.concat "; " (List.map Runtime_vibe_acp_readiness.not_ready_to_string reasons));
+       exit 3)
+;;
 
 let () =
   let args =
@@ -111,6 +206,9 @@ let () =
 " config_path detail;
      exit 2
    | Ok () -> ());
+  Option.iter
+    (fun acp_path -> require_vibe_ready env ~runtime_id:!runtime ~acp_path)
+    args.Masc_lane_cli_probe_args.vibe_acp;
   let module String_map = Map.Make (String) in
   let outcomes = ref String_map.empty in
   let bump key =

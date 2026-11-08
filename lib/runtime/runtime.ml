@@ -199,7 +199,8 @@ let exact_slot_lacks_body_deadline ~(target_source : exact_output_target_source)
      | ( Runtime_execution.Codex_app_server _
        | Runtime_execution.Claude_code _
        | Runtime_execution.Antigravity_cli _
-       | Runtime_execution.Muse_serve _ ), (Some _ | None) -> false)
+       | Runtime_execution.Muse_serve _
+       | Runtime_execution.Vibe_cli _ ), (Some _ | None) -> false)
 ;;
 
 (* Rule 3 of RFC-runtime-two-layers. An HTTP slot of an exact-output lane is
@@ -304,7 +305,8 @@ let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t lis
          | ( Runtime_execution.Codex_app_server _
            | Runtime_execution.Claude_code _
            | Runtime_execution.Antigravity_cli _
-           | Runtime_execution.Muse_serve _ ), _ -> None
+           | Runtime_execution.Muse_serve _
+           | Runtime_execution.Vibe_cli _ ), _ -> None
          | Runtime_execution.Agent_core _, Some _ -> None
          | Runtime_execution.Agent_core provider_config, None ->
            let provider_label =
@@ -654,7 +656,8 @@ let materialize_config
             | Runtime_execution.Codex_app_server _
             | Runtime_execution.Claude_code _
             | Runtime_execution.Antigravity_cli _
-            | Runtime_execution.Muse_serve _ -> None)
+            | Runtime_execution.Muse_serve _
+            | Runtime_execution.Vibe_cli _ -> None)
          runtimes)
     |> Result.map_error (fun disagreements ->
       Admission_allowances_disagree disagreements)
@@ -919,7 +922,8 @@ let exact_output_targets runtimes =
        | Runtime_execution.Codex_app_server _
        | Runtime_execution.Claude_code _
        | Runtime_execution.Antigravity_cli _
-       | Runtime_execution.Muse_serve _ -> None)
+       | Runtime_execution.Muse_serve _
+       | Runtime_execution.Vibe_cli _ -> None)
     runtimes
 ;;
 
@@ -989,7 +993,8 @@ let exact_output_runtime_observations ~origin runtimes =
         Some (runtime.id, Runtime_exact_output_registry.{
           candidate = runtime.candidate_backpressure; quota_scope = runtime.quota_scope })
       | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
-      | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ -> None) runtimes
+      | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _
+      | Runtime_execution.Vibe_cli _ -> None) runtimes
 ;;
 
 let publish_exact_output_registry ?runtime_observations ?required_lane_ids ?excused_lane_ids ~lanes resolver_snapshot =
@@ -1208,7 +1213,8 @@ let verifier_runtime_admission (runtime : t) =
     Error (runtime.id ^ ": completion verifier requires model tools-support")
   | Runtime_execution.Codex_app_server _
   | Runtime_execution.Antigravity_cli _
-  | Runtime_execution.Muse_serve _ ->
+  | Runtime_execution.Muse_serve _
+  | Runtime_execution.Vibe_cli _ ->
     Error (runtime.id ^ ": completion verifier requires native-tool suppression, which this client does not support")
 ;;
 
@@ -1229,7 +1235,8 @@ let verifier_cli_slot_admission_in ~runtimes ~lane_ids ~runtime_id =
      | Runtime_execution.Agent_core _ ->
        Error (runtime_id ^ ": verifier CLI slot must name an official client")
      | Runtime_execution.Claude_code _ | Runtime_execution.Codex_app_server _
-     | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ ->
+     | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _
+     | Runtime_execution.Vibe_cli _ ->
        verifier_runtime_admission runtime)
 ;;
 
@@ -3173,7 +3180,8 @@ let first_run_runtime_text ?(fallback_runtime_ids = []) ?(bind_imp = false) ~run
       | ( Runtime_execution.Codex_app_server _
         | Runtime_execution.Claude_code _
         | Runtime_execution.Antigravity_cli _
-        | Runtime_execution.Muse_serve _ ), (Some _ | None), (Runtime_binding_targets | Replacement_catalog_targets _) -> next
+        | Runtime_execution.Muse_serve _
+        | Runtime_execution.Vibe_cli _ ), (Some _ | None), (Runtime_binding_targets | Replacement_catalog_targets _) -> next
     in
     let next =
       Toml_line_editor.edit_table_multiline_array next
@@ -3616,7 +3624,8 @@ let capability_of_runtime (rt : t) : runtime_capability =
     | Runtime_execution.Codex_app_server _ ->
       Rejects_oversize_input
     | Runtime_execution.Antigravity_cli _
-    | Runtime_execution.Muse_serve _ ->
+    | Runtime_execution.Muse_serve _
+    | Runtime_execution.Vibe_cli _ ->
       Truncates_silently
     | Runtime_execution.Agent_core _ ->
       (match context_window with
@@ -3629,7 +3638,8 @@ let capability_of_runtime (rt : t) : runtime_capability =
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Antigravity_cli _ ->
       Flag_json_schema
-    | Runtime_execution.Muse_serve _ ->
+    | Runtime_execution.Muse_serve _
+    | Runtime_execution.Vibe_cli _ ->
       Prompted_json
     | Runtime_execution.Agent_core provider_config ->
       (match Llm_provider.Provider_config.capabilities_for_config_model provider_config with
@@ -3647,7 +3657,8 @@ let capability_of_runtime (rt : t) : runtime_capability =
       && (Provider_tool_support.agent_core_capabilities_of_config provider)
            .Llm_provider.Capabilities.supports_system_prompt
     | Runtime_execution.Codex_app_server _
-    | Runtime_execution.Antigravity_cli _ ->
+    | Runtime_execution.Antigravity_cli _
+    | Runtime_execution.Vibe_cli _ ->
       false
     | Runtime_execution.Muse_serve _ ->
       Runtime_native_tools.muse_none_supported
@@ -3658,6 +3669,7 @@ let capability_of_runtime (rt : t) : runtime_capability =
     | Runtime_execution.Codex_app_server _
     | Runtime_execution.Antigravity_cli _
     | Runtime_execution.Muse_serve _
+    | Runtime_execution.Vibe_cli _
     | Runtime_execution.Agent_core _ ->
       true
   in

@@ -200,7 +200,8 @@ let provider_kind_for_http_provider ?declaration (provider : Runtime_schema.prov
     | ( Codex_app_server_runtime
       | Claude_code_runtime
       | Antigravity_cli_runtime
-      | Muse_serve_runtime ), _ ->
+      | Muse_serve_runtime
+      | Vibe_cli_runtime ), _ ->
       refuse_unread_wire_kind
         provider
         ~reason:"an official client speaks no HTTP dialect"
@@ -217,7 +218,7 @@ let provider_kind_for_http_provider ?declaration (provider : Runtime_schema.prov
   in
   match provider.api_format with
   | Codex_app_server_runtime | Claude_code_runtime | Antigravity_cli_runtime
-  | Muse_serve_runtime ->
+  | Muse_serve_runtime | Vibe_cli_runtime ->
     Error
       (Printf.sprintf
          "provider %S uses official CLI protocol %s and cannot be materialized as an \
@@ -349,7 +350,8 @@ let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~declar
            | Runtime_schema.Codex_app_server_runtime
            | Runtime_schema.Antigravity_cli_runtime
            | Runtime_schema.Claude_code_runtime
-           | Runtime_schema.Muse_serve_runtime ),
+           | Runtime_schema.Muse_serve_runtime
+           | Runtime_schema.Vibe_cli_runtime ),
            ( Llm_provider.Provider_kind.Anthropic
            | Llm_provider.Provider_kind.Kimi
            | Llm_provider.Provider_kind.OpenAI_compat
@@ -690,8 +692,8 @@ let validate_parallel_tool_policy (provider : Runtime_schema.provider)
     ~(model_id : string) ~supports_parallel_tool_suppression ~disable_parallel_tool_use =
   match provider.api_format, disable_parallel_tool_use with
   | (Runtime_schema.Codex_app_server_runtime | Antigravity_cli_runtime
-    | Claude_code_runtime | Muse_serve_runtime | Ollama_api | Gemini_api
-    | Vertex_gemini_api), true ->
+    | Claude_code_runtime | Muse_serve_runtime | Vibe_cli_runtime | Ollama_api
+    | Gemini_api | Vertex_gemini_api), true ->
     Error
       (Printf.sprintf
          "binding %s.%s declares disable-parallel-tool-use = true, but \
@@ -707,7 +709,8 @@ let validate_parallel_tool_policy (provider : Runtime_schema.provider)
             provider.id model_id provider.id))
   | (Messages_api | Chat_completions_api), false
   | (Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime
-    | Muse_serve_runtime | Ollama_api | Gemini_api | Vertex_gemini_api), false -> Ok ()
+    | Muse_serve_runtime | Vibe_cli_runtime | Ollama_api | Gemini_api
+    | Vertex_gemini_api), false -> Ok ()
 ;;
 
 let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num_ctx ?repeat_penalty
@@ -752,7 +755,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
          | None -> Ok (Llm_provider.Provider_config.Bearer_token, Runtime_google_adc.credential_source ()))
       | Messages_api | Chat_completions_api | Ollama_api | Gemini_api
       | Codex_app_server_runtime | Claude_code_runtime | Antigravity_cli_runtime
-      | Muse_serve_runtime ->
+      | Muse_serve_runtime | Vibe_cli_runtime ->
         Ok (Llm_provider.Provider_config.Provider_default, Llm_provider.Provider_config.Static_credential)
     in
     (match provider_kind_for_http_provider ?declaration provider with
@@ -1087,6 +1090,56 @@ let muse_serve_execution (provider : Runtime_schema.provider)
             }))
 ;;
 
+(* A Vibe call has no MASC time limit (owner decision), so a declared
+   [turn-timeout-s] would be a deadline nothing enforces and is refused.
+   Vibe reads the user's own config; the runtime's [command] is the only
+   path MASC holds. *)
+let vibe_cli_execution (provider : Runtime_schema.provider)
+    (spec : Runtime_schema.model_spec) : (Runtime_execution.t, string) result =
+  match provider.transport with
+  | Http _ ->
+    Error
+      (Printf.sprintf
+         "provider %S uses protocol vibe-cli but declares an HTTP endpoint; \
+          the official Mistral Vibe CLI command is required"
+         provider.id)
+  | Cli command when String.trim command = "" ->
+    Error
+      (Printf.sprintf
+         "provider %S declares an empty Mistral Vibe CLI command"
+         provider.id)
+  | Cli command ->
+    (match provider.credentials, spec.reasoning_effort, spec.turn_timeout_s with
+     | Some _, _, _ ->
+       Error
+         (Printf.sprintf
+            "provider %S uses vibe-cli and must not declare credentials; \
+             Mistral Vibe owns its login"
+            provider.id)
+     | None, _, _ when not provider.is_non_interactive ->
+       Error
+         (Printf.sprintf
+            "provider %S uses vibe-cli and must declare \
+             is-non-interactive = true"
+            provider.id)
+     | None, Some _, _ ->
+       Error
+         (Printf.sprintf
+            "binding %s.%s declares reasoning-effort, but a Mistral Vibe call \
+             has no reasoning control"
+            provider.id
+            spec.id)
+     | None, None, Some _ ->
+       Error
+         (Printf.sprintf
+            "binding %s.%s declares turn-timeout-s, but a Mistral Vibe call has \
+             no MASC time limit"
+            provider.id
+            spec.id)
+     | None, None, None ->
+       Ok (Runtime_execution.Vibe_cli { cli_path = command; model = spec.api_name }))
+;;
+
 let refuse_anthropic_thinking_control_on_official_client
       (provider : Runtime_schema.provider)
       (spec : Runtime_schema.model_spec)
@@ -1095,7 +1148,8 @@ let refuse_anthropic_thinking_control_on_official_client
   | Runtime_schema.Codex_app_server_runtime
   | Runtime_schema.Antigravity_cli_runtime
   | Runtime_schema.Claude_code_runtime
-  | Runtime_schema.Muse_serve_runtime ->
+  | Runtime_schema.Muse_serve_runtime
+  | Runtime_schema.Vibe_cli_runtime ->
     (match
        Option.bind spec.Runtime_schema.capabilities (fun caps ->
          caps.Runtime_schema.anthropic_thinking_control)
@@ -1126,7 +1180,8 @@ let materialize_execution ~construction (cfg : Runtime_schema.config) (binding :
        let open Result.Syntax in
        let* () = match provider.api_format with
          | Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api -> Ok ()
-         | Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime | Muse_serve_runtime ->
+         | Codex_app_server_runtime | Antigravity_cli_runtime | Claude_code_runtime | Muse_serve_runtime
+         | Vibe_cli_runtime ->
            validate_parallel_tool_policy provider ~model_id:binding.model_id
              ~supports_parallel_tool_suppression:false
              ~disable_parallel_tool_use:binding.disable_parallel_tool_use in
@@ -1142,6 +1197,8 @@ let materialize_execution ~construction (cfg : Runtime_schema.config) (binding :
           official (claude_code_execution provider spec)
         | Runtime_schema.Muse_serve_runtime ->
           official (muse_serve_execution provider spec)
+        | Runtime_schema.Vibe_cli_runtime ->
+          official (vibe_cli_execution provider spec)
         | Messages_api | Chat_completions_api | Ollama_api | Gemini_api | Vertex_gemini_api ->
           Result.map
             (fun (selected : provider_materialization) ->

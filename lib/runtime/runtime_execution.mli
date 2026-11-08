@@ -4,9 +4,10 @@
     [Codex_app_server] means the official Codex client owns the whole turn;
     [Claude_code] means the same for the official Claude Code client;
     [Antigravity_cli] means the official Antigravity client owns its model and
-    built-in tool loop; and [Muse_serve] means the same for Muse Code, driven
-    over [muse serve]. MASC owns admission, process lifetime, durable session
-    identity, and result projection. *)
+    built-in tool loop; [Muse_serve] means the same for Muse Code, driven
+    over [muse serve]; and [Vibe_cli] means the same for Mistral Vibe, run
+    once per call in headless mode. MASC owns admission, process lifetime,
+    durable session identity, and result projection. *)
 
 type codex_app_server =
   { cli_path : string
@@ -45,12 +46,21 @@ type muse_serve =
             unless the model declares [turn-timeout-s]. *)
   }
 
+type vibe_cli =
+  { cli_path : string
+        (** The runtime's [command]; Vibe reads the user's own config. *)
+  ; model : string
+        (** The binding's [api-name], passed as Vibe's [--model]. A Vibe call
+            has no MASC time limit. *)
+  }
+
 type t =
   | Agent_core of Llm_provider.Provider_config.t
   | Codex_app_server of codex_app_server
   | Antigravity_cli of antigravity_cli
   | Claude_code of claude_code
   | Muse_serve of muse_serve
+  | Vibe_cli of vibe_cli
 
 val same_account_selection : t -> t -> bool
 (** Compare captured official-client contexts without exposing credentials.
@@ -85,6 +95,10 @@ val checkpoint_owner : t -> checkpoint_owner
     forbids projecting the client's session state into an AGENT_CORE checkpoint. *)
 
 val usage_report : t -> usage_report
+
+val vibe_keeper_turn_refused : Agent_core.Error.t
+(** A [Vibe_cli] runtime serves one-shot calls only, so a Keeper turn on one
+    ends with this error before anything is dispatched. *)
 
 val claude_code_inline_result_bytes : int
 val tool_result_inline_ceiling_bytes : t -> int

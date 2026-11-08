@@ -1034,12 +1034,18 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Repositories ->
-      [ b Navigate "v" "full details" ~help:"read the complete selected path, Keeper assignments and errors"
-      ; b Navigate "j/k" "scroll"
-      ; b Act "Enter" "browse"
+      (* With no repository registered, the keys that read the one under the
+         cursor do nothing or answer with a notice. [a] and [/] still act:
+         the first opens the editor to register one, the second opens the
+         search line. *)
+      [ b Navigate "v" "full details" ~rows:Needs_row
+          ~help:"read the complete selected path, Keeper assignments and errors"
+      ; b Navigate "j/k" "scroll" ~rows:Needs_row
+      ; b Act "Enter" "browse" ~rows:Needs_row
           ~help:"open the repository tree, or the selected changed file"
-      ; b Navigate "H" "recent activity" ~help:"recorded clone writes by Keeper and Task in the last day"
-      ; b Act "d" "Git changes"
+      ; b Navigate "H" "recent activity" ~rows:Needs_row
+          ~help:"recorded clone writes by Keeper and Task in the last day"
+      ; b Act "d" "Git changes" ~rows:Needs_row
           ~help:"show the selected repository's current working-tree changes"
       ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"
       ; b Act "Esc" "back"
@@ -1048,15 +1054,19 @@ let for_surface = function
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching repository, or to a changed \
                  path while Git changes is open"
-      ; b Search "n / N" "next / previous match"
+      ; b Search "n / N" "next / previous match" ~rows:Needs_row
       ]
       @ row_list_jumps @ listing_meta
   | Changes ->
       (* "move", not "scroll": the keys move the marked row and the window
-         follows it, which is also what the surface's own footer says. *)
-      [ b Navigate "j/k" "move"
+         follows it, which is also what the surface's own footer says.
+
+         A keeper that wrote nothing in the window has no row. The keys that
+         read the row under the cursor answer with a notice or do nothing;
+         [ / ] still switches to the next keeper, so it stays. *)
+      [ b Navigate "j/k" "move" ~rows:Needs_row
       ; b Navigate "[ / ]" "keeper" ~help:"previous / next keeper"
-      ; b Act "Right / Enter" "written diff"
+      ; b Act "Right / Enter" "written diff" ~rows:Needs_row
           ~help:"what the call wrote, as a diff"
         (* Left closes an open diff and does nothing on the list; Esc closes
            the diff too and, on the list, goes back to the Keeper screen the
@@ -1065,14 +1075,14 @@ let for_surface = function
       ; b Act "Esc" "back" ~detail:List_only
           ~help:"back to the Keeper screen this list was opened from"
       ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the diff"
-      ; b Act "d" "tree diff" ~help:"what the tree holds now"
-      ; b Act "v" "view code"
+      ; b Act "d" "tree diff" ~rows:Needs_row ~help:"what the tree holds now"
+      ; b Act "v" "view code" ~rows:Needs_row
           ~help:"the file on the Code surface, read from the keeper's own \
                  workspace"
-      ; b Search "/" "find"
+      ; b Search "/" "find" ~rows:Needs_row
           ~help:"jump the cursor to a matching written path"
-      ; b Search "n / N" "next / previous match"
-      ; b Act "o" "editor" ~help:"open in $EDITOR / $NVIM"
+      ; b Search "n / N" "next / previous match" ~rows:Needs_row
+      ; b Act "o" "editor" ~rows:Needs_row ~help:"open in $EDITOR / $NVIM"
       ]
       @ row_list_jumps @ listing_meta
   | Connectors ->

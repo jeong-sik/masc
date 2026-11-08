@@ -53,6 +53,14 @@ let surfaces =
       T.Clients,
       [ "j/k"; "Enter"; "/"; "n / N"; "PgUp/PgDn"; "Home/End" ],
       [ "p / Esc"; "r"; "q" ] )
+  ; ( "Workspace",
+      T.Repositories,
+      [ "v"; "j/k"; "Enter"; "H"; "d"; "n / N"; "PgUp/PgDn"; "Home/End" ],
+      [ "a"; "/"; "Esc"; "r"; "q" ] )
+  ; ( "Changes",
+      T.Changes,
+      [ "j/k"; "Right / Enter"; "d"; "v"; "/"; "n / N"; "o"; "PgUp/PgDn"; "Home/End" ],
+      [ "[ / ]"; "Esc"; "r"; "q" ] )
   ]
 
 let test_each_surface_scopes_a_key_to_a_row () =

@@ -251,7 +251,7 @@ let render_repository_list (state : state) =
           (connection_badge state)
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repositories"
-    ~title ~hints:(Masc_tui_keys.footer_hints state.view)
+    ~title ~hints:(Masc_tui_keys.footer_hints ~has_rows:(shown > 0) state.view)
     ~body:(fun ~budget c ->
       let split, list_width, detail_width, detail, errors, content_height, overflowing =
         repository_studio_geometry state ~cols ~budget ~cursor:state.repositories_cursor in
@@ -891,7 +891,9 @@ let render_changes_list (state : state) =
   Buffer.add_string buf
     (* The footer is the key table's (for_surface Changes); never a literal here. *)
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false Changes));
+       ~hints:
+         (Masc_tui_keys.footer_hints ~detail_open:false ~has_rows:(shown > 0)
+            Changes));
   finish_surface state ~surface_key:"changes" ~rows:terminal_rows ~cols buf
 
 

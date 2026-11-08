@@ -39,6 +39,12 @@ val connection_inventory : config:Workspace.config -> access:Lane_addon_sources.
 (** Read all caller-visible ready services without selecting an export or
     issuing a browser command. Preserve worker failures and unready services
     as inventory issues. No attached service at all is an unavailable result. *)
+val act_route : Browser_selection.preference -> Browser_lane.Action.t -> (unit, string) result
+(** Whether a Page action may run on [preference]. open_tab and control
+    actions name their observed client; take_over alone may leave it out with
+    lane=live, to reopen or reclaim the Space its worker reported missing or
+    user-owned. {!issue} and the Keeper argument parser answer with this one
+    rule. *)
 type receipt = {binding:Browser_binding.t;data:Yojson.Safe.t;
   raw_result:Mcp_protocol.Mcp_types.tool_result}
 (** The original successful MCP receipt remains available if a caller's

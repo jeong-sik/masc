@@ -149,12 +149,7 @@ let prepare ~upload_paths tool json =
         | (Open_tab _|Control _|On_tab {interaction=(Back|Forward|Reload
             |Close_tab|Stop_loading|Accept_dialog _|Dismiss_dialog|Set_cookie _|Delete_cookie _|Set_emulation _|Clear_emulation|Block_requests _|Unblock_requests);_}),(None|Some _) -> Ok action in
       let* request=Legacy.tool_request json in
-      let* ()=match action,request.route with
-        | (B.Action.Open_tab _|Control _),Browser_selection.Exact (B.Live_route None)
-        | Control _,Automatic ->
-            Error "live creation, control and Page management actions require an explicit observed clientId"
-        | (Open_tab _|On_tab _),(Automatic|Exact (Live_route _))
-        | Control _,Exact (Live_route (Some _)) -> Ok () in
+      let* ()=Host.act_route request.route action in
       prepared request Raw (B.Page_act action)
 
   | Tabs ->

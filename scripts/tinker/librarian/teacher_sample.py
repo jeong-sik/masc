@@ -12,8 +12,9 @@
 The teacher is the base model on the 256K training ID at reasoning_effort
 "high", asked exactly as MASC's exact lane asks. Each request gets up to
 ATTEMPTS answers. The first answer is kept when MASC's checks accept it, every
-candidate outcome matches the label (a correction also supersedes its target),
-every planted stale fact is dropped, and nothing else is dropped. Answers from
+candidate is scored correct (`eval_admission.score_synth`: the outcome and the
+claim it names), every planted stale fact is dropped, nothing else is dropped,
+and nothing is absorbed, since no label asks for an absorb. Answers from
 other providers are never used for training. An HTTP error or a missing
 response is not an attempt: it stops that request, and a rerun with the same
 --out sends it again.
@@ -53,6 +54,8 @@ def rejection(item: V.SynthItem, check: V.Check) -> str | None:
         return "outcome"
     if score["planted_dropped"] != score["planted"]:
         return "stale_kept"
+    if score["absorbed"]:
+        return "absorbed"
     if score["dropped"] != score["dropped_expected"]:
         return "unexpected_drop"
     return None

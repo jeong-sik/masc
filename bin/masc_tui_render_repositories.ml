@@ -292,7 +292,10 @@ let render_repository_list (state : state) =
         @ (if overflowing then
              ["repositories " ^ Masc_tui_scroll.window_text ~scroll ~height:content_height shown]
            else []) in
-      let listing = studio_panel ~width:list_width ~title:"Repositories · j/k select" ~lines in
+      (* [j/k] steps over a row; with none, the title does not offer it. *)
+      let listing_title =
+        if shown = 0 then "Repositories" else "Repositories · j/k select" in
+      let listing = studio_panel ~width:list_width ~title:listing_title ~lines in
       if split then begin
         let height = max (List.length listing) (List.length detail) in
         let count = min budget height in

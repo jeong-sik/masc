@@ -38,7 +38,8 @@ type control = Hand_off | Take_over | Space_status | Finish_space of keep_pages 
 type t = Open_tab of string | Control of control
   | On_tab of { tab_id : int; interaction : interaction }
 (* The one control a live lane answers without a client: reclaiming the ego
-   task space whose task ended while the operator held it. *)
+   task space whose task ended while the operator held it, or opening again
+   the configured Space ego no longer lists. *)
 let is_take_over = function
   | Control Take_over -> true
   | Control (Hand_off|Space_status|Finish_space _|Wait_for_control _|Adopt_tab _|Release_tab _)

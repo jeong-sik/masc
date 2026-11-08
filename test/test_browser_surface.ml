@@ -404,7 +404,9 @@ let test_a_snapshot_target_is_checked_before_any_browser () =
     (reaches_the_addon_lookup (live (click @ url)))
 
 (* hand_off and take_over act on the whole space of a live ego connection,
-   named by its observed clientId. *)
+   named by its observed clientId. take_over alone may name only the live
+   lane: the host then asks the worker that reported its Space missing or
+   user-owned, so the Keeper parser must not refuse it first. *)
 let test_a_hand_off_is_checked_before_any_browser () =
   let module Cap = Masc.Browser_capabilities in
   let act fields = addon_tool Cap.Act fields in
@@ -412,10 +414,13 @@ let test_a_hand_off_is_checked_before_any_browser () =
   List.iter (fun (name, result) -> check bool name true (refused_as_input result))
     [ "a hand-off with no connection named", act ["lane",`String "live";"action",`String "hand_off"]
     ; "a hand-off with no lane", act ["action",`String "hand_off"]
-    ; "a hand-off of one tab", live ["action",`String "hand_off";"tabId",`Int 1] ];
+    ; "a hand-off of one tab", live ["action",`String "hand_off";"tabId",`Int 1]
+    ; "a take-over with neither lane nor connection", act ["action",`String "take_over"] ];
   List.iter (fun (name, result) -> check bool name true (reaches_the_addon_lookup result))
     [ "a hand-off on a named live connection goes on to find the browser Add-on", live ["action",`String "hand_off"]
-    ; "and so does a take-over", live ["action",`String "take_over"] ]
+    ; "and so does a take-over", live ["action",`String "take_over"]
+    ; "a take-over on the live lane alone goes on to its reclaim",
+      act ["lane",`String "live";"action",`String "take_over"] ]
 
 (* An ego snapshot is read over a live connection only, with its scope and
    root given to that mode alone and a root that is a ref. *)

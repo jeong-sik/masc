@@ -28,6 +28,13 @@
 # MASC_RELEASE_BASE_URL and MASC_REPO name the release the way
 # scripts/install.sh does; --no-guest-shim skips the step.
 #
+# The dashboard bundle goes the same way (scripts/lib/install-workspace-dashboard.sh,
+# #49980). A workspace that holds <workspace>/assets/dashboard gets this
+# checkout's assets/dashboard when its .build-stamp is newer, and keeps the old
+# bundle as dashboard-backup-<UTC time>. The checkout's bundle is the one
+# build-dashboard-if-needed.sh (make build) last built; this script does not
+# build it.
+#
 # Usage: scripts/install-local-build.sh [--prefix DIR]
 #                                       [--skip-build] [--build-dir DIR] [--base-path DIR]
 #                                       [--no-guest-shim]
@@ -448,6 +455,15 @@ else
   echo "installed masc, masc-tui, masc-deployment-preflight-helper, masc-check-runtime-deployment-preflight, masc-exec-ssh-bootstrap into $prefix (no browser Add-on)"
 fi
 echo "install-local-build: a running server keeps its old build; masc restart replaces it with this one"
+
+# The dashboard bundle the workspace serves is not part of the binaries, and
+# the server picks it up on the next request without a restart (#49980). The
+# step never fails the install.
+if [ "$workspace_kind" = directory ]; then
+  # shellcheck source=lib/install-workspace-dashboard.sh
+  . "$repo/scripts/lib/install-workspace-dashboard.sh"
+  install_workspace_dashboard "$repo/assets/dashboard" "$workspace_root"
+fi
 
 # The masc just installed writes the browser Add-on package it carries into
 # the workspace and declares it when the workspace has none, so the server

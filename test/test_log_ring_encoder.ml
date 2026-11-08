@@ -12,9 +12,10 @@
 
 let entry_of ?(seq = 0) ?(ts = "2026-05-14T00:00:00Z") ?(level = Log.Info)
     ?(source = Log.Structured) ?(module_name = "Test") ?keeper_name ?turn_id
-    ?(message = "hello") ?(details = `Null) ?(category = None) () : Log.Ring.entry =
+    ?(message = "hello") ?(details = `Null) ?(category = None)
+    ?(diagnostic_kind = None) () : Log.Ring.entry =
   { Log.Ring.seq; ts; level; source; module_name; keeper_name; turn_id;
-    message; details; category }
+    message; details; category; diagnostic_kind }
 
 let assoc_field name = function
   | `Assoc fields -> List.assoc_opt name fields

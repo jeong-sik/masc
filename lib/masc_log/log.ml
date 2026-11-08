@@ -50,6 +50,15 @@ let category_of_string_opt s : category option =
   | "broadcast" -> Some Broadcast
   | _ -> None
 
+(** A closed diagnostic classification for the few entries a dashboard
+    projection re-reads by meaning instead of by log wording. Kept in
+    memory only: the JSONL sink and the dashboard wire schema
+    (LogEntryRawSchema) are untouched, so rows restored from disk carry
+    no kind and are classified once at the load boundary. *)
+type diagnostic_kind =
+  | External_signal of string  (* "SIGTERM" | "SIGINT" — set by the server signal handler *)
+  | Agent_decode_failure       (* an agent record failed to decode (workspace / gRPC paths) *)
+
 type category_selector =
   | Category of category
   | Uncategorized
@@ -276,6 +285,7 @@ module Ring = struct
     message : string;
     details : Yojson.Safe.t;
     category : category option;
+    diagnostic_kind : diagnostic_kind option;
   }
 
   (** Live-window bounds of the ring: sequences in
@@ -304,6 +314,7 @@ module Ring = struct
       message = "";
       details = `Null;
       category = None;
+      diagnostic_kind = None;
     }
   let total = Atomic.make 0 (* next sequence to hand out *)
 
@@ -750,12 +761,36 @@ module Ring = struct
           keeper_name; turn_id; message;
           details = Yojson.Safe.Util.member "details" json;
           category;
+          diagnostic_kind = None;
         }
     | _ ->
         raise
           (Entry_decode_error
              (Printf.sprintf "expected JSON object, got %s"
                 (Yojson.Safe.to_string json)))
+
+  (* Legacy sink rows persisted before the typed diagnostic kind carry only
+     their message text, so this fold boundary is the one place string
+     matching is allowed: decoding wire where a string is all that remains
+     (the same rule RFC-0371 §6.1(3) applies to rehydrated provider wire).
+     Rows written after the kind was introduced carry it and skip the text
+     match entirely. *)
+  let classify_legacy_diagnostic (e : entry) : entry =
+    match e.diagnostic_kind with
+    | Some _ -> e
+    | None ->
+      let signal =
+        if String_util.contains_substring e.message "Received SIGTERM" then Some "SIGTERM"
+        else if String_util.contains_substring e.message "Received SIGINT" then Some "SIGINT"
+        else None
+      in
+      match signal with
+      | Some name -> { e with diagnostic_kind = Some (External_signal name) }
+      | None ->
+        if String_util.contains_substring e.message "invalid agent JSON"
+        then { e with diagnostic_kind = Some Agent_decode_failure }
+        else e
+  ;;
 
   let load_from_file dir =
     ensure_dir dir;
@@ -796,7 +831,7 @@ module Ring = struct
       Fs_compat.fold_jsonl_lines
         ~init:()
         ~f:(fun () ~line_no:_ json ->
-          let e = entry_of_json json in
+          let e = classify_legacy_diagnostic (entry_of_json json) in
           if e.seq > !max_seq_on_disk then max_seq_on_disk := e.seq;
           Queue.add e buf_ring;
           if Queue.length buf_ring > capacity then ignore (Queue.pop buf_ring))
@@ -897,6 +932,7 @@ module Ring = struct
       ?keeper_name
       ?turn_id
       ?category
+      ?diagnostic_kind
       ~level
       ~module_name
       ~message
@@ -927,6 +963,7 @@ module Ring = struct
         message;
         details;
         category;
+        diagnostic_kind;
       } in
     buf.(idx) <- entry;
     Eio.Condition.broadcast appended;
@@ -1156,6 +1193,7 @@ module type LOGGER = sig
     ?keeper_name:string ->
     ?turn_id:int ->
     ?category:category ->
+    ?diagnostic_kind:diagnostic_kind ->
     string ->
     unit
 
@@ -1179,16 +1217,16 @@ module type LOGGER = sig
     'a
 
   val debug :
-    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ?diagnostic_kind:diagnostic_kind -> ('a, unit, string, unit) format4 -> 'a
 
   val info :
-    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ?diagnostic_kind:diagnostic_kind -> ('a, unit, string, unit) format4 -> 'a
 
   val warn :
-    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ?diagnostic_kind:diagnostic_kind -> ('a, unit, string, unit) format4 -> 'a
 
   val error :
-    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ?diagnostic_kind:diagnostic_kind -> ('a, unit, string, unit) format4 -> 'a
 end
 
 (** Module-specific loggers.
@@ -1216,7 +1254,7 @@ module Make (M : sig val name : string end) = struct
     in
     level_to_int level >= threshold
 
-  let write_event level ?keeper_name ?turn_id ?category ~details message =
+  let write_event level ?keeper_name ?turn_id ?category ?diagnostic_kind ~details message =
     let level_str = level_to_string level in
     let prefix = match keeper_name with
       | Some kn ->
@@ -1227,12 +1265,12 @@ module Make (M : sig val name : string end) = struct
             (timestamp ()) level_str M.name
     in
     Console_sink.write (prefix ^ " " ^ message);
-    Ring.push ?keeper_name ?turn_id ?category
+    Ring.push ?keeper_name ?turn_id ?category ?diagnostic_kind
       ~level ~module_name:M.name ~message ~details ()
 
-  let emit level ?(details = `Null) ?keeper_name ?turn_id ?category message =
+  let emit level ?(details = `Null) ?keeper_name ?turn_id ?category ?diagnostic_kind message =
     if should_log_module level then
-      write_event level ?keeper_name ?turn_id ?category ~details message
+      write_event level ?keeper_name ?turn_id ?category ?diagnostic_kind ~details message
 
   let emit_lazy level ?keeper_name ?turn_id ?category build =
     if should_log_module level then begin
@@ -1240,8 +1278,8 @@ module Make (M : sig val name : string end) = struct
       write_event level ?keeper_name ?turn_id ?category ~details message
     end
 
-  let log_module level ?keeper_name ?turn_id ?category fmt =
-    Printf.ksprintf (fun msg -> emit level ?keeper_name ?turn_id ?category msg) fmt
+  let log_module level ?keeper_name ?turn_id ?category ?diagnostic_kind fmt =
+    Printf.ksprintf (fun msg -> emit level ?keeper_name ?turn_id ?category ?diagnostic_kind msg) fmt
 
   let routine_lazy ?(details = `Null) ?keeper_name ?turn_id ?category message =
     match routine_level () with
@@ -1260,10 +1298,10 @@ module Make (M : sig val name : string end) = struct
                ?keeper_name ?turn_id ?category msg)
       fmt
 
-  let debug ?keeper_name ?turn_id ?category fmt = log_module Debug ?keeper_name ?turn_id ?category fmt
-  let info ?keeper_name ?turn_id ?category fmt = log_module Info ?keeper_name ?turn_id ?category fmt
-  let warn ?keeper_name ?turn_id ?category fmt = log_module Warn ?keeper_name ?turn_id ?category fmt
-  let error ?keeper_name ?turn_id ?category fmt = log_module Error ?keeper_name ?turn_id ?category fmt
+  let debug ?keeper_name ?turn_id ?category ?diagnostic_kind fmt = log_module Debug ?keeper_name ?turn_id ?category ?diagnostic_kind fmt
+  let info ?keeper_name ?turn_id ?category ?diagnostic_kind fmt = log_module Info ?keeper_name ?turn_id ?category ?diagnostic_kind fmt
+  let warn ?keeper_name ?turn_id ?category ?diagnostic_kind fmt = log_module Warn ?keeper_name ?turn_id ?category ?diagnostic_kind fmt
+  let error ?keeper_name ?turn_id ?category ?diagnostic_kind fmt = log_module Error ?keeper_name ?turn_id ?category ?diagnostic_kind fmt
 end
 
 (** Pre-defined module loggers *)

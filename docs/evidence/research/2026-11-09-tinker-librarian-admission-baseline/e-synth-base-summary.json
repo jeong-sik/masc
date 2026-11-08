@@ -1,25 +1,24 @@
 {
  "set": "synth",
- "request": {
-  "reasoning_effort": "low",
-  "max_tokens": 32768
- },
+ "pass_lines_sha256": "6ad29c0d4f0e99d64bba938712976253fce0548c3611dba12d7512ec15549890",
  "targets": {
   "base": "thinkingmachines/Inkling-2-Small:peft:262144"
  },
- "items": 150,
- "spent_usd": 1.1532,
+ "spent_usd": 1.5557,
  "stopped": null,
  "by_target": {
   "base": {
-   "items": 150,
-   "valid": 141,
-   "valid_rate": 0.94,
-   "latency_p50_s": 12.785,
-   "cost_usd": 1.1532,
-   "outcome_accuracy": 0.8458149779735683,
-   "drop_precision": 0.9594594594594594,
-   "stale_drop_recall": 0.3770491803278688
+   "items": 144,
+   "valid": 133,
+   "valid_rate": 0.9236111111111112,
+   "http_errors": 0,
+   "latency_p50_s": 11.094999999999999,
+   "warm_share": 1.0,
+   "cost_usd": 0.6482,
+   "outcome_accuracy": 0.6893203883495146,
+   "drop_precision": 0.9795918367346939,
+   "absorbed": 41,
+   "stale_drop_recall": 0.1875
   }
  }
 }

@@ -57,6 +57,13 @@
 - #49959 는 Read, Grep, 읽기 권한 캡처, `intent=auto` 인 Execute 에서 이 검사를 빼요. `intent=request_effect` 와 Write·Edit·checkout·`keeper up` 은 그대로 막아요. 호스트 용량은 늘지 않아요.
 - 나머지 묶음은 실패 문구가 다음 행동을 이미 알려줘요(`Edit` 은 다시 읽기, `masc_board_post_get` 은 목록·검색이 돌려준 id 쓰기). 건수도 적어서 이번에 건드리지 않았어요.
 
+## Execute 가 붙드는 시간 (뒤 창)
+
+- 성공한 Execute 4,204건에서 원장 `duration_ms` 합은 7.07 h 이고 명령 자신의 `execution_time_ms` 합은 5.76 h 예요. 도구 쪽 오버헤드는 1.30 h(18%)이고 중앙값은 0.01~0.02 s 예요. 오버헤드가 5초 이상인 호출 149건이 0.56 h 를 차지해요.
+- 60초 이상 붙든 호출은 31건·2.19 h(31%)예요. `sleep` 1.19 h, `gh run watch` 0.44 h 가 큰 몫이에요. 60초 미만 4,238건이 4.87 h(69%)예요. 중앙값은 `/masc-work` 아래 원격 호출 3.0 s, 그 밖 2.0 s 예요.
+- 그래서 시간은 도구 오버헤드보다 명령 자체와 호출 횟수에서 가요. 한 턴 안에서 묶은 호출 사이의 간격 합이 0.02 h 로 작다는 11-08 값과 같은 방향이에요.
+- 이 값은 스크립트를 보관하지 않은 일회성 측정이에요. 오버헤드 5초 이상 149건이 어디서 나오는지(점검 만료, Gate, 샌드박스 시작)는 나누지 않았어요.
+
 ## 비동기
 
 - 영수증(receipt)을 쌓는 outbox 를 읽는 곳은 넷이에요: Codex, Antigravity, provider 경로(`keeper_turn_driver_try_provider.ml`), official client host. 이 넷 밖에 영수증을 못 읽는 레인이 있는지는 따라가 보지 않았어요.

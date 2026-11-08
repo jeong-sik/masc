@@ -602,17 +602,6 @@ let disconnect_receipt_path ~base_path ~keeper_name ~provider_id =
     (provider_id ^ ".json")
 ;;
 
-let rec ensure_dir path =
-  if String.equal path "" || String.equal path "." || String.equal path "/"
-     || Sys.file_exists path
-  then ()
-  else (
-    let parent = Filename.dirname path in
-    if not (String.equal parent path) then ensure_dir parent;
-    try Unix.mkdir path 0o700 with
-    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-;;
-
 (* The receipt is the record an operator can read after the screen has moved
    on: what was deleted, and what the provider said. Written after the local
    deletion so a receipt never describes work that did not happen. *)

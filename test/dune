@@ -2506,8 +2506,7 @@
   fs_compat
   masc_workspace
   masc_schedule
-  unix
-  yojson))
+  unix))
 
 (test
  (name test_schedule_runner)
@@ -2518,7 +2517,6 @@
   eio
   eio_main
   fs_compat
-  masc_core
   masc_workspace
   masc_schedule
   unix
@@ -3458,8 +3456,7 @@
  (name test_keeper_board_discoverable_cursor)
  (modules test_keeper_board_discoverable_cursor)
  (libraries
-  masc_test_deps masc masc.config masc.keeper_metrics masc.keeper_runtime
-  masc_workspace masc_types masc.keeper_registry alcotest eio eio_main unix))
+  masc_test_deps masc masc.keeper_runtime alcotest eio_main unix))
 
 (include stanzas/test_sse_retry_ssot.inc)
 
@@ -3574,7 +3571,6 @@
  (modules test_tool_dispatch_emit)
  (libraries
   alcotest
-  masc
   masc.masc_tool_surface
   masc.masc_tool_dispatch
   masc.tool_types
@@ -3589,7 +3585,6 @@
  (modules test_dispatch_observer_validation_failure)
  (libraries
   alcotest
-  masc
   masc.masc_tool_surface
   masc.masc_tool_dispatch
   masc.tool_types
@@ -3611,7 +3606,7 @@
 (test
  (name test_eval_tool_selector_boundary)
  (modules test_eval_tool_selector_boundary)
- (libraries alcotest masc.string_util masc_core yojson))
+ (libraries alcotest masc_core yojson))
 
 (include stanzas/test_keeper_wire_capture_suppression.inc)
 
@@ -3633,7 +3628,7 @@
  (modules test_keeper_shell_tool_command)
  ; masc.masc_exec: the refusal case builds a Shell IR by hand, which is the
  ; shape a replayed effect hands the runtime.
- (libraries alcotest masc masc.masc_exec))
+ (libraries masc masc.masc_exec))
 
 (test
  (name test_keeper_tool_read_window)
@@ -3659,7 +3654,7 @@
 (test
  (name test_keeper_global_shared_refs_atomic)
  (modules test_keeper_global_shared_refs_atomic)
- (libraries alcotest masc.agent_core masc))
+ (libraries alcotest masc))
 
 ; RFC-keeper-vision-delegation-tool §2.6 — analyze_image pure core
 
@@ -3799,13 +3794,12 @@
   masc_tui_theme
   masc_tui_types
   masc_tui_roster_pane
-  unix
-  yojson))
+  unix))
 
 (test
  (name test_tui_chat_search_projection)
  (modules test_tui_chat_search_projection)
- (libraries eio eio_main masc.masc_core masc_eio_context alcotest astring agent_core masc masc.masc_types
+ (libraries eio eio_main masc.masc_core masc_eio_context alcotest astring agent_core masc
   masc.runtime masc_tui_types masc_tui_keeper_chat_live masc_tui_keeper_chat_log
   masc_tui_keeper_chat_projection masc_tui_keeper_chat_queue
   masc_tui_keeper_chat_transcript masc_tui_image_preview masc_tui_message_layout
@@ -3906,7 +3900,7 @@
 (test
  (name test_tui_native_status_groups)
  (modules test_tui_native_status_groups)
- (libraries masc.runtime alcotest masc masc_tui_keeper_chat_transcript))
+ (libraries masc.runtime alcotest masc_tui_keeper_chat_transcript))
 
 (test
  (name test_tui_autonomous_journal)
@@ -3914,7 +3908,7 @@
  (libraries alcotest masc masc.masc_types masc_tui_types masc_tui_observer
   masc_tui_keeper_chat_live masc_tui_keeper_chat_log masc_tui_keeper_chat_transcript
   masc_tui_keeper_chat_history masc_tui_render_chat masc_tui_image_preview masc_tui_message_layout
-  masc_tui_frame_presenter masc_tui_ansi masc_tui_render_schedule masc_tui_roster_pane astring yojson))
+  masc_tui_frame_presenter masc_tui_ansi masc_tui_render_schedule masc_tui_roster_pane yojson))
 
 (test
  (name test_tui_keeper_chat_log)
@@ -3926,7 +3920,6 @@
  ; masc.
  (libraries
   alcotest
-  masc.string_util
   fmt
   masc
   masc.runtime
@@ -3976,7 +3969,7 @@
  (name test_tui_chat_media)
  (modules test_tui_chat_media)
  (libraries masc_tui_image_payload alcotest masc masc_tui_chat_media masc_tui_image_preview masc_tui_markdown
-  masc_tui_keeper_chat_history yojson))
+  masc_tui_keeper_chat_history))
 
 (test
  (name test_tui_keeper_chat_queue)
@@ -3987,17 +3980,17 @@
 (test
  (name test_tui_chat_surface_mirror)
  (modules test_tui_chat_surface_mirror)
- (libraries alcotest masc masc_tui_keeper_chat_history yojson))
+ (libraries alcotest masc masc_tui_keeper_chat_history))
 
 (test
  (name test_keeper_tool_approval_gate)
  (modules test_keeper_tool_approval_gate)
- (libraries alcotest agent_core eio eio_main fmt masc yojson))
+ (libraries alcotest agent_core eio eio_main fmt masc))
 
 (test
  (name test_keeper_tool_approval_policy)
  (modules test_keeper_tool_approval_policy)
- (libraries mcp_protocol alcotest masc yojson))
+ (libraries mcp_protocol alcotest masc))
 
 (test
  (name test_keeper_tool_approval_registry)
@@ -4042,7 +4035,7 @@
 (test
  (name test_tui_command)
  (modules test_tui_command)
- (libraries alcotest masc masc_tui_command masc_tui_mcp yojson))
+ (libraries alcotest masc_tui_command masc_tui_mcp yojson))
 
 (test
  (name test_tui_fetched)
@@ -4084,11 +4077,9 @@
  (modules test_tui_play_card)
  (libraries
   alcotest
-  masc.config
   masc_tui_play_card
   masc_tui_terminal_palette
-  qrc
-  uri)
+  qrc)
  (action (setenv MASC_TUI_FORCE_COLOR 1 (run %{test}))))
 
 (test
@@ -4134,7 +4125,7 @@
 (test
  (name test_egress_allowlist_toml)
  (modules test_egress_allowlist_toml)
- (libraries alcotest masc.runtime masc.egress_host masc.string_util))
+ (libraries alcotest masc.runtime masc.string_util))
 
 (test
  (name test_egress_proxy_net)
@@ -4151,7 +4142,7 @@
 (test
  (name test_tui_gate_fold)
  (modules test_tui_gate_fold)
- (libraries masc_tui_image_preview alcotest masc masc.keeper_contract masc_tui_types
+ (libraries masc_tui_image_preview alcotest masc.keeper_contract masc_tui_types
    masc_tui_gate_text masc_tui_message_layout masc_tui_chat_row_actions
    masc_tui_render_chat masc_tui_render_prim masc_tui_frame_presenter masc_tui_ansi masc_tui_render_schedule))
 
@@ -4163,7 +4154,7 @@
 (test
  (name test_tui_server_identity_refresh)
  (modules test_tui_server_identity_refresh)
- (libraries masc_tui_owed_read masc_tui_pick_list masc_tui_presented astring masc.masc_candle masc_tui_pr_ref masc_tui_message_layout masc_tui_frame masc_tui_ansi masc_tui_theme masc_tui_frame_presenter masc_tui_render_schedule masc_tui_render_prim masc_tui_render_repositories masc_tui_queue_layout masc_tui_press masc_tui_hit masc_tui_queue_inspection masc_tui_play_card masc_tui_scroll masc_tui_resource_catalog masc.config masc_tui_runtime_config_snapshot masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_model_form masc_tui_model_runtime_table masc_tui_runtime_account_form masc_tui_runtime_config_view masc_tui_keeper_config masc_tui_metrics_tail masc.dated_jsonl masc_tui_ask_projection masc_tui_response_decode masc_tui_kept_reads masc.masc_core masc.masc_types masc.keeper_cost_coverage masc.tool_types masc.runtime masc.sse_wire eio eio_main masc_tui_child_content masc_tui_native_tasks alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_tui_task_payloads masc_tui_async_protocol masc_tui_context_inspector masc_workspace masc.fs_compat masc_tui_context_state masc_tui_fetched masc_tui_loader masc_tui_overview_tasks masc_tui_task_flow masc_tui_agenda masc_tui_keeper_control masc_tui_keeper_list_model masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc_tui_composer_projection masc_tui_composer masc.voice_setup masc.voice_wizard unix yojson))
+ (libraries masc_tui_owed_read masc_tui_pick_list masc_tui_presented astring masc.masc_candle masc_tui_pr_ref masc_tui_message_layout masc_tui_frame masc_tui_ansi masc_tui_theme masc_tui_frame_presenter masc_tui_render_schedule masc_tui_render_prim masc_tui_render_repositories masc_tui_queue_layout masc_tui_press masc_tui_hit masc_tui_queue_inspection masc_tui_play_card masc_tui_scroll masc_tui_resource_catalog masc.config masc_tui_runtime_config_snapshot masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_model_form masc_tui_model_runtime_table masc_tui_runtime_account_form masc_tui_runtime_config_view masc_tui_keeper_config masc_tui_metrics_tail masc.dated_jsonl masc_tui_ask_projection masc_tui_response_decode masc_tui_kept_reads masc.masc_core masc.masc_types masc.keeper_cost_coverage masc.tool_types masc.runtime masc.sse_wire eio eio_main masc_tui_child_content masc_tui_native_tasks alcotest masc masc.browser_lane masc_tui_lane_subscriptions masc_tui_lane_addons masc_tui_types masc_tui_task_payloads masc_tui_async_protocol masc_tui_context_inspector masc.fs_compat masc_tui_context_state masc_tui_fetched masc_tui_loader masc_tui_overview_tasks masc_tui_task_flow masc_tui_agenda masc_tui_keeper_control masc_tui_keeper_list_model masc_tui_board_detail masc_tui_message_input masc_tui_lane_installer masc_tui_voice_wizard_session masc_tui_account_login masc_tui_composer_projection masc_tui_composer masc.voice_setup masc.voice_wizard unix yojson))
 
 (test
  (name test_tool_transport_prefix)
@@ -4178,7 +4169,7 @@
 (test
  (name test_tui_workspace_entries)
  (modules test_tui_workspace_entries)
- (libraries alcotest masc masc.server masc_tui_code_draft masc_tui_fetched masc_tui_types masc_tui_code_results masc_tui_palette))
+ (libraries alcotest masc masc_tui_code_draft masc_tui_fetched masc_tui_types masc_tui_code_results masc_tui_palette))
 
 (test
  (name test_tui_acting)
@@ -4316,8 +4307,7 @@
   masc
   masc_tui_keeper_chat_diff
   masc_tui_keeper_chat_transcript
-  masc_tui_message_layout
-  yojson))
+  masc_tui_message_layout))
 
 (test
  (name test_tui_git_diff_decode)
@@ -4354,7 +4344,6 @@
   masc
   masc.runtime
   masc.agent_core.llm_provider
-  masc.masc_tool_blob_store
   masc.masc_types
   yojson))
 
@@ -4456,7 +4445,7 @@
 (test
  (name test_tui_credential_preparation)
  (modules test_tui_credential_preparation)
- (libraries alcotest masc masc.auth masc.masc_types masc.masc_core
+ (libraries alcotest masc masc.auth masc.masc_core
   masc.fs_compat masc_tui_loader masc_tui_credential masc_tui_credential_preparation
   masc_tui_message_input eio eio_main unix))
 
@@ -4504,7 +4493,6 @@
  (libraries
   alcotest
   masc
-  masc.masc_types
   masc.masc_schedule
   masc_tui_types
   masc_tui_agenda
@@ -4517,7 +4505,6 @@
  (libraries
   alcotest
   masc
-  masc.masc_types
   masc.masc_schedule
   masc_tui_types
   masc_tui_agenda
@@ -4541,7 +4528,6 @@
  (libraries
   alcotest
   masc
-  masc.masc_types
   masc_tui_types
   masc_tui_keeper_axis_cell
   masc_tui_keeper_memory_reading))
@@ -4582,7 +4568,7 @@
 (test
  (name test_tui_board_age_column)
  (modules test_tui_board_age_column)
- (libraries alcotest astring masc_tui_types masc_tui_render_schedule))
+ (libraries alcotest masc_tui_types masc_tui_render_schedule))
 
 (test
  (name test_tui_browser_lane_layout)
@@ -4602,7 +4588,7 @@
 (test
  (name test_tui_board_composer)
  (modules test_tui_board_composer)
- (libraries alcotest masc_tui_board_composer masc_tui_frame masc.string_util
+ (libraries alcotest masc_tui_board_composer masc_tui_frame
   masc_tui_message_layout))
 
 (test
@@ -4618,7 +4604,7 @@
 (test
  (name test_tui_decode_overview_goals)
  (modules test_tui_decode_overview_goals)
- (libraries masc_test_deps masc.masc_goal))
+ (libraries masc_test_deps))
 
 (test
  (name test_tui_chart_shares)
@@ -4645,7 +4631,7 @@
 (test
  (name test_tui_memory_usage)
  (modules test_tui_memory_usage)
- (libraries alcotest masc_tui_memory_usage masc.masc_types yojson))
+ (libraries alcotest masc_tui_memory_usage masc.masc_types))
 
 (test
  (name test_tui_render_memory)
@@ -4954,12 +4940,12 @@
 (test
  (name test_tui_approval_detail)
  (modules test_tui_approval_detail)
- (libraries alcotest masc_tui_approval_detail yojson))
+ (libraries alcotest masc_tui_approval_detail))
 
 (test
  (name test_tui_approval_value_reading)
  (modules test_tui_approval_value_reading)
- (libraries alcotest masc_tui_approval_value_reading yojson))
+ (libraries alcotest masc_tui_approval_value_reading))
 
 (test
  (name test_tui_connector_state)
@@ -4970,7 +4956,7 @@
 (test
  (name test_tui_keeper_efficiency)
  (modules test_tui_keeper_efficiency)
- (libraries alcotest masc masc.keeper_efficiency masc_tui_keeper_efficiency yojson))
+ (libraries alcotest masc.keeper_efficiency masc_tui_keeper_efficiency))
 
 (test
  (name test_tui_connector_unbind)
@@ -5005,7 +4991,7 @@
 (test
  (name test_tui_board_quarantine)
  (modules test_tui_board_quarantine)
- (libraries alcotest masc yojson masc_tui_fetched masc_tui_board_quarantine))
+ (libraries alcotest masc masc_tui_fetched masc_tui_board_quarantine))
 
 (test
  (name test_tui_text_block)

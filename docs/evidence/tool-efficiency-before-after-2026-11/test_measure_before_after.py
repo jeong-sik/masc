@@ -239,6 +239,34 @@ class OverheadTest(unittest.TestCase):
         self.assertEqual(split["unknown"]["slow_calls"], 1)
 
 
+    def test_the_slow_calls_of_a_sandbox_are_split_by_intent(self) -> None:
+        def ran(stamp: float, profile: str, overhead_ms: float, call_input: object) -> bytes:
+            output = json.dumps({"execution_time_ms": 1_000 - overhead_ms})
+            return row(stamp, "Execute", duration_ms=1_000, output=output, sandbox_profile=profile, call_input=call_input)
+
+        result = compared(
+            [
+                ran(BOOT + 400, "remote_ssh", 900, {"command": "gh pr view"}),
+                ran(BOOT + 401, "remote_ssh", 100, {"command": "gh pr view"}),
+                ran(BOOT + 402, "remote_ssh", 500, {"command": "gh pr list", "intent": "auto"}),
+                ran(BOOT + 403, "remote_ssh", 900, {"command": "rm x", "intent": "request_effect"}),
+                ran(BOOT + 404, "remote_ssh", 10, {"command": "rm y", "intent": "request_effect"}),
+                ran(BOOT + 405, "remote_ssh", 700, "not json"),
+                ran(BOOT + 406, "microvm", 900, {"command": "ls"}),
+            ]
+        )
+        split = cast("dict[str, dict[str, object]]", result["after"]["execute_overhead_by_sandbox"])
+        self.assertEqual(
+            split["remote_ssh"]["by_intent"],
+            {
+                "auto": {"calls": 3, "slow_calls": 2},
+                "request_effect": {"calls": 2, "slow_calls": 1},
+                "unknown": {"calls": 1, "slow_calls": 1},
+            },
+        )
+        self.assertEqual(split["microvm"]["by_intent"], {"auto": {"calls": 1, "slow_calls": 1}})
+
+
 class DiskLowTest(unittest.TestCase):
     def test_only_failed_calls_that_hold_the_code_count_and_execute_is_split_by_intent(self) -> None:
         code = json.dumps({"error": "remote_ssh_disk_low: endpoint x available_kib=1 minimum_kib=2"})

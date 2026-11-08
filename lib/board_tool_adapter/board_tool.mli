@@ -97,10 +97,6 @@ val tools : Masc_domain.tool_schema list
 
 val handle_tool :
   result_boundary:Tool_output.result_boundary -> string -> Yojson.Safe.t -> Tool_result.result
-(** RFC-0189 PR-1b.4 — [handle_tool] returns typed [Tool_result.result]
-    end-to-end. Legacy [Tool_result.result] projection lives at the
-    {!Tool_dispatch.handler} registration boundary inside {!register},
-    so external callers (MCP transport) see no behavior change. *)
 (** Routes [name] to the matching internal handler.
     [masc_board_list] reads the store on every call, so a
     mutation is visible to the next read with no
@@ -108,7 +104,12 @@ val handle_tool :
     carrying success flag, structured payload, tool name,
     and elapsed duration.  [result_boundary] is what the
     result meets on its way to the caller's reader;
-    [masc_board_post_get] sizes its comment page by it. *)
+    [masc_board_post_get] sizes its comment page by it.
+
+    RFC-0189 PR-1b.4 — [handle_tool] returns typed [Tool_result.result]
+    end-to-end. Legacy [Tool_result.result] projection lives at the
+    {!Tool_dispatch.handler} registration boundary inside {!register},
+    so external callers (MCP transport) see no behavior change. *)
 
 (** {1 Registry installation} *)
 

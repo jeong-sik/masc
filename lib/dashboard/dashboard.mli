@@ -42,6 +42,7 @@ val valid_scope_strings : string list
 val scope_of_string_opt : string -> scope option
 (** Parses what the tool schema advertises. Exposed so a test can check
     the enum and the parser against each other. *)
+
 (** {1 Formatting} *)
 
 val format_section : section -> string

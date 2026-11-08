@@ -186,9 +186,21 @@ let native_authentication_observation () = fixture (fun root env ->
    | Login.Authenticated -> ()
    | Login.Login_completed | Login.Credential_captured -> fail "native authentication lost"))
 
+(* Plan D1-6a: the home a new login made is found again by its id, and an id
+   with no home, or an Antigravity login, finds none. *)
+let a_new_logins_home_is_found_again () = fixture (fun root _ ->
+  let login = Login.prepare ~runtime_root:root ~account_id:"acct-1" ~client:Login.Claude ~existing:None |> ok in
+  check (result string string) "the same home" (Ok (Login.home_dir login))
+    (Login.account_home ~runtime_root:root ~account_id:"acct-1" ~client:Login.Claude);
+  check bool "no home for another id" true
+    (Result.is_error (Login.account_home ~runtime_root:root ~account_id:"acct-2" ~client:Login.Claude));
+  check bool "none for Antigravity" true
+    (Result.is_error (Login.account_home ~runtime_root:root ~account_id:"acct-1" ~client:Login.Antigravity)))
+
 let () = run "official login adapters" ["selected accounts", [
   test_case "native login isolation" `Quick isolated_native_login;
   test_case "a login's email reaches the provider saved from it" `Quick login_email_reaches_the_saved_provider;
   test_case "native authentication without model calls" `Quick native_authentication_observation;
   test_case "Muse capture and durable account selection" `Quick muse_capture_and_reference;
-  test_case "Claude reauthentication identity" `Quick claude_reference_spelling]]
+  test_case "Claude reauthentication identity" `Quick claude_reference_spelling;
+  test_case "a new login's home is found again" `Quick a_new_logins_home_is_found_again]]

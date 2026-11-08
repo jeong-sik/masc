@@ -20,8 +20,9 @@ val invite_page : nonce:string -> Login_routes.answer
 
 (** [GET /]: the session of the browser and who the server takes it for, a
     form that starts a GitHub login, and a sign-out button. Below them, the
-    subscriptions the person owns, and a form that connects one through
-    {!connect_path} and answers its login. *)
+    subscriptions the person owns, a form that connects one through
+    {!connect_path} and answers its login, and a form that calls one through
+    {!verify_path}. *)
 val home_page : nonce:string -> Login_routes.answer
 
 (** [GET /api/v1/auth/whoami], judged as [Read_auth] by {!Auth_gate.decide}.
@@ -38,6 +39,10 @@ val connect_prefix : string
 
 (** [/api/v1/auth/provider-accounts]: {!provider_accounts}. *)
 val provider_accounts_path : string
+
+(** [/api/v1/setup/accounts/verify]: one call of the person's own account
+    (plan D1-6a). The home page posts the account and the model to it. *)
+val verify_path : string
 
 (** A person that a [Manage_own_provider] route lets through, with the
     namespace their admission fixed. *)

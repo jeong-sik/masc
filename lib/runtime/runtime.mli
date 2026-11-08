@@ -318,6 +318,11 @@ val load_list :
     keeper→lane-name-or-runtime-id list; [media_failover] names the vision runtimes;
     [lanes] is the ordered failover candidate lists. *)
 
+(** The runtimes of a typed configuration, materialized and validated as
+    {!load_list} does those of a file. Nothing is published: the global
+    runtime list does not change. *)
+val runtimes_of_config : config -> (t list, load_failure) result
+
 
 (** {1 Lazy default runtime singleton}
 

@@ -718,6 +718,11 @@ let load_list ~config_path =
          , loaded.lanes ))
 ;;
 
+let runtimes_of_config cfg =
+  materialize_config ~validate_runtime_declarations:true cfg
+  |> Result.map (fun ((loaded : materialized_config), _) -> loaded.runtimes)
+;;
+
 (* ---- Lazy default runtime singleton ---- *)
 
 (** The loaded runtime cache is read from arbitrary call sites, including worker

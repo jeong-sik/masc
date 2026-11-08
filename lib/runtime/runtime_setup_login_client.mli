@@ -13,6 +13,11 @@ val selected_native : native -> account_home:string -> (t, string) result
 (** A login on an account home the operator already declared, as the
     installer's sign-in has it: the exact spelling, which must name an owned
     directory. *)
+val account_home : runtime_root:string -> account_id:string -> client:client ->
+  (string, string) result
+(** The home that {!prepare} made for a new account [account_id] of [client]
+    under [runtime_root]. It must still be there, an owned, protected
+    directory. Antigravity keeps no such home. *)
 val home_dir : t -> string
 val argv : cli_path:string -> t -> string list
 val environment : t -> (string array, string) result

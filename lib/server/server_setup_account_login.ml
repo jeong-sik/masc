@@ -39,13 +39,15 @@ let canonical_account_key path =
   try Ok (Fs_compat.realpath path) with
   | Unix.Unix_error _ | Sys_error _ -> Error account_failure
 
+type person =
+  { zone : Authz_zone.t
+  ; user_id : Authz_types.User_id.t
+  ; namespace : Authz_types.Account_home_namespace.t
+  }
+
 type owner =
   | Operator of { actor : string }
-  | Person of
-      { zone : Authz_zone.t
-      ; user_id : Authz_types.User_id.t
-      ; namespace : Authz_types.Account_home_namespace.t
-      }
+  | Person of person
 
 (* The scope of the sessions and receipts of the caller. *)
 let actor_of = function
@@ -294,3 +296,74 @@ let control ~owner ~base_path ~body request reqd =
   match result with
   | Ok () -> Http.Response.json_value ~status:`Accepted ~request (`Assoc ["accepted", `Bool true]) reqd
   | Error error -> respond ~status:(session_status error) ~request reqd (Session.error_message error)
+
+(* ---- a person's account, called once (plan D1-6a) ---- *)
+
+let verification_timeout_s = 120.0
+
+let verify_members = [ "provider_account_id"; "model" ]
+
+(* Exactly the two members, in either order. A repeated member leaves the
+   other one out, so it is refused too. *)
+let verify_request body =
+  let expected = "Expected exactly provider_account_id and model." in
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error _ -> Error "Invalid verification request."
+  | `Assoc fields when List.length fields = List.length verify_members ->
+    (match List.assoc_opt "provider_account_id" fields, List.assoc_opt "model" fields with
+     | Some (`String id), Some (`String model) -> Ok (id, model)
+     | _ -> Error expected)
+  | _ -> Error expected
+
+let unknown_account = "No account of yours has this id."
+
+(* The account of the person, its integration as the login receipt names it,
+   and the runtime of [model] on its home. An account of another person is
+   answered as one that does not exist (design 4.2: an id grants nothing). *)
+let person_runtime person ~base_path ~provider_account_id ~model =
+  let* id =
+    Authz_types.Provider_account_id.of_string provider_account_id
+    |> Result.map_error (fun _ -> `Not_found, unknown_account) in
+  let state = (Authz_zone.snapshot person.zone).Authz_zone.state in
+  let* () = match Authz_provider_account_state.owner state.Authz_state.provider_accounts id with
+    | Some owner when Authz_types.User_id.equal owner person.user_id -> Ok ()
+    | Some _ | None -> Error (`Not_found, unknown_account) in
+  let* receipt = Receipt.load ~workspace:base_path ~actor:(actor_of (Person person)) ~login_id:provider_account_id
+    |> Result.map_error (function
+      | Receipt.Not_found -> `Not_found, unknown_account
+      | Receipt.Unavailable -> `Service_unavailable, receipt_failure) in
+  let setup_error error =
+    `Bad_request, Server_runtime_setup_actions.error_message error in
+  let* target = Server_runtime_setup_actions.login_target ~base_path ~integration_id:receipt.integration_id
+    |> Result.map_error setup_error in
+  let* runtime_root = runtime_root_of ~base_path (Person person)
+    |> Result.map_error (fun message -> `Service_unavailable, message) in
+  let* account_home = Client.account_home ~runtime_root ~account_id:provider_account_id
+      ~client:target.Server_runtime_setup_actions.client
+    |> Result.map_error (fun message -> `Service_unavailable, message) in
+  let* config = Server_runtime_setup_actions.config ~base_path |> Result.map_error setup_error in
+  Runtime_account_runtime.of_template config ~template:receipt.integration_id
+    ~provider_id:provider_account_id ~account_home ~model
+  |> Result.map_error (fun error -> `Bad_request, Runtime_account_runtime.error_to_string error)
+
+let verify ~person ~base_path ~body request reqd =
+  let prepared =
+    let* provider_account_id, model = verify_request body
+      |> Result.map_error (fun message -> `Bad_request, message) in
+    person_runtime person ~base_path ~provider_account_id ~model in
+  match prepared, Eio_context.get_env_opt () with
+  | Error (status, message), _ -> respond ~status ~request reqd message
+  | Ok _, None -> respond ~status:`Service_unavailable ~request reqd "Verification requires the server process environment."
+  | Ok runtime, Some env ->
+    (* macOS TMPDIR sits under the /var -> /private/var symlink, and a runtime
+       root must be its own realpath, as the runtime-verify command has it. *)
+    match Filename.temp_dir "masc-account-verify-" "" |> Unix.realpath with
+    | exception (Unix.Unix_error _ | Sys_error _) ->
+      respond ~status:`Service_unavailable ~request reqd "The private verification directory could not be made."
+    | private_dir ->
+      let result = Eio.Switch.run (fun sw ->
+        Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree private_dir);
+        Runtime_verification.verify_as_command ~env ~sw ~private_dir
+          ~timeout_s:verification_timeout_s runtime) in
+      Http.Response.json_value ~request ~extra_headers:["cache-control", "no-store"]
+        (Runtime_verification.to_json result) reqd

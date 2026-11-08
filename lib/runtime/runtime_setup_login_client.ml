@@ -24,16 +24,31 @@ let child parent leaf =
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd);
   Ok path
 
+let clients_dir = "official-clients"
+let client_dir = function Codex_home -> "codex" | Claude_home -> "claude" | Muse_home -> "muse"
+
 let new_home ~runtime_root ~account_id ~client = filesystem (fun () ->
   if not (Fs_compat.is_capability_leaf account_id) then Error "Invalid login account identity."
   else if Filename.is_relative runtime_root then Error "The runtime directory must be absolute."
   else
     let runtime_root = Unix.realpath runtime_root in
     let* () = directory ~private_:false runtime_root in
-    let* clients = child runtime_root "official-clients" in
-    let* client_root = child clients (match client with
-      | Codex_home -> "codex" | Claude_home -> "claude" | Muse_home -> "muse") in
+    let* clients = child runtime_root clients_dir in
+    let* client_root = child clients (client_dir client) in
     child client_root account_id)
+
+let account_home ~runtime_root ~account_id ~client =
+  let* native = match client with
+    | Codex -> Ok Codex_home | Claude -> Ok Claude_home | Muse -> Ok Muse_home
+    | Antigravity -> Error "An Antigravity login keeps no account home." in
+  filesystem (fun () ->
+    if not (Fs_compat.is_capability_leaf account_id) then Error "Invalid login account identity."
+    else if Filename.is_relative runtime_root then Error "The runtime directory must be absolute."
+    else
+      let home = List.fold_left Filename.concat (Unix.realpath runtime_root)
+        [clients_dir; client_dir native; account_id] in
+      let* () = directory ~private_:true home in
+      Ok home)
 
 let native_home ~runtime_root ~account_id ~client existing =
   let* account_home = match existing with

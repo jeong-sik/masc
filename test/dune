@@ -6131,6 +6131,11 @@
  (modules test_runtime_setup_login_client)
  (libraries masc_test_deps))
 
+(test
+ (name test_runtime_account_runtime)
+ (modules test_runtime_account_runtime)
+ (libraries masc_test_deps))
+
 (include stanzas/test_sandbox_prerequisites.inc)
 (include stanzas/test_native_addon_program.inc)
 (include stanzas/test_browser_addon_setup.inc)

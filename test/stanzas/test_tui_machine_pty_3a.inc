@@ -6,4 +6,4 @@
 (executable
  (name test_tui_machine_pty_3a)
  (modules test_tui_machine_pty_3a)
- (libraries machine_worker_fixture masc.machine_configuration masc_test_deps yojson base64 bigstringaf unix eio eio_main masc.masc_core masc.machine_live_publication masc.msx_lane masc.dos_lane masc.machine_action_feed masc.server masc_tui_machine_live digestif masc.masc_types masc.auth httpun gluten))
+ (libraries machine_worker_fixture masc.machine_configuration masc_test_deps yojson unix eio eio_main masc.dos_lane masc.server digestif masc.masc_types masc.auth httpun gluten))

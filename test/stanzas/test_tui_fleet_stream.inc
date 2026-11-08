@@ -7,4 +7,4 @@
 (test
  (name test_tui_fleet_stream)
  (modules test_tui_fleet_stream)
- (libraries masc masc_tui_fleet_stream masc_tui_types masc.sse_wire alcotest yojson))
+ (libraries masc masc_tui_fleet_stream masc_tui_types masc.sse_wire alcotest))

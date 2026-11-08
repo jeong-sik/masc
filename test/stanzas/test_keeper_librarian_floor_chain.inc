@@ -11,9 +11,5 @@
   ../addons/exact_worker.py)
  (libraries
   masc_test_deps
-  masc.server
   exact_output_fixture
-  librarian_floor_fixture
-  mcp_protocol
-  masc.masc_random_id
-  astring))
+  librarian_floor_fixture))

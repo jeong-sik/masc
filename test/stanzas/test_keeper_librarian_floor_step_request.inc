@@ -7,7 +7,6 @@
   masc_test_deps
   masc
   masc.runtime
-  masc.masc_eio_context
   agent_core
   astring
   eio_main))

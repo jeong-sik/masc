@@ -14,6 +14,4 @@
   masc.server
   exact_output_fixture
   librarian_floor_fixture
-  mcp_protocol
-  masc.masc_random_id
-  astring))
+  mcp_protocol))

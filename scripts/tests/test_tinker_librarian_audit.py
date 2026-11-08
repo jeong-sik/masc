@@ -63,12 +63,22 @@ class CaseTest(unittest.TestCase):
         case, _ = A.case_of("c001", req, set(), random.Random(1))
         self.assertIn("m31", full_refs(case))
 
-    def test_a_drop_case_shows_the_dropped_fact_among_as_many_facts(self) -> None:
-        req = request([candidate("new_durable")], facts=40)
-        case, key = A.case_of("d001", req, {"m37"}, random.Random(1))
-        self.assertIn("m37", full_refs(case))
-        self.assertEqual(len(full_refs(case)), A.FULL_FACTS)
-        self.assertEqual(cast(dict[str, str], key["facts"])["m37"], "keep")
+    def test_the_drop_cases_of_one_memory_show_the_same_facts(self) -> None:
+        # Facts that differ between the cases of one memory would point at the dropped one.
+        first = {**request([candidate("new_durable")], facts=40), "item_id": "eval-k-0"}
+        second = {**request([candidate("transient")], facts=40), "item_id": "eval-k-1"}
+        drops: D.OffLabel = {"eval-k-0": {"m37": ["A"]}, "eval-k-1": {"m5": ["B"]}}
+        full = A.drop_full_sets(drops, {"eval-k-0": first, "eval-k-1": second}, 20261109)
+        cases = [A.render_case(f"d00{n}", req, full["eval-k"])[0] for n, req in enumerate((first, second))]
+        self.assertEqual(full_refs(cases[0]), full_refs(cases[1]))
+        self.assertTrue({"m37", "m5"} <= set(full_refs(cases[0])))
+        self.assertEqual(len(full_refs(cases[0])), A.FULL_FACTS)
+
+    def test_one_fill_cannot_serve_requests_with_different_facts(self) -> None:
+        first = {**request([candidate("new_durable")]), "item_id": "eval-k-0"}
+        second = {**request([candidate("new_durable")], facts=21), "item_id": "eval-k-1"}
+        with self.assertRaises(SystemExit):
+            A.drop_full_sets({"eval-k-0": {"m3": ["A"]}}, {"eval-k-0": first, "eval-k-1": second}, 1)
 
 
 class MisfitTest(unittest.TestCase):
@@ -121,12 +131,37 @@ class DropTest(unittest.TestCase):
         rows = [synth_row("base", "eval-k-0", []), synth_row("A", "eval-k-1", ["m7"]), synth_row("A", "eval-j-0", [])]
         self.assertEqual([r["item"] for r in self.judge("drop").scored(rows)], ["eval-j-0"])
 
+    def test_a_kept_drop_stays_wrong_when_another_drop_takes_its_memory_out(self) -> None:
+        drops: D.OffLabel = {"eval-k-0": {"m7": ["A"]}, "eval-k-1": {"m9": ["B"]}}
+        facts = {"m7": "keep", "m9": "keep"}
+        keys: list[JsonObject] = [{"case": f"d00{n + 1}", "item": item, "candidates": {"k1": "new"}, "facts": facts,
+                                   "refs": ["m7", "m9"], "off_label": drops[item]}
+                                  for n, item in enumerate(drops)]
+        decisions: list[JsonObject] = [{"case": "d001", "candidates": {"k1": "new"}, "facts": {"m7": "keep", "m9": "drop"}},
+                                       {"case": "d002", "candidates": {"k1": "new"}, "facts": {"m7": "keep", "m9": "drop"}}]
+        judged = D.adjudicate(keys, decisions, drops)
+        self.assertEqual(judged.excluded, frozenset({"eval-k"}))
+        self.assertEqual(judged.wrong_outside(), {"A": 1})
+
     def test_cases_made_for_other_drops_or_missing_decisions_stop_the_verdict(self) -> None:
         with self.assertRaises(SystemExit):
             D.adjudicate([self.KEY], [], self.DROPS)
         with self.assertRaises(SystemExit):
             D.adjudicate([self.KEY], [{"case": "d001", "candidates": {"k1": "new"}, "facts": {"m2": "drop", "m7": "keep"}}],
                          {"eval-k-0": {"m7": ["A", "B"]}})
+
+    def test_a_case_decided_twice_stops_the_verdict(self) -> None:
+        decision: JsonObject = {"case": "d001", "candidates": {"k1": "new"}, "facts": {"m2": "drop", "m7": "keep"}}
+        with self.assertRaises(SystemExit):
+            D.adjudicate([self.KEY], [decision, {**decision, "facts": {"m2": "drop", "m7": "drop"}}], self.DROPS)
+
+    def test_a_case_without_every_drop_of_its_memory_stops_the_verdict(self) -> None:
+        drops: D.OffLabel = {"eval-k-0": {"m7": ["A"]}, "eval-k-1": {"m9": ["B"]}}
+        keys: list[JsonObject] = [{**self.KEY, "case": f"d00{n + 1}", "item": item, "off_label": drops[item]}
+                                  for n, item in enumerate(drops)]
+        decision: JsonObject = {"candidates": {"k1": "new"}, "facts": {"m2": "drop", "m7": "keep"}}
+        with self.assertRaises(SystemExit):
+            D.adjudicate(keys, [{**decision, "case": "d001"}, {**decision, "case": "d002"}], drops)
 
 
 if __name__ == "__main__":

@@ -124,6 +124,11 @@ class BindingTest(unittest.TestCase):
         self.assertIsNotNone(self.problem(targets, dict(targets), {"A": {**saved, "pass_lines_sha256": "q" * 64}}))
         self.assertIsNotNone(self.problem(targets, dict(targets), {}))
 
+    def test_a_target_the_pass_lines_do_not_name_is_refused(self) -> None:
+        targets = {"base": self.BASE, "A": "tinker://run-a/sampler", "C": "tinker://run-c/sampler"}
+        saved: dict[str, object] = {"branch": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
+        self.assertIsNotNone(self.problem(targets, dict(targets), {"A": saved}))
+
     def test_both_runs_send_the_same_model_under_each_name(self) -> None:
         real = {"base": self.BASE, "A": "tinker://run-a/sampler"}
         saved: dict[str, object] = {"branch": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
@@ -181,6 +186,14 @@ class ScoreTest(unittest.TestCase):
                                                planted=2, planted_dropped=1)])["A"]
         assert isinstance(part, dict)
         self.assertEqual((part["drop_precision"], part["absorbed"], part["stale_drop_recall"]), (0.5, 3, 0.5))
+
+    def test_wrong_drops_outside_the_scored_rows_still_lower_precision(self) -> None:
+        rows = [synth_row(dropped=2, dropped_expected=2)]
+        for wrong, precision in (({}, 1.0), ({"A": 1}, 2 / 3), ({"B": 1}, 1.0)):
+            with self.subTest(wrong=wrong):
+                part = V.summarize("synth", rows, wrong)["A"]
+                assert isinstance(part, dict)
+                self.assertEqual(part["drop_precision"], precision)
 
     def test_synth_without_drops_has_full_precision(self) -> None:
         part = V.summarize("synth", [synth_row()])["A"]

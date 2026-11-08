@@ -9,7 +9,7 @@
         --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
         --run artifacts/tinker/librarian/eval-base-synth --baseline base \
         --sample 1000 --seed 20261109 --out artifacts/tinker/librarian/e-synth-audit
-    # the judge reads <out>/judge.md and <out>/cases.jsonl, and writes <out>/decisions.jsonl
+    # the judge gets only <out>/judge/: it reads judge.md and cases.jsonl there and writes decisions.jsonl
     uv run scripts/tinker/librarian/e_synth_audit.py apply \
         --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
         --audit artifacts/tinker/librarian/e-synth-audit \
@@ -17,7 +17,7 @@
     uv run scripts/tinker/librarian/e_synth_audit.py drops \
         --requests artifacts/tinker/librarian/e-synth/requests.jsonl \
         --run artifacts/tinker/librarian/verdict-synth --out artifacts/tinker/librarian/verdict-drops
-    # the judge reads <out>/judge.md and <out>/cases.jsonl, and writes <out>/decisions.jsonl
+    # the same: the judge gets only <out>/judge/
 
 A synthetic request carries its label by construction, and the model that wrote
 the text can miss the kind it was asked for. `cases` picks every request whose
@@ -45,9 +45,14 @@ requests nobody judged.
 
 `drops` runs after the pass lines are fixed, on the verdict's E-synth run. It
 makes one case per request where a valid answer dropped a fact off label
-(`audit_decisions`), in the same form, with those facts among the ones shown in
-full, and the random fill drawn with the pinned audit seed. The verdict reads
-the judge's decisions with `--drops`.
+(`audit_decisions`), in the same form. Every case of one memory shows the same
+facts in full: each fact dropped off label on that memory, filled up to
+FULL_FACTS (at least MIN_DISTRACTORS more) with facts drawn once per memory
+from the pinned audit seed. A dropped fact is then not the one fact the cases
+have in common. The verdict reads the judge's decisions with `--drops`.
+
+The key stays in <out>; the judge's folder <out>/judge/ holds only the cases
+and JUDGE, since the key names the label's classes and the dropped facts.
 """
 
 from __future__ import annotations
@@ -171,20 +176,10 @@ def answer_refs(request: JsonObject, answer: AV.AdmissionAnswer | None) -> set[s
                if j.memory_claim is not None and j.memory_claim in by_claim})
 
 
-def case_of(case_id: str, request: JsonObject, shown: set[str],
-            rng: random.Random) -> tuple[JsonObject, JsonObject]:
-    """The judge's case and the key its decision is checked against. `shown` are memory IDs to
-    show in full besides the ones the label and the candidates' wording pick."""
+def render_case(case_id: str, request: JsonObject, full: set[str]) -> tuple[JsonObject, JsonObject]:
+    """The judge's case showing the memory IDs `full` in full, and the key its decision is checked against."""
     facts = {cast(str, f["memory_id"]): f for f in cast(list[JsonObject], request["facts"])}
     cands, fixed = expected(request)
-    candidates = cast(list[JsonObject], request["candidates"])
-    suspects = set(fixed) | shown | {cast(str, c["target_memory_id"]) for c in candidates
-                                     if c["target_memory_id"] is not None}
-    for c in candidates:
-        suspects |= closest(cast(str, c["claim"]), facts, SIMILAR)
-    others = sorted(set(facts) - suspects, key=lambda m: int(m[1:]))
-    fill = max(FULL_FACTS - len(suspects), MIN_DISTRACTORS)
-    full = suspects | set(rng.sample(others, min(fill, len(others))))
     categories = {cast(str, c["category"]) for c in cast(list[JsonObject], request["candidates"])}
     order = sorted(facts, key=lambda m: int(m[1:]))
     keeper = cast(JsonObject, request["keeper"])
@@ -199,6 +194,44 @@ def case_of(case_id: str, request: JsonObject, shown: set[str],
                        "facts": {m: fixed.get(m, "keep") for m in order if m in full},
                        "refs": [m for m in order if m in full or facts[m]["category"] in categories]}
     return case, key
+
+
+def case_of(case_id: str, request: JsonObject, shown: set[str],
+            rng: random.Random) -> tuple[JsonObject, JsonObject]:
+    """The label audit's case. `shown` are memory IDs to show in full besides the ones the label
+    and the candidates' wording pick."""
+    facts = {cast(str, f["memory_id"]): f for f in cast(list[JsonObject], request["facts"])}
+    _, fixed = expected(request)
+    candidates = cast(list[JsonObject], request["candidates"])
+    suspects = set(fixed) | shown | {cast(str, c["target_memory_id"]) for c in candidates
+                                     if c["target_memory_id"] is not None}
+    for c in candidates:
+        suspects |= closest(cast(str, c["claim"]), facts, SIMILAR)
+    others = sorted(set(facts) - suspects, key=lambda m: int(m[1:]))
+    fill = max(FULL_FACTS - len(suspects), MIN_DISTRACTORS)
+    return render_case(case_id, request, suspects | set(rng.sample(others, min(fill, len(others)))))
+
+
+def drop_full_sets(drops: D.OffLabel, requests: dict[str, JsonObject], seed: int) -> dict[str, set[str]]:
+    """Per memory with an off-label drop, the memory IDs every drop case of it shows in full:
+    each one dropped off label on the memory, filled up with facts drawn once for the memory."""
+    out: dict[str, set[str]] = {}
+    for memory, dropped in sorted(D.dropped_on_memory(drops).items()):
+        mine = [r for item, r in sorted(requests.items()) if D.memory_of(item) == memory]
+        if any(r["facts"] != mine[0]["facts"] for r in mine):
+            raise SystemExit(f"{memory}: its requests carry different facts, so one fill cannot serve them")
+        facts = [cast(str, f["memory_id"]) for f in cast(list[JsonObject], mine[0]["facts"])]
+        others = sorted(set(facts) - dropped, key=lambda m: int(m[1:]))
+        fill = max(FULL_FACTS - len(dropped), MIN_DISTRACTORS)
+        out[memory] = dropped | set(random.Random(f"{seed}:{memory}").sample(others, min(fill, len(others))))
+    return out
+
+
+def write_cases(out: Path, case_rows: list[JsonObject], key_rows: list[JsonObject]) -> None:
+    """The key in <out>; the cases and JUDGE in the judge's folder, which the key never enters."""
+    write_jsonl(out / "key.jsonl", key_rows)
+    write_jsonl(out / D.JUDGE_DIR / "cases.jsonl", case_rows)
+    (out / D.JUDGE_DIR / "judge.md").write_text(JUDGE, encoding="utf-8")
 
 
 def cases(args: argparse.Namespace) -> int:
@@ -231,9 +264,7 @@ def cases(args: argparse.Namespace) -> int:
         case, key = case_of(f"c{n + 1:03d}", by_id[item_id], answer_refs(by_id[item_id], parsed.get(item_id)), rng)
         case_rows.append(case)
         key_rows.append({**key, "picked": why})
-    write_jsonl(out / "cases.jsonl", case_rows)
-    write_jsonl(out / "key.jsonl", key_rows)
-    (out / "judge.md").write_text(JUDGE, encoding="utf-8")
+    write_cases(out, case_rows, key_rows)
     summary = {"requests": len(items), "baseline_invalid": len(invalid), "agree": len(agree),
                "disagree": len(disagree), "sample": len(sample), "cases": len(case_rows)}
     (out / "cases-summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
@@ -244,7 +275,7 @@ def cases(args: argparse.Namespace) -> int:
 def apply(args: argparse.Namespace) -> int:
     audit = Path(cast(str, args.audit))
     keys = {cast(str, k["case"]): k for k in D.read_jsonl(audit / "key.jsonl")}
-    decisions = {cast(str, d["case"]): d for d in D.read_jsonl(audit / "decisions.jsonl")}
+    decisions = D.decisions_by_case(D.read_jsonl(audit / D.JUDGE_DIR / "decisions.jsonl"))
     if set(decisions) != set(keys):
         raise SystemExit(f"decisions cover {len(decisions)} cases, the audit has {len(keys)}")
     removed_items: set[str] = set()
@@ -287,17 +318,15 @@ def drops(args: argparse.Namespace) -> int:
     off = D.off_label(V.read_rows(run))
     by_id = {cast(str, cast(JsonObject, r["request"])["item_id"]): cast(JsonObject, r["request"])
              for r in D.read_jsonl(path)}
-    rng = random.Random(cast(int, e_synth["audit_seed"]))
+    full = drop_full_sets(off, by_id, cast(int, e_synth["audit_seed"]))
     case_rows: list[JsonObject] = []
     key_rows: list[JsonObject] = []
     for n, (item_id, mids) in enumerate(off.items()):
-        case, key = case_of(f"d{n + 1:03d}", by_id[item_id], set(mids), rng)
+        case, key = render_case(f"d{n + 1:03d}", by_id[item_id], full[D.memory_of(item_id)])
         case_rows.append(case)
         key_rows.append({**key, "off_label": mids})
     out = Path(cast(str, args.out))
-    write_jsonl(out / "cases.jsonl", case_rows)
-    write_jsonl(out / "key.jsonl", key_rows)
-    (out / "judge.md").write_text(JUDGE, encoding="utf-8")
+    write_cases(out, case_rows, key_rows)
     summary = {"items": len(off), "off_label_drops": sum(len(m) for m in off.values()), "cases": len(case_rows)}
     (out / "cases-summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(summary))

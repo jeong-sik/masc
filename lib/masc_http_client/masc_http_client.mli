@@ -12,7 +12,7 @@
 
 (** {1 Response payload} *)
 
-type response = {
+type response = Pool.response = {
   status : int;
   headers : (string * string) list;
   body : string;

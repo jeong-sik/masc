@@ -28,7 +28,7 @@
 
 (** POST with structured error handling.
     DNS resolution, TLS, and I/O errors return Error instead of crashing the fiber. *)
-type response = {
+type response = Pool.response = {
   status : int;
   headers : (string * string) list;
   body : string;
@@ -143,10 +143,8 @@ let post_sync ?clock ?timeout_sec ~url ~headers ~body () =
 let post_response_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers ~body () =
   let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
-  match Pool.request pool ?clock ?timeout_seconds:timeout_sec ?max_body_bytes
-          ~method_:`POST ~url ~headers ~body () with
-  | Ok { Pool.status; headers; body } -> Ok { status; headers; body }
-  | Error e -> Error e
+  Pool.request pool ?clock ?timeout_seconds:timeout_sec ?max_body_bytes
+    ~method_:`POST ~url ~headers ~body ()
 
 (** PATCH with structured error handling. *)
 let patch_sync ?clock ?timeout_sec ~url ~headers ~body () =
@@ -169,11 +167,8 @@ let delete_sync ?clock ?timeout_sec ?body ~url ~headers () =
 let get_response_sync ?clock ?timeout_sec ?max_body_bytes ?resolved_addresses ~url ~headers () =
   let headers = ensure_default_headers headers in
   with_pool @@ fun pool ->
-  match Pool.request pool ?clock ?timeout_seconds:timeout_sec ?max_body_bytes ?resolved_addresses
-          ~method_:`GET ~url ~headers () with
-  | Ok { Pool.status; headers; body } ->
-    Ok { status; headers; body }
-  | Error e -> Error e
+  Pool.request pool ?clock ?timeout_seconds:timeout_sec ?max_body_bytes ?resolved_addresses
+    ~method_:`GET ~url ~headers ()
 
 (** GET with structured error handling. *)
 let get_sync ?clock ?timeout_sec ?max_body_bytes ~url ~headers () =

@@ -284,10 +284,6 @@ val sync_directory_capability
     fsync, and explicit close failures are preserved; cancellation propagates
     after the system-thread operation is observed. *)
 
-val capability_directory_sync_error_to_string
-  :  capability_directory_sync_error
-  -> string
-
 module Capability_write_for_testing : sig
   type replace_dispatch_fault
 

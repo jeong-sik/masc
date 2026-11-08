@@ -578,24 +578,6 @@ let capability_write_error_to_string (error : capability_write_error) =
     cleanup
 ;;
 
-let capability_directory_sync_error_to_string
-      (error : capability_directory_sync_error)
-  =
-  let cleanup =
-    match error.cleanup_failures with
-    | [] -> ""
-    | failures ->
-      failures
-      |> List.map capability_write_failure_to_string
-      |> String.concat "; "
-      |> Printf.sprintf " cleanup_failures=[%s]"
-  in
-  Printf.sprintf
-    "failure=(%s)%s"
-    (capability_write_failure_to_string error.failure)
-    cleanup
-;;
-
 let operation_failure stage exception_ backtrace =
   { stage; cause = Operation_failed { exception_; backtrace } }
 ;;

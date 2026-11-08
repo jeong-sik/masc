@@ -695,10 +695,6 @@ let capability_write_cause_to_string = Atomic_write.capability_write_cause_to_st
 let capability_write_failure_to_string = Atomic_write.capability_write_failure_to_string
 let sync_directory_capability = Atomic_write.sync_directory_capability
 
-let capability_directory_sync_error_to_string =
-  Atomic_write.capability_directory_sync_error_to_string
-;;
-
 let is_atomic_orphan_name = Atomic_temp_name.is_name
 type atomic_orphan_cleanup_operation = Atomic_orphan_cleanup.atomic_orphan_cleanup_operation =
   | Inspect_cleanup_root

@@ -11,5 +11,4 @@
   alcotest
   eio
   eio_main
-  unix
-  yojson))
+  unix))

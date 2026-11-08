@@ -8,7 +8,6 @@
   fs_compat_internal
   eio
   eio_main
-  eio.unix
   unix
   uuidm
   yojson

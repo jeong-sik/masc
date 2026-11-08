@@ -354,6 +354,8 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Pat _ -> "Pat"
   | Authz_state.Service_credential_unreadable _ -> "Service_credential_unreadable"
   | Authz_state.Service_credential _ -> "Service_credential"
+  | Authz_state.Provider_account_unreadable _ -> "Provider_account_unreadable"
+  | Authz_state.Provider_account _ -> "Provider_account"
 ;;
 
 let error_name : Z.error -> string = function

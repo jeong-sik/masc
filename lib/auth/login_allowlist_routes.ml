@@ -64,7 +64,9 @@ let state_status = function
   | S.Pat_unreadable _
   | S.Pat _
   | S.Service_credential_unreadable _
-  | S.Service_credential _ -> R.Internal_error_500
+  | S.Service_credential _
+  | S.Provider_account_unreadable _
+  | S.Provider_account _ -> R.Internal_error_500
 ;;
 
 let error_status = function

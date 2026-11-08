@@ -58,6 +58,7 @@ type t = private
   ; sessions : Authz_session_state.t  (** Plan C3. *)
   ; pats : Authz_pat_state.t  (** Plan C4. *)
   ; service_credentials : Authz_service_credential_state.t  (** Plan C4. *)
+  ; provider_accounts : Authz_provider_account_state.t  (** Plan D1-1. *)
   ; revocation_pending : held list
         (** The reductions whose intent the external store gave up (design
             8.3). No record adds one: the writer zone does, from the store
@@ -163,6 +164,8 @@ type refusal =
   | Pat of Authz_pat_state.refusal
   | Service_credential_unreadable of Authz_service_credential_event.error
   | Service_credential of Authz_service_credential_state.refusal
+  | Provider_account_unreadable of Authz_provider_account_event.error
+  | Provider_account of Authz_provider_account_state.refusal
 
 val refusal_to_string : refusal -> string
 
@@ -183,7 +186,9 @@ val refusal_to_string : refusal -> string
     removal is a [Revoke] of the registration, so the entry does not come back
     open (plan C2d). A sign-out is a [Revoke] on its session, and so is a
     sign-in that ends the session its browser held, on that session; a sign-in
-    that ends nothing has none (plan C3). *)
+    that ends nothing has none (plan C3). The link of a provider account has
+    none: a log restored from before it leaves the account with no owner, and
+    no Runtime may spend it (plan D1-1). *)
 type applied =
   { state : t
   ; high_water : Authz_external_store.Change.t option

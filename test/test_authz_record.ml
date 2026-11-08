@@ -46,6 +46,7 @@ let writers_of =
     ; Registration, authenticated
     ; Session, authenticated
     ; Pat, authenticated
+    ; Provider_account, authenticated
     ]
 ;;
 
@@ -81,6 +82,7 @@ let ordinal = function
   | R.Kind.Registration -> 15
   | R.Kind.Session -> 16
   | R.Kind.Pat -> 17
+  | R.Kind.Provider_account -> 18
 ;;
 
 let kinds_are_all_listed () =
@@ -409,6 +411,7 @@ let kind_labels_are_the_names_on_disk () =
     ; "registration"
     ; "session"
     ; "pat"
+    ; "provider_account"
     ]
     (List.map R.Kind.to_string R.Kind.all)
 ;;

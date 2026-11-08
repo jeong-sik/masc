@@ -66,6 +66,7 @@ let other_kinds =
       && kind <> K.Registration
       && kind <> K.Session
       && kind <> K.Pat
+      && kind <> K.Provider_account
       && kind <> K.Internal_service_credential)
     K.all
 
@@ -1495,6 +1496,50 @@ let test_service_credentials_and_their_intents () =
   | other -> Alcotest.failf "before the bootstrap: %s" (step_label other)
 ;;
 
+(* ---- provider accounts ---- *)
+
+module Pae = Authz_provider_account_event
+module Pas = Authz_provider_account_state
+
+let first_account = id_of_string Authz_types.Provider_account_id.of_string "claude-code-user"
+
+let account_record ~author event =
+  match Pae.to_body event with
+  | Error _ -> Alcotest.fail "fixture provider account body refused"
+  | Ok body -> record_by ~author K.Provider_account body
+;;
+
+let linked ~by = Pae.Linked { provider_account_id = first_account; user_id = by }
+
+(* Plan D1-1: a person links an account for themselves once, takes no intent,
+   and links none for another, an Admin included. *)
+let test_provider_accounts () =
+  let state =
+    applied_change "a link" (two_admins ()) (account_record ~author:(human user) (linked ~by:user)) None
+  in
+  Alcotest.(check (option string))
+    "its owner"
+    (Some (Authz_types.User_id.to_string user))
+    (Option.map Authz_types.User_id.to_string (Pas.owner state.S.provider_accounts first_account));
+  refused_as
+    "linked twice"
+    state
+    (account_record ~author:(human user) (linked ~by:user))
+    (S.Provider_account (Pas.Already_linked first_account));
+  refused_as
+    "an Admin links one for another"
+    (two_admins ())
+    (account_record ~author:(human bob) (linked ~by:user))
+    (S.Provider_account (Pas.Linked_for_another { author = bob; user_id = user }));
+  refused_as
+    "a service"
+    (two_admins ())
+    (account_record
+       ~author:(Authz_records.Author.Authenticated (Authz_types.Principal.Service keeper_service))
+       (linked ~by:user))
+    (S.Provider_account (Pas.Not_a_human (Authz_types.Principal.Service keeper_service)))
+;;
+
 let () =
   Alcotest.run
     "authz_state"
@@ -1573,6 +1618,7 @@ let () =
             `Quick
             test_service_credentials_and_their_intents
         ] )
+    ; "provider accounts", [ Alcotest.test_case "linked by their owner" `Quick test_provider_accounts ]
     ; "log", [ Alcotest.test_case "of a real bootstrap" `Quick test_fresh_bootstrap_log ]
     ]
 ;;

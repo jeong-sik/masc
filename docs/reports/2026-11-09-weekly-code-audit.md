@@ -31,6 +31,8 @@ git log 419f2a843ed7 --no-merges \
 
 ### 원격 정리가 bare 저장소를 삭제함
 
+수정 PR: [#50182](https://github.com/jeong-sik/masc/pull/50182).
+
 [원격 정리 payload](../../config/scripts/keeper-remote-workspace-cleanup.py)의 `tree_facts`는
 `.git` 자식이 있는 작업 폴더만 저장소로 셌다. bare 저장소와 별도 Git 관리 디렉터리는
 검사 목록에서 빠졌다. 그 결과 remote에 없는 커밋이나 바깥 worktree를 소유해도
@@ -48,6 +50,8 @@ git log 419f2a843ed7 --no-merges \
 독립 리뷰 세션도 같은 14개를 실행했다. 실제 원격 endpoint에서 정리를 실행한 결과는 아니다.
 
 ### 도구 실행기의 대기 중 취소
+
+수정과 실행 가능한 재현 기록: [#50183](https://github.com/jeong-sik/masc/pull/50183).
 
 [Keeper 도구 계획 실행기](../../lib/keeper/keeper_tool_plan_executor.ml)의 `Exclusive_gate`는
 `Eio.Mutex.use_rw ~protect:true` 안에서 condition을 기다렸다.

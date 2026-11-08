@@ -7,7 +7,7 @@
 - 증명 빌드 둘이에요. 앞은 main `8f385a3b2b78`(run 42521780255, masc-tui sha256 `a3a6d96deb17…`), 뒤는 이 브랜치 코드 커밋 `5fa2090fd423`(run 42523918537, masc-tui sha256 `2fd2cda37c28…`)이에요.
 - 같은 서버 환경에서 읽었어요. 알림이 없는 환경이에요(`/health` 가 `operator_action_required=false`). 읽기 하나: 화면 12개(Work, Task Review, Task Verdicts, Board, Keepers, Memory, Features, Logs, Activity, Tools, Approvals, Fusion)를 24줄로 열고, 80칸부터 40칸까지 1칸씩 줄이며 푸터 줄(아래에서 둘째 줄)을 읽었어요. 빌드마다 492곳이에요. `footer-rows.tsv` 에 492곳 전부를 넣었어요(화면, 폭, 같은지, 앞, 뒤).
 - 읽기 둘: System 화면의 설정 창 7개(runtime.toml, models, params, prompts, presets, themes, voice)를 80칸부터 40칸까지 읽었어요. 빌드마다 287곳이에요. 이 창들은 푸터 글자가 한국어예요(`Esc:뒤로  q:종료`). `footer-rows-config.tsv` 에 넣었어요.
-- 읽기 셋: 같은 설정 창 7개를 40칸부터 10칸까지 읽었어요. 빌드마다 217곳이에요. 한국어 푸터는 못 버리는 키가 짧아서(`Esc:뒤로  q:종료`가 18칸) 마지막 갈래가 40칸 아래에서 돌아요. `footer-rows-config-narrow.tsv` 에 넣었어요.
+- 읽기 셋: 같은 설정 창 7개를 40칸부터 10칸까지 읽었어요. 빌드마다 217곳이에요. 한국어 푸터는 못 버리는 키가 짧아서(`Esc:뒤로  q:종료` 18칸, 설정 창마다 18, 30, 34칸) 마지막 갈래가 40칸 아래(19~21, 31~33, 35~37칸)에서 돌아요. `footer-rows-config-narrow.tsv` 에 넣었어요.
 
 ## 결과
 

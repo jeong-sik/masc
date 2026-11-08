@@ -705,6 +705,13 @@ let allowed_environment_key key =
     ]
 ;;
 
+(* agy starts a background self-update when it launches. A Keeper turn would
+   then swap the binary under the next turn, and parallel turns would each
+   start one (RFC-0490 §2.4). Only the value "true" stops it; "1" does not
+   (RFC-0490 measurement 11). The key is not on the allowlist above, so the
+   operator's own setting never reaches the child and this entry is the only one. *)
+let auto_update_disabled = "AGY_CLI_DISABLE_AUTO_UPDATE=true"
+
 let official_client_environment ?home_dir () =
   let overridden_keys =
     match home_dir with
@@ -718,9 +725,10 @@ let official_client_environment ?home_dir () =
       let key = env_key entry in
       allowed_environment_key key && not (List.mem key overridden_keys))
   in
+  let environment = auto_update_disabled :: inherited in
   match home_dir with
-  | None -> Array.of_list inherited
-  | Some home_dir -> Array.of_list (("HOME=" ^ home_dir) :: inherited)
+  | None -> Array.of_list environment
+  | Some home_dir -> Array.of_list (("HOME=" ^ home_dir) :: environment)
 ;;
 
 let argv config ~conversation_mode =

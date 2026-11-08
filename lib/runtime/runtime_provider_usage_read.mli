@@ -34,7 +34,7 @@ val read_codex :
   Runtime_execution.codex_app_server ->
   (unit, string) result
 (** Read one Codex account and record its windows under [scope]. The answer
-    rests nothing: this is the start read ({!read_all}). *)
+    rests nothing: this is the start read ({!watch_declared}). *)
 
 val read_muse :
   mgr:_ Eio.Process.mgr ->
@@ -86,17 +86,6 @@ val read_scopes :
     with its scope (and shape) and does not stop the scopes after it; only
     {!Eio.Cancel.Cancelled} is re-raised.  A read that states no windows logs
     one info line.  An HTTP read with an empty key fails without a request. *)
-
-val read_all :
-  mgr:_ Eio.Process.mgr ->
-  net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  clock:_ Eio.Time.clock ->
-  cwd:Eio.Fs.dir_ty Eio.Path.t ->
-  unit
-(** Read every configured account that can answer, once per quota scope. A
-    failed read is logged with its scope (and shape for an HTTP read) and
-    leaves that scope as it was; neither the response body nor the key is
-    logged. *)
 
 val refresh_readables :
   clock:_ Eio.Time.clock ->
@@ -218,7 +207,7 @@ val read_after_account_refusal :
     [Spent_without_reset] is {!Runtime_quota_window.note_read_without_reset}.
     A [t] not after the answer's arrival names no rest and is returned and
     recorded as [Spent_without_reset].
-    This read affects the walk order; the startup read ({!read_all}) stays an operator
+    This read affects the walk order; the startup read ({!watch_declared}) stays an operator
     projection. A failed read rests nothing. *)
 
 val http_read_of_runtime : Runtime_instance.t -> http_read option

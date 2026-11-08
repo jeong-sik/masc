@@ -169,7 +169,10 @@ let seed_from_decision_log ?(now = Time_compat.now ()) ~config ~keeper_name () =
   let rotated = read_tail_window_samples ~now ~window_seconds rotated_path in
   match primary, rotated with
   | Ok (primary_samples, primary_trunc), Ok (rotated_samples, rotated_trunc) ->
-    let combined_samples = List.rev (rotated_samples @ primary_samples) in
+    (* [read_tail_window_samples] returns samples newest-to-oldest within each
+       log file. Since primary contains turns newer than rotated (.1), prepending
+       primary to rotated yields global newest-to-oldest order. *)
+    let combined_samples = primary_samples @ rotated_samples in
     let file_truncated = primary_trunc || rotated_trunc in
     let is_truncated =
       file_truncated || List.length combined_samples > max_samples_per_keeper

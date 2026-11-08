@@ -10,6 +10,7 @@
         --out artifacts/tinker/librarian/eval-<name>-real --budget 6
     uv run scripts/tinker/librarian/eval_admission.py run --set synth --requests <requests.jsonl> ...
     uv run scripts/tinker/librarian/eval_admission.py verdict --real <dir> --synth <dir> \
+        --drops <e_synth_audit.py drops --out> \
         --train A=artifacts/tinker/librarian/train-A --train B=artifacts/tinker/librarian/train-B
 
 `pass_lines.json` fixes the request, the sets, the baseline, the candidates and
@@ -44,6 +45,9 @@ Definitions:
   claim that supersedes the label's target, and the target is dropped.
 - E-synth drop precision: dropped IDs that are planted stale facts or label
   correction targets, over all dropped IDs of valid answers (1.0 with no drops).
+  Any other dropped ID is an off-label drop. Rows list them, and `verdict`
+  needs a blind judge's class for each one (`audit_decisions`): when the judge
+  takes the fact out as well, no target is scored on that memory's requests.
 - E-synth absorbed: memory IDs valid answers absorb. No label asks for one.
   Reported apart, not gated, as E-real reports its absorbs: MASC's absorb gate
   checks each absorb at commit, while nothing checks a drop.
@@ -77,6 +81,7 @@ from typing import assert_never, cast
 
 import admission_request as R
 import admission_validator as AV
+import audit_decisions as D
 import exact_store as E
 import synth_render
 import yojson_wire as Y
@@ -233,6 +238,7 @@ def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
         correct[rid] = mine is not None and outcome == label["outcome"] and claim_matches(label, claim, mine)
     return {"candidates": len(labels), "correct": sum(correct.values()), "per_candidate": correct,
             "dropped": len(drops), "absorbed": len(gone - drops), "dropped_expected": len(drops & (planted | targets)),
+            "dropped_off_label": sorted(drops - planted - targets),
             "planted": len(planted), "planted_dropped": len(drops & planted)}
 
 
@@ -429,12 +435,20 @@ def verdict(args: argparse.Namespace) -> int:
     rows, synth_rows = read_rows(real_dir), read_rows(synth_dir)
     # Recomputed from the rows, so an edited or stale summary.json cannot pass a gate.
     r_all = cast(dict[str, JsonObject], summarize("real", rows))
-    s_all = cast(dict[str, JsonObject], summarize("synth", synth_rows))
     expected = {"real": cast(JsonObject, lines["e_real"])["items"], "synth": cast(JsonObject, lines["e_synth"])["items"]}
-    for kind, part in (("real", r_all), ("synth", s_all)):
+    for kind, part in (("real", r_all), ("synth", cast(dict[str, JsonObject], summarize("synth", synth_rows)))):
         counts = {n: t["items"] for n, t in part.items()}
         if any(counts.get(n) != expected[kind] for n in [base, *names]):
             raise SystemExit(f"the {kind} run has not answered every item for every target: {counts}")
+    drops = D.off_label(synth_rows)
+    if drops and args.drops is None:
+        raise SystemExit(f"{sum(len(m) for m in drops.values())} off-label E-synth drops need the blind judge: "
+                         "run e_synth_audit.py drops, then pass its --out as --drops")
+    judged = D.read_adjudication(Path(cast(str, args.drops)), drops) if drops else D.NO_DROPS
+    scored = judged.scored(synth_rows)
+    if not scored:
+        raise SystemExit("the judge's drops leave no E-synth request to score")
+    s_all = cast(dict[str, JsonObject], summarize("synth", scored))
     window = cast(float, comparison["same_item_window_s"])
     result: JsonObject = {}
     warm_min = cast(float, comparison["warm_share_min"])
@@ -461,6 +475,7 @@ def verdict(args: argparse.Namespace) -> int:
                    and cast(float, p50) <= cast(float, b50) * cast(float, gates["G5_e_real_latency_p50_ratio_max"])),
         }
         result[name] = {"pass": all(checks.values()), **checks, "paired": pair, "widest_gap_s": round(gap, 1)}
+    result["e_synth_drops"] = judged.record(len({r["item"] for r in scored}))
     result["choice"] = choose(names, result, s_all, rows, cast(float, choice["prefer_later_when_ahead_by"]))
     print(json.dumps(result))
     (real_dir / "verdict.json").write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
@@ -480,6 +495,9 @@ def main() -> int:
     v = sub.add_parser("verdict")
     v.add_argument("--real", required=True)
     v.add_argument("--synth", required=True)
+    v.add_argument("--drops", default=None,
+                   help="e_synth_audit.py drops --out with the judge's decisions.jsonl; needed when an answer "
+                        "dropped a fact off label")
     v.add_argument("--train", action="append", required=True, help="name=<train_sft --out>, one per candidate")
     args = ap.parse_args()
     return run(args) if args.command == "run" else verdict(args)

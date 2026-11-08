@@ -148,8 +148,8 @@ class ScoreTest(unittest.TestCase):
         both = answer((("r1", "incorporated", "new"), ("r2", "not_durable", None)),
                       dropped=("m1", "m5", "m6"), revisions=(("m1", "new"),))
         score = V.score_synth(item, both)
-        self.assertEqual((score["correct"], score["dropped"], score["dropped_expected"], score["planted_dropped"]),
-                         (2, 3, 2, 1))
+        self.assertEqual((score["correct"], score["dropped"], score["dropped_expected"], score["planted_dropped"],
+                          score["dropped_off_label"]), (2, 3, 2, 1, ["m6"]))
         no_drop = answer((("r1", "incorporated", "new"), ("r2", "not_durable", None)), revisions=(("m1", "new"),))
         self.assertEqual(V.score_synth(item, no_drop)["correct"], 1)
         self.assertEqual(V.score_synth(item, None)["correct"], 0)

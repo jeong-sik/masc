@@ -1717,12 +1717,16 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
      MASC_HOST/MASC_HTTP_PORT would diverge from CLI overrides and could admit
      a host/port on which this process is not listening. *)
   let explicit_base_url = Env_config_core.masc_http_base_url_opt () in
-  let request_trust_policy =
+  (* [https_port] is the port of the TLS listener that actually bound, so a
+     configured port that another process holds (or the cleartext port
+     itself) never becomes a trusted identity. The background projection
+     carries the public or cleartext identity and needs no TLS listener. *)
+  let request_trust_policy ~https_port =
     match
       Server_request_authority.make_trust_policy
         ~bind_host:config.host
         ~bind_port:config.port
-        ~https_port:(Env_config.Transport.https_port ())
+        ~https_port
         ~explicit_base_url
     with
     | Ok policy -> policy
@@ -1732,7 +1736,12 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
            (Server_request_authority.trust_policy_error_to_string error))
   in
   let background_request_authority =
-    Server_request_authority.projection_context request_trust_policy
+    Server_request_authority.projection_context (request_trust_policy ~https_port:None)
+  in
+  let bound_https_port https_listener =
+    Option.map
+      (fun ((listener : Server_bootstrap_http.https_listener), _socket) -> listener.https_port)
+      https_listener
   in
   let http_mode =
     match configured_http_mode with
@@ -2202,15 +2211,12 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
           let https_listener =
             Server_bootstrap_http.listen_https_socket ~sw:serving_sw ~net ~address ~config https
           in
+          let trust_policy = request_trust_policy ~https_port:(bound_https_port https_listener) in
           let routes =
             make_routes ~port:config.port ~host:config.host ~sw:serving_sw ~clock
           in
-          let request_handler =
-            make_request_handler ~trust_policy:request_trust_policy routes
-          in
-          let h2_request_handler =
-            make_h2_request_handler ~trust_policy:request_trust_policy ~routes
-          in
+          let request_handler = make_request_handler ~trust_policy routes in
+          let h2_request_handler = make_h2_request_handler ~trust_policy ~routes in
           let h2_error_handler = make_h2_error_handler () in
           run_serving
             ~sw:serving_sw
@@ -2223,13 +2229,10 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
   else (
     let socket = Server_bootstrap_http.listen_socket ~sw ~net ~address config in
     let https_listener = Server_bootstrap_http.listen_https_socket ~sw ~net ~address ~config https in
+    let trust_policy = request_trust_policy ~https_port:(bound_https_port https_listener) in
     let routes = make_routes ~port:config.port ~host:config.host ~sw ~clock in
-    let request_handler =
-      make_request_handler ~trust_policy:request_trust_policy routes
-    in
-    let h2_request_handler =
-      make_h2_request_handler ~trust_policy:request_trust_policy ~routes
-    in
+    let request_handler = make_request_handler ~trust_policy routes in
+    let h2_request_handler = make_h2_request_handler ~trust_policy ~routes in
     let h2_error_handler = make_h2_error_handler () in
     run_serving
       ~sw

@@ -20,6 +20,13 @@ let authority_host_port ~default_port request_authority =
       (Server_request_authority.port request_authority) )
 ;;
 
+(* The admitted authority's scheme: a request on the TLS listener is sent to
+   the canonical host over https, never to a cleartext URL on the TLS port. *)
+let authority_scheme request_authority =
+  Server_request_authority.scheme_to_string
+    (Server_request_authority.scheme request_authority)
+;;
+
 let canonical_loopback_location
     ~default_port
     ~request_authority
@@ -30,7 +37,13 @@ let canonical_loopback_location
   if String.equal canonical_host host then
     None
   else
-    Some (Printf.sprintf "http://%s:%d%s" canonical_host port request.target)
+    Some
+      (Printf.sprintf
+         "%s://%s:%d%s"
+         (authority_scheme request_authority)
+         canonical_host
+         port
+         request.target)
 
 let with_canonical_loopback_host ~port handler request reqd =
   let request_authority = Server_request_authority.current_exn () in

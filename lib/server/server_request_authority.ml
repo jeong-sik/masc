@@ -401,12 +401,13 @@ let admit_http1_authority
       ; listener_scope = trust_policy.listener_scope
       }
   | Some _ | None ->
-    (* HTTP/1.1 carries no wire scheme: a Host naming the TLS listener is that
-       listener's identity, as on HTTP/2 with [:scheme https]. *)
-    (match configured_identity_admission ~trust_policy ~scheme:Https parsed with
+    (match admit_authority ~trust_policy ~wire_scheme:Http parsed with
      | Some _ as admitted -> admitted
      | None ->
-       (match admit_authority ~trust_policy ~wire_scheme:Http parsed with
+       (* HTTP/1.1 carries no wire scheme: a Host naming the TLS listener is
+          that listener's identity, as on HTTP/2 with [:scheme https]. The
+          cleartext bind was tried first so a Host naming it stays Http. *)
+       (match configured_identity_admission ~trust_policy ~scheme:Https parsed with
         | Some _ as admitted -> admitted
         | None ->
           (match trust_policy.explicit_trusted_host with

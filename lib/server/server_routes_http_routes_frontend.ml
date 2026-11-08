@@ -20,7 +20,12 @@ let canonical_root_dashboard_location ~default_port ~request_authority =
   if String.equal canonical_host host then
     None
   else
-    Some (Printf.sprintf "http://%s:%d/dashboard" canonical_host port)
+    Some
+      (Printf.sprintf
+         "%s://%s:%d/dashboard"
+         (Server_canonical_host.authority_scheme request_authority)
+         canonical_host
+         port)
 
 let redirect_to_dashboard reqd =
   respond_redirect ~location:"/dashboard" reqd

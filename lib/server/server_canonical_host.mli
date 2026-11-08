@@ -14,6 +14,10 @@ val authority_host_port
   -> string * int
 (** The host of the admitted authority, and its port or [default_port]. *)
 
+val authority_scheme : Server_request_authority.authority -> string
+(** ["http"] or ["https"]: the admitted authority's scheme, so a redirect
+    issued on the TLS listener stays on https. *)
+
 val canonical_loopback_location
   :  default_port:int
   -> request_authority:Server_request_authority.authority

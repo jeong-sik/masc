@@ -259,12 +259,12 @@ val record_turn_tool_inflight :
     [Decision_tool_policy_selected]/[Turn_prompting].
     Without this boundary signal, the second-and-later agent-core turn writes
     transition from the previous agent-core turn's terminal phase
-    ([Turn_finalizing]), which [validate_turn_phase_transition] rejects with
+    ([Turn_finalizing]), which [set_turn_phase] rejects with
     [Turn_phase_transition_violation].
 
     This function resets the in-turn FSM fields ([turn_phase],
     [decision_stage]) on the existing observation, the
-    same way [mark_turn_started] bypasses the validator with a fresh
+    same way [mark_turn_started] bypasses the transition check with a fresh
     install. [turn_id], [started_at], [selected_runtime], [measurement],
     [measurement_bind_count], and progress timestamp are preserved across
     agent-core turns inside one keeper turn (they are keeper-turn-scoped, not

@@ -1334,9 +1334,6 @@ let mark_turn_measurement ~observation_token ~base_path name =
   if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
 ;;
 
-(* FSM transition validators moved to Keeper_registry_fsm_validators. *)
-let validate_turn_phase_transition = Keeper_registry_fsm_validators.turn_phase_transition
-
 let set_turn_decision_stage ~observation_token ~base_path name (decision_stage : decision_stage_active) =
 (* Spec invariant: the 3 [<active>_to_undecided] transitions are forbidden within a turn.  Previously enforced at runtime via [invalid_arg] inside a 16-pair match; now unrepresentable through the [dec... *)
   let target_packed = decision_stage_active_to_packed decision_stage in

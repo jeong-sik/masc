@@ -40,11 +40,6 @@ type execution_binding =
   ; execution_id : Ids.Execution_id.t
   }
 
-type stream_phase =
-  | Accepting_content
-  | Stop_reason_seen of Agent_core.Types.stop_reason
-  | Message_stopped
-
 type message_start =
   { raw_id : string
   ; model : string
@@ -71,7 +66,7 @@ type t = {
   mutable current_message_start : message_start option;
   mutable message_presence : message_presence;
   mutable current_scope_progress_seen : bool;
-  mutable stream_phase : stream_phase;
+  mutable stream_phase : Keeper_stream_phase.t;
   mutable invalid_scopes : int list;
   mutable failed_scopes : int list;
   mutable official_executions : Keeper_chat_events.tool_stream_occurrence list;
@@ -94,7 +89,7 @@ let create () =
   ; current_message_start = None
   ; message_presence = Message_unseen
   ; current_scope_progress_seen = false
-  ; stream_phase = Accepting_content
+  ; stream_phase = Keeper_stream_phase.Accepting_content
   ; invalid_scopes = []
   ; failed_scopes = []
   ; official_executions = []
@@ -150,7 +145,7 @@ let advance_to_empty_scope t =
   t.current_message_start <- None;
   t.message_presence <- Message_unseen;
   t.current_scope_progress_seen <- false;
-  t.stream_phase <- Accepting_content;
+  t.stream_phase <- Keeper_stream_phase.Accepting_content;
   t.invalid_indices <- []
 ;;
 
@@ -240,12 +235,12 @@ let current_scope_has_tool_occurrence t =
 
 let prepare_message_start t ~id ~model ~usage =
   let exact_open_replay =
-    t.stream_phase = Accepting_content
+    Keeper_stream_phase.admits_new_content t.stream_phase
     && current_message_start_equal t ~id ~model ~usage
   in
   if
     t.message_presence <> Message_unseen
-    && t.stream_phase = Accepting_content
+    && Keeper_stream_phase.admits_new_content t.stream_phase
     && not t.current_scope_progress_seen
     && not exact_open_replay
     && not (current_scope_is_invalid t)
@@ -262,7 +257,7 @@ let prepare_message_start t ~id ~model ~usage =
 
 let start_message_scope t ~id ~model ~usage =
   if
-    t.stream_phase = Accepting_content
+    Keeper_stream_phase.admits_new_content t.stream_phase
     && t.message_presence <> Message_unseen
     && current_message_start_equal t ~id ~model ~usage
   then
@@ -289,7 +284,7 @@ let ensure_message_scope t =
   match t.message_presence with
   | Message_open -> ()
   | Message_unseen -> t.message_presence <- Message_open
-  | Message_closed when t.stream_phase = Accepting_content ->
+  | Message_closed when Keeper_stream_phase.admits_new_content t.stream_phase ->
     t.message_presence <- Message_open
   | Message_closed -> invalidate_current_scope t
 ;;
@@ -838,14 +833,11 @@ let finalize_open_blocks t =
 ;;
 
 let content_event_allowed t (evt : Agent_core.Types.sse_event) =
-  match evt, t.stream_phase with
-  | (Agent_core.Types.ContentBlockStart _ | Agent_core.Types.ContentBlockDelta _),
-    Accepting_content -> true
-  | Agent_core.Types.ContentBlockStop _,
-    (Accepting_content | Stop_reason_seen _) -> true
-  | (Agent_core.Types.ContentBlockStart _ | Agent_core.Types.ContentBlockDelta _
-    | Agent_core.Types.ContentBlockStop _),
-    (Stop_reason_seen _ | Message_stopped) -> false
+  match evt with
+  | Agent_core.Types.ContentBlockStart _ | Agent_core.Types.ContentBlockDelta _ ->
+    Keeper_stream_phase.admits_new_content t.stream_phase
+  | Agent_core.Types.ContentBlockStop _ ->
+    Keeper_stream_phase.admits_trailing_events t.stream_phase
   | ( Llm_provider.Types.MessageStop | Llm_provider.Types.InlineContentReplay _ | Llm_provider.Types.ResponsesOutputItems _ | Llm_provider.Types.Ping
     | Llm_provider.Types.Connected | Llm_provider.Types.MessageStart _
     | Llm_provider.Types.MessageDelta _ | Llm_provider.Types.SSEError _
@@ -855,8 +847,7 @@ let content_event_allowed t (evt : Agent_core.Types.sse_event) =
     | Llm_provider.Types.SSEUnsupportedPart _
     | Llm_provider.Types.SSEUnsupportedResponse _ | Llm_provider.Types.Timeout _
     | Llm_provider.Types.StreamIncomplete _
-     ),
-    _ -> true
+     ) -> true
 ;;
 
 let on_event t (evt : Agent_core.Types.sse_event) =
@@ -895,22 +886,18 @@ let on_event t (evt : Agent_core.Types.sse_event) =
   | Agent_core.Types.MessageStart { id; model; usage } ->
     start_message_scope t ~id ~model ~usage
   | Agent_core.Types.MessageDelta { stop_reason; _ } ->
-    (match t.stream_phase, stop_reason with
-     | Accepting_content, None -> ()
-     | Accepting_content, Some stop_reason ->
+    (match Keeper_stream_phase.on_stop_reason t.stream_phase stop_reason with
+     | Keeper_stream_phase.Stop_reason_unchanged -> ()
+     | Keeper_stream_phase.Stop_reason_first stop_reason ->
        (* The canonical producer drops every ToolUse at MaxTokens, including
           already closed blocks with parseable arguments. Keep the source-map
           inventory aligned without certifying a cut-off call as executable. *)
        (if stop_reason = Agent_core.Types.MaxTokens
         then discard_scope_tools t t.current_stream_scope
         else finalize_open_blocks t);
-       t.stream_phase <- Stop_reason_seen stop_reason;
+       t.stream_phase <- Keeper_stream_phase.Stop_reason_seen stop_reason;
        close_message_scope t
-     | Stop_reason_seen _, None -> ()
-     | Stop_reason_seen recorded, Some replay when recorded = replay -> ()
-     | Stop_reason_seen _, Some _
-     | Message_stopped, None
-     | Message_stopped, Some _ -> invalidate_current_scope t)
+     | Keeper_stream_phase.Stop_reason_conflict -> invalidate_current_scope t)
   | Agent_core.Types.ContentBlockStart { index; tool_id; tool_name; _ } ->
     ensure_message_scope t;
     if current_scope_is_invalid t
@@ -1079,17 +1066,17 @@ let on_event t (evt : Agent_core.Types.sse_event) =
     then ()
     else finalize_block t index
   | Agent_core.Types.MessageStop ->
-    (match t.stream_phase with
-     | Message_stopped -> ()
-     | Accepting_content ->
+    (match Keeper_stream_phase.on_message_stop t.stream_phase with
+     | Keeper_stream_phase.Message_stop_replayed -> ()
+     | Keeper_stream_phase.Message_stop_without_reason ->
        finalize_open_blocks t;
        close_message_scope t;
-       t.stream_phase <- Message_stopped;
+       t.stream_phase <- Keeper_stream_phase.Message_stopped;
        invalidate_current_scope t
-     | Stop_reason_seen _ ->
+     | Keeper_stream_phase.Message_stop_after_reason ->
        finalize_open_blocks t;
        close_message_scope t;
-       t.stream_phase <- Message_stopped)
+       t.stream_phase <- Keeper_stream_phase.Message_stopped)
   | Agent_core.Types.SSEError _
   | Agent_core.Types.NDJSONError _
   | Agent_core.Types.SSEParseFailed _

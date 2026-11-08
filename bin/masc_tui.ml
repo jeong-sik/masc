@@ -9581,7 +9581,9 @@ let memory_world_read_interval_s = Server_dashboard_http_core_cache.standard_cac
    the Keepers list have no use for it. Each answer sets the time before which
    no read starts, so an open screen asks once per interval, a failed read
    waits the same interval, and a screen entered again within it draws the
-   inventory already held. *)
+   inventory already held. The read carries the expected workspace and needs
+   the server's receipt for it, so an answer from another workspace is an
+   error and not a count. *)
 let launch_owed_memory_world state ~mailbox =
   if state.view = Memory && Option.is_none state.memory_facts_keeper
      && server_authority_ready state then
@@ -9590,7 +9592,7 @@ let launch_owed_memory_world state ~mailbox =
     | Some (next, request) ->
         state.memory_world <- next;
         let host = server_peer_host and port = state.port in
-        launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+        launch_workspace_json_read state ~mailbox
           ~deliver:(fun result -> Memory_msg (Memory_world_loaded (request, result)))
           (fun () -> Masc_tui_loader.load_memory_world ~host ~port)
 

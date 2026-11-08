@@ -33,12 +33,19 @@ def row(target: str, item: str, *, valid: bool = True, agree: int = 0, candidate
 
 
 def answer(judgments: tuple[tuple[str, AV.Outcome, str | None], ...], *, dropped: tuple[str, ...] = (),
-           absorbed: tuple[tuple[str, str], ...] = (),
+           absorbed: tuple[tuple[str, str], ...] = (), added: tuple[str, ...] = (),
            revisions: tuple[tuple[str, str], ...] = ()) -> AV.AdmissionAnswer:
     return AV.AdmissionAnswer(
         judgments=tuple(AV.Judgment(rid, outcome, claim, "r") for rid, outcome, claim in judgments),
-        change_support=(), deferred=False, added_claims=(), dropped=dropped, absorbed=absorbed,
+        change_support=(), deferred=False, added_claims=added, dropped=dropped, absorbed=absorbed,
         revisions=revisions, memory_after=())
+
+
+def synth_row(**counts: int) -> Row:
+    base: Row = {"target": "A", "status": 200, "wall_s": 1.0, "valid": True, "cost_usd": 0.0,
+                 "prompt_tokens": 1, "cached_tokens": 1, "candidates": 2, "correct": 2, "removed": 0,
+                 "dropped": 0, "absorbed": 0, "dropped_expected": 0, "planted": 1, "planted_dropped": 0}
+    return {**base, **counts}
 
 
 class PairedTest(unittest.TestCase):
@@ -75,20 +82,53 @@ class WarmTest(unittest.TestCase):
 
 class ChooseTest(unittest.TestCase):
     @staticmethod
-    def result(a_pass: bool, a_lead: float, b_pass: bool, b_lead: float) -> dict[str, object]:
-        return {"A": {"pass": a_pass, "paired": {"lead": a_lead}}, "B": {"pass": b_pass, "paired": {"lead": b_lead}}}
+    def result(a_pass: bool, b_pass: bool) -> dict[str, object]:
+        return {"A": {"pass": a_pass}, "B": {"pass": b_pass}}
 
-    def test_a_wins_unless_b_leads_on_both_by_the_margin(self) -> None:
+    @staticmethod
+    def rows(a_agree: int, b_agree: int) -> list[Row]:
+        return [row("A", "i1", agree=a_agree, candidates=100), row("B", "i1", agree=b_agree, candidates=100)]
+
+    def test_a_wins_unless_b_leads_it_on_both_by_the_margin(self) -> None:
         synth: dict[str, dict[str, object]] = {"A": {"outcome_accuracy": 0.95}, "B": {"outcome_accuracy": 0.98}}
-        self.assertEqual(V.choose(["A", "B"], self.result(True, 0.00, True, 0.03), synth, 0.03), "B")
-        self.assertEqual(V.choose(["A", "B"], self.result(True, 0.00, True, 0.02), synth, 0.03), "A")
+        self.assertEqual(V.choose(["A", "B"], self.result(True, True), synth, self.rows(80, 83), 0.03), "B")
+        self.assertEqual(V.choose(["A", "B"], self.result(True, True), synth, self.rows(80, 82), 0.03), "A")
         synth["B"] = {"outcome_accuracy": 0.97}
-        self.assertEqual(V.choose(["A", "B"], self.result(True, 0.00, True, 0.10), synth, 0.03), "A")
+        self.assertEqual(V.choose(["A", "B"], self.result(True, True), synth, self.rows(80, 90), 0.03), "A")
+
+    def test_the_two_are_compared_on_items_both_answered_validly(self) -> None:
+        # B's lead over the baseline could come from i2, which A did not answer validly.
+        synth: dict[str, dict[str, object]] = {"A": {"outcome_accuracy": 0.95}, "B": {"outcome_accuracy": 0.99}}
+        rows = [row("A", "i1", agree=50, candidates=100), row("B", "i1", agree=50, candidates=100),
+                row("A", "i2", valid=False, candidates=100), row("B", "i2", agree=100, candidates=100)]
+        self.assertEqual(V.choose(["A", "B"], self.result(True, True), synth, rows, 0.03), "A")
 
     def test_only_passing_candidates_are_chosen(self) -> None:
         synth: dict[str, dict[str, object]] = {"A": {"outcome_accuracy": 0.99}, "B": {"outcome_accuracy": 0.95}}
-        self.assertEqual(V.choose(["A", "B"], self.result(False, 0.5, True, 0.0), synth, 0.03), "B")
-        self.assertIsNone(V.choose(["A", "B"], self.result(False, 0.5, False, 0.0), synth, 0.03))
+        self.assertEqual(V.choose(["A", "B"], self.result(False, True), synth, self.rows(0, 0), 0.03), "B")
+        self.assertIsNone(V.choose(["A", "B"], self.result(False, False), synth, self.rows(0, 0), 0.03))
+
+
+class BindingTest(unittest.TestCase):
+    BASE = "base-model"
+    PIN = "p" * 64
+
+    def problem(self, real: dict[str, str], synth: dict[str, str], trained: dict[str, dict[str, object]]) -> str | None:
+        return V.binding_problem(real, synth, "base", self.BASE, ["A"], trained, self.PIN)
+
+    def test_a_candidate_is_the_checkpoint_its_training_run_saved(self) -> None:
+        targets = {"base": self.BASE, "A": "tinker://run-a/sampler"}
+        saved: dict[str, object] = {"branch": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
+        self.assertIsNone(self.problem(targets, dict(targets), {"A": saved}))
+        self.assertIsNotNone(self.problem(targets, dict(targets), {"A": {**saved, "sampler_path": "tinker://other"}}))
+        self.assertIsNotNone(self.problem(targets, dict(targets), {"A": {**saved, "pass_lines_sha256": "q" * 64}}))
+        self.assertIsNotNone(self.problem(targets, dict(targets), {}))
+
+    def test_both_runs_send_the_same_model_under_each_name(self) -> None:
+        real = {"base": self.BASE, "A": "tinker://run-a/sampler"}
+        saved: dict[str, object] = {"branch": "A", "pass_lines_sha256": self.PIN, "sampler_path": "tinker://run-a/sampler"}
+        self.assertIsNotNone(self.problem(real, {**real, "A": "tinker://run-b/sampler"}, {"A": saved}))
+        self.assertIsNotNone(self.problem({**real, "base": "other"}, {**real, "base": "other"}, {"A": saved}))
 
 
 class ScoreTest(unittest.TestCase):
@@ -114,11 +154,36 @@ class ScoreTest(unittest.TestCase):
         self.assertEqual(V.score_synth(item, no_drop)["correct"], 1)
         self.assertEqual(V.score_synth(item, None)["correct"], 0)
 
-    def test_synth_without_drops_has_full_precision(self) -> None:
-        rows: list[Row] = [{"target": "A", "status": 200, "wall_s": 1.0, "valid": True, "cost_usd": 0.0,
-                            "prompt_tokens": 1, "cached_tokens": 1, "candidates": 2, "correct": 2,
-                            "dropped": 0, "dropped_expected": 0, "planted": 1, "planted_dropped": 0}]
-        part = V.summarize("synth", rows)["A"]
+    def test_synth_new_fact_and_paraphrase_need_the_claim_their_kind_names(self) -> None:
+        label: dict[str, object] = {"candidates": [
+            {"request_id": "r1", "outcome": "incorporated", "supersedes": None, "already_claim": None},
+            {"request_id": "r2", "outcome": "already_represented", "supersedes": None, "already_claim": "old"}],
+            "planted_stale": []}
+        item = V.SynthItem("i1", make_prompt(), "", label)
+        right = answer((("r1", "incorporated", "new"), ("r2", "already_represented", "old")), added=("new",))
+        # MASC accepts both: every named claim is in final memory.
+        wrong = answer((("r1", "incorporated", "old"), ("r2", "already_represented", "new")), added=("new",))
+        self.assertEqual(V.score_synth(item, right)["correct"], 2)
+        self.assertEqual(V.score_synth(item, wrong)["correct"], 0)
+
+    def test_synth_absorbs_are_removals_and_never_drops(self) -> None:
+        label: dict[str, object] = {"candidates": [
+            {"request_id": "r1", "outcome": "incorporated", "supersedes": None, "already_claim": None}],
+            "planted_stale": ["m5"]}
+        item = V.SynthItem("i1", make_prompt(), "", label)
+        mine = answer((("r1", "incorporated", "new"),), added=("new",), absorbed=(("m5", "new"), ("m6", "new")))
+        score = V.score_synth(item, mine)
+        self.assertEqual((score["correct"], score["removed"], score["absorbed"], score["dropped_expected"],
+                          score["planted_dropped"]), (1, 2, 2, 0, 0))
+
+    def test_synth_precision_counts_absorbed_ids_against_it(self) -> None:
+        part = V.summarize("synth", [synth_row(removed=4, dropped=2, absorbed=2, dropped_expected=2,
+                                               planted=2, planted_dropped=2)])["A"]
+        assert isinstance(part, dict)
+        self.assertEqual((part["drop_precision"], part["absorbed"], part["stale_drop_recall"]), (0.5, 2, 1.0))
+
+    def test_synth_without_removals_has_full_precision(self) -> None:
+        part = V.summarize("synth", [synth_row()])["A"]
         assert isinstance(part, dict)
         self.assertEqual((part["drop_precision"], part["stale_drop_recall"]), (1.0, 0.0))
 

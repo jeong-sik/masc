@@ -1318,6 +1318,8 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
     (* fire-and-forget: completion is idempotent and may race disconnect cleanup. *)
     ignore (Eio.Promise.try_resolve stream_projection_done_resolver () : bool)
   in
+  (* Hands [completion] to the queue reader by resolving [worker_completion].
+     Only the first call takes effect. *)
   let publish_completion completion =
     Eio.Mutex.use_rw ~protect:true terminal_delivery_mu (fun () ->
       if not (Atomic.get terminal_pushed)
@@ -1326,6 +1328,9 @@ let process_single_turn ~batch_binding ~user_row_origin ~submission
         ignore
           (Eio.Promise.try_resolve worker_completion_resolver completion : bool)))
   in
+  (* Keeps [completion] for [publish_inline_completion] to publish when the
+     turn ends. The queue reader sees nothing until then, and a later call
+     replaces an earlier one. *)
   let stage_completion completion =
     Eio.Mutex.use_rw ~protect:true terminal_delivery_mu (fun () ->
       if not (Atomic.get terminal_pushed) then staged_completion := Some completion)

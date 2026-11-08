@@ -406,24 +406,10 @@ let admit_http1_authority
      | None ->
        (* HTTP/1.1 carries no wire scheme: a Host naming the TLS listener is
           that listener's identity, as on HTTP/2 with [:scheme https]. The
-          cleartext bind was tried first so a Host naming it stays Http. *)
-       (match configured_identity_admission ~trust_policy ~scheme:Https parsed with
-        | Some _ as admitted -> admitted
-        | None ->
-          (match trust_policy.explicit_trusted_host with
-           | Some trusted
-             when trusted_host_port_matches
-                    ~scheme:trusted.scheme
-                    trusted.authority
-                    parsed ->
-             Some
-               { host = parsed.host
-               ; port = parsed.port
-               ; scheme = trusted.scheme
-               ; trust_class = Explicit_trusted_host
-               ; listener_scope = trust_policy.listener_scope
-               }
-           | Some _ | None -> None)))
+          cleartext bind was tried first so a Host naming it stays Http. An
+          explicit trusted host was already matched above for either scheme,
+          so nothing remains to try after the TLS identity. *)
+       configured_identity_admission ~trust_policy ~scheme:Https parsed)
 ;;
 
 let classify_http1_request ~(trust_policy : trust_policy) request =

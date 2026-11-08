@@ -122,19 +122,6 @@ type run_result = {
 (* Internal: resolve provider                                        *)
 (* ================================================================ *)
 
-(** Resolve a model label string to an AGENT_CORE Provider.config.
-    Uses MASC [Runtime_model_string.parse_model_string] with an AGENT_CORE runtime binding.
-    Only a defaultless Ollama [auto] may use discovery scoped to its exact endpoint.
-    Other unresolved labels are refused rather than silently substituting a model. *)
-let label_resolution_error_to_string =
-  Runtime_transport.label_resolution_error_to_string
-
-let label_resolution_error_to_core_error =
-  Runtime_transport.label_resolution_error_to_core_error
-
-let resolve_provider_config_of_label =
-  Runtime_transport.resolve_provider_config_of_label
-
 let provider_caps_of_config =
   Runtime_transport.provider_caps_of_config
 

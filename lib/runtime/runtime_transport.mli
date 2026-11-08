@@ -7,13 +7,6 @@
 type label_resolution_error =
   | Invalid_model_label of string
 
-(** Render a label-resolution error for log/diagnostic surfaces. *)
-val label_resolution_error_to_string : label_resolution_error -> string
-
-(** Lift a label-resolution error into the AGENT_CORE agent-core error envelope. *)
-val label_resolution_error_to_core_error :
-  label_resolution_error -> Agent_core.Error.t
-
 (** Resolve a model label string to a provider config via the MASC runtime
     parser. Only a defaultless Ollama [auto] may use discovery scoped to its
     exact endpoint. Other unresolved labels return [Error (Invalid_model_label _)]. *)

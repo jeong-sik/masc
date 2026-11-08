@@ -11,8 +11,6 @@
 type label_resolution_error = Runtime_transport_label_resolution.label_resolution_error =
   | Invalid_model_label of string
 
-let label_resolution_error_to_string = Runtime_transport_label_resolution.label_resolution_error_to_string
-let label_resolution_error_to_core_error = Runtime_transport_label_resolution.label_resolution_error_to_core_error
 let resolve_provider_config_of_label = Runtime_transport_label_resolution.resolve_provider_config_of_label
 
 let provider_caps_of_config = Provider_tool_support.agent_core_capabilities_of_config

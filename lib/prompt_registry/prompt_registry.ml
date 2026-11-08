@@ -1074,12 +1074,17 @@ let prompts_json () =
            (held_back_overrides ())) );
   ]
 
+let overrides_path base_path =
+  Filename.concat
+    (Common.masc_dir_from_base_path ~base_path)
+    Prompt_override_persistence.filename
+
 (** Persist overrides to JSON file *)
 let save_override_entries base_path entries =
   let masc_dir = Common.masc_dir_from_base_path ~base_path in
   try
     Fs_compat.mkdir_p masc_dir;
-    let path = Filename.concat masc_dir "prompt_overrides.json" in
+    let path = overrides_path base_path in
     Prompt_override_persistence.save ~path entries
     |> Result.map_error Prompt_override_persistence.error_to_string
   with
@@ -1182,11 +1187,7 @@ let record_override_restore_failure () =
   (Atomic.get restore_failure_observer) ()
 
 let restore_overrides base_path =
-  let path =
-    Filename.concat
-      (Common.masc_dir_from_base_path ~base_path)
-      "prompt_overrides.json"
-  in
+  let path = overrides_path base_path in
   let failures, moved_keys =
     with_override_mutation_lock (fun () ->
       let candidate, failures, rejected_entries =
@@ -1299,11 +1300,7 @@ let promote_file_edit ~base_path ~file ~embedded ~edited =
           | [] when String.equal value "" ->
               not_promotable "the edited body is empty"
           | [] ->
-              let path =
-                Filename.concat
-                  (Common.masc_dir_from_base_path ~base_path)
-                  "prompt_overrides.json"
-              in
+              let path = overrides_path base_path in
               with_override_mutation_lock (fun () ->
                   let saved =
                     if Sys.file_exists path then

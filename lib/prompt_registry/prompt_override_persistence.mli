@@ -58,6 +58,10 @@ val load : path:string -> (entry list, error) result
     schema versions, malformed field types, duplicate JSON fields, and
     duplicate override keys are rejected as typed errors. *)
 
+val filename : string
+(** Name of the overrides file, in the MASC directory and in every saved
+    preset directory. *)
+
 val save : path:string -> entry list -> (unit, error) result
 (** Atomically replace [path] with the canonical versioned envelope. *)
 

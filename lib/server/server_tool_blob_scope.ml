@@ -169,7 +169,7 @@ let workspace =
     ; no_reference Play_room.dirname
     ; no_reference Prompt_preset.presets_dirname
     ; no_reference Prompt_preset.staging_dirname
-    ; no_reference Prompt_preset.overrides_file
+    ; no_reference Prompt_override_persistence.filename
     ; no_reference Published_artifact_check_store.dirname
     ; no_reference Run_eio.runs_dirname
     ; no_reference Tool_metrics_store.database_filename

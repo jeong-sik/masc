@@ -39,6 +39,7 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
   ; kr_runtime_blocker_signature = None
   ; kr_runtime_lane_observation = None
   ; kr_runtime_path_rest = Ok None
+  ; kr_operator_disposition = Ok None
   }
 
 let running_turn activity : Decode.keeper_turn_state =
@@ -1389,6 +1390,45 @@ let test_roster_decodes_the_walk_rest_beside_the_row () =
     ; ( "an unknown basis is an error"
       , resting [ release_at (`Float 1_790_000_000.); "release_basis", `String "guessed" ] )
     ]
+;;
+
+let test_roster_decodes_operator_disposition_beside_the_row () =
+  let decode disp reason =
+    let fields =
+      match Yojson.Safe.from_string (gate_row "disposition_keeper") with
+      | `Assoc fields -> fields
+      | _ -> Alcotest.fail "the fixture row is an object"
+    in
+    let row =
+      `Assoc
+        (fields
+        @ [ "operator_disposition", disp; "operator_disposition_reason", reason ])
+    in
+    match
+      Decode.decode_keeper_runtime_list
+        (`Assoc
+           [ "candle", `Assoc [ "status", `String "off" ]; "keepers", `List [ row ]
+           ; "total", `Int 1; "truncated", `Bool false ])
+    with
+    | Ok ([ runtime ], [], false, 1, _) -> runtime.Decode.kr_operator_disposition
+    | Ok _ -> Alcotest.fail "the row was hidden"
+    | Error reason -> Alcotest.fail reason
+  in
+  Alcotest.(check bool) "null pair decodes to Ok None" true
+    (decode `Null `Null = Ok None);
+  Alcotest.(check bool) "valid typed pair decodes to Ok (Some (kind, reason))" true
+    (decode (`String "operator_action_required") (`String "config_invalid")
+     = Ok
+         (Some
+            ( Masc.Keeper_execution_receipt.Disp_operator_action_required
+            , Masc.Keeper_execution_receipt.Reason_config_invalid )));
+  Alcotest.(check bool) "unknown disposition kind is Error" true
+    (Result.is_error (decode (`String "magic_action") (`String "config_invalid")));
+  Alcotest.(check bool) "unknown reason is Error" true
+    (Result.is_error (decode (`String "operator_action_required") (`String "magic_reason")));
+  Alcotest.(check bool) "asymmetric null/string is Error" true
+    (Result.is_error (decode `Null (`String "config_invalid")))
+;;
 
 let test_actual_producer_error_is_isolated () =
   let producer_row = Yojson.Safe.from_string
@@ -1748,6 +1788,8 @@ let () =
             test_roster_decodes_an_error_row_without_refusing_the_rest
         ; Alcotest.test_case "the walk rest decodes beside the row" `Quick
             test_roster_decodes_the_walk_rest_beside_the_row
+        ; Alcotest.test_case "operator disposition decodes beside the row" `Quick
+            test_roster_decodes_operator_disposition_beside_the_row
         ; Alcotest.test_case "actual producer error stays isolated" `Quick
             test_actual_producer_error_is_isolated
         ; Alcotest.test_case "present unknown health on an error row is rejected" `Quick

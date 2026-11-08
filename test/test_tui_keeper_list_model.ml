@@ -20,6 +20,7 @@ let runtime health name : Decode.keeper_runtime =
   ; kr_runtime_blocker_signature = None
   ; kr_runtime_lane_observation = None
   ; kr_runtime_path_rest = Ok None
+  ; kr_operator_disposition = Ok None
   }
 
 let keeper name : Decode.keeper =

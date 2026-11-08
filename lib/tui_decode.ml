@@ -173,6 +173,9 @@ type keeper_runtime = {
       follow-on line, so the wire a log search keys on stays on screen. *)
   kr_runtime_lane_observation : Keeper_execution_receipt.runtime_lane_observation option;
   kr_runtime_path_rest : (keeper_path_rest option, string) result;
+  kr_operator_disposition :
+    ((Keeper_execution_receipt.operator_disposition_kind
+     * Keeper_execution_receipt.operator_disposition_reason) option, string) result;
 }
 
 type keeper_lane_phase =
@@ -3201,6 +3204,27 @@ let decode_keeper_path_rest json =
     else Error (Printf.sprintf "unknown runtime_path_rest status %S" status)
   | other -> field_type_error "runtime_path_rest" "an object or null" other
 
+let decode_operator_disposition json =
+  match member "operator_disposition" json, member "operator_disposition_reason" json with
+  | (`Null | `String ""), (`Null | `String "") -> Ok None
+  | `String raw_kind, `String raw_reason ->
+    (match
+       Keeper_execution_receipt.operator_disposition_kind_of_string raw_kind,
+       Keeper_execution_receipt.operator_disposition_reason_of_string raw_reason
+     with
+     | Some kind, Some reason -> Ok (Some (kind, reason))
+     | None, _ ->
+       Error (Printf.sprintf "field 'operator_disposition' has unknown kind %S" raw_kind)
+     | _, None ->
+       Error (Printf.sprintf "field 'operator_disposition_reason' has unknown reason %S" raw_reason))
+  | `Null, `String _ ->
+    Error "field 'operator_disposition' is null while 'operator_disposition_reason' is present"
+  | `String _, `Null ->
+    Error "field 'operator_disposition' is present while 'operator_disposition_reason' is null"
+  | other_kind, other_reason ->
+    Error (Printf.sprintf "invalid operator_disposition wire fields: (%s, %s)"
+             (Yojson.Safe.to_string other_kind) (Yojson.Safe.to_string other_reason))
+
 let decode_keeper_runtime ~account_revision json =
   let* kr_name = required_string_field json "name" in
   let* kr_portrait = Keeper_portrait_equipment.reading_of_json (member "portrait" json) in
@@ -3315,6 +3339,7 @@ let decode_keeper_runtime ~account_revision json =
     ; kr_runtime_blocker_signature
     ; kr_runtime_lane_observation
     ; kr_runtime_path_rest = decode_keeper_path_rest json
+    ; kr_operator_disposition = decode_operator_disposition json
     }
 
 (* [truncated] is carried out rather than dropped: the route clamps its own

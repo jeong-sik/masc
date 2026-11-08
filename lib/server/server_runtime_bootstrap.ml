@@ -257,7 +257,7 @@ let publish_exact_output_catalog (lanes, catalog, runtimes) =
   with
   | Error detail -> raise (exact_output_registry_refused detail)
   | Ok registry ->
-    Runtime.report_exact_output_registry registry;
+    Runtime.report_exact_output_registry ~runtimes registry;
     warn_catalog_absent_keeper_assignments resolver_snapshot;
     Log.Misc.info
       "exact_output: immutable resolver-and-lane registry published%s"

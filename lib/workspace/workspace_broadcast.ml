@@ -589,40 +589,40 @@ let empty_reconciliation_report =
 
 let mention_delivery_mutex = Cross_context_mutex.create ()
 
-type committed_message_read =
-  | Committed_message of Masc_domain.message
-  | Committed_message_absent
+type committed_message_failure =
   | Committed_message_unavailable of string
   | Committed_message_corrupt of string
 
-let read_committed_message config path =
+(* [Ok None]: no committed row exists at [path]. *)
+let read_committed_message config path
+  : (Masc_domain.message option, committed_message_failure) result =
   match key_of_path config path with
   | Some key ->
     (match backend_get config ~key with
      | Error error ->
-       Committed_message_unavailable (Backend_types.show_error error)
-     | Ok None -> Committed_message_absent
+       Error (Committed_message_unavailable (Backend_types.show_error error))
+     | Ok None -> Ok None
      | Ok (Some content) ->
        (match Safe_ops.parse_json_safe ~context:"workspace mention committed row" content with
-        | Error detail -> Committed_message_corrupt detail
+        | Error detail -> Error (Committed_message_corrupt detail)
         | Ok json ->
           (match message_of_yojson json with
-           | Ok message -> Committed_message message
-           | Error detail -> Committed_message_corrupt detail)))
+           | Ok message -> Ok (Some message)
+           | Error detail -> Error (Committed_message_corrupt detail))))
   | None ->
     (try
        if not (Sys.file_exists path)
-       then Committed_message_absent
+       then Ok None
        else
          match read_json_local_result path with
-         | Error detail -> Committed_message_unavailable detail
+         | Error detail -> Error (Committed_message_unavailable detail)
          | Ok json ->
            (match message_of_yojson json with
-            | Ok message -> Committed_message message
-            | Error detail -> Committed_message_corrupt detail)
+            | Ok message -> Ok (Some message)
+            | Error detail -> Error (Committed_message_corrupt detail))
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn -> Committed_message_unavailable (Printexc.to_string exn))
+     | exn -> Error (Committed_message_unavailable (Printexc.to_string exn)))
 
 let rematerialize_committed_message config message =
   match
@@ -720,20 +720,16 @@ let reconcile_pending_mentions_unlocked config =
              , blocked_targets )
            else
            let committed_path = message_file config outbox_message in
-             let committed = read_committed_message config committed_path in
              let committed =
-               match committed with
-               | Committed_message_absent ->
-                 (match rematerialize_committed_message config outbox_message with
-                  | Ok message -> Committed_message message
-                  | Error detail -> Committed_message_unavailable detail)
-               | ( Committed_message _
-                 | Committed_message_unavailable _
-                 | Committed_message_corrupt _ ) as other ->
-                 other
+               match read_committed_message config committed_path with
+               | Ok None ->
+                 rematerialize_committed_message config outbox_message
+                 |> Result.map_error (fun detail -> Committed_message_unavailable detail)
+               | Ok (Some message) -> Ok message
+               | Error failure -> Error failure
              in
              (match committed with
-              | Committed_message_unavailable detail ->
+              | Error (Committed_message_unavailable detail) ->
                 Log.Misc.error
                   "workspace mention recovery committed read failed request_id=%s: %s"
                   outbox_message.request_id detail;
@@ -742,7 +738,7 @@ let reconcile_pending_mentions_unlocked config =
                     ~none:blocked_targets
                     ~some:(fun value -> value :: blocked_targets)
                     target )
-              | Committed_message_corrupt detail ->
+              | Error (Committed_message_corrupt detail) ->
                    Log.Misc.error
                      "workspace mention recovery committed decode failed request_id=%s: %s"
                      outbox_message.request_id detail;
@@ -751,7 +747,7 @@ let reconcile_pending_mentions_unlocked config =
                        ~none:blocked_targets
                        ~some:(fun value -> value :: blocked_targets)
                        target )
-              | Committed_message message when
+              | Ok message when
                      not (String.equal message.request_id outbox_message.request_id) ->
                    Log.Misc.error
                      "workspace mention recovery committed identity mismatch outbox_request_id=%s request_id=%s"
@@ -761,7 +757,7 @@ let reconcile_pending_mentions_unlocked config =
                        ~none:blocked_targets
                        ~some:(fun value -> value :: blocked_targets)
                        target )
-              | Committed_message message ->
+              | Ok message ->
                 (match reconcile_persisted_mention config message with
                  | None -> report, blocked_targets
                  | Some delivery ->
@@ -782,8 +778,7 @@ let reconcile_pending_mentions_unlocked config =
                           target )
                     | Rejected _ ->
                       { report with rejected = report.rejected + 1 }, blocked_targets
-                    | Passive -> report, blocked_targets))
-              | Committed_message_absent -> assert false))
+                    | Passive -> report, blocked_targets))))
       (initial_report, [])
       current
   in
@@ -1079,9 +1074,9 @@ let find_broadcast_message ~request_id config ~from_agent ~content =
     | [] -> Ok None
     | [name] ->
         let* message = match read_committed_message config (Filename.concat (messages_dir config) name) with
-          | Committed_message message -> Ok message
-          | Committed_message_absent -> Error (Broadcast_dependency_unavailable "committed Broadcast row disappeared")
-          | Committed_message_unavailable detail | Committed_message_corrupt detail ->
+          | Ok (Some message) -> Ok message
+          | Ok None -> Error (Broadcast_dependency_unavailable "committed Broadcast row disappeared")
+          | Error (Committed_message_unavailable detail | Committed_message_corrupt detail) ->
               Error (Broadcast_dependency_unavailable detail) in
         if not (String.equal message.request_id request_id
           && String.equal message.from_agent from_agent

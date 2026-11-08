@@ -1,6 +1,6 @@
 name = "keeper_composition_status"
 description = """
-Read the status and structured result of one async Keeper composition.
+Read the status and structured result of one async Keeper request.
 
 Use the exact request id when a completion references its result or when more
 detail is needed. A completion that already carries usable selected exports
@@ -20,7 +20,13 @@ completion, then use the same prepared draft and composition_run_id only while
 its original logical run remains unresolved and normal admission succeeds.
 The released physical attempt is waiting and has not failed; an explicit logical
 resolution may subsequently terminate its continuation. A successful status read
-is not effect success or Task completion."""
+is not effect success or Task completion.
+
+A background Execute run (tool_execute with run_in_background) is a request
+too. Pass the request_id its started result carries. status is queued,
+running, cancelling, cancelled, lost, persistence_failed, done or error. result
+is present once the run has ended and holds the Execute result. continuation is
+not_composition."""
 additional_properties = false
 
 

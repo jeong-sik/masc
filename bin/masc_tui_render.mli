@@ -40,8 +40,6 @@ module Planning_detail = Masc_tui_planning_detail
 module Link = Masc_tui_link
 module Status = Masc.Keeper_status_runtime
 module Render_tools = Masc_tui_render_tools
-val json_assoc_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
-
 val set_table_frame : bool -> unit
 
 val panel_input_owner :

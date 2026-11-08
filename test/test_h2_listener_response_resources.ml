@@ -301,8 +301,14 @@ let rec until predicate = if not (predicate ()) then (Eio.Fiber.yield ();until p
 
 (* The shared transport streams a 200 reply as SSE when the request accepts
    text/event-stream, as it does on HTTP/1.1; the reply is the last message. *)
-let json_of_reply body =
-  if String.starts_with ~prefix:"retry:" body
+let json_of_reply reply =
+  let body = read_complete reply in
+  let is_sse =
+    match H2.Headers.get reply.response.H2.Response.headers "content-type" with
+    | Some value -> String.starts_with ~prefix:"text/event-stream" value
+    | None -> false
+  in
+  if is_sse
   then (
     match
       List.rev
@@ -340,7 +346,7 @@ let test_actual_modern_admission_errors () =
       in
       let check_error label ~status ~code ~id reply =
         check int (label ^ " HTTP status") status (H2.Status.to_code reply.response.status);
-        let json = json_of_reply (read_complete reply) in
+        let json = json_of_reply reply in
         check int (label ^ " JSON-RPC code") code
           Yojson.Safe.Util.(json |> member "error" |> member "code" |> to_int);
         check bool (label ^ " request ID") true (Yojson.Safe.Util.member "id" json = id)
@@ -443,7 +449,7 @@ let test_modern_requests_ignore_legacy_session_state () =
         (H2.Status.to_code reply.response.status);
       check (option string) "modern response has no session header" None
         (H2.Headers.get reply.response.headers "mcp-session-id");
-      let json = json_of_reply (read_complete reply) in
+      let json = json_of_reply reply in
       check bool "discovery succeeds" true
         (Yojson.Safe.Util.member "result" json <> `Null);
       for id = 92 to 94 do
@@ -456,7 +462,7 @@ let test_modern_requests_ignore_legacy_session_state () =
             ~body:(Yojson.Safe.to_string call) |> response in
         check int "stateless managed call receives a response" 200
           (H2.Status.to_code reply.response.status);
-        let json = json_of_reply (read_complete reply) in
+        let json = json_of_reply reply in
         check bool "managed call reached the tool" true
           (Yojson.Safe.Util.member "result" json <> `Null)
       done;

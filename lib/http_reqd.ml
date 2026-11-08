@@ -190,7 +190,15 @@ let payload_description_fields =
   [ "content-encoding"; "content-length"; "content-type"; "etag"; "last-modified"; "cache-control" ]
 ;;
 
-let h2_refuse_for_capacity reqd (response : Httpun.Response.t) =
+(* h2#278: close only once the pending bytes are flushed. A reset stream
+   never answers that flush, so the stream's end answers it (Stream_end) and
+   the writer is closed either way. *)
+let close_after_flush ~stream_end writer =
+  Stream_end.flush stream_end writer (function
+    | `Written | `Closed -> H2.Body.Writer.close writer)
+;;
+
+let h2_refuse_for_capacity ~stream_end reqd (response : Httpun.Response.t) =
   let retained =
     List.filter
       (fun (name, _) -> not (List.mem (String.lowercase_ascii name) payload_description_fields))
@@ -205,15 +213,15 @@ let h2_refuse_for_capacity reqd (response : Httpun.Response.t) =
       ~flush_headers_immediately:true
       (H2.Response.create ~headers `Service_unavailable)
   in
-  Http_h2_stream.close_after_flush writer
+  close_after_flush ~stream_end writer
 ;;
 
-let h2_respond_with_string reqd ledger response body =
+let h2_respond_with_string ~stream_end reqd ledger response body =
   (* A request whose body nobody read must still release its stream. *)
   H2.Body.Reader.discard (H2.Reqd.request_body reqd);
   match Http_h2_response_ledger.reserve ledger ~bytes:(String.length body) with
   | Error (Capacity_exhausted | Request_closed) ->
-    h2_refuse_for_capacity reqd response;
+    h2_refuse_for_capacity ~stream_end reqd response;
     Rejected_by_writer
   | Ok lease ->
     (try
@@ -224,7 +232,7 @@ let h2_respond_with_string reqd ledger response body =
            (h2_response_of response)
        in
        Http_h2_response_ledger.write_reserved lease writer body;
-       Http_h2_stream.close_after_flush writer;
+       close_after_flush ~stream_end writer;
        Accepted_by_writer
      with
      | exn ->
@@ -242,7 +250,8 @@ let try_respond_with_string t response body =
        | Http1 { reqd; _ } ->
          Httpun.Reqd.respond_with_string reqd response body;
          Accepted_by_writer
-       | Http2 { reqd; ledger; _ } -> h2_respond_with_string reqd ledger response body)
+       | Http2 { reqd; ledger; stream_end; _ } ->
+         h2_respond_with_string ~stream_end reqd ledger response body)
 ;;
 
 let respond_with_string t response body =
@@ -300,7 +309,7 @@ module Body_writer = struct
 
   let close = function
     | H1 writer -> Httpun.Body.Writer.close writer
-    | H2 { writer; _ } -> Http_h2_stream.close_after_flush writer
+    | H2 { writer; stream_end; _ } -> close_after_flush ~stream_end writer
   ;;
 end
 

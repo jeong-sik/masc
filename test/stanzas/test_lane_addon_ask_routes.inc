@@ -3,4 +3,4 @@
 (test
  (name test_lane_addon_ask_routes)
  (modules test_lane_addon_ask_routes)
- (libraries masc_test_deps alcotest yojson bigstringaf httpun str uri unix eio eio_main masc.masc_core masc.fs_compat masc.server))
+ (libraries masc_test_deps alcotest yojson bigstringaf httpun str uri unix eio eio_main masc.fs_compat masc.server))

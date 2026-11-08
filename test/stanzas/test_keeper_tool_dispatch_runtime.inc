@@ -20,7 +20,6 @@
   masc.msx_lane
   fs_compat_test_support
   masc.skill_config
-  masc.skill_reference
   masc.skill_snapshot))
 
 (rule

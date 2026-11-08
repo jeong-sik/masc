@@ -1,13 +1,5 @@
-(** Test suite for Compact Protocol v4 Compression
-
-    Tests compression functionality across MASC modules:
-    - Backend.Compression (storage layer)
-
-    Expected Results:
-    - 60-70% compression ratio for text/JSON data
-    - Roundtrip integrity preservation
-    - Transparent decompression via ZSTD header detection
-*)
+(** Test suite for compression: the backend ZSTD frame reader, the zstd
+    codec, and the gzip codec with HTTP content negotiation. *)
 
 (* ===== Backend Compression Tests ===== *)
 
@@ -28,17 +20,16 @@ let test_backend_compress_large () =
   Alcotest.(check bool) "smaller than original" true (String.length result < 1000)
 
 let test_backend_roundtrip () =
+  (* A frame as an earlier version stored it: compress, prepend the
+     header, read it back through decompress_auto. *)
   let original = String.init 500 (fun i -> Char.chr (65 + (i mod 26))) in
-  let compressed = BackendCompression.compress_with_header original in
-  let decompressed = BackendCompression.decompress_auto compressed in
-  Alcotest.(check string) "roundtrip preserves data" original decompressed
-
-let test_backend_header_format () =
-  (* compress_with_header is a passthrough (compression disabled).
-     Data should be returned unchanged — no ZSTD header. *)
-  let data = String.make 512 'Z' in
-  let result = BackendCompression.compress_with_header data in
-  Alcotest.(check string) "passthrough returns data unchanged" data result
+  let payload, used_dict, did_compress = BackendCompression.compress original in
+  Alcotest.(check bool) "input is compressed" true did_compress;
+  let framed =
+    BackendCompression.encode_with_header ~used_dict (String.length original) payload
+  in
+  Alcotest.(check string) "decompress_auto restores the original" original
+    (BackendCompression.decompress_auto framed)
 
 let test_backend_non_compressed_passthrough () =
   let plain = "This is plain text without ZSTD header" in
@@ -52,23 +43,12 @@ let test_backend_decompress_failure () =
   in
   Alcotest.(check (option string)) "invalid payload returns none" None result
 
-let test_backend_json_passthrough () =
-  (* compress_with_header is a passthrough — JSON data returned unchanged *)
-  let json_parts = List.init 10 (fun i ->
-    Printf.sprintf {|{"id":%d,"type":"agent_response","status":"ok","timestamp":%d}|} i (1234567890 + i)
-  ) in
-  let json = "[" ^ String.concat "," json_parts ^ "]" in
-  let result = BackendCompression.compress_with_header json in
-  Alcotest.(check string) "JSON passthrough unchanged" json result
-
 let backend_tests = [
   "skip small data", `Quick, test_backend_compress_skip_small;
   "compress large data", `Quick, test_backend_compress_large;
   "roundtrip", `Quick, test_backend_roundtrip;
-  "ZSTD header format", `Quick, test_backend_header_format;
   "non-compressed passthrough", `Quick, test_backend_non_compressed_passthrough;
   "decompress failure", `Quick, test_backend_decompress_failure;
-  "JSON passthrough", `Quick, test_backend_json_passthrough;
 ]
 
 
@@ -114,37 +94,6 @@ let codec_tests = [
   "encoding tokens", `Quick, test_codec_encoding_tokens;
   "compress large", `Quick, test_codec_compress_large;
   "decompress failure", `Quick, test_codec_decompress_failure;
-]
-
-(* ===== Compression Ratio Benchmarks ===== *)
-
-(* compress_with_header is a passthrough — ratio tests verify this. *)
-
-let test_passthrough_text () =
-  let text = String.concat "" (List.init 20 (fun _ ->
-    "The quick brown fox jumps over the lazy dog. "
-  )) in
-  let result = BackendCompression.compress_with_header text in
-  Alcotest.(check int) "text passthrough same length"
-    (String.length text) (String.length result)
-
-let test_passthrough_json () =
-  let json = String.concat "," (List.init 50 (fun i ->
-    Printf.sprintf {|{"id":%d,"name":"item_%d","value":%d}|} i i (i * 100)
-  )) in
-  let full_json = "[" ^ json ^ "]" in
-  let result = BackendCompression.compress_with_header full_json in
-  Alcotest.(check string) "JSON passthrough unchanged" full_json result
-
-let test_passthrough_repeated () =
-  let data = String.make 500 'x' in
-  let result = BackendCompression.compress_with_header data in
-  Alcotest.(check string) "repeated data passthrough" data result
-
-let ratio_tests = [
-  "text passthrough", `Quick, test_passthrough_text;
-  "JSON passthrough", `Quick, test_passthrough_json;
-  "repeated data passthrough", `Quick, test_passthrough_repeated;
 ]
 
 (* ===== Gzip codec and content negotiation ===== *)
@@ -322,6 +271,5 @@ let () =
     "Backend", backend_tests;
     "Thresholds", threshold_tests;
     "Codec", codec_tests;
-    "Compression Ratios", ratio_tests;
     "Gzip", gzip_tests;
   ]

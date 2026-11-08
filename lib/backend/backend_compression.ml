@@ -1,10 +1,5 @@
-(** Backend compression — zstd compression with dictionary support.
-
-    Compact Protocol v4: Transparent zstd compression with Dictionary
-    - Uses trained multi-format dictionary for 32-2048 byte messages
-    - Dictionary achieves ~70% compression vs ~6% standard zstd on small data
-    - Automatically compresses data >32 bytes on save
-    - Automatically decompresses on load (ZSTD/ZSTDD header detection) *)
+(** Backend compression — ZSTD/ZSTDD frame helpers. The interface explains
+    why the backend no longer compresses on write. *)
 
 (** Minimum size for dictionary compression *)
 let min_size = Compression_codec.min_size  (* 32 bytes *)
@@ -89,11 +84,3 @@ let decompress_auto (data : string) : string =
        | Some decompressed -> decompressed
        | None -> data)  (* Return original on failure *)
   | None -> data
-
-(** Compress and add header if beneficial.
-    Compression disabled: 4TB SSD makes ZSTD savings negligible, and corrupt
-    ZSTD headers in PG caused server-wide decompress storms (2026-03-28).
-    Kept as passthrough so callers need no changes. *)
-let compress_with_header ?(level = default_level) (data : string) : string =
-  let _ = level in
-  data

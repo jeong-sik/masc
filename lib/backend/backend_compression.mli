@@ -1,9 +1,10 @@
 (** Backend_compression — ZSTD header framing for the backend.
 
-    Currently a passthrough: compression is disabled because the
-    4TB SSD makes ZSTD savings negligible and corrupt ZSTD headers
-    in PG caused server-wide decompress storms (2026-03-28). The
-    public API is preserved so callers need no changes. *)
+    The backend does not compress on write. Compression was turned
+    off on 2026-03-28: the 4TB SSD makes ZSTD savings negligible, and
+    corrupt ZSTD headers in PG caused server-wide decompress storms.
+    {!decompress_auto} still decodes the [ZSTD] / [ZSTDD] frames that
+    earlier versions stored. *)
 
 (** {1 Constants} *)
 
@@ -42,7 +43,3 @@ val decode_header : string -> (int * string * bool) option
     [data] unchanged otherwise. On decompression failure, returns
     the original [data] (logged via [Log.Misc.error]). *)
 val decompress_auto : string -> string
-
-(** Compress and prepend a header if beneficial. Currently a
-    passthrough — returns [data] unchanged regardless of [level]. *)
-val compress_with_header : ?level:int -> string -> string

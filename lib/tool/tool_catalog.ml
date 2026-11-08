@@ -193,7 +193,6 @@ let hidden_runtime_tool reason meta =
   {
     meta with
     visibility = Hidden;
-    lifecycle = Active;
     allow_direct_call_when_hidden = true;
     reason = Some reason;
   }
@@ -696,6 +695,7 @@ let metadata_to_fields name =
     [
       ("visibility", `String (visibility_to_string meta.visibility));
       ("lifecycle", `String (lifecycle_to_string meta.lifecycle));
+      ("implementationStatus", `String "real");
       ( "requiredPermission"
       , `String (Masc_domain.permission_to_string meta.required_permission) );
     ]

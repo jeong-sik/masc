@@ -997,12 +997,10 @@ let snapshot_json_of_raw ~(meta : keeper_meta) (raw : raw_snapshot) =
          | Some turn_id -> `Int turn_id
          | None -> `Null )
      ; ("phase", runtime_phase)
-     ; ("raw_phase", runtime_phase)
      ; ( "current_task_id"
        , Json_util.string_opt_to_json
            (Keeper_runtime_contract.current_task_id_opt meta) )
      ; ("active_model", Json_util.string_opt_to_json selected_model)
-     ; ("selected_model", Json_util.string_opt_to_json selected_model)
      ; ("runtime_contract", raw.runtime_contract)
      ; ( "runtime_blockers"
        , `Assoc

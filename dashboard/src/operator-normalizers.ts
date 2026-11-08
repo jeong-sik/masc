@@ -162,7 +162,7 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
     needs_attention: typeof raw.needs_attention === 'boolean' ? raw.needs_attention : null,
     attention_reason: asString(raw.attention_reason) ?? null,
     next_human_action: asString(raw.next_human_action) ?? null,
-    runtime_trust: normalizeKeeperTrust(raw.runtime_trust ?? raw.trust),
+    runtime_trust: normalizeKeeperTrust(raw.runtime_trust),
   }
 }
 

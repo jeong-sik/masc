@@ -63,7 +63,6 @@ export interface DashboardMissionAgentBrief {
   evidence_source?: MissionEvidenceSource
   recent_output_preview?: string | null
   recent_input_preview?: string | null
-  recent_event?: string | null
   recent_tool_names: string[]
   latest_tool_names?: string[]
   latest_tool_call_count?: number | null

@@ -305,7 +305,7 @@ module Checkpoint_receipt = Server_msx_checkpoint_receipt
 let checkpoint_epoch = Random_id.uuid_v7 ()
 let checkpoint_receipt_path (config : Workspace.config) =
   Filename.concat
-    (Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) "msx")
+    (Filename.concat (Common.masc_dir_from_base_path ~base_path:config.base_path) Common.msx_dirname)
     "checkpoint-operations.sqlite3"
 
 (* Slot validation the receipt binds on: pure, no machine. *)

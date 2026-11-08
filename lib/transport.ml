@@ -351,7 +351,7 @@ module Rest = struct
          :: request_fields ))
 
   let generate_openapi_document
-      ?(scheme = "http")
+      ~scheme
       ?(host = Env_config_core.masc_host ())
       ?(port = Env_config_core.masc_http_port_int ()) () :
       Yojson.Safe.t =

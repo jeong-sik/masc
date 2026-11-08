@@ -44,7 +44,7 @@ let test_rest_method_to_string_post () =
 
 let test_rest_generate_openapi_document () =
   let open Yojson.Safe.Util in
-  let doc = Transport.Rest.generate_openapi_document () in
+  let doc = Transport.Rest.generate_openapi_document ~scheme:"http" () in
   check string "openapi version" "3.1.0" (doc |> member "openapi" |> to_string);
   check string "info.version matches repo version" Runtime_build_version.current
     (doc |> member "info" |> member "version" |> to_string);
@@ -112,7 +112,7 @@ let test_rest_generate_openapi_document () =
 
 let test_rest_generate_openapi_document_relative_server_fallback () =
   let open Yojson.Safe.Util in
-  let doc = Transport.Rest.generate_openapi_document ~host:"" ~port:0 () in
+  let doc = Transport.Rest.generate_openapi_document ~scheme:"http" ~host:"" ~port:0 () in
   check string "relative server url when host unknown" "/"
     (doc |> member "servers" |> index 0 |> member "url" |> to_string)
 
@@ -122,7 +122,7 @@ let test_rest_generate_openapi_document_relative_server_fallback () =
 let test_rest_generate_openapi_document_folds_a_wildcard_host () =
   let open Yojson.Safe.Util in
   let doc =
-    Transport.Rest.generate_openapi_document ~host:"0.0.0.0" ~port:8935 ()
+    Transport.Rest.generate_openapi_document ~scheme:"http" ~host:"0.0.0.0" ~port:8935 ()
   in
   check string "a bind wildcard is not advertised as a server address"
     "http://127.0.0.1:8935"

@@ -5166,6 +5166,8 @@ let test_openapi_servers_url_follows_the_admitted_authority () =
        Alcotest.(check bool) "the cleartext document is dialled over http" true
          (String_util.contains_substring cleartext "\"url\":\"http://127.0.0.1:8935\"");
        let tls = document tls_authority in
+       Alcotest.(check bool) "the TLS document is served" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" tls);
        Alcotest.(check bool) "the TLS document is dialled over https at the default port" true
          (String_util.contains_substring tls "\"url\":\"https://127.0.0.1:443\""))
 

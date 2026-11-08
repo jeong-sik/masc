@@ -17,9 +17,10 @@ module Rest : sig
 
   val method_to_string : http_method -> string
   val generate_openapi_document :
-    ?scheme:string -> ?host:string -> ?port:int -> unit -> Yojson.Safe.t
+    scheme:string -> ?host:string -> ?port:int -> unit -> Yojson.Safe.t
   (** The OpenAPI 3.1 document. [scheme] (["http"] or ["https"]), [host] and
-      [port] make the ["servers"] URL its reader dials; they default to the
-      cleartext listener's bind settings, and a wildcard host is folded to
-      loopback. *)
+      [port] make the ["servers"] URL its reader dials. [scheme] names the
+      listener the request came in on and has no default; [host] and [port]
+      default to the cleartext listener's bind settings, and a wildcard host
+      is folded to loopback. *)
 end

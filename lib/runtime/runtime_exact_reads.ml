@@ -1,18 +1,21 @@
-(* The capabilities an exact-output slot reads from its model (RFC-0514 §2.2).
-   A model the catalog has no row for is a slot only when runtime.toml states
-   each of them; a provider preset never stands in for one. *)
+(* The five capabilities of its model an exact-output slot needs runtime.toml
+   to state (RFC-0514 §2.2). A model the catalog has no row for is a slot only
+   when runtime.toml states each of them; a provider preset never stands in
+   for one of these five. *)
 
 type t =
   | Context_window
   | Reasoning_effort_ladder
   | Json_mode
   | Native_schema
+  | Output_ceiling
 
 let key = function
   | Context_window -> "max-context"
   | Reasoning_effort_ladder -> "capabilities.accepted-reasoning-efforts"
   | Json_mode -> "capabilities.supports-response-format-json"
   | Native_schema -> "capabilities.supports-structured-output"
+  | Output_ceiling -> "capabilities.max-output-tokens"
 ;;
 
 type stated =
@@ -20,6 +23,7 @@ type stated =
   ; reasoning_effort_ladder : Llm_provider.Reasoning_effort.t list
   ; json_mode : bool
   ; native_schema : bool
+  ; output_ceiling : int
   }
 
 (* Both values, or every read either side leaves unstated, the left side's
@@ -74,9 +78,17 @@ let parse (rt : Runtime_instance.t) =
     from_table Native_schema (fun (caps : Runtime_schema.model_capabilities) ->
       caps.supports_structured_output)
   in
-  match both context_window (both reasoning_effort_ladder (both json_mode native_schema)) with
-  | Ok (context_window, (reasoning_effort_ladder, (json_mode, native_schema))) ->
-    Ok { context_window; reasoning_effort_ladder; json_mode; native_schema }
+  let output_ceiling =
+    from_table Output_ceiling (fun (caps : Runtime_schema.model_capabilities) ->
+      caps.max_output_tokens)
+  in
+  match
+    both
+      context_window
+      (both reasoning_effort_ladder (both json_mode (both native_schema output_ceiling)))
+  with
+  | Ok (context_window, (reasoning_effort_ladder, (json_mode, (native_schema, output_ceiling))))
+    -> Ok { context_window; reasoning_effort_ladder; json_mode; native_schema; output_ceiling }
   | Error unstated -> Error unstated
 ;;
 
@@ -86,5 +98,6 @@ let capabilities_over ~(base : Llm_provider.Capabilities.capabilities) stated =
   ; accepted_reasoning_efforts = Some stated.reasoning_effort_ladder
   ; supports_response_format_json = stated.json_mode
   ; supports_structured_output = stated.native_schema
+  ; max_output_tokens = Some stated.output_ceiling
   }
 ;;

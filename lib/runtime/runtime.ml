@@ -919,16 +919,19 @@ let exact_output_targets runtimes =
                  | None -> Agent_core.Exact_output.Credential_resolved key)
             ; body_timeout_s = rt.provider.Runtime_schema.exact_body_timeout_s
             ; (* A model the catalog has no row for is a slot only through what
-                 runtime.toml states for each capability an exact slot reads; a
-                 provider preset does not stand in for one (RFC-0514 §2.2). The
-                 capability override alone says nothing about that: on the
-                 Anthropic wire the adapter copies the catalog answer into it
-                 when the model states nothing
-                 ([Runtime_adapter.with_client_history_replay]). Where every read
-                 is stated, the slot answers with those four as runtime.toml
-                 states them, laid over what the binding's Keeper turns run on,
-                 which is that override; a table that states them always yields
-                 one. A model row, where the catalog has one, answers instead. *)
+                 runtime.toml states for the five reads [Runtime_exact_reads]
+                 names; a provider preset does not stand in for one of them
+                 (RFC-0514 §2.2). The capability override alone says nothing
+                 about that: on the Anthropic wire the adapter copies the
+                 catalog answer into it when the model states nothing
+                 ([Runtime_adapter.with_client_history_replay]). Where all five
+                 are stated, the slot answers with them as runtime.toml states
+                 them, laid over what the binding's Keeper turns run on, which
+                 is that override; a table that states them always yields one.
+                 The provider's API shape (schema dialect, thinking control,
+                 system prompt, document input) is that override's, so the
+                 preset answers there where runtime.toml states nothing. A
+                 model row, where the catalog has one, answers instead. *)
               model_declaration =
                 (match
                    ( Runtime_exact_reads.parse rt
@@ -2153,8 +2156,8 @@ let warn_rejected_exact_output_slots ~runtimes registry =
   in
   (* A slot whose binding names a model the catalog has no row for, under a
      provider it has a row for, is left out by the resolver ([Target_model])
-     while runtime.toml leaves a capability an exact slot reads unstated
-     (RFC-0514 §2.2). The diagnosis below would call it a binding that
+     while runtime.toml leaves one of the five reads [Runtime_exact_reads]
+     names unstated (RFC-0514 §2.2). The diagnosis below would call it a binding that
      resolved to no catalog row; it is named here instead, once per slot,
      with the keys to write. Only runtime bindings are targets; under a full
      replacement catalog none is. *)
@@ -2189,7 +2192,7 @@ let warn_rejected_exact_output_slots ~runtimes registry =
   List.iter
     (fun ((slot : Runtime_exact_output_registry.rejected_slot), (rt : t), (first, rest)) ->
        Log.Server.warn
-         "exact_output: lane %S slot %d (%S) ignored because model %S has no AGENT_CORE catalog row under provider %S and runtime.toml model %S states no %s; a provider preset does not stand in for a capability an exact slot reads, so write each one"
+         "exact_output: lane %S slot %d (%S) ignored because model %S has no AGENT_CORE catalog row under provider %S and runtime.toml model %S states no %s; a provider preset does not stand in for the window, effort ladder, JSON mode, native schema or output ceiling of a model it has no row for, so write each one"
          slot.lane_id
          slot.position
          slot.slot_id

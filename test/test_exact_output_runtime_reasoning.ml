@@ -83,7 +83,7 @@ reasoning-effort = %S
 
 (* The guide's checkpoint binding (docs/guides/tinker-integration.md,
    "Hot-Swapping a Fine-Tuned Checkpoint"): a tinker:// model the catalog has
-   no row for, under the tinker provider row, whose block states the four
+   no row for, under the tinker provider row, whose block states the five
    reads an exact slot needs. The Librarian lane declares an output budget and
    the HITL lane declares none. *)
 let tinker_checkpoint_toml effort = Printf.sprintf {|[runtime]
@@ -125,6 +125,7 @@ supports-response-format-json = false
 supports-structured-output = false
 supports-image-input = false
 supports-multimodal-inputs = false
+max-output-tokens = 32768
 [tinker.tinker-inkling-ckpt]
 max-concurrent = 4
 |} effort
@@ -343,7 +344,7 @@ let test_guide_checkpoint_request_carries_its_effort_and_lane_budget_and_no_enve
       capabilities.supports_response_format_json;
     check bool "the slot has the stated native schema" false
       capabilities.supports_structured_output;
-    check (option int) "no output ceiling clamps the lane budget" None
+    check (option int) "the slot has the stated output ceiling" (Some 32768)
       capabilities.max_output_tokens;
     let body = checkpoint_request_body ~lane_budget:4096 admitted in
     check string "the request carries the binding's effort" effort_name

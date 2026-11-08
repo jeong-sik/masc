@@ -7529,14 +7529,15 @@ let test_wizard_provider_models_share_catalog_authority () =
 ;;
 
 (* A Tinker sampler checkpoint has no catalog row; only its provider has one
-   (RFC-0514). A binding whose runtime.toml states every capability an exact
-   slot reads is an exact slot that answers with what it states. One that
+   (RFC-0514). A binding whose runtime.toml states the five reads an exact
+   slot needs is an exact slot that answers with what it states. One that
    leaves a read unstated is left out, and the reads it leaves are named; the
    provider preset does not stand in for one. Each read is left out once on
-   its own: the window on the Anthropic wire, whose preset answers 200,000 for
-   it, and the three table keys on Tinker. A binding with no capabilities
-   table states none of the three the table holds, on the Anthropic wire as
-   well, where the adapter fills the binding's capability override from the
+   its own: the window and the output ceiling on the Anthropic wire, whose
+   preset answers both (a window of 200,000 and a ceiling of its own), and
+   the three other table keys on Tinker. A binding with no capabilities table
+   states none of the four the table holds, on the Anthropic wire as well,
+   where the adapter fills the binding's capability override from the
    preset. *)
 let test_a_rowless_model_is_an_exact_slot_only_when_runtime_toml_states_every_exact_read () =
   let checkpoint = "tinker://example:train:0/sampler_weights/x" in
@@ -7555,6 +7556,7 @@ max-context = 262144
 accepted-reasoning-efforts = ["low", "high"]
 supports-response-format-json = false
 supports-structured-output = false
+max-output-tokens = 32768
 
 [models.no-ladder]
 api-name = %S
@@ -7563,6 +7565,7 @@ max-context = 262144
 [models.no-ladder.capabilities]
 supports-response-format-json = false
 supports-structured-output = false
+max-output-tokens = 32768
 
 [models.no-json]
 api-name = %S
@@ -7571,6 +7574,7 @@ max-context = 262144
 [models.no-json.capabilities]
 accepted-reasoning-efforts = ["low", "high"]
 supports-structured-output = false
+max-output-tokens = 32768
 
 [models.no-schema]
 api-name = %S
@@ -7579,6 +7583,7 @@ max-context = 262144
 [models.no-schema.capabilities]
 accepted-reasoning-efforts = ["low", "high"]
 supports-response-format-json = false
+max-output-tokens = 32768
 
 [models.tableless]
 api-name = %S
@@ -7605,12 +7610,24 @@ api-name = %S
 accepted-reasoning-efforts = ["low", "high"]
 supports-response-format-json = false
 supports-structured-output = false
+max-output-tokens = 32768
+
+[models.messages-no-ceiling]
+api-name = %S
+max-context = 131072
+
+[models.messages-no-ceiling.capabilities]
+accepted-reasoning-efforts = ["low", "high"]
+supports-response-format-json = false
+supports-structured-output = false
 
 [models.messages-tableless]
 api-name = %S
 max-context = 131072
 
 [deepseek-anthropic.messages-unwindowed]
+
+[deepseek-anthropic.messages-no-ceiling]
 
 [deepseek-anthropic.messages-tableless]
 
@@ -7622,6 +7639,7 @@ default = "tinker.declared"
       checkpoint
       checkpoint
       checkpoint
+      messages_probe
       messages_probe
       messages_probe
   in
@@ -7678,10 +7696,11 @@ default = "tinker.declared"
   check exact_reads "a binding with no native schema leaves only native schema unstated"
     [ Runtime_exact_reads.Native_schema ]
     (unstated "tinker.no-schema");
-  check exact_reads "a binding with no table leaves the three table keys unstated"
+  check exact_reads "a binding with no table leaves the four table keys unstated"
     [ Runtime_exact_reads.Reasoning_effort_ladder
     ; Runtime_exact_reads.Json_mode
     ; Runtime_exact_reads.Native_schema
+    ; Runtime_exact_reads.Output_ceiling
     ]
     (unstated "tinker.tableless");
   (* What makes the unwindowed case worth asking: the anthropic preset
@@ -7695,6 +7714,18 @@ default = "tinker.declared"
   check exact_reads "a window only the preset answers is not stated"
     [ Runtime_exact_reads.Context_window ]
     (unstated "deepseek-anthropic.messages-unwindowed");
+  (* What makes the ceiling case worth asking: the anthropic preset answers
+     an output ceiling for a model that states none. *)
+  (match
+     (agent_core_provider_config (loaded "deepseek-anthropic.messages-no-ceiling"))
+       .Llm_provider.Provider_config.model_capabilities_override
+   with
+   | Some { Llm_provider.Capabilities.max_output_tokens = Some (_ : int); _ } -> ()
+   | Some { Llm_provider.Capabilities.max_output_tokens = None; _ } | None ->
+     fail "the anthropic preset answers the output ceiling of the binding that states none");
+  check exact_reads "an output ceiling only the preset answers is not stated"
+    [ Runtime_exact_reads.Output_ceiling ]
+    (unstated "deepseek-anthropic.messages-no-ceiling");
   (* What makes the Anthropic case worth asking: the binding's capability
      override is there although its model states nothing. *)
   (match
@@ -7715,6 +7746,8 @@ default = "tinker.declared"
        (Option.map
           (List.map Llm_provider.Reasoning_effort.to_string)
           capabilities.accepted_reasoning_efforts);
+     check (option int) "the slot answers with the stated output ceiling" (Some 32768)
+       capabilities.max_output_tokens;
      check bool "the stated JSON mode overrides the preset" false
        capabilities.supports_response_format_json;
      check bool "the stated native schema overrides the preset" false
@@ -7744,6 +7777,7 @@ default = "tinker.declared"
   require_left_out "tinker.no-schema";
   require_left_out "tinker.tableless";
   require_left_out "deepseek-anthropic.messages-unwindowed";
+  require_left_out "deepseek-anthropic.messages-no-ceiling";
   require_left_out "deepseek-anthropic.messages-tableless"
 ;;
 

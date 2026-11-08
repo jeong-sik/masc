@@ -5106,6 +5106,69 @@ let startup_http_response router path =
   drain ();
   Buffer.contents output
 
+(* The OpenAPI document names the listener a request was admitted on. The TLS
+   listener admits a port-less Host at the https default port, and the
+   document it serves is dialled back over https; the cleartext listener keeps
+   http (#50025). *)
+let test_openapi_servers_url_follows_the_admitted_authority () =
+  let previous_state = Server_auth.For_testing.snapshot_server_state () in
+  let previous_startup = Server_startup_state.snapshot () in
+  Fun.protect
+    ~finally:(fun () ->
+      Server_auth.For_testing.restore_server_state previous_state;
+      Server_startup_state.For_testing.restore previous_startup)
+    (fun () ->
+       Server_startup_state.reset ();
+       Server_startup_state.mark_blocking ();
+       Server_auth.For_testing.restore_server_state @@
+         Some
+           (Mcp_server.For_testing.create_state
+              ~base_path:(Filename.get_temp_dir_name ()));
+       Server_startup_state.mark_state_ready () |> Result.get_ok;
+       let cleartext_authority =
+         match Server_request_authority.of_host_port ~host:"127.0.0.1" ~port:8935 with
+         | Ok authority -> authority
+         | Error `Malformed -> Alcotest.fail "fixture authority must be valid"
+       in
+       let tls_authority =
+         let trust_policy =
+           match
+             Server_request_authority.make_trust_policy
+               ~bind_host:"127.0.0.1" ~bind_port:8935 ~https_port:(Some 443)
+               ~explicit_base_url:None
+           with
+           | Ok policy -> policy
+           | Error error ->
+             Alcotest.fail (Server_request_authority.trust_policy_error_to_string error)
+         in
+         let request =
+           Httpun.Request.create
+             ~headers:(Httpun.Headers.of_list [ "host", "127.0.0.1" ])
+             `GET "/api/v1/openapi.json"
+         in
+         match Server_request_authority.classify_http1_request ~trust_policy request with
+         | Server_request_authority.Single authority -> authority
+         | Server_request_authority.Missing | Server_request_authority.Multiple
+         | Server_request_authority.Malformed | Server_request_authority.Untrusted ->
+           Alcotest.fail "a port-less host on the TLS listener must be admitted"
+       in
+       Eio_main.run @@ fun _env ->
+       let router =
+         Server_routes_http_routes_frontend.add_routes (Http_server_eio.Router.create ())
+       in
+       let document authority =
+         Server_request_authority.with_current authority @@ fun () ->
+         startup_http_response router "/api/v1/openapi.json"
+       in
+       let cleartext = document cleartext_authority in
+       Alcotest.(check bool) "the cleartext document is served" true
+         (String.starts_with ~prefix:"HTTP/1.1 200" cleartext);
+       Alcotest.(check bool) "the cleartext document is dialled over http" true
+         (String_util.contains_substring cleartext "\"url\":\"http://127.0.0.1:8935\"");
+       let tls = document tls_authority in
+       Alcotest.(check bool) "the TLS document is dialled over https at the default port" true
+         (String_util.contains_substring tls "\"url\":\"https://127.0.0.1:443\""))
+
 let test_mcp_transport_requires_explicit_readiness () =
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   let previous_startup = Server_startup_state.snapshot () in
@@ -5145,7 +5208,7 @@ let test_mcp_transport_requires_explicit_readiness () =
        in
        Server_request_authority.with_current authority @@ fun () ->
        let router =
-         Server_routes_http_routes_frontend.add_routes ~port:8935
+         Server_routes_http_routes_frontend.add_routes
            (Http_server_eio.Router.create ())
        in
        let health = startup_http_response router "/health" in
@@ -7237,6 +7300,8 @@ let () =
             test_keeper_msg_startup_recovery_settles_disk_only_running_request;
           Alcotest.test_case "MCP requires explicit readiness" `Quick
             test_mcp_transport_requires_explicit_readiness;
+          Alcotest.test_case "OpenAPI servers url follows the admitted authority" `Quick
+            test_openapi_servers_url_follows_the_admitted_authority;
           Alcotest.test_case
             "lazy inventory stays blocking until explicit readiness"
             `Quick

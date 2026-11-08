@@ -154,7 +154,6 @@ let test_router_method_index_preserves_exact_405 () =
 let test_frontend_transport_routes_present () =
   let routes =
     Server_routes_http_routes_frontend.add_routes
-      ~port:8935
       (Router.create ())
   in
   let has_route meth path =

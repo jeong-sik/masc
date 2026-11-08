@@ -128,6 +128,16 @@ let test_rest_generate_openapi_document_folds_a_wildcard_host () =
     "http://127.0.0.1:8935"
     (doc |> member "servers" |> index 0 |> member "url" |> to_string)
 
+(* The TLS listener admits a port-less Host at the https default port, and
+   the document it serves sends its reader back over https (#50025). *)
+let test_rest_generate_openapi_document_keeps_the_https_scheme () =
+  let open Yojson.Safe.Util in
+  let doc =
+    Transport.Rest.generate_openapi_document ~scheme:"https" ~host:"127.0.0.1" ~port:443 ()
+  in
+  check string "the servers url is dialled over https" "https://127.0.0.1:443"
+    (doc |> member "servers" |> index 0 |> member "url" |> to_string)
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -151,5 +161,7 @@ let () =
         test_rest_generate_openapi_document_relative_server_fallback;
       test_case "openapi document folds a wildcard host" `Quick
         test_rest_generate_openapi_document_folds_a_wildcard_host;
+      test_case "openapi document keeps the https scheme" `Quick
+        test_rest_generate_openapi_document_keeps_the_https_scheme;
     ];
   ]

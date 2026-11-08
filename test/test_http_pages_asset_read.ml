@@ -76,7 +76,6 @@ let test_dashboard_etag_of_body_content_hash () =
 let http1_dashboard_asset_response path =
   let router =
     Server_routes_http_routes_frontend.add_routes
-      ~port:8935
       (Http.Router.create ())
   in
   let response_buf = Buffer.create 256 in
@@ -136,7 +135,6 @@ let http2_dashboard_asset_response path =
   Masc.Http_h2_response_ledger.with_request ledger ~sw @@ fun () ->
   let router =
     Server_routes_http_routes_frontend.add_routes
-      ~port:8935
       (Http.Router.create ())
   in
   let status = ref None in

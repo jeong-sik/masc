@@ -33,8 +33,7 @@
   masc_workspace
   masc.masc_tool_dispatch
   masc.config
-  masc.prompt_registry
-  ambient-context-eio)
+  masc.prompt_registry)
  (preprocess
   (pps
    ppx_deriving_yojson

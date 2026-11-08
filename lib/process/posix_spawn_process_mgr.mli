@@ -23,8 +23,11 @@ exception Stop_without_grace
     that reaches a child's reaper carries this reason, directly or inside
     [Eio.Cancel.Cancelled], [Fun.Finally_raised] or an [Eio.Exn.Multiple]
     whose members all carry it, the reaper sends SIGKILL to the child or its
-    group with no TERM grace. Any other cancellation keeps the grace. Fail a
-    switch with it only for work whose children nobody waits on any more. *)
+    group with no TERM grace. Any other cancellation stops the child as
+    before, and a stop already under way keeps its grace. Server shutdown
+    fails running Keeper turns with it, and the Keeper records a turn that
+    ends with it as stopped by a restart. Fail a switch with it only for work
+    that shutdown abandons. *)
 
 val mgr : Eio_unix.Process.mgr_ty Eio.Resource.t
 

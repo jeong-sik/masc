@@ -248,9 +248,11 @@ let as_person (t : R.t) request reqd f =
     | Ok person -> f state person)
 ;;
 
-let owner_of (t : R.t) { Auth_preview.user_id; namespace } =
-  Server_setup_account_login.Person { zone = t.zone; user_id; namespace }
+let person_of (t : R.t) { Auth_preview.user_id; namespace } =
+  { Server_setup_account_login.zone = t.zone; user_id; namespace }
 ;;
+
+let owner_of t person = Server_setup_account_login.Person (person_of t person)
 
 let connect t ~base_path request reqd =
   as_person t request reqd (fun (_ : Authz_state.t) person ->
@@ -269,6 +271,12 @@ let login_control t ~base_path request reqd =
       Server_setup_account_login.control ~owner:(owner_of t person) ~base_path ~body request reqd))
 ;;
 
+let verify t ~base_path request reqd =
+  as_person t request reqd (fun (_ : Authz_state.t) person ->
+    with_body reqd (fun body ->
+      Server_setup_account_login.verify ~person:(person_of t person) ~base_path ~body request reqd))
+;;
+
 let provider_accounts t request reqd =
   as_person t request reqd (fun state person -> respond reqd (Auth_preview.provider_accounts state person))
 ;;
@@ -280,6 +288,7 @@ let add_preview_routes t ~base_path router =
   |> Server_route.get access whoami_path (whoami t)
   |> Server_route.get access Auth_preview.provider_accounts_path (provider_accounts t)
   |> Server_route.post access Auth_preview.connect_path (connect t ~base_path)
+  |> Server_route.post access Auth_preview.verify_path (verify t ~base_path)
   |> Server_route.prefix_get access Auth_preview.connect_prefix (login_status t ~base_path)
   |> Server_route.prefix_post access Auth_preview.connect_prefix (login_control t ~base_path)
 ;;

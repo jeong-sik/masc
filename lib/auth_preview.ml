@@ -87,6 +87,7 @@ let invite_page ~nonce =
 let connect_path = "/api/v1/setup/accounts/login"
 let connect_prefix = connect_path ^ "/"
 let provider_accounts_path = "/api/v1/auth/provider-accounts"
+let verify_path = "/api/v1/setup/accounts/verify"
 
 let home_script =
   Printf.sprintf
@@ -96,6 +97,9 @@ const accounts = document.getElementById("accounts");
 const integration = document.getElementById("integration");
 const transcript = document.getElementById("transcript");
 const reply = document.getElementById("reply");
+const account = document.getElementById("account");
+const model = document.getElementById("model");
+const verdict = document.getElementById("verdict");
 let csrf = null;
 let loginId = null;
 async function read(path) {
@@ -124,6 +128,9 @@ async function listAccounts() {
   accounts.textContent = answer.ok
     ? (json.provider_accounts.length === 0 ? "none" : json.provider_accounts.join("\n"))
     : "(" + answer.status + "): " + json.error;
+  if (answer.ok && json.provider_accounts.length > 0) {
+    account.value = json.provider_accounts[json.provider_accounts.length - 1];
+  }
 }
 function post(path, body) {
   return fetch(path, {
@@ -170,12 +177,18 @@ document.getElementById("send").addEventListener("click", async () => {
   transcript.textContent += "\n[sent] " + text.status + " " + enter.status + "\n";
   reply.value = "";
 });
+document.getElementById("verify").addEventListener("click", async () => {
+  verdict.textContent = "calling the account";
+  const answer = await post("%s", { provider_account_id: account.value, model: model.value });
+  verdict.textContent = "verify (" + answer.status + "): " + await answer.text();
+});
 show().then(listAccounts);|}
     Authz_browser_request.csrf_header
     provider_accounts_path
     Authz_browser_request.csrf_header
     connect_path
     connect_prefix
+    verify_path
 ;;
 
 let home_page ~nonce =
@@ -195,6 +208,11 @@ let home_page ~nonce =
            ; "<pre id=\"transcript\"></pre>"
            ; "<label>Answer the login <input id=\"reply\" autocomplete=\"off\"></label>"
            ; "<button id=\"send\">Send</button>"
+           ; "<h2>Call my subscription once</h2>"
+           ; "<label>Account <input id=\"account\"></label>"
+           ; "<label>Model (bound to the integration in runtime.toml) <input id=\"model\"></label>"
+           ; "<button id=\"verify\">Verify</button>"
+           ; "<pre id=\"verdict\"></pre>"
            ])
     ~script:home_script
 ;;

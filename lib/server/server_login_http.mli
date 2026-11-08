@@ -56,8 +56,10 @@ val github_callback_path : string
       [/api/v1/setup/accounts/login/], the subscription connect route of the
       server ({!Server_setup_account_login}) for the person, with the account
       home under the workspace [base_path] (plan D1-4)
+    - [POST /api/v1/setup/accounts/verify], one call of the person's own
+      account ({!Server_setup_account_login.verify}, plan D1-6a)
 
-    The last four are judged as [Manage_own_provider] by
+    The last five are judged as [Manage_own_provider] by
     {!Auth_preview.person} on one snapshot of the zone, and a request that does
     not pass gets its 401 or 403 before the connect handler reads anything.
 

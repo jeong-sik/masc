@@ -184,3 +184,57 @@ type trigger =
 - 읽기 한도. GitHub REST 는 인증된 개인 요청에 시간당 5,000건을 허용한다(https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api, 2026-11-05 확인). 서로 다른 실행 하나를 30초마다 읽으면 시간당 120건이라서, 서로 다른 실행 40개쯤을 한꺼번에 기다리면 이 루프만으로 5,000건을 다 쓴다. 읽는 계정은 여럿이 같이 쓰는 계정이다(§6.2 1번). 같은 실행을 기다리는 일정이 여럿이어도 한 순서에 한 번만 읽는다.
 - 효과 측정. Keeper 가 일정으로 자기를 깨우며 메시지에 실행 번호를 적은 81건(11-01~11-05T05:00Z) 가운데 번호가 하나이고 시도가 하나인 63건을 그 실행의 실제 끝과 비교했다(`docs/reports/2026-11-05-tool-efficiency.md` §6 "일정이 실행의 끝을 놓친 크기", `docs/evidence/execute-waits-2026-11/measure_schedule_slack.py`). 일정을 만들 때 실행이 돌던 53건 중 41건은 due 가 실행이 끝난 뒤였고 합계 15.21시간(중앙값 15.5분) 늦었다. 12건은 due 가 끝보다 앞이었고 합계 6.43시간 일렀다. 이 구현이 줄이는 것은 앞쪽 41건이다. 인자를 쓰면 깨움은 끝난 뒤 폴링 간격과 runner 간격을 더한 45초 안에 오므로, 속도 제한과 느린 읽기가 없으면 합계는 많아야 0.51시간(41 × 45초)이다. 뒤쪽 12건은 Keeper 가 due 를 안전망으로 길게 잡아야 줄어든다. 효과는 배포 뒤에 같은 스크립트의 `verdicts.watched`(쓰는 몫)와 서버 로그로 센다. 로그는 `schedule_run_watch: woke <일정 id>, ` 로 시작하고 `completed` 가 든 줄이 실행이 끝나서 깨운 것이고, `woke <일정 id> early` 로 시작하는 줄은 읽지 못해 일찍 깨운 것이다.
 
+### 6.6 측정 수요 — PR 의 head 가 바뀌기를 기다리는 호출 (2026-11-08)
+
+§6.5 의 `until_github_run` 은 실행 하나의 완료를 받는다. Keeper 가 PR 의 head 가 바뀌기를 기다리며 같은 명령을 계속 돌리는 호출은 이 인자가 받지 못한다.
+
+`docs/evidence/tool-efficiency-before-after-2026-11/idle_repeats.py`(PR #50021)로 11-06T00:00Z ~ 11-08T19:00Z 를 쟀다. 정의와 한계는 그 폴더의 README 에 있다. 같은 Keeper 가 같은 명령을 직전 실행이 끝난 뒤 30분 안에 다시 돌려 같은 결과(`execution_time_ms` 제외)를 받은 Execute 호출을 되풀이로 센다.
+
+| 측정 | 값 |
+|---|---|
+| `Execute` 호출 | 20,396건 |
+| 되풀이 | 4,241건 (20.8%), Keeper 13명 |
+| 되풀이 중 `context-reviewer` 의 열린 PR 목록·감시 PR head 읽기 | 2,346건 (55.3%) |
+| 11-08 00:00Z ~ 10:40Z 의 `context-reviewer` `Execute` | 1,628건 중 1,573건이 같은 명령 하나. 실행 간격 중앙값 13.9초, p90 35.1초 |
+| 그 명령 | 열린 PR 12개의 번호·draft·head·갱신 시각·제목을 읽고, 감시 중인 PR 넷의 head 를 따로 읽는다. 한 번에 `gh api` 다섯 번, 결과 1 KB 쯤 |
+| 그 명령이 부른 `gh api` | 1,573 × 5 = 7,865번. 10.7시간 평균 시간당 740번이고, §6.5 가 적은 시간당 5,000건의 15%다(읽는 계정을 여럿이 같이 쓴다면) |
+| 같은 창의 모델 요청 | 1,667번. 요청을 기록한 Keeper 전체 입력 토큰의 85.3% |
+| `until_github_run` 을 단 일정 | 58건 (11-05T00:00Z ~ 11-08T19:00Z, `masc_schedule_create`·`masc_schedule_update` 의 `input` 글자 검색, Keeper 8명) |
+
+- 이 명령이 기다리는 것은 감시 PR 의 head 가 바뀌는 것(새 커밋)과 열린 PR 목록의 변화로 읽었다. 명령이 읽는 두 부분이 이 둘에 맞는다는 것이 근거이고, Keeper 가 무엇을 기다렸는지 직접 본 것은 아니다(추정).
+- 되풀이가 턴을 붙든 시간은 3.36시간으로 작다. 값은 호출마다 모델 요청이 한 번 나간다는 데 있다. 1,573번이 곧 1,573번의 모델 요청은 아니다. 요청 하나가 호출을 여러 개 낼 수 있다.
+- 일정으로 깨운 뒤 첫 요청은 식은 캐시를 읽을 수 있어서 입력 토큰이 줄어든다고 가정하지 않는다. 줄어드는 것은 모델 요청 수, `Execute` 호출 수, GitHub 읽기 수, 턴이 열려 있는 시간이다.
+- 이 Keeper 의 되풀이는 11-08 09:13:35Z 에 멈췄다. 알려진 부팅 시각(11-07 18:24Z, 11-08 11:04Z, 14:40Z)과 맞지 않고, 멈춘 이유는 가리지 못했다.
+
+#### 6.6.1 제안 — `until_github_run` 옆에 인자 하나 더 (결정이 아니다)
+
+```
+type github_watch =
+  | Run of { repo : Github_repo.t; run_id : int; run_attempt : int option }   (* §6.5 *)
+  | Pull_heads of { repo : Github_repo.t; pulls : pull_head list }            (* 새로 *)
+and pull_head = { number : int; head : Git_sha_prefix.t }
+```
+
+- 인자: `masc_schedule_create`·`masc_schedule_update` 에 `until_github_pr_heads: {repo, pulls: [{number, head}]}` 를 더한다. 일정의 due 는 그대로 남고, 감시 PR 중 하나의 head 가 준 값과 다르거나 PR 이 닫히거나 병합되면 그 일정이 그 순간 due 가 된다(§6.5 와 같은 길).
+- `head` 는 Keeper 가 준다. 리뷰하는 Keeper 는 마지막으로 본 head 를 안다(지금 명령도 `#번호 head=앞 8자리` 를 찍는다). 서버가 건 시점에 baseline 을 읽지 않으므로 건 뒤 첫 읽기 전에 push 가 있어도 놓치지 않고, 건 시점 읽기 실패도 없다. `Git_sha_prefix.t` 는 새로 만들 타입이고 7~40자리 16진수만 받는다. 현재 head 가 그 값으로 시작하면 같은 head 로 본다.
+- 서버: `Server_schedule_run_watch` 와 같은 순서(30초마다)에서 감시가 달린 `Scheduled` one-shot Keeper wake 를 모은다. 같은 PR 을 기다리는 일정이 여럿이어도 한 순서에 한 번만 읽는다. 읽는 신원은 §6.2 1번 기본값(`[repositories] pr_reader`)이다.
+- 읽기 실패는 §6.5 와 같이 둘로 나눈다. 같은 답이 다시 올 것은 일정을 첫 순서에 한 번 일찍 깨우고, 다시 읽으면 달라질 것은 다음 순서에 다시 읽는다.
+- 깨움 메시지는 `[github_pr_watch] #<번호> head <준 값> -> <현재 앞 8자리>` 또는 `... closed`, `... merged` 를 감시 PR 마다 한 줄씩 적는다. 머리말은 `[github_run_watch]` 처럼 고정 영어 문장이다.
+- 상한: 일정 하나에 PR 8개. 근거는 지금 명령이 읽는 4개의 두 배라는 것뿐이다.
+- 닿지 않는 곳은 §6.5 와 같다(Lane action 일정, 반복 일정, github.com 밖의 호스트).
+
+#### 6.6.2 정해야 하는 것 (사용자가 정한다)
+
+1. 읽는 방법. PR 마다 REST 단건 조회(`GET /repos/{owner}/{repo}/pulls/{number}` 의 `head.sha`, `state`, `merged`)와 저장소마다 GraphQL 한 번 중 고른다. REST 는 감시 PR N개를 30초마다 읽으면 시간당 120N건이다. 넷이면 480건으로 지금 루프의 평균 740건보다 작지만 크게 작지는 않다. GraphQL 한 번이면 저장소당 시간당 120건이다. GraphQL 의 한도 계산은 REST 와 달라서 확인이 필요하다. 서버가 60초마다 읽는 PR 스냅숏(`server_repository_pulls.ml`)을 재사용하면 읽기가 늘지 않지만, 그 `pull_request` 레코드는 `repo_slug`·번호·`draft`·`checks`·`review`·`mergeable`·`author` 뿐이고 head 가 없다. 질의와 레코드에 칸을 더해야 하고 반응이 60초 이상 늦다.
+2. 신원과 비공개 저장소. §6.2 1·2번과 같다. 지금 명령이 읽는 `jeong-sik/masc` 는 공개 저장소다.
+3. 감시 PR 상한. 위 8개를 바꿀지.
+4. 닫힘·병합에도 깨우는가. 제안은 깨운다. 리뷰하는 Keeper 는 닫힌 PR 의 head 를 더 기다릴 이유가 없다.
+5. 열린 PR 목록에 새 PR 이 생기는 것을 기다리는 수요(위 명령의 첫 절반)를 같은 인자에 넣는지 따로 두는지. 이 제안은 받지 않는다. 한 명령 안에 두 수요가 섞여 있어서 Keeper 가 둘 중 무엇을 기다렸는지 가르지 못했다.
+6. `RFC-keeper-world-state-shows-open-work` 와의 겹침. 그 RFC 의 S8 은 PR 을 커밋한 Keeper 한 명을 깨운다. 리뷰하는 Keeper 는 닿지 않는다. 읽는 계정과 읽기는 하나를 쓰도록 §6.3 의 제안을 따른다.
+
+#### 6.6.3 한계와 확인 방법
+
+- 이 수요는 한 Keeper 의 한 명령이다. 결과가 매번 달라지는 명령으로 기다리는 다른 Keeper 는 되풀이로 잡히지 않고, 이 측정은 그것을 재지 않았다.
+- 같은 모양의 호출이 `date` 시계 읽기(`Execute` 호출의 12.4%, `wkbl-front`·`kidsnote-incoming-dd-manager` 가 거의 전부)에도 있다. 기다리는 대상이 정해져 있지 않아서 이 제안은 닿지 않는다.
+- Keeper 가 이 인자를 쓸지는 모른다. `until_github_run` 은 쓰였다(58건). 이 Keeper 가 쓸지는 배포 뒤에 센다.
+- 구현 뒤에는 같은 스크립트를 같은 길이의 창에 돌린다. 기준선은 위 표다. `context-reviewer` 의 `repeat_calls` 와 `hourly`, 인자를 단 일정 수, 깨움이 실제 head 변경 시각과 맞는지(깨움 시각 대 커밋 시각)를 본다. 값이 줄지 않았을 때는 §6.4 의 순서(만들어졌는지, 발화·만료·읽기 오류, 깨어나기까지의 시간, 깨어난 뒤에도 다시 폴링하는지)로 좁힌다.

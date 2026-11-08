@@ -4521,9 +4521,19 @@
   masc.masc_schedule
   masc_tui_types
   masc_tui_agenda
+  masc_tui_keeper_age_ladder
   masc_tui_keeper_axis_cell
   masc_tui_keeper_axis
   masc_tui_keeper_memory_reading))
+
+(test
+ (name test_tui_keeper_age_ladder)
+ (modules test_tui_keeper_age_ladder)
+ (libraries
+  alcotest
+  masc
+  masc_tui_keeper_age_ladder
+  masc_tui_keeper_axis_cell))
 
 (test
  (name test_tui_keeper_memory_reading)
@@ -4939,7 +4949,7 @@
 (test
  (name test_tui_keeper_mark)
  (modules test_tui_keeper_mark)
- (libraries alcotest masc masc_tui_keeper_list_model masc_tui_keeper_mark masc_tui_message_layout))
+ (libraries alcotest masc masc_tui_keeper_age_ladder masc_tui_keeper_list_model masc_tui_keeper_mark masc_tui_message_layout))
 
 (test
  (name test_tui_approval_detail)

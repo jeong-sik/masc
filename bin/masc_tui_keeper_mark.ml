@@ -175,5 +175,6 @@ let column_legend =
     , "resting path: relative duration (제공자 stated / 상한 bounded); ▹ prefixes next candidate after turn failure" )
   ; badge_glyph Badge_schedule, "next scheduled run or hold status (Detailed second row)"
   ; "mem · lag · stale", "keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second row)"
+  ; Masc_tui_keeper_age_ladder.cell_label, Masc_tui_keeper_age_ladder.legend
   ; "사람 몫 / 효과 확인 / 분류 안 됨", "requires human operator action, effect review, or unmapped fault (NOW column)"
   ]

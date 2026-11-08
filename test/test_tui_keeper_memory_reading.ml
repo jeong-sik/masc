@@ -21,6 +21,7 @@ let make_keeper_health
     ?(removed = 0)
     ?(source_invalidations = 0)
     ?updated_at
+    ?age_bins
     librarian : Masc.Tui_decode_memory_health.memory_keeper_health =
   { mkh_keeper_id = keeper_id
   ; mkh_revision = 1
@@ -33,7 +34,7 @@ let make_keeper_health
   ; mkh_added = added
   ; mkh_removed = removed
   ; mkh_snapshot_present = true
-  ; mkh_age_bins = None
+  ; mkh_age_bins = age_bins
   ; mkh_context_cycle =
       { mcc_saved = None
       ; mcc_saved_unreadable = false
@@ -113,6 +114,35 @@ let test_lag_rules () =
    | _ -> Alcotest.fail "beta should have Lag_unmeasured")
 ;;
 
+let test_row_carries_the_servers_age_ladder () =
+  let lib = make_librarian ~unread_atom_turns:0 ~unread_official_turns:0 () in
+  let bins : Masc.Keeper_memory_age_bins.t =
+    { under_hour = 1; under_day = 2; under_week = 3; older = 4 }
+  in
+  let snap =
+    make_snapshot
+      [ make_keeper_health ~keeper_id:"alpha" ~age_bins:bins lib
+      ; make_keeper_health ~keeper_id:"beta" lib
+      ]
+  in
+  let idx = Masc_tui_keeper_memory_reading.index_of_snapshot (Some snap) in
+  (match Masc_tui_keeper_memory_reading.find idx ~keeper_name:"alpha" with
+   | Masc_tui_keeper_memory_reading.Row { age_bins = Some carried; _ } ->
+     Alcotest.(check bool) "alpha carries the bins the server counted" true (carried = bins)
+   | Masc_tui_keeper_memory_reading.Row { age_bins = None; _ }
+   | Masc_tui_keeper_memory_reading.Unknown
+   | Masc_tui_keeper_memory_reading.No_row
+   | Masc_tui_keeper_memory_reading.Refused _ ->
+     Alcotest.fail "alpha should carry its ladder");
+  (match Masc_tui_keeper_memory_reading.find idx ~keeper_name:"beta" with
+   | Masc_tui_keeper_memory_reading.Row { age_bins = None; _ } -> ()
+   | Masc_tui_keeper_memory_reading.Row { age_bins = Some _; _ }
+   | Masc_tui_keeper_memory_reading.Unknown
+   | Masc_tui_keeper_memory_reading.No_row
+   | Masc_tui_keeper_memory_reading.Refused _ ->
+     Alcotest.fail "beta has no ladder, which is not a ladder of zeros")
+;;
+
 let test_no_row_vs_unknown_vs_refused () =
   let lib = make_librarian ~unread_atom_turns:0 ~unread_official_turns:0 () in
   let k = make_keeper_health ~keeper_id:"alpha" lib in
@@ -188,6 +218,7 @@ let () =
   Alcotest.run "tui_keeper_memory_reading"
     [ ( "memory reading"
       , [ Alcotest.test_case "lag calculation rules" `Quick test_lag_rules
+        ; Alcotest.test_case "row carries the servers age ladder" `Quick test_row_carries_the_servers_age_ladder
         ; Alcotest.test_case "no row vs unknown vs refused" `Quick test_no_row_vs_unknown_vs_refused
         ; Alcotest.test_case "cells formatting" `Quick test_cells_formatting
         ] )

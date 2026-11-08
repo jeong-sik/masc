@@ -82,11 +82,22 @@ let invite_page ~nonce =
     ~script:invite_script
 ;;
 
+(* The subscription connect route of the server, which the preview serves
+   for a person (plan D1-4), and the list of what a person owns. *)
+let connect_path = "/api/v1/setup/accounts/login"
+let connect_prefix = connect_path ^ "/"
+let provider_accounts_path = "/api/v1/auth/provider-accounts"
+
 let home_script =
   Printf.sprintf
     {|const out = document.getElementById("out");
 const signout = document.getElementById("signout");
+const accounts = document.getElementById("accounts");
+const integration = document.getElementById("integration");
+const transcript = document.getElementById("transcript");
+const reply = document.getElementById("reply");
 let csrf = null;
+let loginId = null;
 async function read(path) {
   const answer = await fetch(path);
   const text = await answer.text();
@@ -108,8 +119,63 @@ signout.addEventListener("click", async () => {
   out.textContent = "sign-out: " + answer.status;
   await show();
 });
-show();|}
+async function listAccounts() {
+  const [answer, json] = await read("%s");
+  accounts.textContent = answer.ok
+    ? (json.provider_accounts.length === 0 ? "none" : json.provider_accounts.join("\n"))
+    : "(" + answer.status + "): " + json.error;
+}
+function post(path, body) {
+  return fetch(path, {
+    method: "POST",
+    headers: { "content-type": "application/json", "%s": csrf },
+    body: JSON.stringify(body)
+  });
+}
+function frame(text) {
+  const event = /^event: (.*)$/m.exec(text);
+  const data = /^data: (.*)$/m.exec(text);
+  if (event === null || data === null) return;
+  const json = JSON.parse(data[1]);
+  if (event[1] === "output") { transcript.textContent += json.text; return; }
+  if (event[1] === "started") loginId = json.login_id;
+  transcript.textContent += "\n[" + event[1] + "] " + (json.message || json.status || "") + "\n";
+}
+document.getElementById("connect").addEventListener("click", async () => {
+  transcript.textContent = "";
+  const answer = await post("%s", { integration_id: integration.value });
+  if (!answer.ok) {
+    transcript.textContent = "connect (" + answer.status + "): " + await answer.text();
+    return;
+  }
+  const reader = answer.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let cut;
+    while ((cut = buffer.indexOf("\n\n")) >= 0) {
+      frame(buffer.slice(0, cut));
+      buffer = buffer.slice(cut + 2);
+    }
+  }
+  await listAccounts();
+});
+document.getElementById("send").addEventListener("click", async () => {
+  const path = "%s" + loginId + "/input";
+  const text = await post(path, { kind: "text", text: reply.value });
+  const enter = await post(path, { kind: "key", key: "enter" });
+  transcript.textContent += "\n[sent] " + text.status + " " + enter.status + "\n";
+  reply.value = "";
+});
+show().then(listAccounts);|}
     Authz_browser_request.csrf_header
+    provider_accounts_path
+    Authz_browser_request.csrf_header
+    connect_path
+    connect_prefix
 ;;
 
 let home_page ~nonce =
@@ -119,7 +185,17 @@ let home_page ~nonce =
     ~body:
       ("<h1>Multi-account preview</h1>\n<pre id=\"out\">reading</pre>\n"
        ^ start_form ~invite:false
-       ^ "\n<button id=\"signout\" hidden>Sign out</button>")
+       ^ "\n<button id=\"signout\" hidden>Sign out</button>\n"
+       ^ String.concat
+           "\n"
+           [ "<h2>My subscriptions</h2>"
+           ; "<pre id=\"accounts\">reading</pre>"
+           ; "<label>Integration (a provider of runtime.toml) <input id=\"integration\"></label>"
+           ; "<button id=\"connect\">Connect</button>"
+           ; "<pre id=\"transcript\"></pre>"
+           ; "<label>Answer the login <input id=\"reply\" autocomplete=\"off\"></label>"
+           ; "<button id=\"send\">Send</button>"
+           ])
     ~script:home_script
 ;;
 
@@ -157,4 +233,40 @@ let whoami state ~now_ms request =
        for it; were it to, no one is signed in. *)
     refused Auth_gate.Credential_required
   | Error reason -> refused reason
+;;
+
+type person =
+  { user_id : User_id.t
+  ; namespace : Account_home_namespace.t
+  }
+
+let person state ~now_ms request =
+  match Auth_gate.decide state ~now_ms Route_access.Manage_own_provider request with
+  | Error reason -> Error (refused reason)
+  | Ok (Auth_gate.Authenticated { Auth_gate.principal = Principal.Human user_id; _ }) ->
+    (match Authz_principal_state.find_membership state.Authz_state.principals user_id with
+     | Some { Authz_principal_state.account_home_namespace = namespace; workspace_id = _ } ->
+       Ok { user_id; namespace }
+     | None ->
+       (* The admission that made an active principal made its membership in
+          the same record, so none is a log this build did not write. *)
+       Error (R.json R.Internal_error_500 [ "error", `String "the principal has no membership" ]))
+  | Ok (Auth_gate.Authenticated { Auth_gate.principal = Principal.Service service_id; _ }) ->
+    (* [decide] refuses a service on this kind; were it not to, it still
+       links no account. *)
+    Error (refused (Auth_gate.Service_owns_no_provider service_id))
+  | Ok (Auth_gate.Anonymous | Auth_gate.Judged_by_route) ->
+    (* [Manage_own_provider] needs a credential, so [decide] answers neither. *)
+    Error (refused Auth_gate.Credential_required)
+;;
+
+let provider_accounts state { user_id; namespace = _ } =
+  R.json
+    R.Ok_200
+    [ ( "provider_accounts"
+      , `List
+          (List.map
+             (fun id -> `String (Provider_account_id.to_string id))
+             (Authz_provider_account.owned state user_id)) )
+    ]
 ;;

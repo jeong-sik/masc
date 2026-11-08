@@ -38,6 +38,7 @@ let serve ~clock ~ping_interval_s ~stalled_after_s ~max_queued_events ~subscript
               ~step:(fun frame -> Server_sse_pump.Send frame)
               ~idle:(fun () -> Server_sse_pump.Keepalive)
               ~clock ~ping_interval_s
+              ~closed:(fun () -> Server_sse_response.await_closed response)
               ~send:(Server_sse_response.send response)
           with
           (* [Server_sse_response.send] logs a stalled frame with the request path. *)

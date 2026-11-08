@@ -102,6 +102,13 @@ module Body_writer : sig
 
   val is_closed : t -> bool
   (** On HTTP/2 also true once the stream's switch ended. *)
+
+  val stream_end : t -> unit Eio.Promise.t option
+  (** On HTTP/2, resolved once the stream's switch ended: the peer reset the
+      stream or the connection ended ({!of_h2}). A producer that waits for
+      events elsewhere races it to stop for a client that is gone. [None] on
+      HTTP/1.1: httpun reports no end of the connection before the body
+      closes, so there a client that went away is noticed by the next write. *)
 end
 
 val respond_with_streaming

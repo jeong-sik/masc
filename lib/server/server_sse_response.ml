@@ -30,6 +30,19 @@ let respond ~clock ~stalled_after_s ?flush_headers_immediately reqd response =
 
 let is_closed t = Http_reqd.Body_writer.is_closed t.writer
 
+(* The transport can end the stream under the response before anything here
+   closes it: an h2 peer reset or connection end. httpun reports no such end,
+   so an HTTP/1.1 response closes only through [close] or a send that did not
+   end [Written]. *)
+let await_closed t =
+  match Http_reqd.Body_writer.stream_end t.writer with
+  | None -> Eio.Promise.await t.closed
+  | Some stream_end ->
+    Eio.Fiber.first
+      (fun () -> Eio.Promise.await t.closed)
+      (fun () -> Eio.Promise.await stream_end)
+;;
+
 (* Closing the body answers no waiting flush (httpun body.ml [close]), so
    [closed] is what wakes the sends still waiting. *)
 let close t =
@@ -64,7 +77,7 @@ let send t frame =
                t.stall ();
                Stalled)
             (fun () ->
-               Eio.Promise.await t.closed;
+               await_closed t;
                Closed))
         (fun () ->
            match Eio.Promise.await flushed with

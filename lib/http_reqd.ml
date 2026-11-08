@@ -18,12 +18,20 @@ module Stream_end = struct
     { mutable ended : bool
     ; waiting : (int, unit -> unit) Hashtbl.t
     ; mutable next_id : int
+    ; signal : unit Eio.Promise.t
+    ; resolve_signal : unit Eio.Promise.u
     }
 
   let create ~stream_sw =
-    let t = { ended = false; waiting = Hashtbl.create 2; next_id = 0 } in
+    let signal, resolve_signal = Eio.Promise.create () in
+    let t =
+      { ended = false; waiting = Hashtbl.create 2; next_id = 0; signal; resolve_signal }
+    in
     Eio.Switch.on_release stream_sw (fun () ->
       t.ended <- true;
+      (* The signal goes first: a flush answer that raised would otherwise
+         leave the stream's end unreported to a waiting producer. *)
+      Eio.Promise.resolve t.resolve_signal ();
       let answers = Hashtbl.fold (fun _ answer answers -> answer :: answers) t.waiting [] in
       Hashtbl.reset t.waiting;
       List.iter (fun answer -> answer ()) answers);
@@ -31,6 +39,7 @@ module Stream_end = struct
   ;;
 
   let ended t = t.ended
+  let signal t = t.signal
 
   (* [f] runs once: when h2 drains the body, or when the stream's end comes
      first. *)
@@ -291,6 +300,14 @@ module Body_writer = struct
     | H1 writer -> Httpun.Body.Writer.is_closed writer
     | H2 { writer; stream_end; _ } ->
       H2.Body.Writer.is_closed writer || Stream_end.ended stream_end
+  ;;
+
+  (* The transport's own end of the stream under the writer. h2 reports a
+     peer reset and a connection end through the stream's switch; httpun
+     reports nothing before the body closes. *)
+  let stream_end = function
+    | H1 _ -> None
+    | H2 { stream_end; _ } -> Some (Stream_end.signal stream_end)
   ;;
 
   (* Both libraries answer a flush on a closed body from the connection

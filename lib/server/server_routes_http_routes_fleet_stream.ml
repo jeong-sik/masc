@@ -51,7 +51,9 @@ let serve ?(scope_is_current = fun () -> true) ?scope_replaced
           Server_sse_pump.run ~source:(Server_sse_pump.Queue.source queue)
             ~step:(fun event -> Server_sse_pump.Send (frame event))
             ~idle:(fun () -> Server_sse_pump.Keepalive)
-            ~clock ~ping_interval_s ~send
+            ~clock ~ping_interval_s
+            ~closed:(fun () -> Server_sse_response.await_closed response)
+            ~send
         in
         match scope_replaced with
         | None -> `Ended (pump ())

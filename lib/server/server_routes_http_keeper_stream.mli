@@ -353,6 +353,7 @@ module For_testing : sig
 
   val serve_accepted_chat :
     send:(string -> Server_sse_response.outcome) ->
+    closed:(unit -> unit) ->
     queue:chat_stream_item Server_sse_pump.Queue.t ->
     acceptance_frame:string ->
     replay:(unit -> (int * Ag_ui.event) list) ->

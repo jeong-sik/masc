@@ -1,99 +1,68 @@
 (** MASC MCP Types - Newtypes (Prevent string mixups) *)
 
-(** Agent identifier - prevents mixing with task_id, file_path, etc. *)
-module Agent_id : sig
-  type t
-  val of_string : string -> t
-  val to_string : t -> string
-  val equal : t -> t -> bool
-  val pp : Format.formatter -> t -> unit
-  val generate : unit -> t
-  val to_yojson : t -> Yojson.Safe.t
-  val of_yojson : Yojson.Safe.t -> (t, string) result
-end = struct
+(** What every string-backed ID shares: the string itself, written as a JSON
+    string. [Kind.kind] names the ID in the error [of_yojson] returns for a
+    value that is not a JSON string. The signatures, with [t] abstract, are in
+    [ids.mli]. *)
+module String_id (Kind : sig
+  val kind : string
+end) =
+struct
   type t = string
   let of_string s = s
   let to_string t = t
   let equal = String.equal
   let pp fmt t = Format.fprintf fmt "%s" t
-  let generate () =
-    let rng = Random.State.make_self_init () in
-    Uuidm.v4_gen rng () |> Uuidm.to_string |> of_string
   let to_yojson t = `String t
   let of_yojson = function
     | `String s -> Ok s
     | other ->
         Error
-          (Printf.sprintf "Expected string for Agent_id (received %s)"
+          (Printf.sprintf "Expected string for %s (received %s)" Kind.kind
              (Json_util.kind_name other))
 end
 
-(** Task identifier - prevents mixing with agent_id, etc. *)
-module Task_id : sig
-  type t
-  val of_string : string -> t
-  val to_string : t -> string
-  val equal : t -> t -> bool
-  val pp : Format.formatter -> t -> unit
-  val generate : unit -> t  (* Auto-generate unique ID *)
-  val to_yojson : t -> Yojson.Safe.t
-  val of_yojson : Yojson.Safe.t -> (t, string) result
-end = struct
-  type t = string
-  let of_string s = s
-  let to_string t = t
-  let equal = String.equal
-  let pp fmt t = Format.fprintf fmt "%s" t
-  let _id_counter = Atomic.make 0
+(** A string ID minted as ["<prefix>-<ms>-<seq>"]. Every application of the
+    functor owns its counter. [Atomic.fetch_and_add] returns the
+    pre-increment value in one step, so two fibers in the same millisecond
+    cannot read the same counter value and mint the same ID, as an [incr]
+    followed by a [get] would let them. *)
+module Sequenced_id (Spec : sig
+  val kind : string
+  val prefix : string
+end) =
+struct
+  include String_id (Spec)
+  let counter = Atomic.make 0
   let generate () =
     let timestamp = int_of_float (Time_compat.now () *. 1000.0) in
-    (* [fetch_and_add] atomically returns the pre-increment value, avoiding
-       the [incr; get] split where two fibers can observe the same counter
-       value and produce duplicate task IDs within the same millisecond. *)
-    let seq = (Atomic.fetch_and_add _id_counter 1 + 1) land 0xFFFF in
-    Printf.sprintf "task-%d-%04x" timestamp seq
-  let to_yojson t = `String t
-  let of_yojson = function
-    | `String s -> Ok s
-    | other ->
-        Error
-          (Printf.sprintf "Expected string for Task_id (received %s)"
-             (Json_util.kind_name other))
+    let seq = (Atomic.fetch_and_add counter 1 + 1) land 0xFFFF in
+    Printf.sprintf "%s-%d-%04x" Spec.prefix timestamp seq
 end
+
+let new_uuid_v4 () =
+  let rng = Random.State.make_self_init () in
+  Uuidm.v4_gen rng () |> Uuidm.to_string
+
+(** Agent identifier - prevents mixing with task_id, file_path, etc. *)
+module Agent_id = struct
+  include String_id (struct let kind = "Agent_id" end)
+  let generate () = new_uuid_v4 () |> of_string
+end
+
+(** Task identifier - prevents mixing with agent_id, etc. *)
+module Task_id = Sequenced_id (struct
+  let kind = "Task_id"
+  let prefix = "task"
+end)
 
 (** Tool execution identifier — RFC-0233 canonical join key. One mint
     per tool execution at the dispatch boundary; every store that
     records the execution carries the same value. *)
-module Execution_id : sig
-  type t
-  val of_string : string -> t
-  val to_string : t -> string
-  val equal : t -> t -> bool
-  val pp : Format.formatter -> t -> unit
-  val generate : unit -> t
-  val to_yojson : t -> Yojson.Safe.t
-  val of_yojson : Yojson.Safe.t -> (t, string) result
-end = struct
-  type t = string
-  let of_string s = s
-  let to_string t = t
-  let equal = String.equal
-  let pp fmt t = Format.fprintf fmt "%s" t
-  let _id_counter = Atomic.make 0
-  let generate () =
-    let timestamp = int_of_float (Time_compat.now () *. 1000.0) in
-    (* Same fetch_and_add discipline as [Task_id.generate]: two fibers in
-       the same millisecond still get distinct sequence numbers. *)
-    let seq = (Atomic.fetch_and_add _id_counter 1 + 1) land 0xFFFF in
-    Printf.sprintf "exec-%d-%04x" timestamp seq
-  let to_yojson t = `String t
-  let of_yojson = function
-    | `String s -> Ok s
-    | other ->
-        Error
-          (Printf.sprintf "Expected string for Execution_id (received %s)"
-             (Json_util.kind_name other))
-end
+module Execution_id = Sequenced_id (struct
+  let kind = "Execution_id"
+  let prefix = "exec"
+end)
 
 (** Turn reference — RFC-0233 §7. Canonical per-turn join key, derived
     deterministically from the [(trace_id, absolute_turn)] pair already
@@ -147,119 +116,27 @@ end = struct
 end
 
 (** Thread identifier - conversation thread ID *)
-module Thread_id : sig
-  type t
-  val of_string : string -> t
-  val to_string : t -> string
-  val equal : t -> t -> bool
-  val pp : Format.formatter -> t -> unit
-  val generate : unit -> t
-  val to_yojson : t -> Yojson.Safe.t
-  val of_yojson : Yojson.Safe.t -> (t, string) result
-end = struct
-  type t = string
-  let of_string s = s
-  let to_string t = t
-  let equal = String.equal
-  let pp fmt t = Format.fprintf fmt "%s" t
-  let _id_counter = Atomic.make 0
-  let generate () =
-    let timestamp = int_of_float (Time_compat.now () *. 1000.0) in
-    (* See Task_id.generate — [fetch_and_add] closes the split-atomic race
-       so concurrent callers cannot produce duplicate IDs within the same
-       millisecond. *)
-    let seq = (Atomic.fetch_and_add _id_counter 1 + 1) land 0xFFFF in
-    Printf.sprintf "thread-%d-%04x" timestamp seq
-  let to_yojson t = `String t
-  let of_yojson = function
-    | `String s -> Ok s
-    | other ->
-        Error
-          (Printf.sprintf "Expected string for Thread_id (received %s)"
-             (Json_util.kind_name other))
-end
+module Thread_id = Sequenced_id (struct
+  let kind = "Thread_id"
+  let prefix = "thread"
+end)
 
 (** Turn identifier - individual turn within a thread *)
-module Turn_id : sig
-  type t
-  val of_string : string -> t
-  val to_string : t -> string
-  val equal : t -> t -> bool
-  val pp : Format.formatter -> t -> unit
-  val generate : thread_id:string -> seq:int -> t
-  val to_yojson : t -> Yojson.Safe.t
-  val of_yojson : Yojson.Safe.t -> (t, string) result
-end = struct
-  type t = string
-  let of_string s = s
-  let to_string t = t
-  let equal = String.equal
-  let pp fmt t = Format.fprintf fmt "%s" t
-  let generate ~thread_id ~seq =
-    Printf.sprintf "%s-turn-%04d" thread_id seq
-  let to_yojson t = `String t
-  let of_yojson = function
-    | `String s -> Ok s
-    | other ->
-        Error
-          (Printf.sprintf "Expected string for Turn_id (received %s)"
-             (Json_util.kind_name other))
+module Turn_id = struct
+  include String_id (struct let kind = "Turn_id" end)
+  let generate ~thread_id ~seq = Printf.sprintf "%s-turn-%04d" thread_id seq
 end
 
 (** Keeper identifier - deterministic UUIDv5 from namespace + name + path *)
-module Keeper_id : sig
-  type t
-  val of_string : string -> t
-  val to_string : t -> string
-  val equal : t -> t -> bool
-  val pp : Format.formatter -> t -> unit
-  val generate : name:string -> path:string -> t
-  val to_yojson : t -> Yojson.Safe.t
-  val of_yojson : Yojson.Safe.t -> (t, string) result
-end = struct
-  type t = string
-  let of_string s = s
-  let to_string t = t
-  let equal = String.equal
-  let pp fmt t = Format.fprintf fmt "%s" t
+module Keeper_id = struct
+  include String_id (struct let kind = "Keeper_id" end)
   let generate ~name ~path =
     let input = Printf.sprintf "masc-keeper:%s:%s" name path in
     Uuidm.v5 Uuidm.ns_dns input |> Uuidm.to_string |> of_string
-  let to_yojson t = `String t
-  let of_yojson = function
-    | `String s -> Ok s
-    | other ->
-        Error
-          (Printf.sprintf "Expected string for Keeper_id (received %s)"
-             (Json_util.kind_name other))
 end
 
 (** Credential identifier - random UUIDv4 *)
-module Credential_id : sig
-  type t
-  val of_string : string -> t
-  val to_string : t -> string
-  val equal : t -> t -> bool
-  val pp : Format.formatter -> t -> unit
-  val generate : unit -> t
-  val to_yojson : t -> Yojson.Safe.t
-  val of_yojson : Yojson.Safe.t -> (t, string) result
-end = struct
-  type t = string
-  let of_string s = s
-  let to_string t = t
-  let equal = String.equal
-  let pp fmt t = Format.fprintf fmt "%s" t
-  let generate () =
-    let rng = Random.State.make_self_init () in
-    Uuidm.v4_gen rng () |> Uuidm.to_string |> of_string
-  let to_yojson t = `String t
-  let of_yojson = function
-    | `String s -> Ok s
-    | other ->
-        Error
-          (Printf.sprintf "Expected string for Credential_id (received %s)"
-             (Json_util.kind_name other))
+module Credential_id = struct
+  include String_id (struct let kind = "Credential_id" end)
+  let generate () = new_uuid_v4 () |> of_string
 end
-
-

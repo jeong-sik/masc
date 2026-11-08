@@ -22,7 +22,26 @@ val key : t -> string
 (** Where runtime.toml states it, relative to the model's [\[models.<id>\]]
     table. *)
 
-val unstated : Runtime_instance.t -> t list
-(** The reads runtime.toml does not state for the runtime's model, in the
-    order of {!t}; empty when it states every one. A window only the
-    capability catalog answers is not stated. *)
+(** The four reads as runtime.toml states them. Only {!parse} makes one, so
+    a value of this type states every read. *)
+type stated = private
+  { context_window : int
+  ; reasoning_effort_ladder : Llm_provider.Reasoning_effort.t list
+        (** Never empty. *)
+  ; json_mode : bool
+  ; native_schema : bool
+  }
+
+val parse : Runtime_instance.t -> (stated, t * t list) result
+(** What runtime.toml states for the runtime's model, or every read it leaves
+    unstated, in the order of {!t}. The window is the one the runtime
+    resolves, from the binding, its provider or its model. A window only the
+    capability catalog answers is not stated, and neither is one the
+    catalog's window clamped, since the runtime runs on the catalog's. *)
+
+val capabilities_over
+  :  base:Llm_provider.Capabilities.capabilities
+  -> stated
+  -> Llm_provider.Capabilities.capabilities
+(** [base] with the window, the effort ladder, JSON mode and native schema
+    that [stated] holds; every other capability is [base]'s. *)

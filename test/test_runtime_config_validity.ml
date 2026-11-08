@@ -7627,11 +7627,16 @@ default = "tinker.declared"
     | None -> failf "%s must load as a binding" runtime_id
   in
   let exact_reads = list (testable (Fmt.of_to_string Runtime_exact_reads.key) ( = )) in
+  let unstated runtime_id =
+    match Runtime_exact_reads.parse (loaded runtime_id) with
+    | Ok (_ : Runtime_exact_reads.stated) -> []
+    | Error (first, rest) -> first :: rest
+  in
   check exact_reads "the declared binding states every exact read" []
-    (Runtime_exact_reads.unstated (loaded "tinker.declared"));
+    (unstated "tinker.declared");
   check exact_reads "the partial binding leaves native schema unstated"
     [ Runtime_exact_reads.Native_schema ]
-    (Runtime_exact_reads.unstated (loaded "tinker.partial"));
+    (unstated "tinker.partial");
   (* What makes the Anthropic case worth asking: the binding's capability
      override is there although its model states nothing. *)
   (match

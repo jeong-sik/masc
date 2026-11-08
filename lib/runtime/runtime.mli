@@ -335,8 +335,9 @@ val exact_output_targets : t list -> Agent_core.Exact_output.declared_target lis
 (** The exact-output slots of [runtimes]: every HTTP binding, carried whole with
     its resolved credential and its [exact-body-timeout-s]. A binding whose
     runtime.toml states every capability an exact slot reads
-    ({!Runtime_exact_reads}) also declares the capabilities its Keeper turns
-    run on, which answer where the catalog has no row for its model.
+    ({!Runtime_exact_reads.parse}) also declares its model: those reads as
+    stated, laid over the capabilities its Keeper turns run on. The
+    declaration answers where the catalog has no row for the model.
     Official-client runtimes do no exact output and are left out. *)
 
 type exact_output_catalog =

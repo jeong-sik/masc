@@ -925,18 +925,21 @@ let exact_output_targets runtimes =
                  Anthropic wire the adapter copies the catalog answer into it
                  when the model states nothing
                  ([Runtime_adapter.with_client_history_replay]). Where every read
-                 is stated, the slot answers with what the binding's Keeper turns
-                 run on, which is that override; a table that states them always
-                 yields one. A model row, where the catalog has one, answers
-                 instead. *)
+                 is stated, the slot answers with those four as runtime.toml
+                 states them, laid over what the binding's Keeper turns run on,
+                 which is that override; a table that states them always yields
+                 one. A model row, where the catalog has one, answers instead. *)
               model_declaration =
                 (match
-                   ( Runtime_exact_reads.unstated rt
+                   ( Runtime_exact_reads.parse rt
                    , Llm_provider.Provider_config.capabilities_for_config_model config )
                  with
-                 | [], Some capabilities -> Agent_core.Exact_output.Declared_model capabilities
-                 | [], None | _ :: _, (Some _ | None) ->
-                   Agent_core.Exact_output.No_model_declaration)
+                 | Ok stated, Some base ->
+                   Agent_core.Exact_output.Declared_model
+                     (Runtime_exact_reads.capabilities_over ~base stated)
+                 | Ok (_ : Runtime_exact_reads.stated), None
+                 | Error (_ : Runtime_exact_reads.t * Runtime_exact_reads.t list), (Some _ | None)
+                   -> Agent_core.Exact_output.No_model_declaration)
             } : Agent_core.Exact_output.declared_target)
        | Runtime_execution.Codex_app_server _
        | Runtime_execution.Claude_code _
@@ -2164,9 +2167,9 @@ let warn_rejected_exact_output_slots registry =
     | Replacement_catalog_targets { path = _ } -> None
     | Runtime_binding_targets when List.mem slot.slot_id model_row_missing ->
       Option.bind (get_runtime_by_id slot.slot_id) (fun (rt : t) ->
-        match Runtime_exact_reads.unstated rt with
-        | [] -> None
-        | first :: rest -> Some (rt, (first, rest)))
+        match Runtime_exact_reads.parse rt with
+        | Ok (_ : Runtime_exact_reads.stated) -> None
+        | Error unstated -> Some (rt, unstated))
     | Runtime_binding_targets -> None
   in
   let all_rejected = Runtime_exact_output_registry.rejected_slots registry in

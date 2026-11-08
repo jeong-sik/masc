@@ -278,6 +278,27 @@ let each_kind_of_route_judges_the_request () =
         , Route_access.Self_authenticated Route_access.Oauth_protocol
         , request Nothing
         , refused (G.Not_served_in_multi_account Route_access.Oauth_protocol) )
+      ; ( "own provider, nothing"
+        , Route_access.Manage_own_provider
+        , request Nothing
+        , refused G.Credential_required )
+      ; ( "own provider, Member session"
+        , Route_access.Manage_own_provider
+        , request (Cookie c.member_session)
+        , "worker by session-member" )
+      ; ( "own provider, Admin session"
+        , Route_access.Manage_own_provider
+        , request (Cookie c.admin_session)
+        , "admin by session-admin" )
+      ; "own provider, PAT", Route_access.Manage_own_provider, request (Bearer c.admin_pat), "admin by pat-all"
+      ; ( "own provider, read-only PAT"
+        , Route_access.Manage_own_provider
+        , request (Bearer c.read_only_pat)
+        , refused G.Pat_scope_lacks_own_provider )
+      ; ( "own provider, service"
+        , Route_access.Manage_own_provider
+        , request (Bearer c.service)
+        , refused (G.Service_owns_no_provider (get (Service_id.of_string "keeper-runner"))) )
       ]
     in
     List.iter

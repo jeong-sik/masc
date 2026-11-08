@@ -58,6 +58,12 @@ type t =
   | Tool_observation of { tool_name : string }
       (** Tool authorization with read quota for GET/HEAD observations. *)
   | Tool_actor of { tool_name : string }
+  | Manage_own_provider
+      (** A person manages their own provider accounts: they link a
+          subscription and follow, answer, or end its login (design 5.4, plan
+          D1-3). In multi-account mode every active person may, an Admin and
+          a Member alike, and a PAT needs [Manage_own_provider] in its scope;
+          a service may not. *)
   | Self_authenticated of self_authenticated_reason
 
 (** JSON for the route inventory. [kind] is the constructor in snake case;

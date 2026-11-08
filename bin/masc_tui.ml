@@ -38945,14 +38945,15 @@ Use relative paths for resources already held in the package. -->
            (* The diff covers the file, so these keys move the diff. The page
               keys of the arm below move the file cursor, which the overlay
               hides. *)
-           let count, height = Masc_tui_render_code.code_diff_viewport state in
-           state.code_diff_scroll <-
-             (match move with
-              | "home" -> 0
-              | "end" -> Masc_tui_scroll.maximum ~count ~height
-              | "pageup" -> Masc_tui_scroll.page_up ~count ~height state.code_diff_scroll
-              | "pagedown" -> Masc_tui_scroll.page_down ~count ~height state.code_diff_scroll
-              | _ -> Masc_tui_scroll.normalize ~count ~height state.code_diff_scroll)
+           Option.iter (fun (count, height) ->
+             state.code_diff_scroll <-
+               (match move with
+                | "home" -> 0
+                | "end" -> Masc_tui_scroll.maximum ~count ~height
+                | "pageup" -> Masc_tui_scroll.page_up ~count ~height state.code_diff_scroll
+                | "pagedown" -> Masc_tui_scroll.page_down ~count ~height state.code_diff_scroll
+                | _ -> Masc_tui_scroll.normalize ~count ~height state.code_diff_scroll))
+             (Masc_tui_render_code.code_diff_viewport state)
        | Some "H" when state.view = Code && state.code_focus_file = Right_pane ->
            (* History over the open file. The capital only: lowercase h/l
               choose panes, while shifted arrows pan the file. Same key closes
@@ -40306,9 +40307,10 @@ Use relative paths for resources already held in the package. -->
                     state.code_notes_scroll <-
                       Masc_tui_scroll.down ~count ~height state.code_notes_scroll)
                   else if state.code_diff_open then (
-                    let count, height = Masc_tui_render_code.code_diff_viewport state in
-                    state.code_diff_scroll <-
-                      Masc_tui_scroll.down ~count ~height state.code_diff_scroll)
+                    Option.iter (fun (count, height) ->
+                      state.code_diff_scroll <-
+                        Masc_tui_scroll.down ~count ~height state.code_diff_scroll)
+                      (Masc_tui_render_code.code_diff_viewport state))
                   else if state.code_history_open then (
                     let count, _ = Masc_tui_render_code.code_history_viewport state in
                     state.code_history_scroll <-
@@ -40653,9 +40655,10 @@ Use relative paths for resources already held in the package. -->
                     state.code_notes_scroll <-
                       Masc_tui_scroll.up ~count ~height state.code_notes_scroll)
                   else if state.code_diff_open then (
-                    let count, height = Masc_tui_render_code.code_diff_viewport state in
-                    state.code_diff_scroll <-
-                      Masc_tui_scroll.up ~count ~height state.code_diff_scroll)
+                    Option.iter (fun (count, height) ->
+                      state.code_diff_scroll <-
+                        Masc_tui_scroll.up ~count ~height state.code_diff_scroll)
+                      (Masc_tui_render_code.code_diff_viewport state))
                   else if state.code_history_open then (
                     let count, _ = Masc_tui_render_code.code_history_viewport state in
                     state.code_history_scroll <-

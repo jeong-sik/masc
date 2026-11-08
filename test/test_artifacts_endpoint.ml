@@ -87,7 +87,7 @@ let http_request ~path ?token ?origin () =
 
 let request_trust_policy =
   match Server_request_authority.make_trust_policy
-    ~bind_host:"localhost" ~bind_port:80 ~explicit_base_url:None with
+    ~bind_host:"localhost" ~bind_port:80 ~https_port:None ~explicit_base_url:None with
   | Ok policy -> policy
   | Error error ->
     Alcotest.fail (Server_request_authority.trust_policy_error_to_string error)

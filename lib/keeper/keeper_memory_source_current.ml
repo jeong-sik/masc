@@ -123,11 +123,7 @@ let valid_source_path value =
 let valid_sha256 value =
   String.length value = 71
   && String.starts_with ~prefix:"sha256:" value
-  && String.for_all
-       (function
-         | '0' .. '9' | 'a' .. 'f' -> true
-         | _ -> false)
-       (String.sub value 7 64)
+  && String_util.is_lowercase_sha256_hex (String.sub value 7 64)
 ;;
 
 let finite_nonnegative value = Float.is_finite value && value >= 0.0

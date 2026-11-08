@@ -20,6 +20,11 @@
     permissions need an effect in the scope of the PAT: [CanReadState] needs
     [Read_state], and the task permissions need [Use_tool].
 
+    {b Own provider accounts} (plan D1-3). A [Manage_own_provider] route is
+    open to every active Human, an Admin and a Member alike, as the account
+    they link is theirs. A PAT needs [Manage_own_provider] in its scope, and a
+    service is refused.
+
     {b Kinds.} [Always_public] and [Public_read Open_when_strict] need no
     credential: multi-account mode is strict, and the A4d routes stay open
     under strict auth. Every other kind needs one,
@@ -70,6 +75,12 @@ type reason =
   | Unregistered_tool of string
   | Not_served_in_multi_account of Route_access.self_authenticated_reason
       (** The OAuth routes until plan C5, and the loopback dev token. *)
+  | Service_owns_no_provider of Authz_types.Service_id.t
+      (** A [Manage_own_provider] route, and a service calls it: a person
+          links their own subscription (plan D1-3). *)
+  | Pat_scope_lacks_own_provider
+      (** A [Manage_own_provider] route, and the scope of the PAT does not
+          hold that effect (design 4.4). *)
 
 (** [true] for the reasons that a request without a working credential gets
     (401); [false] for those of an authenticated request that may not do this

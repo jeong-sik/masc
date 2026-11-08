@@ -7,4 +7,4 @@
  ; The agent guide renders config/prompts/play.agent_guide.md.
  (deps (source_tree %{workspace_root}/config/prompts))
  (action (run %{test}))
- (libraries masc_test_deps mcp_protocol alcotest yojson bigstringaf unix eio eio_main masc.masc_core masc.server masc.skill_snapshot_service))
+ (libraries masc_test_deps mcp_protocol alcotest yojson bigstringaf unix eio eio_main masc.server masc.skill_snapshot_service))

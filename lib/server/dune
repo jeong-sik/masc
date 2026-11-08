@@ -192,7 +192,6 @@
   masc.mcp_transport_protocol
   masc.mcp_session
   masc.ag_ui
-  ambient-context-eio
   masc.repo_manager
   masc.otel_genai
   masc.otel_dispatch_hook

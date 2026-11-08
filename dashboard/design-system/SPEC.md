@@ -319,7 +319,6 @@ active named variant 테마는 **dark-fantasy + paper** 두 종이며 source.ts 
    - `dashboard/src/styles/tokens.generated.css` (Tailwind v4 `@theme`)
    - `dashboard/design-system/tokens/build/tokens.json` (DTCG 2025.10)
 4. tier 결정: 같은 의미를 가진 raw 가 이미 있으면 Semantic 만 추가. 새 raw 추가는 active 테마 모두에서 override 가능해야 함
-5. CI 강제: `tokens-drift` workflow 가 idempotent build (재실행 후 git diff = ∅), tier integrity (generated artifact 직접 수정 차단), keeper OkLCH ΔE < 2, status canon pin 4 gate 검증
 
 ### 6.2 Hardcoded color/spacing 금지
 

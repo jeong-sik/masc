@@ -1,7 +1,7 @@
 (test
  (name test_browser_keyboard)
  (modules test_browser_keyboard)
- (libraries masc masc.browser_lane alcotest yojson))
+ (libraries masc.browser_lane alcotest yojson))
 
 (rule
  (alias runtest-test_browser_keyboard_guard)

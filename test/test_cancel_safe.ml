@@ -73,6 +73,55 @@ let test_observe_isolates_fiber_all_siblings () =
   check bool "sibling c completed despite section b failing" true !c;
   check int "exactly one section routed to on_exn" 1 !failures
 
+(* ---- is_internal_race_cancel: context-based, not rendering-based (#49742) ---- *)
+
+(* The loser of a real [Fiber.first] captures its own cancellation; the owner,
+   whose context is still live, recognises it as an internal race cancel. *)
+let test_race_loser_is_internal () =
+  Eio_main.run
+  @@ fun _env ->
+  let captured = ref None in
+  let winner =
+    Eio.Fiber.first
+      (fun () -> 1)
+      (fun () ->
+        try Eio.Fiber.await_cancel ()
+        with Eio.Cancel.Cancelled _ as e ->
+          captured := Some e;
+          raise e)
+  in
+  check int "first branch won" 1 winner;
+  match !captured with
+  | None -> fail "the losing branch was never cancelled"
+  | Some e ->
+    check bool "loser's Cancelled is an internal race cancel" true
+      (Cancel_safe.is_internal_race_cancel e)
+
+exception Stop
+
+(* A fiber cancelled through its own switch sees [Cancelled] while its context
+   is already off: that is the surrounding switch, not an inner race. *)
+let test_own_switch_cancel_is_not_internal () =
+  Eio_main.run
+  @@ fun _env ->
+  let verdict = ref None in
+  (try
+     Eio.Switch.run (fun sw ->
+       Eio.Fiber.fork ~sw (fun () ->
+         try Eio.Fiber.await_cancel ()
+         with Eio.Cancel.Cancelled _ as e ->
+           verdict := Some (Cancel_safe.is_internal_race_cancel e);
+           raise e);
+       Eio.Switch.fail sw Stop)
+   with Stop -> ());
+  match !verdict with
+  | None -> fail "the forked fiber was never cancelled"
+  | Some v -> check bool "own-switch Cancelled is not an internal race cancel" false v
+
+let test_non_cancelled_is_not_internal () =
+  check bool "Failure is not a race cancel" false
+    (Cancel_safe.is_internal_race_cancel (Failure "Eio__core__Fiber.Not_first"))
+
 let () =
   run "cancel_safe"
     [ ( "protect"
@@ -85,5 +134,12 @@ let () =
     ; ( "fiber-all isolation"
       , [ test_case "observe lets Fiber.all siblings complete" `Quick
             test_observe_isolates_fiber_all_siblings
+        ] )
+    ; ( "is_internal_race_cancel"
+      , [ test_case "Fiber.first loser is internal" `Quick test_race_loser_is_internal
+        ; test_case "own-switch cancel is not internal" `Quick
+            test_own_switch_cancel_is_not_internal
+        ; test_case "non-Cancelled is not internal" `Quick
+            test_non_cancelled_is_not_internal
         ] )
     ]

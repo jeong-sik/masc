@@ -696,7 +696,7 @@ let update_keeper_with ~apply_profile ?(preserve_prompt_defaults = false)
                  ~labels:
                    [ ( "keeper", p.name )
                    ; ( "site"
-                     , Keeper_turn_up_update_failure_site.(to_label Config_persistence)
+                     , "config_persistence"
                      )
                    ]
                  ();

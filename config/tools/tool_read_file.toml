@@ -8,6 +8,7 @@ path='lib/foo.ml'. Bad: path=''. For multi-file search, use Grep."""
 [[params]]
 name = "path"
 type = "string"
+role = "path"
 required = true
 description = "Relative or absolute file path"
 

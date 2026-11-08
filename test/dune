@@ -1959,7 +1959,6 @@
   test_prompt_asset_sync
   test_prompt_preset
   test_managed_assets_sync_from_binary
-  test_system_error_class
   test_board_core_payload)
  (modules
   test_keeper_turn_interrupt
@@ -2101,7 +2100,6 @@
   test_prompt_asset_sync
   test_prompt_preset
   test_managed_assets_sync_from_binary
-  test_system_error_class
  test_board_core_payload)
  (libraries
   uucp
@@ -2253,6 +2251,13 @@
  (name test_cancel_safe)
  (modules test_cancel_safe)
  (libraries alcotest masc_cancel_safe eio eio_main))
+
+; RFC-0154 error-class SSOT. Needs only masc_core and the Eio exception
+; shapes it unwraps (#49742), so it does not ride the masc_test_deps superset.
+(test
+ (name test_system_error_class)
+ (modules test_system_error_class)
+ (libraries alcotest fmt masc_core eio eio.unix unix))
 
 ; The metric store is on the same contract: a counter bumped inside a
 ; cancelled fiber must not turn the cancellation into a warning (#37349).
@@ -4913,7 +4918,7 @@
 (test
  (name test_tui_keeper_mark)
  (modules test_tui_keeper_mark)
- (libraries alcotest masc masc_tui_keeper_mark masc_tui_message_layout))
+ (libraries alcotest masc masc_tui_keeper_list_model masc_tui_keeper_mark masc_tui_message_layout))
 
 (test
  (name test_tui_approval_detail)
@@ -5017,6 +5022,7 @@
 (include stanzas/test_keeper_turn_attempt_observer.inc)
 (include stanzas/test_keeper_memory_age_bins.inc)
 (include stanzas/test_tui_decode_workspace_memory.inc)
+(include stanzas/test_keeper_turn_pulse.inc)
 (include stanzas/test_keeper_turn_boundaries.inc)
 (include stanzas/test_keeper_context_core_history.inc)
 (include stanzas/test_keeper_turn_fragments.inc)

@@ -44,10 +44,18 @@ val action_radius_json :
   duration_ms:float ->
   ?error:string ->
   ?sandbox_target:string ->
+  ?path_params:string list ->
   unit ->
   Yojson.Safe.t
 (** [action_radius_json] states what a call reached: tool, action, target,
     and observed paths. It carries no outcome of its own; the enclosing row's
     typed outcome ([disposition]/[wire_outcome], a receipt's [outcome]) is the
     only verdict, so the two cannot disagree. [error] is the failure preview
-    the producer attached to a failed call. *)
+    the producer attached to a failed call.
+
+    [observed_paths] are the non-blank string values of [input]'s top-level
+    keys named in [path_params] — by default the params [tool_name]'s
+    embedded definition declares [role = "path"]
+    ({!Tool_definition_embedded.path_params}). A caller that builds [input]
+    itself for a name without a definition passes the keys it knows are
+    paths. No key is read as a path for its spelling (#49742). *)

@@ -464,10 +464,13 @@ let test_entry_to_json_includes_contract_and_radius () =
       ~sandbox_profile:"docker"
       ()
   in
+  (* [cwd] is what tool_execute.toml declares [role = "path"]; [note_path] is
+     not declared by anyone, and its spelling does not make it a path
+     (#49742). *)
   let action_radius =
     Keeper_runtime_contract.action_radius_json
       ~tool_name:"tool_execute"
-      ~input:(`Assoc [("cwd", `String "/tmp/work")])
+      ~input:(`Assoc [("cwd", `String "/tmp/work"); ("note_path", `String "/elsewhere")])
       ~duration_ms:25.0
       ()
   in
@@ -479,9 +482,9 @@ let test_entry_to_json_includes_contract_and_radius () =
     (json |> member "runtime_contract" |> member "keeper_name" |> to_string);
   Alcotest.(check string) "action tool" "tool_execute"
     (json |> member "action_radius" |> member "tool_name" |> to_string);
-  Alcotest.(check string) "observed path" "/tmp/work"
+  Alcotest.(check (list string)) "observed paths are the declared ones only" [ "/tmp/work" ]
     (json |> member "action_radius" |> member "observed_paths" |> to_list
-     |> List.hd |> to_string);
+     |> List.map to_string);
   Alcotest.(check string) "execution_id persisted" "exec-1000-0001"
     (json |> member "execution_id" |> to_string)
 

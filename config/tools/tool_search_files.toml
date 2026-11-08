@@ -19,6 +19,7 @@ rejected with a regex parse error."""
 [[params]]
 name = "path"
 type = "string"
+role = "path"
 description = """
 Directory or file to search in. Defaults to the keeper sandbox."""
 

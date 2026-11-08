@@ -14,8 +14,12 @@
 
 (** The owner stopped a turn it had started. Not an ambiguity: the owner knows
     the turn did not complete and knows why. Only server shutdown stops an
-    owner, so the operation side records [Interrupted_by_restart]. *)
-exception Stop_active_child
+    owner, so the operation side records [Interrupted_by_restart]. It is the
+    process layer's [Stop_without_grace]: nothing waits on the abandoned
+    turn's processes, so they get SIGKILL without the TERM grace. Before,
+    a vendor CLI or a TERM-ignoring tool held shutdown for the full grace
+    (#49684). *)
+exception Stop_active_child = Posix_spawn_process_mgr.Stop_without_grace
 
 let rec is_owner_cancel_reason = function
   | Stop_active_child -> true

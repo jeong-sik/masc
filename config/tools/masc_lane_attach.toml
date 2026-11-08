@@ -9,6 +9,7 @@ defer_loading = true
 [[params]]
 name = "manifest_path"
 type = "string"
+role = "path"
 required = true
 description = "Path to the package lane.toml on this MASC server. A Keeper's path has to resolve inside the workspace; a relative one is read from the workspace root."
 

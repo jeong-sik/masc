@@ -807,6 +807,18 @@ type keeper_runtime = {
   kr_runtime_path_rest : (keeper_path_rest option, string) result;
   (** [Ok None]: the row carried no rest. [Error]: the rest did not decode,
       without invalidating this roster row. *)
+  kr_operator_disposition :
+    ((Keeper_execution_receipt.operator_disposition_kind
+     * Keeper_execution_receipt.operator_disposition_reason) option, string) result;
+  (** Historical receipt operator disposition: [Ok (Some (kind, reason))]
+      when present and typed; [Ok None] when null or absent; [Error] when an unmapped
+      or broken wire pair was received. *)
+  kr_failing_since : float option;
+  (** If currently failing, when this continuous failing spell began (Unix seconds).
+      [None] when healthy, or when unrecorded. *)
+  kr_recent_turns : Keeper_turn_pulse.pulse option;
+  (** Recent turn pulse window up to 24 samples (RFC-0511 §2.3 S1b).
+      [Some pulse] when seeded or recorded; [None] when null/unknown. *)
 }
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.
@@ -2256,7 +2268,6 @@ val decode_overview_goals :
     server order. Goals of every phase are returned; which ones a surface
     draws is the surface's decision. *)
 
-val parse_log_entry : string -> (log_entry, string) result
 val decode_log_entry : Yojson.Safe.t -> (log_entry, string) result
 val decode_context_observation :
   expected_trace_id:string ->

@@ -19,8 +19,12 @@
 
 type trace_id = string
 
-(** [tool_type_of_name name] returns a low-cardinality category for [name]
-    based on known tool prefixes/names. *)
+(** [tool_type_of_name name] returns a low-cardinality category for [name]:
+    ["board"] for a board tool name, ["mcp"] for the [masc_] surface, else what
+    the tool declares — [Tool_catalog.metadata.readonly] for a catalog tool,
+    the descriptor's [policy.readonly_hint] / [executor] for a keeper tool
+    (["read"], ["write"], ["execute"]) — and ["other"] for a tool that
+    declares nothing. The spelling of a name never decides (#49742). *)
 val tool_type_of_name : string -> string
 
 (** [with_span ~tool_name f] opens an OTel span named

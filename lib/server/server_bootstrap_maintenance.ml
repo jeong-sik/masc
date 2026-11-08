@@ -659,6 +659,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      enqueue and this fiber drains (2026-06-10 fleet-freeze fix — the inline
      append serialized all keepers on one store mutex). *)
   Keeper_transition_audit.start_flush_fiber ~sw ~clock;
+  (* Seed recent turn pulses for all configured keepers from their decision logs (RFC-0511 S1b) *)
+  Keeper_turn_pulse.seed_all_from_decision_logs
+    ~config:(Mcp_server.workspace_config state)
+    ();
   Otel_dispatch_hook.install ();
   (* PR-S3: register the OTel/Otel_metric_store dispatch span wrapper. [Tool_dispatch]
      (lib/tool/, masc_tool_dispatch) no longer code-depends on [Tool_telemetry]

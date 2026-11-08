@@ -1,0 +1,141 @@
+{
+  "already_complete": 5,
+  "by_keeper": {
+    "code-reviewer-mother": {
+      "already_complete": 2,
+      "early": {
+        "calls": 0,
+        "hours": 0.0,
+        "max_min": null,
+        "median_min": null,
+        "p90_min": null
+      },
+      "late": {
+        "calls": 1,
+        "hours": 0.23,
+        "max_min": 13.8,
+        "median_min": 13.8,
+        "p90_min": 13.8
+      }
+    },
+    "e-masc-the-leader": {
+      "already_complete": 1,
+      "early": {
+        "calls": 3,
+        "hours": 3.61,
+        "max_min": 100.1,
+        "median_min": 92.3,
+        "p90_min": 100.1
+      },
+      "late": {
+        "calls": 4,
+        "hours": 6.15,
+        "max_min": 115.8,
+        "median_min": 102.5,
+        "p90_min": 115.8
+      }
+    },
+    "you-never-change": {
+      "already_complete": 1,
+      "early": {
+        "calls": 0,
+        "hours": 0.0,
+        "max_min": null,
+        "median_min": null,
+        "p90_min": null
+      },
+      "late": {
+        "calls": 2,
+        "hours": 0.39,
+        "max_min": 13.0,
+        "median_min": 10.5,
+        "p90_min": 13.0
+      }
+    }
+  },
+  "by_repo": {
+    "jeong-sik/masc": {
+      "already_complete": 5,
+      "early": {
+        "calls": 3,
+        "hours": 3.61,
+        "max_min": 100.1,
+        "median_min": 92.3,
+        "p90_min": 100.1
+      },
+      "late": {
+        "calls": 7,
+        "hours": 6.78,
+        "max_min": 115.8,
+        "median_min": 40.0,
+        "p90_min": 115.8
+      }
+    },
+    "jeong-sik/wkbl": {
+      "already_complete": 0,
+      "early": {
+        "calls": 0,
+        "hours": 0.0,
+        "max_min": null,
+        "median_min": null,
+        "p90_min": null
+      },
+      "late": {
+        "calls": 0,
+        "hours": 0.0,
+        "max_min": null,
+        "median_min": null,
+        "p90_min": null
+      }
+    }
+  },
+  "distinct_runs_measured": 12,
+  "due_in_min": {
+    "median": 40.0,
+    "p10": 15.0,
+    "p90": 120.0
+  },
+  "early": {
+    "calls": 3,
+    "hours": 3.61,
+    "max_min": 100.1,
+    "median_min": 92.3,
+    "p90_min": 100.1
+  },
+  "late": {
+    "calls": 7,
+    "hours": 6.78,
+    "max_min": 115.8,
+    "median_min": 40.0,
+    "p90_min": 115.8
+  },
+  "names_a_run": 48,
+  "probed_at": "2026-11-07T10:06:00+00:00",
+  "remaining_min": {
+    "median": 7.0,
+    "p10": 1.2,
+    "p90": 140.1
+  },
+  "repos": [
+    "jeong-sik/masc",
+    "jeong-sik/wkbl"
+  ],
+  "running_at_creation": 10,
+  "schedule_wakes": 95,
+  "verdicts": {
+    "already_complete": 5,
+    "early": 3,
+    "late": 7,
+    "no_due_time": 0,
+    "not_completed": 0,
+    "rerun": 0,
+    "run_unreadable": 0,
+    "several_runs": 4,
+    "watched": 30
+  },
+  "window": {
+    "from": "2026-11-06",
+    "to": "2026-11-07",
+    "until": "2026-11-07T09:52:00+00:00"
+  }
+}

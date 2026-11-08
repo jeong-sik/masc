@@ -545,6 +545,60 @@ let test_native_command_cancel_cleans_closed_pipe_descendant () =
     | None -> fail "command exited before cancellation fixture was ready")
 ;;
 
+exception Unrelated_stop
+
+(* Two ways a Keeper turn starts a child: spawning it on its own switch, as
+   the official-client adapters do, or through the capture helpers a tool
+   call uses. Both nest the child's switch inside the turn's. *)
+let spawn_on_own_switch ~clock ~marker =
+  let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock
+      ~grace_seconds:Process_eio.child_exit_grace_seconds in
+  Eio.Switch.run (fun sw ->
+    let proc = Eio.Process.spawn ~sw mgr
+        [ "python3"; "-c"; group_fixture; marker; "ignore" ] in
+    ignore (Eio.Process.await proc))
+;;
+
+let spawn_through_capture ~clock:_ ~marker =
+  ignore (Process_eio.run_argv_with_status_split
+    [ "python3"; "-c"; group_fixture; marker; "ignore" ])
+;;
+
+(* Server shutdown fails a running Keeper turn's switch with
+   [Stop_without_grace]. Nobody waits on that turn's children any more, so
+   they end at once instead of holding shutdown for the TERM grace. Any other
+   reason keeps the grace (#49684). The fixture's leader and descendant ignore
+   TERM, so a kept grace runs out in full. *)
+let test_turn_stop_reason_decides_the_grace ~spawn ~reason ~keeps_grace () =
+  with_group_fixture (fun env marker ->
+    let clock = Eio.Stdenv.clock env in
+    Process_eio.init ~cwd_default:(Eio.Stdenv.fs env)
+      ~proc_mgr:(Eio.Stdenv.process_mgr env) ~clock;
+    let grace = Process_eio.child_exit_grace_seconds in
+    let descendant = ref None in
+    let stopped_at = ref None in
+    (match
+       Eio.Switch.run (fun turn ->
+         Eio.Fiber.fork ~sw:turn (fun () -> spawn ~clock ~marker);
+         descendant := Some (wait_for_marker clock marker);
+         stopped_at := Some (Eio.Time.now clock);
+         Eio.Switch.fail turn reason)
+     with
+     | () -> fail "the stopped turn switch returned normally"
+     | exception raised ->
+       check bool "the turn switch ends with its stop reason" true (raised == reason));
+    let elapsed = match !stopped_at with
+      | Some at -> Eio.Time.now clock -. at
+      | None -> fail "the turn never stopped" in
+    if keeps_grace then
+      check bool "another stop reason waits out the TERM grace" true (elapsed >= grace)
+    else
+      check bool "a shutdown stop ends the child before the TERM grace" true (elapsed < grace);
+    match !descendant with
+    | Some pid -> assert_descendant_stopped env pid
+    | None -> fail "the turn child never became ready")
+;;
+
 (* Darwin's group kill answers EPERM when it signalled nobody; the member
    snapshot decides whether nobody was left to signal. *)
 module Members = Process_group_members
@@ -633,7 +687,19 @@ let () =
         ; test_case "switch cancellation settles protected original-child await" `Quick
             test_cancel_settles_protected_await
         ; test_case "native command cancellation cleans its group" `Quick
-            test_native_command_cancel_cleans_closed_pipe_descendant ])
+            test_native_command_cancel_cleans_closed_pipe_descendant
+        ; test_case "a shutdown stop kills a turn's own child without the TERM grace" `Quick
+            (test_turn_stop_reason_decides_the_grace ~spawn:spawn_on_own_switch
+               ~reason:Posix_spawn_process_mgr.Stop_without_grace ~keeps_grace:false)
+        ; test_case "a shutdown stop kills a captured turn child without the TERM grace" `Quick
+            (test_turn_stop_reason_decides_the_grace ~spawn:spawn_through_capture
+               ~reason:Posix_spawn_process_mgr.Stop_without_grace ~keeps_grace:false)
+        ; test_case "another stop reason keeps a turn's own child's TERM grace" `Quick
+            (test_turn_stop_reason_decides_the_grace ~spawn:spawn_on_own_switch
+               ~reason:Unrelated_stop ~keeps_grace:true)
+        ; test_case "another stop reason keeps a captured turn child's TERM grace" `Quick
+            (test_turn_stop_reason_decides_the_grace ~spawn:spawn_through_capture
+               ~reason:Unrelated_stop ~keeps_grace:true) ])
     ; ( "parity with eio_posix"
       , [ test_case "captures stdout" `Quick test_stdout_capture
         ; test_case "reports the exit status" `Quick test_exit_status

@@ -1729,6 +1729,12 @@ let test_operator_interrupt_preserves_older_cooperative_turn () =
     check bool "operator signal is an owner stop" true
       (Keeper_owner_signals.is_owner_cancel_reason
          Keeper_registry_types.Operator_interrupt);
+    (* Shutdown's stop must stay the process layer's reason, or the stopped
+       turn's children wait out the TERM grace again (#49684). *)
+    check bool "the shutdown stop ends turn children without the TERM grace" true
+      (match Keeper_owner_signals.Stop_active_child with
+       | Posix_spawn_process_mgr.Stop_without_grace -> true
+       | _ -> false);
     let backtrace = Printexc.get_callstack 0 in
     check bool "combined operator signal stays an owner stop" true
       (Keeper_owner_signals.is_owner_cancel_reason

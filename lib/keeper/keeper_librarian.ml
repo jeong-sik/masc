@@ -111,9 +111,7 @@ let wire_current_fields =
   [ wire_field_new_claims; wire_field_dropped; wire_field_working_contexts
   ; wire_field_working_state ]
 
-let trim_nonempty s =
-  let s = String.trim s in
-  if String.equal s "" then None else Some s
+let trim_nonempty = String_util.trim_nonempty
 ;;
 
 let role_to_string = Agent_core.Types.role_to_string

@@ -19,12 +19,14 @@ additional_properties = false
 [[params]]
 name = "file_path"
 type = "string"
+role = "path"
 required = true
 description = "Absolute or sandbox-relative file path to edit. The file must exist. Relative paths resolve against cwd when cwd is provided, otherwise against your workspace root."
 
 [[params]]
 name = "cwd"
 type = "string"
+role = "path"
 description = """
 Optional directory, relative to your workspace root, to resolve file_path \
 from. This is explicit only; Edit never inherits the previous Execute cwd."""

@@ -9,14 +9,9 @@
 
 type visibility = Default | Hidden
 type lifecycle = Active
-
-type implementation_status =
-  | Real
-
 type metadata = {
   visibility : visibility;
   lifecycle : lifecycle;
-  implementation_status : implementation_status;
   reason : string option;
   allow_direct_call_when_hidden : bool;
   readonly : bool option;

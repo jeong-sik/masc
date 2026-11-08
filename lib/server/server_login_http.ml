@@ -78,7 +78,15 @@ let pairs query =
 ;;
 
 let query_of (request : Httpun.Request.t) = pairs (Uri.query (Uri.of_string request.target))
-let form_of body = pairs (Uri.query_of_encoded body)
+(* A form is sequences split by '&', and an empty sequence holds no field
+   (URL standard, the application/x-www-form-urlencoded parser). Uri reads
+   the empty body, a trailing '&' and "&&" as a field with an empty name, which
+   the start route refuses as unknown, so the empty sequences go first. *)
+let form_of body =
+  String.split_on_char '&' body
+  |> List.filter (fun sequence -> not (String.equal sequence ""))
+  |> List.concat_map (fun sequence -> pairs (Uri.query_of_encoded sequence))
+;;
 
 (* ---- writing an answer ---- *)
 

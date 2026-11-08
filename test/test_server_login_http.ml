@@ -457,6 +457,8 @@ let the_preview_follows_a_login () =
       "a form may go to GitHub"
       true
       (contains ~sub:"form-action 'self' https://github.com" (one "content-security-policy" home));
+    (* A browser sends "Origin: null" with a form POST from a no-referrer page. *)
+    Alcotest.(check string) "the form posts with its origin" "same-origin" (one "referrer-policy" home);
     let invitation = send admin router ~meth:"GET" ~path:"/accounts/invite" in
     Alcotest.(check int) "the invitation page" 200 invitation.status;
     Alcotest.(check bool)
@@ -495,6 +497,14 @@ let what_the_server_reads () =
       "a value with a bare comma"
       400
       (send b t.router ~meth:"POST" ~path:"/auth/github/start" ~headers:[ "Origin", same_origin ] ~body:"return_to=/a,b");
+    check
+      "empty sequences"
+      303
+      (send b t.router ~meth:"POST" ~path:"/auth/github/start" ~headers:[ "Origin", same_origin ] ~body:"&return_to=/&&");
+    check
+      "a field with no name"
+      400
+      (send b t.router ~meth:"POST" ~path:"/auth/github/start" ~headers:[ "Origin", same_origin ] ~body:"=");
     check
       "a body over the bound"
       413

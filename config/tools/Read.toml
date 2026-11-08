@@ -20,6 +20,7 @@ additional_properties = false
 [[params]]
 name = "file_path"
 type = "string"
+role = "path"
 required = true
 description = """
 Existing file path to read. Relative paths resolve against cwd when cwd is \
@@ -30,6 +31,7 @@ root."""
 [[params]]
 name = "cwd"
 type = "string"
+role = "path"
 description = """
 Optional directory, relative to your workspace root, to resolve file_path \
 from. This is explicit only; Read never inherits the previous Execute cwd."""

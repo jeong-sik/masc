@@ -87,6 +87,13 @@ type loaded =
     (** From the file's [shell_command] key, stored word-split.  The
         sub-command path this tool answers to inside a keeper's shell line
         (RFC tools-as-shell-commands); absent means no shell form. *)
+  ; path_params : string list
+    (** The top-level params declared [role = "path"], in file order: the
+        string arguments whose value is a file-system path. The runtime
+        reports those values as the paths a call touched
+        ([Keeper_runtime_contract.action_radius_json]); a key is never taken
+        for a path because of how it is spelled (#49742). Empty when the
+        file declares none. *)
   }
 
 val load
@@ -111,7 +118,10 @@ val load
     [prompt_hints] / [examples] / [alternatives] string lists, at least one
     of which must be present).
     Accepted param keys: [name], [type] (string | integer | number |
-    boolean | object | array), [required] (bool), [description], [enum]
+    boolean | object | array), [required] (bool), [role] ("path", on the
+    tool's top-level string params only — a projection or nested param
+    declaring one is an error; collected into [path_params] and never
+    emitted into the schema), [description], [enum]
     (non-empty list of the param's own type, string or integer params only),
     [default] (string, integer or boolean params, of that type),
     [minimum] / [maximum] (integer params take an integer, number params a

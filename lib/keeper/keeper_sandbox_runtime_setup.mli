@@ -63,15 +63,10 @@ val sandbox_started_at_label_key : string
 val sandbox_network_label_key : string
 val sandbox_ttl_sec_label_key : string
 
-val turn_container_kind : string
-(** Value of the [masc.mcp.kind] label on a one-turn container. *)
-
 val persistent_container_kind : string
 (** Value of the [masc.mcp.kind] label on a keeper-lifetime container:
     adopted across turns and server restarts, removed only when the keeper
     is. *)
-
-(** Value of the [masc.mcp.kind] label on a container that lives for one turn. *)
 
 val strip_trailing_slashes : string -> string
 val normalize_base_path_for_hash : string -> string

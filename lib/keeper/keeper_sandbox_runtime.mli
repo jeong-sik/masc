@@ -111,7 +111,7 @@ val sandbox_keeper_label_key : string
 val sandbox_kind_label_key : string
 
 val persistent_container_kind : string
-(** Companion of [turn_container_kind] for keeper-lifetime containers:
+(** Value of the [masc.mcp.kind] label on a keeper-lifetime container:
     adopted across turns and server restarts, removed only when the keeper
     is. *)
 

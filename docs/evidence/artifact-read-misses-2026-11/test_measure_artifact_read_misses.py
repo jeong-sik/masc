@@ -13,6 +13,7 @@ import pathlib
 import sys
 import tempfile
 import unittest
+import unittest.mock
 from typing import cast
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
@@ -352,6 +353,18 @@ class TraceTests(unittest.TestCase):
         result = ledger.run()
         self.assertEqual(section(result, "files")["raw_traces"], 0)
         self.assertEqual(section(result, "missed_calls"), {"traced_to_answer_sha256": 0, "not_traced": 1})
+
+    def test_a_trace_file_deleted_after_the_listing_is_counted_and_the_run_goes_on(self) -> None:
+        ledger = Ledger(self)
+        ledger.write("06.jsonl", [row(at(6, 1), "k", HASH_A, MISS_OUTPUT)])
+        ledger.trace("k", f"answer_sha256={HASH_A}\n")
+        listed = sorted((ledger.base / ".masc" / "keepers").glob("*/raw-traces/*.jsonl"))
+        gone = ledger.base / ".masc" / "keepers" / "k" / "raw-traces" / "turn-gone.jsonl"
+        with unittest.mock.patch.object(misses, "raw_trace_paths", lambda _base: iter([gone, *listed])):
+            result = ledger.run()
+        files = section(result, "files")
+        self.assertEqual((files["raw_traces"], files["raw_traces_vanished"]), (1, 1))
+        self.assertEqual(section(result, "missed_calls"), {"traced_to_answer_sha256": 1, "not_traced": 0})
 
     def test_by_day_counts_the_traced_misses_of_that_day(self) -> None:
         ledger = Ledger(self)

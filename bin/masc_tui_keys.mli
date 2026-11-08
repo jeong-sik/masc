@@ -28,6 +28,17 @@ type detail_state =
   | List_only  (** only while no detail is open *)
   | Detail_only  (** only while a detail is open *)
 
+(** Whether a binding needs a row under the cursor.
+
+    A list with no rows has nothing for [j/k] to step over, [Right / Enter] to
+    open or [y / x] to answer, and the dispatcher ends each of those in [()].
+    The footer drew them anyway, first in line, so on a narrow terminal it
+    gave up the keys that do act -- [n] on an empty Schedules list -- before
+    them. The fact is a value in the table, as {!detail_state} is. *)
+type row_need =
+  | Rowless  (** answers with no row under the cursor; the default *)
+  | Needs_row  (** steps over, opens or answers a row; refused on an empty list *)
+
 type binding = {
   key : string;
   label : string;      (** the footer's short word *)
@@ -35,6 +46,7 @@ type binding = {
   help : string option;  (** the overlay's longer sentence; [label] if absent *)
   group : group;
   detail : detail_state;  (** which of a detail-owning surface's two states *)
+  rows : row_need;  (** whether an empty list refuses it *)
 }
 
 val expand_turn_key : string
@@ -123,7 +135,8 @@ val footer_hints_planning_goal_list : string
 val footer_hints_planning_goal_detail : string
 (** The Goal detail has a separate Candle read key: its [r] may mean Resume. *)
 
-val footer_hints : ?detail_open:bool -> Masc_tui_types.surface -> string
+val footer_hints :
+  ?detail_open:bool -> ?has_rows:bool -> Masc_tui_types.surface -> string
 (** [key:label] pairs joined by two spaces, groups in Navigate, Act, Search,
     Meta order.
 
@@ -132,7 +145,11 @@ val footer_hints : ?detail_open:bool -> Masc_tui_types.surface -> string
     there. A surface without a detail leaves it out and every binding stands.
     Left out by a surface that does own one, every binding stands too -- the
     behaviour from before this argument existed, and the one
-    {!has_detail_scoped_keys} exists to catch. *)
+    {!has_detail_scoped_keys} exists to catch.
+
+    [has_rows] is how a list renderer says whether the list on screen holds a
+    row. [false] leaves out the keys that need one; left out, every binding
+    stands. *)
 
 val footer_hints_tools : pane:Masc_tui_types.tools_pane -> string
 (** Tools' bracket keys select retained runs in Available and Keepers in other panes. *)
@@ -156,6 +173,11 @@ val has_detail_scoped_keys : Masc_tui_types.surface -> bool
     and so owes [footer_hints] a [~detail_open] from both of its renderers.
     Read by the test that keeps a new detail-owning surface from landing
     without it. *)
+
+val has_row_scoped_keys : Masc_tui_types.surface -> bool
+(** Whether this surface's table holds a key that needs a row, and so owes
+    [footer_hints] a [~has_rows] from its list renderer. Read by the test that
+    pins the surfaces whose empty list already leaves those keys out. *)
 
 val footer_hints_config : lang:Masc_tui_types.ui_language -> pane:Masc_tui_types.config_pane -> string
 (** Config bindings available on the active pane. The surface-wide help keeps

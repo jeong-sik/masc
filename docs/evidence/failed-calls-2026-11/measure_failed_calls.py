@@ -10,9 +10,11 @@ Definitions:
 
 - failed: `disposition` is `failed`. A line without a `disposition` counts as a call that did
   not fail, so a ledger written before that field existed reads as zero failures.
-- signature: the first line of `output`, every digit run written as `N`, every run of eight or
-  more hex digits written as `<hex>`, cut at --width characters. Two failures with the same
-  signature say the same thing to the model.
+- signature: the first line of `output` up to the command it echoes (a `,"cmd":"` member), every
+  digit run written as `N`, every run of eight or more hex digits written as `<hex>`, cut at
+  --width characters. Two failures with the same signature say the same thing to the model. The
+  command is left out because an error that echoes it would otherwise split one cause by how the
+  command starts: `remote_ssh_disk_low` for one endpoint was two groups of three.
 - turn: one (`keeper`, `session_id`, `keeper_turn_id`) triple; `keeper_turn_id` is a number or
   text. A line without a usable `keeper_turn_id` counts as its own turn. `turns` of a group is
   the number of distinct turns among its failures.
@@ -22,7 +24,7 @@ left out of every number.
 
 Usage:
     python3 docs/evidence/failed-calls-2026-11/measure_failed_calls.py \
-        --base-path ~/me --since 2026-11-06T09:30:00 --until 2026-11-07T09:30:00 \
+        --base-path ~/me --since 2026-11-06T09:52:00 --until 2026-11-07T09:52:00 \
         --json-out result.json
 """
 
@@ -44,6 +46,7 @@ FAILED = "failed"
 LEDGER_FILE = re.compile(r"^(?P<day>[0-9]{2})(?:\.[0-9]{3})?\.jsonl$")
 DIGITS = re.compile(r"[0-9]+")
 LONG_HEX = re.compile(r"\b[0-9a-f]{8,}\b")
+ECHOED_COMMAND = ',"cmd":"'
 DEFAULT_WIDTH = 110
 DEFAULT_TOP = 12
 MAX_DAYS = 366
@@ -66,10 +69,10 @@ class Skipped:
 
 
 def signature_of(output: str, width: int) -> str:
-    """The first line of a result with its numbers and hashes folded, cut at `width`."""
+    """The first line of a result before its echoed command, numbers and hashes folded, cut at `width`."""
     lines = output.strip().splitlines()
     first = lines[0] if lines else ""
-    return DIGITS.sub("N", LONG_HEX.sub("<hex>", first))[:width]
+    return DIGITS.sub("N", LONG_HEX.sub("<hex>", first.split(ECHOED_COMMAND, 1)[0]))[:width]
 
 
 def keeper_of(fields: dict[str, object]) -> str:

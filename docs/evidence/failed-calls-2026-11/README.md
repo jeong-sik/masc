@@ -21,7 +21,7 @@
 | `masc_schedule_get` | 43 | 8 | 18.6% |
 | `Read` | 289 | 6 | 2.1% |
 
-같은 문구(첫 줄에서 숫자는 `N`, 8자리 이상 16진수는 `<hex>`)로 묶으면 이래요.
+같은 문구(첫 줄에서 에코한 명령 `,"cmd":"` 뒤는 떼고, 숫자는 `N`, 8자리 이상 16진수는 `<hex>`)로 묶으면 이래요.
 
 | 도구 | 문구 | 실패 | Keeper | 턴 |
 |---|---|---|---|---|
@@ -31,10 +31,11 @@
 | `BrowserRead` | `selected_client_disconnected` | 8 | 1 | 7 |
 | `Execute` | `remote_ssh_disk_low: endpoint apple-review-pangyo …` | 8 | 2 | 3 |
 | `masc_schedule_get` | `schedule not found` | 8 | 2 | 5 |
+| `Execute` | `remote_ssh_disk_low: endpoint apple-review-be …` | 6 | 2 | 5 |
 | `masc_board_post_get` | `Post not found: p-<hex>. Use an id masc_board_list or masc_board_search returns …` | 4 | 3 | 4 |
 
 - `comment_offset` 실패는 한 Keeper(`e-masc-the-leader`)가 글 두 개에서 글 끝을 넘은 `comment_offset` 으로 읽은 것이에요. 이 Keeper 의 실패는 문구 모양이 둘이라 43건이에요. 글 하나(`p-65ada8108fe3`)에서 29건·16턴·298분, 다른 글(`p-d8f423a22489`)에서 14건·12턴·126분이에요. 서버 응답은 "the thread now has 17 comments, at offsets 0-16. Start again from comment_offset=0" 처럼 다시 시작할 자리를 알려 줘요. 왜 끝을 넘은 자리를 계속 물었는지는 보지 않았어요.
-- `Execute` 의 `remote_ssh_disk_low` 는 리뷰 서버 셋(`apple-review-pangyo` 8건, `apple-review-anyang` 3건, `apple-review-be` 3건)에서 14건이에요. 24건 중 14건이에요.
+- `Execute` 의 `remote_ssh_disk_low` 는 리뷰 서버 셋(`apple-review-pangyo` 8건, `apple-review-anyang` 3건, `apple-review-be` 6건)에서 17건이에요. `Execute` 실패 24건 중 17건이에요.
 - `keeper_artifact_read` 의 `artifact does not exist` 는 이슈 #49396 이 다루는 것이에요. 원본 기록과 맞춘 값은 `artifact-read-misses-2026-11` 에 있어요.
 - `Grep` 은 29건이 거의 다 다른 문구로 나와요. 오류가 경로와 패턴을 담은 한 줄 JSON 이라서 가장 큰 묶음이 2건이에요. 원격(`via":"remote_ssh`) 경로의 `rg` 실패는 #49714 에 따로 적었어요.
 - 위 표에서 `masc_board_post_get` 의 `comment_offset` 문구와 `BrowserRead` 문구는 Keeper 한 명에서만 나왔고, `Edit`·`keeper_artifact_read`·`Execute` 문구는 둘 이상에서 나왔어요. 원인은 확인하지 않았어요.
@@ -64,4 +65,4 @@ python3 docs/evidence/failed-calls-2026-11/measure_failed_calls.py \
 python3 -m unittest discover -s docs/evidence/failed-calls-2026-11
 ```
 
-합성 원장으로 세는 법을 확인하는 시험 10개예요. 실패 여부는 `disposition`, 창은 `ts`, 묶음은 도구와 첫 줄이에요.
+합성 원장으로 세는 법을 확인하는 시험 11개예요. 실패 여부는 `disposition`, 창은 `ts`, 묶음은 도구와 첫 줄이에요.

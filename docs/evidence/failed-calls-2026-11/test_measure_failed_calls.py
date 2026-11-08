@@ -50,6 +50,13 @@ class SignatureTest(unittest.TestCase):
             "comment_offset N names no comment of p-<hex>: N now",
         )
 
+    def test_an_echoed_command_is_not_part_of_the_signature(self) -> None:
+        head = '{"error":"disk_low: endpoint be free=12","typed":true'
+        short = head + ',"cmd":"ls"}'
+        long = head + ',"cmd":"cat > report.md <<EOF ' + "x" * 80
+        self.assertEqual(failed_calls.signature_of(short, 200), failed_calls.signature_of(long, 200))
+        self.assertEqual(failed_calls.signature_of(short, 200), '{"error":"disk_low: endpoint be free=N","typed":true')
+
     def test_a_signature_is_cut_at_the_width(self) -> None:
         self.assertEqual(failed_calls.signature_of("x" * 100, 10), "x" * 10)
 

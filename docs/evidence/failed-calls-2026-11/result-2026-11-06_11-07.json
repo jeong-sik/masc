@@ -94,7 +94,7 @@
     },
     {
       "tool": "Execute",
-      "signature": "{\"error\":\"remote_ssh_disk_low: endpoint apple-review-pangyo available_kib=N minimum_kib=N\",\"typed\":true,\"cmd\":",
+      "signature": "{\"error\":\"remote_ssh_disk_low: endpoint apple-review-pangyo available_kib=N minimum_kib=N\",\"typed\":true",
       "failed": 8,
       "keepers": 2,
       "turns": 3
@@ -103,6 +103,13 @@
       "tool": "masc_schedule_get",
       "signature": "{\"message\":\"schedule not found\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_rejection\",\"next_mo",
       "failed": 8,
+      "keepers": 2,
+      "turns": 5
+    },
+    {
+      "tool": "Execute",
+      "signature": "{\"error\":\"remote_ssh_disk_low: endpoint apple-review-be available_kib=N minimum_kib=N\",\"typed\":true",
+      "failed": 6,
       "keepers": 2,
       "turns": 5
     },
@@ -122,28 +129,21 @@
     },
     {
       "tool": "Execute",
-      "signature": "{\"error\":\"remote_ssh_disk_low: endpoint apple-review-anyang available_kib=N minimum_kib=N\",\"typed\":true,\"cmd\":",
+      "signature": "{\"error\":\"remote_ssh_disk_low: endpoint apple-review-anyang available_kib=N minimum_kib=N\",\"typed\":true",
       "failed": 3,
       "keepers": 1,
       "turns": 1
     },
     {
-      "tool": "Execute",
-      "signature": "{\"error\":\"remote_ssh_disk_low: endpoint apple-review-be available_kib=N minimum_kib=N\",\"typed\":true,\"cmd\":\"bas",
+      "tool": "keeper_artifact_transfer",
+      "signature": "{\"message\":\"Exported artifact <hex> is absent\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_reje",
       "failed": 3,
-      "keepers": 1,
-      "turns": 2
-    },
-    {
-      "tool": "Execute",
-      "signature": "{\"error\":\"remote_ssh_disk_low: endpoint apple-review-be available_kib=N minimum_kib=N\",\"typed\":true,\"cmd\":\"gh ",
-      "failed": 3,
-      "keepers": 1,
+      "keepers": 3,
       "turns": 3
     },
     {
-      "tool": "keeper_artifact_transfer",
-      "signature": "{\"message\":\"Exported artifact <hex> is absent\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_reje",
+      "tool": "masc_board_comment",
+      "signature": "Post not found: p-<hex>. Use an id masc_board_list or masc_board_search returns; a guessed id fails here.",
       "failed": 3,
       "keepers": 3,
       "turns": 3
@@ -155,6 +155,6 @@
   "window": {
     "since": "2026-11-06T09:52:00+00:00",
     "until": "2026-11-07T09:52:00+00:00",
-    "files": 12
+    "files": 16
   }
 }

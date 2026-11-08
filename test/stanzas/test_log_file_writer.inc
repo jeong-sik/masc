@@ -4,7 +4,6 @@
  (libraries
   masc.masc_log
   alcotest
-  eio
   eio_main
   unix
   threads.posix

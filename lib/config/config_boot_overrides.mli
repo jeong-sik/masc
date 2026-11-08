@@ -44,7 +44,3 @@ type source =
 
 val source : string -> source
 (** The layer that would supply [name]. *)
-
-val source_to_string : source -> string
-(** ["env"] | ["boot_override"] | ["default"], the labels the feature-flag
-    projection reports. *)

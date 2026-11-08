@@ -41,16 +41,3 @@ let capture ~base_path ~keepers_dir ~keeper_name =
   let after = execution_basis ~base_path ~keeper_name in
   {Context.sources = List.rev reversed_sources; previous; unavailable = List.rev !failures;
    execution_basis = (if before = after then after else None)}
-
-let render ~base_path ~keepers_dir ~keeper_name =
-  try
-    let input = capture ~base_path ~keepers_dir ~keeper_name in
-    List.iter (fun detail -> Log.Keeper.warn ~keeper_name
-      "working context source unavailable; original intake continues: %s" detail) input.unavailable;
-    Context.render input
-  with
-  | Eio.Cancel.Cancelled _ as error -> raise error
-  | exn ->
-    Log.Keeper.warn ~keeper_name "working context unavailable; original intake continues: %s"
-      (Printexc.to_string exn);
-    Error (Printexc.to_string exn)

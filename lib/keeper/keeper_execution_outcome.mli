@@ -24,10 +24,6 @@ val lane : t -> lane
 val result : t -> Keeper_agent_run.run_result
 val response_text : t -> string
 
-val completion_contract_result
-  :  t
-  -> Keeper_execution_receipt.completion_contract_result
-
 val terminal : t -> terminal
 val is_autonomous : t -> bool
 

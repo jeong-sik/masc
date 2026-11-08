@@ -1,10 +1,5 @@
 type error = Source_reader_unavailable
 
-let error_to_string = function
-  | Source_reader_unavailable ->
-    "canonical workspace artifact reader is absent from the offered Tool surface"
-;;
-
 let require_reader tools =
   let schema = Keeper_runtime_schemas_toml.artifact_read in
   match

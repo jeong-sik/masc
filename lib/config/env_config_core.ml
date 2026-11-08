@@ -403,10 +403,9 @@ let masc_config_dir_opt () =
 let default_base_path_record_path_opt () =
   Option.map (fun dir -> Filename.concat dir "default-base-path") (masc_config_dir_opt ())
 
-(** [running_under_test_executable ()] mirrors the convention in
-    {!Config_dir_resolver}: the process's [Sys.executable_name]
-    basename starts with ["test_"]. Used to gate production-path
-    safeguards. *)
+(** [running_under_test_executable ()] is true when the lowercased basename
+    of [Sys.executable_name] starts with ["test_"]. It gates production-path
+    safeguards, and [Host_config.host] derives its [test_mode] from it. *)
 let running_under_test_executable () =
   let basename =
     Sys.executable_name |> Filename.basename |> String.lowercase_ascii

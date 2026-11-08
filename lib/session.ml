@@ -807,7 +807,8 @@ module McpSessionStore = struct
     await_if_needed p
 end
 
-let start_mcp_session_cleanup_loop ~sw ~clock ?(interval=Env_config.Session.max_age_seconds /. 10.0) () =
+let start_mcp_session_cleanup_loop ~sw ~clock () =
+  let interval = Env_config.Session.max_age_seconds /. 10.0 in
   (* Also start the store loop since we refactored it to Actor *)
   McpSessionStore.start_loop ~sw;
   Eio.Fiber.fork ~sw (fun () ->

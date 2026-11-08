@@ -48,7 +48,7 @@ let mount_argument runtime ({ source; destination } : mount) =
     | Docker -> Printf.sprintf "type=bind,src=%s,dst=%s,readonly" source destination
     | Apple_container -> Printf.sprintf "type=bind,source=%s,target=%s,readonly" source destination)
 
-let create_arguments (container : container) ~command ~name ~instance_id ~state_owner ~scope ~image ~package_mount ~mounts ~state_mounts =
+let create_arguments (container : container) ~command ~name ~instance_id ~state_owner ~scope ~image ~package_mount ~state_mounts =
   let common = ["--name"; name; "--label"; instance_label ^ "=" ^ instance_id]
     @ (match state_owner with
        | None -> []
@@ -73,7 +73,7 @@ let create_arguments (container : container) ~command ~name ~instance_id ~state_
          "--memory"; Int64.to_string (Int64.div container.resources.memory_bytes 1_048_576L) ^ "M";
          "--network"; "none"; "--no-dns"; "--read-only"; "--cap-drop"; "ALL"] in
   controls @ ["--interactive"; "--workdir"; "/addon"; "--mount"; package_mount]
-  @ mounts @ state_mounts @ ["--"; image] @ command
+  @ state_mounts @ ["--"; image] @ command
 
 let start_arguments runtime id = match runtime with
   | Docker -> ["container"; "start"; "--attach"; "--interactive"; id]

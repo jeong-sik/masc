@@ -33,7 +33,7 @@ val mount_argument : Lane_addon_types.runtime -> mount -> (string, string) resul
 val create_arguments :
   Lane_addon_types.container -> command:string list -> name:string -> instance_id:string -> state_owner:string option ->
   scope:string option -> image:string ->
-  package_mount:string -> mounts:string list -> state_mounts:string list -> string list
+  package_mount:string -> state_mounts:string list -> string list
 val start_arguments : Lane_addon_types.runtime -> string -> string list
 val inspect_arguments : Lane_addon_types.runtime -> string -> string list
 val remove_arguments : Lane_addon_types.runtime -> string -> string list

@@ -988,10 +988,6 @@ val sync_directory_capability
   :  _ Eio.Path.t
   -> (unit, capability_directory_sync_error) result
 
-val capability_directory_sync_error_to_string
-  :  capability_directory_sync_error
-  -> string
-
 (** [true] iff [name] matches the canonical [.atomic_*.tmp] pattern produced by
     this module. Exposed for tests and recovery sweeps. *)
 val is_atomic_orphan_name : string -> bool

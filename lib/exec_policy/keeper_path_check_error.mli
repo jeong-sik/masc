@@ -14,9 +14,7 @@
     - Stable lowercase [prefix_token] per variant — kept identical to
       the prior raw-string prefixes so downstream observers
       (dashboard tool-quality, log aggregators) keep working without
-      a behaviour change in this PR.
-    - [parse_prefix] is a typed lookup, not substring grep; circuit
-      breaker classification consumes it directly. *)
+      a behaviour change in this PR. *)
 
 type t =
   | Path_outside_whitelist of
@@ -44,7 +42,3 @@ val message_prefix : t -> string
     (e.g. dashboard tool-quality). Always a strict prefix of the
     lowercase form of [to_message]. *)
 
-val parse_prefix : string -> t option
-(** Inverse of [to_message] for the variant tag only — payload fields
-    are left empty / [None] since the typed module is intended for
-    classification, not full message reconstruction. *)

@@ -145,9 +145,43 @@ class ScanTest(unittest.TestCase):
         self.assertEqual(len(repeats.scan([plain, again], GAP).repeats), 1)
 
 
+class DateCallTest(unittest.TestCase):
+    def test_a_bare_date_command_counts(self) -> None:
+        for command in ["date", "date -u", "date -u +%H:%MZ", "date -u +'%Y-%m-%dT%H:%M:%SZ'", "  date -u  "]:
+            self.assertTrue(repeats.is_date_call(json.dumps({"command": command})), command)
+
+    def test_an_argv_date_counts(self) -> None:
+        self.assertTrue(repeats.is_date_call(json.dumps({"argv": ["date", "-u", "+%Y-%m-%dT%H:%MZ"], "cwd": "."})))
+
+    def test_anything_around_the_date_does_not(self) -> None:
+        for command in ["date; ls", "date && ls", "date | cat", "echo date", "datex", "date > out", "date $(id)", "date `id`", "ls; date", "date -u\nls", ""]:
+            self.assertFalse(repeats.is_date_call(json.dumps({"command": command})), command)
+
+    def test_an_argv_that_carries_a_list_or_a_non_string_does_not(self) -> None:
+        self.assertFalse(repeats.is_date_call(json.dumps({"argv": ["date", "-d", "now; ls"]})))
+        self.assertFalse(repeats.is_date_call(json.dumps({"argv": []})))
+        self.assertFalse(repeats.is_date_call(json.dumps({"argv": ["date", 1]})))
+
+    def test_input_that_is_not_a_json_object_with_a_command_does_not(self) -> None:
+        self.assertFalse(repeats.is_date_call("date"))
+        self.assertFalse(repeats.is_date_call("[1]"))
+        self.assertFalse(repeats.is_date_call(json.dumps({"script": "date"})))
+        self.assertFalse(repeats.is_date_call(json.dumps({"command": 7})))
+
+    def test_a_date_call_is_counted_per_keeper_among_execute_calls_only(self) -> None:
+        calls = [
+            execute(100, command="date -u"),
+            execute(110, command="date -u +%s", answer="x"),
+            execute(120, command="ls"),
+            execute(130, keeper="b", command="date"),
+            execute(140, tool="Read", command="date"),
+        ]
+        self.assertEqual(dict(repeats.scan(calls, GAP).date_calls), {"a": 2, "b": 1})
+
+
 class StreakCountTest(unittest.TestCase):
     def summary_of(self, longest: int) -> dict[str, object]:
-        found = repeats.Scan(Counter({"a": longest}), Counter(), [], {"a": [longest]})
+        found = repeats.Scan(Counter({"a": longest}), Counter(), Counter(), [], {"a": [longest]})
         return repeats.keeper_summary("a", found, {}, 0)
 
     def test_a_streak_of_exactly_the_minimum_counts_as_long(self) -> None:
@@ -277,7 +311,7 @@ class MeasureTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(
             result["execute"],
-            {"calls": 14, "repeat_calls": 11, "repeat_share": round(11 / 14, 4), "repeat_held_hours": round(11 / 3600, 3), "repeat_result_mib": 11.0, "keepers_with_repeats": 1},
+            {"calls": 14, "repeat_calls": 11, "repeat_share": round(11 / 14, 4), "repeat_held_hours": round(11 / 3600, 3), "repeat_result_mib": 11.0, "date_calls": 0, "date_call_share": 0.0, "keepers_with_repeats": 1},
         )
         self.assertEqual(result["model_requests"]["requests"], 14)
         self.assertEqual(result["model_requests"]["input_tokens"], 12 * 300 + 2 * 1_200)
@@ -290,6 +324,24 @@ class MeasureTest(unittest.TestCase):
         self.assertEqual(
             result["hourly"],
             [{"hour": "2026-11-05T00:00:00+00:00", "execute_calls": 14, "repeat_calls": 11, "repeat_share": round(11 / 14, 4)}],
+        )
+
+    def test_the_keepers_with_the_most_date_calls_are_listed_first_with_their_share(self) -> None:
+        t0 = DAY_START
+        self.write_ledger(
+            [self.row("a", t0 + 90, command="date -u"), self.row("a", t0 + 200, command="ls")]
+            + [self.row("b", t0 + 100 + 10 * i, answer=str(i), command="date") for i in range(3)]
+        )
+        _, out = self.run_main()
+        result = json.loads(out.read_text(encoding="utf-8"))
+        self.assertEqual(result["execute"]["date_calls"], 4)
+        self.assertEqual(result["execute"]["date_call_share"], round(4 / 5, 4))
+        self.assertEqual(
+            result["date_callers"],
+            [
+                {"keeper": "b", "date_calls": 3, "execute_calls": 3, "date_call_share": 1.0},
+                {"keeper": "a", "date_calls": 1, "execute_calls": 2, "date_call_share": 0.5},
+            ],
         )
 
     def test_a_keeper_without_a_trace_has_no_request_ratio(self) -> None:

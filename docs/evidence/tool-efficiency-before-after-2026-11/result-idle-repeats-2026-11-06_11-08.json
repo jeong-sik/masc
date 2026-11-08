@@ -14,6 +14,8 @@
     "repeat_share": 0.2079,
     "repeat_held_hours": 3.355,
     "repeat_result_mib": 5.03,
+    "date_calls": 2537,
+    "date_call_share": 0.1244,
     "keepers_with_repeats": 13
   },
   "model_requests": {
@@ -173,6 +175,44 @@
           "repeats": 3
         }
       ]
+    }
+  ],
+  "date_callers": [
+    {
+      "keeper": "wkbl-front",
+      "date_calls": 1293,
+      "execute_calls": 1419,
+      "date_call_share": 0.9112
+    },
+    {
+      "keeper": "kidsnote-incoming-dd-manager",
+      "date_calls": 1059,
+      "execute_calls": 1241,
+      "date_call_share": 0.8533
+    },
+    {
+      "keeper": "wkbl-data",
+      "date_calls": 171,
+      "execute_calls": 172,
+      "date_call_share": 0.9942
+    },
+    {
+      "keeper": "wkbl-web-leader",
+      "date_calls": 4,
+      "execute_calls": 425,
+      "date_call_share": 0.0094
+    },
+    {
+      "keeper": "code-reviewer-uncle",
+      "date_calls": 4,
+      "execute_calls": 1416,
+      "date_call_share": 0.0028
+    },
+    {
+      "keeper": "github-pr-checker",
+      "date_calls": 2,
+      "execute_calls": 986,
+      "date_call_share": 0.002
     }
   ],
   "hourly": [

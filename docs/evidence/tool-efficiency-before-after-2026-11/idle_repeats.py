@@ -24,11 +24,14 @@ Definitions:
   `ts` in [since, end). `repeats_per_model_request` is a ratio and not a share: one request can ask
   for several calls, and a request can end with no call.
 
-`execute.keepers_with_repeats` counts the Keepers with at least one repeat and `top_keepers` lists the six
-with the most. `input_token_share_of_all_keepers` divides the Keeper's input tokens by the input tokens
-of every Keeper that has a trace in the window. `hourly` splits the Execute calls and the repeats of all
-Keepers by the UTC hour of the call's end time (`ts`); a repeat is counted in the hour of the repeat
-itself, and an hour without an Execute call is left out.
+`execute.date_calls` counts the Execute calls whose whole command is one `date` call (`command` or
+`argv`, no pipe, list, redirection or substitution). Once the format shows seconds a clock reading never
+repeats its answer, so these calls are counted apart from the repeats; `date_callers` lists the six
+Keepers with the most. `execute.keepers_with_repeats` counts the Keepers with at least one repeat and
+`top_keepers` lists the six with the most. `input_token_share_of_all_keepers` divides the Keeper's input
+tokens by the input tokens of every Keeper that has a trace in the window. `hourly` splits the Execute
+calls and the repeats of all Keepers by the UTC hour of the call's end time (`ts`); a repeat is counted in
+the hour of the repeat itself, and an hour without an Execute call is left out.
 
 Usage:
     python3 docs/evidence/tool-efficiency-before-after-2026-11/idle_repeats.py \
@@ -44,6 +47,7 @@ import datetime
 import hashlib
 import json
 import pathlib
+import re
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
@@ -66,6 +70,8 @@ TIMING_KEY = "execution_time_ms"
 TURN_EVENTS = "keeper_turn_events"
 USAGE_EVENT = "agent_core_stream_message_delta"
 USAGE_MARKER = b'"usage"'
+# A whole command that is one `date` call: no pipe, list, redirection or substitution.
+DATE_COMMAND = re.compile(r"^date(?: [^;&|<>`$()\n]*)?$")
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -91,6 +97,7 @@ class Repeat:
 class Scan:
     executes: Counter[str]
     executes_by_hour: Counter[float]
+    date_calls: Counter[str]
     repeats: list[Repeat]
     streaks: dict[str, list[int]]
 
@@ -135,6 +142,24 @@ def command_head(input_text: str) -> str:
     return squash(input_text)
 
 
+def is_date_call(input_text: str) -> bool:
+    """Whether the whole command of an Execute input is one `date` call, given as `command` or as `argv`."""
+    try:
+        parsed = cast("object", json.loads(input_text))
+    except ValueError:
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    fields = cast("dict[str, object]", parsed)
+    command = fields.get("command")
+    if isinstance(command, str):
+        return DATE_COMMAND.match(command.strip()) is not None
+    argv = fields.get("argv")
+    if isinstance(argv, list) and argv and all(isinstance(token, str) for token in cast("list[object]", argv)):
+        return DATE_COMMAND.match(" ".join(cast("list[str]", argv))) is not None
+    return False
+
+
 def answer_digest(output_text: str) -> str:
     """A digest of an Execute answer that leaves its `execution_time_ms` out."""
     try:
@@ -156,12 +181,15 @@ def scan(calls: Iterable[ledger.Call], gap_s: float) -> Scan:
     """Execute calls per Keeper and per hour, the repeats, and the length of each streak of two runs or more."""
     executes: Counter[str] = Counter()
     executes_by_hour: Counter[float] = Counter()
+    date_calls: Counter[str] = Counter()
     repeats: list[Repeat] = []
     streaks: defaultdict[str, list[int]] = defaultdict(list)
     last: dict[tuple[str, str], Run] = {}
     for call in sorted((c for c in calls if c.tool == ledger.EXECUTE), key=lambda c: c.ts):
         executes[call.keeper] += 1
         executes_by_hour[hour_start(call.ts)] += 1
+        if is_date_call(call.input_text):
+            date_calls[call.keeper] += 1
         key = (call.keeper, digest(call.input_text))
         answer = answer_digest(call.output_text)
         previous = last.get(key)
@@ -175,7 +203,7 @@ def scan(calls: Iterable[ledger.Call], gap_s: float) -> Scan:
     for (keeper, _), run in last.items():
         if run.streak > 1:
             streaks[keeper].append(run.streak)
-    return Scan(executes, executes_by_hour, repeats, dict(streaks))
+    return Scan(executes, executes_by_hour, date_calls, repeats, dict(streaks))
 
 
 def number_of(value: object) -> float | None:
@@ -298,6 +326,8 @@ def summarize(found: Scan, tokens: dict[str, Tokens]) -> dict[str, object]:
             "repeat_share": share(len(found.repeats), sum(found.executes.values())),
             "repeat_held_hours": hours(sum(r.held_s for r in found.repeats)),
             "repeat_result_mib": round(sum(r.result_bytes for r in found.repeats) / BYTES_PER_MIB, MIB_DIGITS),
+            "date_calls": sum(found.date_calls.values()),
+            "date_call_share": share(sum(found.date_calls.values()), sum(found.executes.values())),
             "keepers_with_repeats": len(by_repeats),
         },
         "model_requests": {
@@ -308,6 +338,15 @@ def summarize(found: Scan, tokens: dict[str, Tokens]) -> dict[str, object]:
             "output_tokens": sum(t.output_tokens for t in tokens.values()),
         },
         "top_keepers": [keeper_summary(keeper, found, tokens, total_input) for keeper, _ in by_repeats.most_common(TOP_KEEPERS)],
+        "date_callers": [
+            {
+                "keeper": keeper,
+                "date_calls": count,
+                "execute_calls": found.executes[keeper],
+                "date_call_share": share(count, found.executes[keeper]),
+            }
+            for keeper, count in found.date_calls.most_common(TOP_KEEPERS)
+        ],
         "hourly": hourly(found),
     }
 

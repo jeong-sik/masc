@@ -78,10 +78,28 @@ let test_shows_operator_disposition_activity_filter () =
     (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Question);
   check_bool "Confirmation does not show disposition badge" false
     (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Confirmation);
+  check_bool "Tool_waiting does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Tool_waiting);
+  check_bool "Model_waiting does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Model_waiting);
+  check_bool "Async_working does not show disposition badge" false
+    (Mark.shows_operator_disposition
+       ~activity:(Masc_tui_keeper_list_model.Async_working { count = 1 }));
+  check_bool "Deferred does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Deferred);
+  check_bool "Delegate_result does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Delegate_result);
+  check_bool "Verifying does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Verifying);
+  check_bool "External_waiting does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.External_waiting);
   check_bool "Idle shows disposition badge" true
     (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Idle);
   check_bool "Attempt_failed shows disposition badge" true
-    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Attempt_failed)
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Attempt_failed);
+  check_bool "Unknown shows disposition badge" true
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Unknown)
+;;
 
 let () =
   Alcotest.run "tui_keeper_mark"

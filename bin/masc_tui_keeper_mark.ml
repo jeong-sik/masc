@@ -109,11 +109,18 @@ let operator_disposition_word : Masc.Keeper_execution_receipt.operator_dispositi
 
 let shows_operator_disposition ~(activity : Masc_tui_keeper_list_model.activity) =
   match activity with
+  (* Only idle/unmapped states and attempt failures of the open turn show
+     historical operator intervention requirements from the last receipt.
+     During active turns (preparing, executing, waiting on tools/models, async,
+     delegation, verification) or operator holds, the current turn is live and
+     has not yet produced a new receipt. *)
+  | Attempt_failed | Idle | Unknown -> true
   | Preparing | Running | Streaming
   | Paused | Offline
-  | Held_call | Question | Confirmation -> false
-  | Attempt_failed | Async_working _ | Deferred | Tool_waiting | Model_waiting
-  | Delegate_result | Verifying | External_waiting | Idle | Unknown -> true
+  | Held_call | Question | Confirmation
+  | Tool_waiting | Model_waiting
+  | Async_working _ | Deferred
+  | Delegate_result | Verifying | External_waiting -> false
 ;;
 
 let column_legend =

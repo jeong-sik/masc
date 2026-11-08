@@ -301,7 +301,6 @@ let test_frontend_canonical_loopback_location_localhost () =
   let request = Httpun.Request.create ~headers `GET "/dashboard?agent=codex" in
   let location =
     Server_routes_http_routes_frontend.canonical_loopback_location
-      ~default_port:8935
       ~request_authority:(request_authority_exn request)
       request
   in
@@ -316,7 +315,6 @@ let test_frontend_canonical_loopback_location_ipv6 () =
   let request = Httpun.Request.create ~headers `GET "/dashboard" in
   let location =
     Server_routes_http_routes_frontend.canonical_loopback_location
-      ~default_port:8935
       ~request_authority:(request_authority_exn request)
       request
   in
@@ -331,7 +329,6 @@ let test_frontend_canonical_loopback_location_canonical_host () =
   let request = Httpun.Request.create ~headers `GET "/dashboard" in
   let location =
     Server_routes_http_routes_frontend.canonical_loopback_location
-      ~default_port:8935
       ~request_authority:(request_authority_exn request)
       request
   in
@@ -344,13 +341,13 @@ let test_frontend_canonical_loopback_location_canonical_host () =
 (* A request on the TLS listener names the loopback alias with the TLS port
    and the admitted scheme is https; the redirect must stay on https so the
    browser does not send cleartext to the TLS port. *)
-let tls_request_authority_exn request =
+let tls_request_authority_exn ~https_port request =
   let policy =
     match
       Server_request_authority.make_trust_policy
         ~bind_host:"127.0.0.1"
         ~bind_port:8935
-        ~https_port:(Some 8938)
+        ~https_port:(Some https_port)
         ~explicit_base_url:None
     with
     | Ok policy -> policy
@@ -369,20 +366,34 @@ let tls_request_authority_exn request =
 let test_frontend_canonical_loopback_location_keeps_https () =
   let headers = Httpun.Headers.of_list [ "host", "localhost:8938" ] in
   let request = Httpun.Request.create ~headers `GET "/dashboard" in
-  let request_authority = tls_request_authority_exn request in
+  let request_authority = tls_request_authority_exn ~https_port:8938 request in
   Alcotest.(check (option string))
     "localhost on the TLS listener redirects over https"
     (Some "https://127.0.0.1:8938/dashboard")
     (Server_routes_http_routes_frontend.canonical_loopback_location
-       ~default_port:8935
        ~request_authority
        request);
   Alcotest.(check (option string))
     "root on the TLS listener goes to the https dashboard"
     (Some "https://127.0.0.1:8938/dashboard")
     (Server_routes_http_routes_frontend.canonical_root_dashboard_location
-       ~default_port:8935
        ~request_authority)
+;;
+
+(* A TLS listener on the https default port is named without a port. The
+   redirect keeps that port, not the cleartext listener's. *)
+let test_frontend_canonical_loopback_location_default_https_port () =
+  let headers = Httpun.Headers.of_list [ "host", "localhost" ] in
+  let request = Httpun.Request.create ~headers `GET "/dashboard" in
+  let request_authority = tls_request_authority_exn ~https_port:443 request in
+  Alcotest.(check (option string))
+    "a port-less host on the TLS listener redirects to the https default port"
+    (Some "https://127.0.0.1:443/dashboard")
+    (Server_routes_http_routes_frontend.canonical_loopback_location ~request_authority request);
+  Alcotest.(check (option string))
+    "the root redirect names the https default port"
+    (Some "https://127.0.0.1:443/dashboard")
+    (Server_routes_http_routes_frontend.canonical_root_dashboard_location ~request_authority)
 ;;
 
 let test_frontend_canonical_root_dashboard_location_localhost () =
@@ -390,7 +401,6 @@ let test_frontend_canonical_root_dashboard_location_localhost () =
   let request = Httpun.Request.create ~headers `GET "/" in
   let location =
     Server_routes_http_routes_frontend.canonical_root_dashboard_location
-      ~default_port:8935
       ~request_authority:(request_authority_exn request)
   in
   Alcotest.(check (option string))
@@ -532,6 +542,9 @@ let router_tests =
   ; ( "frontend canonical redirect keeps https on the TLS listener"
     , `Quick
     , test_frontend_canonical_loopback_location_keeps_https )
+  ; ( "frontend canonical redirect keeps the https default port"
+    , `Quick
+    , test_frontend_canonical_loopback_location_default_https_port )
   ]
 ;;
 

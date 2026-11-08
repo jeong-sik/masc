@@ -2694,7 +2694,7 @@ let operation_executor ~state ~clock : Keeper_owner.operation_executor =
                        Keeper_chat_broadcast.operation_event ~base_path ~keeper_name ~operation_id ~seq:(Some seq) ~event;
                        publish_operation_live_event ~base_path ~keeper_name ~operation_id ~seq:(Some seq) event) projected;
                      member_id, projection) projections in
-                   let is_terminal = Server_keeper_chat_agui_projection.is_terminal event in
+                   let is_terminal = Keeper_chat_run_signal.is_terminal event in
                    if is_terminal && not terminal_seen then settle_delivery (Ok ());
                    loop ~terminal_seen:(terminal_seen || is_terminal) projections
                  in

@@ -1160,49 +1160,7 @@ let sequence_after_complete_rows ~allow_torn_tail ~require_existing journal =
      | Error _ as error -> error
      | Ok latest ->
        let complete = match latest with
-         | Some { event = (Keeper_chat_events.Run_finished _ | Event_error _); _ } -> true
-         | Some
-             { event =
-                 ( Run_started _
-                 | Batch_bound _
-                 | Text_message_start _
-                 | Text_delta _
-                 | Text_message_end
-                 | External_effect_completed _
-                 | Reply_details _
-                 | Continuation_checkpoint _
-                 | Agent_core_stream_connected
-                 | Provider_retry_observed _
-                 | Agent_core_runtime_attempt_started _
-                 | Agent_core_stream_message_start _
-                 | Agent_core_stream_message_delta _
-                 | Agent_core_stream_message_stop _
-                 | Agent_core_stream_ping
-                 | Agent_core_content_block_start _
-                 | Agent_core_content_block_stop _
-                 | Model_content_activity _
-                 | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
-                 | Agent_core_thinking_signature_delta _
-                 | Agent_core_media_delta _
-                 | Agent_core_stream_protocol_error _
-                 | Tool_call_start _ | Tool_call_admitted _
-                 | Tool_call_args _
-                 | Tool_call_args_snapshot _
-                 | Tool_call_end _
-                 | Native_tool_start _
-                 | Native_tool_end _
-                 | Native_tool_progress _
-                 | Tool_approval_requested _
-                 | Tool_approval_settled _
-                 | Tool_result_ready _
-                 | Tool_transcript_committed _
-                 | Link_block _
-                 | Image_block _
-                 | Status_block _
-                 | Audio_block _
-                 | Tool_context_block _ )
-             ; _
-             }
+         | Some { event; _ } -> Keeper_chat_run_signal.is_terminal event
          | None -> false in
        if require_existing && not complete then
          Error (Journal_corrupt "continuation journal has no durable terminal segment boundary")
@@ -1228,54 +1186,16 @@ let same_operation_settlement left right =
 ;;
 
 let existing_operation_terminal settlement = function
-  | ({event=Event_error {message};seq;ts}, Some recorded) :: _
-    when same_operation_settlement settlement recorded -> Some (Existing_terminal_error {seq;ts;message})
-  | []
-  | ( { event =
-          ( Run_started _
-            | Batch_bound _
-            | Text_message_start _
-            | Text_delta _
-            | Text_message_end
-            | External_effect_completed _
-            | Run_finished _
-            | Event_error _
-            | Reply_details _
-            | Continuation_checkpoint _
-            | Agent_core_stream_connected
-            | Provider_retry_observed _
-            | Agent_core_runtime_attempt_started _
-            | Agent_core_stream_message_start _
-            | Agent_core_stream_message_delta _
-            | Agent_core_stream_message_stop _
-            | Agent_core_stream_ping
-            | Agent_core_content_block_start _
-            | Agent_core_content_block_stop _
-            | Model_content_activity _
-            | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
-            | Agent_core_thinking_signature_delta _
-            | Agent_core_media_delta _
-            | Agent_core_stream_protocol_error _
-            | Tool_call_start _ | Tool_call_admitted _
-            | Tool_call_args _
-            | Tool_call_args_snapshot _
-            | Tool_call_end _
-            | Native_tool_start _
-            | Native_tool_end _
-            | Native_tool_progress _
-            | Tool_approval_requested _
-            | Tool_approval_settled _
-            | Tool_result_ready _
-            | Tool_transcript_committed _
-            | Link_block _
-            | Image_block _
-            | Status_block _
-            | Audio_block _
-            | Tool_context_block _ )
-      ; _
-      }
-    , _ )
-    :: _ -> None
+  | ({ event; seq; ts }, Some recorded) :: _
+    when same_operation_settlement settlement recorded ->
+    (match Keeper_chat_run_signal.of_event event with
+     | Keeper_chat_run_signal.Failed message ->
+       Some (Existing_terminal_error { seq; ts; message })
+     | Keeper_chat_run_signal.Closed
+     | Keeper_chat_run_signal.Reply _
+     | Keeper_chat_run_signal.Finished
+     | Keeper_chat_run_signal.Progress -> None)
+  | [] | _ :: _ -> None
 ;;
 
 let find_operation_terminal journal ~settlement =

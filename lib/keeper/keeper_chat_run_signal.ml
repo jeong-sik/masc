@@ -49,6 +49,11 @@ let of_event (event : Keeper_chat_events.keeper_chat_event) =
   | Audio_block _
   | Tool_context_block _ -> Progress
 
+let is_terminal event =
+  match of_event event with
+  | Finished | Failed _ -> true
+  | Closed | Reply _ | Progress -> false
+
 let read events =
   match Keeper_chat_events.subscribe events with
   | Keeper_chat_events.Closed -> Closed

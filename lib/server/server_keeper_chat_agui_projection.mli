@@ -18,5 +18,3 @@ val project :
   t ->
   Keeper_chat_events.keeper_chat_event ->
   t * Ag_ui.event option
-
-val is_terminal : Keeper_chat_events.keeper_chat_event -> bool

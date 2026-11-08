@@ -13,6 +13,11 @@ val of_event : Keeper_chat_events.keeper_chat_event -> t
 (** One arm per event variant and no wildcard: a new variant does not compile
     until it is classified here. *)
 
+val is_terminal : Keeper_chat_events.keeper_chat_event -> bool
+(** [true] for the event that ends a run, [Finished] or [Failed _]. A reader
+    that holds events outside the bus, such as the journal or the Dashboard
+    projection, asks the same question here. *)
+
 val read : Keeper_chat_events.t -> t
 (** The next event of the bus, classified. Blocks like
     {!Keeper_chat_events.subscribe}. *)

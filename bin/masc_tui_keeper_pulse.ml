@@ -37,22 +37,7 @@ type slot =
   | Slot_quiet
   | Slot_turn of Pulse.outcome
 
-type placement =
-  | In_hour of int
-  | Before_window
-
-let seconds_per_hour = 3600.0
-
-(* [at] is finite and [now] is finite. Hour 0 is the one just ended. *)
-let placement ~now at =
-  let age = now -. at in
-  if age < 0.0 then In_hour 0
-  else begin
-    let hours = Float.floor (age /. seconds_per_hour) in
-    if hours >= Float.of_int Mark.pulse_hours then Before_window
-    else In_hour (Float.to_int hours)
-  end
-;;
+let seconds_per_hour = 3600
 
 let worse (a : Pulse.outcome) (b : Pulse.outcome) : Pulse.outcome =
   match a, b with
@@ -64,55 +49,46 @@ let worse (a : Pulse.outcome) (b : Pulse.outcome) : Pulse.outcome =
   | Pulse.Turn_ok, Pulse.Turn_ok -> Pulse.Turn_ok
 ;;
 
-let is_before_window = function
-  | Before_window -> true
-  | In_hour _ -> false
+let worst_of_tally ({ ok; rested; failed } : Pulse.tally) : Pulse.outcome option =
+  if failed > 0 then Some Pulse.Turn_failed
+  else if rested > 0 then Some Pulse.Turn_rested
+  else if ok > 0 then Some Pulse.Turn_ok
+  else None
 ;;
 
+let hour_start seconds = seconds / seconds_per_hour * seconds_per_hour
+
+(* Hours are whole clock hours. Hour 0 holds [now]; a half-hour slot lies
+   inside one hour because an hour is two slots. A slot stamped after the hour
+   of [now] (the two clocks disagree) belongs to hour 0. *)
 let slots ~now pulse =
   let all_unknown () = List.init Mark.pulse_hours (fun _ -> Slot_unknown) in
   match pulse with
   | None -> all_unknown ()
   | Some _ when not (Float.is_finite now) -> all_unknown ()
-  | Some { Pulse.samples; truncated } ->
-      let placed =
-        List.filter_map
-          (fun { Pulse.at; outcome } ->
-            if Float.is_finite at then Some (placement ~now at, outcome) else None)
-          samples
-      in
-      (* The oldest hour, counted back from [now], that the server's record
-         covers. A cut pulse lost its older turns, so it covers back to the
-         oldest turn it kept; one that kept a turn from before the window
-         covers the whole window. An empty hour older than this is unknown. *)
-      let oldest_known_hour =
-        let reaches_past_window = List.exists (fun (place, _) -> is_before_window place) placed in
-        if (not truncated) || reaches_past_window then Mark.pulse_hours - 1
-        else
-          List.fold_left
-            (fun oldest (place, _) ->
-              match place with
-              | In_hour hour -> max oldest hour
-              | Before_window -> oldest)
-            (-1)
-            placed
+  | Some { Pulse.known_since; slots } ->
+      let now_hour = hour_start (int_of_float (Float.floor now)) in
+      let hour_of (slot : Pulse.slot) =
+        max 0 ((now_hour - hour_start slot.starts_at) / seconds_per_hour)
       in
       let slot_of_hour hour =
         let worst =
           List.fold_left
-            (fun worst (place, outcome) ->
-              match place with
-              | In_hour here when here = hour ->
-                  (match worst with
-                   | None -> Some outcome
-                   | Some seen -> Some (worse seen outcome))
-              | In_hour _ | Before_window -> worst)
+            (fun worst (slot : Pulse.slot) ->
+              if hour_of slot <> hour then worst
+              else
+                match worst, worst_of_tally slot.tally with
+                | None, outcome -> outcome
+                | Some seen, Some outcome -> Some (worse seen outcome)
+                | (Some _ as seen), None -> seen)
             None
-            placed
+            slots
         in
         match worst with
         | Some outcome -> Slot_turn outcome
-        | None -> if hour > oldest_known_hour then Slot_unknown else Slot_quiet
+        | None ->
+            let starts = Float.of_int (now_hour - (hour * seconds_per_hour)) in
+            if starts < known_since then Slot_unknown else Slot_quiet
       in
       List.init Mark.pulse_hours (fun position -> slot_of_hour (Mark.pulse_hours - 1 - position))
 ;;

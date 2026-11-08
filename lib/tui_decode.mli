@@ -817,8 +817,9 @@ type keeper_runtime = {
   (** If currently failing, when this continuous failing spell began (Unix seconds).
       [None] when healthy, or when unrecorded. *)
   kr_recent_turns : Keeper_turn_pulse.pulse option;
-  (** Recent turn pulse window up to 24 samples (RFC-0511 §2.3 S1b).
-      [Some pulse] when seeded or recorded; [None] when null/unknown. *)
+  (** Autonomous turns of the last day in half-hour slots (RFC-0515 §2.1).
+      [Some pulse] when seeded or recorded. [None] when the row sends null, or
+      a [recent_turns] whose [known_since] or any slot does not decode. *)
 }
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.

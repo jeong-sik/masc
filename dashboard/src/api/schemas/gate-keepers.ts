@@ -32,10 +32,11 @@ const KeeperLastFailureWireSchema = Schema.Struct({
 
 // Mirror of the healthy row built by keeper_list_row_json in
 // lib/keeper/keeper_tool_surface_ops.ml. RFC-0393 removed the agent_name
+// Half-hour slots of the last day (RFC-0515 §2.1): [starts_at, ok, rested, failed].
 const RecentTurnsWireSchema = Schema.Struct({
-  truncated: Schema.Boolean,
-  turns: Schema.Array(
-    Schema.Tuple(Schema.Number, Schema.Literal('ok', 'rested', 'failed'))
+  known_since: Schema.Number,
+  slots: Schema.Array(
+    Schema.Tuple(Schema.Number, Schema.Number, Schema.Number, Schema.Number)
   ),
 })
 

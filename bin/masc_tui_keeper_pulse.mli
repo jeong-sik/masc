@@ -32,8 +32,9 @@ val failing_cell : now:float -> failing -> Masc_tui_keeper_axis_cell.t option
 (** What the server says about one hour of the pulse window. *)
 type slot =
   | Slot_unknown
-      (** The server no longer holds this hour: it kept only a keeper's newest
-          turns and dropped older ones, or it sent no pulse at all. *)
+      (** No turn is counted in this hour and the hour starts before the
+          server's [known_since], so turns may have ended in it unseen; or the
+          server sent no pulse at all. *)
   | Slot_quiet
       (** The server holds this hour and no autonomous turn ran in it. The
           server counts autonomous turns only, so a chat turn leaves no mark. *)
@@ -41,21 +42,16 @@ type slot =
       (** The worst turn of the hour: failed over rested over ok. *)
 
 val slots : now:float -> Masc.Keeper_turn_pulse.pulse option -> slot list
-(** The last {!Masc_tui_keeper_mark.pulse_hours} hours before [now], oldest
-    first. Hour [n] counts back from [now] in whole hours, so the newest hour
-    is the one just ended, and a turn stamped after [now] (the two clocks
-    disagree) belongs to it.
+(** The last {!Masc_tui_keeper_mark.pulse_hours} clock hours, oldest first.
+    The newest is the hour that holds [now], and a slot stamped after that hour
+    (the two clocks disagree) belongs to it. An hour joins the server's two
+    half-hour slots in it.
 
-    An hour with no turn reads {!Slot_unknown} when the pulse is [truncated]
-    and the hour is older than the oldest turn the server holds, and
-    {!Slot_quiet} otherwise. A truncated pulse that holds a turn older than the
-    whole window knows every hour of it. The oldest hour that holds a turn may
-    have lost older turns to the same cut; it shows the worst of those that
-    remain.
+    An hour with no counted turn reads {!Slot_unknown} when it starts before
+    the pulse's [known_since], and {!Slot_quiet} otherwise.
 
-    [None] is a pulse the server did not seed: every hour is unknown. So is any
-    pulse read against a [now] that is not a finite number. A turn whose time is
-    not a finite number is left out. *)
+    [None] is a pulse the server did not send: every hour is unknown. So is any
+    pulse read against a [now] that is not a finite number. *)
 
 val slot_mark : slot -> string
 (** The mark one hour draws. The marks of the five readings differ, so an hour

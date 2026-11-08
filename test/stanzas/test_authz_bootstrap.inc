@@ -8,4 +8,4 @@
 (test
  (name test_authz_bootstrap)
  (modules test_authz_bootstrap)
- (libraries masc_test_deps masc.agent_core.digest))
+ (libraries masc_test_deps))

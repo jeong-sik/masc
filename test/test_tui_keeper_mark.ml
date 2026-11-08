@@ -84,7 +84,7 @@ let test_shows_operator_disposition_activity_filter () =
     (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Model_waiting);
   check_bool "Async_working does not show disposition badge" false
     (Mark.shows_operator_disposition
-       ~activity:(Masc_tui_keeper_list_model.Async_working { count = 1 }));
+       ~activity:(Masc_tui_keeper_list_model.Async_working 1));
   check_bool "Deferred does not show disposition badge" false
     (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Deferred);
   check_bool "Delegate_result does not show disposition badge" false

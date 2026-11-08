@@ -16,17 +16,9 @@
   yojson
   unix
   threads
-  mirage-crypto-rng.unix
    masc.agent_core.digest
-  grpc-direct
-  grpc-direct-core
-  h2-eio
   eio
-  eio_main
   eio.unix
-  httpun-eio
-  gluten-eio
-  cohttp-eio
   masc.tool_types
   masc.time_codec
   masc.keeper_registry
@@ -42,8 +34,6 @@
   masc.telemetry_unified
   masc.keeper_contract
   masc.keeper_approval
-  tls-eio
-  ca-certs
   time_compat
   fs_compat
   dated_jsonl
@@ -61,9 +51,6 @@
   masc.dashboard_utils
   masc.activity_graph
   masc.prompt_registry
-  opentelemetry
-  opentelemetry.client
-  ambient-context
   ambient-context-eio)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq ppx_let ppx_tla))

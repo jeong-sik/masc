@@ -105,6 +105,9 @@ type served =
 let fleet_step event = Pump.Send (Server_routes_http_routes_fleet_stream.frame event)
 let always_keepalive () = Pump.Keepalive
 
+(* A stub response that never closes: the stream ends through [send]. *)
+let never_closes () : unit = Eio.Fiber.await_cancel ()
+
 (* Subscribes [hub] to a new queue the way a route does and runs [pump] on it;
    the subscription is removed when this returns, raises or is cancelled. *)
 let with_subscribed_queue ~live hub pump =
@@ -130,7 +133,7 @@ let split_frames bytes =
 ;;
 
 let serve ~sw ~clock ~live ?(stop_after = max_int) ?(refusal = Sse.Closed) ?gate ?(gate_from = 1)
-    ?(step = fleet_step) ?(idle = always_keepalive) hub =
+    ?(step = fleet_step) ?(idle = always_keepalive) ?(closed = never_closes) hub =
   let frames = Eio.Stream.create max_int in
   let ending, resolve_ending = Eio.Promise.create () in
   let sent = ref 0 in
@@ -148,7 +151,7 @@ let serve ~sw ~clock ~live ?(stop_after = max_int) ?(refusal = Sse.Closed) ?gate
     Eio.Promise.resolve
       resolve_ending
       (with_subscribed_queue ~live hub (fun queue ->
-         Pump.run ~source:(Pump.Queue.source queue) ~step ~idle ~clock ~ping_interval_s
+         Pump.run ~source:(Pump.Queue.source queue) ~step ~idle ~clock ~ping_interval_s ~closed
            ~send)));
   { frames; ending }
 ;;
@@ -533,7 +536,7 @@ let sends_of ?(capacity = 64) ?(on_send = fun _ _ -> ()) ~step events =
     let sends = ref [] in
     let ending =
       Pump.run ~source:(Pump.Queue.source queue) ~step:(step queue) ~idle:(fun () -> Pump.Finish)
-        ~clock ~ping_interval_s
+        ~clock ~ping_interval_s ~closed:never_closes
         ~send:(fun bytes ->
           sends := split_frames bytes :: !sends;
           on_send queue (List.length !sends);
@@ -603,7 +606,7 @@ let test_a_pile_up_marked_before_a_send_writes_nothing () =
           ~idle:(fun () ->
             overflow queue;
             Pump.Keepalive)
-          ~clock:(Eio.Stdenv.clock env) ~ping_interval_s
+          ~clock:(Eio.Stdenv.clock env) ~ping_interval_s ~closed:never_closes
           ~send:(fun bytes ->
             sends := bytes :: !sends;
             Sse.Written)
@@ -654,7 +657,7 @@ let test_producers_on_several_domains_lose_no_event () =
                incr count;
                if !count = total then Pump.Send_last "" else Pump.Send "")
              ~idle:(fun () -> Pump.Finish)
-             ~clock ~ping_interval_s
+             ~clock ~ping_interval_s ~closed:never_closes
              ~send:(fun _ -> Sse.Written))
         (fun () -> push_from_every_domain fits ~each:pushes_per_domain)
     in
@@ -673,7 +676,7 @@ let test_producers_on_several_domains_lose_no_event () =
       check ending_t "past the bound the client is behind" Pump.Source_stopped
         (Pump.run ~source:(Pump.Queue.source overflow) ~step:(fun _ -> Pump.Send "")
            ~idle:(fun () -> Pump.Finish)
-           ~clock ~ping_interval_s ~send:(fun _ -> Sse.Written))
+           ~clock ~ping_interval_s ~closed:never_closes ~send:(fun _ -> Sse.Written))
     done)
 ;;
 
@@ -704,12 +707,32 @@ let test_a_send_that_raises_removes_the_subscription_and_propagates () =
     (match
        with_subscribed_queue ~live hub (fun queue ->
          Pump.run ~source:(Pump.Queue.source queue) ~step:fleet_step ~idle:always_keepalive
-           ~clock ~ping_interval_s
+           ~clock ~ping_interval_s ~closed:never_closes
            ~send:(fun _ -> failwith "socket write failed"))
      with
      | (_ : Pump.ending) -> fail "the failure should propagate"
      | exception Failure message -> check string "the failure" "socket write failed" message);
     check int "the subscription is removed" 0 !live)
+;;
+
+(* The transport ends the stream while nothing is queued: an HTTP/2 peer
+   reset, or a route that closed the response from another fiber. The pump
+   was waiting for an event and ends without a frame. *)
+let test_a_response_that_closes_while_the_pump_waits_ends_it () =
+  Eio_mock.Backend.run (fun () ->
+    let clock = Eio_mock.Clock.make () in
+    let hub = new_hub () in
+    let live = ref 0 in
+    Hub.observe hub ~measured_at:10.0 (fleet ());
+    let closed, close = Eio.Promise.create () in
+    Eio.Switch.run (fun sw ->
+      let served = serve ~sw ~clock ~live ~closed:(fun () -> Eio.Promise.await closed) hub in
+      ignore (take_frames served 1 : _ list);
+      check bool "the pump waits for an event" false (Eio.Promise.is_resolved served.ending);
+      Eio.Promise.resolve close ();
+      check ending_t "the close ends it" Pump.Client_gone (Eio.Promise.await served.ending);
+      check int "no further frame was written" 0 (Eio.Stream.length served.frames);
+      check int "the subscription is removed" 0 !live))
 ;;
 
 let () =
@@ -746,6 +769,10 @@ let () =
             test_a_keepalive_answered_stalled_ends_the_pump
         ; test_case "a pile-up behind a stalled send ends as stalled" `Quick
             test_a_pile_up_behind_a_stalled_send_ends_as_stalled
+        ] )
+    ; ( "closed response"
+      , [ test_case "a response that closes while the pump waits ends it" `Quick
+            test_a_response_that_closes_while_the_pump_waits_ends_it
         ] )
     ; ( "steps"
       , [ test_case "a skipped event writes nothing" `Quick test_a_skipped_event_writes_nothing

@@ -358,6 +358,7 @@ let serve_chat ~replayed items =
         ~idle:(fun () -> Pump.Finish)
         ~clock:(Eio.Stdenv.clock env)
         ~ping_interval_s:30.0
+        ~closed:Eio.Fiber.await_cancel
         ~send
     in
     List.rev !written, ending_name ending)
@@ -392,7 +393,9 @@ let serve_accepted ?(queued = []) ?(after_send = fun _ -> []) ?closed_from
         Sse.Written
     in
     let ending =
-      Stream.For_testing.serve_accepted_chat ~send ~queue ~acceptance_frame:acceptance
+      (* The stub response never closes; the stream ends through [send]. *)
+      Stream.For_testing.serve_accepted_chat ~send ~closed:Eio.Fiber.await_cancel ~queue
+        ~acceptance_frame:acceptance
         ~replay:(fun () -> replay) ~missed_terminal ~settled ~idle:idle_must_not_be_asked
         ~clock:(Eio.Stdenv.clock env) ~ping_interval_s:short_ping_interval_s
     in

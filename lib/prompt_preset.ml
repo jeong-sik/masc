@@ -131,8 +131,6 @@ let runtime_toml_path ~base_path =
   Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
 ;;
 
-let now_iso () = Time_codec.rfc3339_of_unix (Unix.gettimeofday ())
-
 (* The filesystem boundary raises; a preset call answers with [Error]. *)
 let guard f =
   match f () with
@@ -591,7 +589,7 @@ let capture ~base_path ~name ~description =
       Ok
         { name
         ; description
-        ; created_at = now_iso ()
+        ; created_at = Types_core.now_iso ()
         ; default_revisions = Some (Prompt_registry.default_revisions ())
           (* Everything the operator saved, not only what is in force. A
              snapshot taken while an override is refused has to carry it, or

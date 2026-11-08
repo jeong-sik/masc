@@ -50,6 +50,4 @@
   ; config/prompts/tool_help.md slots (RFC prompts-and-tool-definitions-outside-ocaml).
   ; prompt_registry sits on the workspace/core spine, not on keeper/runtime,
   ; so the leaf constraint above still holds.
-  masc.prompt_registry)
- (preprocess
-  (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))
+  masc.prompt_registry))

@@ -816,6 +816,9 @@ type keeper_runtime = {
   kr_failing_since : float option;
   (** If currently failing, when this continuous failing spell began (Unix seconds).
       [None] when healthy, or when unrecorded. *)
+  kr_recent_turns : Keeper_turn_pulse.pulse option;
+  (** Recent turn pulse window up to 24 samples (RFC-0511 §2.3 S1b).
+      [Some pulse] when seeded or recorded; [None] when null/unknown. *)
 }
 (** One row of [GET /api/v1/gate/keepers] — the live runtime reading of a
     keeper, as [masc_keeper_list] renders it.

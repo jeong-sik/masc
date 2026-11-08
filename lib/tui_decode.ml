@@ -177,6 +177,7 @@ type keeper_runtime = {
     ((Keeper_execution_receipt.operator_disposition_kind
      * Keeper_execution_receipt.operator_disposition_reason) option, string) result;
   kr_failing_since : float option;
+  kr_recent_turns : Keeper_turn_pulse.pulse option;
 }
 
 type keeper_lane_phase =
@@ -3226,6 +3227,38 @@ let decode_operator_disposition json =
     Error (Printf.sprintf "invalid operator_disposition wire fields: (%s, %s)"
              (Yojson.Safe.to_string other_kind) (Yojson.Safe.to_string other_reason))
 
+let decode_recent_turns json =
+  match member "recent_turns" json with
+  | `Assoc fields ->
+    let truncated =
+      match List.assoc_opt "truncated" fields with
+      | Some (`Bool b) -> b
+      | _ -> false
+    in
+    let turns =
+      match List.assoc_opt "turns" fields with
+      | Some (`List items) ->
+        List.filter_map
+          (function
+            | `List [ at_json; `String out_str ] ->
+              let at_opt =
+                match at_json with
+                | `Float f when Float.is_finite f -> Some f
+                | `Int i -> Some (Float.of_int i)
+                | _ -> None
+              in
+              (match at_opt, Keeper_turn_pulse.outcome_of_string out_str with
+               | Some at, Some outcome ->
+                 Some ({ Keeper_turn_pulse.at; outcome } : Keeper_turn_pulse.sample)
+               | _ -> None)
+            | _ -> None)
+          items
+      | _ -> []
+    in
+    Some ({ Keeper_turn_pulse.samples = turns; truncated } : Keeper_turn_pulse.pulse)
+  | `Null | _ -> None
+;;
+
 let decode_keeper_runtime ~account_revision json =
   let* kr_name = required_string_field json "name" in
   let* kr_portrait = Keeper_portrait_equipment.reading_of_json (member "portrait" json) in
@@ -3346,6 +3379,7 @@ let decode_keeper_runtime ~account_revision json =
          | `Float f when Float.is_finite f -> Some f
          | `Int i -> Some (Float.of_int i)
          | `Null | _ -> None)
+    ; kr_recent_turns = decode_recent_turns json
     }
 
 (* [truncated] is carried out rather than dropped: the route clamps its own

@@ -31,6 +31,20 @@ type binding_credential =
   | Credential_resolved of Secret.t
   | Credential_unresolved of { environment_variable : string }
 
+(** What a slot's deployment declares about its model for exact output. The
+    binding's [model_capabilities_override] is not this declaration: a
+    deployment can fill that override from the catalog's own answer, and a
+    copy of what the catalog answers states nothing about the model. *)
+type model_declaration =
+  | No_model_declaration
+      (** Only a catalog model row answers for the model. A model the catalog
+          has no row for leaves the slot out as [Target_model]. *)
+  | Declared_model of Capabilities.capabilities
+      (** What the deployment declares the model answers with. Where the
+          catalog has the binding's provider row and no row for its model,
+          the slot binds to that provider row and answers with these. A
+          model row, where there is one, answers instead. *)
+
 (** One exact-output slot: the binding it names. The caller already holds that
     binding as the typed config its ordinary requests run on, so it arrives
     whole rather than as a field list this module copies -- the wire, the
@@ -47,6 +61,8 @@ type declared_target =
       (** The exact request's body deadline. It is the one request fact a
           binding does not carry: ordinary requests stream, and this one does
           not. *)
+  ; model_declaration : model_declaration
+      (** Read only when the catalog has no row for the binding's model. *)
   }
 
 type resolver_catalog_input =
@@ -195,7 +211,10 @@ val load_resolver_snapshot
   -> (resolver_snapshot, resolver_snapshot_error) result
 (** Read, parse, and freeze the target catalog in one step: every later stage
     resolves against this snapshot, so a run cannot mix catalog generations.
-    Endpoints and credentials come from the supplied target binding. Every
+    Endpoints and credentials come from the supplied target binding. A target
+    binds to its catalog provider row and to its model row, or, where the
+    catalog has no row for the model, to the {!Declared_model} its deployment
+    states; [Target_model] is neither. Every
     declared target is bound and endpoint-checked under [target_binding_policy]:
     [Require_all_target_bindings] (the default) rejects the snapshot with
     {!Target_binding_missing} when a component is unbound, while

@@ -6,8 +6,8 @@ type exact_binding_error =
       (** No model entry of that provider declares the id passed as
           [~model_id]. Exact binding is identity-based, not prefix-based:
           the whole id must match. The payload is the provider entry that
-          was found, the row a binding declaring its own capabilities binds
-          to. *)
+          was found: a target whose deployment declares its model binds to
+          that row. *)
 
 type endpoint_error =
   | Malformed_base_url

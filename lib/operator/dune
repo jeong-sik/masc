@@ -36,11 +36,6 @@
   masc.prompt_registry)
  (preprocess
   (pps
-   ppx_deriving_yojson
-   ppx_deriving.show
-   ppx_deriving.eq
-   ppx_enumerate
-   ppx_let
-   ppx_tla))
+   ppx_enumerate))
  (instrumentation
   (backend bisect_ppx)))

@@ -72,6 +72,4 @@
   masc_types
   masc_core
   masc_log
-  masc_eio_context)
- (preprocess
-  (pps ppx_deriving.show ppx_deriving.eq ppx_tla)))
+  masc_eio_context))

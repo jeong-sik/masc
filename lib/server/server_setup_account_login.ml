@@ -301,12 +301,19 @@ let control ~owner ~base_path ~body request reqd =
 
 let verification_timeout_s = 120.0
 
+let verify_members = [ "provider_account_id"; "model" ]
+
+(* Exactly the two members, in either order. A repeated member leaves the
+   other one out, so it is refused too. *)
 let verify_request body =
-  try
-    match Yojson.Safe.from_string body with
-    | `Assoc [ ("provider_account_id", `String id); ("model", `String model) ] -> Ok (id, model)
-    | _ -> Error "Expected exactly provider_account_id and model."
-  with Yojson.Json_error _ -> Error "Invalid verification request."
+  let expected = "Expected exactly provider_account_id and model." in
+  match Yojson.Safe.from_string body with
+  | exception Yojson.Json_error _ -> Error "Invalid verification request."
+  | `Assoc fields when List.length fields = List.length verify_members ->
+    (match List.assoc_opt "provider_account_id" fields, List.assoc_opt "model" fields with
+     | Some (`String id), Some (`String model) -> Ok (id, model)
+     | _ -> Error expected)
+  | _ -> Error expected
 
 let unknown_account = "No account of yours has this id."
 

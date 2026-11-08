@@ -56,6 +56,8 @@ type person =
     [{"error": ...}] with a 401 or a 403. *)
 val person : Authz_state.t -> now_ms:int -> Auth_gate.request -> (person, Login_routes.answer) result
 
-(** A 200 JSON [{"provider_accounts": [...]}], the ids of the accounts the
-    person owns ({!Authz_provider_account.owned}). *)
+(** A 200 JSON [{"provider_accounts": [...], "runtimes": [...]}]: the ids of
+    the accounts the person owns ({!Authz_provider_account.owned}), and the
+    Runtimes they own as [{"runtime_id":...,"provider_account_id":...}]
+    ({!Authz_runtime.owned}). *)
 val provider_accounts : Authz_state.t -> person -> Login_routes.answer

@@ -7525,9 +7525,11 @@ let test_wizard_provider_models_share_catalog_authority () =
 (* A Tinker sampler checkpoint has no catalog row; only its provider has one
    (RFC-0514). A binding that declares the checkpoint's capabilities is an
    exact slot that answers with them. The same model with no capabilities
-   table is left out, as before. *)
+   table is left out, as before, and so is a table-less rowless model on the
+   Anthropic wire, whose override the preset fills. *)
 let test_a_rowless_model_is_an_exact_slot_when_its_binding_declares_capabilities () =
   let checkpoint = "tinker://example:train:0/sampler_weights/x" in
+  let messages_probe = "messages-rowless-probe" in
   let runtime_toml =
     Printf.sprintf
       {|[providers.tinker]
@@ -7550,29 +7552,47 @@ max-context = 262144
 
 [tinker.tableless]
 
+[providers.deepseek-anthropic]
+protocol = "messages-http"
+endpoint = "https://api.deepseek.com/anthropic"
+
+[models.messages-tableless]
+api-name = %S
+max-context = 131072
+
+[deepseek-anthropic.messages-tableless]
+
 [runtime]
 default = "tinker.declared"
 |}
       checkpoint
       checkpoint
+      messages_probe
   in
   let previous = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
   @@ fun () ->
   (* The embedded catalog: a tinker provider row and no checkpoint row, so
      only the provider's openai_chat preset answers. That preset has no
-     window and turns JSON mode, image and multimodal input on. *)
+     window and turns JSON mode, image and multimodal input on. The
+     deepseek-anthropic provider row answers the probe model the same way,
+     with its anthropic preset. *)
   Llm_provider.Catalog_snapshot.reset ();
-  (match
-     Llm_provider.Capabilities.request_policy_catalog_answer
-       (Llm_provider.Capabilities.resolve_snapshot_request_policy
-          ~snapshot:(Llm_provider.Catalog_snapshot.current ())
-          ~wire:Llm_provider.Provider_kind.OpenAI_compat ~provider_id:"tinker"
-          ~model_id:checkpoint)
-   with
-   | Llm_provider.Capabilities.Provider_preset _ -> ()
-   | Llm_provider.Capabilities.Model_row _ | Llm_provider.Capabilities.No_catalog_answer ->
-     fail "only the tinker provider preset answers for the checkpoint");
+  let require_preset_only ~wire ~provider_id ~model_id =
+    match
+      Llm_provider.Capabilities.request_policy_catalog_answer
+        (Llm_provider.Capabilities.resolve_snapshot_request_policy
+           ~snapshot:(Llm_provider.Catalog_snapshot.current ())
+           ~wire ~provider_id ~model_id)
+    with
+    | Llm_provider.Capabilities.Provider_preset _ -> ()
+    | Llm_provider.Capabilities.Model_row _ | Llm_provider.Capabilities.No_catalog_answer ->
+      failf "only the %s provider preset answers for %s" provider_id model_id
+  in
+  require_preset_only ~wire:Llm_provider.Provider_kind.OpenAI_compat ~provider_id:"tinker"
+    ~model_id:checkpoint;
+  require_preset_only ~wire:Llm_provider.Provider_kind.Anthropic
+    ~provider_id:"deepseek-anthropic" ~model_id:messages_probe;
   with_temp_runtime_toml runtime_toml @@ fun path ->
   let snapshot = snapshot_of_config ~label:"rowless checkpoint" path in
   (match Exact_output.admit_target_ref snapshot "tinker.declared" with
@@ -7587,11 +7607,18 @@ default = "tinker.declared"
        capabilities.supports_image_input;
      check bool "unwritten multimodal input stays off over the preset" false
        capabilities.supports_multimodal_inputs);
-  match Exact_output.admit_target_ref snapshot "tinker.tableless" with
-  | Error (Exact_output.Target_not_in_catalog target) ->
-    check string "the table-less binding is the one left out" "tinker.tableless" target
-  | Error _ -> fail "a table-less binding must be left out as not in the catalog"
-  | Ok _ -> fail "a table-less binding of a rowless model must not be an exact slot"
+  let require_left_out target_id =
+    match Exact_output.admit_target_ref snapshot target_id with
+    | Error (Exact_output.Target_not_in_catalog target) ->
+      check string "the table-less binding is the one left out" target_id target
+    | Error _ -> failf "%s must be left out as not in the catalog" target_id
+    | Ok _ -> failf "%s writes no capabilities table and must not be an exact slot" target_id
+  in
+  require_left_out "tinker.tableless";
+  (* The Anthropic wire fills this binding's capability override from the
+     anthropic preset, so that reasoning replays only within the latest user
+     turn. That copy is not a declaration either. *)
+  require_left_out "deepseek-anthropic.messages-tableless"
 ;;
 
 type materialized_catalog_fact = Context_window | Price_row

@@ -8,6 +8,8 @@
 #   1. HTTP/1.1 health check works (baseline)
 #   2. HTTP/2 h2c health check works
 #   3. The runtime reports the exact auto listener mode
+#   4. The HTTP/1.1 SSE endpoint streams
+#   5. Concurrent HTTP/1.1 connections while h2c may be active
 #   6. The TLS listener answers --http2 (ALPN h2) and --http1.1 on the same
 #      route table; skipped when transport-health says it is off
 
@@ -131,21 +133,28 @@ fi
 
 # Test 6: TLS listener (RFC-0512). ALPN picks h2 for --http2 and http/1.1 for
 # --http1.1 on the same route table. Skipped when the listener is off.
-https_status="$(jq -er '.https_listener.status' <<<"$transport_health_json" 2>/dev/null || echo missing)"
-https_port="$(jq -er '.https_listener.port' <<<"$transport_health_json" 2>/dev/null || true)"
+# Transport health is read again here: the TLS listener binds after the
+# cleartext one, so the JSON taken before Test 1 can still say not_started.
+tls_health_json="$(
+  curl -fsS --max-time 5 "${auth_args[@]}" \
+    "${MASC_HTTP_BASE_URL}/api/v1/dashboard/transport-health" 2>/dev/null || printf '%s' "$transport_health_json"
+)"
+https_status="$(jq -er '.https_listener.status' <<<"$tls_health_json" 2>/dev/null || echo missing)"
+https_port="$(jq -er '.https_listener.port' <<<"$tls_health_json" 2>/dev/null || true)"
 if [[ "$https_status" == "listening" && -n "$https_port" ]]; then
   https_base="${MASC_HTTPS_BASE_URL:-https://127.0.0.1:${https_port}}"
-  tls_h2_proto="$(curl -k -sf --max-time 5 -o /dev/null -w '%{http_version}' --http2 "${https_base}/health" 2>/dev/null || echo fail)"
-  if [[ "$tls_h2_proto" == "2" || "$tls_h2_proto" == "2.0" ]]; then
-    pass "HTTPS health over ALPN h2 (proto: ${tls_h2_proto})"
-  else
-    fail "HTTPS ALPN h2" "proto=${tls_h2_proto}"
-  fi
-  tls_h1_proto="$(curl -k -sf --max-time 5 -o /dev/null -w '%{http_version}' --http1.1 "${https_base}/health" 2>/dev/null || echo fail)"
-  if [[ "$tls_h1_proto" == "1.1" ]]; then
+  # Status and protocol together: a 400 from the request-authority gate would
+  # otherwise look like a failed ALPN negotiation.
+  tls_h2="$(curl -k -s --max-time 5 -o /dev/null -w '%{http_code} %{http_version}' --http2 "${https_base}/health" 2>/dev/null || echo "000 fail")"
+  case "$tls_h2" in
+    "200 2"|"200 2.0") pass "HTTPS health over ALPN h2 (${tls_h2})" ;;
+    *) fail "HTTPS ALPN h2" "status proto=${tls_h2}" ;;
+  esac
+  tls_h1="$(curl -k -s --max-time 5 -o /dev/null -w '%{http_code} %{http_version}' --http1.1 "${https_base}/health" 2>/dev/null || echo "000 fail")"
+  if [[ "$tls_h1" == "200 1.1" ]]; then
     pass "HTTPS health over ALPN http/1.1"
   else
-    fail "HTTPS ALPN http/1.1" "proto=${tls_h1_proto}"
+    fail "HTTPS ALPN http/1.1" "status proto=${tls_h1}"
   fi
 else
   skip "HTTPS listener" "status=${https_status}"

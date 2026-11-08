@@ -73,7 +73,7 @@ MASC가 명시적으로 **하지 않는 것**:
 |------|------|------|
 | Runtime | OCaml 5.x + Eio | Effect-based cooperative concurrency. Stdlib.Mutex 사용 금지 (EDEADLK). |
 | HTTP/1.1 | httpun-eio | 기본 transport. Cloudflare Tunnel 호환. |
-| HTTP/2 | h2-eio (h2c, TLS ALPN) | cleartext 8935 는 `MASC_USE_H2=auto`(H1/H2 자동 감지; `h2_only`는 H2 전용, `0`/`false`/`h1_only`는 H1 전용), TLS 8938 은 ALPN. 경로 표는 HTTP/1.1 과 하나다(RFC-0512). |
+| HTTP/2 | h2-eio (h2c, TLS ALPN) | cleartext 8935 는 `MASC_USE_H2=auto`(H1/H2 자동 감지; `h2_only`는 H2 전용, `0`/`h1_only`는 H1 전용), TLS 8938 은 ALPN. 경로 표는 HTTP/1.1 과 하나다(RFC-0512). |
 | TLS | mirage-crypto + tls-eio + x509 | 리스너 인증서: `transport.tls_cert_file`/`tls_key_file`, 없으면 `.masc/tls/` 자체 서명. 바깥으로 나가는 연결의 CA: `SSL_CERT_FILE` 환경변수. |
 | JSON | yojson | JSON 파싱/생성. `Yojson.Safe.t` 표준 사용. |
 | SQLite | sqlite3 | 로컬 경량 저장 (일부 모듈). |

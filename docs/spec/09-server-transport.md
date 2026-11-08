@@ -528,11 +528,11 @@ client는 허용한다. 로컬 Vite cross-port는 명시된 loopback dev-origin 
 
 cleartext 리스너(8935): `MASC_USE_H2=auto`는 같은 포트에서 HTTP/1.1과 HTTP/2 prior-knowledge 연결을 첫 바이트로 판별한다. `1`/`h2_only`는 HTTP/2만, `0`/`h1_only`는 HTTP/1.1만 받는다. 그 밖의 값은 서버 시작 전에 거부된다.
 
-TLS 리스너(8938, `transport.https_port`, 0 이면 끔): TLS 1.3 handshake 의 ALPN 결과로 h2 또는 http/1.1 연결 핸들러를 고른다. 인증서는 `transport.tls_cert_file`/`tls_key_file`, 없으면 `<base>/.masc/tls/` 의 자체 서명 인증서다. 브라우저와 cloudflared 는 ALPN 으로만 HTTP/2 를 고르므로 HTTP/2 멀티플렉싱은 이 리스너로 받는다. 설정·인증서·확인 명령은 `docs/guides/https-and-http2.md` 에 있다.
+TLS 리스너(8938, `transport.https_port`, 0 이면 끔): TLS 1.3 handshake 의 ALPN 결과로 h2 또는 http/1.1 연결 핸들러를 고른다. ALPN 없이 끝난 handshake 는 http/1.1 핸들러로 가고 `https_listener.alpn_none_total` 에 센다. 인증서는 `transport.tls_cert_file`/`tls_key_file`, 없으면 `<base>/.masc/tls/` 의 자체 서명 인증서다. 브라우저와 cloudflared 는 ALPN 으로만 HTTP/2 를 고르므로 HTTP/2 멀티플렉싱은 이 리스너로 받는다. 설정·인증서·확인 명령은 `docs/guides/https-and-http2.md` 에 있다.
 
 ### 8.2 동작 방식
 
-경로 표는 하나다(RFC-0512). H2 어댑터는 연결 층만 맡는다: 스트림 registry 와 요청 fiber(`Server_h2_stream_registry`), `H2.Request.t` 를 `Httpun.Request.t` 로 옮기기(`Http_reqd.request`: `:authority` 가 `host` 로, version 2.0), `:scheme`/`:authority` 검사(`Server_request_authority.classify_h2_request`), `Http_reqd.Http2` 손잡이 만들기. 그 뒤는 HTTP/1.1 과 같은 `Server_http_ingress.serve` 를 부른다(rate limit → MCP origin·버전 검사 → workspace 전제조건 → `Router.dispatch`, 인증은 route 안). 핸들러 서명이 `Httpun.Request.t -> Http_reqd.t -> unit` 하나라서 한쪽 전송에만 경로를 더하는 일이 생기지 않는다.
+경로 표는 하나다(RFC-0512). H2 어댑터는 연결 층만 맡는다: 스트림 registry 와 요청 fiber(`Server_h2_stream_registry`), `H2.Request.t` 를 `Httpun.Request.t` 로 옮기기(`Http_reqd.request_of_h2`: `:authority` 가 `host` 로, version 2.0), `:scheme`/`:authority` 검사(`Server_request_authority.classify_h2_request`), `Http_reqd.Http2` 손잡이 만들기. 그 뒤는 HTTP/1.1 과 같은 `Server_http_ingress.serve` 를 부른다(rate limit → MCP origin·버전 검사 → workspace 전제조건 → `Router.dispatch`, 인증은 route 안). 핸들러 서명이 `Httpun.Request.t -> Http_reqd.t -> unit` 하나라서 한쪽 전송에만 경로를 더하는 일이 생기지 않는다.
 
 응답은 `Http_reqd`(닫힌 합타입 `Http1 | Http2`)가 전송별로 쓴다. H2 쪽은 응답 자원 원장(`Http_h2_response_ledger`)에 바이트를 예약하고 flush 뒤 돌려준다. 예약이 안 되면 빈 503 `no-store` 로 답하고, 스트리밍 중 용량이 다하면 그 스트림만 리셋한다(`docs/guides/h2-response-resources.md`). connection 전용 헤더(`connection`, `keep-alive`, `proxy-connection`, `transfer-encoding`, `upgrade`)는 H2 응답에서 뺀다(RFC 9113 §8.2.2).
 

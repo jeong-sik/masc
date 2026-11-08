@@ -38,6 +38,15 @@ val category_selector_of_string_opt : string -> category_selector option
 (** Read a wire name, ignoring case and surrounding spaces. [None] for a name
     that is neither a category nor ["uncategorized"]. *)
 
+(** A closed diagnostic classification for the few entries a dashboard
+    projection re-reads by meaning instead of by log wording. In memory
+    only: the JSONL sink and the dashboard wire schema (LogEntryRawSchema)
+    are untouched, so rows restored from disk carry no kind and get
+    classified once at the load boundary. *)
+type diagnostic_kind =
+  | External_signal of string  (* "SIGTERM" | "SIGINT" — set by the server signal handler *)
+  | Agent_decode_failure       (* an agent record failed to decode (workspace / gRPC paths) *)
+
 val level_to_string : level -> string
 (** Convert level to string representation. *)
 
@@ -132,6 +141,7 @@ module Ring : sig
     message : string;
     details : Yojson.Safe.t;
     category : category option;
+    diagnostic_kind : diagnostic_kind option;
   }
 
   exception Entry_decode_error of string
@@ -245,7 +255,7 @@ val client_tool_host_error :
     [M.name] controls the env-var key MASC_LOG_{NAME}_LEVEL
     and the context prefix in log output. *)
 module type LOGGER = sig
-  val emit : level -> ?details:Yojson.Safe.t -> ?keeper_name:string -> ?turn_id:int -> ?category:category -> string -> unit
+  val emit : level -> ?details:Yojson.Safe.t -> ?keeper_name:string -> ?turn_id:int -> ?category:category -> ?diagnostic_kind:diagnostic_kind -> string -> unit
   val emit_lazy :
     level -> ?keeper_name:string -> ?turn_id:int -> ?category:category ->
     (unit -> string * Yojson.Safe.t) -> unit
@@ -268,9 +278,9 @@ module type LOGGER = sig
     ?category:category ->
     ('a, unit, string, unit) format4 ->
     'a
-  val debug : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
-  val info : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
-  val warn : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+  val debug : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ?diagnostic_kind:diagnostic_kind -> ('a, unit, string, unit) format4 -> 'a
+  val info : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ?diagnostic_kind:diagnostic_kind -> ('a, unit, string, unit) format4 -> 'a
+  val warn : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ?diagnostic_kind:diagnostic_kind -> ('a, unit, string, unit) format4 -> 'a
   val error : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
 end
 

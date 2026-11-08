@@ -649,38 +649,30 @@ let server_workspace_mismatch_for_tests ~server_repo_path (config : Workspace.co
   | None -> false
 ;;
 
-let shutdown_signal_of_message message =
-  if String_util.contains_substring message "Received SIGTERM"
-  then Some "SIGTERM"
-  else if String_util.contains_substring message "Received SIGINT"
-  then Some "SIGINT"
-  else None
-;;
-
 let runtime_diagnostics_json () =
   let entries = Log.Ring.recent ~limit:200 ~order:`Newest_first () in
   let diagnostics =
     entries
     |> List.filter_map (fun (entry : Log.Ring.entry) ->
-      let message = entry.message in
-      match shutdown_signal_of_message message with
-      | Some signal ->
+      (* Typed diagnostic classification (#49742). New entries are tagged at
+         their emission sites; rows restored from the JSONL sink were
+         classified once at the load boundary, so no substring matching
+         happens here. *)
+      match entry.diagnostic_kind with
+      | Some (Log.External_signal signal) ->
         Some
           (`Assoc
               [ "ts", `String entry.ts
               ; "kind", `String "external_signal"
               ; "signal", `String signal
-              ; "message", `String message
+              ; "message", `String entry.message
               ])
-      (* Matches the "invalid agent JSON" phrase that [Workspace_lifecycle],
-         [Workspace_gc] and [Masc_grpc_service] log when an agent record fails
-         to decode. *)
-      | None when String_util.contains_substring message "invalid agent JSON" ->
+      | Some Log.Agent_decode_failure ->
         Some
           (`Assoc
               [ "ts", `String entry.ts
               ; "kind", `String "agent_state"
-              ; "message", `String message
+              ; "message", `String entry.message
               ])
       | None -> None)
     |> take 8

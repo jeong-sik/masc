@@ -605,6 +605,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
             in
             Atomic.set shutdown_watchdog (Some watchdog);
             Log.Server.info
+              ~diagnostic_kind:(Log.External_signal signal_name)
               "[MASC] Received %s, shutting down gracefully (timeout=%.0fs, hard_exit=%d)..."
               signal_name force_timeout Masc.Shutdown.process_deadline_exit_code;
             (* Phase 1: Notify SSE clients *)

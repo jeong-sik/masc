@@ -345,6 +345,7 @@ let handle_heartbeat
                 | Workspace.Heartbeat_updated _ | Workspace.Agent_not_found _ -> ()
                 | Workspace.Agent_file_invalid actual_name ->
                   Log.Transport.warn
+                    ~diagnostic_kind:Log.Agent_decode_failure
                     "gRPC heartbeat: invalid agent JSON for %s"
                     actual_name);
               let active_agents = Workspace.get_active_agents workspace_config in

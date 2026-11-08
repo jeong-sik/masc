@@ -345,19 +345,19 @@
 (test
  (name test_msx_vision)
  (modules test_msx_vision)
- (libraries masc.lane_addon_call_context masc.msx_worker mcp_protocol mcp_protocol.eio eio.unix masc.machine_configuration alcotest unix base64 yojson fs_compat masc masc_test_deps
-   masc.msx_lane masc.masc_compression masc.multimodal masc.tool_types))
+ (libraries masc.lane_addon_call_context masc.msx_worker mcp_protocol mcp_protocol.eio eio.unix masc.machine_configuration alcotest unix base64 yojson fs_compat masc_test_deps
+   masc.msx_lane masc.masc_compression))
 
 (test
  (name test_dos_vision)
  (modules test_dos_vision)
- (libraries machine_worker_fixture mcp_protocol eio_main base64 masc.machine_configuration alcotest unix yojson fs_compat masc masc_test_deps
-   masc.dos_lane masc.multimodal masc.tool_types))
+ (libraries machine_worker_fixture eio_main base64 masc.machine_configuration alcotest unix yojson fs_compat masc masc_test_deps
+   masc.dos_lane masc.tool_types))
 
 (test
  (name test_sse_observer_epoch)
  (modules test_sse_observer_epoch)
- (libraries alcotest masc masc.sse_wire masc.time_compat masc_test_deps eio))
+ (libraries alcotest masc masc.sse_wire masc.time_compat masc_test_deps))
 
 (include stanzas/test_keeper_waiting_observer_scope.inc)
 

@@ -211,6 +211,44 @@ let test_composability_context_propagated () =
   Alcotest.(check bool) "key propagated" true v.passed
 ;;
 
+(* ── Model grader score extraction (#49742 cluster 7) ───────── *)
+
+let grader_config : Harness.Model_grader.config =
+  { prompt_template = "Goal: {goal}\nResult: {result}"; rubric = "correctness"; weight = 1.0 }
+;;
+
+let grade_with response =
+  Harness.Model_grader.grade ~complete_fn:(fun _prompt -> Ok response) grader_config
+    ~goal:"g" ~result:"r"
+;;
+
+let test_grader_marker_wins_over_earlier_decimal () =
+  (* A decimal in the explanation precedes the score line; the "Score:"
+     marker must decide, not the first float in the text. *)
+  let v =
+    grade_with
+      "The task involved 1.5 seconds of latency.\nScore: 0.8\nThe tool answer was correct."
+  in
+  Alcotest.(check (option (float 0.0001))) "marker score" (Some 0.8) v.score;
+  Alcotest.(check bool) "passed" true v.passed
+;;
+
+let test_grader_first_line_without_marker () =
+  let v = grade_with "0.85\nThe explanation mentions 1.5 seconds." in
+  Alcotest.(check (option (float 0.0001))) "first-line score" (Some 0.85) v.score
+;;
+
+let test_grader_whole_response_fallback () =
+  let v = grade_with "Explanation without numbers.\nFinal verdict 0.7 overall." in
+  Alcotest.(check (option (float 0.0001))) "fallback score" (Some 0.7) v.score
+;;
+
+let test_grader_no_score_fails () =
+  let v = grade_with "No numeric score anywhere here." in
+  Alcotest.(check (option (float 0.0001))) "no score" None v.score;
+  Alcotest.(check bool) "fails" false v.passed
+;;
+
 (* ── Test suite ──────────────────────────────────────────────── *)
 
 let () =
@@ -243,6 +281,21 @@ let () =
             "context_propagated"
             `Quick
             test_composability_context_propagated
+        ] )
+    ; ( "model_grader"
+      , [ Alcotest.test_case
+            "marker_wins_over_earlier_decimal"
+            `Quick
+            test_grader_marker_wins_over_earlier_decimal
+        ; Alcotest.test_case
+            "first_line_without_marker"
+            `Quick
+            test_grader_first_line_without_marker
+        ; Alcotest.test_case
+            "whole_response_fallback"
+            `Quick
+            test_grader_whole_response_fallback
+        ; Alcotest.test_case "no_score_fails" `Quick test_grader_no_score_fails
         ] )
     ]
 ;;

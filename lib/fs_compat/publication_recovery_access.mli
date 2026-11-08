@@ -282,7 +282,6 @@ val reconcile_owner
   -> owner:owner
   -> (Capability_recovery_reconciler.report, reconciliation_error) result
 
-val report_owner : Capability_recovery_reconciler.report -> string
 val report_is_ready : Capability_recovery_reconciler.report -> bool
 val report_to_yojson : Capability_recovery_reconciler.report -> Yojson.Safe.t
 

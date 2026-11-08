@@ -234,7 +234,6 @@ let identity_of_core identity =
   { device = Core.identity_dev identity; inode = Core.identity_ino identity }
 ;;
 
-let report_owner report = report.owner
 let report_rows report = report.rows
 
 let row_is_ready = function

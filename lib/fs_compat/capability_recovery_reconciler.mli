@@ -237,7 +237,6 @@ val reconcile_owner
   -> owner:Core.owner
   -> report
 
-val report_owner : report -> string
 val report_rows : report -> row list
 
 (** [true] exactly when every source record was transitioned to forensic (or

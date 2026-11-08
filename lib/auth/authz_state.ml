@@ -25,6 +25,7 @@ type t =
   ; sessions : Authz_session_state.t
   ; pats : Authz_pat_state.t
   ; service_credentials : Authz_service_credential_state.t
+  ; provider_accounts : Authz_provider_account_state.t
   ; revocation_pending : held list
   ; latest_at_ms : int option
   }
@@ -37,6 +38,7 @@ let empty =
   ; sessions = Authz_session_state.empty
   ; pats = Authz_pat_state.empty
   ; service_credentials = Authz_service_credential_state.empty
+  ; provider_accounts = Authz_provider_account_state.empty
   ; revocation_pending = []
   ; latest_at_ms = None
   }
@@ -116,6 +118,8 @@ type refusal =
   | Pat of Authz_pat_state.refusal
   | Service_credential_unreadable of Authz_service_credential_event.error
   | Service_credential of Authz_service_credential_state.refusal
+  | Provider_account_unreadable of Authz_provider_account_event.error
+  | Provider_account of Authz_provider_account_state.refusal
 
 let refusal_to_string = function
   | Before_bootstrap kind ->
@@ -191,6 +195,10 @@ let refusal_to_string = function
     "the Service credential record cannot be read: "
     ^ Authz_service_credential_event.error_to_string error
   | Service_credential refusal -> Authz_service_credential_state.refusal_to_string refusal
+  | Provider_account_unreadable error ->
+    "the provider account record cannot be read: "
+    ^ Authz_provider_account_event.error_to_string error
+  | Provider_account refusal -> Authz_provider_account_state.refusal_to_string refusal
 ;;
 
 type applied =
@@ -567,6 +575,23 @@ let service_credential state (record : R.t) =
        Ok { state = { state with service_credentials }; high_water })
 ;;
 
+(* A link takes no intent: cut back to before it, the account has no owner,
+   and no Runtime may spend it. *)
+let provider_account state (record : R.t) =
+  match Authz_provider_account_event.of_body record.R.body with
+  | Error error -> Error (Provider_account_unreadable error)
+  | Ok event ->
+    (match
+       Authz_provider_account_state.apply
+         state.provider_accounts
+         ~author:record.R.author
+         ~is_active:(Authz_principal_state.is_active state.principals)
+         event
+     with
+     | Error refusal -> Error (Provider_account refusal)
+     | Ok provider_accounts -> Ok { state = { state with provider_accounts }; high_water = None })
+;;
+
 (* Every kind but a mode event is matched with the mode, so the branch of a
    kind says what a record of it means before the bootstrap, and a layer gets
    the workspace of the bootstrap only from a branch that has one. *)
@@ -593,6 +618,8 @@ let read state (record : R.t) =
   | K.Internal_service_credential, Authz_mode_state.Multi_account _ -> service_credential state record
   | K.Internal_service_credential, Authz_mode_state.Off _ ->
     Error (Accounts_off K.Internal_service_credential)
+  | K.Provider_account, Authz_mode_state.Multi_account _ -> provider_account state record
+  | K.Provider_account, Authz_mode_state.Off _ -> Error (Accounts_off K.Provider_account)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
       | K.Principal
@@ -609,7 +636,8 @@ let read state (record : R.t) =
       | K.Revocation_cancel
       | K.Registration
       | K.Session
-      | K.Pat ) as kind )
+      | K.Pat
+      | K.Provider_account ) as kind )
     , Authz_mode_state.Not_bootstrapped -> Error (Before_bootstrap kind)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
@@ -713,7 +741,8 @@ let closed_by (record : R.t) =
   | K.Admin_assignment
   | K.Registration
   | K.Session
-  | K.Pat -> record.R.closes
+  | K.Pat
+  | K.Provider_account -> record.R.closes
 ;;
 
 let step state record =

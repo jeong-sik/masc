@@ -1,13 +1,6 @@
 (** TypeSafe AI (System One) core types and JSON codecs.
     Designed for zero-parsing, typed, calibrated decision models. *)
 
-type model =
-  | Jev_latest
-  | Jev_preview
-  | Custom of string
-
-val model_to_string : model -> string
-
 type choice_question =
   { instructions : string
   ; criteria : (string * string option) list

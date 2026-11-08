@@ -29,10 +29,12 @@ module Stream_end = struct
     in
     Eio.Switch.on_release stream_sw (fun () ->
       t.ended <- true;
+      (* The signal goes first: a flush answer that raised would otherwise
+         leave the stream's end unreported to a waiting producer. *)
+      Eio.Promise.resolve t.resolve_signal ();
       let answers = Hashtbl.fold (fun _ answer answers -> answer :: answers) t.waiting [] in
       Hashtbl.reset t.waiting;
-      List.iter (fun answer -> answer ()) answers;
-      Eio.Promise.resolve t.resolve_signal ());
+      List.iter (fun answer -> answer ()) answers);
     t
   ;;
 

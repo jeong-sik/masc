@@ -1294,9 +1294,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~input_source ~arg
     in
     let turn_result =
       let* result = turn_result in
-      let produced = match !natural_completion with
-        | true -> Option.to_list !produced_results
-        | false -> [] in
+      let produced = if !natural_completion then Option.to_list !produced_results else [] in
       on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption (tool_outbox :: produced)));
       Ok result
     in

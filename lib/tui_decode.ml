@@ -869,14 +869,6 @@ let decode_log_entry json =
           le_tools_used;
         }
 
-let parse_log_entry line =
-  let json =
-    try Ok (Yojson.Safe.from_string line)
-    with Yojson.Json_error msg -> Error ("invalid JSON: " ^ msg)
-  in
-  let* json = json in
-  decode_log_entry json
-
 let context_unavailable_reason_of_json json raw =
   let* raw_input_tokens = optional_int_field json "raw_input_tokens" in
   let* context_window = optional_int_field json "context_window" in

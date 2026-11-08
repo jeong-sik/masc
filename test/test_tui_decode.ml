@@ -14935,7 +14935,7 @@ let () =
       ; Alcotest.test_case "carries what the call answered" `Quick
           test_keeper_calls_carry_what_the_call_answered
       ] );
-    ( "parse_log_entry",
+    ( "decode_log_entry",
       [
         Alcotest.test_case "current turn contract" `Quick
           test_decode_current_turn_metrics;

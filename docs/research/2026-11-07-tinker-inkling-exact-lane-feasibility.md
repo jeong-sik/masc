@@ -2,6 +2,7 @@
 
 2026-11-07 조사. 코드 대조 기준은 `cd3b9cb38c8`(#49616 병합 뒤 main)이다.
 §3.1의 보내기 전 검사와 §4.5는 `cc630d4f224`에서 다시 대조했다.
+§5.2는 2026-11-08에 돌린 SFT 한 바퀴다. MASC 코드는 쓰지 않았다.
 [측정 기록](../evidence/research/2026-11-07-tinker-inkling-exact-lane/README.md)은 요청·답 원문 없이
 상태, 응답 모양, 사용량, 채점 결과만 남긴다.
 
@@ -21,8 +22,11 @@
 - Tinker OpenAI 호환 엔드포인트는 `response_format`을 받기만 하고 적용하지 않는다.
   답의 형식은 모델이 프롬프트 속 계약을 지키느냐에 달려 있다.
 - effort `none`은 긴 프롬프트에서 생각을 끄지 않는다. 레인 답 예산만 주면 답이 잘린다.
-- #49616으로 들어온 add-on과 runner는 배선이다. 실제 학습 효과를 보인 적은 없다.
+- #49616으로 들어온 add-on과 runner는 배선이다. 그 runner로 학습 효과를 보인 적은 없다.
   가이드와 템플릿에는 측정과 다른 값이 남아 있다(§5).
+- cookbook 렌더러로 LoRA rank 8을 25 step 학습했다(§5.2).
+  숨긴 규칙 과제의 고정 평가가 0/40에서 39/40으로 올랐다. 학습에 없던 이름·도시는 19/20이다.
+  학습 경로가 끝까지 통한다는 근거다. librarian 품질의 근거는 아니다.
 
 ## 1. 무엇을 확인하려 했나
 
@@ -236,6 +240,43 @@ Tinker까지 내려온 요청은 admission 2건뿐이었다.
 | 기본 effort | `reasoning-effort = "high"` | exact 레인 재생에서는 `low`가 가장 나았다 |
 | 가이드의 `tinker-inkling-2-small-none` | "Fast non-thinking profile for exact-output gates" | `none`도 긴 프롬프트에서 reasoning p50 7,238자, librarian 10/17 잘림 (§4.3) |
 
+### 5.2 SFT 한 바퀴 (2026-11-08)
+
+§6의 3번 중 SFT 쪽을 돌렸다.
+[SFT 측정 기록](../evidence/research/2026-11-08-tinker-inkling-sft-pipeline-check/README.md)에 스크립트, 행, 통과선이 있다.
+과제는 숨긴 규칙으로 레코드를 부호로 바꾸는 일이다(`alice 7 seoul` → `ALICE#007#SEO`).
+프롬프트에 규칙이 없어서 학습 전 모델은 맞힐 수 없다.
+
+- 데이터는 cookbook 0.6.1의 Inkling 2 렌더러(`tml_v0`)로 만들었다. §2의 바이트 토큰은 쓰지 않았다.
+- LoRA rank 8로 160건을 5 epoch(25 step) 학습했다. 학습 데이터의 effort는 부를 때 쓰는 `low`와 같은 0.2다.
+- 학습 전후에 같은 평가 40건을 §4.4의 MASC exact 요청 모양으로 보냈다.
+  학습 뒤에는 `tinker://` sampler 경로를 모델 이름으로 넣었다.
+
+| | 기본 모델 | 학습 뒤 |
+| --- | --- | --- |
+| 정확 일치 | 0/40 | 39/40 |
+| 학습에 없던 이름·도시 | 0/20 | 19/20 |
+| reasoning 글자 p50 | 1,480 | 0 |
+| completion 토큰 p50 (최대) | 403 (4,096) | 19 (20) |
+| 지연 p50 | 4.86초 | 1.09초 |
+
+미리 고정한 통과선 셋을 모두 넘었다.
+기본 모델 0.10 이하, 학습 뒤 0.80 이상, 마지막 step NLL이 첫 step의 절반 이하다.
+학습 NLL은 3.54에서 0.00001로 내려갔다.
+스크립트가 공개 단가로 계산한 비용은 $0.18이다. 청구서와는 맞춰 보지 않았다.
+
+- **학습 경로는 끝까지 통한다.** 렌더러, LoRA 학습, sampler 저장, OpenAI 호환 샘플링이 이어진다.
+- **답만 담아 학습한 모델은 생각을 건너뛰었다.** 학습 데이터의 모델 차례에는 생각 블록이 없었다.
+  학습 뒤 모델은 effort `low`로 불러도 40건 모두 생각 없이 바로 답했다.
+  librarian SFT 데이터에 교사의 생각을 넣을지 먼저 정해야 한다.
+- **Tinker 기본 출력 한도 4,096을 다시 봤다.** 기본 모델 2건은 생각만 하다 4,096 토큰에서 끊겼다.
+  두 답 모두 content가 비었다(§4.4).
+
+이 결과는 librarian 품질의 근거가 아니다. 과제가 단순한 문자열 규칙이다.
+MASC 레인이 체크포인트를 부른 적도 없다. exact 슬롯은 카탈로그 행에만 붙는다(§6의 1번).
+체크포인트를 exact 슬롯에 두려면 적어도 그 경로의 카탈로그 행이 있어야 한다.
+체크포인트(sampler, 4.17GB)는 2026-11-11 09:39Z에 만료된다.
+
 ## 6. 다음에 해 볼 것
 
 1. **keeper-librarian 슬롯.** 2026-11-07 16:09Z 재시작부터 keeper-librarian Lane Add-on의 `admission`·`durable` 출력에서 GLM 다음 슬롯에 `low`로 있다.
@@ -251,16 +292,18 @@ Tinker까지 내려온 요청은 admission 2건뿐이었다.
    그 ID의 단가와 통과선은 보내기 전에 정한다.
    긴 admission 31건이 모두 유효해도, 창 안 실패 5건이 그대로면 이 표본의 admission은 81/86 = 0.942다.
    라이브에서 Tinker까지 내려온 두 요청(251,251·280,850 토큰)은 256K 창에도 하나가 넘는다. 이 두 요청은 part 크기 문제다(#49910).
-3. **학습 파이프라인 확인.** cookbook `sl_basic`·`rl_basic`에 Inkling 2 렌더러와
-   샘플링 logprob을 붙여 한 바퀴 돌린다. 기준은 고정한 평가 세트의 점수가 오르는가다.
+3. **학습 파이프라인 확인.** SFT 쪽은 2026-11-08에 통과했다(§5.2).
+   남은 것은 RL 쪽이다. cookbook `rl_basic`에 샘플링 logprob을 붙여 한 바퀴 돌린다.
+   기준은 같다. 고정한 평가 세트의 점수가 오르는가다.
 4. **librarian 처분 규칙 SFT.** 합성 입력, Tinker 교사 답, 결정론 검사로 데이터를 만든다.
-   실제 기록은 평가에만 쓴다. 3번이 통과한 뒤에 한다.
+   실제 기록은 평가에만 쓴다. 3번의 SFT 쪽이 통과해서 시작할 수 있다.
+   데이터에 교사의 생각을 넣을지 먼저 정한다. 답만 넣으면 학습 뒤 모델이 생각을 건너뛸 수 있다(§5.2).
 
 board는 0.9를 넘는 후보가 생기기 전까지 클라우드에 둔다.
 
 ## 출처
 
-확인 시각은 모두 2026-11-07이다.
+확인 시각은 따로 적지 않으면 2026-11-07이다.
 
 | 출처 | 쓴 곳 | 신뢰도 |
 | --- | --- | --- |
@@ -271,5 +314,7 @@ board는 0.9를 넘는 후보가 생기기 전까지 클라우드에 둔다.
 | [Tinker pricing](https://thinkingmachines.ai/tinker/pricing/) | serverless 단가 "as of October 19, 2026" | High |
 | [Inkling 2 Small 발표](https://thinkingmachines.ai/news/inkling-2-small/) | 닫힌 가중치, 공개 계획 | High(문구) · Low(시점) |
 | [측정 기록](../evidence/research/2026-11-07-tinker-inkling-exact-lane/README.md) | §3, §4 | High(이 표본) |
+| [SFT 측정 기록](../evidence/research/2026-11-08-tinker-inkling-sft-pipeline-check/README.md) (2026-11-08) | §5.2 | High(이 표본) |
+| `tinker-cookbook` 0.6.1, `tinker` 0.39.0 PyPI 배포본 소스 (2026-11-08) | §5.2 렌더러, 학습·저장 호출 | High |
 | 2026-09 로컬 벤치 `REPORT.md`, `LIVE-WIRING-ROLLBACK.md` | 비교값, 42초 기준 | High |
 | 라이브 provider-inputs 집계(스크립트 미보존) | §5 요청 크기, 회사 쪽 몫 | Medium |

@@ -42,10 +42,7 @@ let perform_bound ~config ~who ~role body =
     response ~viewer:who (Error (Play_room.Invalid_request "body must be JSON"))
   | json ->
     match Workspace.validate_expected_workspace ~config json with
-    | Error Workspace.Invalid_workspace_precondition ->
-      `Bad_request, Server_refusal.json ~code:"invalid_workspace_precondition" "invalid expected_workspace precondition"
-    | Error Workspace.Workspace_precondition_failed ->
-      `Conflict, Server_refusal.json ~code:"workspace_precondition_failed" "workspace precondition failed"
+    | Error error -> Server_refusal.expected_workspace_error error
     | Ok args -> perform ~base_path:config.Workspace.base_path ~who ~role (Yojson.Safe.to_string args)
         |> response ~viewer:who
 let add_routes router =

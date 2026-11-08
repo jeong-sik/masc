@@ -49,12 +49,7 @@ let decode_issue body =
 let workspace_precondition ~config json =
   match Workspace.validate_expected_workspace ~config json with
   | Ok args -> Ok args
-  | Error Workspace.Invalid_workspace_precondition ->
-    Error (`Bad_request, Server_refusal.json ~code:"invalid_workspace_precondition"
-      "invalid expected_workspace precondition")
-  | Error Workspace.Workspace_precondition_failed ->
-    Error (`Conflict, Server_refusal.json ~code:"workspace_precondition_failed"
-      "workspace precondition failed")
+  | Error error -> Error (Server_refusal.expected_workspace_error error)
 
 let issue_response ~config ~body =
   match Yojson.Safe.from_string body with

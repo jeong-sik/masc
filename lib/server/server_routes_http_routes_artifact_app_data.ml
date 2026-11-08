@@ -21,10 +21,9 @@ let decode_request ~config body =
     | exception Yojson.Json_error _ -> Error (error_response (Store.Invalid "invalid application input JSON")) in
   let* json = match Workspace.validate_expected_workspace ~config json with
     | Ok json -> Ok json
-    | Error Workspace.Invalid_workspace_precondition ->
-      Error (Server_refusal.json ~code:"invalid_workspace_precondition" "invalid expected_workspace precondition", `Bad_request)
-    | Error Workspace.Workspace_precondition_failed ->
-      Error (Server_refusal.json ~code:"workspace_precondition_failed" "workspace precondition failed", `Conflict) in
+    | Error error ->
+      let status, body = Server_refusal.expected_workspace_error error in
+      Error (body, status) in
   Data.request_of_json json |> Result.map_error (fun message -> error_response (Store.Invalid message))
 let read ~base_path ~actor ~request =
     match extract_path_param ~prefix:"/api/v1/artifact-app-data/" (Http.Request.path request), query_param request "revision" with

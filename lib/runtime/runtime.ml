@@ -2150,7 +2150,7 @@ let warn_rejected_exact_output_slots registry =
        match diagnosis with
        | Runtime_exact_output_registry.Declared_target_binding_rejected ->
          Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because the binding it names resolved to no AGENT_CORE catalog row (see the target binding report above); an endpoint the install wizard created can never match one, so point the slot at a binding the catalog knows or add the row"
+           "exact_output: lane %S slot %d (%S) ignored because the binding it names resolved to no AGENT_CORE catalog row (see the target binding report above); an endpoint the install wizard created can never match one, so point the slot at a binding the catalog knows or add the row; a model with no row under a provider the catalog has a row for becomes a slot when its runtime.toml model declares a [models.<id>.capabilities] table"
            slot.lane_id
            slot.position
            slot.slot_id

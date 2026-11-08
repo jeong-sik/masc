@@ -7518,6 +7518,62 @@ let test_wizard_provider_models_share_catalog_authority () =
       (List.exists (fun row -> model_id row = "deepseek-v4-pro") proxy))
 ;;
 
+(* A Tinker sampler checkpoint has no catalog row; only its provider has one
+   (RFC-0514). A binding that declares the checkpoint's capabilities is an
+   exact slot that answers with them. The same model with no capabilities
+   table is left out, as before. *)
+let test_a_rowless_model_is_an_exact_slot_when_its_binding_declares_capabilities () =
+  let checkpoint = "tinker://example:train:0/sampler_weights/x" in
+  let runtime_toml =
+    Printf.sprintf
+      {|[providers.tinker]
+protocol = "openai-compatible-http"
+endpoint = "https://tinker.example/v1"
+
+[models.declared]
+api-name = %S
+max-context = 262144
+
+[models.declared.capabilities]
+supports-response-format-json = false
+supports-structured-output = false
+
+[models.tableless]
+api-name = %S
+max-context = 262144
+
+[tinker.declared]
+
+[tinker.tableless]
+
+[runtime]
+default = "tinker.declared"
+|}
+      checkpoint
+      checkpoint
+  in
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
+  @@ fun () ->
+  (* The embedded catalog: a tinker provider row and no checkpoint row. *)
+  Llm_provider.Catalog_snapshot.reset ();
+  with_temp_runtime_toml runtime_toml @@ fun path ->
+  let snapshot = snapshot_of_config ~label:"rowless checkpoint" path in
+  (match Exact_output.admit_target_ref snapshot "tinker.declared" with
+   | Error _ -> fail "a binding that declares capabilities must be an exact slot"
+   | Ok admitted ->
+     let capabilities = (Exact_output.projection_target admitted).capabilities in
+     check (option int) "the slot answers with the declared window" (Some 262144)
+       capabilities.max_context_tokens;
+     check bool "the slot answers with the declared JSON mode" false
+       capabilities.supports_response_format_json);
+  match Exact_output.admit_target_ref snapshot "tinker.tableless" with
+  | Error (Exact_output.Target_not_in_catalog target) ->
+    check string "the table-less binding is the one left out" "tinker.tableless" target
+  | Error _ -> fail "a table-less binding must be left out as not in the catalog"
+  | Ok _ -> fail "a table-less binding of a rowless model must not be an exact slot"
+;;
+
 type materialized_catalog_fact = Context_window | Price_row
 
 let test_runtime_selection_owns_catalog ~initially_known ~fact () =
@@ -7975,6 +8031,9 @@ let () =
         ; test_case
             "wizard model rows use provider catalog authority"
             `Quick test_wizard_provider_models_share_catalog_authority
+        ; test_case
+            "a rowless model is an exact slot when its binding declares capabilities"
+            `Quick test_a_rowless_model_is_an_exact_slot_when_its_binding_declares_capabilities
         ] )
     ; ( "lsp servers"
       , [ test_case "reads a command per language" `Quick test_lsp_servers_reads_a_command_per_language

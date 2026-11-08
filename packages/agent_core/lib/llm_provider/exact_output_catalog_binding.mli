@@ -2,10 +2,12 @@ type exact_binding_error =
   | Provider_missing
       (** No provider entry in the catalog has the id passed as
           [~provider_ref]. *)
-  | Model_missing
+  | Model_missing of Model_catalog.provider_entry
       (** No model entry of that provider declares the id passed as
           [~model_id]. Exact binding is identity-based, not prefix-based:
-          the whole id must match. *)
+          the whole id must match. The payload is the provider entry that
+          was found, the row a binding declaring its own capabilities binds
+          to. *)
 
 type endpoint_error =
   | Malformed_base_url

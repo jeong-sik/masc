@@ -132,6 +132,15 @@ type target_declaration =
          it, not a second place to write them. *)
   }
 
+(* What answers for a bound target's model. A catalog row answers when the
+   provider has one. A model the catalog has no row for answers with the
+   capabilities its binding declares, which is what the binding's own
+   requests already run on; a catalog-document target has no binding, so it
+   binds only to a row. *)
+type target_model =
+  | Catalog_row of Model_catalog.model_entry
+  | Binding_declared of Caps.capabilities
+
 type credential_outcome =
   | Credential_not_required
   | Credential_available of Secret.t
@@ -718,8 +727,16 @@ let load_resolver_snapshot
              ~model_id:target.model_id
          with
          | Error Binding.Provider_missing -> reject Target_provider
-         | Error Binding.Model_missing -> reject Target_model
-         | Ok (provider, model) -> Ok ((target, provider, model) :: bindings, rejected))
+         | Error (Binding.Model_missing provider) ->
+           (match target.wire with
+            | Binding_wire { config = binding; credential = _ } ->
+              (match binding.PC.model_capabilities_override with
+               | Some capabilities ->
+                 Ok ((target, provider, Binding_declared capabilities) :: bindings, rejected)
+               | None -> reject Target_model)
+            | Catalog_provider_wire -> reject Target_model)
+         | Ok (provider, model) ->
+           Ok ((target, provider, Catalog_row model) :: bindings, rejected))
       (Ok ([], []))
       target_declarations
   in
@@ -729,10 +746,23 @@ let load_resolver_snapshot
       (fun result
         ( (target : target_declaration)
         , (provider : Model_catalog.provider_entry)
-        , (model : Model_catalog.model_entry) ) ->
+        , (model : target_model) ) ->
          let* targets = result in
-         let catalog_policy = Binding.anthropic_thinking_control_of_model model in
+         (* A model with no row has no catalog policy; only its binding's own
+            declaration, read below, can state one. *)
+         let catalog_policy =
+           match model with
+           | Catalog_row model -> Binding.anthropic_thinking_control_of_model model
+           | Binding_declared _ -> None
+         in
          let* () = Ok () in
+         (* What the model answers with on [wire]: its frozen row laid over the
+            base that wire selects, or the capabilities its binding declared. *)
+         let model_capabilities ~wire =
+           match model with
+           | Catalog_row model -> Binding.capabilities_of_catalog_binding ?wire provider model
+           | Binding_declared capabilities -> capabilities
+         in
          (* The wire, and with it the capabilities a request on that wire can
             express and the reasoning stance it has to state. A binding answers
             with the config its ordinary requests already run on: its own
@@ -745,7 +775,7 @@ let load_resolver_snapshot
              , provider.base_url
              , provider.request_path
              , false
-             , Binding.capabilities_of_catalog_binding provider model )
+             , model_capabilities ~wire:None )
            | Binding_wire { config = binding; credential = _ } ->
              ( binding.PC.kind
              , binding.PC.base_url
@@ -758,11 +788,7 @@ let load_resolver_snapshot
                binding.PC.reasoning_uncontrolled
              , (match binding.PC.model_capabilities_override with
                 | Some capabilities -> capabilities
-                | None ->
-                  Binding.capabilities_of_catalog_binding
-                    ~wire:binding.PC.kind
-                    provider
-                    model) )
+                | None -> model_capabilities ~wire:(Some binding.PC.kind)) )
          in
          let* () = validate_base_url ~target_ref:target.target_ref base_url in
          let* () =

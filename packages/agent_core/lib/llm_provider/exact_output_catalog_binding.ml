@@ -3,7 +3,7 @@ module PC = Provider_config
 
 type exact_binding_error =
   | Provider_missing
-  | Model_missing
+  | Model_missing of Model_catalog.provider_entry
 
 type endpoint_error =
   | Malformed_base_url
@@ -153,7 +153,7 @@ let resolve_exact ~catalog ~provider_ref ~model_id =
             | Ok requested -> Model_identifiers.Model_id.equal entry.model_id requested
             | Error _ -> false)
      with
-     | None -> Error Model_missing
+     | None -> Error (Model_missing provider)
      | Some model -> Ok (provider, model))
 ;;
 

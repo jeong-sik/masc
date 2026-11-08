@@ -19,17 +19,16 @@ val authority_scheme : Server_request_authority.authority -> string
     issued on the TLS listener stays on https. *)
 
 val canonical_loopback_location
-  :  default_port:int
-  -> request_authority:Server_request_authority.authority
+  :  request_authority:Server_request_authority.authority
   -> Httpun.Request.t
   -> string option
 (** [Some redirect_url] when the admitted authority advertises a non-canonical
     loopback host that should redirect, [None] when it already matches the
-    canonical advertisement. *)
+    canonical advertisement. The redirect keeps the admitted authority's
+    scheme and its port, or the scheme default when the request named none. *)
 
 val with_canonical_loopback_host
-  :  port:int
-  -> (Httpun.Request.t -> Http_reqd.t -> unit)
+  :  (Httpun.Request.t -> Http_reqd.t -> unit)
   -> Httpun.Request.t
   -> Http_reqd.t
   -> unit

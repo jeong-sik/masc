@@ -14,8 +14,9 @@ let respond_redirect = Server_canonical_host.respond_redirect
 let authority_host_port = Server_canonical_host.authority_host_port
 let canonical_loopback_location = Server_canonical_host.canonical_loopback_location
 
-let canonical_root_dashboard_location ~default_port ~request_authority =
-  let host, port = authority_host_port ~default_port request_authority in
+let canonical_root_dashboard_location ~request_authority =
+  let host = Server_request_authority.host request_authority in
+  let port = Server_request_authority.port_or_default request_authority in
   let canonical_host = Transport_read_model.normalize_advertised_host host in
   if String.equal canonical_host host then
     None
@@ -166,17 +167,17 @@ let add_routes ?sw ?clock ~port router =
      carried a kind. *)
   |> Server_route.get
        (Server_route.Public_read_on_canonical_host
-          { port; when_strict = Route_access.Open_when_strict })
+          { when_strict = Route_access.Open_when_strict })
        "/dashboard"
        (fun _state req reqd -> serve_dashboard_index req reqd)
   |> Server_route.get
        (Server_route.Public_read_on_canonical_host
-          { port; when_strict = Route_access.Open_when_strict })
+          { when_strict = Route_access.Open_when_strict })
        "/dashboard/"
        (fun _state req reqd -> serve_dashboard_index req reqd)
   |> Server_route.prefix_get
        (Server_route.Public_read_on_canonical_host
-          { port; when_strict = Route_access.Open_when_strict })
+          { when_strict = Route_access.Open_when_strict })
        "/dashboard/"
        (fun _state req reqd ->
          let req_path = Http.Request.path req in
@@ -205,7 +206,7 @@ let add_routes ?sw ?clock ~port router =
   |> Server_route.get Server_route.Always_public "/" (fun request reqd ->
        let request_authority = Server_request_authority.current_exn () in
        match
-         canonical_root_dashboard_location ~default_port:port ~request_authority
+         canonical_root_dashboard_location ~request_authority
        with
        | Some location -> respond_redirect ~location reqd
        | None -> redirect_to_dashboard reqd)

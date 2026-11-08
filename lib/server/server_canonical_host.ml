@@ -27,12 +27,12 @@ let authority_scheme request_authority =
     (Server_request_authority.scheme request_authority)
 ;;
 
-let canonical_loopback_location
-    ~default_port
-    ~request_authority
-    (request : Httpun.Request.t)
-  =
-  let host, port = authority_host_port ~default_port request_authority in
+(* The redirect names the admitted authority's port, or its scheme's default
+   when the request named none: a port-less Host is admitted only when the
+   listener sits on that default, so the redirect reaches the same listener. *)
+let canonical_loopback_location ~request_authority (request : Httpun.Request.t) =
+  let host = Server_request_authority.host request_authority in
+  let port = Server_request_authority.port_or_default request_authority in
   let canonical_host = Transport_read_model.normalize_advertised_host host in
   if String.equal canonical_host host then
     None
@@ -45,10 +45,10 @@ let canonical_loopback_location
          port
          request.target)
 
-let with_canonical_loopback_host ~port handler request reqd =
+let with_canonical_loopback_host handler request reqd =
   let request_authority = Server_request_authority.current_exn () in
   match
-    canonical_loopback_location ~default_port:port ~request_authority request
+    canonical_loopback_location ~request_authority request
   with
   | Some location -> respond_redirect ~location reqd
   | None -> handler request reqd

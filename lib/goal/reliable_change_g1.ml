@@ -1,5 +1,13 @@
 open Yojson.Safe.Util
 
+(* Last element without building a reversed copy. The callers sort lists
+   they just built from non-empty inputs; the explicit [invalid_arg] replaces
+   the partial [List.hd (List.rev _)] crash with a named one. *)
+let last lst =
+  match lst with
+  | [] -> invalid_arg "reliable_change_g1.last: empty list"
+  | x :: _ -> List.fold_left (fun _ y -> y) x lst
+
 type scenario =
   | Success
   | Exit_nonzero
@@ -323,7 +331,7 @@ let aggregate_run_usages (observations : run_observation list) : usage_totals =
                 | c -> c)
              matching
          in
-         List.hd (List.rev sorted))
+         last sorted)
       request_ids
   in
   let all_countable = distinct_per_request @ latest_cumulative in
@@ -540,10 +548,10 @@ let check_observations
            run
        in
        let sorted_attempts = List.map fst sorted_run in
-       let final_attempt, final_scenario = List.hd (List.rev sorted_run) in
+       let final_attempt, final_scenario = last sorted_run in
        let first_attempt = List.hd sorted_attempts in
        let revision_checks = List.map check_verified_revision sorted_attempts in
-       let final_revision_valid = List.hd (List.rev revision_checks) in
+       let final_revision_valid = last revision_checks in
        let run_valid = ref (List.for_all Fun.id revision_checks) in
 
        (* Check for duplicated usage within run *)
@@ -886,10 +894,10 @@ let check_observations
            run
        in
        let sorted_attempts = List.map fst sorted_run in
-       let final_attempt, final_scenario = List.hd (List.rev sorted_run) in
+       let final_attempt, final_scenario = last sorted_run in
        let first_attempt = List.hd sorted_attempts in
        let revision_checks = List.map check_verified_revision sorted_attempts in
-       let final_revision_valid = List.hd (List.rev revision_checks) in
+       let final_revision_valid = last revision_checks in
        let run_valid = ref (List.for_all Fun.id revision_checks) in
 
        (match final_scenario with

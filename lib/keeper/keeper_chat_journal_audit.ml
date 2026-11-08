@@ -329,7 +329,8 @@ let compare entries rows =
   | [] -> Journal_truncated
   | _ ->
     let first_ts = (List.hd entries).Journal.ts in
-    let last_ts = (List.hd (List.rev entries)).Journal.ts in
+    let last_ts =
+      (List.fold_left (fun _ e -> e) (List.hd entries) entries).Journal.ts in
     let joined =
       List.filter
         (fun row -> not (is_surface_post_row ~first_ts ~last_ts row))
@@ -419,7 +420,8 @@ let join_rows ~operation_id entries all =
     | [] -> []
     | _ ->
       let first_ts = (List.hd entries).Journal.ts in
-      let last_ts = (List.hd (List.rev entries)).Journal.ts in
+      let last_ts =
+        (List.fold_left (fun _ e -> e) (List.hd entries) entries).Journal.ts in
       List.filter (fun row -> is_surface_post_row ~first_ts ~last_ts row) all
   in
   dedupe_by_id (transcript_rows @ key_or_ref_rows @ window_rows)

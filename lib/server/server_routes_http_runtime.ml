@@ -114,7 +114,7 @@ let agent_card_json ~request_authority request =
         `Assoc
           [
             ("mcp", `String (base_url ^ "/mcp"));
-            ("health", `String (base_url ^ "/health"));
+            ("health", `String (base_url ^ Server_health_paths.health));
             ("dashboard", `String (base_url ^ "/dashboard/"));
             ("websocket", `String (base_url ^ "/ws"));
           ] );

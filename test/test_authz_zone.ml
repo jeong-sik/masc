@@ -358,6 +358,8 @@ let refusal_name : Authz_state.refusal -> string = function
   | Authz_state.Provider_account _ -> "Provider_account"
   | Authz_state.Runtime_unreadable _ -> "Runtime_unreadable"
   | Authz_state.Runtime _ -> "Runtime"
+  | Authz_state.Keeper_unreadable _ -> "Keeper_unreadable"
+  | Authz_state.Keeper _ -> "Keeper"
 ;;
 
 let error_name : Z.error -> string = function

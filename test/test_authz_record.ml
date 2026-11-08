@@ -48,6 +48,7 @@ let writers_of =
     ; Pat, authenticated
     ; Provider_account, authenticated
     ; Runtime, authenticated
+    ; Keeper, authenticated
     ]
 ;;
 
@@ -85,6 +86,7 @@ let ordinal = function
   | R.Kind.Pat -> 17
   | R.Kind.Provider_account -> 18
   | R.Kind.Runtime -> 19
+  | R.Kind.Keeper -> 20
 ;;
 
 let kinds_are_all_listed () =
@@ -415,6 +417,7 @@ let kind_labels_are_the_names_on_disk () =
     ; "pat"
     ; "provider_account"
     ; "runtime"
+    ; "keeper"
     ]
     (List.map R.Kind.to_string R.Kind.all)
 ;;

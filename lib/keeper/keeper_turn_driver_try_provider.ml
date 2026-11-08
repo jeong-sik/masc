@@ -1098,6 +1098,11 @@ type attempt_state =
         (* Set by each composition: the atom count of the request it composed
            when demoting the tool results and bound arguments in those atoms
            would carry fewer bytes, [None] when it would change nothing. *)
+  ; retained_results : Keeper_client_tool_outbox.run_carrier
+        (* The run's first attempt loads the outbox; every later attempt
+           carries that snapshot in the form the capacity-refusal hook left
+           it, and acknowledges that snapshot (RFC
+           retained-results-carrier-shrinks-to-an-address §5.1, §6.1). *)
   }
 
 (* The ledger's session: the history the carried positions belong to. The
@@ -1122,6 +1127,13 @@ let new_attempt_state (ctx : try_provider_ctx) =
           ~session_id:(ledger_session ctx))
   ; current_turn_results = ref Current_turn_verbatim
   ; current_turn_demotion = ref None
+  ; retained_results =
+      (* Read from [ctx.tools], the request's own tools, as the model input
+         references below read [blob_reader_available]. *)
+      Keeper_client_tool_outbox.run_carrier ~base_path:ctx.base_path
+        ~keeper_name:ctx.keeper_name
+        ~artifact_reader_available:
+          (Result.is_ok (Keeper_recovery_transmission.require_reader ctx.tools))
   }
 ;;
 
@@ -2590,17 +2602,18 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
   let agent_before_attempt = !attempt_agent_ref in
   let config_result =
     Result.bind config_result (fun config ->
-      let snapshot = match ctx.request_input with
+      let retained = match ctx.request_input with
         | Completion_review -> Ok None
         | Keeper_history _ ->
-          Keeper_client_tool_outbox.load ~base_path:ctx.base_path ~keeper_name:ctx.keeper_name
+          Keeper_client_tool_outbox.run_carrier_load state.retained_results
           |> Result.map Option.some
           |> Result.map_error (fun detail -> Agent_core.Error.Internal detail) in
-      Result.map (fun snapshot -> config, snapshot) snapshot)
+      Result.map (fun retained -> config, retained) retained)
   in
   match config_result with
   | Error err -> Error err, None, None
-  | Ok (config, retained_results) ->
+  | Ok (config, retained) ->
+    let retained_results = Option.map fst retained in
     (* Installed here rather than on the record above because the projection
        needs the provider config that record is still producing: it measures
        the history that config's serializer will carry, and asking a config
@@ -2611,7 +2624,8 @@ let run_try_provider_attempt ?continuation_checkpoint ~(state : attempt_state) (
         ~on_resolved:(fun history -> resolved_history := Some history)
         ~agent_cell:attempt_agent_ref ~media_store
         ~provider_config:config.Runtime_agent.provider_cfg in
-    let retained_message = Option.bind retained_results Keeper_client_tool_outbox.context_message in
+    let retained_message =
+      Option.bind retained (fun (_, carrier) -> Keeper_client_tool_outbox.carrier_message carrier) in
     let retained_bytes = match retained_message with
       | None -> 0
       | Some message -> offload_model_input_cpu (fun () ->
@@ -3338,6 +3352,10 @@ let run_try_provider_with_history_recovery
       candidate
   =
   let state = new_attempt_state ctx in
+  (* The carrier step answers a size refusal before memory and history do. *)
+  let on_memory_capacity_refusal =
+    Keeper_client_tool_outbox.run_carrier_reprojection state.retained_results
+      ~then_:on_memory_capacity_refusal in
   match ctx.request_input with
   | Completion_review ->
     run_try_provider_attempt ?continuation_checkpoint ~state ctx candidate

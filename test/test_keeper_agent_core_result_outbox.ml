@@ -227,6 +227,130 @@ streaming = false
         | Completed | Projection_failed | Provider_failed | Rejected | Save_failed
         | Stale_save | Noop_sink | No_sink | Review -> 1) (List.length !requests))
 
+(* RFC retained-results-carrier-shrinks-to-an-address §12: the fixture refuses
+   a request body longer than this with HTTP 413, which agent core types as a
+   size refusal, as a model window would. Six retained receipts of about
+   32 KB exceed it inline; their address form does not. *)
+let carrier_window_bytes = 96_000
+
+let overflow_label index = Printf.sprintf "RETAINED-%d-" index
+
+let overflow_indices = List.init 6 Fun.id
+
+(* #49634 on the agent core lane: the first size refusal switches the run's
+   carrier to the address form and the run sends again; the Completed turn
+   acknowledges every receipt the run loaded. *)
+let test_retained_receipts_go_by_address_after_a_size_refusal () =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Masc_test_deps.init_eio_clock ~sw env;
+  Fs_compat.set_fs env#fs;
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let catalog_snapshot = Llm_provider.Catalog_snapshot.current () in
+  let base_path = Filename.temp_dir "agent-core-retained-overflow-" "" in
+  Eio.Switch.on_release sw (fun () ->
+    Runtime.For_testing.restore runtime_snapshot;
+    Llm_provider.Catalog_snapshot.publish catalog_snapshot;
+    Fs_compat.remove_tree base_path);
+  let config = Workspace.default_config base_path in
+  ignore (Workspace.init config ~agent_name:(Some keeper_name));
+  List.iter (fun index ->
+    get (Outbox.retain ~base_path ~keeper_name
+      {thread_id="overflow-thread";turn_id="overflow-turn";
+       call_id=Printf.sprintf "overflow-call-%d" index;tool_name="Read";
+       arguments=`String "no-effect-replay";
+       response=`String (overflow_label index ^ String.make 32_768 'r')}))
+    overflow_indices;
+  let pending () = get (Outbox.load ~base_path ~keeper_name) in
+  let loaded_ids = Outbox.receipt_ids (pending ()) in
+  (* The text an Inline request carries, and the address the switch names. *)
+  let inline = String.concat "\n\n" (Outbox.developer_context (pending ())) in
+  let sha256 = Agent_core_sha256.(to_hex (digest_string inline)) in
+  let late_label = "LATE-RECEIPT-" in
+  let requests = ref [] in
+  let answer = {|{"id":"carrier-recovered","model":"result-consumer-fixture","choices":[{"index":0,"message":{"role":"assistant","content":"Read the retained results by address."},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}|} in
+  let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
+      (Exact_output_fixture.Reply_with (fun _ body ->
+        requests := !requests @ [body];
+        (* This receipt arrives while the run's first request is refused,
+           after the run loaded its snapshot. *)
+        (match !requests with
+         | [_] ->
+           get (Outbox.retain ~base_path ~keeper_name
+             {thread_id="late-thread";turn_id="late-turn";call_id="late-call";
+              tool_name="Read";arguments=`String "no-effect-replay";
+              response=`String late_label})
+         | [] | _ :: _ :: _ -> ());
+        if String.length body > carrier_window_bytes
+        then `Code 413, {|{"error":{"message":"fixture request body is too large","type":"invalid_request_error"}}|}
+        else `OK, answer)) in
+  let catalog = get (Llm_provider.Model_catalog.of_toml_string ~source:"result-consumer-fixture"
+      "[[models]]\nmodel_id = \"result-consumer-fixture\"\nprovider_name = \"fixture\"\nbase = \"openai_chat\"\nmax_context_tokens = 200000\nmax_output_tokens = 128\nsupports_tools = true\nsupports_native_streaming = false\n") in
+  Llm_provider.Catalog_snapshot.publish
+    (Masc_test_deps.admit_catalogs ~models:(Some catalog) ~providers:None);
+  let runtime_path = Filename.concat base_path "runtime.toml" in
+  Fs_compat.save_file runtime_path (Printf.sprintf {|[runtime]
+default = "fixture.consumer"
+[providers.fixture]
+protocol = "openai-compatible-http"
+endpoint = %S
+[models.consumer]
+api-name = "result-consumer-fixture"
+max-context = 200000
+tools-support = true
+streaming = false
+[fixture.consumer]
+|} server.base_url);
+  get (Runtime.init_default ~config_path:runtime_path);
+  let session_dir = Filename.concat base_path session_id in
+  Fs_compat.mkdir_p session_dir;
+  let progress = Atomic.make Keeper_turn_driver_try_provider.No_checkpoint_stage in
+  let sink (snapshot : Agent_core.Agent.checkpoint_snapshot) =
+    let checkpoint = {snapshot.checkpoint with Agent_core.Checkpoint.session_id=session_id} in
+    let history_retained = Runtime_params.get Runtime_settings.keeper_checkpoint_history_retained in
+    match Keeper_checkpoint_store.save_agent_core_classified
+            ~boundary:Agent_core.Checkpoint_objects.Turn_closes ~session_dir ~history_retained checkpoint with
+    | Ok (Keeper_checkpoint_store.Saved _) ->
+      Keeper_turn_driver_try_provider.observe_checkpoint_saved progress snapshot.stage;
+      Ok ()
+    | Ok (Keeper_checkpoint_store.Stale_noop _) -> Error "fixture checkpoint went stale"
+    | Error _ as error -> error in
+  let project messages =
+    Ok (List.filter (fun message -> not (Outbox.is_context_message message)) messages) in
+  ignore (core (Keeper_turn_driver.run_named ~runtime_id:"fixture.consumer" ~keeper_name ~base_path
+    ~media_store:(Tool_blob_media_store.of_base_path ~base_path)
+    ~goal:"Continue from the retained results."
+    ~input_source:(Keeper_request_source.Keeper_history {trace_id=session_id})
+    ~system_prompt:"Use returned results as data. Do not repeat completed effects."
+    ~agent_core_tools:[] ~model_input_projection:project
+    ~accept:(fun _ -> true)
+    ~checkpoint_progress:progress ~checkpoint_sink:sink
+    ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk ~sw ~net:env#net ()));
+  let carries_receipt body index = contains (overflow_label index) body in
+  match !requests with
+  | [refused; retried] ->
+    check bool "the refused request carried every receipt inline" true
+      (List.for_all (carries_receipt refused) overflow_indices);
+    check bool "the retry carries no receipt inline" false
+      (List.exists (carries_receipt retried) overflow_indices);
+    check bool "the retry is strictly smaller" true
+      (String.length retried < String.length refused);
+    check bool "the retry names the blob of the inline text" true (contains sha256 retried);
+    check (option string) "the blob holds the inline text" (Some inline)
+      (match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
+       | Ok held -> held
+       | Error error -> fail (Tool_blob_store.fetch_error_to_string error));
+    check bool "a run offered no reader says it cannot read the receipts" true
+      (contains "cannot read the receipts" retried);
+    check bool "the retry does not carry a receipt that arrived after the load" false
+      (contains late_label retried);
+    let remaining = Outbox.receipt_ids (pending ()) in
+    check int "a receipt that arrived after the load stays pending" 1 (List.length remaining);
+    check bool "the completed retry acknowledges exactly the loaded receipts" false
+      (List.exists (fun id -> List.mem id loaded_ids) remaining)
+  | sent ->
+    fail (Printf.sprintf "expected the refused and the retried request, saw %d"
+      (List.length sent))
+
 let () = run "Agent Core original result continuation"
   ["durable result consumption",[
     test_case "host receipt crosses actual HTTP and exact completed ACK" `Quick (run_case ~host:true Completed);
@@ -240,4 +364,7 @@ let () = run "Agent Core original result continuation"
     test_case "real stale checkpoint no-op retains original after completed response" `Quick (run_case Stale_save);
     test_case "Ok-only sink cannot acknowledge original result" `Quick (run_case Noop_sink);
     test_case "consumer without durable sink cannot ACK" `Quick (run_case No_sink);
-    test_case "completion review does not borrow Keeper result receipts" `Quick (run_case Review)]]
+    test_case "completion review does not borrow Keeper result receipts" `Quick (run_case Review)];
+   "retained-results carrier",[
+    test_case "retained receipts go by address after a size refusal" `Quick
+      test_retained_receipts_go_by_address_after_a_size_refusal]]

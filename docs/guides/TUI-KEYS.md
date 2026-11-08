@@ -844,6 +844,7 @@ or completion.
 | `AGE` | time since it last moved: the open turn's latest update (its start before it reports one), else the later of its last turn and the start of its wait |
 | `LIFECYCLE` | the keeper process |
 | `◂` | a failing keeper's last failure, in place of its runtime or first in DETAIL: how long ago · cause · the runtime that ended it · candidates tried |
+| `failing` | how long the keeper has been in the failing phase; ? when the server recorded no start, or the start is ahead of this screen's clock (Detailed second row) |
 | `Mode M/D/A` | manual / on demand / autonomous |
 | `S D/M/R` | sandbox: docker / microvm / remote_ssh |
 | `쉬는 중` | resting path: relative duration (제공자 stated / 상한 bounded); ▹ prefixes next candidate after turn failure |

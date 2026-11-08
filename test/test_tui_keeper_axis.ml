@@ -155,7 +155,7 @@ let test_segments_extracts_scheduled_and_memory_cells () =
     };
   let now = 1794050000.0 in
   (* When memory_health is None, memory reading is Unknown ("mem ?") *)
-  let cells = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"edgar" in
+  let cells = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"edgar" ~runtime:None in
   Alcotest.(check int) "has schedule cell + mem ?" 2 (List.length cells);
   (* The schedule cell counts down: the row is due at 12:00:00Z and now is 11:13:20Z. *)
   Alcotest.(check string) "first cell is schedule" "◷ 46m40s"
@@ -163,7 +163,7 @@ let test_segments_extracts_scheduled_and_memory_cells () =
   Alcotest.(check string) "second cell is mem ?" "mem ?"
     (List.nth cells 1).Masc_tui_keeper_axis_cell.text;
 
-  let other = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"other" in
+  let other = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"other" ~runtime:None in
   Alcotest.(check int) "unscheduled keeper has mem ?" 1 (List.length other);
   Alcotest.(check string) "unscheduled cell is mem ?" "mem ?"
     (List.hd other).Masc_tui_keeper_axis_cell.text;
@@ -173,7 +173,7 @@ let test_segments_extracts_scheduled_and_memory_cells () =
   let kh = make_keeper_health ~keeper_id:"edgar" ~updated_at:(now -. 60.0) lib in
   state.memory_health <- Some (make_snapshot [ kh ]);
 
-  let cells_with_memory = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"edgar" in
+  let cells_with_memory = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"edgar" ~runtime:None in
   (* edgar has: schedule cell, lag 4, +1m00s +2 -1, stale ×1 = 4 cells *)
   Alcotest.(check int) "edgar has schedule + lag + clock + stale" 4 (List.length cells_with_memory);
   Alcotest.(check string) "edgar lag cell" "lag 4"
@@ -184,7 +184,7 @@ let test_segments_extracts_scheduled_and_memory_cells () =
     (List.nth cells_with_memory 3).Masc_tui_keeper_axis_cell.text;
 
   (* other is absent from snapshot without anonymous refusal -> No_row (0 cells) *)
-  let other_clean = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"other" in
+  let other_clean = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"other" ~runtime:None in
   Alcotest.(check int) "other has 0 cells when absent from snapshot" 0 (List.length other_clean)
 ;;
 

@@ -1,0 +1,576 @@
+{
+  "window": [
+    "2026-11-06T00:00:00+00:00",
+    "2026-11-08T19:00:00+00:00"
+  ],
+  "gap_seconds": 1800.0,
+  "files": 21,
+  "skipped": {
+    "bad_lines": 0
+  },
+  "execute": {
+    "calls": 20396,
+    "repeat_calls": 4241,
+    "repeat_share": 0.2079,
+    "repeat_held_hours": 3.355,
+    "repeat_result_mib": 5.03,
+    "keepers_with_repeats": 13
+  },
+  "model_requests": {
+    "keepers": 21,
+    "requests": 19643,
+    "input_tokens": 8059317079,
+    "cache_read_tokens": 7643222505,
+    "output_tokens": 17045849
+  },
+  "top_keepers": [
+    {
+      "keeper": "context-reviewer",
+      "execute_calls": 4135,
+      "repeat_calls": 2410,
+      "repeat_share": 0.5828,
+      "repeat_held_hours": 2.552,
+      "longest_streak": 901,
+      "streaks_of_10_or_more": 30,
+      "model_requests": 4208,
+      "input_tokens": 1652411902,
+      "input_token_share_of_all_keepers": 0.205,
+      "repeats_per_model_request": 0.573,
+      "top_commands": [
+        {
+          "command": "gh api \"repos/jeong-sik/masc/pulls?state=open&sort=updated&direction=desc&per_page=12\" --jq '.[]|\"\\(",
+          "repeats": 1935
+        },
+        {
+          "command": "gh api \"repos/jeong-sik/masc/pulls?state=open&sort=updated&direction=desc&per_page=6\" --jq '.[]|\"\\(.",
+          "repeats": 411
+        },
+        {
+          "command": "{\"argv\": [\"sh\", \"-c\", \"gh pr list --repo jeong-sik/masc --state open --limit 300 --json number,isDra",
+          "repeats": 31
+        }
+      ]
+    },
+    {
+      "keeper": "sangsu",
+      "execute_calls": 2203,
+      "repeat_calls": 929,
+      "repeat_share": 0.4217,
+      "repeat_held_hours": 0.186,
+      "longest_streak": 677,
+      "streaks_of_10_or_more": 4,
+      "model_requests": 2325,
+      "input_tokens": 859981898,
+      "input_token_share_of_all_keepers": 0.1067,
+      "repeats_per_model_request": 0.4,
+      "top_commands": [
+        {
+          "command": "{\"argv\": [\"bash\", \"-lc\", \"cd wt-3319 && grep -rn \\\"canonical_internal_name_for_tool_name\\\\|descripto",
+          "repeats": 676
+        },
+        {
+          "command": "{\"argv\": [\"bash\", \"-lc\", \"gh api \\\"repos/jeong-sik/masc/actions/runs/42374668868\\\" --jq '{status, co",
+          "repeats": 194
+        },
+        {
+          "command": "{\"argv\": [\"bash\", \"-lc\", \"echo '== MMB 42374489123 =='; gh api \\\"repos/jeong-sik/masc/actions/runs/4",
+          "repeats": 24
+        }
+      ]
+    },
+    {
+      "keeper": "kidsnote-incoming-dd-manager",
+      "execute_calls": 1241,
+      "repeat_calls": 552,
+      "repeat_share": 0.4448,
+      "repeat_held_hours": 0.03,
+      "longest_streak": 7,
+      "streaks_of_10_or_more": 0,
+      "model_requests": 1529,
+      "input_tokens": 896225517,
+      "input_token_share_of_all_keepers": 0.1112,
+      "repeats_per_model_request": 0.361,
+      "top_commands": [
+        {
+          "command": "{\"argv\": [\"date\", \"-u\", \"+%Y-%m-%dT%H:%MZ\"], \"cwd\": \".\"}",
+          "repeats": 552
+        }
+      ]
+    },
+    {
+      "keeper": "code-reviewer-uncle",
+      "execute_calls": 1416,
+      "repeat_calls": 232,
+      "repeat_share": 0.1638,
+      "repeat_held_hours": 0.09,
+      "longest_streak": 69,
+      "streaks_of_10_or_more": 3,
+      "model_requests": 607,
+      "input_tokens": 160355652,
+      "input_token_share_of_all_keepers": 0.0199,
+      "repeats_per_model_request": 0.382,
+      "top_commands": [
+        {
+          "command": "{\"argv\": [\"gh\", \"pr\", \"list\", \"-R\", \"jeong-sik/masc\", \"--search\", \"review-requested:be-sleepers\", \"-",
+          "repeats": 75
+        },
+        {
+          "command": "{\"argv\": [\"gh\", \"pr\", \"list\", \"-R\", \"jeong-sik/masc\", \"--state\", \"open\", \"--limit\", \"60\", \"--json\", ",
+          "repeats": 70
+        },
+        {
+          "command": "{\"argv\": [\"gh\", \"api\", \"repos/jeong-sik/masc/commits/main\", \"--jq\", \".sha + \\\" \\\" + .commit.committe",
+          "repeats": 70
+        }
+      ]
+    },
+    {
+      "keeper": "masc-productor-owner",
+      "execute_calls": 340,
+      "repeat_calls": 68,
+      "repeat_share": 0.2,
+      "repeat_held_hours": 0.091,
+      "longest_streak": 64,
+      "streaks_of_10_or_more": 1,
+      "model_requests": 2510,
+      "input_tokens": 1954324096,
+      "input_token_share_of_all_keepers": 0.2425,
+      "repeats_per_model_request": 0.027,
+      "top_commands": [
+        {
+          "command": "gh api -X GET search/issues -f q='repo:jeong-sik/masc type:pr is:merged base:main merged:2026-11-06T",
+          "repeats": 67
+        },
+        {
+          "command": "nums=\"49137 49124 49119 49110 49100 49099 49098 49097 49043 49039 49029 49007 49005 48973 48967 4895",
+          "repeats": 1
+        }
+      ]
+    },
+    {
+      "keeper": "pr-updater",
+      "execute_calls": 825,
+      "repeat_calls": 15,
+      "repeat_share": 0.0182,
+      "repeat_held_hours": 0.026,
+      "longest_streak": 5,
+      "streaks_of_10_or_more": 0,
+      "model_requests": 340,
+      "input_tokens": 70740298,
+      "input_token_share_of_all_keepers": 0.0088,
+      "repeats_per_model_request": 0.044,
+      "top_commands": [
+        {
+          "command": "export XDG_CACHE_HOME=/tmp/ghcache GH_CONFIG_DIR=/tmp/ghcfg GH_TOKEN=[REDACTED] auth token) gh api r",
+          "repeats": 7
+        },
+        {
+          "command": "{\"argv\": [\"bash\", \"-c\", \"gh api repos/jeong-sik/masc/commits/main -q '\\\"main \\\\(.sha[0:10]) \\\\(.comm",
+          "repeats": 4
+        },
+        {
+          "command": "export XDG_CACHE_HOME=/tmp/ghcache GH_CONFIG_DIR=/tmp/ghcfg GH_TOKEN=[REDACTED] auth token); gh api ",
+          "repeats": 3
+        }
+      ]
+    }
+  ],
+  "hourly": [
+    {
+      "hour": "2026-11-06T01:00:00+00:00",
+      "execute_calls": 267,
+      "repeat_calls": 3,
+      "repeat_share": 0.0112
+    },
+    {
+      "hour": "2026-11-06T02:00:00+00:00",
+      "execute_calls": 422,
+      "repeat_calls": 3,
+      "repeat_share": 0.0071
+    },
+    {
+      "hour": "2026-11-06T03:00:00+00:00",
+      "execute_calls": 225,
+      "repeat_calls": 2,
+      "repeat_share": 0.0089
+    },
+    {
+      "hour": "2026-11-06T04:00:00+00:00",
+      "execute_calls": 307,
+      "repeat_calls": 3,
+      "repeat_share": 0.0098
+    },
+    {
+      "hour": "2026-11-06T05:00:00+00:00",
+      "execute_calls": 256,
+      "repeat_calls": 32,
+      "repeat_share": 0.125
+    },
+    {
+      "hour": "2026-11-06T06:00:00+00:00",
+      "execute_calls": 296,
+      "repeat_calls": 27,
+      "repeat_share": 0.0912
+    },
+    {
+      "hour": "2026-11-06T07:00:00+00:00",
+      "execute_calls": 127,
+      "repeat_calls": 16,
+      "repeat_share": 0.126
+    },
+    {
+      "hour": "2026-11-06T08:00:00+00:00",
+      "execute_calls": 142,
+      "repeat_calls": 24,
+      "repeat_share": 0.169
+    },
+    {
+      "hour": "2026-11-06T09:00:00+00:00",
+      "execute_calls": 649,
+      "repeat_calls": 0,
+      "repeat_share": 0.0
+    },
+    {
+      "hour": "2026-11-06T10:00:00+00:00",
+      "execute_calls": 557,
+      "repeat_calls": 1,
+      "repeat_share": 0.0018
+    },
+    {
+      "hour": "2026-11-06T11:00:00+00:00",
+      "execute_calls": 510,
+      "repeat_calls": 3,
+      "repeat_share": 0.0059
+    },
+    {
+      "hour": "2026-11-06T12:00:00+00:00",
+      "execute_calls": 706,
+      "repeat_calls": 0,
+      "repeat_share": 0.0
+    },
+    {
+      "hour": "2026-11-06T13:00:00+00:00",
+      "execute_calls": 332,
+      "repeat_calls": 1,
+      "repeat_share": 0.003
+    },
+    {
+      "hour": "2026-11-06T14:00:00+00:00",
+      "execute_calls": 166,
+      "repeat_calls": 1,
+      "repeat_share": 0.006
+    },
+    {
+      "hour": "2026-11-06T15:00:00+00:00",
+      "execute_calls": 426,
+      "repeat_calls": 40,
+      "repeat_share": 0.0939
+    },
+    {
+      "hour": "2026-11-06T16:00:00+00:00",
+      "execute_calls": 333,
+      "repeat_calls": 20,
+      "repeat_share": 0.0601
+    },
+    {
+      "hour": "2026-11-06T17:00:00+00:00",
+      "execute_calls": 425,
+      "repeat_calls": 106,
+      "repeat_share": 0.2494
+    },
+    {
+      "hour": "2026-11-06T18:00:00+00:00",
+      "execute_calls": 393,
+      "repeat_calls": 65,
+      "repeat_share": 0.1654
+    },
+    {
+      "hour": "2026-11-06T19:00:00+00:00",
+      "execute_calls": 453,
+      "repeat_calls": 70,
+      "repeat_share": 0.1545
+    },
+    {
+      "hour": "2026-11-06T20:00:00+00:00",
+      "execute_calls": 139,
+      "repeat_calls": 25,
+      "repeat_share": 0.1799
+    },
+    {
+      "hour": "2026-11-06T21:00:00+00:00",
+      "execute_calls": 134,
+      "repeat_calls": 3,
+      "repeat_share": 0.0224
+    },
+    {
+      "hour": "2026-11-06T22:00:00+00:00",
+      "execute_calls": 281,
+      "repeat_calls": 42,
+      "repeat_share": 0.1495
+    },
+    {
+      "hour": "2026-11-06T23:00:00+00:00",
+      "execute_calls": 294,
+      "repeat_calls": 59,
+      "repeat_share": 0.2007
+    },
+    {
+      "hour": "2026-11-07T00:00:00+00:00",
+      "execute_calls": 233,
+      "repeat_calls": 39,
+      "repeat_share": 0.1674
+    },
+    {
+      "hour": "2026-11-07T01:00:00+00:00",
+      "execute_calls": 344,
+      "repeat_calls": 21,
+      "repeat_share": 0.061
+    },
+    {
+      "hour": "2026-11-07T02:00:00+00:00",
+      "execute_calls": 346,
+      "repeat_calls": 9,
+      "repeat_share": 0.026
+    },
+    {
+      "hour": "2026-11-07T03:00:00+00:00",
+      "execute_calls": 397,
+      "repeat_calls": 25,
+      "repeat_share": 0.063
+    },
+    {
+      "hour": "2026-11-07T04:00:00+00:00",
+      "execute_calls": 366,
+      "repeat_calls": 30,
+      "repeat_share": 0.082
+    },
+    {
+      "hour": "2026-11-07T05:00:00+00:00",
+      "execute_calls": 511,
+      "repeat_calls": 231,
+      "repeat_share": 0.4521
+    },
+    {
+      "hour": "2026-11-07T06:00:00+00:00",
+      "execute_calls": 516,
+      "repeat_calls": 311,
+      "repeat_share": 0.6027
+    },
+    {
+      "hour": "2026-11-07T07:00:00+00:00",
+      "execute_calls": 344,
+      "repeat_calls": 153,
+      "repeat_share": 0.4448
+    },
+    {
+      "hour": "2026-11-07T08:00:00+00:00",
+      "execute_calls": 269,
+      "repeat_calls": 0,
+      "repeat_share": 0.0
+    },
+    {
+      "hour": "2026-11-07T09:00:00+00:00",
+      "execute_calls": 463,
+      "repeat_calls": 0,
+      "repeat_share": 0.0
+    },
+    {
+      "hour": "2026-11-07T10:00:00+00:00",
+      "execute_calls": 127,
+      "repeat_calls": 0,
+      "repeat_share": 0.0
+    },
+    {
+      "hour": "2026-11-07T11:00:00+00:00",
+      "execute_calls": 128,
+      "repeat_calls": 10,
+      "repeat_share": 0.0781
+    },
+    {
+      "hour": "2026-11-07T12:00:00+00:00",
+      "execute_calls": 449,
+      "repeat_calls": 38,
+      "repeat_share": 0.0846
+    },
+    {
+      "hour": "2026-11-07T13:00:00+00:00",
+      "execute_calls": 517,
+      "repeat_calls": 298,
+      "repeat_share": 0.5764
+    },
+    {
+      "hour": "2026-11-07T14:00:00+00:00",
+      "execute_calls": 386,
+      "repeat_calls": 77,
+      "repeat_share": 0.1995
+    },
+    {
+      "hour": "2026-11-07T15:00:00+00:00",
+      "execute_calls": 375,
+      "repeat_calls": 191,
+      "repeat_share": 0.5093
+    },
+    {
+      "hour": "2026-11-07T16:00:00+00:00",
+      "execute_calls": 275,
+      "repeat_calls": 17,
+      "repeat_share": 0.0618
+    },
+    {
+      "hour": "2026-11-07T17:00:00+00:00",
+      "execute_calls": 613,
+      "repeat_calls": 51,
+      "repeat_share": 0.0832
+    },
+    {
+      "hour": "2026-11-07T18:00:00+00:00",
+      "execute_calls": 447,
+      "repeat_calls": 4,
+      "repeat_share": 0.0089
+    },
+    {
+      "hour": "2026-11-07T19:00:00+00:00",
+      "execute_calls": 298,
+      "repeat_calls": 5,
+      "repeat_share": 0.0168
+    },
+    {
+      "hour": "2026-11-07T20:00:00+00:00",
+      "execute_calls": 141,
+      "repeat_calls": 41,
+      "repeat_share": 0.2908
+    },
+    {
+      "hour": "2026-11-07T21:00:00+00:00",
+      "execute_calls": 203,
+      "repeat_calls": 107,
+      "repeat_share": 0.5271
+    },
+    {
+      "hour": "2026-11-07T22:00:00+00:00",
+      "execute_calls": 216,
+      "repeat_calls": 86,
+      "repeat_share": 0.3981
+    },
+    {
+      "hour": "2026-11-07T23:00:00+00:00",
+      "execute_calls": 278,
+      "repeat_calls": 135,
+      "repeat_share": 0.4856
+    },
+    {
+      "hour": "2026-11-08T00:00:00+00:00",
+      "execute_calls": 220,
+      "repeat_calls": 171,
+      "repeat_share": 0.7773
+    },
+    {
+      "hour": "2026-11-08T01:00:00+00:00",
+      "execute_calls": 249,
+      "repeat_calls": 190,
+      "repeat_share": 0.7631
+    },
+    {
+      "hour": "2026-11-08T02:00:00+00:00",
+      "execute_calls": 220,
+      "repeat_calls": 208,
+      "repeat_share": 0.9455
+    },
+    {
+      "hour": "2026-11-08T03:00:00+00:00",
+      "execute_calls": 147,
+      "repeat_calls": 111,
+      "repeat_share": 0.7551
+    },
+    {
+      "hour": "2026-11-08T04:00:00+00:00",
+      "execute_calls": 316,
+      "repeat_calls": 267,
+      "repeat_share": 0.8449
+    },
+    {
+      "hour": "2026-11-08T05:00:00+00:00",
+      "execute_calls": 288,
+      "repeat_calls": 279,
+      "repeat_share": 0.9688
+    },
+    {
+      "hour": "2026-11-08T06:00:00+00:00",
+      "execute_calls": 258,
+      "repeat_calls": 236,
+      "repeat_share": 0.9147
+    },
+    {
+      "hour": "2026-11-08T07:00:00+00:00",
+      "execute_calls": 217,
+      "repeat_calls": 203,
+      "repeat_share": 0.9355
+    },
+    {
+      "hour": "2026-11-08T08:00:00+00:00",
+      "execute_calls": 136,
+      "repeat_calls": 120,
+      "repeat_share": 0.8824
+    },
+    {
+      "hour": "2026-11-08T09:00:00+00:00",
+      "execute_calls": 320,
+      "repeat_calls": 16,
+      "repeat_share": 0.05
+    },
+    {
+      "hour": "2026-11-08T10:00:00+00:00",
+      "execute_calls": 222,
+      "repeat_calls": 2,
+      "repeat_share": 0.009
+    },
+    {
+      "hour": "2026-11-08T11:00:00+00:00",
+      "execute_calls": 29,
+      "repeat_calls": 0,
+      "repeat_share": 0.0
+    },
+    {
+      "hour": "2026-11-08T12:00:00+00:00",
+      "execute_calls": 57,
+      "repeat_calls": 0,
+      "repeat_share": 0.0
+    },
+    {
+      "hour": "2026-11-08T13:00:00+00:00",
+      "execute_calls": 59,
+      "repeat_calls": 0,
+      "repeat_share": 0.0
+    },
+    {
+      "hour": "2026-11-08T14:00:00+00:00",
+      "execute_calls": 508,
+      "repeat_calls": 0,
+      "repeat_share": 0.0
+    },
+    {
+      "hour": "2026-11-08T15:00:00+00:00",
+      "execute_calls": 364,
+      "repeat_calls": 2,
+      "repeat_share": 0.0055
+    },
+    {
+      "hour": "2026-11-08T16:00:00+00:00",
+      "execute_calls": 255,
+      "repeat_calls": 2,
+      "repeat_share": 0.0078
+    },
+    {
+      "hour": "2026-11-08T17:00:00+00:00",
+      "execute_calls": 150,
+      "repeat_calls": 8,
+      "repeat_share": 0.0533
+    },
+    {
+      "hour": "2026-11-08T18:00:00+00:00",
+      "execute_calls": 299,
+      "repeat_calls": 1,
+      "repeat_share": 0.0033
+    }
+  ]
+}

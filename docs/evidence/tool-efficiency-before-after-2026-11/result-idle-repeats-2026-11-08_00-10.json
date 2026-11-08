@@ -1,0 +1,207 @@
+{
+  "window": [
+    "2026-11-08T00:00:00+00:00",
+    "2026-11-08T10:40:00+00:00"
+  ],
+  "gap_seconds": 1800.0,
+  "files": 5,
+  "skipped": {
+    "bad_lines": 0
+  },
+  "execute": {
+    "calls": 2556,
+    "repeat_calls": 1802,
+    "repeat_share": 0.705,
+    "repeat_held_hours": 1.923,
+    "repeat_result_mib": 3.25,
+    "keepers_with_repeats": 5
+  },
+  "model_requests": {
+    "keepers": 8,
+    "requests": 2466,
+    "input_tokens": 776162988,
+    "cache_read_tokens": 745271680,
+    "output_tokens": 3092535
+  },
+  "top_keepers": [
+    {
+      "keeper": "context-reviewer",
+      "execute_calls": 1628,
+      "repeat_calls": 1574,
+      "repeat_share": 0.9668,
+      "repeat_held_hours": 1.843,
+      "longest_streak": 901,
+      "streaks_of_10_or_more": 5,
+      "model_requests": 1667,
+      "input_tokens": 662212157,
+      "input_token_share_of_all_keepers": 0.8532,
+      "repeats_per_model_request": 0.944,
+      "top_commands": [
+        {
+          "command": "gh api \"repos/jeong-sik/masc/pulls?state=open&sort=updated&direction=desc&per_page=12\" --jq '.[]|\"\\(",
+          "repeats": 1565
+        },
+        {
+          "command": "true",
+          "repeats": 9
+        }
+      ]
+    },
+    {
+      "keeper": "code-reviewer-uncle",
+      "execute_calls": 345,
+      "repeat_calls": 224,
+      "repeat_share": 0.6493,
+      "repeat_held_hours": 0.079,
+      "longest_streak": 69,
+      "streaks_of_10_or_more": 3,
+      "model_requests": 234,
+      "input_tokens": 41496139,
+      "input_token_share_of_all_keepers": 0.0535,
+      "repeats_per_model_request": 0.957,
+      "top_commands": [
+        {
+          "command": "{\"argv\": [\"gh\", \"pr\", \"list\", \"-R\", \"jeong-sik/masc\", \"--search\", \"review-requested:be-sleepers\", \"-",
+          "repeats": 75
+        },
+        {
+          "command": "{\"argv\": [\"gh\", \"pr\", \"list\", \"-R\", \"jeong-sik/masc\", \"--state\", \"open\", \"--limit\", \"60\", \"--json\", ",
+          "repeats": 70
+        },
+        {
+          "command": "{\"argv\": [\"gh\", \"api\", \"repos/jeong-sik/masc/commits/main\", \"--jq\", \".sha + \\\" \\\" + .commit.committe",
+          "repeats": 70
+        }
+      ]
+    },
+    {
+      "keeper": "sangsu",
+      "execute_calls": 155,
+      "repeat_calls": 2,
+      "repeat_share": 0.0129,
+      "repeat_held_hours": 0.001,
+      "longest_streak": 2,
+      "streaks_of_10_or_more": 0,
+      "model_requests": 226,
+      "input_tokens": 32384564,
+      "input_token_share_of_all_keepers": 0.0417,
+      "repeats_per_model_request": 0.009,
+      "top_commands": [
+        {
+          "command": "{\"argv\": [\"gh\", \"pr\", \"checks\", \"49922\", \"-R\", \"jeong-sik/masc\"], \"cwd\": \".\"}",
+          "repeats": 1
+        },
+        {
+          "command": "{\"argv\": [\"python3\", \"-I\", \"scripts/changelog-fragments.py\", \"check\"], \"cwd\": \"wt-3363\", \"timeout_se",
+          "repeats": 1
+        }
+      ]
+    },
+    {
+      "keeper": "code-reviewer",
+      "execute_calls": 30,
+      "repeat_calls": 1,
+      "repeat_share": 0.0333,
+      "repeat_held_hours": 0.0,
+      "longest_streak": 2,
+      "streaks_of_10_or_more": 0,
+      "model_requests": 0,
+      "input_tokens": 0,
+      "input_token_share_of_all_keepers": 0.0,
+      "repeats_per_model_request": null,
+      "top_commands": [
+        {
+          "command": "for n in 49914 49912; do gh pr view $n -R jeong-sik/masc --json state,isDraft,headRefOid --jq '\"\\(.s",
+          "repeats": 1
+        }
+      ]
+    },
+    {
+      "keeper": "pr-updater",
+      "execute_calls": 44,
+      "repeat_calls": 1,
+      "repeat_share": 0.0227,
+      "repeat_held_hours": 0.0,
+      "longest_streak": 2,
+      "streaks_of_10_or_more": 0,
+      "model_requests": 0,
+      "input_tokens": 0,
+      "input_token_share_of_all_keepers": 0.0,
+      "repeats_per_model_request": null,
+      "top_commands": [
+        {
+          "command": "export XDG_CACHE_HOME=/tmp/ghcache GH_CONFIG_DIR=/tmp/ghcfg GH_TOKEN=[REDACTED] auth token); gh api ",
+          "repeats": 1
+        }
+      ]
+    }
+  ],
+  "hourly": [
+    {
+      "hour": "2026-11-08T00:00:00+00:00",
+      "execute_calls": 220,
+      "repeat_calls": 170,
+      "repeat_share": 0.7727
+    },
+    {
+      "hour": "2026-11-08T01:00:00+00:00",
+      "execute_calls": 249,
+      "repeat_calls": 190,
+      "repeat_share": 0.7631
+    },
+    {
+      "hour": "2026-11-08T02:00:00+00:00",
+      "execute_calls": 220,
+      "repeat_calls": 208,
+      "repeat_share": 0.9455
+    },
+    {
+      "hour": "2026-11-08T03:00:00+00:00",
+      "execute_calls": 147,
+      "repeat_calls": 111,
+      "repeat_share": 0.7551
+    },
+    {
+      "hour": "2026-11-08T04:00:00+00:00",
+      "execute_calls": 316,
+      "repeat_calls": 267,
+      "repeat_share": 0.8449
+    },
+    {
+      "hour": "2026-11-08T05:00:00+00:00",
+      "execute_calls": 288,
+      "repeat_calls": 279,
+      "repeat_share": 0.9688
+    },
+    {
+      "hour": "2026-11-08T06:00:00+00:00",
+      "execute_calls": 258,
+      "repeat_calls": 236,
+      "repeat_share": 0.9147
+    },
+    {
+      "hour": "2026-11-08T07:00:00+00:00",
+      "execute_calls": 217,
+      "repeat_calls": 203,
+      "repeat_share": 0.9355
+    },
+    {
+      "hour": "2026-11-08T08:00:00+00:00",
+      "execute_calls": 136,
+      "repeat_calls": 120,
+      "repeat_share": 0.8824
+    },
+    {
+      "hour": "2026-11-08T09:00:00+00:00",
+      "execute_calls": 320,
+      "repeat_calls": 16,
+      "repeat_share": 0.05
+    },
+    {
+      "hour": "2026-11-08T10:00:00+00:00",
+      "execute_calls": 185,
+      "repeat_calls": 2,
+      "repeat_share": 0.0108
+    }
+  ]
+}

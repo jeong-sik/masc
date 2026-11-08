@@ -1,0 +1,163 @@
+{
+  "window": [
+    "2026-11-08T14:41:00+00:00",
+    "2026-11-08T19:00:00+00:00"
+  ],
+  "gap_seconds": 1800.0,
+  "files": 5,
+  "skipped": {
+    "bad_lines": 0
+  },
+  "execute": {
+    "calls": 1239,
+    "repeat_calls": 13,
+    "repeat_share": 0.0105,
+    "repeat_held_hours": 0.031,
+    "repeat_result_mib": 0.01,
+    "keepers_with_repeats": 5
+  },
+  "model_requests": {
+    "keepers": 5,
+    "requests": 1154,
+    "input_tokens": 302470105,
+    "cache_read_tokens": 282117568,
+    "output_tokens": 1007627
+  },
+  "top_keepers": [
+    {
+      "keeper": "pr-updater",
+      "execute_calls": 131,
+      "repeat_calls": 7,
+      "repeat_share": 0.0534,
+      "repeat_held_hours": 0.009,
+      "longest_streak": 5,
+      "streaks_of_10_or_more": 0,
+      "model_requests": 0,
+      "input_tokens": 0,
+      "input_token_share_of_all_keepers": 0.0,
+      "repeats_per_model_request": null,
+      "top_commands": [
+        {
+          "command": "export XDG_CACHE_HOME=/tmp/ghcache GH_CONFIG_DIR=/tmp/ghcfg GH_TOKEN=[REDACTED] auth token) gh api r",
+          "repeats": 7
+        }
+      ]
+    },
+    {
+      "keeper": "context-reviewer",
+      "execute_calls": 130,
+      "repeat_calls": 3,
+      "repeat_share": 0.0231,
+      "repeat_held_hours": 0.007,
+      "longest_streak": 2,
+      "streaks_of_10_or_more": 0,
+      "model_requests": 0,
+      "input_tokens": 0,
+      "input_token_share_of_all_keepers": 0.0,
+      "repeats_per_model_request": null,
+      "top_commands": [
+        {
+          "command": "for n in 50016 50024 50028 50050 50059 50072 50077; do gh api repos/jeong-sik/masc/pulls/$n --jq '\"\\",
+          "repeats": 1
+        },
+        {
+          "command": "for n in 50016 50024 50028 50050 50059 50072 50077 50080; do gh api repos/jeong-sik/masc/pulls/$n --",
+          "repeats": 1
+        },
+        {
+          "command": "for n in 50016 50024 50028 50050 50059 50072 50077 50080 50083 50084 50085; do gh api repos/jeong-si",
+          "repeats": 1
+        }
+      ]
+    },
+    {
+      "keeper": "sangsu",
+      "execute_calls": 15,
+      "repeat_calls": 1,
+      "repeat_share": 0.0667,
+      "repeat_held_hours": 0.002,
+      "longest_streak": 2,
+      "streaks_of_10_or_more": 0,
+      "model_requests": 40,
+      "input_tokens": 9880361,
+      "input_token_share_of_all_keepers": 0.0327,
+      "repeats_per_model_request": 0.025,
+      "top_commands": [
+        {
+          "command": "{\"argv\": [\"sh\", \"-c\", \"git -C wt-3378 fetch -q origin; echo '=== current main tip ==='; git -C wt-33",
+          "repeats": 1
+        }
+      ]
+    },
+    {
+      "keeper": "wkbl-web-leader",
+      "execute_calls": 36,
+      "repeat_calls": 1,
+      "repeat_share": 0.0278,
+      "repeat_held_hours": 0.0,
+      "longest_streak": 2,
+      "streaks_of_10_or_more": 0,
+      "model_requests": 93,
+      "input_tokens": 16770529,
+      "input_token_share_of_all_keepers": 0.0554,
+      "repeats_per_model_request": 0.011,
+      "top_commands": [
+        {
+          "command": "cd wkbl-src && gh pr view 893 -R jeong-sik/wkbl --json state,statusCheckRollup --jq '{state, checks:",
+          "repeats": 1
+        }
+      ]
+    },
+    {
+      "keeper": "code-reviewer",
+      "execute_calls": 64,
+      "repeat_calls": 1,
+      "repeat_share": 0.0156,
+      "repeat_held_hours": 0.014,
+      "longest_streak": 2,
+      "streaks_of_10_or_more": 0,
+      "model_requests": 0,
+      "input_tokens": 0,
+      "input_token_share_of_all_keepers": 0.0,
+      "repeats_per_model_request": null,
+      "top_commands": [
+        {
+          "command": "for n in $(gh pr list -R jeong-sik/masc --state open --limit 100 --json number --jq '.[].number'); d",
+          "repeats": 1
+        }
+      ]
+    }
+  ],
+  "hourly": [
+    {
+      "hour": "2026-11-08T14:00:00+00:00",
+      "execute_calls": 171,
+      "repeat_calls": 0,
+      "repeat_share": 0.0
+    },
+    {
+      "hour": "2026-11-08T15:00:00+00:00",
+      "execute_calls": 364,
+      "repeat_calls": 2,
+      "repeat_share": 0.0055
+    },
+    {
+      "hour": "2026-11-08T16:00:00+00:00",
+      "execute_calls": 255,
+      "repeat_calls": 2,
+      "repeat_share": 0.0078
+    },
+    {
+      "hour": "2026-11-08T17:00:00+00:00",
+      "execute_calls": 150,
+      "repeat_calls": 8,
+      "repeat_share": 0.0533
+    },
+    {
+      "hour": "2026-11-08T18:00:00+00:00",
+      "execute_calls": 299,
+      "repeat_calls": 1,
+      "repeat_share": 0.0033
+    }
+  ]
+}

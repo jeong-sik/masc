@@ -1226,6 +1226,51 @@ let test_serial_nodes_run_alone_in_schedule_order () =
     check int "no two nodes ever overlapped" 1 (Atomic.get max_active)
 ;;
 
+(* An admitted tool can need protected teardown after the caller cancels.
+   Its later return must not admit a Serial tool that was still waiting. *)
+let test_cancelled_run_does_not_dispatch_waiting_serial_node () =
+  Eio_main.run @@ fun _env ->
+  Eio.Switch.run @@ fun sw ->
+  let plan = serial_order_fixture () in
+  let context, publish_context = Eio.Promise.create () in
+  let started, publish_started = Eio.Promise.create () in
+  let finish_active, release_active = Eio.Promise.create () in
+  let called = ref [] in
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input:_ () =
+    let name = node_name node in
+    called := !called @ [ name ];
+    let data =
+      match name with
+      | "producer" -> lane_status_data
+      | "w" ->
+        Eio.Cancel.protect (fun () ->
+          Eio.Promise.resolve publish_started ();
+          Eio.Promise.await finish_active);
+        board_stats_data
+      | "s1" | "s2" -> `Assoc []
+      | other -> failf "unexpected dispatched node: %s" other
+    in
+    Executor.dispatch_result (completed ~tool_name:node.Plan.tool_name ~data)
+  in
+  let worker = Eio.Fiber.fork_promise ~sw (fun () ->
+    Eio.Cancel.sub (fun cancel ->
+      Eio.Promise.resolve publish_context cancel;
+      Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch ()))
+  in
+  Eio.Promise.await started;
+  (* Let the plan's remaining fibers reach their gate/predecessor waits
+     while [w] keeps the shared side. No clock or timeout decides the race. *)
+  Eio.Fiber.yield ();
+  Eio.Cancel.cancel (Eio.Promise.await context) Exit;
+  Eio.Promise.resolve release_active ();
+  (match Eio.Promise.await worker with
+   | Error (Eio.Cancel.Cancelled _) -> ()
+   | Error exn -> failf "composition cancellation changed exception: %s" (Printexc.to_string exn)
+   | Ok _ -> fail "cancelled composition returned normally");
+  check (list string) "cancellation admits no queued Serial tool"
+    [ "producer"; "w" ] !called
+;;
+
 (* Declaration order deliberately differs from dependency and lexical order.
    Exercise the public plan and executor, including repeated explicit/output
    edges, serial failure propagation and independent typed dataflow. *)
@@ -2180,6 +2225,10 @@ let () =
             "serial nodes run alone in schedule order"
             `Quick
             test_serial_nodes_run_alone_in_schedule_order
+        ; test_case
+            "cancelled run does not dispatch a waiting Serial node"
+            `Quick
+            test_cancelled_run_does_not_dispatch_waiting_serial_node
         ; test_case
             "serial failure stops successor under Fail_fast"
             `Quick

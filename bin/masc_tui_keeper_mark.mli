@@ -50,6 +50,20 @@ val age_header : string
 (** The list's header words over the activity and age columns. The list draws
     them and {!column_legend} names them from these two values. *)
 
+val operator_disposition_word :
+  Masc.Keeper_execution_receipt.operator_disposition_kind -> string
+(** The human disposition word displayed in the activity column for a turn
+    requiring operator attention. *)
+
+val shows_operator_disposition :
+  activity:Masc_tui_keeper_list_model.activity -> bool
+(** Whether the latest receipt's operator disposition may be drawn over the
+    activity. It may where nothing on the row is newer than the receipt: Idle,
+    Attempt_failed and Unknown. It may not where the activity is newer (an open
+    turn, or work or a wait going on now), where no later receipt replaces it
+    (Paused, Offline), or where a person is already asked (Held_call, Question,
+    Confirmation). *)
+
 val column_legend : (string * string) list
 (** The Keepers header words, the sentence about a failing keeper's past and
     the Mode S letters, each with what it means. The sheet prints it; the

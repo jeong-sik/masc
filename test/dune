@@ -4913,7 +4913,7 @@
 (test
  (name test_tui_keeper_mark)
  (modules test_tui_keeper_mark)
- (libraries alcotest masc masc_tui_keeper_mark masc_tui_message_layout))
+ (libraries alcotest masc masc_tui_keeper_list_model masc_tui_keeper_mark masc_tui_message_layout))
 
 (test
  (name test_tui_approval_detail)

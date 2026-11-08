@@ -129,7 +129,6 @@ val failure_kind : failure -> failure_kind
     Transport, malformed, mixed and other refusals are not capacity evidence. *)
 
 val evaluate :
-  ?timeout_sec:float ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   destinations:destination * destination list ->
   state:Yojson.Safe.t ->
@@ -145,12 +144,12 @@ val evaluate :
     {!failure}. Cancellation is not a refusal: it propagates and nothing more
     is asked.
 
-    [timeout_sec] bounds each destination's request/response exchange
-    separately on [clock] and defaults to
-    {!Masc_http_client.default_request_timeout_sec}, the deadline the other
-    outbound clients share. The clock is required because the HTTP client
-    applies the deadline only when it has one: without it a server that
-    accepts the connection and never answers is waited on for good. *)
+    Each destination's request/response exchange is bounded separately on
+    [clock] by {!Masc_http_client.default_request_timeout_sec}, the
+    deadline the other outbound clients share. The clock is required
+    because the HTTP client applies the deadline only when it has one:
+    without it a server that accepts the connection and never answers is
+    waited on for good. *)
 
 module For_testing : sig
   val transport_failure : endpoint:string -> api_key:string -> string -> refusal

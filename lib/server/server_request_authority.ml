@@ -36,12 +36,14 @@ type trusted_identity =
 
 type trust_policy =
   { configured_bind : trusted_identity
+  ; configured_tls : trusted_identity option
   ; explicit_trusted_host : trusted_identity option
   ; listener_scope : listener_scope
   }
 
 type trust_policy_error =
   | Malformed_bind_authority
+  | Malformed_tls_authority
   | Malformed_explicit_base_url
 
 type classification =
@@ -79,6 +81,7 @@ let scheme_of_string raw =
 
 let trust_policy_error_to_string = function
   | Malformed_bind_authority -> "configured HTTP bind authority is malformed"
+  | Malformed_tls_authority -> "configured HTTPS listener authority is malformed"
   | Malformed_explicit_base_url ->
     "configured HTTP base URL is not a valid HTTP(S) trusted identity"
 ;;
@@ -237,11 +240,13 @@ let host_is_unspecified host =
   | Error _ -> false
 ;;
 
-let configured_bind_matches (configured : trusted_identity) request_authority =
+(* One of the listeners' own identities: the cleartext bind or the TLS
+   listener. The effective port follows the identity's scheme. *)
+let configured_identity_matches (configured : trusted_identity) request_authority =
   let same_port =
     Option.equal Int.equal
-      (effective_host_port ~scheme:Http configured.authority)
-      (effective_host_port ~scheme:Http request_authority)
+      (effective_host_port ~scheme:configured.scheme configured.authority)
+      (effective_host_port ~scheme:configured.scheme request_authority)
   in
   not (host_is_unspecified configured.authority.host)
   && same_port
@@ -274,30 +279,45 @@ let explicit_identity_of_base_url raw =
       None
 ;;
 
-let make_trust_policy ~bind_host ~bind_port ~explicit_base_url :
+let make_trust_policy ~bind_host ~bind_port ~https_port ~explicit_base_url :
     (trust_policy, trust_policy_error) result =
   (* A wildcard is a socket bind address, never a wire authority. Keep the
      listener's local identity reachable when a distinct public base URL is
-     also configured by folding it through the shared advertised-host rule. *)
+     also configured by folding it through the shared advertised-host rule.
+     The TLS listener shares the host and has its own port. *)
   let listener_scope = listener_scope_of_host bind_host in
   let configured_host = Masc_network_defaults.normalize_advertised_host bind_host in
-  match host_port_of_parts ~host:configured_host ~port:(Some bind_port) with
-  | None -> Error Malformed_bind_authority
-  | Some bind_authority ->
-    let configured_bind : trusted_identity =
-      { authority = bind_authority; scheme = Http }
-    in
-    (match explicit_base_url with
-     | None -> Ok { configured_bind; explicit_trusted_host = None; listener_scope }
-     | Some raw ->
-       (match explicit_identity_of_base_url raw with
-        | None -> Error Malformed_explicit_base_url
-        | Some explicit_trusted_host ->
-          Ok
-            { configured_bind
-            ; explicit_trusted_host = Some explicit_trusted_host
-            ; listener_scope
-            }))
+  let configured_identity ~scheme ~port ~error =
+    match host_port_of_parts ~host:configured_host ~port:(Some port) with
+    | None -> Error error
+    | Some authority -> Ok ({ authority; scheme } : trusted_identity)
+  in
+  match configured_identity ~scheme:Http ~port:bind_port ~error:Malformed_bind_authority with
+  | Error _ as error -> error
+  | Ok configured_bind ->
+    (match
+       match https_port with
+       | None -> Ok None
+       | Some port ->
+         Result.map
+           Option.some
+           (configured_identity ~scheme:Https ~port ~error:Malformed_tls_authority)
+     with
+     | Error _ as error -> error
+     | Ok configured_tls ->
+       (match explicit_base_url with
+        | None ->
+          Ok { configured_bind; configured_tls; explicit_trusted_host = None; listener_scope }
+        | Some raw ->
+          (match explicit_identity_of_base_url raw with
+           | None -> Error Malformed_explicit_base_url
+           | Some explicit_trusted_host ->
+             Ok
+               { configured_bind
+               ; configured_tls
+               ; explicit_trusted_host = Some explicit_trusted_host
+               ; listener_scope
+               })))
 ;;
 
 let projection_context (trust_policy : trust_policy) : authority =
@@ -312,6 +332,29 @@ let projection_context (trust_policy : trust_policy) : authority =
   ; trust_class
   ; listener_scope = trust_policy.listener_scope
   }
+;;
+
+(* The listener identity of [scheme]: the cleartext bind for [Http], the TLS
+   listener for [Https] when one is configured. *)
+let configured_identity_admission
+    ~(trust_policy : trust_policy)
+    ~(scheme : scheme)
+    (parsed : host_port) : authority option =
+  let identity =
+    match scheme with
+    | Http -> Some trust_policy.configured_bind
+    | Https -> trust_policy.configured_tls
+  in
+  match identity with
+  | Some configured when configured_identity_matches configured parsed ->
+    Some
+      { host = parsed.host
+      ; port = parsed.port
+      ; scheme
+      ; trust_class = Configured_bind
+      ; listener_scope = trust_policy.listener_scope
+      }
+  | Some _ | None -> None
 ;;
 
 let admit_authority
@@ -335,25 +378,9 @@ let admit_authority
         }
     | Some _ | None -> None
   in
-  let configured_match () =
-    if wire_scheme = Http
-       && configured_bind_matches trust_policy.configured_bind parsed
-    then
-      Some
-        { host = parsed.host
-        ; port = parsed.port
-        ; scheme = Http
-        ; trust_class = Configured_bind
-        ; listener_scope = trust_policy.listener_scope
-        }
-    else None
-  in
-  match wire_scheme with
-  | Https -> explicit_match ()
-  | Http ->
-    (match configured_match () with
-     | Some _ as admitted -> admitted
-     | None -> explicit_match ())
+  match configured_identity_admission ~trust_policy ~scheme:wire_scheme parsed with
+  | Some _ as admitted -> admitted
+  | None -> explicit_match ()
 ;;
 
 let admit_http1_authority
@@ -377,20 +404,12 @@ let admit_http1_authority
     (match admit_authority ~trust_policy ~wire_scheme:Http parsed with
      | Some _ as admitted -> admitted
      | None ->
-       (match trust_policy.explicit_trusted_host with
-        | Some trusted
-          when trusted_host_port_matches
-                 ~scheme:trusted.scheme
-                 trusted.authority
-                 parsed ->
-          Some
-            { host = parsed.host
-            ; port = parsed.port
-            ; scheme = trusted.scheme
-            ; trust_class = Explicit_trusted_host
-            ; listener_scope = trust_policy.listener_scope
-            }
-        | Some _ | None -> None))
+       (* HTTP/1.1 carries no wire scheme: a Host naming the TLS listener is
+          that listener's identity, as on HTTP/2 with [:scheme https]. The
+          cleartext bind was tried first so a Host naming it stays Http. An
+          explicit trusted host was already matched above for either scheme,
+          so nothing remains to try after the TLS identity. *)
+       configured_identity_admission ~trust_policy ~scheme:Https parsed)
 ;;
 
 let classify_http1_request ~(trust_policy : trust_policy) request =

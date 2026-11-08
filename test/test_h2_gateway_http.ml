@@ -50,7 +50,7 @@ let with_gateway ?(on_routes = fun _ -> ()) ?(with_runtime = fun ~env:_ ~sw:_ ru
         let trust_policy =
           match
             Server_request_authority.make_trust_policy
-              ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None
+              ~bind_host:"localhost" ~bind_port:8935 ~https_port:None ~explicit_base_url:None
           with
           | Ok policy -> policy
           | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)

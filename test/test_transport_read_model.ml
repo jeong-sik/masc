@@ -199,7 +199,7 @@ let test_advertised_base_url_uses_typed_trusted_scheme () =
       match
         Server_request_authority.make_trust_policy
           ~bind_host:"0.0.0.0"
-          ~bind_port:8935
+          ~bind_port:8935 ~https_port:None
           ~explicit_base_url:(Some "https://masc.example.com")
       with
       | Ok policy -> policy

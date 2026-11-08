@@ -76,7 +76,7 @@ let with_listener mode ~capacity make_handler run =
       let addr=Eio.Net.listening_addr socket in
       let port=match addr with `Tcp (_,port) -> port | `Unix _ -> fail "expected TCP listener" in
       let trust_policy=match Server_request_authority.make_trust_policy
-        ~bind_host:"localhost" ~bind_port:port ~explicit_base_url:None with
+        ~bind_host:"localhost" ~bind_port:port ~https_port:None ~explicit_base_url:None with
         | Ok policy -> policy
         | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
       let gateway=Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy in

@@ -488,8 +488,9 @@ module Router : sig
 
     (** Redirects a request that names a loopback alias to the canonical
         loopback host, and hands any other request to the handler. It checks no
-        credential. [port] is the one to use when the request names none. *)
-    val with_canonical_loopback_host : port:int -> request_handler -> request_handler
+        credential. The redirect keeps the admitted authority's scheme and
+        port. *)
+    val with_canonical_loopback_host : request_handler -> request_handler
   end
 
   (** HTTP route registration that names the authentication each route needs. *)
@@ -516,9 +517,7 @@ module Router : sig
           (** Stays open when strict auth is on
               ([Route_access.Open_when_strict]). *)
       | Public_read_on_canonical_host :
-          { port : int
-          ; when_strict : Route_access.strict_reading
-          }
+          { when_strict : Route_access.strict_reading }
           -> state_handler auth
           (** A public read behind the canonical-host redirect: a request for a
               loopback alias is redirected before the server's readiness, the

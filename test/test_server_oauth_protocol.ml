@@ -115,7 +115,7 @@ let test_public_listener_cannot_admit_loopback_oauth_by_host () =
     match
       Server_request_authority.make_trust_policy
         ~bind_host:"0.0.0.0"
-        ~bind_port:8935
+        ~bind_port:8935 ~https_port:None
         ~explicit_base_url:(Some "http://127.0.0.1:8935")
     with
     | Ok policy -> policy
@@ -144,7 +144,7 @@ let test_listener_scope_survives_wire_projection () =
     (fun (bind_host, wire_host, expected) ->
       let trust_policy =
         match Server_request_authority.make_trust_policy
-          ~bind_host ~bind_port:8935 ~explicit_base_url:None with
+          ~bind_host ~bind_port:8935 ~https_port:None ~explicit_base_url:None with
         | Ok policy -> policy
         | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
       in

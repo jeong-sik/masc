@@ -697,7 +697,7 @@ module Router = struct
       -> (state -> string -> Httpun.Request.t -> Http_reqd.t -> unit)
       -> request_handler
 
-    val with_canonical_loopback_host : port:int -> request_handler -> request_handler
+    val with_canonical_loopback_host : request_handler -> request_handler
   end
 
   module type Typed = sig
@@ -711,9 +711,7 @@ module Router = struct
       | Public_read : state_handler auth
       | Public_read_open_when_strict : state_handler auth
       | Public_read_on_canonical_host :
-          { port : int
-          ; when_strict : Route_access.strict_reading
-          }
+          { when_strict : Route_access.strict_reading }
           -> state_handler auth
       | Read_auth : state_handler auth
       | Permission : Masc_domain.permission -> state_handler auth
@@ -756,9 +754,7 @@ module Router = struct
       | Public_read : state_handler auth
       | Public_read_open_when_strict : state_handler auth
       | Public_read_on_canonical_host :
-          { port : int
-          ; when_strict : Route_access.strict_reading
-          }
+          { when_strict : Route_access.strict_reading }
           -> state_handler auth
       | Read_auth : state_handler auth
       | Permission : Masc_domain.permission -> state_handler auth
@@ -775,7 +771,7 @@ module Router = struct
       | Always_public -> Route_access.Always_public
       | Public_read -> Route_access.Public_read Route_access.Credential_when_strict
       | Public_read_open_when_strict -> Route_access.Public_read Route_access.Open_when_strict
-      | Public_read_on_canonical_host { when_strict; _ } -> Route_access.Public_read when_strict
+      | Public_read_on_canonical_host { when_strict } -> Route_access.Public_read when_strict
       | Read_auth -> Route_access.Read_auth
       | Permission permission -> Route_access.Permission permission
       | Token_permission permission -> Route_access.Token_permission permission
@@ -795,13 +791,13 @@ module Router = struct
       | Self_authenticated _ -> handler
       | Public_read -> W.with_public_read handler
       | Public_read_open_when_strict -> W.with_public_read_open_when_strict handler
-      | Public_read_on_canonical_host { port; when_strict } ->
+      | Public_read_on_canonical_host { when_strict } ->
         let public_read =
           match when_strict with
           | Route_access.Credential_when_strict -> W.with_public_read handler
           | Route_access.Open_when_strict -> W.with_public_read_open_when_strict handler
         in
-        W.with_canonical_loopback_host ~port public_read
+        W.with_canonical_loopback_host public_read
       | Read_auth -> W.with_read_auth handler
       | Permission permission -> W.with_permission_auth ~permission handler
       | Token_permission permission ->

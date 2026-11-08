@@ -31,16 +31,15 @@ val websocket_upgrade_authorized :
     still go through {!add_routes}. *)
 
 val canonical_loopback_location :
-  default_port:int ->
   request_authority:Server_request_authority.authority ->
   Httpun.Request.t ->
   string option
 (** [Some redirect_url] when the admitted authority advertises a non-canonical
     loopback host that should redirect, [None] when it already matches the
-    canonical advertisement. *)
+    canonical advertisement. The redirect keeps the admitted authority's
+    scheme and port, or the scheme default when the request named none. *)
 
 val canonical_root_dashboard_location :
-  default_port:int ->
   request_authority:Server_request_authority.authority ->
   string option
 (** Like {!canonical_loopback_location} but rewrites the path to

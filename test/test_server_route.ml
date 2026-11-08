@@ -41,14 +41,14 @@ let kinds : (string * (Router.t -> Router.t) * Route_access.t) list =
   ; ( "public_read_on_canonical_host"
     , Server_route.get
         (Server_route.Public_read_on_canonical_host
-           { port = 8935; when_strict = Route_access.Credential_when_strict })
+           { when_strict = Route_access.Credential_when_strict })
         "/x"
         state_handler
     , Route_access.Public_read Route_access.Credential_when_strict )
   ; ( "public_read_on_canonical_host_open_when_strict"
     , Server_route.get
         (Server_route.Public_read_on_canonical_host
-           { port = 8935; when_strict = Route_access.Open_when_strict })
+           { when_strict = Route_access.Open_when_strict })
         "/x"
         state_handler
     , Route_access.Public_read Route_access.Open_when_strict )
@@ -353,7 +353,7 @@ let dispatch_kinds =
     , (fun r ->
         Server_route.get
           (Server_route.Public_read_on_canonical_host
-             { port = 8935; when_strict = Route_access.Credential_when_strict })
+             { when_strict = Route_access.Credential_when_strict })
           "/public_read_on_canonical_host"
           (on_state "public_read_on_canonical_host")
           r)
@@ -364,7 +364,6 @@ let dispatch_kinds =
           "/public_read_on_canonical_host"
           (fun request reqd ->
              Server_canonical_host.with_canonical_loopback_host
-               ~port:8935
                (fun req reqd ->
                   Server_auth.with_public_read
                     (on_state "public_read_on_canonical_host")
@@ -377,7 +376,7 @@ let dispatch_kinds =
     , (fun r ->
         Server_route.get
           (Server_route.Public_read_on_canonical_host
-             { port = 8935; when_strict = Route_access.Open_when_strict })
+             { when_strict = Route_access.Open_when_strict })
           "/public_read_on_canonical_host_open_when_strict"
           (on_state "public_read_on_canonical_host_open_when_strict")
           r)
@@ -387,7 +386,6 @@ let dispatch_kinds =
           "/public_read_on_canonical_host_open_when_strict"
           (fun request reqd ->
              Server_canonical_host.with_canonical_loopback_host
-               ~port:8935
                (Server_auth.with_public_read_open_when_strict
                   (on_state "public_read_on_canonical_host_open_when_strict"))
                request
@@ -680,12 +678,12 @@ let page_routes () =
   Router.create ()
   |> Server_route.get
        (Server_route.Public_read_on_canonical_host
-          { port = 8935; when_strict = Route_access.Credential_when_strict })
+          { when_strict = Route_access.Credential_when_strict })
        "/page"
        (on_state "page")
   |> Server_route.get
        (Server_route.Public_read_on_canonical_host
-          { port = 8935; when_strict = Route_access.Open_when_strict })
+          { when_strict = Route_access.Open_when_strict })
        "/open_page"
        (on_state "open_page")
   |> Server_route.get Server_route.Public_read "/plain" (on_state "plain")

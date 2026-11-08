@@ -135,7 +135,7 @@ let with_gateway capacity run =
               in
               Server_auth.For_testing.restore_server_state (Some state);
               let trust_policy = Server_request_authority.make_trust_policy
-                ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None
+                ~bind_host:"localhost" ~bind_port:8935 ~https_port:None ~explicit_base_url:None
                 |> Result.map_error Server_request_authority.trust_policy_error_to_string
                 |> require in
               let gateway = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy in

@@ -402,7 +402,7 @@ let rec rm_rf path =
 let trust_policy () =
   match
     Server_request_authority.make_trust_policy ~bind_host:listener_host
-      ~bind_port:listener_port ~explicit_base_url:None
+      ~bind_port:listener_port ~https_port:None ~explicit_base_url:None
   with
   | Ok policy -> policy
   | Error error ->
@@ -760,7 +760,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
      discovery is unavailable there and must not be advertised in a 403. *)
   let public_policy =
     match Server_request_authority.make_trust_policy
-        ~bind_host:"0.0.0.0" ~bind_port:listener_port
+        ~bind_host:"0.0.0.0" ~bind_port:listener_port ~https_port:None
         ~explicit_base_url:(Some "http://localhost:8935") with
     | Ok policy -> policy
     | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)

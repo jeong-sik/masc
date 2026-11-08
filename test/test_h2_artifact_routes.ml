@@ -85,7 +85,7 @@ let with_gateway ?(runtime = false) ?resources ?(zero_window = false) run =
                 (match Masc.Server_startup_state.mark_state_ready () with
                  | Ok () -> () | Error error -> fail (Masc.Server_startup_state.state_ready_error_to_string error));
                 let trust_policy = match Server_request_authority.make_trust_policy
-                  ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
+                  ~bind_host:"localhost" ~bind_port:8935 ~https_port:None ~explicit_base_url:None with
                   | Ok policy -> policy
                   | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
                 let authority = match Server_request_authority.of_host_port ~host:"localhost" ~port:8935 with

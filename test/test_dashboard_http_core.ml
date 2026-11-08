@@ -3238,7 +3238,7 @@ let test_dashboard_shell_auth_json_reports_missing_token () =
       match
         Server_request_authority.make_trust_policy
           ~bind_host:"127.0.0.1"
-          ~bind_port:5173
+          ~bind_port:5173 ~https_port:None
           ~explicit_base_url:None
       with
       | Ok policy -> policy
@@ -4977,7 +4977,7 @@ let test_tools_routes_serve_prepared_http_representations () =
     let router = Server_routes_http_routes_dashboard.add_routes ~sw
       ~clock:(Eio.Stdenv.clock env) (Lib.Http_server_eio.Router.create ()) in
     let trust_policy = match Server_request_authority.make_trust_policy
-      ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
+      ~bind_host:"localhost" ~bind_port:8935 ~https_port:None ~explicit_base_url:None with
       | Ok policy -> policy
       | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
     let h2_handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy ~request_sw:sw
@@ -5482,7 +5482,7 @@ let test_execution_routes_serve_prepared_http_representations () =
   let router = Server_routes_http_routes_dashboard.add_routes ~sw ~clock
     (Lib.Http_server_eio.Router.create ()) in
   let trust_policy = match Server_request_authority.make_trust_policy
-    ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
+    ~bind_host:"localhost" ~bind_port:8935 ~https_port:None ~explicit_base_url:None with
     | Ok policy -> policy
     | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
   let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock) ~trust_policy ~request_sw:sw

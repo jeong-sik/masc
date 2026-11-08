@@ -23,18 +23,23 @@ type trust_policy
 
 type trust_policy_error =
   | Malformed_bind_authority
+  | Malformed_tls_authority
   | Malformed_explicit_base_url
 
 val make_trust_policy :
   bind_host:string ->
   bind_port:int ->
+  https_port:int option ->
   explicit_base_url:string option ->
   (trust_policy, trust_policy_error) result
 (** Build the only live-request Host trust policy.  [bind_host]/[bind_port]
-    are the actual listener identity and [explicit_base_url] is the configured
-    public identity (normally [MASC_HTTP_BASE_URL]).  No request header is a
-    trust-policy input. A wildcard bind host is represented by the configured
-    loopback peer because wildcard addresses cannot be wire authorities. *)
+    are the actual listener identity, [https_port] is the TLS listener's port
+    when one is open ([transport.https_port]), so [bind_host]:[https_port]
+    over https is that listener's own identity, and [explicit_base_url] is
+    the configured public identity (normally [MASC_HTTP_BASE_URL]).  No
+    request header is a trust-policy input. A wildcard bind host is
+    represented by the configured loopback peer because wildcard addresses
+    cannot be wire authorities. *)
 
 val trust_policy_error_to_string : trust_policy_error -> string
 
@@ -60,8 +65,9 @@ exception Unbound_request_authority
 val classify_http1_request :
   trust_policy:trust_policy -> Httpun.Request.t -> classification
 (** Classify the case-insensitive HTTP/1.1 [Host] field set, then admit it only
-    when it is the configured bind identity (HTTP) or the explicit base-URL
-    identity (whose HTTP(S) scheme is preserved). *)
+    when it is the configured bind identity (HTTP), the TLS listener identity
+    (HTTPS) or the explicit base-URL identity (whose HTTP(S) scheme is
+    preserved). *)
 
 val classify_h2_request :
   trust_policy:trust_policy -> H2.Request.t -> h2_classification

@@ -281,7 +281,7 @@ module type LOGGER = sig
   val debug : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ?diagnostic_kind:diagnostic_kind -> ('a, unit, string, unit) format4 -> 'a
   val info : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ?diagnostic_kind:diagnostic_kind -> ('a, unit, string, unit) format4 -> 'a
   val warn : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ?diagnostic_kind:diagnostic_kind -> ('a, unit, string, unit) format4 -> 'a
-  val error : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+  val error : ?keeper_name:string -> ?turn_id:int -> ?category:category -> ?diagnostic_kind:diagnostic_kind -> ('a, unit, string, unit) format4 -> 'a
 end
 
 module Make (_ : sig val name : string end) : LOGGER

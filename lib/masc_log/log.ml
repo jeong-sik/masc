@@ -1226,7 +1226,7 @@ module type LOGGER = sig
     ?keeper_name:string -> ?turn_id:int -> ?category:category -> ?diagnostic_kind:diagnostic_kind -> ('a, unit, string, unit) format4 -> 'a
 
   val error :
-    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ('a, unit, string, unit) format4 -> 'a
+    ?keeper_name:string -> ?turn_id:int -> ?category:category -> ?diagnostic_kind:diagnostic_kind -> ('a, unit, string, unit) format4 -> 'a
 end
 
 (** Module-specific loggers.
@@ -1301,7 +1301,7 @@ module Make (M : sig val name : string end) = struct
   let debug ?keeper_name ?turn_id ?category ?diagnostic_kind fmt = log_module Debug ?keeper_name ?turn_id ?category ?diagnostic_kind fmt
   let info ?keeper_name ?turn_id ?category ?diagnostic_kind fmt = log_module Info ?keeper_name ?turn_id ?category ?diagnostic_kind fmt
   let warn ?keeper_name ?turn_id ?category ?diagnostic_kind fmt = log_module Warn ?keeper_name ?turn_id ?category ?diagnostic_kind fmt
-  let error ?keeper_name ?turn_id ?category fmt = log_module Error ?keeper_name ?turn_id ?category fmt
+  let error ?keeper_name ?turn_id ?category ?diagnostic_kind fmt = log_module Error ?keeper_name ?turn_id ?category ?diagnostic_kind fmt
 end
 
 (** Pre-defined module loggers *)

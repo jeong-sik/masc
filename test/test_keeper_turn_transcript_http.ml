@@ -1,7 +1,7 @@
 open Alcotest
 open Masc
 
-module Api = Server_dashboard_http_keeper_api
+module Turn_reads = Server_dashboard_http_keeper_turn_reads
 module K = Keeper_chat_store
 module Inspector = Masc_tui_context_inspector
 
@@ -29,7 +29,7 @@ let with_workspace fn =
     let lookup query =
       let target = Uri.make ~path:("/api/v1/keepers/" ^ keeper ^ "/turn-transcript") ~query ()
           |> Uri.to_string in
-      Api.keeper_turn_transcript_lookup_response ~config ~keeper_name:keeper
+      Turn_reads.keeper_turn_transcript_lookup_response ~config ~keeper_name:keeper
         (Httpun.Request.create `GET target) in
     fn path lookup)
 

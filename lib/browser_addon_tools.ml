@@ -124,19 +124,20 @@ let prepare ~upload_paths tool json =
      | `Assoc supplied when List.assoc_opt "action" supplied = Some (`String "workflow") ->
       let* ()=if List.length supplied=List.length (List.sort_uniq String.compare (List.map fst supplied))
         then Ok () else Error "duplicate native workflow argument" in
-      let* accepted=fields ["lane";"clientId";"tabId";"action";"expectedUrl";"steps";"snapshotScope";"maxChars"] json in
+      let* accepted=fields ["clientId";"tabId";"action";"expectedUrl";"steps";"snapshotScope";"maxChars"] json in
       let fields=accepted in
       let* request=surface fields in
       let* ()=bound request in
       let* cap=optional_int "maxChars" fields in
       let* max_chars=Browser_page_script.text_cap cap in
       let input=`Assoc (("maxChars",`Int max_chars)::List.filter (fun (key,_)->
-        not (List.mem key ["lane";"clientId";"action";"maxChars"])) fields) in
+        not (List.mem key ["clientId";"action";"maxChars"])) fields) in
       let* workflow=B.Native_workflow.of_json input in
       let* ()=B.Native_workflow.validate_input_contract workflow
         |> Result.map_error B.Native_workflow.unavailable_input_message in
       Ok {preference=request.route;required_actions=[];projection=Raw;verb=B.Page_native_workflow workflow}
      | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) ->
+      let* _=fields (Browser_interaction.route_names @ Browser_interaction.wire_fields) json in
       let* request=Browser_interaction.parse json in
       Ok {preference=request.route;required_actions=[];projection=Raw;
         verb=B.Page_interact {tab_id=request.tab_id;expected_url=request.expected_url;action=request.action}})
@@ -162,7 +163,7 @@ let prepare ~upload_paths tool json =
       prepared ~required_actions request Inventory B.Tabs_list
   | Session -> Error "action must be bind_goal, goal_status or unbind_goal"
   | Goto ->
-      let* fields=fields ["lane";"clientId";"tabId";"url"] json in
+      let* fields=fields ["clientId";"tabId";"url"] json in
       let* request=surface fields in
       let* url=absolute_url (List.assoc_opt "url" fields) in
       let* ()=match request.route,request.tab_id with

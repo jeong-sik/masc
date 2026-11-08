@@ -111,7 +111,6 @@ let test_follow_then_read observation case () =
         | "BrowserInteract" ->
             check bool "follow pins the observed client, tab, URL, document and link" true
               (Yojson.Safe.Util.member "action" input=`String "follow_link"
-               && Yojson.Safe.Util.member "lane" input=`String "live"
                && Yojson.Safe.Util.member "clientId" input=Yojson.Safe.Util.member "clientId" args
                && Yojson.Safe.Util.member "tabId" input=`Int 7
                && Yojson.Safe.Util.member "expectedUrl" input=`String "https://example.org/before"

@@ -2,11 +2,13 @@
 type request = { route : Browser_selection.preference; tab_id : int;
   expected_url : string option; action : Browser_lane.interaction }
 open Result.Syntax
-let route_names = ["lane"; "clientId"]
+let route_names = ["clientId"]
 let wire_fields = ["tabId"; "expectedUrl"; "action"; "selector"; "text"; "x"; "y"; "documentId"; "nodeId"; "point"; "from"; "to"; "viewport"; "button"; "source"; "destination"; "via"; "durationMs"; "key"; "modifiers"; "width"; "height"; "value"; "values"; "target"]
 let parse = function
   | `Assoc fields ->
-    let allowed = route_names @ wire_fields in
+    (* The Add-on wire, the HTTP view and the ego worker also name the live
+       lane; a Keeper names only the client (see [route_names]). *)
+    let allowed = "lane" :: route_names @ wire_fields in
     let* () = if List.for_all (fun (key, _) -> List.mem key allowed) fields
       && List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
       then Ok () else Error "unknown or duplicate browser interaction argument" in
@@ -167,7 +169,7 @@ let parse = function
         let* () = match base.route with
           | Browser_selection.Exact (Browser_lane.Live_route _) -> Ok ()
           | Browser_selection.Automatic ->
-              Error "activate_tab requires an observed live clientId or lane" in
+              Error "activate_tab requires the observed clientId" in
         Ok Browser_lane.Activate_tab
       | Some (`String "click") ->
         let* () = excludes ["text"; "x"; "y"; "point"; "from"; "to"; "viewport"] in

@@ -532,6 +532,17 @@ let test_bound_goal_timeout_answers_while_read_pool_is_busy () =
       check bool "H1 refusal does not reflect an untrusted origin" false
         (String_util.contains_substring h1 "access-control-allow-origin:")))
 
+(* The listener a health body names is the protocol the request came on.
+   This exchange is HTTP/2, so the body says so; the table's handler once
+   answered "http/1.1" for both protocols. *)
+let test_health_names_the_h2_listener () =
+  with_gateway ~make_routes:production (fun ~player:_ ~reader:_ client ->
+    let code, body = request ~meth:`GET client "/health" in
+    check int "health answers" 200 code;
+    check string "the body names h2" "h2"
+      Yojson.Safe.Util.(
+        Yojson.Safe.from_string body |> member "protocol" |> member "listener" |> to_string))
+
 (* Strict auth opens a request without a credential only when the route it
    reaches asks for none: [Always_public] or [Public_read Open_when_strict].
    The open paths are spelled as clients send them, so renaming a shared
@@ -594,6 +605,7 @@ let () =
             test_subpath_routes_check_the_token_themselves
         ; test_case "a path the router lacks is not found" `Quick
             test_a_path_the_router_lacks_is_not_found
+        ; test_case "health names the h2 listener" `Quick test_health_names_the_h2_listener
         ; test_case "Fusion workspace admission" `Quick test_fusion_workspace_admission
         ; test_case "physical Skill turn evidence" `Quick test_physical_skill_turn_evidence
         ; test_case "bound Goal tree bypasses stale cache" `Quick test_goal_tree_bound_read_bypasses_stale_cache

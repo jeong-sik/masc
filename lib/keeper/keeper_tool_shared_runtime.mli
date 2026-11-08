@@ -72,9 +72,12 @@ type cwd_existence =
 val cwd_existence : meta:Keeper_meta_contract.keeper_meta -> string -> cwd_existence
 
 (** Project a Keeper-visible write path into its deterministic logical
-    namespace and return the opaque allowed-root capability locator. This is
-    the single owner of relative-path and Docker-visible-path projection for
-    local filesystem writes. *)
+    namespace and return the opaque allowed-root capability locator. A relative
+    path is rooted at that Keeper's playground; an absolute path, including a
+    Docker-visible path projected to its host mount, keeps its explicit
+    identity. The projected path is then checked against the allowed roots.
+    This is the single owner of relative-path and Docker-visible-path
+    projection for local filesystem writes. *)
 val resolve_keeper_confined_write_path
   :  config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta

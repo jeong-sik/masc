@@ -342,6 +342,16 @@ type dispatch_bundle =
 let input_with_cwd cwd (input : Keeper_tool_execute_typed_input.execute_input) =
   { input with Keeper_tool_execute_typed_input.cwd = Some cwd }
 
+(* The free-disk floor of a remote endpoint guards what a call leaves on its
+   disk. A call that requests an effect keeps it. An [Auto] call is an
+   observation unless the Gate judges and approves it as an effect, and a host
+   under the floor still answers an observation. *)
+let remote_access_of_intent : Keeper_tool_execute_typed_input.intent
+    -> Keeper_sandbox_remote.access = function
+  | Keeper_tool_execute_typed_input.Auto -> Keeper_sandbox_remote.Read_only
+  | Keeper_tool_execute_typed_input.Request_effect -> Keeper_sandbox_remote.Read_write
+;;
+
 let handle_tool_execute_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
@@ -496,6 +506,7 @@ let handle_tool_execute_typed
               | Some endpoint -> Keeper_sandbox_shell_ir_target.ssh_target
                  ~endpoint
                  ~on_receipt
+                 ~access:(remote_access_of_intent input.intent)
                  ~base_path:config.base_path
                  ~meta
                  ~timeout_sec

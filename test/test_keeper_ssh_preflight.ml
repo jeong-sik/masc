@@ -302,6 +302,70 @@ let test_named_failures () =
     ]
 ;;
 
+(* A host under the free-disk floor still answers a read. Calls that read
+   (Read, Grep, a read authority, an Execute whose intent is Auto) are the
+   ones that pass; the default stays the whole preflight. *)
+let test_read_only_passes_a_host_under_the_floor () =
+  with_eio @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "0" @@ fun () ->
+  let base_path = temp_dir () in
+  let ssh_bin, _ = make_stub ~dir:base_path ~mode:"disk-low" in
+  let state = make_state ~base_path ~ssh_bin in
+  check (result unit string) "a reader passes" (Ok ())
+    (Keeper_sandbox_remote.check_preflight ~force:true
+       ~access:Keeper_sandbox_remote.Read_only state);
+  check bool "a writer is refused" true
+    (contains_prefix "remote_ssh_disk_low:"
+       (Keeper_sandbox_remote.check_preflight ~force:true
+          ~access:Keeper_sandbox_remote.Read_write state));
+  check bool "no access given is a writer" true
+    (contains_prefix "remote_ssh_disk_low:"
+       (Keeper_sandbox_remote.check_preflight ~force:true state))
+;;
+
+(* The floor is the only step a reader skips: each other failure still
+   refuses it with the same named error. *)
+let test_read_only_keeps_every_other_step () =
+  with_eio @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "0" @@ fun () ->
+  List.iter
+    (fun (mode, prefix) ->
+      let base_path = temp_dir () in
+      let ssh_bin, _ = make_stub ~dir:base_path ~mode in
+      let state = make_state ~base_path ~ssh_bin in
+      check bool mode true
+        (contains_prefix prefix
+           (Keeper_sandbox_remote.check_preflight ~force:true
+              ~access:Keeper_sandbox_remote.Read_only state)))
+    [ "unreachable", "remote_ssh_endpoint_unreachable:"
+    ; "skew", "remote_shim_version_skew:"
+    ; "rg-missing", "remote_ripgrep_unavailable:"
+    ; "gh-missing", "remote_github_identity_missing:"
+    ; "gh-blinded", "remote_github_unreachable:"
+    ]
+;;
+
+(* One pass fills the cache for both kinds of caller: a reader that found the
+   host under the floor does not make the next writer probe it again. *)
+let test_one_pass_serves_both_accesses () =
+  with_eio @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "60" @@ fun () ->
+  let base_path = temp_dir () in
+  let ssh_bin, count_path = make_stub ~dir:base_path ~mode:"disk-low" in
+  let state = make_state ~base_path ~ssh_bin in
+  Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
+  check (result unit string) "reader" (Ok ())
+    (Keeper_sandbox_remote.check_preflight
+       ~access:Keeper_sandbox_remote.Read_only state);
+  let probes = invocation_count count_path in
+  check int "one pass probes every step" 8 probes;
+  check bool "writer reads the same entry" true
+    (contains_prefix "remote_ssh_disk_low:"
+       (Keeper_sandbox_remote.check_preflight
+          ~access:Keeper_sandbox_remote.Read_write state));
+  check int "no second pass" probes (invocation_count count_path)
+;;
+
 let test_absent_github_login_is_not_a_blocker () =
   with_eio @@ fun () ->
   with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "0" @@ fun () ->
@@ -329,5 +393,11 @@ let () =
           ; test_case "named failures" `Quick test_named_failures
           ; test_case "absent GitHub login" `Quick
               test_absent_github_login_is_not_a_blocker
+          ; test_case "read-only passes a host under the floor" `Quick
+              test_read_only_passes_a_host_under_the_floor
+          ; test_case "read-only keeps every other step" `Quick
+              test_read_only_keeps_every_other_step
+          ; test_case "one pass serves both accesses" `Quick
+              test_one_pass_serves_both_accesses
           ] )
       ]

@@ -298,7 +298,8 @@ let guest_target
     Ok { target; runtime; sandbox_profile; observe_route }
 ;;
 
-let ssh_target ~endpoint ~base_path ~meta ~timeout_sec ?ssh_bin ?on_receipt () =
+let ssh_target ~endpoint ~base_path ~meta ~timeout_sec ?ssh_bin ?on_receipt
+    ?(access = Keeper_sandbox_remote.Read_write) () =
     (match
        Keeper_sandbox_ssh.create ?ssh_bin ~base_path ~keeper_name:meta.name
          ~endpoint ()
@@ -314,7 +315,7 @@ let ssh_target ~endpoint ~base_path ~meta ~timeout_sec ?ssh_bin ?on_receipt () =
      | Ok ssh ->
        let readiness =
          if Env_config_sandbox.Preflight.enabled ()
-         then Keeper_sandbox_remote.check_preflight ssh
+         then Keeper_sandbox_remote.check_preflight ~access ssh
          else Ok ()
        in
        (match readiness with

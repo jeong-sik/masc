@@ -19,16 +19,16 @@ let docker_has_no_remote_lane (meta : keeper_meta) =
 (* The preflight is the OpenSSH bootstrap contract: a host the operator
    provisioned, reachable over the network, holding a GitHub identity the
    bootstrap installed. It stays with that transport. *)
-let ready endpoint =
+let ready ~access endpoint =
   let* () =
     if Env_config_sandbox.Preflight.enabled ()
-    then Keeper_sandbox_remote.check_preflight endpoint
+    then Keeper_sandbox_remote.check_preflight ~access endpoint
     else Ok ()
   in
   Ok endpoint
 ;;
 
-let openssh_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) =
+let openssh_endpoint ~access ~(config : Workspace.config) ~(meta : keeper_meta) =
   let* endpoint =
     Keeper_sandbox_ssh.resolve_endpoint
       ~base_path:config.base_path ~keeper_name:meta.name
@@ -37,7 +37,7 @@ let openssh_endpoint ~(config : Workspace.config) ~(meta : keeper_meta) =
     Keeper_sandbox_ssh.create ~base_path:config.base_path
       ~keeper_name:meta.name ~endpoint ()
   in
-  ready ssh
+  ready ~access ssh
 ;;
 
 (* No preflight for a guest. The runtime that boots it establishes what the
@@ -78,17 +78,17 @@ let guest_endpoint ~turn_sandbox_factory ~(meta : keeper_meta) ~cwd =
    the guest directly and cannot start anything. A caller with no turn --
    verification lookup, an operator surface -- reads through this and gets a
    refusal only when the guest is genuinely down. *)
-let attached_guest_endpoint ?timeout_sec ~(config : Workspace.config) ~(meta : keeper_meta) () =
+let attached_guest_endpoint ?timeout_sec ?(access = Keeper_sandbox_remote.Read_write) ~(config : Workspace.config) ~(meta : keeper_meta) () =
   match meta.sandbox_profile with
   | Docker -> Error (docker_has_no_remote_lane meta)
-  | Remote_ssh -> openssh_endpoint ~config ~meta
+  | Remote_ssh -> openssh_endpoint ~access ~config ~meta
   | Micro_vm -> Keeper_turn_sandbox_runtime.microvm_attached_endpoint ?timeout_sec ~config ~meta ()
 ;;
 
-let endpoint ?turn_sandbox_factory ~(config : Workspace.config) ~(meta : keeper_meta) ~cwd () =
+let endpoint ?turn_sandbox_factory ?(access = Keeper_sandbox_remote.Read_write) ~(config : Workspace.config) ~(meta : keeper_meta) ~cwd () =
   match meta.sandbox_profile with
   | Docker -> Error (docker_has_no_remote_lane meta)
-  | Remote_ssh -> openssh_endpoint ~config ~meta
+  | Remote_ssh -> openssh_endpoint ~access ~config ~meta
   | Micro_vm -> guest_endpoint ~turn_sandbox_factory ~meta ~cwd
 ;;
 
@@ -199,7 +199,7 @@ let capture_read_authority ~(config : Workspace.config) ~(meta : keeper_meta) ()
   | Remote_ssh ->
     let* declaration = Keeper_sandbox_ssh.resolve_endpoint ~base_path:config.base_path ~keeper_name:meta.name in
     let* endpoint = Keeper_sandbox_ssh.create ~base_path:config.base_path ~keeper_name:meta.name ~endpoint:declaration () in
-    let* endpoint = ready endpoint in
+    let* endpoint = ready ~access:Keeper_sandbox_remote.Read_only endpoint in
     Ok (capture endpoint (Some declaration) None)
   | Micro_vm ->
     (match meta.microvm_backend with

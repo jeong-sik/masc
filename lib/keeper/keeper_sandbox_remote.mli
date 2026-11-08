@@ -174,10 +174,25 @@ type carrier =
 
 val carrier : t -> carrier
 
-val check_preflight : ?force:bool -> t -> (unit, string) result
+(** What a call may leave on the endpoint's disk. *)
+type access =
+  | Read_only
+      (** The call reads and leaves nothing: Read, Grep, a read authority, an
+          Execute whose intent is [Auto]. *)
+  | Read_write
+      (** The call may write: Write, Edit, a checkout, an Execute that
+          requests an effect, and an operator admitting a Keeper. *)
+
+val check_preflight : ?force:bool -> ?access:access -> t -> (unit, string) result
 (** Verify endpoint reachability, shim major version, remote git/rg, the
     roots, free disk, and per-keeper GitHub identity. Results are cached for
-    [Env_config_sandbox.Preflight.ssh_ttl_sec] unless [force=true]. *)
+    [Env_config_sandbox.Preflight.ssh_ttl_sec] unless [force=true].
+
+    [access] defaults to [Read_write], which checks all of that. [Read_only]
+    leaves out the free-disk floor and nothing else: a host under the floor
+    still answers a read. A [Read_write] call keeps the floor even when its
+    command deletes, because the preflight cannot tell a delete from a write.
+    One pass fills the cache for both. *)
 
 val check_endpoint_preflight : t -> (unit, string) result
 (** Uncached endpoint-root half of the OpenSSH preflight. GitHub login uses

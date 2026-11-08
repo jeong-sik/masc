@@ -76,9 +76,17 @@ type decision =
 
 val decide : Authz_boot_mode.input -> decision
 
+(** How a workspace goes back to a single user while this build does not
+    serve multi-account. Without the log, the external store and the install
+    record, and with no [account_mode] in [config.json], the boot cannot tell
+    the base path from one never activated, and boots a single user (row 1).
+    It is one line for {!messages} and for the texts of [masc auth bootstrap]. *)
+val single_user_again : string
+
 (** One line per reason, the first apart, so a stop always has a reason. A
     {!Multi_account_not_served} stop also says what the high-water mark found
-    when it is not a match. *)
+    when it is not a match. {!Activation_requested} and
+    {!Multi_account_not_served} end with {!single_user_again}. *)
 val messages : Authz_boot_mode.input -> stop -> string * string list
 
 (** A base path that {!boot} judged a single-user boot. Only {!boot} makes one,

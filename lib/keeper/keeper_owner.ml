@@ -1693,25 +1693,35 @@ let start
           | Ok (Some operation) ->
             (match operation.state with
              | Chat_operation.Queued ->
-               (match Chat_operation_store.direct_checkpoint t.operation_store ~operation_id with
-                | Ok (Some _) -> Ok ()
-                | Error error -> Error error
-                | Ok None -> match Chat_operation_store.direct_runtime_retry t.operation_store ~operation_id with
-                | Ok (Some _) -> Ok ()
-                | Ok None ->
-                  (match Chat_operation_store.direct_gate_state t.operation_store ~operation_id with
-                   | Ok (Some _) -> Ok ()
-                   | Ok None ->
-                     (match Chat_operation_store.direct_gate_binding t.operation_store ~operation_id with
-                      | Ok (Some _) -> Ok ()
-                      | Ok None ->
-                        (match Chat_operation_store.direct_input_wait t.operation_store ~operation_id with
-                         | Ok (Some _) -> Ok ()
-                         | Ok None -> Error (Chat_operation_store.Integrity_error "deferred operation has no continuation")
-                         | Error error -> Error error)
-                      | Error error -> Error error)
-                   | Error error -> Error error)
-                | Error error -> Error error)
+               (* The first continuation this deferred operation still has,
+                  probed in a fixed order. Each probe drops its payload — the
+                  arm only asks whether any continuation exists, and the
+                  Integrity_error names the case where none does. *)
+               (* [Option.map] inside [Result.map]: the probe must keep the
+                  Some/None distinction of the read — mapping the payload to
+                  a bare value here would let an absent continuation pass as
+                  present and make the Integrity_error below unreachable. *)
+               let probe read () =
+                 Result.map (Option.map (fun _ -> ())) (read ~operation_id)
+               in
+               let rec first_present = function
+                 | [] ->
+                   Error
+                     (Chat_operation_store.Integrity_error
+                        "deferred operation has no continuation")
+                 | probe :: rest ->
+                   (match probe () with
+                    | Ok (Some ()) -> Ok ()
+                    | Ok None -> first_present rest
+                    | Error error -> Error error)
+               in
+               first_present
+                 [ probe (Chat_operation_store.direct_checkpoint t.operation_store)
+                 ; probe (Chat_operation_store.direct_runtime_retry t.operation_store)
+                 ; probe (Chat_operation_store.direct_gate_state t.operation_store)
+                 ; probe (Chat_operation_store.direct_gate_binding t.operation_store)
+                 ; probe (Chat_operation_store.direct_input_wait t.operation_store)
+                 ]
              | Chat_operation.Cancelled _ -> Ok ()
              | Chat_operation.Running _ | Chat_operation.Succeeded _ | Chat_operation.Failed _ ->
                Error (Chat_operation_store.Integrity_error "deferred operation is not queued")))
@@ -1782,14 +1792,21 @@ let start
             fail_running_operation ~operation_id ~kind ~detail ~outcome_ref))
     in
     let rec start_child_if_needed state shutdown_operation_id =
+      (* One named gate instead of six guard arms that ignored the runner
+         they matched. Order matters only in that cheap checks run first;
+         every gate is [||]-short-circuited exactly as the arms were. *)
+      let gates_closed state shutdown_operation_id runner =
+        Option.is_some (Atomic.get t.turn_in_flight)
+        || Option.is_some shutdown_operation_id
+        || (Keeper_owner_reducer.projection state).stopping
+        || not (turn_admission_open state)
+        || Option.is_some !(t.operation_error)
+        || Option.is_some !(t.metadata_error)
+        || not (runner.ready ~keeper_name:t.keeper_name)
+      in
       match operation_runner with
       | None -> ()
-      | Some _ when Option.is_some (Atomic.get t.turn_in_flight) -> ()
-      | Some _ when Option.is_some shutdown_operation_id -> ()
-      | Some _ when (Keeper_owner_reducer.projection state).stopping -> ()
-      | Some _ when not (turn_admission_open state) -> ()
-      | Some _ when Option.is_some !(t.operation_error) || Option.is_some !(t.metadata_error) -> ()
-      | Some runner when not (runner.ready ~keeper_name:t.keeper_name) -> ()
+      | Some runner when gates_closed state shutdown_operation_id runner -> ()
       | Some runner ->
         let inventory = Atomic.get t.operation_projection in
         (* Direct input takes a released slot. *)

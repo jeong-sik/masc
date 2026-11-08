@@ -178,8 +178,19 @@ let claude_stream_callback ?on_provider_retry ?on_child_content_observation ?on_
            })
       on_usage_report
   in
-  match on_event, raw_trace_run, on_native_action, receipts, on_native_tool_completion, on_native_tool_progress, on_native_task_observation, on_child_content_observation, on_provider_retry with
-  | None, None, None, None, None, None, None, None, None ->
+  (* No observer of any kind: a stub that only feeds the usage windows.
+     Nine optional callbacks are not a closed set to pattern-match over —
+     structural [None] comparison says the same thing in one condition. *)
+  if on_event = None
+     && raw_trace_run = None
+     && on_native_action = None
+     && receipts = None
+     && on_native_tool_completion = None
+     && on_native_tool_progress = None
+     && on_native_task_observation = None
+     && on_child_content_observation = None
+     && on_provider_retry = None
+  then
     Some
       (function
         | Runtime_claude_code.Usage_windows_reported report ->
@@ -190,7 +201,7 @@ let claude_stream_callback ?on_provider_retry ?on_child_content_observation ?on_
           report_usage ~session_id ~turn_id ~model usage
         | Turn_started _ | Text_delta _ | Thinking_delta _ | Child_content_observed _ | Content_block_stopped _ | Dynamic_tool_started _ | Dynamic_tool_finished _
         | Native_tool_started _ | Native_tool_finished _ | Native_tool_progress _ | Native_task_observed _ | Turn_finished _ -> ())
-  | _ ->
+  else
     let emit event = Option.iter (fun callback -> callback event) on_event in
     let next_tool_index = ref 1 in
     let content_indexes = Hashtbl.create 8 in
@@ -1695,9 +1706,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
     in
     let turn_result =
       let* result = turn_result in
-      let produced = match !natural_completion with
-        | true -> Option.to_list !produced_results
-        | false -> [] in
+      let produced = if !natural_completion then Option.to_list !produced_results else [] in
       on_results_ready (Some (Keeper_client_tool_outbox.pending_consumption (tool_outbox :: produced)));
       Ok result
     in

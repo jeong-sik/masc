@@ -987,70 +987,66 @@ let test_validate_tool_result_shape () =
       ; content_blocks = None
       }
   in
+  let scalar_result =
+    Llm_provider.Types.ToolResult
+      { tool_use_id = "scalar"
+      ; content = "42"
+      ; outcome = Tool_succeeded
+      ; json = Some (`Int 42)
+      ; content_blocks = None
+      }
+  in
   Alcotest.(check bool)
     "object ok"
     true
-    (Result.is_ok
-       (Types.validate_tool_result_shape
-          ~expect_object:true
-          ~expect_array:false
-          object_result));
+    (Result.is_ok (Types.validate_tool_result_shape Types.Expect_object object_result));
   Alcotest.(check bool)
     "array ok"
     true
-    (Result.is_ok
-       (Types.validate_tool_result_shape
-          ~expect_object:false
-          ~expect_array:true
-          array_result));
+    (Result.is_ok (Types.validate_tool_result_shape Types.Expect_array array_result));
   Alcotest.(check bool)
-    "both accepts any json"
+    "union accepts array"
     true
     (Result.is_ok
-       (Types.validate_tool_result_shape
-          ~expect_object:true
-          ~expect_array:true
-          array_result));
+       (Types.validate_tool_result_shape Types.Expect_object_or_array array_result));
+  Alcotest.(check bool)
+    "union accepts object"
+    true
+    (Result.is_ok
+       (Types.validate_tool_result_shape Types.Expect_object_or_array object_result));
+  Alcotest.(check bool)
+    "union rejects scalar"
+    true
+    (Result.is_error
+       (Types.validate_tool_result_shape Types.Expect_object_or_array scalar_result));
+  Alcotest.(check bool)
+    "any accepts scalar"
+    true
+    (Result.is_ok (Types.validate_tool_result_shape Types.Expect_any scalar_result));
   Alcotest.(check bool)
     "object expected"
     true
     (Result.is_error
-       (Types.validate_tool_result_shape
-          ~expect_object:true
-          ~expect_array:false
-          array_result));
+       (Types.validate_tool_result_shape Types.Expect_object array_result));
   Alcotest.(check bool)
     "array expected"
     true
     (Result.is_error
-       (Types.validate_tool_result_shape
-          ~expect_object:false
-          ~expect_array:true
-          object_result));
+       (Types.validate_tool_result_shape Types.Expect_array object_result));
   Alcotest.(check bool)
     "parse error"
     true
     (Result.is_error
-       (Types.validate_tool_result_shape
-          ~expect_object:true
-          ~expect_array:false
-          invalid_json_result));
+       (Types.validate_tool_result_shape Types.Expect_object invalid_json_result));
   Alcotest.(check bool)
     "empty content"
     true
-    (Result.is_error
-       (Types.validate_tool_result_shape
-          ~expect_object:false
-          ~expect_array:false
-          empty_result));
+    (Result.is_error (Types.validate_tool_result_shape Types.Expect_any empty_result));
   Alcotest.(check bool)
     "non tool result ignored"
     true
     (Result.is_ok
-       (Types.validate_tool_result_shape
-          ~expect_object:true
-          ~expect_array:false
-          (Llm_provider.Types.Text "plain")))
+       (Types.validate_tool_result_shape Types.Expect_object (Llm_provider.Types.Text "plain")))
 ;;
 
 (* ── Audio content block show ──────────────────────────── *)

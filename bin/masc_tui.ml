@@ -307,13 +307,16 @@ let runtime_config_row_near rows ~direction ~target =
   match rows with
   | [] -> 0
   | first :: _ when direction >= 0 ->
-      (* [Option.value ~default:(List.hd (List.rev rows))] evaluates the
+      (* [Option.value ~default:(List.hd (List.rev rows))] evaluated the
          default eagerly, so it reversed the whole row list on every call
-         even when the find succeeded. The last row is only needed when no
-         row sits at or beyond the target. *)
+         even when the find succeeded. The fold keeps the last row without
+         building a reversed copy; [first] stands in for the impossible
+         empty case because this arm already matched a head. *)
       (match List.find_opt (fun row -> row >= target) rows with
        | Some row -> row
-       | None -> List.hd (List.rev rows))
+       | None ->
+         Option.value ~default:first
+           (List.fold_left (fun _ latest -> Some latest) None rows))
   | first :: _ ->
       List.fold_left
         (fun selected row -> if row <= target then row else selected)
@@ -13683,11 +13686,15 @@ let launch_image_opener ?after ~url ~allow_start ~on_result () =
            match result with
            | Error detail -> Error detail
            | Ok (opener, _) ->
-               (try Eio.Fiber.fork_daemon ~sw (fun () ->
-                  let result = Eio.Promise.await completed in
-                  if generation = !image_opener_generation then on_result result;
-                  `Stop_daemon)
-                with _ -> ());
+               (match
+                  Eio.Fiber.fork_daemon ~sw (fun () ->
+                     let result = Eio.Promise.await completed in
+                     if generation = !image_opener_generation then on_result result;
+                     `Stop_daemon)
+                with
+                | () -> ()
+                | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+                | exception _ -> ());
                Ok opener)
 
 let download_remote_image ?(force_fetch = false) url =
@@ -25181,15 +25188,19 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                             report_action state "error" (Printexc.to_string exn)
                         | thread ->
                             board_image_open_reaper := Some (cancelled,thread);
-                            (try Eio.Fiber.fork_daemon ~sw (fun () ->
+                            (match Eio.Fiber.fork_daemon ~sw (fun () ->
                                let status=Eio.Promise.await completed in
                                let outcome=match status with
                                  | Ok (Unix.WEXITED 0) -> Board_image_open_finished (attempt,"opened " ^ name)
                                  | Ok (Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _) | Error _ ->
                                      Board_image_open_retry {attempt;prepared;opener} in
                                deliver mailbox (Board_msg (Board_attachment_saved (request,Ok outcome)));
-                               `Stop_daemon)
-                             with exn -> finish (); report_action state "error" (Printexc.to_string exn))))
+                               `Stop_daemon) with
+                             | () -> ()
+                             | exception Eio.Cancel.Cancelled _ -> finish ()
+                             | exception exn ->
+                                 finish ();
+                                 report_action state "error" (Printexc.to_string exn))))
               | Some (name,path), None ->
                   finish ();
                   report_action state "system" (Printf.sprintf "saved %s · %s" name path)

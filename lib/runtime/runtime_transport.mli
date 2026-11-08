@@ -20,9 +20,7 @@ val provider_caps_of_config :
 
 (** Whether a provider can accept inline tool definitions on a request.
     Alias for {!Provider_tool_support.provider_supports_inline_tools}. *)
-val provider_supports_inline_tools :
-  ?override:Provider_tool_support.runtime_capabilities_override ->
-  Llm_provider.Provider_config.t -> bool
+val provider_supports_inline_tools : Llm_provider.Provider_config.t -> bool
 
 (** Human-readable [provider_kind:model_id] label. *)
 val provider_label : Llm_provider.Provider_config.t -> string

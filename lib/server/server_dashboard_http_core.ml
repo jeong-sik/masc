@@ -42,10 +42,6 @@ type operator_snapshot_publication =
 ;;
 
 ;;
-let operator_snapshot_cache_diagnostics_json =
-  Server_dashboard_http_core_operator.operator_snapshot_cache_diagnostics_json
-;;
-let operator_digest_cache = Server_dashboard_http_core_operator.operator_digest_cache
 let json_assoc_int_opt = Server_dashboard_http_core_json.json_assoc_int_opt
 (* Operator query-JSON + envelope metadata helpers extracted to
    [Server_dashboard_http_core_operator_query] (godfile decomp). *)
@@ -251,7 +247,6 @@ let dashboard_shell_status_json =
   Server_dashboard_http_core_entities.dashboard_shell_status_json
 ;;
 
-let dashboard_agent_json = Server_dashboard_http_core_entities.dashboard_agent_json
 let dashboard_message_json = Server_dashboard_http_core_entities.dashboard_message_json
 
 

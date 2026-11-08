@@ -32,8 +32,6 @@ val run_dashboard_compute :
 
 (** Internal cached surfaces for proactive refresh loops.
     Exposed for the facade module [Server_dashboard_http]. *)
-val operator_snapshot_cache_diagnostics_json : unit -> Yojson.Safe.t
-val operator_digest_cache : cached_surface
 val shell_warmed : bool Atomic.t
 val shell_warming : bool Atomic.t
 val last_good_shell : Yojson.Safe.t Atomic.t
@@ -134,7 +132,6 @@ val dashboard_briefing_sections_http_json :
 (** {1 Shell and Data Helpers} *)
 
 val dashboard_shell_status_json : Workspace.config -> Yojson.Safe.t
-val dashboard_agent_json : Masc_domain.agent -> Yojson.Safe.t
 val dashboard_message_json : Masc_domain.message -> Yojson.Safe.t
 val dashboard_tasks_safe : Workspace.config -> Masc_domain.task list
 val dashboard_agents_safe : Workspace.config -> Masc_domain.agent list

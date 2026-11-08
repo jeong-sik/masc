@@ -162,10 +162,6 @@ let operator_snapshot_publication_json
       ]
 ;;
 
-let operator_snapshot_cache_diagnostics_json () =
-  operator_snapshot_publication () |> operator_snapshot_publication_json
-;;
-
 let publish_operator_snapshot_invalidation_if_current ~generation =
   Dashboard_projection_cache.with_snapshot_publication_generation
     (fun current_generation ->

@@ -24,14 +24,6 @@ val check_agent_rate_limit :
 val trim_opt : string option -> string option
 (** Trim a [string option]; collapses [Some ""] to [None]. *)
 
-val strip_prefix : prefix:string -> string -> string
-(** Remove [prefix] from [s] when present, else return [s] unchanged. *)
-
-val strip_suffix : suffix:string -> string -> string
-(** Remove [suffix] from [s] when present, else return [s] unchanged. *)
-
-(** [Some trimmed] when non-empty, else [None]. *)
-
 (** {1 Bind host / loopback classification} *)
 
 val is_loopback_host : string -> bool

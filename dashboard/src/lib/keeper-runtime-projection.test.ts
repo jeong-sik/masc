@@ -122,7 +122,6 @@ describe('deriveKeeperRuntimeProjection', () => {
     const projection = deriveKeeperRuntimeProjection({
       keeper: keeper({
         context_ratio: 0.97,
-        runtime_warning_ctx_ratio: 0.95,
       }),
       composite: composite({
         phase: 'failing',

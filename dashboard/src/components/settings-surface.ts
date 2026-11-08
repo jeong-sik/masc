@@ -1219,12 +1219,6 @@ function mcpEndpointFromConfig(config: DashboardConfig | undefined): string {
   return endpointFromWindow()
 }
 
-function formatThresholdPercent(value: string | undefined): string {
-  const parsed = value === undefined ? NaN : Number.parseFloat(value)
-  if (!Number.isFinite(parsed)) return value ?? '미수집'
-  return `${Math.round(parsed * 100)}%`
-}
-
 function ConfigTruthRow({
   label,
   entry,
@@ -1239,25 +1233,6 @@ function ConfigTruthRow({
     <${SetRow} label=${label} hint=${entry?.description ?? 'dashboard config projection'}>
       <div class="set-truth-value">
         <span class="mono" data-testid=${`settings-config-${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}>${value}</span>
-        <span class="set-truth-source">${formatConfigSource(entry)}</span>
-      </div>
-    <//>
-  `
-}
-
-function ThresholdTruthRow({
-  label,
-  entry,
-  value,
-}: {
-  label: string
-  entry: ConfigEntry | undefined
-  value: string
-}) {
-  return html`
-    <${SetRow} label=${label} hint=${entry?.env ?? 'dashboard alert threshold'}>
-      <div class="set-truth-value">
-        <span class="mono">${value}</span>
         <span class="set-truth-source">${formatConfigSource(entry)}</span>
       </div>
     <//>
@@ -1735,7 +1710,6 @@ export function SettingsSurface() {
   const httpBaseUrlEntry = configEntry(dashboardConfig, 'MASC_HTTP_BASE_URL')
   const basePathEntry = configEntry(dashboardConfig, 'MASC_BASE_PATH')
   const configDirEntry = configEntry(dashboardConfig, 'MASC_CONFIG_DIR')
-  const runtimeWarningEntry = configEntry(dashboardConfig, 'MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO')
   const signalStaleEntry = configEntry(dashboardConfig, 'MASC_DASHBOARD_SIGNAL_STALE_SEC')
 
   return html`
@@ -2132,11 +2106,6 @@ export function SettingsSurface() {
                   : html`
                     <div data-testid="notify-thresholds">
                       <div class="set-sub-h">Live alert thresholds</div>
-                      <${ThresholdTruthRow}
-                        label="Runtime warning"
-                        entry=${runtimeWarningEntry}
-                        value=${formatThresholdPercent(configEntryDisplayValue(runtimeWarningEntry))}
-                      />
                       <${ConfigTruthRow} label="Signal stale seconds" entry=${signalStaleEntry} />
                     </div>
                   `}

@@ -267,10 +267,7 @@ function deriveBacklogAttention(keeper: Keeper): KeeperBacklogAttention {
 }
 
 function deriveContextProjection(keeper: Keeper): KeeperContextProjection {
-  const threshold =
-    typeof keeper.runtime_warning_ctx_ratio === 'number' && Number.isFinite(keeper.runtime_warning_ctx_ratio)
-      ? keeper.runtime_warning_ctx_ratio
-      : KEEPER_RUNTIME_CONTEXT_ATTENTION_RATIO
+  const threshold = KEEPER_RUNTIME_CONTEXT_ATTENTION_RATIO
   const ratio =
     typeof keeper.context_ratio === 'number' && Number.isFinite(keeper.context_ratio)
       ? keeper.context_ratio

@@ -23,9 +23,12 @@ as large as the rest judges every request, so label errors the baseline shares
 are found as often as the ones it disagrees with. A case holds the Keeper's
 role material, the candidate claims, FULL_FACTS memory facts in full and the
 heads of the other facts in the candidates' categories. The facts in full are
-those the label or the answer refers to and the planted stale facts, filled up
-with random others (at least MIN_DISTRACTORS), so how many there are does not
-tell the judge which ones matter. A case shows neither the label nor the answer.
+those the label or the answer refers to, the planted stale facts, and for every
+candidate the SIMILAR facts whose wording overlaps most with it (character
+trigrams), filled up with random others (at least MIN_DISTRACTORS), so how many
+there are does not tell the judge which ones matter. On E-synth-2 the judges
+named 88 restated memories: 66 were among the candidate's three closest, and 11
+were judged from a 90-char head. A case shows neither the label nor the answer.
 
 `apply` keeps a request only when every classification matches its label. A
 `restates` must name the label's memory: the harness scores an
@@ -50,8 +53,10 @@ import admission_validator as AV
 import eval_admission as V
 from tinker_oai import HTTP_OK, Call, call_from_row
 
-FULL_FACTS = 7
+FULL_FACTS = 12
 MIN_DISTRACTORS = 2
+# Facts shown in full for each candidate because their wording overlaps most with it.
+SIMILAR = 3
 HEAD = 90
 JUDGE = """# E-synth 라벨 감사 판정 기준
 
@@ -67,6 +72,7 @@ JUDGE = """# E-synth 라벨 감사 판정 기준
 - "corrects:<m>": 보이는 기억 <m>이 말하는 값·조건·결정 가운데 하나를 바꾸고, 바뀐 내용이 앞으로도 유효하다.
 - "restates:<m>": 보이는 기억 <m>(전문이나 앞부분)이 이미 같은 지식을 담는다. 날짜, PR 번호, 이름 같은 부수 정보만 다르다.
   context는 앞 90자만 보이므로, 보이는 글만으로 같은 지식임이 분명할 때만 context의 <m>을 고른다.
+  같은 기억의 전문이 받은 다른 case에 나왔으면 그 전문으로 판단해도 된다.
   같은 지식을 담은 기억이 둘 이상이면 모두 쉼표로 적는다. 예: "restates:m3,m7".
 - "transient": 지속 지식이 아니다. 진행 중이거나 기다리는 일, 특정 PR·CI·task의 현재 상태,
   큐 길이, 깨움 시각, 턴 진행, 도구 호출, 인사.
@@ -138,13 +144,30 @@ def expected(request: JsonObject) -> tuple[dict[str, str], dict[str, str]]:
     return cands, facts
 
 
+def trigrams(text: str) -> frozenset[str]:
+    squeezed = "".join(text.split())
+    return frozenset(squeezed[i:i + 3] for i in range(len(squeezed) - 2))
+
+
+def closest(claim: str, facts: dict[str, JsonObject], n: int) -> set[str]:
+    """The n memory ids whose claims share the most character trigrams with `claim`, relative to the shorter text."""
+    mine = trigrams(claim)
+
+    def overlap(memory_id: str) -> float:
+        theirs = trigrams(cast(str, facts[memory_id]["claim"]))
+        return len(mine & theirs) / max(1, min(len(mine), len(theirs)))
+    return set(sorted(facts, key=lambda m: (-overlap(m), int(m[1:])))[:n])
+
+
 def case_of(case_id: str, request: JsonObject, answer: AV.AdmissionAnswer | None,
             rng: random.Random) -> tuple[JsonObject, JsonObject]:
     """The judge's case and the key that `apply` checks it against."""
     facts = {cast(str, f["memory_id"]): f for f in cast(list[JsonObject], request["facts"])}
     cands, fixed = expected(request)
-    suspects = set(fixed) | {cast(str, c["target_memory_id"]) for c in cast(list[JsonObject], request["candidates"])
-                             if c["target_memory_id"] is not None}
+    candidates = cast(list[JsonObject], request["candidates"])
+    suspects = set(fixed) | {cast(str, c["target_memory_id"]) for c in candidates if c["target_memory_id"] is not None}
+    for c in candidates:
+        suspects |= closest(cast(str, c["claim"]), facts, SIMILAR)
     if answer is not None:
         by_claim = {cast(str, f["claim"]): mid for mid, f in facts.items()}
         suspects |= set(answer.dropped) | {old for old, _ in answer.revisions}

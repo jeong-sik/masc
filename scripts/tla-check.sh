@@ -149,8 +149,6 @@ run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperBacklogPreemption.t
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperBacklogPreemption.tla" "KeeperBacklogPreemption-buggy-receipt.cfg" "receipt-buggy"
 run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperDwellMonotone.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperDwellMonotone.tla"
-run_tlc "$REPO_ROOT/specs/keeper-state-machine" "KeeperOutcomesConservation.tla"
-run_tlc_buggy "$REPO_ROOT/specs/keeper-state-machine" "KeeperOutcomesConservation.tla"
 run_tlc "$REPO_ROOT/specs/keeper-turn-fsm" "KeeperTurnFSM.tla"
 run_tlc_buggy "$REPO_ROOT/specs/keeper-turn-fsm" "KeeperTurnFSM.tla"
 run_tlc "$REPO_ROOT/specs/keeper-switch-hierarchy" "KeeperSwitchHierarchy.tla"

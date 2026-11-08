@@ -1,0 +1,2495 @@
+{
+ "seed_memories": {
+  "judge-1": {
+   "memory": "eval-infra-cost-watch-01",
+   "cases": [
+    "c023",
+    "c024",
+    "c111",
+    "c112"
+   ]
+  },
+  "judge-2": {
+   "memory": "eval-docs-gardener-01",
+   "cases": [
+    "c004",
+    "c005",
+    "c006",
+    "c007"
+   ]
+  },
+  "judge-3": {
+   "memory": "eval-qa-coordinator-09",
+   "cases": [
+    "c066",
+    "c136",
+    "c137"
+   ]
+  },
+  "judge-4": {
+   "memory": "eval-qa-coordinator-05",
+   "cases": [
+    "c053",
+    "c054",
+    "c055",
+    "c056"
+   ]
+  },
+  "judge-5": {
+   "memory": "eval-infra-cost-watch-05",
+   "cases": [
+    "c031",
+    "c032",
+    "c119",
+    "c120"
+   ]
+  },
+  "judge-6": {
+   "memory": "eval-support-triage-08",
+   "cases": [
+    "c090",
+    "c091",
+    "c092",
+    "c093"
+   ]
+  },
+  "judge-7": {
+   "memory": "eval-infra-cost-watch-07",
+   "cases": [
+    "c036",
+    "c037",
+    "c038",
+    "c039"
+   ]
+  },
+  "judge-8": {
+   "memory": "eval-infra-cost-watch-00",
+   "cases": [
+    "c022",
+    "c108",
+    "c109",
+    "c110"
+   ]
+  }
+ },
+ "cases": [
+  {
+   "case": "c004",
+   "item": "eval-docs-gardener-01-001",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "restates:m8",
+     "first": "restates:m8",
+     "second": "restates:m8"
+    },
+    "k2": {
+     "label": "restates:m7",
+     "first": "restates:m7",
+     "second": "restates:m7"
+    },
+    "k3": {
+     "label": "new",
+     "first": "new",
+     "second": "new"
+    }
+   },
+   "facts": {
+    "m2": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m3": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m4": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m5": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m6": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m7": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m8": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m9": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m12": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m13": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m17": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m18": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c005",
+   "item": "eval-docs-gardener-01-039",
+   "first_removed": true,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "new",
+     "first": "new",
+     "second": "new"
+    },
+    "k2": {
+     "label": "new",
+     "first": "restates:m11,m18,m7",
+     "second": "new"
+    }
+   },
+   "facts": {
+    "m1": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m2": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m3": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m5": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m6": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m7": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m8": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m11": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m12": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m15": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m17": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m18": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c006",
+   "item": "eval-docs-gardener-01-077",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "new",
+     "first": "new",
+     "second": "new"
+    }
+   },
+   "facts": {
+    "m3": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m5": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m6": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m7": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m8": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m9": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m10": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m11": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m12": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m13": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m17": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m18": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c007",
+   "item": "eval-docs-gardener-01-115",
+   "first_removed": true,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "new",
+     "first": "restates:m11,m12,m2",
+     "second": "new"
+    }
+   },
+   "facts": {
+    "m1": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m2": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m3": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m5": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m6": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m7": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m8": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m9": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m11": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m12": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m14": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m17": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    }
+   }
+  },
+  {
+   "case": "c022",
+   "item": "eval-infra-cost-watch-00-018",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "transient",
+     "first": "transient",
+     "second": "transient"
+    }
+   },
+   "facts": {
+    "m1": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m2": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m34": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m39": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m41": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m45": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m46": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m57": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m58": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m68": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m75": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m79": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c023",
+   "item": "eval-infra-cost-watch-01-057",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "new",
+     "first": "new",
+     "second": "new"
+    }
+   },
+   "facts": {
+    "m2": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m12": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m20": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m21": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m25": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m30": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m37": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m50": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m58": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m62": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m66": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m67": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c024",
+   "item": "eval-infra-cost-watch-01-133",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "corrects:m54",
+     "first": "corrects:m54",
+     "second": "corrects:m54"
+    }
+   },
+   "facts": {
+    "m4": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m5": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m12": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m21": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m30": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m39": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m45": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m47": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m49": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m54": {
+     "label": "superseded:k1",
+     "first": "superseded:k1",
+     "second": "superseded:k1"
+    },
+    "m61": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m63": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c031",
+   "item": "eval-infra-cost-watch-05-099",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "transient",
+     "first": "transient",
+     "second": "transient"
+    },
+    "k2": {
+     "label": "new",
+     "first": "new",
+     "second": "new"
+    }
+   },
+   "facts": {
+    "m1": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m6": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m14": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m16": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m17": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m19": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m21": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m23": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m26": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m28": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m29": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m30": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c032",
+   "item": "eval-infra-cost-watch-05-137",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "new",
+     "first": "new",
+     "second": "new"
+    },
+    "k2": {
+     "label": "transient",
+     "first": "transient",
+     "second": "transient"
+    }
+   },
+   "facts": {
+    "m3": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m6": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m10": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m12": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m16": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m18": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m23": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m26": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m27": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m30": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m31": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m32": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c036",
+   "item": "eval-infra-cost-watch-07-025",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "restates:m31",
+     "first": "restates:m31",
+     "second": "restates:m31"
+    }
+   },
+   "facts": {
+    "m2": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m5": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m13": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m15": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m20": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m21": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m22": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m27": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m31": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m37": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m40": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m42": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c037",
+   "item": "eval-infra-cost-watch-07-063",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "new",
+     "first": "new",
+     "second": "new"
+    },
+    "k2": {
+     "label": "corrects:m34",
+     "first": "corrects:m34",
+     "second": "corrects:m34"
+    }
+   },
+   "facts": {
+    "m1": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m2": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m8": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m10": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m12": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m13": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m22": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m26": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m33": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m34": {
+     "label": "superseded:k2",
+     "first": "superseded:k2",
+     "second": "superseded:k2"
+    },
+    "m36": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m38": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c038",
+   "item": "eval-infra-cost-watch-07-101",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "corrects:m24",
+     "first": "corrects:m24",
+     "second": "corrects:m24"
+    }
+   },
+   "facts": {
+    "m2": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m3": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m12": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m17": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m22": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m24": {
+     "label": "superseded:k1",
+     "first": "superseded:k1",
+     "second": "superseded:k1"
+    },
+    "m27": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m36": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m37": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m38": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m40": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m42": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c039",
+   "item": "eval-infra-cost-watch-07-139",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "transient",
+     "first": "transient",
+     "second": "transient"
+    },
+    "k2": {
+     "label": "corrects:m7",
+     "first": "corrects:m7",
+     "second": "corrects:m7"
+    },
+    "k3": {
+     "label": "new",
+     "first": "new",
+     "second": "new"
+    }
+   },
+   "facts": {
+    "m3": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m7": {
+     "label": "superseded:k2",
+     "first": "superseded:k2",
+     "second": "superseded:k2"
+    },
+    "m11": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m13": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m14": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m22": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m26": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m30": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m34": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m37": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m38": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m42": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c053",
+   "item": "eval-qa-coordinator-05-033",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "corrects:m27",
+     "first": "corrects:m27",
+     "second": "corrects:m27"
+    }
+   },
+   "facts": {
+    "m19": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m24": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m25": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m27": {
+     "label": "superseded:k1",
+     "first": "superseded:k1",
+     "second": "superseded:k1"
+    },
+    "m50": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m52": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m57": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m65": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m67": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m80": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m85": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m91": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c054",
+   "item": "eval-qa-coordinator-05-071",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "transient",
+     "first": "transient",
+     "second": "transient"
+    }
+   },
+   "facts": {
+    "m12": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m13": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m18": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m23": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m24": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m35": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m37": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m57": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m61": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m67": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m68": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m82": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c055",
+   "item": "eval-qa-coordinator-05-109",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "restates:m66",
+     "first": "restates:m66",
+     "second": "restates:m66"
+    }
+   },
+   "facts": {
+    "m3": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m9": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m18": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m24": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m44": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m57": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m64": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m66": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m73": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m78": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m84": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m89": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c056",
+   "item": "eval-qa-coordinator-05-147",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "transient",
+     "first": "transient",
+     "second": "transient"
+    },
+    "k2": {
+     "label": "corrects:m86",
+     "first": "corrects:m86",
+     "second": "corrects:m86"
+    }
+   },
+   "facts": {
+    "m14": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m22": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m24": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m37": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m47": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m59": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m61": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m67": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m68": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m69": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m78": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m86": {
+     "label": "superseded:k2",
+     "first": "superseded:k2",
+     "second": "superseded:k2"
+    }
+   }
+  },
+  {
+   "case": "c066",
+   "item": "eval-qa-coordinator-09-113",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "new",
+     "first": "new",
+     "second": "new"
+    }
+   },
+   "facts": {
+    "m8": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m9": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m25": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m35": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m40": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m45": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m49": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m54": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m55": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m72": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m73": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m74": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c090",
+   "item": "eval-support-triage-08-016",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "transient",
+     "first": "transient",
+     "second": "transient"
+    },
+    "k2": {
+     "label": "new",
+     "first": "new",
+     "second": "new"
+    },
+    "k3": {
+     "label": "restates:m14",
+     "first": "restates:m14",
+     "second": "restates:m14"
+    }
+   },
+   "facts": {
+    "m1": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m4": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m11": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m14": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m25": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m32": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m35": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m38": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m43": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m44": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m50": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m63": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c091",
+   "item": "eval-support-triage-08-054",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "restates:m1",
+     "first": "restates:m1",
+     "second": "restates:m1"
+    }
+   },
+   "facts": {
+    "m1": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m4": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m11": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m15": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m23": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m35": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m51": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m54": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m65": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m68": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m72": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m74": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c092",
+   "item": "eval-support-triage-08-092",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "new",
+     "first": "new",
+     "second": "new"
+    }
+   },
+   "facts": {
+    "m3": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m9": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m11": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m16": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m25": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m27": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m30": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m36": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m45": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m48": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m52": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m63": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c093",
+   "item": "eval-support-triage-08-130",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "transient",
+     "first": "transient",
+     "second": "transient"
+    },
+    "k2": {
+     "label": "new",
+     "first": "new",
+     "second": "new"
+    }
+   },
+   "facts": {
+    "m1": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m10": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m11": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m14": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m23": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m32": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m33": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m40": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m45": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m47": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m49": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m64": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c108",
+   "item": "eval-infra-cost-watch-00-056",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "corrects:m45",
+     "first": "corrects:m45",
+     "second": "corrects:m45"
+    }
+   },
+   "facts": {
+    "m2": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m23": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m24": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m29": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m30": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m41": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m45": {
+     "label": "superseded:k1",
+     "first": "superseded:k1",
+     "second": "superseded:k1"
+    },
+    "m53": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m55": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m58": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m68": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m70": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c109",
+   "item": "eval-infra-cost-watch-00-094",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "transient",
+     "first": "transient",
+     "second": "transient"
+    },
+    "k2": {
+     "label": "transient",
+     "first": "transient",
+     "second": "transient"
+    }
+   },
+   "facts": {
+    "m2": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m8": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m16": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m31": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m32": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m40": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m52": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m59": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m68": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m69": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m75": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m79": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c110",
+   "item": "eval-infra-cost-watch-00-132",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "transient",
+     "first": "transient",
+     "second": "transient"
+    },
+    "k2": {
+     "label": "corrects:m50",
+     "first": "corrects:m50",
+     "second": "corrects:m50"
+    },
+    "k3": {
+     "label": "restates:m76",
+     "first": "restates:m76",
+     "second": "restates:m76"
+    }
+   },
+   "facts": {
+    "m18": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m22": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m32": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m39": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m40": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m50": {
+     "label": "superseded:k2",
+     "first": "superseded:k2",
+     "second": "superseded:k2"
+    },
+    "m54": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m63": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m66": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m68": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m70": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m76": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c111",
+   "item": "eval-infra-cost-watch-01-019",
+   "first_removed": false,
+   "second_removed": true,
+   "candidates": {
+    "k1": {
+     "label": "restates:m61",
+     "first": "restates:m61",
+     "second": "restates:m61"
+    }
+   },
+   "facts": {
+    "m14": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m19": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m21": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m30": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m33": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m35": {
+     "label": "keep",
+     "first": "keep",
+     "second": "drop"
+    },
+    "m49": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m50": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m54": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m55": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m61": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m71": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c112",
+   "item": "eval-infra-cost-watch-01-095",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "restates:m74",
+     "first": "restates:m74",
+     "second": "restates:m74"
+    }
+   },
+   "facts": {
+    "m5": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m8": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m14": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m20": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m27": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m30": {
+     "label": "drop",
+     "first": "drop",
+     "second": "drop"
+    },
+    "m32": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m33": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m39": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m60": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m67": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m74": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c119",
+   "item": "eval-infra-cost-watch-05-023",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "restates:m9",
+     "first": "restates:m9",
+     "second": "restates:m9"
+    }
+   },
+   "facts": {
+    "m2": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m3": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m8": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m9": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m11": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m15": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m17": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m20": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m21": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m25": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m26": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m28": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c120",
+   "item": "eval-infra-cost-watch-05-061",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "corrects:m6",
+     "first": "corrects:m6",
+     "second": "corrects:m6"
+    },
+    "k2": {
+     "label": "new",
+     "first": "new",
+     "second": "new"
+    }
+   },
+   "facts": {
+    "m2": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m4": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m6": {
+     "label": "superseded:k1",
+     "first": "superseded:k1",
+     "second": "superseded:k1"
+    },
+    "m7": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m8": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m16": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m17": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m20": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m26": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m28": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m30": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m31": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c136",
+   "item": "eval-qa-coordinator-09-037",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "transient",
+     "first": "transient",
+     "second": "transient"
+    }
+   },
+   "facts": {
+    "m6": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m14": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m15": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m22": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m36": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m43": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m48": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m52": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m54": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m67": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m71": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m77": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  },
+  {
+   "case": "c137",
+   "item": "eval-qa-coordinator-09-075",
+   "first_removed": false,
+   "second_removed": false,
+   "candidates": {
+    "k1": {
+     "label": "restates:m12",
+     "first": "restates:m12",
+     "second": "restates:m12"
+    },
+    "k2": {
+     "label": "restates:m62",
+     "first": "restates:m62",
+     "second": "restates:m62"
+    }
+   },
+   "facts": {
+    "m3": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m10": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m12": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m16": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m17": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m23": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m30": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m32": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m34": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m46": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m62": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    },
+    "m73": {
+     "label": "keep",
+     "first": "keep",
+     "second": "keep"
+    }
+   }
+  }
+ ],
+ "second_removes_of_first_kept": {
+  "removed": 1,
+  "of": 29,
+  "clopper_pearson_95": [
+   0.0009,
+   0.1776
+  ]
+ }
+}

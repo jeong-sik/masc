@@ -25,25 +25,6 @@ type tool_surface_metrics =
   ; runtime_config_path : string option
   }
 
-(** Find the active task ID a keeper currently owns. *)
-val owned_active_task_id_for_meta :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  Keeper_id.Task_id.t option
-
-(** Reconcile [meta.current_task_id] with the backlog. *)
-val sync_current_task_id_from_backlog :
-  config:Workspace.config ->
-  Keeper_meta_contract.keeper_meta ->
-  Keeper_meta_contract.keeper_meta
-
-(** Best-effort reconciliation for callers that only know an agent name.
-    No-ops for non-keeper agents. *)
-val sync_current_task_id_for_agent_name :
-  config:Workspace.config ->
-  agent_name:string ->
-  unit
-
 (** The tool surface a request actually carried, rather than the one the turn
     was built with.
 

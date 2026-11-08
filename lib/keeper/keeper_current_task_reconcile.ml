@@ -152,12 +152,6 @@ let owned_active_task_id_with_revision_for_meta ~(config : Workspace.config)
   | Ok snapshot ->
     Ok (snapshot.backlog_version, select_owned_active_task_id ~meta snapshot.tasks)
 
-let owned_active_task_id_for_meta ~(config : Workspace.config)
-    ~(meta : Keeper_meta_contract.keeper_meta) =
-  match owned_active_task_id_result_for_meta ~config ~meta with
-  | Ok task_id -> task_id
-  | Error _ -> None
-
 let between_ownership_read_and_apply_hook : (unit -> unit) Atomic.t =
   Atomic.make ignore
 

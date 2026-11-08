@@ -3,11 +3,11 @@ rfc: "claude-code-context-overflow-bounded-restart"
 title: "Admit Claude Code bootstrap input without replaying rejected episodes"
 status: Draft
 created: 2026-08-12
-updated: 2026-08-12
+updated: 2026-11-08
 author: codex
 supersedes: []
 superseded_by: null
-related: ["0351", "0353", "0368", "0371"]
+related: ["0351", "0353", "0368", "0371", "retained-results-carrier-shrinks-to-an-address"]
 ---
 
 # RFC: Claude Code bootstrap admission and rejected-episode fence
@@ -116,9 +116,15 @@ view가 없을 때까지). 이는 필요한 adapter 수리지만
 - model/reasoning parameters
 - official-client context codec version
 
-축소 attempt는 frozen value를 재사용하고 **history selection만** 바꾼다. retry가
+축소 attempt는 frozen value를 재사용하고 **history selection과 retained tool-result
+carrier의 꼴만** 바꾼다. retry가
 `before_turn`, `before_turn_params`, operator-note consumption, Gate replay projection,
 prompt capture, tool assignment을 다시 실행해서는 안 된다.
+
+retained tool-result carrier(끝나지 못한 vendor 턴이 남긴 receipt 묶음)는 history
+밖에 붙지만 view에 속한다. 그 꼴은 첫 typed 크기 거절에서, `By_address`가 엄격히
+짧으면 `Inline`에서 `By_address`로 한 번 바뀐다
+(RFC-retained-results-carrier-shrinks-to-an-address).
 
 ### 4.2 Episode identity
 
@@ -137,7 +143,8 @@ sha256(
 ```
 
 volatile timestamp나 retry capacity는 identity에 넣지 않는다. 동일 work item이 매
-heartbeat마다 다른 fingerprint를 얻어 fence를 우회하면 안 된다.
+heartbeat마다 다른 fingerprint를 얻어 fence를 우회하면 안 된다. retained tool-result
+carrier의 꼴도 넣지 않는다. 꼴은 같은 episode의 view가 고른다.
 
 입력 identity가 바뀌는 예는 다음과 같다.
 
@@ -148,8 +155,9 @@ heartbeat마다 다른 fingerprint를 얻어 fence를 우회하면 안 된다.
 
 ### 4.3 View identity
 
-각 attempt는 별도의 `view_sha256`, retained/dropped atom 수, measured history bytes를
-기록한다. 이것은 관측용이며 episode re-entry admission에는 사용하지 않는다.
+각 attempt는 별도의 `view_sha256`, retained/dropped atom 수, measured history bytes,
+retained tool-result carrier의 꼴을 기록한다. 이것은 관측용이며 episode re-entry
+admission에는 사용하지 않는다.
 
 ## 5. Bootstrap floor
 
@@ -162,15 +170,20 @@ current goal이 history 밖에 별도로 존재하므로 모든 prior-history at
 - exact dynamic-tool surface
 - pinned extra-system-context
 - history omission preamble
+- retained tool-result carrier, 그 run의 꼴(첫 typed 크기 거절 뒤에는 `By_address`)
 - **zero shrinkable prior-history atoms**
 
 System/extra-context message가 history list에 있으면 pinned component로 floor에 남는다.
 User/Assistant/Tool prior history는 structural atom 단위로 모두 제거할 수 있다.
+retained tool-result carrier는 history list 밖에 붙으므로 floor 바이트 계산
+(`Runtime_model_input_tail_window.minimum_capacity_bytes`)에 들지 않는다. 그 길이는 꼴이
+묶는다. `By_address` 꼴은 receipt 개수와 상관없이 도구 종류와 개수 자릿수로만 길어진다.
 
 full view가 거부됐을 때 시도 순서는 다음과 같다.
 
 ```text
 full
+  -> optional same-capacity view with the carrier By_address
   -> optional midpoint 1
   -> optional midpoint 2
   -> mandatory floor
@@ -181,6 +194,8 @@ full
 - floor와 현재 view가 같으면 provider를 다시 호출하지 않는다.
 - provider dispatch 수는 strictly smaller view의 수로 bounded다. halving이면 history
   바이트의 log2 이고, view마다 atom을 하나 이상 버리므로 atom 수를 넘지 않는다.
+  carrier를 `By_address`로 바꾼 view는 atom을 버리지 않는다. 그 view는 run마다 한 번뿐이라
+  이 bound에 하나를 더한다.
 - 마지막 dispatch가 floor가 아니면 “attempts exhausted”를 선언할 수 없다.
 
 floor 성공은 durable history가 불필요하다는 뜻이 아니다. 그 turn의 provider bootstrap
@@ -224,7 +239,8 @@ safe overflow 뒤 더 작은 view가 존재할 때만 현재 process가 exact re
 - error가 typed Claude context overflow다.
 - `tool_effect_attempted = false`
 - `response_emitted = false`
-- next view가 current view보다 strictly smaller다.
+- next view가 current view보다 strictly smaller다. retained tool-result carrier를
+  `By_address`로 바꾼 view는 같은 capacity에서 carrier만 strictly smaller인 view다.
 - next view가 있다. walk는 attempt 횟수가 아니라 더 작은 view가 없는 floor에서 끝나고,
   floor rejection이 마지막이다. (2026-09-05 geek-scout 실측: 4.1MB history가 1.9MB, 507KB,
   498KB에서 거절된 뒤 floor를 묻지 않은 채 `Bootstrap_floor_exceeded`로 commit됐고,
@@ -255,7 +271,8 @@ Claude process spawn 자체는 outer lane에서 계속
 - `context_overflow_recoverable`: 더 작은 bootstrap view를 같은 run에서 시도 중
 - `bootstrap_floor_exceeded`: MASC가 소유한 history 축을 모두 제거했지만 provider가
   거부함; system prompt, current goal, tool surface, pinned context를 줄이거나 runtime을
-  변경해야 함
+  변경해야 함. retained tool-result carrier는 floor에 이미 `By_address`로 실렸으니,
+  receipt를 outbox에서 옮기는 것은 조치가 아니다
 
 same-episode local refusal은 provider error처럼 위장하지 않는다. dashboard blocker와
 turn receipt는 다음을 포함한다.
@@ -268,6 +285,7 @@ turn receipt는 다음을 포함한다.
 - system prompt bytes
 - tool count/tool surface bytes
 - current goal bytes
+- retained tool-result carrier 꼴, receipt 수, carrier bytes
 - operator next action
 
 provider token 수치는 진단 원문으로 보존하되 byte/token 환산 상수로 admission을
@@ -311,7 +329,8 @@ generic untyped `tool_call(name, json)`로 policy boundary를 우회하는 설�
 
 1. full + shrink retries 전체에서 preparation hook은 한 번만 실행된다.
 2. source projection과 operator-note consumption은 한 번만 실행된다.
-3. tool surface와 system prompt는 모든 view에서 동일하다.
+3. tool surface와 base system prompt는 모든 view에서 동일하다. Start의 system prompt에
+   실리는 retained tool-result carrier만 꼴에 따라 달라진다.
 4. capacity만 달라지고 `episode_sha256`은 동일하다.
 
 ### 10.3 Floor convergence
@@ -322,6 +341,10 @@ generic untyped `tool_call(name, json)`로 policy boundary를 우회하는 설�
 4. floor rejection 뒤 provider attempt는 더 발생하지 않는다.
 5. prior history가 단일 atom이어도 zero-history floor를 시도한다.
 6. oversized current goal/pinned context는 floor rejection으로 분류된다.
+7. retained tool-result carrier만으로 창을 넘으면 첫 typed 거절 뒤 같은 capacity에서
+   `By_address`로 다시 보내고, floor에 닿기 전에 받아들여진다.
+8. `By_address`로 바꿔도 넘치면 history 줄이기가 이어지고, floor까지 `By_address`가
+   실린다. 그 floor도 거절되면 `Bootstrap_floor_exceeded`다.
 
 ### 10.4 Durable re-entry
 

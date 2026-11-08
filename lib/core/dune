@@ -51,7 +51,6 @@
   yojson
   unix
   re
-  re.pcre
   eio
   eio.unix
   eio_main

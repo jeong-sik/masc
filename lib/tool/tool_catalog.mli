@@ -9,6 +9,8 @@
 
 type visibility = Default | Hidden
 type lifecycle = Active
+(** Only [Active] exists today; the field rides [tool_info]'s JSON, so a
+    second kind is a dashboard wire change, not a local edit. *)
 type metadata = {
   visibility : visibility;
   lifecycle : lifecycle;

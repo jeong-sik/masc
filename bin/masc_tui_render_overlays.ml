@@ -558,9 +558,14 @@ let render_palette (state : state) =
        it is not a key, and it is the first thing a narrow row should give
        up. *)
     ~hints:
-      (Printf.sprintf "%d/%d  Enter:%s  Up/Down:select  Home/End:first/last  Ctrl-U:clear  Esc:close"
-         (if total = 0 then 0 else cursor + 1)
-         total action)
+      (if Masc_tui_palette.command_enter_has_nothing state then
+         (* Nothing is listed, so Enter, the arrows and Home/End have no row to
+            act on. The key handler reads the same answer. *)
+         "0/0  Ctrl-U:clear  Esc:close"
+       else
+         Printf.sprintf "%d/%d  Enter:%s  Up/Down:select  Home/End:first/last  Ctrl-U:clear  Esc:close"
+           (if total = 0 then 0 else cursor + 1)
+           total action)
     ~body:(fun ~budget c ->
       c.push_styled ~style:(Theme.recede ())
         ("   From " ^ origin ^ " · Esc returns here");

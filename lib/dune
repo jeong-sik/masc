@@ -158,41 +158,29 @@
   graphql
   graphql_parser
   bigstringaf
-  ws-direct-core
-  ws-direct-eio
   unix
   threads
   re
   ptime
-  re.str
-  re.pcre
   masc.markup_document
   masc.watched_work
   masc.keeper_sandbox_image
   masc.build_commit
   mirage-crypto-pk
   x509
-  mirage-crypto-rng.unix
   cstruct
   masc.agent_core.digest
   ocaml-protoc-plugin
   ; Native Eio gRPC. The opam grpc/grpc-lwt stack pins an h2 version that
   ; conflicts with httpun-eio below, so it cannot be used alongside it.
   grpc-direct
-  grpc-direct-core
   h2
-  h2-eio
   eio
-  eio_main
   eio.unix
-  httpun-eio
   httpun
-  gluten-eio
   gluten
   ipaddr
   fmt
-  cohttp
-  cohttp-eio
   masc.agent_core
   masc.agent_core.base
   masc.agent_core.llm_provider
@@ -278,9 +266,6 @@
   masc.skill_snapshot
   masc.skill_snapshot_service
   uri
-  tls
-  tls-eio
-  ca-certs
   masc.monotonic_deadline
   mtime
   mtime.clock
@@ -339,9 +324,6 @@
   masc.tool_invocation_ref
   masc.mcp_session
   masc.ag_ui
-  opentelemetry
-  opentelemetry.client
-  ambient-context
   ambient-context-eio
   masc.shared_types
   masc.multimodal

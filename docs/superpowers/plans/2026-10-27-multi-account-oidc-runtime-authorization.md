@@ -534,12 +534,45 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
 
 | 층 | 결과 | 설계 | 선행 |
 |---|---|---|---|
-| D1 | ProviderAccount·Runtime owner 검사(setup, raw TOML, 부팅), Runtime 생성과 같은 append의 Self grant, `CanAdmin`에서 `ManageOwnProvider` 분리, ProviderLink의 membership·namespace 검사(로그인을 시작하는 `runtime_setup_login_session.ml:138` 포함). 1단계에서 Keeper를 만들면 만든 사람을 owner로 기록하고, Keeper에 배정할 수 있는 Runtime은 owner가 Self grant를 가진 것뿐이다(설계 §4.3의 1단계 문단). | §4.2~4.3, §5.4 | B3, C4 |
+| D1 | ProviderAccount·Runtime owner 검사(setup, raw TOML, 부팅), Runtime 생성과 같은 append의 Self grant, `CanAdmin`에서 `ManageOwnProvider` 분리, ProviderLink의 membership·namespace 검사(로그인을 시작하는 `runtime_setup_login_session.ml:138` 포함). 1단계에서 Keeper를 만들면 만든 사람을 owner로 기록하고, Keeper에 배정할 수 있는 Runtime은 owner가 Self grant를 가진 것뿐이다(설계 §4.3의 1단계 문단). | §4.2~4.3, §5.4 | B3, C4-8 |
 | D2 | `Runtime_view.t`와 abstract `Authorized_runtime.t`, `Runtime.authorize`. Codex와 Claude Code의 `run_turn`, 그 위의 Keeper 경로(`Keeper_codex_runtime`, `Keeper_claude_code_runtime`, `run_codex`·`run_claude` 갈래)가 `Authorized_runtime.t`를 요구하게 바꾼다. 직접 호출자(Fusion, verifier, capability probe)는 컴파일러가 모아 같이 바꾼다. 1단계의 Keeper 턴은 Keeper owner의 Self grant로 인가한다(executor = owner). 다른 사람의 Board 글이 Keeper를 깨워도 실행하는 쪽은 owner다. | §6.1 | A3, D1 |
 | D3 | 나머지 실행 진입을 같은 타입으로 바꾼다. Antigravity와 Muse의 `run_turn`, 그 Keeper 래퍼(`Keeper_antigravity_runtime`, `Keeper_muse_runtime`)와 `run_antigravity`·`run_muse` 갈래, 그 밖의 호출자(verifier, Fusion, capability probe), 프로세스를 띄우는 조회(Codex `probe_metadata`의 호출자, Claude `probe_auth_status`, Muse `with_spawned_client`의 호출자). 첫 일은 §2에서 따라가지 못한 곳을 조사하는 것이다. 두 Runtime을 공유 대상으로 열지는 §6의 결정 4가 정한다. 1단계 개시 증거로 Keeper 실행 lane 종류(호스트 프로세스, container, microVM)마다 다른 owner의 account-home을 읽으려다 거절되는 시험을 하나씩 남긴다(설계 §11.1). 1단계에서 Antigravity·Muse Runtime은 공유하지 않는다. | §6.1 | D2 |
 | D4 | API provider 실행 경로를 조사하고 같은 타입으로 바꾼다. | §6.1 | D2 |
 | D5 | Delegated grant, MachineSharePolicy, DelegatePolicy, channel, 영속 작업의 initiator/executor 재검사. 자동 만료는 `Preauthorized_expiry(cause_event_id)`로 닫는다(§6.3). §6.2 판정이 `Purge_pending`을 거부 사유로 쓴다. `Purge_pending` initiator의 새 dispatch와 새 shard 쓰기를 거부한다. | §4.3~4.4, §6.2, §6.3, §8.5-1, §8.5-3 | D2, B3, B4 |
 | D6 | Keeper 지속 상태(컨텍스트·기억·산출 글)에 initiator 표시를 붙이고, `Read_state`가 허용되지 않으면 initiator별 분리 컨텍스트로 돌린다. 파생 상태는 원천 initiator를 표시하고 읽는 쪽에 `Source_sealed`·`Source_purged`를 돌려준다. principal 삭제 연산은 `Delete` 사건과 같은 append로 표시된 몫을 `Purge_pending`에 올린다. 세부와 첫 일은 표 아래 D6 범위다. | §3-11, §6.2, §8.5 | D2, D5, B3, B4 |
+
+**D1 범위** (구독 계정과 Runtime의 주인, 2026-11-08)
+
+- 사용자 결정(2026-11-08).
+  - D1을 C4-9~12보다 먼저 한다. D1이 C4에서 쓰는 것은 C4-8의 `Auth_gate`뿐이다. C4-9~12와 C6은 D층과 나란히 하거나 S1 직전에 한다.
+  - 다계정에서 Runtime 배정이 없는 Keeper는 전역 default로 떨어지지 않는다. `NoAuthorizedRuntime`으로 거절한다. 남의 구독을 모르고 쓰는 길을 두지 않는다.
+  - 구독 연결은 새로 만들지 않는다. 지금 있는 연결 경로에 주인을 붙이고, 그 경로를 localhost 미리보기에 달아 사람이 브라우저로 확인한다.
+- 지금 있는 것(main `ef87beded86`).
+  - Runtime 층에는 주인이 없다. Runtime은 provider와 model의 binding이고 id는 `provider.model`이다(`Runtime_schema.binding_key`). 구독 계정은 `runtime.toml`의 `[providers.<id>]`와 그 `account-home`이다(`runtime_schema.mli:141`). Keeper 배정은 `[runtime.assignments]` 하나다. keeper TOML에는 runtime 키가 없다.
+  - Runtime과 배정을 쓰는 경로는 모두 `CanAdmin`이다. HTTP는 setup·runtime config 경로들이다(`server_routes_http_routes_dashboard.ml`). MCP는 `masc_keeper_up`, HTTP keeper `/up`·`/config`다. CLI `runtime-setup-batch`·`runtime-default-set`·`config set`·`runtime-account-login`은 서버가 없으면 검사 없이 쓴다. raw `runtime.toml`은 부팅이 검사 없이 읽는다.
+  - 구독 연결은 `POST /api/v1/setup/accounts/login`이 `Runtime_setup_login_session`으로 `codex login --device-auth`나 `claude auth login`을 띄우는 흐름이다(`server_setup_account_login.ml:138`). 세션은 legacy token의 agent 이름과 workspace 문자열로 가른다. membership·namespace 검사가 없다. account-home은 모두가 쓰는 `<base>/.masc/official-clients/<client>/<login_id>`다.
+  - `lib/auth`에는 `Runtime_row`(owner, provider_account), `Runtime_grant`(`Self`, `Delegated`), `Effect.Manage_own_provider`가 있다. 부르는 곳은 시험뿐이다. Kind `Runtime_grant`는 `Authz_state`가 `Kind_not_read`로 거절한다. 구독 계정, Runtime, Keeper 주인을 담는 Kind는 없다.
+  - Keeper의 Runtime을 고르는 곳은 70곳쯤이다(`Runtime.get_runtime_by_id` 38곳, `resolve_assignment` 23곳, `Keeper_meta_contract.runtime_id_of_meta` 22파일 39곳). 이것을 타입으로 묶는 일은 D2·D3이다.
+- 결정.
+  - 주인은 `authz.jsonl`에 둔다. `runtime.toml`은 설정으로 남고, 다계정에서는 로그와 맞는지 검사한다. raw TOML은 작성자 없이 고칠 수 있다. 설계 §4.2는 raw 저장과 부팅 때 검사를 요구한다. 회수와 복원 판정(§8)은 로그 위에서만 선다.
+  - provider 항목 하나가 ProviderAccount 하나다. binding 하나가 Runtime 하나다. Runtime의 주인은 그 provider의 ProviderAccount 주인과 같아야 한다(§4.2). 기록을 쓸 때와 상태에 넣을 때 둘 다 검사한다.
+  - Runtime 기록 하나가 Self grant를 함께 싣는다. 구역의 커밋은 기록 하나라서(`Authz_zone`의 "One record"), 이것이 "Runtime 생성과 같은 append"(§4.3)를 지키는 길이다. Runtime 기록은 Self grant의 id를 든다. D2의 `Stored_grant of Grant_id.t`가 그 id를 쓴다.
+  - Keeper 주인은 새 Kind `Keeper`로 쓴다. 만든 사람이 쓴다. 회수 대상이 아니라서 intent subject가 아니다.
+  - account-home은 주인의 namespace 아래에 둔다. namespace는 입장 때 정한 `account_home_namespace`다.
+  - `runtime.toml` 대조 함수는 `masc_runtime`에 둔다. `masc_runtime`은 `masc.auth`를 보지만 거꾸로는 못 본다.
+- 층.
+  - D1-1 기록. Kind `Provider_account`, `Runtime`(Self grant 포함), `Keeper`의 본문과 작성자다. 작성자는 주인 본인이다. `Authz_state`가 셋을 읽는다. Runtime 주인과 구독 계정 주인이 다르면 상태가 거절한다.
+  - D1-2 대조. `runtime.toml`의 provider, binding, 배정을 하나씩 기록과 맞춘다. lane이면 모든 구성원이 Keeper 주인의 것이어야 한다. 배정이 없으면 default로 가지 않고 거절한다. Single_user는 이 함수를 부르지 않는다.
+  - D1-3 `ManageOwnProvider`. 구독 연결 경로를 위한 `Route_access` 종류다. Single_user는 지금처럼 `CanAdmin`으로 판정한다. 다계정 `Auth_gate`는 활동 중인 Member와 Admin 본인에게 연다. PAT는 범위에 `Manage_own_provider`가 있어야 한다.
+  - D1-4 구독 연결(ProviderLink, §5.4). 세션 키를 legacy 이름에서 principal로 바꾼다. 시작, 상태, 코드 입력, 취소마다 저장소의 membership과 namespace를 대조한다. account-home을 namespace 아래에 만든다. 연결이 끝나면 `Provider_account`와 `Runtime` 기록을 쓴다.
+  - D1-5 Keeper 만들기와 배정. 다계정에서 Keeper를 만들면 `Keeper` 기록을 쓴다. 배정은 주인의 Runtime만 받는다.
+  - D1-6 미리보기 연결. 미리보기에 D1-4의 구독 연결 경로와 "내 구독과 Runtime" 목록을 단다. 사람이 브라우저에서 자기 Claude Code나 Codex 구독으로 로그인한다. 그러면 자기 namespace의 account-home과 자기 기록이 생긴다. 사람이 한 확인을 PR 본문에 적는다.
+- 시험(설계 §12 소유권).
+  - A가 B의 provider id로 Runtime을 만들면 거절한다. Admin도 남의 구독으로 Runtime을 만들지 못한다.
+  - 남의 Runtime을 Keeper에 배정하면 거절한다. lane에 남의 Runtime이 섞여도 거절한다. 배정 없는 Keeper는 default로 가지 않는다.
+  - 남의 구독 연결 세션의 상태, 코드 입력, 취소를 거절한다.
+  - 일반 Member가 Admin 없이 자기 구독을 연결한다.
+- 하지 않는 것: 실행 진입의 타입(D2·D3), 공유(Delegated·MachineShared, 2단계), lane별 account-home 격리 증거(D3), 부팅에 대조를 다는 일(S1).
 
 **D6 범위**
 

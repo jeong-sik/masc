@@ -60,10 +60,7 @@
   uutf
   uucp
   re
-  re.str
-  re.pcre
   eio
-  eio.unix
   time_compat
   fs_compat
   masc_random_id

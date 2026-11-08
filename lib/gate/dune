@@ -61,7 +61,6 @@
   bigstringaf
   ws-direct-core
   ws-direct-eio
-  mirage-crypto-rng.unix
   re
   ; existing
   ; Health_status: channel health is published on the shared vocabulary, not

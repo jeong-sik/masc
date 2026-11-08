@@ -12,6 +12,11 @@ open Result.Syntax
    actor; run identity stays with the per-review [verification_id]. *)
 let authority_actor = Masc_domain.completion_authority_actor Verifier_review_publication.authority
 
+(* The installation and package the verifier review records of this lane are
+   filed under. *)
+let host_installation_id = "masc.completion-authority"
+let host_package_id = "masc.completion-authority.review"
+
 (* How many operator-disagreement examples ride along in the judge's prompt.
    Few-shot selection puts false positives first, so the examples that cost
    the most (an approve a human overturned) are the ones that survive the
@@ -968,7 +973,7 @@ let preserve_original_publication ~store ~verification_id ~task_id ~producer =
   match Eio.Cancel.protect (fun () -> Verifier_review_owner.pending_commits
     ~selection:(Verifier_review_owner.Verification verification_id)
     ~terminal_pending:Verifier_review_publication.needs_publication ~store
-    ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review") with
+    ~installation_id:host_installation_id ~package_id:host_package_id) with
   | Error _ -> true
   | Ok pending -> List.exists (fun retained ->
       let original=Verifier_review_owner.original retained in
@@ -1021,7 +1026,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
     let original=Verifier_review_owner.original retained in
     match Verifier_review_owner.load_retained ~store ~verification_id
       ~attempt:(Verifier_review_original.attempt original)
-      ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review" with
+      ~installation_id:host_installation_id ~package_id:host_package_id with
     | Error _ -> Stalled (Commit_failed {detail="terminal review owner readback unavailable"})
     | Ok retained ->
       (match Lane_addon_request_progress.phase (Verifier_review_owner.progress retained) with
@@ -1043,7 +1048,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
   try
     match Verifier_review_owner.retained_commits ~store
       ~selection:(Verifier_review_owner.Verification verification_id)
-      ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review" with
+      ~installation_id:host_installation_id ~package_id:host_package_id with
     | Error _ -> defer_unavailable ~stage:Verification_run_registry.Review_preparation
         ~detail:"original host judgment inventory unavailable"
     | Ok pending ->
@@ -1074,7 +1079,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                     | Reject reason -> Verification_run_registry.Rejected {reason} in
                   complete_retained ~store ~retained
                     (commit_verdict runtime task ~store ~attempt:(Verifier_review_original.attempt original)
-                      ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review"
+                      ~installation_id:host_installation_id ~package_id:host_package_id
                       ~verification_id ~authority ~verdict:(completion_verdict_of_review review_verdict)
                       ~notes ~verdict_label:(Task.Anti_rationalization.verdict_constructor_name review_verdict)
                       ~on_commit ~evaluator_runtime:(Some result.evaluator_runtime))))))
@@ -1135,8 +1140,8 @@ let process_task_once ?(registry=Verification_run_registry.global ())
               Lane_addon_store.create
                 ~root:(Filename.concat (Workspace.masc_dir runtime.config) "lane-addons")
             in
-            let installation_id = "masc.completion-authority" in
-            let package_id = "masc.completion-authority.review" in
+            let installation_id = host_installation_id in
+            let package_id = host_package_id in
             let prepared_original : (int * Verifier_review_original.t, Verifier_review_worker.error) result =
               let* attempt =
                 Verifier_review_owner.next_attempt ~store:owner_store ~verification_id
@@ -1482,7 +1487,7 @@ let recover_terminal_publications (runtime:runtime) ~registry ~scope =
   let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir runtime.config) "lane-addons") in
   let* pending=O.pending_commits ~terminal_pending:Verifier_review_publication.needs_publication
     ~selection:O.All_verifications
-    ~store ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review"
+    ~store ~installation_id:host_installation_id ~package_id:host_package_id
     |> Result.map_error (function O.Not_found -> "review publication inventory absent"
       | Load_store_unavailable detail | Corrupt_original detail -> detail) in
   let terminal=List.filter_map (fun retained -> match P.phase (O.progress retained) with
@@ -1534,7 +1539,7 @@ let process_scope (runtime : runtime) ~scope =
     let entries = match Verifier_review_owner.pending_commits
       ~selection:Verifier_review_owner.All_verifications
       ~terminal_pending:Verifier_review_publication.needs_publication ~store
-      ~installation_id:"masc.completion-authority" ~package_id:"masc.completion-authority.review" with
+      ~installation_id:host_installation_id ~package_id:host_package_id with
       | Error _ ->
         Log.Misc.error "verifier original commit inventory unavailable; no commit recovery inferred";
         entries

@@ -7,6 +7,11 @@
     The module is named [Tool_capability] to make its narrow tool-registration
     scope explicit. *)
 
+(* Dispatch-time capability query. [Tool_catalog.execution_policy_axis]
+   restates the same three metadata fields for registration-time
+   completeness checks with different wire words — a new policy axis
+   changes both, by design of the layering ([tool_capability] cannot see
+   [Tool_catalog]). *)
 type kind =
   | Read_only
   | Mcp_context_required

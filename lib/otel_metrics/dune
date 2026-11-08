@@ -10,4 +10,4 @@
  (name masc_otel_metrics)
  (public_name masc.otel_metrics)
  (wrapped false)
- (libraries opentelemetry opentelemetry.client))
+ (libraries opentelemetry))

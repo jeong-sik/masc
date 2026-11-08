@@ -66,9 +66,6 @@
   eio
   eio_main
   ptime.clock
-  h2-eio
-  httpun-eio
-  gluten-eio
   gluten
   httpun
   masc_core
@@ -82,8 +79,6 @@
   unix
   yojson
   uri
-  cohttp
-  cohttp-eio
   masc.masc_schedule
   masc.agent_core
   masc.agent_core.llm_provider))
@@ -109,8 +104,7 @@
   time_compat
   masc_log
   masc_workspace
-  unix
-  cohttp-eio))
+  unix))
 
 (executable
  (name masc_cost)
@@ -127,8 +121,7 @@
   time_compat
   masc_log
   eio_main
-  eio
-  cohttp-eio))
+  eio))
 
 (executable
  (name keeper_store_layout_manifest)
@@ -2365,7 +2358,6 @@
   masc_tui_command
   masc_tui_features
   yojson
-  eio.unix
   masc_tui_ask_projection
   masc_tui_browser_lane_layout
   masc_tui_chart
@@ -2552,7 +2544,6 @@
   uri
   base64
   eio
-  eio.unix
   unix
   mtime.clock.os
   masc_tui_account_login
@@ -3010,8 +3001,6 @@
   eio
   eio.unix
   mtime.clock.os
-  cohttp
-  cohttp-eio
   masc.agent_core
   masc.agent_core.llm_provider))
 
@@ -3037,8 +3026,7 @@
   eio
   eio_main
   time_compat
-  masc_eio_context
-  cohttp-eio))
+  masc_eio_context))
 
 ;; E6 continuity evidence harness (task-11, M1 PR1): drives an existing
 ;; keeper's live chat surface over HTTP (unlike fusion_run.ml, which calls
@@ -3219,7 +3207,6 @@
   masc_tui_io_domain
   cstruct
   eio
-  eio.unix
   eio_main
   unix
   mtime.clock.os))

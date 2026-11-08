@@ -6,7 +6,6 @@
  (wrapped false)
  (libraries
   eio
-  eio.unix
   unix
   masc.masc_core
   masc.dated_jsonl

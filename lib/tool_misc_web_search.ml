@@ -449,15 +449,36 @@ let fetch_searxng ~timeout_sec ~query =
           Error (Server (Printf.sprintf "search endpoint returned HTTP %d" status))
       | Ok (None, _) -> Error (Server "search endpoint returned no HTTP status")
 
+(* The two failures a provider call has on any wire: the request did not
+   complete, or the endpoint answered with a status. The transport's own
+   detail is redacted because it can echo the query. *)
+let provider_transport_error detail =
+  Transport (endpoint_error ~fallback:"provider request failed" detail)
+
+let provider_http_status_error status =
+  Server (Printf.sprintf "provider returned HTTP %d" status)
+
+(* Every provider fetch except SearXNG's settles its HTTP outcome the same way:
+   a transport failure, a status other than 200, no status at all, or the 200
+   body handed to [on_ok]. *)
+let settle_provider_response ~on_ok = function
+  | Error detail -> Error (provider_transport_error detail)
+  | Ok (Some 200, payload) -> on_ok payload
+  | Ok (Some status, _) -> Error (provider_http_status_error status)
+  | Ok (None, _) -> Error (Server "provider returned no HTTP status")
+
+(* The response of [provider] for a parsed hit list: at most [limit] hits, each
+   normalised under the provider's label. *)
+let response_of_parsed provider ~search_url ~limit parsed =
+  let engine = provider_to_string provider in
+  let hits = parsed |> take_results limit |> normalize_hits ~source:engine in
+  Ok { engine; search_url; hits }
+
 (* One path from a Brave 200 body to a response, shared by [fetch_brave] and
    the simulator's [`Brave_body] outcome so tests exercise the real parse. *)
 let brave_response_of_body ~search_url ~limit payload =
   let* parsed = parse_brave_json payload in
-  let hits =
-    parsed |> take_results limit
-    |> normalize_hits ~source:(provider_to_string Brave)
-  in
-  Ok { engine = provider_to_string Brave; search_url; hits }
+  response_of_parsed Brave ~search_url ~limit parsed
 
 let fetch_brave ~timeout_sec ~query ~limit =
   match credential Brave with
@@ -468,18 +489,13 @@ let fetch_brave ~timeout_sec ~query ~limit =
           "https://api.search.brave.com/res/v1/web/search?q=%s&count=%d"
           (Uri.pct_encode query) limit
       in
-      match
-        Tool_local_runtime_http.http_get_text_with_status_with_headers
-          ~timeout_sec
-          ~headers:
-            [ ("Accept", "application/json"); ("X-Subscription-Token", api_key) ]
-          search_url
-      with
-      | Error detail ->
-          Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
-      | Ok (Some 200, payload) -> brave_response_of_body ~search_url ~limit payload
-      | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
-      | Ok (None, _) -> Error (Server "provider returned no HTTP status")
+      Tool_local_runtime_http.http_get_text_with_status_with_headers
+        ~timeout_sec
+        ~headers:
+          [ ("Accept", "application/json"); ("X-Subscription-Token", api_key) ]
+        search_url
+      |> settle_provider_response
+           ~on_ok:(brave_response_of_body ~search_url ~limit)
 
 let fetch_tavily ~timeout_sec ~query ~limit =
   match credential Tavily with
@@ -496,24 +512,14 @@ let fetch_tavily ~timeout_sec ~query ~limit =
           ]
         |> Yojson.Safe.to_string
       in
-      match
-        Tool_local_runtime_http.http_post_json_text_with_status_with_headers
-          ~timeout_sec
-          ~headers:[ ("Accept", "application/json") ]
-          ~url:search_url
-          ~body_json ()
-      with
-      | Error detail ->
-          Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
-      | Ok (Some 200, payload) ->
-          let* parsed = parse_tavily_json payload in
-          let hits =
-            parsed |> take_results limit
-            |> normalize_hits ~source:(provider_to_string Tavily)
-          in
-          Ok { engine = provider_to_string Tavily; search_url; hits }
-      | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
-      | Ok (None, _) -> Error (Server "provider returned no HTTP status")
+      Tool_local_runtime_http.http_post_json_text_with_status_with_headers
+        ~timeout_sec
+        ~headers:[ ("Accept", "application/json") ]
+        ~url:search_url
+        ~body_json ()
+      |> settle_provider_response ~on_ok:(fun payload ->
+             let* parsed = parse_tavily_json payload in
+             response_of_parsed Tavily ~search_url ~limit parsed)
 
 let fetch_exa ~timeout_sec ~query ~limit =
   match credential Exa with
@@ -529,25 +535,15 @@ let fetch_exa ~timeout_sec ~query ~limit =
           ]
         |> Yojson.Safe.to_string
       in
-      match
-        Tool_local_runtime_http.http_post_json_text_with_status_with_headers
-          ~timeout_sec
-          ~headers:
-            [ ("Accept", "application/json"); ("x-api-key", api_key) ]
-          ~url:search_url
-          ~body_json ()
-      with
-      | Error detail ->
-          Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
-      | Ok (Some 200, payload) ->
-          let* parsed = parse_exa_json payload in
-          let hits =
-            parsed |> take_results limit
-            |> normalize_hits ~source:(provider_to_string Exa)
-          in
-          Ok { engine = provider_to_string Exa; search_url; hits }
-      | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
-      | Ok (None, _) -> Error (Server "provider returned no HTTP status")
+      Tool_local_runtime_http.http_post_json_text_with_status_with_headers
+        ~timeout_sec
+        ~headers:
+          [ ("Accept", "application/json"); ("x-api-key", api_key) ]
+        ~url:search_url
+        ~body_json ()
+      |> settle_provider_response ~on_ok:(fun payload ->
+             let* parsed = parse_exa_json payload in
+             response_of_parsed Exa ~search_url ~limit parsed)
 
 let fetch_bing_api ~timeout_sec ~query ~limit =
   match credential Bing_api with
@@ -558,27 +554,17 @@ let fetch_bing_api ~timeout_sec ~query ~limit =
           "https://api.bing.microsoft.com/v7.0/search?q=%s&count=%d&responseFilter=Webpages"
           (Uri.pct_encode query) limit
       in
-      match
-        Tool_local_runtime_http.http_get_text_with_status_with_headers
-          ~timeout_sec
-          ~headers:
-            [
-              ("Accept", "application/json");
-              ("Ocp-Apim-Subscription-Key", key);
-            ]
-          search_url
-      with
-      | Error detail ->
-          Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
-      | Ok (Some 200, payload) ->
-          let* parsed = parse_bing_search_json payload in
-          let hits =
-            parsed |> take_results limit
-            |> normalize_hits ~source:(provider_to_string Bing_api)
-          in
-          Ok { engine = provider_to_string Bing_api; search_url; hits }
-      | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
-      | Ok (None, _) -> Error (Server "provider returned no HTTP status")
+      Tool_local_runtime_http.http_get_text_with_status_with_headers
+        ~timeout_sec
+        ~headers:
+          [
+            ("Accept", "application/json");
+            ("Ocp-Apim-Subscription-Key", key);
+          ]
+        search_url
+      |> settle_provider_response ~on_ok:(fun payload ->
+             let* parsed = parse_bing_search_json payload in
+             response_of_parsed Bing_api ~search_url ~limit parsed)
 
 (* Contract:
    https://api-dashboard.search.brave.com/api-reference/summarizer/llm_context/get
@@ -595,24 +581,18 @@ let fetch_brave_llm_context ~timeout_sec ~query ~limit =
           "https://api.search.brave.com/res/v1/llm/context?q=%s&maximum_number_of_urls=%d"
           (Uri.pct_encode query) limit
       in
-      match
-        Tool_local_runtime_http.http_get_text_with_status_with_headers
-          ~timeout_sec
-          ~headers:
-            [ ("Accept", "application/json"); ("X-Subscription-Token", api_key) ]
-          search_url
-      with
-      | Error detail ->
-          Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
-      | Ok (Some 200, payload) ->
-          let* parsed = parse_brave_llm_context_json payload in
-          Ok
-            { context_search_url = search_url
-            ; items = List.map (fun (url, title, snippets) ->
-                  { source_url = url; source_title = title; snippets }) parsed
-            }
-      | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
-      | Ok (None, _) -> Error (Server "provider returned no HTTP status")
+      Tool_local_runtime_http.http_get_text_with_status_with_headers
+        ~timeout_sec
+        ~headers:
+          [ ("Accept", "application/json"); ("X-Subscription-Token", api_key) ]
+        search_url
+      |> settle_provider_response ~on_ok:(fun payload ->
+             let* parsed = parse_brave_llm_context_json payload in
+             Ok
+               { context_search_url = search_url
+               ; items = List.map (fun (url, title, snippets) ->
+                     { source_url = url; source_title = title; snippets }) parsed
+               })
 
 (* Contract: https://docs.ollama.com/capabilities/web-search
    POST /api/web_search with {query, max_results (default 5, max 10)}
@@ -626,27 +606,17 @@ let fetch_ollama ~timeout_sec ~query ~limit =
         `Assoc [ ("query", `String query); ("max_results", `Int limit) ]
         |> Yojson.Safe.to_string
       in
-      match
-        Tool_local_runtime_http.http_post_json_text_with_status_with_headers
-          ~timeout_sec
-          ~headers:
-            [ ("Accept", "application/json")
-            ; ("Authorization", "Bearer " ^ api_key)
-            ]
-          ~url:search_url
-          ~body_json ()
-      with
-      | Error detail ->
-          Error (Transport (endpoint_error ~fallback:"provider request failed" detail))
-      | Ok (Some 200, payload) ->
-          let* parsed = parse_ollama_search_json payload in
-          let hits =
-            parsed |> take_results limit
-            |> normalize_hits ~source:(provider_to_string Ollama)
-          in
-          Ok { engine = provider_to_string Ollama; search_url; hits }
-      | Ok (Some status, _) -> Error (Server (Printf.sprintf "provider returned HTTP %d" status))
-      | Ok (None, _) -> Error (Server "provider returned no HTTP status")
+      Tool_local_runtime_http.http_post_json_text_with_status_with_headers
+        ~timeout_sec
+        ~headers:
+          [ ("Accept", "application/json")
+          ; ("Authorization", "Bearer " ^ api_key)
+          ]
+        ~url:search_url
+        ~body_json ()
+      |> settle_provider_response ~on_ok:(fun payload ->
+             let* parsed = parse_ollama_search_json payload in
+             response_of_parsed Ollama ~search_url ~limit parsed)
 
 (* z.ai's Web Search MCP server: streamable HTTP, the key as a Bearer token,
    one tool. The tool's own description (tools/list, measured 2026-10-14)
@@ -662,10 +632,9 @@ let zai_location = "us"
 (* What an MCP failure says to the chain. The server's own message is left
    out, as for the other providers: it can echo the query. *)
 let rec zai_error_of_mcp : Mcp_client.error -> provider_error = function
-  | Mcp_client.Transport detail ->
-      Transport (endpoint_error ~fallback:"provider request failed" detail)
+  | Mcp_client.Transport detail -> provider_transport_error detail
   | Mcp_client.Unauthorized _ -> Server "provider refused the key"
-  | Mcp_client.Http { status; _ } -> Server (Printf.sprintf "provider returned HTTP %d" status)
+  | Mcp_client.Http { status; _ } -> provider_http_status_error status
   | Mcp_client.Rpc { code; _ } -> Server (Printf.sprintf "provider refused the call (%d)" code)
   | Mcp_client.Input_required _ -> Server "provider requires additional input"
   | Mcp_client.Before_tool_call error -> zai_error_of_mcp error

@@ -13,7 +13,3 @@ val json_member : string -> Yojson.Safe.t -> Yojson.Safe.t
     [`Int]; collapses Wrong_shape / Field_absent to [None] at the
     boundary. *)
 val json_number : string -> Yojson.Safe.t -> float option
-
-(** [Json_field.assoc] adapter wrapping back to [`Assoc fields]
-    option. *)
-val json_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t option

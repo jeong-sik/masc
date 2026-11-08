@@ -73,41 +73,10 @@ let[@inline always] to_option = function
   | Wrong_shape _ -> None
 ;;
 
-(* Fast zero-allocation extractors for optional fields *)
-let[@inline always] string_opt json key : string option =
-  match lookup json key with
-  | Some (`String s) -> Some s
-  | _ -> None
-;;
-
-let[@inline always] int_opt json key : int option =
-  match lookup json key with
-  | Some (`Int i) -> Some i
-  | _ -> None
-;;
-
-let[@inline always] bool_opt json key : bool option =
-  match lookup json key with
-  | Some (`Bool b) -> Some b
-  | _ -> None
-;;
-
 let[@inline always] float_opt json key : float option =
   match lookup json key with
   | Some (`Float f) -> Some f
   | Some (`Int i) -> Some (float_of_int i)
-  | _ -> None
-;;
-
-let[@inline always] assoc_opt json key : (string * Yojson.Safe.t) list option =
-  match lookup json key with
-  | Some (`Assoc fields) -> Some fields
-  | _ -> None
-;;
-
-let[@inline always] list_opt json key : Yojson.Safe.t list option =
-  match lookup json key with
-  | Some (`List items) -> Some items
   | _ -> None
 ;;
 

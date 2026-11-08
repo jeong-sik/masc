@@ -10,9 +10,7 @@
     - [json_member key json] — `Assoc field-by-key with [`Null] on
       miss / non-Assoc.
     - [json_number] — RFC-0142 PR-5 typed-failure variant via
-      Json_field.float |> to_option (accepts both `Float and `Int).
-    - [json_assoc] — Json_field.assoc adapter wrapping back to
-      [`Assoc fields] option. *)
+      Json_field.float_opt (accepts both `Float and `Int). *)
 
 (* [max_chars] is a byte budget for the kept text. The cut moves back to a
    UTF-8 character boundary: a receipt error message is often Korean model
@@ -34,10 +32,4 @@ let json_member key = function
 
 let[@inline always] json_number key json =
   Json_field.float_opt json key
-;;
-
-let[@inline always] json_assoc key json =
-  match Json_field.assoc_opt json key with
-  | Some fields -> Some (`Assoc fields)
-  | None -> None
 ;;

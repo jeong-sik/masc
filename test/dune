@@ -2927,6 +2927,7 @@
 (include stanzas/test_browser_spectator.inc)
 (include stanzas/test_tui_browser_push.inc)
 (include stanzas/test_tui_memory_push.inc)
+(include stanzas/test_tui_memory_world.inc)
 (include stanzas/test_tui_play_room_push.inc)
 ; nofile-status reads the process table: which finds scan the caller's home,
 ; which lock waiters lost their parent, which dune runs outside a wrapper.

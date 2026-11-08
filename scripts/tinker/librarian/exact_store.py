@@ -19,11 +19,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
+import yojson_wire as W
+
 DECLARATION = "keeper-librarian"
 OUTPUT = "admission"
 MANIFEST_SCHEMA = "masc.tinker.librarian.e_real_manifest.v1"
 
-type JsonObject = dict[str, object]
+type JsonDict = dict[str, object]  # the manifest, which this module writes
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,8 +33,8 @@ class AnsweredAdmission:
     digest: str
     sha256: str
     prompt: str  # the one user message MASC sent
-    schema: JsonObject  # the output JSON Schema MASC sent
-    answer: JsonObject  # the answer MASC accepted
+    schema: W.JsonObject  # the output JSON Schema MASC sent
+    answer: W.JsonObject  # the answer MASC accepted
     slot: str  # the slot that answered
 
 
@@ -47,30 +49,54 @@ def store_dir(base: Path) -> Path:
     return base / ".masc" / "lane-addons" / "exact-requests"
 
 
-def _object(value: object) -> JsonObject | None:
-    return cast(JsonObject, value) if isinstance(value, dict) else None
+def _object(value: object) -> JsonDict | None:
+    return cast(JsonDict, value) if isinstance(value, dict) else None
+
+
+def read_json(raw: bytes) -> W.Json | None:
+    """A record MASC wrote with `Yojson.Safe.to_string`, read as MASC reads it, or None.
+
+    The Yojson port keeps an out-of-range integer as Intlit text and reads any
+    depth; json.loads stops past 4300 digits or near 1000 levels. Yojson stores
+    a lone surrogate escape as the bytes ED B0 80, and surrogatepass reads them
+    back as that one code point. None: the bytes do not decode that way, or
+    the text is not JSON.
+    """
+    try:
+        text = raw.decode("utf-8", "surrogatepass")
+    except UnicodeDecodeError:
+        return None
+    value = W.parse(text)
+    return None if isinstance(value, W.JsonError) else value
 
 
 def read_record(path: Path) -> AnsweredAdmission | None:
-    """The record when it is an answered admission of keeper-librarian, else None."""
+    """The record when it is an answered admission of keeper-librarian, else None.
+    A record that cannot be read stops the run."""
     raw = path.read_bytes()
-    rec = _object(json.loads(raw))
-    if rec is None or rec.get("declaration_id") != DECLARATION:
+    rec = read_json(raw)
+    if rec is None:
+        raise SystemExit(f"{path.name}: not a JSON record")
+    if not isinstance(rec, W.JsonObject) or W.member(rec, "declaration_id") != DECLARATION:
         return None
-    request, final = _object(rec.get("request")), _object(rec.get("final"))
-    if request is None or final is None or request.get("output") != OUTPUT or final.get("status") != "answered":
+    request, final = W.member(rec, "request"), W.member(rec, "final")
+    if (not isinstance(request, W.JsonObject) or not isinstance(final, W.JsonObject)
+            or W.member(request, "output") != OUTPUT or W.member(final, "status") != "answered"):
         return None
-    schema, answer, messages = _object(request.get("schema")), _object(final.get("output")), request.get("messages")
-    digest, slot = rec.get("digest"), final.get("slot")
-    if schema is None or answer is None or not isinstance(digest, str) or not isinstance(slot, str):
+    schema, answer, messages = W.member(request, "schema"), W.member(final, "output"), W.member(request, "messages")
+    digest, slot = W.member(rec, "digest"), W.member(final, "slot")
+    if (not isinstance(schema, W.JsonObject) or not isinstance(answer, W.JsonObject)
+            or not isinstance(digest, str) or not isinstance(slot, str)):
         return None
     # Every admission request so far is one user message without a system field.
     # Another shape would reach the wire differently, so it stops the run.
-    if "system" in request or not isinstance(messages, list) or len(cast(list[object], messages)) != 1:
+    if not isinstance(W.member(request, "system"), W.Absent) or not isinstance(messages, tuple) or len(messages) != 1:
         raise SystemExit(f"{path.name}: admission request is not one user message")
-    message = _object(cast(list[object], messages)[0])
-    text = message.get("text") if message is not None else None
-    if message is None or message.get("role") != "user" or not isinstance(text, str):
+    message = messages[0]
+    if not isinstance(message, W.JsonObject):
+        raise SystemExit(f"{path.name}: admission request is not one user message")
+    text = W.member(message, "text")
+    if W.member(message, "role") != "user" or not isinstance(text, str):
         raise SystemExit(f"{path.name}: admission request is not one user message")
     return AnsweredAdmission(digest, hashlib.sha256(raw).hexdigest(), text, schema, answer, slot)
 
@@ -80,7 +106,7 @@ def answered_admissions(base: Path) -> list[AnsweredAdmission]:
     return sorted((r for r in found if r is not None), key=lambda r: r.digest)
 
 
-def manifest_of(records: list[AnsweredAdmission], created_at: str) -> JsonObject:
+def manifest_of(records: list[AnsweredAdmission], created_at: str) -> JsonDict:
     return {"schema": MANIFEST_SCHEMA, "declaration": DECLARATION, "output": OUTPUT, "created_at": created_at,
             "selection": "every record whose final.status is answered with an object output",
             "items": [{"digest": r.digest, "sha256": r.sha256} for r in records]}

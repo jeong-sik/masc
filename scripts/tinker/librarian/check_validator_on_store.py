@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import json
 import sys
 import time
 from collections import Counter
@@ -47,10 +46,7 @@ import admission_request as R
 import admission_validator as V
 import exact_store as E
 from yojson_wire import (
-    OCAML_INT_MAX,
-    OCAML_INT_MIN,
     Absent,
-    IntLit,
     Json,
     JsonObject,
     member,
@@ -77,42 +73,13 @@ SCHEMA_NOTE = "the answer does not match the declared schema: "
 # ---------------------------------------------------------------- store reading
 
 
-def _from_python(value: object) -> Json:
-    match value:
-        case None | bool() | float() | str() | JsonObject():
-            return value
-        case int():
-            return value if OCAML_INT_MIN <= value <= OCAML_INT_MAX else IntLit(str(value))
-        case list():
-            return tuple(_from_python(item) for item in cast(list[object], value))
-        case _:
-            raise TypeError(f"json.loads returned a {type(value).__name__}")
-
-
-def _members(pairs: list[tuple[str, object]]) -> JsonObject:
-    return JsonObject(tuple((name, _from_python(item)) for name, item in pairs))
-
-
-def read_text(text: str) -> Json | None:
-    """Standard JSON as `Json`, keeping member order and duplicates, or None when unreadable."""
-    try:
-        raw: object = json.loads(text, object_pairs_hook=_members)
-    except json.JSONDecodeError:
-        return None
-    return _from_python(raw)
-
-
 def read_record(path: Path) -> Json | None:
-    """A record MASC wrote with `Yojson.Safe.to_string`, or None when unreadable.
-
-    The stdlib reader agrees with Yojson on such compact standard JSON and is
-    about 15 times faster here; the Yojson port reads model answers.
-    """
+    """A record MASC wrote with `Yojson.Safe.to_string`, or None when unreadable."""
     try:
-        text = path.read_bytes().decode("utf-8", "surrogateescape")
+        raw = path.read_bytes()
     except OSError:
         return None
-    return read_text(text)
+    return E.read_json(raw)
 
 
 def field(value: Json | Absent, *path: str) -> Json | Absent:
@@ -233,7 +200,7 @@ def check_selection(
         case _, None:
             counts["2 accepted, but exact_store does not list it"] += 1
         case _, E.AnsweredAdmission(answer=answer):
-            same = read_text(json.dumps(answer)) == accepted
+            same = answer == accepted
             counts[
                 "2 exact_store lists it with the accepted answer"
                 if same

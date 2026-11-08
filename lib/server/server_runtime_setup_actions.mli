@@ -35,6 +35,10 @@ val login_target : base_path:string -> integration_id:string -> (login_target, e
 (** Resolve the official client and executable from the current server catalog.
     [spawn_path] is resolved in the server working directory, before the login
     process moves to the account home. *)
+
+val config : base_path:string -> (Runtime_schema.config, error) result
+(** The runtime.toml of the workspace, parsed. A missing or unparsable file is
+    [Configuration_unavailable]. *)
 val import_account : binary:string -> base_path:string -> Yojson.Safe.t -> (Yojson.Safe.t,error) result
 (** Explicit selected Antigravity account import; returns only a workspace-bound
     opaque reference and projected metadata. Original source auth is untouched. *)

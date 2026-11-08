@@ -83,8 +83,9 @@ checkpoint's binding declares an output ceiling of 32,768, and the lane's
 6. When a valid E-synth answer dropped a fact that is neither planted stale nor
    a correction target, a judge that sees neither the labels nor the answers
    classifies that fact among others of the same memory (`e_synth_audit.py
-   drops`). If the judge takes it out as well, no target is scored on that
-   memory. Then `verdict`.
+   drops`). Every case of one memory shows the same facts. If the judge takes
+   the fact out as well, no target is scored on that memory. A drop the judge
+   keeps stays wrong, also when its memory leaves scoring. Then `verdict`.
 
 ```sh
 MASC_BASE_PATH=<base> uv run scripts/tinker/librarian/e_real_manifest.py \
@@ -117,9 +118,12 @@ uv run scripts/tinker/librarian/eval_admission.py verdict \
   --train A=artifacts/tinker/librarian/train-A --train B=artifacts/tinker/librarian/train-B
 ```
 
-The judge reads `verdict-drops/judge.md` and `cases.jsonl` and writes
-`decisions.jsonl`. `verdict` refuses while an off-label drop has no decision,
-and records each drop, its class and the memories left out in `verdict.json`.
+`cases` and `drops` keep the key in `--out` and put the judge's material in
+`--out/judge/`. Give the judge only that folder: it reads `judge.md` and
+`cases.jsonl` there and writes `decisions.jsonl` next to them. The key holds
+the label's classes and the dropped facts. `verdict` refuses while an
+off-label drop has no decision, and records each drop, its class, the memories
+left out and the kept drops on them in `verdict.json`.
 
 A rerun with the same `--out` reuses every answered call and pays only for the
 rest. A budget stop exits with status 2. `verdict` refuses a run where a

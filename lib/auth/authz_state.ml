@@ -26,6 +26,7 @@ type t =
   ; pats : Authz_pat_state.t
   ; service_credentials : Authz_service_credential_state.t
   ; provider_accounts : Authz_provider_account_state.t
+  ; runtimes : Authz_runtime_state.t
   ; revocation_pending : held list
   ; latest_at_ms : int option
   }
@@ -39,6 +40,7 @@ let empty =
   ; pats = Authz_pat_state.empty
   ; service_credentials = Authz_service_credential_state.empty
   ; provider_accounts = Authz_provider_account_state.empty
+  ; runtimes = Authz_runtime_state.empty
   ; revocation_pending = []
   ; latest_at_ms = None
   }
@@ -120,6 +122,8 @@ type refusal =
   | Service_credential of Authz_service_credential_state.refusal
   | Provider_account_unreadable of Authz_provider_account_event.error
   | Provider_account of Authz_provider_account_state.refusal
+  | Runtime_unreadable of Authz_runtime_event.error
+  | Runtime of Authz_runtime_state.refusal
 
 let refusal_to_string = function
   | Before_bootstrap kind ->
@@ -199,6 +203,9 @@ let refusal_to_string = function
     "the provider account record cannot be read: "
     ^ Authz_provider_account_event.error_to_string error
   | Provider_account refusal -> Authz_provider_account_state.refusal_to_string refusal
+  | Runtime_unreadable error ->
+    "the Runtime record cannot be read: " ^ Authz_runtime_event.error_to_string error
+  | Runtime refusal -> Authz_runtime_state.refusal_to_string refusal
 ;;
 
 type applied =
@@ -592,6 +599,24 @@ let provider_account state (record : R.t) =
      | Ok provider_accounts -> Ok { state = { state with provider_accounts }; high_water = None })
 ;;
 
+(* A Runtime takes no intent either: cut back to before it, the Runtime and its
+   Self grant are not there, and no Keeper turn runs on it. *)
+let runtime state (record : R.t) =
+  match Authz_runtime_event.of_body record.R.body with
+  | Error error -> Error (Runtime_unreadable error)
+  | Ok event ->
+    (match
+       Authz_runtime_state.apply
+         state.runtimes
+         ~author:record.R.author
+         ~is_active:(Authz_principal_state.is_active state.principals)
+         ~account_owner:(Authz_provider_account_state.owner state.provider_accounts)
+         event
+     with
+     | Error refusal -> Error (Runtime refusal)
+     | Ok runtimes -> Ok { state = { state with runtimes }; high_water = None })
+;;
+
 (* Every kind but a mode event is matched with the mode, so the branch of a
    kind says what a record of it means before the bootstrap, and a layer gets
    the workspace of the bootstrap only from a branch that has one. *)
@@ -620,6 +645,8 @@ let read state (record : R.t) =
     Error (Accounts_off K.Internal_service_credential)
   | K.Provider_account, Authz_mode_state.Multi_account _ -> provider_account state record
   | K.Provider_account, Authz_mode_state.Off _ -> Error (Accounts_off K.Provider_account)
+  | K.Runtime, Authz_mode_state.Multi_account _ -> runtime state record
+  | K.Runtime, Authz_mode_state.Off _ -> Error (Accounts_off K.Runtime)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
       | K.Principal
@@ -637,7 +664,8 @@ let read state (record : R.t) =
       | K.Registration
       | K.Session
       | K.Pat
-      | K.Provider_account ) as kind )
+      | K.Provider_account
+      | K.Runtime ) as kind )
     , Authz_mode_state.Not_bootstrapped -> Error (Before_bootstrap kind)
   | ( ( K.Runtime_grant
       | K.Delegate_policy
@@ -742,7 +770,8 @@ let closed_by (record : R.t) =
   | K.Registration
   | K.Session
   | K.Pat
-  | K.Provider_account -> record.R.closes
+  | K.Provider_account
+  | K.Runtime -> record.R.closes
 ;;
 
 let step state record =

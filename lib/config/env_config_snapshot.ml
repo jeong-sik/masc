@@ -358,14 +358,6 @@ let tool_entries =
       "Tool list page size (clamped 10-1024)";
   ]
 
-let worker_entries =
-  [
-    entry ~default:"(none)" "MASC_LOCAL_RUNTIME_COOLDOWN_SEC"
-      "Local runtime cooldown (seconds); None when unset";
-    entry ~default:"false" "MASC_LOCAL_RUNTIME_DEBUG"
-      "Local runtime debug logging (feature flag)";
-  ]
-
 let category_specs () =
   [
     ( "server"
@@ -393,7 +385,6 @@ let category_specs () =
     "operations", operator_entries;
     "channel", channel_gate_entries;
     "process", shutdown_entries;
-    "worker", worker_entries;
     "web_search", keeper_web_search_entries;
     "session", session_entries;
   ]

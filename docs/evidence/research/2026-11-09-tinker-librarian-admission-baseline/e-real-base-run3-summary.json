@@ -1,0 +1,23 @@
+{
+ "set": "real",
+ "pass_lines_sha256": "f1a3d4ff5e0052fbf38d197cea8c2fe1d6cf0c50555dc22c1f0e95119040d1b4",
+ "targets": {
+  "base": "thinkingmachines/Inkling-2-Small:peft:262144"
+ },
+ "spent_usd": 0.5805,
+ "stopped": null,
+ "by_target": {
+  "base": {
+   "items": 99,
+   "valid": 92,
+   "valid_rate": 0.9292929292929293,
+   "http_errors": 0,
+   "latency_p50_s": 8.0,
+   "warm_share": 1.0,
+   "cost_usd": 0.4206,
+   "outcome_agreement": 0.45064377682403434,
+   "dropped_not_in_live": 1,
+   "absorbed_not_in_live": 6
+  }
+ }
+}

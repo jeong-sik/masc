@@ -14,7 +14,9 @@ The teacher is the base model on the 256K training ID at reasoning_effort
 ATTEMPTS answers. The first answer is kept when MASC's checks accept it, every
 candidate outcome matches the label (a correction also supersedes its target),
 every planted stale fact is dropped, and nothing else is dropped. Answers from
-other providers are never used for training.
+other providers are never used for training. An HTTP error or a missing
+response is not an attempt: it stops that request, and a rerun with the same
+--out sends it again.
 
 Output: <out>/calls.jsonl (with the teacher's reasoning), <out>/accepted.jsonl
 (item, attempt, answer, reasoning) and <out>/summary.json.
@@ -31,13 +33,13 @@ from pathlib import Path
 from typing import cast
 
 import eval_admission as V
-from tinker_oai import Caller
+from tinker_oai import HTTP_OK, Caller
 
 TEACHER = "thinkingmachines/Inkling-2-Small:peft:262144"
 EFFORT = "high"
 MAX_TOKENS = 32768
 ATTEMPTS = 4
-WORKERS = 4
+WORKERS = 8
 
 type JsonObject = dict[str, object]
 
@@ -68,12 +70,16 @@ def main() -> int:
     items = V.synth_items(Path(cast(str, args.requests)))
     caller = Caller(out / "calls.jsonl", cast(float, args.budget))
     reasons: Counter[str] = Counter()
+    errors: Counter[int] = Counter()
 
     def one(item: V.SynthItem) -> JsonObject | None:
         for attempt in range(ATTEMPTS):
             call = caller.ask(model=TEACHER, label=f"teacher:{item.item_id}", messages=[item.text, instruction],
                               effort=EFFORT, max_tokens=MAX_TOKENS, attempt=attempt)
             if call is None:
+                return None
+            if call.status != HTTP_OK:
+                errors[call.status] += 1
                 return None
             why = rejection(item, V.check(item.prompt, call.answer()))
             if why is None:
@@ -87,6 +93,7 @@ def main() -> int:
         fh.writelines(json.dumps(k, ensure_ascii=False) + "\n" for k in kept)
     summary = {"teacher": TEACHER, "effort": EFFORT, "requests": len(items), "accepted": len(kept),
                "by_attempt": Counter(cast(int, k["attempt"]) for k in kept), "rejections": reasons,
+               "http_errors": errors,
                "spent_usd": round(caller.spent, 4), "stopped": caller.stopped}
     (out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(summary))

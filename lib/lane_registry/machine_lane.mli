@@ -15,5 +15,5 @@ val to_wire : t -> string
     their [machine] fields. *)
 
 val of_wire : string -> t option
-(** Inverse of {!to_wire}: [None] for a name no machine has. Every reader of a
-    machine name goes through here, so a new constructor is spelled once. *)
+(** Inverse of {!to_wire}, derived from it over [all]: [None] for a name no
+    machine has. A new constructor needs no second spelling here. *)

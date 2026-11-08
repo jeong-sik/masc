@@ -289,13 +289,51 @@ let wire_declared_target (target : EO.declared_target) : Resolver.declared_targe
        | EO.Declared_model capabilities -> Resolver.Declared_model capabilities)
   }
 
+(* The request bytes the runtime bootstrap froze for [admitted], the slot a
+   lane resolved to. They are read from the wire plan of the declared target
+   the runtime built, admitted the way the lane admits it ([lane_budget] is
+   the lane's [max_output_tokens]), and the digest ties them to the runtime
+   plan. The wire plan goes through ready admission, as the lane's request
+   does: [serialized_body] preflights the projection config as it stands, and
+   a binding that declares [max-concurrent] (the guide's does) is refused
+   there as [Global_admission_not_allowed]. *)
+let checkpoint_request_body ?lane_budget admitted =
+  let module Ready = Llm_provider.Exact_output_ready_admission in
+  let runtime_receipt = EO.start_attempt (ready admitted)
+    |> require_ok "runtime attempt" |> EO.attempt_receipt in
+  let declared =
+    match Runtime.exact_output_targets (Runtime.get_runtimes ()) with
+    | [ declared ] -> wire_declared_target declared
+    | _ -> fail "expected the checkpoint binding as the one exact target" in
+  let snapshot = Resolver.load_resolver_snapshot
+      ~catalog:(Resolver.Embedded_with_targets [ declared ]) ()
+    |> require_ok "wire resolver snapshot" in
+  let wire_admitted = Resolver.admit_target_ref snapshot declared.target_ref
+    |> require_ok "wire admitted target" in
+  let selected =
+    (match lane_budget with
+     | Some budget -> Resolver.admitted_target_with_max_tokens wire_admitted budget
+     | None -> wire_admitted)
+    |> Resolver.resolve_target
+    |> require_ok "wire selected target"
+  in
+  let wire_requirement = Ready.make_output_requirement
+      ~schema:(`Assoc [ "type", `String "object" ])
+      ~minimum_guarantee:Ready.Json_syntax in
+  let wire_plan = Ready.admit ~target:selected ~messages wire_requirement
+    |> require_ok "wire ready plan" in
+  let serialized = Plan.request_body wire_plan.plan in
+  check string "runtime bootstrap freezes these exact request bytes"
+    (Agent_core_sha256.(digest_string serialized |> to_hex))
+    (EO.receipt_request_body_sha256 runtime_receipt);
+  Printf.eprintf "checkpoint request: %s\n%!" serialized;
+  Yojson.Safe.from_string serialized
+
 (* The guide's checkpoint binding on a Librarian lane: the request carries the
    binding's effort and the lane's budget, and no response_format, since the
-   block states neither JSON mode nor native schema. The bytes are read from
-   the wire plan of the declared target the runtime built, and the digest ties
-   them to the plan the runtime bootstrap froze. *)
+   block states neither JSON mode nor native schema. On the HITL lane, which
+   declares no budget, the request carries no max_tokens. *)
 let test_guide_checkpoint_request_carries_its_effort_and_lane_budget_and_no_envelope () =
-  let module Ready = Llm_provider.Exact_output_ready_admission in
   with_runtime ~toml:tinker_checkpoint_toml ~credential_env:"TINKER_API_KEY" @@ fun load ->
   List.iter (fun effort ->
     let effort_name = Llm_provider.Reasoning_effort.to_string effort in
@@ -307,34 +345,7 @@ let test_guide_checkpoint_request_carries_its_effort_and_lane_budget_and_no_enve
       capabilities.supports_structured_output;
     check (option int) "no output ceiling clamps the lane budget" None
       capabilities.max_output_tokens;
-    let runtime_receipt = EO.start_attempt (ready admitted)
-      |> require_ok "runtime attempt" |> EO.attempt_receipt in
-    let declared =
-      match Runtime.exact_output_targets (Runtime.get_runtimes ()) with
-      | [ declared ] -> wire_declared_target declared
-      | _ -> fail "expected the checkpoint binding as the one exact target" in
-    let snapshot = Resolver.load_resolver_snapshot
-        ~catalog:(Resolver.Embedded_with_targets [ declared ]) ()
-      |> require_ok "wire resolver snapshot" in
-    let selected =
-      Resolver.admit_target_ref snapshot declared.target_ref
-      |> require_ok "wire admitted target"
-      (* The Librarian lane declares [max_output_tokens = 4096]. *)
-      |> fun wire_admitted -> Resolver.admitted_target_with_max_tokens wire_admitted 4096
-      |> Resolver.resolve_target
-      |> require_ok "wire selected target"
-    in
-    let wire_requirement = Ready.make_output_requirement
-        ~schema:(`Assoc [ "type", `String "object" ])
-        ~minimum_guarantee:Ready.Json_syntax in
-    let wire_plan = Ready.admit ~target:selected ~messages wire_requirement
-      |> require_ok "wire ready plan" in
-    let serialized = Plan.request_body wire_plan.plan in
-    check string "runtime bootstrap freezes these exact request bytes"
-      (Agent_core_sha256.(digest_string serialized |> to_hex))
-      (EO.receipt_request_body_sha256 runtime_receipt);
-    Printf.eprintf "checkpoint request: %s\n%!" serialized;
-    let body = Yojson.Safe.from_string serialized in
+    let body = checkpoint_request_body ~lane_budget:4096 admitted in
     check string "the request carries the binding's effort" effort_name
       Yojson.Safe.Util.(body |> member "reasoning_effort" |> to_string);
     check int "the request max_tokens is the lane budget" 4096
@@ -343,8 +354,8 @@ let test_guide_checkpoint_request_carries_its_effort_and_lane_budget_and_no_enve
       (Yojson.Safe.Util.member "response_format" body = `Null))
     [ Llm_provider.Reasoning_effort.Low; Llm_provider.Reasoning_effort.High ];
   check bool "a lane with no budget sends no max_tokens" true
-    (Yojson.Safe.Util.(
-       serialized_body (load ~lane_id:"hitl_auto_judge" "low") |> member "max_tokens")
+    (Yojson.Safe.Util.member "max_tokens"
+       (checkpoint_request_body (load ~lane_id:"hitl_auto_judge" "low"))
      = `Null)
 ;;
 

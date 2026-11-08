@@ -1,4 +1,4 @@
-.PHONY: release-evidence release viewer-build viewer-serve harness-streamable-http-contract harness-run-local-fresh-boot viewer-local-e2e-check
+.PHONY: release-evidence release viewer-build viewer-serve harness-streamable-http-contract harness-run-local-fresh-boot
 
 release-evidence:
 	bash scripts/release-evidence.sh _build/default/bin/main_eio.exe artifacts/release-evidence/local-release-evidence.md
@@ -23,7 +23,3 @@ harness-streamable-http-contract:
 # Fresh temp-dir proof: run-local bootstrap -> /health -> initialize -> tools/list
 harness-run-local-fresh-boot:
 	scripts/harness/contract/run_local_fresh_boot_contract.sh
-
-# Local E2E checklist runner (contracts + optional viewer build/smoke)
-viewer-local-e2e-check:
-	scripts/viewer-local-e2e-check.sh

@@ -24,7 +24,9 @@
     [send] returns. *)
 
 type ending =
-  | Client_gone  (** [send] answered [Closed]. *)
+  | Client_gone
+  (** [send] answered [Closed], or [closed] returned while the pump waited
+      for an event. *)
   | Source_stopped
   (** The source said to write no more. A {!Queue} says so once an event came
       while it was full. *)
@@ -91,10 +93,11 @@ val run :
   idle:(unit -> idle) ->
   clock:_ Eio.Time.clock ->
   ping_interval_s:float ->
+  closed:(unit -> unit) ->
   send:(string -> Server_sse_response.outcome) ->
   ending
-(** [run ~source ~step ~idle ~clock ~ping_interval_s ~send] serves one client
-    until it ends.
+(** [run ~source ~step ~idle ~clock ~ping_interval_s ~closed ~send] serves
+    one client until it ends.
 
     - The caller subscribes the producer before [run], and removes the
       subscription when the stream's switch ends. Frames the caller sends
@@ -102,6 +105,9 @@ val run :
     - [idle ()] is asked when no event came for [ping_interval_s]. The
       interval counts from the last frame or skip, so a stream that carries
       events is not asked.
+    - [closed ()] returns once the response takes no more frames
+      ({!Server_sse_response.await_closed}). A pump waiting for an event then
+      ends [Client_gone] at once instead of at its next write.
     - An event taken as the interval runs out is that event: it has left the
       source, and the idle answer is not used in its place.
     - The frames of the events already waiting when one is taken go out in

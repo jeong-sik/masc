@@ -24,6 +24,7 @@ type 'event source =
 type 'event wake =
   | Event of 'event
   | Ping
+  | Gone
 
 let keepalive_frame = ": keepalive\n\n"
 let max_batch_bytes = 65_536
@@ -79,19 +80,26 @@ module Queue = struct
   ;;
 end
 
-let run ~source ~step ~idle ~clock ~ping_interval_s ~send =
+let run ~source ~step ~idle ~clock ~ping_interval_s ~closed ~send =
   let rec serve () =
     if source.stopped ()
     then Source_stopped
     else (
       (* An event taken as the interval ran out is that event: it has left
          the source, and the idle answer used in its place would drop it.
-         [Watched_work.run] keeps the work's outcome. *)
+         [Watched_work.run] keeps the work's outcome. A response that closes
+         while no event comes (the peer reset its HTTP/2 stream, or the route
+         closed it) ends the wait too, so no take outlives the client. *)
       match
         Watched_work.run
           ~watcher:(fun () ->
-            Eio.Time.sleep clock ping_interval_s;
-            Ping)
+            Eio.Fiber.first
+              (fun () ->
+                Eio.Time.sleep clock ping_interval_s;
+                Ping)
+              (fun () ->
+                closed ();
+                Gone))
           (fun () -> Event (source.take ()))
       with
       | Event event ->
@@ -104,7 +112,8 @@ let run ~source ~step ~idle ~clock ~ping_interval_s ~send =
         (match idle () with
          | Keepalive -> write ~last:false [ keepalive_frame ]
          | Quiet -> serve ()
-         | Finish -> Finished))
+         | Finish -> Finished)
+      | Gone -> Client_gone)
   (* The events already waiting go out in the same send, so a burst waits for
      the socket once per batch instead of once per frame. Each take first asks
      whether to stop, so nothing is taken after a stop. *)

@@ -283,6 +283,7 @@ let drain_sse info ~clock ~prime ~replay ~frame_of ~send event_stream =
     ~idle:(fun () -> Server_sse_pump.Quiet)
     ~clock
     ~ping_interval_s:Server_mcp_transport_http_headers.sse_ping_interval_s
+    ~closed:(fun () -> Server_sse_response.await_closed info.response)
     ~send
 
 (* Run the SSE drain + ping pumps for a connection under a switch scoped to

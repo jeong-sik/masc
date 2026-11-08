@@ -53,16 +53,22 @@ payload 는 `config/scripts/keeper-remote-workspace-cleanup.py` 다. 동작:
 
 Keeper 루트 바로 아래 항목마다 아래를 모두 만족해야 지운다. 하나라도 읽지 못하면 건너뛰고 이유를 보고한다.
 
+0. **이름이 `.` 으로 시작하지 않는다.** Keeper 루트에는 masc 가 쓰는 상태가 있다.
+   - Keeper 의 GitHub 로그인 `.config/gh` 가 있다(`lib/keeper/keeper_sandbox_remote.ml:260` `gh_config_dir`).
+   - 원격 쓰기 도구의 임시 파일 `.masc-write.*` 가 있다(`lib/keeper/keeper_tool_filesystem_remote_write.ml:34`).
+   - 그래서 점 항목은 크기와 나이에 상관없이 남긴다.
 1. **symlink 가 아니다.** 실제 경로가 Keeper 루트 안에 있다.
 2. **오래됐다.** 트리 안 모든 inode 의 `max(mtime, ctime)` 이 retention 보다 오래됐다. symlink 는 따라가지 않는다.
    - ctime 도 보는 이유: `git archive`·tar 로 푼 사본은 mtime 이 커밋 시각이라, 방금 만든 사본도 오래돼 보인다. ctime 은 풀 때의 시각이다.
-3. **쓰는 프로세스가 없다.** 살아 있는 프로세스의 cwd 가 그 안이 아니다. `/proc` 를 못 읽으면 아무것도 지우지 않는다.
+3. **쓰는 프로세스가 없다.** 살아 있는 프로세스의 cwd·exe·열린 파일이 그 안을 가리키지 않는다. `/proc` 를 못 읽으면 아무것도 지우지 않는다.
+   - Keeper 루트가 group·other 에 search 권한을 주지 않으면(11-08 리뷰 컨테이너는 모두 `700`), root 가 아닌 다른 사용자의 프로세스는 그 안에 들어올 수 없다. 그래서 그 프로세스는 읽지 못해도 넘어간다.
+   - 같은 사용자의 프로세스를 읽지 못하면 아무것도 지우지 않는다.
 4. **안의 git 저장소가 모두 커밋을 잃지 않는다.** 트리 안 `.git` 마다 확인한다.
    - `stash list` 가 비어 있다.
    - HEAD 와 로컬 브랜치 끝이 하나도 빠짐없이 둘 중 하나다.
      - `rev-list --count <tip> --not --remotes` 가 0 이다.
      - `git ls-remote origin` 이 그 sha 를 광고한다. PR 사본이 여기에 해당한다. ls-remote 가 실패하면 건너뛴다.
-   - 그 저장소에 묶인 worktree 가 이 항목 밖에 없다.
+   - 본 저장소(`.git` 이 폴더)이면, 그 저장소에 묶인 worktree 가 이 항목 밖에 없다. 연결된 worktree(`.git` 이 파일)는 지워도 커밋을 잃지 않는다. 커밋은 본 저장소에 있다.
    - git 명령마다 5초 제한을 둔다. 실패하거나 시간이 넘으면 건너뛴다.
 
 지우는 방식과 보고:
@@ -95,7 +101,7 @@ Keeper 루트 바로 아래 항목마다 아래를 모두 만족해야 지운다
 payload(Python, `test/test_keeper_remote_workspace_cleanup.py`, `test/test_keeper_vm_build_cleanup.py` 방식의 fixture):
 
 - 지워지는 것: 오래되고 깨끗한 clone, 오래된 dirty·untracked clone, 원격이 광고하는 detached PR head, 오래된 비-git 폴더.
-- 남는 것: 원격에 없는 로컬 커밋, ls-remote 실패, stash, 최근 ctime, 안쪽 저장소의 로컬 커밋, symlink 항목, 밖에 묶인 worktree, 살아 있는 프로세스 cwd, 읽을 수 없는 `/proc`.
+- 남는 것: 점 항목(`.config/gh`), 원격에 없는 로컬 커밋, ls-remote 실패, stash, 최근 ctime, 안쪽 저장소의 로컬 커밋, symlink 항목, 밖에 묶인 worktree, 살아 있는 프로세스 cwd, 읽을 수 없는 `/proc`.
 - report 모드는 아무것도 지우지 않는다.
 - 보호 조건 하나를 빼면 해당 시험이 실패해야 한다.
 

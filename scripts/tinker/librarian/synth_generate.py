@@ -12,11 +12,13 @@ Run from the repository root:
 
 The seed fixes the plan: which Keepers, how many memories, fact counts,
 categories, claim lengths, planted stale facts, candidate kinds and targets,
-and the date, time and number each claim carries (`synth_spec.py`). A planted
+and the date, time and number each claim carries (`synth_spec.py`). The
+candidates of the whole split are planned before any call, with their marks
+and lengths dealt out per label kind (`synth_candidate_plan.py`). A planted
 stale fact is written in the same call as the durable facts of its category.
 The model writes only text: role material, a world sheet, category names, a
-goal, and claims; a claim whose marks differ from its plan is not kept. Every
-model call is cached in
+goal, and claims; a claim whose marks differ from its plan, or a candidate
+whose length leaves its band, is not kept. Every model call is cached in
 <out>/calls.jsonl under a key derived from the request, so a rerun resumes and
 pays only for calls that have no answer yet. Output: <out>/requests.jsonl (one
 request with its label per line) and <out>/summary.json.
@@ -38,12 +40,16 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import assert_never, cast
 
+import synth_candidate_plan as C
 import synth_prompts as P
 import synth_spec as S
 from tinker_oai import Caller
 
 MODEL = "thinkingmachines/Inkling-2-Small"
 ATTEMPTS = 3
+# A candidate must also land in its length band. With 3 attempts, 17 of 260 training
+# requests lost a candidate that way, 10 of them corrections (11-09).
+CANDIDATE_ATTEMPTS = 5
 WORKERS = 8
 # The model writes shorter claims than asked, and shorter still when asked for many.
 # 11-08 pilots, planned median 492 chars: 30 claims per call gave a median of 253;
@@ -64,7 +70,8 @@ CANDIDATE_TIME_START = dt.datetime(2026, 11, 7, tzinfo=dt.UTC)
 SPLITS = {
     # split: (keepers, memories per keeper, requests)
     "eval": (tuple(k for k in S.KEEPER_SEEDS if k.key in S.EVAL_KEEPERS), 10, 150),
-    "train": (tuple(k for k in S.KEEPER_SEEDS if k.key not in S.EVAL_KEEPERS), 9, 260),
+    # The teacher kept 51 of 96 answered requests on 11-09; the pilot trains on 200.
+    "train": (tuple(k for k in S.KEEPER_SEEDS if k.key not in S.EVAL_KEEPERS), 9, 420),
 }
 
 # --- stages ------------------------------------------------------------------
@@ -195,30 +202,27 @@ def build_memory(caller: Caller, plan: MemoryPlan) -> tuple[S.MemoryFact, ...] |
         for i, (slot, claim) in enumerate(timed))
 
 
-def build_candidates(caller: Caller, rng: random.Random, keeper: S.KeeperProfile,
-                     facts: tuple[S.MemoryFact, ...]) -> tuple[S.Candidate, ...] | None:
-    k = S.sample_weighted(rng, S.CANDIDATES_PER_REQUEST_WEIGHTS)
+def build_candidates(caller: Caller, rng: random.Random, keeper: S.KeeperProfile, facts: tuple[S.MemoryFact, ...],
+                     plans: tuple[C.CandidatePlan, ...]) -> tuple[S.Candidate, ...] | None:
     durable = [f for f in facts if not f.planted_stale]
     categories = sorted({f.category for f in facts}, key=lambda s: s.encode())
     used: set[str] = set()
     out: list[S.Candidate] = []
     clock = between(rng, CANDIDATE_TIME_START, CANDIDATE_TIME_START + dt.timedelta(days=1))
     first_sequence = rng.randrange(1, 150)
-    for sequence in range(first_sequence, first_sequence + k):
-        kind = S.sample_weighted(rng, S.CANDIDATE_KIND_WEIGHTS)
-        length = int(round(S.sample_quantile(rng, S.CANDIDATE_CLAIM_CHARS), -1))
+    for sequence, plan in enumerate(plans, start=first_sequence):
         clock += dt.timedelta(seconds=rng.randrange(5, 600), microseconds=rng.randrange(10**6))
-        surface = S.plan_surface(rng, S.CANDIDATE_SURFACE, clock)
+        surface = C.candidate_surface(rng, plan, clock)
         target: S.MemoryFact | None = None
-        match kind:
+        match plan.kind:
             case S.CandidateKind.CORRECTION | S.CandidateKind.PARAPHRASE:
                 choices = [f for f in durable if f.memory_id not in used]
                 if not choices:
                     return None
-                target = rng.choice(choices)
+                target = C.target_near(rng, choices, plan.length)
                 used.add(target.memory_id)
                 category = target.category
-                task = (P.TASK_CORRECTION if kind is S.CandidateKind.CORRECTION else P.TASK_PARAPHRASE).format(
+                task = (P.TASK_CORRECTION if plan.kind is S.CandidateKind.CORRECTION else P.TASK_PARAPHRASE).format(
                     target=target.claim)
             case S.CandidateKind.NEW_DURABLE:
                 category = rng.choice(categories)
@@ -229,23 +233,23 @@ def build_candidates(caller: Caller, rng: random.Random, keeper: S.KeeperProfile
                 category = rng.choice(categories)
                 task = P.TASK_TRANSIENT.format(category=category)
         prompt = P.CANDIDATE_PROMPT.format(role=keeper.role_material, world=keeper.world, task=task,
-                                         length=length, surface="표기: " + P.surface_line(surface),
+                                         length=plan.length, surface="표기: " + P.surface_line(surface),
                                          marks=P.MARKS, style=P.STYLE)
         claim: str | None = None
-        for attempt in range(ATTEMPTS):
+        for attempt in range(CANDIDATE_ATTEMPTS):
             answer = ask(caller, "candidate", prompt, attempt)
             if answer is None:
                 return None
             parsed = S.parse_single_claim(answer) if answer else None
-            if parsed is not None and S.surface_holds(parsed, surface):
+            if parsed is not None and S.surface_holds(parsed, surface) and C.length_holds(parsed, plan.length):
                 claim = parsed
                 break
         if claim is None:
             return None
         seen = round(clock.timestamp(), 6)
-        board = S.board_ref(rng) if rng.random() < S.CANDIDATE_BOARD_SHARE else None
+        board = S.board_ref(rng) if plan.board else None
         out.append(S.Candidate(S.candidate_request_id(rng), sequence, claim, category, seen, board,
-                               S.trace_id(rng, int(seen * 1000)), kind,
+                               S.trace_id(rng, int(seen * 1000)), plan.kind,
                                target.memory_id if target is not None else None))
     return tuple(out)
 
@@ -278,6 +282,10 @@ def request_json(request: S.SynthRequest) -> str:
     return json.dumps({"request": body, "label": {
         "candidates": [asdict(c) for c in label.candidates], "planted_stale": sorted(label.planted_stale)}},
         ensure_ascii=False, default=enum_value)
+
+
+# One request to build: its index, its memory, its random seed and its candidate plans.
+type Job = tuple[int, tuple[MemoryPlan, tuple[S.MemoryFact, ...]], int, tuple[C.CandidatePlan, ...]]
 
 
 def main() -> int:
@@ -314,17 +322,19 @@ def main() -> int:
             return 2
         slots = [built[i % len(built)] for i in range(n_requests)]
         slot_seeds = [rng.randrange(2**31) for _ in slots]
+        candidate_plans = C.plan_candidates(rng, len(slots))
 
-        def one(args_: tuple[int, tuple[MemoryPlan, tuple[S.MemoryFact, ...]], int]) -> S.SynthRequest | None:
-            index, (plan, facts), seed = args_
+        def one(job: Job) -> S.SynthRequest | None:
+            index, (plan, facts), seed, wanted = job
             local = random.Random(seed)
-            candidates = build_candidates(caller, local, plan.keeper, facts)
+            candidates = build_candidates(caller, local, plan.keeper, facts, wanted)
             if candidates is None:
                 return None
             return S.SynthRequest(f"{split}-{plan.memory_key}-{index:03d}", plan.keeper, facts,
                                   goal_for(local, plan.keeper), candidates)
 
-        requests = list(pool.map(one, [(i, s, z) for i, (s, z) in enumerate(zip(slots, slot_seeds, strict=True))]))
+        jobs = zip(slots, slot_seeds, candidate_plans, strict=True)
+        requests = list(pool.map(one, [(i, s, z, c) for i, (s, z, c) in enumerate(jobs)]))
     done = [r for r in requests if r is not None]
     status["requests_failed"] = len(requests) - len(done)
     with (out / "requests.jsonl").open("w", encoding="utf-8") as fh:

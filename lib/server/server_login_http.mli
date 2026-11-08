@@ -58,10 +58,15 @@ val github_callback_path : string
       home under the workspace [base_path] (plan D1-4)
     - [POST /api/v1/setup/accounts/verify], one call of the person's own
       account ({!Server_setup_account_login.verify}, plan D1-6a)
+    - [GET] and [POST /api/v1/auth/keepers] and
+      [POST /api/v1/auth/keepers/assign], the Keepers of the person
+      ({!Auth_preview_keeper}, plan D1-5)
 
-    The last five are judged as [Manage_own_provider] by
+    The subscription routes are judged as [Manage_own_provider] by
     {!Auth_preview.person} on one snapshot of the zone, and a request that does
     not pass gets its 401 or 403 before the connect handler reads anything.
+    The Keeper routes are judged the same way as [Manage_own_keeper] by
+    {!Auth_preview.keeper_owner}.
 
     Only the preview command registers them; {!add_routes} is what a server
     registers (S1). *)

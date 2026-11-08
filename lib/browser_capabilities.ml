@@ -275,7 +275,7 @@ let support backend operation = match backend with
     | Touch -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"tap_at" Interact
           [observed;geometry;
-           "tap_at is a touch press and release at the observed point; swipe is a held touch from one observed point to another, with the same via and durationMs as drag. A swipe longer than the command's window is refused before it starts.";
+           "tap_at is a touch press and release at the observed point; swipe is a held touch from one observed point to another, through the via points in order, each move taking durationMs. A swipe longer than the command's window is refused before it starts.";
            "CDP touch events with no touch emulation: the page sees trusted pointer (pointerType touch) and touch events, and a tap ends with a click; a swipe scrolls the page and its pointer events end with pointercancel. The page's maxTouchPoints stays 0. A gesture that fails after its press is cancelled with touchCancel. The input invalidates snapshot refs (refsInvalidated): take a new snapshot.";
            ego_agent_pages]
       | Safari_unavailable -> missing)

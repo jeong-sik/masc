@@ -23,11 +23,10 @@ val pointer_receipt_script : string
 (** Validate screenshot identity and geometry before native WebDriver pointer input. *)
 
 val pointer_target_script : string
-(** Resolve visible, unobstructed semantic click/hover/drag targets to current
-    viewport geometry and URL. Click checks disabled/ARIA-disabled activation
-    targets, including labels. A drag destination may additionally provide
-    [arrival], a distinct point inside the same visible, hit-tested destination
-    rectangle. Does not scroll or dispatch page events. *)
+(** Resolve a visible, unobstructed semantic click, double-click or hover
+    target to a point in the current viewport, with the URL. Click checks
+    disabled/ARIA-disabled activation targets, including labels. Does not
+    scroll or dispatch page events. *)
 val needs_pointer_resolution : Browser_lane.interaction -> bool
 (** Whether a native action first resolves a semantic target. WebDriver, BiDi
     and ego share this classification. *)

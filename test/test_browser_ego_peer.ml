@@ -706,7 +706,7 @@ let test_selector_input_uses_ego_sdk () =
        | Lane.Activate_tab | Lane.Click _ | Lane.Fill _ | Lane.Set_viewport _
        | Lane.Double_click _ | Lane.Double_click_at _ | Lane.Type_text _ | Lane.Press_key _
        | Lane.Scroll _ | Lane.Hover _ | Lane.Drag_to _ | Lane.Hover_at _ | Lane.Tap_at _
-       | Lane.Swipe _ | Lane.Click_at _ | Lane.Scroll_at _ | Lane.Drag _ | Lane.Follow_link _
+       | Lane.Swipe _ | Lane.Click_at _ | Lane.Scroll_at _ | Lane.Follow_link _
        | Lane.Click_node _ | Lane.Fill_node _ | Lane.Click_target _ | Lane.Fill_target _
        | Lane.Hover_target _ | Lane.Double_click_target _ -> ())
     | other -> failf "native selector was %s" (failure_kind other)) actions;
@@ -740,8 +740,7 @@ let test_unattestable_raw_input_is_refused_before_effect () =
     | other -> failf "raw-input preflight must not run %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let selector=Lane.Selector "#source" and scene=Lane.Scene_node {document_id="d1";node_id="source"} in
-  let raw=[Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0};
-    Lane.Drag_to {source=selector;destination=selector;via=[{x=0.5;y=0.5}];duration_ms=0};
+  let raw=[Lane.Drag_to {source=selector;destination=selector;via=[{x=0.5;y=0.5}];duration_ms=0};
     Lane.Drag_to {source=scene;destination=selector;via=[];duration_ms=0};
     Lane.Drag_to {source=selector;destination=scene;via=[];duration_ms=0}] in
   let refuse readiness=List.iter (fun action ->
@@ -1807,9 +1806,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Block_requests ["ads.example.com"]});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Unblock_requests});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Set_cookie {name="n";value="v";path="/";secure=false;http_only=false;same_site=None;max_age_sec=None}});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Delete_cookie "n"});
-      (* Known-unavailable raw drag is refused before the runner. *)
-      Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0}) ];
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Delete_cookie "n"}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.document";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.cookies";"page.network";"page.console";"page.capture";

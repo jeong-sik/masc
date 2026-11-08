@@ -19,8 +19,9 @@ type outcome =
   | Written  (** The frame reached the socket. *)
   | Closed
   (** The response was closed before the frame reached the socket: by
-      {!close}, by an earlier [send] that did not end [Written], or by httpun
-      when the connection failed. *)
+      {!close}, by an earlier [send] that did not end [Written], by httpun
+      when the connection failed, or by the transport ending the stream
+      (an HTTP/2 peer reset or connection end). *)
   | Stalled
   (** The frame did not reach the socket within [stalled_after_s]. A client
       that went away while the frame was waiting ends here too: httpun closes
@@ -57,3 +58,11 @@ val close : t -> unit
     [Closed]. Closing twice is the same as closing once. *)
 
 val is_closed : t -> bool
+
+val await_closed : t -> unit
+(** Returns once the response is closed: by {!close}, by a [send] that did
+    not end [Written], or by the transport ending the stream under it (an
+    HTTP/2 peer reset or connection end, {!Http_reqd.Body_writer.stream_end}).
+    httpun reports no such end, so on HTTP/1.1 only the first two apply. A
+    fiber that waits for events elsewhere races this to stop producing for a
+    client that is gone. *)

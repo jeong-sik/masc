@@ -67,6 +67,7 @@ let other_kinds =
       && kind <> K.Session
       && kind <> K.Pat
       && kind <> K.Provider_account
+      && kind <> K.Runtime
       && kind <> K.Internal_service_credential)
     K.all
 
@@ -1540,6 +1541,79 @@ let test_provider_accounts () =
     (S.Provider_account (Pas.Not_a_human (Authz_types.Principal.Service keeper_service)))
 ;;
 
+(* ---- Runtimes ---- *)
+
+module Re = Authz_runtime_event
+module Rs = Authz_runtime_state
+
+let first_runtime = id_of_string Authz_types.Runtime_id.of_string "claude-code-user.claude-sonnet-5-5"
+let second_runtime = id_of_string Authz_types.Runtime_id.of_string "claude-code-user.claude-opus-5-5"
+let first_grant = id_of_string Authz_types.Grant_id.of_string "grant-1"
+let second_grant = id_of_string Authz_types.Grant_id.of_string "grant-2"
+
+let runtime_record ~author event =
+  match Re.to_body event with
+  | Error _ -> Alcotest.fail "fixture Runtime body refused"
+  | Ok body -> record_by ~author K.Runtime body
+;;
+
+let made ?(runtime_id = first_runtime) ?(grant_id = first_grant) ~by () =
+  Re.Made { runtime_id; provider_account_id = first_account; user_id = by; grant_id }
+;;
+
+(* Plan D1: a person makes a Runtime on an account they own, with its Self
+   grant, once; an Admin makes none for another person, nor on the account of
+   another person, and a grant id names one grant. *)
+let test_runtimes () =
+  let linked_state =
+    applied_change "a link" (two_admins ()) (account_record ~author:(human user) (linked ~by:user)) None
+  in
+  refused_as
+    "on an account no one linked"
+    (two_admins ())
+    (runtime_record ~author:(human user) (made ~by:user ()))
+    (S.Runtime (Rs.Account_not_theirs { provider_account_id = first_account; user_id = user }));
+  let state =
+    applied_change "a Runtime" linked_state (runtime_record ~author:(human user) (made ~by:user ())) None
+  in
+  Alcotest.(check (list (pair string string)))
+    "its owner owns it with its Self grant"
+    [ Authz_types.Runtime_id.to_string first_runtime, Authz_types.Grant_id.to_string first_grant ]
+    (List.map
+       (fun (id, (runtime : Rs.runtime)) ->
+         ( Authz_types.Runtime_id.to_string id
+         , Authz_types.Grant_id.to_string runtime.Rs.self_grant ))
+       (Rs.owned_by state.S.runtimes user));
+  Alcotest.(check int) "another person owns none" 0 (List.length (Rs.owned_by state.S.runtimes bob));
+  refused_as
+    "made twice"
+    state
+    (runtime_record ~author:(human user) (made ~grant_id:second_grant ~by:user ()))
+    (S.Runtime (Rs.Already_made first_runtime));
+  refused_as
+    "a grant named twice"
+    state
+    (runtime_record ~author:(human user) (made ~runtime_id:second_runtime ~by:user ()))
+    (S.Runtime (Rs.Grant_named_before first_grant));
+  refused_as
+    "an Admin makes one for another"
+    linked_state
+    (runtime_record ~author:(human bob) (made ~by:user ()))
+    (S.Runtime (Rs.Made_for_another { author = bob; user_id = user }));
+  refused_as
+    "an Admin makes one on the account of another"
+    linked_state
+    (runtime_record ~author:(human bob) (made ~by:bob ()))
+    (S.Runtime (Rs.Account_not_theirs { provider_account_id = first_account; user_id = bob }));
+  refused_as
+    "a service"
+    linked_state
+    (runtime_record
+       ~author:(Authz_records.Author.Authenticated (Authz_types.Principal.Service keeper_service))
+       (made ~by:user ()))
+    (S.Runtime (Rs.Not_a_human (Authz_types.Principal.Service keeper_service)))
+;;
+
 let () =
   Alcotest.run
     "authz_state"
@@ -1619,6 +1693,7 @@ let () =
             test_service_credentials_and_their_intents
         ] )
     ; "provider accounts", [ Alcotest.test_case "linked by their owner" `Quick test_provider_accounts ]
+    ; "runtimes", [ Alcotest.test_case "made by their owner on their account" `Quick test_runtimes ]
     ; "log", [ Alcotest.test_case "of a real bootstrap" `Quick test_fresh_bootstrap_log ]
     ]
 ;;

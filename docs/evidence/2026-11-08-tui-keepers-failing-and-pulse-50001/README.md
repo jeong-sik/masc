@@ -11,11 +11,11 @@ tmux 3.6a 안에서 `env -i` 로 환경을 비우고 `TERM=xterm-256color` 로 T
 1. TUI 를 띄우고 머리줄에 `HTTP [connected|partial]` 이 나올 때까지 기다려요.
 2. 터미널이 묻는 색 질문에 답해요.
 3. `3` 으로 Keepers 탭을 열어요. 이 세션들에서는 처음 화면이 Detailed 였어요.
-4. 화면을 저장해요. 같은 세션에서 `v` 로 Compact 와 Grouped 도 찍어 봤지만, 이 PR 이 바꾸지 않는 레이아웃이라 이 폴더에는 Detailed 만 넣었어요.
+4. 화면을 저장해요. 같은 세션에서 `v` 로 Compact 와 Grouped 도 찍어 봤지만, #49995 와 #50001 이 바꾸지 않는 레이아웃이라 이 폴더에는 Detailed 만 넣었어요.
 
 - 전: main 의 증명 빌드 Minimal manual checks run 42489112438(성공), 커밋 `bffe49a985275ba3c0923fab996c49aa519b81ab`, `masc-tui` sha256 `9e7dc84c7d94ed671fee130d2b606625a69bef06f18ab3aef53229ef04d62ffd`, `--build-commit` 이 같아요.
 - 후: #50001 head 의 증명 빌드 Minimal manual checks run 42490533158(성공), 커밋 `e362481e758c26d9c63e678046f6938256b500c9`, sha256 `de0742d1220ece49fa3b684611accf401bf44e15db3c9ba378e15acfeddbe8b2`, `--build-commit` 이 같아요. 이 빌드에 #49995 와 #50001 이 다 들어 있어서, 실패 칸과 맥박 칸이 한 빌드에서 같이 보여요.
-- 두 빌드 사이에는 이 PR 의 파일 말고 main 커밋 하나(#49982, `lib/board_tool_adapter/board_tool_post.ml`)가 더 있어요. Keepers 목록과 상관없는 파일이에요.
+- 두 빌드 사이에는 두 PR 의 파일 말고 main 커밋 하나(#49982, `lib/board_tool_adapter/board_tool_post.ml`)가 더 있어요. Keepers 목록과 상관없는 파일이에요.
 
 ## 합성 Keeper
 
@@ -109,7 +109,7 @@ tmux 3.6a 안에서 `env -i` 로 환경을 비우고 `TERM=xterm-256color` 로 T
 
 - 실제 서버가 보내는 `failing_since` 와 `recent_turns` 값은 아니에요. 합성 서버가 만든 값이에요.
 - 일정 · 기억 칸이 길어지는 줄, 실제 DETAIL 글이 긴 줄, 선택된 줄의 색은 다루지 않았어요(선택된 줄은 색을 걷어 내요. 첫 줄 alpha-failing 이 선택된 줄이에요).
-- NOW · AGE 열이 `- unknown`, `48d00h` 인 것은 합성 서버가 턴 목록을 비워 두고 메타 파일의 시각이 오래돼서예요. 이 PR 과 상관없어요.
+- NOW · AGE 열이 `- unknown`, `48d00h` 인 것은 합성 서버가 턴 목록을 비워 두고 메타 파일의 시각이 오래돼서예요. #49995 와 #50001 의 변경과 상관없어요.
 - 이 빌드에 없는 동작은 말하지 않았어요.
 
 ## 파일

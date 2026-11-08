@@ -80,7 +80,11 @@ python3 docs/evidence/tool-efficiency-before-after-2026-11/replay_preflight_ttl.
 | 600초 넘음 | 86 | 2.53초 | 86 |
 
 - 간격이 길수록 비싼 호출의 몫이 올라가고, 60초(현재 TTL)를 넘으면 전부 비싸요. 비용은 명령이 아니라 점검에서 와요.
-- 모델의 가정이 둘이에요. 호출 시작은 `ts - duration_ms` 로 잡아요(원장 줄은 호출이 끝날 때 쓰여요). 모든 점검은 읽기를 통과시킨다고 봐요. 점검이 읽기를 거절하는 구간(GitHub 로그인 없음 등)은 60초를 그대로 써요.
+- 모델의 가정이 넷이에요.
+  - 호출 시작은 `ts - duration_ms` 로 잡아요(원장 줄은 호출이 끝날 때 쓰여요).
+  - 모든 점검은 읽기를 통과시킨다고 봐요. 점검이 읽기를 거절하는 구간(GitHub 로그인 없음 등)은 60초를 그대로 써요.
+  - 캐시 항목은 Keeper 이름 하나로 나눠요. 서버의 키는 `(identity, keeper_name, gh_config_dir, injected_env)` 네 개예요. 한 Keeper 안에서 뒤 둘이 바뀌면 서버는 항목을 따로 두니 실제 점검이 재생보다 많아요. 바뀌는지는 확인하지 않았어요.
+  - 원장에 남지 않는 캐시 변화가 둘이라 재생에 없어요. GitHub 로그인 lane(`keeper_github_login_lane.ml`)은 로그인 단계마다 `invalidate_preflight` 로 항목을 지워요. Keeper를 올릴 때(`keeper_turn_up_args.ml`)는 캐시를 보지 않고 점검을 돌려요(`~force:true`). 실패한 도구 호출은 항목을 지우지 않아요.
 - 재생 60초 횟수 1,151은 같은 창의 `remote_ssh` Execute 오버헤드 0.5초 이상 1,110건과 가까워요. 앞은 캐시를 쓰는 원격 도구 전체이고 뒤는 명령 시간이 남은 Execute만이라 같은 집합은 아니에요.
 
 ## 시험

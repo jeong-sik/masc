@@ -1180,9 +1180,11 @@ let auth_cmd =
            it out of the request URL. Only a digest of the token is written. \
            The invitation works once and expires after 24 hours."
       ; `P
-          "This build does not serve multi-account yet: once the command \
-           succeeds, a server stops at boot on the workspace, and no command \
-           undoes the activation."
+          ("This build does not serve multi-account yet: once the command \
+            succeeds, a server stops at boot on the workspace, and no command \
+            undoes the activation; "
+           ^ Authz_boot_mode_read.single_user_again
+           ^ ".")
       ]
     in
     Cmd.v

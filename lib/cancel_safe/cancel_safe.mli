@@ -23,10 +23,14 @@ val observe : on_exn:(exn -> unit) -> (unit -> unit) -> unit
     record a failure but continue the surrounding workflow. *)
 
 val is_internal_race_cancel : exn -> bool
-(** [is_internal_race_cancel exn] returns [true] when [exn] is an
-    [Eio.Cancel.Cancelled] whose [Printexc.to_string] rendering is
-    ["Cancelled: Eio__core__Fiber.Not_first"] or ends with
-    ["Eio__core__Fiber.Not_first"]. That payload comes from Eio's own
-    [Fiber.first] race resolution — the losing fiber is cancelled by the
-    runtime, not by the surrounding switch. Any other exception, including
-    every other [Cancelled] payload, returns [false]. *)
+(** [is_internal_race_cancel exn] is [true] when [exn] is an
+    [Eio.Cancel.Cancelled] and the calling fiber's own cancellation context
+    is still live ([Eio.Fiber.is_cancelled () = false]).  Cancellation is
+    sticky, so a live context proves the [Cancelled] came from a sub-context
+    below the caller — the one [Eio.Fiber.first] / [Fiber.any] cancels when
+    another branch wins — and not from the surrounding switch.  Any other
+    exception is [false], and so is a [Cancelled] seen while the caller's own
+    context is already cancelled, whatever its payload.
+
+    Call it from the fiber that caught [exn], inside an Eio scheduler;
+    outside one the [Cancelled] arm has no context to read. *)

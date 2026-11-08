@@ -36687,6 +36687,12 @@ Use relative paths for resources already held in the package. -->
                   else
                     Masc_tui_code_requests.start_lsp_question state ~host:server_peer_host ~deliver:(deliver_code state async_messages) ~report:(report_action state)
                       ~question ~symbol)
+            | "\r" when Masc_tui_palette.command_enter_has_nothing state ->
+                (* No command matches the typed text, so there is nothing to
+                   run. The list already says so. The palette stays open with
+                   its text so a typo can be edited; closing here looked like a
+                   command had run. *)
+                ()
             | "\r" ->
                 let matches = Masc_tui_palette.palette_matches state in
                 let chosen =

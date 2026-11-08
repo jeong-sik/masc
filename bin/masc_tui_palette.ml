@@ -608,3 +608,11 @@ let search_enter state =
     match selected_search_match state with
     | Some found -> Enter_opens found
     | None -> Enter_searches
+
+let command_enter_has_nothing state =
+  match state.palette_mode with
+  | Palette_jump ->
+      Option.is_none (palette_typed_question state.palette_query)
+      && (match palette_matches state with [] -> true | _ :: _ -> false)
+  | Palette_choice _ | Palette_files _ | Palette_locations _ | Palette_branches _
+  | Palette_worktrees _ | Palette_search _ -> false

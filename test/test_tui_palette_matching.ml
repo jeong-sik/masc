@@ -425,6 +425,25 @@ let test_a_row_typed_whole_leads () =
     surface_ring
 ;;
 
+(* Enter in the [:] palette runs the highlighted row. When nothing is listed it
+   has nothing to run: the key leaves the palette open and the footer drops
+   Enter, both reading [command_enter_has_nothing]. A typed Code question runs
+   without a listed row, so it is not "nothing". *)
+let test_enter_has_nothing_only_when_no_command_matches () =
+  let state = create_state ~workspace:"test" ~port:8935 () in
+  state.palette_mode <- Palette_jump;
+  state.palette_query <- "xyzzy";
+  check_bool "text that names no command" true (command_enter_has_nothing state);
+  List.iter
+    (fun (_, name) ->
+      state.palette_query <- name;
+      check_bool (name ^ " names a command") false (command_enter_has_nothing state))
+    surface_ring;
+  state.palette_query <- "def xyzzy";
+  check_bool "a typed Code question runs without a listed row" false
+    (command_enter_has_nothing state)
+;;
+
 let test_goal_and_candle_queries_select_their_destinations () =
   let state = create_state ~workspace:"test" ~port:8935 () in
   List.iter (fun query ->
@@ -683,6 +702,8 @@ let () =
             test_the_palette_goes_to_both_halves_of_task_review
         ; Alcotest.test_case "a row typed whole leads" `Quick
             test_a_row_typed_whole_leads
+        ; Alcotest.test_case "Enter has nothing to run only when no command matches"
+            `Quick test_enter_has_nothing_only_when_no_command_matches
         ; Alcotest.test_case "Goal and Candle queries select their destinations" `Quick
             test_goal_and_candle_queries_select_their_destinations
         ; Alcotest.test_case "msx is reached by its name" `Quick

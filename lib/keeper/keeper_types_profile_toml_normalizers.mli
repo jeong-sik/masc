@@ -79,4 +79,3 @@ val empty_keeper_profile_defaults : keeper_profile_defaults
 val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list
 val normalize_board_interests : string list -> string list
-val first_some : 'a option -> 'a option -> 'a option

@@ -60,9 +60,6 @@ type snapshot_view =
       snapshot.  [Summary] is the lightweight default;
       [Full] is reserved for diagnostic dumps. *)
 
-val snapshot_view_to_string : snapshot_view -> string
-(** Inverse of {!snapshot_view_of_string_opt}. *)
-
 val valid_snapshot_view_strings : string list
 (** Wire forms accepted by {!snapshot_view_of_string_opt}.
     The [masc_operator_snapshot] tool schema's [view] enum is a

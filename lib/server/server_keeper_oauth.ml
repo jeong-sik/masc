@@ -618,17 +618,7 @@ let rec ensure_dir path =
    deletion so a receipt never describes work that did not happen. *)
 let write_disconnect_receipt ~base_path ~keeper_name ~provider_id json =
   let path = disconnect_receipt_path ~base_path ~keeper_name ~provider_id in
-  try
-    ensure_dir (Filename.dirname path);
-    let temp = path ^ ".tmp" in
-    Out_channel.with_open_bin temp (fun oc ->
-      Out_channel.output_string oc (Yojson.Safe.to_string json));
-    Unix.rename temp path;
-    Ok ()
-  with
-  | Unix.Unix_error (err, fn, arg) ->
-    Error (Printf.sprintf "%s: %s %s" (Unix.error_message err) fn arg)
-  | Sys_error message -> Error message
+  Keeper_identity_tools.write_json_snapshot ~path json
 ;;
 
 let disconnect ?transports ~clock ~(config : Workspace.config) ~keeper ~provider_id

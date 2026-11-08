@@ -617,10 +617,7 @@ let string_list_field fields key =
   | _ -> []
 ;;
 
-let trim_nonempty_string value =
-  let trimmed = String.trim value in
-  if String.equal trimmed "" then None else Some trimmed
-;;
+let trim_nonempty_string = String_util.trim_nonempty
 
 let string_opt_arg args key =
   Option.bind (Tool_args.get_string_opt args key) trim_nonempty_string

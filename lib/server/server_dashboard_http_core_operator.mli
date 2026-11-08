@@ -22,7 +22,6 @@ val operator_snapshot_publication_with_freshness :
     serialized owner read. *)
 
 val operator_snapshot_publication_json : operator_snapshot_publication -> Yojson.Safe.t
-val operator_snapshot_cache_diagnostics_json : unit -> Yojson.Safe.t
 
 val publish_operator_snapshot_invalidation_if_current :
   generation:int -> operator_snapshot_publication option

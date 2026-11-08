@@ -146,6 +146,23 @@ let test_client_failures_stay_apart () =
     (List.map
        Yojson.Safe.Util.to_string
        [ signed_in_detail; started_detail; config_detail ]);
+  (* Issue #50018: a person who calls their own account gets the code and the
+     message, and the detail, which can name a path of the server, stays out. *)
+  let spawn =
+    measure (fun _ ~prompt:_ ->
+      Error (Verify.Unavailable (Client_not_started "executable \"/srv/bin/claude\" was not found")))
+  in
+  let member = Yojson.Safe.Util.member "failure" (Verify.to_member_json spawn) in
+  check
+    bool
+    "a person's answer keeps the code"
+    true
+    (Yojson.Safe.Util.member "code" member = `String "client_not_started");
+  check
+    bool
+    "and leaves the detail out"
+    true
+    (Yojson.Safe.Util.member "detail" member = `Null);
   let result =
     measure (fun _ ~prompt:_ -> Error (Verify.Unavailable Unsupported_runtime))
   in

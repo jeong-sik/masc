@@ -151,7 +151,7 @@ let status_of_failure = function
       | Empty_response | Model_unreported ) -> "failed"
 ;;
 
-let to_json result =
+let json ~with_detail result =
   `Assoc
     [ "schema", `String schema
     ; "runtime_id", `String result.runtime_id
@@ -175,12 +175,15 @@ let to_json result =
             [ "code", `String (failure_code failure)
             ; "message", `String (failure_message failure)
             ; ( "detail"
-              , match failure_detail failure with
-                | None -> `Null
-                | Some detail -> `String detail )
+              , match with_detail, failure_detail failure with
+                | false, (None | Some _) | true, None -> `Null
+                | true, Some detail -> `String detail )
             ] )
     ]
 ;;
+
+let to_json = json ~with_detail:true
+let to_member_json = json ~with_detail:false
 
 let unavailable_to_json ?detail ~runtime_id ~code ~message () =
   `Assoc

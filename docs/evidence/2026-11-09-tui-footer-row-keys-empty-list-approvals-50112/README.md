@@ -13,7 +13,7 @@
 tmux 3.6a 안의 TUI 로 명령 팔레트에서 `go Approvals` 를 열고 찍었어요. 크기는 100x30 과 80x24 예요. 승인·질문은 가짜 값이에요.
 
 - 고치기 전: 부모 층 #50094 코드 커밋 `3b2d043f27b3` 의 증명 빌드 run 42508812178(성공), `masc-tui` sha256 `6d661bcb3ec3cbc56ff9bcf47af649097d3cc6865bf9389bb6bfd22a81f71596`, `--build-commit` 이 같아요.
-- 고친 뒤: 이 PR 코드 커밋 `16d21118d3a3` 의 증명 빌드 run 42513877543(성공), `masc-tui` sha256 `5045c62a19d4bb81c74ede0a11263890d44c3d0d7005725e6ecea197608a6d47`, `--build-commit` 이 같아요. 영수증(`receipt.json`)의 소스 커밋 `16d21118d3a3edc937da604d95b5e7dce2ab1132` 를 검증했어요.
+- 고친 뒤: 이 PR 코드 커밋 `2e6bd2a6bb0c` 의 증명 빌드 run 42516522107(성공), `masc-tui` sha256 `3181bec0e735ac9a71b4b3ba19f58d8e615013160ac1cc8b504fc136c1fd9c3d`, `--build-commit` 이 같아요. 영수증(`receipt.json`)의 소스 커밋 `2e6bd2a6bb0c77afa56f55bbff9fc914a8e31eb2` 를 검증했어요.
 - 두 빌드 사이에 바뀐 코드 파일: `bin/masc_tui.ml`, `bin/masc_tui_keys.ml`, `bin/masc_tui_keys.mli`, `bin/masc_tui_render_approvals.ml`, `bin/masc_tui_render_prim.ml`, `bin/masc_tui_render_prim.mli`, `bin/masc_tui_types.ml`, `test/test_tui_footer_detail_state.ml`, `test/test_tui_footer_row_need.ml`.
 
 ## 읽는 법
@@ -120,47 +120,22 @@ tmux 3.6a 안의 TUI 로 명령 팔레트에서 `go Approvals` 를 열고 찍었
 
 ## 질문 머리줄
 
-질문 블록의 머리줄 `[?] Questions waiting on you (N) · a:open answers` 는 모든 상태에서 `a:open answers` 로 끝났어요. 질문이 0건이거나 커서가 어느 질문에도 없을 때 `a` 는 알림만 내요. 이제 질문을 골랐을 때만 그려요.
+질문 블록의 머리줄 `[?] Questions waiting on you (N) · a:open answers` 는 모든 상태에서 `a:open answers` 로 끝났어요. 질문이 0건이거나 커서가 어느 질문에도 없을 때 `a` 는 알림만 내요. 이제 질문을 골랐을 때만 `a` 를 알리고, 푸터와 같은 말(`a:answer a question`)로 써요. 머리줄은 키 표의 문구를 그대로 가져와서(`approval_answer_hint`) 푸터와 어긋날 수 없어요.
 
 | 상태 | 고치기 전 머리줄 | 고친 뒤 머리줄 |
 | --- | --- | --- |
 | 승인·질문이 없는 목록 | `[?] Questions waiting on you (0) · a:open answers` | `[?] Questions waiting on you (0)` |
 | 승인 두 줄, 질문 없음 | `[?] Questions waiting on you (0) · a:open answers` | `[?] Questions waiting on you (0)` |
-| 질문 한 줄(커서가 올라 있음), 승인 없음 | `[?] Questions waiting on you (1) · a:open answers` | `[?] Questions waiting on you (1) · a:open answers` (같음) |
-| 승인 두 줄과 질문 한 줄 | `[?] Questions waiting on you (1) · a:open answers` | `[?] Questions waiting on you (1) · a:open answers` (같음) |
+| 질문 한 줄(커서가 올라 있음), 승인 없음 | `[?] Questions waiting on you (1) · a:open answers` | `[?] Questions waiting on you (1) · a:answer a question` |
+| 승인 두 줄과 질문 한 줄 | `[?] Questions waiting on you (1) · a:open answers` | `[?] Questions waiting on you (1) · a:answer a question` |
 | 질문이 있는데 커서가 어느 것에도 없음 | `[?] Questions waiting on you (1) · a:open answers` | `[?] Questions waiting on you (1)` |
-| Lane Add-on 질문 한 줄만 | `[?] Questions waiting on you (1) · a:open answers` | `[?] Questions waiting on you (1) · a:open answers` (같음) |
+| Lane Add-on 질문 한 줄만 | `[?] Questions waiting on you (1) · a:open answers` | `[?] Questions waiting on you (1) · a:answer a question` |
 
 ## 두 빌드가 같아야 하는 단계
 
-푸터와 머리줄만 바뀌어야 해요. 화면 전체를 줄 단위로 견준 결과예요(빈 줄은 뺐고 시계 숫자는 가렸어요). 한 줄이 달라지면 지운 줄과 쓴 줄로 두 번 세요.
+푸터와 머리줄만 바뀌어야 해요. 두 빌드의 화면 전체를 줄 단위로 견줬어요(빈 줄은 뺐고 시계 숫자는 가렸어요).
 
-| 화면 | 환경 | 크기 | 달라진 줄 | 어디가 달라요 |
-| --- | --- | --- | --- | --- |
-| 승인·질문이 없는 목록 | 알림 있음 | 100x30 | 4 | 푸터, 질문 머리줄 |
-| 승인·질문이 없는 목록 | 알림 있음 | 80x24 | 4 | 푸터, 질문 머리줄 |
-| 승인·질문이 없는 목록 | 알림 없음 | 100x30 | 4 | 푸터, 질문 머리줄 |
-| 승인·질문이 없는 목록 | 알림 없음 | 80x24 | 4 | 푸터, 질문 머리줄 |
-| 승인 두 줄, 질문 없음 | 알림 있음 | 100x30 | 2 | 질문 머리줄 |
-| 승인 두 줄, 질문 없음 | 알림 있음 | 80x24 | 2 | 질문 머리줄 |
-| 승인 두 줄, 질문 없음 | 알림 없음 | 100x30 | 4 | 푸터, 질문 머리줄 |
-| 승인 두 줄, 질문 없음 | 알림 없음 | 80x24 | 2 | 질문 머리줄 |
-| 질문 한 줄(커서가 올라 있음), 승인 없음 | 알림 있음 | 100x30 | 2 | 푸터 |
-| 질문 한 줄(커서가 올라 있음), 승인 없음 | 알림 있음 | 80x24 | 2 | 푸터 |
-| 질문 한 줄(커서가 올라 있음), 승인 없음 | 알림 없음 | 100x30 | 2 | 푸터 |
-| 질문 한 줄(커서가 올라 있음), 승인 없음 | 알림 없음 | 80x24 | 2 | 푸터 |
-| 승인 두 줄과 질문 한 줄 | 알림 있음 | 100x30 | 0 | 없음 |
-| 승인 두 줄과 질문 한 줄 | 알림 있음 | 80x24 | 0 | 없음 |
-| 승인 두 줄과 질문 한 줄 | 알림 없음 | 100x30 | 0 | 없음 |
-| 승인 두 줄과 질문 한 줄 | 알림 없음 | 80x24 | 0 | 없음 |
-| 질문이 있는데 커서가 어느 것에도 없음 | 알림 있음 | 100x30 | 4 | 푸터, 질문 머리줄 |
-| 질문이 있는데 커서가 어느 것에도 없음 | 알림 있음 | 80x24 | 4 | 푸터, 질문 머리줄 |
-| 질문이 있는데 커서가 어느 것에도 없음 | 알림 없음 | 100x30 | 4 | 푸터, 질문 머리줄 |
-| 질문이 있는데 커서가 어느 것에도 없음 | 알림 없음 | 80x24 | 4 | 푸터, 질문 머리줄 |
-| Lane Add-on 질문 한 줄만 | 알림 있음 | 100x30 | 2 | 푸터 |
-| Lane Add-on 질문 한 줄만 | 알림 있음 | 80x24 | 2 | 푸터 |
-| Lane Add-on 질문 한 줄만 | 알림 없음 | 100x30 | 2 | 푸터 |
-| Lane Add-on 질문 한 줄만 | 알림 없음 | 80x24 | 2 | 푸터 |
+달라진 줄은 푸터와 질문 머리줄뿐이에요.
 
 ## 화면
 

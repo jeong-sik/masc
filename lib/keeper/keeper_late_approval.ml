@@ -466,6 +466,7 @@ let journal_stats t = with_store t (fun () ->
                  | exception _ -> None)
       with
       | stats -> stats
+      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
       | exception _ -> None))
 let journal_uncertain t = with_store t (fun () -> List.length t.uncertain)
 let journal_error t = with_store t (fun () -> t.journal_error)

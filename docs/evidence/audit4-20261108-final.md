@@ -44,6 +44,8 @@ string ISO(Types_core.task·Goal_store.goal·Keeper_meta) / float(Board_types.po
 
 ## 감사 후속 (이번 전수로 새로 등기하는 것)
 
+0. dashboard_http_keeper.ml:88·:145 의 degraded 행이 여전히 ("trust", …)+("runtime_trust", …) 이중 방출 — 독자가 execution-trust 표면 안에서 닫혀 있어 파손은 없으나(adv-49974b F2 확인) 다음 hard cut 후보.
+
 1. Tui_decode.agent(masc_tui_types:616 재수출)의 실사용처 전수 확인 후 삭제 — 재수출 외 참조가 없으면 Types_core.agent 로 통일.
 2. 도메인별 시각 타입 통일 규칙 RFC(항목 4) — 다음 도메인 hard cut 부터 적용.
 

@@ -411,7 +411,7 @@ let test_snapshot_counts_malformed_decision_rows () =
        Alcotest.(check string)
          "selected model survives fallback"
          "test-model"
-         (snapshot |> member "selected_model" |> to_string);
+         (snapshot |> member "active_model" |> to_string);
        Alcotest.(check (float 0.001))
          "malformed json increments entry error"
          1.0
@@ -509,7 +509,7 @@ let test_snapshot_uses_receipt_runtime_model_when_decision_absent () =
        Alcotest.(check string)
          "selected model falls back to receipt"
          "receipt-model"
-         (snapshot |> member "selected_model" |> to_string);
+         (snapshot |> member "active_model" |> to_string);
        Alcotest.(check string)
          "active model falls back to receipt"
          "receipt-model"

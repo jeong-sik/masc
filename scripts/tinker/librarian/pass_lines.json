@@ -1,0 +1,70 @@
+{
+ "schema": "masc.tinker.librarian.pass_lines.v1",
+ "fixed_on": "2026-11-09",
+ "scope": "keeper-librarian admission output",
+ "request": {
+  "reasoning_effort": "low",
+  "max_tokens": 32768
+ },
+ "comparison": {
+  "baseline": "base",
+  "baseline_model": "thinkingmachines/Inkling-2-Small:peft:262144",
+  "same_item_window_s": 1800,
+  "warm_share_min": 0.9
+ },
+ "e_real": {
+  "manifest": "e_real_manifest.json",
+  "manifest_sha256": "16d3a90a83eda27517b72a1073b8df74097f5947e720aa8fec12206a10ea70d6",
+  "items": 99
+ },
+ "e_synth": {
+  "generator_split": "eval",
+  "seed": 20261109,
+  "audit_seed": 20261109,
+  "requests_sha256": "e2bb1915d8c05f813ad32c619703044a867027ea0fbd04d54670ffa09e83a767",
+  "items": 142,
+  "audit": {
+   "requests_in": 150,
+   "requests_out": 142,
+   "cases": 97,
+   "sample_cases": 30,
+   "sample_misfit_rate": 0.03333333333333333
+  }
+ },
+ "instruction_sha256": "b5eaa8abf5138b1e0fd494757a1562097c9ea6841712f5ffa2cb78c38e882631",
+ "gates": {
+  "G1_e_real_valid_rate_min": 0.95,
+  "G2_e_real_dropped_not_in_live_max": 2,
+  "G3_e_synth_outcome_accuracy_min": 0.95,
+  "G3_e_synth_drop_precision_min": 1.0,
+  "G3_e_synth_stale_drop_recall_min": 0.9,
+  "G4_e_real_paired_lead_min": 0.0,
+  "G5_e_real_latency_p50_ratio_max": 1.0
+ },
+ "choice": {
+  "order": [
+   "A",
+   "B"
+  ],
+  "prefer_later_when_ahead_by": 0.03
+ },
+ "files_sha256": {
+  "admission_judgment.py": "59f45c57ce9d4f65a0446451a85e344f43b1f667a58ba8a05cfbd30eadea2efd",
+  "admission_request.py": "a268b1d58ad1f0ac3261015007e5700cff11b6aacd8540c86a2d6c07813d7127",
+  "admission_result.py": "52b773a017bb15a42b12713f85c1d74efaba5e4e8f8ef638d251cace1b642489",
+  "admission_template.py": "7abcefaf499ebf9302e934af48ee934a2551e26b9df310aca018581b71361c52",
+  "admission_validator.py": "e4a01bc06cff15f1529c657fd9268512c0f915547089553f4bf2f4ad40f3ca90",
+  "eval_admission.py": "756dd0e642ebf050c2e3d837f3811716895a5f25973e4235f9704d11330d2378",
+  "exact_store.py": "34f44001cd42c9593461521c519f7b193c3e9c12efb2f2ec9703222562febc02",
+  "lane_addon_checks.py": "a507d43ddd8cfbcdb70ad33e2734470c2372a1fd35ef2b432cd4ec182015901d",
+  "librarian_selection.py": "2847371ccabb72031bb4f4dad8cef8b6f80ea17c3d3e94f9f72f1483cb9ed6de",
+  "memory_variables.py": "ece02069c7334a99b92dbe2a48816fae048b2010f6c029f1b53385efd02b9f66",
+  "ocaml_text.py": "639f93bc85d667cdc6e95d597fa3a41413e1ed6da24309e940d6a3a41cbc057f",
+  "prompt_facts.py": "3f20f4f61312b214e04e562b2be97e147f82b43952f6f64ff6c8ec33e97ed44b",
+  "synth_render.py": "5fdb8f46be8c001844f2afcc07d9577e9e648edb1837b6ea19765615b735cc76",
+  "synth_spec.py": "84972ac70476d6e05ccdcaa02d231e0ad6eb2ebeaa3a15d6f780cbf7e4458064",
+  "tinker_oai.py": "defdd1c86c3a12c8bcf2d83f09c62672171c99b0995d96e8225b5efa1db6111f",
+  "yojson_wire.py": "880e76614c55975afc5ded1bb4253ed0ba6328055a7d660905d1d1b21c49ddda",
+  "../../../config/prompts/librarian.md": "ec5cb66fa5a17d1c78844642123edc4e095aa0bc065d98c4e841162b3cd099c7"
+ }
+}

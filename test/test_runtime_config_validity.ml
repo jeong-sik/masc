@@ -1924,15 +1924,19 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
            | None -> failf "%s: an agent_core seed binding without a provider id" runtime.id
          in
          (* The adapter's own lookup, argument for argument: the branch that
-            drops the twelve is the one this answers [Some] for. *)
+            drops the twelve is the one a model row answers. A provider preset
+            alone takes every key the block writes (RFC-0514). *)
          (match
-            Llm_provider.Capabilities.for_provider_model_id
-              ~wire:(Some config.Llm_provider.Provider_config.kind)
-              ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label)
-              ~model_id:config.Llm_provider.Provider_config.model_id
+            Llm_provider.Capabilities.request_policy_catalog_answer
+              (Llm_provider.Capabilities.resolve_snapshot_request_policy
+                 ~snapshot:(Llm_provider.Catalog_snapshot.current ())
+                 ~wire:config.Llm_provider.Provider_config.kind
+                 ~provider_id:provider_label
+                 ~model_id:config.Llm_provider.Provider_config.model_id)
           with
-          | None -> ()
-          | Some _ ->
+          | Llm_provider.Capabilities.Provider_preset _
+          | Llm_provider.Capabilities.No_catalog_answer -> ()
+          | Llm_provider.Capabilities.Model_row _ ->
             visited := runtime.model.id :: !visited;
             (match Llm_provider.Provider_config.capabilities_for_config_model config with
              | None ->
@@ -7555,8 +7559,20 @@ default = "tinker.declared"
   let previous = Llm_provider.Catalog_snapshot.current () in
   Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
   @@ fun () ->
-  (* The embedded catalog: a tinker provider row and no checkpoint row. *)
+  (* The embedded catalog: a tinker provider row and no checkpoint row, so
+     only the provider's openai_chat preset answers. That preset has no
+     window and turns JSON mode, image and multimodal input on. *)
   Llm_provider.Catalog_snapshot.reset ();
+  (match
+     Llm_provider.Capabilities.request_policy_catalog_answer
+       (Llm_provider.Capabilities.resolve_snapshot_request_policy
+          ~snapshot:(Llm_provider.Catalog_snapshot.current ())
+          ~wire:Llm_provider.Provider_kind.OpenAI_compat ~provider_id:"tinker"
+          ~model_id:checkpoint)
+   with
+   | Llm_provider.Capabilities.Provider_preset _ -> ()
+   | Llm_provider.Capabilities.Model_row _ | Llm_provider.Capabilities.No_catalog_answer ->
+     fail "only the tinker provider preset answers for the checkpoint");
   with_temp_runtime_toml runtime_toml @@ fun path ->
   let snapshot = snapshot_of_config ~label:"rowless checkpoint" path in
   (match Exact_output.admit_target_ref snapshot "tinker.declared" with
@@ -7565,8 +7581,12 @@ default = "tinker.declared"
      let capabilities = (Exact_output.projection_target admitted).capabilities in
      check (option int) "the slot answers with the declared window" (Some 262144)
        capabilities.max_context_tokens;
-     check bool "the slot answers with the declared JSON mode" false
-       capabilities.supports_response_format_json);
+     check bool "the declared JSON mode overrides the preset" false
+       capabilities.supports_response_format_json;
+     check bool "unwritten image input stays off over the preset" false
+       capabilities.supports_image_input;
+     check bool "unwritten multimodal input stays off over the preset" false
+       capabilities.supports_multimodal_inputs);
   match Exact_output.admit_target_ref snapshot "tinker.tableless" with
   | Error (Exact_output.Target_not_in_catalog target) ->
     check string "the table-less binding is the one left out" "tinker.tableless" target

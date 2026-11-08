@@ -19,7 +19,7 @@ related: ["claude-code-context-overflow-bounded-restart", "official-client-conve
 끝나지 못한 vendor 턴은 도구 결과 기록(receipt)을 outbox에 남긴다. 다음 요청은 receipt 전부를 묶음(carrier) 하나로 싣는다. 이 RFC는 묶음에 꼴(form)을 둘 둔다.
 
 - `Inline`: 지금 묶음이다. receipt를 전부 글로 싣는다.
-- `By_address`: receipt가 몇 개든 길이가 도구 종류와 개수의 자릿수로만 달라진다. 이미 실행된 호출 수, 도구별 개수, 목록 blob 하나의 주소를 싣는다.
+- `By_address`: receipt가 몇 개든 길이가 도구 종류와 개수의 자릿수로만 달라진다. 이미 돌아온 호출 수, 도구별 개수, 그리고 `Inline` 글을 담은 blob 하나의 주소를 싣는다.
 
 run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은 `Inline`으로 시작한다. lane이 다른 후보로 넘어가면 새 run이 다시 `Inline`으로 시작한다. typed 크기 거절이 오면 이미 있는 재투영 hook `on_memory_capacity_refusal`이 묶음을 `By_address`로 한 번 바꾼다. `By_address` 글이 엄격히 짧을 때만 바꾼다. 그러면 같은 capacity로 다시 보낸다(§5.2). 그다음 거절은 지금처럼 history를 줄인다. 그 view와 floor에도 `By_address`가 실린다.
 
@@ -50,13 +50,17 @@ run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은
 - 요청은 약 197만 토큰이었다. 17:34 KST까지 47번 연속 실패했다. 잠긴 이유는 `input_rejected_bootstrap_floor_exceeded`다.
 - 17:51 KST에 운영자가 같은 방법으로 풀었다.
 
-**#49680·#49698이 고친 것과 못 고친 것**
+**#49665·#49680·#49698이 고친 것과 못 고친 것**
 
-- 고친 것: receipt 하나의 크기다. 백업한 receipt 248개에 새 쓰기 규칙을 Python으로 흉내 내면 11,833,867 B가 326,903 B가 된다. OCaml 코드로 잰 값은 아니다.
+세 PR은 두 사고 뒤인 11-07 17:25~18:19 KST에 병합됐다.
+
+- 고친 것
+  - 새로 쓰는 receipt 하나의 크기다(#49680·#49698). 그림과 긴 글 본문을 blob 주소로 남긴다. 백업한 receipt 248개에 새 쓰기 규칙을 Python으로 흉내 내면 11,833,867 B가 326,903 B가 된다. OCaml 코드로 잰 값은 아니다.
+  - 묶음 글의 그림이다(#49665). receipt 파일에 base64 그림이 있어도 묶음 글에는 바이트 수와 sha256만 싣는다(`keeper_client_tool_outbox_media.ml:97`). 옛 모양 receipt와 Codex receipt의 data URL도 같다.
 - 못 고친 것
   - receipt 개수에 상한이 없다.
-  - 이미 쌓인 receipt는 옛 모양 그대로다.
-  - Codex receipt는 그림 data URL을 그대로 담는다(#49697).
+  - 이미 쌓인 옛 모양 receipt의 긴 글 본문은 묶음 글에 그대로 실린다.
+  - Codex receipt 파일은 그림 data URL을 그대로 담는다(#49697). 묶음 글에서는 빠지지만 파일은 크다.
   - 무엇보다, 한 번 넘친 Keeper가 스스로 빠져나올 길이 없다.
 
 ## 3. 원인
@@ -97,46 +101,47 @@ run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은
 
 지금 `developer_context`의 글 그대로다(`keeper_client_tool_outbox.ml:318-337`).
 
+- receipt마다 `carrier_row`를 거친 JSON이다. base64 그림은 바이트 수와 sha256으로 보이고(#49665), 나머지 값은 그대로다.
+
 ### 4.2 `By_address`
 
 글은 다음 순서다.
 
 1. 지금 prefix. receipt를 도구 데이터로 다루고, 끝난 효과를 반복하지 말라는 안내다.
-2. 「이 요청은 receipt를 주소로 싣는다. 호출 N개가 이미 실행됐다. 그 효과를 반복하지 않는다.」
-3. 도구별 개수. snapshot에서 처음 나온 순서로 적는다.
-4. 「개수로는 호출 하나하나를 가릴 수 없다. 위에 적힌 도구를 다시 부르기 전에 목록을 읽는다.」
-5. 목록 blob의 marker 한 줄(`[masc:blob sha256=…]`).
+2. 「이 요청은 receipt N개를 주소로 싣는다. 하나하나가 이미 돌아온 호출이고, 효과가 있었다면 이미 일어났다. 반복하지 않는다.」
+3. 도구별 개수. snapshot에서 처음 나온 순서를 지킨 JSON 객체다.
+4. 「개수로는 어느 호출이 무엇을 했는지 알 수 없다.」
+5. blob marker 한 줄(`[masc:blob sha256=… bytes=… mime=text/plain preview="…"]`).
 6. 읽는 법
-   - 요청 도구 목록에 `keeper_artifact_read`가 있으면 그 이름을 적는다. `offset`과 `max_bytes`로 나눠 읽으라고 적는다.
-   - 없으면 「이 요청에서는 목록을 읽을 수 없다」고 적는다(§6.2).
+   - 요청 도구 목록에 `keeper_artifact_read`가 있으면, 위 도구를 다시 부르기 전에 그 sha256으로 읽고 `next_offset`을 따라가라고 적는다. 읽는 글은 이 요청이 `Inline`으로 실었을 글이라고 적는다.
+   - 없으면 「이 요청에는 reader가 없어 receipt를 읽을 수 없다」고 적는다(§6.2).
 
-목록 blob은 다음 JSON이다.
+blob은 하나다. 바이트는 `Inline` 글 그대로다.
 
-```json
-{"schema": "masc.retained-tool-results.v1",
- "receipts": [{"call_id": "…", "tool_name": "…", "receipt": <artifact ref>}]}
-```
-
-- `receipts`는 outbox snapshot 순서를 지킨다. 실행 순서라는 뜻은 없다. prefix가 이미 그렇게 말한다.
-- `<artifact ref>`는 `Tool_output.normalized_artifact_ref_to_json` 꼴이다.
-- 각 receipt blob의 바이트는 그 receipt의 compact JSON(`Yojson.Safe.to_string`)이다.
-  - 그 sha256은 receipt 파일 이름과 같다. 파일 이름은 같은 문자열의 sha256이고(`keeper_client_tool_outbox_codec.ml:24-25`), `load`가 `validate`로 이를 검사한다.
-- 두 blob 모두 이름표(MIME)는 `application/json`이다.
-  - artifact manifest MIME(`application/vnd.masc.tool-result-manifest+json`)은 쓰지 않는다.
-  - 정리 작업은 그 MIME을 엄격한 manifest로 읽는다. 잘못된 manifest 하나가 base path 정리 전체를 멈춘다. #49698이 고친 함정과 같다.
+- 모델이 주소로 읽는 내용과 `Inline`으로 받았을 내용이 같다. 꼴은 글이 놓이는 자리만 바꾼다.
+- 이름표(MIME)는 `text/plain`이다.
+  - 정리 작업은 살아 있는 marker가 artifact manifest MIME(`application/vnd.masc.tool-result-manifest+json`)을 단 blob만 열어 읽는다. 그 밖의 blob 내용은 읽지 않는다(`tool_blob_maintenance.mli:3-11`).
+  - manifest MIME을 달면 엄격한 manifest로 읽힌다. 잘못된 manifest 하나가 base path 정리 전체를 멈춘다. #49698이 고친 함정과 같다.
+- marker의 preview는 고정 글이다. Librarian recall도 같은 방법을 쓴다(`keeper_librarian_context_recall.ml:179`).
+  - 그래서 marker 길이는 바이트 수의 자릿수로만 달라진다.
+- receipt마다 blob을 두고 목록 blob으로 가리키는 꼴은 버렸다(§11의 9).
 
 ### 4.3 blob 쓰기와 수명
 
-- `By_address`를 렌더할 때마다 `Tool_blob_store.put_durable_reuse`로 쓴다(`tool_blob_store.mli:129-135`).
-  - 이 process가 이미 쓴 주소는 읽어서 비교만 한다.
-  - 없거나 깨졌으면 다시 쓴다.
-- 길이만 잴 때는 `Tool_blob_store.address`를 쓴다. 파일을 읽지도 쓰지도 않는다(`tool_blob_store.mli:87`).
-- 쓰기가 실패하면 `put_durable_reuse`는 `Sys_error`를 던진다. 이 예외를 run 밖으로 내보내지 않는다.
-  - hook은 꼴을 바꾸기 전에 blob을 먼저 쓴다. 실패하면 `Error`를 돌려준다(§5.1).
-  - 렌더도 `result`를 돌려준다. 실패하면 그 attempt는 internal error로 끝난다. 크기 거절이 아니니 walk는 이어지지 않는다.
+- hook이 꼴을 바꿀 때 blob을 한 번 쓴다. `Tool_blob_store.put_durable_reuse`를 쓴다(`tool_blob_store.mli:129-135`).
+  - 이 process가 이미 쓴 주소는 읽어서 비교만 한다. 없거나 깨졌으면 다시 쓴다.
+  - 쓰기가 실패하면 `put_durable_reuse`는 `Sys_error`를 던진다. hook은 이것을 `Error`로 돌려주고 꼴을 바꾸지 않는다(§5.1). 예외는 run 밖으로 나가지 않는다.
+- 렌더는 파일을 읽지도 쓰지도 않는다.
+  - `Inline`이면 run을 시작할 때 만든 글을, `By_address`면 hook이 만든 글을 돌려준다.
+  - 그래서 렌더는 실패하지 않는다.
+- 길이를 잴 때는 sha256 자리를 0으로 채운 marker를 쓴다.
+  - sha256은 늘 64자이고 preview는 고정 글이다. 그래서 이 marker는 실제 marker와 길이가 같다.
+  - 해시도 파일 I/O도 하지 않는다. 길이가 줄지 않으면 blob을 쓰지 않는다.
+  - receipt 글 본문을 marker로 바꿀지 정할 때도 같은 방법을 쓴다(`keeper_client_tool_outbox.ml:125-159`).
 - blob 삭제는 배포 helper가 BasePath lease를 쥐고 오프라인에서 두 번 검사할 때만 일어난다(`tool_blob_maintenance.mli:35-41`).
-  - 목록 blob과 receipt blob은 정리 작업이 보는 저장소에서 참조되지 않는다. 그래서 배포 때 지워질 수 있다.
-  - 다음 렌더가 같은 주소로 다시 쓴다. 주소는 바이트에서 나오기 때문이다.
+  - 서버 안의 sweep(RFC-0499 1층)은 세기만 하고 지우지 않는다(`tool_blob_sweep.mli:1-2`). 그래서 run 안에서는 이 blob이 늘 읽힌다.
+  - 이 blob은 정리 작업이 보는 저장소에서 참조되지 않는다. 그래서 배포 때 지워질 수 있다.
+  - 배포 뒤 receipt가 아직 남아 있으면 다음 run의 hook이 같은 주소로 다시 쓴다. 주소는 바이트에서 나오고, 바이트는 같은 snapshot의 `Inline` 글이기 때문이다.
   - 그래서 정리 규칙은 바꾸지 않는다.
 
 ## 5. 바꾸는 때
@@ -153,10 +158,10 @@ run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은
 - agent_core의 `memory_capacity_retry_sequence`(`keeper_turn_driver_try_provider.ml:3320-3330`)
   - `Reprojected`면 다시 보내고, `Unchanged`면 history 쪽 복구로 넘긴다.
 
-묶음 hook은 run마다 하나인 carrier 값을 가진다. 그 값은 지금 꼴과, 마지막에 렌더한 snapshot을 안다.
+묶음 hook은 run마다 하나인 carrier 값을 가진다. 그 값은 run이 load한 snapshot, 그 `Inline` 글, 지금 꼴을 안다.
 
 - 꼴이 `Inline`이고, receipt가 있고, `By_address` 글이 `Inline` 글보다 엄격히 짧다.
-  - 길이는 `Tool_blob_store.address`로 계산한 주소로 잰다.
+  - 길이는 sha256 자리를 0으로 채운 marker로 잰다(§4.3).
   - blob을 `put_durable_reuse`로 쓴다. 쓰기가 실패하면 `Error`를 돌려준다.
   - 꼴을 `By_address`로 바꾸고 `Reprojected`를 돌려준다.
 - 그 밖에는 `Unchanged`를 돌려준다. 이미 바꾼 뒤에도 `Unchanged`다.
@@ -203,14 +208,14 @@ run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은
 ### 6.1 ACK
 
 - 바꾸지 않는다. 모든 receipt가 늘 한 꼴로 실린다. 그래서 「load한 snapshot을 지운다」가 「실린 것을 지운다」와 같다.
-- `By_address`에서 모델이 목록을 읽지 않고 턴을 끝낼 수 있다. 그래도 `Completed`면 receipt를 지운다.
+- `By_address`에서 모델이 blob을 읽지 않고 턴을 끝낼 수 있다. 그래도 `Completed`면 receipt를 지운다.
   - 실린 것은 「호출 N개가 실행됐다」는 사실과 주소다.
   - 결과 바이트는 blob에 남는다(§4.3).
 
 ### 6.2 reader가 없는 요청
 
 - 그래도 `By_address`로 바꾼다. 교착을 막는 쪽을 먼저 지킨다.
-- 글에 「이 요청에서는 목록을 읽을 수 없다」고 적는다. 모델은 호출 수와 도구별 개수만 본다.
+- 글에 「이 요청에는 reader가 없어 receipt를 읽을 수 없다」고 적는다. 모델은 호출 수와 도구별 개수만 본다.
 - memory recall은 reader가 없으면 inline으로 돌아간다. receipt 묶음은 길이를 묶는 곳이 없어서 그렇게 하지 않는다.
 - 11-07 17:55 KST에 마지막 프롬프트가 남은 Keeper 36명은 모두 `keeper_artifact_read`를 받고 있었다(#49698).
 
@@ -244,8 +249,9 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
 
 ## 8. 따라 풀리는 것과 남는 것
 
-- 넘쳐서 꼴이 바뀌면, 이미 쌓인 옛 모양 receipt(그림 base64가 글 안에 있는 것)와 Codex receipt의 data URL(#49697)도 변환 없이 주소로 간다. receipt JSON을 통째로 blob에 넣기 때문이다.
-- 들어갈 때는 지금처럼 `Inline`으로 간다. 그림 base64가 글자로 실려 창을 쓴다. 그래서 #49697(쓸 때 줄이기)은 그대로 남는다.
+- 옛 모양 receipt의 그림 base64와 Codex receipt의 data URL은 #49665가 이미 묶음 글에서 뺀다. 이 RFC가 할 일은 아니다.
+- 옛 모양 receipt의 긴 글 본문은 `Inline`에 그대로 실린다. 넘쳐서 꼴이 바뀌면 `Inline` 글이 통째로 blob으로 가니, 변환 없이 주소로 간다.
+- 들어갈 때는 지금처럼 `Inline`으로 간다. #49697(Codex receipt 파일이 data URL을 담는 것)은 파일 크기 문제로 그대로 남는다.
 - `By_address` 글은 도구 종류 수와 개수 자릿수로만 길어진다. receipt 개수로는 Codex 문자열 상한에 닿지 않는다. `Inline`이 그 상한을 넘을 때의 거절은 아직 typed가 아니다(§7).
 
 ## 9. 남는 대가
@@ -267,7 +273,8 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
 - Completion review 요청은 같은 run에서 다시 보내지 않는다(`keeper_claude_code_runtime.ml:1768`, `keeper_codex_runtime.ml:2112`). 그래도 묶음 때문에 넘치지는 않는다. review는 Keeper가 아닌 임시 base path에서 돌아서(`lib/workspace_metric_hooks.ml:369-394`) 그 Keeper의 receipt를 싣지 않는다.
 - ACK된 뒤의 blob은 배포 때 오프라인 검사 두 번이 지나면 지워질 수 있다. 그 뒤에 vendor 대화에 남은 주소로 읽으면 실패한다.
 - reader가 없는 요청은 호출 수와 도구별 개수만 본다.
-- `By_address`를 처음 렌더하면 blob을 receipt 개수 + 1개 쓴다. 쓸 때마다 파일과 부모 폴더를 fsync한다. 248개면 249개다. 비용은 재지 않았다.
+- hook이 꼴을 바꿀 때 blob 하나를 쓰고 파일과 부모 폴더를 fsync한다. 크기는 `Inline` 글과 같다. 11-07 첫 번째 사고라면 약 12 MB다. 비용은 재지 않았다.
+- 호출 하나를 찾으려면 blob을 앞에서부터 나눠 읽어야 한다. receipt마다 따로 읽는 꼴은 버렸다(§11의 9).
 - 이 RFC가 배포되기 전에는 #49698이 receipt 하나를 흉내 값 기준 약 36분의 1로 줄인다. 그 사이 다시 잠기면 11-07처럼 receipt를 옮긴다.
   - 배포 뒤 floor 거절로 이미 잠긴 Keeper는 `restart_fresh` 한 번이면 풀린다. 다음 run의 첫 요청이 넘치면 hook이 꼴을 바꾼다. receipt를 옮길 필요가 없다.
 
@@ -331,6 +338,14 @@ TLC 1.8.0(로컬, `-workers 1`) 결과는 이렇다.
      - official client 턴이 `Completed`가 아니게 정산되는 길은 터미널 도구가 durable stimulus에 자리를 내준 경우다(`keeper_official_client_host.ml:202-204`).
      - receipt를 쓰는 runtime에서는 그 도구를 포함해 dynamic 도구 호출의 결과가 모두 receipt가 된다(`keeper_official_client_host.ml:1694-1718`). 그래서 그런 턴 뒤 snapshot은 바뀐다.
      - 남는 길은 caller가 도구 없이 끝난 턴을 받아들이지 않은 경우 정도다. 그 길을 위해 분기를 두지 않는다.
+9. **receipt마다 blob을 두고 목록 blob으로 가리키기**
+   - 내용: 목록 blob에 receipt마다 `call_id`, `tool_name`, receipt blob 주소를 적는다. 이 RFC의 첫 안이었다.
+   - 장점: 모델이 receipt 하나만 골라 읽을 수 있다.
+   - 단점
+     - fresh Start 뒤 모델은 지난 턴의 `call_id`를 모른다. 목록에서 고를 단서는 `tool_name`뿐이다. 인자를 보려면 receipt를 하나씩 읽어야 한다.
+     - 꼴을 바꿀 때 blob을 receipt 수 + 1개 쓰고, 하나마다 fsync한다. 5,000개면 5,001번이다.
+     - receipt 파일 바이트를 그대로 실으면 #49665가 뺀 그림 base64가 다시 들어온다. `carrier_row`를 거치면 blob sha256이 파일 이름과 달라져, 목록에 receipt 이름을 따로 적어야 한다.
+     - 목록 형식(schema)과 코드가 는다.
 
 ## 12. 시험과 구현 순서
 
@@ -342,16 +357,21 @@ TLC 1.8.0(로컬, `-workers 1`) 결과는 이렇다.
 
 **2. PR A — outbox 꼴과 hook** (`keeper_client_tool_outbox.ml/.mli`, 시험)
 
-- receipt 1·248·5,000개에서 `By_address` 글 길이가 도구 종류와 개수 자릿수로만 정해진다.
-- 목록 blob이 모든 receipt를 snapshot 순서로 가리킨다. 각 receipt blob은 파일과 같은 바이트로 읽히고, sha256이 파일 이름과 같다.
+- receipt 1·248·5,000개에서 `By_address` 글은 숫자와 sha256만 다르다. 숫자를 지우고 sha256을 가리면 세 글이 같다.
+- 도구별 개수 JSON은 snapshot에서 처음 나온 순서를 따른다.
+- blob은 `Inline` 글과 바이트가 같고, 이름표는 `text/plain`이다.
 - hook
-  - `By_address`가 엄격히 짧지 않으면 `Unchanged`다.
-  - 한 번 바꾼 뒤에도 `Unchanged`다.
+  - `By_address`가 엄격히 짧지 않으면 `Unchanged`이고 blob을 쓰지 않는다.
+  - 한 번 바꾼 뒤에는 `Unchanged`다.
   - receipt가 없으면 `Unchanged`다.
+  - 묶음 쪽이 `Unchanged`일 때만 memory hook을 부른다. 묶음 쪽이 `Reprojected`나 `Error`면 부르지 않는다.
 - blob 쓰기가 실패하면 hook이 `Error`를 돌려주고 꼴을 바꾸지 않는다.
 - reader가 없으면 글에 읽을 수 없다는 줄이 있고 reader 이름이 없다.
-- 옛 모양 receipt(base64가 글 안에 있는 것)도 주소로 간다. `By_address` 글에 base64가 없다.
-- 목록 blob이 있는 base path에서 blob 정리를 두 번 돌려도 멈추지 않는다.
+- 옛 모양 receipt(base64가 글 안에 있는 것)도 `By_address` 글과 blob에 base64가 없다.
+- 정리 작업을 두 번 돌려도 멈추지 않고, receipt가 가리키는 blob은 남는다.
+- 묶음 blob이 지워져도 다음 run의 hook이 같은 주소로 다시 쓴다.
+  - 정리 작업은 분류되지 않은 항목이 하나라도 있으면 아무것도 지우지 않는다(`tool_blob_maintenance.mli:121-125`). 그래서 시험은 blob 파일을 직접 지운다.
+- 꼴을 바꿔도 receipt 파일은 그대로다.
 
 **3. PR B — runtime 연결** (`keeper_claude_code_runtime.ml`, `keeper_codex_runtime.ml`, `keeper_turn_driver_try_provider.ml`, 주석)
 

@@ -95,12 +95,15 @@ let test_resolve_overrides_keeps_env_precedence () =
 let test_h2_listener_capacity_maps_from_toml () =
   let count, overrides = K.resolve_overrides ~env_lookup:empty_env
     ["transport.h2_max_concurrent_streams", T.Toml_int 100;
-     "transport.h2_max_pending_response_bytes", T.Toml_int 67108864] in
-  check int "both capacities reach the boot overlay" 2 count;
+     "transport.h2_max_pending_response_bytes", T.Toml_int 67108864;
+     "transport.h2_initial_window_size", T.Toml_int 1048576] in
+  check int "all three H2 settings reach the boot overlay" 3 count;
   check (option string) "peer stream capacity" (Some "100")
     (List.assoc_opt "MASC_H2_MAX_CONCURRENT_STREAMS" overrides);
   check (option string) "listener payload capacity" (Some "67108864")
-    (List.assoc_opt "MASC_H2_MAX_PENDING_RESPONSE_BYTES" overrides)
+    (List.assoc_opt "MASC_H2_MAX_PENDING_RESPONSE_BYTES" overrides);
+  check (option string) "initial window" (Some "1048576")
+    (List.assoc_opt "MASC_H2_INITIAL_WINDOW_SIZE" overrides)
 ;;
 
 let test_h2_listener_capacity_rejects_invalid_values () =

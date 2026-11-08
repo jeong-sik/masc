@@ -36,7 +36,9 @@ Transports:
 - h1: HTTP/1.1 with one connection per in-flight request.
 - h2c: HTTP/2 over cleartext with prior knowledge, one connection, streams
   multiplexed on it.
-- h2 (only for an https base URL): HTTP/2 negotiated through ALPN, one
+- tls-h1: HTTP/1.1 over the TLS listener with at most 6 connections; the
+  server certificate is not verified.
+- tls-h2: HTTP/2 over the TLS listener, negotiated through ALPN, one
   connection; the server certificate is not verified.
 
 The server owned by this script runs the release-evidence runtime fixture: no
@@ -78,7 +80,8 @@ BROWSER_CONNECTIONS = 6
 BOOT_WAIT_S = 60.0
 READINESS_PATH = "/favicon.svg"
 BUNDLE_PATTERN = re.compile(r"/dashboard/assets/index-[A-Za-z0-9_-]+\.js")
-TRANSPORTS = ("h1-6", "h1", "h2c", "h2")
+TRANSPORTS = ("h1-6", "h1", "h2c", "tls-h1", "tls-h2")
+TLS_TRANSPORTS = ("tls-h1", "tls-h2")
 SCENARIOS = ("serial", "burst", "download", "sse", "curl")
 
 
@@ -141,8 +144,12 @@ def transport(name: str, concurrency: int) -> Transport:
             # http1=False with http2=True is httpcore's HTTP/2 prior knowledge
             # over a cleartext connection.
             return Transport(name, http1=False, http2=True, max_connections=1)
-        case "h2":
-            return Transport(name, http1=True, http2=True, max_connections=1)
+        case "tls-h1":
+            return Transport(name, http1=True, http2=False, max_connections=BROWSER_CONNECTIONS)
+        case "tls-h2":
+            # http2=True without http1 negotiates HTTP/2 on the TLS connection;
+            # the listener counts it under alpn_h2_total.
+            return Transport(name, http1=False, http2=True, max_connections=1)
     raise SystemExit(f"unknown transport {name}")
 
 
@@ -333,18 +340,22 @@ def last_line(command: list[str]) -> str | None:
     return lines[-1] if lines else None
 
 
-def run_curl_download(base_url: str, path: str, samples: int, headers: dict | None) -> list[dict]:
+def run_curl_download(base_url: str, https_base_url: str | None, path: str, samples: int,
+                      headers: dict | None) -> list[dict]:
     curl = shutil.which("curl")
     if curl is None:
         return [{"scenario": "curl", "skipped": "curl not installed"}]
     rows = []
-    for flag, label in (("--http1.1", "h1"), ("--http2-prior-knowledge", "h2c")):
+    targets = [("--http1.1", "h1", base_url), ("--http2-prior-knowledge", "h2c", base_url)]
+    if https_base_url is not None:
+        targets.append(("--http2", "tls-h2", https_base_url))
+    for flag, label, origin in targets:
         for _ in range(samples):
             command = [curl, "-s", "-o", "/dev/null", "-w", "%{http_version} %{http_code} %{size_download} %{speed_download} %{time_total}",
                        flag, "-k", "-H", "accept-encoding: identity"]
             for key, value in (headers or {}).items():
                 command += ["-H", f"{key}: {value}"]
-            command.append(base_url + path)
+            command.append(origin + path)
             completed = subprocess.run(command, capture_output=True, text=True, timeout=120)
             fields = completed.stdout.split()
             if completed.returncode != 0 or len(fields) != 5:
@@ -376,7 +387,11 @@ class OwnedServer:
         self.process: subprocess.Popen | None = None
         self.temporary: tempfile.TemporaryDirectory | None = None
         self.port = free_port()
+        self.https_port = free_port()
+        while self.https_port == self.port:
+            self.https_port = free_port()
         self.base_url = f"http://127.0.0.1:{self.port}"
+        self.https_base_url = f"https://127.0.0.1:{self.https_port}"
         self.log_path = out / "server.log"
 
     def __enter__(self) -> "OwnedServer":
@@ -390,7 +405,10 @@ class OwnedServer:
         env = {"PATH": os.environ["PATH"], "LANG": "C.UTF-8", "HOME": os.environ.get("HOME", str(base)),
                "MASC_BASE_PATH": str(base), "MASC_CONFIG_DIR": str(config),
                "MASC_CONFIG_BOOTSTRAP": "skip", "MASC_KEEPER_AUTONOMOUS_ENABLED": "false",
-               "MASC_GRPC_ENABLED": "0", "MASC_WS_ENABLED": "0", **RATE_LIMIT_ENV}
+               "MASC_GRPC_ENABLED": "0", "MASC_WS_ENABLED": "0",
+               # The TLS listener with the self-signed pair the server writes
+               # under its base path; clients below do not verify it.
+               "MASC_HTTPS_PORT": str(self.https_port), **RATE_LIMIT_ENV}
         if self.h2_mode is not None:
             env["MASC_USE_H2"] = self.h2_mode
         if self.assets_dir is not None:
@@ -452,8 +470,17 @@ def dev_token(base_url: str) -> str | None:
     return response.json().get("token") or None
 
 
-async def measure(args, base_url: str, transports: list[str], headers: dict | None) -> list[dict]:
+async def measure(args, base_url: str, https_base_url: str | None, transports: list[str],
+                  headers: dict | None) -> list[dict]:
     results: list[dict] = []
+
+    def url_for(name: str) -> str:
+        if name in TLS_TRANSPORTS:
+            if https_base_url is None:
+                raise SystemExit(f"{name} needs an https base URL")
+            return https_base_url
+        return base_url
+
     bundle = await discover_bundle(base_url, headers)
     scenarios = set(args.scenarios)
     for repeat in range(args.repeats):
@@ -464,7 +491,7 @@ async def measure(args, base_url: str, transports: list[str], headers: dict | No
             for path in args.burst_path:
                 if "serial" in scenarios:
                     tr = transport(name, 1)
-                    row = await run_burst(tr, base_url, path, args.serial_requests, 1, headers, scenario="serial")
+                    row = await run_burst(tr, url_for(name), path, args.serial_requests, 1, headers, scenario="serial")
                     row["repeat"] = repeat
                     results.append(row)
                     print(f"[{repeat}] serial {name:5} {path:28} ok={row['ok']:4} "
@@ -472,7 +499,7 @@ async def measure(args, base_url: str, transports: list[str], headers: dict | No
                           f"p99={row['latency'].get('p99_ms', float('nan')):7.2f}ms", flush=True)
                 if "burst" in scenarios:
                     tr = transport(name, args.concurrency)
-                    row = await run_burst(tr, base_url, path, args.requests, args.concurrency, headers)
+                    row = await run_burst(tr, url_for(name), path, args.requests, args.concurrency, headers)
                     row["repeat"] = repeat
                     results.append(row)
                     print(f"[{repeat}] burst {name:5} {path:28} ok={row['ok']:4} "
@@ -481,7 +508,7 @@ async def measure(args, base_url: str, transports: list[str], headers: dict | No
                           f"{row['requests_per_s'] or 0:8.1f} req/s", flush=True)
             if "download" in scenarios and bundle is not None:
                 tr = transport(name, args.download_concurrency)
-                row = await run_download(tr, base_url, bundle, args.download_concurrency, headers)
+                row = await run_download(tr, url_for(name), bundle, args.download_concurrency, headers)
                 row["repeat"] = repeat
                 results.append(row)
                 print(f"[{repeat}] download {name:5} ok={row['ok']} "
@@ -491,14 +518,14 @@ async def measure(args, base_url: str, transports: list[str], headers: dict | No
                                 "skipped": "no dashboard bundle found at /dashboard/"})
             if "sse" in scenarios and args.sse_streams > 0:
                 tr = transport(name, args.sse_streams)
-                row = await run_sse(tr, base_url, args.sse_path, args.sse_streams, args.sse_hold_s, headers)
+                row = await run_sse(tr, url_for(name), args.sse_path, args.sse_streams, args.sse_hold_s, headers)
                 row["repeat"] = repeat
                 results.append(row)
                 print(f"[{repeat}] sse {name:5} established={row['established']}/{args.sse_streams} "
                       f"frames/stream p50={row['frames_per_stream'].get('p50_ms', 0):.0f} "
                       f"errors={row['errors'][:1]}", flush=True)
         if "curl" in scenarios and bundle is not None:
-            for row in run_curl_download(base_url, bundle, args.curl_samples, headers):
+            for row in run_curl_download(base_url, https_base_url, bundle, args.curl_samples, headers):
                 row["repeat"] = repeat
                 results.append(row)
                 print(f"[{repeat}] curl {row.get('transport', '?'):5} {row.get('http_version', '')} "
@@ -511,6 +538,8 @@ def main() -> None:
     target = parser.add_mutually_exclusive_group(required=True)
     target.add_argument("--binary", type=Path, help="installed masc binary to own on a loopback port")
     target.add_argument("--base-url", help="attach to a listening server instead of owning one")
+    parser.add_argument("--https-base-url", default=None,
+                        help="the attached server's TLS listener, for the tls-* transports")
     parser.add_argument("--repo", type=Path, default=Path(__file__).resolve().parents[3],
                         help="repository root holding the release-evidence runtime fixture")
     parser.add_argument("--output", type=Path, required=True, help="new directory for results")
@@ -548,6 +577,11 @@ def main() -> None:
     for name in args.scenarios:
         if name not in SCENARIOS:
             raise SystemExit(f"unknown scenario {name}")
+    if args.https_base_url is not None and not args.https_base_url.startswith("https://"):
+        raise SystemExit(f"--https-base-url must start with https://, got {args.https_base_url}")
+    tls_requested = [name for name in transports if name in TLS_TRANSPORTS]
+    if args.base_url is not None and tls_requested and args.https_base_url is None:
+        raise SystemExit(f"{', '.join(tls_requested)} need --https-base-url when attaching to a server")
     args.output.mkdir(parents=True, exist_ok=False)
 
     identity = {
@@ -574,7 +608,7 @@ def main() -> None:
                               "build_commit": last_line([str(binary), "build-commit"])}
         assets_dir = args.assets_dir.expanduser().resolve() if args.assets_dir else None
         with OwnedServer(binary, args.repo, args.output, args.h2_mode, assets_dir) as server:
-            identity["server"] = {"base_url": server.base_url, "owned": True,
+            identity["server"] = {"base_url": server.base_url, "https_base_url": server.https_base_url, "owned": True,
                                   "environment_keys": server.environment_keys,
                                   "fixture_sha256": server.fixture_sha256, "h2_mode_env": args.h2_mode,
                                   "assets_dir": str(assets_dir) if assets_dir else None,
@@ -584,12 +618,12 @@ def main() -> None:
             if token is not None and headers is None:
                 headers = {"authorization": f"Bearer {token}"}
                 identity["server"]["credential"] = "loopback dashboard dev-token (not recorded)"
-            results = asyncio.run(measure(args, server.base_url, transports, headers))
+            results = asyncio.run(measure(args, server.base_url, server.https_base_url, transports, headers))
         identity["server"]["exit_code"] = server.exit_code
     else:
-        identity["server"] = {"base_url": args.base_url, "owned": False}
+        identity["server"] = {"base_url": args.base_url, "https_base_url": args.https_base_url, "owned": False}
         identity["health"] = health_transport(args.base_url)
-        results = asyncio.run(measure(args, args.base_url, transports, headers))
+        results = asyncio.run(measure(args, args.base_url, args.https_base_url, transports, headers))
 
     identity["finished_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     write_json(args.output / "identity.json", identity)

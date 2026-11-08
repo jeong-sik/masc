@@ -367,6 +367,20 @@ let test_alpn_dispatch () =
   check int "one handshake failure" (failures + 1) (metric "handshake_failures_total")
 ;;
 
+let test_h2_settings () =
+  let config = Server_bootstrap_http.h2_config () in
+  check bool "server push is never advertised" false config.H2.Config.enable_server_push;
+  check int32 "stream limit" 100l config.H2.Config.max_concurrent_streams;
+  check int32 "initial window is the h2 library default"
+    H2.Config.default.initial_window_size config.H2.Config.initial_window_size;
+  check int32 "the library default is 2^27, not the RFC 9113 65,535"
+    (Int32.shift_left 1l 27) config.H2.Config.initial_window_size;
+  check int "largest frame is the library default"
+    H2.Config.default.read_buffer_size config.H2.Config.read_buffer_size;
+  check int "the library default is the RFC 9113 minimum 16,384"
+    16384 config.H2.Config.read_buffer_size
+;;
+
 let () =
   run
     "HTTPS listener"
@@ -374,6 +388,9 @@ let () =
       , [ test_case "self-signed pair: generate, reuse, renew" `Quick test_generate_and_reuse
         ; test_case "configured pair and its refusals" `Quick test_configured_pair
         ] )
-    ; "listener", [ test_case "ALPN picks h2 or httpun" `Quick test_alpn_dispatch ]
+    ; ( "listener"
+      , [ test_case "ALPN picks h2 or httpun" `Quick test_alpn_dispatch
+        ; test_case "h2 settings: push off, library defaults" `Quick test_h2_settings
+        ] )
     ]
 ;;

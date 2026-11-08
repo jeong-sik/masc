@@ -111,6 +111,11 @@ val serve :
     identify which listener emitted the line when a process runs
     multiple HTTP servers. *)
 
+val h2_config : unit -> H2.Config.t
+(** The settings every H2 connection is created with, cleartext or TLS:
+    server push off, and the stream limit and initial window from
+    {!H2_response_limits}. *)
+
 val serve_h2_connection :
   ?streams:Server_h2_stream_registry.t ->
   ?resources:Http_h2_response_ledger.t ->

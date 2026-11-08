@@ -679,6 +679,16 @@ let all =
       ~category:Transport
       "Maximum retained application response payload bytes across one listener"
   ; setting
+      ~range:(int_range ~min:1 ~max:H2_response_limits.max_settings_value ())
+      ~effective:(Reader (fun () -> display_int (H2_response_limits.initial_window_size ())))
+      ~env_name:"MASC_H2_INITIAL_WINDOW_SIZE"
+      ~exposure:(Toml_only "transport.h2_initial_window_size")
+      ~value_kind:Integer
+      ~default:(display_int H2_response_limits.default_initial_window_size)
+      ~consumers:["Server_bootstrap_http H2, Auto and HTTPS listeners"]
+      ~category:Transport
+      "Flow-control window each H2 stream starts with, in bytes"
+  ; setting
       ~range:(int_range ~min:0 ~max:65535 ())
       ~effective:
         (Reader

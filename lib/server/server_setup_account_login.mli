@@ -41,7 +41,18 @@ val status : owner:owner -> base_path:string ->
     of [model] ({!Runtime_account_runtime}), and the call is
     {!Runtime_verification.verify_as_command}, the readiness check of the
     [runtime-verify] command: a model answer and a tool round trip, within 120
-    seconds. The answer is its JSON. Nothing is written to runtime.toml or to
-    the authorization log. *)
+    seconds.
+
+    The answer is [{"verification": ..., "runtime": ...}].
+    [verification] is {!Runtime_verification.to_member_json}: the detail of a
+    failure goes to the server log, since it can name a path of the server.
+    When the call passes, the binding is a Runtime of the person: the first
+    pass writes its record with a Self grant to the authorization log
+    ({!Authz_runtime.make}), and [runtime] is
+    [{"runtime_id":...,"record":"made"}], or ["existing"] on a later pass.
+    When it fails, [runtime] is [null]. Nothing is written to runtime.toml.
+
+    One verification of an account runs at a time: a second request while one
+    runs is answered 409 (issue #50018). *)
 val verify : person:person -> base_path:string -> body:string ->
   Httpun.Request.t -> Http_reqd.t -> unit

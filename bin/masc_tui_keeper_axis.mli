@@ -8,5 +8,5 @@ val segments :
   Masc_tui_keeper_axis_cell.t list
 (** The cells of one keeper's second row, in the order they yield to a narrow
     row: the last one is dropped first. [runtime] is the keeper's row from the
-    live roster, [None] when the roster did not read it; the failing-for cell
-    (RFC-0511 D1) comes from it and the others from [state]. *)
+    live roster, [None] when the roster did not read it; the failing-for and
+    turn-pulse cells (RFC-0511 D1) come from it and the others from [state]. *)

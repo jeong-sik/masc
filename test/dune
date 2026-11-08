@@ -4484,6 +4484,7 @@
   alcotest
   masc
   masc_tui_keeper_axis_cell
+  masc_tui_keeper_mark
   masc_tui_keeper_pulse))
 
 (test

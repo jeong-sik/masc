@@ -123,15 +123,30 @@ let shows_operator_disposition ~(activity : Masc_tui_keeper_list_model.activity)
   | Delegate_result | Verifying | External_waiting -> false
 ;;
 
-(* The failing-for cell of the Detailed second row (RFC-0511 D1a) draws these
-   words and [column_legend] names them from the same values, so a word that
-   changes cannot keep its old meaning on the sheet. *)
+(* The turn cells of the Detailed second row (RFC-0511 D1). The cells draw
+   these words and marks and [column_legend] names them from the same values,
+   so a mark that changes cannot keep its old meaning on the sheet. Three of
+   the marks are the ones the row already draws for the same meaning: a failed
+   attempt, a spent quota and a keeper with no turn. *)
 let failing_since_word = "failing"
 let unknown_mark = "?"
+let pulse_hours = 12
+let pulse_ok_mark = "\xe2\x9c\x93" (* ✓: the turn finished without failing or resting *)
+let pulse_rested_mark = badge_glyph Masc_tui_keeper_list_model.Badge_quota_spent
+let pulse_failed_mark = attempt_glyph
+let pulse_quiet_mark = health_glyph Reading.Health_idle
 
 let column_legend =
   let letters letter values = String.concat "/" (List.map letter values) in
   let words word values = String.concat " / " (List.map word values) in
+  let pulse_marks =
+    [ pulse_ok_mark, "ok"
+    ; pulse_rested_mark, "rested"
+    ; pulse_failed_mark, "failed"
+    ; pulse_quiet_mark, "no turn"
+    ; unknown_mark, "unknown"
+    ]
+  in
   [ now_header, "what the keeper is doing at this moment"
   ; ( age_header
     , "time since it last moved: the open turn's latest update (its start before it \
@@ -144,6 +159,15 @@ let column_legend =
     , Printf.sprintf
         "how long the keeper has been in the failing phase; %s when the server recorded \
          no start, or the start is ahead of this screen's clock (Detailed second row)"
+        unknown_mark )
+  ; ( String.concat " " (List.map fst pulse_marks)
+    , Printf.sprintf
+        "autonomous turn results of the last %d hours, one mark per hour, newest on the \
+         right: %s; chat turns are not counted, and the server keeps a keeper's last %d \
+         turns, so a busy keeper's older hours read %s (Detailed second row)"
+        pulse_hours
+        (String.concat " / " (List.map (fun (mark, word) -> mark ^ " " ^ word) pulse_marks))
+        Masc.Keeper_turn_pulse.max_samples_per_keeper
         unknown_mark )
   ; "Mode " ^ letters activation_letter activations, words activation_word activations
   ; "S " ^ letters sandbox_letter sandboxes, "sandbox: " ^ words sandbox_word sandboxes

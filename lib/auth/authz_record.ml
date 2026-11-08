@@ -48,6 +48,7 @@ module Kind = struct
     | Pat
     | Provider_account
     | Runtime
+    | Keeper
 
   let all =
     [ Runtime_grant
@@ -70,6 +71,7 @@ module Kind = struct
     ; Pat
     ; Provider_account
     ; Runtime
+    ; Keeper
     ]
   ;;
 
@@ -94,6 +96,7 @@ module Kind = struct
     | Pat -> "pat"
     | Provider_account -> "provider_account"
     | Runtime -> "runtime"
+    | Keeper -> "keeper"
   ;;
 
   let of_string label = List.find_opt (fun kind -> String.equal (to_string kind) label) all
@@ -134,7 +137,8 @@ let writers : Kind.t -> writer list = function
   | Kind.Session
   | Kind.Pat
   | Kind.Provider_account
-  | Kind.Runtime -> [ Authenticated_principal ]
+  | Kind.Runtime
+  | Kind.Keeper -> [ Authenticated_principal ]
   | Kind.Trigger_evidence -> [ Cron ]
   | Kind.Lease_terminal_evidence | Kind.Preauthorized_expiry -> [ Maintenance ]
   | Kind.Migration_diagnostic -> [ Migration ]

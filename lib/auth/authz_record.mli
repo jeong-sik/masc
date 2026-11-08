@@ -95,6 +95,10 @@ module Kind : sig
       (** A person makes a Runtime on a provider account they own, with its
           Self grant in the same record (design 4.2-4.3, plan D1). The body is
           that of {!Authz_runtime_event}. *)
+    | Keeper
+      (** A person makes a Keeper and is its owner, and gives it one of
+          their Runtimes (design 4.3, plan D1-5). The body is that of
+          {!Authz_keeper_event}. *)
 
   val all : t list
   val to_string : t -> string
@@ -116,7 +120,8 @@ end
     it. A [Session] record needs an authenticated principal too: the person
     whose session it is, and so does a [Pat] record: the person whose PAT it
     is, a [Provider_account] record: the person who links the account, and a
-    [Runtime] record: the person who makes the Runtime. An [Internal_service_credential] record is written by the local
+    [Runtime] record: the person who makes the Runtime, and a [Keeper]
+    record: the person who makes the Keeper or gives it a Runtime. An [Internal_service_credential] record is written by the local
     operator: the host CLI issues and revokes the credentials of the services
     the host starts (user decision 2026-11-07). *)
 val admits : Kind.t -> Author.t -> bool

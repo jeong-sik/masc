@@ -20,7 +20,7 @@ let issue_message = function
       Printf.sprintf "Browser worker %s: ego task space %S is user-owned, so the live ego lane refuses it; take_over with lane=live and no clientId reclaims it after the operator asks to continue"
         instance_id space
   | Ego_space_missing {instance_id;space;space_id;_} ->
-      Printf.sprintf "Browser worker %s: ego no longer lists task space %d (%S), so its connection ended and no replacement was opened; take_over with lane=live and no clientId asks the worker to open its configured Space again"
+      Printf.sprintf "Browser worker %s: ego no longer lists task space %d (%S), so its connection ended and no replacement was opened; take_over with lane=live and no clientId asks the worker to open its configured Space again, which works only when the worker names the Space rather than its number"
         instance_id space_id space
 let issue_to_json issue =
   let source kind instance_id message = `Assoc ["kind",`String kind;

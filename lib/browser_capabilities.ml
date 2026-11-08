@@ -250,7 +250,7 @@ let support backend operation = match backend with
     | Release_tab -> manage_page backend ~action:"release_tab"
     | Take_over -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"take_over" Act
-          ["Takes the space back after the operator has said they are done; nothing checks that they did, so taking it early takes the browser from under them. With the exact observed clientId it resumes a space handed off with hand_off. With lane=live and no clientId it reclaims the Space whose task ended while the operator held it, which the lane's inventory reports as a user-owned refusal (the receipt says reclaimed and names no tab), or opens again a configured Space ego no longer lists (the receipt says reopening).";
+          ["Takes the space back after the operator has said they are done; nothing checks that they did, so taking it early takes the browser from under them. With the exact observed clientId it resumes a space handed off with hand_off. With lane=live and no clientId it reclaims the Space whose task ended while the operator held it, which the lane's inventory reports as a user-owned refusal (the receipt says reclaimed and names no tab), or, when the worker names its Space rather than its number, opens again a Space ego no longer lists (the receipt says reopening).";
            "Refused before any effect when the agent already holds the space. The clientId receipt carries the tab that was active, unless it is a tab the operator opened; list the tabs before the next step."]
       | Safari_unavailable ->
           Unsupported "Only an ego connection takes its task space back from the operator.")

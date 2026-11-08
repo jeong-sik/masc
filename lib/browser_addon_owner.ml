@@ -255,11 +255,11 @@ let issue t ~incarnation ~upload_admission ~route ~verb ~actor ~timeout_sec ~onl
              ~finally:(fun () -> Eio.Cancel.protect (fun () ->
                Eio.Mutex.use_rw ~protect:true t.gate (fun () -> t.ego_claim_active <- false)))
              (fun () -> waiting t ~disposition:W.Outcome_unknown (fun () ->
-                (* A browser answer is a success only with [ok: true]
-                   (Browser_addon_tool.failure_of_reply), so the recovery
-                   answer carries it like every page answer. *)
+                (* The host reads a success as [ok: true] with [data]
+                   (Browser_addon_host.issue), so the recovery answer is
+                   built by the envelope every live page answer uses. *)
                 let taken_over fields = W.Issue_result (Ok (B.Answered
-                  (`Assoc (("ok",`Bool true) :: ("action",`String "take_over") :: fields)))) in
+                  (Browser_live_peer.payload (Ok (`Assoc (("action",`String "take_over") :: fields)))))) in
                 match recover published with
                 | Ok (Reclaimed {space_id; space_name}) ->
                     taken_over ["spaceId",`Int space_id;"spaceName",`String space_name;"reclaimed",`Bool true]

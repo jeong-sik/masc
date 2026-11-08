@@ -94,7 +94,8 @@ type t = Open_tab of string | Control of control
   | On_tab of { tab_id : int; interaction : interaction }
 val is_take_over : t -> bool
 (** The one control a live lane answers without a client: reclaiming the ego
-    task space whose task ended while the operator held it. *)
+    task space whose task ended while the operator held it, or opening again
+    the configured Space ego no longer lists. *)
 (** Reply observation window shared by built-in and Add-on action callers.
     Expiry does not prove that a dispatched browser effect did not happen. *)
 val reply_timeout_sec : t -> float

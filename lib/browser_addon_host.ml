@@ -237,12 +237,13 @@ let selection_detail ~clients error = `Assoc ["error",Browser_selection.error_to
 (* Which Page action may run on a route that names no client. take_over alone
    may, on the live lane: the worker that published its Space as missing or
    user-owned is then the target, and it reads its own state again before it
-   reopens or reclaims (see [resolve]). Every other control action and
-   open_tab steers the task Space, so it names its client. The Keeper argument
-   parser answers with this same rule. *)
+   reopens or reclaims (see [resolve]). Every other control action names its
+   client, and so does open_tab on lane=live; open_tab without a lane lets the
+   host choose. The Keeper argument parser answers with this same rule. *)
 let explicit_client_required =
   "live creation, control and Page management actions require an explicit observed clientId; \
-   only take_over may leave it out, with lane=live, to reopen or reclaim the Space its worker reported"
+   open_tab may leave out both lane and clientId to let the host choose, and take_over may leave out \
+   clientId with lane=live to reopen or reclaim the Space its worker reported"
 let act_route preference (action : Browser_lane.Action.t) =
   match preference,action with
   | Browser_selection.Exact (Browser_lane.Live_route None),Browser_lane.Action.Control Browser_lane.Action.Take_over -> Ok ()

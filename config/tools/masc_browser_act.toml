@@ -1,7 +1,7 @@
 name = "masc_browser_act"
 description = """
 Act on a browser task space: tabs, hand_off, emulation, cookies, upload, finish.
-Page input (click, fill, keys, scroll) is BrowserInteract/masc_browser_interact. Every action except open_tab needs the observed clientId; open_tab without it lets MASC pick the browser and report browserSelection. When the task space is reported user-owned or missing, take_over with lane=live and no clientId reclaims or reopens it.
+Page input (click, fill, keys, scroll) is BrowserInteract/masc_browser_interact. Every action except open_tab needs the observed clientId; open_tab without it lets MASC pick the browser and report browserSelection. When the task space is reported user-owned or missing, take_over with lane=live and no clientId asks its worker to reclaim or reopen it.
 open_tab: if navigation fails after the tab is created, the error carries the new tabId; inspect that tab, never open another.
 hand_off gives the whole task space to the operator for a step only a person can take, such as a sign-in or a captcha; explain the step with masc_ask. Until take_over, every tab list, read and action except space_status is refused before any effect. Call take_over only after the operator says they are done, because nothing checks; it is refused while the agent holds the space. Its receipt may carry activeTabId and egoPage; label null means unmanaged: adopt_tab before reading it. space_status returns spaceId, spaceName, ownership (agent, agentDelegatedToUser, ...) and observedAt without touching a Page, also while the operator holds the space.
 adopt_tab makes an observed unmanaged tab readable and actionable; release_tab unmanages an adopted Page without closing it. close_tab closes only Pages the agent opened.

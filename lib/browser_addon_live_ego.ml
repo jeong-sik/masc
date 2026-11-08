@@ -330,8 +330,13 @@ let run ?(on_lane_ended=fun () -> ()) ~env ~owner ~downloads (configuration : Br
     match Browser_addon_owner.mark_ego_space_missing owner ~space:space.name ~space_id:space.id ~observed_at with
     | Error detail -> Log.Server.warn "browser Add-on could not publish the missing ego task space: %s" detail
     | Ok () ->
-      Log.Server.warn "browser Add-on ego connection ended: ego no longer lists task space %d (%S); take_over with lane=live and no clientId asks for the configured Space again"
-        space.id space.name in
+      (match configuration.space with
+       | Browser_configuration.Named_space _ ->
+         Log.Server.warn "browser Add-on ego connection ended: ego no longer lists task space %d (%S); take_over with lane=live and no clientId asks for the configured Space again"
+           space.id space.name
+       | Existing_space _ ->
+         Log.Server.warn "browser Add-on ego connection ended: ego no longer lists task space %d (%S); this worker names that Space by its number, so change the configured ego space"
+           space.id space.name) in
   (* One claim: a fresh session reclaims the Space whose task ended while the
      operator held it, then the supervisor cycle below reconnects. The claim
      answers the request that asked for it, the reconnection follows on its

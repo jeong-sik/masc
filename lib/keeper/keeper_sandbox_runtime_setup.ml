@@ -191,11 +191,9 @@ let sandbox_started_at_label_key = "masc.mcp.started_at"
 let sandbox_network_label_key = "masc.mcp.network"
 let sandbox_ttl_sec_label_key = "masc.mcp.ttl_sec"
 
-(* Values of the [masc.mcp.kind] label. A turn container lives for one turn and
-   is torn down with it; a oneshot container lives for one command. A persistent
-   container is keeper-lifetime: adopted across turns and server restarts, and
-   removed only when the keeper itself is removed. *)
-let turn_container_kind = "turn"
+(* Values of the [masc.mcp.kind] label. A oneshot container lives for one
+   command. A persistent container is keeper-lifetime: adopted across turns and
+   server restarts, and removed only when the keeper itself is removed. *)
 let persistent_container_kind = "persistent"
 
 (* The pid is stamped on a container as [masc.mcp.owner_pid] and supplied again

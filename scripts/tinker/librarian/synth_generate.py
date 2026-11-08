@@ -11,9 +11,12 @@ Run from the repository root:
         --out artifacts/tinker/librarian/synth-eval --budget 6
 
 The seed fixes the plan: which Keepers, how many memories, fact counts,
-categories, claim lengths, planted stale facts, candidate kinds and targets
-(`synth_spec.py`). The model writes only text: role material, a world sheet,
-category names, a goal, and claims. Every model call is cached in
+categories, claim lengths, planted stale facts, candidate kinds and targets,
+and the date, time and number each claim carries (`synth_spec.py`). A planted
+stale fact is written in the same call as the durable facts of its category.
+The model writes only text: role material, a world sheet, category names, a
+goal, and claims; a claim whose marks differ from its plan is not kept. Every
+model call is cached in
 <out>/calls.jsonl under a key derived from the request, so a rerun resumes and
 pays only for calls that have no answer yet. Output: <out>/requests.jsonl (one
 request with its label per line) and <out>/summary.json.
@@ -25,9 +28,11 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import itertools
 import json
 import random
 import sys
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -47,8 +52,10 @@ WORKERS = 8
 # LENGTH_ASK times the planned length.
 FACTS_PER_CALL = 6
 LENGTH_ASK = 1.7
-EFFORT = {"profile": "medium", "facts": "low", "stale": "low", "candidate": "medium"}
-MAX_TOKENS = {"profile": 8192, "facts": 16384, "stale": 4096, "candidate": 4096}
+# Share of a call's durable slots whose claims must come back with their marks.
+DURABLE_KEEP_SHARE = 0.7
+EFFORT = {"profile": "medium", "facts": "low", "candidate": "medium"}
+MAX_TOKENS = {"profile": 8192, "facts": 16384, "candidate": 4096}
 # Measured role material: p10 716, p50 1,144, p90 2,684 chars.
 ROLE_CHARS = ((0.0, 500.0), (0.1, 716.0), (0.5, 1144.0), (0.9, 2684.0), (1.0, 3400.0))
 EXISTING_HEAD = 90
@@ -90,26 +97,45 @@ def profile_of(caller: Caller, seed: S.KeeperSeed, rng: random.Random) -> S.Keep
 
 
 @dataclass(frozen=True, slots=True)
+class FactSlot:
+    """One fact to write: its category, planned length, kind, the time it was seen, and the
+    date, time and number its text carries."""
+
+    category: str
+    length: int
+    stale: bool
+    seen: dt.datetime
+    surface: S.Surface
+
+
+@dataclass(frozen=True, slots=True)
 class MemoryPlan:
     memory_key: str
     keeper: S.KeeperProfile
-    categories: tuple[tuple[str, int], ...]
-    lengths: tuple[tuple[int, ...], ...]
-    stale: int
-    stale_lengths: tuple[int, ...]
+    slots: tuple[FactSlot, ...]  # grouped by category, in writing order
     seed: int
 
 
 def plan_memory(rng: random.Random, keeper: S.KeeperProfile, index: int) -> MemoryPlan:
+    """A planted stale fact lands in a category in proportion to its size, at a random place among
+    the durable facts there, and draws its length, time and surface as a durable fact does."""
     n_facts = round(S.sample_quantile(rng, S.FACTS_PER_MEMORY))
     n_cats = min(len(keeper.categories), round(S.sample_quantile(rng, S.CATEGORIES_PER_MEMORY)))
     names = rng.sample(keeper.categories, n_cats)
     counts = S.allocate_counts(rng, n_facts, n_cats)
-    lengths = tuple(tuple(int(round(S.sample_quantile(rng, S.CLAIM_CHARS), -1)) for _ in range(c)) for c in counts)
-    stale = S.sample_weighted(rng, S.STALE_FACTS_PER_MEMORY_WEIGHTS)
-    stale_lengths = tuple(int(round(S.sample_quantile(rng, S.CANDIDATE_CLAIM_CHARS), -1)) for _ in range(stale))
-    return MemoryPlan(f"{keeper.key}-{index:02d}", keeper, tuple(zip(names, counts, strict=True)), lengths,
-                      stale, stale_lengths, rng.randrange(2**31))
+    names = names[: len(counts)]  # fewer facts than categories leaves the last categories empty
+    stale_in = Counter(rng.choices(names, weights=counts, k=S.sample_weighted(rng, S.STALE_FACTS_PER_MEMORY_WEIGHTS)))
+    end = MEMORY_END - dt.timedelta(seconds=rng.randrange(86400))
+    start = end - dt.timedelta(days=S.sample_quantile(rng, S.MEMORY_SPAN_DAYS))
+    slots: list[FactSlot] = []
+    for name, count in zip(names, counts, strict=True):
+        kinds = [False] * count + [True] * stale_in[name]
+        rng.shuffle(kinds)
+        for stale in kinds:
+            seen = between(rng, start, end)
+            length = int(round(S.sample_quantile(rng, S.CLAIM_CHARS), -1))
+            slots.append(FactSlot(name, length, stale, seen, S.plan_surface(rng, S.FACT_SURFACE, seen)))
+    return MemoryPlan(f"{keeper.key}-{index:02d}", keeper, tuple(slots), rng.randrange(2**31))
 
 
 def iso(t: dt.datetime) -> str:
@@ -120,47 +146,53 @@ def between(rng: random.Random, start: dt.datetime, end: dt.datetime) -> dt.date
     return start + dt.timedelta(seconds=rng.randrange(int((end - start).total_seconds())))
 
 
-def claims_for(caller: Caller, template: str, stage: str, plan: MemoryPlan, category: str,
-               lengths: tuple[int, ...], existing: list[str]) -> tuple[str, ...] | None:
-    prompt = template.format(role=plan.keeper.role_material, world=plan.keeper.world, category=category,
-                             n=len(lengths), lengths=", ".join(str(int(round(n * LENGTH_ASK, -1))) for n in lengths),
-                             existing="\n".join(f"- {head(c)}" for c in existing) or "(없음)", style=P.STYLE)
+def claims_for(caller: Caller, plan: MemoryPlan, category: str, slots: tuple[FactSlot, ...],
+               existing: list[str]) -> list[tuple[FactSlot, str]] | None:
+    """Claims for `slots`, matched by position. A claim counts only when its text carries exactly
+    its slot's surface. An attempt is kept when every stale slot and DURABLE_KEEP_SHARE of the
+    durable ones came back: a stale fact that failed its marks would leave the kept stale facts
+    with other marks than the kept durable ones."""
+    items = "\n".join(P.fact_item(i + 1, slot.stale, int(round(slot.length * LENGTH_ASK, -1)), slot.surface)
+                      for i, slot in enumerate(slots))
+    prompt = P.FACTS_PROMPT.format(role=plan.keeper.role_material, world=plan.keeper.world, category=category,
+                                   n=len(slots), marks=P.MARKS, items=items,
+                                   existing="\n".join(f"- {head(c)}" for c in existing) or "(없음)", style=P.STYLE)
+    durable = sum(not s.stale for s in slots)
+    stale = len(slots) - durable
     for attempt in range(ATTEMPTS):
-        answer = ask(caller, stage, prompt, attempt)
+        answer = ask(caller, "facts", prompt, attempt)
         if answer is None:
             return None
         claims = S.parse_claims(answer) if answer else None
-        if claims is not None and len(claims) >= max(1, round(0.7 * len(lengths))):
-            seen = {c.strip() for c in existing}
-            fresh = tuple(dict.fromkeys(c for c in claims if c.strip() not in seen))
-            return fresh[: len(lengths)]
+        if claims is None:
+            continue
+        texts = {c.strip() for c in existing}
+        kept: list[tuple[FactSlot, str]] = []
+        for slot, claim in zip(slots, claims):
+            if claim.strip() not in texts and S.surface_holds(claim, slot.surface):
+                texts.add(claim.strip())
+                kept.append((slot, claim))
+        kept_stale = sum(s.stale for s, _ in kept)
+        if kept_stale == stale and len(kept) - kept_stale >= round(DURABLE_KEEP_SHARE * durable):
+            return kept
     return None
 
 
 def build_memory(caller: Caller, plan: MemoryPlan) -> tuple[S.MemoryFact, ...] | None:
     rng = random.Random(plan.seed)
-    drafts: list[tuple[str, str, bool]] = []
-    for (category, _count), lengths in zip(plan.categories, plan.lengths, strict=True):
-        for start in range(0, len(lengths), FACTS_PER_CALL):
-            claims = claims_for(caller, P.FACTS_PROMPT, "facts", plan, category, lengths[start:start + FACTS_PER_CALL],
-                                [d[1] for d in drafts])
-            if claims is None:
+    written: list[tuple[FactSlot, str]] = []
+    for category, group in itertools.groupby(plan.slots, key=lambda slot: slot.category):
+        slots = tuple(group)
+        for start in range(0, len(slots), FACTS_PER_CALL):
+            got = claims_for(caller, plan, category, slots[start:start + FACTS_PER_CALL], [c for _, c in written])
+            if got is None:
                 return None
-            drafts.extend((category, c, False) for c in claims)
-    if plan.stale:
-        category = rng.choice([c for c, _ in plan.categories])
-        stale = claims_for(caller, P.STALE_PROMPT, "stale", plan, category, plan.stale_lengths, [])
-        if stale is None:
-            return None
-        drafts.extend((category, c, True) for c in stale)
-    end = MEMORY_END - dt.timedelta(seconds=rng.randrange(86400))
-    start = end - dt.timedelta(days=S.sample_quantile(rng, S.MEMORY_SPAN_DAYS))
-    timed = sorted(((between(rng, start, end), category, claim, stale_flag) for category, claim, stale_flag in drafts),
-                   key=lambda t: t[0])
+            written.extend(got)
+    timed = sorted(written, key=lambda pair: pair[0].seen)
     return tuple(
-        S.MemoryFact(f"m{i + 1}", claim, category, S.board_ref(rng) if rng.random() < S.BOARD_BASIS_SHARE else None,
-                     iso(seen), stale_flag)
-        for i, (seen, category, claim, stale_flag) in enumerate(timed))
+        S.MemoryFact(f"m{i + 1}", claim, slot.category,
+                     S.board_ref(rng) if rng.random() < S.BOARD_BASIS_SHARE else None, iso(slot.seen), slot.stale)
+        for i, (slot, claim) in enumerate(timed))
 
 
 def build_candidates(caller: Caller, rng: random.Random, keeper: S.KeeperProfile,
@@ -175,6 +207,8 @@ def build_candidates(caller: Caller, rng: random.Random, keeper: S.KeeperProfile
     for sequence in range(first_sequence, first_sequence + k):
         kind = S.sample_weighted(rng, S.CANDIDATE_KIND_WEIGHTS)
         length = int(round(S.sample_quantile(rng, S.CANDIDATE_CLAIM_CHARS), -1))
+        clock += dt.timedelta(seconds=rng.randrange(5, 600), microseconds=rng.randrange(10**6))
+        surface = S.plan_surface(rng, S.CANDIDATE_SURFACE, clock)
         target: S.MemoryFact | None = None
         match kind:
             case S.CandidateKind.CORRECTION | S.CandidateKind.PARAPHRASE:
@@ -195,18 +229,19 @@ def build_candidates(caller: Caller, rng: random.Random, keeper: S.KeeperProfile
                 category = rng.choice(categories)
                 task = P.TASK_TRANSIENT.format(category=category)
         prompt = P.CANDIDATE_PROMPT.format(role=keeper.role_material, world=keeper.world, task=task,
-                                         length=length, style=P.STYLE)
+                                         length=length, surface="표기: " + P.surface_line(surface),
+                                         marks=P.MARKS, style=P.STYLE)
         claim: str | None = None
         for attempt in range(ATTEMPTS):
             answer = ask(caller, "candidate", prompt, attempt)
             if answer is None:
                 return None
-            claim = S.parse_single_claim(answer) if answer else None
-            if claim is not None:
+            parsed = S.parse_single_claim(answer) if answer else None
+            if parsed is not None and S.surface_holds(parsed, surface):
+                claim = parsed
                 break
         if claim is None:
             return None
-        clock += dt.timedelta(seconds=rng.randrange(5, 600), microseconds=rng.randrange(10**6))
         seen = round(clock.timestamp(), 6)
         board = S.board_ref(rng) if rng.random() < S.CANDIDATE_BOARD_SHARE else None
         out.append(S.Candidate(S.candidate_request_id(rng), sequence, claim, category, seen, board,

@@ -146,18 +146,6 @@ let operator_disposition (receipt : t)
     | Provider_error _
     | Unknown _ -> false
   in
-  let provider_runtime_failure =
-    match terminal_reason with
-    | Keeper_terminal_reason.Provider_runtime_failure _ -> true
-    | Keeper_terminal_reason.Runtime_exhausted _ | Keeper_terminal_reason.Config_invalid _
-    | Keeper_terminal_reason.Authorization_refused _
-    | Keeper_terminal_reason.Transcript_corruption _
-    | Keeper_terminal_reason.Official_client_recovery_required _
-    | Keeper_terminal_reason.Provider_attempt_effect_fenced _
-    | Keeper_terminal_reason.Tool_correction_lost _ | Keeper_terminal_reason.Accept_rejected _
-    | Keeper_terminal_reason.Terminal_effect_failed _ | Keeper_terminal_reason.Internal_error _
-    | Keeper_terminal_reason.Pre_dispatch_success _ | Keeper_terminal_reason.Unknown _ -> false
-  in
   (* Either half puts this turn on a degraded-retry lane: it dispatched on a
      lane an earlier turn deferred to, or it deferred one itself. The
      disposition is the same for both; only the receipt's label distinguishes
@@ -222,42 +210,37 @@ let operator_disposition (receipt : t)
        operator surfaces, none from a keeper. Short-period limits arrive as
        [api_error_rate_limited] and never reach this arm. *)
     Disp_operator_action_required, Reason_authorization_refused
-  | _ when provider_runtime_failure && degraded_retry_on_the_receipt ->
-    Disp_fail_open_next_runtime, Reason_degraded_retry
-  | _
-    when provider_runtime_failure
-         && (receipt.runtime_fallback_applied
-             || receipt.runtime_outcome = Runtime_passed_to_next_model) ->
-    Disp_pass_next_model, Reason_runtime_fallback
-  | _
-    when provider_runtime_failure
-         && Keeper_terminal_reason.is_transient_provider_runtime_failure
-              terminal_reason ->
-    (* This terminal receipt has already excluded both same-turn degraded retry
-       and cross-runtime fallback.  The Keeper remains live and its keepalive
-       cadence may run another turn later, but this turn did not move to a next
-       runtime.  Keep that future scheduling contract distinct from observed
-       same-turn routing. *)
-    Disp_retry_later, Reason_transient_runtime_retry
-  | _ when provider_runtime_failure ->
-    (* No degraded retry or cross-runtime fallback was observed above.  The
-       Keeper remains live and may try another turn later, but this terminal
-       receipt cannot claim a same-turn lane transition. *)
-    Disp_retry_later, Reason_provider_runtime_error
+  | Keeper_terminal_reason.Provider_runtime_failure _ ->
+    if degraded_retry_on_the_receipt
+    then Disp_fail_open_next_runtime, Reason_degraded_retry
+    else if
+      receipt.runtime_fallback_applied
+      || receipt.runtime_outcome = Runtime_passed_to_next_model
+    then Disp_pass_next_model, Reason_runtime_fallback
+    else if
+      Keeper_terminal_reason.is_transient_provider_runtime_failure
+        terminal_reason
+    then
+      (* This terminal receipt has already excluded both same-turn degraded retry
+         and cross-runtime fallback.  The Keeper remains live and its keepalive
+         cadence may run another turn later, but this turn did not move to a next
+         runtime.  Keep that future scheduling contract distinct from observed
+         same-turn routing. *)
+      Disp_retry_later, Reason_transient_runtime_retry
+    else
+      (* No degraded retry or cross-runtime fallback was observed above.  The
+         Keeper remains live and may try another turn later, but this terminal
+         receipt cannot claim a same-turn lane transition. *)
+      Disp_retry_later, Reason_provider_runtime_error
   | Keeper_terminal_reason.Internal_error _ ->
     Disp_fail_open_next_runtime, Reason_internal_error
-  | Provider_runtime_failure _
   | Accept_rejected _
   | Pre_dispatch_success _
   | Unknown _ ->
-    (* Generic fall-through. [Provider_runtime_failure] is caught by the
-       guarded branches above (its constructor forces
-       [provider_runtime_failure] true), so only [Pre_dispatch_success] and
-       [Unknown] reach here in practice; it is listed to keep the match
-       exhaustive without a wildcard. [Config_invalid] and
-       [Authorization_refused] are absent because they now have unguarded
-       constructor arms above, which OCaml counts towards exhaustiveness —
-       listing them here would be a dead branch. *)
+    (* Generic fall-through for [Accept_rejected], [Pre_dispatch_success], and
+       [Unknown]. Pre-dispatch refusals and [Provider_runtime_failure] have
+       unguarded constructor arms above, which OCaml counts towards
+       exhaustiveness without a wildcard. *)
     if degraded_retry_on_the_receipt
     then Disp_fail_open_next_runtime, Reason_degraded_retry
     else if

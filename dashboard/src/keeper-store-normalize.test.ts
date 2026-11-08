@@ -455,13 +455,13 @@ describe('normalizeKeepers lifecycle metrics', () => {
           needs_attention: true,
           attention_reason: 'approval_pending',
           next_human_action: 'resolve_approval',
-          approval_state: {
+          approval: {
             state: 'pending',
             summary: '1 approval request waiting',
             pending_count: 1,
             latest_event_at: '2026-04-23T00:09:30Z',
           },
-          execution_summary: {
+          execution: {
             sandbox_summary: 'docker / none',
             completion_observation_summary: 'not_observed',
             latest_receipt_at: '2026-04-23T00:10:00Z',

@@ -848,6 +848,7 @@ let test_hitl_flow_takes_a_freed_permit_ahead_of_a_standard_request () =
                     ; binding
                     ; credential = EO.Credential_resolved (Llm_provider.Secret.of_string api_key)
                     ; body_timeout_s = Some F.fixture_post_body_timeout_seconds
+                    ; model_declaration = EO.No_model_declaration
                     }
                   ])
              ()

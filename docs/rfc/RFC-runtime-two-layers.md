@@ -180,7 +180,7 @@ goo-yang-bong = "librarian_exact"
 능력도 아래 '정체성도 같은 문제였다'의 끝에 적은 규칙을 따른다. 카탈로그가 아는 것은 카탈로그가, 모르는 것은 배포가 말한다.
 
 - **카탈로그에 행이 있는 provider·모델 쌍** — 능력은 카탈로그만 말한다. 배포는 바인딩만 적는다.
-- **카탈로그에 행이 없는 모델** — 로컬 llama-server, 설치 마법사가 만든 endpoint. 배포가 능력 표를 선언한다. 표가 없으면 부팅 때 `missing_runtime_model_capabilities`(`runtime.ml:1068`)가 그 바인딩을 카탈로그에 없는 모델로 잡는다. #37016 이 이 길을 쓴다. 마법사는 `[models.X.capabilities]` 를 쓰고(`runtime_setup_spec.ml` 의 `render`), `docs/LLAMA-SERVER-RUNBOOK.md` §3.1 은 로컬 모델을 `runtime.toml` 만으로 등록한다.
+- **카탈로그에 행이 없는 모델** — 로컬 llama-server, 설치 마법사가 만든 endpoint. 배포가 능력 표를 선언한다. 표가 없으면 부팅 때 `missing_runtime_model_capabilities`(`runtime.ml:1068`)가 그 바인딩을 카탈로그에 없는 모델로 잡는다. #37016 이 이 길을 쓴다. 마법사는 `[models.X.capabilities]` 를 쓰고(`runtime_setup_spec.ml` 의 `render`), `docs/LLAMA-SERVER-RUNBOOK.md` §3.1 은 로컬 모델을 `runtime.toml` 만으로 등록한다. provider 행에 능력 preset 이 있으면 부팅 검사는 표 없는 모델을 잡지 않는다. 그 모델은 preset 으로 돈다(RFC-0514).
 
 두 번째 경우에 카탈로그 행을 더하는 길은 쓸 수 없다.
 

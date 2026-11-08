@@ -584,8 +584,11 @@ path = "/api/tags"
 # has the provider row and the thinkingmachines/Inkling-2-Small row, so this
 # binding states no capability. The 65,536-token window, the reasoning ladder
 # and the missing structured output all come from the row. A `tinker://`
-# checkpoint has no catalog row, so its model table carries its own
-# capabilities block (docs/guides/tinker-integration.md).
+# checkpoint has no catalog row, so only the provider's preset answers for it.
+# Its model table carries its own capabilities block, which overrides the
+# preset. It is an exact-output slot only when it states the window, the
+# effort ladder, JSON mode, native schema and the output ceiling
+# (docs/guides/tinker-integration.md).
 # [providers.tinker]
 # display-name = "Thinking Machines Tinker"
 # protocol = "openai-compatible-http"

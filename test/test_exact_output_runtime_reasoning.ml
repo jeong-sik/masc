@@ -33,7 +33,8 @@ let test_missing_effort_has_typed_request_rejection () =
     { target_ref = "openrouter.probe"
     ; binding = openrouter_binding ()
     ; credential = Resolver.Credential_not_declared
-    ; body_timeout_s = Some exact_body_timeout_s } in
+    ; body_timeout_s = Some exact_body_timeout_s
+    ; model_declaration = Resolver.No_model_declaration } in
   let snapshot = Resolver.load_resolver_snapshot
       ~catalog:(Resolver.Embedded_with_targets [ target ]) ()
     |> require_ok "resolver snapshot" in
@@ -80,11 +81,61 @@ reasoning-effort = %S
 [openrouter.probe]
 |} exact_body_timeout_s effort
 
-let with_runtime f =
+(* The guide's checkpoint binding (docs/guides/tinker-integration.md,
+   "Hot-Swapping a Fine-Tuned Checkpoint"): a tinker:// model the catalog has
+   no row for, under the tinker provider row, whose block states the five
+   reads an exact slot needs. The Librarian lane declares the guide's budget,
+   the board lane one above the stated output ceiling, and the HITL lane
+   none. *)
+let tinker_checkpoint_toml effort = Printf.sprintf {|[runtime]
+default = "tinker.tinker-inkling-ckpt"
+[runtime.exact_output_lanes.librarian_exact]
+slots = ["tinker.tinker-inkling-ckpt"]
+max_output_tokens = 32768
+[runtime.exact_output_lanes.hitl_auto_judge]
+slots = ["tinker.tinker-inkling-ckpt"]
+[runtime.exact_output_lanes.board_attention_exact]
+slots = ["tinker.tinker-inkling-ckpt"]
+max_output_tokens = 40000
+[providers.tinker]
+protocol = "openai-compatible-http"
+endpoint = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
+connect-timeout-s = 1200.0
+exact-body-timeout-s = 1200.0
+[providers.tinker.credentials]
+type = "env"
+key = "TINKER_API_KEY"
+[providers.tinker.healthcheck]
+path = "/models"
+[models.tinker-inkling-ckpt]
+api-name = "tinker://example:train:0/sampler_weights/x"
+max-context = 65536
+tools-support = true
+thinking-support = true
+streaming = true
+reasoning-effort = %S
+[models.tinker-inkling-ckpt.capabilities]
+thinking-control-format = "reasoning-effort-default-on"
+accepted-reasoning-efforts = ["minimal", "low", "medium", "high", "xhigh"]
+reasoning-streaming-format = "delta:reasoning_content"
+supports-tool-choice = true
+supports-required-tool-choice = true
+supports-parallel-tool-calls = true
+supports-named-tool-choice = false
+supports-response-format-json = false
+supports-structured-output = false
+supports-image-input = false
+supports-multimodal-inputs = false
+max-output-tokens = 32768
+[tinker.tinker-inkling-ckpt]
+max-concurrent = 4
+|} effort
+
+let with_runtime ?(toml = runtime_toml) ?(credential_env = "OPENROUTER_API_KEY") f =
   Masc_test_deps.with_process_env Env_config_core.base_path_env_key None @@ fun () ->
   Masc_test_deps.with_process_env Env_config_core.config_dir_env_key None @@ fun () ->
   Masc_test_deps.with_process_env "AGENT_CORE_MODEL_CATALOG" None @@ fun () ->
-  Masc_test_deps.with_process_env "OPENROUTER_API_KEY" (Some "synthetic-no-network") @@ fun () ->
+  Masc_test_deps.with_process_env credential_env (Some "synthetic-no-network") @@ fun () ->
   let root = Filename.temp_dir "exact-runtime-reasoning-" "" in
   let previous_runtime = Runtime.For_testing.snapshot () in
   let previous_startup = Runtime_startup_state.get () in
@@ -98,7 +149,7 @@ let with_runtime f =
   (Llm_provider.Catalog_snapshot.reset ());
   let load ?(lane_id = "librarian_exact") effort =
     let path = Filename.concat root "runtime.toml" in
-    Fs_compat.save_file path (runtime_toml effort);
+    Fs_compat.save_file path (toml effort);
     Runtime.init_default ~config_path:path |> require_ok "runtime initialization";
     let runtime = match Runtime.get_runtimes () with
       | [ runtime ] -> runtime | _ -> fail "expected one runtime" in
@@ -159,7 +210,8 @@ let test_explicit_effort_reaches_serialized_request () =
       ; binding = openrouter_binding ~reasoning_effort:effort ()
       ; credential =
           Resolver.Credential_resolved (Llm_provider.Secret.of_string "synthetic-no-network")
-      ; body_timeout_s = Some exact_body_timeout_s } in
+      ; body_timeout_s = Some exact_body_timeout_s
+      ; model_declaration = Resolver.No_model_declaration } in
     let snapshot = Resolver.load_resolver_snapshot
         ~catalog:(Resolver.Embedded_with_targets [ target ]) ()
       |> require_ok "wire resolver snapshot" in
@@ -221,6 +273,105 @@ let test_declared_lane_budget_reaches_serialized_request () =
      = `Null)
 ;;
 
+(* The runtime's declared target, run through the wire resolver so the bytes
+   of its request can be read. *)
+let wire_declared_target (target : EO.declared_target) : Resolver.declared_target =
+  { target_ref = target.target_ref
+  ; binding = target.binding
+  ; credential =
+      (match target.credential with
+       | EO.Credential_not_declared -> Resolver.Credential_not_declared
+       | EO.Credential_resolved key -> Resolver.Credential_resolved key
+       | EO.Credential_unresolved { environment_variable } ->
+         Resolver.Credential_unresolved { environment_variable })
+  ; body_timeout_s = target.body_timeout_s
+  ; model_declaration =
+      (match target.model_declaration with
+       | EO.No_model_declaration -> Resolver.No_model_declaration
+       | EO.Declared_model capabilities -> Resolver.Declared_model capabilities)
+  }
+
+(* The request bytes the runtime bootstrap froze for [admitted], the slot a
+   lane resolved to. They are read from the wire plan of the declared target
+   the runtime built, admitted the way the lane admits it ([lane_budget] is
+   the lane's [max_output_tokens]), and the digest ties them to the runtime
+   plan. The wire plan goes through ready admission, as the lane's request
+   does: [serialized_body] preflights the projection config as it stands, and
+   a binding that declares [max-concurrent] (the guide's does) is refused
+   there as [Global_admission_not_allowed]. *)
+let checkpoint_request_body ?lane_budget admitted =
+  let module Ready = Llm_provider.Exact_output_ready_admission in
+  let runtime_receipt = EO.start_attempt (ready admitted)
+    |> require_ok "runtime attempt" |> EO.attempt_receipt in
+  let declared =
+    match Runtime.exact_output_targets (Runtime.get_runtimes ()) with
+    | [ declared ] -> wire_declared_target declared
+    | _ -> fail "expected the checkpoint binding as the one exact target" in
+  let snapshot = Resolver.load_resolver_snapshot
+      ~catalog:(Resolver.Embedded_with_targets [ declared ]) ()
+    |> require_ok "wire resolver snapshot" in
+  let wire_admitted = Resolver.admit_target_ref snapshot declared.target_ref
+    |> require_ok "wire admitted target" in
+  let selected =
+    (match lane_budget with
+     | Some budget -> Resolver.admitted_target_with_max_tokens wire_admitted budget
+     | None -> wire_admitted)
+    |> Resolver.resolve_target
+    |> require_ok "wire selected target"
+  in
+  let wire_requirement = Ready.make_output_requirement
+      ~schema:(`Assoc [ "type", `String "object" ])
+      ~minimum_guarantee:Ready.Json_syntax in
+  let wire_plan = Ready.admit ~target:selected ~messages wire_requirement
+    |> require_ok "wire ready plan" in
+  let serialized = Plan.request_body wire_plan.plan in
+  check string "runtime bootstrap freezes these exact request bytes"
+    (Agent_core_sha256.(digest_string serialized |> to_hex))
+    (EO.receipt_request_body_sha256 runtime_receipt);
+  Printf.eprintf "checkpoint request: %s\n%!" serialized;
+  Yojson.Safe.from_string serialized
+
+(* The guide's checkpoint binding on its Librarian lane: the request carries
+   the binding's effort and the lane's budget, within the slot's stated output
+   ceiling, and no response_format, since the block states neither JSON mode
+   nor native schema. The lane decides max_tokens; the stated ceiling only
+   cuts it, as on the board lane, whose budget is above it. On the HITL lane,
+   which declares no budget, the request carries no max_tokens. *)
+let test_guide_checkpoint_request_carries_its_effort_and_lane_budget_and_no_envelope () =
+  with_runtime ~toml:tinker_checkpoint_toml ~credential_env:"TINKER_API_KEY" @@ fun load ->
+  List.iter (fun effort ->
+    let effort_name = Llm_provider.Reasoning_effort.to_string effort in
+    let admitted = load effort_name in
+    let capabilities = (EO.projection_target admitted).capabilities in
+    check bool "the slot has the stated JSON mode" false
+      capabilities.supports_response_format_json;
+    check bool "the slot has the stated native schema" false
+      capabilities.supports_structured_output;
+    check (option int) "the slot has the stated output ceiling" (Some 32768)
+      capabilities.max_output_tokens;
+    let body = checkpoint_request_body ~lane_budget:32768 admitted in
+    check string "the request carries the binding's effort" effort_name
+      Yojson.Safe.Util.(body |> member "reasoning_effort" |> to_string);
+    let max_tokens = Yojson.Safe.Util.(body |> member "max_tokens" |> to_int) in
+    check int "the request max_tokens is the lane budget" 32768 max_tokens;
+    check bool "the lane budget stays within the slot's output ceiling" true
+      (match capabilities.max_output_tokens with
+       | Some ceiling -> max_tokens <= ceiling
+       | None -> false);
+    check bool "the request carries no response_format" true
+      (Yojson.Safe.Util.member "response_format" body = `Null))
+    [ Llm_provider.Reasoning_effort.Low; Llm_provider.Reasoning_effort.High ];
+  check int "a lane budget above the stated output ceiling is cut to it" 32768
+    Yojson.Safe.Util.(
+      checkpoint_request_body ~lane_budget:40000
+        (load ~lane_id:"board_attention_exact" "low")
+      |> member "max_tokens" |> to_int);
+  check bool "a lane with no budget sends no max_tokens" true
+    (Yojson.Safe.Util.member "max_tokens"
+       (checkpoint_request_body (load ~lane_id:"hitl_auto_judge" "low"))
+     = `Null)
+;;
+
 (* One declared target, published straight into the registry with one lane,
    so a lane's [thinking] is checked against the slot's own capabilities. *)
 let publish_thinking_lane ~binding ~thinking =
@@ -228,7 +379,8 @@ let publish_thinking_lane ~binding ~thinking =
     { target_ref = "openrouter.probe"
     ; binding
     ; credential = EO.Credential_not_declared
-    ; body_timeout_s = Some exact_body_timeout_s } in
+    ; body_timeout_s = Some exact_body_timeout_s
+    ; model_declaration = EO.No_model_declaration } in
   let snapshot = EO.load_resolver_snapshot
       ~catalog:(EO.Embedded_with_targets [ target ]) ()
     |> require_ok "resolver snapshot" in
@@ -360,6 +512,8 @@ let () =
           test_explicit_effort_reaches_serialized_request;
         test_case "the declared lane budget is the serialized max_tokens" `Quick
           test_declared_lane_budget_reaches_serialized_request;
+        test_case "the guide's checkpoint binding sends its effort and lane budget, no envelope" `Quick
+          test_guide_checkpoint_request_carries_its_effort_and_lane_budget_and_no_envelope;
         test_case "the declared lane thinking reaches the request config" `Quick
           test_declared_lane_thinking_reaches_request_config;
         test_case "a lane thinking the slot cannot carry is refused at publication" `Quick

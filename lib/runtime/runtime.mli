@@ -338,8 +338,12 @@ val init_default : config_path:string -> (unit, string) result
 
 val exact_output_targets : t list -> Agent_core.Exact_output.declared_target list
 (** The exact-output slots of [runtimes]: every HTTP binding, carried whole with
-    its resolved credential and its [exact-body-timeout-s]. Official-client
-    runtimes do no exact output and are left out. *)
+    its resolved credential and its [exact-body-timeout-s]. A binding whose
+    runtime.toml states the five reads {!Runtime_exact_reads.parse} requires
+    also declares its model: those reads as stated, laid over the
+    capabilities its Keeper turns run on. The declaration answers where the
+    catalog has no row for the model.
+    Official-client runtimes do no exact output and are left out. *)
 
 type exact_output_catalog =
   { catalog_input : Agent_core.Exact_output.resolver_catalog_input
@@ -365,15 +369,16 @@ val exact_output_resolver_catalog :
     [catalog_exact_slots.emptied_lane_ids] as the lanes excused from the
     required set. *)
 
-val report_exact_output_registry : Runtime_exact_output_registry.t -> unit
+val report_exact_output_registry : runtimes:t list -> Runtime_exact_output_registry.t -> unit
 (** Log what [registry] left out: targets whose binding has no catalog row,
     rejected lane slots (a slot rule 3 left out is counted, not diagnosed
     again), [verifier_exact] slots that cannot judge, and the optional lanes
-    with nothing admitted. Boot runs it after publishing and every config
-    commit that replaces the registry runs it when what it reports changed
-    (a kept registry's rejected slots are listed, not diagnosed, because it
-    was built from an earlier text). The rule-3 slots and lanes themselves
-    are named by {!warn_exact_slot_degradation}. *)
+    with nothing admitted. A rejected slot's binding is read from [runtimes],
+    the runtimes [registry] was built from. Boot runs it after publishing and
+    every config commit that replaces the registry runs it when what it
+    reports changed (a kept registry's rejected slots are listed, not
+    diagnosed, because it was built from an earlier text). The rule-3 slots
+    and lanes themselves are named by {!warn_exact_slot_degradation}. *)
 
 val warn_exact_slot_degradation : exact_slot_degradation -> unit
 (** One WARN per exact slot rule 3 leaves out and one per lane it empties.

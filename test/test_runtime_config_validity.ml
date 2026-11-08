@@ -861,12 +861,9 @@ let test_nemotron_seed_uses_declared_boolean_thinking () =
     [None; Some false]
 ;;
 
-(* A lane slot names a runtime binding, so the slots a config declares are its
-   bindings. The server's own derivation answers which, and this asks it
-   instead of keeping a second copy beside it: the copy is how a slot came to
-   run on a different wire than the Keeper requests of the same binding
-   (#37674). *)
-let declared_targets_of_config_path ?(environment = []) ~label path =
+(* The bindings a config loads, read while they are the process's runtimes
+   and put back after. *)
+let with_config_runtimes ?(environment = []) ~label path read =
   let runtime_snapshot = Runtime.For_testing.snapshot () in
   let startup_state = Runtime_startup_state.get () in
   Fun.protect
@@ -886,9 +883,18 @@ let declared_targets_of_config_path ?(environment = []) ~label path =
   with_environment environment @@ fun () ->
   match Runtime.init_default ~config_path:path with
   | Error detail -> failf "%s: runtime bindings should initialize: %s" label detail
-  (* Loading the bindings is what makes them targets, so a binding this config
-     disables has no slot here -- the same answer the server gives. *)
-  | Ok () -> Runtime.exact_output_targets (Runtime.get_runtimes ())
+  | Ok () -> read (Runtime.get_runtimes ())
+;;
+
+(* A lane slot names a runtime binding, so the slots a config declares are its
+   bindings. The server's own derivation answers which, and this asks it
+   instead of keeping a second copy beside it: the copy is how a slot came to
+   run on a different wire than the Keeper requests of the same binding
+   (#37674). Loading the bindings is what makes them targets, so a binding
+   this config disables has no slot here -- the same answer the server
+   gives. *)
+let declared_targets_of_config_path ?environment ~label path =
+  with_config_runtimes ?environment ~label path Runtime.exact_output_targets
 ;;
 
 let snapshot_of_config ?environment ~label path =
@@ -1924,15 +1930,19 @@ let test_seed_catalog_decided_capability_keys_agree_with_the_catalog () =
            | None -> failf "%s: an agent_core seed binding without a provider id" runtime.id
          in
          (* The adapter's own lookup, argument for argument: the branch that
-            drops the twelve is the one this answers [Some] for. *)
+            drops the twelve is the one a model row answers. A provider preset
+            alone takes every key the block writes (RFC-0514). *)
          (match
-            Llm_provider.Capabilities.for_provider_model_id
-              ~wire:(Some config.Llm_provider.Provider_config.kind)
-              ~provider:(Llm_provider.Model_catalog.Declared_provider provider_label)
-              ~model_id:config.Llm_provider.Provider_config.model_id
+            Llm_provider.Capabilities.request_policy_catalog_answer
+              (Llm_provider.Capabilities.resolve_snapshot_request_policy
+                 ~snapshot:(Llm_provider.Catalog_snapshot.current ())
+                 ~wire:config.Llm_provider.Provider_config.kind
+                 ~provider_id:provider_label
+                 ~model_id:config.Llm_provider.Provider_config.model_id)
           with
-          | None -> ()
-          | Some _ ->
+          | Llm_provider.Capabilities.Provider_preset _
+          | Llm_provider.Capabilities.No_catalog_answer -> ()
+          | Llm_provider.Capabilities.Model_row _ ->
             visited := runtime.model.id :: !visited;
             (match Llm_provider.Provider_config.capabilities_for_config_model config with
              | None ->
@@ -7518,6 +7528,259 @@ let test_wizard_provider_models_share_catalog_authority () =
       (List.exists (fun row -> model_id row = "deepseek-v4-pro") proxy))
 ;;
 
+(* A Tinker sampler checkpoint has no catalog row; only its provider has one
+   (RFC-0514). A binding whose runtime.toml states the five reads an exact
+   slot needs is an exact slot that answers with what it states. One that
+   leaves a read unstated is left out, and the reads it leaves are named; the
+   provider preset does not stand in for one. Each read is left out once on
+   its own: the window and the output ceiling on the Anthropic wire, whose
+   preset answers both (a window of 200,000 and a ceiling of its own), and
+   the three other table keys on Tinker. A binding with no capabilities table
+   states none of the four the table holds, on the Anthropic wire as well,
+   where the adapter fills the binding's capability override from the
+   preset. *)
+let test_a_rowless_model_is_an_exact_slot_only_when_runtime_toml_states_every_exact_read () =
+  let checkpoint = "tinker://example:train:0/sampler_weights/x" in
+  let messages_probe = "messages-rowless-probe" in
+  let runtime_toml =
+    Printf.sprintf
+      {|[providers.tinker]
+protocol = "openai-compatible-http"
+endpoint = "https://tinker.example/v1"
+
+[models.declared]
+api-name = %S
+max-context = 262144
+
+[models.declared.capabilities]
+accepted-reasoning-efforts = ["low", "high"]
+supports-response-format-json = false
+supports-structured-output = false
+max-output-tokens = 32768
+
+[models.no-ladder]
+api-name = %S
+max-context = 262144
+
+[models.no-ladder.capabilities]
+supports-response-format-json = false
+supports-structured-output = false
+max-output-tokens = 32768
+
+[models.no-json]
+api-name = %S
+max-context = 262144
+
+[models.no-json.capabilities]
+accepted-reasoning-efforts = ["low", "high"]
+supports-structured-output = false
+max-output-tokens = 32768
+
+[models.no-schema]
+api-name = %S
+max-context = 262144
+
+[models.no-schema.capabilities]
+accepted-reasoning-efforts = ["low", "high"]
+supports-response-format-json = false
+max-output-tokens = 32768
+
+[models.tableless]
+api-name = %S
+max-context = 262144
+
+[tinker.declared]
+
+[tinker.no-ladder]
+
+[tinker.no-json]
+
+[tinker.no-schema]
+
+[tinker.tableless]
+
+[providers.deepseek-anthropic]
+protocol = "messages-http"
+endpoint = "https://api.deepseek.com/anthropic"
+
+[models.messages-unwindowed]
+api-name = %S
+
+[models.messages-unwindowed.capabilities]
+accepted-reasoning-efforts = ["low", "high"]
+supports-response-format-json = false
+supports-structured-output = false
+max-output-tokens = 32768
+
+[models.messages-no-ceiling]
+api-name = %S
+max-context = 131072
+
+[models.messages-no-ceiling.capabilities]
+accepted-reasoning-efforts = ["low", "high"]
+supports-response-format-json = false
+supports-structured-output = false
+
+[models.messages-tableless]
+api-name = %S
+max-context = 131072
+
+[deepseek-anthropic.messages-unwindowed]
+
+[deepseek-anthropic.messages-no-ceiling]
+
+[deepseek-anthropic.messages-tableless]
+
+[runtime]
+default = "tinker.declared"
+|}
+      checkpoint
+      checkpoint
+      checkpoint
+      checkpoint
+      checkpoint
+      messages_probe
+      messages_probe
+      messages_probe
+  in
+  let previous = Llm_provider.Catalog_snapshot.current () in
+  Fun.protect ~finally:(fun () -> Llm_provider.Catalog_snapshot.publish previous)
+  @@ fun () ->
+  (* The embedded catalog: a tinker provider row and no checkpoint row, so
+     only the provider's openai_chat preset answers. That preset has no
+     window and turns JSON mode, native schema, image and multimodal input
+     on. The deepseek-anthropic provider row answers the probe model the
+     same way, with its anthropic preset. *)
+  Llm_provider.Catalog_snapshot.reset ();
+  let require_preset_only ~wire ~provider_id ~model_id =
+    match
+      Llm_provider.Capabilities.request_policy_catalog_answer
+        (Llm_provider.Capabilities.resolve_snapshot_request_policy
+           ~snapshot:(Llm_provider.Catalog_snapshot.current ())
+           ~wire ~provider_id ~model_id)
+    with
+    | Llm_provider.Capabilities.Provider_preset _ -> ()
+    | Llm_provider.Capabilities.Model_row _ | Llm_provider.Capabilities.No_catalog_answer ->
+      failf "only the %s provider preset answers for %s" provider_id model_id
+  in
+  require_preset_only ~wire:Llm_provider.Provider_kind.OpenAI_compat ~provider_id:"tinker"
+    ~model_id:checkpoint;
+  require_preset_only ~wire:Llm_provider.Provider_kind.Anthropic
+    ~provider_id:"deepseek-anthropic" ~model_id:messages_probe;
+  with_temp_runtime_toml runtime_toml @@ fun path ->
+  let label = "rowless checkpoint" in
+  let runtimes = with_config_runtimes ~label path Fun.id in
+  let loaded runtime_id =
+    match
+      List.find_opt
+        (fun (runtime : Runtime_instance.t) -> String.equal runtime.id runtime_id)
+        runtimes
+    with
+    | Some runtime -> runtime
+    | None -> failf "%s must load as a binding" runtime_id
+  in
+  let exact_reads = list (testable (Fmt.of_to_string Runtime_exact_reads.key) ( = )) in
+  let unstated runtime_id =
+    match Runtime_exact_reads.parse (loaded runtime_id) with
+    | Ok (_ : Runtime_exact_reads.stated) -> []
+    | Error (first, rest) -> first :: rest
+  in
+  check exact_reads "the declared binding states every exact read" []
+    (unstated "tinker.declared");
+  check exact_reads "a binding with no effort ladder leaves only the ladder unstated"
+    [ Runtime_exact_reads.Reasoning_effort_ladder ]
+    (unstated "tinker.no-ladder");
+  check exact_reads "a binding with no JSON mode leaves only JSON mode unstated"
+    [ Runtime_exact_reads.Json_mode ]
+    (unstated "tinker.no-json");
+  check exact_reads "a binding with no native schema leaves only native schema unstated"
+    [ Runtime_exact_reads.Native_schema ]
+    (unstated "tinker.no-schema");
+  check exact_reads "a binding with no table leaves the four table keys unstated"
+    [ Runtime_exact_reads.Reasoning_effort_ladder
+    ; Runtime_exact_reads.Json_mode
+    ; Runtime_exact_reads.Native_schema
+    ; Runtime_exact_reads.Output_ceiling
+    ]
+    (unstated "tinker.tableless");
+  (* What makes the unwindowed case worth asking: the anthropic preset
+     answers a window for a model that states none. *)
+  (match
+     Runtime_instance.resolve_max_context_of_runtime
+       (loaded "deepseek-anthropic.messages-unwindowed")
+   with
+   | Some (200_000, Runtime_instance.Capability) -> ()
+   | Some _ | None -> fail "only the anthropic preset answers the unwindowed window, with 200,000");
+  check exact_reads "a window only the preset answers is not stated"
+    [ Runtime_exact_reads.Context_window ]
+    (unstated "deepseek-anthropic.messages-unwindowed");
+  (* What makes the ceiling case worth asking: the anthropic preset answers
+     an output ceiling for a model that states none. *)
+  (match
+     (agent_core_provider_config (loaded "deepseek-anthropic.messages-no-ceiling"))
+       .Llm_provider.Provider_config.model_capabilities_override
+   with
+   | Some { Llm_provider.Capabilities.max_output_tokens = Some (_ : int); _ } -> ()
+   | Some { Llm_provider.Capabilities.max_output_tokens = None; _ } | None ->
+     fail "the anthropic preset answers the output ceiling of the binding that states none");
+  check exact_reads "an output ceiling only the preset answers is not stated"
+    [ Runtime_exact_reads.Output_ceiling ]
+    (unstated "deepseek-anthropic.messages-no-ceiling");
+  (* What makes the Anthropic case worth asking: the binding's capability
+     override is there although its model states nothing. *)
+  (match
+     (agent_core_provider_config (loaded "deepseek-anthropic.messages-tableless"))
+       .Llm_provider.Provider_config.model_capabilities_override
+   with
+   | Some (_ : Llm_provider.Capabilities.capabilities) -> ()
+   | None -> fail "the Anthropic wire fills the table-less binding's capability override");
+  let snapshot = snapshot_of_config ~label path in
+  (match Exact_output.admit_target_ref snapshot "tinker.declared" with
+   | Error _ -> fail "a binding that states every exact read must be an exact slot"
+   | Ok admitted ->
+     let capabilities = (Exact_output.projection_target admitted).capabilities in
+     check (option int) "the slot answers with the stated window" (Some 262144)
+       capabilities.max_context_tokens;
+     check (option (list string)) "the slot answers with the stated effort ladder"
+       (Some [ "low"; "high" ])
+       (Option.map
+          (List.map Llm_provider.Reasoning_effort.to_string)
+          capabilities.accepted_reasoning_efforts);
+     check (option int) "the slot answers with the stated output ceiling" (Some 32768)
+       capabilities.max_output_tokens;
+     check bool "the stated JSON mode overrides the preset" false
+       capabilities.supports_response_format_json;
+     check bool "the stated native schema overrides the preset" false
+       capabilities.supports_structured_output;
+     check bool "unwritten image input stays off over the preset" false
+       capabilities.supports_image_input;
+     check bool "unwritten multimodal input stays off over the preset" false
+       capabilities.supports_multimodal_inputs);
+  let require_left_out target_id =
+    (match Exact_output.admit_target_ref snapshot target_id with
+     | Error (Exact_output.Target_not_in_catalog target) ->
+       check string "the left-out binding is the one named" target_id target
+     | Error _ -> failf "%s must be left out as not in the catalog" target_id
+     | Ok _ -> failf "%s leaves an exact read unstated and must not be an exact slot" target_id);
+    match
+      List.find_map
+        (fun (binding : Exact_output.rejected_target_binding) ->
+           if String.equal binding.target_ref target_id then Some binding.component else None)
+        (Exact_output.resolver_rejected_target_bindings snapshot)
+    with
+    | Some Exact_output.Target_model -> ()
+    | Some Exact_output.Target_provider -> failf "%s must be rejected for its model, not its provider" target_id
+    | None -> failf "%s must be recorded as a rejected binding" target_id
+  in
+  require_left_out "tinker.no-ladder";
+  require_left_out "tinker.no-json";
+  require_left_out "tinker.no-schema";
+  require_left_out "tinker.tableless";
+  require_left_out "deepseek-anthropic.messages-unwindowed";
+  require_left_out "deepseek-anthropic.messages-no-ceiling";
+  require_left_out "deepseek-anthropic.messages-tableless"
+;;
+
 type materialized_catalog_fact = Context_window | Price_row
 
 let test_runtime_selection_owns_catalog ~initially_known ~fact () =
@@ -7975,6 +8238,9 @@ let () =
         ; test_case
             "wizard model rows use provider catalog authority"
             `Quick test_wizard_provider_models_share_catalog_authority
+        ; test_case
+            "a rowless model is an exact slot only when runtime.toml states every exact read"
+            `Quick test_a_rowless_model_is_an_exact_slot_only_when_runtime_toml_states_every_exact_read
         ] )
     ; ( "lsp servers"
       , [ test_case "reads a command per language" `Quick test_lsp_servers_reads_a_command_per_language

@@ -31,11 +31,20 @@ type binding_credential =
   | Credential_resolved of Secret.t
   | Credential_unresolved of { environment_variable : string }
 
+(* What a slot's deployment declares about its model for exact output. The
+   binding's capability override is not this declaration: a deployment can
+   fill that override from the catalog's own answer, and a copy of what the
+   catalog answers states nothing about the model. *)
+type model_declaration =
+  | No_model_declaration
+  | Declared_model of Caps.capabilities
+
 type declared_target =
   { target_ref : string
   ; binding : PC.t
   ; credential : binding_credential
   ; body_timeout_s : float option
+  ; model_declaration : model_declaration
   }
 
 type resolver_catalog_input =
@@ -110,12 +119,15 @@ type resolver_snapshot_error =
    reaches. Reading the row instead sent the Librarian's ollama_cloud slot to
    the native /api/chat surface while its Keeper requests ran on the
    OpenAI-compatible one (#37674); the Keeper path answered the same question
-   from the binding after the mirror-image failure in #33652. *)
+   from the binding after the mirror-image failure in #33652. A catalog
+   document's target has no deployment either, so only a binding wire carries
+   a model declaration. *)
 type target_wire =
   | Catalog_provider_wire
   | Binding_wire of
       { config : PC.t
       ; credential : binding_credential
+      ; model_declaration : model_declaration
       }
 
 type target_declaration =
@@ -551,10 +563,13 @@ let canonical_catalog_evidence catalog model_entries target_declarations =
       ]
       @
       (* The wire a slot runs on is part of what its evidence covers: the same
-         provider row serves more than one, and a binding names which. *)
+         provider row serves more than one, and a binding names which. A
+         declared model is not a catalog row, so it is not evidence; the
+         target identity fingerprints the declared capabilities it
+         projects. *)
       (match target.wire with
        | Catalog_provider_wire -> [ "wire=catalog_provider" ]
-       | Binding_wire { config = binding; credential = _ } ->
+       | Binding_wire { config = binding; credential = _; model_declaration = _ } ->
          [ "wire=binding"
          ; PC.string_of_provider_kind binding.PC.kind
          ; binding.PC.base_url
@@ -647,7 +662,12 @@ let load_resolver_snapshot
         ; reasoning_effort = binding.PC.reasoning_effort
         ; connect_timeout_s = binding.PC.connect_timeout_s
         ; body_timeout_s = declared.body_timeout_s
-        ; wire = Binding_wire { config = binding; credential = declared.credential }
+        ; wire =
+            Binding_wire
+              { config = binding
+              ; credential = declared.credential
+              ; model_declaration = declared.model_declaration
+              }
         }
   in
   let* base_source, base_document, declared_targets =
@@ -711,6 +731,17 @@ let load_resolver_snapshot
                   { target_ref = rejection.target_ref; component })
            | Exclude_unbound_targets -> Ok (bindings, rejection :: rejected)
          in
+         (* What the model answers with on this target's wire, and the model
+            row's own Anthropic thinking policy. A binding answers with the
+            config its ordinary requests already run on: its own capability
+            override first, else the frozen row laid over the base that wire
+            selects. A model the catalog has no row for answers only with what
+            its deployment declared, and has no row policy. Both are settled
+            here, where the wire is matched, so no later step can pair a
+            catalog wire with a declaration. *)
+         let bind provider capabilities catalog_policy =
+           Ok ((target, provider, capabilities, catalog_policy) :: bindings, rejected)
+         in
          match
            Binding.resolve_exact
              ~catalog
@@ -718,8 +749,30 @@ let load_resolver_snapshot
              ~model_id:target.model_id
          with
          | Error Binding.Provider_missing -> reject Target_provider
-         | Error Binding.Model_missing -> reject Target_model
-         | Ok (provider, model) -> Ok ((target, provider, model) :: bindings, rejected))
+         | Ok (provider, model) ->
+           let catalog_policy = Binding.anthropic_thinking_control_of_model model in
+           (match target.wire with
+            | Catalog_provider_wire ->
+              bind provider (Binding.capabilities_of_catalog_binding provider model) catalog_policy
+            | Binding_wire { config = binding; credential = _; model_declaration = _ } ->
+              bind
+                provider
+                (match binding.PC.model_capabilities_override with
+                 | Some capabilities -> capabilities
+                 | None ->
+                   Binding.capabilities_of_catalog_binding
+                     ~wire:binding.PC.kind
+                     provider
+                     model)
+                catalog_policy)
+         | Error (Binding.Model_missing provider) ->
+           (match target.wire with
+            | Binding_wire
+                { model_declaration = Declared_model capabilities; config = _; credential = _ }
+              -> bind provider capabilities None
+            | Binding_wire
+                { model_declaration = No_model_declaration; config = _; credential = _ }
+            | Catalog_provider_wire -> reject Target_model))
       (Ok ([], []))
       target_declarations
   in
@@ -729,24 +782,17 @@ let load_resolver_snapshot
       (fun result
         ( (target : target_declaration)
         , (provider : Model_catalog.provider_entry)
-        , (model : Model_catalog.model_entry) ) ->
+        , (capabilities : Caps.capabilities)
+        , (catalog_policy : Caps.anthropic_thinking_control option) ) ->
          let* targets = result in
-         let catalog_policy = Binding.anthropic_thinking_control_of_model model in
          let* () = Ok () in
-         (* The wire, and with it the capabilities a request on that wire can
-            express and the reasoning stance it has to state. A binding answers
-            with the config its ordinary requests already run on: its own
-            capability override first, else the frozen row laid over the base
-            that wire selects. *)
-         let kind, base_url, request_path, reasoning_uncontrolled, capabilities =
+         (* The wire, and with it the reasoning stance a request on that wire
+            has to state. *)
+         let kind, base_url, request_path, reasoning_uncontrolled =
            match target.wire with
            | Catalog_provider_wire ->
-             ( provider.kind
-             , provider.base_url
-             , provider.request_path
-             , false
-             , Binding.capabilities_of_catalog_binding provider model )
-           | Binding_wire { config = binding; credential = _ } ->
+             provider.kind, provider.base_url, provider.request_path, false
+           | Binding_wire { config = binding; credential = _; model_declaration = _ } ->
              ( binding.PC.kind
              , binding.PC.base_url
              , binding.PC.request_path
@@ -755,14 +801,7 @@ let load_resolver_snapshot
                   provider's default. Dropping it here left the second kind of
                   row unable to say either, which is the same field-at-the-
                   boundary failure this change is about. *)
-               binding.PC.reasoning_uncontrolled
-             , (match binding.PC.model_capabilities_override with
-                | Some capabilities -> capabilities
-                | None ->
-                  Binding.capabilities_of_catalog_binding
-                    ~wire:binding.PC.kind
-                    provider
-                    model) )
+               binding.PC.reasoning_uncontrolled )
          in
          let* () = validate_base_url ~target_ref:target.target_ref base_url in
          let* () =

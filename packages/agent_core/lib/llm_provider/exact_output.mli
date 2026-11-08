@@ -70,6 +70,20 @@ type binding_credential =
   | Credential_resolved of Secret.t
   | Credential_unresolved of { environment_variable : string }
 
+(** What a slot's deployment declares about its model for exact output. The
+    binding's [model_capabilities_override] is not this declaration: a
+    deployment can fill that override from the catalog's own answer, and a
+    copy of what the catalog answers states nothing about the model. *)
+type model_declaration =
+  | No_model_declaration
+      (** Only a catalog model row answers for the model. A model the catalog
+          has no row for leaves the slot out as [Target_model]. *)
+  | Declared_model of Capabilities.capabilities
+      (** What the deployment declares the model answers with. Where the
+          catalog has the binding's provider row and no row for its model,
+          the slot binds to that provider row and answers with these. A
+          model row, where there is one, answers instead. *)
+
 (** One exact-output slot: the binding it names. A caller that already holds
     that binding as the typed config its ordinary requests run on -- a
     deployment does -- passes it whole instead of copying a field list into
@@ -87,6 +101,8 @@ type declared_target =
       (** The exact request's body deadline. It is the one request fact a
           binding does not carry: ordinary requests stream, and this one does
           not. *)
+  ; model_declaration : model_declaration
+      (** Read only when the catalog has no row for the binding's model. *)
   }
 
 type resolver_catalog_input =
@@ -475,12 +491,15 @@ val snapshot_flow
 
 (** Parse exactly one typed catalog input and freeze a private immutable target
     map. The default input is the embedded AGENT_CORE catalog, whose rows are
-    the only place a provider or model fact is written. A full replacement,
+    the only place a provider fact is written, and the only place a model fact
+    is written except a declared target's [Declared_model] for a model the
+    catalog has no row for. A full replacement,
     supplied as owned bytes or a file path, suppresses every embedded row.
     Provider endpoints and credentials come from the declared target binding.
     Invalid paths, syntax, collisions, and endpoint declarations fail closed.
     [Require_all_target_bindings] also rejects the snapshot when any target has
-    no exact provider/model join. [Exclude_unbound_targets] instead records and
+    no exact provider row, or neither a model row nor a [Declared_model] under
+    that provider. [Exclude_unbound_targets] instead records and
     excludes only those targets; callers must inspect
     [resolver_rejected_target_bindings] and decide whether their required target
     set remains available. Missing, invalid, or read-failed credentials are

@@ -399,7 +399,10 @@ let agent_core_thinking_control_format = function
 
 (* Every value a runtime capability block states, laid over [base]. [None]
    means the block stated nothing, so [base] decides — what a
-   [false]-defaulted bool could not deliver (#37435). *)
+   [false]-defaulted bool could not deliver (#37435). [tools-support] and
+   [streaming] are plain bools, not options: the parser fills an unwritten
+   one with [false] and [true], so they always carry a value and override
+   [base] whether the model table writes them or not. *)
 let stated_capabilities_over
       ~(base : Llm_provider.Capabilities.capabilities)
       (spec : Runtime_schema.model_spec)
@@ -498,7 +501,9 @@ let declared_capabilities_override_of_model_spec
     (* The preset speaks for every model of its provider and knows nothing of
        this one, so it is only the base: the block's window, output ceiling
        and thinking control override it as well, and an unstated value keeps
-       the preset's. *)
+       the preset's. [tools-support] and [streaming] are never unstated: the
+       parser fills them with [false] and [true], so they override the preset
+       even when the model table does not write them. *)
     Option.map
       (fun (caps : Runtime_schema.model_capabilities) ->
          { (stated_capabilities_over ~base:preset spec caps) with

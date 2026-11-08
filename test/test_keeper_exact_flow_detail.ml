@@ -221,6 +221,7 @@ let test_rejection_cause_reaches_terminal_and_intermediate_detail () =
     ; credential =
         Exact_output.Credential_unresolved { environment_variable = "MISSING_FLOW_KEY" }
     ; body_timeout_s = None
+    ; model_declaration = Exact_output.No_model_declaration
     }
   in
   let snapshot =

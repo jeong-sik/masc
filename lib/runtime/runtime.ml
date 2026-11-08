@@ -923,6 +923,31 @@ let exact_output_targets runtimes =
                    Agent_core.Exact_output.Credential_not_declared
                  | None -> Agent_core.Exact_output.Credential_resolved key)
             ; body_timeout_s = rt.provider.Runtime_schema.exact_body_timeout_s
+            ; (* A model the catalog has no row for is a slot only through what
+                 runtime.toml states for the five reads [Runtime_exact_reads]
+                 names; a provider preset does not stand in for one of them
+                 (RFC-0514 §2.2). The capability override alone says nothing
+                 about that: on the Anthropic wire the adapter copies the
+                 catalog answer into it when the model states nothing
+                 ([Runtime_adapter.with_client_history_replay]). Where all five
+                 are stated, the slot answers with them as runtime.toml states
+                 them, laid over what the binding's Keeper turns run on, which
+                 is that override; a table that states them always yields one.
+                 The provider's API shape (schema dialect, thinking control,
+                 system prompt, document input) is that override's, so the
+                 preset answers there where runtime.toml states nothing. A
+                 model row, where the catalog has one, answers instead. *)
+              model_declaration =
+                (match
+                   ( Runtime_exact_reads.parse rt
+                   , Llm_provider.Provider_config.capabilities_for_config_model config )
+                 with
+                 | Ok stated, Some base ->
+                   Agent_core.Exact_output.Declared_model
+                     (Runtime_exact_reads.capabilities_over ~base stated)
+                 | Ok (_ : Runtime_exact_reads.stated), None
+                 | Error (_ : Runtime_exact_reads.t * Runtime_exact_reads.t list), (Some _ | None)
+                   -> Agent_core.Exact_output.No_model_declaration)
             } : Agent_core.Exact_output.declared_target)
        | Runtime_execution.Codex_app_server _
        | Runtime_execution.Claude_code _
@@ -2116,12 +2141,17 @@ let warn_exact_slot_degradation (degradation : exact_slot_degradation) =
     degradation.emptied_lane_ids
 ;;
 
-let warn_rejected_exact_output_slots registry =
+let warn_rejected_exact_output_slots ~runtimes registry =
   (* A slot left out for rule 3 is rejected here too, because its target was
      never handed to the resolver. Its cause is already named, one WARN per
      slot, by [warn_exact_slot_degradation]; diagnosing it again would
      call it a subscription CLI or a typo. It is counted in the summary. *)
   let gaps = exact_slot_body_deadline_gaps () in
+  (* A slot's binding as [registry] was built from it: [runtimes] are the
+     runtimes it was built from, not whatever table is loaded now. *)
+  let runtime_of_slot slot_id =
+    List.find_opt (fun (rt : t) -> String.equal rt.id slot_id) runtimes
+  in
   let left_out_for_deadline (slot : Runtime_exact_output_registry.rejected_slot) =
     List.exists
       (fun (gap : exact_slot_body_deadline_gap) ->
@@ -2129,16 +2159,58 @@ let warn_rejected_exact_output_slots registry =
          && String.equal gap.slot_id slot.slot_id)
       gaps
   in
+  (* A slot whose binding names a model the catalog has no row for, under a
+     provider it has a row for, is left out by the resolver ([Target_model])
+     while runtime.toml leaves one of the five reads [Runtime_exact_reads]
+     names unstated (RFC-0514 §2.2). The diagnosis below would call it a binding that
+     resolved to no catalog row; it is named here instead, once per slot,
+     with the keys to write. Only runtime bindings are targets; under a full
+     replacement catalog none is. *)
+  let target_source = exact_output_target_source () in
+  let model_row_missing =
+    List.filter_map
+      (fun (binding : Agent_core.Exact_output.rejected_target_binding) ->
+         match binding.component with
+         | Agent_core.Exact_output.Target_model -> Some binding.target_ref
+         | Agent_core.Exact_output.Target_provider -> None)
+      (Runtime_exact_output_registry.rejected_target_bindings registry)
+  in
+  let unstated_reads_of (slot : Runtime_exact_output_registry.rejected_slot) =
+    match target_source with
+    | Replacement_catalog_targets { path = _ } -> None
+    | Runtime_binding_targets when List.mem slot.slot_id model_row_missing ->
+      Option.bind (runtime_of_slot slot.slot_id) (fun (rt : t) ->
+        match Runtime_exact_reads.parse rt with
+        | Ok (_ : Runtime_exact_reads.stated) -> None
+        | Error unstated -> Some (rt, unstated))
+    | Runtime_binding_targets -> None
+  in
   let all_rejected = Runtime_exact_output_registry.rejected_slots registry in
   let deadline_rejected = List.filter left_out_for_deadline all_rejected in
-  let rejected =
+  let unstated, rejected =
     List.filter (fun slot -> not (left_out_for_deadline slot)) all_rejected
+    |> List.partition_map (fun slot ->
+      match unstated_reads_of slot with
+      | Some (rt, reads) -> Either.Left (slot, rt, reads)
+      | None -> Either.Right slot)
   in
+  List.iter
+    (fun ((slot : Runtime_exact_output_registry.rejected_slot), (rt : t), (first, rest)) ->
+       Log.Server.warn
+         "exact_output: lane %S slot %d (%S) ignored because model %S has no AGENT_CORE catalog row under provider %S and runtime.toml model %S states no %s; a provider preset does not stand in for the window, effort ladder, JSON mode, native schema or output ceiling of a model it has no row for, so write each one"
+         slot.lane_id
+         slot.position
+         slot.slot_id
+         rt.model.Runtime_schema.api_name
+         rt.provider.Runtime_schema.id
+         rt.model.Runtime_schema.id
+         (String.concat ", " (List.map Runtime_exact_reads.key (first :: rest))))
+    unstated;
   let configured_runtime slot_id =
     Option.map
       (fun (rt : t) ->
          rt.provider.Runtime_schema.id, rt.model.Runtime_schema.api_name)
-      (get_runtime_by_id slot_id)
+      (runtime_of_slot slot_id)
   in
   let diagnoses =
     List.map
@@ -2208,7 +2280,7 @@ let warn_rejected_exact_output_slots registry =
        List.length (List.filter (fun (_, diagnosis) -> predicate diagnosis) diagnoses)
      in
      Log.Server.error
-       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d naming no enabled binding, %d naming a binding that does no exact output, %d whose binding resolved to no catalog row, %d whose provider declares no %s — fix runtime.toml"
+       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d naming no enabled binding, %d naming a binding that does no exact output, %d whose binding resolved to no catalog row, %d whose model has no catalog row and leaves an exact read unstated, %d whose provider declares no %s — fix runtime.toml"
        (List.length all_rejected)
        (List.length lanes)
        (String.concat ", " lanes)
@@ -2224,6 +2296,7 @@ let warn_rejected_exact_output_slots registry =
           | Runtime_exact_output_registry.Declared_target_binding_rejected -> true
           | Runtime_exact_output_registry.Unknown_to_both_registries
           | Runtime_exact_output_registry.Configured_runtime_only _ -> false))
+       (List.length unstated)
        (List.length deadline_rejected)
        Runtime_schema.exact_body_timeout_s_key)
 ;;
@@ -2292,10 +2365,11 @@ let warn_optional_exact_output_lane registry ~(lane : exact_lane) ~feature =
 
 (* What boot logs after it publishes a registry, logged again after every
    config commit that replaces it, so a saved slot the new registry drops is
-   named where an operator reads the boot report. *)
-let report_exact_output_registry registry =
+   named where an operator reads the boot report. [runtimes] are the ones the
+   registry was built from. *)
+let report_exact_output_registry ~runtimes registry =
   warn_rejected_exact_output_bindings registry;
-  warn_rejected_exact_output_slots registry;
+  warn_rejected_exact_output_slots ~runtimes registry;
   report_verifier_exact_lane_admission ();
   warn_optional_exact_output_lane registry ~lane:Librarian ~feature:"librarian";
   warn_optional_exact_output_lane registry ~lane:Verifier ~feature:"completion authority"
@@ -2394,15 +2468,15 @@ let exact_output_registry_application_to_string = function
     ^ Runtime_exact_output_registry.publication_error_to_string reason
 ;;
 
-(* After a commit that replaced or kept the registry: what the committed
-   text leaves out under rule 3 ([exact_slot_degradation], just recorded by
-   [set_loaded]), then what the published registry leaves out. For a kept
-   registry that second report is about the registry still serving, which no
-   longer describes the file. *)
-let report_published_after_commit ~path =
+(* After a commit that replaced the registry: what the committed text leaves
+   out under rule 3 ([exact_slot_degradation], just recorded by
+   [set_loaded]), then what the registry built from the committed text's
+   [runtimes] leaves out. A kept registry is reported by
+   [report_kept_registry] instead. *)
+let report_published_after_commit ~path ~runtimes =
   warn_exact_slot_degradation (exact_slot_degradation ());
   match Runtime_exact_output_registry.current () with
-  | Ok registry -> report_exact_output_registry registry
+  | Ok registry -> report_exact_output_registry ~runtimes registry
   | Error error ->
     Log.Misc.warn
       "exact_output: registry after committing %s cannot be reported: %s"
@@ -2441,9 +2515,9 @@ let report_kept_registry ~path =
       (Runtime_exact_output_registry.publication_error_to_string error)
 ;;
 
-let report_exact_output_commit ~path application =
+let report_exact_output_commit ~path ~runtimes application =
   match application with
-  | Exact_output_registry_replaced _ -> report_published_after_commit ~path
+  | Exact_output_registry_replaced _ -> report_published_after_commit ~path ~runtimes
   | Exact_output_registry_unpublished ->
     (* Boot already warned that no registry is published; a commit does not
        change that, and processes that never publish one (the TUI) commit too. *)
@@ -2498,8 +2572,9 @@ let exact_output_report_view () =
 
 (* After a commit's write is visible: record whether the registry now serving
    is stale, then report when anything the reports are about changed. A kept
-   registry stays stale since the first commit that kept it. *)
-let record_exact_output_commit ~path ~previous_view (receipt : config_commit_receipt) =
+   registry stays stale since the first commit that kept it. [runtimes] are
+   the committed text's, which a replaced registry was built from. *)
+let record_exact_output_commit ~path ~runtimes ~previous_view (receipt : config_commit_receipt) =
   let application = receipt.exact_output_registry in
   Atomic.set
     exact_output_registry_stale_ref
@@ -2513,7 +2588,7 @@ let record_exact_output_commit ~path ~previous_view (receipt : config_commit_rec
        Some { stale_reason = reason; stale_since_commit }
      | Exact_output_registry_replaced _ | Exact_output_registry_unpublished -> None);
   if exact_output_report_view () <> previous_view
-  then report_exact_output_commit ~path application
+  then report_exact_output_commit ~path ~runtimes application
   else
     Log.Misc.debug
       "exact_output: %s committed; registry %s; nothing it leaves out changed"
@@ -2538,7 +2613,9 @@ let commit_config_text_locked_attempt
     |> Result.map_error (fun detail -> Config_commit_refused detail)
   in
   let previous_view = exact_output_report_view () in
-  let committed = record_exact_output_commit ~path ~previous_view in
+  let committed =
+    record_exact_output_commit ~path ~runtimes:loaded.runtimes ~previous_view
+  in
   (* Every branch below that leaves the new text visible calls this, a
      failure after the rename included. The text is on disk before the
      catalogue is published, so it is noted first: a raise from [set_loaded]

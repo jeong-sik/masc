@@ -495,8 +495,11 @@ let test_actual_subscription_route () =
       check int "healthy sibling was admitted before overflow" 200
         (H2.Status.to_code live_response.response.status);
       until (fun () -> Subs.count ()=2);
+      (* The shared route primes the stream with its reconnect directive before
+         the acknowledgement, as on HTTP/1.1. *)
+      let preamble=Server_mcp_transport_http_headers.sse_prime_event () in
       let ack=sse (Subs.acknowledgement ~subscription_id:healthy_id (filter resource_notifications)) in
-      read_through live_response (String.length ack);
+      read_through live_response (String.length (preamble ^ ack));
       let note=Protocol.jsonrpc_notification "notifications/tools/list_changed"
         ~params:(`Assoc ["payload",`String (String.make 16384 'e')]) in
       let frame=sse (Protocol.tag_notification_with_subscription ~subscription_id:blocked_id note) in
@@ -515,7 +518,7 @@ let test_actual_subscription_route () =
       reset blocked held held_response;
       until (fun () -> Subs.count ()=1);
       ping blocked;
-      let expected=ref ack in
+      let expected=ref (preamble ^ ack) in
       List.iter (fun sequence ->
         let note=Protocol.jsonrpc_notification "notifications/resources/updated"
           ~params:(`Assoc ["uri",`String resource_uri;"sequence",`Int sequence;

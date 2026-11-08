@@ -304,11 +304,15 @@ let test_alpn_dispatch () =
          | _ -> ()
          | exception End_of_file -> ()
          | exception Eio.Io _ -> ());
+        (* The accept loop records Listening when it starts and Stopped when
+           its switch releases. Fiber.first cancels it once this fiber
+           returns, so the live status is read here. *)
+        check string "listener status while serving" "listening" (status_label ());
         alpn_h2, alpn_http1)
   in
   check (option string) "server chose h2" (Some "h2") alpn_h2;
   check (option string) "server chose http/1.1" (Some "http/1.1") alpn_http1;
-  check string "listener status" "listening" (status_label ());
+  check string "listener status after the accept loop ends" "stopped" (status_label ());
   check int "three connections accepted" (accepted + 3) (metric "accepted_total");
   check int "one h2 negotiation" (h2 + 1) (metric "alpn_h2_total");
   check int "one http/1.1 negotiation" (http1 + 1) (metric "alpn_http1_total");

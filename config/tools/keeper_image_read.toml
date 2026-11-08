@@ -18,6 +18,7 @@ additional_properties = false
 [[params]]
 name = "path"
 type = "string"
+role = "path"
 description = "Image file in your own sandbox, resolved like Read."
 
 [[params]]

@@ -109,13 +109,31 @@ let ordered_fields ~field pairs =
    all. The grammar is written once here and recurses; a level that JSON Schema
    allows is a level this reads. *)
 
+(* What a string parameter's value is, beyond its JSON type. [Path_role] marks
+   a file-system path: the runtime reports its value as a path the call
+   touched ([Keeper_runtime_contract.action_radius_json]) instead of guessing
+   from the spelling of the key (#49742). The role is declaration-only — it
+   never reaches the emitted JSON Schema. Closed: a role the runtime does not
+   consume is rejected like any other unknown value. *)
+type param_role = Path_role
+
+let param_role_of_string ~context = function
+  | "path" -> Ok Path_role
+  | other -> Error (sprintf "%s must be \"path\", got %S" context other)
+;;
+
 type parsed_param =
   { param_name : string
   ; param_required : bool
+  ; param_role : param_role option
   ; param_json : Yojson.Safe.t
   }
 
-let rec param_of_pairs ~context pairs =
+(* [role_allowed] is set only for the canonical tool's top-level [[params]]:
+   that is the one place [path_params] reads roles from, and a role the
+   runtime never reads (a projection, a nested object field) is refused like
+   any other unconsumed key. *)
+let rec param_of_pairs ~context ?(role_allowed = false) pairs =
   let* name =
     match List.assoc_opt "name" pairs with
     | None -> Error (sprintf "%s is missing the required key \"name\"" context)
@@ -127,9 +145,31 @@ let rec param_of_pairs ~context pairs =
     | None -> Ok false
     | Some value -> as_bool ~context:(sprintf "%s.required" context) value
   in
+  let* role =
+    match List.assoc_opt "role" pairs with
+    | None -> Ok None
+    | Some _ when not role_allowed ->
+      Error
+        (sprintf
+           "%s.role is only read on the tool's top-level params; a projection or nested param cannot declare one"
+           context)
+    | Some value ->
+      let role_context = sprintf "%s.role" context in
+      let* text = as_string ~context:role_context value in
+      let* role = param_role_of_string ~context:role_context text in
+      let* declared = find_param_type ~context pairs in
+      (match declared with
+       | Ptype_string -> Ok (Some role)
+       | Ptype_integer | Ptype_number | Ptype_boolean | Ptype_object | Ptype_array ->
+         Error
+           (sprintf
+              "%s is only valid for type string params, this param is type %s"
+              role_context
+              (param_type_to_string declared)))
+  in
   let* json = schema_json ~context
-    (List.filter (fun (key, _) -> key <> "name" && key <> "required") pairs) in
-  Ok { param_name = name; param_required = required; param_json = json }
+    (List.filter (fun (key, _) -> key <> "name" && key <> "required" && key <> "role") pairs) in
+  Ok { param_name = name; param_required = required; param_role = role; param_json = json }
 
 and schema_json ~context pairs =
   match List.assoc_opt "one_of" pairs with
@@ -348,13 +388,13 @@ and typed_schema_json ~context pairs =
   in
   Ok (`Assoc fields)
 
-and params_of_value ~context value =
+and params_of_value ~context ?(role_allowed = false) value =
   match value with
   | Otoml.TomlTableArray tables ->
     let element index table =
       let element_context = sprintf "%s[%d]" context index in
       let* pairs = as_table_pairs ~context:element_context table in
-      param_of_pairs ~context:element_context pairs
+      param_of_pairs ~context:element_context ~role_allowed pairs
     in
     let rec collect index acc = function
       | [] -> Ok (List.rev acc)
@@ -525,6 +565,9 @@ type loaded =
             makes [masc board post get p-1] callable without a provider
             round trip).  Stored word-split once here rather than split at
             every use.  Absent means the tool has no shell form. *)
+  ; path_params : string list
+        (** The top-level params declared [role = "path"], in file order.
+            Declaration-only: never emitted into the schema (#49742). *)
   }
 
 let help_of_pairs pairs =
@@ -781,7 +824,7 @@ let tool_of_pairs ~name pairs =
   let* params =
     match List.assoc_opt "params" pairs with
     | None -> Ok []
-    | Some value -> params_of_value ~context:"params" value
+    | Some value -> params_of_value ~context:"params" ~role_allowed:true value
   in
   let* loading =
     match List.assoc_opt "defer_loading" pairs with
@@ -885,6 +928,13 @@ let tool_of_pairs ~name pairs =
     ; loading
     ; operator_remote_description
     ; shell_command
+    ; path_params =
+        List.filter_map
+          (fun p ->
+             match p.param_role with
+             | Some Path_role -> Some p.param_name
+             | None -> None)
+          params
     }
 ;;
 

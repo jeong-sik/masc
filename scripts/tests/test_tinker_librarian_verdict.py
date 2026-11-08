@@ -43,7 +43,7 @@ def answer(judgments: tuple[tuple[str, AV.Outcome, str | None], ...], *, dropped
 
 def synth_row(**counts: int) -> Row:
     base: Row = {"target": "A", "status": 200, "wall_s": 1.0, "valid": True, "cost_usd": 0.0,
-                 "prompt_tokens": 1, "cached_tokens": 1, "candidates": 2, "correct": 2, "removed": 0,
+                 "prompt_tokens": 1, "cached_tokens": 1, "candidates": 2, "correct": 2,
                  "dropped": 0, "absorbed": 0, "dropped_expected": 0, "planted": 1, "planted_dropped": 0}
     return {**base, **counts}
 
@@ -166,23 +166,23 @@ class ScoreTest(unittest.TestCase):
         self.assertEqual(V.score_synth(item, right)["correct"], 2)
         self.assertEqual(V.score_synth(item, wrong)["correct"], 0)
 
-    def test_synth_absorbs_are_removals_and_never_drops(self) -> None:
+    def test_synth_absorbs_are_counted_apart_and_never_drops(self) -> None:
         label: dict[str, object] = {"candidates": [
             {"request_id": "r1", "outcome": "incorporated", "supersedes": None, "already_claim": None}],
             "planted_stale": ["m5"]}
         item = V.SynthItem("i1", make_prompt(), "", label)
         mine = answer((("r1", "incorporated", "new"),), added=("new",), absorbed=(("m5", "new"), ("m6", "new")))
         score = V.score_synth(item, mine)
-        self.assertEqual((score["correct"], score["removed"], score["absorbed"], score["dropped_expected"],
-                          score["planted_dropped"]), (1, 2, 2, 0, 0))
+        self.assertEqual((score["correct"], score["dropped"], score["absorbed"], score["dropped_expected"],
+                          score["planted_dropped"]), (1, 0, 2, 0, 0))
 
-    def test_synth_precision_counts_absorbed_ids_against_it(self) -> None:
-        part = V.summarize("synth", [synth_row(removed=4, dropped=2, absorbed=2, dropped_expected=2,
-                                               planted=2, planted_dropped=2)])["A"]
+    def test_synth_precision_counts_drops_and_reports_absorbs(self) -> None:
+        part = V.summarize("synth", [synth_row(dropped=2, absorbed=3, dropped_expected=1,
+                                               planted=2, planted_dropped=1)])["A"]
         assert isinstance(part, dict)
-        self.assertEqual((part["drop_precision"], part["absorbed"], part["stale_drop_recall"]), (0.5, 2, 1.0))
+        self.assertEqual((part["drop_precision"], part["absorbed"], part["stale_drop_recall"]), (0.5, 3, 0.5))
 
-    def test_synth_without_removals_has_full_precision(self) -> None:
+    def test_synth_without_drops_has_full_precision(self) -> None:
         part = V.summarize("synth", [synth_row()])["A"]
         assert isinstance(part, dict)
         self.assertEqual((part["drop_precision"], part["stale_drop_recall"]), (1.0, 0.0))

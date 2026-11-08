@@ -42,10 +42,11 @@ Definitions:
   (an answer that is not valid is wrong). A new fact names a claim the answer
   adds; a paraphrase names the existing claim it restates; a correction names a
   claim that supersedes the label's target, and the target is dropped.
-- E-synth drop precision: removed IDs that are dropped planted stale facts or
-  dropped correction targets, over every ID a valid answer takes out of memory,
-  dropped or absorbed (1.0 when none). No label asks for an absorb, so every
-  absorbed ID counts against precision.
+- E-synth drop precision: dropped IDs that are planted stale facts or label
+  correction targets, over all dropped IDs of valid answers (1.0 with no drops).
+- E-synth absorbed: memory IDs valid answers absorb. No label asks for one.
+  Reported apart, not gated, as E-real reports its absorbs: MASC's absorb gate
+  checks each absorb at commit, while nothing checks a drop.
 - E-synth stale drop recall: planted stale facts dropped, over all planted. An
   absorbed stale fact is not dropped: its text lives on in the new claim.
 - latency p50 (G5): median wall time of E-real calls that returned HTTP 200.
@@ -231,8 +232,7 @@ def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
         outcome, claim = got.get(rid, ("", None))
         correct[rid] = mine is not None and outcome == label["outcome"] and claim_matches(label, claim, mine)
     return {"candidates": len(labels), "correct": sum(correct.values()), "per_candidate": correct,
-            "removed": len(gone), "dropped": len(drops), "absorbed": len(gone - drops),
-            "dropped_expected": len(drops & (planted | targets)),
+            "dropped": len(drops), "absorbed": len(gone - drops), "dropped_expected": len(drops & (planted | targets)),
             "planted": len(planted), "planted_dropped": len(drops & planted)}
 
 
@@ -286,11 +286,10 @@ def summarize(kind: str, rows: list[JsonObject]) -> JsonObject:
             part["dropped_not_in_live"] = sum(len(cast(list[str], r["dropped_not_in_live"])) for r in mine)
             part["absorbed_not_in_live"] = sum(len(cast(list[str], r["absorbed_not_in_live"])) for r in mine)
         else:
-            removals = sum(cast(int, r["removed"]) for r in mine)
+            drops = sum(cast(int, r["dropped"]) for r in mine)
             part["outcome_accuracy"] = sum(cast(int, r["correct"]) for r in mine) / cands
+            part["drop_precision"] = sum(cast(int, r["dropped_expected"]) for r in mine) / drops if drops else 1.0
             part["absorbed"] = sum(cast(int, r["absorbed"]) for r in mine)
-            part["drop_precision"] = (sum(cast(int, r["dropped_expected"]) for r in mine) / removals
-                                      if removals else 1.0)
             part["stale_drop_recall"] = (sum(cast(int, r["planted_dropped"]) for r in mine)
                                          / max(1, sum(cast(int, r["planted"]) for r in mine)))
         out[name] = part

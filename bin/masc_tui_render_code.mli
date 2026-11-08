@@ -7,6 +7,9 @@ val code_notes_viewport : Masc_tui_types.state -> int * int
 (** Wrapped memo row count and visible row budget at the current file-pane width. *)
 val code_history_viewport : Masc_tui_types.state -> int * int
 (** Physical history row count and visible row budget at the file-pane width. *)
+val code_diff_viewport : Masc_tui_types.state -> int * int
+(** Row count of the diff read over the open file (0 until it is read) and the
+    pane height it is drawn through: the window the key handlers move in. *)
 val code_history_selected : Masc_tui_types.state -> Masc_tui_types.code_history_entry option
 (** The record owning the top visible row; coverage and failure rows have no owner. *)
 val toggle_history_change : Masc_tui_types.state -> bool

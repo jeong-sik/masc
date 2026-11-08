@@ -261,6 +261,20 @@ let code_history_viewport (state : state) =
   (List.length (code_history_rows state ~cols:(code_history_pane_cols ())),
    max 1 (code_pane_content_height state - 1))
 
+(* The diff is drawn through the whole pane height with no row of its own
+   above it, so its window is [code_pane_content_height]. A diff that has not
+   been read has no rows to move through. *)
+let code_diff_viewport (state : state) =
+  let count =
+    match Masc_tui_fetched.current state.code_diff with
+    | Some (_, Masc_tui_fetched.Ready diff) ->
+        List.length diff.Masc.Tui_decode.gd_rows
+    | Some (_, (Masc_tui_fetched.Absent | Masc_tui_fetched.Loading
+               | Masc_tui_fetched.Stale _ | Masc_tui_fetched.Failed _))
+    | None -> 0
+  in
+  (count, max 1 (code_pane_content_height state))
+
 let code_history_selected_occurrence (state : state) =
   let rows = code_history_rows state ~cols:(code_history_pane_cols ()) in
   (* The first row owns Enter. Let every physical row reach that position,

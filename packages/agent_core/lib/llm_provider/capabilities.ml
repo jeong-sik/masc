@@ -504,23 +504,35 @@ let for_provider_reference_base ~catalog ~wire ~provider =
       (fun provider -> Option.map capabilities_of_preset (provider_preset ~wire provider))
 ;;
 
-let for_provider_model_id_from_catalog ~catalog ~wire ~provider ~model_id =
+type catalog_answer =
+  | Model_row of capabilities
+  | Provider_preset of capabilities
+  | No_catalog_answer
+
+let capabilities_of_catalog_answer = function
+  | Model_row capabilities | Provider_preset capabilities -> Some capabilities
+  | No_catalog_answer -> None
+;;
+
+let catalog_answer_from_catalog ~catalog ~wire ~provider ~model_id =
   let row = Option.bind catalog (fun catalog ->
     Option.map (fun entry -> catalog, entry)
       (Model_catalog.lookup_model_for_provider catalog ~provider ~model_id)) in
   match row with
   | Some (catalog, entry) ->
     (match entry.Model_catalog.provider_name with
-     | None -> Some (apply_catalog_entry ~provider_entry:None ~wire:None entry)
+     | None -> Model_row (apply_catalog_entry ~provider_entry:None ~wire:None entry)
      | Some _ ->
        let provider_entry = Model_catalog.provider_entry_for_reference catalog provider in
-       Some (apply_catalog_entry ~provider_entry ~wire entry))
+       Model_row (apply_catalog_entry ~provider_entry ~wire entry))
   | None ->
-    for_provider_reference_base ~catalog ~wire ~provider
+    (match for_provider_reference_base ~catalog ~wire ~provider with
+     | Some preset -> Provider_preset preset
+     | None -> No_catalog_answer)
 ;;
 
 type request_policy =
-  { model_capabilities : capabilities option
+  { catalog_answer : catalog_answer
   ; anthropic_thinking_control : anthropic_thinking_control option
   ; pricing_source : Pricing.source
   }
@@ -528,9 +540,9 @@ type request_policy =
 let resolve_request_policy_from_catalog ~catalog ~wire ~provider ~model_id =
   let pricing_source = Pricing.of_catalog ~catalog ~provider in
   match Model_identifiers.Model_id.of_string model_id with
-  | Error _ -> { model_capabilities = None; anthropic_thinking_control = None; pricing_source }
+  | Error _ -> { catalog_answer = No_catalog_answer; anthropic_thinking_control = None; pricing_source }
   | Ok model_id ->
-  let model_capabilities = for_provider_model_id_from_catalog
+  let catalog_answer = catalog_answer_from_catalog
       ~catalog ~wire:(Some wire) ~provider ~model_id in
   let anthropic_thinking_control =
     match wire with
@@ -540,7 +552,7 @@ let resolve_request_policy_from_catalog ~catalog ~wire ~provider ~model_id =
     | Provider_kind.Kimi | Provider_kind.OpenAI_compat | Provider_kind.Ollama
     | Provider_kind.Gemini | Provider_kind.Glm -> None
   in
-  { model_capabilities; anthropic_thinking_control; pricing_source }
+  { catalog_answer; anthropic_thinking_control; pricing_source }
 ;;
 
 let resolve_bound_request_policy ~catalog ~wire ~(provider : Model_catalog.provider_entry)
@@ -554,17 +566,21 @@ let resolve_bound_request_policy ~catalog ~wire ~(provider : Model_catalog.provi
     | Ok model_id -> Option.bind catalog (fun catalog ->
         Model_catalog.lookup_model_for_provider_entry catalog ~provider ~model_id) in
   match row with
-  | None -> {model_capabilities=capabilities;anthropic_thinking_control=None;pricing_source}
+  | None ->
+    let catalog_answer = match capabilities with
+      | Some preset -> Provider_preset preset
+      | None -> No_catalog_answer in
+    {catalog_answer;anthropic_thinking_control=None;pricing_source}
   | Some row ->
     let scoped_provider = match row.Model_catalog.provider_name with
       | None -> None | Some _ -> Some provider in
-    let model_capabilities = Some (apply_catalog_entry ?base:capabilities
+    let catalog_answer = Model_row (apply_catalog_entry ?base:capabilities
         ~provider_entry:scoped_provider ~wire:(Some wire) row) in
     let anthropic_thinking_control = match wire with
       | Provider_kind.Anthropic -> Option.map anthropic_thinking_control_of_vocab_value
           row.anthropic_thinking_control
       | Kimi | OpenAI_compat | Ollama | Gemini | Glm -> None in
-    {model_capabilities;anthropic_thinking_control;pricing_source}
+    {catalog_answer;anthropic_thinking_control;pricing_source}
 ;;
 
 let resolve_snapshot_request_policy ~snapshot ~wire ~provider_id ~model_id =
@@ -589,7 +605,8 @@ let for_provider_model_id ~wire ~provider ~model_id =
   with_model_id model_id (fun model_id ->
     let catalog = Catalog_snapshot.model_catalog_for_provider
         (Catalog_snapshot.current ()) provider in
-    for_provider_model_id_from_catalog ~catalog ~wire ~provider ~model_id)
+    capabilities_of_catalog_answer
+      (catalog_answer_from_catalog ~catalog ~wire ~provider ~model_id))
 ;;
 
 let anthropic_thinking_control_for_provider_model_id ~provider ~model_id =
@@ -599,7 +616,8 @@ let anthropic_thinking_control_for_provider_model_id ~provider ~model_id =
     anthropic_thinking_control_for_provider_from_catalog ~catalog ~provider model_id)
 ;;
 
-let request_policy_capabilities policy = policy.model_capabilities
+let request_policy_catalog_answer policy = policy.catalog_answer
+let request_policy_capabilities policy = capabilities_of_catalog_answer policy.catalog_answer
 let request_policy_anthropic_thinking_control policy = policy.anthropic_thinking_control
 let request_policy_pricing_source policy = policy.pricing_source
 

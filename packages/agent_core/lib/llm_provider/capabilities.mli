@@ -333,6 +333,18 @@ val declared_image_input_for_provider_model
     anonymous endpoints and missing or foreign rows supply no borrowed facts.
     Effective protocol defaults and the capability manifest are not sources. *)
 
+(** Which catalog layer answered a provider/model pair's capabilities. A
+    provider preset speaks for every model of its provider and knows nothing
+    of this one; a caller that holds its own declaration for the model reads
+    the difference here. *)
+type catalog_answer =
+  | Model_row of capabilities
+      (** A model row answered, laid over the base its provider selects. *)
+  | Provider_preset of capabilities
+      (** No model row; the provider's capability preset answered. *)
+  | No_catalog_answer
+      (** Neither a model row nor a provider preset answered. *)
+
 (** Immutable resolution for one request. Missing facts remain missing even
     if process catalogs are replaced later. *)
 type request_policy
@@ -361,7 +373,12 @@ val resolve_bound_request_policy :
     No global catalog is read; absent thinking controls remain absent.
     [capabilities=None] is model-only policy: an unknown model stays absent. *)
 
+val request_policy_catalog_answer : request_policy -> catalog_answer
+
 val request_policy_capabilities : request_policy -> capabilities option
+(** The capabilities of {!request_policy_catalog_answer}, whichever layer
+    answered. *)
+
 val resolve_snapshot_request_policy :
   snapshot:Catalog_snapshot.t -> wire:Provider_kind.t ->
   provider_id:string -> model_id:string -> request_policy

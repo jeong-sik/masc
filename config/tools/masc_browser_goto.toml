@@ -1,27 +1,28 @@
 name = "masc_browser_goto"
 description = """
-Navigate a tab to HTTP(S); returns landing URL/title. An ego connection navigates only a managed Page in its task space: pass lane live, its clientId and that tabId. An unmanaged tab the operator opened is refused before any effect; adopt it with BrowserAct/masc_browser_act adopt_tab first."""
+Navigate a managed tab to an absolute HTTP(S) URL.
+Returns the landing URL and title, and on a failed load where the tab is now. Needs the tab's clientId and tabId. A tab the operator opened (egoPage.label null) is refused before any effect: adopt it with BrowserAct/masc_browser_act adopt_tab first."""
 additional_properties = false
 
 [[params]]
 name = "url"
 type = "string"
 required = true
-description = "HTTP(S) URL."
+description = "Absolute HTTP(S) URL."
 
 [[params]]
 name = "lane"
 type = "string"
 enum = ["live"]
-description = "Optional advanced browser override. Omit only for initial discovery; MASC selects an eligible browser and reports browserSelection. For every observed tab, retain browserSelection.lane and its clientId on subsequent calls; tab IDs are local to a browser."
+description = "Optional; live is the only lane."
 
 [[params]]
 name = "tabId"
 type = "integer"
-description = "BrowserTabs/masc_browser_tabs ID of the tab to navigate."
+description = "Required: observed tab ID."
 minimum = 0
 
 [[params]]
 name = "clientId"
 type = "string"
-description = "lane live: the exact observed clientId of the ego connection that manages tabId."
+description = "Required: observed connection UUID that lists tabId."

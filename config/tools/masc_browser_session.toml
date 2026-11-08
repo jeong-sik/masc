@@ -1,6 +1,7 @@
 name = "masc_browser_session"
 description = """
-Bind an observed Ego Space to a shared Goal. Goal Space binding is experimental: it has no measured Keeper production run yet. action=bind_goal requires goalId, lane=live and the observed Ego clientId; it stores metadata without browser input or taking control. action=goal_status with goalId reads only the stored binding. The same binding is idempotent; reassignment or sharing a Space across distinct Goals is refused. action=unbind_goal with goalId removes the Goal's binding so a wrong one can be bound again; it changes no browser or Space. Keeper initial automatic discovery consults its current Task Goal binding; retain the resulting lane/clientId for subsequent calls. A bound Ego Space is already open: use BrowserTabs to discover its pages. A missing bound connection does not select another browser."""
+Bind an observed ego Space to a shared Goal for that Goal's Tasks.
+BrowserTabs {} in a Task of that Goal then selects it. It stores metadata only: no browser input or control change. Binding the same pair again is a no-op; another Space for the Goal, or one Space for two Goals, is refused: unbind_goal first. If the bound Space is not connected, discovery fails instead of picking another browser. A bound Space is already open: list its pages with BrowserTabs."""
 additional_properties = false
 # 2026-10-29 ~ 11-04 에 저장된 agent-core 요청 5,479개(Keeper 28명)가 이 정의 4,611 B 를
 # 매번 실었다. 이 도구를 부른 서로 다른 Keeper 턴은 24개(44회)다. 지연의 손익은
@@ -16,21 +17,21 @@ name = "action"
 type = "string"
 enum = ["bind_goal", "goal_status", "unbind_goal"]
 required = true
-description = "bind_goal stores an observed Ego Space for goalId (lane=live and clientId required). goal_status reads the stored binding only (goalId required; no other options). unbind_goal removes that binding (goalId required; no other options)."
+description = "bind_goal needs goalId, lane=live and clientId. goal_status and unbind_goal take goalId only."
 
 [[params]]
 name = "lane"
 type = "string"
 enum = ["live"]
-description = "Required for bind_goal: the lane of the observed Ego connection."
+description = "bind_goal: required."
 
 [[params]]
 name = "clientId"
 type = "string"
-description = "Exact observed live connection UUID. Required for bind_goal; it is never a numeric Space ID."
+description = "bind_goal: observed connection UUID, never the numeric Space ID."
 
 [[params]]
 name = "goalId"
 type = "string"
-description = "Shared workspace Goal ID, required for bind_goal, goal_status and unbind_goal. bind_goal and goal_status require an existing Goal; unbind_goal also accepts a deleted Goal's ID to release its stored binding."
+description = "Workspace Goal ID. bind_goal and goal_status need an existing Goal; unbind_goal also takes a deleted Goal's ID."
 

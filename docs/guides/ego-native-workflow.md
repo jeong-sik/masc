@@ -106,10 +106,9 @@ from that handle or call its void return a release acknowledgement. A failed
 selector drag preserves the original SDK failure and reports
 `release_uncertain`. A selector drag that returns normally reports
 `command_settled` only when `dragAndDrop` answers with an object receipt that
-has no `dialog` (see below). Coordinate-path drag (`page.drag`) calls `mouse.down`,
-`mouse.move` and `mouse.up`, which return void and swallow a dialog interruption,
-so no SDK answer shows that the button came up. Current admission refuses these
-raw drags before input; that refusal keeps the readiness it had. A lost key press/type/paste response also
+has no `dialog` (see below). MASC sends no coordinate-path drag (`page.drag`): it
+calls `mouse.down`, `mouse.move` and `mouse.up`, which return void and swallow a
+dialog interruption, so no SDK answer would show that the button came up. A lost key press/type/paste response also
 keeps release unconfirmed without guessing a key-up sequence. `keyboard.paste`
 uses the SDK's `ControlOrMeta+V` sequence, so it can leave a modifier held.
 `press` is included because its key sequence may be held if
@@ -151,9 +150,8 @@ types at its current Page's focus; use an observed editor's `focus` step when
 needed. Choose native `fill` to replace an observed input, textarea or
 contenteditable editor, `keyboard.insertText` for literal insertion without
 key-down/up, or `keyboard.paste` for text/HTML. MASC never substitutes a method.
-Coordinate, waypoint and scene-node raw drags remain refused before input;
-native selector-to-selector `drag_to` without `via` and with `durationMs=0`, and
-workflow `dragAndDrop`, keep their observed receipt boundary.
+Selector-to-selector `drag_to` and workflow `dragAndDrop` keep their observed
+receipt boundary.
 
 Before native holding input, MASC persists the actual command's `Pending`
 intent. For raw typing it also fixes the original source Page and the current
@@ -279,8 +277,8 @@ such as `keyboard.type`, and `mouse.down`, `mouse.move` and `mouse.up`, swallow
 that error into void
 ([raw action](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L2674-L2687),
 [mouse](https://github.com/citrolabs/ego-lite/blob/aecc5831fc5a9ea01a078b632185992a3a7ac448/package/ego-browser/src/page-model.ts#L512-L568)),
-so void is never release proof. Raw pointer drags remain refused before input;
-raw typing uses only the separate bounded native-window path above.
+so void is never release proof. MASC sends no raw pointer drag, and raw typing
+uses only the separate bounded native-window path above.
 `Page.info()` and unbounded event samples cannot establish that interval or
 complete an interrupted call. The SDK documents no release acknowledgement,
 and neither a receipt nor a verified typing tail proves that every key or

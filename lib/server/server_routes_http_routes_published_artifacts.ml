@@ -50,12 +50,9 @@ let check_error_response error =
 let validate_body_workspace ~config json =
   match Workspace.validate_expected_workspace ~config json with
   | Ok json -> Ok json
-  | Error Workspace.Invalid_workspace_precondition ->
-    Error (Server_refusal.json ~code:"invalid_workspace_precondition"
-      "invalid expected_workspace precondition", `Bad_request)
-  | Error Workspace.Workspace_precondition_failed ->
-    Error (Server_refusal.json ~code:"workspace_precondition_failed"
-      "workspace precondition failed", `Conflict)
+  | Error error ->
+    let status, body = Server_refusal.expected_workspace_error error in
+    Error (body, status)
 
 let decode_publication_request ~config ~body =
   let open Result.Syntax in
@@ -72,14 +69,7 @@ let decode_check_request ~config ~body =
     | json -> Ok json
     | exception Yojson.Json_error _ ->
       Error (check_error_response (Published_artifact_check_store.Invalid "invalid JSON body")) in
-  let* json = match Workspace.validate_expected_workspace ~config json with
-    | Ok json -> Ok json
-    | Error Workspace.Invalid_workspace_precondition ->
-      Error (Server_refusal.json ~code:"invalid_workspace_precondition"
-        "invalid expected_workspace precondition", `Bad_request)
-    | Error Workspace.Workspace_precondition_failed ->
-      Error (Server_refusal.json ~code:"workspace_precondition_failed"
-        "workspace precondition failed", `Conflict) in
+  let* json = validate_body_workspace ~config json in
   Result.map_error (fun message ->
     check_error_response (Published_artifact_check_store.Invalid message))
     (Published_artifact_check.request_of_json json)
@@ -94,14 +84,7 @@ let decode_share_request ~config ~body =
     | `Assoc fields when List.length (List.filter (fun (name, _) -> String.equal name "expected_workspace") fields) = 1 -> Ok ()
     | _ -> Error (Server_refusal.json ~code:"invalid_workspace_precondition"
         "expected_workspace is required for a share change", `Bad_request) in
-  let* json = match Workspace.validate_expected_workspace ~config json with
-    | Ok json -> Ok json
-    | Error Workspace.Invalid_workspace_precondition ->
-      Error (Server_refusal.json ~code:"invalid_workspace_precondition"
-        "invalid expected_workspace precondition", `Bad_request)
-    | Error Workspace.Workspace_precondition_failed ->
-      Error (Server_refusal.json ~code:"workspace_precondition_failed"
-        "workspace precondition failed", `Conflict) in
+  let* json = validate_body_workspace ~config json in
   match json with
   | `Assoc fields ->
     if List.sort String.compare (List.map fst fields) <>

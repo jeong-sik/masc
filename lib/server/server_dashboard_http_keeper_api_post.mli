@@ -6,14 +6,6 @@ include module type of Server_dashboard_http_keeper_api_types
 
 val json_list_length : Yojson.Safe.t -> int
 
-val respond_error :
-  ?status:Httpun.Status.t ->
-  ?request:Httpun.Request.t ->
-  ?ok:bool ->
-  Http_reqd.t ->
-  string ->
-  unit
-
 (** Operator-initiated deliberation on behalf of [keeper]. The run is owned by
     the keeper named in the route, so its wake, board post and chat delivery
     are indistinguishable from a self-initiated run; the prompt, preset and

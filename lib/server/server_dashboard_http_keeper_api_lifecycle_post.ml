@@ -5,9 +5,6 @@ open Server_dashboard_http_keeper_api_types
 
 module Http = Http_server_eio
 
-let respond_error ?(status = `Bad_request) ?request ?ok reqd message =
-  Http.Response.json_value ?request ~status (error_json ?ok message) reqd
-
 let tool_detail_json body =
   try Yojson.Safe.from_string body with
   | Yojson.Json_error _ -> `String body

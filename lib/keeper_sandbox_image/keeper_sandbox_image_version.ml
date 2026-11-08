@@ -198,11 +198,9 @@ let version ~built_at recipe =
 let tag ~built_at recipe =
   Printf.sprintf "%s:%s" (repository recipe) (version ~built_at recipe)
 
-let rfc3339_utc built_at =
-  let tm = Unix.gmtime built_at in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ" (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour tm.Unix.tm_min
-    tm.Unix.tm_sec
+(* Same rendering for every RFC 3339 stamp the product emits: the format
+   lives in [Time_codec] once, including the out-of-range-year fallback. *)
+let rfc3339_utc built_at = Time_codec.rfc3339_of_unix built_at
 
 let current_lock_sha256 () = Keeper_sandbox_lock_digest.sha256
 

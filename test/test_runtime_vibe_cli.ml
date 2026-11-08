@@ -50,7 +50,7 @@ let test_disagreements () =
      check bool "stderr kept" true (String.length stderr_tail > 0)
    | other -> fail (Cli.error_to_string other));
   (match error (classify ~exit_code:0 ~export:"export-usage-error.json" ()) with
-   | Cli.Exit_code_mismatch { process = 0; export = 1 } -> ()
+   | Cli.Exit_code_mismatch { process = 0; export = 1; _ } -> ()
    | other -> fail (Cli.error_to_string other));
   (* An export whose own exit_code agrees with the process but not with the
      code its outcome had: finished with 3. *)
@@ -62,8 +62,47 @@ let test_disagreements () =
     | _ -> fail "export-finished.json is an object"
   in
   match error (Cli.classify ~exit_code:3 ~export_json:(Some finished_with_3) ~stdout:"" ~stderr:"") with
-  | Cli.Outcome_exit_mismatch { outcome = Vibe.Finished; exit_code = 3 } -> ()
+  | Cli.Outcome_exit_mismatch { outcome = Vibe.Finished; exit_code = 3; _ } as disagreement ->
+    (* The run disagreed with its export, but the export's tokens were spent. *)
+    check bool "usage kept" true (Option.is_some (Cli.reported_usage disagreement))
   | other -> fail (Cli.error_to_string other)
+;;
+
+(* The answer a one-shot caller reads: the text of a finished run's last
+   entry when that entry is an assistant message, and the outcome otherwise. *)
+let test_answer () =
+  let run ~exit_code ?stdout export = run_of (classify ~exit_code ~export ?stdout ()) in
+  let finished = run ~exit_code:0 ~stdout:(read "entries-first-call.json") "export-finished.json" in
+  (match Runtime_vibe_answer.of_run finished with
+   | Ok text -> check bool "m0 reply" true (String.length text > 0)
+   | Error error -> fail (Runtime_vibe_answer.error_to_string error));
+  (match Runtime_vibe_answer.of_run (run ~exit_code:0 "export-finished.json") with
+   | Error Runtime_vibe_answer.No_output -> ()
+   | Ok _ | Error _ -> fail "finished with an empty stdout has no answer");
+  (match Runtime_vibe_answer.of_run (run ~exit_code:3 "export-deadline.json") with
+   | Error (Runtime_vibe_answer.Not_finished { stop = Runtime_vibe_answer.Deadline; _ }) -> ()
+   | Ok _ | Error _ -> fail "m5 stopped at its deadline");
+  (* An entry after the last assistant message: the earlier message is not
+     the reply. *)
+  let ending entry =
+    match finished.transcript with
+    | Cli.Entries entries ->
+      Runtime_vibe_answer.of_run { finished with transcript = Cli.Entries (entries @ [ entry ]) }
+    | Cli.No_output -> fail "m0 has entries"
+  in
+  let message role = Vibe.Message { session_id = "s"; turn_id = "t"; role; content = [ Vibe.Text "x" ] } in
+  (match ending (message Vibe.User) with
+   | Error Runtime_vibe_answer.No_assistant_reply -> ()
+   | Ok _ | Error _ -> fail "a user message last is no reply");
+  (match ending (Vibe.Effect { session_id = "s"; turn_id = "t"; tool_name = "read_file"; status = Vibe.Completed; error = None }) with
+   | Error Runtime_vibe_answer.No_assistant_reply -> ()
+   | Ok _ | Error _ -> fail "an effect last is no reply");
+  (match ending (message (Vibe.Unrecognized_role "narrator")) with
+   | Error (Runtime_vibe_answer.Unrecognized_last_role "narrator") -> ()
+   | Ok _ | Error _ -> fail "an unknown role last is not skipped");
+  match ending (Vibe.Unrecognized_entry { kind = "summary"; session_id = "s"; turn_id = "t" }) with
+  | Error (Runtime_vibe_answer.Unrecognized_last_entry "summary") -> ()
+  | Ok _ | Error _ -> fail "an unknown entry last is not skipped"
 ;;
 
 let config =
@@ -98,6 +137,7 @@ let () =
       , [ test_case "outcomes" `Quick test_outcomes
         ; test_case "disagreements" `Quick test_disagreements
         ] )
+    ; "answer", [ test_case "last assistant text" `Quick test_answer ]
     ; "child process", [ test_case "env and argv" `Quick test_child_process ]
     ]
 ;;

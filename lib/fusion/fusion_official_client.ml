@@ -169,7 +169,7 @@ let muse_config ~turn_timeout_s ~override_s (execution : Runtime_execution.muse_
   }
 ;;
 
-(* Antigravity and Muse Code have no system-prompt channel. A one-shot turn
+(* Antigravity, Muse Code and Vibe have no system-prompt channel. A one-shot turn
    puts the instructions at the head of the input in the frame a keeper turn
    uses ({!Antigravity_input_frame}; the Muse Code keeper start uses the same
    labels). Without this the panel or judge system prompt — for a
@@ -201,6 +201,12 @@ let antigravity_usage (usage : Runtime_antigravity.usage) : Fusion_types.usage =
 let muse_usage (usage : Runtime_muse_msp.token_usage) : Fusion_types.usage =
   { input_tokens = usage.input_tokens; output_tokens = usage.output_tokens }
 
+(* [total_tokens] is [input_tokens + output_tokens] in every retained export
+   (m0, m10-m14), so [cached_input_tokens] is a part of [input_tokens] and is
+   not added to it. *)
+let vibe_usage (usage : Runtime_vibe_headless.usage) : Fusion_types.usage =
+  { input_tokens = usage.input_tokens; output_tokens = usage.output_tokens }
+
 let optional_usage convert = function
   | Some usage -> convert usage
   | None -> Fusion_types.zero_usage
@@ -218,6 +224,10 @@ type failure =
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
   | Muse_failure of Runtime_muse_serve.error
+  | Vibe_failure of vibe_failure
+and vibe_failure =
+  | Vibe_run_failed of Runtime_vibe_cli.error
+  | Vibe_not_answered of Runtime_vibe_answer.error
 
 let failure_detail ~runtime_id = function
   | Missing_reply -> Printf.sprintf "%s: completed turn has no assistant reply" runtime_id
@@ -230,6 +240,10 @@ let failure_detail ~runtime_id = function
     Printf.sprintf "%s: %s" runtime_id (Runtime_antigravity.error_to_string error)
   | Muse_failure error ->
     Printf.sprintf "%s: %s" runtime_id (Runtime_muse_serve.error_to_string error)
+  | Vibe_failure (Vibe_run_failed error) ->
+    Printf.sprintf "%s: %s" runtime_id (Runtime_vibe_cli.error_to_string error)
+  | Vibe_failure (Vibe_not_answered error) ->
+    Printf.sprintf "%s: %s" runtime_id (Runtime_vibe_answer.error_to_string error)
 ;;
 
 (* 어댑터마다 자기 [Timeout] 갈래를 갖는다. 그것을 문자열로 접으면 Fusion
@@ -320,6 +334,52 @@ let panel_failure ~runtime_id = function
        | Runtime_muse_serve.Runtime_shutting_down
        | Runtime_muse_serve.Process_exited _ ) as error) ->
     provider_error ~runtime_id (Runtime_muse_serve.error_to_string error)
+  (* MASC sets no Vibe deadline, so [after_s = Some _] does not occur today;
+     [None] is an exit 124 Vibe chose itself. [deadline] is Vibe's own limit,
+     which can come only from the user's Vibe config. *)
+  | Vibe_failure (Vibe_run_failed (Runtime_vibe_cli.Timed_out { after_s = Some _; _ }))
+  | Vibe_failure
+      (Vibe_not_answered
+         (Runtime_vibe_answer.Not_finished { stop = Runtime_vibe_answer.Deadline; _ })) ->
+    Fusion_types.Timeout
+  | Vibe_failure
+      (Vibe_run_failed
+         (( Runtime_vibe_cli.Invalid_config _
+          | Runtime_vibe_cli.Process_runtime_unavailable
+          | Runtime_vibe_cli.Call_dir_failed _
+          | Runtime_vibe_cli.Spawn_refused _
+          | Runtime_vibe_cli.Timed_out { after_s = None; _ }
+          | Runtime_vibe_cli.Signaled _
+          | Runtime_vibe_cli.Stopped _
+          | Runtime_vibe_cli.No_export _
+          | Runtime_vibe_cli.Export_unreadable _
+          | Runtime_vibe_cli.Transcript_unreadable _
+          | Runtime_vibe_cli.Exit_code_mismatch _
+          | Runtime_vibe_cli.Outcome_exit_mismatch _ ) as error)) ->
+    provider_error ~runtime_id (Runtime_vibe_cli.error_to_string error)
+  | Vibe_failure
+      (Vibe_not_answered
+         (( Runtime_vibe_answer.Not_finished
+              { stop =
+                  ( Runtime_vibe_answer.Usage_error
+                  | Runtime_vibe_answer.Config_error
+                  | Runtime_vibe_answer.Infrastructure_failure
+                  | Runtime_vibe_answer.Turn_limit
+                  | Runtime_vibe_answer.Token_limit
+                  | Runtime_vibe_answer.Price_limit
+                  | Runtime_vibe_answer.Terminated
+                  | Runtime_vibe_answer.Length
+                  | Runtime_vibe_answer.Refusal
+                  | Runtime_vibe_answer.Aborted
+                  | Runtime_vibe_answer.Unrecognized_outcome _ )
+              ; _
+              }
+          | Runtime_vibe_answer.No_output
+          | Runtime_vibe_answer.No_assistant_reply
+          | Runtime_vibe_answer.Unrecognized_last_role _
+          | Runtime_vibe_answer.Unrecognized_last_entry _
+          | Runtime_vibe_answer.Unrecognized_reply_part _ ) as error)) ->
+    provider_error ~runtime_id (Runtime_vibe_answer.error_to_string error)
 
 
 (* A Muse Code panelist starts in an empty temporary directory rather than
@@ -345,6 +405,28 @@ let remove_muse_panel_root root =
   | (Sys_error _ | Unix.Unix_error _) as exn ->
     Log.Runtime_agent.warn
       "Muse Code panelist left its workspace %s behind: %s"
+      root
+      (Printexc.to_string exn)
+;;
+
+(* A Vibe panelist starts in an empty private directory, passed as its
+   [--workdir] without [--trust], so the [ask] agent finds no operator files
+   and Vibe loads no project [.vibe] from it. The path is kept as
+   [Filename.temp_dir] gives it: without [--trust] nothing compares it with
+   a resolved form, and resolving it after creation could fail with the
+   directory already made and no cleanup registered yet. *)
+let create_vibe_panel_root () =
+  match Filename.temp_dir ~perms:0o700 "masc-vibe-panelist-" "" with
+  | root -> Ok root
+  | exception Sys_error detail ->
+    Error (Setup_failure ("cannot create the Mistral Vibe panelist workdir: " ^ detail))
+;;
+
+let remove_vibe_panel_root root =
+  try Fs_compat.remove_tree root with
+  | (Sys_error _ | Unix.Unix_error _) as exn ->
+    Log.Runtime_agent.warn
+      "Mistral Vibe panelist left its workdir %s behind: %s"
       root
       (Printexc.to_string exn)
 ;;
@@ -535,7 +617,7 @@ let claude_quota_standing : Runtime_claude_code.quota_block -> Runtime_candidate
 let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runtime_instance.t) ~system_prompt ?timeout_s ?output_schema ~prompt () =
   let open Result.Syntax in
   (* The Codex and Claude adapters take the system prompt as an option and
-     treat [None] as "client default"; Antigravity and Muse Code get it
+     treat [None] as "client default"; Antigravity, Muse Code and Vibe get it
      framed into the input. An empty group prompt is not an instruction, so it becomes [None]
      rather than an empty instruction the client must obey. *)
   let system_prompt =
@@ -610,6 +692,57 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
        which is a bug in this module's callers rather than a provider failure. *)
     Error (Setup_failure
       "runtime is Agent_core-owned; it belongs on the Async_agent path")
+  (* A Vibe headless call takes one prompt file: no schema, no image, and no
+     MASC deadline. The owner left Vibe calls without a time limit, so a
+     declared one is refused here rather than dropped. *)
+  | Runtime_execution.Vibe_cli _ when Option.is_some output_schema ->
+    Error
+      (Setup_failure
+         "Mistral Vibe's headless call has no output-schema channel, so a \
+          schema-held answer cannot be asked of it")
+  | Runtime_execution.Vibe_cli _ when not (List.is_empty images) ->
+    Error (Setup_failure "Mistral Vibe's headless call takes text only, so it cannot carry an image")
+  | Runtime_execution.Vibe_cli _ when Option.is_some timeout_s ->
+    Error
+      (Setup_failure
+         "a Mistral Vibe call has no MASC time limit, so a declared timeout_s \
+          cannot be held")
+  | Runtime_execution.Vibe_cli execution ->
+    let* prompt =
+      framed_prompt ~system_prompt ~prompt
+      |> Result.map_error (fun detail -> Setup_failure detail)
+    in
+    Eio.Switch.run
+    @@ fun sw ->
+    (* Enter the cancellation scope before acquiring the directory, then
+       register its cleanup before cancellation can discard the acquisition. *)
+    let* workdir = Eio.Cancel.protect (fun () ->
+      let* root = create_vibe_panel_root () in
+      Eio.Switch.on_release sw (fun () -> remove_vibe_panel_root root);
+      Ok root) in
+    let config : Runtime_vibe_cli.config =
+      { cli_path = execution.cli_path
+      ; workdir
+      ; trust_workdir = false
+      ; model = Some execution.model
+      ; time_limit_s = None
+      }
+    in
+    (match Runtime_vibe_cli.run config ~prompt with
+     | Error error ->
+       Option.iter
+         (fun usage -> on_usage (vibe_usage usage))
+         (Runtime_vibe_cli.reported_usage error);
+       Error (Vibe_failure (Vibe_run_failed error))
+     | Ok run ->
+       let usage = optional_usage vibe_usage run.export.usage in
+       (* [export.json] names no model, so the panel records the [--model]
+          MASC passed: the one Vibe did not contradict, not one it confirmed. *)
+       (match Runtime_vibe_answer.of_run run with
+        | Ok text -> succeeded { text; model = execution.model; usage }
+        | Error error ->
+          on_usage usage;
+          Error (Vibe_failure (Vibe_not_answered error))))
   | Runtime_execution.Claude_code execution ->
     let config =
       claude_config ~base_dir ~turn_timeout_s:runtime.model.turn_timeout_s

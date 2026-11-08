@@ -9,14 +9,11 @@
 
 type visibility = Default | Hidden
 type lifecycle = Active
-
-type implementation_status =
-  | Real
-
+(** Only [Active] exists today; the field rides [tool_info]'s JSON, so a
+    second kind is a dashboard wire change, not a local edit. *)
 type metadata = {
   visibility : visibility;
   lifecycle : lifecycle;
-  implementation_status : implementation_status;
   reason : string option;
   allow_direct_call_when_hidden : bool;
   readonly : bool option;

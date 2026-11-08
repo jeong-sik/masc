@@ -9,9 +9,8 @@ let latest_metrics_json ~metrics_store =
   let parsed, _ =
     Fs_compat.parse_jsonl_lines ~source:"keeper_metrics_latest" lines
   in
-  match
-    List.rev parsed
-    |> List.find_opt (fun json ->
+  List.rev parsed
+  |> List.find_opt (fun json ->
       match
         Keeper_metrics_record.kind_of_json json,
         Json_util.assoc_member_opt "runtime" json
@@ -20,9 +19,6 @@ let latest_metrics_json ~metrics_store =
       | Some Keeper_metrics_record.Turn, _
       | Some Keeper_metrics_record.Heartbeat, _
       | None, _ -> false)
-  with
-  | Some json -> Some json
-  | None -> None
 
 let first_some candidates =
   List.find_map Fun.id candidates
@@ -30,8 +26,8 @@ let first_some candidates =
 let selected_model_of_runtime_trust runtime_trust =
   let top_level =
     first_some
-      [ (Json_util.assoc_string_opt "selected_model" runtime_trust
-         |> Option.map (fun model -> model, "runtime_trust.selected_model"))
+      [ (Json_util.assoc_string_opt "active_model" runtime_trust
+         |> Option.map (fun model -> model, "runtime_trust.active_model"))
       ]
   in
   match top_level with

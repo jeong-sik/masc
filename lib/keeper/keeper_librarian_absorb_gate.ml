@@ -5,29 +5,12 @@
 
 let min_statement_chars = 20
 
-let is_ascii_space c =
+(* Prose separators for the statement splitter below: the classic blank set,
+   including form feed and vertical tab, which pasted logs carry. Deliberately
+   wider than [String_util.is_ascii_space] (query tokenization) — that set
+   splits on nothing invisible but ASCII space-class bytes for search. *)
+let is_prose_separator c =
   c = ' ' || c = '\t' || c = '\n' || c = '\r' || c = '\012' || c = '\011'
-;;
-
-(* Characters, not bytes: the carry rule below counts what a reader sees,
-   and the scorer this cut mirrors counted code points. *)
-let utf8_length s =
-  let n = ref 0 in
-  String.iter (fun c -> if Char.code c land 0xC0 <> 0x80 then incr n) s;
-  !n
-;;
-
-let strip s =
-  let n = String.length s in
-  let i = ref 0 in
-  while !i < n && is_ascii_space s.[!i] do
-    incr i
-  done;
-  let j = ref n in
-  while !j > !i && is_ascii_space s.[!j - 1] do
-    decr j
-  done;
-  String.sub s !i (!j - !i)
 ;;
 
 let da_period = "\xEB\x8B\xA4." (* 다. *)
@@ -48,12 +31,12 @@ let cut_line line =
   let pieces = ref [] in
   let start = ref 0 in
   let emit stop =
-    let piece = strip (String.sub line !start (stop - !start)) in
+    let piece = String.trim (String.sub line !start (stop - !start)) in
     if piece <> "" then pieces := piece :: !pieces
   in
   let skip_spaces i =
     let j = ref i in
-    while !j < n && is_ascii_space line.[!j] do
+    while !j < n && is_prose_separator line.[!j] do
       incr j
     done;
     !j
@@ -69,18 +52,18 @@ let cut_line line =
       i := !start)
     else if (c = '.' || c = '!' || c = '?' || c = ';')
             && !i + 1 < n
-            && is_ascii_space line.[!i + 1]
+            && is_prose_separator line.[!i + 1]
     then (
       emit (!i + 1);
       start := skip_spaces (!i + 1);
       i := !start)
-    else if is_ascii_space c
+    else if is_prose_separator c
     then (
       let after_spaces = skip_spaces !i in
       if after_spaces < n
          && starts_with_at line after_spaces em_dash
          && after_spaces + String.length em_dash < n
-         && is_ascii_space line.[after_spaces + String.length em_dash]
+         && is_prose_separator line.[after_spaces + String.length em_dash]
       then (
         emit !i;
         start := skip_spaces (after_spaces + String.length em_dash);
@@ -98,8 +81,11 @@ let statements text =
   let out, carry =
     List.fold_left
       (fun (out, carry) piece ->
-         let carry = strip (carry ^ " " ^ piece) in
-         if utf8_length carry >= min_statement_chars then carry :: out, "" else out, carry)
+         (* Characters, not bytes: the carry rule counts what a reader sees,
+            and the scorer this cut mirrors counted code points. *)
+         let carry = String.trim (carry ^ " " ^ piece) in
+         if String_util.utf8_length carry >= min_statement_chars
+         then carry :: out, "" else out, carry)
       ([], "")
       pieces
   in

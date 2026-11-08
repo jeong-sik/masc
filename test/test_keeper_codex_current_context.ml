@@ -21,7 +21,7 @@ let text = Yojson.Safe.Util.to_string
 let items = Yojson.Safe.Util.to_list
 let require = function Ok value -> value | Error detail -> fail detail
 
-let fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item ~checkpoint_tool ~accepted_efforts ~turn_delay_s =
+let fixture root ~reject_context ~overflow_resume ~overflow_over_injected_bytes ~hold_first_resume ~compact_resume ~compact_item ~checkpoint_tool ~accepted_efforts ~turn_delay_s =
   let capture = Filename.concat root "requests.jsonl" in
   write capture "";
   let command = Filename.concat root "codex-fixture" in
@@ -42,6 +42,8 @@ compact_item = %s
 checkpoint_tool = %s
 accepted_efforts = %s
 turn_delay_s = %g
+overflow_over_injected_bytes = %s
+injected_bytes = 0
 turn_id = 'fresh-turn'
 def emit(value):
     print(json.dumps(value), flush=True)
@@ -61,6 +63,7 @@ for line in sys.stdin:
             'supportedReasoningEfforts':[{'reasoningEffort':effort,'description':effort}
                 for effort in accepted_efforts]}],'nextCursor':None}})
     elif method in ('thread/start', 'thread/resume'):
+        injected_bytes = 0
         if method == 'thread/resume':
             turn_id = 'resumed-turn'
         emit({'id':ident,'result':{'thread':{'id':'context-thread'},'model':'context-fixture'}})
@@ -68,6 +71,7 @@ for line in sys.stdin:
         if reject_context:
             emit({'id':ident,'error':{'code':-32602,'message':'fixture rejected current context'}})
         else:
+            injected_bytes += len(json.dumps(request['params']['items']))
             emit({'id':ident,'result':{}})
     elif method == 'turn/start':
         hold_this_turn = hold_first_resume and turn_id == 'resumed-turn' and not os.path.exists(capture+'.held')
@@ -85,6 +89,9 @@ for line in sys.stdin:
         if overflow_resume and turn_id == 'resumed-turn' and not os.path.exists(capture+'.overflowed'):
             with open(capture+'.overflowed', 'w') as out:
                 out.write('rejected before effects')
+            emit({'method':'turn/completed','params':{'threadId':'context-thread','turn':{'id':turn_id,'items':[],'status':'failed','error':{'message':'context is full','codexErrorInfo':'contextWindowExceeded'}}}})
+            continue
+        if overflow_over_injected_bytes is not None and injected_bytes > overflow_over_injected_bytes:
             emit({'method':'turn/completed','params':{'threadId':'context-thread','turn':{'id':turn_id,'items':[],'status':'failed','error':{'message':'context is full','codexErrorInfo':'contextWindowExceeded'}}}})
             continue
         if compact_resume and turn_id == 'resumed-turn' and not os.path.exists(capture+'.compacted'):
@@ -109,11 +116,12 @@ for line in sys.stdin:
     (if compact_item then "True" else "False")
     (if checkpoint_tool then "True" else "False")
     (Yojson.Safe.to_string (`List (List.map (fun effort -> `String effort) accepted_efforts)))
-    turn_delay_s);
+    turn_delay_s
+    (match overflow_over_injected_bytes with None -> "None" | Some bytes -> string_of_int bytes));
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?(checkpoint_tool = false) ?catalog_context_window
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?overflow_over_injected_bytes ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?(checkpoint_tool = false) ?catalog_context_window
     ?(reasoning_effort = None) ?(turn_timeout_s = None) ?catalog_inference
     ?(remove_runtime = false) ?(turn_delay_s = 0.)
     ?(accepted_efforts = ["none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max"; "ultra"])
@@ -140,7 +148,7 @@ let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_res
     ~base_path:root ~sandbox_profile:None "context-fixture";
   let saved = Runtime.For_testing.snapshot () in
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
-  let command, capture = fixture root ~reject_context ~overflow_resume ~hold_first_resume ~compact_resume ~compact_item ~checkpoint_tool ~accepted_efforts ~turn_delay_s in
+  let command, capture = fixture root ~reject_context ~overflow_resume ~overflow_over_injected_bytes ~hold_first_resume ~compact_resume ~compact_item ~checkpoint_tool ~accepted_efforts ~turn_delay_s in
   let config_path = Filename.concat root "runtime.toml" in
   let write_catalog ~model_id max_context reasoning_effort turn_timeout_s =
     let inference =
@@ -1529,6 +1537,112 @@ let test_checkpoint_preserves_receipt_across_session_replacement () =
          fail "completed receipt consumption must retire its exact hint");
       check int "replacement never re-executes the original or independent effect" 1 !calls)
 
+(* RFC retained-results-carrier-shrinks-to-an-address §12: the fixture refuses
+   a turn whose thread took in more than this many bytes of injected items
+   since it started, as a model window would. Six retained receipts of about
+   4 KB exceed it inline; their address form does not. *)
+let carrier_window_bytes = 16_000
+
+let retained_label index = Printf.sprintf "RETAINED-%d-" index
+
+let retained_indices = List.init 6 Fun.id
+
+let retain_overflow_receipts ~base_path ~keeper_name =
+  List.iter (fun index ->
+    Keeper_client_tool_outbox.retain ~base_path ~keeper_name
+      {thread_id="overflow-thread";turn_id="overflow-turn";
+       call_id=Printf.sprintf "overflow-call-%d" index;tool_name="Read";
+       arguments=`String "no-effect-replay";
+       response=`String (retained_label index ^ String.make 4096 'r')} |> require)
+    retained_indices
+
+let pending_receipts ~base_path ~keeper_name =
+  Keeper_client_tool_outbox.load ~base_path ~keeper_name |> require
+
+(* The text an Inline request carries, and the address the switch names. *)
+let inline_carrier ~base_path ~keeper_name =
+  String.concat "\n\n"
+    (Keeper_client_tool_outbox.developer_context (pending_receipts ~base_path ~keeper_name))
+
+let held_blob ~base_path sha256 =
+  match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
+  | Ok held -> held
+  | Error error -> fail (Tool_blob_store.fetch_error_to_string error)
+
+let carries_each_receipt text = List.for_all (fun index ->
+  String_util.contains_substring text (retained_label index)) retained_indices
+
+let carries_no_receipt text = not (List.exists (fun index ->
+  String_util.contains_substring text (retained_label index)) retained_indices)
+
+(* #49634 on the Codex lane: the first typed overflow switches the run's
+   carrier to the address form and the run starts again at the same
+   capacity; the Completed turn acknowledges every receipt the run loaded. *)
+let test_retained_receipts_go_by_address_after_a_codex_overflow () =
+  with_fixture ~overflow_over_injected_bytes:carrier_window_bytes @@ fun ~run ~capture ~reports:_ ->
+  let base_path = Filename.dirname capture and keeper_name = "context-fixture" in
+  retain_overflow_receipts ~base_path ~keeper_name;
+  let inline = inline_carrier ~base_path ~keeper_name in
+  let sha256 = Agent_core_sha256.(to_hex (digest_string inline)) in
+  successful (run ~instructions:"Keeper instructions" ~world:"world" ());
+  let rows = read_requests capture in
+  check int "the refused Start and its retry each start a thread" 2
+    (List.length (params_of "thread/start" rows));
+  match List.map Yojson.Safe.to_string (params_of "thread/inject_items" rows) with
+  | [refused; retried] ->
+    check bool "the refused Start carried every receipt inline" true
+      (carries_each_receipt refused);
+    check bool "the retry carries no receipt inline" true (carries_no_receipt retried);
+    check bool "the retry's injected items are strictly smaller" true
+      (String.length retried < String.length refused);
+    check bool "the retry names the blob of the inline text" true
+      (String_util.contains_substring retried sha256);
+    check (option string) "the blob holds the inline text" (Some inline)
+      (held_blob ~base_path sha256);
+    check bool "a run offered no reader says it cannot read the receipts" true
+      (String_util.contains_substring retried "cannot read the receipts");
+    check int "the completed retry acknowledges every loaded receipt" 0
+      (List.length (Keeper_client_tool_outbox.receipt_ids
+         (pending_receipts ~base_path ~keeper_name)))
+  | injected ->
+    fail (Printf.sprintf "expected the refused and the retried injection, saw %d"
+      (List.length injected))
+
+(* A Resume refused on the retained receipts goes again as a fresh Start
+   (the vendor thread holds the refused items), and that Start carries the
+   address form. *)
+let test_codex_resume_overflow_restarts_with_the_address_form () =
+  with_fixture ~overflow_over_injected_bytes:carrier_window_bytes @@ fun ~run ~capture ~reports:_ ->
+  let base_path = Filename.dirname capture and keeper_name = "context-fixture" in
+  successful (run ~instructions:"Keeper instructions" ~world:"world" ());
+  retain_overflow_receipts ~base_path ~keeper_name;
+  let inline = inline_carrier ~base_path ~keeper_name in
+  let sha256 = Agent_core_sha256.(to_hex (digest_string inline)) in
+  let before = List.length (read_requests capture) in
+  successful (run ~instructions:"Keeper instructions" ~world:"world" ());
+  let rows = read_requests capture |> List.filteri (fun index _ -> index >= before) in
+  (match params_of "thread/resume" rows, params_of "thread/start" rows with
+   | [_], [_] -> ()
+   | resumes, starts ->
+     fail (Printf.sprintf "expected a Resume then a fresh Start, saw %d resumes and %d starts"
+       (List.length resumes) (List.length starts)));
+  match List.map Yojson.Safe.to_string (params_of "thread/inject_items" rows) with
+  | [refused; restarted] ->
+    check bool "the refused Resume carried every receipt inline" true
+      (carries_each_receipt refused);
+    check bool "the fresh Start carries no receipt inline" true
+      (carries_no_receipt restarted);
+    check bool "the fresh Start names the blob of the inline text" true
+      (String_util.contains_substring restarted sha256);
+    check (option string) "the blob holds the inline text" (Some inline)
+      (held_blob ~base_path sha256);
+    check int "the completed Start acknowledges every loaded receipt" 0
+      (List.length (Keeper_client_tool_outbox.receipt_ids
+         (pending_receipts ~base_path ~keeper_name)))
+  | injected ->
+    fail (Printf.sprintf "expected the refused and the restarted injection, saw %d"
+      (List.length injected))
+
 let () = run "Keeper current Codex context" ["native requests",[
   test_case "a Keeper's Codex client runs in its private directory" `Quick
     test_codex_runs_in_the_keepers_private_directory;
@@ -1606,4 +1720,8 @@ let () = run "Keeper current Codex context" ["native requests",[
       test_completion_projection_failure_prevents_native_request];
   "async receipt continuation",[
     test_case "host checkpoint preserves result through fresh-session intake" `Quick
-      test_checkpoint_preserves_receipt_across_session_replacement]]
+      test_checkpoint_preserves_receipt_across_session_replacement;
+    test_case "retained receipts go by address after an overflow" `Quick
+      test_retained_receipts_go_by_address_after_a_codex_overflow;
+    test_case "a resume overflow restarts with the address form" `Quick
+      test_codex_resume_overflow_restarts_with_the_address_form]]

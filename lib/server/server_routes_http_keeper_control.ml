@@ -28,10 +28,7 @@ let handle_keeper_tool_approval ~actor state request reqd =
           let* stripped_json =
             match Workspace.validate_expected_workspace ~config json with
             | Ok payload -> Ok payload
-            | Error Workspace.Invalid_workspace_precondition ->
-              Error "invalid expected_workspace precondition"
-            | Error Workspace.Workspace_precondition_failed ->
-              Error "workspace precondition failed"
+            | Error error -> Error (Workspace.expected_workspace_error_message error)
           in
           let fields =
             match stripped_json with

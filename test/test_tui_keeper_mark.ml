@@ -42,7 +42,30 @@ let test_the_column_legend_explains_every_letter_the_cell_draws () =
     (mode_letters @ sandbox_letters);
   List.iter
     (fun header -> check_bool ("the legend names " ^ header) true (contains keys header))
-    [ Mark.now_header; Mark.age_header; "LIFECYCLE"; Mark.failing_glyph; "Mode"; "S "; Mark.(badge_glyph Badge_schedule); "mem"; "사람 몫" ]
+    [ Mark.now_header; Mark.age_header; "LIFECYCLE"; Mark.failing_glyph; "Mode"; "S "; Mark.(badge_glyph Badge_schedule); "mem"; Masc_tui_keeper_age_ladder.cell_label; "사람 몫" ]
+
+let test_the_column_legend_names_the_failing_cell () =
+  check_bool "the failing-for word is a legend key" true
+    (List.exists (fun (key, _) -> String.equal key Mark.failing_since_word) Mark.column_legend)
+
+let test_the_column_legend_names_the_pulse_cell () =
+  let contains haystack needle =
+    let n = String.length needle and h = String.length haystack in
+    let rec go i = i + n <= h && (String.sub haystack i n = needle || go (i + 1)) in
+    go 0
+  in
+  let pulse_marks =
+    [ Mark.pulse_ok_mark
+    ; Mark.pulse_rested_mark
+    ; Mark.pulse_failed_mark
+    ; Mark.pulse_quiet_mark
+    ; Mark.unknown_mark
+    ]
+  in
+  check_bool "one legend entry is keyed by all five pulse marks" true
+    (List.exists
+       (fun (key, _) -> List.for_all (fun mark -> contains key mark) pulse_marks)
+       Mark.column_legend)
 
 let test_operator_disposition_words () =
   let kinds =
@@ -106,6 +129,10 @@ let () =
     [ ( "marks"
       , [ Alcotest.test_case "the column legend explains every letter" `Quick
             test_the_column_legend_explains_every_letter_the_cell_draws
+        ; Alcotest.test_case "the column legend names the failing cell" `Quick
+            test_the_column_legend_names_the_failing_cell
+        ; Alcotest.test_case "the column legend names the pulse cell" `Quick
+            test_the_column_legend_names_the_pulse_cell
         ; Alcotest.test_case "operator disposition words are declared" `Quick
             test_operator_disposition_words
         ; Alcotest.test_case "operator disposition activity filter" `Quick

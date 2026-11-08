@@ -164,11 +164,11 @@ let pending_confirm_common_fields (entry : pending_confirm) =
     ("actor", `String entry.actor);
     ("action_type", `String entry.action_type);
     ("target_type", `String entry.target_type);
-    ("target_id", Json_util.string_option_to_yojson entry.target_id);
+    ("target_id", Json_util.string_opt_to_json entry.target_id);
     ("payload", entry.payload);
     ("delegated_tool", `String entry.delegated_tool);
     ("created_at", `String entry.created_at);
-    ("expires_at", Json_util.string_option_to_yojson entry.expires_at);
+    ("expires_at", Json_util.string_opt_to_json entry.expires_at);
   ]
 
 let pending_confirm_to_yojson (entry : pending_confirm) =
@@ -549,7 +549,7 @@ let pending_confirm_summary_json_of_scope scope =
   in
   `Assoc
     [
-      ("actor_filter", Json_util.string_option_to_yojson scope.actor_filter);
+      ("actor_filter", Json_util.string_opt_to_json scope.actor_filter);
       ("filter_active", `Bool (Option.is_some scope.actor_filter));
       ("visible_count", `Int (List.length scope.visible_entries));
       ("total_count", `Int (List.length scope.all_entries));

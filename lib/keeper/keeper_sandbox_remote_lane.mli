@@ -61,6 +61,7 @@ val microvm_endpoint :
 
 val endpoint :
   ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
+  ?access:Keeper_sandbox_remote.access ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   cwd:string ->
@@ -73,10 +74,15 @@ val endpoint :
     guest belongs to the turn that owns it -- which a write to a stopped
     guest needs. A caller that only needs a guest already running takes
     {!attached_guest_endpoint}. Docker: refused
-    ([docker_has_no_remote_lane]). *)
+    ([docker_has_no_remote_lane]).
+
+    [access] only matters to Remote_ssh, whose preflight leaves out the
+    free-disk floor for [Read_only]. It defaults to [Read_write]: a caller
+    that does not say it only reads gets the whole preflight. *)
 
 val attached_guest_endpoint :
   ?timeout_sec:float ->
+  ?access:Keeper_sandbox_remote.access ->
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   unit ->

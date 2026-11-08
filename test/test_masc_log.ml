@@ -102,6 +102,7 @@ let test_entry_to_json_keeper_name_none_serializes_system () =
     message = "test message";
     details = `Null;
     category = None;
+    diagnostic_kind = None;
   } in
   let json = Log.Ring.entry_to_json entry in
   let keeper_name_val =
@@ -122,6 +123,7 @@ let test_entry_to_json_keeper_name_some_preserves () =
     message = "test message";
     details = `Null;
     category = None;
+    diagnostic_kind = None;
   } in
   let json = Log.Ring.entry_to_json entry in
   let keeper_name_val =
@@ -129,6 +131,26 @@ let test_entry_to_json_keeper_name_some_preserves () =
     |> Yojson.Safe.Util.to_string
   in
   Alcotest.(check string) "keeper_name Some preserved" "my-keeper" keeper_name_val
+
+(* #49742: the diagnostic kind is an in-memory field only — the sink wire
+   schema (LogEntryRawSchema) must not gain a key for it. *)
+let test_entry_to_json_omits_diagnostic_kind () =
+  let entry : Log.Ring.entry = {
+    seq = 3;
+    ts = "2026-05-26T00:00:00Z";
+    level = Log.Warn;
+    source = Log.Structured;
+    module_name = "test";
+    keeper_name = None;
+    turn_id = None;
+    message = "[MASC] Received SIGTERM, shutting down gracefully";
+    details = `Null;
+    category = None;
+    diagnostic_kind = Some (Log.External_signal "SIGTERM");
+  } in
+  let json = Log.Ring.entry_to_json entry in
+  Alcotest.(check bool) "no diagnostic_kind key on the wire" false
+    (Yojson.Safe.Util.member "diagnostic_kind" json <> `Null)
 
 (* Local helper: this binary intentionally depends only on masc_log +
    alcotest-adjacent modules, so no String_util import. *)

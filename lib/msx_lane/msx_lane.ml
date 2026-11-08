@@ -938,27 +938,22 @@ let rec mkdir_checkpoint_directory dir =
     sync_checkpoint_directory (Filename.dirname dir)
   end
 
+(* The write is the canonical strict staged replacement (Fs_compat): a temp
+   file next to the target, payload and parent-directory fsync, cancellation
+   re-raised after cleanup. This lane maps the failure stage onto its own
+   error taxonomy — a failure before the rename leaves the previous
+   checkpoint readable ([Unreadable]); one after it leaves the directory in
+   an unknown state ([Effect_unknown]). *)
 let atomic_write path contents =
-  let replaced = ref false in
-  let failure message = Error (if !replaced then Effect_unknown message else Unreadable message) in
-  try
-    mkdir_checkpoint_directory (Filename.dirname path);
-    let tmp, oc = Filename.open_temp_file ~temp_dir:(Filename.dirname path) ".msx-" ".tmp" in
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr oc; if Sys.file_exists tmp then Sys.remove tmp)
-      (fun () ->
-        output_string oc contents;
-        flush oc;
-        Unix.fsync (Unix.descr_of_out_channel oc);
-        close_out oc;
-        Sys.rename tmp path;
-        replaced := true;
-        sync_checkpoint_directory (Filename.dirname path);
-        Ok ())
-  with
-  | Sys_error message -> failure message
-  | Unix.Unix_error (error, operation, path) ->
-      failure (operation ^ " " ^ path ^ ": " ^ Unix.error_message error)
+  match mkdir_checkpoint_directory (Filename.dirname path) with
+  | () ->
+    (match Fs_compat.save_file_atomic_strict_staged path contents with
+     | Ok () -> Ok ()
+     | Error { stage = Before_rename; exception_; _ } ->
+       Error (Unreadable (Printexc.to_string exception_))
+     | Error { stage = After_rename; exception_; _ } ->
+       Error (Effect_unknown (Printexc.to_string exception_)))
+  | exception Sys_error message -> Error (Unreadable message)
 ;;
 
 let checkpoint_json (st : machine) =
@@ -1260,12 +1255,7 @@ let checkpoint_info ~path =
           match Unix.stat path with
           | exception _ -> None, None
           | stats ->
-            let tm = Unix.gmtime stats.st_mtime in
-            let utc =
-              Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-                (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-                tm.tm_hour tm.tm_min tm.tm_sec in
-            Some stats.st_mtime, Some utc in
+            Some stats.st_mtime, Some (Time_codec.rfc3339_of_unix stats.st_mtime) in
         Ok
           { exists = true
           ; version

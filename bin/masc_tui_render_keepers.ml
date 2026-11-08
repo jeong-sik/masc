@@ -1277,6 +1277,11 @@ let render_keeper_list (state : state) =
                let cells =
                  Masc_tui_keeper_axis.segments state ~now:now_unix
                    ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name
+                   ~runtime:
+                     (match row.Keeper_list_model.reading.Keeper_control.liveness with
+                      | Keeper_control.Present runtime -> Some runtime
+                      | Keeper_control.Absent | Keeper_control.Unobserved
+                      | Keeper_control.Invalid _ -> None)
                in
                emit (keeper_secondary_row_content ~now:now_unix ~inner ~cells row)
            | Keeper_list_model.Compact | Keeper_list_model.Grouped -> ()))

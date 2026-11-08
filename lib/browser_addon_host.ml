@@ -234,6 +234,24 @@ let stamp binding (result : Mcp_protocol.Mcp_types.tool_result) =
   | (None|Some _),_ -> result
 let selection_detail ~clients error = `Assoc ["error",Browser_selection.error_to_json error;
   "clients",`List (List.map Browser_lane.client_json clients)]
+(* Which Page action may run on a route that names no client. take_over alone
+   may, on the live lane: the worker that published its Space as missing or
+   user-owned is then the target, and it reads its own state again before it
+   reopens or reclaims (see [resolve]). Every other control action and
+   open_tab steers the task Space, so it names its client. The Keeper argument
+   parser answers with this same rule. *)
+let explicit_client_required =
+  "live creation, control and Page management actions require an explicit observed clientId; \
+   only take_over may leave it out, with lane=live, to reopen or reclaim the Space its worker reported"
+let act_route preference (action : Browser_lane.Action.t) =
+  match preference,action with
+  | Browser_selection.Exact (Browser_lane.Live_route None),Browser_lane.Action.Control Browser_lane.Action.Take_over -> Ok ()
+  | Browser_selection.Exact (Browser_lane.Live_route None),
+    (Browser_lane.Action.Open_tab _|Control (Hand_off|Space_status|Finish_space _|Wait_for_control _|Adopt_tab _|Release_tab _))
+  | Automatic,Control (Hand_off|Take_over|Space_status|Finish_space _|Wait_for_control _|Adopt_tab _|Release_tab _) ->
+      Error explicit_client_required
+  | Exact (Live_route (Some _)),Control (Hand_off|Take_over|Space_status|Finish_space _|Wait_for_control _|Adopt_tab _|Release_tab _)
+  | (Automatic|Exact (Live_route _)),(Open_tab _|On_tab _) -> Ok ()
 (* Choose from the worker's snapshot, then run the command once on the chosen
    route. A refusal after the snapshot is returned as the worker gave it; the
    host never sends the command to another browser. *)
@@ -250,18 +268,11 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
     | (Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_console _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
       | Page_goto _|Page_elements _|Page_act _|Page_context _),_::_ ->
         refuse "requiredActions applies only to initial tab discovery" in
-  let* ()=match preference,verb with
-    | Browser_selection.Exact (Browser_lane.Live_route None),
-      Browser_lane.Page_act (Browser_lane.Action.Control Browser_lane.Action.Take_over) -> Ok ()
-    | Browser_selection.Exact (Browser_lane.Live_route None),
-      Browser_lane.Page_act (Browser_lane.Action.Open_tab _|
-        Control (Hand_off|Space_status|Finish_space _|Wait_for_control _|Adopt_tab _|Release_tab _))
-    | Automatic,Browser_lane.Page_act (Browser_lane.Action.Control _) ->
-        refuse "live creation, control and Page management actions require an explicit observed clientId"
-    | Exact (Browser_lane.Live_route (Some _)),Browser_lane.Page_act (Browser_lane.Action.Control _) -> Ok ()
-    | (Automatic|Exact (Live_route _)),
-      (Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_console _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
-      | Page_goto _|Page_elements _|Page_act (Browser_lane.Action.Open_tab _|On_tab _)|Page_context _) -> Ok () in
+  let* ()=match verb with
+    | Browser_lane.Page_act action ->
+        (match act_route preference action with Ok () -> Ok () | Error detail -> refuse detail)
+    | Tabs_list|Page_read _|Page_document _|Page_downloads _|Page_cookies _|Page_network _|Page_console _|Page_capture _|Page_scene _|Page_snapshot _|Page_native_workflow _|Page_interact _
+    | Page_goto _|Page_elements _|Page_context _ -> Ok () in
   match preference,required_actions with
     | Browser_selection.Exact (Browser_lane.Live_route None),[]
       when (match verb with
@@ -294,7 +305,7 @@ let resolve ?goal_space ~required_actions t ~preference verb ~start_time =
                 {Browser_selection.route=Browser_lane.Live_route None;reason=Browser_selection.Explicit_browser},
                 served)
           | [] ->
-              refuse "take_over without a clientId recovers an ego task space a worker reports as user-owned or missing; no live worker reports one"
+              refuse "take_over with lane=live and no clientId recovers an ego task space a worker reports as user-owned or missing; no live worker reports one"
           | _::_::_ ->
               refuse "more than one live worker reports an unavailable ego task space; inspect the inventory issues"))
     | (Automatic|Exact (Live_route _)),_ ->

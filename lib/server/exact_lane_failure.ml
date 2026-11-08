@@ -194,4 +194,8 @@ let cli_failure = function
      | Fusion_official_client.Claude_failure error
      | Fusion_official_client.Claude_admission_failure error -> claude_error error
      | Fusion_official_client.Antigravity_failure error -> antigravity_error error
-     | Fusion_official_client.Muse_failure error -> muse_error error)
+     | Fusion_official_client.Muse_failure error -> muse_error error
+     (* The load check refuses a Vibe runtime in [slots] and [cli_slots]
+        (Client_without_output_schema), so a Vibe failure here means that
+        check no longer holds. *)
+     | Fusion_official_client.Vibe_failure _ -> Configuration_refused)

@@ -1,0 +1,35 @@
+{
+  "model": "thinkingmachines/Inkling-2-Small",
+  "effort": [
+    "low",
+    0.2
+  ],
+  "rank": 8,
+  "learning_rate": 0.0002,
+  "batch": 32,
+  "epochs": 5,
+  "seed": 20261108,
+  "n_train": 160,
+  "n_eval": {
+    "seen_pool": 20,
+    "unseen_pool": 20
+  },
+  "datum_tokens": {
+    "min": 119,
+    "p50": 121,
+    "max": 123
+  },
+  "pass": {
+    "base_accuracy_max": 0.1,
+    "trained_accuracy_min": 0.8,
+    "last_over_first_nll_max": 0.5
+  },
+  "estimate": {
+    "train_tokens_per_epoch": 19333,
+    "train_tokens_total": 96665,
+    "train_usd": 0.145,
+    "eval_usd_ceiling": 0.0998,
+    "total_usd_estimate": 0.2448
+  },
+  "budget_usd": 1.0
+}

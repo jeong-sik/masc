@@ -378,13 +378,21 @@ let handle_goal_upsert_validated ~tool_name ~start_time (ctx : context) args : T
             ])
 ;;
 
+(* A refused [expected_workspace] precondition: one that is not well formed is
+   a validation error, one that names another workspace is a conflict. *)
+let expected_workspace_refusal ~tool_name ~start_time error =
+  let message = Workspace.expected_workspace_error_message error in
+  match error with
+  | Workspace.Invalid_workspace_precondition ->
+    error_result_typed ~tool_name ~start_time ~code:Validation_error message
+  | Workspace.Workspace_precondition_failed ->
+    error_result_typed ~tool_name ~start_time ~code:Conflict message
+;;
+
 let handle_goal_upsert ~tool_name ~start_time (ctx : context) args =
   match Workspace.validate_expected_workspace ~config:ctx.config args with
   | Ok args -> handle_goal_upsert_validated ~tool_name ~start_time ctx args
-  | Error Workspace.Invalid_workspace_precondition ->
-    error_result_typed ~tool_name ~start_time ~code:Validation_error "invalid expected_workspace precondition"
-  | Error Workspace.Workspace_precondition_failed ->
-    error_result_typed ~tool_name ~start_time ~code:Conflict "workspace precondition failed"
+  | Error error -> expected_workspace_refusal ~tool_name ~start_time error
 ;;
 
 let handle_goal_measure ~tool_name ~start_time (ctx : context) args
@@ -1219,10 +1227,7 @@ let handle_goal_transition_validated ~tool_name ~start_time (ctx : context) args
 let handle_goal_transition ~tool_name ~start_time (ctx : context) args =
   match Workspace.validate_expected_workspace ~config:ctx.config args with
   | Ok args -> handle_goal_transition_validated ~tool_name ~start_time ctx args
-  | Error Workspace.Invalid_workspace_precondition ->
-    error_result_typed ~tool_name ~start_time ~code:Validation_error "invalid expected_workspace precondition"
-  | Error Workspace.Workspace_precondition_failed ->
-    error_result_typed ~tool_name ~start_time ~code:Conflict "workspace precondition failed"
+  | Error error -> expected_workspace_refusal ~tool_name ~start_time error
 ;;
 
 let confirm_completion ?after_confirmation config ~goal_id ~operator_id

@@ -1235,15 +1235,24 @@ val tool_result_msg
 type tool_result_validation_error =
   | Expected_object of string
   | Expected_array of string
+  | Expected_object_or_array of string
   | Empty_content of string
   | Json_parse_failed of string
 
-(** Validate that a ToolResult's payload matches a minimal expected shape.
+(** What shape a ToolResult's payload must have. One closed variant states
+    the four real contracts; two booleans could also state the impossible
+    "neither" and let "both" pass scalars. *)
+type tool_result_shape =
+  | Expect_any
+  | Expect_object
+  | Expect_array
+  | Expect_object_or_array
+
+(** Validate that a ToolResult's payload matches the expected shape.
     Returns [Ok ()] when the result passes, or a descriptive error.
     Foundation for P0's full JSON Schema validation loop. *)
 val validate_tool_result_shape
-  :  expect_object:bool
-  -> expect_array:bool
+  :  tool_result_shape
   -> 'source content_block_with
   -> (unit, tool_result_validation_error) result
 

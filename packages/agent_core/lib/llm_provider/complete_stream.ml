@@ -627,11 +627,7 @@ let complete_stream_http
              between any first event and the first token; [None]
              when they coincide (OpenAI-compat: no separable
              prelude). *)
-          let ttft_ms =
-            match !first_token_at_ref with
-            | Some t -> Some t
-            | None -> None
-          in
+          let ttft_ms = !first_token_at_ref in
           let prefill_ms =
             match !first_event_at_ref, !first_token_at_ref with
             | Some fe, Some ft when ft > fe -> Some fe

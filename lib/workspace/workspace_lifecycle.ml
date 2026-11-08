@@ -149,6 +149,7 @@ let bind_session config ~agent_name ?(agent_type_override=None) ~capabilities
              ~agent_file:agent_file_dedup
          in
          Log.Workspace.warn
+           ~diagnostic_kind:Log.Agent_decode_failure
            "agent session rebound: invalid agent JSON for %s: %s | snapshot=%s"
            nickname e (Yojson.Safe.to_string snapshot));
     Printf.sprintf "%s already bound in the namespace (last_seen updated)" nickname
@@ -244,6 +245,7 @@ let end_session config ~agent_name =
            agent_parse_error_snapshot ~agent_name:actual_name ~agent_file
          in
          Log.Workspace.warn
+           ~diagnostic_kind:Log.Agent_decode_failure
            "agent session end: invalid agent JSON for %s: %s | snapshot=%s"
            actual_name e (Yojson.Safe.to_string snapshot));
 

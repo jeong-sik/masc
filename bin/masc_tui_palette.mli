@@ -83,6 +83,14 @@ type search_enter =
 
 val search_enter : Masc_tui_types.state -> search_enter
 
+(** True when Enter in the [:] command palette has nothing to run: the typed
+    text matches no command and is not a Code question (those run without a
+    listed row). The key then leaves the palette open with its text, and the
+    footer drops Enter, both from this one answer. The other prompts never read
+    it: "search in files" searches the typed text, and the branch and worktree
+    lists close on Enter. *)
+val command_enter_has_nothing : Masc_tui_types.state -> bool
+
 val palette_starts_with : needle:string -> string -> bool
 val palette_subsequence : needle:string -> string -> bool
 

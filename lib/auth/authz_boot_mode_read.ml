@@ -165,6 +165,14 @@ let high_water_detail = function
   | B.Judged (H.Absent | H.Matches) -> []
 ;;
 
+let single_user_again =
+  "to go back to a single user, stop every masc process on the workspace, delete the \
+   authorization log .masc/auth/authz.jsonl, the external store, and the install record in the \
+   masc config directory that names this base path (authz-install-*.json), and take \
+   account_mode out of config.json; deleting the log alone makes a boot refuse, as after a \
+   restore"
+;;
+
 let messages (input : B.input) = function
   | Refuse (first, rest) -> B.refusal_to_string first, List.map B.refusal_to_string rest
   | Activation_requested ->
@@ -174,13 +182,14 @@ let messages (input : B.input) = function
       ; "masc auth bootstrap --external-store PATH, run while no server runs, activates the \
          workspace; a server of this build then stops at boot, and no command undoes the \
          activation"
+      ; single_user_again
       ] )
   | Multi_account_not_served mode ->
     ( Printf.sprintf
         "the authorization log made Multi_account (%s); this build does not have the account \
          layers that serve it"
         (B.mode_to_string mode)
-    , high_water_detail input.high_water )
+    , high_water_detail input.high_water @ [ single_user_again ] )
 ;;
 
 type single_user = Judged_single_user of string

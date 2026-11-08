@@ -257,6 +257,10 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
       k.mkh_facts k.mkh_observed_facts k.mkh_derived_facts k.mkh_added
       k.mkh_removed k.mkh_support_invalidations
   in
+  let ladder_rows =
+    clause_rows ~full ~cols
+      (Masc_tui_keeper_age_ladder.keeper_clauses ~ko k.mkh_age_bins)
+  in
   (* RFC librarian-lifecycle §4.9: how far behind, when that was counted,
      and what the journal last said. A count the durable drain could not take prints
      as "unread ?" rather than as zero. *)
@@ -464,7 +468,9 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
     then
       [ current_line ]
       @ input_rows
-      @ [ facts_line; source_line;
+      @ [ facts_line ]
+      @ ladder_rows
+      @ [ source_line;
           "  Recall block detail: open Keeper chat /context." ]
       @ clause_rows ~full ~cols librarian_clauses
       @ librarian_stalled_lines
@@ -952,6 +958,17 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
             | Memory_usage.Bytes -> text "저장된 지식, 턴 입력 아님" "stored knowledge, not turn input")
          ]
   in
+  (* The ordinary facts counted by time since first seen, summed over the
+     Keepers whose row carries the server's ladder (RFC-0511 D2). A Keeper
+     without one, and a row this build refused, are counted at the end of the
+     row, so a partial sum does not read as the whole. *)
+  let age_ladder_rows (snapshot : memory_health_snapshot) =
+    labelled (text "일반:" "Ordinary:")
+      (Masc_tui_keeper_age_ladder.fleet_clauses ~ko
+         (Masc_tui_keeper_age_ladder.fleet_of
+            ~refused_rows:(List.length snapshot.mhs_refused_keepers)
+            snapshot.mhs_keepers))
+  in
   let readings =
     match state.memory_health with
     | None -> [ "  Librarian: " ^ missing_reading (text "상태 관측 대기" "waiting for health data") ]
@@ -971,6 +988,7 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
             labelled (text "일반:" "Ordinary:")
               [Printf.sprintf (if ko then "읽기 실패 키퍼 %d명" else "read errors in %d keepers")
                  snapshot.mhs_total_read_errors])
+       @ age_ladder_rows snapshot
        (* The source-bound snapshot is stored and invalidated apart from the
           ordinary facts above, and each Keeper's roster row and detail already
           print their own count (#38446). The count here is the standing set of

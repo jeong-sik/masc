@@ -869,14 +869,6 @@ let decode_log_entry json =
           le_tools_used;
         }
 
-let parse_log_entry line =
-  let json =
-    try Ok (Yojson.Safe.from_string line)
-    with Yojson.Json_error msg -> Error ("invalid JSON: " ^ msg)
-  in
-  let* json = json in
-  decode_log_entry json
-
 let context_unavailable_reason_of_json json raw =
   let* raw_input_tokens = optional_int_field json "raw_input_tokens" in
   let* context_window = optional_int_field json "context_window" in
@@ -1538,7 +1530,7 @@ type keeper_call_log_health =
   | Call_log_coverage_gap
   | Call_log_unknown of string
 
-(* The vocabulary of [Dashboard_http_keeper_types.source_health_fields]. Total
+(* The vocabulary of [Dashboard_tool_source_freshness.health_fields]. Total
    on purpose: a word the server adds later still decodes, and readers fail
    it closed to an incomplete log. *)
 let keeper_call_log_health_of_string = function

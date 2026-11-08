@@ -123,9 +123,30 @@ let shows_operator_disposition ~(activity : Masc_tui_keeper_list_model.activity)
   | Delegate_result | Verifying | External_waiting -> false
 ;;
 
+(* The turn cells of the Detailed second row (RFC-0511 D1). The cells draw
+   these words and marks and [column_legend] names them from the same values,
+   so a mark that changes cannot keep its old meaning on the sheet. Three of
+   the marks are the ones the row already draws for the same meaning: a failed
+   attempt, a spent quota and a keeper with no turn. *)
+let failing_since_word = "failing"
+let unknown_mark = "?"
+let pulse_hours = 12
+let pulse_ok_mark = "\xe2\x9c\x93" (* ✓: the turn finished without failing or resting *)
+let pulse_rested_mark = badge_glyph Masc_tui_keeper_list_model.Badge_quota_spent
+let pulse_failed_mark = attempt_glyph
+let pulse_quiet_mark = health_glyph Reading.Health_idle
+
 let column_legend =
   let letters letter values = String.concat "/" (List.map letter values) in
   let words word values = String.concat " / " (List.map word values) in
+  let pulse_marks =
+    [ pulse_ok_mark, "ok"
+    ; pulse_rested_mark, "rested"
+    ; pulse_failed_mark, "failed"
+    ; pulse_quiet_mark, "no turn"
+    ; unknown_mark, "unknown"
+    ]
+  in
   [ now_header, "what the keeper is doing at this moment"
   ; ( age_header
     , "time since it last moved: the open turn's latest update (its start before it \
@@ -134,11 +155,26 @@ let column_legend =
   ; ( failing_glyph
     , "a failing keeper's last failure, in place of its runtime or first in DETAIL: \
        how long ago · cause · the runtime that ended it · candidates tried" )
+  ; ( failing_since_word
+    , Printf.sprintf
+        "how long the keeper has been in the failing phase; %s when the server recorded \
+         no start, or the start is ahead of this screen's clock (Detailed second row)"
+        unknown_mark )
+  ; ( String.concat " " (List.map fst pulse_marks)
+    , Printf.sprintf
+        "autonomous turn results of the last %d hours, one mark per hour, newest on the \
+         right: %s; chat turns are not counted, and the server keeps a keeper's last %d \
+         turns, so a busy keeper's older hours read %s (Detailed second row)"
+        pulse_hours
+        (String.concat " / " (List.map (fun (mark, word) -> mark ^ " " ^ word) pulse_marks))
+        Masc.Keeper_turn_pulse.max_samples_per_keeper
+        unknown_mark )
   ; "Mode " ^ letters activation_letter activations, words activation_word activations
   ; "S " ^ letters sandbox_letter sandboxes, "sandbox: " ^ words sandbox_word sandboxes
   ; ( "쉬는 중"
     , "resting path: relative duration (제공자 stated / 상한 bounded); ▹ prefixes next candidate after turn failure" )
   ; badge_glyph Badge_schedule, "next scheduled run or hold status (Detailed second row)"
   ; "mem · lag · stale", "keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second row)"
+  ; Masc_tui_keeper_age_ladder.cell_label, Masc_tui_keeper_age_ladder.legend
   ; "사람 몫 / 효과 확인 / 분류 안 됨", "requires human operator action, effect review, or unmapped fault (NOW column)"
   ]

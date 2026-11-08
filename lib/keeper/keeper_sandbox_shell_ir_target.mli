@@ -91,8 +91,13 @@ val ssh_target
   -> timeout_sec:float
   -> ?ssh_bin:string
   -> ?on_receipt:(Keeper_sandbox_remote.execution_observation -> unit)
+  -> ?access:Keeper_sandbox_remote.access
   -> unit
   -> (ssh_dispatch, target_error) result
 (** Resolve the keeper's endpoint and construct a fail-closed SSH target.
     Pipeline dispatch remains unsupported until a native remote pipeline
-    contract exists. *)
+    contract exists.
+
+    [access] picks the preflight the target must pass; it defaults to
+    [Read_write], the whole preflight. [Read_only] leaves out the free-disk
+    floor. *)

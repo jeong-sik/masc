@@ -86,10 +86,6 @@ let category_for_resolved_callee raw =
   | "Stdlib.Result.get_ok" | "Result.get_ok" ->
     Some Partial_extraction
   | "Stdlib.Result.to_option" | "Result.to_option" -> Some Failure_erasure
-  | callee when String.equal callee "Parse_outcome.to_option" ->
-    Some Failure_erasure
-  | callee when String.ends_with ~suffix:".Parse_outcome.to_option" callee ->
-    Some Failure_erasure
   | _ -> None
 ;;
 

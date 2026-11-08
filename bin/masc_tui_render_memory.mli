@@ -71,8 +71,8 @@ val memory_fact_detail_lines : cols:int -> memory_fact_row -> string list
     terminal. Each returned row occupies one scrollable display row. *)
 
 val memory_fleet_header_rows : cols:int -> state -> string list
-(** The Total, Ordinary, Source and Librarian rows above the sort row, each
-    wrapped to the frame [cols] gives. *)
+(** The Total, Ordinary (counts, then the age ladder), Source and Librarian
+    rows above the sort row, each wrapped to the frame [cols] gives. *)
 
 val memory_overview_reading : cols:int -> state -> Masc_tui_detail_reading.t
 (** A captured, scrollable fleet summary and selected Keeper health reading.

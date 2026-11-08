@@ -131,8 +131,6 @@ let runtime_toml_path ~base_path =
   Config_dir_resolver.runtime_toml_path_for_base_path ~base_path
 ;;
 
-let now_iso () = Time_codec.rfc3339_of_unix (Unix.gettimeofday ())
-
 (* The filesystem boundary raises; a preset call answers with [Error]. *)
 let guard f =
   match f () with
@@ -591,7 +589,7 @@ let capture ~base_path ~name ~description =
       Ok
         { name
         ; description
-        ; created_at = now_iso ()
+        ; created_at = Types_core.now_iso ()
         ; default_revisions = Some (Prompt_registry.default_revisions ())
           (* Everything the operator saved, not only what is in force. A
              snapshot taken while an override is refused has to carry it, or
@@ -1023,7 +1021,7 @@ let unavailable_assignments content assignments =
       | Some runtime ->
         match runtime.execution, Runtime_instance.capabilities_for_runtime runtime with
         | (Runtime_execution.Codex_app_server _ | Claude_code _
-          | Antigravity_cli _ | Muse_serve _), _ -> None
+          | Antigravity_cli _ | Muse_serve _ | Vibe_cli _), _ -> None
         | Runtime_execution.Agent_core _, Some _ -> None
         | Runtime_execution.Agent_core provider_config, None ->
           let missing : Runtime.missing_catalog_model =

@@ -34,7 +34,11 @@ type validation_error =
     }
   | Cwd_not_absolute of string
 
-let json_type_name (json : Yojson.Safe.t) =
+(* JSON Schema type names, which split integers from other numbers — the
+   typed-input errors below quote the schema's own vocabulary. The wire-level
+   [Llm_provider.Json_util.json_type_name] merges both into "number"; this is
+   deliberately not that function. *)
+let json_schema_type_name (json : Yojson.Safe.t) =
   match json with
   | `Assoc _ -> "object"
   | `Bool _ -> "boolean"
@@ -55,7 +59,7 @@ let assoc_fields ~path (json : Yojson.Safe.t) =
     result_errorf
       "%s must be object, got %s"
       path
-      (json_type_name value)
+      (json_schema_type_name value)
 ;;
 
 let member fields key = List.assoc_opt key fields
@@ -81,7 +85,7 @@ let optional_string ~path fields key =
       "%s.%s must be string, got %s"
       path
       key
-      (json_type_name value)
+      (json_schema_type_name value)
 ;;
 
 let optional_bool ~path fields key =
@@ -93,7 +97,7 @@ let optional_bool ~path fields key =
       "%s.%s must be boolean, got %s"
       path
       key
-      (json_type_name value)
+      (json_schema_type_name value)
 ;;
 
 let optional_positive_float ~path fields key =
@@ -115,7 +119,7 @@ let optional_positive_float ~path fields key =
       "%s.%s must be number, got %s"
       path
       key
-      (json_type_name value)
+      (json_schema_type_name value)
 ;;
 
 let required_string_list ~path fields key =
@@ -130,7 +134,7 @@ let required_string_list ~path fields key =
           path
           key
           index
-          (json_type_name value)
+          (json_schema_type_name value)
     in
     loop 0 [] values
   | Some value ->
@@ -138,7 +142,7 @@ let required_string_list ~path fields key =
       "%s.%s must be array, got %s"
       path
       key
-      (json_type_name value)
+      (json_schema_type_name value)
   | None -> result_errorf "%s.%s is required" path key
 ;;
 

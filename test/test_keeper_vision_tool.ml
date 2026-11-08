@@ -630,7 +630,7 @@ let test_provider_for_vision_uses_runtime_temperature () =
           | Runtime_execution.Codex_app_server _
           | Runtime_execution.Claude_code _
           | Runtime_execution.Antigravity_cli _
-          | Runtime_execution.Muse_serve _ ->
+          | Runtime_execution.Muse_serve _ | Runtime_execution.Vibe_cli _ ->
             failwith "selected vision runtime should be agent_core"
           | Runtime_execution.Agent_core provider_config ->
             let configured = Vt.provider_for_vision provider_config in

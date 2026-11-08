@@ -97,6 +97,60 @@ let test_cleanup_report_keeps_guest_skip_reason () =
     | Ok _ -> Alcotest.fail "malformed cleanup report accepted")
     [ {|{"skip":false,"entries":[]}|}; "not JSON" ]
 
+let test_workspace_report_counts_entries_and_keeps_skip_reason () =
+  let decode = Keeper_remote_workspace_cleanup.report_of_string in
+  (match decode {|{"skip":"/proc unavailable","entries":[],"free_kib_before":5,"free_kib_after":5}|} with
+   | Error reason -> Alcotest.(check string) "payload refusal remains observable"
+       "Keeper workspace cleanup skipped: /proc unavailable" reason
+   | Ok _ -> Alcotest.fail "skipped sweep was reported as successful");
+  (match decode
+     {|{"free_kib_before":100,"free_kib_after":160,"entries":[
+        {"name":"p1","result":"removed"},{"name":"p2","result":"removed"},
+        {"name":".config","result":"skipped","reason":"dot entry"},
+        {"name":"p3","result":"failed","reason":"busy"}]}|} with
+   | Ok report ->
+     Alcotest.(check (list int)) "removed, skipped, failed, freed, available"
+       [ 2; 1; 1; 60; 160 ]
+       [ report.removed; report.skipped; report.failed; report.freed_kib; report.available_kib ]
+   | Error reason -> Alcotest.fail reason);
+  List.iter (fun body ->
+    match decode body with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "malformed workspace report accepted: %s" body)
+    [ {|{"free_kib_before":1,"free_kib_after":1,"entries":[{"result":"would remove"}]}|};
+      {|{"free_kib_before":1,"free_kib_after":1,"entries":[{"name":"p1"}]}|};
+      {|{"entries":[]}|};
+      {|{"skip":false,"entries":[],"free_kib_before":1,"free_kib_after":1}|};
+      "not JSON" ]
+
+let test_each_profile_takes_its_own_cleanup_switch () =
+  let module M = Server_keeper_build_maintenance in
+  let module P = Keeper_types_profile in
+  let step = Alcotest.testable
+      (fun ppf step -> Format.pp_print_string ppf (match step with
+         | Some M.Guest_builds -> "guest builds"
+         | Some M.Remote_workspace -> "remote workspace"
+         | None -> "none"))
+      ( = ) in
+  List.iter (fun (profile, builds, remote_workspace, expected) ->
+    Alcotest.check step
+      (Printf.sprintf "%s builds=%b remote_workspace=%b"
+         (P.sandbox_profile_to_string profile) builds remote_workspace)
+      expected (M.step_for ~builds ~remote_workspace profile))
+    [ P.Remote_ssh, true, true, Some M.Remote_workspace;
+      P.Remote_ssh, true, false, None;
+      P.Remote_ssh, false, true, Some M.Remote_workspace;
+      P.Micro_vm, true, false, Some M.Guest_builds;
+      P.Micro_vm, false, true, None;
+      P.Docker, true, true, Some M.Guest_builds;
+      P.Docker, false, true, None ]
+
+let test_server_always_applies_the_workspace_payload () =
+  Alcotest.(check (list string)) "argv"
+    [ "python3"; "-"; "--root"; "/masc-work/keeper"; "--retention-sec"; "172800."; "--apply" ]
+    (Keeper_remote_workspace_cleanup.payload_argv ~root:"/masc-work/keeper"
+       ~retention_sec:172800.)
+
 let test_slow_keeper_does_not_block_another_cleanup () =
   Eio_main.run @@ fun _env ->
   let running = Server_keeper_build_maintenance.create_running () in
@@ -146,6 +200,9 @@ let () =
       Alcotest.test_case "Owner identity must match" `Quick test_cleanup_rejects_other_owner;
       Alcotest.test_case "Profile errors refuse cleanup" `Quick test_cleanup_rejects_invalid_profile;
       Alcotest.test_case "Guest skip reason is not empty success" `Quick test_cleanup_report_keeps_guest_skip_reason;
+      Alcotest.test_case "Workspace report counts entries" `Quick test_workspace_report_counts_entries_and_keeps_skip_reason;
+      Alcotest.test_case "Each profile takes its own switch" `Quick test_each_profile_takes_its_own_cleanup_switch;
+      Alcotest.test_case "Server applies the workspace payload" `Quick test_server_always_applies_the_workspace_payload;
       Alcotest.test_case "Slow Keeper does not block another cleanup" `Quick test_slow_keeper_does_not_block_another_cleanup;
       Alcotest.test_case "Cancelled cleanup releases its reservation" `Quick test_cancelled_cleanup_releases_its_reservation;
     ] ]

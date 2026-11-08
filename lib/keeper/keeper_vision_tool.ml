@@ -86,7 +86,9 @@ let vision_runtime_candidates ~now =
        (* The official-client read holds its answer to an output schema, and
           [muse serve] has no channel for one: Fusion_official_client refuses
           the request, so the runtime is no candidate. *)
-       | Runtime_execution.Muse_serve _ -> None)
+       | Runtime_execution.Muse_serve _ -> None
+       (* Vibe takes text only, so the image check above already refused it. *)
+       | Runtime_execution.Vibe_cli _ -> None)
 
 let vision_runtime_ids ~now : string list =
   List.map (fun (runtime_id, _, _) -> runtime_id) (vision_runtime_candidates ~now)
@@ -543,7 +545,8 @@ type candidate_failure =
    admission and effect observations. An accepted-but-unobserved timeout is
    not evidence that another candidate may safely replace the turn. *)
 let official_failure_can_advance : Fusion_official_client.failure -> bool = function
-  | Missing_reply | Setup_failure _ | Antigravity_failure _ | Muse_failure _ -> false
+  | Missing_reply | Setup_failure _ | Antigravity_failure _ | Muse_failure _
+  | Vibe_failure _ -> false
   | Claude_admission_failure (Invalid_config _) -> false
   | Claude_admission_failure (Runtime_claude_code.Spawn_failed _)
   | Claude_admission_failure (Runtime_claude_code.Protocol_error _)
@@ -622,7 +625,7 @@ let official_failure_effect : Fusion_official_client.failure -> Tool_result.fail
       | Quota_blocked { tool_effect_attempted = false; response_emitted = false; _ }
       | Context_window_exceeded { tool_effect_attempted = false; response_emitted = false; _ }
       | Turn_failed_with_observation { tool_effect_attempted = false; response_emitted = false; _ }) -> Proven_pre_effect
-  | Missing_reply | Antigravity_failure _ | Muse_failure _
+  | Missing_reply | Antigravity_failure _ | Muse_failure _ | Vibe_failure _
   | Codex_failure
       ( Turn_input_write_failed _ | Protocol_error _ | Rpc_error _
       | Unsupported_server_request _ | Turn_failed _ | Stopped_by_host _
@@ -1022,6 +1025,7 @@ let execution_of_vision_outcome = function
       | _ when official_failure_can_advance failure ->
         Tool_result.Dependency_unavailable, "provider_error"
       | Missing_reply | Setup_failure _ | Antigravity_failure _ | Muse_failure _
+      | Vibe_failure _
       | Codex_failure
           ( Invalid_config _ | Spawn_failed _ | Reasoning_effort_admission_failed _
           | Account_read_failed _

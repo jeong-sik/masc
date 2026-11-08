@@ -16,7 +16,8 @@ let exact_slot_list_admitting api_format =
        | Runtime_schema.Codex_app_server_runtime
        | Runtime_schema.Antigravity_cli_runtime
        | Runtime_schema.Claude_code_runtime
-       | Runtime_schema.Muse_serve_runtime -> Cli_slots
+       | Runtime_schema.Muse_serve_runtime
+       | Runtime_schema.Vibe_cli_runtime -> Cli_slots
        | Runtime_schema.Messages_api
        | Runtime_schema.Chat_completions_api
        | Runtime_schema.Ollama_api

@@ -1004,22 +1004,20 @@ let save_trajectory_summary_cache ~path =
   match trajectory_summary_rows () with
   | [] -> Ok ()
   | rows ->
-    (try
-       Fs_compat.mkdir_p (Filename.dirname path);
-       let tmp = path ^ ".tmp" in
-       let oc = open_out tmp in
-       Fun.protect
-         ~finally:(fun () -> close_out_noerr oc)
-         (fun () ->
-            output_string
-              oc
-              (Yojson.Safe.to_string (trajectory_summary_to_json rows)));
-       Sys.rename tmp path;
-       Ok ()
+    (* A fixed "<path>.tmp" collided when the server and the TUI wrote the
+       cache in the same directory at once; Fs_compat's atomic replace stages
+       in a unique temp file next to the target and fsyncs before the rename. *)
+    (match
+       (try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
+        | Sys_error detail -> Error detail
+        | Unix.Unix_error (err, op, arg) ->
+          Error (Printf.sprintf "%s(%s): %s" op arg (Unix.error_message err)))
      with
-     | Sys_error detail -> Error detail
-     | Unix.Unix_error (err, op, arg) ->
-       Error (Printf.sprintf "%s(%s): %s" op arg (Unix.error_message err)))
+     | Error _ as e -> e
+     | Ok () ->
+       Fs_compat.save_file_atomic
+         path
+         (Yojson.Safe.to_string (trajectory_summary_to_json rows)))
 ;;
 
 let load_trajectory_summary_cache ~path =

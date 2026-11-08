@@ -51,6 +51,10 @@
 
 같은 읽기 함수로 `disposition` 을 보지 않고 `names no comment` 가 든 줄만 따로 훑었어요. 창 안에서 44줄이고, `comment_offset N … the thread now has N comments` 42줄, `the thread has no comments` 1줄(둘 다 `e-masc-the-leader`), `after_comment_id … names no comment` 1줄(`github-pr-checker`)이에요. 위 표의 42건과 Keeper 한 명의 43건이 모두 이 줄들에서 나와요.
 
+## 두 번째 창 (2026-11-07T18:29Z ~ 11-08T14:08Z, UTC)
+
+호출 8,547건 중 117건(1.37%)이 실패했어요. 가장 큰 묶음은 `Execute` 의 `remote_ssh_disk_low` 예요. 세 endpoint 에서 22건·17건·12건으로 합 51건(43.6%)이에요. 이어서 `masc_board_post_get` 의 `Post not found` 7건, `Edit` 의 `old_string not found` 6건, `WebFetch` 9건이에요. 결과는 `result-2026-11-07_11-08.json` 이고 해석은 [11-08 보고서](../../reports/2026-11-08-tool-efficiency-after-the-1107-deploy.md)에 있어요.
+
 ## 다시 만들기
 
 ```bash

@@ -397,8 +397,8 @@ export function normalizeKeeperTrustTerminalReason(raw: unknown): KeeperTrustTer
 
 export function normalizeKeeperTrust(raw: unknown): Keeper['trust'] {
   if (!isRecord(raw)) return null
-  const approvalRaw = isRecord(raw.approval_state) ? raw.approval_state : raw.approval
-  const executionRaw = isRecord(raw.execution_summary) ? raw.execution_summary : raw.execution
+  const approvalRaw = isRecord(raw.approval) ? raw.approval : undefined
+  const executionRaw = isRecord(raw.execution) ? raw.execution : undefined
   return {
     disposition: asTrustDisposition(raw.disposition),
     disposition_reason: asString(raw.disposition_reason) ?? null,
@@ -674,7 +674,7 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
 
       const runtimeBlockerClass = asKeeperRuntimeBlockerClass(row.runtime_blocker_class)
       const runtimeBlockerSummary = asString(row.runtime_blocker_summary) ?? null
-      const trust = normalizeKeeperTrust(row.runtime_trust ?? row.trust)
+      const trust = normalizeKeeperTrust(row.runtime_trust)
       const terminalReason = trust?.latest_terminal_reason ?? null
       const nextHumanAction = asString(row.next_human_action) ?? null
       const stopCause = normalizeStopCause({

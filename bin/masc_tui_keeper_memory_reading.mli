@@ -25,6 +25,7 @@ type t =
       ; added : int
       ; removed : int
       ; source_invalidations : int
+      ; age_bins : Masc.Keeper_memory_age_bins.t option
       }
 
 type index

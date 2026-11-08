@@ -449,19 +449,19 @@ describe('normalizeKeepers lifecycle metrics', () => {
       {
         name: 'trust-keeper',
         status: 'active',
-        trust: {
+        runtime_trust: {
           disposition: 'Blocked',
           disposition_reason: 'approval_waiting',
           needs_attention: true,
           attention_reason: 'approval_pending',
           next_human_action: 'resolve_approval',
-          approval_state: {
+          approval: {
             state: 'pending',
             summary: '1 approval request waiting',
             pending_count: 1,
             latest_event_at: '2026-04-23T00:09:30Z',
           },
-          execution_summary: {
+          execution: {
             sandbox_summary: 'docker / none',
             completion_observation_summary: 'not_observed',
             latest_receipt_at: '2026-04-23T00:10:00Z',
@@ -514,7 +514,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       {
         name: 'blocked-keeper',
         status: 'active',
-        trust: {
+        runtime_trust: {
           disposition: 'Alert',
           operator_disposition: 'pause_runtime',
           operator_disposition_reason: 'fiber_unresolved',
@@ -562,7 +562,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
         status: 'active',
         runtime_blocker_class: 'fiber_unresolved',
         runtime_blocker_summary: 'turn has not made progress',
-        trust: {
+        runtime_trust: {
           latest_terminal_reason: {
             code: 'api_error_timeout',
             source: 'execution_receipt',
@@ -585,7 +585,7 @@ describe('normalizeKeepers lifecycle metrics', () => {
       {
         name: 'no-code-keeper',
         status: 'active',
-        trust: {
+        runtime_trust: {
           latest_terminal_reason: { source: 'execution_receipt' },
         },
       },
@@ -961,7 +961,7 @@ describe('approval_state.pending_first — worktree approval blocker surfacing',
       {
         name: 'pr-keeper',
         status: 'active',
-        trust: {
+        runtime_trust: {
           needs_attention: true,
           attention_reason: 'approval_pending',
           next_human_action: 'resolve_approval',
@@ -991,7 +991,7 @@ describe('approval_state.pending_first — worktree approval blocker surfacing',
       {
         name: 'pr-keeper',
         status: 'active',
-        trust: {
+        runtime_trust: {
           approval: {
             state: 'idle',
             pending_count: 0,
@@ -1007,7 +1007,7 @@ describe('approval_state.pending_first — worktree approval blocker surfacing',
       {
         name: 'pr-keeper',
         status: 'active',
-        trust: {
+        runtime_trust: {
           approval: {
             state: 'pending',
             pending_count: 1,

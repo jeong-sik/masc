@@ -315,6 +315,9 @@ module Preflight = struct
   let ssh_ttl_sec () =
     max 0 (get_int ~default:60 "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC")
 
+  let ssh_read_ttl_sec () =
+    max 0 (get_int ~default:300 "MASC_KEEPER_SSH_PREFLIGHT_READ_TTL_SEC")
+
   let ssh_disk_free_min_kib () =
     max 0
       (get_int ~default:1_048_576

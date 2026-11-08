@@ -408,9 +408,16 @@ let parse_conversations_history_response ~status ~body =
                 items
             | _ -> [Error "messages must be an array"]
           in
-          (match List.find_opt Result.is_error parsed with
-           | Some (Error msg) -> Error (Other msg)
-           | Some (Ok _) | None ->
+          (* [List.partition] is stable, so the first decode failure stays
+             first and names the error. With no failures there is nothing to
+             extract — no unreachable [Some (Ok _)] arm, no [Result.get_ok]
+             on values a sibling proved [Ok]. *)
+          (match List.partition Result.is_ok parsed with
+           | _, Error msg :: _ -> Error (Other msg)
+           (* [partition Result.is_ok] never puts an [Ok] in the second
+              list; the pattern keeps the match exhaustive without a
+              wildcard. *)
+           | oks, ([] | Ok _ :: _) ->
              let has_more =
                match List.assoc_opt "has_more" fields with
                | Some (`Bool b) -> Ok b
@@ -425,7 +432,7 @@ let parse_conversations_history_response ~status ~body =
                | _ -> None
              in
              Result.map (fun has_more ->
-               { messages = List.map Result.get_ok parsed
+               { messages = List.filter_map Result.to_option oks
                ; has_more
                ; next_cursor
                }) has_more)

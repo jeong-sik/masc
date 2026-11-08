@@ -243,6 +243,19 @@ let test_install_record_lost () =
     check_decision "row 8" (Read.Stop (Read.Multi_account_not_served B.Multi_account_uncertain)) dirs)
 ;;
 
+(* The way back that Read.single_user_again gives. The lock file of the log
+   stays: a boot makes it anyway. *)
+let test_single_user_again () =
+  with_dirs (fun dirs ->
+    bootstrap dirs;
+    write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
+    Sys.remove (L.path_of_base_path ~base_path:dirs.base);
+    Sys.remove dirs.store;
+    Sys.remove (install_record_file dirs);
+    write_config dirs {|{"enabled":true,"require_token":true}|};
+    check_decision "row 1" Read.Boot_single_user dirs)
+;;
+
 let test_unreadable_config_dir () =
   if Unix.geteuid () = 0 then Alcotest.skip ();
   with_dirs (fun dirs ->
@@ -343,7 +356,10 @@ let test_log_of_another_bootstrap () =
        Alcotest.fail "expected a mismatch");
     let stop = Read.Multi_account_not_served B.Multi_account_uncertain in
     Alcotest.check decision "row 8" (Read.Stop stop) (Read.decide i);
-    Alcotest.(check bool) "the mismatch is in the message" true (snd (Read.messages i stop) <> []))
+    Alcotest.(check bool)
+      "the mismatch is in the message"
+      true
+      (snd (Read.messages i stop) <> [ Read.single_user_again ]))
 ;;
 
 let test_boot_entry () =
@@ -569,6 +585,7 @@ let () =
         ; Alcotest.test_case "bootstrapped" `Quick test_bootstrapped
         ; Alcotest.test_case "restored before bootstrap" `Quick test_restored_before_bootstrap
         ; Alcotest.test_case "install record lost" `Quick test_install_record_lost
+        ; Alcotest.test_case "single user again" `Quick test_single_user_again
         ; Alcotest.test_case "config dir others can write" `Quick test_unreadable_config_dir
         ; Alcotest.test_case "log without a mode event" `Quick test_log_without_mode_event
         ; Alcotest.test_case "record after the bootstrap" `Quick test_record_after_the_bootstrap

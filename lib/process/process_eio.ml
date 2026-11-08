@@ -58,6 +58,17 @@ let observe_process_timeout argv ~timeout_sec ~origin =
     Log.Misc.warn "[Process_eio] timeout observer failed: %s"
       (Printexc.to_string exn)
 
+(* Every explicit-timeout branch writes this line, then reports the timeout to
+   the observer. *)
+let note_explicit_timeout argv ~timeout_sec ~origin ~label =
+  Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s" timeout_sec
+    (Timeout_origin.to_label origin) label;
+  observe_process_timeout argv ~timeout_sec ~origin
+
+(* The line every argv failure branch writes before it builds its error output. *)
+let log_argv_error ~label exn =
+  Log.Misc.error "[Process_eio] argv error: %s — %s" label (Printexc.to_string exn)
+
 type spawn_guard = { run : 'a. (unit -> 'a) -> 'a }
 
 type fallback_policy = Allow_unix_fallback | Eio_only
@@ -749,9 +760,7 @@ let run_argv ?timeout_sec ?env (argv : string list) : string =
                       output_for_status ~status ~stdout:(Exec_buffer.render buf) ~stderr:""))
             with
             | Explicit_process_timeout timeout_sec ->
-                Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
-                  timeout_sec (Timeout_origin.to_label !phase_ref) label;
-                observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
+                note_explicit_timeout argv ~timeout_sec ~origin:!phase_ref ~label;
                 process_error_output ~label
                   ~partial_stdout:(Exec_buffer.render buf)
                   ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec) ()
@@ -775,8 +784,7 @@ let run_argv ?timeout_sec ?env (argv : string list) : string =
                   process_error_output ~label
                     ~reason:"pipe closed by reader" ()
                 ) else (
-                  Log.Misc.error "[Process_eio] argv error: %s — %s" label
-                    (Printexc.to_string exn);
+                  log_argv_error ~label exn;
                   process_error_output ~label ~reason:(reason_of_exn_for_output exn) ()))
 
 let run_argv_with_stdin ?timeout_sec ?env ~(stdin_content : string) (argv : string list) : string =
@@ -803,9 +811,7 @@ let run_argv_with_stdin ?timeout_sec ?env ~(stdin_content : string) (argv : stri
                       output_for_status ~status ~stdout:(Exec_buffer.render buf) ~stderr:""))
             with
             | Explicit_process_timeout timeout_sec ->
-                Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
-                  timeout_sec (Timeout_origin.to_label !phase_ref) label;
-                observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
+                note_explicit_timeout argv ~timeout_sec ~origin:!phase_ref ~label;
                 process_error_output ~label
                   ~partial_stdout:(Exec_buffer.render buf)
                   ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec) ()
@@ -829,8 +835,7 @@ let run_argv_with_stdin ?timeout_sec ?env ~(stdin_content : string) (argv : stri
                   process_error_output ~label
                     ~reason:"pipe closed by reader" ()
                 ) else (
-                  Log.Misc.error "[Process_eio] argv error: %s — %s" label
-                    (Printexc.to_string exn);
+                  log_argv_error ~label exn;
                   process_error_output ~label ~reason:(reason_of_exn_for_output exn) ()))
 
 let run_argv_with_stdin_and_status_split
@@ -897,9 +902,7 @@ let run_argv_with_stdin_and_status_split
                     Exec_buffer.render stderr_buf ))
             with
             | Explicit_process_timeout timeout_sec ->
-                Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
-                  timeout_sec (Timeout_origin.to_label !phase_ref) label;
-                observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
+                note_explicit_timeout argv ~timeout_sec ~origin:!phase_ref ~label;
                 let timeout_status = timed_out_status in
                 let stdout = Exec_buffer.render stdout_buf in
                 let stderr = Exec_buffer.render stderr_buf in
@@ -935,8 +938,7 @@ let run_argv_with_stdin_and_status_split
                     process_error_output ~label
                       ~reason:"pipe closed by reader" () )
                 ) else (
-                  Log.Misc.error "[Process_eio] argv error: %s — %s" label
-                    (Printexc.to_string exn);
+                  log_argv_error ~label exn;
                   ( Unix.WEXITED 127,
                     "",
                     process_error_output ~label
@@ -979,9 +981,7 @@ let run_argv_with_stdin_held_open_and_status_split
           unix_status, Exec_buffer.render stdout_buf, Exec_buffer.render stderr_buf)
       with
       | Explicit_process_timeout timeout_sec ->
-        Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
-          timeout_sec (Timeout_origin.to_label !phase_ref) label;
-        observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
+        note_explicit_timeout argv ~timeout_sec ~origin:!phase_ref ~label;
         let stdout = Exec_buffer.render stdout_buf in
         let stderr = Exec_buffer.render stderr_buf in
         let stderr =
@@ -1142,9 +1142,7 @@ let run_argv_with_redirects ?timeout_sec ?env ?cwd ~stdin ~stdout ~stderr
            Ok (unix_status, rendered_output out, rendered_output err))
        with
        | Explicit_process_timeout timeout_sec ->
-         Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s" timeout_sec
-           (Timeout_origin.to_label !phase_ref) label;
-         observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
+         note_explicit_timeout argv ~timeout_sec ~origin:!phase_ref ~label;
          Ok (timed_out_status, "", process_error_output ~label
                ~reason:(Printf.sprintf "timeout after %.2fs" timeout_sec) ())
        | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1195,9 +1193,7 @@ let run_argv_with_status_split_resolving ?timeout_sec ?env ?cwd
                        Exec_buffer.render stderr_buf )))
             with
             | Explicit_process_timeout timeout_sec ->
-                Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
-                  timeout_sec (Timeout_origin.to_label !phase_ref) label;
-                observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
+                note_explicit_timeout argv ~timeout_sec ~origin:!phase_ref ~label;
                 let timeout_status = timed_out_status in
                 let stdout = Exec_buffer.render stdout_buf in
                 let stderr = Exec_buffer.render stderr_buf in
@@ -1251,8 +1247,7 @@ let run_argv_with_status_split_resolving ?timeout_sec ?env ?cwd
                       process_error_output ~label
                         ~reason:"pipe closed by reader" () )
                 ) else (
-                  Log.Misc.error "[Process_eio] argv error: %s — %s" label
-                    (Printexc.to_string exn);
+                  log_argv_error ~label exn;
                   Ok
                     ( Unix.WEXITED 127,
                       "",
@@ -1265,8 +1260,7 @@ let run_argv_with_status_split ?timeout_sec ?env ?cwd
   | Ok outcome -> outcome
   | Error (_refusal, exn) ->
       let label = String.concat " " (List.map Filename.quote argv) in
-      Log.Misc.error "[Process_eio] argv error: %s — %s" label
-        (Printexc.to_string exn);
+      log_argv_error ~label exn;
       ( Unix.WEXITED 127,
         "",
         process_error_output ~label ~reason:(reason_of_exn_for_output exn) () )
@@ -1346,9 +1340,7 @@ let run_argv_with_status_split_streaming
                 unix_status, Exec_buffer.render stdout_buf, Exec_buffer.render stderr_buf)
           with
           | Explicit_process_timeout timeout_sec ->
-            Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
-              timeout_sec (Timeout_origin.to_label !phase_ref) label;
-            observe_process_timeout argv ~timeout_sec ~origin:!phase_ref;
+            note_explicit_timeout argv ~timeout_sec ~origin:!phase_ref ~label;
             let timeout_status = timed_out_status in
             let stdout = Exec_buffer.render stdout_buf in
             let stderr = Exec_buffer.render stderr_buf in
@@ -1376,8 +1368,7 @@ let run_argv_with_status_split_streaming
                 "",
                 process_error_output ~label ~reason:"pipe closed by reader" () ))
             else (
-              Log.Misc.error "[Process_eio] argv error: %s — %s" label
-                (Printexc.to_string exn);
+              log_argv_error ~label exn;
               ( Unix.WEXITED 127,
                 "",
                 process_error_output ~label ~reason:(reason_of_exn_for_output exn) () ))))
@@ -1585,11 +1576,9 @@ let run_argv_pipeline_with_status_split ?timeout_sec
              with
              | Pipeline_redirect_failed message -> Error message
              | Explicit_process_timeout timeout_sec ->
-                 Log.Misc.warn "[Process_eio] Timeout after %.2fs (%s): %s"
-                   timeout_sec (Timeout_origin.to_label !phase_ref) label;
-                 observe_process_timeout
+                 note_explicit_timeout
                    (match stages with [] -> [] | stage :: _ -> stage.argv)
-                   ~timeout_sec ~origin:!phase_ref;
+                   ~timeout_sec ~origin:!phase_ref ~label;
                  let streamed_stderr = stderr_contents () in
                  let stderr =
                    if String.trim streamed_stderr = "" then

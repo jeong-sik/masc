@@ -73,7 +73,7 @@ let child_environment runtime =
     (match Runtime_codex_app_server.client_environment (Runtime_official_account.Captured execution.account_home) with
      | Ok environment -> environment
      | Error error -> fail (Runtime_codex_app_server.error_to_string error))
-  | Agent_core _ | Antigravity_cli _ | Muse_serve _ -> fail "expected an official client"
+  | Agent_core _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ -> fail "expected an official client"
 
 let test_inherited_home client () =
   with_directory (fun first -> with_directory (fun second ->
@@ -100,7 +100,7 @@ let test_inherited_home client () =
              check (option string) "ordinary account file remains in admitted HOME"
                (Some (Filename.concat first ".claude.json"))
                (Runtime_claude_code.account_file (Runtime_official_account.Captured execution.account_home))
-           | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ ->
+           | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
              fail "expected Claude execution")
         | Codex -> check (option string) "Codex store remains the admitted directory"
             (Some home) (env_value "CODEX_HOME" child)))))
@@ -120,7 +120,7 @@ let test_inherited_directory client () =
               (Some (Filename.concat first ".claude.json"))
               (Runtime_claude_code.account_file (Runtime_official_account.Captured execution.account_home))
           | Codex_app_server _ -> ()
-          | Agent_core _ | Antigravity_cli _ | Muse_serve _ -> fail "expected native execution")))))
+          | Agent_core _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ -> fail "expected native execution")))))
 
 let test_inherited_credential client () =
   with_directory (fun home ->
@@ -188,7 +188,7 @@ let test_claude_credential_diagnosis () =
             check bool "refusal diagnosis uses the credential actually passed to this child"
               true (Runtime_claude_code.runs_on_environment_credential
                 (Runtime_official_account.Captured execution.account_home))
-          | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ ->
+          | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
             fail "expected Claude execution"))))
 
 let test_private_codex_environment configured () =
@@ -223,7 +223,7 @@ env_key = "OPENAI_API_KEY"
                check string "private projection cannot change the original account scope"
                  (Filename.concat home ".codex")
                  (Runtime_official_account.home execution.account_home)
-             | Agent_core _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
+             | Agent_core _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
                fail "expected Codex execution"))))))
 
 let with_cwd directory run =
@@ -337,7 +337,7 @@ env_http_headers = { "X-Fixture" = "CUSTOM_GATEWAY_HEADER" }
                   (Some "declared-header-a") (env_value "CUSTOM_GATEWAY_HEADER" child);
                 check (option string) "undeclared custom key cannot enter the child"
                   None (env_value "UNDECLARED_GATEWAY_KEY" child)
-              | Agent_core _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
+              | Agent_core _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
                 fail "expected Codex execution")))))))
 
 let test_retired_codex_profiles () =

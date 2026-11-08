@@ -1,0 +1,213 @@
+{
+  "before": {
+    "calls": 18727,
+    "failed": 170,
+    "failed_by_tool": [
+      {
+        "tool": "Grep",
+        "failed": 39
+      },
+      {
+        "tool": "Execute",
+        "failed": 23
+      },
+      {
+        "tool": "Edit",
+        "failed": 16
+      },
+      {
+        "tool": "keeper_artifact_read",
+        "failed": 15
+      }
+    ],
+    "sized": {
+      "Grep": {
+        "cap": 102400,
+        "calls": 1087,
+        "p50": 987,
+        "max": 1127672,
+        "at_or_over_cap": 108,
+        "bytes_at_or_over_cap": 34675003
+      },
+      "keeper_tools_list": {
+        "cap": 102400,
+        "calls": 81,
+        "p50": 282958,
+        "max": 292878,
+        "at_or_over_cap": 81,
+        "bytes_at_or_over_cap": 22927827
+      },
+      "BrowserTabs": {
+        "cap": 16384,
+        "calls": 50,
+        "p50": 33014,
+        "max": 40902,
+        "at_or_over_cap": 27,
+        "bytes_at_or_over_cap": 944189
+      },
+      "masc_dashboard": {
+        "cap": 16384,
+        "calls": 36,
+        "p50": 17582,
+        "max": 18719,
+        "at_or_over_cap": 36,
+        "bytes_at_or_over_cap": 636813
+      }
+    },
+    "execute": {
+      "calls": 7238,
+      "held_hours": 13.3,
+      "background_calls": 0,
+      "background_by_keeper": {},
+      "held_60s_or_more_calls": 109,
+      "held_60s_or_more_hours": 6.117
+    },
+    "sleep_polls": {
+      "keepers": [
+        "github-pr-checker",
+        "pr-updater"
+      ],
+      "keeper_execute_calls": 624,
+      "calls": 71,
+      "hours": 4.181
+    },
+    "execute_overhead": {
+      "calls": 7147,
+      "duration_hours": 13.193,
+      "execution_hours": 11.365,
+      "overhead_hours": 1.829,
+      "overhead_share": 0.139,
+      "overhead_5s_or_more_calls": 194,
+      "overhead_5s_or_more_hours": 0.462
+    },
+    "disk_low": {
+      "calls": 17,
+      "by_tool": {
+        "Execute": 17
+      },
+      "execute_by_intent": {
+        "auto": 16,
+        "unknown": 1
+      }
+    },
+    "background_starts": {
+      "calls": 0,
+      "naming_both_handle_tools": 0
+    }
+  },
+  "after": {
+    "calls": 8524,
+    "failed": 116,
+    "failed_by_tool": [
+      {
+        "tool": "Execute",
+        "failed": 55
+      },
+      {
+        "tool": "WebFetch",
+        "failed": 9
+      },
+      {
+        "tool": "masc_board_post_get",
+        "failed": 7
+      },
+      {
+        "tool": "Edit",
+        "failed": 6
+      }
+    ],
+    "sized": {
+      "Grep": {
+        "cap": 102400,
+        "calls": 147,
+        "p50": 985,
+        "max": 10552,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "keeper_tools_list": {
+        "cap": 102400,
+        "calls": 28,
+        "p50": 9655,
+        "max": 9655,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "BrowserTabs": {
+        "cap": 16384,
+        "calls": 8,
+        "p50": 7901,
+        "max": 8210,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "masc_dashboard": {
+        "cap": 16384,
+        "calls": 6,
+        "p50": 16388,
+        "max": 17852,
+        "at_or_over_cap": 3,
+        "bytes_at_or_over_cap": 51218
+      }
+    },
+    "execute": {
+      "calls": 4186,
+      "held_hours": 7.033,
+      "background_calls": 1,
+      "background_by_keeper": {
+        "sangsu": 1
+      },
+      "held_60s_or_more_calls": 29,
+      "held_60s_or_more_hours": 2.142
+    },
+    "sleep_polls": {
+      "keepers": [
+        "github-pr-checker",
+        "pr-updater"
+      ],
+      "keeper_execute_calls": 228,
+      "calls": 7,
+      "hours": 0.275
+    },
+    "execute_overhead": {
+      "calls": 4111,
+      "duration_hours": 6.876,
+      "execution_hours": 5.606,
+      "overhead_hours": 1.27,
+      "overhead_share": 0.185,
+      "overhead_5s_or_more_calls": 142,
+      "overhead_5s_or_more_hours": 0.551
+    },
+    "disk_low": {
+      "calls": 53,
+      "by_tool": {
+        "Execute": 51,
+        "Grep": 2
+      },
+      "execute_by_intent": {
+        "auto": 49,
+        "request_effect": 2
+      }
+    },
+    "background_starts": {
+      "calls": 1,
+      "naming_both_handle_tools": 0
+    }
+  },
+  "skipped": {
+    "bad_lines": 0
+  },
+  "window": {
+    "boot": "2026-11-07T18:24:19+00:00",
+    "settle_s": 300.0,
+    "before": [
+      "2026-11-06T22:45:38+00:00",
+      "2026-11-07T18:24:19+00:00"
+    ],
+    "after": [
+      "2026-11-07T18:29:19+00:00",
+      "2026-11-08T14:08:00+00:00"
+    ],
+    "files": 19
+  }
+}

@@ -14,11 +14,8 @@
   yojson
   unix
   threads
-  mirage-crypto-rng.unix
    masc.agent_core.digest
   eio
-  eio_main
-  eio.unix
   masc.agent_core
   masc.tool_types
   masc.keeper_registry
@@ -36,18 +33,9 @@
   masc_workspace
   masc.masc_tool_dispatch
   masc.config
-  masc.prompt_registry
-  opentelemetry
-  opentelemetry.client
-  ambient-context
-  ambient-context-eio)
+  masc.prompt_registry)
  (preprocess
   (pps
-   ppx_deriving_yojson
-   ppx_deriving.show
-   ppx_deriving.eq
-   ppx_enumerate
-   ppx_let
-   ppx_tla))
+   ppx_enumerate))
  (instrumentation
   (backend bisect_ppx)))

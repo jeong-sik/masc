@@ -224,14 +224,14 @@ let telemetry_reported_of_result
 
 let coverage_reason_of_result
     (result : Keeper_agent_run.run_result) : string option =
+  (* The match alone covers all four flag pairs; the former leading
+     [if both then None] only made the [true, true] arm below dead. *)
   let telemetry_reported = telemetry_reported_of_result result in
-  if result.usage_reported && telemetry_reported then None
-  else
-    match result.usage_reported, telemetry_reported with
-    | false, false -> Some "missing_usage_and_inference"
-    | false, true -> Some "missing_usage"
-    | true, false -> Some "missing_inference"
-    | true, true -> None
+  match result.usage_reported, telemetry_reported with
+  | false, false -> Some "missing_usage_and_inference"
+  | false, true -> Some "missing_usage"
+  | true, false -> Some "missing_inference"
+  | true, true -> None
 
 let coverage_stage_of_result
     (result : Keeper_agent_run.run_result) : string option =

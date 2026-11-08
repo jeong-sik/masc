@@ -371,11 +371,7 @@ let run () =
      with
      | Error message -> fatal message
      | Ok () ->
-       let task_id =
-         match nonblank !task_id with
-         | Some value -> Some value
-         | None -> None
-       in
+       let task_id = nonblank !task_id in
        (match
           log_cost
             ~agent:(String.trim !agent)

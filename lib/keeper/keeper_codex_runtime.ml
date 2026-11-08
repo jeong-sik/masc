@@ -845,11 +845,14 @@ let recovery_failure_of_client_error = function
 
 (* A Gate continuation may only resume the thread it was captured in. When
    that thread refuses the resume as a context overflow, the thread itself is
-   full: a Resume sends none of the conversation, so its input is the same at
-   every capacity, and no fresh start may carry the continuation. It is
-   recorded [Vendor_session_full], as in the Claude Code lane: the Gate
-   operation fails for good, whether a tool effect came first stays in the
-   record, and the next ordinary turn starts fresh. *)
+   taken as full: a Resume sends none of the conversation, so shrinking
+   history does not change its input, and no fresh start may carry the
+   continuation. The retained receipts a Resume injects can be what overflows
+   instead; that case is recorded the same way (RFC
+   retained-results-carrier-shrinks-to-an-address §5.4). It is recorded
+   [Vendor_session_full], as in the Claude Code lane: the Gate operation fails
+   for good, whether a tool effect came first stays in the record, and the
+   next ordinary turn starts fresh. *)
 let recovery_failure_of_attempt ~thread_mode ~gate_continuation error =
   match thread_mode, gate_continuation, error with
   | ( Runtime_codex_app_server.Resume _
@@ -984,7 +987,7 @@ let native_cwd ~base_path ~keeper_name ~sandbox_profile =
   | Unix.Unix_error (error, _, _) -> unusable (Unix.error_message error)
 ;;
 
-let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
+let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~required_native_posture ~official_client_continuation ~runtime_id ~context_window ~configured_reasoning_effort ~turn_timeout_s ~quota_scope ~keeper_name
     ~pre_tool_rejects ~base_path ~goal ~goal_blocks
     ~system_prompt ~tools ~loading_plan ~initial_messages ~capacity_bytes ~project_history
     ~on_transmitted_model_input ~hooks
@@ -1250,8 +1253,13 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
        Start System context keeps its existing instruction surface. *)
     (* Ordinary context keeps its existing placement. Receipts that outlived
        a cancelled vendor cell enter both Start and Resume as acknowledged
-       developer items, independently of the previous session's survival. *)
-    let* tool_outbox = Keeper_client_tool_outbox.load ~base_path ~keeper_name
+       developer items, independently of the previous session's survival.
+       Every attempt of the run carries the snapshot its first attempt
+       loaded, in the form the capacity-refusal hook left it, and
+       acknowledges that snapshot (RFC
+       retained-results-carrier-shrinks-to-an-address §5.1, §6.1). *)
+    let* tool_outbox, retained_carrier =
+      Keeper_client_tool_outbox.run_carrier_load retained_results
       |> Result.map_error internal_error in
     (* Resume configuration alone does not update the model-visible history.
        The runtime waits for this injection's ACK before [turn/start]. The
@@ -1263,7 +1271,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~offi
        injecting it again would put a second copy in the thread (#47644). *)
     let developer_context =
       (if refresh_system then [Keeper_context_submission_link.text system_projection] else [])
-      @ Keeper_client_tool_outbox.developer_context tool_outbox in
+      @ Keeper_client_tool_outbox.carrier_context retained_carrier in
     let terminal_error = ref None in
     (* Reported only after the complete turn/start write. A Resume sent none of
        the conversation; the thread holds it. *)
@@ -2095,18 +2103,36 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
   in
   let observed_next_shrink_capacity_bytes = ref None in
   let measure_message_bytes = measure_model_input_message_bytes in
+  (* Whether this run's [tools] include keeper_artifact_read. A turn hook
+     that sets [tool_choice] to [None_] drops these tools from one request
+     ({!Host.prepare_turn}); that request then names a reader it does not
+     offer, and offers none of the run's tools to call again. *)
+  let retained_results =
+    Keeper_client_tool_outbox.run_carrier ~base_path ~keeper_name
+      ~artifact_reader_available:
+        (Result.is_ok (Keeper_recovery_transmission.require_reader tools))
+  in
+  (* The carrier step answers a size refusal before memory and history do. *)
+  let on_memory_capacity_refusal =
+    Keeper_client_tool_outbox.run_carrier_reprojection retained_results
+      ~then_:
+        (Option.value on_memory_capacity_refusal
+           ~default:(fun ~refusal:_ -> Ok Keeper_memory_delivery_reprojection.Unchanged))
+  in
   let result =
     Eio.Switch.run (fun result_scope ->
     Host.with_run_lifecycle_events ~event_bus ~keeper_name (fun () ->
       Keeper_turn_driver_try_provider.context_overflow_shrink_sequence
-        ?on_memory_capacity_refusal
+        ~on_memory_capacity_refusal
         ~on_memory_retry:(fun () ->
           resolve_input_rejected_for_shrink_retry ~base_path ~keeper_name ~runtime_id ())
       ~starting_capacity:unbounded_model_input_capacity_bytes
-      (* A continuation always resumes its original thread, and a Resume's
-         input is the same at every capacity; the retry would be a fresh
-         start, which a continuation forbids. Its overflow ends the turn on the
-         typed error instead ([recovery_failure_of_attempt]). *)
+      (* A continuation always resumes its original thread, and shrinking
+         history does not change a Resume's input. The retry would be a fresh
+         start, carrying the range of its capacity and the retained-result
+         carrier in the form the capacity-refusal hook left it; a continuation
+         forbids that fresh start. Its overflow ends the turn on the typed
+         error instead ([recovery_failure_of_attempt]). *)
       ~same_run_retry_authorized:(fun () ->
         (match input_source with
          | Keeper_request_source.Completion_review -> false
@@ -2141,7 +2167,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
         (* A read in an abandoned attempt cannot certify a tool-only answer
            from the next one. Effect evidence remains cumulative. *)
         Atomic.set successful_tool_completion No_successful_tool_completion;
-        run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~official_client_continuation ~context_window
+        run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~official_task_reference ~composed_context ~accepts_image_input ~on_session_settled ~on_results_ready ~retained_results ~official_client_continuation ~context_window
           ~configured_reasoning_effort ~turn_timeout_s
           ~required_native_posture
           ~runtime_id

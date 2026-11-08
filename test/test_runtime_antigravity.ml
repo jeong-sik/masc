@@ -1074,6 +1074,30 @@ let test_isolated_home_replaces_inherited_directory_roots () =
           | Ok _ -> ()))
 ;;
 
+(* RFC-0490 §2.4: every agy masc launches gets the one value that stops its
+   self-update, even when the operator's shell sets another. *)
+let test_environment_turns_off_agy_auto_update_once () =
+  let key = "AGY_CLI_DISABLE_AUTO_UPDATE" in
+  let previous = Sys.getenv_opt key in
+  (* OCaml has no unsetenv: an absent key comes back as an empty value, which
+     the allowlist drops from every child all the same. *)
+  Fun.protect ~finally:(fun () -> Unix.putenv key (Option.value previous ~default:""))
+  @@ fun () ->
+  Unix.putenv key "0";
+  let entries environment =
+    Array.to_list environment
+    |> List.filter (fun entry ->
+      match String.index_opt entry '=' with
+      | Some i -> String.equal (String.sub entry 0 i) "AGY_CLI_DISABLE_AUTO_UPDATE"
+      | None -> false)
+  in
+  let expected = [ "AGY_CLI_DISABLE_AUTO_UPDATE=true" ] in
+  check (list string) "without a private home" expected
+    (entries (Runtime_antigravity.official_client_environment ()));
+  check (list string) "with a private home" expected
+    (entries (Runtime_antigravity.official_client_environment ~home_dir:"/tmp/masc-agy-home" ()))
+;;
+
 let test_resume_requires_exact_identity_and_argv () =
   with_fixture
     ~require_resume:true
@@ -2363,6 +2387,10 @@ let () =
             "isolated HOME"
             `Quick
             test_isolated_home_replaces_inherited_directory_roots
+        ; test_case
+            "agy self-update is off exactly once"
+            `Quick
+            test_environment_turns_off_agy_auto_update_once
         ; test_case
             "conversation callback"
             `Quick

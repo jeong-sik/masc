@@ -50,7 +50,8 @@ let how_of_runtime (rt : Runtime_instance.t) =
       rt.provider.usage_read
   | Runtime_execution.Codex_app_server codex -> Some (Codex codex)
   | Runtime_execution.Antigravity_cli antigravity -> Some (Antigravity antigravity)
-  | Runtime_execution.Claude_code _ | Runtime_execution.Muse_serve _ -> None
+  | Runtime_execution.Claude_code _ | Runtime_execution.Muse_serve _
+  | Runtime_execution.Vibe_cli _ -> None
 ;;
 
 (* One runtime per account: every runtime of a quota scope shares the

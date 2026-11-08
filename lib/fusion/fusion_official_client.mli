@@ -170,6 +170,18 @@ type failure =
   | Claude_admission_failure of Runtime_claude_code.error
   | Antigravity_failure of Runtime_antigravity.error
   | Muse_failure of Runtime_muse_serve.error
+  | Vibe_failure of vibe_failure
+and vibe_failure =
+  | Vibe_run_failed of Runtime_vibe_cli.error
+      (** {!Runtime_vibe_cli.run} returned an error: nothing ran (invalid
+          config, no call directory, spawn refused), the process was
+          killed or ran out of time, or its outputs did not agree (no or
+          unreadable [export.json], an unreadable transcript, an exit code
+          that disagrees). An unreadable transcript and a disagreeing exit
+          code come after the export was read; its usage is reported through
+          [on_usage] ({!Runtime_vibe_cli.reported_usage}). *)
+  | Vibe_not_answered of Runtime_vibe_answer.error
+      (** Vibe ended the run, but not with a reply this caller can use. *)
 
 val failure_detail : runtime_id:string -> failure -> string
 (** The adapter's own failure text, naming [runtime_id] once. A
@@ -212,6 +224,12 @@ val run_with_images
     asset is a [Setup_failure]. Muse Code carries the image bytes over
     [muse serve], gets [system_prompt] framed the same way, and starts a new
     session in a private temporary workspace and native storage tree for each call.
+    Vibe runs once in headless mode in an empty private workdir without
+    [--trust], with [system_prompt] framed the same way; it refuses an output
+    schema, nonempty image input and a declared [timeout_s], since its call
+    has none of those channels and no MASC time limit. Its answer is the text
+    of a [finished] run's last entry when that entry is an assistant message
+    ({!Runtime_vibe_answer}).
     [on_usage] observes reported counts before terminal failure is projected;
     counts are snapshots, not additive deltas. [model] is the transport's
     response identity. [usage] carries reported token counts; absent counts are

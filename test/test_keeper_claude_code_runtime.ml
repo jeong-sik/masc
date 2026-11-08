@@ -302,13 +302,21 @@ let with_fixture_sequence
     ?second_system_marker
     ?first_prompt_marker
     ?second_prompt_marker
+    ?third_system_marker
+    ?third_argv_marker
     ?(later_lines = [])
     first_lines
     second_lines
     f =
   let first_path = fixture_script ?system_marker:first_system_marker ?prompt_marker:first_prompt_marker first_lines in
   let second_path = fixture_script ?system_marker:second_system_marker ?prompt_marker:second_prompt_marker second_lines in
-  let paths = first_path :: second_path :: List.map (fun lines -> fixture_script lines) later_lines in
+  (* The third invocation is the first of [later_lines]. *)
+  let later_paths = match later_lines with
+    | [] -> []
+    | third :: rest ->
+      fixture_script ?system_marker:third_system_marker ?argv_marker:third_argv_marker third
+      :: List.map (fun lines -> fixture_script lines) rest in
+  let paths = first_path :: second_path :: later_paths in
   let counter_path = Filename.temp_file "masc-keeper-claude-sequence-" ".txt" in
   Sys.remove counter_path;
   let path = Filename.temp_file "masc-keeper-claude-sequence-" ".sh" in
@@ -3271,7 +3279,7 @@ let run_direct_attempt
                   let config =
                     match runtime.Runtime_instance.execution with
                     | Runtime_execution.Claude_code config -> config
-                    | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ ->
+                    | Agent_core _ | Codex_app_server _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
                       fail "Claude runtime fixture did not resolve"
                   in
                   let config = match admission_timeout_s with
@@ -6940,6 +6948,179 @@ let test_rejecting_keeper_accept_preserves_loaded_and_new_originals () =
           (List.length (Keeper_client_tool_outbox.receipt_ids (pending ())))))
 ;;
 
+(* Receipts the address-form tests retain: six 4 KB results whose labels show
+   whether a request carried them inline. *)
+module Retained_overflow = struct
+  let keeper_name = "claude-fixture"
+
+  let label index = Printf.sprintf "RETAINED-%d-" index
+
+  let store f = Eio_main.run (fun env ->
+    Fs_compat.set_fs env#fs;
+    Fun.protect ~finally:Fs_compat.clear_fs f)
+
+  let get = function Ok value -> value | Error detail -> fail detail
+
+  let indices = List.init 6 Fun.id
+
+  let retain base_path = store (fun () -> List.iter (fun index ->
+    Keeper_client_tool_outbox.retain ~base_path ~keeper_name
+      {thread_id="overflow-thread";turn_id="overflow-turn";
+       call_id=Printf.sprintf "overflow-call-%d" index;tool_name="Read";
+       arguments=`String "no-effect-replay";
+       response=`String (label index ^ String.make 4096 'r')} |> get) indices)
+
+  let pending base_path = store (fun () ->
+    Keeper_client_tool_outbox.load ~base_path ~keeper_name |> get)
+
+  (* The text an Inline request carries, and the address the switch names. *)
+  let inline base_path =
+    String.concat "\n\n" (Keeper_client_tool_outbox.developer_context (pending base_path))
+
+  let held base_path sha256 = store (fun () ->
+    match Tool_blob_store.fetch (Tool_blob_store.create ~base_path) ~sha256 with
+    | Ok held -> held
+    | Error error -> fail (Tool_blob_store.fetch_error_to_string error))
+
+  let carries_each text = List.for_all (fun index ->
+    String_util.contains_substring text (label index)) indices
+
+  let carries_none text = not (List.exists (fun index ->
+    String_util.contains_substring text (label index)) indices)
+
+  let read path = In_channel.with_open_bin path In_channel.input_all
+end
+
+(* #49634: retained receipts outgrew the window and every request was refused.
+   The first typed overflow switches the run's carrier to the address form and
+   the run sends again at the same capacity; the Completed turn acknowledges
+   every receipt the run loaded. *)
+let test_retained_receipts_go_by_address_after_an_overflow () =
+  let module R = Retained_overflow in
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    R.retain base_path;
+    let inline = R.inline base_path in
+    let sha256 = Agent_core_sha256.(to_hex (digest_string inline)) in
+    let first_system_marker = Filename.concat base_path "carrier-first-system"
+    and second_system_marker = Filename.concat base_path "carrier-second-system" in
+    with_fixture_sequence ~first_system_marker ~second_system_marker
+      [Emit blocking_limit_diagnostic;Emit blocking_limit_result]
+      [Emit (assistant ~turn_id:"carrier-recovered" "RECOVERED");
+       Emit (result ~turn_id:"carrier-recovered" "RECOVERED")]
+      (fun cli_path ->
+        match run_keeper_turn ~base_path ~cli_path ~goal:"Continue from the retained results" () with
+        | Ok _ -> ()
+        | Error error -> fail (Agent_core.Error.to_string error));
+    let first = R.read first_system_marker and second = R.read second_system_marker in
+    check bool "the refused Start carried every receipt inline" true (R.carries_each first);
+    check bool "the retry carries no receipt inline" true (R.carries_none second);
+    check bool "the retry's system context is strictly smaller" true
+      (String.length second < String.length first);
+    check bool "the retry names the blob of the inline text" true
+      (String_util.contains_substring second sha256);
+    check (option string) "the blob holds the inline text" (Some inline) (R.held base_path sha256);
+    check bool "a run offered no reader says it cannot read the receipts" true
+      (String_util.contains_substring second "cannot read the receipts");
+    check int "the completed retry acknowledges every loaded receipt" 0
+      (List.length (Keeper_client_tool_outbox.receipt_ids (R.pending base_path))))
+;;
+
+(* A Resume refused on the retained receipts goes again as a fresh Start
+   ([on_memory_retry] resolves the refusal to [Restart_fresh]), and that
+   Start carries the address form. *)
+let test_resume_overflow_restarts_with_the_address_form () =
+  let module R = Retained_overflow in
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let resumed_prompt = Filename.concat base_path "carrier-resume-input" in
+    let inline = ref "" in
+    with_fixture_sequence ~second_prompt_marker:resumed_prompt
+      ~later_lines:[[Emit (assistant ~turn_id:"carrier-restarted" "RESTARTED");
+                     Emit (result ~turn_id:"carrier-restarted" "RESTARTED")]]
+      [Emit (assistant ~turn_id:"before-receipts" "STARTED");
+       Emit (result ~turn_id:"before-receipts" "STARTED")]
+      [Emit blocking_limit_diagnostic;Emit blocking_limit_result]
+      (fun cli_path ->
+        let turn goal = match run_keeper_turn ~base_path ~cli_path ~goal () with
+          | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error) in
+        turn "Start before any receipt";
+        R.retain base_path;
+        inline := R.inline base_path;
+        turn "Resume with the retained receipts");
+    check bool "the refused Resume carried every receipt inline" true
+      (R.carries_each (R.read resumed_prompt));
+    let sha256 = Agent_core_sha256.(to_hex (digest_string !inline)) in
+    check (option string) "the fresh Start switched to the blob of the inline text" (Some !inline)
+      (R.held base_path sha256);
+    check int "the completed Start acknowledges every loaded receipt" 0
+      (List.length (Keeper_client_tool_outbox.receipt_ids (R.pending base_path))))
+;;
+
+(* The invocation after a refused Resume: a fresh session, not the refused
+   one, and its system context carries the address form. *)
+let test_resume_overflow_restart_is_a_fresh_start_by_address () =
+  let module R = Retained_overflow in
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    let resumed_prompt = Filename.concat base_path "carrier-resume-input" in
+    let restarted_system = Filename.concat base_path "carrier-restart-system" in
+    let restarted_argv = Filename.concat base_path "carrier-restart-argv" in
+    let inline = ref "" in
+    with_fixture_sequence ~second_prompt_marker:resumed_prompt
+      ~third_system_marker:restarted_system ~third_argv_marker:restarted_argv
+      ~later_lines:[[Emit (assistant ~turn_id:"carrier-restarted" "RESTARTED");
+                     Emit (result ~turn_id:"carrier-restarted" "RESTARTED")]]
+      [Emit (assistant ~turn_id:"before-receipts" "STARTED");
+       Emit (result ~turn_id:"before-receipts" "STARTED")]
+      [Emit blocking_limit_diagnostic;Emit blocking_limit_result]
+      (fun cli_path ->
+        let turn goal = match run_keeper_turn ~base_path ~cli_path ~goal () with
+          | Ok _ -> () | Error error -> fail (Agent_core.Error.to_string error) in
+        turn "Start before any receipt";
+        R.retain base_path;
+        inline := R.inline base_path;
+        turn "Resume with the retained receipts");
+    let sha256 = Agent_core_sha256.(to_hex (digest_string !inline)) in
+    let restarted = R.read restarted_system and argv = R.read restarted_argv in
+    check bool "the refused Resume carried every receipt inline" true
+      (R.carries_each (R.read resumed_prompt));
+    check bool "the restart opens a fresh session" true
+      (String_util.contains_substring argv "--session-id=");
+    check bool "the restart does not resume the refused session" false
+      (String_util.contains_substring argv "--resume=");
+    check bool "the restart carries no receipt inline" true (R.carries_none restarted);
+    check bool "the restart names the blob of the inline text" true
+      (String_util.contains_substring restarted sha256);
+    check int "the completed restart acknowledges every loaded receipt" 0
+      (List.length (Keeper_client_tool_outbox.receipt_ids (R.pending base_path))))
+;;
+
+(* A run that offers keeper_artifact_read names it in the address form. *)
+let test_address_form_names_the_offered_reader () =
+  let module R = Retained_overflow in
+  let base_path = temp_workspace () in
+  Fun.protect ~finally:(fun () -> cleanup_tree base_path) (fun () ->
+    R.retain base_path;
+    let second_system_marker = Filename.concat base_path "carrier-reader-system" in
+    with_fixture_sequence ~second_system_marker
+      [Emit blocking_limit_diagnostic;Emit blocking_limit_result]
+      [Emit (assistant ~turn_id:"carrier-read" "READ");
+       Emit (result ~turn_id:"carrier-read" "READ")]
+      (fun cli_path ->
+        match run_keeper_turn ~tools:[Argument_start_fixture.reader base_path]
+                ~base_path ~cli_path ~goal:"Continue from the retained results" () with
+        | Ok _ -> ()
+        | Error error -> fail (Agent_core.Error.to_string error));
+    let second = R.read second_system_marker in
+    check bool "the retry carries no receipt inline" true (R.carries_none second);
+    check bool "the address form names the offered reader" true
+      (String_util.contains_substring second
+         ("read the receipts with " ^ Keeper_runtime_schemas_toml.artifact_read.name));
+    check bool "a run offered the reader does not say it cannot read" false
+      (String_util.contains_substring second "cannot read the receipts"))
+;;
+
 let () =
   (* Pin the prompt directory explicitly. Under dune the registry falls back to
      [DUNE_SOURCEROOT], but a test executable run directly has neither that
@@ -7007,7 +7188,15 @@ let () =
     ; ( "async result outbox",[test_case "original result is delivered on Start and Resume" `Quick
            test_original_outbox_result_is_delivered_on_start_and_resume;
          test_case "real Keeper acceptance rejection preserves loaded and new originals" `Quick
-           test_rejecting_keeper_accept_preserves_loaded_and_new_originals])
+           test_rejecting_keeper_accept_preserves_loaded_and_new_originals;
+         test_case "retained receipts go by address after an overflow" `Quick
+           test_retained_receipts_go_by_address_after_an_overflow;
+         test_case "a Resume overflow restarts with the address form" `Quick
+           test_resume_overflow_restarts_with_the_address_form;
+         test_case "the restart after a Resume overflow is a fresh Start by address" `Quick
+           test_resume_overflow_restart_is_a_fresh_start_by_address;
+         test_case "the address form names the offered reader" `Quick
+           test_address_form_names_the_offered_reader])
     ; ( "native action", [ test_case "partial content boundary identity" `Quick test_partial_content_boundaries_keep_message_and_channel_identity
         ; test_case "exact provider identity" `Quick test_native_action_observer_keeps_exact_provider_identity ] )
     ; ( "usage scope"

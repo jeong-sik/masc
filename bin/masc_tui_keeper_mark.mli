@@ -64,6 +64,33 @@ val shows_operator_disposition :
     (Paused, Offline), or where a person is already asked (Held_call, Question,
     Confirmation). *)
 
+val failing_since_word : string
+(** The word that opens the failing-for cell of the Detailed second row. *)
+
+val unknown_mark : string
+(** What the second row's server-value cells draw for a value that is not
+    known: the server did not record it, or it does not fit this screen's
+    clock. *)
+
+val pulse_hours : int
+(** How many hours the turn pulse spans. It draws one mark per hour. *)
+
+val pulse_ok_mark : string
+(** The turn pulse's mark for an hour whose worst turn finished without
+    failing or resting. {!unknown_mark} stands for an hour the server no longer
+    holds. The pulse counts a keeper's autonomous turns; a chat turn leaves no
+    mark. *)
+
+val pulse_rested_mark : string
+(** An hour whose worst turn rested. The mark of a spent quota. *)
+
+val pulse_failed_mark : string
+(** An hour with a failed turn. The mark of a failed attempt. *)
+
+val pulse_quiet_mark : string
+(** An hour in which no autonomous turn ran. The mark of a keeper with no turn
+    yet. *)
+
 val column_legend : (string * string) list
 (** The Keepers header words, the sentence about a failing keeper's past and
     the Mode S letters, each with what it means. The sheet prints it; the

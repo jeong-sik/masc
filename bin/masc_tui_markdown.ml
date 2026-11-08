@@ -150,9 +150,7 @@ let underscore_closes text index =
   before <> ' ' && not (is_word_byte after)
 
 let find_char text ~from char =
-  match String.index_from_opt text from char with
-  | Some index -> Some index
-  | None -> None
+  String.index_from_opt text from char
 
 let inline_segments_lexed ?on_segment text =
   let limit = String.length text in

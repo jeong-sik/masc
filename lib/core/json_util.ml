@@ -97,15 +97,20 @@ let get_array : Yojson.Safe.t -> string -> Yojson.Safe.t option = fun json key -
 
 (** {1 Required field extraction (Result-returning)} *)
 
+(* The two refusals every [require_*] shares: the key is absent, or it is
+   present as [null]. *)
+let missing_field key = Error (Printf.sprintf "required field '%s' is missing" key)
+let null_field key = Error (Printf.sprintf "required field '%s' is null" key)
+
 let require_string json key : (string, string) result =
   match json with
   | `Assoc fields ->
     (match List.assoc_opt key fields with
      | Some (`String s) -> Ok s
-     | Some `Null -> Error (Printf.sprintf "required field '%s' is null" key)
+     | Some `Null -> null_field key
      | Some _ -> Error (Printf.sprintf "field '%s' is not a string" key)
-     | None -> Error (Printf.sprintf "required field '%s' is missing" key))
-  | _ -> Error (Printf.sprintf "required field '%s' is missing" key)
+     | None -> missing_field key)
+  | _ -> missing_field key
 
 let require_int json key : (int, string) result =
   match json with
@@ -116,10 +121,10 @@ let require_int json key : (int, string) result =
        (match int_of_string_opt s with
         | Some n -> Ok n
         | None -> Error (Printf.sprintf "field '%s' has non-integer intlit: %s" key s))
-     | Some `Null -> Error (Printf.sprintf "required field '%s' is null" key)
+     | Some `Null -> null_field key
      | Some _ -> Error (Printf.sprintf "field '%s' is not an int" key)
-     | None -> Error (Printf.sprintf "required field '%s' is missing" key))
-  | _ -> Error (Printf.sprintf "required field '%s' is missing" key)
+     | None -> missing_field key)
+  | _ -> missing_field key
 
 let require_float json key : (float, string) result =
   match json with
@@ -127,20 +132,20 @@ let require_float json key : (float, string) result =
     (match List.assoc_opt key fields with
      | Some (`Float f) -> Ok f
      | Some (`Int n) -> Ok (Float.of_int n)
-     | Some `Null -> Error (Printf.sprintf "required field '%s' is null" key)
+     | Some `Null -> null_field key
      | Some _ -> Error (Printf.sprintf "field '%s' is not a float" key)
-     | None -> Error (Printf.sprintf "required field '%s' is missing" key))
-  | _ -> Error (Printf.sprintf "required field '%s' is missing" key)
+     | None -> missing_field key)
+  | _ -> missing_field key
 
 let require_bool json key : (bool, string) result =
   match json with
   | `Assoc fields ->
     (match List.assoc_opt key fields with
      | Some (`Bool b) -> Ok b
-     | Some `Null -> Error (Printf.sprintf "required field '%s' is null" key)
+     | Some `Null -> null_field key
      | Some _ -> Error (Printf.sprintf "field '%s' is not a bool" key)
-     | None -> Error (Printf.sprintf "required field '%s' is missing" key))
-  | _ -> Error (Printf.sprintf "required field '%s' is missing" key)
+     | None -> missing_field key)
+  | _ -> missing_field key
 
 (** Value-level type discrimination — returns the JSON variant name as
     a lowercase string.  Used in parse-error diagnostics across 5+ modules. *)
@@ -182,14 +187,6 @@ let string_field_if_present key = function
 
 let option_to_yojson (f : 'a -> Yojson.Safe.t) : 'a option -> Yojson.Safe.t = function
   | Some value -> f value
-  | None -> `Null
-
-let int_option_to_yojson : int option -> Yojson.Safe.t = function
-  | Some n -> `Int n
-  | None -> `Null
-
-let string_option_to_yojson : string option -> Yojson.Safe.t = function
-  | Some s -> `String s
   | None -> `Null
 
 let excerpt ?(max = 160) (json : Yojson.Safe.t) : string =

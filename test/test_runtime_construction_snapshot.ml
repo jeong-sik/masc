@@ -41,7 +41,7 @@ let materialize cfg binding =
   | Ok runtime ->
     (match runtime.Runtime_instance.execution with
      | Runtime_execution.Agent_core config -> config
-     | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
+     | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
        fail "fixture requires an HTTP execution")
   | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason)
 

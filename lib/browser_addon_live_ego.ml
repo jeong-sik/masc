@@ -330,7 +330,7 @@ let run ?(on_lane_ended=fun () -> ()) ~env ~owner ~downloads (configuration : Br
     match Browser_addon_owner.mark_ego_space_missing owner ~space:space.name ~space_id:space.id ~observed_at with
     | Error detail -> Log.Server.warn "browser Add-on could not publish the missing ego task space: %s" detail
     | Ok () ->
-      Log.Server.warn "browser Add-on ego connection ended: ego no longer lists task space %d (%S); take_over without a clientId asks for the configured Space again"
+      Log.Server.warn "browser Add-on ego connection ended: ego no longer lists task space %d (%S); take_over with lane=live and no clientId asks for the configured Space again"
         space.id space.name in
   (* One claim: a fresh session reclaims the Space whose task ended while the
      operator held it, then the supervisor cycle below reconnects. The claim
@@ -508,7 +508,7 @@ let run ?(on_lane_ended=fun () -> ()) ~env ~owner ~downloads (configuration : Br
          | Error detail ->
            Log.Server.warn "browser Add-on could not publish ego unavailability: %s" detail
          | Ok () ->
-           Log.Server.warn "browser Add-on ego unavailable: task space %S is user-owned; take_over without a clientId reclaims it once the operator asks to continue"
+           Log.Server.warn "browser Add-on ego unavailable: task space %S is user-owned; take_over with lane=live and no clientId reclaims it once the operator asks to continue"
              space) in
       let rec recovered_or_ended wake =
         match Eio.Fiber.first

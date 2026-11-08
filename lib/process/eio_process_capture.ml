@@ -69,7 +69,9 @@ let child_exit_grace_seconds = 2.0
     switch is cancelled while this reap is waiting -- a keeper turn aborted,
     or a shutdown, arriving during the grace -- the daemon takes the stop over
     under protection: TERM, the owner's grace, [SIGKILL], [waitpid]
-    ([Posix_spawn_process_mgr.stop_owned]). So a switch that is off after the
+    ([Posix_spawn_process_mgr.stop_owned]). A switch failed with
+    [Posix_spawn_process_mgr.Stop_without_grace] skips that TERM and grace:
+    the daemon sends [SIGKILL] at once. So a switch that is off after the
     grace gets the [SIGKILL] and no wait here: the daemon, or the switch's
     release hook if the daemon failed, makes the last reap. A switch that is
     still on gets the await, bounded by the same grace:
@@ -144,7 +146,9 @@ let rec discard_to_eof r chunk =
 (* Cancelling the owning switch does not stop its reap daemon from settling
    the child: the daemon catches the cancellation and, protected, sends TERM,
    waits out the owner's grace, escalates and reaps
-   ([Posix_spawn_process_mgr.stop_owned]). [Eio.Process.await] resolves once
+   ([Posix_spawn_process_mgr.stop_owned]). For
+   [Posix_spawn_process_mgr.Stop_without_grace] it sends SIGKILL at once
+   instead. [Eio.Process.await] resolves once
    it has. Neither EOF nor absence of capture pipes proves the child exited:
    it may close its streams before finishing a TERM handler. So this waits on
    that await rather than on the pipes, and reads them to EOF meanwhile so a

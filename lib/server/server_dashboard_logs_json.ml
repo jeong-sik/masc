@@ -77,15 +77,15 @@ let build
              ; "applied_level", `String (Log.level_to_string applied_level)
              ; "min_level", `Int min_level
              ; "module", `String module_filter
-             ; "since_seq", Json_util.int_option_to_yojson since_seq
-             ; "before_seq", Json_util.int_option_to_yojson before_seq
+             ; "since_seq", Json_util.int_opt_to_json since_seq
+             ; "before_seq", Json_util.int_opt_to_json before_seq
              ; "category", selectors_json categories
              ; "exclude_category", selectors_json exclude_categories
              ] )
        ; "returned", `Int (List.length entries)
-       ; "latest_seq", Json_util.int_option_to_yojson (entry_seq_json newest)
-       ; "oldest_seq", Json_util.int_option_to_yojson (entry_seq_json oldest)
-       ; "latest_ts_iso", Json_util.string_option_to_yojson (entry_ts_json newest)
+       ; "latest_seq", Json_util.int_opt_to_json (entry_seq_json newest)
+       ; "oldest_seq", Json_util.int_opt_to_json (entry_seq_json oldest)
+       ; "latest_ts_iso", Json_util.string_opt_to_json (entry_ts_json newest)
          (* Live-window truth: with [dropped_before] true, an empty or
             thin result below [start_seq] means "outside the ring
             window" (consult [retention.durable_store]), not "did not

@@ -73,10 +73,7 @@ let host () =
   ; agent_runtime_root = tmp
   ; sandbox_workspace_root = default_workspace_root (Filename.concat tmp "masc-fleet")
   ; test_mode =
-      (let exec =
-         Sys.executable_name |> Filename.basename |> String.lowercase_ascii
-       in
-       if String.starts_with ~prefix:"test_" exec
+      (if Env_config_core.running_under_test_executable ()
        then Test
        else Production)
   ; log_dir = tmp

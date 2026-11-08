@@ -350,8 +350,8 @@ let keeper_build_cleanup_enabled =
     ~meta:{ Runtime_params.description =
               "쉬고 있는 키퍼의 Apple 마이크로VM 게스트(실행 중인 것만) 안에서 \
                오래 안 쓴 Dune 빌드 디렉터리(_build)를 주기적으로 지울지. 끄면 \
-               주기가 되어도 키퍼를 훑지 않고 아무것도 지우지 않는다. _build \
-               옆에 .masc-keep-build 파일을 두면 켜 둬도 그 빌드는 남는다";
+               주기가 되어도 빌드 디렉터리를 지우지 않는다. _build 옆에 \
+               .masc-keep-build 파일을 두면 켜 둬도 그 빌드는 남는다";
             value_type = "bool";
             min_value = None; max_value = None; choices = [] }
     ()
@@ -367,8 +367,9 @@ let keeper_build_cleanup_interval_sec =
   register_cleanup_duration ~key:"keeper_build_cleanup_interval_sec"
     ~default:(fun () -> Masc_time_constants.hour)
     ~meta:{ Runtime_params.description =
-              "빌드 디렉터리 정리 점검 주기(초). 켜져 있으면 한 번 돌 때 모든 \
-               키퍼를 훑고, 쉬고 있는 키퍼만 정리한다. 바꾼 값은 지금 기다리는 \
+              "빌드 디렉터리와 remote_ssh 작업 폴더 정리 점검 주기(초). 둘 중 \
+               하나라도 켜져 있으면 한 번 돌 때 모든 키퍼를 훑고, 쉬고 있는 \
+               키퍼만 정리한다. 바꾼 값은 지금 기다리는 \
                중인 주기가 끝난 뒤부터 적용된다. 0 보다 커야 한다";
             value_type = "float";
             min_value = None; max_value = None; choices = [] }
@@ -382,6 +383,29 @@ let keeper_build_cleanup_retention_sec =
             value_type = "float";
             min_value = None; max_value = None; choices = [] }
 
+let keeper_remote_workspace_cleanup_enabled =
+  register_bool ~key:"keeper_remote_workspace_cleanup_enabled" ~default:(fun () -> true)
+    ~meta:{ Runtime_params.description =
+              "쉬고 있는 remote_ssh 키퍼의 작업 루트 바로 아래 항목 중 오래 안 \
+               건드린 것을 그 endpoint 에서 주기적으로 지울지. 원격에 없는 \
+               커밋이나 stash 가 있는 항목, 이름이 점으로 시작하는 항목, 살아 \
+               있는 프로세스가 쓰는 항목은 남긴다. 커밋 안 한 변경과 untracked \
+               파일은 남기지 않는다. 점검 주기는 keeper_build_cleanup_interval_sec \
+               를 따른다";
+            value_type = "bool";
+            min_value = None; max_value = None; choices = [] }
+    ()
+
+let keeper_remote_workspace_cleanup_retention_sec =
+  register_cleanup_duration ~key:"keeper_remote_workspace_cleanup_retention_sec"
+    ~default:(fun () -> 2. *. Masc_time_constants.day)
+    ~meta:{ Runtime_params.description =
+              "작업 루트 항목 안의 모든 파일이 이 시간(초)보다 오래 안 바뀌었을 \
+               때만 지운다. 파일마다 mtime 과 ctime 중 늦은 쪽을 본다. 0 보다 \
+               커야 한다";
+            value_type = "float";
+            min_value = None; max_value = None; choices = [] }
+
 let surfaces =
   [
     {
@@ -389,6 +413,12 @@ let surfaces =
       description = "Idle guest build artifact cleanup";
       param_keys = [ "keeper_build_cleanup_enabled";
         "keeper_build_cleanup_interval_sec"; "keeper_build_cleanup_retention_sec" ];
+    };
+    {
+      id = "keeper_remote_workspace_cleanup";
+      description = "Idle remote_ssh Keeper workspace cleanup";
+      param_keys = [ "keeper_remote_workspace_cleanup_enabled";
+        "keeper_remote_workspace_cleanup_retention_sec" ];
     };
     {
       id = "keeper_lifecycle";

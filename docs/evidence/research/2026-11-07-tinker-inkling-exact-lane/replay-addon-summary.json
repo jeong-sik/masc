@@ -1,0 +1,66 @@
+{
+ "pass_lines": {
+  "admission_valid_rate_min": 0.95,
+  "durable_valid_all": true
+ },
+ "spent_usd": 0.9367,
+ "admission": {
+  "n": 86,
+  "window_refused": 24,
+  "http_errors": 1,
+  "finish": {
+   "length": 8,
+   "stop": 53
+  },
+  "json_forms": {
+   "bare": 53,
+   "unparseable": 8
+  },
+  "schema_valid": 52,
+  "valid": 50,
+  "valid_rate": 0.806,
+  "rules_pass": {
+   "absorbs_not_dropped": "52/52",
+   "absorbs_once": "52/52",
+   "category_form": "52/52",
+   "ids_known": "52/52",
+   "supersedes_dropped": "52/52"
+  },
+  "wall_p50": 9.21,
+  "wall_p90": 20.27,
+  "prompt_tokens_p50": 42834,
+  "completion_tokens_p50": 1635,
+  "completion_tokens_max": 8192,
+  "cost_usd": 0.8856,
+  "outcome_agree": "53/73",
+  "pass": false
+ },
+ "durable": {
+  "n": 8,
+  "window_refused": 4,
+  "http_errors": 0,
+  "finish": {
+   "stop": 4
+  },
+  "json_forms": {
+   "bare": 4
+  },
+  "schema_valid": 4,
+  "valid": 4,
+  "valid_rate": 1.0,
+  "rules_pass": {
+   "absorbs_not_dropped": "4/4",
+   "absorbs_once": "4/4",
+   "category_form": "4/4",
+   "ids_known": "4/4",
+   "supersedes_dropped": "4/4"
+  },
+  "wall_p50": 7.14,
+  "wall_p90": 8.26,
+  "prompt_tokens_p50": 48374,
+  "completion_tokens_p50": 815,
+  "completion_tokens_max": 1174,
+  "cost_usd": 0.0511,
+  "pass": true
+ }
+}

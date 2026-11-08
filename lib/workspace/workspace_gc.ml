@@ -38,7 +38,9 @@ let heartbeat config ~agent_name =
           Workspace_agent_record.write config agent_file ~previous:(Some agent) updated;
           Heartbeat_updated actual_name
       | Error e ->
-          Log.Workspace.debug "heartbeat: invalid agent JSON for %s: %s" actual_name e;
+          Log.Workspace.debug
+            ~diagnostic_kind:Log.Agent_decode_failure
+            "heartbeat: invalid agent JSON for %s: %s" actual_name e;
           Agent_file_invalid actual_name
     )
   end else

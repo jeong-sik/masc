@@ -50,10 +50,7 @@ let add_routes ~sw ~clock router =
                    ~config:(Mcp_server.workspace_config state)
                    (Yojson.Safe.from_string body_str) with
                | Ok payload -> Ok (Yojson.Safe.to_string payload)
-               | Error Workspace.Invalid_workspace_precondition ->
-                   Error "invalid expected_workspace precondition"
-               | Error Workspace.Workspace_precondition_failed ->
-                   Error "workspace precondition failed"
+               | Error error -> Error (Workspace.expected_workspace_error_message error)
              with Yojson.Json_error _ -> Error "invalid JSON body"
            in
            match

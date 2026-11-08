@@ -1416,9 +1416,21 @@ let bootstrap_keeper_control_root ~timeout_sec t =
 
 (* ── Preflight ───────────────────────────────────────────────────────── *)
 
+type access =
+  | Read_only
+  | Read_write
+
+(* What one preflight pass found. The free-disk floor guards data a call
+   leaves on the host, so it is the one step a reader does not need:
+   [writable] is [readable] with that step added, in the order the steps run. *)
+type preflight_verdict =
+  { readable : (unit, string) result
+  ; writable : (unit, string) result
+  }
+
 type preflight_cache_entry =
   { checked_at : float
-  ; result : (unit, string) result
+  ; verdict : preflight_verdict
   }
 
 type preflight_identity = endpoint_identity * string * string * (string * string) list
@@ -1430,21 +1442,42 @@ let preflight_cache_key t =
   t.identity, t.keeper_name, t.gh_config_dir, t.injected_env
 ;;
 
-let cached_preflight ~now t =
+let verdict_for access verdict =
+  match access with
+  | Read_only -> verdict.readable
+  | Read_write -> verdict.writable
+;;
+
+(* How long an earlier pass answers this caller. A reader that the pass let
+   through reuses it for [ssh_read_ttl_sec]: a reader leaves nothing on the
+   disk, and its own command reports a host that went away since. A refusal and
+   every answer a writer relies on keep [ssh_ttl_sec], so a freed disk or a
+   restored login is noticed within that time. A pass costs one SSH connection
+   per step, up to eight, because the transport does not reuse connections. *)
+let cached_preflight ~now ~access t =
   let ttl = float_of_int (Env_config_sandbox.Preflight.ssh_ttl_sec ()) in
   if ttl <= 0.0
   then None
   else
     Stdlib.Mutex.protect preflight_cache_mu (fun () ->
       match Hashtbl.find_opt preflight_cache (preflight_cache_key t) with
-      | Some entry when now -. entry.checked_at < ttl -> Some entry.result
-      | Some _ | None -> None)
+      | None -> None
+      | Some entry ->
+        let reusable_for =
+          match access, verdict_for access entry.verdict with
+          | Read_only, Ok () ->
+            Float.max
+              ttl
+              (float_of_int (Env_config_sandbox.Preflight.ssh_read_ttl_sec ()))
+          | Read_only, Error _ | Read_write, (Ok () | Error _) -> ttl
+        in
+        if now -. entry.checked_at < reusable_for then Some entry.verdict else None)
 ;;
 
-let store_preflight ~now t result =
+let store_preflight ~now t verdict =
   Stdlib.Mutex.protect preflight_cache_mu (fun () ->
     Hashtbl.replace preflight_cache (preflight_cache_key t)
-      { checked_at = now; result })
+      { checked_at = now; verdict })
 ;;
 
 let invalidate_preflight t =
@@ -1658,26 +1691,30 @@ let perform_payload_tool_preflight t =
     run_preflight_command t ~error_code:"remote_ripgrep_unavailable"
       [ "rg"; "--version" ]
   in
+  Ok ()
+;;
+
+(* A host under the floor still answers a read, and the commands that free
+   space run on the same host. Only a [Read_write] caller is refused for this
+   step; see [perform_preflight]. *)
+let perform_disk_preflight t =
   let* disk =
     run_preflight_command t ~error_code:(code t "disk_probe_failed")
       [ "df"; "-Pk"; workspace_root t ]
   in
   let minimum = Env_config_sandbox.Preflight.ssh_disk_free_min_kib () in
-  let* () =
-    match available_kib disk with
-    | Some available when available >= minimum -> Ok ()
-    | Some available ->
-      Error
-        (Printf.sprintf
-           "%s: endpoint %s available_kib=%d minimum_kib=%d"
-           (code t "disk_low") t.name available minimum)
-    | None ->
-      Error
-        (Printf.sprintf
-           "%s: endpoint %s returned unparseable df output"
-           (code t "disk_probe_failed") t.name)
-  in
-  Ok ()
+  match available_kib disk with
+  | Some available when available >= minimum -> Ok ()
+  | Some available ->
+    Error
+      (Printf.sprintf
+         "%s: endpoint %s available_kib=%d minimum_kib=%d"
+         (code t "disk_low") t.name available minimum)
+  | None ->
+    Error
+      (Printf.sprintf
+         "%s: endpoint %s returned unparseable df output"
+         (code t "disk_probe_failed") t.name)
 ;;
 
 let perform_identity_preflight t =
@@ -1708,26 +1745,46 @@ let perform_identity_preflight t =
   Ok ()
 ;;
 
+(* Endpoint, roots and payload tools gate every caller: with one of them
+   missing nothing after it can be probed. Past those, the disk floor and the
+   GitHub identity are probed independently so that a host under the floor
+   still reports the identity verdict a reader needs. A writer is refused for
+   the floor first, as it was when the steps ran in one chain. *)
 let perform_preflight ?(force_probe = false) t =
-  let* () = perform_endpoint_preflight ~force_probe t in
-  let* () = perform_workspace_preflight t in
-  let* () = perform_payload_tool_preflight t in
-  perform_identity_preflight t
+  let tools_ready =
+    let* () = perform_endpoint_preflight ~force_probe t in
+    let* () = perform_workspace_preflight t in
+    perform_payload_tool_preflight t
+  in
+  match tools_ready with
+  | Error _ as refused -> { readable = refused; writable = refused }
+  | Ok () ->
+    let room = perform_disk_preflight t in
+    let identity = perform_identity_preflight t in
+    { readable = identity
+    ; writable =
+        (match room with
+         | Error _ -> room
+         | Ok () -> identity)
+    }
 ;;
 
 let check_endpoint_preflight t = perform_endpoint_preflight t
 let check_workspace_preflight t = perform_workspace_preflight t
 
-let check_preflight ?(force = false) t =
+let check_preflight ?(force = false) ?(access = Read_write) t =
   (* NDT-OK: wall time controls only readiness-cache freshness; it is neither
      persisted authority nor a policy decision. *)
   let now = Unix.gettimeofday () in
-  match if force then None else cached_preflight ~now t with
-  | Some result -> result
-  | None ->
-    let result = perform_preflight ~force_probe:force t in
-    store_preflight ~now t result;
-    result
+  let verdict =
+    match if force then None else cached_preflight ~now ~access t with
+    | Some verdict -> verdict
+    | None ->
+      let verdict = perform_preflight ~force_probe:force t in
+      store_preflight ~now t verdict;
+      verdict
+  in
+  verdict_for access verdict
 ;;
 
 module For_testing = struct

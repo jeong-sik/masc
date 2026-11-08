@@ -103,8 +103,9 @@ val materialize_execution
     a credential-free CLI transport becomes
     {!Runtime_execution.Codex_app_server}; [claude-code] becomes
     {!Runtime_execution.Claude_code}; [antigravity-cli] becomes
-    {!Runtime_execution.Antigravity_cli}; and [muse-serve] becomes
-    {!Runtime_execution.Muse_serve}. These clients have no supported
+    {!Runtime_execution.Antigravity_cli}; [muse-serve] becomes
+    {!Runtime_execution.Muse_serve}; and [vibe-cli] becomes
+    {!Runtime_execution.Vibe_cli}. These clients have no supported
     [disable_parallel_tool_use] control here, so bindings requesting it are
     refused. Other CLI protocols remain rejected.
 
@@ -112,4 +113,6 @@ val materialize_execution
     The command is spawned from where {!Runtime_official_cli_install.locate}
     finds it at this call: PATH first, then the vendor installer's directory
     for the client's own name. A command found nowhere is kept as configured;
-    its absence surfaces when the client is spawned, not here. *)
+    its absence surfaces when the client is spawned, not here. A [vibe-cli]
+    command is kept exactly as configured, and its binding is refused when it
+    declares [reasoning-effort] or [turn-timeout-s]. *)

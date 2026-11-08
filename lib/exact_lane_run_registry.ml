@@ -603,15 +603,13 @@ let write_payload ~log_path ~run_id kind value =
 let max_completed_retained = Store.max_completed_retained
 let cut_replay_log = Store.cut_replay_log
 
-let change_observer_fn : (unit -> unit) Atomic.t = Atomic.make (fun () -> ())
+let change_observer_fn = Run_registry_core.Observer.make ()
 
 let notify_changed () =
-  try (Atomic.get change_observer_fn) () with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Log.Keeper.warn
-      "exact_lane_run_registry change observer failed: %s"
-      (Printexc.to_string exn)
+  Run_registry_core.Observer.notify change_observer_fn ~on_failure:(fun exn ->
+      Log.Keeper.warn
+        "exact_lane_run_registry change observer failed: %s"
+        (Printexc.to_string exn))
 ;;
 
 let remove_failed_completion t run_id =

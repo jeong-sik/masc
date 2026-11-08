@@ -66,9 +66,6 @@
   eio
   eio_main
   ptime.clock
-  h2-eio
-  httpun-eio
-  gluten-eio
   gluten
   httpun
   masc_core
@@ -82,8 +79,6 @@
   unix
   yojson
   uri
-  cohttp
-  cohttp-eio
   masc.masc_schedule
   masc.agent_core
   masc.agent_core.llm_provider))
@@ -109,8 +104,7 @@
   time_compat
   masc_log
   masc_workspace
-  unix
-  cohttp-eio))
+  unix))
 
 (executable
  (name masc_cost)
@@ -127,8 +121,7 @@
   time_compat
   masc_log
   eio_main
-  eio
-  cohttp-eio))
+  eio))
 
 (executable
  (name keeper_store_layout_manifest)
@@ -254,6 +247,7 @@
  (libraries
   masc
   masc.config
+  masc.fs_compat
   masc.masc_process
   masc.prompt_registry
   masc.server
@@ -1372,7 +1366,7 @@
  (name masc_tui_keeper_mark)
  (wrapped false)
  (modules masc_tui_keeper_mark)
- (libraries masc masc_tui_keeper_list_model))
+ (libraries masc masc_tui_keeper_age_ladder masc_tui_keeper_list_model))
 
 (library
  (name masc_tui_board_kind_mark)
@@ -1944,6 +1938,16 @@
  (modules masc_tui_keeper_axis_cell))
 
 (library
+ (name masc_tui_keeper_pulse)
+ (wrapped false)
+ (modules masc_tui_keeper_pulse)
+ (libraries
+  masc
+  masc_tui_keeper_axis_cell
+  masc_tui_keeper_mark
+  masc_tui_message_layout))
+
+(library
  (name masc_tui_keeper_next_run)
  (wrapped false)
  (modules masc_tui_keeper_next_run)
@@ -1963,9 +1967,22 @@
   masc
   masc_tui_types
   masc_tui_agenda
+  masc_tui_keeper_age_ladder
   masc_tui_keeper_axis_cell
+  masc_tui_keeper_pulse
   masc_tui_keeper_next_run
   masc_tui_keeper_memory_reading))
+
+(library
+ (name masc_tui_keeper_age_ladder)
+ (wrapped false)
+ (modules masc_tui_keeper_age_ladder)
+ (libraries
+  masc
+  masc.config
+  masc_tui_chart
+  masc_tui_keeper_axis_cell
+  masc_tui_message_layout))
 
 (library
  (name masc_tui_keeper_memory_reading)
@@ -2246,6 +2263,7 @@
   masc_tui_rows
   masc_tui_theme
   masc_tui_types
+  masc_tui_keeper_age_ladder
   masc_tui_keeper_memory_reading
   masc_tui_message_layout
   masc_tui_render_schedule
@@ -2365,7 +2383,6 @@
   masc_tui_command
   masc_tui_features
   yojson
-  eio.unix
   masc_tui_ask_projection
   masc_tui_browser_lane_layout
   masc_tui_chart
@@ -2446,10 +2463,6 @@
   masc_tui_markdown
   masc_tui_observation_layout
   masc
-  ;; Same rule as the masc_tui stanza: Tui_decode carries
-  ;; Tool_result.recorded_call_outcome and this module words its
-  ;; constructors for the results view.
-  masc.tool_types
   masc_tui_keys
   masc_tui_types
   unix))
@@ -2556,7 +2569,6 @@
   uri
   base64
   eio
-  eio.unix
   unix
   mtime.clock.os
   masc_tui_account_login
@@ -2735,6 +2747,7 @@
   masc_tui_chat_portrait
   masc_tui_keeper_list_model
   masc_tui_keeper_trail
+  masc_tui_keeper_pulse
   masc_tui_keeper_axis_cell
   masc_tui_keeper_next_run
   masc_tui_keeper_axis
@@ -3014,8 +3027,6 @@
   eio
   eio.unix
   mtime.clock.os
-  cohttp
-  cohttp-eio
   masc.agent_core
   masc.agent_core.llm_provider))
 
@@ -3041,8 +3052,7 @@
   eio
   eio_main
   time_compat
-  masc_eio_context
-  cohttp-eio))
+  masc_eio_context))
 
 ;; E6 continuity evidence harness (task-11, M1 PR1): drives an existing
 ;; keeper's live chat surface over HTTP (unlike fusion_run.ml, which calls
@@ -3223,7 +3233,6 @@
   masc_tui_io_domain
   cstruct
   eio
-  eio.unix
   eio_main
   unix
   mtime.clock.os))

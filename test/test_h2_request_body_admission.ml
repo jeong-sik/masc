@@ -27,7 +27,7 @@ let authority = Printf.sprintf "%s:%d" listener_host listener_port
 
 let max_bytes = Masc.Http_server_eio.Request.max_body_bytes
 
-type reply = { status : int; body : string }
+type reply = { status : int; content_type : string option; body : string }
 
 type response_failure =
   | Stream_failure of H2.Client_connection.error
@@ -141,7 +141,10 @@ let open_request session ?(meth = `POST) ?(headers = [])
       let body = Buffer.create 256 in
       let rec read () = H2.Body.Reader.schedule_read reader
         ~on_eof:(fun () -> match H2.Body.Reader.completion reader with
-          | Complete -> finish (Ok { status = H2.Status.to_code response.status; body = Buffer.contents body })
+          | Complete ->
+            finish (Ok { status = H2.Status.to_code response.status;
+                         content_type = H2.Headers.get response.headers "content-type";
+                         body = Buffer.contents body })
           | Pending | Aborted -> finish (Error Incomplete_response_body))
         ~on_read:(fun bytes ~off ~len ->
           Buffer.add_string body (Bigstringaf.substring bytes ~off ~len); read ()) in
@@ -405,7 +408,31 @@ let trust_policy () =
   | Error error ->
     fail (Server_request_authority.trust_policy_error_to_string error)
 
-let graphql_body = {|{"query":"{ status { project paused } }"}|}
+(* The shared transport streams a 200 reply as SSE when the request accepts
+   text/event-stream, as it does on HTTP/1.1; the reply is the last message. *)
+let json_of_reply (reply : reply) =
+  let body = reply.body in
+  let is_sse =
+    match reply.content_type with
+    | Some value -> String.starts_with ~prefix:"text/event-stream" value
+    | None -> false
+  in
+  if is_sse
+  then (
+    match
+      List.rev
+        (List.filter_map
+           (fun line ->
+             if String.starts_with ~prefix:"data: " line
+             then Some (String.sub line 6 (String.length line - 6))
+             else None)
+           (String.split_on_char '\n' body))
+    with
+    | [] -> fail "SSE reply carried no data line"
+    | last :: _ -> Yojson.Safe.from_string last)
+  else Yojson.Safe.from_string body
+
+let graphql_body = {|{"query":"{ status { project } }"}|}
 
 (* A workspace whose auth config requires a token, published as the running
    server's state, and the H2 gateway's own request handler serving it. *)
@@ -572,7 +599,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
       (H2.Headers.get response_headers "access-control-allow-origin");
     check bool "H2 scope response exposes the challenge to the admitted origin"
       true (exposes_challenge (H2.Headers.get response_headers "access-control-expose-headers"));
-    let response = Yojson.Safe.from_string reply.body in
+    let response = json_of_reply reply in
     check string "error echoes the request id" (Yojson.Safe.to_string id)
       (Yojson.Safe.to_string (Yojson.Safe.Util.member "id" response));
     check int "error is insufficient scope"
@@ -615,7 +642,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
   check (option string) "2026 challenge names the admin scope"
     (Some (Server_oauth_metadata.insufficient_scope_challenge oauth_authority Auth_oauth.Mcp_admin))
     challenge;
-  let response = Yojson.Safe.from_string reply.body in
+  let response = json_of_reply reply in
   check bool "2026 scope challenge echoes the request id" true
     Yojson.Safe.Util.(response |> member "id" = modern_id);
   check int "2026 scope challenge has insufficient-scope code"
@@ -626,7 +653,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
     post_modern (modern_call continuation_id [ "requestState", `String "opaque" ]) in
   check int "2026 unknown continuation is HTTP 400" 400 reply.status;
   check (option string) "2026 continuation does not receive a scope challenge" None challenge;
-  let response = Yojson.Safe.from_string reply.body in
+  let response = json_of_reply reply in
   check bool "2026 continuation refusal echoes the request id" true
     Yojson.Safe.Util.(response |> member "id" = continuation_id);
   check int "2026 continuation retains invalid-params code" (-32602)
@@ -661,7 +688,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
   let non_public_reply = await_reply session pending in
   check int "non-public tool retains its tool-level response" 200 non_public_reply.status;
   check (option string) "non-public tool has no OAuth scope challenge" None !non_public_challenge;
-  let non_public_response = Yojson.Safe.from_string non_public_reply.body in
+  let non_public_response = json_of_reply non_public_reply in
   check bool "non-public refusal keeps the request id" true
     Yojson.Safe.Util.(non_public_response |> member "id" = `Int 20);
   check bool "non-public tool reports a permission failure" true
@@ -694,7 +721,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
     check (option string) ("rejected origin has no " ^ name) None
       (H2.Headers.get rejected_headers name))
     ["www-authenticate"; "access-control-allow-origin"; "access-control-expose-headers"];
-  let rejected_response = Yojson.Safe.from_string rejected.body in
+  let rejected_response = json_of_reply rejected in
   check int "origin gate retains its invalid-request error"
     (Mcp_error_code.to_wire_code Mcp_error_code.Invalid_request)
     Yojson.Safe.Util.(rejected_response |> member "error" |> member "code" |> to_int);
@@ -724,7 +751,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
   send_whole request writer;
   let reply = await_reply session pending in
   check (option string) "managed refusal does not claim a wider scope fixes it" None !challenge;
-  let response = Yojson.Safe.from_string reply.body in
+  let response = json_of_reply reply in
   check int "managed profile keeps its method-not-found refusal"
     (Mcp_error_code.to_wire_code Mcp_error_code.Method_not_found)
     Yojson.Safe.Util.(response |> member "error" |> member "code" |> to_int);
@@ -767,7 +794,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
   let reply = await_reply public_session pending in
   check (option string) "public listener does not advertise unavailable OAuth" None !challenge;
   check int "public listener retains the tool-level response" 200 reply.status;
-  let response = Yojson.Safe.from_string reply.body in
+  let response = json_of_reply reply in
   check bool "public listener refusal echoes the request id" true
     Yojson.Safe.Util.(response |> member "id" = `Int 19);
   check bool "public listener retains the permission refusal" true

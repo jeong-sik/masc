@@ -1,8 +1,10 @@
 name = "keeper_composition_cancel"
 description = """
-Request cancellation of one async Keeper composition.
+Request cancellation of one async Keeper request.
 
-Addressed by its exact durable request id."""
+Addressed by its exact durable request id. A background Execute run
+(tool_execute with run_in_background) is a request too: pass the request_id
+its started result carries."""
 additional_properties = false
 
 # Held back from the request until the model asks for it by name. Not

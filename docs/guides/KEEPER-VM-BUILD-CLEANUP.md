@@ -7,6 +7,12 @@ The MASC server owns artifact cleanup through each Keeper's Owner mailbox.
 `keeper_build_cleanup_retention_sec` (one day). These are artifact-retention
 settings, not time limits on Keeper work or durable tasks.
 
+The same pass sweeps each Remote_ssh Keeper's workspace root on its endpoint
+when `keeper_remote_workspace_cleanup_enabled` (default true) is on, with
+`keeper_remote_workspace_cleanup_retention_sec` (two days). The payload is
+`config/scripts/keeper-remote-workspace-cleanup.py`; its keep rules are in
+`docs/rfc/RFC-remote-keeper-workspace-entries-are-swept-on-their-endpoint.md`.
+
 The binary embeds `config/scripts/keeper-build-cleanup.py` and passes both the
 Keeper work root and the canonical build-volume root to its framed exec-shim
 runner. There is one product mutation controller; installing the binary does

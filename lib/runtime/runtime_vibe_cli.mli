@@ -90,20 +90,31 @@ type error =
       (** The process exited and wrote no [export.json]. Observed for an
           argument Vibe rejects (exit 1, m2). *)
   | Export_unreadable of Runtime_vibe_headless.error
-  | Transcript_unreadable of Runtime_vibe_headless.error
+  | Transcript_unreadable of
+      { error : Runtime_vibe_headless.error
+      ; usage : Runtime_vibe_headless.usage option
+      }
+      (** [export.json] agreed with the exit code but stdout did not decode. *)
   | Exit_code_mismatch of
       { process : int
       ; export : int
+      ; usage : Runtime_vibe_headless.usage option
       }
       (** The process exit code differs from [export.json]'s [exit_code]. *)
   | Outcome_exit_mismatch of
       { outcome : Runtime_vibe_headless.outcome
       ; exit_code : int
+      ; usage : Runtime_vibe_headless.usage option
       }
       (** The exit code is not the one Vibe gives this outcome. An
           unrecognized outcome is not checked. *)
 
 val error_to_string : error -> string
+
+val reported_usage : error -> Runtime_vibe_headless.usage option
+(** The usage [export.json] reported, for the three errors that come after
+    it was read; [None] for every other error and for an export with no
+    usage. A run that disagreed with its export still spent those tokens. *)
 
 val classify
   :  exit_code:int

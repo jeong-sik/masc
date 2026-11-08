@@ -176,6 +176,25 @@ let stop_owned t set_exit_status =
   if not (Promise.is_resolved t.exit_status) then reap_owned t set_exit_status
 ;;
 
+exception Stop_without_grace
+
+let rec ends_without_grace = function
+  | Stop_without_grace -> true
+  | Eio.Cancel.Cancelled inner | Stdlib.Fun.Finally_raised inner -> ends_without_grace inner
+  | Eio.Exn.Multiple [] -> false
+  | Eio.Exn.Multiple members ->
+    List.for_all (fun (member, _backtrace) -> ends_without_grace member) members
+  | _ -> false
+;;
+
+(* The work that owned this child is abandoned, so nothing is left to give a
+   TERM handler time for. SIGKILL marks the group [Killed], and the reap that
+   follows has no deadline to wait out. *)
+let stop_now t set_exit_status =
+  signal t Sys.sigkill;
+  if not (Promise.is_resolved t.exit_status) then reap_owned t set_exit_status
+;;
+
 module Process_impl = struct
   type nonrec t = t
   type tag = [ `Generic | `Unix ]
@@ -279,7 +298,9 @@ module Impl = struct
           | () -> ()
           | exception (Eio.Cancel.Cancelled _ as exn) ->
             let bt = Printexc.get_raw_backtrace () in
-            Eio.Cancel.protect (fun () -> stop_owned t set_exit_status);
+            Eio.Cancel.protect (fun () ->
+              if ends_without_grace exn then stop_now t set_exit_status
+              else stop_owned t set_exit_status);
             Printexc.raise_with_backtrace exn bt in
         match run () with
         | () -> Switch.remove_hook hook; `Stop_daemon

@@ -663,7 +663,7 @@ supports-multimodal-inputs = true
             Llm_provider.Provider_config.model_capabilities_override =
               Some (Llm_provider.Capabilities.capabilities_of_kind provider.kind)} in
           {runtime with Runtime_instance.execution = Runtime_execution.Agent_core provider}
-        | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
+        | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
           fail "fixture must materialize an Agent Core runtime")
      | Error reason -> fail (Runtime_config_error.string_of_drop_reason reason))
   | [] | _::_::_ -> fail "fixture must materialize exactly one selected runtime"
@@ -682,7 +682,7 @@ let test_per_candidate_image_projection () =
     text_runtime.id image_runtime.id;
   let provider = match text_runtime.execution with
     | Runtime_execution.Agent_core provider -> provider
-    | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ ->
+    | Codex_app_server _ | Claude_code _ | Antigravity_cli _ | Muse_serve _ | Vibe_cli _ ->
       fail "fixture must use the Agent Core transport" in
   check bool "the provider preset alone advertises images" true
     (Runtime_agent.provider_caps_of_config provider).supports_image_input;

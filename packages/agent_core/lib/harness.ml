@@ -502,7 +502,8 @@ module Model_grader = struct
 
       The prompt is constructed by replacing \{goal\} and \{result\}
       in the template, appending the rubric. The LLM response is
-      parsed for a numeric score (first float found). *)
+      parsed for a numeric score: a "Score: <number>" line first, then
+      the first line's number, then the first float anywhere. *)
   let grade ~complete_fn (config : config) ~goal ~result : verdict =
     let prompt =
       config.prompt_template
@@ -514,7 +515,8 @@ module Model_grader = struct
         "%s\n\n\
          Rubric:\n\
          %s\n\n\
-         Respond with a score from 0.0 to 1.0 on the first line, then explanation."
+         Respond with a score from 0.0 to 1.0 on the first line as \"Score: <number>\", \
+         then explanation."
         prompt
         config.rubric
     in
@@ -526,13 +528,54 @@ module Model_grader = struct
       ; detail = Some (Printf.sprintf "Model grader failed: %s" msg)
       }
     | Ok response ->
-      (* Extract first float from response *)
-      let score =
+      (* Structured-first score extraction (#49742 cluster 7). The prompt
+         asks for a "Score: <number>" line, so that marker decides first;
+         the first-line number and the whole-response first-float scan
+         remain as fallbacks for graders that ignore the marker. Without
+         the marker precedence a decimal in the explanation that happens
+         to come before the score line became the score. *)
+      let extract_float text =
         try
-          let _ = Str.search_forward (Str.regexp {|[0-9]+\.[0-9]+|}) response 0 in
-          Some (float_of_string (Str.matched_string response))
+          let _ = Str.search_forward (Str.regexp {|[0-9]+\.[0-9]+|}) text 0 in
+          Some (float_of_string (Str.matched_string text))
         with
         | Not_found | Failure _ -> None
+      in
+      let score_from_marker text =
+        let marker = "score:" in
+        let marker_len = String.length marker in
+        let rec find_from line i =
+          if i + marker_len > String.length line
+          then None
+          else if
+            String.equal (String.lowercase_ascii (String.sub line i marker_len)) marker
+          then Some i
+          else find_from line (i + 1)
+        in
+        let rec go = function
+          | [] -> None
+          | line :: rest ->
+            (match find_from line 0 with
+             | None -> go rest
+             | Some at ->
+               (match extract_float (String.sub line at (String.length line - at)) with
+                | Some s -> Some s
+                | None -> go rest))
+        in
+        go (String.split_on_char '\n' text)
+      in
+      let first_line =
+        match String.index_opt response '\n' with
+        | Some nl -> String.sub response 0 nl
+        | None -> response
+      in
+      let score =
+        match score_from_marker response with
+        | Some s -> Some s
+        | None ->
+          (match extract_float first_line with
+           | Some s -> Some s
+           | None -> extract_float response)
       in
       let score = Option.map (fun s -> Float.min 1.0 (Float.max 0.0 s)) score in
       let passed =

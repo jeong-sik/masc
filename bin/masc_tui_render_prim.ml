@@ -497,13 +497,22 @@ let awaiting_approval_notice (state : state) =
    suffix would be naming keys that are not there. It is also a key hint, so
    hints off drops it and keeps the query and its count.
 
+   A settled query is drawn only where those keys have rows. On Schedules,
+   Overview or a detail pane "/" does not open and n/N do not move, so the
+   query would name a hunt that cannot happen there; Enter on Board used to
+   leave "/board" in the footer of every screen after it. [state.search_last]
+   keeps it and the surface with the list draws it again. A query still being
+   typed always shows, with its caret.
+
    One spelling, because three surfaces draw this: the footer every surface
    carries, the Keepers heading, and the context inspector's own title. They
    said three different things about the same pair of fields. *)
 let search_marker (state : state) =
-  let marker query ~settled =
+  let rows_reached query =
+    Masc_tui_surface_search.surface_search_count ~cols:(snd (get_terminal_size ())) state state.view ~query
+  in
+  let marker query ~reached ~settled =
     let has_query = surface_search_query state.view query <> "" in
-    let reached = Masc_tui_surface_search.surface_search_count ~cols:(snd (get_terminal_size ())) state state.view ~query in
     let found =
       match reached with
       | None -> ""
@@ -520,15 +529,18 @@ let search_marker (state : state) =
            stay; naming two more keys next to them contradicted both halves of
            that setting. *)
         ""
-      else match reached with None -> "" | Some _ -> " n/N"
+      else " n/N"
     in
     Printf.sprintf "/%s%s%s" (Terminal_text.single_line query) found tail
   in
   match state.search with
-  | Some query -> Some (marker query ~settled:false)
+  | Some query -> Some (marker query ~reached:(rows_reached query) ~settled:false)
   | None ->
       if state.search_last = "" then None
-      else Some (marker state.search_last ~settled:true)
+      else
+        (match rows_reached state.search_last with
+         | None -> None
+         | Some _ as reached -> Some (marker state.search_last ~reached ~settled:true))
 
 (* The marker with the colour the two headings give it: accented while the
    query is being typed, dim once it is settled. Empty when there is no

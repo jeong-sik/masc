@@ -34,22 +34,6 @@ val with_disable_parallel_tool_use : bool -> t -> t
 val with_initial_messages : Types.message list -> t -> t
 val with_cache_system_prompt : bool -> t -> t
 
-(** Enable or disable provider-lease release before tool execution.
-
-    When [true], a run invokes [on_yield] after assistant collection succeeds
-    and immediately before the first tool hook or implementation. A continuing
-    run invokes [on_resume] before its next provider turn. Only affects
-    [on_yield]/[on_resume] callback behavior; it does not change model or tool
-    semantics.
-
-    @since 0.99.7 *)
-val with_yield_on_tool : bool -> t -> t
-
-(** Ceiling on tool-continuation rounds in one run. Unset leaves the loop
-    unbounded. Reaching it fails the run with [`Tool_round_limit_exceeded]
-    rather than returning a truncated run as a completed one. *)
-val with_max_tool_rounds : int -> t -> t
-
 (** {2 Tools and MCP} *)
 
 val with_tools : Tool.t list -> t -> t
@@ -59,9 +43,7 @@ val with_tool : Tool.t -> t -> t
 
 val with_hooks : Hooks.hooks -> t -> t
 val with_tracer : Tracing.t -> t -> t
-val with_raw_trace : Raw_trace.t -> t -> t
 val with_context : Context.t -> t -> t
-val with_context_injector : Hooks.context_injector -> t -> t
 
 (** Attach a caller-owned event bus, replacing the default per-agent bus. *)
 val with_event_bus : Event_bus.t -> t -> t
@@ -128,11 +110,6 @@ val with_call_timeout : float -> t -> t
     clock on the underlying request. @since 0.231.15 *)
 val with_admission_timeout : float -> t -> t
 
-(** Set the cell bounded permit waits write
-    ({!Agent_types.options.permit_wait}) as such a wait begins and ends, on
-    every route. *)
-val with_permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t -> t -> t
-
 val with_elicitation : Hooks.elicitation_callback -> t -> t
 
 val with_description : string -> t -> t
@@ -143,11 +120,6 @@ val with_periodic_callbacks : Agent.periodic_callback list -> t -> t
     capability overrides unchanged to dispatch. Generic turn fields seed the
     Builder and may be replaced by later [with_*] calls. *)
 val with_provider_config : Llm_provider.Provider_config.t -> t -> t
-
-val with_reasoning_source_change
-  : Llm_provider.Reasoning_history_projection.source_change_policy -> t -> t
-(** Explicit wire-only reasoning exclusion policy for imported history.
-    Defaults to [Reject_incompatible]. Canonical messages remain intact. *)
 
 (** Select Agent-level provider-fit admission. [Require_exact_fit] never
     degrades to an unmeasured provider call. *)
@@ -165,10 +137,6 @@ val with_pre_dispatch_serialization_observer
   :  Agent.pre_dispatch_serialization_observer
   -> t
   -> t
-
-(** Run each admitted provider body's serialisation through [executor], for
-    example on another domain, instead of on the fiber that drives the turn. *)
-val with_serialization_executor : Agent.serialization_executor -> t -> t
 
 (** Inject an {!Llm_provider.Llm_transport.t} for non-HTTP providers.
     Required for CLI provider kinds ([Claude_code], [Codex],
@@ -211,20 +179,6 @@ val with_skills : Skill_document.t list -> t -> t
     An agent can use both paths simultaneously: registry skills for
     external discovery, and contract skills for prompt composition. *)
 val with_skill_registry : Skill_registry.t -> t -> t
-
-(** {2 Run lifecycle} *)
-
-(** Set a callback invoked when a run finishes.  Receives [true] on
-    success, [false] on error.  Intended for emitting eval metrics,
-    flushing OTel spans, or other end-of-run side effects.
-    @since 0.110.0 *)
-val with_on_run_complete : (bool -> unit) -> t -> t
-
-(** Attach a caller-owned turn-boundary checkpoint sink. The sink is stored
-    on the built {!Agent.t}, not in {!Agent.options}, so existing callers that
-    construct options records remain source-compatible.
-    @since 0.193.9 *)
-val with_checkpoint_sink : Agent.checkpoint_sink -> t -> t
 
 (** {2 Build} *)
 

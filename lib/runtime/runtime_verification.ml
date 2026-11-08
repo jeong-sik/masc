@@ -756,6 +756,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
               | Runtime_antigravity.Child_fd_ceiling_exceeded _
               | Runtime_antigravity.Unhandled_exception _ ) as err)) ->
            Error (Provider_rejected (Runtime_antigravity.error_to_string err)))
+      | Runtime_execution.Vibe_cli _ -> Error (Unavailable Unsupported_runtime)
       | Runtime_execution.Agent_core provider_cfg ->
         (match
            Runtime_instance.validate_dispatch_credential ~provider_config:provider_cfg runtime

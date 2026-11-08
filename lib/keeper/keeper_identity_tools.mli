@@ -60,6 +60,13 @@ val client_binding_path :
     tool catalogs, and never in the Keeper's own projection, because a
     client secret is not the Keeper's to hold. *)
 
+val write_json_snapshot : path:string -> Yojson.Safe.t -> (unit, string) result
+(** Write a private JSON snapshot beside its target: [Filename.temp_file]
+    creates the temp in the same directory, unique per call and 0600, and the
+    rename leaves the snapshot whole and either old or new. Two writers never
+    share a temp file. The OAuth catalog and — via
+    [Server_keeper_oauth] — the disconnect receipt both go through this. *)
+
 type local_detachment = private {
   refresh_token : string option;
   client : (Keeper_oauth_client_store.binding option, string) result;

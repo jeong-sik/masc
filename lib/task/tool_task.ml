@@ -56,14 +56,14 @@ let handle_transition ~tool_name ~start_time ctx args =
         names (String.concat ", " transition_known_args))
   else
   match Workspace.validate_expected_workspace ~config:ctx.config args with
-  | Error Workspace.Invalid_workspace_precondition ->
-    workflow_rejection_result ~tool_name ~start_time
-      ~rule_id:"task_invalid_workspace_precondition"
-      "invalid expected_workspace precondition"
-  | Error Workspace.Workspace_precondition_failed ->
-    workflow_rejection_result ~tool_name ~start_time
-      ~rule_id:"task_workspace_precondition_failed"
-      "workspace precondition failed"
+  | Error error ->
+    let rule_id =
+      match error with
+      | Workspace.Invalid_workspace_precondition -> "task_invalid_workspace_precondition"
+      | Workspace.Workspace_precondition_failed -> "task_workspace_precondition_failed"
+    in
+    workflow_rejection_result ~tool_name ~start_time ~rule_id
+      (Workspace.expected_workspace_error_message error)
   | Ok args ->
   let task_id = get_string args "task_id" "" in
   match validate_task_id task_id with
@@ -336,8 +336,7 @@ let handle_tasks ~tool_name ~start_time ctx args =
   let refuse detail = Tool_result.error
     ~failure_class:Tool_result.Workflow_rejection ~tool_name ~start_time detail in
   match Workspace.validate_expected_workspace ~config:ctx.config args with
-  | Error Workspace.Invalid_workspace_precondition -> refuse "invalid expected_workspace precondition"
-  | Error Workspace.Workspace_precondition_failed -> refuse "workspace precondition failed"
+  | Error error -> refuse (Workspace.expected_workspace_error_message error)
   | Ok args ->
     (match Tool_task_args.parse_task_creation_request_id args with
      | Error detail -> refuse detail

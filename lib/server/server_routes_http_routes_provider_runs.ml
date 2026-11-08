@@ -20,7 +20,8 @@ let runtime_specification_json (runtime : Runtime_instance.t) =
       Llm_provider.Provider_config.capabilities_for_config_model
         { config with model_capabilities_override = None }
     | Runtime_execution.Codex_app_server _ | Runtime_execution.Claude_code _
-    | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _ -> None in
+    | Runtime_execution.Antigravity_cli _ | Runtime_execution.Muse_serve _
+    | Runtime_execution.Vibe_cli _ -> None in
   `Assoc [ "runtime_id", `String runtime.id;
     "catalog_context", Json_util.int_opt_to_json
       (Option.bind catalog (fun caps -> caps.Llm_provider.Capabilities.max_context_tokens));

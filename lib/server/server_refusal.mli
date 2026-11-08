@@ -8,3 +8,10 @@
 
 val json :
   ?code:string -> ?fields:(string * Yojson.Safe.t) list -> string -> Yojson.Safe.t
+
+val expected_workspace_error :
+  Workspace.expected_workspace_error -> [> `Bad_request | `Conflict ] * Yojson.Safe.t
+(** The status and body that refuse a request whose [expected_workspace]
+    precondition did not hold. A precondition that is not well formed is a
+    [`Bad_request]; one that names another workspace is a [`Conflict]. The
+    sentence is {!Workspace.expected_workspace_error_message}. *)

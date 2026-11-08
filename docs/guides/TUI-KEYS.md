@@ -844,11 +844,14 @@ or completion.
 | `AGE` | time since it last moved: the open turn's latest update (its start before it reports one), else the later of its last turn and the start of its wait |
 | `LIFECYCLE` | the keeper process |
 | `◂` | a failing keeper's last failure, in place of its runtime or first in DETAIL: how long ago · cause · the runtime that ended it · candidates tried |
+| `failing` | how long the keeper has been in the failing phase; ? when the server recorded no start, or the start is ahead of this screen's clock (Detailed second row) |
+| `✓ ⊘ ✗ · ?` | autonomous turn results of the last 12 hours, one mark per hour, newest on the right: ✓ ok / ⊘ rested / ✗ failed / · no turn / ? unknown; chat turns are not counted, and the server keeps a keeper's last 24 turns, so a busy keeper's older hours read ? (Detailed second row) |
 | `Mode M/D/A` | manual / on demand / autonomous |
 | `S D/M/R` | sandbox: docker / microvm / remote_ssh |
 | `쉬는 중` | resting path: relative duration (제공자 stated / 상한 bounded); ▹ prefixes next candidate after turn failure |
 | `◷` | next scheduled run or hold status (Detailed second row) |
 | `mem · lag · stale` | keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second row) |
+| `facts` | ordinary memory facts counted by time since first seen, oldest on the left (7d or older, 1d to 7d, 1h to 1d, under 1h); bar height is relative to the tallest bin of the same strip, 0 is none, ? is not measured (Detailed second row) |
 | `사람 몫 / 효과 확인 / 분류 안 됨` | requires human operator action, effect review, or unmapped fault (NOW column) |
 
 ## Memory marks

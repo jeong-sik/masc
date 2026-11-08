@@ -340,7 +340,7 @@ let test_ego_user_owned_inventory () =
     (member "inventoryComplete" report=`Bool true);
   check bool "the refusal names the Space and the recovery" true
     (String.equal (I.issue_message issue)
-       "Browser worker ego-worker: ego task space \"masc-keepers\" is user-owned, so the live ego lane refuses it; take_over reclaims it after the operator asks to continue");
+       "Browser worker ego-worker: ego task space \"masc-keepers\" is user-owned, so the live ego lane refuses it; take_over with lane=live and no clientId reclaims it after the operator asks to continue");
   let code name=member "automatic" report |> member name |> member "error" |> member "code" in
   check bool "automatic selection says there is no browser, not that the answer is missing" true
     (code "browse"=`String "no_available_browser");
@@ -376,7 +376,7 @@ let test_ego_user_owned_inventory () =
     (member "inventoryComplete" ended=`Bool true);
   check bool "the issue names the Space, the ended connection and the recovery" true
     (String.equal (I.issue_message issue)
-       "Browser worker ego-worker: ego no longer lists task space 12 (\"masc-keepers\"), so its connection ended and no replacement was opened; take_over without a clientId asks the worker to open its configured Space again");
+       "Browser worker ego-worker: ego no longer lists task space 12 (\"masc-keepers\"), so its connection ended and no replacement was opened; take_over with lane=live and no clientId asks the worker to open its configured Space again");
   check bool "missing issue wire round trip" true
     (I.issues_of_json (I.issues_to_json [issue])=Ok [issue]);
   let row extra=`List [`Assoc (["kind",`String "ego_space_missing";"instanceId",`String "w";"space",`String "s";

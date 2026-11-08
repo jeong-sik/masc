@@ -147,7 +147,6 @@ let execution_smoke_fixture_json () =
                 ("koreanName", `String "local-alpha");
                 ("model", `String "runtime");
                 ("recent_output_preview", `String "manager synthesized runtime visibility and handed next checks to beta");
-                ("recent_event", `String "manager handoff");
               ];
             `Assoc
               [
@@ -166,7 +165,6 @@ let execution_smoke_fixture_json () =
                 ("koreanName", `String "local-beta");
                 ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-claude"));
                 ("recent_output_preview", `String "secondary runtime is quiet; watching queue depth before escalation");
-                ("recent_event", `String "secondary runtime probe");
               ];
             `Assoc
               [
@@ -185,7 +183,6 @@ let execution_smoke_fixture_json () =
                 ("koreanName", `String "local-gamma");
                 ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-model-b"));
                 ("recent_output_preview", `Null);
-                ("recent_event", `String "idle");
               ];
           ] );
       ( "worker_briefs",
@@ -272,7 +269,6 @@ let execution_smoke_fixture_json () =
                 ("koreanName", `String "local-delta");
                 ("model", `String (Runtime_provider_binding.local_runtime_label "fixture-model-b"));
                 ("recent_output_preview", `Null);
-                ("recent_event", `String "missing heartbeat");
               ];
           ] );
       ( "agents",

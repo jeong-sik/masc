@@ -15,8 +15,8 @@
     use the auto-generated [pp_t], [show_t], [equal] without writing
     bespoke formatters. *)
 
-(** Test-mode token (replaces [String.starts_with "test_" executable]
-    at the historical 5 detection sites). *)
+(** Test-mode token. [Test] when the executable basename starts with
+    ["test_"], as [Env_config_core.running_under_test_executable] decides. *)
 type test_mode_kind =
   | Test
   | Production

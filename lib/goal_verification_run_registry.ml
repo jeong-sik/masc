@@ -326,15 +326,13 @@ let create = Store.create
 let replay = Store.replay
 let max_completed_retained = Store.max_completed_retained
 let cut_replay_log = Store.cut_replay_log
-let change_observer_fn : (unit -> unit) Atomic.t = Atomic.make (fun () -> ())
+let change_observer_fn = Run_registry_core.Observer.make ()
 
 let notify_changed () =
-  try (Atomic.get change_observer_fn) () with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Log.Task.warn
-      "goal_verification_run_registry change observer failed: %s"
-      (Printexc.to_string exn)
+  Run_registry_core.Observer.notify change_observer_fn ~on_failure:(fun exn ->
+      Log.Task.warn
+        "goal_verification_run_registry change observer failed: %s"
+        (Printexc.to_string exn))
 ;;
 
 let register_running t ~run_id ~goal_id ~request_id ~criterion ~review_kind ~authority_actor ~started_at =
@@ -359,16 +357,11 @@ let mark_completed t ~run_id ~outcome ~evaluated_verdict ~tools ?evaluator_runti
   | `Persistence_failed failure -> raise (Sys_error failure.detail)
 ;;
 
-let rec publication_source_error = function
-  | Store.Volatile_store -> "A volatile Goal registry cannot confirm durable publication"
-  | Not_initialized -> "Goal registry startup authority has not been established"
-  | Incomplete_startup _ -> "Goal registry startup history was incomplete or malformed"
-  | Non_regular_history _ -> "Goal registry history is not a regular file"
-  | Invalid_history detail | Read_failed detail -> detail
-  | Incomplete_history -> "Goal registry history has an incomplete tail"
-  | Snapshot_changed -> "Goal registry history changed during observation"
-  | Read_cleanup_failed {primary;detail} ->
-    (match primary with None -> detail | Some error -> publication_source_error error ^ "; " ^ detail)
+let publication_source_error error =
+  Store.source_error_to_string
+    ~volatile:"Goal registry"
+    ~proper:"Goal registry"
+    error
 ;;
 
 let mark_completed_confirmed t ~run_id ~outcome ~evaluated_verdict ~tools ?evaluator_runtime ~elapsed_s () =

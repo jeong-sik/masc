@@ -89,9 +89,6 @@ let tool_result_with_tool_name ~tool_name : tool_result -> tool_result = functio
 let tool_result_body = Tool_result.message
 let tool_result_success = Tool_result.is_success
 
-(* Configuration: see Keeper_config *)
-include Keeper_config
-
 let short_preview ?(max_len = 220) (s : string) : string =
   let s = String.trim s in
   if String.length s <= max_len then s

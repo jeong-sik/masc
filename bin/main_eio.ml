@@ -605,6 +605,7 @@ let run_cmd ?schema_observation ?(record_default = false) ?(previous_owner = Ref
             in
             Atomic.set shutdown_watchdog (Some watchdog);
             Log.Server.info
+              ~diagnostic_kind:(Log.External_signal signal_name)
               "[MASC] Received %s, shutting down gracefully (timeout=%.0fs, hard_exit=%d)..."
               signal_name force_timeout Masc.Shutdown.process_deadline_exit_code;
             (* Phase 1: Notify SSE clients *)
@@ -1179,9 +1180,11 @@ let auth_cmd =
            it out of the request URL. Only a digest of the token is written. \
            The invitation works once and expires after 24 hours."
       ; `P
-          "This build does not serve multi-account yet: once the command \
-           succeeds, a server stops at boot on the workspace, and no command \
-           undoes the activation."
+          ("This build does not serve multi-account yet: once the command \
+            succeeds, a server stops at boot on the workspace, and no command \
+            undoes the activation; "
+           ^ Authz_boot_mode_read.single_user_again
+           ^ ".")
       ]
     in
     Cmd.v
@@ -2790,6 +2793,11 @@ let runtime_probe_cmd_exit base_path runtime_id =
           | Runtime_execution.Muse_serve _ ->
               print_string "unsupported\n";
               Printf.eprintf "runtime %S (muse code) exposes no login probe\n"
+                runtime_id;
+              3
+          | Runtime_execution.Vibe_cli _ ->
+              print_string "unsupported\n";
+              Printf.eprintf "runtime %S (mistral vibe) exposes no login probe\n"
                 runtime_id;
               3
           | Runtime_execution.Claude_code exec ->

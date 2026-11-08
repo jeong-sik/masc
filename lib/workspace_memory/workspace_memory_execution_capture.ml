@@ -15,9 +15,8 @@ module Request_id = struct
   let to_string value = value
   let compare = String.compare
   let minted_on value =
-    Result.map (fun time_ms ->
-      let day = Unix.gmtime (Int64.to_float time_ms /. 1000.) in
-      Printf.sprintf "%04d-%02d-%02d" (day.Unix.tm_year + 1900) (day.tm_mon + 1) day.tm_mday)
+    Result.map
+      (fun time_ms -> Jsonl_writer.day_key ~ts:(Int64.to_float time_ms /. 1000.))
       (Random_id.uuid_v7_time_ms value)
 end
 module Identity = Fs_compat.Durable_file_identity

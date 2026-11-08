@@ -34,6 +34,19 @@ module Json : sig
       element is a string; anything else is an [Error], never [None]. *)
 end
 
+module Observer : sig
+  type t = (unit -> unit) Atomic.t
+
+  val make : unit -> t
+
+  val notify : t -> on_failure:(exn -> unit) -> unit
+  (** Invoke the registered change observer once. [Eio.Cancel.Cancelled]
+      propagates — an observer that dies to cancellation must not swallow it.
+      Any other observer failure goes to [on_failure]: a change notification
+      is a latency hint, not a delivery contract, and the durable append it
+      hints at has already happened. *)
+end
+
 module type Payload = sig
   type registration
   type completion
@@ -192,6 +205,16 @@ module Make (Payload : Payload) : sig
     | Snapshot_changed
     | Read_failed of string
     | Read_cleanup_failed of { primary : current_read_error option; detail : string }
+
+  val source_error_to_string
+    :  volatile:string
+    -> proper:string
+    -> current_read_error
+    -> string
+  (** Shared wording for the strict current-source refusals, parameterized by
+      the registry's own name spellings: [volatile] in "A volatile … cannot
+      confirm durable publication", [proper] in every other sentence. The
+      exact-lane registry keeps its own receipt wording instead. *)
 
   val read_current_from_log
     : t -> id:string -> (entry option, current_read_error) result

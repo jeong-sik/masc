@@ -60,10 +60,9 @@ dispatch owner
 ```
 
 - Do not add `Option.get` or `Result.get_ok`.
-- Do not erase an error with `Result.to_option` or
-  `Parse_outcome.to_option`. If a product boundary intentionally maps named
-  errors to absence, implement an explicit policy function whose match and
-  tests say which errors become `None`.
+- Do not erase an error with `Result.to_option`. If a product boundary
+  intentionally maps named errors to absence, implement an explicit policy
+  function whose match and tests say which errors become `None`.
 - `Option.value` is not globally forbidden. A default is valid when the owning
   boundary defines it as domain policy. Prefer a named resolver and an explicit
   match so the policy is reviewable.
@@ -115,7 +114,7 @@ from the audit silently.
 The hard gate is deliberately narrow:
 
 - partial extraction: `Option.get`, `Result.get_ok`;
-- failure erasure: `Result.to_option`, `Parse_outcome.to_option`;
+- failure erasure: `Result.to_option`;
 - canonical effect APIs inside explicitly registered pure modules.
 
 The first two categories have an exact baseline keyed by source, lexical

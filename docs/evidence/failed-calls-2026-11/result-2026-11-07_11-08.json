@@ -1,0 +1,160 @@
+{
+  "calls": 8547,
+  "failed": 117,
+  "tools": [
+    {
+      "tool": "Execute",
+      "calls": 4193,
+      "failed": 55
+    },
+    {
+      "tool": "WebFetch",
+      "calls": 70,
+      "failed": 9
+    },
+    {
+      "tool": "Grep",
+      "calls": 152,
+      "failed": 7
+    },
+    {
+      "tool": "masc_board_post_get",
+      "calls": 135,
+      "failed": 7
+    },
+    {
+      "tool": "Edit",
+      "calls": 293,
+      "failed": 6
+    },
+    {
+      "tool": "keeper_artifact_read",
+      "calls": 126,
+      "failed": 5
+    },
+    {
+      "tool": "Read",
+      "calls": 181,
+      "failed": 4
+    },
+    {
+      "tool": "BrowserGoto",
+      "calls": 16,
+      "failed": 4
+    },
+    {
+      "tool": "masc_board_comment",
+      "calls": 144,
+      "failed": 3
+    },
+    {
+      "tool": "masc_schedule_get",
+      "calls": 61,
+      "failed": 3
+    },
+    {
+      "tool": "keeper_memory_write",
+      "calls": 46,
+      "failed": 3
+    },
+    {
+      "tool": "keeper_image_read",
+      "calls": 12,
+      "failed": 2
+    }
+  ],
+  "signatures": [
+    {
+      "tool": "Execute",
+      "signature": "{\"error\":\"remote_ssh_disk_low: endpoint apple-review-be available_kib=N minimum_kib=N\",\"typed\":true",
+      "failed": 22,
+      "keepers": 2,
+      "turns": 20
+    },
+    {
+      "tool": "Execute",
+      "signature": "{\"error\":\"remote_ssh_disk_low: endpoint apple-review-anyang available_kib=N minimum_kib=N\",\"typed\":true",
+      "failed": 17,
+      "keepers": 3,
+      "turns": 13
+    },
+    {
+      "tool": "Execute",
+      "signature": "{\"error\":\"remote_ssh_disk_low: endpoint apple-review-pangyo available_kib=N minimum_kib=N\",\"typed\":true",
+      "failed": 12,
+      "keepers": 2,
+      "turns": 11
+    },
+    {
+      "tool": "Edit",
+      "signature": "{\"error\":\"old_string not found in file. Patch did not match anything. Re-Read the file and copy old_string fro",
+      "failed": 6,
+      "keepers": 3,
+      "turns": 6
+    },
+    {
+      "tool": "keeper_artifact_read",
+      "signature": "{\"ok\":false,\"error\":\"invalid_artifact_read\",\"message\":\"artifact does not exist. A stored result's marker names",
+      "failed": 4,
+      "keepers": 3,
+      "turns": 4
+    },
+    {
+      "tool": "masc_board_post_get",
+      "signature": "Post not found: <hex>. Use an id masc_board_list or masc_board_search returns; a guessed id fails here.",
+      "failed": 4,
+      "keepers": 1,
+      "turns": 1
+    },
+    {
+      "tool": "WebFetch",
+      "signature": "fetch failed: timed out before curl answered",
+      "failed": 3,
+      "keepers": 2,
+      "turns": 3
+    },
+    {
+      "tool": "WebFetch",
+      "signature": "{\"message\":\"Upstream HTTP N. The upstream could not fulfill this request. Check the service's state before dec",
+      "failed": 3,
+      "keepers": 3,
+      "turns": 3
+    },
+    {
+      "tool": "WebFetch",
+      "signature": "{\"message\":\"Upstream HTTP N. The upstream requires valid authentication. Use an authorized connector or authen",
+      "failed": 3,
+      "keepers": 3,
+      "turns": 3
+    },
+    {
+      "tool": "masc_board_post_get",
+      "signature": "Post not found: p-<hex>. Use an id masc_board_list or masc_board_search returns; a guessed id fails here.",
+      "failed": 3,
+      "keepers": 3,
+      "turns": 3
+    },
+    {
+      "tool": "masc_schedule_get",
+      "signature": "{\"message\":\"schedule not found\",\"masc.tool_disposition\":\"failed\",\"failure_class\":\"workflow_rejection\",\"next_mo",
+      "failed": 3,
+      "keepers": 3,
+      "turns": 3
+    },
+    {
+      "tool": "BrowserGoto",
+      "signature": "{\"message\":\"Invalid browser arguments: live navigation needs the tabId of a tab this connection opened with op",
+      "failed": 2,
+      "keepers": 2,
+      "turns": 2
+    }
+  ],
+  "skipped": {
+    "bad_lines": 0
+  },
+  "window": {
+    "since": "2026-11-07T18:29:00+00:00",
+    "until": "2026-11-08T14:08:00+00:00",
+    "files": 12
+  }
+}

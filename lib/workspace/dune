@@ -62,8 +62,6 @@
   masc_process
   ; #27397: the evidence snapshot cap is the Read ceiling, read from the leaf
   masc_tool_types
-  ; #27143: the day-file layout has one owner; this module used to rebuild it
-  masc.jsonl_writer
   ; the store list says which root each date-split JSONL store hangs from
   masc.dated_jsonl
   ; RFC-0085 PR-9 — workspace_utils_backend_setup reads the env-derived
@@ -82,12 +80,8 @@
   yojson
   unix
   re
-  re.str
-  re.pcre
   eio
   eio.unix
   base64
    masc.agent_core.digest
-  masc_random_id)
- (preprocess
-  (pps ppx_deriving.show ppx_deriving.eq ppx_deriving_yojson)))
+  masc_random_id))

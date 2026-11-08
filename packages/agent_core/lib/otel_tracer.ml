@@ -191,9 +191,7 @@ let get_fiber_stack inst : span_cell list ref option =
   | None -> None
   | Some key ->
     (try
-       match Eio.Fiber.get key with
-       | Some ref -> Some ref
-       | None -> None
+       Eio.Fiber.get key
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | _ -> None)

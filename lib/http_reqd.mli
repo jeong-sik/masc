@@ -49,7 +49,8 @@ val of_h2
   -> H2.Reqd.t
   -> t
 (** The handle for one HTTP/2 stream. [stream_sw] is the switch that ends
-    with the stream; deferred body work runs on it. [ledger] is the request's
+    with the stream: deferred body work runs on it, and its end answers the
+    response flushes still waiting ({!Body_writer.flush}). [ledger] is the request's
     scope in the listener's response ledger: every response byte is reserved
     there before it is written. The request is read as httpun's: the method
     and target are shared types, [:authority] becomes a [host] field when the
@@ -90,13 +91,17 @@ module Body_writer : sig
   val flush : t -> ([ `Written | `Closed ] -> unit) -> unit
   (** [flush t f] calls [f `Written] once every byte written so far reached
       the output channel, or [f `Closed] once that channel closed first. On a
-      writer that is already closed it calls [f `Closed] at once. *)
+      writer that is already closed it calls [f `Closed] at once. The h2
+      library drains neither a stream the peer reset nor a connection that
+      ended while the stream's window was 0, so on HTTP/2 [f `Closed] also
+      comes from the end of the stream's switch ({!of_h2}). *)
 
   val close : t -> unit
-  (** On HTTP/2 the close waits for the bytes written so far
-      ({!Http_h2_stream.close_after_flush}). *)
+  (** On HTTP/2 the close waits for the bytes written so far; a stream that
+      ends first (peer reset) answers that wait and the writer closes. *)
 
   val is_closed : t -> bool
+  (** On HTTP/2 also true once the stream's switch ended. *)
 end
 
 val respond_with_streaming

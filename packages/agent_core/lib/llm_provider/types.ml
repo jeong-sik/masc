@@ -1646,16 +1646,27 @@ let tool_result_msg ~tool_use_id ~content ?(outcome = Tool_succeeded) ?json () =
 type tool_result_validation_error =
   | Expected_object of string (** Expected JSON object, got other type *)
   | Expected_array of string (** Expected JSON array, got other type *)
+  | Expected_object_or_array of string
+        (** Expected a JSON object or array, got a scalar *)
   | Empty_content of string (** Tool returned empty content *)
   | Json_parse_failed of string (** Content is not valid JSON *)
 [@@deriving show]
+
+(** What shape a ToolResult's payload must have. Two booleans could express
+    the impossible "neither" and silently let "both" pass scalars like
+    {!Expect_object_or_array} never may; one closed variant states the four
+    real contracts. *)
+type tool_result_shape =
+  | Expect_any
+  | Expect_object
+  | Expect_array
+  | Expect_object_or_array
 
 (** Validate that a ToolResult's payload matches a minimal expected shape.
     Returns [Ok ()] when the result passes, or a descriptive error.
     This is the foundation for P0's full JSON Schema validation loop. *)
 let validate_tool_result_shape
-      ~expect_object:(expect_obj : bool)
-      ~expect_array:(expect_arr : bool)
+      (expectation : tool_result_shape)
       (block : _ content_block_with)
   : (unit, tool_result_validation_error) result
   =
@@ -1663,27 +1674,22 @@ let validate_tool_result_shape
   | ToolResult { content; json; _ } ->
     if String.length (String.trim content) = 0
     then Error (Empty_content "ToolResult content is empty")
-    else if expect_obj || expect_arr
-    then (
-      match json with
-      | None ->
+    else (
+      match expectation, json with
+      | Expect_any, _ -> Ok ()
+      | (Expect_object | Expect_array | Expect_object_or_array), None ->
         (* content was not parseable as JSON *)
         Error (Json_parse_failed "ToolResult content is not valid JSON")
-      | Some json_value ->
-        if expect_obj && not expect_arr
-        then (
-          match json_value with
-          | `Assoc _ -> Ok ()
-          | _ -> Error (Expected_object "ToolResult JSON is not an object"))
-        else if expect_arr && not expect_obj
-        then (
-          match json_value with
-          | `List _ -> Ok ()
-          | _ -> Error (Expected_array "ToolResult JSON is not an array"))
-        else
-          (* Both allowed — any JSON is fine *)
-          Ok ())
-    else Ok ()
+      | (Expect_object | Expect_object_or_array), Some (`Assoc _) -> Ok ()
+      | (Expect_array | Expect_object_or_array), Some (`List _) -> Ok ()
+      | Expect_object, Some _ ->
+        Error (Expected_object "ToolResult JSON is not an object")
+      | Expect_array, Some _ ->
+        Error (Expected_array "ToolResult JSON is not an array")
+      | Expect_object_or_array, Some _ ->
+        Error
+          (Expected_object_or_array
+             "ToolResult JSON is neither an object nor an array"))
   | Text _ | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _ | Image _ | Document _
   | Audio _ -> Ok ()
 ;;

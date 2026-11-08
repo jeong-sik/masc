@@ -4,16 +4,7 @@ let parse_iso_opt = function
 
 let first_some a b = match a with Some _ as v -> v | None -> b
 
-module String_set = Set_util.StringSet
-
-let dedup_strings (xs : string list) : string list =
-  let rec go seen acc = function
-    | [] -> List.rev acc
-    | x :: rest ->
-      if String_set.mem x seen then go seen acc rest
-      else go (String_set.add x seen) (x :: acc) rest
-  in
-  go String_set.empty [] xs
+let dedup_strings (xs : string list) : string list = Json_util.dedupe_keep_order xs
 
 let string_list_of_json json =
   match json with

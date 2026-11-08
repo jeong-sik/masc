@@ -239,6 +239,14 @@ Use both fields in the same update:
 the SSH lane, select the new profile and pass `"remote_endpoint": null` in the
 same call. Leaving a remote endpoint attached to another profile is rejected.
 
+A preflight pass is reused between calls. A read-only call that the pass let
+through (Read, Grep, a read authority, an Execute with `intent=auto`) reuses it
+for `MASC_KEEPER_SSH_PREFLIGHT_READ_TTL_SEC` seconds, default 300. A refusal
+and every call that may write reuse it for `MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC`
+seconds, default 60, so a freed disk or a restored login is noticed within that
+time. A pass opens one SSH connection per step, up to eight, because the
+transport does not reuse connections.
+
 The Dashboard's Keeper sandbox settings select from the current runtime
 endpoint registry and display the server's last shim/dispatch observations.
 An empty registry and an unreadable registry are different states. Reading
@@ -340,8 +348,8 @@ sentence saying so is not.
 | `remote_git_unavailable` | Remote `git --version` failed. | Install/fix git for the endpoint account. |
 | `remote_ssh_root_missing` | Declared `remote_root` is absent. | Rerun bootstrap or restore the declared root. |
 | `remote_ssh_keeper_root_missing` | `remote_root/<keeper>` is absent. | Bootstrap that keeper identity/root. |
-| `remote_ssh_disk_probe_failed` | `df -Pk` failed or returned an unknown shape. | Fix remote coreutils/permissions and rerun preflight. |
-| `remote_ssh_disk_low` | Available KiB is below the configured floor. | Free/expand disk or deliberately change the floor. |
+| `remote_ssh_disk_probe_failed` | `df -Pk` failed or returned an unknown shape. Refuses the same calls as `remote_ssh_disk_low`. | Fix remote coreutils/permissions and rerun preflight. |
+| `remote_ssh_disk_low` | Available KiB is below the configured floor (`MASC_KEEPER_SSH_PREFLIGHT_DISK_FREE_MIN_KIB`). Only a call declared as writing is refused: Write, Edit, a checkout, an Execute with `intent=request_effect`, and `keeper up`. Read, Grep, a read authority and an Execute with `intent=auto` still run, including an `auto` command the Gate judges and approves as an effect. | Free/expand disk or deliberately change the floor. |
 | `remote_github_identity_missing` | Keeper-scoped `gh auth status` failed while `api.github.com` answered the endpoint. | Re-provision that keeper's token/config; never send a token per tool call. |
 | `remote_github_unreachable` | `gh auth status` failed and `api.github.com` did not answer the endpoint; the token is not proven bad. | Fix the endpoint network first (microvm: `network_mode` in the keeper TOML, DNS via the sandbox profile); re-check the token only after the API answers. |
 | `remote_ssh_env_invalid` | A typed env entry is malformed. | Correct the caller input; every entry must be `NAME=value`. |

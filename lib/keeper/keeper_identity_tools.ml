@@ -191,21 +191,39 @@ let rec ensure_dir path =
     | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
 ;;
 
-let save_catalog_file ~base_path ~keeper_name catalog =
-  let path =
-    catalog_path ~base_path ~keeper_name ~provider_id:catalog.provider_id
-  in
-  let temp = path ^ ".tmp" in
+(* One writer for the JSON snapshots this area keeps (OAuth catalogs, and —
+   via [Server_keeper_oauth] — disconnect receipts). [Filename.temp_file]
+   creates the temp next to the target, unique per call and 0600; the rename
+   then leaves the snapshot private, whole, and either old or new. Two
+   writers never share a temp file. *)
+let write_json_snapshot ~(path : string) (json : Yojson.Safe.t) :
+  (unit, string) result =
   try
     ensure_dir (Filename.dirname path);
-    Out_channel.with_open_bin temp (fun oc ->
-      Out_channel.output_string oc (Yojson.Safe.to_string (catalog_to_json catalog)));
-    Unix.rename temp path;
-    Ok ()
+    let temp =
+      Filename.temp_file ~temp_dir:(Filename.dirname path)
+        (Filename.basename path) ".tmp"
+    in
+    (match
+       Out_channel.with_open_bin temp (fun oc ->
+         Out_channel.output_string oc (Yojson.Safe.to_string json));
+       Unix.rename temp path
+     with
+     | () -> Ok ()
+     | exception exn ->
+       (try Sys.remove temp with Sys_error _ | Unix.Unix_error _ -> ());
+       raise exn)
   with
   | Unix.Unix_error (err, fn, arg) ->
     Error (Printf.sprintf "%s: %s %s" (Unix.error_message err) fn arg)
   | Sys_error message -> Error message
+;;
+
+let save_catalog_file ~base_path ~keeper_name catalog =
+  let path =
+    catalog_path ~base_path ~keeper_name ~provider_id:catalog.provider_id
+  in
+  write_json_snapshot ~path (catalog_to_json catalog)
 ;;
 
 let save ~publication catalog =

@@ -43,6 +43,14 @@ let non_positive_trials_reject () =
   ignore (parse_err [ "--trials"; "-2" ])
 ;;
 
+let vibe_acp_is_optional () =
+  let none = parse_ok [ "--lane"; "hitl"; "--runtime"; "r1" ] in
+  Alcotest.(check (option string)) "no flag" None none.Args.vibe_acp;
+  let some = parse_ok [ "--runtime"; "r1"; "--vibe-acp"; "/opt/vibe/vibe-acp" ] in
+  Alcotest.(check (option string)) "flag" (Some "/opt/vibe/vibe-acp") some.Args.vibe_acp;
+  ignore (parse_err [ "--vibe-acp"; "" ])
+;;
+
 let unknown_argument_rejects () =
   ignore (parse_err [ "--lane"; "hitl"; "--bogus"; "x" ])
 ;;
@@ -55,6 +63,7 @@ let () =
         ; Alcotest.test_case "trials default to three" `Quick trials_default_to_three
         ; Alcotest.test_case "non-numeric trials reject" `Quick non_numeric_trials_reject
         ; Alcotest.test_case "non-positive trials reject" `Quick non_positive_trials_reject
+        ; Alcotest.test_case "vibe-acp is optional" `Quick vibe_acp_is_optional
         ; Alcotest.test_case "unknown argument rejects" `Quick unknown_argument_rejects
         ] )
     ]

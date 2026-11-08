@@ -296,9 +296,9 @@ function decodeGoalKeeperTrustSummary(raw: unknown): GoalKeeperTrustSummary | nu
     next_human_action: asNullableString(raw.next_human_action),
     latest_terminal_reason: normalizeKeeperTrustTerminalReason(raw.latest_terminal_reason),
     latest_next_action: asNullableString(raw.latest_next_action),
-    approval_state: decodeGoalKeeperTrustApprovalState(raw.approval_state ?? raw.approval),
+    approval_state: decodeGoalKeeperTrustApprovalState(raw.approval),
     execution_summary:
-      decodeGoalKeeperTrustExecutionSummary(raw.execution_summary ?? raw.execution),
+      decodeGoalKeeperTrustExecutionSummary(raw.execution),
     latest_causal_event: decodeGoalKeeperTrustLatestEvent(raw.latest_causal_event),
   }
 }

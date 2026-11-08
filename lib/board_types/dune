@@ -16,7 +16,6 @@
   yojson
   fs_compat
   re
-  re.pcre
   eio
   eio.unix
   unix
@@ -25,4 +24,4 @@
   masc_core
   masc_types)
  (preprocess
-  (pps ppx_deriving.show ppx_deriving.eq ppx_tla ppx_enumerate)))
+  (pps ppx_deriving.show ppx_tla ppx_enumerate)))

@@ -313,22 +313,14 @@ let default_state () =
 let default_prepared_state () =
   { state = default_state (); records_by_goal_id = Goal_store.Goal_id_map.empty }
 
-(* Content-addressed in-memory cache of [prepared_state] keyed by file path.
-   Protected by [Stdlib.Mutex] with zero Eio yield points inside the critical
-   section. A hit requires exact byte equality ([String.equal cached_bytes
-   content]) against the freshly read document, so out-of-band file edits can
-   never serve stale state while repeated reads reuse JSON parsing and
-   [Goal_id_map] indexing. [state] and [record] have no mutable fields. *)
-let verifications_cache : (string, string * prepared_state) Hashtbl.t =
-  Hashtbl.create 8
-
-let verifications_cache_mu = Stdlib.Mutex.create ()
+(* Content-addressed prepared cache — the byte-equality and locking mechanics
+   live in [Mirrored_store_cache.Content_cache], shared with the goal store.
+   [state] and [record] have no mutable fields. *)
+let verifications_cache : prepared_state Mirrored_store_cache.Content_cache.t =
+  Mirrored_store_cache.Content_cache.create ()
 
 let clear_verifications_cache_for path =
-  Stdlib.Mutex.lock verifications_cache_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock verifications_cache_mu)
-    (fun () -> Hashtbl.remove verifications_cache path)
+  Mirrored_store_cache.Content_cache.clear verifications_cache path
 
 (* A failed follow-symlink existence check is not evidence that the directory
    entry is absent. In particular, a dangling link may name an earlier ledger. *)
@@ -386,14 +378,8 @@ let read_state config path : (prepared_state option, string) result =
       Ok None
   | Ok (Some content) ->
       let cached =
-        Stdlib.Mutex.lock verifications_cache_mu;
-        Fun.protect
-          ~finally:(fun () -> Stdlib.Mutex.unlock verifications_cache_mu)
-          (fun () ->
-            match Hashtbl.find_opt verifications_cache path with
-            | Some (cached_bytes, prepared) when String.equal cached_bytes content ->
-                Some prepared
-            | Some _ | None -> None)
+        Mirrored_store_cache.Content_cache.find verifications_cache ~path
+          ~bytes:content
       in
       (match cached with
        | Some prepared -> Ok (Some prepared)
@@ -418,11 +404,8 @@ let read_state config path : (prepared_state option, string) result =
                       err
                   | Ok state ->
                       let prepared = prepare_state state in
-                      Stdlib.Mutex.lock verifications_cache_mu;
-                      Fun.protect
-                        ~finally:(fun () -> Stdlib.Mutex.unlock verifications_cache_mu)
-                        (fun () ->
-                          Hashtbl.replace verifications_cache path (content, prepared));
+                      Mirrored_store_cache.Content_cache.replace
+                        verifications_cache path content prepared;
                       Ok (Some prepared)))
 
 (* When the primary is absent, an existing or uninspectable mirror cannot be

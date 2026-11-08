@@ -67,9 +67,7 @@ let default_owned_target ~ownership_root ~path =
     List.filter
       (fun name ->
         let p = Filename.concat root name in
-        match Sys.is_directory p with
-        | true -> not (String.equal name skip)
-        | _ -> false)
+        Sys.is_directory p && not (String.equal name skip))
       (entries ~root)
   in
   let strip_prefix prefix p =

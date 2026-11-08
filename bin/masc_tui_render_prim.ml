@@ -529,7 +529,7 @@ let search_marker (state : state) =
            stay; naming two more keys next to them contradicted both halves of
            that setting. *)
         ""
-      else match reached with None -> "" | Some _ -> " n/N"
+      else " n/N"
     in
     Printf.sprintf "/%s%s%s" (Terminal_text.single_line query) found tail
   in

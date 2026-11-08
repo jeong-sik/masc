@@ -13,7 +13,7 @@ keeper_librarian.ml:385-410). Those sections render the same text in every
 admission prompt, so they are part of the template here, and `parse` refuses a
 prompt where they differ.
 
-Where MASC renders each part (main 4b770e51972c):
+Where MASC renders each part (main d2bc93109055):
 - whole prompt: keeper_librarian_runtime.ml:537-560 `prepare_admission`
   = main template rendered with the variables, then `admission_suffix` (368-381)
   (here)

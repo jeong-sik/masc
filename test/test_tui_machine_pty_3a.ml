@@ -264,7 +264,7 @@ let main env =
     let mk_policy host =
       match
         Server_request_authority.make_trust_policy ~bind_host:host
-          ~bind_port:port ~explicit_base_url:None
+          ~bind_port:port ~https_port:None ~explicit_base_url:None
       with
       | Ok policy -> policy
       | Error e ->

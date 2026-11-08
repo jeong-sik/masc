@@ -312,7 +312,7 @@ let machine_wire_preserves_both_readings () =
 
 let h2_read ~sw ~clock ~state token =
   let trust_policy = match Server_request_authority.make_trust_policy
-    ~bind_host:"127.0.0.1" ~bind_port:8935 ~explicit_base_url:None with
+    ~bind_host:"127.0.0.1" ~bind_port:8935 ~https_port:None ~explicit_base_url:None with
     | Ok value -> value | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
   let previous = Server_auth.For_testing.snapshot_server_state () in
   Server_auth.publish_server_state state;

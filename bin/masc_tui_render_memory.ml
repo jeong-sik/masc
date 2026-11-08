@@ -906,11 +906,12 @@ let memory_fact_detail_lines ~cols row =
    words come from {!Masc_tui_memory_world}, which the key sheet reads too. A
    world not read yet, or whose read failed, draws the unknown mark and no
    count. [labelled] is the fleet header's own wrapper, so the row folds under
-   its label at the frame's width as the others do. *)
-let memory_world_rows ~ko ~labelled (state : state) =
+   its label at the frame's width as the others do; [room] is the width it
+   packs with, which the failure cause is cut to so it adds no row. *)
+let memory_world_rows ~ko ~labelled ~room (state : state) =
   labelled
     (Masc_tui_memory_world.label ~ko)
-    (Masc_tui_memory_world.clauses ~ko
+    (Masc_tui_memory_world.clauses ~ko ~room
        (Masc_tui_memory_world.reading state.memory_world))
 
 (* The fleet header above the sort row: the Total, Ordinary, Source and
@@ -941,11 +942,14 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
      row starting with a number still has its subject above it. The break is a
      clause mark rather than any space, because "0 failures since server start"
      and "0 failures" are different claims (#36497). *)
+  let prefix_of label = "  " ^ label ^ " " in
+  let room_after label =
+    max 1 (framed_inner_width cols - Message_layout.display_width (prefix_of label))
+  in
   let labelled label clauses =
-    let prefix = "  " ^ label ^ " " in
+    let prefix = prefix_of label in
     let prefix_cells = Message_layout.display_width prefix in
-    let room = max 1 (framed_inner_width cols - prefix_cells) in
-    Message_layout.pack_clauses ~max_cells:room clauses
+    Message_layout.pack_clauses ~max_cells:(room_after label) clauses
     |> List.mapi (fun index line ->
            (if index = 0 then prefix else String.make prefix_cells ' ') ^ line)
   in
@@ -1048,7 +1052,11 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
                 snapshot.mhs_total_vision_ingest_errors
             ])
   in
-  total @ readings @ memory_world_rows ~ko ~labelled state
+  total
+  @ readings
+  @ memory_world_rows ~ko ~labelled
+      ~room:(room_after (Masc_tui_memory_world.label ~ko))
+      state
 
 
 (* Both counts are the length of what this module draws: the fleet header

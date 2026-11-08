@@ -864,7 +864,7 @@ or completion.
 | `s` | source facts only |
 | `x` | starving, or the read failed |
 | `?` | world line: not read yet or still being read; nothing is known, and it is not zero |
-| `read failed` | world line: the inventory could not be read just now, because the request failed or reading is suspended until the workspace is confirmed; any count beside it is from an earlier read |
+| `read failed` | world line: the inventory could not be read just now; any count beside it is from an earlier read. The clause after it says why. workspace unconfirmed: reading is suspended until the workspace is confirmed again. Any other text: the failure as the client received it, cut with … to the width the row has left, or left out when too little is left |
 | `no ledger` | world line: the server found no curator ledger file when it looked; that is a value, not an unknown |
 | `claims/conflicts` | world line: how many shared claims and conflicts the curator recorded; its reading of the Keepers' facts, not a check that any is true |
 | `briefing` | world line: the server's word for the shared briefing, shown as sent. current: it matches the present claims and prompt contract (always so when there are none), not that its text is right. stale: they changed since it was written. pending: none is published. unavailable: it could not be read |

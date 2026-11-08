@@ -28,15 +28,23 @@ let start_exn ~now t =
 let answer ~now t request result =
   World.complete ~next_read_at:(now +. interval_s) t request result
 
+(* What a failed read says it failed of: the text it came with, or that it was
+   retired. *)
+let cause = function
+  | World.Suspended -> "suspended"
+  | World.Request_failed text -> text
+
 (* What a reading holds, as a name, so a failure prints both sides. *)
 let held t =
   match World.reading t with
   | World.Not_read -> "not read"
   | World.Reading -> "reading"
-  | World.Read_failed -> "read failed"
-  | World.Loaded { world; refresh_failed } ->
+  | World.Read_failed failure -> "read failed: " ^ cause failure
+  | World.Loaded { world; refresh_failure } ->
     let which = if world = first then "first" else if world = second then "second" else "other" in
-    which ^ if refresh_failed then ", last read failed" else ""
+    (match refresh_failure with
+     | None -> which
+     | Some failure -> which ^ ", last read failed: " ^ cause failure)
 
 let can_start ~now t = Option.is_some (World.start ~now t)
 
@@ -52,11 +60,13 @@ let test_an_answer_sets_the_wait () =
 let test_a_failed_answer_waits_as_long () =
   let t1, request = start_exn ~now:0.0 World.initial in
   let t2 = answer ~now:0.0 t1 request (Error "boom") in
-  Alcotest.(check string) "failed with nothing read" "read failed" (held t2);
+  Alcotest.(check string) "failed with nothing read, and the text it came with"
+    "read failed: boom" (held t2);
   Alcotest.(check bool) "a down server is asked once per interval" false
     (can_start ~now:(interval_s -. 0.1) t2);
   let t3, _ = start_exn ~now:interval_s t2 in
-  Alcotest.(check string) "a retry in flight is still the failure" "read failed" (held t3)
+  Alcotest.(check string) "a retry in flight is still the failure, with its cause"
+    "read failed: boom" (held t3)
 
 let test_a_refresh_keeps_the_value () =
   let t1, request = start_exn ~now:0.0 World.initial in
@@ -65,8 +75,8 @@ let test_a_refresh_keeps_the_value () =
   let t3, refresh = start_exn ~now:interval_s t2 in
   Alcotest.(check string) "the held inventory stays while the refresh runs" "first" (held t3);
   let t4 = answer ~now:interval_s t3 refresh (Error "boom") in
-  Alcotest.(check string) "a failed refresh keeps it and says so" "first, last read failed"
-    (held t4);
+  Alcotest.(check string) "a failed refresh keeps it and says so, with its cause"
+    "first, last read failed: boom" (held t4);
   let t5, again = start_exn ~now:(2.0 *. interval_s) t4 in
   let t6 = answer ~now:(2.0 *. interval_s) t5 again (Ok second) in
   Alcotest.(check string) "the next answer replaces it" "second" (held t6)
@@ -90,20 +100,26 @@ let test_clear_allows_a_read_at_once () =
 let test_suspend_retires_the_read () =
   let t1, retired = start_exn ~now:0.0 World.initial in
   let t2 = World.suspend t1 in
-  Alcotest.(check string) "a first read cut short holds nothing" "read failed" (held t2);
+  Alcotest.(check string) "a first read cut short holds nothing, and says it was retired"
+    "read failed: suspended" (held t2);
   Alcotest.(check bool) "it never answered, so the next read need not wait" true
     (can_start ~now:1.0 t2);
   let late = answer ~now:1.0 t2 retired (Ok first) in
-  Alcotest.(check string) "its late answer is dropped" "read failed" (held late);
+  Alcotest.(check string) "its late answer is dropped" "read failed: suspended" (held late);
   Alcotest.(check bool) "and sets no wait" true (can_start ~now:1.5 late);
   let t3, request = start_exn ~now:2.0 World.initial in
   let t4 = answer ~now:2.0 t3 request (Ok first) in
   let t5, refresh = start_exn ~now:(2.0 +. interval_s) t4 in
   let t6 = World.suspend t5 in
   Alcotest.(check string) "a refresh cut short keeps the inventory, marked failed"
-    "first, last read failed" (held t6);
-  Alcotest.(check string) "and its late answer is dropped" "first, last read failed"
-    (held (answer ~now:(2.0 +. interval_s) t6 refresh (Ok second)))
+    "first, last read failed: suspended" (held t6);
+  Alcotest.(check string) "and its late answer is dropped" "first, last read failed: suspended"
+    (held (answer ~now:(2.0 +. interval_s) t6 refresh (Ok second)));
+  let t7, failed = start_exn ~now:4.0 World.initial in
+  let t8 = answer ~now:4.0 t7 failed (Error "boom") in
+  let t9, _ = start_exn ~now:(4.0 +. interval_s) t8 in
+  Alcotest.(check string) "a retry cut short keeps the failure it was retrying"
+    "read failed: boom" (held (World.suspend t9))
 
 let () =
   Alcotest.run "tui_memory_world"

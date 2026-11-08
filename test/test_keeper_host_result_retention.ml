@@ -658,6 +658,406 @@ let test_original_that_reads_back_different_creates_no_receipt () = with_workspa
   check int "later valid originals, including Korean text, are retained" 2
     (List.length (Outbox.receipt_ids (load base_path))))
 
+(* The carrier forms of RFC retained-results-carrier-shrinks-to-an-address.
+   #49634: 248 retained receipts made one carrier larger than the window, and
+   every request of the Keeper was refused until an operator moved them. *)
+
+module Reprojection = Keeper_memory_delivery_reprojection
+
+let refusal = Agent_core.Error.Internal "the provider refused the request size"
+
+let reduction = testable (fun formatter reduction ->
+    Format.pp_print_string formatter (match reduction with
+      | Reprojection.Unchanged -> "Unchanged"
+      | Reprojection.Reprojected -> "Reprojected")) ( = )
+
+let form = testable (fun formatter form ->
+    Format.pp_print_string formatter (match form with
+      | Outbox.Inline -> "Inline"
+      | Outbox.By_address -> "By_address")) ( = )
+
+let check_reduction message expected actual =
+  check (result reduction string) message (Ok expected) actual
+
+let unreached ~refusal:_ = fail "the memory hook runs only when the carrier step is unchanged"
+
+let sha256_hex text = Agent_core_sha256.(digest_string text |> to_hex)
+
+let outbox_directory ~keeper_name base_path =
+  let session = get (Keeper_official_client_session_store.path ~base_path ~keeper_name) in
+  Filename.concat (Filename.dirname session) "undelivered-tools"
+
+let receipt_files base_path =
+  let directory = outbox_directory ~keeper_name base_path in
+  Sys.readdir directory |> Array.to_list |> List.sort String.compare
+  |> List.map (fun name ->
+    name, In_channel.with_open_bin (Filename.concat directory name) In_channel.input_all)
+
+let vendor_receipt ~call_id ~tool_name response =
+  {Outbox.thread_id="carrier-thread"; turn_id="carrier-turn"; call_id; tool_name;
+   arguments=`Assoc ["call", `String call_id]; response}
+
+(* Written as [Outbox.retain] writes them, without one durable write per file,
+   so a test can hold thousands. The first goes through [Outbox.retain], which
+   makes the owned outbox directory. *)
+let retain_vendor_receipts ?(keeper_name = keeper_name) base_path = function
+  | [] -> ()
+  | first :: rest ->
+    get (Outbox.retain ~base_path ~keeper_name first);
+    let directory = outbox_directory ~keeper_name base_path in
+    List.iter (fun (receipt : Outbox.receipt) ->
+      let body = Yojson.Safe.to_string (`Assoc [
+          "thread_id", `String receipt.Outbox.thread_id;
+          "turn_id", `String receipt.Outbox.turn_id;
+          "call_id", `String receipt.Outbox.call_id;
+          "tool_name", `String receipt.Outbox.tool_name;
+          "arguments", receipt.Outbox.arguments;
+          "response", receipt.Outbox.response]) in
+      Out_channel.with_open_gen [Open_wronly; Open_creat; Open_excl; Open_binary] 0o600
+        (Filename.concat directory (sha256_hex body ^ ".json"))
+        (fun channel -> Out_channel.output_string channel body)) rest
+
+let switch carrier =
+  match Outbox.carrier_reprojection carrier ~then_:unreached ~refusal with
+  | Ok Reprojection.Reprojected -> ()
+  | Ok Reprojection.Unchanged -> fail "the carrier switches to its address form"
+  | Error detail -> fail detail
+
+let carried_text carrier =
+  match Outbox.carrier_context carrier with
+  | [text] -> text
+  | _ -> fail "the carrier is one text"
+
+let carried_reference text =
+  let marker_start = match String_util.find_substring text "[masc:blob " with
+    | Some index -> index
+    | None -> fail "the carrier names a blob" in
+  let marker_end = match String.index_from_opt text marker_start ']' with
+    | Some index -> index
+    | None -> fail "the blob marker ends" in
+  match Tool_output.decode_from_agent_core
+          (String.sub text marker_start (marker_end - marker_start + 1)) with
+  | Tool_output.Decoded reference -> reference
+  | Tool_output.Not_marker | Tool_output.Invalid_marker _ -> fail "the blob marker decodes"
+
+let hiding sha256 text =
+  match String_util.find_substring text sha256 with
+  | Some index ->
+    let after = index + String.length sha256 in
+    String.concat "" [String.sub text 0 index; "<sha256>";
+      String.sub text after (String.length text - after)]
+  | None -> fail "the carrier names its blob by sha256"
+
+let is_digit character = character >= '0' && character <= '9'
+
+(* Every run of digits becomes one '#'. *)
+let without_numbers text =
+  let buffer = Buffer.create (String.length text) in
+  String.iteri (fun index character ->
+    if not (is_digit character) then Buffer.add_char buffer character
+    else if index = 0 || not (is_digit text.[index - 1]) then Buffer.add_char buffer '#')
+    text;
+  Buffer.contents buffer
+
+let message_text (message : Agent_core.Types.message) =
+  match message.Llm_provider.Types.content with
+  | [Llm_provider.Types.Text text] -> text
+  | _ -> fail "the carrier message is one text block"
+
+(* However many receipts a run holds, the address text changes only in its
+   numbers: the receipt count, the count per tool and the blob's byte count. *)
+let test_address_text_differs_only_in_numbers () = with_workspace (fun base_path ->
+  let response = `String (String.make 2048 'r') in
+  let shape count =
+    let keeper_name = Printf.sprintf "carrier-shape-%d" count in
+    retain_vendor_receipts ~keeper_name base_path (List.init count (fun index ->
+      vendor_receipt ~call_id:(Printf.sprintf "shape-%05d" index) ~tool_name:"Screen" response));
+    let carrier = Outbox.carrier ~base_path ~artifact_reader_available:true
+        (get (Outbox.load ~base_path ~keeper_name)) in
+    switch carrier;
+    let text = carried_text carrier in
+    without_numbers (hiding (carried_reference text).Tool_output.sha256 text) in
+  let one = shape 1 in
+  check string "248 receipts change only the numbers" one (shape 248);
+  check string "5,000 receipts change only the numbers" one (shape 5000))
+
+let test_address_form_carries_the_inline_text_by_one_blob () = with_workspace (fun base_path ->
+  retain_vendor_receipts base_path (List.init 3 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "inline-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 'i'))));
+  let snapshot = load base_path in
+  let inline = Outbox.developer_context snapshot in
+  let carrier = Outbox.carrier ~base_path ~artifact_reader_available:true snapshot in
+  check form "a run starts inline" Outbox.Inline (Outbox.carrier_form carrier);
+  check (list string) "the inline form is the developer context" inline
+    (Outbox.carrier_context carrier);
+  check bool "the inline message is the snapshot's context message" true
+    (Outbox.carrier_message carrier = Outbox.context_message snapshot);
+  let before = receipt_files base_path in
+  switch carrier;
+  check form "the switched run carries the address form" Outbox.By_address
+    (Outbox.carrier_form carrier);
+  let text = carried_text carrier in
+  let reference = carried_reference text in
+  check string "the blob is labelled plain text, never an artifact manifest" "text/plain"
+    reference.Tool_output.mime;
+  check (option string) "the blob holds the inline text byte for byte"
+    (Some (String.concat "\n\n" inline)) (held (blob_store base_path) reference.Tool_output.sha256);
+  (match Outbox.carrier_message carrier with
+   | Some message ->
+     check bool "the address message is the retained-results carrier" true
+       (Outbox.is_context_message message);
+     check string "the message carries the address text" text (message_text message)
+   | None -> fail "a carrier with receipts has a message");
+  check (list (pair string string)) "switching leaves the receipt files unchanged" before
+    (receipt_files base_path))
+
+let test_counts_follow_first_appearance () = with_workspace (fun base_path ->
+  let tools = ["Screen"; "Key"; "Screen"; "Read"; "Key"; "Screen"] in
+  retain_vendor_receipts base_path (List.mapi (fun index tool_name ->
+    vendor_receipt ~call_id:(Printf.sprintf "count-%d" index) ~tool_name
+      (`String (String.make 2048 'c'))) tools);
+  let snapshot = load base_path in
+  let carrier = Outbox.carrier ~base_path ~artifact_reader_available:true snapshot in
+  switch carrier;
+  (* Snapshot order is the order of the receipt files, so the expected order is
+     read back from them. *)
+  let directory = outbox_directory ~keeper_name base_path in
+  let names = List.map (fun id ->
+    match Yojson.Safe.from_file (Filename.concat directory (id ^ ".json")) with
+    | `Assoc fields ->
+      (match List.assoc_opt "tool_name" fields with
+       | Some (`String name) -> name
+       | _ -> fail "a receipt names its tool")
+    | _ -> fail "a receipt is an object") (Outbox.receipt_ids snapshot) in
+  let counts = List.fold_left (fun counts name ->
+    if List.mem_assoc name counts
+    then List.map (fun (seen, count) ->
+        if String.equal seen name then seen, count + 1 else seen, count) counts
+    else counts @ [name, 1]) [] names in
+  check int "three tools in six receipts" 3 (List.length counts);
+  check bool "the counts are a JSON object in order of first appearance" true
+    (String_util.contains_substring (carried_text carrier)
+       (Yojson.Safe.to_string (`Assoc (List.map (fun (name, count) -> name, `Int count) counts)))))
+
+let test_carrier_step_switches_once_and_only_when_shorter () = with_workspace (fun base_path ->
+  let memory_calls = ref 0 in
+  let memory ~refusal:_ = incr memory_calls; Ok Reprojection.Unchanged in
+  let empty = Outbox.carrier ~base_path ~artifact_reader_available:true (load base_path) in
+  check (list string) "no receipts carry nothing" [] (Outbox.carrier_context empty);
+  check_reduction "no receipts leave the refusal to the memory hook" Reprojection.Unchanged
+    (Outbox.carrier_reprojection empty ~then_:memory ~refusal);
+  check int "the memory hook is asked" 1 !memory_calls;
+  get (Outbox.retain ~base_path ~keeper_name
+    (vendor_receipt ~call_id:"tiny" ~tool_name:"Ping" (`String "ok")));
+  let tiny_snapshot = load base_path in
+  let tiny = Outbox.carrier ~base_path ~artifact_reader_available:true tiny_snapshot in
+  check_reduction "an address form that is not shorter is not taken" Reprojection.Unchanged
+    (Outbox.carrier_reprojection tiny ~then_:memory ~refusal);
+  check int "the memory hook is asked again" 2 !memory_calls;
+  check form "the run stays inline" Outbox.Inline (Outbox.carrier_form tiny);
+  check (option string) "no blob is written for a form that is not taken" None
+    (held (blob_store base_path)
+       (sha256_hex (String.concat "\n\n" (Outbox.developer_context tiny_snapshot))));
+  retain_vendor_receipts base_path (List.init 4 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "large-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 'l'))));
+  let carrier = Outbox.carrier ~base_path ~artifact_reader_available:true (load base_path) in
+  check_reduction "a shorter address form is taken before the memory hook"
+    Reprojection.Reprojected (Outbox.carrier_reprojection carrier ~then_:unreached ~refusal);
+  let switched = Outbox.carrier_context carrier in
+  let memory_reprojects ~refusal:_ = incr memory_calls; Ok Reprojection.Reprojected in
+  check_reduction "after the switch the memory hook decides" Reprojection.Reprojected
+    (Outbox.carrier_reprojection carrier ~then_:memory_reprojects ~refusal);
+  check int "the memory hook is asked once the carrier is switched" 3 !memory_calls;
+  check form "the form never switches back" Outbox.By_address (Outbox.carrier_form carrier);
+  check (list string) "the address text stays as it was" switched (Outbox.carrier_context carrier))
+
+let test_blob_write_failure_keeps_the_run_inline () = with_workspace (fun base_path ->
+  retain_vendor_receipts base_path (List.init 4 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "blocked-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 'b'))));
+  let snapshot = load base_path in
+  (* A regular file where the blob directory belongs makes the durable write
+     fail structurally, even when the test runs as root. *)
+  Out_channel.with_open_bin (Tool_blob_store.root_dir (blob_store base_path))
+    (fun channel -> Out_channel.output_string channel "not a directory");
+  let carrier = Outbox.carrier ~base_path ~artifact_reader_available:true snapshot in
+  (match Outbox.carrier_reprojection carrier ~then_:unreached ~refusal with
+   | Error _ -> ()
+   | Ok _ -> fail "a blob that cannot be written cannot switch the form");
+  check form "the run stays inline" Outbox.Inline (Outbox.carrier_form carrier);
+  check (list string) "the carrier keeps the inline text" (Outbox.developer_context snapshot)
+    (Outbox.carrier_context carrier))
+
+let test_address_text_names_the_reader_only_when_offered () = with_workspace (fun base_path ->
+  retain_vendor_receipts base_path (List.init 3 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "reader-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 'a'))));
+  let snapshot = load base_path in
+  let switched_text artifact_reader_available =
+    let carrier = Outbox.carrier ~base_path ~artifact_reader_available snapshot in
+    switch carrier;
+    carried_text carrier in
+  let with_reader = switched_text true in
+  let without_reader = switched_text false in
+  let contains text part = String_util.contains_substring text part in
+  check bool "an offered reader is named" true (contains with_reader "keeper_artifact_read");
+  check bool "an offered reader is not told it cannot read" false
+    (contains with_reader "cannot read");
+  check bool "no reader is named when none is offered" false
+    (contains without_reader "keeper_artifact_read");
+  check bool "a request without a reader is told it cannot read the receipts" true
+    (contains without_reader "cannot read");
+  check string "both texts name the same blob" (carried_reference with_reader).Tool_output.sha256
+    (carried_reference without_reader).Tool_output.sha256)
+
+(* A Codex receipt holds its image as a base64 data URL in the file (#49697).
+   #49665 keeps it out of the inline text, and the address form carries that
+   same text. The host receipt here is written by today's code, which names
+   its image by blob address. *)
+let test_address_form_keeps_base64_out () = with_workspace (fun base_path ->
+  let raw = String.init 3000 (fun index -> Char.chr (index mod 256)) in
+  let encoded = Base64.encode_string raw in
+  let image = Llm_provider.Types.Image {media_type="image/png";source=Llm_provider.Types.Base64 encoded} in
+  let terminal_error = ref None in
+  let tool = project ~base_path ~stop:(Some stop) ~terminal_error (fun _ ->
+    Ok {Agent_core.Types.content="screenshot taken";content_blocks=Some [image];_meta=None}) in
+  ignore (tool.call ~call_id:"host-image-call" (`Assoc []));
+  let items = match Runtime_official_client_tool.project_content Codex
+      ~content:"screenshot taken" ~content_blocks:(Some [image]) with
+    | Ok items -> items | Error detail -> fail detail in
+  get (Outbox.retain ~base_path ~keeper_name
+    {thread_id="vendor-thread";turn_id="vendor-turn";call_id="codex-image-call";
+     tool_name="Screenshot";arguments=`Assoc [];
+     response=`Assoc ["id",`Int 9; "result",`Assoc ["success",`Bool true; "contentItems",`List items]]});
+  retain_vendor_receipts base_path (List.init 4 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "text-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 't'))));
+  let files = receipt_files base_path in
+  check bool "the receipt files keep the base64 payload" true
+    (List.exists (fun (_, body) -> String_util.contains_substring body encoded) files);
+  let carrier = Outbox.carrier ~base_path ~artifact_reader_available:true (load base_path) in
+  switch carrier;
+  let text = carried_text carrier in
+  check bool "the address text holds no base64 payload" false
+    (String_util.contains_substring text encoded);
+  (match held (blob_store base_path) (carried_reference text).Tool_output.sha256 with
+   | Some carried ->
+     check bool "the carried blob holds no base64 payload" false
+       (String_util.contains_substring carried encoded)
+   | None -> fail "the carried blob is held");
+  check (list (pair string string)) "switching leaves the receipt files unchanged" files
+    (receipt_files base_path))
+
+(* A host receipt written before #49680 holds its image as a base64 wire block
+   in [content_blocks]. #49665 names it by bytes and sha256 in the inline text,
+   so neither the address text nor its blob carries the payload. *)
+let test_address_form_keeps_old_host_base64_out () = with_workspace (fun base_path ->
+  let raw = String.init 3000 (fun index -> Char.chr (index mod 256)) in
+  let encoded = Base64.encode_string raw in
+  let image = Llm_provider.Types.Image {media_type="image/png";source=Llm_provider.Types.Base64 encoded} in
+  let block = match Agent_core.Checkpoint.wire_content_block_to_json_result
+      ~scope:"official_client_original_tool_result" image with
+    | Ok block -> block
+    | Error error -> fail (Agent_core.Error.to_string error) in
+  let producer = get (Outbox.host_producer ~base_path ~keeper_name
+      ~runtime_label:"carrier-fixture" ~turn_count:1) in
+  get (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"old-host-image"
+         ~tool_name:"Screenshot" ~arguments:(`Assoc [])
+         ~response:(`Assoc ["success", `Bool true; "content", `String "screenshot taken";
+                            "content_blocks", `List [block]]));
+  retain_vendor_receipts base_path (List.init 4 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "old-host-text-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 'o'))));
+  let files = receipt_files base_path in
+  check int "only the old host receipt file holds the base64 payload" 1
+    (List.length (List.filter (fun (_, body) -> String_util.contains_substring body encoded) files));
+  let snapshot = load base_path in
+  check bool "the inline text names the image instead of carrying it" false
+    (String_util.contains_substring (String.concat "\n\n" (Outbox.developer_context snapshot)) encoded);
+  let carrier = Outbox.carrier ~base_path ~artifact_reader_available:true snapshot in
+  switch carrier;
+  let text = carried_text carrier in
+  check bool "the address text holds no base64 payload" false
+    (String_util.contains_substring text encoded);
+  (match held (blob_store base_path) (carried_reference text).Tool_output.sha256 with
+   | Some carried ->
+     check bool "the carried blob holds no base64 payload" false
+       (String_util.contains_substring carried encoded)
+   | None -> fail "the carried blob is held");
+  check (list (pair string string)) "switching leaves the receipt files unchanged" files
+    (receipt_files base_path))
+
+(* The switch is decided on a planned marker. If the stored marker came out
+   longer, a carrier near the threshold would switch to a text that is not
+   shorter, and every fixture far from the threshold would still pass. *)
+let test_planned_marker_is_as_long_as_the_stored_one () = with_workspace (fun base_path ->
+  retain_vendor_receipts base_path (List.init 4 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "planned-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 'p'))));
+  let snapshot = load base_path in
+  let inline = String.concat "\n\n" (Outbox.developer_context snapshot) in
+  let carrier = Outbox.carrier ~base_path ~artifact_reader_available:true snapshot in
+  switch carrier;
+  let text = carried_text carrier in
+  let stored = carried_reference text in
+  let planned =
+    match Tool_output.make_artifact_ref
+            ~sha256:(String.make (String.length stored.Tool_output.sha256) '0')
+            ~bytes:(String.length inline) ~preview:stored.Tool_output.preview
+            ~mime:stored.Tool_output.mime with
+    | Ok planned -> planned
+    | Error error -> fail (Tool_output.make_error_to_string error) in
+  let marker reference = Tool_output.encode_for_agent_core (Tool_output.Stored reference) in
+  check int "the planned marker is as long as the stored one"
+    (String.length (marker stored)) (String.length (marker planned));
+  check bool "the switched text is strictly shorter than the inline text" true
+    (String.length text < String.length inline))
+
+(* Nothing durable names the carrier blob, so a deploy sweep may delete it
+   while the receipts it carried stay. The next run writes it again. *)
+let test_maintenance_keeps_receipt_blobs_and_the_next_run_rewrites () =
+  with_workspace (fun base_path ->
+  let producer = get (Outbox.host_producer ~base_path ~keeper_name
+      ~runtime_label:"carrier-fixture" ~turn_count:1) in
+  let body = String.make 8192 'm' in
+  let response = get (Outbox.host_response producer ~min_result_bytes:0 ~success:true
+      ~content:body ~content_blocks:None) in
+  get (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"host-call"
+      ~tool_name:"Read" ~arguments:(`Assoc []) ~response);
+  retain_vendor_receipts base_path (List.init 3 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "swept-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 's'))));
+  let snapshot = load base_path in
+  let store = blob_store base_path in
+  check (option string) "the host receipt names its body by a held blob" (Some body)
+    (held store (sha256_hex body));
+  let first = Outbox.carrier ~base_path ~artifact_reader_available:true snapshot in
+  switch first;
+  let carried = carried_reference (carried_text first) in
+  for _pass = 1 to 2 do
+    match Tool_blob_maintenance.run ~base_path ~scope:Server_tool_blob_scope.scope
+            ~mode:Tool_blob_maintenance.Delete_previous_candidates with
+    | Ok _ -> ()
+    | Error error -> fail (Tool_blob_maintenance.error_to_string error)
+  done;
+  check (option string) "maintenance keeps the blob a retained receipt names" (Some body)
+    (held store (sha256_hex body));
+  let path = Filename.concat
+      (Filename.concat (Tool_blob_store.root_dir store)
+         (String.sub carried.Tool_output.sha256 0 2))
+      carried.Tool_output.sha256 in
+  if Sys.file_exists path then Sys.remove path;
+  check (option string) "the carrier blob is gone" None (held store carried.Tool_output.sha256);
+  let next = Outbox.carrier ~base_path ~artifact_reader_available:true snapshot in
+  switch next;
+  check string "the next run names the same address" carried.Tool_output.sha256
+    (carried_reference (carried_text next)).Tool_output.sha256;
+  check (option string) "and writes its bytes again"
+    (Some (String.concat "\n\n" (Outbox.developer_context snapshot)))
+    (held store carried.Tool_output.sha256))
+
 let () = run "Original official-client host result retention"
   ["durable host stop",[
     test_case "typed stop retains original before transport continuation" `Quick test_stop_retains_before_transport_return;
@@ -682,4 +1082,22 @@ let () = run "Original official-client host result retention"
     test_case "sparse repetition preserves the large unique result" `Quick test_sparse_repetition_falls_back_without_losing_unique_result;
     test_case "nested signed zero stays distinct" `Quick test_shared_nested_signed_zero;
     test_case "representation choice matches serialized size" `Quick test_representation_choice_uses_exact_serialized_size;
-    test_case "mixed groups match serialized size" `Quick test_mixed_groups_use_exact_serialized_size]]
+    test_case "mixed groups match serialized size" `Quick test_mixed_groups_use_exact_serialized_size];
+   "retained-results carrier form",[
+    test_case "address text differs only in numbers" `Quick test_address_text_differs_only_in_numbers;
+    test_case "address form carries the inline text by one blob" `Quick
+      test_address_form_carries_the_inline_text_by_one_blob;
+    test_case "counts follow first appearance" `Quick test_counts_follow_first_appearance;
+    test_case "carrier step switches once and only when shorter" `Quick
+      test_carrier_step_switches_once_and_only_when_shorter;
+    test_case "blob write failure keeps the run inline" `Quick
+      test_blob_write_failure_keeps_the_run_inline;
+    test_case "address text names the reader only when offered" `Quick
+      test_address_text_names_the_reader_only_when_offered;
+    test_case "address form keeps base64 out" `Quick test_address_form_keeps_base64_out;
+    test_case "address form keeps old host base64 out" `Quick
+      test_address_form_keeps_old_host_base64_out;
+    test_case "planned marker is as long as the stored one" `Quick
+      test_planned_marker_is_as_long_as_the_stored_one;
+    test_case "maintenance keeps receipt blobs and the next run rewrites" `Quick
+      test_maintenance_keeps_receipt_blobs_and_the_next_run_rewrites]]

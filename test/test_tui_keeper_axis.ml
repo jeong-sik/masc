@@ -23,6 +23,7 @@ let make_keeper_health
     ?(removed = 1)
     ?(source_invalidations = 1)
     ?updated_at
+    ?age_bins
     librarian : Tui_decode_memory_health.memory_keeper_health =
   { mkh_keeper_id = keeper_id
   ; mkh_revision = 1
@@ -35,7 +36,7 @@ let make_keeper_health
   ; mkh_added = added
   ; mkh_removed = removed
   ; mkh_snapshot_present = true
-  ; mkh_age_bins = None
+  ; mkh_age_bins = age_bins
   ; mkh_context_cycle =
       { mcc_saved = None
       ; mcc_saved_unreadable = false
@@ -86,6 +87,9 @@ let make_snapshot ?(refusals = []) keepers : Tui_decode_memory_health.memory_hea
   ; mhs_starving_keepers = 0
   }
 ;;
+
+(* The ladder cell goes last so a tight row drops it first. *)
+let last_cell cells = List.nth_opt (List.rev cells) 0
 
 let test_segments_extracts_scheduled_and_memory_cells () =
   let state = Masc_tui_types.create_state ~workspace:"test" ~port:8935 () in
@@ -174,14 +178,43 @@ let test_segments_extracts_scheduled_and_memory_cells () =
   state.memory_health <- Some (make_snapshot [ kh ]);
 
   let cells_with_memory = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"edgar" ~runtime:None in
-  (* edgar has: schedule cell, lag 4, +1m00s +2 -1, stale ×1 = 4 cells *)
-  Alcotest.(check int) "edgar has schedule + lag + clock + stale" 4 (List.length cells_with_memory);
+  (* edgar has: schedule cell, lag 4, +1m00s +2 -1, stale ×1, and the ladder
+     cell last = 5 cells. The row carries no ladder, so that cell is the
+     unmeasured one, not a zero. *)
+  Alcotest.(check int) "edgar has schedule + lag + clock + stale + ladder" 5
+    (List.length cells_with_memory);
   Alcotest.(check string) "edgar lag cell" "lag 4"
     (List.nth cells_with_memory 1).Masc_tui_keeper_axis_cell.text;
   Alcotest.(check string) "edgar clock cell" "+1m00s +2 -1"
     (List.nth cells_with_memory 2).Masc_tui_keeper_axis_cell.text;
   Alcotest.(check string) "edgar stale cell" "stale ×1"
     (List.nth cells_with_memory 3).Masc_tui_keeper_axis_cell.text;
+  Alcotest.(check bool) "an unmeasured ladder is the last cell" true
+    (last_cell cells_with_memory = Some (Masc_tui_keeper_age_ladder.cell None));
+
+  (* The server's ladder replaces the unmeasured cell, still last. *)
+  let bins : Masc.Keeper_memory_age_bins.t =
+    { under_hour = 1; under_day = 2; under_week = 3; older = 4 }
+  in
+  let kh_with_bins =
+    make_keeper_health ~keeper_id:"edgar" ~updated_at:(now -. 60.0) ~age_bins:bins lib
+  in
+  state.memory_health <- Some (make_snapshot [ kh_with_bins ]);
+  let cells_with_ladder =
+    Masc_tui_keeper_axis.segments state ~now ~keeper_name:"edgar" ~runtime:None
+  in
+  Alcotest.(check int) "a ladder does not add a cell" 5 (List.length cells_with_ladder);
+  Alcotest.(check bool) "the ladder cell is drawn from the row's bins" true
+    (last_cell cells_with_ladder = Some (Masc_tui_keeper_age_ladder.cell (Some bins)));
+
+  (* A refused Keeper has the refusal cell and no ladder. *)
+  let refusal : Tui_decode_memory_health.memory_keeper_refusal =
+    { mkr_keeper_id = Some "gamma"; mkr_reason = "corrupt snapshot" }
+  in
+  state.memory_health <- Some (make_snapshot ~refusals:[ refusal ] [ kh_with_bins ]);
+  let refused = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"gamma" ~runtime:None in
+  Alcotest.(check int) "a refused keeper has one cell and no ladder" 1 (List.length refused);
+  state.memory_health <- Some (make_snapshot [ kh ]);
 
   (* other is absent from snapshot without anonymous refusal -> No_row (0 cells) *)
   let other_clean = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"other" ~runtime:None in

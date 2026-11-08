@@ -74,5 +74,16 @@ let segments (state : Masc_tui_types.state) ~now ~keeper_name ~runtime
   in
   let memory_cells = Masc_tui_keeper_memory_reading.cells ~now memory_reading in
   let failing_cells, pulse_cells = runtime_cells ~now runtime in
-  failing_cells @ schedule_cells @ memory_cells @ pulse_cells
+  (* Last, so a row too narrow for every cell drops the ladder first. Only a
+     health row carries a ladder; for the other three readings the [mem] cell,
+     or no cell at all, is the whole statement. *)
+  let age_cells =
+    match memory_reading with
+    | Masc_tui_keeper_memory_reading.Row { age_bins; _ } ->
+        [ Masc_tui_keeper_age_ladder.cell age_bins ]
+    | Masc_tui_keeper_memory_reading.Unknown
+    | Masc_tui_keeper_memory_reading.No_row
+    | Masc_tui_keeper_memory_reading.Refused _ -> []
+  in
+  failing_cells @ schedule_cells @ memory_cells @ pulse_cells @ age_cells
 ;;

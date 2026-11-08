@@ -25,6 +25,7 @@ type t =
       ; added : int
       ; removed : int
       ; source_invalidations : int
+      ; age_bins : Masc.Keeper_memory_age_bins.t option
       }
 
 type index =
@@ -88,6 +89,7 @@ let index_of_snapshot (snap_opt : Tui_decode_memory_health.memory_health_snapsho
               ; added = k.mkh_added
               ; removed = k.mkh_removed
               ; source_invalidations = k.mkh_source_invalidations
+              ; age_bins = k.mkh_age_bins
               }
           in
           Hashtbl.replace table k.mkh_keeper_id row)

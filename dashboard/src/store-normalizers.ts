@@ -200,7 +200,7 @@ export function normalizeExecutionQueueItem(raw: unknown): DashboardExecutionQue
   if (!id || !summary || !targetType || !targetId || (kind !== 'operation' && kind !== 'keeper')) {
     return null
   }
-  const runtimeTrust = normalizeKeeperTrust(raw.runtime_trust ?? raw.trust)
+  const runtimeTrust = normalizeKeeperTrust(raw.runtime_trust)
   const terminalReason = runtimeTrust?.latest_terminal_reason ?? null
   const terminalReasonCode =
     asString(raw.terminal_reason_code) ?? terminalReason?.code ?? null
@@ -263,7 +263,6 @@ export function normalizeExecutionWorkerSupportBrief(raw: unknown): DashboardExe
     korean_name: asString(raw.korean_name),
     model: asString(raw.model) ?? null,
     recent_output_preview: asString(raw.recent_output_preview) ?? null,
-    recent_event: asString(raw.recent_event) ?? null,
   }
 }
 

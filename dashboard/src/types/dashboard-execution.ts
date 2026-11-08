@@ -423,7 +423,6 @@ export interface DashboardExecutionWorkerSupportBrief {
   korean_name?: string | null
   model?: string | null
   recent_output_preview?: string | null
-  recent_event?: string | null
 }
 
 export interface DashboardExecutionContinuityBrief {

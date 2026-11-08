@@ -100,8 +100,8 @@ let compact_keeper_trust_json ~(config : Workspace.config) ~(meta : Keeper_meta_
     ; "needs_attention", member "needs_attention"
     ; "attention_reason", member "attention_reason"
     ; "next_human_action", member "next_human_action"
-    ; "approval_state", member "approval"
-    ; "execution_summary", member "execution"
+    ; "approval", member "approval"
+    ; "execution", member "execution"
     ; "latest_terminal_reason", member "latest_terminal_reason"
     ; "latest_next_action", member "latest_next_action"
     ; "latest_causal_event", member "latest_causal_event"
@@ -249,13 +249,10 @@ let assoc_member_if_object key json =
 ;;
 
 let existing_keeper_trust_json keeper_json =
-  match assoc_member_if_object "runtime_trust" keeper_json with
-  | Some _ as value -> value
-  | None -> assoc_member_if_object "trust" keeper_json
+  assoc_member_if_object "runtime_trust" keeper_json
 ;;
 
 let upsert_keeper_trust_fields fields trust =
-  let fields = assoc_upsert fields "trust" trust in
   let fields = assoc_upsert fields "runtime_trust" trust in
   reconcile_keeper_attention_fields_with_trust fields trust
 ;;
@@ -352,7 +349,7 @@ let bool_field ?(default = false) key json =
 let keeper_runtime_trust_json keeper =
   match member_assoc "runtime_trust" keeper with
   | `Assoc _ as trust -> trust
-  | _ -> member_assoc "trust" keeper
+  | _ -> `Null
 ;;
 
 let lowercase_json_string key json =

@@ -56,7 +56,7 @@ let project_compact_runtime_trust runtime_trust =
     ; "needs_attention", member "needs_attention"
     ; "attention_reason", member "attention_reason"
     ; "next_human_action", member "next_human_action"
-    ; "execution_summary", member "execution"
+    ; "execution", member "execution"
     ; "latest_terminal_reason", member "latest_terminal_reason"
     ; "latest_next_action", member "latest_next_action"
     ; "latest_causal_event", member "latest_causal_event"

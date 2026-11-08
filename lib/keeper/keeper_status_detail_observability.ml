@@ -26,8 +26,8 @@ let first_some candidates =
 let selected_model_of_runtime_trust runtime_trust =
   let top_level =
     first_some
-      [ (Json_util.assoc_string_opt "selected_model" runtime_trust
-         |> Option.map (fun model -> model, "runtime_trust.selected_model"))
+      [ (Json_util.assoc_string_opt "active_model" runtime_trust
+         |> Option.map (fun model -> model, "runtime_trust.active_model"))
       ]
   in
   match top_level with

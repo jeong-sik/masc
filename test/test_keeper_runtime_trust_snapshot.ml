@@ -411,7 +411,7 @@ let test_snapshot_counts_malformed_decision_rows () =
        Alcotest.(check string)
          "selected model survives fallback"
          "test-model"
-         (snapshot |> member "selected_model" |> to_string);
+         (snapshot |> member "active_model" |> to_string);
        Alcotest.(check (float 0.001))
          "malformed json increments entry error"
          1.0
@@ -509,7 +509,7 @@ let test_snapshot_uses_receipt_runtime_model_when_decision_absent () =
        Alcotest.(check string)
          "selected model falls back to receipt"
          "receipt-model"
-         (snapshot |> member "selected_model" |> to_string);
+         (snapshot |> member "active_model" |> to_string);
        Alcotest.(check string)
          "active model falls back to receipt"
          "receipt-model"
@@ -1063,7 +1063,7 @@ let test_degraded_dashboard_trust_reports_no_operator_disposition () =
 let test_model_observability_uses_runtime_trust_selected_model () =
   let runtime_trust =
     `Assoc
-      [ "selected_model", `String "receipt-model"
+      [ "active_model", `String "receipt-model"
       ; ( "execution"
         , `Assoc [ "provider_selected_model", `String "execution-model" ] )
       ]
@@ -1090,7 +1090,7 @@ let test_model_observability_uses_runtime_trust_selected_model () =
     (json |> member "runtime_contract" |> member "verified" |> to_bool);
   Alcotest.(check string)
     "runtime contract source records trust field"
-    "runtime_trust.selected_model"
+    "runtime_trust.active_model"
     (json |> member "runtime_contract" |> member "source" |> to_string);
   Alcotest.(check bool)
     "runtime contract does not expose selected model as actual model"

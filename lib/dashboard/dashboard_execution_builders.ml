@@ -199,7 +199,6 @@ let worker_state_of_agent
           ("koreanName", `String profile.korean_name);
           ("model", `Null);
           ("recent_output_preview", Json_util.string_opt_to_json recent_output_preview);
-          ("recent_event", Json_util.string_opt_to_json recent_output_preview);
         ];
   }
 

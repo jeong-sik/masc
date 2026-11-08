@@ -42,6 +42,7 @@ let owner_lease_dirname = ".masc-owner"
 let searxng_dirname = "searxng"
 let dos_dirname = "dos"
 let msx_dirname = "msx"
+let upgrades_dirname = "upgrades"
 
 (* OUTPUT root segment for server-written keeper runtime state (meta json +
    metrics/memory/decisions/receipts sidecars). The SINGLE literal behind both

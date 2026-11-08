@@ -1,6 +1,10 @@
 open Result.Syntax
 let digest text = Agent_core_sha256.(digest_string text |> to_hex)
 
+(* File names inside one backup directory under [Common.upgrades_dirname]. *)
+let backup_original_basename = "original.toml"
+let backup_manifest_basename = "manifest.json"
+
 type plan =
   { path : string
   ; original : string
@@ -207,20 +211,20 @@ let apply ~run_dir ~base_path plan =
            then Error Source_changed
            else (
              let directory =
-               Filename.concat (Filename.concat base_path Common.masc_dirname) "upgrades"
+               Filename.concat (Filename.concat base_path Common.masc_dirname) Common.upgrades_dirname
              in
              let* () = private_directory directory in
              sync_directory (Filename.dirname directory);
              let transaction = Filename.concat directory (Random_id.hex ~bytes:16) in
              Unix.mkdir transaction 0o700;
              sync_directory directory;
-             let backup_path = Filename.concat transaction "original.toml" in
+             let backup_path = Filename.concat transaction backup_original_basename in
              match write ~mode:0o600 backup_path plan.original with
              | Error _ -> Error Backup_failed
              | Ok () ->
                let manifest = Yojson.Safe.to_string (plan_to_json plan) in
                (match
-                  write ~mode:0o600 (Filename.concat transaction "manifest.json") manifest
+                  write ~mode:0o600 (Filename.concat transaction backup_manifest_basename) manifest
                 with
                 | Error _ -> Error Backup_failed
                 | Ok () ->
@@ -338,8 +342,8 @@ let load_recovery ~base_path ~backup_id =
       try
         let base_path = Unix.realpath base_path in
         let root = Filename.concat base_path Common.masc_dirname in
-        let directory = Filename.concat (Filename.concat root "upgrades") backup_id in
-        let backup_path = Filename.concat directory "original.toml" in
+        let directory = Filename.concat (Filename.concat root Common.upgrades_dirname) backup_id in
+        let backup_path = Filename.concat directory backup_original_basename in
         let read path =
           match
             Fs_compat.load_owned_regular_file_with_snapshot ~ownership_root:root path
@@ -350,7 +354,7 @@ let load_recovery ~base_path ~backup_id =
           | Ok _ | Error _ -> Error Backup_failed
         in
         let* original = read backup_path in
-        let* manifest = read (Filename.concat directory "manifest.json") in
+        let* manifest = read (Filename.concat directory backup_manifest_basename) in
         let json = Yojson.Safe.from_string manifest in
         let* path =
           match json with

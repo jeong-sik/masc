@@ -39,15 +39,80 @@ let canonical_account_key path =
   try Ok (Fs_compat.realpath path) with
   | Unix.Unix_error _ | Sys_error _ -> Error account_failure
 
-let start ~actor ~base_path ~body request reqd =
+type owner =
+  | Operator of { actor : string }
+  | Person of
+      { zone : Authz_zone.t
+      ; user_id : Authz_types.User_id.t
+      ; namespace : Authz_types.Account_home_namespace.t
+      }
+
+(* The scope of the sessions and receipts of the caller. A person is named by
+   the kind of principal and its id, so no agent name of a single-user actor
+   can be one. *)
+let actor_of = function
+  | Operator { actor } -> actor
+  | Person { user_id; _ } -> "human:" ^ Authz_types.User_id.to_string user_id
+
+let accounts_dir = "accounts"
+
+let private_child parent leaf =
+  let path = Filename.concat parent leaf in
+  (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  path
+
+(* A person's account homes go under their namespace, which the admission
+   fixed (design 4.1 and 5.4), so no other person's login reaches them. *)
+let runtime_root_of ~base_path = function
+  | Operator _ -> Ok (Common.masc_dir_from_base_path ~base_path)
+  | Person { namespace; _ } ->
+    (try
+       Ok
+         (private_child
+            (private_child (Common.masc_dir_from_base_path ~base_path) accounts_dir)
+            (Authz_types.Account_home_namespace.to_string namespace))
+     with Unix.Unix_error _ | Sys_error _ -> Error account_failure)
+
+let person_reference_refused =
+  "In multi-account mode a login makes a new account, and account_ref is not read."
+let person_antigravity_refused =
+  "Antigravity is not connected in multi-account mode: its credential is a copy in the \
+   setup registry, which has no owner."
+
+(* What a confirmed login leaves behind. An operator's account is published to
+   the setup registry, from which setup selects it. A person's account is
+   linked to them in the authorization log, and the registry, which has no
+   owner, does not hear of it. *)
+let finish owner ~base_path ~integration_id ~cli_path ~login_id home =
+  match owner with
+  | Operator _ ->
+    Client.publish ~workspace:base_path ~integration_id ~cli_path home
+    |> Result.map Option.some
+    |> Result.map_error (fun _ -> "The selected account could not be published. Retry account recovery.")
+  | Person { zone; user_id; namespace = _ } ->
+    let* provider_account_id =
+      Authz_types.Provider_account_id.of_string login_id
+      |> Result.map_error (fun _ -> account_failure) in
+    Authz_provider_account.link zone ~user_id ~provider_account_id
+    |> Result.map (fun () -> None)
+    |> Result.map_error (fun error ->
+      "The account was not linked to you: " ^ Authz_provider_account.error_to_string error)
+
+let start ~owner ~base_path ~body request reqd =
+  let actor = actor_of owner in
   let prepared =
     let* integration_id, reference = parse body in
     let* target = Server_runtime_setup_actions.login_target ~base_path ~integration_id
       |> Result.map_error Server_runtime_setup_actions.error_message in
     let Server_runtime_setup_actions.{client; cli_path; spawn_path} = target in
-    let* existing = match reference with
-      | None -> Ok None
-      | Some reference -> Runtime_setup_accounts.resolve ~workspace:base_path ~integration_id ~cli_path reference
+    let* () = match owner, client with
+      | Person _, Client.Antigravity -> Error person_antigravity_refused
+      | Person _, (Client.Codex | Claude | Muse)
+      | Operator _, (Client.Codex | Claude | Antigravity | Muse) -> Ok () in
+    let* existing = match owner, reference with
+      | (Operator _ | Person _), None -> Ok None
+      | Person _, Some _ -> Error person_reference_refused
+      | Operator _, Some reference -> Runtime_setup_accounts.resolve ~workspace:base_path ~integration_id ~cli_path reference
           |> Result.map Option.some |> Result.map_error Runtime_setup_accounts.error_message in
     Ok (integration_id, client, cli_path, spawn_path, reference, existing)
   in
@@ -63,7 +128,8 @@ let start ~actor ~base_path ~body request reqd =
     | Error message -> respond ~status:`Service_unavailable ~request reqd message; Ok ()
     | Ok account_key -> Session.with_session ~workspace:base_path ~actor ~account_key (fun session ->
       let prepared =
-        let* home = Client.prepare ~runtime_root:(Common.masc_dir_from_base_path ~base_path)
+        let* runtime_root = runtime_root_of ~base_path owner in
+        let* home = Client.prepare ~runtime_root
           ~account_id:(Session.id session) ~client ~existing in
         let* () = match client, existing with
           | Client.Antigravity, Some _ -> Ok ()
@@ -72,10 +138,11 @@ let start ~actor ~base_path ~body request reqd =
             Session.bind_account session ~account_key
             |> Result.map_error Session.error_message in
         let* child_env = Client.environment home in
-        let* reference = match client with
-          | Client.Antigravity -> Ok reference
-          | Codex | Claude | Muse -> Client.publish ~workspace:base_path ~integration_id ~cli_path home
-              |> Result.map Option.some in
+        let* reference = match owner, client with
+          | Operator _, Client.Antigravity -> Ok reference
+          | Operator _, (Codex | Claude | Muse) -> Client.publish ~workspace:base_path ~integration_id ~cli_path home
+              |> Result.map Option.some
+          | Person _, (Client.Antigravity | Codex | Claude | Muse) -> Ok None in
         let receipt = { Receipt.login_id = Session.id session; integration_id;
           account_ref = reference; status = Receipt.Running } in
         let* () = Receipt.save ~workspace:base_path ~actor receipt
@@ -147,9 +214,10 @@ let start ~actor ~base_path ~body request reqd =
                     status, Session.error_message error) in
                 let* observed = observe () |> Result.map_error (fun _ ->
                   Receipt.Failed, "The official client did not confirm the selected account. Retry login or verify the account.") in
-                let* reference = Client.publish ~workspace:base_path ~integration_id ~cli_path home
-                  |> Result.map_error (fun _ -> Receipt.Failed, "The selected account could not be published. Retry account recovery.") in
-                save { !receipt with account_ref = Some reference; status = Receipt.Complete observed }
+                let* account_ref = finish owner ~base_path ~integration_id ~cli_path
+                    ~login_id:(Session.id session) home
+                  |> Result.map_error (fun message -> Receipt.Failed, message) in
+                save { !receipt with account_ref; status = Receipt.Complete observed }
                 |> Result.map_error (fun message -> Receipt.Failed, message))
             with Eio.Cancel.Cancelled _ as exn ->
               Eio.Cancel.protect (fun () ->
@@ -187,7 +255,8 @@ let start ~actor ~base_path ~body request reqd =
      | Ok () -> ()
      | Error error -> respond ~status:(session_status error) ~request reqd (Session.error_message error))
 
-let status ~actor ~base_path request reqd =
+let status ~owner ~base_path request reqd =
+  let actor = actor_of owner in
   let path = Uri.path (Uri.of_string request.Httpun.Request.target) in
   let result = match Server_utils.extract_path_param ~prefix path with
     | None -> Error Receipt.Not_found
@@ -203,7 +272,8 @@ let status ~actor ~base_path request reqd =
     Http.Response.json_value ~request ~extra_headers:["cache-control", "no-store"]
       (Receipt.to_json receipt) reqd
 
-let control ~actor ~base_path ~body request reqd =
+let control ~owner ~base_path ~body request reqd =
+  let actor = actor_of owner in
   let path = Uri.path (Uri.of_string request.Httpun.Request.target) in
   let suffix = Server_utils.extract_path_param ~prefix path in
   let result = match suffix with

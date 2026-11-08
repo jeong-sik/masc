@@ -8,7 +8,7 @@
     uv run scripts/tinker/librarian/e_synth_audit.py cases \
         --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
         --run artifacts/tinker/librarian/eval-base-synth --baseline base \
-        --sample 30 --seed 20261109 --out artifacts/tinker/librarian/e-synth-audit
+        --sample 1000 --seed 20261109 --out artifacts/tinker/librarian/e-synth-audit
     # the judge reads <out>/judge.md and <out>/cases.jsonl, and writes <out>/decisions.jsonl
     uv run scripts/tinker/librarian/e_synth_audit.py apply \
         --requests artifacts/tinker/librarian/synth-eval/requests.jsonl \
@@ -18,14 +18,19 @@
 A synthetic request carries its label by construction, and the model that wrote
 the text can miss the kind it was asked for. `cases` picks every request whose
 baseline answer was valid and disagreed with the label, plus `--sample` of the
-rest (answers that agreed, and answers that were not valid). A case holds the
-Keeper's role material, the
-candidate claims, some memory facts in full (those the label or the answer
-refers to, the planted stale facts, and DISTRACTORS random others) and the heads
-of the other facts in the candidates' categories. A case shows neither the
-label nor the answer.
+rest (answers that agreed, and answers that were not valid). A sample at least
+as large as the rest judges every request, so label errors the baseline shares
+are found as often as the ones it disagrees with. A case holds the Keeper's
+role material, the candidate claims, FULL_FACTS memory facts in full and the
+heads of the other facts in the candidates' categories. The facts in full are
+those the label or the answer refers to and the planted stale facts, filled up
+with random others (at least MIN_DISTRACTORS), so how many there are does not
+tell the judge which ones matter. A case shows neither the label nor the answer.
 
 `apply` keeps a request only when every classification matches its label. A
+`restates` must name the label's memory: the harness scores an
+already_represented answer by that claim (eval_admission.claim_matches), so a
+candidate that restates another memory as well is ambiguous and goes. A
 non-planted fact judged `drop`, or a planted stale fact judged `keep`, means the
 memory itself is wrong, so every request on that memory goes. Labels are never
 rewritten. The misfit rate of the sample estimates the label errors left in the
@@ -45,7 +50,8 @@ import admission_validator as AV
 import eval_admission as V
 from tinker_oai import HTTP_OK, Call, call_from_row
 
-DISTRACTORS = 2
+FULL_FACTS = 7
+MIN_DISTRACTORS = 2
 HEAD = 90
 JUDGE = """# E-synth 라벨 감사 판정 기준
 
@@ -61,6 +67,7 @@ JUDGE = """# E-synth 라벨 감사 판정 기준
 - "corrects:<m>": 보이는 기억 <m>이 말하는 값·조건·결정 가운데 하나를 바꾸고, 바뀐 내용이 앞으로도 유효하다.
 - "restates:<m>": 보이는 기억 <m>(전문이나 앞부분)이 이미 같은 지식을 담는다. 날짜, PR 번호, 이름 같은 부수 정보만 다르다.
   context는 앞 90자만 보이므로, 보이는 글만으로 같은 지식임이 분명할 때만 context의 <m>을 고른다.
+  같은 지식을 담은 기억이 둘 이상이면 모두 쉼표로 적는다. 예: "restates:m3,m7".
 - "transient": 지속 지식이 아니다. 진행 중이거나 기다리는 일, 특정 PR·CI·task의 현재 상태,
   큐 길이, 깨움 시각, 턴 진행, 도구 호출, 인사.
 
@@ -136,15 +143,16 @@ def case_of(case_id: str, request: JsonObject, answer: AV.AdmissionAnswer | None
     """The judge's case and the key that `apply` checks it against."""
     facts = {cast(str, f["memory_id"]): f for f in cast(list[JsonObject], request["facts"])}
     cands, fixed = expected(request)
-    full = set(fixed) | {cast(str, c["target_memory_id"]) for c in cast(list[JsonObject], request["candidates"])
-                         if c["target_memory_id"] is not None}
+    suspects = set(fixed) | {cast(str, c["target_memory_id"]) for c in cast(list[JsonObject], request["candidates"])
+                             if c["target_memory_id"] is not None}
     if answer is not None:
         by_claim = {cast(str, f["claim"]): mid for mid, f in facts.items()}
-        full |= set(answer.dropped) | {old for old, _ in answer.revisions}
-        full |= {by_claim[j.memory_claim] for j in answer.judgments
-                 if j.memory_claim is not None and j.memory_claim in by_claim}
-    others = sorted(set(facts) - full, key=lambda m: int(m[1:]))
-    full |= set(rng.sample(others, min(DISTRACTORS, len(others))))
+        suspects |= set(answer.dropped) | {old for old, _ in answer.revisions}
+        suspects |= {by_claim[j.memory_claim] for j in answer.judgments
+                     if j.memory_claim is not None and j.memory_claim in by_claim}
+    others = sorted(set(facts) - suspects, key=lambda m: int(m[1:]))
+    fill = max(FULL_FACTS - len(suspects), MIN_DISTRACTORS)
+    full = suspects | set(rng.sample(others, min(fill, len(others))))
     categories = {cast(str, c["category"]) for c in cast(list[JsonObject], request["candidates"])}
     order = sorted(facts, key=lambda m: int(m[1:]))
     keeper = cast(JsonObject, request["keeper"])
@@ -216,10 +224,10 @@ def misfits(key: JsonObject, decision: JsonObject) -> tuple[list[str], list[str]
         verb, _, target = got.partition(":")
         if verb not in {"new", "transient", "restates", "corrects"} or (bool(target) != (verb in {"restates", "corrects"})):
             raise SystemExit(f"{case}: {ref} has an unknown classification {got!r}")
-        if target and target not in refs:
+        named = target.split(",") if verb == "restates" else [target] if target else []
+        if any(m not in refs for m in named):
             raise SystemExit(f"{case}: {ref} names {target}, which the case does not show")
-        fits = got.startswith("restates:") if want.startswith("restates:") else got == want
-        if not fits:
+        if got != want:
             request.append(f"{ref} expect {want} got {got}")
     for mid, want in want_f.items():
         got = got_f[mid]

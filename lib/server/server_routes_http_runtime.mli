@@ -50,12 +50,6 @@ val server_start_time : float
     [now - server_start_time].  Pinned as a float because the
     health renderer formats with second precision (no micro). *)
 
-val configured_http_port : unit -> int
-val configured_http_host : unit -> string
-(** Aliases over {!Env_config_core.masc_http_port_int} /
-    {!Env_config_core.masc_host}.  Each call re-reads the env
-    var, supporting tests that override mid-process. *)
-
 val advertised_host_port :
   request_authority:Server_request_authority.authority -> string * int
 (** [advertised_host_port ~request_authority] returns the

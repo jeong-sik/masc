@@ -120,6 +120,39 @@ let test_an_empty_list_keeps_the_keys_that_answer () =
         answering)
     surfaces
 
+(* The Goal list draws from a builder of its own: it puts the Candle read first
+   and leaves the generic table reading above behind. Its [~has_rows] is a
+   required argument, so the renderer cannot leave it out; this pins what it
+   takes with it. [b], [t], [p], [v], [f] and [s] act on an empty list, and [f]
+   is how a filter that left no Goal is undone. *)
+let goal_list_needing =
+  [ "z"; "j/k"; "Right / Enter"; "Y"; "/"; "n / N"; "PgUp/PgDn"; "Home/End" ]
+
+let goal_list_answering = [ "b"; "t"; "p"; "v"; "f"; "s"; "Esc"; "r"; "q" ]
+
+let test_an_empty_goal_list_names_no_key_that_needs_a_row () =
+  check bool "Goals has a key that needs a row" true
+    (Keys.has_row_scoped_keys T.Planning);
+  let empty = Keys.footer_hints_planning_goal_list ~has_rows:false in
+  List.iter
+    (fun key ->
+      check bool ("Goals empty list does not name " ^ key) false
+        (names_item empty key))
+    goal_list_needing;
+  List.iter
+    (fun key ->
+      check bool ("Goals empty list still names " ^ key) true
+        (names_item empty key))
+    goal_list_answering
+
+let test_a_goal_list_with_a_row_names_every_key () =
+  let full = Keys.footer_hints_planning_goal_list ~has_rows:true in
+  List.iter
+    (fun key ->
+      check bool ("Goals list with a row names " ^ key) true
+        (names_item full key))
+    (goal_list_needing @ goal_list_answering)
+
 let () =
   run "tui footer row need"
     [ ( "table",
@@ -133,5 +166,9 @@ let () =
             test_a_caller_that_names_no_rows_keeps_every_key
         ; test_case "an empty list keeps the keys that answer" `Quick
             test_an_empty_list_keeps_the_keys_that_answer
+        ; test_case "an empty goal list names no key that needs a row" `Quick
+            test_an_empty_goal_list_names_no_key_that_needs_a_row
+        ; test_case "a goal list with a row names every key" `Quick
+            test_a_goal_list_with_a_row_names_every_key
         ] )
     ]

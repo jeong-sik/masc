@@ -129,8 +129,10 @@ val goal_candle_refresh_key : string
 val keeper_navigation_hints : string
 (** Keys while the Keeper navigator opened with Left holds focus. *)
 
-val footer_hints_planning_goal_list : string
-(** The Goal list offers a direct route to its selected Candle record. *)
+val footer_hints_planning_goal_list : has_rows:bool -> string
+(** The Goal list offers a direct route to its selected Candle record.
+    [has_rows] is whether the list on screen holds a Goal: with none, the
+    keys that read the Goal under the cursor are left out. *)
 
 val footer_hints_planning_goal_detail : string
 (** The Goal detail has a separate Candle read key: its [r] may mean Resume. *)

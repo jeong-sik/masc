@@ -24,7 +24,6 @@ module Tempo = Tempo
 module Auth = Auth
 module Board = Board
 module Board_dispatch = Board_dispatch
-module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 module Progress = Progress
 module Sse = Sse
 module Safe_ops = Safe_ops
@@ -39,40 +38,7 @@ let mcp_protocol_version_default =
 
 let default_base_path = Server_mcp_transport_http.default_base_path
 
-let is_valid_protocol_version =
-  Server_mcp_transport_http.is_valid_protocol_version
-
-let remember_protocol_version =
-  Server_mcp_transport_http.remember_protocol_version
-
-let remember_protocol_version_if_initialize_succeeded =
-  Server_mcp_transport_http.remember_protocol_version_if_initialize_succeeded
-
-let remember_mcp_profile = Server_mcp_transport_http.remember_mcp_profile
-
-let forget_mcp_session = Server_mcp_transport_http.forget_mcp_session
-
-let validate_mcp_session_profile =
-  Server_mcp_transport_http.validate_mcp_session_profile
-
-let validate_mcp_session_delete_profile =
-  Server_mcp_transport_http.validate_mcp_session_delete_profile
-
-let protocol_version_from_body =
-  Server_mcp_transport_http.protocol_version_from_body
-
-let get_session_id_query = Server_mcp_transport_http.get_session_id_query
-
-let get_header_any_case = Server_mcp_transport_http.get_header_any_case
-
 let get_cookie_value = Server_mcp_transport_http.get_cookie_value
-
-let get_session_id_any = Server_mcp_transport_http.get_session_id_any
-
-let get_protocol_version = Server_mcp_transport_http.get_protocol_version
-
-let get_protocol_version_for_session =
-  Server_mcp_transport_http.get_protocol_version_for_session
 
 let current_server_state_opt () = current_server_state ()
 
@@ -97,17 +63,6 @@ let validate_origin ~request_authority (request : Httpun.Request.t) =
   | Multiple_origins
   | Malformed_origin ->
     false
-
-(** Check if client accepts SSE *)
-(** Check if client accepts MCP Streamable HTTP (JSON + SSE) *)
-let accepts_streamable_mcp (request : Httpun.Request.t) =
-  Http_negotiation.accepts_streamable_mcp
-    (Httpun.Headers.get request.headers "accept")
-
-let request_force_json_response =
-  Server_mcp_transport_http.request_force_json_response
-
-let force_json_response = Server_mcp_transport_http.force_json_response
 
 let mcp_transport_http_deps () : Server_mcp_transport_http.deps =
   {
@@ -189,12 +144,7 @@ let mcp_headers = Server_mcp_transport_http.mcp_headers
 
 let json_headers = mcp_transport_json_headers
 
-let check_sse_connect_guard = Server_mcp_transport_http.check_sse_connect_guard
-
 let stop_sse_session = Server_mcp_transport_http.stop_sse_session
-
-let close_all_sse_connections =
-  Server_mcp_transport_http.close_all_sse_connections
 
 let handle_get_mcp ?(profile = Server_mcp_transport_http.Full) ?sse_kind
     request reqd =

@@ -7,4 +7,4 @@
 (executable
  (name test_keeper_event_genealogy_capture)
  (modules test_keeper_event_genealogy_capture)
- (libraries masc_test_deps exact_output_fixture masc masc.runtime masc.masc_eio_context agent_core eio_main))
+ (libraries masc_test_deps exact_output_fixture masc masc.runtime masc.masc_eio_context eio_main))

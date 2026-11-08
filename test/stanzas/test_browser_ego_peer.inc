@@ -7,7 +7,7 @@
 (test
  (name test_browser_ego_input_release)
  (modules test_browser_ego_input_release)
- (libraries masc masc.browser_lane alcotest yojson))
+ (libraries masc alcotest))
 
 (rule
  (alias runtest-test_browser_ego_target)

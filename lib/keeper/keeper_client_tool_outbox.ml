@@ -475,8 +475,9 @@ let carrier_reprojection carrier ~then_ ~refusal =
   | Ok Keeper_memory_delivery_reprojection.Reprojected as reduced -> reduced
   | Ok Unchanged -> then_ ~refusal
 
-(* The load stays inside the run's first attempt, where a failed load already
-   settles the claimed turn; a run's attempts follow one another. *)
+(* Each attempt calls [run_carrier_load] where it loaded the outbox before, so
+   a failed load still ends that attempt with the same error; a run's
+   attempts follow one another. *)
 type run_carrier =
   { run_base_path : string
   ; run_keeper_name : string

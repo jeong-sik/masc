@@ -544,13 +544,13 @@ let recovery_failure_of_client_error = function
 
 (* A Gate continuation may only resume the session it was captured in. When
    that session refuses the resume as a context overflow, the vendor's own
-   conversation is taken as full: the resume prompt is the same at every masc
-   capacity, and no fresh start may carry the continuation. Retained receipts
-   in the resume prompt can be what overflows instead; that case is recorded
-   the same way (RFC retained-results-carrier-shrinks-to-an-address §5.4).
-   That is not an input rejection an operator can retry -- [Retry_previous]
-   would send into the same full session -- so it is recorded
-   [Vendor_session_full]: the continuation
+   conversation is taken as full: shrinking history does not change the
+   resume prompt, and no fresh start may carry the continuation. Retained
+   receipts in the resume prompt can be what overflows instead; that case is
+   recorded the same way (RFC retained-results-carrier-shrinks-to-an-address
+   §5.4). That is not an input rejection an operator can retry --
+   [Retry_previous] would send into the same full session -- so it is
+   recorded [Vendor_session_full]: the continuation
    ends for good ({!Keeper_direct_gate_continuation.session_full} reads it) and
    the next ordinary turn supersedes it with a fresh session. Whether a
    response or tool effect was observed first is kept in the record. *)
@@ -1547,12 +1547,13 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
               | Runtime_claude_code.Process_exited _
               | Runtime_claude_code.Unhandled_exception _
               | Runtime_claude_code.Timeout _ ) as error) ->
-           (* A resumed session is refused on the vendor's own conversation,
-              which a smaller masc range does not change: the resume prompt is
-              the same at every capacity. The retry is therefore a fresh start
-              carrying the shrunk range, or the retained-result carrier in the
-              address form the capacity-refusal hook switched it to. A Gate
-              continuation forbids that fresh start --
+           (* A refused Resume sends the vendor's own conversation and the
+              resume prompt, and shrinking history changes neither: the
+              overflow is that conversation, or retained receipts in the
+              resume prompt. The retry is therefore a fresh start, carrying
+              the range of its capacity and the retained-result carrier in the
+              form the capacity-refusal hook left it. A Gate continuation
+              forbids that fresh start --
               it must stay in its original session -- so that turn ends on the
               typed overflow instead of respawning the same refused input. *)
            context_overflow_retry_safe :=
@@ -1774,9 +1775,9 @@ let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal 
   let observed_floor_capacity_bytes = ref None in
   let context_overflow_retry_safe = ref false in
   (* Whether this run's [tools] include keeper_artifact_read. A turn hook
-     that sets [tool_choice] to [None_] sends one request with no tools
-     ({!Host.prepare_turn}); that request cannot call a receipt's tool again
-     either. *)
+     that sets [tool_choice] to [None_] drops these tools from one request
+     ({!Host.prepare_turn}); that request then names a reader it does not
+     offer, and offers none of the run's tools to call again. *)
   let retained_results =
     Keeper_client_tool_outbox.run_carrier ~base_path ~keeper_name
       ~artifact_reader_available:

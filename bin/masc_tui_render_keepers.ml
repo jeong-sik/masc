@@ -507,8 +507,10 @@ let render_attempt_chain ~max_cells (attempts : Masc_tui_keeper_trail.attempt li
         let chain = prefix ^ String.concat sep fitted in
         Some (Theme.warn () ^ chain ^ Ansi.reset)
 
-(* The cells the detail keeps beside the attempt chain, after the separator. *)
-let attempt_detail_floor_cells = 10
+(* The columns the DETAIL text keeps. The attempt chain leaves them after its
+   separator, and the axis cells on the right leave them before the first
+   cell. *)
+let detail_floor_cells = 10
 
 let style_axis_cell (cell : Masc_tui_keeper_axis_cell.t) =
   let style =
@@ -529,27 +531,26 @@ let keeper_secondary_row_content ?now ?(cells = []) ~inner (row : Keeper_list_mo
     | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
   in
   let attempts = Masc_tui_keeper_trail.attempts_of_runtime runtime in
-  let rec fit_cells acc_rev width_used = function
-    | [] -> List.rev acc_rev, width_used
-    | (cell : Masc_tui_keeper_axis_cell.t) :: rest ->
-        let cell_w = Message_layout.display_width cell.text in
-        let additional = if acc_rev = [] then cell_w else cell_w + 2 in
-        if width_used + additional <= available then
-          fit_cells (cell :: acc_rev) (width_used + additional) rest
-        else
-          List.rev acc_rev, width_used
-  in
-  let fitting_cells, cells_width = fit_cells [] 0 cells in
-  let detail_space =
-    if cells_width > 0 then max 0 (available - cells_width - 1)
-    else available
-  in
   let detail =
     match keeper_detail_text ?now row with
     | "" -> Masc_tui_theme.Glyph.no_value
     | text -> text
   in
   let has_detail = not (String.equal detail Masc_tui_theme.Glyph.no_value) in
+  (* A row with DETAIL text leaves it a floor of columns before the cells on
+     the right take theirs. The cells that do not fit are the last ones. *)
+  let { Masc_tui_keeper_axis_cell.drawn = fitting_cells
+      ; cells_width
+      ; left_width = detail_space
+      }
+    =
+    Masc_tui_keeper_axis_cell.fit
+      ~available
+      ~detail_floor:(if has_detail then Some detail_floor_cells else None)
+      ~width:(fun (cell : Masc_tui_keeper_axis_cell.t) ->
+        Message_layout.display_width cell.text)
+      cells
+  in
   let sep = "  ·  " in
   let sep_cells = Message_layout.display_width sep in
   (* The chain drops its older attempts to leave the detail a floor of cells.
@@ -559,7 +560,7 @@ let keeper_secondary_row_content ?now ?(cells = []) ~inner (row : Keeper_list_mo
     let beside_detail =
       if has_detail then
         render_attempt_chain
-          ~max_cells:(detail_space - sep_cells - attempt_detail_floor_cells)
+          ~max_cells:(detail_space - sep_cells - detail_floor_cells)
           attempts
       else None
     in
@@ -579,7 +580,7 @@ let keeper_secondary_row_content ?now ?(cells = []) ~inner (row : Keeper_list_mo
     | [] -> ""
     | cs ->
         let styled = List.map style_axis_cell cs in
-        String.concat "  " styled
+        String.concat Masc_tui_keeper_axis_cell.separator styled
   in
   let body =
     if right_text = "" then left_text

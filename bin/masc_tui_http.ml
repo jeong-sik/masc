@@ -3948,6 +3948,13 @@ let fetch_keeper_memory_health_row ~(host : string) ~(port : int) ~(keeper : str
   get_json ~host ~port
     ~path:("/api/v1/dashboard/keeper-memory-health?keeper=" ^ percent_encode_query_value keeper)
 
+(** Fetch /api/v1/dashboard/workspace-memory-inventory: the curator's ledger
+    counts and the briefing's state, one object for the workspace (RFC-0511
+    W3). The server answers from a 60 s cache. *)
+let fetch_workspace_memory_inventory ~(host : string) ~(port : int) :
+    (Yojson.Safe.t, string) result =
+  get_json ~host ~port ~path:"/api/v1/dashboard/workspace-memory-inventory"
+
 (** Fetch what one keeper remembers, fact by fact
     ([GET /api/v1/keepers/:name/memory-facts]): the ordinary and
     source-bound stores, each answered independently. *)

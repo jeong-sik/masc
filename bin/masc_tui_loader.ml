@@ -1569,6 +1569,14 @@ let load_memory_health_row ~(host : string) ~(port : int) ~(keeper : string) :
   | Error err -> Error ("memory health row load failed: " ^ err)
   | Ok json -> Masc.Tui_decode_memory_health.decode_memory_health_row ~keeper json
 
+(** The workspace memory world (RFC-0511 D2c). The answer is one small object,
+    so it is decoded where it is read and not handed to the decode domain. *)
+let load_memory_world ~(host : string) ~(port : int) :
+    (Masc.Tui_decode_workspace_memory.inventory, string) result =
+  match fetch_workspace_memory_inventory ~host ~port with
+  | Error err -> Error ("memory world load failed: " ^ err)
+  | Ok json -> Masc.Tui_decode_workspace_memory.decode_inventory json
+
 let memo_memory_facts = json_memo ()
 
 (** Load one keeper's remembered facts, both stores. *)

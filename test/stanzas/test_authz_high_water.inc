@@ -9,4 +9,4 @@
 (test
  (name test_authz_high_water)
  (modules test_authz_high_water)
- (libraries masc_test_deps masc.agent_core.digest))
+ (libraries masc_test_deps))

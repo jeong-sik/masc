@@ -30,6 +30,42 @@ type delivery =
     }
   | Durable_queue_failed of { keeper_name : string; detail : string }
 
+let producer_keeper
+      ~(config : Workspace_utils_backend_setup.config)
+      ~producer
+      ~task_id
+  =
+  match Keeper_producer_route.resolve ~config producer with
+  | Error detail ->
+    Error (Producer_identity_lookup_failed { producer; task_id; detail })
+  | Ok Keeper_producer_route.No_keeper ->
+    Error (Unroutable_producer { producer; task_id })
+  | Ok (Keeper_producer_route.Keeper keeper_name) -> Ok keeper_name
+;;
+
+let wake_producer_keeper
+      ~notify
+      ~(config : Workspace_utils_backend_setup.config)
+      ~keeper_name
+  =
+  try
+    notify ();
+    match
+      Keeper_registry.wakeup_running
+        ~intent:Keeper_registry.Reactive_signal
+        ~base_path:config.base_path
+        keeper_name
+    with
+    | Keeper_registry.Signaled -> Signaled { keeper_name }
+    | ( Keeper_registry.Deferred_unregistered
+      | Keeper_registry.Deferred_not_running _
+      | Keeper_registry.Deferred_lifecycle _ ) as wakeup ->
+      Durable_deferred { keeper_name; wakeup }
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Durable_wake_failed { keeper_name; detail = Printexc.to_string exn }
+;;
+
 let wake_approved_producer
       ~(config : Workspace_utils_backend_setup.config)
       ~producer
@@ -37,12 +73,9 @@ let wake_approved_producer
       ~verification_id
       ~authority
   =
-  match Keeper_producer_route.resolve ~config producer with
-  | Error detail ->
-    Producer_identity_lookup_failed { producer; task_id; detail }
-  | Ok Keeper_producer_route.No_keeper ->
-    Unroutable_producer { producer; task_id }
-  | Ok (Keeper_producer_route.Keeper keeper_name) ->
+  match producer_keeper ~config ~producer ~task_id with
+  | Error delivery -> delivery
+  | Ok keeper_name ->
     let outcome : Keeper_event_queue.task_outcome =
       { to_task_id = task_id
       ; to_verification_id = verification_id
@@ -71,20 +104,4 @@ let wake_approved_producer
           and the producer's projection already cleared, so a queued row
           behind a long Board backlog would deliver the news to a Keeper that
           has moved on without knowing why. *)
-       (try
-          match
-            Keeper_registry.wakeup_running
-              ~intent:Keeper_registry.Reactive_signal
-              ~base_path:config.base_path
-              keeper_name
-          with
-          | Signaled -> Signaled { keeper_name }
-          | ( Deferred_unregistered
-            | Deferred_not_running _
-            | Deferred_lifecycle _ ) as wakeup ->
-            Durable_deferred { keeper_name; wakeup }
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          Durable_wake_failed
-            { keeper_name; detail = Printexc.to_string exn }))
+       wake_producer_keeper ~notify:ignore ~config ~keeper_name)

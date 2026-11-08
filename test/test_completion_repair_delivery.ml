@@ -5,6 +5,7 @@ module D = Masc_domain
 module W = Workspace_core
 module Outbox = Workspace_task_rejection_outbox
 module Wake = Masc.Completion_authority_wakeup
+module Task_wake = Masc.Keeper_task_outcome_wake
 module Queue = Keeper_event_queue_persistence
 
 let () = Mirage_crypto_rng_unix.use_default ()
@@ -370,10 +371,12 @@ let test_an_undecodable_meta_that_appears_before_the_lock_keeps_the_task () =
        Wake.wake_rejected_producer ~config ~producer ~task_id ~verification_id
          ~reason ~authority:system
      with
-     | Wake.Unroutable_producer _ -> ()
+     | Wake.Delivery (Task_wake.Unroutable_producer _) -> ()
      | Wake.Rejection_superseded _ -> Alcotest.fail "current rejection was superseded"
-     | Wake.Signaled _ | Wake.Durable_deferred _ | Wake.Durable_wake_failed _
-     | Wake.Producer_identity_lookup_failed _ | Wake.Durable_queue_failed _ ->
+     | Wake.Delivery
+         ( Task_wake.Signaled _ | Task_wake.Durable_deferred _
+         | Task_wake.Durable_wake_failed _ | Task_wake.Producer_identity_lookup_failed _
+         | Task_wake.Durable_queue_failed _ ) ->
        Alcotest.fail "the first routing read must find no Keeper");
     let meta_path = Masc.Keeper_types_profile.keeper_meta_path config producer in
     Fs_compat.mkdir_p (Filename.dirname meta_path);
@@ -532,10 +535,13 @@ let test_enqueue_before_ack_is_idempotent () =
     (* Simulate a process stopping after durable enqueue and before outbox ack. *)
     (match Wake.wake_rejected_producer ~config ~producer ~task_id ~verification_id
              ~reason ~authority:system with
-     | Wake.Signaled _ | Wake.Durable_deferred _ | Wake.Durable_wake_failed _ -> ()
+     | Wake.Delivery
+         ( Task_wake.Signaled _ | Task_wake.Durable_deferred _
+         | Task_wake.Durable_wake_failed _ ) -> ()
      | Wake.Rejection_superseded _ -> Alcotest.fail "current rejection was superseded"
-     | Wake.Unroutable_producer _ | Wake.Producer_identity_lookup_failed _
-     | Wake.Durable_queue_failed _ ->
+     | Wake.Delivery
+         ( Task_wake.Unroutable_producer _ | Task_wake.Producer_identity_lookup_failed _
+         | Task_wake.Durable_queue_failed _ ) ->
        Alcotest.fail "fixture failed to durably enqueue rejection");
     check_pending config 1;
     check_rejection config ~verification_id ~authority:system;
@@ -708,9 +714,11 @@ let expect_superseded ~verification_id = function
   | Wake.Rejection_superseded {task_id=actual_task;verification_id=actual_verification} ->
     Alcotest.(check string) "superseded task" task_id actual_task;
     Alcotest.(check string) "superseded verification" verification_id actual_verification
-  | Wake.Signaled _ | Wake.Durable_deferred _ | Wake.Durable_wake_failed _
-  | Wake.Unroutable_producer _ | Wake.Producer_identity_lookup_failed _
-  | Wake.Durable_queue_failed _ -> Alcotest.fail "old rejection still owned delivery"
+  | Wake.Delivery
+      ( Task_wake.Signaled _ | Task_wake.Durable_deferred _ | Task_wake.Durable_wake_failed _
+      | Task_wake.Unroutable_producer _ | Task_wake.Producer_identity_lookup_failed _
+      | Task_wake.Durable_queue_failed _ ) ->
+    Alcotest.fail "old rejection still owned delivery"
 
 let test_snapshot_before_resubmit_cannot_enqueue () =
   with_workspace (fun config ->
@@ -805,9 +813,13 @@ let test_corrupt_primary_blocks_wake_without_changing_queue () =
     commit config ~authority:system ~verification_id (D.Verdict_rejected {reason});
     (match Wake.wake_rejected_producer ~config ~producer ~task_id ~verification_id
        ~reason ~authority:system with
-     | Wake.Signaled _ | Wake.Durable_deferred _ | Wake.Durable_wake_failed _ -> ()
-     | Wake.Rejection_superseded _ | Wake.Unroutable_producer _
-     | Wake.Producer_identity_lookup_failed _ | Wake.Durable_queue_failed _ ->
+     | Wake.Delivery
+         ( Task_wake.Signaled _ | Task_wake.Durable_deferred _
+         | Task_wake.Durable_wake_failed _ ) -> ()
+     | Wake.Rejection_superseded _
+     | Wake.Delivery
+         ( Task_wake.Unroutable_producer _ | Task_wake.Producer_identity_lookup_failed _
+         | Task_wake.Durable_queue_failed _ ) ->
        Alcotest.fail "fixture did not enqueue the current rejection");
     check_pending config 1;
     let queue_path = snapshot_path config in
@@ -818,10 +830,11 @@ let test_corrupt_primary_blocks_wake_without_changing_queue () =
     Out_channel.with_open_text backlog_path (fun out -> output_string out corrupt);
     (match Wake.wake_rejected_producer ~config ~producer ~task_id ~verification_id
        ~reason ~authority:system with
-     | Wake.Durable_queue_failed _ -> ()
-     | Wake.Signaled _ | Wake.Durable_deferred _ | Wake.Durable_wake_failed _
-     | Wake.Rejection_superseded _ | Wake.Unroutable_producer _
-     | Wake.Producer_identity_lookup_failed _ ->
+     | Wake.Delivery (Task_wake.Durable_queue_failed _) -> ()
+     | Wake.Rejection_superseded _
+     | Wake.Delivery
+         ( Task_wake.Signaled _ | Task_wake.Durable_deferred _ | Task_wake.Durable_wake_failed _
+         | Task_wake.Unroutable_producer _ | Task_wake.Producer_identity_lookup_failed _ ) ->
        Alcotest.fail "wake accepted a recovered or corrupt primary backlog");
     Alcotest.(check bool) "standing never trusts recovered primary" true
       (Result.is_error (standing config ~verification_id ~authority:system));

@@ -3273,7 +3273,6 @@
 (include stanzas/test_runtime_config_commit_announce.inc)
 (include stanzas/test_gate_change_notify.inc)
 (include stanzas/test_keeper_event_queue_announce.inc)
-(include stanzas/test_keeper_metrics_appended_announce.inc)
 
 (include stanzas/test_keeper_approval_queue.inc)
 

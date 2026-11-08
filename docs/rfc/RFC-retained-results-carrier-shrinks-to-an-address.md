@@ -29,7 +29,7 @@ run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은
 
 - 고정부(system prompt, 도구, 목표)와 `By_address` 묶음이 창에 들어가면, 효과 전에 온 크기 거절로 그 Keeper가 floor에서 잠기지 않는다(`Bootstrap_floor_exceeded`). receipt 개수와 상관없다.
 - 넘친 턴은 같은 턴 안에서 사람 손 없이 다시 보내진다. 그 턴의 `Completed`가 receipt를 지운다.
-- 모델은 무엇이 이미 실행됐는지 안다. 「효과를 반복하지 말라」는 안내는 두 꼴 모두에 있다.
+- 모델은 호출 몇 개가 이미 결과를 돌려줬는지 안다. reader가 있으면 그 결과도 읽는다. 「끝난 효과를 반복하지 말라」는 안내는 두 꼴 모두에 있다.
 - 효과 뒤에 턴 안에서 넘치는 경우(`Effect_fenced`)는 지금처럼 운영자 몫이다(§9).
 
 ## 2. 일어난 일
@@ -108,13 +108,15 @@ run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은
 글은 다음 순서다.
 
 1. 지금 prefix. receipt를 도구 데이터로 다루고, 끝난 효과를 반복하지 말라는 안내다.
-2. 「이 요청은 receipt N개를 주소로 싣는다. 하나하나가 이미 돌아온 호출이고, 효과가 있었다면 이미 일어났다. 반복하지 않는다.」
+2. 「이 요청은 receipt N개를 주소로 싣는다. 하나하나 결과가 이미 돌아왔고, 실패나 실행 전 거절일 수 있다.」
+   - receipt에는 실패와 실행 전 거절도 있다. 그래서 「반복하지 말라」는 끝난 효과에만 건다. 그 말은 1의 prefix에 있다.
+   - 이 줄이 모든 호출을 반복하지 말라고 하면, 주소 꼴에서는 실패한 호출도 다시 부르지 못한다. 모델이 어느 호출이 실패했는지 가르지 못하기 때문이다.
 3. 도구별 개수. snapshot에서 처음 나온 순서를 지킨 JSON 객체다.
 4. 「개수로는 어느 호출이 무엇을 했는지 알 수 없다.」
 5. blob marker 한 줄(`[masc:blob sha256=… bytes=… mime=text/plain preview="…"]`).
 6. 읽는 법
    - 요청 도구 목록에 `keeper_artifact_read`가 있으면, 위 도구를 다시 부르기 전에 그 sha256으로 읽고 `next_offset`을 따라가라고 적는다. 읽는 글은 이 요청이 `Inline`으로 실었을 글이라고 적는다.
-   - 없으면 「이 요청에는 reader가 없어 receipt를 읽을 수 없다」고 적는다(§6.2).
+   - 없으면 「이 요청에는 reader가 없어 receipt를 읽을 수 없다. 위 도구를 다시 부르기 전에 지금 상태를 본다」고 적는다(§6.2).
 
 blob은 하나다. 바이트는 `Inline` 글 그대로다.
 
@@ -209,13 +211,13 @@ blob은 하나다. 바이트는 `Inline` 글 그대로다.
 
 - 바꾸지 않는다. 모든 receipt가 늘 한 꼴로 실린다. 그래서 「load한 snapshot을 지운다」가 「실린 것을 지운다」와 같다.
 - `By_address`에서 모델이 blob을 읽지 않고 턴을 끝낼 수 있다. 그래도 `Completed`면 receipt를 지운다.
-  - 실린 것은 「호출 N개가 실행됐다」는 사실과 주소다.
+  - 실린 것은 「호출 N개가 결과를 돌려줬다」는 사실과 주소다.
   - 결과 바이트는 blob에 남는다(§4.3).
 
 ### 6.2 reader가 없는 요청
 
 - 그래도 `By_address`로 바꾼다. 교착을 막는 쪽을 먼저 지킨다.
-- 글에 「이 요청에는 reader가 없어 receipt를 읽을 수 없다」고 적는다. 모델은 호출 수와 도구별 개수만 본다.
+- 글에 「이 요청에는 reader가 없어 receipt를 읽을 수 없다. 위 도구를 다시 부르기 전에 지금 상태를 본다」고 적는다. 모델은 호출 수와 도구별 개수만 본다.
 - memory recall은 reader가 없으면 inline으로 돌아간다. receipt 묶음은 길이를 묶는 곳이 없어서 그렇게 하지 않는다.
 - 11-07 17:55 KST에 마지막 프롬프트가 남은 Keeper 36명은 모두 `keeper_artifact_read`를 받고 있었다(#49698).
 
@@ -231,13 +233,21 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
 
 **닿지 않는 경로** (이슈로 남긴다. §12의 4)
 
-- Codex `thread/inject_items` 거절
-  - 묶음은 `turn/start` 전에 `thread/inject_items`로 들어가 developer item이 된다(`runtime_codex_app_server.ml:2655-2671`).
-  - typed 크기 거절은 `turn/start`만 본다(`runtime_codex_app_server.ml:447-449`).
-  - inject가 거절되면 `ProviderReportedError`가 되고(`keeper_codex_runtime.ml:729-740`), `Protocol_failed`로 기록된다(`:826-828`).
-  - 그러면 hook이 불리지 않는다. 다음 `plan_claim`은 fresh plan을 내고, run마다 같은 `Inline`을 다시 보내 실패한다. 잠기지는 않지만 나아가지도 않는다.
-  - Codex는 문자열 하나가 10,485,760자를 넘으면 거절한다(RFC-official-client-conversation-in-masc §2.5, #37353). 그 거절이 어떤 꼴로 오는지는 재지 않았다.
-  - PR B는 이것부터 잰다. 크기 거절이면 parse 경계에서 typed로 만든다.
+- Codex에서 10,485,760자를 넘는 `Inline` 묶음
+  - 묶음은 `turn/start` 전에 `thread/inject_items`로 들어가 developer item **하나**가 된다(`keeper_codex_runtime.ml:1264-1266`, `runtime_codex_app_server.ml:2655-2671`).
+  - upstream은 문자열 하나가 10,485,760자를 넘으면 `string_above_max_length`로 거절한다(RFC-official-client-conversation-in-masc §2.5, #37353).
+  - #37353(codex 0.155.1)에서 이 거절은 `codexErrorInfo=other`로 왔다. 그래서 `Turn_failed`가 되고 `Provider_rejected`로 기록된다(`keeper_codex_runtime.ml:830-831`).
+  - codex-cli 0.167.0의 app-server schema(`codex app-server generate-json-schema`)를 11-08에 봤다.
+    - `ThreadInjectItemsParams.items`는 길이 제한 없는 raw JSON이다.
+    - `CodexErrorInfo`에는 문자열 길이를 뜻하는 값이 없다.
+    - app-server가 typed로 주는 글자 한도(`input_too_large`)는 `turn/start` 입력에만 있다(`keeper_codex_runtime.ml:711-720`).
+  - 그래서 hook이 불리지 않는다. run마다 같은 `Inline`을 다시 보내 같은 거절을 받는다. 11-07 첫 사고 묶음(12,154,908자)이 Codex였다면 이 경로였다.
+  - 그보다 작은 묶음이 창을 넘으면 `turn/start`의 `contextWindowExceeded`로 와서 hook에 닿는다.
+  - 실제 턴으로 재지는 않았다. 근거는 schema와 #37353이고, 신뢰도는 Medium이다.
+  - 구조 해결은 이슈로 남긴다(§12의 4).
+    - receipt마다 developer item을 나누면 item 하나가 상한에 닿기 어렵다. 전체가 넘치면 typed 거절이 된다.
+    - provider 문자열 상한을 넘는 `Inline`은 처음부터 `By_address`로 보낸다.
+    - 둘 다 Codex 전송 모양을 바꾸니 이 RFC 범위 밖이다.
 - agent_core의 문장만 있는 400
   - 지금까지 잰 live 크기 거절은 모두 typed 이유 없이 문장만 있는 400이다(`keeper_turn_driver_try_provider.ml:3112-3118`).
   - `is_size_refusal`은 이런 거절을 크기 거절로 보지 않는다(`:2988-2999`). 그래서 hook에 닿지 않는다.
@@ -252,7 +262,7 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
 - 옛 모양 receipt의 그림 base64와 Codex receipt의 data URL은 #49665가 이미 묶음 글에서 뺀다. 이 RFC가 할 일은 아니다.
 - 옛 모양 receipt의 긴 글 본문은 `Inline`에 그대로 실린다. 넘쳐서 꼴이 바뀌면 `Inline` 글이 통째로 blob으로 가니, 변환 없이 주소로 간다.
 - 들어갈 때는 지금처럼 `Inline`으로 간다. #49697(Codex receipt 파일이 data URL을 담는 것)은 파일 크기 문제로 그대로 남는다.
-- `By_address` 글은 도구 종류 수와 개수 자릿수로만 길어진다. receipt 개수로는 Codex 문자열 상한에 닿지 않는다. `Inline`이 그 상한을 넘을 때의 거절은 아직 typed가 아니다(§7).
+- `By_address` 글은 도구 종류 수, 개수 자릿수, reader 여부로만 길이가 달라진다. receipt 개수로는 Codex 문자열 상한에 닿지 않는다. `Inline`이 그 상한을 넘을 때의 거절은 typed가 아니다(§7).
 
 ## 9. 남는 대가
 
@@ -268,11 +278,15 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
   - 풀린 뒤 다음 run도 `Inline`으로 시작한다. 그래서 첫 요청이 들어가는 동안은 되풀이될 수 있다.
   - §11의 7(꼴 기억)이 효과 뒤 넘침에서도 배우게 하면, 다음 run을 `By_address`로 시작할 수 있다.
 - Resume이 `Inline`으로 넘치면 vendor 세션을 버린다(§5.3). receipt가 남아 있는 동안 Resume 턴마다 되풀이될 수 있다.
-- Codex inject 거절과 agent_core의 문장만 있는 400에서는 꼴이 바뀌지 않는다(§7).
+- Codex의 10,485,760자 초과 묶음과 agent_core의 문장만 있는 400에서는 꼴이 바뀌지 않는다(§7).
+- blob 쓰기가 실패하면 묶음 쪽은 `Error`를 돌려주고 `then_`을 부르지 않는다(§5.1).
+  - receipt가 있는 run은 크기 거절을 받으면 history를 줄여 보지 않고 끝난다. 묶음이 작고 history가 넘친 경우도 그렇다.
+  - agent_core에서는 그 run의 다른 다시 보내기(turn boundary resend, demotion)도 막힌다. `memory_capacity_retry_sequence`가 `Error`에 `on_projection_failure`를 부르기 때문이다(`keeper_turn_driver_try_provider.ml:3320-3330`).
+  - blob 저장소가 고장 나면 큰 도구 결과와 그림 저장도 같이 실패한다. 그래서 묶음만 따로 살리는 길은 두지 않는다.
 - Gate continuation이 묶음 때문에 넘치면 `Vendor_session_full`로 잘못 기록된다(§5.4).
 - Completion review 요청은 같은 run에서 다시 보내지 않는다(`keeper_claude_code_runtime.ml:1768`, `keeper_codex_runtime.ml:2112`). 그래도 묶음 때문에 넘치지는 않는다. review는 Keeper가 아닌 임시 base path에서 돌아서(`lib/workspace_metric_hooks.ml:369-394`) 그 Keeper의 receipt를 싣지 않는다.
 - ACK된 뒤의 blob은 배포 때 오프라인 검사 두 번이 지나면 지워질 수 있다. 그 뒤에 vendor 대화에 남은 주소로 읽으면 실패한다.
-- reader가 없는 요청은 호출 수와 도구별 개수만 본다.
+- reader가 없는 요청은 호출 수와 도구별 개수만 본다. 어느 호출이 실패했는지 모르니, 다시 부르기 전에 지금 상태를 보라는 안내만 받는다.
 - hook이 꼴을 바꿀 때 blob 하나를 쓰고 파일과 부모 폴더를 fsync한다. 크기는 `Inline` 글과 같다. 11-07 첫 번째 사고라면 약 12 MB다. 비용은 재지 않았다.
 - 호출 하나를 찾으려면 blob을 앞에서부터 나눠 읽어야 한다. receipt마다 따로 읽는 꼴은 버렸다(§11의 9).
 - 이 RFC가 배포되기 전에는 #49698이 receipt 하나를 흉내 값 기준 약 36분의 1로 줄인다. 그 사이 다시 잠기면 11-07처럼 receipt를 옮긴다.
@@ -349,7 +363,7 @@ TLC 1.8.0(로컬, `-workers 1`) 결과는 이렇다.
 
 ## 12. 시험과 구현 순서
 
-시험은 각 PR의 첫 커밋에 넣고, 그 뒤로 고치지 않는다. 로컬 Dune 빌드는 하지 않는다. PR마다 type-check와 leader CI 시험 결과를 본다.
+시험은 각 PR의 첫 커밋에 넣고, 그 뒤로 고치지 않는다. 검토가 찾은 빈 곳은 새 시험으로 더하고, 고정한 assertion은 바꾸지 않는다. 로컬 Dune 빌드는 하지 않는다. PR마다 type-check와 leader CI 시험 결과를 본다.
 
 **1. 이 문서 PR**
 
@@ -367,7 +381,8 @@ TLC 1.8.0(로컬, `-workers 1`) 결과는 이렇다.
   - 묶음 쪽이 `Unchanged`일 때만 memory hook을 부른다. 묶음 쪽이 `Reprojected`나 `Error`면 부르지 않는다.
 - blob 쓰기가 실패하면 hook이 `Error`를 돌려주고 꼴을 바꾸지 않는다.
 - reader가 없으면 글에 읽을 수 없다는 줄이 있고 reader 이름이 없다.
-- 옛 모양 receipt(base64가 글 안에 있는 것)도 `By_address` 글과 blob에 base64가 없다.
+- 옛 모양 receipt(base64가 글 안에 있는 것)도 `By_address` 글과 blob에 base64가 없다. Codex의 data URL receipt와 #49680 전 host receipt를 따로 본다.
+- 계획 marker는 저장한 marker와 길이가 같고, 바뀐 글은 `Inline` 글보다 짧다. 문턱에서 먼 fixture만으로는 두 marker 길이가 어긋나도 드러나지 않는다.
 - 정리 작업을 두 번 돌려도 멈추지 않고, receipt가 가리키는 blob은 남는다.
 - 묶음 blob이 지워져도 다음 run의 hook이 같은 주소로 다시 쓴다.
   - 정리 작업은 분류되지 않은 항목이 하나라도 있으면 아무것도 지우지 않는다(`tool_blob_maintenance.mli:121-125`). 그래서 시험은 blob 파일을 직접 지운다.
@@ -375,9 +390,7 @@ TLC 1.8.0(로컬, `-workers 1`) 결과는 이렇다.
 
 **3. PR B — runtime 연결** (`keeper_claude_code_runtime.ml`, `keeper_codex_runtime.ml`, `keeper_turn_driver_try_provider.ml`, 주석)
 
-- 먼저 잰다: Codex `thread/inject_items`에 10,485,760자를 넘는 developer item을 넣으면 무엇이 오는가.
-  - 크기 거절이면 parse 경계에서 typed로 만들고, 아래 Codex 시험에 넣는다.
-  - 크기 거절이 아니면 §7의 닿지 않는 경로로 남긴다.
+- Codex 10,485,760자 초과 묶음은 11-08에 schema와 #37353으로 확인했다. typed 크기 거절이 아니다(§7). 그래서 PR B는 실제 턴으로 재지 않고, 이 경로를 Codex 시험에 넣지 않는다.
 - 가짜 provider가 창 W를 넘는 요청을 typed overflow로 거절한다. 옛 모양 receipt 248개를 넣는다.
   - Claude Code Start: 두 번째 시도가 받아들여진다. `Input_rejected`가 남지 않는다. `Completed` 뒤 outbox가 빈다.
   - Codex(`contextWindowExceeded`)와 agent_core도 같다.
@@ -393,7 +406,8 @@ PR A와 PR B는 이 PR 위에 `gh stack`으로 쌓는다.
 
 - antigravity·muse의 typed overflow와 hook.
 - agent_core provider의 문장만 있는 크기 거절. parse 경계에서 typed 이유를 주게 한다.
-- Codex `thread/inject_items` 거절. PR B에서 잰 결과가 크기 거절이 아닐 때만 남긴다.
+- Codex의 10,485,760자 초과 `Inline` 묶음(§7). 구조안 둘을 같이 적는다.
+- outbox가 codec이 이미 확인한 receipt 필드(`tool_name`, `call_id`, `host_producer_id`)를 다시 읽는다. 그래서 닿지 않는 `Error` 갈래가 생긴다. codec이 확인한 값을 돌려주게 한다.
 - `keeper_turn_driver_try_provider.ml:2953`의 주석이 없는 함수 `Runtime_instance.prompt_capacity_bytes`를 가리킨다.
 
 **5. 배포 뒤(운영자 승인)**

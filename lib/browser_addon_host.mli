@@ -40,8 +40,9 @@ val connection_inventory : config:Workspace.config -> access:Lane_addon_sources.
     issuing a browser command. Preserve worker failures and unready services
     as inventory issues. No attached service at all is an unavailable result. *)
 val act_route : Browser_selection.preference -> Browser_lane.Action.t -> (unit, string) result
-(** Whether a Page action may run on [preference]. open_tab and control
-    actions name their observed client; take_over alone may leave it out with
+(** Whether a Page action may run on [preference]. Control actions name their
+    observed client, and so does open_tab on lane=live; open_tab without a
+    lane lets the host choose. take_over alone may leave the client out with
     lane=live, to reopen or reclaim the Space its worker reported missing or
     user-owned. {!issue} and the Keeper argument parser answer with this one
     rule. *)

@@ -3,19 +3,15 @@
     [open Server_routes_http_common] +
     runtime-include through {!Server_routes_http}.
 
-    External surface: 36 module aliases + 32 helpers.
-
     Runtime chain (cycle 224 indirect runtime pattern):
     Server_routes_http_common
       ↓ include Server_routes_http_common (in
         Server_routes_http)
-      ↓ open Server_routes_http (in 4 indirect
-        consumers: server_h2_gateway,
-        server_h2_gateway_routes_extra,
-        server_runtime_bootstrap, bin/main_eio)
+      ↓ open Server_routes_http (in
+        server_runtime_bootstrap)
 
     The module aliases at the top of the .ml are reached
-    unqualified by the indirect consumers
+    unqualified by the indirect consumer
     (e.g. [Mcp_eio.create_state_eio] in
     [server_runtime_bootstrap], [Sse.X] across many
     modules). *)
@@ -52,7 +48,6 @@ module Tempo = Tempo
 module Auth = Auth
 module Board = Board
 module Board_dispatch = Board_dispatch
-module Http_negotiation = Mcp_transport_protocol.Http_negotiation
 module Progress = Progress
 module Sse = Sse
 module Safe_ops = Safe_ops
@@ -65,54 +60,18 @@ module Server_mcp_transport_http = Server_mcp_transport_http
 val mcp_protocol_versions : string list
 val mcp_protocol_version_default : string
 val default_base_path : unit -> string
-val is_valid_protocol_version : string -> bool
-val remember_protocol_version :
-  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
-  string ->
-  string ->
-  unit
-
-val remember_protocol_version_if_initialize_succeeded :
-  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
-  string ->
-  request_body:string ->
-  response_json:Yojson.Safe.t ->
-  unit
-
-val remember_mcp_profile :
-  ?otel_transport_context:Otel_dispatch_hook.transport_context ->
-  string ->
-  Server_mcp_transport_http.tool_profile ->
-  unit
-val forget_mcp_session : string -> unit
-val validate_mcp_session_profile :
-  profile:Server_mcp_transport_http.tool_profile ->
-  string ->
-  (unit, string) result
-val validate_mcp_session_delete_profile :
-  profile:Server_mcp_transport_http.tool_profile ->
-  string ->
-  (unit, string) result
-val protocol_version_from_body : string -> string option
 
 (** {1 Request introspection} *)
 
-val get_session_id_query : string -> string option
-val get_header_any_case :
-  Httpun.Headers.t -> string -> string option
 val get_cookie_value :
   Httpun.Request.t -> string -> string option
-val get_session_id_any : Httpun.Request.t -> string option
-val get_protocol_version : Httpun.Request.t -> string
-val get_protocol_version_for_session :
-  ?session_id:string -> Httpun.Request.t -> string
 
 (** {1 Server state} *)
 
 val current_server_state_opt :
   unit -> Mcp_server.server_state option
 
-(** {1 Origin / Accept negotiation} *)
+(** {1 Origin} *)
 
 val is_mcp_transport_request : Httpun.Request.t -> bool
 (** [true] only for requests entering the MCP HTTP/SSE surface. *)
@@ -123,9 +82,6 @@ val validate_origin :
 (** Validate a browser Origin against the authority admitted at request entry.
     Requests without Origin are native clients and remain valid. *)
 
-val accepts_streamable_mcp : Httpun.Request.t -> bool
-val request_force_json_response : Httpun.Request.t -> bool
-val force_json_response : bool
 (** {1 Header builders} *)
 
 val mcp_headers : string -> string -> (string * string) list
@@ -133,10 +89,7 @@ val json_headers : string -> string -> string -> (string * string) list
 
 (** {1 SSE session control} *)
 
-val check_sse_connect_guard :
-  string -> (unit, Sse_reject_reason.t * float) result
 val stop_sse_session : string -> unit
-val close_all_sse_connections : unit -> unit
 
 (** {1 MCP HTTP route handlers} *)
 

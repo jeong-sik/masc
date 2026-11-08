@@ -81,8 +81,7 @@ let raw
               (if replaced
                then Keeper_client_usage_report.Count_replaced
                else
-                 Keeper_client_usage_report.Running_count
-                   (Keeper_usage_resolution.api_usage_of_sample usage))
+                 Keeper_client_usage_report.Running_count usage)
           ; vendor_total_tokens = None
           } )
   in

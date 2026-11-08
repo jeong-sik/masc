@@ -42,12 +42,6 @@ type t =
   ; observed_at : float
   }
 
-let sample_of_api_usage (usage : Agent_core.Types.api_usage) : sample = usage
-;;
-
-let api_usage_of_sample (sample : sample) : Agent_core.Types.api_usage = sample
-;;
-
 let reported_cost_usd (sample : sample) =
   (* DET-OK: a sum of reported costs gains nothing from a sample that reported
      none, and the ledger row says so in cost_usd_source. *)

@@ -1583,7 +1583,7 @@ max-concurrent = 1
       Masc.Keeper_usage_resolution.resolve
         ~cursor:prior.runtime.usage_cursor
         ~basis
-        ~observation:(Some (Masc.Keeper_usage_resolution.sample_of_api_usage usage))
+        ~observation:(Some usage)
         ~observed_at:42.0
     in
     let updated = Masc.Keeper_unified_metrics.update_metrics_from_result
@@ -1600,7 +1600,7 @@ max-concurrent = 1
        separately from the synthetic-capable token metric updater. *)
     let reading : Masc.Keeper_turn_spend.reading =
       {reading_index=0; response_id="metric-fixture"; ordinal=1; model="fixture";
-       basis; observation=Some (Masc.Keeper_usage_resolution.sample_of_api_usage usage);
+       basis; observation=Some usage;
        count_after=Masc.Keeper_turn_spend.Count_continues} in
     let attempt : Masc.Keeper_turn_spend.attempt =
       {routing_run_id="metric-fixture";runtime_id="fixture";lane_attempt_index=0;readings=[reading]} in
@@ -1763,8 +1763,7 @@ max-concurrent = 1
            ; conversation_id = "conversation-after-restart"
            ; position = Masc.Keeper_usage_resolution.Resumed
            })
-      ~observation:
-        (Some (Masc.Keeper_usage_resolution.sample_of_api_usage cumulative_usage))
+      ~observation:(Some cumulative_usage)
       ~observed_at:43.0
   in
   check
@@ -1772,10 +1771,7 @@ max-concurrent = 1
     (resumed_without_baseline.status = Masc.Keeper_usage_resolution.Baseline_missing
      && Option.is_none resumed_without_baseline.delta
      && Option.is_some established_cursor);
-  let regressed_usage =
-    { cumulative_usage with input_tokens = 8_999 }
-    |> Masc.Keeper_usage_resolution.sample_of_api_usage
-  in
+  let regressed_usage = { cumulative_usage with input_tokens = 8_999 } in
   let regressed, retained_cursor =
     Masc.Keeper_usage_resolution.resolve
       ~cursor:cumulative.runtime.usage_cursor
@@ -1842,9 +1838,6 @@ max-concurrent = 1
     ; cost_usd = Some 12.3
     }
   in
-  let climbing_sample =
-    Masc.Keeper_usage_resolution.sample_of_api_usage climbing_usage
-  in
   let stalled, _ =
     Masc.Keeper_usage_resolution.resolve
       ~cursor:cumulative.runtime.usage_cursor
@@ -1854,7 +1847,7 @@ max-concurrent = 1
            ; conversation_id = "conversation-1"
            ; position = Masc.Keeper_usage_resolution.Resumed
            })
-      ~observation:(Some climbing_sample)
+      ~observation:(Some climbing_usage)
       ~observed_at:44.25
   in
   check
@@ -1915,10 +1908,7 @@ max-concurrent = 1
     "climbing past the old peak is charged from the re-baselined cursor"
     (past_peak.runtime.usage.total_input_tokens = 14_600
      && past_peak.runtime.usage.total_output_tokens = 1_470);
-  let cost_regressed_usage =
-    { resumed_usage with cost_usd = Some 11.0 }
-    |> Masc.Keeper_usage_resolution.sample_of_api_usage
-  in
+  let cost_regressed_usage = { resumed_usage with cost_usd = Some 11.0 } in
   let cost_regressed, _ =
     Masc.Keeper_usage_resolution.resolve
       ~cursor:cumulative.runtime.usage_cursor
@@ -1944,14 +1934,13 @@ max-concurrent = 1
            ; conversation_id = "conversation-2"
            ; position = Masc.Keeper_usage_resolution.Fresh
            })
-      ~observation:
-        (Some (Masc.Keeper_usage_resolution.sample_of_api_usage cumulative_usage))
+      ~observation:(Some cumulative_usage)
       ~observed_at:45.0
   in
   check
     "runtime and conversation switch with Fresh replaces the cursor"
     ( switched.delta
-      = Some (Masc.Keeper_usage_resolution.sample_of_api_usage cumulative_usage)
+      = Some cumulative_usage
       && Option.fold
            ~none:false
            ~some:(fun cursor ->

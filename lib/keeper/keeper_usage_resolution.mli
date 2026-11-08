@@ -41,8 +41,6 @@ type t =
   ; observed_at : float
   }
 
-val sample_of_api_usage : Agent_core.Types.api_usage -> sample
-val api_usage_of_sample : sample -> Agent_core.Types.api_usage
 val sample_to_json : sample -> Yojson.Safe.t
 val sample_of_json : Yojson.Safe.t -> (sample, string) result
 

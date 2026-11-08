@@ -15,12 +15,18 @@ let policy ~nonce =
     github_authorize_origin
 ;;
 
+(* Under no-referrer a browser sends "Origin: null" with a form POST (Fetch,
+   "append a request Origin header"), and the start route refuses a null
+   origin; Chromium 148 did so on 2026-11-08. same-origin keeps the origin on
+   the form and still sends no Referer to GitHub. *)
+let referrer_policy = "referrer-policy", "same-origin"
+
 let page ~nonce ~title ~body ~script =
   { R.status = R.Ok_200
   ; headers =
       [ "content-type", "text/html; charset=utf-8"
       ; "cache-control", "no-store"
-      ; "referrer-policy", "no-referrer"
+      ; referrer_policy
       ; "content-security-policy", policy ~nonce
       ]
   ; body =

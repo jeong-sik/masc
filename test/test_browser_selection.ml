@@ -376,7 +376,7 @@ let test_ego_user_owned_inventory () =
     (member "inventoryComplete" ended=`Bool true);
   check bool "the issue names the Space, the ended connection and the recovery" true
     (String.equal (I.issue_message issue)
-       "Browser worker ego-worker: ego no longer lists task space 12 (\"masc-keepers\"), so its connection ended and no replacement was opened; take_over with lane=live and no clientId asks the worker to open its configured Space again");
+       "Browser worker ego-worker: ego no longer lists task space 12 (\"masc-keepers\"), so its connection ended and no replacement was opened; take_over with lane=live and no clientId asks the worker to open its configured Space again, which works only when the worker names the Space rather than its number");
   check bool "missing issue wire round trip" true
     (I.issues_of_json (I.issues_to_json [issue])=Ok [issue]);
   let row extra=`List [`Assoc (["kind",`String "ego_space_missing";"instanceId",`String "w";"space",`String "s";

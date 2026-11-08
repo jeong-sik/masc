@@ -21,8 +21,9 @@ type t = {
   status : status;
 }
 type error = Not_found | Unavailable
-val save : workspace:string -> actor:string -> t -> (unit, error) result
-val load : workspace:string -> actor:string -> login_id:string -> (t, error) result
+val save : workspace:string -> actor:Runtime_setup_login_session.actor -> t -> (unit, error) result
+val load : workspace:string -> actor:Runtime_setup_login_session.actor -> login_id:string ->
+  (t, error) result
 val to_json : t -> Yojson.Safe.t
 (** A running receipt with no process registry entry is projected as Interrupted
     by the caller. A reference alone is never authentication evidence. *)

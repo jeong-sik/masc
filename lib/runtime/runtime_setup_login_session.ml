@@ -4,8 +4,12 @@ type error = Already_running | Not_found | Not_running | Input_pending | Invalid
   | Cancelled | Transport_failed | Process_failed of int | Interpreter_missing
 type command = Input of input | Cancel
 type phase = Preparing | Running | Observing | Closed
+type actor = Agent of string | Person of string
+let same_actor left right = match left, right with
+  | Agent left, Agent right | Person left, Person right -> String.equal left right
+  | Agent _, Person _ | Person _, Agent _ -> false
 type t = {
-  id : string; workspace : string; actor : string; mutable account_key : string;
+  id : string; workspace : string; actor : actor; mutable account_key : string;
   commands : command Eio.Stream.t; phase : phase Atomic.t;
   input_pending : bool Atomic.t; cancel_requested : bool Atomic.t;
   pipe_input_closed : bool Atomic.t; terminal : bool Atomic.t;
@@ -67,7 +71,7 @@ let bind_account t ~account_key = locked (fun () ->
 let is_active ~workspace ~actor ~login_id =
   let workspace = Unix.realpath workspace in
   locked (fun () -> match Hashtbl.find_opt registry login_id with
-    | Some t when String.equal workspace t.workspace && String.equal actor t.actor ->
+    | Some t when String.equal workspace t.workspace && same_actor actor t.actor ->
       (match Atomic.get t.phase with Preparing | Running | Observing -> true | Closed -> false)
     | Some _ | None -> false)
 
@@ -82,7 +86,7 @@ let enqueue ~workspace ~actor ~login_id command =
   let workspace = Unix.realpath workspace in
   let found = locked (fun () -> Hashtbl.find_opt registry login_id) in
   match found with
-  | Some t when String.equal workspace t.workspace && String.equal actor t.actor ->
+  | Some t when String.equal workspace t.workspace && same_actor actor t.actor ->
     (match command, Atomic.get t.phase with
      | Cancel, (Preparing | Running | Observing) -> Atomic.set t.cancel_requested true; Ok ()
      | Cancel, Closed | Input _, (Preparing | Observing | Closed) -> Error Not_running

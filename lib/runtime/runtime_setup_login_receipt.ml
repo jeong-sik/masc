@@ -34,9 +34,16 @@ let to_json t =
   `Assoc (["login_id", `String t.login_id; "integration_id", `String t.integration_id;
     "status", `String status; "invocation_verified", `Bool false] @ account @ authentication)
 
+(* An agent's scope digests two strings, as before plan D1-4, and a person's
+   three, so the JSON of one is never the JSON of the other. *)
+let person_scope_label = "person"
+
 let scope ~workspace ~actor =
   let workspace = Unix.realpath workspace in
-  Auth.sha256_hash (Yojson.Safe.to_string (`List [`String workspace; `String actor]))
+  let actor = match (actor : Runtime_setup_login_session.actor) with
+    | Agent name -> [`String name]
+    | Person user_id -> [`String person_scope_label; `String user_id] in
+  Auth.sha256_hash (Yojson.Safe.to_string (`List (`String workspace :: actor)))
 
 let directory ~create path =
   if create then (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());

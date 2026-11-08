@@ -47,12 +47,10 @@ type owner =
       ; namespace : Authz_types.Account_home_namespace.t
       }
 
-(* The scope of the sessions and receipts of the caller. A person is named by
-   the kind of principal and its id, so no agent name of a single-user actor
-   can be one. *)
+(* The scope of the sessions and receipts of the caller. *)
 let actor_of = function
-  | Operator { actor } -> actor
-  | Person { user_id; _ } -> "human:" ^ Authz_types.User_id.to_string user_id
+  | Operator { actor } -> Session.Agent actor
+  | Person { user_id; _ } -> Session.Person (Authz_types.User_id.to_string user_id)
 
 let accounts_dir = "accounts"
 

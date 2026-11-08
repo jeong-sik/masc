@@ -176,8 +176,6 @@ let signal_name signal =
   else Printf.sprintf "signal %d" signal
 ;;
 
-let json_assoc_member_opt = Masc_tui_json.member_opt
-
 (** One 60 Hz frame window: bursts are coalesced without delaying an idle
     terminal's first changed frame. *)
 let frame_interval_ns = 16_000_000L

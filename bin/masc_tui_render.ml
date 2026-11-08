@@ -52,8 +52,6 @@ type memory_state = Render_memory.memory_state =
   | Memory_read_error
 
 
-let json_assoc_member_opt = Masc_tui_json.member_opt
-
 let set_table_frame enabled = table_frame_enabled := enabled
 
 let keeper_roster_name_cells = Masc_tui_roster_pane.pane_cols - 7

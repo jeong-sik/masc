@@ -319,15 +319,13 @@ let replay = Store.replay
 let max_completed_retained = Store.max_completed_retained
 let cut_replay_log = Store.cut_replay_log
 
-let change_observer_fn : (unit -> unit) Atomic.t = Atomic.make (fun () -> ())
+let change_observer_fn = Run_registry_core.Observer.make ()
 
 let notify_changed () =
-  try (Atomic.get change_observer_fn) () with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn ->
-    Log.Task.warn
-      "verification_run_registry change observer failed: %s"
-      (Printexc.to_string exn)
+  Run_registry_core.Observer.notify change_observer_fn ~on_failure:(fun exn ->
+      Log.Task.warn
+        "verification_run_registry change observer failed: %s"
+        (Printexc.to_string exn))
 ;;
 
 let register_running
@@ -364,22 +362,11 @@ type publication_error =
   | Invalid_change of string
   | Publication_failed of Run_registry_core.persistence_failure
 
-let rec publication_source_error_to_string = function
-  | Store.Volatile_store ->
-    "A volatile verification registry cannot confirm durable publication"
-  | Store.Not_initialized ->
-    "Verification registry startup authority has not been established"
-  | Store.Incomplete_startup _ ->
-    "Verification registry startup history was incomplete or malformed"
-  | Store.Non_regular_history _ ->
-    "Verification registry history is not a regular file"
-  | Store.Invalid_history detail | Store.Read_failed detail -> detail
-  | Store.Incomplete_history -> "Verification registry history has an incomplete tail"
-  | Store.Snapshot_changed -> "Verification registry history changed during observation"
-  | Store.Read_cleanup_failed { primary; detail } ->
-    (match primary with
-     | None -> detail
-     | Some error -> publication_source_error_to_string error ^ "; " ^ detail)
+let publication_source_error_to_string error =
+  Store.source_error_to_string
+    ~volatile:"verification registry"
+    ~proper:"Verification registry"
+    error
 ;;
 
 let publication_error_to_string = function

@@ -112,6 +112,22 @@ module type Payload = sig
   val retention_group : (registration -> string) option
 end
 
+module Observer = struct
+  type t = (unit -> unit) Atomic.t
+
+  let make () : t = Atomic.make (fun () -> ())
+
+  (* A change notification is a latency hint, not a delivery contract: the
+     durable append already happened, so an observer failure is logged, never
+     propagated. Cancellation is the one exception — an observer that dies to
+     cancellation must not swallow it. *)
+  let notify t ~on_failure =
+    try (Atomic.get t) () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> on_failure exn
+  ;;
+end
+
 type persistence_state =
   | Not_persisted
   | Durability_unknown
@@ -690,6 +706,30 @@ module Make (Payload : Payload) = struct
     | Snapshot_changed
     | Read_failed of string
     | Read_cleanup_failed of { primary : current_read_error option; detail : string }
+
+  (* Shared wording for the strict current-source refusals. Task and Goal
+     spell the same eight cases around their own registry name; the
+     exact-lane registry keeps its own receipt wording. *)
+  let rec source_error_to_string ~volatile ~proper = function
+    | Volatile_store ->
+      Printf.sprintf "A volatile %s cannot confirm durable publication" volatile
+    | Not_initialized ->
+      Printf.sprintf "%s startup authority has not been established" proper
+    | Incomplete_startup _ ->
+      Printf.sprintf "%s startup history was incomplete or malformed" proper
+    | Non_regular_history _ ->
+      Printf.sprintf "%s history is not a regular file" proper
+    | Invalid_history detail | Read_failed detail -> detail
+    | Incomplete_history ->
+      Printf.sprintf "%s history has an incomplete tail" proper
+    | Snapshot_changed ->
+      Printf.sprintf "%s history changed during observation" proper
+    | Read_cleanup_failed { primary; detail } ->
+      (match primary with
+       | None -> detail
+       | Some error ->
+         source_error_to_string ~volatile ~proper error ^ "; " ^ detail)
+  ;;
 
   let read_current_from_log t ~id =
     Cross_context_mutex.with_lock t.mutation_mutex (fun () ->

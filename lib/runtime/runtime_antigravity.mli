@@ -58,8 +58,11 @@ val structured_output_instruction : schema:Yojson.Safe.t -> string
 val official_client_environment : ?home_dir:string -> unit -> string array
 (** Provider-owned account environment with an optional isolated HOME. This
     excludes API-key/provider-routing variables and user tool configuration,
-    and carries [AGY_CLI_DISABLE_AUTO_UPDATE=true] exactly once, so no agy
-    that masc launches updates itself (RFC-0490 §2.4). *)
+    and carries [AGY_CLI_DISABLE_AUTO_UPDATE=true] exactly once, so the agy
+    started for a Keeper turn, a probe, a model, context or usage read, or a
+    login does not update itself (RFC-0490 §2.4). The prerequisite installer's
+    version check is an operator action and runs with the operator's
+    environment. *)
 
 val default_config : cwd:string -> model:string -> config
 val default_timeout_s : float

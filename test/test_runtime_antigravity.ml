@@ -1077,7 +1077,13 @@ let test_isolated_home_replaces_inherited_directory_roots () =
 (* RFC-0490 §2.4: every agy masc launches gets the one value that stops its
    self-update, even when the operator's shell sets another. *)
 let test_environment_turns_off_agy_auto_update_once () =
-  Unix.putenv "AGY_CLI_DISABLE_AUTO_UPDATE" "0";
+  let key = "AGY_CLI_DISABLE_AUTO_UPDATE" in
+  let previous = Sys.getenv_opt key in
+  (* OCaml has no unsetenv: an absent key comes back as an empty value, which
+     the allowlist drops from every child all the same. *)
+  Fun.protect ~finally:(fun () -> Unix.putenv key (Option.value previous ~default:""))
+  @@ fun () ->
+  Unix.putenv key "0";
   let entries environment =
     Array.to_list environment
     |> List.filter (fun entry ->

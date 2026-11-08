@@ -1203,9 +1203,8 @@
  (name test_channel_gate_connector_routes)
  (modules test_channel_gate_connector_routes)
  (libraries
-  masc_test_deps masc_tui_types masc_tui_workspace_job masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
-  masc.embedded_config masc.keeper_identity masc.mcp_client
-  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
+  masc_test_deps masc_tui_types masc_tui_workspace_job bigstringaf
+  masc.embedded_config))
 
 ; Repository catalog tests depend only on the focused repo_manager library.
 ; The iMessage connector's platform-independent core. Needs sqlite3 directly
@@ -2379,7 +2378,7 @@
 (test
  (name test_server_auth_refusal_log)
  (modules test_server_auth_refusal_log)
- (libraries alcotest masc masc.auth masc.masc_types masc_server masc_log yojson httpun bigstringaf eio_main))
+ (libraries alcotest masc masc.masc_types masc_server masc_log yojson httpun bigstringaf eio_main))
 
 ; Dashboard actor attribution: rejected credentials cannot become anonymous hints.
 

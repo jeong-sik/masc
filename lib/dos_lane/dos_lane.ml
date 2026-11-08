@@ -658,13 +658,6 @@ let advance st ~budget ~until_ready =
    A file the program deletes is not carried: the inventory copy comes back
    at the next load. None of the games this lane runs delete their saves. *)
 
-let write_atomically ~dir name contents =
-  let path = Filename.concat dir name in
-  let tmp = Filename.concat dir ("." ^ name ^ ".tmp") in
-  Out_channel.with_open_bin tmp (fun oc -> output_string oc contents);
-  Sys.rename tmp path
-;;
-
 let rec mkdir_p dir =
   if not (Sys.file_exists dir) then begin
     mkdir_p (Filename.dirname dir);
@@ -700,13 +693,13 @@ let keep_writes st =
            Hashtbl.replace st.kept name now;
            Some (name ^ ": a path, not a file name; it stays in this machine only")
          | _ ->
-           (match
-              mkdir_p st.saves_dir;
-              write_atomically ~dir:st.saves_dir name now
-            with
+           (match mkdir_p st.saves_dir with
             | () ->
-              Hashtbl.replace st.kept name now;
-              None
+              (match Fs_compat.save_file_atomic (Filename.concat st.saves_dir name) now with
+               | Ok () ->
+                 Hashtbl.replace st.kept name now;
+                 None
+               | Error message -> Some (name ^ ": " ^ message))
             | exception Sys_error message -> Some (name ^ ": " ^ message))))
     (Dos_machine.mounted_names st.m)
 ;;

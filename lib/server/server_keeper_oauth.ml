@@ -602,33 +602,12 @@ let disconnect_receipt_path ~base_path ~keeper_name ~provider_id =
     (provider_id ^ ".json")
 ;;
 
-let rec ensure_dir path =
-  if String.equal path "" || String.equal path "." || String.equal path "/"
-     || Sys.file_exists path
-  then ()
-  else (
-    let parent = Filename.dirname path in
-    if not (String.equal parent path) then ensure_dir parent;
-    try Unix.mkdir path 0o700 with
-    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-;;
-
 (* The receipt is the record an operator can read after the screen has moved
    on: what was deleted, and what the provider said. Written after the local
    deletion so a receipt never describes work that did not happen. *)
 let write_disconnect_receipt ~base_path ~keeper_name ~provider_id json =
   let path = disconnect_receipt_path ~base_path ~keeper_name ~provider_id in
-  try
-    ensure_dir (Filename.dirname path);
-    let temp = path ^ ".tmp" in
-    Out_channel.with_open_bin temp (fun oc ->
-      Out_channel.output_string oc (Yojson.Safe.to_string json));
-    Unix.rename temp path;
-    Ok ()
-  with
-  | Unix.Unix_error (err, fn, arg) ->
-    Error (Printf.sprintf "%s: %s %s" (Unix.error_message err) fn arg)
-  | Sys_error message -> Error message
+  Keeper_identity_tools.write_json_snapshot ~path json
 ;;
 
 let disconnect ?transports ~clock ~(config : Workspace.config) ~keeper ~provider_id

@@ -347,6 +347,22 @@ let is_valid_utf8 s =
   in
   loop 0
 
+(* Characters, not bytes: callers bound what a reader sees — a schema
+   maxLength, a statement-length cut — and a byte count would reject a
+   Korean string well under the declared bound. [utf_decode_length] is at
+   least 1 even for an invalid byte, so the walk always advances and a
+   stray byte counts as one character. *)
+let utf8_length s =
+  let len = String.length s in
+  let rec loop index count =
+    if index >= len
+    then count
+    else
+      let decoded = String.get_utf_8_uchar s index in
+      loop (index + Uchar.utf_decode_length decoded) (count + 1)
+  in
+  loop 0 0
+
 let utf8_prefix ~max_bytes s =
   if max_bytes <= 0 then ""
   else

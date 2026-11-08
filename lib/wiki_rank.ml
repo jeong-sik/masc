@@ -21,8 +21,9 @@ let is_ascii_word_char = function
   | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' -> true
   | _ -> false
 
-(* Length of the UTF-8 sequence a lead byte opens; 0 when it opens none. *)
-let utf8_length lead =
+(* Length of the UTF-8 sequence a lead byte opens; 0 when it opens none.
+   Not a character count: [String_util.utf8_length] counts characters. *)
+let utf8_sequence_length lead =
   let code = Char.code lead in
   if code >= 0xC2 && code <= 0xDF
   then 2
@@ -69,7 +70,7 @@ let pieces text =
         in
         go (at + 1) (piece :: acc))
       else (
-        let size = utf8_length byte in
+        let size = utf8_sequence_length byte in
         let rec continuations k = k >= size || (is_continuation text.[at + k] && continuations (k + 1)) in
         if size = 0 || at + size > length || not (continuations 1)
         then go (at + 1) (Break :: acc)

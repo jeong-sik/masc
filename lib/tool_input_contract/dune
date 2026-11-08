@@ -3,4 +3,4 @@
  (name tool_input_contract)
  (public_name masc.tool_input_contract)
  (wrapped false)
- (libraries masc.masc_core masc.tool_types masc.agent_core yojson))
+ (libraries masc.masc_core masc.tool_types masc.agent_core masc.string_util yojson))

@@ -120,6 +120,12 @@ val is_valid_utf8 : string -> bool
 (** [is_valid_utf8 s]: whether every byte of [s] decodes as UTF-8. Used at
     process boundaries whose reader rejects invalid sequences. *)
 
+val utf8_length : string -> int
+(** [utf8_length s]: the number of UTF-8 characters in [s], not bytes. An
+    invalid or stray byte counts as one character; the walk always advances.
+    For bounds a reader perceives (schema maxLength, statement-length cuts)
+    where a byte count would reject a Korean string well under the bound. *)
+
 val sanitize_utf8 : string -> string
 (** [sanitize_utf8 s]: [s] itself when {!is_valid_utf8} holds; otherwise a
     copy in which every malformed byte sequence is replaced by U+FFFD. For a

@@ -14,7 +14,7 @@ val first_some : 'a option -> 'a option -> 'a option
 (** Return the first [Some], or the second. *)
 
 val dedup_strings : string list -> string list
-(** Order-preserving deduplication via local [String_set]. *)
+(** Order-preserving deduplication via {!Json_util.dedupe_keep_order}. *)
 
 val compact_text : ?max_len:int -> string -> string
 (** Collapse newlines/whitespace into single spaces, then truncate to a

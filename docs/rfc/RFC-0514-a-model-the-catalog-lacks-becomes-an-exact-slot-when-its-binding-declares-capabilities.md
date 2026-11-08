@@ -287,6 +287,7 @@ max-output-tokens = 32768       # 체크포인트 평가 요청의 max_tokens
 - 롤아웃 시험 하나를 둔다. 가이드의 체크포인트 바인딩을 runtime에 올리고 exact registry를 띄운다.
   슬롯의 출력 상한은 적은 32,768이다.
   Librarian 레인 요청 본문에는 바인딩의 effort, 레인의 `max_tokens = 4096`이 있고 `response_format`은 없다.
+  보드 레인은 상한보다 큰 40,000을 적는다. 그 요청의 `max_tokens`는 32,768로 깎인다.
   예산이 없는 HITL 레인 요청에는 `max_tokens`가 없다.
 - 확인은 PR CI의 타입 검사·시험과 현재 head 독립 리뷰로 한다.
 - 설치 뒤에는 두 가지를 본다.

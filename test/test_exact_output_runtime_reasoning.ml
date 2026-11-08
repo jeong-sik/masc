@@ -84,8 +84,9 @@ reasoning-effort = %S
 (* The guide's checkpoint binding (docs/guides/tinker-integration.md,
    "Hot-Swapping a Fine-Tuned Checkpoint"): a tinker:// model the catalog has
    no row for, under the tinker provider row, whose block states the five
-   reads an exact slot needs. The Librarian lane declares an output budget and
-   the HITL lane declares none. *)
+   reads an exact slot needs. The Librarian lane declares an output budget
+   under the stated ceiling, the board lane one above it, and the HITL lane
+   none. *)
 let tinker_checkpoint_toml effort = Printf.sprintf {|[runtime]
 default = "tinker.tinker-inkling-ckpt"
 [runtime.exact_output_lanes.librarian_exact]
@@ -95,7 +96,7 @@ max_output_tokens = 4096
 slots = ["tinker.tinker-inkling-ckpt"]
 [runtime.exact_output_lanes.board_attention_exact]
 slots = ["tinker.tinker-inkling-ckpt"]
-max_output_tokens = 4096
+max_output_tokens = 40000
 [providers.tinker]
 protocol = "openai-compatible-http"
 endpoint = "https://tinker.thinkingmachines.dev/services/tinker-prod/oai/api/v1"
@@ -332,8 +333,10 @@ let checkpoint_request_body ?lane_budget admitted =
 
 (* The guide's checkpoint binding on a Librarian lane: the request carries the
    binding's effort and the lane's budget, and no response_format, since the
-   block states neither JSON mode nor native schema. On the HITL lane, which
-   declares no budget, the request carries no max_tokens. *)
+   block states neither JSON mode nor native schema. On the board lane, whose
+   budget is above the stated output ceiling, the request carries the
+   ceiling. On the HITL lane, which declares no budget, the request carries no
+   max_tokens. *)
 let test_guide_checkpoint_request_carries_its_effort_and_lane_budget_and_no_envelope () =
   with_runtime ~toml:tinker_checkpoint_toml ~credential_env:"TINKER_API_KEY" @@ fun load ->
   List.iter (fun effort ->
@@ -354,6 +357,11 @@ let test_guide_checkpoint_request_carries_its_effort_and_lane_budget_and_no_enve
     check bool "the request carries no response_format" true
       (Yojson.Safe.Util.member "response_format" body = `Null))
     [ Llm_provider.Reasoning_effort.Low; Llm_provider.Reasoning_effort.High ];
+  check int "a lane budget above the stated output ceiling is cut to it" 32768
+    Yojson.Safe.Util.(
+      checkpoint_request_body ~lane_budget:40000
+        (load ~lane_id:"board_attention_exact" "low")
+      |> member "max_tokens" |> to_int);
   check bool "a lane with no budget sends no max_tokens" true
     (Yojson.Safe.Util.member "max_tokens"
        (checkpoint_request_body (load ~lane_id:"hitl_auto_judge" "low"))

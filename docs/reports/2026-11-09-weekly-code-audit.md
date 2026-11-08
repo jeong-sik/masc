@@ -81,7 +81,7 @@ Eio의 `Cancel.protect`는 반환 시 부모 취소를 다시 검사하지 않�
   순수한 overlap-key 계산을 공유한다. thunk 안에 fiber를 넘기는 I/O를 넣지 않는 용도다.
 - [소유 작업 inventory](../../lib/keeper/keeper_owned_job_backend.ml)는 I/O를 하는 공유 초기화에
   ``Eio.Lazy.from_fun ~cancel:`Restart``를 사용한다. `Lazy.Mutexed`로 무조건 바꾸면 안 된다.
-- `List.take`, 닫힌 variant, 불변 Map/Set도 현재 도구 실행기에서 사용한다.
+- 닫힌 variant와 불변 Map/Set도 현재 도구 실행기에서 사용한다.
 
 [공식 Lazy.Mutexed API](https://ocaml.org/manual/5.5/api/Lazy.Mutexed.html)는 mutex로 대기하므로
 thunk가 fiber를 넘기면 같은 스레드의 중복 force가 실패할 수 있다고 설명한다.

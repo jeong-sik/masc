@@ -29,6 +29,7 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `exact_store.py` | Reads answered admission records from the store, read only |
 | `e_real_manifest.py` | Writes the manifest |
 | `synth_spec.py` | Plan of a synthetic request: measured distributions, ID shapes, labels |
+| `synth_candidate_plan.py` | Plans a split's candidates before any call, dealing marks and lengths out per label kind |
 | `synth_prompts.py` | Prompts that ask the model for role material, memories and candidates |
 | `synth_generate.py` | Builds synthetic requests with labels (`--split eval` or `train`) |
 | `synth_render.py` | Renders a synthetic request as the admission prompt MASC would send |

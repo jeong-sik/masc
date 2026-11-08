@@ -1,5 +1,6 @@
 open Masc
 module Api = Server_dashboard_http_keeper_api
+module Keeper_tool_calls = Server_dashboard_http_keeper_tool_calls
 open Yojson.Safe.Util
 
 let () = Server_startup_state.mark_state_ready () |> Result.get_ok
@@ -170,7 +171,7 @@ let test_ambiguity_and_invalid_query () =
       ; "execution_id=&execution_id=duplicate" ];
     let req = Httpun.Request.create `GET "/api/v1/keepers/editor/tool-calls?limit=200" in
     Alcotest.(check bool) "absent identity leaves recent route in charge" true
-      (Api.keeper_tool_call_lookup_response ~config ~keeper_name:"editor" req = None))
+      (Keeper_tool_calls.keeper_tool_call_lookup_response ~config ~keeper_name:"editor" req = None))
 
 let test_store_failure_is_unavailable () =
   with_workspace (fun _env _sw state _config store ->

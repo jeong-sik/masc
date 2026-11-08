@@ -393,22 +393,45 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     ~now ~frame ~yolo ~selected (row : Keeper_list_model.row) =
   let keeper = row.keeper in
   let activity = Keeper_list_model.primary_activity_of_row row in
-  let status_color = keeper_activity_style activity in
-  let glyph =
-    match activity with
-    | Preparing | Running -> Masc_tui_answering.running_glyph ~frame
-    | Held_call | Question | Confirmation | Attempt_failed | Streaming | Async_working _
-    | Deferred | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting
-    | Idle | Paused | Offline | Unknown -> Masc_tui_keeper_mark.activity_glyph activity
-  in
-  let name =
-    Message_layout.fit_middle columns.kcol_name
-      (Terminal_text.single_line keeper.Tui_decode.k_name)
-  in
   let runtime =
     match row.reading.Keeper_control.liveness with
     | Keeper_control.Present runtime -> Some runtime
     | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
+  in
+  let operator_disposition =
+    match runtime with
+    | Some { kr_operator_disposition = Ok (Some (disp, _)); _ }
+      when Masc.Keeper_execution_receipt.needs_operator_broadcast disp
+           && Masc_tui_keeper_mark.shows_operator_disposition ~activity ->
+        Some disp
+    | Some { kr_operator_disposition = Ok (Some _); _ } -> None
+    | Some { kr_operator_disposition = Ok None; _ } -> None
+    | Some { kr_operator_disposition = Error _; _ } -> None
+    | None -> None
+  in
+  let status_color =
+    match operator_disposition with
+    | Some _ -> Theme.bad ()
+    | None -> keeper_activity_style activity
+  in
+  let glyph =
+    match operator_disposition with
+    | Some _ -> Masc_tui_keeper_mark.activity_glyph Held_call
+    | None ->
+      (match activity with
+       | Preparing | Running -> Masc_tui_answering.running_glyph ~frame
+       | Held_call | Question | Confirmation | Attempt_failed | Streaming | Async_working _
+       | Deferred | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting
+       | Idle | Paused | Offline | Unknown -> Masc_tui_keeper_mark.activity_glyph activity)
+  in
+  let status_word =
+    match operator_disposition with
+    | Some disp -> Masc_tui_keeper_mark.operator_disposition_word disp
+    | None -> keeper_activity_word activity
+  in
+  let name =
+    Message_layout.fit_middle columns.kcol_name
+      (Terminal_text.single_line keeper.Tui_decode.k_name)
   in
   let failure_context =
     keeper_row_trail_sentence ~age:(keeper_trail_age ~now) row
@@ -425,7 +448,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     ; (if yolo then Theme.bad () ^ name ^ Ansi.reset else name)
     ; " "
     ; status_color ^ glyph ^ " "
-      ^ Message_layout.fit_width (keeper_activity_word activity)
+      ^ Message_layout.fit_width status_word
           (Render_schedule.keeper_status_width - 2)
       ^ Ansi.reset
     ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")
@@ -487,7 +510,17 @@ let render_attempt_chain ~max_cells (attempts : Masc_tui_keeper_trail.attempt li
 (* The cells the detail keeps beside the attempt chain, after the separator. *)
 let attempt_detail_floor_cells = 10
 
-let keeper_secondary_row_content ?now ~inner (row : Keeper_list_model.row) =
+let style_axis_cell (cell : Masc_tui_keeper_axis_cell.t) =
+  let style =
+    match cell.tone with
+    | Masc_tui_keeper_axis_cell.Quiet -> Theme.recede ()
+    | Masc_tui_keeper_axis_cell.Attention -> Theme.warn ()
+    | Masc_tui_keeper_axis_cell.Failure -> Theme.bad ()
+  in
+  style ^ cell.text ^ Ansi.reset
+;;
+
+let keeper_secondary_row_content ?now ?(cells = []) ~inner (row : Keeper_list_model.row) =
   let indent_cells = Render_schedule.keeper_marker_width + 2 in
   let available = max 0 (inner - indent_cells) in
   let runtime =
@@ -496,6 +529,21 @@ let keeper_secondary_row_content ?now ~inner (row : Keeper_list_model.row) =
     | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
   in
   let attempts = Masc_tui_keeper_trail.attempts_of_runtime runtime in
+  let rec fit_cells acc_rev width_used = function
+    | [] -> List.rev acc_rev, width_used
+    | (cell : Masc_tui_keeper_axis_cell.t) :: rest ->
+        let cell_w = Message_layout.display_width cell.text in
+        let additional = if acc_rev = [] then cell_w else cell_w + 2 in
+        if width_used + additional <= available then
+          fit_cells (cell :: acc_rev) (width_used + additional) rest
+        else
+          List.rev acc_rev, width_used
+  in
+  let fitting_cells, cells_width = fit_cells [] 0 cells in
+  let detail_space =
+    if cells_width > 0 then max 0 (available - cells_width - 1)
+    else available
+  in
   let detail =
     match keeper_detail_text ?now row with
     | "" -> Masc_tui_theme.Glyph.no_value
@@ -507,11 +555,11 @@ let keeper_secondary_row_content ?now ~inner (row : Keeper_list_model.row) =
   (* The chain drops its older attempts to leave the detail a floor of cells.
      Only when the last attempt does not fit beside that floor does the chain
      take the whole row, and the detail is left out. *)
-  let content =
+  let left_text =
     let beside_detail =
       if has_detail then
         render_attempt_chain
-          ~max_cells:(available - sep_cells - attempt_detail_floor_cells)
+          ~max_cells:(detail_space - sep_cells - attempt_detail_floor_cells)
           attempts
       else None
     in
@@ -519,14 +567,29 @@ let keeper_secondary_row_content ?now ~inner (row : Keeper_list_model.row) =
     | Some chain ->
         let chain_cells = Message_layout.display_width chain in
         chain ^ Theme.recede () ^ sep
-        ^ fit_width detail (available - chain_cells - sep_cells)
+        ^ fit_width detail (detail_space - chain_cells - sep_cells)
         ^ Ansi.reset
     | None -> (
-        match render_attempt_chain ~max_cells:available attempts with
-        | Some chain -> fit_width chain available
-        | None -> Theme.recede () ^ fit_width detail available ^ Ansi.reset)
+        match render_attempt_chain ~max_cells:detail_space attempts with
+        | Some chain -> fit_width chain detail_space
+        | None -> Theme.recede () ^ fit_width detail detail_space ^ Ansi.reset)
   in
-  String.make indent_cells ' ' ^ content
+  let right_text =
+    match fitting_cells with
+    | [] -> ""
+    | cs ->
+        let styled = List.map style_axis_cell cs in
+        String.concat "  " styled
+  in
+  let body =
+    if right_text = "" then left_text
+    else
+      let left_w = Message_layout.display_width left_text in
+      let pad = max 1 (available - left_w - cells_width) in
+      left_text ^ String.make pad ' ' ^ right_text
+  in
+  String.make indent_cells ' ' ^ body
+;;
 
 (* The subtractions over the fleet's name lists. They answer different
    questions and only one of them is about being stopped: a keeper the fleet
@@ -1210,7 +1273,12 @@ let render_keeper_list (state : state) =
           emit primary;
           (* Only the detailed layout draws the second row, so only it builds one. *)
           (match state.keeper_list_layout with
-           | Keeper_list_model.Detailed -> emit (keeper_secondary_row_content ~now:now_unix ~inner row)
+           | Keeper_list_model.Detailed ->
+               let cells =
+                 Masc_tui_keeper_axis.segments state ~now:now_unix
+                   ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name
+               in
+               emit (keeper_secondary_row_content ~now:now_unix ~inner ~cells row)
            | Keeper_list_model.Compact | Keeper_list_model.Grouped -> ()))
     entries_window;
 

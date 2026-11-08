@@ -697,20 +697,64 @@ module McpSessionStore = struct
     else process_store_msg msg
 
   let start_loop ~sw =
-    if Atomic.compare_and_set loop_started false true then
-    Eio.Fiber.fork ~sw (fun () ->
-      let rec loop store_state =
-        let msg = Eio.Stream.take mailbox in
-        let state' =
-          Stdlib.Mutex.protect state_mutex (fun () ->
-            let state' = process_msg store_state msg in
-            state := state';
-            state')
+    if Atomic.compare_and_set loop_started false true then begin
+      (* On loop death (switch close) restore the pre-loop state so dispatch
+         falls back to synchronous processing, and drain the mailbox so
+         stranded callers get a defined answer instead of awaiting an
+         unresolved promise forever (영구 먹통 방지).  Mirrors the registry
+         start_loop above; McpSessionStore resolves bare values rather than
+         results, so the drain answers with throwaway values that are not
+         stored. *)
+      Eio.Switch.on_release sw (fun () ->
+        Atomic.set loop_started false;
+        let rec drain () =
+          match Eio.Stream.take_nonblocking mailbox with
+          | None -> ()
+          | Some msg ->
+            (match msg with
+             | Generate_id u ->
+               Eio.Promise.resolve u (Random_id.prefixed ~prefix:"mcp_" ~bytes:16)
+             | Create (agent_name, now, u) ->
+               let session = {
+                 id = Random_id.prefixed ~prefix:"mcp_" ~bytes:16;
+                 created_at = now;
+                 last_activity = now;
+                 agent_name;
+                 metadata = [];
+                 request_count = 0;
+               } in
+               Eio.Promise.resolve u session
+             | Get (_, _, u) -> Eio.Promise.resolve u None
+             | Peek (_, u) -> Eio.Promise.resolve u None
+             | Get_or_create (_, agent_name, now, u) ->
+               let session = {
+                 id = Random_id.prefixed ~prefix:"mcp_" ~bytes:16;
+                 created_at = now;
+                 last_activity = now;
+                 agent_name;
+                 metadata = [];
+                 request_count = 0;
+               } in
+               Eio.Promise.resolve u session
+             | Cleanup_stale (_, _, u) -> Eio.Promise.resolve u 0
+             | List_all u -> Eio.Promise.resolve u []
+             | Remove (_, u) -> Eio.Promise.resolve u false);
+            drain ()
         in
-        loop state'
-      in
-      loop !state
-    )
+        drain ());
+      Eio.Fiber.fork_daemon ~sw (fun () ->
+        let rec loop store_state =
+          let msg = Eio.Stream.take mailbox in
+          let state' =
+            Stdlib.Mutex.protect state_mutex (fun () ->
+              let state' = process_msg store_state msg in
+              state := state';
+              state')
+          in
+          loop state'
+        in
+        loop !state)
+    end
 
   let generate_id () =
     let p, r = Eio.Promise.create () in

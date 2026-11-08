@@ -25,20 +25,11 @@ val candle_purchase : Masc_domain.tool_schema
 val candle_equip : Masc_domain.tool_schema
 val candle_gift : Masc_domain.tool_schema
 
-val dos_load : Masc_domain.tool_schema
-val dos_meta : Masc_domain.tool_schema
-val dos_inventory : Masc_domain.tool_schema
-val dos_eject : Masc_domain.tool_schema
-val dos_screen : Masc_domain.tool_schema
 val dos_step : Masc_domain.tool_schema
 val dos_press : Masc_domain.tool_schema
-val dos_click : Masc_domain.tool_schema
 val dos_type : Masc_domain.tool_schema
-val dos_peek : Masc_domain.tool_schema
 val play_room : Masc_domain.tool_schema
 val dos_pass : Masc_domain.tool_schema
-val dos_save : Masc_domain.tool_schema
-val dos_restore : Masc_domain.tool_schema
 
 (** Optional Lane Add-on observation and lifecycle tools. *)
 val lane_attach : Masc_domain.tool_schema

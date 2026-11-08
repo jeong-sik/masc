@@ -212,8 +212,24 @@ let fresh_recovery_id () =
     Uuidm.v4_gen recovery_rng () |> Uuidm.to_string)
 ;;
 
-let process_epoch_value = lazy (fresh_recovery_id ())
-let process_epoch () = Lazy.force process_epoch_value
+(* The process epoch is computed once per process and reused. [Atomic] CAS
+   keeps the first winner and losing fibers adopt it, so concurrent askers
+   never sit on a [Lazy] cell: [Lazy.force] from concurrent fibers can raise
+   [Lazy.Undefined] or block the whole domain while the losing asker waits
+   (audit 8/8 #49747 category 1). *)
+let process_epoch_value : string option Atomic.t = Atomic.make None
+
+let process_epoch () =
+  match Atomic.get process_epoch_value with
+  | Some epoch -> epoch
+  | None ->
+    let computed = fresh_recovery_id () in
+    if Atomic.compare_and_set process_epoch_value None (Some computed)
+    then computed
+    else
+      match Atomic.get process_epoch_value with
+      | Some epoch -> epoch
+      | None -> computed
 
 let state_dir = Keeper_official_client_paths.state_dir
 

@@ -48,7 +48,7 @@ let event_may_affect_account_revision (event : Candle_event.t) =
   | Candle_event.Snapshot _
   | Candle_event.Payout_owed _
   | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
-  | Candle_event.Candidate_window_held _
+  | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
   | Candle_event.Unattributed _
   | Candle_event.Payout_failed _ -> false
 
@@ -70,7 +70,7 @@ let event_is_relevant_to_keeper ~keeper (event : Candle_event.t) =
   | Candle_event.Snapshot _
   | Candle_event.Payout_owed _
   | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
-  | Candle_event.Candidate_window_held _
+  | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
   | Candle_event.Unattributed _
   | Candle_event.Payout_failed _ -> false
 
@@ -93,7 +93,7 @@ let event_touches (event : Candle_event.t) =
   | Candle_event.Snapshot _
   | Candle_event.Payout_owed _
   | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
-  | Candle_event.Candidate_window_held _
+  | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
   | Candle_event.Unattributed _
   | Candle_event.Payout_failed _ -> Keepers []
 

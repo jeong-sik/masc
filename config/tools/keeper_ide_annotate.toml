@@ -11,6 +11,7 @@ defer_loading = true
 [[params]]
 name = "file_path"
 type = "string"
+role = "path"
 required = true
 description = "Absolute or sandbox-relative path of the file, as Edit takes it. The file must exist."
 

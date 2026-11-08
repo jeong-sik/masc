@@ -176,8 +176,6 @@
   cstruct
   masc.agent_core.digest
   ocaml-protoc-plugin
-  ; Generated from proto/masc_workspace.proto.
-  masc_proto
   ; Native Eio gRPC. The opam grpc/grpc-lwt stack pins an h2 version that
   ; conflicts with httpun-eio below, so it cannot be used alongside it.
   grpc-direct
@@ -305,7 +303,6 @@
   masc_compression
   masc_eio_context
   masc_cancel_safe
-  masc_backend
   masc.keeper_tool_call_index
   masc_process
   masc.masc_exec

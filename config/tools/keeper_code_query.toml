@@ -21,6 +21,7 @@ description = "Query type: definition for where defined, hover for type and docs
 [[params]]
 name = "path"
 type = "string"
+role = "path"
 required = true
 description = "File path within the keeper workspace to query."
 

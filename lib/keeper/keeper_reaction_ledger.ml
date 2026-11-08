@@ -486,14 +486,6 @@ let event_queue_transition_reaction_json
        ])
 ;;
 
-let after_ledger_append_hook :
-  (unit -> (unit, string) result) option Atomic.t
-  =
-  Atomic.make None
-;;
-
-let after_ledger_append_hook_mutex = Stdlib.Mutex.create ()
-
 (* #38527: the retention predicate for a retiring transition's prior receipt.
    A durable paused-work disposition receipt keyed by the same operation id is
    the standing asker that can still re-ask it by
@@ -583,11 +575,6 @@ let project_event_queue_transition_outbox_result
                     (Printexc.to_string exn)))
         in
         let* () = append_sources 0 stimuli in
-        let* () =
-          match Atomic.get after_ledger_append_hook with
-          | None -> Ok ()
-          | Some hook -> hook ()
-        in
         (* The prior receipt is about to leave [last_transition]. Its ledger
            append already succeeded in an earlier projection; commit a small
            exact-id receipt before this owner snapshot can forget it. A
@@ -601,18 +588,6 @@ let project_event_queue_transition_outbox_result
 
 module For_testing = struct
   let schedule_occurrence_receipt_path = schedule_occurrence_receipt_path
-
-  let with_after_ledger_append ~after_ledger_append f =
-    Stdlib.Mutex.lock after_ledger_append_hook_mutex;
-    let previous =
-      Atomic.exchange after_ledger_append_hook (Some after_ledger_append)
-    in
-    Fun.protect
-      ~finally:(fun () ->
-        Atomic.set after_ledger_append_hook previous;
-        Stdlib.Mutex.unlock after_ledger_append_hook_mutex)
-      f
-  ;;
 end
 
 type event_queue_reaction_evidence =

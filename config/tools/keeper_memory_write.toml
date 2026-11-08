@@ -30,6 +30,7 @@ then **Why** and **How to apply** lines."""
 [[params]]
 name = "source_path"
 type = "string"
+role = "path"
 description = "Optional keeper-visible regular file that makes this claim source-bound."
 
 [[params]]

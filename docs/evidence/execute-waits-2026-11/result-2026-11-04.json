@@ -1,0 +1,291 @@
+{
+  "days_without_file": [],
+  "execute": {
+    "by_day": [
+      {
+        "calls": 14461,
+        "day": "2026-11-04",
+        "hours": 27.94,
+        "long_calls": 211,
+        "long_hours": 14.8,
+        "sleeping_long_hours": 11.18
+      }
+    ],
+    "calls": 14461,
+    "calls_without_command": 357,
+    "duration_buckets": [
+      {
+        "calls": 4375,
+        "hours": 0.71,
+        "hours_percent": 2.5,
+        "label": "<1s"
+      },
+      {
+        "calls": 5254,
+        "hours": 2.54,
+        "hours_percent": 9.1,
+        "label": "1-3s"
+      },
+      {
+        "calls": 3915,
+        "hours": 5.33,
+        "hours_percent": 19.1,
+        "label": "3-10s"
+      },
+      {
+        "calls": 706,
+        "hours": 4.55,
+        "hours_percent": 16.3,
+        "label": "10-60s"
+      },
+      {
+        "calls": 171,
+        "hours": 8.36,
+        "hours_percent": 29.9,
+        "label": "60-300s"
+      },
+      {
+        "calls": 40,
+        "hours": 6.44,
+        "hours_percent": 23.1,
+        "label": ">=300s"
+      }
+    ],
+    "hours": 27.94,
+    "long_calls": {
+      "by_kind": [
+        {
+          "calls": 82,
+          "hours": 8.49,
+          "hours_percent_of_long": 57.3,
+          "kind": "names_a_run",
+          "sleeping_calls": 82,
+          "sleeping_hours": 8.49,
+          "sleeping_hours_percent_of_sleeping": 75.9
+        },
+        {
+          "calls": 76,
+          "hours": 3.62,
+          "hours_percent_of_long": 24.4,
+          "kind": "gh_without_run",
+          "sleeping_calls": 45,
+          "sleeping_hours": 2.27,
+          "sleeping_hours_percent_of_sleeping": 20.3
+        },
+        {
+          "calls": 4,
+          "hours": 0.16,
+          "hours_percent_of_long": 1.1,
+          "kind": "build_or_test",
+          "sleeping_calls": 0,
+          "sleeping_hours": 0.0,
+          "sleeping_hours_percent_of_sleeping": 0.0
+        },
+        {
+          "calls": 49,
+          "hours": 2.54,
+          "hours_percent_of_long": 17.2,
+          "kind": "rest",
+          "sleeping_calls": 8,
+          "sleeping_hours": 0.43,
+          "sleeping_hours_percent_of_sleeping": 3.8
+        }
+      ],
+      "calls": 211,
+      "calls_percent": 1.5,
+      "calls_without_command": 0,
+      "github_calls": 158,
+      "github_hours": 12.1,
+      "github_hours_percent_of_long": 81.8,
+      "hours": 14.8,
+      "hours_percent_of_execute": 53.0,
+      "sleeping_calls": 135,
+      "sleeping_github_hours": 10.76,
+      "sleeping_github_percent_of_sleeping": 96.2,
+      "sleeping_hours": 11.18,
+      "sleeping_hours_percent_of_long": 75.5,
+      "threshold_seconds": 60
+    }
+  },
+  "executes_without_duration": 0,
+  "files_read": 12,
+  "keepers_in_both": [
+    {
+      "blocked_hours": 2.69,
+      "keeper": "wkbl-data",
+      "self_wakes_naming_a_run": 5
+    },
+    {
+      "blocked_hours": 1.29,
+      "keeper": "sangsu",
+      "self_wakes_naming_a_run": 11
+    },
+    {
+      "blocked_hours": 0.1,
+      "keeper": "masc-productor-owner",
+      "self_wakes_naming_a_run": 2
+    }
+  ],
+  "rows_in_window": 25839,
+  "rows_without_timestamp": 0,
+  "run_waits": {
+    "blocked_hours": 8.54,
+    "blocked_hours_percent_of_execute": 30.6,
+    "blocked_hours_summed_over_waits": 8.85,
+    "blocked_minutes_per_wait": {
+      "max": 40.7,
+      "median": 7.9,
+      "p90": 17.0
+    },
+    "polls": 94,
+    "polls_naming_several_runs": 4,
+    "polls_per_wait": {
+      "max": 7.0,
+      "median": 2.0,
+      "p90": 3.0
+    },
+    "polls_summed_over_waits": 98,
+    "repos": {
+      "blocked_hours_without_a_repo": 1.77,
+      "by_repo": [
+        {
+          "blocked_hours": 4.49,
+          "repo": "jeong-sik/masc",
+          "waits": 34
+        },
+        {
+          "blocked_hours": 2.28,
+          "repo": "jeong-sik/wkbl",
+          "waits": 12
+        }
+      ],
+      "waits_without_a_repo": 8
+    },
+    "single_poll_waits": 26,
+    "top_keepers": [
+      {
+        "blocked_hours": 2.69,
+        "keeper": "wkbl-data",
+        "waits": 10
+      },
+      {
+        "blocked_hours": 2.17,
+        "keeper": "pr-updater",
+        "waits": 16
+      },
+      {
+        "blocked_hours": 1.75,
+        "keeper": "github-pr-checker",
+        "waits": 10
+      },
+      {
+        "blocked_hours": 1.29,
+        "keeper": "sangsu",
+        "waits": 11
+      },
+      {
+        "blocked_hours": 0.36,
+        "keeper": "wkbl-front",
+        "waits": 4
+      },
+      {
+        "blocked_hours": 0.18,
+        "keeper": "code-reviewer-brother",
+        "waits": 1
+      },
+      {
+        "blocked_hours": 0.1,
+        "keeper": "masc-productor-owner",
+        "waits": 2
+      }
+    ],
+    "waits": 54
+  },
+  "schedule_wakes": {
+    "creates": 46,
+    "distinct_keeper_run_pairs": 21,
+    "due_in_sec_of_those": {
+      "median": 1500.0,
+      "p10": 900.0,
+      "p90": 3600.0
+    },
+    "self_wakes": 46,
+    "self_wakes_naming_a_run": 24,
+    "top_keepers": [
+      {
+        "keeper": "sangsu",
+        "wakes": 11
+      },
+      {
+        "keeper": "wkbl-data",
+        "wakes": 5
+      },
+      {
+        "keeper": "e-masc-the-leader",
+        "wakes": 3
+      },
+      {
+        "keeper": "masc-productor-owner",
+        "wakes": 2
+      },
+      {
+        "keeper": "wkbl-web-leader",
+        "wakes": 2
+      },
+      {
+        "keeper": "build-maniac",
+        "wakes": 1
+      }
+    ]
+  },
+  "skipped_lines": 0,
+  "turn_time": {
+    "build_or_test_calls": {
+      "calls": 4,
+      "hours": 0.16,
+      "inside_hours": 0.08,
+      "inside_percent_of_turn_time": 0.0,
+      "outside_hours": 0.08
+    },
+    "execute": {
+      "calls": 14461,
+      "hours": 27.94,
+      "inside_hours": 21.87,
+      "inside_percent_of_turn_time": 8.4,
+      "outside_hours": 6.07
+    },
+    "execute_of_keepers_without_turn_traces": {
+      "calls": 0,
+      "hours": 0.0,
+      "keepers": 0
+    },
+    "github_calls": {
+      "calls": 158,
+      "hours": 12.1,
+      "inside_hours": 9.24,
+      "inside_percent_of_turn_time": 3.5,
+      "outside_hours": 2.86
+    },
+    "hours": 261.84,
+    "keepers_with_turn_traces": 25,
+    "long_calls": {
+      "calls": 211,
+      "hours": 14.8,
+      "inside_hours": 11.15,
+      "inside_percent_of_turn_time": 4.3,
+      "outside_hours": 3.65
+    },
+    "poll_calls": {
+      "calls": 94,
+      "hours": 8.54,
+      "inside_hours": 5.99,
+      "inside_percent_of_turn_time": 2.3,
+      "outside_hours": 2.56
+    }
+  },
+  "window": {
+    "from": "2026-11-04",
+    "to": "2026-11-04",
+    "until": "2026-11-05T00:00:00+00:00"
+  }
+}

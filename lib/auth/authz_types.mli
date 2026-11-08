@@ -15,6 +15,16 @@ module Policy_id : Authz_id.S
     secret of the session; the log names the session by it. *)
 module Session_id : Authz_id.S
 
+(** The id of a scoped PAT (plan C4). The token carries it with the secret of
+    the PAT; the log names the PAT by it. *)
+module Pat_id : Authz_id.S
+
+(** The id of a Service credential (plan C4). The token carries it with the
+    secret of the credential; the log names the credential by it. A
+    {!Service_id} names the service, and one service may hold several
+    credentials over time. *)
+module Service_credential_id : Authz_id.S
+
 module Workspace_id : Authz_id.S
 module Invite_id : Authz_id.S
 
@@ -56,7 +66,13 @@ module Effect : sig
     | Admin_disable_block
     | Read_audit_metadata
 
+  (** The label of an effect, such as [read_state]. A scoped PAT record holds
+      it on disk (plan C4-1b), so renaming one orphans every record written
+      with it. *)
   val to_string : t -> string
+
+  (** The effect of a label of {!to_string}. *)
+  val of_string : string -> t option
 
   (** The five [Manage_*] effects and [Admin_disable_block]: the ones that
       change who may do what, or whether something runs. A PAT that asks for
@@ -82,6 +98,14 @@ module Channel : sig
     | Verifier
     | Autonomous
 
+  (** The label of a channel, such as [board_trigger]. A scoped PAT record
+      holds it on disk (plan C4-1b), so renaming one orphans every record
+      written with it. *)
+  val to_string : t -> string
+
+  (** The channel of a label of {!to_string}. *)
+  val of_string : string -> t option
+
   val equal : t -> t -> bool
 
   module Set : Set.S with type elt = t
@@ -105,6 +129,7 @@ module Authorization_scope : sig
   val all : t
 
   val inter : t -> t -> t
+  val equal : t -> t -> bool
 end
 
 module Pat_scope : sig

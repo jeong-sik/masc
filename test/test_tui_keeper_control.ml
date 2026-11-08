@@ -39,6 +39,9 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
   ; kr_runtime_blocker_signature = None
   ; kr_runtime_lane_observation = None
   ; kr_runtime_path_rest = Ok None
+  ; kr_operator_disposition = Ok None
+  ; kr_failing_since = None
+  ; kr_recent_turns = None
   }
 
 let running_turn activity : Decode.keeper_turn_state =
@@ -1389,6 +1392,113 @@ let test_roster_decodes_the_walk_rest_beside_the_row () =
     ; ( "an unknown basis is an error"
       , resting [ release_at (`Float 1_790_000_000.); "release_basis", `String "guessed" ] )
     ]
+;;
+
+let test_roster_decodes_operator_disposition_beside_the_row () =
+  let decode disp reason =
+    let fields =
+      match Yojson.Safe.from_string (gate_row "disposition_keeper") with
+      | `Assoc fields -> fields
+      | _ -> Alcotest.fail "the fixture row is an object"
+    in
+    let row =
+      `Assoc
+        (fields
+        @ [ "operator_disposition", disp; "operator_disposition_reason", reason ])
+    in
+    match
+      Decode.decode_keeper_runtime_list
+        (`Assoc
+           [ "candle", `Assoc [ "status", `String "off" ]; "keepers", `List [ row ]
+           ; "total", `Int 1; "truncated", `Bool false ])
+    with
+    | Ok ([ runtime ], [], false, 1, _) -> runtime.Decode.kr_operator_disposition
+    | Ok _ -> Alcotest.fail "the row was hidden"
+    | Error reason -> Alcotest.fail reason
+  in
+  Alcotest.(check bool) "null pair decodes to Ok None" true
+    (decode `Null `Null = Ok None);
+  Alcotest.(check bool) "valid typed pair decodes to Ok (Some (kind, reason))" true
+    (decode (`String "operator_action_required") (`String "config_invalid")
+     = Ok
+         (Some
+            ( Masc.Keeper_execution_receipt.Disp_operator_action_required
+            , Masc.Keeper_execution_receipt.Reason_config_invalid )));
+  Alcotest.(check bool) "unknown disposition kind is Error" true
+    (Result.is_error (decode (`String "magic_action") (`String "config_invalid")));
+  Alcotest.(check bool) "unknown reason is Error" true
+    (Result.is_error (decode (`String "operator_action_required") (`String "magic_reason")));
+  Alcotest.(check bool) "asymmetric null/string is Error" true
+    (Result.is_error (decode `Null (`String "config_invalid")))
+;;
+
+let test_roster_decodes_failing_since () =
+  let decode failing_since =
+    let fields =
+      match Yojson.Safe.from_string (gate_row "failing_keeper") with
+      | `Assoc fields -> fields
+      | _ -> Alcotest.fail "the fixture row is an object"
+    in
+    let row = `Assoc (fields @ [ "failing_since", failing_since ]) in
+    match
+      Decode.decode_keeper_runtime_list
+        (`Assoc
+           [ "candle", `Assoc [ "status", `String "off" ]; "keepers", `List [ row ]
+           ; "total", `Int 1; "truncated", `Bool false ])
+    with
+    | Ok ([ runtime ], [], false, 1, _) -> runtime.Decode.kr_failing_since
+    | Ok _ -> Alcotest.fail "the row was hidden"
+    | Error reason -> Alcotest.fail reason
+  in
+  Alcotest.(check (option (float 0.001))) "null failing_since is None" None (decode `Null);
+  Alcotest.(check (option (float 0.001))) "numeric failing_since is Some" (Some 1794050000.0)
+    (decode (`Float 1794050000.0))
+;;
+
+let test_roster_decodes_recent_turns () =
+  let decode recent_turns =
+    let fields =
+      match Yojson.Safe.from_string (gate_row "pulse_keeper") with
+      | `Assoc fields -> fields
+      | _ -> Alcotest.fail "the fixture row is an object"
+    in
+    let row = `Assoc (fields @ [ "recent_turns", recent_turns ]) in
+    match
+      Decode.decode_keeper_runtime_list
+        (`Assoc
+           [ "candle", `Assoc [ "status", `String "off" ]; "keepers", `List [ row ]
+           ; "total", `Int 1; "truncated", `Bool false ])
+    with
+    | Ok ([ runtime ], [], false, 1, _) -> runtime.Decode.kr_recent_turns
+    | Ok _ -> Alcotest.fail "the row was hidden"
+    | Error reason -> Alcotest.fail reason
+  in
+  Alcotest.(check bool) "null recent_turns is None" true (decode `Null = None);
+  let sample_obj =
+    `Assoc
+      [ "truncated", `Bool false
+      ; ( "turns"
+        , `List
+            [ `List [ `Float 1794037335.0; `String "ok" ]
+            ; `List [ `Int 1794036000; `String "failed" ]
+            ] )
+      ]
+  in
+  match decode sample_obj with
+  | None -> Alcotest.fail "expected decoded recent_turns"
+  | Some pulse ->
+    Alcotest.(check bool) "not truncated" false pulse.truncated;
+    Alcotest.(check int) "2 samples" 2 (List.length pulse.samples);
+    let s1 = List.hd pulse.samples in
+    let s2 = List.nth pulse.samples 1 in
+    Alcotest.(check (float 0.001)) "first ts" 1794037335.0 s1.at;
+    Alcotest.(check bool) "first outcome is Turn_ok" true (s1.outcome = Masc.Keeper_turn_pulse.Turn_ok);
+    Alcotest.(check (float 0.001)) "second ts" 1794036000.0 s2.at;
+    Alcotest.(check bool)
+      "second outcome is Turn_failed"
+      true
+      (s2.outcome = Masc.Keeper_turn_pulse.Turn_failed)
+;;
 
 let test_actual_producer_error_is_isolated () =
   let producer_row = Yojson.Safe.from_string
@@ -1748,6 +1858,12 @@ let () =
             test_roster_decodes_an_error_row_without_refusing_the_rest
         ; Alcotest.test_case "the walk rest decodes beside the row" `Quick
             test_roster_decodes_the_walk_rest_beside_the_row
+        ; Alcotest.test_case "operator disposition decodes beside the row" `Quick
+            test_roster_decodes_operator_disposition_beside_the_row
+        ; Alcotest.test_case "failing_since decodes beside the row" `Quick
+            test_roster_decodes_failing_since
+        ; Alcotest.test_case "recent_turns decodes beside the row" `Quick
+            test_roster_decodes_recent_turns
         ; Alcotest.test_case "actual producer error stays isolated" `Quick
             test_actual_producer_error_is_isolated
         ; Alcotest.test_case "present unknown health on an error row is rejected" `Quick

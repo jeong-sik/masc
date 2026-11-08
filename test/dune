@@ -1959,7 +1959,6 @@
   test_prompt_asset_sync
   test_prompt_preset
   test_managed_assets_sync_from_binary
-  test_system_error_class
   test_board_core_payload)
  (modules
   test_keeper_turn_interrupt
@@ -2101,7 +2100,6 @@
   test_prompt_asset_sync
   test_prompt_preset
   test_managed_assets_sync_from_binary
-  test_system_error_class
  test_board_core_payload)
  (libraries
   uucp
@@ -2253,6 +2251,13 @@
  (name test_cancel_safe)
  (modules test_cancel_safe)
  (libraries alcotest masc_cancel_safe eio eio_main))
+
+; RFC-0154 error-class SSOT. Needs only masc_core and the Eio exception
+; shapes it unwraps (#49742), so it does not ride the masc_test_deps superset.
+(test
+ (name test_system_error_class)
+ (modules test_system_error_class)
+ (libraries alcotest fmt masc_core eio eio.unix unix))
 
 ; The metric store is on the same contract: a counter bumped inside a
 ; cancelled fiber must not turn the cancellation into a warning (#37349).
@@ -3093,6 +3098,8 @@
 
 (include stanzas/test_keeper_decision_audit_dated_store.inc)
 
+(include stanzas/test_mcp_session_store_loop.inc)
+
 (include stanzas/test_keeper_terminal_reason_typed.inc)
 
 (include stanzas/test_keeper_phase_gate_plan.inc)
@@ -3379,6 +3386,7 @@
 (include stanzas/test_runtime_muse_msp.inc)
 (include stanzas/test_runtime_vibe_headless.inc)
 (include stanzas/test_runtime_vibe_cli.inc)
+(include stanzas/test_runtime_vibe_acp_readiness.inc)
 (include stanzas/test_runtime_muse_serve.inc)
 (include stanzas/test_runtime_muse_serve_config.inc)
 (include stanzas/test_runtime_muse_home.inc)
@@ -4470,6 +4478,44 @@
  (libraries alcotest masc_tui_keeper_list_model masc_tui_render_schedule))
 
 (test
+ (name test_tui_keeper_next_run)
+ (modules test_tui_keeper_next_run)
+ (libraries
+  alcotest
+  masc
+  masc.masc_types
+  masc.masc_schedule
+  masc_tui_types
+  masc_tui_agenda
+  masc_tui_keeper_axis_cell
+  masc_tui_keeper_next_run))
+
+(test
+ (name test_tui_keeper_axis)
+ (modules test_tui_keeper_axis)
+ (libraries
+  alcotest
+  masc
+  masc.masc_types
+  masc.masc_schedule
+  masc_tui_types
+  masc_tui_agenda
+  masc_tui_keeper_axis_cell
+  masc_tui_keeper_axis
+  masc_tui_keeper_memory_reading))
+
+(test
+ (name test_tui_keeper_memory_reading)
+ (modules test_tui_keeper_memory_reading)
+ (libraries
+  alcotest
+  masc
+  masc.masc_types
+  masc_tui_types
+  masc_tui_keeper_axis_cell
+  masc_tui_keeper_memory_reading))
+
+(test
  (name test_tui_editor)
  (modules test_tui_editor)
  (libraries alcotest unix masc_tui_editor))
@@ -4872,7 +4918,7 @@
 (test
  (name test_tui_keeper_mark)
  (modules test_tui_keeper_mark)
- (libraries alcotest masc masc_tui_keeper_mark masc_tui_message_layout))
+ (libraries alcotest masc masc_tui_keeper_list_model masc_tui_keeper_mark masc_tui_message_layout))
 
 (test
  (name test_tui_approval_detail)
@@ -4974,6 +5020,9 @@
   unix))
 
 (include stanzas/test_keeper_turn_attempt_observer.inc)
+(include stanzas/test_keeper_memory_age_bins.inc)
+(include stanzas/test_tui_decode_workspace_memory.inc)
+(include stanzas/test_keeper_turn_pulse.inc)
 (include stanzas/test_keeper_turn_boundaries.inc)
 (include stanzas/test_keeper_context_core_history.inc)
 (include stanzas/test_keeper_turn_fragments.inc)
@@ -7151,6 +7200,13 @@
 (include stanzas/test_authz_session_state.inc)
 (include stanzas/test_authz_browser_session.inc)
 (include stanzas/test_authz_browser_request.inc)
+(include stanzas/test_authz_credential_token.inc)
+(include stanzas/test_authz_scope_body.inc)
+(include stanzas/test_authz_pat_event.inc)
+(include stanzas/test_authz_service_credential_event.inc)
+(include stanzas/test_authz_credential_auth.inc)
+(include stanzas/test_auth_gate.inc)
+(include stanzas/test_authz_credential_presentation.inc)
 (include stanzas/test_authz_principal_event.inc)
 (include stanzas/test_authz_cancel_event.inc)
 (include stanzas/test_authz_registration_event.inc)

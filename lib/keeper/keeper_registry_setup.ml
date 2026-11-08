@@ -416,10 +416,6 @@ let install_entry_if_current_internal
        else Entry_install_conflict))
 ;;
 
-let install_entry_if_current ~observed replacement =
-  install_entry_if_current_internal ~observed replacement
-;;
-
 let update_entry_unit ~base_path name f =
   (* fire-and-forget: unit wrapper discards Ok/Error; callers only need side effects and logged metrics. *)
   ignore (update_entry ~base_path name f)
@@ -551,6 +547,7 @@ let register_with_state_result
     ; last_error = None
     ; last_failure_reason = initial_failure_reason
     ; last_failure_at = None
+    ; failing_since = None
     ; turn_consecutive_failures = initial_turn_failure_streak
     ; turn_attempt_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
@@ -859,6 +856,7 @@ let register_restarting_internal ?lifecycle_token ?intake_token ~base_path name 
     ; last_error = None
     ; last_failure_reason = initial_failure_reason
     ; last_failure_at = None
+    ; failing_since = None
     ; turn_consecutive_failures = initial_turn_failure_streak
     ; turn_attempt_state = Atomic.make None
     ; current_turn_switch = Atomic.make None
@@ -1377,45 +1375,6 @@ let set_turn_phase_direct ~observation_token ~base_path name ~event_kind (turn_p
                    ~where:event_kind
                    ~from:obs.turn_phase
                    ~to_:turn_phase
-                   ~violation);
-            obs)
-      in
-      e', changed)
-  in
-  if changed then broadcast_composite_changed ~base_path ~name ~ts_unix:now
-;;
-
-let set_turn_phase_with ~observation_token ~base_path name ~event_kind ~target ~update_obs =
-  (* RFC-0072 Phase 4b + Phase 5 variant: resolve the turn_phase transition
-     and let the caller apply additional observation mutations atomically in
-     the same CAS.  This keeps multi-field setters (gate rejection) on the
-     same resolver / guard / broadcast pathway as [set_turn_phase] instead
-     of calling the legacy
-     [validate_turn_phase_transition] directly.  Idempotent self-loops are
-     no-ops and do not emit a broadcast, matching [set_turn_phase].  The
-     [event_kind] label is forwarded to [raise_turn_phase_transition_violation]
-     via [wrap_unit] so guard metrics name the actual caller. *)
-  let now = Time_compat.now () in
-  let changed =
-    update_entry_if_registered ~base_path name (fun e ->
-      let e', changed =
-        update_current_turn ~observation_token e (fun obs ->
-          match resolve_turn_phase_transition ~from:obs.turn_phase ~target with
-          | Resolved_turn_idempotent -> obs
-          | Resolved_turn_transition _ ->
-            let obs' =
-              { (stamp_turn_progress ~now ~event_kind obs) with turn_phase = target }
-            in
-            update_obs obs'
-          | Resolved_turn_violation violation ->
-            Keeper_fsm_guard_runtime.wrap_unit
-              ~action:"turn_phase_transition"
-              ~stage:"guard"
-              (fun () ->
-                 raise_turn_phase_transition_violation
-                   ~where:event_kind
-                   ~from:obs.turn_phase
-                   ~to_:target
                    ~violation);
             obs)
       in

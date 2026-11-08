@@ -201,7 +201,7 @@ let last_candidates (config : Workspace.config) =
       (fun (event : E.t) ->
          match event.body with
          | E.Candidates c | E.Candidates_fenced c -> Some (c.candidate_task_ids, c.candidate_keepers)
-         | E.Half_life_set _ | E.Snapshot _ | E.Payout_owed _ | E.Candidate_window_held _ | E.Unattributed _ | E.Paid _ | E.Equipped _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Payout_failed _ -> None)
+         | E.Half_life_set _ | E.Snapshot _ | E.Payout_owed _ | E.Candidate_window_held _ | E.Candidate_window_released _ | E.Unattributed _ | E.Paid _ | E.Equipped _ | E.Purchased _ | E.Granted _ | E.Gifted _ | E.Gifted_item _ | E.Payout_failed _ -> None)
       (List.rev (Candle_ledger.events view))
 
 

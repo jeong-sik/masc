@@ -391,7 +391,7 @@ let replay events =
          | Candle_event.Snapshot _
          | Candle_event.Payout_owed _
          | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
-         | Candle_event.Candidate_window_held _
+         | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
          | Candle_event.Unattributed _
          | Candle_event.Payout_failed _ -> Ok state))
     (Ok empty)

@@ -75,6 +75,20 @@ let refusal_to_string = function
   | Session_refused refusal -> Bs.refusal_to_string refusal
 ;;
 
+let is_unauthenticated = function
+  | Query_credential
+  | Session_and_bearer
+  | Not_a_session_cookie
+  | Session_refused
+      ( Bs.Unknown
+      | Bs.Ended
+      | Bs.Expired
+      | Bs.Secret_differs
+      | Bs.Revocation_pending
+      | Bs.Principal_inactive (_ : Authz_types.User_id.t) ) -> true
+  | Cross_origin | Origin_missing | Csrf_missing | Csrf_differs -> false
+;;
+
 type verdict =
   | No_session
   | Session of

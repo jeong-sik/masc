@@ -26,34 +26,42 @@ let capability_drop_warned : (string * string, unit) Hashtbl.t = Hashtbl.create 
 
 let dialect_ignored_warned : (string * string, unit) Hashtbl.t = Hashtbl.create 16
 
+(* Serializes the mem→replace one-shot bookkeeping on both tables: agent
+   fibers run on pool domains and OCaml 5 domains preempt without suspension
+   points, so concurrent mem/replace (and the table resize it may trigger)
+   is not cooperative-safe even though a double warning itself would be. *)
+let warned_table_mutex = Eio.Mutex.create ()
+
 let warn_capability_drop ~model_id ~field =
   let key = model_id, field in
-  if not (Hashtbl.mem capability_drop_warned key)
-  then (
-    Hashtbl.replace capability_drop_warned key ();
-    (Metrics.get_global ()).on_capability_drop ~model_id ~field;
-    Diag.warn
-      "backend_openai"
-      "dropping request field %s for model %s: capability record reports supports_%s = \
-       false. Update Capabilities.for_model_id if this model actually supports it, \
-       otherwise remove the field from your request config."
-      field
-      model_id
-      field)
+  Eio.Mutex.use_rw ~protect:true warned_table_mutex (fun () ->
+    if not (Hashtbl.mem capability_drop_warned key)
+    then (
+      Hashtbl.replace capability_drop_warned key ();
+      (Metrics.get_global ()).on_capability_drop ~model_id ~field;
+      Diag.warn
+        "backend_openai"
+        "dropping request field %s for model %s: capability record reports supports_%s = \
+         false. Update Capabilities.for_model_id if this model actually supports it, \
+         otherwise remove the field from your request config."
+        field
+        model_id
+        field))
 ;;
 
 let warn_dialect_ignored ~model_id ~parameter =
   let field = Capabilities.sampling_parameter_to_string parameter in
   let key = model_id, field in
-  if not (Hashtbl.mem dialect_ignored_warned key)
-  then (
-    Hashtbl.replace dialect_ignored_warned key ();
-    Diag.warn
-      "backend_openai"
-      "dropping request field %s for model %s: the selected reasoning dialect suppresses \
-       this sampling parameter."
-      field
-      model_id)
+  Eio.Mutex.use_rw ~protect:true warned_table_mutex (fun () ->
+    if not (Hashtbl.mem dialect_ignored_warned key)
+    then (
+      Hashtbl.replace dialect_ignored_warned key ();
+      Diag.warn
+        "backend_openai"
+        "dropping request field %s for model %s: the selected reasoning dialect suppresses \
+         this sampling parameter."
+        field
+        model_id))
 ;;
 
 (* A clamp is not a drop: the field stays on the wire at the ceiling. It shares

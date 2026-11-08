@@ -1,0 +1,38 @@
+(** Memory health readings and axis cells for Keeper secondary row (RFC-0511 A3). *)
+
+type lag =
+  | Lag_unmeasured
+  | Lag of int
+
+type gap =
+  | No_gap
+  | Gap of
+      { first_atom : int
+      ; past_last_atom : int
+      }
+  | Gap_unmeasured
+
+type t =
+  | Unknown
+  | No_row
+  | Refused of string
+  | Row of
+      { state : Masc_tui_types.memory_state
+      ; lag : lag
+      ; gap : gap
+      ; digest_at : float option
+      ; updated_at : float option
+      ; added : int
+      ; removed : int
+      ; source_invalidations : int
+      }
+
+type index
+
+val unread_lag : Masc.Tui_decode_memory_health.memory_librarian_health -> int option
+
+val index_of_snapshot : Masc.Tui_decode_memory_health.memory_health_snapshot option -> index
+
+val find : index -> keeper_name:string -> t
+
+val cells : now:float -> t -> Masc_tui_keeper_axis_cell.t list

@@ -3,7 +3,7 @@ rfc: "0511"
 title: "Keepers 목록의 남은 시안 항목은 갈래 넷의 독립 스택으로 올린다"
 status: Accepted
 created: 2026-11-07
-updated: 2026-11-07
+updated: 2026-11-08
 author: claude
 supersedes: []
 superseded_by: null
@@ -18,7 +18,7 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 
 - 시안 `Keeper Pulse`(Artifact 3판, 2026-11-06)의 데이터 표는 14행이다. main `3519bd8c658` 과 맞춰 보면 들어간 것이 1행, 일부 들어간 것이 3행, 서버 값을 기다리는 것이 2행이다. RFC-0503 §4 가 범위 밖으로 둔 것이 7행이고, 맡은 층이 없는 것이 1행이다.
 - 이 RFC 는 남은 13행을 네 갈래로 나눈다. K 는 Keepers 목록의 글(TUI 만), S 는 roster 행에 더하는 서버 투영, A 는 행의 둘째 줄에 붙는 칸(일정 · 기억 읽기), W 는 기억 서버(나이 사다리 · 월드)다. 갈래마다 스택 하나를 두고, 갈래끼리 고치는 파일이 겹치지 않게 선을 긋는다. 겹치는 파일은 §5.2 표에 모두 적었다.
-- 서버 값을 화면에 그리는 층 둘(D1 D2)은 2차 착수다. 앞 층이 main 에 오른 뒤에 시작한다.
+- 서버 값을 화면에 그리는 층 셋(D1 D2 D2c)은 2차 착수다. 앞 층이 main 에 오른 뒤에 시작한다.
 - 나이는 값이다. stale 은 서버가 닫힌 값으로 적은 것에만 쓴다(RFC-0418). 모르는 값은 0 이 아니라 표지로 그린다.
 - 대조에서 사실 넷이 나왔다. 서버는 한도 해제 시각과 그 출처를 이미 내고 TUI 는 출처를 버린다. `failing_since` 는 서버 어디에도 없다. 쉬는 시각은 `HH:MM` 이 아니라 날짜가 붙은 19칸 글이다. RFC-0503 §6.5 의 "서버는 해제 시각을 내지 않는다"는 main 보다 낡았다.
 - 운영자가 이 RFC 의 병합과 구현 착수를 지시했다(2026-11-07). RFC-0503 §5 의 "층마다 범위를 먼저 승인받는다"를 이 RFC 의 §3 층 표로 대신한다. 구현 PR 의 병합은 따로 정한다.
@@ -46,7 +46,7 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 | 11 | 갱신 시계 `+ 47m` · `+1 −0` | A | 〃 | A3 A4 A5 |
 | 12 | stale ×N(근거 무효화) | B | 〃 | A3 A4 A5 |
 | 13 | 사실 나이 사다리 · `absent` | C | 〃. 서버에 사다리가 없다 | W1 W2 D2 |
-| 14 | 월드 `current` · `stale` · `building` | C | 〃. 서버에 월드 읽기 경로가 없다 | W3 W4 D2 |
+| 14 | 월드 `current` · `stale` · `building` | C | 〃. 서버에 월드 읽기 경로가 없다. 경로를 놓아도(W3) TUI 가 읽지 않는다 | W3 W4 D2c |
 
 ### 1.2 대조에서 나온 사실
 
@@ -86,7 +86,7 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 | A | 8 9 10 11 12 | A1 A2 A3 A4 A5 | `bin/masc_tui_keeper_*` 새 모듈, 둘째 줄 함수 한 곳, `bin/masc_tui.ml` 의 읽기 조건 두 곳, `bin/masc_tui_types.ml` 의 `due` 규칙을 함수로 꺼내는 한 곳 | 없다 |
 | W | 13 14 | W1 W2 W3 W4 | `lib/keeper/keeper_memory_age_bins`, `lib/workspace_memory/`, health 서버 · 디코더 | health 행에 필드 하나, 읽기 경로 하나 |
 
-2차 착수는 D1(S 값을 행에 그린다)과 D2(W 값을 Memory 화면과 행에 그린다)다.
+2차 착수는 D1(S 값을 행에 그린다), D2(W 의 나이 사다리를 Memory 화면과 행에 그린다), D2c(TUI 가 W 의 월드를 읽고 Memory 화면에 그린다)다.
 
 ### 2.3 K 갈래 — Keepers 목록의 글
 
@@ -145,7 +145,13 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 
 **S3d. 사람 손이 필요한 행의 표지 (행 6의 표시)**
 
-- 가장 최근 영수증이 `needs_operator_broadcast` 에 걸리는 행은 `Held_call` 과 같은 글리프 `!` 와 `Theme.bad` 를 쓴다. 사람이 움직인다는 뜻이 같아서 글리프도 같다. 원인이 다르므로 낱말로 가른다.
+- 가장 최근 영수증이 `needs_operator_broadcast` 에 걸리고 행의 활동이 `Idle` `Attempt_failed` `Unknown` 인 행은 `Held_call` 과 같은 글리프 `!` 와 `Theme.bad` 를 쓴다. 사람이 움직인다는 뜻이 같아서 글리프도 같다. 원인이 다르므로 낱말로 가른다.
+  - 영수증은 턴이 끝날 때만 쓰이므로 지난 턴을 말한다. 행이 그보다 새로운 상태를 보이지 않을 때만 표지를 단다. `Idle` 은 지난 턴 뒤의 빈틈이다. `Attempt_failed` 는 열린 턴이 이미 실패 중이라 행과 영수증이 같은 방향을 말한다. `Unknown` 은 낱말과 어긋날 활동이 행에 없다.
+  - `Preparing` `Streaming` `Running` `Tool_waiting` `Model_waiting` 은 영수증이 아직 없는 열린 턴 안에서만 나온다. `Async_working` `Deferred` `Delegate_result` `Verifying` `External_waiting` 은 지금 하는 일이나 기다림이다. 이 활동들은 영수증보다 새로우므로 자기 글리프와 낱말을 그대로 쓴다.
+  - `Paused` `Offline` 은 새 영수증이 이어지지 않아 오래된 낱말이 계속 남는다. 이 활동도 자기 글리프와 낱말을 쓴다.
+  - `Held_call` `Question` `Confirmation` 은 이미 사람이 움직이는 활동이라 표지를 더하지 않는다.
+  - 판정은 `Masc_tui_keeper_mark.shows_operator_disposition` 한 곳에 있고 활동 variant 를 모두 적는다. 새 활동은 컴파일러가 이 함수에서 잡는다.
+  - 영수증 시각과 현재 턴 시작을 비교하는 길은 쓰지 않는다. 서버 필드(S3)를 늘려야 한다. `Idle` 에서 운영자가 고친 뒤 다음 턴이 영수증을 새로 쓰기 전까지는 낡은 표지가 남는다.
   - `Disp_operator_action_required` → `사람 몫`: 사람만 고칠 수 있는 원인이다.
   - `Disp_effect_review_required` → `효과 확인`: 원인은 알려졌고, 턴이 바깥을 바꿨는지 사람이 확인한다.
   - `Disp_unknown` → `분류 안 됨`: 분류기가 갈래를 못 찾았다. 사람이 할 일이 정해진 것이 아니라 고칠 빈틈이다.
@@ -313,7 +319,8 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 ### 2.7 2차 착수 — 표시 층
 
 - **D1.** S 의 값을 행에 그린다. `failing_since` 로 "실패 N분째" 칸, `recent_turns` 로 맥박 칸을 둘째 줄 칸 목록에 더한다. 맥박은 샘플 시각으로 12시간 창을 자르고, 창 앞부분이 `truncated` 로 비었으면 그 부분을 "모름" 기호로 그린다. `rested` 와 `failed` 는 다른 기호다. 선행: S1b · S2 · A2 가 main 에 오른 뒤.
-- **D2.** W 의 값을 그린다. Memory 화면의 `memory_fleet_header_rows`(`bin/masc_tui_render_memory.ml:907`)에 월드 줄과 사다리 줄을 더하고, 선택한 Keeper 상세(`memory_context_lines`, `:238`)에 사다리를 더하고, 둘째 줄 칸 목록에 사다리 칸을 더한다. 선행: W2 · W4 · A5 가 main 에 오른 뒤.
+- **D2.** W 의 나이 사다리를 그린다. Memory 화면의 `memory_fleet_header_rows`(`bin/masc_tui_render_memory.ml:907`)에 사다리 줄을 더하고, 선택한 Keeper 상세(`memory_context_lines`, `:238`)에 사다리를 더하고, 둘째 줄 칸 목록에 사다리 칸을 더한다. 선행: W2 · A5 가 main 에 오른 뒤.
+- **D2c.** TUI 가 W 의 월드를 읽고 Memory 화면에 그린다. W3 라우트(`/api/v1/dashboard/workspace-memory-inventory`)와 W4 디코더는 main 에 있지만 `bin/` 에서 W4 를 부르는 곳이 없다. 그래서 읽는 길(상태 필드, HTTP 읽기, loader, async 메시지, 화면 트리거)이 어느 층에도 없다. D2c 가 이 길을 놓고 `memory_fleet_header_rows` 에 월드 줄을 더한다. 월드 값은 닫힌 타입(아직 안 읽음 · 읽는 중 · 읽음 · 실패)이다. 아직 안 읽었거나 실패했으면 0 이나 빈 줄이 아니라 '모름' 기호를 그린다. 읽은 빈 월드는 0 개라는 값으로 그리고 '모름' 과 다르게 보인다. 읽는 때는 §7 의 결정 D11 을 따른다. 선행: W4 가 main 에 오른 뒤, D2 의 스택 위에 쌓는다.
 
 ## 3. 바뀌는 것
 
@@ -339,7 +346,8 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 | W3 | — | `workspace_memory_briefing.ml(i)`, `workspace_memory_ledger.ml(i)`, `workspace_memory_ledger_view.ml(i)`, `server_routes_http_routes_dashboard.ml`, 시험 | 185 | — |
 | W4 | `tui_decode_workspace_memory.ml(i)`, 시험 | `bin/dune` 또는 `lib/dune` | 200 | W3 |
 | D1 | 칸 모듈 | `bin/masc_tui_render_keepers.ml`, `bin/masc_tui_keeper_axis.ml` | 250 | S1b S2 A2 가 main 에 오른 뒤 |
-| D2 | — | `bin/masc_tui_render_memory.ml`, `bin/masc_tui_keeper_axis.ml` | 200 | W2 W4 A5 가 main 에 오른 뒤 |
+| D2 | — | `bin/masc_tui_render_memory.ml`, `bin/masc_tui_keeper_axis.ml` | 200 | W2 A5 가 main 에 오른 뒤 |
+| D2c | 시험 | `bin/masc_tui_render_memory.ml`, `bin/masc_tui_types.ml`, `bin/masc_tui_http.ml`, `bin/masc_tui_loader.ml`, `bin/masc_tui_async_protocol.ml(i)`, `bin/masc_tui.ml` | 180 | W4 가 main 에 오른 뒤, D2 의 스택 위에 쌓는다 |
 
 경로는 `lib/keeper/` · `lib/server/` · `lib/workspace_memory/` · `lib/` · `bin/` 를 줄여 적은 것이다. 층을 시작하는 에이전트가 자기 기준 커밋에서 경로를 다시 확인한다.
 
@@ -364,7 +372,7 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 ### 5.1 착수
 
 - 1차 착수는 스택 넷, 에이전트 넷이다. K · S · A · W. 층 순서는 §3 표대로이고, 스택마다 밑동 PR 은 `main` 을 겨냥하고 다음 층은 앞 층의 브랜치를 겨냥한다(`docs/guides/NATIVE-GITHUB-STACKS.md`). W 스택은 서버 쪽(W1 W2 W3)과 디코더(W4)를 한 에이전트가 순서대로 쌓는다.
-- 2차 착수(D1 D2)는 앞 층이 main 에 오른 뒤에 각각 main 에서 새 스택으로 시작한다. 1차 스택이 병합되기 전에는 시작하지 않는다.
+- 2차 착수(D1 D2)는 앞 층이 main 에 오른 뒤에 각각 main 에서 새 스택으로 시작한다. D2c 는 D2 의 스택 위에 쌓는다. 1차 스택이 병합되기 전에는 시작하지 않는다.
 - 에이전트는 자기 갈래의 층만 만든다. 구현 PR 의 병합, Ready 전환, 강제 푸시, 이미 리뷰가 달린 스택의 rebase, 다른 갈래의 파일 수정은 하지 않는다.
 
 ### 5.2 파일 소유와 충돌
@@ -376,13 +384,14 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 | `bin/masc_tui_keeper_trail.ml(i)` | K | — |
 | `lib/tui_decode.ml(i)`, `lib/keeper/keeper_tool_surface_ops.ml`, `lib/keeper/keeper_registry*.ml`, `gate-keepers.ts` | S | — |
 | `bin/masc_tui_keeper_axis*.ml`, `bin/masc_tui_keeper_next_run.ml`, `bin/masc_tui_keeper_memory_reading.ml` | A | D1 · D2 가 `bin/masc_tui_keeper_axis.ml` 의 칸 목록에 줄을 더한다 |
-| `bin/masc_tui.ml` | 아무도 | A4 가 읽기 조건 두 곳 |
-| `bin/masc_tui_types.ml` | 아무도 | A1 이 `due` 규칙을 이름 있는 함수로 꺼내는 한 곳 |
+| `bin/masc_tui.ml` | 아무도 | A4 가 읽기 조건 두 곳, D2c 가 월드 읽기를 시작하는 한 곳 |
+| `bin/masc_tui_types.ml` | 아무도 | A1 이 `due` 규칙을 이름 있는 함수로 꺼내는 한 곳, D2c 가 월드 상태 필드 하나 |
+| `bin/masc_tui_http.ml`, `bin/masc_tui_loader.ml`, `bin/masc_tui_async_protocol.ml(i)` | 아무도 | D2c 가 월드 읽기를 한 곳씩 더한다 |
 | `bin/masc_tui_keeper_mark.ml` | S(S3d 의 낱말과 글리프) | K2 K3 A2 A5 D1 D2 가 `column_legend` 에 자기 줄을 더한다 |
 | `docs/guides/TUI-KEYS.md` | 생성 문서 | 위 `column_legend` 를 고친 층이 생성기 출력과 맞춘다 |
 | `test/test_tui_keeper_control.ml`, `test/test_tui_keeper_trail.ml`, `test/test_tui_keeper_list_model.ml` | S(`keeper_runtime` 리터럴) | K3 가 `test_tui_keeper_trail.ml` 에 시험을 더한다 |
 | `lib/tui_decode_memory_health.ml(i)`, health 서버, `dashboard-misc.ts` | W | A3 는 읽기만 한다 |
-| `bin/masc_tui_render_memory.ml` | A3 가 규칙을 옮기는 두 곳 | D2 가 줄을 더한다 |
+| `bin/masc_tui_render_memory.ml` | A3 가 규칙을 옮기는 두 곳 | D2 가 사다리 줄을, D2c 가 월드 줄을 더한다 |
 | `bin/dune`, `test/dune` | 모두 | 떨어진 줄에 추가한다 |
 
 - 두 갈래가 같은 곳을 고치는 자리는 넷이다.
@@ -428,6 +437,7 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 | D8 | `Provider` 가르기 | 하지 않는다 | §4. 근본 해결은 서버 RFC-0454 P2 |
 | D9 | 월드의 `published_at` 과 `absent` | 1차에서 제외 | 재료가 없거나 무겁다(W3) |
 | D10 | 2차 착수 시점 | 필요한 1차 스택이 main 에 오른 뒤 | 두 스택에 걸친 층은 스택 하나로 쌓을 수 없다 |
+| D11 | 월드를 읽는 때 | Memory 화면이 열려 있는 동안만, W3 의 60초 캐시보다 잦지 않게 읽는다. 모양은 memory-health 읽기(`bin/masc_tui.ml` 의 `launch_memory_health_load`)를 따르고 새 타이머를 만들지 않는다 | W3 에는 변경 신호가 없어서(§2.6) 서버가 바뀌었다고 말할 때 읽는 길(RFC-0480)을 쓸 수 없다. 월드 줄은 Memory 화면에만 있어서 다른 화면에서 읽으면 쓰이지 않는다 |
 
 ## 8. 참고
 

@@ -118,6 +118,16 @@ let run_keeper_cycle_admitted
         ?event_bus
         ())
   in
+  let record_pulse outcome =
+    Keeper_turn_pulse.record
+      ~base_path:ctx.config.base_path
+      ~keeper_name:meta_after_triage.name
+      ~at:(Time_compat.now ())
+      outcome;
+    Keeper_row_broadcast.changed
+      ~base_path:ctx.config.base_path
+      ~keeper_name:meta_after_triage.name
+  in
   match admitted_execution with
   | Error failure ->
     let err = failure.Keeper_unified_turn.error in
@@ -173,13 +183,21 @@ let run_keeper_cycle_admitted
           ();
         meta_after_triage
     in
+    record_pulse Keeper_turn_pulse.Turn_failed;
     Failed { meta; failure }
-  | Ok (Keeper_unified_turn.Turn_completed { meta }) -> Completed { meta }
-  | Ok (Keeper_unified_turn.Turn_checkpointed { meta }) -> Checkpointed { meta }
-  | Ok (Keeper_unified_turn.Turn_input_required updated) -> Input_required updated
+  | Ok (Keeper_unified_turn.Turn_completed { meta }) ->
+    record_pulse Keeper_turn_pulse.Turn_ok;
+    Completed { meta }
+  | Ok (Keeper_unified_turn.Turn_checkpointed { meta }) ->
+    record_pulse Keeper_turn_pulse.Turn_ok;
+    Checkpointed { meta }
+  | Ok (Keeper_unified_turn.Turn_input_required updated) ->
+    record_pulse Keeper_turn_pulse.Turn_ok;
+    Input_required updated
   | Ok (Keeper_unified_turn.Turn_cancelled meta) -> Cancelled meta
   | Ok (Keeper_unified_turn.Turn_skipped meta) -> Skipped meta
   | Ok (Keeper_unified_turn.Turn_rested { meta; rest; deferred_runtime_lane }) ->
+    record_pulse Keeper_turn_pulse.Turn_rested;
     Rested { meta; rest; deferred_runtime_lane }
 ;;
 

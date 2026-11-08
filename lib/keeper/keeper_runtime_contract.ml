@@ -114,26 +114,23 @@ let json_string_field name = function
 let first_string_field names json =
   List.find_map (fun name -> json_string_field name json) names
 
-let path_like_key key =
-  let key = String.lowercase_ascii key in
-  key = "cwd" || key = "dir" || key = "directory" || key = "file"
-  || String_util.contains_substring key "path"
-
-let collect_observed_paths json =
-  let rec loop acc = function
-    | `Assoc fields ->
-        List.fold_left
-          (fun acc (key, value) ->
-            match value with
-            | `String path when path_like_key key && String.trim path <> "" ->
-                path :: acc
-            | other -> loop acc other)
-          acc fields
-    | `List values -> List.fold_left loop acc values
-    | _ -> acc
-  in
-  loop [] json
-  |> List.sort_uniq String.compare
+(* The paths a call touched are the values of the params its definition
+   declares as paths ([role = "path"] in config/tools/<name>.toml, read back
+   as [Tool_definition_toml.path_params]). A key is never taken for a path
+   because of its spelling: an undeclared key that happens to contain "path"
+   is not one, and a declared key named anything is (#49742). A tool without
+   an embedded definition declares nothing, so it reports no paths. *)
+let observed_paths ~path_params input =
+  match input with
+  | `Assoc fields ->
+    List.filter_map
+      (fun (key, value) ->
+         match value with
+         | `String path when List.mem key path_params && String.trim path <> "" -> Some path
+         | _ -> None)
+      fields
+    |> List.sort_uniq String.compare
+  | _ -> []
 
 (* Which input key the target came from, in the order they are tried. A file
    target and a working directory are both strings and were both reported as
@@ -174,7 +171,12 @@ let target_kind_of_input input target =
           | None -> "tool"))
 
 let action_radius_json ~tool_name ~input ~duration_ms ?error
-    ?sandbox_target () : Yojson.Safe.t =
+    ?sandbox_target ?path_params () : Yojson.Safe.t =
+  let path_params =
+    match path_params with
+    | Some declared -> declared
+    | None -> Tool_definition_embedded.path_params tool_name
+  in
   let action_key =
     first_string_field [ "action"; "action_key"; "op"; "cmd"; "command" ] input
     |> Option.value ~default:tool_name
@@ -187,7 +189,7 @@ let action_radius_json ~tool_name ~input ~duration_ms ?error
       ("target_kind", `String (target_kind_of_input input target));
       ("target_path", string_opt_json (Option.map fst target));
       ("sandbox_target", string_opt_json sandbox_target);
-      ("observed_paths", Json_util.json_string_list (collect_observed_paths input));
+      ("observed_paths", Json_util.json_string_list (observed_paths ~path_params input));
       ("duration_ms", `Float duration_ms);
       ("error", string_opt_json error);
     ]

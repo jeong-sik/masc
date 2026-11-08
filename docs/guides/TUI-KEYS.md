@@ -847,6 +847,9 @@ or completion.
 | `Mode M/D/A` | manual / on demand / autonomous |
 | `S D/M/R` | sandbox: docker / microvm / remote_ssh |
 | `쉬는 중` | resting path: relative duration (제공자 stated / 상한 bounded); ▹ prefixes next candidate after turn failure |
+| `◷` | next scheduled run or hold status (Detailed second row) |
+| `mem · lag · stale` | keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second row) |
+| `사람 몫 / 효과 확인 / 분류 안 됨` | requires human operator action, effect review, or unmapped fault (NOW column) |
 
 ## Memory marks
 

@@ -25,8 +25,8 @@ let masc_publish event =
 
 (** Publish a keeper keepalive lifecycle event.
 
-    Event names are pinned by
-    {!Keeper_lifecycle_events.all_event_names}, which covers both the
+    Event names come from [Keeper_lifecycle_events.t] and
+    [Keeper_state_machine.phase_to_string], which cover both the
     custom verbs (\[started\] / \[reconciled\] / \[restarted\] /
     \[supervisor_cleaned\] / \[purged\] / \[admission_denied\]) and
     the phase-derived names (\[stopped\] / \[crashed\] / \[dead\] /
@@ -35,9 +35,8 @@ let masc_publish event =
     Issue #8575: the previous docstring listed only five names, so
     operators silently missed the cleanup and recovery events
     (\[reconciled\] / \[supervisor_cleaned\] / \[admission_denied\]) — exactly the events that signal supervisor
-    recovery actions where observability matters most. Subscribe to
-    {!Keeper_lifecycle_events.all_event_names} to receive the full
-    stream.  A sync test asserting every literal emitted by
+    recovery actions where observability matters most. A subscriber that
+    wants the full stream takes both groups.  A sync test asserting every literal emitted by
     [Keeper_supervisor] / [Keeper_keepalive] lives in the SSOT was cited
     here as [test_types.ml :: lifecycle_events_ssot]; neither the file
     nor the test exists (#22071). *)

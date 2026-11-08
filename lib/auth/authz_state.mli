@@ -56,6 +56,8 @@ type t = private
   ; principals : Authz_principal_state.t  (** Plan B3c-2. *)
   ; registrations : Authz_registration_state.t  (** Plan C2d. *)
   ; sessions : Authz_session_state.t  (** Plan C3. *)
+  ; pats : Authz_pat_state.t  (** Plan C4. *)
+  ; service_credentials : Authz_service_credential_state.t  (** Plan C4. *)
   ; revocation_pending : held list
         (** The reductions whose intent the external store gave up (design
             8.3). No record adds one: the writer zone does, from the store
@@ -157,6 +159,10 @@ type refusal =
   | Registration of Authz_registration_state.refusal
   | Session_unreadable of Authz_session_event.error
   | Session of Authz_session_state.refusal
+  | Pat_unreadable of Authz_pat_event.error
+  | Pat of Authz_pat_state.refusal
+  | Service_credential_unreadable of Authz_service_credential_event.error
+  | Service_credential of Authz_service_credential_state.refusal
 
 val refusal_to_string : refusal -> string
 

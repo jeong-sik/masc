@@ -60,14 +60,14 @@ let candidates_row ~fenced ~at (waiting : Candle_payout.waiting) tasks (decided 
   }
 ;;
 
-let unattributed_row ~at (waiting : Candle_payout.waiting) =
+let unattributed_row ~at (waiting : Candle_payout.waiting) reason =
   { Candle_event.at
   ; body =
       Candle_event.Unattributed
         { goal_id = waiting.goal_id
         ; request_id = waiting.request_id
         ; verification_run_id = waiting.verification_run_id
-        ; reason = Candle_event.No_candidates
+        ; reason
         }
   }
 ;;
@@ -87,7 +87,7 @@ let close_without_keepers ~now ~base_path waiting =
       ~base_path
       waiting
       ~still_needed:(fun _ -> true)
-      [ unattributed_row ~at waiting ]
+      [ unattributed_row ~at waiting Candle_event.No_candidates ]
   in
   Ok
     (match written with
@@ -104,7 +104,7 @@ let read_tasks ~sources (waiting : Candle_payout.waiting) (pass : Candle_payout.
   | _ :: _ -> sources.task_lookups ~goal_id:waiting.goal_id pass.linked_task_ids
 ;;
 
-let write_candidates ~fenced ~sources ~keeper_snapshot ~now ~base_path (waiting : Candle_payout.waiting)
+let write_candidates ~released ~fenced ~sources ~keeper_snapshot ~now ~base_path (waiting : Candle_payout.waiting)
   (pass : Candle_payout.pass) =
   let* tasks = read_tasks ~sources waiting pass in
   let issues = Candle_payout.window_issues
@@ -117,7 +117,18 @@ let write_candidates ~fenced ~sources ~keeper_snapshot ~now ~base_path (waiting 
     Candle_payout.current_pass_of waiting events = Ok pass
     && Option.is_none (Candle_payout.candidates_of waiting events)
     && Option.is_none (Candle_payout.held_window_of waiting events) in
-  if durable_issue then (
+  if durable_issue && released then (
+    (* RFC-0513: the release gave this payout one fresh read. The fresh read
+       reproduced the same permanent ambiguity, so the payout closes for
+       nobody instead of holding again. *)
+    let* at = Candle_stamp.at ~now in
+    let* written =
+      append_when_still_open ~base_path waiting ~still_needed
+        [ unattributed_row ~at waiting Candle_event.Window_released ] in
+    Ok (match written with
+      | Written -> Wrote_unattributed {goal_id=waiting.goal_id}
+      | Not_written -> Superseded {goal_id=waiting.goal_id}))
+  else if durable_issue then (
     (* Preserve the time observation even when the Keeper directory is down. *)
     let is_keeper = match keeper_snapshot with Ok value -> Some value | Error _ -> None in
     let tasks = Candle_payout.classify_fragments ~is_keeper tasks in
@@ -141,7 +152,7 @@ let write_candidates ~fenced ~sources ~keeper_snapshot ~now ~base_path (waiting 
       |> Result.map_error (fun issues -> String.concat "; " (List.map Candle_payout.window_issue_to_string issues)) in
     let* at = Candle_stamp.at ~now in
     let rows = candidates_row ~fenced ~at waiting tasks decided
-      :: (if no_candidate_keepers decided then [ unattributed_row ~at waiting ] else []) in
+      :: (if no_candidate_keepers decided then [ unattributed_row ~at waiting Candle_event.No_candidates ] else []) in
     let* written = append_when_still_open ~base_path waiting ~still_needed rows in
     Ok (match written, no_candidate_keepers decided with
       | Written, true -> Wrote_unattributed { goal_id = waiting.goal_id }
@@ -172,7 +183,8 @@ let prepare ~sources ~now ~config events (waiting : Candle_payout.waiting) =
           close_without_keepers ~now ~base_path waiting
         | Some _, Some _ -> Ok (Already_prepared { goal_id = waiting.goal_id })
         | None, None when pass.linked_task_ids = [] ->
-          write_candidates ~fenced:false ~sources ~keeper_snapshot:(Ok (fun _ -> false))
+          write_candidates ~released:(Candle_payout.released_of waiting events)
+            ~fenced:false ~sources ~keeper_snapshot:(Ok (fun _ -> false))
             ~now ~base_path waiting pass
         | None, None ->
           (* Directory enumeration does not belong inside the backlog fence.
@@ -185,7 +197,8 @@ let prepare ~sources ~now ~config events (waiting : Candle_payout.waiting) =
           let lock_path = Workspace_backlog.backlog_lock_path config in
           (match Workspace_utils_ops.try_with_file_lock config lock_path (fun () ->
              Workspace_utils_ops.commit_under_held_lease config lock_path (fun () ->
-               write_candidates ~fenced:true ~sources ~keeper_snapshot ~now ~base_path waiting pass)) with
+               write_candidates ~released:(Candle_payout.released_of waiting events)
+                 ~fenced:true ~sources ~keeper_snapshot ~now ~base_path waiting pass)) with
            | Workspace_utils_ops.Lock_contended -> Error "Task backlog is busy; candidate preparation will retry"
            | Lock_unavailable detail -> Error ("Task backlog lock unavailable: " ^ detail)
            | Lock_acquired (Error refusal) -> Error (Workspace_utils_ops.lease_commit_refusal_to_string refusal)

@@ -57,6 +57,112 @@ let check_rejects ~name ~contents needle =
       (contains ~needle message)
 ;;
 
+(* ---- role = "path": declared path params (#49742) ---- *)
+
+let role_fixture ~role_line =
+  Printf.sprintf
+    {|name = "fixture_tool"
+description = "fixture"
+
+[[params]]
+name = "file_path"
+type = "string"
+%s
+required = true
+description = "a file"
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "a count"
+|}
+    role_line
+;;
+
+let test_role_path_collects_and_stays_out_of_schema () =
+  let contents = role_fixture ~role_line:{|role = "path"|} in
+  match Tool_definition_toml.load ~name:"fixture_tool" ~contents with
+  | Error message -> failf "expected role = \"path\" to load, got error: %s" message
+  | Ok { Tool_definition_toml.path_params; schema; _ } ->
+    check (list string) "declared path params" [ "file_path" ] path_params;
+    check bool "role is not emitted into the schema" false
+      (contains ~needle:"role" (Yojson.Safe.to_string schema.Masc_domain.input_schema))
+;;
+
+let test_role_absent_declares_no_paths () =
+  let contents = role_fixture ~role_line:"" in
+  match Tool_definition_toml.load ~name:"fixture_tool" ~contents with
+  | Error message -> failf "expected the fixture to load, got error: %s" message
+  | Ok { Tool_definition_toml.path_params; _ } ->
+    check (list string) "no role, no path params" [] path_params
+;;
+
+let test_role_rejects_unknown_value () =
+  check_rejects
+    ~name:"fixture_tool"
+    ~contents:(role_fixture ~role_line:{|role = "url"|})
+    "role must be \"path\""
+;;
+
+let test_role_rejects_non_string_param () =
+  let contents =
+    {|name = "fixture_tool"
+description = "fixture"
+
+[[params]]
+name = "limit"
+type = "integer"
+role = "path"
+|}
+  in
+  check_rejects ~name:"fixture_tool" ~contents "only valid for type string params"
+;;
+
+(* A role is read from the top-level params only; one on a nested field or a
+   projection would never be consumed, so the loader refuses it rather than
+   let a declaration sit there unread. *)
+let test_role_rejects_nested_and_projection_params () =
+  let nested =
+    {|name = "fixture_tool"
+description = "fixture"
+
+[[params]]
+name = "context"
+type = "object"
+
+[[params.params]]
+name = "base_path"
+type = "string"
+role = "path"
+|}
+  in
+  check_rejects ~name:"fixture_tool" ~contents:nested "only read on the tool's top-level params";
+  let projection =
+    {|name = "fixture_tool"
+description = "fixture"
+
+[keeper_projection]
+description = "narrow"
+
+[[keeper_projection.params]]
+name = "file_path"
+type = "string"
+role = "path"
+|}
+  in
+  check_rejects ~name:"fixture_tool" ~contents:projection
+    "only read on the tool's top-level params"
+;;
+
+(* The shipped definitions carry the roles the runtime reads back: tool_execute
+   declares [cwd], and a name with no embedded definition declares nothing. *)
+let test_embedded_tool_execute_declares_cwd_path () =
+  check (list string) "tool_execute path params" [ "cwd" ]
+    (Tool_definition_embedded.path_params "tool_execute");
+  check (list string) "an unknown tool declares nothing" []
+    (Tool_definition_embedded.path_params "no_such_tool_for_this_test")
+;;
+
 let test_identity_fields_round_trip () =
   let contents =
     {|name = "fixture_tool"
@@ -1619,6 +1725,18 @@ let () =
         ; test_case "blank strings are refused" `Quick test_toml_access_refuses_blank_strings
         ; test_case "list readers name the failing element" `Quick
             test_toml_access_lists_name_the_failing_element
+        ] )
+    ; ( "role"
+      , [ test_case "path role is collected and kept out of the schema" `Quick
+            test_role_path_collects_and_stays_out_of_schema
+        ; test_case "no role declares no paths" `Quick test_role_absent_declares_no_paths
+        ; test_case "unknown role value is refused" `Quick test_role_rejects_unknown_value
+        ; test_case "role on a non-string param is refused" `Quick
+            test_role_rejects_non_string_param
+        ; test_case "role on nested or projection params is refused" `Quick
+            test_role_rejects_nested_and_projection_params
+        ; test_case "embedded tool_execute declares cwd" `Quick
+            test_embedded_tool_execute_declares_cwd_path
         ] )
     ]
 ;;

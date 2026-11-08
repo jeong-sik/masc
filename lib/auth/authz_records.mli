@@ -93,7 +93,9 @@ end
     the records of the log (design 4.1). [Session] is a browser session, which
     acts as its principal until it ends (design 5.2, plan C3), so its
     revocation is one too: a sign-out, or a new sign-in of the same browser
-    that ends the session it held. *)
+    that ends the session it held. [Pat] and [Service_credential] are the
+    credentials of plan C4, which act as their principal until revoked, so
+    their revocations are intents too. *)
 module Subject : sig
   type t =
     | Grant of Grant_id.t
@@ -101,6 +103,8 @@ module Subject : sig
     | Principal of Principal.t
     | Runtime of Runtime_id.t
     | Session of Session_id.t
+    | Pat of Pat_id.t
+    | Service_credential of Service_credential_id.t
     | Invite of Invite_id.t
     | Registration of Registration_id.t
 

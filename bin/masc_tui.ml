@@ -6923,6 +6923,7 @@ let launch_file_changes_load state ~mailbox ~keeper_name =
   let enqueue_async = workspace_enqueue state in
   let host = server_peer_host in
   let port = state.port in
+  state.changes_inflight <- true;
   Masc_tui_async_read.launch
     ~deliver:(fun result ->
       enqueue_async mailbox (File_changes_loaded (keeper_name, result)))
@@ -7096,6 +7097,7 @@ let cycle_changes_keeper state ~mailbox ~delta =
         state.changes_keeper <- Some keeper.k_name;
         state.changes <- None;
         state.changes_error <- None;
+        state.changes_inflight <- false;
         state.changes_cursor <- 0;
         state.changes_scroll <- 0;
         state.changes_diff_row <- None;
@@ -8564,9 +8566,15 @@ let launch_surface_reads state ~mailbox (surface : surface) =
   | Lanes -> launch_lanes_load state ~mailbox
   | Clients -> owe_clients_read state
   (* The list draws nothing from the Keeper composite; Info and Secrets read
-     it on entry and when it changes. *)
+     it on entry and when it changes. Keeper_list reads memory health for its
+     second-row axis cells (RFC-0511 A4). *)
+  | Keepers Keeper_list ->
+      owe_tool_modes_read state;
+      owe_async_requests_read state;
+      owe_memory_health_read state;
+      launch_memory_health_load state ~mailbox
   | Keepers
-      ( Keeper_list | Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message
+      ( Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message
       | Keeper_runtime_pick ) ->
       owe_tool_modes_read state;
       owe_async_requests_read state
@@ -8710,6 +8718,7 @@ let goto_surface ?(from_reference = false) state ~mailbox (destination : surface
            state.changes_keeper <- Some name;
            state.changes <- None;
            state.changes_error <- None;
+           state.changes_inflight <- false;
            state.changes_cursor <- 0;
            state.changes_scroll <- 0;
            state.changes_diff_row <- None;
@@ -9516,10 +9525,13 @@ let launch_owed_repositories state ~mailbox =
 
 let memory_health_on_screen state =
   match state.view with
-  | Memory | Metrics -> true
+  | Memory | Metrics | Keepers Keeper_list -> true
   | Overview | Approvals | Acting | Lanes | Clients | Board | Planning | Schedules
   | Verification | Harness | Repositories | Fusion | Code | Changes | Connectors | Runtime
-  | Config | Resources | Tools | System_logs | Keepers _ ->
+  | Config | Resources | Tools | System_logs
+  | Keepers
+      ( Keeper_detail | Keeper_logs | Keeper_calls | Keeper_message
+      | Keeper_runtime_pick ) ->
       false
 
 (* Runs on every loop iteration. Off screen nothing is owed: arriving reads the
@@ -16400,20 +16412,42 @@ let reconcile_system_log_stream state ~mailbox =
    read starts on the next iteration, which draws nothing until an answer or a
    key arrives. The page kept saying "press r" while its read ran. The loop
    takes this before its launches and again just before it picks the frame,
-   and asks for a frame when it moved, wherever in between the read started. *)
+   and asks for a frame when it moved, wherever in between the read started.
+
+   The facts are named. Twelve positions in two nested tuples left a new fact
+   to be added by counting slots, and a reader could not tell which slot was
+   which without the render site open beside it. *)
+type reads_in_flight =
+  { rif_clients : bool
+  ; rif_lane_runs : bool
+  ; rif_runtime : int option
+  ; rif_harness : bool
+  ; rif_verification : bool
+  ; rif_memory_health : bool
+  ; rif_repositories : bool
+  ; rif_changes : bool
+  ; rif_system_log : bool
+  ; rif_schedules : bool
+  ; rif_fusion_runs : bool
+  ; rif_memory_facts : bool
+  ; rif_status_sources : Surface_read_order.source list
+  }
+
 let reads_in_flight (state : state) =
-  ( ( state.clients_surface_inflight
-    , state.lane_runs_loading
-    , state.runtime_surface_inflight
-    , state.harness_inflight
-    , state.verification_inflight
-    , state.memory_health_inflight
-    , state.repositories_inflight )
-  , ( Option.is_some state.system_log_stream
-    , Snapshot_read.in_flight state.schedules_read
-    , view_is_loading (Masc_tui_fusion_model.fusion_runs_view state)
-    , view_is_loading (memory_facts_view state)
-    , surface_reads_pending state ) )
+  { rif_clients = state.clients_surface_inflight
+  ; rif_lane_runs = state.lane_runs_loading
+  ; rif_runtime = state.runtime_surface_inflight
+  ; rif_harness = state.harness_inflight
+  ; rif_verification = state.verification_inflight
+  ; rif_memory_health = state.memory_health_inflight
+  ; rif_repositories = state.repositories_inflight
+  ; rif_changes = state.changes_inflight
+  ; rif_system_log = Option.is_some state.system_log_stream
+  ; rif_schedules = Snapshot_read.in_flight state.schedules_read
+  ; rif_fusion_runs = view_is_loading (Masc_tui_fusion_model.fusion_runs_view state)
+  ; rif_memory_facts = view_is_loading (memory_facts_view state)
+  ; rif_status_sources = surface_reads_pending state
+  }
 
 (* A frame or an ending of the job that is current lands on the server page; a
    message from a job since replaced is dropped. *)
@@ -17739,6 +17773,7 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.changes_keeper <- None;
   state.changes <- None;
   state.changes_error <- None;
+  state.changes_inflight <- false;
   state.changes_tree_diff <- None;
   state.changes_tree_diff_error <- None;
   state.changes_tree_diff_path <- None;
@@ -28403,6 +28438,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
          surface's answer. Dropping it keeps one keeper's files from being
          drawn under another's name. *)
       if Option.equal String.equal state.changes_keeper (Some keeper_name) then (
+        state.changes_inflight <- false;
         match result with
         | Ok snapshot ->
             (* The open row indexes the snapshot it was opened against. A new
@@ -29492,9 +29528,9 @@ let main
   let resize_generation = Atomic.make 0 in
 
   let restore_terminal_outcome () =
-    (* No tracking-off here: suspend runs this too, and a terminal that
-       re-enters raw mode after Ctrl-Z would silently lose the wheel. The
-       off byte is written once, in [cleanup], at real process exit. *)
+    (* No tracking-off here. [cleanup] writes the off byte once, at real
+       process exit, after the farewell. [suspend] writes it before the stop
+       and takes the mode again when the process continues. *)
     Frame_presenter.cleanup frame_presenter ~write:(output_string stdout)
       ~flush:(fun () -> flush stdout);
     if Terminal_profile.dynamic_title terminal_profile then
@@ -29579,6 +29615,12 @@ let main
     Masc_tui_exit_signals.request_interrupt exit_signals
   in
   let rec suspend _ =
+    (* The shell has the terminal while this process is stopped. It does not
+       read mouse reports, so the wheel would print as characters at its
+       prompt and a drag would not select. Tracking is a terminal mode, not
+       part of the alternate screen, so leaving that screen does not clear it. *)
+    output_string stdout mouse_tracking_disable;
+    flush stdout;
     restore_terminal ();
     Sys.set_signal Sys.sigtstp Sys.Signal_default;
     Fun.protect
@@ -29590,6 +29632,10 @@ let main
            frame lands on top of whatever the user did meanwhile. *)
         Frame_presenter.setup frame_presenter ~write:(output_string stdout)
           ~flush:(fun () -> flush stdout);
+        (* F2 hands the mouse back to the terminal; a stop in that state
+           continues in it. [enable_bracketed_paste] flushes. *)
+        if Atomic.get mouse_tracking_on then
+          output_string stdout mouse_tracking_enable;
         enable_bracketed_paste ();
         request_full_repaint 0)
       (fun () -> Unix.kill (Unix.getpid ()) Sys.sigtstp)
@@ -39786,7 +39832,8 @@ Use relative paths for resources already held in the package. -->
                   Masc_tui_code_requests.launch_entries_load state
                     ~host:server_peer_host
                     ~deliver:(deliver_code state async_messages)
-            | Keepers Keeper_list -> ()
+            | Keepers Keeper_list ->
+                launch_memory_health_load state ~mailbox:async_messages
             | Keepers Keeper_logs ->
                 ignore (launch_current_keeper_logs state ~mailbox:async_messages ~intent:Snapshot_read.Refresh)
             | Keepers Keeper_calls ->

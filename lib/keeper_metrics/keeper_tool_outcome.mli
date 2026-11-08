@@ -21,9 +21,3 @@ val to_json : t -> Yojson.Safe.t
 (** JSON deserialization from tool output embedding. Malformed input
     returns [None]. *)
 val of_json : Yojson.Safe.t -> t option
-
-(** Is this typed outcome a no-progress signal ([No_progress _] or [Error _])?
-    [None] is [false], preserving the legacy name-based behavior when a tool
-    does not emit a typed outcome. Single owner of the outcome gate shared by
-    the no-progress detector and the unified-metrics substantive check. *)
-val is_nonprogress : t option -> bool

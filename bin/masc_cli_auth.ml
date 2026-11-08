@@ -124,3 +124,125 @@ let invite ~base_path =
        expire.\n";
     print_link ~command:"invite" ~base_url invitation
 ;;
+
+(* ---- masc auth preview (plan, preview scope P3) ---- *)
+
+let github_client_secret_env = "MASC_GITHUB_CLIENT_SECRET"
+let default_preview_port = 8940
+let preview_host = "127.0.0.1"
+let preview_backlog = 16
+let login_transaction_capacity = 16
+let draw_bytes = 32
+
+(* The listener admits only the authority it binds, as the server does
+   before it routes (Server_request_authority). *)
+let preview_handler ~trust_policy router (_ : Eio.Net.Sockaddr.stream) gluten_reqd =
+  let reqd = gluten_reqd.Gluten.Reqd.reqd in
+  let neutral_reqd = Masc.Http_reqd.of_gluten gluten_reqd in
+  let request = Httpun.Reqd.request reqd in
+  match Server_request_authority.classify_http1_request ~trust_policy request with
+  | Server_request_authority.Single authority ->
+    Server_request_authority.with_current authority (fun () ->
+      Masc.Http_server_eio.Router.dispatch router request neutral_reqd)
+  | Server_request_authority.Missing
+  | Server_request_authority.Multiple
+  | Server_request_authority.Malformed
+  | Server_request_authority.Untrusted ->
+    Masc.Http_server_eio.Response.text
+      ~status:`Bad_request
+      (Printf.sprintf "the Host of the request is not %s" preview_host)
+      neutral_reqd
+;;
+
+let serve_preview ~base_path ~store ~port github =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      Crypto_rng.ensure_default ();
+      Eio_context.set_env env;
+      Eio_context.set_switch sw;
+      Eio_context.set_net (Eio.Stdenv.net env);
+      let clock = Eio.Stdenv.clock env in
+      let log_path = Authz_log.path_of_base_path ~base_path in
+      let* zone =
+        Result.map_error
+          (fun error -> "the authorization zone is not opened: " ^ Authz_zone.open_error_to_string error)
+          (Authz_zone.open_at_start ~now_ms ~log_path ~store_path:store)
+      in
+      let* trust_policy =
+        Result.map_error
+          Server_request_authority.trust_policy_error_to_string
+          (Server_request_authority.make_trust_policy
+             ~bind_host:preview_host
+             ~bind_port:port
+             ~explicit_base_url:None)
+      in
+      let routes =
+        { Login_routes.zone
+        ; transactions = Oidc_login_transaction.create ~capacity:login_transaction_capacity
+        ; google = None
+        ; github = Some github
+        ; get = Server_login_http.get ~clock
+        ; post = Server_login_http.post ~clock
+        ; now = Ptime_clock.now
+        ; draw = (fun () -> Random_id.hex ~bytes:draw_bytes)
+        }
+      in
+      let router =
+        Masc.Http_server_eio.Router.create ()
+        |> Server_login_http.add_routes routes
+        |> Server_login_http.add_preview_routes routes
+      in
+      let address = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
+      match Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:preview_backlog address with
+      | exception (Eio.Io _ as exn) ->
+        Error (Printf.sprintf "%s:%d is not listened on: %s" preview_host port (Printexc.to_string exn))
+      | socket ->
+        let base_url = Printf.sprintf "http://%s:%d" preview_host port in
+        Printf.printf
+          "The multi-account preview listens on %s. Open %s/ in a browser, or the link of \
+           masc auth invite made with MASC_HTTP_BASE_URL=%s. It serves the login routes \
+           only, no Keeper or Runtime. Stop it with Ctrl-C.\n%!"
+          base_url
+          base_url
+          base_url;
+        Server_bootstrap_http.serve
+          ~sw
+          ~clock
+          ~socket
+          ~addr_label:(Printf.sprintf "%s:%d" preview_host port)
+          ~request_handler:(preview_handler ~trust_policy router);
+        Ok ()))
+;;
+
+let preview ~base_path ~port ~github_client_id =
+  let github =
+    match Sys.getenv_opt github_client_secret_env with
+    | None -> Error (github_client_secret_env ^ " is not set")
+    | Some client_secret ->
+      Result.map_error
+        Login_client.loopback_error_to_string
+        (Login_client.loopback
+           ~client_id:github_client_id
+           ~client_secret
+           ~port
+           ~path:Server_login_http.github_callback_path)
+  in
+  let run =
+    let* github = github in
+    with_lease ~base_path (fun base_path ->
+      let* anonymous_mutations = anonymous_mutations () in
+      let* store =
+        Result.map_error
+          A.invite_error_to_string
+          (A.active_store
+             ~base_path
+             ~config_dir:(Env_config_core.masc_config_dir_opt ())
+             ~anonymous_mutations)
+      in
+      serve_preview ~base_path ~store ~port github)
+  in
+  match run with
+  | Ok () -> 0
+  | Error reason -> refused "preview" reason
+;;
+

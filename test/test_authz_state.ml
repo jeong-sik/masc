@@ -64,7 +64,9 @@ let other_kinds =
       && kind <> K.Principal
       && kind <> K.Revocation_cancel
       && kind <> K.Registration
-      && kind <> K.Session)
+      && kind <> K.Session
+      && kind <> K.Pat
+      && kind <> K.Internal_service_credential)
     K.all
 
 let mode = Alcotest.testable (fun fmt m -> Format.pp_print_string fmt (Mode.to_string m)) Mode.equal
@@ -1358,6 +1360,141 @@ let test_a_blocked_session () =
   Alcotest.(check string) "and ends the session" "replaced by session-2" (session_status again first_session)
 ;;
 
+(* ---- PATs and Service credentials ---- *)
+
+module Pa = Authz_pat_event
+module Pats = Authz_pat_state
+module Sc = Authz_service_credential_event
+module Scs = Authz_service_credential_state
+
+let first_pat = id_of_string Authz_types.Pat_id.of_string "pat-1"
+let second_pat = id_of_string Authz_types.Pat_id.of_string "pat-2"
+let first_credential = id_of_string Authz_types.Service_credential_id.of_string "cred-1"
+let keeper_service = id_of_string Authz_types.Service_id.of_string "keeper-runner"
+
+let digest_of of_hex =
+  match of_hex (String.make 64 'a') with
+  | Some digest -> digest
+  | None -> Alcotest.fail "fixture digest refused"
+;;
+
+let pat_record ~author event =
+  match Pa.to_body event with
+  | Error _ -> Alcotest.fail "fixture PAT body refused"
+  | Ok body -> record_by ~author K.Pat body
+;;
+
+let pat_issued ?expires_at_ms ~by pat_id =
+  Pa.Issued
+    { pat_id
+    ; user_id = by
+    ; secret_digest = digest_of Authz_credential_token.Pat.Digest.of_hex
+    ; scope = Authz_types.Authorization_scope.all
+    ; expires_at_ms
+    }
+;;
+
+let credential_record event =
+  match Sc.to_body event with
+  | Error _ -> Alcotest.fail "fixture Service credential body refused"
+  | Ok body -> record_by ~author:Authz_records.Author.Local_operator K.Internal_service_credential body
+;;
+
+let refused_as label state record expected =
+  Alcotest.(check string) label (S.refusal_to_string expected) (step_word state record)
+;;
+
+(* Plan C4-4: another's PAT is not revoked, a PAT is not revoked twice, it
+   expires at its expiry, and its revocation is a Revoke intent. *)
+let test_pats_and_their_intents () =
+  let issued =
+    applied_change
+      "a PAT"
+      (two_admins ())
+      (pat_record ~author:(human user) (pat_issued ~expires_at_ms:(at_ms + 1000) ~by:user first_pat))
+      None
+  in
+  let acts_at state now_ms =
+    match Pats.find_active state.S.pats first_pat ~now_ms with
+    | Ok (_ : Pats.pat) -> "acts"
+    | Error Pats.Expired -> "expired"
+    | Error Pats.Ended -> "revoked"
+    | Error Pats.Unknown -> "unknown"
+  in
+  Alcotest.(check string) "before its expiry" "acts" (acts_at issued (at_ms + 999));
+  Alcotest.(check string) "at its expiry" "expired" (acts_at issued (at_ms + 1000));
+  refused_as
+    "another's PAT"
+    issued
+    (pat_record ~author:(human bob) (Pa.Revoked { pat_id = first_pat }))
+    (S.Pat (Pats.Not_the_owner { pat_id = first_pat; author = bob }));
+  refused_as
+    "a PAT for another"
+    issued
+    (pat_record ~author:(human bob) (pat_issued ~by:user second_pat))
+    (S.Pat (Pats.Issued_for_another { author = bob; user_id = user }));
+  refused_as
+    "a service"
+    issued
+    (pat_record
+       ~author:(Authz_records.Author.Authenticated (Authz_types.Principal.Service keeper_service))
+       (pat_issued ~by:user second_pat))
+    (S.Pat (Pats.Not_a_human (Authz_types.Principal.Service keeper_service)));
+  let revoked =
+    applied_change
+      "its revoke"
+      issued
+      (pat_record ~author:(human user) (Pa.Revoked { pat_id = first_pat }))
+      (Some "revoke of pat:pat-1")
+  in
+  Alcotest.(check string) "revoked" "revoked" (acts_at revoked at_ms);
+  refused_as
+    "revoked twice"
+    revoked
+    (pat_record ~author:(human user) (Pa.Revoked { pat_id = first_pat }))
+    (S.Pat (Pats.Already_revoked first_pat))
+;;
+
+(* The local operator issues and revokes a Service credential; its revocation
+   is a Revoke intent. *)
+let test_service_credentials_and_their_intents () =
+  let issued =
+    applied_change
+      "a credential"
+      (two_admins ())
+      (credential_record
+         (Sc.Issued
+            { credential_id = first_credential
+            ; service_id = keeper_service
+            ; secret_digest = digest_of Authz_credential_token.Service_credential.Digest.of_hex
+            }))
+      None
+  in
+  let acts state =
+    match Scs.find_active state.S.service_credentials first_credential with
+    | Ok (_ : Scs.credential) -> "acts"
+    | Error Scs.Ended -> "revoked"
+    | Error Scs.Unknown -> "unknown"
+  in
+  Alcotest.(check string) "issued" "acts" (acts issued);
+  let revoked =
+    applied_change
+      "its revoke"
+      issued
+      (credential_record (Sc.Revoked { credential_id = first_credential }))
+      (Some "revoke of service_credential:cred-1")
+  in
+  Alcotest.(check string) "revoked" "revoked" (acts revoked);
+  refused_as
+    "revoked twice"
+    revoked
+    (credential_record (Sc.Revoked { credential_id = first_credential }))
+    (S.Service_credential (Scs.Already_revoked first_credential));
+  match S.step S.empty (credential_record (Sc.Revoked { credential_id = first_credential })) with
+  | Error (S.Before_bootstrap K.Internal_service_credential) -> ()
+  | other -> Alcotest.failf "before the bootstrap: %s" (step_label other)
+;;
+
 let () =
   Alcotest.run
     "authz_state"
@@ -1428,6 +1565,13 @@ let () =
         ; Alcotest.test_case "refused" `Quick test_a_session_record_that_is_refused
         ; Alcotest.test_case "by mode" `Quick test_a_session_record_by_mode
         ; Alcotest.test_case "blocked" `Quick test_a_blocked_session
+        ] )
+    ; ( "credentials"
+      , [ Alcotest.test_case "PATs and their intents" `Quick test_pats_and_their_intents
+        ; Alcotest.test_case
+            "Service credentials and their intents"
+            `Quick
+            test_service_credentials_and_their_intents
         ] )
     ; "log", [ Alcotest.test_case "of a real bootstrap" `Quick test_fresh_bootstrap_log ]
     ]

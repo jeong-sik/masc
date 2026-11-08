@@ -68,25 +68,6 @@ let event_of_string = function
 let all_custom_events : t list =
   [ Started; Reconciled; Restarted; Supervisor_cleaned; Purged; Admission_denied ]
 
-let valid_custom_event_strings : string list =
-  List.map to_string all_custom_events
-
-(** Phase-derived event names. These mirror the wire format of
-    {!Keeper_state_machine.phase_to_string} for the four lifecycle
-    phases that publish a lifecycle event. The list is hand-rolled
-    rather than generated to keep this module dependency-free
-    (Keeper_state_machine pulls in the full FSM module). Keep aligned
-    with [Keeper_state_machine.phase_to_string] by hand — the formerly
-    cited sync test ([test/test_types.ml]) does not exist (#22071). *)
-let phase_derived_event_strings : string list =
-  [ "stopped"; "crashed"; "dead"; "running" ]
-
-(** Combined vocabulary — every event name [publish_keeper_lifecycle]
-    can carry. Subscribe to all of these to avoid silently missing
-    half the lifecycle stream. *)
-let all_event_names : string list =
-  valid_custom_event_strings @ phase_derived_event_strings
-
 (** {1 Unified lifecycle event sum type (#8856 / #8605 family)}
 
     [publish_keeper_lifecycle] previously took [event:string ?phase] --

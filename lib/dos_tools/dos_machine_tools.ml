@@ -775,7 +775,9 @@ let resolve_program ?boot ~base_path name =
    only queues the line, and [flush_announcements] posts the queue after the
    call returns. One Eio mutex lets one fiber drain at a time, so the queue's
    order is the board's order. A line left behind by a failed drain goes out
-   with the next one. *)
+   with the next one. The drain runs with cancellation deferred
+   (~protect:true): a cancelled drain still unlocks the mutex, so
+   cancellation can never leave the queue un-drainable. *)
 type announcement = { author : string; content : string }
 let announcements : announcement Queue.t = Queue.create ()
 let announcements_lock = Mutex.create ()
@@ -788,7 +790,7 @@ let announce ~author content () =
 let flush_announcements () =
   let next () = Mutex.protect announcements_lock (fun () -> Queue.take_opt announcements) in
   try
-    Eio.Mutex.use_rw ~protect:false posting (fun () ->
+    Eio.Mutex.use_rw ~protect:true posting (fun () ->
       let rec drain () =
         match next () with
         | None -> ()

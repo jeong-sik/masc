@@ -9,7 +9,7 @@
 - 자격 증명: `env -u MISTRAL_API_KEY vibe --setup` 이 macOS keychain 에 넣은 항목
   (`svce=ai.mistral.vibe`, `acct=MISTRAL_API_KEY`). 이 문서는 이것을 keychain 자격
   증명이라 부른다. 마법사에서 브라우저 로그인과 키 입력 중 어느 쪽을 골랐는지는
-  기록하지 않았다. 아래 「L0 뒤 실측」이 키 scope 로 이 자격 증명의 종류를 적는다.
+  기록하지 않았다. 아래 「L0 뒤 실측」이 Vibe 가 준 플랜 종류로 이 자격 증명의 종류를 적는다.
 - 계정은 Mistral Pro 플랜 하나다. 같은 시각 masc 의 mistral HTTP 레인
   (env `MISTRAL_API_KEY`)은 402 `billing_api_budget_exhausted` 를 받고 있었다
   (`system_log_2026-11-07.jsonl`, sangsu, 09:10:57Z). 이 로그 줄은 묶음에 없다.
@@ -115,14 +115,18 @@ journal_dir, started_at, ended_at, limits, exit_code.
   `--prompt-file <PATH>` 를 적는다.
 - m14(17:18Z, `repro/run-m14.py`, `fixtures/m14/`): `vibe --workdir <work>
   --output-dir <out> --agent ask --output json --prompt-file <run>/prompt.txt`. `-p` 도,
-  `--max-turns` 도, `--time-limit` 도 주지 않았다. stdin 은 닫혀 있었다. 자식 env 는
-  `lib/runtime/runtime_vibe_cli.ml` 의 허용 목록에 있는 이름뿐이었다(이 셸에 있던 것은
+  `--max-turns` 도, `--time-limit` 도 주지 않았다. stdin 은 `/dev/null` 이었고(lane 은 쓰는
+  쪽을 닫은 pipe 를 준다), 프로세스 cwd 는 `<run>` 이었다(lane 은 `--workdir` 와 같은 폴더).
+  자식 env 는 `lib/runtime/runtime_vibe_cli.ml` 의 허용 목록에 있는 이름뿐이었다(이 셸에
+  있던 것은
   `COLORTERM`, `HOME`, `LANG`, `LC_ALL`, `LOGNAME`, `PATH`, `SHELL`, `TERM`, `TMPDIR`,
   `USER` 열 개). 7.1초에 exit 0 `finished`, user 메시지는 파일의 글 그대로였고 답은
-  `PINEAPPLE` 이었다. stderr 는 keychain 에서 키를 읽는다는 한 줄이었다. `limits` 는
-  네 칸 모두 `null` 이었다. 한도를 안 주면 Vibe 쪽 기본 한도도 없다.
-  - 같은 꼴에 없는 파일을 주면(`--prompt-file <run>/missing.txt`) 모델을 부르지 않고
-    exit 1 `usage_error` 로 끝났다. `export.json` 은 썼고 stdout 은 비었다.
+  `PINEAPPLE` 이었다. stderr 는 keychain 에서 키를 읽는다는 한 줄이었다. `export.json`
+  의 `limits` 는 네 칸 모두 `null` 이었다.
+  - 직전에 셸에서 없는 파일을 줬다(`env -u MISTRAL_API_KEY vibe --workdir <work>
+    --output-dir <out> --agent ask --output json --prompt-file <run>/missing.txt`,
+    `fixtures/m14-missing-prompt/`). 모델을 부르지 않고 exit 1 `usage_error` 로 끝났다.
+    `export.json` 은 썼고 stdout 은 비었다.
   - masc 의 Vibe 실행은 이 `--prompt-file` 형태를 쓴다(`lib/runtime/runtime_vibe_cli.ml`).
     stdin 으로 보내면 Vibe 가 읽기 전에 끝날 때 큰 prompt 가 EPIPE 를 만들고 Vibe 의
     exit code 를 가린다(#49834 리뷰).

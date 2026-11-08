@@ -139,6 +139,8 @@ describe('Goal Candle observation', () => {
     const held = payload('goal-1', { state: 'held', ...identity, snapshot: 'matching', origin: 'stored',
       issues: { state: 'complete', entries: [{ kind: 'same_second', task_id: 'task-1', boundary: 'human_confirmed', completed_at: '2026-09-10T00:00:00Z' }] } })
     expect(decodeGoalCandle(held, 'goal-1').ledger).toMatchObject({ state: 'observed', payout: { state: 'held', issues: { entries: [{ task_id: 'task-1' }] } } })
+    const released = payload('goal-1', { state: 'unattributed', ...identity, recorded_at: '2026-11-07T18:00:00Z', reason: 'window_released' })
+    expect(decodeGoalCandle(released, 'goal-1').ledger).toMatchObject({ state: 'observed', payout: { state: 'unattributed', reason: 'window_released' } })
     expect(() => decodeGoalCandle(payload('goal-1', { state: 'future' }), 'goal-1')).toThrow()
     expect(() => decodeGoalCandle({ ...held, execution: { state: 'not_observed' } }, 'goal-1')).toThrow()
   })

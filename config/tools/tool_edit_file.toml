@@ -12,6 +12,7 @@ mode='create' (use overwrite). Creates parent dirs."""
 [[params]]
 name = "path"
 type = "string"
+role = "path"
 required = true
 description = "Relative or absolute file path to write"
 

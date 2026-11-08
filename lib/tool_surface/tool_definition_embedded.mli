@@ -26,3 +26,11 @@ val load : string -> Tool_definition_toml.loaded
 
 val schema : string -> Masc_domain.tool_schema
 (** [schema name] is the [schema] of [load name]. *)
+
+val path_params : string -> string list
+(** [path_params name] is the [path_params] of [name]'s embedded definition —
+    the params it declares [role = "path"] — or [[]] when the tree holds no
+    definition for [name] (an attached service tool, a composition, a name
+    that is not a built-in). Decoded once per name and kept. A definition
+    that does not decode is a boot failure in {!validate_embedded} terms and
+    reads as [[]] here. *)

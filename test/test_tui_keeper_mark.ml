@@ -42,12 +42,73 @@ let test_the_column_legend_explains_every_letter_the_cell_draws () =
     (mode_letters @ sandbox_letters);
   List.iter
     (fun header -> check_bool ("the legend names " ^ header) true (contains keys header))
-    [ Mark.now_header; Mark.age_header; "LIFECYCLE"; Mark.failing_glyph; "Mode"; "S " ]
+    [ Mark.now_header; Mark.age_header; "LIFECYCLE"; Mark.failing_glyph; "Mode"; "S "; Mark.(badge_glyph Badge_schedule); "mem"; "사람 몫" ]
+
+let test_operator_disposition_words () =
+  let kinds =
+    [ Masc.Keeper_execution_receipt.Disp_operator_action_required
+    ; Masc.Keeper_execution_receipt.Disp_effect_review_required
+    ; Masc.Keeper_execution_receipt.Disp_unknown
+    ]
+  in
+  let words = List.map Mark.operator_disposition_word kinds in
+  check_int "each operator disposition kind has its distinct word" 3
+    (List.length (List.sort_uniq String.compare words));
+  Alcotest.(check string) "operator action required is 사람 몫" "사람 몫"
+    (Mark.operator_disposition_word Disp_operator_action_required);
+  Alcotest.(check string) "effect review required is 효과 확인" "효과 확인"
+    (Mark.operator_disposition_word Disp_effect_review_required);
+  Alcotest.(check string) "unknown is 분류 안 됨" "분류 안 됨"
+    (Mark.operator_disposition_word Disp_unknown)
+
+let test_shows_operator_disposition_activity_filter () =
+  check_bool "Running does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Running);
+  check_bool "Preparing does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Preparing);
+  check_bool "Streaming does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Streaming);
+  check_bool "Paused does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Paused);
+  check_bool "Offline does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Offline);
+  check_bool "Held_call does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Held_call);
+  check_bool "Question does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Question);
+  check_bool "Confirmation does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Confirmation);
+  check_bool "Tool_waiting does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Tool_waiting);
+  check_bool "Model_waiting does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Model_waiting);
+  check_bool "Async_working does not show disposition badge" false
+    (Mark.shows_operator_disposition
+       ~activity:(Masc_tui_keeper_list_model.Async_working 1));
+  check_bool "Deferred does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Deferred);
+  check_bool "Delegate_result does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Delegate_result);
+  check_bool "Verifying does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Verifying);
+  check_bool "External_waiting does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.External_waiting);
+  check_bool "Idle shows disposition badge" true
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Idle);
+  check_bool "Attempt_failed shows disposition badge" true
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Attempt_failed);
+  check_bool "Unknown shows disposition badge" true
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Unknown)
+;;
 
 let () =
   Alcotest.run "tui_keeper_mark"
     [ ( "marks"
       , [ Alcotest.test_case "the column legend explains every letter" `Quick
             test_the_column_legend_explains_every_letter_the_cell_draws
+        ; Alcotest.test_case "operator disposition words are declared" `Quick
+            test_operator_disposition_words
+        ; Alcotest.test_case "operator disposition activity filter" `Quick
+            test_shows_operator_disposition_activity_filter
         ] )
     ]

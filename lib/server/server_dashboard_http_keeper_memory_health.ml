@@ -148,6 +148,7 @@ type keeper_health =
   ; added : int
   ; removed : int
   ; snapshot_present : bool
+  ; first_seen : float list option
   ; context_cycle : context_cycle
   ; librarian : librarian_health
   ; librarian_failures : int
@@ -389,6 +390,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
     ; added = 0
     ; removed = 0
     ; snapshot_present = false
+    ; first_seen = None
     ; context_cycle
     ; librarian
     ; librarian_failures = librarian_failures_for_keeper keeper_id
@@ -424,6 +426,11 @@ let keeper_health ~config ~keepers_dir keeper_id =
     ; added = List.length snapshot.change.added
     ; removed = List.length snapshot.change.removed
     ; snapshot_present = true
+    ; first_seen =
+        Some
+          (List.map
+             (fun (f : Keeper_memory_os_types.fact) -> f.first_seen)
+             snapshot.facts)
     ; context_cycle
     ; librarian
     ; librarian_failures = librarian_failures_for_keeper keeper_id
@@ -450,6 +457,7 @@ let keeper_health ~config ~keepers_dir keeper_id =
     ; added = 0
     ; removed = 0
     ; snapshot_present = false
+    ; first_seen = None
     ; context_cycle
     ; librarian
     ; librarian_failures = librarian_failures_for_keeper keeper_id
@@ -658,7 +666,14 @@ let alerts (h : keeper_health) =
 ;;
 
 
-let keeper_health_entry_to_json (h : keeper_health) =
+let keeper_health_entry_to_json ~now (h : keeper_health) =
+  let age_bins_json =
+    match h.first_seen with
+    | None -> `Null
+    | Some timestamps ->
+      Keeper_memory_age_bins.to_json
+        (Keeper_memory_age_bins.of_first_seen ~now timestamps)
+  in
   `Assoc
     [ "keeper_id", `String h.keeper_id
     ; "revision", `Int h.revision
@@ -671,6 +686,7 @@ let keeper_health_entry_to_json (h : keeper_health) =
     ; "added", `Int h.added
     ; "removed", `Int h.removed
     ; "snapshot_present", `Bool h.snapshot_present
+    ; "age_bins", age_bins_json
     ; "context_cycle", context_cycle_to_json h.context_cycle
     ; ( "librarian"
       , `Assoc
@@ -753,7 +769,7 @@ let keeper_health_entry_to_json (h : keeper_health) =
     ]
 ;;
 
-let schema = "keeper.memory_os.current_health.v8"
+let schema = "keeper.memory_os.current_health.v9"
 
 let fleet_cache_key ~base_path = "keeper_memory_health:" ^ base_path
 
@@ -807,7 +823,7 @@ let keeper_memory_health_http_json ~base_path =
     [ "schema", `String schema
     ; "generated_at", `Float generated_at
     ; "execution", Keeper_memory_execution_availability.(to_json (snapshot ~config ~mode:`Live))
-    ; "keepers", `List (List.map keeper_health_entry_to_json entries)
+    ; "keepers", `List (List.map (keeper_health_entry_to_json ~now:generated_at) entries)
     ; "totals", Keeper_memory_health_totals.totals_to_json totals
     ; "alert_summary", Keeper_memory_health_totals.alert_summary_to_json totals
     ]
@@ -827,7 +843,7 @@ let keeper_memory_health_row_http_json ~base_path ~keeper =
     Hashtbl.replace health_base_paths (health_directory_identity keepers_dir) base_path);
   let row =
     if List.exists (String.equal keeper) (health_keeper_ids ~keepers_dir)
-    then keeper_health_entry_to_json (cached_keeper_health ~config ~keepers_dir keeper)
+    then keeper_health_entry_to_json ~now:generated_at (cached_keeper_health ~config ~keepers_dir keeper)
     else `Null
   in
   `Assoc [ "schema", `String schema; "generated_at", `Float generated_at; "keeper", row ]

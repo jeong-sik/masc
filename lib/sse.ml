@@ -1230,13 +1230,6 @@ let broadcast_to_with_commit target ~on_committed json =
   | All | Observers | Runtime_observers _ | Scoped_runtime_observers _ ->
       broadcast_impl ~on_committed:(fun _ -> on_committed ()) target (Value json)
 
-let broadcast_encoded_to target encoded =
-  match target with
-  | Runtime_presence _ ->
-      invalid_arg "broadcast_encoded_to: use broadcast_presence_to_runtime"
-  | All | Observers | Runtime_observers _ | Scoped_runtime_observers _ | Presence_only ->
-      broadcast_impl target (Encoded encoded)
-
 let broadcast_encoded_to_with_receipts target ~on_fanout ~on_committed encoded =
   match target with
   | Presence_only | Runtime_presence _ ->

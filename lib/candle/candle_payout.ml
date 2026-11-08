@@ -51,7 +51,7 @@ let is_settled ~goal_id events =
        | Candle_event.Paid p -> String.equal p.identity.goal_id goal_id
        | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> false
        | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
-       | Candle_event.Candidate_window_held _ ->
+       | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _ ->
          false)
     events
 ;;
@@ -71,7 +71,7 @@ let last_owed ~goal_id events =
        | Candle_event.Payout_owed _
        | Candle_event.Snapshot _
        | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
-       | Candle_event.Candidate_window_held _
+       | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
        | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> last)
     None
     events
@@ -82,7 +82,7 @@ let failed_run ~goal_id ~request_id ~verification_run_id events =
     | Candle_event.Payout_failed f -> f.goal_id = goal_id && f.request_id = request_id
         && f.verification_run_id = verification_run_id
     | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
-    | Candle_event.Candidate_window_held _
+    | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
     | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> false) events
 
 let state ~goal_id events =
@@ -102,7 +102,7 @@ let waiting events =
          match event.body with
          | Candle_event.Payout_owed owed ->
            if List.mem owed.goal_id seen then seen else owed.goal_id :: seen
-         | Candle_event.Snapshot _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _ | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ ->
+         | Candle_event.Snapshot _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _ | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ ->
            seen)
       []
       events
@@ -137,7 +137,7 @@ let find_pass ~goal_id ~request_id ~verification_run_id ~passed_at events =
        | Candle_event.Snapshot _
        | Candle_event.Payout_owed _
        | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
-       | Candle_event.Candidate_window_held _
+       | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
        | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> None)
     events
 ;;
@@ -181,6 +181,7 @@ let observe_current_pass (waiting : waiting) events =
             due_date = snapshot.due_date; linked_task_ids = snapshot.linked_task_ids}
     | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
     | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _
+    | Candle_event.Candidate_window_released _
     | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _
     | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _
     | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> None) events in
@@ -209,7 +210,7 @@ let candidates_of (waiting : waiting) events =
            { candidate_task_ids = c.candidate_task_ids; candidate_keepers = c.candidate_keepers;
              candidate_task_keepers = c.candidate_task_keepers }
        | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
-       | Candle_event.Candidate_window_held _
+       | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
        | Candle_event.Snapshot _
        | Candle_event.Payout_owed _
        | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> None)
@@ -229,21 +230,38 @@ let candidate_observations_of (waiting : waiting) events =
            && String.equal c.request_id waiting.request_id
            && String.equal c.verification_run_id waiting.verification_run_id -> Some (c.tasks, Backlog_fenced)
     | Candle_event.Candidates _ | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _
+    | Candle_event.Candidate_window_released _
     | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Unattributed _
     | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _
     | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _
     | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> None) events
 ;;
 
+(* RFC-0513: a release row closes this payout's held window. The hold row
+   itself stays in the ledger; only the blocking fact is closed. *)
+let released_of (waiting : waiting) events =
+  List.exists (fun (event : Candle_event.t) -> match event.body with
+    | Candle_event.Candidate_window_released released ->
+      String.equal released.goal_id waiting.goal_id
+      && String.equal released.request_id waiting.request_id
+      && String.equal released.verification_run_id waiting.verification_run_id
+    | Candle_event.Candidate_window_held _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
+    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Unattributed _
+    | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _
+    | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _
+    | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> false) events
+
 let held_window_of (waiting : waiting) events =
-  List.find_map (fun (event : Candle_event.t) -> match event.body with
+  if released_of waiting events then None
+  else List.find_map (fun (event : Candle_event.t) -> match event.body with
     | Candle_event.Candidate_window_held held
       when String.equal held.goal_id waiting.goal_id
            && String.equal held.request_id waiting.request_id
            && String.equal held.verification_run_id waiting.verification_run_id ->
       Some { passed_at=held.passed_at; confirmed_at=held.confirmed_at;
              tasks = held.tasks; task_keepers = held.task_keepers }
-    | Candle_event.Candidate_window_held _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
+    | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
+    | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
     | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Unattributed _
     | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _
     | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _
@@ -385,6 +403,7 @@ let validate_durable_candidates_internal ~rules (waiting : waiting) events =
     | Candle_event.Candidates_fenced c when matches c.goal_id c.request_id c.verification_run_id ->
       Some (c.tasks, c.candidate_task_ids, c.candidate_keepers, c.candidate_task_keepers, Backlog_fenced)
     | Candle_event.Candidates _ | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _
+    | Candle_event.Candidate_window_released _
     | Candle_event.Snapshot _ | Candle_event.Payout_owed _
     | Candle_event.Unattributed _ | Candle_event.Paid _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _ -> None) events in
   let* tasks, ids, keepers, task_keepers, provenance = match candidates with
@@ -444,9 +463,31 @@ let validate_settlement_under ~rules (waiting : waiting) events body =
   let matches goal_id request_id verification_run_id =
     goal_id = waiting.goal_id && request_id = waiting.request_id
     && verification_run_id = waiting.verification_run_id in
-  let* pass, tasks, ids, keepers, task_keepers =
-    validate_durable_candidates_internal ~rules waiting events
-  in
+  (* RFC-0513: the released-window closure settles without durable Candidates;
+     its truth is the release row, not a decided candidate set. *)
+  let released_closure = match body with
+    | Candle_event.Unattributed ({ reason = Candle_event.Window_released;
+                                   goal_id; request_id; verification_run_id }) ->
+      Some (goal_id, request_id, verification_run_id)
+    | Candle_event.Unattributed { reason = Candle_event.No_candidates; _ }
+    | Candle_event.Unattributed { reason = Candle_event.All_unrelated _; _ }
+    | Candle_event.Unattributed { reason = Candle_event.No_related_keepers _; _ }
+    | Candle_event.Paid _ | Candle_event.Payout_failed _
+    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _
+    | Candle_event.Candidates_fenced _ | Candle_event.Candidate_window_held _
+    | Candle_event.Candidate_window_released _ | Candle_event.Half_life_set _
+    | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _
+    | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> None in
+  (match released_closure with
+   | Some (goal_id, request_id, verification_run_id)
+     when matches goal_id request_id verification_run_id ->
+     if released_of waiting events then Ok ()
+     else Error "window_released closure requires the released candidate window"
+   | Some _ -> Error "settlement does not name the confirmed verifier run"
+   | None ->
+     let* pass, tasks, ids, keepers, task_keepers =
+       validate_durable_candidates_internal ~rules waiting events
+     in
   let recipients relations =
     let actual = List.map (fun (r : Candle_appraisal.task_relation) -> r.task_id) relations in
     if List.length actual <> List.length (List.sort_uniq String.compare actual)
@@ -477,14 +518,17 @@ let validate_settlement_under ~rules (waiting : waiting) events body =
      | Candle_event.No_related_keepers a ->
        let* eligible = recipients a.relations in
        if eligible = [] && List.exists (fun (r : Candle_appraisal.task_relation) -> r.relation = Candle_appraisal.Related) a.relations
-       then Ok () else Error "no_related_keepers does not match relation decisions")
+       then Ok () else Error "no_related_keepers does not match relation decisions"
+     | Candle_event.Window_released ->
+       (* decided above, without durable candidates *)
+       Error "window_released closure is decided without durable candidates")
   | Candle_event.Payout_failed f when matches f.goal_id f.request_id f.verification_run_id ->
     if pass.due_date = Some f.due_date then Ok ()
     else Error "failed due date differs from the confirmed Snapshot"
-  | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _
-  | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
-  | Candle_event.Candidate_window_held _ ->
-    Error "settlement does not name the confirmed verifier run"
+    | Candle_event.Paid _ | Candle_event.Unattributed _ | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ | Candle_event.Payout_failed _
+    | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
+    | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _ ->
+      Error "settlement does not name the confirmed verifier run")
 
 let validate_settlement waiting events body =
   validate_settlement_under ~rules:Current_rules waiting events body
@@ -496,7 +540,9 @@ let validate_hold (waiting : waiting) events ~passed_at ~confirmed_at tasks task
     then Ok () else Error "held candidate window differs from the open payout times" in
   let* pass = current_pass_of waiting events in
   let* () =
-    if Option.is_some (held_window_of waiting events) || Option.is_some (candidates_of waiting events)
+    if released_of waiting events
+    then Error "released payout window cannot be held again"
+    else if Option.is_some (held_window_of waiting events) || Option.is_some (candidates_of waiting events)
     then Error "candidate observation is already durable"
     else Ok () in
   let ids = List.map fst tasks in
@@ -546,6 +592,13 @@ let validate_under ~rules events body =
          held.tasks held.task_keepers
      | Waiting _ | No_obligation | Failed _ | Settled ->
        Error "held candidate window requires the current open payout")
+  | Candle_event.Candidate_window_released released ->
+    (match state ~goal_id:released.goal_id events with
+     | Waiting waiting
+       when identity_matches waiting released.goal_id released.request_id released.verification_run_id
+            && Option.is_some (held_window_of waiting events) -> Ok ()
+     | Waiting _ | No_obligation | Failed _ | Settled ->
+       Error "candidate window release requires the held window of the current open payout")
   | Candle_event.Candidates c | Candle_event.Candidates_fenced c ->
     (match state ~goal_id:c.goal_id events with
      | Waiting waiting when Option.is_some (held_window_of waiting events) ->
@@ -558,7 +611,7 @@ let validate_under ~rules events body =
     | Candle_event.Unattributed u -> Some u.goal_id
     | Candle_event.Payout_failed f -> Some f.goal_id
     | Candle_event.Snapshot _ | Candle_event.Payout_owed _ | Candle_event.Candidates _ | Candle_event.Candidates_fenced _
-    | Candle_event.Candidate_window_held _
+    | Candle_event.Candidate_window_held _ | Candle_event.Candidate_window_released _
     | Candle_event.Half_life_set _ | Candle_event.Equipped _ | Candle_event.Purchased _ | Candle_event.Granted _ | Candle_event.Gifted _ | Candle_event.Gifted_item _ -> None in
   match goal_id with
   | None -> Ok ()

@@ -113,6 +113,19 @@ let operator_disposition_reason_of_string value =
     all_of_operator_disposition_reason
 ;;
 
+let receipt_operator_disposition receipt_json =
+  match
+    ( Option.bind
+        (Json_util.get_string_nonempty receipt_json "operator_disposition")
+        operator_disposition_kind_of_string,
+      Option.bind
+        (Json_util.get_string_nonempty receipt_json "operator_disposition_reason")
+        operator_disposition_reason_of_string )
+  with
+  | Some kind, Some reason -> Some (kind, reason)
+  | Some _, None | None, Some _ | None, None -> None
+;;
+
 let operator_disposition (receipt : t)
   : operator_disposition_kind * operator_disposition_reason
   =
@@ -388,6 +401,7 @@ let to_json_with_operator_disposition
       ~duration_ms:(receipt_duration_ms receipt)
       ?error:receipt.error_message
       ~sandbox_target:(Keeper_types_profile_sandbox.sandbox_profile_to_string receipt.sandbox_kind)
+      ~path_params:[ "target_path" ]
       ()
   in
   `Assoc

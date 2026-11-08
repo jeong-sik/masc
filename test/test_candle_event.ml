@@ -379,11 +379,20 @@ let test_an_event_that_would_not_read_back_is_not_written () =
     (Result.is_error (E.to_line (snapshot ~linked_task_ids:[ "task-1"; " " ] ())))
 ;;
 
+let test_a_release_names_the_held_payout () =
+  let row = event (E.Candidate_window_released
+    { goal_id="goal-1"; request_id="req-1"; verification_run_id="run-1" }) in
+  round_trips "a release names the held payout" row;
+  Alcotest.(check string) "the kind is candidate_window_released"
+    "candidate_window_released" (E.kind row.body)
+;;
+
 let () =
   Alcotest.run
     "candle_event"
     [ ( "codec"
-      , [ Alcotest.test_case "the row format" `Quick test_the_row_format
+      , [ Alcotest.test_case "a release names the held payout" `Quick test_a_release_names_the_held_payout
+        ; Alcotest.test_case "the row format" `Quick test_the_row_format
         ; Alcotest.test_case "a row reads back as written" `Quick test_a_row_reads_back_as_written
         ; Alcotest.test_case "held window codec keeps unknowns distinct" `Quick
             test_held_window_codec_keeps_unknowns_distinct

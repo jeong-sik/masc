@@ -47,7 +47,8 @@ function payoutText(payout: GoalCandlePayout): string {
     case 'paid': return `지급이 원장에 기록되었습니다 (${payout.recorded_at}).`
     case 'unattributed': return ({ no_candidates: '지급할 후보가 없다고 기록되었습니다.',
       all_unrelated: '후보 작업이 목표와 무관하다고 기록되었습니다.',
-      no_related_keepers: '관련된 Keeper가 없다고 기록되었습니다.' })[payout.reason]
+      no_related_keepers: '관련된 Keeper가 없다고 기록되었습니다.',
+      window_released: '해제된 보류 창이 다시 읽어도 모호해 지급 대상이 없다고 기록되었습니다.' })[payout.reason]
     case 'payout_failed': return '기한을 읽을 수 없다는 지급 실패가 원장에 기록되었습니다.'
   }
 }

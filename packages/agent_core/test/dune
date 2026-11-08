@@ -42,7 +42,7 @@
 (executable
  (name anthropic_live_proof)
  (modules anthropic_live_proof)
- (libraries agent_core_test_deps agent_core llm_provider eio eio_main))
+ (libraries agent_core_test_deps llm_provider eio eio_main))
 
 (executable
  (name capability_resolution_dump)

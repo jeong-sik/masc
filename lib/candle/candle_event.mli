@@ -57,8 +57,14 @@ type attribution = {
   grade_trace : Candle_appraisal.trace;
   relations : Candle_appraisal.task_relation list;
 }
-type unattributed_reason = No_candidates | All_unrelated of attribution | No_related_keepers of attribution
-(** Nobody could be paid. *)
+type unattributed_reason =
+  | No_candidates
+  | All_unrelated of attribution
+  | No_related_keepers of attribution
+  | Window_released
+(** Nobody could be paid. [Window_released]: the held candidate window was
+    released by decision and the fresh read reproduced the same permanent
+    ambiguity, so the payout settled for nobody (RFC-0513). *)
 
 type equipment_choice = Default | Item of Keeper_portrait_item.t
 
@@ -116,6 +122,16 @@ type body =
       }
       (** Some linked Task's ordering or original status cannot be determined.
           This is an observation, not a candidate decision or settlement. *)
+  | Candidate_window_released of
+      { goal_id : string
+      ; request_id : string
+      ; verification_run_id : string
+      }
+      (** The operator's decision that this held window no longer blocks the
+          payout. The hold row stays. The next payout pass re-decides the
+          payout from a fresh observation; a window that stays ambiguous
+          closes [Unattributed] with [Window_released] instead of holding
+          again (RFC-0513). *)
   | Unattributed of
       { goal_id : string
       ; request_id : string

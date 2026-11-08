@@ -95,6 +95,34 @@ let sandboxes = Masc.Keeper_types_profile.all_sandbox_profiles
 let now_header = "NOW"
 let age_header = "AGE"
 
+let operator_disposition_word : Masc.Keeper_execution_receipt.operator_disposition_kind -> string = function
+  | Disp_operator_action_required -> "사람 몫"
+  | Disp_effect_review_required -> "효과 확인"
+  | Disp_unknown -> "분류 안 됨"
+  | Disp_pass -> "pass"
+  | Disp_fail_open_next_runtime -> "fail open"
+  | Disp_retry_later -> "retry later"
+  | Disp_pass_next_model -> "next model"
+  | Disp_user_cancelled -> "cancelled"
+  | Disp_skipped -> "skipped"
+;;
+
+let shows_operator_disposition ~(activity : Masc_tui_keeper_list_model.activity) =
+  match activity with
+  (* Only idle/unmapped states and attempt failures of the open turn show
+     historical operator intervention requirements from the last receipt.
+     During active turns (preparing, executing, waiting on tools/models, async,
+     delegation, verification) or operator holds, the current turn is live and
+     has not yet produced a new receipt. *)
+  | Attempt_failed | Idle | Unknown -> true
+  | Preparing | Running | Streaming
+  | Paused | Offline
+  | Held_call | Question | Confirmation
+  | Tool_waiting | Model_waiting
+  | Async_working _ | Deferred
+  | Delegate_result | Verifying | External_waiting -> false
+;;
+
 let column_legend =
   let letters letter values = String.concat "/" (List.map letter values) in
   let words word values = String.concat " / " (List.map word values) in
@@ -110,4 +138,7 @@ let column_legend =
   ; "S " ^ letters sandbox_letter sandboxes, "sandbox: " ^ words sandbox_word sandboxes
   ; ( "쉬는 중"
     , "resting path: relative duration (제공자 stated / 상한 bounded); ▹ prefixes next candidate after turn failure" )
+  ; badge_glyph Badge_schedule, "next scheduled run or hold status (Detailed second row)"
+  ; "mem · lag · stale", "keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second row)"
+  ; "사람 몫 / 효과 확인 / 분류 안 됨", "requires human operator action, effect review, or unmapped fault (NOW column)"
   ]

@@ -140,6 +140,8 @@ let init ~base_path () =
   (try
      Fs_compat.mkdir_p dir;
      let store = Dated_jsonl.open_store (location masc_root) in
+     (* Last init wins; the replaced store handle is abandoned rather than
+        closed — Dated_jsonl exposes no release API (audit follow-up). *)
      Atomic.set store_ref (Some store)
    with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
      Atomic.set store_ref None;

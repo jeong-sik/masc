@@ -18,6 +18,12 @@ type batch =
   ; rendered_prompt : string
   }
 type preparation = Unchanged | Cleanup of t | Prepared of batch
+type pass = { target : int; remaining : int }
+
+let pass t =
+  match t.building with
+  | None -> None
+  | Some b -> Some { target = List.length b.target; remaining = List.length b.remaining }
 
 open Result.Syntax
 let empty = { published = None; building = None }
@@ -52,7 +58,7 @@ let observe ~sources ~contract t =
 let input batch = batch.input
 let rendered_prompt batch = batch.rendered_prompt
 let selected_count batch = List.length batch.selected
-let remaining_count batch = List.length batch.remaining
+let remaining_count (batch : batch) = List.length batch.remaining
 let prepared_state batch = batch.state
 let batch_contract batch = match batch.state.building with
   | Some building -> Ok building.contract

@@ -74,11 +74,6 @@ let receipt_phase = function
   | Terminal_receipt _ -> Terminal
 ;;
 
-let receipt_dispatch_count = function
-  | Before_dispatch_receipt _ -> 0
-  | Dispatch_started_receipt _ | Response_received_receipt _ | Terminal_receipt _ -> 1
-;;
-
 let receipt_http_status = function
   | Before_dispatch_receipt _ | Dispatch_started_receipt _ -> None
   | Response_received_receipt receipt | Terminal_receipt receipt ->

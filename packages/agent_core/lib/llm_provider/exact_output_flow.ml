@@ -80,11 +80,6 @@ let record_admission progress admission =
     }
 ;;
 
-let record_attempt progress attempt =
-  let current = Atomic.get progress in
-  Atomic.set progress { current with attempts_rev = attempt :: current.attempts_rev }
-;;
-
 (* A value is published when its visit starts and again as the visit settles.
    The lists are kept newest first and reversed once in [progress_snapshot]:
    a value seen for the first time goes at the head, like [record_admission]

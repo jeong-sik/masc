@@ -2493,7 +2493,21 @@ let ask_block f =
 let question_hints (state : state) =
   let open Masc_tui_keys in
   match state.ask_answer_mode with
-  | Ask_browsing -> footer_hints_approvals Approval_browsing
+  | Ask_browsing ->
+      let asks =
+        match open_ask_rows state with
+        | [] -> No_asks
+        | _ :: _ ->
+            (match selected_ask_row state with
+             | Some _ -> Ask_selected
+             | None -> Asks_unselected)
+      in
+      footer_hints_approvals
+        (Approval_browsing
+           { approvals = Masc_tui_approvals_model.approval_items state <> []
+           ; asks
+           ; source = Option.is_some (selected_ask_origin state)
+           })
   | Ask_answering _ ->
       (match state.ask_text_entry with
        | Some _ -> footer_hints_approvals Approval_writing

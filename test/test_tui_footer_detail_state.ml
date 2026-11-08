@@ -102,6 +102,13 @@ let back_keys_of_surface name surface =
     ~list:(Keys.footer_hints ~detail_open:false surface)
     ~detail:(Keys.footer_hints ~detail_open:true surface)
 
+(* The queue with a row, a question under the cursor and its source: every key
+   the browsing footer can name. *)
+let approvals_list_footer =
+  Keys.footer_hints_approvals
+    (Keys.Approval_browsing
+       { approvals = true; asks = Keys.Ask_selected; source = true })
+
 let scoped_keys =
   [ ( "Planning",
       Keys.footer_hints_planning_goal_list ~has_rows:true,
@@ -122,11 +129,11 @@ let scoped_keys =
      read, as "string bytes" or, once they are shown, as "text". *)
   ; ( "Approvals string bytes",
       Keys.footer_hints_approval_detail ~value_hint:Keys.Readable_values,
-      Keys.footer_hints_approvals Keys.Approval_browsing,
+      approvals_list_footer,
       [ "v" ] )
   ; ( "Approvals text",
       Keys.footer_hints_approval_detail ~value_hint:Keys.Byte_values,
-      Keys.footer_hints_approvals Keys.Approval_browsing,
+      approvals_list_footer,
       [ "v" ] )
   ]
   @ back_keys "Planning"

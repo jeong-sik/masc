@@ -1380,8 +1380,13 @@ let footer_hints_tools ~pane =
        if String.equal binding.key bracket.key then bracket else binding)
        (for_surface Tools))
 
+type ask_supply =
+  | No_asks
+  | Asks_unselected
+  | Ask_selected
+
 type approvals_footer =
-  | Approval_browsing
+  | Approval_browsing of { approvals : bool; asks : ask_supply; source : bool }
   | Approval_writing
   | Approval_armed
   | Approval_answering of { has_choices : bool; takes_text : bool }
@@ -1395,15 +1400,26 @@ let footer_hints_approvals mode =
   in
   let row items = String.concat "  " items in
   match mode with
-  | Approval_browsing ->
+  | Approval_browsing { approvals; asks; source } ->
+      (* Three things a key can need. [j/k] and [y / n] act on an approval
+         row; with none the decision answers with a notice. [ / ] selects a
+         waiting question and [a] opens the selected one, so a cursor on none
+         of them keeps [ / ] and drops [a]. [o / O] read the source of a
+         question, the last answer's included. [w] and [e] open a palette and
+         act on an empty queue. *)
       row
-        [ hint approval_move; hint approval_decide; hint approval_workspace
-        ; hint approval_outside; hint approval_walk; hint approval_answer; hint approval_origin
-        ; hint listing_refresh; hint listing_next
-          (* The way out: the two keys a cut row keeps
-             ([Masc_tui_footer.never_dropped_keys]). *)
-        ; hint approval_back; hint listing_quit
-        ]
+        ((if approvals then [ hint approval_move; hint approval_decide ] else [])
+         @ [ hint approval_workspace; hint approval_outside ]
+         @ (match asks with
+            | No_asks -> []
+            | Asks_unselected -> [ hint approval_walk ]
+            | Ask_selected -> [ hint approval_walk; hint approval_answer ])
+         @ (if source then [ hint approval_origin ] else [])
+         @ [ hint listing_refresh; hint listing_next
+             (* The way out: the two keys a cut row keeps
+                ([Masc_tui_footer.never_dropped_keys]). *)
+           ; hint approval_back; hint listing_quit
+           ])
   | Approval_writing ->
       row [ hint ~label:"save" approval_read; hint ~label:"cancel" approval_back ]
   | Approval_armed ->

@@ -91,20 +91,14 @@
   yojson
   otoml
   base64
-  graphql
-  graphql_parser
   ws-direct-core
   ws-direct-gluten
-  ws-direct-eio
   bigstringaf
   sqlite3
   unix
   threads
   optint
   re
-  re.str
-  re.pcre
-  mirage-crypto-rng.unix
   cstruct
   masc.agent_core.digest
   ocaml-protoc-plugin
@@ -114,15 +108,12 @@
   h2
   h2-eio
   eio
-  eio_main
   eio.unix
   httpun-eio
   httpun
-  gluten-eio
   gluten
   ipaddr
   cohttp
-  cohttp-eio
   masc.agent_core
   masc.agent_core.llm_provider
   masc_schedule
@@ -167,7 +158,6 @@
   x509
   ptime
   masc.crypto_rng
-  ca-certs
   mtime
   mtime.clock
   mtime.clock.os
@@ -205,9 +195,6 @@
   masc.mcp_transport_protocol
   masc.mcp_session
   masc.ag_ui
-  opentelemetry
-  opentelemetry.client
-  ambient-context
   ambient-context-eio
   masc.repo_manager
   masc.otel_genai

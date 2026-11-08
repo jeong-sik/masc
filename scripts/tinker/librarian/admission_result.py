@@ -67,7 +67,7 @@ class Kind(Enum):
 
 
 def masc_rule(kind: Kind) -> str:
-    """Where MASC enforces the rule (main 4b770e51972c)."""
+    """Where MASC enforces the rule (main d2bc93109055)."""
     match kind:
         case Kind.INVALID_JSON:
             return "exact_output_plan.ml:641 normalize_json"

@@ -8,7 +8,7 @@ let request_trust_policy =
   match
     Server_request_authority.make_trust_policy
       ~bind_host:"127.0.0.1"
-      ~bind_port:8935
+      ~bind_port:8935 ~https_port:None
       ~explicit_base_url:None
   with
   | Ok policy -> policy

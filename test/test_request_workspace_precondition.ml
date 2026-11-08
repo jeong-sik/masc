@@ -320,7 +320,7 @@ let h2_exchange ~env headers =
     match
       Server_request_authority.make_trust_policy
         ~bind_host:"localhost"
-        ~bind_port:8935
+        ~bind_port:8935 ~https_port:None
         ~explicit_base_url:None
     with
     | Ok policy -> policy

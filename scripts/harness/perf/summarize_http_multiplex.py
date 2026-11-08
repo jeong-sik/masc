@@ -123,7 +123,7 @@ def curl_table(rows: list[dict]) -> list[str]:
     if not samples:
         return []
     path = samples[0].get("path", "")
-    transports = [t for t in ("h1", "h2c") if any(r["transport"] == t for r in samples)]
+    transports = [t for t in TRANSPORT_ORDER if any(r["transport"] == t for r in samples)]
     lines = [f"### curl `{path}` (one download per sample, all repeats pooled)", "",
              "| | " + " | ".join(transports) + " |", "|---|" + "---|" * len(transports)]
     for label, pick in (("MB/s median", statistics.median), ("MB/s min", min), ("MB/s max", max)):

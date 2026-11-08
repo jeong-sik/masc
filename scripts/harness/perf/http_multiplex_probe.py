@@ -147,7 +147,8 @@ def transport(name: str, concurrency: int) -> Transport:
         case "tls-h1":
             return Transport(name, http1=True, http2=False, max_connections=BROWSER_CONNECTIONS)
         case "tls-h2":
-            # ALPN offers h2 only; the TLS listener answers with h2.
+            # http2=True without http1 negotiates HTTP/2 on the TLS connection;
+            # the listener counts it under alpn_h2_total.
             return Transport(name, http1=False, http2=True, max_connections=1)
     raise SystemExit(f"unknown transport {name}")
 
@@ -576,6 +577,11 @@ def main() -> None:
     for name in args.scenarios:
         if name not in SCENARIOS:
             raise SystemExit(f"unknown scenario {name}")
+    if args.https_base_url is not None and not args.https_base_url.startswith("https://"):
+        raise SystemExit(f"--https-base-url must start with https://, got {args.https_base_url}")
+    tls_requested = [name for name in transports if name in TLS_TRANSPORTS]
+    if args.base_url is not None and tls_requested and args.https_base_url is None:
+        raise SystemExit(f"{', '.join(tls_requested)} need --https-base-url when attaching to a server")
     args.output.mkdir(parents=True, exist_ok=False)
 
     identity = {

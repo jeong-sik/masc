@@ -16,7 +16,7 @@
 
 ## `after/` 재는 절차
 
-1. 스택 head 로 바이너리를 만들어 설치한다(`~/.local/bin/masc`). `masc --version` 의 build-commit 을 적는다.
+1. 스택 head 로 바이너리를 만들어 설치한다(`~/.local/bin/masc`). `masc --version` 의 build-commit 을 적는다. 바이너리에 TLS 리스너 자기 주소 신뢰(#49933)가 들어 있어야 한다. 없으면 `tls-h1`·`tls-h2` 요청이 `127.0.0.1:<https_port>` 를 400 `request_authority_untrusted` 로 거절해 ok=0 행이 남는다.
 2. 기준선과 같은 인자로 돌린다. 전송 다섯 개를 모두 적는다.
 
 ```bash

@@ -4,29 +4,12 @@
     accumulator, and exposes the same snapshot as an OpenTelemetry metric source
     during server bootstrap. *)
 
+(* Name modules arrive once, through {!Otel_builtin_metric_names}, which
+   includes every one of them; direct includes here only re-received the
+   same members a second time. The four keeper/schedule aliases duplicated
+   [Otel_metric_names] members the include already exported. *)
 include Otel_metric_store_core
-include Otel_metric_names
 include Otel_builtin_metric_names
-include Otel_agent_core_metric_names
-include Otel_runtime_metric_names
-include Otel_core_metric_names
-include Otel_policy_metric_names
-include Otel_identity_metric_names
-include Otel_transport_metric_names
-
-let metric_keeper_waiting_count = Otel_metric_names.metric_keeper_waiting_count
-
-let metric_keeper_waiting_age_seconds =
-  Otel_metric_names.metric_keeper_waiting_age_seconds
-;;
-
-let metric_keeper_waiting_keeper_count =
-  Otel_metric_names.metric_keeper_waiting_keeper_count
-;;
-
-let metric_schedule_payload_unsupported_total =
-  Otel_metric_names.metric_schedule_payload_unsupported_total
-;;
 
 let otel_kind_of_metric_type = function
   | Counter -> Otel_metrics.Counter

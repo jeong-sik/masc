@@ -4,6 +4,8 @@
     second lifecycle store. *)
 
 type review_kind = Proof
+(** Independent verifiers use proof review only. The value is written into
+    each JSONL run row, so a second kind is a store schema change. *)
 
 type evaluated_verdict = Approved of { reason : string } | Rejected of { reason : string }
 

@@ -402,7 +402,7 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     match runtime with
     | Some { kr_operator_disposition = Ok (Some (disp, _)); _ }
       when Masc.Keeper_execution_receipt.needs_operator_broadcast disp
-           && activity <> Held_call && activity <> Question && activity <> Confirmation ->
+           && Masc_tui_keeper_mark.shows_operator_disposition ~activity ->
         Some disp
     | Some { kr_operator_disposition = Ok (Some _); _ } -> None
     | Some { kr_operator_disposition = Ok None; _ } -> None

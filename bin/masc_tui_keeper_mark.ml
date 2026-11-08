@@ -107,6 +107,15 @@ let operator_disposition_word : Masc.Keeper_execution_receipt.operator_dispositi
   | Disp_skipped -> "skipped"
 ;;
 
+let shows_operator_disposition ~(activity : Masc_tui_keeper_list_model.activity) =
+  match activity with
+  | Preparing | Running | Streaming
+  | Paused | Offline
+  | Held_call | Question | Confirmation -> false
+  | Attempt_failed | Async_working _ | Deferred | Tool_waiting | Model_waiting
+  | Delegate_result | Verifying | External_waiting | Idle | Unknown -> true
+;;
+
 let column_legend =
   let letters letter values = String.concat "/" (List.map letter values) in
   let words word values = String.concat " / " (List.map word values) in

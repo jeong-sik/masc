@@ -55,6 +55,13 @@ val operator_disposition_word :
 (** The human disposition word displayed in the activity column for a turn
     requiring operator attention. *)
 
+val shows_operator_disposition :
+  activity:Masc_tui_keeper_list_model.activity -> bool
+(** Whether an operator disposition broadcast badge should be drawn for the
+    activity. Excludes actively executing states (Preparing, Running, Streaming),
+    explicit operator pause (Paused), offline state (Offline), and interactive
+    turns (Held_call, Question, Confirmation). *)
+
 val column_legend : (string * string) list
 (** The Keepers header words, the sentence about a failing keeper's past and
     the Mode S letters, each with what it means. The sheet prints it; the

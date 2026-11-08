@@ -61,6 +61,28 @@ let test_operator_disposition_words () =
   Alcotest.(check string) "unknown is 분류 안 됨" "분류 안 됨"
     (Mark.operator_disposition_word Disp_unknown)
 
+let test_shows_operator_disposition_activity_filter () =
+  check_bool "Running does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Running);
+  check_bool "Preparing does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Preparing);
+  check_bool "Streaming does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Streaming);
+  check_bool "Paused does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Paused);
+  check_bool "Offline does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Offline);
+  check_bool "Held_call does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Held_call);
+  check_bool "Question does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Question);
+  check_bool "Confirmation does not show disposition badge" false
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Confirmation);
+  check_bool "Idle shows disposition badge" true
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Idle);
+  check_bool "Attempt_failed shows disposition badge" true
+    (Mark.shows_operator_disposition ~activity:Masc_tui_keeper_list_model.Attempt_failed)
+
 let () =
   Alcotest.run "tui_keeper_mark"
     [ ( "marks"
@@ -68,5 +90,7 @@ let () =
             test_the_column_legend_explains_every_letter_the_cell_draws
         ; Alcotest.test_case "operator disposition words are declared" `Quick
             test_operator_disposition_words
+        ; Alcotest.test_case "operator disposition activity filter" `Quick
+            test_shows_operator_disposition_activity_filter
         ] )
     ]

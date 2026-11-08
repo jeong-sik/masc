@@ -167,8 +167,8 @@ val turn_phase_transition_spec_violation_to_tag
   :  turn_phase_transition_spec_violation
   -> string
 
-(** RFC-0072 Phase 5: raised by [validate_turn_phase_transition] and
-    [set_turn_phase] on a forbidden turn_phase transition, carrying the
+(** RFC-0072 Phase 5: raised by [set_turn_phase] and [set_turn_phase_direct]
+    on a forbidden turn_phase transition, carrying the
     typed [turn_phase_transition_spec_violation] payload (replaces the
     prior string-formatted [Invalid_argument]).  [where] is a diagnostic
     label naming the raising function.  A [Printexc] printer is registered

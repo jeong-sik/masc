@@ -44,7 +44,7 @@ type packed_turn_phase = Packed : 'a turn_phase_witness -> packed_turn_phase
 (* Diagnostic label for invalid-transition error messages.  Must stay in
    sync with the [turn_phase] variant — adding a constructor will fail
    compilation here, which forces the operator to extend
-   [validate_turn_phase_transition] at the same time. *)
+   [resolve_turn_phase_transition] at the same time. *)
 let packed_turn_phase_label : packed_turn_phase -> string = function
   | Packed Turn_idle -> "Turn_idle"
   | Packed Turn_prompting -> "Turn_prompting"
@@ -150,7 +150,7 @@ let turn_phase_transition_spec_violation_to_tag = function
 (* RFC-0072 Phase 5: typed exception for forbidden turn_phase transitions.
    The typed [turn_phase_transition_spec_violation] payload travels on the
    exception instead of through a string message. Raised by
-   [validate_turn_phase_transition] / [set_turn_phase]. The registered
+   [set_turn_phase] / [set_turn_phase_direct]. The registered
    [Printexc] printer reproduces the original message for generic catchers
    and log output. *)
 exception

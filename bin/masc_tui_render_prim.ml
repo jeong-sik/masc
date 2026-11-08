@@ -2504,7 +2504,7 @@ let question_hints (state : state) =
       in
       footer_hints_approvals
         (Approval_browsing
-           { approvals = Masc_tui_approvals_model.approval_items state <> []
+           { approvals = not (List.is_empty (Masc_tui_approvals_model.approval_items state))
            ; asks
            ; source = Option.is_some (selected_ask_origin state)
            })

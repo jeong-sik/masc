@@ -428,9 +428,15 @@ let approval_read =
 let approval_value_bytes =
   b Navigate "v" "string bytes" ~detail:Detail_only
     ~help:"read decoded top-level Gate string values as bytes, not JSON wire; v or Esc returns"
+(* One spelling of "key:label". The queue footer and the Questions heading both
+   name the answer key, and two hand-written spellings of it had drifted
+   ([a:open answers] over [a:answer a question]). *)
+let key_hint ?label (binding : binding) =
+  binding.key ^ ":" ^ (match label with Some word -> word | None -> binding.label)
 let approval_answer =
   b Act "a" "answer a question"
     ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
+let approval_answer_hint = key_hint approval_answer
 let approval_installation_results =
   b Act "g" "installation Results"
     ~help:"after answering an installation's question, open that installation's Results in Plugins, where the reveal appears"
@@ -1395,9 +1401,7 @@ type approvals_footer =
    Help. Their modes need a deliberate order and, for Enter, a mode-specific
    verb; the dispatcher gives that key a different action in each mode. *)
 let footer_hints_approvals mode =
-  let hint ?label (binding : binding) =
-    binding.key ^ ":" ^ (match label with Some word -> word | None -> binding.label)
-  in
+  let hint = key_hint in
   let row items = String.concat "  " items in
   match mode with
   | Approval_browsing { approvals; asks; source } ->

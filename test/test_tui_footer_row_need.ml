@@ -213,6 +213,14 @@ let test_a_question_brings_the_walk_and_a_selected_one_brings_answer () =
     ~named:("[ / ]" :: "a" :: approvals_always)
     ~absent:[ "j/k"; "y / n"; "o / O" ]
 
+(* The Questions heading prints [approval_answer_hint]. The footer names the
+   key in the same words, or the two lines say different things about [a]. *)
+let test_the_selected_question_footer_uses_the_headings_words_for_answer () =
+  check bool "the selected-question footer holds the heading's hint" true
+    (contains
+       ("  " ^ approvals_footer ~asks:Keys.Ask_selected ())
+       ("  " ^ Keys.approval_answer_hint))
+
 let test_a_source_brings_the_source_keys_without_a_question () =
   check_keys "Approvals with only a source" (approvals_footer ~source:true ())
     ~named:("o / O" :: approvals_always)
@@ -250,6 +258,9 @@ let () =
         ; test_case "a question brings the walk, a selected one the answer"
             `Quick
             test_a_question_brings_the_walk_and_a_selected_one_brings_answer
+        ; test_case "the selected question footer uses the heading's words"
+            `Quick
+            test_the_selected_question_footer_uses_the_headings_words_for_answer
         ; test_case "a source brings the source keys without a question"
             `Quick test_a_source_brings_the_source_keys_without_a_question
         ; test_case "an approvals footer with everything names every key"

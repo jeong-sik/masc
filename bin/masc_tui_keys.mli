@@ -191,6 +191,11 @@ val footer_hints_approvals : approvals_footer -> string
 (** Project the Approvals queue and question reader's modal footers from the
     same binding records as the Help sheet. *)
 
+val approval_answer_hint : string
+(** The footer's words for the key that opens the selected question. The
+    Questions heading prints this one string, so the two cannot name the key
+    differently. *)
+
 val has_detail_scoped_keys : Masc_tui_types.surface -> bool
 (** Whether this surface's table scopes any binding to one of the two states,
     and so owes [footer_hints] a [~detail_open] from both of its renderers.

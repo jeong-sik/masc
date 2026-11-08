@@ -31,12 +31,11 @@ browser_binding_required는 tabId가 어느 브라우저의 것인지 빠졌다�
     연결은 읽기(`mode=text`·`elements`·`scene`·`screenshot`), `open_tab`, `close_tab`, `back`·`forward`·`reload`, `accept_dialog`·`dismiss_dialog`,
     `hand_off`·`take_over`, `upload`(`selector` 의 파일 입력, 또는 `opener` 로 뜨는 파일 선택 창),
     `mode=downloads`, `BrowserGoto`,
-    그리고 click·`click_at`·`double_click`·hover·drag·`scroll`·`scroll_at`·fill·
-    `select_option`·`follow_link`·`type_text`·`press_key` 를 한다. 드래그는 셀렉터로 고른
-    `drag_to`(경유점 `via` 없음)만 SDK 가 영수증을 돌려주고, 영수증에 `dialog` 가 없으면 입력이
-    풀린 것으로 본다. 좌표 `drag`, `via` 가 있는 `drag_to`, `scene` 노드로 고른 드래그는 입력을
-    보낸 뒤에는 끝까지 실행돼도 결과를 알 수 없다고 답하고, 운영자가 입력을 초기화할 때까지 그
-    연결의 다음 입력이 거절된다. 입력을 보내기 전에 거절된 드래그는 입력을 그대로 쓸 수 있다.
+    그리고 click·`click_at`·`double_click`·hover·`drag_to`·`scroll`·`scroll_at`·fill·
+    `select_option`·`follow_link`·`type_text`·`press_key` 를 한다. `drag_to` 는 셀렉터끼리,
+    경유점 `via` 없이 SDK 의 `dragAndDrop` 으로 끌고, 영수증에 `dialog` 가 없으면 입력이
+    풀린 것으로 본다. `via` 가 있거나 `scene` 노드로 고른 `drag_to` 는 입력을 보내기 전에
+    거절되고, 그 연결의 입력은 그대로 쓸 수 있다.
     프레임은 snapshot 으로
     다룬다: snapshot 이 iframe 내용을 ref 와 함께 담고, 그 ref 나 role·글 `target` 으로
     프레임 안을 누르고 채운다. 터치·`set_viewport`·`activate_tab` 은 하지

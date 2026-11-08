@@ -24,11 +24,13 @@ let shared_instances : (string, t) Hashtbl.t = Hashtbl.create 8
 (* Serializes the find→create→replace below: OCaml 5 domains preempt
    without suspension points, so pool-domain fibers can interleave here and
    mint two instances for one directory, leaving the loser's state diverged
-   from the shared cache. *)
-let shared_instances_mutex = Eio.Mutex.create ()
+   from the shared cache. Stdlib.Mutex, not Eio.Mutex: tests reach this
+   before Eio_main.run and from non-Eio domains, where an Eio lock either
+   silently skips or raises Non_eio_mutex_context (5ec4d5ff6b / #49900). *)
+let shared_instances_mutex = Stdlib.Mutex.create ()
 
 let get_or_create ~base_path =
-  Eio_guard.with_mutex shared_instances_mutex (fun () ->
+  Stdlib.Mutex.protect shared_instances_mutex (fun () ->
     match Hashtbl.find_opt shared_instances base_path with
     | Some t -> t
     | None ->

@@ -169,25 +169,30 @@ let logged_toml_discovery_error : (string * string, unit) Hashtbl.t = Hashtbl.cr
    below: keeper fleet scans run on pool-domain fibers and OCaml 5 domains
    preempt without suspension points, so concurrent mem/add (and the
    Hashtbl resize it may trigger) is not cooperative-safe even though a
-   duplicate warning itself would be harmless. *)
-let logged_tables_mutex = Eio.Mutex.create ()
+   duplicate warning itself would be harmless. Stdlib.Mutex, not
+   Eio.Mutex: fleet scans also run before Eio_main.run and from non-Eio
+   domains, where an Eio lock either silently skips or raises
+   Non_eio_mutex_context (5ec4d5ff6b / #49900). *)
+let logged_tables_mutex = Stdlib.Mutex.create ()
 
 let log_toml_discovery_error_once ~file ~error =
   let key = (file, error) in
-  Eio_guard.with_mutex logged_tables_mutex (fun () ->
-    if Hashtbl.mem logged_toml_discovery_error key then false
-    else begin
-      Hashtbl.add logged_toml_discovery_error key ();
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string ProfileLoadFailures)
-        ~labels:
-          [ ( "site"
-            , Keeper_profile_load_failure_site.(to_label Toml_discovery_error) )
-          ]
-        ();
-      Log.Keeper.warn "toml_loader: invalid discovery retained for %s: %s" file error;
-      true
-    end)
+  let first =
+    Stdlib.Mutex.protect logged_tables_mutex (fun () ->
+      if Hashtbl.mem logged_toml_discovery_error key then false
+      else (
+        Hashtbl.add logged_toml_discovery_error key ();
+        true))
+  in
+  if first then (
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string ProfileLoadFailures)
+      ~labels:
+        [ ( "site"
+          , Keeper_profile_load_failure_site.(to_label Toml_discovery_error) ) ]
+      ();
+    Log.Keeper.warn "toml_loader: invalid discovery retained for %s: %s" file error);
+  first
 
 let logged_missing_keepers_dir : (string, unit) Hashtbl.t = Hashtbl.create 4
 
@@ -197,14 +202,18 @@ let keeper_toml_paths (dir : string) : string list =
     (* A missing keepers directory is a misconfiguration, not an empty
        roster: say so once per process instead of returning silence that
        downstream reports as zero keepers and missing declarations. *)
-    Eio_guard.with_mutex logged_tables_mutex (fun () ->
-      if not (Hashtbl.mem logged_missing_keepers_dir dir)
-      then (
-        Hashtbl.add logged_missing_keepers_dir dir ();
-        Log.Keeper.warn
-          "toml_loader: keepers directory %s is missing or not a directory: \
-           fleet scan finds zero keepers"
-          dir));
+    let first =
+      Stdlib.Mutex.protect logged_tables_mutex (fun () ->
+        if Hashtbl.mem logged_missing_keepers_dir dir then false
+        else (
+          Hashtbl.add logged_missing_keepers_dir dir ();
+          true))
+    in
+    if first then
+      Log.Keeper.warn
+        "toml_loader: keepers directory %s is missing or not a directory: \
+         fleet scan finds zero keepers"
+        dir;
     [])
   else
     dir

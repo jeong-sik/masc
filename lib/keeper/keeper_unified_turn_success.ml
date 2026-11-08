@@ -108,7 +108,7 @@ let append_metrics_snapshot
         Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
         ~labels:
           [ "keeper", meta.Keeper_meta_contract.name
-          ; "site", Keeper_turn_metrics_snapshot_failure_site.(to_label Post_cycle)
+          ; "site", "post_cycle"
           ]
         ())
     (fun () ->

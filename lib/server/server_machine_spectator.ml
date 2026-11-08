@@ -1,9 +1,10 @@
 let machine_of_request_target target =
   match Uri.get_query_param (Uri.of_string target) "machine" with
   | None -> Ok None
-  | Some "msx" -> Ok (Some Machine_lane.Msx)
-  | Some "dos" -> Ok (Some Machine_lane.Dos)
-  | Some value -> Error ("unknown observer machine: " ^ value)
+  | Some value ->
+    (match Machine_lane.of_wire value with
+     | Some machine -> Ok (Some machine)
+     | None -> Error ("unknown observer machine: " ^ value))
 
 type step_error =
   | Unavailable of string

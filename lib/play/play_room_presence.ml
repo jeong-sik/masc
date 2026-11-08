@@ -27,16 +27,12 @@ let speaker_of_role = function
   | Masc_domain.Worker | Masc_domain.Admin -> Play_room.Keeper
   | Masc_domain.Player -> Play_room.Participant
 
-let machine_name = function
-  | Machine_lane.Msx -> "msx"
-  | Machine_lane.Dos -> "dos"
-
 let presence_action operation (scope : scope) =
   let action = match operation with Play_room.Join -> "join" | Play_room.Leave -> "leave" in
   Play_room.parse_action (`Assoc [
     "action", `String action;
     "client_id", `String scope.play_client;
-    "machine", `String (machine_name scope.machine);
+    "machine", `String (Machine_lane.to_wire scope.machine);
   ])
 
 let with_lease_lock fn = Eio.Mutex.use_rw ~protect:true lease_mutex fn

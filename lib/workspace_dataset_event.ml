@@ -304,10 +304,12 @@ let instance_of_fields fields =
   | Some _ | None -> Error (event_type ^ " lane_addons names no instance")
 
 let machine_of_fields fields =
-  match List.assoc_opt "machine" fields with
-  | Some (`String "msx") -> Ok Machine_lane.Msx
-  | Some (`String "dos") -> Ok Machine_lane.Dos
-  | Some _ | None -> Error (event_type ^ " machine_live names no known machine")
+  let machine =
+    match List.assoc_opt "machine" fields with
+    | Some (`String name) -> Machine_lane.of_wire name
+    | Some _ | None -> None
+  in
+  Option.to_result ~none:(event_type ^ " machine_live names no known machine") machine
 
 let of_fields fields =
   match List.assoc_opt "dataset" fields with

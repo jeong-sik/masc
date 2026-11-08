@@ -11,6 +11,7 @@ description = "Stored image handle returned by an image tool. A file hash alone 
 [[params]]
 name = "path"
 type = "string"
+role = "path"
 description = "Image in your own sandbox, resolved like Read. Reads and stores the bytes, then analyzes them; success includes a reusable artifact handle."
 
 [[params]]

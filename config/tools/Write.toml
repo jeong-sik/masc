@@ -7,6 +7,7 @@ Execute mkdir."""
 [[params]]
 name = "file_path"
 type = "string"
+role = "path"
 required = true
 description = "Absolute or sandbox-relative file path. Parent directories are created as needed."
 

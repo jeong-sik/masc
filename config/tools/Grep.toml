@@ -16,6 +16,7 @@ description = "Regular expression to search file contents for (ripgrep)."
 [[params]]
 name = "path"
 type = "string"
+role = "path"
 description = "Directory or file to search in. Defaults to the keeper sandbox when omitted."
 
 [[params]]

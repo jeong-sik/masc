@@ -15,6 +15,7 @@ enum = ["export", "materialize"]
 [[params]]
 name = "path"
 type = "string"
+role = "path"
 required = true
 description = "Absolute or sandbox-relative file path: the file to export, or where materialize writes."
 [[params]]

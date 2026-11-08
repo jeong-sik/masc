@@ -9,5 +9,6 @@ defer_loading = true
 [[params]]
 name = "source_path"
 type = "string"
+role = "path"
 required = true
 description = "Exact declaration source_path returned by Lane inspection."

@@ -8,6 +8,7 @@ content='let x = 1'. Bad: path='', content=''. Creates parent dirs."""
 [[params]]
 name = "path"
 type = "string"
+role = "path"
 required = true
 description = "Relative or absolute file path to write"
 

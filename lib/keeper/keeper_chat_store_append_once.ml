@@ -247,14 +247,10 @@ let append_tool_calls_once
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | exn ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string ChatStoreFailures)
-        ~labels:[ "operation", Keeper_chat_store_operation.(to_label Append) ]
-        ();
-      let detail = Printexc.to_string exn in
-      Log.Keeper.warn
-        "keeper_chat_store: tool-call append-once failed for %s: %s"
-        (sanitize_name keeper_name)
-        detail;
-      Error detail
+      Error
+        (report_store_failure
+           ~operation:Keeper_chat_store_operation.Append
+           ~keeper_name
+           ~what:"tool-call append-once"
+           exn)
 ;;

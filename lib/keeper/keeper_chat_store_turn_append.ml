@@ -12,6 +12,19 @@ let user_line_mentions ~extra_mentions content =
   Keeper_lane_mentions.mention_ids_of_content content @ extra_mentions
   |> List.sort_uniq Keeper_identity.Keeper_id.compare
 
+(* One tool line per executed call, in call order. *)
+let encode_tool_lines ~ts ?surface ?conversation_id ?turn_ref tool_calls =
+  List.map
+    (fun (tc : tool_call) ->
+      encode_line ~role:Role.Tool
+        ~content:(normalize_tool_args tc.args)
+        ~ts
+        ?tool_call_id:(provider_tool_call_id tc.call_id)
+        ?execution_id:tc.execution_id
+        ~tool_call_name:tc.call_name
+        ?surface ?conversation_id ?turn_ref ())
+    tool_calls
+
 let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
     ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
     ?conversation_id ?external_message_id ?speaker ?(extra_mentions = [])
@@ -48,16 +61,7 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
         ~mentions:(user_line_mentions ~extra_mentions user_content) ()
     in
     let tool_lines =
-      List.mapi
-        (fun position tc ->
-          encode_line ~role:Role.Tool
-            ~content:(normalize_tool_args tc.args)
-            ~ts
-            ?tool_call_id:(provider_tool_call_id tc.call_id)
-            ?execution_id:tc.execution_id
-            ~tool_call_name:tc.call_name
-            ?surface ?conversation_id ?turn_ref ())
-        tool_calls
+      encode_tool_lines ~ts ?surface ?conversation_id ?turn_ref tool_calls
     in
     let asst_line =
       encode_line ~role:Role.Assistant ~content:assistant_content ~ts ?surface
@@ -73,14 +77,9 @@ let append_turn_result ~base_dir ~keeper_name ~(user_content : string)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ChatStoreFailures)
-      ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
-      ();
-    let message = Printexc.to_string exn in
-    Log.Keeper.warn "keeper_chat_store: append failed for %s: %s"
-      (sanitize_name keeper_name) message;
-    Error message
+    Error
+      (report_store_failure ~operation:Keeper_chat_store_operation.Append
+         ~keeper_name ~what:"append" exn)
 
 let append_turn ~base_dir ~keeper_name ~(user_content : string)
     ~(user_attachments : attachment list) ?(tool_calls = []) ?surface
@@ -118,16 +117,7 @@ let append_user_and_tool_calls_result ~base_dir ~keeper_name ~(user_content : st
         ~mentions:(user_line_mentions ~extra_mentions user_content) ()
     in
     let tool_lines =
-      List.mapi
-        (fun position tc ->
-           encode_line ~role:Role.Tool
-             ~content:(normalize_tool_args tc.args)
-             ~ts
-             ?tool_call_id:(provider_tool_call_id tc.call_id)
-             ?execution_id:tc.execution_id
-             ~tool_call_name:tc.call_name
-             ?surface ?conversation_id ?turn_ref ())
-        tool_calls
+      encode_tool_lines ~ts ?surface ?conversation_id ?turn_ref tool_calls
     in
     append_chat_payload_durable path (String.concat "\n" (user_line :: tool_lines) ^ "\n");
     announce_appended ~keeper_name ?surface ();
@@ -135,14 +125,9 @@ let append_user_and_tool_calls_result ~base_dir ~keeper_name ~(user_content : st
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ChatStoreFailures)
-      ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
-      ();
-    let message = Printexc.to_string exn in
-    Log.Keeper.warn "keeper_chat_store: user/tool append failed for %s: %s"
-      (sanitize_name keeper_name) message;
-    Error message
+    Error
+      (report_store_failure ~operation:Keeper_chat_store_operation.Append
+         ~keeper_name ~what:"user/tool append" exn)
 
 let append_tool_calls_result ~base_dir ~keeper_name ~(tool_calls : tool_call list)
     ?surface ?conversation_id ?turn_ref () : (unit, string) result =
@@ -154,16 +139,7 @@ let append_tool_calls_result ~base_dir ~keeper_name ~(tool_calls : tool_call lis
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let tool_lines =
-      List.mapi
-        (fun position tc ->
-           encode_line ~role:Role.Tool
-             ~content:(normalize_tool_args tc.args)
-             ~ts
-             ?tool_call_id:(provider_tool_call_id tc.call_id)
-             ?execution_id:tc.execution_id
-             ~tool_call_name:tc.call_name
-             ?surface ?conversation_id ?turn_ref ())
-        tool_calls
+      encode_tool_lines ~ts ?surface ?conversation_id ?turn_ref tool_calls
     in
     append_chat_payload_durable path (String.concat "\n" tool_lines ^ "\n");
     announce_appended ~keeper_name ?surface ();
@@ -171,14 +147,9 @@ let append_tool_calls_result ~base_dir ~keeper_name ~(tool_calls : tool_call lis
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ChatStoreFailures)
-      ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
-      ();
-    let message = Printexc.to_string exn in
-    Log.Keeper.warn "keeper_chat_store: tool-only append failed for %s: %s"
-      (sanitize_name keeper_name) message;
-    Error message
+    Error
+      (report_store_failure ~operation:Keeper_chat_store_operation.Append
+         ~keeper_name ~what:"tool-only append" exn)
 
 (* RFC-0223 P4: keeper-initiated message on one lane. A single
    assistant line — there is no user turn to pair it with.
@@ -201,16 +172,7 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let tool_lines =
-      List.mapi
-        (fun position tc ->
-          encode_line ~role:Role.Tool
-            ~content:(normalize_tool_args tc.args)
-            ~ts
-            ?tool_call_id:(provider_tool_call_id tc.call_id)
-            ?execution_id:tc.execution_id
-            ~tool_call_name:tc.call_name
-            ?surface ?conversation_id ?turn_ref ())
-        tool_calls
+      encode_tool_lines ~ts ?surface ?conversation_id ?turn_ref tool_calls
     in
     let line =
       encode_line ~role:Role.Assistant ~content ~ts ?surface ?conversation_id
@@ -225,10 +187,6 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ChatStoreFailures)
-      ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
-      ();
-    Log.Keeper.warn "keeper_chat_store: assistant append failed for %s: %s"
-      (sanitize_name keeper_name) (Printexc.to_string exn);
-    Error (Printexc.to_string exn)
+    Error
+      (report_store_failure ~operation:Keeper_chat_store_operation.Append
+         ~keeper_name ~what:"assistant append" exn)

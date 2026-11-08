@@ -214,12 +214,10 @@ let load_page ~base_dir ~keeper_name ?before ?(max_total = max_total_lines) () :
       { messages = []; has_more = false }
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-      Otel_metric_store.inc_counter
-        Keeper_metrics.(to_string ChatStoreFailures)
-        ~labels:[("operation", Keeper_chat_store_operation.(to_label Load))]
-        ();
-      Log.Keeper.warn "keeper_chat_store: load failed for %s: %s"
-        (sanitize_name keeper_name) (Printexc.to_string exn);
+      ignore
+        (report_store_failure ~operation:Keeper_chat_store_operation.Load
+           ~keeper_name ~what:"load" exn
+          : string);
       { messages = []; has_more = false }
 
 let load ~base_dir ~keeper_name : chat_message list =

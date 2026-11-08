@@ -68,16 +68,12 @@ let append_terminal_message_once
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ChatStoreFailures)
-      ~labels:[ "operation", Keeper_chat_store_operation.(to_label Append) ]
-      ();
-    let detail = Printexc.to_string exn in
-    Log.Keeper.warn
-      "keeper_chat_store: terminal append-once failed for %s: %s"
-      (sanitize_name keeper_name)
-      detail;
-    Error detail
+    Error
+      (report_store_failure
+         ~operation:Keeper_chat_store_operation.Append
+         ~keeper_name
+         ~what:"terminal append-once"
+         exn)
 ;;
 
 let append_assistant_message_once ~base_dir ~keeper_name ~delivery_key ~content
@@ -215,16 +211,12 @@ let append_settled_failures_once ~base_dir ~keeper_name failures =
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string ChatStoreFailures)
-         ~labels:[ "operation", Keeper_chat_store_operation.(to_label Append) ]
-         ();
-       let detail = Printexc.to_string exn in
-       Log.Keeper.warn
-         "keeper_chat_store: settled failure batch failed for %s: %s"
-         (sanitize_name keeper_name)
-         detail;
-       Error detail)
+       Error
+         (report_store_failure
+            ~operation:Keeper_chat_store_operation.Append
+            ~keeper_name
+            ~what:"settled failure batch"
+            exn))
 ;;
 
 (* Unit wrapper: existing callers keep the prior swallow-and-count behavior (the
@@ -263,12 +255,13 @@ let append_user_message ~base_dir ~keeper_name ~(content : string)
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ChatStoreFailures)
-      ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
-      ();
-    Log.Keeper.warn "keeper_chat_store: user append failed for %s: %s"
-      (sanitize_name keeper_name) (Printexc.to_string exn)
+    ignore
+      (report_store_failure
+         ~operation:Keeper_chat_store_operation.Append
+         ~keeper_name
+         ~what:"user append"
+         exn
+        : string)
 
 type mention_policy = Parse_mentions | Passive_context
 
@@ -324,14 +317,10 @@ let append_user_message_once
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    Otel_metric_store.inc_counter
-      Keeper_metrics.(to_string ChatStoreFailures)
-      ~labels:[ "operation", Keeper_chat_store_operation.(to_label Append) ]
-      ();
-    let detail = Printexc.to_string exn in
-    Log.Keeper.warn
-      "keeper_chat_store: user append-once failed for %s: %s"
-      (sanitize_name keeper_name)
-      detail;
-    Error detail
+    Error
+      (report_store_failure
+         ~operation:Keeper_chat_store_operation.Append
+         ~keeper_name
+         ~what:"user append-once"
+         exn)
 ;;

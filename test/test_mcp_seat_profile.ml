@@ -514,7 +514,7 @@ let test_the_seat_ends_only_its_own_sessions () =
       check bool "a seat does not end a session it cannot place" false (ends "no-such-session"))
 
 let test_the_routes_serve_post_and_delete_but_no_stream () =
-  let router = Server_routes_http_routes_frontend.add_routes ~port:8935 (Router.create ()) in
+  let router = Server_routes_http_routes_frontend.add_routes (Router.create ()) in
   let resolves meth =
     match Router.resolve router (http_request ~meth "/mcp/play") with
     | `Matched _ -> "matched"

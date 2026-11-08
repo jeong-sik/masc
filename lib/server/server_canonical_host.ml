@@ -13,13 +13,6 @@ let respond_redirect ~location reqd =
   in
   Http_reqd.respond_with_string reqd response ""
 
-let authority_host_port ~default_port request_authority =
-  ( Server_request_authority.host request_authority
-  , Option.value
-      ~default:default_port
-      (Server_request_authority.port request_authority) )
-;;
-
 (* The admitted authority's scheme: a request on the TLS listener is sent to
    the canonical host over https, never to a cleartext URL on the TLS port. *)
 let authority_scheme request_authority =

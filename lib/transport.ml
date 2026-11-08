@@ -351,6 +351,7 @@ module Rest = struct
          :: request_fields ))
 
   let generate_openapi_document
+      ~scheme
       ?(host = Env_config_core.masc_host ())
       ?(port = Env_config_core.masc_http_port_int ()) () :
       Yojson.Safe.t =
@@ -450,10 +451,12 @@ module Rest = struct
          defaults to MASC_HOST -- the server's bind setting, whose own help
          text offers 0.0.0.0. Fold it the way every other advertised address
          is folded (#30383). The HTTP callers pass a Host header instead,
-         which a client is equally free to send as "0.0.0.0:8935". *)
+         which a client is equally free to send as "0.0.0.0:8935". [scheme]
+         is the listener's: the document the TLS listener serves points its
+         reader at https (#50025). *)
       let advertised = Masc_network_defaults.normalize_advertised_host host in
       if advertised = "" || port <= 0 then "/"
-      else Printf.sprintf "http://%s:%d" advertised port
+      else Printf.sprintf "%s://%s:%d" scheme advertised port
     in
     `Assoc
       [

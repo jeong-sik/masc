@@ -11,7 +11,6 @@ module Pages = Server_routes_http_pages
 module Runtime = Server_routes_http_runtime
 
 let respond_redirect = Server_canonical_host.respond_redirect
-let authority_host_port = Server_canonical_host.authority_host_port
 let canonical_loopback_location = Server_canonical_host.canonical_loopback_location
 
 let canonical_root_dashboard_location ~request_authority =
@@ -127,7 +126,7 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
   else
     websocket_discovery_handler request reqd
 
-let add_routes ?sw ?clock ~port router =
+let add_routes ?sw ?clock router =
   router
   |> Server_route.get Server_route.Always_public "/health" health_handler
   |> Server_route.get Server_route.Always_public Server_health_paths.liveness liveness_handler
@@ -187,12 +186,12 @@ let add_routes ?sw ?clock ~port router =
            Http.Response.not_found reqd)
   |> Server_route.get Server_route.Public_read "/api/v1/openapi.json" (fun _state req reqd ->
          let request_authority = Server_request_authority.current_exn () in
-         let resolved_host, resolved_port =
-           authority_host_port ~default_port:port request_authority
-         in
          let json =
            Transport.Rest.generate_openapi_document
-             ~host:resolved_host ~port:resolved_port ()
+             ~scheme:(Server_canonical_host.authority_scheme request_authority)
+             ~host:(Server_request_authority.host request_authority)
+             ~port:(Server_request_authority.port_or_default request_authority)
+             ()
          in
          Http.Response.json_value json reqd
        )

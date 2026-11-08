@@ -6,7 +6,7 @@
     ({!Task.Tool}, {!Tool_control}, {!Tool_plan},
 
     Issue #8636: [assertion_kind_enum_strings] hand-mirrors
-    {!Tool_workspace.valid_assertion_strings}; the sync regression test
+    {!Workspace_assertions.valid_assertion_strings}; the sync regression test
     [test_assertion_kind_mirror] catches drift. *)
 
 type operation =

@@ -386,12 +386,6 @@ val end_at_operator_stop : stop_request -> level_phase -> capture_end
     says a sentence was thrown away; before any speech it is the same
     [Stopped_before_speech] as the other key. *)
 
-val default_capture_timeout_seconds : float
-(** How long {!record_and_transcribe} runs before it ends on its own when
-    the caller passes no [timeout_sec]. The one number for that knob: the
-    TUI and the keeper listen tool both pass nothing, and the listen tool's
-    schema advertises this value. *)
-
 type capture_level =
   | Level_observed of float
   | Level_unavailable

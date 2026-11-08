@@ -108,7 +108,6 @@ let agent_speak = Voice_speak.agent_speak
 let get_agent_voice = Voice_speak.get_agent_voice
 
 (* E09 Phase 2d re-exports: the capture pipeline lives in Voice_capture now. *)
-let default_capture_timeout_seconds = Voice_capture.default_capture_timeout_seconds
 let db_of_amplitude = Voice_capture.db_of_amplitude
 let amplitude_of_db = Voice_capture.amplitude_of_db
 let measure_noise_floor = Voice_capture.measure_noise_floor

@@ -221,7 +221,7 @@ let handle_speak_with_outcome
 (* Listen opens the user's microphone window, so it never becomes a Gate
    request. An approval cycle outlives the recording window (auto_judge
    resolution is measured in tens of seconds, and a capture the model gave
-   no timeout waits [Voice_bridge.default_capture_timeout_seconds] for
+   no timeout waits [Voice_capture.default_capture_timeout_seconds] for
    speech), and a post-approval replay would open the microphone after the
    user has stopped talking. Inbound speech is input collection, not an
    outbound effect; speak is the voice leaf that still goes to the Gate,

@@ -27,7 +27,6 @@ let option_or_else fallback = function
 let member_assoc = Dashboard_utils.member_assoc
 let string_field = Dashboard_utils.string_field
 let take = List.take
-let list_field = Dashboard_utils.list_field
 let compact_text = String_util.compact_text
 let latest_iso_timestamp values =
   let pick_latest best candidate =
@@ -56,8 +55,6 @@ let execution_tool_preview_limit = 8
 
 let cap_string_list ?(limit = execution_tool_preview_limit) values =
   take limit values
-
-let dedup_strings = Dashboard_utils.dedup_strings
 
 let dashboard_fixture_name ?fixture () =
   let fixtures_enabled = Env_config.Dashboard_config.fixtures_enabled () in

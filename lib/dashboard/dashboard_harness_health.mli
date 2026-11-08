@@ -2,11 +2,9 @@
     read model over recent eval-calibration verdicts.
 
     External surface:
-    - {b records} ({!harness_verdict_item}) reached as a type
-      or via record-pattern access by callers.
-    - {b verdict readers} ({!read_recent_verdicts},
-      {!read_recent_verdicts_for_agents}) consumed by the
-      keeper monitoring HTTP route.
+    - {b records} ({!harness_verdict_item}) returned by
+      {!read_recent_verdicts}.
+    - {b verdict reader} ({!read_recent_verdicts}) read by {!json}.
     - {b dashboard JSON entry} ({!json}) consumed by
       [server_routes_http_routes_dashboard].
 
@@ -18,10 +16,7 @@
 
 (** {1 Verdict record} *)
 
-(** One row of the recent harness verdicts ledger.
-    Reached as a type by [dashboard_http_keeper] and as
-    record-pattern access by the eval-calibration HTTP
-    surface. *)
+(** One row of the recent harness verdicts ledger. *)
 type harness_verdict_item =
   { timestamp : float
   ; task_id : string
@@ -36,7 +31,7 @@ type harness_verdict_item =
         hash joins this verdict in {!Eval_calibration.find_divergences}. *)
   }
 
-(** {1 Verdict readers} *)
+(** {1 Verdict reader} *)
 
 (** Returns the most recent calibration verdicts.
     [?since] / [?until] are ISO-date strings; [?limit]
@@ -46,19 +41,6 @@ val read_recent_verdicts
   -> ?until:string
   -> ?limit:int
   -> base_path:string
-  -> unit
-  -> harness_verdict_item list
-
-(** Filtered variant of {!read_recent_verdicts} — keeps
-    only verdicts whose [agent_name] matches a (trimmed,
-    non-empty) entry of [agent_names].  Returns [\[\]]
-    when the filter list is empty after trimming. *)
-val read_recent_verdicts_for_agents
-  :  ?since:string
-  -> ?until:string
-  -> ?limit:int
-  -> base_path:string
-  -> agent_names:string list
   -> unit
   -> harness_verdict_item list
 

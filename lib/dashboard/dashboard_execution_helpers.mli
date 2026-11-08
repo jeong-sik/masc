@@ -77,7 +77,6 @@ val get_agent_profile : string -> agent_profile
 
 val member_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t
 val string_field : ?default:string -> string -> Yojson.Safe.t -> string
-val list_field : string -> Yojson.Safe.t -> Yojson.Safe.t list
 val string_list_of_field : string -> Yojson.Safe.t -> string list
 
 (** {1 Misc helpers} *)
@@ -86,7 +85,6 @@ val option_or_else : (unit -> 'a option) -> 'a option -> 'a option
 val take : int -> 'a list -> 'a list
 val latest_iso_timestamp : string option list -> string option
 val compact_text : ?max_len:int -> string -> string
-val dedup_strings : string list -> string list
 val dashboard_fixture_name : ?fixture:string -> unit -> string option
 val execution_fixture_name : ?fixture:string -> unit -> string option
 val cap_string_list : ?limit:int -> string list -> string list

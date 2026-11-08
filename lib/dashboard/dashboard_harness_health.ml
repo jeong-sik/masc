@@ -139,40 +139,6 @@ let read_recent_verdicts ?since ?until ?(limit = max_recent_verdicts) ~base_path
   trim_recent limit verdicts
 ;;
 
-let read_recent_verdicts_for_agents
-      ?since
-      ?until
-      ?(limit = max_recent_verdicts)
-      ~base_path
-      ~agent_names
-      ()
-  : harness_verdict_item list
-  =
-  let wanted =
-    agent_names |> List.map String.trim |> List.filter (fun name -> name <> "")
-  in
-  if wanted = []
-  then []
-  else (
-    let is_wanted name = List.exists (String.equal name) wanted in
-    let verdicts : harness_verdict_item list =
-      read_store_records
-        (Eval_calibration.store ~base_path)
-        ?since
-        ?until
-        ~f:verdict_item_of_json
-        ()
-      |> List.filter (fun verdict -> is_wanted verdict.agent_name)
-    in
-    let verdicts =
-      List.sort
-        (fun (left : harness_verdict_item) (right : harness_verdict_item) ->
-           Float.compare right.timestamp left.timestamp)
-        verdicts
-    in
-    trim_recent limit verdicts)
-;;
-
 let evaluator_status ~calibration latest_timestamp =
   let total_verdicts = Safe_ops.json_int ~default:0 "total_verdicts" calibration in
   let fallback_count = Safe_ops.json_int ~default:0 "fallback_count" calibration in

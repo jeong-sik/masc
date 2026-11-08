@@ -1442,15 +1442,36 @@ let preflight_cache_key t =
   t.identity, t.keeper_name, t.gh_config_dir, t.injected_env
 ;;
 
-let cached_preflight ~now t =
+let verdict_for access verdict =
+  match access with
+  | Read_only -> verdict.readable
+  | Read_write -> verdict.writable
+;;
+
+(* How long an earlier pass answers this caller. A reader that the pass let
+   through reuses it for [ssh_read_ttl_sec]: a reader leaves nothing on the
+   disk, and its own command reports a host that went away since. A refusal and
+   every answer a writer relies on keep [ssh_ttl_sec], so a freed disk or a
+   restored login is noticed within that time. A pass costs one SSH connection
+   per step, up to eight, because the transport does not reuse connections. *)
+let cached_preflight ~now ~access t =
   let ttl = float_of_int (Env_config_sandbox.Preflight.ssh_ttl_sec ()) in
   if ttl <= 0.0
   then None
   else
     Stdlib.Mutex.protect preflight_cache_mu (fun () ->
       match Hashtbl.find_opt preflight_cache (preflight_cache_key t) with
-      | Some entry when now -. entry.checked_at < ttl -> Some entry.verdict
-      | Some _ | None -> None)
+      | None -> None
+      | Some entry ->
+        let reusable_for =
+          match access, verdict_for access entry.verdict with
+          | Read_only, Ok () ->
+            Float.max
+              ttl
+              (float_of_int (Env_config_sandbox.Preflight.ssh_read_ttl_sec ()))
+          | Read_only, Error _ | Read_write, (Ok () | Error _) -> ttl
+        in
+        if now -. entry.checked_at < reusable_for then Some entry.verdict else None)
 ;;
 
 let store_preflight ~now t verdict =
@@ -1756,16 +1777,14 @@ let check_preflight ?(force = false) ?(access = Read_write) t =
      persisted authority nor a policy decision. *)
   let now = Unix.gettimeofday () in
   let verdict =
-    match if force then None else cached_preflight ~now t with
+    match if force then None else cached_preflight ~now ~access t with
     | Some verdict -> verdict
     | None ->
       let verdict = perform_preflight ~force_probe:force t in
       store_preflight ~now t verdict;
       verdict
   in
-  match access with
-  | Read_only -> verdict.readable
-  | Read_write -> verdict.writable
+  verdict_for access verdict
 ;;
 
 module For_testing = struct

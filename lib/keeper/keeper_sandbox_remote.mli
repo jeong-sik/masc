@@ -185,8 +185,10 @@ type access =
 
 val check_preflight : ?force:bool -> ?access:access -> t -> (unit, string) result
 (** Verify endpoint reachability, shim major version, remote git/rg, the
-    roots, free disk, and per-keeper GitHub identity. Results are cached for
-    [Env_config_sandbox.Preflight.ssh_ttl_sec] unless [force=true].
+    roots, free disk, and per-keeper GitHub identity. Results are cached unless
+    [force=true]. A [Read_only] call that the cached pass let through reuses it
+    for [Env_config_sandbox.Preflight.ssh_read_ttl_sec]; a refusal and every
+    [Read_write] call reuse it for [Env_config_sandbox.Preflight.ssh_ttl_sec].
 
     [access] defaults to [Read_write], which checks all of that. [Read_only]
     leaves out the free-disk floor and nothing else: a host under the floor

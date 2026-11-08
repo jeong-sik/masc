@@ -181,9 +181,16 @@ module Preflight : sig
       Env: [MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED].  Default: [true]. *)
 
   val ssh_ttl_sec : unit -> int
-  (** Successful/failed SSH readiness observation TTL in seconds.
+  (** How long an SSH readiness observation is reused, in seconds, for a
+      refusal and for a call that may write.
       Env: [MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC]. Default: [60]. [0] disables
       caching, which is useful for deterministic tests. *)
+
+  val ssh_read_ttl_sec : unit -> int
+  (** How long a read-only call reuses an observation that found the endpoint
+      readable, in seconds. A value below {!ssh_ttl_sec} has no effect, and
+      [ssh_ttl_sec = 0] still disables caching.
+      Env: [MASC_KEEPER_SSH_PREFLIGHT_READ_TTL_SEC]. Default: [300]. *)
 
   val ssh_disk_free_min_kib : unit -> int
   (** Minimum available space under the endpoint remote root, in KiB.

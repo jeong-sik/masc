@@ -366,6 +366,54 @@ let test_one_pass_serves_both_accesses () =
   check int "no second pass" probes (invocation_count count_path)
 ;;
 
+(* A pass that let a reader through serves readers for the read TTL and
+   writers for the refusal TTL. The refusal TTL is one second here and the read
+   TTL an hour, so what each caller does after the sleep says which TTL it got. *)
+let test_reader_keeps_a_ready_pass_longer_than_a_writer () =
+  with_eio @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "1" @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_READ_TTL_SEC" "3600" @@ fun () ->
+  let base_path = temp_dir () in
+  let ssh_bin, count_path = make_stub ~dir:base_path ~mode:"ok" in
+  let state = make_state ~base_path ~ssh_bin in
+  Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
+  let check_as access = Keeper_sandbox_remote.check_preflight ~access state in
+  check (result unit string) "reader ready" (Ok ())
+    (check_as Keeper_sandbox_remote.Read_only);
+  let probes = invocation_count count_path in
+  check bool "the reader ran a pass" true (probes > 0);
+  Unix.sleepf 1.2;
+  check (result unit string) "reader after the refusal TTL" (Ok ())
+    (check_as Keeper_sandbox_remote.Read_only);
+  check int "reader reused the pass" probes (invocation_count count_path);
+  check (result unit string) "writer after the refusal TTL" (Ok ())
+    (check_as Keeper_sandbox_remote.Read_write);
+  check bool "writer ran a new pass" true (invocation_count count_path > probes)
+;;
+
+(* A refusal is not given the read TTL: once the refusal TTL has passed, the
+   next reader asks the host again, so a restored login is noticed. *)
+let test_refused_reader_is_asked_again_after_the_refusal_ttl () =
+  with_eio @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "1" @@ fun () ->
+  with_env "MASC_KEEPER_SSH_PREFLIGHT_READ_TTL_SEC" "3600" @@ fun () ->
+  let base_path = temp_dir () in
+  let ssh_bin, count_path = make_stub ~dir:base_path ~mode:"gh-missing" in
+  let state = make_state ~base_path ~ssh_bin in
+  Keeper_sandbox_remote.For_testing.clear_preflight_cache ();
+  let reader () =
+    Keeper_sandbox_remote.check_preflight
+      ~access:Keeper_sandbox_remote.Read_only state
+  in
+  check bool "refused" true
+    (contains_prefix "remote_github_identity_missing:" (reader ()));
+  let probes = invocation_count count_path in
+  Unix.sleepf 1.2;
+  check bool "still refused" true
+    (contains_prefix "remote_github_identity_missing:" (reader ()));
+  check bool "asked the host again" true (invocation_count count_path > probes)
+;;
+
 let test_absent_github_login_is_not_a_blocker () =
   with_eio @@ fun () ->
   with_env "MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC" "0" @@ fun () ->
@@ -399,5 +447,9 @@ let () =
               test_read_only_keeps_every_other_step
           ; test_case "one pass serves both accesses" `Quick
               test_one_pass_serves_both_accesses
+          ; test_case "reader keeps a ready pass longer than a writer" `Quick
+              test_reader_keeps_a_ready_pass_longer_than_a_writer
+          ; test_case "refused reader is asked again after the refusal TTL" `Quick
+              test_refused_reader_is_asked_again_after_the_refusal_ttl
           ] )
       ]

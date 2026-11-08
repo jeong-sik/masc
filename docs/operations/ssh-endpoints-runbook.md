@@ -239,6 +239,14 @@ Use both fields in the same update:
 the SSH lane, select the new profile and pass `"remote_endpoint": null` in the
 same call. Leaving a remote endpoint attached to another profile is rejected.
 
+A preflight pass is reused between calls. A read-only call that the pass let
+through (Read, Grep, a read authority, an Execute with `intent=auto`) reuses it
+for `MASC_KEEPER_SSH_PREFLIGHT_READ_TTL_SEC` seconds, default 300. A refusal
+and every call that may write reuse it for `MASC_KEEPER_SSH_PREFLIGHT_TTL_SEC`
+seconds, default 60, so a freed disk or a restored login is noticed within that
+time. A pass opens one SSH connection per step, up to eight, because the
+transport does not reuse connections.
+
 The Dashboard's Keeper sandbox settings select from the current runtime
 endpoint registry and display the server's last shim/dispatch observations.
 An empty registry and an unreadable registry are different states. Reading

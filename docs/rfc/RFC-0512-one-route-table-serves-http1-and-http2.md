@@ -1,9 +1,9 @@
 ---
 rfc: "0512"
 title: "경로 표 하나가 HTTP/1.1 과 HTTP/2 를 다 받고, TLS·ALPN 리스너가 HTTP/2 를 실제로 쓰이게 한다"
-status: Draft
+status: Implemented (S0~S6 병합 2026-11-07~08, after 측정 2026-11-08. 경로 패리티·브라우저 증거는 #50192)
 created: 2026-11-07
-updated: 2026-11-07
+updated: 2026-11-08
 author: claude
 supersedes: []
 superseded_by: null
@@ -120,10 +120,10 @@ piaf 0.2.0 은 HTTP/1.1·HTTP/2·TLS 를 한 API 로 주지만 핸들러가 `Res
 ## 5. 측정
 
 - 전(이미 있음): `docs/evidence/http2-one-table-2026-11/baseline/`.
-- 후(S5 끝에): 같은 인자로 `after/`. 전송 `h1-6`, `h1`, `h2c` 에 TLS 리스너의 `tls-h1`·`tls-h2` 를 더한다(`--transports h1-6,h1,h2c,tls-h1,tls-h2`). 절차는 `docs/evidence/http2-one-table-2026-11/README.md` 에 있다. 스택으로 만든 바이너리를 같은 호스트에 설치한 뒤에 잰다.
-- 비교할 것: SSE 50개가 h2·h2c 에서 50개 열리는지. burst req/s·p99 가 HTTP/1.1 에서 기준선보다 나빠지지 않았는지(회귀 검사). h2 다운로드 MB/s 가 curl 기준 h1 의 0.84 배에서 어디로 갔는지. 한 요청 왕복에서 h2c 의 2~3 ms 추가 비용이 어디로 갔는지.
-- 전송별 경로 차이: `scripts/auth-route-baseline/run.sh` 를 S3 전(기준선 바이너리)·후(S5 의 바이너리)에 돌려 `compare.py` 차이 0건.
-- 브라우저: DevTools Network 의 Protocol 열이 `h2` 인 스크린샷, 대시보드 한 탭의 연결 수(`lsof -nP -iTCP:8935,8938`) 전·후.
+- 후(2026-11-08, 바이너리 `9c7452c0e208` = main 에 S0~S6 과 #49862·#49933·#50027 이 들어간 뒤): `docs/evidence/http2-one-table-2026-11/after/`. 전송 `h1-6`·`h1`·`h2c`·`tls-h1`·`tls-h2`, 기준선과 같은 인자. 절차는 그 디렉터리의 README 에 있다.
+- 본 것: SSE 50개가 `h2c`·`tls-h2` 에서 50/50 열린다(기준선의 h2c 는 50개 모두 404). HTTP/1.1 의 burst req/s·p50 은 기준선보다 나빠지지 않았다. 같은 측정 안에서 100개 동시 burst 는 한 연결의 h2c·tls-h2 가 h1-6·tls-h1 보다 req/s 1.4~2.3배이고 p99 는 그 19~38% 다. curl 다운로드는 h2c 가 h1 의 0.84배로 기준선과 같고, tls-h2 는 56~59 MB/s(tls-h1 88~93 MB/s)다. 한 요청 왕복의 h2c 추가 비용은 0.2~0.7 ms 다(기준선 1.7~3.5 ms). 기준선과 사이에 이틀치 main 변경과 측정 시각 차이가 있어 HTTP/1.1 값의 개선은 이 스택의 효과로 읽지 않는다.
+- 전송별 경로 차이: 아직 재지 않았다. `tools/auth_route_inventory` 를 빌드해야 하고 그것을 돌리는 CI 워크플로가 없다. #50192 가 추적한다.
+- 브라우저: 아직 잡지 않았다. #50192 가 추적한다.
 
 ## 6. 열린 질문
 

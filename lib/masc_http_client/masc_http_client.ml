@@ -26,8 +26,6 @@
     outbound HTTP call until restart.  See PR #20476 for the full
     incident analysis. *)
 
-(** POST with structured error handling.
-    DNS resolution, TLS, and I/O errors return Error instead of crashing the fiber. *)
 type response = Pool.response = {
   status : int;
   headers : (string * string) list;

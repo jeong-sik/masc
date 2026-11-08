@@ -28,15 +28,6 @@ type tool_surface_metrics =
   ; runtime_config_path : string option
   }
 
-let owned_active_task_id_for_meta =
-  Keeper_current_task_reconcile.owned_active_task_id_for_meta
-
-let sync_current_task_id_from_backlog =
-  Keeper_current_task_reconcile.sync_current_task_id_from_backlog
-
-let sync_current_task_id_for_agent_name =
-  Keeper_current_task_reconcile.sync_current_task_id_for_agent_name
-
 let on_the_wire ~agent_cell ~built =
   match !agent_cell with
   | Some agent -> Agent_core.Tool_set.to_list (Agent_core.Agent.tools agent)

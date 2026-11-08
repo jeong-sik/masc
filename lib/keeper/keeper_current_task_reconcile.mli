@@ -32,14 +32,8 @@ val owned_active_tasks_snapshot_for_meta_strict :
     verification have left the keeper's execution lane and clear the binding.
     If multiple active tasks remain, reconciliation keeps an existing active
     [current_task_id], otherwise it chooses a stable task by status, priority,
-    creation time, and task id. *)
-val owned_active_task_id_for_meta :
-  config:Workspace.config ->
-  meta:Keeper_meta_contract.keeper_meta ->
-  Keeper_id.Task_id.t option
-
-(** The same current-task selection, preserving authoritative backlog read
-    failures rather than treating them as absence. Does not change metadata. *)
+    creation time, and task id. Authoritative backlog read failures are
+    returned rather than treated as absence. Does not change metadata. *)
 val owned_active_task_id_result_for_meta :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

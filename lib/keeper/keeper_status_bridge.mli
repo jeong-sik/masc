@@ -44,8 +44,6 @@ val runtime_blocker_surface_of_failure_reason :
   latest_receipt:(unit -> Keeper_execution_receipt.latest_receipt_reading) ->
   Keeper_registry.failure_reason -> runtime_blocker_surface option
 
-val auto_execution_session_surface_json : unit -> Yojson.Safe.t
-
 val workspace_surface_json : keeper_meta -> Yojson.Safe.t
 
 val live_override_fields :

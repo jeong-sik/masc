@@ -5,10 +5,6 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 
-let auto_execution_session_surface_json () =
-  `Assoc [ "status", `String "removed"; "enabled", `Bool false ]
-;;
-
 let workspace_surface_json (meta : keeper_meta) =
   `Assoc
     [ "mention_targets", Json_util.json_string_list meta.mention_targets

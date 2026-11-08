@@ -747,7 +747,6 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("network_mode",
                `String (network_mode_to_string m.network_mode));
            ]);
-           ("auto_execution_session", auto_execution_session_surface_json ());
         ] @ runtime_blocker_fields @ attention_fields @ [
            ("status_options", `Assoc [
              ("tail_turns", `Int tail_turns);

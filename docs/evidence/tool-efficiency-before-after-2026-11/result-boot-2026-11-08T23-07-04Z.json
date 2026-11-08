@@ -1,0 +1,272 @@
+{
+  "before": {
+    "calls": 338,
+    "failed": 2,
+    "failed_by_tool": [
+      {
+        "tool": "BrowserTabs",
+        "failed": 2
+      }
+    ],
+    "sized": {
+      "Grep": {
+        "cap": 102400,
+        "calls": 1,
+        "p50": 7458,
+        "max": 7458,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "keeper_tools_list": {
+        "cap": 102400,
+        "calls": 2,
+        "p50": 9655,
+        "max": 9655,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "BrowserTabs": {
+        "cap": 16384,
+        "calls": 2,
+        "p50": 54,
+        "max": 54,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "masc_dashboard": {
+        "cap": 16384,
+        "calls": 0,
+        "p50": null,
+        "max": null,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      }
+    },
+    "execute": {
+      "calls": 111,
+      "held_hours": 0.371,
+      "background_calls": 0,
+      "background_by_keeper": {},
+      "held_60s_or_more_calls": 6,
+      "held_60s_or_more_hours": 0.208
+    },
+    "sleep_polls": {
+      "keepers": [
+        "github-pr-checker",
+        "pr-updater"
+      ],
+      "keeper_execute_calls": 14,
+      "calls": 0,
+      "hours": 0.0
+    },
+    "execute_overhead": {
+      "calls": 109,
+      "duration_hours": 0.364,
+      "execution_hours": 0.31,
+      "overhead_hours": 0.054,
+      "overhead_share": 0.149,
+      "overhead_5s_or_more_calls": 8,
+      "overhead_5s_or_more_hours": 0.026
+    },
+    "execute_overhead_by_sandbox": {
+      "microvm": {
+        "calls": 15,
+        "overhead_hours": 0.004,
+        "overhead_p50_s": 0.276,
+        "slow_calls": 2,
+        "slow_hours": 0.003,
+        "slow_mean_s": 5.33,
+        "by_intent": {
+          "auto": {
+            "calls": 12,
+            "slow_calls": 2
+          },
+          "request_effect": {
+            "calls": 3,
+            "slow_calls": 0
+          }
+        }
+      },
+      "remote_ssh": {
+        "calls": 94,
+        "overhead_hours": 0.05,
+        "overhead_p50_s": 0.158,
+        "slow_calls": 46,
+        "slow_hours": 0.05,
+        "slow_mean_s": 3.92,
+        "by_intent": {
+          "auto": {
+            "calls": 85,
+            "slow_calls": 45
+          },
+          "request_effect": {
+            "calls": 5,
+            "slow_calls": 0
+          },
+          "unknown": {
+            "calls": 4,
+            "slow_calls": 1
+          }
+        }
+      }
+    },
+    "disk_low": {
+      "calls": 0,
+      "by_tool": {},
+      "execute_by_intent": {}
+    },
+    "background_starts": {
+      "calls": 0,
+      "naming_both_handle_tools": 0
+    }
+  },
+  "after": {
+    "calls": 520,
+    "failed": 6,
+    "failed_by_tool": [
+      {
+        "tool": "BrowserAct",
+        "failed": 3
+      },
+      {
+        "tool": "BrowserGoto",
+        "failed": 1
+      },
+      {
+        "tool": "BrowserTabs",
+        "failed": 1
+      },
+      {
+        "tool": "keeper_artifact_read",
+        "failed": 1
+      }
+    ],
+    "sized": {
+      "Grep": {
+        "cap": 102400,
+        "calls": 14,
+        "p50": 1477,
+        "max": 24378,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "keeper_tools_list": {
+        "cap": 102400,
+        "calls": 3,
+        "p50": 9655,
+        "max": 9655,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "BrowserTabs": {
+        "cap": 16384,
+        "calls": 3,
+        "p50": 794,
+        "max": 7460,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "masc_dashboard": {
+        "cap": 16384,
+        "calls": 2,
+        "p50": 13925,
+        "max": 13925,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      }
+    },
+    "execute": {
+      "calls": 228,
+      "held_hours": 0.295,
+      "background_calls": 0,
+      "background_by_keeper": {},
+      "held_60s_or_more_calls": 1,
+      "held_60s_or_more_hours": 0.017
+    },
+    "sleep_polls": {
+      "keepers": [
+        "github-pr-checker",
+        "pr-updater"
+      ],
+      "keeper_execute_calls": 13,
+      "calls": 0,
+      "hours": 0.0
+    },
+    "execute_overhead": {
+      "calls": 224,
+      "duration_hours": 0.276,
+      "execution_hours": 0.252,
+      "overhead_hours": 0.025,
+      "overhead_share": 0.089,
+      "overhead_5s_or_more_calls": 0,
+      "overhead_5s_or_more_hours": 0.0
+    },
+    "execute_overhead_by_sandbox": {
+      "microvm": {
+        "calls": 25,
+        "overhead_hours": 0.003,
+        "overhead_p50_s": 0.023,
+        "slow_calls": 5,
+        "slow_hours": 0.003,
+        "slow_mean_s": 1.83,
+        "by_intent": {
+          "auto": {
+            "calls": 23,
+            "slow_calls": 5
+          },
+          "request_effect": {
+            "calls": 2,
+            "slow_calls": 0
+          }
+        }
+      },
+      "remote_ssh": {
+        "calls": 199,
+        "overhead_hours": 0.021,
+        "overhead_p50_s": 0.024,
+        "slow_calls": 26,
+        "slow_hours": 0.02,
+        "slow_mean_s": 2.74,
+        "by_intent": {
+          "auto": {
+            "calls": 184,
+            "slow_calls": 26
+          },
+          "request_effect": {
+            "calls": 13,
+            "slow_calls": 0
+          },
+          "unknown": {
+            "calls": 2,
+            "slow_calls": 0
+          }
+        }
+      }
+    },
+    "disk_low": {
+      "calls": 0,
+      "by_tool": {},
+      "execute_by_intent": {}
+    },
+    "background_starts": {
+      "calls": 0,
+      "naming_both_handle_tools": 0
+    }
+  },
+  "skipped": {
+    "bad_lines": 0
+  },
+  "window": {
+    "boot": "2026-11-08T23:07:04+00:00",
+    "settle_s": 60.0,
+    "before": [
+      "2026-11-08T22:35:08+00:00",
+      "2026-11-08T23:07:04+00:00"
+    ],
+    "after": [
+      "2026-11-08T23:08:04+00:00",
+      "2026-11-08T23:40:00+00:00"
+    ],
+    "files": 6
+  }
+}

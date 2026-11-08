@@ -90,5 +90,4 @@
   fs_compat
   fs_compat_internal
   eio
-  eio.unix
   uuidm))

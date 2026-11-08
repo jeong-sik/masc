@@ -806,48 +806,14 @@ let current_journaled_envelope_of_json json =
          | [(_, value)] -> Result.map Option.some (operation_settlement_of_json value)
          | _ -> Error "duplicate operation settlement")
     | _ -> Error "journaled event is not an object" in
-  match settlement, entry.event with
-  | Some _, Event_error _ | None, _ -> Ok (entry, settlement)
-  | Some _,
-    ( Run_started _
-    | Batch_bound _
-    | Text_message_start _
-    | Text_delta _
-    | Text_message_end
-    | External_effect_completed _
-    | Run_finished _
-    | Reply_details _
-    | Continuation_checkpoint _
-    | Agent_core_stream_connected
-    | Provider_retry_observed _
-    | Agent_core_runtime_attempt_started _
-    | Agent_core_stream_message_start _
-    | Agent_core_stream_message_delta _
-    | Agent_core_stream_message_stop _
-    | Agent_core_stream_ping
-    | Agent_core_content_block_start _
-    | Agent_core_content_block_stop _
-    | Model_content_activity _
-    | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
-    | Agent_core_thinking_signature_delta _
-    | Agent_core_media_delta _
-    | Agent_core_stream_protocol_error _
-    | Tool_call_start _ | Tool_call_admitted _
-    | Tool_call_args _
-    | Tool_call_args_snapshot _
-    | Tool_call_end _
-    | Native_tool_start _
-    | Native_tool_end _
-    | Native_tool_progress _
-    | Tool_approval_requested _
-    | Tool_approval_settled _
-    | Tool_result_ready _
-    | Tool_transcript_committed _
-    | Link_block _
-    | Image_block _
-    | Status_block _
-    | Audio_block _
-    | Tool_context_block _ ) -> Error "operation settlement must identify an error terminal"
+  match settlement, Keeper_chat_run_signal.of_event entry.event with
+  | None, _ | Some _, Keeper_chat_run_signal.Failed _ -> Ok (entry, settlement)
+  | ( Some _
+    , ( Keeper_chat_run_signal.Closed
+      | Keeper_chat_run_signal.Reply _
+      | Keeper_chat_run_signal.Finished
+      | Keeper_chat_run_signal.Progress ) ) ->
+    Error "operation settlement must identify an error terminal"
 ;;
 
 let journaled_envelope_of_json json =
@@ -1185,16 +1151,20 @@ let same_operation_settlement left right =
   && Float.equal left.completed_at right.completed_at
 ;;
 
+let existing_terminal_error { event; seq; ts } =
+  match Keeper_chat_run_signal.of_event event with
+  | Keeper_chat_run_signal.Failed message ->
+    Some (Existing_terminal_error { seq; ts; message })
+  | Keeper_chat_run_signal.Closed
+  | Keeper_chat_run_signal.Reply _
+  | Keeper_chat_run_signal.Finished
+  | Keeper_chat_run_signal.Progress -> None
+;;
+
 let existing_operation_terminal settlement = function
-  | ({ event; seq; ts }, Some recorded) :: _
+  | (entry, Some recorded) :: _
     when same_operation_settlement settlement recorded ->
-    (match Keeper_chat_run_signal.of_event event with
-     | Keeper_chat_run_signal.Failed message ->
-       Some (Existing_terminal_error { seq; ts; message })
-     | Keeper_chat_run_signal.Closed
-     | Keeper_chat_run_signal.Reply _
-     | Keeper_chat_run_signal.Finished
-     | Keeper_chat_run_signal.Progress -> None)
+    existing_terminal_error entry
   | [] | _ :: _ -> None
 ;;
 
@@ -1277,62 +1247,22 @@ let record_terminal_error_from_journal ~segment journal ~ts ~message =
     | Error Journal_missing -> Ok []
     | Error (Journal_unreadable _ | Journal_corrupt _ | Journal_unsupported_version _ as error) -> Error (read_error error) in
   match segment, List.rev entries with
-  | Existing_segment, ({ event = Keeper_chat_events.Event_error { message }; seq; ts }, _) :: _ ->
-    Ok (Existing_terminal_error { seq; ts; message })
+  | Existing_segment, entries ->
+    let existing =
+      match entries with
+      | (entry, _) :: _ -> existing_terminal_error entry
+      | [] -> None in
+    (match existing with
+     | Some receipt -> Ok receipt
+     | None ->
+         let* () = append_result journal ~seq ~ts (Event_error {message}) in
+         Ok (Recorded_terminal_error {seq;ts}))
   | Operation_settlement settlement, entries ->
     (match existing_operation_terminal settlement entries with
      | Some receipt -> Ok receipt
      | None ->
          let* () = append_journaled_result ~operation_settlement:settlement journal ~seq ~ts (Event_error {message}) in
          Ok (Recorded_terminal_error {seq;ts}))
-  | Existing_segment, []
-  | ( Existing_segment
-    , ( { event =
-            ( Run_started _
-            | Batch_bound _
-            | Text_message_start _
-            | Text_delta _
-            | Text_message_end
-            | External_effect_completed _
-            | Run_finished _
-            | Reply_details _
-            | Continuation_checkpoint _
-            | Agent_core_stream_connected
-            | Provider_retry_observed _
-            | Agent_core_runtime_attempt_started _
-            | Agent_core_stream_message_start _
-            | Agent_core_stream_message_delta _
-            | Agent_core_stream_message_stop _
-            | Agent_core_stream_ping
-            | Agent_core_content_block_start _
-            | Agent_core_content_block_stop _
-            | Model_content_activity _
-            | (Agent_core_thinking_delta _ | Agent_core_thinking_snapshot _)
-            | Agent_core_thinking_signature_delta _
-            | Agent_core_media_delta _
-            | Agent_core_stream_protocol_error _
-            | Tool_call_start _ | Tool_call_admitted _
-            | Tool_call_args _
-            | Tool_call_args_snapshot _
-            | Tool_call_end _
-            | Native_tool_start _
-            | Native_tool_end _
-            | Native_tool_progress _
-            | Tool_approval_requested _
-            | Tool_approval_settled _
-            | Tool_result_ready _
-            | Tool_transcript_committed _
-            | Link_block _
-            | Image_block _
-            | Status_block _
-            | Audio_block _
-            | Tool_context_block _ )
-        ; _
-        }
-      , _ )
-      :: _ ) ->
-    let* () = append_result journal ~seq ~ts (Event_error {message}) in
-    Ok (Recorded_terminal_error {seq;ts})
 ;;
 
 let record_terminal_error ?(segment = Existing_segment) journal ~ts ~message =

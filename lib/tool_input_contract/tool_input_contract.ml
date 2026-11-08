@@ -476,22 +476,6 @@ let numeric_to_string = function
   | Numeric_float value -> Printf.sprintf "%g" value
 ;;
 
-(* JSON Schema counts string length in characters, not bytes. Counting
-   bytes would reject a Korean title well under a declared maxLength. *)
-let utf8_character_count source =
-  let source_length = String.length source in
-  let rec loop index count =
-    if index >= source_length
-    then count
-    else (
-      let decoded = String.get_utf_8_uchar source index in
-      (* [utf_decode_length] is at least 1 even for an invalid byte, so the
-         walk always terminates. *)
-      loop (index + Uchar.utf_decode_length decoded) (count + 1))
-  in
-  loop 0 0
-;;
-
 let count_bound_of_json : Yojson.Safe.t -> int option = function
   | `Int value when value >= 0 -> Some value
   | `Float value
@@ -607,7 +591,7 @@ let numeric_constraint_failure ~path ~keyword ~declared value =
 let count_constraint_failure ~path ~keyword ~declared value =
   let measured =
     match keyword, value with
-    | (Min_length | Max_length), `String text -> Some (utf8_character_count text)
+    | (Min_length | Max_length), `String text -> Some (String_util.utf8_length text)
     | (Min_items | Max_items), `List items -> Some (List.length items)
     | (Min_length | Max_length | Min_items | Max_items), _ -> None
   in

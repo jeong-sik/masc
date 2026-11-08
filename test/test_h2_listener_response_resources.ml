@@ -9,6 +9,8 @@ module Subs = Mcp_subscriptions
 module Protocol = Mcp_transport_protocol
 
 type mode = H2_only | Auto
+
+exception Test_finished
 type client = {
   connection : H2_eio.Client.t;
   authorization : string;
@@ -52,7 +54,7 @@ let with_listener mode ~capacity make_handler run =
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     (* Only a fixture deadlock bound; no production request deadline. *)
     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 @@ fun () ->
-    Eio.Switch.run @@ fun sw ->
+    match Eio.Switch.run (fun sw ->
     Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
       ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw (fun () ->
       Masc.Board.reset_global_for_test ();
@@ -102,7 +104,14 @@ let with_listener mode ~capacity make_handler run =
             ~socket ~addr_label:"resource-fixture" ~h2_request_handler:handler ~h2_error_handler
             ~request_handler:(fun _ _ -> fail "H2 preface was routed as HTTP/1"))
         (fun () -> Fun.protect ~finally:(fun () -> List.iter (fun client -> client.close ()) !clients)
-          (fun () -> run ~connect ~port))))
+          (fun () -> run ~connect ~port));
+      (* A streamed POST reply leaves its keepalive fiber asleep on the runtime
+         switch, so the switch is failed once the client is done, as
+         test_mcp_post_sse_stream does on HTTP/1.1. *)
+      Eio.Switch.fail sw Test_finished))
+    with
+    | () -> fail "the failed fixture switch returned normally"
+    | exception Test_finished -> ())
 
 let request ?(body="") ?(headers=[]) ?(on_error=fun _ -> ()) client ~port path =
   let received,receive=Eio.Promise.create () in

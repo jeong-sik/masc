@@ -590,7 +590,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
       (H2.Headers.get response_headers "access-control-allow-origin");
     check bool "H2 scope response exposes the challenge to the admitted origin"
       true (exposes_challenge (H2.Headers.get response_headers "access-control-expose-headers"));
-    let response = Yojson.Safe.from_string reply.body in
+    let response = json_of_reply reply.body in
     check string "error echoes the request id" (Yojson.Safe.to_string id)
       (Yojson.Safe.to_string (Yojson.Safe.Util.member "id" response));
     check int "error is insufficient scope"
@@ -633,7 +633,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
   check (option string) "2026 challenge names the admin scope"
     (Some (Server_oauth_metadata.insufficient_scope_challenge oauth_authority Auth_oauth.Mcp_admin))
     challenge;
-  let response = Yojson.Safe.from_string reply.body in
+  let response = json_of_reply reply.body in
   check bool "2026 scope challenge echoes the request id" true
     Yojson.Safe.Util.(response |> member "id" = modern_id);
   check int "2026 scope challenge has insufficient-scope code"
@@ -644,7 +644,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
     post_modern (modern_call continuation_id [ "requestState", `String "opaque" ]) in
   check int "2026 unknown continuation is HTTP 400" 400 reply.status;
   check (option string) "2026 continuation does not receive a scope challenge" None challenge;
-  let response = Yojson.Safe.from_string reply.body in
+  let response = json_of_reply reply.body in
   check bool "2026 continuation refusal echoes the request id" true
     Yojson.Safe.Util.(response |> member "id" = continuation_id);
   check int "2026 continuation retains invalid-params code" (-32602)
@@ -712,7 +712,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
     check (option string) ("rejected origin has no " ^ name) None
       (H2.Headers.get rejected_headers name))
     ["www-authenticate"; "access-control-allow-origin"; "access-control-expose-headers"];
-  let rejected_response = Yojson.Safe.from_string rejected.body in
+  let rejected_response = json_of_reply rejected.body in
   check int "origin gate retains its invalid-request error"
     (Mcp_error_code.to_wire_code Mcp_error_code.Invalid_request)
     Yojson.Safe.Util.(rejected_response |> member "error" |> member "code" |> to_int);
@@ -742,7 +742,7 @@ let test_oauth_scope_refusal_preserves_request_ids () =
   send_whole request writer;
   let reply = await_reply session pending in
   check (option string) "managed refusal does not claim a wider scope fixes it" None !challenge;
-  let response = Yojson.Safe.from_string reply.body in
+  let response = json_of_reply reply.body in
   check int "managed profile keeps its method-not-found refusal"
     (Mcp_error_code.to_wire_code Mcp_error_code.Method_not_found)
     Yojson.Safe.Util.(response |> member "error" |> member "code" |> to_int);

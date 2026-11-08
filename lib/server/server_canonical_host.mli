@@ -8,12 +8,6 @@
 val respond_redirect : location:string -> Http_reqd.t -> unit
 (** A 302 to [location] with an empty body. *)
 
-val authority_host_port
-  :  default_port:int
-  -> Server_request_authority.authority
-  -> string * int
-(** The host of the admitted authority, and its port or [default_port]. *)
-
 val authority_scheme : Server_request_authority.authority -> string
 (** ["http"] or ["https"]: the admitted authority's scheme, so a redirect
     issued on the TLS listener stays on https. *)

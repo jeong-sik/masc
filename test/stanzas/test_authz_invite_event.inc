@@ -6,4 +6,4 @@
 (test
  (name test_authz_invite_event)
  (modules test_authz_invite_event)
- (libraries masc_test_deps masc.agent_core.digest))
+ (libraries masc_test_deps))

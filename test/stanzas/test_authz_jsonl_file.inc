@@ -4,4 +4,4 @@
  (name test_authz_jsonl_file)
  (modules test_authz_jsonl_file)
  (action (run %{test}))
- (libraries masc_test_deps masc.agent_core.digest))
+ (libraries masc_test_deps))

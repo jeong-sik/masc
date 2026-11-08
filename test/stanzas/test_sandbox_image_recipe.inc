@@ -7,4 +7,4 @@
  (modules test_sandbox_image_recipe)
  (deps %{workspace_root}/sandbox-images/base/Dockerfile)
  (action (run %{test}))
- (libraries alcotest masc.keeper_sandbox_image masc.config masc))
+ (libraries alcotest masc.keeper_sandbox_image masc))

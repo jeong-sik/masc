@@ -1,7 +1,7 @@
 (test
  (name test_runtime_official_client_mcp_http)
  (modules test_runtime_official_client_mcp_http)
- (libraries masc masc_test_deps))
+ (libraries masc_test_deps))
 
 (rule
  (alias runtest-test_runtime_official_client_mcp_http_response_delivery)

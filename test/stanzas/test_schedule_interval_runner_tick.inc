@@ -9,8 +9,6 @@
   eio
   eio_main
   fs_compat
-  masc_core
   masc_test_deps
   masc_workspace
-  masc_schedule
-  yojson))
+  masc_schedule))

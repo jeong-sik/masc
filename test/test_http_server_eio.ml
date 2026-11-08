@@ -341,6 +341,50 @@ let test_frontend_canonical_loopback_location_canonical_host () =
     location
 ;;
 
+(* A request on the TLS listener names the loopback alias with the TLS port
+   and the admitted scheme is https; the redirect must stay on https so the
+   browser does not send cleartext to the TLS port. *)
+let tls_request_authority_exn request =
+  let policy =
+    match
+      Server_request_authority.make_trust_policy
+        ~bind_host:"127.0.0.1"
+        ~bind_port:8935
+        ~https_port:(Some 8938)
+        ~explicit_base_url:None
+    with
+    | Ok policy -> policy
+    | Error error ->
+      Alcotest.fail (Server_request_authority.trust_policy_error_to_string error)
+  in
+  match Server_request_authority.classify_http1_request ~trust_policy:policy request with
+  | Server_request_authority.Single authority -> authority
+  | Server_request_authority.Missing
+  | Server_request_authority.Multiple
+  | Server_request_authority.Malformed
+  | Server_request_authority.Untrusted ->
+    Alcotest.fail "expected the TLS listener authority to be admitted"
+;;
+
+let test_frontend_canonical_loopback_location_keeps_https () =
+  let headers = Httpun.Headers.of_list [ "host", "localhost:8938" ] in
+  let request = Httpun.Request.create ~headers `GET "/dashboard" in
+  let request_authority = tls_request_authority_exn request in
+  Alcotest.(check (option string))
+    "localhost on the TLS listener redirects over https"
+    (Some "https://127.0.0.1:8938/dashboard")
+    (Server_routes_http_routes_frontend.canonical_loopback_location
+       ~default_port:8935
+       ~request_authority
+       request);
+  Alcotest.(check (option string))
+    "root on the TLS listener goes to the https dashboard"
+    (Some "https://127.0.0.1:8938/dashboard")
+    (Server_routes_http_routes_frontend.canonical_root_dashboard_location
+       ~default_port:8935
+       ~request_authority)
+;;
+
 let test_frontend_canonical_root_dashboard_location_localhost () =
   let headers = Httpun.Headers.of_list [ "host", "localhost:8935" ] in
   let request = Httpun.Request.create ~headers `GET "/" in
@@ -485,6 +529,9 @@ let router_tests =
   ; ( "frontend canonical root goes direct to dashboard"
     , `Quick
     , test_frontend_canonical_root_dashboard_location_localhost )
+  ; ( "frontend canonical redirect keeps https on the TLS listener"
+    , `Quick
+    , test_frontend_canonical_loopback_location_keeps_https )
   ]
 ;;
 

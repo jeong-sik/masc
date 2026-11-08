@@ -490,6 +490,19 @@ let test_tls_listener_identity_keeps_explicit_precedence () =
     "masc.example.test" (Authority.host projected)
 ;;
 
+(* The cleartext bind is matched before the TLS identity on HTTP/1.1, so a
+   policy whose two ports coincide (a misconfiguration the bootstrap never
+   produces: the TLS bind fails and no identity is added) still classifies
+   the shared port as the cleartext listener. *)
+let test_tls_listener_identity_yields_to_the_cleartext_bind () =
+  let policy = trust_policy ~bind_port:8938 ~https_port:8938 () in
+  let h1 = admitted_http1 ~policy [ "host", "127.0.0.1:8938" ] in
+  check_scheme "shared port is the cleartext bind on HTTP/1.1" Authority.Http h1;
+  check_trust "shared port trust" Authority.Configured_bind h1;
+  check_scheme "HTTP/2 with :scheme https is still the TLS identity"
+    Authority.Https (admitted_h2 ~policy "127.0.0.1:8938")
+;;
+
 let test_tls_listener_port_is_validated () =
   match
     Authority.make_trust_policy
@@ -987,6 +1000,10 @@ let () =
             "explicit identity keeps precedence"
             `Quick
             test_tls_listener_identity_keeps_explicit_precedence
+        ; test_case
+            "cleartext bind is matched first on HTTP/1.1"
+            `Quick
+            test_tls_listener_identity_yields_to_the_cleartext_bind
         ; test_case "port is validated" `Quick test_tls_listener_port_is_validated
         ] )
     ]

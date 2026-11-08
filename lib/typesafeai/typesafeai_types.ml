@@ -1,14 +1,3 @@
-type model =
-  | Jev_latest
-  | Jev_preview
-  | Custom of string
-
-let model_to_string = function
-  | Jev_latest -> "jev-latest"
-  | Jev_preview -> "jev-preview"
-  | Custom s -> s
-;;
-
 type choice_question =
   { instructions : string
   ; criteria : (string * string option) list

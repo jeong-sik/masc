@@ -70,7 +70,7 @@
 (test
  (name test_eio_process_capture_reap)
  (modules test_eio_process_capture_reap)
- (libraries masc_process eio eio.unix eio_main alcotest unix))
+ (libraries masc_process eio eio_main alcotest unix))
 
 (test
  (name test_tui_play_room)
@@ -165,7 +165,7 @@
 (test
  (name test_runtime_inference_turn_timeout)
  (modules test_runtime_inference_turn_timeout)
- (libraries alcotest masc masc_test_deps))
+ (libraries alcotest masc_test_deps))
 
 (test
  (name test_keeper_transcript_tail_recovery)
@@ -340,7 +340,7 @@
        ../config/prompts/workspace_memory_briefing.md
        ../config/prompts/keeper.md
        (source_tree ../addons/workspace-curator) ../addons/protocol.py ../addons/exact_worker.py)
- (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol))
+ (libraries masc_test_deps masc.server exact_output_fixture))
 
 (test
  (name test_msx_vision)
@@ -1131,7 +1131,7 @@
  (deps (source_tree %{workspace_root}/config/prompts))
  (libraries
  masc.prompt_registry
- masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
+ masc_test_deps masc_schedule bigstringaf masc.keeper_checkpoint_ref
   ;; The workspace file-save HTTP fixture creates real role-scoped tokens.
   masc.auth
   ;; test_keeper_turn_driver_failover builds the operation id the chat lane's
@@ -1166,7 +1166,7 @@
  ;; test_observability_redact calls the shared JSON redaction pass of the
  ;; unwrapped secret-pattern library directly.
  masc.secret_patterns
- masc.agent_core mcp_protocol))
+ masc.agent_core))
 
 (test
  (name test_keeper_tool_execute_stream_close)
@@ -1177,9 +1177,8 @@
  (name test_keeper_sandbox_docker_route)
  (modules test_keeper_sandbox_docker_route)
  (libraries
-  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
-  masc.embedded_config masc.keeper_identity masc.mcp_client
-  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
+  masc_test_deps
+  masc.embedded_config))
 
 ; Extracted from the big (tests ...) group above: this suite measures mention
 ; wakeup and delivery policy, not sandbox isolation, so its keeper fixture
@@ -1188,17 +1187,15 @@
  (name test_broadcast_wakeup_policy)
  (modules test_broadcast_wakeup_policy)
  (libraries
-  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
-  masc.embedded_config masc.keeper_identity masc.mcp_client
-  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
+  masc_test_deps
+  masc.embedded_config))
 
 (test
  (name test_keeper_supervisor)
  (modules test_keeper_supervisor)
  (libraries
-  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
-  masc.embedded_config masc.keeper_identity masc.mcp_client
-  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config))
+  masc_test_deps
+  masc.embedded_config masc.config))
 
 (test
  (name test_channel_gate_connector_routes)

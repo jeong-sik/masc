@@ -1397,778 +1397,836 @@ let parse_unified_diff lines =
 
 (* --- Routes --- *)
 
+let handle_workspace_tree_get
+    (state : Server_route.state)
+    (request : Httpun.Request.t)
+    (reqd : Http_reqd.t) =
+  let uri = Uri.of_string request.target in
+  let base, source = resolve_workspace_base ~state ~uri in
+  let depth =
+    match Uri.get_query_param uri "depth" with
+    | Some d ->
+      (match int_of_string_opt d with
+       | Some n -> max 1 (min 5 n)
+       | None -> 3)
+    | None -> 3
+  in
+  let max_nodes =
+    tree_node_limit_of_query (Uri.get_query_param uri "limit")
+  in
+  let include_diff = bool_query_param request "diff" ~default:false in
+  let effective_depth, effective_max_nodes =
+    match source with
+    | `Project
+    | `RepositoryMissing _
+    | `RepositoryUnknown _
+    | `PlaygroundMissing _
+    | `KeeperUnknown _ -> (0, min max_nodes 200)
+    | `Repository _ | `Playground _ -> (depth, max_nodes)
+  in
+  let cache_key =
+    Printf.sprintf "workspace:tree:%s:%s:%d:%d:%b"
+      base
+      (source_to_string source)
+      effective_depth effective_max_nodes include_diff
+  in
+  let payload =
+    Dashboard_cache.get_or_compute_payload cache_key
+      ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+      (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+         let nodes =
+           if not (Sys.file_exists base) then []
+           else
+             let diff_by_path =
+               if include_diff then Some (git_diff_badges ~base)
+               else None
+             in
+             scan_dir ?diff_by_path ~base ~depth:0
+               ~max_depth:effective_depth
+               ~max_nodes:effective_max_nodes [] base
+         in
+         `List (List.rev nodes)))
+  in
+  cached_response_with_source_and_base ~source ~base_path:base request
+    reqd payload
+
+let handle_workspace_files_get
+    (state : Server_route.state)
+    (request : Httpun.Request.t)
+    (reqd : Http_reqd.t) =
+  let uri = Uri.of_string request.target in
+  let base, source = resolve_workspace_base ~state ~uri in
+  match source with
+  | `RepositoryMissing _ | `RepositoryUnknown _
+  | `PlaygroundMissing _ | `KeeperUnknown _ ->
+      json_response ~status:`Not_found request reqd
+        (json_error "The selected workspace is unavailable")
+  | `Project | `Repository _ | `Playground _ ->
+      match Uri.get_query_param uri "path" with
+      | None ->
+          json_response ~status:`Bad_request request reqd
+            (json_error "Missing path parameter")
+      | Some path ->
+          let result =
+            Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+              workspace_file_catalog ~base ~path)
+          in
+          match result with
+          | Ok catalog ->
+              json_response_with_source ~status:`OK ~source request reqd
+                (`Assoc
+                   [ ("root", `String catalog.catalog_root)
+                   ; ("files", `List (List.map (fun path -> `String path)
+                                      catalog.catalog_paths))
+                   ])
+          | Error error ->
+              let status, message =
+                match error with
+                | Catalog_invalid_path -> `Bad_request, "Invalid path"
+                | Catalog_directory_unavailable ->
+                    `Not_found, "The selected directory is unavailable"
+                | Catalog_repository_unavailable ->
+                    `Not_found, "Open a Git repository directory to find files"
+                | Catalog_scan_failed detail -> `Internal_server_error, detail
+              in
+              json_response ~status request reqd (json_error message)
+
+let handle_git_branches_get
+    (state : Server_route.state)
+    (request : Httpun.Request.t)
+    (reqd : Http_reqd.t) =
+  let uri = Uri.of_string request.target in
+  let base, source = resolve_workspace_base ~state ~uri in
+  match source with
+  | `RepositoryMissing _ | `RepositoryUnknown _
+  | `PlaygroundMissing _ | `KeeperUnknown _ ->
+      json_response ~status:`Not_found request reqd
+        (json_error "The selected workspace is unavailable")
+  | `Project | `Repository _ | `Playground _ ->
+      match Uri.get_query_param uri "path" with
+      | None ->
+          json_response ~status:`Bad_request request reqd
+            (json_error "Missing path parameter")
+      | Some path ->
+          let result =
+            Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+              workspace_branches ~base ~path)
+          in
+          match result with
+          | Ok found ->
+              json_response_with_source ~status:`OK ~source request reqd
+                (workspace_branches_json found)
+          | Error error ->
+              let status, message =
+                match error with
+                | Branches_invalid_path -> `Bad_request, "Invalid path"
+                | Branches_directory_unavailable ->
+                    `Not_found, "The selected directory is unavailable"
+                | Branches_repository_unavailable ->
+                    `Not_found, "Open a Git repository directory to list branches"
+                | Branches_failed detail -> `Internal_server_error, detail
+              in
+              json_response ~status request reqd (json_error message)
+
+let handle_git_worktrees_get
+    (state : Server_route.state)
+    (request : Httpun.Request.t)
+    (reqd : Http_reqd.t) =
+  let uri = Uri.of_string request.target in
+  let base, source = resolve_workspace_base ~state ~uri in
+  match source with
+  | `RepositoryMissing _ | `RepositoryUnknown _
+  | `PlaygroundMissing _ | `KeeperUnknown _ ->
+      json_response ~status:`Not_found request reqd
+        (json_error "The selected workspace is unavailable")
+  | `Project | `Repository _ | `Playground _ ->
+      match Uri.get_query_param uri "path" with
+      | None ->
+          json_response ~status:`Bad_request request reqd
+            (json_error "Missing path parameter")
+      | Some path ->
+          let result =
+            Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+              workspace_worktrees ~base ~path)
+          in
+          match result with
+          | Ok found ->
+              json_response_with_source ~status:`OK ~source request reqd
+                (workspace_worktrees_json found)
+          | Error error ->
+              let status, message =
+                match error with
+                | Worktrees_invalid_path -> `Bad_request, "Invalid path"
+                | Worktrees_directory_unavailable ->
+                    `Not_found, "The selected directory is unavailable"
+                | Worktrees_repository_unavailable ->
+                    `Not_found, "Open a Git repository directory to list worktrees"
+                | Worktrees_failed detail -> `Internal_server_error, detail
+              in
+              json_response ~status request reqd (json_error message)
+
+(* HIGH-RISK-UNREVIEWED: this route returns lines of file content. Every
+   path in the answer has passed [vetted_regular_file], the same guard the
+   file catalog applies before it offers a file to [/api/v1/workspace/file];
+   the query is a fixed string bounded by [search_query_is_valid]. *)
+let handle_workspace_search_get
+    (state : Server_route.state)
+    (request : Httpun.Request.t)
+    (reqd : Http_reqd.t) =
+  let uri = Uri.of_string request.target in
+  let base, source = resolve_workspace_base ~state ~uri in
+  match source with
+  | `RepositoryMissing _ | `RepositoryUnknown _
+  | `PlaygroundMissing _ | `KeeperUnknown _ ->
+      json_response ~status:`Not_found request reqd
+        (json_error "The selected workspace is unavailable")
+  | `Project | `Repository _ | `Playground _ ->
+      let ignore_case =
+        match Uri.get_query_param uri "ignore_case" with
+        | None | Some "0" -> Ok false
+        | Some "1" -> Ok true
+        | Some _ -> Error "ignore_case must be 0 or 1"
+      in
+      (match
+         Uri.get_query_param uri "path", Uri.get_query_param uri "q", ignore_case
+       with
+       | None, _, _ ->
+           json_response ~status:`Bad_request request reqd
+             (json_error "Missing path parameter")
+       | _, None, _ ->
+           json_response ~status:`Bad_request request reqd
+             (json_error "Missing q parameter")
+       | _, _, Error message ->
+           json_response ~status:`Bad_request request reqd (json_error message)
+       | Some path, Some query, Ok ignore_case ->
+           let result =
+             Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+               workspace_search ~base ~path ~query ~ignore_case)
+           in
+           (match result with
+            | Ok found ->
+                json_response_with_source ~status:`OK ~source request reqd
+                  (`Assoc
+                     [ ("root", `String found.search_root)
+                     ; ("query", `String query)
+                     ; ("ignore_case", `Bool ignore_case)
+                     ; ( "matches"
+                       , `List
+                           (List.map
+                              (fun (m : workspace_search_match) ->
+                                `Assoc
+                                  [ ("path", `String m.sm_path)
+                                  ; ("line", `Int m.sm_line)
+                                  ; ("text", `String m.sm_text)
+                                  ])
+                              found.search_matches) )
+                     ; ("truncated", `Bool found.search_truncated)
+                     ])
+            | Error error ->
+                let status, message =
+                  match error with
+                  | Search_invalid_query ->
+                      ( `Bad_request
+                      , Printf.sprintf
+                          "q must be %d to %d bytes of valid UTF-8 without line breaks or control characters"
+                          search_query_min_bytes search_query_max_bytes )
+                  | Search_invalid_path -> `Bad_request, "Invalid path"
+                  | Search_directory_unavailable ->
+                      `Not_found, "The selected directory is unavailable"
+                  | Search_repository_unavailable ->
+                      `Not_found, "Open a Git repository directory to search"
+                  | Search_failed detail -> `Internal_server_error, detail
+                in
+                json_response ~status request reqd (json_error message)))
+
+let handle_git_status_get
+    (state : Server_route.state)
+    (request : Httpun.Request.t)
+    (reqd : Http_reqd.t) =
+  let uri = Uri.of_string request.target in
+  let base, source = resolve_workspace_base ~state ~uri in
+  let scope =
+    match source with
+    | `Project -> Some (`Assoc [ ("kind", `String "project") ])
+    | `Repository id ->
+        Some
+          (`Assoc
+             [ ("kind", `String "repository")
+             ; ("repository_id", `String id)
+             ])
+    | `RepositoryMissing _ | `RepositoryUnknown _
+    | `Playground _ | `PlaygroundMissing _ | `KeeperUnknown _ ->
+        None
+  in
+  match scope with
+  | None ->
+      json_response ~status:`Not_found request reqd
+        (json_error "Git status needs a project or repository workspace")
+  | Some scope ->
+      (* Git itself walks above [base]. A status request has no file
+         path from which to find an owning nested checkout, so only
+         the repository rooted exactly at the requested workspace is
+         a truthful answer. *)
+      if not (Sys.file_exists (Filename.concat base ".git")) then
+        json_response ~status:`Not_found request reqd
+          (json_error "No Git repository at this workspace root")
+      else
+        (match Repo_git.status_snapshot_at ~local_path:base () with
+         | Error detail ->
+             json_response ~status:`Internal_server_error request reqd
+               (json_error detail)
+         | Ok (changes, branch) ->
+             json_response_with_source ~status:`OK ~source request reqd
+               (Server_git_status_json.snapshot ~scope ~branch ~changes))
+
+(* Lazy tree: return exactly one level of a directory's entries so the
+   IDE can expand deep trees on demand instead of relying on the single
+   bounded /tree snapshot (which, for the [project] workspace source, is
+   root-only). [base] stays the whole workspace base and only [dir] is
+   the subpath, so each node's path/parent/depth stay anchored to the
+   whole tree and merge into the client's flat node array. *)
+let handle_workspace_children_get
+    (state : Server_route.state)
+    (request : Httpun.Request.t)
+    (reqd : Http_reqd.t) =
+  let uri = Uri.of_string request.target in
+  let base, source = resolve_workspace_base ~state ~uri in
+  match Uri.get_query_param uri "path" with
+  | None ->
+    json_response ~status:`Bad_request request reqd
+      (json_error "Missing path parameter")
+  | Some requested ->
+    (* Same admission control as /file, /blame, /diff: uniform
+       [Invalid path] on traversal / confidential / symlink escape so a
+       caller cannot probe which subpaths exist or are secret. *)
+    (match resolve_workspace_file base requested with
+     | Error _ ->
+       json_response ~status:`Bad_request request reqd
+         (json_error "Invalid path")
+     | Ok file ->
+       let max_nodes =
+         tree_node_limit_of_query (Uri.get_query_param uri "limit")
+       in
+       (* A rel path with N non-empty segments sits at depth N-1, so
+          its children are at depth N. Passing ~depth = ~max_depth =
+          child_depth reads exactly one level (the recursion guard
+          [depth < max_depth] is false), while [rel_under base] keeps
+          path/parent anchored to the whole tree. *)
+       let child_depth =
+         rel_under base file.lexical_path
+         |> String.split_on_char '/'
+         |> List.filter (fun s -> not (String.equal s ""))
+         |> List.length
+       in
+       let cache_key =
+         Printf.sprintf "workspace:children:%s:%s:%d:%d"
+           base file.lexical_path child_depth max_nodes
+       in
+       let payload =
+         Dashboard_cache.get_or_compute_payload cache_key
+           ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+           (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
+              let is_dir =
+                workspace_or_default
+                  ~warn_on_failure:false
+                  ~site:"children_is_directory"
+                  ~path:file.lexical_path
+                  ~default:false
+                  (fun () -> Sys.is_directory file.lexical_path)
+              in
+              if not is_dir then `List []
+              else
+                let nodes =
+                  scan_dir ~base ~depth:child_depth
+                    ~max_depth:child_depth ~max_nodes []
+                    file.lexical_path
+                in
+                `List (List.rev nodes)))
+       in
+       cached_response_with_source_and_base ~source ~base_path:base
+         request reqd payload)
+
+let handle_workspace_file_get
+    (state : Server_route.state)
+    (request : Httpun.Request.t)
+    (reqd : Http_reqd.t) =
+  let uri = Uri.of_string request.target in
+  let base, source = resolve_workspace_base ~state ~uri in
+  match source with
+  | `RepositoryMissing _ | `RepositoryUnknown _
+  | `PlaygroundMissing _ | `KeeperUnknown _ ->
+    json_response ~status:`Not_found request reqd
+      (json_error "The selected workspace is unavailable")
+  | `Project | `Repository _ | `Playground _ ->
+  match Uri.get_query_param uri "path" with
+  | None -> json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
+  | Some p ->
+    (match resolve_workspace_file base p with
+     | Error _ ->
+       (* Uniform [Invalid path] for traversal, confidential, and
+          symlink-escape rejections: a distinct message would let
+          a caller probe which paths are secret or exist. *)
+       json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+     | Ok file ->
+       (match load_workspace_file_content file with
+        | Ok content ->
+          let revision = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+            workspace_file_revision ~base file content) in
+          let json = `Assoc [("ok", `Bool true); ("content", `String content);
+            ("revision", `String revision)] in
+          json_response_with_source ~status:`OK ~source request reqd json
+        | Error File_not_found | Error File_not_regular ->
+          json_response ~status:`Not_found request reqd (json_error "File not found")
+        | Error File_changed_during_open ->
+          json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+        | Error (File_too_large _) ->
+          json_response ~status:`Payload_too_large request reqd (json_error "File too large")
+        | Error (File_read_failed msg) ->
+          observe_workspace_route_failure
+            ~site:"file_read"
+            ~path:file.lexical_path
+            (Failure msg);
+          json_response ~status:`Internal_server_error request reqd (json_error "Failed to read file")))
+
+let handle_workspace_file_post
+    (state : Server_route.state)
+    (request : Httpun.Request.t)
+    (reqd : Http_reqd.t) =
+  Http.Request.read_body_async reqd (fun body ->
+    let refuse status code detail =
+      json_response ~status request reqd
+        (`Assoc ["ok", `Bool false; "code", `String code; "error", `String detail]) in
+    let invalid () = refuse `Bad_request "invalid_workspace_file_save"
+        "Provide path, expected_revision, content and expected_workspace" in
+    match Yojson.Safe.from_string body with
+    | exception Yojson.Json_error _ -> invalid ()
+    | `Assoc fields when List.length fields = 4
+        && List.sort_uniq String.compare (List.map fst fields)
+           = ["content"; "expected_revision"; "expected_workspace"; "path"] ->
+      (match List.assoc_opt "path" fields, List.assoc_opt "expected_revision" fields,
+             List.assoc_opt "content" fields, List.assoc_opt "expected_workspace" fields with
+       | Some (`String path), Some (`String expected_revision), Some (`String content), Some (`Assoc _) ->
+         let config = Mcp_server.workspace_config state in
+         (match Workspace.validate_expected_workspace ~config (`Assoc fields) with
+          | Error Workspace.Invalid_workspace_precondition -> invalid ()
+          | Error Workspace.Workspace_precondition_failed ->
+            refuse `Conflict "workspace_precondition_failed" "Workspace changed; retain the draft and refresh its identity"
+          | Ok _ ->
+            let uri = Uri.of_string request.target in
+            let scope_valid = match Uri.query uri with
+              | [] -> true
+              | [ ("keeper" | "repo_id"), [name] ] -> String.trim name <> ""
+              | _ -> false in
+            if not scope_valid then invalid ()
+            else
+              let base, source = resolve_workspace_base ~state ~uri in
+              match source with
+              | `RepositoryMissing _ | `RepositoryUnknown _ | `PlaygroundMissing _ | `KeeperUnknown _ ->
+                refuse `Not_found "workspace_unavailable" "The selected workspace is unavailable"
+              | `Project | `Repository _ | `Playground _ ->
+                (match save_workspace_file
+                  ~publication_recovery:(Mcp_server.publication_recovery_availability_provider state)
+                  ~base ~path ~expected_revision ~content with
+                 | Ok revision -> json_response_with_source ~status:`OK ~source request reqd
+                   (`Assoc ["ok", `Bool true; "revision", `String revision])
+                 | Error Save_invalid_path -> refuse `Bad_request "invalid_path" "Invalid path"
+                 | Error Save_invalid_revision -> invalid ()
+                 | Error Save_conflict -> refuse `Conflict "workspace_file_changed" "File changed; retain the draft and compare the current source"
+                 | Error Save_too_large | Error (Save_read_failed (File_too_large _)) ->
+                   refuse `Payload_too_large "workspace_file_too_large" "File exceeds the configured readable size"
+                 | Error (Save_read_failed (File_not_found | File_not_regular)) ->
+                   refuse `Not_found "workspace_file_unavailable" "The existing file is unavailable"
+                 | Error (Save_read_failed File_changed_during_open) ->
+                   refuse `Conflict "workspace_file_changed" "File changed; retain the draft"
+                 | Error (Save_read_failed (File_read_failed _)) ->
+                   refuse `Service_unavailable "workspace_file_read_failed" "Could not read the current file; retain the draft"
+                 | Error (Save_recovery_unavailable error) ->
+                   Log.Server.warn "workspace file recovery unavailable: %s"
+                     (Keeper_publication_recovery_availability.unavailable_to_string error);
+                   refuse `Service_unavailable "workspace_file_save_unavailable" "Save is unavailable; retain the draft"
+                 | Error (Save_recovery_release_failed { save_result; release_failure }) ->
+                   Log.Server.warn "workspace file recovery release failed saved=%b evidence=%s"
+                     (Result.is_ok save_result)
+                     (Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure);
+                   refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save"
+                 | Error (Save_io_failed { publication_may_have_started; detail }) ->
+                   Log.Server.warn "workspace file save IO failed publication_started=%b evidence=%s"
+                     publication_may_have_started detail;
+                   if publication_may_have_started then
+                     refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save"
+                   else
+                     refuse `Service_unavailable "workspace_file_read_failed" "Could not read the current file; retain the draft"
+                 | Error (Save_write_failed error) ->
+                   Log.Server.warn "workspace file publication failed: %s"
+                     (Fs_compat.capability_write_error_to_string error);
+                   (match error.target_effect with
+                    | Fs_compat.Target_unchanged -> refuse `Internal_server_error "workspace_file_save_failed" "Save failed before publication; retain the draft"
+                    | Fs_compat.Target_created
+                    | Fs_compat.Target_replaced | Fs_compat.Target_state_unknown ->
+                      refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save")))
+       | _ -> invalid ())
+    | _ -> invalid ())
+
+(* Ask the language server about a name: definition or hover, at the
+   occurrence-th start of [symbol] on a 1-based line. The same
+   question surface the keeper_code_query tool offers, over the same
+   [Lsp_position] arithmetic, reached through the workspace axes
+   (?keeper= / ?repo_id=) this file already resolves.
+
+   Token-gated where the file reads above are public: answering
+   spawns a language server. The pool is request-scoped
+   ([Lsp_turn_pool.with_turn_pool]) for the reason its mli measures —
+   a resident server holds 12-155 MB; a spawn costs tens of
+   milliseconds plus the first question's indexing. *)
+let handle_lsp_question_get
+    (state : Server_route.state)
+    (_identity : string)
+    (request : Httpun.Request.t)
+    (reqd : Http_reqd.t) =
+  let uri = Uri.of_string request.target in
+  let base, _source = resolve_workspace_base ~state ~uri in
+  let param name = Uri.get_query_param uri name in
+  let bad message =
+    json_response ~status:`Bad_request request reqd
+      (json_error message)
+  in
+  let open struct
+    let ( let* ) r f =
+      match r with
+      | Ok v -> f v
+      | Error message -> `Failed message
+  end in
+  let outcome =
+    (* Parsed by the module that owns the vocabulary, not spelled
+       again here. This arm read [definition] and [hover] only,
+       while the Keeper tool over the same client had answered
+       [references] since #30504 -- the route was a word behind,
+       and nothing said so. *)
+    let* question =
+      match param "question" with
+      | Some raw ->
+        (match Lsp_questions.question_of_string raw with
+         | Some question -> Ok question
+         | None ->
+           Error
+             (Printf.sprintf
+                "question must be definition, hover or references, \
+                 got %S"
+                raw))
+      | None -> Error "question parameter is required"
+    in
+    let* raw_path =
+      match param "path" with
+      | Some p when String.trim p <> "" -> Ok p
+      | _ -> Error "path parameter is required"
+    in
+    let* line_number =
+      match Option.bind (param "line") int_of_string_opt with
+      | Some n when n >= 1 -> Ok n
+      | Some _ -> Error "line is 1-based and must be >= 1"
+      | None -> Error "line parameter is required (1-based)"
+    in
+    let* symbol =
+      match param "symbol" with
+      | Some sym when String.trim sym <> "" -> Ok (String.trim sym)
+      | _ -> Error "symbol parameter is required"
+    in
+    let* occurrence =
+      match param "occurrence" with
+      | None -> Ok 1
+      | Some raw ->
+        (match int_of_string_opt raw with
+         | Some n when n >= 1 -> Ok n
+         | Some _ | None ->
+           Error "occurrence is 1-based and must be >= 1")
+    in
+    let* file =
+      match resolve_workspace_file base raw_path with
+      | Ok file -> Ok file
+      | Error _ -> Error "Invalid path"
+    in
+    let path = file.lexical_path in
+    let line_index = line_number - 1 in
+    let* language = Lsp_position.language_of ~path in
+    let* line = Lsp_position.line_of_file ~path ~line_index in
+    let* character =
+      Lsp_position.column_of ~line ~symbol ~occurrence ~line_number
+    in
+    let* workspace_root =
+      Lsp_position.project_root_of ~language ~path ~boundary:base
+    in
+    (* Refused before it is asked, not judged after it is answered:
+       a server with no index answers references with the
+       occurrences in the file it was given, and a short list reads
+       like an answer. The same guard the Keeper tool applies. *)
+    let* () =
+      Lsp_questions.reference_index_ready
+        ~question
+        ~language
+        ~project_root:workspace_root
+    in
+    `Ask (question, language, workspace_root, path, line_index,
+          character)
+  in
+  match outcome with
+  | `Failed message -> bad message
+  | `Ask (question, language, workspace_root, path, line_index,
+          character) ->
+    Lsp_turn_pool.with_turn_pool ~servers:(Runtime.lsp_servers ()) (fun () ->
+      match Lsp_turn_pool.get_opt () with
+      | None ->
+        json_response ~status:`Service_unavailable request reqd
+          (json_error
+             "no Eio environment for a language-server pool here")
+      | Some pool ->
+        (match
+           Lsp_questions.ask pool ~language ~workspace_root ~path
+             ~line:line_index ~character ~question
+         with
+         | Error error ->
+           json_response ~status:`Bad_gateway request reqd
+             (json_error
+                (Format.asprintf "%a" Lsp_questions.pp_error error))
+         | Ok answer ->
+           let location_json (l : Lsp_questions.location) =
+             (* 1-based out, the way the caller asked. A location
+                outside the workspace (stdlib, a vendored package)
+                keeps its absolute path and says which side it fell
+                on, instead of a relative path that resolves to the
+                wrong file. *)
+             let boundary = Fs_compat.realpath_lenient base in
+             let answered =
+               Fs_compat.realpath_lenient l.Lsp_questions.path
+             in
+             let prefix = boundary ^ Filename.dir_sep in
+             let inside =
+               String.starts_with ~prefix answered
+             in
+             let shown =
+               if inside then
+                 String.sub answered (String.length prefix)
+                   (String.length answered - String.length prefix)
+               else answered
+             in
+             `Assoc
+               [ ("path", `String shown)
+               ; ("inside_workspace", `Bool inside)
+               ; ("line", `Int (l.Lsp_questions.line + 1))
+               ; ("character", `Int (l.Lsp_questions.character + 1))
+               ]
+           in
+           let data =
+             match answer with
+             | Lsp_questions.Locations locations ->
+               `Assoc
+                 [ ("kind", `String "locations")
+                 ; ( "locations"
+                   , `List (List.map location_json locations) )
+                 ]
+             | Lsp_questions.Hover_text text ->
+               `Assoc
+                 [ ("kind", `String "hover")
+                 ; ( "text"
+                   , match text with
+                     | Some t -> `String t
+                     | None -> `Null )
+                 ]
+           in
+           json_response ~status:`OK request reqd
+             (`Assoc [ ("ok", `Bool true); ("data", data) ])))
+
+let handle_git_blame_get
+    (state : Server_route.state)
+    (request : Httpun.Request.t)
+    (reqd : Http_reqd.t) =
+  let uri = Uri.of_string request.target in
+  let base, source = resolve_workspace_base ~state ~uri in
+  let file_path =
+    match Uri.get_query_param uri "path" with
+    | Some p -> p
+    | None -> ""
+  in
+  if file_path = "" then
+    json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
+  else
+    (match resolve_workspace_file base file_path with
+     | Error _ ->
+       json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+     | Ok safe ->
+       if not (Sys.file_exists safe.resolved_path) then
+         json_response ~status:`Not_found request reqd (json_error "File not found")
+       else
+       (match repository_owning ~base ~path:safe.lexical_path with
+        | None ->
+          json_response ~status:`Not_found request reqd
+            (json_error "No git repository under this scope owns that path")
+        | Some repo_root ->
+         let rel = rel_under repo_root safe.lexical_path in
+         let cache_key =
+           Printf.sprintf "git:blame:%s:%s:%s"
+             repo_root
+             (source_to_string source)
+             rel
+         in
+         let payload =
+           Dashboard_cache.get_or_compute_payload cache_key
+             ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+             (Pool_work.io ~name:__FUNCTION__ (fun () ->
+                match git_run_lines ~cwd:repo_root
+                        ["blame"; "--porcelain"; "--"; rel]
+                with
+                | [] -> `List []
+                | lines ->
+                  let entries = parse_blame_porcelain lines in
+                  let grouped = group_blame_entries rel entries in
+                  `List grouped))
+         in
+         cached_response_with_source ~source request reqd payload))
+
+let handle_git_log_get
+    (state : Server_route.state)
+    (request : Httpun.Request.t)
+    (reqd : Http_reqd.t) =
+  let uri = Uri.of_string request.target in
+  let base, source = resolve_workspace_base ~state ~uri in
+  let limit =
+    match
+      Option.bind (Uri.get_query_param uri "limit") int_of_string_opt
+    with
+    | Some n when n >= 1 -> min n 200
+    | Some _ | None -> 50
+  in
+  match Uri.get_query_param uri "path" with
+  | None | Some "" ->
+    json_response ~status:`Bad_request request reqd
+      (json_error "Missing path parameter")
+  | Some p ->
+    (match resolve_workspace_file base p with
+     | Error _ ->
+       json_response ~status:`Bad_request request reqd
+         (json_error "Invalid path")
+     | Ok safe ->
+       if not (Sys.file_exists safe.resolved_path) then
+         json_response ~status:`Not_found request reqd
+           (json_error "File not found")
+       else
+         (match repository_owning ~base ~path:safe.lexical_path with
+          | None ->
+            json_response ~status:`Not_found request reqd
+              (json_error
+                 "No git repository under this scope owns that path")
+          | Some repo_root ->
+            let rel = rel_under repo_root safe.lexical_path in
+            let cache_key =
+              Printf.sprintf "git:log:%s:%s:%s:%d" repo_root
+                (source_to_string source)
+                rel limit
+            in
+            let payload =
+              Dashboard_cache.get_or_compute_payload cache_key
+                ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+                (Pool_work.io ~name:__FUNCTION__ (fun () ->
+                   let lines =
+                     git_run_lines ~cwd:repo_root
+                       [ "log"
+                       ; Printf.sprintf "-n%d" limit
+                       ; "--pretty=format:%h%x09%at%x09%an%x09%s"
+                       ; "--"
+                       ; rel
+                       ]
+                   in
+                   `Assoc
+                     [ ("ok", `Bool true)
+                     ; ( "commits"
+                       , `List
+                           (List.filter_map git_log_row_of_line
+                              lines) )
+                     ]))
+            in
+            cached_response_with_source ~source request reqd payload))
+
+let handle_git_diff_get
+    (state : Server_route.state)
+    (request : Httpun.Request.t)
+    (reqd : Http_reqd.t) =
+  let uri = Uri.of_string request.target in
+  let base, source = resolve_workspace_base ~state ~uri in
+  let file_path =
+    match Uri.get_query_param uri "path" with
+    | Some p -> p
+    | None -> ""
+  in
+  if file_path = "" then
+    json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
+  else
+    match
+      git_diff_target_of_params
+        ~base_ref:(Uri.get_query_param uri "base_ref")
+        ~commit:(Uri.get_query_param uri "commit")
+    with
+    | Error message ->
+      json_response ~status:`Bad_request request reqd (json_error message)
+    | Ok target ->
+    (match resolve_workspace_file base file_path with
+     | Error _ ->
+       json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+     | Ok safe ->
+       (match repository_owning ~base ~path:safe.lexical_path with
+        | None ->
+          (* Saying so beats the empty diff git would print from
+             whatever repository encloses this one: an answer from
+             outside the queried scope is not an answer. *)
+          json_response ~status:`Not_found request reqd
+            (json_error "No git repository under this scope owns that path")
+        | Some repo_root ->
+       let rel = rel_under repo_root safe.lexical_path in
+       let cache_key =
+         Printf.sprintf "git:diff:%s:%s:%s:%s"
+           repo_root
+           (source_to_string source)
+           (git_diff_target_key target)
+           rel
+       in
+       let payload =
+         Dashboard_cache.get_or_compute_payload cache_key
+           ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+           (Pool_work.io ~name:__FUNCTION__ (fun () ->
+              match git_run_lines_or_error ~cwd:repo_root
+                      (git_diff_args ~target ~rel)
+              with
+              | Error _ ->
+                observe_workspace_route_failure
+                  ~site:"git_run" ~path:rel
+                  (Failure "git diff failed");
+                `Null
+              | Ok [] ->
+                `Assoc [("unified", `List []); ("has_changes", `Bool false)]
+              | Ok diff_lines ->
+                let unified = parse_unified_diff diff_lines in
+                `Assoc [("unified", `List unified); ("has_changes", `Bool true)]))
+       in
+       (match payload.json with
+        | `Null ->
+          json_response ~status:`Bad_request request reqd
+            (json_error "git diff failed")
+        | _ -> cached_response_with_source ~source request reqd payload)))
+
 let add_routes router =
   router
-  |> Server_route.get Server_route.Public_read "/api/v1/workspace/tree" (fun state request reqd ->
-           let uri = Uri.of_string request.target in
-           let base, source = resolve_workspace_base ~state ~uri in
-           let depth =
-             match Uri.get_query_param uri "depth" with
-             | Some d ->
-               (match int_of_string_opt d with
-                | Some n -> max 1 (min 5 n)
-                | None -> 3)
-             | None -> 3
-           in
-           let max_nodes =
-             tree_node_limit_of_query (Uri.get_query_param uri "limit")
-           in
-           let include_diff = bool_query_param request "diff" ~default:false in
-           let effective_depth, effective_max_nodes =
-             match source with
-             | `Project
-             | `RepositoryMissing _
-             | `RepositoryUnknown _
-             | `PlaygroundMissing _
-             | `KeeperUnknown _ -> (0, min max_nodes 200)
-             | `Repository _ | `Playground _ -> (depth, max_nodes)
-           in
-           let cache_key =
-             Printf.sprintf "workspace:tree:%s:%s:%d:%d:%b"
-               base
-               (source_to_string source)
-               effective_depth effective_max_nodes include_diff
-           in
-           let payload =
-             Dashboard_cache.get_or_compute_payload cache_key
-               ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-               (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-                  let nodes =
-                    if not (Sys.file_exists base) then []
-                    else
-                      let diff_by_path =
-                        if include_diff then Some (git_diff_badges ~base)
-                        else None
-                      in
-                      scan_dir ?diff_by_path ~base ~depth:0
-                        ~max_depth:effective_depth
-                        ~max_nodes:effective_max_nodes [] base
-                  in
-                  `List (List.rev nodes)))
-           in
-           cached_response_with_source_and_base ~source ~base_path:base request
-             reqd payload)
-
-  |> Server_route.get Server_route.Public_read "/api/v1/workspace/files" (fun state request reqd ->
-           let uri = Uri.of_string request.target in
-           let base, source = resolve_workspace_base ~state ~uri in
-           match source with
-           | `RepositoryMissing _ | `RepositoryUnknown _
-           | `PlaygroundMissing _ | `KeeperUnknown _ ->
-               json_response ~status:`Not_found request reqd
-                 (json_error "The selected workspace is unavailable")
-           | `Project | `Repository _ | `Playground _ ->
-               match Uri.get_query_param uri "path" with
-               | None ->
-                   json_response ~status:`Bad_request request reqd
-                     (json_error "Missing path parameter")
-               | Some path ->
-                   let result =
-                     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-                       workspace_file_catalog ~base ~path)
-                   in
-                   match result with
-                   | Ok catalog ->
-                       json_response_with_source ~status:`OK ~source request reqd
-                         (`Assoc
-                            [ ("root", `String catalog.catalog_root)
-                            ; ("files", `List (List.map (fun path -> `String path)
-                                               catalog.catalog_paths))
-                            ])
-                   | Error error ->
-                       let status, message =
-                         match error with
-                         | Catalog_invalid_path -> `Bad_request, "Invalid path"
-                         | Catalog_directory_unavailable ->
-                             `Not_found, "The selected directory is unavailable"
-                         | Catalog_repository_unavailable ->
-                             `Not_found, "Open a Git repository directory to find files"
-                         | Catalog_scan_failed detail -> `Internal_server_error, detail
-                       in
-                       json_response ~status request reqd (json_error message))
-
-  |> Server_route.get Server_route.Public_read "/api/v1/git/branches" (fun state request reqd ->
-           let uri = Uri.of_string request.target in
-           let base, source = resolve_workspace_base ~state ~uri in
-           match source with
-           | `RepositoryMissing _ | `RepositoryUnknown _
-           | `PlaygroundMissing _ | `KeeperUnknown _ ->
-               json_response ~status:`Not_found request reqd
-                 (json_error "The selected workspace is unavailable")
-           | `Project | `Repository _ | `Playground _ ->
-               match Uri.get_query_param uri "path" with
-               | None ->
-                   json_response ~status:`Bad_request request reqd
-                     (json_error "Missing path parameter")
-               | Some path ->
-                   let result =
-                     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-                       workspace_branches ~base ~path)
-                   in
-                   match result with
-                   | Ok found ->
-                       json_response_with_source ~status:`OK ~source request reqd
-                         (workspace_branches_json found)
-                   | Error error ->
-                       let status, message =
-                         match error with
-                         | Branches_invalid_path -> `Bad_request, "Invalid path"
-                         | Branches_directory_unavailable ->
-                             `Not_found, "The selected directory is unavailable"
-                         | Branches_repository_unavailable ->
-                             `Not_found, "Open a Git repository directory to list branches"
-                         | Branches_failed detail -> `Internal_server_error, detail
-                       in
-                       json_response ~status request reqd (json_error message))
-
-  |> Server_route.get Server_route.Public_read "/api/v1/git/worktrees" (fun state request reqd ->
-           let uri = Uri.of_string request.target in
-           let base, source = resolve_workspace_base ~state ~uri in
-           match source with
-           | `RepositoryMissing _ | `RepositoryUnknown _
-           | `PlaygroundMissing _ | `KeeperUnknown _ ->
-               json_response ~status:`Not_found request reqd
-                 (json_error "The selected workspace is unavailable")
-           | `Project | `Repository _ | `Playground _ ->
-               match Uri.get_query_param uri "path" with
-               | None ->
-                   json_response ~status:`Bad_request request reqd
-                     (json_error "Missing path parameter")
-               | Some path ->
-                   let result =
-                     Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-                       workspace_worktrees ~base ~path)
-                   in
-                   match result with
-                   | Ok found ->
-                       json_response_with_source ~status:`OK ~source request reqd
-                         (workspace_worktrees_json found)
-                   | Error error ->
-                       let status, message =
-                         match error with
-                         | Worktrees_invalid_path -> `Bad_request, "Invalid path"
-                         | Worktrees_directory_unavailable ->
-                             `Not_found, "The selected directory is unavailable"
-                         | Worktrees_repository_unavailable ->
-                             `Not_found, "Open a Git repository directory to list worktrees"
-                         | Worktrees_failed detail -> `Internal_server_error, detail
-                       in
-                       json_response ~status request reqd (json_error message))
-
-  (* HIGH-RISK-UNREVIEWED: this route returns lines of file content. Every
-     path in the answer has passed [vetted_regular_file], the same guard the
-     file catalog applies before it offers a file to [/api/v1/workspace/file];
-     the query is a fixed string bounded by [search_query_is_valid]. *)
-  |> Server_route.get Server_route.Public_read "/api/v1/workspace/search" (fun state request reqd ->
-           let uri = Uri.of_string request.target in
-           let base, source = resolve_workspace_base ~state ~uri in
-           match source with
-           | `RepositoryMissing _ | `RepositoryUnknown _
-           | `PlaygroundMissing _ | `KeeperUnknown _ ->
-               json_response ~status:`Not_found request reqd
-                 (json_error "The selected workspace is unavailable")
-           | `Project | `Repository _ | `Playground _ ->
-               let ignore_case =
-                 match Uri.get_query_param uri "ignore_case" with
-                 | None | Some "0" -> Ok false
-                 | Some "1" -> Ok true
-                 | Some _ -> Error "ignore_case must be 0 or 1"
-               in
-               (match
-                  Uri.get_query_param uri "path", Uri.get_query_param uri "q", ignore_case
-                with
-                | None, _, _ ->
-                    json_response ~status:`Bad_request request reqd
-                      (json_error "Missing path parameter")
-                | _, None, _ ->
-                    json_response ~status:`Bad_request request reqd
-                      (json_error "Missing q parameter")
-                | _, _, Error message ->
-                    json_response ~status:`Bad_request request reqd (json_error message)
-                | Some path, Some query, Ok ignore_case ->
-                    let result =
-                      Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-                        workspace_search ~base ~path ~query ~ignore_case)
-                    in
-                    (match result with
-                     | Ok found ->
-                         json_response_with_source ~status:`OK ~source request reqd
-                           (`Assoc
-                              [ ("root", `String found.search_root)
-                              ; ("query", `String query)
-                              ; ("ignore_case", `Bool ignore_case)
-                              ; ( "matches"
-                                , `List
-                                    (List.map
-                                       (fun (m : workspace_search_match) ->
-                                         `Assoc
-                                           [ ("path", `String m.sm_path)
-                                           ; ("line", `Int m.sm_line)
-                                           ; ("text", `String m.sm_text)
-                                           ])
-                                       found.search_matches) )
-                              ; ("truncated", `Bool found.search_truncated)
-                              ])
-                     | Error error ->
-                         let status, message =
-                           match error with
-                           | Search_invalid_query ->
-                               ( `Bad_request
-                               , Printf.sprintf
-                                   "q must be %d to %d bytes of valid UTF-8 without line breaks or control characters"
-                                   search_query_min_bytes search_query_max_bytes )
-                           | Search_invalid_path -> `Bad_request, "Invalid path"
-                           | Search_directory_unavailable ->
-                               `Not_found, "The selected directory is unavailable"
-                           | Search_repository_unavailable ->
-                               `Not_found, "Open a Git repository directory to search"
-                           | Search_failed detail -> `Internal_server_error, detail
-                         in
-                         json_response ~status request reqd (json_error message))))
-
-  |> Server_route.get Server_route.Public_read "/api/v1/git/status" (fun state request reqd ->
-           let uri = Uri.of_string request.target in
-           let base, source = resolve_workspace_base ~state ~uri in
-           let scope =
-             match source with
-             | `Project -> Some (`Assoc [ ("kind", `String "project") ])
-             | `Repository id ->
-                 Some
-                   (`Assoc
-                      [ ("kind", `String "repository")
-                      ; ("repository_id", `String id)
-                      ])
-             | `RepositoryMissing _ | `RepositoryUnknown _
-             | `Playground _ | `PlaygroundMissing _ | `KeeperUnknown _ ->
-                 None
-           in
-           match scope with
-           | None ->
-               json_response ~status:`Not_found request reqd
-                 (json_error "Git status needs a project or repository workspace")
-           | Some scope ->
-               (* Git itself walks above [base]. A status request has no file
-                  path from which to find an owning nested checkout, so only
-                  the repository rooted exactly at the requested workspace is
-                  a truthful answer. *)
-               if not (Sys.file_exists (Filename.concat base ".git")) then
-                 json_response ~status:`Not_found request reqd
-                   (json_error "No Git repository at this workspace root")
-               else
-                 (match Repo_git.status_snapshot_at ~local_path:base () with
-                  | Error detail ->
-                      json_response ~status:`Internal_server_error request reqd
-                        (json_error detail)
-                  | Ok (changes, branch) ->
-                      json_response_with_source ~status:`OK ~source request reqd
-                        (Server_git_status_json.snapshot ~scope ~branch ~changes)))
-
-  (* Lazy tree: return exactly one level of a directory's entries so the
-     IDE can expand deep trees on demand instead of relying on the single
-     bounded /tree snapshot (which, for the [project] workspace source, is
-     root-only). [base] stays the whole workspace base and only [dir] is
-     the subpath, so each node's path/parent/depth stay anchored to the
-     whole tree and merge into the client's flat node array. *)
-  |> Server_route.get Server_route.Public_read "/api/v1/workspace/children" (fun state request reqd ->
-           let uri = Uri.of_string request.target in
-           let base, source = resolve_workspace_base ~state ~uri in
-           match Uri.get_query_param uri "path" with
-           | None ->
-             json_response ~status:`Bad_request request reqd
-               (json_error "Missing path parameter")
-           | Some requested ->
-             (* Same admission control as /file, /blame, /diff: uniform
-                [Invalid path] on traversal / confidential / symlink escape so a
-                caller cannot probe which subpaths exist or are secret. *)
-             (match resolve_workspace_file base requested with
-              | Error _ ->
-                json_response ~status:`Bad_request request reqd
-                  (json_error "Invalid path")
-              | Ok file ->
-                let max_nodes =
-                  tree_node_limit_of_query (Uri.get_query_param uri "limit")
-                in
-                (* A rel path with N non-empty segments sits at depth N-1, so
-                   its children are at depth N. Passing ~depth = ~max_depth =
-                   child_depth reads exactly one level (the recursion guard
-                   [depth < max_depth] is false), while [rel_under base] keeps
-                   path/parent anchored to the whole tree. *)
-                let child_depth =
-                  rel_under base file.lexical_path
-                  |> String.split_on_char '/'
-                  |> List.filter (fun s -> not (String.equal s ""))
-                  |> List.length
-                in
-                let cache_key =
-                  Printf.sprintf "workspace:children:%s:%s:%d:%d"
-                    base file.lexical_path child_depth max_nodes
-                in
-                let payload =
-                  Dashboard_cache.get_or_compute_payload cache_key
-                    ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-                    (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
-                       let is_dir =
-                         workspace_or_default
-                           ~warn_on_failure:false
-                           ~site:"children_is_directory"
-                           ~path:file.lexical_path
-                           ~default:false
-                           (fun () -> Sys.is_directory file.lexical_path)
-                       in
-                       if not is_dir then `List []
-                       else
-                         let nodes =
-                           scan_dir ~base ~depth:child_depth
-                             ~max_depth:child_depth ~max_nodes []
-                             file.lexical_path
-                         in
-                         `List (List.rev nodes)))
-                in
-                cached_response_with_source_and_base ~source ~base_path:base
-                  request reqd payload))
-
-  |> Server_route.get Server_route.Public_read "/api/v1/workspace/file" (fun state request reqd ->
-           let uri = Uri.of_string request.target in
-           let base, source = resolve_workspace_base ~state ~uri in
-           match source with
-           | `RepositoryMissing _ | `RepositoryUnknown _
-           | `PlaygroundMissing _ | `KeeperUnknown _ ->
-             json_response ~status:`Not_found request reqd
-               (json_error "The selected workspace is unavailable")
-           | `Project | `Repository _ | `Playground _ ->
-           match Uri.get_query_param uri "path" with
-           | None -> json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
-           | Some p ->
-             (match resolve_workspace_file base p with
-              | Error _ ->
-                (* Uniform [Invalid path] for traversal, confidential, and
-                   symlink-escape rejections: a distinct message would let
-                   a caller probe which paths are secret or exist. *)
-                json_response ~status:`Bad_request request reqd (json_error "Invalid path")
-              | Ok file ->
-                (match load_workspace_file_content file with
-                 | Ok content ->
-                   let revision = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-                     workspace_file_revision ~base file content) in
-                   let json = `Assoc [("ok", `Bool true); ("content", `String content);
-                     ("revision", `String revision)] in
-                   json_response_with_source ~status:`OK ~source request reqd json
-                 | Error File_not_found | Error File_not_regular ->
-                   json_response ~status:`Not_found request reqd (json_error "File not found")
-                 | Error File_changed_during_open ->
-                   json_response ~status:`Bad_request request reqd (json_error "Invalid path")
-                 | Error (File_too_large _) ->
-                   json_response ~status:`Payload_too_large request reqd (json_error "File too large")
-                 | Error (File_read_failed msg) ->
-                   observe_workspace_route_failure
-                     ~site:"file_read"
-                     ~path:file.lexical_path
-                     (Failure msg);
-                   json_response ~status:`Internal_server_error request reqd (json_error "Failed to read file"))))
-
-  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/workspace/file" (fun state request reqd ->
-           Http.Request.read_body_async reqd (fun body ->
-             let refuse status code detail =
-               json_response ~status request reqd
-                 (`Assoc ["ok", `Bool false; "code", `String code; "error", `String detail]) in
-             let invalid () = refuse `Bad_request "invalid_workspace_file_save"
-                 "Provide path, expected_revision, content and expected_workspace" in
-             match Yojson.Safe.from_string body with
-             | exception Yojson.Json_error _ -> invalid ()
-             | `Assoc fields when List.length fields = 4
-                 && List.sort_uniq String.compare (List.map fst fields)
-                    = ["content"; "expected_revision"; "expected_workspace"; "path"] ->
-               (match List.assoc_opt "path" fields, List.assoc_opt "expected_revision" fields,
-                      List.assoc_opt "content" fields, List.assoc_opt "expected_workspace" fields with
-                | Some (`String path), Some (`String expected_revision), Some (`String content), Some (`Assoc _) ->
-                  let config = Mcp_server.workspace_config state in
-                  (match Workspace.validate_expected_workspace ~config (`Assoc fields) with
-                   | Error Workspace.Invalid_workspace_precondition -> invalid ()
-                   | Error Workspace.Workspace_precondition_failed ->
-                     refuse `Conflict "workspace_precondition_failed" "Workspace changed; retain the draft and refresh its identity"
-                   | Ok _ ->
-                     let uri = Uri.of_string request.target in
-                     let scope_valid = match Uri.query uri with
-                       | [] -> true
-                       | [ ("keeper" | "repo_id"), [name] ] -> String.trim name <> ""
-                       | _ -> false in
-                     if not scope_valid then invalid ()
-                     else
-                       let base, source = resolve_workspace_base ~state ~uri in
-                       match source with
-                       | `RepositoryMissing _ | `RepositoryUnknown _ | `PlaygroundMissing _ | `KeeperUnknown _ ->
-                         refuse `Not_found "workspace_unavailable" "The selected workspace is unavailable"
-                       | `Project | `Repository _ | `Playground _ ->
-                         (match save_workspace_file
-                           ~publication_recovery:(Mcp_server.publication_recovery_availability_provider state)
-                           ~base ~path ~expected_revision ~content with
-                          | Ok revision -> json_response_with_source ~status:`OK ~source request reqd
-                            (`Assoc ["ok", `Bool true; "revision", `String revision])
-                          | Error Save_invalid_path -> refuse `Bad_request "invalid_path" "Invalid path"
-                          | Error Save_invalid_revision -> invalid ()
-                          | Error Save_conflict -> refuse `Conflict "workspace_file_changed" "File changed; retain the draft and compare the current source"
-                          | Error Save_too_large | Error (Save_read_failed (File_too_large _)) ->
-                            refuse `Payload_too_large "workspace_file_too_large" "File exceeds the configured readable size"
-                          | Error (Save_read_failed (File_not_found | File_not_regular)) ->
-                            refuse `Not_found "workspace_file_unavailable" "The existing file is unavailable"
-                          | Error (Save_read_failed File_changed_during_open) ->
-                            refuse `Conflict "workspace_file_changed" "File changed; retain the draft"
-                          | Error (Save_read_failed (File_read_failed _)) ->
-                            refuse `Service_unavailable "workspace_file_read_failed" "Could not read the current file; retain the draft"
-                          | Error (Save_recovery_unavailable error) ->
-                            Log.Server.warn "workspace file recovery unavailable: %s"
-                              (Keeper_publication_recovery_availability.unavailable_to_string error);
-                            refuse `Service_unavailable "workspace_file_save_unavailable" "Save is unavailable; retain the draft"
-                          | Error (Save_recovery_release_failed { save_result; release_failure }) ->
-                            Log.Server.warn "workspace file recovery release failed saved=%b evidence=%s"
-                              (Result.is_ok save_result)
-                              (Fs_compat.Publication_recovery.lane_release_failure_to_string release_failure);
-                            refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save"
-                          | Error (Save_io_failed { publication_may_have_started; detail }) ->
-                            Log.Server.warn "workspace file save IO failed publication_started=%b evidence=%s"
-                              publication_may_have_started detail;
-                            if publication_may_have_started then
-                              refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save"
-                            else
-                              refuse `Service_unavailable "workspace_file_read_failed" "Could not read the current file; retain the draft"
-                          | Error (Save_write_failed error) ->
-                            Log.Server.warn "workspace file publication failed: %s"
-                              (Fs_compat.capability_write_error_to_string error);
-                            (match error.target_effect with
-                             | Fs_compat.Target_unchanged -> refuse `Internal_server_error "workspace_file_save_failed" "Save failed before publication; retain the draft"
-                             | Fs_compat.Target_created
-                             | Fs_compat.Target_replaced | Fs_compat.Target_state_unknown ->
-                               refuse `Internal_server_error "workspace_file_save_uncertain" "File may have been saved; retain the draft and reread before another save")))
-                | _ -> invalid ())
-             | _ -> invalid ()))
-
-  (* Ask the language server about a name: definition or hover, at the
-     occurrence-th start of [symbol] on a 1-based line. The same
-     question surface the keeper_code_query tool offers, over the same
-     [Lsp_position] arithmetic, reached through the workspace axes
-     (?keeper= / ?repo_id=) this file already resolves.
-
-     Token-gated where the file reads above are public: answering
-     spawns a language server. The pool is request-scoped
-     ([Lsp_turn_pool.with_turn_pool]) for the reason its mli measures —
-     a resident server holds 12-155 MB; a spawn costs tens of
-     milliseconds plus the first question's indexing. *)
-  |> Server_route.get (Server_route.Token_permission Masc_domain.CanBroadcast) "/api/v1/lsp/question" (fun state _identity request reqd ->
-            let uri = Uri.of_string request.target in
-            let base, _source = resolve_workspace_base ~state ~uri in
-            let param name = Uri.get_query_param uri name in
-            let bad message =
-              json_response ~status:`Bad_request request reqd
-                (json_error message)
-            in
-            let open struct
-              let ( let* ) r f =
-                match r with
-                | Ok v -> f v
-                | Error message -> `Failed message
-            end in
-            let outcome =
-              (* Parsed by the module that owns the vocabulary, not spelled
-                 again here. This arm read [definition] and [hover] only,
-                 while the Keeper tool over the same client had answered
-                 [references] since #30504 -- the route was a word behind,
-                 and nothing said so. *)
-              let* question =
-                match param "question" with
-                | Some raw ->
-                  (match Lsp_questions.question_of_string raw with
-                   | Some question -> Ok question
-                   | None ->
-                     Error
-                       (Printf.sprintf
-                          "question must be definition, hover or references, \
-                           got %S"
-                          raw))
-                | None -> Error "question parameter is required"
-              in
-              let* raw_path =
-                match param "path" with
-                | Some p when String.trim p <> "" -> Ok p
-                | _ -> Error "path parameter is required"
-              in
-              let* line_number =
-                match Option.bind (param "line") int_of_string_opt with
-                | Some n when n >= 1 -> Ok n
-                | Some _ -> Error "line is 1-based and must be >= 1"
-                | None -> Error "line parameter is required (1-based)"
-              in
-              let* symbol =
-                match param "symbol" with
-                | Some sym when String.trim sym <> "" -> Ok (String.trim sym)
-                | _ -> Error "symbol parameter is required"
-              in
-              let* occurrence =
-                match param "occurrence" with
-                | None -> Ok 1
-                | Some raw ->
-                  (match int_of_string_opt raw with
-                   | Some n when n >= 1 -> Ok n
-                   | Some _ | None ->
-                     Error "occurrence is 1-based and must be >= 1")
-              in
-              let* file =
-                match resolve_workspace_file base raw_path with
-                | Ok file -> Ok file
-                | Error _ -> Error "Invalid path"
-              in
-              let path = file.lexical_path in
-              let line_index = line_number - 1 in
-              let* language = Lsp_position.language_of ~path in
-              let* line = Lsp_position.line_of_file ~path ~line_index in
-              let* character =
-                Lsp_position.column_of ~line ~symbol ~occurrence ~line_number
-              in
-              let* workspace_root =
-                Lsp_position.project_root_of ~language ~path ~boundary:base
-              in
-              (* Refused before it is asked, not judged after it is answered:
-                 a server with no index answers references with the
-                 occurrences in the file it was given, and a short list reads
-                 like an answer. The same guard the Keeper tool applies. *)
-              let* () =
-                Lsp_questions.reference_index_ready
-                  ~question
-                  ~language
-                  ~project_root:workspace_root
-              in
-              `Ask (question, language, workspace_root, path, line_index,
-                    character)
-            in
-            match outcome with
-            | `Failed message -> bad message
-            | `Ask (question, language, workspace_root, path, line_index,
-                    character) ->
-              Lsp_turn_pool.with_turn_pool ~servers:(Runtime.lsp_servers ()) (fun () ->
-                match Lsp_turn_pool.get_opt () with
-                | None ->
-                  json_response ~status:`Service_unavailable request reqd
-                    (json_error
-                       "no Eio environment for a language-server pool here")
-                | Some pool ->
-                  (match
-                     Lsp_questions.ask pool ~language ~workspace_root ~path
-                       ~line:line_index ~character ~question
-                   with
-                   | Error error ->
-                     json_response ~status:`Bad_gateway request reqd
-                       (json_error
-                          (Format.asprintf "%a" Lsp_questions.pp_error error))
-                   | Ok answer ->
-                     let location_json (l : Lsp_questions.location) =
-                       (* 1-based out, the way the caller asked. A location
-                          outside the workspace (stdlib, a vendored package)
-                          keeps its absolute path and says which side it fell
-                          on, instead of a relative path that resolves to the
-                          wrong file. *)
-                       let boundary = Fs_compat.realpath_lenient base in
-                       let answered =
-                         Fs_compat.realpath_lenient l.Lsp_questions.path
-                       in
-                       let prefix = boundary ^ Filename.dir_sep in
-                       let inside =
-                         String.starts_with ~prefix answered
-                       in
-                       let shown =
-                         if inside then
-                           String.sub answered (String.length prefix)
-                             (String.length answered - String.length prefix)
-                         else answered
-                       in
-                       `Assoc
-                         [ ("path", `String shown)
-                         ; ("inside_workspace", `Bool inside)
-                         ; ("line", `Int (l.Lsp_questions.line + 1))
-                         ; ("character", `Int (l.Lsp_questions.character + 1))
-                         ]
-                     in
-                     let data =
-                       match answer with
-                       | Lsp_questions.Locations locations ->
-                         `Assoc
-                           [ ("kind", `String "locations")
-                           ; ( "locations"
-                             , `List (List.map location_json locations) )
-                           ]
-                       | Lsp_questions.Hover_text text ->
-                         `Assoc
-                           [ ("kind", `String "hover")
-                           ; ( "text"
-                             , match text with
-                               | Some t -> `String t
-                               | None -> `Null )
-                           ]
-                     in
-                     json_response ~status:`OK request reqd
-                       (`Assoc [ ("ok", `Bool true); ("data", data) ]))))
-
-  |> Server_route.get Server_route.Public_read "/api/v1/git/blame" (fun state request reqd ->
-           let uri = Uri.of_string request.target in
-           let base, source = resolve_workspace_base ~state ~uri in
-           let file_path =
-             match Uri.get_query_param uri "path" with
-             | Some p -> p
-             | None -> ""
-           in
-           if file_path = "" then
-             json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
-           else
-             (match resolve_workspace_file base file_path with
-              | Error _ ->
-                json_response ~status:`Bad_request request reqd (json_error "Invalid path")
-              | Ok safe ->
-                if not (Sys.file_exists safe.resolved_path) then
-                  json_response ~status:`Not_found request reqd (json_error "File not found")
-                else
-                (match repository_owning ~base ~path:safe.lexical_path with
-                 | None ->
-                   json_response ~status:`Not_found request reqd
-                     (json_error "No git repository under this scope owns that path")
-                 | Some repo_root ->
-                  let rel = rel_under repo_root safe.lexical_path in
-                  let cache_key =
-                    Printf.sprintf "git:blame:%s:%s:%s"
-                      repo_root
-                      (source_to_string source)
-                      rel
-                  in
-                  let payload =
-                    Dashboard_cache.get_or_compute_payload cache_key
-                      ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-                      (Pool_work.io ~name:__FUNCTION__ (fun () ->
-                         match git_run_lines ~cwd:repo_root
-                                 ["blame"; "--porcelain"; "--"; rel]
-                         with
-                         | [] -> `List []
-                         | lines ->
-                           let entries = parse_blame_porcelain lines in
-                           let grouped = group_blame_entries rel entries in
-                           `List grouped))
-                  in
-                  cached_response_with_source ~source request reqd payload)))
-
-  |> Server_route.get Server_route.Public_read "/api/v1/git/log" (fun state request reqd ->
-           let uri = Uri.of_string request.target in
-           let base, source = resolve_workspace_base ~state ~uri in
-           let limit =
-             match
-               Option.bind (Uri.get_query_param uri "limit") int_of_string_opt
-             with
-             | Some n when n >= 1 -> min n 200
-             | Some _ | None -> 50
-           in
-           match Uri.get_query_param uri "path" with
-           | None | Some "" ->
-             json_response ~status:`Bad_request request reqd
-               (json_error "Missing path parameter")
-           | Some p ->
-             (match resolve_workspace_file base p with
-              | Error _ ->
-                json_response ~status:`Bad_request request reqd
-                  (json_error "Invalid path")
-              | Ok safe ->
-                if not (Sys.file_exists safe.resolved_path) then
-                  json_response ~status:`Not_found request reqd
-                    (json_error "File not found")
-                else
-                  (match repository_owning ~base ~path:safe.lexical_path with
-                   | None ->
-                     json_response ~status:`Not_found request reqd
-                       (json_error
-                          "No git repository under this scope owns that path")
-                   | Some repo_root ->
-                     let rel = rel_under repo_root safe.lexical_path in
-                     let cache_key =
-                       Printf.sprintf "git:log:%s:%s:%s:%d" repo_root
-                         (source_to_string source)
-                         rel limit
-                     in
-                     let payload =
-                       Dashboard_cache.get_or_compute_payload cache_key
-                         ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-                         (Pool_work.io ~name:__FUNCTION__ (fun () ->
-                            let lines =
-                              git_run_lines ~cwd:repo_root
-                                [ "log"
-                                ; Printf.sprintf "-n%d" limit
-                                ; "--pretty=format:%h%x09%at%x09%an%x09%s"
-                                ; "--"
-                                ; rel
-                                ]
-                            in
-                            `Assoc
-                              [ ("ok", `Bool true)
-                              ; ( "commits"
-                                , `List
-                                    (List.filter_map git_log_row_of_line
-                                       lines) )
-                              ]))
-                     in
-                     cached_response_with_source ~source request reqd payload)))
-
-  |> Server_route.get Server_route.Public_read "/api/v1/git/diff" (fun state request reqd ->
-           let uri = Uri.of_string request.target in
-           let base, source = resolve_workspace_base ~state ~uri in
-           let file_path =
-             match Uri.get_query_param uri "path" with
-             | Some p -> p
-             | None -> ""
-           in
-           if file_path = "" then
-             json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
-           else
-             match
-               git_diff_target_of_params
-                 ~base_ref:(Uri.get_query_param uri "base_ref")
-                 ~commit:(Uri.get_query_param uri "commit")
-             with
-             | Error message ->
-               json_response ~status:`Bad_request request reqd (json_error message)
-             | Ok target ->
-             (match resolve_workspace_file base file_path with
-              | Error _ ->
-                json_response ~status:`Bad_request request reqd (json_error "Invalid path")
-              | Ok safe ->
-                (match repository_owning ~base ~path:safe.lexical_path with
-                 | None ->
-                   (* Saying so beats the empty diff git would print from
-                      whatever repository encloses this one: an answer from
-                      outside the queried scope is not an answer. *)
-                   json_response ~status:`Not_found request reqd
-                     (json_error "No git repository under this scope owns that path")
-                 | Some repo_root ->
-                let rel = rel_under repo_root safe.lexical_path in
-                let cache_key =
-                  Printf.sprintf "git:diff:%s:%s:%s:%s"
-                    repo_root
-                    (source_to_string source)
-                    (git_diff_target_key target)
-                    rel
-                in
-                let payload =
-                  Dashboard_cache.get_or_compute_payload cache_key
-                    ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
-                    (Pool_work.io ~name:__FUNCTION__ (fun () ->
-                       match git_run_lines_or_error ~cwd:repo_root
-                               (git_diff_args ~target ~rel)
-                       with
-                       | Error _ ->
-                         observe_workspace_route_failure
-                           ~site:"git_run" ~path:rel
-                           (Failure "git diff failed");
-                         `Null
-                       | Ok [] ->
-                         `Assoc [("unified", `List []); ("has_changes", `Bool false)]
-                       | Ok diff_lines ->
-                         let unified = parse_unified_diff diff_lines in
-                         `Assoc [("unified", `List unified); ("has_changes", `Bool true)]))
-                in
-                (match payload.json with
-                 | `Null ->
-                   json_response ~status:`Bad_request request reqd
-                     (json_error "git diff failed")
-                 | _ -> cached_response_with_source ~source request reqd payload))))
+  |> Server_route.get Server_route.Public_read "/api/v1/workspace/tree" handle_workspace_tree_get
+  |> Server_route.get Server_route.Public_read "/api/v1/workspace/files" handle_workspace_files_get
+  |> Server_route.get Server_route.Public_read "/api/v1/git/branches" handle_git_branches_get
+  |> Server_route.get Server_route.Public_read "/api/v1/git/worktrees" handle_git_worktrees_get
+  |> Server_route.get Server_route.Public_read "/api/v1/workspace/search"
+       handle_workspace_search_get
+  |> Server_route.get Server_route.Public_read "/api/v1/git/status" handle_git_status_get
+  |> Server_route.get Server_route.Public_read "/api/v1/workspace/children"
+       handle_workspace_children_get
+  |> Server_route.get Server_route.Public_read "/api/v1/workspace/file" handle_workspace_file_get
+  |> Server_route.post (Server_route.Permission Masc_domain.CanAdmin) "/api/v1/workspace/file"
+       handle_workspace_file_post
+  |> Server_route.get (Server_route.Token_permission Masc_domain.CanBroadcast) "/api/v1/lsp/question"
+       handle_lsp_question_get
+  |> Server_route.get Server_route.Public_read "/api/v1/git/blame" handle_git_blame_get
+  |> Server_route.get Server_route.Public_read "/api/v1/git/log" handle_git_log_get
+  |> Server_route.get Server_route.Public_read "/api/v1/git/diff" handle_git_diff_get

@@ -1975,13 +1975,22 @@ let test_tinker_inkling_2_small_binds_as_exact_target () =
 (* A sampler checkpoint has no model row, only its provider has one. Its slot
    binds to that provider row through the model the deployment declares, and
    answers with it. A capability override on the binding is not that
-   declaration: the same binding without one is left out for its model. *)
+   declaration: the same binding without one is left out for its model. The
+   override and the declaration differ in window, JSON mode and native
+   schema, so the slot shows which one it answers with. *)
 let test_a_declared_model_binds_a_rowless_slot_to_its_provider_row () =
   let declared =
     { Capabilities.openai_compat_chat_capabilities with
       Capabilities.max_context_tokens = Some 65_536
     ; supports_response_format_json = false
     ; supports_structured_output = false
+    }
+  in
+  let override =
+    { Capabilities.openai_compat_chat_capabilities with
+      Capabilities.max_context_tokens = Some 32_768
+    ; supports_response_format_json = true
+    ; supports_structured_output = true
     }
   in
   let slot target_ref model_declaration : Exact_output.declared_target =
@@ -1993,7 +2002,7 @@ let test_a_declared_model_binds_a_rowless_slot_to_its_provider_row () =
           ~model_id:"tinker://example:train:0/sampler_weights/x"
           ~base_url:"https://tinker.example/v1"
           ~request_path:"/chat/completions"
-          ~model_capabilities_override:declared
+          ~model_capabilities_override:override
           ~connect_timeout_s:30.0
           ()
     ; credential = Exact_output.Credential_not_declared
@@ -2018,11 +2027,15 @@ let test_a_declared_model_binds_a_rowless_slot_to_its_provider_row () =
      | Ok admitted ->
        let capabilities = (Exact_output.projection_target admitted).capabilities in
        Alcotest.(check (option int))
-         "the slot answers with the declared window"
+         "the slot answers with the declared window, not the override's"
          (Some 65_536)
          capabilities.max_context_tokens;
        Alcotest.(check bool)
-         "the slot answers with the declared native schema"
+         "the slot answers with the declared JSON mode, not the override's"
+         false
+         capabilities.supports_response_format_json;
+       Alcotest.(check bool)
+         "the slot answers with the declared native schema, not the override's"
          false
          capabilities.supports_structured_output);
     (match Exact_output.admit_target_ref snapshot "tinker.undeclared" with

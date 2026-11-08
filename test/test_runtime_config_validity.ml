@@ -7532,7 +7532,9 @@ let test_wizard_provider_models_share_catalog_authority () =
    (RFC-0514). A binding whose runtime.toml states every capability an exact
    slot reads is an exact slot that answers with what it states. One that
    leaves a read unstated is left out, and the reads it leaves are named; the
-   provider preset does not stand in for one. A binding with no capabilities
+   provider preset does not stand in for one. Each read is left out once on
+   its own: the window on the Anthropic wire, whose preset answers 200,000 for
+   it, and the three table keys on Tinker. A binding with no capabilities
    table states none of the three the table holds, on the Anthropic wire as
    well, where the adapter fills the binding's capability override from the
    preset. *)
@@ -7554,11 +7556,27 @@ accepted-reasoning-efforts = ["low", "high"]
 supports-response-format-json = false
 supports-structured-output = false
 
-[models.partial]
+[models.no-ladder]
 api-name = %S
 max-context = 262144
 
-[models.partial.capabilities]
+[models.no-ladder.capabilities]
+supports-response-format-json = false
+supports-structured-output = false
+
+[models.no-json]
+api-name = %S
+max-context = 262144
+
+[models.no-json.capabilities]
+accepted-reasoning-efforts = ["low", "high"]
+supports-structured-output = false
+
+[models.no-schema]
+api-name = %S
+max-context = 262144
+
+[models.no-schema.capabilities]
 accepted-reasoning-efforts = ["low", "high"]
 supports-response-format-json = false
 
@@ -7568,7 +7586,11 @@ max-context = 262144
 
 [tinker.declared]
 
-[tinker.partial]
+[tinker.no-ladder]
+
+[tinker.no-json]
+
+[tinker.no-schema]
 
 [tinker.tableless]
 
@@ -7576,9 +7598,19 @@ max-context = 262144
 protocol = "messages-http"
 endpoint = "https://api.deepseek.com/anthropic"
 
+[models.messages-unwindowed]
+api-name = %S
+
+[models.messages-unwindowed.capabilities]
+accepted-reasoning-efforts = ["low", "high"]
+supports-response-format-json = false
+supports-structured-output = false
+
 [models.messages-tableless]
 api-name = %S
 max-context = 131072
+
+[deepseek-anthropic.messages-unwindowed]
 
 [deepseek-anthropic.messages-tableless]
 
@@ -7588,6 +7620,9 @@ default = "tinker.declared"
       checkpoint
       checkpoint
       checkpoint
+      checkpoint
+      checkpoint
+      messages_probe
       messages_probe
   in
   let previous = Llm_provider.Catalog_snapshot.current () in
@@ -7634,9 +7669,32 @@ default = "tinker.declared"
   in
   check exact_reads "the declared binding states every exact read" []
     (unstated "tinker.declared");
-  check exact_reads "the partial binding leaves native schema unstated"
+  check exact_reads "a binding with no effort ladder leaves only the ladder unstated"
+    [ Runtime_exact_reads.Reasoning_effort_ladder ]
+    (unstated "tinker.no-ladder");
+  check exact_reads "a binding with no JSON mode leaves only JSON mode unstated"
+    [ Runtime_exact_reads.Json_mode ]
+    (unstated "tinker.no-json");
+  check exact_reads "a binding with no native schema leaves only native schema unstated"
     [ Runtime_exact_reads.Native_schema ]
-    (unstated "tinker.partial");
+    (unstated "tinker.no-schema");
+  check exact_reads "a binding with no table leaves the three table keys unstated"
+    [ Runtime_exact_reads.Reasoning_effort_ladder
+    ; Runtime_exact_reads.Json_mode
+    ; Runtime_exact_reads.Native_schema
+    ]
+    (unstated "tinker.tableless");
+  (* What makes the unwindowed case worth asking: the anthropic preset
+     answers a window for a model that states none. *)
+  (match
+     Runtime_instance.resolve_max_context_of_runtime
+       (loaded "deepseek-anthropic.messages-unwindowed")
+   with
+   | Some (200_000, Runtime_instance.Capability) -> ()
+   | Some _ | None -> fail "only the anthropic preset answers the unwindowed window, with 200,000");
+  check exact_reads "a window only the preset answers is not stated"
+    [ Runtime_exact_reads.Context_window ]
+    (unstated "deepseek-anthropic.messages-unwindowed");
   (* What makes the Anthropic case worth asking: the binding's capability
      override is there although its model states nothing. *)
   (match
@@ -7652,6 +7710,11 @@ default = "tinker.declared"
      let capabilities = (Exact_output.projection_target admitted).capabilities in
      check (option int) "the slot answers with the stated window" (Some 262144)
        capabilities.max_context_tokens;
+     check (option (list string)) "the slot answers with the stated effort ladder"
+       (Some [ "low"; "high" ])
+       (Option.map
+          (List.map Llm_provider.Reasoning_effort.to_string)
+          capabilities.accepted_reasoning_efforts);
      check bool "the stated JSON mode overrides the preset" false
        capabilities.supports_response_format_json;
      check bool "the stated native schema overrides the preset" false
@@ -7676,8 +7739,11 @@ default = "tinker.declared"
     | Some Exact_output.Target_provider -> failf "%s must be rejected for its model, not its provider" target_id
     | None -> failf "%s must be recorded as a rejected binding" target_id
   in
-  require_left_out "tinker.partial";
+  require_left_out "tinker.no-ladder";
+  require_left_out "tinker.no-json";
+  require_left_out "tinker.no-schema";
   require_left_out "tinker.tableless";
+  require_left_out "deepseek-anthropic.messages-unwindowed";
   require_left_out "deepseek-anthropic.messages-tableless"
 ;;
 

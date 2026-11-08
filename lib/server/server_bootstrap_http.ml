@@ -280,14 +280,15 @@ let serve ~sw ~clock ~socket ~addr_label ~request_handler =
 exception Request_without_header_block
 
 (* RFC 9113 §8.4 deprecates server push and browsers stopped accepting it, so
-   no H2 connection advertises it. h2's [read_buffer_size] is the
-   SETTINGS_MAX_FRAME_SIZE the server announces ([H2.Config.to_settings]). *)
+   no H2 connection advertises it. [read_buffer_size] stays the library's
+   16384: h2 sizes the DATA frames it writes by that value until the peer
+   announces a MAX_FRAME_SIZE, and Chrome, curl and [H2_eio.Client] never do,
+   so a larger value would make them drop the connection (#49940). *)
 let h2_config () =
   { H2.Config.default with
     enable_server_push = false
   ; max_concurrent_streams = Int32.of_int (H2_response_limits.max_concurrent_streams ())
   ; initial_window_size = Int32.of_int (H2_response_limits.initial_window_size ())
-  ; read_buffer_size = H2_response_limits.max_frame_size ()
   }
 ;;
 

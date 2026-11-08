@@ -113,8 +113,8 @@ val serve :
 
 val h2_config : unit -> H2.Config.t
 (** The settings every H2 connection is created with, cleartext or TLS:
-    server push off, and the stream limit, initial window and largest frame
-    from {!H2_response_limits}. *)
+    server push off, and the stream limit and initial window from
+    {!H2_response_limits}. *)
 
 val serve_h2_connection :
   ?streams:Server_h2_stream_registry.t ->

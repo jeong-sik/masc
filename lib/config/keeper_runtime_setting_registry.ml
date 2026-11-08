@@ -689,17 +689,6 @@ let all =
       ~category:Transport
       "Flow-control window each H2 stream starts with, in bytes"
   ; setting
-      ~range:(int_range ~min:H2_response_limits.min_max_frame_size
-                ~max:H2_response_limits.max_max_frame_size ())
-      ~effective:(Reader (fun () -> display_int (H2_response_limits.max_frame_size ())))
-      ~env_name:"MASC_H2_MAX_FRAME_SIZE"
-      ~exposure:(Toml_only "transport.h2_max_frame_size")
-      ~value_kind:Integer
-      ~default:(display_int H2_response_limits.default_max_frame_size)
-      ~consumers:["Server_bootstrap_http H2, Auto and HTTPS listeners"]
-      ~category:Transport
-      "Largest H2 frame payload the server accepts, in bytes"
-  ; setting
       ~range:(int_range ~min:0 ~max:65535 ())
       ~effective:
         (Reader

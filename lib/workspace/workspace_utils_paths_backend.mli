@@ -16,6 +16,10 @@ type expected_workspace_error =
 val validate_expected_workspace :
   config:config -> Yojson.Safe.t -> (Yojson.Safe.t, expected_workspace_error) result
 
+val expected_workspace_error_message : expected_workspace_error -> string
+(** The sentence a refusal of {!validate_expected_workspace} shows its caller,
+    on every surface that reports it. *)
+
 val read_precondition_admission_header : string * string
 (** Wire receipt emitted only after a GET/HEAD's explicit workspace pair was
     validated. Readers require exactly this receipt on successful/304 replies

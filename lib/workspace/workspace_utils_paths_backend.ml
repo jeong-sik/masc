@@ -33,6 +33,12 @@ let validate_expected_workspace ~config args =
      | _ -> Error Invalid_workspace_precondition)
   | _ -> Error Invalid_workspace_precondition
 
+(* The sentence a refusal of [validate_expected_workspace] shows, on every
+   surface that reports it. *)
+let expected_workspace_error_message = function
+  | Invalid_workspace_precondition -> "invalid expected_workspace precondition"
+  | Workspace_precondition_failed -> "workspace precondition failed"
+
 let agents_dirname = "agents"
 let agents_dir config = Filename.concat (masc_dir config) agents_dirname
 (* Segment names for the task store, exposed so a reader holding only a

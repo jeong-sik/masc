@@ -330,11 +330,8 @@ let resolve_task_skills ~base_path requests =
 let handle_add_task ?created_by ~tool_name ~start_time ctx args =
   match Workspace.validate_expected_workspace ~config:ctx.config args with
   | Error error ->
-      let detail = match error with
-        | Workspace.Invalid_workspace_precondition -> "invalid expected_workspace precondition"
-        | Workspace.Workspace_precondition_failed -> "workspace precondition failed" in
       Tool_result.error ~failure_class:Tool_result.Workflow_rejection
-        ~tool_name ~start_time detail
+        ~tool_name ~start_time (Workspace.expected_workspace_error_message error)
   | Ok args ->
   let valid_keys =
     [ "title"
@@ -472,11 +469,8 @@ let handle_add_task ?created_by ~tool_name ~start_time ctx args =
 let handle_set_goal ~tool_name ~start_time ctx args =
   match Workspace.validate_expected_workspace ~config:ctx.config args with
   | Error error ->
-    let detail = match error with
-      | Workspace.Invalid_workspace_precondition -> "invalid expected_workspace precondition"
-      | Workspace.Workspace_precondition_failed -> "workspace precondition failed" in
     Tool_result.error ~failure_class:Tool_result.Workflow_rejection
-      ~tool_name ~start_time detail
+      ~tool_name ~start_time (Workspace.expected_workspace_error_message error)
   | Ok args ->
   let valid_keys = [ "task_id"; "goal_id" ] in
   let unknown = unknown_args ~valid_keys args in

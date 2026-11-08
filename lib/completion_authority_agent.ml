@@ -1014,7 +1014,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
         result
       :: !tools
   in
-  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir runtime.config) "lane-addons") in
+  let store=Lane_addon_store.of_config runtime.config in
   let complete ?evaluator_runtime (process_outcome, outcome) =
     Verification_run_registry.mark_completed
       registry
@@ -1141,8 +1141,7 @@ let process_task_once ?(registry=Verification_run_registry.global ())
                verification's evidence. The verdict extraction, verdict tool
                and Task/Goal transition stay on this host side below. *)
             let owner_store =
-              Lane_addon_store.create
-                ~root:(Filename.concat (Workspace.masc_dir runtime.config) "lane-addons")
+              Lane_addon_store.of_config runtime.config
             in
             let installation_id = host_installation_id in
             let package_id = host_package_id in
@@ -1488,7 +1487,7 @@ let recover_terminal_publications (runtime:runtime) ~registry ~scope =
   let module O=Verifier_review_owner in
   let module V=Verifier_review_original in
   let module P=Lane_addon_request_progress in
-  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir runtime.config) "lane-addons") in
+  let store=Lane_addon_store.of_config runtime.config in
   let* pending=O.pending_commits ~terminal_pending:Verifier_review_publication.needs_publication
     ~selection:O.All_verifications
     ~store ~installation_id:host_installation_id ~package_id:host_package_id
@@ -1539,7 +1538,7 @@ let process_scope (runtime : runtime) ~scope =
            | Masc_domain.Cancelled _ -> None)
         backlog.tasks
     in
-    let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir runtime.config) "lane-addons") in
+    let store=Lane_addon_store.of_config runtime.config in
     let entries = match Verifier_review_owner.pending_commits
       ~selection:Verifier_review_owner.All_verifications
       ~terminal_pending:Verifier_review_publication.needs_publication ~store

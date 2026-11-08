@@ -501,21 +501,7 @@ let render_code (state : state) =
                     "vs " ^ Terminal_text.single_line base_ref
                 | None -> "vs HEAD"
               in
-              (* A diff longer than its window says which of its rows the
-                 window holds, as the file, notes and history panes do. The
-                 title carries it so the window keeps all of its rows. *)
-              let position =
-                match code_diff_viewport state with
-                | Some (count, height) when count > height ->
-                    Masc_tui_scroll.window_reading ~noun:"rows"
-                      ~scroll:
-                        (Masc_tui_scroll.normalize ~count ~height
-                           state.code_diff_scroll)
-                      ~height count
-                    ^ " · "
-                | Some _ | None -> ""
-              in
-              Printf.sprintf "diff %scol %d %s: %s" position
+              Printf.sprintf "diff col %d %s: %s"
                 (state.code_diff_hscroll + 1) basis path
             else if history_showing then "history: " ^ path
             else path ^ (if Option.is_some (current_code_draft state) then " · draft retained (V)" else "")
@@ -607,15 +593,26 @@ let render_code (state : state) =
     let file_scroll total_lines =
       max 0 (min state.code_file_scroll (max 0 (total_lines - content_height)))
     in
-    (* The row under the pane's rows. A file longer than its window says there
-       where the window is, like the other panes' "rows X-Y/Z" line; with
-       nothing to say it is the gap above the footer. [content_height] budgets
-       that one row, so a position drawn beside the gap made the surface one
-       row too tall and [finish_surface] cut its last row, the footer. *)
+    (* The row under the pane's rows. A file or a diff longer than its window
+       says there where the window is, like the other panes' "rows X-Y/Z" line;
+       with nothing to say it is the gap above the footer. The diff says it
+       here, as the file does, and not in its title: the title ends in the
+       path, which a narrow pane cuts first. [content_height] budgets that one
+       row, so a position drawn beside the gap made the surface one row too
+       tall and [finish_surface] cut its last row, the footer. *)
     let position_row =
-      if hover_showing || draft_showing || notes_showing || diff_showing
-         || history_showing
-      then None
+      if hover_showing || draft_showing || notes_showing then None
+      else if diff_showing then
+        match code_diff_viewport state with
+        | Some (count, height) when count > height ->
+            Some
+              (Masc_tui_scroll.window_reading ~noun:"rows"
+                 ~scroll:
+                   (Masc_tui_scroll.normalize ~count ~height
+                      state.code_diff_scroll)
+                 ~height count)
+        | Some _ | None -> None
+      else if history_showing then None
       else
         match Masc_tui_fetched.current state.code_file with
         | Some (_, Masc_tui_fetched.Ready { cfd_rows = file_rows; _ })

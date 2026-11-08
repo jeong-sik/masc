@@ -333,8 +333,11 @@ val init_default : config_path:string -> (unit, string) result
 
 val exact_output_targets : t list -> Agent_core.Exact_output.declared_target list
 (** The exact-output slots of [runtimes]: every HTTP binding, carried whole with
-    its resolved credential and its [exact-body-timeout-s]. Official-client
-    runtimes do no exact output and are left out. *)
+    its resolved credential and its [exact-body-timeout-s]. A binding whose
+    runtime.toml states every capability an exact slot reads
+    ({!Runtime_exact_reads}) also declares the capabilities its Keeper turns
+    run on, which answer where the catalog has no row for its model.
+    Official-client runtimes do no exact output and are left out. *)
 
 type exact_output_catalog =
   { catalog_input : Agent_core.Exact_output.resolver_catalog_input

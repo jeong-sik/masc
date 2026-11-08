@@ -867,54 +867,6 @@ let init_default ~config_path =
   set_loaded ~config_path ~exact_output_lane_decls loaded;
   Ok ()
 
-(* Why an HTTP binding is not handed to the exact resolver as a target. *)
-type exact_target_refusal =
-  | Rowless_model_without_capabilities_table of
-      { provider_id : string
-      ; api_name : string
-      }
-      (* The catalog has no row for [api_name] under [provider_id], only the
-         provider's preset answers, and the runtime.toml model writes no
-         [capabilities] table. *)
-
-(* A model the catalog has no row for is an exact slot only through the
-   capabilities table its runtime.toml model writes (RFC-0514 §3). The
-   binding's capability override is not that declaration. On the Anthropic
-   wire, with no table written, the adapter copies the catalog answer into
-   the override to keep reasoning replay within the latest user turn
-   ([Runtime_adapter.with_client_history_replay]). Where only the provider
-   preset answers, the resolver would read that copy as a declaration, so
-   such a binding is kept from it here. The rule holds on every wire; on the
-   others the resolver refuses the binding as well. This asks the request
-   policy the adapter built the override from, with the same arguments. *)
-let exact_target_refusal (rt : t) =
-  match rt.execution, rt.model.Runtime_schema.capabilities with
-  | Runtime_execution.Agent_core _, Some (_ : Runtime_schema.model_capabilities) -> None
-  | Runtime_execution.Agent_core config, None ->
-    let provider_id = rt.provider.Runtime_schema.id in
-    let api_name = rt.model.Runtime_schema.api_name in
-    (match
-       Llm_provider.Capabilities.request_policy_catalog_answer
-         (Llm_provider.Capabilities.resolve_snapshot_request_policy
-            ~snapshot:(Llm_provider.Catalog_snapshot.current ())
-            ~wire:config.Llm_provider.Provider_config.kind
-            ~provider_id
-            ~model_id:api_name)
-     with
-     | Llm_provider.Capabilities.Provider_preset (_ : Llm_provider.Capabilities.capabilities) ->
-       Some (Rowless_model_without_capabilities_table { provider_id; api_name })
-     (* A row answers, so the resolver binds the slot to it. *)
-     | Llm_provider.Capabilities.Model_row (_ : Llm_provider.Capabilities.capabilities)
-     (* Nothing answers, so no override is filled and the resolver refuses
-        the binding itself. *)
-     | Llm_provider.Capabilities.No_catalog_answer -> None)
-  | ( Runtime_execution.Codex_app_server _
-    | Runtime_execution.Claude_code _
-    | Runtime_execution.Antigravity_cli _
-    | Runtime_execution.Muse_serve _
-    | Runtime_execution.Vibe_cli _ ), (Some _ | None) -> None
-;;
-
 (* An exact-output slot names a runtime binding: the lane configuration and the
    binding table use the same "<provider>.<model>" id. Restating that binding in
    a second file is how a slot came to point at a declaration nobody had
@@ -931,15 +883,11 @@ let exact_output_targets runtimes =
      only of endpoints. A subscription CLI has none — it is a local binary named
      by [command] — so declaring one as a target only to have the binding
      resolver reject it reports a missing catalog provider where the truth is
-     that this kind of runtime does no exact output. A binding
-     [exact_target_refusal] refuses is left out too;
-     [warn_rejected_exact_output_slots] names each lane slot that names one. *)
+     that this kind of runtime does no exact output. *)
   List.filter_map
     (fun (rt : t) ->
-       match rt.execution, exact_target_refusal rt with
-       | Runtime_execution.Agent_core _, Some (Rowless_model_without_capabilities_table _) ->
-         None
-       | Runtime_execution.Agent_core config, None ->
+       match rt.execution with
+       | Runtime_execution.Agent_core config ->
          Some
            ({ target_ref = rt.id
             ; (* [enable_thinking] is a per-turn control the Keeper path sets as
@@ -970,12 +918,31 @@ let exact_output_targets runtimes =
                    Agent_core.Exact_output.Credential_not_declared
                  | None -> Agent_core.Exact_output.Credential_resolved key)
             ; body_timeout_s = rt.provider.Runtime_schema.exact_body_timeout_s
+            ; (* A model the catalog has no row for is a slot only through what
+                 runtime.toml states for each capability an exact slot reads; a
+                 provider preset does not stand in for one (RFC-0514 §2.2). The
+                 capability override alone says nothing about that: on the
+                 Anthropic wire the adapter copies the catalog answer into it
+                 when the model states nothing
+                 ([Runtime_adapter.with_client_history_replay]). Where every read
+                 is stated, the slot answers with what the binding's Keeper turns
+                 run on, which is that override; a table that states them always
+                 yields one. A model row, where the catalog has one, answers
+                 instead. *)
+              model_declaration =
+                (match
+                   ( Runtime_exact_reads.unstated rt
+                   , Llm_provider.Provider_config.capabilities_for_config_model config )
+                 with
+                 | [], Some capabilities -> Agent_core.Exact_output.Declared_model capabilities
+                 | [], None | _ :: _, (Some _ | None) ->
+                   Agent_core.Exact_output.No_model_declaration)
             } : Agent_core.Exact_output.declared_target)
-       | ( Runtime_execution.Codex_app_server _
-         | Runtime_execution.Claude_code _
-         | Runtime_execution.Antigravity_cli _
-         | Runtime_execution.Muse_serve _
-         | Runtime_execution.Vibe_cli _ ), (Some _ | None) -> None)
+       | Runtime_execution.Codex_app_server _
+       | Runtime_execution.Claude_code _
+       | Runtime_execution.Antigravity_cli _
+       | Runtime_execution.Muse_serve _
+       | Runtime_execution.Vibe_cli _ -> None)
     runtimes
 ;;
 
@@ -2176,39 +2143,53 @@ let warn_rejected_exact_output_slots registry =
          && String.equal gap.slot_id slot.slot_id)
       gaps
   in
-  (* A slot whose binding [exact_target_refusal] kept from the resolver is
-     rejected here too, and the diagnosis below would call it a binding that
-     does no exact output. It is named here instead, once per slot, with the
-     table to write. Only runtime bindings are targets; under a full
-     replacement catalog none is, so none is refused. *)
+  (* A slot whose binding names a model the catalog has no row for, under a
+     provider it has a row for, is left out by the resolver ([Target_model])
+     while runtime.toml leaves a capability an exact slot reads unstated
+     (RFC-0514 §2.2). The diagnosis below would call it a binding that
+     resolved to no catalog row; it is named here instead, once per slot,
+     with the keys to write. Only runtime bindings are targets; under a full
+     replacement catalog none is. *)
   let target_source = exact_output_target_source () in
-  let refusal_of (slot : Runtime_exact_output_registry.rejected_slot) =
+  let model_row_missing =
+    List.filter_map
+      (fun (binding : Agent_core.Exact_output.rejected_target_binding) ->
+         match binding.component with
+         | Agent_core.Exact_output.Target_model -> Some binding.target_ref
+         | Agent_core.Exact_output.Target_provider -> None)
+      (Runtime_exact_output_registry.rejected_target_bindings registry)
+  in
+  let unstated_reads_of (slot : Runtime_exact_output_registry.rejected_slot) =
     match target_source with
     | Replacement_catalog_targets { path = _ } -> None
-    | Runtime_binding_targets ->
-      Option.bind (get_runtime_by_id slot.slot_id) exact_target_refusal
+    | Runtime_binding_targets when List.mem slot.slot_id model_row_missing ->
+      Option.bind (get_runtime_by_id slot.slot_id) (fun (rt : t) ->
+        match Runtime_exact_reads.unstated rt with
+        | [] -> None
+        | first :: rest -> Some (rt, (first, rest)))
+    | Runtime_binding_targets -> None
   in
   let all_rejected = Runtime_exact_output_registry.rejected_slots registry in
   let deadline_rejected = List.filter left_out_for_deadline all_rejected in
-  let refused, rejected =
+  let unstated, rejected =
     List.filter (fun slot -> not (left_out_for_deadline slot)) all_rejected
     |> List.partition_map (fun slot ->
-      match refusal_of slot with
-      | Some refusal -> Either.Left (slot, refusal)
+      match unstated_reads_of slot with
+      | Some (rt, reads) -> Either.Left (slot, rt, reads)
       | None -> Either.Right slot)
   in
   List.iter
-    (fun ((slot : Runtime_exact_output_registry.rejected_slot), refusal) ->
-       match refusal with
-       | Rowless_model_without_capabilities_table { provider_id; api_name } ->
-         Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because model %S has no AGENT_CORE catalog row under provider %S and its runtime.toml model writes no [models.<id>.capabilities] table; the provider preset is not a declaration, so write the table the slot should answer with"
-           slot.lane_id
-           slot.position
-           slot.slot_id
-           api_name
-           provider_id)
-    refused;
+    (fun ((slot : Runtime_exact_output_registry.rejected_slot), (rt : t), (first, rest)) ->
+       Log.Server.warn
+         "exact_output: lane %S slot %d (%S) ignored because model %S has no AGENT_CORE catalog row under provider %S and runtime.toml model %S states no %s; a provider preset does not stand in for a capability an exact slot reads, so write each one"
+         slot.lane_id
+         slot.position
+         slot.slot_id
+         rt.model.Runtime_schema.api_name
+         rt.provider.Runtime_schema.id
+         rt.model.Runtime_schema.id
+         (String.concat ", " (List.map Runtime_exact_reads.key (first :: rest))))
+    unstated;
   let configured_runtime slot_id =
     Option.map
       (fun (rt : t) ->
@@ -2230,7 +2211,7 @@ let warn_rejected_exact_output_slots registry =
        match diagnosis with
        | Runtime_exact_output_registry.Declared_target_binding_rejected ->
          Log.Server.warn
-           "exact_output: lane %S slot %d (%S) ignored because the binding it names resolved to no AGENT_CORE catalog row (see the target binding report above); an endpoint the install wizard created can never match one, so point the slot at a binding the catalog knows or add the row; a model with no row under a provider the catalog has a row for becomes a slot when its runtime.toml model declares a [models.<id>.capabilities] table"
+           "exact_output: lane %S slot %d (%S) ignored because the binding it names resolved to no AGENT_CORE catalog row (see the target binding report above); an endpoint the install wizard created can never match one, so point the slot at a binding the catalog knows or add the row"
            slot.lane_id
            slot.position
            slot.slot_id
@@ -2283,7 +2264,7 @@ let warn_rejected_exact_output_slots registry =
        List.length (List.filter (fun (_, diagnosis) -> predicate diagnosis) diagnoses)
      in
      Log.Server.error
-       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d naming no enabled binding, %d naming a binding that does no exact output, %d whose binding resolved to no catalog row, %d whose model has no catalog row and writes no capabilities table, %d whose provider declares no %s — fix runtime.toml"
+       "exact_output: %d slot(s) ignored across %d lane(s) (%s): %d naming no enabled binding, %d naming a binding that does no exact output, %d whose binding resolved to no catalog row, %d whose model has no catalog row and leaves an exact read unstated, %d whose provider declares no %s — fix runtime.toml"
        (List.length all_rejected)
        (List.length lanes)
        (String.concat ", " lanes)
@@ -2299,7 +2280,7 @@ let warn_rejected_exact_output_slots registry =
           | Runtime_exact_output_registry.Declared_target_binding_rejected -> true
           | Runtime_exact_output_registry.Unknown_to_both_registries
           | Runtime_exact_output_registry.Configured_runtime_only _ -> false))
-       (List.length refused)
+       (List.length unstated)
        (List.length deadline_rejected)
        Runtime_schema.exact_body_timeout_s_key)
 ;;

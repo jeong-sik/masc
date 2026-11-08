@@ -61,7 +61,6 @@ let entry ~timestamp ~agent_id ~action ~outcome =
     Audit_log.timestamp;
     agent_id;
     action;
-    workspace_id = None;
     details = `Null;
     outcome;
     cost_estimate = None;
@@ -281,7 +280,6 @@ let test_runtime_config_write_event_projection () =
       timestamp = 1_700_000_000.0;
       agent_id = "operator";
       action = Audit_log.RuntimeConfigWrite;
-      workspace_id = None;
       details =
         `Assoc
           [
@@ -316,7 +314,6 @@ let test_runtime_config_write_assignment_projection () =
       timestamp = 1_700_000_001.0;
       agent_id = "dashboard";
       action = Audit_log.RuntimeConfigWrite;
-      workspace_id = None;
       details =
         `Assoc
           [
@@ -355,7 +352,6 @@ let test_runtime_config_write_routing_list_projection () =
       timestamp = 1_700_000_002.0;
       agent_id = "dashboard";
       action = Audit_log.RuntimeConfigWrite;
-      workspace_id = None;
       details =
         `Assoc
           [

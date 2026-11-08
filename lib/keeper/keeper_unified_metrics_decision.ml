@@ -80,7 +80,7 @@ let append_decision_record
     | None -> Keeper_runtime_contract.current_task_id_opt meta
   in
   let runtime_contract =
-    Keeper_runtime_contract.runtime_observability_contract_json ~config meta
+    Keeper_runtime_contract.runtime_observability_contract_json meta
   in
   let approval_queue_state, pending_approval_count =
     match

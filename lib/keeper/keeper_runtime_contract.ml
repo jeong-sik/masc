@@ -194,20 +194,13 @@ let action_radius_json ~tool_name ~input ~duration_ms ?error
       ("error", string_opt_json error);
     ]
 
-let runtime_contract_json ~(config : Workspace.config) (meta : keeper_meta) : Yojson.Safe.t =
-  ignore config;
-  `Assoc [ ("task_id", Json_util.string_opt_to_json (current_task_id_opt meta)) ]
-
-let runtime_observability_contract_json ~(config : Workspace.config) (meta : keeper_meta) : Yojson.Safe.t =
+let runtime_observability_contract_json (meta : keeper_meta) : Yojson.Safe.t =
   let sandbox_target = backend_of_meta meta in
-  match runtime_contract_json ~config meta with
-  | `Assoc fields ->
-    `Assoc
-      ([
-         ("sandbox_profile", `String (sandbox_profile_to_string meta.sandbox_profile));
-         ("network_mode", `String (network_mode_to_string meta.network_mode));
-         ("backend", `String sandbox_target);
-         ("sandbox_target", `String sandbox_target);
-       ]
-       @ fields)
-  | json -> json
+  `Assoc
+    [
+      ("sandbox_profile", `String (sandbox_profile_to_string meta.sandbox_profile));
+      ("network_mode", `String (network_mode_to_string meta.network_mode));
+      ("backend", `String sandbox_target);
+      ("sandbox_target", `String sandbox_target);
+      ("task_id", Json_util.string_opt_to_json (current_task_id_opt meta));
+    ]

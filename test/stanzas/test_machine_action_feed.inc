@@ -2,4 +2,4 @@
 (test
  (name test_machine_action_feed)
  (modules test_machine_action_feed)
- (libraries alcotest yojson masc.machine_action_feed))
+ (libraries alcotest masc.machine_action_feed))

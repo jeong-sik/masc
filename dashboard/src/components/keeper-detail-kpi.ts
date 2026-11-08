@@ -7,7 +7,6 @@ import {
   CTX_CRITICAL_PCT,
   CTX_WARN_PCT,
 } from './keeper-detail-ctx-utils'
-import { OutcomesLedger } from './keeper-detail-outcomes'
 
 export function MutedSpan({ children }: { children: unknown }) {
   return html`<span class="text-3xs text-[var(--color-fg-disabled)]">${children}</span>`
@@ -39,8 +38,7 @@ export function DetailCard({ class: cx, children }: {
 }
 
 // ── KPI Grid ─────────────────────────────────────────────
-// 4-section layout mirrors the keeper's 3-layer state model
-// (Events -> Phase+Conditions -> Counters): identity / memory / autonomy / outcomes.
+// Two sections: identity and memory pressure.
 
 export function KpiSection({ title, children }: {
   title: string
@@ -72,8 +70,6 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
   const ctxPct = keeper.context_ratio != null ? Math.round(keeper.context_ratio * 100) : null
   const ctxTone: KpiTone = ctxPct == null ? 'default' : ctxPct > CTX_CRITICAL_PCT ? 'bad' : ctxPct > CTX_WARN_PCT ? 'warn' : ctxPct > 0 ? 'ok' : 'default'
   const ctxHint = ctxPct != null && ctxPct > CTX_WARN_PCT ? '한계 접근 중' : undefined
-
-  const outcomes = keeper.outcomes
 
   return html`
     <div class="flex flex-col gap-3 mb-5 v2-monitoring-surface">
@@ -122,15 +118,6 @@ export function KpiGrid({ keeper }: { keeper: Keeper }) {
               : null}
           </div>
         </div>
-      <//>
-
-
-      <${KpiSection} title="결과">
-        ${outcomes ? html`<${OutcomesLedger} keeper=${keeper} outcomes=${outcomes} />` : html`
-          <div class="text-2xs text-[var(--color-fg-disabled)] leading-snug">
-            outcomes 집계를 불러오는 중이거나, 이 키퍼는 아직 관찰된 전이가 없습니다.
-          </div>
-        `}
       <//>
     </div>
   `

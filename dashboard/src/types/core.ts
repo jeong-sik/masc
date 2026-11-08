@@ -1502,38 +1502,7 @@ export interface Keeper {
   inventory?: string[]
   relationships?: Record<string, string>
   supervisor_diagnostics?: KeeperSupervisorDiagnostics
-  outcomes?: KeeperOutcomes
   conditions?: KeeperConditions
-}
-
-/** Outcomes rollup — aggregated successes / failures / validation
- *  for the last 50-entry transition ring. Backed by
- *  [Dashboard_http_keeper.compute_outcomes_rollup]. See
- *  [specs/keeper-state-machine/KeeperOutcomesConservation.tla] for the
- *  conservation invariant:
- *    successes.substantive_turns + failures.turn_failed = observed_turns
- */
-export interface KeeperOutcomes {
-  window: string
-  observed_turns: number
-  successes: {
-    substantive_turns: number
-  }
-  failures: {
-    turn_failed: number
-    crashes: number
-    restarts: number
-    consecutive_fail_current: number
-  }
-  validation: {
-    agent_core_verdicts: {
-      pass: number
-      fail: number
-      unknown: number
-      top_failure_reasons: string[]
-    }
-    last_verdict_at: number | null
-  }
 }
 
 /** Observable conditions that drive the keeper FSM.

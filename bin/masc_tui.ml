@@ -9571,6 +9571,29 @@ let launch_owed_memory_health state ~mailbox =
     | Settled, None, [] -> ()
   end
 
+(* The server answers the workspace memory inventory from a cache of this many
+   seconds and sends no change signal, so the world line reads it no faster
+   than that (RFC-0511 D11). *)
+let memory_world_read_interval_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
+
+(* Runs on every loop iteration. Only the Memory overview draws the world line,
+   so only the Memory overview reads the world: the facts browser, Metrics and
+   the Keepers list have no use for it. Each answer sets the time before which
+   no read starts, so an open screen asks once per interval, a failed read
+   waits the same interval, and a screen entered again within it draws the
+   inventory already held. *)
+let launch_owed_memory_world state ~mailbox =
+  if state.view = Memory && Option.is_none state.memory_facts_keeper
+     && server_authority_ready state then
+    match Masc_tui_memory_world.start ~now:(monotonic_now_s ()) state.memory_world with
+    | None -> ()
+    | Some (next, request) ->
+        state.memory_world <- next;
+        let host = server_peer_host and port = state.port in
+        launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+          ~deliver:(fun result -> Memory_msg (Memory_world_loaded (request, result)))
+          (fun () -> Masc_tui_loader.load_memory_world ~host ~port)
+
 (* Runs on every loop iteration. The input pane reads when the selection moves
    to another Keeper, when a memory health answer owes it, and again after a
    failed read, which waits like any owed read (RFC-0480 §3.1). Off Memory
@@ -17351,6 +17374,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.memory_health_rows_owed <- [];
   state.memory_health_cursor <- 0;
   state.memory_health_scroll <- 0;
+  (* The ledger and briefing belong to the workspace just left. *)
+  state.memory_world <- Masc_tui_memory_world.clear state.memory_world;
   (* A Health line or harness read out under the old authority is refused
      when it answers, and only its answer released the slot. The new
      authority owes its own reads ([resume_reads_after_authority_change]). *)
@@ -23081,7 +23106,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _))
         | Memory_msg (Memory_recall_standing_loaded (_, _)) | Repository_msg (Repositories_loaded _)
         | Workspace_msg (Workspace_activity_loaded (_, _)) | Memory_msg (Memory_loaded _ | Memory_input_loaded (_, _)
-        | Memory_facts_loaded (_, _)) | Repository_msg (Repository_changes_loaded (_, _)
+        | Memory_world_loaded (_, _) | Memory_facts_loaded (_, _)) | Repository_msg (Repository_changes_loaded (_, _)
         | Repository_changes_diff_loaded (_, _)) | File_changes_loaded (_, _)
         | Keeper_msg (Keeper_chat_file_changes_loaded (_, _, _)) | Git_diff_loaded (_, _)
         | Browser_msg (Browser_history_list_loaded (_, _) | Browser_history_page_loaded (_, _)
@@ -28315,6 +28340,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            | Error _ -> failed_read state.memory_input_owed);
       state.memory_input <-
         Masc_tui_fetched.complete ~equal:String.equal state.memory_input request result
+  | Memory_msg (Memory_world_loaded (request, result)) ->
+      (* An answer for a read the workspace has moved past is dropped whole by
+         [complete]; a failed refresh keeps the inventory held. *)
+      state.memory_world <-
+        Masc_tui_memory_world.complete
+          ~next_read_at:(monotonic_now_s () +. memory_world_read_interval_s)
+          state.memory_world request result
   | Memory_msg (Memory_facts_loaded (request, result)) ->
       (* A late answer for a browser that closed, or for the keeper the reader
          already left, is dropped whole by [complete]. A failed refresh keeps
@@ -33817,6 +33849,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_verification state ~mailbox:async_messages;
       launch_owed_repositories state ~mailbox:async_messages;
       launch_owed_memory_health state ~mailbox:async_messages;
+      launch_owed_memory_world state ~mailbox:async_messages;
       launch_owed_runtime_surface state ~mailbox:async_messages;
       launch_owed_overview state ~mailbox:async_messages;
       launch_owed_runtime_config state ~mailbox:async_messages;

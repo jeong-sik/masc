@@ -625,6 +625,12 @@ type memory_msg =
   | Memory_loaded of memory_health_read
   | Memory_input_loaded of string Masc_tui_fetched.request
       * (Masc_tui_memory_usage.t, string) result
+  (* The Memory screen's world read. It carries the request it answers: the
+     workspace can change while the read is in flight, and a late answer for
+     the old one must be dropped, not drawn as the new one's. *)
+  | Memory_world_loaded of
+      unit Masc_tui_fetched.request
+      * (Masc.Tui_decode_workspace_memory.inventory, string) result
   (* Carries the request it answers: the browser can be closed or pointed at
      another keeper while a load is in flight, and a late answer for somebody
      else must be dropped, not filed under whoever is open. The answer is the

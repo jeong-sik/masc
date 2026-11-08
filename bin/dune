@@ -1898,6 +1898,7 @@
   masc_tui_board_detail
   masc_tui_board_quarantine
   masc_tui_fetched
+  masc_tui_memory_world
   masc_tui_volume_gc
   masc_tui_attachment
   masc_tui_code_lexer
@@ -2772,6 +2773,7 @@
   masc_tui_kept_reads
   masc_tui_response_decode
   masc_tui_loader
+  masc_tui_memory_world
   masc_tui_io_domain
   masc_tui_features
   masc_tui_account_login

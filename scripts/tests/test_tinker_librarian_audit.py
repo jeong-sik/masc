@@ -53,6 +53,14 @@ class CaseTest(unittest.TestCase):
         case, _ = A.case_of("c001", request([candidate("new_durable")], stale=stale), None, random.Random(1))
         self.assertEqual(len(full_refs(case)), A.FULL_FACTS + A.MIN_DISTRACTORS)
 
+    def test_a_fact_worded_like_a_candidate_is_shown_in_full(self) -> None:
+        req = request([candidate("new_durable")], facts=40)
+        facts = cast(list[JsonObject], req["facts"])
+        facts[30]["claim"] = "재시도는 세 번까지 하고 실패하면 담당자에게 넘긴다"
+        cast(list[JsonObject], req["candidates"])[0]["claim"] = "재시도는 세 번까지 하고 실패하면 담당자에게 넘긴다고 정했다"
+        case, _ = A.case_of("c001", req, None, random.Random(1))
+        self.assertIn("m31", full_refs(case))
+
 
 class MisfitTest(unittest.TestCase):
     KEY: JsonObject = {"case": "c001", "candidates": {"k1": "restates:m3"}, "facts": {"m3": "keep"},

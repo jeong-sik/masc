@@ -1,6 +1,13 @@
 {
   "executionEnvironments": [
     {
+      "root": "scripts/tests",
+      "extraPaths": ["scripts", "test", "scripts/tinker/librarian"]
+    },
+    {
+      "root": "scripts/tinker/librarian"
+    },
+    {
       "root": "scripts",
       "extraPaths": ["test"]
     }

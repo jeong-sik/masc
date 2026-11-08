@@ -1226,7 +1226,7 @@ let ask_question_scroll_limit state =
 let render_question_reader (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
-  let asks = question_asks state in
+  let asks = open_ask_rows state in
   let selected_index = Ask_projection.selected_index asks state.ask_cursor in
   let selected = Option.bind selected_index (List.nth_opt asks) in
   box_top buf cols;

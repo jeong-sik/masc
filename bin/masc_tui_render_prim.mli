@@ -432,9 +432,6 @@ val box_wrapped_field :
 (** Wrap [body] inside a framed box row of width [cols], prefixing the first
     row with [head] and hanging continuation rows to [head]'s display width. *)
 
-val selected_ask_question :
-  Masc_tui_types.state -> Masc.Tui_decode_asks.ask_question option
-
 val draw_ask_question :
   Buffer.t ->
   int ->
@@ -457,8 +454,6 @@ val draw_ask_origin : Buffer.t -> int -> Masc_tui_types.state -> unit
 val ask_block : (Buffer.t -> 'a) -> string * int
 
 val question_hints : Masc_tui_types.state -> string
-
-val question_asks : Masc_tui_types.state -> Masc.Tui_decode_asks.ask_row list
 
 val ask_question_viewport : Masc_tui_types.state -> string list * int
 

@@ -251,7 +251,10 @@ let render_repository_list (state : state) =
           (connection_badge state)
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"repositories"
-    ~title ~hints:(Masc_tui_keys.footer_hints ~has_rows:(shown > 0) state.view)
+    ~title
+    ~hints:(Masc_tui_keys.footer_hints ~has_rows:(shown > 0)
+              ~has_reading:(Option.is_some (selected_repository_reading state))
+              state.view)
     ~body:(fun ~budget c ->
       let split, list_width, detail_width, detail, errors, content_height, overflowing =
         repository_studio_geometry state ~cols ~budget ~cursor:state.repositories_cursor in

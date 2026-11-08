@@ -55,7 +55,7 @@ let surfaces =
       [ "p / Esc"; "r"; "q" ] )
   ; ( "Workspace",
       T.Repositories,
-      [ "v"; "j/k"; "Enter"; "H"; "d"; "n / N"; "PgUp/PgDn"; "Home/End" ],
+      [ "j/k"; "Enter"; "H"; "d"; "n / N"; "PgUp/PgDn"; "Home/End" ],
       [ "a"; "/"; "Esc"; "r"; "q" ] )
   ; ( "Changes",
       T.Changes,
@@ -120,6 +120,23 @@ let test_an_empty_list_keeps_the_keys_that_answer () =
         answering)
     surfaces
 
+(* Workspace [v] opens a reading, not a row. After a failed read there is no
+   repository to select and still a failure to open, so the footer follows
+   [~has_reading] and a failed read keeps [v] while [Enter] and the other row
+   keys stay out. *)
+let test_workspace_v_follows_the_reading_and_not_the_row () =
+  let hints ~has_rows ~has_reading =
+    Keys.footer_hints ~detail_open:false ~has_rows ~has_reading T.Repositories
+  in
+  check bool "v with a row" true
+    (names_item (hints ~has_rows:true ~has_reading:true) "v");
+  check bool "v after a failed read with no row" true
+    (names_item (hints ~has_rows:false ~has_reading:true) "v");
+  check bool "Enter after a failed read with no row" false
+    (names_item (hints ~has_rows:false ~has_reading:true) "Enter");
+  check bool "v with nothing to open" false
+    (names_item (hints ~has_rows:false ~has_reading:false) "v")
+
 (* The Goal list draws from a builder of its own: it puts the Candle read first
    and leaves the generic table reading above behind. Its [~has_rows] is a
    required argument, so the renderer cannot leave it out; this pins what it
@@ -166,6 +183,8 @@ let () =
             test_a_caller_that_names_no_rows_keeps_every_key
         ; test_case "an empty list keeps the keys that answer" `Quick
             test_an_empty_list_keeps_the_keys_that_answer
+        ; test_case "workspace v follows the reading and not the row" `Quick
+            test_workspace_v_follows_the_reading_and_not_the_row
         ; test_case "an empty goal list names no key that needs a row" `Quick
             test_an_empty_goal_list_names_no_key_that_needs_a_row
         ; test_case "a goal list with a row names every key" `Quick

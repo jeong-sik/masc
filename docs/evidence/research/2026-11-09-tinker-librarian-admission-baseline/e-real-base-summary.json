@@ -1,0 +1,25 @@
+{
+ "set": "real",
+ "request": {
+  "reasoning_effort": "low",
+  "max_tokens": 32768
+ },
+ "targets": {
+  "base": "thinkingmachines/Inkling-2-Small:peft:262144"
+ },
+ "items": 99,
+ "spent_usd": 0.4213,
+ "stopped": null,
+ "by_target": {
+  "base": {
+   "items": 99,
+   "valid": 92,
+   "valid_rate": 0.9292929292929293,
+   "latency_p50_s": 13.75,
+   "cost_usd": 0.4213,
+   "outcome_agreement": 0.4978540772532189,
+   "dropped_not_in_live": 0,
+   "absorbed_not_in_live": 5
+  }
+ }
+}

@@ -28,11 +28,6 @@ let invoke ?action ?mode tool = {tool;action;mode}
 let available ?action ?mode tool = Available (invoke ?action ?mode tool)
 let conditional ?action ?mode tool constraints =
   Conditional {invocation=invoke ?action ?mode tool;constraints}
-let ego_input_availability method_ support =
-  match Browser_lane.Native_input.contract method_ with
-  | Browser_lane.Native_input.No_hold | Browser_lane.Native_input.Observed_receipt
-  | Browser_lane.Native_input.Observed_native_window -> support
-  | Browser_lane.Native_input.Unattestable_raw_hold reason -> Unsupported (Browser_lane.Native_input.message reason)
 let missing = Unsupported "No public browser tool implements this operation."
 let viewport_bounds = Printf.sprintf "width and height are CSS pixels between %d and %d, given together"
   Browser_lane.viewport_side_min_px Browser_lane.viewport_side_max_px
@@ -146,16 +141,14 @@ let support backend operation = match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"hover" Interact [observed;"Selector uses native Ego hover and auto-scrolling. Scene references retain MASC identity and coordinate guards.";ego_agent_pages]
       | Safari_unavailable -> missing)
     | Pointer_drag -> (match backend with
-      | Connected Browser_lane.Ego_task_space -> ego_input_availability Browser_lane.Native_input.Drag_and_drop
-          (conditional ~action:"drag_to" Interact
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"drag_to" Interact
             [observed;ego_agent_pages;
-             "drag_to from one selector onto another, using native dragAndDrop. The SDK receipt does not establish application drop acceptance."])
+             "drag_to from one selector onto another, using native dragAndDrop. The SDK receipt does not establish application drop acceptance."]
       | Safari_unavailable -> missing)
     | Html5_drop -> (match backend with
-      | Connected Browser_lane.Ego_task_space -> ego_input_availability Browser_lane.Native_input.Drag_and_drop
-          (conditional ~action:"drag_to" Interact
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"drag_to" Interact
             [observed;ego_agent_pages;
-             "drag_to from one selector onto another, using native dragAndDrop. Native HTML5 DataTransfer/drop passed a fixture; target behavior must be observed afterward. Not a universal drop guarantee."])
+             "drag_to from one selector onto another, using native dragAndDrop. Native HTML5 DataTransfer/drop passed a fixture; target behavior must be observed afterward. Not a universal drop guarantee."]
       | Safari_unavailable -> missing)
     | Right_click | Middle_click -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"click_at" Interact
@@ -187,11 +180,10 @@ let support backend operation = match backend with
           [observed;"Selector uses native Ego double click and SDK actionability. Scene references retain MASC identity and coordinate guards; observe the application result.";ego_agent_pages]
       | Safari_unavailable -> missing)
     | Type_text -> (match backend with
-      | Connected Browser_lane.Ego_task_space -> ego_input_availability Browser_lane.Native_input.Keyboard_type
-          (conditional ~action:"type_text" Interact
+      | Connected Browser_lane.Ego_task_space -> conditional ~action:"type_text" Interact
             [observed;"Requires current documentId and expectedUrl; stale document/URL is refused.";
              "Requires the current enabled editable focus. Unicode text is literal; C0/DEL controls are refused.";
-             "One native typing call with separately verified nativeCompletion; its SDK return remains void. After interruption or missing native evidence its release stays unconfirmed. Observe application acceptance; never replay uncertain typing.";ego_agent_pages])
+             "One native typing call with separately verified nativeCompletion; its SDK return remains void. After interruption or missing native evidence its release stays unconfirmed. Observe application acceptance; never replay uncertain typing.";ego_agent_pages]
       | Safari_unavailable -> missing)
     | Press_key | Key_chord -> (match backend with
       | Connected Browser_lane.Ego_task_space -> conditional ~action:"press_key" Interact

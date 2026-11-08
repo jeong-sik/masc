@@ -34,7 +34,7 @@ export interface FsmGraphSpec {
 // strings are rejected. Resolve once per render against `:root` and
 // pass literal hex/rgb values into the stylesheet.
 // Fallback values mirror the Cockpit Design System defaults from
-// `styles/tokens.generated.ts` so SSR / missing-CSS degrades gracefully.
+// `styles/tokens.generated.css` so SSR / missing-CSS degrades gracefully.
 const TOKEN_FALLBACKS: Record<string, string> = {
   '--color-bg-0': '#0c0b08',
   '--color-bg-1': '#141210',

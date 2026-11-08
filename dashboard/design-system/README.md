@@ -298,6 +298,5 @@ If new icons are genuinely needed (they usually aren't), **use Lucide at 12–14
 The preview-local `colors_and_type.css` in `design-system/` was removed in Wave 2 (#11250) — the preview surface consumes `source_styles/tokens.generated.css` directly (while the live Preact dashboard also loads `dashboard/src/styles/tokens.css` and `dashboard/src/styles/keeper-v2/colors_and_type.css`). Sibling generated artifacts live in their consuming surfaces:
 
 - `dashboard/src/styles/tokens.generated.css` (Tailwind v4 `@theme`)
-- `dashboard/src/styles/tokens.generated.ts`  (Preact typed)
 
 No `slides/` directory — no slide template was provided.

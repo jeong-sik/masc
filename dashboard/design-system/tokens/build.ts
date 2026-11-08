@@ -1,11 +1,10 @@
 /**
  * MASC Cockpit Design System — Codegen Driver
  *
- * Reads source.ts, emits four artifacts:
+ * Reads source.ts, emits three artifacts:
  *   1. dashboard/design-system/source_styles/tokens.generated.css
  *   2. dashboard/src/styles/tokens.generated.css      (Tailwind v4 @theme)
- *   3. dashboard/src/styles/tokens.generated.ts       (Preact typed)
- *   4. dashboard/design-system/tokens/build/tokens.json (DTCG 2025.10)
+ *   3. dashboard/design-system/tokens/build/tokens.json (DTCG 2025.10)
  *
  * Run:  pnpm tokens:build  (from dashboard/)
  *
@@ -31,7 +30,6 @@ const REPO = resolve(HERE, "..", "..", ".."); // <repo>/dashboard/design-system/
 const OUT = {
   previewCss: resolve(REPO, "dashboard/design-system/source_styles/tokens.generated.css"),
   tailwindCss: resolve(REPO, "dashboard/src/styles/tokens.generated.css"),
-  preactTs: resolve(REPO, "dashboard/src/styles/tokens.generated.ts"),
   dtcgJson: resolve(REPO, "dashboard/design-system/tokens/build/tokens.json"),
 } as const;
 
@@ -39,7 +37,6 @@ const HEADER_TEXT =
   "@generated DO NOT EDIT — run `pnpm tokens:build` (source: dashboard/design-system/tokens/source.ts)";
 
 const cssHeader = `/* ${HEADER_TEXT} */\n\n`;
-const tsHeader = `// ${HEADER_TEXT}\n\n`;
 
 function ensureDir(path: string): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -179,24 +176,7 @@ function buildTailwindCss(): string {
   return `${cssHeader}@theme {\n${body}\n}\n`;
 }
 
-// 3. Preact typed const + literal-string union
-function buildPreactTs(): string {
-  const all: TokenBase[] = [...source.raw, ...source.semantic];
-  // De-dupe by name (semantic and raw must not collide; this is a guard).
-  const seen = new Set<string>();
-  const dedup = all.filter((tk) => {
-    if (seen.has(tk.name)) return false;
-    seen.add(tk.name);
-    return true;
-  });
-  const entries = dedup.map((tk) => {
-    const camel = tk.name.replace(/-(.)/g, (_, c: string) => c.toUpperCase());
-    return `  ${JSON.stringify(camel)}: { name: ${JSON.stringify(`--${tk.name}`)}, value: ${JSON.stringify(tk.value)}, tier: ${JSON.stringify(tk.tier)}, kind: ${JSON.stringify(tk.kind)} }`;
-  });
-  return `${tsHeader}export const TOKENS = {\n${entries.join(",\n")},\n} as const;\n\nexport type TokenName = keyof typeof TOKENS;\nexport type TokenVar = typeof TOKENS[TokenName]["name"];\n\n/** \`var(--token-name)\` for the given token. */\nexport const tokenVar = (k: TokenName): string => \`var(\${TOKENS[k].name})\`;\n`;
-}
-
-// 4. DTCG 2025.10 — design-tokens-format JSON
+// 3. DTCG 2025.10 — design-tokens-format JSON
 //    spec: design-tokens.github.io/community-group/format
 function dtcgKindToType(kind: TokenBase["kind"]): string {
   switch (kind) {
@@ -270,7 +250,6 @@ function main(): void {
   console.log("MASC tokens codegen");
   writeFile(OUT.previewCss, buildPreviewCss());
   writeFile(OUT.tailwindCss, buildTailwindCss());
-  writeFile(OUT.preactTs, buildPreactTs());
   writeFile(OUT.dtcgJson, buildDtcgJson());
   console.log("done");
 }

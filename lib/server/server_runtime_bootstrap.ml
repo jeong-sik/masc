@@ -1722,6 +1722,7 @@ let run ~sw ~runtime_sw ~env ~address ~port ~base_path ?input_base_path ?on_read
       Server_request_authority.make_trust_policy
         ~bind_host:config.host
         ~bind_port:config.port
+        ~https_port:(Env_config.Transport.https_port ())
         ~explicit_base_url
     with
     | Ok policy -> policy

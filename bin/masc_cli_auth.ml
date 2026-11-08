@@ -173,7 +173,7 @@ let serve_preview ~base_path ~store ~port github =
           Server_request_authority.trust_policy_error_to_string
           (Server_request_authority.make_trust_policy
              ~bind_host:preview_host
-             ~bind_port:port
+             ~bind_port:port ~https_port:None
              ~explicit_base_url:None)
       in
       let routes =

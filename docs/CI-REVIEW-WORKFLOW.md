@@ -240,16 +240,6 @@ not become an individual PR's check, an independent source approval or merge
 permission. A source review does not establish a CI result; Release admission
 still requires its current-head full verification evidence.
 
-After the complete selected build succeeds, binaries and their source/checksums
-are retained before runtime checks. A later fixture failure therefore preserves
-the build artifact without implying runtime success. Independent fixture commands
-all run and record pipeline exit codes in `companion-results.tsv`; the step fails
-if any command or log pipeline fails.
-These fixtures use fabricated CDP/provider edges; the separate browser probe
-still exercises its selected real browser. Neither proves real 1Password
-approval, website authentication or Keeper continuation. Source and workflow
-commits remain separate, and no account credentials are required by this scope.
-
 CI catches concrete functional, compilation, schema, credential or resource
 failures. Bulk source-style lints, prose rules, byte inventories, historical counts
 and recursive checks about other checks are not release gates. Feature work

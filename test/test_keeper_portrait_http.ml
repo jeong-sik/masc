@@ -352,7 +352,7 @@ let request ~router ?if_none_match ?token ~meth ~body path =
   let output = Buffer.create 4096 in
   let trust_policy = require_ok Server_request_authority.trust_policy_error_to_string
     (Server_request_authority.make_trust_policy
-       ~bind_host:"127.0.0.1" ~bind_port:8935 ~explicit_base_url:None) in
+       ~bind_host:"127.0.0.1" ~bind_port:8935 ~https_port:None ~explicit_base_url:None) in
   let connection = Httpun.Server_connection.create (fun reqd ->
     let request = Httpun.Reqd.request reqd in
     let reqd = Http_reqd.of_httpun reqd in

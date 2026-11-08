@@ -28,7 +28,7 @@ let with_gateway run =
           | Error error -> fail (Masc_domain.masc_error_to_string error) in
         Server_auth.For_testing.restore_server_state (Some state);
         let trust_policy = match Server_request_authority.make_trust_policy
-          ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
+          ~bind_host:"localhost" ~bind_port:8935 ~https_port:None ~explicit_base_url:None with
           | Ok policy -> policy
           | Error error -> fail (Server_request_authority.trust_policy_error_to_string error) in
         let handler = Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env)) ~trust_policy in

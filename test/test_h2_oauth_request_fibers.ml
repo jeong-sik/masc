@@ -13,7 +13,7 @@ let rec remove_tree path =
 
 let trust_policy () =
   match Server_request_authority.make_trust_policy
-    ~bind_host:"localhost" ~bind_port:8935 ~explicit_base_url:None with
+    ~bind_host:"localhost" ~bind_port:8935 ~https_port:None ~explicit_base_url:None with
   | Ok policy -> policy
   | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
 

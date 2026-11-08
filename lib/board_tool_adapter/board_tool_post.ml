@@ -90,29 +90,19 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
     in
     let body = Option.map (fun _ -> content) body_arg in
     let author = get_string_opt args "author" |> Option.map String.trim in
-    if
-      Option.is_none author
-      || Option.equal String.equal author (Some "")
-      || Option.equal String.equal author (Some "anonymous")
-    then
+    (* One exhaustive match replaces the [if Option.is_none …] guard plus the
+       [None] arm that guard made unreachable. *)
+    match author with
+    | None | Some "" | Some "anonymous" ->
       Tool_result.make_err
         ~tool_name
         ~class_:Tool_result.Workflow_rejection
         ~effect_disposition:Tool_result.Proven_pre_effect
         ~start_time
         "author is required"
-    else
-      match author with
-      | None ->
-        Tool_result.make_err
-          ~tool_name
-          ~class_:Tool_result.Workflow_rejection
-          ~effect_disposition:Tool_result.Proven_pre_effect
-          ~start_time
-          "author is required"
-      | Some author ->
+    | Some author ->
       let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
-      let visibility_str = get_string args "visibility" "internal" in
+       let visibility_str = get_string args "visibility" "internal" in
       let hearth = get_string_opt args "hearth" in
       let thread_id = get_string_opt args "thread_id" in
       let raw_post_kind = get_string_opt args "post_kind" in

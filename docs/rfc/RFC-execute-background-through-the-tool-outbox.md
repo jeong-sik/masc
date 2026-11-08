@@ -149,8 +149,15 @@ backend, and the receipt claims neither.
 
 ## 3. Limits of this change
 
-- No cancel or status tool for the model. `timeout_sec` is the bound.
-  `Keeper_msg_async.cancel` and `poll` exist and take the request id.
+- The model reaches the run by its request id through
+  `keeper_composition_status` and `keeper_composition_cancel`. They call
+  `Keeper_msg_async.poll` and `cancel` with the request id and the calling
+  Keeper, and neither looks at what produced the request. Both are deferred
+  tools, so the start result names them and the loader that attaches them
+  (`keeper_tool_search`). `timeout_sec` is the other bound. The `unfinished`
+  receipt of a cancelled run says an operator cancelled it, whoever called
+  `cancel`: `cancelled_cause` has `Operator_request` and `Runtime_cancellation`
+  and no Keeper case.
 - The ledger row of the Execute call is the `started` result, with no duration.
   Execute duration statistics undercount background time until a row is written
   at completion.

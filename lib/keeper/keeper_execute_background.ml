@@ -73,6 +73,22 @@ let receipt ~request_id ~arguments ending : Outbox.receipt =
   }
 ;;
 
+(* The request controls of the composition surface take any [Keeper_msg_async]
+   request id and the caller that submitted it: [poll] and [cancel] do not look
+   at what produced the request. A background run is such a request, so the
+   start result names them. They are held back like the other deferred tools
+   and need the loader first. *)
+let delivery_text =
+  Printf.sprintf
+    "async: the command runs on the server until it exits or reaches \
+     timeout_sec. Its result arrives as a tool-result receipt that wakes you, \
+     and the receipt carries this request_id. With this request_id, %s reads \
+     the run and %s asks to stop it; %s loads either."
+    Keeper_tool_composition_catalog.status_tool_name
+    Keeper_tool_composition_catalog.cancel_tool_name
+    Keeper_identity_tool_search.tool_name
+;;
+
 (* An Execute payload, so that a composition plan node which sets
    [run_in_background] passes the output schema the executor validates against:
    [status] is an object with a [kind], and [typed] and the call time are
@@ -82,11 +98,7 @@ let started_json ~request_id ~elapsed_ms =
     [ "ok", `Bool true
     ; "status", `Assoc [ "kind", `String "started" ]
     ; "request_id", `String request_id
-    ; ( "delivery"
-      , `String
-          "async: the command runs on the server until it exits or reaches \
-           timeout_sec. Its result arrives as a tool-result receipt that wakes \
-           you, and the receipt carries this request_id." )
+    ; "delivery", `String delivery_text
     ; "typed", `Bool true
     ; Keeper_tool_execute_runtime.execution_time_field, `Int elapsed_ms
     ]

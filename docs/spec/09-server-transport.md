@@ -536,7 +536,7 @@ TLS 리스너(8938, `transport.https_port`, 0 이면 끔): TLS 1.3 handshake 의
 
 응답은 `Http_reqd`(닫힌 합타입 `Http1 | Http2`)가 전송별로 쓴다. H2 쪽은 응답 자원 원장(`Http_h2_response_ledger`)에 바이트를 예약하고 flush 뒤 돌려준다. 예약이 안 되면 빈 503 `no-store` 로 답하고, 스트리밍 중 용량이 다하면 그 스트림만 리셋한다(`docs/guides/h2-response-resources.md`). connection 전용 헤더(`connection`, `keep-alive`, `proxy-connection`, `transfer-encoding`, `upgrade`)는 H2 응답에서 뺀다(RFC 9113 §8.2.2).
 
-H2 연결 설정은 `Server_bootstrap_http.h2_config` 하나가 만들고 cleartext·TLS 가 같이 쓴다: server push 끔(RFC 9113 §8.4), `transport.h2_max_concurrent_streams`(100), `h2_initial_window_size`(65535), `h2_max_frame_size`(16384).
+H2 연결 설정은 `Server_bootstrap_http.h2_config` 하나가 만들고 cleartext·TLS 가 같이 쓴다: server push 끔(RFC 9113 §8.4), `transport.h2_max_concurrent_streams`(100), `transport.h2_initial_window_size`(기본 134217728 = 2^27, h2 라이브러리 기본). 최대 프레임 크기는 라이브러리 기본 16384 로 고정이고 키는 두지 않는다(#49940).
 
 HTTP/1.1 과 다른 점: 한 연결에 SSE 스트림을 여럿 둘 수 있다(브라우저의 origin 당 6연결 상한 밖). `/ws` 는 426 이다(h2 에 RFC 8441 extended CONNECT 가 없다). `subscriptions/listen` 의 막힌 구독자는 HTTP/1.1 과 같은 규칙으로 내려간다(stall 또는 reset). 스트림·연결 하나의 예외는 그 H2 연결 안에서만 처리되고 리스너나 다른 세션을 멈추지 않는다.
 

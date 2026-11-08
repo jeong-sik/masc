@@ -590,10 +590,6 @@ let live_capability = function
   | Page_act (Action.On_tab {interaction = (Action.Set_cookie _ | Action.Delete_cookie _); _}) -> Cookie_writing
 ;;
 
-
-let snapshot_refused = "an accessibility snapshot is served only by an ego connection on the live lane"
-let snapshot_target_refused = "a snapshot target is acted on only by an ego connection on the live lane"
-let handoff_refused = "Space control actions apply only to an ego connection on the live lane"
 type issued = { id : string; verb_json : Yojson.Safe.t }
 
 type answer =
@@ -1036,10 +1032,6 @@ type registration_refusal = Client_retired | Client_identity_changed
 let registration_refusal_to_wire = function
   | Client_retired -> "client_disconnected"
   | Client_identity_changed -> "client_identity_changed"
-let registration_refusal_of_wire = function
-  | "client_disconnected" -> Some Client_retired
-  | "client_identity_changed" -> Some Client_identity_changed
-  | _ -> None
 let register info =
   Eio.Mutex.use_rw ~protect:true clients_mutex (fun () ->
     prune_unlocked ();

@@ -82,6 +82,7 @@ related: ["runtime-two-layers"]
   - preset만 답함: 바탕은 preset이다. 바인딩이 적은 값은 모두 바탕을 덮는다.
     `[models.X]`의 `max-context`, `tools-support`, `streaming`, `thinking-support`와 능력 표의 모든 칸이다.
     적지 않은 칸은 preset 값이 남는다(#37435와 같은 규칙).
+    `tools-support`와 `streaming`은 적지 않아도 preset을 덮는다. 파서가 적지 않은 줄을 각각 `false`와 `true`로 채워서 늘 값이 있다.
     미디어 입력 칸만은 적지 않으면 `false`다. 「답 없음」 갈래와 같은 규칙이다.
   - 답 없음: 지금과 같다.
 - 이 규칙은 Keeper 턴에도 그대로 적용된다.

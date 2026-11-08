@@ -48,6 +48,7 @@ Definitions:
   Any other dropped ID is an off-label drop. Rows list them, and `verdict`
   needs a blind judge's class for each one (`audit_decisions`): when the judge
   takes the fact out as well, no target is scored on that memory's requests.
+  A drop the judge keeps stays wrong, also when its memory leaves scoring.
 - E-synth absorbed: memory IDs valid answers absorb. No label asks for one.
   Reported apart, not gated, as E-real reports its absorbs: MASC's absorb gate
   checks each absorb at commit, while nothing checks a drop.
@@ -275,7 +276,9 @@ def warm(row: JsonObject) -> bool:
     return cast(int, row["cached_tokens"]) >= WARM_CACHED_SHARE * max(1, cast(int, row["prompt_tokens"]))
 
 
-def summarize(kind: str, rows: list[JsonObject]) -> JsonObject:
+def summarize(kind: str, rows: list[JsonObject], wrong_elsewhere: dict[str, int] | None = None) -> JsonObject:
+    """Per target numbers of a set. `wrong_elsewhere` adds, per target, E-synth drops that are
+    wrong but sit on rows left out of scoring (`audit_decisions.Adjudication.wrong_outside`)."""
     out: JsonObject = {}
     for name in dict.fromkeys(cast(str, r["target"]) for r in rows):
         mine = [r for r in rows if r["target"] == name]
@@ -292,7 +295,7 @@ def summarize(kind: str, rows: list[JsonObject]) -> JsonObject:
             part["dropped_not_in_live"] = sum(len(cast(list[str], r["dropped_not_in_live"])) for r in mine)
             part["absorbed_not_in_live"] = sum(len(cast(list[str], r["absorbed_not_in_live"])) for r in mine)
         else:
-            drops = sum(cast(int, r["dropped"]) for r in mine)
+            drops = sum(cast(int, r["dropped"]) for r in mine) + (wrong_elsewhere or {}).get(name, 0)
             part["outcome_accuracy"] = sum(cast(int, r["correct"]) for r in mine) / cands
             part["drop_precision"] = sum(cast(int, r["dropped_expected"]) for r in mine) / drops if drops else 1.0
             part["absorbed"] = sum(cast(int, r["absorbed"]) for r in mine)
@@ -404,6 +407,9 @@ def binding_problem(real_targets: dict[str, str], synth_targets: dict[str, str],
     both runs, and each candidate must be the checkpoint its training run saved under `pin`."""
     if synth_targets != real_targets:
         return f"the runs sent different models: real {real_targets}, synth {synth_targets}"
+    if set(real_targets) != {baseline, *names}:
+        # Another target's off-label drops could take memories out of the candidates' scoring.
+        return f"the runs sent {sorted(real_targets)}; the pass lines name {baseline} and {names} only"
     if real_targets.get(baseline) != baseline_model:
         return f"the runs have no {baseline}={baseline_model} target"
     for name in names:
@@ -448,7 +454,7 @@ def verdict(args: argparse.Namespace) -> int:
     scored = judged.scored(synth_rows)
     if not scored:
         raise SystemExit("the judge's drops leave no E-synth request to score")
-    s_all = cast(dict[str, JsonObject], summarize("synth", scored))
+    s_all = cast(dict[str, JsonObject], summarize("synth", scored, judged.wrong_outside()))
     window = cast(float, comparison["same_item_window_s"])
     result: JsonObject = {}
     warm_min = cast(float, comparison["warm_share_min"])
@@ -496,8 +502,8 @@ def main() -> int:
     v.add_argument("--real", required=True)
     v.add_argument("--synth", required=True)
     v.add_argument("--drops", default=None,
-                   help="e_synth_audit.py drops --out with the judge's decisions.jsonl; needed when an answer "
-                        "dropped a fact off label")
+                   help="e_synth_audit.py drops --out, with the judge's judge/decisions.jsonl; needed when an "
+                        "answer dropped a fact off label")
     v.add_argument("--train", action="append", required=True, help="name=<train_sft --out>, one per candidate")
     args = ap.parse_args()
     return run(args) if args.command == "run" else verdict(args)

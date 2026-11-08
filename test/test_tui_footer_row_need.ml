@@ -39,7 +39,7 @@ let surfaces =
       [ "n"; "< / >"; "Esc"; "r"; "q" ] )
   ; ( "Harness",
       T.Harness,
-      [ "j/k"; "PgUp/PgDn"; "Right / Enter"; "y / x"; "Y"; "Home/End" ],
+      [ "j/k"; "PgUp/PgDn"; "Right / Enter"; "y / x"; "Y"; "n / N"; "Home/End" ],
       [ "v"; "/"; "Esc"; "r"; "q" ] )
   ; ( "Task Review",
       T.Verification,

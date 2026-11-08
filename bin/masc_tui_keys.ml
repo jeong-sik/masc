@@ -988,7 +988,11 @@ let for_surface = function
           ~help:"copy a link to the task in Work"
       ; b Search "/" "find" ~detail:List_only
           ~help:"jump the cursor to a matching task id or title"
+      (* [/] opens its prompt on a read list with no row, so it stays; the
+         jump has no match to step to and ends in [()] -- the same split
+         Task Review draws. *)
       ; b Search "n / N" "next / previous match" ~detail:List_only
+          ~rows:Needs_row
       ]
       @ row_list_edges @ listing_meta
   | Fusion ->

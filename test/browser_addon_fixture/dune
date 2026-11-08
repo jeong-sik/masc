@@ -3,4 +3,4 @@
  (wrapped false)
  (modules browser_addon_fixture)
  (libraries masc masc.runtime masc.browser_lane masc.tool_types masc.lane_addon_tool_result masc.masc_eio_context
-  masc.fs_compat mcp_protocol eio eio.unix eio_main yojson unix))
+  masc.fs_compat mcp_protocol eio eio.unix yojson unix))

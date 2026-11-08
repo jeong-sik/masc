@@ -631,7 +631,7 @@
 (tests
  (names test_runtime_store_unit test_runtime_types)
  (modules test_runtime_store_unit test_runtime_types)
- (libraries agent_core_test_deps agent_core alcotest eio_main unix yojson)
+ (libraries agent_core_test_deps agent_core alcotest unix yojson)
  (action
   (run %{test})))
 

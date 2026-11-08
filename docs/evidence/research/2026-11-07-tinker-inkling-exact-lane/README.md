@@ -49,11 +49,13 @@ O와 L은 MASC exact 레인이 이 카탈로그 행(JSON mode·native schema 모
 지시 문장은 `domain_schema_instruction_text`에서 그대로 옮겼다(`packages/agent_core/lib/llm_provider/exact_output_ready_admission.ml:241`).
 스키마는 키를 정렬한 한 줄 JSON이다.
 O는 나머지를 모두 R에서 가져왔다. effort `low`, temperature 0.0, 답 예산(librarian 7,168·board 4,864), 묶음 크기가 같다.
-L은 두 가지를 MASC 요청처럼 바꿨다. temperature를 싣지 않고, `max_tokens`를 8,192로 고정했다.
+L은 temperature를 싣지 않고, `max_tokens`를 8,192로 고정했다.
 MASC exact 요청은 temperature를 비운다(`exact_config`, 같은 파일 277행).
+`max_tokens` 8,192는 라이브 요청과 다르다. 2026-11-08에 코드와 라이브 기록으로 다시 확인했다.
 keeper-librarian Add-on의 두 출력은 레인 `max_output_tokens`를 적지 않는다.
-그래서 요청의 `max_tokens`는 바인딩의 `max-tokens`다(`lib/runtime/runtime_exact_output_registry.ml:685`).
-8,192는 라이브 설정 후보의 `max-tokens` 값이다.
+레인 예산이 없으면 MASC는 `max_tokens`를 싣지 않는다(`packages/agent_core/lib/llm_provider/exact_output_resolver.ml:927`).
+바인딩의 `max-tokens`는 exact 요청에 쓰이지 않는다.
+라이브 Tinker 400 본문에는 `4096 max_tokens`가 찍혔다. Tinker가 빈 필드에 4,096을 쓴다.
 L은 O가 끝나고 약 3분 뒤에 같은 librarian 프롬프트를 다시 보냈다.
 O·L의 요청 모양은 `f8dbd356759`의 코드와 대조했다.
 
@@ -66,6 +68,7 @@ declaration이 `keeper-librarian`이고 최종 상태가 `answered`인 기록 94
 
 A의 요청 모양은 L과 같다. 기록에 남은 메시지(모두 user)에 스키마 지시를 마지막 user 메시지로 덧붙였다.
 스키마는 기록에 남은 요청 스키마다. temperature는 싣지 않았다. `max_tokens`는 8,192, effort는 `low`다.
+`max_tokens`는 L처럼 라이브(필드 없음, Tinker 기본 4,096)와 다르다.
 4건씩 동시에 보냈다.
 비교 대상은 기록에 남은 최종 답이다. 그 답을 낸 슬롯은 GLM 68건, ollama 14건, opencode 11건, Claude Haiku 1건이다.
 A의 유효 조건은 네 가지다. HTTP 200, `finish_reason=stop`, 답이 JSON 하나, 기록 스키마 검증(Draft 2020-12) 통과다.
@@ -149,7 +152,7 @@ O와 L (`replay-masc-off-summary.json`, `replay-masc-live-summary.json`), effort
 - 54건 모두 200, `finish_reason=stop`이었다. 답은 모두 앞뒤 공백만 빼면 JSON 하나였다(`json_form=bare`).
   코드 펜스나 설명이 붙은 답은 없었다.
 - 스키마 지시는 기록마다 prompt를 librarian 417 토큰, board 188 토큰 늘렸다.
-- 출력 토큰에는 reasoning이 들어간다. L의 최대 3,172 토큰은 답 예산 8,192 안에 들어간다.
+- 출력 토큰에는 reasoning이 들어간다. L의 최대 3,172 토큰은 라이브 Tinker 기본값 4,096 안에도 들어간다.
 - board 일치는 R보다 1건 적다. 클래스별로 relevant 6/10, not_relevant 9/10이다. 통과선 0.9 아래다.
 - librarian 결정이 클라우드와 같은 정도는 세 기록이 비슷하다.
   retained Jaccard 평균은 R 0.944, O 0.936, L 0.932다. dropped 완전 일치는 9·8·8건, no-op 일치는 11·11·12건이다.
@@ -184,6 +187,8 @@ A (`replay-addon-summary.json`, 분해는 `replay_addon_breakdown.py`):
 - durable completion은 127~1,174 토큰이었다. 같은 요청의 기록 답 출력은 5,658~26,628 토큰이었다.
 - 실행 뒤 분해(통과선 아님): prompt가 57,344 토큰(65,536 − 8,192) 이하인 admission은 52건이다.
   그중 유효는 48건(0.923)이다. 창 영향을 빼도 0.95 아래다.
+- 실행 뒤 추정(통과선 아님): 라이브 답 예산 4,096이었다면 유효 50건 중 1건(completion 5,039 토큰)이 잘린다.
+  그러면 admission은 49/62 = 0.790이다. durable completion 최대는 1,174 토큰이라 그대로다.
 - 총비용은 $0.9367이다. 예산 $1.0에 걸려 멈추지 않았다.
 
 ## 확인하지 않은 범위

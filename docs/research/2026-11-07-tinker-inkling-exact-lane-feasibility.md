@@ -153,7 +153,10 @@ no-op 여부가 클라우드와 같은 것은 11/17이다.
 O는 temperature 0.0과 위 재생의 답 예산을 그대로 두었다.
 L은 temperature를 싣지 않고 `max_tokens`를 8,192로 고정했다.
 MASC exact 요청은 temperature를 비운다.
-keeper-librarian 출력은 레인 답 예산을 적지 않아서, `max_tokens`에 바인딩 값이 나간다. 8,192는 라이브 바인딩 후보 값이다.
+`max_tokens` 8,192는 라이브와 다르다(2026-11-08 확인).
+keeper-librarian 출력은 레인 답 예산(`max_output_tokens`)을 적지 않는다. 그러면 MASC는 `max_tokens`를 싣지 않는다(`exact_output_resolver.ml:927`).
+바인딩의 `max-tokens`는 exact 요청에 쓰이지 않는다. 라이브 Tinker 400 본문에는 `4096 max_tokens`가 찍혔다.
+L의 출력 최대 3,172 토큰은 4,096 안에도 들어간다.
 
 | 기록 | librarian 유효 | librarian 지연 p50 | librarian 출력 최대 | board 일치 |
 | --- | --- | --- | --- | --- |
@@ -188,7 +191,15 @@ Tinker는 2026-11-07 16:09Z 재시작부터 keeper-librarian Lane Add-on의 `adm
 - admission도 기록 답보다 새 claim을 적게 만들었다. 유효 50건의 새 claim은 40개, 같은 요청의 기록 답은 46개다.
   후보별 결정은 스키마를 지킨 답의 후보 73개 중 53개가 기록 답과 같았다.
 - 이 요청은 core `librarian_exact` 레인의 입력(p50 12.9KB)과 다른 요청이고, 훨씬 크다.
+- A는 `max_tokens`를 8,192로 보냈다. 라이브는 이 필드를 싣지 않아 Tinker 기본값 4,096이 쓰인다(§4.4).
+  유효 50건 중 1건(completion 5,039 토큰)은 4,096이면 잘린다. 그러면 admission은 49/62 = 0.790이다. 결과를 본 뒤의 추정이다.
 - 94건 재생 비용은 $0.937이었다.
+
+라이브(2026-11-07 16:09Z~11-08 09:06Z)에서 기록이 바뀐 keeper-librarian 요청은 17건이다. 답을 받은 14건은 모두 GLM이 답했다.
+Tinker까지 내려온 요청은 admission 2건뿐이었다.
+둘 다 매번 창 넘침 400을 받았다. prompt는 251,251 토큰과 280,850 토큰이다.
+이 두 요청은 후보를 272개와 515개 싣고 있다. 다른 admission 요청의 후보 수는 중앙값 1개, 최대 77개다.
+모든 슬롯이 429, 시간 초과, 400으로 실패해서 11-07부터 같은 요청을 다시 보내고 있다(#49910).
 
 ## 5. 학습으로 갈 수 있는 범위
 
@@ -239,6 +250,7 @@ Tinker는 2026-11-07 16:09Z 재시작부터 keeper-librarian Lane Add-on의 `adm
    35건은 창 넘침 400 28건과 창 끝에서 잘린 7건이다. prompt를 합치면 2,724,410 토큰이고, 기본 ID 단가로 prefill만 약 $0.82다.
    그 ID의 단가와 통과선은 보내기 전에 정한다.
    긴 admission 31건이 모두 유효해도, 창 안 실패 5건이 그대로면 이 표본의 admission은 81/86 = 0.942다.
+   라이브에서 Tinker까지 내려온 두 요청(251,251·280,850 토큰)은 256K 창에도 하나가 넘는다. 이 두 요청은 part 크기 문제다(#49910).
 3. **학습 파이프라인 확인.** cookbook `sl_basic`·`rl_basic`에 Inkling 2 렌더러와
    샘플링 logprob을 붙여 한 바퀴 돌린다. 기준은 고정한 평가 세트의 점수가 오르는가다.
 4. **librarian 처분 규칙 SFT.** 합성 입력, Tinker 교사 답, 결정론 검사로 데이터를 만든다.

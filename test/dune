@@ -6401,14 +6401,14 @@
 (test
  (name test_watched_work)
  (modules test_watched_work)
- (libraries masc.watched_work alcotest eio eio_main eio.mock))
+ (libraries masc.watched_work alcotest eio eio.mock))
 
 ; The same order through the pool: its request window and idle window keep
 ; a result the work finished.
 (test
  (name test_pool_watched_work)
  (modules test_pool_watched_work)
- (libraries masc_test_deps masc.http_client piaf eio eio_main eio.mock))
+ (libraries masc_test_deps masc.http_client piaf eio eio.mock))
 
 (test
  (name test_lane_addon_skills)
@@ -6430,17 +6430,17 @@
 (test
  (name test_tui_browser_history_model)
  (modules test_tui_browser_history_model)
- (libraries masc_tui_types masc yojson masc.masc_tool_blob_store))
+ (libraries masc_tui_types masc masc.masc_tool_blob_store))
 
 (test
  (name test_lane_addon_asks)
  (modules test_lane_addon_asks)
- (libraries masc_test_deps masc.fs_compat eio eio_main yojson unix))
+ (libraries masc_test_deps masc.fs_compat eio eio_main unix))
 
 (test
  (name test_lane_addon_records)
  (modules test_lane_addon_records)
- (libraries masc_test_deps yojson))
+ (libraries masc_test_deps))
 
 (test
  (name test_candle_appraiser_contract)
@@ -6471,7 +6471,7 @@
 (test
  (name test_lane_addon_host_request)
  (modules test_lane_addon_host_request)
- (libraries masc_test_deps yojson))
+ (libraries masc_test_deps))
 
 (test
  (name test_lane_addon_exact)
@@ -6481,7 +6481,7 @@
 (test
  (name test_lane_addon_actions)
  (modules test_lane_addon_actions)
- (libraries masc_test_deps eio eio_main eio.mock yojson unix))
+ (libraries masc_test_deps eio eio_main yojson unix))
 
 (test
  (name test_lane_addon_subscription)
@@ -6491,7 +6491,7 @@
 (test
  (name test_tui_lane_broadcast_pending)
  (modules test_tui_lane_broadcast_pending)
- (libraries alcotest yojson unix masc.fs_compat masc_tui_lane_broadcast_pending))
+ (libraries alcotest yojson unix masc_tui_lane_broadcast_pending))
 
 (test
  (name test_lane_addon_catalog)
@@ -6501,12 +6501,12 @@
 (test
  (name test_tui_package_browser)
  (modules test_tui_package_browser)
- (libraries alcotest unix yojson masc masc_tui_package_browser))
+ (libraries alcotest unix masc masc_tui_package_browser))
 
 (test
  (name test_tui_lane_application)
  (modules test_tui_lane_application)
- (libraries alcotest yojson masc_tui_lane_application masc_tui_lane_declaration))
+ (libraries alcotest masc_tui_lane_application masc_tui_lane_declaration))
 
 (test
  (name test_tui_lane_addons)
@@ -6568,7 +6568,7 @@
 (test
  (name test_tui_queue_inspection)
  (modules test_tui_queue_inspection)
- (libraries alcotest astring masc masc.keeper_runtime masc.http_client masc_tui_queue_inspection
+ (libraries alcotest masc masc.keeper_runtime masc.http_client masc_tui_queue_inspection
   masc_tui_workspace_read masc_tui_kept_reads eio_main uri yojson))
 
 (test
@@ -6674,7 +6674,7 @@
 (test
  (name test_lane_addon_broadcast_delivery)
  (modules test_lane_addon_broadcast_delivery)
- (libraries masc masc.fs_compat masc.keeper_chat_delivery_identity alcotest unix yojson))
+ (libraries masc masc.fs_compat alcotest unix yojson))
 
 (include stanzas/test_candle_purchase_flow.inc)
 
@@ -6708,7 +6708,7 @@
 (test
  (name test_tui_lane_inventory)
  (modules test_tui_lane_inventory)
- (libraries masc masc.runtime masc.browser_lane masc_tui_lane_inventory masc_tui_lane_standing alcotest yojson))
+ (libraries masc masc.runtime masc.browser_lane masc_tui_lane_inventory masc_tui_lane_standing alcotest))
 
 (test
  (name test_tui_lane_declaration_path)
@@ -6747,7 +6747,7 @@
 (test
  (name test_tui_model_form)
  (modules test_tui_model_form)
- (libraries alcotest astring masc.agent_core.llm_provider masc.toml_line_editor masc_tui_model_form masc_tui_model_runtime_table masc_tui_message_layout masc.runtime))
+ (libraries alcotest masc.agent_core.llm_provider masc.toml_line_editor masc_tui_model_form masc_tui_model_runtime_table masc_tui_message_layout masc.runtime))
 
 (test
  (name test_tui_runtime_evidence)
@@ -6810,7 +6810,7 @@
 (test
  (name test_h2_journal)
  (modules test_h2_journal)
- (libraries masc_test_deps masc.operator masc.skill_config masc.skill_reference masc_tui_types masc_tui_task_document masc_tui_task_document_observation masc_tui_workspace_job masc_tui_fetched masc_tui_overview_tasks masc_tui_loader masc_tui_agenda))
+ (libraries masc_test_deps masc.operator masc.skill_config masc_tui_types masc_tui_task_document masc_tui_task_document_observation masc_tui_workspace_job masc_tui_fetched masc_tui_overview_tasks masc_tui_loader masc_tui_agenda))
 
 (test
  (name test_keeper_owned_jobs)
@@ -6830,7 +6830,7 @@
 (test
  (name test_lane_addon_tool_result)
  (modules test_lane_addon_tool_result)
- (libraries alcotest masc.lane_addon_tool_result masc.tool_types mcp_protocol yojson))
+ (libraries alcotest masc.lane_addon_tool_result masc.tool_types mcp_protocol))
 
 (test
  (name test_msx_addon_worker)
@@ -6926,12 +6926,12 @@
 (test
  (name test_tui_keeper_call_evidence)
  (modules test_tui_keeper_call_evidence)
- (libraries alcotest masc masc.tool_types masc_tui_keeper_call_evidence masc_tui_keeper_chat_transcript yojson))
+ (libraries alcotest masc masc_tui_keeper_call_evidence masc_tui_keeper_chat_transcript))
 
 (test
  (name test_tui_preparation_details)
  (modules test_tui_preparation_details)
- (libraries alcotest masc masc.server masc_test_deps masc.masc_types masc.keeper_runtime masc.keeper_chat_operations masc.keeper_operation_identity
+ (libraries alcotest masc masc.server masc_test_deps masc.masc_types masc.keeper_chat_operations masc.keeper_operation_identity
   masc.keeper_execution_scope eio eio_main masc_tui_preparation_details
   masc_tui_keeper_chat_log masc_tui_keeper_chat_live masc_tui_keeper_chat_transcript
   masc_tui_workspace_read masc_tui_kept_reads masc.http_client httpun unix uri yojson))
@@ -7025,14 +7025,14 @@
 (test
  (name test_tui_resource_image_admission)
  (modules test_tui_resource_image_admission)
- (libraries masc masc.agent_core.digest masc.skill_reference masc_tui_loader masc_tui_image_requests masc_tui_input_reader masc_tui_resource_diagrams masc_tui_keeper_chat_projection masc_tui_resource_catalog alcotest masc_tui_types masc_tui_mcp masc_tui_resource_images masc_tui_board_detail masc_tui_board_reader masc_tui_board_preview_work masc_tui_image_cache masc_tui_image_payload masc_tui_async_protocol masc_tui_attachment_action masc_tui_browser masc_tui_pele unix threads yojson mtime.clock.os
+ (libraries masc masc.agent_core.digest masc.skill_reference masc_tui_loader masc_tui_image_requests masc_tui_input_reader masc_tui_resource_diagrams masc_tui_keeper_chat_projection masc_tui_resource_catalog alcotest masc_tui_types masc_tui_mcp masc_tui_resource_images masc_tui_board_detail masc_tui_board_reader masc_tui_board_preview_work masc_tui_image_cache masc_tui_image_payload masc_tui_async_protocol masc_tui_attachment_action masc_tui_browser masc_tui_pele unix threads mtime.clock.os
   masc_tui_image_preview masc_tui_image_viewport masc_tui_resources_updates
   masc_tui_workspace_result masc_eio_context eio eio_main))
 
 (test
  (name test_tui_published_reports)
  (modules test_tui_published_reports)
- (libraries masc.time_codec alcotest masc masc.masc_tool_blob_store  masc.agent_core.digest yojson masc_tui_resource_catalog
+ (libraries masc.time_codec alcotest masc masc.masc_tool_blob_store  masc.agent_core.digest masc_tui_resource_catalog
   masc_tui_artifact_checks masc_tui_fetched masc_tui_types masc_tui_resources_updates masc_tui_mcp masc_tui_loader))
 
 (test
@@ -7040,12 +7040,12 @@
  (modules test_tui_resource_export)
  (libraries masc_tui_resource_export masc_tui_resource_catalog masc masc.masc_tool_blob_store alcotest
   masc_tui_workspace_read masc_tui_kept_reads masc_tui_types masc.http_client
-   masc.agent_core.digest uri yojson eio eio_main unix fs_compat))
+   masc.agent_core.digest uri yojson eio_main unix fs_compat))
 
 (test
  (name test_tui_workspace_http_error)
  (modules test_tui_workspace_http_error)
- (libraries alcotest masc masc.string_util masc_tui_workspace_read masc_tui_kept_reads masc.http_client yojson))
+ (libraries alcotest masc masc.string_util masc_tui_workspace_read masc_tui_kept_reads masc.http_client))
 
 (test
  (name test_tui_resource_document_search)
@@ -7056,7 +7056,7 @@
 (test
  (name test_tui_artifact_checks)
  (modules test_tui_artifact_checks)
- (libraries alcotest masc masc.server masc.masc_tool_blob_store masc.tool_types masc.time_codec  masc.agent_core.digest httpun unix yojson
+ (libraries alcotest masc masc.server masc.masc_tool_blob_store masc.time_codec  masc.agent_core.digest httpun unix yojson
   masc_tui_artifact_check_action masc_tui_artifact_checks masc_tui_resource_catalog
   masc_tui_resources_updates masc_tui_types masc_tui_fetched masc_tui_mcp))
 
@@ -7117,14 +7117,14 @@
  (deps ../config/prompts/librarian.md
        ../config/prompts/keeper.md
        (source_tree ../addons/keeper-librarian) ../addons/protocol.py ../addons/exact_worker.py)
- (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol masc.masc_random_id))
+ (libraries masc_test_deps masc.server exact_output_fixture masc.masc_random_id))
 
 ; Not a test: prints one Librarian pass's allocation and stored bytes per
 ; already-read history size. Run by hand from _build/default/test.
 (executable
  (name bench_keeper_librarian_pass)
  (modules bench_keeper_librarian_pass)
- (libraries masc_test_deps masc.server exact_output_fixture mcp_protocol masc.masc_random_id))
+ (libraries masc_test_deps masc.server exact_output_fixture masc.masc_random_id))
 
 (include stanzas/bench_keeper_checkpoint_store.inc)
 

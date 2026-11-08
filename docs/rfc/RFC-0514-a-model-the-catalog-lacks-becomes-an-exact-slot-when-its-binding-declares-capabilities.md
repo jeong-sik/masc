@@ -1,16 +1,16 @@
 ---
 rfc: "0514"
-title: "카탈로그에 행이 없는 모델도 바인딩이 능력을 적으면 exact 슬롯이 된다"
+title: "카탈로그에 행이 없는 모델도 exact가 읽는 능력을 바인딩이 다 적으면 exact 슬롯이 된다"
 status: Draft
 created: 2026-11-08
-updated: 2026-11-08
+updated: 2026-11-09
 author: claude
 supersedes: []
 superseded_by: null
 related: ["runtime-two-layers"]
 ---
 
-# RFC-0514 — 카탈로그에 행이 없는 모델도 바인딩이 능력을 적으면 exact 슬롯이 된다
+# RFC-0514 — 카탈로그에 행이 없는 모델도 exact가 읽는 능력을 바인딩이 다 적으면 exact 슬롯이 된다
 
 ## 0. 요약
 
@@ -23,10 +23,15 @@ related: ["runtime-two-layers"]
 - Keeper 턴은 이미 다른 규칙을 쓴다.
   [RFC-runtime-two-layers](RFC-runtime-two-layers.md) 「우리가 안 싣는 모델」은 카탈로그가 모르는 모델의 능력 표를 배포가 선언한다고 정했다.
 - 이 RFC는 그 규칙을 exact 출력까지 넓힌다. 두 곳을 고친다.
-  1. MASC adapter: 모델 행 없이 provider 기본값(preset)만 답하면 바인딩의 능력 표를 전부 읽는다. 지금은 네 칸만 읽는다.
-  2. agent_core exact resolver: 모델 행이 없어도 바인딩이 능력을 선언했으면 provider 행에 묶는다.
-- 새 카탈로그 필드, 이름 접두어 규칙, 호환 코드, 새 거절 사유는 없다.
-  능력 표가 없는 행 없는 모델은 지금처럼 거절된다.
+  1. MASC adapter: 모델 행 없이 provider 기본값(preset)만 답하면 바인딩의 능력 표를 전부 읽는다. 지금은 일부 칸만 읽는다(§1.2).
+  2. agent_core exact resolver: 모델 행이 없어도 배포가 모델을 선언했으면 provider 행에 묶는다.
+- exact가 읽는 능력은 넷이다. 창, effort 사다리, JSON mode, native schema다.
+  행 없는 모델은 runtime.toml이 넷을 다 적어야 슬롯이 된다.
+  preset 값은 넷 중 어느 것도 대신하지 않는다.
+- 하나라도 빠지면 그 슬롯은 지금처럼 빠진다. 부팅 로그가 빠진 키를 알려 준다.
+  MASC는 빠진 능력을 닫힌 합타입(`Runtime_exact_reads.t`)으로 센다.
+- 새 카탈로그 필드, 이름 접두어 규칙, 호환 코드는 없다.
+  agent_core의 거절 갈래도 지금처럼 `Target_model` 하나다.
 
 ## 1. 지금
 
@@ -39,8 +44,8 @@ related: ["runtime-two-layers"]
   그다음 그 provider의 모델 행을 model id로 찾는다. 행이 없으면 `Model_missing`이다.
 - resolver는 `Model_missing`을 `reject Target_model`로 바꾼다(`exact_output_resolver.ml:721`).
   MASC 레지스트리는 그 슬롯을 `Target_not_in_catalog`로 뺀다.
-- 바인딩이 능력을 선언해도 결과는 같다.
-  선언(`model_capabilities_override`)은 행을 찾은 뒤에만 읽힌다(`exact_output_resolver.ml:759-765`).
+- 바인딩이 능력 표를 적어도 결과는 같다.
+  바인딩의 능력 override(`model_capabilities_override`)는 행을 찾은 뒤에만 읽힌다(`exact_output_resolver.ml:759-765`).
 
 ### 1.2 행 없는 모델의 능력 표는 네 칸만 읽힌다
 
@@ -86,37 +91,72 @@ related: ["runtime-two-layers"]
     미디어 입력 칸만은 적지 않으면 `false`다. 「답 없음」 갈래와 같은 규칙이다.
   - 답 없음: 지금과 같다.
 - 이 규칙은 Keeper 턴에도 그대로 적용된다.
-  한 바인딩은 Keeper 턴과 exact에 같은 능력으로 답한다.
-  resolver도 같은 원칙을 따른다(`exact_output_resolver.ml:736-740` 주석).
+  exact 슬롯이 되는 바인딩은 Keeper 턴과 같은 능력으로 답한다.
+- 슬롯이 되는지는 이 합치기 규칙이 정하지 않는다(§2.2).
+  exact가 읽는 능력 넷(§2.2)은 preset이 대신 채우지 않는다.
 - 2026-11-08 라이브 설정에서 카탈로그 provider 아래 행 없는 바인딩은 2개다. 둘 다 능력 표가 있다.
   - `supports_named_tool_choice`가 preset의 `true`에서 운영자가 적은 `false`로 바뀐다.
   - `max_context_tokens`가 `None`에서 적은 창으로 바뀐다.
     Keeper 창은 지금도 그 값이다(`runtime_adapter.ml:625-648`).
   - 나머지 칸은 적은 값과 preset 값이 같다.
 
-### 2.2 resolver: 능력을 선언한 바인딩은 행 없이 묶인다
+### 2.2 resolver: 배포가 선언한 모델은 행 없이 묶인다
 
-- resolver fold(`exact_output_resolver.ml:714-722`)는 `Model_missing`을 두 갈래로 나눈다.
-  - 대상이 `Binding_wire`이고 바인딩에 `model_capabilities_override = Some caps`가 있으면 provider 행에 묶는다. 능력은 `caps`다.
-  - 그 밖은 지금처럼 `reject Target_model`이다. `Catalog_provider_wire` 대상과 선언 없는 바인딩이 여기에 든다.
-- Anthropic wire에서는 표가 없어도 override가 채워진다.
-  adapter(`with_client_history_replay`)가 카탈로그 답을 옮겨 적기 때문이다.
-  preset만 답하는 모델이면 이 값은 preset 사본이고 선언이 아니다.
-  그래서 MASC는 행도 표도 없는 바인딩을 resolver에 넘기지 않는다(`Runtime.exact_target_refusal`).
-  어느 wire에서나 같은 규칙이다. 그런 슬롯마다 부팅 로그에 경고가 한 줄 남는다. 경고는 적을 표를 알려 준다.
-- fold가 넘기는 `(target, provider, model)`의 세 번째 값을 닫힌 합타입으로 바꾼다.
-  모델 행으로 묶임(`model_entry`)과 바인딩 선언으로 묶임(`capabilities`)이다.
-  뒤 fold의 `match`가 두 갈래를 다 다룬다.
-- 바인딩 선언으로 묶인 대상은 아래 값을 쓴다.
-  - 능력: 바인딩 선언이다. `Binding_wire` 갈래가 이미 이렇게 읽는다(`:759-760`).
-  - Anthropic thinking 정책: 모델 행 정책이 없다. 바인딩의 `model_anthropic_thinking_control_override`만 읽는다.
-  - 지문: 대상 지문은 이미 `functional_capability_projection capabilities`를 담는다(`:856-858`).
-    선언이 바뀌면 지문도 바뀐다.
-- 카탈로그 증거(`canonical_catalog_evidence`, `:474-565`)는 바꾸지 않는다.
+- exact 대상(`Exact_output.declared_target`)에 `model_declaration` 칸을 더한다.
+  `No_model_declaration`과 `Declared_model of capabilities`의 닫힌 합타입이다.
+- 이 칸은 바인딩의 `model_capabilities_override`와 다르다.
+  override에는 카탈로그 답의 사본이 들 수 있다.
+  Anthropic wire에서는 능력 표가 없어도 adapter가 카탈로그 답을 옮겨 적는다(`with_client_history_replay`).
+  preset만 답하는 모델이면 그 사본은 preset 값이고, 모델에 대해 아무것도 말하지 않는다.
+- resolver의 첫 fold는 `Model_missing`을 두 갈래로 나눈다.
+  - `Binding_wire`이고 선언이 `Declared_model caps`면 provider 행에 묶는다. 능력은 `caps`다.
+  - 그 밖은 지금처럼 `reject Target_model`이다. `Catalog_provider_wire`와 `No_model_declaration`이 여기에 든다.
+  - 행 없는 모델에서는 override를 읽지 않는다.
+- 선언은 `Binding_wire` 갈래 안에만 있다. 카탈로그 문서의 대상에는 배포가 없어서다.
+  그래서 `Catalog_provider_wire`와 선언의 짝은 타입으로 만들 수 없다.
+- 능력과 모델 행 정책은 wire를 맞추는 첫 fold에서 정한다.
+  뒤 fold는 넘겨받은 값만 쓰고 override를 다시 읽지 않는다.
+- 모델 행이 있는 대상은 선언을 읽지 않는다. 행으로 묶는 규칙은 그대로다.
+
+MASC는 runtime.toml이 exact가 읽는 능력 넷을 다 적었을 때만 `Declared_model`을 채운다(`Runtime_exact_reads`).
+
+| 능력 | runtime.toml 키 |
+| --- | --- |
+| 창 | `max-context`. 바인딩, provider, 모델 중 어디에 적어도 된다 |
+| effort 사다리 | 능력 표의 `accepted-reasoning-efforts` |
+| JSON mode | 능력 표의 `supports-response-format-json` |
+| native schema | 능력 표의 `supports-structured-output` |
+
+- 창은 Keeper 창과 같은 순서로 찾는다. 바인딩, provider, 모델 순이다.
+  카탈로그만 답한 창은 적은 것으로 세지 않는다.
+- 넷을 다 적으면 MASC는 그 바인딩이 Keeper 턴에서 쓰는 능력을 넘긴다(`Provider_config.capabilities_for_config_model`).
+  그래서 exact와 Keeper 턴이 같은 능력을 본다.
+  넷이 아닌 칸은 Keeper 턴처럼 §2.1의 합치기 규칙을 따른다.
+- 하나라도 빠지면 `No_model_declaration`이다.
+  `Runtime_exact_reads.unstated`가 빠진 능력을 닫힌 합타입 목록으로 돌려준다.
+- 그런 슬롯마다 부팅 로그에 경고가 한 줄 남는다. 경고는 적을 키를 알려 준다.
+  경고는 resolver의 `Target_model` 거절과 runtime.toml만 읽는다. 카탈로그를 다시 묻지 않는다.
+- 파서는 빈 사다리(`accepted-reasoning-efforts = []`)를 적지 않은 것으로 읽는다.
+  그래서 effort 사다리가 없는 모델은 아직 이 길로 슬롯이 될 수 없다.
+
+선언으로 묶인 대상은 아래 값을 쓴다.
+
+- 능력: 선언 값이다.
+- Anthropic thinking 정책: 모델 행 정책이 없다. 바인딩의 `model_anthropic_thinking_control_override`만 읽는다.
+- 지문: 대상 지문은 `functional_capability_projection capabilities`를 담는다(`exact_output_catalog_binding.ml:204-236`).
+  - 창, JSON mode, native schema처럼 이 투영에 든 칸이 바뀌면 지문도 바뀐다.
+  - effort 사다리, thinking 제어 형식, reasoning 스트리밍 형식, `supports_reasoning`, 도구 칸, `supports_native_streaming`은 투영에 없다.
+    그 칸만 바뀌면 지문은 그대로다. 모델 행으로 묶인 슬롯도 같다.
+  - 이 구멍은 #50105에 적었다. 이 RFC는 지문을 넓히지 않는다.
+
+그 밖:
+
+- 카탈로그 증거(`canonical_catalog_evidence`)는 바꾸지 않는다.
+  선언은 카탈로그 행이 아니라서 증거에 들지 않는다.
   증거를 읽는 곳은 측정 영수증뿐이다(`exact_output_measurement_receipt.ml`).
   측정은 serving constraint가 있는 행에서만 돈다.
 - agent_core에는 MASC 이름도 Tinker 이름도 들어가지 않는다.
-  더하는 규칙은 하나다. 바인딩 wire가 선언한 능력은 카탈로그가 모르는 모델에 답한다.
+  더하는 규칙은 하나다. 배포가 선언한 모델은 카탈로그에 행이 없는 모델에 답한다.
 
 ### 2.3 운영자가 적는 모양
 
@@ -141,6 +181,7 @@ supports-structured-output = false
 [tinker.librarian-checkpoint]
 ```
 
+- 예시는 exact가 읽는 넷을 다 적는다. 하나를 지우면 슬롯이 빠지고, 부팅 로그가 지운 키를 알려 준다.
 - 슬롯 목록에는 `"tinker.librarian-checkpoint"`를 넣는다. 되돌릴 때는 슬롯 목록만 고친다.
 - 요청의 출력 상한은 레인의 `max_output_tokens`가 정한다(`lib/runtime/runtime_exact_output_registry.ml:684-689`).
   레인 값이 없으면 요청에 출력 상한이 실리지 않고, endpoint 기본값이 상한이 된다.
@@ -154,24 +195,31 @@ supports-structured-output = false
 | `AGENT_CORE_MODEL_CATALOG` 파일 | 코드를 안 바꾼다 | 내장 카탈로그를 통째로 바꾼다. 바이너리를 올려도 그 파일의 행은 낡은 채 남는다(RFC-runtime-two-layers) |
 | 이름 접두어(`tinker://` → 기본 모델 행) | 운영자가 적을 것이 없다 | 문자열 분류기다. 체크포인트 이름만으로는 기본 모델을 알 수 없다 |
 | 운영자 카탈로그 덧붙임 파일 | 행 모양을 그대로 쓴다 | 설정 면과 병합 규칙이 새로 생긴다. 한 모델에 바인딩 선언과 덧붙인 행, 두 답이 생긴다 |
-| 이 RFC: exact도 바인딩 선언을 읽는다 | 새 키가 없다. 한 바인딩이 Keeper 턴과 exact에 같은 능력으로 답한다 | 운영자가 기본 모델 행의 값을 바인딩에 다시 적는다. 적지 않은 칸은 preset 값을 따른다 |
+| 이 RFC: exact도 배포 선언을 읽는다 | 새 키가 없다. 슬롯이 되는 바인딩은 Keeper 턴과 같은 능력으로 답한다 | 운영자가 기본 모델 행의 값을 바인딩에 다시 적는다. exact가 읽는 넷 중 하나를 빠뜨리면 슬롯이 빠진다 |
 
-- 마지막 단점의 결과는 이렇다.
-  운영자가 `supports-response-format-json = false`를 빠뜨리면 exact 요청에 `response_format`이 실린다.
+- 넷을 칸마다 따지는 까닭은 preset이다.
+  preset은 provider의 모든 모델에 답하고, 이 모델은 모른다.
+  - `openai_chat` preset은 JSON mode와 native schema를 켠다(`capability_profile.ml:443-444`).
+  - `anthropic` preset은 창 200,000과 native schema를 켠다(`capability_profile.ml:334`, `:344`).
+- 능력 표가 있는지만 보면 설치 마법사가 쓰는 한 줄짜리 표로도 슬롯이 열린다.
+  마법사는 `reasoning-streaming-format = "none"`을 쓴다(`runtime_setup_spec.ml:483-492`).
+  그러면 exact가 아무도 적지 않은 preset 값으로 돈다.
+- exact에서 슬롯을 빼도 그 바인딩의 Keeper 턴 능력은 바뀌지 않는다.
+  바인딩의 답은 여전히 하나다. exact가 적지 않은 값으로 돌지 않을 뿐이다.
+- 넷을 다 적은 운영자가 값을 틀리게 적으면 그 값이 실린다.
+  예를 들어 `supports-response-format-json = true`를 잘못 적으면 exact 요청에 `response_format`이 실린다.
   endpoint가 그 요청을 거절하면 그 슬롯이 실패하고, 순회가 다음 슬롯으로 넘어간다.
   실패는 exact 요청 저장소와 서버 로그에 남는다.
-- exact에서만 칸마다 선언을 강제하는 길도 봤다.
-  그러면 같은 바인딩이 Keeper 턴에서는 preset 값으로 돌고, exact에서는 거절된다.
-  한 바인딩의 답이 둘이 되므로 이 길은 택하지 않는다.
 
 ## 3. 그대로인 것
 
-- 카탈로그 모델 행이 있는 바인딩. 행이 답하고 바인딩은 네 칸만 덮는다.
+- 카탈로그 모델 행이 있는 바인딩. 행이 답하고 바인딩은 §1.2의 네 칸만 덮는다. exact는 배포 선언을 읽지 않는다.
+- Keeper 턴의 합치기 규칙(§2.1). 적은 값이 preset을 덮고, 적지 않은 칸은 preset 값이 남는다.
 - provider가 카탈로그에 없는 바인딩(설치 마법사가 만든 provider 등).
   exact에서는 지금처럼 `Target_provider`로 빠지고, Keeper 턴의 「답 없음」 갈래도 그대로다.
 - 보내기 전 창 검사. serving constraint가 있는 행에서만 돈다.
 - 부팅 검사 `missing_runtime_model_capabilities`.
-  preset이 있는 provider 아래에서 표 없는 모델은 Keeper 턴에서 preset으로 돈다. exact에서는 선언이 없으니 빠진다.
+  preset이 있는 provider 아래에서 표 없는 모델은 Keeper 턴에서 preset으로 돈다. exact에서는 넷을 적지 않았으니 빠진다.
 - 슬롯 순회, 레인 설정 모양, 카탈로그 증거 모양.
 
 ## 4. 구현 층
@@ -182,23 +230,27 @@ supports-structured-output = false
 | --- | --- |
 | 1 | 이 RFC |
 | 2 | request policy가 답의 출처를 돌려주고, adapter가 preset만 답한 모델의 표를 전부 읽는다(§2.1). PR 본문에 라이브 행 없는 바인딩의 능력 변화를 싣는다 |
-| 3 | exact resolver가 선언한 바인딩을 행 없이 묶는다(§2.2). 기능 시험(§5)과 낡는 글 고침을 같이 싣는다 |
+| 3 | exact resolver가 배포가 선언한 모델을 행 없이 묶고, MASC는 넷을 다 적은 바인딩만 선언으로 넘긴다(§2.2). 기능 시험(§5)과 낡는 글 고침을 같이 싣는다 |
 
 3층에서 고칠 글:
 
 - `docs/guides/tinker-integration.md`의 exact 절(71행)과 체크포인트 절(77행)
 - `config/runtime.toml` Tinker 예시 주석(577-584행)
 - `packages/agent_core/test/test_provider_config.ml:1950-1953` 주석
-- `lib/runtime/runtime.ml:2146` 로그 문구. 모델 행이 없을 때 능력 표를 적는 길을 알려 준다
+- `lib/runtime/runtime.ml`의 부팅 경고. 넷 중 빠진 키를 알려 준다
 - RFC-runtime-two-layers 186행. preset이 있는 provider에서는 부팅 검사가 표 없는 모델을 잡지 않는다고 고친다
 
 ## 5. 시험
 
-- 기능 시험 하나를 3층에 둔다. runtime.toml 문자열로 exact 레지스트리를 만든다.
-  - provider 행만 있고 모델 행이 없는 모델에 능력 표를 적은 바인딩은 슬롯이 된다.
-    슬롯 능력에는 적은 창과 `supports_response_format_json = false`가 있다.
-  - 같은 모델에 능력 표가 없는 바인딩은 `Target_not_in_catalog`로 빠진다.
-  - Anthropic wire에서 행도 표도 없는 바인딩도 `Target_not_in_catalog`로 빠진다.
+- 기능 시험 하나를 3층에 둔다. runtime.toml 문자열로 exact resolver snapshot을 만든다.
+  - provider 행만 있고 모델 행이 없는 모델에 넷을 다 적은 바인딩은 슬롯이 된다.
+    슬롯 능력에는 적은 창, `supports_response_format_json = false`, `supports_structured_output = false`가 있다.
+  - 같은 모델에서 native schema만 빠뜨린 바인딩은 `Target_not_in_catalog`로 빠진다.
+    `Runtime_exact_reads.unstated`는 `[Native_schema]`이고, resolver는 `Target_model`로 거절한다.
+  - 같은 모델에 능력 표가 없는 바인딩도 빠진다.
+  - Anthropic wire에서 행도 표도 없는 바인딩도 빠진다. 시험은 그 바인딩의 override가 채워졌는지 먼저 본다.
+- agent_core 시험 하나를 둔다. 같은 바인딩을 `Declared_model`과 `No_model_declaration`으로 넘긴다.
+  앞은 provider 행에 묶이고 선언 값으로 답한다. 뒤는 override가 있어도 `Target_model`로 빠진다.
 - 확인은 PR CI의 타입 검사·시험과 현재 head 독립 리뷰로 한다.
 - 설치 뒤에는 두 가지를 본다.
   - 부팅 로그에 체크포인트 슬롯의 `Target_not_in_catalog`가 없다.

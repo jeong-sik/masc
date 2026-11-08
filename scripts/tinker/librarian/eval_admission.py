@@ -165,7 +165,7 @@ def real_items(manifest: Path, base: Path) -> list[RealItem]:
         prompt = R.parse(record.prompt, synth_render.template())
         if isinstance(prompt, R.ParseError):
             raise SystemExit(f"{record.digest[:16]}: prompt does not parse: {prompt.detail}")
-        live = check(prompt, json.dumps(record.answer, ensure_ascii=False))
+        live = check(prompt, Y.write(record.answer))
         if live.answer is None:
             raise SystemExit(f"{record.digest[:16]}: the live answer is refused: {live.problems}")
         items.append(RealItem(record.digest[:16], prompt, record.prompt, live.answer))

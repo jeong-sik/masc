@@ -1,7 +1,7 @@
 (executable
  (name process_group_terminal_stdin_fixture)
  (modules process_group_terminal_stdin_fixture)
- (libraries masc.masc_process eio eio.unix eio_main unix))
+ (libraries masc.masc_process eio eio_main unix))
 
 (rule
  (alias runtest-test_process_group_terminal_stdin)

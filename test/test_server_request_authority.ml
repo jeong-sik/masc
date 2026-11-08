@@ -20,10 +20,10 @@ let () =
   | Error error -> fail (Server_auth.configure_error_to_string error)
 ;;
 
-let trust_policy ?(bind_host = "127.0.0.1") ?(bind_port = 8935)
+let trust_policy ?(bind_host = "127.0.0.1") ?(bind_port = 8935) ?https_port
     ?explicit_base_url () =
   match
-    Authority.make_trust_policy ~bind_host ~bind_port ~explicit_base_url
+    Authority.make_trust_policy ~bind_host ~bind_port ~https_port ~explicit_base_url
   with
   | Ok policy -> policy
   | Error error -> fail (Authority.trust_policy_error_to_string error)
@@ -394,6 +394,116 @@ let check_trust label expected authority =
   check bool label true (Authority.trust_class authority = expected)
 ;;
 
+(* {1 The TLS listener's own identity} *)
+
+let tls_policy = trust_policy ~https_port:8938 ()
+
+let admitted_h2 ?(policy = tls_policy) ?scheme authority =
+  match
+    Authority.classify_h2_request
+      ~trust_policy:policy
+      (h2_request ?scheme ~headers:[ ":authority", authority ] "/health")
+  with
+  | Authority.H2_authority (Authority.Single authority) -> authority
+  | Authority.H2_authority
+      (Authority.Missing | Authority.Multiple | Authority.Malformed | Authority.Untrusted)
+  | Authority.Unsupported_asterisk_form_options ->
+    failf "expected %s to be admitted" authority
+;;
+
+let untrusted_h2 ?(policy = tls_policy) ?scheme authority =
+  match
+    Authority.classify_h2_request
+      ~trust_policy:policy
+      (h2_request ?scheme ~headers:[ ":authority", authority ] "/health")
+  with
+  | Authority.H2_authority Authority.Untrusted -> ()
+  | Authority.H2_authority
+      (Authority.Single _ | Authority.Missing | Authority.Multiple | Authority.Malformed)
+  | Authority.Unsupported_asterisk_form_options ->
+    failf "expected %s to be untrusted" authority
+;;
+
+let untrusted_http1 ?(policy = tls_policy) host =
+  check_classification
+    `Untrusted
+    (Authority.classify_http1_request
+       ~trust_policy:policy
+       (http1_request ~headers:[ "host", host ] "/health"))
+;;
+
+let test_tls_listener_identity_is_configured_bind () =
+  let h2 = admitted_h2 "127.0.0.1:8938" in
+  check string "host" "127.0.0.1" (Authority.host h2);
+  check (option int) "port" (Some 8938) (Authority.port h2);
+  check_scheme "h2 scheme is the listener's" Authority.Https h2;
+  check_trust "h2 trust is the listener's own" Authority.Configured_bind h2;
+  check bool "the listener is loopback" true (Authority.listener_is_loopback h2);
+  let localhost = admitted_h2 "localhost:8938" in
+  check string "loopback names are equivalent" "localhost" (Authority.host localhost);
+  check_trust "localhost trust" Authority.Configured_bind localhost;
+  (* HTTP/1.1 over TLS carries the same authority in Host. *)
+  let h1 = admitted_http1 ~policy:tls_policy [ "host", "127.0.0.1:8938" ] in
+  check_scheme "h1 scheme is the listener's" Authority.Https h1;
+  check_trust "h1 trust is the listener's own" Authority.Configured_bind h1;
+  check (option int) "h1 port" (Some 8938) (Authority.port h1);
+  (* The cleartext bind is admitted exactly as before. *)
+  let cleartext = admitted_h2 ~scheme:"http" "127.0.0.1:8935" in
+  check_scheme "cleartext scheme" Authority.Http cleartext;
+  check_trust "cleartext trust" Authority.Configured_bind cleartext
+;;
+
+let test_tls_listener_identity_needs_the_configured_port () =
+  (* No TLS listener: its would-be authority is a stranger. *)
+  untrusted_h2 ~policy:loopback_policy "127.0.0.1:8938";
+  untrusted_http1 ~policy:loopback_policy "127.0.0.1:8938";
+  (* Another port, the cleartext port, the scheme default, or the cleartext
+     scheme are not the TLS listener. *)
+  untrusted_h2 "127.0.0.1:8939";
+  untrusted_h2 "127.0.0.1:8935";
+  untrusted_h2 "127.0.0.1";
+  untrusted_h2 ~scheme:"http" "127.0.0.1:8938";
+  untrusted_http1 "127.0.0.1:8939";
+  untrusted_http1 "127.0.0.1";
+  (* A non-loopback name on the listener port is not the listener. *)
+  untrusted_h2 "attacker.example:8938";
+  untrusted_http1 "attacker.example:8938"
+;;
+
+let test_tls_listener_identity_keeps_explicit_precedence () =
+  let policy =
+    trust_policy
+      ~bind_host:"0.0.0.0"
+      ~https_port:8938
+      ~explicit_base_url:"https://masc.example.test:9443/root"
+      ()
+  in
+  let public = admitted_http1 ~policy [ "host", "masc.example.test:9443" ] in
+  check_trust "public host stays explicit" Authority.Explicit_trusted_host public;
+  check_scheme "public scheme" Authority.Https public;
+  let own = admitted_h2 ~policy "127.0.0.1:8938" in
+  check_trust "wildcard bind projects the TLS identity to loopback"
+    Authority.Configured_bind own;
+  check bool "wildcard listener is not loopback" false (Authority.listener_is_loopback own);
+  let projected = Authority.projection_context policy in
+  check string "background projection keeps the public host"
+    "masc.example.test" (Authority.host projected)
+;;
+
+let test_tls_listener_port_is_validated () =
+  match
+    Authority.make_trust_policy
+      ~bind_host:"127.0.0.1"
+      ~bind_port:8935
+      ~https_port:(Some 70000)
+      ~explicit_base_url:None
+  with
+  | Ok _ -> fail "a TLS port above 65535 was accepted"
+  | Error Authority.Malformed_tls_authority -> ()
+  | Error (Authority.Malformed_bind_authority | Authority.Malformed_explicit_base_url) ->
+    fail "the TLS port was blamed on another identity"
+;;
+
 let test_request_context_preserves_scheme_and_trust () =
   let local = admitted_http1 [ "host", "localhost:8935" ] in
   check_scheme "local scheme" Authority.Http local;
@@ -428,11 +538,11 @@ let test_trust_policy_has_no_permissive_default () =
   (match
      Authority.make_trust_policy
        ~bind_host:"0.0.0.0"
-       ~bind_port:8935
+       ~bind_port:8935 ~https_port:None
        ~explicit_base_url:(Some "ftp://attacker.example")
    with
    | Error Authority.Malformed_explicit_base_url -> ()
-   | Error Authority.Malformed_bind_authority
+   | Error (Authority.Malformed_bind_authority | Authority.Malformed_tls_authority)
    | Ok _ ->
      fail "malformed explicit trusted host did not fail closed");
   let wildcard_only = trust_policy ~bind_host:"0.0.0.0" () in
@@ -863,6 +973,21 @@ let () =
             "trust policy has no permissive default"
             `Quick
             test_trust_policy_has_no_permissive_default
+        ] )
+    ; ( "TLS listener identity"
+      , [ test_case
+            "listener host and port are its own identity"
+            `Quick
+            test_tls_listener_identity_is_configured_bind
+        ; test_case
+            "only the configured port and scheme"
+            `Quick
+            test_tls_listener_identity_needs_the_configured_port
+        ; test_case
+            "explicit identity keeps precedence"
+            `Quick
+            test_tls_listener_identity_keeps_explicit_precedence
+        ; test_case "port is validated" `Quick test_tls_listener_port_is_validated
         ] )
     ]
 ;;

@@ -143,18 +143,58 @@ type reply =
   ; body : string
   }
 
-let request_handler _addr (reqd : Httpun.Reqd.t Gluten.Reqd.t) =
+(* The handlers answer the way the live ingress starts: the request authority
+   must be admitted by the trust policy built for this listener's port, and it
+   must be the listener's own https identity. *)
+let trust_policy ~port =
+  match
+    Server_request_authority.make_trust_policy
+      ~bind_host:"127.0.0.1"
+      ~bind_port:8935
+      ~https_port:(Some port)
+      ~explicit_base_url:None
+  with
+  | Ok policy -> policy
+  | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
+;;
+
+let own_identity = function
+  | Server_request_authority.Single authority ->
+    (match Server_request_authority.scheme authority with
+     | Server_request_authority.Https -> `OK
+     | Server_request_authority.Http -> `Bad_request)
+  | Server_request_authority.Missing
+  | Server_request_authority.Multiple
+  | Server_request_authority.Malformed
+  | Server_request_authority.Untrusted ->
+    `Bad_request
+;;
+
+let request_handler ~trust_policy _addr (reqd : Httpun.Reqd.t Gluten.Reqd.t) =
+  let status =
+    own_identity
+      (Server_request_authority.classify_http1_request
+         ~trust_policy
+         (Httpun.Reqd.request reqd.Gluten.Reqd.reqd))
+  in
   let headers = Httpun.Headers.of_list [ "content-type", "text/plain"; "content-length", "2" ] in
   Httpun.Reqd.respond_with_string
     reqd.Gluten.Reqd.reqd
-    (Httpun.Response.create ~headers `OK)
+    (Httpun.Response.create ~headers status)
     "h1"
 ;;
 
-let h2_request_handler ~request_sw:_ _addr reqd =
+let h2_request_handler ~trust_policy ~request_sw:_ _addr reqd =
+  let status =
+    match
+      Server_request_authority.classify_h2_request ~trust_policy (H2.Reqd.request reqd)
+    with
+    | Server_request_authority.H2_authority classification -> own_identity classification
+    | Server_request_authority.Unsupported_asterisk_form_options -> `Bad_request
+  in
   H2.Reqd.respond_with_string
     reqd
-    (H2.Response.create ~headers:(H2.Headers.of_list [ "content-type", "text/plain" ]) `OK)
+    (H2.Response.create ~headers:(H2.Headers.of_list [ "content-type", "text/plain" ]) status)
     "h2"
 ;;
 
@@ -174,7 +214,7 @@ let tls_client ~sw ~net ~port ~alpn =
   | Error () -> fail "no session after the client handshake"
 ;;
 
-let h2_get ~sw socket =
+let h2_get ~sw ~authority socket =
   let closing = ref false in
   let client =
     H2_eio.Client.create_connection
@@ -190,7 +230,7 @@ let h2_get ~sw socket =
          ~scheme:"https"
          `GET
          "/"
-         ~headers:(H2.Headers.of_list [ ":authority", "localhost" ]))
+         ~headers:(H2.Headers.of_list [ ":authority", authority ]))
       ~error_handler:(fun _ -> fail "unexpected h2 stream error")
       ~response_handler:(fun response reader ->
         let body = Buffer.create 16 in
@@ -214,13 +254,13 @@ let h2_get ~sw socket =
   reply
 ;;
 
-let h1_get ~sw socket =
+let h1_get ~sw ~host socket =
   let client = Httpun_eio.Client.create_connection ~sw socket in
   let reply, resolve = Eio.Promise.create () in
   let writer =
     Httpun_eio.Client.request
       client
-      (Httpun.Request.create ~headers:(Httpun.Headers.of_list [ "host", "localhost" ]) `GET "/")
+      (Httpun.Request.create ~headers:(Httpun.Headers.of_list [ "host", host ]) `GET "/")
       ~error_handler:(fun _ -> fail "unexpected h1 client error")
       ~response_handler:(fun response reader ->
         let body = Buffer.create 16 in
@@ -265,6 +305,7 @@ let test_alpn_dispatch () =
     | `Tcp (_, port) -> port
     | `Unix _ -> fail "a TCP socket has a port"
   in
+  let trust_policy = trust_policy ~port in
   let accepted = metric "accepted_total" in
   let h2 = metric "alpn_h2_total" in
   let http1 = metric "alpn_http1_total" in
@@ -279,19 +320,26 @@ let test_alpn_dispatch () =
             ~socket
             ~addr_label:(Printf.sprintf "127.0.0.1:%d" port)
             ~tls
-            ~request_handler
-            ~h2_request_handler
+            ~request_handler:(request_handler ~trust_policy)
+            ~h2_request_handler:(h2_request_handler ~trust_policy)
             ~h2_error_handler;
           fail "the accept loop returned"))
       (fun () ->
+        (* The authority a client of this listener sends: the loopback host
+           and the listener's own port, over https. *)
+        let authority = Printf.sprintf "127.0.0.1:%d" port in
         let alpn_h2, h2_socket = tls_client ~sw ~net ~port ~alpn:"h2" in
-        let h2_reply = h2_get ~sw h2_socket in
+        let h2_reply = h2_get ~sw ~authority h2_socket in
         check int "h2 status" 200 h2_reply.status;
         check string "h2 handler answered" "h2" h2_reply.body;
         let alpn_http1, h1_socket = tls_client ~sw ~net ~port ~alpn:"http/1.1" in
-        let h1_reply = h1_get ~sw h1_socket in
+        let h1_reply = h1_get ~sw ~host:(Printf.sprintf "localhost:%d" port) h1_socket in
         check int "http/1.1 status" 200 h1_reply.status;
         check string "httpun handler answered" "h1" h1_reply.body;
+        (* The cleartext port's authority is not this listener's. *)
+        let _, stranger_socket = tls_client ~sw ~net ~port ~alpn:"h2" in
+        let stranger = h2_get ~sw ~authority:"127.0.0.1:8935" stranger_socket in
+        check int "the cleartext authority is refused on the TLS listener" 400 stranger.status;
         (* A cleartext request on the TLS port is read as a record header. The
            TLS reader checks the length before the content type (tls
            reader.ml, parse_record) and waits for the 8,239 bytes that "GET /"
@@ -309,8 +357,8 @@ let test_alpn_dispatch () =
   check (option string) "server chose h2" (Some "h2") alpn_h2;
   check (option string) "server chose http/1.1" (Some "http/1.1") alpn_http1;
   check string "listener status" "listening" (status_label ());
-  check int "three connections accepted" (accepted + 3) (metric "accepted_total");
-  check int "one h2 negotiation" (h2 + 1) (metric "alpn_h2_total");
+  check int "four connections accepted" (accepted + 4) (metric "accepted_total");
+  check int "two h2 negotiations" (h2 + 2) (metric "alpn_h2_total");
   check int "one http/1.1 negotiation" (http1 + 1) (metric "alpn_http1_total");
   check int "one handshake failure" (failures + 1) (metric "handshake_failures_total")
 ;;

@@ -22,6 +22,7 @@ from dataclasses import dataclass
 # OCaml 5 native int on 64-bit hosts: 63-bit two's complement.
 OCAML_INT_MIN = -(2**62)
 OCAML_INT_MAX = 2**62 - 1
+_INT_DIGITS = len(str(OCAML_INT_MAX))  # 19, as many as len(str(-OCAML_INT_MIN))
 
 
 @dataclass(frozen=True, slots=True)
@@ -149,6 +150,19 @@ def _read_string(text: str, pos: int) -> tuple[str, int] | JsonError:
         parts.append(chr(code))
 
 
+def int_of_lexeme(lexeme: str) -> int | IntLit:
+    """An integer token (`-?(0|[1-9][0-9]*)`) as Yojson reads it: `Int` in range, else `Intlit`.
+
+    A token has no leading zero, so one with more digits than OCAML_INT_MAX is
+    out of range and stays text. int() is never called on it: CPython refuses
+    to convert more than 4300 digits, and Yojson reads any length.
+    """
+    if len(lexeme.removeprefix("-")) > _INT_DIGITS:
+        return IntLit(lexeme)
+    value = int(lexeme)
+    return value if OCAML_INT_MIN <= value <= OCAML_INT_MAX else IntLit(lexeme)
+
+
 def _read_number(text: str, pos: int) -> _Read:
     found = _NUMBER.match(text, pos)
     if found is None:
@@ -156,96 +170,127 @@ def _read_number(text: str, pos: int) -> _Read:
     lexeme = found.group()
     if found.group(1) is not None or found.group(2) is not None:
         return float(lexeme), found.end()
-    value = int(lexeme)
-    if OCAML_INT_MIN <= value <= OCAML_INT_MAX:
-        return value, found.end()
-    return IntLit(lexeme), found.end()
+    return int_of_lexeme(lexeme), found.end()
 
 
-def _read_object(text: str, pos: int) -> _Read:
-    members: list[tuple[str, Json]] = []
-    after = _skip_space(text, pos + 1)
-    if isinstance(after, JsonError):
-        return after
-    pos = after
-    if text.startswith("}", pos):
-        return JsonObject(()), pos + 1
-    while True:
-        if text.startswith('"', pos):
-            key = _read_string(text, pos)
-            if isinstance(key, JsonError):
-                return key
-            name, pos = key
-        else:
-            ident = _IDENT.match(text, pos)
-            if ident is None:
-                return JsonError(pos, "expected string or identifier")
-            name, pos = ident.group(), ident.end()
-        after = _skip_space(text, pos)
-        if isinstance(after, JsonError):
-            return after
-        if not text.startswith(":", after):
-            return JsonError(after, "expected ':'")
-        after = _skip_space(text, after + 1)
-        if isinstance(after, JsonError):
-            return after
-        value = _read_value(text, after)
-        if isinstance(value, JsonError):
-            return value
-        members.append((name, value[0]))
-        after = _skip_space(text, value[1])
-        if isinstance(after, JsonError):
-            return after
-        if text.startswith("}", after):
-            return JsonObject(tuple(members)), after + 1
-        if not text.startswith(",", after):
-            return JsonError(after, "expected ',' or '}'")
-        after = _skip_space(text, after + 1)
-        if isinstance(after, JsonError):
-            return after
-        pos = after
-
-
-def _read_array(text: str, pos: int) -> _Read:
-    items: list[Json] = []
-    after = _skip_space(text, pos + 1)
-    if isinstance(after, JsonError):
-        return after
-    pos = after
-    if text.startswith("]", pos):
-        return (), pos + 1
-    while True:
-        value = _read_value(text, pos)
-        if isinstance(value, JsonError):
-            return value
-        items.append(value[0])
-        after = _skip_space(text, value[1])
-        if isinstance(after, JsonError):
-            return after
-        if text.startswith("]", after):
-            return tuple(items), after + 1
-        if not text.startswith(",", after):
-            return JsonError(after, "expected ',' or ']'")
-        after = _skip_space(text, after + 1)
-        if isinstance(after, JsonError):
-            return after
-        pos = after
-
-
-def _read_value(text: str, pos: int) -> _Read:
-    if pos >= len(text):
-        return JsonError(pos, "unexpected end of input")
-    head = text[pos]
-    if head == "{":
-        return _read_object(text, pos)
-    if head == "[":
-        return _read_array(text, pos)
-    if head == '"':
+def _read_scalar(text: str, pos: int) -> _Read:
+    """A string, literal or number token at `pos`."""
+    if text.startswith('"', pos):
         return _read_string(text, pos)
     for lexeme, literal in _LITERALS:
         if text.startswith(lexeme, pos):
             return literal, pos + len(lexeme)
     return _read_number(text, pos)
+
+
+def _read_key(text: str, pos: int) -> tuple[str, int] | JsonError:
+    """A member name (string or identifier), then ':', and the offset where its value starts."""
+    if text.startswith('"', pos):
+        key = _read_string(text, pos)
+        if isinstance(key, JsonError):
+            return key
+        name, pos = key
+    else:
+        ident = _IDENT.match(text, pos)
+        if ident is None:
+            return JsonError(pos, "expected string or identifier")
+        name, pos = ident.group(), ident.end()
+    after = _skip_space(text, pos)
+    if isinstance(after, JsonError):
+        return after
+    if not text.startswith(":", after):
+        return JsonError(after, "expected ':'")
+    after = _skip_space(text, after + 1)
+    if isinstance(after, JsonError):
+        return after
+    return name, after
+
+
+@dataclass(slots=True)
+class _OpenArray:
+    items: list[Json]
+
+
+@dataclass(slots=True)
+class _OpenObject:
+    members: list[tuple[str, Json]]
+    name: str  # the member whose value is being read
+
+
+def _read_value(text: str, pos: int) -> _Read:
+    """One value starting at `pos`, read left to right as Yojson's lexer does.
+
+    Open containers wait on a list instead of the Python call stack, so any
+    depth Yojson reads is read here too; a recursive reader stops near 500.
+    """
+    open_: list[_OpenArray | _OpenObject] = []
+    while True:
+        # The value at pos: a token, an empty container, or a container whose
+        # first item is read next.
+        if pos >= len(text):
+            return JsonError(pos, "unexpected end of input")
+        value: Json
+        if text.startswith("{", pos) or text.startswith("[", pos):
+            array = text.startswith("[", pos)
+            after = _skip_space(text, pos + 1)
+            if isinstance(after, JsonError):
+                return after
+            if text.startswith("]" if array else "}", after):
+                value, pos = ((), after + 1) if array else (JsonObject(()), after + 1)
+            elif array:
+                open_.append(_OpenArray([]))
+                pos = after
+                continue
+            else:
+                key = _read_key(text, after)
+                if isinstance(key, JsonError):
+                    return key
+                open_.append(_OpenObject([], key[0]))
+                pos = key[1]
+                continue
+        else:
+            token = _read_scalar(text, pos)
+            if isinstance(token, JsonError):
+                return token
+            value, pos = token
+        # Give the value to the innermost open container, and close each
+        # container that ends right after it.
+        while True:
+            if not open_:
+                return value, pos
+            after = _skip_space(text, pos)
+            if isinstance(after, JsonError):
+                return after
+            container = open_[-1]
+            match container:
+                case _OpenArray(items=items):
+                    items.append(value)
+                    if text.startswith("]", after):
+                        open_.pop()
+                        value, pos = tuple(items), after + 1
+                        continue
+                    if not text.startswith(",", after):
+                        return JsonError(after, "expected ',' or ']'")
+                    after = _skip_space(text, after + 1)
+                    if isinstance(after, JsonError):
+                        return after
+                    pos = after
+                case _OpenObject(members=members, name=name):
+                    members.append((name, value))
+                    if text.startswith("}", after):
+                        open_.pop()
+                        value, pos = JsonObject(tuple(members)), after + 1
+                        continue
+                    if not text.startswith(",", after):
+                        return JsonError(after, "expected ',' or '}'")
+                    after = _skip_space(text, after + 1)
+                    if isinstance(after, JsonError):
+                        return after
+                    key = _read_key(text, after)
+                    if isinstance(key, JsonError):
+                        return key
+                    container.name, pos = key
+            break
 
 
 def parse(text: str) -> Json | JsonError:
@@ -311,22 +356,51 @@ def format_float(value: float) -> str:
     return text
 
 
+@dataclass(frozen=True, slots=True)
+class _Text:
+    """Output the writer emits as it is: brackets, commas and `"name":` prefixes."""
+
+    text: str
+
+
 def write(value: Json) -> str:
-    """`Yojson.Safe.to_string`: compact, members in the order given."""
-    match value:
-        case None:
-            return "null"
-        case bool():
-            return "true" if value else "false"
-        case int():
-            return str(value)
-        case float():
-            return format_float(value)
-        case str():
-            return write_string(value)
-        case IntLit(text=text):
-            return text
-        case tuple():
-            return "[" + ",".join(write(item) for item in value) + "]"
-        case JsonObject(members=members):
-            return "{" + ",".join(write_string(name) + ":" + write(item) for name, item in members) + "}"
+    """`Yojson.Safe.to_string`: compact, members in the order given.
+
+    Work waits on a list instead of the Python call stack, so any depth the
+    reader returns is written.
+    """
+    out: list[str] = []
+    todo: list[Json | _Text] = [value]
+    while todo:
+        item = todo.pop()
+        match item:
+            case _Text(text=text):
+                out.append(text)
+            case None:
+                out.append("null")
+            case bool():
+                out.append("true" if item else "false")
+            case int():
+                out.append(str(item))
+            case float():
+                out.append(format_float(item))
+            case str():
+                out.append(write_string(item))
+            case IntLit(text=text):
+                out.append(text)
+            case tuple():
+                # Pushed in reverse, so they pop in order.
+                todo.append(_Text("]"))
+                for index in range(len(item) - 1, -1, -1):
+                    todo.append(item[index])
+                    if index > 0:
+                        todo.append(_Text(","))
+                todo.append(_Text("["))
+            case JsonObject(members=members):
+                todo.append(_Text("}"))
+                for index in range(len(members) - 1, -1, -1):
+                    name, child = members[index]
+                    todo.append(child)
+                    todo.append(_Text(("," if index > 0 else "") + write_string(name) + ":"))
+                todo.append(_Text("{"))
+    return "".join(out)

@@ -26,31 +26,30 @@ from yojson_wire import (
 )
 
 
-def canonical(value: Json) -> Json | Violation:
-    """lane_addon_action.ml:39-58: sort members, refuse duplicates and non-finite numbers."""
+@dataclass(slots=True)
+class _Open:
+    """A container whose children are being made canonical, in source order."""
+
+    names: tuple[str, ...] | None  # None for an array
+    values: tuple[Json, ...]
+    ordered: bool  # an object whose names already increase keeps its order
+    done: list[Json]
+
+
+def _enter(value: Json) -> Json | Violation | _Open:
+    """A canonical leaf or empty container, the refusal, or a container to descend into.
+
+    An object's members are checked for duplicates here, before any child.
+    """
     match value:
         case JsonObject(members=members):
-            names = [name for name, _ in members]
+            names = tuple(name for name, _ in members)
             ordered = all(left < right for left, right in itertools.pairwise(names))
             if not ordered and len(set(names)) != len(names):
                 return Violation(Kind.DUPLICATE_MEMBER, "duplicate object member")
-            rebuilt: list[tuple[str, Json]] = []
-            for name, item in members:
-                child = canonical(item)
-                if isinstance(child, Violation):
-                    return child
-                rebuilt.append((name, child))
-            if not ordered:
-                rebuilt.sort(key=lambda pair: pair[0])
-            return JsonObject(tuple(rebuilt))
+            return _Open(names, tuple(item for _, item in members), ordered, []) if members else value
         case tuple():
-            items: list[Json] = []
-            for item in value:
-                child = canonical(item)
-                if isinstance(child, Violation):
-                    return child
-                items.append(child)
-            return tuple(items)
+            return _Open(None, value, True, []) if value else value
         case bool() | int() | str() | IntLit() | None:
             return value
         case float():
@@ -62,6 +61,45 @@ def canonical(value: Json) -> Json | Violation:
             text = f"{value:.0f}"
             number = int(text)
             return number if OCAML_INT_MIN <= number <= OCAML_INT_MAX else IntLit(text)
+
+
+def _close(container: _Open) -> Json:
+    if container.names is None:
+        return tuple(container.done)
+    members = list(zip(container.names, container.done, strict=True))
+    if not container.ordered:
+        members.sort(key=lambda pair: pair[0])
+    return JsonObject(tuple(members))
+
+
+def canonical(value: Json) -> Json | Violation:
+    """lane_addon_action.ml:39-58: sort members, refuse duplicates and non-finite numbers.
+
+    Depth first in source order, so the refusal is the first one the OCaml
+    recursion meets. Open containers wait on a list instead of the Python call
+    stack, so any depth the reader returns is checked.
+    """
+    open_: list[_Open] = []
+    pending = value
+    while True:
+        entered = _enter(pending)
+        if isinstance(entered, Violation):
+            return entered
+        if isinstance(entered, _Open):
+            open_.append(entered)
+            pending = entered.values[0]
+            continue
+        finished: Json = entered
+        while True:
+            if not open_:
+                return finished
+            container = open_[-1]
+            container.done.append(finished)
+            if len(container.done) < len(container.values):
+                pending = container.values[len(container.done)]
+                break
+            open_.pop()
+            finished = _close(container)
 
 
 @dataclass(frozen=True, slots=True)

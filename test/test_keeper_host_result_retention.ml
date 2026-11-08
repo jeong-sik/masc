@@ -392,15 +392,28 @@ let test_shared_context_preserves_each_retained_result () = with_workspace (fun 
   check (list string) "producing context changes no durable acknowledgements" ids
     (Outbox.receipt_ids (load base_path)))
 
+(* Host receipts written before #49680 hold an image as a base64 wire block in
+   [content_blocks]; today's host receipts name it by blob address instead
+   (test_screenshot_receipt_names_bytes_by_address). Receipts of the old shape
+   stay on disk until a completed turn acknowledges them. *)
+let retain_old_host_image_receipt base_path ~call_id image =
+  let block = match Agent_core.Checkpoint.wire_content_block_to_json_result
+      ~scope:"official_client_original_tool_result" image with
+    | Ok block -> block
+    | Error error -> fail (Agent_core.Error.to_string error) in
+  let producer = get (Outbox.host_producer ~base_path ~keeper_name
+      ~runtime_label:"old-host-fixture" ~turn_count:1) in
+  get (Outbox.retain_host_result producer ~invocation_index:0 ~call_id
+         ~tool_name:"Screenshot" ~arguments:(`Assoc [])
+         ~response:(`Assoc ["success", `Bool true; "content", `String "screenshot taken";
+                            "content_blocks", `List [block]]))
+
 let test_carrier_names_media_by_identity () = with_workspace (fun base_path ->
   let raw = String.init 3000 (fun index -> Char.chr (index mod 256)) in
   let encoded = Base64.encode_string raw in
   let stored = Agent_core.History.stored_of_raw raw in
   let image = Llm_provider.Types.Image {media_type="image/png";source=Llm_provider.Types.Base64 encoded} in
-  let terminal_error = ref None in
-  let tool = project ~base_path ~stop:(Some stop) ~terminal_error (fun _ ->
-    Ok {Agent_core.Types.content="screenshot taken";content_blocks=Some [image];_meta=None}) in
-  ignore (tool.call ~call_id:"host-image-call" (`Assoc []));
+  retain_old_host_image_receipt base_path ~call_id:"host-image-call" image;
   let items = match Runtime_official_client_tool.project_content Codex
       ~content:"screenshot taken" ~content_blocks:(Some [image]) with
     | Ok items -> items | Error detail -> fail detail in

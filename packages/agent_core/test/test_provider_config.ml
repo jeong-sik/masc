@@ -1947,10 +1947,11 @@ let test_tinker_inkling_2_small_refuses_provider_schema () =
     | Ok () -> Alcotest.fail "Inkling-2-Small must not take a provider-schema request")
 ;;
 
-(* An exact-output slot binds only to a provider row and a model row of the
-   catalog (Exact_output_catalog_binding.resolve_exact). A runtime.toml-only
-   declaration is left out of the exact registry at boot. These rows let a
-   Lane Add-on's exact output name the Tinker model as a slot. *)
+(* An exact-output slot binds to a catalog provider row, and to a model row
+   (Exact_output_catalog_binding.resolve_exact) or, for a model with no row,
+   to the capabilities its binding declares. A runtime.toml-only model without
+   a capabilities table is left out of the exact registry at boot. These rows
+   let a Lane Add-on's exact output name the Tinker model as a slot. *)
 let test_tinker_inkling_2_small_binds_as_exact_target () =
   match List.find_opt Sys.file_exists [ "models.toml"; "../models.toml" ] with
   | None -> Alcotest.fail "models.toml not found for the exact binding test"

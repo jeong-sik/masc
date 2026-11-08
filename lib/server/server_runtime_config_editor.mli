@@ -64,7 +64,7 @@ val respond_runtime_config_commit :
   operation:runtime_config_write_operation ->
   receipt:Runtime.config_commit_receipt ->
   Httpun.Request.t ->
-  Httpun.Reqd.t ->
+  Http_reqd.t ->
   unit
 (** Answer a committed write: apply the receipt to the Skill snapshot, audit
     the write as a success, and send the editor payload. *)

@@ -30,7 +30,6 @@ let test_resolved_failure_erasure () =
          (category_for_resolved_callee callee))
     [ "Stdlib!.Result.to_option"
     ; "Result.to_option"
-    ; "Agent_core__Parse_outcome.to_option"
     ]
 ;;
 

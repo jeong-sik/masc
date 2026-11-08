@@ -18,6 +18,14 @@
     [Unix.Unix_error (errno, "posix_spawn", executable)]; the executable
     lookup on PATH and its [Eio.Io] error stay with [Eio_unix.Process]. *)
 
+exception Stop_without_grace
+(** A cancellation reason that ends a child at once. When the cancellation
+    that reaches a child's reaper carries this reason, directly or inside
+    [Eio.Cancel.Cancelled], [Fun.Finally_raised] or an [Eio.Exn.Multiple]
+    whose members all carry it, the reaper sends SIGKILL to the child or its
+    group with no TERM grace. Any other cancellation keeps the grace. Fail a
+    switch with it only for work whose children nobody waits on any more. *)
+
 val mgr : Eio_unix.Process.mgr_ty Eio.Resource.t
 
 val original_start : _ Eio.Process.t -> string option

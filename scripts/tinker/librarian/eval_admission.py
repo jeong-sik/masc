@@ -51,9 +51,9 @@ Definitions:
 - latency p50 (G5): median wall time of E-real calls that returned HTTP 200.
   Every target first gets each prompt with WARM_MAX_TOKENS, so the measured
   calls all read a cached prefix. `verdict` refuses when fewer than
-  `warm_share_min` of a target's calls did. A call is one HTTP attempt
-  (`tinker_oai` sends no retries), so a failed call is an answer that is not
-  valid, and `http_errors` counts them.
+  `warm_share_min` of a target's calls did. `tinker_oai` retries a transient
+  failure itself and logs every attempt, so wall_s is one attempt. A call that
+  still failed is an answer that is not valid, and `http_errors` counts them.
 - `verdict` recomputes every number from rows.jsonl. It refuses unless both runs
   sent the same model under each name, and each candidate is the sampler_path
   `train_sft.py` saved for that branch under these pass lines.

@@ -10,7 +10,6 @@ include module type of Voice_bridge_core
 
 (** {1 Types} *)
 
-(** How one Voice MCP call failed. *)
 (** One voice as an endpoint names it. [voice_id] is what a configuration
     stores. For [say] that id is the whole printed label, parentheses included:
     say adds them to names that exist in several languages, and the bare name
@@ -78,6 +77,7 @@ val clip_format_for_kind : Voice_config.endpoint_kind -> Voice_bridge_core.clip_
     reader resolves a token by it, so the two sides cannot disagree about what
     the bytes are. *)
 
+(** How one Voice MCP call failed. *)
 type mcp_call_error =
   | Timed_out of float
   | Connection_failed of string

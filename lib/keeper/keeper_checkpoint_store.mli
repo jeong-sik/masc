@@ -6,15 +6,10 @@
 val agent_core_checkpoint_path :
   session_dir:string -> session_id:string -> string
 
-(** [agent-core-snapshot-] prefix on AGENT_CORE history archive entries. *)
-(** [.json] suffix on AGENT_CORE history archive entries. *)
-(** [true] iff [filename] is an AGENT_CORE history archive file. *)
 (** Sorted-descending list of AGENT_CORE history archive filenames in
     [session_dir]. *)
-
 val list_agent_core_history_files : session_dir:string -> string list
 
-(** Number of AGENT_CORE history archive entries retained after a save. *)
 (** Path of an AGENT_CORE history archive entry within [session_dir]. *)
 val agent_core_history_path :
   session_dir:string -> snapshot_id:string -> string

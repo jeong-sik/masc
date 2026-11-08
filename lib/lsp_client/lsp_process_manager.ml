@@ -410,7 +410,6 @@ let command_exists cmd =
   Executable_path.path_has_executable cmd
 ;;
 
-(** Allocate a fresh JSON-RPC request ID for this process. *)
 (** Write a JSON-RPC message to the process stdin with Content-Length framing.
 
     LSP spec: messages are framed as

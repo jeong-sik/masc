@@ -191,6 +191,7 @@ val with_metadata : Yojson.Safe.t -> result -> result
 
 (** Explicit predicates.  Use all three when recording or serializing an
     outcome; do not collapse {!Deferred} into a success boolean inside MASC. *)
+
 (** [true] only for [Completed].  This is a derived query, not an outcome value;
     registries and serializers must consume the full {!disposition}. *)
 val is_success : result -> bool

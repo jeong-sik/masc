@@ -371,8 +371,12 @@ let test_h2_settings () =
   let config = Server_bootstrap_http.h2_config () in
   check bool "server push is never advertised" false config.H2.Config.enable_server_push;
   check int32 "stream limit" 100l config.H2.Config.max_concurrent_streams;
-  check int32 "initial window is the RFC 9113 default" 65535l config.H2.Config.initial_window_size;
-  check int "largest frame is the RFC 9113 default" 16384 config.H2.Config.read_buffer_size
+  check int32 "initial window is the h2 library default"
+    H2.Config.default.initial_window_size config.H2.Config.initial_window_size;
+  check int32 "the library default is 2^27, not the RFC 9113 65,535"
+    (Int32.shift_left 1l 27) config.H2.Config.initial_window_size;
+  check int "largest frame is the library default"
+    H2.Config.default.read_buffer_size config.H2.Config.read_buffer_size
 ;;
 
 let () =
@@ -384,7 +388,7 @@ let () =
         ] )
     ; ( "listener"
       , [ test_case "ALPN picks h2 or httpun" `Quick test_alpn_dispatch
-        ; test_case "h2 settings: push off, RFC defaults" `Quick test_h2_settings
+        ; test_case "h2 settings: push off, library defaults" `Quick test_h2_settings
         ] )
     ]
 ;;

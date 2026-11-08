@@ -912,8 +912,10 @@ let test_address_text_names_the_reader_only_when_offered () = with_workspace (fu
   check string "both texts name the same blob" (carried_reference with_reader).Tool_output.sha256
     (carried_reference without_reader).Tool_output.sha256)
 
-(* Receipts written before #49680 hold base64 media in the file. #49665 keeps
-   it out of the inline text, and the address form carries that same text. *)
+(* A Codex receipt holds its image as a base64 data URL in the file (#49697).
+   #49665 keeps it out of the inline text, and the address form carries that
+   same text. The host receipt here is written by today's code, which names
+   its image by blob address. *)
 let test_address_form_keeps_base64_out () = with_workspace (fun base_path ->
   let raw = String.init 3000 (fun index -> Char.chr (index mod 256)) in
   let encoded = Base64.encode_string raw in
@@ -947,6 +949,71 @@ let test_address_form_keeps_base64_out () = with_workspace (fun base_path ->
    | None -> fail "the carried blob is held");
   check (list (pair string string)) "switching leaves the receipt files unchanged" files
     (receipt_files base_path))
+
+(* A host receipt written before #49680 holds its image as a base64 wire block
+   in [content_blocks]. #49665 names it by bytes and sha256 in the inline text,
+   so neither the address text nor its blob carries the payload. *)
+let test_address_form_keeps_old_host_base64_out () = with_workspace (fun base_path ->
+  let raw = String.init 3000 (fun index -> Char.chr (index mod 256)) in
+  let encoded = Base64.encode_string raw in
+  let image = Llm_provider.Types.Image {media_type="image/png";source=Llm_provider.Types.Base64 encoded} in
+  let block = match Agent_core.Checkpoint.wire_content_block_to_json_result
+      ~scope:"official_client_original_tool_result" image with
+    | Ok block -> block
+    | Error error -> fail (Agent_core.Error.to_string error) in
+  let producer = get (Outbox.host_producer ~base_path ~keeper_name
+      ~runtime_label:"carrier-fixture" ~turn_count:1) in
+  get (Outbox.retain_host_result producer ~invocation_index:0 ~call_id:"old-host-image"
+         ~tool_name:"Screenshot" ~arguments:(`Assoc [])
+         ~response:(`Assoc ["success", `Bool true; "content", `String "screenshot taken";
+                            "content_blocks", `List [block]]));
+  retain_vendor_receipts base_path (List.init 4 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "old-host-text-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 'o'))));
+  let files = receipt_files base_path in
+  check int "only the old host receipt file holds the base64 payload" 1
+    (List.length (List.filter (fun (_, body) -> String_util.contains_substring body encoded) files));
+  let snapshot = load base_path in
+  check bool "the inline text names the image instead of carrying it" false
+    (String_util.contains_substring (String.concat "\n\n" (Outbox.developer_context snapshot)) encoded);
+  let carrier = Outbox.carrier ~base_path ~artifact_reader_available:true snapshot in
+  switch carrier;
+  let text = carried_text carrier in
+  check bool "the address text holds no base64 payload" false
+    (String_util.contains_substring text encoded);
+  (match held (blob_store base_path) (carried_reference text).Tool_output.sha256 with
+   | Some carried ->
+     check bool "the carried blob holds no base64 payload" false
+       (String_util.contains_substring carried encoded)
+   | None -> fail "the carried blob is held");
+  check (list (pair string string)) "switching leaves the receipt files unchanged" files
+    (receipt_files base_path))
+
+(* The switch is decided on a planned marker. If the stored marker came out
+   longer, a carrier near the threshold would switch to a text that is not
+   shorter, and every fixture far from the threshold would still pass. *)
+let test_planned_marker_is_as_long_as_the_stored_one () = with_workspace (fun base_path ->
+  retain_vendor_receipts base_path (List.init 4 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "planned-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 'p'))));
+  let snapshot = load base_path in
+  let inline = String.concat "\n\n" (Outbox.developer_context snapshot) in
+  let carrier = Outbox.carrier ~base_path ~artifact_reader_available:true snapshot in
+  switch carrier;
+  let text = carried_text carrier in
+  let stored = carried_reference text in
+  let planned =
+    match Tool_output.make_artifact_ref
+            ~sha256:(String.make (String.length stored.Tool_output.sha256) '0')
+            ~bytes:(String.length inline) ~preview:stored.Tool_output.preview
+            ~mime:stored.Tool_output.mime with
+    | Ok planned -> planned
+    | Error error -> fail (Tool_output.make_error_to_string error) in
+  let marker reference = Tool_output.encode_for_agent_core (Tool_output.Stored reference) in
+  check int "the planned marker is as long as the stored one"
+    (String.length (marker stored)) (String.length (marker planned));
+  check bool "the switched text is strictly shorter than the inline text" true
+    (String.length text < String.length inline))
 
 (* Nothing durable names the carrier blob, so a deploy sweep may delete it
    while the receipts it carried stay. The next run writes it again. *)
@@ -1028,5 +1095,9 @@ let () = run "Original official-client host result retention"
     test_case "address text names the reader only when offered" `Quick
       test_address_text_names_the_reader_only_when_offered;
     test_case "address form keeps base64 out" `Quick test_address_form_keeps_base64_out;
+    test_case "address form keeps old host base64 out" `Quick
+      test_address_form_keeps_old_host_base64_out;
+    test_case "planned marker is as long as the stored one" `Quick
+      test_planned_marker_is_as_long_as_the_stored_one;
     test_case "maintenance keeps receipt blobs and the next run rewrites" `Quick
       test_maintenance_keeps_receipt_blobs_and_the_next_run_rewrites]]

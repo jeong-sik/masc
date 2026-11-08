@@ -80,7 +80,8 @@ type interaction = Activate_tab | Click of string | Fill of { selector : string;
   | Press_key of { document_id : string; key : Keyboard.t }
   | Scroll of { x : int; y : int }
   | Hover of pointer_target
-  | Drag_to of { source : pointer_target; destination : pointer_target; via : Pointer.point list; duration_ms : int }
+  | Drag_to of { source : string; destination : string }
+      (** One selector dragged onto another by the SDK's dragAndDrop. *)
   | Hover_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Tap_at of { point : Pointer.point; viewport : Pointer.viewport }
   | Swipe of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport; via : Pointer.point list; duration_ms : int }
@@ -94,12 +95,7 @@ type interaction = Activate_tab | Click of string | Fill of { selector : string;
    their own native input contracts and dispatch paths. *)
 let ego_input_contract = function
   | Type_text _ -> Native_input.contract Native_input.Keyboard_type
-  | Drag_to {source;destination;via;_} ->
-      (match source,destination,via with
-       | Selector _,Selector _,[] -> Native_input.contract Native_input.Drag_and_drop
-       | Selector _,Selector _,_::_
-       | Scene_node _,(Selector _|Scene_node _),([]|_::_)
-       | Selector _,Scene_node _,([]|_::_) -> Native_input.contract Native_input.Raw_pointer_drag)
+  | Drag_to _ -> Native_input.contract Native_input.Drag_and_drop
   | Click _ | Click_node _ | Click_target _ -> Native_input.contract Native_input.Click
   | Double_click _ | Double_click_target _ -> Native_input.contract Native_input.Double_click
   | Click_at _ | Double_click_at _ -> Native_input.contract Native_input.Mouse_click
@@ -190,13 +186,7 @@ let ego_reply_policy = function
     (match action with
      | Activate_tab | Click _ | Fill _ | Select_option _ | Click_target _ | Fill_target _
      | Hover_target _ | Double_click_target _ -> Executor_owned
-     | Hover (Selector _) | Double_click (Selector _) -> Executor_owned
-     | Drag_to {source;destination;via;duration_ms} ->
-       (match source,destination with
-        | Selector _,Selector _ ->
-          (match via with [] when duration_ms=0 -> Executor_owned
-           | [] | _::_ -> Reply_window)
-        | Scene_node _,(Selector _|Scene_node _) | Selector _,Scene_node _ -> Reply_window)
+     | Hover (Selector _) | Double_click (Selector _) | Drag_to _ -> Executor_owned
      | Hover (Scene_node _) | Double_click (Scene_node _)
      | Set_viewport _ | Double_click_at _ | Type_text _
      | Press_key _ | Scroll _ | Hover_at _ | Tap_at _ | Swipe _ | Click_at _
@@ -258,7 +248,7 @@ let interaction_verb = function
   | Scroll _ -> "scroll"
 ;;
 
-let drag_fields via duration_ms =
+let swipe_fields via duration_ms =
   (match via with [] -> [] | _::_ -> ["via", `List (List.map Pointer.point_to_json via)])
   @ (if duration_ms = 0 then [] else ["durationMs", `Int duration_ms])
 
@@ -327,8 +317,8 @@ let interaction_args ~tab_id ~expected_url action =
     | Type_text {document_id;text} -> [verb;"documentId",`String document_id;"text",`String text]
     | Press_key {document_id;key} -> [verb;"documentId",`String document_id] @ Keyboard.to_json_fields key
     | Hover target -> verb :: target_fields target
-    | Drag_to {source;destination;via;duration_ms} -> [verb; "source",`Assoc (target_fields source);
-        "destination",`Assoc (target_fields destination)] @ drag_fields via duration_ms
+    | Drag_to {source;destination} -> [verb; "source",`Assoc ["selector",`String source];
+        "destination",`Assoc ["selector",`String destination]]
     | Scroll_at {point;viewport;x;y} -> [verb;
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport;
         "x",`Int x; "y",`Int y]
@@ -338,7 +328,7 @@ let interaction_args ~tab_id ~expected_url action =
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
     | Swipe {from;to_;viewport;via;duration_ms} -> [verb;
         "from", Pointer.point_to_json from; "to", Pointer.point_to_json to_;
-        "viewport", Pointer.viewport_to_json viewport] @ drag_fields via duration_ms
+        "viewport", Pointer.viewport_to_json viewport] @ swipe_fields via duration_ms
     | Click_at {point;viewport;button} -> [verb;
         "point", Pointer.point_to_json point; "viewport", Pointer.viewport_to_json viewport]
         @ (match button with

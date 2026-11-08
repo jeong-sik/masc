@@ -59,35 +59,41 @@ let test_semantic_pointer_actions () =
   let hover = parsed (fields "hover" @ base @ observed) in
   check bool "hover pins observed node" true
     (hover.action = Browser_lane.Hover (Browser_lane.Scene_node {document_id="doc";node_id="source"}));
-  let drag = parsed (fields "drag_to" @ base @ ["source",`Assoc observed;
+  let drag = parsed (fields "drag_to" @ base @ ["source",`Assoc ["selector",`String "#source"];
     "destination",`Assoc ["selector",`String "#target"]]) in
   let wire = Browser_lane.interaction_args ~tab_id:7 ~expected_url:drag.expected_url drag.action in
-  check bool "semantic drag round trips typed targets" true
+  check bool "a selector drag round trips" true
     ((match Interaction.parse wire with Ok request -> request.action = drag.action | Error _ -> false));
   List.iter (fun input -> check bool "semantic target rejects mixed, missing and unrelated fields" true
     (Result.is_error (Interaction.parse (`Assoc input))))
     [fields "hover" @ observed;
      fields "hover" @ base @ observed @ ["selector",`String "#source"];
-     fields "drag_to" @ base @ ["source",`Assoc observed];
+     fields "drag_to" @ base @ ["source",`Assoc observed;"destination",`Assoc ["selector",`String "#target"]];
+     fields "drag_to" @ base @ ["source",`Assoc ["selector",`String "#source"]];
      fields "drag_to" @ base @ ["source",`Assoc (observed @ ["selector",`String "#source"]);
        "destination",`Assoc ["selector",`String "#target"]];
      fields "click" @ ["selector",`String "button";"source",`Assoc observed]]
-let test_drag_options () =
+let test_swipe_options () =
+  let viewport = `Assoc ["documentId",`String "doc";"width",`Int 800;"height",`Int 600;
+    "scrollX",`Int 0;"scrollY",`Int 0] in
   let point x y = `Assoc ["x",`Float x;"y",`Float y] in
   let via = `List [point 0.3 0.2;point 0.4 0.7] in
-  let cases = [
-    fields "drag_to" @ ["expectedUrl",`String "https://example.org";
-      "source",`Assoc ["selector",`String "#source"];"destination",`Assoc ["selector",`String "#drop"]]] in
-  List.iter (fun base ->
-    let request = parsed (base @ ["via",via;"durationMs",`Int 120]) in
-    let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~expected_url:request.expected_url request.action in
-    check bool "ordered path and timing survive round trip" true
-      ((parsed (Yojson.Safe.Util.to_assoc wire)).action = request.action);
-    List.iter (fun bad -> check bool "invalid drag geometry or timing is refused before dispatch" true
-      (Result.is_error (Interaction.parse (`Assoc (base @ bad)))))
-      [["durationMs",`Int (-1)];["durationMs",`Float 1.5];["via",`List [point 1.0 0.2]];
-       ["via",`List [`Assoc ["x",`Float 0.2;"y",`Float 0.2;"x",`Float 0.3]]]]) cases;
-  check bool "drag options are rejected on other actions" true
+  let base = fields "swipe" @ ["expectedUrl",`String "https://example.org";"viewport",viewport;
+    "from",point 0.1 0.2;"to",point 0.8 0.7] in
+  let request = parsed (base @ ["via",via;"durationMs",`Int 120]) in
+  let wire = Browser_lane.interaction_args ~tab_id:request.tab_id ~expected_url:request.expected_url request.action in
+  check bool "ordered path and timing survive round trip" true
+    ((parsed (Yojson.Safe.Util.to_assoc wire)).action = request.action);
+  List.iter (fun bad -> check bool "invalid swipe geometry or timing is refused before dispatch" true
+    (Result.is_error (Interaction.parse (`Assoc (base @ bad)))))
+    [["durationMs",`Int (-1)];["durationMs",`Float 1.5];["via",`List [point 1.0 0.2]];
+     ["via",`List [`Assoc ["x",`Float 0.2;"y",`Float 0.2;"x",`Float 0.3]]]];
+  let drag = fields "drag_to" @ ["expectedUrl",`String "https://example.org";
+    "source",`Assoc ["selector",`String "#source"];"destination",`Assoc ["selector",`String "#drop"]] in
+  List.iter (fun extra -> check bool "a drag_to takes no path or timing" true
+    (Result.is_error (Interaction.parse (`Assoc (drag @ extra)))))
+    [["via",via];["durationMs",`Int 0]];
+  check bool "swipe options are rejected on other actions" true
     (Result.is_error (Interaction.parse (`Assoc (fields "click" @ ["selector",`String "#button";"durationMs",`Int 1]))))
 
 let test_invalid_actions () =
@@ -376,7 +382,7 @@ let test_touch_sources_use_a_touch_pointer () =
 let () = run "browser interaction" ["typed boundary", [
   test_case "native keyboard and double click parser" `Quick test_native_keyboard_parser;
   test_case "observed semantic pointer targets" `Quick test_semantic_pointer_actions;
-  test_case "drag path and timing contract" `Quick test_drag_options;
+  test_case "swipe path and timing contract" `Quick test_swipe_options;
   test_case "explicit live tab activation" `Quick test_activate_tab;
   test_case "screenshot pointer actions" `Quick test_pointer_actions;
   test_case "set_viewport takes both sides in bounds or neither" `Quick test_set_viewport;

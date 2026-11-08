@@ -145,7 +145,13 @@ related: ["0503", "0418", "0480", "0481", "tui-operator-workbench"]
 
 **S3d. 사람 손이 필요한 행의 표지 (행 6의 표시)**
 
-- 가장 최근 영수증이 `needs_operator_broadcast` 에 걸리는 행은 `Held_call` 과 같은 글리프 `!` 와 `Theme.bad` 를 쓴다. 사람이 움직인다는 뜻이 같아서 글리프도 같다. 원인이 다르므로 낱말로 가른다.
+- 가장 최근 영수증이 `needs_operator_broadcast` 에 걸리고 행의 활동이 `Idle` `Attempt_failed` `Unknown` 인 행은 `Held_call` 과 같은 글리프 `!` 와 `Theme.bad` 를 쓴다. 사람이 움직인다는 뜻이 같아서 글리프도 같다. 원인이 다르므로 낱말로 가른다.
+  - 영수증은 턴이 끝날 때만 쓰이므로 지난 턴을 말한다. 행이 그보다 새로운 상태를 보이지 않을 때만 표지를 단다. `Idle` 은 지난 턴 뒤의 빈틈이다. `Attempt_failed` 는 열린 턴이 이미 실패 중이라 행과 영수증이 같은 방향을 말한다. `Unknown` 은 낱말과 어긋날 활동이 행에 없다.
+  - `Preparing` `Streaming` `Running` `Tool_waiting` `Model_waiting` 은 영수증이 아직 없는 열린 턴 안에서만 나온다. `Async_working` `Deferred` `Delegate_result` `Verifying` `External_waiting` 은 지금 하는 일이나 기다림이다. 이 활동들은 영수증보다 새로우므로 자기 글리프와 낱말을 그대로 쓴다.
+  - `Paused` `Offline` 은 새 영수증이 이어지지 않아 오래된 낱말이 계속 남는다. 이 활동도 자기 글리프와 낱말을 쓴다.
+  - `Held_call` `Question` `Confirmation` 은 이미 사람이 움직이는 활동이라 표지를 더하지 않는다.
+  - 판정은 `Masc_tui_keeper_mark.shows_operator_disposition` 한 곳에 있고 활동 variant 를 모두 적는다. 새 활동은 컴파일러가 이 함수에서 잡는다.
+  - 영수증 시각과 현재 턴 시작을 비교하는 길은 쓰지 않는다. 서버 필드(S3)를 늘려야 한다. `Idle` 에서 운영자가 고친 뒤 다음 턴이 영수증을 새로 쓰기 전까지는 낡은 표지가 남는다.
   - `Disp_operator_action_required` → `사람 몫`: 사람만 고칠 수 있는 원인이다.
   - `Disp_effect_review_required` → `효과 확인`: 원인은 알려졌고, 턴이 바깥을 바꿨는지 사람이 확인한다.
   - `Disp_unknown` → `분류 안 됨`: 분류기가 갈래를 못 찾았다. 사람이 할 일이 정해진 것이 아니라 고칠 빈틈이다.

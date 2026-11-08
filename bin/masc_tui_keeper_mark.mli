@@ -57,10 +57,12 @@ val operator_disposition_word :
 
 val shows_operator_disposition :
   activity:Masc_tui_keeper_list_model.activity -> bool
-(** Whether an operator disposition broadcast badge should be drawn for the
-    activity. Excludes actively executing states (Preparing, Running, Streaming),
-    explicit operator pause (Paused), offline state (Offline), and interactive
-    turns (Held_call, Question, Confirmation). *)
+(** Whether the latest receipt's operator disposition may be drawn over the
+    activity. It may where nothing on the row is newer than the receipt: Idle,
+    Attempt_failed and Unknown. It may not where the activity is newer (an open
+    turn, or work or a wait going on now), where no later receipt replaces it
+    (Paused, Offline), or where a person is already asked (Held_call, Question,
+    Confirmation). *)
 
 val column_legend : (string * string) list
 (** The Keepers header words, the sentence about a failing keeper's past and

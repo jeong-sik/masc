@@ -361,16 +361,18 @@ let worker_settlement (result : worker_response) : Checkpoint_receipt.state =
 
 let receipt_json ~(config : Workspace.config) (receipt : Checkpoint_receipt.receipt) =
   let binding = receipt.binding in
-  let status, extra = match receipt.state with
-    | Pending when receipt.epoch=checkpoint_epoch -> "pending", []
-    | Pending -> "unknown", ["message",`String "checkpoint belongs to an earlier server instance"]
-    | Unknown detail -> "unknown", ["message",`String detail]
+  (* The [ok] flag rides the same match as the wire label, so a state change
+     cannot update one without the other. *)
+  let status, extra, committed = match receipt.state with
+    | Pending when receipt.epoch=checkpoint_epoch -> "pending", [], false
+    | Pending -> "unknown", ["message",`String "checkpoint belongs to an earlier server instance"], false
+    | Unknown detail -> "unknown", ["message",`String detail], false
     | Refused detail -> "refused", ["message",`String detail;
-        "effect_disposition",`String "proven_pre_effect"]
+        "effect_disposition",`String "proven_pre_effect"], false
     | Committed completed -> "committed", ["effect",`Assoc [
         "change_count",`Int completed.mark.count; "incarnation",`String completed.mark.incarnation;
-        "checkpoint_sha256",`String completed.checkpoint_sha256]] in
-  ["ok",`Bool (status="committed");
+        "checkpoint_sha256",`String completed.checkpoint_sha256]], true in
+  ["ok",`Bool committed;
    "workspace",`Assoc ["base_path",`String (Unix.realpath config.base_path);
                          "masc_root",`String (Unix.realpath (Workspace.masc_dir config))];
    "operation_id",`String (Keeper_operation_id.to_string binding.operation_id);

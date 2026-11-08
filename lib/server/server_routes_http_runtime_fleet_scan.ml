@@ -661,15 +661,24 @@ let keeper_identity_drift_health_json_of_scan scan =
   in
   let meta_without_config_count = List.length scan.meta_without_config_names in
   let blocking = meta_without_config_count > 0 in
+  (* One closed value decides every derived field, so the JSON label and the
+     operator flag can never disagree about what the scan found. *)
+  let health =
+    if blocking then `Blocked
+    else if configured_without_meta_count > 0 then `Degraded
+    else `Ok
+  in
   let status =
-    if blocking then "blocked"
-    else if configured_without_meta_count > 0 then "degraded"
-    else "ok"
+    match health with
+    | `Blocked -> "blocked"
+    | `Degraded -> "degraded"
+    | `Ok -> "ok"
   in
   let terminal_reason =
-    if meta_without_config_count > 0 then "runtime_meta_without_keeper_toml"
-    else if configured_without_meta_count > 0 then "configured_keeper_without_runtime_meta"
-    else "none"
+    match health with
+    | `Blocked -> "runtime_meta_without_keeper_toml"
+    | `Degraded -> "configured_keeper_without_runtime_meta"
+    | `Ok -> "none"
   in
   `Assoc
     [
@@ -677,7 +686,7 @@ let keeper_identity_drift_health_json_of_scan scan =
       ("status", `String status);
       ("blocking", `Bool blocking);
       ("terminal_reason", `String terminal_reason);
-      ("operator_action_required", `Bool (status <> "ok"));
+      ("operator_action_required", `Bool (match health with `Ok -> false | `Blocked | `Degraded -> true));
       ("configured_keeper_count", `Int (List.length scan.configured_names));
       ( "configured_keeper_names",
         json_string_list scan.configured_names );

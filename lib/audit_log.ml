@@ -19,6 +19,8 @@ type outcome =
   | Failure of string [@tla.symbol "failure"]
 [@@deriving tla]
 
+let outcome_tla_symbol = to_tla_symbol
+
 type gate_audit_decision =
   | Gate_allow [@tla.symbol "gate_allow"]
   | Gate_require_confirmation [@tla.symbol "gate_require_confirmation"]
@@ -152,9 +154,9 @@ let string_to_action s =
      | _ -> unknown_action s)
 
 let outcome_to_json = function
-  | Success -> `Assoc [("status", `String "success")]
+  | Success -> `Assoc [("status", `String (outcome_tla_symbol Success))]
   | Failure reason -> `Assoc [
-      ("status", `String "failure");
+      ("status", `String (outcome_tla_symbol (Failure reason)));
       ("reason", `String reason);
     ]
 
@@ -195,11 +197,12 @@ let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
     let outcome =
       match Json_util.get_object json "outcome" with
       | Some o ->
-        let status = Json_util.get_string o "status" |> Option.value ~default:"" in
-        if status = "success" then Success
-        else
-          let reason = Safe_ops.json_string ~default:"unknown" "reason" o in
-          Failure reason
+        (match Json_util.get_string o "status" with
+         | Some status when String.equal status (outcome_tla_symbol Success) ->
+           Success
+         | Some _ | None ->
+           let reason = Safe_ops.json_string ~default:"unknown" "reason" o in
+           Failure reason)
       | None -> Failure "missing outcome"
     in
     let cost_estimate = Safe_ops.json_float_opt "cost_estimate" json in

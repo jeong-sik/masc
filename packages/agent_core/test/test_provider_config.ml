@@ -1949,9 +1949,8 @@ let test_tinker_inkling_2_small_refuses_provider_schema () =
 
 (* An exact-output slot binds to a catalog provider row, and to a model row
    (Exact_output_catalog_binding.resolve_exact) or, for a model with no row,
-   to the capabilities its binding declares. A runtime.toml-only model without
-   a capabilities table is left out of the exact registry at boot. These rows
-   let a Lane Add-on's exact output name the Tinker model as a slot. *)
+   to the model its deployment declares. These rows let a Lane Add-on's exact
+   output name the Tinker model as a slot. *)
 let test_tinker_inkling_2_small_binds_as_exact_target () =
   match List.find_opt Sys.file_exists [ "models.toml"; "../models.toml" ] with
   | None -> Alcotest.fail "models.toml not found for the exact binding test"
@@ -1971,6 +1970,74 @@ let test_tinker_inkling_2_small_binds_as_exact_target () =
             "the bound row carries the 64K window"
             (Some 65_536)
             model.max_context_tokens))
+;;
+
+(* A sampler checkpoint has no model row, only its provider has one. Its slot
+   binds to that provider row through the model the deployment declares, and
+   answers with it. A capability override on the binding is not that
+   declaration: the same binding without one is left out for its model. *)
+let test_a_declared_model_binds_a_rowless_slot_to_its_provider_row () =
+  let declared =
+    { Capabilities.openai_compat_chat_capabilities with
+      Capabilities.max_context_tokens = Some 65_536
+    ; supports_response_format_json = false
+    ; supports_structured_output = false
+    }
+  in
+  let slot target_ref model_declaration : Exact_output.declared_target =
+    { target_ref
+    ; binding =
+        Provider_config.make
+          ~kind:OpenAI_compat
+          ~provider_id:"tinker"
+          ~model_id:"tinker://example:train:0/sampler_weights/x"
+          ~base_url:"https://tinker.example/v1"
+          ~request_path:"/chat/completions"
+          ~model_capabilities_override:declared
+          ~connect_timeout_s:30.0
+          ()
+    ; credential = Exact_output.Credential_not_declared
+    ; body_timeout_s = Some 30.0
+    ; model_declaration
+    }
+  in
+  match
+    Exact_output.load_resolver_snapshot
+      ~target_binding_policy:Exact_output.Exclude_unbound_targets
+      ~catalog:
+        (Exact_output.Embedded_with_targets
+           [ slot "tinker.declared" (Exact_output.Declared_model declared)
+           ; slot "tinker.undeclared" Exact_output.No_model_declaration
+           ])
+      ()
+  with
+  | Error _ -> Alcotest.fail "the embedded catalog and both slots must load"
+  | Ok snapshot ->
+    (match Exact_output.admit_target_ref snapshot "tinker.declared" with
+     | Error _ -> Alcotest.fail "a declared model must bind to the tinker provider row"
+     | Ok admitted ->
+       let capabilities = (Exact_output.projection_target admitted).capabilities in
+       Alcotest.(check (option int))
+         "the slot answers with the declared window"
+         (Some 65_536)
+         capabilities.max_context_tokens;
+       Alcotest.(check bool)
+         "the slot answers with the declared native schema"
+         false
+         capabilities.supports_structured_output);
+    (match Exact_output.admit_target_ref snapshot "tinker.undeclared" with
+     | Error (Exact_output.Target_not_in_catalog _) -> ()
+     | Error _ -> Alcotest.fail "the undeclared slot must be left out of the catalog"
+     | Ok _ -> Alcotest.fail "a capability override must not bind a model with no row");
+    Alcotest.(check (list string))
+      "only the undeclared slot is rejected, for its model"
+      [ "tinker.undeclared" ]
+      (List.filter_map
+         (fun (rejected : Exact_output.rejected_target_binding) ->
+            match rejected.component with
+            | Exact_output.Target_model -> Some rejected.target_ref
+            | Exact_output.Target_provider -> None)
+         (Exact_output.resolver_rejected_target_bindings snapshot))
 ;;
 
 let test_validate_output_schema_openai_unscoped_catalog_not_inferred () =
@@ -3410,6 +3477,10 @@ let () =
             "tinker Inkling-2-Small binds as an exact target"
             `Quick
             test_tinker_inkling_2_small_binds_as_exact_target
+        ; Alcotest.test_case
+            "a declared model binds a rowless slot to its provider row"
+            `Quick
+            test_a_declared_model_binds_a_rowless_slot_to_its_provider_row
         ; Alcotest.test_case
             "reasoning effort undeclared fails closed"
             `Quick

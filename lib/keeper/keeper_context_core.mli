@@ -12,9 +12,6 @@ type session_context = Keeper_types.session_context
 
 val message_count : working_context -> int
 
-(** Re-export of [Agent_core.Types.text_of_message]. *)
-val text_of_message : Agent_core.Types.message -> string
-
 (** {1 Working-context construction & mutation} *)
 
 (** Construct a fresh working context with the given system prompt.
@@ -46,13 +43,7 @@ val agent_core_context_of_context : working_context -> Agent_core.Context.t
 val system_prompt_of_context : working_context -> string
 val messages_of_context : working_context -> Agent_core.Types.message list
 
-(** {1 Role / message JSON} *)
-
-val role_to_string : Agent_core.Types.role -> string
-
-(** [Some] only for the four wire-format names; callers must
-    handle [None] explicitly (#8623). *)
-val role_of_string_opt : string -> Agent_core.Types.role option
+(** {1 Message JSON} *)
 
 val message_to_json : Agent_core.Types.message -> Yojson.Safe.t
 

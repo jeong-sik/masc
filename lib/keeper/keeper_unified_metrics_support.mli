@@ -69,10 +69,7 @@ val scheduled_autonomous_outcome_for_result :
   Keeper_agent_run.run_result -> Keeper_meta_contract.proactive_cycle_outcome
 
 val turn_mode_to_string : turn_mode -> string
-val turn_mode_of_string : string -> turn_mode option
 val turn_mode_of_result : Keeper_agent_run.run_result -> turn_mode
-val turn_mode_of_json : Yojson.Safe.t -> turn_mode option
-val work_kind_of_turn_mode : turn_mode -> string
 val work_kind_of_json : Yojson.Safe.t -> string option
 
 val decision_channel_of_observation :

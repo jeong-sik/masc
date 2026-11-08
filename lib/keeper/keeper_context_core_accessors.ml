@@ -27,8 +27,6 @@ type session_context = Keeper_types.session_context
 (* Working Context Operations                                        *)
 (* ================================================================ *)
 
-let text_of_message = Agent_core.Types.text_of_message
-
 let checkpoint_of_context (ctx : working_context) = ctx.checkpoint
 
 let agent_core_context_of_context (ctx : working_context) = ctx.checkpoint.context
@@ -102,8 +100,6 @@ let sync_agent_core_context (ctx : working_context) : working_context =
     "message_count" (`Int message_count);
   ctx
 
-let role_to_string = Message_json.role_to_string
-let role_of_string_opt = Message_json.role_of_string_opt
 let message_to_json = Message_json.message_to_json
 let message_measurer = Message_json.message_measurer
 let message_of_json = Message_json.message_of_json

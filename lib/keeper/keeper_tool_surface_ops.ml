@@ -366,6 +366,13 @@ let keeper_list_row_json ~runtime_class config name =
                 ])
             entry.Keeper_registry.last_failure_reason)
       in
+      let failing_since =
+        match registry_entry with
+        | Some { Keeper_registry.phase = Failing; failing_since = Some at; _ } -> `Float at
+        | Some { Keeper_registry.phase = Failing; failing_since = None; _ } -> `Null
+        | Some { Keeper_registry.phase = (Offline | Running | Draining | Paused | Stopped | Crashed | Restarting); _ } -> `Null
+        | None -> `Null
+      in
       let runtime_blocker =
         Option.bind registry_entry (fun entry ->
           Option.bind entry.Keeper_registry.last_failure_reason
@@ -458,6 +465,7 @@ let keeper_list_row_json ~runtime_class config name =
                 (Keeper_meta_contract.runtime_id_of_meta meta) );
             ("operator_disposition", operator_disposition);
             ("operator_disposition_reason", operator_disposition_reason);
+            ("failing_since", failing_since);
             ("keepalive_running", `Bool keepalive_running);
             ("activation_mode", Keeper_activation_mode.to_yojson meta.activation_mode);
             ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta meta));

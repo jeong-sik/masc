@@ -54,6 +54,7 @@ const GateKeeperWireSchema = Schema.Struct({
   runtime_blocker_signature: Schema.NullOr(Schema.String),
   operator_disposition: Schema.optional(Schema.NullOr(Schema.String)),
   operator_disposition_reason: Schema.optional(Schema.NullOr(Schema.String)),
+  failing_since: Schema.optional(Schema.NullOr(Schema.Number)),
   runtime_path_rest: Schema.optional(Schema.Unknown),
   keepalive_running: Schema.Boolean,
   activation_mode: Schema.Literal(...KEEPER_ACTIVATION_MODES),

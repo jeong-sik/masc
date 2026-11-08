@@ -40,6 +40,7 @@ let runtime ?(keepalive_running = true) ?(health = health "healthy") ?(paused = 
   ; kr_runtime_lane_observation = None
   ; kr_runtime_path_rest = Ok None
   ; kr_operator_disposition = Ok None
+  ; kr_failing_since = None
   }
 
 let running_turn activity : Decode.keeper_turn_state =
@@ -1430,6 +1431,29 @@ let test_roster_decodes_operator_disposition_beside_the_row () =
     (Result.is_error (decode `Null (`String "config_invalid")))
 ;;
 
+let test_roster_decodes_failing_since () =
+  let decode failing_since =
+    let fields =
+      match Yojson.Safe.from_string (gate_row "failing_keeper") with
+      | `Assoc fields -> fields
+      | _ -> Alcotest.fail "the fixture row is an object"
+    in
+    let row = `Assoc (fields @ [ "failing_since", failing_since ]) in
+    match
+      Decode.decode_keeper_runtime_list
+        (`Assoc
+           [ "candle", `Assoc [ "status", `String "off" ]; "keepers", `List [ row ]
+           ; "total", `Int 1; "truncated", `Bool false ])
+    with
+    | Ok ([ runtime ], [], false, 1, _) -> runtime.Decode.kr_failing_since
+    | Ok _ -> Alcotest.fail "the row was hidden"
+    | Error reason -> Alcotest.fail reason
+  in
+  Alcotest.(check (option (float 0.001))) "null failing_since is None" None (decode `Null);
+  Alcotest.(check (option (float 0.001))) "numeric failing_since is Some" (Some 1794050000.0)
+    (decode (`Float 1794050000.0))
+;;
+
 let test_actual_producer_error_is_isolated () =
   let producer_row = Yojson.Safe.from_string
     {|{"status":"error","runtime_class":"keeper","name":"broken-meta",
@@ -1790,6 +1814,8 @@ let () =
             test_roster_decodes_the_walk_rest_beside_the_row
         ; Alcotest.test_case "operator disposition decodes beside the row" `Quick
             test_roster_decodes_operator_disposition_beside_the_row
+        ; Alcotest.test_case "failing_since decodes beside the row" `Quick
+            test_roster_decodes_failing_since
         ; Alcotest.test_case "actual producer error stays isolated" `Quick
             test_actual_producer_error_is_isolated
         ; Alcotest.test_case "present unknown health on an error row is rejected" `Quick

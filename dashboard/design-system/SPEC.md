@@ -402,6 +402,6 @@ active named variant 테마는 **dark-fantasy + paper** 두 종이며 source.ts 
 - preview surface 의 hand-written token CSS 삭제 (`source_styles/tokens.generated.css` 사용)
 - 2 themes (dark-fantasy + paper) active (`dashboard_bonsai/` 및 그 하위 archive 는 이후 레포에서 제거됨)
 - drift 방지 CI 4 gate 활성화: idempotent build, status canon pin, keeper OkLCH ΔE < 2, tier integrity (generated 직접 수정 차단). 이후 #30880 이 workflow 를 지워서 지금은 PR 단계 자동 검사가 없음
-- §6.1 새 token 추가 절차가 SSOT 경로 (`source.ts` → `pnpm tokens:build` → 3 artifact emit) 로 단순화됨
+- §6.1 새 token 추가 절차가 SSOT 경로 (`source.ts` → `pnpm tokens:build` → 3 artifact emit, 현재 기준) 로 단순화됨
 
 historical note: 본 audit 섹션 머지 이전, SPEC 본문 §6.2 governance 예외 목록에는 `--font-mono` stack divergence (PR-S2.5) 와 `--shadow-inset` vs `--shadow-ring` rename (PR-S3g) 항목이 active exception 으로 등재되어 있었다. 두 divergence 모두 source.ts 단일 SSOT 도입 후 해소되어 예외 목록에서 제거.

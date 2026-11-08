@@ -1,6 +1,5 @@
 (** Dashboard HTTP keeper — the execution-trust dashboard surface and the
-    keeper counts, outcomes rollup and config snapshot the dashboard routes
-    read. *)
+    keeper counts and config snapshot the dashboard routes read. *)
 
 
 open Keeper_status_bridge
@@ -10,10 +9,7 @@ include Dashboard_http_keeper_detail
 (** Runtime display constants and live runtime-id resolver moved
     to Dashboard_http_keeper_types (intra-library file split, 2026-05-16). *)
 include Dashboard_http_keeper_types
-module Outcomes = Dashboard_http_keeper_outcomes
 module Trust = Dashboard_http_keeper_trust
-
-let compute_outcomes_rollup = Outcomes.compute_outcomes_rollup
 
 (* prompt_block_json / tokens_per_sec_json /
    last_latency_ms_json moved to Dashboard_http_keeper_types

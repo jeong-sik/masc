@@ -1,13 +1,10 @@
 (** Dashboard_http_keeper — the execution-trust dashboard surface and the
-    keeper counts, outcomes rollup and config snapshot the dashboard routes
-    read.
+    keeper counts and config snapshot the dashboard routes read.
 
     - {b dashboard producer} ({!execution_trust_dashboard_json}) consumed by
       the dashboard HTTP execution-surfaces facade.
     - {b per-keeper runtime snapshot} ({!keeper_config_json}) consumed by
-      [server_dashboard_http_keeper_api].
-    - {b outcomes rollup} ({!compute_outcomes_rollup}) consumed by
-      [test/test_dashboard_harness_health]. *)
+      [server_dashboard_http_keeper_api]. *)
 
 (** {1 Runtime re-exports for [Server_dashboard_http_core]}
 
@@ -31,22 +28,6 @@ val running_keeper_count : Workspace.config -> int
 (** Counts keepers whose meta indicates an active
     keep-alive runtime.  Used by the dashboard fleet
     summary on the runtime consumer side. *)
-
-(** {1 Outcomes rollup} *)
-
-val compute_outcomes_rollup :
-  base_path:string ->
-  keeper_name:string ->
-  agent_name:string ->
-  recent_crash_count:int ->
-  registry_entry:Keeper_registry.registry_entry option ->
-  Yojson.Safe.t
-(** Aggregates the keeper's last 50 completed turns into
-    a JSON rollup of success / failure counters
-    (turns / handoffs / gate rejections).
-    [recent_crash_count] is folded in as an additional
-    failure axis; [registry_entry] supplies metadata
-    (active model and other runtime metadata) when present. *)
 
 (** {1 Dashboard producers} *)
 

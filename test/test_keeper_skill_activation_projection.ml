@@ -253,7 +253,7 @@ let chat_row turn_ref =
 
 let attached_skill_projection config ~keeper_name turn_ref =
   let open Yojson.Safe.Util in
-  Server_dashboard_http_keeper_api.attach_keeper_chat_skill_activations
+  Server_dashboard_http_keeper_chat_history.attach_keeper_chat_skill_activations
     ~config ~keeper_name (`List [ chat_row turn_ref ])
   |> to_list |> List.hd |> member "skill_activations"
 ;;

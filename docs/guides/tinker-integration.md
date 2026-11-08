@@ -56,7 +56,7 @@ The row declares the following. The behaviour was measured on 2026-11-07 (`docs/
 
 | Fact | Row | What a request sees |
 | --- | --- | --- |
-| Window | 65,536 tokens, prompt plus `max_tokens` | An exact-output request that does not fit is refused before dispatch (`measured_context_window_exceeded`). The endpoint answers an overflow with HTTP 400 and `{"detail": ...}`. The 256K window belongs to the separate ID `thinkingmachines/Inkling-2-Small:peft:262144`, which has no catalog row. |
+| Window | 65,536 tokens, prompt plus `max_tokens` | MASC sends an exact-output request to this row without counting its tokens. The pre-dispatch window check runs only for a row with a `serving_constraint`, and this row has none. The endpoint answers an overflow with HTTP 400 and `{"detail": ...}`, and the exact walk moves to the next slot. The 256K window belongs to the separate ID `thinkingmachines/Inkling-2-Small:peft:262144`, which has no catalog row. |
 | Reasoning ladder | `minimal`, `low`, `medium`, `high`, `xhigh` | `none` is refused before dispatch. The endpoint accepts it, but the model still reasoned on long prompts. An omitted effort means 0.9. Reasoning arrives on `reasoning_content` and is billed as completion tokens. |
 | `response_format` | Neither JSON mode nor native schema | The endpoint answers 200 to `json_schema` and `json_object` and applies neither. A provider-schema request is refused before dispatch. |
 | Tool choice | Tool calls, `required`, parallel calls | A named `tool_choice` is refused before dispatch, because it is neither documented nor measured. |

@@ -22,9 +22,12 @@ A memory fact with `planted_stale=True` is a transient state that slipped into
 memory; the expected answer drops it without a superseding claim.
 
 What a claim carries besides its meaning (a date, a time, a PR/issue/task
-number) is planned per claim from shares measured on the retained records,
-drawn the same way whatever the claim's label, and `surface_holds` checks the
-written text against the plan. A label then leaves no mark in those strings.
+number) is planned from shares measured on the retained records, and
+`surface_holds` checks the written text against the plan. A memory fact draws
+its marks one by one with `plan_surface`, the same way stale or durable.
+Candidates are planned for a whole split at once by `synth_candidate_plan`,
+which deals each mark and the length out within each label kind. A label then
+leaves no mark in those strings.
 Rules: `config/prompts/librarian.md` 143-208 (keep, drop, correct) and
 586-616 (admission).
 """
@@ -46,7 +49,9 @@ from typing import Literal, assert_never, cast
 FACTS_PER_MEMORY = ((0.0, 12.0), (0.1, 27.0), (0.5, 66.0), (0.9, 96.0), (1.0, 140.0))
 CATEGORIES_PER_MEMORY = ((0.0, 3.0), (0.1, 4.0), (0.5, 8.0), (0.9, 10.0), (1.0, 14.0))
 CLAIM_CHARS = ((0.0, 120.0), (0.1, 214.0), (0.5, 492.0), (0.9, 1410.0), (1.0, 2400.0))
-CANDIDATE_CLAIM_CHARS = ((0.0, 150.0), (0.1, 302.0), (0.5, 475.0), (0.9, 1166.0), (1.0, 2000.0))
+# Candidates: the 233 of the 99 E-real records, measured 2026-11-09 (p10 399, p50 737,
+# p90 1,234). The 11-08 points (p50 475) matched no retained set this split is checked on.
+CANDIDATE_CLAIM_CHARS = ((0.0, 150.0), (0.1, 399.0), (0.5, 737.0), (0.9, 1234.0), (1.0, 2000.0))
 # Days between the earliest and the latest fact of one memory: p10 8, p50 41, p90 61.
 MEMORY_SPAN_DAYS = ((0.0, 2.0), (0.1, 8.0), (0.5, 41.0), (0.9, 61.0), (1.0, 90.0))
 # Measured: 1,111 of 6,743 facts cite a Board post.
@@ -273,12 +278,16 @@ def label_of(request: SynthRequest) -> RequestLabel:
 # --- sampling ---------------------------------------------------------------
 
 
-def sample_quantile(rng: random.Random, points: tuple[tuple[float, float], ...]) -> float:
-    u = rng.random()
+def value_at(points: tuple[tuple[float, float], ...], u: float) -> float:
+    """The piecewise-linear inverse CDF `points` at quantile u."""
     for (q0, v0), (q1, v1) in itertools.pairwise(points):
         if u <= q1:
             return v0 + (v1 - v0) * (u - q0) / (q1 - q0)
     return points[-1][1]
+
+
+def sample_quantile(rng: random.Random, points: tuple[tuple[float, float], ...]) -> float:
+    return value_at(points, rng.random())
 
 
 def sample_weighted[T](rng: random.Random, weights: tuple[tuple[T, float], ...]) -> T:

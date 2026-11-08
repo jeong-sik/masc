@@ -36,12 +36,6 @@ type assertion_kind = Workspace_assertions.assertion_kind =
   | Task_claimed
   | Current_task_set
 
-(** [valid_assertion_strings] is the canonical list of
-    assertion kind labels (one per constructor).  Used by the
-    [expected_assertions] field of the answer to an unknown assertion —
-    adding a constructor automatically updates this list. *)
-val valid_assertion_strings : string list
-
 (** {1 Dispatch} *)
 
 (** Tool names routed by {!dispatch}.  This list is derived from the

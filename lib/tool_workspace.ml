@@ -17,8 +17,6 @@ type assertion_kind = Workspace_assertions.assertion_kind =
   | Task_claimed
   | Current_task_set
 
-let valid_assertion_strings = Workspace_assertions.valid_assertion_strings
-
 (* Handlers *)
 
 (* Trims before comparing, so [" a"] and ["a"] are one value, and drops

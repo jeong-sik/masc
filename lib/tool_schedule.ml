@@ -1643,8 +1643,6 @@ let dispatch ctx ~name ~args : Tool_result.result option =
   | None -> None
 ;;
 
-let schemas = Tool_schemas_schedule.schemas
-
 let () =
   List.iter
     (fun (definition : Tool_schemas_schedule.definition) ->

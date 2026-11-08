@@ -162,6 +162,7 @@ let keeper_runtime_minimum_inner_width = 120
 type keeper_columns = {
   kcol_show_flags : bool;
   kcol_show_runtime : bool;
+  kcol_show_detail : bool;
   kcol_name : int;
   kcol_runtime : int;
   kcol_task : int;
@@ -172,7 +173,7 @@ let keeper_columns_used_width columns =
   + (if columns.kcol_show_flags then 1 + keeper_flags_width else 0)
   + 1 + keeper_last_turn_width
   + (if columns.kcol_show_runtime then 1 + columns.kcol_runtime else 0)
-  + 1 + columns.kcol_task
+  + (if columns.kcol_show_detail then 1 + columns.kcol_task else 0)
 
 (* [widest_runtime] is the widest runtime cell the rows will draw, measured
    from those rows. A constant stood here before, and at 34 it was below what
@@ -180,16 +181,20 @@ let keeper_columns_used_width columns =
    ([antigravity_subscription.claude-opus-4-6-thinking]), so every long id was
    elided while the slack the row had left went on to the task column -- 49
    cells of it, for an id this file's own note calls short by construction. *)
-let allocate_keeper_columns ?(runtime_visible = true) ?(widest_detail = 0) ~prioritize_runtime ~inner_width ~widest_runtime () =
+let allocate_keeper_columns ?(runtime_visible = true) ?(detail_beside_runtime = true) ?(widest_detail = 0) ~prioritize_runtime ~inner_width ~widest_runtime () =
   let inner_width = max 0 inner_width in
   let show_flags = inner_width >= keeper_flags_minimum_inner_width in
   let show_runtime = runtime_visible && inner_width >= keeper_runtime_minimum_inner_width in
+  (* Without the runtime column the detail is where the failure sentence
+     goes, so it stays. *)
+  let detail_visible = detail_beside_runtime || not show_runtime in
   let base =
     { kcol_show_flags = show_flags
     ; kcol_show_runtime = show_runtime
+    ; kcol_show_detail = detail_visible
     ; kcol_name = keeper_minimum_name_width
     ; kcol_runtime = (if show_runtime then keeper_minimum_runtime_width else 0)
-    ; kcol_task = keeper_minimum_task_width
+    ; kcol_task = (if detail_visible then keeper_minimum_task_width else 0)
     }
   in
   let slack = inner_width - keeper_columns_used_width base in
@@ -203,6 +208,7 @@ let allocate_keeper_columns ?(runtime_visible = true) ?(widest_detail = 0) ~prio
     let remaining = remaining - name_shrink in
     { kcol_show_flags = base.kcol_show_flags && remaining = 0
     ; kcol_show_runtime = base.kcol_show_runtime && base.kcol_runtime > runtime_shrink
+    ; kcol_show_detail = base.kcol_show_detail
     ; kcol_name = base.kcol_name - name_shrink
     ; kcol_runtime = base.kcol_runtime - runtime_shrink
     ; kcol_task = base.kcol_task - task_shrink
@@ -216,7 +222,7 @@ let allocate_keeper_columns ?(runtime_visible = true) ?(widest_detail = 0) ~prio
       if show_runtime then keeper_minimum_task_width
       else max keeper_minimum_task_width widest_detail
     in
-    let detail_budget = detail_ceiling - keeper_minimum_task_width in
+    let detail_budget = if detail_visible then detail_ceiling - keeper_minimum_task_width else 0 in
     let detail_growth, slack = take detail_budget slack in
     let name_budget = keeper_maximum_name_width - keeper_minimum_name_width in
     let runtime_ceiling = max keeper_minimum_runtime_width widest_runtime in
@@ -233,10 +239,12 @@ let allocate_keeper_columns ?(runtime_visible = true) ?(widest_detail = 0) ~prio
         in
         name_growth, runtime_growth, slack
     in
+    (* Without a detail column the slack has no column to fill and stays as
+       the row's trailing space. *)
     { base with
       kcol_name = base.kcol_name + name_growth
     ; kcol_runtime = base.kcol_runtime + runtime_growth
-    ; kcol_task = base.kcol_task + detail_growth + slack
+    ; kcol_task = (if detail_visible then base.kcol_task + detail_growth + slack else 0)
     }
 
 type waiting_group_layout = {

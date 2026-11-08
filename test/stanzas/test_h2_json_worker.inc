@@ -1,4 +1,4 @@
 (test
  (name test_h2_json_worker)
  (modules test_h2_json_worker)
- (libraries masc alcotest h2 bigstringaf yojson decompress.gz decompress.de eio eio_main masc.masc_core masc.dashboard masc.server masc.config))
+ (libraries masc alcotest h2 bigstringaf yojson decompress.gz decompress.de eio eio_main masc.masc_core masc.dashboard masc.config))

@@ -6,9 +6,9 @@
 (test
  (name test_keeper_gate_workspace_alias)
  (modules test_keeper_gate_workspace_alias)
- (libraries alcotest masc masc.keeper_approval masc_test_deps eio_main))
+ (libraries alcotest masc masc.keeper_approval masc_test_deps))
 
 (test
  (name test_keeper_native_continuation_projection)
  (modules test_keeper_native_continuation_projection)
- (libraries alcotest masc masc.keeper_approval masc_test_deps))
+ (libraries alcotest masc masc_test_deps))

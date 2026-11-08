@@ -496,9 +496,14 @@ let draw_ask_questions buf cols (state : state) ~budget =
         | [] -> Theme.recede ()
         | _ :: _ -> Ansi.bold ^ Theme.warn ()
       in
+      (* [a] opens the question under the cursor. With none under it the key
+         answers "Choose a question with [ or ] first", so the heading names it
+         only while one is selected. *)
+      let selected = Ask_projection.selected_index open_rows state.ask_cursor in
+      let answer_hint = if Option.is_some selected then " · a:open answers" else "" in
       box_line buf cols
-        (Printf.sprintf "  %s[?] Questions waiting on you (%d) · a:open answers%s" heading_tone
-           (Masc_tui_approvals_model.approvals_open_question_count state) Ansi.reset);
+        (Printf.sprintf "  %s[?] Questions waiting on you (%d)%s%s" heading_tone
+           (Masc_tui_approvals_model.approvals_open_question_count state) answer_hint Ansi.reset);
       match open_rows with
       | [] ->
           box_line buf cols
@@ -511,7 +516,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
              budget -- an ask of four questions was enough to push the rest off
              the bottom, the cursor with it, so [/] and j/k moved a selection
              nothing on screen showed. *)
-          match Ask_projection.selected_index rows state.ask_cursor with
+          match selected with
           | None ->
               (* The selected ask left the list. No ask is drawn open, because
                  an open ask here is the one the next keys would answer. *)

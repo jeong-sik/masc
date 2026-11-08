@@ -52,8 +52,6 @@ MASC_E2E_TESTS=true scripts/dune-local.sh build @test/runtest-test_sse_storm_e2e
 - live network / realtime 환경 의존
   - live ICE/STUN/TURN/browser interop proof
   - 공용 CI에서는 hermetic signaling/data-plane smoke만 돌리고, 인터넷 상호운용성은 env-gated로 분리한다
-- local viewer/toolchain 의존
-  - `scripts/viewer-local-e2e-check.sh --build-viewer`
 
 규칙:
 

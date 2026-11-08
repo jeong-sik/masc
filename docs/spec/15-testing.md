@@ -26,7 +26,7 @@ MASC MCP의 검증 전략을 정의한다. 테스트는 3개 계층(Hermetic Req
 
 1. **Hermetic first**: 외부 DB, 네트워크, LLM 런타임 없이 재현 가능한 테스트가 CI 필수 게이트.
 2. **Env-gated 분리**: PostgreSQL, live network, local LLM 등 환경 의존 테스트는 별도 계층으로 분리. CI 기본 green과 동일시하지 않는다.
-3. **실험은 실험**: benchmark, swarm proof, TRPG workload는 pass/fail이 아니라 proof artifact와 함께 해석한다.
+3. **실험은 실험**: benchmark, swarm proof는 pass/fail이 아니라 proof artifact와 함께 해석한다.
 4. **기능 검증**: 제품의 입력·출력·상태 변화를 검사한다. 테스트 등록·CI 구성·검사기·증거 판정기의 자체 동작을 검사하는 테스트는 두지 않는다.
 5. **Agent harness**: Keeper 에이전트의 행동 품질은 시나리오 기반 eval harness로 측정한다.
 
@@ -61,10 +61,6 @@ Contract harness는 서버가 이미 떠 있다고 가정하지 않고 hermetic 
 ### 3.2 Layer 2: Optional Env-Gated
 
 특정 환경이 있을 때만 의미가 있는 테스트. CI 기본 green에 포함되지 않는다.
-
-| 게이트 | 테스트 파일 | 필요 환경 |
-|--------|-----------|----------|
-| Local viewer | `scripts/viewer-local-e2e-check.sh` | 빌드 도구 |
 
 규칙: env 미설정 시 skip 또는 not run. CI 로그에 "왜 안 돌았는지"가 명시되어야 한다.
 

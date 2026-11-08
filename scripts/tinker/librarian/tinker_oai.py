@@ -96,8 +96,10 @@ class Caller:
         self.budget = budget
         self.spent = sum(c.cost() for c in logged)
         self.stopped: str | None = None
+        # One HTTP attempt per call: the SDK's own retries would add their time to wall_s and
+        # leave no row. A failed call is logged with its status, and the caller decides.
         self._client = OpenAI(base_url=BASE_URL, api_key=os.environ["TINKER_API_KEY"], timeout=TIMEOUT_S,
-                              max_retries=2)
+                              max_retries=0)
 
     def ask(self, *, model: str, label: str, messages: Sequence[str], effort: str, max_tokens: int,
             attempt: int = 0) -> Call | None:

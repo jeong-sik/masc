@@ -414,7 +414,10 @@ let parse_conversations_history_response ~status ~body =
              on values a sibling proved [Ok]. *)
           (match List.partition Result.is_ok parsed with
            | _, Error msg :: _ -> Error (Other msg)
-           | oks, [] ->
+           (* [partition Result.is_ok] never puts an [Ok] in the second
+              list; the pattern keeps the match exhaustive without a
+              wildcard. *)
+           | oks, ([] | Ok _ :: _) ->
              let has_more =
                match List.assoc_opt "has_more" fields with
                | Some (`Bool b) -> Ok b

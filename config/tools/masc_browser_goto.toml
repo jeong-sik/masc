@@ -14,7 +14,7 @@ description = "Absolute HTTP(S) URL."
 name = "lane"
 type = "string"
 enum = ["live"]
-description = "Optional; live is the only lane."
+description = "Leave it out; clientId alone selects the browser. lane=live without clientId turns off automatic selection."
 
 [[params]]
 name = "tabId"

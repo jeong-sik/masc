@@ -1,9 +1,9 @@
 name = "masc_browser_interact"
 description = """
 Act on an observed browser tab: pointer, keys, touch, viewport, or a workflow.
-Pass clientId and tabId from BrowserTabs/masc_browser_tabs; tab IDs belong to one connection. Only Pages the ego task space manages take input; adopt an operator tab first (BrowserAct adopt_tab). After a failure or unknown result, read the tab again before acting: page handlers may already have run, so never replay.
+Pass clientId and tabId from BrowserTabs/masc_browser_tabs; tab IDs belong to one connection. Only Pages the ego task space manages take input; adopt an operator tab first (BrowserAct/masc_browser_act adopt_tab). After a failure or unknown result, read the tab again before acting: page handlers may already have run, so never replay.
 Name an element with selector, target or documentId/nodeId; prefer refs from BrowserRead/masc_browser_read mode=snapshot. fill (action or workflow step) replaces the value or editor content and does not press Enter or submit. scroll moves the page; scroll_at scrolls the pane under the point. hover_at moves the pointer without clicking. tap_at is a touch press and release; swipe holds a touch from one point to another, and a swipe longer than the command window is refused before it starts.
-drag_to works only selector to selector, without via and with durationMs 0; its receipt does not prove the page accepted the drop.
+drag is always refused before input. drag_to works only selector to selector, without via and with durationMs 0; its receipt does not prove the page accepted the drop.
 set_viewport, tap_at and swipe invalidate snapshot refs: take a new snapshot and screenshot. A set viewport lasts while the SDK process runs; a later answer with another sdkProcessStartedAt means it is gone.
 follow_link opens an observed same-tab HTTP(S) anchor without running click handlers; it refuses downloads, new-window targets, noreferrer and referrerpolicy. destinationUrl is the intended URL, not proof of load.
 activate_tab restores the window only when minimized and reports active/window state, not OS focus; use it before hand_off. expectedUrl is compared before the SDK call, not atomically with it.
@@ -21,7 +21,7 @@ defer_loading = true
 name = "lane"
 type = "string"
 enum = ["live"]
-description = "Optional; live is the only lane, and clientId alone selects the browser."
+description = "Leave it out; clientId alone selects the browser. lane=live without clientId turns off automatic selection."
 
 [[params]]
 name = "tabId"
@@ -122,7 +122,7 @@ description = "Scene node, with documentId; refused once the node is detached or
 [[params]]
 name = "point"
 type = "object"
-description = "click_at/double_click_at/hover_at/scroll_at/tap_at: the point from the screenshot."
+description = "click_at/double_click_at/hover_at/scroll_at/tap_at: x and y as fractions of the screenshot viewport, in [0,1)."
 
 additional_properties = false
 
@@ -143,7 +143,7 @@ exclusive_maximum = 1.0
 [[params]]
 name = "from"
 type = "object"
-description = "swipe start."
+description = "swipe start: viewport fractions in [0,1)."
 
 additional_properties = false
 
@@ -164,7 +164,7 @@ exclusive_maximum = 1.0
 [[params]]
 name = "to"
 type = "object"
-description = "swipe end."
+description = "swipe end: viewport fractions in [0,1)."
 
 additional_properties = false
 
@@ -257,7 +257,7 @@ type = "string"
 [[params]]
 name = "via"
 type = "array"
-description = "swipe: intermediate points in order; omitted, the swipe passes the midpoint."
+description = "swipe: intermediate points in [0,1), in order; omitted, the swipe passes the midpoint."
 
 [params.items]
 type = "object"
@@ -311,7 +311,7 @@ maximum = 4096
 [[params]]
 name = "steps"
 type = "array"
-description = "workflow: SDK Page calls in order; a step may carry only its method's fields. click/dblclick/hover/focus: selector. clickAndWaitForPopup: selector, popupOptions. dragAndDrop: selector, destination (selector). mouse.click/mouse.move: x,y CSS px. mouse.wheel: x,y deltas at the pointer; move or click over the scroll container first in the same workflow. fill: selector, text. press: selector, key. selectOption: selector, selectionJson. goto: absolute HTTP(S) url. waitForURL: url glob or urlRegex. waitForSelector: selector, state attached|detached|visible|hidden. waitForLoadState: optional state domcontentloaded|load|networkidle. keyboard.type/insertText: text. keyboard.paste: text, optional html. keyboard.press: key chord such as Meta+b. evaluate/waitForFunction: source, optional argumentJson. fetch: HTTP(S) or relative url; the step receipt is the response. download.cancel: downloadId. waitForTimeout: milliseconds. reload/url/title/info/snapshot/events: none. evaluate, insertText, paste, download.cancel, url, title, info, events and waitForTimeout take no options. events drains the Page event buffer; network requests are in BrowserRead mode=network. No step or time limit."
+description = "workflow: SDK Page calls in order; a step may carry only its method's fields. click/dblclick/hover/focus: selector. clickAndWaitForPopup: selector, popupOptions. dragAndDrop: selector, destination (selector). mouse.click/mouse.move: x,y CSS px. mouse.wheel: x,y deltas at the pointer; move or click over the scroll container first in the same workflow. fill: selector, text. press: selector, key. selectOption: selector, selectionJson. goto: absolute HTTP(S) url. waitForURL: url glob or urlRegex. waitForSelector: selector, state attached|detached|visible|hidden. waitForLoadState: optional state domcontentloaded|load|networkidle. keyboard.type/insertText: text. keyboard.paste: text, optional html. keyboard.press: key chord such as Meta+b. evaluate/waitForFunction: source, optional argumentJson. fetch: HTTP(S) or relative url; the step receipt is the response. download.cancel: downloadId. waitForTimeout: milliseconds. reload/url/title/info/snapshot/events: none. evaluate, insertText, paste, download.cancel, url, title, info, events and waitForTimeout take no options. events drains the Page event buffer; network requests are in BrowserRead/masc_browser_read mode=network. No step or time limit."
 
 [params.items]
 type = "object"
@@ -356,7 +356,7 @@ type = "string"
 [[params.items.params]]
 name = "downloadId"
 type = "string"
-description = "download.cancel: a pending download's ID from BrowserRead mode=downloads on this Page. cancelReturned only means the call returned; read downloads again for the state."
+description = "download.cancel: a pending download's ID from BrowserRead/masc_browser_read mode=downloads on this Page. cancelReturned only means the call returned; read downloads again for the state."
 
 [[params.items.params]]
 name = "urlRegex"
@@ -552,7 +552,7 @@ additional_properties = true
 [[params.items.params.params]]
 name = "saveAs"
 type = "string"
-description = "fetch: artifact filename, no directories. The answer's downloadId reads the save through BrowserRead mode=downloads; HTTP error responses are saved too. Do not fetch again to get it."
+description = "fetch: artifact filename, no directories. The answer's downloadId reads the save through BrowserRead/masc_browser_read mode=downloads; HTTP error responses are saved too. Do not fetch again to get it."
 
 [[params.items.params.params]]
 name = "body"

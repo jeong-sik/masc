@@ -13,7 +13,7 @@ defer_loading = true
 [[params]]
 name = "tabId"
 type = "integer"
-description = "Observed tab ID; needs clientId. Omit only for text or elements to read the active tab."
+description = "Observed tab ID; needs clientId. Omit only for text or elements to read the active tab; an unmanaged active tab is refused."
 minimum = 0
 
 [[params]]
@@ -27,14 +27,14 @@ maximum = 100000
 name = "lane"
 type = "string"
 enum = ["live"]
-description = "Optional; live is the only lane, and clientId alone selects the browser."
+description = "Leave it out; clientId alone selects the browser. lane=live without clientId turns off automatic selection."
 
 [[params]]
 name = "mode"
 type = "string"
 enum = ["text", "html", "elements", "scene", "regions", "snapshot", "screenshot", "dialog", "downloads", "cookies", "network", "console"]
 default = "text"
-description = "text: page text. html: the top document's outerHTML, never cut; over 1 MiB html is null with htmlComplete false. Only html shows inline formatting such as bold. elements: visible controls, or selector matches. scene: viewport content with geometry and documentId/nodeId; geometry does not prove a node is unobscured; sourceContext, when present, is a dev-source hint to verify before editing. regions: landmarks whose references scope scene/regions. snapshot (preferred): ego's accessibility tree; each actionable node has a ref (ref=12) for the page as read. screenshot: viewport PNG, or a page image with screenshotOptions. dialog: the open alert, confirm or prompt; dialogObservation=observed without dialog means none. downloads: files the page started, pending, completed or interrupted. cookies: the cookies the top document sees (at most 200, with the total) with name, domain, path, secure, httpOnly, sameSite, expiry, plus localStorage and sessionStorage keys and IndexedDB names (at most 100 each, with counts); no value. network: the tab's requests oldest first (at most 200, with dropped): method, address with every query value REDACTED, header names, state, status; no header value, cookie or body. Only what the current ego SDK process saw (sdkProcessStartedAt), so a popup's first load and frames of another site are often missing. console: the current document's console lines and uncaught errors, oldest first (at most 200, with dropped; text cut at 4000 bytes, textCut); the browser keeps only its newest 1000. The read turns ego's console hiding off and back on, which sites can detect (hiding.offMs; hiding.restored false means it stayed off)."
+description = "text: page text. html: the top document's outerHTML, never cut; over 1 MiB html is null with htmlComplete false. Inline formatting such as bold: text and snapshot drop it; scene gives each text run's fontWeight, except a contenteditable editor, which is one control with the editor's weight; html keeps it. elements: visible controls, or selector matches. scene: viewport content with geometry and documentId/nodeId; geometry does not prove a node is unobscured; sourceContext, when present, is a dev-source hint to verify before editing. regions: landmarks whose references scope scene/regions. snapshot (preferred): ego's accessibility tree; each actionable node has a ref (ref=12) for the page as read. screenshot: viewport PNG, or a page image with screenshotOptions. dialog: the open alert, confirm or prompt; dialogObservation=observed without dialog means none. downloads: files the page started, pending, completed or interrupted. cookies: the cookies the top document sees (at most 200, with the total) with name, domain, path, secure, httpOnly, sameSite, expiry, plus localStorage and sessionStorage keys and IndexedDB names (at most 100 each, with counts); no value. network: the tab's requests oldest first (at most 200, with dropped): method, address with every query value REDACTED, header names, state, status; no header value, cookie or body. Only what the current ego SDK process saw (sdkProcessStartedAt), so a popup's first load and frames of another site are often missing. console: the current document's console lines and uncaught errors, oldest first (at most 200, with dropped; text cut at 4000 bytes, textCut); the browser keeps only its newest 1000. The read turns ego's console hiding off and back on, which sites can detect (hiding.offMs; hiding.restored false means it stayed off)."
 
 [[params]]
 name = "within"

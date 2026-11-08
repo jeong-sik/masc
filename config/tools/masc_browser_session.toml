@@ -1,7 +1,7 @@
 name = "masc_browser_session"
 description = """
 Bind an observed ego Space to a shared Goal for that Goal's Tasks.
-BrowserTabs {} in a Task of that Goal then selects it. It stores metadata only: no browser input or control change. Binding the same pair again is a no-op; another Space for the Goal, or one Space for two Goals, is refused: unbind_goal first. If the bound Space is not connected, discovery fails instead of picking another browser. A bound Space is already open: list its pages with BrowserTabs."""
+BrowserTabs/masc_browser_tabs {} in a Task of that Goal then selects it. It stores metadata only: no browser input or control change. Binding the same pair again is a no-op; another Space for the Goal, or one Space for two Goals, is refused: unbind_goal first. If the bound Space is not connected, discovery fails instead of picking another browser. A bound Space is already open: list its pages with BrowserTabs."""
 additional_properties = false
 # 2026-10-29 ~ 11-04 에 저장된 agent-core 요청 5,479개(Keeper 28명)가 이 정의 4,611 B 를
 # 매번 실었다. 이 도구를 부른 서로 다른 Keeper 턴은 24개(44회)다. 지연의 손익은

@@ -28,7 +28,7 @@ required = true
 name = "lane"
 type = "string"
 enum = ["live"]
-description = "Optional; live is the only lane, and clientId alone selects the browser."
+description = "Leave it out; clientId alone selects the browser. lane=live without clientId turns off automatic selection."
 
 [[params]]
 name = "tabId"

@@ -1,7 +1,7 @@
 name = "masc_browser_tabs"
 description = """
 List a browser's tabs and the operations it implements.
-For Task work call BrowserTabs {} first: with no mode, lane or clientId, MASC picks the browser, using the current Task's Goal binding when present. Keep browserSelection.clientId and tab ids for every later call. browserCapabilities lists implemented operations; a conditional row lists its constraints only when its operation is in requiredActions. A tab whose egoPage.label is null is unmanaged: adopt_tab before reading or acting on it. dialogObservation=unobserved is not proof that no dialog is open; read one with BrowserRead mode=dialog. An ambiguous or stale selection dispatches nothing: choose one listed client deliberately, never the first by default."""
+For Task work call BrowserTabs/masc_browser_tabs {} first: with no mode, lane or clientId, MASC picks the browser, using the current Task's Goal binding when present. Keep browserSelection.clientId and tab ids for every later call. browserCapabilities lists implemented operations; a conditional row lists its constraints only when its operation is in requiredActions. A tab whose egoPage.label is null is unmanaged: adopt_tab before reading or acting on it. dialogObservation=unobserved is not proof that no dialog is open; read one with BrowserRead/masc_browser_read mode=dialog. An ambiguous or stale selection dispatches nothing: choose one listed client deliberately, never the first by default."""
 additional_properties = false
 
 [[params]]
@@ -14,7 +14,7 @@ description = "connections: every observed live client with inventoryIssues and 
 name = "lane"
 type = "string"
 enum = ["live"]
-description = "Optional; live is the only lane, and clientId alone selects the browser."
+description = "Leave it out; clientId alone selects the browser. lane=live without clientId skips the Goal binding and works only when one browser is connected."
 
 [[params]]
 name = "clientId"

@@ -170,10 +170,6 @@
   x509
   cstruct
   masc.agent_core.digest
-  ocaml-protoc-plugin
-  ; Native Eio gRPC. The opam grpc/grpc-lwt stack pins an h2 version that
-  ; conflicts with httpun-eio below, so it cannot be used alongside it.
-  grpc-direct
   h2
   eio
   eio.unix
@@ -324,7 +320,6 @@
   masc.tool_invocation_ref
   masc.mcp_session
   masc.ag_ui
-  ambient-context-eio
   masc.shared_types
   masc.multimodal
   masc.repo_manager

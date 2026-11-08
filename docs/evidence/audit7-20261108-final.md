@@ -29,7 +29,7 @@ PR 에 실려 있다.
 | `keeper_execution_receipt.ml:159-247` classify_disposition | **판정: 구조적 의도** | `provider_runtime_failure` bool(149-160)을 받는 guard 4개(225-246)가 한 생성자(Provider_runtime_failure)를 영수증 필드값으로 4분류한다 — 단일 생성자 arm 으로는 표현 불가. 249행 나열 arm 은 "열거를 와일드카드 없이 완전하게 유지"한다는 253-260 주석으로 문서화돼 있다. 감사의 dead code 독해는 이미 응답됨 |
 | `keeper_owner.ml:1784-1793` start_child_if_needed | **수리** | 값을 쓰지 않는 `Some _ when` 가드 6연발을 이름 붙인 `gates_closed` 술어 하나로 합친다(|| 단락 평가 순서는 arm 순서와 같다) |
 | `keeper_unified_metrics_support.ml:225-235` | **이전 해소 확인** | 225-234 가 네 쌍 match 로 고쳐졌고 227-228 주석이 수정 사실을 직접 문서화한다 |
-| `slack_rest_client.ml:411-431` | **수리** | `List.find_opt Result.is_error` 뒤의 도달 불가 `Some (Ok _)` 분기와 `List.map Result.get_ok` 짝을 `List.partition Result.is_ok` 로 지운다(순서 보존 — 첫 실패가 그대로 밝혀진다) |
+| `slack_rest_client.ml:411-431` | **수리** | `List.find_opt Result.is_error` / `Some (Ok _)` / `List.map Result.get_ok` 짝을 `List.partition Result.is_ok` 로 바꾼다(순서 보존 — 첫 실패가 그대로 밝혀진다). 정정: 옛 `Some (Ok _)` 분기는 도달 불가가 아니라 타입 체커가 요구하는 분기였다 — 재검토 리뷰(adv-49973 F2·F3)가 바로잡았고, partition 은 그 요구를 `([] | Ok _ :: _)` or-패턴 하나로 흡수한다 |
 | `keeper_github_identity.ml:524-566` 6단 피라미드 | **판정: 무변경** | 각 단의 조기 탈출이 `Ok None`(성공)이라 `let*` 로는 펴지지 않는다 — 삼분 step result(Absent·Present·Error) 재설계가 필요하고 현재 코드는 각 단에 근거가 붙어 있다 |
 
 ## 범주 4 option 튜플 + invalid_arg — 등기 1

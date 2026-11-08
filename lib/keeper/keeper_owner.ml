@@ -1697,8 +1697,12 @@ let start
                   probed in a fixed order. Each probe drops its payload — the
                   arm only asks whether any continuation exists, and the
                   Integrity_error names the case where none does. *)
+               (* [Option.map] inside [Result.map]: the probe must keep the
+                  Some/None distinction of the read — mapping the payload to
+                  a bare value here would let an absent continuation pass as
+                  present and make the Integrity_error below unreachable. *)
                let probe read () =
-                 Result.map (fun _ -> Some ()) (read ~operation_id)
+                 Result.map (Option.map (fun _ -> ())) (read ~operation_id)
                in
                let rec first_present = function
                  | [] ->

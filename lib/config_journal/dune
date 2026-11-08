@@ -4,4 +4,4 @@
  (name masc_config_journal)
  (public_name masc.config_journal)
  (wrapped false)
- (libraries masc.config_dir_resolver masc.fs_compat masc.masc_core eio.unix unix yojson))
+ (libraries masc.config_dir_resolver masc.fs_compat masc.masc_core unix yojson))

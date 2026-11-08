@@ -16,7 +16,6 @@
   yojson
   fs_compat
   re
-  re.pcre
   eio
   eio.unix
   unix

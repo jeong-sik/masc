@@ -80,8 +80,6 @@
   yojson
   unix
   re
-  re.str
-  re.pcre
   eio
   eio.unix
   base64

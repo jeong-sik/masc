@@ -843,17 +843,6 @@ module KeeperProactive = struct
   ;;
 end
 
-(** {1 Dashboard Health Thresholds}
-
-    Thresholds used by the dashboard keeper health scorer and harness health
-    panels. These affect UI display only. *)
-
-module DashboardHealth = struct
-  let runtime_warning_ctx_ratio =
-    get_float ~default:0.95 "MASC_DASHBOARD_RUNTIME_WARNING_CTX_RATIO"
-  ;;
-end
-
 module KeeperPeerArtifact = struct
   let clamp_int ~min_value ~max_value value = max min_value (min max_value value)
   let max_bytes_default = 64 * 1024 * 1024

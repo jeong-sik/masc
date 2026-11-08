@@ -6,8 +6,6 @@
     existing callers continue to use [Dashboard_http_keeper.<helper>]
     unchanged. *)
 
-val runtime_warning_ctx_ratio : float
-
 val live_keeper_runtime_id_result :
   string -> (string, [ `Unresolved of string ]) result
 (** [Ok] carries the trimmed runtime id; a blank input is

@@ -511,6 +511,7 @@ let test_deepseek_catalog_is_json_only_before_dispatch () =
             ()
       ; credential = EO.Credential_resolved (Secret.of_string "deepseek-fixture-key")
       ; body_timeout_s = Some fixture_body_timeout_s
+      ; model_declaration = EO.No_model_declaration
       }
     ]
   in

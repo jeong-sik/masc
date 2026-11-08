@@ -200,6 +200,7 @@ let exact_view (keeper : PC.t) =
     ; binding = { keeper with PC.enable_thinking = Some true }
     ; credential = Resolver.Credential_resolved keeper.PC.api_key
     ; body_timeout_s = Some exact_body_timeout_s
+    ; model_declaration = Resolver.No_model_declaration
     }
   in
   let snapshot =

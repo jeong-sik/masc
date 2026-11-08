@@ -201,6 +201,7 @@ let with_bound_targets ?admission_priority_run_limit
     ; binding = binding key
     ; credential = EO.Credential_resolved (Secret.of_string key)
     ; body_timeout_s = Some body_timeout_s
+    ; model_declaration = EO.No_model_declaration
     }
   in
 
@@ -258,6 +259,7 @@ let with_bound_anthropic ~base_url ~body_timeout_s f =
     ; credential =
         EO.Credential_resolved (Secret.of_string "anthropic-test-key")
     ; body_timeout_s = Some body_timeout_s
+    ; model_declaration = EO.No_model_declaration
     }
   in
 

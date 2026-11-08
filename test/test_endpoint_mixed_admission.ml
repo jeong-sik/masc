@@ -134,7 +134,8 @@ let exact_flow config =
      credential=EO.Credential_resolved config.LP.Provider_config.api_key;
      (* The public exact API requires an explicit transport deadline. It is
         not used as the synchronization/assertion boundary in this fixture. *)
-     body_timeout_s=Some 120.0} in
+     body_timeout_s=Some 120.0;
+     model_declaration=EO.No_model_declaration} in
   let snapshot = EO.load_resolver_snapshot
       ~catalog:(EO.Embedded_with_targets [declaration]) ()
       |> get_ok "exact snapshot must use the original runtime binding" in

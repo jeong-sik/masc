@@ -67,7 +67,8 @@ let declared_target ~connect ~body : EO.declared_target =
           ()
     ; credential =
         EO.Credential_resolved (Llm_provider.Secret.of_string "synthetic-no-network")
-    ; body_timeout_s = body }
+    ; body_timeout_s = body
+    ; model_declaration = EO.No_model_declaration }
 
 let admitted_declared_target (target : EO.declared_target) =
   let snapshot =

@@ -28,8 +28,6 @@ let json_rpc_error (code : Mcp_error_code.t) message =
    (godfile decomp). *)
 
 let server_start_time = Server_routes_http_runtime_health_helpers.server_start_time
-let configured_http_port = Transport_read_model.configured_http_port
-let configured_http_host = Transport_read_model.configured_http_host
 
 let authority_host host =
   match Ipaddr.of_string host with

@@ -26,9 +26,6 @@ let websocket_url_from_base_url base_url =
   (Uri.to_string uri |> trim_trailing_slashes) ^ "/ws"
 ;;
 
-let configured_http_port () = Env_config_core.masc_http_port_int ()
-let configured_http_host () = Env_config_core.masc_host ()
-
 (* The fold itself lives beside the predicates it asks -- [is_unspecified_host]
    is in [Masc_network_defaults], and this module carried a second copy of the
    same rule until #30383. [Transport.Rest.generate_openapi_document] needs it

@@ -1058,6 +1058,45 @@ let test_maintenance_keeps_receipt_blobs_and_the_next_run_rewrites () =
     (Some (String.concat "\n\n" (Outbox.developer_context snapshot)))
     (held store carried.Tool_output.sha256))
 
+(* A runtime makes one run_carrier per run. Its first attempt loads the outbox;
+   every later attempt gets the same snapshot and carrier, so a switched form
+   stays switched and the run acknowledges exactly what it loaded. *)
+let test_run_carrier_loads_once () = with_workspace (fun base_path ->
+  retain_vendor_receipts base_path (List.init 2 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "run-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 'u'))));
+  let retained = Outbox.run_carrier ~base_path ~keeper_name ~artifact_reader_available:true in
+  let snapshot, carrier = get (Outbox.run_carrier_load retained) in
+  get (Outbox.retain ~base_path ~keeper_name
+    (vendor_receipt ~call_id:"run-late" ~tool_name:"Read" (`String "written after the load")));
+  let later_snapshot, later_carrier = get (Outbox.run_carrier_load retained) in
+  check int "the run holds the two receipts written before its first load" 2
+    (List.length (Outbox.receipt_ids later_snapshot));
+  check (list string) "a later attempt gets the snapshot the run loaded"
+    (Outbox.receipt_ids snapshot) (Outbox.receipt_ids later_snapshot);
+  check bool "a later attempt renders the same carrier" true (carrier == later_carrier))
+
+let test_run_carrier_reprojection_waits_for_the_load () = with_workspace (fun base_path ->
+  retain_vendor_receipts base_path (List.init 4 (fun index ->
+    vendor_receipt ~call_id:(Printf.sprintf "wait-%d" index) ~tool_name:"Read"
+      (`String (String.make 2048 'w'))));
+  let retained = Outbox.run_carrier ~base_path ~keeper_name ~artifact_reader_available:true in
+  let calls = ref 0 in
+  let memory ~refusal:_ = incr calls; Ok Reprojection.Unchanged in
+  check_reduction "before the run loads, the memory hook alone answers" Reprojection.Unchanged
+    (Outbox.run_carrier_reprojection retained ~then_:memory ~refusal);
+  check int "the memory hook ran once" 1 !calls;
+  let _, carrier = get (Outbox.run_carrier_load retained) in
+  check_reduction "after the load, the carrier step comes first" Reprojection.Reprojected
+    (Outbox.run_carrier_reprojection retained ~then_:unreached ~refusal);
+  check form "the loaded carrier switched" Outbox.By_address (Outbox.carrier_form carrier);
+  let _, again = get (Outbox.run_carrier_load retained) in
+  check form "a later attempt renders the switched form" Outbox.By_address
+    (Outbox.carrier_form again);
+  check_reduction "a switched run leaves the next refusal to the memory hook" Reprojection.Unchanged
+    (Outbox.run_carrier_reprojection retained ~then_:memory ~refusal);
+  check int "the memory hook ran again" 2 !calls)
+
 let () = run "Original official-client host result retention"
   ["durable host stop",[
     test_case "typed stop retains original before transport continuation" `Quick test_stop_retains_before_transport_return;
@@ -1100,4 +1139,8 @@ let () = run "Original official-client host result retention"
     test_case "planned marker is as long as the stored one" `Quick
       test_planned_marker_is_as_long_as_the_stored_one;
     test_case "maintenance keeps receipt blobs and the next run rewrites" `Quick
-      test_maintenance_keeps_receipt_blobs_and_the_next_run_rewrites]]
+      test_maintenance_keeps_receipt_blobs_and_the_next_run_rewrites];
+   "retained-results carrier run",[
+    test_case "run carrier loads once" `Quick test_run_carrier_loads_once;
+    test_case "run carrier reprojection waits for the load" `Quick
+      test_run_carrier_reprojection_waits_for_the_load]]

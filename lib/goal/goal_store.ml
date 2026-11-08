@@ -244,46 +244,19 @@ let prepare_state (state : state) : prepared_state =
   in
   { state; goals_by_id; sorted_goals = sort_goals state.goals }
 
-(* Content-addressed cache keyed by file path -> (raw_bytes, prepared_state).
-   Comparing exact [raw_bytes] avoids heuristic mtime checks while eliminating
-   repeated JSON parsing, decoding, sorting, and [Goal_id_map] construction when
-   [goals.json] is unchanged.
-   [Stdlib.Mutex] is used intentionally because the critical section performs
-   only in-memory [Hashtbl] lookups/updates and [String.equal] with zero Eio
-   fiber yields, and [Goal_store] is called from both Eio fibers and non-Eio
-   contexts. *)
-let goals_cache : (string, string * prepared_state) Hashtbl.t = Hashtbl.create 8
-let goals_cache_mu = Stdlib.Mutex.create ()
+(* Content-addressed prepared cache — the byte-equality and locking mechanics
+   live in [Mirrored_store_cache.Content_cache], shared with the verification
+   store. This instance skips repeated JSON parsing, decoding, sorting, and
+   [Goal_id_map] construction when [goals.json] is unchanged. *)
+let goals_cache : prepared_state Mirrored_store_cache.Content_cache.t =
+  Mirrored_store_cache.Content_cache.create ()
 
 let clear_goals_cache_for path =
-  Stdlib.Mutex.lock goals_cache_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock goals_cache_mu)
-    (fun () -> Hashtbl.remove goals_cache path)
+  Mirrored_store_cache.Content_cache.clear goals_cache path
 
 let decode_prepared_bytes ~path bytes : (prepared_state, reason) result =
-  let cached =
-    Stdlib.Mutex.lock goals_cache_mu;
-    Fun.protect
-      ~finally:(fun () -> Stdlib.Mutex.unlock goals_cache_mu)
-      (fun () ->
-        match Hashtbl.find_opt goals_cache path with
-        | Some (cached_bytes, prepared) when String.equal cached_bytes bytes ->
-          Some prepared
-        | Some _ | None -> None)
-  in
-  match cached with
-  | Some prepared -> Ok prepared
-  | None ->
-      (match decode_bytes bytes with
-       | Error _ as error -> error
-       | Ok state ->
-           let prepared = prepare_state state in
-           Stdlib.Mutex.lock goals_cache_mu;
-           Fun.protect
-             ~finally:(fun () -> Stdlib.Mutex.unlock goals_cache_mu)
-             (fun () -> Hashtbl.replace goals_cache path (bytes, prepared));
-           Ok prepared)
+  Mirrored_store_cache.Content_cache.memo goals_cache ~path ~bytes
+    ~decode:decode_bytes ~prepare:prepare_state
 
 (* The mirror is evidence of how far the primary drifted, never state: a
    mirror that decodes is reported with its size and stamp and is not served

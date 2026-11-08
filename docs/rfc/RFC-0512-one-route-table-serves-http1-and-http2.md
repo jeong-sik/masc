@@ -12,7 +12,7 @@ related: ["typed-route-auth", "0493", "0350", "0281", "0204"]
 
 # RFC-0512: 경로 표 하나가 HTTP/1.1 과 HTTP/2 를 다 받고, TLS·ALPN 리스너가 HTTP/2 를 실제로 쓰이게 한다
 
-- 상태: 초안
+- 상태: 구현됨. S0~S6 병합 2026-11-07~08, after 측정 2026-11-08. 남은 증거(전송별 경로 차이, 브라우저)는 #50192, Q1 은 #50198 이 추적한다.
 - 이슈: #35592, #46676, #47255, #47348, #47534, #47551, #47609, #28161, #40063, #48713(전송별 경로 차이), #39050(h2 stream id)
 - 근거: 조사는 `docs/research/2026-11-07-http-transport-stack.md`, 기준선은 `docs/evidence/http2-one-table-2026-11/baseline/`(2026-11-07 09:43Z~09:52Z, 설치 바이너리 0.68.0 build-commit `6afc364dd90`). 코드 좌표는 `origin/main` `f8dbd356759` 에서 읽었다.
 - 먼저 있는 결정: `typed-route-auth` 가 HTTP/1.1 경로의 인증 종류를 등록 타입으로 적었다(`Router.Make_typed`). A4c 가 HTTP/2 게이트웨이에게 그 종류를 읽게 했다(`Server_h2_route_gate`). RFC-0493 이 SSE 프레임을 소켓 flush 까지 기다리게 했다. RFC-0350 이 H2 요청 fiber 의 admission 을 정했다. 이 RFC 는 그 위에서 응답 쪽을 전송 중립으로 만들고 리스너에 TLS 를 더한다.
@@ -115,19 +115,19 @@ piaf 0.2.0 은 HTTP/1.1·HTTP/2·TLS 를 한 API 로 주지만 핸들러가 `Res
 - Cloudflare 터널로 HTTP/2 를 쓰려면 운영자가 `config.yml` 의 `service` 를 `https://127.0.0.1:8938` 로 바꾸고 `originRequest.http2Origin: true` 와 `noTLSVerify: true`(또는 `caPool`)를 적는다. 이 RFC 는 그 파일을 건드리지 않는다. 절차는 `docs/guides/https-and-http2.md` 에 적는다.
 - `/health` `http_listener` 에 `https` 섹션(`port`, `alpn` 별 연결 수, `tls_source: configured | self_signed`)이 생긴다. `Transport_metrics` 의 `mode` 라벨에 `tls` 가 더해진다. 대시보드 transport-health 카드가 그것을 보인다.
 - TOML 키 4개가 생긴다: `transport.https_port`, `transport.tls_cert_file`, `transport.tls_key_file`, `transport.h2_initial_window_size`(마지막은 S5).
-- HTTP/2 응답이 바뀌는 곳: 손 등록에 없던 경로가 HTTP/1.1 과 같은 답을 준다(fleet 스트림 200 등). 게이트웨이에만 있던 별명 경로는 없다: 지운 H2 모듈 세 개가 맞추던 경로 리터럴 89개가 모두 살아 있는 등록에 있다(S3 PR 본문의 정적 비교). A1 의 전·후 비교는 이 가지로 만든 바이너리가 있어야 하므로 S5 에서 한다.
+- HTTP/2 응답이 바뀌는 곳: 손 등록에 없던 경로가 HTTP/1.1 과 같은 답을 준다(fleet 스트림 200 등). 게이트웨이에만 있던 별명 경로는 없다: 지운 H2 모듈 세 개가 맞추던 경로 리터럴 89개가 모두 살아 있는 등록에 있다(S3 PR 본문의 정적 비교). A1 의 전·후 비교는 아직 하지 않았다. `tools/auth_route_inventory` 빌드가 필요하고 그것을 돌리는 CI 워크플로가 없다(#50192).
 
 ## 5. 측정
 
 - 전(이미 있음): `docs/evidence/http2-one-table-2026-11/baseline/`.
 - 후(2026-11-08, 바이너리 `9c7452c0e208` = main 에 S0~S6 과 #49862·#49933·#50027 이 들어간 뒤): `docs/evidence/http2-one-table-2026-11/after/`. 전송 `h1-6`·`h1`·`h2c`·`tls-h1`·`tls-h2`, 기준선과 같은 인자. 절차는 그 디렉터리의 README 에 있다.
-- 본 것: SSE 50개가 `h2c`·`tls-h2` 에서 50/50 열린다(기준선의 h2c 는 50개 모두 404). HTTP/1.1 의 burst req/s·p50 은 기준선보다 나빠지지 않았다. 같은 측정 안에서 100개 동시 burst 는 한 연결의 h2c·tls-h2 가 h1-6·tls-h1 보다 req/s 1.4~2.3배이고 p99 는 그 19~38% 다. curl 다운로드는 h2c 가 h1 의 0.84배로 기준선과 같고, tls-h2 는 56~59 MB/s(tls-h1 88~93 MB/s)다. 한 요청 왕복의 h2c 추가 비용은 0.2~0.7 ms 다(기준선 1.7~3.5 ms). 기준선과 사이에 이틀치 main 변경과 측정 시각 차이가 있어 HTTP/1.1 값의 개선은 이 스택의 효과로 읽지 않는다.
+- 본 것: SSE 50개가 `h2c`·`tls-h2` 에서 50/50 열린다(기준선의 h2c 는 50개 모두 404). HTTP/1.1 의 burst req/s·p50 은 기준선보다 나빠지지 않았다. 같은 측정 안에서 100개 동시 burst 는 한 연결의 h2c·tls-h2 가 h1-6·tls-h1 보다 req/s 1.4~2.3배이고 p99 는 그 19~38% 다. curl 다운로드(한 번에 하나씩)는 h2c 가 h1 의 0.84배(본 측정)·0.73배(교차 확인)이고 기준선(교차 확인 런)은 0.84 였다. tls-h2 는 curl 로 56~59 MB/s(curl h2c 의 1/7.4~1/7.5, curl tls-h1 은 재지 않음)이고 Python 4개 동시로는 tls-h1 88~93 / tls-h2 81~87 MB/s 라, TLS 위의 손실은 TLS 리스너의 비용이다. 한 요청 왕복에서 h2c 는 h1 보다 0.2~0.7 ms 더 든다(기준선 1.7~3.5 ms). 기준선과 사이에 이틀치 main 변경과 측정 시각 차이가 있어 HTTP/1.1 값의 개선은 이 스택의 효과로 읽지 않는다.
 - 전송별 경로 차이: 아직 재지 않았다. `tools/auth_route_inventory` 를 빌드해야 하고 그것을 돌리는 CI 워크플로가 없다. #50192 가 추적한다.
 - 브라우저: 아직 잡지 않았다. #50192 가 추적한다.
 
 ## 6. 열린 질문
 
-- Q1. 동시 HTTP/1.1 연결 100개에서 p99 가 3~7초로 떨어지는 원인. 전송이 아니라 서버의 동시 처리 경로일 수 있다. S5 에서 `h1` 전송만 따로 재고 원인을 적는다. 고치는 일은 이 RFC 밖이다.
+- Q1. 동시 HTTP/1.1 연결 100개에서 p99 가 3~7초로 떨어지는 원인. 전송이 아니라 서버의 동시 처리 경로일 수 있다. S5 는 따로 재지 않았다. after 측정에서 `h1` 의 p99 는 0.7~1.4초로 여전히 다섯 전송 중 가장 길다. 원인 측정은 #50198, 고치는 일은 이 RFC 밖이다.
 - Q2. h2 포크에 `Reqd.stream_id`·peer reset 콜백을 더해 `Server_h2_frame_tap`(#39050) 을 지울 수 있는지. 별 이슈로 남긴다.
 - Q3. 자체 서명 인증서의 SAN 에 bind host 외에 무엇을 넣을지(운영자가 `--host 0.0.0.0` 으로 띄우는 경우).
 - Q4. `Public_read` 같은 strict 인증 종류가 TLS 리스너와 cleartext 리스너에서 같은지. 같아야 한다. A1 을 두 포트에 돌려 확인한다.

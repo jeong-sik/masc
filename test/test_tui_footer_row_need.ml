@@ -41,6 +41,18 @@ let surfaces =
       T.Harness,
       [ "j/k"; "PgUp/PgDn"; "Right / Enter"; "y / x"; "Y"; "Home/End" ],
       [ "v"; "/"; "Esc"; "r"; "q" ] )
+  ; ( "Task Review",
+      T.Verification,
+      [ "j/k"; "Right / Enter"; "a / x"; "n / N"; "PgUp/PgDn"; "Home/End" ],
+      [ "v"; "h"; "/"; "< / >"; "Esc"; "r"; "q" ] )
+  ; ( "Fusion",
+      T.Fusion,
+      [ "j/k"; "PgUp/PgDn"; "Enter"; "K"; "B"; "Y"; "/"; "n / N"; "Home/End" ],
+      [ "a"; "Esc"; "r"; "q" ] )
+  ; ( "Clients",
+      T.Clients,
+      [ "j/k"; "Enter"; "/"; "n / N"; "PgUp/PgDn"; "Home/End" ],
+      [ "p / Esc"; "r"; "q" ] )
   ]
 
 let test_each_surface_scopes_a_key_to_a_row () =

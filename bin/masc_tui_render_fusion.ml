@@ -269,7 +269,8 @@ let render_fusion_list (state : state) =
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
        ~hints:
-         (Masc_tui_keys.footer_hints ~detail_open:false Fusion));
+         (Masc_tui_keys.footer_hints ~detail_open:false ~has_rows:(shown > 0)
+            Fusion));
   finish_surface state ~surface_key:"fusion-list" ~rows:terminal_rows ~cols buf
 
 (* The panel as marks, one per model, filled where the model answered.

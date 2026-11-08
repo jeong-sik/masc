@@ -501,7 +501,21 @@ let render_code (state : state) =
                     "vs " ^ Terminal_text.single_line base_ref
                 | None -> "vs HEAD"
               in
-              Printf.sprintf "diff col %d %s: %s"
+              (* A diff longer than its window says which of its rows the
+                 window holds, as the file, notes and history panes do. The
+                 title carries it so the window keeps all of its rows. *)
+              let position =
+                match code_diff_viewport state with
+                | Some (count, height) when count > height ->
+                    Masc_tui_scroll.window_reading ~noun:"rows"
+                      ~scroll:
+                        (Masc_tui_scroll.normalize ~count ~height
+                           state.code_diff_scroll)
+                      ~height count
+                    ^ " · "
+                | Some _ | None -> ""
+              in
+              Printf.sprintf "diff %scol %d %s: %s" position
                 (state.code_diff_hscroll + 1) basis path
             else if history_showing then "history: " ^ path
             else path ^ (if Option.is_some (current_code_draft state) then " · draft retained (V)" else "")
@@ -594,7 +608,7 @@ let render_code (state : state) =
       max 0 (min state.code_file_scroll (max 0 (total_lines - content_height)))
     in
     (* The row under the pane's rows. A file longer than its window says there
-       where the window is, like the other panes' "rows X-Y of Z" line; with
+       where the window is, like the other panes' "rows X-Y/Z" line; with
        nothing to say it is the gap above the footer. [content_height] budgets
        that one row, so a position drawn beside the gap made the surface one
        row too tall and [finish_surface] cut its last row, the footer. *)
@@ -609,9 +623,8 @@ let render_code (state : state) =
             let total_lines = Array.length file_rows in
             let scroll = file_scroll total_lines in
             Some
-              (Printf.sprintf "lines %d-%d of %d" (scroll + 1)
-                 (min total_lines (scroll + content_height))
-                 total_lines)
+              (Masc_tui_scroll.window_reading ~noun:"lines" ~scroll
+                 ~height:content_height total_lines)
         | Some (_, Masc_tui_fetched.Ready _)
         | Some
             ( _,
@@ -627,8 +640,9 @@ let render_code (state : state) =
          | None -> 0 | Some reading -> max 0 (min reading.chr_scroll (max 0 (total - height))) in
        if content_height > 1 then
          box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
-           (Printf.sprintf "  rows %d-%d of %d · Esc returns to code"
-             (min total (scroll + 1)) (min total (scroll + height)) total);
+           ("  "
+            ^ Masc_tui_scroll.window_reading ~noun:"rows" ~scroll ~height total
+            ^ " · Esc returns to code");
        let window = Rows.of_list ~first:scroll ~height rendered in
        for index = 0 to height - 1 do
          match Rows.at window (scroll + index) with
@@ -652,8 +666,7 @@ let render_code (state : state) =
        let scroll = max 0 (min state.code_notes_scroll (max 0 (total - height))) in
        if content_height > 1 then
          box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
-           (Printf.sprintf "  rows %d-%d of %d" (scroll + 1)
-              (min total (scroll + height)) total);
+           ("  " ^ Masc_tui_scroll.window_reading ~noun:"rows" ~scroll ~height total);
        let window = Rows.of_list ~first:scroll ~height rendered in
        for i = 0 to height - 1 do
          match Rows.at window (scroll + i) with
@@ -699,9 +712,9 @@ let render_code (state : state) =
                done
            | rows ->
                let total = List.length rows in
-               let max_scroll = max 0 (total - content_height) in
                let scroll =
-                 max 0 (min state.code_diff_scroll max_scroll)
+                 Masc_tui_scroll.normalize ~count:total ~height:content_height
+                   state.code_diff_scroll
                in
                let rows_window = Rows.of_list ~first:scroll ~height:content_height rows in
                (* An add or context row is the working tree's own line, so
@@ -780,9 +793,7 @@ let render_code (state : state) =
        let scroll = Masc_tui_scroll.normalize ~count:total ~height:1 state.code_history_scroll in
        if content_height > 1 then
          box_line_styled pane_buf pane_cols ~style:(Theme.recede ())
-           (Printf.sprintf "  rows %d-%d of %d"
-              (if total = 0 then 0 else scroll + 1)
-              (min total (scroll + height)) total);
+           ("  " ^ Masc_tui_scroll.window_reading ~noun:"rows" ~scroll ~height total);
        let window = Rows.of_list ~first:scroll ~height rendered in
        for i = 0 to height - 1 do
          match Rows.at window (scroll + i) with

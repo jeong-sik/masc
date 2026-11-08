@@ -33,7 +33,8 @@ let test_missing_effort_has_typed_request_rejection () =
     { target_ref = "openrouter.probe"
     ; binding = openrouter_binding ()
     ; credential = Resolver.Credential_not_declared
-    ; body_timeout_s = Some exact_body_timeout_s } in
+    ; body_timeout_s = Some exact_body_timeout_s
+    ; model_declaration = Resolver.No_model_declaration } in
   let snapshot = Resolver.load_resolver_snapshot
       ~catalog:(Resolver.Embedded_with_targets [ target ]) ()
     |> require_ok "resolver snapshot" in
@@ -159,7 +160,8 @@ let test_explicit_effort_reaches_serialized_request () =
       ; binding = openrouter_binding ~reasoning_effort:effort ()
       ; credential =
           Resolver.Credential_resolved (Llm_provider.Secret.of_string "synthetic-no-network")
-      ; body_timeout_s = Some exact_body_timeout_s } in
+      ; body_timeout_s = Some exact_body_timeout_s
+      ; model_declaration = Resolver.No_model_declaration } in
     let snapshot = Resolver.load_resolver_snapshot
         ~catalog:(Resolver.Embedded_with_targets [ target ]) ()
       |> require_ok "wire resolver snapshot" in
@@ -228,7 +230,8 @@ let publish_thinking_lane ~binding ~thinking =
     { target_ref = "openrouter.probe"
     ; binding
     ; credential = EO.Credential_not_declared
-    ; body_timeout_s = Some exact_body_timeout_s } in
+    ; body_timeout_s = Some exact_body_timeout_s
+    ; model_declaration = EO.No_model_declaration } in
   let snapshot = EO.load_resolver_snapshot
       ~catalog:(EO.Embedded_with_targets [ target ]) ()
     |> require_ok "resolver snapshot" in

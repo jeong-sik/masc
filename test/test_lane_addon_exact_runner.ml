@@ -903,7 +903,8 @@ let test_http_flow_preserves_host_admission_class ?(revoke_while_queued=false) a
     let target : Agent_core.Exact_output.declared_target =
       {target_ref="openai-responses.admission"; binding;
        credential=Agent_core.Exact_output.Credential_resolved binding.api_key;
-       body_timeout_s=Some F.fixture_post_body_timeout_seconds} in
+       body_timeout_s=Some F.fixture_post_body_timeout_seconds;
+       model_declaration=Agent_core.Exact_output.No_model_declaration} in
     let snapshot=match Agent_core.Exact_output.load_resolver_snapshot
         ~catalog:(Agent_core.Exact_output.Embedded_with_targets [target]) () with
       | Ok snapshot -> snapshot | Error _ -> fail "actual admission fixture target did not load" in

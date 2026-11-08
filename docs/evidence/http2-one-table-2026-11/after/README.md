@@ -4,7 +4,7 @@
 
 ## 조건
 
-- 서버·클라이언트·호스트·인자는 기준선과 같다. `scripts/harness/perf/http_multiplex_probe.py` 가 임시 base path 와 임의 loopback 포트에 띄운 격리 서버, 요청 600개 동시 100, 직렬 100, 다운로드 4개 동시, SSE 50 스트림 32초, 반복 3회의 중앙값이다. 클라이언트는 httpx 0.28.1 / httpcore 1.0.9 / h2 4.4.1(`uv run` 임시 환경), 교차 확인은 curl 8.7.1(libcurl 8.7.1, SecureTransport). 프로브 스크립트는 S5 가 TLS 전송과 curl tls-h2 대상을 더한 판이고 serial·burst·download·sse 로직은 기준선 때와 같다.
+- 서버·클라이언트·호스트·인자는 기준선과 같다. `scripts/harness/perf/http_multiplex_probe.py` 가 임시 base path 와 임의 loopback 포트에 띄운 격리 서버, 요청 600개 동시 100, 직렬 100, 다운로드 4개 동시, SSE 50 스트림 32초, 반복 3회의 중앙값이다. 클라이언트는 httpx 0.28.1 / httpcore 1.0.9 / h2 4.4.1(`uv run` 임시 환경), 교차 확인은 curl 8.7.1(libcurl 8.7.1, SecureTransport). 프로브 스크립트는 S5 가 TLS 전송과 curl tls-h2 대상을 더한 판이다. serial·burst·download·sse 로직은 S0 병합본의 프로브(기준선 교차 확인 런이 쓴 판)와 같다. 기준선 본 런의 프로브(sha 2af4098f)는 git 에 없다.
 - 전송 다섯 개. 기준선의 `h1-6`(HTTP/1.1 연결 6개)·`h1`(동시 요청 수만큼 연결)·`h2c`(prior knowledge 연결 1개)에 TLS 리스너의 `tls-h1`(ALPN http/1.1, 연결 6개)·`tls-h2`(ALPN h2, 연결 1개)를 더했다. 소유 서버는 `MASC_HTTPS_PORT` 로 임의 포트에 TLS 리스너를 열고 임시 base path 의 `.masc/tls/` 에 자체 서명 인증서를 만들었다. 클라이언트는 인증서를 검증하지 않는다.
 - 호스트는 기준선과 같은 Apple M3 Max, macOS 27.2 arm64, loopback. 라이브 서버(8935·8938, 같은 바이너리, 11-08 23:07Z 재시작)는 같은 시간에 돌고 있었다.
 - 기준선과 이 측정 사이에는 전송 층 말고도 이틀치 main 변경이 들어 있고 측정 시각도 다르다(기준선 18:43 KST, 이번 08:29 KST). 그래서 HTTP/1.1 값이 좋아진 것을 이 스택의 효과로 읽지 않는다. 같은 측정 안에서 전송끼리 견준 값만 전송의 차이로 읽는다.

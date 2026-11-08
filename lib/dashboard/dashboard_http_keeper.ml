@@ -347,9 +347,10 @@ let execution_trust_dashboard_json (config : Workspace.config) : Yojson.Safe.t =
       ("coverage_gaps", `List coverage_gaps);
       ("coverage_gap_count", `Int (List.length coverage_gaps));
     ]
-    @ freshness_fields ~now latest_ts
-    @ source_health_fields
-        ~now ~exists ~entry_count ~latest_ts ?coverage_gap ())
+    @ Dashboard_tool_source_freshness.freshness_fields ~now latest_ts
+    @ Dashboard_tool_source_freshness.health_fields
+        ~now ~exists ~entry_count ~latest_ts
+        ~freshness_slo_s:execution_trust_freshness_slo_s ?coverage_gap ())
 
 (* Per-keeper snapshot/config rendering extracted to
    [Dashboard_http_keeper_snapshot] (godfile decomp). *)

@@ -7,7 +7,11 @@
 # Tests:
 #   1. HTTP/1.1 health check works (baseline)
 #   2. HTTP/2 h2c health check works
-#   3. The runtime reports the exact auto listener mode
+#   3. MCP POST over h2c, the production path
+#   4. The HTTP/1.1 SSE endpoint streams
+#   5. Concurrent HTTP/1.1 connections while h2c may be active
+#   6. The TLS listener answers --http2 (ALPN h2) and --http1.1 on the same
+#      route table; skipped when /health says it is off
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/harness/transport/common.sh
@@ -125,6 +129,35 @@ if [ "$success" -eq 4 ]; then
   pass "concurrent HTTP/1.1 connections (4/4)"
 else
   fail "concurrent connections" "${success}/4 succeeded"
+fi
+
+# Test 6: TLS listener (RFC-0512). ALPN picks h2 for --http2 and http/1.1 for
+# --http1.1 on the same route table. Skipped when the listener is off.
+# /health reads the listener state directly; transport-health is a cached
+# snapshot, so it is not reread here.
+tls_health_json="$(
+  curl -fsS --max-time 5 "${MASC_HTTP_BASE_URL}/health" 2>/dev/null || printf '%s' "$transport_health_json"
+)"
+https_status="$(jq -er '.https_listener.status' <<<"$tls_health_json" 2>/dev/null || echo missing)"
+https_port="$(jq -er '.https_listener.port' <<<"$tls_health_json" 2>/dev/null || true)"
+if [[ "$https_status" == "listening" && -n "$https_port" ]]; then
+  https_base="${MASC_HTTPS_BASE_URL:-https://127.0.0.1:${https_port}}"
+  # Status and protocol together: a 400 from the request-authority gate would
+  # otherwise look like a failed ALPN negotiation. curl prints "000 0" when
+  # no response came back, so that is the failure signature.
+  tls_h2="$(curl -k -s --max-time 5 -o /dev/null -w '%{http_code} %{http_version}' --http2 "${https_base}/health" 2>/dev/null || true)"
+  case "$tls_h2" in
+    "200 2"|"200 2.0") pass "HTTPS health over ALPN h2 (${tls_h2})" ;;
+    *) fail "HTTPS ALPN h2" "status proto=${tls_h2}" ;;
+  esac
+  tls_h1="$(curl -k -s --max-time 5 -o /dev/null -w '%{http_code} %{http_version}' --http1.1 "${https_base}/health" 2>/dev/null || true)"
+  if [[ "$tls_h1" == "200 1.1" ]]; then
+    pass "HTTPS health over ALPN http/1.1"
+  else
+    fail "HTTPS ALPN http/1.1" "status proto=${tls_h1}"
+  fi
+else
+  skip "HTTPS listener" "status=${https_status}"
 fi
 
 summary

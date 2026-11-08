@@ -33,6 +33,8 @@
       "repeat_calls": 1574,
       "repeat_share": 0.9668,
       "repeat_same_turn_calls": 1519,
+      "repeat_interval_p50_s": 13.9,
+      "repeat_interval_p90_s": 34.6,
       "repeat_held_hours": 1.843,
       "longest_streak": 901,
       "streaks_of_10_or_more": 5,
@@ -43,11 +45,13 @@
       "top_commands": [
         {
           "command": "gh api \"repos/jeong-sik/masc/pulls?state=open&sort=updated&direction=desc&per_page=12\" --jq '.[]|\"\\(",
-          "repeats": 1565
+          "repeats": 1565,
+          "runs": 1573
         },
         {
           "command": "true",
-          "repeats": 9
+          "repeats": 9,
+          "runs": 10
         }
       ]
     },
@@ -57,6 +61,8 @@
       "repeat_calls": 224,
       "repeat_share": 0.6493,
       "repeat_same_turn_calls": 219,
+      "repeat_interval_p50_s": 24.7,
+      "repeat_interval_p90_s": 98.2,
       "repeat_held_hours": 0.079,
       "longest_streak": 69,
       "streaks_of_10_or_more": 3,
@@ -67,15 +73,18 @@
       "top_commands": [
         {
           "command": "{\"argv\": [\"gh\", \"pr\", \"list\", \"-R\", \"jeong-sik/masc\", \"--search\", \"review-requested:be-sleepers\", \"-",
-          "repeats": 75
+          "repeats": 75,
+          "runs": 84
         },
         {
           "command": "{\"argv\": [\"gh\", \"pr\", \"list\", \"-R\", \"jeong-sik/masc\", \"--state\", \"open\", \"--limit\", \"60\", \"--json\", ",
-          "repeats": 70
+          "repeats": 70,
+          "runs": 77
         },
         {
           "command": "{\"argv\": [\"gh\", \"api\", \"repos/jeong-sik/masc/commits/main\", \"--jq\", \".sha + \\\" \\\" + .commit.committe",
-          "repeats": 70
+          "repeats": 70,
+          "runs": 75
         }
       ]
     },
@@ -85,6 +94,8 @@
       "repeat_calls": 2,
       "repeat_share": 0.0129,
       "repeat_same_turn_calls": 2,
+      "repeat_interval_p50_s": 446.3,
+      "repeat_interval_p90_s": 446.3,
       "repeat_held_hours": 0.001,
       "longest_streak": 2,
       "streaks_of_10_or_more": 0,
@@ -95,11 +106,13 @@
       "top_commands": [
         {
           "command": "{\"argv\": [\"gh\", \"pr\", \"checks\", \"49922\", \"-R\", \"jeong-sik/masc\"], \"cwd\": \".\"}",
-          "repeats": 1
+          "repeats": 1,
+          "runs": 3
         },
         {
           "command": "{\"argv\": [\"python3\", \"-I\", \"scripts/changelog-fragments.py\", \"check\"], \"cwd\": \"wt-3363\", \"timeout_se",
-          "repeats": 1
+          "repeats": 1,
+          "runs": 2
         }
       ]
     },
@@ -109,6 +122,8 @@
       "repeat_calls": 1,
       "repeat_share": 0.0333,
       "repeat_same_turn_calls": 0,
+      "repeat_interval_p50_s": 439.8,
+      "repeat_interval_p90_s": 439.8,
       "repeat_held_hours": 0.0,
       "longest_streak": 2,
       "streaks_of_10_or_more": 0,
@@ -119,7 +134,8 @@
       "top_commands": [
         {
           "command": "for n in 49914 49912; do gh pr view $n -R jeong-sik/masc --json state,isDraft,headRefOid --jq '\"\\(.s",
-          "repeats": 1
+          "repeats": 1,
+          "runs": 2
         }
       ]
     },
@@ -129,6 +145,8 @@
       "repeat_calls": 1,
       "repeat_share": 0.0227,
       "repeat_same_turn_calls": 0,
+      "repeat_interval_p50_s": 70.4,
+      "repeat_interval_p90_s": 70.4,
       "repeat_held_hours": 0.0,
       "longest_streak": 2,
       "streaks_of_10_or_more": 0,
@@ -139,7 +157,8 @@
       "top_commands": [
         {
           "command": "export XDG_CACHE_HOME=/tmp/ghcache GH_CONFIG_DIR=/tmp/ghcfg GH_TOKEN=[REDACTED] auth token); gh api ",
-          "repeats": 1
+          "repeats": 1,
+          "runs": 30
         }
       ]
     }

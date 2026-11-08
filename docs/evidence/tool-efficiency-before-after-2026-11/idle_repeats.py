@@ -23,6 +23,12 @@ Definitions:
 - same turn: a repeat whose previous run belongs to the same turn. A turn is the pair of the row's
   `trace_id` and `keeper_turn_id`, and a row without a `keeper_turn_id` is never in the same turn as
   another. `repeat_same_turn_calls` counts these repeats for every Keeper and for each listed Keeper.
+- interval: the seconds from the end of the previous run of the command to the end of the repeat, so
+  the run time of the repeat is inside it. `repeat_interval_p50_s` and `repeat_interval_p90_s` are the
+  values at position `n // 2` and `n * 9 // 10` of the sorted intervals of a Keeper's repeats, the
+  position rule `measure_before_after.py` uses for its p50.
+- runs: `top_commands[].runs` counts every Execute call of the Keeper whose command head is that head,
+  the first run and the runs that gave a new answer included, and `repeats` counts the repeats only.
 - model request: a `usage` event of a turn trace, the event `agent_core_stream_message_delta`, with
   `ts` in [since, end). `repeats_per_model_request` is a ratio and not a share: one request can ask
   for several calls, and a request can end with no call.
@@ -69,6 +75,7 @@ HOURS_DIGITS = 3
 MIB_DIGITS = 2
 SHARE_DIGITS = 4
 RATIO_DIGITS = 3
+INTERVAL_DIGITS = 1
 TIMING_KEY = "execution_time_ms"
 TURN_EVENTS = "keeper_turn_events"
 USAGE_EVENT = "agent_core_stream_message_delta"
@@ -96,6 +103,7 @@ class Repeat:
     result_bytes: int
     ts: float
     same_turn: bool
+    interval_s: float
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -103,6 +111,7 @@ class Scan:
     executes: Counter[str]
     executes_by_hour: Counter[float]
     date_calls: Counter[str]
+    runs: dict[str, Counter[str]]
     repeats: list[Repeat]
     streaks: dict[str, list[int]]
 
@@ -187,6 +196,7 @@ def scan(calls: Iterable[ledger.Call], gap_s: float) -> Scan:
     executes: Counter[str] = Counter()
     executes_by_hour: Counter[float] = Counter()
     date_calls: Counter[str] = Counter()
+    runs: defaultdict[str, Counter[str]] = defaultdict(Counter)
     repeats: list[Repeat] = []
     streaks: defaultdict[str, list[int]] = defaultdict(list)
     last: dict[tuple[str, str], Run] = {}
@@ -195,21 +205,23 @@ def scan(calls: Iterable[ledger.Call], gap_s: float) -> Scan:
         executes_by_hour[hour_start(call.ts)] += 1
         if is_date_call(call.input_text):
             date_calls[call.keeper] += 1
+        head = command_head(call.input_text)
+        runs[call.keeper][head] += 1
         key = (call.keeper, digest(call.input_text))
         answer = answer_digest(call.output_text)
         previous = last.get(key)
         if previous is not None and call.ts - previous.ts <= gap_s and previous.answer == answer:
             same_turn = call.turn != "" and call.turn == previous.turn
-            repeats.append(Repeat(call.keeper, previous.head, call.duration_ms / 1000, call.result_bytes, call.ts, same_turn))
+            repeats.append(Repeat(call.keeper, previous.head, call.duration_ms / 1000, call.result_bytes, call.ts, same_turn, call.ts - previous.ts))
             last[key] = Run(call.ts, answer, previous.streak + 1, previous.head, call.turn)
             continue
         if previous is not None and previous.streak > 1:
             streaks[call.keeper].append(previous.streak)
-        last[key] = Run(call.ts, answer, 1, command_head(call.input_text), call.turn)
+        last[key] = Run(call.ts, answer, 1, head, call.turn)
     for (keeper, _), run in last.items():
         if run.streak > 1:
             streaks[keeper].append(run.streak)
-    return Scan(executes, executes_by_hour, date_calls, repeats, dict(streaks))
+    return Scan(executes, executes_by_hour, date_calls, dict(runs), repeats, dict(streaks))
 
 
 def number_of(value: object) -> float | None:
@@ -283,12 +295,23 @@ def hours(seconds: float) -> float:
     return round(seconds / SECONDS_PER_HOUR, HOURS_DIGITS)
 
 
+def round_or_none(value: float | None) -> float | None:
+    return round(value, INTERVAL_DIGITS) if value is not None else None
+
+
 def share(part: float, whole: float) -> float | None:
     return round(part / whole, SHARE_DIGITS) if whole > 0 else None
 
 
+def rank(sorted_values: Sequence[float], numerator: int, denominator: int) -> float | None:
+    """The value at position `n * numerator // denominator` of sorted values (numerator below denominator), None when there are none."""
+    return sorted_values[len(sorted_values) * numerator // denominator] if sorted_values else None
+
+
 def keeper_summary(keeper: str, found: Scan, tokens: dict[str, Tokens], all_input: int) -> dict[str, object]:
     mine = [r for r in found.repeats if r.keeper == keeper]
+    interval = sorted(r.interval_s for r in mine)
+    runs = found.runs.get(keeper, Counter())
     streaks = found.streaks.get(keeper, [])
     used = tokens.get(keeper, NO_TOKENS)
     return {
@@ -297,6 +320,8 @@ def keeper_summary(keeper: str, found: Scan, tokens: dict[str, Tokens], all_inpu
         "repeat_calls": len(mine),
         "repeat_share": share(len(mine), found.executes[keeper]),
         "repeat_same_turn_calls": sum(1 for r in mine if r.same_turn),
+        "repeat_interval_p50_s": round_or_none(rank(interval, 1, 2)),
+        "repeat_interval_p90_s": round_or_none(rank(interval, 9, 10)),
         "repeat_held_hours": hours(sum(r.held_s for r in mine)),
         "longest_streak": max(streaks, default=0),
         "streaks_of_10_or_more": sum(1 for length in streaks if length >= STREAK_MIN),
@@ -305,7 +330,8 @@ def keeper_summary(keeper: str, found: Scan, tokens: dict[str, Tokens], all_inpu
         "input_token_share_of_all_keepers": share(used.input_tokens, all_input),
         "repeats_per_model_request": round(len(mine) / used.requests, RATIO_DIGITS) if used.requests > 0 else None,
         "top_commands": [
-            {"command": head, "repeats": count} for head, count in Counter(r.head for r in mine).most_common(TOP_COMMANDS)
+            {"command": head, "repeats": count, "runs": runs[head]}
+            for head, count in Counter(r.head for r in mine).most_common(TOP_COMMANDS)
         ],
     }
 

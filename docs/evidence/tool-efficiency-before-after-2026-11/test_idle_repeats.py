@@ -136,7 +136,7 @@ class ScanTest(unittest.TestCase):
 
     def test_a_repeat_records_its_hold_its_bytes_and_the_first_head(self) -> None:
         found = repeats.scan([execute(100, held_s=2.0), execute(120, held_s=3.5, result_bytes=77)], GAP)
-        self.assertEqual(found.repeats, [repeats.Repeat("a", "gh api pulls", 3.5, 77, 120, False)])
+        self.assertEqual(found.repeats, [repeats.Repeat("a", "gh api pulls", 3.5, 77, 120, False, 20.0)])
 
     def test_the_run_time_of_the_command_does_not_hide_a_repeat(self) -> None:
         found = repeats.scan([execute(100, run_ms=5), execute(120, run_ms=7000)], GAP)
@@ -179,6 +179,52 @@ class SameTurnTest(unittest.TestCase):
         self.assertEqual((cast("dict[str, object]", summary["execute"])["repeat_same_turn_calls"], listed), (1, {"a": 1, "b": 0}))
 
 
+class IntervalTest(unittest.TestCase):
+    def intervals(self, calls: list[before_after.Call]) -> list[float]:
+        return [r.interval_s for r in repeats.scan(calls, GAP).repeats]
+
+    def test_the_interval_runs_from_the_end_of_the_previous_run_to_the_end_of_the_repeat(self) -> None:
+        self.assertEqual(self.intervals([execute(100, held_s=2.0), execute(120, held_s=3.0)]), [20.0])
+
+    def test_the_interval_is_measured_from_the_last_run_and_not_the_first(self) -> None:
+        calls = [execute(100), execute(110), execute(130)]
+        self.assertEqual(self.intervals(calls), [10.0, 20.0])
+
+    def test_the_position_rule_matches_the_p50_of_the_sized_calls(self) -> None:
+        self.assertEqual(repeats.rank([1.0, 2.0, 3.0, 4.0], 1, 2), 3.0)
+        self.assertEqual(repeats.rank([1.0, 2.0, 3.0], 1, 2), 2.0)
+        self.assertEqual(repeats.rank([float(i) for i in range(10)], 9, 10), 9.0)
+        self.assertEqual(repeats.rank([float(i) for i in range(11)], 9, 10), 9.0)
+        self.assertEqual(repeats.rank([5.0], 9, 10), 5.0)
+        self.assertIsNone(repeats.rank([], 1, 2))
+
+    def test_the_summary_gives_p50_and_p90_per_keeper_and_none_without_repeats(self) -> None:
+        ends = [100.0]
+        for step in range(1, 11):
+            ends.append(ends[-1] + step)
+        found = repeats.scan([execute(end, held_s=0.0) for end in ends] + [execute(500, keeper="b")], GAP)
+        a = repeats.keeper_summary("a", found, {}, 0)
+        b = repeats.keeper_summary("b", found, {}, 0)
+        self.assertEqual((a["repeat_interval_p50_s"], a["repeat_interval_p90_s"]), (6.0, 10.0))
+        self.assertEqual((b["repeat_interval_p50_s"], b["repeat_interval_p90_s"]), (None, None))
+
+
+class RunCountTest(unittest.TestCase):
+    def test_every_execute_call_is_a_run_of_its_command_whether_or_not_it_is_a_repeat(self) -> None:
+        calls = [execute(100), execute(110), execute(120, answer="new"), execute(130, command="ls", answer="z"), execute(140, tool="Read")]
+        runs = repeats.scan(calls, GAP).runs
+        self.assertEqual({keeper: dict(heads) for keeper, heads in runs.items()}, {"a": {"gh api pulls": 3, "ls": 1}})
+
+    def test_runs_are_kept_per_keeper(self) -> None:
+        runs = repeats.scan([execute(100), execute(110, keeper="b")], GAP).runs
+        self.assertEqual({keeper: dict(heads) for keeper, heads in runs.items()}, {"a": {"gh api pulls": 1}, "b": {"gh api pulls": 1}})
+
+    def test_the_summary_lists_the_runs_of_each_command_next_to_its_repeats(self) -> None:
+        calls = [execute(100), execute(110), execute(120, answer="new"), execute(130, command="ls")]
+        [top, *_] = cast("list[dict[str, object]]", repeats.keeper_summary("a", repeats.scan(calls, GAP), {}, 0)["top_commands"])
+        self.assertEqual(top, {"command": "gh api pulls", "repeats": 1, "runs": 3})
+
+
 class DateCallTest(unittest.TestCase):
     def test_a_bare_date_command_counts(self) -> None:
         for command in ["date", "date -u", "date -u +%H:%MZ", "date -u +'%Y-%m-%dT%H:%M:%SZ'", "  date -u  "]:
@@ -215,7 +261,7 @@ class DateCallTest(unittest.TestCase):
 
 class StreakCountTest(unittest.TestCase):
     def summary_of(self, longest: int) -> dict[str, object]:
-        found = repeats.Scan(Counter({"a": longest}), Counter(), Counter(), [], {"a": [longest]})
+        found = repeats.Scan(Counter({"a": longest}), Counter(), Counter(), {}, [], {"a": [longest]})
         return repeats.keeper_summary("a", found, {}, 0)
 
     def test_a_streak_of_exactly_the_minimum_counts_as_long(self) -> None:
@@ -354,7 +400,7 @@ class MeasureTest(unittest.TestCase):
         self.assertEqual((top["longest_streak"], top["streaks_of_10_or_more"]), (12, 1))
         self.assertEqual(top["input_token_share_of_all_keepers"], round(3_600 / 6_000, 4))
         self.assertEqual(top["repeats_per_model_request"], round(11 / 12, 3))
-        self.assertEqual(top["top_commands"], [{"command": "gh api pulls", "repeats": 11}])
+        self.assertEqual(top["top_commands"], [{"command": "gh api pulls", "repeats": 11, "runs": 12}])
         self.assertEqual(
             result["hourly"],
             [{"hour": "2026-11-05T00:00:00+00:00", "execute_calls": 14, "repeat_calls": 11, "repeat_share": round(11 / 14, 4)}],

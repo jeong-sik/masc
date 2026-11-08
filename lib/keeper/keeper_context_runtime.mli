@@ -38,20 +38,9 @@ val persist_tool_observation :
 
 (** {1 Keeper Context Lifecycle} *)
 
-val log_keeper_exn : label:string -> exn -> unit
-
 val context_of_agent_core_checkpoint
   :  Agent_core.Checkpoint.t
   -> working_context
-
-val save_agent_core_checkpoint
-  :  base_path:string
-  -> runtime_id:string
-  -> keeper_name:string
-  -> session:session_context
-  -> agent_name:string
-  -> ctx:working_context
-  -> (Agent_core.Checkpoint.t, string Keeper_context_core.checkpoint_write_error) result
 
 type post_turn_lifecycle =
   { updated_meta : keeper_meta
@@ -80,11 +69,6 @@ type context_budget_source =
   | Requested_override_clamped_to_provider
 
 (** {1 Checkpoint Loading} *)
-
-val load_context_from_checkpoint
-  :  trace_id:string
-  -> base_dir:string
-  -> session_context * working_context option
 
 (** What a checkpoint load found ({!Keeper_context_core.checkpoint_load}).
     [Checkpoint_unread] is any failure other than a missing file: the saved
@@ -143,14 +127,3 @@ val context_budget_json_of_resolution
   :  runtime_id:string
   -> max_context_resolution
   -> Yojson.Safe.t
-
-
-(** {1 Prompt Delegation} *)
-
-val build_keeper_system_prompt
-  :  instructions:string
-  -> ?keeper_name:string
-  -> ?workspace_root:string
-  -> ?constitution:string
-  -> unit
-  -> string

@@ -201,8 +201,6 @@ let record_keeper_idle_seconds ~keeper_name ~idle_seconds =
 
 (* RFC-0182 §3.1 cycle break — codecs live in [Turn_mode_codec]. *)
 let turn_mode_to_string = Turn_mode_codec.turn_mode_to_string
-let turn_mode_of_string = Turn_mode_codec.turn_mode_of_string
-let work_kind_of_turn_mode = Turn_mode_codec.work_kind_of_turn_mode
 
 let has_substantive_tool_calls (tools_used : string list) : bool =
   tools_used <> []
@@ -293,7 +291,6 @@ let turn_mode_of_result (result : Keeper_agent_run.run_result) : turn_mode =
   else if text = "" then Noop
   else Text_response
 
-let turn_mode_of_json = Turn_mode_codec.turn_mode_of_json
 let work_kind_of_json = Turn_mode_codec.work_kind_of_json
 
 let claim_backlog_actionable

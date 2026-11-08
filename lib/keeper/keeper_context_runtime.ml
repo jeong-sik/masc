@@ -23,10 +23,7 @@ let create_session = Keeper_context_core.create_session
 let persist_message = Keeper_context_core.persist_message
 let persist_tool_observation = Keeper_context_core.persist_tool_observation
 
-let log_keeper_exn = Keeper_context_core.log_keeper_exn
 let context_of_agent_core_checkpoint = Keeper_context_core.context_of_agent_core_checkpoint
-let save_agent_core_checkpoint = Keeper_context_core.save_agent_core_checkpoint
-let load_context_from_checkpoint = Keeper_context_core.load_context_from_checkpoint
 
 type checkpoint_load = Keeper_context_core.checkpoint_load =
   | Checkpoint_loaded of working_context
@@ -202,6 +199,3 @@ let resolve_max_context_resolution_for_runtime_id
   | None -> Error (Runtime_context_window_unavailable { runtime_id })
   | Some runtime ->
     resolve_max_context_resolution_for_runtime ~requested_override runtime
-
-(* Delegate to Keeper_prompt — single source of truth for keeper prompts. *)
-let build_keeper_system_prompt = Keeper_prompt.build_keeper_system_prompt

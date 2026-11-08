@@ -234,5 +234,5 @@ let run_at_startup ~base_path =
   | exception Unix.Unix_error (error, operation, _) ->
     Error (Sweep_refused (operation ^ ": " ^ Unix.error_message error))
   | stat when stat.Unix.st_kind = Unix.S_DIR ->
-    run ~store:(Store.create ~root:(Filename.concat runtime_root "lane-addons"))
+    run ~store:(Store.create ~root:(Store.directory ~masc_dir:runtime_root))
   | _ -> Error (Sweep_refused "workspace runtime root is not a directory")

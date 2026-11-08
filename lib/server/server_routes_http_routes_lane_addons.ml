@@ -394,7 +394,7 @@ let live_read ~config source ~since =
              | Some cached when cached.blob = reference && cached.blob_bytes <= snapshot.max_bytes ->
                  Ok (reference, cached.blob_bytes, cached.screen)
              | Some _ | None ->
-                 let store = Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+                 let store = Lane_addon_store.of_config config in
                  (* A DOS screen blob is about 1.2 MB. Its digest check and
                     parse take about 10 ms on an idle machine, so both run on
                     the system-thread host rather than on the domain serving

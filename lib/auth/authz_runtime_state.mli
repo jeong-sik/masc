@@ -28,6 +28,9 @@ val empty : t
 (** The Runtime, if it was made. *)
 val find : t -> Authz_types.Runtime_id.t -> runtime option
 
+(** The owner of the Runtime, if it was made. *)
+val owner : t -> Authz_types.Runtime_id.t -> Authz_types.User_id.t option
+
 (** The Runtimes this person owns, in the order of their ids. *)
 val owned_by : t -> Authz_types.User_id.t -> (Authz_types.Runtime_id.t * runtime) list
 

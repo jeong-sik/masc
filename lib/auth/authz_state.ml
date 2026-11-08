@@ -635,10 +635,7 @@ let keeper state (record : R.t) =
          state.keepers
          ~author:record.R.author
          ~is_active:(Authz_principal_state.is_active state.principals)
-         ~runtime_owner:(fun runtime_id ->
-           Option.map
-             (fun (runtime : Authz_runtime_state.runtime) -> runtime.Authz_runtime_state.owner)
-             (Authz_runtime_state.find state.runtimes runtime_id))
+         ~runtime_owner:(Authz_runtime_state.owner state.runtimes)
          event
      with
      | Error refusal -> Error (Keeper refusal)

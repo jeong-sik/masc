@@ -8,10 +8,14 @@
 
 type error =
   | Body_not_built of Authz_body.error
+  | Refused of Authz_keeper_state.refusal
+      (** The state of the zone, read just before the commit, refuses the
+          record: the Keeper was made before, or the Runtime is another
+          person's, among others. Nothing was written. *)
   | Commit_failed of Authz_zone.error
-      (** The zone refused the record: the Keeper was made before, the Runtime
-          is another person's, or the person is no longer active, among
-          others. *)
+      (** The zone did not write the record. A record that a later record
+          made refusable between the read and the commit lands here too, as a
+          [Refused] of the zone. *)
 
 val error_to_string : error -> string
 

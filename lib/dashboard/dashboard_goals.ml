@@ -10,10 +10,6 @@ include Dashboard_goals_types
 module String_map = Map.Make (String)
 module String_set = Set.Make (String)
 
-(* receipt_* / trust_* / iso_max helpers moved to Dashboard_goals_types. *)
-
-
-
 let keeper_runtime_trust_snapshot_json ~config ~(meta : Keeper_meta_contract.keeper_meta) =
   try Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

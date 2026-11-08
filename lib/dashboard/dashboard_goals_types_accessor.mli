@@ -40,6 +40,3 @@ val trust_latest_event : Yojson.Safe.t -> Yojson.Safe.t option
 val trust_latest_event_ts : Yojson.Safe.t -> string option
 val trust_latest_event_ts_unix : Yojson.Safe.t -> float option
 val receipt_has_error : Yojson.Safe.t -> bool
-
-val iso_max : string -> string -> string
-val latest_iso : ?fallback:string -> string list -> string option

@@ -91,12 +91,3 @@ let receipt_has_error json =
   match receipt_error_kind json with
   | Some _ -> true
   | None -> false
-
-let iso_max left right =
-  if String.compare left right >= 0 then left else right
-
-let latest_iso ?fallback values =
-  match values with
-  | [] -> fallback
-  | first :: rest ->
-      Some (List.fold_left iso_max first rest)

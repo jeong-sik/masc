@@ -200,9 +200,8 @@ val unmeasured_atoms : t -> int
 val event_to_string : event -> string
 
 val to_json : t -> Yojson.Safe.t
-(** Counts and totals only; the block list is {!blocks_to_json}. *)
+(** Counts and totals only. *)
 
-val blocks_to_json : t -> Yojson.Safe.t
 val observation_to_json : observation -> Yojson.Safe.t
 
 val prefix_digest : system_prompt:string -> tools:Agent_core.Tool.t list -> string

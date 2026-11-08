@@ -21,6 +21,7 @@ type t =
   | Tool_observation of { tool_name : string }
   | Tool_actor of { tool_name : string }
   | Manage_own_provider
+  | Manage_own_keeper
   | Self_authenticated of self_authenticated_reason
 
 let reason_to_string = function
@@ -54,6 +55,7 @@ let to_json t =
   | Tool_observation { tool_name } -> kind "tool_observation" [ "tool_name", `String tool_name ]
   | Tool_actor { tool_name } -> kind "tool_actor" [ "tool_name", `String tool_name ]
   | Manage_own_provider -> kind "manage_own_provider" []
+  | Manage_own_keeper -> kind "manage_own_keeper" []
   | Self_authenticated reason ->
     kind "self_authenticated" [ "reason", `String (reason_to_string reason) ]
 ;;

@@ -548,10 +548,6 @@ module InternalTimers = struct
   let sse_buffer_ttl_sec =
     get_float ~default:300.0 "MASC_SSE_BUFFER_TTL_SEC"
 
-  (** Operator digest stalled session threshold (seconds). Default: 300 (5 min). *)
-  let stalled_session_threshold_sec =
-    get_float ~default:300.0 "MASC_STALLED_SESSION_THRESHOLD_SEC"
-
   (** Repository auto-sync interval (seconds). The repo_sync fiber in
       [server_bootstrap_loops] wakes at this cadence to fetch repositories
       with [auto_sync = true]. Default: 300 (5 min). *)

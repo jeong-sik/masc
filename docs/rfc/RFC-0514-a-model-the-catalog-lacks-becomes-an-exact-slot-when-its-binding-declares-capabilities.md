@@ -99,6 +99,11 @@ related: ["runtime-two-layers"]
 - resolver fold(`exact_output_resolver.ml:714-722`)는 `Model_missing`을 두 갈래로 나눈다.
   - 대상이 `Binding_wire`이고 바인딩에 `model_capabilities_override = Some caps`가 있으면 provider 행에 묶는다. 능력은 `caps`다.
   - 그 밖은 지금처럼 `reject Target_model`이다. `Catalog_provider_wire` 대상과 선언 없는 바인딩이 여기에 든다.
+- Anthropic wire에서는 표가 없어도 override가 채워진다.
+  adapter(`with_client_history_replay`)가 카탈로그 답을 옮겨 적기 때문이다.
+  preset만 답하는 모델이면 이 값은 preset 사본이고 선언이 아니다.
+  그래서 MASC는 행도 표도 없는 바인딩을 resolver에 넘기지 않는다(`Runtime.exact_target_refusal`).
+  어느 wire에서나 같은 규칙이다. 그런 슬롯마다 부팅 로그에 경고가 한 줄 남는다. 경고는 적을 표를 알려 준다.
 - fold가 넘기는 `(target, provider, model)`의 세 번째 값을 닫힌 합타입으로 바꾼다.
   모델 행으로 묶임(`model_entry`)과 바인딩 선언으로 묶임(`capabilities`)이다.
   뒤 fold의 `match`가 두 갈래를 다 다룬다.
@@ -193,6 +198,7 @@ supports-structured-output = false
   - provider 행만 있고 모델 행이 없는 모델에 능력 표를 적은 바인딩은 슬롯이 된다.
     슬롯 능력에는 적은 창과 `supports_response_format_json = false`가 있다.
   - 같은 모델에 능력 표가 없는 바인딩은 `Target_not_in_catalog`로 빠진다.
+  - Anthropic wire에서 행도 표도 없는 바인딩도 `Target_not_in_catalog`로 빠진다.
 - 확인은 PR CI의 타입 검사·시험과 현재 head 독립 리뷰로 한다.
 - 설치 뒤에는 두 가지를 본다.
   - 부팅 로그에 체크포인트 슬롯의 `Target_not_in_catalog`가 없다.

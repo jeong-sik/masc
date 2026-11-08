@@ -5,4 +5,4 @@
  ; masc_tui_render_tools's tools_display_lines; this test executes that
  ; function with a decoded async observation and a decoded Skill-activation
  ; ledger, so the drawn rows are the function's own output.
- (libraries masc masc.masc_types masc.runtime masc.skill_reference masc.string_util masc_tui_types masc_tui_owed_read masc_tui_theme masc_tui_render_tools alcotest yojson masc.agent_core.digest))
+ (libraries masc masc.masc_types masc.runtime masc.skill_reference masc_tui_types masc_tui_owed_read masc_tui_theme masc_tui_render_tools alcotest yojson masc.agent_core.digest))

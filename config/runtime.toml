@@ -583,7 +583,7 @@ path = "/api/tags"
 # checkpoint has no catalog row, so only the provider's preset answers for it.
 # Its model table carries its own capabilities block, which overrides the
 # preset. It is an exact-output slot only when it states the window, the
-# effort ladder, JSON mode and native schema
+# effort ladder, JSON mode, native schema and the output ceiling
 # (docs/guides/tinker-integration.md).
 # [providers.tinker]
 # display-name = "Thinking Machines Tinker"

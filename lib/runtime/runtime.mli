@@ -334,10 +334,10 @@ val init_default : config_path:string -> (unit, string) result
 val exact_output_targets : t list -> Agent_core.Exact_output.declared_target list
 (** The exact-output slots of [runtimes]: every HTTP binding, carried whole with
     its resolved credential and its [exact-body-timeout-s]. A binding whose
-    runtime.toml states every capability an exact slot reads
-    ({!Runtime_exact_reads.parse}) also declares its model: those reads as
-    stated, laid over the capabilities its Keeper turns run on. The
-    declaration answers where the catalog has no row for the model.
+    runtime.toml states the five reads {!Runtime_exact_reads.parse} requires
+    also declares its model: those reads as stated, laid over the
+    capabilities its Keeper turns run on. The declaration answers where the
+    catalog has no row for the model.
     Official-client runtimes do no exact output and are left out. *)
 
 type exact_output_catalog =

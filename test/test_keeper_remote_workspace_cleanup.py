@@ -136,6 +136,28 @@ class RemoteWorkspaceCleanup(unittest.TestCase):
         git(detached, "commit", "-q", "-am", "detached only")
         self.assert_kept(self.sweep(), "detached", "only in detached")
 
+    def test_bare_repositories_with_local_commits_are_kept(self) -> None:
+        (self.root / "box").mkdir()
+        for relative in ("local.git", "box/nested.git"):
+            bare = self.root / relative
+            git(self.root, "clone", "-q", "--bare", str(self.origin), str(bare))
+            commit = git(bare, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "local only").strip()
+            git(bare, "update-ref", "refs/heads/main", commit)
+            self.assertEqual(cleaner.unpushed_tip(bare), commit)
+        entries = self.sweep()
+        self.assert_kept(entries, "local.git", "Git directory")
+        self.assert_kept(entries, "box", "Git directory")
+
+    def test_separate_git_directory_keeps_its_external_worktree(self) -> None:
+        administrative = self.root / "administrative"
+        worktree = self.root.parent / "outside-worktree"
+        git(self.root, "clone", "-q", "--separate-git-dir", str(administrative),
+            str(self.origin), str(worktree))
+        entries = self.sweep()
+        self.assert_kept(entries, "administrative", "Git directory")
+        self.assertEqual(git(worktree, "rev-parse", "HEAD").strip(),
+                         git(self.origin, "rev-parse", "HEAD").strip())
+
     def test_unreadable_origin_keeps_an_unpushed_tip(self) -> None:
         orphan = self.clone("orphan")
         (orphan / "README").write_text("local only\n")

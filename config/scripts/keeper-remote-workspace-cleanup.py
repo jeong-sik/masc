@@ -68,6 +68,7 @@ def tree_facts(entry: Path) -> tuple[int, float, list[Path]]:
     size = top.st_blocks * 512
     newest = max(top.st_mtime, top.st_ctime)
     repos: list[Path] = []
+    owned_git_dirs: set[Path] = set()
     if not stat.S_ISDIR(top.st_mode):
         return size, newest, repos
 
@@ -78,6 +79,13 @@ def tree_facts(entry: Path) -> tuple[int, float, list[Path]]:
         for directory, dirs, files in os.walk(entry, followlinks=False, onerror=fail):
             here = Path(directory)
             if ".git" in dirs or ".git" in files:
+                repos.append(here)
+                owned_git_dirs.add(here / ".git")
+            elif (here not in owned_git_dirs and "HEAD" in files
+                  and ("objects" in dirs or "commondir" in files)):
+                # Bare repositories and separate Git directories have no
+                # .git child. Keep them through the same decision path; the
+                # ordinary worktree's own .git is already checked via its owner.
                 repos.append(here)
             for name in dirs + files:
                 info = (here / name).lstat()
@@ -181,6 +189,11 @@ def foreign_worktree(repo: Path, entry: Path) -> Path | None:
 
 
 def keep_reason(repo: Path, entry: Path) -> str | None:
+    if git(repo, "rev-parse", "--is-inside-git-dir").strip() == "true":
+        # A standalone administrative directory may own an external worktree;
+        # a bare repository may be the only copy of its commits. Neither has
+        # the worktree contract required by the checks below.
+        return f"Git directory in {repo.relative_to(entry.parent)}"
     if git(repo, "stash", "list").strip():
         return f"stash in {repo.relative_to(entry.parent)}"
     tip = unpushed_tip(repo)

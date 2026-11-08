@@ -475,6 +475,39 @@ let carrier_reprojection carrier ~then_ ~refusal =
   | Ok Keeper_memory_delivery_reprojection.Reprojected as reduced -> reduced
   | Ok Unchanged -> then_ ~refusal
 
+(* The load stays inside the run's first attempt, where a failed load already
+   settles the claimed turn; a run's attempts follow one another. *)
+type run_carrier =
+  { run_base_path : string
+  ; run_keeper_name : string
+  ; run_reader_available : bool
+  ; run_loaded : (snapshot * carrier) option Atomic.t
+  }
+
+let run_carrier ~base_path ~keeper_name ~artifact_reader_available =
+  { run_base_path = base_path
+  ; run_keeper_name = keeper_name
+  ; run_reader_available = artifact_reader_available
+  ; run_loaded = Atomic.make None
+  }
+
+let run_carrier_load run =
+  match Atomic.get run.run_loaded with
+  | Some loaded -> Ok loaded
+  | None ->
+    let* snapshot = load ~base_path:run.run_base_path ~keeper_name:run.run_keeper_name in
+    let loaded =
+      snapshot,
+      carrier ~base_path:run.run_base_path
+        ~artifact_reader_available:run.run_reader_available snapshot in
+    Atomic.set run.run_loaded (Some loaded);
+    Ok loaded
+
+let run_carrier_reprojection run ~then_ ~refusal =
+  match Atomic.get run.run_loaded with
+  | None -> then_ ~refusal
+  | Some (_, loaded) -> carrier_reprojection loaded ~then_ ~refusal
+
 let is_context_parts ~(role : Agent_core.Types.role) ~(origin : Agent_core.Types.message_origin) ~metadata =
   role=System && origin=Agent_instruction
   && List.assoc_opt "masc_retained_tool_results" metadata=Some (`Bool true)

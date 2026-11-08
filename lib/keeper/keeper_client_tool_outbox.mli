@@ -196,6 +196,28 @@ val carrier_reprojection :
     maintenance may delete it after the run; the next run that switches writes
     it again at the same address. *)
 
+type run_carrier
+(** The retained results of one run. A runtime makes it once per run, before
+    the run's first attempt. *)
+
+val run_carrier :
+  base_path:string -> keeper_name:string -> artifact_reader_available:bool -> run_carrier
+(** Reads and writes no file. [artifact_reader_available] is as for {!carrier}. *)
+
+val run_carrier_load : run_carrier -> (snapshot * carrier, string) result
+(** The first successful call loads the outbox and starts its carrier. Every
+    later call returns that same snapshot and carrier, so a form the hook
+    switched stays switched for the rest of the run and the run acknowledges
+    exactly the snapshot it carried. A failed load is returned and not kept.
+    A run's attempts call it one after another. *)
+
+val run_carrier_reprojection :
+  run_carrier ->
+  then_:Keeper_memory_delivery_reprojection.t ->
+  Keeper_memory_delivery_reprojection.t
+(** {!carrier_reprojection} of the loaded carrier; before the first load, [then_]
+    alone. *)
+
 val acknowledge : snapshot -> (unit, string) result
 (** Remove only the exact loaded receipts after the consumer completes.
     Newer receipts remain pending. Runtime callers use [settle_after_turn] so

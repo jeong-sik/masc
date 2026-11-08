@@ -111,6 +111,17 @@ let test_backup_apply_and_restart_restore () =
     let backup = Yojson.Safe.Util.(json |> member "backup_path" |> to_string) in
     check string "original backup exact bytes" original (contents backup);
     check int "backup is private" 0o600 ((Unix.stat backup).st_perm land 0o777);
+    check string "backup file name" "original.toml" (Filename.basename backup);
+    check
+      string
+      "backup sits in a per-backup directory under .masc/upgrades"
+      (Filename.concat base_path ".masc/upgrades")
+      (Filename.dirname (Filename.dirname backup));
+    check
+      bool
+      "manifest sits beside the backup"
+      true
+      (Sys.file_exists (Filename.concat (Filename.dirname backup) "manifest.json"));
     let backup_id = Filename.basename (Filename.dirname backup) in
     let reopened =
       match U.load_recovery ~base_path ~backup_id with

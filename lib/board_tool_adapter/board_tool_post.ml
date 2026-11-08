@@ -90,20 +90,7 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
     in
     let body = Option.map (fun _ -> content) body_arg in
     let author = get_string_opt args "author" |> Option.map String.trim in
-    let title_is_empty =
-      match title with
-      | Some value -> String.equal (String.trim value) ""
-      | None -> false
-    in
-    if title_is_empty
-    then
-      Tool_result.make_err
-        ~tool_name
-        ~class_:Tool_result.Workflow_rejection
-        ~effect_disposition:Tool_result.Proven_pre_effect
-        ~start_time
-        "title is required"
-    else if
+    if
       Option.is_none author
       || Option.equal String.equal author (Some "")
       || Option.equal String.equal author (Some "anonymous")

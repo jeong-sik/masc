@@ -280,8 +280,6 @@ let credential_file config agent_name =
 
 module Nickname_helpers = Auth_nickname
 
-let is_generated_nickname_shape = Nickname_helpers.is_generated_nickname_shape
-let keeper_transport_alias_stable_name = Nickname_helpers.keeper_transport_alias_stable_name
 let extract_agent_type_prefix = Nickname_helpers.extract_agent_type_prefix
 let credential_agent_name = Nickname_helpers.credential_agent_name
 

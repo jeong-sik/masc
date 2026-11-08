@@ -1781,11 +1781,21 @@ type code_file_presence =
 let code_file_is_current (state : state) =
   Option.is_some (Masc_tui_fetched.current_key state.code_file)
 
+(* [d] on the file list opens the project's Git changes. The arm answers the
+   project's own workspace only: a keeper's or a repository's tree has no arm
+   for the key and it ends in [()]. The dispatcher and the footer both read
+   this answer, so the pair is named exactly where it answers. *)
+let code_tree_opens_changes = function
+  | Code_scope_project -> true
+  | Code_scope_keeper _ | Code_scope_repo _ -> false
+
 type code_pane =
-  | Code_tree of code_file_presence
-      (** the file list has focus below the project root *)
-  | Code_root of code_file_presence
-      (** the file list has focus at the project root *)
+  | Code_tree of code_file_presence * code_workspace_scope
+      (** the file list has focus below the project root, over the workspace
+          the scope names *)
+  | Code_root of code_file_presence * code_workspace_scope
+      (** the file list has focus at the project root, over the workspace the
+          scope names *)
   | Code_file  (** a file is open and nothing covers it *)
   | Code_diff
   | Code_notes  (** wrapped memo document is drawn over the file *)
@@ -1794,8 +1804,9 @@ type code_pane =
 let code_pane_of (state : state) =
   if state.code_focus_file <> Right_pane then
     let file = if code_file_is_current state then File_current else No_file in
-    if code_back_step state = Leave_code_for_workspace then Code_root file
-    else Code_tree file
+    if code_back_step state = Leave_code_for_workspace then
+      Code_root (file, state.code_scope)
+    else Code_tree (file, state.code_scope)
   else if state.code_notes_open then Code_notes
   else if state.code_history_open then Code_history
   else if state.code_diff_open then Code_diff
@@ -1846,14 +1857,20 @@ let footer_hints_code ~pane =
   let overlay_keys = [ "Enter (history)" ] in
   let dead =
     match pane with
-    | Code_tree file | Code_root file ->
+    | Code_tree (file, scope) | Code_root (file, scope) ->
         (* With no file read current, [h] and [l] have no pane to move to
            ([code_file_is_current]), and the row named them on the first
            screen of Code. *)
         let pane_keys = match file with
           | No_file -> [ "h/l" ]
           | File_current -> [] in
-        overlay_keys @ file_keys @ pane_keys
+        (* [d] on the list is not a file key: it opens the project's Git
+           changes where the dispatcher has that arm. *)
+        let tree_file_keys =
+          if code_tree_opens_changes scope then
+            List.filter (fun key -> not (String.equal key "d")) file_keys
+          else file_keys in
+        overlay_keys @ tree_file_keys @ pane_keys
     | Code_file ->
         (* The arm behind Right and Enter opens a tree row or answers the
            history overlay. With the file pane focused and nothing over it, it
@@ -1896,6 +1913,12 @@ let footer_hints_code ~pane =
          { b with label = (match pane with
            | Code_tree _ | Code_root _ -> "move"
            | Code_file | Code_diff | Code_notes | Code_history -> "scroll") }
+       else if String.equal b.key "d" then
+         (* On the list the key shows the project's changes; on an open file
+            it shows that file's diff. *)
+         { b with label = (match pane with
+           | Code_tree _ | Code_root _ -> "changes"
+           | Code_file | Code_diff | Code_notes | Code_history -> b.label) }
        else b)
   |> hints_of_bindings
   |> fun hints ->

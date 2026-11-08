@@ -294,11 +294,19 @@ val code_file_is_current : Masc_tui_types.state -> bool
     footer read this one answer, so the pair is named exactly where it
     answers. *)
 
+val code_tree_opens_changes : Masc_tui_types.code_workspace_scope -> bool
+(** Whether [d] on the file list opens the project's Git changes. Only the
+    project's own workspace has that arm; a keeper's or a repository's tree
+    passes the key on. The dispatcher and the footer read this one answer, so
+    the pair is named exactly where it answers. *)
+
 type code_pane =
-  | Code_tree of code_file_presence
-      (** the file list has focus below the project root *)
-  | Code_root of code_file_presence
-      (** the file list has focus at the project root *)
+  | Code_tree of code_file_presence * Masc_tui_types.code_workspace_scope
+      (** the file list has focus below the project root, over the workspace
+          the scope names *)
+  | Code_root of code_file_presence * Masc_tui_types.code_workspace_scope
+      (** the file list has focus at the project root, over the workspace the
+          scope names *)
   | Code_file  (** a file is open and nothing covers it *)
   | Code_diff
   | Code_notes  (** wrapped memo document is drawn over the file *)

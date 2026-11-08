@@ -872,7 +872,6 @@ module FileSystem = struct
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Error (IOError (Printf.sprintf "atomic_increment failed: %s" (Printexc.to_string exn)))
 
-  (** Atomically get the current counter value without incrementing *)
   (** Atomically get the current counter value without incrementing.
       Reads the file without locking — the counter is a small integer
       written atomically by [atomic_increment] (which holds an exclusive

@@ -31,9 +31,6 @@ let try_with_log context f =
     Log.Misc.error "%s failed: %s" context (Printexc.to_string e);
     None
 
-(** Cancel-aware Result wrapper.
-    Re-raises [Eio.Cancel.Cancelled] with backtrace; captures other
-    exceptions as [Error exn]. *)
 (** Cancel-aware exception handler.
     Re-raises [Eio.Cancel.Cancelled] with backtrace; delegates other
     exceptions to [handler]. *)
@@ -464,7 +461,6 @@ let list_dir_safe path : (string list, string) result =
     | e ->
       Error (Printf.sprintf "Failed to list %s: %s" path (Printexc.to_string e))
 
-(** Close channel with logging on failure *)
 (** Get environment variable with logging when invalid *)
 let get_env_int_logged name ~default =
   match Sys.getenv_opt name with

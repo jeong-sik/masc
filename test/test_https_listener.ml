@@ -292,9 +292,14 @@ let test_alpn_dispatch () =
         let h1_reply = h1_get ~sw h1_socket in
         check int "http/1.1 status" 200 h1_reply.status;
         check string "httpun handler answered" "h1" h1_reply.body;
-        (* A cleartext request on the TLS port ends in a protocol failure. *)
+        (* A cleartext request on the TLS port is read as a record header. The
+           TLS reader checks the length before the content type (tls
+           reader.ml, parse_record) and waits for the 8,239 bytes that "GET /"
+           spells, so the peer gives up; the listener counts the handshake
+           that ended at the peer's EOF. *)
         let raw = Eio.Net.connect ~sw net (`Tcp (Eio.Net.Ipaddr.V4.loopback, port)) in
         Eio.Flow.copy_string "GET / HTTP/1.1\r\nhost: localhost\r\n\r\n" raw;
+        Eio.Flow.shutdown raw `Send;
         (match Eio.Flow.single_read raw (Cstruct.create 64) with
          | _ -> ()
          | exception End_of_file -> ()

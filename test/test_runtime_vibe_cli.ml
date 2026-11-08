@@ -50,7 +50,7 @@ let test_disagreements () =
      check bool "stderr kept" true (String.length stderr_tail > 0)
    | other -> fail (Cli.error_to_string other));
   (match error (classify ~exit_code:0 ~export:"export-usage-error.json" ()) with
-   | Cli.Exit_code_mismatch { process = 0; export = 1 } -> ()
+   | Cli.Exit_code_mismatch { process = 0; export = 1; _ } -> ()
    | other -> fail (Cli.error_to_string other));
   (* An export whose own exit_code agrees with the process but not with the
      code its outcome had: finished with 3. *)
@@ -62,7 +62,9 @@ let test_disagreements () =
     | _ -> fail "export-finished.json is an object"
   in
   match error (Cli.classify ~exit_code:3 ~export_json:(Some finished_with_3) ~stdout:"" ~stderr:"") with
-  | Cli.Outcome_exit_mismatch { outcome = Vibe.Finished; exit_code = 3 } -> ()
+  | Cli.Outcome_exit_mismatch { outcome = Vibe.Finished; exit_code = 3; _ } as disagreement ->
+    (* The run disagreed with its export, but the export's tokens were spent. *)
+    check bool "usage kept" true (Option.is_some (Cli.reported_usage disagreement))
   | other -> fail (Cli.error_to_string other)
 ;;
 

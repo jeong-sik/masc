@@ -178,8 +178,8 @@ and vibe_failure =
           killed or ran out of time, or its outputs did not agree (no or
           unreadable [export.json], an unreadable transcript, an exit code
           that disagrees). An unreadable transcript and a disagreeing exit
-          code come after the export was read, but the error does not carry
-          its usage, so none is reported. *)
+          code come after the export was read; its usage is reported through
+          [on_usage] ({!Runtime_vibe_cli.reported_usage}). *)
   | Vibe_not_answered of Runtime_vibe_answer.error
       (** Vibe ended the run, but not with a reply this caller can use. *)
 

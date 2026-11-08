@@ -729,7 +729,11 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       }
     in
     (match Runtime_vibe_cli.run config ~prompt with
-     | Error error -> Error (Vibe_failure (Vibe_run_failed error))
+     | Error error ->
+       Option.iter
+         (fun usage -> on_usage (vibe_usage usage))
+         (Runtime_vibe_cli.reported_usage error);
+       Error (Vibe_failure (Vibe_run_failed error))
      | Ok run ->
        let usage = optional_usage vibe_usage run.export.usage in
        (* [export.json] names no model, so the panel records the [--model]

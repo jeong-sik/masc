@@ -20,8 +20,7 @@ let count_to_json = function
   | Keeper_client_usage_report.Running_count usage ->
     `Assoc
       [ "kind", `String "running"
-      ; "usage", Keeper_usage_resolution.sample_to_json
-                   (Keeper_usage_resolution.sample_of_api_usage usage)
+      ; "usage", Keeper_usage_resolution.sample_to_json usage
       ]
   | Keeper_client_usage_report.Count_replaced -> `Assoc [ "kind", `String "replaced" ]
 ;;
@@ -84,9 +83,7 @@ let count_of_json = function
      | "running" ->
        let* usage = member "usage" fields in
        let* sample = Keeper_usage_resolution.sample_of_json usage in
-       Ok
-         (Keeper_client_usage_report.Running_count
-            (Keeper_usage_resolution.api_usage_of_sample sample))
+       Ok (Keeper_client_usage_report.Running_count sample)
      | "replaced" -> Ok Keeper_client_usage_report.Count_replaced
      | other -> Error (Printf.sprintf "unknown count kind %S" other))
   | _ -> Error "count must be an object"
@@ -147,6 +144,6 @@ let observe spend = function
       ~response_id
       ~ordinal
       ~model
-      (Option.map Keeper_usage_resolution.api_usage_of_sample usage)
+      usage
   | Client_report report -> Keeper_turn_spend.observe_client_report spend report
 ;;

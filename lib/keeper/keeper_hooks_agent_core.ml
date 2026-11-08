@@ -410,7 +410,7 @@ let make_hooks
                  { response_id = response.id
                  ; ordinal = turn
                  ; model
-                 ; usage = Option.map Keeper_usage_resolution.sample_of_api_usage usage
+                 ; usage
                  })
           | Some (Client_stream_attempt _) | None -> None
         in

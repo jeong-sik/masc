@@ -421,11 +421,13 @@ let by_address_text ~receipt_count ~tool_counts ~artifact_reader_available refer
       Printf.sprintf "Before calling one of these tools again, read the receipts with %s \
         using that sha256 and following next_offset. They are the text this request \
         would otherwise carry inline.\n" Keeper_runtime_schemas_toml.artifact_read.name
-    else "This request has no artifact reader, so it cannot read the receipts.\n" in
+    else "This request has no artifact reader, so it cannot read the receipts. \
+      Check the current state before calling one of these tools again.\n" in
   String.concat ""
     [ receipts_prefix
-    ; Printf.sprintf "Receipts carried by address in this request: %d. Each one is a call \
-        that already returned; any effect it had has happened, so do not repeat it.\n"
+    ; Printf.sprintf "Receipts carried by address in this request: %d. Each one \
+        already returned a result, which may be a failure or a refusal before \
+        execution.\n"
         receipt_count
     ; "Receipts per tool, in order of first appearance: "
     ; Yojson.Safe.to_string
@@ -461,9 +463,11 @@ let switch_to_address carrier =
       let* stored = host_put carrier.carrier_store ~bytes:inline ~mime:host_text_mime in
       let by_address =
         Carried_by_address [text (Tool_output.with_preview stored carrier_preview)] in
-      if Atomic.compare_and_set carrier.carried Carried_inline by_address
-      then Ok Keeper_memory_delivery_reprojection.Reprojected
-      else Ok Keeper_memory_delivery_reprojection.Unchanged
+      (* The form only moves from Inline to By_address. A call that loses this
+         race finds the carrier already switched; the request it was refused
+         for carried Inline all the same, so its retry is shorter too. *)
+      match Atomic.compare_and_set carrier.carried Carried_inline by_address with
+      | true | false -> Ok Keeper_memory_delivery_reprojection.Reprojected
 
 let carrier_reprojection carrier ~then_ ~refusal =
   match switch_to_address carrier with

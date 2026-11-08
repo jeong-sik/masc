@@ -153,8 +153,9 @@ type form =
   | By_address
       (** The receipt count, the receipts per tool and the marker of one
           [text/plain] blob holding the [Inline] text, with how to read it.
-          Beyond the tool names, only the digits of those numbers change its
-          length. *)
+          Its length depends only on the tool names, the digits of those
+          numbers and of the blob's byte count, and whether the run offers a
+          reader. *)
 
 type carrier
 (** The carrier of one run: every provider attempt of one runtime call to one

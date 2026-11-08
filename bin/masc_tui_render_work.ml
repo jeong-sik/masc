@@ -1675,10 +1675,6 @@ let schedule_delivery_rows = 2
 let schedule_rows_around_list =
   schedule_summary_rows + schedule_column_header_rows + schedule_delivery_rows
 
-(** Render the Schedules surface: the scheduled-automation list, with an
-    armed cancel. The server sorts active rows first by due time and caps the
-    list at its own limit; [scs_truncated] and [scs_request_count] say what
-    of the whole store this page is. *)
 (* Whether the list holds a row for [j/k], [Right / Enter], [e], [x] and [Y]
    to act on. Read by the footer; the dispatcher reads the same rows. *)
 let schedule_list_has_rows (state : state) =
@@ -1686,6 +1682,10 @@ let schedule_list_has_rows (state : state) =
   | Some snapshot -> snapshot.scs_rows <> []
   | None -> false
 
+(** Render the Schedules surface: the scheduled-automation list, with an
+    armed cancel. The server sorts active rows first by due time and caps the
+    list at its own limit; [scs_truncated] and [scs_request_count] say what
+    of the whole store this page is. *)
 let render_schedule_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let refusal_rows = schedule_form_refusal_rows state ~cols in

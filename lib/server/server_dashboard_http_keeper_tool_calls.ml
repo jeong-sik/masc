@@ -1,7 +1,6 @@
 (* See server_dashboard_http_keeper_tool_calls.mli. *)
 
 module Http = Http_server_eio
-module Api_post = Server_dashboard_http_keeper_api_post
 
 let standard_cache_ttl_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 let freshness_slo_s = Server_dashboard_http_core_cache.freshness_slo_s
@@ -73,9 +72,7 @@ let tool_call_store_unavailable_json ~keeper_name detail =
 let tool_calls_limit_max = 200
 
 let handle_stats_get state req reqd name =
-  if String.length name = 0 then
-    Api_post.respond_error reqd "keeper name is required"
-  else if not (Keeper_config.validate_name name) then
+  if not (Keeper_config.validate_name name) then
     Http.Response.json_value ~status:`Bad_request
       (`Assoc
          [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
@@ -183,9 +180,7 @@ let handle_result_get state req reqd keeper =
 ;;
 
 let handle_calls_get state req reqd name =
-  if String.length name = 0 then
-    Api_post.respond_error reqd "keeper name is required"
-  else if not (Keeper_config.validate_name name) then
+  if not (Keeper_config.validate_name name) then
     Http.Response.json_value ~status:`Bad_request
       (`Assoc
          [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])

@@ -137,6 +137,8 @@ val evidence_to_json : evidence -> Yojson.Safe.t
 val evidence_of_json : Yojson.Safe.t -> (evidence, string) result
 val row_to_json : row -> Yojson.Safe.t
 val row_of_json : Yojson.Safe.t -> (row, string) result
+val output_fields : output -> (string * Yojson.Safe.t) list
+(** The members of {!output_to_json}'s object, for a caller that adds members of its own. *)
 val output_to_json : output -> Yojson.Safe.t
 val output_of_json : Yojson.Safe.t -> (output, string) result
 val coverage_to_json : coverage -> Yojson.Safe.t

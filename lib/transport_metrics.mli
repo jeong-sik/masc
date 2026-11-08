@@ -161,6 +161,10 @@ type http_protocol =
 val http_protocol_to_string : http_protocol -> string
 (** The label a protocol carries in metrics and log lines: ["h1"] or ["h2"]. *)
 
+val http_protocol_version : http_protocol -> string
+(** The HTTP version a protocol carries, spelled as OpenTelemetry's
+    [network.protocol.version]: ["1.1"] or ["2"]. *)
+
 type http_rate_limit_scope =
   | Client_ip
   | Agent

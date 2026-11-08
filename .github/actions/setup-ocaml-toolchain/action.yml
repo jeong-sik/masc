@@ -91,6 +91,7 @@ runs:
         OCAML_COMPILER_INPUT: ${{ inputs.ocaml-compiler }}
         OPAM_CACHE_EXACT_HIT: ${{ steps.opam-toolchain-cache.outputs.cache-hit }}
         OPAM_CACHE_EXACT_HIT_STORE: ${{ steps.opam-toolchain-store.outputs.cache-hit }}
+        GH_TOKEN: ${{ github.token }}
       run: |
         set -euo pipefail
 
@@ -152,7 +153,15 @@ runs:
         opam_url="https://github.com/ocaml/opam/releases/download/${opam_version}/opam-${opam_version}-${opam_arch}-${opam_os}"
 
         mkdir -p "${opam_dir}"
-        curl -L --fail --retry 3 --retry-delay 5 --retry-all-errors "${opam_url}" -o "${opam_dir}/opam"
+        if ! curl -L --fail --retry 2 --retry-delay 3 --retry-all-errors "${opam_url}" -o "${opam_dir}/opam"; then
+          echo "curl download failed for ${opam_url}, falling back to gh release download..." >&2
+          gh release download "${opam_version}" \
+            --repo ocaml/opam \
+            --pattern "opam-${opam_version}-${opam_arch}-${opam_os}" \
+            --dir "${opam_dir}" \
+            --clobber
+          mv -f "${opam_dir}/opam-${opam_version}-${opam_arch}-${opam_os}" "${opam_dir}/opam"
+        fi
         chmod +x "${opam_dir}/opam"
         export PATH="${opam_dir}:${PATH}"
         echo "${opam_dir}" >> "${GITHUB_PATH}"

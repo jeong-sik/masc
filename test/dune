@@ -35,6 +35,16 @@
  (name runtest)
  (deps (alias runtest-test_measure_tool_efficiency)))
 
+(rule
+ (alias runtest-test_keeper_remote_workspace_cleanup)
+ (deps ../config/scripts/keeper-remote-workspace-cleanup.py
+       test_keeper_remote_workspace_cleanup.py)
+ (action (run python3 %{dep:test_keeper_remote_workspace_cleanup.py})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_keeper_remote_workspace_cleanup)))
+
 (test
  (name test_tui_board_reader)
  (modules test_tui_board_reader)

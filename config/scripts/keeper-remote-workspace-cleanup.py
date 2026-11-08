@@ -11,6 +11,8 @@ Without --apply it only reports. An operator can run the same file by hand:
   ssh <endpoint> python3 - --root <keeper root> --retention-sec 172800 < this
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os

@@ -171,9 +171,9 @@ let compress_encoded_body encoding body =
   | Prefer_zstd -> (
     match Compression_codec.compress body with
     | Compression_codec.Unchanged payload -> payload, [ vary_accept_encoding ]
-    | Compression_codec.Compressed { payload; encoding } ->
+    | Compression_codec.Compressed payload ->
       ( payload
-      , [ ("content-encoding", Compression_codec.content_encoding encoding)
+      , [ ("content-encoding", Compression_codec.content_encoding)
         ; vary_accept_encoding
         ] ))
   | Prefer_gzip -> (

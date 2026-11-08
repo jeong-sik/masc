@@ -1,35 +1,23 @@
 (** Shared compression codec surface.
 
-    This module owns the raw zstd compression/decompression policy so transport
-    and backend layers depend on a neutral codec rather than backend-local
-    helpers. *)
+    This module owns the raw zstd compression/decompression policy shared by
+    the HTTP response path and machine checkpoints. *)
 
 (** {1 Types} *)
 
-type encoding =
-  | Standard
-  | Dictionary
-
-type compressed = {
-  payload : string;
-  encoding : encoding;
-}
-
 type compress_result =
   | Unchanged of string
-  | Compressed of compressed
+  | Compressed of string  (** zstd-encoded payload. *)
 
 (** {1 Thresholds} *)
 
 val min_size : int
 (** Minimum payload size (bytes) below which compression is skipped. *)
 
-(** {1 Encoding helpers} *)
+(** {1 Encoding} *)
 
-val uses_dict : encoding -> bool
-
-val content_encoding : encoding -> string
-(** HTTP [Content-Encoding] header value for an [encoding]. *)
+val content_encoding : string
+(** HTTP [Content-Encoding] header value for a [Compressed] payload. *)
 
 (** {1 Compression} *)
 

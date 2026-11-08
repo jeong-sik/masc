@@ -4,21 +4,17 @@
 module Compression_codec = Compression_codec
 module Http_response_payload = Masc.Http_response_payload
 
-let test_codec_encoding_tokens () =
-  Alcotest.(check string) "standard encoding"
-    "zstd" (Compression_codec.content_encoding Compression_codec.Standard);
-  Alcotest.(check string) "dictionary encoding"
-    "zstd-dict" (Compression_codec.content_encoding Compression_codec.Dictionary)
+let test_codec_content_encoding_token () =
+  Alcotest.(check string) "content-encoding token"
+    "zstd" Compression_codec.content_encoding
 
 let test_codec_compress_large () =
   let large = String.make 1000 'x' in
   match Compression_codec.compress large with
   | Compression_codec.Unchanged _ ->
       Alcotest.fail "expected large repetitive input to compress"
-  | Compression_codec.Compressed { payload; encoding } ->
-      Alcotest.(check bool) "payload shrinks" true (String.length payload < String.length large);
-      Alcotest.(check string) "encoding token"
-        "zstd" (Compression_codec.content_encoding encoding)
+  | Compression_codec.Compressed payload ->
+      Alcotest.(check bool) "payload shrinks" true (String.length payload < String.length large)
 
 let test_codec_compress_skips_small () =
   let small = "tiny" in
@@ -33,7 +29,7 @@ let test_codec_round_trip () =
   match Compression_codec.compress original with
   | Compression_codec.Unchanged _ ->
       Alcotest.fail "expected the 500-byte input to compress"
-  | Compression_codec.Compressed { payload; _ } ->
+  | Compression_codec.Compressed payload ->
       (match Compression_codec.decompress ~orig_size:(String.length original) payload with
        | Ok restored ->
            Alcotest.(check string) "decompress restores the input" original restored
@@ -48,7 +44,7 @@ let test_codec_decompress_failure () =
   | Error _ -> ()
 
 let codec_tests = [
-  "encoding tokens", `Quick, test_codec_encoding_tokens;
+  "content-encoding token", `Quick, test_codec_content_encoding_token;
   "compress large", `Quick, test_codec_compress_large;
   "compress skips small", `Quick, test_codec_compress_skips_small;
   "round trip", `Quick, test_codec_round_trip;

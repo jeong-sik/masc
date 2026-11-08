@@ -85,9 +85,7 @@ let encode (h : header) ~meta ~machine_bytes =
   let body = sized (Yojson.Safe.to_string meta) ^ machine_bytes in
   let compression, stored =
     match Compression_codec.compress body with
-    | Compression_codec.Compressed { payload; encoding = Compression_codec.Standard } ->
-      (Zstd, payload)
-    | Compression_codec.Compressed { encoding = Compression_codec.Dictionary; _ }
+    | Compression_codec.Compressed payload -> (Zstd, payload)
     | Compression_codec.Unchanged _ -> (Raw, body)
   in
   String.concat ""

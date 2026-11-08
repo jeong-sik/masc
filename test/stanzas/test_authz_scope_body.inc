@@ -7,4 +7,4 @@
 (test
  (name test_authz_scope_body)
  (modules test_authz_scope_body)
- (libraries masc_test_deps yojson))
+ (libraries masc_test_deps))

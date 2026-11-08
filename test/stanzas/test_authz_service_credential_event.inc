@@ -6,4 +6,4 @@
 (test
  (name test_authz_service_credential_event)
  (modules test_authz_service_credential_event)
- (libraries masc_test_deps yojson))
+ (libraries masc_test_deps))

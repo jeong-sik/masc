@@ -7,4 +7,4 @@
 (test
  (name test_authz_session_state)
  (modules test_authz_session_state)
- (libraries masc_test_deps masc.agent_core.digest))
+ (libraries masc_test_deps))

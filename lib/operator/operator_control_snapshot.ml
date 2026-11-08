@@ -546,7 +546,6 @@ type snapshot_view = Operator_control_snapshot_view.snapshot_view =
   | Messages
   | Full
 
-let snapshot_view_to_string = Operator_control_snapshot_view.snapshot_view_to_string
 let valid_snapshot_view_strings = Operator_control_snapshot_view.valid_snapshot_view_strings
 let snapshot_view_of_string_opt = Operator_control_snapshot_view.snapshot_view_of_string_opt
 

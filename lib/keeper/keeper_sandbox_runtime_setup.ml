@@ -109,7 +109,6 @@ type classified_error =
   ; failure_class : Keeper_sandbox_runtime_classify.docker_failure_class
   }
 
-let process_status_is_timeout = Keeper_sandbox_runtime_classify.process_status_is_timeout
 let classify_docker_info_failure = Keeper_sandbox_runtime_classify.classify_docker_info_failure
 let classify_image_inspect_failure =
   Keeper_sandbox_runtime_classify.classify_image_inspect_failure

@@ -23,8 +23,6 @@ let normalize_board_interests items =
   normalize_name_list items |> List.sort_uniq String.compare
 ;;
 
-let first_some = Dashboard_utils.first_some
-
 (* ================================================================ *)
 (* TOML -> keeper_profile_defaults conversion                        *)
 (* ================================================================ *)

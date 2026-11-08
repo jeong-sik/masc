@@ -29,7 +29,6 @@ type classified_error = {
   message : string;
   failure_class : Keeper_sandbox_runtime_classify.docker_failure_class;
 }
-val process_status_is_timeout : Unix.process_status -> bool
 val classify_docker_info_failure :
   status:Unix.process_status -> Keeper_sandbox_runtime_classify.docker_failure_class
 val classify_image_inspect_failure :

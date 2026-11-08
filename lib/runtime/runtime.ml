@@ -932,8 +932,8 @@ let exact_output_targets runtimes =
      by [command] — so declaring one as a target only to have the binding
      resolver reject it reports a missing catalog provider where the truth is
      that this kind of runtime does no exact output. A binding
-     [exact_target_refusal] refuses is left out too, and
-     [warn_rejected_exact_output_slots] names the slots it empties. *)
+     [exact_target_refusal] refuses is left out too;
+     [warn_rejected_exact_output_slots] names each lane slot that names one. *)
   List.filter_map
     (fun (rt : t) ->
        match rt.execution, exact_target_refusal rt with

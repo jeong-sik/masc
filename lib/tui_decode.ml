@@ -1530,7 +1530,7 @@ type keeper_call_log_health =
   | Call_log_coverage_gap
   | Call_log_unknown of string
 
-(* The vocabulary of [Dashboard_http_keeper_types.source_health_fields]. Total
+(* The vocabulary of [Dashboard_tool_source_freshness.health_fields]. Total
    on purpose: a word the server adds later still decodes, and readers fail
    it closed to an incomplete log. *)
 let keeper_call_log_health_of_string = function

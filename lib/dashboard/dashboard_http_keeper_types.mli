@@ -46,18 +46,6 @@ val max_ts_opt : float option -> float -> float option
 val latest_receipt_ts_of_keeper_rows :
   Yojson.Safe.t list -> float option
 
-val freshness_fields :
-  now:float -> float option -> (string * Yojson.Safe.t) list
-
-val source_health_fields :
-  now:float ->
-  exists:bool ->
-  entry_count:int ->
-  latest_ts:float option ->
-  ?coverage_gap:Yojson.Safe.t ->
-  unit ->
-  (string * Yojson.Safe.t) list
-
 (** {1 Internal metric / list / decision helpers} *)
 
 val nonempty_string_opt : string -> string option

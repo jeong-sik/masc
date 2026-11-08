@@ -13,7 +13,7 @@ related: ["idle-keeper-worktrees-are-swept-where-they-live"]
 - Status: Draft. 좌표는 `origin/main` `7d90dc8cb284` 기준 `path:line` 이다.
 - 운영자 요청(2026-11-08): "이거 디스크 개선좀", "기능으로도 만들어줘".
 - 운영자 결정(2026-11-08):
-  - 처음 값은 `apply` 다.
+  - 처음부터 켜 두고 바로 지운다(`apply`).
   - git 은 커밋만 지킨다.
 
 ## 1. 문제
@@ -49,7 +49,8 @@ payload 는 `config/scripts/keeper-remote-workspace-cleanup.py` 다. 동작:
 
 - 바이너리에 넣고(`Embedded_config`), stdin 으로 넘겨 `python3 -` 로 돌린다. `Keeper_sandbox_remote.runner` 를 거치고, 실행 위치는 Keeper 루트 `remote_root/<keeper>` 다.
 - endpoint 는 `Keeper_sandbox_ssh.resolve_endpoint` + `Keeper_sandbox_ssh.create` 로 만든다. `attached_guest_endpoint` 는 `ready` 에서 디스크 preflight 를 돌리기 때문에, 이 단계가 꼭 필요할 때 거절당한다.
-- `--apply` 가 없으면 지우지 않고 보고만 한다. 운영자는 같은 파일을 ssh 로 손으로 돌릴 수 있다.
+- 서버는 늘 `--apply` 로 부른다. `--apply` 가 없으면 지우지 않고 보고만 한다. 운영자는 같은 파일을 ssh 로 손으로 돌려 후보를 본다.
+- payload 시간 제한은 5분이다. 그동안 그 Keeper 에게 온 대화는 기다린다. 11-08 report 실행은 가장 큰 루트 셋(항목 700~2,400개)에서 1~2초 걸렸다.
 
 Keeper 루트 바로 아래 항목마다 아래를 모두 만족해야 지운다. 하나라도 읽지 못하면 건너뛰고 이유를 보고한다.
 
@@ -80,7 +81,9 @@ Keeper 루트 바로 아래 항목마다 아래를 모두 만족해야 지운다
 
 - `shutil.rmtree` 로 지운다.
 - 보고에는 항목마다 이름, 할당 바이트, 결과(`removed | skipped | failed`), 건너뛴 이유를 담는다. 끝에 정리 전후의 여유 KiB 를 적는다.
-- 서버는 Keeper 마다 로그 한 줄을 남긴다: `Keeper workspace cleanup keeper= removed= skipped= failed= freed_kib= available_kib=`
+- 지우거나 실패한 항목이 있으면 서버는 Keeper 마다 로그 한 줄을 남긴다: `Keeper workspace cleanup keeper= removed= skipped= failed= freed_kib= available_kib=`
+  - `freed_kib` 는 정리 뒤 여유 공간에서 정리 전 여유 공간을 뺀 값이다. 볼륨을 같이 쓰는 다른 Keeper 가 그사이 쓰면 음수일 수 있다.
+  - payload 가 정리를 거절하거나(`skip`) 실패하면 경고 줄을 남긴다.
 
 커밋 안 한 변경과 untracked 파일은 보지 않는다. 운영자 결정이다.
 
@@ -90,8 +93,10 @@ Keeper 루트 바로 아래 항목마다 아래를 모두 만족해야 지운다
 
 설정은 `Runtime_settings` 에 둘을 더한다.
 
-- `keeper_remote_workspace_cleanup_mode`: `off | report | apply`. 닫힌 enum 이고 처음 값은 `apply`.
+- `keeper_remote_workspace_cleanup_enabled`: 처음 값은 `true` 다. 끄면 Remote_ssh Keeper 를 훑지 않는다.
 - `keeper_remote_workspace_cleanup_retention_sec`: 처음 값은 48시간. 운영자가 11-08 에 고른 기준이다.
+- 점검 주기는 `keeper_build_cleanup_interval_sec`(1시간)를 같이 쓴다.
+- report 모드 설정은 두지 않는다. `Runtime_params` 에는 enum 을 등록하는 도구가 없고, 보고만 볼 때는 payload 를 손으로 돌리면 된다.
 
 ## 3. 하지 않는 것
 
@@ -113,7 +118,8 @@ payload(Python, `test/test_keeper_remote_workspace_cleanup.py`, `test/test_keepe
 OCaml:
 
 - 보고 JSON 을 typed record 로 파싱한다.
-- `off` 면 부르지 않고, `report` 는 `--apply` 없이, `apply` 는 `--apply` 로 부른다.
+- 설정이 꺼져 있으면 부르지 않는다. microVM·Docker Keeper 는 빌드 정리 설정을, Remote_ssh Keeper 는 이 설정을 따른다.
+- 서버는 늘 `--apply` 로 부른다.
 
 실제 환경:
 

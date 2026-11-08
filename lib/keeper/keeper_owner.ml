@@ -1698,7 +1698,7 @@ let start
                   arm only asks whether any continuation exists, and the
                   Integrity_error names the case where none does. *)
                let probe read () =
-                 Result.map (fun _ -> ()) (read ~operation_id)
+                 Result.map (fun _ -> Some ()) (read ~operation_id)
                in
                let rec first_present = function
                  | [] ->

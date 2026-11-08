@@ -17,13 +17,15 @@ tmux 3.6a 안의 TUI 로 명령 팔레트에서 `go Work`(Goals 탭이 열려요
 ## 읽는 법
 
 - Goals 푸터는 목록이 비어 있어도 `z`, `j/k`, `Right / Enter` 를 앞에 그렸어요. 이 PR 은 키 표에서 Goals 의 행 키에 `Needs_row` 를 달고, 목록 렌더러가 행이 없다고 말하면 푸터에서 빼요.
-- 핸들러의 조건과 같아요.
-  - `Right / Enter` 는 `open_planning_detail` 이 `List.nth_opt` 로 Goal 을 못 찾으면 아무것도 안 해요.
-  - `z` 도 Goal 이 없으면 아무것도 안 해요. `Y` 는 `nothing on this surface has a link` 알림만 띄워요. `/` 는 찾을 대상이 없어서 검색줄이 안 열려요.
-  - 이동·페이지·처음/끝·`n / N` 은 `row_list` 의 `rl_count = 0` 에서 끝나요. 렌더러가 세는 행 수와 `rl_count` 는 같은 식(`planning_visible_goals ~filter ~sort`)이에요.
-  - `b`, `t`, `p`, `v`, `f`, `s` 는 행이 없어도 해요. 필터가 Goal 을 다 가렸을 때 `f` 로 되돌려요. 그래서 이 키들은 푸터에 남아요.
+- 핸들러의 조건과 같아요. 눌러 본 결과는 아래 「눌러 본 결과」 표에 있고, 여기에는 핸들러가 끝나는 자리만 적어요.
+  - `Right / Enter` 와 `z`: `open_planning_detail` 이 `List.nth_opt` 로 Goal 을 못 찾으면 `()` 로 끝나요. `z` 는 `open_candle` 이 같은 함수를 거쳐요.
+  - `/`: 검색 원본(`surface_row_texts`)의 `Planning_list` 갈래가 보이는 Goal 이 없으면 `None` 이라 검색줄이 안 열려요.
+  - 이동·페이지·처음/끝·`n / N`: `row_list` 의 `Planning_list` 갈래가 `rl_count = 0` 을 줘요. 렌더러가 세는 행 수와 `rl_count` 는 같은 식(`planning_visible_goals ~filter ~sort`)이에요.
+  - `b`, `t`, `p`, `v`, `f`, `s` 는 행을 안 봐요. 필터가 Goal 을 다 가렸을 때 `f` 로 되돌려요. 그래서 이 키들은 푸터에 남아요.
+  - `t` 로 Tasks 에 포커스를 주면 `render_planning` 이 `render_work_tasks` 를 그려요. 그 푸터는 따로 있어서(`footer_hints_work_tasks`) 이 PR 이 바꾸는 Goals 푸터가 아니에요.
 - Workspace 의 `v` 는 행이 아니라 읽을 화면이 있어야 해요. 저장소를 고른 경우에 그 저장소를 읽고, 목록 읽기가 실패한 경우에는 저장소가 없어도 그 실패를 열어요. #50087 에서 `v` 를 `Needs_row` 로 달았더니 읽기 실패 뒤 푸터에서 `v` 가 사라졌어요(#50087 리뷰 P3). 이 PR 은 `Needs_reading` 을 새로 달고, 렌더러가 `selected_repository_reading` 이 있는지를 푸터에 알려요.
 - `…?` 는 폭이 모자라 키 일부를 숨겼다는 표시예요.
+- 화면 맨 아래 `› to imp   (i to write)` 줄은 모든 화면에 같은 모양으로 있는 메시지 입력줄이에요. 이 PR 과 관계없어요.
 
 ## 푸터: 서버가 `ACTION NEEDED` 를 내는 환경
 
@@ -31,10 +33,10 @@ tmux 3.6a 안의 TUI 로 명령 팔레트에서 `go Work`(Goals 탭이 열려요
 | --- | --- | --- | --- |
 | Goals, 행이 없는 목록 | 100x30 | `ACTION NEEDED 3  z:Candle  j/k:move  t:Goals / Tasks  Right / Enter:detail  Esc:back  q:quit  …?` | `ACTION NEEDED 3 · keeper_fleet_safety:no_executable_keeper_fibers  Esc:back  q:quit  …?` |
 | Goals, 행이 없는 목록 | 80x24 | `ACTION NEEDED 3  z:Candle  Right / Enter:detail  Esc:back  q:quit  …?` | `ACTION NEEDED 3  t:Goals / Tasks  p:Approvals  Esc:back  q:quit  …?` |
-| Goals, 행이 있는 목록 | 100x30 | `ACTION NEEDED 3  z:Candle  j/k:move  t:Goals / Tasks  Right / Enter:detail  Esc:back  q:quit  …?` | 같음 |
-| Goals, 행이 있는 목록 | 80x24 | `ACTION NEEDED 3  z:Candle  Right / Enter:detail  Esc:back  q:quit  …?` | 같음 |
 | Workspace, 목록 읽기 실패 | 100x30 | `ACTION NEEDED 3 · keeper_fleet_safety:no_executable_keeper_fibers  a:add  Esc:back  q:quit  …?` | `ACTION NEEDED 3 · keeper_fleet_safety:no_executable_keeper_fibers  Esc:back  q:quit  …?` |
 | Workspace, 목록 읽기 실패 | 80x24 | `ACTION NEEDED 3  a:add  Esc:back  /:find  r:refresh  Tab:next  q:quit  ?:help` | `ACTION NEEDED 3  v:full details  a:add  Esc:back  /:find  q:quit  …?` |
+
+행이 있는 Goals 는 두 크기 모두 푸터가 같아요.
 
 이 환경에서 100x30 은 쓸 수 있는 키가 줄어요.
 
@@ -49,18 +51,13 @@ tmux 3.6a 안의 TUI 로 명령 팔레트에서 `go Work`(Goals 탭이 열려요
 | --- | --- | --- | --- |
 | Goals, 행이 없는 목록 | 100x30 | `z:Candle  j/k:move  t:Goals / Tasks  p:Approvals  Right / Enter:detail  Esc:back  q:quit  …?` | `t:Goals / Tasks  p:Approvals  v:next Work tab  f:filter  s:sort  b:summary  Esc:back  q:quit  …?` |
 | Goals, 행이 없는 목록 | 80x24 | `z:Candle  j/k:move  Right / Enter:detail  Esc:back  q:quit  …?` | `t:Goals / Tasks  p:Approvals  v:next Work tab  f:filter  Esc:back  q:quit  …?` |
-| Goals, 행이 있는 목록 | 100x30 | `z:Candle  j/k:move  t:Goals / Tasks  p:Approvals  Right / Enter:detail  Esc:back  q:quit  …?` | 같음 |
-| Goals, 행이 있는 목록 | 80x24 | `z:Candle  j/k:move  Right / Enter:detail  Esc:back  q:quit  …?` | 같음 |
 | Workspace, 목록 읽기 실패 | 100x30 | `a:add  Esc:back  /:find  r:refresh  Tab:next  q:quit  ?:help` | `v:full details  a:add  Esc:back  /:find  r:refresh  Tab:next  q:quit  ?:help` |
 | Workspace, 목록 읽기 실패 | 80x24 | `a:add  Esc:back  /:find  r:refresh  Tab:next  q:quit  ?:help` | `v:full details  a:add  Esc:back  /:find  r:refresh  Tab:next  q:quit  ?:help` |
-| Workspace, 행이 없는 목록 | 100x30 | `a:add  Esc:back  /:find  r:refresh  Tab:next  q:quit  ?:help` | 같음 |
-| Workspace, 행이 없는 목록 | 80x24 | `a:add  Esc:back  /:find  r:refresh  Tab:next  q:quit  ?:help` | 같음 |
 
-알림이 없으면 키가 줄지 않아요.
+행이 있는 Goals 와 행이 없는 Workspace 는 두 크기 모두 푸터가 같아요. 알림이 없으면 키가 줄지 않아요.
 
 - Goals(행 없음) 100x30: 동작하는 키 `t p v f s b` 가 모두 보여요. 고치기 전에는 안 움직이는 `z`, `j/k`, `Right / Enter` 가 앞에 있었고 `v f s b` 는 폭이 모자라 `…?` 뒤로 밀렸어요. 80x24 는 `t p v f` 가 보여요.
 - Workspace(읽기 실패): `v:full details` 가 새로 보이고 나머지 키는 그대로 다 들어가요.
-- 행이 있는 Goals 와 행이 없는 Workspace 목록은 푸터가 같아요.
 
 ## 고치기 전 빌드에서 행 없는 Goals 의 푸터 키를 눌러 본 결과(100x30)
 
@@ -71,6 +68,8 @@ tmux 3.6a 안의 TUI 로 명령 팔레트에서 `go Work`(Goals 탭이 열려요
 | `j` `k` `Down` `Up` `PageDown` `PageUp` `Home` `End` `Right` `Enter` `z` `/` `n` `N` | `Y`(`nothing on this surface has a link`) | `b`(요약 화면이 열려요), `t`(Tasks), `p`(Approvals), `v`(다음 Work 탭), `f`(필터 `미종결` → `완료`), `s`(정렬 `단계/우선순위` → `최근 갱신`) |
 
 고친 뒤 빌드에서 같은 키를 같은 순서로 눌렀고 결과 분류가 같았어요(키 처리는 바뀌지 않았어요).
+
+`t` 로 연 Tasks 화면의 푸터는 두 빌드가 같아요(Task 가 없는 환경에서 쟀어요): `ACTION NEEDED 3  j/k:select  t / Esc:Goals  Enter:detail  r:refresh  Tab:next  q:quit  ?:help`. Tasks 포커스에서는 Goals 푸터가 아니라 이 푸터가 그려져요.
 
 Workspace 는 목록 읽기가 실패한 뒤 100x30 에서 두 키를 눌러 봤어요. 두 빌드의 결과가 같아요.
 

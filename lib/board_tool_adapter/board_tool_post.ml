@@ -558,19 +558,11 @@ let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
       ~class_:Tool_result.Workflow_rejection
       ~start_time
       "Content must not be empty"
-  else if
-    Option.is_none author
-    || Option.equal String.equal author (Some "")
-    || Option.equal String.equal author (Some "anonymous")
-  then
-    Tool_result.make_err
-      ~tool_name
-      ~class_:Tool_result.Workflow_rejection
-      ~start_time
-      "author is required"
   else
+    (* Same exhaustive-match shape as handle_post_create: the guard's dead
+       [None] arm is gone and the three rejections share one arm. *)
     match author with
-    | None ->
+    | None | Some "" | Some "anonymous" ->
       Tool_result.make_err
         ~tool_name
         ~class_:Tool_result.Workflow_rejection

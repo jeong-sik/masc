@@ -29,7 +29,7 @@ classify_command 가 Shell_ir.t 를 버리고 decide_raw 로 원시 문자열을
 | 좌표 | 판정 | 근거 |
 | --- | --- | --- |
 | board_tool_post 제목 공백 2중 검사 | **수리** — PR #49976 병합(2b4078c63f8c): 첫 검사가 둘째를 도달 불가화, 죽은 분기·title_is_empty 삭제. 적대적 리뷰(adv-49976)가 도달 불가성 증명·제거 문구 소비자 0 확인 |
-| board_tool_post author None-match 죽은 분기 | **수리** — 이 PR: Option.is_none author 가드 뒤의 `| None -> "author is required"` 분기가 도달 불가(adv-49976 관찰). if+가드+죽은 arm 을 단일 완전 match(None·""·"anonymous" 거절 | Some author 본문)로 |
+| board_tool_post author None-match 죽은 분기 2곳 | **수리** — 이 PR: handle_post_create 와 handle_comment_add(:561-578) 모두에서 Option.is_none author 가드 뒤의 `| None -> "author is required"` 분기가 도달 불가(adv-49976·adv-49982 관찰). if+가드+죽은 arm 을 단일 완전 match(None·""·"anonymous" 거절 \| Some author 본문)로 |
 | keeper_turn_fsm emit_transition 이중 평가 | **판정: 문서화됨** | :112-121 주석이 guard_transition 이 classify 를 덧호출함과 None,Some_ arm 이 완전성용임을 명시 — 감사의 dead code 독해에 대한 답변으로 성립. 재구성은 행동 위험 > 이득 |
 | workspace_task_lifecycle 클레임 판정 중복 | **판정: 부분 해소 확인** | sangsu 대조표 — Masc_domain 공유로 축소, 잔여 매핑은 도메인 경계 정당 |
 

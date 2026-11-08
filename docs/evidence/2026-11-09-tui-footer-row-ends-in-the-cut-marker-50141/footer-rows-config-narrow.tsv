@@ -1,0 +1,218 @@
+screen	width	same	before	after
+Config runtime.toml	40	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	39	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	38	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	37	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	36	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	35	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	34	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	33	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	32	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	31	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	30	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	29	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	28	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	27	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	26	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	25	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	24	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	23	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	22	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config runtime.toml	21	0	Esc:뒤로  q:종료  ?	Esc:뒤로  q:종료 …?
+Config runtime.toml	20	0	Esc:뒤로  q:종료 ?	Esc:뒤로  q:종료…?
+Config runtime.toml	19	0	Esc:뒤로  q:종료?	Esc:뒤로  q:종 …?
+Config runtime.toml	18	1	Esc:뒤로  q:종…?	Esc:뒤로  q:종…?
+Config runtime.toml	17	1	Esc:뒤로  q: …?	Esc:뒤로  q: …?
+Config runtime.toml	16	1	Esc:뒤로  q:…?	Esc:뒤로  q:…?
+Config runtime.toml	15	1	Esc:뒤로  q…?	Esc:뒤로  q…?
+Config runtime.toml	14	1	Esc:뒤로  …?	Esc:뒤로  …?
+Config runtime.toml	13	1	Esc:뒤로 …?	Esc:뒤로 …?
+Config runtime.toml	12	1	Esc:뒤로…?	Esc:뒤로…?
+Config runtime.toml	11	1	Esc:뒤 …?	Esc:뒤 …?
+Config runtime.toml	10	1	Esc:뒤…?	Esc:뒤…?
+Config models	40	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	39	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	38	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	37	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	36	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	35	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	34	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	33	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	32	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	31	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	30	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	29	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	28	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	27	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	26	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	25	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	24	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	23	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	22	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config models	21	0	Esc:뒤로  q:종료  ?	Esc:뒤로  q:종료 …?
+Config models	20	0	Esc:뒤로  q:종료 ?	Esc:뒤로  q:종료…?
+Config models	19	0	Esc:뒤로  q:종료?	Esc:뒤로  q:종 …?
+Config models	18	1	Esc:뒤로  q:종…?	Esc:뒤로  q:종…?
+Config models	17	1	Esc:뒤로  q: …?	Esc:뒤로  q: …?
+Config models	16	1	Esc:뒤로  q:…?	Esc:뒤로  q:…?
+Config models	15	1	Esc:뒤로  q…?	Esc:뒤로  q…?
+Config models	14	1	Esc:뒤로  …?	Esc:뒤로  …?
+Config models	13	1	Esc:뒤로 …?	Esc:뒤로 …?
+Config models	12	1	Esc:뒤로…?	Esc:뒤로…?
+Config models	11	1	Esc:뒤 …?	Esc:뒤 …?
+Config models	10	1	Esc:뒤…?	Esc:뒤…?
+Config params	40	1	e / Enter:편집  Esc:뒤로  q:종료  …?	e / Enter:편집  Esc:뒤로  q:종료  …?
+Config params	39	1	e / Enter:편집  Esc:뒤로  q:종료  …?	e / Enter:편집  Esc:뒤로  q:종료  …?
+Config params	38	1	e / Enter:편집  Esc:뒤로  q:종료  …?	e / Enter:편집  Esc:뒤로  q:종료  …?
+Config params	37	0	e / Enter:편집  Esc:뒤로  q:종료  ?	e / Enter:편집  Esc:뒤로  q:종료 …?
+Config params	36	0	e / Enter:편집  Esc:뒤로  q:종료 ?	e / Enter:편집  Esc:뒤로  q:종료…?
+Config params	35	0	e / Enter:편집  Esc:뒤로  q:종료?	e / Enter:편집  Esc:뒤로  q:종 …?
+Config params	34	1	e / Enter:편집  Esc:뒤로  q:종…?	e / Enter:편집  Esc:뒤로  q:종…?
+Config params	33	1	e / Enter:편집  Esc:뒤로  q: …?	e / Enter:편집  Esc:뒤로  q: …?
+Config params	32	1	e / Enter:편집  Esc:뒤로  q:…?	e / Enter:편집  Esc:뒤로  q:…?
+Config params	31	1	e / Enter:편집  Esc:뒤로  q…?	e / Enter:편집  Esc:뒤로  q…?
+Config params	30	1	e / Enter:편집  Esc:뒤로  …?	e / Enter:편집  Esc:뒤로  …?
+Config params	29	1	e / Enter:편집  Esc:뒤로 …?	e / Enter:편집  Esc:뒤로 …?
+Config params	28	1	e / Enter:편집  Esc:뒤로…?	e / Enter:편집  Esc:뒤로…?
+Config params	27	1	e / Enter:편집  Esc:뒤 …?	e / Enter:편집  Esc:뒤 …?
+Config params	26	1	e / Enter:편집  Esc:뒤…?	e / Enter:편집  Esc:뒤…?
+Config params	25	1	e / Enter:편집  Esc: …?	e / Enter:편집  Esc: …?
+Config params	24	1	e / Enter:편집  Esc:…?	e / Enter:편집  Esc:…?
+Config params	23	1	e / Enter:편집  Esc…?	e / Enter:편집  Esc…?
+Config params	22	1	e / Enter:편집  Es…?	e / Enter:편집  Es…?
+Config params	21	1	e / Enter:편집  E…?	e / Enter:편집  E…?
+Config params	20	1	e / Enter:편집  …?	e / Enter:편집  …?
+Config params	19	1	e / Enter:편집 …?	e / Enter:편집 …?
+Config params	18	1	e / Enter:편집…?	e / Enter:편집…?
+Config params	17	1	e / Enter:편 …?	e / Enter:편 …?
+Config params	16	1	e / Enter:편…?	e / Enter:편…?
+Config params	15	1	e / Enter: …?	e / Enter: …?
+Config params	14	1	e / Enter:…?	e / Enter:…?
+Config params	13	1	e / Enter…?	e / Enter…?
+Config params	12	1	e / Ente…?	e / Ente…?
+Config params	11	1	e / Ent…?	e / Ent…?
+Config params	10	1	e / En…?	e / En…?
+Config prompts	40	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	39	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	38	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	37	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	36	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	35	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	34	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	33	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	32	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	31	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	30	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	29	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	28	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	27	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	26	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	25	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	24	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	23	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	22	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config prompts	21	0	Esc:뒤로  q:종료  ?	Esc:뒤로  q:종료 …?
+Config prompts	20	0	Esc:뒤로  q:종료 ?	Esc:뒤로  q:종료…?
+Config prompts	19	0	Esc:뒤로  q:종료?	Esc:뒤로  q:종 …?
+Config prompts	18	1	Esc:뒤로  q:종…?	Esc:뒤로  q:종…?
+Config prompts	17	1	Esc:뒤로  q: …?	Esc:뒤로  q: …?
+Config prompts	16	1	Esc:뒤로  q:…?	Esc:뒤로  q:…?
+Config prompts	15	1	Esc:뒤로  q…?	Esc:뒤로  q…?
+Config prompts	14	1	Esc:뒤로  …?	Esc:뒤로  …?
+Config prompts	13	1	Esc:뒤로 …?	Esc:뒤로 …?
+Config prompts	12	1	Esc:뒤로…?	Esc:뒤로…?
+Config prompts	11	1	Esc:뒤 …?	Esc:뒤 …?
+Config prompts	10	1	Esc:뒤…?	Esc:뒤…?
+Config presets	40	1	n:새로 저장  Esc:뒤로  q:종료  …?	n:새로 저장  Esc:뒤로  q:종료  …?
+Config presets	39	1	n:새로 저장  Esc:뒤로  q:종료  …?	n:새로 저장  Esc:뒤로  q:종료  …?
+Config presets	38	1	n:새로 저장  Esc:뒤로  q:종료  …?	n:새로 저장  Esc:뒤로  q:종료  …?
+Config presets	37	1	n:새로 저장  Esc:뒤로  q:종료  …?	n:새로 저장  Esc:뒤로  q:종료  …?
+Config presets	36	1	n:새로 저장  Esc:뒤로  q:종료  …?	n:새로 저장  Esc:뒤로  q:종료  …?
+Config presets	35	1	n:새로 저장  Esc:뒤로  q:종료  …?	n:새로 저장  Esc:뒤로  q:종료  …?
+Config presets	34	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config presets	33	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config presets	32	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config presets	31	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config presets	30	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config presets	29	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config presets	28	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config presets	27	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config presets	26	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config presets	25	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config presets	24	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config presets	23	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config presets	22	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config presets	21	0	Esc:뒤로  q:종료  ?	Esc:뒤로  q:종료 …?
+Config presets	20	0	Esc:뒤로  q:종료 ?	Esc:뒤로  q:종료…?
+Config presets	19	0	Esc:뒤로  q:종료?	Esc:뒤로  q:종 …?
+Config presets	18	1	Esc:뒤로  q:종…?	Esc:뒤로  q:종…?
+Config presets	17	1	Esc:뒤로  q: …?	Esc:뒤로  q: …?
+Config presets	16	1	Esc:뒤로  q:…?	Esc:뒤로  q:…?
+Config presets	15	1	Esc:뒤로  q…?	Esc:뒤로  q…?
+Config presets	14	1	Esc:뒤로  …?	Esc:뒤로  …?
+Config presets	13	1	Esc:뒤로 …?	Esc:뒤로 …?
+Config presets	12	1	Esc:뒤로…?	Esc:뒤로…?
+Config presets	11	1	Esc:뒤 …?	Esc:뒤 …?
+Config presets	10	1	Esc:뒤…?	Esc:뒤…?
+Config themes	40	1	Enter:적용  Esc:뒤로  q:종료  …?	Enter:적용  Esc:뒤로  q:종료  …?
+Config themes	39	1	Enter:적용  Esc:뒤로  q:종료  …?	Enter:적용  Esc:뒤로  q:종료  …?
+Config themes	38	1	Enter:적용  Esc:뒤로  q:종료  …?	Enter:적용  Esc:뒤로  q:종료  …?
+Config themes	37	1	Enter:적용  Esc:뒤로  q:종료  …?	Enter:적용  Esc:뒤로  q:종료  …?
+Config themes	36	1	Enter:적용  Esc:뒤로  q:종료  …?	Enter:적용  Esc:뒤로  q:종료  …?
+Config themes	35	1	Enter:적용  Esc:뒤로  q:종료  …?	Enter:적용  Esc:뒤로  q:종료  …?
+Config themes	34	1	Enter:적용  Esc:뒤로  q:종료  …?	Enter:적용  Esc:뒤로  q:종료  …?
+Config themes	33	0	Enter:적용  Esc:뒤로  q:종료  ?	Enter:적용  Esc:뒤로  q:종료 …?
+Config themes	32	0	Enter:적용  Esc:뒤로  q:종료 ?	Enter:적용  Esc:뒤로  q:종료…?
+Config themes	31	0	Enter:적용  Esc:뒤로  q:종료?	Enter:적용  Esc:뒤로  q:종 …?
+Config themes	30	1	Enter:적용  Esc:뒤로  q:종…?	Enter:적용  Esc:뒤로  q:종…?
+Config themes	29	1	Enter:적용  Esc:뒤로  q: …?	Enter:적용  Esc:뒤로  q: …?
+Config themes	28	1	Enter:적용  Esc:뒤로  q:…?	Enter:적용  Esc:뒤로  q:…?
+Config themes	27	1	Enter:적용  Esc:뒤로  q…?	Enter:적용  Esc:뒤로  q…?
+Config themes	26	1	Enter:적용  Esc:뒤로  …?	Enter:적용  Esc:뒤로  …?
+Config themes	25	1	Enter:적용  Esc:뒤로 …?	Enter:적용  Esc:뒤로 …?
+Config themes	24	1	Enter:적용  Esc:뒤로…?	Enter:적용  Esc:뒤로…?
+Config themes	23	1	Enter:적용  Esc:뒤 …?	Enter:적용  Esc:뒤 …?
+Config themes	22	1	Enter:적용  Esc:뒤…?	Enter:적용  Esc:뒤…?
+Config themes	21	1	Enter:적용  Esc: …?	Enter:적용  Esc: …?
+Config themes	20	1	Enter:적용  Esc:…?	Enter:적용  Esc:…?
+Config themes	19	1	Enter:적용  Esc…?	Enter:적용  Esc…?
+Config themes	18	1	Enter:적용  Es…?	Enter:적용  Es…?
+Config themes	17	1	Enter:적용  E…?	Enter:적용  E…?
+Config themes	16	1	Enter:적용  …?	Enter:적용  …?
+Config themes	15	1	Enter:적용 …?	Enter:적용 …?
+Config themes	14	1	Enter:적용…?	Enter:적용…?
+Config themes	13	1	Enter:적 …?	Enter:적 …?
+Config themes	12	1	Enter:적…?	Enter:적…?
+Config themes	11	1	Enter: …?	Enter: …?
+Config themes	10	1	Enter:…?	Enter:…?
+Config voice	40	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	39	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	38	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	37	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	36	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	35	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	34	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	33	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	32	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	31	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	30	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	29	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	28	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	27	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	26	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	25	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	24	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	23	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	22	1	Esc:뒤로  q:종료  …?	Esc:뒤로  q:종료  …?
+Config voice	21	0	Esc:뒤로  q:종료  ?	Esc:뒤로  q:종료 …?
+Config voice	20	0	Esc:뒤로  q:종료 ?	Esc:뒤로  q:종료…?
+Config voice	19	0	Esc:뒤로  q:종료?	Esc:뒤로  q:종 …?
+Config voice	18	1	Esc:뒤로  q:종…?	Esc:뒤로  q:종…?
+Config voice	17	1	Esc:뒤로  q: …?	Esc:뒤로  q: …?
+Config voice	16	1	Esc:뒤로  q:…?	Esc:뒤로  q:…?
+Config voice	15	1	Esc:뒤로  q…?	Esc:뒤로  q…?
+Config voice	14	1	Esc:뒤로  …?	Esc:뒤로  …?
+Config voice	13	1	Esc:뒤로 …?	Esc:뒤로 …?
+Config voice	12	1	Esc:뒤로…?	Esc:뒤로…?
+Config voice	11	1	Esc:뒤 …?	Esc:뒤 …?
+Config voice	10	1	Esc:뒤…?	Esc:뒤…?

@@ -1238,13 +1238,13 @@
 (test
  (name test_keeper_event_queue_cancellation)
  (modules test_keeper_event_queue_cancellation)
- (libraries alcotest masc masc.keeper_runtime masc.masc_core
+ (libraries alcotest masc masc.keeper_runtime
   masc.fs_compat masc.masc_eio_context eio eio_main unix yojson))
 
 (test
  (name test_keeper_event_queue_state_v2)
  (modules test_keeper_event_queue_state_v2)
- (libraries alcotest masc_test_deps masc.keeper_checkpoint_ref))
+ (libraries alcotest masc_test_deps))
 
 (test
  (name test_keeper_event_queue_codec_pool)
@@ -1303,7 +1303,7 @@
 (test
  (name test_keeper_event_queue_operator_audit_receipt)
  (modules test_keeper_event_queue_operator_audit_receipt)
- (libraries alcotest masc_test_deps eio_main re))
+ (libraries alcotest masc_test_deps re))
 
 (test
  (name test_server_request_authority)
@@ -1322,7 +1322,7 @@
 (test
  (name test_operator_control_snapshot)
  (modules test_operator_control_snapshot)
- (libraries masc_test_deps masc.keeper_identity test_operator_control_support))
+ (libraries masc_test_deps test_operator_control_support))
 
 ; The operator-control helper is shared by four executables in two different
 ; stanzas (the big tests group and the snapshot extraction), so it owns a
@@ -1333,10 +1333,8 @@
  (name test_operator_control_support)
  (modules test_operator_control_support)
  (libraries
-  masc_test_deps masc_schedule multimodal bigstringaf masc.keeper_checkpoint_ref
-  masc.embedded_config masc.keeper_identity masc.mcp_client
-  masc.skill_config masc.skill_reference masc.skill_snapshot masc.config
-  exec_ssh_protocol))
+  masc_test_deps
+  masc.embedded_config))
 
 ; Extracted from the big (tests ...) group above: these cases measure
 ; admission fencing around creation, so the sandbox profile is incidental --
@@ -1356,16 +1354,7 @@
  (modules test_keeper_effective_meta_overlay)
  (libraries
   masc_test_deps
-  masc_schedule
-  multimodal
-  bigstringaf
-  masc.keeper_checkpoint_ref
-  masc.embedded_config
-  masc.keeper_identity
-  masc.mcp_client
-  masc.skill_config
-  masc.skill_reference
-  masc.skill_snapshot))
+  masc.embedded_config))
 
 ; Focused CI gate for runtime TOML validity.
 
@@ -1737,7 +1726,7 @@
 (test
  (name test_systhread_host)
  (modules test_systhread_host)
- (libraries alcotest masc.masc_core eio eio_main eio.unix unix threads.posix))
+ (libraries alcotest masc.masc_core eio eio_main unix threads.posix))
 
 (test
  (name test_pool_lane)
@@ -1781,7 +1770,7 @@
 (test
  (name test_dashboard_fresh_read)
  (modules test_dashboard_fresh_read)
- (libraries alcotest masc.dashboard masc.masc_core masc.masc_eio_context eio eio_main eio.mock))
+ (libraries alcotest masc.dashboard masc.masc_core masc.masc_eio_context eio eio_main))
 
 (test
  (name test_dashboard_cache_lane)
@@ -2114,11 +2103,9 @@
  (libraries
   uucp
   masc.toml_line_editor
-  masc.browser_lane
   ; The fallback descendant fixture uses the monotonic deadline owner.
   masc.monotonic_deadline
  masc_test_deps
-  masc_test_runtime
   masc.embedded_config
   masc.skill_config
   masc.skill_reference
@@ -2157,10 +2144,8 @@
   masc.masc_candle_runtime
   masc.masc_candle_store
   masc.keeper_portrait
-  masc.keeper_identity
   masc.keeper_runtime
   masc_test_deps
-  masc_test_runtime
   ;; The wake-history and scoped-page tests drive Schedule_store to produce the
   ;; rows the projection is asserted on, rather than hand-writing a ledger.
   masc.masc_schedule
@@ -2169,8 +2154,6 @@
   masc.skill_reference
   bigstringaf
   h2
-  terminal_size
-  masc.jsonl_writer
   decompress.de
   decompress.gz)
  ;; The schedule lookup found answer is pinned to the fixture the Dashboard
@@ -2300,7 +2283,7 @@
  (name librarian_floor_fixture)
  (wrapped false)
  (modules librarian_floor_fixture)
- (libraries alcotest masc_test_deps masc.server exact_output_fixture mcp_protocol masc.masc_random_id astring))
+ (libraries alcotest masc_test_deps masc.server exact_output_fixture mcp_protocol astring))
 
 ; No client-side gate stands between the composed request and the peer: a
 ; large body reaches the real HTTP peer, and only the peer's refusal moves the
@@ -2390,7 +2373,7 @@
 (test
  (name test_server_auth_warn_log_bound)
  (modules test_server_auth_warn_log_bound)
- (libraries alcotest masc masc.auth masc_server eio_main))
+ (libraries alcotest masc.auth masc_server eio_main))
 
 ; A refused request leaves a line naming the endpoint that produced it.
 

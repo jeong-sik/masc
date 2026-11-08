@@ -2,7 +2,7 @@
     [keeper_agent_run.run_turn] Step 8 body (L1942-L1999).
 
     Cycle 5 [EveryTurnHasTerminalReceipt] safety invariant
-    (KeeperTurnFSM / KeeperOutcomesConservation specs): a turn whose
+    (KeeperTurnFSM spec): a turn whose
     authoritative receipt is silently dropped cannot be reported as
     Ok.  Pre-Cycle 5 the catch arm logged a WARN, recorded a
     coverage-gap and let [turn_result] fall through unchanged.  This

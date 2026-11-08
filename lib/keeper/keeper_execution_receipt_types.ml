@@ -4,8 +4,7 @@
    godfile decomposition. *)
 
 (* Receipt outcome classification. Mirrors the TLA+ spec
-   [ReceiptOutcomeSet] (see [specs/keeper-turn-fsm/KeeperTurnFSM.tla] and
-   [specs/keeper-state-machine/KeeperOutcomesConservation.tla]).
+   [ReceiptOutcomeSet] (see [specs/keeper-turn-fsm/KeeperTurnFSM.tla]).
    [`Skipped] corresponds to TLA+ "receipt_skipped" produced by the
    [PhaseGateSkip] action: the turn reached terminal [Done] without
    dispatching, so it is a successful no-op rather than a failure or

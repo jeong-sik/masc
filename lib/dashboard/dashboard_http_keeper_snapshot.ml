@@ -480,7 +480,6 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
          ("execution", execution);
          ("tools", tools);
          ("skills", skills);
-         ("auto_execution_session", auto_execution_session_surface_json ());
          ("hooks", Keeper_hooks_agent_core.hook_introspection_json ());
          ("runtime", runtime_surface_json config m);
          ("runtime_trust", runtime_trust);

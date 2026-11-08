@@ -1,0 +1,235 @@
+"""Remote_ssh Keeper workspace cleanup keeps every commit and stash.
+
+RFC-remote-keeper-workspace-entries-are-swept-on-their-endpoint section 4.
+Run: python3 test/test_keeper_remote_workspace_cleanup.py -v
+"""
+
+import importlib.util
+import os
+from pathlib import Path
+import shutil
+import subprocess
+import tempfile
+import time
+from types import SimpleNamespace
+import unittest
+from unittest.mock import patch
+
+PAYLOAD = (
+    Path(__file__).resolve().parents[1] / "config/scripts/keeper-remote-workspace-cleanup.py"
+)
+SPEC = importlib.util.spec_from_file_location("keeper_remote_workspace_cleanup", PAYLOAD)
+assert SPEC is not None and SPEC.loader is not None
+cleaner = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(cleaner)
+
+RETENTION_SEC = 48 * 3600
+# Every fixture file is younger than the retention unless the sweep looks
+# from this far ahead.
+LATER = 3 * 24 * 3600
+
+
+def git(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-c", "user.email=keeper@example.invalid", "-c", "user.name=keeper", *args],
+        cwd=cwd,
+        text=True,
+        capture_output=True,
+        check=True,
+    ).stdout
+
+
+class RemoteWorkspaceCleanup(unittest.TestCase):
+    def setUp(self) -> None:
+        # The fixtures and the payload's git must not read the runner's global
+        # hooks, signing or credential settings.
+        isolated = patch.dict(
+            os.environ,
+            {"GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"},
+        )
+        isolated.start()
+        self.addCleanup(isolated.stop)
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        base = Path(temporary.name)
+        self.root = base / "keeper"
+        self.root.mkdir(mode=0o700)
+        self.root.chmod(0o700)
+        self.proc = base / "proc"
+        self.proc.mkdir()
+        self.origin = base / "origin.git"
+        git(base, "init", "-q", "--bare", "-b", "main", str(self.origin))
+        seed = base / "seed"
+        git(base, "clone", "-q", str(self.origin), str(seed))
+        (seed / "README").write_text("seed\n")
+        git(seed, "add", "README")
+        git(seed, "commit", "-q", "-m", "seed")
+        git(seed, "push", "-q", "origin", "HEAD:main")
+        (seed / "README").write_text("pull request\n")
+        git(seed, "commit", "-q", "-am", "pull request head")
+        git(seed, "push", "-q", "origin", "HEAD:refs/pull/1/head")
+
+    def clone(self, name: str) -> Path:
+        path = self.root / name
+        git(self.root, "clone", "-q", str(self.origin), str(path))
+        return path
+
+    def sweep(self, apply: bool = True, *, later: bool = True) -> dict[str, dict]:
+        now = time.time() + (LATER if later else 0)
+        report = cleaner.sweep(self.root, RETENTION_SEC, apply, proc=self.proc, now=now)
+        self.report = report
+        return {entry["name"]: entry for entry in report["entries"]}
+
+    def assert_removed(self, entries: dict[str, dict], name: str) -> None:
+        self.assertEqual(entries[name]["result"], "removed", entries[name])
+        self.assertFalse((self.root / name).exists())
+
+    def assert_kept(self, entries: dict[str, dict], name: str, reason: str) -> None:
+        self.assertEqual(entries[name]["result"], "skipped", entries[name])
+        self.assertIn(reason, entries[name]["reason"])
+        self.assertTrue((self.root / name).exists() or (self.root / name).is_symlink())
+
+    def test_old_entries_without_lost_commits_are_removed(self) -> None:
+        self.clone("clean")
+        dirty = self.clone("dirty")
+        (dirty / "README").write_text("uncommitted\n")
+        (dirty / "notes.md").write_text("review memo\n")
+        pull = self.clone("pull")
+        git(pull, "fetch", "-q", "origin", "refs/pull/1/head")
+        git(pull, "checkout", "-q", "--detach", "FETCH_HEAD")
+        (self.root / "plain").mkdir()
+        (self.root / "plain" / "diff.txt").write_text("diff\n")
+        (self.root / "49051-review.md").write_text("verdict\n")
+        entries = self.sweep()
+        for name in ("clean", "dirty", "pull", "plain", "49051-review.md"):
+            self.assert_removed(entries, name)
+        self.assertIn("free_kib_after", self.report)
+
+    def test_report_mode_removes_nothing(self) -> None:
+        self.clone("clean")
+        entries = self.sweep(apply=False)
+        self.assertEqual(entries["clean"]["result"], "would remove")
+        self.assertTrue((self.root / "clean").is_dir())
+
+    def test_recently_touched_entry_is_kept(self) -> None:
+        self.clone("fresh")
+        self.assert_kept(self.sweep(later=False), "fresh", "touched within retention")
+
+    def test_local_commit_is_kept_even_when_nested(self) -> None:
+        local = self.clone("local")
+        (local / "README").write_text("local only\n")
+        git(local, "commit", "-q", "-am", "local only")
+        (self.root / "box").mkdir()
+        nested = self.root / "box" / "inner"
+        git(self.root, "clone", "-q", str(self.origin), str(nested))
+        git(nested, "checkout", "-q", "-b", "topic")
+        (nested / "README").write_text("nested local\n")
+        git(nested, "commit", "-q", "-am", "nested local")
+        entries = self.sweep()
+        self.assert_kept(entries, "local", "only in local")
+        self.assert_kept(entries, "box", "only in box/inner")
+
+    def test_detached_commit_no_remote_advertises_is_kept(self) -> None:
+        detached = self.clone("detached")
+        git(detached, "checkout", "-q", "--detach")
+        (detached / "README").write_text("detached\n")
+        git(detached, "commit", "-q", "-am", "detached only")
+        self.assert_kept(self.sweep(), "detached", "only in detached")
+
+    def test_unreadable_origin_keeps_an_unpushed_tip(self) -> None:
+        orphan = self.clone("orphan")
+        (orphan / "README").write_text("local only\n")
+        git(orphan, "commit", "-q", "-am", "local only")
+        git(orphan, "remote", "set-url", "origin", str(self.root / "missing.git"))
+        self.assert_kept(self.sweep(), "orphan", "ls-remote")
+
+    def test_stash_is_kept(self) -> None:
+        stashed = self.clone("stashed")
+        (stashed / "README").write_text("stashed\n")
+        git(stashed, "stash", "-q")
+        self.assert_kept(self.sweep(), "stashed", "stash in stashed")
+
+    def test_dot_entries_and_symlinks_are_kept(self) -> None:
+        gh = self.root / ".config" / "gh"
+        gh.mkdir(parents=True)
+        (gh / "hosts.yml").write_text("token: kept\n")
+        outside = self.root.parent / "outside"
+        outside.mkdir()
+        (outside / "data").write_text("kept\n")
+        (self.root / "link").symlink_to(outside)
+        entries = self.sweep()
+        self.assert_kept(entries, ".config", "dot entry")
+        self.assert_kept(entries, "link", "symlink")
+        self.assertTrue((outside / "data").is_file())
+
+    def test_main_repository_with_an_outside_worktree_is_kept(self) -> None:
+        main = self.clone("a-main")
+        git(main, "worktree", "add", "-q", "--detach", str(self.root / "b-linked"))
+        entries = self.sweep()
+        self.assert_kept(entries, "a-main", "lives outside")
+        self.assert_removed(entries, "b-linked")
+
+    def test_live_process_inside_an_entry_keeps_it(self) -> None:
+        busy = self.clone("busy")
+        process = self.proc / "4242"
+        (process / "fd").mkdir(parents=True)
+        (process / "cwd").symlink_to(busy)
+        (process / "exe").symlink_to("/usr/bin/true")
+        self.assert_kept(self.sweep(), "busy", "live process uses it")
+
+    def test_missing_proc_removes_nothing(self) -> None:
+        self.clone("clean")
+        self.proc.rmdir()
+        self.sweep()
+        self.assertEqual(self.report["skip"], "/proc unavailable")
+        self.assertTrue((self.root / "clean").is_dir())
+
+    def test_unreadable_process_is_passed_over_only_when_it_cannot_be_inside(self) -> None:
+        me = os.getuid()
+        other = me + 1
+        # (root mode, process owner, owner of its /proc links, removed?)
+        cases = [
+            (0o700, other, other, True),  # another user cannot enter a private root
+            (0o755, other, other, False),  # a shared root lets it in
+            (0o700, me, 0, True),  # our sshd session: links belong to root
+            (0o700, me, me, False),  # our own inspectable process we cannot read
+        ]
+        process = self.proc / "4242"
+        (process / "fd").mkdir(parents=True)
+        readlink = os.readlink
+        stat_of, lstat_of = Path.stat, Path.lstat
+        for mode, owner, links, removed in cases:
+            with self.subTest(mode=oct(mode), owner=owner, links=links):
+                self.clone("clean")
+
+                def denied(path, *args, **kwargs):
+                    if Path(path).parent == process:
+                        raise PermissionError(path)
+                    return readlink(path, *args, **kwargs)
+
+                def owned(path, *args, _owner=owner, **kwargs):
+                    if path == process:
+                        return SimpleNamespace(st_uid=_owner)
+                    return stat_of(path, *args, **kwargs)
+
+                def linked(path, *args, _links=links, **kwargs):
+                    if path == process / "cwd":
+                        return SimpleNamespace(st_uid=_links)
+                    return lstat_of(path, *args, **kwargs)
+
+                self.root.chmod(mode)
+                with (
+                    patch.object(cleaner.os, "readlink", side_effect=denied),
+                    patch.object(Path, "stat", owned),
+                    patch.object(Path, "lstat", linked),
+                ):
+                    entries = self.sweep()
+                if removed:
+                    self.assert_removed(entries, "clean")
+                else:
+                    self.assertIn("process 4242", self.report["skip"])
+                    shutil.rmtree(self.root / "clean")
+
+
+if __name__ == "__main__":
+    unittest.main()

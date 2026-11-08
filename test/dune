@@ -5101,12 +5101,12 @@
 (test
  (name test_keeper_tool_surface_schema)
  (modules test_keeper_tool_surface_schema)
- (libraries alcotest yojson masc masc_test_deps))
+ (libraries alcotest masc masc_test_deps))
 
 (test
  (name test_keeper_descriptor_schema)
  (modules test_keeper_descriptor_schema)
- (libraries alcotest yojson masc masc_test_deps mcp_protocol eio eio_main))
+ (libraries alcotest yojson masc masc_test_deps mcp_protocol eio_main))
 
 (include stanzas/test_librarian_journal_failures.inc)
 
@@ -5127,7 +5127,7 @@
 (test
  (name test_keeper_memory_journal_serialization)
  (modules test_keeper_memory_journal_serialization)
- (libraries alcotest masc masc_test_deps unix yojson))
+ (libraries alcotest masc masc_test_deps unix))
 
 (include stanzas/test_review_prompt_sections_reach_the_model.inc)
 (include stanzas/test_prompt_templates_render.inc)
@@ -5290,12 +5290,12 @@
 (test
  (name test_skill_source_config)
  (modules test_skill_source_config)
- (libraries alcotest masc.skill_config masc.keeper_toml masc.masc_core yojson))
+ (libraries alcotest masc.skill_config masc.keeper_toml masc.masc_core))
 
 (test
  (name test_skill_source_runtime_integration)
  (modules test_skill_source_runtime_integration)
- (libraries alcotest masc masc.skill_config masc.skill_snapshot masc.skill_snapshot_service masc.server masc_runtime masc.string_util masc.masc_core masc.masc_log unix))
+ (libraries alcotest masc masc.skill_snapshot_service masc.server masc_runtime masc.string_util masc.masc_core masc.masc_log unix))
 
 (test
  (name test_skill_catalog_snapshot)
@@ -5365,7 +5365,6 @@
   alcotest
   masc.skill_snapshot_service
   masc.skill_snapshot
-  masc.skill_config
   unix))
 
 (test
@@ -5451,7 +5450,6 @@
   fs_compat
   masc
   masc.keeper_registry
-  masc.masc_types
   masc.runtime
   masc_test_deps
   unix))
@@ -5544,8 +5542,7 @@
 (test
  (name test_keeper_composition_async_broker)
  (modules test_keeper_composition_async_broker)
- (libraries masc_test_deps masc_schedule multimodal bigstringaf
-   masc.keeper_checkpoint_ref masc.embedded_config))
+ (libraries masc_test_deps masc.embedded_config))
 
 (test
  (name test_keeper_remote_ssh_profile)
@@ -5658,7 +5655,7 @@
 (test
  (name test_browser_lane)
  (modules test_browser_lane)
- (libraries alcotest eio_main eio yojson masc.browser_lane masc masc.time_compat masc.monotonic_deadline))
+ (libraries alcotest eio_main eio yojson masc.browser_lane masc.time_compat masc.monotonic_deadline))
 
 (test
  (name test_browser_capture_options)
@@ -5678,7 +5675,7 @@
 (test
  (name test_browser_lane_watched_work)
  (modules test_browser_lane_watched_work)
- (libraries alcotest eio eio.mock yojson masc.browser_lane masc.time_compat masc.monotonic_deadline))
+ (libraries alcotest eio eio.mock masc.browser_lane masc.time_compat masc.monotonic_deadline))
 
 (include stanzas/test_browser_lane_setup_cli.inc)
 
@@ -5725,12 +5722,12 @@
 (test
  (name test_keeper_ssh_integration)
  (modules test_keeper_ssh_integration)
- (libraries masc_test_deps exec_ssh_protocol))
+ (libraries masc_test_deps))
 
 (test
  (name test_keeper_sandbox_remote_checkouts)
  (modules test_keeper_sandbox_remote_checkouts)
- (libraries alcotest masc masc.repo_manager unix yojson))
+ (libraries alcotest masc masc.repo_manager unix))
 
 (test
  (name test_tui_image_mosaic)
@@ -5777,8 +5774,7 @@
 (test
  (name test_tui_msx_load)
  (modules test_tui_msx_load)
- (libraries alcotest unix yojson masc masc.msx_lane masc_tui_types masc_tui_machine_live
-   masc_tui_interactive masc_tui_msx))
+ (libraries alcotest unix yojson masc masc.msx_lane masc_tui_types masc_tui_machine_live masc_tui_msx))
 
 ; The spectator's typed read of GET /api/v1/lane-addons/live: every answer
 ; shape, the malformed ones, and what a read does to the drawn view.
@@ -5795,7 +5791,7 @@
 (test
  (name test_msx_wire)
  (modules test_msx_wire)
- (libraries masc.msx_wire alcotest yojson))
+ (libraries masc.msx_wire alcotest))
 
 (test
  (name test_tui_msx_graphics)
@@ -5816,7 +5812,7 @@
 (test
  (name test_tui_runtime_listing)
  (modules test_tui_runtime_listing)
- (libraries astring yojson masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_surface_search alcotest masc masc.server masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
+ (libraries yojson masc_tui_runtime_config_edit masc_tui_runtime_config_receipt masc_tui_surface_search alcotest masc masc.server masc.agent_core.llm_provider masc.runtime masc_tui_frame masc_tui_message_layout masc_tui_pick_list masc_tui_types))
 
 (rule
  (alias runtest-test_browser_elements)
@@ -5894,7 +5890,7 @@
 (test
  (name test_keeper_log_lines)
  (modules test_keeper_log_lines)
- (libraries alcotest masc.keeper_hooks_agent_core_types masc_log))
+ (libraries alcotest masc.keeper_hooks_agent_core_types))
 
 ; The supervisor announces a keeper's pending HITL count only when it changes.
 (test
@@ -6077,7 +6073,7 @@
 (test
  (name test_server_settled_archive_sweep)
  (modules test_server_settled_archive_sweep)
- (libraries alcotest yojson masc masc.server unix))
+ (libraries alcotest masc masc.server unix))
 
 (test
  (name test_workspace_memory_execution_capture)
@@ -6087,7 +6083,7 @@
 (test
  (name test_workspace_memory_log_reader)
  (modules test_workspace_memory_log_reader)
- (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat unix))
+ (libraries alcotest masc masc.fs_compat unix))
 
 (test
  (name test_keeper_direct_runtime_resume)
@@ -6097,7 +6093,7 @@
 (test
  (name test_fusion_decision)
  (modules test_fusion_decision)
- (libraries masc_test_deps masc.fusion_core masc.jsonl_writer))
+ (libraries masc_test_deps))
 (include stanzas/test_onboarding_status.inc)
 (include stanzas/test_onboarding_journey.inc)
 (include stanzas/test_sandbox_readiness.inc)
@@ -6159,7 +6155,7 @@
 (test
  (name test_owner_process_identity)
  (modules test_owner_process_identity)
- (libraries alcotest unix masc.owner_process_identity masc.server masc.fs_compat))
+ (libraries alcotest unix masc.owner_process_identity))
 
 (test
  (name test_server_upgrade_preparation)
@@ -6177,12 +6173,12 @@
 (test
  (name test_browser_addon_artifacts)
  (modules test_browser_addon_artifacts)
- (libraries masc masc.browser_lane masc.lane_addon_call_context masc.masc_tool_blob_store masc.native_addon_lease masc.fs_compat masc.masc_eio_context masc.time_compat mcp_protocol alcotest eio eio.unix eio_main yojson unix  masc.agent_core.digest))
+ (libraries masc masc.browser_lane masc.lane_addon_call_context masc.masc_tool_blob_store masc.native_addon_lease masc.fs_compat masc.masc_eio_context masc.time_compat mcp_protocol alcotest eio eio_main yojson unix  masc.agent_core.digest))
 
 (test
  (name test_lane_addon_worker_protocol)
  (modules test_lane_addon_worker_protocol)
- (libraries masc masc.agent_core masc.lane_addon_call_context masc.fs_compat mcp_protocol alcotest eio eio_main yojson))
+ (libraries masc masc.agent_core masc.lane_addon_call_context mcp_protocol alcotest eio eio_main))
 
 (test
  (name test_resource_requirement)
@@ -6199,28 +6195,28 @@
 (test
  (name test_lane_addon_native_worker)
  (modules test_lane_addon_native_worker)
- (libraries masc masc.agent_core masc.lane_addon_call_context masc_process masc.native_addon_lease mcp_protocol alcotest eio eio.unix eio_main yojson unix)
+ (libraries masc masc.lane_addon_call_context masc_process masc.native_addon_lease alcotest eio eio.unix eio_main yojson unix)
  (deps ../bin/masc_native_addon_launcher.exe)
  (action (run %{test} %{dep:../bin/masc_native_addon_launcher.exe})))
 
 (test
  (name test_lane_addon_native_runtime)
  (modules test_lane_addon_native_runtime)
- (libraries masc masc.masc_core masc.masc_goal masc.browser_lane masc.browser_configuration masc.lane_addon_call_context masc.lane_addon_tool_result masc.tool_types mcp_protocol masc.native_addon_lease masc_process masc.fs_compat masc.masc_eio_context alcotest eio eio.unix eio_main yojson unix uuidm)
+ (libraries masc masc.native_addon_lease masc_process masc.fs_compat masc.masc_eio_context alcotest eio eio.unix eio_main yojson unix uuidm)
  (deps ../bin/masc_native_addon_launcher.exe)
  (action (run %{test} %{dep:../bin/masc_native_addon_launcher.exe})))
 
 (test
  (name test_lane_addon_exact_native)
  (modules test_lane_addon_exact_native)
- (libraries masc_test_deps masc.server exact_output_fixture masc.native_addon_lease)
+ (libraries masc_test_deps masc.server exact_output_fixture)
  (deps ../bin/masc_native_addon_launcher.exe)
  (action (run %{test} %{dep:../bin/masc_native_addon_launcher.exe})))
 
 (test
  (name test_lane_addon_worker)
  (modules test_lane_addon_worker)
- (libraries masc.lane_addon_call_context masc masc.string_util masc_random_id mcp_protocol alcotest eio eio_main yojson unix  masc.agent_core.digest masc.fs_compat base64))
+ (libraries masc.lane_addon_call_context masc masc_random_id mcp_protocol alcotest eio eio_main yojson unix  masc.agent_core.digest masc.fs_compat base64))
 
 (include stanzas/test_bedrock_sdk.inc)
 (test
@@ -6270,7 +6266,7 @@
 (test
  (name test_server_runtime_setup_actions)
  (modules test_server_runtime_setup_actions)
- (libraries masc.toml_line_editor alcotest yojson unix eio eio_main httpun masc.agent_core.llm_provider masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
+ (libraries masc.toml_line_editor alcotest yojson unix eio eio_main masc.agent_core.llm_provider masc.auth masc.server masc.runtime masc.masc_core masc.fs_compat masc.masc_process))
 
 (test
  (name test_runtime_model_context_metadata)
@@ -6301,7 +6297,7 @@
 (test
  (name test_world_constitution_store)
  (modules test_world_constitution_store)
- (libraries alcotest masc yojson unix fs_compat))
+ (libraries alcotest masc unix fs_compat))
 
 (test
  (name test_world_constitution_prompt)

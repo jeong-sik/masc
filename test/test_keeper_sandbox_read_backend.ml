@@ -3227,21 +3227,27 @@ let test_accepted_nonzero_exit_cut_keeps_the_error () =
       (String_util.contains_substring output "No such file or directory")
   | Error message -> Alcotest.failf "exit 2 is accepted here, got: %s" message
 
-let test_exit_zero_returns_stdout_alone () =
-  let outcome =
-    Masc_exec.Sandbox_target.Ran
-      { output_files = None
-      ; status = Unix.WEXITED 0
-      ; stdout = "a.ml:1:match\n"
-      ; stderr = "ssh: a warning\n"
-      }
-  in
-  match
-    Keeper_sandbox_read_backend.classify_read_outcome ~lane:"remote_ssh"
-      ~endpoint_name:"guest" ~ok_exit_codes:[ 0; 1; 2 ] ~max_bytes:4096 outcome
-  with
-  | Ok (_, output) -> Alcotest.(check string) "stdout only" "a.ml:1:match\n" output
-  | Error message -> Alcotest.failf "exit 0 should be Ok, got: %s" message
+(* Exit 0 is a match and exit 1 is no match: stdout is the result, and a
+   warning on stderr must not become a match line. *)
+let test_exit_zero_and_one_return_stdout_alone () =
+  List.iter
+    (fun code ->
+       let outcome =
+         Masc_exec.Sandbox_target.Ran
+           { output_files = None
+           ; status = Unix.WEXITED code
+           ; stdout = "a.ml:1:match\n"
+           ; stderr = "ssh: a warning\n"
+           }
+       in
+       match
+         Keeper_sandbox_read_backend.classify_read_outcome ~lane:"remote_ssh"
+           ~endpoint_name:"guest" ~ok_exit_codes:[ 0; 1; 2 ] ~max_bytes:4096 outcome
+       with
+       | Ok (_, output) ->
+         Alcotest.(check string) (Printf.sprintf "exit %d: stdout only" code) "a.ml:1:match\n" output
+       | Error message -> Alcotest.failf "exit %d should be Ok, got: %s" code message)
+    [ 0; 1 ]
 
 let test_complete_binary_failure_has_safe_diagnostic () =
   let script = "#!/bin/sh\ncase \"$1\" in info|image) printf '[]\\n'; exit 0;; run) printf '\\377PNG'; exit 1;; *) exit 2;; esac\n" in
@@ -3548,8 +3554,8 @@ let run_tests ~clock ~fs () =
             test_accepted_nonzero_exit_keeps_stderr;
           Alcotest.test_case "accepted non-zero exit cut keeps the error" `Quick
             test_accepted_nonzero_exit_cut_keeps_the_error;
-          Alcotest.test_case "exit 0 returns stdout alone" `Quick
-            test_exit_zero_returns_stdout_alone;
+          Alcotest.test_case "exit 0 and 1 return stdout alone" `Quick
+            test_exit_zero_and_one_return_stdout_alone;
         ] );
       ( "defined but never registered until task-1768",
           [ Alcotest.test_case "run command scrubs sensitive env" `Quick test_run_command_scrubs_sensitive_env

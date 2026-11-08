@@ -136,12 +136,14 @@ let container_name_of meta =
        ; started_ms = int_of_float (Unix.gettimeofday () *. 1000.0)
        })
 
-(* A program that exits non-zero and is still accepted says why on stderr: rg
-   exits 2 after an error and prints it there. The docker lane returns both
+(* A program that exits with an accepted code of 2 or more says why on stderr:
+   rg exits 2 after an error and prints it there. The docker lane returns both
    streams in one string, so a Grep failure there carries rg's message. This
    lane returns the two apart, and an accepted exit used to keep stdout alone,
    so a Grep on a missing path came back as exit 2 with nothing else. The error
-   text goes first so a cut at [max_bytes] keeps it. *)
+   text goes first so a cut at [max_bytes] keeps it. Exit 0 and exit 1 keep
+   stdout alone: for rg they mean a match and no match, stdout holds the result
+   lines, and a warning on stderr must not join them. *)
 let error_text_then_stdout ~stderr ~stdout =
   if String.ends_with ~suffix:"\n" stderr
   then stderr ^ stdout
@@ -155,9 +157,9 @@ let error_text_then_stdout ~stderr ~stdout =
 (* The read backend's translation of a [run_outcome] into a read result.
    [Transport_failed] is always an error -- this is what stops a down lane
    from reading as an empty [Ok] on the Grep lane, whose [ok_exit_codes]
-   accepts exit 1. Exit 0 returns stdout alone; an accepted non-zero exit
-   returns stderr, then stdout. Pure and exported so the distinction is tested
-   directly (test_keeper_sandbox_read_backend, the differential test). *)
+   accepts exit 1. Exit 0 and 1 return stdout alone; an accepted exit of 2 or
+   more returns stderr, then stdout. Pure and exported so the distinction is
+   tested directly (test_keeper_sandbox_read_backend, the differential test). *)
 let classify_read_outcome_with_limit ~lane ~endpoint_name ~ok_exit_codes ~max_bytes outcome =
   match (outcome : Masc_exec.Sandbox_target.run_outcome) with
   | Transport_failed { reason; stderr; _ } ->
@@ -174,7 +176,7 @@ let classify_read_outcome_with_limit ~lane ~endpoint_name ~ok_exit_codes ~max_by
          | None -> stdout
          | Some limit ->
            let text =
-             if code = 0 || String.equal stderr ""
+             if code <= 1 || String.equal stderr ""
              then stdout
              else error_text_then_stdout ~stderr ~stdout
            in

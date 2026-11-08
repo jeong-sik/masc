@@ -26,31 +26,22 @@ type t =
   ; tools : Tool_set.t
   ; context : Context.t option
   ; provider_config : Llm_provider.Provider_config.t option
-  ; reasoning_source_change : Llm_provider.Reasoning_history_projection.source_change_policy
   ; context_fit_admission : Agent.context_fit_admission
   ; model_input_projection : Agent.model_input_projection option
   ; pre_dispatch_serialization_observer : Agent.pre_dispatch_serialization_observer option
-  ; serialization_executor : Agent.serialization_executor option
   ; stream_idle_timeout_s : float option
   ; first_event_timeout_s : float option
   ; body_timeout_s : float option
   ; call_timeout_s : float option
   ; admission_timeout_s : float option
-  ; permit_wait : Llm_provider.Provider_admission.permit_wait Atomic.t option
   ; hooks : Hooks.hooks
   ; tracer : Tracing.t
-  ; raw_trace : Raw_trace.t option
-  ; context_injector : Hooks.context_injector option
   ; event_bus : Event_bus.t option
   ; skill_registry : Skill_registry.t option
   ; elicitation : Hooks.elicitation_callback option
   ; description : string option
   ; periodic_callbacks : Agent.periodic_callback list
   ; contract : Contract.t
-  ; yield_on_tool : bool
-  ; max_tool_rounds : int option
-  ; on_run_complete : (bool -> unit) option
-  ; checkpoint_sink : Agent.checkpoint_sink option
   ; transport : Llm_provider.Llm_transport.t option
   }
 
@@ -78,21 +69,16 @@ let create ~net ~media_store ~model =
   ; tools = Tool_set.empty
   ; context = None
   ; provider_config = None
-  ; reasoning_source_change = Agent.default_options.reasoning_source_change
   ; context_fit_admission = Agent.Body_only
   ; model_input_projection = None
   ; pre_dispatch_serialization_observer = None
-  ; serialization_executor = None
   ; stream_idle_timeout_s = None
   ; first_event_timeout_s = None
   ; body_timeout_s = None
   ; call_timeout_s = None
   ; admission_timeout_s = None
-  ; permit_wait = None
   ; hooks = Hooks.empty
   ; tracer = Tracing.null
-  ; raw_trace = None
-  ; context_injector = None
   ; (* Observability-as-default: every Builder-constructed agent gets a fresh,
        per-agent event bus so Turn/Tool/InferenceTelemetry events are emitted
        without the caller opting in. [create] is a per-call function, so this
@@ -107,16 +93,8 @@ let create ~net ~media_store ~model =
   ; description = None
   ; periodic_callbacks = []
   ; contract = Contract.empty
-  ; yield_on_tool = false
-  ; max_tool_rounds = None
-  ; on_run_complete = None
-  ; checkpoint_sink = None
   ; transport = None
   }
-;;
-
-let with_checkpoint_sink checkpoint_sink b =
-  { b with checkpoint_sink = Some checkpoint_sink }
 ;;
 
 let with_transport transport b = { b with transport = Some transport }
@@ -134,10 +112,8 @@ let with_tools tools b = { b with tools = Tool_set.of_list tools }
 let with_tool tool b = { b with tools = Tool_set.merge b.tools (Tool_set.singleton tool) }
 let with_hooks hooks b = { b with hooks }
 let with_tracer tracer b = { b with tracer }
-let with_raw_trace raw_trace b = { b with raw_trace = Some raw_trace }
 let with_context ctx b = { b with context = Some ctx }
 
-let with_reasoning_source_change policy b = { b with reasoning_source_change = policy }
 let with_provider_config (pc : Llm_provider.Provider_config.t) b =
   { b with
     model = pc.model_id
@@ -168,10 +144,6 @@ let with_pre_dispatch_serialization_observer observer b =
   { b with pre_dispatch_serialization_observer = Some observer }
 ;;
 
-let with_serialization_executor executor b = { b with serialization_executor = Some executor }
-;;
-
-let with_on_run_complete cb b = { b with on_run_complete = Some cb }
 let with_contract contract b = { b with contract = Contract.merge b.contract contract }
 let with_skill skill b = with_contract (Contract.with_skill skill Contract.empty) b
 let with_skills skills b = with_contract (Contract.with_skills skills Contract.empty) b
@@ -181,8 +153,6 @@ let with_disable_parallel_tool_use v b = { b with disable_parallel_tool_use = v 
 let with_reasoning_effort effort b = { b with reasoning_effort = Some effort }
 let with_initial_messages msgs b = { b with initial_messages = msgs }
 let with_cache_system_prompt v b = { b with cache_system_prompt = v }
-let with_yield_on_tool v b = { b with yield_on_tool = v }
-let with_max_tool_rounds v b = { b with max_tool_rounds = Some v }
 let with_event_bus bus b = { b with event_bus = Some bus }
 let without_event_bus b = { b with event_bus = None }
 let with_stream_idle_timeout s b = { b with stream_idle_timeout_s = Some s }
@@ -190,8 +160,6 @@ let with_first_event_timeout s b = { b with first_event_timeout_s = Some s }
 let with_body_timeout s b = { b with body_timeout_s = Some s }
 let with_call_timeout s b = { b with call_timeout_s = Some s }
 let with_admission_timeout s b = { b with admission_timeout_s = Some s }
-let with_permit_wait cell b = { b with permit_wait = Some cell }
-let with_context_injector injector b = { b with context_injector = Some injector }
 let with_skill_registry reg b = { b with skill_registry = Some reg }
 let with_elicitation cb b = { b with elicitation = Some cb }
 let with_description desc b = { b with description = Some desc }
@@ -221,31 +189,31 @@ let build b =
     ; cache_system_prompt = b.cache_system_prompt
     ; cache_extended_ttl = b.cache_extended_ttl
     ; initial_messages = b.initial_messages
-    ; yield_on_tool = b.yield_on_tool
-    ; max_tool_rounds = b.max_tool_rounds
+    ; yield_on_tool = false
+    ; max_tool_rounds = None
     }
   in
   let options =
     { Agent_types.provider_config = b.provider_config
-    ; reasoning_source_change = b.reasoning_source_change
+    ; reasoning_source_change = Agent.default_options.reasoning_source_change
     ; stream_idle_timeout_s = b.stream_idle_timeout_s
     ; first_event_timeout_s = b.first_event_timeout_s
     ; body_timeout_s = b.body_timeout_s
     ; call_timeout_s = b.call_timeout_s
     ; admission_timeout_s = b.admission_timeout_s
-    ; permit_wait = b.permit_wait
+    ; permit_wait = None
     ; hooks = b.hooks
     ; tracer = b.tracer
     ; trace_link = None
-    ; raw_trace = b.raw_trace
-    ; context_injector = b.context_injector
+    ; raw_trace = None
+    ; context_injector = None
     ; event_bus = b.event_bus
     ; skill_registry = b.skill_registry
     ; elicitation = b.elicitation
     ; tool_approval = None
     ; description = b.description
     ; periodic_callbacks = b.periodic_callbacks
-    ; on_run_complete = b.on_run_complete
+    ; on_run_complete = None
     ; transport = b.transport
     }
   in
@@ -259,8 +227,6 @@ let build b =
     ~context_fit_admission:b.context_fit_admission
     ?model_input_projection:b.model_input_projection
     ?pre_dispatch_serialization_observer:b.pre_dispatch_serialization_observer
-    ?serialization_executor:b.serialization_executor
-    ?checkpoint_sink:b.checkpoint_sink
     ()
 ;;
 

@@ -88,7 +88,8 @@ related: ["runtime-two-layers"]
     `[models.X]`의 `max-context`, `tools-support`, `streaming`, `thinking-support`와 능력 표의 모든 칸이다.
     적지 않은 칸은 preset 값이 남는다(#37435와 같은 규칙).
     `tools-support`와 `streaming`은 적지 않아도 preset을 덮는다. 파서가 적지 않은 줄을 각각 `false`와 `true`로 채워서 늘 값이 있다.
-    미디어 입력 칸만은 적지 않으면 `false`다. 「답 없음」 갈래와 같은 규칙이다.
+    이미지·오디오·비디오·멀티모달 입력 칸만은 적지 않으면 `false`다. 「답 없음」 갈래와 같은 규칙이다.
+    문서 입력은 runtime.toml에 적을 키가 없다. 그래서 preset 값이 남는다(`anthropic` preset은 `true`, `capability_profile.ml:349`).
   - 답 없음: 지금과 같다.
 - 이 규칙은 Keeper 턴에도 그대로 적용된다.
   exact 슬롯이 되는 바인딩은 Keeper 턴과 같은 능력으로 답한다.
@@ -129,13 +130,17 @@ MASC는 runtime.toml이 exact가 읽는 능력 넷을 다 적었을 때만 `Decl
 
 - 창은 Keeper 창과 같은 순서로 찾는다. 바인딩, provider, 모델 순이다.
   카탈로그만 답한 창은 적은 것으로 세지 않는다.
-- 넷을 다 적으면 MASC는 그 바인딩이 Keeper 턴에서 쓰는 능력을 넘긴다(`Provider_config.capabilities_for_config_model`).
-  그래서 exact와 Keeper 턴이 같은 능력을 본다.
+  카탈로그 창에 깎인 창도 세지 않는다. runtime은 깎인 카탈로그 값으로 돈다.
+- `Runtime_exact_reads.parse`가 바인딩을 읽는다. 넷을 다 적었으면 넷이 모두 채워진 레코드(`stated`)를 돌려준다.
+  MASC는 그 레코드를 바인딩이 Keeper 턴에서 쓰는 능력(`Provider_config.capabilities_for_config_model`) 위에 얹어 넘긴다(`capabilities_over`).
+  그래서 슬롯은 검사한 값 그대로 답하고, exact와 Keeper 턴이 같은 능력을 본다.
   넷이 아닌 칸은 Keeper 턴처럼 §2.1의 합치기 규칙을 따른다.
 - 하나라도 빠지면 `No_model_declaration`이다.
-  `Runtime_exact_reads.unstated`가 빠진 능력을 닫힌 합타입 목록으로 돌려준다.
+  `parse`는 빠진 능력을 닫힌 합타입(`Runtime_exact_reads.t`)으로 모두 돌려준다. 이 목록은 비지 않는다.
 - 그런 슬롯마다 부팅 로그에 경고가 한 줄 남는다. 경고는 적을 키를 알려 준다.
-  경고는 resolver의 `Target_model` 거절과 runtime.toml만 읽는다. 카탈로그를 다시 묻지 않는다.
+  경고는 resolver의 `Target_model` 거절과, 그 registry를 만든 runtime 표를 읽는다.
+  창은 runtime이 푼 값이다. 이 값을 풀 때 바인딩 설정에 담긴 카탈로그 답도 읽는다(`provider_config.ml:219-226`).
+  카탈로그를 새로 묻지는 않는다.
 - 파서는 빈 사다리(`accepted-reasoning-efforts = []`)를 적지 않은 것으로 읽는다.
   그래서 effort 사다리가 없는 모델은 아직 이 길로 슬롯이 될 수 없다.
 
@@ -201,9 +206,11 @@ supports-structured-output = false
   preset은 provider의 모든 모델에 답하고, 이 모델은 모른다.
   - `openai_chat` preset은 JSON mode와 native schema를 켠다(`capability_profile.ml:443-444`).
   - `anthropic` preset은 창 200,000과 native schema를 켠다(`capability_profile.ml:334`, `:344`).
-- 능력 표가 있는지만 보면 설치 마법사가 쓰는 한 줄짜리 표로도 슬롯이 열린다.
-  마법사는 `reasoning-streaming-format = "none"`을 쓴다(`runtime_setup_spec.ml:483-492`).
+- 능력 표가 있는지만 보면 한 줄짜리 표로도 슬롯이 열린다.
+  예를 들어 `reasoning-streaming-format = "none"` 한 줄만 적은 표다.
   그러면 exact가 아무도 적지 않은 preset 값으로 돈다.
+  설치 마법사도 이 한 줄을 쓰지만, 카탈로그가 모르는 provider에만 쓴다(`runtime_setup_spec.ml:486`).
+  그런 슬롯은 provider 행이 없어서 이미 `Target_provider`로 빠진다(`exact_output_resolver.ml:751`).
 - exact에서 슬롯을 빼도 그 바인딩의 Keeper 턴 능력은 바뀌지 않는다.
   바인딩의 답은 여전히 하나다. exact가 적지 않은 값으로 돌지 않을 뿐이다.
 - 넷을 다 적은 운영자가 값을 틀리게 적으면 그 값이 실린다.
@@ -244,13 +251,18 @@ supports-structured-output = false
 
 - 기능 시험 하나를 3층에 둔다. runtime.toml 문자열로 exact resolver snapshot을 만든다.
   - provider 행만 있고 모델 행이 없는 모델에 넷을 다 적은 바인딩은 슬롯이 된다.
-    슬롯 능력에는 적은 창, `supports_response_format_json = false`, `supports_structured_output = false`가 있다.
-  - 같은 모델에서 native schema만 빠뜨린 바인딩은 `Target_not_in_catalog`로 빠진다.
-    `Runtime_exact_reads.unstated`는 `[Native_schema]`이고, resolver는 `Target_model`로 거절한다.
-  - 같은 모델에 능력 표가 없는 바인딩도 빠진다.
+    슬롯 능력에는 적은 창, 적은 effort 사다리, `supports_response_format_json = false`, `supports_structured_output = false`가 있다.
+  - 넷을 하나씩만 빠뜨린 바인딩은 `Target_not_in_catalog`로 빠진다.
+    `parse`는 빠뜨린 그 하나만 돌려주고, resolver는 `Target_model`로 거절한다.
+    창은 Anthropic wire에서 빠뜨린다. 그 preset은 창 200,000으로 답하므로(`Capability`), 시험은 그 답이 있는지 먼저 본다.
+  - 같은 모델에 능력 표가 없는 바인딩도 빠진다. 빠진 셋은 합타입 순서대로 나온다.
   - Anthropic wire에서 행도 표도 없는 바인딩도 빠진다. 시험은 그 바인딩의 override가 채워졌는지 먼저 본다.
 - agent_core 시험 하나를 둔다. 같은 바인딩을 `Declared_model`과 `No_model_declaration`으로 넘긴다.
+  override와 선언은 창, JSON mode, native schema가 서로 다르다.
   앞은 provider 행에 묶이고 선언 값으로 답한다. 뒤는 override가 있어도 `Target_model`로 빠진다.
+- 롤아웃 시험 하나를 둔다. 가이드의 체크포인트 바인딩을 runtime에 올리고 exact registry를 띄운다.
+  Librarian 레인 요청 본문에는 바인딩의 effort, 레인의 `max_tokens = 4096`이 있고 `response_format`은 없다.
+  예산이 없는 HITL 레인 요청에는 `max_tokens`가 없다.
 - 확인은 PR CI의 타입 검사·시험과 현재 head 독립 리뷰로 한다.
 - 설치 뒤에는 두 가지를 본다.
   - 부팅 로그에 체크포인트 슬롯의 `Target_not_in_catalog`가 없다.

@@ -28,19 +28,6 @@ let task_is_claim_pool_candidate (task : Masc_domain.task) =
   Masc_domain.task_claim_next_action_is_claimable task
 ;;
 
-let agent_record_keeper_name = Workspace_task_receipts.agent_record_keeper_name
-let keeper_receipt_candidate_names = Workspace_task_receipts.keeper_receipt_candidate_names
-let directory_exists = Workspace_task_receipts.directory_exists
-let directory_entries = Workspace_task_receipts.directory_entries
-let jsonl_files_under = Workspace_task_receipts.jsonl_files_under
-let last_nonempty_line = Workspace_task_receipts.last_nonempty_line
-let latest_json_in_receipt_dir = Workspace_task_receipts.latest_json_in_receipt_dir
-let json_member_path = Workspace_task_receipts.json_member_path
-let json_raw_string_path = Workspace_task_receipts.json_raw_string_path
-let json_string_path = Workspace_task_receipts.json_string_path
-let receipt_sort_key = Workspace_task_receipts.receipt_sort_key
-let latest_execution_receipt_json = Workspace_task_receipts.latest_execution_receipt_json
-
 let reconcile_agent_current_task_with_prepared_backlog
       config
       ?(touch_last_seen = true)

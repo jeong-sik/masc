@@ -3186,8 +3186,8 @@ let keeper_chat_idle ~client_gone ~operation_state : Server_sse_pump.idle =
    events through the pump. [missed_terminal] is asked after the replay, and
    its marker and [Settled] go behind the live events queued meanwhile.
    [None] when the client was gone before the live part. *)
-let serve_accepted_chat ~send ~queue ~acceptance_frame ~replay ~missed_terminal ~settled
-    ~idle ~clock ~ping_interval_s =
+let serve_accepted_chat ~send ~closed ~queue ~acceptance_frame ~replay ~missed_terminal
+    ~settled ~idle ~clock ~ping_interval_s =
   match (send acceptance_frame : Server_sse_response.outcome) with
   | Closed | Stalled -> None
   | Written ->
@@ -3213,7 +3213,7 @@ let serve_accepted_chat ~send ~queue ~acceptance_frame ~replay ~missed_terminal 
        Some
          (Server_sse_pump.run ~source:(Server_sse_pump.Queue.source queue)
             ~step:(keeper_chat_step ~replayed) ~idle ~clock
-            ~ping_interval_s ~send))
+            ~ping_interval_s ~closed ~send))
 ;;
 
 (* The retry frame goes first: it sets the client's reconnect delay, and the
@@ -3372,7 +3372,9 @@ let handle_keeper_chat_stream ~sw ~clock ~submitted_by state request reqd payloa
       | Written, Ok (acceptance, frame) ->
         let operation = acceptance.operation in
         (match
-           serve_accepted_chat ~send ~queue ~acceptance_frame:frame
+           serve_accepted_chat ~send
+             ~closed:(fun () -> Server_sse_response.await_closed response)
+             ~queue ~acceptance_frame:frame
              ~replay:(fun () -> replay_frames acceptance)
              ~missed_terminal:(fun ~replayed ->
                operation_terminal_after_replay ~base_path ~keeper_name:payload.name

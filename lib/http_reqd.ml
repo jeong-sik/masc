@@ -7,6 +7,52 @@ type acceptance = Transport_metrics.response_write_acceptance =
   | Accepted_by_writer
   | Rejected_by_writer
 
+(* The h2 library answers a flush only when the connection writer drains the
+   body (Http_h2_stream). A stream the peer reset, and a connection that ended
+   while the stream's window was 0, are never drained, so a flush registered
+   before that would wait for ever. The stream switch ends in both cases:
+   Server_h2_stream_registry fails it on RST_STREAM, and the connection scope
+   cancels it. That end answers every flush still waiting with [`Closed]. *)
+module Stream_end = struct
+  type t =
+    { mutable ended : bool
+    ; waiting : (int, unit -> unit) Hashtbl.t
+    ; mutable next_id : int
+    }
+
+  let create ~stream_sw =
+    let t = { ended = false; waiting = Hashtbl.create 2; next_id = 0 } in
+    Eio.Switch.on_release stream_sw (fun () ->
+      t.ended <- true;
+      let answers = Hashtbl.fold (fun _ answer answers -> answer :: answers) t.waiting [] in
+      Hashtbl.reset t.waiting;
+      List.iter (fun answer -> answer ()) answers);
+    t
+  ;;
+
+  let ended t = t.ended
+
+  (* [f] runs once: when h2 drains the body, or when the stream's end comes
+     first. *)
+  let flush t writer f =
+    if t.ended
+    then f `Closed
+    else (
+      let id = t.next_id in
+      t.next_id <- id + 1;
+      let answered = ref false in
+      let once outcome =
+        if not !answered
+        then (
+          answered := true;
+          Hashtbl.remove t.waiting id;
+          f outcome)
+      in
+      Hashtbl.replace t.waiting id (fun () -> once `Closed);
+      H2.Body.Writer.flush writer once)
+  ;;
+end
+
 (* One constructor per transport that carries requests. *)
 type t =
   | Http1 of
@@ -18,6 +64,7 @@ type t =
       ; request : Httpun.Request.t
       ; ledger : Http_h2_response_ledger.request
       ; stream_sw : Eio.Switch.t
+      ; stream_end : Stream_end.t
       }
 
 let of_gluten (gluten_reqd : Httpun.Reqd.t Gluten.Reqd.t) =
@@ -57,7 +104,13 @@ let request_of_h2 (h2_request : H2.Request.t) =
 ;;
 
 let of_h2 ~stream_sw ~ledger reqd =
-  Http2 { reqd; request = request_of_h2 (H2.Reqd.request reqd); ledger; stream_sw }
+  Http2
+    { reqd
+    ; request = request_of_h2 (H2.Reqd.request reqd)
+    ; ledger
+    ; stream_sw
+    ; stream_end = Stream_end.create ~stream_sw
+    }
 ;;
 
 let request = function
@@ -137,7 +190,15 @@ let payload_description_fields =
   [ "content-encoding"; "content-length"; "content-type"; "etag"; "last-modified"; "cache-control" ]
 ;;
 
-let h2_refuse_for_capacity reqd (response : Httpun.Response.t) =
+(* h2#278: close only once the pending bytes are flushed. A reset stream
+   never answers that flush, so the stream's end answers it (Stream_end) and
+   the writer is closed either way. *)
+let close_after_flush ~stream_end writer =
+  Stream_end.flush stream_end writer (function
+    | `Written | `Closed -> H2.Body.Writer.close writer)
+;;
+
+let h2_refuse_for_capacity ~stream_end reqd (response : Httpun.Response.t) =
   let retained =
     List.filter
       (fun (name, _) -> not (List.mem (String.lowercase_ascii name) payload_description_fields))
@@ -152,15 +213,15 @@ let h2_refuse_for_capacity reqd (response : Httpun.Response.t) =
       ~flush_headers_immediately:true
       (H2.Response.create ~headers `Service_unavailable)
   in
-  Http_h2_stream.close_after_flush writer
+  close_after_flush ~stream_end writer
 ;;
 
-let h2_respond_with_string reqd ledger response body =
+let h2_respond_with_string ~stream_end reqd ledger response body =
   (* A request whose body nobody read must still release its stream. *)
   H2.Body.Reader.discard (H2.Reqd.request_body reqd);
   match Http_h2_response_ledger.reserve ledger ~bytes:(String.length body) with
   | Error (Capacity_exhausted | Request_closed) ->
-    h2_refuse_for_capacity reqd response;
+    h2_refuse_for_capacity ~stream_end reqd response;
     Rejected_by_writer
   | Ok lease ->
     (try
@@ -171,7 +232,7 @@ let h2_respond_with_string reqd ledger response body =
            (h2_response_of response)
        in
        Http_h2_response_ledger.write_reserved lease writer body;
-       Http_h2_stream.close_after_flush writer;
+       close_after_flush ~stream_end writer;
        Accepted_by_writer
      with
      | exn ->
@@ -189,7 +250,8 @@ let try_respond_with_string t response body =
        | Http1 { reqd; _ } ->
          Httpun.Reqd.respond_with_string reqd response body;
          Accepted_by_writer
-       | Http2 { reqd; ledger; _ } -> h2_respond_with_string reqd ledger response body)
+       | Http2 { reqd; ledger; stream_end; _ } ->
+         h2_respond_with_string ~stream_end reqd ledger response body)
 ;;
 
 let respond_with_string t response body =
@@ -204,6 +266,7 @@ module Body_writer = struct
         { reqd : H2.Reqd.t
         ; writer : H2.Body.Writer.t
         ; ledger : Http_h2_response_ledger.request
+        ; stream_end : Stream_end.t
         }
 
   (* Exhausted capacity resets this stream, as the ledger's own drain did
@@ -211,7 +274,7 @@ module Body_writer = struct
   let write_string t s =
     match t with
     | H1 writer -> Httpun.Body.Writer.write_string writer s
-    | H2 { reqd; writer; ledger } ->
+    | H2 { reqd; writer; ledger; _ } ->
       (match Http_h2_response_ledger.reserve ledger ~bytes:(String.length s) with
        | Ok lease -> Http_h2_response_ledger.write_reserved lease writer s
        | Error refusal ->
@@ -226,25 +289,27 @@ module Body_writer = struct
 
   let is_closed = function
     | H1 writer -> Httpun.Body.Writer.is_closed writer
-    | H2 { writer; _ } -> H2.Body.Writer.is_closed writer
+    | H2 { writer; stream_end; _ } ->
+      H2.Body.Writer.is_closed writer || Stream_end.ended stream_end
   ;;
 
   (* Both libraries answer a flush on a closed body from the connection
      writer: [`Written] once nothing is pending, and nothing at all for an h2
      stream that was reset, because a closed stream is never drained. The
-     caller asks about bytes the peer will not get, so answer [`Closed]. *)
+     caller asks about bytes the peer will not get, so answer [`Closed]. On
+     h2 the stream's end answers the flushes still waiting (Stream_end). *)
   let flush t f =
     if is_closed t
     then f `Closed
     else (
       match t with
       | H1 writer -> Httpun.Body.Writer.flush writer f
-      | H2 { writer; _ } -> H2.Body.Writer.flush writer f)
+      | H2 { writer; stream_end; _ } -> Stream_end.flush stream_end writer f)
   ;;
 
   let close = function
     | H1 writer -> Httpun.Body.Writer.close writer
-    | H2 { writer; _ } -> Http_h2_stream.close_after_flush writer
+    | H2 { writer; stream_end; _ } -> close_after_flush ~stream_end writer
   ;;
 end
 
@@ -252,11 +317,11 @@ let respond_with_streaming ?flush_headers_immediately t response =
   match t with
   | Http1 { reqd; _ } ->
     Body_writer.H1 (Httpun.Reqd.respond_with_streaming ?flush_headers_immediately reqd response)
-  | Http2 { reqd; ledger; _ } ->
+  | Http2 { reqd; ledger; stream_end; _ } ->
     let writer =
       H2.Reqd.respond_with_streaming reqd ?flush_headers_immediately (h2_response_of response)
     in
-    Body_writer.H2 { reqd; writer; ledger }
+    Body_writer.H2 { reqd; writer; ledger; stream_end }
 ;;
 
 type body_read_error =

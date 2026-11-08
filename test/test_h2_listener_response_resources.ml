@@ -9,6 +9,8 @@ module Subs = Mcp_subscriptions
 module Protocol = Mcp_transport_protocol
 
 type mode = H2_only | Auto
+
+exception Test_finished
 type client = {
   connection : H2_eio.Client.t;
   authorization : string;
@@ -52,7 +54,7 @@ let with_listener mode ~capacity make_handler run =
     Fs_compat.set_fs (Eio.Stdenv.fs env);
     (* Only a fixture deadlock bound; no production request deadline. *)
     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 @@ fun () ->
-    Eio.Switch.run @@ fun sw ->
+    match Eio.Switch.run (fun sw ->
     Eio_context.with_test_env ~net:(Eio.Stdenv.net env)
       ~clock:(Eio.Stdenv.clock env) ~mono_clock:(Eio.Stdenv.mono_clock env) ~sw (fun () ->
       Masc.Board.reset_global_for_test ();
@@ -102,7 +104,14 @@ let with_listener mode ~capacity make_handler run =
             ~socket ~addr_label:"resource-fixture" ~h2_request_handler:handler ~h2_error_handler
             ~request_handler:(fun _ _ -> fail "H2 preface was routed as HTTP/1"))
         (fun () -> Fun.protect ~finally:(fun () -> List.iter (fun client -> client.close ()) !clients)
-          (fun () -> run ~connect ~port))))
+          (fun () -> run ~connect ~port));
+      (* A streamed POST reply leaves its keepalive fiber asleep on the runtime
+         switch, so the switch is failed once the client is done, as
+         test_mcp_post_sse_stream does on HTTP/1.1. *)
+      Eio.Switch.fail sw Test_finished))
+    with
+    | () -> fail "the failed fixture switch returned normally"
+    | exception Test_finished -> ())
 
 let request ?(body="") ?(headers=[]) ?(on_error=fun _ -> ()) client ~port path =
   let received,receive=Eio.Promise.create () in
@@ -290,6 +299,31 @@ let subscribe ?(notifications=tools_notifications) client ~port id =
 
 let rec until predicate = if not (predicate ()) then (Eio.Fiber.yield ();until predicate)
 
+(* The shared transport streams a 200 reply as SSE when the request accepts
+   text/event-stream, as it does on HTTP/1.1; the reply is the last message. *)
+let json_of_reply reply =
+  let body = read_complete reply in
+  let is_sse =
+    match H2.Headers.get reply.response.H2.Response.headers "content-type" with
+    | Some value -> String.starts_with ~prefix:"text/event-stream" value
+    | None -> false
+  in
+  if is_sse
+  then (
+    match
+      List.rev
+        (List.filter_map
+           (fun line ->
+             if String.starts_with ~prefix:"data: " line
+             then Some (String.sub line 6 (String.length line - 6))
+             else None)
+           (String.split_on_char '\n' body))
+    with
+    | [] -> fail "SSE reply carried no data line"
+    | last :: _ -> Yojson.Safe.from_string last)
+  else Yojson.Safe.from_string body
+
+
 let test_actual_modern_admission_errors () =
   let make_handler ~gateway = gateway in
   with_listener H2_only ~capacity:65536 make_handler (fun ~connect ~port ->
@@ -312,7 +346,7 @@ let test_actual_modern_admission_errors () =
       in
       let check_error label ~status ~code ~id reply =
         check int (label ^ " HTTP status") status (H2.Status.to_code reply.response.status);
-        let json = Yojson.Safe.from_string (read_complete reply) in
+        let json = json_of_reply reply in
         check int (label ^ " JSON-RPC code") code
           Yojson.Safe.Util.(json |> member "error" |> member "code" |> to_int);
         check bool (label ^ " request ID") true (Yojson.Safe.Util.member "id" json = id)
@@ -321,14 +355,16 @@ let test_actual_modern_admission_errors () =
         [ "jsonrpc", `String "2.0"; "id", id; "method", `String "server/discover"
         ; "params", `Assoc [ "_meta", meta version ] ] in
       (* The shared ingress refuses an unsupported mcp-protocol-version header
-         before the handler runs, with the HTTP/1.1 code. *)
+         before it reads the body, with the HTTP/1.1 code and no request id. *)
       check_error "unsupported version" ~status:400
-        ~code:(Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_request) ~id:(`Int 81)
+        ~code:(Masc.Mcp_error_code.to_wire_code Masc.Mcp_error_code.Invalid_request) ~id:`Null
         (post ~header_version:"2099-01-01" ~method_:"server/discover"
            (discover (`Int 81) "2099-01-01"));
+      (* A supported header that disagrees with the body's own stateless
+         revision is the mirror check's to refuse, and that check echoes the id. *)
       check_error "mismatched version" ~status:400 ~code:(-32020) ~id:(`Int 82)
-        (post ~header_version:"2099-01-01" ~method_:"server/discover"
-           (discover (`Int 82) "2026-07-28"));
+        (post ~header_version:"2026-07-28" ~method_:"server/discover"
+           (discover (`Int 82) "DRAFT-2026-v1"));
       let unknown = `Assoc
         [ "jsonrpc", `String "2.0"; "id", `Int 83; "method", `String "unknown/method"
         ; "params", `Assoc [ "_meta", meta "2026-07-28" ] ] in
@@ -413,7 +449,7 @@ let test_modern_requests_ignore_legacy_session_state () =
         (H2.Status.to_code reply.response.status);
       check (option string) "modern response has no session header" None
         (H2.Headers.get reply.response.headers "mcp-session-id");
-      let json = Yojson.Safe.from_string (read_complete reply) in
+      let json = json_of_reply reply in
       check bool "discovery succeeds" true
         (Yojson.Safe.Util.member "result" json <> `Null);
       for id = 92 to 94 do
@@ -426,7 +462,7 @@ let test_modern_requests_ignore_legacy_session_state () =
             ~body:(Yojson.Safe.to_string call) |> response in
         check int "stateless managed call receives a response" 200
           (H2.Status.to_code reply.response.status);
-        let json = Yojson.Safe.from_string (read_complete reply) in
+        let json = json_of_reply reply in
         check bool "managed call reached the tool" true
           (Yojson.Safe.Util.member "result" json <> `Null)
       done;
@@ -459,26 +495,30 @@ let test_actual_subscription_route () =
       check int "healthy sibling was admitted before overflow" 200
         (H2.Status.to_code live_response.response.status);
       until (fun () -> Subs.count ()=2);
+      (* The shared route primes the stream with its reconnect directive before
+         the acknowledgement, as on HTTP/1.1. *)
+      let preamble=Server_mcp_transport_http_headers.sse_prime_event () in
       let ack=sse (Subs.acknowledgement ~subscription_id:healthy_id (filter resource_notifications)) in
-      read_through live_response (String.length ack);
+      read_through live_response (String.length (preamble ^ ack));
       let note=Protocol.jsonrpc_notification "notifications/tools/list_changed"
         ~params:(`Assoc ["payload",`String (String.make 16384 'e')]) in
       let frame=sse (Protocol.tag_notification_with_subscription ~subscription_id:blocked_id note) in
       Subs.notify_tools_list_changed note;
-      (* Let the actual route's drain enter its flow-controlled flush. No
+      (* Let the shared route's pump enter its flow-controlled flush. No
          Reader callback returns the peer's 1024-byte stream credit yet. *)
       ping blocked;
-      (* This count follows the declared byte capacity, not a runtime cap.
-         Every publish uses the real registry and its shared publisher lock. *)
+      (* More frames than the listener's byte capacity. The shared route queues
+         them per subscriber and sends one at a time, so the blocked peer holds
+         one leased frame while the publisher neither blocks nor fails; the
+         peer is retired when it stalls or resets, as on HTTP/1.1. *)
       for _=1 to capacity / String.length frame + 1 do
         Subs.notify_tools_list_changed note
       done;
-      check int "overflow retires only the blocked subscriber without waiting on the socket" 1 (Subs.count ());
-      Eio.Promise.await held.failed;
-      check bool "overflow is not clean SSE EOF" true
-        (H2.Body.Reader.completion held_response.reader<>Complete);
+      check int "a blocked subscriber stays registered while its frame waits on credit" 2 (Subs.count ());
+      reset blocked held held_response;
+      until (fun () -> Subs.count ()=1);
       ping blocked;
-      let expected=ref ack in
+      let expected=ref (preamble ^ ack) in
       List.iter (fun sequence ->
         let note=Protocol.jsonrpc_notification "notifications/resources/updated"
           ~params:(`Assoc ["uri",`String resource_uri;"sequence",`Int sequence;

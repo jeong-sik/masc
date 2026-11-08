@@ -4797,7 +4797,7 @@ let prerequisite_actions_cmd =
   let dependency = Arg.(required & pos 0 (some string) None & info [] ~docv:"DEPENDENCY") in
   let action = Arg.(value & opt (some string) None & info ["execute"]
     ~doc:"Execute this explicitly selected action from the current host catalog.") in
-  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, pdf-tools, presentation-tools, firefox, ego-browser, or searxng.")
+  Cmd.v (Cmd.info "prerequisite-actions" ~doc:"Show installation actions for a sandbox, official client, pdf-tools, presentation-tools, ego-browser, or searxng.")
     (* Resolved on demand: only presentation-tools and searxng are scoped to a workspace, and
        an operator installing Codex or Docker has not made one yet. Taking the
        resolving [base_path] term here refused every dependency with "MASC_BASE_PATH

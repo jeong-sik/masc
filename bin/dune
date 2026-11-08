@@ -1378,7 +1378,7 @@
  (name masc_tui_memory_mark)
  (wrapped false)
  (modules masc_tui_memory_mark)
- (libraries masc_tui_types))
+ (libraries masc_tui_types masc_tui_memory_world))
 
 (library
  (name masc_tui_config_mark)
@@ -2263,6 +2263,7 @@
   masc_tui_detail_reading
   masc_tui_fetched
   masc_tui_memory_mark
+  masc_tui_memory_world
   masc_tui_context_inspector
   masc_tui_token_scale
   masc_tui_frame

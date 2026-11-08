@@ -12,4 +12,5 @@ val glyph : Masc_tui_types.memory_state -> string
 val legend : (string * string) list
 (** Every mark once, paired with what a row wearing it reads as. Two states
     share the attention mark and two share the failure mark, so this is
-    shorter than {!Masc_tui_types.memory_state} has constructors. *)
+    shorter than {!Masc_tui_types.memory_state} has constructors. The words of
+    the header's world line follow, from {!Masc_tui_memory_world.legend}. *)

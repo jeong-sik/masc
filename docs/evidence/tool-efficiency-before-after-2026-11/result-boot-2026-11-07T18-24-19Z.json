@@ -80,6 +80,24 @@
       "overhead_5s_or_more_calls": 194,
       "overhead_5s_or_more_hours": 0.462
     },
+    "execute_overhead_by_sandbox": {
+      "microvm": {
+        "calls": 2774,
+        "overhead_hours": 0.2,
+        "overhead_p50_s": 0.005,
+        "slow_calls": 219,
+        "slow_hours": 0.176,
+        "slow_mean_s": 2.89
+      },
+      "remote_ssh": {
+        "calls": 4373,
+        "overhead_hours": 1.628,
+        "overhead_p50_s": 0.127,
+        "slow_calls": 1828,
+        "slow_hours": 1.585,
+        "slow_mean_s": 3.12
+      }
+    },
     "disk_low": {
       "calls": 17,
       "by_tool": {
@@ -177,6 +195,24 @@
       "overhead_share": 0.185,
       "overhead_5s_or_more_calls": 142,
       "overhead_5s_or_more_hours": 0.551
+    },
+    "execute_overhead_by_sandbox": {
+      "microvm": {
+        "calls": 730,
+        "overhead_hours": 0.107,
+        "overhead_p50_s": 0.006,
+        "slow_calls": 107,
+        "slow_hours": 0.096,
+        "slow_mean_s": 3.22
+      },
+      "remote_ssh": {
+        "calls": 3381,
+        "overhead_hours": 1.164,
+        "overhead_p50_s": 0.016,
+        "slow_calls": 1110,
+        "slow_hours": 1.15,
+        "slow_mean_s": 3.73
+      }
     },
     "disk_low": {
       "calls": 53,

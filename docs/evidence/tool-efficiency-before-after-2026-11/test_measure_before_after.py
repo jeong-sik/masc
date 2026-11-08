@@ -34,6 +34,7 @@ def row(
     disposition: str | None = None,
     call_input: object = None,
     output: object = "",
+    sandbox_profile: str | None = None,
 ) -> bytes:
     fields: dict[str, object] = {
         "ts": stamp,
@@ -47,6 +48,8 @@ def row(
     }
     if disposition is not None:
         fields["disposition"] = disposition
+    if sandbox_profile is not None:
+        fields["runtime_contract"] = {"sandbox_profile": sandbox_profile}
     return json.dumps(fields).encode("utf-8")
 
 
@@ -184,6 +187,35 @@ class OverheadTest(unittest.TestCase):
     def test_no_reporting_call_leaves_the_share_empty(self) -> None:
         overhead = cast("dict[str, object]", compared([])["after"]["execute_overhead"])
         self.assertEqual((overhead["calls"], overhead["overhead_share"]), (0, None))
+
+    def test_overhead_is_split_by_sandbox_profile_and_slow_means_half_a_second_or_more(self) -> None:
+        def ran(
+            stamp: float, profile: str | None, held_ms: float, overhead_ms: float, disposition: str | None = None
+        ) -> bytes:
+            output = json.dumps({"execution_time_ms": held_ms - overhead_ms})
+            return row(
+                stamp, "Execute", duration_ms=held_ms, output=output, sandbox_profile=profile, disposition=disposition
+            )
+
+        result = compared(
+            [
+                ran(BOOT + 400, "remote_ssh", 3_600_000, 1_800_000),
+                ran(BOOT + 401, "remote_ssh", 10_000, 600),
+                ran(BOOT + 402, "remote_ssh", 10_000, 10),
+                ran(BOOT + 403, "microvm", 10_000, 100),
+                ran(BOOT + 404, None, 10_000, 4_000),
+                ran(BOOT + 405, "remote_ssh", 10_000, 9_000, disposition="failed"),
+            ]
+        )
+        split = cast("dict[str, dict[str, object]]", result["after"]["execute_overhead_by_sandbox"])
+        self.assertEqual(sorted(split), ["microvm", "remote_ssh", "unknown"])
+        remote = split["remote_ssh"]
+        self.assertEqual(remote["calls"], 3)
+        self.assertEqual(remote["overhead_hours"], 0.5)
+        self.assertEqual(remote["overhead_p50_s"], 0.6)
+        self.assertEqual((remote["slow_calls"], remote["slow_hours"], remote["slow_mean_s"]), (2, 0.5, 900.3))
+        self.assertEqual((split["microvm"]["calls"], split["microvm"]["slow_calls"], split["microvm"]["slow_mean_s"]), (1, 0, None))
+        self.assertEqual(split["unknown"]["slow_calls"], 1)
 
 
 class DiskLowTest(unittest.TestCase):

@@ -4,7 +4,7 @@
 Reads, and never writes, `<base-path>/.masc/tool_calls/<YYYY-MM>/<DD>.jsonl` and
 `<DD>.<NNN>.jsonl`: one JSON object per line. A line counts when `record_kind` is `tool_call`
 and `ts` (UTC seconds) lies in a window. Fields used: `tool`, `keeper`, `duration_ms`,
-`result_bytes`, `disposition`, `input` and `output`.
+`result_bytes`, `disposition`, `input`, `output` and `runtime_contract.sandbox_profile`.
 
 Windows (all UTC):
 
@@ -27,6 +27,11 @@ Numbers of one window:
   against how much they ran.
 - execute_overhead: for Execute calls that did not fail and whose output carries
   `execution_time_ms`, `duration_ms` minus that value, which is the time outside the command.
+- execute_overhead_by_sandbox: the same overhead per `runtime_contract.sandbox_profile` (`unknown`
+  when the line has none): calls, overhead hours, the median overhead in seconds, and the calls
+  whose overhead is 0.5 s or more with their hours and mean. On a `remote_ssh` Execute that is
+  almost always a call that ran an SSH preflight pass: calls that found the cache full have a
+  median overhead of 0.02 s.
 - disk_low: failed calls whose output holds `remote_ssh_disk_low`, by tool, and for Execute by
   intent: `request_effect` when the input says so, `auto` when it names no intent, `unknown` when
   the input is not JSON. A call that only quotes the code in a successful result does not count.
@@ -67,6 +72,8 @@ SIZE_CAPS = {"Grep": 102_400, "keeper_tools_list": 102_400, "BrowserTabs": 16_38
 DEFAULT_SLEEP_KEEPERS = ("github-pr-checker", "pr-updater")
 SLEEP_POLL_MS = 60_000
 OVERHEAD_TAIL_MS = 5_000
+OVERHEAD_SLOW_MS = 500
+UNKNOWN_SANDBOX = "unknown"
 MS_PER_HOUR = 3_600_000
 DEFAULT_SETTLE_S = 300.0
 TOP_FAILED_TOOLS = 4
@@ -87,6 +94,7 @@ class Call:
     failed: bool
     input_text: str
     output_text: str
+    sandbox: str
 
 
 @dataclasses.dataclass(slots=True)
@@ -145,6 +153,8 @@ def parse_call(raw: bytes, since: float, until: float, skipped: Skipped) -> Call
     size = number_of(fields.get("result_bytes"))
     failed = fields.get("disposition") == FAILED
     keep_text = tool == EXECUTE or failed
+    contract = fields.get("runtime_contract")
+    profile = cast("dict[str, object]", contract).get("sandbox_profile") if isinstance(contract, dict) else None
     return Call(
         ts=stamp,
         tool=tool,
@@ -154,6 +164,7 @@ def parse_call(raw: bytes, since: float, until: float, skipped: Skipped) -> Call
         failed=failed,
         input_text=text_of(fields.get("input")) if keep_text else "",
         output_text=text_of(fields.get("output")) if keep_text else "",
+        sandbox=profile if isinstance(profile, str) and profile else UNKNOWN_SANDBOX,
     )
 
 
@@ -266,6 +277,30 @@ def execute_overhead(executes: Sequence[Call]) -> dict[str, object]:
     }
 
 
+def overhead_by_sandbox(executes: Sequence[Call]) -> dict[str, object]:
+    outside_by_sandbox: dict[str, list[float]] = {}
+    for call in executes:
+        if call.failed:
+            continue
+        run = execution_time_ms_of(call.output_text)
+        if run is None:
+            continue
+        outside_by_sandbox.setdefault(call.sandbox, []).append(call.duration_ms - run)
+    split: dict[str, object] = {}
+    for sandbox, outside in sorted(outside_by_sandbox.items()):
+        ordered = sorted(outside)
+        slow = [milliseconds for milliseconds in ordered if milliseconds >= OVERHEAD_SLOW_MS]
+        split[sandbox] = {
+            "calls": len(ordered),
+            "overhead_hours": hours(sum(ordered)),
+            "overhead_p50_s": round(ordered[len(ordered) // 2] / 1000, 3),
+            "slow_calls": len(slow),
+            "slow_hours": hours(sum(slow)),
+            "slow_mean_s": round(sum(slow) / len(slow) / 1000, 2) if slow else None,
+        }
+    return split
+
+
 def disk_low_of(calls: Sequence[Call]) -> dict[str, object]:
     hit = [call for call in calls if call.failed and DISK_LOW in call.output_text]
     by_tool = Counter(call.tool for call in hit)
@@ -307,6 +342,7 @@ def summarize(calls: Sequence[Call], sleep_keepers: Sequence[str]) -> dict[str, 
             "hours": hours(sum(call.duration_ms for call in polls)),
         },
         "execute_overhead": execute_overhead(executes),
+        "execute_overhead_by_sandbox": overhead_by_sandbox(executes),
         "disk_low": disk_low_of(calls),
         "background_starts": {
             "calls": len(started),

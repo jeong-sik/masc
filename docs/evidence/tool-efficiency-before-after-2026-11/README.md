@@ -1,6 +1,8 @@
 # 서버 재시작 앞뒤로 도구 호출 원장 비교하기 (2026-11)
 
-도구 호출 원장(`~/me/.masc/tool_calls`)을 서버 부팅 시각 앞뒤의 같은 길이 두 창으로 나눠 같은 값을 세요. 결과 크기, Execute 가 붙든 시간, 실패, 디스크 바닥 거절, 백그라운드 Execute 를 한 번에 내요.
+도구 호출 원장(`~/me/.masc/tool_calls`)을 서버 부팅 시각 앞뒤의 같은 길이 두 창으로 나눠 같은 값을 세요. 결과 크기, Execute 가 붙든 시간, 샌드박스별 Execute 오버헤드, 실패, 디스크 바닥 거절, 백그라운드 Execute 를 한 번에 내요(`measure_before_after.py`).
+
+`replay_preflight_ttl.py` 는 원격 SSH 점검 결과를 다시 쓰는 시간을 바꾸면 점검이 몇 번 도는지 원장으로 다시 놓아 세요(추정). 같은 폴더의 `measure_before_after.py` 를 가져다 써서 함께 둬요.
 
 ## 왜 재나요
 
@@ -22,6 +24,8 @@
 | Execute 60초 이상 | 109호출, 6.12 h | 29호출, 2.14 h |
 | `sleep N` 폴링(두 Keeper) | 71호출, 4.18 h (이 둘의 Execute 624호출) | 7호출, 0.28 h (228호출) |
 | 성공한 Execute 의 도구 쪽 오버헤드 | 1.83 h (13.9%) | 1.27 h (18.5%) |
+| 원격(`remote_ssh`) Execute 오버헤드 | 1.63 h (4,373호출), 0.5초 이상 1,828건 | 1.16 h (3,381호출), 0.5초 이상 1,110건 |
+| microvm Execute 오버헤드 | 0.20 h (2,774호출), 0.5초 이상 219건 | 0.11 h (730호출), 0.5초 이상 107건 |
 | `remote_ssh_disk_low` 실패 | 17 (Execute 17) | 53 (Execute 51, Grep 2) |
 | `run_in_background` 시작 | 0 | 1 (도구 이름을 알리는 문구 0) |
 
@@ -41,7 +45,43 @@ python3 docs/evidence/tool-efficiency-before-after-2026-11/measure_before_after.
 
 - #49959(읽기 호출은 디스크 바닥 검사를 건너뛴다): `after.disk_low.by_tool` 에 `Grep` 이 없고 `execute_by_intent` 에 `auto` 가 없어야 해요. `request_effect` 는 남을 수 있어요.
 - #49942(시작 결과가 상태 읽기·취소 도구 이름을 알린다): `after.background_starts.naming_both_handle_tools` 가 `calls` 와 같아야 해요.
+- #50012(읽기 호출은 통과한 점검 결과를 300초 동안 다시 쓴다): `after.execute_overhead_by_sandbox.remote_ssh.slow_calls` 가 호출 수에 견줘 줄어야 해요. 뒤 창(11-07 18:29Z ~ 11-08 14:08Z, #50012 이전)은 3,381호출 중 1,110건(32.8%)이에요. 아래 재생 추정은 점검 횟수가 60% 안팎으로 준다고 말해요.
 - `--hours-before` 로 앞 창 길이를, `--settle-s` 로 부팅 직후를 뺀 시간을, `--sleep-keepers` 로 폴링을 셀 Keeper 를 바꿔요.
+
+## 원격 점검 캐시 재생 (`replay_preflight_ttl.py`)
+
+원격 SSH 점검 한 번은 SSH 연결을 단계마다 새로 열어요(정상이면 8개). `keeper_sandbox_remote.ml` 의 캐시는 점검 결과를 호출 종류별로 정해진 시간 동안 다시 써요. 같은 원장을 Keeper별로 다시 놓고, 그 시간을 바꾸면 점검이 몇 번 도는지 세요. 서버를 돌려 잰 값이 아니라 추정이에요.
+
+```bash
+python3 docs/evidence/tool-efficiency-before-after-2026-11/replay_preflight_ttl.py \
+  --base-path ~/me --since 2026-11-07T18:29:19 --end 2026-11-08T14:08:00 \
+  --json-out docs/evidence/tool-efficiency-before-after-2026-11/result-preflight-replay-2026-11-07_11-08.json
+```
+
+결과(11-07 18:29Z ~ 11-08 14:08Z): 캐시를 쓰는 원격 호출 3,752건 중 읽기 3,561건, 쓰기 191건이에요.
+
+| 읽기 TTL (쓰기는 60초) | 점검 횟수 |
+|---|---|
+| 60초 (#50012 이전) | 1,151 (읽기 1,073, 쓰기 78) |
+| 120초 | 760 |
+| 300초 (#50012) | 466 (-59.5%) |
+| 600초 | 344 |
+| 1800초 | 236 |
+
+관측 쪽은 `overhead_by_gap` 이에요. 성공한 원격 Execute 의 오버헤드를, 같은 Keeper 의 직전 호출과의 시작 간격으로 나눠요. 간격이 60초를 넘는 호출은 모두 오버헤드가 0.5초 이상이에요.
+
+| 직전 호출과 간격 | 호출 | 오버헤드 중앙값 | 0.5초 이상 |
+|---|---|---|---|
+| 10초 안 | 635 | 0.015초 | 37 |
+| 10~30초 | 1,910 | 0.015초 | 450 |
+| 30~60초 | 461 | 1.04초 | 248 |
+| 60~120초 | 170 | 2.52초 | 170 |
+| 120~600초 | 119 | 2.71초 | 119 |
+| 600초 넘음 | 86 | 2.53초 | 86 |
+
+- 간격이 길수록 비싼 호출의 몫이 올라가고, 60초(현재 TTL)를 넘으면 전부 비싸요. 비용은 명령이 아니라 점검에서 와요.
+- 모델의 가정이 둘이에요. 호출 시작은 `ts - duration_ms` 로 잡아요(원장 줄은 호출이 끝날 때 쓰여요). 모든 점검은 읽기를 통과시킨다고 봐요. 점검이 읽기를 거절하는 구간(GitHub 로그인 없음 등)은 60초를 그대로 써요.
+- 재생 60초 횟수 1,151은 같은 창의 `remote_ssh` Execute 오버헤드 0.5초 이상 1,110건과 가까워요. 앞은 캐시를 쓰는 원격 도구 전체이고 뒤는 명령 시간이 남은 Execute만이라 같은 집합은 아니에요.
 
 ## 시험
 
@@ -49,7 +89,7 @@ python3 docs/evidence/tool-efficiency-before-after-2026-11/measure_before_after.
 python3 -m unittest discover -s docs/evidence/tool-efficiency-before-after-2026-11
 ```
 
-합성 원장으로 세는 법을 확인하는 시험 15개예요. 창과 부팅 직후 제외, 크기 중앙값과 상한, `sleep` 폴링의 정의, 백그라운드 호출, 오버헤드, 디스크 바닥 거절의 의도별 구분, 회전 파일 읽기를 봐요.
+합성 원장으로 세는 법을 확인하는 시험 30개예요. 창과 부팅 직후 제외, 크기 중앙값과 상한, `sleep` 폴링의 정의, 백그라운드 호출, 오버헤드(샌드박스별 포함), 디스크 바닥 거절의 의도별 구분, 회전 파일 읽기, 점검 재생의 읽기·쓰기 구분과 시작 시각, 간격별 오버헤드를 봐요.
 
 ## 못 잰 것
 

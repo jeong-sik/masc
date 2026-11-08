@@ -7,9 +7,6 @@ val effective_keepalive_meta :
   Keeper_meta_contract.keeper_meta
 (** Pick the freshest keeper meta available for keepalive publication. *)
 
-val keeper_agent_status : Keeper_meta_contract.keeper_meta -> Masc_domain.agent_status
-(** Project keeper meta into the public agent status enum. *)
-
 val sync_keeper_presence :
   ctx:'a Keeper_types_profile.context ->
   registry_entry:Keeper_registry.registry_entry ->

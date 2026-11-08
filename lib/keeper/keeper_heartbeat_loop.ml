@@ -16,25 +16,15 @@ module Cycle = Keeper_heartbeat_loop_cycle
 (* Presence/identity sync extracted to
    [Keeper_heartbeat_loop_presence] (godfile decomp). *)
 let effective_keepalive_meta = Keeper_heartbeat_loop_presence.effective_keepalive_meta
-let keeper_agent_status = Keeper_heartbeat_loop_presence.keeper_agent_status
 let sync_keeper_presence = Keeper_heartbeat_loop_presence.sync_keeper_presence
 
 (* Pending board-event collection extracted to
    [Keeper_heartbeat_loop_board_events] (godfile decomp). *)
 let collect_keepalive_board_events = Keeper_heartbeat_loop_board_events.collect_keepalive_board_events
 
-let in_turn_liveness_pulse_interval_sec =
-  Keeper_heartbeat_loop_in_turn_pulse.in_turn_liveness_pulse_interval_sec
-
-let emit_in_turn_liveness_pulse =
-  Keeper_heartbeat_loop_in_turn_pulse.emit_in_turn_liveness_pulse
-
-let with_in_turn_liveness_pulse =
-  Keeper_heartbeat_loop_in_turn_pulse.with_in_turn_liveness_pulse
-
 (* Event-Layer stimulus intake extracted to [Keeper_heartbeat_stimulus_intake]
-   (godfile decomp). Type + entry point are re-exported as transparent
-   aliases so callers (incl. .mli consumers) stay byte-identical. *)
+   (godfile decomp). The type is re-exported as a transparent alias so
+   callers (incl. .mli consumers) stay byte-identical. *)
 module Stimulus_intake = Keeper_heartbeat_stimulus_intake
 
 let record_event_queue_stimulus_turn_started =
@@ -59,8 +49,6 @@ let classify_turn_intake_admission ~lifecycle =
     Intake_lifecycle_blocked denial
   | Keeper_lifecycle_admission.Autonomous_admitted -> Intake_admitted
 ;;
-
-let heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake
 
 (* Keepalive scheduling decision (record + decide function) extracted to
    [Keeper_heartbeat_loop_scheduling] (godfile decomp). *)

@@ -70,15 +70,6 @@ let effective_keepalive_meta
 ;;
 
 
-let keeper_agent_status (meta : keeper_meta) =
-  if meta.paused
-  then Masc_domain.Inactive
-  else (
-    match meta.current_task_id with
-    | Some _ -> Masc_domain.Busy
-    | None -> Masc_domain.Active)
-;;
-
 (** Preserve turn failure accounting when heartbeat recovers.
 
     Heartbeat health and turn health are independent in the keeper FSM. A

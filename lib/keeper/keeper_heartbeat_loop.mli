@@ -8,8 +8,6 @@ val effective_keepalive_meta :
   disk_meta_opt:keeper_meta option ->
   keeper_meta
 
-val keeper_agent_status : keeper_meta -> Masc_domain.agent_status
-
 val sync_keeper_presence :
   ctx:'a context ->
   registry_entry:Keeper_registry.registry_entry ->
@@ -22,17 +20,6 @@ val collect_keepalive_board_events :
   meta_current:keeper_meta ->
   proactive_warmup_elapsed:bool ->
   Keeper_world_observation.pending_board_event list * keeper_meta
-
-val in_turn_liveness_pulse_interval_sec : unit -> float
-
-val emit_in_turn_liveness_pulse :
-  ctx:'a context -> meta:keeper_meta -> unit
-
-val with_in_turn_liveness_pulse :
-  ctx:'a context ->
-  meta:keeper_meta ->
-  stop:bool Atomic.t ->
-  (unit -> 'b) -> 'b
 
 type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
@@ -51,12 +38,6 @@ type turn_intake_admission =
 val classify_turn_intake_admission :
   lifecycle:Keeper_lifecycle_admission.autonomous_admission ->
   turn_intake_admission
-
-val heartbeat_event_intake :
-  ctx:'a context ->
-  meta_after_triage:keeper_meta ->
-  pending_board_events:Keeper_world_observation.pending_board_event list ->
-  heartbeat_event_intake
 
 (** Source-authority gate applied after world scheduling. A durable selection
     failure blocks dispatch. Unread, missing or unanswered Ask sources and

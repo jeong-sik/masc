@@ -376,7 +376,9 @@ let test_h2_settings () =
   check int32 "the library default is 2^27, not the RFC 9113 65,535"
     (Int32.shift_left 1l 27) config.H2.Config.initial_window_size;
   check int "largest frame is the library default"
-    H2.Config.default.read_buffer_size config.H2.Config.read_buffer_size
+    H2.Config.default.read_buffer_size config.H2.Config.read_buffer_size;
+  check int "the library default is the RFC 9113 minimum 16,384"
+    16384 config.H2.Config.read_buffer_size
 ;;
 
 let () =

@@ -27,7 +27,3 @@ val peek : string -> Yojson.Safe.t option
 val invalidate_snapshot_cache : unit -> unit
 (** Drops every cached operator snapshot entry. Called automatically by
     keeper-mutation routes so the next snapshot read sees fresh state. *)
-
-val stats : unit -> Yojson.Safe.t
-(** Returns [{"entries": N, "fresh": M, "stale": S, "expired": E,
-    "computing": C, "max_entries": K}] for diagnostics. *)

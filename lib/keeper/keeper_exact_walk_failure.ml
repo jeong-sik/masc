@@ -209,39 +209,6 @@ let of_local_rejection = function
 let of_disposition disposition = of_local_rejection (local_rejection disposition)
 ;;
 
-let of_rejection rejection =
-  of_disposition (Exact_output.candidate_rejection_disposition rejection)
-;;
-
-let of_flow error =
-  let flow, final =
-    match error with
-    | Exact_output.Flow_attempt_already_started evidence -> evidence, empty
-    | Flow_attempt_start_failed { evidence; _ }
-    | Flow_measurement_start_failed { evidence; _ }
-    | Flow_before_measurement_dispatch_callback_failed { evidence; _ }
-    | Flow_measurement_terminal_callback_failed { evidence; _ }
-    | Flow_before_dispatch_callback_failed { evidence; _ }
-    | Flow_before_advance_callback_failed { evidence; _ } -> evidence, empty
-    | Flow_candidates_exhausted { evidence; rejection } -> evidence, of_rejection rejection
-    | Flow_exact_execution_failed { evidence; cause; _ } ->
-      evidence, of_cause cause.Exact_output.cause
-  in
-  let evidence =
-    List.fold_left
-      (fun accumulated (receipt : Exact_output.flow_advance_receipt) ->
-        let observed =
-          match receipt.failed with
-          | Flow_advance_execution_failed { cause; _ } -> of_cause cause
-          | Flow_advance_candidate_rejected rejection -> of_rejection rejection
-        in
-        combine accumulated observed)
-      final
-      flow.Exact_output.advances
-  in
-  flow, evidence
-;;
-
 type native_family = Codex | Claude | Claude_admission | Antigravity | Muse | Vibe | Host
 [@@deriving yojson]
 type measured_capacity = { actual_chars : int; max_chars : int } [@@deriving yojson]

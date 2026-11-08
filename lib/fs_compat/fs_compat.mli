@@ -1057,9 +1057,6 @@ val file_exists : string -> bool
 (** Return file size or None *)
 val file_size : string -> int option
 
-(** Return file mtime or None *)
-val file_mtime : string -> float option
-
 (** Rename file. *)
 val rename : string -> string -> unit
 

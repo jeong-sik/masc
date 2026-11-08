@@ -395,20 +395,72 @@ let agent_core_thinking_control_format = function
   | Runtime_schema.Reasoning_enabled -> Llm_provider.Capabilities.Reasoning_enabled
 ;;
 
+(* Every value a runtime capability block states, laid over [base]. [None]
+   means the block stated nothing, so [base] decides — what a
+   [false]-defaulted bool could not deliver (#37435). *)
+let stated_capabilities_over
+      ~(base : Llm_provider.Capabilities.capabilities)
+      (spec : Runtime_schema.model_spec)
+      (caps : Runtime_schema.model_capabilities)
+  : Llm_provider.Capabilities.capabilities
+  =
+  let stated field ~default = Option.value field ~default in
+  (* Media input stays fail-closed: MASC's model spec is the SSOT for
+     it ([Runtime_agent.apply_runtime_model_input_capabilities]), so an
+     unwritten media flag is [false], never the base's value. Absence
+     is the answer here, not a stand-in for a value that went missing:
+     the operator did not grant the modality. *)
+  (* DET-OK: the default is the contract. *)
+  let media field = Option.value field ~default:false in
+  { base with
+    supports_tools = spec.tools_support
+  ; supports_tool_choice = stated caps.supports_tool_choice ~default:base.supports_tool_choice
+  ; supports_required_tool_choice = stated caps.supports_required_tool_choice ~default:base.supports_required_tool_choice
+  ; supports_named_tool_choice = stated caps.supports_named_tool_choice ~default:base.supports_named_tool_choice
+  ; supports_parallel_tool_calls = stated caps.supports_parallel_tool_calls ~default:base.supports_parallel_tool_calls
+  (* DET-OK: absent policy retains the existing provider default capability
+     for this uncataloged model; it does not synthesize enable_thinking. *)
+  ; supports_reasoning = Option.value spec.thinking_support ~default:base.supports_reasoning
+  ; accepted_reasoning_efforts =
+      (match caps.accepted_reasoning_efforts with
+       | Some _ as declared -> declared
+       | None -> base.accepted_reasoning_efforts)
+  ; reasoning_streaming_format =
+      Option.value
+        caps.reasoning_streaming_format
+        ~default:base.reasoning_streaming_format
+  ; supports_response_format_json = stated caps.supports_response_format_json ~default:base.supports_response_format_json
+  ; supports_structured_output = stated caps.supports_structured_output ~default:base.supports_structured_output
+  ; supports_multimodal_inputs = media caps.supports_multimodal_inputs
+  ; supports_image_input = media caps.supports_image_input
+  ; supports_audio_input = media caps.supports_audio_input
+  ; supports_video_input = media caps.supports_video_input
+  ; supports_native_streaming = spec.streaming
+  ; supports_system_prompt = stated caps.supports_system_prompt ~default:base.supports_system_prompt
+  ; supports_assistant_prefill = stated caps.supports_assistant_prefill ~default:base.supports_assistant_prefill
+  ; supports_prompt_caching = stated caps.supports_prompt_caching ~default:base.supports_prompt_caching
+  ; supports_top_k = stated caps.supports_top_k ~default:base.supports_top_k
+  ; supports_min_p = stated caps.supports_min_p ~default:base.supports_min_p
+  ; supports_seed = stated caps.supports_seed ~default:base.supports_seed
+  ; emits_usage_tokens = stated caps.emits_usage_tokens ~default:base.emits_usage_tokens
+  }
+;;
+
 (** A runtime [api-name] is an opaque deployment string, not automatically an
-    AGENT_CORE catalog model. When AGENT_CORE has no exact provider/model row, project the
-    complete typed runtime declaration into the Provider_config override that
-    AGENT_CORE exposes for concrete endpoint contracts. Catalogued models preserve
-    the row except for explicit output ceilings and thinking transport declarations;
-    an absent runtime capability block remains absent and is
-    rejected later by the normal startup gate. *)
+    AGENT_CORE catalog model. When no model row answers for the provider/model
+    pair, project the complete typed runtime declaration into the
+    Provider_config override that AGENT_CORE exposes for concrete endpoint
+    contracts. Catalogued models preserve the row except for explicit output
+    ceilings and thinking transport declarations. An absent runtime capability
+    block remains absent: a provider preset then answers alone, and with no
+    catalog answer at all the normal startup gate rejects the binding. *)
 let declared_capabilities_override_of_model_spec
       ~(wire : Llm_provider.Provider_kind.t)
-      ~(catalog_capabilities : Llm_provider.Capabilities.capabilities option)
+      ~(catalog_answer : Llm_provider.Capabilities.catalog_answer)
       (spec : Runtime_schema.model_spec)
   =
-  match catalog_capabilities with
-  | Some catalog_caps ->
+  match catalog_answer with
+  | Llm_provider.Capabilities.Model_row catalog_caps ->
     (match spec.capabilities with
      | None -> None
      | Some runtime_caps ->
@@ -440,61 +492,41 @@ let declared_capabilities_override_of_model_spec
                   reasoning_streaming_format
                   ~default:catalog_caps.reasoning_streaming_format
             }))
-  | None ->
+  | Llm_provider.Capabilities.Provider_preset preset ->
+    (* The preset speaks for every model of its provider and knows nothing of
+       this one, so it is only the base: the block's window, output ceiling
+       and thinking control override it as well, and an unstated value keeps
+       the preset's. *)
+    Option.map
+      (fun (caps : Runtime_schema.model_capabilities) ->
+         { (stated_capabilities_over ~base:preset spec caps) with
+           max_context_tokens =
+             (match spec.max_context with
+              | Some _ as declared -> declared
+              | None -> preset.max_context_tokens)
+         ; max_output_tokens =
+             (match caps.max_output_tokens with
+              | Some _ as declared -> declared
+              | None -> preset.max_output_tokens)
+         ; thinking_control_format =
+             (match caps.declared_thinking_control_format with
+              | Some format -> agent_core_thinking_control_format format
+              | None -> preset.thinking_control_format)
+         })
+      spec.capabilities
+  | Llm_provider.Capabilities.No_catalog_answer ->
     Option.map
       (fun (caps : Runtime_schema.model_capabilities) ->
          (* The wire's own preset, not the bare defaults: an uncatalogued model
             still runs on a known dialect, and that dialect decides the fields
             no runtime block states (tool content shape, output budget field,
-            reasoning replay). Fields the block does state are assigned below
-            and override it. *)
+            reasoning replay). Fields the block does state override it. *)
          let base = Llm_provider.Capabilities.capabilities_of_kind wire in
-         (* [None] means the block stated nothing, so the dialect decides —
-            which is what the comment above has always promised and what a
-            [false]-defaulted bool could not deliver (#37435). *)
-         let stated field ~default = Option.value field ~default in
-         (* Media input stays fail-closed: MASC's model spec is the SSOT for
-            it ([Runtime_agent.apply_runtime_model_input_capabilities]), so an
-            unwritten media flag is [false], never the wire's preset. Absence
-            is the answer here, not a stand-in for a value that went missing:
-            the operator did not grant the modality. *)
-         (* DET-OK: the default is the contract. *)
-         let media field = Option.value field ~default:false in
-         { base with
+         { (stated_capabilities_over ~base spec caps) with
            max_context_tokens = spec.max_context
          ; max_output_tokens = caps.max_output_tokens
-         ; supports_tools = spec.tools_support
-         ; supports_tool_choice = stated caps.supports_tool_choice ~default:base.supports_tool_choice
-         ; supports_required_tool_choice = stated caps.supports_required_tool_choice ~default:base.supports_required_tool_choice
-         ; supports_named_tool_choice = stated caps.supports_named_tool_choice ~default:base.supports_named_tool_choice
-         ; supports_parallel_tool_calls = stated caps.supports_parallel_tool_calls ~default:base.supports_parallel_tool_calls
-         (* DET-OK: absent policy retains the existing provider default capability
-            for this uncataloged model; it does not synthesize enable_thinking. *)
-         ; supports_reasoning = Option.value spec.thinking_support ~default:base.supports_reasoning
          ; thinking_control_format =
              agent_core_thinking_control_format caps.thinking_control_format
-         ; accepted_reasoning_efforts =
-             (match caps.accepted_reasoning_efforts with
-              | Some _ as declared -> declared
-              | None -> base.accepted_reasoning_efforts)
-         ; reasoning_streaming_format =
-             Option.value
-               caps.reasoning_streaming_format
-               ~default:base.reasoning_streaming_format
-         ; supports_response_format_json = stated caps.supports_response_format_json ~default:base.supports_response_format_json
-         ; supports_structured_output = stated caps.supports_structured_output ~default:base.supports_structured_output
-         ; supports_multimodal_inputs = media caps.supports_multimodal_inputs
-         ; supports_image_input = media caps.supports_image_input
-         ; supports_audio_input = media caps.supports_audio_input
-         ; supports_video_input = media caps.supports_video_input
-         ; supports_native_streaming = spec.streaming
-         ; supports_system_prompt = stated caps.supports_system_prompt ~default:base.supports_system_prompt
-         ; supports_assistant_prefill = stated caps.supports_assistant_prefill ~default:base.supports_assistant_prefill
-         ; supports_prompt_caching = stated caps.supports_prompt_caching ~default:base.supports_prompt_caching
-         ; supports_top_k = stated caps.supports_top_k ~default:base.supports_top_k
-         ; supports_min_p = stated caps.supports_min_p ~default:base.supports_min_p
-         ; supports_seed = stated caps.supports_seed ~default:base.supports_seed
-         ; emits_usage_tokens = stated caps.emits_usage_tokens ~default:base.emits_usage_tokens
          })
       spec.capabilities
 ;;
@@ -552,11 +584,16 @@ let with_client_history_replay
 
 let model_capabilities_override_of_model_spec
       ~(wire : Llm_provider.Provider_kind.t)
-      ~(catalog_capabilities : Llm_provider.Capabilities.capabilities option)
+      ~request_policy
       (spec : Runtime_schema.model_spec)
   =
-  declared_capabilities_override_of_model_spec ~wire ~catalog_capabilities spec
-  |> with_client_history_replay ~wire ~catalog_capabilities
+  declared_capabilities_override_of_model_spec
+    ~wire
+    ~catalog_answer:(Llm_provider.Capabilities.request_policy_catalog_answer request_policy)
+    spec
+  |> with_client_history_replay
+       ~wire
+       ~catalog_capabilities:(Llm_provider.Capabilities.request_policy_capabilities request_policy)
 ;;
 
 (* A deployment-declared Anthropic thinking-control policy is read only where
@@ -727,7 +764,7 @@ let provider_config_from_declared_provider ?binding_max_context ?keep_alive ?num
        let model_capabilities_override =
          model_capabilities_override_of_model_spec
            ~wire:kind
-           ~catalog_capabilities
+           ~request_policy
            spec
        in
        let* model_anthropic_thinking_control_override =

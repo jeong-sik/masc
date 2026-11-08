@@ -1,4 +1,5 @@
-(* Server_imessage_in_process_gateway — replaces sidecars/imessage-bot/.
+(* Server_imessage_in_process_gateway — the iMessage gateway that runs inside
+   the server process.
 
    Shaped after the Slack gateway, minus everything Slack needs and iMessage
    does not: no socket, no handshake, no reconnect, no bot identity, no

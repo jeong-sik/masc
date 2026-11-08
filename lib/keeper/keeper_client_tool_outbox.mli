@@ -140,6 +140,61 @@ val place_carrier :
   'source Llm_provider.Types.message_with list ->
   'source Llm_provider.Types.message_with list
 
+(** {1 The carrier of one run}
+
+    RFC retained-results-carrier-shrinks-to-an-address. Every retained receipt
+    rides on every request until a completed turn acknowledges it, and no
+    window cuts the carrier: 248 receipts made one larger than the model
+    window (#49634). When a provider refuses a run's request for its size, the
+    run can carry the same text behind one blob address instead. *)
+
+type form =
+  | Inline  (** The {!developer_context} text. *)
+  | By_address
+      (** The receipt count, the receipts per tool and the marker of one
+          [text/plain] blob holding the [Inline] text, with how to read it.
+          Beyond the tool names, only the digits of those numbers change its
+          length. *)
+
+type carrier
+(** The carrier of one run: every provider attempt of one runtime call to one
+    candidate. A new run starts a new carrier. *)
+
+val carrier :
+  base_path:string -> artifact_reader_available:bool -> snapshot -> carrier
+(** Start a run's carrier of [snapshot] in the [Inline] form. Reads and writes
+    no file. [artifact_reader_available] says whether the run's requests offer
+    keeper_artifact_read: the [By_address] text then says how to read the blob,
+    and otherwise that the request cannot read it. *)
+
+val carrier_form : carrier -> form
+
+val carrier_context : carrier -> string list
+(** The carrier text in its current form. Reads and writes no file. *)
+
+val carrier_message : carrier -> Agent_core.Types.message option
+(** {!context_message} of the current form. *)
+
+val carrier_reprojection :
+  carrier ->
+  then_:Keeper_memory_delivery_reprojection.t ->
+  Keeper_memory_delivery_reprojection.t
+(** The capacity-refusal hook of a run, with the carrier step before [then_].
+
+    The carrier step switches an [Inline] carrier that holds receipts to
+    [By_address] when that text is strictly shorter. It measures with a
+    planned marker, without hashing or file I/O, so a form that is not shorter
+    writes nothing. Before switching it writes the blob with
+    {!Tool_blob_store.put_durable_reuse}; a failed write returns [Error] and
+    the form stays [Inline]. A switch returns [Reprojected], and the caller
+    sends again at the same capacity.
+
+    Otherwise the carrier step is [Unchanged] and [then_] decides, so a carrier
+    switches at most once and never back. [Error] from the carrier step does
+    not call [then_]. The blob is named by no durable store, so offline blob
+    maintenance may delete it after the run; the next run that switches writes
+    it again at the same address. *)
+
 val acknowledge : snapshot -> (unit, string) result
 (** Remove only the exact loaded receipts after the consumer completes.
     Newer receipts remain pending. Runtime callers use [settle_after_turn] so

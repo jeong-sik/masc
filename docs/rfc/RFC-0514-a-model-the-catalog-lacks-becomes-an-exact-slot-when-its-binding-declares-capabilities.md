@@ -206,9 +206,10 @@ max-output-tokens = 32768       # 체크포인트 평가 요청의 max_tokens
 
 - 예시는 exact에 필요한 다섯을 다 적는다. 하나를 지우면 슬롯이 빠지고, 부팅 로그가 지운 키를 알려 준다.
 - 기본 모델 행에는 출력 상한이 없다. 예시의 32,768은 체크포인트 평가 요청의 `max_tokens`와 같은 값이다.
+  그 값을 요청에 실으려면 체크포인트를 고른 레인에도 `max_output_tokens = 32768`을 적는다.
 - 슬롯 목록에는 `"tinker.librarian-checkpoint"`를 넣는다. 되돌릴 때는 슬롯 목록만 고친다.
-- 요청의 `max_tokens`는 레인의 `max_output_tokens`가 정한다(`lib/runtime/runtime_exact_output_registry.ml:684-689`).
-  OpenAI 호환 wire(Tinker)에서는 레인 값이 출력 상한보다 크면 상한으로 깎인다.
+- exact 요청의 `max_tokens`는 레인의 `max_output_tokens`가 정한다(`lib/runtime/runtime_exact_output_registry.ml:684-689`).
+  OpenAI 호환 wire(Tinker)에서 선언 상한은 그 값을 깎을 때만 쓰인다. 레인 값이 상한보다 크면 상한으로 깎인다.
 - 레인 값이 없을 때는 wire마다 다르다.
   - OpenAI 호환 wire(Tinker): 요청에 `max_tokens`가 실리지 않는다. endpoint 기본값이 상한이 된다.
     상한을 요청 값으로 채우지 않는 규칙은 `backend_openai_request.ml:227-254`에 있다.
@@ -286,7 +287,8 @@ max-output-tokens = 32768       # 체크포인트 평가 요청의 max_tokens
   앞은 provider 행에 묶이고 선언 값으로 답한다. 뒤는 override가 있어도 `Target_model`로 빠진다.
 - 롤아웃 시험 하나를 둔다. 가이드의 체크포인트 바인딩을 runtime에 올리고 exact registry를 띄운다.
   슬롯의 출력 상한은 적은 32,768이다.
-  Librarian 레인 요청 본문에는 바인딩의 effort, 레인의 `max_tokens = 4096`이 있고 `response_format`은 없다.
+  Librarian 레인은 가이드처럼 32,768을 적는다. 그 요청 본문에는 바인딩의 effort, 레인의 `max_tokens = 32768`이 있고 `response_format`은 없다.
+  그 값은 슬롯의 출력 상한을 넘지 않는다.
   보드 레인은 상한보다 큰 40,000을 적는다. 그 요청의 `max_tokens`는 32,768로 깎인다.
   예산이 없는 HITL 레인 요청에는 `max_tokens`가 없다.
 - 확인은 PR CI의 타입 검사·시험과 현재 head 독립 리뷰로 한다.

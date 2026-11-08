@@ -78,7 +78,7 @@ When `save_weights_for_sampler` produces a checkpoint URI, bind it as a new mode
 
 The checkpoint is an exact-output slot only when runtime.toml states five keys. `max-context` may sit on the model, the binding or the provider table. A provider's `max-context` is the operator's value too: it counts, answers for every model of that provider, and is read before the model table's. The capabilities block states the other four: `accepted-reasoning-efforts`, `supports-response-format-json`, `supports-structured-output` and `max-output-tokens`. The rest of what an exact request reads describes the provider's API and follows the `openai_chat` preset unless stated. Of those, `thinking-support` on the model table and `thinking-control-format` and `supports-system-prompt` in the block have keys; the schema dialect, document input and the endpoint's behaviour without a reasoning control have none ([RFC-0514](../rfc/RFC-0514-a-model-the-catalog-lacks-becomes-an-exact-slot-when-its-binding-declares-capabilities.md) §2.2).
 
-The example below states all five and copies what the `thinkingmachines/Inkling-2-Small` row declares. That row declares no output ceiling; 32,768 is the `max_tokens` the checkpoint's evaluation requests send. An exact request carries the lane's `max_output_tokens`, cut to that ceiling when larger; a lane without one sends no `max_tokens`, as above. Give the lane `max_output_tokens = 32768` to send what the evaluation sends; the window counts it together with the prompt. A checkpoint's own behaviour was not measured. Declare the window of the base the run trained on: 65,536 for `thinkingmachines/Inkling-2-Small`, 262,144 for `thinkingmachines/Inkling-2-Small:peft:262144`. Restart MASC to load the row:
+The example below states all five and copies what the `thinkingmachines/Inkling-2-Small` row declares. That row declares no output ceiling; the example's 32,768 is the `max_tokens` the checkpoint's evaluation requests send. An exact request's `max_tokens` comes from the lane's `max_output_tokens`, and the declared `max-output-tokens` is used only to cut that value down. A lane without `max_output_tokens` sends no `max_tokens`, as above, so the example's Librarian lane states 32,768 as well. The lane's budget goes to every slot it lists, and the window counts it together with the prompt. A checkpoint's own behaviour was not measured. Declare the window of the base the run trained on: 65,536 for `thinkingmachines/Inkling-2-Small`, 262,144 for `thinkingmachines/Inkling-2-Small:peft:262144`. Restart MASC to load the row:
 
 ```toml
 [models.tinker-inkling-ckpt]
@@ -105,6 +105,10 @@ max-output-tokens = 32768
 
 [tinker.tinker-inkling-ckpt]
 max-concurrent = 4
+
+[runtime.exact_output_lanes.librarian_exact]
+slots = ["tinker.tinker-inkling-ckpt"]  # with the lane's other slots
+max_output_tokens = 32768
 ```
 
 A `tinker://` model still uses `[providers.tinker]`, its credential and an account with access to that checkpoint. Detaching the dataset add-on does not remove or disable this model row.

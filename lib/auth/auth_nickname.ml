@@ -55,8 +55,6 @@ let extract_generated_nickname_prefix name =
    canonical shape (keeper-<name>-agent) and must resolve to the middle segment
    so keeper-scoped credentials can be stored under the stable keeper name
    rather than the transport alias. Covered by the nickname fallback tests. *)
-let is_generated_nickname_shape name = List.length (String.split_on_char '-' name) >= 3
-
 let keeper_transport_alias_stable_name name =
   match String.split_on_char '-' name with
   | "keeper" :: rest ->

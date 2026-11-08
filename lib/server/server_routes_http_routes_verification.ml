@@ -223,10 +223,8 @@ let commit_goal_confirmation_json ~config ~operator_id json : (Yojson.Safe.t, co
                      else
                        match Workspace.validate_expected_workspace ~config json with
                        | Ok _ -> Ok ()
-                       | Error Workspace.Invalid_workspace_precondition ->
-                         Error (Confirmation_rejected "invalid expected_workspace precondition")
-                       | Error Workspace.Workspace_precondition_failed ->
-                         Error (Confirmation_rejected "workspace precondition failed") in
+                       | Error error ->
+                         Error (Confirmation_rejected (Workspace.expected_workspace_error_message error)) in
                    let* () = require_confirmation_backend ~config ~goal_id in
                    Workspace_goals.confirm_completion config
                      ~after_confirmation:(Candle_payout_owed.after_confirmation config)

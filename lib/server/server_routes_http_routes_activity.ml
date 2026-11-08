@@ -23,8 +23,7 @@ module Keeper_api_types = Server_dashboard_http_keeper_api_types
 let validate_write_workspace ~config args =
   match Workspace.validate_expected_workspace ~config args with
   | Ok args -> Ok args
-  | Error Workspace.Invalid_workspace_precondition -> Error "invalid expected_workspace precondition"
-  | Error Workspace.Workspace_precondition_failed -> Error "workspace precondition failed"
+  | Error error -> Error (Workspace.expected_workspace_error_message error)
 
 (* A Goal transition from the terminal names the workspace the operator saw.
    A board write may omit it; a Goal transition may not, so a server swapped

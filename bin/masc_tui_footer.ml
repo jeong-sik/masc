@@ -712,7 +712,20 @@ let rec fit_body ?literal_prefix ?action_text ?position ~max_cells ~conflicts ~h
            []
        in
        let room = max_cells - Masc_tui_message_layout.display_width more_key in
+       let marker_room =
+         max_cells - Masc_tui_message_layout.display_width cut_marker
+       in
        if room <= 0 then Masc_tui_message_layout.fit_width rendered max_cells
+       else if
+         Masc_tui_message_layout.display_width rendered <= marker_room
+         && not (String.ends_with ~suffix:cut_marker rendered)
+       then
+         (* The keys that cannot be dropped fit whole beside the marker. Cell
+            truncation is what puts the ellipsis on the row, and it cut
+            nothing here, so a bare [?] would follow the padding and say that
+            no key was left out. The marker says it. Planning's four pinned
+            keys take 57 of 60 cells. *)
+         Masc_tui_message_layout.fit_width rendered marker_room ^ cut_marker
        else Masc_tui_message_layout.fit_width rendered room ^ more_key)
 
 (** What the caller would rather the notice slot said than [action_text],

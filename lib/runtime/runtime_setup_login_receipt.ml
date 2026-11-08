@@ -1,9 +1,13 @@
 type status = Running | Complete of Runtime_setup_login_client.observation
   | Failed | Cancelled | Interrupted
+type account =
+  | Unselected
+  | Published of Runtime_setup_accounts.reference
+  | Linked
 type t = {
   login_id : string;
   integration_id : string;
-  account_ref : Runtime_setup_accounts.reference option;
+  account : account;
   status : status;
 }
 type error = Not_found | Unavailable
@@ -14,6 +18,8 @@ let observation_name = function
   | Login_completed -> "login_completed"
   | Credential_captured -> "credential_captured"
 
+let linked_label = "linked"
+
 let to_json t =
   let status, authentication = match t.status with
     | Running -> "running", []
@@ -21,11 +27,12 @@ let to_json t =
     | Failed -> "failed", []
     | Cancelled -> "cancelled", []
     | Interrupted -> "interrupted", [] in
-  let reference = match t.account_ref with
-    | None -> []
-    | Some reference -> ["account_ref", `String (Runtime_setup_accounts.reference_to_string reference)] in
+  let account = match t.account with
+    | Unselected -> []
+    | Published reference -> ["account_ref", `String (Runtime_setup_accounts.reference_to_string reference)]
+    | Linked -> ["account", `String linked_label] in
   `Assoc (["login_id", `String t.login_id; "integration_id", `String t.integration_id;
-    "status", `String status; "invocation_verified", `Bool false] @ reference @ authentication)
+    "status", `String status; "invocation_verified", `Bool false] @ account @ authentication)
 
 let scope ~workspace ~actor =
   let workspace = Unix.realpath workspace in
@@ -67,17 +74,19 @@ let save ~workspace ~actor t = filesystem (fun () ->
 let decode ~login_id = function
   | `Assoc fields when List.length fields = List.length (List.sort_uniq String.compare (List.map fst fields))
       && List.for_all (fun (key, _) -> List.mem key
-        ["login_id"; "integration_id"; "status"; "invocation_verified"; "account_ref"; "authentication"]) fields ->
+        ["login_id"; "integration_id"; "status"; "invocation_verified"; "account_ref"; "account";
+         "authentication"]) fields ->
     let* integration_id = match List.assoc_opt "login_id" fields, List.assoc_opt "integration_id" fields,
         List.assoc_opt "invocation_verified" fields with
       | Some (`String stored_id), Some (`String integration_id), Some (`Bool false)
         when String.equal stored_id login_id && String.trim integration_id <> "" -> Ok integration_id
       | _ -> Error Unavailable in
-    let* account_ref = match List.assoc_opt "account_ref" fields with
-      | None -> Ok None
-      | Some (`String value) -> Runtime_setup_accounts.reference_of_string value
-          |> Result.map Option.some |> Result.map_error (fun _ -> Unavailable)
-      | Some _ -> Error Unavailable in
+    let* account = match List.assoc_opt "account_ref" fields, List.assoc_opt "account" fields with
+      | None, None -> Ok Unselected
+      | Some (`String value), None -> Runtime_setup_accounts.reference_of_string value
+          |> Result.map (fun reference -> Published reference) |> Result.map_error (fun _ -> Unavailable)
+      | None, Some (`String label) when String.equal label linked_label -> Ok Linked
+      | _ -> Error Unavailable in
     let* status = match List.assoc_opt "status" fields, List.assoc_opt "authentication" fields with
       | Some (`String "running"), None -> Ok Running
       | Some (`String "failed"), None -> Ok Failed
@@ -87,10 +96,12 @@ let decode ~login_id = function
       | Some (`String "complete"), Some (`String "login_completed") -> Ok (Complete Login_completed)
       | Some (`String "complete"), Some (`String "credential_captured") -> Ok (Complete Credential_captured)
       | _ -> Error Unavailable in
-    (match status, account_ref with
-     | Complete _, None -> Error Unavailable
-     | (Running | Complete _ | Failed | Cancelled | Interrupted), _ ->
-       Ok {login_id; integration_id; account_ref; status})
+    (match status, account with
+     | Complete _, Unselected -> Error Unavailable
+     | (Running | Failed | Cancelled | Interrupted), Linked -> Error Unavailable
+     | Complete _, (Published _ | Linked)
+     | (Running | Failed | Cancelled | Interrupted), (Unselected | Published _) ->
+       Ok {login_id; integration_id; account; status})
   | _ -> Error Unavailable
 
 let load ~workspace ~actor ~login_id = filesystem (fun () ->

@@ -18,11 +18,12 @@ let lost_complete () = fixture (fun root ->
   let account_ref = Accounts.register_home ~workspace:root ~integration_id:"codex"
     ~cli_path:"codex" ~account_home:home |> ok in
   let initial = {Receipt.login_id = Auth.generate_token (); integration_id = "codex";
-    account_ref = Some account_ref; status = Receipt.Running} in
+    account = Receipt.Published account_ref; status = Receipt.Running} in
   Receipt.save ~workspace:root ~actor:"owner" initial |> ok;
   let read () = Receipt.load ~workspace:root ~actor:"owner" ~login_id:initial.login_id |> ok in
   let pending = read () in
-  check bool "prepared account recoverable before spawn" true (Option.is_some pending.account_ref);
+  check bool "prepared account recoverable before spawn" true
+    (match pending.account with Receipt.Published _ -> true | Receipt.Unselected | Receipt.Linked -> false);
   check bool "reference is not authentication proof" true (pending.status = Receipt.Running);
   let completed = {initial with status = Receipt.Complete Runtime_setup_login_client.Authenticated} in
   Receipt.save ~workspace:root ~actor:"owner" completed |> ok;
@@ -39,7 +40,7 @@ let lost_complete () = fixture (fun root ->
 let owner_scope_and_storage () = fixture (fun root ->
   let login_id = Auth.generate_token () in
   let receipt = {Receipt.login_id; integration_id = "muse";
-    account_ref = None; status = Receipt.Interrupted} in
+    account = Receipt.Unselected; status = Receipt.Interrupted} in
   Receipt.save ~workspace:root ~actor:"owner" receipt |> ok;
   let alias = Filename.concat root "workspace-alias" in Unix.symlink root alias;
   ignore (Receipt.load ~workspace:alias ~actor:"owner" ~login_id |> ok);
@@ -70,7 +71,7 @@ let owner_scope_and_storage () = fixture (fun root ->
 let corrupt_evidence () = fixture (fun root ->
   let login_id = Auth.generate_token () in
   let receipt = {Receipt.login_id; integration_id = "claude";
-    account_ref = None; status = Receipt.Running} in
+    account = Receipt.Unselected; status = Receipt.Running} in
   Receipt.save ~workspace:root ~actor:"owner" receipt |> ok;
   let record = match Env_config_core.default_base_path_record_path_opt () with
     | Some record -> record | None -> fail "missing private registry root" in
@@ -86,7 +87,25 @@ let corrupt_evidence () = fixture (fun root ->
   check bool "completion without account reference rejected" true
     (Receipt.load ~workspace:root ~actor:"owner" ~login_id = Error Receipt.Unavailable))
 
+(* Plan D1-4: a person's completed login has its account in the authorization
+   log, not in the setup registry, and its receipt is read back; a receipt that
+   claims that before the login completed is not. *)
+let a_persons_linked_completion () = fixture (fun root ->
+  let login_id = Auth.generate_token () in
+  let linked = {Receipt.login_id; integration_id = "claude_code";
+    account = Receipt.Linked; status = Receipt.Complete Runtime_setup_login_client.Authenticated} in
+  Receipt.save ~workspace:root ~actor:"human:user-1" linked |> ok;
+  let read = Receipt.load ~workspace:root ~actor:"human:user-1" ~login_id |> ok in
+  check bool "read back as linked and complete" true (read = linked);
+  let json = Receipt.to_json read in
+  check bool "named linked" true (Yojson.Safe.Util.member "account" json = `String "linked");
+  check bool "with no registry reference" true (Yojson.Safe.Util.member "account_ref" json = `Null);
+  Receipt.save ~workspace:root ~actor:"human:user-1" {linked with status = Receipt.Running} |> ok;
+  check bool "linked before completion rejected" true
+    (Receipt.load ~workspace:root ~actor:"human:user-1" ~login_id = Error Receipt.Unavailable))
+
 let () = run "official login recovery" ["receipts", [
   test_case "lost complete and cancellation" `Quick lost_complete;
   test_case "actor workspace and private storage" `Quick owner_scope_and_storage;
-  test_case "corrupt completion rejected" `Quick corrupt_evidence]]
+  test_case "corrupt completion rejected" `Quick corrupt_evidence;
+  test_case "a person's linked completion" `Quick a_persons_linked_completion]]

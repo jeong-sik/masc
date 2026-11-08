@@ -87,14 +87,14 @@ let finish owner ~base_path ~integration_id ~cli_path ~login_id home =
   match owner with
   | Operator _ ->
     Client.publish ~workspace:base_path ~integration_id ~cli_path home
-    |> Result.map Option.some
+    |> Result.map (fun reference -> Receipt.Published reference)
     |> Result.map_error (fun _ -> "The selected account could not be published. Retry account recovery.")
   | Person { zone; user_id; namespace = _ } ->
     let* provider_account_id =
       Authz_types.Provider_account_id.of_string login_id
       |> Result.map_error (fun _ -> account_failure) in
     Authz_provider_account.link zone ~user_id ~provider_account_id
-    |> Result.map (fun () -> None)
+    |> Result.map (fun () -> Receipt.Linked)
     |> Result.map_error (fun error ->
       "The account was not linked to you: " ^ Authz_provider_account.error_to_string error)
 
@@ -138,13 +138,15 @@ let start ~owner ~base_path ~body request reqd =
             Session.bind_account session ~account_key
             |> Result.map_error Session.error_message in
         let* child_env = Client.environment home in
-        let* reference = match owner, client with
-          | Operator _, Client.Antigravity -> Ok reference
-          | Operator _, (Codex | Claude | Muse) -> Client.publish ~workspace:base_path ~integration_id ~cli_path home
-              |> Result.map Option.some
-          | Person _, (Client.Antigravity | Codex | Claude | Muse) -> Ok None in
+        let* account = match owner, client, reference with
+          | Operator _, Client.Antigravity, Some reference -> Ok (Receipt.Published reference)
+          | Operator _, Client.Antigravity, None -> Ok Receipt.Unselected
+          | Operator _, (Codex | Claude | Muse), (None | Some _) ->
+            Client.publish ~workspace:base_path ~integration_id ~cli_path home
+            |> Result.map (fun reference -> Receipt.Published reference)
+          | Person _, (Client.Antigravity | Codex | Claude | Muse), (None | Some _) -> Ok Receipt.Unselected in
         let receipt = { Receipt.login_id = Session.id session; integration_id;
-          account_ref = reference; status = Receipt.Running } in
+          account; status = Receipt.Running } in
         let* () = Receipt.save ~workspace:base_path ~actor receipt
           |> Result.map_error (fun _ -> receipt_failure) in
         Ok (home, child_env, receipt) in
@@ -180,16 +182,16 @@ let start ~owner ~base_path ~body request reqd =
           (* A cancelled CLI may already have saved its selected credential. Only
              Antigravity needs capture: native homes were published before spawn.
              Capturing here makes no successful-login or invocation claim. *)
-          let account_ref = match client with
-            | Client.Codex | Claude | Muse -> !receipt.account_ref
+          let account = match client with
+            | Client.Codex | Claude | Muse -> !receipt.account
             | Antigravity ->
               (match observe () with
-               | Error _ -> !receipt.account_ref
+               | Error _ -> !receipt.account
                | Ok _ ->
                  match Client.publish ~workspace:base_path ~integration_id ~cli_path home with
-                 | Ok reference -> Some reference
-                 | Error _ -> !receipt.account_ref) in
-          save { !receipt with account_ref; status } in
+                 | Ok reference -> Receipt.Published reference
+                 | Error _ -> !receipt.account) in
+          save { !receipt with account; status } in
         (* The official client rewrites its credential file however the login
            ends, a cancelled one included, and the models panes draw the
            account emails those files hold. *)
@@ -214,10 +216,10 @@ let start ~owner ~base_path ~body request reqd =
                     status, Session.error_message error) in
                 let* observed = observe () |> Result.map_error (fun _ ->
                   Receipt.Failed, "The official client did not confirm the selected account. Retry login or verify the account.") in
-                let* account_ref = finish owner ~base_path ~integration_id ~cli_path
+                let* account = finish owner ~base_path ~integration_id ~cli_path
                     ~login_id:(Session.id session) home
                   |> Result.map_error (fun message -> Receipt.Failed, message) in
-                save { !receipt with account_ref; status = Receipt.Complete observed }
+                save { !receipt with account; status = Receipt.Complete observed }
                 |> Result.map_error (fun message -> Receipt.Failed, message))
             with Eio.Cancel.Cancelled _ as exn ->
               Eio.Cancel.protect (fun () ->

@@ -832,7 +832,6 @@ let reconcile_owner =
     ~before_terminalization:(fun () -> ())
 ;;
 
-let report_owner = Reconciler.report_owner
 let report_is_ready = Reconciler.report_is_ready
 let report_to_yojson = Reconciler.report_to_yojson
 

@@ -20,310 +20,84 @@ let gemini_url ~(config : Provider_config.t) ~stream =
   if stream then base ^ "?alt=sse" else base
 ;;
 
-(* --- gemini_url tests --- *)
+(* --- gemini_url tests ---
+
+   [gemini_url] reads [base_url] and [model_id] only, so each test takes the
+   rest of its config from [Provider_config.make]. *)
 
 let%test "gemini_url sync no api_key" =
-  let config : Provider_config.t =
-    { kind = Provider_config.Gemini
-    ; provider_id = None
-    ; model_id = "gemini-3.7-flash"
-    ; base_url = "https://gen.googleapis.com/v1beta"
-    ; credential_source = Provider_config.Static_credential
-    ; auth_scheme = Provider_config.Provider_default
-    ; api_key = Secret.empty
-    ; request_path = ""
-    ; headers = []
-    ; system_prompt = None
-    ; temperature = None
-    ; max_tokens = Some 1024
-    ; max_context = None
-    ; top_p = None
-    ; top_k = None
-    ; min_p = None
-    ; enable_thinking = None
-    ; preserve_thinking = None
-    ; reasoning_effort = None
-    ; reasoning_uncontrolled = false
-    ; tool_stream = false
-    ; tool_choice = None
-    ; disable_parallel_tool_use = false
-    ; response_format = Types.Off
-    ; cache_system_prompt = false
-    ; system_prompt_cache_prefix = None
-    ; cache_extended_ttl = false
-    ; model_capabilities_override = None
-    ; model_anthropic_thinking_control_override = None
-    ; request_policy_snapshot = None
-    ; keep_alive = None
-    ; return_progress = false
-    ; internal_model_rotation_count = None
-    ; num_ctx = None
-    ; seed = None
-    ; previous_response_id = None
-    ; connect_timeout_s = None
-    ; max_concurrent_requests = None
-    ; admission_priority_run_limit = None
-    ; admission_class = Admission_class.Standard
-    ; repeat_penalty = None
-    ; repeat_last_n = None
-    }
+  let config =
+    Provider_config.make
+      ~kind:Provider_config.Gemini
+      ~model_id:"gemini-3.7-flash"
+      ~base_url:"https://gen.googleapis.com/v1beta"
+      ()
   in
-  let url = gemini_url ~config ~stream:false in
-  url = "https://gen.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
+  gemini_url ~config ~stream:false
+  = "https://gen.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
 ;;
 
 let%test "gemini_url sync with api_key" =
-  let config : Provider_config.t =
-    { kind = Gemini
-    ; provider_id = None
-    ; model_id = "gemini-3.7-flash"
-    ; base_url = "https://gen.googleapis.com/v1beta"
-    ; credential_source = Provider_config.Static_credential
-    ; auth_scheme = Provider_config.Provider_default
-    ; api_key = Secret.of_string "mykey"
-    ; request_path = ""
-    ; headers = []
-    ; system_prompt = None
-    ; temperature = None
-    ; max_tokens = Some 1024
-    ; max_context = None
-    ; top_p = None
-    ; top_k = None
-    ; min_p = None
-    ; enable_thinking = None
-    ; preserve_thinking = None
-    ; reasoning_effort = None
-    ; reasoning_uncontrolled = false
-    ; tool_stream = false
-    ; tool_choice = None
-    ; disable_parallel_tool_use = false
-    ; response_format = Types.Off
-    ; cache_system_prompt = false
-    ; system_prompt_cache_prefix = None
-    ; cache_extended_ttl = false
-    ; model_capabilities_override = None
-    ; model_anthropic_thinking_control_override = None
-    ; request_policy_snapshot = None
-    ; keep_alive = None
-    ; return_progress = false
-    ; internal_model_rotation_count = None
-    ; num_ctx = None
-    ; seed = None
-    ; previous_response_id = None
-    ; connect_timeout_s = None
-    ; max_concurrent_requests = None
-    ; admission_priority_run_limit = None
-    ; admission_class = Admission_class.Standard
-    ; repeat_penalty = None
-    ; repeat_last_n = None
-    }
+  let config =
+    Provider_config.make
+      ~kind:Provider_config.Gemini
+      ~model_id:"gemini-3.7-flash"
+      ~base_url:"https://gen.googleapis.com/v1beta"
+      ~api_key:"mykey"
+      ()
   in
-  let url = gemini_url ~config ~stream:false in
-  url = "https://gen.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
+  gemini_url ~config ~stream:false
+  = "https://gen.googleapis.com/v1beta/models/gemini-3.7-flash:generateContent"
 ;;
 
 let%test "gemini_url stream with api_key" =
-  let config : Provider_config.t =
-    { kind = Gemini
-    ; provider_id = None
-    ; model_id = "gemini-3.7-flash"
-    ; base_url = "https://gen.googleapis.com/v1beta"
-    ; credential_source = Provider_config.Static_credential
-    ; auth_scheme = Provider_config.Provider_default
-    ; api_key = Secret.of_string "mykey"
-    ; request_path = ""
-    ; headers = []
-    ; system_prompt = None
-    ; temperature = None
-    ; max_tokens = Some 1024
-    ; max_context = None
-    ; top_p = None
-    ; top_k = None
-    ; min_p = None
-    ; enable_thinking = None
-    ; preserve_thinking = None
-    ; reasoning_effort = None
-    ; reasoning_uncontrolled = false
-    ; tool_stream = false
-    ; tool_choice = None
-    ; disable_parallel_tool_use = false
-    ; response_format = Types.Off
-    ; cache_system_prompt = false
-    ; system_prompt_cache_prefix = None
-    ; cache_extended_ttl = false
-    ; model_capabilities_override = None
-    ; model_anthropic_thinking_control_override = None
-    ; request_policy_snapshot = None
-    ; keep_alive = None
-    ; return_progress = false
-    ; internal_model_rotation_count = None
-    ; num_ctx = None
-    ; seed = None
-    ; previous_response_id = None
-    ; connect_timeout_s = None
-    ; max_concurrent_requests = None
-    ; admission_priority_run_limit = None
-    ; admission_class = Admission_class.Standard
-    ; repeat_penalty = None
-    ; repeat_last_n = None
-    }
+  let config =
+    Provider_config.make
+      ~kind:Provider_config.Gemini
+      ~model_id:"gemini-3.7-flash"
+      ~base_url:"https://gen.googleapis.com/v1beta"
+      ~api_key:"mykey"
+      ()
   in
-  let url = gemini_url ~config ~stream:true in
-  url
+  gemini_url ~config ~stream:true
   = "https://gen.googleapis.com/v1beta/models/gemini-3.7-flash:streamGenerateContent?alt=sse"
 ;;
 
 let%test "gemini_url stream no api_key" =
-  let config : Provider_config.t =
-    { kind = Gemini
-    ; provider_id = None
-    ; model_id = "gemini-3.7-flash"
-    ; base_url = "https://gen.googleapis.com/v1beta"
-    ; credential_source = Provider_config.Static_credential
-    ; auth_scheme = Provider_config.Provider_default
-    ; api_key = Secret.empty
-    ; request_path = ""
-    ; headers = []
-    ; system_prompt = None
-    ; temperature = None
-    ; max_tokens = Some 1024
-    ; max_context = None
-    ; top_p = None
-    ; top_k = None
-    ; min_p = None
-    ; enable_thinking = None
-    ; preserve_thinking = None
-    ; reasoning_effort = None
-    ; reasoning_uncontrolled = false
-    ; tool_stream = false
-    ; tool_choice = None
-    ; disable_parallel_tool_use = false
-    ; response_format = Types.Off
-    ; cache_system_prompt = false
-    ; system_prompt_cache_prefix = None
-    ; cache_extended_ttl = false
-    ; model_capabilities_override = None
-    ; model_anthropic_thinking_control_override = None
-    ; request_policy_snapshot = None
-    ; keep_alive = None
-    ; return_progress = false
-    ; internal_model_rotation_count = None
-    ; num_ctx = None
-    ; seed = None
-    ; previous_response_id = None
-    ; connect_timeout_s = None
-    ; max_concurrent_requests = None
-    ; admission_priority_run_limit = None
-    ; admission_class = Admission_class.Standard
-    ; repeat_penalty = None
-    ; repeat_last_n = None
-    }
+  let config =
+    Provider_config.make
+      ~kind:Provider_config.Gemini
+      ~model_id:"gemini-3.7-flash"
+      ~base_url:"https://gen.googleapis.com/v1beta"
+      ()
   in
-  let url = gemini_url ~config ~stream:true in
-  url
+  gemini_url ~config ~stream:true
   = "https://gen.googleapis.com/v1beta/models/gemini-3.7-flash:streamGenerateContent?alt=sse"
 ;;
 
 let%test "gemini_url never leaks api_key even when set" =
-  let config : Provider_config.t =
-    { kind = Gemini
-    ; provider_id = None
-    ; model_id = "gemini-3.7-flash"
-    ; base_url = "https://gen.googleapis.com/v1beta"
-    ; credential_source = Provider_config.Static_credential
-    ; auth_scheme = Provider_config.Provider_default
-    ; api_key = Secret.of_string "mykey"
-    ; request_path = ""
-    ; headers = []
-    ; system_prompt = None
-    ; temperature = None
-    ; max_tokens = Some 1024
-    ; max_context = None
-    ; top_p = None
-    ; top_k = None
-    ; min_p = None
-    ; enable_thinking = None
-    ; preserve_thinking = None
-    ; reasoning_effort = None
-    ; reasoning_uncontrolled = false
-    ; tool_stream = false
-    ; tool_choice = None
-    ; disable_parallel_tool_use = false
-    ; response_format = Types.Off
-    ; cache_system_prompt = false
-    ; system_prompt_cache_prefix = None
-    ; cache_extended_ttl = false
-    ; model_capabilities_override = None
-    ; model_anthropic_thinking_control_override = None
-    ; request_policy_snapshot = None
-    ; keep_alive = None
-    ; return_progress = false
-    ; internal_model_rotation_count = None
-    ; num_ctx = None
-    ; seed = None
-    ; previous_response_id = None
-    ; connect_timeout_s = None
-    ; max_concurrent_requests = None
-    ; admission_priority_run_limit = None
-    ; admission_class = Admission_class.Standard
-    ; repeat_penalty = None
-    ; repeat_last_n = None
-    }
+  let config =
+    Provider_config.make
+      ~kind:Provider_config.Gemini
+      ~model_id:"gemini-3.7-flash"
+      ~base_url:"https://gen.googleapis.com/v1beta"
+      ~api_key:"mykey"
+      ()
   in
-  let url_sync = gemini_url ~config ~stream:false in
-  let url_stream = gemini_url ~config ~stream:true in
-  (not
-     (Agent_core_strings.contains_substring ~haystack:url_sync ~needle:"mykey"))
-  && not
-       (Agent_core_strings.contains_substring ~haystack:url_stream ~needle:"mykey")
+  let leaks url =
+    Agent_core_strings.contains_substring ~haystack:url ~needle:"mykey"
+  in
+  (not (leaks (gemini_url ~config ~stream:false)))
+  && not (leaks (gemini_url ~config ~stream:true))
 ;;
 
 let%test "gemini_url empty base_url no trailing slash" =
-  let config : Provider_config.t =
-    { kind = Gemini
-    ; provider_id = None
-    ; model_id = "gemini-3.7-flash"
-    ; base_url = ""
-    ; credential_source = Provider_config.Static_credential
-    ; auth_scheme = Provider_config.Provider_default
-    ; api_key = Secret.empty
-    ; request_path = ""
-    ; headers = []
-    ; system_prompt = None
-    ; temperature = None
-    ; max_tokens = Some 1024
-    ; max_context = None
-    ; top_p = None
-    ; top_k = None
-    ; min_p = None
-    ; enable_thinking = None
-    ; preserve_thinking = None
-    ; reasoning_effort = None
-    ; reasoning_uncontrolled = false
-    ; tool_stream = false
-    ; tool_choice = None
-    ; disable_parallel_tool_use = false
-    ; response_format = Types.Off
-    ; cache_system_prompt = false
-    ; system_prompt_cache_prefix = None
-    ; cache_extended_ttl = false
-    ; model_capabilities_override = None
-    ; model_anthropic_thinking_control_override = None
-    ; request_policy_snapshot = None
-    ; keep_alive = None
-    ; return_progress = false
-    ; internal_model_rotation_count = None
-    ; num_ctx = None
-    ; seed = None
-    ; previous_response_id = None
-    ; connect_timeout_s = None
-    ; max_concurrent_requests = None
-    ; admission_priority_run_limit = None
-    ; admission_class = Admission_class.Standard
-    ; repeat_penalty = None
-    ; repeat_last_n = None
-    }
+  let config =
+    Provider_config.make
+      ~kind:Provider_config.Gemini
+      ~model_id:"gemini-3.7-flash"
+      ~base_url:""
+      ()
   in
-  let url = gemini_url ~config ~stream:false in
-  url = "/models/gemini-3.7-flash:generateContent"
+  gemini_url ~config ~stream:false = "/models/gemini-3.7-flash:generateContent"
 ;;

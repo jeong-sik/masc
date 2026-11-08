@@ -10537,6 +10537,9 @@ type state = {
      held, oldest first. Each is read as its own row and merged into that
      answer, so one Keeper's push reads one row, not the fleet (RFC-0487). *)
   mutable memory_health_rows_owed: string list;
+  (* The workspace memory world the Memory header's world line draws, and
+     the time its next read may start (RFC-0511 D2c). *)
+  mutable memory_world: Masc_tui_memory_world.t;
   mutable memory_health_scroll: int;
   mutable memory_health_cursor: int;
   mutable memory_unit: Masc_tui_memory_usage.display_unit;
@@ -14702,6 +14705,7 @@ let suspend_workspace_readings state =
   state.memory_health_inflight <- false;
   state.memory_health_owed <- Masc_tui_owed_read.settled;
   state.memory_health_rows_owed <- [];
+  state.memory_world <- Masc_tui_memory_world.suspend state.memory_world;
   suspend_runtime_catalog_read state;
   state.runtime_config_read <- `Idle;
   state.runtime_config_owed <- Masc_tui_owed_read.settled;
@@ -20258,6 +20262,7 @@ let create_state
   memory_health_inflight = false;
   memory_health_owed = Masc_tui_owed_read.settled;
   memory_health_rows_owed = [];
+  memory_world = Masc_tui_memory_world.initial;
   memory_health_scroll = 0;
   memory_health_cursor = 0;
   memory_unit = Masc_tui_memory_usage.Tokens;

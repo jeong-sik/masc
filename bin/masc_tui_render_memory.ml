@@ -902,6 +902,17 @@ let memory_fact_detail_lines ~cols row =
   let parts = memory_fact_detail_parts ~cols row in
   fact_detail_prefix parts (fact_detail_line_count parts)
 
+(* The world line: what the workspace curator's ledger and briefing say. The
+   words come from {!Masc_tui_memory_world}, which the key sheet reads too. A
+   world not read yet, or whose read failed, draws the unknown mark and no
+   count. [labelled] is the fleet header's own wrapper, so the row folds under
+   its label at the frame's width as the others do. *)
+let memory_world_rows ~ko ~labelled (state : state) =
+  labelled
+    (Masc_tui_memory_world.label ~ko)
+    (Masc_tui_memory_world.clauses ~ko
+       (Masc_tui_memory_world.reading state.memory_world))
+
 (* The fleet header above the sort row: the Total, Ordinary, Source and
    Librarian readings, each wrapped to the frame. Its row count depends on the
    width, so the list's height is worked out from these same rows
@@ -1037,7 +1048,7 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
                 snapshot.mhs_total_vision_ingest_errors
             ])
   in
-  total @ readings
+  total @ readings @ memory_world_rows ~ko ~labelled state
 
 
 (* Both counts are the length of what this module draws: the fleet header

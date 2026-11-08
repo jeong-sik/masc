@@ -34,3 +34,6 @@ let legend =
   ; (source_only_glyph, "source facts only")
   ; (failed_glyph, "starving, or the read failed")
   ]
+  (* The words of the header's world line follow the marks, its `?` among them:
+     they are what a reader of that line would look up. *)
+  @ Masc_tui_memory_world.legend

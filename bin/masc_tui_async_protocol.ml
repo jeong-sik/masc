@@ -634,6 +634,12 @@ type memory_msg =
   | Memory_loaded of memory_health_read
   | Memory_input_loaded of string Masc_tui_fetched.request
       * (Masc_tui_memory_usage.t, string) result
+  (* The Memory screen's world read. It carries the request it answers: the
+     workspace can change while the read is in flight, and a late answer for
+     the old one must be dropped, not drawn as the new one's. *)
+  | Memory_world_loaded of
+      unit Masc_tui_fetched.request
+      * (Masc.Tui_decode_workspace_memory.inventory, string) result
   (* Carries the request it answers: the browser can be closed or pointed at
      another keeper while a load is in flight, and a late answer for somebody
      else must be dropped, not filed under whoever is open. The answer is the
@@ -1123,6 +1129,7 @@ let rec workspace_message_is_read = function
   | Workspace_msg (Workspace_activity_loaded _)
   | Memory_msg (Memory_loaded _
   | Memory_input_loaded _
+  | Memory_world_loaded _
   | Memory_facts_loaded _)
   | Repository_msg (Repository_changes_loaded _
   | Repository_changes_diff_loaded _)
@@ -1325,7 +1332,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Fusion_launch_options_loaded _ | Fusion_launched _) | Memory_msg (Memory_recall_standing_loaded _)
   | Repository_msg (Repositories_loaded _)
   | Workspace_msg (Workspace_activity_loaded _) | Memory_msg (Memory_loaded _ | Memory_input_loaded _
-  | Memory_facts_loaded _) | Repository_msg (Repository_changes_loaded _ | Repository_changes_diff_loaded _)
+  | Memory_world_loaded _ | Memory_facts_loaded _) | Repository_msg (Repository_changes_loaded _ | Repository_changes_diff_loaded _)
   | File_changes_loaded _ | Keeper_msg (Keeper_chat_file_changes_loaded _) | Git_diff_loaded _
   | Browser_msg (Browser_history_list_loaded _ | Browser_history_page_loaded _
   | Browser_lane_clients_loaded _ | Browser_lane_loaded _
@@ -1485,7 +1492,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _))
     | Memory_msg (Memory_recall_standing_loaded (_, _))
     | Repository_msg (Repositories_loaded _) | Workspace_msg (Workspace_activity_loaded (_, _)) | Memory_msg (Memory_loaded _
-    | Memory_input_loaded (_, _) | Memory_facts_loaded (_, _))
+    | Memory_input_loaded (_, _) | Memory_world_loaded (_, _) | Memory_facts_loaded (_, _))
     | Repository_msg (Repository_changes_loaded (_, _) | Repository_changes_diff_loaded (_, _))
     | File_changes_loaded (_, _) | Keeper_msg (Keeper_chat_file_changes_loaded (_, _, _))
     | Git_diff_loaded (_, _) | Browser_msg (Browser_history_list_loaded (_, _)
@@ -1631,7 +1638,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Fusion_launch_options_loaded (_, _) | Fusion_launched (_, _))
   | Memory_msg (Memory_recall_standing_loaded (_, _))
   | Repository_msg (Repositories_loaded _) | Workspace_msg (Workspace_activity_loaded (_, _)) | Memory_msg (Memory_loaded _
-  | Memory_input_loaded (_, _) | Memory_facts_loaded (_, _))
+  | Memory_input_loaded (_, _) | Memory_world_loaded (_, _) | Memory_facts_loaded (_, _))
   | Repository_msg (Repository_changes_loaded (_, _) | Repository_changes_diff_loaded (_, _))
   | File_changes_loaded (_, _) | Keeper_msg (Keeper_chat_file_changes_loaded (_, _, _))
   | Git_diff_loaded (_, _) | Browser_msg (Browser_history_list_loaded (_, _)

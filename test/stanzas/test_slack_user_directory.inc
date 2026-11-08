@@ -3,4 +3,4 @@
 (test
  (name test_slack_user_directory)
  (modules test_slack_user_directory)
- (libraries alcotest yojson masc.gate))
+ (libraries alcotest masc.gate))

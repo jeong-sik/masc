@@ -3,4 +3,4 @@
 (test
  (name test_slack_gateway_state)
  (modules test_slack_gateway_state)
- (libraries alcotest yojson masc.gate))
+ (libraries alcotest masc.gate))

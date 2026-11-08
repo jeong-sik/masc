@@ -187,6 +187,54 @@ let test_seed_from_decision_log_read_error () =
          (seeded "unreadable-rotated" = None))
 ;;
 
+let test_seed_rotation_and_capacity_order () =
+  Pulse.reset_for_tests ();
+  let base_dir = Filename.temp_dir "keeper-turn-pulse-rot" "" in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let primary_path =
+         Masc.Keeper_types_support.keeper_decision_log_path config "active-keeper"
+       in
+       let rotated_path = primary_path ^ ".1" in
+       let now = 10_000.0 in
+       (* Rotated file has 15 older entries: 1000.0 .. 1014.0 *)
+       let make_line ts =
+         Printf.sprintf {|{"event":"turn","ts_unix":%.1f,"outcome":"success"}|} ts
+       in
+       Out_channel.with_open_text rotated_path (fun oc ->
+         for i = 0 to 14 do
+           output_string oc (make_line (1000.0 +. float_of_int i) ^ "\n")
+         done);
+       (* Primary file has 15 newer entries: 1015.0 .. 1029.0 *)
+       Out_channel.with_open_text primary_path (fun oc ->
+         for i = 15 to 29 do
+           output_string oc (make_line (1000.0 +. float_of_int i) ^ "\n")
+         done);
+       Pulse.seed_from_decision_log ~now ~config ~keeper_name:"active-keeper" ();
+       match Pulse.get ~base_path:config.Masc.Workspace.base_path ~keeper_name:"active-keeper" with
+       | None -> Alcotest.fail "expected seeded pulse"
+       | Some pulse ->
+         Alcotest.(check bool) "pulse is marked truncated" true pulse.truncated;
+         Alcotest.(check int) "capacity is 24" 24 (List.length pulse.samples);
+         (* First sample must be the newest entry: 1029.0 *)
+         let newest = List.hd pulse.samples in
+         Alcotest.(check (float 0.001)) "newest sample is preserved" 1029.0 newest.at;
+         (* Last sample in 24 must be 1006.0 (surviving older entry) *)
+         let last = List.nth pulse.samples 23 in
+         Alcotest.(check (float 0.001)) "oldest surviving sample" 1006.0 last.at;
+         (* Samples must be strictly descending in time (newest-first) *)
+         let is_descending =
+           let rec check = function
+             | [] | [ _ ] -> true
+             | a :: (b :: _ as rest) -> a.Pulse.at > b.Pulse.at && check rest
+           in
+           check pulse.samples
+         in
+         Alcotest.(check bool) "samples stored newest-first" true is_descending)
+;;
+
 let () =
   Alcotest.run
     "keeper_turn_pulse"
@@ -201,6 +249,7 @@ let () =
             "seed from decision log read error"
             `Quick
             test_seed_from_decision_log_read_error
+        ; Alcotest.test_case "seed rotation and capacity order" `Quick test_seed_rotation_and_capacity_order
         ; Alcotest.test_case "outcome string roundtrip" `Quick test_outcome_string_roundtrip
         ] )
     ]

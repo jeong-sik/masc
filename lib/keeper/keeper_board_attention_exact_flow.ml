@@ -911,8 +911,7 @@ let execute_current
              (match flow with
               | Ok success ->
                 observed_usage :=
-                  (Exact_output.flow_success_output success.transport_success).usage
-                  |> Option.map Exact_lane_run_registry.usage_of_api_usage;
+                  (Exact_output.flow_success_output success.transport_success).usage;
                 Ok success.accepted
               | Error (Exact_output.Flow_execution_terminal { cause; prior_rejections }) ->
                 let terminal = terminal_of_flow_error ~callback_error_to_string cause in

@@ -779,7 +779,6 @@ export function normalizeKeepers(raw: unknown): Keeper[] {
           : decodeKeeperApprovalQueueState(row.approval_queue_state)
             ?? gateObservationErrorState('Keeper approval queue state is not a current closed variant'),
         last_proactive_preview: asString(row.last_proactive_preview) ?? null,
-        runtime_warning_ctx_ratio: asNumber(row.runtime_warning_ctx_ratio) ?? null,
         context_ratio: contextRatio,
         context_tokens: topContextMeasured ? asNumber(row.context_tokens) ?? null : null,
         context_max: topContextMeasured ? asNumber(row.context_max) ?? null : null,

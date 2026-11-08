@@ -1454,7 +1454,6 @@ export interface Keeper {
   last_proactive_reason?: string | null
   last_proactive_preview?: string | null
   drift_count_total?: number
-  runtime_warning_ctx_ratio?: number | null
   trust?: KeeperTrustSummary | null
   turn_count?: number
   total_turns?: number

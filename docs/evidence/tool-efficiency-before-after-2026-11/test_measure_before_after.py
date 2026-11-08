@@ -94,6 +94,27 @@ class WindowTest(unittest.TestCase):
         self.assertEqual(skipped.bad_lines, 3)
 
 
+class TurnTest(unittest.TestCase):
+    def turn_of(self, tool: str = "Execute", **fields: object) -> str | None:
+        line = {"ts": 7, "record_kind": "tool_call", "tool": tool, **fields}
+        call = before_after.parse_call(json.dumps(line).encode("utf-8"), 0, 1e12, before_after.Skipped())
+        return None if call is None else call.turn
+
+    def test_the_turn_is_the_trace_and_the_keeper_turn_number(self) -> None:
+        self.assertEqual(self.turn_of(trace_id="tr-1", keeper_turn_id=7), "tr-1:7")
+
+    def test_the_same_number_in_another_trace_is_another_turn(self) -> None:
+        self.assertNotEqual(self.turn_of(trace_id="tr-1", keeper_turn_id=7), self.turn_of(trace_id="tr-2", keeper_turn_id=7))
+
+    def test_a_row_without_a_whole_turn_number_has_no_turn(self) -> None:
+        for number in (None, True, "7", 7.5):
+            self.assertEqual(self.turn_of(trace_id="tr-1", keeper_turn_id=number), "", number)
+        self.assertEqual(self.turn_of(trace_id="tr-1"), "")
+
+    def test_only_execute_rows_keep_a_turn(self) -> None:
+        self.assertEqual(self.turn_of(tool="Read", trace_id="tr-1", keeper_turn_id=7), "")
+
+
 class SizedTest(unittest.TestCase):
     def test_the_median_the_maximum_and_the_calls_at_or_over_the_cap(self) -> None:
         sizes = [100, 102_400, 200_000]

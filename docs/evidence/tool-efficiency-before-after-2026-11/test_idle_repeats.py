@@ -14,6 +14,7 @@ import sys
 import tempfile
 import unittest
 from collections import Counter
+from typing import cast
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 
@@ -37,6 +38,7 @@ def execute(
     held_s: float = 1.0,
     result_bytes: int = 10,
     run_ms: int = 5,
+    turn: str = "",
 ) -> before_after.Call:
     return before_after.Call(
         ts=end,
@@ -48,6 +50,7 @@ def execute(
         input_text=json.dumps({"command": command}),
         output_text=payload(answer, run_ms),
         sandbox="remote_ssh",
+        turn=turn,
     )
 
 
@@ -133,7 +136,7 @@ class ScanTest(unittest.TestCase):
 
     def test_a_repeat_records_its_hold_its_bytes_and_the_first_head(self) -> None:
         found = repeats.scan([execute(100, held_s=2.0), execute(120, held_s=3.5, result_bytes=77)], GAP)
-        self.assertEqual(found.repeats, [repeats.Repeat("a", "gh api pulls", 3.5, 77, 120)])
+        self.assertEqual(found.repeats, [repeats.Repeat("a", "gh api pulls", 3.5, 77, 120, False)])
 
     def test_the_run_time_of_the_command_does_not_hide_a_repeat(self) -> None:
         found = repeats.scan([execute(100, run_ms=5), execute(120, run_ms=7000)], GAP)
@@ -143,6 +146,37 @@ class ScanTest(unittest.TestCase):
         plain = before_after.Call(100, "Execute", "a", 1000.0, 1, True, "{}", "boom", "remote_ssh")
         again = before_after.Call(110, "Execute", "a", 1000.0, 1, True, "{}", "boom", "remote_ssh")
         self.assertEqual(len(repeats.scan([plain, again], GAP).repeats), 1)
+
+
+class SameTurnTest(unittest.TestCase):
+    def flags(self, calls: list[before_after.Call]) -> list[bool]:
+        return [r.same_turn for r in repeats.scan(calls, GAP).repeats]
+
+    def test_a_repeat_in_the_turn_of_the_previous_run_is_in_the_same_turn(self) -> None:
+        self.assertEqual(self.flags([execute(100, turn="t:1"), execute(120, turn="t:1")]), [True])
+
+    def test_a_repeat_in_another_turn_is_not(self) -> None:
+        self.assertEqual(self.flags([execute(100, turn="t:1"), execute(120, turn="t:2")]), [False])
+
+    def test_a_row_without_a_turn_is_never_in_the_same_turn(self) -> None:
+        self.assertEqual(self.flags([execute(100), execute(120)]), [False])
+        self.assertEqual(self.flags([execute(100, turn="t:1"), execute(120)]), [False])
+
+    def test_the_turn_is_compared_with_the_previous_run_and_not_with_the_first(self) -> None:
+        calls = [execute(100, turn="t:1"), execute(110, turn="t:2"), execute(120, turn="t:2")]
+        self.assertEqual(self.flags(calls), [False, True])
+
+    def test_the_counts_are_per_keeper_and_in_total(self) -> None:
+        calls = [
+            execute(100, turn="t:1"),
+            execute(110, turn="t:1"),
+            execute(120, turn="t:2"),
+            execute(100, keeper="b", turn="t:9"),
+            execute(110, keeper="b", turn="t:8"),
+        ]
+        summary = repeats.summarize(repeats.scan(calls, GAP), {})
+        listed = {str(row["keeper"]): row["repeat_same_turn_calls"] for row in cast("list[dict[str, object]]", summary["top_keepers"])}
+        self.assertEqual((cast("dict[str, object]", summary["execute"])["repeat_same_turn_calls"], listed), (1, {"a": 1, "b": 0}))
 
 
 class DateCallTest(unittest.TestCase):
@@ -311,7 +345,7 @@ class MeasureTest(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertEqual(
             result["execute"],
-            {"calls": 14, "repeat_calls": 11, "repeat_share": round(11 / 14, 4), "repeat_held_hours": round(11 / 3600, 3), "repeat_result_mib": 11.0, "date_calls": 0, "date_call_share": 0.0, "keepers_with_repeats": 1},
+            {"calls": 14, "repeat_calls": 11, "repeat_share": round(11 / 14, 4), "repeat_same_turn_calls": 0, "repeat_held_hours": round(11 / 3600, 3), "repeat_result_mib": 11.0, "date_calls": 0, "date_call_share": 0.0, "keepers_with_repeats": 1},
         )
         self.assertEqual(result["model_requests"]["requests"], 14)
         self.assertEqual(result["model_requests"]["input_tokens"], 12 * 300 + 2 * 1_200)

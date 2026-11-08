@@ -84,7 +84,7 @@ UTC = datetime.timezone.utc
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class Call:
-    """One ledger line. `input_text` and `output_text` are kept only for Execute and failed calls."""
+    """One ledger line. `input_text` and `output_text` are kept only for Execute and failed calls, `turn` only for Execute."""
 
     ts: float
     tool: str
@@ -95,6 +95,7 @@ class Call:
     input_text: str
     output_text: str
     sandbox: str
+    turn: str = ""
 
 
 @dataclasses.dataclass(slots=True)
@@ -126,6 +127,18 @@ def number_of(value: object) -> float | None:
         except ValueError:
             return None
     return None
+
+
+def turn_of(fields: dict[str, object]) -> str:
+    """The turn a ledger line belongs to, as its trace and its Keeper turn number, or "" when the line has no turn number.
+
+    The turn number alone can come back after a restart, so the trace goes in front of it.
+    """
+    number = fields.get("keeper_turn_id")
+    if isinstance(number, bool) or not isinstance(number, int):
+        return ""
+    trace = fields.get("trace_id")
+    return f"{trace if isinstance(trace, str) else ''}:{number}"
 
 
 def parse_call(raw: bytes, since: float, until: float, skipped: Skipped) -> Call | None:
@@ -165,6 +178,7 @@ def parse_call(raw: bytes, since: float, until: float, skipped: Skipped) -> Call
         input_text=text_of(fields.get("input")) if keep_text else "",
         output_text=text_of(fields.get("output")) if keep_text else "",
         sandbox=profile if isinstance(profile, str) and profile else UNKNOWN_SANDBOX,
+        turn=turn_of(fields) if tool == EXECUTE else "",
     )
 
 

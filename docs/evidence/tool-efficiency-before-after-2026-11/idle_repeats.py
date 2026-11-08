@@ -20,6 +20,9 @@ Definitions:
   never a repeat. A failed call that fails the same way again is a repeat too.
 - streak: the runs of one command by one Keeper that follow each other inside the gap with the same
   answer. A streak of 12 is one first run and 11 repeats. A changed answer or a longer gap ends it.
+- same turn: a repeat whose previous run belongs to the same turn. A turn is the pair of the row's
+  `trace_id` and `keeper_turn_id`, and a row without a `keeper_turn_id` is never in the same turn as
+  another. `repeat_same_turn_calls` counts these repeats for every Keeper and for each listed Keeper.
 - model request: a `usage` event of a turn trace, the event `agent_core_stream_message_delta`, with
   `ts` in [since, end). `repeats_per_model_request` is a ratio and not a share: one request can ask
   for several calls, and a request can end with no call.
@@ -82,6 +85,7 @@ class Run:
     answer: str
     streak: int
     head: str
+    turn: str
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -91,6 +95,7 @@ class Repeat:
     held_s: float
     result_bytes: int
     ts: float
+    same_turn: bool
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -194,12 +199,13 @@ def scan(calls: Iterable[ledger.Call], gap_s: float) -> Scan:
         answer = answer_digest(call.output_text)
         previous = last.get(key)
         if previous is not None and call.ts - previous.ts <= gap_s and previous.answer == answer:
-            repeats.append(Repeat(call.keeper, previous.head, call.duration_ms / 1000, call.result_bytes, call.ts))
-            last[key] = Run(call.ts, answer, previous.streak + 1, previous.head)
+            same_turn = call.turn != "" and call.turn == previous.turn
+            repeats.append(Repeat(call.keeper, previous.head, call.duration_ms / 1000, call.result_bytes, call.ts, same_turn))
+            last[key] = Run(call.ts, answer, previous.streak + 1, previous.head, call.turn)
             continue
         if previous is not None and previous.streak > 1:
             streaks[call.keeper].append(previous.streak)
-        last[key] = Run(call.ts, answer, 1, command_head(call.input_text))
+        last[key] = Run(call.ts, answer, 1, command_head(call.input_text), call.turn)
     for (keeper, _), run in last.items():
         if run.streak > 1:
             streaks[keeper].append(run.streak)
@@ -290,6 +296,7 @@ def keeper_summary(keeper: str, found: Scan, tokens: dict[str, Tokens], all_inpu
         "execute_calls": found.executes[keeper],
         "repeat_calls": len(mine),
         "repeat_share": share(len(mine), found.executes[keeper]),
+        "repeat_same_turn_calls": sum(1 for r in mine if r.same_turn),
         "repeat_held_hours": hours(sum(r.held_s for r in mine)),
         "longest_streak": max(streaks, default=0),
         "streaks_of_10_or_more": sum(1 for length in streaks if length >= STREAK_MIN),
@@ -324,6 +331,7 @@ def summarize(found: Scan, tokens: dict[str, Tokens]) -> dict[str, object]:
             "calls": sum(found.executes.values()),
             "repeat_calls": len(found.repeats),
             "repeat_share": share(len(found.repeats), sum(found.executes.values())),
+            "repeat_same_turn_calls": sum(1 for r in found.repeats if r.same_turn),
             "repeat_held_hours": hours(sum(r.held_s for r in found.repeats)),
             "repeat_result_mib": round(sum(r.result_bytes for r in found.repeats) / BYTES_PER_MIB, MIB_DIGITS),
             "date_calls": sum(found.date_calls.values()),

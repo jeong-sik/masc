@@ -14,6 +14,7 @@ module Task_selection = Masc_tui_task_selection
 module Overview_tasks = Masc_tui_overview_tasks
 module Planning_detail = Masc_tui_planning_detail
 module Link = Masc_tui_link
+module Press = Masc_tui_press
 module Chart = Masc_tui_chart
 
 module Task_id_set = Set.Make (String)
@@ -28,9 +29,9 @@ let work_hub_navigation (state : state) ~cols =
     if Message_layout.display_width ("  " ^ requests ^ "  " ^ board)
        <= framed_inner_width cols
     then
-      pressable (Press_surface Approvals) requests ^ "  "
-      ^ pressable (Press_surface Board) board
-    else pressable (Press_surface Board) board
+      Press.pressable (Press.Press_surface Approvals) requests ^ "  "
+      ^ Press.pressable (Press.Press_surface Board) board
+    else Press.pressable (Press.Press_surface Board) board
   in
   "  " ^ Theme.recede () ^ links ^ Ansi.reset
 

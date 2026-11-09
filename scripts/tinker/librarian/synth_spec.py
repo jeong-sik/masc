@@ -276,13 +276,18 @@ class CandidateLabel:
 
 @dataclass(frozen=True, slots=True)
 class RequestLabel:
-    """`planted_stale` are the planted stale facts the answer drops. `duplicates` pairs a fact
-    with its planted duplicate; the answer keeps one of each pair and absorbs the other into it.
-    Both are empty when no candidate can support a Memory change."""
+    """`planted_stale` are the planted stale facts and `duplicates` pairs a fact with its planted
+    duplicate, whatever the candidates. The answer drops the stale facts and keeps one fact of each
+    pair, absorbing the other into it, only when a candidate can support a Memory change
+    (`supports_change`): MASC refuses any other change (`verify_support`)."""
 
     candidates: tuple[CandidateLabel, ...]
     planted_stale: frozenset[str]
     duplicates: tuple[tuple[str, str], ...]
+
+    @property
+    def supports_change(self) -> bool:
+        return any(can_support(c.outcome) for c in self.candidates)
 
 
 def can_support(outcome: Outcome) -> bool:
@@ -315,8 +320,6 @@ def candidate_label(candidate: Candidate, by_id: dict[str, MemoryFact]) -> Candi
 def labeled(facts: tuple[MemoryFact, ...], candidates: tuple[Candidate, ...]) -> RequestLabel:
     by_id = {f.memory_id: f for f in facts}
     labels = tuple(candidate_label(c, by_id) for c in candidates)
-    if not any(can_support(label.outcome) for label in labels):
-        return RequestLabel(labels, frozenset(), ())
     stale = frozenset(f.memory_id for f in facts if f.planted_stale)
     pairs = tuple((f.duplicate_of, f.memory_id) for f in facts if f.duplicate_of is not None)
     return RequestLabel(labels, stale, pairs)

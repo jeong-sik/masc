@@ -9,8 +9,10 @@
         --target base=thinkingmachines/Inkling-2-Small:peft:262144 --target A=tinker://... \
         --out artifacts/tinker/librarian/eval-<name>-real --budget 6
     uv run scripts/tinker/librarian/eval_admission.py run --set synth --requests <requests.jsonl> ...
+    uv run scripts/tinker/librarian/eval_admission.py run --provider glm --target glm=<model> \
+        --set synth --requests <requests.jsonl> --out <dir> --max-calls 300
     uv run scripts/tinker/librarian/eval_admission.py verdict --real <dir> --synth <dir> \
-        --drops <e_synth_audit.py drops --out> \
+        --drops <e_synth_audit.py drops --out> --merges <merge_cases.py --out> \
         --train A=artifacts/tinker/librarian/train-A --train B=artifacts/tinker/librarian/train-B
 
 `pass_lines.json` fixes the request, the sets, the baseline, the candidates and
@@ -21,9 +23,22 @@ baseline calls must leave next to the candidates' calls, which a call log from
 an earlier run cannot show. The request is the one MASC's exact lane sends: the
 admission prompt, then the schema instruction as the last user message.
 
+`run --template <librarian.md>` sends every prompt drawn with that file's
+template instead: an E-real prompt is read with the pinned template and drawn
+again from the same data, an E-synth prompt is drawn from its request. The
+summary records the sha256 of the template the prompts were drawn with, and
+`verdict` refuses a run drawn with another template than the pinned one.
+
+`run --provider glm` sends the same messages to Z.AI's GLM coding endpoint in
+the request MASC's GLM slot sends (`glm_chat`), so a prompt change can be
+measured on that model too. It sends no warm call, `--max-calls` caps its
+requests in place of `--budget`, and its rows cost nothing per token: the calls
+draw on the key's usage quota. The summary names the provider of the run.
+
 Definitions:
-- valid: HTTP 200, finish_reason "stop", and `admission_validator.validate`
-  accepts the content against the prompt, as MASC would.
+- valid: HTTP 200 with no provider error, finish_reason "stop", and
+  `admission_validator.validate` accepts the content against the prompt, as
+  MASC would.
 - E-real outcome agreement: candidates whose outcome equals the live answer's,
   over every candidate (an answer that is not valid agrees with nothing).
   Reported, not gated.
@@ -45,25 +60,33 @@ Definitions:
 - E-synth outcome accuracy: candidates whose outcome equals the label and whose
   `memory_claim` points where the label's kind needs it, over every candidate
   (an answer that is not valid is wrong). A new fact or a complement names a
-  claim the answer adds; a paraphrase names the existing claim it restates; a
-  correction names a claim that supersedes the label's target, and the target
-  is dropped.
+  claim the answer adds that is not another candidate's text; a paraphrase
+  names the existing claim it restates; a correction names such a claim that
+  supersedes the label's target, and the target is dropped.
 - E-synth drop precision: dropped IDs that are planted stale facts or label
   correction targets, over all dropped IDs of valid answers (1.0 with no drops).
   A dropped complement target or duplicate fact counts against it, since the
   label absorbs those (`dropped_unmerged`). Any other dropped ID is an off-label
   drop. Rows list them, and `verdict` needs a blind judge's class for each one
-  (`audit_decisions`): when the judge takes the fact out as well, no target is
-  scored on that memory's requests. A drop the judge keeps stays wrong, also
-  when its memory leaves scoring.
+  (`audit_decisions`): unless the judge keeps the fact, no target is scored on
+  that memory's requests. A drop the judge keeps or finds restating
+  another fact stays wrong, also when its memory leaves scoring, and so does a
+  dropped complement target or duplicate fact.
 - E-synth absorbed: memory IDs valid answers absorb, each with what the label
-  says of that fact. Reported, not gated: MASC's absorb gate checks each absorb
-  at commit, while nothing checks a drop.
+  says of that fact.
 - E-synth merge recall: complement targets absorbed into the complement's claim
   and duplicate pairs left as one fact, over the merges the labels expect.
+- E-synth absorb precision and judged merge recall: `verdict` asks a blind
+  judge what MASC's absorb gate asks of every absorb, in the gate's words
+  (`merge_cases.py`, `merge_decisions`). Absorb precision is absorbs judged
+  mergeable over all absorbs; judged merge recall counts a merge the label
+  expects only when every absorb it made is judged mergeable. Reported; G6
+  gates them once the gates are fixed again.
 - E-synth stale drop recall: planted stale facts dropped, over the planted stale
   facts the labels expect to leave. An absorbed stale fact is not dropped: its
-  text lives on in the new claim.
+  text lives on in the new claim. Labels expect merges and stale drops only on
+  requests with a candidate that can support a change; elsewhere a dropped
+  stale fact still counts as a right drop.
 - Growth: claims an answer adds minus the memory IDs it takes out, per item,
   beside the labels' (E-synth) or the live answers' (E-real).
 - latency p50 (G5): median wall time of E-real calls that returned HTTP 200.
@@ -77,7 +100,8 @@ Definitions:
   `train_sft.py` saved for that branch under these pass lines.
 
 Output: <out>/calls.jsonl holds raw answers (E-real answers carry Keeper memory;
-keep them local), <out>/rows.jsonl numbers, IDs and verdicts, <out>/summary.json.
+keep them local), <out>/rows.jsonl numbers, IDs and verdicts, each row naming
+the call it scores by its key and send time, <out>/summary.json.
 """
 
 from __future__ import annotations
@@ -88,7 +112,7 @@ import json
 import statistics
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import assert_never, cast
 
@@ -96,11 +120,13 @@ import admission_request as R
 import admission_validator as AV
 import audit_decisions as D
 import exact_store as E
+import glm_chat as G
 import memory_scores as M
+import merge_decisions as MD
 import synth_render
 import synth_rows as RW
 import yojson_wire as Y
-from tinker_oai import HTTP_OK, Caller
+from tinker_oai import HTTP_OK, Call, Caller
 
 HERE = Path(__file__).resolve().parent
 PASS_LINES = HERE / "pass_lines.json"
@@ -191,31 +217,85 @@ def synth_items(path: Path) -> list[M.SynthItem]:
     return items
 
 
-def run_item(caller: Caller, request: JsonObject, targets: list[tuple[str, str]], item: Item) -> list[JsonObject]:
+def retemplated(item: Item, template: R.AdmissionTemplate) -> Item:
+    """The item with its prompt drawn with `template` from the same data."""
+    prompt = replace(item.prompt, template=template)
+    return replace(item, prompt=prompt, text=R.render(prompt))
+
+
+@dataclass(frozen=True, slots=True)
+class TinkerLane:
+    """Tinker's endpoint: the pass lines' effort and output budget, a warm call first, a price per token."""
+
+    caller: Caller
+    effort: str
+    max_tokens: int
+
+
+@dataclass(frozen=True, slots=True)
+class GlmLane:
+    """GLM's coding endpoint in MASC's request (`glm_chat`): no warm call, no price per token."""
+
+    caller: G.Caller
+
+
+type Lane = TinkerLane | GlmLane
+
+
+def measured(lane: Lane, model: str, label: str, messages: list[str]) -> tuple[Call, float] | None:
+    """The measured call and what it cost in USD, or None once the lane stops."""
+    match lane:
+        case TinkerLane(caller=caller, effort=effort, max_tokens=max_tokens):
+            call = caller.ask(model=model, label=label, messages=messages, effort=effort, max_tokens=max_tokens)
+            return (call, round(call.cost(), 6)) if call is not None else None
+        case GlmLane(caller=caller):
+            call = caller.ask(model=model, label=label, messages=messages)
+            return (call, 0.0) if call is not None else None
+        case _:
+            assert_never(lane)
+
+
+def spending(lane: Lane) -> JsonObject:
+    match lane:
+        case TinkerLane(caller=caller):
+            return {"provider": "tinker", "spent_usd": round(caller.spent, 4)}
+        case GlmLane(caller=caller):
+            return {"provider": "glm", "requests_sent": caller.sent}
+        case _:
+            assert_never(lane)
+
+
+def run_item(lane: Lane, targets: list[tuple[str, str]], item: Item) -> list[JsonObject]:
     kind = "real" if isinstance(item, M.RealItem) else "synth"
     messages = [item.text, schema_instruction()]
-    effort = cast(str, request["reasoning_effort"])
-    for name, model in targets:
-        if caller.ask(model=model, label=f"{kind}:{name}:{item.item_id}:warm", messages=messages, effort=effort,
-                      max_tokens=WARM_MAX_TOKENS) is None:
-            return []
+    match lane:
+        case TinkerLane(caller=caller, effort=effort):
+            for name, model in targets:
+                if caller.ask(model=model, label=f"{kind}:{name}:{item.item_id}:warm", messages=messages,
+                              effort=effort, max_tokens=WARM_MAX_TOKENS) is None:
+                    return []
+        case GlmLane():
+            pass
+        case _:
+            assert_never(lane)
     rows: list[JsonObject] = []
     for name, model in targets:
-        call = caller.ask(model=model, label=f"{kind}:{name}:{item.item_id}", messages=messages, effort=effort,
-                          max_tokens=cast(int, request["max_tokens"]))
-        if call is None:
+        got = measured(lane, model, f"{kind}:{name}:{item.item_id}", messages)
+        if got is None:
             break
+        call, cost = got
         result = check(item.prompt, call.answer())
         match item:
             case M.RealItem():
                 score = M.score_real(item, result.answer)
             case M.SynthItem():
                 score = M.score_synth(item, result.answer)
-        rows.append({"set": kind, "item": item.item_id, "target": name, "status": call.status, "finish": call.finish,
+        rows.append({"set": kind, "item": item.item_id, "target": name, "call_key": call.key,
+                     "status": call.status, "error": call.error, "finish": call.finish,
                      "sent_at": call.sent_at, "wall_s": call.wall_s, "prompt_tokens": call.prompt_tokens,
                      "cached_tokens": call.cached_tokens,
                      "completion_tokens": call.completion_tokens, "reasoning_chars": len(call.reasoning or ""),
-                     "cost_usd": round(call.cost(), 6), "valid": result.answer is not None,
+                     "cost_usd": cost, "valid": result.answer is not None,
                      "problems": list(result.problems), **score})
     return rows
 
@@ -240,7 +320,7 @@ def summarize(kind: str, rows: list[JsonObject], wrong_elsewhere: dict[str, int]
     out: JsonObject = {}
     for name in dict.fromkeys(cast(str, r["target"]) for r in rows):
         mine = [r for r in rows if r["target"] == name]
-        ok = [cast(float, r["wall_s"]) for r in mine if r["status"] == HTTP_OK]
+        ok = [cast(float, r["wall_s"]) for r in mine if r["status"] == HTTP_OK and r.get("error") is None]
         valid = sum(bool(r["valid"]) for r in mine)
         part: JsonObject = {"items": len(mine), "valid": valid, "valid_rate": valid / len(mine),
                             "http_errors": len(mine) - len(ok),
@@ -277,10 +357,24 @@ def summarize(kind: str, rows: list[JsonObject], wrong_elsewhere: dict[str, int]
     return out
 
 
+def lane_of(args: argparse.Namespace, log: Path, request: JsonObject) -> Lane:
+    """The lane --provider names, with its limit: --budget on Tinker, --max-calls on GLM."""
+    budget, max_calls = cast(float | None, args.budget), cast(int | None, args.max_calls)
+    match cast(str, args.provider), budget, max_calls:
+        case "tinker", float(), None:
+            return TinkerLane(Caller(log, budget), cast(str, request["reasoning_effort"]),
+                              cast(int, request["max_tokens"]))
+        case "glm", None, int():
+            return GlmLane(G.Caller(log, max_calls))
+        case _:
+            raise SystemExit("--provider tinker needs --budget alone, --provider glm needs --max-calls alone")
+
+
 def run(args: argparse.Namespace) -> int:
     lines = load_pass_lines()
     kind, out = cast(str, args.set), Path(cast(str, args.out))
     out.mkdir(parents=True, exist_ok=True)
+    lane = lane_of(args, out / "calls.jsonl", cast(JsonObject, lines["request"]))
     targets = [cast(tuple[str, str], tuple(t.split("=", 1))) for t in cast(list[str], args.target)]
     items: list[Item]
     if kind == "real":
@@ -294,21 +388,24 @@ def run(args: argparse.Namespace) -> int:
         if sha256_file(requests) != cast(JsonObject, lines["e_synth"])["requests_sha256"]:
             raise SystemExit("the E-synth requests differ from pass_lines.json")
         items = list(synth_items(requests))
-    caller = Caller(out / "calls.jsonl", cast(float, args.budget))
-    request = cast(JsonObject, lines["request"])
+    template = synth_render.TEMPLATE if args.template is None else Path(cast(str, args.template))
+    if args.template is not None:
+        drawn = synth_render.template_at(template)
+        items = [retemplated(i, drawn) for i in items]
 
     def one(item: Item) -> list[JsonObject]:
-        return run_item(caller, request, targets, item)
+        return run_item(lane, targets, item)
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
         rows = [r for rs in pool.map(one, items) for r in rs]
     with (out / "rows.jsonl").open("w", encoding="utf-8") as fh:
         fh.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
-    summary = {"set": kind, "pass_lines_sha256": sha256_file(PASS_LINES), "targets": dict(targets),
-               "spent_usd": round(caller.spent, 4), "stopped": caller.stopped, "by_target": summarize(kind, rows)}
+    summary = {"set": kind, "pass_lines_sha256": sha256_file(PASS_LINES), "template_sha256": sha256_file(template),
+               "targets": dict(targets), **spending(lane), "stopped": lane.caller.stopped,
+               "by_target": summarize(kind, rows)}
     (out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(summary["by_target"]))
-    return 2 if caller.stopped is not None else 0
+    return 2 if lane.caller.stopped is not None else 0
 
 
 def read_rows(out: Path) -> list[JsonObject]:
@@ -373,6 +470,16 @@ def trained_runs(pairs: list[str]) -> dict[str, JsonObject]:
     return out
 
 
+def pinned_problem(summaries: list[JsonObject], pin: str, template: str) -> str | None:
+    """Why a run was not made under these pass lines, or with prompts drawn with another template than
+    their pinned one; None when every run was."""
+    if {s["pass_lines_sha256"] for s in summaries} != {pin}:
+        return "a run used other pass lines"
+    if {s["template_sha256"] for s in summaries} != {template}:
+        return "a run drew its prompts with another template than the pinned one"
+    return None
+
+
 def binding_problem(real_targets: dict[str, str], synth_targets: dict[str, str], baseline: str,
                     baseline_model: str, names: list[str], trained: dict[str, JsonObject], pin: str) -> str | None:
     """Why the two runs cannot be judged together, or None. Each name must send the same model in
@@ -400,8 +507,9 @@ def verdict(args: argparse.Namespace) -> int:
     pin = sha256_file(PASS_LINES)
     real = cast(JsonObject, json.loads((real_dir / "summary.json").read_text(encoding="utf-8")))
     synth = cast(JsonObject, json.loads((synth_dir / "summary.json").read_text(encoding="utf-8")))
-    if {real["pass_lines_sha256"], synth["pass_lines_sha256"]} != {pin}:
-        raise SystemExit("a run used other pass lines")
+    pinned = pinned_problem([real, synth], pin, sha256_file(synth_render.TEMPLATE))
+    if pinned is not None:
+        raise SystemExit(pinned)
     gates, comparison = cast(JsonObject, lines["gates"]), cast(JsonObject, lines["comparison"])
     choice = cast(JsonObject, lines["choice"])
     base, names = cast(str, comparison["baseline"]), cast(list[str], choice["order"])
@@ -426,7 +534,7 @@ def verdict(args: argparse.Namespace) -> int:
     scored = judged.scored(synth_rows)
     if not scored:
         raise SystemExit("the judge's drops leave no E-synth request to score")
-    s_all = cast(dict[str, JsonObject], summarize("synth", scored, judged.wrong_outside()))
+    s_all = cast(dict[str, JsonObject], summarize("synth", scored, judged.wrong_outside(synth_rows)))
     window = cast(float, comparison["same_item_window_s"])
     result: JsonObject = {}
     warm_min = cast(float, comparison["warm_share_min"])
@@ -453,7 +561,10 @@ def verdict(args: argparse.Namespace) -> int:
                    and cast(float, p50) <= cast(float, b50) * cast(float, gates["G5_e_real_latency_p50_ratio_max"])),
         }
         result[name] = {"pass": all(checks.values()), **checks, "paired": pair, "widest_gap_s": round(gap, 1)}
-    result["e_synth_drops"] = judged.record(len({r["item"] for r in scored}))
+    result["e_synth_drops"] = judged.record(synth_rows)
+    result["e_synth_merges"] = MD.report(synth_rows, scored,
+                                         Path(cast(str, args.merges)) if args.merges is not None else None,
+                                         synth_render.TEMPLATE, synth_dir, [base, *names])
     result["choice"] = choose(names, result, s_all, rows, cast(float, choice["prefer_later_when_ahead_by"]))
     print(json.dumps(result))
     (real_dir / "verdict.json").write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
@@ -469,13 +580,20 @@ def main() -> int:
     r.add_argument("--requests", help="E-synth requests.jsonl (for --set synth)")
     r.add_argument("--base", default=None, help="MASC base path (default: MASC_BASE_PATH)")
     r.add_argument("--out", required=True)
-    r.add_argument("--budget", type=float, required=True)
+    r.add_argument("--provider", choices=["tinker", "glm"], default="tinker")
+    r.add_argument("--budget", type=float, default=None, help="USD, for --provider tinker")
+    r.add_argument("--max-calls", type=int, default=None, help="requests under --out, for --provider glm")
+    r.add_argument("--template", default=None,
+                   help="a librarian.md to draw every prompt with (default: the pinned config/prompts/librarian.md)")
     v = sub.add_parser("verdict")
     v.add_argument("--real", required=True)
     v.add_argument("--synth", required=True)
     v.add_argument("--drops", default=None,
                    help="e_synth_audit.py drops --out, with the judge's judge/decisions.jsonl; needed when an "
                         "answer dropped a fact off label")
+    v.add_argument("--merges", default=None,
+                   help="merge_cases.py --out, with the judge's judge/decisions.jsonl; needed when an answer "
+                        "absorbed a memory")
     v.add_argument("--train", action="append", required=True, help="name=<train_sft --out>, one per candidate")
     args = ap.parse_args()
     return run(args) if args.command == "run" else verdict(args)

@@ -34,6 +34,7 @@ import json
 import sys
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
@@ -50,6 +51,16 @@ WORKERS = 8
 LABELED_MERGES = frozenset({"complement", "duplicate"})
 
 type JsonObject = dict[str, object]
+
+
+@dataclass(frozen=True, slots=True)
+class Sampled:
+    """One request's teacher answers: the one kept, why each earlier attempt was not, and the
+    HTTP status that stopped the request."""
+
+    kept: JsonObject | None
+    rejected: tuple[str, ...]
+    http_error: int | None
 
 
 def rejection(item: M.SynthItem, check: V.Check) -> str | None:
@@ -84,26 +95,29 @@ def main() -> int:
     instruction = V.schema_instruction()
     items = V.synth_items(Path(cast(str, args.requests)))
     caller = Caller(out / "calls.jsonl", cast(float, args.budget))
-    reasons: Counter[str] = Counter()
-    errors: Counter[int] = Counter()
 
-    def one(item: M.SynthItem) -> JsonObject | None:
+    # Each worker returns what it saw; the counts are summed here, outside the worker threads.
+    def one(item: M.SynthItem) -> Sampled:
+        rejected: list[str] = []
         for attempt in range(ATTEMPTS):
             call = caller.ask(model=TEACHER, label=f"teacher:{item.item_id}", messages=[item.text, instruction],
                               effort=EFFORT, max_tokens=MAX_TOKENS, attempt=attempt)
             if call is None:
-                return None
+                return Sampled(None, tuple(rejected), None)
             if call.status != HTTP_OK:
-                errors[call.status] += 1
-                return None
+                return Sampled(None, tuple(rejected), call.status)
             why = rejection(item, V.check(item.prompt, call.answer()))
             if why is None:
-                return {"item": item.item_id, "attempt": attempt, "answer": call.answer(), "reasoning": call.reasoning}
-            reasons[why] += 1
-        return None
+                return Sampled({"item": item.item_id, "attempt": attempt, "answer": call.answer(),
+                                "reasoning": call.reasoning}, tuple(rejected), None)
+            rejected.append(why)
+        return Sampled(None, tuple(rejected), None)
 
     with ThreadPoolExecutor(max_workers=WORKERS) as pool:
-        kept = [k for k in pool.map(one, items) if k is not None]
+        sampled = list(pool.map(one, items))
+    kept = [s.kept for s in sampled if s.kept is not None]
+    reasons = Counter(why for s in sampled for why in s.rejected)
+    errors = Counter(s.http_error for s in sampled if s.http_error is not None)
     with (out / "accepted.jsonl").open("w", encoding="utf-8") as fh:
         fh.writelines(json.dumps(k, ensure_ascii=False) + "\n" for k in kept)
     summary = {"teacher": TEACHER, "effort": EFFORT, "requests": len(items), "accepted": len(kept),

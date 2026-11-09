@@ -2,13 +2,14 @@
 """Budgeted, cached chat calls to Tinker's OpenAI-compatible endpoint.
 
 Every HTTP attempt is appended to one JSONL log. A rerun that points at the same
-log reuses each HTTP 200 answer under the same key, so an interrupted run resumes
-and pays only for calls that have no answer yet. A transient failure (no
+log reuses each reply (`Call.replied`) under the same key, so an interrupted run
+resumes and pays only for calls that have no answer yet. A transient failure (no
 response, 408, 429, 5xx) is sent again up to TRANSIENT_RETRIES times after a
 pause. Each attempt is its own row and its own wall_s, so a returned call's
 wall_s never holds a retry. A failure left after that is sent again on a rerun.
 
-TINKER_API_KEY comes from the environment and is never written.
+TINKER_API_KEY comes from the environment and is never written. The row shape
+is the harness's call log for every provider (`glm_chat` writes it too).
 """
 
 from __future__ import annotations
@@ -58,6 +59,11 @@ class Call:
     completion_tokens: int
     wall_s: float
     sent_at: float | None  # epoch seconds when the request left; None in rows logged before 2026-11-09
+    error: str | None = None  # the provider's error code and message for a failed attempt, when it gave one
+
+    def replied(self) -> bool:
+        """HTTP 200 with no provider error: the call holds the model's reply."""
+        return self.status == HTTP_OK and self.error is None
 
     def cost(self) -> float:
         uncached = max(0, self.prompt_tokens - self.cached_tokens)
@@ -65,8 +71,8 @@ class Call:
                 + self.completion_tokens * PRICE["sample"]) / 1e6
 
     def answer(self) -> str | None:
-        """The answer text of a complete reply: HTTP 200 and finish_reason "stop"."""
-        return self.content if self.status == HTTP_OK and self.finish == "stop" else None
+        """The answer text of a complete reply: `replied` and finish_reason "stop"."""
+        return self.content if self.replied() and self.finish == "stop" else None
 
 
 def call_from_row(row: object) -> Call | None:
@@ -74,16 +80,30 @@ def call_from_row(row: object) -> Call | None:
         return None
     r = cast(dict[str, object], row)
     key, label, wall, sent = r.get("key"), r.get("label"), r.get("wall_s"), r.get("sent_at")
-    texts = [r.get(k) for k in ("finish", "content", "reasoning")]
+    texts = [r.get(k) for k in ("finish", "content", "reasoning", "error")]
     ints = [r.get(k) for k in ("status", "prompt_tokens", "cached_tokens", "completion_tokens")]
     if (not isinstance(key, str) or not isinstance(label, str) or not isinstance(wall, (int, float))
             or not (sent is None or isinstance(sent, (int, float)))
             or not all(v is None or isinstance(v, str) for v in texts) or not all(isinstance(v, int) for v in ints)):
         return None
-    finish, content, reasoning = (cast(str | None, v) for v in texts)
+    finish, content, reasoning, error = (cast(str | None, v) for v in texts)
     status, prompt, cached, completion = (cast(int, v) for v in ints)
     return Call(key, label, status, finish, content, reasoning, prompt, cached, completion, float(wall),
-                float(sent) if sent is not None else None)
+                float(sent) if sent is not None else None, error)
+
+
+def completion_call(key: str, label: str, status: int, data: dict[str, object], wall: float, sent: float) -> Call:
+    """The call an OpenAI-shaped chat completion body describes."""
+    choices = cast(list[dict[str, object]], data.get("choices") or [{}])
+    message = cast(dict[str, object], choices[0].get("message") or {})
+    usage = cast(dict[str, object], data.get("usage") or {})
+    details = cast(dict[str, object], usage.get("prompt_tokens_details") or {})
+    content, finish, reasoning = message.get("content"), choices[0].get("finish_reason"), message.get(
+        "reasoning_content")
+    return Call(key, label, status, finish if isinstance(finish, str) else None,
+                content if isinstance(content, str) else None, reasoning if isinstance(reasoning, str) else None,
+                int(cast(int, usage.get("prompt_tokens") or 0)), int(cast(int, details.get("cached_tokens") or 0)),
+                int(cast(int, usage.get("completion_tokens") or 0)), wall, sent)
 
 
 def call_key(model: str, effort: str, max_tokens: int, attempt: int, messages: Sequence[str]) -> str:
@@ -103,7 +123,7 @@ class Caller:
                 call = call_from_row(json.loads(line))
                 if call is not None:
                     logged.append(call)
-        self._cache: dict[str, Call] = {c.key: c for c in logged if c.status == HTTP_OK}
+        self._cache: dict[str, Call] = {c.key: c for c in logged if c.replied()}
         self.budget = budget
         self.spent = sum(c.cost() for c in logged)
         self.stopped: str | None = None
@@ -132,7 +152,7 @@ class Caller:
             call = self._send(key, label, model, messages, effort, max_tokens)
             with self._lock:
                 self.spent += call.cost() - worst
-                if call.status == HTTP_OK:
+                if call.replied():
                     self._cache[key] = call
                 with self._log.open("a", encoding="utf-8") as fh:
                     fh.write(json.dumps(asdict(call), ensure_ascii=False) + "\n")
@@ -155,14 +175,4 @@ class Caller:
         except (APIConnectionError, APITimeoutError):
             return Call(key, label, NO_RESPONSE, None, None, None, 0, 0, 0, round(time.monotonic() - t0, 2), sent)
         wall = round(time.monotonic() - t0, 2)
-        data = cast(dict[str, object], json.loads(body))
-        choices = cast(list[dict[str, object]], data.get("choices") or [{}])
-        message = cast(dict[str, object], choices[0].get("message") or {})
-        usage = cast(dict[str, object], data.get("usage") or {})
-        details = cast(dict[str, object], usage.get("prompt_tokens_details") or {})
-        content, finish, reasoning = message.get("content"), choices[0].get("finish_reason"), message.get(
-            "reasoning_content")
-        return Call(key, label, status, finish if isinstance(finish, str) else None,
-                    content if isinstance(content, str) else None, reasoning if isinstance(reasoning, str) else None,
-                    int(cast(int, usage.get("prompt_tokens") or 0)), int(cast(int, details.get("cached_tokens") or 0)),
-                    int(cast(int, usage.get("completion_tokens") or 0)), wall, sent)
+        return completion_call(key, label, status, cast(dict[str, object], json.loads(body)), wall, sent)

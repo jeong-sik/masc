@@ -143,6 +143,13 @@ class KindTest(unittest.TestCase):
                                 claims=(claim_json(c1.claim), claim_json(c2.claim, absorbs=("m1",))))
             self.assertEqual((state(scored(req, own), name), state(scored(req, other), name)), ([1, 1], [1, 0]), name)
 
+    def test_a_correction_adds_the_claim_that_supersedes_its_target(self) -> None:
+        req, c = one(K.CORRECTION)
+        # A kept claim takes the supersedes: the target goes, and the correction's knowledge never comes in.
+        s = scored(req, answer_text(((c.request_id, "incorporated", M2),), claims=(claim_json(M2, supersedes="m1"),),
+                                    dropped=("m1",)))
+        self.assertEqual((s["added"], s["dropped_expected"], s["correct"], state(s, "corrects")), (0, 1, 0, [1, 0]))
+
     def test_a_correction_record_names_the_claim_that_supersedes_its_target(self) -> None:
         req, c1, c2 = two(K.CORRECTION, K.CORRECTION)
         joint = "교정: 링크 규칙 1번과 2번을 함께 바꾼다."
@@ -212,6 +219,53 @@ class KindTest(unittest.TestCase):
                 self.assertEqual((s["correct"], s["state_correct"]), (0, 0), f"{kind.value} {name}")
 
 
+class AttributionTest(unittest.TestCase):
+    def test_a_claim_that_copies_a_candidate_carries_that_candidates_knowledge(self) -> None:
+        kinds: tuple[tuple[S.CandidateKind, M.Kind], ...] = ((K.TRANSIENT, "transient"), (K.PARAPHRASE, "restates"))
+        for first, kind in kinds:
+            req, c1, c2 = two(first, K.NEW_DURABLE)
+            j1: Judged = ((c1.request_id, "not_durable", None) if first is K.TRANSIENT
+                          else (c1.request_id, "already_represented", M1))
+            # c2 names c1's words, so c2's own knowledge never comes in and c1's does.
+            s = scored(req, answer_text((j1, (c2.request_id, "incorporated", c1.claim)), claims=(claim_json(c1.claim),)))
+            self.assertEqual((s["correct"], state(s, kind), state(s, "new")), (1, [1, 0], [1, 0]), kind)
+
+    def test_candidates_that_name_each_others_words_are_both_wrong(self) -> None:
+        req, c1, c2 = two(K.NEW_DURABLE, K.NEW_DURABLE)
+        swapped = scored(req, answer_text(((c1.request_id, "incorporated", c2.claim),
+                                           (c2.request_id, "incorporated", c1.claim)),
+                                          claims=(claim_json(c1.claim), claim_json(c2.claim))))
+        rewritten = "새로 정한 두 규칙을 한 문장으로 다시 쓴 기억."
+        own = scored(req, answer_text(((c1.request_id, "incorporated", c1.claim),
+                                       (c2.request_id, "incorporated", rewritten)),
+                                      claims=(claim_json(c1.claim), claim_json(rewritten))))
+        self.assertEqual([(s["correct"], state(s, "new")) for s in (swapped, own)], [(0, [2, 0]), (2, [2, 2])])
+
+
+    def test_a_correction_that_names_another_candidates_words_is_wrong(self) -> None:
+        req, c1, c2 = two(K.CORRECTION, K.NEW_DURABLE)
+        s = scored(req, answer_text(((c1.request_id, "incorporated", c2.claim), (c2.request_id, "incorporated", c2.claim)),
+                                    claims=(claim_json(c2.claim, supersedes="m1"),), dropped=("m1",)))
+        self.assertEqual((s["per_candidate"], state(s, "corrects"), state(s, "new")),
+                         ({c1.request_id: False, c2.request_id: True}, [1, 0], [1, 1]))
+
+
+class SupportTest(unittest.TestCase):
+    def test_a_planted_fact_is_what_its_row_says_though_the_label_cannot_ask_for_it(self) -> None:
+        # MASC takes the change only because the transient is misjudged as already represented.
+        req, c = one(K.TRANSIENT)
+        misjudged: tuple[Judged, ...] = ((c.request_id, "already_represented", M1),)
+        cleaned = scored(req, answer_text(misjudged, claims=(claim_json(M5, absorbs=("m6",)),), dropped=("m4",)))
+        self.assertEqual((cleaned["planted"], cleaned["pairs"], cleaned["merges"], cleaned["expected_removed"]),
+                         (0, 0, 0, 0))
+        self.assertEqual((cleaned["dropped"], cleaned["dropped_expected"], cleaned["dropped_off_label"],
+                          cleaned["absorbs"], cleaned["correct"]), (1, 1, [], {"m6": "duplicate"}, 0))
+        lost = scored(req, answer_text(misjudged, dropped=("m6",)))
+        self.assertEqual((lost["dropped_unmerged"], lost["dropped_off_label"]), (["m6"], []))
+        absorbed = scored(req, answer_text(misjudged, claims=(claim_json(M2, absorbs=("m4",)),)))
+        self.assertEqual((absorbed["planted_absorbed"], absorbed["absorbs"]), (1, {"m4": "stale"}))
+
+
 class PairTest(unittest.TestCase):
     def test_a_pair_ends_as_one_fact_inside_itself_or_in_one_claim_the_answer_adds(self) -> None:
         req, c = one(K.PARAPHRASE)
@@ -234,6 +288,26 @@ class PairTest(unittest.TestCase):
         apart = answer_text(both_incorporated(c1, c2),
                             claims=(claim_json(c1.claim, absorbs=("m5",)), claim_json(c2.claim, absorbs=("m6",))))
         self.assertEqual(scored(req, apart)["pairs_merged"], 0)
+
+    def test_a_made_merge_names_the_memories_it_absorbed(self) -> None:
+        # The merge judge's verdict on those absorbs decides whether the merge kept its knowledge.
+        req = request(PLANTED, candidates_of((K.COMPLEMENT,)))
+        self.assertEqual(scored(req, label_answer(req))["merges_absorbed"], [["m1"], ["m6"]])
+        req, c = one(K.NEW_DURABLE)
+        both = M5 + " " + c.claim
+        joined = scored(req, answer_text(((c.request_id, "incorporated", both),),
+                                         claims=(claim_json(both, absorbs=("m5", "m6")),)))
+        self.assertEqual(joined["merges_absorbed"], [["m5", "m6"]])
+        req, c = one(K.COMPLEMENT)
+        beside = scored(req, answer_text(((c.request_id, "incorporated", c.claim),), claims=(claim_json(c.claim),)))
+        self.assertEqual(beside["merges_absorbed"], [])
+        # The complement's target goes into another candidate's claim: the expected merge is not made.
+        req, c, new = two(K.COMPLEMENT, K.NEW_DURABLE)
+        elsewhere = new.claim + " " + M1
+        moved = scored(req, answer_text(((c.request_id, "incorporated", c.claim),
+                                         (new.request_id, "incorporated", elsewhere)),
+                                        claims=(claim_json(c.claim), claim_json(elsewhere, absorbs=("m1",)))))
+        self.assertEqual(moved["merges_absorbed"], [])
 
 
 if __name__ == "__main__":

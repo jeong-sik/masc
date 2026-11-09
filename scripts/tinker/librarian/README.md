@@ -5,8 +5,9 @@ keeper-librarian Lane Add-on's `admission` output, and decide with fixed pass
 lines whether the trained checkpoint may answer that output first.
 
 Everything runs on the operator's machine with `uv run`. Each script pins its
-dependencies in a PEP 723 header. `TINKER_API_KEY` comes from the environment
-and is never written. Paths to the MASC runtime store come from `--base` or
+dependencies in a PEP 723 header. `TINKER_API_KEY`, and `ZAI_API_KEY` for a GLM
+run, come from the environment and are never written. Paths to the MASC runtime
+store come from `--base` or
 `MASC_BASE_PATH`. Output goes under `artifacts/` (git-ignored).
 
 ## Data rule
@@ -15,7 +16,8 @@ The exact-request store holds real Keeper memory. Scripts read it in place.
 Nothing from it is copied into this repository: the E-real manifest holds only
 record digests and file sha256 values. E-real model answers stay in the run's
 `calls.jsonl` under `artifacts/`. The committed evidence holds numbers, IDs and
-verdicts.
+verdicts. A GLM run sends E-real prompts to Z.AI, where MASC's GLM slot sends
+them.
 
 Synthetic Keepers, memories and candidates are invented by the model from
 `synth_spec.py` and `synth_prompts.py`. They carry no store content.
@@ -24,7 +26,7 @@ Synthetic Keepers, memories and candidates are invented by the model from
 
 | File | Role |
 | --- | --- |
-| `pass_lines.json` | Fixed request shape, evaluation sets, baseline, candidates, gates and the files whose bytes they assume: every module `eval_admission.py` and `e_synth_audit.py` import, and the prompt template |
+| `pass_lines.json` | Fixed request shape, evaluation sets, baseline, candidates, gates and the files whose bytes they assume: every module `eval_admission.py`, `e_synth_audit.py` and `merge_cases.py` import, and the prompt template |
 | `e_real_manifest.json` | E-real: the answered admission records, by digest and sha256 |
 | `exact_store.py` | Reads answered admission records from the store, read only |
 | `e_real_manifest.py` | Writes the manifest |
@@ -36,6 +38,8 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `synth_render.py` | Renders a synthetic request as the admission prompt MASC would send |
 | `e_synth_audit.py` | Picks requests for a blind judge and drops the ones whose labels the judge does not confirm; at verdict time, makes the judge's cases for facts an answer dropped off label |
 | `audit_decisions.py` | Checks the judge's decisions, and turns its classes for off-label drops into the memories the verdict leaves out |
+| `merge_cases.py` | At verdict time, asks a blind judge of every memory an answer absorbs what MASC's absorb gate asks, in the gate's words |
+| `merge_decisions.py` | Checks the judge's classes for absorbs, and counts absorb precision and judged merge recall from them |
 | `admission_request.py` | Reads an admission prompt into typed parts and writes it back byte for byte |
 | `admission_template.py` | Splits `config/prompts/librarian.md` at its variables |
 | `prompt_facts.py` | Reads and writes the prompt's current memory and candidates as MASC's JSON |
@@ -49,6 +53,7 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `yojson_wire.py` | Reads and writes JSON the way MASC's Yojson does |
 | `check_validator_on_store.py` | Runs the parser and the validator over every retained admission record and prints counts, read only |
 | `tinker_oai.py` | Budgeted calls to Tinker's OpenAI-compatible endpoint, cached for resume |
+| `glm_chat.py` | Capped calls to Z.AI's GLM coding endpoint in the request MASC's GLM slot sends, cached for resume |
 | `eval_admission.py` | Measures targets on E-real and E-synth, then applies the gates |
 | `memory_scores.py` | Scores one answer: E-real against the live answer, E-synth by the memory it leaves |
 | `teacher_sample.py` | Keeps teacher answers that match the training labels |
@@ -75,6 +80,11 @@ lane's value to each slot's declared or catalog output ceiling. At rollout the
 checkpoint's binding declares an output ceiling of 32,768, and the lane's
 `max_output_tokens` is at least that, so the checkpoint receives 32,768.
 
+A GLM run sends what MASC's GLM slot sends: the same two messages, with
+thinking enabled and a `json_object` response format. The slot declares no
+output ceiling and no effort, so the request carries neither, and the endpoint
+applies its own defaults.
+
 ## Order
 
 1. Write the E-real manifest and generate E-synth.
@@ -88,10 +98,19 @@ checkpoint's binding declares an output ceiling of 32,768, and the lane's
    duplicate pair), a judge that sees neither the labels nor the answers
    classifies that fact among others of the same memory (`e_synth_audit.py
    drops`). Every case of one memory shows the same facts: the ones the label
-   audit picks on any request of that memory, the dropped ones and a fill. If
-   the judge takes the fact out as well, no target is scored on that memory. A
-   drop the judge keeps stays wrong, also when its memory leaves scoring. Then
-   `verdict`.
+   audit picks on any request of that memory, the dropped ones and a fill.
+   Unless the judge keeps the fact, no target is scored on that memory. A drop
+   the judge keeps or finds restating another fact stays wrong, also when its
+   memory leaves scoring, and so does a dropped complement target or duplicate
+   fact.
+7. When a valid E-synth answer absorbs a memory, a judge that sees no label,
+   target or request answers the question MASC's absorb gate asks of it, in
+   the gate's words and with the state the gate sends (`merge_cases.py`): can
+   this memory retire into that claim? An absorbed planted stale fact gets no
+   case: no candidate continues that transient state, so its label makes the
+   absorb wrong. Absorb precision is the share of absorbs judged mergeable;
+   judged merge recall counts a merge the label expects only when every absorb
+   it made is judged mergeable. Then `verdict`.
 
 ```sh
 MASC_BASE_PATH=<base> uv run scripts/tinker/librarian/e_real_manifest.py \
@@ -118,30 +137,58 @@ uv run scripts/tinker/librarian/eval_admission.py run --set synth \
 uv run scripts/tinker/librarian/e_synth_audit.py drops \
   --requests artifacts/tinker/librarian/e-synth/requests.jsonl \
   --run artifacts/tinker/librarian/verdict-synth --out artifacts/tinker/librarian/verdict-drops
+uv run scripts/tinker/librarian/merge_cases.py \
+  --requests artifacts/tinker/librarian/e-synth/requests.jsonl \
+  --run artifacts/tinker/librarian/verdict-synth --out artifacts/tinker/librarian/verdict-merges
 uv run scripts/tinker/librarian/eval_admission.py verdict \
   --real artifacts/tinker/librarian/verdict-real --synth artifacts/tinker/librarian/verdict-synth \
-  --drops artifacts/tinker/librarian/verdict-drops \
+  --drops artifacts/tinker/librarian/verdict-drops --merges artifacts/tinker/librarian/verdict-merges \
   --train A=artifacts/tinker/librarian/train-A --train B=artifacts/tinker/librarian/train-B
 ```
 
-`cases` and `drops` keep the key in `--out` and put the judge's material in
-`--out/judge/`. Give the judge that folder itself, not a copy, and nothing
-else: it reads `judge.md` and `cases.jsonl` there and writes `decisions.jsonl`
-next to them. `cases` and `drops` refuse an `--out` whose judge folder already
-holds `decisions.jsonl`. The check cannot tell decisions made under other
+`cases`, `drops` and `merge_cases.py` keep the key in `--out` and put the
+judge's material in `--out/judge/`. Give the judge that folder itself, not a
+copy, and nothing else: it reads `judge.md` and `cases.jsonl` there and writes
+`decisions.jsonl` next to them. They refuse an `--out` whose judge folder
+already holds `decisions.jsonl`. The check cannot tell decisions made under other
 rules: copy a `decisions.jsonl` into another `--out` only to re-check an audit
 under the same rules. `judge.md` names
 its rules as `config/prompts/librarian.md`, and the folder holds a copy at that
-path. The key holds the label's classes and the dropped facts.
+path; the merge judge's `judge.md` quotes the gate's slots from it. The key
+holds the label's classes and the dropped facts, or the absorbs each merge
+case stands for.
 `--out/judge-files.json` holds the sha256 of the three files the judge was
 given. `apply` and `verdict` read the decisions only while those files are
 unchanged and the rules copy equals this checkout's `config/prompts/librarian.md`.
-`verdict` refuses while an off-label drop has no decision, and records each
-drop, its class, the memories left out, the kept drops on them and the judge's
-file sha256 values in `verdict.json`.
+A merge case shows the claim of the call its row names, and
+`merge_cases.py` writes `--out/run-files.json`, the sha256 of the run's
+`calls.jsonl` and `rows.jsonl`: `verdict` reads the merge decisions only for
+the `--synth` run that holds those files.
+`verdict` refuses while an off-label drop or an absorb has no decision. It
+records each drop, its class, the memories left out, each target's wrong drops
+on them, each absorb's class, each target's absorb numbers and the judges' file
+sha256 values in `verdict.json`.
 
 A rerun with the same `--out` reuses every answered call and pays only for the
 rest. A budget stop exits with status 2. `verdict` refuses a run where a
 candidate's call and the baseline's call for the same item left more than
 `same_item_window_s` apart, so a baseline answered in an earlier run cannot
 stand in for the one G5 compares against.
+
+`run --template <librarian.md>` measures a prompt change on the same sets: it
+draws every prompt with that file's template from the same request data. An
+E-real prompt is first read with the pinned template. `summary.json` records
+the sha256 of the template the prompts were drawn with, and `verdict` refuses
+a run whose template is not the pinned one.
+
+`run --provider glm --target glm=<model> --max-calls <n>` measures the same
+sets on GLM (`glm_chat.py`). It sends no warm call, and its rows cost nothing
+per token. `--max-calls` caps the requests under `--out`, counting the ones
+already logged. The code GLM states in the body decides before the HTTP status:
+a spent usage window, plan or balance (1113, 1308-1311, 1313, 1314, 1316-1321)
+or an auth code stops the run with GLM's message, which names the reset time,
+and exits with status 2. A rerun with the same `--out` after the reset sends
+only the rest. A rate limit, a server code, no response, or a 408, 429 or 5xx
+without a code is sent again; any other failure leaves that answer not valid.
+Keep GLM and Tinker runs in separate `--out` folders: each caller counts every
+row of its log against its own limit.

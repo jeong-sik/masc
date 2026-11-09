@@ -6,7 +6,11 @@ these scores and sums the rows.
 
 E-synth: a candidate counts as right when the memory the answer leaves is the
 one its label kind needs (`state_ok`). A candidate adds a claim when it is
-judged incorporated and names a claim the answer adds.
+judged incorporated and names a claim the answer adds that is not another
+candidate's text: a claim that copies a candidate word for word carries that
+candidate's knowledge (`synth_rows` gives every candidate its own text). A
+candidate whose own text the answer adds under another judgment is right for
+no kind: its knowledge sits where its judgment does not say.
 
 | kind | right when |
 | --- | --- |
@@ -24,11 +28,19 @@ claim the answer adds. A planted stale fact leaves by `dropped`:
 config/prompts/librarian.md 133-135 rules out absorbing a stale state. The
 outcome with the claim it names (`claim_matches`) stays in the rows as a record.
 
-The drops a label asks for take out planted stale facts and correction
-targets. A complement target or a fact of a duplicate pair is to be absorbed,
-so dropping it goes against the label too. Any other drop is off label, and a
-blind judge classifies it at verdict time (`audit_decisions`). Growth is the
-claims an answer adds minus the memory IDs it takes out, beside the label's.
+A drop of a planted stale fact or a correction target is right. A complement
+target or a fact of a duplicate pair is to be absorbed, so dropping it goes
+against the label. Any other drop is off label, and a blind judge classifies it
+at verdict time (`audit_decisions`). These follow what each fact is. Stale
+drop recall, pair merges and the label's growth count only requests whose
+label asks for a change: on the others MASC refuses one unless a candidate is
+misjudged. Growth is the claims an answer adds minus the memory IDs it takes
+out, beside the label's.
+
+Text comparison cannot tell whether a merge keeps the knowledge it absorbs.
+A row names, for each merge the label expects and the answer made, the memory
+IDs it absorbed, and the class of each absorbed ID; a blind judge classifies
+the absorbs at verdict time (`merge_decisions`).
 """
 
 from __future__ import annotations
@@ -121,16 +133,17 @@ def kind_of(label: S.CandidateLabel) -> Kind:
             assert_never(label.outcome)
 
 
-def claim_matches(label: S.CandidateLabel, claim: str | None, left: Left) -> bool:
+def claim_matches(label: S.CandidateLabel, claim: str | None, left: Left, others: frozenset[str]) -> bool:
     """Whether a judgment's `memory_claim` points where the label's kind needs it.
-    MASC accepts any claim of final memory, so an outcome alone can name the wrong one. A
-    correction names a claim that supersedes its target; MASC refuses a `supersedes` whose target
-    is not dropped."""
+    MASC accepts any claim of final memory, so an outcome alone can name the wrong one. An
+    incorporated candidate names a claim the answer adds that is not another candidate's text
+    (`others`); a correction's claim also supersedes its target. MASC refuses a `supersedes` whose
+    target is not dropped."""
     match label.outcome:
         case "incorporated" if label.supersedes is not None:
-            return (label.supersedes, claim) in left.revisions
+            return (label.supersedes, claim) in left.revisions and claim in left.added and claim not in others
         case "incorporated":
-            return claim in left.added
+            return claim in left.added and claim not in others
         case "already_represented":
             return claim == label.already_claim
         case "not_durable":
@@ -139,12 +152,16 @@ def claim_matches(label: S.CandidateLabel, claim: str | None, left: Left) -> boo
             assert_never(label.outcome)
 
 
-def state_ok(label: S.CandidateLabel, judgment: AV.Judgment | None, left: Left, ids: Mapping[str, str]) -> bool:
-    """Whether the memory the answer leaves is the one the candidate's label kind needs."""
+def state_ok(label: S.CandidateLabel, judgment: AV.Judgment | None, left: Left, ids: Mapping[str, str],
+             own: str, others: frozenset[str]) -> bool:
+    """Whether the memory the answer leaves is the one the candidate's label kind needs. `own` is the
+    candidate's text and `others` the texts of the request's other candidates."""
     if judgment is None or judgment.outcome == "deferred":
         return False
     claim = judgment.memory_claim
-    added = judgment.outcome == "incorporated" and claim in left.added
+    added = judgment.outcome == "incorporated" and claim in left.added and claim not in others
+    if own in left.added and not (added and claim == own):
+        return False
     match kind_of(label):
         case "new":
             return added
@@ -181,7 +198,11 @@ def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
     label = item.label
     claims = fact_claims(item.prompt)
     ids = {claim: mid for mid, claim in claims.items()}
-    planted = set(label.planted_stale)
+    texts = {c.request_id: c.proposed_fact.claim for c in item.prompt.candidates}
+    stale = set(label.planted_stale)
+    # What the label asks of stale facts and pairs; MASC refuses those changes without support.
+    planted = stale if label.supports_change else set[str]()
+    pairs = label.duplicates if label.supports_change else ()
     corrected = {c.supersedes for c in label.candidates if c.supersedes is not None}
     complemented = {c.absorbs for c in label.candidates if c.absorbs is not None}
     paired = {mid for pair in label.duplicates for mid in pair}
@@ -190,19 +211,26 @@ def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
     got = judgments_of(mine)
     word: dict[str, bool] = {}
     by_kind: dict[Kind, list[int]] = {kind: [0, 0] for kind in KINDS}
+    # For each merge the label expects and the answer made, the memory IDs it absorbed.
+    complements_done: list[list[str]] = []
     for c in label.candidates:
         judgment = got.get(c.request_id)
+        own = texts[c.request_id]
+        others = frozenset(texts.values()) - {own}
         word[c.request_id] = (judgment is not None and judgment.outcome == c.outcome
-                              and claim_matches(c, judgment.memory_claim, left))
+                              and claim_matches(c, judgment.memory_claim, left, others))
         tally = by_kind[kind_of(c)]
         tally[0] += 1
-        tally[1] += state_ok(c, judgment, left, ids)
+        ok = state_ok(c, judgment, left, ids, own, others)
+        tally[1] += ok
+        if ok and kind_of(c) == "complements" and c.absorbs is not None:
+            complements_done.append([c.absorbs])
+    pairs_done = [sorted({a, b} & left.absorbed.keys()) for a, b in pairs if left_one(a, b, claims, left)]
     # The class of each absorbed ID, for the merge judge: what the label says of that fact.
     labeled = ({m: "correction" for m in corrected} | {m: "paraphrase" for m in restated}
                | {m: "complement" for m in complemented} | {m: "duplicate" for m in paired}
-               | {m: "stale" for m in planted})
-    asked, merged = planted | corrected, complemented | paired
-    pairs_merged = sum(left_one(a, b, claims, left) for a, b in label.duplicates)
+               | {m: "stale" for m in stale})
+    asked, merged = stale | corrected, complemented | paired
     return {"candidates": len(label.candidates), "correct": sum(word.values()), "per_candidate": word,
             "state_correct": sum(ok for _, ok in by_kind.values()),
             "state_by_kind": {kind: tally for kind, tally in by_kind.items() if tally[0]},
@@ -210,9 +238,10 @@ def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
             "dropped_unmerged": sorted(left.dropped & merged), "dropped_off_label": sorted(left.dropped - asked - merged),
             "absorbed": len(left.absorbed), "absorbs": {mid: labeled.get(mid, "other") for mid in sorted(left.absorbed)},
             "planted": len(planted), "planted_dropped": len(left.dropped & planted),
-            "planted_absorbed": len(planted & left.absorbed.keys()),
-            "pairs": len(label.duplicates), "pairs_merged": pairs_merged,
-            "merges": len(complemented) + len(label.duplicates), "merges_done": by_kind["complements"][1] + pairs_merged,
+            "planted_absorbed": len(stale & left.absorbed.keys()),
+            "pairs": len(pairs), "pairs_merged": len(pairs_done),
+            "merges": len(complemented) + len(pairs), "merges_done": len(complements_done) + len(pairs_done),
+            "merges_absorbed": complements_done + pairs_done,
             "added": len(left.added), "removed": len(left.dropped | left.absorbed.keys()),
             "expected_added": sum(c.outcome == "incorporated" for c in label.candidates),
-            "expected_removed": len(corrected) + len(complemented) + len(planted) + len(label.duplicates)}
+            "expected_removed": len(corrected) + len(complemented) + len(planted) + len(pairs)}

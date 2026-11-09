@@ -52,8 +52,28 @@ def adding_duplicate_of(original: str) -> Change:
     return change
 
 
-def replacing_facts(row: JsonObject) -> None:
-    row["facts"] = {}
+def replacing(section: str, value: object) -> Change:
+    def change(row: JsonObject) -> None:
+        row[section] = value
+    return change
+
+
+def swapping_the_first_ids(row: JsonObject) -> None:
+    facts = cast(list[JsonObject], row["facts"])
+    facts[0]["memory_id"], facts[1]["memory_id"] = facts[1]["memory_id"], facts[0]["memory_id"]
+
+
+def renaming_ids(row: JsonObject) -> None:
+    """Every memory ID, and every reference to one, renamed: the same request under IDs the prompt does not show."""
+    facts, candidates = cast(list[JsonObject], row["facts"]), cast(list[JsonObject], row["candidates"])
+    renamed = {cast(str, f["memory_id"]): f"fact-{i}" for i, f in enumerate(facts)}
+    for f in facts:
+        f["memory_id"] = renamed[cast(str, f["memory_id"])]
+        if f["duplicate_of"] is not None:
+            f["duplicate_of"] = renamed[cast(str, f["duplicate_of"])]
+    for c in candidates:
+        if c["target_memory_id"] is not None:
+            c["target_memory_id"] = renamed[cast(str, c["target_memory_id"])]
 
 
 # k1 corrects m1, k2 restates m2, k3 is new; m4 is stale and m6 restates m5.
@@ -64,6 +84,12 @@ REFUSED: tuple[tuple[str, Change], ...] = (
     ("a fact with another field", setting("facts", 0, "note", "x")),
     ("two facts with one memory ID", setting("facts", 2, "memory_id", "m1")),
     ("two facts with one claim", setting("facts", 1, "claim", PLANTED[0].claim)),
+    ("facts out of their place", swapping_the_first_ids),
+    ("memory IDs the prompt does not show", renaming_ids),
+    ("a candidate worded as a fact", setting("candidates", 2, "claim", PLANTED[2].claim)),
+    ("two candidates worded alike", setting("candidates", 1, "claim", BASE.candidates[0].claim)),
+    ("no candidates", replacing("candidates", [])),
+    ("candidates that are not a list", replacing("candidates", {})),
     ("two candidates with one request ID", setting("candidates", 1, "request_id", BASE.candidates[0].request_id)),
     ("a new fact with a target", setting("candidates", 2, "target_memory_id", "m3")),
     ("a correction without a target", setting("candidates", 0, "target_memory_id", None)),
@@ -82,7 +108,7 @@ REFUSED: tuple[tuple[str, Change], ...] = (
     ("a true-or-false sequence", setting("candidates", 0, "sequence", True)),
     ("a whole-number candidate time", setting("candidates", 0, "seen_at", 1762505000)),
     ("a board with another field", setting("facts", 0, "board", {"post_id": "p-1", "comment_id": None, "x": 1})),
-    ("facts that are not a list", replacing_facts),
+    ("facts that are not a list", replacing("facts", {})),
 )
 
 

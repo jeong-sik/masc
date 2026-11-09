@@ -43,15 +43,12 @@ from tinker_librarian_synth_fixtures import (
 )
 
 class LabelTest(unittest.TestCase):
-    def test_transient_candidates_alone_leave_the_planted_facts(self) -> None:
-        label = S.label_of(request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT))))
-        self.assertEqual(label.planted_stale, frozenset())
-        self.assertEqual(label.duplicates, ())
-
-    def test_one_supporting_candidate_takes_out_the_planted_facts(self) -> None:
-        label = S.label_of(request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.PARAPHRASE))))
-        self.assertEqual(label.planted_stale, frozenset({"m4"}))
-        self.assertEqual(label.duplicates, (("m5", "m6"),))
+    def test_a_label_names_the_planted_facts_and_asks_for_them_only_with_support(self) -> None:
+        alone = S.label_of(request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.TRANSIENT))))
+        supported = S.label_of(request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.PARAPHRASE))))
+        for label in (alone, supported):
+            self.assertEqual((label.planted_stale, label.duplicates), (frozenset({"m4"}), (("m5", "m6"),)))
+        self.assertEqual((alone.supports_change, supported.supports_change), (False, True))
 
     def test_a_complement_absorbs_its_target(self) -> None:
         [cl] = S.label_of(request(PLANTED, candidates_of((S.CandidateKind.COMPLEMENT,)))).candidates
@@ -71,9 +68,10 @@ class ContractTest(unittest.TestCase):
                     corrected = {cl.supersedes for cl in label.candidates if cl.supersedes is not None}
                     complemented = {cl.absorbs: merged(by_id[cl.absorbs], by_request[cl.request_id])
                                     for cl in label.candidates if cl.absorbs is not None}
-                    self.assertEqual(set(got.dropped), label.planted_stale | corrected)
+                    asks = label.supports_change
+                    self.assertEqual(set(got.dropped), (label.planted_stale if asks else frozenset[str]()) | corrected)
                     self.assertEqual(dict(got.absorbed),
-                                     complemented | {gone: by_id[kept].claim for kept, gone in label.duplicates})
+                                     complemented | {gone: by_id[kept].claim for kept, gone in label.duplicates if asks})
                     gone = set(got.dropped) | set(dict(got.absorbed))
                     self.assertEqual(set(got.memory_after) - set(got.added_claims),
                                      {f.claim for f in PLANTED if f.memory_id not in gone})
@@ -128,6 +126,18 @@ class TeacherTest(unittest.TestCase):
         for absorbs, pair, dropped, why in cases:
             answer = teacher_answer(req, absorbs=absorbs, pair=pair, dropped=dropped)
             self.assertEqual(teacher_rejection(req, answer), why, (absorbs, pair, dropped))
+
+    def test_an_answer_that_misjudges_a_candidate_is_not_kept_though_its_memory_is_right(self) -> None:
+        req = request(PLANTED, candidates_of((S.CandidateKind.TRANSIENT, S.CandidateKind.NEW_DURABLE)))
+        c1, c2 = req.candidates
+        by_id = {f.memory_id: f for f in req.facts}
+        # The transient is judged incorporated into the kept claim of m2, so nothing of it is added.
+        answer = answer_text(((c1.request_id, "incorporated", by_id["m2"].claim), (c2.request_id, "incorporated", c2.claim)),
+                             claims=(claim_json(c2.claim), claim_json(by_id["m5"].claim, absorbs=("m5", "m6"))),
+                             dropped=("m4",))
+        item = M.SynthItem(req.item_id, prompt_of(req), "", S.label_of(req))
+        self.assertEqual(M.score_synth(item, accepted(req, answer))["state_correct"], 2)
+        self.assertEqual(teacher_rejection(req, answer), "outcome")
 
 
 if __name__ == "__main__":

@@ -48,15 +48,21 @@ def text(n: int) -> str:
 
 
 type Reply = Callable[["FakeModel"], str]
+type FactsReply = Callable[["FakeModel", int], list[str]]
 
 
 class FakeModel:
     """Answers every stage the way its prompt asks, with a new claim of LENGTH chars each time.
-    `duplicate` replaces the answers of the duplicate stage, one per attempt."""
+    `duplicate` replaces the answers of the duplicate stage and `facts` those of the facts stage,
+    one per attempt; `candidate` replaces the answers of the candidate stage, one per call."""
 
-    def __init__(self, duplicate: Sequence[Reply] = ()) -> None:
+    def __init__(self, duplicate: Sequence[Reply] = (), candidate: Sequence[Reply] = (),
+                 facts: Sequence[FactsReply] = ()) -> None:
         self.duplicate = tuple(duplicate)
+        self.candidate = tuple(candidate)
+        self.facts = tuple(facts)
         self.written: list[str] = []
+        self.candidate_calls = 0
 
     def fresh(self) -> str:
         self.written.append(text(1000 + len(self.written)))
@@ -69,11 +75,15 @@ class FakeModel:
             case "facts":
                 asked = ASKED.search(messages[-1])
                 assert asked is not None
-                body = {"facts": [{"claim": self.fresh()} for _ in range(int(asked.group(1)))]}
-            case "duplicate" if self.duplicate:
-                body = {"claim": self.duplicate[attempt](self)}
-            case "duplicate" | "candidate":
-                body = {"claim": self.fresh()}
+                n = int(asked.group(1))
+                claims = self.facts[attempt](self, n) if self.facts else [self.fresh() for _ in range(n)]
+                body = {"facts": [{"claim": claim} for claim in claims]}
+            case "duplicate":
+                body = {"claim": self.duplicate[attempt](self) if self.duplicate else self.fresh()}
+            case "candidate":
+                reply = self.candidate[self.candidate_calls] if self.candidate_calls < len(self.candidate) else fresh
+                self.candidate_calls += 1
+                body = {"claim": reply(self)}
             case other:
                 raise AssertionError(f"the generator asked for {other}")
         return Call("key", label, HTTP_OK, "stop", json.dumps(body, ensure_ascii=False), None, 0, 0, 0, 0.0, None)
@@ -93,6 +103,42 @@ def too_long(model: FakeModel) -> str:
 
 def fresh(model: FakeModel) -> str:
     return model.fresh()
+
+
+def a_fact(model: FakeModel) -> str:
+    return PLANTED[0].claim
+
+
+def previous(model: FakeModel) -> str:
+    return model.written[-1]
+
+
+def fresh_facts(model: FakeModel, n: int) -> list[str]:
+    return [model.fresh() for _ in range(n)]
+
+
+def second_copies_first(model: FakeModel, n: int) -> list[str]:
+    claims = fresh_facts(model, n)
+    claims[1] = claims[0]
+    return claims
+
+
+def second_dated(model: FakeModel, n: int) -> list[str]:
+    claims = fresh_facts(model, n)
+    claims[1] = dated(model)
+    return claims
+
+
+def two_copy_first(model: FakeModel, n: int) -> list[str]:
+    claims = fresh_facts(model, n)
+    claims[1] = claims[2] = claims[0]
+    return claims
+
+
+def stale_copies_first(model: FakeModel, n: int) -> list[str]:
+    claims = fresh_facts(model, n)
+    claims[3] = claims[0]
+    return claims
 
 
 def memory_plan(seed: int) -> G.MemoryPlan:
@@ -147,6 +193,20 @@ class PlanTest(unittest.TestCase):
             by_size.append(sum(c * c for c in durable.values()) / sum(durable.values()))
         self.assertGreater(mean(picked), (mean(even) + mean(by_size)) / 2)
 
+    def test_a_stale_fact_lands_in_a_category_in_proportion_to_its_size(self) -> None:
+        picked: list[float] = []
+        even: list[float] = []
+        by_size: list[float] = []
+        for seed in range(2000):
+            plan = G.plan_memory(random.Random(seed), KEEPER, 0, False)
+            durable = Counter(slot.category for slot in plan.slots if not slot.stale)
+            for slot in plan.slots:
+                if slot.stale and durable[slot.category]:
+                    picked.append(durable[slot.category])
+                    even.append(sum(durable.values()) / len(durable))
+                    by_size.append(sum(c * c for c in durable.values()) / sum(durable.values()))
+        self.assertGreater(mean(picked), (mean(even) + mean(by_size)) / 2)
+
 
 class MemoryTest(unittest.TestCase):
     def test_a_duplicate_names_the_id_its_fact_gets_once_sorted_by_time(self) -> None:
@@ -179,6 +239,27 @@ class MemoryTest(unittest.TestCase):
         self.assertGreater(len(refused.duplicate), G.CANDIDATE_ATTEMPTS - 1)
         self.assertIsNone(G.build_memory(refused, memory_plan(0)))
 
+    def test_a_fact_that_copies_another_or_misses_its_marks_is_not_kept(self) -> None:
+        # Three durable slots, then three stale ones; DURABLE_KEEP_SHARE keeps an attempt with two
+        # durable facts of three, and only one with every stale fact.
+        plan = memory_plan(0)
+        for reply in (second_copies_first, second_dated):
+            kept = G.claims_for(FakeModel(facts=(reply,)), plan, "topic_0", plan.slots, [])
+            assert kept is not None
+            self.assertEqual([plan.slots.index(slot) for slot, _ in kept], [0, 2, 3, 4, 5], reply.__name__)
+        existing = text(999)
+        kept = G.claims_for(FakeModel(facts=(lambda m, n: [existing, *fresh_facts(m, n - 1)],)), plan, "topic_0",
+                            plan.slots, [existing])
+        assert kept is not None
+        self.assertEqual([plan.slots.index(slot) for slot, _ in kept], [1, 2, 3, 4, 5])
+
+    def test_an_attempt_that_keeps_too_few_facts_is_asked_again(self) -> None:
+        for lost in (two_copy_first, stale_copies_first):
+            model = FakeModel(facts=(lost, fresh_facts))
+            kept = G.claims_for(model, memory_plan(0), "topic_0", memory_plan(0).slots, [])
+            assert kept is not None
+            self.assertEqual([claim for _, claim in kept], model.written[-6:], lost.__name__)
+
 
 class CandidatesTest(unittest.TestCase):
     def test_no_target_is_a_planted_fact(self) -> None:
@@ -204,6 +285,24 @@ class CandidatesTest(unittest.TestCase):
                 landed[built[0].category] += 1
             # A target is topic_0 with 0.8; a category drawn evenly would be 0.5.
             self.assertGreater(landed["topic_0"] / runs, 0.7, kind)
+
+    def test_a_candidate_that_copies_a_fact_or_misses_its_marks_or_length_is_not_kept(self) -> None:
+        plans = (plan_of(S.CandidateKind.NEW_DURABLE),)
+        model = FakeModel(candidate=(a_fact, dated, too_long, fresh))
+        built = G.build_candidates(model, random.Random(1), KEEPER, PLANTED, plans)
+        assert built is not None
+        self.assertEqual([c.claim for c in built], [model.written[-1]])
+        refused = FakeModel(candidate=(a_fact, dated, too_long) * 2)
+        self.assertGreaterEqual(len(refused.candidate), G.CANDIDATE_ATTEMPTS)
+        self.assertIsNone(G.build_candidates(refused, random.Random(1), KEEPER, PLANTED, plans))
+
+    def test_a_candidate_that_copies_an_earlier_one_is_not_kept(self) -> None:
+        model = FakeModel(candidate=(fresh, previous, fresh))
+        plans = (plan_of(S.CandidateKind.NEW_DURABLE), plan_of(S.CandidateKind.TRANSIENT))
+        built = G.build_candidates(model, random.Random(1), KEEPER, PLANTED, plans)
+        assert built is not None
+        self.assertEqual([c.claim for c in built], model.written)
+        self.assertEqual(len(model.written), 2)
 
 
 if __name__ == "__main__":

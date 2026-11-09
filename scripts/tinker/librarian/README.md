@@ -5,8 +5,9 @@ keeper-librarian Lane Add-on's `admission` output, and decide with fixed pass
 lines whether the trained checkpoint may answer that output first.
 
 Everything runs on the operator's machine with `uv run`. Each script pins its
-dependencies in a PEP 723 header. `TINKER_API_KEY` comes from the environment
-and is never written. Paths to the MASC runtime store come from `--base` or
+dependencies in a PEP 723 header. `TINKER_API_KEY`, and `ZAI_API_KEY` for a GLM
+run, come from the environment and are never written. Paths to the MASC runtime
+store come from `--base` or
 `MASC_BASE_PATH`. Output goes under `artifacts/` (git-ignored).
 
 ## Data rule
@@ -15,7 +16,8 @@ The exact-request store holds real Keeper memory. Scripts read it in place.
 Nothing from it is copied into this repository: the E-real manifest holds only
 record digests and file sha256 values. E-real model answers stay in the run's
 `calls.jsonl` under `artifacts/`. The committed evidence holds numbers, IDs and
-verdicts.
+verdicts. A GLM run sends E-real prompts to Z.AI, where MASC's GLM slot sends
+them.
 
 Synthetic Keepers, memories and candidates are invented by the model from
 `synth_spec.py` and `synth_prompts.py`. They carry no store content.
@@ -51,6 +53,7 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `yojson_wire.py` | Reads and writes JSON the way MASC's Yojson does |
 | `check_validator_on_store.py` | Runs the parser and the validator over every retained admission record and prints counts, read only |
 | `tinker_oai.py` | Budgeted calls to Tinker's OpenAI-compatible endpoint, cached for resume |
+| `glm_chat.py` | Capped calls to Z.AI's GLM coding endpoint in the request MASC's GLM slot sends, cached for resume |
 | `eval_admission.py` | Measures targets on E-real and E-synth, then applies the gates |
 | `memory_scores.py` | Scores one answer: E-real against the live answer, E-synth by the memory it leaves |
 | `teacher_sample.py` | Keeps teacher answers that match the training labels |
@@ -76,6 +79,11 @@ An exact request carries `max_tokens` only when its lane declares
 lane's value to each slot's declared or catalog output ceiling. At rollout the
 checkpoint's binding declares an output ceiling of 32,768, and the lane's
 `max_output_tokens` is at least that, so the checkpoint receives 32,768.
+
+A GLM run sends what MASC's GLM slot sends: the same two messages, with
+thinking enabled and a `json_object` response format. The slot declares no
+output ceiling and no effort, so the request carries neither, and the endpoint
+applies its own defaults.
 
 ## Order
 
@@ -172,3 +180,15 @@ draws every prompt with that file's template from the same request data. An
 E-real prompt is first read with the pinned template. `summary.json` records
 the sha256 of the template the prompts were drawn with, and `verdict` refuses
 a run whose template is not the pinned one.
+
+`run --provider glm --target glm=<model> --max-calls <n>` measures the same
+sets on GLM (`glm_chat.py`). It sends no warm call, and its rows cost nothing
+per token. `--max-calls` caps the requests under `--out`, counting the ones
+already logged. The code GLM states in the body decides before the HTTP status:
+a spent usage window, plan or balance (1113, 1308-1311, 1313, 1314, 1316-1321)
+or an auth code stops the run with GLM's message, which names the reset time,
+and exits with status 2. A rerun with the same `--out` after the reset sends
+only the rest. A rate limit, a server code, no response, or a 408, 429 or 5xx
+without a code is sent again; any other failure leaves that answer not valid.
+Keep GLM and Tinker runs in separate `--out` folders: each caller counts every
+row of its log against its own limit.

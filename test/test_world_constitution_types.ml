@@ -86,7 +86,7 @@ let test_removal_without_a_reason_decodes () =
   match Wire.entry_of_json (Yojson.Safe.from_string raw) with
   | Ok (Removed { reason; _ }) ->
     Alcotest.(check bool) "no reason" true (Option.is_none reason)
-  | Ok (Added _) -> Alcotest.fail "decoded as the other move"
+  | Ok (Added _ | Replaced _) -> Alcotest.fail "decoded as the other move"
   | Error error ->
     Alcotest.failf "a reason-less removal was refused: %s"
       (Wire.decode_error_to_string error)

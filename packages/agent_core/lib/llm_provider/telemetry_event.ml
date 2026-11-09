@@ -81,12 +81,3 @@ type t =
       }
   | Wire_observer_failure of Wire_observer.failure
 [@@deriving yojson, show]
-
-let event_type_name = function
-  | Streaming_first_chunk _ -> "streaming_first_chunk"
-  | Streaming_summary _ -> "streaming_summary"
-  | Thinking_complete _ -> "thinking_complete"
-  | Timeout _ -> "timeout"
-  | Prefill_complete _ -> "prefill_complete"
-  | Wire_observer_failure _ -> "wire_observer_failure"
-;;

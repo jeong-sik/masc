@@ -61,11 +61,6 @@ let window_label ~slots = window_of_minutes (slots * slot_minutes)
 
 let slot_label = window_label ~slots:1
 
-(* G1a draws whole clock hours; G2 draws half-hour cells and returns the
-   headers to [window_label]/[slot_label]. *)
-let hour_window_label ~hours = window_of_minutes (hours * minutes_per_hour)
-let hour_slot_label = hour_window_label ~hours:1
-
 type verdict =
   | Failing of { resting : bool }
   | Paused

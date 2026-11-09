@@ -145,7 +145,6 @@ let pulse_quiet_mark = health_glyph Reading.Health_idle
 let axis_before_glyph = failing_glyph
 let axis_now_glyph = filled_dot
 let axis_next_glyph = "\xe2\x96\xb9" (* ▹ *)
-let pulse_header = Printf.sprintf "%s %dh" axis_before_glyph pulse_hours
 let axis_now_header = axis_now_glyph ^ " now"
 
 (* The grid of the views (RFC-0515 §2.4). The row marks are the marks the
@@ -164,6 +163,12 @@ let grid_due_header = "due"
 let grid_lag_header = "lag"
 let grid_pulse_header ~window = axis_before_glyph ^ " " ^ window
 let grid_next_header ~window = "next " ^ axis_next_glyph ^ " " ^ window
+
+(* The views' pulse draws one mark per half hour (RFC-0515 §2.4.3): the
+   lowest bar for ok turns, a full one for failed turns ([grid_full_mark])
+   and a half one for a half hour that holds both. *)
+let grid_pulse_ok_mark = "\xe2\x96\x81" (* ▁ *)
+let grid_pulse_failed_and_ok_mark = "\xe2\x96\x84" (* ▄ *)
 
 (* The memory and age views, the failure line and the group titles. *)
 let grid_wait_glyph = "\xe2\x97\x8c" (* ◌ *)
@@ -201,6 +206,15 @@ let column_legend =
     ; unknown_mark, "unknown"
     ]
   in
+  let half_hour_marks =
+    [ grid_dot_mark, "no turn"
+    ; grid_pulse_ok_mark, "ok"
+    ; grid_pulse_failed_and_ok_mark, "failed and ok"
+    ; grid_full_mark, "failed"
+    ; unknown_mark, "unknown"
+    ]
+  in
+  let marked marks = String.concat " / " (List.map (fun (mark, word) -> mark ^ " " ^ word) marks) in
   [ now_header, "what the keeper is doing at this moment"
   ; ( age_header
     , "time since it last moved: the open turn's latest update (its start before it \
@@ -241,6 +255,13 @@ let column_legend =
          the most facts; %s is a value the server did not measure"
         grid_saved_mark Masc_tui_theme.Glyph.no_value grid_no_snapshot_word grid_stale_mark
         Masc_tui_keeper_age_ladder.unmeasured_mark )
+  ; ( String.concat " " (List.map fst half_hour_marks)
+    , Printf.sprintf
+        "the views' turn pulse: autonomous turn results of the last half hours, one mark \
+         per half hour, newest on the right: %s; a rested turn counts as failed, chat turns \
+         are not counted, and a half hour from before the server's record of the keeper \
+         reads %s. The header names how long the marks span"
+        (marked half_hour_marks) unknown_mark )
   ; ( failing_glyph
     , "a failing keeper's last failure: how long ago · cause · the runtime that ended it \
        · candidates tried. The list draws it in place of its runtime or first in DETAIL" )
@@ -253,10 +274,8 @@ let column_legend =
     , Printf.sprintf
         "autonomous turn results of the last %d clock hours, one mark per hour, newest \
          on the right: %s; chat turns are not counted, and an hour from before the \
-         server's record of the keeper reads %s (Detailed second row, and %s in the views)"
-        pulse_hours
-        (String.concat " / " (List.map (fun (mark, word) -> mark ^ " " ^ word) pulse_marks))
-        unknown_mark pulse_header )
+         server's record of the keeper reads %s (Detailed second row)"
+        pulse_hours (marked pulse_marks) unknown_mark )
   ; "Mode " ^ letters activation_letter activations, words activation_word activations
   ; "S " ^ letters sandbox_letter sandboxes, "sandbox: " ^ words sandbox_word sandboxes
   ; ( "쉬는 중"

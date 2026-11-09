@@ -315,15 +315,16 @@ generic untyped `tool_call(name, json)`로 policy boundary를 우회하는 설�
 `prompt_too_long`을 실제 방출함을 강제 overflow stdio 캡처로 확증하여 분류
 권위를 typed 축으로 이관했다.)
 
-1. quota 막힘을 먼저 본다. `api_error_status`가 429이거나 rate limit이 거절이면
-   `Quota_blocked`다. 거절된 창이 없는 429는 `Rate_throttled`다
-   (`runtime_claude_code.ml:2129-2149`, `:2213-2221`).
+1. quota 막힘을 먼저 본다. `api_error_status`가 429이거나 이 턴의 마지막 rate limit
+   상태가 거절이면 `Quota_blocked`다. 막힘 종류는 거절된 창이 있으면 `Quota_spent`,
+   없으면 `Rate_throttled`다 (`runtime_claude_code.ml:2129-2149`, `:2213-2221`).
 2. 그다음 `is_error`가 참이고 `terminal_reason`이 `prompt_too_long`, `blocking_limit`,
    `rapid_refill_breaker`인 frame은 문구와 무관하게 typed context overflow가 된다
    (`:2042-2053`, `:2200-2230`).
-3. `terminal_reason`이 다른 값이거나 없으면 문구가 overflow 문장과 같아도 generic
-   failure로 남는다. 문구는 읽지 않는다.
-4. tool/response activity flag가 terminal error에 보존된다.
+3. `is_error`가 참이고 `terminal_reason`이 다른 값이거나 없으면, 문구가 overflow 문장과
+   같아도 `Turn_failed_with_observation`으로 남는다 (`:2231-2244`). 문구는 읽지 않는다.
+4. `Quota_blocked`, `Context_window_exceeded`, `Turn_failed_with_observation`은
+   tool/response activity flag를 보존한다.
 
 ### 10.2 Frozen episode
 

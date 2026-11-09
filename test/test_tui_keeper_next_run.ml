@@ -8,6 +8,8 @@ let make_row
     ?runner_hold
     ?(occurrence_stage = Masc.Tui_schedule_observation.No_occurrence)
     ?occurrence_due_at_iso
+    ?expires_at_iso
+    ?(recurrence = Ok Schedule_domain.One_shot)
     () : Masc_tui_types.schedule_row =
   { sch_schedule_id = id
   ; sch_schedule_instance_id = "inst-1"
@@ -18,9 +20,9 @@ let make_row
   ; sch_requested_at_iso = "2026-11-07T00:00:00Z"
   ; sch_due_at_iso = due_at_iso
   ; sch_next_due_at_iso = next_due_at_iso
-  ; sch_expires_at_iso = None
+  ; sch_expires_at_iso = expires_at_iso
   ; sch_recurrence_summary = ""
-  ; sch_recurrence = `Assoc []
+  ; sch_recurrence = recurrence
   ; sch_payload_digest = "digest"
   ; sch_payload = `Assoc []
   ; sch_payload_kind = None
@@ -406,6 +408,340 @@ let test_index_of_agenda () =
     true (Masc_tui_keeper_next_run.find empty_index ~keeper_name:"alpha" = Masc_tui_keeper_next_run.Unknown)
 ;;
 
+(* Wake strip (RFC-0515 §2.4.4). [day] starts on a slot boundary and [now] is
+   one minute into it, so slot [i] holds [day + i * 30min]. *)
+let day = 1794009600.0 (* 2026-11-07T00:00:00Z *)
+let now = day +. 60.
+let ahead = 24
+let iso ~h ~m = Printf.sprintf "2026-11-07T%02d:%02d:00Z" h m
+
+let scheduled ?(keeper_name = "alpha") ?expires_at_iso ?recurrence ~h ~m () =
+  make_row ~keeper_name ~due_at_iso:(iso ~h ~m) ?expires_at_iso ?recurrence ()
+;;
+
+let agenda_index snapshot =
+  Masc_tui_keeper_next_run.index_of_agenda ~freshness:Masc_tui_agenda.Last_read snapshot
+;;
+
+let strip_of ?(keeper_name = "alpha") rows =
+  Masc_tui_keeper_next_run.wake_strip
+    (agenda_index (Some (make_snapshot rows)))
+    ~now ~ahead ~keeper_name
+;;
+
+let wake_slot =
+  Alcotest.testable
+    (fun fmt -> function
+       | Masc_tui_keeper_next_run.Wakes n -> Format.fprintf fmt "Wakes %d" n
+       | Masc_tui_keeper_next_run.Wakes_unknown -> Format.pp_print_string fmt "Wakes_unknown")
+    ( = )
+;;
+
+let strip = Alcotest.list wake_slot
+let every slot = List.init (ahead + 1) (fun _ -> slot)
+
+(* [Wakes 1] in the listed slots, [Wakes 0] elsewhere. *)
+let once_in indexes =
+  List.init (ahead + 1) (fun index ->
+    Masc_tui_keeper_next_run.Wakes (if List.mem index indexes then 1 else 0))
+;;
+
+let interval seconds = Ok (Schedule_domain.Interval { interval_sec = seconds })
+
+let test_interval_wakes_every_period () =
+  (* 00:00 is a minute behind [now] and not late, so it is in the now slot. *)
+  Alcotest.check strip "600 s puts three wakes in every slot"
+    (every (Masc_tui_keeper_next_run.Wakes 3))
+    (strip_of [ scheduled ~h:0 ~m:0 ~recurrence:(interval 600) () ])
+;;
+
+(* A 45-minute interval from yesterday's 23:50 stays on its own grid: 00:35,
+   01:20, 02:05 and on, so every third slot after the now slot is empty. The
+   missed 23:50 is the now slot's one wake. *)
+let test_an_interval_stays_on_its_own_grid () =
+  Alcotest.check strip "23:50 + k * 45 min"
+    (List.init (ahead + 1) (fun index ->
+       Masc_tui_keeper_next_run.Wakes (if index = 0 || index mod 3 <> 0 then 1 else 0)))
+    (strip_of
+       [ make_row ~keeper_name:"alpha" ~due_at_iso:"2026-11-06T23:50:00Z"
+           ~recurrence:(interval 2700) () ])
+;;
+
+(* While the 00:00 occurrence is still queued, the request already says
+   00:10. The strip walks from the request, as the runner steps it. *)
+let test_strip_walks_from_the_request_due () =
+  let row =
+    make_row ~keeper_name:"alpha" ~due_at_iso:(iso ~h:0 ~m:10) ~next_due_at_iso:(iso ~h:0 ~m:10)
+      ~occurrence_stage:Masc.Tui_schedule_observation.Queued
+      ~occurrence_due_at_iso:(iso ~h:0 ~m:0) ~recurrence:(interval 600) ()
+  in
+  Alcotest.check strip "00:10 and 00:20 in the now slot, then three a slot"
+    (List.init (ahead + 1) (fun index ->
+       Masc_tui_keeper_next_run.Wakes (if index = 0 then 2 else 3)))
+    (strip_of [ row ])
+;;
+
+(* Two days of missed 03:00 runs are one firing in the now slot, and the
+   next 03:00 is today's. *)
+let test_a_row_missed_by_more_than_a_day_counts_once () =
+  let missed recurrence =
+    strip_of [ make_row ~keeper_name:"alpha" ~due_at_iso:"2026-11-05T03:00:00Z" ~recurrence () ]
+  in
+  Alcotest.check strip "daily"
+    (once_in [ 0; 6 ])
+    (missed (Ok (Schedule_domain.Daily { hour = 3; minute = 0; second = 0; timezone = "UTC" })));
+  Alcotest.check strip "cron"
+    (once_in [ 0; 6 ])
+    (missed (Ok (Schedule_domain.Cron { expression = "0 3 * * *"; timezone = "UTC" })))
+;;
+
+(* A due before the now slot and not late: the runner fires it once, so the
+   occurrences between it and the slot start are not counted. An occurrence
+   on the slot start, 00:00, counts in the now slot beside the missed due. *)
+let test_an_occurrence_on_the_slot_start_counts () =
+  let missed ~due_at_iso recurrence =
+    strip_of [ make_row ~keeper_name:"alpha" ~due_at_iso ~recurrence () ]
+  in
+  let hourly =
+    List.init (ahead + 1) (fun index ->
+      Masc_tui_keeper_next_run.Wakes
+        (if index = 0 then 2 else if index mod 2 = 0 then 1 else 0))
+  in
+  Alcotest.check strip "interval: 21:00 missed, then 00:00 and every hour" hourly
+    (missed ~due_at_iso:"2026-11-06T21:00:00Z" (interval 3600));
+  Alcotest.check strip "cron: 21:00 missed, then 00:00 and every hour" hourly
+    (missed ~due_at_iso:"2026-11-06T21:00:00Z"
+       (Ok (Schedule_domain.Cron { expression = "0 * * * *"; timezone = "UTC" })));
+  Alcotest.check strip "daily: yesterday's 00:00 missed, then today's 00:00"
+    (List.init (ahead + 1) (fun index ->
+       Masc_tui_keeper_next_run.Wakes (if index = 0 then 2 else 0)))
+    (missed ~due_at_iso:"2026-11-06T00:00:00Z"
+       (Ok (Schedule_domain.Daily { hour = 0; minute = 0; second = 0; timezone = "UTC" })))
+;;
+
+let test_strip_is_the_same_for_every_now_in_one_slot () =
+  (* At 00:20 the occurrence at 00:10 has passed. It is in the now slot all
+     the same, so the strip read at 00:01 and at 00:20 agree. *)
+  let index =
+    agenda_index (Some (make_snapshot [ scheduled ~h:0 ~m:0 ~recurrence:(interval 600) () ]))
+  in
+  let read now = Masc_tui_keeper_next_run.wake_strip index ~now ~ahead ~keeper_name:"alpha" in
+  let early = read (day +. 60.) in
+  let late = read (day +. 1200.) in
+  Alcotest.check strip "00:01 reads three wakes a slot"
+    (every (Masc_tui_keeper_next_run.Wakes 3)) early;
+  Alcotest.check strip "00:20 reads the same strip" early late;
+  Alcotest.check strip "a fresh index at 00:20 agrees"
+    early
+    (Masc_tui_keeper_next_run.wake_strip
+       (agenda_index (Some (make_snapshot [ scheduled ~h:0 ~m:0 ~recurrence:(interval 600) () ])))
+       ~now:(day +. 1200.) ~ahead ~keeper_name:"alpha")
+;;
+
+let test_daily_wakes_once () =
+  let daily =
+    Ok (Schedule_domain.Daily { hour = 3; minute = 0; second = 0; timezone = "UTC" })
+  in
+  Alcotest.check strip "03:00 is the only wake in the next 12.5 hours"
+    (once_in [ 6 ])
+    (strip_of [ scheduled ~h:3 ~m:0 ~recurrence:daily () ])
+;;
+
+let test_cron_every_half_hour () =
+  let cron = Ok (Schedule_domain.Cron { expression = "*/30 * * * *"; timezone = "UTC" }) in
+  Alcotest.check strip "*/30 puts one wake in every slot"
+    (every (Masc_tui_keeper_next_run.Wakes 1))
+    (strip_of [ scheduled ~h:0 ~m:0 ~recurrence:cron () ])
+;;
+
+let test_one_shot_wakes_once () =
+  Alcotest.check strip "a one-shot at 05:00 is one wake"
+    (once_in [ 10 ])
+    (strip_of [ scheduled ~h:5 ~m:0 () ])
+;;
+
+let test_no_wake_at_or_after_expiry () =
+  let row =
+    scheduled ~h:0 ~m:0 ~recurrence:(interval 600) ~expires_at_iso:(iso ~h:1 ~m:0) ()
+  in
+  Alcotest.check strip "wakes stop at 01:00"
+    (List.init (ahead + 1) (fun index ->
+       Masc_tui_keeper_next_run.Wakes (if index < 2 then 3 else 0)))
+    (strip_of [ row ])
+;;
+
+(* A late or held row wakes again when it fires or the hold ends, a time
+   neither row carries, so its share of the strip is unknown. *)
+let test_held_and_late_rows_are_unknown () =
+  let hold : Masc.Tui_decode.schedule_runner_hold =
+    { srh_occurrence_id = "occ-1"
+    ; srh_due_at_iso = iso ~h:1 ~m:0
+    ; srh_reason = Masc.Tui_decode.Hold_previous_wake_untaken
+    ; srh_observed_at = now
+    }
+  in
+  let held = { (scheduled ~h:1 ~m:0 ()) with sch_runner_hold = Some hold } in
+  let late = make_row ~id:"sch-late" ~status:"due" ~keeper_name:"alpha"
+      ~due_at_iso:(iso ~h:0 ~m:0) ~recurrence:(interval 600) () in
+  let unknown = every Masc_tui_keeper_next_run.Wakes_unknown in
+  Alcotest.check strip "a held row is unknown" unknown (strip_of [ held ]);
+  Alcotest.check strip "a late row is unknown" unknown (strip_of [ late ]);
+  Alcotest.check strip "another row's known wake shows through"
+    (List.init (ahead + 1) (fun index ->
+       if index = 2 then Masc_tui_keeper_next_run.Wakes 1
+       else Masc_tui_keeper_next_run.Wakes_unknown))
+    (strip_of [ held; late; make_row ~id:"sch-known" ~keeper_name:"alpha"
+                              ~due_at_iso:(iso ~h:1 ~m:0) () ]);
+  Alcotest.check strip "a late row is unknown only up to its expiry"
+    (List.init (ahead + 1) (fun index ->
+       if index < 2 then Masc_tui_keeper_next_run.Wakes_unknown
+       else Masc_tui_keeper_next_run.Wakes 0))
+    (strip_of [ { late with sch_expires_at_iso = Some (iso ~h:1 ~m:0) } ]);
+  Alcotest.check strip "the same row without the hold wakes"
+    (once_in [ 2 ])
+    (strip_of [ { held with sch_runner_hold = None } ])
+;;
+
+let test_unreadable_status_is_unknown () =
+  Alcotest.check strip "a Keeper whose only row has an unknown status word"
+    (every Masc_tui_keeper_next_run.Wakes_unknown)
+    (strip_of [ make_row ~status:"paused" ~keeper_name:"alpha" ~due_at_iso:(iso ~h:1 ~m:0) () ])
+;;
+
+let test_unread_recurrence_knows_only_the_first_wake () =
+  Alcotest.check strip "after 01:00 the slots are unknown"
+    (List.init (ahead + 1) (fun index ->
+       if index < 2 then Masc_tui_keeper_next_run.Wakes 0
+       else if index = 2 then Masc_tui_keeper_next_run.Wakes 1
+       else Masc_tui_keeper_next_run.Wakes_unknown))
+    (strip_of [ scheduled ~h:1 ~m:0 ~recurrence:(Error "unknown recurrence kind") () ])
+;;
+
+(* A fleet page in the server's shape with one row of [recurrence]. The
+   actor and the readable recurrence go through the schedule contract's own
+   writers. *)
+let agenda_json recurrence =
+  let actor =
+    Schedule_domain.actor_to_yojson
+      { Schedule_domain.id = "operator"; kind = Schedule_domain.Human_operator; display_name = None }
+  in
+  `Assoc
+    [ "generated_at", `String (iso ~h:0 ~m:0)
+    ; "status", `String "ok"
+    ; "request_count", `Int 1
+    ; "truncated", `Bool false
+    ; "fsm", `Assoc [ "next_due_at", `Null ]
+    ; "counts", `Null
+    ; "schedule_runner", `Assoc [ "status", `String "ok" ]
+    ; ( "requests"
+      , `List
+          [ `Assoc
+              [ "schedule_instance_id", `String "inst-1"
+              ; "schedule_id", `String "sch-1"
+              ; "status", `String "scheduled"
+              ; "source", `String "operator_request"
+              ; "requested_by", actor
+              ; "scheduled_by", actor
+              ; "requested_at_iso", `String (iso ~h:0 ~m:0)
+              ; "due_at_iso", `String (iso ~h:1 ~m:0)
+              ; "next_due_at_iso", `String (iso ~h:1 ~m:0)
+              ; "expires_at_iso", `Null
+              ; "recurrence_summary", `String "every two weeks"
+              ; "recurrence", recurrence
+              ; "payload_digest", `String "digest"
+              ; "payload", `Assoc []
+              ; "payload_support", `String "supported"
+              ; "payload_keeper_name", `String "alpha"
+              ; "runner_hold", `Null
+              ]
+          ] )
+    ]
+;;
+
+let test_decode_keeps_a_row_whose_recurrence_it_cannot_read () =
+  let decode recurrence =
+    match Masc_tui_schedule_decode.snapshot_of_json (agenda_json recurrence) with
+    | Ok snapshot -> snapshot
+    | Error reason -> Alcotest.fail reason
+  in
+  let unread = decode (`Assoc [ "kind", `String "fortnightly" ]) in
+  (match unread.scs_rows with
+   | [ { Masc_tui_types.sch_recurrence = Error _; _ } ] -> ()
+   | [ { Masc_tui_types.sch_recurrence = Ok _; _ } ] -> Alcotest.fail "an unknown kind decoded"
+   | rows -> Alcotest.failf "the page kept %d rows, not 1" (List.length rows));
+  Alcotest.check strip "the kept row wakes at 01:00, then is unknown"
+    (List.init (ahead + 1) (fun index ->
+       if index < 2 then Masc_tui_keeper_next_run.Wakes 0
+       else if index = 2 then Masc_tui_keeper_next_run.Wakes 1
+       else Masc_tui_keeper_next_run.Wakes_unknown))
+    (Masc_tui_keeper_next_run.wake_strip (agenda_index (Some unread))
+       ~now ~ahead ~keeper_name:"alpha");
+  let readable =
+    decode (Schedule_domain.recurrence_to_yojson (Schedule_domain.Interval { interval_sec = 600 }))
+  in
+  match readable.scs_rows with
+  | [ { Masc_tui_types.sch_recurrence = Ok (Schedule_domain.Interval { interval_sec = 600 }); _ } ]
+    -> ()
+  | _ -> Alcotest.fail "a 600 s interval did not decode as itself"
+;;
+
+let test_failed_or_missing_agenda_is_unknown () =
+  let unknown = every Masc_tui_keeper_next_run.Wakes_unknown in
+  Alcotest.check strip "a failed read"
+    unknown
+    (Masc_tui_keeper_next_run.wake_strip
+       (agenda_index (Some (make_snapshot ~read_error:"store unreadable" [])))
+       ~now ~ahead ~keeper_name:"alpha");
+  Alcotest.check strip "no agenda yet"
+    unknown
+    (Masc_tui_keeper_next_run.wake_strip (agenda_index None) ~now ~ahead ~keeper_name:"alpha")
+;;
+
+let test_cut_agenda_is_unknown_from_its_last_due () =
+  let mine = scheduled ~h:1 ~m:0 () in
+  let last = make_row ~id:"sch-other" ~keeper_name:"beta" ~due_at_iso:(iso ~h:4 ~m:0) () in
+  let read rows =
+    Masc_tui_keeper_next_run.wake_strip
+      (agenda_index (Some (make_snapshot ~truncated:true rows)))
+      ~now ~ahead ~keeper_name:"alpha"
+  in
+  Alcotest.check strip "slots before 04:00 are known, from 04:00 on unknown"
+    (List.init (ahead + 1) (fun index ->
+       if index = 2 then Masc_tui_keeper_next_run.Wakes 1
+       else if index < 8 then Masc_tui_keeper_next_run.Wakes 0
+       else Masc_tui_keeper_next_run.Wakes_unknown))
+    (read [ mine; last ]);
+  Alcotest.check strip "a closed last row means every active row was sent"
+    (once_in [ 2 ])
+    (read [ mine; { last with sch_status = "succeeded" } ])
+;;
+
+let test_strip_follows_the_now_slot_and_length () =
+  let index = agenda_index (Some (make_snapshot [ scheduled ~h:1 ~m:0 () ])) in
+  let read ~now ~ahead =
+    Masc_tui_keeper_next_run.wake_strip index ~now ~ahead ~keeper_name:"alpha"
+  in
+  Alcotest.check strip "three slots" (Masc_tui_keeper_next_run.[ Wakes 0; Wakes 0; Wakes 1 ])
+    (read ~now ~ahead:2);
+  Alcotest.check strip "five slots"
+    (Masc_tui_keeper_next_run.[ Wakes 0; Wakes 0; Wakes 1; Wakes 0; Wakes 0 ])
+    (read ~now ~ahead:4);
+  Alcotest.check strip "half an hour later the wake is one slot nearer"
+    (Masc_tui_keeper_next_run.[ Wakes 0; Wakes 1; Wakes 0 ])
+    (read ~now:(now +. 1800.) ~ahead:2)
+;;
+
+let test_sum_rule () =
+  let open Masc_tui_keeper_next_run in
+  Alcotest.check strip "known wakes add; a zero with an unknown is unknown"
+    [ Wakes_unknown; Wakes_unknown; Wakes 3; Wakes 1; Wakes 0 ]
+    (sum_wake_strips
+       [ [ Wakes 0; Wakes_unknown; Wakes 2; Wakes_unknown; Wakes 0 ]
+       ; [ Wakes_unknown; Wakes_unknown; Wakes_unknown; Wakes 1; Wakes 0 ]
+       ; [ Wakes 0; Wakes 0; Wakes 1 ]
+       ])
+;;
+
 let () =
   Alcotest.run "tui_keeper_next_run"
     [ ( "next_run reduction"
@@ -414,5 +750,34 @@ let () =
         ; Alcotest.test_case "lane vs keeper separation" `Quick test_lane_vs_keeper_separation
         ; Alcotest.test_case "hold reading variations" `Quick test_hold_reading_variations
         ; Alcotest.test_case "index of agenda" `Quick test_index_of_agenda
+        ] )
+    ; ( "wake strip"
+      , [ Alcotest.test_case "interval" `Quick test_interval_wakes_every_period
+        ; Alcotest.test_case "interval off the slot grid" `Quick
+            test_an_interval_stays_on_its_own_grid
+        ; Alcotest.test_case "walks from the request due" `Quick
+            test_strip_walks_from_the_request_due
+        ; Alcotest.test_case "missed by more than a day" `Quick
+            test_a_row_missed_by_more_than_a_day_counts_once
+        ; Alcotest.test_case "occurrence on the slot start" `Quick
+            test_an_occurrence_on_the_slot_start_counts
+        ; Alcotest.test_case "same strip within one slot" `Quick
+            test_strip_is_the_same_for_every_now_in_one_slot
+        ; Alcotest.test_case "daily" `Quick test_daily_wakes_once
+        ; Alcotest.test_case "cron" `Quick test_cron_every_half_hour
+        ; Alcotest.test_case "one-shot" `Quick test_one_shot_wakes_once
+        ; Alcotest.test_case "expiry" `Quick test_no_wake_at_or_after_expiry
+        ; Alcotest.test_case "held and late" `Quick test_held_and_late_rows_are_unknown
+        ; Alcotest.test_case "unreadable status" `Quick test_unreadable_status_is_unknown
+        ; Alcotest.test_case "unread recurrence" `Quick
+            test_unread_recurrence_knows_only_the_first_wake
+        ; Alcotest.test_case "decode keeps an unread recurrence" `Quick
+            test_decode_keeps_a_row_whose_recurrence_it_cannot_read
+        ; Alcotest.test_case "failed or missing agenda" `Quick
+            test_failed_or_missing_agenda_is_unknown
+        ; Alcotest.test_case "cut agenda" `Quick test_cut_agenda_is_unknown_from_its_last_due
+        ; Alcotest.test_case "now slot and length" `Quick
+            test_strip_follows_the_now_slot_and_length
+        ; Alcotest.test_case "sum rule" `Quick test_sum_rule
         ] )
     ]

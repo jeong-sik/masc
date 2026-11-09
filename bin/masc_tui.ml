@@ -31938,11 +31938,10 @@ Use relative paths for resources already held in the package. -->
        edited fifteen fields and saved. The status is on the screen before the
        key is pressed, so the answer is available here. *)
     | Some row ->
-      (match Masc_tui_types.schedule_modify_refusal row with
-       | Some reason -> report_action state "error" ("modify: " ^ reason)
-       | None ->
-         handle_schedule_form ~action:"modify"
-           ~stem:(Masc_tui_types.schedule_update_form_json row)
+      (match Masc_tui_types.schedule_update_form_json row with
+       | Error reason -> report_action state "error" ("modify: " ^ reason)
+       | Ok stem ->
+         handle_schedule_form ~action:"modify" ~stem
            ~post:(fun body_json ->
              Masc_tui_http.post_schedule_update ~host:server_peer_host
                ~port:state.port ~body_json))

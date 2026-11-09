@@ -4509,7 +4509,10 @@
   masc_tui_types
   masc_tui_agenda
   masc_tui_keeper_axis_cell
-  masc_tui_keeper_next_run))
+  masc_tui_keeper_next_run
+  ;; The decode test reads a page through the agenda's own decoder.
+  masc_tui_loader
+  yojson))
 
 (test
  (name test_tui_keeper_axis)

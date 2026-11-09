@@ -167,24 +167,49 @@ let recording_transport ~clock ~dispatched ~stream_first_event_s : Llm_transport
   })
 ;;
 
+(* The agent config that carries the provider config's prompt and sampling
+   fields, so the request is built from the values the provider config holds. *)
+let agent_config_of_provider (pc : Provider_config.t) : Agent_core.Types.agent_config =
+  { (Agent_core.Types.default_config ~model:pc.model_id) with
+    system_prompt = pc.system_prompt
+  ; max_tokens = pc.max_tokens
+  ; temperature = pc.temperature
+  ; top_p = pc.top_p
+  ; top_k = pc.top_k
+  ; min_p = pc.min_p
+  ; enable_thinking = pc.enable_thinking
+  ; preserve_thinking = pc.preserve_thinking
+  ; response_format = pc.response_format
+  ; reasoning_effort = pc.reasoning_effort
+  ; tool_choice = pc.tool_choice
+  ; disable_parallel_tool_use = pc.disable_parallel_tool_use
+  ; cache_system_prompt = pc.cache_system_prompt
+  }
+;;
+
 let build_agent ~net ~provider_config ~transport ~bounds =
-  let builder =
-    Agent_core.Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:provider_config.Provider_config.model_id
-    |> Agent_core.Builder.with_provider_config provider_config
-    |> Agent_core.Builder.with_context_fit_admission Agent_core.Agent.Require_exact_fit
-    |> Agent_core.Builder.without_event_bus
-    |> Agent_core.Builder.with_transport transport
+  let options =
+    { Agent_core.Agent.default_options with
+      provider_config = Some provider_config
+    ; transport = Some transport
+    }
   in
-  (match bounds with
-   | Call_deadline -> Agent_core.Builder.with_call_timeout call_deadline_s builder
-   | Stream_budgets ->
-     builder
-     |> Agent_core.Builder.with_admission_timeout admission_budget_s
-     |> Agent_core.Builder.with_first_event_timeout first_event_budget_s)
-  |> Agent_core.Builder.build_safe
-  |> function
-  | Ok agent -> agent
-  | Error error -> fail (Agent_core.Error.to_string error)
+  let options =
+    match bounds with
+    | Call_deadline -> { options with call_timeout_s = Some call_deadline_s }
+    | Stream_budgets ->
+      { options with
+        admission_timeout_s = Some admission_budget_s
+      ; first_event_timeout_s = Some first_event_budget_s
+      }
+  in
+  Agent_core.Agent.create
+    ~net
+    ~media_store:(Agent_core.History.Memory_store.create ())
+    ~config:(agent_config_of_provider provider_config)
+    ~options
+    ~context_fit_admission:Agent_core.Agent.Require_exact_fit
+    ()
 ;;
 
 type outcome =

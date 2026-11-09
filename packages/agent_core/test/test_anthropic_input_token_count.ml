@@ -136,6 +136,26 @@ let response =
   }
 ;;
 
+(* The agent config that carries the provider config's prompt and sampling
+   fields, so the request is built from the values the provider config holds. *)
+let agent_config_of_provider (pc : Provider_config.t) : Agent_core.Types.agent_config =
+  { (Agent_core.Types.default_config ~model:pc.model_id) with
+    system_prompt = pc.system_prompt
+  ; max_tokens = pc.max_tokens
+  ; temperature = pc.temperature
+  ; top_p = pc.top_p
+  ; top_k = pc.top_k
+  ; min_p = pc.min_p
+  ; enable_thinking = pc.enable_thinking
+  ; preserve_thinking = pc.preserve_thinking
+  ; response_format = pc.response_format
+  ; reasoning_effort = pc.reasoning_effort
+  ; tool_choice = pc.tool_choice
+  ; disable_parallel_tool_use = pc.disable_parallel_tool_use
+  ; cache_system_prompt = pc.cache_system_prompt
+  }
+;;
+
 let build_admission_agent
       ?(media_store = Agent_core.History.Memory_store.create ())
       ?model_input_projection
@@ -146,38 +166,22 @@ let build_admission_agent
       ?transport
       ()
   =
-  let builder =
-    Agent_core.Builder.create ~media_store ~net ~model:provider_config.Provider_config.model_id
-    |> Agent_core.Builder.with_provider_config provider_config
-    |> Agent_core.Builder.with_context_fit_admission Agent_core.Agent.Require_exact_fit
-    |> Agent_core.Builder.without_event_bus
+  let options =
+    { Agent_core.Agent.default_options with
+      provider_config = Some provider_config
+    ; body_timeout_s
+    ; transport
+    }
   in
-  let builder =
-    match transport with
-    | None -> builder
-    | Some transport -> Agent_core.Builder.with_transport transport builder
-  in
-  let builder =
-    match model_input_projection with
-    | None -> builder
-    | Some project -> Agent_core.Builder.with_model_input_projection project builder
-  in
-  let builder =
-    match body_timeout_s with
-    | None -> builder
-    | Some timeout_s -> Agent_core.Builder.with_body_timeout timeout_s builder
-  in
-  let builder =
-    match pre_dispatch_serialization_observer with
-    | None -> builder
-    | Some observer ->
-      Agent_core.Builder.with_pre_dispatch_serialization_observer observer builder
-  in
-  builder
-  |> Agent_core.Builder.build_safe
-  |> function
-  | Ok agent -> agent
-  | Error error -> fail (Agent_core.Error.to_string error)
+  Agent_core.Agent.create
+    ~net
+    ~media_store
+    ~config:(agent_config_of_provider provider_config)
+    ~options
+    ~context_fit_admission:Agent_core.Agent.Require_exact_fit
+    ?model_input_projection
+    ?pre_dispatch_serialization_observer
+    ()
 ;;
 
 let completion_request config : Llm_transport.completion_request =

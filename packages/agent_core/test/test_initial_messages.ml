@@ -85,22 +85,6 @@ let test_empty_initial_preserves_behavior () =
   check int "empty initial_messages" 0 (List.length st.config.initial_messages)
 ;;
 
-let test_builder_initial_messages () =
-  Eio_main.run
-  @@ fun env ->
-  let history = [ msg User "hi"; msg Assistant "hello" ] in
-  let agent =
-    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:"claude-sonnet-5"
-    |> Builder.with_initial_messages history
-    |> Builder.build_safe
-    |> Result.get_ok
-  in
-  let st = Agent.state agent in
-  check int "config has 2 initial messages" 2 (List.length st.config.initial_messages);
-  (* create initializes messages = config.initial_messages (agent_types.ml) *)
-  check int "state messages seeded from initial" 2 (List.length st.messages)
-;;
-
 let test_config_show () =
   (* Verify [@@deriving show] works with initial_messages *)
   let config =
@@ -128,7 +112,5 @@ let () =
             `Quick
             test_empty_initial_preserves_behavior
         ] )
-    ; ( "builder"
-      , [ test_case "with_initial_messages" `Quick test_builder_initial_messages ] )
     ]
 ;;

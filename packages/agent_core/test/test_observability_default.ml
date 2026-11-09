@@ -1,12 +1,9 @@
-(** Observability-as-default tests.
+(** Observability tests.
 
-    Covers the three guarantees added with the default-on event bus:
-    1. [Builder.build] installs a per-agent {!Event_bus.t} without the caller
-       opting in (default-on).
-    2. [Builder.without_event_bus] clears it (opt-out).
-    3. The turn pipeline publishes an {!Event_bus.InferenceTelemetry} event for
-       each completed turn onto that default bus, carrying the provider, turn,
-       model, token counts, and decode timings reported for the call. *)
+    The turn pipeline publishes an {!Event_bus.InferenceTelemetry} event for
+    each completed turn onto the agent's {!Event_bus.t}, carrying the provider,
+    turn, model, token counts, and decode timings reported for the call. A
+    tool-using run surfaces the tool and turn events in causal order. *)
 
 open Agent_core
 
@@ -62,10 +59,21 @@ let response_with_telemetry : Types.api_response =
   }
 ;;
 
-let build_or_fail b =
-  match Builder.build_safe b with
-  | Ok agent -> agent
-  | Error err -> Alcotest.fail ("build_safe failed: " ^ Error.to_string err)
+let make_agent ?tools ~net ~name ~event_bus ~transport () =
+  let options =
+    { Agent.default_options with
+      provider_config = Some mock_provider
+    ; transport = Some transport
+    ; event_bus = Some event_bus
+    }
+  in
+  Agent.create
+    ~net
+    ~media_store:(Agent_core.History.Memory_store.create ())
+    ~config:{ (Types.default_config ~model:"mock-model") with name }
+    ?tools
+    ~options
+    ()
 ;;
 
 let sample_telemetry : Types.inference_telemetry =
@@ -163,54 +171,15 @@ let first_index pred xs =
   loop 0 xs
 ;;
 
-let test_builder_default_on_event_bus () =
-  Eio_main.run
-  @@ fun env ->
-  let agent =
-    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
-    |> build_or_fail
-  in
-  Alcotest.(check bool)
-    "Builder installs a default event bus"
-    true
-    (Option.is_some (Agent.options agent).event_bus)
-;;
-
-let test_builder_without_event_bus_opts_out () =
-  Eio_main.run
-  @@ fun env ->
-  let agent =
-    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net:env#net ~model:(Types.default_config ~model:"test-model").model
-    |> Builder.without_event_bus
-    |> build_or_fail
-  in
-  Alcotest.(check bool)
-    "without_event_bus clears the default bus"
-    true
-    (Option.is_none (Agent.options agent).event_bus)
-;;
-
-let test_pipeline_emits_inference_telemetry_on_default_bus () =
+let test_pipeline_emits_inference_telemetry () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
   let net = Eio.Stdenv.net env in
   let transport = sequence_transport [ response_with_telemetry ] in
-  (* Build through the default-on path and pull the bus the Builder created, so
-     this also proves the producer publishes onto the *default* bus. *)
-  let agent =
-    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"mock-model"
-    |> Builder.with_name "obs-emit"
-    |> Builder.with_provider_config mock_provider
-    |> Builder.with_transport transport
-    |> build_or_fail
-  in
-  let event_bus =
-    match (Agent.options agent).event_bus with
-    | Some bus -> bus
-    | None -> Alcotest.fail "expected default-on event bus on the built agent"
-  in
+  let event_bus = Event_bus.create () in
+  let agent = make_agent ~net ~name:"obs-emit" ~event_bus ~transport () in
   let config =
     Event_bus.subscription_config ~capacity:32 ~overflow:Event_bus.Drop_newest
     |> Result.get_ok
@@ -258,12 +227,11 @@ let test_pipeline_emits_inference_telemetry_on_default_bus () =
     Alcotest.(check (option (float 0.001))) "decode_tok_s" (Some 81.5) decode_tok_s
 ;;
 
-(* The adversarial core of the observability pillar: with only a Builder (no
-   explicit bus wiring), a tool-using multi-turn run must surface Tools and
-   Turns on the default bus in causal order, and AGENT_CORE must preserve the
-   Thinking → Tool interleaving order in the assembled assistant message. This
-   is "Tools observed by default — verified, not claimed". *)
-let test_tools_turns_and_interleaving_observed_by_default () =
+(* The adversarial core of the observability pillar: a tool-using multi-turn
+   run must surface Tools and Turns on the agent's bus in causal order, and
+   AGENT_CORE must preserve the Thinking → Tool interleaving order in the
+   assembled assistant message. *)
+let test_tools_turns_and_interleaving_are_observed () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -272,18 +240,9 @@ let test_tools_turns_and_interleaving_observed_by_default () =
   let transport =
     sequence_transport [ thinking_then_tool_response; final_text_response ]
   in
+  let event_bus = Event_bus.create () in
   let agent =
-    Builder.create ~media_store:(Agent_core.History.Memory_store.create ()) ~net ~model:"mock-model"
-    |> Builder.with_name "obs-tools"
-    |> Builder.with_provider_config mock_provider
-    |> Builder.with_transport transport
-    |> Builder.with_tool get_time_tool
-    |> build_or_fail
-  in
-  let event_bus =
-    match (Agent.options agent).event_bus with
-    | Some bus -> bus
-    | None -> Alcotest.fail "expected default-on event bus on the built agent"
+    make_agent ~tools:[ get_time_tool ] ~net ~name:"obs-tools" ~event_bus ~transport ()
   in
   let config =
     Event_bus.subscription_config ~capacity:32 ~overflow:Event_bus.Drop_newest
@@ -297,16 +256,16 @@ let test_tools_turns_and_interleaving_observed_by_default () =
     Event_bus.drain sub
     |> List.map (fun event -> Event_bus.payload_kind event.Event_bus.payload)
   in
-  (* Tools observed by default, in causal order (call before completion). *)
+  (* Tools observed, in causal order (call before completion). *)
   let idx k = first_index (String.equal k) kinds in
   (match idx "tool_called", idx "tool_completed" with
    | Some called, Some completed ->
      Alcotest.(check bool) "tool_called precedes tool_completed" true (called < completed)
    | _ ->
      Alcotest.failf
-       "expected tool_called and tool_completed on the default bus; saw [%s]"
+       "expected tool_called and tool_completed on the bus; saw [%s]"
        (String.concat "; " kinds));
-  (* Turn and per-call telemetry observed by default. *)
+  (* Turn and per-call telemetry observed. *)
   Alcotest.(check bool) "turn_completed observed" true (List.mem "turn_completed" kinds);
   Alcotest.(check bool)
     "inference_telemetry observed"
@@ -350,26 +309,16 @@ let test_tools_turns_and_interleaving_observed_by_default () =
 
 let () =
   Alcotest.run
-    "Observability default"
-    [ ( "builder"
+    "Observability"
+    [ ( "pipeline"
       , [ Alcotest.test_case
-            "default-on installs event bus"
+            "emits InferenceTelemetry on the bus"
             `Quick
-            test_builder_default_on_event_bus
+            test_pipeline_emits_inference_telemetry
         ; Alcotest.test_case
-            "without_event_bus opts out"
+            "tools, turns, and interleaving are observed"
             `Quick
-            test_builder_without_event_bus_opts_out
-        ] )
-    ; ( "pipeline"
-      , [ Alcotest.test_case
-            "emits InferenceTelemetry on default bus"
-            `Quick
-            test_pipeline_emits_inference_telemetry_on_default_bus
-        ; Alcotest.test_case
-            "tools, turns, and interleaving observed by default"
-            `Quick
-            test_tools_turns_and_interleaving_observed_by_default
+            test_tools_turns_and_interleaving_are_observed
         ] )
     ]
 ;;

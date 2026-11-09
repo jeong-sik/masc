@@ -126,6 +126,7 @@
   keeper_fs_durable_directory
   keeper_sandbox_microvm_base
   keeper_sandbox_microvm_network
+  keeper_sandbox_microvm_image_probe
   keeper_chat_store_paths
   keeper_chat_store_redaction
   keeper_chat_store_row_codec

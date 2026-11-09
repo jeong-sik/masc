@@ -115,7 +115,6 @@ let codex_config ~runtime ~system_prompt ~override_s ~output_schema
   : Runtime_codex_app_server.config
   =
   { cli_path = execution.cli_path
-  ; account_home = Runtime_official_account.Captured execution.account_home
   ; isolated_home = None
   ; model = execution.model
   ; context_window = Some (Runtime_instance.max_context_of_runtime runtime)
@@ -803,6 +802,15 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
         | Ok (result : Runtime_claude_code.turn_result) -> succeeded { text = result.text; model = result.model; usage = optional_usage claude_usage result.usage.turn_total }
         | Error error -> claude_failed ~admission:false error)))
   | Runtime_execution.Codex_app_server execution ->
+    (* HIGH-RISK-UNREVIEWED: a panelist is a call of the operator, so its
+       app-server starts only where the access allows one (plan D2-6). A
+       refusal starts no process and observes nothing of the candidate. *)
+    (match
+       Runtime_account_access.authorize Runtime_account_access.Operator_call
+         (Runtime_account_access.seal execution.account_home)
+     with
+     | Error refusal -> Error (Setup_failure (Runtime_account_access.refusal_to_string refusal))
+     | Ok account ->
     let config =
       codex_config ~runtime ~system_prompt ~override_s:timeout_s ~output_schema execution
     in
@@ -832,11 +840,11 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          | Runtime_codex_app_server.Elicitation_cancelled _
          | Runtime_codex_app_server.Usage_windows_reported _
          | Runtime_codex_app_server.Turn_finished _ | Usage_reported {frame=Counted _; _ } -> ())
-       ~mgr ~clock ~cwd config ~prompt ~images with
+       ~mgr ~clock ~cwd ~account config ~prompt ~images with
      | Ok (result : Runtime_codex_app_server.turn_result) -> succeeded { text = result.text; model = result.model; usage = (match result.usage with
          | Some Runtime_codex_app_server.Thread_count_replaced -> !observed_usage
          | (Some (Runtime_codex_app_server.Thread_count _) | None) as usage -> optional_usage codex_usage usage) }
-     | Error error -> codex_failed error)
+     | Error error -> codex_failed error))
   | Runtime_execution.Antigravity_cli _ when not (List.is_empty images) ->
     Error (Setup_failure "Antigravity transport does not support image input")
   | Runtime_execution.Antigravity_cli execution ->

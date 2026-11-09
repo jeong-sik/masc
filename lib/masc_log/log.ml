@@ -769,13 +769,16 @@ module Ring = struct
              (Printf.sprintf "expected JSON object, got %s"
                 (Yojson.Safe.to_string json)))
 
-  (* Legacy sink rows persisted before the typed diagnostic kind carry only
-     their message text, so this fold boundary is the one place string
+  (* The diagnostic kind is in memory only: the sink wire has no key for it,
+     so every row read back from disk arrives with [diagnostic_kind = None]
+     and only its message text. This fold boundary is the one place string
      matching is allowed: decoding wire where a string is all that remains
      (the same rule RFC-0371 §6.1(3) applies to rehydrated provider wire).
-     Rows written after the kind was introduced carry it and skip the text
-     match entirely. *)
-  let classify_legacy_diagnostic (e : entry) : entry =
+     The signal row's text comes from a format string, so the literal
+     "Received SIGTERM" does not appear at its emission site. If the JSONL
+     sink writes the kind, restored rows carry it and this function goes
+     away. *)
+  let classify_restored_diagnostic (e : entry) : entry =
     match e.diagnostic_kind with
     | Some _ -> e
     | None ->
@@ -831,7 +834,7 @@ module Ring = struct
       Fs_compat.fold_jsonl_lines
         ~init:()
         ~f:(fun () ~line_no:_ json ->
-          let e = classify_legacy_diagnostic (entry_of_json json) in
+          let e = classify_restored_diagnostic (entry_of_json json) in
           if e.seq > !max_seq_on_disk then max_seq_on_disk := e.seq;
           Queue.add e buf_ring;
           if Queue.length buf_ring > capacity then ignore (Queue.pop buf_ring))

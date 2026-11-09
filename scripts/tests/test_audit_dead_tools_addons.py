@@ -200,5 +200,55 @@ class Classification(unittest.TestCase):
         self.assertNotIn("admit_memory", unused_names)
 
 
+class Rendering(unittest.TestCase):
+    """An addon error must reach the markdown report, not only the JSON."""
+
+    def report_with_addon_error(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            registry_dir = root / "config" / "tools"
+            write_registry_tool(registry_dir, "tool_read_file")
+            addon_dir = root / "addons"
+            write_lane(addon_dir, "first", ["shared_tool"])
+            write_lane(addon_dir, "second", ["shared_tool"])
+            now = 1_800_000_000.0
+            ledger_dir = root / "ledger"
+            (ledger_dir / "2026-11").mkdir(parents=True)
+            (ledger_dir / "2026-11" / "09.jsonl").write_text("", encoding="utf-8")
+
+            registry = AUDIT.load_registry(registry_dir)
+            exports, files, errors = AUDIT.load_addon_exports(addon_dir)
+            registry.addon_directory = str(addon_dir)
+            registry.addon_files = files
+            registry.addons = exports
+            registry.addon_errors = errors
+            end = datetime.fromtimestamp(now, tz=timezone.utc)
+            source = AUDIT.load_ledger(ledger_dir, now - 86400, now + 1)
+            report = AUDIT.build_report(
+                registry=registry,
+                sources=[source],
+                coverage=AUDIT.load_coverage(None),
+                window_start=end.timestamp() - 86400,
+                window_end=end.timestamp(),
+                window_days=1,
+                window_kind="trailing window",
+                retired_names=[],
+            )
+        return registry, report
+
+    def test_duplicate_export_error_appears_in_markdown(self):
+        registry, report = self.report_with_addon_error()
+        self.assertEqual(len(registry.addon_errors), 1)
+        rendered = AUDIT.render_markdown(report)
+        self.assertIn("등록부 경고", rendered)
+        self.assertIn("shared_tool", rendered)
+
+    def test_duplicate_export_error_appears_in_json(self):
+        registry, report = self.report_with_addon_error()
+        payload = json.loads(AUDIT.render_json(report))
+        self.assertEqual(len(payload["registry"]["addon_errors"]), 1)
+        self.assertIn("shared_tool", payload["registry"]["addon_errors"][0])
+
+
 if __name__ == "__main__":
     unittest.main()

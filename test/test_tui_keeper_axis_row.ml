@@ -9,6 +9,7 @@ let failed = Trail.Trail_failed { ended_at = None; last = None; walk = Trail.Wal
 
 let shape_label = function
   | Axis_row.List_columns -> "list columns"
+  | Axis_row.Wall_columns -> "half-hour wall"
   | Axis_row.Grid Axis_row.Activity_columns -> "grid of the activity columns"
   | Axis_row.Grid Axis_row.Memory_columns -> "grid of the memory columns"
   | Axis_row.Grid Axis_row.Age_columns -> "grid of the age columns"
@@ -26,7 +27,8 @@ let test_each_view_picks_the_columns_it_draws () =
         | Model.Plain -> "list columns"
         | Model.By_memory -> "grid of the memory columns"
         | Model.By_age -> "grid of the age columns"
-        | Model.By_state | Model.By_cause | Model.By_time | Model.By_runtime | Model.Day_wall ->
+        | Model.Day_wall -> "half-hour wall"
+        | Model.By_state | Model.By_cause | Model.By_time | Model.By_runtime ->
             "grid of the activity columns"
       in
       Alcotest.(check string) (Model.view_label view) expected

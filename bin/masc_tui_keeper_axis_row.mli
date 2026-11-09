@@ -20,6 +20,7 @@ type columns =
 
 type shape =
   | List_columns  (** The list's columns: NOW, Mode S, AGE, LIFECYCLE / RUNTIME, DETAIL. *)
+  | Wall_columns (** A half-hour wall, not the activity grid. *)
   | Grid of columns
 
 val shape_of_view : Masc_tui_keeper_list_model.view -> shape

@@ -15,6 +15,10 @@
     stays. The answer to the second press, not the report, says what was
     reclaimed.
 
+    Below what the next press does, the pane shows the server's last
+    periodic report: when it ran and the candidates it listed. The server
+    only reports; deleting stays these two presses.
+
     The pane draws the answer in place rather than in a reading: a reading
     owns every key, and closing it would take the second press back. *)
 
@@ -24,10 +28,9 @@ val tool : string
 (** ["V"]. *)
 val key : string
 
-(** The sandbox image catalog name the claims-read helper runs on.
-    [config/sandbox-images.toml] defines [base] as the general image; the
-    helper only reads a marker file from the mounted work volume. Without an
-    image the server reads no marker and reclaims nothing. *)
+(** {!Masc.Keeper_volume_gc_host.claims_image}: the image the claims-read
+    helper runs on, the same one the server's periodic report uses. Without
+    an image the server reads no marker and reclaims nothing. *)
 val claims_image : string
 
 (** 60 s. A report lists the volumes once, reads the container inventory once
@@ -102,9 +105,18 @@ type tone =
   | Dim
   | Bad
 
-(** The pane's lines: what the next press does, then the last answer. Text
-    from the server is made single-line for the terminal. *)
-val lines : t -> (tone * string) list
+(** The line under the next press for the server's periodic report: when
+    the last pass ended, by [timestamp], and the reclaim candidates it
+    listed, or why it was skipped or failed. [None] is a server whose first
+    pass has not ended. The line is only read: the second press sends the
+    names of the first press's own report, not these. *)
+val server_report_line :
+  timestamp:(float -> string) -> Masc.Keeper_volume_gc_periodic.t option -> tone * string
+
+(** The pane's lines: what the next press does, [server_report] when the
+    catalog has a reading, then the last answer. Text from the server is made
+    single-line for the terminal. *)
+val lines : server_report:(tone * string) option -> t -> (tone * string) list
 
 (** The footer line after an answer. *)
 val status_line : t -> string

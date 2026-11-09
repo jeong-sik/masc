@@ -158,6 +158,7 @@ type tool_snapshot = {
   ts_freshness : inventory_freshness;
   ts_effective : effective_tool_surface option;
   ts_usage : tool_usage_row list option;
+  ts_volume_gc_report : Keeper_volume_gc_periodic.t option;
 }
 
 let decode_tool_entry json =
@@ -1174,12 +1175,20 @@ let decode_tool_snapshot json =
     | bad -> field_type_error "effective_keeper_surface" "an object or null" bad
   in
   let* ts_usage = decode_tool_usage json in
+  (* A server sends null until its first periodic pass ends, and a server
+     without the pass sends no field; neither has a report to show. *)
+  let* ts_volume_gc_report =
+    match member Keeper_volume_gc_periodic.envelope_field json with
+    | `Null -> Ok None
+    | report -> Result.map Option.some (Keeper_volume_gc_periodic.of_json report)
+  in
   Ok
     { ts_tools
     ; ts_count
     ; ts_freshness
     ; ts_effective
     ; ts_usage
+    ; ts_volume_gc_report
     }
 
 let skill_activation_keeper = function

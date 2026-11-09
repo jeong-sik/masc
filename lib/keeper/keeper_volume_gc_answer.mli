@@ -46,6 +46,9 @@ val of_report : executed:bool -> image_given:bool -> Keeper_volume_gc.report -> 
 (** Counted from the keepers. *)
 val summary : t -> summary
 
+(** The names of the keepers judged reclaim candidates, in answer order. *)
+val reclaim_candidates : t -> string list
+
 (** The object the tool answers with. The summary is written too, counted
     from the keepers. *)
 val to_json : t -> Yojson.Safe.t

@@ -31,8 +31,9 @@ if args[0]=='runtime-antigravity-account':
       'catalog':{'models':[{'id':'fresh-antigravity','label':'Fresh account model','context':None}]}}))
     sys.exit(0)
 if args[0]=='runtime-muse-models':
-    assert args[1:3] == ['--cli-path','muse'] and args[3] == '--account-home'
-    catalog_file=os.path.join(args[4],'fixture-muse-catalog.json')
+    assert args[1] == '--base-path' and os.path.isabs(args[2])
+    assert args[3:5] == ['--cli-path','muse'] and args[5] == '--account-home'
+    catalog_file=os.path.join(args[6],'fixture-muse-catalog.json')
     if os.path.exists(catalog_file):
         with open(catalog_file) as f: models=json.load(f)
     else: models=[{'id':'reported-muse','label':'Reported Muse','context':32768}]

@@ -189,8 +189,7 @@ let provider_runtime_error_looks_like_timeout ~code =
        code
 ;;
 
-let classify_provider_runtime_error_record ?agent_core_timeout ~code ~detail () =
-  ignore detail;
+let classify_provider_runtime_error_record ?agent_core_timeout ~code () =
   (* Typed observation first (RFC-0371 §6.1(3)): records built while the
      original agent-core error was in hand carry it, and no string is
      consulted. The prefix parse below survives only for records rehydrated

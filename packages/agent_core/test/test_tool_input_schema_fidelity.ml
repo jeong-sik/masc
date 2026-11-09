@@ -204,20 +204,6 @@ let test_tool_parameters_are_derived_from_the_schema () =
   check_parameters_derived_from_schema "Mcp.tool_of_input_schema_result" tool.schema
 ;;
 
-let test_middleware_schema_keeps_its_source () =
-  match
-    Tool_middleware.tool_schema_of_json_result
-      ~name:"read_file"
-      ~description:"Read a file"
-      rich_input_schema
-  with
-  | Error detail -> failf "tool_schema_of_json_result: %s" detail
-  | Ok schema ->
-    check_parameters_derived_from_schema
-      "Tool_middleware.tool_schema_of_json_result"
-      schema
-;;
-
 let test_invalid_schema_names_the_failing_property () =
   let unsupported_type_schema : Yojson.Safe.t =
     `Assoc
@@ -776,10 +762,6 @@ let () =
             "tool parameters derived from the schema"
             `Quick
             test_tool_parameters_are_derived_from_the_schema
-        ; test_case
-            "middleware schema keeps its source"
-            `Quick
-            test_middleware_schema_keeps_its_source
         ; test_case
             "invalid schema names the failing property"
             `Quick

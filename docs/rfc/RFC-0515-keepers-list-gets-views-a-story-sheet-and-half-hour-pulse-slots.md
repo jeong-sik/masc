@@ -150,6 +150,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 - 기억별 · 나이별 칸의 값은 TUI 가 이미 받는 Memory 스냅숏(`memory_keeper_health`)에 있다. 새 서버 값은 없다. lag · gap · digest 시각 · `age_bins` · `updated_at` 은 `Masc_tui_keeper_memory_reading.t` 의 `Row` 가 들고 있다. Librarian 패스 끝(`mkh_librarian.mlh_state`)은 V6 이 `Row` 에 더한다.
 - 앞 12시간 일정 띠(V7)는 일정의 반복(`Schedule_domain.recurrence`)으로 12시간 안의 깰 시각을 모두 구해 `◷` 로 찍는다. 지금 TUI 는 반복을 JSON(`sch_recurrence`)과 요약 문자열로만 받는다. 요약 문자열은 가르지 않는다. `Schedule_domain` 의 반복 디코더를 열어 닫힌 값으로 읽는다(E19). 행 JSON 의 반복 모양이 그 디코더와 맞는지는 V7 에서 확인한다.
 - Mode · S · AGE · LIFECYCLE 은 Story 창으로 옮긴다. 실패한 Keeper 는 둘째 줄에 사슬과 원인을 그린다.
+- 고른 Keeper 의 초상은 목록 보기의 두 줄에서만 그리고, 전신으로 그린다. 한 축 줄 보기는 그 줄들을 Keeper 행에 쓴다(E20).
 
 ### 2.5 Story 창
 
@@ -277,6 +278,7 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | E17 | 나이별 ◂ 칸 수 | `age_bins` 4칸 | 시안은 더 촘촘하다. 서버 칸을 늘리는 일은 이 RFC 밖이다 |
 | E18 | 나이별 머리 띠 둘째 줄 | 그리지 않는다 | 무효화 시각은 약 3MB 응답에만 있다. 서버가 하루 무효화 수를 주면 다시 본다 |
 | E19 | 앞 12시간 일정 띠의 재료 | `Schedule_domain` 의 반복 디코더를 열고, TUI 가 같은 `lib/schedule` 함수로 깰 시각을 구한다 | 대안은 서버가 앞 12시간 깰 시각을 행에 실어 주는 것이다. 서버와 TUI 가 같은 계산 함수를 링크하니 행 JSON 을 늘리지 않는다 |
+| E20 | 초상 | 목록 보기 · 두 줄에서만, 전신(픽셀은 `Keeper_portrait_draw.render` 를 얼굴 초상과 같은 상자에, 모자이크는 Items 미리보기와 같은 24칸) | 2026-11-09 실측: 두 줄 보기 120x35 에서 초상이 약 9줄을 써서 Keeper 36명 중 4~6명만 보였다. 시안에는 초상이 없다. 운영자가 목록 보기에만 남기고 얼굴 대신 전신을 그리라고 골랐다. 모자이크 16칸에서는 관찰된 장비가 몸 색으로 뭉개져서 전신은 Items 의 24칸을 쓴다. 대화 머리의 얼굴 초상은 그대로다 |
 
 ## 8. 참고
 

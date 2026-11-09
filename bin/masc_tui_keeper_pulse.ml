@@ -111,12 +111,15 @@ let is_failed = function
   | Slot_turn (Pulse.Turn_ok | Pulse.Turn_rested) | Slot_unknown | Slot_quiet -> false
 ;;
 
+let cell_of_hours hours =
+  { Cell.text = String.concat "" (List.map slot_mark hours)
+  ; tone = (if List.exists is_failed hours then Cell.Attention else Cell.Quiet)
+  }
+;;
+
+let hours_cell ~now pulse = cell_of_hours (slots ~now pulse)
+
 let pulse_cell ~now pulse =
   let hours = slots ~now pulse in
-  if List.for_all is_quiet hours then None
-  else
-    Some
-      { Cell.text = String.concat "" (List.map slot_mark hours)
-      ; tone = (if List.exists is_failed hours then Cell.Attention else Cell.Quiet)
-      }
+  if List.for_all is_quiet hours then None else Some (cell_of_hours hours)
 ;;

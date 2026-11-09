@@ -144,6 +144,13 @@ let next_density = function
   | One_line -> Two_lines
   | Two_lines -> One_line
 
+let shows_portrait view density =
+  match view, density with
+  | Plain, Two_lines -> true
+  | Plain, One_line -> false
+  | (By_state | By_cause | By_time | By_memory | By_age | By_runtime | Day_wall),
+    (One_line | Two_lines) -> false
+
 let density_label = function
   | One_line -> "compact"
   | Two_lines -> "detailed"
@@ -273,6 +280,33 @@ let primary_activity_of_row row =
               || waiting_state row = Some Keeper_waiting_idle then Idle
       else Unknown)
     | Some Masc.Tui_decode.Keeper_activity_attempt_failed -> Attempt_failed
+
+type person_wait =
+  | Held_tool of Masc.Tui_decode.keeper_tool_approval
+  | Held_item of Masc.Tui_decode.waiting_item
+  | Open_questions of int
+  | Confirmation_item of Masc.Tui_decode.waiting_item
+
+(* The same readings, in the same order, as the first three tests of
+   [primary_activity_of_row]. *)
+let person_wait row =
+  let item_of source =
+    List.find_opt (fun item -> item.Masc.Tui_decode.kwi_source = source) (waiting_items row)
+  in
+  match primary_activity_of_row row with
+  | Held_call -> (
+      match row.approval with
+      | Some approval -> Some (Held_tool approval)
+      | None ->
+          Option.map (fun item -> Held_item item) (item_of Waiting_source_hitl_pending))
+  | Question -> Some (Open_questions row.open_questions)
+  | Confirmation ->
+      Option.map
+        (fun item -> Confirmation_item item)
+        (item_of Waiting_source_operator_pending_confirm)
+  | Attempt_failed | Preparing | Streaming | Running | Async_working _ | Deferred
+  | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting | Idle
+  | Paused | Offline | Unknown -> None
 
 let badges_of_row row =
   let items = waiting_items row in

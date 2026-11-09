@@ -651,9 +651,8 @@ let recovery_box_bottom state buf ~cols =
 
 let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?choices
     (state : state) ~max_cells ~hints =
-  (* Hints off trades the key text for status room; "?:help" stays as the
-     door back. One seam for every surface, which is what makes the setting
-     a setting instead of per-screen behaviour. *)
+  (* Hints off trades the key text for status room. "?:help" stays only
+     when the current input owner lets that key open the help sheet. *)
   (* The same seam names the sheet while the keys are visible, and asks the
      one named question for where [?] answers -- the rule and its reasons
      live with [Masc_tui_types.help_key_answers], beside the predicates it
@@ -663,7 +662,7 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
   let help_hint = ui_text state ~ko:"?:도움말" ~en:Masc_tui_footer.help_hint_item in
   let hints =
     if not state.hints_visible then
-      if Option.value help_door ~default:true then help_hint else ""
+      if door_answers then help_hint else ""
     else if door_answers then
       (* Inspect the key, as the shared fitter does, rather than its label. *)
       if List.exists (fun item ->
@@ -815,6 +814,7 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None) ?
     | Masc_tui_types.Workspace_identity_match -> []
   in
   Masc_tui_footer.line ?literal_prefix ?action_text ?preferred_action ?position
+    ~help_key_answers:door_answers
     ~status:(keeper_action_status state @ task_creation_status state
       @ List.filter (fun item -> Masc_tui_footer.needs_operator item
           && not (List.mem item (keeper_action_status state))) status

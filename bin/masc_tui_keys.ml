@@ -1580,7 +1580,7 @@ let board_compose_menu_hints ~lang ~reply =
       hints_of_bindings ~lang
         [ b ~ko:"전송" Act "s" "send"
         ; b ~ko:"버리기" Act "d" "discard"
-        ; b ~ko:"계속 작성" Meta "Esc" "keep writing"
+        ; b ~ko:"계속" Meta "Esc" "continue"
         ]
   ; hints =
       hints_of_bindings ~lang

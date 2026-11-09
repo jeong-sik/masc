@@ -110,7 +110,7 @@ let render_board_compose (state : state) =
          | Ready (post, _, _) when String.equal post.bp_id post_id ->
              [ target ^ Terminal_text.single_line post.bp_title
              ; Ansi.dim ^ Terminal_text.single_line post.bp_author ^ " · "
-               ^ Ansi.reset ^ Terminal_text.single_line post.bp_body
+               ^ Ansi.reset ^ Terminal_text.preview_line post.bp_body
              ]
          | Loading ->
              [ unidentified; words state "원문 조회 중" "Loading the original post" ]

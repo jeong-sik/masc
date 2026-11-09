@@ -892,6 +892,7 @@ accepted_reasoning_efforts = ["low"]
 ;;
 
 let () =
+  Masc_test_deps.publish_single_user_access ();
   run
     "keeper_capability_probe"
     [ ( "Muse actual MCP", [test_case "callback evidence differs from reply claim" `Quick test_muse_probe_uses_actual_mcp_callback] )

@@ -67,9 +67,12 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
         ~raw_trace:None ~on_event:None ~config () in
     outcome.result, outcome.settled_session, outcome.effect_disposition
   | S.Muse ->
+    let account =
+      Masc_test_deps.authorized_muse
+        (Runtime_account_access.Declared_home
+           (Masc_test_deps.muse_home (Filename.concat base_path "absent-synthetic-account"))) in
     let config : Runtime_muse_serve.config =
       { (Runtime_muse_serve.default_config ()) with cli_path
-      ; account_home = Some (Filename.concat base_path "absent-synthetic-account")
       ; model = Some "synthetic-model"
       ; admission_timeout_s = 1.; timeout_s = Some 1. } in
     let outcome = Keeper_muse_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
@@ -84,7 +87,7 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
         ~tools:[] ~initial_messages:[] ~model_input_projection:None
         ~on_transmitted_model_input:transmitted ~hooks:None
         ~context_injector:None ~context:None ~event_bus:None
-        ~raw_trace:None ~on_event:None ~config () in
+        ~raw_trace:None ~on_event:None ~account ~config () in
     outcome.result, outcome.settled_session, outcome.effect_disposition
 
 let read_recovery ~base_path ~keeper_name =

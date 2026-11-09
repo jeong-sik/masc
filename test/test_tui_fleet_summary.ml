@@ -8,7 +8,8 @@ let reading =
         (match value with
          | Fleet_summary.Running -> "running"
          | Fleet_summary.Turn_capacity -> "turn capacity"
-         | Fleet_summary.Blocker -> "blocker"))
+         | Fleet_summary.Blocker -> "blocker"
+         | Fleet_summary.Proactive_interval -> "proactive interval"))
     ( = )
 
 let select ~cells readings =

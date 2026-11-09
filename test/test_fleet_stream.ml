@@ -15,6 +15,12 @@ let names words =
   | None -> failf "not canonical: %s" (String.concat "," words)
 ;;
 
+let proactive_interval seconds =
+  match F.Proactive_interval.of_seconds seconds with
+  | Some interval -> interval
+  | None -> failf "proactive interval %d" seconds
+;;
+
 (* Every field holds a value no other field holds. A decoder that read one key
    into another field would not give back an equal reading. *)
 let sample_fleet : F.fleet =
@@ -39,6 +45,7 @@ let sample_fleet : F.fleet =
   ; fs_active_task_owner_without_fiber_count = 21
   ; fs_completion_authority_pending_count = 22
   ; fs_active_task_owner_scan_error_count = 23
+  ; fs_proactive_interval = proactive_interval 24
   }
 ;;
 
@@ -195,6 +202,7 @@ let test_the_wire_names_are_fixed () =
          ; "official_client_recovery_required_names"
          ; "operator_action_required"
          ; "paused_count"
+         ; "proactive_interval_sec"
          ; "reaction_capacity_shortfall"
          ; "recovering_count"
          ; "running_count"
@@ -221,6 +229,10 @@ let test_a_missing_field_is_named () =
   reject "no blocker key at all"
     (in_fleet (drop_member "blocker") json)
     (F.Missing_field { at = "fleet"; field = "blocker" });
+  (* A server built before the interval was carried: no default stands in. *)
+  reject "no proactive interval"
+    (in_fleet (drop_member "proactive_interval_sec") json)
+    (F.Missing_field { at = "fleet"; field = "proactive_interval_sec" });
   reject "no event name" (drop_member "event" json)
     (F.Missing_field { at = "event"; field = "event" })
 ;;
@@ -306,6 +318,14 @@ let test_a_number_out_of_range_is_refused () =
     (F.Out_of_range { at = "fleet"; field = "failing_count" });
   reject "revision 0" (map_member "revision" (fun _ -> `Int 0) json)
     (F.Out_of_range { at = "event"; field = "revision" });
+  (* The server's setting refuses an interval below one second, so a stream
+     that carries one is not that server's reading. *)
+  List.iter
+    (fun seconds ->
+       reject (Printf.sprintf "proactive interval %d" seconds)
+         (in_fleet (map_member "proactive_interval_sec" (fun _ -> `Int seconds)) json)
+         (F.Out_of_range { at = "fleet"; field = "proactive_interval_sec" }))
+    [ 0; -1 ];
   List.iter
     (fun (label, seconds) ->
        reject label
@@ -421,6 +441,9 @@ let test_fleets_compare_by_content () =
     (F.equal_fleet sample_fleet { sample_fleet with fs_status = Grade.Fleet_blocked });
   check bool "another count" false
     (F.equal_fleet sample_fleet { sample_fleet with fs_paused_count = 99 });
+  check bool "another proactive interval" false
+    (F.equal_fleet sample_fleet
+       { sample_fleet with fs_proactive_interval = proactive_interval 600 });
   check bool "another name set" false
     (F.equal_fleet sample_fleet
        { sample_fleet with fs_running_names = names [ "alpha" ] });

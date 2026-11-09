@@ -1354,6 +1354,10 @@ let keeper_fleet_safety_health_json
     ; ( "blocker"
       , Json_util.string_opt_to_json (Option.map Keeper_fleet_blocker.wire_name blocker) )
     ; "keeper_bootstrap_enabled", `Bool keeper_bootstrap_enabled
+      (* The setting the Keeper heartbeat loop reads for its periodic turns,
+         read the same way, so a runtime override shows on the next scan. *)
+    ; ( "proactive_interval_sec"
+      , `Int (Runtime_params.get Runtime_settings.keeper_keepalive_interval_sec) )
     ; ( "keeper_bootstrap_blocker"
       , if keeper_bootstrap_blocked
         then

@@ -54,6 +54,18 @@ let test_the_status_word_is_the_grades_wire_name () =
   check string "a grade" "blocked"
     (Masc_tui_fleet_line.status_text Masc.Keeper_fleet_grade.Fleet_blocked)
 
+(* The interval is a setting, so the words convert back to the same seconds:
+   a whole unit when one divides it, never a rounded one. *)
+let test_an_interval_reads_as_exactly_its_setting () =
+  List.iter
+    (fun (seconds, expected) ->
+       match Masc.Fleet_stream.Proactive_interval.of_seconds seconds with
+       | None -> failf "%d seconds is a proactive interval" seconds
+       | Some interval ->
+         check string (Printf.sprintf "%d seconds" seconds) expected
+           (Masc_tui_fleet_line.interval_text interval))
+    [ 300, "5m"; 3600, "1h"; 90, "1m30s"; 45, "45s" ]
+
 let () =
   run "tui fleet line"
     [ ( "blocker names"
@@ -76,6 +88,10 @@ let () =
       , [ test_case "only ok is healthy" `Quick test_only_ok_is_healthy
         ; test_case "the status word is the grade's wire name" `Quick
             test_the_status_word_is_the_grades_wire_name
+        ] )
+    ; ( "proactive interval"
+      , [ test_case "an interval reads as exactly its setting" `Quick
+            test_an_interval_reads_as_exactly_its_setting
         ] )
     ; ( "failing"
       , [] )

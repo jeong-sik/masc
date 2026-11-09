@@ -30,11 +30,6 @@ type mcp_tool =
   ; input_schema : Yojson.Safe.t
   }
 
-type mcp_resource = Sdk_types.resource
-type mcp_resource_contents = Sdk_types.resource_contents
-type mcp_prompt = Sdk_types.prompt
-type mcp_prompt_result = Sdk_types.prompt_result
-
 (** Convert SDK {!Sdk_types.tool} to agent_core {!mcp_tool}. *)
 let mcp_tool_of_agent_core_tool (t : Sdk_types.tool) : mcp_tool =
   { name = t.name

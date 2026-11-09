@@ -180,30 +180,6 @@ let call_tool_full t ~name ~arguments =
   | Ok result -> Ok result
 ;;
 
-let list_resources t =
-  match Sdk_client.list_resources_all t.client with
-  | Error detail -> Error (Error.Mcp (ToolListFailed { detail }))
-  | Ok resources -> Ok resources
-;;
-
-let read_resource t ~uri =
-  match Sdk_client.read_resource t.client ~uri with
-  | Error detail -> Error (Error.Mcp (ToolCallFailed { tool_name = uri; detail }))
-  | Ok contents -> Ok contents
-;;
-
-let list_prompts t =
-  match Sdk_client.list_prompts_all t.client with
-  | Error detail -> Error (Error.Mcp (ToolListFailed { detail }))
-  | Ok prompts -> Ok prompts
-;;
-
-let get_prompt t ~name ?(arguments = []) () =
-  match Sdk_client.get_prompt t.client ~name ~arguments () with
-  | Ok prompt_result -> Ok prompt_result
-  | Error detail -> Error (Error.Mcp (ToolCallFailed { tool_name = name; detail }))
-;;
-
 (** Invoke a tool on the MCP server.
     Returns the concatenated text content on success. *)
 let call_tool t ~name ~arguments : Types.tool_result =
@@ -251,17 +227,6 @@ let convert_tools ~server_name ~call_fn_for (tools : mcp_tool list) =
       tools
   in
   List.rev converted_rev, List.rev skipped_rev
-;;
-
-(** Check if the MCP server subprocess is still responsive.
-    Sends a [ping] request and returns [true] if a response arrives. *)
-let is_alive t =
-  try
-    match Sdk_client.ping t.client with
-    | Ok _ -> true
-    | Error _ -> false
-  with
-  | End_of_file | Eio.Io _ | Unix.Unix_error _ | Failure _ -> false
 ;;
 
 (** Close the MCP client and terminate the subprocess. *)
@@ -468,22 +433,6 @@ let connect_and_load ~sw ~mgr (spec : server_spec) =
                { detail =
                    Printf.sprintf "MCP server '%s': %s" spec.name (Printexc.to_string exn)
                })))
-;;
-
-(** Connect to multiple MCP servers sequentially.
-    If any server fails, all previously-connected servers are closed
-    and the first error is returned. *)
-let connect_all ~sw ~mgr specs =
-  let rec loop acc = function
-    | [] -> Ok (List.rev acc)
-    | spec :: rest ->
-      (match connect_and_load ~sw ~mgr spec with
-       | Error e ->
-         close_all (List.rev acc);
-         Error e
-       | Ok m -> loop (m :: acc) rest)
-  in
-  loop [] specs
 ;;
 
 [@@@coverage off]

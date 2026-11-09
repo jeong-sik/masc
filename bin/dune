@@ -1299,7 +1299,8 @@
  (wrapped false)
  (modules masc_tui_press)
  (libraries masc_tui_action_notice masc_tui_hit masc_tui_types masc_tui_context_inspector masc_tui_lane_inventory
-  masc_tui_queue_inspection masc_tui_queue_layout masc_tui_message_layout masc_tui_play_card))
+  masc_tui_queue_inspection masc_tui_queue_layout masc_tui_message_layout masc_tui_play_card
+  masc_tui_keeper_list_model))
 
 (library
  (name masc_tui_help)

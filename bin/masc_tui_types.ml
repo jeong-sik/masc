@@ -9861,6 +9861,11 @@ type state = {
       and age views. Those readings are decoded by modules built on this one,
       so the TUI installs the reduction after it creates the state. *)
   mutable keeper_list_density: Masc_tui_keeper_list_model.density;
+  (* The group heading the cursor stands on, and the groups whose rows are
+     folded away (RFC-0515 E12). Kept for this session only: neither is a
+     choice [tui-keepers.toml] stores. *)
+  mutable keeper_list_heading: Masc_tui_keeper_list_model.heading_focus option;
+  mutable keeper_list_folded: Masc_tui_keeper_list_model.group list;
   mutable keeper_list_sort: Masc_tui_keeper_list_model.sort;
   mutable keeper_list_preference_notice: string option;
   mutable keeper_list_preference_startup_error: string option;
@@ -12675,7 +12680,9 @@ let keeper_index state keeper_name =
     (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
     (ordered_keepers state)
 
+(* A Keeper chosen by name is a row, never the heading above it. *)
 let select_keeper_name_with keepers state keeper_name =
+  state.keeper_list_heading <- None;
   match List.find_index (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name) keepers with
   | Some index -> state.keeper_cursor <- index
   | None ->
@@ -12687,8 +12694,61 @@ let select_keeper_name state keeper_name =
 let keeper_list_select_name state keeper_name =
   select_keeper_name_with (ordered_keepers state) state keeper_name
 
+let keeper_list_stop (state : state) =
+  Masc_tui_keeper_list_model.current_stop ~folded:state.keeper_list_folded
+    ~focus:state.keeper_list_heading ~cursor:state.keeper_cursor
+    (keeper_list_reading state).klr_groups
+
+let keeper_list_stops (state : state) =
+  Masc_tui_keeper_list_model.stops ~folded:state.keeper_list_folded
+    (keeper_list_reading state).klr_groups
+
+(* Only a focused heading or a folded group can put the cursor on a heading,
+   so without either the list is not read. *)
+let keeper_list_on_heading (state : state) =
+  state.view = Keepers Keeper_list
+  && (Option.is_some state.keeper_list_heading
+      || (match state.keeper_list_folded with [] -> false | _ :: _ -> true))
+  && (match keeper_list_stop state with
+      | Some (Masc_tui_keeper_list_model.Stop_heading _) -> true
+      | Some (Masc_tui_keeper_list_model.Stop_row _) | None -> false)
+
+(* A heading names no Keeper, so a key that acts on the selected Keeper finds
+   none there. *)
 let selected_keeper (state : state) =
-  List.nth_opt (keepers_for_selection state) state.keeper_cursor
+  if keeper_list_on_heading state then None
+  else List.nth_opt (keepers_for_selection state) state.keeper_cursor
+
+let place_keeper_list_stop (state : state) stop =
+  Option.iter
+    (fun (focus, cursor) ->
+      state.keeper_list_heading <- focus;
+      state.keeper_cursor <- cursor)
+    (Masc_tui_keeper_list_model.placement (keeper_list_reading state).klr_groups stop)
+
+let step_keeper_list_stop (state : state) ~delta =
+  Option.iter
+    (fun current ->
+      Option.iter (place_keeper_list_stop state)
+        (Masc_tui_keeper_list_model.step_stop ~delta (keeper_list_stops state) current))
+    (keeper_list_stop state)
+
+let jump_keeper_list_group (state : state) direction =
+  Option.iter
+    (fun current ->
+      Option.iter (place_keeper_list_stop state)
+        (Masc_tui_keeper_list_model.group_jump direction (keeper_list_stops state) current))
+    (keeper_list_stop state)
+
+(* A heading the cursor was placed on stays selected after either change.
+   A heading that stood for the cursor's row inside a folded group gives way
+   to that row once the group unfolds. *)
+let refold_keeper_list_heading (state : state) change =
+  match keeper_list_stop state with
+  | Some (Masc_tui_keeper_list_model.Stop_heading group) ->
+      state.keeper_list_folded <-
+        Masc_tui_keeper_list_model.refold change group state.keeper_list_folded
+  | Some (Masc_tui_keeper_list_model.Stop_row _) | None -> ()
 
 let selected_tools_error (state : state) =
   held_tools_error
@@ -12764,8 +12824,10 @@ let select_activity_keeper state keeper_name =
       (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
       (keepers_for_selection state) with
   | None -> Activity_keeper_missing
-  | Some index when index = state.keeper_cursor -> Activity_keeper_already_selected
+  | Some index when index = state.keeper_cursor && not (keeper_list_on_heading state) ->
+      Activity_keeper_already_selected
   | Some index ->
+      state.keeper_list_heading <- None;
       state.keeper_cursor <- index;
       Activity_keeper_selected
 
@@ -12774,10 +12836,20 @@ let transition_keeper_view state view =
   state.view <- view;
   Option.iter (select_keeper_name state) selected
 
+(* A heading keeps the cursor on its group's first row, so the Keeper the
+   cursor rests on is carried into the new view whether a heading or a row
+   was selected. The old view's headings mean nothing in the new one. *)
+let set_keeper_list_view state view =
+  let resting =
+    Option.map (fun (keeper : keeper) -> keeper.k_name)
+      (List.nth_opt (ordered_keepers state) state.keeper_cursor)
+  in
+  state.keeper_list_view <- view;
+  state.keeper_list_heading <- None;
+  Option.iter (keeper_list_select_name state) resting
+
 let cycle_keeper_list_view state =
-  let selected = Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) in
-  state.keeper_list_view <- Masc_tui_keeper_list_model.next_view state.keeper_list_view;
-  Option.iter (keeper_list_select_name state) selected
+  set_keeper_list_view state (Masc_tui_keeper_list_model.next_view state.keeper_list_view)
 
 (* Density changes how tall a row is, not the order, so the cursor stays on
    the same Keeper without a lookup. *)
@@ -19963,6 +20035,8 @@ let create_state
   keeper_list_view = Masc_tui_keeper_list_model.By_state;
   keeper_outside_reading = (fun _ ~now:_ ~keeper_name:_ -> Masc_tui_keeper_list_model.outside_unread);
   keeper_list_density = Masc_tui_keeper_list_model.Two_lines;
+  keeper_list_heading = None;
+  keeper_list_folded = [];
   keeper_list_sort = Masc_tui_keeper_list_model.Priority;
   keeper_list_preference_notice = None;
   keeper_list_preference_startup_error = None;

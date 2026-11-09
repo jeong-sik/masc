@@ -1,7 +1,7 @@
 (** A reading page drawn from [Masc_tui_page_line] lines. A fact's label sits
     receded in a column as wide as the page's longest label, so the values start
-    at one cell; a title is bold, a quiet line is receded and an attention line
-    is warned. A value with a word wider than the room beside its label (a hash,
+    at one cell; a title is bold, a quiet line is receded, an info line is drawn
+    in the info colour and an attention line is warned. A value with a word wider than the room beside its label (a hash,
     a path), or on a screen too narrow to leave it room, goes on the rows under
     the label, so no word is cut at a column in the middle.
 

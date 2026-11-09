@@ -22,6 +22,7 @@ let min_value_cells = 16
 let tone_style = function
   | Page_line.Quiet -> Theme.recede ()
   | Page_line.Plain -> Ansi.reset
+  | Page_line.Info -> Theme.info ()
   | Page_line.Attention -> Theme.warn ()
   | Page_line.Failure -> Theme.bad ()
 

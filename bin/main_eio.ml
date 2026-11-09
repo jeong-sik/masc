@@ -2038,7 +2038,8 @@ let verify_runtime_execution runtime timeout_s =
     Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree private_path);
     (* The env and clock a provider request reads are installed inside; the
        verification's own bound is the command's [timeout_s]. *)
-    Runtime_verification.verify_as_command ~env ~sw ~private_dir:private_path ~timeout_s runtime))
+    Runtime_verification.verify_as_command ~env ~sw ~private_dir:private_path ~timeout_s
+      ~account_request:Runtime_account_access.Operator_call runtime))
 
 let runtime_verify_cmd_exit base_path runtime_id timeout_s =
   let unavailable ?detail code message =
@@ -2066,12 +2067,23 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
       match List.find_opt (fun (runtime : Runtime_instance.t) -> runtime.id = runtime_id) runtimes with
       | None -> unavailable "runtime_not_configured" "The requested runtime is not an enabled configured binding."
       | Some runtime ->
+        (* HIGH-RISK-UNREVIEWED: a host tool starts a client on an account only
+           as the single user of a base path never set up for accounts (plan
+           D2-2, D2-3). *)
+        (match
+           Runtime_account_access.publish_host_tool ~base_path
+             ~config_dir:(Env_config_core.masc_config_dir_opt ())
+         with
+         | Error (first, rest) ->
+           unavailable ~detail:(String.concat "; " (first :: rest)) "account_access_refused"
+             "A host tool does not start a client on an account of this base path."
+         | Ok () ->
         (try
           let result = verify_runtime_execution runtime timeout_s in
           print_endline (Yojson.Safe.to_string (Runtime_verification.to_json result));
           Runtime_verification.exit_code result
          with Eio.Io _ | Unix.Unix_error _ | Sys_error _ ->
-           unavailable "verification_session_failed" "The isolated verification session could not start or finish.")
+           unavailable "verification_session_failed" "The isolated verification session could not start or finish."))
 
 let runtime_verify_cmd =
   let runtime_id = Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID") in
@@ -4416,7 +4428,7 @@ let setup_validate_runtime base_path =
              Printf.eprintf "Missing model credential: %s. Set this variable in the shell that starts MASC.\n" key
            | (Some (Runtime_verification.Unavailable (Runtime_verification.Missing_credential _)), Some (Runtime_schema.File _ | Runtime_schema.Inline _))
            | (Some (Runtime_verification.Unavailable (Runtime_verification.Missing_credential _)), None)
-           | (Some (Runtime_verification.Unavailable (Runtime_verification.Unsupported_runtime | (Runtime_verification.Tools_not_declared | (Runtime_verification.Invalid_credential _ | (Runtime_verification.Invalid_configuration _ | (Runtime_verification.Client_not_authenticated _ | Runtime_verification.Client_not_started _)))))), _)
+           | (Some (Runtime_verification.Unavailable (Runtime_verification.Unsupported_runtime | (Runtime_verification.Tools_not_declared | (Runtime_verification.Invalid_credential _ | (Runtime_verification.Invalid_configuration _ | (Runtime_verification.Client_not_authenticated _ | (Runtime_verification.Client_not_started _ | Runtime_verification.Account_not_authorized _))))))), _)
            | (Some (Runtime_verification.Timed_out | (Runtime_verification.Tool_not_called | (Runtime_verification.Tool_result_not_consumed | (Runtime_verification.Empty_response | (Runtime_verification.Model_unreported | (Runtime_verification.Rate_limited _ | (Runtime_verification.Quota_exhausted _ | (Runtime_verification.Provider_overloaded _ | (Runtime_verification.Provider_auth_refused _ | (Runtime_verification.Provider_unreachable _ | (Runtime_verification.Model_not_found _ | Runtime_verification.Provider_rejected _))))))))))), _)
            | (None, _) -> ());
           (* Name the cause: a refused key needs a new one, a missing model

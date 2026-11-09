@@ -632,7 +632,8 @@ let handle_comment_add ~reader ~tool_name ~start_time args : Tool_result.result 
              (Board_tool_format.with_unresolved (comment_acknowledgement comment) unresolved)
              (thread_position_fields ~reader ~post_id comment)
          in
-         Tool_result.make_ok ~tool_name ~start_time ~data:json ()
+         Tool_result.make_ok ~tool_name ~start_time ~data:json
+           ~metadata:(Board_tool_evidence.metadata (Board_tool_evidence.comment comment)) ()
        | Error e ->
          Board_tool_format.error_of_board_error ~tool_name ~start_time e)
 ;;

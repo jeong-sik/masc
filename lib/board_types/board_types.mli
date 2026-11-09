@@ -34,14 +34,14 @@ type board_error =
         alias. The write is refused and nothing is stored. *)
 [@@deriving show]
 
-(** An ordinary in-memory read can report an invalid or absent ID. A read for
-    durable evidence also refuses an incomplete source. *)
+(** Reads that require a complete source distinguish unavailable data from
+    an invalid or absent ID. *)
 type board_read_error =
   | Read_invalid_id of string
   | Read_post_not_found of string
   | Read_comment_not_found of string
   | Read_source_unavailable of board_error
-      (** The posts source cannot establish either a post or its absence. *)
+      (** A required source cannot establish the requested row or complete list. *)
 [@@deriving show]
 
 val board_error_of_read_error : board_read_error -> board_error
@@ -207,6 +207,18 @@ type comment = {
   votes_up : int;
   votes_down : int;
 }
+
+type source_completeness =
+  | Source_complete
+  | Source_incomplete of board_error
+
+type comments_observation = {
+  comments : comment list;
+  completeness : source_completeness;
+}
+(** Rows and source status captured together under persistence then state
+    locks. Incomplete rows remain available for display; neither their absence
+    nor their count establishes the contents of the complete thread. *)
 
 type post_creation = {
   post : post;

@@ -414,12 +414,17 @@ val list_posts_by_run_origin : store -> post list
 (** Snapshot the exact run-origin index, newest publication first. Does not
     scan unrelated Board posts or inspect body text. *)
 
-(** Coalesces [read_post] + [read_comments] under a single
-    {!with_lock} block to avoid the two-call lock churn
-    that previously surfaced as
-    [Mutex.lock: Resource deadlock avoided] under contended
-    repeated agent polling.  Returns the whole thread in {!read_comments}
-    order; paging is {!Board_types.Comment_page}'s job. *)
+val observe_post_and_comments
+  : store
+  -> post_id:string
+  -> (post * comments_observation, board_read_error) Result.t
+(** Capture a post, indexed comments and source completeness together under
+    persistence then state locks. Retains display rows when either source is
+    incomplete. A missing post in an incomplete posts source is unavailable. *)
+
+(** Complete thread in {!read_comments} order, observed in one persistence
+    then state critical section. Refuses an incomplete posts or comments source
+    with [Read_source_unavailable]. Paging is {!Board_types.Comment_page}'s job. *)
 val read_post_and_comments
   :  store
   -> post_id:string
@@ -478,15 +483,21 @@ val add_comment_with_audience
 (** Validate and freeze comment routing before the Board mutation, returning
     the same audience with the committed comment. *)
 
-(** Returns the comments for [post_id] oldest first: by [created_at], and by
+val observe_comments : store -> post_id:string -> (comments_observation, board_read_error) Result.t
+(** Display rows with their completeness captured in the same persistence then
+    state critical section. Incomplete rows cannot establish absence or totals. *)
+
+(** Returns complete comments for [post_id] oldest first: by [created_at], and by
     comment id among comments with the same [created_at], so every read of an
     unchanged thread returns the same order. *)
 val read_comments : store -> post_id:string -> (comment list, board_read_error) Result.t
-(** No indexed rows answers [Ok []]. This lookup does not check post
-    existence; retained orphan comments remain readable by their post ID. *)
+(** Only a complete source may answer [Ok []]. An incomplete source answers
+    [Read_source_unavailable]. This lookup does not check post existence;
+    retained orphan comments remain readable by their post ID. *)
 
 
-(** Returns one comment by id. *)
+(** Returns a retained comment by id. An absent row answers [Comment_not_found]
+    only when the source is complete, otherwise its source error. *)
 val get_comment : store -> comment_id:string -> (comment, board_error) Result.t
 
 (** Returns up to [limit] (default 1000) most recent

@@ -255,20 +255,37 @@ let add_comment store ~lookup ~post_id ~author ~content ?parent_id ?ttl_hours ()
   |> Result.map (fun creation -> creation.comment)
 ;;
 
-let read_comments store ~post_id : (comment list, board_read_error) Result.t =
+(* Both the rows and their absence authority belong to this one locked view. *)
+let observe_comments_unlocked store pid : comments_observation =
+  let post_key = Post_id.to_string pid in
+  let comment_ids =
+    Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[]
+  in
+  let comments =
+    List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid) comment_ids
+    |> List.sort compare_comments_oldest_first
+  in
+  let completeness = match require_comments_source_readable store with
+    | Ok () -> Source_complete
+    | Error error -> Source_incomplete error
+  in
+  { comments; completeness }
+;;
+
+let observe_comments store ~post_id : (comments_observation, board_read_error) Result.t =
   maybe_sweep store;
   match Post_id.of_string_for_read post_id with
   | Error e -> Error e
   | Ok pid ->
-    with_lock store (fun () ->
-      let post_key = Post_id.to_string pid in
-      let comment_ids =
-        Hashtbl.find_opt store.comments_by_post post_key |> Option.value ~default:[]
-      in
-      let comments =
-        List.filter_map (fun cid -> Hashtbl.find_opt store.comments cid) comment_ids
-      in
-      Ok (List.sort compare_comments_oldest_first comments))
+    with_persist_lock store (fun () ->
+      with_lock store (fun () -> Ok (observe_comments_unlocked store pid)))
+;;
+
+let read_comments store ~post_id : (comment list, board_read_error) Result.t =
+  let* observation = observe_comments store ~post_id in
+  match observation.completeness with
+  | Source_complete -> Ok observation.comments
+  | Source_incomplete error -> Error (Read_source_unavailable error)
 ;;
 
 let get_comment store ~comment_id : (comment, board_error) Result.t =
@@ -276,11 +293,14 @@ let get_comment store ~comment_id : (comment, board_error) Result.t =
   match Comment_id.of_string comment_id with
   | Error e -> Error e
   | Ok cid ->
-    with_lock store (fun () ->
-      let comment_key = Comment_id.to_string cid in
-      match Hashtbl.find_opt store.comments comment_key with
-      | Some comment -> Ok comment
-      | None -> Error (Comment_not_found comment_id))
+    with_persist_lock store (fun () ->
+      with_lock store (fun () ->
+        let comment_key = Comment_id.to_string cid in
+        match Hashtbl.find_opt store.comments comment_key with
+        | Some comment -> Ok comment
+        | None ->
+          let* () = require_comments_source_readable store in
+          Error (Comment_not_found comment_id)))
 ;;
 
 (** List all comments (for profile aggregation) *)

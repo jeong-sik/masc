@@ -35,7 +35,7 @@ type board_error =
         alias. The write is refused and nothing is stored. *)
   [@@deriving show]
 
-(* An evidence read can also refuse a partial posts source. *)
+(* Complete-source reads distinguish unavailable data from absent rows. *)
 type board_read_error =
   | Read_invalid_id of string
   | Read_post_not_found of string
@@ -251,6 +251,15 @@ type comment = {
   expires_at: float;   (* MANDATORY *)
   votes_up: int;
   votes_down: int;
+}
+
+type source_completeness =
+  | Source_complete
+  | Source_incomplete of board_error
+
+type comments_observation = {
+  comments : comment list;
+  completeness : source_completeness;
 }
 
 type post_creation = {

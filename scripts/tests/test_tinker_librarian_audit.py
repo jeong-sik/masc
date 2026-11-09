@@ -189,5 +189,20 @@ class CaseTest(unittest.TestCase):
                 D.judge_decisions(out, synth_render.TEMPLATE)
 
 
+class AnswersTest(unittest.TestCase):
+    def test_the_baseline_answer_of_an_item_is_a_reply_and_not_an_error_stated_in_a_200_body(self) -> None:
+        def row(label: str, error: str | None) -> str:
+            return json.dumps({"key": label, "label": label, "status": 200, "finish": None if error else "stop",
+                               "content": None if error else "{}", "reasoning": None, "prompt_tokens": 0,
+                               "cached_tokens": 0, "completion_tokens": 0, "wall_s": 1.0, "sent_at": 0.0,
+                               "error": error})
+        with tempfile.TemporaryDirectory() as tmp:
+            run = Path(tmp)
+            (run / "calls.jsonl").write_text("".join(row(label, error) + "\n" for label, error in (
+                ("synth:base:i1", None), ("synth:base:i2", "GLM 1305: busy"), ("synth:A:i3", None))),
+                encoding="utf-8")
+            self.assertEqual(sorted(A.answers(run, "base")), ["i1"])
+
+
 if __name__ == "__main__":
     unittest.main()

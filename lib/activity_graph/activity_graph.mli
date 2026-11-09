@@ -136,17 +136,6 @@ val graph_json :
     metadata record (limit / events_shown / events_store_total
     / has_more). *)
 
-type default_projections = {
-  events_default : Yojson.Safe.t;
-  graph_default : Yojson.Safe.t;
-}
-
-val default_projections : Workspace_utils.config -> default_projections
-(** Single-pass computation of the two default dashboard activity
-    projections ([events_default] and [graph_default]).  Reads the store
-    once for up to 1000 recent events, counts total store lines once, and
-    derives both payloads without re-parsing or redundant disk traversal. *)
-
 type cache_stats = {
   past_day_files : int;  (** parsed day files held *)
   past_day_records : int;  (** events across them *)

@@ -26205,10 +26205,6 @@ let keeper_message_frame_for_viewport ?scroll state ~now ~terminal_rows ~termina
   { frame with kmsf_schedule_rows = keeper_message_schedule_rows state ~now ~max_rows:budget }
 
 let keeper_message_command_window ?status_frame ?scroll state ~terminal_rows ~terminal_cols =
-  let status_frame = Some (match status_frame with
-    | Some frame -> frame
-    | None -> keeper_message_frame_for_viewport ?scroll state ~now:(Unix.gettimeofday ())
-                ~terminal_rows ~terminal_cols) in
   match state.view, state.keeper_message_focus, state.voice_capture,
         current_recall_edit state with
   | Keepers Keeper_message, Right_pane, None, None
@@ -26218,6 +26214,10 @@ let keeper_message_command_window ?status_frame ?scroll state ~terminal_rows ~te
         (Masc_tui_message_input.contents state.msg_input) with
      | None -> None
      | Some menu ->
+       let status_frame = Some (match status_frame with
+         | Some frame -> frame
+         | None -> keeper_message_frame_for_viewport ?scroll state ~now:(Unix.gettimeofday ())
+                     ~terminal_rows ~terminal_cols) in
        let status_rows = keeper_message_status_rows ?status_frame ?scroll state + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
            ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in

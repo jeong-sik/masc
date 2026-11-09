@@ -3806,7 +3806,7 @@ let scroll_position_for_window state ~keeper_name projection ~markdown ~source_b
     (window : Message_layout.scroll_window) =
   let live_edge = window.scroll = 0 in
   let positions = if live_edge then List.rev window.body_positions else window.body_positions in
-  let points = List.filter_map (fun (position : Message_layout.body_row_position) ->
+  let point_of_position (position : Message_layout.body_row_position) =
     Option.bind (scroll_anchor_at projection position.entry_index) (fun anchor ->
       let source = if live_edge then
           Option.bind (source_body position.entry_index) (fun body ->
@@ -3814,11 +3814,13 @@ let scroll_position_for_window state ~keeper_name projection ~markdown ~source_b
         else source_point_on_row ~source_body position.entry_index position.body_row in
       Option.map (fun source_position ->
         {scroll_anchor=anchor; body_row=position.body_row; source_position=Some source_position;
-         rows_below=position.rows_below}) source)) positions in
+         rows_below=position.rows_below}) source) in
   (* Live-edge seeds use the last actually displayed mapped byte. Opening
      rows separated from the tail by a generated gap never elect an offset
      measured through an old, elided physical middle. *)
-  let points = if live_edge then (match points with [] -> [] | point::_ -> [point]) else points in
+  let points = if live_edge then
+      Option.to_list (List.find_map point_of_position positions)
+    else List.filter_map point_of_position positions in
   (* Frame feedback must retain a searched query endpoint, rather than replace
      it with the first byte of whichever physical row is now at the top. An
      explicit scroll gesture changes Hold_search to Hold_scroll at the edge. *)

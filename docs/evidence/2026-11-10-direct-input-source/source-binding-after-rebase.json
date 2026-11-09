@@ -1,0 +1,15 @@
+{
+  "observed_at": "2026-11-09T16:15:07.027421+00:00",
+  "scope": "Source binding after whole Native Stack rebase; no new browser, frontend test or backend behavior run",
+  "base_head": "6a20db266c6b612936272609d4ef793c292ec0e0",
+  "source_head": "d6218b35fbb9c78937c34dfe1a570d25b83fc3f1",
+  "reader_head_before_receipt_commit": "5c60fc91a660f4c302f7b56c7183d969d65a900d",
+  "dashboard_git_tree": "70ae81a7c2da78fbb631673a9f09541f1851980d",
+  "same_dashboard_tree_as_capture_commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+  "ocaml_parse_source_hashes_match_committed_worktree": true,
+  "parsed_files": 27,
+  "ocamlc_version": "5.5.1",
+  "repository_target_ocaml": "5.5.2",
+  "backend_typed_or_behavior_tests_executed": false,
+  "ci_executed": false
+}

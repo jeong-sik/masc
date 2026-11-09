@@ -1,0 +1,763 @@
+{
+  "schema": "masc.evidence.current-locations.v1",
+  "purpose": "Locate unchanged #26049 synthetic browser captures and capture-time source blobs; assembled after capture, not a new browser observation.",
+  "paths_relative_to": "repository_root",
+  "recorded_manifest": {
+    "path": "retained-sha256.json",
+    "sha256": "6f4b1fd8e76c61681fa49967ee9302ff40fb38251dd7aabf24f10710578a0bdf"
+  },
+  "files": {
+    "docs/evidence/2026-11-10-direct-input-source/browser/README.md": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/README.md",
+      "recorded_sha256": "9fa30fb7d658e9b9f8dafe32c7bb134458054466fe006ec6ffac99e1029d05ad",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/browser-receipt.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/browser-receipt.json",
+      "recorded_sha256": "8527cb49db7384621991f4b838b280ca04bab4d116eab1bd2dc1750264ec7548",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/browser-dom.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/browser-dom.json",
+      "recorded_sha256": "f7f429b655a9a08dbb92ddf230253d60491a32dd8a49223d540740f34e6513b0",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/browser-snapshot.txt": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/browser-snapshot.txt",
+      "recorded_sha256": "fc462784e9b63fa10aef931eac5d546fb8ab0ead2cc48d404f7bb325d52c88f0",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/memory-inspector-source-raw.png": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/memory-inspector-source-raw.png",
+      "recorded_sha256": "1bb090b68aa5dda154d7b84c37e839c2da2ab069b3644f3b2f7b1096d18ddac2",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/source-hashes-before.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/source-hashes-before.json",
+      "recorded_sha256": "a60e6d809513e8f8ee7c80be302a67e4c8c3ff73336ea78b19e30f5100ed6851",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/source-hashes-after.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/source-hashes-after.json",
+      "recorded_sha256": "313cdcb8882085d5028852ba1d5b435a435a7a5418b12d52fe4fdc5c2d2562e3",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/loaded-source-hashes.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/loaded-source-hashes.json",
+      "recorded_sha256": "853cab88ed8c086a8bfc34b947cb5ce8e02fcfb57ccfa49bd1812bf862135621",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/payload.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/payload.json",
+      "recorded_sha256": "81f1c3a89bd9ff0a360b8ba80b38e47f13d5e69b8244c23177dbdb770ef79083",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/expected.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/expected.json",
+      "recorded_sha256": "71c51259dad505792e635e48daaa312cb6ef901d95b1abbf1b37a3f228c14bdc",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/synthetic-provider-request.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/synthetic-provider-request.json",
+      "recorded_sha256": "b6cd2ef7517a3c30d778b409f3e5c5f7493548c86e1a01ca4a06170d80efd6dd",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/fixture.ts": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/fixture.ts",
+      "recorded_sha256": "ec313977be366f8a14602c38499c514086ce27f8444302f19c3f18128ccd24f0",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/index.html": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/index.html",
+      "recorded_sha256": "2894489dda37eded9af184611b6d397606041506bebdd9b68745729cfcf1356d",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/vite-server.mjs": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/vite-server.mjs",
+      "recorded_sha256": "e03c4145f511a91848b2f69fd9c1837fcad84727c28dbdf25bf5bc7877d9534d",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/http-requests.jsonl": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/http-requests.jsonl",
+      "recorded_sha256": "7ea9394407ebb9ed4a25dcfaa1bc8f67dc3218dbe389f78b5e0a9efa61edcf58",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/server-owner.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/server-owner.json",
+      "recorded_sha256": "c286360583989f170bf03f7f693b59c2ecbfa4af7a839d5a3a8669e35719702d",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/task-space-finish.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/task-space-finish.json",
+      "recorded_sha256": "f9d75bcc32c815b3a986ab2fd4b1dc4a36a3e6399a66338a3c93b8e815f8dff9",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/browser/artifact-hashes.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/browser/artifact-hashes.json",
+      "recorded_sha256": "c21b3c732d975d2ea630dd1d00e1329878d043aead498b3c1aab4d1dee11a1a4",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/frontend-tests.txt": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/frontend-tests.txt",
+      "recorded_sha256": "92c01d802fbfd5946747a2c886882b9f5e1f2ad92b74f12676db01a2de8b5912",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/backend-parse-before-rebase.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/combined-parse-only.json",
+      "recorded_sha256": "e0f09ae71d833ae5c45ab1a3c819cca21cefbf2152d701058e22fd0a806b72c2",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/backend-parse-main-integration.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/backend-parse-main-integration.json",
+      "recorded_sha256": "6d2db0767786fc0aa46ed647513bdcaf9aad6616aa15aff4bdd91f0825f76c2a",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/source-binding-after-rebase.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/source-binding-after-rebase.json",
+      "recorded_sha256": "94edbd624f5c06e1fcb66614abcca7c7dc1fae101c75518f622487d392193e47",
+      "content_kind": "retained_capture"
+    }
+  },
+  "historical_records": [
+    {
+      "recorded_path": "dashboard/src/components/memory-inspector.ts",
+      "recorded_sha256": "0866a0550a2169110ccd7bff03ee5d9c3c6453db1fedfbcf9fdb342e1fefb05b",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/components/memory-inspector.ts",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/components/memory-inspector.ts"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/api/dashboard-turn-records.ts",
+      "recorded_sha256": "5953dbede75c6d89c6fd7a7224a2dd23d760b9b661eef193980df6da05916edf",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/api/dashboard-turn-records.ts",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/api/dashboard-turn-records.ts"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/components/keeper-turn-inspector-panel.ts",
+      "recorded_sha256": "74c3d6f6071b6771c2978edf9b437b04cfa715be32cfe52f49fca8bbdf242f8f",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/components/keeper-turn-inspector-panel.ts",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/components/keeper-turn-inspector-panel.ts"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/api/core.ts",
+      "recorded_sha256": "ae0e79a5ada013b73f8d87387fcf1ac43f930df6ba845ac72eac946c0f4ccde0",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/api/core.ts",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/api/core.ts"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/api/dev-token.ts",
+      "recorded_sha256": "acb752ae3934f849524b5c53c4f1cb32c2004ead96bdbde483c4526cd7731910",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/api/dev-token.ts",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/api/dev-token.ts"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/ds-theme-tokens.css",
+      "recorded_sha256": "69e2c6b1d9153c167af9a063fd74676526ee2d7142de4619fd77ebea9a5bbdd2",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/ds-theme-tokens.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/ds-theme-tokens.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/primitives.css",
+      "recorded_sha256": "ba75c4ada283eef870f01142506b628530ea1e5e44d1ffd60d21f75e3da712da",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/primitives.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/primitives.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/layout.css",
+      "recorded_sha256": "496b4e216519fe999744025edf10c7f3cc6143122151268a6dbb3494ecde0faf",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/layout.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/layout.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/layers.css",
+      "recorded_sha256": "f61ef99abe4432ee2a244a3e8ab781c8c885b206544e98f9f5c796c5028d0e63",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/layers.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/layers.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/kpi.css",
+      "recorded_sha256": "2f624de2badb4f0acab4ca440ac2337041ba4058f5f43b8f1949770539dd24b3",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/kpi.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/kpi.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/rail.css",
+      "recorded_sha256": "1d538df03a9a8c0fc9f9787b157a87d855e801d61215dedf9a5b3a885c38ca14",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/rail.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/rail.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/deck.css",
+      "recorded_sha256": "521852fd1daf46e22e3cb97c4b00101ad0ac8a97b4b8ab30fa151895ebeda774",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/deck.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/deck.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/drawer.css",
+      "recorded_sha256": "f6b5eee80c3567ed987201d94cd6c69be58c5b0edddfcc1966e8080a1a46cba6",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/drawer.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/drawer.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/swimlanes.css",
+      "recorded_sha256": "50d7fbfccb21bf8b67a73990f157c7ccd657f4eb43903b7356591bf259cb1770",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/swimlanes.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/swimlanes.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/code.css",
+      "recorded_sha256": "1942666fc2f5d5c1c50088e30530c9678e4df32b8c695ac2a2f3bd6f209243ea",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/code.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/code.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/styleseed-theme.css",
+      "recorded_sha256": "b91292ff8cec29b6e75d7e0c906f6cd1350c38612b820fe4370266a036908c96",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/styleseed-theme.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/styleseed-theme.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/styleseed-base.css",
+      "recorded_sha256": "4f1f70c0cda3b950b8a3188589837de161e26ea9b75f3ac693b201b97f5d7069",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/styleseed-base.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/styleseed-base.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/global.css",
+      "recorded_sha256": "2430f0c8bcedd56b76f82b014ff71ab9aac263a5b196f6e40af69781ff4726f0",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/global.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/global.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/tokens.css",
+      "recorded_sha256": "fb1690e355a2ad0e86d3d501caabe90a42dded29405dacec6a081554a3a5d17d",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/tokens.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/tokens.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/paper-theme.css",
+      "recorded_sha256": "5540e43f932982da6287680ff59add26a72ce4c4131cb39269bc5942d3f66b12",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/paper-theme.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/paper-theme.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-workspace.css",
+      "recorded_sha256": "33e7443f2dec2c0dbc37411930dc30c88847cd8b60e3442f090fe0513c5b8d9a",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-workspace.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-workspace.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/copilot-dock.css",
+      "recorded_sha256": "10c307781c188963a60c152ce32a734f7920daac8c657a3530cf303887332d21",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/copilot-dock.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/copilot-dock.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/states.css",
+      "recorded_sha256": "02d239a4762b52ed2463ef2e280e11909f4a0f1b0509e6c7ba14dc2541aaf926",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/states.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/states.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/ss-keeper-v2-bridge.css",
+      "recorded_sha256": "4449b5b2f024814d6e92e7d8cde9c8c02051edb58c7cff0bacd970b812f7a351",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/ss-keeper-v2-bridge.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/ss-keeper-v2-bridge.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/app-shell-v2.css",
+      "recorded_sha256": "e87a663b29d4da3647d2ca097b66f0d70c9b673d145447a6b595e6ed3da94055",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/app-shell-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/app-shell-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/approvals-v2.css",
+      "recorded_sha256": "64572691ce42cc9bf93562080c89e5cb726d477b118287ea24980cd463f6d8a3",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/approvals-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/approvals-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/board-v2.css",
+      "recorded_sha256": "2127619eef90dc0d7ef6dd34a73b0bc7880a994a4b799edb1dabb295b137facb",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/board-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/board-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/chat-blocks-v2.css",
+      "recorded_sha256": "e1ee8976aba1b13a971604c57519d23ae8ca0ef678983fa8b64bb95fd8cd2fa7",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/chat-blocks-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/chat-blocks-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/cockpit-v2.css",
+      "recorded_sha256": "0670184923fbea4d2d7e5c8ec62a505e18c7e269c0628fd4c9a17c1c854b1860",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/cockpit-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/cockpit-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/connectors-v2.css",
+      "recorded_sha256": "a9d990d1919847c1014071083e52d7ce4ff4849d6a07d91e833b3a66dfb421b0",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/connectors-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/connectors-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/craft-v2.css",
+      "recorded_sha256": "1214205bbe96a3ecd39370e4a7380f2874ed190f57c270b2bea56a84daccbaec",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/craft-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/craft-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/fusion-v2.css",
+      "recorded_sha256": "549f3057ce8b86ea7ac0d810a5bcd54f26ceefcfe5b6e11969dc1943d2c43c0b",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/fusion-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/fusion-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/ide-v2.css",
+      "recorded_sha256": "42381686b4bd53b9464edd5ca676dcd9b130bb32015d2e4c4ec6061e56c701fc",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/ide-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/ide-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/indicators-v2.css",
+      "recorded_sha256": "f72984519ac8ffee0a07df78e2cc5d6df0865dd6653f19460fa5a917e80ccc0a",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/indicators-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/indicators-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-asks-v2.css",
+      "recorded_sha256": "5cfb6004e39976236a05c7bd89852eed4ea056bc8d916dc718df8c5bf4f42235",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-asks-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-asks-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-memory-health-v2.css",
+      "recorded_sha256": "a5d3495973bcb67f91d52510e450378a1e7bddce0d3c678f63c67610091265f4",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-memory-health-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-memory-health-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/memory-inspector-v2.css",
+      "recorded_sha256": "2fb529b2bacc593fc3d036de85032cc9d8575421575b02108b386aa97da932c6",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/memory-inspector-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/memory-inspector-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/primitives-v2.css",
+      "recorded_sha256": "97ab09622257870173750082d08d305c0bc8d26cfc7ec564c2746ad880fa751d",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/primitives-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/primitives-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/runtime-editor-v2.css",
+      "recorded_sha256": "4f2cb713ba47c67ae45171bffc832744a7f9e3245e91191f8d2655b31ffadfe7",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/runtime-editor-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/runtime-editor-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/skin-v2.css",
+      "recorded_sha256": "b87166daa43d8fae09dbbe1baeac0f32700c89e910656ebc8c3f6bc7a30818cf",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/skin-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/skin-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/surfaces-v2.css",
+      "recorded_sha256": "4ce33c56b380a0bf2645f69d72713afeb6f0a79d9afbb14c014a99da4596a9be",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/surfaces-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/surfaces-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/work-v2.css",
+      "recorded_sha256": "2db5c68551599a1aa825345c778c39864fc6757202577d7533a54829c981c57d",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/work-v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/work-v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/colors_and_type.css",
+      "recorded_sha256": "554e9b272c3ce344b86f73603cb3074716b56af2ae19653f8dfb2910a62b57fb",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/colors_and_type.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/colors_and_type.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/v2.css",
+      "recorded_sha256": "ec6db10a5b53382e09e71ad62fdbbea417e6df1afa4960caed4edf5f71ffd2d7",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/v2.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/v2.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/surfaces.css",
+      "recorded_sha256": "4098fceddcf454e36f13d20cca00f6bc6ffc71cb82084c2794d4439eaa984282",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/surfaces.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/surfaces.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/dock.css",
+      "recorded_sha256": "eb40a82b92ab5bbe95d052439b2ef46044aff7128134716137b387f3bc00aec3",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/dock.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/dock.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/craft.css",
+      "recorded_sha256": "b3e9cd44dec9be08b6187c75647794dce579f912282470a30cac5ee50b45bc18",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/craft.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/craft.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/inspector.css",
+      "recorded_sha256": "de6c8012994aa2be63bd69ab7df01f58efbb74c5b83f7ef09f24940b2260be93",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/inspector.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/inspector.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/perf.css",
+      "recorded_sha256": "b5a74985a3e429a4354bf6631d3c6f82166f56c415d7b6a0413596bddeee97ac",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/perf.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/perf.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/fleet.css",
+      "recorded_sha256": "10caccf01f796fd7c3ffe647458212bda88eb6d20496d28cd4a3154f5c3f0a6d",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/fleet.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/fleet.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/logs.css",
+      "recorded_sha256": "e8eb55cdfbe1cb00b713895603d1e2c75d0ed34cfd216cde8f5f3b9faf38538f",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/logs.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/logs.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/keeper-config.css",
+      "recorded_sha256": "62ec004fb61bea678df976d135330b3e4727269eca111581e809dc69ea15408d",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/keeper-config.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/keeper-config.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/fusion.css",
+      "recorded_sha256": "30e2bfb9c02c7374101bc7cbc503223158166ad0b1fb7a091fdfb0e69c0c0c3b",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/fusion.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/fusion.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/memory.css",
+      "recorded_sha256": "ffb0c4796fa8fa19a17f0fdcfd1bfc006cc05d2a84fb6da0dbc87b22b0edaf01",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/memory.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/memory.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/schedule.css",
+      "recorded_sha256": "886a34cfd0cc08912b7a4d908f1f393ef0da474d5a6a56f5cba590b7abd8c5ee",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/schedule.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/schedule.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/runtime.css",
+      "recorded_sha256": "6159889f790894eaa17be626135df7f0f0edad1c1dc5e4271489ce065f36188e",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/runtime.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/runtime.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/ops-cluster.css",
+      "recorded_sha256": "809edeb78be783ce7d5960c0a75393be1b96117290912ea9989f5a8ee9957afe",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/ops-cluster.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/ops-cluster.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/prompt-book.css",
+      "recorded_sha256": "4c12130bbd2880c066798a56ea1211925ff8558720de436a7face4deef90fbf7",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/prompt-book.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/prompt-book.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/verify.css",
+      "recorded_sha256": "c13b07886a8586f3f5bf20d7b03006d1f7e5f73570ffeec3c0a023ea39e9ebe2",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/verify.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/verify.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/registry.css",
+      "recorded_sha256": "2cd2ba49389219a5a2cee58f7b6834370a17ed6967972d638a65de986a6a2240",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/registry.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/registry.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/monitor.css",
+      "recorded_sha256": "ec980237ca63fdeb8d308a72ab9eacfb5237e1667de6ef3b6944e8e40cc8ddc8",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/monitor.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/monitor.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/lanes.css",
+      "recorded_sha256": "f31416f297f29f9aa74f6d72850632065e29fba330f0102f85bcd57bb8f4381c",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/lanes.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/lanes.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/keeper-v2/tempered.css",
+      "recorded_sha256": "7163042321b06c160d2be9dc00b867ccf0c1f02d46d6360885f7c036a8df6c64",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/keeper-v2/tempered.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/keeper-v2/tempered.css"
+      }
+    },
+    {
+      "recorded_path": "dashboard/src/styles/mobile-operator-targets.css",
+      "recorded_sha256": "d6759e319d949b7371d0cf20bbff53eb6f23d4af9cee89becf644f224d0cea99",
+      "location": {
+        "kind": "git_blob",
+        "commit": "0480843d4793d5379f9df916534893fea2a33a8f",
+        "path": "dashboard/src/styles/mobile-operator-targets.css",
+        "url": "https://github.com/jeong-sik/masc/blob/0480843d4793d5379f9df916534893fea2a33a8f/dashboard/src/styles/mobile-operator-targets.css"
+      }
+    }
+  ]
+}

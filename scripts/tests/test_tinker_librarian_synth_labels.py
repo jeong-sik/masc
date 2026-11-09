@@ -3,8 +3,9 @@
 # dependencies = ["openai==3.46.0"]
 # ///
 # pyright: strict
-"""Tests for the labels of synthetic requests (scripts/tinker/librarian/synth_spec.py) and for
-scoring answers by the memory they leave (memory_scores.py).
+"""Tests for the labels of synthetic requests (scripts/tinker/librarian/synth_spec.py), for
+scoring answers by the memory they leave (memory_scores.py), and for the teacher answers kept
+as training targets (teacher_sample.py).
 
 A label is a Memory decision MASC accepts: the answer it asks for passes
 `admission_validator` for the prompt `synth_render` makes from the request, and
@@ -18,7 +19,6 @@ from __future__ import annotations
 import datetime as dt
 import itertools
 import json
-import random
 import sys
 import unittest
 from pathlib import Path
@@ -28,10 +28,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tinker" / "librari
 import admission_request as R
 import admission_result as AR
 import admission_validator as AV
+import eval_admission as V
 import memory_scores as M
 import synth_generate as G
 import synth_render as SR
 import synth_spec as S
+import teacher_sample as T
 
 KEEPER = S.KeeperProfile("docs-gardener", "synth-docs-gardener", "문서 사이트를 돌보는 Keeper.", "가상의 문서 저장소.",
                          ("doc_links", "style_rules"), S.GoalDraft("깨진 링크 줄이기", "깨진 링크 수", "0"))
@@ -278,19 +280,43 @@ class ReadBackTest(unittest.TestCase):
         self.assertIsNone(S.label_from_json(mismatched))
 
 
-class GenerateTest(unittest.TestCase):
-    def test_no_target_is_a_planted_fact(self) -> None:
-        self.assertEqual([f.memory_id for f in G.target_choices(PLANTED)], list(TARGETS))
+def teacher_answer(req: S.SynthRequest, *, absorbs: tuple[str, ...], pair: bool, dropped: tuple[str, ...]) -> str:
+    """An answer MASC accepts on PLANTED with a complement of m1 (k1) and a new fact (k2). The
+    complement's claim joins m1 when `absorbs` holds m1; `pair` merges m6 into m5."""
+    k1, k2 = req.candidates
+    by_id = {f.memory_id: f for f in req.facts}
+    first = merged(by_id["m1"], k1) if "m1" in absorbs else k1.claim
+    claims = [claim_json(first, absorbs=absorbs), claim_json(k2.claim)]
+    if pair:
+        claims.append(claim_json(by_id["m5"].claim, absorbs=("m5", "m6")))
+    return answer_text(((k1.request_id, "incorporated", first), (k2.request_id, "incorporated", k2.claim)),
+                       claims=tuple(claims), dropped=dropped)
 
-    def test_a_duplicate_names_the_id_its_fact_gets_once_sorted_by_time(self) -> None:
-        late, early = dt.datetime(2026, 10, 9, tzinfo=dt.UTC), dt.datetime(2026, 10, 2, tzinfo=dt.UTC)
-        written = [G.Written(late, "doc_links", False, "원래 기억", None),
-                   G.Written(early, "doc_links", False, "같은 지식의 다른 문장", "원래 기억"),
-                   G.Written(early + dt.timedelta(days=1), "doc_links", True, "낡은 상태", None)]
-        facts = G.facts_of(random.Random(1), written)
-        self.assertEqual([(f.memory_id, f.claim, f.planted_stale, f.duplicate_of) for f in facts],
-                         [("m1", "같은 지식의 다른 문장", False, "m3"), ("m2", "낡은 상태", True, None),
-                          ("m3", "원래 기억", False, None)])
+
+def teacher_rejection(req: S.SynthRequest, answer: str) -> str | None:
+    accepted(req, answer)
+    item = M.SynthItem(req.item_id, prompt_of(req), "", S.label_of(req))
+    return T.rejection(item, V.check(item.prompt, answer))
+
+
+class TeacherTest(unittest.TestCase):
+    def test_the_answer_a_label_asks_for_is_kept_with_its_merges(self) -> None:
+        req = request(PLANTED, candidates_of((S.CandidateKind.COMPLEMENT, S.CandidateKind.NEW_DURABLE)))
+        self.assertIsNone(teacher_rejection(req, label_answer(req)))
+        self.assertIsNone(teacher_rejection(req, teacher_answer(req, absorbs=("m1",), pair=True, dropped=("m4",))))
+
+    def test_an_answer_that_skips_a_merge_or_merges_outside_the_label_is_not_kept(self) -> None:
+        req = request(PLANTED, candidates_of((S.CandidateKind.COMPLEMENT, S.CandidateKind.NEW_DURABLE)))
+        # (complement's absorbs, pair merged, dropped) -> why the answer is not kept
+        cases: tuple[tuple[tuple[str, ...], bool, tuple[str, ...], str], ...] = (
+            ((), True, ("m4",), "memory_state"),
+            (("m1",), False, ("m4",), "duplicate_kept"),
+            (("m1", "m4"), True, (), "stale_kept"),
+            (("m1", "m2"), True, ("m4",), "absorbed_off_label"),
+            (("m1",), True, ("m4", "m2"), "unexpected_drop"))
+        for absorbs, pair, dropped, why in cases:
+            answer = teacher_answer(req, absorbs=absorbs, pair=pair, dropped=dropped)
+            self.assertEqual(teacher_rejection(req, answer), why, (absorbs, pair, dropped))
 
 
 if __name__ == "__main__":

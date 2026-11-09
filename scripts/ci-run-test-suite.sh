@@ -184,8 +184,9 @@ disk_bands_seen=" "
 disk_evidence() {
   echo "[test-suite] free space fell below ${1}G; what holds the bytes:"
   df -h /
-  echo "[test-suite] largest _build entries:"
-  timeout 90 du -xh --max-depth=1 "$repo_root/_build" 2>/dev/null | sort -rh | head -15 || true
+  echo "[test-suite] largest _build entries (two levels: subtree then its biggest children):"
+  timeout 90 du -xh --max-depth=1 "$repo_root/_build" 2>/dev/null | sort -rh | head -8 || true
+  timeout 120 du -xh --max-depth=1 "$repo_root/_build"/* 2>/dev/null | sort -rh | head -15 || true
   echo "[test-suite] runner temp:"
   du -sh "$tmp" 2>/dev/null || true
   ls -lh "$log" "$trace" 2>/dev/null || true

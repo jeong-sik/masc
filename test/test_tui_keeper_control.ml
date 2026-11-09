@@ -1474,30 +1474,29 @@ let test_roster_decodes_recent_turns () =
     | Error reason -> Alcotest.fail reason
   in
   Alcotest.(check bool) "null recent_turns is None" true (decode `Null = None);
-  let sample_obj =
-    `Assoc
-      [ "truncated", `Bool false
-      ; ( "turns"
-        , `List
-            [ `List [ `Float 1794037335.0; `String "ok" ]
-            ; `List [ `Int 1794036000; `String "failed" ]
-            ] )
-      ]
+  let slot starts_at ok rested failed = `List [ `Int starts_at; `Int ok; `Int rested; `Int failed ] in
+  let wire ?(known_since = `Float 1794030000.0) slots =
+    `Assoc [ "known_since", known_since; "slots", `List slots ]
   in
-  match decode sample_obj with
-  | None -> Alcotest.fail "expected decoded recent_turns"
-  | Some pulse ->
-    Alcotest.(check bool) "not truncated" false pulse.truncated;
-    Alcotest.(check int) "2 samples" 2 (List.length pulse.samples);
-    let s1 = List.hd pulse.samples in
-    let s2 = List.nth pulse.samples 1 in
-    Alcotest.(check (float 0.001)) "first ts" 1794037335.0 s1.at;
-    Alcotest.(check bool) "first outcome is Turn_ok" true (s1.outcome = Masc.Keeper_turn_pulse.Turn_ok);
-    Alcotest.(check (float 0.001)) "second ts" 1794036000.0 s2.at;
-    Alcotest.(check bool)
-      "second outcome is Turn_failed"
-      true
-      (s2.outcome = Masc.Keeper_turn_pulse.Turn_failed)
+  (match decode (wire [ slot 1794036600 2 0 1; slot 1794034800 0 1 0 ]) with
+   | None -> Alcotest.fail "expected decoded recent_turns"
+   | Some pulse ->
+     Alcotest.(check (float 0.001)) "known since" 1794030000.0 pulse.known_since;
+     Alcotest.(check (list (pair int (triple int int int))))
+       "slots newest first with their counts"
+       [ 1794036600, (2, 0, 1); 1794034800, (0, 1, 0) ]
+       (List.map
+          (fun ({ starts_at; tally = { ok; rested; failed } } : Masc.Keeper_turn_pulse.slot) ->
+            starts_at, (ok, rested, failed))
+          pulse.slots));
+  Alcotest.(check bool) "a slot that does not decode drops the pulse" true
+    (decode (wire [ slot 1794036600 1 0 0; `List [ `Int 1794034800; `String "ok" ] ]) = None);
+  Alcotest.(check bool) "a negative count drops the pulse" true
+    (decode (wire [ slot 1794036600 (-1) 0 0 ]) = None);
+  Alcotest.(check bool) "a missing known_since drops the pulse" true
+    (decode (`Assoc [ "slots", `List [] ]) = None);
+  Alcotest.(check bool) "the old turns shape is not read" true
+    (decode (`Assoc [ "truncated", `Bool false; "turns", `List [] ]) = None)
 ;;
 
 let test_actual_producer_error_is_isolated () =

@@ -162,12 +162,11 @@ let column_legend =
         unknown_mark )
   ; ( String.concat " " (List.map fst pulse_marks)
     , Printf.sprintf
-        "autonomous turn results of the last %d hours, one mark per hour, newest on the \
-         right: %s; chat turns are not counted, and the server keeps a keeper's last %d \
-         turns, so a busy keeper's older hours read %s (Detailed second row)"
+        "autonomous turn results of the last %d clock hours, one mark per hour, newest \
+         on the right: %s; chat turns are not counted, and an hour from before the \
+         server's record of the keeper reads %s (Detailed second row)"
         pulse_hours
         (String.concat " / " (List.map (fun (mark, word) -> mark ^ " " ^ word) pulse_marks))
-        Masc.Keeper_turn_pulse.max_samples_per_keeper
         unknown_mark )
   ; "Mode " ^ letters activation_letter activations, words activation_word activations
   ; "S " ^ letters sandbox_letter sandboxes, "sandbox: " ^ words sandbox_word sandboxes

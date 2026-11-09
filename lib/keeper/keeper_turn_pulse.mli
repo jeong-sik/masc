@@ -1,69 +1,78 @@
-(** In-memory bounded cache of recent turn outcomes per keeper (RFC-0511 §2.3 S1a, S1b).
+(** Autonomous turn outcomes per keeper, counted in half-hour slots over the
+    last day (RFC-0515 §2.1).
 
-    Tracks recent autonomous turn execution outcomes ([Turn_ok], [Turn_rested],
-    [Turn_failed]) for each keeper up to [max_samples_per_keeper]. Maintained
-    in an Atomic map updated via CAS loop so read projections (such as the
-    roster row builder running on another domain) observe immutable snapshots. *)
+    A slot starts on a multiple of {!slot_seconds} of Unix time and counts the
+    turns that ended in it. Slots change only when a turn is recorded or the
+    pulse is seeded: recording prunes the slots that lie more than
+    {!window_seconds} before the newest slot and moves [known_since] up to that
+    boundary, and reading computes nothing.
+    So a keeper's row carries the same pulse until its next turn (RFC-0481),
+    and the number of slots a keeper holds is set by time, not by how many
+    turns it ran.
+
+    The map is updated through a CAS loop so a reader on another domain sees an
+    immutable snapshot. *)
 
 type outcome =
   | Turn_ok
   | Turn_rested
   | Turn_failed
 
-val outcome_to_string : outcome -> string
-val outcome_of_string : string -> outcome option
+type tally = {
+  ok : int;
+  rested : int;
+  failed : int;
+}
+
+type slot = {
+  starts_at : int;  (** Unix seconds, a multiple of {!slot_seconds}. *)
+  tally : tally;
+}
+
+type pulse = {
+  known_since : float;
+      (** The server knows every turn that ended at or after this Unix time.
+          A slot that starts before it may have lost turns. *)
+  slots : slot list;  (** Newest first; a slot with no turn is not stored. *)
+}
+
+val slot_seconds : int
+(** 1800: half an hour. *)
+
+val window_seconds : int
+(** 86400: the slots kept behind the newest recorded turn's slot. *)
+
+val slot_start : float -> int
+(** The start of the slot that holds Unix time [at]. *)
+
+val record : base_path:string -> keeper_name:string -> at:float -> outcome -> unit
+(** Count one turn that ended at [at]. A keeper with no pulse yet knows its
+    turns from [at] on. *)
+
+val get : base_path:string -> keeper_name:string -> pulse option
+(** [None] when the keeper was neither seeded nor recorded. *)
 
 type sample = {
   at : float;
   outcome : outcome;
 }
 
-type pulse = {
-  samples : sample list;
-  truncated : bool;
-}
-
-val max_samples_per_keeper : int
-
-val record : base_path:string -> keeper_name:string -> at:float -> outcome -> unit
-(** [record ~base_path ~keeper_name ~at outcome] prepends [outcome] at time [at]
-    to the keeper's pulse history. If the history exceeds [max_samples_per_keeper],
-    older entries are dropped and [truncated] is set to true. *)
-
-val get : base_path:string -> keeper_name:string -> pulse option
-(** Returns the recorded pulse history for the given keeper, or [None] if neither
-    seeded nor recorded. *)
-
-val seed :
-  ?override:bool ->
-  base_path:string ->
-  keeper_name:string ->
-  samples:sample list ->
-  truncated:bool ->
-  unit ->
-  unit
-(** [seed ?override ~base_path ~keeper_name ~samples ~truncated ()] seeds the pulse
-    cache if the keeper has no entry yet (or unconditionally if [override = true]). *)
-
 val sample_of_decision_line : string -> sample option
-(** Parse a single decision log JSON line. Returns [Some sample] if the line is
-    a turn event with recognized outcome and valid timestamp; [None] otherwise. *)
+(** A decision log line that is an autonomous-cycle turn with a known outcome
+    and a finite time; [None] for any other line, chat turns included. *)
 
 val seed_from_decision_log :
-  ?now:float ->
-  config:Workspace.config ->
-  keeper_name:string ->
-  unit ->
-  unit
-(** Seeds a keeper's pulse history from [decisions.jsonl] and [.1] within a 12-hour window.
-    A missing log, or a log with no turns in the window, seeds an empty pulse. A log
-    that exists but cannot be read leaves the pulse unseeded, so [get] stays [None]. *)
+  ?now:float -> config:Workspace.config -> keeper_name:string -> unit -> unit
+(** Fill a keeper's pulse from the tail of [decisions.jsonl], and from
+    [decisions.jsonl.1] when the primary log is missing or was read whole
+    without reaching the window start. Rows stamped after [now] are dropped.
+    Seeding leaves a keeper that already has a pulse alone.
 
-val seed_all_from_decision_logs :
-  ?now:float ->
-  config:Workspace.config ->
-  unit ->
-  unit
-(** Seeds all persisted keepers in [config] from their respective decision logs. *)
+    [known_since] is the window start when a row older than the window was
+    read. Otherwise it is the oldest row read, of any event, since the logs
+    hold every turn after it; with no row read it is [now]. A log that exists
+    but cannot be read leaves the keeper unseeded, so [get] stays [None]. *)
+
+val seed_all_from_decision_logs : ?now:float -> config:Workspace.config -> unit -> unit
 
 val reset_for_tests : unit -> unit

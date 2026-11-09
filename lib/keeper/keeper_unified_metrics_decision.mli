@@ -18,6 +18,9 @@ type execution_path =
 
 val execution_path_to_string : execution_path -> string
 
+val execution_path_of_string : string -> execution_path option
+(** The inverse of {!execution_path_to_string}; [None] for any other label. *)
+
 val append_decision_record :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->

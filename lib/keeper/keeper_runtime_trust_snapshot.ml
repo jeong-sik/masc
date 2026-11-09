@@ -327,7 +327,7 @@ let latest_decision_json ~(config : Workspace.config) ~(keeper_name : string) :
         Keeper_memory.read_file_tail_lines_with_completion path
           ~max_bytes:40000 ~max_lines:20
       with
-      | Ok (lines, completion) -> (lines, completion)
+      | Ok { lines; completion; from_file_start = _ } -> (lines, completion)
       | Error exn_class ->
           Keeper_memory.record_memory_recall_read_error
             ~site:"keeper_runtime_trust_decisions" path exn_class;

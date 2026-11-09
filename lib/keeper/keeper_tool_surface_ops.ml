@@ -382,16 +382,13 @@ let keeper_list_row_json ~runtime_class config name =
         | None -> `Null
         | Some pulse ->
           `Assoc
-            [ ( "truncated", `Bool pulse.truncated )
-            ; ( "turns"
+            [ "known_since", `Float pulse.known_since
+            ; ( "slots"
               , `List
                   (List.map
-                     (fun (s : Keeper_turn_pulse.sample) ->
-                        `List
-                          [ `Float s.at
-                          ; `String (Keeper_turn_pulse.outcome_to_string s.outcome)
-                          ])
-                     pulse.samples) )
+                     (fun ({ starts_at; tally = { ok; rested; failed } } : Keeper_turn_pulse.slot) ->
+                        `List [ `Int starts_at; `Int ok; `Int rested; `Int failed ])
+                     pulse.slots) )
             ]
       in
       let runtime_blocker =

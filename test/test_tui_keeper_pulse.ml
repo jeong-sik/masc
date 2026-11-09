@@ -46,14 +46,36 @@ let ok = P.Slot_turn Pulse.Turn_ok
 let rested = P.Slot_turn Pulse.Turn_rested
 let failed = P.Slot_turn Pulse.Turn_failed
 
-let pulse ?(truncated = false) samples : Pulse.pulse =
-  { Pulse.samples = List.map (fun (at, outcome) -> { Pulse.at; outcome }) samples
-  ; truncated
-  }
+(* [now] is 20 minutes into its clock hour. *)
+let now_hour = Float.of_int (int_of_float (Float.floor (now /. hour)) * 3600)
+let in_hour ?(minute = 5) back = now_hour -. (Float.of_int back *. hour) +. Float.of_int (minute * 60)
+
+(* The server's slots for [turns], newest first. *)
+let pulse ?(known_since = now -. (24.0 *. hour)) turns : Pulse.pulse =
+  let add slots (at, outcome) =
+    let starts_at = Pulse.slot_start at in
+    let tally =
+      Option.value (List.assoc_opt starts_at slots)
+        ~default:{ Pulse.ok = 0; rested = 0; failed = 0 }
+    in
+    let tally =
+      match outcome with
+      | Pulse.Turn_ok -> { tally with Pulse.ok = tally.Pulse.ok + 1 }
+      | Pulse.Turn_rested -> { tally with Pulse.rested = tally.Pulse.rested + 1 }
+      | Pulse.Turn_failed -> { tally with Pulse.failed = tally.Pulse.failed + 1 }
+    in
+    (starts_at, tally) :: List.remove_assoc starts_at slots
+  in
+  let slots =
+    List.fold_left add [] turns
+    |> List.sort (fun (a, _) (b, _) -> Int.compare b a)
+    |> List.map (fun (starts_at, tally) -> { Pulse.starts_at; tally })
+  in
+  { Pulse.known_since; slots }
 ;;
 
-(* The window oldest hour first. [held] names slots by hours back from [now]
-   (0 is the hour just ended); every other hour reads [fill]. *)
+(* The window oldest hour first. [held] names slots by clock hours back from
+   the hour of [now] (0); every other hour reads [fill]. *)
 let window ~fill held =
   List.init Mark.pulse_hours (fun position ->
     match List.assoc_opt (Mark.pulse_hours - 1 - position) held with
@@ -112,7 +134,7 @@ let test_failing_cell_decisions () =
 ;;
 
 let test_no_pulse_is_unknown_in_every_hour () =
-  check_slots "a pulse the server did not seed"
+  check_slots "a pulse the server did not send"
     (window ~fill:P.Slot_unknown [])
     (P.slots ~now None);
   check_slots "a pulse read against a clock that is not a number"
@@ -127,96 +149,71 @@ let test_a_complete_window_without_turns_is_quiet_and_draws_nothing () =
     (P.slots ~now (Some (pulse [])));
   check_bool "nothing to draw" true (Option.is_none (P.pulse_cell ~now (Some (pulse []))));
   check_bool "a turn older than the window leaves the window quiet" true
-    (Option.is_none
-       (P.pulse_cell ~now (Some (pulse [ ago (13.0 *. hour), Pulse.Turn_failed ]))))
+    (Option.is_none (P.pulse_cell ~now (Some (pulse [ in_hour 13, Pulse.Turn_failed ]))))
 ;;
 
-let test_each_turn_lands_in_the_hour_it_ended () =
-  check_slots "newest hour at the end, a turn five hours back in the seventh slot"
+let test_each_turn_lands_in_its_clock_hour () =
+  check_slots "the hour of now at the end, five hours back in the seventh slot"
     (window ~fill:P.Slot_quiet [ 0, failed; 5, ok ])
-    (P.slots ~now
-       (Some (pulse [ ago 1800.0, Pulse.Turn_failed; ago ((5.0 *. hour) +. 1800.0), Pulse.Turn_ok ])));
-  check_slots "samples may come in either order"
-    (P.slots ~now (Some (pulse [ ago 1800.0, Pulse.Turn_failed; ago (5.5 *. hour), Pulse.Turn_ok ])))
-    (P.slots ~now (Some (pulse [ ago (5.5 *. hour), Pulse.Turn_ok; ago 1800.0, Pulse.Turn_failed ])))
+    (P.slots ~now (Some (pulse [ in_hour 0, Pulse.Turn_failed; in_hour 5, Pulse.Turn_ok ])))
 ;;
 
 let test_hour_boundaries () =
   let only at = P.slots ~now (Some (pulse [ at, Pulse.Turn_ok ])) in
-  check_slots "a turn now belongs to the newest hour" (window ~fill:P.Slot_quiet [ 0, ok ]) (only now);
-  check_slots "just under an hour back is still the newest hour"
+  check_slots "the start of the hour of now is that hour"
     (window ~fill:P.Slot_quiet [ 0, ok ])
-    (only (ago (hour -. 1.0)));
-  check_slots "an hour back starts the next hour"
+    (only now_hour);
+  check_slots "a second before it is the hour before"
     (window ~fill:P.Slot_quiet [ 1, ok ])
-    (only (ago hour));
-  check_slots "just under twelve hours back is the oldest hour"
+    (only (now_hour -. 1.0));
+  check_slots "the start of the eleventh hour back is the oldest hour"
     (window ~fill:P.Slot_quiet [ Mark.pulse_hours - 1, ok ])
-    (only (ago ((12.0 *. hour) -. 1.0)));
-  check_slots "twelve hours back is outside the window"
+    (only (now_hour -. (11.0 *. hour)));
+  check_slots "a second before it is outside the window"
     (window ~fill:P.Slot_quiet [])
-    (only (ago (12.0 *. hour)));
-  check_slots "a turn stamped after now belongs to the newest hour"
+    (only (now_hour -. (11.0 *. hour) -. 1.0));
+  check_slots "a turn stamped after the hour of now belongs to it"
     (window ~fill:P.Slot_quiet [ 0, ok ])
-    (only (now +. 120.0))
+    (only (now +. (2.0 *. hour)))
 ;;
 
 let test_the_worst_turn_of_an_hour_is_the_hour () =
-  let hour_of outcomes =
-    P.slots ~now
-      (Some (pulse (List.mapi (fun i outcome -> ago (60.0 *. Float.of_int (i + 1)), outcome) outcomes)))
-  in
-  let newest slots = List.nth slots (Mark.pulse_hours - 1) in
-  Alcotest.check slot_testable "ok alone" ok (newest (hour_of [ Pulse.Turn_ok ]));
-  Alcotest.check slot_testable "rested over ok" rested
-    (newest (hour_of [ Pulse.Turn_ok; Pulse.Turn_rested; Pulse.Turn_ok ]));
+  let newest turns = List.nth (P.slots ~now (Some (pulse turns))) (Mark.pulse_hours - 1) in
+  Alcotest.check slot_testable "ok alone" ok (newest [ in_hour 0, Pulse.Turn_ok ]);
+  Alcotest.check slot_testable "rested in the other half hour is over ok" rested
+    (newest [ in_hour ~minute:5 0, Pulse.Turn_ok; in_hour ~minute:40 0, Pulse.Turn_rested ]);
   Alcotest.check slot_testable "failed over rested and ok" failed
-    (newest (hour_of [ Pulse.Turn_rested; Pulse.Turn_ok; Pulse.Turn_failed; Pulse.Turn_ok ]));
-  Alcotest.check slot_testable "failed first" failed
-    (newest (hour_of [ Pulse.Turn_failed; Pulse.Turn_rested ]))
+    (newest
+       [ in_hour ~minute:5 0, Pulse.Turn_rested
+       ; in_hour ~minute:6 0, Pulse.Turn_ok
+       ; in_hour ~minute:45 0, Pulse.Turn_failed
+       ])
 ;;
 
-let test_a_cut_pulse_does_not_know_the_hours_before_its_oldest_turn () =
-  let samples = [ ago 600.0, Pulse.Turn_ok; ago ((3.0 *. hour) +. 1800.0), Pulse.Turn_failed ] in
-  let unknown_before_hour_3 = List.init 8 (fun i -> 4 + i, P.Slot_unknown) in
-  check_slots "hours older than the oldest held turn are unknown, newer empty hours quiet"
-    (window ~fill:P.Slot_quiet ((3, failed) :: (0, ok) :: unknown_before_hour_3))
-    (P.slots ~now (Some (pulse ~truncated:true samples)));
-  check_slots "the same turns without the cut mark leave those hours quiet"
-    (window ~fill:P.Slot_quiet [ 3, failed; 0, ok ])
-    (P.slots ~now (Some (pulse samples)));
-  check_slots "a cut pulse that holds a turn older than the window knows every hour"
-    (window ~fill:P.Slot_quiet [ 0, ok ])
+let test_hours_before_known_since_are_unknown () =
+  let known_since = now_hour -. (3.5 *. hour) in
+  let unknown_from_hour_4 = List.init 8 (fun i -> 4 + i, P.Slot_unknown) in
+  check_slots "an empty hour that starts before known_since is unknown, a turn still shows"
+    (window ~fill:P.Slot_quiet ((6, failed) :: (0, ok) :: List.remove_assoc 6 unknown_from_hour_4))
     (P.slots ~now
-       (Some (pulse ~truncated:true [ ago 600.0, Pulse.Turn_ok; ago (13.0 *. hour), Pulse.Turn_ok ])));
-  check_slots "a cut pulse that holds nothing knows nothing"
-    (window ~fill:P.Slot_unknown [])
-    (P.slots ~now (Some (pulse ~truncated:true [])));
-  check_slots "a cut pulse whose oldest turn is in the oldest hour knows every hour"
-    (window ~fill:P.Slot_quiet [ Mark.pulse_hours - 1, ok ])
-    (P.slots ~now (Some (pulse ~truncated:true [ ago ((11.0 *. hour) +. 1800.0), Pulse.Turn_ok ])))
-;;
-
-let test_a_turn_with_no_time_is_left_out () =
-  check_slots "a turn whose time is not a number places nowhere"
-    (P.slots ~now (Some (pulse [ ago 600.0, Pulse.Turn_ok ])))
-    (P.slots ~now (Some (pulse [ ago 600.0, Pulse.Turn_ok; Float.nan, Pulse.Turn_failed ])));
-  check_slots "a turn whose time is infinite places nowhere"
-    (P.slots ~now (Some (pulse [ ago 600.0, Pulse.Turn_ok ])))
-    (P.slots ~now
-       (Some (pulse [ ago 600.0, Pulse.Turn_ok; Float.infinity, Pulse.Turn_failed; Float.neg_infinity, Pulse.Turn_failed ])))
+       (Some (pulse ~known_since [ in_hour 0, Pulse.Turn_ok; in_hour 6, Pulse.Turn_failed ])));
+  check_slots "a pulse that knows nothing before now knows no empty hour"
+    (window ~fill:P.Slot_unknown [ 0, ok ])
+    (P.slots ~now (Some (pulse ~known_since:now [ now, Pulse.Turn_ok ])));
+  check_slots "a pulse that knows the whole day has no unknown hour"
+    (window ~fill:P.Slot_quiet [ 11, ok ])
+    (P.slots ~now (Some (pulse [ in_hour 11, Pulse.Turn_ok ])))
 ;;
 
 let test_the_cell_tone_follows_failures () =
   let tone pulse_option = (cell_of "pulse" (P.pulse_cell ~now pulse_option)).Cell.tone in
   check_bool "a failed turn asks for attention" true
-    (tone (Some (pulse [ ago 600.0, Pulse.Turn_failed ])) = Cell.Attention);
+    (tone (Some (pulse [ in_hour 0, Pulse.Turn_failed ])) = Cell.Attention);
   check_bool "ok and rested turns stay quiet" true
-    (tone (Some (pulse [ ago 600.0, Pulse.Turn_ok; ago 4000.0, Pulse.Turn_rested ])) = Cell.Quiet);
+    (tone (Some (pulse [ in_hour 0, Pulse.Turn_ok; in_hour 1, Pulse.Turn_rested ])) = Cell.Quiet);
   check_bool "hours the server does not hold stay quiet" true (tone None = Cell.Quiet);
   check_bool "a failure older than the window is not in the window" true
-    (tone (Some (pulse [ ago 600.0, Pulse.Turn_ok; ago (13.0 *. hour), Pulse.Turn_failed ]))
-     = Cell.Quiet)
+    (tone (Some (pulse [ in_hour 0, Pulse.Turn_ok; in_hour 13, Pulse.Turn_failed ])) = Cell.Quiet)
 ;;
 
 let test_the_readings_draw_different_marks () =
@@ -238,15 +235,13 @@ let () =
             test_no_pulse_is_unknown_in_every_hour
         ; Alcotest.test_case "a complete empty window draws nothing" `Quick
             test_a_complete_window_without_turns_is_quiet_and_draws_nothing
-        ; Alcotest.test_case "each turn lands in the hour it ended" `Quick
-            test_each_turn_lands_in_the_hour_it_ended
+        ; Alcotest.test_case "each turn lands in its clock hour" `Quick
+            test_each_turn_lands_in_its_clock_hour
         ; Alcotest.test_case "hour boundaries" `Quick test_hour_boundaries
         ; Alcotest.test_case "the worst turn is the hour" `Quick
             test_the_worst_turn_of_an_hour_is_the_hour
-        ; Alcotest.test_case "a cut pulse does not know the older hours" `Quick
-            test_a_cut_pulse_does_not_know_the_hours_before_its_oldest_turn
-        ; Alcotest.test_case "a turn with no time is left out" `Quick
-            test_a_turn_with_no_time_is_left_out
+        ; Alcotest.test_case "hours before known_since are unknown" `Quick
+            test_hours_before_known_since_are_unknown
         ; Alcotest.test_case "the cell tone follows failures" `Quick
             test_the_cell_tone_follows_failures
         ; Alcotest.test_case "the readings draw different marks" `Quick

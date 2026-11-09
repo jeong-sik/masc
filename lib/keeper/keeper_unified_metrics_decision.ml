@@ -21,6 +21,12 @@ let execution_path_to_string = function
   | Autonomous_cycle -> "autonomous_cycle"
 ;;
 
+let execution_path_of_string = function
+  | "direct_turn" -> Some Direct_turn
+  | "autonomous_cycle" -> Some Autonomous_cycle
+  | _ -> None
+;;
+
 let append_decision_record
     ~(config : Workspace.config)
     ~(meta : keeper_meta)

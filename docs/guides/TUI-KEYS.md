@@ -845,7 +845,7 @@ or completion.
 | `LIFECYCLE` | the keeper process |
 | `◂` | a failing keeper's last failure, in place of its runtime or first in DETAIL: how long ago · cause · the runtime that ended it · candidates tried |
 | `failing` | how long the keeper has been in the failing phase; ? when the server recorded no start, or the start is ahead of this screen's clock (Detailed second row) |
-| `✓ ⊘ ✗ · ?` | autonomous turn results of the last 12 hours, one mark per hour, newest on the right: ✓ ok / ⊘ rested / ✗ failed / · no turn / ? unknown; chat turns are not counted, and the server keeps a keeper's last 24 turns, so a busy keeper's older hours read ? (Detailed second row) |
+| `✓ ⊘ ✗ · ?` | autonomous turn results of the last 12 clock hours, one mark per hour, newest on the right: ✓ ok / ⊘ rested / ✗ failed / · no turn / ? unknown; chat turns are not counted, and an hour from before the server's record of the keeper reads ? (Detailed second row) |
 | `Mode M/D/A` | manual / on demand / autonomous |
 | `S D/M/R` | sandbox: docker / microvm / remote_ssh |
 | `쉬는 중` | resting path: relative duration (제공자 stated / 상한 bounded); ▹ prefixes next candidate after turn failure |

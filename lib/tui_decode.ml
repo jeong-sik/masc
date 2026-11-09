@@ -3219,36 +3219,36 @@ let decode_operator_disposition json =
     Error (Printf.sprintf "invalid operator_disposition wire fields: (%s, %s)"
              (Yojson.Safe.to_string other_kind) (Yojson.Safe.to_string other_reason))
 
+let decode_pulse_slot = function
+  | `List [ `Int starts_at; `Int ok; `Int rested; `Int failed ]
+    when ok >= 0 && rested >= 0 && failed >= 0 ->
+    Some ({ Keeper_turn_pulse.starts_at; tally = { ok; rested; failed } } : Keeper_turn_pulse.slot)
+  | _ -> None
+;;
+
+(* One slot that does not decode drops the whole pulse: a pulse missing a slot
+   would draw that slot's turns as a quiet half hour. *)
 let decode_recent_turns json =
   match member "recent_turns" json with
   | `Assoc fields ->
-    let truncated =
-      match List.assoc_opt "truncated" fields with
-      | Some (`Bool b) -> b
-      | _ -> false
+    let known_since =
+      match List.assoc_opt "known_since" fields with
+      | Some (`Float f) when Float.is_finite f -> Some f
+      | Some (`Int i) -> Some (Float.of_int i)
+      | Some _ | None -> None
     in
-    let turns =
-      match List.assoc_opt "turns" fields with
+    let slots =
+      match List.assoc_opt "slots" fields with
       | Some (`List items) ->
-        List.filter_map
-          (function
-            | `List [ at_json; `String out_str ] ->
-              let at_opt =
-                match at_json with
-                | `Float f when Float.is_finite f -> Some f
-                | `Int i -> Some (Float.of_int i)
-                | _ -> None
-              in
-              (match at_opt, Keeper_turn_pulse.outcome_of_string out_str with
-               | Some at, Some outcome ->
-                 Some ({ Keeper_turn_pulse.at; outcome } : Keeper_turn_pulse.sample)
-               | _ -> None)
-            | _ -> None)
-          items
-      | _ -> []
+        let decoded = List.filter_map decode_pulse_slot items in
+        if List.compare_lengths decoded items = 0 then Some decoded else None
+      | Some _ | None -> None
     in
-    Some ({ Keeper_turn_pulse.samples = turns; truncated } : Keeper_turn_pulse.pulse)
-  | `Null | _ -> None
+    (match known_since, slots with
+     | Some known_since, Some slots ->
+       Some ({ Keeper_turn_pulse.known_since; slots } : Keeper_turn_pulse.pulse)
+     | (Some _ | None), (Some _ | None) -> None)
+  | _ -> None
 ;;
 
 let decode_keeper_runtime ~account_revision json =

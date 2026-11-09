@@ -6,6 +6,7 @@ type unavailable =
   | Invalid_configuration of string
   | Client_not_authenticated of string
   | Client_not_started of string
+  | Account_not_authorized of string
 
 type failure =
   | Unavailable of unavailable
@@ -45,6 +46,7 @@ let failure_code = function
   | Unavailable (Invalid_configuration _) -> "invalid_configuration"
   | Unavailable (Client_not_authenticated _) -> "client_not_authenticated"
   | Unavailable (Client_not_started _) -> "client_not_started"
+  | Unavailable (Account_not_authorized _) -> "account_not_authorized"
   | Rate_limited _ -> "rate_limited"
   | Quota_exhausted _ -> "quota_exhausted"
   | Provider_overloaded _ -> "provider_overloaded"
@@ -73,6 +75,8 @@ let failure_message = function
     "The configured client reports no sign-in. Sign in with the client itself, or \
      export its credential variables."
   | Unavailable (Client_not_started _) -> "The configured client could not be started."
+  | Unavailable (Account_not_authorized _) ->
+    "This process may not start the client on this account for the check."
   | Rate_limited _ ->
     "The provider is rate limiting this account (a request limit or usage window). \
      The configuration is fine; wait and retry, or continue with another connection."
@@ -109,6 +113,7 @@ let failure_detail = function
   | Unavailable (Invalid_configuration detail)
   | Unavailable (Client_not_authenticated detail)
   | Unavailable (Client_not_started detail)
+  | Unavailable (Account_not_authorized detail)
   | Rate_limited detail
   | Quota_exhausted detail
   | Provider_overloaded detail
@@ -244,6 +249,7 @@ let failure_of_code ~code ~detail =
   | "client_not_authenticated", Some detail ->
     Ok (Unavailable (Client_not_authenticated detail))
   | "client_not_started", Some detail -> Ok (Unavailable (Client_not_started detail))
+  | "account_not_authorized", Some detail -> Ok (Unavailable (Account_not_authorized detail))
   | "rate_limited", Some detail -> Ok (Rate_limited detail)
   | "quota_exhausted", Some detail -> Ok (Quota_exhausted detail)
   | "provider_overloaded", Some detail -> Ok (Provider_overloaded detail)
@@ -613,7 +619,17 @@ let muse_account_spent ~mgr ~clock ~cwd ~scope config =
       | Ok () -> exhausted ()
       | Error _ -> false)
 
-let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtime : Runtime_instance.t) =
+(* WORKAROUND: the clients still take the account in their config, so the
+   authorized account goes there. Root fix: plan D2-5 and D2-6, where every
+   client function that starts the CLI takes the authorized account. *)
+let authorized ~account_request account =
+  Runtime_account_access.authorize account_request (Runtime_account_access.seal account)
+  |> Result.map Runtime_account_access.account
+  |> Result.map_error (fun refusal ->
+    Unavailable (Account_not_authorized (Runtime_account_access.refusal_to_string refusal)))
+;;
+
+let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~account_request (runtime : Runtime_instance.t) =
   (* The refusal the client's latest report amounts to. Whichever ends the
      run first -- this window or the client's own timeout -- reads it. *)
   let refusal_before_deadline = ref None in
@@ -896,9 +912,12 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                       }
                   | (Runtime_agent_context.Yielded_to_durable_stimulus _ | Runtime_agent_context.InputRequired _) as stop_reason -> Error (Provider_rejected (unfinished_run_reason stop_reason))))))
       | Runtime_execution.Claude_code execution ->
+        (match authorized ~account_request execution.account_home with
+         | Error failure -> Error failure
+         | Ok account_home ->
         let config =
           { (Runtime_claude_code.default_config ~cwd:cwd_path) with
-            account_home = Runtime_official_account.Captured execution.account_home;
+            account_home = Runtime_official_account.Captured account_home;
             cli_path = execution.cli_path
           ; model = execution.model
           ; admission_timeout_s = Float.min timeout_s execution.timeout_s
@@ -919,7 +938,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                    Option.map
                      (fun status ->
                         claude_auth_refusal
-                          ~account_home:execution.account_home
+                          ~account_home
                           ~status
                           (Printf.sprintf
                              "Claude Code was retrying the provider request (retry %d of %d)"
@@ -968,7 +987,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
                 { api_error_status; detail; _ } as error) ->
            (match claude_auth_status api_error_status with
             | Some status ->
-              Error (claude_auth_refusal ~account_home:execution.account_home ~status detail)
+              Error (claude_auth_refusal ~account_home ~status detail)
             | None -> Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
          | Error (Runtime_claude_code.Quota_blocked { block; _ } as error) ->
            Error (claude_quota_failure block (Runtime_claude_code.error_to_string error))
@@ -981,10 +1000,13 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
               | Runtime_claude_code.Stopped_by_host _
               | Runtime_claude_code.Process_exited _
               | Runtime_claude_code.Unhandled_exception _ ) as error) ->
-           Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
+           Error (Provider_rejected (Runtime_claude_code.error_to_string error))))
       | Runtime_execution.Codex_app_server execution ->
-        (match Runtime_verification_codex_home.prepare
-          ~source_home:(Runtime_official_account.home execution.account_home) ~directory:cwd_path () with
+        (match authorized ~account_request execution.account_home with
+         | Error failure -> Error failure
+         | Ok account_home ->
+        match Runtime_verification_codex_home.prepare
+          ~source_home:(Runtime_official_account.home account_home) ~directory:cwd_path () with
         | Error detail -> Error (Unavailable (Invalid_configuration detail))
         | Ok isolated_home ->
         (* Codex rejects Native_none. Native_read is its least supported
@@ -993,7 +1015,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
         let config =
           { (Runtime_codex_app_server.default_config ()) with
             cli_path = execution.cli_path
-          ; account_home = Runtime_official_account.Captured execution.account_home
+          ; account_home = Runtime_official_account.Captured account_home
           ; isolated_home = Some isolated_home
           ; model = execution.model
           ; context_window = Some (Runtime_instance.max_context_of_runtime runtime)
@@ -1080,7 +1102,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s (runtim
    that calls this proves the command's shape by running it. Children start
    through the posix_spawn manager the server itself uses, so a runtime that
    verifies here is started the way the server will start it. *)
-let verify_as_command ~env ~sw ~private_dir ~timeout_s runtime =
+let verify_as_command ~env ~sw ~private_dir ~timeout_s ~account_request runtime =
   let clock = Eio.Stdenv.clock env in
   Eio_context.set_env env;
   Eio_context.set_clock clock;
@@ -1095,6 +1117,7 @@ let verify_as_command ~env ~sw ~private_dir ~timeout_s runtime =
     ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_dir)
     ~cwd_path:private_dir
     ~timeout_s
+    ~account_request
     runtime
 ;;
 

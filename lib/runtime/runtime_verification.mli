@@ -17,6 +17,10 @@ type unavailable =
           sign-in. Carries the client's own account of what it looked for. *)
   | Client_not_started of string
       (** The official client binary could not be launched at all. *)
+  | Account_not_authorized of string
+      (** {!Runtime_account_access.authorize} refused to start the client on
+          the account for the request of this verification. Carries the
+          refusal. *)
 
 type failure =
   | Unavailable of unavailable
@@ -145,6 +149,7 @@ val verify
   -> cwd:Eio.Fs.dir_ty Eio.Path.t
   -> cwd_path:string
   -> timeout_s:float
+  -> account_request:Runtime_account_access.request
   -> Runtime_instance.t
   -> result
 
@@ -161,6 +166,7 @@ val verify_as_command
   -> sw:Eio.Switch.t
   -> private_dir:string
   -> timeout_s:float
+  -> account_request:Runtime_account_access.request
   -> Runtime_instance.t
   -> result
 

@@ -40,6 +40,9 @@ val private_codex_environment : home:string -> codex t -> (string array, string)
 (** Derive an isolated process view from the captured credentials, reapplying
     the private configuration's explicit isolation filter. *)
 
+val client : 'client t -> 'client client
+(** The client the account was captured for. *)
+
 val home : 'client t -> string
 val source : 'client t -> source
 val environment : 'client t -> string array

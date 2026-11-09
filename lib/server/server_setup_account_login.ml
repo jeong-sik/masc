@@ -54,23 +54,22 @@ let actor_of = function
   | Operator { actor } -> Session.Agent actor
   | Person { user_id; _ } -> Session.Person (Authz_types.User_id.to_string user_id)
 
-let accounts_dir = "accounts"
-
 let private_child parent leaf =
   let path = Filename.concat parent leaf in
   (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   path
 
 (* A person's account homes go under their namespace, which the admission
-   fixed (design 4.1 and 5.4), so no other person's login reaches them. *)
+   fixed (design 4.1 and 5.4), so no other person's login reaches them. The two
+   directories are made from the spelling of the layout. *)
 let runtime_root_of ~base_path = function
   | Operator _ -> Ok (Common.masc_dir_from_base_path ~base_path)
   | Person { namespace; _ } ->
+    let root = Runtime_account_home_layout.person_runtime_root ~base_path ~namespace in
+    let accounts = Filename.dirname root in
     (try
-       Ok
-         (private_child
-            (private_child (Common.masc_dir_from_base_path ~base_path) accounts_dir)
-            (Authz_types.Account_home_namespace.to_string namespace))
+       let accounts = private_child (Filename.dirname accounts) (Filename.basename accounts) in
+       Ok (private_child accounts (Filename.basename root))
      with Unix.Unix_error _ | Sys_error _ -> Error account_failure)
 
 let person_reference_refused =
@@ -176,8 +175,18 @@ let start ~owner ~base_path ~body request reqd =
           let clock = Eio.Stdenv.clock env in
           let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock
             ~grace_seconds:Process_eio.child_exit_grace_seconds in
+          (* A person checks the account of their own login, which the log
+             links to them only once the check is done. *)
+          let* account_request = match owner with
+            | Operator _ -> Ok Runtime_account_access.Operator_call
+            | Person { user_id; _ } ->
+              Authz_types.Provider_account_id.of_string (Session.id session)
+              |> Result.map (fun provider_account_id ->
+                Runtime_account_access.Own_account { user_id; provider_account_id })
+              |> Result.map_error (fun _ -> account_failure) in
           Client.observe ~mgr ~clock
-            ~cwd:Eio.Path.(Eio.Stdenv.fs env / Client.home_dir home) ~cli_path:spawn_path home in
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / Client.home_dir home) ~cli_path:spawn_path
+            ~account_request home in
         let recover status =
           (* A cancelled CLI may already have saved its selected credential. Only
              Antigravity needs capture: native homes were published before spawn.
@@ -422,7 +431,7 @@ let log_detail (result : Runtime_verification.result) =
   | Some detail -> Log.Server.warn "Account verification %s failed: %s" result.runtime_id detail
   | None -> ()
 
-let call ~env prepared =
+let call ~env ~person prepared =
   (* macOS TMPDIR sits under the /var -> /private/var symlink, and a runtime
      root must be its own realpath, as the runtime-verify command has it. *)
   match Filename.temp_dir "masc-account-verify-" "" |> Unix.realpath with
@@ -432,7 +441,10 @@ let call ~env prepared =
     Ok (Eio.Switch.run (fun sw ->
       Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree private_dir);
       Runtime_verification.verify_as_command ~env ~sw ~private_dir
-        ~timeout_s:verification_timeout_s prepared.runtime))
+        ~timeout_s:verification_timeout_s
+        ~account_request:(Runtime_account_access.Own_account
+          { user_id = person.user_id; provider_account_id = prepared.provider_account_id })
+        prepared.runtime))
 
 let verify ~person ~base_path ~body request reqd =
   let answer =
@@ -442,7 +454,7 @@ let verify ~person ~base_path ~body request reqd =
     let* env = Option.to_result (Eio_context.get_env_opt ())
       ~none:(`Service_unavailable, "Verification requires the server process environment.") in
     while_verifying prepared.provider_account_id (fun () ->
-      let* result = call ~env prepared in
+      let* result = call ~env ~person prepared in
       log_detail result;
       let* runtime = match result.Runtime_verification.failure with
         | Some _ -> Ok `Null

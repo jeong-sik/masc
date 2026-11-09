@@ -170,6 +170,15 @@ let serve_preview ~base_path ~store ~port github =
           (fun error -> "the authorization zone is not opened: " ^ Authz_zone.open_error_to_string error)
           (Authz_zone.open_at_start ~now_ms ~log_path ~store_path:store)
       in
+      (* A login check and a verification start an official client only on a
+         home of the person who asked (plan D2-4). *)
+      let* () =
+        Result.map_error
+          Runtime_account_access.publish_error_to_string
+          (Runtime_account_access.publish
+             (Runtime_account_access.Multi_account
+                { zone; base_path; now = (fun () -> Eio.Time.now clock) }))
+      in
       let* trust_policy =
         Result.map_error
           Server_request_authority.trust_policy_error_to_string

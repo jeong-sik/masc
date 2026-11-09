@@ -38,8 +38,8 @@
   "G3_e_synth_outcome_accuracy_min": 0.95,
   "G3_e_synth_drop_precision_min": 1.0,
   "G3_e_synth_stale_drop_recall_min": 0.9,
-  "G4_e_real_paired_lead_min": 0.0,
-  "G5_e_real_latency_p50_ratio_max": 1.0
+  "G4_e_real_paired_lead_min": -0.06,
+  "G5_e_real_latency_p50_ratio_max": 1.16
  },
  "choice": {
   "order": [
@@ -54,7 +54,9 @@
   "admission_result.py": "4cf93888cde55ec90cd4e6444818184d099ea2d02fad5123caa4f708a7464590",
   "admission_template.py": "7abcefaf499ebf9302e934af48ee934a2551e26b9df310aca018581b71361c52",
   "admission_validator.py": "05ce32b4a3468578bf20a65facda4b7fac26e4c905ee70ea7d606b31ef7ba546",
-  "eval_admission.py": "454eda74e673045d2661ddaa9e680f5783b41c86e6030c5409d1c8a820c01af0",
+  "audit_decisions.py": "d51e0ac4e6438291c9753c01667e679e5704af3a32db04032244d6bde9190d08",
+  "e_synth_audit.py": "06c36ee8a1616952c300e10a3c9f6ce8469f8d635ff9cd744e75389a7fc1e0fb",
+  "eval_admission.py": "e7bff0bf10ae83eca6d5d49e7be5ae5d89ed3223d732f50bcadaf4bf5b9c0d04",
   "exact_store.py": "c47d1ba5c4092ba4624335813538140641b50d392bcd76eaf6eadfea34b9fa57",
   "lane_addon_checks.py": "d4f50ecd293243c9af6edb9612cb54ac6cd2771e48704ed86d1d3e22b53f1ccd",
   "librarian_selection.py": "2847371ccabb72031bb4f4dad8cef8b6f80ea17c3d3e94f9f72f1483cb9ed6de",

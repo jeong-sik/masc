@@ -33,7 +33,8 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `synth_prompts.py` | Prompts that ask the model for role material, memories and candidates |
 | `synth_generate.py` | Builds synthetic requests with labels (`--split eval` or `train`) |
 | `synth_render.py` | Renders a synthetic request as the admission prompt MASC would send |
-| `e_synth_audit.py` | Picks requests for a blind judge and drops the ones whose labels the judge does not confirm |
+| `e_synth_audit.py` | Picks requests for a blind judge and drops the ones whose labels the judge does not confirm; at verdict time, makes the judge's cases for facts an answer dropped off label |
+| `audit_decisions.py` | Checks the judge's decisions, and turns its classes for off-label drops into the memories the verdict leaves out |
 | `admission_request.py` | Reads an admission prompt into typed parts and writes it back byte for byte |
 | `admission_template.py` | Splits `config/prompts/librarian.md` at its variables |
 | `prompt_facts.py` | Reads and writes the prompt's current memory and candidates as MASC's JSON |
@@ -78,8 +79,15 @@ checkpoint's binding declares an output ceiling of 32,768, and the lane's
    neither the labels nor the answers, and keep the requests it confirms.
 3. Fix `pass_lines.json` and commit it before any training.
 4. Generate the training split, sample the teacher, train branch A and branch B.
-5. Measure the base model, A and B in one run per set, from an empty `--out`,
-   then `verdict`.
+5. Measure the base model, A and B in one run per set, from an empty `--out`.
+6. When a valid E-synth answer dropped a fact that is neither planted stale nor
+   a correction target, a judge that sees neither the labels nor the answers
+   classifies that fact among others of the same memory (`e_synth_audit.py
+   drops`). Every case of one memory shows the same facts: the ones the label
+   audit picks on any request of that memory, the dropped ones and a fill. If
+   the judge takes the fact out as well, no target is scored on that memory. A
+   drop the judge keeps stays wrong, also when its memory leaves scoring. Then
+   `verdict`.
 
 ```sh
 MASC_BASE_PATH=<base> uv run scripts/tinker/librarian/e_real_manifest.py \
@@ -103,9 +111,30 @@ uv run scripts/tinker/librarian/eval_admission.py run --set synth \
   --target base=thinkingmachines/Inkling-2-Small:peft:262144 \
   --target A=<sampler path of A> --target B=<sampler path of B> \
   --out artifacts/tinker/librarian/verdict-synth --budget 9
+uv run scripts/tinker/librarian/e_synth_audit.py drops \
+  --requests artifacts/tinker/librarian/e-synth/requests.jsonl \
+  --run artifacts/tinker/librarian/verdict-synth --out artifacts/tinker/librarian/verdict-drops
 uv run scripts/tinker/librarian/eval_admission.py verdict \
-  --real artifacts/tinker/librarian/verdict-real --synth artifacts/tinker/librarian/verdict-synth
+  --real artifacts/tinker/librarian/verdict-real --synth artifacts/tinker/librarian/verdict-synth \
+  --drops artifacts/tinker/librarian/verdict-drops \
+  --train A=artifacts/tinker/librarian/train-A --train B=artifacts/tinker/librarian/train-B
 ```
+
+`cases` and `drops` keep the key in `--out` and put the judge's material in
+`--out/judge/`. Give the judge that folder itself, not a copy, and nothing
+else: it reads `judge.md` and `cases.jsonl` there and writes `decisions.jsonl`
+next to them. `cases` and `drops` refuse an `--out` whose judge folder already
+holds `decisions.jsonl`. The check cannot tell decisions made under other
+rules: copy a `decisions.jsonl` into another `--out` only to re-check an audit
+under the same rules. `judge.md` names
+its rules as `config/prompts/librarian.md`, and the folder holds a copy at that
+path. The key holds the label's classes and the dropped facts.
+`--out/judge-files.json` holds the sha256 of the three files the judge was
+given. `apply` and `verdict` read the decisions only while those files are
+unchanged and the rules copy equals this checkout's `config/prompts/librarian.md`.
+`verdict` refuses while an off-label drop has no decision, and records each
+drop, its class, the memories left out, the kept drops on them and the judge's
+file sha256 values in `verdict.json`.
 
 A rerun with the same `--out` reuses every answered call and pays only for the
 rest. A budget stop exits with status 2. `verdict` refuses a run where a

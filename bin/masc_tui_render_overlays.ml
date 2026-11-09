@@ -408,13 +408,6 @@ let render_palette (state : state) =
   let matches = Masc_tui_palette.palette_matches state in
   let total = List.length matches in
   let cursor = max 0 (min state.palette_cursor (total - 1)) in
-  let origin =
-    if Option.is_some state.lane_addons then "Plugins"
-    else match List.find_opt (fun (_, surface) -> surface = state.view)
-        Masc_tui_keys.help_surfaces with
-      | Some (title, _) -> title
-      | None -> "current screen"
-  in
   let title, prompt, action =
     match state.palette_mode with
     | Masc_tui_types.Palette_jump ->
@@ -440,14 +433,7 @@ let render_palette (state : state) =
         (Printf.sprintf " %s · %s" query.clq_question
            (Terminal_text.single_line query.clq_symbol), "filter:", "open")
   in
-  (* The title names the palette the way the key table does (":" command
-     palette) and the prompt follows it. It was "Quick Jump & Navigation" with
-     a lightning glyph between them: the glyph said nothing, and the entries
-     are not all jumps -- settings, the gate modes, a task or a post run from
-     the same list, which is why Enter reads "run".
-
-     The overlay contract draws the box and fills the rows under a short list
-     of matches, so the footer stays on the composer's row. *)
+  (* The overlay fills unused rows so the footer stays on the composer row. *)
   let caret = "\xe2\x96\x8c" in
   let prompt = Ansi.bold ^ prompt ^ Ansi.reset ^ " " in
   let inner_width = framed_inner_width cols in
@@ -514,8 +500,6 @@ let render_palette (state : state) =
            | Some (_, (Masc_tui_fetched.Failed detail | Masc_tui_fetched.Stale (_, detail))) ->
                [ detail ]
            | Some (_, Masc_tui_fetched.Ready search) ->
-               (* The count is on the line under this one; only what it cannot
-                  say is written here. *)
                (match search.Tui_decode.wss_matches, search.wss_truncated with
                 | _, false -> []
                 | [], true -> [ "No match could be shown · narrow the text" ]
@@ -567,8 +551,6 @@ let render_palette (state : state) =
            (if total = 0 then 0 else cursor + 1)
            total action)
     ~body:(fun ~budget c ->
-      c.push_styled ~style:(Theme.recede ())
-        ("   From " ^ origin ^ " · Esc returns here");
       List.iter (fun note -> c.push ("   " ^ note)) finder_notes;
       match explicit_question with
       | Some (question, symbol) ->
@@ -576,26 +558,20 @@ let render_palette (state : state) =
             ^ Terminal_text.single_line symbol);
           c.push "   Ask about this symbol in the file open on Code"
       | None ->
-          c.push_styled ~style:(Theme.recede ())
-            (Printf.sprintf "   %s%s · %d/%d · %s"
-              (palette_count state.palette_mode total)
-              (match state.palette_mode with
-               | Palette_search search_origin ->
-                   (match search_place search_origin with
-                    | None -> ""
-                    | Some dir -> " under " ^ Terminal_text.single_line dir)
-               | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _
-               | Palette_jump | Palette_choice _ -> "")
-              (if total = 0 then 0 else cursor + 1) total
-              (match state.palette_mode with
-               | Palette_search _ ->
-                   (match Masc_tui_palette.search_enter state with
-                    | Masc_tui_palette.Enter_opens _ -> "Enter opens the match"
-                    | Masc_tui_palette.Enter_searches -> "Enter searches the typed text")
-               | Palette_files _ | Palette_branches _ | Palette_worktrees _ | Palette_locations _
-               | Palette_jump | Palette_choice _ ->
-                   "type to filter"));
-          let list_rows = max 0 (budget - 2 - List.length finder_notes) in
+          let context = match state.palette_mode with
+            | Palette_jump when String.trim state.palette_query = "" ->
+                [ui_text state
+                   ~ko:"화면·키퍼·Task·게시글·설정을 검색하세요"
+                   ~en:"Search screens, Keepers, Tasks, posts or settings"]
+            | Palette_search search_origin ->
+                (match search_place search_origin with
+                 | None -> []
+                 | Some dir -> ["In " ^ Terminal_text.single_line dir])
+            | Palette_jump | Palette_choice _ | Palette_files _ | Palette_branches _
+            | Palette_worktrees _ | Palette_locations _ -> []
+          in
+          List.iter (fun note -> c.push_styled ~style:(Theme.recede ()) ("   " ^ note)) context;
+          let list_rows = max 0 (budget - List.length context - List.length finder_notes) in
           let first = max 0 (cursor - list_rows + 1) in
           matches
           |> List.filteri (fun i _ -> i >= first && i < first + list_rows)

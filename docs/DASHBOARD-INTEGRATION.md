@@ -117,8 +117,6 @@ status: reference
 - `GET /api/v1/dashboard/project-snapshot`
   - journey / agents / shared project snapshot
   - goal navigator runtime status
-- `GET /api/v1/activity/graph`
-  - observatory investigation graph
 - `GET /api/v1/dashboard/telemetry/summary`, `GET /api/v1/dashboard/telemetry?source=tool_call_io`
   - Tool Monitor evidence-log lens and source freshness metadata
 - `GET /api/v1/dashboard/agent_core/telemetry/recent`, `GET /api/v1/dashboard/agent_core/telemetry/summary`

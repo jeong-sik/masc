@@ -10,9 +10,14 @@ on:
         description: PR to recheck (any member of a native stack)
         required: true
         type: string
+      receipt:
+        description: JSON receipt of an unsettled merge-async request to resume (uuid, pr, head, members, since)
+        required: false
+        default: ''
+        type: string
 
 permissions:
-  actions: read
+  actions: write
   contents: write
   pull-requests: write
 
@@ -47,5 +52,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DISPATCH_PR: ${{ inputs.pr }}
+          DISPATCH_RECEIPT: ${{ inputs.receipt }}
           REQUEST_FILE: ${{ runner.temp }}/approval-merge-request/request.json
         run: python3 scripts/review/approval-auto-merge.py

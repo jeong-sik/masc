@@ -5,18 +5,16 @@ status: Accepted
 created: 2026-09-25
 updated: 2026-11-07
 author: dancer + codex
-supersedes: ["0464", "tui-operator-ia:3.1"]
+supersedes: []
 superseded_by: null
-related: ["0462", "tui-operator-ia"]
+related: ["0462"]
 ---
 
 # A measured TUI operator home
 
 ## Decision
 
-The operator's 2026-09-25 review of the live Overview replaces the home-screen
-decision in RFC-0464 and the top-level menu proposed in
-RFC-tui-operator-ia §3.1. The first screen answers how the system and its work
+The first screen answers how the system and its work
 are progressing. It does not repeat the task list, Keeper roster, or quota
 graphs from their own destinations.
 

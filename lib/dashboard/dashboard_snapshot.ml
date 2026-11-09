@@ -41,9 +41,6 @@ type t = {
   telemetry_summary : Yojson.Safe.t;
   activity_events_default : Yojson.Safe.t;
   (* RFC-0201 Step 1 — see [.mli] for contract. *)
-  activity_graph_default : Yojson.Safe.t;
-  (* RFC-0201 Step 2 — see [.mli] for contract.  Returned as-is to
-     default-shape callers; results are aggregated and not sliceable. *)
 }
 
 (* Lock-free publish slot.  Holds [None] before the first publish so
@@ -157,36 +154,6 @@ let refresh_tools_projection ~now ~ttl ~cache ~config compute =
         | None -> raise exn))
 ;;
 
-type activity_defaults_entry =
-  { refreshed_at : float
-  ; value : Activity_graph.default_projections
-  }
-
-type activity_defaults_cache = activity_defaults_entry option Atomic.t
-
-let make_activity_defaults_cache () : activity_defaults_cache = Atomic.make None
-
-let refresh_activity_defaults ~now ~ttl ~(cache : activity_defaults_cache) compute =
-  let started_at = now () in
-  match Atomic.get cache with
-  | Some entry
-    when should_reuse_projection
-           ~now:started_at
-           ~ttl
-           ~refreshed_at:entry.refreshed_at ->
-    entry.value
-  | previous ->
-    (match compute () with
-     | value ->
-       Atomic.set cache (Some { refreshed_at = now (); value });
-       value
-     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-     | exception exn ->
-       (match previous with
-        | Some entry -> entry.value
-        | None -> raise exn))
-;;
-
 let dashboard_shell_payload_json_ref :
   (?light:bool -> Workspace.config -> Yojson.Safe.t) ref =
   ref (fun ?light:_ _config -> `Null)
@@ -227,35 +194,7 @@ let refresh_loop
   let tools_cache = make_tools_cache () in
   let telemetry_cache = make_projection_cache () in
   let namespace_truth_cache = make_projection_cache () in
-  let activity_defaults_cache = make_activity_defaults_cache () in
-  let cached_activity_defaults ~ttl ~cache label f =
-    (* NDT-OK: wall time only gates cache freshness; it is not durable output. *)
-    refresh_activity_defaults ~now:Unix.gettimeofday ~ttl ~cache (fun () ->
-      (* NDT-OK: wall time only measures operator diagnostics. *)
-      let started_at = Unix.gettimeofday () in
-      let allocated_before = Gc.allocated_bytes () in
-      match f () with
-      | value ->
-        (* NDT-OK: elapsed time only selects diagnostic log severity. *)
-        let elapsed_s = Unix.gettimeofday () -. started_at in
-        let allocated_mb =
-          (Gc.allocated_bytes () -. allocated_before) /. 1_048_576.0
-        in
-        if elapsed_s >= 5.0 || allocated_mb >= 256.0
-        then
-          Log.Dashboard.warn
-            "dashboard_snapshot heavy refresh: component=%s elapsed_s=%.3f allocated_mb=%.1f ttl_s=%.0f"
-            label elapsed_s allocated_mb ttl
-        else
-          Log.Dashboard.debug
-            "dashboard_snapshot refreshed: component=%s elapsed_s=%.3f allocated_mb=%.1f ttl_s=%.0f"
-            label elapsed_s allocated_mb ttl;
-        value
-      | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-      | exception exn ->
-        log_failure label exn;
-        raise exn)
-  in
+  let activity_events_cache = make_projection_cache () in
   let cached_projection ~ttl ~cache label f =
     (* NDT-OK: wall time only gates cache freshness; it is not durable output. *)
     refresh_projection ~now:Unix.gettimeofday ~ttl ~cache (fun () ->
@@ -333,13 +272,12 @@ let refresh_loop
              | Some json -> json
              | None -> `Null))
     in
-    let activity_defaults =
-      (* RFC-0201 / RFC-0204: compute both default activity projections
-         (events, graph) in a single pass over the recent events store,
-         avoiding 2x redundant re-parsing and scanning on every 10s tick. *)
-      cached_activity_defaults ~ttl:10.0 ~cache:activity_defaults_cache
-        "activity_defaults" (fun () ->
-        Activity_graph.default_projections config)
+    let activity_events_default =
+      (* RFC-0201 Step 1: the default-shaped events query (no kinds, no
+         cursor, newest 1000). *)
+      cached_projection ~ttl:10.0 ~cache:activity_events_cache
+        "activity_events_default" (fun () ->
+        Activity_graph.json_response config ~after_seq:0 ~limit:1000 ())
     in
     {
       generated_at = Unix.gettimeofday ();
@@ -348,15 +286,14 @@ let refresh_loop
       tools;
       namespace_truth;
       telemetry_summary;
-      activity_events_default = activity_defaults.events_default;
-      activity_graph_default = activity_defaults.graph_default;
+      activity_events_default;
     }
   in
   let rec loop () =
     (match
        (* Offload the snapshot compute to a worker domain (RFC-0204 sections 8-9
-          Phase 2).  The projection build (shell board scan + 3 activity
-          graphs) is CPU-heavy and previously ran inline on the main Eio
+          Phase 2).  The projection build (shell board scan + the activity
+          events page) is CPU-heavy and previously ran inline on the main Eio
           domain, contending with WS dispatch and keeper fibers under host
           load.  [submit_cpu_or_inline] reserves a full worker slot
           (weight 1.0, matching the per-surface refresh loops'
@@ -384,8 +321,7 @@ let publish_for_test t = Atomic.set slot (Some t)
 
 let make_for_test ~config ~shell ?(shell_light = `Null) ~tools ~namespace_truth
       ~telemetry_summary
-      ?(activity_events_default = `Null)
-      ?(activity_graph_default = `Null) () =
+      ?(activity_events_default = `Null) () =
   {
     generated_at = Unix.gettimeofday ();
     shell;
@@ -394,7 +330,6 @@ let make_for_test ~config ~shell ?(shell_light = `Null) ~tools ~namespace_truth
     namespace_truth;
     telemetry_summary;
     activity_events_default;
-    activity_graph_default;
   }
 ;;
 
@@ -403,13 +338,10 @@ let reset_for_test () = Atomic.set slot None
 module For_testing = struct
   type cache = Yojson.Safe.t projection_cache
   type nonrec tools_cache = tools_cache
-  type activity_cache = activity_defaults_cache
 
   let make_cache = make_projection_cache
   let refresh_projection = refresh_projection
   let make_tools_cache = make_tools_cache
   let refresh_tools = refresh_tools_projection
-  let make_activity_cache = make_activity_defaults_cache
-  let refresh_activity_defaults = refresh_activity_defaults
   let should_reuse_projection = should_reuse_projection
 end

@@ -387,10 +387,11 @@ val footer_hints_git_changes : string
 val footer_hints_git_diff : string
 (** The Git diff view for a changed file in repository changes. *)
 
-val footer_hints_memory_facts : cols:int -> string
+val footer_hints_memory_facts : cols:int -> has_rows:bool -> string
 (** The Memory fact browser opened by Enter on a health row: row movement,
     the category cycle, search, and the way back to the table. Omits
-    [d:Category pane] on narrow frames where the Category rail does not fit. *)
+    [d:Category pane] on narrow frames where the Category rail does not fit,
+    and the keys that act on a fact when [has_rows] is false. *)
 
 val bindings_memory_facts : binding list
 (** The fact browser's own keys. Separate from {!for_surface} because they are

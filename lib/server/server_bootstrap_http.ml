@@ -79,7 +79,6 @@ let print_startup_banner
   Printf.printf "   DELETE /mcp → Session termination\n%!";
   Printf.printf "   POST /graphql → GraphQL (read-only)\n%!";
   Printf.printf "   GET  /api/v1/activity/events → Activity replay API\n%!";
-  Printf.printf "   GET  /api/v1/activity/graph → Activity graph snapshot\n%!";
   Printf.printf "   GET  /health → Health check\n%!";
   (match https with
    | None -> ()

@@ -42,28 +42,26 @@ let make_keeper_tool_handler_with_authority
     -> Yojson.Safe.t
     -> Tool_result.result
   =
+  let has_handler expected =
+    match descriptor with
+    | Some d -> d.Keeper_tool_descriptor.runtime_handler = expected
+    | None -> false
+  in
   let prepared_read, prepared_edit, prepared_write =
     match prepared_file with
     | None -> None, None, None
-    | Some op ->
-      let handler =
-        Option.map
-          (fun (d : Keeper_tool_descriptor.t) -> d.runtime_handler)
-          descriptor
-      in
-      (match op, handler with
-       | Keeper_prepared_inline_files.Read read, Some Keeper_tool_descriptor.Tool_read_file ->
-         Some read, None, None
-       | Keeper_prepared_inline_files.Read _, _ ->
-         invalid_arg "prepared Read requires its canonical Read descriptor"
-       | Keeper_prepared_inline_files.Edit edit, Some Keeper_tool_descriptor.Tool_edit_file ->
-         None, Some edit, None
-       | Keeper_prepared_inline_files.Edit _, _ ->
-         invalid_arg "prepared Edit requires its canonical Edit descriptor"
-       | Keeper_prepared_inline_files.Write write, Some Keeper_tool_descriptor.Tool_write_file ->
-         None, None, Some write
-       | Keeper_prepared_inline_files.Write _, _ ->
-         invalid_arg "prepared Write requires its canonical Write descriptor")
+    | Some (Keeper_prepared_inline_files.Read read) ->
+      if has_handler Keeper_tool_descriptor.Tool_read_file
+      then Some read, None, None
+      else invalid_arg "prepared Read requires its canonical Read descriptor"
+    | Some (Keeper_prepared_inline_files.Edit edit) ->
+      if has_handler Keeper_tool_descriptor.Tool_edit_file
+      then None, Some edit, None
+      else invalid_arg "prepared Edit requires its canonical Edit descriptor"
+    | Some (Keeper_prepared_inline_files.Write write) ->
+      if has_handler Keeper_tool_descriptor.Tool_write_file
+      then None, None, Some write
+      else invalid_arg "prepared Write requires its canonical Write descriptor"
   in
   let input_schema =
     match descriptor with

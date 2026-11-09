@@ -7,7 +7,7 @@ updated: 2026-09-12
 author: claude
 supersedes: []
 superseded_by: null
-related: ["tui-operator-ia", "chat-turn-rail-and-side-lanes"]
+related: ["chat-turn-rail-and-side-lanes"]
 ---
 
 # RFC: Keeper 채팅의 경계와 연속 (tui-chat-boundary-continuity)
@@ -129,9 +129,6 @@ diff 는 없다. `Ctrl-D` → `Tools_full` → `launch_keeper_chat_tool_details_
 그려지므로(`masc_tui_render.ml:9744`), compact 에서는 "볼 게 있는지" 조차 말하지
 않는다.
 
-참고: `RFC-tui-operator-ia` §6-4 는 "부분 커버리지 필드는 렌더 지점이 없다" 고
-적었다. 그 뒤 `diff_status` 가 생겨 지금은 렌더된다. 그 항목은 해소됐다.
-
 ## 2. 운영자 지적 12건 → 원인
 
 | # | 지적 | 판정 | 원인 |
@@ -186,9 +183,7 @@ diff 는 없다. `Ctrl-D` → `Tools_full` → `launch_keeper_chat_tool_details_
 라고 물은 것에 대한 답이다. **표현한다. 단 대화만, 계기판은 빼고.** 그 자리가
 불편했던 것은 대화가 올라가서가 아니라 계기판이 같이 올라가 있어서다.
 
-근거: 단일 에이전트 TUI 4종(pi·Claude Code·Hermes·Kimi)이 수렴한 모양이
-"단일 스트림 + 접힌 tool 행 + 상태 바" 다(`RFC-tui-operator-ia` §5). 스트리밍
-중인 답을 스트림 안에 두는 것이 그 4종의 공통점이다.
+스트리밍 중인 답은 대화 본문에 두고, 요청 상태와 진단은 입력 주변에서 구분한다.
 
 ### 3.3 경계 안에 둘 것 — 계기판
 
@@ -333,8 +328,7 @@ PR 1(이 PR)과 PR 2 는 레일이 그리지 않는 영역만 건드리므로 �
   움직이지 않아야 공간 기억이 생긴다. 지금 composer 는 상태 행 수에 따라 움직인다.
 - **색은 위계를 강화하지 만들지 않는다**: 색을 다 뺐을 때 못 쓰면 설계가 깨진 것.
   16색에서 동작해야 한다. §3.5 의 근거.
-- **단계적 공개**: footer 필수 키 → 도움말 overlay → 문서. `RFC-tui-operator-ia`
-  §5 전이패턴 ④(함대 1줄 → tool 행 → 전체 trace)와 같은 규칙이다.
+- **단계적 공개**: footer 필수 키 → 도움말 overlay → 문서.
 - **화면의 모든 칸은 자리값을 한다**: `AT THE GATE` 가 대기 0건일 때도 한 행을
   쓰던 것이 여기에 걸린다.
 
@@ -346,10 +340,5 @@ PR 1(이 PR)과 PR 2 는 레일이 그리지 않는 영역만 건드리므로 �
 - **runtime lane 의 재시도 정책**(지적 #10). 계속 실패하는 대상을 계속 고르는
   것이 맞는지는 lane preference 의 문제다. 이 RFC 는 그 실패를 **읽을 수 있게**
   만들 뿐이다. 별도 이슈로 분리한다.
-- **좌측 로스터 삭제**. 기본값을 끄되 `Ctrl-B` 는 남긴다. 지우는 판단은 Orca 식
-  4상태 칩(`RFC-tui-operator-ia` §5 전이패턴 ③)을 넣은 뒤에 한다.
-- **렌더 기반 교체**(ANSI 직접 → Notty 등). `RFC-tui-operator-ia` §7 과 같다.
-- **metadata 열 기본값 변경**(지적 #5). `Origin_row` 는 운영자가 `Ctrl-F` 로 켠
-  상태다. 다만 `masc_tui_message_layout.mli:199` 는 기본값을 `Origin_bare` 라
-  적었고 실제 기본값은 `Origin_inline`(`masc_tui_types.ml:5436`)이다. 문서가
-  낡았을 뿐이므로 PR 1 에서 주석만 고친다.
+- **좌측 로스터 삭제**. 탐색·본문 폭·선택 대상 보존을 별도로 검토한다.
+- **렌더 기반 교체**(ANSI 직접 → Notty 등).

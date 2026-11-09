@@ -200,12 +200,13 @@ let apple_turn_start_argv ~container_name ~(plan : Keeper_microvm_boot_plan.t)
     |> Result.map_error (fun refusals -> Apple_constraints_unexpressible refusals))
 ;;
 
-(* [--user uid:gid] is a value [container exec] and [nerdctl exec] document
-   and [msb exec] does not -- see {!shim_exec_prefix_for} for the whole
-   reading. Every msb caller of this builder is behind an earlier refusal
-   today ({!ensure_work_volume_for}), so the numeric form never reaches msb.
-   Lifting that refusal without settling the identity would make this the
-   place a keeper's tree gets written under the wrong uid. *)
+(* [--user uid:gid] is a value [container exec] ([name|uid[:gid]]) and
+   [nerdctl exec] (Docker's) document and [msb exec] does not -- see
+   {!shim_exec_prefix_for} for the msb reading. Every msb caller of this
+   builder is behind an earlier refusal today ({!ensure_work_volume_for}), so
+   the numeric form never reaches msb. Lifting that refusal without settling
+   the identity would make this the place a keeper's tree gets written under
+   the wrong uid. *)
 let exec_argv_for backend ~container_name ~uid ~gid ~container_cwd ~stdin ~command_argv =
   command_argv_for backend
   @ [ "exec" ]
@@ -233,26 +234,27 @@ let request_environment ~shim_config_path =
   ]
 ;;
 
-(** The prefix the remote lane delivers a framed shim request through.
+(** The prefix the remote lane delivers a framed shim request through, for a
+    runtime that takes each request as one exec ({!Backend.request_delivery}).
 
     It differs from {!exec_argv_for} in one thing the shim cannot do without:
     the guest has to be told where its config is, and that travels as an
-    environment entry on the exec. All three CLIs document that entry --
-    [msb exec] has [-e, --env <ENV>] the same as the other two.
+    environment entry on the exec. Both CLIs document that entry --
+    [msb exec] has [-e, --env <ENV>] the same as nerdctl.
 
     What [msb] does not document is numeric [uid:gid] under [--user].
-    [container exec --user] documents [name|uid[:gid]] and nerdctl takes
-    Docker's, so the mapped [uid:gid] this lane runs the keeper's commands as
-    is a value those CLIs accept. [msb exec -u, --user <USER>] documents
-    "Run the command as the specified guest user" and no numeric form
-    (0.6.16, 2026-09-04). For msb, [--user] is omitted; the work volume's
+    nerdctl takes Docker's, so the mapped [uid:gid] this lane runs the
+    keeper's commands as is a value it accepts. [msb exec -u, --user <USER>]
+    documents "Run the command as the specified guest user" and no numeric
+    form (0.6.16, 2026-09-04). For msb, [--user] is omitted; the work volume's
     [uid=,gid=] mount places writes at the right host uid. *)
-let shim_exec_prefix_for ?(stdin = true) backend ~container_name ~uid ~gid ~remote_root ~shim_config_path =
+let shim_exec_prefix_for ?(stdin = true) runtime ~container_name ~uid ~gid ~remote_root ~shim_config_path =
   let environment_args =
     List.concat_map (fun (key, value) -> [ "--env"; key ^ "=" ^ value ])
       (request_environment ~shim_config_path) in
-  match (backend : Backend.t) with
-  | Backend.Apple_container | Backend.Nerdctl_kata ->
+  match (runtime : Backend.exec_runtime) with
+  | Backend.Nerdctl_kata_exec ->
+    let backend = Backend.Nerdctl_kata in
     Ok
       (command_argv_for backend
        @ [ "exec" ]
@@ -261,12 +263,13 @@ let shim_exec_prefix_for ?(stdin = true) backend ~container_name ~uid ~gid ~remo
        @ environment_args
        @ [ container_name ]
        @ Backend.command_separator backend)
-  | Backend.Microsandbox ->
+  | Backend.Microsandbox_exec ->
+    let backend = Backend.Microsandbox in
     (* msb [exec --user] names a guest user, not the uid:gid this lane maps
        ownership with, so it is left off -- the work volume's [uid=,gid=] mount
        already places the keeper's writes at the right host uid, and msb runs as
        its guest default. The shim config still travels as [--env], which msb
-       documents the same as the other two. *)
+       documents the same as nerdctl. *)
     Ok
       (command_argv_for backend
        @ [ "exec" ]

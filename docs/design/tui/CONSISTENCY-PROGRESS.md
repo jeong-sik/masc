@@ -132,7 +132,7 @@ toolchain compilation, native execution and formal current-head approvals.
 
 ## 2026-11-10: request reading
 
-The Requests slice leads each approval row with its original request/summary,
+[#50740](https://github.com/jeong-sik/masc/pull/50740) leads each approval row with its original request/summary,
 then its actor. Gate rows retain the actual automatic/human phase even when a
 long tool name must shorten. Folded Asks show the first original question with
 the asker, age and additional-question count. These are display projections;
@@ -170,3 +170,24 @@ keeps both failed runs and the later decoder-fixture repair. Memory's 13 cases
 passed on b5655270; the decoder's 407 cases passed on f35a50b9. Only the decoder
 test changed between those sources. This does not cover the later Usage layer
 or establish a native capture of this follow-up.
+
+## 2026-11-10: stack integration and next readings
+
+The 14-layer native stack was rebased together onto main f7f30f94. It preserves
+the Memory author's decoder repair and selected validation records. The parallel
+local fixture repair was omitted because the same semantic repair was already
+present. Usage's self-citation fix is in #50730 itself; the later documentation
+layer no longer has to supply it. Captured source/run identities above remain
+historical observations, not execution results for the rebased heads.
+
+The Requests source passed independent rereview before restacking, and the three
+product-source blobs are identical after restacking; review of the new base is
+separate. Local OCaml 5.5.1 parsing and fragment checks differ from the pinned 5.5.2 build,
+formal GitHub approval, native screen, installation and restart. No local Dune
+build was run for this slice.
+
+Verification and Harness are next. Source inspection found that Harness cursor
+movement and rendering use different list heights, and both detail readers omit
+the failed-refresh warning while retaining an earlier snapshot. Those repairs,
+the oversized Ask receipt/origin case, and all remaining child/input readings
+stay in the full 23-surface scope.

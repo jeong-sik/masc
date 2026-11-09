@@ -38,3 +38,28 @@ are separate evidence layers. Only observed behavior supports a claim at that
 layer. Keep this ledger current as each bounded stack slice lands; the whole
 request remains open until the listed surfaces and shared states are coherent
 and their actual renderings have been verified.
+
+## 2026-11-09: simplify every operator surface
+
+The current request covers all six entry points and all 23 surfaces in
+[the screen map](SCREENS.md), including their child readings and input overlays.
+It does not stop at the Task list. The operator asked for ordinary words and
+information that matches the actual product flow, with fewer explanations of
+internal fields. The [information architecture](OPERATOR-INFORMATION-ARCHITECTURE.md)
+owns that rule; this table records the remaining scope.
+
+| Entry point | Surfaces and child readings | Current work | Remaining evidence |
+| --- | --- | --- | --- |
+| Operations | Overview, Metrics; requests, account and call details | Inspect actual decisions separately from system diagnostics; remove repeated normal-reading chrome where useful | Current-source audit and candidate execution |
+| Work | Planning, Approvals, Verification, Harness, Board; Goal, Task, request, proof and discussion details | #50671 simplifies the Task list and request preview; Goal previews still prioritize clipped metadata over the request | Goal and other Work readings; candidate execution and installation |
+| Keepers | Keepers, Memory, Schedules, Fusion, Changes; all six Keeper modes and detail tabs | Coordinate with existing Keeper Pulse and memory work (#50669, #50643) rather than duplicate it | Review those changes together; chat, schedule, result and error states |
+| Features and plugins | Lanes, Clients, Connectors, Resources, Tools; plugins, browser, tools, skills and result details | Simplify feature overview around purpose, standing, errors and existing actions; retain full diagnostics in detail | Candidate build/execution; the other feature surfaces and input overlays |
+| Workspace | Repositories, Code; checkout, Git changes, files, history, diff and navigation overlays | Registration and current Git readings remain distinct; inspect the repeated explanatory header and selected content next | Source audit, candidate execution and navigation/return behavior |
+| System | Config, Runtime, Acting, System_logs; all settings tabs, account/model forms and diagnostic details | Inspect effective settings and pending application before source revisions and raw keys | Source audit, candidate execution and save/uncertain-result behavior |
+
+For each row, inspect wide and narrow native views, loading/empty/error and
+retained observations, selection/scroll/return ownership, and applicable input
+drafts and save receipts. Do not add tests for wording, layout or row order.
+Source review, parsing, candidate build, observed rendering, merge and installed
+runtime are separate stages. A baseline observation or a pending PR does not
+complete a row. Keep the full request open until every row has current evidence.

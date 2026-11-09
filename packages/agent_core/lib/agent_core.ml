@@ -88,7 +88,6 @@ module Event_bus = Event_bus
 module Telemetry_bus = Telemetry_bus
 module Skill_document = Skill_document
 module Skill_registry = Skill_registry
-module Contract = Contract
 module Structured = Structured
 module Checkpoint = Checkpoint
 module Checkpoint_snapshot = Checkpoint_snapshot

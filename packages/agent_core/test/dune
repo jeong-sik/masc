@@ -100,7 +100,6 @@
   test_context
   test_context_concurrency
   test_context_flow_proof
-  test_contract
   test_discovery
   test_discovery_http
   test_e2e_v024
@@ -227,7 +226,6 @@
   test_context
   test_context_concurrency
   test_context_flow_proof
-  test_contract
   test_discovery
   test_discovery_http
   test_e2e_v024

@@ -657,8 +657,6 @@ let cached_surface_generated_at_iso json =
 let cached_surface_cache_json
       ?cache_key
       ~scope
-      ~ttl_s
-      ~timeout_s
       ~background_refresh_interval_s
       json
   =
@@ -695,8 +693,6 @@ let with_cached_dashboard_surface_metadata
       ~scope
       ~producer
       ~store_kind
-      ~ttl_s
-      ~timeout_s
       ~background_refresh_interval_s
       ~query
       json
@@ -734,8 +730,6 @@ let with_cached_dashboard_surface_metadata
         , cached_surface_cache_json
             ?cache_key
             ~scope
-            ~ttl_s
-            ~timeout_s
             ~background_refresh_interval_s
             json )
       ]
@@ -777,8 +771,6 @@ let with_execution_metadata ~config ?cache_key ~query json =
     ~scope:"dashboard_execution"
     ~producer:"Dashboard_execution.json"
     ~store_kind:"process_cache"
-    ~ttl_s:deep_surface_cache_ttl_s
-    ~timeout_s:Env_config_runtime.Dashboard.execution_timeout_sec
     ~background_refresh_interval_s:60.0
     ~query
     json
@@ -1563,7 +1555,7 @@ module For_testing = struct
 end
 ;;
 
-let start_transport_health_refresh_loop ~state ~sw ~clock =
+let start_transport_health_refresh_loop ~sw ~clock =
   let timeout_s =
     float_of_env_default
       "MASC_DASHBOARD_TRANSPORT_HEALTH_TIMEOUT_S"

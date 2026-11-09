@@ -22,6 +22,49 @@ export type ToolCallDisposition = 'completed' | 'deferred' | 'failed'
 export type ToolCallWireOutcome = 'ok' | 'error' | 'unknown'
 export type ToolCallCompositionExecution = 'inline' | 'async'
 
+const BOARD_ACTION_SCHEMA = 'masc.board-action-evidence/v1'
+
+export type BoardActionEvidence =
+  | { schema: typeof BOARD_ACTION_SCHEMA; kind: 'comment_added'; post_id: string
+      comment_id: string; parent_id: string | null; author: string }
+  | { schema: typeof BOARD_ACTION_SCHEMA; kind: 'reaction_changed'; post_id: string
+      target_type: 'post' | 'comment'; target_id: string; user_id: string; emoji: string; reacted: boolean }
+  | { schema: typeof BOARD_ACTION_SCHEMA; kind: 'invalid' }
+
+function nonblank(value: unknown): value is string {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function exactFields(raw: Record<string, unknown>, fields: readonly string[]): boolean {
+  return Object.keys(raw).length === fields.length && fields.every(field => Object.hasOwn(raw, field))
+}
+
+/** Producer facts are independent of wire/typed response success. Only the
+ * reserved Board writer may attest its action kind; Add-on metadata is not
+ * Board authorship. Missing and malformed metadata remain distinct. */
+export function decodeBoardActionEvidence(tool: string, raw: unknown): BoardActionEvidence | undefined {
+  if (raw === undefined) return undefined
+  const invalid: BoardActionEvidence = { schema: BOARD_ACTION_SCHEMA, kind: 'invalid' }
+  if (!isRecord(raw) || raw.schema !== BOARD_ACTION_SCHEMA) return invalid
+  if (tool === 'masc_board_comment' && raw.kind === 'comment_added'
+    && exactFields(raw, ['schema', 'kind', 'post_id', 'comment_id', 'parent_id', 'author'])
+    && nonblank(raw.post_id) && nonblank(raw.comment_id) && nonblank(raw.author)
+    && (raw.parent_id === null || nonblank(raw.parent_id))) {
+    return { schema: BOARD_ACTION_SCHEMA, kind: 'comment_added', post_id: raw.post_id,
+      comment_id: raw.comment_id, parent_id: raw.parent_id, author: raw.author }
+  }
+  if (tool === 'masc_board_reaction' && raw.kind === 'reaction_changed'
+    && exactFields(raw, ['schema', 'kind', 'post_id', 'target_type', 'target_id', 'user_id', 'emoji', 'reacted'])
+    && nonblank(raw.post_id) && nonblank(raw.target_id) && nonblank(raw.user_id) && nonblank(raw.emoji)
+    && (raw.target_type === 'post' || raw.target_type === 'comment') && typeof raw.reacted === 'boolean'
+    && (raw.target_type !== 'post' || raw.target_id === raw.post_id)) {
+    return { schema: BOARD_ACTION_SCHEMA, kind: 'reaction_changed', post_id: raw.post_id,
+      target_type: raw.target_type, target_id: raw.target_id, user_id: raw.user_id,
+      emoji: raw.emoji, reacted: raw.reacted }
+  }
+  return invalid
+}
+
 // Recorded execution evidence — written per row by lib/keeper_tool_call_log.ml.
 // The jsonl row is the wire truth: nested nullable fields persist as explicit
 // nulls (e.g. runtime_contract.task_id), optional top-level fields as absent.
@@ -137,6 +180,17 @@ export type ToolCallEntry = {
   runtime_contract?: ToolCallRuntimeContract
   action_radius?: ToolCallActionRadius
   route_evidence?: ToolCallRouteEvidence
+  // A committed Board writer fact, never reconstructed from response text.
+  // Undefined is unrecorded; kind=invalid means the evidence is unavailable.
+  board_action_evidence?: BoardActionEvidence
+  // Preserve the original row identities for Board attribution. The ordinary
+  // display fields above retain their existing normalization and legacy join.
+  board_action_identity?: {
+    keeper?: string
+    trace_id?: string
+    keeper_turn_id?: number
+    execution_id?: string
+  }
   // Model invocation parameters for this call's turn.
   thinking_enabled?: boolean
   tool_choice?: string
@@ -162,6 +216,12 @@ export function toolCallCompletion(entry: ToolCallEntry): boolean | undefined {
 export type ToolCallsResponse = TelemetryFreshnessMetadata & {
   keeper: string
   count: number
+  entries: ToolCallEntry[]
+}
+
+export type ToolCallsByExecutionIdsResponse = {
+  keeper: string
+  requested_execution_ids: string[]
   entries: ToolCallEntry[]
 }
 
@@ -312,6 +372,15 @@ function decodeToolCallEntry(raw: unknown): ToolCallEntry | null {
     runtime_contract: decodeRuntimeContract(raw.runtime_contract),
     action_radius: decodeActionRadius(raw.action_radius),
     route_evidence: decodeRouteEvidence(raw.route_evidence),
+    board_action_evidence: decodeBoardActionEvidence(
+      typeof raw.tool === 'string' ? raw.tool : '', raw.board_action_evidence),
+    board_action_identity: {
+      keeper: typeof raw.keeper === 'string' ? raw.keeper : undefined,
+      trace_id: typeof raw.trace_id === 'string' ? raw.trace_id : undefined,
+      keeper_turn_id: typeof raw.keeper_turn_id === 'number' && Number.isSafeInteger(raw.keeper_turn_id)
+        && raw.keeper_turn_id >= 0 ? raw.keeper_turn_id : undefined,
+      execution_id: typeof raw.execution_id === 'string' ? raw.execution_id : undefined,
+    },
     thinking_enabled: asBoolean(raw.thinking_enabled),
     tool_choice: asString(raw.tool_choice),
     prompt_fingerprint: asString(raw.prompt_fingerprint),
@@ -367,4 +436,42 @@ export async function fetchKeeperToolCall(
     throw new Error('요청한 도구 실행의 기록을 확인할 수 없습니다.')
   }
   return entry
+}
+
+/** Read all retained rows for one exact selection through the existing Admin
+ * tool-call door. Duplicate rows remain evidence of ambiguity. */
+export async function fetchKeeperToolCallsByExecutionIds(
+  keeper: string, executionIds: readonly string[], opts?: AbortableRequestOptions,
+): Promise<ToolCallsByExecutionIdsResponse> {
+  if (!nonblank(keeper) || executionIds.length === 0 || !executionIds.every(nonblank)
+    || new Set(executionIds).size !== executionIds.length) {
+    throw new Error('조회할 Keeper와 고유 실행 식별자가 필요합니다.')
+  }
+  const requested = [...executionIds]
+  const params = new URLSearchParams({ execution_ids: JSON.stringify(requested) })
+  const raw = await get<unknown>(
+    `/api/v1/keepers/${encodeURIComponent(keeper)}/tool-calls?${params}`,
+    { signal: opts?.signal, consumeWithinTimeout: true },
+  )
+  if (!isRecord(raw) || raw.keeper !== keeper || !Array.isArray(raw.requested_execution_ids)
+    || raw.requested_execution_ids.length !== requested.length
+    || !raw.requested_execution_ids.every((id, index) => id === requested[index])
+    || !Array.isArray(raw.entries)) {
+    throw new Error('선택한 Keeper·실행 목록과 조회 응답이 일치하지 않습니다.')
+  }
+  const ids = new Set(requested)
+  const entries = raw.entries.map(value => {
+    // Compare wire identities before the ordinary log decoder's display
+    // normalization; whitespace must not alias another Keeper or execution.
+    if (!isRecord(value) || value.keeper !== keeper || typeof value.execution_id !== 'string'
+      || !ids.has(value.execution_id)) {
+      throw new Error('조회 응답에 선택하지 않은 실행 기록이 있습니다.')
+    }
+    const entry = decodeToolCallEntry(value)
+    if (!entry || entry.keeper !== keeper || !entry.execution_id || !ids.has(entry.execution_id)) {
+      throw new Error('조회 응답에 선택하지 않은 실행 기록이 있습니다.')
+    }
+    return entry
+  })
+  return { keeper, requested_execution_ids: requested, entries }
 }

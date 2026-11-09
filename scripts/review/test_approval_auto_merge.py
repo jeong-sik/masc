@@ -10,7 +10,7 @@ import subprocess
 import sys
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 
 
 HERE = Path(__file__).resolve().parent
@@ -400,6 +400,66 @@ class FollowingAcceptedMerges(unittest.TestCase):
             result = MERGE.submit(REPO, 102, sha(102), self.scope)
         self.assertEqual(result['status'], 'merged')
         self.assertEqual(len(self.puts), 1)
+
+    def test_a_member_not_found_does_not_end_a_live_merge_request(self):
+        for detail in ('gh: Not Found (HTTP 404)', 'gh: Gone (HTTP 410)'):
+            with self.subTest(detail=detail):
+                self.puts.clear()
+                missing = True
+
+                def pull(repo, number):
+                    nonlocal missing
+                    if missing:
+                        missing = False
+                        raise ValueError(detail)
+                    return self.landed(number)
+
+                with self.accepted(), patch.object(MERGE, 'read', return_value={'status': 'enqueued'}) as read, \
+                     patch.object(MERGE, 'pull', side_effect=pull), redirect_stdout(io.StringIO()):
+                    result = MERGE.submit(REPO, 102, sha(102), self.scope)
+                self.assertEqual(result['status'], 'merged')
+                self.assertEqual(result['uuid'], UUID)
+                self.assertEqual(len(self.puts), 1)
+                self.assertEqual(read.call_args_list, [
+                    call(PREFIX + f'/pulls/102/merge-async/{UUID}')
+                ] * 2)
+
+    def test_a_member_read_failure_hands_off_the_original_receipt(self):
+        receipt = json.loads(self.resume_environment()['DISPATCH_RECEIPT'])
+        with patch.dict(os.environ, self.resume_environment()), \
+             patch.object(sys, 'argv', ['auto-merge']), \
+             patch.object(MERGE, 'auto_merge_default') as arm, \
+             patch.object(MERGE, 'prepare') as admit, \
+             patch.object(MERGE, 'read', return_value={'status': 'enqueued'}), \
+             patch.object(MERGE, 'pull', side_effect=ValueError('gh: Not Found (HTTP 404)')), \
+             patch.object(MERGE.subprocess, 'run',
+                          return_value=subprocess.CompletedProcess([], 0, '', '')) as run, \
+             patch.object(MERGE, 'WAIT_SECONDS', 0), redirect_stdout(io.StringIO()) as output:
+            code = MERGE.main()
+        result = json.loads(output.getvalue())['result']
+        self.assertEqual(code, 0)
+        self.assertEqual(result['status'], 'resume_dispatched')
+        self.assertEqual(result['previous'], 'observation_unavailable')
+        self.assertEqual(run.call_count, 1)
+        command = run.call_args.args[0]
+        self.assertEqual(command[:3], ['gh', 'workflow', 'run'])
+        continued = next(value.removeprefix('receipt=') for value in command
+                         if value.startswith('receipt='))
+        self.assertEqual(json.loads(continued), receipt)
+        arm.assert_not_called()
+        admit.assert_not_called()
+
+    def test_a_failed_request_keeps_its_reason_even_if_members_are_unreadable(self):
+        failure = {'status': 'failed', 'details': {'message': 'rules rejected'}}
+        receipt = json.loads(self.resume_environment()['DISPATCH_RECEIPT'])
+        with patch.object(MERGE, 'read', return_value=failure), \
+             patch.object(MERGE, 'pull', side_effect=ValueError('gh: Not Found (HTTP 404)')) as pull, \
+             patch.object(MERGE.subprocess, 'run') as run:
+            result = MERGE.resume(REPO, receipt)
+        self.assertEqual(result['status'], 'failed')
+        self.assertEqual(result['reason'], failure['details'])
+        pull.assert_not_called()
+        run.assert_not_called()
 
     def test_merged_receipt_is_not_success_until_every_member_has_a_commit(self):
         for partial in ({'merged': False}, {'merged': True, 'merge_commit_sha': None}):

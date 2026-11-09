@@ -2231,9 +2231,17 @@ let keeper_plain_list_lines (state : state) ~now:_ projection =
         let selected = keeper_entry_selected stop entry in
         let name_width = max 1 (width - Render_schedule.keeper_marker_width - Render_schedule.keeper_status_width - 1) in
         let yolo = List.mem row.Keeper_list_model.keeper.Tui_decode.k_name state.keeper_yolo_names in
-        let primary = keeper_row_marker ~selected
-          ^ keeper_row_name ~width:name_width ~yolo row ^ " "
-          ^ keeper_now_cell ~ko:(state.ui_language = Lang_ko) ~frame:state.activity_frame row in
+        let prefix = keeper_row_marker ~selected
+          ^ keeper_row_name ~width:name_width ~yolo row ^ " " in
+        let now_cell = keeper_now_cell ~ko:(state.ui_language = Lang_ko)
+            ~frame:state.activity_frame row in
+        let primary = prefix ^ now_cell.text in
+        (match shift_motion ~prefix now_cell.motion with
+         | Masc_tui_answering.Still -> ()
+         | Moving through_cell ->
+             if projection.kpp_list_rows > 0 then
+               Render_schedule.Activity_tick.note_motion_if_visible
+                 ~text:primary ~width ~through_cell);
         let emit value =
           let value = fit_width value width in
           let value = if selected then Ansi.reverse ^ Masc_tui_theme.strip_sgr value ^ Ansi.reset else value in

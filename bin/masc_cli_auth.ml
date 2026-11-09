@@ -154,21 +154,34 @@ let service_credential_issue ~base_path ~service =
   with
   | Error reason -> refused "service-credential issue" reason
   | Ok token ->
-    (* The credential is committed by now. A token that did not reach the
-       output is reported, so the exit code does not claim it was printed. *)
-    Printf.printf
-      "The service %s has a new credential, %s. Its token is not shown again:\n%s\n"
-      service
-      (Authz_types.Service_credential_id.to_string
-         (Authz_credential_token.Service_credential.id token))
-      (Authz_credential_token.Service_credential.to_string token);
-    (match flush stdout with
+    let id =
+      Authz_types.Service_credential_id.to_string
+        (Authz_credential_token.Service_credential.id token)
+    in
+    (* The credential is committed by now. When the token does not reach the
+       output, the standard error names the credential, so the operator
+       revokes this one and no other; the token is not printed again. A reader
+       that went away gives EPIPE here instead of killing the process. SIGPIPE
+       stays ignored until the process ends, so the flush at exit of the
+       unwritten token fails quietly and the exit code stays 1. *)
+    Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+    (match
+       Printf.printf
+         "The service %s has a new credential, %s. Its token is not shown again:\n%s\n"
+         service
+         id
+         (Authz_credential_token.Service_credential.to_string token);
+       flush stdout
+     with
      | () -> 0
      | exception Sys_error detail ->
        Printf.eprintf
-         "masc auth service-credential issue: the credential is written, and its token \
-          did not reach the standard output: %s; revoke it and issue another\n"
-         detail;
+         "masc auth service-credential issue: the credential %s is written, and its \
+          token did not reach the standard output: %s; revoke it with masc auth \
+          service-credential revoke --credential %s and issue another\n%!"
+         id
+         detail
+         id;
        1)
 ;;
 

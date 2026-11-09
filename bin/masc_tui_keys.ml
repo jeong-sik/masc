@@ -2215,11 +2215,11 @@ let acting_evidence_hints = hints_of_bindings bindings_acting_evidence
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)
 let help_surfaces : (string * surface) list =
-  [ "Dashboard", Overview
+  [ "Operations", Overview
   ; "Work", Planning
   ; "Keepers", Keepers Keeper_list
-  ; "Usage", Metrics
-  ; "Board", Board
+  ; "Operations / Usage", Metrics
+  ; "Work / Board", Board
   ; "Workspace", Repositories
   ; "System", Config
   ; "Activity", Acting
@@ -2234,8 +2234,8 @@ let help_surfaces : (string * surface) list =
   ; "Keepers / Logs", Keepers Keeper_logs
   ; "Keepers / Calls", Keepers Keeper_calls
   ; "Keepers / Runtime", Keepers Keeper_runtime_pick
-  ; "Features", Lanes
-  ; "System / Runtime / Clients", Clients
+  ; "Features & plugins", Lanes
+  ; "Features & plugins / Clients", Clients
   ; "Approvals", Approvals
   ; "Work / Task Review", Verification
   ; "Work / Task Verdicts", Harness
@@ -2251,8 +2251,8 @@ let help_surfaces : (string * surface) list =
   ; "Workspace / Code", Code
   ; "Changes", Changes
   ; "System / Runtime", Runtime
-  ; "System / Resources", Resources
-  ; "System / Tools", Tools
+  ; "Features & plugins / Resources", Resources
+  ; "Features & plugins / Tools", Tools
   ; "System / Logs", System_logs
   (* Its keys are the least guessable on the product -- [B] opens the Browser
      Lane, [Ctrl-O] previews a tab, [b / u] bind and unbind a channel -- and

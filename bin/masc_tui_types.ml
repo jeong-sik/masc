@@ -4503,15 +4503,14 @@ type browser_lane_visibility =
       return_composer_focused : bool;
     }
 
-(* The Tab cycle and strip share seven destinations. Detail surfaces map to
-   their parent below; Activity and logs live under System, and Goals, Tasks,
-   approvals, review, and verdicts live under Work. *)
+(* The strip follows the operator's questions. Usage belongs to Operations;
+   Board, approvals and verification belong to Work. Features and plugins
+   have their own entry instead of hiding behind runtime configuration. *)
 let surface_ring : (surface * string) list =
-  [ (Overview, "Dashboard");
+  [ (Overview, "Operations");
     (Planning, "Work");
     (Keepers Keeper_list, "Keepers");
-    (Metrics, "Usage");
-    (Board, "Board");
+    (Lanes, "Features & plugins");
     (Repositories, "Workspace");
     (Config, "System");
   ]
@@ -5755,14 +5754,15 @@ let surface_ring_display_label ~lang (surface : surface) fallback =
   | Lang_en -> fallback
   | Lang_ko ->
       (match surface with
-       | Overview -> "대시보드"
+       | Overview -> "운영"
        | Planning -> "작업"
        | Keepers _ -> "키퍼"
+       | Lanes -> "기능·플러그인"
        | Metrics -> "사용량"
        | Board -> "보드"
        | Repositories -> "워크스페이스"
        | Config -> "시스템"
-       | Acting | Memory | Lanes | Clients | Approvals | Schedules
+       | Acting | Memory | Clients | Approvals | Schedules
        | Verification | Harness | Fusion | Code | Changes | Connectors
        | Runtime | Resources | Tools | System_logs ->
            fallback)
@@ -19920,7 +19920,7 @@ let create_state
   runtime_config_generation = 0;
   runtime_config_read = `Idle;
   runtime_config_owed = Masc_tui_owed_read.settled;
-  runtime_config_status_open = false;
+  runtime_config_status_open = true;
   runtime_config_status_scroll = 0;
   runtime_account_form = None;
   memory_recall_form = None;

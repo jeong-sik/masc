@@ -153,7 +153,7 @@ let axis_next_header = axis_next_glyph ^ " next"
 let header_words words = String.concat " \xc2\xb7 " words (* · *)
 let fact_age_header = axis_before_glyph ^ " fact age"
 let librarian_header = axis_now_glyph ^ " librarian"
-let updated_header = axis_now_glyph ^ " updated"
+let updated_header = axis_now_glyph ^ " saved"
 let lag_digest_gap_header = axis_next_glyph ^ " " ^ header_words [ "lag"; "digest"; "gap" ]
 
 let lag_stale_facts_header =

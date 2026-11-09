@@ -921,11 +921,11 @@ let waiting_badge_gap_cells = 3
 let surface_strip (state : state) ~cols =
   (* An array because the strip is drawn by index: the width probe, the
      label and the cell each read entry [i], and a list answers that by
-     walking. Seven entries make that cost nothing -- it is an array so the
+     walking. The short ring makes that cost nothing -- it is an array so the
      renderer holds no row lookup that walks, with no exception to carry. *)
   let ring = Array.of_list Masc_tui_types.surface_ring in
   let n = Array.length ring in
-  let active = Masc_tui_surface_navigation.surface_ring_index state state.view in
+  let active = Masc_tui_surface_navigation.surface_ring_index state.view in
   (* A count rides the entry it belongs to, so pending work is visible from
      every surface without a spare row. Zero draws nothing -- an always-on
      badge would be texture, not information. *)
@@ -949,11 +949,28 @@ let surface_strip (state : state) ~cols =
     else Message_layout.display_width badge + waiting_badge_gap_cells
   in
   let budget = max 8 (cols - 1 - badge_reserved) in
+  let active_hidden_cells =
+    (if active > 0 then Message_layout.display_width (hidden_before_mark active) + 1 else 0)
+    + (if active < n - 1 then
+         Message_layout.display_width (hidden_after_mark (n - 1 - active)) + 1
+       else 0)
+  in
+  let active_label_cells =
+    max 0 (budget - active_hidden_cells
+           - Message_layout.display_width Masc_tui_theme.Glyph.current_entry)
+  in
   let label i =
     let surface, name = ring.(i) in
-    Masc_tui_types.surface_ring_display_label ~lang:state.ui_language
-      surface name
-    ^ badge_of_surface surface
+    let text =
+      Masc_tui_types.surface_ring_display_label ~lang:state.ui_language
+        surface name
+      ^ badge_of_surface surface
+    in
+    (* Even a window containing only the active entry must leave room for
+       its hidden-entry markers and the operator's waiting badge. Measurement
+       and drawing both use this same cell-bounded label. *)
+    if i = active then Message_layout.truncate_middle active_label_cells text
+    else text
   in
   (* Plain-cell width of entry [i] inside a window starting at [lo]. *)
   let entry_width ~lo i =

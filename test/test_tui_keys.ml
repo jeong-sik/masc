@@ -456,21 +456,17 @@ let test_keeper_runs_selection_survives_a_shorter_list () =
   check (Alcotest.option (Alcotest.pair Alcotest.int str)) "empty list has no action target"
     None (selected ())
 
-let ring_stop surface =
-  Masc_tui_surface_navigation.surface_ring_index
-    (create_state ~workspace:"" ~port:0 ())
-    surface
+let ring_stop = Masc_tui_surface_navigation.surface_ring_index
 
 (* Every view lands on a stop the ring holds. The index cannot say this: a
    family missing from the ring comes back as 0, Overview's position, and a
    comparison against Overview would pass. *)
 let test_every_view_has_a_ring_stop () =
-  let state = create_state ~workspace:"" ~port:0 () in
   List.iter
     (fun surface ->
       Alcotest.(check bool) "the view's family is a ring stop" true
         (List.exists
-           (fun (stop, _) -> stop = Masc_tui_surface_navigation.surface_ring_family state surface)
+           (fun (stop, _) -> stop = Masc_tui_surface_navigation.surface_ring_family surface)
            surface_ring))
     every_surface
 
@@ -510,13 +506,11 @@ let test_keeper_operations_are_not_top_level_tabs () =
        Alcotest.(check int) (label ^ " highlights Keepers")
          (ring_stop (Keepers Keeper_list))
          (ring_stop surface))
-    [ Connectors, "Channels"; Schedules, "Automation" ]
+    [ Schedules, "Automation" ]
 
 let test_lanes_is_a_main_destination () =
-  Alcotest.(check bool) "Lanes is reached through System" false
-    (List.exists (fun (surface, _) -> surface = Lanes) surface_ring);
-  Alcotest.(check int) "Lanes highlights System"
-    (ring_stop Config) (ring_stop Lanes)
+  Alcotest.(check bool) "Features is a top-level destination" true
+    (List.exists (fun (surface, _) -> surface = Lanes) surface_ring)
 
 (* Code's tree is always somebody's checkout -- a registered repository, a
    keeper workspace, or the project -- and Enter on a Workspace row is
@@ -529,21 +523,19 @@ let test_code_is_a_workspace_child () =
     (ring_stop Repositories)
     (ring_stop Code)
 
-(* Resources and Tools are registration catalogs -- what is wired up here,
-   read rarely -- so they hang off Config under [s] and [t] instead of
-   holding Tab stops of their own. *)
-let test_resources_is_a_config_child () =
+(* Capability catalogs share the Features destination. *)
+let test_resources_is_a_features_child () =
   Alcotest.(check bool) "Resources is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Resources) surface_ring);
-  Alcotest.(check int) "Resources highlights Config"
-    (ring_stop Config)
+  Alcotest.(check int) "Resources highlights Features"
+    (ring_stop Lanes)
     (ring_stop Resources)
 
-let test_tools_is_a_config_child () =
+let test_tools_is_a_features_child () =
   Alcotest.(check bool) "Tools is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = Tools) surface_ring);
-  Alcotest.(check int) "Tools highlights Config"
-    (ring_stop Config)
+  Alcotest.(check int) "Tools highlights Features"
+    (ring_stop Lanes)
     (ring_stop Tools)
 
 (* Tool calls settling and the server's own log lines are two readings of
@@ -555,7 +547,7 @@ let test_logs_is_an_activity_child () =
   List.iter (fun surface ->
       Alcotest.(check int) "runtime children highlight Config"
         (ring_stop Config) (ring_stop surface))
-    [Runtime; Clients];
+    [Runtime];
   Alcotest.(check bool) "Logs is not a top-level ring entry" false
     (List.exists (fun (surface, _) -> surface = System_logs) surface_ring);
   Alcotest.(check int) "Logs highlights System"
@@ -565,10 +557,10 @@ let test_logs_is_an_activity_child () =
 (* Telemetry and multicore engine metrics hang off Overview under [m]
    instead of holding a top-level Tab stop of their own. *)
 let test_metrics_is_an_overview_child () =
-  Alcotest.(check bool) "Usage is a top-level ring entry" true
+  Alcotest.(check bool) "Usage is reached through Operations" false
     (List.exists (fun (surface, _) -> surface = Metrics) surface_ring);
-  Alcotest.(check int) "Usage highlights itself"
-    (ring_stop Metrics)
+  Alcotest.(check int) "Usage highlights Operations"
+    (ring_stop Overview)
     (ring_stop Metrics)
 
 (* The strip dropped the Approvals entry when nothing was waiting. "Nothing
@@ -602,17 +594,17 @@ let approvals_reading_is_current state =
     Some { Masc.Tui_decode_asks.asn_keeper = None; asn_open_count = 0; asn_rows = [] };
   state.asks_error <- None
 
-let approvals_home_in_ring state =
-  let home = Masc_tui_surface_navigation.surface_ring_family state Approvals in
+let approvals_home_in_ring () =
+  let home = Masc_tui_surface_navigation.surface_ring_family Approvals in
   List.exists (fun (surface, _) -> surface = home) Masc_tui_types.surface_ring
 
 let test_approvals_stay_reachable_and_unread_until_a_reading_empties_it () =
   let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Overview;
   Alcotest.(check bool) "Approvals is reached through Work" true
-    (Masc_tui_surface_navigation.surface_ring_family state Approvals = Planning);
+    (Masc_tui_surface_navigation.surface_ring_family Approvals = Planning);
   Alcotest.(check bool) "Work, where Approvals opens, is in the ring" true
-    (approvals_home_in_ring state);
+    (approvals_home_in_ring ());
   Alcotest.(check bool) "before any reading nothing reads as settled" false
     (Masc_tui_approvals_model.approvals_reading_current state);
   approvals_reading_is_current state;
@@ -683,26 +675,26 @@ let test_a_gate_poll_that_fails_after_one_answered_is_not_an_empty_queue () =
   Alcotest.(check bool) "the next answered poll empties it again" true
     (Masc_tui_approvals_model.approvals_empty_queue (Masc_tui_approvals_model.approvals_reading state) = Masc_tui_approvals_model.Nothing_pending)
 
-let test_browser_lanes_highlight_config () =
+let test_browser_lanes_highlight_features () =
   let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Connectors;
-  check Alcotest.int "channel bindings remain under Keepers"
-    (Masc_tui_surface_navigation.surface_ring_index state (Keepers Keeper_list))
-    (Masc_tui_surface_navigation.surface_ring_index state Connectors);
+  check Alcotest.int "channel bindings belong to Features"
+    (Masc_tui_surface_navigation.surface_ring_index Lanes)
+    (Masc_tui_surface_navigation.surface_ring_index Connectors);
   List.iter (fun source ->
       show_browser_lane state;
       state.browser_lane <- Some
         (Browser_lane_view.switch_source source (Browser_lane_view.create ()));
-      let index = Masc_tui_surface_navigation.surface_ring_index state Connectors in
-      check Alcotest.int "Browser reader highlights Config"
-        (Masc_tui_surface_navigation.surface_ring_index state Config) index;
-      check Alcotest.bool "the selected ring entry is Config, not the fallback"
-        true (fst (List.nth (Masc_tui_types.surface_ring) index) = Config))
+      let index = Masc_tui_surface_navigation.surface_ring_index Connectors in
+      check Alcotest.int "Browser reader highlights Features"
+        (Masc_tui_surface_navigation.surface_ring_index Lanes) index;
+      check Alcotest.bool "the selected ring entry is Features, not the fallback"
+        true (fst (List.nth (Masc_tui_types.surface_ring) index) = Lanes))
     [Browser_lane_view.Live];
   state.browser_lane <- None;
-  check Alcotest.int "closing the reader restores the Keeper parent"
-    (Masc_tui_surface_navigation.surface_ring_index state (Keepers Keeper_list))
-    (Masc_tui_surface_navigation.surface_ring_index state Connectors)
+  check Alcotest.int "closing the reader retains its Features parent"
+    (Masc_tui_surface_navigation.surface_ring_index Lanes)
+    (Masc_tui_surface_navigation.surface_ring_index Connectors)
 
 (* One ask can carry several questions, and the surface counts them under the
    word "question": its title and the block header above the rows both read
@@ -2279,16 +2271,16 @@ let () =
             test_lanes_is_a_main_destination
         ; Alcotest.test_case "Code is a Workspace child" `Quick
             test_code_is_a_workspace_child
-        ; Alcotest.test_case "Resources is a Config child" `Quick
-            test_resources_is_a_config_child
-        ; Alcotest.test_case "Tools is a Config child" `Quick
-            test_tools_is_a_config_child
+        ; Alcotest.test_case "Resources is a Features child" `Quick
+            test_resources_is_a_features_child
+        ; Alcotest.test_case "Tools is a Features child" `Quick
+            test_tools_is_a_features_child
         ; Alcotest.test_case "Logs is an Activity child" `Quick
             test_logs_is_an_activity_child
         ; Alcotest.test_case "Usage is a main destination" `Quick
             test_metrics_is_an_overview_child
-        ; Alcotest.test_case "Browser reader belongs to Config" `Quick
-            test_browser_lanes_highlight_config
+        ; Alcotest.test_case "Browser reader belongs to Features" `Quick
+            test_browser_lanes_highlight_features
         ; Alcotest.test_case "the question count counts questions" `Quick
             test_the_question_count_counts_questions
         ; Alcotest.test_case "the questions reading tells unread from none open"

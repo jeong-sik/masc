@@ -523,9 +523,9 @@ let test_browser_reader_chrome_scope () =
     state.Tui_types.browser_lane <- Some (Lane.switch_source source (Lane.create ()));
     check bool "reader owns its context row" true
       (Option.is_some (Tui_types.browser_lane_on_screen state));
-    check int "reader highlights its Runtime family"
-      (Masc_tui_surface_navigation.surface_ring_index state Tui_types.Runtime)
-      (Masc_tui_surface_navigation.surface_ring_index state state.Tui_types.view);
+    check int "reader highlights its Features family"
+      (Masc_tui_surface_navigation.surface_ring_index Tui_types.Lanes)
+      (Masc_tui_surface_navigation.surface_ring_index state.Tui_types.view);
     state.Tui_types.view <- Tui_types.Keepers Tui_types.Keeper_detail;
     check bool "retained browser does not hide Keeper chrome" true
       (Option.is_none (Tui_types.browser_lane_on_screen state)))
@@ -535,8 +535,8 @@ let test_browser_reader_chrome_scope () =
   check bool "connector routing retains Keeper context" true
     (Option.is_none (Tui_types.browser_lane_on_screen state));
   check int "connector routing keeps its existing navigation family"
-    (Masc_tui_surface_navigation.surface_ring_index state (Tui_types.Keepers Tui_types.Keeper_list))
-    (Masc_tui_surface_navigation.surface_ring_index state Tui_types.Connectors)
+    (Masc_tui_surface_navigation.surface_ring_index Tui_types.Lanes)
+    (Masc_tui_surface_navigation.surface_ring_index Tui_types.Connectors)
 ;;
 
 let test_reader_discards_active_and_queued_voice () =

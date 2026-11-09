@@ -190,36 +190,37 @@ let main_entries =
 
 let palette_entries (state : state) =
   main_entries
-  @ [ "go Work / Task Review", Palette_goto Verification
+  @ [ "go Operations / Usage", Palette_goto Metrics
+    ; "go Work / Board", Palette_goto Board
+    ; "go Work / Task Review", Palette_goto Verification
     ; "go Work / Task Verdicts", Palette_goto Harness
     ; "go Work / Requests", Palette_goto Approvals
     ; "go Keepers / Memory", Palette_goto Memory
     ; "go Keepers / Schedules", Palette_goto Schedules
     ; "go Keepers / Fusion", Palette_goto Fusion
     ; "go Keepers / Changes", Palette_goto Changes
-    ; "go Keepers / Channels", Palette_connectors
+    ; "go Features & plugins / Channels", Palette_connectors
     ; "go Workspace / Code", Palette_goto Code
     ; "go System / Runtime", Palette_goto Runtime
-    ; "go System / Features", Palette_goto Lanes
-    ; "go System / Clients", Palette_goto Clients
-    ; "go System / Resources", Palette_goto Resources
-    ; "go System / Tools & Skills", Palette_goto Tools
+    ; "go Features & plugins / Clients", Palette_goto Clients
+    ; "go Features & plugins / Resources", Palette_goto Resources
+    ; "go Features & plugins / Tools & Skills", Palette_goto Tools
     ; "go System / Activity", Palette_goto Acting
     ; "go System / Logs", Palette_goto System_logs
-    ; "go System / Browser", Palette_browser_lane
-    ; "go System / Plugins", Palette_lane_addons
+    ; "go Features & plugins / Browser", Palette_browser_lane
+    ; "go Features & plugins / Plugins", Palette_lane_addons
     ]
   @ List.map
       (fun (pane, label) -> ("go System / " ^ label, Palette_config pane))
       config_panes
   @ List.map (fun lane ->
-      ("go System / Features / " ^ Lane_run_identity.label lane ^ " history", Palette_lane_history lane))
+      ("go Features & plugins / " ^ Lane_run_identity.label lane ^ " history", Palette_lane_history lane))
       Lane_run_identity.all
   @ [ "go Play / Links", Palette_collab
     ; "go Play / MSX", Palette_msx
     ; "go Play / DOS", Palette_dos
     ]
-  @ List.map (fun (id, title) -> ("go System / Plugins / " ^ title ^ " Results", Palette_addon_results id))
+  @ List.map (fun (id, title) -> ("go Features & plugins / Plugins / " ^ title ^ " Results", Palette_addon_results id))
       (addon_result_targets state)
   @ (match browser_lane_on_screen state with
       | None -> []
@@ -313,8 +314,8 @@ let palette_action_words action =
   | Palette_goto surface ->
       let aliases = match surface with
         | Resources -> [ "artifacts"; "reports"; "resources"; "리소스"; "산출물" ]
-        | Metrics -> [ "metrics"; "telemetry"; "charts"; "stats"; "사용량"; "비용" ]
-        | Overview -> [ "대시보드"; "홈" ]
+        | Metrics -> [ "usage"; "metrics"; "telemetry"; "charts"; "stats"; "사용량"; "비용" ]
+        | Overview -> [ "dashboard"; "operations"; "운영"; "대시보드"; "홈" ]
         | Planning -> [ "goals"; "candle"; "작업"; "목표" ]
         | Keepers _ -> [ "키퍼"; "에이전트" ]
         | Board -> [ "보드"; "게시판" ]

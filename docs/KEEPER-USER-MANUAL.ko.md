@@ -498,14 +498,11 @@ allow = ["github.com", "api.github.com", "*.githubusercontent.com"]
 `githubusercontent.com` 자체를 포함하지 않습니다. `policy`를 지원하지 않는
 backend는 `inherit`로 몰래 바꾸지 않고 요청을 거부합니다.
 
-요청마다 `container exec` 를 띄우는 대신 게스트 agent 로 요청을 보내려면, 그 Keeper 의
-`[keeper]` 표에 `microvm_delivery = "agent_socket"` 을 적습니다
-([RFC](rfc/RFC-microvm-guest-agent-over-socket.md), 지금은 Keeper 별 canary).
-위 예처럼 `sandbox_profile = "microvm"` 과 `microvm_backend = "apple_container"` 가 있어야
-받습니다. backend 를 적지 않고 호스트 기본값으로 뜨던 Keeper 도 `microvm_backend` 줄을
-적습니다. 다음 턴에 첫 프로세스가
-shim agent 인 게스트로 바뀌고, 이 줄을 지우면 그다음 턴에 원래대로 바뀝니다.
+Apple container 게스트는 모든 요청을 게스트 agent 로 받습니다
+([RFC](rfc/RFC-microvm-guest-agent-over-socket.md)). 게스트의 첫 프로세스가 shim agent 이고,
 agent 소켓의 호스트 쪽 끝은 `<base>/.masc/microvm/agent/` 아래에 있습니다.
+Keeper TOML 에는 이것을 고르는 키가 없습니다. `nerdctl_kata` 와 `microsandbox` 게스트는
+요청마다 shim 을 exec 로 하나씩 띄웁니다.
 
 ### Keeper 한 명에 Docker 컨테이너 하나
 

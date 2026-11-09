@@ -1,38 +1,65 @@
-let bin_count = 24
-
 type bin = int
 
-(* The ladder's two exact edges. The bins between them start on equal log
-   steps, so bin 1 starts at the lower edge and bin 23 at the upper one. *)
-let hour_edge = Masc_time_constants.hour
-let month_edge = Masc_time_constants.days_to_seconds 30
-let log_steps = bin_count - 2
-let span_ratio = month_edge /. hour_edge
-let log_step = Float.log span_ratio /. float_of_int log_steps
+type edge =
+  | Hour
+  | Day
+  | Week
+  | Month
+
+type span =
+  | Hours of int
+  | Days of int
+
+let edges = [ Hour; Day; Week; Month ]
+
+let edge_span = function
+  | Hour -> Hours 1
+  | Day -> Days 1
+  | Week -> Days 7
+  | Month -> Days 30
+;;
+
+let span_seconds = function
+  | Hours n -> float_of_int n *. Masc_time_constants.hour
+  | Days n -> Masc_time_constants.days_to_seconds n
+;;
+
+let edge_seconds edge = span_seconds (edge_span edge)
+
+(* How many bins split the ages from one edge to the next (E28). *)
+let hour_to_day_bins = 8
+let day_to_week_bins = 8
+let week_to_month_bins = 6
 let newest = 0
-let oldest = bin_count - 1
+
+let edge_bin = function
+  | Hour -> newest + 1
+  | Day -> newest + 1 + hour_to_day_bins
+  | Week -> newest + 1 + hour_to_day_bins + day_to_week_bins
+  | Month -> newest + 1 + hour_to_day_bins + day_to_week_bins + week_to_month_bins
+;;
+
+let oldest = edge_bin Month
+let bin_count = oldest + 1
 let bins = List.init bin_count Fun.id
 let index bin = bin
 
-(* [span_ratio ** 1.0] is [span_ratio] exactly, so bin 23 starts at 30 days
-   to the second, and bin 1 at one hour. *)
-let edges =
-  Array.init bin_count (fun k ->
-    if k = newest
-    then 0.0
-    else hour_edge *. Float.pow span_ratio (float_of_int (k - 1) /. float_of_int log_steps))
+let segments =
+  [ Hour, Day, hour_to_day_bins; Day, Week, day_to_week_bins; Week, Month, week_to_month_bins ]
 ;;
 
-let lower_edge bin = edges.(bin)
+(* The bins from [low] to [high], each a log step older than the one before.
+   The first is [low × ratio ** 0.0], which is [low] exactly, so every edge
+   starts its bin to the second. *)
+let segment_starts (low, high, steps) =
+  let ratio = edge_seconds high /. edge_seconds low in
+  List.init steps (fun step ->
+    edge_seconds low *. Float.pow ratio (float_of_int step /. float_of_int steps))
+;;
 
-let nearest_edge age =
-  if age <= hour_edge
-  then 1
-  else if age >= month_edge
-  then oldest
-  else (
-    let k = Float.to_int (Float.round (Float.log (age /. hour_edge) /. log_step)) + 1 in
-    max 1 (min oldest k))
+(* The youngest age each bin counts, bin 0 first. *)
+let lower_edges =
+  Array.of_list ((0.0 :: List.concat_map segment_starts segments) @ [ edge_seconds Month ])
 ;;
 
 (* An array the module builds and never hands out, so the counts cannot change
@@ -44,7 +71,7 @@ let zero = Array.make bin_count 0
 let classify ~now ts =
   let age = if ts > now then 0.0 else now -. ts in
   (* The oldest bin whose lower edge the age reaches. *)
-  let rec reached k = if k = newest || age >= edges.(k) then k else reached (k - 1) in
+  let rec reached k = if k = newest || age >= lower_edges.(k) then k else reached (k - 1) in
   reached oldest
 ;;
 

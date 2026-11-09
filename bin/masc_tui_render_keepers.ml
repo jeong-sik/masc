@@ -859,11 +859,11 @@ let grid_gap (grid : Grid.t) memory =
 
 module Age_ladder = Masc_tui_keeper_age_ladder
 
-(* A ladder cell takes the colour of the newest bin it adds (the mock's
-   [cellZone]): a bin that starts within a day is the info colour, within a
-   week the row's own, and older facts recede. *)
+(* A ladder cell takes the colour of the newest bin it adds, as the mock's
+   legend reads: under a day the info colour, a day to seven days the row's
+   own, older facts recede. *)
 let grid_age_group_style = function
-  | Age_ladder.Within_hour | Age_ladder.Within_day -> Theme.info ()
+  | Age_ladder.Within_day -> Theme.info ()
   | Age_ladder.Within_week -> ""
   | Age_ladder.Past_week -> Theme.recede ()
 

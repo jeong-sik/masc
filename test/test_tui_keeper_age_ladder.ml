@@ -73,19 +73,31 @@ let group_letter = function
   | Ladder.Past_week -> 'P'
   | Ladder.Within_week -> 'W'
   | Ladder.Within_day -> 'D'
-  | Ladder.Within_hour -> 'H'
 ;;
 
 let letters groups = String.of_seq (List.to_seq (List.map group_letter groups))
 
-(* A bin's group follows where it starts: bin 0 is under an hour, bins 1–11
-   start within a day (bin 11 at 19.9h), bins 12–18 within seven days (bin 12
-   at 26.8h, bin 18 at 6.7d) and bins 19–23 further back (bin 19 at 9.1d). *)
-let test_a_bin_belongs_to_the_group_it_starts_in () =
+(* The server's day edge starts bin 9 and its week edge bin 17: bins 0–8 are
+   under a day, 9–16 a day to seven days, 17–23 older. *)
+let test_a_bin_belongs_to_the_group_between_its_edges () =
   Alcotest.(check string)
     "groups of bins 0 to 23"
-    ("H" ^ String.make 11 'D' ^ String.make 7 'W' ^ String.make 5 'P')
+    (String.make 9 'D' ^ String.make 8 'W' ^ String.make 7 'P')
     (letters (List.map Ladder.group_of_bin Bins.bins))
+;;
+
+let test_the_groups_add_up_to_the_facts () =
+  List.iter
+    (fun (label, b) ->
+      Alcotest.(check int)
+        label
+        (Bins.total b)
+        (List.fold_left (fun sum group -> sum + Ladder.group_count b group) 0
+           Ladder.groups_oldest_first))
+    [ "no facts", Bins.zero
+    ; "a fact in every bin, each bin a different count", ladder (List.init Bins.bin_count (fun k -> 1 lsl k))
+    ; "only the two ends", ladder ((3 :: List.init 22 (fun _ -> 0)) @ [ 5 ])
+    ]
 ;;
 
 let test_a_column_adds_one_two_or_four_bins_to_a_cell () =
@@ -148,7 +160,8 @@ let test_an_empty_group_never_draws_a_bar () =
           Ladder.groups_oldest_first
       in
       let marks = Ladder.marks b in
-      Alcotest.(check int) (label ^ ": one mark per group") 4 (List.length marks);
+      Alcotest.(check int) (label ^ ": one mark per group")
+        (List.length Ladder.groups_oldest_first) (List.length marks);
       List.iter2
         (fun count mark ->
           Alcotest.(check bool)
@@ -168,11 +181,11 @@ let test_the_oldest_is_drawn_first () =
   let drawn b = List.map (fun mark -> not (is_empty mark)) (Ladder.marks b) in
   Alcotest.(check (list bool))
     "facts 30 days or older draw the leftmost mark"
-    [ true; false; false; false ]
+    [ true; false; false ]
     (drawn (ends ~newest:0 ~oldest:5));
   Alcotest.(check (list bool))
     "facts first seen in the last hour draw the rightmost mark"
-    [ false; false; false; true ]
+    [ false; false; true ]
     (drawn (ends ~newest:5 ~oldest:0))
 ;;
 
@@ -253,9 +266,10 @@ let () =
     "tui_keeper_age_ladder"
     [ ( "age ladder"
       , [ Alcotest.test_case
-            "a bin belongs to the group it starts in"
+            "a bin belongs to the group between its edges"
             `Quick
-            test_a_bin_belongs_to_the_group_it_starts_in
+            test_a_bin_belongs_to_the_group_between_its_edges
+        ; Alcotest.test_case "the groups add up to the facts" `Quick test_the_groups_add_up_to_the_facts
         ; Alcotest.test_case
             "a column adds one, two or four bins to a cell"
             `Quick

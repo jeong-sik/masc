@@ -7671,12 +7671,10 @@ let row_list (state : state) : row_list option =
   else
   match state.view with
   | Keepers Keeper_list ->
-      (* Search, Home/End and the page keys name a row, not the heading
-         above it. *)
+      (* Search, Home/End and the page keys choose a row, which a folded
+         group opens to show. *)
       windowed ~count:(List.length state.keepers) ~cursor:state.keeper_cursor
-        (fun index ->
-          state.keeper_list_heading <- None;
-          state.keeper_cursor <- index)
+        (choose_keeper_row state)
   | Lanes ->
       (match state.lanes_mode with
        (* The run list moves [lane_runs_cursor] for j/k and the page keys, so
@@ -39277,7 +39275,7 @@ Use relative paths for resources already held in the package. -->
                              String.equal keeper.k_name keeper_name)
                           (keepers_for_selection state)
                       with
-                      | Some index -> state.keeper_cursor <- index
+                      | Some index -> choose_keeper_row state index
                       | None -> ())
                  | (Link.Board_post | Link.Goal | Link.Schedule | Link.Task
                    | Link.Fusion_run | Link.Keeper),

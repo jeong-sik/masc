@@ -1,4 +1,4 @@
-.PHONY: release-evidence release viewer-build viewer-serve harness-streamable-http-contract harness-run-local-fresh-boot
+.PHONY: release-evidence release harness-streamable-http-contract harness-run-local-fresh-boot
 
 release-evidence:
 	bash scripts/release-evidence.sh _build/default/bin/main_eio.exe artifacts/release-evidence/local-release-evidence.md
@@ -7,14 +7,6 @@ release-evidence:
 release:
 	dune build --root . --release
 	@echo "Release binary at _build/default/bin/main_eio.exe"
-
-# Build viewer (Bevy + WASM via trunk) with NO_COLOR normalization.
-viewer-build:
-	scripts/viewer-trunk.sh build
-
-# Serve viewer locally at http://127.0.0.1:8080
-viewer-serve:
-	scripts/viewer-trunk.sh serve
 
 # MCP streamable transport contract harness (Accept policy + deprecation headers)
 harness-streamable-http-contract:

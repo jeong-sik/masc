@@ -1654,8 +1654,8 @@ let render_runtime_config_status state =
       ~name:(screen_title (ui_text state
         ~ko:" MASC 시스템 / 상태" ~en:" MASC System / Status")) state)
     ~hints:(ui_text state
-      ~ko:"v/Esc:설정 원문  j/k:스크롤  PgUp/PgDn:페이지  r:새로고침"
-      ~en:"v/Esc:settings source  j/k:scroll  PgUp/PgDn:page  r:reload")
+      ~ko:"v/Esc:설정 원문  j/k:스크롤  PgUp/PgDn:페이지  Home/End:처음/끝  r:새로고침"
+      ~en:"v/Esc:settings source  j/k:scroll  PgUp/PgDn:page  Home/End:top/end  r:reload")
     ~body:(fun ~budget c ->
       let lines = runtime_config_status_rows state ~cols in
       let scroll = min state.runtime_config_status_scroll (max 0 (List.length lines - budget)) in

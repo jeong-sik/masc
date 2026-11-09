@@ -10,13 +10,6 @@ type report = {
 
 let payload_path = "scripts/keeper-remote-workspace-cleanup.py"
 
-(* The sweep keeps this Keeper's cleanup reservation until it returns, and a
-   later pass skips a reserved Keeper, so the budget stays in minutes. On
-   2026-11-08 a report run over each of the
-   three largest review roots (700 to 2,400 entries) took 1 to 2 s; each
-   git repository it inspects can add a 20 s ls-remote. *)
-let payload_timeout_sec = 5. *. Masc_time_constants.minute
-
 type entry_result = Removed | Skipped | Failed
 
 let entry_result_of_string = function
@@ -72,13 +65,13 @@ let failure_detail stderr =
    disk preflight, which refuses below 1 GiB free. A full disk is when this
    sweep has to run. *)
 let run_payload ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta)
-    ~retention_sec payload =
+    ~retention_sec ~timeout_sec payload =
   let base_path = config.base_path in
   let* declaration = Keeper_sandbox_ssh.resolve_endpoint ~base_path ~keeper_name:meta.name in
   let* endpoint =
     Keeper_sandbox_ssh.create ~base_path ~keeper_name:meta.name ~endpoint:declaration ()
   in
-  let run = Keeper_sandbox_remote.runner ~timeout_sec:payload_timeout_sec endpoint in
+  let run = Keeper_sandbox_remote.runner ~timeout_sec endpoint in
   let argv =
     payload_argv ~root:(Keeper_sandbox_remote.workspace_root endpoint) ~retention_sec
   in
@@ -99,7 +92,7 @@ let run_payload ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keepe
     Error ("Keeper workspace cleanup transport failed: " ^ reason)
 
 let cleanup ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta)
-    ~retention_sec () =
+    ~retention_sec ~timeout_sec () =
   match meta.sandbox_profile with
   | Keeper_types_profile_sandbox.(Docker | Micro_vm) as profile ->
     Error
@@ -108,4 +101,4 @@ let cleanup ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_me
   | Keeper_types_profile_sandbox.Remote_ssh ->
     (match Embedded_config.read payload_path with
      | None -> Error "embedded Keeper workspace cleanup payload missing"
-     | Some payload -> run_payload ~config ~meta ~retention_sec payload)
+     | Some payload -> run_payload ~config ~meta ~retention_sec ~timeout_sec payload)

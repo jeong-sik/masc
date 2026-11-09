@@ -9,7 +9,9 @@ settings, not time limits on Keeper work or durable tasks.
 
 The same pass sweeps each Remote_ssh Keeper's workspace root on its endpoint
 when `keeper_remote_workspace_cleanup_enabled` (default true) is on, with
-`keeper_remote_workspace_cleanup_retention_sec` (two days). The payload is
+`keeper_remote_workspace_cleanup_retention_sec` (two days). Each Keeper's run
+on the endpoint stops after `keeper_remote_workspace_cleanup_timeout_sec`
+(five minutes); entries removed before then stay removed. The payload is
 `config/scripts/keeper-remote-workspace-cleanup.py`; its keep rules are in
 `docs/rfc/RFC-remote-keeper-workspace-entries-are-swept-on-their-endpoint.md`.
 This step does not take the Maintenance admission below: it runs beside the

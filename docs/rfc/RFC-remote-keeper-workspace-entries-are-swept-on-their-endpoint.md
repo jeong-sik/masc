@@ -55,7 +55,7 @@ payload 는 `config/scripts/keeper-remote-workspace-cleanup.py` 다. 동작:
 - 바이너리에 넣고(`Embedded_config`), stdin 으로 넘겨 `python3 -` 로 돌린다. `Keeper_sandbox_remote.runner` 를 거치고, 실행 위치는 Keeper 루트 `remote_root/<keeper>` 다.
 - endpoint 는 `Keeper_sandbox_ssh.resolve_endpoint` + `Keeper_sandbox_ssh.create` 로 만든다. `attached_guest_endpoint` 는 `ready` 에서 디스크 preflight 를 돌리기 때문에, 이 단계가 꼭 필요할 때 거절당한다.
 - 서버는 늘 `--apply` 로 부른다. `--apply` 가 없으면 지우지 않고 보고만 한다. 운영자는 같은 파일을 ssh 로 손으로 돌려 후보를 본다.
-- payload 시간 제한은 5분이다. 끝날 때까지 그 Keeper 는 다음 주기에서 건너뛴다. 11-08 report 실행은 가장 큰 루트 셋(항목 700~2,400개)에서 1~2초 걸렸다.
+- payload 시간 제한은 `keeper_remote_workspace_cleanup_timeout_sec`(처음 값 5분)다. 끝날 때까지 그 Keeper 는 다음 주기에서 건너뛴다. 11-08 report 실행은 가장 큰 루트 셋(항목 700~2,400개)에서 1~2초 걸렸다.
 
 Keeper 루트 바로 아래 항목마다 아래를 모두 만족해야 지운다. 하나라도 읽지 못하면 건너뛰고 이유를 보고한다.
 
@@ -102,10 +102,11 @@ Keeper 루트 바로 아래 항목마다 아래를 모두 만족해야 지운다
 - 막는 것: 커밋, stash, 원격에 없는 브랜치는 남는다. 2번 조건 때문에 48시간 안에 건드린 파일이 하나라도 있으면 항목 전체가 남는다.
 - 이유: 반대로 정하면 위 `kej` 같은 리뷰 메모 사본이 영영 남는다. 측정한 11개 중 4개가 그렇다.
 
-설정은 `Runtime_settings` 에 둘을 더한다.
+설정은 `Runtime_settings` 에 셋을 더한다.
 
 - `keeper_remote_workspace_cleanup_enabled`: 처음 값은 `true` 다. 끄면 Remote_ssh Keeper 를 훑지 않는다.
 - `keeper_remote_workspace_cleanup_retention_sec`: 처음 값은 48시간. 운영자가 11-08 에 고른 기준이다.
+- `keeper_remote_workspace_cleanup_timeout_sec`: 처음 값은 5분. 넘기면 endpoint 가 payload 를 멈추고 그 Keeper 는 경고 줄을 남긴다. 그때까지 지운 항목은 돌아오지 않는다. 처음에는 코드 상수였는데, 루트 크기와 ls-remote 응답 시간이 endpoint 마다 달라 11-09 에 설정으로 옮겼다.
 - 점검 주기는 `keeper_build_cleanup_interval_sec`(1시간)를 같이 쓴다.
 - report 모드 설정은 두지 않는다. `Runtime_params` 에는 enum 을 등록하는 도구가 없고, 보고만 볼 때는 payload 를 손으로 돌리면 된다.
 

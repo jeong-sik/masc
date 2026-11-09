@@ -277,6 +277,11 @@ let http_protocol_to_string = function
   | H2 -> "h2"
 ;;
 
+let http_protocol_version = function
+  | H1 -> "1.1"
+  | H2 -> "2"
+;;
+
 let http_rate_limit_scope_to_string = function
   | Client_ip -> "client_ip"
   | Agent -> "agent"

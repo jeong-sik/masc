@@ -724,6 +724,10 @@ let test_unknown_summary_word_is_refused () =
     (Masc.Transport_metrics.queue_pressure_kind_of_string "panicking" = None)
 ;;
 
+let test_http_protocol_version_follows_opentelemetry () =
+  check string "an HTTP/1.1 request" "1.1" (TM.http_protocol_version TM.H1);
+  check string "an HTTP/2 request" "2" (TM.http_protocol_version TM.H2)
+
 let () =
   run "Transport_metrics" [
     ("init", [
@@ -773,6 +777,10 @@ let () =
       test_case "wire words round trip" `Quick test_summary_words_round_trip;
       test_case "an unknown word is refused" `Quick
         test_unknown_summary_word_is_refused;
+    ]);
+    ("http protocol", [
+      test_case "the version follows OpenTelemetry" `Quick
+        test_http_protocol_version_follows_opentelemetry;
     ]);
     ("listen_status", [
       test_case "grpc listen_status lifecycle" `Quick

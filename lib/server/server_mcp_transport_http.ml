@@ -282,6 +282,11 @@ let post_endpoint_label profile = "POST " ^ profile_label profile
 let get_endpoint_label profile = "GET " ^ profile_label profile
 let delete_endpoint_label profile = "DELETE " ^ profile_label profile
 
+(* The OpenTelemetry transport of the connection a request came on. *)
+let transport_context_of_reqd reqd =
+  Otel_dispatch_hook.http_transport_context
+    ~protocol_version:(Transport_metrics.http_protocol_version (Http_reqd.protocol reqd))
+
 let handle_post_mcp ~deps ?(profile = Full) request reqd =
   let request_authority = Server_request_authority.current_exn () in
   (* Readiness gate: reject before session/auth if server state is not ready *)
@@ -456,9 +461,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
       in
       let stateless_request = request_uses_stateless_protocol request body_str in
       if not stateless_request then (
-        let otel_transport_context =
-          Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
-        in
+        let otel_transport_context = transport_context_of_reqd reqd in
         remember_mcp_profile ~otel_transport_context session_id profile);
       let accept_mode = post_context.accept_mode in
       let* runtime =
@@ -507,10 +510,7 @@ let handle_post_mcp ~deps ?(profile = Full) request reqd =
                               Httpun.Headers.of_list
                                 (Server_timing.extra_header timing @ headers)
                             in
-                            let otel_transport_context =
-                              Otel_dispatch_hook.http_transport_context
-                                ~protocol_version:"1.1"
-                            in
+                            let otel_transport_context = transport_context_of_reqd reqd in
                             let response_protocol_version =
                               match protocol_version_from_body body_str with
                               | Some v -> v
@@ -889,9 +889,7 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
       in
       let observer_instance_id = Option.map
           (fun handshake -> handshake.Sse_wire.instance_id) observer_handshake in
-      let otel_transport_context =
-        Otel_dispatch_hook.http_transport_context ~protocol_version:"1.1"
-      in
+      let otel_transport_context = transport_context_of_reqd reqd in
       remember_mcp_profile ~otel_transport_context session_id profile;
       let token =
         match sse_kind with

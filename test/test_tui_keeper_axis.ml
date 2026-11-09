@@ -405,6 +405,160 @@ let test_age_buckets_the_last_update () =
        ])
 ;;
 
+module Strip = Masc_tui_keeper_strip
+module Control = Masc_tui_keeper_control
+
+let strip_runtime ~health ?(paused = false) ?recent_turns name : Tui_decode.keeper_runtime =
+  { kr_name = name
+  ; kr_identity = Ok { k_trace_id = "trace-" ^ name; k_created_at = "2026-01-01T00:00:00Z"; k_updated_at = "2026-01-01T00:00:00Z" }
+  ; kr_portrait = Tui_decode.Unavailable "test"
+  ; kr_candle_account_revision = Ok None
+  ; kr_health = Option.get (Tui_decode.keeper_health_of_string health)
+  ; kr_paused = paused
+  ; kr_next_action = None
+  ; kr_keepalive_running = true
+  ; kr_activation_mode = Tui_decode.Activation_autonomous
+  ; kr_runtime_id = "test.runtime"
+  ; kr_phase = Option.get (Tui_decode.keeper_phase_of_string "running")
+  ; kr_sandbox_profile = "docker"
+  ; kr_runtime_blocker_summary = None
+  ; kr_last_failure = None
+  ; kr_runtime_blocker_signature = None
+  ; kr_runtime_lane_observation = None
+  ; kr_runtime_path_rest = Ok None
+  ; kr_operator_disposition = Ok None
+  ; kr_failing_since = None
+  ; kr_recent_turns = recent_turns
+  }
+;;
+
+let strip_row ~liveness name : Model.row =
+  let paused =
+    match liveness with
+    | Control.Present rt -> rt.Tui_decode.kr_paused
+    | Control.Absent | Control.Unobserved | Control.Invalid _ -> false
+  in
+  { keeper =
+      { k_origin = Tui_decode.Persisted_keeper
+      ; k_name = name
+      ; k_paused = paused
+      ; k_identity = Error "not needed"
+      ; k_activity = None
+      }
+  ; reading = { Control.name = name; paused; liveness }
+  ; turn = None
+  ; waiting = Model.Waiting_unobserved
+  ; approval = None
+  ; task = None
+  ; awaiting_verification = false
+  ; open_questions = 0
+  ; async_requests = []
+  ; last_activity_at = Some reading_now
+  }
+;;
+
+let contains_substring ~needle haystack =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  let rec loop i =
+    if i + nlen > hlen then false
+    else if String.sub haystack i nlen = needle then true
+    else loop (i + 1)
+  in
+  loop 0
+;;
+
+let test_header_preserves_every_group_count_on_large_rosters () =
+  let slot_start = Keeper_turn_pulse.slot_start reading_now in
+  let recent_recovery : Keeper_turn_pulse.t =
+    { known_since = reading_now -. (24. *. hour)
+    ; slots = [ { starts_at = slot_start; tally = { ok = 1; rested = 0; failed = 1 } } ]
+    }
+  in
+  List.iter
+    (fun total ->
+      let n_fail = total * 2 / 5 in
+      let n_rec = max 1 (total / 10) in
+      let n_ok = total * 3 / 10 in
+      let n_paused = max 1 (total / 10) in
+      let n_unknown = total - n_fail - n_rec - n_ok - n_paused in
+      let make_group prefix count make_liveness =
+        List.init count (fun idx ->
+          let name = Printf.sprintf "%s-%d" prefix idx in
+          strip_row ~liveness:(make_liveness name) name)
+      in
+      let rows =
+        make_group "fail" n_fail (fun n -> Control.Present (strip_runtime ~health:"failing" n))
+        @ make_group "rec" n_rec (fun n ->
+            Control.Present (strip_runtime ~health:"healthy" ~recent_turns:recent_recovery n))
+        @ make_group "ok" n_ok (fun n -> Control.Present (strip_runtime ~health:"healthy" n))
+        @ make_group "pause" n_paused (fun n ->
+            Control.Present (strip_runtime ~health:"healthy" ~paused:true n))
+        @ make_group "unk" n_unknown (fun _ -> Control.Unobserved)
+      in
+      let last_ok = Printf.sprintf "ok-%d" (n_ok - 1) in
+      List.iter
+        (fun cells ->
+          let rendered =
+            Strip.header ~now:reading_now ~cells ~view:Model.By_state
+              ~selected:(Some last_ok) ~age:(fun _ -> Model.Age_within_3h) rows
+          in
+          let plain = Masc_tui_ansi.Terminal_text.strip_ansi rendered in
+          let width = Masc_tui_message_layout.display_width plain in
+          Alcotest.(check bool)
+            (Printf.sprintf "total=%d cells=%d fits within cells (got %d)" total cells width)
+            true
+            (width <= cells);
+          List.iter
+            (fun token ->
+              Alcotest.(check bool)
+                (Printf.sprintf "total=%d cells=%d preserves group count %s in %S" total cells token plain)
+                true
+                (contains_substring ~needle:token plain))
+            [ Printf.sprintf "!%d" n_fail
+            ; Printf.sprintf "✓%d" n_rec
+            ; Printf.sprintf "●%d" n_ok
+            ; Printf.sprintf "○%d" n_paused
+            ; Printf.sprintf "?%d" n_unknown
+            ];
+          Alcotest.(check bool)
+            (Printf.sprintf "total=%d cells=%d preserves bold mark for selected tail keeper" total cells)
+            true
+            (contains_substring ~needle:(Masc_tui_ansi.Ansi.bold ^ "▪") rendered);
+          let age_for (r : Model.row) =
+            let k = r.keeper.Tui_decode.k_name in
+            if String.starts_with ~prefix:"fail-" k then Model.Age_within_3h
+            else if String.starts_with ~prefix:"rec-" k then Model.Age_within_day
+            else if String.starts_with ~prefix:"ok-" k then Model.Age_within_3d
+            else if String.starts_with ~prefix:"pause-" k then Model.Age_older
+            else Model.Age_unknown
+          in
+          let rendered_age =
+            Strip.header ~now:reading_now ~cells ~view:Model.By_age
+              ~selected:(Some last_ok) ~age:age_for rows
+          in
+          let plain_age = Masc_tui_ansi.Terminal_text.strip_ansi rendered_age in
+          let width_age = Masc_tui_message_layout.display_width plain_age in
+          Alcotest.(check bool)
+            (Printf.sprintf "By_age total=%d cells=%d fits within cells (got %d)" total cells width_age)
+            true
+            (width_age <= cells);
+          List.iter
+            (fun token ->
+              Alcotest.(check bool)
+                (Printf.sprintf "By_age total=%d cells=%d preserves group count %s in %S" total cells token plain_age)
+                true
+                (contains_substring ~needle:token plain_age))
+            [ Printf.sprintf "█%d" n_fail
+            ; Printf.sprintf "▆%d" n_rec
+            ; Printf.sprintf "▃%d" n_ok
+            ; Printf.sprintf "▁%d" n_paused
+            ; Printf.sprintf "?%d" n_unknown
+            ])
+        [ 78; 80; 118; 120 ])
+    [ 40; 100; 300 ]
+;;
+
 let () =
   Alcotest.run "tui_keeper_axis"
     [ ( "axis segments"
@@ -421,5 +575,7 @@ let () =
         ; Alcotest.test_case "a gap comes before lag" `Quick test_follow_puts_a_gap_before_lag
         ; Alcotest.test_case "age bounds belong to the nearer bucket" `Quick
             test_age_buckets_the_last_update
+        ; Alcotest.test_case "header reserves every group count before marks at 40/100/300 keepers" `Quick
+            test_header_preserves_every_group_count_on_large_rosters
         ] )
     ]

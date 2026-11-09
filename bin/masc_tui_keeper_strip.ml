@@ -57,22 +57,91 @@ let header ~now ~cells ~view ~selected ~age rows =
   let label long (_, mark, word, _, members) =
     if long then Printf.sprintf "%s %d %s" mark (List.length members) word
     else mark ^ string_of_int (List.length members) in
-  let long = List.fold_left (fun n ((_, _, _, _, members) as group) ->
-    n + Layout.display_width (label true group) + List.length members + 3) 0 groups <= cells in
-  let draw ((key, _, _, style, members) as group) =
-    let marks = List.map (fun row ->
-      let mark, tone = match key with
-        | Paused -> "·", Theme.recede ()
-        | Failures ->
-            (match Grid.verdict ~now (runtime row) with
-             | Grid.Failing { resting = true } -> "▫", Theme.recede ()
-             | Grid.Failing { resting = false } | Grid.Paused | Grid.Recovered | Grid.Sound | Grid.Other -> "▪", style)
-        | Dormant -> if odd_dormant row then "▪", Theme.warn () else "▫", style
-        | Unknown -> "?", Theme.recede ()
-        | Recoveries | Sound | Fresh | Today | Cooling -> "▪", style in
-      tone ^ (if selected = Some (name row) then Ansi.bold else "") ^ mark ^ Ansi.reset) members in
-    style ^ label long group ^ Ansi.reset ^ " " ^ String.concat "" marks in
-  String.concat "  " (List.map draw groups)
+  let sep_w = 2 * max 0 (List.length groups - 1) in
+  let base_w long =
+    sep_w + List.fold_left (fun n g -> n + Layout.display_width (label long g)) 0 groups in
+  let full_marks_w =
+    List.fold_left (fun n (_, _, _, _, members) -> n + 1 + List.length members) 0 groups in
+  let long = base_w true + full_marks_w <= cells in
+  let group_count = List.length groups in
+  let mark_budgets =
+    let avail = max 0 (cells - base_w long) in
+    if full_marks_w <= avail then
+      List.map (fun (_, _, _, _, members) -> 1 + List.length members) groups
+    else
+      let caps =
+        Array.of_list (List.map (fun (_, _, _, _, members) -> 1 + List.length members) groups)
+      in
+      let alloc = Array.make group_count 0 in
+      let rem = ref avail in
+      let progress = ref true in
+      while !rem > 0 && !progress do
+        progress := false;
+        for i = 0 to group_count - 1 do
+          if !rem > 0 && alloc.(i) < caps.(i) then (
+            alloc.(i) <- alloc.(i) + 1;
+            decr rem;
+            progress := true)
+        done
+      done;
+      Array.to_list alloc
+  in
+  let draw_mark key style row =
+    let mark, tone = match key with
+      | Paused -> "·", Theme.recede ()
+      | Failures ->
+          (match Grid.verdict ~now (runtime row) with
+           | Grid.Failing { resting = true } -> "▫", Theme.recede ()
+           | Grid.Failing { resting = false } | Grid.Paused | Grid.Recovered | Grid.Sound | Grid.Other -> "▪", style)
+      | Dormant -> if odd_dormant row then "▪", Theme.warn () else "▫", style
+      | Unknown -> "?", Theme.recede ()
+      | Recoveries | Sound | Fresh | Today | Cooling -> "▪", style in
+    tone ^ (if selected = Some (name row) then Ansi.bold else "") ^ mark ^ Ansi.reset
+  in
+  let take_with_selected count members =
+    let rec take n acc = function
+      | [] -> List.rev acc
+      | _ when n <= 0 -> List.rev acc
+      | x :: xs -> take (n - 1) (x :: acc) xs
+    in
+    let prefix = take count [] members in
+    match selected with
+    | None -> prefix
+    | Some sel ->
+      if List.exists (fun r -> String.equal (name r) sel) prefix then prefix
+      else
+        (match List.find_opt (fun r -> String.equal (name r) sel) members with
+         | None -> prefix
+         | Some sel_row ->
+           (match List.rev prefix with
+            | [] -> [sel_row]
+            | _ :: rev_init -> List.rev (sel_row :: rev_init)))
+  in
+  let draw budget ((key, _, _, style, members) as group) =
+    let count = List.length members in
+    let lbl = style ^ label long group ^ Ansi.reset in
+    if budget >= 1 + count then
+      lbl ^ " " ^ String.concat "" (List.map (draw_mark key style) members)
+    else
+      let mark_cols = budget - 1 in
+      let max_suffix_w = 1 + String.length (string_of_int count) in
+      if mark_cols >= 1 + max_suffix_w then
+        let shown0 = mark_cols - max_suffix_w in
+        let shown =
+          if shown0 + 1 < count
+             && shown0 + 1 + 1 + String.length (string_of_int (count - shown0 - 1)) <= mark_cols
+          then shown0 + 1
+          else shown0
+        in
+        let omitted = count - shown in
+        let visible_members = take_with_selected shown members in
+        let marks_str = String.concat "" (List.map (draw_mark key style) visible_members) in
+        let suffix = Theme.recede () ^ "+" ^ string_of_int omitted ^ Ansi.reset in
+        lbl ^ " " ^ marks_str ^ suffix
+      else
+        lbl
+  in
+  String.concat "  " (List.map2 draw mark_budgets groups)
 
 type fleet_cells = { name : string; pulse : string; strip : string; due : string }
 

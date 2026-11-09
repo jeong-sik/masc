@@ -2071,6 +2071,24 @@
   unix))
 
 (library
+ (name masc_tui_keeper_strip)
+ (wrapped false)
+ (modules masc_tui_keeper_strip)
+ (libraries
+  masc
+  masc.masc_schedule
+  masc_tui_ansi
+  masc_tui_keeper_axis_cell
+  masc_tui_keeper_control
+  masc_tui_keeper_grid
+  masc_tui_keeper_list_model
+  masc_tui_keeper_memory_reading
+  masc_tui_keeper_next_run
+  masc_tui_keeper_pulse
+  masc_tui_message_layout
+  unix))
+
+(library
  (name masc_tui_composer_projection)
  (wrapped false)
  (modules masc_tui_composer_projection)
@@ -2828,7 +2846,6 @@
   masc_tui_render_config
   masc_tui_render_keepers
   masc_tui_keeper_wall
-  masc_tui_keeper_strip
   masc_tui_render_keeper_story
   masc_tui_render_runtime
   masc_tui_render_overlays
@@ -2855,6 +2872,7 @@
   masc_tui_keeper_wakes
   masc_tui_keeper_feed
   masc_tui_keeper_grid
+  masc_tui_keeper_strip
   masc_tui_keeper_verdict
   masc_tui_lane_standing
   masc_tui_async_protocol

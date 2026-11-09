@@ -4527,12 +4527,17 @@
   masc.masc_schedule
   masc_tui_types
   masc_tui_agenda
+  masc_tui_ansi
   masc_tui_keeper_age_ladder
   masc_tui_keeper_axis_cell
   masc_tui_keeper_axis
+  masc_tui_keeper_control
+  masc_tui_keeper_grid
   masc_tui_keeper_list_model
   masc_tui_keeper_memory_reading
-  masc_tui_keeper_next_run))
+  masc_tui_keeper_next_run
+  masc_tui_keeper_strip
+  masc_tui_message_layout))
 
 (test
  (name test_tui_keeper_story)

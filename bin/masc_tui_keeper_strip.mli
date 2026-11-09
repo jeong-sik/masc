@@ -6,7 +6,8 @@ val header :
   age:(Masc_tui_keeper_list_model.row -> Masc_tui_keeper_list_model.memory_age) ->
   Masc_tui_keeper_list_model.row list -> string
 (** Four fixed known groups; unknown readings keep an explicit [?] count.
-    A selected Keeper's individual mark is bold, and labels yield before marks. *)
+    Every non-empty group's count is reserved before marks; remaining width
+    shows individual marks (with the selected Keeper bold) or [+n] overflow. *)
 
 type fleet_cells = { name : string; pulse : string; strip : string; due : string }
 

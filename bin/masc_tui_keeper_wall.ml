@@ -3,6 +3,7 @@ module Grid = Masc_tui_keeper_grid
 module Layout = Masc_tui_message_layout
 module Ansi = Masc_tui_ansi.Ansi
 module Theme = Masc_tui_ansi.Theme
+module Terminal_text = Masc_tui_ansi.Terminal_text
 
 let day_slots = Masc.Keeper_turn_pulse.window_seconds / Masc.Keeper_turn_pulse.slot_seconds
 

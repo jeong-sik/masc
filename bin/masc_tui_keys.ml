@@ -485,8 +485,10 @@ let board_read_focus_key =
     ~help:"switch the focused reading window; on the comments, j/k select a \
            comment and PgUp/PgDn scroll by rows"
 
-let fusion_caller_key = b Navigate "K" "calling Keeper"
-let fusion_board_key = b Navigate "B" "Board evidence"
+(* Both read the run under the cursor. On the list with no run they answer
+   with a notice and move nothing; an open run has its own footer. *)
+let fusion_caller_key = b ~rows:Needs_row Navigate "K" "calling Keeper"
+let fusion_board_key = b ~rows:Needs_row Navigate "B" "Board evidence"
 
 let keeper_navigation_hints = "Up/Down:move  Enter:open  Right/Esc:back"
 
@@ -748,8 +750,9 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Clients ->
-      [ b Navigate "j/k" "move" ~help:"move the roster cursor"
-      ; b Act "Enter" "detail" ~help:"read the client's full identity and observation"
+      [ b Navigate "j/k" "move" ~rows:Needs_row ~help:"move the roster cursor"
+      ; b Act "Enter" "detail" ~rows:Needs_row
+          ~help:"read the client's full identity and observation"
         (* Two doors, one action: both call [goto_surface Runtime]. As two
            bindings the sheet printed the answer twice, one row under the
            other, and the second row's help differed from the first by a
@@ -758,9 +761,9 @@ let for_surface = function
            the footer keeps its Esc pin and both keys stay counted. *)
       ; b Act "p / Esc" "runtime"
           ~help:"back to the Runtime surface this hangs off"
-      ; b Search "/" "find"
+      ; b Search "/" "find" ~rows:Needs_row
           ~help:"jump the cursor to a matching attached name"
-      ; b Search "n / N" "next / previous match"
+      ; b Search "n / N" "next / previous match" ~rows:Needs_row
       ]
       @ row_list_jumps @ listing_meta
   | Board ->
@@ -908,13 +911,14 @@ let for_surface = function
       ]
       @ row_list_edges @ listing_meta
   | Verification ->
-      [ b Navigate "j/k" "move" ~help:"move; in details, scroll the evidence"
+      [ b Navigate "j/k" "move" ~rows:Needs_row
+          ~help:"move; in details, scroll the evidence"
       ; b Navigate "v" "next Work tab"
           ~help:"on to Task Verdicts, then back to Goals"
       ; b Navigate "h" "queue / history"
           ~help:"the queue is what a task is still waiting on; the history is \
                  every request ever submitted, which nothing removes"
-      ; b Act "Right / Enter" "details" ~detail:List_only
+      ; b Act "Right / Enter" "details" ~detail:List_only ~rows:Needs_row
           ~help:"read the request and evidence"
       ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
       ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"back to the list"
@@ -936,7 +940,7 @@ let for_surface = function
           ~help:"download the retained copy and open it with a local application"
       ; b Act "s" "증거 사본 저장" ~detail:Detail_only
           ~help:"save this exact evidence item privately on this machine; its local path stays in the detail"
-      ; b Act "a / x" "approve / reject"
+      ; b Act "a / x" "approve / reject" ~rows:Needs_row
           ~help:"a approves the row under the cursor (press twice); x rejects \
                  with a reason ($EDITOR form)"
       (* The row search reads the list's rows. An open detail has none, so the
@@ -945,6 +949,7 @@ let for_surface = function
           ~help:"jump the cursor to a matching task id, title, or submitter; \
                  the queue answers this, an open detail does not"
       ; b Search "n / N" "next / previous match" ~detail:List_only
+          ~rows:Needs_row
       ]
       @ row_list_jumps @ listing_meta
   | Harness ->
@@ -982,9 +987,10 @@ let for_surface = function
       (* [fusion_mode] owns list/detail (masc_tui_types.ml); the detail
          footer is [footer_hints_fusion_detail], which also appends the live
          scroll position this static table cannot know. *)
-      [ b Navigate "j/k" "move"
-      ; b Navigate "PgUp/PgDn" "page"
-      ; b Act "Enter" "open" ~help:"open a retained run or its historical Board evidence"
+      [ b Navigate "j/k" "move" ~rows:Needs_row
+      ; b Navigate "PgUp/PgDn" "page" ~rows:Needs_row
+      ; b Act "Enter" "open" ~rows:Needs_row
+          ~help:"open a retained run or its historical Board evidence"
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; fusion_caller_key
@@ -996,11 +1002,12 @@ let for_surface = function
           ~help:"launch a Fusion run from the list: pick the Keeper, preset \
                  and topology, type the prompt, then Ctrl-S reviews and \
                  Enter starts it"
-      ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
-      ; b Search "/" "find"
+      ; b Act "Y" "copy" ~rows:Needs_row
+          ~help:"copy the selected Fusion run reference"
+      ; b Search "/" "find" ~rows:Needs_row
           ~help:"jump the cursor to a matching run id, Keeper or preset; an \
                  open run's detail carries no searchable rows"
-      ; b Search "n / N" "next / previous match"
+      ; b Search "n / N" "next / previous match" ~rows:Needs_row
       ; b Act "Esc" "back" ~help:"leave detail, or return to Dashboard"
       ]
       @ row_list_edges @ listing_meta

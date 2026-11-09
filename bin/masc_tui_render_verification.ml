@@ -308,7 +308,9 @@ let render_verification_list (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
+       ~hints:
+         (Masc_tui_keys.footer_hints ~detail_open:false ~has_rows:(shown > 0)
+            state.view));
   finish_surface state ~surface_key:"verification" ~rows:terminal_rows ~cols buf
 
 (* Complete judgement metadata is a physical document. Rows that fit keep

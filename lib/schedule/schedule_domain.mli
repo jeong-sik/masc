@@ -225,6 +225,11 @@ val wake_status_to_string : wake_status -> string
 
 val actor_to_yojson : actor -> Yojson.Safe.t
 val recurrence_to_yojson : recurrence -> Yojson.Safe.t
+val recurrence_of_yojson : Yojson.Safe.t -> (recurrence, string) result
+(** Reads the shape {!recurrence_to_yojson} writes and checks it with
+    {!validate_recurrence}. The TUI reads a schedule row's recurrence with it,
+    so the store and the screen agree on what a recurrence is. *)
+
 val wake_record_to_yojson : wake_record -> Yojson.Safe.t
 val wake_record_of_yojson :
   Yojson.Safe.t -> (wake_record, string) result

@@ -1976,6 +1976,7 @@
  (libraries
   masc
   masc.masc_schedule
+  masc.time_codec
   masc_tui_types
   masc_tui_agenda
   masc_tui_keeper_axis_cell

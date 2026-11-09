@@ -95,7 +95,10 @@ let decode_schedule_row json =
   let* sch_recurrence_summary =
     Masc.Tui_decode_fields.required_string_field json "recurrence_summary"
   in
-  let* sch_recurrence = required_schedule_json_field json "recurrence" in
+  (* The field must be there; a value this build cannot read keeps the row and
+     stays [Error], so one newer recurrence kind does not drop the page. *)
+  let* recurrence_json = required_schedule_json_field json "recurrence" in
+  let sch_recurrence = Schedule_domain.recurrence_of_yojson recurrence_json in
   let* sch_payload_digest = Masc.Tui_decode_fields.required_string_field json "payload_digest" in
   let* sch_payload = required_schedule_json_field json "payload" in
   let* sch_payload_kind = Masc.Tui_decode_fields.optional_string_field json "payload_kind" in

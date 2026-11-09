@@ -156,7 +156,7 @@ let lines (t : t) =
     | None -> None, [L.fact "Current file" "unverified"]
     | Some document ->
       (match activity t.owner.lane document with
-       | Error detail -> None, [L.note ~tone:L.Attention detail]
+       | Error detail -> None, [L.note ~tone:L.Failure detail]
        | Ok (enabled,slots,cli) -> Some enabled, [L.fact "File" document.path;
            L.fact "Current file" (Printf.sprintf "%s · %d HTTP / %d CLI candidates" (flag enabled) (List.length slots) (List.length cli))]) in
   let draft = match t.draft with None -> [] | Some draft ->

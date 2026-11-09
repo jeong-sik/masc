@@ -169,6 +169,7 @@ let reading_tone_style = function
   | Page_line.Quiet -> Theme.recede ()
   | Page_line.Plain -> Ansi.reset
   | Page_line.Attention -> Theme.warn ()
+  | Page_line.Failure -> Theme.bad ()
 
 let widest_word_cells text =
   List.fold_left
@@ -341,11 +342,7 @@ let inventory_row_summary_lines ~titled ~cols ~standing ~selected_output
     (row : Masc.Tui_decode_lane_inventory.row) =
   let open Masc.Tui_decode_lane_inventory in
   let standing_style =
-    match standing with
-    | Masc_tui_lane_standing.Failing -> Theme.bad ()
-    | Masc_tui_lane_standing.(Waiting | Changing | Not_set_up) -> Theme.warn ()
-    | Masc_tui_lane_standing.(Off | Unobserved) -> Theme.recede ()
-    | Masc_tui_lane_standing.Ready -> Ansi.reset
+    reading_tone_style (Masc_tui_lane_inventory.standing_tone standing)
   in
   let state_line =
     ( standing_style
@@ -541,15 +538,6 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
 let inventory_row_detail_lines ~width ~selected_output
     (row : Masc.Tui_decode_lane_inventory.row) =
   let max_cells = max 1 (width - 2) in
-  let wrap style text = wrap_indented_line ~max_cells style text in
-  let base_lines =
-    match Masc_tui_lane_inventory.detail_lines row with
-    | label :: purpose :: rest ->
-      wrap Ansi.bold (label ^ " · " ^ purpose)
-      @ detail_section_heading "1. 설정 · 관측 상세 (Configuration · Observation)"
-      @ wrap_indented_lines ~max_cells Ansi.reset rest
-    | lines -> wrap_indented_lines ~max_cells Ansi.reset lines
-  in
   let output_lines =
     match Masc_tui_lane_inventory.exact_output_lines ~selected:selected_output row with
     | [] -> []
@@ -557,7 +545,10 @@ let inventory_row_detail_lines ~width ~selected_output
       detail_section_heading "2. 출력 스키마 바인딩 (Exact Output)"
       @ wrap_indented_lines ~max_cells Ansi.reset outputs
   in
-  base_lines @ output_lines
+  reading_rows ~max_cells [ Page_line.Title (row.label ^ " · " ^ row.purpose) ]
+  @ detail_section_heading "1. 설정 · 관측 상세 (Configuration · Observation)"
+  @ reading_rows ~max_cells (Masc_tui_lane_inventory.detail_lines row)
+  @ output_lines
 
 let rec take_rows remaining acc = function
   | _ when remaining <= 0 -> List.rev acc

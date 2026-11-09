@@ -223,7 +223,7 @@ let disabled_exact_keeps_candidates_and_finishing_work () =
   Alcotest.(check string) "off preserves observation of accepted work"
     "off · 1 finishing · off; candidates retained" (Display.row_summary_in observed row);
   Alcotest.(check bool) "candidate order available in detail" true
-    (List.mem "Declared HTTP slots: first, second" (Display.detail_lines row));
+    (List.mem "Declared HTTP slots: first, second" (List.map Masc_tui_page_line.text (Display.detail_lines row)));
   rejects "off must not admit new candidates" (make (off |> set "admitted_slots" (strings ["first"])));
   rejects "off and running status contradict" (make (off |> set "status" (str "running")));
   rejects "off declarations must agree" (make (off |> set "declared_slots" (strings ["other"])))
@@ -346,6 +346,52 @@ let exact_standing_reads_the_run_observation () =
   Alcotest.check standing "a lane switched off that still finishes runs is changing" S.Changing
     (Display.row_standing_in (with_status Tui_decode.Standalone_off 1) row)
 
+(* A reading line says how much it matters, so a failed worker or declaration
+   does not read like a plain fact, and the Reading line is drawn as the list
+   draws the same standing. *)
+let reading_lines_carry_how_much_each_one_matters () =
+  let module L = Masc_tui_page_line in
+  let module S = Masc_tui_lane_standing in
+  let tone = Alcotest.testable (fun f value -> Format.pp_print_string f (match value with
+    | L.Quiet -> "quiet" | L.Plain -> "plain" | L.Attention -> "attention" | L.Failure -> "failure")) ( = ) in
+  let row_of selection state = { Decode.id = "row"; label = "row"; purpose = "fixture purpose"; ui_category = None;
+    selection; state } in
+  let toml = Decode.Declaration "/config/lane-addons/browser-work.toml" in
+  let manual_selection = Decode.Manual_instance { instance_id = "worker"; incarnation = "worker" } in
+  let worker phase = { Decode.instance_id = "worker"; incarnation = "worker"; run_id = "browser-work";
+    package_id = "browser"; title = "Browser connections"; package_revision = "0.1.0"; ui_category = None;
+    presence = Decode.Live; phase; applied_revision = None } in
+  let tones_of label row = List.filter_map (function
+    | L.Fact { label = name; tone; _ } when String.equal name label -> Some tone
+    | L.Fact _ | L.Title _ | L.Note _ -> None) (Display.detail_lines row) in
+  let check name label expected row = Alcotest.(check (list tone)) name expected (tones_of label row) in
+  let with_worker phase = row_of manual_selection (Decode.Package_state { declaration = None; instances = [ worker phase ] }) in
+  check "a failed worker is a failure" "Worker" [ L.Failure ] (with_worker (Decode.Failed "cleanup incomplete"));
+  check "a worker being detached needs attention" "Worker" [ L.Attention ] (with_worker Decode.Detaching);
+  check "a worker kept as history recedes" "Worker" [ L.Quiet ] (with_worker Decode.Detached);
+  check "a worker that runs is plain" "Worker" [ L.Plain ] (with_worker Decode.Attached);
+  check "every declaration error is a failure" "Declaration error" [ L.Failure; L.Failure ]
+    (row_of toml (Decode.Package_state { declaration = Some (Decode.Invalid [ "no title"; "no run" ]); instances = [] }));
+  let admitted admission_error = row_of (Decode.Exact Standalone_lane.Librarian) (Decode.Exact_state
+    (Decode.Configured { admitted_slots = [ "account.model" ]; cli_slots = []; declared_slots = [ "account.model" ];
+      declared_cli_slots = []; dropped_slots = [ "gone" ]; admission_error })) in
+  check "an admission error is a failure" "Admission" [ L.Failure ] (admitted (Some "no registry"));
+  check "no error leaves no admission line" "Admission" [] (admitted None);
+  check "a dropped candidate needs attention" "Dropped HTTP slots" [ L.Attention ] (admitted None);
+  Alcotest.(check (list tone)) "each standing has one tone"
+    [ L.Plain; L.Attention; L.Attention; L.Failure; L.Quiet; L.Attention; L.Quiet ]
+    (List.map Display.standing_tone
+       [ S.Ready; S.Waiting; S.Changing; S.Failing; S.Off; S.Not_set_up; S.Unobserved ]);
+  List.iter (fun state ->
+    let row = row_of toml state in
+    Alcotest.(check (list tone)) "the Reading line takes the tone of the row's standing"
+      [ Display.standing_tone (Display.row_standing row) ] (tones_of "Reading" row))
+    [ Decode.Machine_state (Decode.Machine_enabled, Decode.Stable);
+      Decode.Machine_state (Decode.Machine_enabled, Decode.Publication_unavailable);
+      Decode.Machine_state (Decode.Machine_enabled, Decode.No_screen);
+      Decode.Machine_state (Decode.Machine_disabled, Decode.Stable);
+      Decode.Exact_state (Decode.Unconfigured "no candidates") ]
+
 let categories_are_strict_metadata () =
   let declared_category value = object_ ["kind",str "valid";"enabled",`Bool true;
     "installation_id",str "custom";"run_id",str "run";"package_id",str "arbitrary-id";
@@ -385,6 +431,7 @@ let () = Alcotest.run "TUI Lane inventory" ["wire and display",[
   Alcotest.test_case "machine activity and publication remain independent" `Quick machine_activity_and_publication_are_independent;
   Alcotest.test_case "standing reads what the row says" `Quick standing_reads_what_the_row_says;
   Alcotest.test_case "exact standing reads the run observation" `Quick exact_standing_reads_the_run_observation;
+  Alcotest.test_case "reading lines carry how much each one matters" `Quick reading_lines_carry_how_much_each_one_matters;
   Alcotest.test_case "a browser row carries no activity" `Quick a_browser_row_carries_no_activity;
   Alcotest.test_case "browser Add-on reading wire" `Quick browser_addon_reading_wire;
   Alcotest.test_case "exact off retains candidates and finishing work" `Quick disabled_exact_keeps_candidates_and_finishing_work;

@@ -35,6 +35,9 @@ val max_message_bytes : int
     [{"keeper_id": <name>, "message": <text>}], and the answer is a 200 JSON
     [{"keeper_id":...,"runtime_id":...,"model":...,"text":...}].
 
+    Field order does not matter. Each request field must occur once and hold
+    a string; missing, duplicate and additional fields are refused with 400.
+
     The other answers are a JSON [{"error": ...}]:
     - 400: the body is not that, the message is blank or longer than
       {!max_message_bytes}, or the Runtime is not a Claude Code Runtime.

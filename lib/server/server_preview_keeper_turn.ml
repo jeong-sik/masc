@@ -18,16 +18,21 @@ let unexpected_refusal = "The turn was refused for a reason this preview does no
 let request_of body =
   match Yojson.Safe.from_string body with
   | exception Yojson.Json_error (_ : string) -> Error (error R.Bad_request_400 shape)
-  | `Assoc [ ("keeper_id", `String name); ("message", `String message) ] ->
-    if String.length message > max_message_bytes
-    then
-      Error
-        (error
-           R.Bad_request_400
-           (Printf.sprintf "The message is longer than %d bytes." max_message_bytes))
-    else if String.equal (String.trim message) ""
-    then Error (error R.Bad_request_400 "The message is blank.")
-    else Ok (name, message)
+  | `Assoc ([ _; _ ] as fields) ->
+    (* Exactly these two named fields: duplicates cannot replace a missing
+       field, and additional fields are refused before starting a turn. *)
+    (match List.assoc_opt "keeper_id" fields, List.assoc_opt "message" fields with
+     | Some (`String name), Some (`String message) ->
+       if String.length message > max_message_bytes
+       then
+         Error
+           (error
+              R.Bad_request_400
+              (Printf.sprintf "The message is longer than %d bytes." max_message_bytes))
+       else if String.equal (String.trim message) ""
+       then Error (error R.Bad_request_400 "The message is blank.")
+       else Ok (name, message)
+     | _ -> Error (error R.Bad_request_400 shape))
   | _ -> Error (error R.Bad_request_400 shape)
 ;;
 

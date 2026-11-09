@@ -368,6 +368,19 @@ let test_turn () =
           "in a private directory that is gone after the turn"
           false
           (Sys.file_exists (text_of first "cwd"));
+        check_reply
+          "request field order does not change the turn"
+          (answered "keeper-alice" alice_runtime "echo: reversed")
+          (reply alice {|{"message":"reversed","keeper_id":"keeper-alice"}|});
+        let reversed = seen claude in
+        Alcotest.(check string)
+          "reversed fields keep her account home"
+          (home_of ~base_path alice)
+          (text_of reversed "home");
+        Alcotest.(check string)
+          "reversed fields keep the message"
+          "reversed"
+          (text_of reversed "prompt");
         (* Another person's Keeper is not there for her, and nothing starts. *)
         Sys.remove (claude ^ ".turn.json");
         check_reply
@@ -392,10 +405,20 @@ let test_turn () =
           (reply
              alice
              (body ~keeper:"keeper-alice" ~message:(String.make (Server_preview_keeper_turn.max_message_bytes + 1) 'a')));
-        check_reply
-          "another body"
-          (400, {|{"error":"The body is {\"keeper_id\": \"<name>\", \"message\": \"<text>\"}."}|})
-          (reply alice {|{"message":"hello","keeper_id":"keeper-alice"}|});
+        List.iter
+          (fun (label, request) ->
+            Alcotest.(check int) label 400 (fst (reply alice request)))
+          [ "malformed JSON", "{"
+          ; "a non-object body", "[]"
+          ; "missing Keeper", {|{"message":"hello"}|}
+          ; "missing message", {|{"keeper_id":"keeper-alice"}|}
+          ; "non-string Keeper", {|{"keeper_id":1,"message":"hello"}|}
+          ; "non-string message", {|{"keeper_id":"keeper-alice","message":null}|}
+          ; "additional field", {|{"keeper_id":"keeper-alice","message":"hello","extra":true}|}
+          ; "duplicate Keeper", {|{"keeper_id":"keeper-alice","message":"hello","keeper_id":"keeper-bob"}|}
+          ; "duplicate message", {|{"keeper_id":"keeper-alice","message":"hello","message":"second"}|}
+          ; "duplicate replacing a missing field", {|{"keeper_id":"keeper-alice","keeper_id":"keeper-bob"}|}
+          ];
         Alcotest.(check int)
           "a name that is not a Keeper name"
           400

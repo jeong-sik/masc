@@ -28,16 +28,15 @@ let to_json (catalog : Msp.model_catalog) =
     ]
 ;;
 
-let run ~mgr ~clock ~cwd ~account_home ~cli_path ~timeout_s =
+let run ~mgr ~clock ~cwd ~account ~cli_path ~timeout_s =
   let config = { (Runtime_muse_serve.default_config ()) with
-    cli_path; account_home = Some account_home;
-    admission_timeout_s = timeout_s; timeout_s = Some timeout_s } in
+    cli_path; admission_timeout_s = timeout_s; timeout_s = Some timeout_s } in
   (* The deadline covers the cancellable handshake and model/list exchange.
      Account preparation uses blocking systhreads, so a stalled filesystem
      can delay timeout delivery. Notifications cannot restart the window. *)
   try
     Eio.Time.with_timeout_exn clock timeout_s (fun () ->
-      Runtime_muse_serve.list_models ~mgr ~clock ~cwd config |> Result.map to_json)
+      Runtime_muse_serve.list_models ~mgr ~clock ~cwd ~account config |> Result.map to_json)
   with Eio.Time.Timeout ->
     Error (Runtime_muse_serve.Timeout {seconds=timeout_s; turn_accepted=false})
 ;;

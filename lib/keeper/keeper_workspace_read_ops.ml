@@ -175,7 +175,9 @@ let try_handle_with_authority
   match op with
   | "rg" ->
     Some
-      (let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
+      (* A regex is source text: leading/trailing spaces and newlines have
+         meaning. Let rg validate the original pattern instead of changing it. *)
+      (let pattern = Safe_ops.json_string ~default:"" "pattern" args in
        let file_type = Safe_ops.json_string ~default:"" "type" args |> String.trim in
        if pattern = ""
        then

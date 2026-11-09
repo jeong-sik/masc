@@ -1,0 +1,151 @@
+"""Read GitHub JSON; only a server-timed quota response retries an HTTP GET.
+
+Writes never pass through this transport. A pause invalidates an admission's
+earlier reads; callers can compare ``pauses`` before committing a decision.
+"""
+from email.utils import parsedate_to_datetime
+import json
+import re
+import subprocess
+import time
+from typing import NamedTuple
+from urllib.parse import urlsplit
+
+
+QUOTA_HEADERS = ('retry-after', 'x-ratelimit-remaining', 'x-ratelimit-reset')
+
+
+class ApiFailure(ValueError):
+    def __init__(self, path, status, headers, message):
+        self.path, self.status, self.headers = path, status, headers
+        self.details = {'method': 'GET', 'path': path, 'http_status': status,
+                        'headers': {k: headers[k] for k in QUOTA_HEADERS if k in headers},
+                        'message': message}
+        super().__init__(json.dumps(self.details, ensure_ascii=False))
+
+
+class QuotaLimited(ApiFailure):
+    def __init__(self, path, status, headers, message, retry_at):
+        super().__init__(path, status, headers, message)
+        self.retry_at = retry_at
+
+
+class Response(NamedTuple):
+    data: object
+    status: int
+    headers: dict[str, str]
+
+
+def response_parts(raw):
+    header, separator, body = raw.replace('\r\n', '\n').partition('\n\n')
+    lines = header.splitlines()
+    status = re.fullmatch(r'HTTP/\S+ ([0-9]{3})(?: .*)?', lines[0]) if lines else None
+    if not separator or status is None:
+        raise ValueError('gh api did not return HTTP status and headers')
+    headers = {}
+    for line in lines[1:]:
+        key, colon, value = line.partition(':')
+        if not colon or not key.strip():
+            raise ValueError('gh api returned malformed HTTP headers')
+        key, value = key.strip().lower(), value.strip()
+        if key in headers:
+            if key in QUOTA_HEADERS:
+                if headers[key] != value:
+                    raise ValueError('GitHub returned conflicting quota headers')
+            else:
+                headers[key] += ', ' + value
+        else:
+            headers[key] = value
+    return int(status[1]), headers, body
+
+
+def quota_retry_at(status, headers, now):
+    if status not in (403, 429):
+        return None
+    deadlines = []
+    retry = headers.get('retry-after')
+    if retry is not None:
+        try:
+            if retry.isascii() and retry.isdecimal():
+                deadlines.append(now + int(retry))
+            else:
+                date = parsedate_to_datetime(retry)
+                if date.tzinfo is not None:
+                    deadlines.append(date.timestamp())
+        except (ValueError, TypeError, OverflowError):
+            pass
+    reset = headers.get('x-ratelimit-reset', '')
+    if headers.get('x-ratelimit-remaining') == '0' and reset.isascii() and reset.isdecimal():
+        deadlines.append(int(reset))
+    # A missing, malformed or already elapsed time gives no useful pause.
+    # Keep it visible instead of spinning on the same quota response.
+    return max(deadlines) if deadlines and max(deadlines) > now else None
+
+
+class Client:
+    def __init__(self, *, run=None, clock=None, sleep=None, on_quota=None):
+        self.run = run or subprocess.run
+        self.clock = clock or time.time
+        self.sleep = sleep or time.sleep
+        self.on_quota = on_quota or (lambda failure: None)
+        self.pauses = 0
+
+    def once(self, path):
+        result = self.run(['gh', 'api', '--method', 'GET', '--include', '--', path],
+                          capture_output=True, text=True, check=False)
+        try:
+            status, headers, body = response_parts(result.stdout)
+        except ValueError as error:
+            raise ApiFailure(path, None, {}, str(error)) from error
+        try:
+            data = json.loads(body)
+        except ValueError:
+            data = None
+        message = (data.get('message') if isinstance(data, dict) else None)
+        message = message or result.stderr.strip() or 'GitHub did not return valid JSON'
+        if result.returncode or not 200 <= status < 300:
+            retry_at = quota_retry_at(status, headers, self.clock())
+            if retry_at is not None:
+                raise QuotaLimited(path, status, headers, message, retry_at)
+            raise ApiFailure(path, status, headers, message)
+        if data is None:
+            raise ApiFailure(path, status, headers, 'GitHub did not return valid JSON')
+        return Response(data, status, headers)
+
+    def get(self, path):
+        while True:
+            try:
+                return self.once(path)
+            except QuotaLimited as failure:
+                self.pauses += 1
+                self.on_quota(failure)
+                while (remaining := failure.retry_at - self.clock()) > 0:
+                    self.sleep(remaining)
+
+    def read(self, path):
+        return self.get(path).data
+
+    def pages(self, path):
+        rows, seen = [], set()
+        while path is not None:
+            if path in seen:
+                raise ApiFailure(path, None, {}, 'GitHub repeated a pagination link')
+            seen.add(path)
+            response = self.get(path)
+            if not isinstance(response.data, list):
+                raise ApiFailure(path, response.status, response.headers, 'expected a paginated array')
+            rows.extend(response.data)
+            path = None
+            for part in response.headers.get('link', '').split(','):
+                if not part.strip():
+                    continue
+                link = re.fullmatch(r'\s*<([^>]+)>;\s*rel="([^"]+)"\s*', part)
+                if link is None:
+                    raise ValueError('GitHub returned a malformed pagination link')
+                if 'next' in link[2].split():
+                    target = urlsplit(link[1])
+                    following = target.path.lstrip('/') + ('?' + target.query if target.query else '')
+                    if path is not None and path != following:
+                        raise ValueError('GitHub returned conflicting next-page links')
+                    path = following
+        return rows

@@ -144,6 +144,14 @@ Only a 404/410 from the UUID result endpoint ends tracking as `request_not_found
 a terminal request failure retains its reason without requiring member reads.
 A failed API read never establishes an absent stack or an approval.
 
+The worker's GET transport retries a quota response only when GitHub provides
+an actionable `Retry-After`, or zero `X-RateLimit-Remaining` with a future
+`X-RateLimit-Reset`. It makes no request before that time. A pause restarts the
+read-only admission or reservation plan, including head, base and review
+checks; it never replays a merge or reservation write. An accepted merge keeps
+its original UUID through read recovery. Other HTTP errors and missing or
+conflicting quota headers remain visible failures.
+
 ### Manual integration
 
 For native stacks the API operation is:

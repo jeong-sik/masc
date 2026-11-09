@@ -15,8 +15,6 @@
     and a history line is evidence for a later reader. *)
 
 open Keeper_types
-open Keeper_meta_contract
-open Keeper_types_profile
 
 (* Note: this module is `include`d into Keeper_context_core which already
    exposes `module Message_json = Keeper_context_core_message_json`. Avoid

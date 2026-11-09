@@ -4,8 +4,6 @@
     the report of one drain over the owners. [Keeper_gate] includes this
     module. *)
 
-open Keeper_gate_types
-
 type judgment_finalize_outcome =
   | Judgment_finalized
   | Judgment_skipped

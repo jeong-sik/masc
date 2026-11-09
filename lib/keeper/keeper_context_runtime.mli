@@ -1,9 +1,7 @@
 (** Keeper context capacity resolution, checkpoint access, system prompts
     and lifecycle dispatch. Working context types live in {!Keeper_types}. *)
 
-open Keeper_types
 open Keeper_meta_contract
-open Keeper_types_profile
 
 (** {1 Working Context Types (re-exported from Keeper_types)} *)
 

@@ -8,11 +8,6 @@
 
     @since 0.122.0 *)
 
-open Keeper_types
-open Keeper_meta_contract
-open Keeper_types_profile
-open Keeper_context_runtime
-
 (** Detect transient network errors that warrant retry with short backoff.
     Uses structured [Agent_core.Error.t] pattern matching instead of
     substring matching on stringified error messages. *)

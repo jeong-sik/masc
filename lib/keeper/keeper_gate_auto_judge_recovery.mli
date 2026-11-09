@@ -5,9 +5,7 @@
     [Keeper_gate] includes this module. *)
 
 open Keeper_gate_types
-open Keeper_gate_authorization
 open Keeper_gate_auto_judge_queue
-open Keeper_gate_auto_judge_worker
 
 val retry_blocked_auto_judge :
   base_path:string ->

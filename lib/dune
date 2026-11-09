@@ -129,6 +129,7 @@
   keeper_sandbox_microvm_image_probe
   keeper_sandbox_microvm_guest_argv
   keeper_sandbox_microvm_work_volume
+  keeper_sandbox_microvm_shim
   keeper_chat_store_paths
   keeper_chat_store_redaction
   keeper_chat_store_row_codec

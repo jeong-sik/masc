@@ -68,6 +68,8 @@ def tree_facts(entry: Path) -> tuple[int, float, list[Path]]:
     size = top.st_blocks * 512
     newest = max(top.st_mtime, top.st_ctime)
     repos: list[Path] = []
+    administrative_dirs: list[Path] = []
+    owned_git_dirs: set[Path] = set()
     if not stat.S_ISDIR(top.st_mode):
         return size, newest, repos
 
@@ -79,6 +81,15 @@ def tree_facts(entry: Path) -> tuple[int, float, list[Path]]:
             here = Path(directory)
             if ".git" in dirs or ".git" in files:
                 repos.append(here)
+                if ".git" in dirs:
+                    owned_git_dirs.add((here / ".git").resolve(strict=True))
+                else:
+                    # Linked worktrees and initialized submodules point to
+                    # an administrative directory already checked via them.
+                    git_dir = git(here, "rev-parse", "--absolute-git-dir").removesuffix("\n")
+                    owned_git_dirs.add(Path(git_dir).resolve(strict=True))
+            elif "HEAD" in files and ("objects" in dirs or "commondir" in files):
+                administrative_dirs.append(here.resolve(strict=True))
             for name in dirs + files:
                 info = (here / name).lstat()
                 size += info.st_blocks * 512
@@ -86,6 +97,12 @@ def tree_facts(entry: Path) -> tuple[int, float, list[Path]]:
     except OSError as error:
         # A file that vanished or turned unreadable mid-walk: someone is here.
         raise Unreadable(f"walk {entry.name}: {error}") from error
+    # An administrative directory can be visited before its worktree. Only
+    # omit exact owned paths after discovery; orphaned submodule/worktree
+    # directories and standalone repositories may still own unique commits.
+    repos.extend(
+        here for here in administrative_dirs if here not in owned_git_dirs
+    )
     return size, newest, repos
 
 
@@ -181,6 +198,11 @@ def foreign_worktree(repo: Path, entry: Path) -> Path | None:
 
 
 def keep_reason(repo: Path, entry: Path) -> str | None:
+    if git(repo, "rev-parse", "--is-inside-git-dir").strip() == "true":
+        # A standalone administrative directory may own an external worktree;
+        # a bare repository may be the only copy of its commits. Neither has
+        # the worktree contract required by the checks below.
+        return f"Git directory in {repo.relative_to(entry.parent)}"
     if git(repo, "stash", "list").strip():
         return f"stash in {repo.relative_to(entry.parent)}"
     tip = unpushed_tip(repo)

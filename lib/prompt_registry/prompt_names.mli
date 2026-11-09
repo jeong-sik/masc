@@ -185,6 +185,7 @@ val keeper_fleet_diagnose : string
 val keeper_antigravity_workspace_shared : string
 val keeper_antigravity_workspace_private : string
 val keeper_antigravity_additional_directories_label : string
+val keeper_context_direct_input_source : string
 val keeper_context_librarian_working : string
 val keeper_context_librarian_empty_artifact : string
 val keeper_context_librarian_empty : string

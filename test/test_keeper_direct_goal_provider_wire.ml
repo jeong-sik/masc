@@ -26,9 +26,26 @@ let contains ~needle text = Astring.String.is_infix ~affix:needle text
 let owner_request = "Create a Task for the remaining result and inspect its evidence."
 let reported_value = "1/2 independently inspected results"
 let model_id = "direct-goal-wire-fixture"
+let peer_name = "peer-request-wire"
+let peer_operation = "kmsg-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+let peer_input_source () =
+  let operation_id =
+    match Keeper_chat_operation.Operation_id.of_string peer_operation with
+    | Ok operation_id -> operation_id
+    | Error detail -> fail detail
+  in
+  let keeper_id =
+    match Keeper_identity.Keeper_id.of_string peer_name with
+    | Some keeper_id -> keeper_id
+    | None -> fail "fixture peer must have a canonical Keeper identity"
+  in
+  Keeper_direct_input_source.of_admitted_input ~operation_id
+    ~speaker:(Keeper_input_speaker.Person (Keeper_input_speaker.Keeper keeper_id))
 
 let prepare config =
   Direct.prepare
+    ~direct_input_source:None
     ~active_goal_summaries:(Prompt.active_goal_summaries ~config ~keeper_name:"direct-goal-wire")
     ~current_task:Keeper_world_observation_inputs.No_current_task
     ~held_task_skills:[] ~task_skill_surfaces:[]
@@ -211,7 +228,7 @@ let run_case source () =
       | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
       | ToolResult _ | Image _ | Document _ | Audio _ -> ()) message.content) checkpoint.messages
 
-let test_goal_survives_read_then_task_creation () =
+let test_goal_survives_read_then_task_creation ~peer () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
   Masc_test_deps.init_eio_clock ~sw env;
   Fs_compat.set_fs env#fs;
@@ -227,6 +244,7 @@ let test_goal_survives_read_then_task_creation () =
   let measurement = observe config goal in
   let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-goal-loop-wire" ~absolute_turn:1 in
   let prepared = Direct.prepare
+      ~direct_input_source:(if peer then Some (peer_input_source ()) else None)
       ~active_goal_summaries:(Prompt.active_goal_summaries ~config ~keeper_name:"goal-loop-wire")
       ~current_task:Keeper_world_observation_inputs.No_current_task ~held_task_skills:[]
       ~task_skill_surfaces:[] ~workspace_memory:Workspace_memory_ledger.Missing
@@ -328,6 +346,14 @@ let test_goal_survives_read_then_task_creation () =
         Agent_core_sha256.(digest_string bytes |> to_hex)) physical.partition.spans;
     List.iter (fun needle -> check bool "every receiver request's System keeps the Goal and criterion" true
       (contains ~needle context)) [goal.id;goal.criterion_revision];
+    List.iter (fun needle ->
+      check bool "every receiver System keeps only this operation's peer source" peer
+        (contains ~needle context);
+      check bool "the peer source is never replayed as User context" false
+        (List.exists (contains ~needle) contexts)) [peer_name; peer_operation];
+    check bool "the original request remains unchanged on the wire" true
+      (List.exists (fun message -> Json.member "role" message = `String "user"
+        && Json.member "content" message = `String owner_request) messages);
     List.iter (fun needle -> check bool "no request's System carries the latest measurement" false
       (contains ~needle context)) [measurement.id;reported_value];
     List.iter (fun needle -> check bool "only the first request's carrier carries the latest measurement" (index=0)
@@ -369,11 +395,14 @@ let test_goal_survives_read_then_task_creation () =
     (Some "Read the metric, then record the remaining work as a Task.") checkpoint.system_prompt;
   let capture = match Keeper_prompt_capture.read ~config ~keeper:"goal-loop-wire" with
     | Ok capture -> capture | Error error -> fail (Keeper_prompt_capture.read_error_to_string error) in
-  check int "capture contains exactly the two stable producers" 2 (List.length capture.blocks);
+  let expected_blocks = [Prompt_block_id.Keeper_instructions; Active_goals]
+      @ (if peer then [Prompt_block_id.Direct_input_source] else []) in
+  check int "capture contains exactly the issued stable producers"
+    (List.length expected_blocks) (List.length capture.blocks);
   List.iter (fun id -> check int ("capture attributes " ^ Prompt_block_id.to_string id ^ " exactly once") 1
       (List.length (List.filter (fun (block : Keeper_prompt_capture.block) ->
         Prompt_block_id.equal block.id id) capture.blocks)))
-    [Prompt_block_id.Keeper_instructions; Active_goals];
+    expected_blocks;
   let captured_turn = Ids.Turn_ref.make ~trace_id:capture.trace_id ~absolute_turn:capture.absolute_turn in
   check bool "capture and direct preparation identify the same actual fixture turn" true
     (Ids.Turn_ref.equal turn_ref captured_turn);
@@ -385,7 +414,14 @@ let test_goal_survives_read_then_task_creation () =
     (List.exists (fun (message : Agent_core.Types.message) ->
       List.exists (function Agent_core.Types.Text text -> contains ~needle:measurement.id text
         | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
-        | ToolResult _ | Image _ | Document _ | Audio _ -> false) message.content) checkpoint.messages)
+        | ToolResult _ | Image _ | Document _ | Audio _ -> false) message.content) checkpoint.messages);
+  List.iter (fun needle ->
+    check bool "host source observation stays out of durable conversation" false
+      (List.exists (fun (message : Agent_core.Types.message) ->
+        List.exists (function Agent_core.Types.Text text -> contains ~needle text
+          | Thinking _ | ReasoningDetails _ | RedactedThinking _ | ToolUse _
+          | ToolResult _ | Image _ | Document _ | Audio _ -> false) message.content)
+        checkpoint.messages)) [peer_name; peer_operation]
 
 let test_completion_observation_survives_tool_reply approved () =
   Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
@@ -625,7 +661,9 @@ let () = run "direct Goal context on actual provider wire"
     test_case "Goal primary failure never borrows recovery context" `Quick (run_case Goal_unavailable);
     test_case "independent work needs no synthetic Goal" `Quick (run_case Empty);
     test_case "Goal survives Read and actual Task creation without other world replay" `Quick
-      test_goal_survives_read_then_task_creation;
+      (test_goal_survives_read_then_task_creation ~peer:false);
+    test_case "peer request source stays in System through Read and Task creation" `Quick
+      (test_goal_survives_read_then_task_creation ~peer:true);
     test_case "Task approval survives the following tool reply" `Quick
       (test_completion_observation_survives_tool_reply true);
     test_case "Task rejection survives the following tool reply" `Quick

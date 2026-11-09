@@ -8,6 +8,10 @@
     [Keeper_instructions] is the rendered system prompt (keeper_prompt.ml).
     [Active_goals] is the renderer-attributed Goal snapshot split from the
     per-turn world context, including current criterion and measurement.
+    [Direct_input_source] is the immutable source of an admitted direct
+    operation, issued as a separate System observation after [Active_goals].
+    It names that operation's typed source without granting authority or
+    authenticating a local request as an operator.
     [Completion_authority] is the existing completion-authority renderer's
     Task approval/rejection event observations with their correlation keys.
     [Goals_awaiting_proof] names the Goals in [Verifying]: completion was
@@ -56,6 +60,7 @@ type t =
   | Keeper_instructions
   | Dynamic_context
   | Active_goals
+  | Direct_input_source
   | Completion_authority
   | Goals_awaiting_proof
   | Constitution_amendments
@@ -122,7 +127,8 @@ val injected_on_post_tool_round : t -> bool
     re-answer it on every round (task-514, 2026-08-24). Recurring state
     blocks therefore stay on the first round only. [Active_goals] is the
     separately produced immutable Goal snapshot and stays in the System after
-    tools. [Completion_authority] carries this turn's approval/rejection
+    tools. [Direct_input_source] stays there as well, retaining the original
+    admitted operation across tool rounds. [Completion_authority] carries this turn's approval/rejection
     correlation keys and rides every round of its turn, without rebroadcasting
     Task, Gate, Lane or other inbox state. [Goals_awaiting_proof] rides every
     round as well: a later round that lost it would read a Goal under proof as
@@ -166,6 +172,10 @@ val resent_when_held : t -> bool
     resumes, so each resume states the Goals under proof now.
     [Constitution_amendments] answers [false]: the same bytes name the same
     articles the session already holds.
+
+    [Direct_input_source] answers [false]: the same operation id and typed
+    source name the same admitted operation. A different operation changes
+    the observation bytes and is delivered independently.
 
     [Arrived_stimuli] answers [false]: an official-client resume never carries
     it, so the answer only completes the match.

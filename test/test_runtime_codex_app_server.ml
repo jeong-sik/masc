@@ -9250,7 +9250,8 @@ let carries_extra_system_context envelope =
 let captured_extra_context_blocks (blocks : Keeper_prompt_capture.block list) =
   List.filter_map (fun (block : Keeper_prompt_capture.block) ->
     match block.id with
-    | Keeper_instructions | Active_goals | Goals_awaiting_proof | Completion_authority -> None
+    | Keeper_instructions | Active_goals | Direct_input_source
+    | Goals_awaiting_proof | Completion_authority -> None
     | Dynamic_context | Constitution_amendments | Temporal_summary | Memory_os_recall
     | Librarian_working_context | Recalled_memory | Recalled_memory_status | Operator_note
     | Skill_compositions | Arrived_stimuli ->

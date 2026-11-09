@@ -408,7 +408,9 @@ let rank row =
 type cause_bucket =
   | Cause_named of Masc_tui_keeper_trail.cause_group
   | Cause_unnamed
+  | Cause_recovered
   | Not_failing
+  | Cause_paused
 
 type due =
   | Due_late
@@ -444,7 +446,7 @@ type group =
   | Group_memory of memory_follow
   | Group_age of memory_age
 
-let cause_bucket_of_row row =
+let failing_cause_of_row row =
   match trail_of_row row with
   | Masc_tui_keeper_trail.Trail_sound -> Not_failing
   | Masc_tui_keeper_trail.Trail_failed
@@ -456,17 +458,24 @@ let cause_bucket_of_row row =
             | Walk_unreadable | Walk_absent | Walk_not_applicable)
       ; _ } -> Cause_unnamed
 
+let cause_bucket_of_row ~now row =
+  match Masc_tui_keeper_verdict.of_runtime ~now (runtime_of_row row) with
+  | Masc_tui_keeper_verdict.Failing _ -> failing_cause_of_row row
+  | Masc_tui_keeper_verdict.Recovered -> Cause_recovered
+  | Masc_tui_keeper_verdict.Paused -> Cause_paused
+  | Masc_tui_keeper_verdict.Sound | Masc_tui_keeper_verdict.Other -> Not_failing
+
 let keeper_name_of_row row = row.keeper.Masc.Tui_decode.k_name
 
-let group_of_view ~outside view row =
+let group_of_view ~now ~outside view row =
   match view with
   | Plain | Day_wall -> None
   | By_state -> Some (Group_state (group_of_row row))
-  | By_cause -> Some (Group_cause (cause_bucket_of_row row))
+  | By_cause -> Some (Group_cause (cause_bucket_of_row ~now row))
   | By_time -> Some (Group_due (outside ~keeper_name:(keeper_name_of_row row)).due)
   | By_memory -> Some (Group_memory (outside ~keeper_name:(keeper_name_of_row row)).follow)
   | By_age -> Some (Group_age (outside ~keeper_name:(keeper_name_of_row row)).age)
-  | By_runtime -> Some (Group_cause (cause_bucket_of_row row))
+  | By_runtime -> Some (Group_cause (cause_bucket_of_row ~now row))
 
 let failed_half_hours ~now row =
   match runtime_of_row row with
@@ -496,9 +505,9 @@ let day_rank ~now row =
 (* A slot leaves the last day once every half hour; a due time and a
    snapshot age cross their bounds by the minute. *)
 let order_clock_step = function
-  | Plain | By_state | By_cause | By_memory | By_runtime -> None
+  | Plain | By_state | By_memory | By_runtime -> None
   | By_time | By_age -> Some 60.
-  | Day_wall -> Some (float_of_int Masc.Keeper_turn_pulse.slot_seconds)
+  | By_cause | Day_wall -> Some (float_of_int Masc.Keeper_turn_pulse.slot_seconds)
 
 let cause_rank = function
   | Cause_named cause ->
@@ -515,7 +524,9 @@ let cause_rank = function
        | Masc_tui_keeper_trail.Server -> 9
        | Masc_tui_keeper_trail.Internal -> 10)
   | Cause_unnamed -> 11
-  | Not_failing -> 12
+  | Cause_recovered -> 12
+  | Not_failing -> 13
+  | Cause_paused -> 14
 
 let due_rank = function
   | Due_late -> 0
@@ -546,11 +557,11 @@ let view_key ~now ~outside view ranked =
   match view with
   | Plain -> 0, ""
   | By_state -> attention_rank ranked.group, ""
-  | By_cause -> cause_rank (cause_bucket_of_row ranked.row), ""
+  | By_cause -> cause_rank (cause_bucket_of_row ~now ranked.row), ""
   | By_time -> due_rank (outside ~keeper_name:(keeper_name_of_row ranked.row)).due, ""
   | By_memory -> follow_rank (outside ~keeper_name:(keeper_name_of_row ranked.row)).follow, ""
   | By_age -> age_rank (outside ~keeper_name:(keeper_name_of_row ranked.row)).age, ""
-  | By_runtime -> cause_rank (cause_bucket_of_row ranked.row), ""
+  | By_runtime -> cause_rank (cause_bucket_of_row ~now ranked.row), ""
   | Day_wall -> day_rank ~now ranked.row, ""
 
 let compare_view_key (left_rank, left_name) (right_rank, right_name) =
@@ -571,7 +582,11 @@ let compare_sorted sort left right =
 
 let order_rows ~view ~sort ~now ~outside rows =
   let rows = match view with
-    | By_runtime -> List.filter trail_is_failed rows
+    | By_runtime -> List.filter (fun row ->
+        match Masc_tui_keeper_verdict.of_runtime ~now (runtime_of_row row) with
+        | Masc_tui_keeper_verdict.Failing _ -> true
+        | Masc_tui_keeper_verdict.Paused | Masc_tui_keeper_verdict.Recovered
+        | Masc_tui_keeper_verdict.Sound | Masc_tui_keeper_verdict.Other -> false) rows
     | Plain | By_state | By_cause | By_time | By_memory | By_age | Day_wall -> rows
   in
   List.map (fun row -> let ranked = rank row in ranked, view_key ~now ~outside view ranked) rows
@@ -642,6 +657,26 @@ let refold change group folded =
   match change with
   | Fold -> group :: others
   | Unfold -> others
+
+let initially_folded ~count = function
+  | Group_cause Cause_recovered | Group_cause Cause_paused
+  | Group_due Due_none | Group_memory Memory_following | Group_memory Memory_unread
+  | Group_age Age_within_day | Group_age Age_unknown -> true
+  | Group_cause Not_failing -> count > 4
+  | Group_cause (Cause_named _ | Cause_unnamed) | Group_state _
+  | Group_due (Due_late | Due_held | Due_within_hour | Due_within_half_day | Due_later | Due_unknown)
+  | Group_memory (Memory_refused | Memory_gap | Memory_lagging)
+  | Group_age (Age_within_3h | Age_within_3d | Age_older) -> false
+
+let first_folds ~seen ~folded groups =
+  List.fold_left (fun (seen, folded) -> function
+    | None -> seen, folded
+    | Some group ->
+        if List.mem group seen then seen, folded
+        else
+          let count = List.length (List.filter (( = ) (Some group)) groups) in
+          group :: seen, (if initially_folded ~count group then refold Fold group folded else folded))
+    (seen, folded) groups
 
 type group_counts = {
   attention_rows : int;

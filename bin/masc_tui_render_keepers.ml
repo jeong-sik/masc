@@ -871,9 +871,9 @@ let grid_gap (grid : Grid.t) memory =
     | Memory_reading.Row { gap = Memory_reading.Gap { first_atom; past_last_atom }; _ }
       when past_last_atom > first_atom ->
         Masc_tui_chart.format_compact_num (past_last_atom - first_atom)
-    | Memory_reading.Row { gap = Memory_reading.Gap_unmeasured; _ } -> Keeper_mark.unknown_mark
+    | Memory_reading.No_row | Memory_reading.Row { gap = Memory_reading.Gap_unmeasured; _ } -> Keeper_mark.unknown_mark
     | Memory_reading.Row { gap = Memory_reading.Gap _ | Memory_reading.No_gap; _ }
-    | Memory_reading.Unknown | Memory_reading.No_row | Memory_reading.Refused _ -> ""
+    | Memory_reading.Unknown | Memory_reading.Refused _ -> ""
   in
   Theme.info () ^ Message_layout.pad_left text grid.mem_cells ^ Ansi.reset
 
@@ -906,6 +906,14 @@ let grid_age_ladder (grid : Grid.t) bins =
                else
                  grid_age_group_style cell.group ^ Grid.level_glyph ~peak cell.count ^ Ansi.reset)
              cells)
+
+let grid_age_ladder_reading (grid : Grid.t) = function
+  | Some bins -> grid_age_ladder grid bins
+  | None ->
+      (match Age_ladder.merge_of_column grid.side_cells with
+       | None -> String.make grid.side_cells ' '
+       | Some _ -> Theme.recede ()
+           ^ Message_layout.pad_left Keeper_mark.unknown_mark grid.side_cells ^ Ansi.reset)
 
 (* The age view's pulse column: the Keeper's ladder, or the word its age cell
    uses when there is none. *)
@@ -1101,28 +1109,137 @@ let grid_failure_line (grid : Grid.t) ~now (row : Keeper_list_model.row) =
     ; fit_width (grid_next_dispatch runtime) (grid_tail_cells grid)
     ]
 
-(* A group title on the grid (§2.4.7): [▌] in the group's colour, [−] open or
-   [+] folded, and the title over the name and pulse columns, then the band.
-   A title with a sum for the pulse column ([pulse]) keeps to the name column.
-   The age view's ladder sum is the only one drawn yet. *)
-let grid_title_cells (grid : Grid.t) = grid.name_cells + grid.side_cells
+(* Group sums use only members of this heading, including folded rows. *)
+let group_pulse_slots = 12
+let group_pulse_min_cells = 20
 
-let grid_group_title (grid : Grid.t) ~folded ~style ~pulse title =
-  let bold_title cells = style ^ Ansi.bold ^ fit_width title cells ^ Ansi.reset in
+let group_pulse ~now members =
+  let hours row = Masc_tui_keeper_pulse.half_hours ~now ~count:group_pulse_slots
+      (Option.bind (keeper_row_runtime row) (fun r -> r.Tui_decode.kr_recent_turns)) in
+  let readings = List.map hours members in
+  String.concat "" (List.init group_pulse_slots (fun position ->
+    let count, unknown = List.fold_left (fun (count, unknown) slots ->
+      match List.nth_opt slots position with
+      | Some (Masc_tui_keeper_pulse.Half_hour_failed | Masc_tui_keeper_pulse.Half_hour_failed_and_ok) -> count + 1, unknown
+      | Some Masc_tui_keeper_pulse.Half_hour_unknown | None -> count, true
+      | Some (Masc_tui_keeper_pulse.Half_hour_quiet | Masc_tui_keeper_pulse.Half_hour_ok) -> count, unknown)
+      (0, false) readings in
+    if count > 0 then Theme.warn () ^ Grid.level_glyph ~peak:(List.length members) count ^ Ansi.reset
+    else Theme.recede () ^ (if unknown then "?" else "·") ^ Ansi.reset))
+
+let group_sum project readings =
+  List.fold_left (fun total reading ->
+    match total, project reading with Some a, Some b -> Some (a + b)
+    | None, (Some _ | None) | Some _, None -> None) (Some 0) readings
+
+let group_lag = function
+  | Memory_reading.Row { lag = Memory_reading.Lag n; _ } -> Some n
+  | Memory_reading.Row { lag = Memory_reading.Lag_unmeasured; _ }
+  | Memory_reading.No_row
+  | Memory_reading.Unknown | Memory_reading.Refused _ -> None
+
+let group_gap = function
+  | Memory_reading.Row { gap = Memory_reading.No_gap; _ } -> Some 0
+  | Memory_reading.Row { gap = Memory_reading.Gap { first_atom; past_last_atom }; _ } ->
+      Some (max 0 (past_last_atom - first_atom))
+  | Memory_reading.No_row | Memory_reading.Row { gap = Memory_reading.Gap_unmeasured; _ }
+  | Memory_reading.Unknown | Memory_reading.Refused _ -> None
+
+let group_facts reading =
+  match Memory_reading.age_bins reading with
+  | Memory_reading.Measured bins -> Some (Masc.Keeper_memory_age_bins.total bins)
+  | Memory_reading.No_snapshot -> Some 0
+  | Memory_reading.Unmeasured | Memory_reading.Row_absent
+  | Memory_reading.Snapshot_unknown | Memory_reading.Row_refused -> None
+
+let group_number = function
+  | Some n -> Masc_tui_chart.format_compact_num n
+  | None -> "?"
+
+(* Each heading adds every member's known wakes, including paused Keepers.
+   The shared reducer keeps an unknown slot only when no known wake fills it. *)
+let group_wake_strip state (grid : Grid.t) ~now members =
+  let open Masc_tui_keeper_next_run in
+  let slots =
+    List.map
+      (fun (row : Keeper_list_model.row) ->
+        Masc_tui_keeper_axis.wake_strip state ~now ~ahead:(Grid.strip_cells grid - 1)
+          ~keeper_name:row.keeper.Tui_decode.k_name)
+      members
+    |> sum_wake_strips
+  in
+  let peak = List.fold_left (fun peak -> function
+    | Wakes count -> max peak count
+    | Wakes_unknown -> peak) 0 slots in
+  String.concat "" (List.mapi (fun position -> function
+    | Wakes count when count > 0 ->
+        (if position = 0 then Ansi.bold else "") ^ Theme.info ()
+        ^ Grid.level_glyph ~peak count ^ Ansi.reset
+    | Wakes _ -> Theme.recede () ^ Keeper_mark.grid_dot_mark ^ Ansi.reset
+    | Wakes_unknown -> Theme.recede () ^ Keeper_mark.unknown_mark ^ Ansi.reset) slots)
+
+let grid_group_title state (grid : Grid.t) ~now ~group ~members ~folded ~style ~pulse title =
+  let count = List.length members in
+  let memories = List.map (keeper_memory_reading state) members in
+  let lag = group_number (group_sum group_lag memories) in
+  let now_text, tail, right = match group with
+    | Keeper_list_model.Group_cause (Keeper_list_model.Cause_named _ | Keeper_list_model.Cause_unnamed) ->
+        let retry, wait, unknown = List.fold_left (fun (retry, wait, unknown) row ->
+          match keeper_row_runtime row with
+          | Some runtime -> (match runtime.Tui_decode.kr_runtime_path_rest with
+              | Ok (Some (Tui_decode.Path_rest_resting _)) -> retry, wait + 1, unknown
+              | Ok (Some (Tui_decode.Path_rest_serving _)) -> retry + 1, wait, unknown
+              | Ok None | Error _ -> retry, wait, unknown + 1)
+          | None -> retry, wait, unknown + 1) (0, 0, 0) members in
+        let parts = (if retry > 0 then [Printf.sprintf "▹ retry %d" retry] else [])
+          @ (if wait > 0 then [Printf.sprintf "◌ wait %d" wait] else [])
+          @ (if unknown > 0 then [Printf.sprintf "? %d" unknown] else []) in
+        Printf.sprintf "! %d failing" count, String.concat "  " parts, ""
+    | Keeper_list_model.Group_cause Keeper_list_model.Cause_recovered ->
+        Printf.sprintf "✓ %d" count, group_wake_strip state grid ~now members, ""
+    | Keeper_list_model.Group_cause Keeper_list_model.Not_failing ->
+        Printf.sprintf "● %d" count, group_wake_strip state grid ~now members, ""
+    | Keeper_list_model.Group_cause Keeper_list_model.Cause_paused ->
+        Printf.sprintf "○ %d" count, group_wake_strip state grid ~now members, ""
+    | Keeper_list_model.Group_state _ | Keeper_list_model.Group_due _ ->
+        string_of_int count, group_wake_strip state grid ~now members, ""
+    | Keeper_list_model.Group_memory _ ->
+        let gap = match group_sum group_gap memories with Some 0 -> "" | value -> group_number value in
+        string_of_int count, "Σ lag " ^ lag, gap
+    | Keeper_list_model.Group_age age ->
+        let odd = if age <> Keeper_list_model.Age_older then 0 else
+          List.length (List.filter (fun row -> match keeper_row_runtime row with
+            | Some r -> not r.Tui_decode.kr_paused && (match r.kr_activation_mode with
+                | Tui_decode.Activation_autonomous -> true
+                | Tui_decode.Activation_manual | Tui_decode.Activation_on_demand -> false)
+            | None -> false) members) in
+        (if odd > 0 then Printf.sprintf "%d · %d!" count odd else string_of_int count),
+        "Σ " ^ group_number (group_sum group_facts memories) ^ " facts · lag " ^ lag, "" in
+  let pulse_width = match pulse with
+    | Some _ -> grid.side_cells
+    | None -> (match group with
+        | Keeper_list_model.Group_memory _ | Keeper_list_model.Group_age _ -> 0
+        | Keeper_list_model.Group_cause _ | Keeper_list_model.Group_state _ | Keeper_list_model.Group_due _ ->
+            if grid.side_cells >= group_pulse_min_cells then group_pulse_slots else 0) in
+  let pulse = match pulse with
+    | Some pulse -> pulse
+    | None -> if pulse_width > 0 then group_pulse ~now members else "" in
+  let lead_width = grid_lead_cells grid - Grid.gutter_cells in
+  let title_width = max 0 (lead_width - (if pulse_width > 0 then pulse_width + 1 else 0)) in
+  let title = match group with Keeper_list_model.Group_age _ -> fit_width title grid.name_cells
+    | Keeper_list_model.Group_cause _ | Keeper_list_model.Group_state _
+    | Keeper_list_model.Group_due _ | Keeper_list_model.Group_memory _ -> title in
+  let tail_width = grid_tail_cells grid in
+  let right_width = grid.mem_cells in
   String.concat ""
     [ style ^ Keeper_mark.grid_gutter_glyph ^ Ansi.reset ^ " "
-    ; Ansi.bold
-      ^ (if folded then Keeper_mark.grid_folded_mark else Keeper_mark.grid_open_mark)
-      ^ Ansi.reset ^ " "
-    ; (match pulse with
-       | Some pulse when grid.side_cells > 0 -> bold_title grid.name_cells ^ " " ^ pulse
-       | Some _ | None ->
-           style ^ Ansi.bold
-           ^ fit_width (fit_width title (grid_title_cells grid)) (grid_lead_cells grid - Grid.gutter_cells)
-           ^ Ansi.reset)
-    ; " "
-    ; grid_band grid_blank_now
-    ]
+    ; Ansi.bold ^ (if folded then Keeper_mark.grid_folded_mark else Keeper_mark.grid_open_mark) ^ Ansi.reset ^ " "
+    ; style ^ Ansi.bold ^ fit_width title title_width ^ Ansi.reset
+    ; (if pulse_width > 0 then " " ^ pulse else "")
+    ; " " ^ grid_band (style ^ fit_width now_text Grid.now_cells ^ Ansi.reset)
+    ; " " ^ Theme.recede () ^ fit_width tail (max 0 (tail_width - right_width))
+    ; (if right_width > 0 then Message_layout.pad_left right right_width else "")
+    ; Ansi.reset ]
 
 (* The rows of one group, folded or not. [klr_groups] is mapped from
    [klr_rows], one group per row. *)
@@ -1135,8 +1252,8 @@ let keeper_group_rows (reading : Masc_tui_types.keeper_list_reading) group =
   in
   members reading.klr_rows reading.klr_groups
 
-(* The age view's group title draws the ladders of its Keepers added up
-   (§2.4.7). A Keeper without a ladder adds nothing. *)
+(* The age view's group title draws its Keepers' ladders added up (§2.4.7).
+   An unavailable member makes the sum unknown; a known empty snapshot adds zero. *)
 let grid_group_pulse state (grid : Grid.t) reading group =
   match (group : Keeper_list_model.group) with
   | Keeper_list_model.Group_age _ ->
@@ -1144,14 +1261,15 @@ let grid_group_pulse state (grid : Grid.t) reading group =
         List.fold_left
           (fun sum row ->
             match Memory_reading.age_bins (keeper_memory_reading state row) with
-            | Memory_reading.Measured bins -> Masc.Keeper_memory_age_bins.add sum bins
-            | Memory_reading.Unmeasured | Memory_reading.No_snapshot
-            | Memory_reading.Snapshot_unknown | Memory_reading.Row_absent
-            | Memory_reading.Row_refused -> sum)
-          Masc.Keeper_memory_age_bins.zero
+            | Memory_reading.Measured bins ->
+                Option.map (fun sum -> Masc.Keeper_memory_age_bins.add sum bins) sum
+            | Memory_reading.No_snapshot -> sum
+            | Memory_reading.Unmeasured | Memory_reading.Snapshot_unknown
+            | Memory_reading.Row_absent | Memory_reading.Row_refused -> None)
+          (Some Masc.Keeper_memory_age_bins.zero)
           (keeper_group_rows reading group)
       in
-      Some (grid_age_ladder grid bins)
+      Some (grid_age_ladder_reading grid bins)
   | Keeper_list_model.Group_state _ | Keeper_list_model.Group_cause _
   | Keeper_list_model.Group_due _ | Keeper_list_model.Group_memory _ -> None
 
@@ -1416,7 +1534,9 @@ let keeper_group_heading_style = function
   | Keeper_list_model.Group_state attention -> keeper_state_heading_style attention
   | Keeper_list_model.Group_cause (Keeper_list_model.Cause_named _ | Keeper_list_model.Cause_unnamed) ->
       Theme.warn ()
-  | Keeper_list_model.Group_cause Keeper_list_model.Not_failing -> Theme.recede ()
+  | Keeper_list_model.Group_cause Keeper_list_model.Cause_recovered -> grid_receded_ok ()
+  | Keeper_list_model.Group_cause Keeper_list_model.Not_failing -> Theme.ok ()
+  | Keeper_list_model.Group_cause Keeper_list_model.Cause_paused -> Theme.recede ()
   | Keeper_list_model.Group_due (Keeper_list_model.Due_late | Keeper_list_model.Due_held) ->
       Theme.warn ()
   | Keeper_list_model.Group_due
@@ -1463,8 +1583,9 @@ let keeper_group_heading_text ~available_cells rows group count =
         (String.uppercase_ascii (keeper_cause_group_word cause)) count
   | Keeper_list_model.Group_cause Keeper_list_model.Cause_unnamed ->
       Printf.sprintf "%s FAILING · CAUSE NOT RECORDED %d" failing_glyph count
-  | Keeper_list_model.Group_cause Keeper_list_model.Not_failing ->
-      Printf.sprintf "NOT FAILING %d" count
+  | Keeper_list_model.Group_cause Keeper_list_model.Cause_recovered -> "recovered · failed in 12h"
+  | Keeper_list_model.Group_cause Keeper_list_model.Not_failing -> "no current failure"
+  | Keeper_list_model.Group_cause Keeper_list_model.Cause_paused -> "paused"
   | Keeper_list_model.Group_due due ->
       let label =
         match due with
@@ -2754,9 +2875,12 @@ let render_keeper_axes (state : state) =
             let title = keeper_group_heading_text ~available_cells:inner model_rows group count in
             match matrix with
             | Some _ -> keeper_group_heading_style group ^ "▌   " ^ title ^ Ansi.reset
-            | None -> grid_group_title grid ~folded:(List.mem group state.keeper_list_folded)
-                ~style:(keeper_group_heading_style group)
-                ~pulse:(grid_group_pulse state grid list_reading group) title
+            | None ->
+                let members = keeper_group_rows list_reading group in
+                grid_group_title state grid ~now:now_unix ~group ~members
+                  ~folded:(List.mem group state.keeper_list_folded)
+                  ~style:(keeper_group_heading_style group)
+                  ~pulse:(grid_group_pulse state grid list_reading group) title
           in
           if keeper_entry_selected stop entry then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr text)

@@ -207,7 +207,7 @@ let test_runtime_view_contains_only_failing_rows () =
     [ "a"; "b" ]
     (names (Model.order_rows ~outside:unread ~view:Model.By_runtime ~sort:Model.Name ~now:0. rows));
   Alcotest.(check bool) "the matrix uses the same cause grouping as failures" true
-    (Model.group_of_view ~outside:unread Model.By_runtime (List.nth rows 2)
+    (Model.group_of_view ~now:0. ~outside:unread Model.By_runtime (List.nth rows 2)
      = Some (Model.Group_cause Model.Cause_unnamed))
 
 let test_cause_view_puts_failing_rows_first () =
@@ -216,10 +216,10 @@ let test_cause_view_puts_failing_rows_first () =
     [ "failing"; "sound" ]
     (names (Model.order_rows ~outside:unread ~view:Model.By_cause ~sort:Model.Name ~now:0. rows));
   Alcotest.(check bool) "a failure with no receipt names no cause" true
-    (Model.group_of_view ~outside:unread Model.By_cause (List.nth rows 1)
+    (Model.group_of_view ~now:0. ~outside:unread Model.By_cause (List.nth rows 1)
      = Some (Model.Group_cause Model.Cause_unnamed));
   Alcotest.(check bool) "a sound row is not failing" true
-    (Model.group_of_view ~outside:unread Model.By_cause (List.hd rows) = Some (Model.Group_cause Model.Not_failing))
+    (Model.group_of_view ~now:0. ~outside:unread Model.By_cause (List.hd rows) = Some (Model.Group_cause Model.Not_failing))
 
 let day = float_of_int Masc.Keeper_turn_pulse.window_seconds
 let slot_seconds = Masc.Keeper_turn_pulse.slot_seconds
@@ -250,7 +250,7 @@ let test_day_wall_puts_the_most_failed_half_hours_first () =
     [ "two"; "one"; "no-pulse"; "older" ]
     (names (Model.order_rows ~outside:unread ~view:Model.Day_wall ~sort:Model.Name ~now rows));
   Alcotest.(check bool) "the day wall does not group" true
-    (Model.group_of_view ~outside:unread Model.Day_wall (List.hd rows) = None);
+    (Model.group_of_view ~now:0. ~outside:unread Model.Day_wall (List.hd rows) = None);
   Alcotest.(check bool) "the day wall can reorder every half hour" true
     (Model.order_clock_step Model.Day_wall = Some (float_of_int slot_seconds));
   Alcotest.(check bool) "the state view only reorders on new readings" true
@@ -265,6 +265,29 @@ let test_day_wall_counts_rested_and_clamps_future () =
       slot (newest - Masc.Keeper_turn_pulse.window_seconds) 1 0]) "rested" in
   Alcotest.(check (option int)) "rest and future share newest; 24h boundary excluded"
     (Some 1) (Model.failed_half_hours ~now r)
+
+let test_cause_verdict_and_first_folds () =
+  let healthy = health "healthy" in
+  let rows =
+    [ row ~health:(health "failing") ~edit:(fun r -> { r with kr_paused = true }) "paused"
+    ; row ~health:healthy ~edit:(with_pulse [ failed_slot ~ago:600. ]) "recovered"
+    ; row ~health:(health "offline") ~edit:(with_pulse [ failed_slot ~ago:600. ]) "offline-recovered"
+    ; row ~health:healthy "sound" ] in
+  let group row = Model.group_of_view ~now ~outside:unread Model.By_cause row in
+  Alcotest.(check bool) "paused takes precedence and offline can recover" true
+    (List.map group rows = List.map (fun cause -> Some (Model.Group_cause cause))
+      [ Model.Cause_paused; Model.Cause_recovered; Model.Cause_recovered; Model.Not_failing ]);
+  Alcotest.(check (list string)) "runtime matrix omits paused failing Keeper" []
+    (names (Model.order_rows ~outside:unread ~view:Model.By_runtime ~sort:Model.Name ~now rows));
+  let recovered = Model.Group_cause Model.Cause_recovered in
+  let sound = Model.Group_cause Model.Not_failing in
+  let groups = Some recovered :: List.init 5 (fun _ -> Some sound) in
+  let seen, folded = Model.first_folds ~seen:[] ~folded:[] groups in
+  Alcotest.(check bool) "recovery and more than four sound Keepers initially fold" true
+    (List.mem recovered folded && List.mem sound folded);
+  let folded = Model.refold Model.Unfold recovered folded in
+  let _, refreshed = Model.first_folds ~seen ~folded groups in
+  Alcotest.(check bool) "refresh preserves explicit unfold" false (List.mem recovered refreshed)
 
 let reading_by_name readings ~keeper_name =
   match List.assoc_opt keeper_name readings with
@@ -284,7 +307,7 @@ let test_time_memory_and_age_views_follow_the_outside_reading () =
     [ "e"; "d"; "c"; "b"; "a" ]
     (names (Model.order_rows ~outside:due ~view:Model.By_time ~sort:Model.Name ~now rows));
   Alcotest.(check bool) "a late row heads the late group" true
-    (Model.group_of_view ~outside:due Model.By_time (List.nth rows 4)
+    (Model.group_of_view ~now:0. ~outside:due Model.By_time (List.nth rows 4)
      = Some (Model.Group_due Model.Due_late));
   let follow =
     read (fun follow -> { Model.outside_unread with Model.follow })
@@ -758,6 +781,7 @@ let () =
             test_runtime_view_contains_only_failing_rows
         ; Alcotest.test_case "cause view puts failing rows first" `Quick
             test_cause_view_puts_failing_rows_first
+        ; Alcotest.test_case "cause verdict and first folds" `Quick test_cause_verdict_and_first_folds
         ; Alcotest.test_case "day wall counts rest and clamps future" `Quick
             test_day_wall_counts_rested_and_clamps_future
         ; Alcotest.test_case "day wall puts the most failed half-hours first" `Quick

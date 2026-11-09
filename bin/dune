@@ -1543,7 +1543,7 @@
  (name masc_tui_keeper_list_model)
  (wrapped false)
  (modules masc_tui_keeper_list_model)
- (libraries masc masc.masc_types masc_tui_keeper_control masc_tui_keeper_trail))
+ (libraries masc masc.masc_types masc_tui_keeper_control masc_tui_keeper_trail masc_tui_keeper_verdict))
 
 (library
  (name masc_tui_keeper_story)
@@ -2049,6 +2049,12 @@
   masc_tui_message_layout))
 
 (library
+ (name masc_tui_keeper_verdict)
+ (wrapped false)
+ (modules masc_tui_keeper_verdict)
+ (libraries masc))
+
+(library
  (name masc_tui_keeper_grid)
  (wrapped false)
  (modules masc_tui_keeper_grid)
@@ -2059,6 +2065,7 @@
   masc_tui_keeper_mark
   masc_tui_keeper_next_run
   masc_tui_keeper_pulse
+  masc_tui_keeper_verdict
   masc_tui_message_layout
   unix))
 
@@ -2847,6 +2854,7 @@
   masc_tui_keeper_wakes
   masc_tui_keeper_feed
   masc_tui_keeper_grid
+  masc_tui_keeper_verdict
   masc_tui_lane_standing
   masc_tui_async_protocol
   masc_tui_board_requests

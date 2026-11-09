@@ -185,7 +185,9 @@ type cause_bucket =
   | Cause_named of Masc_tui_keeper_trail.cause_group
       (** The trail is failed and its last receipt names the cause. *)
   | Cause_unnamed  (** The trail is failed and no receipt names a cause. *)
-  | Not_failing
+  | Cause_recovered (** Non-failing/non-paused, with a failed half hour in 12h. *)
+  | Not_failing (** No current failure; unread rows make no claim of healthy status. *)
+  | Cause_paused (** Pause wins even when the health reading is failing. *)
 
 type due =
   | Due_late  (** A due run has not started. *)
@@ -225,7 +227,7 @@ type group =
   | Group_memory of memory_follow
   | Group_age of memory_age
 
-val group_of_view : outside:(keeper_name:string -> outside) -> view -> row -> group option
+val group_of_view : now:float -> outside:(keeper_name:string -> outside) -> view -> row -> group option
 (** The heading [row] sits under in [view]; [None] for a view that does not
     group. {!order_rows} keeps the rows of one group next to each other. *)
 
@@ -290,6 +292,12 @@ val group_jump : group_direction -> stop list -> stop -> stop option
 
 val refold : fold_change -> group -> group list -> group list
 (** The folded groups after folding or unfolding [group]. *)
+
+val first_folds :
+  seen:group list -> folded:group list -> group option list -> group list * group list
+(** Apply E26 defaults only when a group is first observed in this session.
+    Returns the seen groups and folded groups. Later refreshes retain the
+    reader's explicit fold/unfold choices, including newly arriving groups. *)
 
 type group_counts = {
   attention_rows : int;

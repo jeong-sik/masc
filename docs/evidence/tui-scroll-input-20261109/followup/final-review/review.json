@@ -1,0 +1,309 @@
+{
+  "reviewed_at_utc": "2026-11-09T09:08:02.821308+00:00",
+  "review_kind": "Independent adversarial retained-documentation/data review",
+  "repository_head": "c379de5e39ef11a2f26a2b0bb8cd89f187fe47d9",
+  "reviewed_readme_status": "uncommitted working-tree README on c379; exact content frozen separately",
+  "readme_path": "docs/evidence/tui-scroll-input-20261109/README.md",
+  "readme_sha256": "b4110992aec1da6386ae85fe0494d791ac4b522549c9d23f7db76bee68d48433",
+  "initial_readme_sha256": "2c0fa3eb2763f69cee6de95d4f619596f1eb6f6eed2fe7a6786df646982d796e",
+  "native_source": "ff1cc7700b081c6ce7f1abebea42ef352d518ed5",
+  "scope": "README numbers/denominators/correlation/CPU and provenance boundaries; original and followup bundles/manifests; source identity; retained secret/private-chat boundary. No active-helper implementation rereview or production-source rereview.",
+  "verdict": "No unresolved P0, P1 or P2 finding; no remaining P3 finding after the load-range correction.",
+  "findings": [],
+  "resolved_findings": [
+    {
+      "severity": "P3",
+      "location": "README.md:59",
+      "original": "Normal cohort 1-minute load range was 68.6–259.7, omitting a post-run 66.58544921875 reading.",
+      "resolution": "README now says before/after load and 66.6–259.7. Verified in final reviewed content."
+    }
+  ],
+  "verified_metric_summary": {
+    "paired-final-normal": {
+      "process_runs": 50,
+      "prefix_count": 1600,
+      "nonce_count": 50,
+      "comparisons": {
+        "typing": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 25.567958946339786,
+          "p95_after_ms": 8.161166100762784,
+          "p95_improved_pairs": 5,
+          "median_paired_p95_delta_ms": -10.202709003351629,
+          "cpu_decreased_pairs": 5
+        },
+        "pageup": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 110.0361249409616,
+          "p95_after_ms": 96.93516697734594,
+          "p95_improved_pairs": 3,
+          "median_paired_p95_delta_ms": -15.71266702376306,
+          "cpu_decreased_pairs": 5
+        },
+        "pagedown": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 37.836333038285375,
+          "p95_after_ms": 73.27225001063198,
+          "p95_improved_pairs": 3,
+          "median_paired_p95_delta_ms": -6.296458886936307,
+          "cpu_decreased_pairs": 5
+        },
+        "wheelup": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 47.66437504440546,
+          "p95_after_ms": 28.800499974749982,
+          "p95_improved_pairs": 3,
+          "median_paired_p95_delta_ms": -3.943125018849969,
+          "cpu_decreased_pairs": 5
+        },
+        "wheeldown": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 20.368375000543892,
+          "p95_after_ms": 16.250208020210266,
+          "p95_improved_pairs": 3,
+          "median_paired_p95_delta_ms": -2.4754159385338426,
+          "cpu_decreased_pairs": 5
+        }
+      },
+      "cpu_lifecycle_sum_s": {
+        "before": 22.843180000000007,
+        "after": 16.662659999999992
+      },
+      "cpu_reduction_percent": 27.056303019106853,
+      "load_1min_range": [
+        66.58544921875,
+        259.6875
+      ],
+      "median_run_mean_gap_ms": {
+        "type": 54.11806116218588,
+        "scroll": 24.078363576897196
+      }
+    },
+    "paired-final-burst": {
+      "process_runs": 50,
+      "prefix_count": 1600,
+      "nonce_count": 50,
+      "comparisons": {
+        "typing": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 5.958709050901234,
+          "p95_after_ms": 13.330291956663132,
+          "p95_improved_pairs": 2,
+          "median_paired_p95_delta_ms": 4.586707917042077,
+          "cpu_decreased_pairs": 5
+        },
+        "pageup": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 215.9739590715617,
+          "p95_after_ms": 138.09879205655307,
+          "p95_improved_pairs": 3,
+          "median_paired_p95_delta_ms": -31.239748932421207,
+          "cpu_decreased_pairs": 5
+        },
+        "pagedown": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 30.10350000113249,
+          "p95_after_ms": 8.811541018076241,
+          "p95_improved_pairs": 4,
+          "median_paired_p95_delta_ms": -5.512916017323732,
+          "cpu_decreased_pairs": 5
+        },
+        "wheelup": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 79.67287499923259,
+          "p95_after_ms": 65.67100004758686,
+          "p95_improved_pairs": 4,
+          "median_paired_p95_delta_ms": -2.3161660647019744,
+          "cpu_decreased_pairs": 5
+        },
+        "wheeldown": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 54.43483300041407,
+          "p95_after_ms": 11.339333956129849,
+          "p95_improved_pairs": 4,
+          "median_paired_p95_delta_ms": -36.8711679475382,
+          "cpu_decreased_pairs": 5
+        }
+      },
+      "cpu_lifecycle_sum_s": {
+        "before": 22.579258,
+        "after": 16.345118
+      },
+      "cpu_reduction_percent": 27.61003040932523,
+      "load_1min_range": [
+        48.544921875,
+        303.38037109375
+      ],
+      "median_run_mean_gap_ms": {
+        "type": 28.591339371257252,
+        "scroll": 6.199260971217213
+      }
+    },
+    "paired-ff1-active-burst": {
+      "process_runs": 50,
+      "prefix_count": 1600,
+      "nonce_count": 50,
+      "comparisons": {
+        "typing": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 13.580708997324109,
+          "p95_after_ms": 6.202624994330108,
+          "p95_improved_pairs": 3,
+          "median_paired_p95_delta_ms": -4.807166988030076,
+          "cpu_decreased_pairs": 5
+        },
+        "pageup": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 61.48891698103398,
+          "p95_after_ms": 47.03858389984816,
+          "p95_improved_pairs": 4,
+          "median_paired_p95_delta_ms": -13.465333031490445,
+          "cpu_decreased_pairs": 5
+        },
+        "pagedown": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 22.727542091161013,
+          "p95_after_ms": 27.125374996103346,
+          "p95_improved_pairs": 3,
+          "median_paired_p95_delta_ms": -4.23487601801753,
+          "cpu_decreased_pairs": 5
+        },
+        "wheelup": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 39.64425006415695,
+          "p95_after_ms": 20.9332910599187,
+          "p95_improved_pairs": 3,
+          "median_paired_p95_delta_ms": -23.492375039495528,
+          "cpu_decreased_pairs": 5
+        },
+        "wheeldown": {
+          "n_before": 160,
+          "n_after": 160,
+          "p95_before_ms": 23.828875040635467,
+          "p95_after_ms": 13.884417014196515,
+          "p95_improved_pairs": 3,
+          "median_paired_p95_delta_ms": -11.485249968245625,
+          "cpu_decreased_pairs": 5
+        }
+      },
+      "cpu_lifecycle_sum_s": {
+        "before": 28.325080999999994,
+        "after": 19.436776000000002
+      },
+      "cpu_reduction_percent": 31.379627828778297,
+      "load_1min_range": [
+        162.7744140625,
+        263.88720703125
+      ],
+      "median_run_mean_gap_ms": {
+        "type": 28.772907936194493,
+        "scroll": 6.242790999410509
+      }
+    }
+  },
+  "unicode_requests": {
+    "b7_runs": 4,
+    "ff1_runs": 4,
+    "scalar_prefixes_per_run": 16,
+    "all_acknowledged": true,
+    "chat_posts_per_run": 1,
+    "all_post_bodies_equal_final_input_prefix": true,
+    "scope": "Synthetic peer refusal; not a live Keeper/model execution or IME preedit test."
+  },
+  "provenance": {
+    "native_run": 42585592312,
+    "workflow_ref": "main",
+    "workflow_head": "e26416eace6d3f1bc7f47e751b6f27041e1d225e",
+    "captured_workflow_status": "completed/success",
+    "compiled_source": "ff1cc7700b081c6ce7f1abebea42ef352d518ed5",
+    "binary_sha256": "1181f65f190aa4894aa6d1067448159cdd3acd4b06bf6eaf4af1223a078e4bd6",
+    "artifact_binary_matches_receipt": true,
+    "ownership_suite_tests": {
+      "detail_reading": 7,
+      "board_successor": 4,
+      "usage_scope": 20
+    },
+    "observation_boundary": "Run metadata, receipts and existing immutable test logs were read locally. No new CI query/run was made.",
+    "non_documentation_git_entries": 14708,
+    "source_equals_document_head": true,
+    "source_tree_canonical_sha256": "d2d56a4e488b47f0598857e58d17af1c79cd9efd14db277333834867b15caa7f",
+    "source_tree_canonical_format": "git ls-tree -r lines excluding docs/ and changelog.d/, joined with LF, without final LF",
+    "installation": "Receipt identifies prior source 9d67e41d and native ff1 binary 1181f65f. Prior source is an ancestor of ff1. Retained smoke derivative matches original result hash and selected fields. Same-runtime/base/binary and keeper-message surface claims agree with retained observations. Installation was not rerun by this reviewer."
+  },
+  "viewport_and_bounds": {
+    "raw_timed_scroll_max": 153,
+    "scroll_runs": 40,
+    "all_have_prephase_Record_ids": true,
+    "all_change_Record_id_sets_during_measurement": true,
+    "ranges": {
+      "pageup": [
+        519,
+        781
+      ],
+      "pagedown": [
+        453,
+        718
+      ],
+      "wheelup": [
+        758,
+        782
+      ],
+      "wheeldown": [
+        712,
+        736
+      ]
+    },
+    "all_have_paired_present_end_observed_after_last_scroll_write_return": true,
+    "limits": "v2 excludes unpaired cleanup wrap-enable markers. Read timestamp is an emission upper bound; no conclusion that every late key was consumed, exact row offsets were proven or physical paint was measured. Prior b7 burst-down cohort remains explicitly disqualified as whole-interval active scrolling."
+  },
+  "bundle_integrity": {
+    "original_members": 316,
+    "original_zip_bytes": 5999062,
+    "original_zip_sha256": "596e88c77ad986d6cc12b8e2f3a6c2b1311ea0c52452c51abf7239877b2ded3f",
+    "followup_members": 162,
+    "followup_zip_bytes": 4276453,
+    "followup_zip_sha256": "52391de3fb50b40217ccf28d1f9ea542aca06ae8a5c3b5b221056f4b5868379c",
+    "all_478_member_hashes_sizes_and_original_sources_match": true,
+    "all_capture_chunk_byte_sums_match": true,
+    "original_location_files": 63,
+    "followup_location_files": 36,
+    "all_location_and_recorded_manifest_digests_match": true
+  },
+  "retained_data_review": {
+    "current_non_zip_files_scanned": 102,
+    "zip_members_scanned": 478,
+    "known_credential_pattern_matches": 0,
+    "nonempty_json_credential_value_candidates": 0,
+    "history_identity": "known synthetic history b1d4d6fa; raw captures are from synthetic fixture runs",
+    "real_server_capture_boundary": "Neither public ZIP contains installed-smoke capture data. Actual installed-smoke directory has result/selected metadata/frame timings and no raw screen capture. Public followup retains selected observation metadata only. Home paths and runtime identity metadata remain deliberately present and disclosed in README.",
+    "limit": "A bounded pattern scan and provenance inspection do not prove absence of every possible secret or personal datum; README correctly preserves that qualification."
+  },
+  "evidence_limits": [
+    "32 prefixes within one process remain correlated; the five process pairs are the paired unit.",
+    "Pooled p95 and median of paired run-p95 deltas answer different summaries. Both normal b7 and corrected ff1 PageDown pooled regressions are explicitly retained.",
+    "CPU is child lifecycle user+system; not input-only CPU or per-frame CPU.",
+    "Each comparison is eb4 installed baseline to candidate upgrade, not isolated causal attribution to C.",
+    "No prior b7 measurement is relabeled as ff1 evidence. No physical terminal paint, all-late-key consumption, general smoothness or full-regression claim is established."
+  ],
+  "validation_performed": "Offline JSON arithmetic, archive/manifest/hash inspection, source-tree identity and local receipt/log reading only. No build, CI query, product execution, Git mutation or external review post.",
+  "supporting_files": {
+    "computed-checks.json": "1d7354fd01fb63fe88695f8b3e48020947b8863f2be6f464d04da548241da4b5",
+    "bundle-integrity-and-data-scan.json": "7577f887349a227e7fe868463b5124d1142da4a7e099ecb4c08c3c05c2892a37",
+    "additional-identity-checks.json": "40305b5c553643697dbfc134f2ce822f341b8b61aad04b9540653a5bdddd372b",
+    "reviewed-evidence-files.json": "00e9ea2a49df4eb3971e7a3bee245ce4eb2b522a542c54b9321b2a5ea5406a09"
+  }
+}

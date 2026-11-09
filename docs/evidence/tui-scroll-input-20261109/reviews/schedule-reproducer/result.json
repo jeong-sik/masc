@@ -1,0 +1,18 @@
+{
+  "scope": "Source-extracted pure scheduling decision after a 64ms frame with queued input; no local Dune or TUI build",
+  "compiler": "OCaml 5.5.1",
+  "results": [
+    {
+      "label": "before",
+      "source_sha": "16dd4aa47803259dc516a1c2acbc244d9985c0cd",
+      "schedule_source_sha256": "a09123bf5672e97e1daa06b5b21d7eccf000a3bfcd5c3c32dbdef599a57aec4f",
+      "decision": "render"
+    },
+    {
+      "label": "after",
+      "source_sha": "b7d717df36de2aa91b62b413df3cad67739c499d",
+      "schedule_source_sha256": "8fb5349d996dd00756e94c6335b776f4dd463cee41c94ede6f58d15437ac7482",
+      "decision": "wait:80000000"
+    }
+  ]
+}

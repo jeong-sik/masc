@@ -1,0 +1,79 @@
+{
+  "scope": "pure byte fixtures; no imports of fixture servers, no PTY, no process or user TUI",
+  "snapshot_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+  "results": [
+    {
+      "case": "osc-bel",
+      "single_cut_count": 25,
+      "all_decoded_AB": true,
+      "all_hidden_prefix_unacknowledged": true,
+      "one_byte_chunks_decoded_AB": true
+    },
+    {
+      "case": "osc-st",
+      "single_cut_count": 26,
+      "all_decoded_AB": true,
+      "all_hidden_prefix_unacknowledged": true,
+      "one_byte_chunks_decoded_AB": true
+    },
+    {
+      "case": "dcs-st",
+      "single_cut_count": 21,
+      "all_decoded_AB": true,
+      "all_hidden_prefix_unacknowledged": true,
+      "one_byte_chunks_decoded_AB": true
+    },
+    {
+      "case": "pm-st",
+      "single_cut_count": 20,
+      "all_decoded_AB": true,
+      "all_hidden_prefix_unacknowledged": true,
+      "one_byte_chunks_decoded_AB": true
+    },
+    {
+      "case": "apc-st",
+      "single_cut_count": 20,
+      "all_decoded_AB": true,
+      "all_hidden_prefix_unacknowledged": true,
+      "one_byte_chunks_decoded_AB": true
+    },
+    {
+      "case": "csi-sgr",
+      "single_cut_count": 14,
+      "all_decoded_AB": true,
+      "all_hidden_prefix_unacknowledged": true,
+      "one_byte_chunks_decoded_AB": true
+    },
+    {
+      "case": "frame-end-marker-every-single-split",
+      "cuts": 6,
+      "all_recognized": true
+    },
+    {
+      "case": "valid-prefix-before-retained-tail",
+      "read_bytes": 17013,
+      "max_os_read_bytes": 65536,
+      "prefix_emit_at": 2.0,
+      "single_read_ack": 2.0,
+      "same_stream_same_timestamp_split_reads_ack": 2.0,
+      "chunk_partition_invariance": true,
+      "expected_ack": 2.0,
+      "source_line": 311
+    },
+    {
+      "case": "unicode-prefix-every-byte-boundary",
+      "prefix_bytes": 25,
+      "cuts": 26,
+      "all_pass": true,
+      "failures": []
+    },
+    {
+      "case": "prefix-itself-longer-than-16k",
+      "prefix_bytes": 17012,
+      "ack": 3.0,
+      "expected": 3.0,
+      "pass": true
+    }
+  ],
+  "ack_loop_lineno": 310
+}

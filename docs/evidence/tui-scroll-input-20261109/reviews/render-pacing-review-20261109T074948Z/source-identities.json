@@ -1,0 +1,58 @@
+{
+  "at": "2026-11-09T07:49:52.425337+00:00",
+  "observed_head": "16dd4aa47803259dc516a1c2acbc244d9985c0cd",
+  "B_head": "bae45a3e0e70de9c238e2a16410ccf15d295a4be",
+  "sources": {
+    "bin/masc_tui_render_schedule.ml": {
+      "sha256": "a09123bf5672e97e1daa06b5b21d7eccf000a3bfcd5c3c32dbdef599a57aec4f",
+      "git_blob": "cc6f7c250073dcecc6dde927b0d743df54d9f610",
+      "bytes": 88491
+    },
+    "bin/masc_tui_render_schedule.mli": {
+      "sha256": "5e47525ca728cd0ed31ae146db7f0eb1f123730937a3824b5c2eebca3fcdc04e",
+      "git_blob": "84d6e373ce909192d6b4c1c7c9cb1c6d1bd1c67a",
+      "bytes": 34679
+    },
+    "bin/masc_tui.ml": {
+      "sha256": "7b675ed34604658c1df05be1317f63ebd782a6e6a7a4104c6ece376ba25208f1",
+      "git_blob": "3695cf0e59535606a6836bc7eda0c3df5188bebd",
+      "bytes": 2337568
+    },
+    "bin/masc_tui_input_reader.ml": {
+      "sha256": "31575d2d3c73a2dfc8dd6b0e53ebd0b7ab5fb1bce0fa3720294e518602a39134",
+      "git_blob": "c9f4483fda4d04a565507e7ebb044d19dc13793e",
+      "bytes": 28459
+    },
+    "bin/masc_tui_frame_presenter.ml": {
+      "sha256": "33be770e5fa7314ddf3bd39fe67819369d1cccf039215a288896540814fd7ab8",
+      "git_blob": "9e7bb5e053d1842fb6e37acf9610ffb61f827178",
+      "bytes": 11983
+    },
+    "bin/masc_tui_frame_presenter.mli": {
+      "sha256": "5e793499aaec1d1b6efdfee3591faf19ecfa7ced9dd485bd61a4762db1e65e58",
+      "git_blob": "bfbe1368a5d640f16c93ed87522db20622df9509",
+      "bytes": 5305
+    },
+    "bin/masc_tui_frame_timing.ml": {
+      "sha256": "b0fe4e72e1194529f1e91373a000fa5e3a16198b295ded1de202f283550c1317",
+      "git_blob": "8728a6baac89f23422e418db56db49a126bb918f",
+      "bytes": 26859
+    },
+    "bin/masc_tui_terminal_write_repair.ml": {
+      "sha256": "c104be2f1c7e7bb2fcbfcc04c48c9b84133edf22aa614ec8ab3045c0cfe34479",
+      "git_blob": "6433c00f389945321ec9f7038a86e3ab177aefe4",
+      "bytes": 951
+    },
+    "test/test_tui_render_schedule.ml": {
+      "sha256": "1fedef13c0dc50f260b30c3a5e8bdc5f89f1bb1e73ce4256981f1d1864f24b50",
+      "git_blob": "6b82a936deb626520d8cdb0b4694adab5b31ced4",
+      "bytes": 18389
+    },
+    "test/test_tui_terminal_write_repair.ml": {
+      "sha256": "501ee181ba0af66f970f78a8cee828a8d34b76f009b4baa231d17f3a30a1ca7d",
+      "git_blob": "63c8e608977f72672d2c3a94bc802b079f8b9e13",
+      "bytes": 2548
+    },
+    "B_to_observed_head_core_scope_diff": ""
+  }
+}

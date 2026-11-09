@@ -648,7 +648,15 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - 토큰을 받는 곳은 호스트 자격 증명에 닿는 함수 전부다. Antigravity 턴(`run_turn`), 홈 준비(`prepare`, `prepare_account`, `prepare_native`, `prepare_for_login`), `/usage` 읽기, readiness 턴, 컨텍스트 관찰, Vibe 호출(`Runtime_vibe_cli.run`), vibe-acp readiness.
     - 홈 준비도 토큰을 받는다. 홈에는 호스트 자격 증명의 사본이 들어가므로, 거절된 시작은 사본도 만들지 않는다.
     - 호출처: 턴 드라이버(시도마다), verify, capability probe, Fusion, 사용량 읽기, setup 로그인, `masc runtime-antigravity-{account,models,context}`(작업 공간 판정 뒤), `masc lane-cli-probe`.
-  - D3c lane 증거. 설계 §11.1의 lane 종류마다 다른 owner의 account-home을 읽으려다 거절되는 시험이다.
+  - D3c 다른 사람의 홈. 설계 §11.1의 lane 종류마다 다른 owner의 account-home을 읽지 못한다는 증거다. 세 조각으로 나눈다(사용자 결정 2026-11-09).
+    - D3c-2 규칙. 공식 CLI는 서버 프로세스의 사용자로 돈다. 그 CLI의 native 도구(Claude Code의 Read, Codex의 read-only 샌드박스, Muse의 내장 도구)는 그 사용자가 읽는 곳을 모두 읽는다. 다계정에서는 거기에 다른 사람의 홈과 로그인 자격 증명이 있다.
+      - 그래서 다계정 프로세스는 모델 턴을 native 도구 없이(`Native_none`)만 돌린다.
+      - `Runtime_account_access.authorize_native`가 판정한다. 단일 사용자는 모든 자세를 허용한다. 다계정은 `Native_none`만 허용하고, 나머지는 `Native_tools_reach_other_homes`로 거절한다.
+      - 판정은 클라이언트마다 모델 턴의 입구 한 곳에서 한다(`Runtime_claude_code.run_turn`, `Runtime_codex_app_server.run_turn`, `Runtime_muse_serve.run_turn`). 거절된 턴은 CLI를 띄우지 않고 `Invalid_config`로 끝난다.
+      - Codex와 Muse에는 `Native_none`이 없다. 그래서 두 클라이언트의 다계정 모델 턴은 D3c-3이 자세를 열 때까지 거절된다. 미리보기의 Codex 턴은 CLI를 띄우기 전에 403으로 거절된다.
+      - 모델 턴이 아닌 호출(계정 확인, 사용량 읽기, 모델 목록)은 native 도구를 쓰지 않는다. 그래서 판정하지 않는다.
+    - D3c-1 lane 증거. Keeper 컨테이너 lane(docker, Apple)과 MASC Read 도구가 다른 owner의 홈을 마운트하지도 읽지도 못한다는 시험이다.
+    - D3c-3 측정. 실제 CLI에게 다른 owner의 홈에 둔 표지 파일을 읽게 시키는 스크립트다. 표지를 못 읽는다고 나온 자세만 D3c-2의 허용 목록에 더한다. 구독을 쓰므로 사용자가 돌린다.
 
 **D6 범위**
 

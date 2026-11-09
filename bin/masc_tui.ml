@@ -24096,16 +24096,19 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              state.observer_cursor <- None;
              state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay");
         record_observer_opened state ~session_id ~at:(Unix.gettimeofday ());
-        launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
-        owe_agenda_revalidation state;
-        (* A change can land between the initial read and subscription, or
-           during a disconnected interval. Read under the current authority. *)
-        launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
-        revalidate_visible_fusion state ~mailbox;
         (* The feed announces changes only while it is open. Unless this
            connection replays every event since the last applied one, the
-           visible surfaces read once more (RFC-0480 §3.3). *)
+           visible surfaces read once more (RFC-0480 §3.3): a change can land
+           between the initial read and subscription, or during a
+           disconnected interval, and the reads run under the current
+           authority. A Resumed replay missed nothing -- the server read its
+           retained window before answering -- so it re-reads none of them;
+           the replayed events owe their own reads. *)
         if not (Masc_tui_types.observer_replay_is_complete handshake) then begin
+          launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
+          owe_agenda_revalidation state;
+          launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
+          revalidate_visible_fusion state ~mailbox;
           state.play_room <- Option.map Masc_tui_play_room.revalidate state.play_room;
           if state.view = Memory then owe_memory_health_read state;
           start_http_refresh state ~host:server_peer_host ~port:state.port

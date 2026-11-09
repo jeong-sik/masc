@@ -11,6 +11,9 @@ let create ~root =
       trim_separator (String.sub root 0 (length - 1)) else root in
   { root = trim_separator root; root_parent_pending = true; sequence_mutex = Mutex.create (); sequences = Hashtbl.create 4 }
 let root t = t.root
+let name_in_masc_dir = "lane-addons"
+let directory ~masc_dir = Filename.concat masc_dir name_in_masc_dir
+let of_config config = create ~root:(directory ~masc_dir:(Workspace.masc_dir config))
 (* Agent_core_sha256 feeds bounded slices, so hashing a large original request
    answers stop-the-world requests between slices (RFC-0474 L2). *)
 let digest bytes = Agent_core_sha256.(to_hex (digest_string bytes))

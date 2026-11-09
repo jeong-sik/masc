@@ -195,6 +195,7 @@ let activity_of_misc_operation : Tool_schemas_misc.misc_operation -> activity = 
   | Misc_candle_balance | Misc_candle_catalog | Misc_candle_purchase | Misc_candle_equip
   | Misc_candle_gift
   | Misc_play_room
+  | Misc_pull_requests
   | Misc_tool_help | Misc_web_fetch | Misc_web_search -> Tool_completed
 let refresh_fingerprint interest captured =
   let stable = function

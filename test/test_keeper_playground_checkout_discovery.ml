@@ -8,13 +8,18 @@ open Alcotest
 module C = Masc.Keeper_playground_checkouts
 
 let rec rm_rf path =
-  if Sys.file_exists path
-  then
-    if Sys.is_directory path
-    then (
-      Sys.readdir path |> Array.iter (fun n -> rm_rf (Filename.concat path n));
-      Unix.rmdir path)
-    else Sys.remove path
+  (* [Unix.lstat], not [Sys.is_directory]: the latter follows symlinks, so a
+     link to a directory would make [Sys.readdir] enumerate the *target* and
+     this loop delete entries outside the swept tree, then fail its rmdir.
+     [S_LNK] falls through to [Sys.remove], which unlinks the link itself.
+     A dangling link ([Sys.file_exists] reads false) is unlinked too instead
+     of being skipped into an ENOTEMPTY. *)
+  match Unix.lstat path with
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Sys.readdir path |> Array.iter (fun n -> rm_rf (Filename.concat path n));
+    Unix.rmdir path
+  | _ -> Sys.remove path
 ;;
 
 let mkdir_p path =
@@ -190,6 +195,29 @@ let test_symlinked_git_entry_is_rejected () =
 (* A symlinked .git excludes the whole child tree, even a recognizable nested
    checkout. A visible sibling proves the scan itself still runs. This checks the
    boundary decision directly, without relying on exhausting the entry budget. *)
+(* #26648: the fixture cleanup must unlink symlinks instead of following
+   them. A directory link left under the swept root used to make [rm_rf]
+   enumerate the target and delete its entries, then fail its rmdir — silently
+   swallowed by [with_temp_root]. *)
+let test_rm_rf_unlinks_symlinks_without_following () =
+  let outside = Filename.temp_file "rm-rf-symlink-outside-" "" in
+  Sys.remove outside;
+  Unix.mkdir outside 0o755;
+  let keep = Filename.concat outside "keep.txt" in
+  let oc = open_out keep in
+  output_string oc "x";
+  close_out oc;
+  let root = Filename.temp_file "rm-rf-symlink-" "" in
+  Sys.remove root;
+  Unix.mkdir root 0o755;
+  Unix.symlink outside (Filename.concat root "dir_link");
+  Unix.symlink (Filename.concat root "missing") (Filename.concat root "dangling");
+  rm_rf root;
+  check bool "tree with links is fully removed" false (Sys.file_exists root);
+  check bool "outside target is untouched" true (Sys.file_exists keep);
+  rm_rf outside
+;;
+
 let test_symlinked_git_entry_does_not_descend () =
   with_temp_root (fun root ->
     let dir = Filename.concat root "repos/x" in
@@ -424,6 +452,8 @@ let () =
         ; test_case "symlinked .git rejected" `Quick test_symlinked_git_entry_is_rejected
         ; test_case "symlinked .git does not descend" `Quick
             test_symlinked_git_entry_does_not_descend
+        ; test_case "cleanup unlinks symlinks without following" `Quick
+            test_rm_rf_unlinks_symlinks_without_following
         ] )
     ; ( "failure is not emptiness"
       , [ test_case "missing root is not an empty listing" `Quick

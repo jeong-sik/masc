@@ -83,11 +83,6 @@ let fresh_state_step refusal =
   Printf.sprintf "stop the server, delete %s, start the new build"
     (String.concat " and " refusal.delete)
 
-(* The Lane Add-on store root the runtime opens below the workspace's .masc
-   directory (Lane_addon_runtime builds it the same way at each entry point). *)
-let store_root ~base_path =
-  Filename.concat (Common.masc_dir_from_base_path ~base_path) "lane-addons"
-
 (* A missing directory is an empty store. Once it exists, a listing failure
    means the preflight has not read records the server uses. *)
 let entries dir =
@@ -277,7 +272,7 @@ let scan_native_claims root =
        names)
 
 let scan_with ?(validate_tool_request=(fun () ~read:_ ~read_scope:_ ~read_body:_ _ -> Ok ())) ~after_read store ~base_path =
-  let root = store_root ~base_path in
+  let root = Lane_addon_store.directory ~masc_dir:(Common.masc_dir_from_base_path ~base_path) in
   let report =
     match store with
     | Store.Bindings -> scan_bindings ~after_read root

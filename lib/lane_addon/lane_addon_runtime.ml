@@ -34,11 +34,10 @@ type owner_event = Export_inventory_changed | Configuration_observed
 type owner_subscription = { root:string; package_id:string; signal:owner_event -> unit }
 let owner_subscriptions_mutex=Stdlib.Mutex.create ()
 let owner_subscriptions : owner_subscription list ref=ref []
-let lane_addons_dirname = "lane-addons"
+let store_directory config = Lane_addon_store.directory ~masc_dir:(Workspace.masc_dir config)
 
 let subscribe_owner_events ~config ~package_id signal =
-  let root=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) lane_addons_dirname)
-    |> Lane_addon_store.root in
+  let root=Lane_addon_store.of_config config |> Lane_addon_store.root in
   let subscription={root;package_id;signal} in
   Stdlib.Mutex.protect owner_subscriptions_mutex (fun () ->
     owner_subscriptions:=subscription :: !owner_subscriptions);
@@ -1857,7 +1856,7 @@ let backend ~store ~artifact_store () = match !override with
         let* clock = Option.to_result ~none:(Lifecycle.Worker_failed "container clock is unavailable") clock in
         Lane_addon_worker.sweep ~clock ~control_timeout_sec ~mgr:Posix_spawn_process_mgr.mgr ~runtime ~scope ~is_live_instance ()) }
 let manager config =
-  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let root = store_directory config in
   match Hashtbl.find_opt managers root with
   | Some m -> m
   | None -> let m = { store = Lane_addon_store.create ~root; base_path = config.base_path;
@@ -1913,7 +1912,7 @@ type export_snapshot = {
   unready : Lane_addon_unready.t list;
 }
 let current_reading ~config ~access =
-  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let root = store_directory config in
   match Hashtbl.find_opt managers root with
   | None -> ({ ready = []; unready = [] } : live_reading)
   | Some m -> live_reading m access
@@ -2002,7 +2001,7 @@ let observation_of_entries entries =
              refreshing=e.state = Lifecycle.Observing || e.pending <> Idle || e.active_tool_calls > 0 || Option.is_some e.current_action;output=e.output}))
   | _ :: _ :: _, ([] | _ :: _) -> Error (Ambiguous_installations (List.map installation_name serving))
 let observation_for_export ~config ~access ~name = Eio_context.run_on_owner_domain (fun () ->
-  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let root = store_directory config in
   match Hashtbl.find_opt managers root with
   | None -> Ok None
   | Some m -> observation_of_entries (entries m |> List.filter (fun (e : entry) ->
@@ -2015,7 +2014,7 @@ type browser_observation = {
    that installation's replacement, never to an unrelated worker sharing its
    backend. Live identity conflict reduction happens after these reads. *)
 let browser_observations ~config ~access = Eio_context.run_on_owner_domain (fun () ->
-  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let root = store_directory config in
   match Hashtbl.find_opt managers root with
   | None -> []
   | Some m ->
@@ -2047,7 +2046,7 @@ let with_operator_connection ~config ~access ~instance_id ~expected_incarnation 
     | Keeper _ | Unauthenticated -> Error Operator_rejected in
   let* () = if instance_id = expected_incarnation then Ok () else Error Operator_unavailable in
   with_tool_call_owner (fun () ->
-    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    let root = store_directory config in
     let* m = Option.to_result ~none:Operator_unavailable (Hashtbl.find_opt managers root) in
     (* Capture the original generative owner before a fresh disk read yields.
        No global serializer is acquired under the per-worker RPC mutex: the
@@ -2180,7 +2179,7 @@ let call_manager_browser_service m ~access ~(service:browser_service) ~command =
       result)
 let call_browser_service ~config ~access ~service ~command =
   with_tool_call_owner (fun () ->
-    let root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    let root = store_directory config in
     match Hashtbl.find_opt managers root with
     | Some m -> call_manager_browser_service m ~access ~service ~command
     | None -> Error (Browser_addon_client.Unavailable "browser Add-on owner is unavailable"))
@@ -2285,7 +2284,7 @@ let read_browser_document m ~access ~visibility ~route ~tab_id =
 
 let retain_tool_request_owner ~config ~access ~reserved ~(export : tool_export) ~scope ~request_id ~summary ~request =
   with_tool_call_owner (fun () ->
-    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    let root = store_directory config in
     let* m = match Hashtbl.find_opt managers root with
       | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
     let reading = live_reading m access in
@@ -2309,7 +2308,7 @@ type tool_request_destination = {
   source_revision : string; configuration_revision : string; max_reply_bytes : int;
 }
 let with_tool_request_destination_on_owner ~config ~access ~reserved ~(export : tool_export) ~prepare ~use =
-    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    let root = store_directory config in
     let* m = match Hashtbl.find_opt managers root with
       | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
     Eio.Mutex.use_ro m.configuration_mutex (fun () ->
@@ -2356,7 +2355,7 @@ let capture_tool_request_owner ~config ~access ~reserved ~export ~scope ~request
   with_tool_request_destination ~config ~access ~reserved ~export ~publish:(fun destination ->
     let* value,request,summary = capture destination |> Result.map_error (fun detail ->
       Host_refusal (Lane_addon_call_context.Rejected detail)) in
-    let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+    let store=Lane_addon_store.of_config config in
     let* () = offload (fun () -> Lane_addon_tool_request_owner.retain ~store ~scope ~request_id
       ~installation_id:destination.installation_id ~package_id:destination.package_id
       ~tool:destination.tool ~summary ~request)
@@ -2368,7 +2367,7 @@ let capture_tool_request_owner ~config ~access ~reserved ~export ~scope ~request
 
 let call_exported_tool_on_owner ~on_complete ~on_result ~authorize ~principal ~config ~access ~reserved ~(export : tool_export) ~arguments =
     Fun.protect ~finally:on_complete (fun () ->
-    let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+    let root = store_directory config in
     let* m = match Hashtbl.find_opt managers root with
       | Some m -> Ok m | None -> Error (Unavailable "Add-on owner is unavailable") in
     let reading = live_reading m access in
@@ -2477,7 +2476,7 @@ let call_captured_tool_request ~config ~access ~reserved ~export ~installation_i
             && original.tool=tool
           then Ok () else Error (Host_refusal (Lane_addon_call_context.Rejected
             "Captured request no longer owns this configured tool destination")) in
-        let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+        let store=Lane_addon_store.of_config config in
         let* ()=offload (fun () -> Lane_addon_tool_request_owner.retain ~store
           ~scope:original.scope ~request_id:original.request_id ~installation_id ~package_id ~tool
           ~summary:original.summary ~request:original.request) |> Result.map_error (fun error ->
@@ -2495,7 +2494,7 @@ let call_exported_tool = call_exported_tool_with_principal ~principal:None
    caller on the HTTP serving domain or a pool worker is carried there, like
    [dispatch], instead of being dropped. *)
 let notify_activity ~config ~activity = Eio_context.run_on_owner_domain (fun () ->
-  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let root = store_directory config in
   match Hashtbl.find_opt managers root with
   | None -> ()
   | Some m -> Hashtbl.iter (fun _ e ->
@@ -2541,7 +2540,7 @@ let read_retained_binding m ~instance_id =
   let* stored = offload (fun () -> Lane_addon_store.read_binding m.store ~instance_id) in
   Ok (retained_reading m stored)
 let browser_service_status ~config ~access ~instance_id = Eio_context.run_on_owner_domain (fun () ->
-  let root=Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let root = store_directory config in
   match Hashtbl.find_opt managers root with
   | None -> Browser_unavailable
   | Some m -> match Hashtbl.find_opt m.entries instance_id with
@@ -2720,7 +2719,7 @@ let configuration_application m ~(reading : configuration_reading)
         ~complete:(reading.snapshot.complete && not unattributed)
         ~issues:(issues @ List.map inventory_issue_message concerns) ~workers
 let inventory ~config = Eio_context.run_on_owner_domain (fun () ->
-  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let root = store_directory config in
   let inventory = inventory_at_root ~root in
   let applications = match Hashtbl.find_opt managers root with
     | None -> []
@@ -2734,7 +2733,7 @@ let inventory ~config = Eio_context.run_on_owner_domain (fun () ->
   {inventory with applications})
 
 let inventory_live ~config = Eio_context.run_on_owner_domain (fun () ->
-  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let root = store_directory config in
   match Hashtbl.find_opt managers root with
   | None -> { owner_present = false; instances = []; issues = []; complete = true; applications = [] }
   | Some m ->
@@ -2746,7 +2745,7 @@ let inventory_live ~config = Eio_context.run_on_owner_domain (fun () ->
       { owner_present = true; instances; issues = []; complete = true; applications = [] })
 
 let configuration_applications ~config ~inventory = Eio_context.run_on_owner_domain (fun () ->
-  let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let root = store_directory config in
   match Hashtbl.find_opt managers root with
   | None -> []
   | Some m ->
@@ -4717,7 +4716,7 @@ module For_testing = struct
   let document_route_services = document_route_services
   let await_run_stopped ~config ~instance_id =
     Eio_context.run_on_owner_domain (fun () ->
-      let root = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+      let root = store_directory config in
       match Hashtbl.find_opt managers root with
       | None -> ()
       | Some m ->

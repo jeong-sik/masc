@@ -24,6 +24,7 @@ val candle_catalog : Masc_domain.tool_schema
 val candle_purchase : Masc_domain.tool_schema
 val candle_equip : Masc_domain.tool_schema
 val candle_gift : Masc_domain.tool_schema
+val pull_requests : Masc_domain.tool_schema
 
 val dos_step : Masc_domain.tool_schema
 val dos_press : Masc_domain.tool_schema

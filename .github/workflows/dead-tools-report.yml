@@ -43,6 +43,15 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Pin the Python that parses TOML
+        # The audit script imports tomllib (Python 3.11+). Run 42595760657
+        # measured the hosted runner's default python3 at 3.11+; the pin keeps
+        # a future runner-image change from turning the report into a silent
+        # ImportError.
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: '3.11'
+
       - name: Check the registry the report counts
         id: registry
         shell: bash
@@ -63,7 +72,14 @@ jobs:
           registry = payload['registry']
           print(f"registry files: {registry['files']}")
           print(f"registered tools: {registry['count']}")
-          problems = list(registry['errors']) + [f"duplicate: {d}" for d in registry['duplicates']]
+          print(f"addon registry files: {registry['addon_files']}")
+          # A broken addons/*/lane.toml must fail this gate, not just appear in
+          # the report body (#50548 follow-up, task-3451).
+          problems = (
+              list(registry['errors'])
+              + [f"duplicate: {d}" for d in registry['duplicates']]
+              + [f"addon: {e}" for e in registry.get('addon_errors', [])]
+          )
           if problems:
               for problem in problems:
                   print(f"WARNING: {problem}")

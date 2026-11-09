@@ -11,13 +11,17 @@
 
 The teacher is the base model on the 256K training ID at reasoning_effort
 "high", asked exactly as MASC's exact lane asks. Each request gets up to
-ATTEMPTS answers. The first answer is kept when MASC's checks accept it, every
-candidate is scored correct (`memory_scores.score_synth`: the outcome and the
-claim it names), every planted stale fact is dropped, nothing else is dropped,
-and nothing is absorbed, since no label asks for an absorb. Answers from
-other providers are never used for training. An HTTP error or a missing
-response is not an attempt: it stops that request, and a rerun with the same
---out sends it again.
+ATTEMPTS answers. The first answer is kept when MASC's checks accept it and it
+leaves the memory its label asks for (`memory_scores.score_synth`): every
+candidate has the label's outcome and claim and leaves the memory its kind
+needs, every planted stale fact is dropped, every planted duplicate pair ends as
+one fact, nothing else is dropped, and only a complement's target and the facts
+of a pair are absorbed. Answers from other providers are never used for
+training. An HTTP error or a missing response is not an attempt: it stops that
+request, and a rerun with the same --out sends it again. The run starts only
+while the files pass_lines.json pins are unchanged
+(`eval_admission.load_pass_lines`), so the answers it keeps are scored by the
+code the verdict runs.
 
 Output: <out>/calls.jsonl (with the teacher's reasoning), <out>/accepted.jsonl
 (item, attempt, answer, reasoning) and <out>/summary.json.
@@ -42,6 +46,8 @@ EFFORT = "high"
 MAX_TOKENS = 32768
 ATTEMPTS = 4
 WORKERS = 8
+# The absorb classes of `memory_scores.score_synth` a label asks for.
+LABELED_MERGES = frozenset({"complement", "duplicate"})
 
 type JsonObject = dict[str, object]
 
@@ -53,10 +59,14 @@ def rejection(item: M.SynthItem, check: V.Check) -> str | None:
     score = M.score_synth(item, check.answer)
     if score["correct"] != score["candidates"]:
         return "outcome"
+    if score["state_correct"] != score["candidates"]:
+        return "memory_state"
     if score["planted_dropped"] != score["planted"]:
         return "stale_kept"
-    if score["absorbed"]:
-        return "absorbed"
+    if score["pairs_merged"] != score["pairs"]:
+        return "duplicate_kept"
+    if not set(cast(dict[str, str], score["absorbs"]).values()) <= LABELED_MERGES:
+        return "absorbed_off_label"
     if score["dropped"] != score["dropped_expected"]:
         return "unexpected_drop"
     return None
@@ -68,6 +78,7 @@ def main() -> int:
     ap.add_argument("--out", required=True)
     ap.add_argument("--budget", type=float, required=True)
     args = ap.parse_args()
+    V.load_pass_lines()
     out = Path(cast(str, args.out))
     out.mkdir(parents=True, exist_ok=True)
     instruction = V.schema_instruction()

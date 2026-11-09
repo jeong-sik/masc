@@ -130,6 +130,27 @@ it with a parallel repair. Two local source reviews covered its full
 and direct interfaces. Parsing and source reviews remain separate from fixed
 toolchain compilation, native execution and formal current-head approvals.
 
+## 2026-11-10: request reading
+
+The Requests slice leads each approval row with its original request/summary,
+then its actor. Gate rows retain the actual automatic/human phase even when a
+long tool name must shorten. Folded Asks show the first original question with
+the asker, age and additional-question count. These are display projections;
+the original row order, Ask keys, draft, source and approval authority remain.
+
+The selected preview retains execution site, age, input and real expiry facts.
+Call/approval/trace IDs move to the full reader; the reader also retains the
+original reason and target ID. Missing, failed, retained and unavailable sources
+are separate measured rows, before policy controls. The header count is qualified
+as observed unless all four readers are current. Normal title breakdown and the
+wall clock are removed, and an absent selected approval contributes no empty
+detail rows. Header, selected context, questions, footer and queue window still
+share the actual measured buffers.
+
+This is source work, not native or installed confirmation. Full question
+answering/follow-up readers, Verification/Harness, and the rest of the 23-surface
+scope remain open. No wording, layout or row-order tests are added.
+
 The [second four-surface source review](../../reports/2026-11-10-four-surface-reading-review.md)
 keeps Memory health queries aligned with the displayed canonical/KO/EN state
 and carries refused health rows into fleet fact coverage, including anonymous

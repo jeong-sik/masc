@@ -70,6 +70,13 @@ val runnable : inventory -> part list
 (** Original left-before-right leaf traversal. Children are runnable only
     after their exact two-child transaction is acknowledged. A parent with a
     pending transaction is not independently runnable. *)
+val completion_candidates : inventory -> Keeper_memory_os_current.explicit_candidate_id list option
+(** [Some ids] only for a nonempty forest whose partitions are all acknowledged
+    and whose active leaves exactly cover its active roots. Includes candidate
+    identities from historical parts too. This structural observation is not
+    execution completion, committed-receipt proof or queue ACK: the owner must
+    independently establish all three before closing the forest. [None]
+    preserves an empty or incompletely published forest. *)
 val find : inventory -> part_id:string -> (part, string) result
 val load_parent : inventory -> request_id:string ->
   (Keeper_memory_admission_queue.batch, string) result

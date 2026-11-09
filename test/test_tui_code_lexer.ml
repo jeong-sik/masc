@@ -208,7 +208,8 @@ let test_json_leaves_a_subtraction_alone () =
 (* The four roles a served JSON payload is drawn in are the chat's own, so the
    lexer names each of them: the string before a colon, a number, the three
    literals, and the six characters that only shape the document. A string
-   value keeps the generic string kind. *)
+   value keeps the generic string kind, and two shaping characters in a row are
+   one segment. *)
 let test_json_names_its_four_roles () =
   check seg "key, number, literals, punctuation and a string value"
     [ ("{", Masc_tui_code_lexer.kind_json_punctuation)
@@ -229,8 +230,7 @@ let test_json_names_its_four_roles () =
     ; (",", Masc_tui_code_lexer.kind_json_punctuation)
     ; (" ", Masc_tui_code_lexer.kind_code)
     ; ("\"s\"", Masc_tui_code_lexer.kind_string)
-    ; ("]", Masc_tui_code_lexer.kind_json_punctuation)
-    ; ("}", Masc_tui_code_lexer.kind_json_punctuation)
+    ; ("]}", Masc_tui_code_lexer.kind_json_punctuation)
     ]
     (spans "json" "{\"k\": [1, true, false, null, \"s\"]}")
 

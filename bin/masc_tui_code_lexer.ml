@@ -17,8 +17,9 @@ let kind_number = "code_number"
 let kind_type = "code_type"
 
 (* A served JSON payload has its own four roles, the ones the chat's tool
-   results and a Task note already draw (Theme.Syntax.json_*). Naming them here
-   keeps a fenced block, a Tools or Lanes pane and the chat on one palette. *)
+   results and a Task note already draw through Theme.Syntax.json_key and its
+   three siblings. Naming them here keeps a fenced block, a Tools or Lanes pane
+   and the chat on one palette. *)
 let kind_json_key = "json_key"
 let kind_json_number = "json_number"
 let kind_json_literal = "json_literal"

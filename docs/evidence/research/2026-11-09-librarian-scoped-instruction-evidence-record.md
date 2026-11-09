@@ -2,7 +2,7 @@
 
 ## 공통 헤더
 
-- 날짜(ISO8601): `2026-11-09T12:20:00+09:00`
+- 날짜(ISO8601): `2026-11-09T14:10:00+09:00`
 - 작성자: `Claude Code (Opus 5.5)`
 - 결정 ID: `librarian-scoped-instruction-stale-constraint-r1`
 - 적용 대상: `MASC_BASE_PATH=~/me` 의 `.masc`, main `95c0fb274d4d`
@@ -16,22 +16,56 @@
 - 출처: `<base-path>/.masc/config/keepers/code-reviewer-sister.memory-journal.jsonl` 의 rev 249·255·259 항목(`source.kind=librarian`),
   `<base-path>/.masc/keepers/code-reviewer-sister/chat-operations.sqlite3` 의 `operations`(읽기 전용 조회),
   같은 Keeper 의 `raw-traces/turn-1794188846492-369d-000471.jsonl`,
-  GitHub reviews API(#50298·#50297·#50293)
-- 확인일시: `2026-11-09T10:50:00+09:00` ~ `2026-11-09T12:10:00+09:00`
+  GitHub reviews API(#50264·#50269·#50298·#50297·#50293)
+- 확인일시: `2026-11-09T10:50:00+09:00` ~ `2026-11-09T14:05:00+09:00`
 - 신뢰도: `High` 시각, 문구, 출처 종류. `Medium` 01:47Z 위임이 01:50Z 기억의 직접 원인이라는 해석(시간 순서와 claim 문구로 판단).
-- 제한조건: 한 Keeper, 한 사례. 완료된 operation 은 `input_json` 이 비어서 원문은 raw trace 에서 읽었다.
+- 제한조건: 완료된 operation 은 `input_json` 이 비어서 원문은 raw trace 에서 읽었다. rev 255 는 1건 추가, 1건 제거다.
+
+- 항목: [근거] 잘못된 Draft COMMENT 는 기억보다 먼저 났다. 01:47:25Z 위임을 받은 턴 안에서 01:48:37Z 에 Draft #50264 에 COMMENT 가 게시됐다.
+- 출처: GitHub reviews API(#50264, 본문 서명 `code-reviewer-sister`), sister `chat-operations.sqlite3`
+- 확인일시: `2026-11-09T14:00:00+09:00`
+- 신뢰도: `High` 시각과 Draft 상태(리뷰 본문에 `Draft` 와 head 가 적힘). `Medium` 작성 Keeper(서명은 인증이 아니고 계정을 Keeper 셋이 같이 씀).
+- 제한조건: 한 건이다.
+
+- 항목: [근거] 그 기억은 66분 동안 그 Keeper 의 턴에서 읽히지 않았다. 01:47~03:01Z 16턴의 도구 호출은 Execute 79회, artifact 읽기 1회, Board 읽기 1회, Board 댓글 1회이고 기억 검색은 0회다.
+  턴 프롬프트의 기억 칸은 본문 없이 개수만 보인다(bodies omitted).
+- 출처: sister `raw-traces/turn-*.jsonl`(호출 id 기준 집계), `last-prompt.json`
+- 확인일시: `2026-11-09T13:10:00+09:00`
+- 신뢰도: `High`
+- 제한조건: trace 한 줄이 아니라 호출 id 하나를 한 번으로 셌다.
+
+- 항목: [근거] 리더 위임의 판정 문장이 바뀐 시각. 옛 문장은 01:47:25Z·01:59:27Z·02:02:19Z 에 나왔고 02:02~02:47Z 위임에는 Draft 언급이 없다. 새 문장("Draft는 검토한 범위에 맞는 판정")은 02:52:11Z 에 처음 나왔다.
+  sister 는 02:54:41~49Z 에 Draft PR 셋에 APPROVE 했고 GitHub 가 받았다. 01:59Z 위임 대상 #50269 는 그새 Ready 가 돼서 02:00:52Z 에 APPROVE 했다.
+- 출처: 리더 `<base-path>/.masc/keepers/code-reviewer/chat-operations.sqlite3`(읽기 전용), GitHub reviews API
+- 확인일시: `2026-11-09T13:10:00+09:00` ~ `2026-11-09T14:05:00+09:00`
+- 신뢰도: `High` 시각과 문구. 리더가 새 문장을 어디서 가져왔는지는 모른다.
+- 제한조건: 리더 턴이 읽은 checkout 에 라우팅 문서 병합이 언제 반영됐는지 확인하지 않았다.
+
+- 항목: [근거] "Draft 면 COMMENT" 절은 라우팅 문서와 샘플 지시문에 있었다. 공유 프롬프트 `keeper.md` 에는 "COMMENT 전담자" 역할 문장만 있었고 Draft 언급은 없었다.
+- 출처: 커밋 `3687b61fc2d6`(#50261) diff 의 `config/prompts/pr-review-routing.md`, `config/keepers/code-reviewer.toml`, `config/prompts/keeper.md`
+- 확인일시: `2026-11-09T14:00:00+09:00`
+- 신뢰도: `High`
+- 제한조건: 스킬 2개와 라이브 지시문 9개는 같은 커밋 밖에서 바뀌었다.
 
 - 항목: [근거] 기억 행에는 적용 범위 칸이 없고, Librarian 이 만든 행의 `origin.trace_id` 는 비어 있다.
-- 출처: `lib/keeper/keeper_memory_os_types.mli:335`, `lib/keeper/keeper_librarian.ml:569`,
-  리뷰어 9명의 `memory-current.json` 집계(897행 중 trace_id 있는 행 0, 03:18Z)
-- 확인일시: `2026-11-09T12:18:00+09:00`
+  그 이유로 든 주석은 journal 이 정확한 trace 를 가진다고 하지만, 라이브 Keeper 35명의 Librarian journal 항목 51,836개는 Keeper 마다 trace 값이 하나뿐이다.
+- 출처: `lib/keeper/keeper_memory_os_types.mli:335`, `lib/keeper/keeper_librarian.ml:560-569`,
+  리뷰어 9명의 `memory-current.json` 집계(897행 중 trace_id 있는 행 0, 03:18Z),
+  35명의 `memory-journal.jsonl` 집계(`source.kind=librarian` 항목의 서로 다른 `source.trace_id` 수), 이슈 #50412
+- 확인일시: `2026-11-09T12:18:00+09:00`, `2026-11-09T13:55:00+09:00`
 - 신뢰도: `High`
-- 제한조건: 집계는 그 시각의 스냅숏이다. 행 수는 턴마다 바뀐다.
+- 제한조건: 집계는 그 시각의 스냅숏이다. 주 경로의 `turn_ref` 가 어디서 오는지는 끝까지 따라가지 않았다.
 
-- 항목: [근거] Librarian 입력에는 Keeper 지시문만 들어가고 공유 `keeper.md` 는 없다. 정리 패스는 개수 초과 때만 돈다.
-- 출처: `lib/keeper/keeper_librarian_admission_owner.ml:111`, `config/prompts/librarian.md` 의 template_variables(5행),
-  `lib/keeper/keeper_memory_cleanup.mli:1-3`
-- 확인일시: `2026-11-09T11:55:00+09:00`
+- 항목: [근거] Librarian 은 claim 마다 근거 대화 위치를 계산해 흡수 판정에 쓰고, 행에는 남기지 않는다.
+- 출처: `lib/keeper/keeper_librarian.ml:94`(`cited`), `lib/keeper/keeper_librarian_runtime.ml:938-953`, `lib/keeper/keeper_memory_os_types.mli:185`·`:295`
+- 확인일시: `2026-11-09T12:40:00+09:00`
+- 신뢰도: `High` 계산과 쓰임. `Low` 흡수 판정 기록이 커밋 뒤에도 근거 위치를 들고 있는지(확인 안 함).
+- 제한조건: 소스 읽기만 했다.
+
+- 항목: [근거] Librarian 입력에는 Keeper 지시문만 들어가고 공유 `keeper.md` 와 라우팅 문서는 없다. 정리 패스는 개수 초과 때만 돈다.
+- 출처: 주 경로 `lib/keeper/keeper_librarian_queue_refresh.ml:488`·`:892`, 재캡처 경로 `lib/keeper/keeper_librarian_admission_owner.ml:111`,
+  `config/prompts/librarian.md` 의 template_variables(5행), `lib/keeper/keeper_memory_cleanup.mli:1-3`
+- 확인일시: `2026-11-09T11:55:00+09:00`, `2026-11-09T14:05:00+09:00`
 - 신뢰도: `High` 입력 목록. `Medium` "다른 재검토 계기가 없다"(호출처 전수 조사는 안 함).
 - 제한조건: 소스 읽기만 했다. 실행 경로 추적은 안 했다.
 
@@ -41,17 +75,24 @@
 - 신뢰도: `High` 개수. `Low` "113개가 다시 검증할 대상"이라는 해석(상한일 뿐 실제 낡은 수는 모름).
 - 제한조건: 한 번의 지시에서 온 행이 몇 개인지는 분류하지 않았다.
 
-- 항목: [근거] 그 기억이 남아 있던 01:50:53Z~02:57:15Z 에 리뷰 계정이 Draft 를 이유로 판정을 미룬 COMMENT 는 0건이다. 같은 기간 COMMENT 1건(#50242)은 다른 Keeper 의 Ready PR 관점 의견이다.
+- 항목: [근거] 기억이 남아 있던 01:50:53Z~02:57:15Z 에 리뷰 계정이 Draft 를 이유로 판정을 미룬 COMMENT 는 0건이다. 같은 기간 COMMENT 1건(#50242)은 다른 Keeper 의 Ready PR 관점 의견이다.
 - 출처: GitHub GraphQL, 최근 갱신 PR 100개의 reviews(PR 당 마지막 40개), 계정별·시간 구간별 집계
 - 확인일시: `2026-11-09T12:35:00+09:00`
 - 신뢰도: `Medium`. 계정을 Keeper 셋이 같이 써서 sister 의 리뷰만 가를 수 없다. PR 100개 밖의 리뷰는 세지 않았다.
-- 제한조건: "Draft 를 이유로 미룸"은 본문 앞 300자에 `Draft` 가 있는 COMMENT 로 셌다(측정용 근사).
+- 제한조건: "Draft 를 이유로 미룸"은 본문 앞 300자에 `Draft` 가 있는 COMMENT 로 셌다(측정용 근사). 기억이 생기기 전 01:48:37Z COMMENT 는 이 구간 밖이라 위 항목에 따로 적었다.
 
 - 항목: [근거] 리뷰어 9명의 `constraint` 114개 중 위임·요청 낱말(`위임`, `요청 기준`, `이번 요청`, `의뢰`)이 든 것은 4개이고, 위임 한 번을 정책으로 굳힌 것은 1건이다.
+  다른 분류에서 1건이 더 있다. mother 의 `review_delegation` 기억(2026-11-06T03:11Z)은 "Draft 위임은 판정 줄 없이 … COMMENT"를 반복되는 위임 형식으로 적었고 14:05 KST 에도 남아 있다.
 - 출처: 리뷰어 9명의 `memory-current.json`
-- 확인일시: `2026-11-09T12:35:00+09:00`
+- 확인일시: `2026-11-09T12:35:00+09:00`, `2026-11-09T14:05:00+09:00`
 - 신뢰도: `Low`. 낱말로 센 측정용 추정이라 놓친 행이 있을 수 있다.
 - 제한조건: 손으로 분류한 표본이 없다.
+
+- 항목: [근거] 선택지 판정은 세 모델이 따로 했다. Sonnet 과 Fable 에는 원자료와 질문만 주고 답을 정한 뒤 분석 문서를 읽게 했다. 세 모델 모두 6.0(정책 정본 하나)을 지금 할 일로, 6.3·6.4 를 하지 않을 일로 골랐다.
+- 출처: 이 세션의 하위 에이전트 응답(저장소에 넣지 않음)
+- 확인일시: `2026-11-09T12:50:00+09:00`
+- 신뢰도: `Medium`. 같은 원자료를 받았으므로 독립 표본이 아니다.
+- 제한조건: 이 판정은 근거가 아니라 의견이다.
 
 ## 외부 자료
 

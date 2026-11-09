@@ -150,17 +150,17 @@ let exact_lane_overview_actions state =
 
 (* The first reading separates declarations, application and observed work.
    Candidate routes, percentages and latency remain in the full [d] reading. *)
-let feature_summary_lines state ~width ~label ~purpose ~standing ~fields ~actions =
+let feature_summary_lines state ~width ~label ~purpose ~standing ~notices ~fields ~actions =
   let wrap style text =
-    Masc_tui_text_block.rows ~max_cells:(max 1 width) (Terminal_text.single_line text)
+    Masc_tui_text_block.rows ~max_cells:(max 1 width) text
     |> List.map (fun line -> style, line) in
   wrap Ansi.bold label
   @ wrap (Theme.recede ()) purpose
   @ wrap (Masc_tui_lane_standing.colour standing)
-      (ui_text state ~ko:"관측 상태 · " ~en:"Observed state · "
-       ^ Masc_tui_lane_standing.word ~korean:(state.ui_language = Lang_ko) standing)
-  @ List.concat_map (fun (style, line) -> wrap style line) fields
+      (Masc_tui_lane_standing.word ~korean:(state.ui_language = Lang_ko) standing)
+  @ List.concat_map (fun (style, line) -> wrap style line) notices
   @ List.map (fun line -> Theme.info (), line) (Hint_lines.wrap ~max_cells:(max 1 width) actions)
+  @ List.concat_map (fun (style, line) -> wrap style line) fields
 
 let standalone_lane_summary_lines state ~width ~standing
     (lane : Tui_decode.standalone_lane) =
@@ -170,36 +170,22 @@ let standalone_lane_summary_lines state ~width ~standing
     | Lane_off -> text "꺼짐" "Off"
     | Lane_unconfigured -> text "실행 후보 미설정" "No candidates configured"
     | Lane_registry_unavailable -> text "레지스트리 미관측" "Registry not observed" in
-  let admission = match lane.sl_configuration_state with
-    | Lane_ready -> Printf.sprintf
-        (if state.ui_language = Lang_ko then "수락된 후보 %d개" else "%d candidates admitted")
-        (List.length lane.sl_admitted_slots + List.length lane.sl_cli_slots)
-    | Lane_slotless -> text "사용 가능한 후보 없음" "No usable candidates"
-    | Lane_off -> text "새 실행 중지 · 기존 실행은 별도" "New runs disabled; in-flight runs are separate"
-    | Lane_unconfigured -> text "미설정" "Not configured"
-    | Lane_registry_unavailable -> text "미관측" "Not observed" in
   let current = if lane.sl_running_count = 0 then text "보고된 실행 없음" "No runs reported"
     else Printf.sprintf (if state.ui_language = Lang_ko then "%d건 실행 관측" else "%d runs observed") lane.sl_running_count in
-  let retained = Printf.sprintf
-      (if state.ui_language = Lang_ko then "%d건 · 성공 %d / 실패 %d / 취소 %d" else "%d retained · %d succeeded / %d failed / %d cancelled")
-      lane.sl_retained_run_count lane.sl_succeeded_count lane.sl_failed_count lane.sl_cancelled_count in
+  let notices = Option.to_list (Option.map (fun error -> Theme.bad (),
+      text "실행 준비 오류 · " "Admission error · " ^ error) lane.sl_admission_error) in
   let fields =
-    [ Ansi.reset, text "설정 선언 · " "Declaration · " ^ declared
-    ; Ansi.reset, text "실행 준비 · " "Admission · " ^ admission
-    ; Ansi.reset, text "현재 실행(관측) · " "Current runs (observed) · " ^ current
-    ; (if lane.sl_failed_count > 0 then Theme.warn () else Theme.recede ()),
-        text "보존 실행 · " "Retained runs · " ^ retained
+    [ Ansi.reset, text "설정 · " "Configuration · " ^ declared
+    ; Ansi.reset, text "현재 실행 · " "Current runs · " ^ current
     ]
     @ Option.to_list (Option.map (fun outcome -> Theme.recede (),
         text "마지막 종료 결과 · " "Last terminal outcome · " ^ Terminal_text.single_line outcome)
-        lane.sl_last_outcome)
-    @ Option.to_list (Option.map (fun error -> Theme.bad (),
-        text "실행 준비 오류 · " "Admission error · " ^ error) lane.sl_admission_error) in
+        lane.sl_last_outcome) in
   feature_summary_lines state ~width ~label:lane.sl_label
     ~purpose:(match lane.sl_purpose with
       | Some purpose -> purpose
       | None -> text "이 관측에는 기능 설명이 없습니다." "No purpose was reported in this observation.")
-    ~standing ~fields
+    ~standing ~notices ~fields
     ~actions:(exact_lane_overview_actions state)
 
 let inventory_row_summary_lines state ~width ~standing ~selected_output
@@ -207,7 +193,7 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
   let open Masc.Tui_decode_lane_inventory in
   let text ko en = ui_text state ~ko ~en in
   let field label value = Ansi.reset, label ^ " · " ^ value in
-  let fields, actions = match row.state with
+  let fields, notices, actions = match row.state with
     | Exact_state config ->
         let declared, applied, errors = match config with
           | Configured c ->
@@ -218,22 +204,20 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
           | Disabled _ -> text "꺼짐" "Off", text "새 실행 중지" "New runs disabled", []
           | Unconfigured detail -> text "미설정" "Not configured", detail, []
           | Registry_unavailable detail -> text "미관측" "Not observed", detail, [] in
-        [field (text "설정 선언" "Declaration") declared;
+        [field (text "설정" "Configuration") declared;
          field (text "실행 준비" "Admission") applied;
-         field (text "현재·보존 실행" "Current/retained runs") (text "미관측" "Not observed")]
-        @ errors, exact_lane_overview_actions state
+         field (text "실행 기록" "Run history") (text "미관측" "Not observed")],
+        errors, exact_lane_overview_actions state
     | Browser_clients reading ->
-        let connection = match reading with
+        let connection, notices = match reading with
           | Browser_observed count -> Printf.sprintf
-              (if state.ui_language = Lang_ko then "연결된 클라이언트 %d개" else "%d connected clients") count
-          | Browser_addon_absent -> text "브라우저 플러그인 선언 없음" "No browser plugin declared"
-          | Browser_addon_off -> text "브라우저 플러그인 꺼짐" "Browser plugin off"
-          | Browser_addon_not_running -> text "켜짐 선언 · 워커 실행 미보고" "Declared on; no running worker reported"
-          | Browser_addon_unavailable detail -> text "관측 불가: " "Observation unavailable: " ^ detail in
-        [field (text "연결 관측" "Connection observation") connection;
-         field (text "선언·적용" "Declaration/application") (text "이 연결 목록에서는 미관측" "Not observed by the client list");
-         field (text "설정 경로" "Configuration") (text "브라우저 플러그인에서 관리" "Managed by the browser plugin");
-         field (text "현재·보존 워커" "Current/retained workers") (text "이 연결 목록에서는 미관측" "Not observed by the client list")],
+              (if state.ui_language = Lang_ko then "연결된 클라이언트 %d개" else "%d connected clients") count, []
+          | Browser_addon_absent -> text "브라우저 플러그인 선언 없음" "No browser plugin declared", []
+          | Browser_addon_off -> text "브라우저 플러그인 꺼짐" "Browser plugin off", []
+          | Browser_addon_not_running -> text "켜짐 선언 · 워커 실행 미보고" "Declared on; no running worker reported", []
+          | Browser_addon_unavailable detail -> text "조회 실패" "Read failed", [Theme.bad (), detail] in
+        [field (text "연결" "Connection") connection;
+         field (text "설정" "Configuration") (text "브라우저 플러그인에서 관리" "Managed by the browser plugin")], notices,
         [hint "Enter" (text "브라우저 열기" "open browser"); hint "d" (text "관측 근거" "evidence")]
     | Machine_state (activity, publication) ->
         let declared = match activity with
@@ -245,9 +229,8 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
           | Stable -> text "보존된 화면 안정 상태" "Published screen stable"
           | Running -> text "실행 상태 보고" "Running state reported"
           | Publication_unavailable -> text "워커 관측 불가" "Worker observation unavailable" in
-        [field (text "설정 선언" "Declaration") declared;
-         field (text "화면 관측" "Screen observation") publication;
-         field (text "현재·보존 워커" "Current/retained workers") (text "미관측 · 화면 상태와 별도" "Not observed; separate from screen state")],
+        [field (text "설정" "Configuration") declared;
+         field (text "화면" "Screen") publication], [],
         [hint "Enter" (text "화면 열기" "open screen"); hint "Space" (text "켜기/끄기" "on/off"); hint "d" (text "관측 근거" "evidence")]
     | Package_state {declaration; instances} ->
         let declared, application, errors = match declaration with
@@ -265,7 +248,7 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
                 | Failed messages -> text "적용 실패" "Application failed", List.map (fun message -> Theme.bad (), message) messages
                 | Unknown messages -> text "적용 미확인" "Application unconfirmed", List.map (fun message -> Theme.warn (), message) messages in
               (if value.enabled then text "켜짐" "On" else text "꺼짐" "Off"), application, errors in
-        let live, retained = List.partition (fun (item : instance) -> match item.presence with Live -> true | Retained -> false) instances in
+        let live = List.filter (fun (item : instance) -> match item.presence with Live -> true | Retained -> false) instances in
         let phase_label = function
           | Attached -> text "연결" "attached"
           | Observing -> text "관측 중" "observing"
@@ -277,7 +260,6 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
           | items ->
               Printf.sprintf (if state.ui_language = Lang_ko then "현재 서버 기록 %d개" else "%d current-server records") (List.length items)
               ^ " · " ^ String.concat ", " (List.map (fun (item : instance) -> phase_label item.phase) items) in
-        let retained = Printf.sprintf (if state.ui_language = Lang_ko then "%d개 · 현재 실행과 별도" else "%d records; separate from current execution") (List.length retained) in
         let failures = List.filter_map (fun (item : instance) ->
           let prefix = match item.presence with Live -> text "현재 워커 실패 · " "Current worker failed · " | Retained -> text "보존 워커 실패 · " "Retained worker failed · " in
           match item.phase with
@@ -297,14 +279,13 @@ let inventory_row_summary_lines state ~width ~standing ~selected_output
               [hint "Enter" (text "워커·적용 상태" "workers and application"); hint "d" (text "전체 근거" "full evidence")]
           | (Exact _ | Browser _ | Machine _), _ ->
               [hint "Enter" (text "열기" "open"); hint "d" (text "전체 근거" "full evidence")] in
-        [field (text "설정 선언" "Declaration") declared;
-         field (text "설정 적용" "Application") application;
-         field (text "현재 워커(관측)" "Current workers (observed)") current;
-         field (text "보존 워커" "Retained workers") retained]
-        @ errors @ failures @ output, actions
+        [field (text "설정" "Configuration") declared]
+        @ (match declaration with None -> [] | Some _ -> [field (text "적용" "Application") application])
+        @ [field (text "워커" "Workers") current]
+        @ output, errors @ failures, actions
   in
   feature_summary_lines state ~width ~label:row.label ~purpose:row.purpose
-    ~standing ~fields ~actions
+    ~standing ~notices ~fields ~actions
 
 let standalone_lane_without_slot_rows_ko (lane : Tui_decode.standalone_lane) =
   let without = lane.sl_runs_without_slot in
@@ -671,21 +652,15 @@ let render_lanes_overview (state : state) =
   let header =
     let title = screen_title
         (ui_text state ~ko:" MASC 기능·플러그인" ~en:" MASC Features & plugins") in
-    match state.lane_inventory with
-    | None ->
-        Printf.sprintf "%s  %s  %s"
-          title (title_missing_reading ~error:state.standalone_lanes_error)
-          (connection_badge state)
-    | Some _ ->
-        runtime_substrate_heading state ~cols ~title ~current:`Features
-          ~after:[]
+    let reading = match state.lane_inventory with
+      | None -> [title_missing_reading ~error:state.standalone_lanes_error]
+      | Some _ -> [] in
+    detail_heading ~cols ~lead:(Lead_text (title ^ " ")) ~id:""
+      ~after:reading ~tail:(connection_badge state)
   in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  projection.lop_headings
-  |> List.iteri (fun i line -> box_line_styled buf cols
-       ~style:(if i = 0 then Ansi.bold else Theme.recede ()) line);
   projection.lop_links
   |> List.iter (fun links ->
        let line = links |> List.map (fun (target, label) ->
@@ -763,7 +738,7 @@ let render_lanes_overview (state : state) =
   let listing = listing @ Option.to_list position in
   let listing = if projection.lop_boxed then
       studio_panel ~width:list_width
-        ~title:(ui_text state ~ko:"기능 목록 · 이름/하는 일/관측" ~en:"Capabilities · name/purpose/state")
+        ~title:(ui_text state ~ko:"기능" ~en:"Features")
         ~lines:listing
     else listing in
   let detail_height = projection.lop_detail_height in
@@ -783,7 +758,7 @@ let render_lanes_overview (state : state) =
   let detail = List.map (fun (style, line) -> style ^ line ^ Ansi.reset) visible_detail in
   let detail = if projection.lop_boxed then
       studio_panel ~width:detail_width
-        ~title:(ui_text state ~ko:"선택한 기능 · 관측과 조치" ~en:"Selected capability · observations and actions")
+        ~title:(ui_text state ~ko:"선택한 기능" ~en:"Selected feature")
         ~lines:detail
     else detail in
   if split then begin

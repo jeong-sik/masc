@@ -23956,13 +23956,6 @@ let runtime_picker_projection ?(page=runtime_picker_page) (state : state) =
 (* The feature landing and its key viewport share the complete physical
    heading, catalogue links and panel geometry. Destinations stay in Types;
    the renderer alone adds click marks and native panel styling. *)
-let lanes_overview_heading_rows (state : state) ~cols =
-  let cells = max 1 (Masc_tui_frame.inner_width ~cols) in
-  [ ui_text state ~ko:"여기서 무엇을 사용할 수 있나" ~en:"What can be used here"
-  ; ui_text state ~ko:"기능과 관측 상태를 고르고, 설정·워커·조치를 읽습니다."
-      ~en:"Select a capability and observation, then read configuration, workers and actions."
-  ] |> List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:cells)
-
 let lanes_overview_link_rows (state : state) ~cols =
   let cells = max 1 (Masc_tui_frame.inner_width ~cols) in
   let links =
@@ -24027,7 +24020,6 @@ let lanes_scrolled (state : state) ~cols:_ =
       }
 
 type lanes_overview_projection = {
-  lop_headings : string list;
   lop_links : (surface option * string) list list;
   lop_observation : bool;
   lop_notices : string list;
@@ -24045,7 +24037,6 @@ type lanes_overview_projection = {
 let lanes_overview_projection (state : state) ~rows ~cols =
   let budget = max 0 (rows - Masc_tui_frame.chrome_rows) in
   let width = max 1 (Masc_tui_frame.inner_width ~cols) in
-  let headings = lanes_overview_heading_rows state ~cols in
   let links = lanes_overview_link_rows state ~cols in
   let notices = lane_inventory_notice_lines ~cols state in
   let split, list_width, detail_width = lanes_overview_panel_widths state ~cols in
@@ -24059,7 +24050,7 @@ let lanes_overview_projection (state : state) ~rows ~cols =
       + lanes_overview_picker_rows state in
   let panel_edges = 2 in
   let native_minimum = (panel_edges + 1) * (if split then 1 else 2) in
-  let full = List.length headings + List.length links + List.length notices
+  let full = List.length links + List.length notices
       + 1 + full_tail_rows + native_minimum <= budget in
   let compact_tail =
     let picker = match runtime_picker_projection state with
@@ -24090,14 +24081,14 @@ let lanes_overview_projection (state : state) ~rows ~cols =
   let tail_rows = if full then full_tail_rows else List.length compact_tail in
   let minimum_body = min 2 (max 0 (budget - tail_rows)) in
   let intro_room = max 0 (budget - tail_rows - minimum_body) in
-  let headings, links, observation, notices = if full then headings, links, true, notices
+  let links, observation, notices = if full then links, true, notices
     else
       let observation = intro_room > 0 in
       let room = max 0 (intro_room - if observation then 1 else 0) in
       let notices = List.take room notices in
       let links = List.take (max 0 (room - List.length notices)) links in
-      [], links, observation, notices in
-  let intro_rows = List.length headings + List.length links
+      links, observation, notices in
+  let intro_rows = List.length links
       + (if observation then 1 else 0) + List.length notices in
   let boxed = full in
   let split = boxed && split in
@@ -24110,7 +24101,7 @@ let lanes_overview_projection (state : state) ~rows ~cols =
   let count = List.length (lane_inventory_entries state) in
   let position = list_slots > 1 && count > list_slots in
   let list_height = max 0 (list_slots - if position then 1 else 0) in
-  { lop_headings = headings; lop_links = links; lop_observation = observation;
+  { lop_links = links; lop_observation = observation;
     lop_notices = notices; lop_boxed = boxed; lop_split = split;
     lop_list_width = list_width; lop_detail_width = detail_width;
     lop_list_height = list_height; lop_detail_height = detail_height;

@@ -38167,8 +38167,11 @@ Use relative paths for resources already held in the package. -->
                   Masc_tui_scroll.step_uncounted ~delta state.memory_fact_detail_scroll)
        | Some ("\r" | "\n" | "enter")
          when state.view = Memory && Option.is_some state.memory_facts_keeper ->
-           state.memory_fact_detail_open <- true;
-           state.memory_fact_detail_scroll <- 0
+           (* A browser with no fact has no reading to open. *)
+           if not (List.is_empty (Masc_tui_types.memory_fact_rows state)) then begin
+             state.memory_fact_detail_open <- true;
+             state.memory_fact_detail_scroll <- 0
+           end
        | Some ("esc" | "left")
          when state.view = Acting && Option.is_some state.acting_detail ->
            state.acting_detail <- None;

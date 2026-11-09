@@ -1675,6 +1675,13 @@ let schedule_delivery_rows = 2
 let schedule_rows_around_list =
   schedule_summary_rows + schedule_column_header_rows + schedule_delivery_rows
 
+(* Whether the list holds a row for [j/k], [Right / Enter], [e], [x] and [Y]
+   to act on. Read by the footer; the dispatcher reads the same rows. *)
+let schedule_list_has_rows (state : state) =
+  match state.schedules with
+  | Some snapshot -> snapshot.scs_rows <> []
+  | None -> false
+
 (** Render the Schedules surface: the scheduled-automation list, with an
     armed cancel. The server sorts active rows first by due time and caps the
     list at its own limit; [scs_truncated] and [scs_request_count] say what
@@ -1692,7 +1699,9 @@ let render_schedule_list (state : state) =
     (connection_badge state) in
 
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
-    ~hints:(Masc_tui_keys.footer_hints ~detail_open:false Schedules)
+    ~hints:
+      (Masc_tui_keys.footer_hints ~detail_open:false
+         ~has_rows:(schedule_list_has_rows state) Schedules)
     ~body:(fun ~budget c ->
   (* The refusal rows go first and take what the list's fixed rows leave;
      past that, the last row says where the rest is. The fixed rows are the

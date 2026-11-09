@@ -20,6 +20,17 @@ type detail_state =
   | List_only  (** only while no detail is open *)
   | Detail_only  (** only while a detail is open *)
 
+(* Whether a binding needs a row under the cursor. A list with no rows has
+   nothing for [j/k] to step over, [Right / Enter] to open or [y / x] to
+   answer, and the dispatcher ends each of those in [()]. The footer drew them
+   anyway, first in line, so on a narrow terminal it gave up the keys that do
+   act -- [n] on an empty Schedules list -- before them. As with
+   [detail_state], the fact is a value in the table, so the footer and the
+   dispatcher stop disagreeing. *)
+type row_need =
+  | Rowless  (** answers with no row under the cursor; the default *)
+  | Needs_row  (** steps over, opens or answers a row; refused on an empty list *)
+
 type binding = {
   key : string;
   label : string;
@@ -27,10 +38,11 @@ type binding = {
   help : string option;
   group : group;
   detail : detail_state;
+  rows : row_need;
 }
 
-let b ?help ?ko ?(detail = Either) group key label =
-  { key; label; label_ko = ko; help; group; detail }
+let b ?help ?ko ?(detail = Either) ?(rows = Rowless) group key label =
+  { key; label; label_ko = ko; help; group; detail; rows }
 
 (* [None] is shared by all Config panes; [Some panes] belongs only to those
    input handlers. Keep availability beside the binding, not in a second key
@@ -381,16 +393,17 @@ let keeper_actions =
 (* The keys that move a row list by more than a step. Shared rather than
    retyped per surface: they answer wherever [row_list] in masc_tui.ml finds a
    list, and that is one decision, so the table should not be able to claim
-   them for one listing and forget them on the next. *)
-let row_list_page = b Navigate "PgUp/PgDn" "page"
+   them for one listing and forget them on the next. Each needs a row: with
+   [rl_count = 0] the dispatcher answers them with [()]. *)
+let row_list_page = b ~rows:Needs_row Navigate "PgUp/PgDn" "page"
 let row_list_jumps =
   [ row_list_page
-  ; b Navigate "Home/End" "top/bottom"
+  ; b ~rows:Needs_row Navigate "Home/End" "top/bottom"
   ]
 
 (* The same two, minus the page key, for the surfaces whose own entry already
    spells one because a detail pane under them pages too. *)
-let row_list_edges = [ b Navigate "Home/End" "top/bottom" ]
+let row_list_edges = [ b ~rows:Needs_row Navigate "Home/End" "top/bottom" ]
 
 (* The two keys the whole surface exists for, as one binding. Spelled apart
    ("y" and "n") they were two items a fitted row could drop one at a time,
@@ -874,11 +887,12 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Schedules ->
-      [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
-      ; b Navigate "PgUp/PgDn" "page"
+      [ b Navigate "j/k" "move" ~rows:Needs_row
+          ~help:"move; in details, scroll the payload"
+      ; b Navigate "PgUp/PgDn" "page" ~rows:Needs_row
       ; b Navigate "< / >" "schedule pages" ~detail:List_only
           ~help:"previous / next server page; pages are separate observations"
-      ; b Act "Right / Enter" "details" ~detail:List_only
+      ; b Act "Right / Enter" "details" ~detail:List_only ~rows:Needs_row
           ~help:"open schedule details"
       ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
       ; b Act "Left / Esc" "back" ~detail:Detail_only
@@ -886,10 +900,11 @@ let for_surface = function
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "n" "new" ~help:"create a schedule through a $EDITOR JSON form"
-      ; b Act "e" "modify"
+      ; b Act "e" "modify" ~rows:Needs_row
           ~help:"edit the selected active schedule; running/finished rows refuse"
-      ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
-      ; b Act "Y" "copy link" ~help:"copy the selected schedule reference"
+      ; b Act "x" "cancel" ~rows:Needs_row ~help:"arm / confirm cancellation"
+      ; b Act "Y" "copy link" ~rows:Needs_row
+          ~help:"copy the selected schedule reference"
       ]
       @ row_list_edges @ listing_meta
   | Verification ->
@@ -933,10 +948,11 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Harness ->
-      [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
+      [ b Navigate "j/k" "move" ~rows:Needs_row
+          ~help:"move; in a verdict, scroll"
       ; b Navigate "v" "next Work tab" ~help:"back round to Goals"
-      ; b Navigate "PgUp/PgDn" "page"
-      ; b Act "Right / Enter" "verdict" ~detail:List_only
+      ; b Navigate "PgUp/PgDn" "page" ~rows:Needs_row
+      ; b Act "Right / Enter" "verdict" ~detail:List_only ~rows:Needs_row
           ~help:"open the full evaluator verdict"
       ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
       ; b Act "Left / Esc" "back" ~detail:Detail_only
@@ -952,10 +968,11 @@ let for_surface = function
 
            [x], not [n]: this surface answers the row search, and [n] / [N]
            step it. *)
-      ; b Act "y / x" "agree / overrule"
+      ; b Act "y / x" "agree / overrule" ~rows:Needs_row
           ~help:"y records the machine's verdict as yours; x records the \
                  opposite, with $EDITOR taking the reason"
-      ; b Act "Y" "copy task" ~help:"copy a link to the task in Work"
+      ; b Act "Y" "copy task" ~rows:Needs_row
+          ~help:"copy a link to the task in Work"
       ; b Search "/" "find" ~detail:List_only
           ~help:"jump the cursor to a matching task id or title"
       ; b Search "n / N" "next / previous match" ~detail:List_only
@@ -1287,17 +1304,25 @@ let hints_of_bindings ?(lang = Lang_en) bindings =
    function because two footers filter their surface's table by hand --
    Resources for the focused pane, Code for the open one -- and a second
    reading of this rule beside them is how a key comes back to a footer that
-   refuses it. *)
-let answers_in_state ?detail_open binding =
-  match detail_open, binding.detail with
-  | _, Either -> true
-  | None, (List_only | Detail_only) -> true
-  | Some open_, List_only -> not open_
-  | Some open_, Detail_only -> open_
+   refuses it.
 
-let footer_hints ?detail_open surface =
+   [has_rows] is how a list renderer says whether the list on screen holds a
+   row. [Some false] leaves out the keys that need one; a renderer that does
+   not pass it keeps every binding, as before. *)
+let answers_in_state ?detail_open ?has_rows binding =
+  (match detail_open, binding.detail with
+   | _, Either -> true
+   | None, (List_only | Detail_only) -> true
+   | Some open_, List_only -> not open_
+   | Some open_, Detail_only -> open_)
+  && (match has_rows, binding.rows with
+      | Some false, Needs_row -> false
+      | Some false, Rowless -> true
+      | (Some true | None), (Rowless | Needs_row) -> true)
+
+let footer_hints ?detail_open ?has_rows surface =
   hints_of_bindings
-    (List.filter (answers_in_state ?detail_open) (for_surface surface))
+    (List.filter (answers_in_state ?detail_open ?has_rows) (for_surface surface))
 
 (* [r] is Resume for a paused Goal, so the generic refresh label must not
    advertise it as a read in this detail. The Candle read has its own key. *)
@@ -1366,6 +1391,18 @@ let has_detail_scoped_keys surface =
       match binding.detail with
       | Either -> false
       | List_only | Detail_only -> true)
+    (for_surface surface)
+
+(* The same question for rows: whether this surface's table holds a key that
+   needs one, and so owes [footer_hints] a [~has_rows] from its list renderer.
+   [test_tui_footer_row_need] reads this rather than a list written by hand
+   beside it. *)
+let has_row_scoped_keys surface =
+  List.exists
+    (fun binding ->
+      match binding.rows with
+      | Rowless -> false
+      | Needs_row -> true)
     (for_surface surface)
 
 let footer_hints_metrics ~telemetry =

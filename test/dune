@@ -3718,6 +3718,11 @@
  (libraries alcotest masc_tui_fetched masc_tui_keys masc_tui_types masc_tui_footer))
 
 (test
+ (name test_tui_footer_row_need)
+ (modules test_tui_footer_row_need)
+ (libraries alcotest masc_tui_keys masc_tui_types))
+
+(test
  (name test_tui_runtime_config_receipt)
  (modules test_tui_runtime_config_receipt)
  (libraries alcotest masc_tui_runtime_config_receipt yojson))

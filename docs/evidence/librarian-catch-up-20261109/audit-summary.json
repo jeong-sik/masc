@@ -1,0 +1,142 @@
+{
+  "schema": "librarian-catch-up-audit.v1",
+  "installed_server_commit": "6a6ec4c28e2f26edcf272e37115ac2f655005f2b",
+  "implementation_base": "ce6a2e21963cbbcc485c1f8189eb983fa6e0335a",
+  "effective_base_path": "/Users/dancer/me",
+  "log_provenance": {
+    "captured_at": "2026-11-09T10:14:45.307280+00:00",
+    "runtime": "/Users/dancer/me/.masc",
+    "files": [
+      {
+        "path": "/Users/dancer/me/.masc/logs/system_log_2026-11-06.jsonl",
+        "bytes_before": 97020003,
+        "bytes_after": 97020003,
+        "mtime_before_ns": 1794009599998066316,
+        "mtime_after_ns": 1794009599998066316,
+        "scanned_lines": 242625,
+        "malformed_lines": 0
+      },
+      {
+        "path": "/Users/dancer/me/.masc/logs/system_log_2026-11-07.jsonl",
+        "bytes_before": 76756298,
+        "bytes_after": 76756298,
+        "mtime_before_ns": 1794095996133199198,
+        "mtime_after_ns": 1794095996133199198,
+        "scanned_lines": 210260,
+        "malformed_lines": 0
+      },
+      {
+        "path": "/Users/dancer/me/.masc/logs/system_log_2026-11-08.jsonl",
+        "bytes_before": 50219016,
+        "bytes_after": 50219016,
+        "mtime_before_ns": 1794182395062424213,
+        "mtime_after_ns": 1794182395062424213,
+        "scanned_lines": 138949,
+        "malformed_lines": 0
+      },
+      {
+        "path": "/Users/dancer/me/.masc/logs/system_log_2026-11-09.jsonl",
+        "bytes_before": 69564860,
+        "bytes_after": 69571457,
+        "mtime_before_ns": 1794219278481847397,
+        "mtime_after_ns": 1794219283199031273,
+        "scanned_lines": 193850,
+        "malformed_lines": 0
+      }
+    ],
+    "limits": "Logs may append during capture. Owner records are separate read-only observations, not an atomic snapshot. Bodies are not printed or replayed."
+  },
+  "health_observation": {
+    "captured_at_kst": "2026-11-09T19:05:14.502688+09:00",
+    "memory_rows": [
+      {
+        "keeper": "code-reviewer",
+        "observed_state": "pending",
+        "pass_measured_at": 1794218700.121503,
+        "unread_turns": 1646,
+        "last_digest_hours_ago": 39.36,
+        "gap_atoms": 4209
+      },
+      {
+        "keeper": "pr-updater",
+        "observed_state": "pending",
+        "pass_measured_at": 1794218434.960986,
+        "unread_turns": 1272,
+        "last_digest_hours_ago": 70.11,
+        "gap_atoms": 905
+      }
+    ],
+    "control_table": "runtime.addon_exact_lanes.keeper-librarian.durable",
+    "observation_limits": "Pass counters describe the last measured drain. Pending cause is not established. No runtime settings or execution state changed."
+  },
+  "retained_owner_observations": [
+    {
+      "keeper": "code-reviewer",
+      "owner_schema": "lane.addon.tool-request-owner.v4",
+      "owner_sha256": "6a859d8483667577df81ce58c19b5b25b2a1e8e4b25a131193e77357243dadf3",
+      "owner_bytes": 153181,
+      "owner_mtime": "2026-11-07T05:43:21.205168+00:00",
+      "event_counts": {
+        "dispatch_intended": 601,
+        "admission_declined": 600,
+        "worker_absent": 1
+      },
+      "evidence_counts": {
+        "capacity_wait": 600,
+        "absent": 1
+      },
+      "last_event_types": [
+        "admission_declined",
+        "dispatch_intended",
+        "admission_declined",
+        "dispatch_intended",
+        "worker_absent"
+      ],
+      "last_observation": "absent"
+    },
+    {
+      "keeper": "pr-updater",
+      "owner_schema": "lane.addon.tool-request-owner.v4",
+      "owner_sha256": "9556d20095051ac6f5b62719429536378ca319748291209110a6e31117a24ff5",
+      "owner_bytes": 75711,
+      "owner_mtime": "2026-11-06T12:09:09.753202+00:00",
+      "event_counts": {
+        "dispatch_intended": 296,
+        "admission_declined": 295,
+        "worker_absent": 1
+      },
+      "evidence_counts": {
+        "capacity_wait": 295,
+        "absent": 1
+      },
+      "last_event_types": [
+        "admission_declined",
+        "dispatch_intended",
+        "admission_declined",
+        "dispatch_intended",
+        "worker_absent"
+      ],
+      "last_observation": "absent"
+    }
+  ],
+  "scope": "Read-only observations. No request bodies, tokens, raw prompts, replay, restart, or runtime mutation. Logs and owner files were not captured atomically.",
+  "local_evidence": "artifacts/memory-catchup-20261109 and artifacts/memory-lag-20261109T100446Z in the original workspace; ignored by Git.",
+  "worker_observation": {
+    "observed_at": "2026-11-09T11:06:22.570925+00:00",
+    "package_revision": "0.2.3",
+    "manifest_max_reply_bytes": 4194304,
+    "resolved_image": "sha256:ccafc76f0a45817c404e936e654e579f36e97b516d2369f3a6018f246b4b33a7",
+    "container_image_verified": true,
+    "source_path_in_container": "/exact_worker.py",
+    "source_sha256": "856d5bb683c687536cb773a9476418f7198f4a8e36260e6ce951c79cf811b758",
+    "candidate_source_sha256": "856d5bb683c687536cb773a9476418f7198f4a8e36260e6ce951c79cf811b758",
+    "source_bytes_match": true,
+    "method": "Read-only docker inspect and docker cp; no container restart, exec, or persistent store changes."
+  },
+  "candidate_integration": {
+    "recorded_at": "2026-11-09T11:21:12.961563+00:00",
+    "base": "6d0d6dcb4dae3d7353e50aadb9dd8510f05b6a54",
+    "health_schema": "keeper.memory_os.current_health.v11",
+    "note": "The initial investigation used v9. Current main uses v10 for changed age ranges; candidate waits require v11. This does not change the observed installed runtime."
+  }
+}

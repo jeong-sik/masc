@@ -15221,7 +15221,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
     | Acting_pane_call_order_unknown _ | Scroll_acting_pane _ | Acting_pane_scroll_unknown _
     | Switch_keeper _ | Switch_keeper_missing_name | Queue _ | Run_next | Priority _
     | Answer_tool_approval _ | Interrupt_turn | Interrupt_keeper_turn _ | Steer_turn _
-    | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory
+    | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory | Memory_status | Memory_sync
     | Open_fleet_memory | Find_in_chat _ | Find_next | Open_measurement _ | Measurement_missing_sha
     | Inspect_context | View_image _ | View_image_missing_path | Attach_image _ | Attach_image_missing_path
     | Attach_image_ref _ | Attach_image_ref_missing_value | Preset_list | Preset_restore _
@@ -15256,7 +15256,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       | Set_acting_pane_call_order _ | Acting_pane_call_order_unknown _ | Scroll_acting_pane _
       | Acting_pane_scroll_unknown _ | Switch_keeper _ | Switch_keeper_missing_name | Queue _
       | Run_next | Priority _ | Answer_tool_approval _ | Interrupt_turn | Interrupt_keeper_turn _
-      | Steer_turn _ | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory
+      | Steer_turn _ | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory | Memory_status | Memory_sync
       | Open_fleet_memory | Find_in_chat _ | Find_next | Open_measurement _
       | Measurement_missing_sha | Inspect_context | View_image _ | View_image_missing_path
       | Attach_image _ | Attach_image_missing_path | Attach_image_ref _
@@ -15899,6 +15899,53 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
         ("Librarian/Memory timeline: "
          ^ memory_visibility_to_string state.msg_memory_visibility
          ^ " (Ctrl-N or /memory to cycle)")
+  | Masc_tui_command.Memory_status ->
+      (match target with
+       | None -> notice ~kind:Notice_failure "먼저 Keeper를 선택하세요."
+       | Some _ when not (server_authority_ready state) ->
+         notice ~kind:Notice_failure "서버와 작업 공간을 확인한 뒤 다시 조회하세요."
+       | Some keeper ->
+         Masc_tui_message_input.clear state.msg_input;
+         notice ~kind:Notice_reply (keeper ^ ": 메모리 처리 상태 조회 중");
+         let ticket = ref () in
+         state.chat_command_reads <-
+           (ticket, state.workspace_read_authority, "/memory status") :: state.chat_command_reads;
+         let host = server_peer_host and port = state.port in
+         launch_workspace_json_read state ~mailbox
+           ~deliver:(fun result -> Chat_command_read_completed
+             (ticket, Memory_msg (Memory_loaded (Command_health_read {keeper; result}))))
+           (fun () -> Masc_tui_loader.load_memory_health_row ~host ~port ~keeper))
+  | Masc_tui_command.Memory_sync ->
+      (match target, state.server_identity with
+       | Some keeper, Some workspace
+         when server_authority_ready state ->
+           let check = capture_workspace_check state ~mailbox in
+           let authority = state.workspace_authority in
+           let host = server_peer_host and port = state.port in
+           let posting = Atomic.make false in
+           let interrupted detail =
+             if Atomic.get posting then Masc_tui_http.Catch_up_unconfirmed detail
+             else Masc_tui_http.Catch_up_not_sent detail in
+           let message outcome =
+             Keeper_msg (Keeper_memory_catch_up_done {keeper; workspace; authority; outcome}) in
+           Masc_tui_message_input.clear state.msg_input;
+           notice ~kind:Notice_reply (keeper ^ ": 메모리 따라잡기 요청 중");
+           (* Keep this original operation receipt through workspace withdrawal.
+              Its delivery grants no read or retry authority in a successor. *)
+           Masc_tui_workspace_result.launch state ~results:mailbox.workspace_results
+             ~cancelled_by:(fun () -> message (interrupted "작업 공간 연결이 변경되었습니다."))
+             ~boundary_error:interrupted
+             ~deliver:(fun result -> message (match result with Ok outcome | Error outcome -> outcome))
+             (fun () ->
+               match check () with
+               | Error detail -> Ok (Masc_tui_http.Catch_up_not_sent detail)
+               | Ok () ->
+                 Atomic.set posting true;
+                 Ok (Masc_tui_http.post_keeper_memory_catch_up ~expected_workspace:workspace
+                   ~host ~port ~keeper_name:keeper))
+       | None, _ -> notice ~kind:Notice_failure "먼저 Keeper를 선택하세요."
+       | Some _, (None | Some _) ->
+           notice ~kind:Notice_failure "서버와 작업 공간을 확인한 뒤 다시 요청하세요.")
   | Masc_tui_command.Open_fleet_memory ->
       Masc_tui_message_input.clear state.msg_input;
       goto_surface state ~mailbox Memory;
@@ -23223,7 +23270,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _) | Keeper_gate_settings_loaded _
         | Keeper_tool_modes_loaded (_, _) | Keeper_tool_mode_set (_, _, _, _)
         | Keeper_chat_dispatch_blocked (_, _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _
-        | Keeper_action_done (_, _, _, _))
+        | Keeper_action_done (_, _, _, _) | Keeper_memory_catch_up_done _)
         | (Board_msg (Board_publication_done _ | Board_comment_done _)) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _)) | Goal_msg (Goal_transition_done _
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _)) | Schedule_msg (Schedules_loaded (_, _)
         | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _))
@@ -24993,6 +25040,24 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                report_action state "error"
                  (prefix ^ "creation outcome unconfirmed; declaration retained. Inspect the original roster before retrying: " ^ detail))
       end
+  | Keeper_msg (Keeper_memory_catch_up_done {keeper; workspace; authority; outcome}) ->
+      let original_is_current = authority = state.workspace_authority
+        && same_workspace_identity (Some workspace) state.server_identity in
+      let kind, detail = match outcome with
+        | Masc_tui_http.Catch_up_submitted ->
+          Notice_reply, "메모리 따라잡기 요청 접수. 처리 상태는 /memory status로 조회하세요."
+        | Catch_up_coalesced ->
+          Notice_reply, "대기 중인 따라잡기 요청에 합쳤습니다. 처리 상태는 /memory status로 조회하세요."
+        | Catch_up_not_sent detail -> Notice_failure, "요청을 전송하지 못했습니다: " ^ detail
+        | Catch_up_refused detail -> Notice_failure, "서버가 요청을 거절했습니다: " ^ detail
+        | Catch_up_unconfirmed detail ->
+          Notice_failure, "접수 결과 미확인: " ^ detail ^ " · 원래 작업 공간에서 /memory status로 확인하세요." in
+      if original_is_current then
+        chat_notice state ~keeper_name:(Some keeper) ~kind (keeper ^ ": " ^ detail)
+      else
+        report_action state (match kind with Notice_failure -> "error" | Notice_reply -> "system")
+          (Masc.Tui_decode.Canonical_path.to_string workspace.sid_base_path
+           ^ "의 원래 요청 · " ^ keeper ^ ": " ^ detail)
   | Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)) ->
       let origin_matches =
         Option.for_all
@@ -28410,8 +28475,42 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Ok snapshot, (Some _ | None) -> apply_memory_health_snapshot state snapshot
        | Error detail, (Some _ | None) -> state.memory_health_error <- Some detail);
       owe_memory_input_read state
-  | Memory_msg (Memory_loaded (Row_health_read { keeper; result })) ->
-      state.memory_health_inflight <- false;
+  | Memory_msg (Memory_loaded ((Row_health_read { keeper; result }
+      | Command_health_read { keeper; result }) as reading)) ->
+      (match reading with
+       | Row_health_read _ -> state.memory_health_inflight <- false
+       | Command_health_read _ | Fleet_health_read _ -> ());
+      (match reading with
+       | Row_health_read _ | Fleet_health_read _ -> ()
+       | Command_health_read _ ->
+         let notice = chat_notice state ~keeper_name:(Some keeper) in
+         match result with
+         | Error detail -> notice ~kind:Notice_failure (keeper ^ ": 상태 조회 실패 · " ^ detail)
+         | Ok {mhr_keeper = Row_absent; _} ->
+           notice ~kind:Notice_failure (keeper ^ ": 메모리 관측 행이 없습니다.")
+         | Ok {mhr_keeper = Row_refused refusal; _} ->
+           notice ~kind:Notice_failure (keeper ^ ": 상태를 읽지 못했습니다 · " ^ refusal.mkr_reason)
+         | Ok {mhr_keeper = Row_present row; mhr_generated_at} ->
+           let librarian = row.mkh_librarian in
+           let pass = match librarian.mlh_state with
+             | None -> "이번 서버에서 처리 결과 미관측"
+             | Some state -> Masc_tui_keeper_memory_reading.pass_word state in
+           let lag = match Masc_tui_keeper_memory_reading.unread_lag librarian with
+             | None -> "미처리 턴 미관측"
+             | Some count -> Printf.sprintf "미처리 %d턴" count in
+           let measured = match librarian.mlh_measured_at with
+             | None -> "처리 관측 시각 없음"
+             | Some at -> "처리 관측 " ^ Masc_tui_message_layout.span_text
+                 (max 0. (Time_compat.now () -. at)) ^ " 전" in
+           let cause = Option.bind librarian.mlh_state
+             Masc.Tui_decode_memory_health.memory_librarian_pass_end_cause in
+           let admission = Option.map (fun worker ->
+             "명시적 메모리 후보: " ^ Masc.Keeper_librarian_pending.description
+               (Masc.Keeper_librarian_pending.Worker worker)) librarian.mlh_admission_wait in
+           let reading_age = "상태 조회 " ^ Masc_tui_message_layout.span_text
+             (max 0. (Time_compat.now () -. mhr_generated_at)) ^ " 전" in
+           notice ~kind:Notice_reply (String.concat " · "
+             ([keeper; pass; lag; measured; reading_age] @ Option.to_list cause @ Option.to_list admission)));
       (* The row replaces the Keeper's row in the fleet answer, or removes it
          when the Keeper has none, and the totals are counted again
          (RFC-0487). A row that cannot be merged -- no fleet answer yet, a

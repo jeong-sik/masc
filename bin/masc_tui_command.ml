@@ -59,6 +59,8 @@ type t =
   | Open_calls
   | Set_tools of [ `Toggle | `Compact | `Results | `Full ]
   | Cycle_memory
+  | Memory_status
+  | Memory_sync
   | Open_fleet_memory
   | Find_in_chat of string
   | Find_next
@@ -220,8 +222,8 @@ let catalog =
     }
   ; { word = "memory"
     ; aliases = []
-    ; args = ""
-    ; summary = "cycle Librarian/Memory journal rows: summary, full, hidden"
+    ; args = "[status|sync]"
+    ; summary = "cycle journal rows, read the last measured drain, or request catch-up"
     }
   ; { word = "fleet-memory"
     ; aliases = []
@@ -544,7 +546,10 @@ let parse_with_message_source text =
     | "tools", "compact" -> Set_tools `Compact
     | "tools", "results" -> Set_tools `Results
     | "tools", "full" -> Set_tools `Full
-    | "memory", _ -> Cycle_memory
+    | "memory", "" -> Cycle_memory
+    | "memory", "status" -> Memory_status
+    | "memory", "sync" -> Memory_sync
+    | "memory", arguments -> Unknown ("memory " ^ arguments)
     | "fleet-memory", _ -> Open_fleet_memory
     | "find", "" -> Find_next
     | "find", text -> Find_in_chat text
@@ -799,6 +804,7 @@ let known_sub_arguments ~keeper_names word =
   match word with
   | "thinking" -> [ "hidden"; "folded"; "full" ]
   | "tools" -> [ "compact"; "results"; "full" ]
+  | "memory" -> [ "status"; "sync" ]
   (* [show] goes last: [save] is the older word and shares its first
      letter, so leading with [show] would move where "/preset s" lands. *)
   | "preset" -> [ "save"; "restore"; "show" ]

@@ -19700,13 +19700,19 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
                   | Masc_tui_fleet_stream.Reconnect -> raise Close_connection)
             with Close_connection -> Ok ()
           in
+          (* Every end emits exactly one connection_ended line so reconnect
+             cadence is countable per outcome; the warn on transport failure
+             stays the alarm signal with the detail. This replaces the old
+             debug-only tui_fleet_stream_ended, which no reader could see. *)
           (match outcome with
            | Error (Masc_tui_http.Http_refused { status; detail }) ->
                Masc_tui_fleet_stream.refused reader ~status ~detail;
-               Log.Transport.info "tui_fleet_stream_connection_ended outcome=refused status=%d"
+               Log.Transport.info
+                 "tui_fleet_stream_connection_ended outcome=refused status=%d detail=%s"
                  status detail
            | Error (Masc_tui_http.Transport_failed detail) ->
-               Log.Transport.warn "tui_fleet_stream_lost detail=%s" detail
+               Log.Transport.warn "tui_fleet_stream_lost detail=%s" detail;
+               Log.Transport.info "tui_fleet_stream_connection_ended outcome=transport_failed"
            | Error (Masc_tui_http.Invalid_handshake detail) ->
                Masc_tui_fleet_stream.invalid_response reader detail;
                Log.Transport.info

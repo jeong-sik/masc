@@ -1,0 +1,1318 @@
+{
+  "url": "http://127.0.0.1:5195/",
+  "title": "#26049 · MemoryInspector synthetic HTTP evidence",
+  "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 Safari/537.36",
+  "viewport": {
+    "width": 1548,
+    "height": 990,
+    "devicePixelRatio": 2
+  },
+  "body": "#26049 · 요청 출처\n\n실제 MemoryInspector 컴포넌트와 Dashboard CSS\n\nBackend · synthetic HTTP fixture\n\n설치·운영 중인 MASC, Keeper 실행 및 provider 요청의 증거가 아닙니다.\n\n원본 TurnRecord의 direct_input_source와 prompt.direct_input_source를 HTTP로 제공합니다.\n\nKEEPER 메모리\nsynthetic-peer-source-26049\n이 keeper\n전체\n✕\nSTORE\nrevision 0\n0 facts · current snapshot\nSCOPE\nsynthetic-peer-source-26049\nfresh state\nPROMPT LINK\nno memory block\nsynthetic-trace-26049#7\n최종 PROVIDER 입력 구성\n1.3KB wire · 1.2KB content\n5개 구성요소· 범위 미상· 설정 미상 · 클라이언트 보고 미측정· 설정 기준 컨텍스트 점유율 미상 · synthetic.local\nKeeper 지침\n936B\n현재 Goal\n48B\n요청 출처\n113B\n도구 스키마\n87B\n사용자 메시지\n48B\n회상 연결 · FULL PROMPT\n1\nsnapshot writer\nfresh state\n2\nsnapshot\nsynthetic://memory-current\n3\nrecall block\nnot present in latest prompt record\n4\nFull Prompt\n마지막 캡처 보기\nlatest assembly synthetic-trace-26049#7 · 2026. 11. 10. 오전 12:48\n현재 기억 계약 · FRESH STATE\nWRITER\nfresh state\nlatest snapshot writer\nCOMMIT\nsynthetic://memory-current\nsingle atomic snapshot\nRECALL\nmemory_os_recall\nexact current facts · no ranking/truncation\nDELTA\nrevision 0\nexact added / removed / retained\n장기 메모리 스토어 · MEMORY-OS\n0\n추가 0 · 제거 0 · 지지 무효화 0 · 유지 0\n장기 메모리 항목 없음.\n최근 회상 · 주입\n최근 memory_os_recall 주입 없음.",
+  "legend": [
+    {
+      "label": "Keeper 지침",
+      "bytes": "936B",
+      "bounds": {
+        "x": 898.0546875,
+        "y": 287.4296875,
+        "width": 302.5,
+        "height": 17.8203125,
+        "top": 287.4296875,
+        "right": 1200.5546875,
+        "bottom": 305.25,
+        "left": 898.0546875
+      }
+    },
+    {
+      "label": "현재 Goal",
+      "bytes": "48B",
+      "bounds": {
+        "x": 1216.5546875,
+        "y": 287.4296875,
+        "width": 302.5,
+        "height": 17.8203125,
+        "top": 287.4296875,
+        "right": 1519.0546875,
+        "bottom": 305.25,
+        "left": 1216.5546875
+      }
+    },
+    {
+      "label": "요청 출처",
+      "bytes": "113B",
+      "bounds": {
+        "x": 898.0546875,
+        "y": 309.25,
+        "width": 302.5,
+        "height": 17.8203125,
+        "top": 309.25,
+        "right": 1200.5546875,
+        "bottom": 327.0703125,
+        "left": 898.0546875
+      }
+    },
+    {
+      "label": "도구 스키마",
+      "bytes": "87B",
+      "bounds": {
+        "x": 1216.5546875,
+        "y": 309.25,
+        "width": 302.5,
+        "height": 17.8203125,
+        "top": 309.25,
+        "right": 1519.0546875,
+        "bottom": 327.0703125,
+        "left": 1216.5546875
+      }
+    },
+    {
+      "label": "사용자 메시지",
+      "bytes": "48B",
+      "bounds": {
+        "x": 898.0546875,
+        "y": 331.0703125,
+        "width": 302.5,
+        "height": 17.8203125,
+        "top": 331.0703125,
+        "right": 1200.5546875,
+        "bottom": 348.890625,
+        "left": 898.0546875
+      }
+    }
+  ],
+  "composition": "1.3KB wire · 1.2KB content5개 구성요소· 범위 미상· 설정 미상 ·\n    클라이언트 보고 미측정· 설정 기준 컨텍스트 점유율 미상 · synthetic.localKeeper 지침936B현재 Goal48B요청 출처113B도구 스키마87B사용자 메시지48B",
+  "errors": [],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/dev-token",
+      "status": 404,
+      "body": {
+        "error": "synthetic_fixture_route_unavailable"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/synthetic-peer-source-26049/turn-records?limit=24",
+      "status": 200,
+      "body": {
+        "keeper": "synthetic-peer-source-26049",
+        "count": 1,
+        "skipped_rows": 0,
+        "source": "turn_record",
+        "producer": "keeper_agent_run.run_turn|keeper_turn_record_writer",
+        "durable_store": "synthetic://turn-records",
+        "dashboard_surface": "/api/v1/keepers/:name/turn-records",
+        "freshness_slo_s": 300,
+        "live_turn_in_progress": false,
+        "live_turn_started_at_unix": null,
+        "live_turn_last_progress_at_unix": null,
+        "latest_ts_unix": 1794239283,
+        "latest_ts_iso": "2026-11-09T15:48:03Z",
+        "latest_age_s": 0,
+        "health": "ok",
+        "stale_reason": null,
+        "memory_os": {
+          "keeper": "synthetic-peer-source-26049",
+          "snapshot_store": "synthetic://memory-current",
+          "recall_enabled": false,
+          "revision": 0,
+          "updated_at": null,
+          "update_source": null,
+          "read_errors": [],
+          "facts": {
+            "shown": 0,
+            "current": 0,
+            "items": []
+          },
+          "change": {
+            "added": [],
+            "removed": [],
+            "retained": 0,
+            "invalidated": []
+          }
+        },
+        "entries": [
+          {
+            "record": {
+              "execution_ids": [],
+              "keeper": "synthetic-peer-source-26049",
+              "agent_name": "synthetic-peer-source-agent",
+              "turn_kind": "direct",
+              "trace_id": "synthetic-trace-26049",
+              "absolute_turn": 7,
+              "turn_ref": "synthetic-trace-26049#7",
+              "blocks": [
+                {
+                  "block": "keeper_instructions",
+                  "bytes": 936,
+                  "digest": "5ca036fadc8faf1be473026a01f1768326f6cf40e3281b8addd11e5ff99cd851"
+                },
+                {
+                  "block": "active_goals",
+                  "bytes": 48,
+                  "digest": "6897e8a98dbd26a68ffeb73589a53983d8cea5e7c6f1bcc41eed907ec5e10d67"
+                },
+                {
+                  "block": "direct_input_source",
+                  "bytes": 113,
+                  "digest": "58759bee28c95e004b3bacbcd112704aa5cee28492ea700ee9b6e7d4e54335ac"
+                }
+              ],
+              "input_components": [
+                {
+                  "component": "prompt.keeper_instructions",
+                  "bytes": 936
+                },
+                {
+                  "component": "prompt.active_goals",
+                  "bytes": 48
+                },
+                {
+                  "component": "prompt.direct_input_source",
+                  "bytes": 113
+                },
+                {
+                  "component": "tool_schemas",
+                  "bytes": 87
+                },
+                {
+                  "component": "message_user",
+                  "bytes": 48
+                }
+              ],
+              "runtime_profile": "synthetic.local",
+              "request_runtime_profile": "synthetic.local",
+              "request_body_bytes": 1343,
+              "transmitted_atoms": null,
+              "total_atoms": null,
+              "model_input_measurement": null,
+              "model_input_front": null,
+              "response_observed_model_input": null,
+              "raw_trace_run_ref": null,
+              "usage_scope": "unavailable",
+              "ts": 1794239283,
+              "request_observations": []
+            },
+            "diff_vs_prev": null
+          }
+        ]
+      }
+    }
+  ],
+  "navigation": [
+    {
+      "name": "http://127.0.0.1:5195/",
+      "entryType": "navigation",
+      "startTime": 0,
+      "duration": 225.29999995231628,
+      "navigationId": 1570,
+      "initiatorType": "navigation",
+      "deliveryType": "cache",
+      "nextHopProtocol": "",
+      "renderBlockingStatus": "non-blocking",
+      "contentType": "text/html",
+      "contentEncoding": "",
+      "workerStart": 0,
+      "workerRouterEvaluationStart": 0,
+      "workerCacheLookupStart": 0,
+      "workerMatchedSourceType": "",
+      "workerFinalSourceType": "",
+      "redirectStart": 0,
+      "redirectEnd": 0,
+      "fetchStart": 1.0999999046325684,
+      "domainLookupStart": 1.0999999046325684,
+      "domainLookupEnd": 1.0999999046325684,
+      "connectStart": 1.0999999046325684,
+      "secureConnectionStart": 0,
+      "connectEnd": 1.0999999046325684,
+      "requestStart": 2.5999999046325684,
+      "responseStart": 5.799999952316284,
+      "firstInterimResponseStart": 0,
+      "finalResponseHeadersStart": 5.799999952316284,
+      "responseEnd": 6.099999904632568,
+      "transferSize": 300,
+      "encodedBodySize": 863,
+      "decodedBodySize": 863,
+      "responseStatus": 200,
+      "serverTiming": [],
+      "unloadEventStart": 9.799999952316284,
+      "unloadEventEnd": 9.799999952316284,
+      "domInteractive": 14,
+      "domContentLoadedEventStart": 185.5,
+      "domContentLoadedEventEnd": 185.59999990463257,
+      "domComplete": 225.29999995231628,
+      "loadEventStart": 225.29999995231628,
+      "loadEventEnd": 225.29999995231628,
+      "type": "reload",
+      "redirectCount": 0,
+      "activationStart": 0,
+      "criticalCHRestart": 0,
+      "notRestoredReasons": null,
+      "confidence": {}
+    }
+  ],
+  "styles": [
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/ds-theme-tokens.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/primitives.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/layout.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/layers.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/kpi.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/rail.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/deck.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/drawer.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/swimlanes.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/code.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/styleseed-theme.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/styleseed-base.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/global.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/tokens.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/paper-theme.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-workspace.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/copilot-dock.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/states.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/ss-keeper-v2-bridge.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/app-shell-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/approvals-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/board-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/chat-blocks-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/cockpit-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/connectors-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/craft-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/fusion-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/ide-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/indicators-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-asks-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-memory-health-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/memory-inspector-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/primitives-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/runtime-editor-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/skin-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/surfaces-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/work-v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/colors_and_type.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/v2.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/surfaces.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/dock.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/craft.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/inspector.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/perf.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/fleet.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/logs.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/keeper-config.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/fusion.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/memory.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/schedule.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/runtime.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/ops-cluster.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/prompt-book.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/verify.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/registry.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/monitor.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/lanes.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/tempered.css",
+    "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/mobile-operator-targets.css"
+  ],
+  "resources": [
+    {
+      "name": "http://127.0.0.1:5195/@vite/client",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/fixture.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/ds-theme-tokens.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/primitives.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/layout.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/layers.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/deck.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/kpi.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/rail.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/drawer.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/swimlanes.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/code.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/styleseed-theme.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/styleseed-base.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/paper-theme.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/tokens.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/copilot-dock.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-workspace.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/global.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/states.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/ss-keeper-v2-bridge.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/app-shell-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/approvals-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/board-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/chat-blocks-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/cockpit-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/craft-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/fusion-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/connectors-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/indicators-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/ide-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-asks-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-memory-health-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/memory-inspector-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/primitives-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/runtime-editor-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/surfaces-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/skin-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/work-v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/colors_and_type.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/dock.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/craft.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/surfaces.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/v2.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/perf.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/inspector.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/logs.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/fleet.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/keeper-config.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/memory.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/schedule.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/fusion.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/runtime.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/ops-cluster.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/prompt-book.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/verify.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/registry.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/tempered.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/monitor.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/keeper-v2/lanes.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/styles/mobile-operator-targets.css",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/vite-cache/deps/preact.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/components/memory-inspector.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/vite-cache/deps/chunk-MK2TUT2O.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/vite@7.3.7_@types+node@22.19.17_jiti@2.6.1_lightningcss@1.32.0_tsx@4.23.12/node_modules/vite/dist/client/env.mjs",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/keyboard.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/turn-context-window.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/components/common/context-window-facts.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/vite-cache/deps/htm_preact.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/vite-cache/deps/preact_hooks.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/vite-cache/deps/@preact_signals.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/use-managed-async-resource.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/async-state.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/format-time.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/components/keeper-turn-inspector-panel.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/components/common/turn-usage-scope.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/vite-cache/deps/chunk-VSK7YMAG.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/token-revision.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-hot.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/tool-host-failure.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-fusion.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-goals.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-verification-runs.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-exact-lane-runs.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-goal-verification-runs.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-standalone-lanes.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-shared.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-agent.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-provider-input.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-execution.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-mission.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-keeper-cost.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-gate.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-schedule.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-tools-prompts.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-runtime.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-scheduled-automation.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-keeper-config.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-keeper-trajectory.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-keeper-tool-stats.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-keeper-tool-calls.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-telemetry.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-turn-records.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-misc.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/format-string.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dashboard-keeper-prompt.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/components/btn.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/components/common/json-viewer.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/core.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/components/common/normalize.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/dev-token.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/goal-criterion-review.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/goal-proof.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/goal-lifecycle.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/goal-identity.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/trust-disposition.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/keeper-store-normalize.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/published-artifacts.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/types/goal-store-unavailable.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/goal-store-unavailable-labels.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/config/constants.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/keeper-approval-decision.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/board.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/keeper-approval-audit.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/gate-observation-state.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/index.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/lib/rfc3339.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/@noble+hashes@2.4.0/node_modules/@noble/hashes/sha2.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/@noble+hashes@2.4.0/node_modules/@noble/hashes/utils.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/src/api/schemas/prompt-authoring.ts",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/max.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/nil.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/parse.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/stringify.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v1.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v1ToV6.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v3.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v4.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v5.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v6.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v6ToV1.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v7.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/validate.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/version.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/@noble+hashes@2.4.0/node_modules/@noble/hashes/_md.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/@noble+hashes@2.4.0/node_modules/@noble/hashes/_u64.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/rng.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/md5.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/v35.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/sha1.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/uuid@14.0.0/node_modules/uuid/dist/regex.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/index.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Function.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Arbitrary.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Array.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/BigDecimal.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/BigInt.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Boolean.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Brand.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Cache.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Cause.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Channel.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ChildExecutorDecision.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Chunk.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Clock.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Config.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ConfigError.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ConfigProvider.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ConfigProviderPathPatch.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Console.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Context.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Cron.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Data.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/DateTime.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/DefaultServices.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Deferred.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Differ.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Duration.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Effect.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Effectable.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Either.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Encoding.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Equal.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Equivalence.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ExecutionPlan.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ExecutionStrategy.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Exit.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FastCheck.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Fiber.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberHandle.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberId.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberMap.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberRef.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberRefs.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberRefsPatch.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberSet.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/FiberStatus.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/GlobalValue.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Graph.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/GroupBy.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/HKT.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Hash.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/HashMap.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/HashRing.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/HashSet.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Inspectable.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Iterable.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/JSONSchema.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/KeyedPool.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Layer.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/LayerMap.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/List.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/LogLevel.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/LogSpan.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Logger.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Mailbox.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ManagedRuntime.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Match.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MergeDecision.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MergeState.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MergeStrategy.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Metric.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricBoundaries.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricHook.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricKey.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricKeyType.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricLabel.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricPair.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricPolling.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricRegistry.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MetricState.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Micro.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ModuleVersion.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MutableHashMap.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MutableHashSet.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MutableList.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MutableQueue.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/MutableRef.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/NonEmptyIterable.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Number.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Option.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Order.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Ordering.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/ParseResult.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/PartitionedSemaphore.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Pipeable.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Pool.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Predicate.js?v=ae8c39f0",
+      "initiatorType": "script"
+    },
+    {
+      "name": "http://127.0.0.1:5195/@fs/Users/dancer/me/workspace/yousleepwhen/masc/dashboard/node_modules/.pnpm/effect@3.22.1/node_modules/effect/dist/esm/Pretty.js?v=ae8c39f0",
+      "initiatorType": "script"
+    }
+  ]
+}

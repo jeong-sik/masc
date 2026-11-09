@@ -645,6 +645,7 @@ let test_execution_env_preserves_exact_invocation () =
       (fun execution_env _input ->
          seen_invocation := Agent_core.Tool.Execution_env.invocation execution_env;
          tool_ok ~tool_name:"occurrence_probe" "ok")
+    |> Result.get_ok
   in
   let invocation =
     Agent_core.Tool_contract.Invocation.create

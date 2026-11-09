@@ -64,7 +64,7 @@ type 'evidence schema_tool_origin =
   | Transient_run
 
 val composition_schema_tool :
-  Keeper_tool_composition_catalog.entry -> Agent_core.Tool.t
+  Keeper_tool_composition_catalog.entry -> (Agent_core.Tool.t, Tool_bridge.schema_error) result
 
 val schema_tool_name_rows :
   ?include_drafts:bool ->
@@ -76,4 +76,4 @@ val schema_tool_rows :
   ?include_drafts:bool ->
   ?skill_compositions:(Keeper_tool_composition_catalog.entry * 'evidence) list ->
   unit ->
-  ('evidence schema_tool_origin * Agent_core.Tool.t) list
+  ('evidence schema_tool_origin * (Agent_core.Tool.t, Tool_bridge.schema_error) result) list

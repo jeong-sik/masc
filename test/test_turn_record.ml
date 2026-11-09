@@ -46,6 +46,7 @@ let test_block_id_post_tool_round_classes () =
     [ (Prompt_block_id.Keeper_instructions, true)
     ; (Prompt_block_id.Dynamic_context, false)
     ; (Prompt_block_id.Active_goals, true)
+    ; (Prompt_block_id.Direct_input_source, true)
     ; (Prompt_block_id.Completion_authority, true)
     ; (Prompt_block_id.Goals_awaiting_proof, true)
     ; (Prompt_block_id.Constitution_amendments, true)

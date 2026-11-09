@@ -1,0 +1,19 @@
+{
+  "keeper": "synthetic-peer-source-26049",
+  "block": "direct_input_source",
+  "component": "prompt.direct_input_source",
+  "label": "요청 출처",
+  "source_bytes": 113,
+  "total_content_bytes": 1232,
+  "wire_bytes": 1343,
+  "source_facts": {
+    "operation_id": "synthetic-operation-26049-peer",
+    "speaker": {
+      "kind": "keeper",
+      "keeper_id": "synthetic-peer-sender"
+    }
+  },
+  "source_text": "{\"operation_id\":\"synthetic-operation-26049-peer\",\"speaker\":{\"kind\":\"keeper\",\"keeper_id\":\"synthetic-peer-sender\"}}",
+  "backend": "synthetic HTTP only",
+  "worktree": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source"
+}

@@ -1,0 +1,32 @@
+Testing `terminal text boundary'.
+This run has ID `J1D3K464'.
+
+> [FAIL]        security              0   a control byte never reaches the te...
+  [FAIL]        security              1   visible text survives the escape.
+  [FAIL]        security              2   a C1 control uses the codepoint esc...
+  [OK]          security              3   sanitize is idempotent.
+  [FAIL]        preservation          0   plain text is returned unchanged.
+  [FAIL]        preservation          1   multi-byte letters are not read as ...
+  [FAIL]        preservation          2   lines keep LF and escape CR.
+
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ [FAIL]        security              0   a control byte never reaches the...  │
+└──────────────────────────────────────────────────────────────────────────────┘
+ASSERT ESC: no raw control byte
+ASSERT ESC: an escape is drawn
+File "list.ml", line 114, character 12:
+FAIL ESC: an escape is drawn
+
+   Expected: `true'
+   Received: `false'
+
+Raised at Alcotest_engine__Test.check in file "src/alcotest-engine/test.ml", lines 216-226, characters 4-19
+Called from Stdlib__List.iter in file "list.ml", line 114, characters 12-15
+Called from Alcotest_engine__Core.Make.protect_test.(fun) in file "src/alcotest-engine/core.ml", line 186, characters 17-23
+Called from Alcotest_engine__Monad.Identity.catch in file "src/alcotest-engine/monad.ml", line 24, characters 31-35
+
+Logs saved to `/masc-work/rondo/repo/evidence/task-3491/dropmut/_build/_tests/terminal text boundary/security.000.output'.
+ ──────────────────────────────────────────────────────────────────────────────
+
+Full test results in `/masc-work/rondo/repo/evidence/task-3491/dropmut/_build/_tests/terminal text boundary'.
+6 failures! in 0.002s. 7 tests run.

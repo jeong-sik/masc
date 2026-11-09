@@ -93,25 +93,47 @@ let is_top_level_execution = function
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 ;;
 
+type execution_row =
+  { record_kind : string option
+  ; top_level : bool
+  ; keeper : string option
+  ; trace_id : string option
+  ; session_id : string option
+  ; turn_kind : string option
+  ; keeper_turn_id : int option
+  ; turn : int option
+  ; planned_index : int option
+  ; tool_use_id : string option
+  ; tool_name : string option
+  }
+
+let execution_row_of_json row : execution_row =
+  let str key = Json_util.get_string row key in
+  let int key = Json_util.get_int row key in
+  { record_kind = str "record_kind"; top_level = is_top_level_execution row
+  ; keeper = str "keeper"
+  ; trace_id = str "trace_id"; session_id = str "session_id"
+  ; turn_kind = str "turn_kind"; keeper_turn_id = int "keeper_turn_id"
+  ; turn = int "turn"; planned_index = int "planned_index"
+  ; tool_use_id = str "tool_use_id"; tool_name = str "tool"
+  }
+
 let executions_for_turn (record : Turn_record.t) execution_rows =
   List.fold_left (fun index id ->
     match Execution_map.find_opt (Ids.Execution_id.to_string id) execution_rows with
-    | Some [ row ] ->
-      let str key = Json_util.get_string row key in
-      let int key = Json_util.get_int row key in
-      (match int "turn", int "planned_index" with
+    | Some [ (row : execution_row) ] ->
+      (match row.turn, row.planned_index with
        | Some turn, Some planned_index when turn >= 0 && planned_index >= 0
-           && str "record_kind" = Some "tool_call"
-           (* Child schedules restart at slot zero inside their parent turn.
-              Their explicit node marker keeps those separate from raw starts. *)
-           && is_top_level_execution row
-           && str "keeper" = Some record.keeper
-           && str "trace_id" = Some record.trace_id
-           && str "session_id" = Some record.trace_id
-           && str "turn_kind" = Some (Turn_record.turn_kind_to_string Turn_record.Autonomous)
-           && int "keeper_turn_id" = Some record.absolute_turn ->
+           && row.record_kind = Some "tool_call"
+           (* A child marker of any JSON type excludes the row. *)
+           && row.top_level
+           && row.keeper = Some record.keeper
+           && row.trace_id = Some record.trace_id
+           && row.session_id = Some record.trace_id
+           && row.turn_kind = Some (Turn_record.turn_kind_to_string Turn_record.Autonomous)
+           && row.keeper_turn_id = Some record.absolute_turn ->
          let occurrence = { execution_id = id;
-           tool_use_id = str "tool_use_id"; tool_name = str "tool" } in
+           tool_use_id = row.tool_use_id; tool_name = row.tool_name } in
          Invocation_map.update (turn, planned_index)
            (function None -> Some [ occurrence ] | Some rows -> Some (occurrence :: rows)) index
        | _ -> index)
@@ -182,7 +204,7 @@ let execution_of_invocation ~executions = function
          (invocation.invocation_turn, invocation.invocation_planned_index)
          executions
      with
-     | Some [ occurrence ]
+     | Some [ (occurrence : execution_occurrence) ]
        when occurrence.tool_use_id = invocation.raw_tool_use_id
             && occurrence.tool_name = invocation.raw_tool_name ->
        Some occurrence.execution_id
@@ -245,7 +267,7 @@ let trace_step_of_run_step ~executions = function
       }
 ;;
 
-let reading_of_records ~keeper_name (run_ref : Turn_record.raw_trace_run_ref) = function
+let reading_of_records ~include_trace ~keeper_name (run_ref : Turn_record.raw_trace_run_ref) = function
   | [] ->
     Log.Keeper.warn ~keeper_name
       "autonomous turn source: exact run %s has no records"
@@ -272,6 +294,7 @@ let reading_of_records ~keeper_name (run_ref : Turn_record.raw_trace_run_ref) = 
          |> Option.map (fun (row : Agent_core.Raw_trace.record) -> row.final_text)
          |> Option.join
        in
+       let steps = if not include_trace then [] else
        let records_by_seq = List.fold_left
          (fun index (row : Agent_core.Raw_trace.record) ->
            Sequence_map.update row.seq (function None -> Some [ row ] | Some rows -> Some (row :: rows)) index)
@@ -296,7 +319,6 @@ let reading_of_records ~keeper_name (run_ref : Turn_record.raw_trace_run_ref) = 
              , (Some _ | None) ) -> index)
          Invocation_map.empty records
        in
-       let steps =
          (Agent_core.Trajectory.of_raw_trace_records records).steps
          |> List.filter_map
               (run_step_of_trajectory ~records:records_by_seq ~raw_occurrences)
@@ -382,7 +404,7 @@ let run_key (run_ref : Turn_record.raw_trace_run_ref) =
     ]
 ;;
 
-let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
+let turn_of_record ~include_trace ~config ~keeper_name ~execution_rows ~previous ~used
     (record : Turn_record.t) =
   let open Result.Syntax in
   match record.turn_kind, record.raw_trace_run_ref with
@@ -478,7 +500,7 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
                    (Agent_core.Error.to_string err);
                  Error (Agent_core.Error.to_string err)
                | Ok records ->
-                 let reading = reading_of_records ~keeper_name run_ref records in
+                 let reading = reading_of_records ~include_trace ~keeper_name run_ref records in
                  (* Remembered only when the file statted before the read is
                     the one still there after it: a rewrite in between would
                     pair the new identity with the old records. *)
@@ -496,7 +518,8 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
               { turn_id = Ids.Turn_ref.to_string record.turn_ref
               ; started_at = run_started_at
               ; final_text = run_final_text
-              ; trace = List.map (trace_step_of_run_step ~executions) steps
+              ; trace = if include_trace then
+                  List.map (trace_step_of_run_step ~executions) steps else []
               })
           | Some (Run_has_no_records | Run_identity_mismatch _) | None -> Ok None)
 ;;
@@ -513,7 +536,7 @@ let project_records ~config ~keeper_name ?since records =
     in
     let execution_rows =
       match execution_ids with
-      | [] -> []
+      | [] -> Execution_map.empty
       | _ ->
         let ledger =
           Dated_jsonl.open_store
@@ -521,26 +544,27 @@ let project_records ~config ~keeper_name ?since records =
                (Workspace.dated_store_root config)
                Dated_jsonl.Store.Root.Tool_calls)
         in
-        (match Keeper_tool_call_index.by_execution_ids
-           ~store:ledger ~keeper_name ~execution_ids with
+        (match Keeper_tool_call_index.fold_by_execution_ids
+           ~store:ledger ~keeper_name ~execution_ids ~init:Execution_map.empty
+           ~f:(fun index row ->
+             match Json_util.get_string_nonempty row "execution_id" with
+             | None -> Ok index
+             | Some id ->
+               let projected = execution_row_of_json row in
+               Ok (Execution_map.update id
+                 (function None -> Some [ projected ]
+                   | Some rows -> Some (projected :: rows)) index)) with
          | Ok rows -> rows
          | Error error ->
            Log.Keeper.warn ~keeper_name "autonomous execution evidence unavailable: %s" error;
-           [])
-    in
-    let execution_rows = List.fold_left (fun index row ->
-      match Json_util.get_string_nonempty row "execution_id" with
-      | None -> index
-      | Some id -> Execution_map.update id
-          (function None -> Some [ row ] | Some rows -> Some (row :: rows)) index)
-      Execution_map.empty execution_rows
+           Execution_map.empty)
     in
     let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
     let previous = with_run_tables (fun () -> Hashtbl.find_opt run_readings dir) in
     let used = Hashtbl.create (List.length records) in
     let turns_rev, unavailable =
       List.fold_left (fun (turns, unavailable) record ->
-        match turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used record with
+        match turn_of_record ~include_trace:true ~config ~keeper_name ~execution_rows ~previous ~used record with
         | Ok (Some turn) -> turn :: turns, unavailable
         | Ok None -> turns, unavailable
         | Error detail ->
@@ -564,30 +588,47 @@ let read_store config keeper_name =
   Dated_jsonl.open_store ~cross_context_mutex:(Cross_context_mutex.create ()) location
 ;;
 
-type snapshot = { records : Turn_record.t list; fingerprint : string }
+type snapshot =
+  { keeper_name : string
+  ; source_root : string
+  ; source_rows : (string * string) list
+  ; records : Turn_record.t list
+  ; fingerprint : string
+  }
 
 let snapshot_has_records snapshot = match snapshot.records with [] -> false | _ :: _ -> true
 let snapshot_fingerprint snapshot = snapshot.fingerprint
 
-let read_snapshot_result ~config ~keeper_name ?(limit = default_limit) () =
+let read_snapshot_result ~config ~keeper_name ?previous ?(limit = default_limit) () =
   let open Result.Syntax in
-  let* entries = Dated_jsonl.read_recent_result (read_store config keeper_name) (max 1 limit)
+  let store = read_store config keeper_name in
+  let source_root = Dated_jsonl.base_dir store in
+  let* source_rows = Dated_jsonl.read_recent_lines_result
+      store (max 1 limit)
     |> Result.map_error Dated_jsonl.read_error_to_string in
-  let* records_rev, json_rev = List.fold_left (fun state entry ->
+  let same_row (left_path, left_line) (right_path, right_line) =
+    String.equal left_path right_path && String.equal left_line right_line in
+  match previous with
+  | Some previous when String.equal previous.keeper_name keeper_name
+      && String.equal previous.source_root source_root
+      && List.equal same_row previous.source_rows source_rows -> Ok previous
+  | Some _ | None ->
+  let* records_rev, json_rev = List.fold_left (fun state (path, line) ->
     let* records, rows = state in
-    match entry with
-    | Dated_jsonl.Malformed_json { path; line_number; detail } ->
+    match Dated_jsonl.entry_of_physical_line ~path line with
+    | None -> Ok (records, rows)
+    | Some (Dated_jsonl.Malformed_json { path; line_number; detail }) ->
       Error (Printf.sprintf "unreadable TurnRecord at %s:%s: %s" path
         (Option.fold ~none:"unknown" ~some:string_of_int line_number) detail)
-    | Dated_jsonl.Parsed json ->
+    | Some (Dated_jsonl.Parsed json) ->
       let* record = Turn_record.of_json json in
       if not (String.equal record.keeper keeper_name)
       then Error (Printf.sprintf "TurnRecord belongs to %s instead of %s" record.keeper keeper_name)
       else Ok (record :: records, json :: rows))
-    (Ok ([], [])) entries in
+    (Ok ([], [])) source_rows in
   let fingerprint = `List (List.rev json_rev) |> Yojson.Safe.to_string
     |> Digest.string |> Digest.to_hex in
-  Ok { records = List.rev records_rev; fingerprint }
+  Ok { keeper_name; source_root; source_rows; records = List.rev records_rev; fingerprint }
 ;;
 
 let project_snapshot_result ~config ~keeper_name snapshot =
@@ -595,6 +636,26 @@ let project_snapshot_result ~config ~keeper_name snapshot =
   match projection.unavailable with
   | None -> Ok projection.turns
   | Some detail -> Error detail
+;;
+
+let project_latest_reply_result ~config ~keeper_name snapshot =
+  if not (String.equal snapshot.keeper_name keeper_name
+          && String.equal snapshot.source_root (Dated_jsonl.base_dir (read_store config keeper_name)))
+  then Error "TurnRecord snapshot belongs to another Keeper store"
+  else
+    match List.rev snapshot.records with
+    | [] -> Ok None
+    | record :: _ ->
+      let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
+      let previous = with_run_tables (fun () -> Hashtbl.find_opt run_readings dir) in
+      let used = Hashtbl.create 1 in
+      (* This one-record read must not evict the aggregate's retained run set. *)
+      Result.map (function
+        | Some turn when Option.exists (fun text -> String.trim text <> "") turn.final_text ->
+          Some {turn with trace=[]}
+        | Some _ | None -> None)
+        (turn_of_record ~include_trace:false ~config ~keeper_name ~execution_rows:Execution_map.empty
+           ~previous ~used record)
 ;;
 
 let load_recent ~config ~keeper_name ?(limit = default_limit) ?since () =

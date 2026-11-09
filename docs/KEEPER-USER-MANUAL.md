@@ -865,6 +865,12 @@ describe the returned roster's coverage. A listed Keeper is not proof that it
 has accepted work. Submit through `masc_keeper_delegate` and follow the original
 target and operation ID for the result.
 
+For a direct request, MASC also tells the receiving model who sent the original
+operation. A registered Keeper stays distinct from an unattributed
+`local_request`; the latter is not proof of operator identity. This source
+observation remains bound to that operation through tool use and host resume
+cues. It grants neither operator authority nor Task ownership.
+
 Open a Keeper's Turn Inspector and select a turn, then **입력과 실행**
 (input and execution). The view uses the complete `turn_ref` — trace and
 absolute turn together — rather than joining nearby timestamps.

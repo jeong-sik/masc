@@ -60,7 +60,8 @@ val assemble_request_context :
   dynamic_context_partition:Keeper_context_layers.rendered option ->
   existing_extra_system_context:string option ->
   blocks:(Prompt_block_id.t * string) list -> extra_system_context_assembly
-(** Split uniquely renderer-attributed Active Goals into a system suffix.
+(** Split uniquely renderer-attributed Active Goals and admitted request source
+    into System suffixes, in that order.
     Agent Core carries Goals Awaiting Proof in that same issued System;
     official clients keep it in their turn-scoped context carrier. Completion
     Authority remains a context block. Missing, stale or duplicate renderer

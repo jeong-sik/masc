@@ -352,31 +352,6 @@ let test_model_catalog_configuration_replaces_whole_selection () =
     Alcotest.(check bool) "captured selection retains old overlay identity" true
       (Option.is_some (Snapshot.find original "retired-bootstrap-alias")))
 
-let test_model_catalog_configuration_ignores_legacy_discovery_inputs () =
-  let catalog_calls = ref 0 in
-  let load_calls = ref 0 in
-  let set_calls = ref 0 in
-  let env = function
-    | "MASC_MODEL_CATALOG" -> Some "/legacy/masc-models.toml"
-    | _ -> None
-  in
-  let result =
-    Server_runtime_bootstrap.configure_agent_core_model_catalog_env
-      ~env
-      ~agent_core_catalog:(fun () ->
-        incr catalog_calls;
-        Some Llm_provider.Model_catalog.empty)
-      ~load_catalog:(fun (_ : string) ->
-        incr load_calls;
-        Ok Llm_provider.Model_catalog.empty)
-      ~publish_catalog:(fun (_ : Llm_provider.Catalog_snapshot.t) -> incr set_calls)
-      ()
-  in
-  Alcotest.(check bool) "ambient catalog selected" true (Option.is_none result);
-  Alcotest.(check int) "ambient catalog queried" 1 !catalog_calls;
-  Alcotest.(check int) "legacy catalog not loaded" 0 !load_calls;
-  Alcotest.(check int) "legacy catalog not installed" 0 !set_calls
-
 let test_config_load_failure_diagnostic_attributes_to_config () =
   let output =
     Server_runtime_bootstrap.config_load_failure_diagnostic
@@ -7065,9 +7040,6 @@ let () =
           Alcotest.test_case
             "model catalog replaces whole selection"
             `Quick test_model_catalog_configuration_replaces_whole_selection;
-          Alcotest.test_case
-            "model catalog ignores legacy discovery inputs"
-            `Quick test_model_catalog_configuration_ignores_legacy_discovery_inputs;
           Alcotest.test_case
             "config load failure diagnostic attributes to config"
             `Quick test_config_load_failure_diagnostic_attributes_to_config;

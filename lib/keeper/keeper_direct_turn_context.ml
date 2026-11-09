@@ -1,5 +1,6 @@
 type t =
-  { goal_context : string option
+  { direct_input_source : string option
+  ; goal_context : string option
   ; goal_observations : string option
   ; goals_awaiting_proof : string option
   ; task_context : string option
@@ -40,10 +41,12 @@ let direct_turn_task_context
   in
   current ^ held
 
-let prepare ~active_goal_summaries ~current_task ~held_task_skills ~task_skill_surfaces
+let prepare ~direct_input_source ~active_goal_summaries ~current_task ~held_task_skills ~task_skill_surfaces
     ~workspace_memory ~wiki_contents ~lane_updates ~approval_authority_text
     ~recent_direct_conversation_text ~worktree_text ~telemetry_feedback_text
     ~turn_instructions_text () =
+  let direct_input_source = Option.map
+      (fun source -> Keeper_direct_input_source.render source ^ "\n\n") direct_input_source in
   let goal_context = Keeper_unified_prompt.format_active_goal_summaries active_goal_summaries in
   let goal_observations =
     Keeper_unified_prompt.format_goal_observation_summaries active_goal_summaries in
@@ -55,7 +58,7 @@ let prepare ~active_goal_summaries ~current_task ~held_task_skills ~task_skill_s
       (Option.to_list (Lane_addon_subscription.render lane_updates)
        @ [approval_authority_text; recent_direct_conversation_text; worktree_text;
           telemetry_feedback_text; turn_instructions_text]) in
-  { goal_context; goal_observations; goals_awaiting_proof; task_context; remaining_context
+  { direct_input_source; goal_context; goal_observations; goals_awaiting_proof; task_context; remaining_context
   ; workspace_memory; wiki_contents }
 
 let project_partition prepared ~workspace_memory_access =
@@ -72,6 +75,7 @@ let project_partition prepared ~workspace_memory_access =
       (Option.to_list prepared.task_context @ dynamic @ Option.to_list prepared.remaining_context) in
   let observations = Keeper_context_layers.assemble ~content_of:(function
     | Active_goals -> prepared.goal_context
+    | Direct_input_source -> prepared.direct_input_source
     | Goal_observations -> prepared.goal_observations
     | Goals_awaiting_proof -> prepared.goals_awaiting_proof
     | Current_task | Approval_authority | Connected_surfaces | Namespace_state

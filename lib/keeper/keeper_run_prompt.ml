@@ -44,8 +44,8 @@ let assemble_extra_system_context = Keeper_context_assembly.assemble
 
 (* RFC-0491 §3.1: the Completion Authority layer is world state that comes and
    goes between turns, so it is a context block, not a System observation.
-   Only the Goal observation is a System suffix. A later round of the same
-   turn carries this turn's authority block again because the post-tool
+   The Goal snapshot and admitted operation source are System suffixes. A later
+   round carries this turn's authority block again because the post-tool
    assembly drops the [Dynamic_context] it came from (#45853). Proof state
    remains visible too, but Agent Core keeps this recurring state out of the
    post-tool User tail by carrying it in the issued System. Official clients
@@ -63,7 +63,8 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
           | None -> observations
           | Some _ -> List.filter (function
               | Keeper_context_assembly.Goals_awaiting_proof _ -> false
-              | Keeper_context_assembly.Active_goals _ -> true) observations in
+              | Keeper_context_assembly.Active_goals _
+              | Keeper_context_assembly.Direct_input_source _ -> true) observations in
         let carried = List.filter (fun (id, _) ->
             Prompt_block_id.equal id Prompt_block_id.Completion_authority
             || (Option.is_none previous.proof_state
@@ -76,14 +77,19 @@ let assemble_request_context ~checkpoint_owner ~(system : Keeper_turn_system.t) 
         let sections = Keeper_context_layers.sections partition in
         let unique layer = List.length (List.filter (fun (section : Keeper_context_layers.section) ->
           section.section_source = Keeper_context_layers.Layer layer) sections) <= 1 in
-        if not (unique Active_goals && unique Goals_awaiting_proof && unique Completion_authority)
+        if not (unique Active_goals && unique Direct_input_source
+                && unique Goals_awaiting_proof && unique Completion_authority)
         then [], blocks, dynamic_context_partition, None
         else
           let goals, remaining = Keeper_context_layers.partition_layer Active_goals partition in
+          let source, remaining = Keeper_context_layers.partition_layer Direct_input_source remaining in
           let awaiting, remaining = Keeper_context_layers.partition_layer Goals_awaiting_proof remaining in
           let authority, remaining = Keeper_context_layers.partition_layer Completion_authority remaining in
-          let observations = match Keeper_context_layers.text goals with
-            | "" -> [] | text -> [Keeper_context_assembly.Active_goals (Inference_utils.sanitize_text_utf8 text)] in
+          let observation make layer = match Keeper_context_layers.text layer with
+            | "" -> [] | text -> [make (Inference_utils.sanitize_text_utf8 text)] in
+          let observations =
+            observation (fun text -> Keeper_context_assembly.Active_goals text) goals
+            @ observation (fun text -> Keeper_context_assembly.Direct_input_source text) source in
           let block id layer = match Keeper_context_layers.text layer with
             | "" -> [] | text -> [id, Inference_utils.sanitize_text_utf8 text] in
           let proof_state = Keeper_context_assembly.issue_proof_state awaiting in

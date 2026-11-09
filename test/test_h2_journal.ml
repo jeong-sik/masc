@@ -624,7 +624,7 @@ let test_resumed_ask_uses_only_original_source_evidence () =
       {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
     let tools = Tools.make_tools ~capability_surface:(surface base_path) ~config ~meta ~publication_recovery
         ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"resumed Ask source fixture")
-        ~turn_ctx_cell:cell ~clock:(Eio.Stdenv.clock env) () in
+        ~turn_ctx_cell:cell ~clock:(Eio.Stdenv.clock env) () |> Result.get_ok in
     let tool = List.find_map (fun (tool,_,_) ->
         if tool.Agent_core.Tool.schema.name=Draft.run_tool_name then Some tool else None) tools
         |> Option.get in
@@ -678,7 +678,7 @@ let test_public_run_resume_keeps_original_task () = with_workspace (fun env sw b
   Call_log.set_turn_context ~cell ~agent_name:keeper ~turn:42 ~keeper_turn_id:1 ~task_id:"task-A"
     ~trace_id:"original-trace" ~session_id:"original-session" ~answer_source_ids:[original_answer] ();
   let tools () = Tools.make_tools ~capability_surface:(surface base_path) ~config ~meta:!current_meta ~publication_recovery
-      ~ctx_snapshot ~turn_ctx_cell:cell ~clock:(Eio.Stdenv.clock env) () in
+      ~ctx_snapshot ~turn_ctx_cell:cell ~clock:(Eio.Stdenv.clock env) () |> Result.get_ok in
   let invoke ~turn ~id name input =
     let tool = List.find_map (fun (tool, _, _) ->
         if tool.Agent_core.Tool.schema.name = name then Some tool else None) (tools ())
@@ -921,7 +921,7 @@ let test_first_loss_retains_unproven_effects mode () =
         {provider=Masc.Keeper_publication_recovery_availability.non_runtime_provider;keeper_name=keeper} in
       let tools = Masc.Keeper_tool_composition_surface.make_tools ~capability_surface:(surface base_path)
           ~config ~meta ~publication_recovery ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"")
-          ~turn_ctx_cell:cell ~clock:(Eio.Stdenv.clock env) () in
+          ~turn_ctx_cell:cell ~clock:(Eio.Stdenv.clock env) () |> Result.get_ok in
       let tool = List.find_map (fun (tool,_,_) ->
         if tool.Agent_core.Tool.schema.name = Draft.run_tool_name then Some tool else None) tools |> Option.get in
       let invocation = Agent_core.Tool_contract.Invocation.create ~tool_use_id:"first-loss-manual-resume" ~turn:43
@@ -1222,7 +1222,7 @@ let test_first_loss_retains_unproven_effects mode () =
         let reading=Ui.Local_read_observation.run request.lwr_observation
           ~read:(fun () -> Masc_tui_loader.read_local_workspace base_path)
           ~prepare:(Masc_tui_loader.prepare_local_workspace request) in
-        match Ui.take_local_workspace_read ui ~source:Ui.Local_work request (Ok reading) with
+        match Ui.take_local_workspace_read ui ~source:Ui.Local_work ~is_observed:Masc_tui_loader.local_workspace_observed request (Ok reading) with
         | Some (Ok reading) -> Ui.Local_read_observation.apply request.lwr_observation
             (Masc_tui_loader.apply_local_workspace ui) reading
         | Some (Error _) | None -> fail "actual Work observation lost its original read owner" in
@@ -1294,7 +1294,7 @@ let test_first_loss_retains_unproven_effects mode () =
       let metadata=Ui.begin_local_workspace_read ui ~intent:Ui.Snapshot_read.Refresh
         ~source:Ui.Local_keepers ~base_path ~started_ns:(Mtime_clock.elapsed_ns ()) |> Option.get in
       check bool "late actual Work result is rejected after source withdrawal" true
-        (Option.is_none (Ui.take_local_workspace_read ui ~source:Ui.Local_work late_work (Ok late_reading)));
+        (Option.is_none (Ui.take_local_workspace_read ui ~source:Ui.Local_work ~is_observed:Masc_tui_loader.local_workspace_observed late_work (Ok late_reading)));
       check bool "late Work result leaves replacement and metadata independently pending" true
         (Ui.Local_read_order.in_flight ui.local_workspace_read_order
           && Ui.Local_read_order.in_flight ui.local_keeper_read_order);
@@ -1304,7 +1304,7 @@ let test_first_loss_retains_unproven_effects mode () =
          | Some (_,Rejected Superseded),None -> true | _ -> false);
       let keeper_reading=Ui.Local_read_observation.run metadata.lwr_observation
         ~read:(fun () -> Masc_tui_loader.read_local_keepers base_path) ~prepare:Fun.id in
-      (match Ui.take_local_workspace_read ui ~source:Ui.Local_keepers metadata (Ok keeper_reading) with
+      (match Ui.take_local_workspace_read ui ~source:Ui.Local_keepers ~is_observed:Masc_tui_loader.local_keepers_observed metadata (Ok keeper_reading) with
        | Some (Ok reading) -> Ui.Local_read_observation.apply metadata.lwr_observation
            (Masc_tui_loader.apply_local_keepers ui) reading
        | Some (Error _) | None -> fail "actual metadata result lost independent source ownership");
@@ -1314,7 +1314,7 @@ let test_first_loss_retains_unproven_effects mode () =
       let replacement_reading=Ui.Local_read_observation.run replacement_work.lwr_observation
         ~read:(fun () -> Masc_tui_loader.read_local_workspace base_path)
         ~prepare:(Masc_tui_loader.prepare_local_workspace replacement_work) in
-      (match Ui.take_local_workspace_read ui ~source:Ui.Local_work replacement_work (Ok replacement_reading) with
+      (match Ui.take_local_workspace_read ui ~source:Ui.Local_work ~is_observed:Masc_tui_loader.local_workspace_observed replacement_work (Ok replacement_reading) with
        | Some (Ok reading) -> Ui.Local_read_observation.apply replacement_work.lwr_observation
            (Masc_tui_loader.apply_local_workspace ui) reading
        | Some (Error _) | None -> fail "replacement Work result lost its original source owner");

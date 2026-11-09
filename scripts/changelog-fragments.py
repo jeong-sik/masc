@@ -14,11 +14,16 @@ bullet cites the fragment's own pull request as `#<number>`.
 Modes:
   check [--dir D]                      refuse a malformed fragment
   assemble [--dir D] [--changelog C]   fold fragments into [Unreleased], delete them
-  missing --base B [--head H] [--dir D]
+  missing --base B [--head H] [--dir D] [--strict]  (exit 3 on findings)
                                        list PRs merged since B whose changes
                                        carry no fragment — reported once, at
                                        the fold, so the release author can
-                                       write the entries; never a refusal
+                                       write the entries; with --strict the
+                                       same report also refuses the fold
+                                       (exit 3, exemptions aside). When HEAD
+                                       has not moved past the release cut the
+                                       range is empty and the report passes —
+                                       that is a genuinely empty window.
   pr-guard --base B [--head H]         refuse a PR that adds a bullet under
                                        [Unreleased] in CHANGELOG.md instead of
                                        writing a fragment (a release PR, which
@@ -323,7 +328,31 @@ def merged_squashes(base: str, head: str) -> list[tuple[int, str]]:
     return merged
 
 
-def missing(base: str, head: str, directory: pathlib.Path) -> int:
+def _exempt_numbers() -> set[int]:
+    """PR numbers the strict gate may not count as blocking findings.
+
+    Numbers live in changelog-fragments-exempt.txt beside this script, one
+    per line, and only for pull requests whose own content is changelog
+    work (a backfill PR carries another PR's fragment as its payload).
+    """
+    path = pathlib.Path(__file__).resolve().parent / "changelog-fragments-exempt.txt"
+    if not path.exists():
+        return set()
+    out: set[int] = set()
+    for line in path.read_text().splitlines():
+        head = line.split("#", 1)[0].strip()
+        if head.isdigit():
+            out.add(int(head))
+        elif head:
+            print(
+                f"warning: changelog-fragments-exempt.txt: ignoring"
+                f" unrecognized line: {line!r}",
+                file=sys.stderr,
+            )
+    return out
+
+
+def missing(base: str, head: str, directory: pathlib.Path, strict: bool = False) -> int:
     """Report PRs merged since `base` whose history carries no fragment.
 
     A PR not yet folded still carries its own changelog.d/<N>.md on main, so a
@@ -348,17 +377,24 @@ def missing(base: str, head: str, directory: pathlib.Path) -> int:
         print(f"every pull request merged since {base} has a changelog fragment")
         return 0
     unfragmented.sort()
+    exempt = _exempt_numbers()
+    blocking = [pair for pair in unfragmented if pair[0] not in exempt]
     print(
         f"{len(unfragmented)} pull request(s) merged since {base} without a "
         f"changelog fragment:"
     )
     for number, subject in unfragmented:
-        print(f"  #{number} {subject}")
+        marker = "" if number not in exempt else "  (exempt)"
+        print(f"  #{number} {subject}{marker}")
     print(
         "Write the entries to "
         f"{FRAGMENT_DIR}/<PR number>.md before folding, or note here why a "
         "release omits one."
     )
+    if strict and blocking:
+        # Exit 3, not 1: a Python crash also exits 1, and callers must tell
+        # "findings" from "broken report" apart.
+        return 3
     return 0
 
 
@@ -453,6 +489,8 @@ def main() -> int:
     miss = sub.add_parser("missing")
     miss.add_argument("--base", required=True)
     miss.add_argument("--head", default="HEAD")
+    miss.add_argument("--strict", action="store_true",
+                        help="exit 3 when any non-exempt merged pull request lacks a fragment")
     miss.add_argument("--dir", default=FRAGMENT_DIR)
     guard = sub.add_parser("pr-guard")
     guard.add_argument("--base", required=True)
@@ -470,7 +508,7 @@ def main() -> int:
         if args.mode == "assemble":
             return assemble(pathlib.Path(args.dir), pathlib.Path(args.changelog))
         if args.mode == "missing":
-            return missing(base=args.base, head=args.head,
+            return missing(base=args.base, head=args.head, strict=args.strict,
                            directory=pathlib.Path(args.dir))
         return pr_guard(args.base, args.head)
     except FragmentError as err:

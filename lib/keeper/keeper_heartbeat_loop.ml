@@ -172,6 +172,7 @@ type keepalive_turn_outcome = {
   stimuli_acked : bool;
       (** The cycle admitted at least one event-queue stimulus and acked
           every entry of that batch on completion. *)
+  checkpoint_followup : Keeper_agent_result.checkpoint_followup;
   after_failure : after_failure option;
       (** What the cycle's turn failure or provider rest leaves the next
           cycle; [None] keeps the plain cadence. *)
@@ -551,6 +552,7 @@ let interrupted_cycle_outcome ~(meta : keeper_meta) =
   { meta
   ; cycle_status = Turn_cycle_interrupted
   ; stimuli_acked = false
+  ; checkpoint_followup = Keeper_agent_result.Keep_cadence
   ; after_failure = None
   }
 ;;
@@ -565,6 +567,7 @@ let handle_cycle_exception ~registry_entry ~(meta : keeper_meta) exn =
     { meta
     ; cycle_status = Turn_cycle_crashed
     ; stimuli_acked = false
+    ; checkpoint_followup = Keeper_agent_result.Keep_cadence
     ; after_failure = None
     })
 ;;
@@ -852,16 +855,31 @@ let pending_stimulus_remains ~ctx ~keeper_name =
     false
 ;;
 
-(* A serving deferred suffix is the failed turn's unfinished input. It does
-   not need a second Event Queue row to authorize the next cycle. Path waits
-   and ordinary cadence keep the existing acknowledged-pending-stimulus rule;
-   in particular this does not let a wake cut short #34653's resting-path
-   wait. *)
-let next_cycle_starts_now ~after_failure ~stimuli_acked ~pending_stimulus =
+(* Ready chat explains why the turn yielded; only successful retention of
+   unfinished input gives the heartbeat a continuation to retry. *)
+let checkpoint_followup_after_retention ~cycle_outcome ~retained_stimulus =
+  match cycle_outcome with
+  | Some (Cycle.Checkpointed { followup; _ }) ->
+    if retained_stimulus then followup else Keeper_agent_result.Keep_cadence
+  | Some (Cycle.Completed _ | Cycle.Input_required _ | Cycle.Cancelled _
+         | Cycle.Skipped _ | Cycle.Failed _ | Cycle.Rested _)
+  | None -> Keeper_agent_result.Keep_cadence
+;;
+
+(* A serving deferred suffix is unfinished input in its own right. A chat
+   handoff needs its retained Event Queue source to remain pending. Other
+   checkpoints keep the cadence, and this followup never cuts a provider's
+   dated rest short (#34653). *)
+let next_cycle_starts_now ~after_failure ~stimuli_acked ~checkpoint_followup ~pending_stimulus =
   match after_failure with
   | Some (Continue_on_deferred_lane _) -> true
-  | Some (Wait_for_path_release _) | None ->
+  | Some (Wait_for_path_release _) ->
     stimuli_acked && pending_stimulus ()
+  | None ->
+    (stimuli_acked || match checkpoint_followup with
+       | Keeper_agent_result.Resume_after_chat_handoff -> true
+       | Keeper_agent_result.Keep_cadence -> false)
+    && pending_stimulus ()
 ;;
 
 let cycle_wake ~periodic_due ~deferred_runtime_lane =
@@ -923,6 +941,7 @@ let run_keepalive_unified_turn
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_completed
     ; stimuli_acked = false
+    ; checkpoint_followup = Keeper_agent_result.Keep_cadence
     ; after_failure = None
     })
   else
@@ -942,6 +961,7 @@ let run_keepalive_unified_turn
     let hitl_continuation_projection_ok = ref true in
     let selection_acked = ref false in
     let stimuli_acked = ref false in
+    let retained_checkpoint_stimulus = ref false in
     let event_queue_failed = ref false in
     let record_event_queue_failure message =
       event_queue_failed := true;
@@ -1402,7 +1422,11 @@ let run_keepalive_unified_turn
              (match retain_checkpoint_continuations
                 ~base_path:ctx.config.base_path
                 ~keeper_name:meta_after_triage.name selections with
-              | Ok () -> ()
+              | Ok () ->
+                retained_checkpoint_stimulus := List.exists
+                  (fun (selection : Keeper_event_queue_state.pending_selection) ->
+                     not (checkpoint_source_may_ack selection.source.payload))
+                  selections
               | Error detail -> record_event_queue_failure
                   ("checkpoint continuation retention failed: " ^ detail));
              (* Source policy is shared with retention: a failed rotation
@@ -1428,6 +1452,9 @@ let run_keepalive_unified_turn
                  | Cycle.Failed _ )
              | None -> Turn_cycle_completed)
       ; stimuli_acked = !stimuli_acked
+      ; checkpoint_followup = checkpoint_followup_after_retention
+          ~cycle_outcome:!cycle_outcome_ref
+          ~retained_stimulus:(!retained_checkpoint_stimulus && not !event_queue_failed)
       ; after_failure =
           after_failure_of_cycle_outcome
             ~now:(Time_compat.now ())
@@ -1467,6 +1494,7 @@ let run_keepalive_unified_turn
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_busy block
     ; stimuli_acked = false
+    ; checkpoint_followup = Keeper_agent_result.Keep_cadence
     ; after_failure = None
     }
   | Ok
@@ -1477,6 +1505,7 @@ let run_keepalive_unified_turn
     { meta = meta_after_triage
     ; cycle_status = Turn_cycle_busy block
     ; stimuli_acked = false
+    ; checkpoint_followup = Keeper_agent_result.Keep_cadence
     ; after_failure = None
     }
   | Error error ->
@@ -1492,6 +1521,7 @@ let run_keepalive_unified_turn
     { meta = meta_after_triage
     ; cycle_status
     ; stimuli_acked = false
+    ; checkpoint_followup = Keeper_agent_result.Keep_cadence
     ; after_failure = None
     }
 ;;
@@ -1745,6 +1775,7 @@ let run_heartbeat_loop
             { meta = meta_current
             ; cycle_status = Turn_cycle_completed
             ; stimuli_acked = false
+            ; checkpoint_followup = Keeper_agent_result.Keep_cadence
             ; after_failure = None
             })
           else (
@@ -1875,9 +1906,11 @@ let run_heartbeat_loop
 
            A cycle that acked its stimulus batch and left more entries pending
            does not sleep the cadence: the queue is the wake signal, and the
-           next cycle dispatches as [Woken]. A checkpointed, failed, or busy
-           cycle keeps the cadence so a turn that made no progress is not
-           re-run back to back.
+           next cycle dispatches as [Woken]. A checkpointed turn that yielded
+           to ready chat retries its retained source once: either chat already
+           settled, or the Owner records the refused admission and wakes the
+           autonomous lane when chat releases the slot. Other checkpointed,
+           failed, or busy cycles keep the cadence.
 
            A failed cycle follows [turn_outcome.after_failure]
            (RFC-provider-path-rest). When the driver deferred the input to a
@@ -1953,6 +1986,7 @@ let run_heartbeat_loop
           next_cycle_starts_now
             ~after_failure:turn_outcome.after_failure
             ~stimuli_acked:turn_outcome.stimuli_acked
+            ~checkpoint_followup:turn_outcome.checkpoint_followup
             ~pending_stimulus:(fun () ->
               pending_stimulus_remains ~ctx ~keeper_name:m.name)
         in
@@ -2003,6 +2037,7 @@ module For_testing = struct
 
   let after_failure = after_failure
   let next_cycle_starts_now = next_cycle_starts_now
+  let checkpoint_followup_after_retention = checkpoint_followup_after_retention
   let cycle_wake = cycle_wake
   let periodic_cadence_after_cycle = periodic_cadence_after_cycle
 end

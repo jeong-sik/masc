@@ -14,6 +14,14 @@ val read_json :
           Keeper_autonomous_turn_source.turn list -> Yojson.Safe.t) ->
   (Yojson.Safe.t, error) result
 
+val initial_reply_json :
+  config:Workspace.config -> keeper_name:string ->
+  render:(Keeper_autonomous_turn_source.turn option -> Yojson.Safe.t) ->
+  (Yojson.Safe.t, error) result
+(** One latest committed record's autonomous reply, without tool evidence or
+    complete-history claims. Retained-store ownership and strict read failures
+    follow [read_json]. This uncached observation does not replace full history. *)
+
 val cached_json :
   config:Workspace.config -> keeper_name:string -> ttl:float ->
   render:(Keeper_chat_store.chat_message list ->

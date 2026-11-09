@@ -44,6 +44,7 @@ type guest_dispatch =
   { target : Masc_exec.Sandbox_target.t
   ; runtime : Keeper_turn_sandbox_runtime.t
   ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile
+  ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; observe_route : unit -> observe_route
   }
 

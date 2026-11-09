@@ -1,0 +1,18 @@
+ASSERT ESC: no raw control byte
+ASSERT ESC: an escape is drawn
+ASSERT BEL: no raw control byte
+ASSERT BEL: an escape is drawn
+ASSERT DEL: no raw control byte
+ASSERT DEL: an escape is drawn
+ASSERT NUL: no raw control byte
+ASSERT NUL: an escape is drawn
+ASSERT CR: no raw control byte
+ASSERT CR: an escape is drawn
+ASSERT tab: no raw control byte
+ASSERT tab: an escape is drawn
+ASSERT vertical tab: no raw control byte
+ASSERT vertical tab: an escape is drawn
+ASSERT backspace: no raw control byte
+ASSERT backspace: an escape is drawn
+ASSERT form feed: no raw control byte
+ASSERT form feed: an escape is drawn

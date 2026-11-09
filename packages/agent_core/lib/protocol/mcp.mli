@@ -35,11 +35,6 @@ val tool_of_input_schema_result
   -> (Yojson.Safe.t -> Types.tool_result)
   -> (Tool.t, string) result
 
-val mcp_tool_to_agent_core_tool
-  :  call_fn:(Yojson.Safe.t -> Types.tool_result)
-  -> mcp_tool
-  -> Tool.t
-
 val mcp_tool_to_agent_core_tool_result
   :  call_fn:(Yojson.Safe.t -> Types.tool_result)
   -> mcp_tool
@@ -55,17 +50,6 @@ type skipped_tool =
   { tool_name : string
   ; detail : string
   }
-
-(** [convert_tools ~server_name ~call_fn_for tools] converts each tool
-    independently. Tools that convert are returned first; tools whose schema
-    fails conversion are returned as {!skipped_tool} values and logged under
-    [server_name], so one malformed schema disables only that tool instead of
-    failing the whole list. Both lists keep the input order. *)
-val convert_tools
-  :  server_name:string
-  -> call_fn_for:(mcp_tool -> Yojson.Safe.t -> Types.tool_result)
-  -> mcp_tool list
-  -> Tool.t list * skipped_tool list
 
 (** {1 Client handle} *)
 

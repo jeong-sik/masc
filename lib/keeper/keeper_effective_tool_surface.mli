@@ -84,6 +84,12 @@ type outcome =
   | Available of t
   | Unavailable of unavailable
 
+type projection_error =
+  | Task_skill_error of Keeper_task_skill_turn.error
+  | Tool_schema_error of Tool_bridge.schema_error
+
+val projection_error_to_string : projection_error -> string
+
 val resolve : config:Workspace.config -> keeper_name:string -> outcome
 val to_yojson : outcome -> Yojson.Safe.t
 
@@ -102,6 +108,6 @@ module For_testing : sig
     task_skill_references:Skill_reference.t list ->
     task_selection:Keeper_task_skill_turn.t option ->
     skill_snapshot:Skill_catalog_snapshot.t ->
-    (t, Keeper_task_skill_turn.error) result
+    (t, projection_error) result
   (** Pure projection seam over one frozen Task/snapshot pair. *)
 end

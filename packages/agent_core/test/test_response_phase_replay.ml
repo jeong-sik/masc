@@ -182,7 +182,11 @@ let chat_control () =
 let reasoning_without_its_following_item () =
   let reasoning=`Assoc Streams.encrypted_reasoning_fields in
   let call arguments=`Assoc["type",`String"function_call";"call_id",`String"call";"name",`String"test";"arguments",`String arguments] in
-  let item_types response=match assistant_message_of_response response with
+  let item_types response =
+    (* A real completion binds its provider identity after parsing. The raw
+       codec alone cannot know which endpoint produced these reasoning bytes. *)
+    let response = Complete_common.patch_telemetry response ~config:(config "/v1/responses") None in
+    match assistant_message_of_response response with
     | Ok message->List.map(fun item->Yojson.Safe.Util.(item|>member "type"|>to_string))(replay_input_items message)
     | Error error->Alcotest.fail(show_assistant_message_error error) in
   let unreadable=Sync.parse(Sync.response[reasoning;call "[]"]) in

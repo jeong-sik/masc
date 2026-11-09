@@ -1,0 +1,25 @@
+import {createRequire} from 'node:module';
+import fs from 'node:fs';
+import path from 'node:path';
+const require = createRequire("/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/package.json");
+const {createServer} = await import(require.resolve('vite'));
+const tailwind = (await import("/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard/node_modules/@tailwindcss/vite/dist/index.mjs")).default;
+const root = "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26049-peer-source/browser";
+const dashboard = "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source/dashboard";
+const deps = fs.realpathSync(path.join(dashboard,'node_modules'));
+const payload = JSON.parse(fs.readFileSync(path.join(root,'payload.json'),'utf8'));
+const apiLog = path.join(root,'http-requests.jsonl');
+const server = await createServer({configFile:false, root, cacheDir:path.join(root,'vite-cache'),publicDir:path.join(dashboard,'public'),plugins:[tailwind(),{name:'synthetic-http-only',configureServer(s){s.middlewares.use((req,res,next)=>{
+ const url = new URL(req.url,'http://127.0.0.1:5195');
+ if (!url.pathname.startsWith('/api/') && !['/health','/mcp','/sse','/ws','/yjs'].includes(url.pathname)) return next();
+ const isRecord = req.method === 'GET' && url.pathname === '/api/v1/keepers/synthetic-peer-source-26049/turn-records';
+ const status = isRecord ? 200 : 404;
+ fs.appendFileSync(apiLog,JSON.stringify({ts:new Date().toISOString(),method:req.method,path:url.pathname+url.search,status})+'\n');
+ res.statusCode=status;res.setHeader('Content-Type','application/json');res.setHeader('Cache-Control','no-store');
+ res.end(JSON.stringify(isRecord ? payload : {error:'synthetic_fixture_route_unavailable'}));
+});}}],resolve:{alias:[{find:'preact',replacement:path.join(deps,'preact')},{find:'htm',replacement:path.join(deps,'htm')},{find:'@preact/signals',replacement:path.join(deps,'@preact/signals')}],dedupe:['preact','htm','@preact/signals']},optimizeDeps:{noDiscovery:true,include:['preact','preact/hooks','htm/preact','@preact/signals']},server:{host:'127.0.0.1',port:5195,strictPort:true,fs:{allow:[root,dashboard,deps]},hmr:false}});
+await server.listen();
+fs.writeFileSync(path.join(root,'server-owner.json'),JSON.stringify({pid:process.pid,port:5195,url:'http://127.0.0.1:5195/',entry:path.join(root,'vite-server.mjs'),started_at:new Date().toISOString()},null,2)+'\n');
+console.log(JSON.stringify({pid:process.pid,url:'http://127.0.0.1:5195/',root,backend:'synthetic only'}));
+let stopping=false;
+for(const signal of ['SIGTERM','SIGINT']) process.on(signal,async()=>{if(stopping)return;stopping=true;await server.close();process.exit(0);});

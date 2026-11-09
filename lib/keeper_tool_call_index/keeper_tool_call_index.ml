@@ -1104,6 +1104,22 @@ let by_execution_ids ~store ~keeper_name ~execution_ids =
       rows_of_locations locations)
 ;;
 
+let fold_by_execution_ids ~store ~keeper_name ~execution_ids ~init ~f =
+  match execution_ids with
+  | [] -> Ok init
+  | _ ->
+    let* folded = with_index ~before_scan:(fun ~path:_ -> ()) ~store ~read:(fun index ->
+      let* locations = select_identity_locations ~sql:select_execution_sql index
+          ~keeper_name ~identities:execution_ids in
+      let accumulated = ref (Ok init) in
+      let* _ = map_locations ~f:(fun _ row ->
+        accumulated := (let* value = !accumulated in f value row);
+        None) locations in
+      Ok !accumulated) in
+    (* A caller's semantic refusal does not invalidate the source index. *)
+    folded
+;;
+
 let addressed_rows ~store ~codebase ?keeper_name ~limit ~offset () =
   if limit <= 0 || offset < 0 then Error "invalid addressed-row pagination"
   else with_index ~before_scan:(fun ~path:_ -> ()) ~store ~read:(fun index ->

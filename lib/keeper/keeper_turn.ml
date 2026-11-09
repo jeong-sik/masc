@@ -525,6 +525,11 @@ let run_keeper_invocation_turn_admitted_inner
       let official_checkpoint_resume = Option.bind direct_resume (function
         | Keeper_agent_run.Checkpoint_continuation admission -> Keeper_direct_checkpoint_continuation.official_client admission
         | Keeper_agent_run.Runtime_continuation _ | Keeper_agent_run.Gate_continuation _ -> None) in
+      (* The source belongs to the admitted operation, before an official
+         continuation replaces its User input with a host-authored resume cue. *)
+      let direct_input_source =
+        Some (Keeper_direct_input_source.of_admitted_input ~operation_id ~speaker:input_speaker)
+      in
       let official_task_reference = Option.bind direct_resume (function
         | Keeper_agent_run.Checkpoint_continuation admission ->
           Option.map (fun original_turn -> Keeper_official_task_reference.create
@@ -742,6 +747,7 @@ let run_keeper_invocation_turn_admitted_inner
               in
               let prepared_context =
                 Keeper_direct_turn_context.prepare
+                  ~direct_input_source
                   ~active_goal_summaries
                   ~current_task
                   ~held_task_skills

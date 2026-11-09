@@ -1,0 +1,103 @@
+{
+  "keeper": "synthetic-peer-source-26049",
+  "count": 1,
+  "skipped_rows": 0,
+  "source": "turn_record",
+  "producer": "keeper_agent_run.run_turn|keeper_turn_record_writer",
+  "durable_store": "synthetic://turn-records",
+  "dashboard_surface": "/api/v1/keepers/:name/turn-records",
+  "freshness_slo_s": 300,
+  "live_turn_in_progress": false,
+  "live_turn_started_at_unix": null,
+  "live_turn_last_progress_at_unix": null,
+  "latest_ts_unix": 1794239283,
+  "latest_ts_iso": "2026-11-09T15:48:03Z",
+  "latest_age_s": 0,
+  "health": "ok",
+  "stale_reason": null,
+  "memory_os": {
+    "keeper": "synthetic-peer-source-26049",
+    "snapshot_store": "synthetic://memory-current",
+    "recall_enabled": false,
+    "revision": 0,
+    "updated_at": null,
+    "update_source": null,
+    "read_errors": [],
+    "facts": {
+      "shown": 0,
+      "current": 0,
+      "items": []
+    },
+    "change": {
+      "added": [],
+      "removed": [],
+      "retained": 0,
+      "invalidated": []
+    }
+  },
+  "entries": [
+    {
+      "record": {
+        "execution_ids": [],
+        "keeper": "synthetic-peer-source-26049",
+        "agent_name": "synthetic-peer-source-agent",
+        "turn_kind": "direct",
+        "trace_id": "synthetic-trace-26049",
+        "absolute_turn": 7,
+        "turn_ref": "synthetic-trace-26049#7",
+        "blocks": [
+          {
+            "block": "keeper_instructions",
+            "bytes": 936,
+            "digest": "5ca036fadc8faf1be473026a01f1768326f6cf40e3281b8addd11e5ff99cd851"
+          },
+          {
+            "block": "active_goals",
+            "bytes": 48,
+            "digest": "6897e8a98dbd26a68ffeb73589a53983d8cea5e7c6f1bcc41eed907ec5e10d67"
+          },
+          {
+            "block": "direct_input_source",
+            "bytes": 113,
+            "digest": "58759bee28c95e004b3bacbcd112704aa5cee28492ea700ee9b6e7d4e54335ac"
+          }
+        ],
+        "input_components": [
+          {
+            "component": "prompt.keeper_instructions",
+            "bytes": 936
+          },
+          {
+            "component": "prompt.active_goals",
+            "bytes": 48
+          },
+          {
+            "component": "prompt.direct_input_source",
+            "bytes": 113
+          },
+          {
+            "component": "tool_schemas",
+            "bytes": 87
+          },
+          {
+            "component": "message_user",
+            "bytes": 48
+          }
+        ],
+        "runtime_profile": "synthetic.local",
+        "request_runtime_profile": "synthetic.local",
+        "request_body_bytes": 1343,
+        "transmitted_atoms": null,
+        "total_atoms": null,
+        "model_input_measurement": null,
+        "model_input_front": null,
+        "response_observed_model_input": null,
+        "raw_trace_run_ref": null,
+        "usage_scope": "unavailable",
+        "ts": 1794239283,
+        "request_observations": []
+      },
+      "diff_vs_prev": null
+    }
+  ]
+}

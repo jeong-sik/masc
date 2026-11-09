@@ -69,7 +69,7 @@ module Keeper_waiting_read : sig
   val clear : t -> t
   val in_flight : t -> bool
   val change_pending : t -> bool
-  val awaiting_change : t -> bool
+  val awaiting_age : t -> int64 option
   val needs_revalidation : t -> bool
   val poll_receipt : t -> (int * int) option
   val accepts_poll : t -> (int * int) option -> bool
@@ -81,15 +81,25 @@ module Keeper_waiting_read : sig
   val exclusive : t -> t
 end = struct
   type request = { ticket : Snapshot_read.request; after_change : bool; revision : int; publication : int }
+  (* [awaiting_since] is the first change of the current burst, monotonic
+     clock. A burst of changes does not restart it: the age answers how long
+     the screen has been behind, which is what a display bar gates on. *)
   type t = { reading : Snapshot_read.t; pending : bool; active_after_change : bool;
-             awaiting : bool; revision : int; publication : int; exclusive : bool }
+             awaiting : bool; awaiting_since : int64 option; revision : int; publication : int
+           ; exclusive : bool }
 
   let idle = { reading = Snapshot_read.idle; pending = false; active_after_change = false;
-               awaiting = false; revision = 0; publication = 0; exclusive = false }
-  let note_change t = { t with pending = true; awaiting = true; revision = t.revision + 1 }
+               awaiting = false; awaiting_since = None; revision = 0; publication = 0
+             ; exclusive = false }
+  let note_change t =
+    let awaiting_since = if t.awaiting then t.awaiting_since else Some (Mtime_clock.elapsed_ns ()) in
+    { t with pending = true; awaiting = true; awaiting_since; revision = t.revision + 1 }
   let in_flight t = Snapshot_read.in_flight t.reading
   let change_pending t = t.pending
-  let awaiting_change t = t.awaiting
+  let awaiting_age t =
+    if t.awaiting then
+      Option.map (fun since -> Int64.sub (Mtime_clock.elapsed_ns ()) since) t.awaiting_since
+    else None
   let needs_revalidation t = t.pending || t.active_after_change
   let poll_receipt t = if t.exclusive then None else Some (t.revision, t.publication)
   let accepts_poll t = function
@@ -97,7 +107,9 @@ end = struct
         revision = t.revision && publication = t.publication && not t.exclusive
     | None -> false
   let settle_poll t ~success =
-    if success then { t with pending = false; awaiting = false; publication = t.publication + 1 }
+    if success then
+      { t with pending = false; awaiting = false; awaiting_since = None
+      ; publication = t.publication + 1 }
     else { t with pending = t.pending || t.active_after_change;
                   publication = t.publication + 1 }
   let accepts_event (t : t) (request : request) = request.publication = t.publication
@@ -125,7 +137,13 @@ end = struct
       let follow_up = t.pending in
       let pending = t.pending || (request.after_change && not success) in
       let awaiting = t.pending || (request.after_change && not observed) in
-      Some ({ t with reading; pending; active_after_change = false; awaiting;
+      let awaiting_since =
+        if awaiting then
+          match t.awaiting_since with
+          | Some since -> Some since
+          | None -> Some (Mtime_clock.elapsed_ns ())
+        else None in
+      Some ({ t with reading; pending; active_after_change = false; awaiting; awaiting_since;
                      exclusive = t.exclusive && follow_up }, follow_up)
 
   let suspend t =
@@ -133,6 +151,7 @@ end = struct
     ; pending = t.pending || t.active_after_change
     ; active_after_change = false
     ; awaiting = t.awaiting
+    ; awaiting_since = t.awaiting_since
     ; revision = t.revision + 1
     ; publication = t.publication + 1
     ; exclusive = false
@@ -140,7 +159,7 @@ end = struct
 
   let clear t =
     { reading = Snapshot_read.invalidate t.reading; pending = false; active_after_change = false;
-      awaiting = false; revision = t.revision + 1; publication = t.publication + 1;
+      awaiting = false; awaiting_since = None; revision = t.revision + 1; publication = t.publication + 1;
       exclusive = false }
 end
 
@@ -324,19 +343,27 @@ module Local_read_order : sig
   val request_revision : request -> revision
   val start : intent:Snapshot_read.intent -> t -> t * (request * Snapshot_read.intent) option
   val settle : t -> request -> observed:bool -> t option
+  (** A complete event replay cannot repair a failed source observation. Queue
+      that read again, or retain one failure-only followup until a successful
+      read covers the demand present at resume. Older attempts and already owed
+      work preserve it; the followup does not retry itself. An idle source with
+      unmet demand requests one fresh observation without inherited credit. *)
+  val after_observer_resume : t -> t
   val invalidate : t -> t
 end = struct
   type revision = int64
   type request = { ticket : Snapshot_read.request; revision : revision }
   type followup = No_followup | Refresh_requested
+  type recovery = No_recovery | Read_failed | Retry_if_failed of revision
   type t = {
     tickets : Snapshot_read.t;
     demanded : revision;
     observed : revision option;
     followup : followup;
+    recovery : recovery;
   }
   let idle = { tickets = Snapshot_read.idle; demanded = 0L;
-               observed = None; followup = No_followup }
+               observed = None; followup = No_followup; recovery = No_recovery }
   let in_flight state = Snapshot_read.in_flight state.tickets
   let has_followup state = state.followup = Refresh_requested
   let demanded_revision state = state.demanded
@@ -357,16 +384,34 @@ end = struct
         | No_followup -> Snapshot_read.Poll
         | Refresh_requested -> Snapshot_read.Refresh in
       let tickets, ticket = Snapshot_read.start ~intent:Snapshot_read.Poll state.tickets in
-      let next = {state with tickets; followup = No_followup} in
+      let recovery = match state.recovery with
+        | Retry_if_failed _ -> state.recovery
+        | No_recovery | Read_failed -> No_recovery in
+      let next = {state with tickets; followup = No_followup; recovery} in
       next, Option.map (fun ticket -> {ticket; revision = state.demanded}, intent) ticket
   let settle state request ~observed =
     Option.map (fun tickets ->
+        let followup, recovery = match state.recovery with
+          | Retry_if_failed required when Int64.compare request.revision required < 0 ->
+              state.followup, state.recovery
+          | Retry_if_failed _ ->
+              if observed then state.followup, No_recovery else Refresh_requested, Read_failed
+          | No_recovery | Read_failed ->
+              state.followup, (if observed then No_recovery else Read_failed) in
         {state with tickets;
-          observed = if observed then Some request.revision else state.observed})
+          observed = if observed then Some request.revision else state.observed;
+          followup; recovery})
       (Snapshot_read.settle state.tickets request.ticket)
+  let after_observer_resume state =
+    if in_flight state then {state with recovery = Retry_if_failed state.demanded}
+    else match state.recovery with
+      | Read_failed -> {state with followup = Refresh_requested}
+      | No_recovery when not (covers state state.demanded) ->
+          {state with followup = Refresh_requested}
+      | No_recovery | Retry_if_failed _ -> state
   let invalidate state =
     {state with tickets = Snapshot_read.invalidate state.tickets;
-      observed = None; followup = No_followup}
+      observed = None; followup = No_followup; recovery = No_recovery}
 end
 
 module Surface_read_source = struct
@@ -1227,15 +1272,28 @@ type msg_entry = {
   me_at: float;
 }
 
-(* The canonical transcript and memory journal are distinct sources, even
-   when a transcript system row uses the Memory display role. [None] means
-   no successful transcript read yet; [Some []] is a received empty source. *)
+(* A partial reply does not establish receipt of the physical page or full
+   transcript. In particular it must not consume their first-read/retry rights.
+   A received empty history remains distinct from an unread source. *)
+type keeper_chat_history =
+  | Chat_history_unread
+  | Chat_history_partial of msg_entry list
+  | Chat_history_received of msg_entry list
+
+let keeper_chat_history_rows = function
+  | Chat_history_unread -> []
+  | Chat_history_partial rows | Chat_history_received rows -> rows
+
+let keeper_chat_history_received = function
+  | Chat_history_received _ -> true
+  | Chat_history_unread | Chat_history_partial _ -> false
+
 type keeper_chat_sources = {
-  kcs_history : msg_entry list option;
+  kcs_history : keeper_chat_history;
   kcs_memory : msg_entry list;
 }
 
-let empty_keeper_chat_sources = {kcs_history=None; kcs_memory=[]}
+let empty_keeper_chat_sources = {kcs_history=Chat_history_unread; kcs_memory=[]}
 
 (* Rows already read from one Keeper, with the paging authority supplied by
    those reads. This is a session cache, not another persistent transcript. *)
@@ -1337,7 +1395,7 @@ type keeper_history_owed = {
    the UI's owned-result drain offers each slot once without a mailbox wait.
    Offering is not settlement: the request stays busy until UI admission. *)
 module Keeper_history_read : sig
-  type source = History | Memory
+  type source = History | Memory | Initial_reply
   type result = (Masc_tui_keeper_chat_history.decoded, string) Result.t
   type page_result = (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) Result.t
   type 'a observed = { result : 'a; ready_at_ns : int64 }
@@ -1347,8 +1405,9 @@ module Keeper_history_read : sig
 
   val create : generation:int -> keeper:string -> authority:workspace_authority ->
     reading:unit ref -> first_page:bool -> t
-  (** A first page is requested only while this Keeper has no received history.
-      An unrequested page slot is already settled and never publishes data. *)
+  (** The physical first page and the optional latest reply are requested only
+      while this Keeper has no received history. Unrequested slots are already
+      settled and never publish data. *)
   val generation : t -> int
   val keeper : t -> string
   val authority : t -> workspace_authority
@@ -1356,18 +1415,24 @@ module Keeper_history_read : sig
   val publish : t -> source -> ready_at_ns:int64 -> result -> unit
   val take_ready : t -> (source * observation) list
   val settle : t -> source -> bool
+  (** Admit only an offered source once. When History and Memory have both
+      settled, withdraw the optional reply so it cannot block a failure retry. *)
   val publish_page : t -> ready_at_ns:int64 -> page_result -> unit
   val take_page_ready : t -> page_observation option
   val settle_page : t -> bool
   val retire_page : t -> unit
   (** A later explicit paging request withdraws initial-page application.
       This is not a claim that the first-page worker stopped. *)
+  val retire_initial_reply : t -> unit
+  (** A successful full transcript withdraws the optional initial reply,
+      including a result already offered but not yet admitted. *)
   val page_pending : t -> bool
+  val history_pending : t -> bool
   val sources_pending : t -> bool
   (** Whether the History or Memory answer of this request is not applied yet. *)
   val pending : t -> bool
 end = struct
-  type source = History | Memory
+  type source = History | Memory | Initial_reply
   type result = (Masc_tui_keeper_chat_history.decoded, string) Result.t
   type page_result = (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) Result.t
   type 'a observed = { result : 'a; ready_at_ns : int64 }
@@ -1381,18 +1446,23 @@ end = struct
     reading : unit ref;
     history : result slot Atomic.t;
     memory : result slot Atomic.t;
+    initial_reply : result slot Atomic.t;
     page : page_result slot Atomic.t;
   }
 
   let create ~generation ~keeper ~authority ~reading ~first_page =
     { generation; keeper; authority; reading;
       history = Atomic.make Waiting; memory = Atomic.make Waiting;
+      initial_reply = Atomic.make (if first_page then Waiting else Settled);
       page = Atomic.make (if first_page then Waiting else Settled) }
   let generation request = request.generation
   let keeper request = request.keeper
   let authority request = request.authority
   let reading request = request.reading
-  let slot request = function History -> request.history | Memory -> request.memory
+  let slot request = function
+    | History -> request.history
+    | Memory -> request.memory
+    | Initial_reply -> request.initial_reply
   let publish_cell cell ~ready_at_ns result =
     ignore (Atomic.compare_and_set cell Waiting (Ready {result; ready_at_ns}))
   let publish request source = publish_cell (slot request source)
@@ -1405,19 +1475,27 @@ end = struct
   let take_ready request =
     List.filter_map (fun source ->
       Option.map (fun observation -> source, observation) (take_cell (slot request source)))
-      [History; Memory]
+      [Initial_reply; History; Memory]
   let take_page_ready request = take_cell request.page
-  let settle request source =
-    Atomic.compare_and_set (slot request source) Offered Settled
-  let settle_page request = Atomic.compare_and_set request.page Offered Settled
-  let retire_page request = Atomic.set request.page Settled
   let unsettled cell = match Atomic.get cell with
     | Settled -> false
     | Waiting | Ready _ | Offered -> true
+  let settle request source =
+    let applied = Atomic.compare_and_set (slot request source) Offered Settled in
+    (* An optional accelerator must not hold a failed full read's retry.
+       Once both authoritative sources are admitted, withdraw it regardless
+       of their outcome. A successful History can withdraw it earlier. *)
+    if applied && not (unsettled request.history || unsettled request.memory) then
+      Atomic.set request.initial_reply Settled;
+    applied
+  let settle_page request = Atomic.compare_and_set request.page Offered Settled
+  let retire_page request = Atomic.set request.page Settled
+  let retire_initial_reply request = Atomic.set request.initial_reply Settled
   let page_pending request = unsettled request.page
+  let history_pending request = unsettled request.history
   let sources_pending request = unsettled request.history || unsettled request.memory
   let pending request =
-    unsettled request.history || unsettled request.memory || unsettled request.page
+    sources_pending request || unsettled request.initial_reply || unsettled request.page
 end
 
 (* The Memory lane in summary mode says where the memory ended up.
@@ -3873,6 +3951,23 @@ let observer_replay_description ?(source_loss = false) replay =
   in
   if source_loss then "SOURCE EVENTS LOST · " ^ description
   else description
+
+(* One word for the transport log: which replay a newly opened observer
+   connection negotiated. Same cases as [observer_replay_description], so
+   connection cadence and resume quality are countable per word. *)
+let observer_replay_word = function
+  | Observer_replay_unobserved -> "unobserved"
+  | Observer_replay_unavailable _ -> "unavailable"
+  | Observer_replay_rejected _ -> "rejected"
+  | Observer_replay_scoped { Sse_wire.replay = Fresh; _ } -> "fresh"
+  | Observer_replay_scoped { Sse_wire.replay = Resumed; _ } -> "resumed"
+  | Observer_replay_scoped { Sse_wire.replay = Resumed_after_gap _; _ } -> "after_gap"
+  | Observer_replay_scoped { Sse_wire.replay = Reset Sse_wire.Instance_changed; _ } ->
+      "reset_instance_changed"
+  | Observer_replay_scoped { Sse_wire.replay = Reset Sse_wire.Unscoped_cursor; _ } ->
+      "reset_unscoped_cursor"
+  | Observer_replay_scoped { Sse_wire.replay = Reset Sse_wire.Cursor_ahead; _ } ->
+      "reset_cursor_ahead"
 
 (* A retry after a partially published SSE event can have a new transport
    cursor. Remember the highest notice sequence independently per source. *)
@@ -12103,6 +12198,11 @@ let set_local_source_order (state : state) source reading =
   | Local_keepers -> state.local_keeper_read_order <- reading
   | Local_work -> state.local_workspace_read_order <- reading
 
+let note_local_source_observer_resume (state : state) source =
+  if state.workspace_identity = Workspace_identity_match then
+    set_local_source_order state source
+      (Local_read_order.after_observer_resume (local_source_order state source))
+
 let local_source_observation (state : state) = function
   | Local_keepers -> state.local_keeper_observation
   | Local_work -> state.local_work_observation
@@ -12189,20 +12289,21 @@ let begin_local_workspace_read (state : state) ~intent ~source ~base_path ~start
           lwr_previous_tasks = (match source with
             | Local_work -> state.task_payloads | Local_keepers -> Task_payloads.empty) }) request
 
-let take_local_workspace_read (state : state) ~source request result =
+let take_local_workspace_read (state : state) ~source ~is_observed request result =
   let observation=request.lwr_observation in
   let reject reason = Local_read_observation.observe observation (Ui_admission (Rejected reason));None in
   if source <> request.lwr_source then reject Wrong_source
   else if state.workspace_identity <> Workspace_identity_match
      || request.lwr_authority <> state.workspace_authority
      || not (String.equal request.lwr_base_path state.local_base_path) then reject Workspace_withdrawn
-  else match Local_read_order.settle (local_source_order state source) request.lwr_request
-      ~observed:(Result.is_ok result) with
+  else
+    let observed = match result with Ok reading -> is_observed reading | Error _ -> false in
+    match Local_read_order.settle (local_source_order state source) request.lwr_request ~observed with
     | None -> reject Superseded
     | Some reading ->
         set_local_source_order state source reading;
         Local_read_observation.observe observation (Ui_admission
-          (match result with Ok _ -> Accepted | Error _ -> Accepted_failure));
+          (if observed then Accepted else Accepted_failure));
         (match result with
          | Ok _ -> ()
          | Error detail ->
@@ -21176,10 +21277,10 @@ let transcript_replaces_session_output ~(fresh : msg_entry list)
    chat projection/search. All source updates rebuild that view here. *)
 let set_keeper_chat_sources (state : state) sources =
   state.msg_loaded_sources <- sources;
-  state.msg_loaded <- match sources.kcs_history, sources.kcs_memory with
-    | None, memory -> memory
-    | Some history, [] -> history
-    | Some history, memory -> history @ memory
+  state.msg_loaded <- match keeper_chat_history_rows sources.kcs_history, sources.kcs_memory with
+    | [], memory -> memory
+    | history, [] -> history
+    | history, memory -> history @ memory
 ;;
 
 let restore_keeper_chat_page (state : state) keeper_name =
@@ -21235,7 +21336,7 @@ let retire_keeper_chat_history (state : state) keeper_name =
   state.msg_loaded_pages <- List.remove_assoc keeper_name state.msg_loaded_pages;
   if state.msg_loaded_keeper = Some keeper_name then (
     retire_keeper_message_search state;
-    set_keeper_chat_sources state {state.msg_loaded_sources with kcs_history=None};
+    set_keeper_chat_sources state {state.msg_loaded_sources with kcs_history=Chat_history_unread};
     state.msg_loaded_error <- None;
     state.msg_loaded_dropped <- 0;
     state.msg_older_cursor <- None;
@@ -26167,6 +26268,16 @@ let keeper_message_inflight_drawn (state : state) =
 
 (* The current conversation's extra request diagnostics, shared by the
    renderer and its row budget. Background work stays on the Activity pane. *)
+let keeper_message_history_loading (state : state) =
+  match state.msg_history_inflight, state.msg_target_keeper_name with
+  | Some request, Some keeper_name ->
+    String.equal (Keeper_history_read.keeper request) keeper_name
+    && Keeper_history_read.generation request = state.msg_history_load_generation
+    && Keeper_history_read.authority request = state.workspace_authority
+    && Keeper_history_read.reading request == state.workspace_read_authority
+    && Keeper_history_read.history_pending request
+  | Some _, None | None, (Some _ | None) -> false
+
 let keeper_message_inflight_rows (state : state) ~now =
   let batch_label group =
     if group.count = 1 then ""
@@ -26200,6 +26311,9 @@ let keeper_message_inflight_rows (state : state) ~now =
   in
   List.map (fun group -> true, summary group)
     (keeper_message_inflight_drawn state)
+  @ if keeper_message_history_loading state then
+      [false, "  Loading conversation history…"]
+    else []
 
 let keeper_message_schedule_rows state ~now ~max_rows =
   if state.view <> Keepers Keeper_message || max_rows <= 0 then [] else

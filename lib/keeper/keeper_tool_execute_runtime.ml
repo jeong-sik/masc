@@ -182,13 +182,14 @@ let gate_operation = Keeper_gate.tool_execute_gate_operation
    name the directory the operator approved. Owning the upsert here keeps the
    producer and its inverse [replay_args_of_gate_input] pinned by the same
    round-trip test (#26143). *)
-let execute_gate_input ~input ~cwd ~sandbox_profile ~sandbox_target =
+let execute_gate_input ~input ~cwd ~sandbox_profile ~sandbox_target ~network_mode =
   `Assoc
     [ "schema", `String "masc.keeper_gate.request.v1"
     ; "input", Keeper_tool_execute_input.assoc_upsert "cwd" (`String cwd) input
     ; "cwd", `String cwd
     ; "sandbox_profile", `String sandbox_profile
     ; "sandbox_target", `String sandbox_target
+    ; "network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string network_mode)
     ]
 ;;
 
@@ -199,7 +200,7 @@ let execute_gate_input ~input ~cwd ~sandbox_profile ~sandbox_target =
    Unlike the write path, nothing is reconstructed: the approved tool
    arguments were stored verbatim under [input], because the Gate request
    wraps them with execution context rather than re-encoding them. The
-   surrounding [cwd]/[sandbox_*] fields describe where the approval was
+   surrounding [cwd]/[sandbox_*]/[network_mode] fields describe where the approval was
    granted; the handler re-derives them from the current turn, and a
    divergence there fails the canonical-input match rather than silently
    executing somewhere else. *)
@@ -325,6 +326,7 @@ let guest_sandbox_target = Keeper_sandbox_shell_ir_target.guest_target
 type dispatch_bundle =
   { sandbox : Masc_exec.Sandbox_target.t
   ; sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile
+  ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; fields : (string * Yojson.Safe.t) list
   ; base_host_env : string array option
   ; github_secret_files :
@@ -359,6 +361,7 @@ let handle_tool_execute_typed
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?replay_gate_input
       ?defer
       ~shell_ir_rewrite
       ~(result_projection : Tool_output.model_projection)
@@ -453,10 +456,11 @@ let handle_tool_execute_typed
            a microVM backend applies to a route the factory already fixed. *)
         let execution_condition_fields
               ~(sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile)
+              ~network_mode
           =
           [ "network_mode"
           , `String
-              (Keeper_types_profile_sandbox.network_mode_to_string effective_network)
+              (Keeper_types_profile_sandbox.network_mode_to_string network_mode)
           ]
           @ (match sandbox_profile, meta.microvm_backend with
              | Micro_vm, Some backend ->
@@ -525,7 +529,8 @@ let handle_tool_execute_typed
                Ok
                  { sandbox = dispatch.target
                  ; sandbox_profile = Remote_ssh
-                 ; fields = execution_condition_fields ~sandbox_profile:Remote_ssh @
+                 ; network_mode = effective_network
+                 ; fields = execution_condition_fields ~sandbox_profile:Remote_ssh ~network_mode:effective_network @
                      [ "requested_sandbox", `String "remote_ssh"
                      ; "via", `String "remote_ssh"
                      ; "sandbox_profile", `String "remote_ssh"
@@ -548,7 +553,8 @@ let handle_tool_execute_typed
             Ok
               { sandbox = dispatch.target
               ; sandbox_profile = dispatch.sandbox_profile
-              ; fields = execution_condition_fields ~sandbox_profile:dispatch.sandbox_profile @
+              ; network_mode = dispatch.network_mode
+              ; fields = execution_condition_fields ~sandbox_profile:dispatch.sandbox_profile ~network_mode:dispatch.network_mode @
                   [ "requested_sandbox", `String label
                   ; "via", `String label
                   ; "sandbox_profile", `String label
@@ -575,7 +581,7 @@ let handle_tool_execute_typed
              (error_json
                 ~fields:
                   ([ "typed", `Bool true; "cmd", `String cmd ]
-                   @ execution_condition_fields ~sandbox_profile
+                   @ execution_condition_fields ~sandbox_profile ~network_mode:effective_network
                    @ model_location_fields
                    @ fields)
                 message)
@@ -683,7 +689,15 @@ let handle_tool_execute_typed
             ~cwd
             ~sandbox_profile:sandbox_profile_label
             ~sandbox_target:(sandbox_target_label dispatch_sandbox)
+            ~network_mode:dispatch_bundle.network_mode
         in
+        if Option.fold ~none:false
+             ~some:(fun approved ->
+               Keeper_approval_request_fingerprint.request_fingerprint approved
+               <> Keeper_approval_request_fingerprint.request_fingerprint gate_input)
+             replay_gate_input
+        then typed_error_json ~class_:Tool_result.Policy_rejection "approval_input_drifted operation=tool_execute"
+        else
         let gate_request : Keeper_gate.request =
           { keeper_name = meta.name
           ; operation = gate_operation
@@ -1316,6 +1330,7 @@ let handle_tool_execute_with_outcome
       ?continuation_channel
       ?gate_context
       ?gate_grant
+      ?replay_gate_input
       ?defer
       ~shell_ir_rewrite
       ~result_projection
@@ -1334,6 +1349,7 @@ let handle_tool_execute_with_outcome
     ?continuation_channel
     ?gate_context
     ?gate_grant
+    ?replay_gate_input
     ?defer
     ~shell_ir_rewrite
     ~result_projection

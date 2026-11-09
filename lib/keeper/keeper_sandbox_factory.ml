@@ -5,6 +5,7 @@ type guest_profile =
 type runtime_binding =
   { runtime : Keeper_turn_sandbox_runtime.t
   ; guest_profile : guest_profile
+  ; network_mode : Keeper_types_profile_sandbox.network_mode
   ; image : (string, Keeper_sandbox_image_resolver.error) result
   }
 
@@ -90,7 +91,7 @@ let resolve (t : t) ~cwd =
         , host_root )
       in
       let bind runtime =
-        Runtime { runtime; guest_profile; image }
+        Runtime { runtime; guest_profile; network_mode = actual_network; image }
       in
       match Hashtbl.find_opt t.cache key with
       | Some runtime -> bind runtime

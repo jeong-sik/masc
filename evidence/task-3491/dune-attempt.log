@@ -1,0 +1,27 @@
+# dune 표적 실행 시도 — 2026-11-09T19:5xZ, branch test/terminal-text-boundary @ 88b4bf4e
+# 실행자: rondo (이 샌드박스 레인)
+
+$ dune build test/test_tui_terminal_text.exe
+File "lib/auth/dune", line 20, characters 2-6:
+20 |   jose
+       ^^^^
+Error: Library "jose" not found.
+-> required by library "masc.auth" in _build/default/lib/auth
+-> required by executable test_tui_terminal_text in test/dune:4035
+-> required by _build/default/test/test_tui_terminal_text.exe
+
+$ dune build @test/test_tui_terminal_text
+Error: Alias "test_tui_terminal_text" specified on the command line is empty.
+It is not defined in test or any of its descendants.
+
+$ opam install -y jose
+[ERROR] Opam has not been initialised, please run `opam init'
+
+# 결론: 이 레인에서 dune 경로는 test_tui_terminal_text -> masc -> masc.auth -> jose
+# 부재로 실행 불가하며, opam 이 초기화되지 않아 설치도 불가하다.
+# 이것은 후보 코드의 결함이 아니라 이 실행 환경의 의존성 결손이다.
+# 그래서 shim 으로 같은 시험 파일을 컴파일·실행했다:
+#   - test_tui_terminal_text.ml 은 원본을 바이트 그대로 복사 (변형 0)
+#   - tui_terminal_text.ml/.mli, string_util.ml, time_codec.ml/.mli 도 원본 그대로
+#   - 유일한 추가물 masc.ml 은 `open Masc` 를 만족시키는 2줄짜리 모듈 별칭
+#   - 의존: alcotest 1.9.1, uucp 18.0.0, ptime (모두 설치돼 있음)

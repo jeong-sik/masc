@@ -48,10 +48,11 @@ val execute_gate_input :
   cwd:string ->
   sandbox_profile:string ->
   sandbox_target:string ->
+  network_mode:Keeper_types_profile_sandbox.network_mode ->
   Yojson.Safe.t
 (** The Gate input an execute submits: the tool arguments with the resolved
-    [cwd] upserted into them, wrapped with the [cwd], sandbox profile label and
-    sandbox target label the approval is granted under. This is the producer
+    [cwd] upserted into them, wrapped with the [cwd], sandbox profile, target,
+    and configured network mode the approval is granted under. This is the producer
     side of the contract {!replay_args_of_gate_input} decodes; tests build
     their stored-approval fixtures through it so the two cannot drift. *)
 
@@ -65,7 +66,7 @@ val replay_args_of_gate_input : Yojson.Safe.t -> (Yojson.Safe.t, string) result
     directory, and re-deriving the current turn's default would execute
     somewhere the operator never saw.
 
-    The envelope's sibling [cwd]/[sandbox_profile]/[sandbox_target] fields
+    The envelope's sibling [cwd]/[sandbox_profile]/[sandbox_target]/[network_mode] fields
     stay behind. The handler re-derives the sandbox from the current turn and
     rebuilds the envelope, so a sandbox that moved between approval and replay
     produces a different canonical input and fails the match rather than
@@ -78,6 +79,10 @@ val handle_tool_execute_with_outcome :
   ?continuation_channel:Keeper_continuation_channel.t ->
   ?gate_context:(unit -> Keeper_gate.causal_context) ->
   ?gate_grant:Keeper_gate.cycle_grant ->
+  ?replay_gate_input:Yojson.Safe.t ->
+    (** Host replay supplies the approved envelope. A mismatch with the
+        freshly resolved envelope refuses before consulting other Gate policy;
+        a legacy envelope without network mode cannot authorize a new replay. *)
   ?defer:
     ((turn_sandbox_factory:Keeper_sandbox_factory.t option ->
       Keeper_tool_execution.t) ->

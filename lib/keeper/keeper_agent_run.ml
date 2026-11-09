@@ -400,7 +400,23 @@ let finalize_turn_surface ~response_text ~stop_reason terminal_effect_state =
     Ok (Keeper_turn_outcome.of_result_surface ~response_text stop_reason, None)
 ;;
 
+let observe_chat_handoff ~observed probe () =
+  let answer = probe () in
+  (match answer with
+   | Ok true -> observed := Keeper_agent_result.Resume_after_chat_handoff
+   | Ok false | Error _ -> ());
+  answer
+;;
+
+let checkpoint_followup_of_stop_reason ~observed = function
+  | Runtime_agent.Yielded_to_durable_stimulus _ -> observed
+  | Runtime_agent.Completed _ | Runtime_agent.InputRequired _ ->
+    Keeper_agent_result.Keep_cadence
+;;
+
 module For_testing = struct
+  let observe_chat_handoff = observe_chat_handoff
+  let checkpoint_followup_of_stop_reason = checkpoint_followup_of_stop_reason
   let finalize_turn_surface = finalize_turn_surface
   let tool_boundary_state = tool_boundary_state
   let official_client_tool_boundary = official_client_tool_boundary
@@ -1326,8 +1342,12 @@ let run_turn
           fails returns no [run_result] and so no [checkpoint_owner]; this is
           how the error path below knows the turn ran on an official client. *)
        let last_dispatched_checkpoint_owner = ref None in
+       (* Capture readiness while the autonomous child still owns the slot.
+          A fast chat may have settled before the heartbeat sees this result.
+          Each dispatched attempt starts a fresh observation below. *)
+       let checkpoint_followup = ref Keeper_agent_result.Keep_cadence in
        let turn_result =
-         let chat_handoff () =
+         let chat_handoff = observe_chat_handoff ~observed:checkpoint_followup (fun () ->
            match turn_kind, Keeper_turn_preview_owner.current () with
            | Turn_record.Direct, _ | Turn_record.Autonomous, None -> Ok false
            | Turn_record.Autonomous, Some _ ->
@@ -1348,7 +1368,7 @@ let run_turn
               | Ok true ->
                 Log.Keeper.info ~keeper_name:meta.name
                   "turn checkpoint: handing the autonomous slot to ready queued chat";
-                Ok true)
+                Ok true))
          in
          let on_official_client_tool_boundary ~tool_name =
            official_client_tool_boundary ~repetition_execution ~chat_handoff ~tool_name
@@ -1581,6 +1601,7 @@ let run_turn
                         request_observations_rev := observation :: !request_observations_rev)
                       ~on_runtime_attempt:
                         (fun attempt ->
+                           checkpoint_followup := Keeper_agent_result.Keep_cadence;
                            runtime_walk_observed := true;
                            last_dispatched_checkpoint_owner :=
                              Some attempt.Keeper_turn_driver.checkpoint_owner;
@@ -1967,6 +1988,9 @@ let run_turn
                              ~history_assistant_source
                              ~raw_response_text:response_text
                              ~turn_outcome
+                             ~checkpoint_followup:
+                               (checkpoint_followup_of_stop_reason
+                                  ~observed:!checkpoint_followup result.stop_reason)
                              ~terminal_effect_receipt
                              ~capture_replay_response:
                                (fun ~response_text ->

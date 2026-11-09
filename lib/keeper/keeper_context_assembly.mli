@@ -17,11 +17,14 @@ type receipt = private
   }
 type system_observation =
   | Active_goals of string
+  | Direct_input_source of string
   | Goals_awaiting_proof of string
-(** Only this renderer-issued observation can become a System suffix.
-    Agent Core keeps the current turn's proof state here so tool feedback
-    remains the newest message. Official clients receive proof state as
-    turn-scoped input instead. Completion Authority remains a context block. *)
+(** Only these renderer-issued observations can become System suffixes.
+    The admitted operation source follows the Goal snapshot and is held across
+    tool rounds independently of the remaining dynamic context. Agent Core
+    keeps the current turn's proof state here so tool feedback remains the
+    newest message. Official clients receive proof state as turn-scoped input
+    instead. Completion Authority remains a context block. *)
 val observation_block : system_observation -> Prompt_block_id.t * string
 
 type proof_state = private { proof_text : string }

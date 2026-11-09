@@ -143,6 +143,10 @@ type keepalive_turn_outcome = {
       (** The cycle admitted at least one event-queue stimulus and acked
           every entry of that batch on completion. The loop reads it to
           skip the cadence sleep while more entries are pending. *)
+  checkpoint_followup : Keeper_agent_result.checkpoint_followup;
+      (** Carries a ready-chat yield only after its unfinished source was
+          retained successfully. This schedules one admission attempt; the
+          Owner's lifecycle, shutdown and child-slot gates still decide it. *)
   after_failure : after_failure option;
       (** What the cycle's turn failure or provider rest leaves the next
           cycle; [None] keeps the plain cadence. A rested cycle carries the
@@ -358,13 +362,19 @@ module For_testing : sig
 
   (** Whether the loop starts another cycle without sleeping. A serving
       deferred suffix is itself unfinished input and starts immediately;
-      ordinary cadence and path-release outcomes retain the existing
-      acknowledged-pending-stimulus rule. *)
+      a retained checkpoint that yielded to ready chat retries admission while
+      its source is pending. Ordinary checkpoints and path-release outcomes
+      retain the existing acknowledged-pending-stimulus rule. *)
   val next_cycle_starts_now :
     after_failure:after_failure option ->
     stimuli_acked:bool ->
+    checkpoint_followup:Keeper_agent_result.checkpoint_followup ->
     pending_stimulus:(unit -> bool) ->
     bool
+
+  val checkpoint_followup_after_retention :
+    cycle_outcome:Keeper_heartbeat_loop_cycle.cycle_outcome option ->
+    retained_stimulus:bool -> Keeper_agent_result.checkpoint_followup
 
   (** Scheduling authority chosen from the loop's exact state. A deferred
       runtime suffix takes precedence over cadence because it is unfinished

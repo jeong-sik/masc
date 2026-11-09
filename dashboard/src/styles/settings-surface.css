@@ -980,7 +980,7 @@
   border: 1px solid var(--border-main);
   border-radius: var(--radius-sm);
   overflow: hidden;
-  /* keeper-v2 styles/surfaces.css:506 — well (deepest), not sunken */
+  /* well (deepest), not sunken */
   background: var(--bg-well);
 }
 
@@ -1294,7 +1294,7 @@
   font-size: var(--fs-12);
 }
 
-/* tool-group policy — keeper-v2 styles/surfaces.css:555-565 (.set-tg-*) */
+/* tool-group policy (.set-tg-*) */
 .set-tg-row {
   display: flex;
   align-items: flex-start;
@@ -1370,7 +1370,7 @@
   color: color-mix(in oklab, var(--status-ok) 80%, var(--text-mid));
 }
 
-/* tool_execute 3-layer guard — keeper-v2 styles/surfaces.css:567-569 */
+/* tool_execute 3-layer guard */
 .set-guard {
   display: flex;
   align-items: center;
@@ -1394,7 +1394,7 @@
   font-size: var(--fs-13);
 }
 
-/* fusion preset — keeper-v2 styles/surfaces.css:572-577 (.set-fus-*) */
+/* fusion preset (.set-fus-*) */
 .set-fus-preset {
   display: grid;
   grid-template-columns: 1fr;
@@ -1661,7 +1661,7 @@
   cursor: default;
 }
 
-/* Discord trigger radios — keeper-v2 styles/surfaces.css:580-587 (.set-trigger*) */
+/* Discord trigger radios (.set-trigger*) */
 .set-trigger {
   display: flex;
   align-items: flex-start;

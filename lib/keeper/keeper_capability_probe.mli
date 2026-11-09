@@ -159,7 +159,8 @@ type invocation_error =
   | Muse_home_unavailable of string
   | Account_not_authorized of string
       (** The access refused to start the official CLI on the account of the
-          runtime ({!Runtime_account_access.authorize}); no process started. *)
+          runtime ({!Runtime_account_access.authorize},
+          {!Runtime_account_access.authorize_muse}); no process started. *)
   | Not_antigravity_lane of string
       (** {!probe_antigravity_invocation} was asked about a lane that declares
           its tools directly. Use {!probe_invocation} or

@@ -40,10 +40,8 @@ type t = {
 
 type get = url:string -> (int * string, string) result
 
-let discovery_headers =
-  [ "User-Agent", "masc/0.31.0"
-  ; "Accept", "application/json, */*"
-  ]
+(* The shared client adds the User-Agent to a request that has none. *)
+let discovery_headers = [ "Accept", "application/json, */*" ]
 
 (* The production transports, each one short JSON round trip bounded by
    [timeout_sec] on [clock]. No defaults: the shared client's default arm is

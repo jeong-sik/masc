@@ -3,10 +3,8 @@
     @stability Internal
     @since 0.93.1 *)
 
-val default_base_url : string
 val api_version : string
 val max_response_body : int
-val max_stdio_buffer : int
 
 (** Allocate an opaque, process-unique tool-use identity.
 
@@ -17,7 +15,6 @@ val fresh_tool_use_id : unit -> string
 
 val string_is_blank : string -> bool
 val text_blocks_to_string : Types.content_block list -> string
-val json_of_string_or_raw : string -> Yojson.Safe.t
 
 val error_message_of_body : string -> string option
 (** The cause a provider error body names, when it names one: the string

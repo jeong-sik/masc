@@ -25,7 +25,8 @@ A whole response reserves its encoded payload before sending headers. If the
 listener has insufficient capacity, it returns an empty 503 with `no-store`,
 preserving CORS headers and removing the source representation's encoding and
 cache validators. Accepted responses keep the existing flush-before-close
-behavior, including clients that consume more slowly than the initial H2 window.
+behavior, including clients that consume more slowly than the initial H2 window,
+as long as each 16 KiB slice of the body drains within the stall bound below.
 Reset and connection cancellation release reservations even when the writer's
 flush callback cannot run.
 
@@ -34,7 +35,15 @@ on the network while holding the shared publisher lock. A separate request
 fiber drains one frame at a time. Capacity exhaustion resets that stream;
 it does not silently drop events or end a partial SSE as successful. GitHub login
 SSE uses a sequential, reserved write-and-flush path outside publisher locks.
-There is no response idle timeout.
+
+A stream whose oldest response flush goes 90 seconds without an answer is
+reset with RST_STREAM(INTERNAL_ERROR), and one warn line names the request
+(RFC-0518 D2). The time counts from when that flush became the oldest one
+waiting. Bodies written through the ledger get a flush at every 16 KiB slice
+(D3), so a client that keeps reading has 90 seconds for each slice, not for
+the whole body. The reset releases the stream's fibers and reservations. The
+bound is a code constant, not a setting. gRPC listener responses are written
+by `Grpc_eio` and are outside it.
 
 The default stream capacity follows RFC 9113 section 6.5.2's recommendation to
 allow at least 100 concurrent streams. The 64 MiB payload allocation also covers

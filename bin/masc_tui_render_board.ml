@@ -97,36 +97,53 @@ let render_board_compose (state : state) =
   let (rows, cols) = get_terminal_size () in
   let buf = Buffer.create 4096 in
   let draft_content = Buffer.contents state.board_draft in
-  let draft_chars = String.length draft_content in
   let raw_lines = String.split_on_char '\n' draft_content in
-  let line_count = List.length raw_lines in
   (* What the draft is and where it goes. The keys are the footer's: this
      row carried "Enter: newline  Ctrl-E: $EDITOR" over a footer spelling
      Ctrl-E its own way and not naming Enter at all. *)
-  let kind_line =
+  let context_lines =
     match state.board_compose_reply_to with
     | Some post_id ->
-        Printf.sprintf "comment on %s"
-          (Terminal_text.single_line post_id)
+        let target = words state "댓글 대상: " "Reply to: " in
+        let unidentified = target ^ Terminal_text.single_line post_id in
+        (match Board_detail.view_for state.board_detail ~post_id with
+         | Ready (post, _, _) when String.equal post.bp_id post_id ->
+             [ target ^ Terminal_text.single_line post.bp_title
+             ; Ansi.dim ^ Terminal_text.single_line post.bp_author ^ " · "
+               ^ Ansi.reset ^ Terminal_text.preview_line post.bp_body
+             ]
+         | Loading ->
+             [ unidentified; words state "원문 조회 중" "Loading the original post" ]
+         | Failed detail ->
+             [ unidentified
+             ; (Theme.bad ()) ^ Terminal_text.single_line detail ^ Ansi.reset
+             ]
+         | Ready _ | Absent ->
+             [ unidentified
+             ; words state "원문을 확인할 수 없습니다" "Original post unavailable"
+             ])
     | None ->
         let hearth_label =
           match state.board_compose_hearth with
-          | Some h -> "#" ^ h
-          | None -> "(default)"
+          | Some h -> "#" ^ Terminal_text.single_line h
+          | None -> words state "기본" "default"
         in
-        Printf.sprintf "first line: title  rest: body  hearth: %s" hearth_label
+        let addressing = Board_composer.analyze_addressing draft_content in
+        [ words state "첫 줄은 제목, 나머지는 본문 · 게시판: "
+            "First line: title · rest: body · hearth: " ^ hearth_label
+        ; Board_composer.format_addressing_hint
+            ~max_cells:(framed_inner_width cols) addressing
+        ]
   in
-  let header = Printf.sprintf "%s  %s[%s]%s  %s  %s(%s, %s)%s"
+  let header = Printf.sprintf "%s  %s[%s]%s  %s"
     (screen_title (words state " MASC 게시판" " MASC Board"))
     (Masc_tui_theme.tone Masc_tui_theme.Accent)
     (match state.board_compose_reply_to with
-     | Some _ -> "reply" | None -> "new post")
+     | Some _ -> words state "댓글" "reply"
+     | None -> words state "새 글" "new post")
     Ansi.reset
     (connection_badge state)
-    Ansi.dim (Masc_tui_message_layout.count_noun line_count "line") (Masc_tui_message_layout.count_noun draft_chars "char") Ansi.reset
   in
-  let addressing_kind = Board_composer.analyze_addressing draft_content in
-  let addressing_line = Board_composer.format_addressing_hint ~max_cells:(framed_inner_width cols) addressing_kind in
   (* Staged files ride the post being written; a comment has no attachment
      wire, so like the hearth they are not named on a reply's pane. *)
   let attachments_line =
@@ -163,8 +180,7 @@ let render_board_compose (state : state) =
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
-  box_line buf cols (Ansi.dim ^ kind_line ^ Ansi.reset);
-  box_line buf cols addressing_line;
+  List.iter (box_line buf cols) context_lines;
   (match attachments_line with
    | Some line -> box_line buf cols (Ansi.dim ^ line ^ Ansi.reset)
    | None -> ());
@@ -190,7 +206,9 @@ let render_board_compose (state : state) =
   let error_rows = if Option.is_some state.board_post_error then 1 else 0 in
   let attachment_rows = if Option.is_some attachments_line then 1 else 0 in
   let attach_input_rows = if Option.is_some attach_input_line then 1 else 0 in
-  let chrome_top_rows = 5 + error_rows + attachment_rows + attach_input_rows in
+  let chrome_top_rows =
+    3 + List.length context_lines + error_rows + attachment_rows + attach_input_rows
+  in
   let content_height = max 1 (rows - (chrome_top_rows + 3)) in
   let visible_lines =
     let total = List.length draft_lines in
@@ -207,20 +225,30 @@ let render_board_compose (state : state) =
     box_line buf cols ""
   done;
   box_bottom buf cols;
-  let prompt =
+  let footer =
     match state.board_compose_attach_input with
     | Some _ ->
         (* The path input owns the keys, so the footer names its two; the
            path itself is on the pane above. *)
-        Masc_tui_keys.footer_hints_board_attach_input ~lang:state.ui_language
+        Footer_hints
+          { hints = Masc_tui_keys.footer_hints_board_attach_input ~lang:state.ui_language
+          ; position = None
+          }
     | None ->
         if state.board_compose_armed then
-          Masc_tui_keys.footer_hints_board_compose_armed ~lang:state.ui_language
-            ~reply:(Option.is_some state.board_compose_reply_to)
+          let menu =
+            Masc_tui_keys.board_compose_menu_hints ~lang:state.ui_language
+              ~reply:(Option.is_some state.board_compose_reply_to)
+          in
+          Footer_choices { choices = menu.choices; hints = menu.hints }
         else
           (* Projected from the key table; the table says why there is no [q]. *)
-          Masc_tui_keys.footer_hints_board_compose_writing ~lang:state.ui_language
-            ~reply:(Option.is_some state.board_compose_reply_to)
+          Footer_hints
+            { hints =
+                Masc_tui_keys.footer_hints_board_compose_writing ~lang:state.ui_language
+                  ~reply:(Option.is_some state.board_compose_reply_to)
+            ; position = None
+            }
   in
   let cursor =
     if state.board_compose_armed || Option.is_some state.board_compose_attach_input then
@@ -234,7 +262,7 @@ let render_board_compose (state : state) =
       Frame_presenter.Visible_at { row = min (rows - 2) row; column }
   in
   finish_frame_beside_acting_pane state ~surface_key:"board-compose" ~cursor
-    ~rows ~cols ~footer:(Footer_hints { hints = prompt; position = None }) buf
+    ~rows ~cols ~footer buf
 
 (* A tail this heading can do without. The two rows above the board each end
    in something atomic -- a key hint, the clause that finishes a sentence --

@@ -1572,14 +1572,25 @@ let footer_hints_board_attach_input ~lang =
   (match lang with Lang_ko -> "파일 경로 입력  " | Lang_en -> "type the file path  ")
   ^ hints_of_bindings ~lang board_attach_input_bindings
 
-let board_compose_armed_bindings ~reply =
-  [ b ~ko:"전송" Act "s" "send" ]
-  @ [ b ~ko:"$EDITOR에서 편집" Act "e" "edit in $EDITOR" ]
-  @ (if reply then [] else [ b ~ko:"게시판 전환" Act "h" "cycle hearth" ~help:"a new post's sub-board" ])
-  @ [ b ~ko:"버리기" Act "d" "discard"; b ~ko:"계속 작성" Meta "Esc" "keep writing" ]
+type board_compose_menu_hints = {
+  choices : string;
+  hints : string;
+}
 
-let footer_hints_board_compose_armed ~lang ~reply =
-  hints_of_bindings ~lang (board_compose_armed_bindings ~reply)
+let board_compose_menu_hints ~lang ~reply =
+  { choices =
+      hints_of_bindings ~lang
+        [ b ~ko:"전송" Act "s" "send"
+        ; b ~ko:"버리기" Act "d" "discard"
+        ; b ~ko:"계속" Meta "Esc" "continue"
+        ]
+  ; hints =
+      hints_of_bindings ~lang
+        ([ b ~ko:"$EDITOR에서 편집" Act "e" "edit in $EDITOR" ]
+         @ (if reply then []
+            else [ b ~ko:"게시판 전환" Act "h" "cycle hearth"
+                     ~help:"a new post's sub-board" ]))
+  }
 
 (* No [q] here either: while a drop reason has the keys, every printable
    scalar is a letter of it. *)

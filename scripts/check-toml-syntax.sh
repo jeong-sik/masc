@@ -21,7 +21,7 @@ except ImportError:
 # keeper profiles under presets/classic/keepers/ that carry the same [keeper]
 # tables as config/keepers/ and are meant to be copied there.
 SKIP = ("_build/", ".git/", ".worktrees/", ".claude/", "node_modules/",
-        "viewer/target/", "archive/")
+        "archive/")
 files = [p for p in glob.glob("**/*.toml", recursive=True)
          if not p.startswith(SKIP)]
 

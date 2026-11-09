@@ -15,7 +15,7 @@
 
 ## 2. Hermetic Test Suites
 
-외부 DB, live network, viewer/toolchain, local llama runtime 없이 재현 가능한 계층이다:
+외부 DB, live network, local llama runtime 없이 재현 가능한 계층이다:
 
 - `dune test --root .`
   - 기본 단위/통합 테스트 묶음 (`make test` 또는 `scripts/ci-run-tests.sh "opam exec -- dune test"`)

@@ -2,42 +2,29 @@ module Bins = Masc.Keeper_memory_age_bins
 
 type bin = Bins.bin
 
-(* The ages the screens name, each declared with its unit. The seconds and
-   the words are both made from them. *)
-type span =
-  | Hours of int
-  | Days of int
-
-let span_seconds = function
-  | Hours n -> float_of_int n *. Masc_time_constants.hour
-  | Days n -> Masc_time_constants.days_to_seconds n
-;;
-
+(* An age in the unit a person reads it in. Korean reads one day as 하루. *)
 let span_text ~ko = function
-  | Hours n -> Printf.sprintf (if ko then "%d시간" else "%dh") n
-  | Days n -> Printf.sprintf (if ko then "%d일" else "%dd") n
+  | Bins.Days 1 when ko -> "하루"
+  | Bins.Hours n -> Printf.sprintf (if ko then "%d시간" else "%dh") n
+  | Bins.Days n -> Printf.sprintf (if ko then "%d일" else "%dd") n
 ;;
-
-let hour_edge = Hours 1
-let day_edge = Days 1
-let week_edge = Days 7
 
 type group =
   | Past_week
   | Within_week
   | Within_day
-  | Within_hour
 
-let groups_oldest_first = [ Past_week; Within_week; Within_day; Within_hour ]
+let groups_oldest_first = [ Past_week; Within_week; Within_day ]
+let groups_newest_first = List.rev groups_oldest_first
 
-(* Where the bin starts decides its group, as the mock's [cellZone] does. *)
+(* The bins before the one the day edge starts are under a day, those before
+   the week edge's bin a day to seven days, the rest older. No bin crosses an
+   edge, so a bin's group is the group of every fact in it. *)
 let group_of_bin bin =
-  let start = Bins.lower_edge bin in
-  if start < span_seconds hour_edge
-  then Within_hour
-  else if start < span_seconds day_edge
+  let k = Bins.index bin in
+  if k < Bins.index (Bins.edge_bin Bins.Day)
   then Within_day
-  else if start < span_seconds week_edge
+  else if k < Bins.index (Bins.edge_bin Bins.Week)
   then Within_week
   else Past_week
 ;;
@@ -46,15 +33,6 @@ let group_count bins group =
   List.fold_left
     (fun sum bin -> if group_of_bin bin = group then sum + Bins.count bins bin else sum)
     0
-    Bins.bins
-;;
-
-(* The age the group's youngest bin starts at. *)
-let group_start group =
-  List.fold_left
-    (fun start bin ->
-      if group_of_bin bin = group then Float.min start (Bins.lower_edge bin) else start)
-    Float.infinity
     Bins.bins
 ;;
 
@@ -91,20 +69,18 @@ let cells merge bins =
   List.rev (chunks Bins.bins)
 ;;
 
-(* The mock's [ladderTicks], newest first. *)
-let tick_spans = [ hour_edge; Hours 6; day_edge; week_edge; Days 30 ]
-
 let tick_line ~column =
   let line = Bytes.make (max 0 column) ' ' in
   (match merge_of_column column with
    | None -> ()
    | Some merge ->
-     (* A tick names the bin whose edge is nearest its age. In the column it
-        stands at [(column − cells) + cells − 1 − ⌊k ÷ merge⌋], the cells being
-        on the right. [right] is where the tick placed before it starts. *)
-     let place right span =
-       let text = span_text ~ko:false span in
-       let k = Bins.index (Bins.nearest_edge (span_seconds span)) in
+     (* A tick names an edge at the cell of the bin the edge starts. In the
+        column it stands at [(column − cells) + cells − 1 − ⌊k ÷ merge⌋], the
+        cells being on the right. [right] is where the tick placed before it
+        starts; the youngest edge is placed first. *)
+     let place right edge =
+       let text = span_text ~ko:false (Bins.edge_span edge) in
+       let k = Bins.index (Bins.edge_bin edge) in
        let at = column - 1 - (k / merge) in
        if at < 0 || at + String.length text + 1 > right
        then right
@@ -112,49 +88,52 @@ let tick_line ~column =
          Bytes.blit_string text 0 line at (String.length text);
          at)
      in
-     ignore (List.fold_left place (column + 1) tick_spans : int));
+     ignore (List.fold_left place (column + 1) Bins.edges : int));
   Bytes.to_string line
+;;
+
+let column_legend ~empty =
+  let edge e = span_text ~ko:false (Bins.edge_span e) in
+  Printf.sprintf
+    "the server's %d age bins, %s or older on the left and under %s on the right, on log \
+     steps between the edges %s, two or four bins to a cell on a narrow list; a cell is a \
+     level against the row's largest one, %s when empty, in the info colour under %s, the \
+     row's own to %s and dim past that"
+    Bins.bin_count
+    (edge Bins.Month)
+    (edge Bins.Hour)
+    (String.concat ", " (List.map edge Bins.edges))
+    empty
+    (edge Bins.Day)
+    (edge Bins.Week)
 ;;
 
 (* {1 Words and the second-row strip} *)
 
-(* An edge in the unit a person reads it in: hours under two days, days from
-   there, each to the nearest whole. *)
-let hours_until = Days 2
-
-let span_of_seconds seconds =
-  let nearest unit = Float.to_int (Float.round (seconds /. span_seconds unit)) in
-  if seconds < span_seconds hours_until
-  then Hours (nearest (Hours 1))
-  else Days (nearest (Days 1))
-;;
-
 let span_number = function
-  | Hours n | Days n -> n
+  | Bins.Hours n | Bins.Days n -> n
 ;;
 
 let range_text ~ko low high =
   let sep = if ko then "~" else "–" in
   match low, high with
-  | Hours _, Hours _ | Days _, Days _ ->
+  | Bins.Hours _, Bins.Hours _ | Bins.Days _, Bins.Days _ ->
     string_of_int (span_number low) ^ sep ^ span_text ~ko high
-  | Hours _, Days _ | Days _, Hours _ -> span_text ~ko low ^ sep ^ span_text ~ko high
+  | Bins.Hours _, Bins.Days _ | Bins.Days _, Bins.Hours _ ->
+    span_text ~ko low ^ sep ^ span_text ~ko high
 ;;
 
-(* Each group is named by the ages its bins span: from where its youngest bin
-   starts to where the next older group starts. *)
+(* Each group is named by the edges it lies between. *)
 let group_words ~ko group =
-  let edge group = span_of_seconds (group_start group) in
+  let edge e = Bins.edge_span e in
   match group with
-  | Past_week ->
-    let since = span_text ~ko (edge Past_week) in
-    if ko then Printf.sprintf "배운 지 %s 넘음" since
-    else Printf.sprintf "learned over %s ago" since
-  | Within_week -> range_text ~ko (edge Within_week) (edge Past_week)
-  | Within_day -> range_text ~ko (edge Within_day) (edge Within_week)
-  | Within_hour ->
-    let under = span_text ~ko (edge Within_day) in
+  | Within_day ->
+    let under = span_text ~ko (edge Bins.Day) in
     if ko then under ^ " 안" else "under " ^ under
+  | Within_week -> range_text ~ko (edge Bins.Day) (edge Bins.Week)
+  | Past_week ->
+    let over = span_text ~ko (edge Bins.Week) in
+    if ko then over ^ " 넘음" else "over " ^ over
 ;;
 
 (* A group that holds nothing draws the digit 0, as the input trend strip does
@@ -202,7 +181,7 @@ let cell bins : Masc_tui_keeper_axis_cell.t =
 
 let legend =
   Printf.sprintf
-    "ordinary memory facts by time since first seen, in four groups oldest first (%s); \
+    "ordinary memory facts by time since first seen, one bar per group oldest first (%s); \
      bar height is relative to the largest group of the same strip, %s is none, %s is \
      not measured"
     (String.concat ", " (List.map (group_words ~ko:false) groups_oldest_first))
@@ -215,7 +194,7 @@ let ages_clauses ~ko = function
   | Some bins ->
     List.map
       (fun group -> Printf.sprintf "%s %d" (group_words ~ko group) (group_count bins group))
-      groups_oldest_first
+      groups_newest_first
 ;;
 
 let keeper_clauses ~ko = function

@@ -2,10 +2,11 @@
 
     The server counts a Keeper's ordinary facts into 24 bins by the time since
     each fact was first seen, at the health response's [generated_at]
-    ({!Masc.Keeper_memory_age_bins}). This module owns every word, mark and
-    edge the screens draw from those bins, so the age view, the Memory screen,
-    the Story window, the Keepers second-row cell and the key sheet read one
-    spelling.
+    ({!Masc.Keeper_memory_age_bins}). This module owns every word and mark
+    the screens draw from those bins, so the age view, the Memory screen, the
+    Story window, the Keepers second-row cell and the key sheet read one
+    spelling. The ages the words and ticks name are the server module's
+    edges; this module holds no age of its own.
 
     The ladder counts facts by age; it names no state. Pure: no clock, no
     terminal. *)
@@ -14,21 +15,23 @@ type bin = Masc.Keeper_memory_age_bins.bin
 
 (** {1 Groups}
 
-    The ladder's bins in four groups, oldest first. A bin's group is decided
-    by where the bin starts: under a day back, under seven days back, or
-    further. Bin 0 (under an hour) is a group of its own. The age view colours
-    a cell by the group of the newest bin it holds; the words and the
-    second-row strip count the facts per group. *)
+    The ladder's bins in three groups, split at the server's day and week
+    edges ({!Masc.Keeper_memory_age_bins.edge_bin}). No bin crosses an edge,
+    so every fact of a bin is in the bin's group. The age view colours a cell
+    by the group of the newest bin it holds; the words and the second-row
+    strip count the facts per group. *)
 
 type group =
-  | Past_week  (** The bin starts seven days or more back. *)
-  | Within_week  (** The bin starts a day to seven days back. *)
-  | Within_day  (** The bin starts an hour to a day back. *)
-  | Within_hour  (** Bin 0: under an hour. *)
+  | Past_week  (** Seven days or older. *)
+  | Within_week  (** A day to seven days. *)
+  | Within_day  (** Under a day, the hour's bin included. *)
 
 val groups_oldest_first : group list
 
 val group_of_bin : bin -> group
+
+val group_count : Masc.Keeper_memory_age_bins.t -> group -> int
+(** The facts in the group's bins. The groups' counts add up to the facts. *)
 
 (** {1 The age view's column} *)
 
@@ -53,10 +56,15 @@ val cells : merge -> Masc.Keeper_memory_age_bins.t -> cell list
     adds the bins [c × merge] to [c × merge + merge − 1]. *)
 
 val tick_line : column:int -> string
-(** The column header: [1h 6h 1d 7d 30d] at the cells of their nearest bin
-    edges, in a line of [column] cells. A tick that would run past the column
-    or into the tick on its right is left out. Blank when the column draws no
-    ladder. *)
+(** The column header: the server's edges [30d 7d 1d 1h] at the cells of the
+    bins they start, in a line of [column] cells. A tick that would run past
+    the column or into the tick on its right is left out. Blank when the
+    column draws no ladder. *)
+
+val column_legend : empty:string -> string
+(** The age view's column for the key sheet: the bins, the axis and its
+    edges, the merge on a narrow list, the level and the colours. [empty] is
+    the mark an empty cell draws. *)
 
 (** {1 Words and the second-row strip} *)
 
@@ -93,9 +101,10 @@ val legend : string
     facts and [?] for a ladder that was not measured. *)
 
 val ages_clauses : ko:bool -> Masc.Keeper_memory_age_bins.t option -> string list
-(** The facts per group, oldest first, each group named by the ages its bins
-    span ("learned over 9d ago 68", "27h–9d 22", "1–27h 27", "under 1h 2"),
-    or one clause saying the ages were not measured. *)
+(** The facts per group, newest first, each group named by the edges it lies
+    between ("under 1d 29", "1–7d 22", "over 7d 68"; "하루 안 29",
+    "1~7일 22", "7일 넘음 68"), or one clause saying the ages were not
+    measured. *)
 
 val keeper_clauses : ko:bool -> Masc.Keeper_memory_age_bins.t option -> string list
 (** One Keeper's facts for a row with no count beside it: the fact count, then

@@ -31,9 +31,12 @@ let activation_in_window ~now activated_at =
 ;;
 
 let newer_than candidate best =
-  match (Time_codec.parse_rfc3339 candidate, Time_codec.parse_rfc3339 best) with
-  | Ok candidate_unix, Ok best_unix -> Float.compare candidate_unix best_unix > 0
-  | _ -> true
+  match Time_codec.parse_rfc3339 candidate with
+  | Error _ -> true
+  | Ok candidate_unix -> (
+      match Time_codec.parse_rfc3339 best with
+      | Error _ -> true
+      | Ok best_unix -> Float.compare candidate_unix best_unix > 0)
 ;;
 
 let present_names (snapshot : Skill_catalog_snapshot.t) =
@@ -74,7 +77,7 @@ let expected_source_path (snapshot : Skill_catalog_snapshot.t) ~skill_name ~sour
 
 let ghosts ~now ~snapshot ~activations =
   let is_present = present_names snapshot in
-  let latest : (string * string) Hashtbl.t = Hashtbl.create 16 in
+  let latest : (string, string) Hashtbl.t = Hashtbl.create 16 in
   List.iter
     (fun (identity, activated_at) ->
        let skill_name = Skill_reference.identity_package_id_to_string identity in
@@ -83,7 +86,8 @@ let ghosts ~now ~snapshot ~activations =
          let source_id = Skill_reference.identity_source_id_to_string identity in
          match Hashtbl.find_opt latest skill_name with
          | Some (_, best) when not (newer_than activated_at best) -> ()
-         | _ -> Hashtbl.replace latest skill_name (source_id, activated_at)))
+         | Some _ | None ->
+           Hashtbl.replace latest skill_name (source_id, activated_at)))
     activations;
   Hashtbl.fold
     (fun skill_name (source_id, last_activated_at) acc ->

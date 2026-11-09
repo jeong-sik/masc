@@ -70,9 +70,9 @@ let with_case f =
        let store = Lane_addon_store.create ~root:(Filename.concat base_path "lane-addons") in
        f ~sw ~net ~clock ~base_path ~store)
 
-let publish ?(lane_id = lane_id) ?(cli_slots = []) ~base_path targets =
+let publish ?(lane_id = lane_id) ?(cli_slots = []) ?runtime_observations ~base_path targets =
   ignore
-    (F.publish_registry ~lane_id
+    (F.publish_registry ~lane_id ?runtime_observations
        ~slot_ids:(List.map (fun (target : F.target_fixture) -> target.id) targets)
        ~cli_slot_ids:cli_slots
        (F.resolver_snapshot ~source:base_path targets)
@@ -553,6 +553,82 @@ let test_a_slot_that_may_pass_keeps_the_request_open () =
     match run_request ~base_path ~store "a7" with
     | Exact.Not_final (Exact.Provider_refused (Exact.Provider_unavailable _)) -> ()
     | _ -> fail "an input refusal must not end the request while another slot may still answer")
+
+let fixture_runtime runtime_id =
+  match Runtime.get_runtime_by_id runtime_id with
+  | Some runtime -> runtime
+  | None -> failf "fixture runtime %s must exist" runtime_id
+
+(* What the host retained for one request: "started" for a started call,
+   otherwise the not-final reason it recorded. *)
+let attempt_labels ~store id =
+  match Lane_addon_store.load_exact_request store ~declaration_id ~request_id:id with
+  | Error detail -> fail detail
+  | Ok None -> fail "the request must be recorded"
+  | Ok (Some json) ->
+    List.map
+      (function
+        | `Assoc fields when List.mem_assoc "started" fields -> "started"
+        | `Assoc fields ->
+          (match List.assoc_opt "reason" fields with
+           | Some (`String reason) -> reason
+           | Some _ | None -> "unlabelled")
+        | _ -> "unlabelled")
+      Yojson.Safe.Util.(json |> member "attempts" |> to_list)
+
+(* RFC-exact-lane-waits-for-a-stated-reset R4: when the provider stated a
+   reset for the account every slot runs on, the runner calls no slot and the
+   host retains a deferral without a Started attempt. Before the rule every
+   host event started a call the provider refused (85 on 2026-11-09). Both
+   official-client fixture runtimes share one Claude Code account. *)
+let test_a_lane_whose_every_slot_waits_starts_nothing () =
+  with_case (fun ~sw:_ ~net:_ ~clock:_ ~base_path ~store ->
+    publish ~base_path ~cli_slots:[ F.cli_primary_runtime; F.cli_secondary_runtime ] [];
+    Runtime_quota_window.reset_for_testing ();
+    Fun.protect ~finally:Runtime_quota_window.reset_for_testing (fun () ->
+      let resets_at = Time_compat.now () +. 3600.0 in
+      Runtime_quota_window.note_exhausted
+        ~scope:(Runtime_instance.quota_scope_of_runtime (fixture_runtime F.cli_primary_runtime)) ~resets_at;
+      let calls = ref [] in
+      let cli_runner : Keeper_lane_cli_oneshot.runner =
+        fun ~runtime:{ Runtime_instance.id = runtime_id; _ } ~system_prompt:_ ~output_schema:_ ~prompt:_ ->
+        calls := runtime_id :: !calls;
+        Ok (Yojson.Safe.to_string question)
+      in
+      let runner = Server_lane_addon_exact.For_testing.runner ~base_path ~cli_runner in
+      (match run_request ~runner ~base_path ~store "h1" with
+       | Exact.Not_final (Exact.Lane_unavailable (Exact.Every_slot_held { until })) ->
+         check (float 0.0) "the lane waits for the reset the provider stated" resets_at until
+       | _ -> fail "a lane whose every slot waits must end held, uncalled");
+      check (list string) "no client was started" [] !calls;
+      check (list string) "the host retains one deferral and no Started attempt"
+        [ "every_slot_held" ] (attempt_labels ~store "h1")))
+
+(* R5 when only some slots wait: a held slot ends the call as a slot that
+   refused for its account's rest would, minus the call. A walked slot's input
+   refusal then cannot end the request, as when the held slot was called and
+   answered 429 (test_a_slot_that_may_pass_keeps_the_request_open). The
+   receipt check compares walked candidates in order, so a wrong
+   declared/excluded pair would raise instead of returning. *)
+let test_a_held_slot_keeps_the_request_open_without_a_call () =
+  with_case (fun ~sw ~net ~clock ~base_path ~store ->
+    let held = F.start_server ~sw ~net ~clock (F.Reply_with (fun _ _ -> `Too_many_requests, refusal_body "rate_limit_error")) in
+    let refusing = F.start_server ~sw ~net ~clock (F.Reply_with (fun _ _ -> `Bad_request, refusal_body "invalid_request_error")) in
+    let runtime = fixture_runtime "stub-http.stub-model" in
+    let candidate = runtime.Runtime_instance.candidate_backpressure in
+    publish ~base_path
+      ~runtime_observations:
+        [ ( "held"
+          , { Runtime_exact_output_registry.candidate
+            ; quota_scope = Runtime_instance.quota_scope_of_runtime runtime } ) ]
+      [ { F.id = "held"; base_url = held.base_url }; { F.id = "refusing"; base_url = refusing.base_url } ];
+    Fun.protect ~finally:(fun () -> Runtime_candidate_backpressure.note_candidate_success ~candidate) (fun () ->
+      Runtime_candidate_backpressure.note_rate_limit ~candidate ~retry_after:(Some 3600.0);
+      (match run_request ~base_path ~store "h2" with
+       | Exact.Not_final (Exact.Provider_refused (Exact.Provider_unavailable _)) -> ()
+       | _ -> fail "an input refusal must not end the request while a held slot may still answer");
+      check int "the held slot is not called" 0 (F.post_count held);
+      check int "the walked slot is called once" 1 (F.post_count refusing)))
 
 let test_an_unconfigured_lane_sends_nothing () =
   with_case (fun ~sw ~net ~clock ~base_path ~store ->
@@ -1253,6 +1329,9 @@ let () =
         ; test_case "provider error type is not exposed" `Quick test_provider_error_type_is_not_exposed_in_the_refusal_detail
         ; test_case "an auth refusal is not final" `Quick test_an_auth_refusal_is_not_final
         ; test_case "a slot that may pass keeps the request open" `Quick test_a_slot_that_may_pass_keeps_the_request_open
+        ; test_case "a lane whose every slot waits starts nothing" `Quick test_a_lane_whose_every_slot_waits_starts_nothing
+        ; test_case "a held slot keeps the request open without a call" `Quick
+            test_a_held_slot_keeps_the_request_open_without_a_call
         ; test_case "an unconfigured lane sends nothing" `Quick test_an_unconfigured_lane_sends_nothing
         ; test_case "an off lane sends nothing" `Quick test_an_off_lane_sends_nothing
         ; test_case "the cli tail answers after the http slots" `Quick test_the_cli_tail_answers_after_the_http_slots

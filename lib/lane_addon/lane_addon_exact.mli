@@ -138,6 +138,12 @@ type lane_unavailable =
   | Lane_registry_unavailable of { detail : string }
       (** The host has no published lane registry right now: before startup
           published one, or while a replacement is being committed. *)
+  | Every_slot_held of { until : float }
+      (** Every slot of the lane waits for a time its provider stated -- its
+          account's stated reset, or the end of its own Retry-After -- so none
+          was called. [until] is the earliest of those times, Unix epoch
+          seconds; the next host event after it walks the lane again
+          (RFC-exact-lane-waits-for-a-stated-reset). *)
 
 (** A provider refusal of a sent call that may pass without changing the
     input. *)

@@ -38,7 +38,7 @@ val ghosts :
     record new ghost observations as a WARN, audit row and best-effort
     runtime-observer event. A successful [skill-catalog] audit row with the
     exact (skill_name, source_id, last_activated_at) triple suppresses repeated
-    observations while that row is retained by the workspace audit store.
+    observations while that row is retained and readable in the workspace audit store.
     A fresh activation timestamp or source records a new observation.
 
     Audit lookup and recording share a canonical workspace transaction lock

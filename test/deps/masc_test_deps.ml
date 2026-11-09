@@ -48,6 +48,19 @@ let authorized_account account =
   | Ok authorized -> authorized
   | Error refusal -> failwith (Runtime_account_access.refusal_to_string refusal)
 
+(** A declared Muse home, as the runtime table holds one. *)
+let muse_home home =
+  match Runtime_account_access.declare_muse_home home with
+  | Ok declared -> declared
+  | Error detail -> failwith detail
+
+(** A Muse account authorized for an operator call, by the access
+    {!publish_single_user_access} published. *)
+let authorized_muse account =
+  match Runtime_account_access.authorize_muse Runtime_account_access.Operator_call account with
+  | Ok authorized -> authorized
+  | Error refusal -> failwith (Runtime_account_access.refusal_to_string refusal)
+
 (** Install the Eio clock + optional switch in every registry the lib
     code reads from.
 

@@ -47,7 +47,8 @@ type person =
   ; account : Provider_account_id.t
   ; runtime : Runtime_id.t
   ; keeper : string
-  ; home : string  (** The home of [account], as the layout spells it. *)
+  ; runtime_root : string  (** The runtime root of the person's namespace. *)
+  ; home : string  (** The Claude Code home of [account], as the layout spells it. *)
   }
 
 (* One person joins through an invitation, links one account, makes a Runtime
@@ -116,7 +117,7 @@ let person zone ~base_path ~name ~hex =
       (Layout.home ~runtime_root Layout.Claude_home ~account_id:(Provider_account_id.to_string account))
   in
   Fs_compat.mkdir_p home;
-  { user_id; account; runtime; keeper; home }
+  { user_id; account; runtime; keeper; runtime_root; home }
 ;;
 
 let captured home =
@@ -136,6 +137,38 @@ let allowed label request captured =
 let refused label request captured expected =
   match Access.authorize request (Access.seal captured) with
   | Ok (_ : Account.claude_code Access.authorized) -> Alcotest.failf "%s: authorized" label
+  | Error refusal ->
+    if not (expected refusal)
+    then
+      Alcotest.failf "%s: refused for another reason: %s" label (Access.refusal_to_string refusal)
+;;
+
+(* The Muse home of the person's account, as the layout spells it. *)
+let muse_path (who : person) =
+  get_text
+    (Layout.home
+       ~runtime_root:who.runtime_root
+       Layout.Muse_home
+       ~account_id:(Provider_account_id.to_string who.account))
+;;
+
+let muse (who : person) =
+  Access.Declared_home (get_text (Access.declare_muse_home (muse_path who)))
+;;
+
+let muse_allowed label request (who : person) =
+  match Access.authorize_muse request (muse who) with
+  | Ok authorized ->
+    Alcotest.(check string)
+      (label ^ ": the authorized home is the one declared")
+      (muse_path who)
+      (Access.declared_muse_home authorized)
+  | Error refusal -> Alcotest.failf "%s: refused: %s" label (Access.refusal_to_string refusal)
+;;
+
+let muse_refused (type where) label request (account : where Access.muse_account) expected =
+  match Access.authorize_muse request account with
+  | Ok (_ : where Access.muse_authorized) -> Alcotest.failf "%s: authorized" label
   | Error refusal ->
     if not (expected refusal)
     then
@@ -277,6 +310,30 @@ let test_multi_account () =
         Unix.symlink alice.home link;
         refused "another spelling of her home" (own alice ()) (captured link) (function
           | Access.Not_the_account_home _ -> true
+          | _ -> false);
+        (* A Muse home is judged by the same rule (plan D3): the Muse home of
+           the person's account under their namespace, and no other. *)
+        muse_allowed "the Muse home of the person's account" (own alice ()) alice;
+        muse_allowed "a turn of the person's Keeper" (turn alice ()) alice;
+        muse_refused "the Muse home of another person" (own alice ()) (muse bob) (function
+          | Access.Not_the_account_home _ -> true
+          | _ -> false);
+        muse_refused "a turn of another person's Keeper" (turn bob ()) (muse alice) (function
+          | Access.Not_the_account_home _ -> true
+          | _ -> false);
+        muse_refused
+          "the Claude Code home of her account"
+          (own alice ())
+          (Access.Declared_home (get_text (Access.declare_muse_home alice.home)))
+          (function
+            | Access.Not_the_account_home _ -> true
+            | _ -> false);
+        muse_refused "the environment of the process" (own alice ()) Access.Process_environment
+          (function
+          | Access.Not_a_declared_home -> true
+          | _ -> false);
+        muse_refused "an operator call on her Muse home" Access.Operator_call (muse alice) (function
+          | Access.No_operator -> true
           | _ -> false);
         match
           Access.publish

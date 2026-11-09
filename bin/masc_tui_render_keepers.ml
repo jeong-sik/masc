@@ -2620,7 +2620,7 @@ let render_keeper_axes (state : state) =
             let elapsed = Printf.sprintf "%.1f" (Int64.to_float age /. 1e9) in
             box_line buf cols
               (Theme.warn () ^ "  waiting inventory: " ^ detail ^ " · " ^ elapsed ^ "s" ^ Ansi.reset)
-        | None -> ());
+        | None -> ()));
   (match state.keeper_waiting_failure with
    | None -> ()
    | Some failure ->

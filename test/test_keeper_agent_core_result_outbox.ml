@@ -211,7 +211,11 @@ streaming = false
         fail "consumer did not yield at its settled tool boundary");
      check (list string) "checkpoint keeps the original result pending" original_ids
        (Outbox.receipt_ids (snapshot ()));
-     let settled = Eio.Promise.await chat_settled in
+     let settled =
+       match Eio.Time.with_timeout env#clock 10. (fun () -> Eio.Promise.await chat_settled) with
+       | operations -> operations
+       | exception Eio.Time.Timeout -> fail "queued chat did not settle after the autonomous slot handoff"
+     in
      check bool "the Owner durably settles the queued chat" true
        (List.exists (fun (operation : Keeper_chat_operation.t) ->
           Keeper_operation_id.equal operation.operation_id chat_id
@@ -224,8 +228,10 @@ streaming = false
        (match chat.state with
         | Succeeded _ -> true
         | Queued | Running _ | Failed _ | Cancelled _ -> false);
-     let checkpoint = match result.run_result.checkpoint with
-       | Some value -> value | None -> fail "yield lost the original checkpoint" in
+     (match result.run_result.checkpoint with
+      | Some _ -> () | None -> fail "yield lost the original checkpoint");
+     let checkpoint = Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id
+       |> Result.map_error Keeper_checkpoint_store.checkpoint_load_error_to_string |> get in
      ignore (core (run_on_owner (fun () -> run ~checkpoint ())));
      check int "the completed local effect is not replayed" 1 !effects;
      check (list string) "completed resumed consumer ACKs original result" []

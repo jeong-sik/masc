@@ -51,7 +51,10 @@ The combined scenario uses a real Owner and SQLite operation queue, a local
 HTTP provider fixture and the actual runtime/checkpoint/outbox path: chat
 arrives during a tool, remains Queued, the saved tool boundary yields, the Owner
 claims and settles chat, and autonomous work resumes without replaying its
-completed effect. The scheduled intake scenario checks mixed unrouted work,
+completed effect. The autonomous input is reloaded from the canonical
+checkpoint store before resumption. The chat executor is a fixture runner;
+this does not prove a real model's chat response or process-restart recovery.
+The scheduled intake scenario checks mixed unrouted work,
 same-route schedules, distinct Slack threads, both connector/schedule queue
 orders, retention at a checkpoint, later progress and exact completion ACK.
 

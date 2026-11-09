@@ -2066,7 +2066,7 @@ let test_returned_source_failures_keep_resume_recovery () =
       ~partial_applied:(fun state reading -> state.keepers_error = reading.Masc_tui_loader.lkr_error))
     [false; true])
     [{ metadata with lkr_error = Some "one metadata row failed" };
-     { metadata with lkr_keepers = []; lkr_error = Some "metadata inventory failed" }];
+     { lkr_keepers = []; lkr_error = Some "metadata inventory failed" }];
   let work = local_work_observation_fixture () in
   let failures =
     [ { work with lr_rows = Masc_tui_overview_tasks.Rows_unread }

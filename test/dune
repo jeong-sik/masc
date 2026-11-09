@@ -6054,7 +6054,7 @@
 (test
  (name test_workspace_memory_ledger_view)
  (modules test_workspace_memory_ledger_view)
- (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat))
+ (libraries alcotest  masc.agent_core.digest yojson masc masc.fs_compat masc.config_dir_resolver))
 
 (test
  (name test_workspace_memory_ledger)

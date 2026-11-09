@@ -165,10 +165,14 @@ let test_inventory_representation () = with_base (fun base_path ->
     (missing |> member "schema" |> to_string);
   Alcotest.(check string) "missing status" "missing"
     (missing |> member "status" |> to_string);
-  Alcotest.(check string) "an existing empty workspace is fully observed" "complete"
+  Alcotest.(check string) "unread Keeper discovery is not an empty inventory" "unavailable"
     (missing |> member "ordinary_absence" |> member "status" |> to_string);
-  Alcotest.(check int) "an existing empty workspace has no absent facts" 0
-    (missing |> member "ordinary_absence" |> member "absent" |> to_int);
+  Fs_compat.mkdir_p (Config_dir_resolver.keepers_dir_for_base_path ~base_path);
+  let empty = View.inventory ~now:1794037335.0 ~base_path () |> require in
+  Alcotest.(check string) "an existing empty Keeper directory is fully observed" "complete"
+    (empty |> member "ordinary_absence" |> member "status" |> to_string);
+  Alcotest.(check int) "an observed empty workspace has no absent facts" 0
+    (empty |> member "ordinary_absence" |> member "absent" |> to_int);
   Alcotest.(check (list string)) "missing has no other keys"
     ["generated_at"; "ordinary_absence"; "schema"; "status"]
     (match missing with `Assoc fields -> List.sort String.compare (List.map fst fields) | _ -> []);

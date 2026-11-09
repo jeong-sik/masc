@@ -166,3 +166,9 @@ rest. A budget stop exits with status 2. `verdict` refuses a run where a
 candidate's call and the baseline's call for the same item left more than
 `same_item_window_s` apart, so a baseline answered in an earlier run cannot
 stand in for the one G5 compares against.
+
+`run --template <librarian.md>` measures a prompt change on the same sets: it
+draws every prompt with that file's template from the same request data. An
+E-real prompt is first read with the pinned template. `summary.json` records
+the sha256 of the template the prompts were drawn with, and `verdict` refuses
+a run whose template is not the pinned one.

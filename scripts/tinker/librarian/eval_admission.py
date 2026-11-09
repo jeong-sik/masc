@@ -21,6 +21,12 @@ baseline calls must leave next to the candidates' calls, which a call log from
 an earlier run cannot show. The request is the one MASC's exact lane sends: the
 admission prompt, then the schema instruction as the last user message.
 
+`run --template <librarian.md>` sends every prompt drawn with that file's
+template instead: an E-real prompt is read with the pinned template and drawn
+again from the same data, an E-synth prompt is drawn from its request. The
+summary records the sha256 of the template the prompts were drawn with, and
+`verdict` refuses a run drawn with another template than the pinned one.
+
 Definitions:
 - valid: HTTP 200, finish_reason "stop", and `admission_validator.validate`
   accepts the content against the prompt, as MASC would.
@@ -97,7 +103,7 @@ import json
 import statistics
 import sys
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import assert_never, cast
 
@@ -199,6 +205,12 @@ def synth_items(path: Path) -> list[M.SynthItem]:
         prompt = synth_render.prompt_of(request)
         items.append(M.SynthItem(cast(str, request["item_id"]), prompt, R.render(prompt), label))
     return items
+
+
+def retemplated(item: Item, template: R.AdmissionTemplate) -> Item:
+    """The item with its prompt drawn with `template` from the same data."""
+    prompt = replace(item.prompt, template=template)
+    return replace(item, prompt=prompt, text=R.render(prompt))
 
 
 def run_item(caller: Caller, request: JsonObject, targets: list[tuple[str, str]], item: Item) -> list[JsonObject]:
@@ -305,6 +317,10 @@ def run(args: argparse.Namespace) -> int:
         if sha256_file(requests) != cast(JsonObject, lines["e_synth"])["requests_sha256"]:
             raise SystemExit("the E-synth requests differ from pass_lines.json")
         items = list(synth_items(requests))
+    template = synth_render.TEMPLATE if args.template is None else Path(cast(str, args.template))
+    if args.template is not None:
+        drawn = synth_render.template_at(template)
+        items = [retemplated(i, drawn) for i in items]
     caller = Caller(out / "calls.jsonl", cast(float, args.budget))
     request = cast(JsonObject, lines["request"])
 
@@ -315,7 +331,8 @@ def run(args: argparse.Namespace) -> int:
         rows = [r for rs in pool.map(one, items) for r in rs]
     with (out / "rows.jsonl").open("w", encoding="utf-8") as fh:
         fh.writelines(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
-    summary = {"set": kind, "pass_lines_sha256": sha256_file(PASS_LINES), "targets": dict(targets),
+    summary = {"set": kind, "pass_lines_sha256": sha256_file(PASS_LINES), "template_sha256": sha256_file(template),
+               "targets": dict(targets),
                "spent_usd": round(caller.spent, 4), "stopped": caller.stopped, "by_target": summarize(kind, rows)}
     (out / "summary.json").write_text(json.dumps(summary, indent=1) + "\n", encoding="utf-8")
     print(json.dumps(summary["by_target"]))
@@ -384,6 +401,16 @@ def trained_runs(pairs: list[str]) -> dict[str, JsonObject]:
     return out
 
 
+def pinned_problem(summaries: list[JsonObject], pin: str, template: str) -> str | None:
+    """Why a run was not made under these pass lines, or with prompts drawn with another template than
+    their pinned one; None when every run was."""
+    if {s["pass_lines_sha256"] for s in summaries} != {pin}:
+        return "a run used other pass lines"
+    if {s["template_sha256"] for s in summaries} != {template}:
+        return "a run drew its prompts with another template than the pinned one"
+    return None
+
+
 def binding_problem(real_targets: dict[str, str], synth_targets: dict[str, str], baseline: str,
                     baseline_model: str, names: list[str], trained: dict[str, JsonObject], pin: str) -> str | None:
     """Why the two runs cannot be judged together, or None. Each name must send the same model in
@@ -411,8 +438,9 @@ def verdict(args: argparse.Namespace) -> int:
     pin = sha256_file(PASS_LINES)
     real = cast(JsonObject, json.loads((real_dir / "summary.json").read_text(encoding="utf-8")))
     synth = cast(JsonObject, json.loads((synth_dir / "summary.json").read_text(encoding="utf-8")))
-    if {real["pass_lines_sha256"], synth["pass_lines_sha256"]} != {pin}:
-        raise SystemExit("a run used other pass lines")
+    pinned = pinned_problem([real, synth], pin, sha256_file(synth_render.TEMPLATE))
+    if pinned is not None:
+        raise SystemExit(pinned)
     gates, comparison = cast(JsonObject, lines["gates"]), cast(JsonObject, lines["comparison"])
     choice = cast(JsonObject, lines["choice"])
     base, names = cast(str, comparison["baseline"]), cast(list[str], choice["order"])
@@ -484,6 +512,8 @@ def main() -> int:
     r.add_argument("--base", default=None, help="MASC base path (default: MASC_BASE_PATH)")
     r.add_argument("--out", required=True)
     r.add_argument("--budget", type=float, required=True)
+    r.add_argument("--template", default=None,
+                   help="a librarian.md to draw every prompt with (default: the pinned config/prompts/librarian.md)")
     v = sub.add_parser("verdict")
     v.add_argument("--real", required=True)
     v.add_argument("--synth", required=True)

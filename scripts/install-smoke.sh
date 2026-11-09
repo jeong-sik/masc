@@ -121,7 +121,7 @@ case "$ARCH" in
   macos-*) PATH="$(dirname "$(readlink "$prefix/masc")")/python/bin:$PATH"; export PATH ;;
 esac
 
-for a in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deployment-preflight masc-exec-ssh-bootstrap masc-antigravity-path-hook; do
+for a in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deployment-preflight masc-exec-ssh-bootstrap masc-antigravity-path-hook masc-test-companion; do
   [ -x "$prefix/$a" ] || { echo "install-smoke: installer did not place $a" >&2; exit 1; }
 done
 echo "install-smoke: installer placed all required executables"

@@ -309,6 +309,9 @@
   masc.task_handlers
   masc_random_id
   masc_workspace
+  ; Goal_criterion_review names Backend.FileSystem and Backend_types directly.
+  ; Transitive module visibility is disabled, so the dependency is spelled out.
+  masc_backend
   masc_goal
   masc_candle
   masc_candle_runtime

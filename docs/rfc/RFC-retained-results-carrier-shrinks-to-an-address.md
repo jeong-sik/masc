@@ -3,7 +3,7 @@ rfc: "retained-results-carrier-shrinks-to-an-address"
 title: "남은 도구 결과 묶음은 크기 거절을 받으면 주소 꼴로 바꿔 같은 턴에서 다시 보낸다"
 status: Draft
 created: 2026-11-08
-updated: 2026-11-08
+updated: 2026-11-09
 author: claude
 supersedes: []
 superseded_by: null
@@ -21,7 +21,7 @@ related: ["claude-code-context-overflow-bounded-restart", "official-client-conve
 - `Inline`: 지금 묶음이다. receipt를 전부 글로 싣는다.
 - `By_address`: receipt가 몇 개든 길이가 도구 종류와 개수의 자릿수로만 달라진다. 이미 돌아온 호출 수, 도구별 개수, 그리고 `Inline` 글을 담은 blob 하나의 주소를 싣는다.
 
-run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은 `Inline`으로 시작한다. lane이 다른 후보로 넘어가면 새 run이 다시 `Inline`으로 시작한다. typed 크기 거절이 오면 이미 있는 재투영 hook `on_memory_capacity_refusal`이 묶음을 `By_address`로 한 번 바꾼다. `By_address` 글이 엄격히 짧을 때만 바꾼다. 그러면 같은 capacity로 다시 보낸다(§5.2). 그다음 거절은 지금처럼 history를 줄인다. 그 view와 floor에도 `By_address`가 실린다.
+run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은 `Inline`으로 시작한다. lane이 다른 후보로 넘어가면 새 run이 다시 `Inline`으로 시작한다. typed 크기 거절이 오면 이미 있는 재투영 hook `on_memory_capacity_refusal`이 묶음을 `By_address`로 한 번 바꾼다. `By_address` 글이 엄격히 짧을 때만 바꾼다. Codex의 `input_too_large`에서는 바꾸지 않는다. 그 거절이 세는 입력에 묶음이 없다(§5.1, §7). 그러면 같은 capacity로 다시 보낸다(§5.2). 그다음 거절은 지금처럼 history를 줄인다. 그 view와 floor에도 `By_address`가 실린다.
 
 줄이기 단계(walk), floor 계산, tail window, blob 정리, ACK 규칙은 바꾸지 않는다.
 
@@ -180,8 +180,9 @@ blob은 하나다. 바이트는 `Inline` 글 그대로다.
 
 - Claude Code와 Codex의 `on_memory_retry`는 `resolve_input_rejected_for_shrink_retry`다(`keeper_claude_code_runtime.ml:681-710`).
   - Claude Code의 크기 거절과 Codex의 `contextWindowExceeded`는 `Input_rejected Bootstrap_floor_exceeded`로 기록된다. `on_memory_retry`가 이것을 `Restart_fresh`로 푼다.
-  - Codex의 `input_too_large`에는 묶음 hook이 답하지 않는다(§5.1, §7).
-  - 다시 보내는 요청은 fresh Start다.
+  - Codex의 `input_too_large`는 `Protocol_failed`로 기록된다(`keeper_codex_runtime.ml:826-828`). `on_memory_retry`는 아무것도 하지 않고, 다음 `plan_claim`이 fresh plan을 낸다(`keeper_official_client_session_store.ml:1520-1532`).
+  - Codex의 `input_too_large`에는 묶음 hook이 답하지 않는다(§5.1, §7). memory hook이 `Reprojected`를 돌려주면 위 길로 다시 보낸다.
+  - 어느 쪽이든 다시 보내는 요청은 fresh Start다.
 - 같은 capacity로 다시 보내니 history는 그대로이고 묶음만 짧아진다.
 - 그다음 거절은 history를 줄인다. 그 view와 floor에도 `By_address`가 실린다.
 - floor는 history만 재니(§3) floor 계산은 그대로 맞다.
@@ -229,10 +230,13 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
 **닿는 경로**
 
 - Claude Code: `prompt_too_long`이 `Context_window_exceeded`로 온다. Start와 Resume에서 닿고, Gate continuation에서는 닿지 않는다(§5.4).
-- Codex: `turn/start`가 돌려준 `contextWindowExceeded`다.
+- Codex: `turn/completed`의 `codexErrorInfo`로 오는 `contextWindowExceeded`다.
   - `input_too_large`도 hook에 닿지만 묶음 단계는 건너뛴다. memory hook만 부른다(`keeper_codex_runtime.ml`의 `run`).
-  - app-server는 `turn/start` 입력, 곧 이번 턴 블록과 goal의 글자 수만 잰다. `thread/inject_items`에는 글자 수 검사가 없다(openai/codex 8f2c15c3, `codex-rs/app-server/src/request_processors/turn_processor.rs`의 `turn_start_inner`, `thread_inject_items_response_inner`).
-  - 묶음은 `thread/inject_items`로 간다. 꼴을 바꿔도 거절된 입력은 줄지 않고, receipt만 모델 눈에서 빠진다.
+  - `input_too_large`는 `turn/start` 응답의 오류다. app-server는 `turn/start` 입력의 글자 수만 잰다. `thread/inject_items`에는 글자 수 검사가 없다(openai/codex 8f2c15c3, `codex-rs/app-server/src/request_processors/turn_processor.rs`의 `turn_start_inner`, `thread_inject_items_response_inner`).
+    - Start의 입력은 이번 턴 블록과 goal이다. System 맥락은 `thread/start`의 `developerInstructions`로 간다.
+    - Resume의 입력은 세션이 아직 갖지 않은 맥락 블록과 goal이다(`resume_prompt`).
+  - 묶음은 Start와 Resume 모두 `thread/inject_items`로 간다. 꼴을 바꿔도 거절된 입력은 줄지 않고, receipt만 모델 눈에서 빠진다.
+  - memory와 history 단계도 Start의 입력은 줄이지 못한다. #50255에서 다룬다.
 - agent_core: provider가 parse 경계에서 크기 거절을 typed로 줄 때만 닿는다.
 
 **닿지 않는 경로** (이슈로 남긴다. §12의 4)
@@ -314,7 +318,10 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
   - `RefuseIgnoringCarrier`: 크기 거절이 history만 줄인다. 이 RFC 전의 동작이다.
   - `ShrinkBeforeSwitch`: 꼴을 바꿀 수 있는데 history부터 줄인다. §11의 2(floor에서만 바꾸기)다.
   - `SwitchBack`: hook이 꼴을 `Inline`으로 되돌린다.
-- 모델에 없는 것: 효과 뒤의 거절과 typed가 아닌 거절이다. 둘 다 hook에 닿지 않는다(§7, §9).
+- 모델에 없는 것
+  - 효과 뒤의 거절과 typed가 아닌 거절이다. 둘 다 hook에 닿지 않는다(§7, §9).
+  - Codex의 `input_too_large`다. hook에 닿지만 묶음을 바꾸지 않는다. 그 거절이 세는 입력에 묶음이 없다(§5.1).
+  - 모델의 크기 거절은 모두 묶음을 바꿀 수 있는 거절이다.
 
 TLC 1.8.0(로컬, `-workers 1`) 결과는 이렇다.
 

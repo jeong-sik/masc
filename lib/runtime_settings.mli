@@ -129,3 +129,4 @@ val keeper_build_cleanup_interval_sec : float Runtime_params.param
 val keeper_build_cleanup_retention_sec : float Runtime_params.param
 val keeper_remote_workspace_cleanup_enabled : bool Runtime_params.param
 val keeper_remote_workspace_cleanup_retention_sec : float Runtime_params.param
+val keeper_remote_workspace_cleanup_timeout_sec : float Runtime_params.param

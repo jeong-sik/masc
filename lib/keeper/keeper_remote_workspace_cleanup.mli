@@ -30,6 +30,7 @@ val cleanup :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
   retention_sec:float ->
+  timeout_sec:float ->
   unit ->
   (report, string) result
 (** An error names the declared profile when [meta] is not Remote_ssh: the
@@ -40,4 +41,7 @@ val cleanup :
     payload leaves alone an entry a live process is inside or that was
     touched within the retention.
     The endpoint is built without the disk preflight: that preflight refuses
-    a full disk, which is when this sweep matters most. *)
+    a full disk, which is when this sweep matters most.
+    [timeout_sec] is the endpoint's run limit for the payload. When it
+    passes, the endpoint stops the payload and this returns an error; the
+    entries removed before then stay removed. *)

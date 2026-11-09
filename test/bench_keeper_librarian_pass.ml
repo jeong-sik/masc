@@ -270,7 +270,7 @@ let prepare_history config kind =
        ~history_at_start:(Boundary.history_at_start_of_messages !first_messages_ref) !first_messages_ref);
      (match Consumer.consume_one ~config ~keeper_name ~commit:(fun _ -> fail "baseline unexpectedly proposed Memory") with
       | Ok (Consumer.Baseline_advanced _) -> ()
-      | Ok (Consumer.Nothing_to_read | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending) ->
+       | Ok (Consumer.Nothing_to_read | Progress_advanced _ | Official_advanced _ | Memory_not_committed _ | Pending _) ->
         fail "actual baseline was not established"
       | Error error -> fail (Consumer.error_to_string error)));
   (match kind with

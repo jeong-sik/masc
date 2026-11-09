@@ -24,7 +24,7 @@ goal, and claims; a claim whose marks differ from its plan, or a candidate or
 duplicate whose length leaves its band, is not kept. Every model call is cached in
 <out>/calls.jsonl under a key derived from the request, so a rerun resumes and
 pays only for calls that have no answer yet. Output: <out>/requests.jsonl (one
-request with its label per line) and <out>/summary.json.
+request per line; `synth_rows.label_of_row` reads its label) and <out>/summary.json.
 
 TINKER_API_KEY comes from the environment and is never written.
 """
@@ -40,12 +40,13 @@ import sys
 from collections import Counter
 from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol, assert_never, cast
 
 import synth_candidate_plan as C
 import synth_prompts as P
+import synth_rows as RW
 import synth_spec as S
 from tinker_oai import Call, Caller
 
@@ -366,22 +367,9 @@ def goal_for(rng: random.Random, keeper: S.KeeperProfile) -> S.GoalContext:
             assert_never(shape)
 
 
-def enum_value(value: object) -> str:
-    if isinstance(value, S.CandidateKind):
-        return value.value
-    raise TypeError(f"not JSON serializable: {type(value).__name__}")
-
-
 def request_json(request: S.SynthRequest) -> str:
-    """One line of requests.jsonl. The goal is stored as the goal_context text MASC shows."""
-    label = S.label_of(request)
-    body = asdict(request)
-    del body["goal"]
-    body["goal_context"] = S.goal_json(request.goal)
-    return json.dumps({"request": body, "label": {
-        "candidates": [asdict(c) for c in label.candidates], "planted_stale": sorted(label.planted_stale),
-        "duplicates": [list(pair) for pair in label.duplicates]}},
-        ensure_ascii=False, default=enum_value)
+    """One line of requests.jsonl: the request as `synth_rows.row_of` writes it."""
+    return json.dumps({"request": RW.row_of(request)}, ensure_ascii=False)
 
 
 # One request to build: its index, its memory, its random seed and its candidate plans.

@@ -312,66 +312,18 @@ def candidate_label(candidate: Candidate, by_id: dict[str, MemoryFact]) -> Candi
             assert_never(candidate.kind)
 
 
-def label_of(request: SynthRequest) -> RequestLabel:
-    by_id = {f.memory_id: f for f in request.facts}
-    labels = tuple(candidate_label(c, by_id) for c in request.candidates)
+def labeled(facts: tuple[MemoryFact, ...], candidates: tuple[Candidate, ...]) -> RequestLabel:
+    by_id = {f.memory_id: f for f in facts}
+    labels = tuple(candidate_label(c, by_id) for c in candidates)
     if not any(can_support(label.outcome) for label in labels):
         return RequestLabel(labels, frozenset(), ())
-    stale = frozenset(f.memory_id for f in request.facts if f.planted_stale)
-    pairs = tuple((f.duplicate_of, f.memory_id) for f in request.facts if f.duplicate_of is not None)
+    stale = frozenset(f.memory_id for f in facts if f.planted_stale)
+    pairs = tuple((f.duplicate_of, f.memory_id) for f in facts if f.duplicate_of is not None)
     return RequestLabel(labels, stale, pairs)
 
 
-CANDIDATE_LABEL_FIELDS = frozenset({"request_id", "outcome", "supersedes", "absorbs", "already_claim"})
-REQUEST_LABEL_FIELDS = frozenset({"candidates", "planted_stale", "duplicates"})
-
-
-def outcome_of(value: object) -> Outcome | None:
-    match value:
-        case "incorporated":
-            return "incorporated"
-        case "already_represented":
-            return "already_represented"
-        case "not_durable":
-            return "not_durable"
-        case _:
-            return None
-
-
-def candidate_label_of(value: object) -> CandidateLabel | None:
-    """A candidate label as JSON, or None unless it has exactly the label's fields, at most one
-    target, and a target its outcome can have."""
-    if not isinstance(value, dict) or frozenset(cast(dict[str, object], value)) != CANDIDATE_LABEL_FIELDS:
-        return None
-    obj = cast(dict[str, object], value)
-    rid, outcome = obj["request_id"], outcome_of(obj["outcome"])
-    targets = (obj["supersedes"], obj["absorbs"], obj["already_claim"])
-    if not isinstance(rid, str) or outcome is None or not all(t is None or isinstance(t, str) for t in targets):
-        return None
-    supersedes, absorbs, already_claim = (cast(str | None, t) for t in targets)
-    if sum(t is not None for t in targets) > 1 or (already_claim is not None and outcome != "already_represented"):
-        return None
-    if (supersedes is not None or absorbs is not None) and outcome != "incorporated":
-        return None
-    return CandidateLabel(rid, outcome, supersedes, absorbs, already_claim)
-
-
-def label_from_json(value: object) -> RequestLabel | None:
-    """A request label as `synth_generate.request_json` writes it, or None when the value is not one."""
-    if not isinstance(value, dict) or frozenset(cast(dict[str, object], value)) != REQUEST_LABEL_FIELDS:
-        return None
-    obj = cast(dict[str, object], value)
-    raw_candidates, raw_stale, raw_pairs = obj["candidates"], obj["planted_stale"], obj["duplicates"]
-    if not (isinstance(raw_candidates, list) and isinstance(raw_stale, list) and isinstance(raw_pairs, list)):
-        return None
-    candidates = [candidate_label_of(c) for c in cast(list[object], raw_candidates)]
-    stale = [s for s in cast(list[object], raw_stale) if isinstance(s, str)]
-    pairs = [cast(list[object], p) for p in cast(list[object], raw_pairs) if isinstance(p, list)]
-    pair_ids = [(a, b) for a, b in (p for p in pairs if len(p) == 2) if isinstance(a, str) and isinstance(b, str)]
-    if (any(c is None for c in candidates) or len(stale) != len(cast(list[object], raw_stale))
-            or len(pair_ids) != len(cast(list[object], raw_pairs))):
-        return None
-    return RequestLabel(tuple(c for c in candidates if c is not None), frozenset(stale), tuple(pair_ids))
+def label_of(request: SynthRequest) -> RequestLabel:
+    return labeled(request.facts, request.candidates)
 
 
 # --- sampling ---------------------------------------------------------------

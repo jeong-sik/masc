@@ -503,20 +503,54 @@ class FollowingAcceptedMerges(unittest.TestCase):
         self.assertEqual((receipt['uuid'], receipt['head'], receipt['pr'], receipt['members']),
                          (UUID, sha(102), 102, [101, 102]))
 
-    def test_a_failed_dispatch_or_expired_chain_stays_red(self):
+    def test_a_failed_dispatch_stays_red_and_age_never_ends_the_chain(self):
         outcome = {'status': 'still_pending', 'uuid': UUID, 'pr': 102, 'head': sha(102),
                    'members': [101, 102], 'since': 0}
-        with patch.object(MERGE.time, 'time', create=True, return_value=MERGE.RESUME_LIMIT_SECONDS + 1), \
-             patch.object(MERGE.subprocess, 'run') as run:
-            expired = MERGE.hand_off(REPO, outcome)
-        run.assert_not_called()
-        self.assertEqual(expired['status'], 'still_pending')
-        outcome['since'] = 1000.0
-        with patch.object(MERGE.time, 'time', create=True, return_value=1001.0), \
-             patch.object(MERGE.subprocess, 'run', side_effect=OSError('gh missing')):
+        with patch.object(MERGE.subprocess, 'run',
+                          return_value=subprocess.CompletedProcess([], 0, '', '')) as run:
+            old = MERGE.hand_off(REPO, outcome)  # submitted 50 hours ago in this test
+        self.assertEqual(old['status'], 'resume_dispatched')
+        self.assertEqual(run.call_count, 1)
+        with patch.object(MERGE.subprocess, 'run', side_effect=OSError('gh missing')):
             failed = MERGE.hand_off(REPO, outcome)
         self.assertEqual(failed['status'], 'still_pending')
         self.assertIn('dispatch_failed', failed['resume'])
+
+    def resume_environment(self, **extra):
+        receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102), 'members': [101, 102], 'since': 1.0}
+        return dict({'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+                     'DISPATCH_PR': '102', 'DISPATCH_RECEIPT': json.dumps(receipt),
+                     'GITHUB_STEP_SUMMARY': ''}, **extra)
+
+    def test_dry_run_with_a_receipt_reads_but_never_dispatches_or_writes(self):
+        with patch.dict(os.environ, self.resume_environment()), \
+             patch.object(sys, 'argv', ['auto-merge', '--dry-run']), \
+             patch.object(MERGE, 'read', return_value={'status': 'pending'}), \
+             patch.object(MERGE, 'pull', return_value={'merged': False, 'state': 'open'}), \
+             patch.object(MERGE.subprocess, 'run') as run, \
+             patch.object(MERGE.time, 'sleep'), patch.object(MERGE, 'WAIT_SECONDS', 0), \
+             redirect_stdout(io.StringIO()) as output:
+            code = MERGE.main()
+        run.assert_not_called()
+        self.assertEqual(code, 1)
+        self.assertIn('still_pending', output.getvalue())
+        self.assertNotIn('resume_dispatched', output.getvalue())
+
+    def test_a_request_that_is_gone_or_a_closed_member_ends_the_chain_visibly(self):
+        receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102), 'members': [101, 102], 'since': 1.0}
+        with patch.object(MERGE, 'read', side_effect=ValueError('gh: Not Found (HTTP 404)')), \
+             patch.object(MERGE.subprocess, 'run') as run:
+            gone = MERGE.resume(REPO, receipt)
+        self.assertEqual(gone['status'], 'request_not_found')
+        run.assert_not_called()
+        with patch.object(MERGE, 'read', return_value={'status': 'pending'}), \
+             patch.object(MERGE, 'pull', return_value={'merged': False, 'state': 'closed'}), \
+             patch.object(MERGE.subprocess, 'run') as run:
+            closed = MERGE.resume(REPO, receipt)
+        self.assertEqual(closed['status'], 'member_closed_unmerged')
+        run.assert_not_called()
+        self.assertNotIn(gone['status'], MERGE.SUCCESS)
+        self.assertNotIn(closed['status'], MERGE.SUCCESS)
 
     def test_resume_reads_only_the_recorded_receipt_and_completes(self):
         receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102), 'members': [101, 102], 'since': 1.0}

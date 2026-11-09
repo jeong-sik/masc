@@ -35,15 +35,16 @@ REQUIRED_APPROVALS = 2  # Operator-requested distinct GitHub accounts.
 WAIT_SECONDS = 600
 POLL_SECONDS = 10
 # A run that outlives its wait hands the receipt to a fresh run of the same
-# workflow instead of ending the follow-up. The chain stops this long after the
-# original submission and the stop is a visible failure.
-RESUME_LIMIT_SECONDS = 3600
+# workflow instead of ending the follow-up. There is no elapsed-time cutoff:
+# the chain ends only on a terminal answer (landed, failed, request gone, a
+# member closed without merging) or an explicit dispatch failure, all visible.
 # Only `pending` is still being decided. `enqueued` and `merged` are final
 # answers about the request; whether the pull requests landed is read from the
 # members themselves, because the receipt never changes afterwards.
 IN_FLIGHT = frozenset({'pending'})
 ACCEPTED = frozenset({'merged', 'enqueued'})
 SUCCESS = frozenset({'merged', 'eligible_dry_run', 'resume_dispatched'})
+GONE = ('HTTP 404', 'HTTP 410', 'Not Found')
 UNSETTLED = frozenset({'still_pending', 'observation_unavailable'})
 UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 SHA = re.compile(r'[0-9a-f]{40}')
@@ -193,6 +194,7 @@ def member_states(repo, scope):
     for member in scope['scope']:
         row = pull(repo, member['number'])
         states[member['number']] = {'merged': row['merged'] is True,
+                                    'state': row.get('state'),
                                     'merge_commit_sha': row.get('merge_commit_sha')}
     return states
 
@@ -220,8 +222,15 @@ def follow(repo, result_endpoint, receipt, scope):
             error = None
         except (ValueError, KeyError, TypeError, OSError) as failure:
             error = str(failure)
+            if any(marker in error for marker in GONE):
+                return dict(receipt, status='request_not_found', error=error)
         else:
             status = observation['status']
+            abandoned = [n for n, row in states.items()
+                         if row.get('state') == 'closed' and not row['merged']]
+            if abandoned:
+                return dict(receipt, status='member_closed_unmerged', members_closed=abandoned,
+                            observation=observation, member_states=states)
             if status in ACCEPTED and all_landed(states):
                 return dict(receipt, status='merged', observation=observation,
                             member_states=states)
@@ -240,8 +249,6 @@ def follow(repo, result_endpoint, receipt, scope):
 def hand_off(repo, outcome):
     """Continue an unsettled receipt in a new run; never submit a merge again."""
     receipt = {key: outcome[key] for key in ('uuid', 'pr', 'head', 'members', 'since')}
-    if time.time() - receipt['since'] > RESUME_LIMIT_SECONDS:
-        return dict(outcome, resume='limit_reached')
     command = ['gh', 'workflow', 'run', 'approval-auto-merge.yml', '--repo', repo,
                '--ref', 'main', '-f', f'pr={receipt["pr"]}',
                '-f', f'receipt={json.dumps(receipt, separators=(",", ":"))}']
@@ -273,13 +280,13 @@ def parse_receipt(raw):
     return receipt
 
 
-def resume(repo, receipt):
+def resume(repo, receipt, dispatch=True):
     """Read the original request again; no admission and no new merge request."""
     endpoint = f'repos/{repo}/pulls/{receipt["pr"]}/merge-async/{receipt["uuid"]}'
     scope = {'scope': [{'number': n} for n in receipt['members']]}
     outcome = follow(repo, endpoint, dict(receipt, status='resumed', result_endpoint=endpoint),
                      scope)
-    if outcome['status'] in UNSETTLED:
+    if outcome['status'] in UNSETTLED and dispatch:
         outcome = hand_off(repo, outcome)
     return outcome
 
@@ -366,7 +373,7 @@ def main():
             receipt = parse_receipt(raw_receipt)
             if receipt['pr'] != number:
                 raise ValueError('receipt does not belong to the requested pull request')
-            outcome = resume(repo, receipt)
+            outcome = resume(repo, receipt, dispatch=not args.dry_run)
             emit({'pr': number, 'result': outcome})
             return 0 if outcome.get('status') in SUCCESS else 1
         if not args.dry_run:

@@ -293,9 +293,16 @@ let test_partial_load_never_rewrites_the_file () =
     (Result.is_error (Masc_board_handlers.Board_votes_json.load_persisted_comments store));
   Alcotest.(check bool) "posts after the damaged line are still served" true
     (Result.is_ok (Board_core.read_post store ~post_id:(Board.Post_id.to_string after.id)));
-  Alcotest.(check bool) "comments after the damaged line are still served" true
-    (Result.is_ok
-       (Board_core.get_comment store ~comment_id:(Board.Comment_id.to_string c_after.id)));
+  let observed = match Board_core.observe_comments store
+      ~post_id:(Board.Post_id.to_string c_after.post_id) with
+    | Ok observed -> observed
+    | Error error -> Alcotest.fail (Board.show_board_read_error error) in
+  Alcotest.(check bool) "comments after the damaged line remain display rows" true
+    (List.exists (fun (comment : Board.comment) -> comment.id = c_after.id) observed.comments);
+  Alcotest.(check bool) "display rows retain their incomplete source status" true
+    (match observed.completeness with
+     | Board.Source_incomplete (Board.Io_error _) -> true
+     | Board.Source_incomplete _ | Board.Source_complete -> false);
   let unchanged label =
     Alcotest.(check string) (label ^ ": posts file untouched") posts_on_disk (read posts_path);
     Alcotest.(check string) (label ^ ": comments file untouched") comments_on_disk

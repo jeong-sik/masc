@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-11-09T05:36:44Z (HEAD: 498d0415b592)
+Generated: 2026-11-09T07:36:50Z (HEAD: e00eddb3736f)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -59,7 +59,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | OllamaBodyIntegrity.tla | OllamaBodyIntegrity | manual | 2 | 1 | clean={inv:BalancedNeverFails, inv:ParseErrorImpliesUnbalanced} buggy={inv:BalancedNeverFails} | 08e878c2fde0 |
 | RetainedResultCarrier.tla | RetainedResultCarrier | manual | 4 | 3 | clean={inv:TypeOK, inv:NoLockWhileFloorFits, inv:SwitchBeforeShrink, prop:ReceiptsLeaveOnlyOnAccept, prop:RunEnds} buggy={inv:TypeOK, inv:NoLockWhileFloorFits} shrink-first-buggy={inv:TypeOK, inv:SwitchBeforeShrink} switch-back-buggy={inv:TypeOK, prop:RunEnds} | ff559a0803e3 |
 | SSEBroadcastBlock.tla | SSEBroadcastBlock | manual | 2 | 1 | clean={inv:TypeOK, inv:NoPermanentBlock} buggy={inv:TypeOK, inv:NoPermanentBlock} | baa8b016ef40 |
-| SizeRefusalRetryAdmission.tla | SizeRefusalRetryAdmission | manual | 7 | 6 | clean={inv:TypeOK, inv:WritesOnlyForTheFloor, inv:EndsOnlyWhenNoRungIsLeft, inv:NoPrematureEnd, prop:EveryResendStepsDown, prop:NoResendOverTheBound, prop:FreshStartCarriesEverything, prop:RunEnds} commit-first-buggy={inv:TypeOK, inv:WritesOnlyForTheFloor} cut-on-drop-buggy={inv:TypeOK, prop:FreshStartCarriesEverything} over-bound-buggy={inv:TypeOK, prop:NoResendOverTheBound} resend-refused-buggy={inv:TypeOK, prop:EveryResendStepsDown} skip-floor-buggy={inv:TypeOK, inv:EndsOnlyWhenNoRungIsLeft} write-failure-buggy={inv:TypeOK, inv:NoPrematureEnd} | 9f847a430a0c |
+| SizeRefusalRetryAdmission.tla | SizeRefusalRetryAdmission | manual | 7 | 6 | clean={inv:TypeOK, inv:WritesOnlyForTheFloor, inv:EndsOnlyWhenNoRungIsLeft, inv:NoPrematureEnd, prop:EveryResendStepsDown, prop:FreshStartCarriesEverything, prop:RunEnds} commit-first-buggy={inv:TypeOK, inv:WritesOnlyForTheFloor} cut-on-drop-buggy={inv:TypeOK, prop:FreshStartCarriesEverything} resend-refused-buggy={inv:TypeOK, prop:EveryResendStepsDown} skip-floor-buggy={inv:TypeOK, inv:EndsOnlyWhenNoRungIsLeft} skip-fresh-start-buggy={inv:TypeOK, prop:EveryResendStepsDown} write-failure-buggy={inv:TypeOK, inv:NoPrematureEnd} | cc3e1e321d76 |
 | SlotScheduler.tla | SlotScheduler | manual | 2 | 1 | clean={inv:TypeOK, inv:MutualExclusion, inv:NeverStuck} buggy={inv:TypeOK, inv:NeverStuck} | 71a2d144944a |
 
 ### specs/keeper-state-machine (8 specs)

@@ -56,7 +56,9 @@ verdict reads the judge's decisions with `--drops`.
 
 The key stays in <out>, since it names the label's classes and the dropped
 facts. The judge's folder <out>/judge/ holds the cases, JUDGE, and a copy of
-the rules JUDGE names at the same path (RULES).
+the rules JUDGE names at the same path (`audit_decisions.RULES`). The sha256 of
+those three files go beside the key, and `apply` and the verdict read the
+decisions only while the files are unchanged.
 """
 
 from __future__ import annotations
@@ -79,9 +81,6 @@ MIN_DISTRACTORS = 2
 # Facts shown in full for each candidate because their wording overlaps most with it.
 SIMILAR = 3
 HEAD = 90
-# JUDGE names the rules by this repository path. The judge's folder holds a copy of
-# synth_render.TEMPLATE there, so the path resolves inside the folder too.
-RULES = Path("config") / "prompts" / "librarian.md"
 JUDGE = """# E-synth 라벨 감사 판정 기준
 
 한 case는 keeper-librarian admission 요청 하나입니다. Keeper 역할 자료(role), 이번 턴
@@ -245,13 +244,15 @@ def drop_full_sets(drops: D.OffLabel, requests: dict[str, JsonObject], seed: int
 
 
 def write_cases(out: Path, case_rows: list[JsonObject], key_rows: list[JsonObject]) -> None:
-    """The key in <out>; the cases, JUDGE and its RULES in the judge's folder, which the key never enters."""
+    """The key and the sha256 of the judge's files in <out>; the cases, JUDGE and a copy of the rules
+    JUDGE names (synth_render.TEMPLATE) in the judge's folder, which the key never enters."""
     judge = out / D.JUDGE_DIR
     write_jsonl(out / "key.jsonl", key_rows)
     write_jsonl(judge / "cases.jsonl", case_rows)
     (judge / "judge.md").write_text(JUDGE, encoding="utf-8")
-    (judge / RULES).parent.mkdir(parents=True, exist_ok=True)
-    (judge / RULES).write_bytes(synth_render.TEMPLATE.read_bytes())
+    (judge / D.RULES).parent.mkdir(parents=True, exist_ok=True)
+    (judge / D.RULES).write_bytes(synth_render.TEMPLATE.read_bytes())
+    D.record_judge_files(out, ["cases.jsonl", "judge.md", D.RULES.as_posix()])
 
 
 def cases(args: argparse.Namespace) -> int:
@@ -295,7 +296,7 @@ def cases(args: argparse.Namespace) -> int:
 def apply(args: argparse.Namespace) -> int:
     audit = Path(cast(str, args.audit))
     keys = {cast(str, k["case"]): k for k in D.read_jsonl(audit / "key.jsonl")}
-    decisions = D.decisions_by_case(D.read_jsonl(audit / D.JUDGE_DIR / "decisions.jsonl"))
+    decisions = D.decisions_by_case(D.judge_decisions(audit, synth_render.TEMPLATE)[1])
     if set(decisions) != set(keys):
         raise SystemExit(f"decisions cover {len(decisions)} cases, the audit has {len(keys)}")
     removed_items: set[str] = set()

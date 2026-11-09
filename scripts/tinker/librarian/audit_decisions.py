@@ -23,12 +23,19 @@ Each drop is judged in the case of the request it was made on. When the judge ta
 request on that memory for any target. When the judge keeps the fact, the drop
 stays wrong, also when its memory leaves scoring for another drop:
 `wrong_outside` counts it against the target that made it.
+
+The judge gets one folder, JUDGE_DIR, and writes its decisions there. Beside the
+key, JUDGE_FILES records the sha256 of each file the folder was given.
+`judge_decisions` reads the decisions only while those files are unchanged and
+the rules copy is the checkout's rules, so a judge cannot decide under rules it
+rewrote.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
@@ -40,10 +47,36 @@ CANDIDATE_VERBS = frozenset({"new", "transient", "restates", "corrects"})
 FACT_VERBS = frozenset({"keep", "drop", "superseded"})
 # The folder a judge gets: the cases and the judging text, never the key.
 JUDGE_DIR = "judge"
+# The rules the judging text names, by repository path. The judge's folder holds a copy at that path.
+RULES = Path("config") / "prompts" / "librarian.md"
+# Beside the key: the sha256 of each file the judge's folder was given.
+JUDGE_FILES = "judge-files.json"
 
 
 def read_jsonl(path: Path) -> list[JsonObject]:
     return [cast(JsonObject, json.loads(line)) for line in path.read_text(encoding="utf-8").splitlines()]
+
+
+def file_sha256(path: Path) -> str | None:
+    return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+
+
+def record_judge_files(folder: Path, names: list[str]) -> None:
+    """Write <folder>/JUDGE_FILES: the sha256 of each named file in <folder>/JUDGE_DIR."""
+    files = {name: file_sha256(folder / JUDGE_DIR / name) for name in sorted(names)}
+    (folder / JUDGE_FILES).write_text(json.dumps(files, indent=1) + "\n", encoding="utf-8")
+
+
+def judge_decisions(folder: Path, rules: Path) -> tuple[dict[str, str], list[JsonObject]]:
+    """The sha256 of the files the judge was given, and its decisions. SystemExit when one of those
+    files changed after the cases were written, or the rules copy is not `rules`."""
+    files = cast(dict[str, str], json.loads((folder / JUDGE_FILES).read_text(encoding="utf-8")))
+    changed = sorted(name for name, sha in files.items() if file_sha256(folder / JUDGE_DIR / name) != sha)
+    if changed:
+        raise SystemExit(f"{folder / JUDGE_DIR}: {', '.join(changed)} changed after the cases were written")
+    if files.get(RULES.as_posix()) != file_sha256(rules):
+        raise SystemExit(f"{folder / JUDGE_DIR}: its {RULES} is not {rules}")
+    return files, read_jsonl(folder / JUDGE_DIR / "decisions.jsonl")
 
 
 def memory_of(item_id: str) -> str:
@@ -129,9 +162,11 @@ class Judged:
 
 @dataclass(frozen=True, slots=True)
 class Adjudication:
-    """The judge's class for each off-label drop, and the memories the verdict leaves out."""
+    """The judge's class for each off-label drop, the memories the verdict leaves out, and the
+    sha256 of the files the judge decided on."""
     drops: tuple[Judged, ...]
     excluded: frozenset[str]
+    judge_files: tuple[tuple[str, str], ...] = ()
 
     def scored(self, rows: list[JsonObject]) -> list[JsonObject]:
         """The E-synth rows the verdict scores: none on an excluded memory, whatever the target."""
@@ -151,7 +186,7 @@ class Adjudication:
         return {"off_label_drops": [{"item": d.item, "memory_id": d.memory_id, "targets": list(d.targets),
                                      "judged": d.judged} for d in self.drops],
                 "excluded_memories": sorted(self.excluded), "wrong_outside": self.wrong_outside(),
-                "items_scored": items_scored}
+                "items_scored": items_scored, "judge_files": dict(self.judge_files)}
 
 
 NO_DROPS = Adjudication((), frozenset())
@@ -181,7 +216,9 @@ def adjudicate(keys: list[JsonObject], decisions: list[JsonObject], drops: OffLa
     return Adjudication(tuple(judged), frozenset(memory_of(d.item) for d in judged if d.judged != "keep"))
 
 
-def read_adjudication(folder: Path, drops: OffLabel) -> Adjudication:
+def read_adjudication(folder: Path, drops: OffLabel, rules: Path) -> Adjudication:
     """`adjudicate` over <folder>/key.jsonl, written by `e_synth_audit.py drops`, and the judge's
-    <folder>/judge/decisions.jsonl."""
-    return adjudicate(read_jsonl(folder / "key.jsonl"), read_jsonl(folder / JUDGE_DIR / "decisions.jsonl"), drops)
+    decisions (`judge_decisions`)."""
+    files, decisions = judge_decisions(folder, rules)
+    judged = adjudicate(read_jsonl(folder / "key.jsonl"), decisions, drops)
+    return replace(judged, judge_files=tuple(sorted(files.items())))

@@ -12,6 +12,7 @@ caller, which imports openai, so this file runs with `uv run`.
 
 from __future__ import annotations
 
+import json
 import random
 import sys
 import tempfile
@@ -93,14 +94,32 @@ class CaseTest(unittest.TestCase):
             A.drop_full_sets({"eval-k-0": {"m3": ["A"]}}, {"eval-k-0": first, "eval-k-1": second}, 1)
 
     def test_the_judge_folder_holds_the_rules_judge_names_and_not_the_key(self) -> None:
-        self.assertIn(f"`{A.RULES.as_posix()}`", A.JUDGE)
+        self.assertIn(f"`{D.RULES.as_posix()}`", A.JUDGE)
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
             A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}])
             judge = out / D.JUDGE_DIR
-            self.assertEqual((judge / A.RULES).read_bytes(), synth_render.TEMPLATE.read_bytes())
-            self.assertEqual(sorted(p.relative_to(judge).as_posix() for p in judge.rglob("*") if p.is_file()),
-                             sorted(["cases.jsonl", "judge.md", A.RULES.as_posix()]))
+            given = sorted(["cases.jsonl", "judge.md", D.RULES.as_posix()])
+            self.assertEqual((judge / D.RULES).read_bytes(), synth_render.TEMPLATE.read_bytes())
+            self.assertEqual(sorted(p.relative_to(judge).as_posix() for p in judge.rglob("*") if p.is_file()), given)
+            recorded = cast(dict[str, str], json.loads((out / D.JUDGE_FILES).read_text(encoding="utf-8")))
+            self.assertEqual(recorded, {name: D.file_sha256(judge / name) for name in given})
+
+    def test_decisions_are_read_only_beside_the_files_the_judge_was_given(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}])
+            (out / D.JUDGE_DIR / "decisions.jsonl").write_text('{"case": "d001"}\n', encoding="utf-8")
+            self.assertEqual(D.judge_decisions(out, synth_render.TEMPLATE)[1], [{"case": "d001"}])
+            with self.assertRaisesRegex(SystemExit, "is not"):
+                D.judge_decisions(out, out / D.JUDGE_DIR / "judge.md")
+            rules = out / D.JUDGE_DIR / D.RULES
+            rules.write_bytes(rules.read_bytes() + b"\n")
+            with self.assertRaisesRegex(SystemExit, "changed after"):
+                D.judge_decisions(out, synth_render.TEMPLATE)
+            rules.unlink()
+            with self.assertRaisesRegex(SystemExit, "changed after"):
+                D.judge_decisions(out, synth_render.TEMPLATE)
 
 
 class MisfitTest(unittest.TestCase):

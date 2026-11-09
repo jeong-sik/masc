@@ -625,10 +625,10 @@ let test_attached_guest_endpoint_names_the_derived_guest ~fs ~net () =
      So the cleanup runs in [finally] here, outside the switch. *)
   Fun.protect
     ~finally:(fun () ->
-      cleanup_fixture_dir base;
-      cleanup_dir bin_dir;
       Eio_context.restore_state context;
-      (match previous_fs with None -> Fs_compat.clear_fs () | Some fs -> Fs_compat.set_fs fs))
+      (match previous_fs with None -> Fs_compat.clear_fs () | Some fs -> Fs_compat.set_fs fs);
+      cleanup_fixture_dir base;
+      cleanup_dir bin_dir)
   @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   Eio_context.set_switch sw;

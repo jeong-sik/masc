@@ -1,2 +1,0 @@
-ASSERT C1 becomes a codepoint escape
-ASSERT no raw C1 byte pair

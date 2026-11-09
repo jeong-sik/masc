@@ -1,4 +1,12 @@
-4facd48239452f6695504ec0a621b9b552fb2dc4d95f6b3d8f1e1764ec3c4e33  probe.exe
+# Identities for the artifacts this evidence directory refers to.
+#
+# `probe.exe` is NOT stored here. It is a 7.3 MiB compiled binary; committing it
+# made this the only `.exe` in the repository and the `_build/` outputs next to
+# it were regenerable byproducts (`.gitignore:2` ignores `_build/`, and they
+# arrived only because the commit used `git add -f`). The hash below is kept so
+# the identity of the binary that produced `run.log` / `mutant.log` stays
+# checkable; rebuild it with the command in `run.cmd.txt`.
+4facd48239452f6695504ec0a621b9b552fb2dc4d95f6b3d8f1e1764ec3c4e33  probe.exe  (not stored; identity only)
 e1700e0d5d20a86fc36979461cd880757f9f8e499dfcf0ad964074d72630c690  tui_terminal_text.ml
 53870fd70c10f1fcf5007deddfdf4627aae78224aaf773375fbba5241d18b994  test_tui_terminal_text.ml
 a88c4436719b60c0eab830ee3f55e0f8314cbd5ebbcbea2b215dc0893ce31b6d  masc.ml

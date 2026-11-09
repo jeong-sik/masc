@@ -47,6 +47,7 @@
 | 학습 데이터 | `--bundle`이 없으면 합성 datum 1개를 만든다 | `scripts/tinker/tinker_runner.py:583` |
 | `promote_ready` | 평가 통과율 기본값 0.88, 기준선 기본값 0.78을 비교한다 | `scripts/tinker/tinker_runner.py:561`, `addons/tinker-trainer/server.py:704` |
 | 스냅샷 소스 | 예제가 상대 경로를 쓰는데, 런타임은 절대 경로만 받는다 | `docs/examples/lane-addons/tinker-trainer.toml:21`, `lib/lane_addon/lane_addon_sources.ml:88` |
+위치는 #49616의 병합 커밋 `cca5af9f4afc` 기준이다.
 
 그 한 스텝은 배선이 끝까지 통한다는 뜻이다.
 모델이 나아졌다는 근거는 아니다.

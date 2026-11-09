@@ -268,7 +268,7 @@ python3 docs/evidence/tool-efficiency-before-after-2026-11/pr_read_needs.py \
 | `body_or_comments` | 1,117호출, 1.966 h | 88호출, 0.078 h |
 | `labels_or_requests` | 500호출, 2.022 h | 5호출, 0.013 h |
 
-- 칸을 하나 더해서 줄일 수 있는 필요는 `times`, `check_detail`, `refs_or_author_login`, `merge_state_detail`, `labels_or_requests` 예요. `writes` 는 읽기 도구가 대신할 수 없어요. `ci_run_or_main_tip` 은 CI run 과 main 끝을 `sleep` 으로 기다리는 호출이라 일정 감시(RFC-0379 §6.6)의 몫이에요. `closed_or_merged` 는 스냅숏이 열린 PR 만 가져서 칸으로 풀리지 않아요.
+- 칸을 하나 더해서 줄일 수 있는 필요는 `times`, `check_detail`, `refs_or_author_login`, `merge_state_detail`, `labels_or_requests` 예요. `writes` 는 읽기 도구가 대신할 수 없어요. `ci_run_or_main_tip` 은 CI run 과 main 끝을 보는 호출이고, 시간의 60.6% 가 `sleep N` 이 든 기다림이라 일정 감시(RFC-0379 §6.6)의 몫이에요(「스크립트 밖에서 센 값」). `closed_or_merged` 는 스냅숏이 열린 PR 만 가져서 칸으로 풀리지 않아요.
 - 글자 맞춤이라 오차가 양쪽으로 있어요. 명령을 인용만 한 호출은 필요를 부른 것으로 세서 값이 낮아지고, 패턴이 모르는 사실을 묻는 호출은 "필요 없음"에 들어와 값이 높아져요.
 - 3.057 h 는 스냅숏이 답할 수 있는 시간의 어림이에요. Keeper 가 도구를 부르게 된다는 뜻은 아니에요. 도구를 안 부르면 줄지 않으므로, 병합과 재시작 뒤에는 원장에서 `keeper_pull_requests_list` 호출 수를 보고, 같은 명령으로 "필요 없음" 호출이 줄었는지 견줘요.
 - 위 절의 PR 읽기 10,609호출 중 1,495호출 3.060 h 는 `writes` 도 불러요. 대부분 리뷰를 게시하는 호출이고, 게시 전에 head 를 한 번 읽어요. `pr_state_reads.py` 가 `/pulls` 를 부르는 `gh api` 를 읽기와 쓰기 구분 없이 세서 그래요.
@@ -297,6 +297,10 @@ python3 docs/evidence/tool-efficiency-before-after-2026-11/pr_read_needs.py \
 - Keeper 별로 `context-reviewer` 가 2,634호출 2.815 h(94.3%)이고, 다음은 `code-reviewer` 49호출 0.080 h 예요.
 - 3자리 이상 숫자를 지우고 앞 150자가 같은 명령으로 묶으면 가장 큰 묶음은 `gh api "repos/jeong-sik/masc/pulls?state=open&sort=updated&direction=desc&per_page=12" --jq '.[]|select(.updated_at>"시각")|"번호 draft head 시각 제목"'` 모양이에요. 1,990호출 2.452 h 이고, `per_page=6` 인 같은 모양이 488호출 0.197 h 예요.
 - 앞의 `per_page=12` 모양은 `context-reviewer` 가 11-07 418호출, 11-08 1,574호출이고 중앙값 3.2초, p90 5.8초예요(1,992호출, 2.453 h. 묶음 기준이 앞 150자라서 1,990호출과 2건 차이가 나요).
+
+**`ci_run_or_main_tip` 을 부른 호출의 모양**(「스냅숏이 답할 수 있는 PR 읽기」)
+
+- 구간: 위와 같아요. 호출: `pr_read_needs.needs_of(명령)` 에 `ci_run_or_main_tip` 이 든 PR 읽기 1,117호출 5.862 h 예요. `pr_state_reads` 의 모양으로 나누면 기다림 106호출 3.550 h(60.6%), 한 번 읽기 833호출 1.446 h, 반복문 178호출 0.867 h 예요.
 
 **#50012 첫 측정**(「결과 2」)
 

@@ -7309,6 +7309,8 @@
 
 (include stanzas/test_authz_activation.inc)
 
+(include stanzas/test_authz_service_credential_host.inc)
+
 (include stanzas/test_authz_high_water.inc)
 
 (include stanzas/test_server_memory_recall_standing.inc)

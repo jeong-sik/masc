@@ -1558,13 +1558,15 @@ let runtime_record ~author event =
   | Ok body -> record_by ~author K.Runtime body
 ;;
 
+let fixture_self_effects = Authz_types.Effect.(Set.of_list [ Invoke_model; Use_tool ])
+
 let made ?(runtime_id = first_runtime) ?(grant_id = first_grant) ~by () =
   Re.Made
     { runtime_id
     ; provider_account_id = first_account
     ; user_id = by
     ; grant_id
-    ; self_effects = Authz_types.Effect.Set.of_list Authz_types.Effect.[ Invoke_model; Use_tool ]
+    ; self_effects = fixture_self_effects
     }
 ;;
 
@@ -1727,6 +1729,7 @@ let test_keepers () =
                ; provider_account_id = second_account
                ; user_id = bob
                ; grant_id = second_grant
+               ; self_effects = fixture_self_effects
                }) )
       ; ( "a Keeper of the Admin"
         , keeper_record ~author:(human bob) (keeper_made ~keeper_id:second_keeper ~by:bob ()) )

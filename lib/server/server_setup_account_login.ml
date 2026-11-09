@@ -390,19 +390,25 @@ let recorded_label = function Made -> "made" | Existing -> "existing"
 
 let runtime_failure = "The Runtime of this account could not be recorded."
 
+(* What the Self grant of a verified Runtime allows: its owner's turns read
+   state, call the model and use tools (user decision 2026-11-09, plan D2).
+   A turn is decided against this set, never against a default in code. *)
+let verified_runtime_effects =
+  Authz_types.Effect.(Set.of_list [ Read_state; Invoke_model; Use_tool ])
+
 (* A model of the person's account answered and called a tool, so its binding
    is a Runtime of theirs, with its Self grant (plan D1). Another call finds
    the Runtime the first one made. *)
 let record_runtime person { provider_account_id; runtime_id; runtime = _ } =
   let state = (Authz_zone.snapshot person.zone).Authz_zone.state in
   match Authz_runtime_state.find state.Authz_state.runtimes runtime_id with
-  | Some { Authz_runtime_state.owner; provider_account_id = account; self_grant = _ }
+  | Some { Authz_runtime_state.owner; provider_account_id = account; self_grant = _; self_effects = _ }
     when Authz_types.User_id.equal owner person.user_id
          && Authz_types.Provider_account_id.equal account provider_account_id -> Ok Existing
   | Some _ -> Error (`Conflict, "Another account has a Runtime of this id.")
   | None ->
     (match Authz_runtime.make person.zone ~user_id:person.user_id ~provider_account_id ~runtime_id
-             ~draw:Auth.generate_token with
+             ~self_effects:verified_runtime_effects ~draw:Auth.generate_token with
      | Ok (_ : Authz_types.Grant_id.t) -> Ok Made
      | Error error ->
        Log.Server.warn "Runtime %s was not recorded: %s"

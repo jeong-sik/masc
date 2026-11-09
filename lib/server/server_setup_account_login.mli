@@ -48,7 +48,8 @@ val status : owner:owner -> base_path:string ->
     failure goes to the server log, since it can name a path of the server.
     When the call passes, the binding is a Runtime of the person: the first
     pass writes its record with a Self grant to the authorization log
-    ({!Authz_runtime.make}), and [runtime] is
+    ({!Authz_runtime.make}); the grant allows [read_state], [invoke_model]
+    and [use_tool]. [runtime] is
     [{"runtime_id":...,"record":"made"}], or ["existing"] on a later pass.
     When it fails, [runtime] is [null]. Nothing is written to runtime.toml.
 

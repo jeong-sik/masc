@@ -1970,14 +1970,11 @@ let edit_queued store ~operation_id ~input =
   in
   let* input_json = canonical_json "input" input in
   let* input = json_of_stored "input" input_json in
-  let current = ref None in
   let* expected =
     let* operation = operation_or_unknown store.db operation_id in
-    current := Some operation;
     Reducer.apply operation (Edit_queued { input; execution_digest })
     |> Result.map_error (reducer_error operation_id)
   in
-  ignore current;
   persist_and_readback store expected (fun () ->
     let* executions = semantic_rows store.db ~active_only:true in
     if List.exists (fun (execution : Semantic.t) ->

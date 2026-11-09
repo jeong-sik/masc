@@ -191,8 +191,8 @@ let test_frontend_transport_routes_present () =
 (* RFC-0281: typed WebSocket-upgrade routes.  [ws_get] registers a
    [Router.Ws] route (carrying the Gluten upgrade capability); [get]
    registers a [Router.Plain] route.  The variant is what lets
-   [Router.dispatch] thread [upgrade] to WS routes and reject WS routes
-   on non-upgrade transports with 426. *)
+   [Router.dispatch] thread the optional [upgrade] capability to WS routes;
+   their handlers can answer discovery without upgrading. *)
 let test_router_ws_get_registers_ws_route () =
   let handler ~upgrade:_ _req _reqd = () in
   let routes = Router.create () |> Server_route.ws_get "/ws" handler in

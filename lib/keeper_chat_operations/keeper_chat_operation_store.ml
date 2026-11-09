@@ -77,6 +77,11 @@ type durable_snapshot =
       ; input_checkpoints : Keeper_checkpoint_ref.t list
       ; input_history : input_history
       }
+
+type native_history =
+  { execution_operation_id : Operation.Operation_id.t
+  ; calls : Keeper_native_call.history_ref list
+  }
 let database_schema = "masc.keeper_chat_operations.v3"
 let database_application_id = 0x4d4b4f50L
 let database_user_version = 3L
@@ -1168,6 +1173,36 @@ let read_batch_member_inputs db =
       in read [])
 ;;
 
+let inspect_file ~path inspect =
+  let inspect_existing () =
+    match Sqlite3.db_open ~mode:`READONLY path with
+    | exception Sqlite3.Error detail -> Error (Store_unavailable detail)
+    | db ->
+      let result =
+        try inspect db with
+        | Sqlite3.Error detail -> Error (Store_unavailable detail)
+      in
+      if close_db db then result
+      else Error (Store_unavailable "failed to close read-only operation store")
+  in
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_REG; _ } -> inspect_existing ()
+  | { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _ } ->
+    Error (Integrity_error "operation store path is not a regular file")
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    (* A journal without its database is damaged evidence, not an empty queue. *)
+    let rec absent_companions = function
+      | [] -> Ok None
+      | suffix :: rest ->
+        (match Unix.lstat (path ^ suffix) with
+         | _ -> Error (Integrity_error "operation journal exists without its database")
+         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> absent_companions rest
+         | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error)))
+    in absent_companions
+      [ Common.sqlite_journal_suffix; Common.sqlite_wal_suffix; Common.sqlite_shm_suffix ]
+  | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error))
+;;
+
 let inspect_store_with ~scope ~path =
   let inspect db =
     let* () = exec db ~operation:"begin read-only inspection" "BEGIN" in
@@ -1212,33 +1247,7 @@ let inspect_store_with ~scope ~path =
     let* () = exec db ~operation:"end read-only inspection" "COMMIT" in
     Ok (Some (chat_operations, batch_member_inputs, semantic_executions, input_checkpoints, input_history))
   in
-  let inspect_existing () =
-    match Sqlite3.db_open ~mode:`READONLY path with
-    | exception Sqlite3.Error detail -> Error (Store_unavailable detail)
-    | db ->
-      let result =
-        try inspect db with
-        | Sqlite3.Error detail -> Error (Store_unavailable detail)
-      in
-      if close_db db then result
-      else Error (Store_unavailable "failed to close read-only operation store")
-  in
-  match Unix.lstat path with
-  | { Unix.st_kind = Unix.S_REG; _ } -> inspect_existing ()
-  | { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _ } ->
-    Error (Integrity_error "operation store path is not a regular file")
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-    (* A journal without its database is damaged evidence, not an empty queue. *)
-    let rec absent_companions = function
-      | [] -> Ok None
-      | suffix :: rest ->
-        (match Unix.lstat (path ^ suffix) with
-         | _ -> Error (Integrity_error "operation journal exists without its database")
-         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> absent_companions rest
-         | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error)))
-    in absent_companions
-      [ Common.sqlite_journal_suffix; Common.sqlite_wal_suffix; Common.sqlite_shm_suffix ]
-  | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error))
+  inspect_file ~path inspect
 ;;
 
 let inspect_outstanding ~path =
@@ -2282,6 +2291,8 @@ let direct_execution_with_db db (operation : Operation.t) =
   match execution with
   | None -> Ok None
   | Some execution ->
+    let* () = if String.equal execution.Semantic.input_sha256 operation.execution_digest
+      then Ok () else Error (Integrity_error "direct continuation operation digest changed") in
     let* () = match operation.input, execution.Semantic.input with
       | Some input, Some saved when String.equal execution.input_sha256 operation.execution_digest ->
         let* input = canonical_json "operation continuation input" input in
@@ -2292,6 +2303,22 @@ let direct_execution_with_db db (operation : Operation.t) =
       | _ -> Error (Integrity_error "direct continuation input binding is not current") in
     Ok (Some execution)
 ;;
+
+let inspect_native_history ~path ~operation_id =
+  inspect_file ~path (fun db ->
+    let* () = exec db ~operation:"begin native history inspection" "BEGIN" in
+    let* () = validate_schema db in
+    let* requested = operation_or_unknown db operation_id in
+    let* operation = match requested.batch_membership with
+      | Some member when not (Id.equal member.execution_id operation_id) ->
+        operation_or_unknown db member.execution_id
+      | Some _ | None -> Ok requested in
+    let* execution = direct_execution_with_db db operation in
+    let calls = match execution with
+      | None -> []
+      | Some execution -> execution.Semantic.native_calls in
+    let* () = exec db ~operation:"end native history inspection" "COMMIT" in
+    Ok (Some {execution_operation_id=operation.operation_id; calls}))
 
 let pending_retry = function
   | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Runtime_retry continuation; _ }; _ } -> Some continuation

@@ -116,6 +116,42 @@ let projection_events projection =
     if page.has_more then read_pages page.next_cursor acc else List.rev acc in
   read_pages (Projection.beginning_cursor projection) []
 
+let check_history_redaction (event : Projection.event) =
+  let original = Server_dashboard_http_keeper_execution_history.event_json
+      ~redact_text:Fun.id ~redact_json:Fun.id event in
+  let masked = Server_dashboard_http_keeper_execution_history.event_json
+      ~redact_text:(fun _ -> "[REDACTED]") ~redact_json:(fun _ -> `String "[REDACTED]") event in
+  let member = Yojson.Safe.Util.member in
+  check (of_pp Yojson.Safe.pp) "redaction preserves the canonical event identity"
+    (`String (Projection.Event_id.to_string event.event_id)) (member "event_id" masked);
+  let payload = member "payload" masked in
+  let original_payload = member "payload" original in
+  let same_fields label fields before after = List.iter (fun key ->
+    check (of_pp Yojson.Safe.pp) (label ^ " " ^ key) (member key before) (member key after)) fields in
+  match event.payload with
+  | Projection.Node_opened _ ->
+    same_fields "node protocol survives masking"
+      ["kind"; "ordinal"; "block_kind"; "provider_tool_use_id"; "schedule"; "completion"]
+      (member "node" original_payload) (member "node" payload)
+  | Node_closed _ ->
+    same_fields "terminal protocol survives masking" ["kind"; "failure_kind"]
+      (member "terminal" original_payload) (member "terminal" payload)
+  | Node_updated {update; _} ->
+    (match update with
+     | Projection.Output_snapshot _ | Tool_input_snapshot _ | Tool_result _ ->
+       let before = member "data" original_payload in
+       let after = member "data" payload in
+       same_fields "typed content protocol survives masking"
+         ["type"; "id"; "tool_use_id"; "is_error"] before after;
+       let source_type json = match member "source" json with
+         | `Assoc fields -> List.assoc "type" fields
+         | `Null -> `Null
+         | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> fail "invalid typed media source" in
+       check (of_pp Yojson.Safe.pp) "typed media source survives masking"
+         (source_type before) (source_type after)
+     | Turn_ready _ | Checkpoint_snapshot _ | Provider_event _ | Provider_request_snapshot _
+     | Provider_response_snapshot _ | Output_delta _ | Tool_input_delta _ | Tool_progress _ -> ())
+
 let check_original_input (checkpoint : Agent_core.Checkpoint.t) =
   let original = List.filter (fun (message : Agent_core.Types.message) ->
     message.role = Agent_core.Types.User && Agent_core.Types.text_of_content message.content = goal)
@@ -366,6 +402,16 @@ is-default = true
          (target_results checkpoint = [proof.canonical_result]));
     check_repetition checkpoint;
     check_effect_counts root;
+    if empty_terminal then (
+      let runtime = Runtime_agent_execution_runtime.get () |> Option.get in
+      let dir = Eio.Path.(env#fs / session_dir / "native-executions" / terminal_call.call_id) in
+      let projection = Agent_core.Agent.open_execution_projection ~runtime ~dir terminal_call.locator
+        |> require "open completed call before Owner settlement" in
+      let events = projection_events projection in
+      List.iter check_history_redaction events;
+      let events = List.map
+          (Server_dashboard_http_keeper_execution_history.event_json ~redact_text:Fun.id ~redact_json:Fun.id) events in
+      write (Filename.concat root "history-before-settlement.json") (Yojson.Safe.to_string (`List events)));
     if child then Unix._exit (exit_code cut);
     Owner.Operation_succeeded {outcome_ref="real-ingress-native-recovered"}
   in
@@ -437,6 +483,28 @@ let test_restart cut () =
     check string "the child and parent used an unchanged executable" executable_before executable_after;
     emit_evidence ~root ~cut ~executable_sha256:executable_after ~article_rows ~target_tool_log_rows)
 
+let read_completed_history_in_new_process root =
+  Eio_main.run @@ fun env -> Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs env#fs;
+  Runtime_agent_execution_runtime.initialize ~sw ~domain_mgr:env#domain_mgr ~domain_count:1
+    |> require "initialize observation runtime";
+  let page = Keeper_native_execution_history.list_calls ~base_path:root ~keeper_name ~operation_id
+      ~after_call_id:None ~limit:1 |> require "list completed calls without an Owner" in
+  let call = match page.calls with
+    | [call] -> call | _ -> fail "completed message has no exact native call" in
+  let rec read_pages after through acc =
+    let result = Keeper_native_execution_history.read_page ~base_path:root ~keeper_name ~operation_id
+        ~call_id:call.call_id ~after ~through ~limit:2 |> require "read completed Core page" in
+    let page = result.page in
+    let events = List.map (Server_dashboard_http_keeper_execution_history.event_json ~redact_text:Fun.id ~redact_json:Fun.id) page.events in
+    let acc = List.rev_append events acc in
+    if page.has_more then read_pages (Some page.next_cursor) (Some page.high_watermark) acc
+    else List.rev acc in
+  let events = read_pages None None [] in
+  let expected = read (Filename.concat root "history-before-settlement.json") |> Yojson.Safe.from_string in
+  check bool "new process reads identical occurrence, parent, topology and content observations" true
+    (Yojson.Safe.equal expected (`List events))
+
 let test_empty_terminal_completes_message_without_replay () =
   let root = Filename.temp_dir "keeper-ingress-empty-terminal-" "" in
   Fun.protect ~finally:(fun () ->
@@ -447,6 +515,16 @@ let test_empty_terminal_completes_message_without_replay () =
     check int "one admitted message execution" 1 (count root "ingress");
     check int "one durable tool effect" 1 article_rows;
     check int "one durable target tool log row" 1 target_tool_log_rows;
+    Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      let process = Eio.Process.spawn ~sw env#process_mgr
+          [Sys.executable_name; "--read-completed-native-history"; root] in
+      match Eio.Process.await process with
+      | `Exited 0 -> ()
+      | `Exited code -> failf "completed history observer exited %d" code
+      | `Signaled signal -> failf "completed history observer died from signal %d" signal));
+    check int "history observation did not call the provider" 3 (count root "provider");
+    check int "history observation did not install an executor" 1 (count root "ingress");
+    check_effect_counts root;
     let config = Workspace.default_config root in
     let path = Keeper_chat_operation_store.path_for_keeper
         ~keepers_runtime_dir:(Workspace.keepers_runtime_dir config) ~keeper_name in
@@ -463,6 +541,7 @@ let test_empty_terminal_completes_message_without_replay () =
       check bool "original caller identity survives settlement" true (operation.source = source)))
 
 let () = match Array.to_list Sys.argv with
+  | [_; "--read-completed-native-history"; root] -> read_completed_history_in_new_process root
   | [_; "--ingress-native-child"; "settled"; root] -> ignore (run_phase ~child:true ~cut:Settled_result root)
   | [_; "--ingress-native-child"; "terminal"; root] -> ignore (run_phase ~child:true ~cut:Returned_turn root)
   | _ -> run "Keeper direct ingress native restart" ["real ingress", [

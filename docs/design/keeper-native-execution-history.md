@@ -49,9 +49,37 @@ see [the stored-state guide](../guides/DURABLE-STORE-HARD-CUT.md#keeper-chat-ope
 and [the #50583 fresh-state entry](../../changelog.d/50583.md).
 This source change does not reset or alter an installed workspace.
 
+## Read-only HTTP inspection
+
+Both endpoints require a token-bound Admin identity, including when ordinary
+operation reads allow anonymous local access:
+
+- `GET /api/v1/keepers/:name/chat/operations/:operation/native-calls`
+  accepts `limit` (1–200, default 50) and optional `after_call_id`. The response
+  contains `calls`, `execution_operation_id` and `next_after_call_id`. The latter
+  is present only when another call page remains. A foreign cursor is refused.
+- `GET /api/v1/keepers/:name/chat/operations/:operation/native-calls/:call/events`
+  accepts `limit` within the chat event API's page boundary, default 200, and
+  optional JSON `after` and `through` Core cursors. Feed `next_cursor` back as
+  `after` and `high_watermark` as `through` to keep one fixed committed prefix.
+
+The operation store is opened read-only. A batch member resolves through its
+stored execution leader. This does not require a running Keeper or install an
+Owner. Each call opens the original trace directory through Core's public
+projection API; current Keeper session metadata does not select its history.
+Missing, damaged and mismatched evidence produces an error, without a trajectory
+fallback or a cursor reset.
+
+`masc.native_execution_events.v1` presents every selected event with its exact
+event/run/correlation/node/parent/cause identities and source sequence. The
+presentation includes node kinds, lifecycle, output/tool deltas and snapshots.
+Content is redacted separately from protocol identities. Checkpoint and provider
+request/response bodies stay in their dedicated inspection APIs; this response
+is not a full raw-event export.
+
 ## Remaining product integration
 
-Issue [#25338](https://github.com/jeong-sik/masc/issues/25338) also tracks bounded,
-read-only association/Core projection reads and the actual Dashboard consumer.
-Retaining associations alone does not implement that HTTP or UI contract or
-prove completed-call journal reads after a process restart.
+Issue [#25338](https://github.com/jeong-sik/masc/issues/25338) also tracks the actual
+Dashboard consumer and broader execution-history coverage. Source and regression
+scenarios do not establish that the candidate was executed, installed or shown
+in a browser. The direct-operation endpoints do not index unbound calls.

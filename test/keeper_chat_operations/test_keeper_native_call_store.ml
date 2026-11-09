@@ -141,11 +141,38 @@ let test_completed_history_keeps_every_call_after_reopen () = with_store @@ fun 
     (Native.equal_state Native.No_native_call (read reopened));
   check bool "completed operation is not dispatched after restart" true
     (Option.is_none (Store.claim_next reopened ~now:6. |> ok));
+  (match Store.inspect_native_history ~path ~operation_id |> ok with
+   | Some history -> check bool "read-only history has the same settled associations" true
+       (List.equal Native.equal_history_ref expected history.calls)
+   | None -> fail "completed operation store disappeared");
   match Store.semantic_get reopened (Keeper_execution_scope_id.direct_operation operation_id) with
   | Ok (Some execution) ->
     check int "historical calls do not pin checkpoint payloads" 0
       (List.length (Keeper_semantic_execution.checkpoint_references execution))
   | Ok None | Error _ -> fail "completed execution is unavailable"
+
+let test_batch_history_uses_the_stored_execution_leader () =
+  let directory = Filename.temp_dir "native-batch-history" "" in
+  let path = Filename.concat directory Store.database_file in
+  let store = Store.open_or_create ~path |> ok in
+  Fun.protect ~finally:(fun () -> ignore (Store.close store : (unit, Store.error) result)) (fun () ->
+    let member = Operation.Operation_id.of_string "native-batch-member" |> value in
+    submit store operation_id "first";
+    submit store member "second";
+    let batch _ _ = Ok (Some {Store.members=[operation_id; member]; input=`Assoc ["text", `String "combined"]}) in
+    let operation = match Store.claim_next ~batch store ~now:2. |> ok with
+      | Some operation -> operation | None -> fail "batch was not claimed" in
+    let call = make_call operation in
+    bind store operation call;
+    terminal store operation Agent.Retire;
+    ignore (Store.succeed_running store ~now:4. ~operation_id ~outcome_ref:"batch-accepted" |> ok);
+    match Store.inspect_native_history ~path ~operation_id:member |> ok with
+    | Some history ->
+      check bool "member resolves to the original execution" true
+        (Operation.Operation_id.equal operation_id history.execution_operation_id);
+      check bool "member gets the leader's call, not an empty sibling history" true
+        (List.equal Native.equal_history_ref [Native.history_ref call] history.calls)
+    | None -> fail "batch store disappeared")
 
 let test_history_uses_the_native_bind_transaction () = with_store @@ fun _path store operation ->
   let call = make_call operation in
@@ -863,6 +890,7 @@ let () = run "native-call-owner-store" ["input ownership", [
   test_case "openers preserve fresh and current mixed native records" `Quick test_openers_accept_fresh_and_current_native_records;
   test_case "openers and preflight refuse mixed unsupported records without writes" `Quick test_openers_refuse_mixed_unsupported_records;
   test_case "openers and preflight identify a mismatched settled index" `Quick test_openers_refuse_semantic_index_mismatch;
+  test_case "read-only history resolves the stored batch execution" `Quick test_batch_history_uses_the_stored_execution_leader;
   test_case "completed history keeps every call and original trace after reopen" `Quick test_completed_history_keeps_every_call_after_reopen;
   test_case "history shares native Bind commit and rejects retired reactivation" `Quick test_history_uses_the_native_bind_transaction;
   test_case "active restart preserves exact admission" `Quick test_active_restart_preserves_seed_and_exact_identity;

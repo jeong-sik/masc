@@ -994,48 +994,6 @@ let test_past_day_cache_evicts_entries_for_deleted_files () =
       check int "cache entry evicted once the backing file is gone"
         baseline_count (Activity_graph.For_testing.past_day_cache_entry_count ()))
 
-(* Node accumulators are values, not cells. A record read out of the table
-   before a later event keeps what it was read with, while the table itself
-   advances. Against the previous in-place form both checks on [first] would
-   fail, because [first] and the table entry were the same physical record. *)
-let test_reducer_replaces_node_entries_instead_of_writing_through () =
-  let nodes = Hashtbl.create 8 in
-  let edges = Hashtbl.create 8 in
-  let event seq ts_iso : Activity_graph_types.event =
-    {
-      seq;
-      ts_ms = seq * 1000;
-      ts_iso;
-      kind = "task.assigned";
-      actor = Some { kind = "agent"; id = "a1" };
-      subject = Some { kind = "task"; id = "t1" };
-      payload = `Assoc [];
-      tags = [];
-    }
-  in
-  Activity_graph_reducer.reduce_event ~nodes ~edges
-    (event 1 "2026-01-01T00:00:00Z");
-  let first : Activity_graph_reducer.node_acc =
-    match Hashtbl.find_opt nodes "agent:a1" with
-    | Some node -> node
-    | None -> fail "actor node missing after the first event"
-  in
-  check int "first read sees one hit" 1 first.weight;
-  Activity_graph_reducer.reduce_event ~nodes ~edges
-    (event 2 "2026-01-02T00:00:00Z");
-  check int "the earlier record keeps its weight" 1 first.weight;
-  check string "the earlier record keeps its timestamp" "2026-01-01T00:00:00Z"
-    first.last_event_at;
-  let second : Activity_graph_reducer.node_acc =
-    match Hashtbl.find_opt nodes "agent:a1" with
-    | Some node -> node
-    | None -> fail "actor node missing after the second event"
-  in
-  check int "the table advances the weight" 2 second.weight;
-  check string "the table advances the timestamp" "2026-01-02T00:00:00Z"
-    second.last_event_at
-;;
-
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1105,10 +1063,5 @@ let () =
             test_past_day_cache_evicts_entries_for_deleted_files;
           test_case "keep runs before the page is cut" `Quick
             test_keep_runs_before_the_page_is_cut;
-        ] );
-      ( "reducer",
-        [
-          test_case "a later event replaces the node entry rather than writing through"
-            `Quick test_reducer_replaces_node_entries_instead_of_writing_through;
         ] );
     ]

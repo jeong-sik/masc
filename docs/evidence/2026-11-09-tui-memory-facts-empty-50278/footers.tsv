@@ -1,0 +1,7 @@
+size	build	footer
+80x24	before	ACTION NEEDED 3  j/k:move  Enter:detail  Esc:close / clear  q:quit  …?
+80x24	after	ACTION NEEDED 3  c / C:category  s:sort  Esc:close / clear  q:quit  …?
+100x30	before	ACTION NEEDED 3  j/k:move  Home/End:top/bottom  Enter:detail  Esc:close / clear  q:quit  …?
+100x30	after	ACTION NEEDED 3 · keeper_fleet_safety:no_executable_keeper_fibers  Esc:close / clear  q:quit  …?
+120x34	before	ACTION NEEDED 3 · keeper_fleet_safety:no_executable_keeper_fibers  Enter:detail  Esc:close / clear  q:quit  …?
+120x34	after	ACTION NEEDED 3 · keeper_fleet_safety:no_executable_keeper_fibers  c / C:category  Esc:close / clear  q:quit  …?

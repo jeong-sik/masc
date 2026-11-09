@@ -10,8 +10,12 @@ let unread_glyph = "-"
    its count in the summary, and the sentence of its last failure. *)
 let failing_glyph = "\xe2\x97\x82" (* ◂ *)
 
+(* The filled dot: a healthy keeper that has turned, a turn under way, and the
+   now cell of the views' header. *)
+let filled_dot = "\xe2\x97\x8f" (* ● *)
+
 let health_glyph : Reading.keeper_health_reading -> string = function
-  | Reading.Health_running -> "\xe2\x97\x8f" (* ● filled: keepalive running, has turned *)
+  | Reading.Health_running -> filled_dot (* keepalive running, has turned *)
   | Reading.Health_idle -> "\xc2\xb7" (* · small: keepalive running, no turn yet *)
   | Reading.Health_failing -> "!" (* keepalive running, its turns failing *)
   | Reading.Health_offline -> "\xc3\x97" (* × gone *)
@@ -27,7 +31,7 @@ let activity_glyph : Masc_tui_keeper_list_model.activity -> string = function
   | Attempt_failed -> "\xe2\x9c\x97" (* ✗: an attempt of the open turn failed *)
   | Question -> "?"
   | Confirmation | Verifying -> "\xe2\x97\x87" (* ◇ *)
-  | Preparing | Running -> "\xe2\x97\x8f" (* ●; the list substitutes its animated mark *)
+  | Preparing | Running -> filled_dot (* the list substitutes its animated mark *)
   | Streaming -> ">"
   | Async_working _ -> "&"
   | Deferred -> "\xe2\x97\x8c" (* ◌ *)
@@ -136,6 +140,15 @@ let pulse_rested_mark = badge_glyph Masc_tui_keeper_list_model.Badge_quota_spent
 let pulse_failed_mark = attempt_glyph
 let pulse_quiet_mark = health_glyph Reading.Health_idle
 
+(* The header of the views' axis row (RFC-0515 §2.4): before, now and next.
+   Before takes the mark of the failure sentence, which also looks back. *)
+let axis_before_glyph = failing_glyph
+let axis_now_glyph = filled_dot
+let axis_next_glyph = "\xe2\x96\xb9" (* ▹ *)
+let pulse_header = Printf.sprintf "%s %dh" axis_before_glyph pulse_hours
+let axis_now_header = axis_now_glyph ^ " now"
+let axis_next_header = axis_next_glyph ^ " next"
+
 let column_legend =
   let letters letter values = String.concat "/" (List.map letter values) in
   let words word values = String.concat " / " (List.map word values) in
@@ -152,9 +165,15 @@ let column_legend =
     , "time since it last moved: the open turn's latest update (its start before it \
        reports one), else the later of its last turn and the start of its wait" )
   ; "LIFECYCLE", "the keeper process"
+  ; ( String.concat " " [ pulse_header; axis_now_header; axis_next_header ]
+    , "every view but the list draws a keeper on one axis row: its turn pulse, its NOW \
+       cell, then what comes next -- what it waits on a person for, the next scheduled \
+       run, the next dispatch path and the librarian lag. With two lines only a failing \
+       keeper adds a second line" )
   ; ( failing_glyph
-    , "a failing keeper's last failure, in place of its runtime or first in DETAIL: \
-       how long ago · cause · the runtime that ended it · candidates tried" )
+    , "a failing keeper's last failure: how long ago · cause · the runtime that ended it \
+       · candidates tried. The list draws it in place of its runtime or first in DETAIL, \
+       the views on a failing keeper's second line" )
   ; ( failing_since_word
     , Printf.sprintf
         "how long the keeper has been in the failing phase; %s when the server recorded \
@@ -164,16 +183,24 @@ let column_legend =
     , Printf.sprintf
         "autonomous turn results of the last %d clock hours, one mark per hour, newest \
          on the right: %s; chat turns are not counted, and an hour from before the \
-         server's record of the keeper reads %s (Detailed second row)"
+         server's record of the keeper reads %s (Detailed second row, and %s in the views)"
         pulse_hours
         (String.concat " / " (List.map (fun (mark, word) -> mark ^ " " ^ word) pulse_marks))
-        unknown_mark )
+        unknown_mark pulse_header )
   ; "Mode " ^ letters activation_letter activations, words activation_word activations
   ; "S " ^ letters sandbox_letter sandboxes, "sandbox: " ^ words sandbox_word sandboxes
   ; ( "쉬는 중"
-    , "resting path: relative duration (제공자 stated / 상한 bounded); ▹ prefixes next candidate after turn failure" )
-  ; badge_glyph Badge_schedule, "next scheduled run or hold status (Detailed second row)"
-  ; "mem · lag · stale", "keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second row)"
+    , Printf.sprintf
+        "resting path: relative duration (제공자 stated / 상한 bounded); in DETAIL %s prefixes next candidate after turn failure"
+        axis_next_glyph )
+  ; ( badge_glyph Badge_schedule
+    , Printf.sprintf "next scheduled run or hold status (Detailed second row, and %s in the views)"
+        axis_next_header )
+  ; ( "mem · lag · stale"
+    , Printf.sprintf
+        "keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second \
+         row, and its lag in %s in the views)"
+        axis_next_header )
   ; Masc_tui_keeper_age_ladder.cell_label, Masc_tui_keeper_age_ladder.legend
   ; "사람 몫 / 효과 확인 / 분류 안 됨", "requires human operator action, effect review, or unmapped fault (NOW column)"
   ]

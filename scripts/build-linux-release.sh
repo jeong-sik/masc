@@ -67,6 +67,7 @@ release_binaries=(
   bin/masc_tui.exe
   bin/deployment_preflight_helper.exe
   bin/masc_exec_ssh_bootstrap.exe
+  bin/masc_antigravity_path_hook.exe
 )
 
 # Run inside the container with --run-contract-test, not exported and run on
@@ -215,13 +216,13 @@ tar -C "$repo_root" --null -T "$tracked" -cf - \
 echo "== pinned SQLite at the existing glibc floor"
 docker exec -u root "$container" bash /src/scripts/build-release-sqlite.sh "${jobs:-2}"
 
-# The repo supports exactly OCaml 5.5.1; the image's default switch is not
+# The repo supports exactly OCaml 5.5.2; the image's default switch is not
 # guaranteed to be that patch release.
-echo "== opam switch 5.5.1"
+echo "== opam switch 5.5.2"
 docker exec "$container" bash -lc '
   set -e
-  opam switch list-available ocaml-base-compiler | grep -q 5.5.1 || opam update -y
-  opam switch create masc 5.5.1 -y
+  opam switch list-available ocaml-base-compiler | grep -q 5.5.2 || opam update -y
+  opam switch create masc 5.5.2 -y
 '
 
 echo "== pin private dependencies"

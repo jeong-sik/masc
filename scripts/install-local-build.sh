@@ -97,7 +97,8 @@ done
 # CI artifacts use the same target list as a default local install. Keep this
 # read-only query before the transaction lock and every workspace operation.
 build_targets=(./bin/main_eio.exe ./bin/masc_tui.exe
-  ./bin/deployment_preflight_helper.exe ./bin/masc_exec_ssh_bootstrap.exe)
+  ./bin/deployment_preflight_helper.exe ./bin/masc_exec_ssh_bootstrap.exe
+  ./bin/masc_antigravity_path_hook.exe)
 if [ "$browser_addon" = true ]; then
   for program in "${browser_addon_programs[@]}"; do
     build_targets+=("./bin/$program.exe")
@@ -155,6 +156,10 @@ fi
 preflight_helper="$build_dir/deployment_preflight_helper.exe"
 if [ ! -x "$build_dir/masc_exec_ssh_bootstrap.exe" ]; then
   echo "install-local-build: missing executable $build_dir/masc_exec_ssh_bootstrap.exe; nothing installed" >&2
+  exit 1
+fi
+if [ ! -x "$build_dir/masc_antigravity_path_hook.exe" ]; then
+  echo "install-local-build: missing executable $build_dir/masc_antigravity_path_hook.exe; nothing installed" >&2
   exit 1
 fi
 if [ "$skip_build" = true ]; then
@@ -432,6 +437,7 @@ refresh_guest_shim
 mkdir -p "$prefix"
 install -m 755 "$build_dir/main_eio.exe" "$prefix/masc"
 install -m 755 "$build_dir/masc_tui.exe" "$prefix/masc-tui"
+install -m 755 "$build_dir/masc_antigravity_path_hook.exe" "$prefix/masc-antigravity-path-hook"
 if [ "$browser_addon" = true ]; then
   for program in "${browser_addon_programs[@]}"; do
     install -m 755 "$build_dir/$program.exe" "$prefix/${program//_/-}"

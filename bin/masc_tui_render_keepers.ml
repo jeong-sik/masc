@@ -2788,17 +2788,17 @@ let render_keeper_axes (state : state) =
           let world = Masc_tui_keeper_world.row_cells ~view:state.keeper_list_view
               ~health_error:state.memory_health_error state.memory_health
               (Masc_tui_memory_world.reading state.memory_world) in
-          let text = grid_line grid
+          let text = (grid_line grid
             { gutter = Theme.info () ^ "▌ ■ " ^ Ansi.reset
             ; name = fit_width "world · shared" grid.name_cells
             ; pulse = (match world.pulse with
                 | Masc_tui_keeper_world.Ledger_and_briefing ->
                     fit_width "ledger + briefing" grid.side_cells
                 | Masc_tui_keeper_world.Fact_ages bins -> grid_age_ladder_reading grid bins)
-            ; now_cell = fit_width world.now_cell Grid.now_cells
+            ; now_cell = still_row (fit_width world.now_cell Grid.now_cells)
             ; strip = fit_width world.strip (Grid.strip_cells grid)
             ; due = fit_width world.due Grid.due_cells
-            ; right = Message_layout.pad_left world.right grid.mem_cells } in
+            ; right = Message_layout.pad_left world.right grid.mem_cells }).text in
           let text = pressable Press_keeper_world (fit_width text inner) in
           if keeper_entry_selected stop entry then
             box_line_selected buf cols (Masc_tui_theme.strip_sgr text)

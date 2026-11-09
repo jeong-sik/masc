@@ -4447,7 +4447,8 @@
  masc_tui_composer_projection
  masc_tui_render_prim
  masc_tui_theme
- masc_tui_types))
+ masc_tui_types
+ mtime.clock.os))
 
 (test
  (name test_tui_credential)

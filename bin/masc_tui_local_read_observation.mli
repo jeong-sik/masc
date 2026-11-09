@@ -61,3 +61,13 @@ val pending : t -> pending
     an unstarted caller remains [Read_not_started]. These observations imply
     neither a queued UI message nor physical worker/registration release.
     No elapsed-time inference. *)
+val slow_after_ns : int64
+(** One second in [Mtime_clock.elapsed_ns] nanoseconds: the display gate
+    below. *)
+val slow_pending : now_ns:int64 -> t -> pending option
+(** [Some pending] once the original request has been in flight for at least
+    [slow_after_ns]: both [now_ns] and [facts.requested_ns] are monotonic
+    [Mtime_clock.elapsed_ns] nanoseconds, like every other TUI age reading.
+    A younger read returns [None], so a fast poll never gains or loses a
+    display line. Pure projection of already-observed facts — no mutation,
+    no scheduling, and [pending] itself still infers no elapsed time. *)

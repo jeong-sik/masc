@@ -164,3 +164,12 @@ let pending t =
     else if Option.is_some f.io.worker_entered then Io_running
     else if Option.is_some f.io.submitted_ns then Io_queued
     else Awaiting_start
+
+(* The header note and the composer hint share this gate: a read shows its
+   stage only after it has been slow for a whole second, so a fast poll
+   never adds or removes a display line. *)
+let slow_after_ns = 1_000_000_000L
+
+let slow_pending ~now_ns t =
+  let age_ns = Int64.sub now_ns (facts t).requested_ns in
+  if Int64.compare age_ns slow_after_ns >= 0 then Some (pending t) else None

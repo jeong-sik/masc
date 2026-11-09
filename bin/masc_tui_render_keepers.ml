@@ -2626,7 +2626,9 @@ let render_keeper_axes (state : state) =
           ^ Terminal_text.single_line err ^ Ansi.reset)
    | None -> ());
 
-  Option.iter (fun note -> box_line buf cols (Theme.recede () ^ note ^ Ansi.reset))
+  (* The note already carries its own recede theme; wrapping it again would
+     stack identical SGR runs. *)
+  Option.iter (fun note -> box_line buf cols note)
     (local_source_pending_note state Local_keepers);
 
   let chrome_rows = count_frame_lines buf in

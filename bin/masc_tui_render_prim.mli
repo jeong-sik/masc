@@ -23,8 +23,11 @@ module Span = Masc_tui_span
 module Status = Masc.Keeper_status_runtime
 
 val local_source_pending_note : state -> local_read_source -> string option
-(** The original local read's pending phase for the Work and Keeper surfaces.
-    [None] means that this source has no pending read. *)
+(** The original local read's pending phase for the Work and Keeper surfaces,
+    shown only once the read has been in flight for at least one second so
+    fast polls never gain or drop the header line. One themed recede line
+    naming the stage with elapsed whole seconds. [None] means that this
+    source has no slow pending read. *)
 
 val runtime_assignment_label : runtime_assignment -> string
 (** The assignment shown in the runtime picker and Runtime Stats value. *)

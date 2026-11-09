@@ -12117,6 +12117,27 @@ let local_source_pending state source =
     Option.map Local_read_observation.pending (local_source_observation state source)
   else None
 
+(* The Keeper/Work header note and the composer Metadata hint share this
+   display gate: a read younger than one second shows nothing, so fast polls
+   never gain or drop a line. The age is monotonic nanoseconds since the
+   original request ([Mtime_clock.elapsed_ns], like every other TUI age),
+   and the phase travels with it so the caller renders one stable line per
+   slow read. *)
+let local_source_slow_pending state source =
+  if Local_read_order.in_flight (local_source_order state source) then
+    match local_source_observation state source with
+    | None -> None
+    | Some observation -> (
+        let now_ns = Mtime_clock.elapsed_ns () in
+        match Local_read_observation.slow_pending ~now_ns observation with
+        | Some phase ->
+            Some
+              ( phase
+              , Int64.sub now_ns
+                  (Local_read_observation.facts observation).requested_ns )
+        | None -> None)
+  else None
+
 let local_source_cancellation (state : state) = function
   | Local_keepers -> state.local_keeper_read_cancel
   | Local_work -> state.local_work_read_cancel

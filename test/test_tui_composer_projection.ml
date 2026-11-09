@@ -120,6 +120,65 @@ let test_idle_recipient_owns_its_draft () =
   check bool "send stays with focused owner" true
     (Projection.classify_key state Composer.send_key = Composer.Send other.k_name)
 
+(* The one-second display gate. A fresh poll gains no pending hint and no
+   header line; a slow read shows one stable line on both surfaces. The
+   pure boundary is pinned on the observation module without the clock. *)
+let test_observation_gate_boundary () =
+  let open Tui_types.Local_read_observation in
+  let observation =
+    create ~requested_ns:0L
+      { source = Tui_types.Local_keepers
+      ; intent = Poll
+      ; request_id = 1
+      ; demand_revision = "rev"
+      ; workspace_revision = 0
+      ; workspace_fingerprint = None }
+  in
+  check bool "just under a second stays hidden" true
+    (Option.is_none (slow_pending ~now_ns:999_999_999L observation));
+  check bool "one second shows the stage" true
+    (Option.is_some (slow_pending ~now_ns:1_000_000_000L observation))
+
+let test_young_read_hides_the_pending_hint () =
+  let now_ns = Mtime_clock.elapsed_ns () in
+  let state = state () in
+  let begun =
+    Tui_types.begin_local_workspace_read state
+      ~intent:Tui_types.Snapshot_read.Poll
+      ~source:Tui_types.Local_keepers ~base_path:state.local_base_path
+      ~started_ns:now_ns
+  in
+  check bool "young read begins" true (Option.is_some begun);
+  match (Projection.of_state state).reading with
+  | Composer.Metadata { pending; _ } ->
+      check bool "fresh poll shows no pending hint" true
+        (Option.is_none pending);
+      check bool "fresh poll shows no header note" true
+        (Option.is_none
+           (Masc_tui_render_prim.local_source_pending_note state
+              Tui_types.Local_keepers))
+  | _ -> fail "expected Metadata reading"
+
+let test_slow_read_shows_one_stable_line () =
+  let now_ns = Mtime_clock.elapsed_ns () in
+  let state = state () in
+  let begun =
+    Tui_types.begin_local_workspace_read state
+      ~intent:Tui_types.Snapshot_read.Poll
+      ~source:Tui_types.Local_keepers ~base_path:state.local_base_path
+      ~started_ns:(Int64.sub now_ns (Int64.mul 2L 1_000_000_000L))
+  in
+  check bool "slow read begins" true (Option.is_some begun);
+  match (Projection.of_state state).reading with
+  | Composer.Metadata { pending; _ } ->
+      check bool "slow read shows pending" true (Option.is_some pending);
+      let note =
+        Masc_tui_render_prim.local_source_pending_note state
+          Tui_types.Local_keepers
+      in
+      check bool "slow read shows header note" true (Option.is_some note)
+  | _ -> fail "expected Metadata reading"
+
 let () =
   run "tui-composer-projection"
     [ ( "state projection"
@@ -133,5 +192,11 @@ let () =
             test_idle_recipient_owns_its_draft
         ; test_case "workspace loss withdraws queued message target" `Quick
             test_workspace_loss_withdraws_queued_message_target
+        ; test_case "observation gate boundary is one second" `Quick
+            test_observation_gate_boundary
+        ; test_case "one-second gate hides a fresh read" `Quick
+            test_young_read_hides_the_pending_hint
+        ; test_case "slow read shows one stable line" `Quick
+            test_slow_read_shows_one_stable_line
         ;] )
     ]

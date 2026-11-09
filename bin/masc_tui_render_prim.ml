@@ -42,23 +42,38 @@ module Status = Masc.Keeper_status_runtime
 module Keeper_chat_transcript = Masc_tui_keeper_chat_transcript
 module Keeper_control = Masc_tui_keeper_control
 
+(* One themed line per slow local read, shared by the Work and Keeper
+   surfaces. Reads younger than one second show nothing at all, so the
+   header never gains or drops a line poll to poll; the stage word and the
+   elapsed whole seconds only appear once the read has earned them. *)
 let local_source_pending_note state source =
-  Option.map (fun phase ->
-    let step=match phase with
-      | Local_read_observation.Awaiting_start -> "starting read"
-      | Io_queued -> "waiting for I/O worker"
-      | Io_running -> "reading local files"
-      | Io_returning -> "returning I/O result"
-      | Preparing -> "preparing snapshot"
-      | Comparison_queued -> "waiting for Task comparison worker"
-      | Comparison_running -> "comparing Task values"
-      | Comparison_returning -> "returning Task comparison"
-      | Awaiting_ui -> "result awaiting state application"
-      | Local_read_observation.Read_failed Raised -> "read failed"
-      | Local_read_observation.Read_failed Interrupted -> "read interrupted"
-      | Read_not_started -> "read not started" in
-    let name=match source with Local_keepers -> "Keeper metadata" | Local_work -> "Work" in
-    "  " ^ name ^ " · " ^ step) (local_source_pending state source)
+  Option.map
+    (fun (phase, age_ns) ->
+      let text ko en = ui_text state ~ko ~en in
+      let step =
+        match phase with
+        | Local_read_observation.Awaiting_start -> text "읽기 시작 대기" "starting read"
+        | Io_queued -> text "I/O 작업자 대기" "waiting for I/O worker"
+        | Io_running -> text "로컬 파일 읽는 중" "reading local files"
+        | Io_returning -> text "I/O 결과 돌려주는 중" "returning I/O result"
+        | Preparing -> text "스냅샷 준비 중" "preparing snapshot"
+        | Comparison_queued -> text "Task 비교 작업자 대기" "waiting for Task comparison worker"
+        | Comparison_running -> text "Task 값 비교 중" "comparing Task values"
+        | Comparison_returning -> text "Task 비교 결과 돌려주는 중" "returning Task comparison"
+        | Awaiting_ui -> text "상태 적용 대기" "result awaiting state application"
+        | Local_read_observation.Read_failed Raised -> text "읽기 실패" "read failed"
+        | Local_read_observation.Read_failed Interrupted -> text "읽기 중단됨" "read interrupted"
+        | Read_not_started -> text "읽기 시작되지 않음" "read not started"
+      in
+      let name =
+        match source with
+        | Local_keepers -> text "Keeper 메타데이터" "Keeper metadata"
+        | Local_work -> text "작업" "Work"
+      in
+      let secs = Int64.to_string (Int64.div age_ns 1_000_000_000L) in
+      Theme.recede () ^ "  " ^ name ^ " · " ^ step ^ " · " ^ secs
+      ^ text "초째" "s" ^ Ansi.reset)
+    (local_source_slow_pending state source)
 module Markdown = Masc_tui_markdown
 module Message_layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows

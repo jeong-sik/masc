@@ -1,0 +1,9 @@
+{
+  "base_head": "20f5de3e695cd82e446c7f037fe2ec827c7dfbf8",
+  "files": {
+    "lib/keeper/keeper_autonomous_turn_source.mli": "f412d1716814bc972e1c39c47d7992e9e1460da676aa181ceffe242ec985bb61",
+    "lib/keeper/keeper_autonomous_turn_source.ml": "0cc1476d84c6be945f474d3aab0bed39af8642185d24057cf498aee80a138f17",
+    "test/test_keeper_autonomous_turn_source.ml": "4fedd4b9c01054c518c7edde1a30900cd5764a52ad4eabd84fe1516d2c21c782"
+  },
+  "patch_sha256": "22473d26bfd1d11fb17e6813e619e16fdc9c9ee286fd8f707772785ff1673c12"
+}

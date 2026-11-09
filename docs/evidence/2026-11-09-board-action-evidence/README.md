@@ -49,3 +49,13 @@ The later inline child repair has its own `inline-association-source.json` and
 The authored real bundle → Board → committed row → TurnRecord regression covers
 foreign identities, missing log commits and sealing. It was not executed and is
 not part of the browser evidence above. Async observation paths are unchanged.
+
+Later source responses retain the public `Masc_board_handlers` imports in both
+Board evidence codec files, expose MCP recording confirmation separately from
+Board effect success, and exclude explicit composition child rows from the
+top-level raw-transcript invocation slots. Their source and parse receipts are
+retained separately. `combined-parse-only.json` records all 38 changed OCaml
+files at that combined source; it remains parsing-only with 5.5.1. The five
+actual-MCP regression registrations (including post-append uncertainty) and the
+transcript slot regression were authored, not executed. The earlier browser
+source files remain byte-identical; these responses do not enlarge its proof.

@@ -1,0 +1,31 @@
+{
+  "recorded_at": "2026-11-09T14:19:13.969673+00:00",
+  "head": "e8c36f2301dc8ba3cf8bb4e71b5a0b39b76a3c33",
+  "branch": "fix/26034-board-action-evidence",
+  "compiler": "5.5.1",
+  "target_compiler": "5.5.2",
+  "check": "ocamlc -stop-after parsing only",
+  "results": [
+    {
+      "file": "lib/mcp_server_eio_call_tool.mli",
+      "exit_code": 0,
+      "sha256": "a017f98f034af1ada9a1638cc30ff30f6ebb49dc671dacb4b5fae0700b6a1871"
+    },
+    {
+      "file": "lib/mcp_server_eio_call_tool.ml",
+      "exit_code": 0,
+      "sha256": "043eca1be3ce281c1453c5e8c9bb2e74ae066e4ad67675abfda09ca1cbc3b99e"
+    },
+    {
+      "file": "test/test_mcp_server_eio_call_tool.ml",
+      "exit_code": 0,
+      "sha256": "7f59802be3a570fead9560864eb3ffdb5bff4b42f5b83f986daa42877870ea15"
+    }
+  ],
+  "test_execution": "not run",
+  "typecheck_or_build": "not run",
+  "limits": [
+    "Installed compiler 5.5.1; required target 5.5.2 remains unverified.",
+    "No OCaml test execution, Dune, CI, runtime/model/config operations, Git commit or push."
+  ]
+}

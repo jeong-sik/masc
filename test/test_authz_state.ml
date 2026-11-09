@@ -1649,7 +1649,21 @@ let keeper_record ~author event =
   | Ok body -> record_by ~author K.Keeper body
 ;;
 
-let keeper_made ?(keeper_id = first_keeper) ~by () = Ke.Made { keeper_id; user_id = by }
+let first_policy = id_of_string Authz_types.Policy_id.of_string "policy-1"
+let second_policy = id_of_string Authz_types.Policy_id.of_string "policy-2"
+
+let fixture_turn_scope =
+  { Authz_types.Authorization_scope.runtimes = Authz_types.Runtime_scope.all
+  ; channels =
+      Authz_types.Channel_scope.only
+        (Authz_types.Channel.Set.of_list Authz_types.Channel.[ Autonomous; Direct ])
+  ; allowed_effects = Authz_types.Effect_scope.all
+  }
+;;
+
+let keeper_made ?(keeper_id = first_keeper) ?(policy_id = first_policy) ~by () =
+  Ke.Made { keeper_id; user_id = by; policy_id; turn_scope = fixture_turn_scope }
+;;
 
 let assigned ?(keeper_id = first_keeper) runtime_id = Ke.Assigned { keeper_id; runtime_id }
 
@@ -1674,15 +1688,42 @@ let test_keepers () =
     [ Authz_types.Keeper_id.to_string first_keeper, None ]
     (owned_keepers state user);
   Alcotest.(check int) "another person owns none" 0 (List.length (Authz_keeper.owned state bob));
+  (match Ke.to_body (keeper_made ~by:user ()) with
+   | Error _ -> Alcotest.fail "the made body was not built"
+   | Ok body ->
+     Alcotest.(check string)
+       "the made body on disk"
+       ({|{"event":"made","keeper_id":"|}
+        ^ Authz_types.Keeper_id.to_string first_keeper
+        ^ {|","user_id":"|}
+        ^ Authz_types.User_id.to_string user
+        ^ {|","policy_id":"policy-1","turn_scope":{"runtimes":"all","channels":["autonomous","direct"],"allowed_effects":"all"}}|})
+       (Authz_body.to_string body));
+  (match Ks.find state.S.keepers first_keeper with
+   | None -> Alcotest.fail "the Keeper is not in the state"
+   | Some keeper ->
+     Alcotest.(check string)
+       "its policy id"
+       "policy-1"
+       (Authz_types.Policy_id.to_string keeper.Ks.policy_id);
+     Alcotest.(check bool)
+       "its turn scope"
+       true
+       (Authz_types.Authorization_scope.equal fixture_turn_scope keeper.Ks.turn_scope));
   refused_as
     "made twice"
     state
-    (keeper_record ~author:(human user) (keeper_made ~by:user ()))
+    (keeper_record ~author:(human user) (keeper_made ~policy_id:second_policy ~by:user ()))
     (S.Keeper (Ks.Already_made first_keeper));
+  refused_as
+    "a policy id another Keeper named"
+    state
+    (keeper_record ~author:(human user) (keeper_made ~keeper_id:second_keeper ~by:user ()))
+    (S.Keeper (Ks.Policy_named_before first_policy));
   refused_as
     "made again by another"
     state
-    (keeper_record ~author:(human bob) (keeper_made ~by:bob ()))
+    (keeper_record ~author:(human bob) (keeper_made ~policy_id:second_policy ~by:bob ()))
     (S.Keeper (Ks.Already_made first_keeper));
   refused_as
     "an Admin makes one for another"
@@ -1732,7 +1773,9 @@ let test_keepers () =
                ; self_effects = fixture_self_effects
                }) )
       ; ( "a Keeper of the Admin"
-        , keeper_record ~author:(human bob) (keeper_made ~keeper_id:second_keeper ~by:bob ()) )
+        , keeper_record
+            ~author:(human bob)
+            (keeper_made ~keeper_id:second_keeper ~policy_id:second_policy ~by:bob ()) )
       ]
   in
   refused_as

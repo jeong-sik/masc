@@ -660,10 +660,17 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
      is made of. *)
   let door_answers = Option.value help_door
       ~default:(help_key_answers ~compact_viewport:false state) in
+  let help_hint = ui_text state ~ko:"?:도움말" ~en:Masc_tui_footer.help_hint_item in
   let hints =
     if not state.hints_visible then
-      if Option.value help_door ~default:true then Masc_tui_footer.help_hint_item else ""
-    else if door_answers then Masc_tui_footer.ensure_help_item hints
+      if Option.value help_door ~default:true then help_hint else ""
+    else if door_answers then
+      (* Inspect the key, as the shared fitter does, rather than its label. *)
+      if List.exists (fun item ->
+           match Masc_tui_footer.item_key item with
+           | Some key -> List.mem "?" (Masc_tui_footer.key_atoms key)
+           | None -> false) (Masc_tui_footer.split_on_double_space hints)
+      then hints else hints ^ "  " ^ help_hint
     else hints
   in
   (* The keys this frame announces, for the navigation trace (RFC-0485). *)
@@ -696,7 +703,9 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
            && Masc_tui_types.image_reading_is_current state pending
            && not state.msx_open ->
         Some (Terminal_text.single_line
-          (Printf.sprintf "Loading image (any key cancels): %s" pending.sir_name))
+          (Printf.sprintf (ui_text state
+             ~ko:"이미지 조회 중 (아무 키로 취소): %s"
+             ~en:"Loading image (any key cancels): %s") pending.sir_name))
     | Some _ | None -> None
   in
   let current_quit = current_quit_confirmation state ~now:(Unix.gettimeofday ()) in
@@ -727,12 +736,12 @@ let footer_line ?help_door ?(status = []) ?position ?(recovery_in_slot = None)
             | Some confirmation ->
                 if Option.exists (Masc_tui_action_notice.same_quit confirmation) quit_in_slot
                 then None, None
-                else Some "Resize to confirm quit", Some confirmation
+                else Some (ui_text state ~ko:"창을 넓혀 종료 확인" ~en:"Resize to confirm quit"), Some confirmation
             | None when Masc_tui_action_notice.csi_active state.last_action
                         || Option.is_some (Masc_tui_action_notice.rejection state.last_action
                              ~now:(Unix.gettimeofday ()) ~window:last_action_window_s) ->
                 None, None
-            | None -> Some "Quit changed; retry", None)
+            | None -> Some (ui_text state ~ko:"종료 조건 변경; 다시 시도" ~en:"Quit changed; retry"), None)
        | Some _ | None -> Some text, None)
     | Some _ | None -> None, None)))))
   in
@@ -1727,18 +1736,28 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
   finish_surface state ?clamped ~surface_key ~rows:terminal_rows ~cols:full_cols buf
 
 
-let connection_status_parts (status : Masc_tui_types.connection_status) =
+let connection_status_parts ~ko (status : Masc_tui_types.connection_status) =
   (* This badge summarizes HTTP refreshes. A rejected read (for example 429)
      can fail while the independent Recent event feed remains live. *)
   match status with
-  | Connected -> Theme.text_status Masc_tui_theme.Ok, "connected", ["HTTP connected", false; "connected", true; "HTTP up", true]
-  | Degraded -> Theme.text_status Masc_tui_theme.Warn, "partial", ["HTTP partial", false; "partial", true]
-  | Connecting -> Theme.text_status Masc_tui_theme.Warn, "loading...", ["HTTP loading", false; "loading", true]
-  | Booting -> Theme.text_status Masc_tui_theme.Warn, "server booting...", ["server booting", false; "booting", true]
-  | Disconnected -> Theme.text_status Masc_tui_theme.Bad, "refresh failed", ["HTTP refresh failed", false; "HTTP failed", true; "failed", true]
+  | Connected -> Theme.text_status Masc_tui_theme.Ok,
+      (if ko then "연결됨" else "connected"),
+      (if ko then ["HTTP 연결됨", false; "연결됨", true] else ["HTTP connected", false; "connected", true; "HTTP up", true])
+  | Degraded -> Theme.text_status Masc_tui_theme.Warn,
+      (if ko then "일부 관측" else "partial"),
+      (if ko then ["HTTP 일부 관측", false; "일부 관측", true] else ["HTTP partial", false; "partial", true])
+  | Connecting -> Theme.text_status Masc_tui_theme.Warn,
+      (if ko then "조회 중" else "loading..."),
+      (if ko then ["HTTP 조회 중", false; "조회 중", true] else ["HTTP loading", false; "loading", true])
+  | Booting -> Theme.text_status Masc_tui_theme.Warn,
+      (if ko then "서버 시작 중" else "server booting..."),
+      (if ko then ["서버 시작 중", false; "시작 중", true] else ["server booting", false; "booting", true])
+  | Disconnected -> Theme.text_status Masc_tui_theme.Bad,
+      (if ko then "조회 실패" else "refresh failed"),
+      (if ko then ["HTTP 조회 실패", false; "조회 실패", true] else ["HTTP refresh failed", false; "HTTP failed", true; "failed", true])
 
-let connection_status_badge status =
-  let style, label, _ = connection_status_parts status in
+let connection_status_badge ~ko status =
+  let style, label, _ = connection_status_parts ~ko status in
   "HTTP " ^ style ^ "[" ^ label ^ "]" ^ Ansi.reset
 
 ;;
@@ -1749,10 +1768,34 @@ let connection_status_badge status =
    that has to survive a full row of key hints, because the surfaces it
    explains are the ones drawing nothing. *)
 let refresh_progress_badge (state : state) =
+  let ko = state.ui_language = Lang_ko in
+  let text = ui_text state in
+  let surface_name source = if not ko then Surface_read_order.source_name source else
+    match source with
+    | Surface_read_source.Transport -> "연결" | Board -> "게시판" | Planning -> "목표·작업"
+    | Runtime_quota -> "제공자 한도" | Keeper_usage -> "Keeper 사용량"
+    | Provider_history -> "제공자 기록" | Overview_goals -> "목표"
+    | Account_emails -> "계정" | Tool_series -> "도구 호출" in
+  let source_name source = if not ko then Http_refresh_progress.source_name source else
+    match source with
+    | Http_refresh_progress.Identity_before -> "작업 공간"
+    | Approvals -> "승인" | Questions -> "질문" | Keepers -> "Keeper"
+    | Quiz_rows -> "운영자 질문" | Surface_data source -> surface_name source
+    | Identity_after -> "작업 공간 확인" in
+  let component_name component = if not ko then Http_refresh_progress.component_name component else
+    match component with
+    | Http_refresh_progress.Runtime_catalogue -> "런타임 목록" | Provider_windows -> "제공자 한도"
+    | Board_posts -> "게시글" | Board_hearths -> "하위 게시판"
+    | Keeper_roster -> "Keeper 목록" | Keeper_candle -> "Candle" in
+  let component_outcome outcome = if not ko then Http_refresh_progress.component_outcome_name outcome else
+    match outcome with
+    | Http_refresh_progress.Component_returned Part_received -> "관측됨"
+    | Component_returned Part_failed | Component_exception -> "조회 실패"
+    | Component_interrupted -> "조회 중단" | Component_unfinished -> "조회 미완료" in
   let foreground =
     match surface_reads_pending state with
     | [] -> ""
-    | source :: rest -> " · reading " ^ Surface_read_order.source_name source
+    | source :: rest -> " · " ^ text ~ko:"조회 중: " ~en:"reading " ^ surface_name source
         ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))
   in
   match state.http_refresh_progress with
@@ -1760,27 +1803,28 @@ let refresh_progress_badge (state : state) =
       let outcome_notice completion label =
         match Http_refresh_progress.settled_sources ~completion progress with
         | [] -> ""
-        | source :: rest -> " · " ^ Http_refresh_progress.source_name source ^ " " ^ label
+        | source :: rest -> " · " ^ source_name source ^ " " ^ label
             ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
       let partials = match Http_refresh_progress.partial_readings progress with
         | [] -> ""
         | (_,parts) :: rest ->
             let names outcome = Http_refresh_progress.components parts
               |> List.filter_map (fun (component,observed) -> if observed=outcome
-                then Some (Http_refresh_progress.component_name component) else None)
+                then Some (component_name component) else None)
               |> String.concat ", " in
-            " · partial: " ^ names Http_refresh_progress.Part_failed ^ " failed; "
-              ^ names Http_refresh_progress.Part_received ^ " received"
+            " · " ^ text ~ko:"일부 관측: " ~en:"partial: " ^ names Http_refresh_progress.Part_failed
+              ^ text ~ko:" 조회 실패; " ~en:" failed; "
+              ^ names Http_refresh_progress.Part_received ^ text ~ko:" 관측됨" ~en:" received"
               ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest)) in
-      let notices = outcome_notice Http_refresh_progress.Failed_read "read failed"
-        ^ outcome_notice Http_refresh_progress.Interrupted_read "interrupted" ^ partials in
+      let notices = outcome_notice Http_refresh_progress.Failed_read (text ~ko:"조회 실패" ~en:"read failed")
+        ^ outcome_notice Http_refresh_progress.Interrupted_read (text ~ko:"조회 중단" ~en:"interrupted") ^ partials in
       let component_reads = Http_refresh_progress.unreturned_component_reads progress in
       let component_notices = component_reads |> List.filter_map (fun part ->
         match part.Http_refresh_progress.cr_status with
         | Http_refresh_progress.Component_pending -> None
         | Http_refresh_progress.Component_settled (_,outcome) ->
-            Some (Http_refresh_progress.component_name part.cr_component ^ " "
-              ^ Http_refresh_progress.component_outcome_name outcome)) |> String.concat "; " in
+            Some (component_name part.cr_component ^ " "
+              ^ component_outcome outcome)) |> String.concat "; " in
       let notices = notices ^ (if component_notices="" then "" else " · " ^ component_notices) in
       (match progress.Http_refresh_progress.phase with
        | Http_refresh_progress.Finished _ -> notices ^ foreground
@@ -1791,28 +1835,29 @@ let refresh_progress_badge (state : state) =
              | Http_refresh_progress.Component_pending -> true
              | Http_refresh_progress.Component_settled _ -> false) component_reads in
            let pending = match pending_components with
-             | part :: rest -> "reading " ^ Http_refresh_progress.component_name part.cr_component
+             | part :: rest -> text ~ko:"조회 중: " ~en:"reading " ^ component_name part.cr_component
                  ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))
              | [] -> (match Http_refresh_progress.pending_sources progress with
                  | [] -> (match progress.Http_refresh_progress.readings with
-                     | [] -> "refreshing"
-                     | _ :: _ -> "finishing refresh")
-                 | source :: rest -> "reading " ^ Http_refresh_progress.source_name source
+                     | [] -> text ~ko:"새로 조회 중" ~en:"refreshing"
+                     | _ :: _ -> text ~ko:"조회 마무리 중" ~en:"finishing refresh")
+                 | source :: rest -> text ~ko:"조회 중: " ~en:"reading " ^ source_name source
                      ^ (match rest with [] -> "" | _ -> Printf.sprintf " +%d" (List.length rest))) in
            notices ^ " · " ^ pending)
   | Some _ | None -> foreground
 
 let connection_badge (state : state) =
-  let connection = connection_status_badge state.connection_status in
+  let text = ui_text state in
+  let connection = connection_status_badge ~ko:(state.ui_language = Lang_ko) state.connection_status in
   let connection = match state.workspace_identity with
   | Masc_tui_types.Workspace_identity_mismatch _ ->
-      connection ^ " " ^ Theme.text_status Masc_tui_theme.Bad ^ "[workspace mismatch]" ^ Ansi.reset
+      connection ^ " " ^ Theme.text_status Masc_tui_theme.Bad ^ text ~ko:"[작업 공간 불일치]" ~en:"[workspace mismatch]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_match_unconfirmed _ ->
-      connection ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ "[workspace unconfirmed]" ^ Ansi.reset
+      connection ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ text ~ko:"[작업 공간 확인 대기]" ~en:"[workspace unconfirmed]" ^ Ansi.reset
   | Masc_tui_types.Workspace_identity_unread
   | Masc_tui_types.Workspace_identity_match -> connection in
   let source_loss =
-    if state.observer_source_loss then Theme.warn () ^ "[events lost] " ^ Ansi.reset
+    if state.observer_source_loss then Theme.warn () ^ text ~ko:"[이벤트 유실] " ~en:"[events lost] " ^ Ansi.reset
     else ""
   in
   source_loss ^ connection ^ refresh_progress_badge state
@@ -1872,7 +1917,8 @@ let usage_connection_badge (state : state) =
   let badge = connection_badge state in
   match state.workspace_identity, state.connection_status with
   | Workspace_identity_unread, (Connected | Degraded) ->
-      badge ^ " " ^ Theme.text_status Masc_tui_theme.Warn ^ "[workspace not observed]" ^ Ansi.reset
+      badge ^ " " ^ Theme.text_status Masc_tui_theme.Warn
+      ^ ui_text state ~ko:"[작업 공간 미조회]" ~en:"[workspace not observed]" ^ Ansi.reset
   | (Workspace_identity_match | Workspace_identity_match_unconfirmed _
     | Workspace_identity_mismatch _), _
   | Workspace_identity_unread, (Connecting | Booting | Disconnected) -> badge
@@ -1880,6 +1926,8 @@ let usage_connection_badge (state : state) =
 (* A narrow Usage title keeps a textual state visible while its longer
    workspace and refresh details remain available in the scrolled body. *)
 let compact_connection_badge (state : state) ~width =
+  let ko = state.ui_language = Lang_ko in
+  let options ko_label en_labels = if ko then [ko_label, true] else en_labels in
   let choose options =
     match List.find_opt (fun (label, _) -> Message_layout.display_width label <= width) options with
     | Some choice -> choice
@@ -1887,16 +1935,16 @@ let compact_connection_badge (state : state) ~width =
   in
   let style, options, needs_context =
     match compact_connection_state state with
-    | Compact_workspace_mismatch -> Theme.text_status Masc_tui_theme.Bad, ["WS mismatch", true; "mismatch", true], true
-    | Compact_workspace_unconfirmed -> Theme.text_status Masc_tui_theme.Warn, ["WS unconfirmed", true; "unconfirmed", true], true
-    | Compact_workspace_unread -> Theme.text_status Masc_tui_theme.Warn, ["WS unread", true; "unread", true], true
-    | Compact_read_failed -> Theme.text_status Masc_tui_theme.Bad, ["read failed", true; "failed", true], true
-    | Compact_read_partial -> Theme.text_status Masc_tui_theme.Warn, ["read partial", true; "partial", true], true
-    | Compact_read_interrupted -> Theme.text_status Masc_tui_theme.Warn, ["read interrupted", true; "interrupted", true], true
-    | Compact_read_unfinished -> Theme.text_status Masc_tui_theme.Warn, ["read unfinished", true; "unfinished", true], true
-    | Compact_reading -> Theme.text_status Masc_tui_theme.Warn, ["reading data", true; "reading", true], true
+    | Compact_workspace_mismatch -> Theme.text_status Masc_tui_theme.Bad, options "공간 불일치" ["WS mismatch", true; "mismatch", true], true
+    | Compact_workspace_unconfirmed -> Theme.text_status Masc_tui_theme.Warn, options "공간 확인 대기" ["WS unconfirmed", true; "unconfirmed", true], true
+    | Compact_workspace_unread -> Theme.text_status Masc_tui_theme.Warn, options "공간 미조회" ["WS unread", true; "unread", true], true
+    | Compact_read_failed -> Theme.text_status Masc_tui_theme.Bad, options "조회 실패" ["read failed", true; "failed", true], true
+    | Compact_read_partial -> Theme.text_status Masc_tui_theme.Warn, options "일부 관측" ["read partial", true; "partial", true], true
+    | Compact_read_interrupted -> Theme.text_status Masc_tui_theme.Warn, options "조회 중단" ["read interrupted", true; "interrupted", true], true
+    | Compact_read_unfinished -> Theme.text_status Masc_tui_theme.Warn, options "조회 미완료" ["read unfinished", true; "unfinished", true], true
+    | Compact_reading -> Theme.text_status Masc_tui_theme.Warn, options "조회 중" ["reading data", true; "reading", true], true
     | Compact_http status ->
-        let style, _, options = connection_status_parts status in
+        let style, _, options = connection_status_parts ~ko status in
         style, options, false in
   let label, needs_full_status = choose options in
   let details =
@@ -2734,14 +2782,14 @@ let semantic_status_color status =
    spent twelve columns of every planning row on one phase name and folded
    titles at 80 and 99 columns alike. Each label is a match arm so a new
    phase has to be given a word rather than inheriting a long one. *)
-let planning_phase_label = function
-  | Goal_phase.Executing -> "executing"
-  | Goal_phase.Verifying -> "verifying"
-  | Goal_phase.Awaiting_confirmation -> "confirming"
-  | Goal_phase.Completed -> "completed"
-  | Goal_phase.Dropped -> "dropped"
-  | Goal_phase.Paused _ -> "paused"
-  | Goal_phase.Blocked _ -> "blocked"
+let planning_phase_label ~ko = function
+  | Goal_phase.Executing -> if ko then "진행 중" else "executing"
+  | Goal_phase.Verifying -> if ko then "검증 중" else "verifying"
+  | Goal_phase.Awaiting_confirmation -> if ko then "최종 확인 대기" else "confirming"
+  | Goal_phase.Completed -> if ko then "완료" else "completed"
+  | Goal_phase.Dropped -> if ko then "중단" else "dropped"
+  | Goal_phase.Paused _ -> if ko then "일시 정지" else "paused"
+  | Goal_phase.Blocked _ -> if ko then "막힘" else "blocked"
 
 (* The key and label a Goal detail uses for each lifecycle request. [c]
    requests completion or recovery; its submission does not prove a judge was
@@ -2765,14 +2813,14 @@ let planning_action_confirmation_keys action =
   let key = planning_action_key action in
   [ key; String.uppercase_ascii key ]
 
-let planning_action_label = function
-  | Goal_phase.Public_action.Request_complete -> "Request completion"
-  | Goal_phase.Public_action.Drop -> "Drop"
-  | Goal_phase.Public_action.Reopen -> "Reopen"
-  | Goal_phase.Public_action.Pause -> "Pause"
-  | Goal_phase.Public_action.Resume -> "Resume"
-  | Goal_phase.Public_action.Block -> "Block"
-  | Goal_phase.Public_action.Unblock -> "Unblock"
+let planning_action_label ~ko = function
+  | Goal_phase.Public_action.Request_complete -> if ko then "완료 요청" else "Request completion"
+  | Goal_phase.Public_action.Drop -> if ko then "중단" else "Drop"
+  | Goal_phase.Public_action.Reopen -> if ko then "다시 열기" else "Reopen"
+  | Goal_phase.Public_action.Pause -> if ko then "일시 정지" else "Pause"
+  | Goal_phase.Public_action.Resume -> if ko then "재개" else "Resume"
+  | Goal_phase.Public_action.Block -> if ko then "막힘 설정" else "Block"
+  | Goal_phase.Public_action.Unblock -> if ko then "막힘 해제" else "Unblock"
 
 
 (* As wide as the widest phase rather than a literal. Three of the four labels
@@ -2780,10 +2828,10 @@ let planning_action_label = function
    [complet~] with sixty columns of space to its right -- the mark that says
    "there was more" on a value nothing was cut from. Taken from the phase list
    so a new phase widens the column instead of losing its last letter. *)
-let planning_phase_column =
+let planning_phase_column ~ko =
   List.fold_left
     (fun widest phase ->
-      max widest (Message_layout.display_width (planning_phase_label phase)))
+      max widest (Message_layout.display_width (planning_phase_label ~ko phase)))
     0
     Goal_phase.all
 

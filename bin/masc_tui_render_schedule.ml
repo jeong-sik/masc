@@ -2171,7 +2171,7 @@ let board_layout ~inner_width =
   Table.fit ~inner_width ~width:board_column_width ~flex:Board_title
     ~drop_order:board_drop_order board_columns
 
-let board_cell ~styles ~age_header ~title_width values = function
+let board_cell ~ko ~styles ~age_header ~title_width values = function
   | Board_mark ->
       (* The kind mark is a mark, like Planning's proof. A name would be
          wider than the cell holding it, and it carries its own dress: the
@@ -2181,13 +2181,13 @@ let board_cell ~styles ~age_header ~title_width values = function
       Table.cell ~style:styles.bstyle_id ~header:"ID" ~width:board_id_width
         values.brow_id
   | Board_hearth ->
-      Table.cell ~style:styles.bstyle_hearth ~header:"HEARTH"
+      Table.cell ~style:styles.bstyle_hearth ~header:(if ko then "게시판" else "HEARTH")
         ~width:board_hearth_width values.brow_hearth
   | Board_author ->
-      Table.cell ~style:styles.bstyle_author ~header:"AUTHOR"
+      Table.cell ~style:styles.bstyle_author ~header:(if ko then "작성자" else "AUTHOR")
         ~width:board_author_width values.brow_author
   | Board_title ->
-      Table.cell ~fold:Table.Fold_tail ~header:"TITLE" ~width:title_width
+      Table.cell ~fold:Table.Fold_tail ~header:(if ko then "제목" else "TITLE") ~width:title_width
         values.brow_title
   | Board_age ->
       (* Right, the way Planning's age reads. A span is a number and the two
@@ -2196,16 +2196,16 @@ let board_cell ~styles ~age_header ~title_width values = function
       Table.cell ~align:Table.Right ~style:styles.bstyle_age
         ~header:age_header ~width:board_age_width values.brow_age
   | Board_score ->
-      Table.cell ~style:styles.bstyle_score ~header:"SCORE"
+      Table.cell ~style:styles.bstyle_score ~header:(if ko then "점수" else "SCORE")
         ~width:board_score_width values.brow_score
   | Board_replies ->
-      Table.cell ~style:styles.bstyle_replies ~header:"REPLIES"
+      Table.cell ~style:styles.bstyle_replies ~header:(if ko then "댓글" else "REPLIES")
         ~width:board_replies_width values.brow_replies
 
-let board_cells ?(styles = board_no_styles) ~age_header
+let board_cells ?(styles = board_no_styles) ~ko ~age_header
     ~(layout : board_column Table.layout) values =
   List.map
-    (board_cell ~styles ~age_header ~title_width:layout.Table.flex_width
+    (board_cell ~ko ~styles ~age_header ~title_width:layout.Table.flex_width
        values)
     layout.Table.shown
 
@@ -2235,11 +2235,11 @@ let board_age_text ~now = function
 let sidebar_row_label ~about ~apart =
   match apart with None -> about | Some apart -> about ^ "  " ^ apart
 
-let board_header_row ~age_header ~layout =
-  Table.header_row (board_cells ~age_header ~layout board_no_values)
+let board_header_row ~ko ~age_header ~layout =
+  Table.header_row (board_cells ~ko ~age_header ~layout board_no_values)
 
-let board_row ?close ~styles ~age_header ~layout values =
-  Table.row ?close (board_cells ~styles ~age_header ~layout values)
+let board_row ?close ~ko ~styles ~age_header ~layout values =
+  Table.row ?close (board_cells ~ko ~styles ~age_header ~layout values)
 
 module Terminal_size_cache = struct
   type refresh =

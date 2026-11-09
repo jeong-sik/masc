@@ -22153,6 +22153,7 @@ let task_document_columns state ~terminal_cols =
 
 let task_document_inputs state ~cols =
   let module Document = Masc_tui_task_document in
+  let ko = state.ui_language = Lang_ko in
   let make target input = {tdk_target=target;tdk_input=input} in
   match state.view,state.planning_mode,state.task_detail_id,state.task_focus with
   | Planning,Planning_list,Some id,Masc_tui_overview_tasks.Task_focus _ ->
@@ -22165,9 +22166,9 @@ let task_document_inputs state ~cols =
          | Read ids -> Document.Membership ids in
        let history=Masc_tui_fetched.view_for ~equal:String.equal state.task_history ~key:id in
        let target=Work_task_document id in
-       Some (make target (Document.body ~cols ~goals task)),
+       Some (make target (Document.body ~ko ~cols ~goals task)),
        Option.map (fun (history : Masc.Tui_decode_task_inspection.history) ->
-         make target (Document.history ~cols history.history_events)) (Masc_tui_fetched.value history))
+         make target (Document.history ~ko ~cols history.history_events)) (Masc_tui_fetched.value history))
   | Tools,_,_,_ when state.tools_pane=Tools_async && state.tools_async_detail_open ->
     (match state.tools_async_task_source,state.tools_async_selection with
      | Some source,Some selection when Masc.Tui_decode_async_request.equal_target selection source.ats_request.target ->
@@ -22175,9 +22176,9 @@ let task_document_inputs state ~cols =
        let history=Masc_tui_fetched.view_for ~equal:equal_tools_async_task_source state.tools_async_task_history ~key:source in
        let target=Async_task_document source in
        Option.map (fun (detail : Masc.Tui_decode_task_inspection.detail) ->
-         make target (Document.body ~cols ~goals:(Document.Canonical detail.canonical_goal_id) detail.task)) (Masc_tui_fetched.value body),
+         make target (Document.body ~ko ~cols ~goals:(Document.Canonical detail.canonical_goal_id) detail.task)) (Masc_tui_fetched.value body),
        Option.map (fun (history : Masc.Tui_decode_task_inspection.history) ->
-         make target (Document.history ~cols history.history_events)) (Masc_tui_fetched.value history)
+         make target (Document.history ~ko ~cols history.history_events)) (Masc_tui_fetched.value history)
      | Some _,Some _ | Some _,None | None,_ -> None,None)
   | Planning,Planning_list,None,Masc_tui_overview_tasks.Task_focus _
   | Planning,Planning_list,_,Masc_tui_overview_tasks.No_task_focus
@@ -22197,8 +22198,9 @@ let sync_task_documents state ~cols =
       Option.iter (fun request -> Observation.observe request.tdr_observation
         (Retired Source_unavailable)) slot.tds_request;
       let previous = match part,slot.tds_previous with
-        | History,Some ({tdk_target=Work_task_document task_id;_},Some owner,_)
-          when owner == state.workspace_read_authority && task_history_owned_by state ~task_id -> slot.tds_previous
+        | History,Some ({tdk_target=Work_task_document task_id;tdk_input},Some owner,_)
+          when owner == state.workspace_read_authority && task_history_owned_by state ~task_id
+            && Masc_tui_task_document.is_korean tdk_input = (state.ui_language = Lang_ko) -> slot.tds_previous
         | History,(None | Some ({tdk_target=(Work_task_document _ | Async_task_document _);_},_,_))
         | Masc_tui_task_document.Body,(None | Some _) -> None in
       let reading = match Masc_tui_fetched.current slot.tds_reading,previous with
@@ -22276,28 +22278,30 @@ let task_document_lines state ~cols part =
   | None -> []
   | Some key ->
     let slot=task_document_slot state part in
+    let text ko en = ui_text state ~ko ~en in
     let notice text = Masc_tui_text_block.rows
       ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols)) text in
     let previous=match slot.tds_previous with
       | Some (old,_,rows) when equal_task_document_target old.tdk_target key.tdk_target
-          && Masc_tui_task_document.columns old.tdk_input=cols -> rows
+          && Masc_tui_task_document.columns old.tdk_input=cols
+          && Masc_tui_task_document.is_korean old.tdk_input = Masc_tui_task_document.is_korean key.tdk_input -> rows
       | Some _ | None -> [] in
     match Masc_tui_fetched.view_for ~equal:equal_task_document_key slot.tds_reading ~key with
     | Masc_tui_fetched.Ready rows -> rows
-    | Stale (rows,detail) -> notice (" Task 표시 재확인 실패: " ^ detail) @ rows
-    | Failed detail -> notice (" Task 표시를 준비하지 못했습니다: " ^ detail
-        ^ if previous=[] then "" else " · 이전 표시 유지") @ previous
+    | Stale (rows,detail) -> notice ((text " 작업 표시 재확인 실패: " " Task document refresh failed: ") ^ detail) @ rows
+    | Failed detail -> notice ((text " 작업 표시를 준비하지 못했습니다: " " Task document preparation failed: ") ^ detail
+        ^ if previous=[] then "" else (text " · 이전 표시 유지" " · previous document retained")) @ previous
     | Absent | Loading ->
       let phase=match slot.tds_request with
         | Some request when equal_task_document_key key (Masc_tui_fetched.request_key request.tdr_ticket) ->
           let facts=Masc_tui_task_document_observation.facts request.tdr_observation in
           (match facts.caller_observed,facts.worker_returned,facts.worker_entered with
-           | Some _,_,_ -> " Task 표시 반영 대기"
-           | None,Some _,_ -> " Task 준비 결과 전달 대기"
-           | None,None,Some _ -> " Task 내용을 정리 중"
-           | None,None,None -> " Task 준비 시작 대기")
-        | Some _ | None -> " Task 내용을 준비 중입니다" in
-      notice (phase ^ if previous=[] then "" else " · 이전 표시 유지") @ previous
+           | Some _,_,_ -> (text " 작업 표시 반영 대기" " Task document awaiting display")
+           | None,Some _,_ -> (text " 작업 준비 결과 전달 대기" " Task document delivery pending")
+           | None,None,Some _ -> (text " 작업 내용을 정리 중" " Preparing Task document")
+           | None,None,None -> (text " 작업 준비 시작 대기" " Task document preparation pending"))
+        | Some _ | None -> (text " 작업 내용을 준비 중입니다" " Preparing Task document") in
+      notice (phase ^ if previous=[] then "" else (text " · 이전 표시 유지" " · previous document retained")) @ previous
 
 let task_documents_pending state =
   Masc_tui_fetched.in_flight state.task_document_body.tds_reading

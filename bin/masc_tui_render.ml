@@ -419,11 +419,11 @@ let render_memory (state : state) =
           | Some _ -> ""
         in
         Printf.sprintf "%s  %s  %s  %s"
-          (screen_title (if ko then " MASC 메모리" else " MASC Memory")) reading_note timestamp
+          (screen_title (if ko then " MASC 기억" else " MASC Memory")) reading_note timestamp
           (connection_badge state)
     | Some s ->
         Printf.sprintf "%s · %s · %s · %s  %s"
-          (screen_title (if ko then " MASC 메모리" else " MASC Memory"))
+          (screen_title (if ko then " MASC 기억" else " MASC Memory"))
           (if ko then Printf.sprintf "키퍼 %d명" shown else Masc_tui_message_layout.count_noun shown "keeper")
           (match current_memory_starving_count s with
            | Some count -> Printf.sprintf (if ko then "기억 필요 %d" else "%d need memory") count
@@ -435,7 +435,7 @@ let render_memory (state : state) =
           (connection_badge state)
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory"
-    ~title ~hints:(Masc_tui_keys.footer_hints state.view)
+    ~title ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language state.view)
     ~body:(fun ~budget c ->
       Render_memory.render_memory_body ~cols ~budget state
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
@@ -453,14 +453,16 @@ let render_memory (state : state) =
    window's "[lines a-b/n]" row under it. *)
 let render_memory_fact_detail (state : state) =
   let terminal_rows, cols = get_terminal_size () in
+  let ko = state.ui_language = Lang_ko in
   let facts = Masc_tui_types.memory_fact_rows state in
   let total = List.length facts in
   let cursor = max 0 (min state.memory_facts_cursor (max 0 (total - 1))) in
   let lines =
     match List.nth_opt facts cursor with
-    | None -> [ "    This list has no fact row to read." ]
-    | Some row -> Render_memory.memory_fact_detail_lines ~cols row
+    | None -> [ ui_text state ~ko:"    읽을 사실이 없습니다." ~en:"    This list has no fact row to read." ]
+    | Some row -> Render_memory.memory_fact_detail_lines ~ko ~cols row
   in
+  let lines = Render_memory.memory_facts_scope_lines ~full:true ~cols state @ lines in
   surface_chrome state ~terminal_rows ~cols ~surface_key:"memory-fact-detail"
     ~frame:Chrome_overlay
     (* The drawing says what it actually clamped to, so [G]'s sentinel and a
@@ -470,10 +472,10 @@ let render_memory_fact_detail (state : state) =
       (Scrolled
          { scroll = state.memory_fact_detail_scroll
          ; report = (fun scroll -> Memory_fact_detail_scroll scroll) })
-    ~title:(screen_title " MASC MEMORY - FACT DETAIL")
+    ~title:(screen_title (ui_text state ~ko:" MASC 기억 · 사실" ~en:" MASC Memory · fact"))
     (* The keys project the same bindings the help sheet carries, so the
        footer and [?] cannot teach different keys. *)
-    ~hints:Masc_tui_keys.memory_fact_detail_hints
+    ~hints:(Masc_tui_keys.memory_fact_detail_hints ~lang:state.ui_language)
     ~body:(fun ~budget:_ c -> List.iter c.push lines)
 
 let rec render_memory_facts (state : state) =
@@ -483,7 +485,8 @@ let rec render_memory_facts (state : state) =
 and render_memory_facts_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let open Masc.Tui_decode in
-  let keeper_name = Render_memory.facts_keeper_label state.memory_facts_keeper in
+  let ko = state.ui_language = Lang_ko in
+  let keeper_name = Render_memory.facts_keeper_label ~ko state.memory_facts_keeper in
   let rows = Masc_tui_types.memory_fact_rows state in
   let total = List.length rows in
   let now = Unix.localtime (Unix.gettimeofday ()) in
@@ -492,21 +495,21 @@ and render_memory_facts_list (state : state) =
       now.Unix.tm_sec
   in
   let filter_label =
-    Masc_tui_types.memory_category_filter_label state.memory_facts_category
+    Render_memory.memory_category_filter_text ~ko state.memory_facts_category
   in
   let query_label =
     match state.search with
     | Some q when String.length (String.trim q) > 0 ->
-        Printf.sprintf " \xc2\xb7 find \"%s\"" (Terminal_text.single_line (String.trim q))
-    | Some _ -> " \xc2\xb7 find \"\""
+        Printf.sprintf (if ko then " · 찾기 \"%s\"" else " · find \"%s\"") (Terminal_text.single_line (String.trim q))
+    | Some _ -> if ko then " · 찾기 \"\"" else " · find \"\""
     | None ->
         if String.length (String.trim state.search_last) > 0 then
-          Printf.sprintf " \xc2\xb7 filter \"%s\"" (Terminal_text.single_line (String.trim state.search_last))
+          Printf.sprintf (if ko then " · 필터 \"%s\"" else " · filter \"%s\"") (Terminal_text.single_line (String.trim state.search_last))
         else ""
   in
   let title =
-    Render_memory.facts_title ~cols
-      ~screen:(screen_title " MASC Memory")
+    Render_memory.facts_title ~ko ~cols
+      ~screen:(screen_title (if ko then " MASC 기억" else " MASC Memory"))
       ~keeper:keeper_name
       ~reading:
         (match Masc_tui_types.memory_facts_snapshot state with
@@ -519,7 +522,7 @@ and render_memory_facts_list (state : state) =
       ~badge:(connection_badge state)
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory-facts"
-    ~title ~hints:(Masc_tui_keys.footer_hints_memory_facts ~cols ~has_rows:(total > 0))
+    ~title ~hints:(Masc_tui_keys.footer_hints_memory_facts ~lang:state.ui_language ~cols ~has_rows:(total > 0))
     ~body:(fun ~budget c ->
       Render_memory.render_memory_facts_body ~cols ~budget state
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected
@@ -597,15 +600,15 @@ let render_surface ~home (state : state) =
                 | None ->
                     let terminal_rows, cols = get_terminal_size () in
                     surface_chrome ~overflow:Fits state ~terminal_rows ~cols ~surface_key:"board-read"
-                      ~title:(screen_title (" MASC Board / " ^ Terminal_text.single_line post_id))
-                      ~hints:Masc_tui_keys.footer_hints_board_pending
+                      ~title:(screen_title (ui_text state ~ko:" MASC 게시판 / " ~en:" MASC Board / " ^ Terminal_text.single_line post_id))
+                      ~hints:(Masc_tui_keys.footer_hints_board_pending ~lang:state.ui_language)
                       ~body:(fun ~budget:_ c ->
                         match Board_detail.view_for state.board_detail ~post_id with
                         | Board_detail.Failed detail ->
                             c.push_styled ~style:(Theme.bad ())
                               ("  " ^ Terminal_text.single_line detail)
-                        | Board_detail.Absent -> c.push "  Board post has not been loaded. Press r to retry."
-                        | Board_detail.Loading -> c.push "  Loading Board post..."
+                        | Board_detail.Absent -> c.push (ui_text state ~ko:"  글을 아직 읽지 못했습니다. r로 다시 읽습니다." ~en:"  Board post has not been loaded. Press r to retry.")
+                        | Board_detail.Loading -> c.push (ui_text state ~ko:"  글을 읽는 중…" ~en:"  Loading Board post…")
                         | Board_detail.Ready _ -> ())))
   | Planning -> Masc_tui_render_work.render_planning state
   | Approvals when (match state.ask_answer_mode with Ask_answering _ -> true | Ask_browsing -> false) ->

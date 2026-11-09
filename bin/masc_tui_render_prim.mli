@@ -493,7 +493,7 @@ val browser_lane_rows :
 
 val semantic_status_color : string -> string
 
-val planning_phase_label : Goal_phase.t -> string
+val planning_phase_label : ko:bool -> Goal_phase.t -> string
 
 val planning_action_key : Goal_phase.Public_action.t -> string
 
@@ -503,10 +503,10 @@ val planning_action_confirmation_keys : Goal_phase.Public_action.t -> string lis
 val planning_action_of_key : string -> Goal_phase.Public_action.t option
 (** Parse the same keys drawn in the Goal detail action strip. *)
 
-val planning_action_label : Goal_phase.Public_action.t -> string
+val planning_action_label : ko:bool -> Goal_phase.Public_action.t -> string
 (** What the goal detail's Actions and ARMED rows call that request. *)
 
-val planning_phase_column : int
+val planning_phase_column : ko:bool -> int
 
 val planning_phase_color : Goal_phase.t -> string
 

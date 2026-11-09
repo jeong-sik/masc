@@ -28,11 +28,11 @@ let check_bool = Alcotest.(check bool)
 let check_string = Alcotest.(check string)
 
 let test_tone_separates_a_refusal_from_a_proof () =
-  let proven = tones (Detail.body ~width:60 (Proof.Proof_proven None) None) in
-  let refused = tones (Detail.body ~width:60 (Proof.Proof_refuted None) None) in
+  let proven = tones (Detail.body ~ko:false ~width:60 (Proof.Proof_proven None) None) in
+  let refused = tones (Detail.body ~ko:false ~width:60 (Proof.Proof_refuted None) None) in
   check_bool "a proof reads as proven" true (List.hd proven = Detail.Proven);
   check_bool "a refusal reads as refused" true (List.hd refused = Detail.Refused);
-  let stale = Detail.body ~width:60 (Proof.Proof_stale (Some "old target reached")) None in
+  let stale = Detail.body ~ko:false ~width:60 (Proof.Proof_stale (Some "old target reached")) None in
   check_bool "historical proof has no current approval tone" true
     (List.for_all (fun tone -> tone <> Detail.Proven) (tones stale));
   check_bool "historical evidence remains readable" true
@@ -43,7 +43,7 @@ let test_tone_separates_a_refusal_from_a_proof () =
    reason reaches the terminal escaped. *)
 let test_a_stuck_goal_says_which_step_and_why () =
   let rows =
-    Detail.unreconciled_lines ~width:60
+    Detail.unreconciled_lines ~ko:false ~width:60
       { Proof.vu_step = Goal_reconcile_step.Rearm_proof
       ; vu_detail = "criterion already proven\x1b[2J"
       }
@@ -58,7 +58,7 @@ let test_a_stuck_goal_says_which_step_and_why () =
     (List.for_all (fun text -> not (String.contains text '\x1b')) (texts rows));
   check_string "the other step has its own headline"
     "verifier could not apply the committed proof"
-    (Detail.unreconciled_heading Goal_reconcile_step.Reconcile_proof)
+    (Detail.unreconciled_heading ~ko:false Goal_reconcile_step.Reconcile_proof)
 
 (* [c] on a stuck Verifying goal applies a committed proof or retries a
    matching pending request. The stuck hint used to
@@ -74,7 +74,7 @@ let test_a_stuck_goal_offers_the_retry_first () =
     from 0
   in
   let stuck_tone, stuck =
-    Detail.verifying_next_step ~can_retry:true
+    Detail.verifying_next_step ~ko:false ~can_retry:true
       (Some
          { Proof.vu_step = Goal_reconcile_step.Reconcile_proof
          ; vu_detail = "goal store unavailable"
@@ -86,7 +86,7 @@ let test_a_stuck_goal_offers_the_retry_first () =
      check_bool "the retry comes before taking it back" true (retry < reopen)
    | None, _ -> Alcotest.fail ("a stuck goal's next step drops [c]: " ^ stuck)
    | Some _, None -> Alcotest.fail ("a stuck goal's next step drops [o]: " ^ stuck));
-  let waiting_tone, waiting = Detail.verifying_next_step ~can_retry:true None in
+  let waiting_tone, waiting = Detail.verifying_next_step ~ko:false ~can_retry:true None in
   check_bool "unresolved verification reads as waiting" true (waiting_tone = Detail.Waiting);
   check_bool "and offers [c] too" true (Option.is_some (index_of "[c]" waiting))
 
@@ -95,7 +95,7 @@ let test_a_stuck_goal_offers_the_retry_first () =
    (same class as the approval detail, #38478). *)
 let test_verdict_and_note_reach_the_pane_escaped () =
   let rows =
-    Detail.body ~width:60
+    Detail.body ~ko:false ~width:60
       (Proof.Proof_refuted (Some "refused\x1b[2J by the judge"))
       (Some "note\x1b]52;c;cGFzdGU=\x07 here")
   in
@@ -115,7 +115,7 @@ let test_verdict_and_note_reach_the_pane_escaped () =
    the two lines into one run. Each line is escaped on its own instead. *)
 let test_a_note_with_a_newline_draws_two_lines () =
   let rows =
-    Detail.body ~width:60 Proof.Proof_idle (Some "first line\nsecond\x1b[2J line")
+    Detail.body ~ko:false ~width:60 Proof.Proof_idle (Some "first line\nsecond\x1b[2J line")
   in
   let texts = texts rows in
   check_bool "the first line is its own row" true (List.mem "first line" texts);
@@ -140,9 +140,9 @@ let test_a_note_with_a_newline_draws_two_lines () =
    escaping turned it into a printed "\x0D". *)
 let test_a_crlf_note_draws_its_lines_without_the_cr () =
   let rows =
-    Detail.body ~width:60 Proof.Proof_idle (Some "first line\r\nsecond line\r\n")
+    Detail.body ~ko:false ~width:60 Proof.Proof_idle (Some "first line\r\nsecond line\r\n")
   in
-  let inner_cr = texts (Detail.body ~width:60 Proof.Proof_idle (Some "a\rb")) in
+  let inner_cr = texts (Detail.body ~ko:false ~width:60 Proof.Proof_idle (Some "a\rb")) in
   let texts = texts rows in
   check_bool "the first line is its own row without its CR" true
     (List.mem "first line" texts);
@@ -162,7 +162,7 @@ let test_a_crlf_note_draws_its_lines_without_the_cr () =
     (List.mem "a\\x0Db" inner_cr)
 
 let test_a_narrow_pane_still_produces_rows () =
-  let rows = Detail.body ~width:0 (Proof.Proof_refuted (Some "why")) None in
+  let rows = Detail.body ~ko:false ~width:0 (Proof.Proof_refuted (Some "why")) None in
   check_bool "width 0 does not loop or vanish" true (rows <> [])
 
 let confirmation_fixture ?(goal_id = "goal-1") ?(revision = "revision-1")
@@ -317,7 +317,7 @@ let test_confirmation_retains_the_displayed_proof () =
   check_bool "the same credential reassigned to another operator cannot expose receipt detail" false
     (current ~instance:"instance-1" (Some other_operator));
   let error_for credential_is_current error =
-    Detail.confirmation_read_error_message ~credential_is_current error in
+    Detail.confirmation_read_error_message ~ko:false ~credential_is_current error in
   let refused = Detail.Read_failed (Some confirmation_owner, "private earlier HTTP 403") in
   check_bool "an error body is withheld even for the current credential" false
     (contains "private earlier" (error_for (fun owner -> owner == confirmation_owner) refused));

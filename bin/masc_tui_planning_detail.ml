@@ -168,16 +168,17 @@ type confirmation_state =
      cancel inspection, but cannot cancel a confirmation already sent. *)
   | Submitting of string * confirmation_read
 
-let confirmation_read_error_message ~credential_is_current = function
-  | Read_failed (Some owner, _) when credential_is_current owner -> "Goal confirmation read failed; check the connection and permissions"
-  | Read_failed (Some _, _) -> "Goal confirmation credential changed; read the proof again"
-  | Read_failed (None, _) -> "Goal confirmation read unavailable; read the proof again"
+let confirmation_read_error_message ~ko ~credential_is_current =
+  let text korean english = if ko then korean else english in function
+  | Read_failed (Some owner, _) when credential_is_current owner -> (text "목표 확인 증거 조회 실패 · 연결과 권한을 확인하세요" "Goal confirmation read failed; check the connection and permissions")
+  | Read_failed (Some _, _) -> (text "인증 정보가 바뀌었습니다 · 증거를 다시 조회하세요" "Goal confirmation credential changed; read the proof again")
+  | Read_failed (None, _) -> (text "목표 확인 증거를 조회할 수 없습니다 · 다시 조회하세요" "Goal confirmation read unavailable; read the proof again")
   | Read_http_error (owner, 503) when credential_is_current owner ->
-      "Goal confirmation unavailable (HTTP 503); check server availability, storage and runtime"
-  | Read_http_error (owner, status) when credential_is_current owner -> Printf.sprintf "Goal confirmation read failed (HTTP %d)" status
-  | Read_http_error _ -> "Goal confirmation credential changed; read the proof again"
-  | Server_changed owner when credential_is_current owner -> "Goal confirmation server changed; rechecking server identity"
-  | Server_changed _ -> "Goal confirmation credential changed; read the proof again"
+      (text "목표 확인 증거 조회 불가 (HTTP 503) · 서버·저장소·런타임을 확인하세요" "Goal confirmation unavailable (HTTP 503); check server availability, storage and runtime")
+  | Read_http_error (owner, status) when credential_is_current owner -> Printf.sprintf (text "목표 확인 증거 조회 실패 (HTTP %d)" "Goal confirmation read failed (HTTP %d)") status
+  | Read_http_error _ -> (text "인증 정보가 바뀌었습니다 · 증거를 다시 조회하세요" "Goal confirmation credential changed; read the proof again")
+  | Server_changed owner when credential_is_current owner -> (text "서버가 바뀌었습니다 · 서버 식별 재확인 중" "Goal confirmation server changed; rechecking server identity")
+  | Server_changed _ -> (text "인증 정보가 바뀌었습니다 · 증거를 다시 조회하세요" "Goal confirmation credential changed; read the proof again")
 
 let suspend_confirmation_read read =
   let read = match Masc_tui_fetched.current_key read with
@@ -331,43 +332,47 @@ let humanized_bytes bytes =
 let sha256_prefix sha256 =
   String.sub sha256 0 (min (String.length sha256) sha256_cells)
 
-let submitted_original_text (original : submitted_original) =
+let submitted_original_text ~ko (original : submitted_original) =
+  let text korean english = if ko then korean else english in
   match original with
   | Original_collaboration { reference; bytes } ->
-      Printf.sprintf "collaboration %s · %s" reference (humanized_bytes bytes)
+      Printf.sprintf (text "협업 원본 %s · %s" "collaboration %s · %s") reference (humanized_bytes bytes)
   | Original_note { bytes } ->
-      Printf.sprintf "note · %s" (humanized_bytes bytes)
+      Printf.sprintf (text "메모 · %s" "note · %s") (humanized_bytes bytes)
   | Original_artifact { reference; bytes; truncated } ->
-      Printf.sprintf "artifact %s · %s%s" reference (humanized_bytes bytes)
-        (if truncated then " · truncated" else "")
+      Printf.sprintf (text "자료 %s · %s%s" "artifact %s · %s%s") reference (humanized_bytes bytes)
+        (if truncated then (text " · 일부만 보존" " · truncated") else "")
   | Original_binary { reference; bytes; sha256; format } ->
-      Printf.sprintf "binary %s · %s · %s · sha256 %s"
+      Printf.sprintf (text "파일 %s · %s · %s · sha256 %s" "binary %s · %s · %s · sha256 %s")
         reference format (humanized_bytes bytes) (sha256_prefix sha256)
   | Original_unreadable { reference; reason } ->
       (match reference with
-       | Some reference -> "unreadable " ^ reference
-       | None -> "unreadable")
+       | Some reference -> (text "읽기 실패 " "unreadable ") ^ reference
+       | None -> (text "읽기 실패" "unreadable"))
       ^ " · " ^ reason
-  | Original_unknown kind -> "unknown kind " ^ kind
+  | Original_unknown kind -> (text "알 수 없는 종류 " "unknown kind ") ^ kind
 
 let confirmation_lines ~width ~ko { goal_id; phase; verdict; recorded_confirmation; submitted; _ } =
   let Goal_store.Criterion criterion = verdict.Goal_verification.criterion in
+  let text korean english = if ko then korean else english in
   let line_of tone text = { tone; text } in
+  let cells = List.fold_left (fun widest label -> max widest (Message_layout.display_width label + 2)) 0
+    (if ko then ["제목"; "목표값"; "결속"; "확인"; "제출 원본"]
+     else ["Title"; "Target"; "Binding"; "Confirmed"; "Submitted"]) in
+  let prefix label = let label = label ^ ":" in
+    label ^ String.make (max 0 (cells - Message_layout.display_width label)) ' ' in
   let sanitize text =
     Masc.Tui_terminal_text.sanitize_terminal_text (without_line_end_cr text)
   in
-  (* Rows under a label align every continuation to the value column; the
-     column is one wider than the longest label ("Evidence:"), as the
-     timeline's field is. *)
+  (* Align continuation rows by terminal cells in the selected language. *)
   let labelled ~tone label text =
-    let cells = 10 in
-    let prefix = Printf.sprintf "%-10s" (label ^ ":") in
+    let lead = prefix label in
     String.split_on_char '\n' text
     |> List.concat_map (fun text ->
          Message_layout.wrap_words ~max_cells:(max 1 (width - cells))
            (sanitize text))
     |> List.mapi (fun index text ->
-         line_of tone ((if index = 0 then prefix else String.make cells ' ') ^ text))
+         line_of tone ((if index = 0 then lead else String.make cells ' ') ^ text))
   in
   let paragraph ~indent tone text =
     String.split_on_char '\n' text
@@ -397,42 +402,41 @@ let confirmation_lines ~width ~ko { goal_id; phase; verdict; recorded_confirmati
            else "CONFIRM THIS PROOF — read through evidence, then [a]; Esc cancels")
   in
   let promise =
-    labelled ~tone:Plain "Title" criterion.title
-    @ labelled ~tone:Plain "Target"
-        (Option.value criterion.metric ~default:"not declared"
-         ^ " = " ^ Option.value criterion.target_value ~default:"not declared")
+    labelled ~tone:Plain (text "제목" "Title") criterion.title
+    @ labelled ~tone:Plain (text "목표값" "Target")
+        (Option.value criterion.metric ~default:(text "미지정" "not declared")
+         ^ " = " ^ Option.value criterion.target_value ~default:(text "미지정" "not declared"))
   in
   let binding =
-    labelled ~tone:Quiet "Binding"
-      (Printf.sprintf "goal %s · criterion %s · request %s · verifier run %s"
+    labelled ~tone:Quiet (text "결속" "Binding")
+      (Printf.sprintf (text "목표 %s · 기준 %s · 요청 %s · 검증 실행 %s" "goal %s · criterion %s · request %s · verifier run %s")
          goal_id criterion.revision verdict.request_id
          verdict.verification_run_id)
   in
   let recorded = match recorded_confirmation with
     | None -> []
     | Some (recorded : Goal_verification.confirmation) ->
-        labelled ~tone:Note "Confirmed" (recorded.operator_id ^ " · " ^ recorded.confirmed_at)
+        labelled ~tone:Note (text "확인" "Confirmed") (recorded.operator_id ^ " · " ^ recorded.confirmed_at)
         @ (if phase = Goal_phase.Completed then [] else
           paragraph ~indent:0 Waiting (if ko
             then "운영자 확인은 저장되었습니다. 목표 완료와 후속 처리는 아직 확인되지 않았습니다."
             else "Operator confirmation is recorded; Goal completion and follow-up are not yet verified.")) in
   let evidence =
-    line_of Plain "Evidence:" :: paragraph ~indent:2 Plain verdict.evidence
+    line_of Plain (text "근거:" "Evidence:") :: paragraph ~indent:2 Plain verdict.evidence
   in
   let submitted =
     match submitted with
     | [] -> []
     | originals ->
-        let cells = 10 in
         List.concat_map
           (fun original ->
              Message_layout.wrap_words ~max_cells:(max 1 (width - cells))
-               (submitted_original_text original))
+               (submitted_original_text ~ko original))
           originals
-        |> List.mapi (fun index text ->
+        |> List.mapi (fun index line ->
                line_of Plain
-                 ((if index = 0 then Printf.sprintf "%-10s" "Submitted:" else String.make cells ' ')
-                  ^ text))
+                 ((if index = 0 then prefix (text "제출 원본" "Submitted") else String.make cells ' ')
+                  ^ line))
   in
   let blank = [ line_of Quiet "" ] in
   let coverage =
@@ -461,10 +465,11 @@ let verdict ~width tone headline reason =
    word is not what holds it: no judge model runs in these steps, only
    original, goal store and ledger access. The heading says which step failed;
    the store's reason wraps under it like a verdict's. *)
-let unreconciled_heading = function
-  | Goal_reconcile_step.Reconcile_proof -> "verifier could not apply the committed proof"
-  | Goal_reconcile_step.Rearm_proof -> "verifier could not resolve the proof request"
-  | Goal_reconcile_step.Read_original -> "verifier could not read the retained request"
+let unreconciled_heading ~ko =
+  let text korean english = if ko then korean else english in function
+  | Goal_reconcile_step.Reconcile_proof -> (text "검증기가 확정 근거를 적용하지 못함" "verifier could not apply the committed proof")
+  | Goal_reconcile_step.Rearm_proof -> (text "검증기가 증명 요청을 확인하지 못함" "verifier could not resolve the proof request")
+  | Goal_reconcile_step.Read_original -> (text "검증기가 보존된 요청을 읽지 못함" "verifier could not read the retained request")
 
 (* [c] on a Verifying goal sends [request_complete] again: under the goal lock
    it applies a committed proof or retries the matching pending request. An
@@ -472,46 +477,48 @@ let unreconciled_heading = function
    reopens the goal, which archives
    a committed proof, so it is offered as taking the goal back, never as the
    way to unstick it. *)
-let verifying_next_step ~can_retry unreconciled =
+let verifying_next_step ~ko ~can_retry unreconciled =
+  let text korean english = if ko then korean else english in
   if not can_retry then
     ( Unreadable
-    , "verification binding unavailable - a prior review may still run; check connection, server storage and runtime, then [r] refresh; [x] requests drop" )
+    , (text "검증 결속 미확인 · 기존 검토가 진행 중일 수 있습니다. 연결·저장소·런타임을 확인하고 [r]로 재조회하세요. [x]:포기 요청" "verification binding unavailable - a prior review may still run; check connection, server storage and runtime, then [r] refresh; [x] requests drop") )
   else match unreconciled with
   | Some (_ : Tui_decode.verifier_unreconciled) ->
     ( Refused
-    , "the verifier could not settle it - [c] requests recovery; [o] takes it back, [x] drops it" )
+    , (text "검증 결과 반영 실패 · [c]:복구 요청 · [o]:재개 요청 · [x]:포기 요청" "the verifier could not settle it - [c] requests recovery; [o] takes it back, [x] drops it") )
   | None ->
     ( Waiting
-    , "verification unresolved - [c] requests recovery; [o] takes it back, [x] drops it" )
+    , (text "검증 미해결 · [c]:복구 요청 · [o]:재개 요청 · [x]:포기 요청" "verification unresolved - [c] requests recovery; [o] takes it back, [x] drops it") )
 
-let unreconciled_lines ~width (blocked : Tui_decode.verifier_unreconciled) =
-  verdict ~width:(max 1 width) Refused (unreconciled_heading blocked.vu_step)
+let unreconciled_lines ~ko ~width (blocked : Tui_decode.verifier_unreconciled) =
+  verdict ~width:(max 1 width) Refused (unreconciled_heading ~ko blocked.vu_step)
     (Some blocked.vu_detail)
 
-let note ~width = function
+let note ~ko ~width = function
   | None -> []
-  | Some note -> { tone = Note; text = "note" } :: wrapped ~width Note note
+  | Some note -> { tone = Note; text = (if ko then "메모" else "note") } :: wrapped ~width Note note
 
-let body ~width proof last_review_note =
+let body ~ko ~width proof last_review_note =
+  let text korean english = if ko then korean else english in
   let width = max 1 width in
   match (proof : Tui_decode.goal_proof) with
   | Tui_decode.Proof_proven reason ->
-      verdict ~width Proven "proven" reason @ note ~width last_review_note
+      verdict ~width Proven (text "검증 통과" "proven") reason @ note ~ko ~width last_review_note
   | Tui_decode.Proof_refuted reason ->
-      verdict ~width Refused "refused" reason @ note ~width last_review_note
+      verdict ~width Refused (text "검증 거절" "refused") reason @ note ~ko ~width last_review_note
   | Tui_decode.Proof_pending ->
-      { tone = Waiting; text = "verification result pending" }
-      :: note ~width last_review_note
+      { tone = Waiting; text = (text "완료 판정 대기" "verification result pending") }
+      :: note ~ko ~width last_review_note
   | Tui_decode.Proof_stale evidence ->
-      verdict ~width Note "criterion changed; previous proof is historical" evidence
-      @ note ~width last_review_note
+      verdict ~width Note (text "기준 변경 · 이전 근거는 기록으로 보존됨" "criterion changed; previous proof is historical") evidence
+      @ note ~ko ~width last_review_note
   | Tui_decode.Proof_unreadable detail ->
-      verdict ~width Unreadable "verification ledger unreadable" detail
-      @ note ~width last_review_note
+      verdict ~width Unreadable (text "검증 기록 읽기 실패" "verification ledger unreadable") detail
+      @ note ~ko ~width last_review_note
   | Tui_decode.Proof_idle ->
-      (match note ~width last_review_note with
-       | [] -> [ { tone = Quiet; text = "no verdict on the ledger" } ]
-       | rows -> { tone = Quiet; text = "no verdict on the ledger" } :: rows)
+      (match note ~ko ~width last_review_note with
+       | [] -> [ { tone = Quiet; text = (text "판정 미기록" "no verdict on the ledger") } ]
+       | rows -> { tone = Quiet; text = (text "판정 미기록" "no verdict on the ledger") } :: rows)
 
 let criterion_review_lines ~width ~ko review =
   let text korean english = if ko then korean else english in
@@ -534,7 +541,7 @@ let criterion_review_lines ~width ~ko review =
         | Tui_decode.Criterion_needs_revision reason -> Refused, text "성공 기준 수정 필요" "Criterion needs revision", Some reason
         | Tui_decode.Criterion_superseded -> Quiet, text "기준 검토 대체됨" "Criterion review superseded", observed.detail in
       verdict ~width tone headline reason
-      @ wrapped ~width Quiet (text "기준 revision: " "Criterion revision: " ^ observed.criterion_revision)
+      @ wrapped ~width Quiet (text "기준 버전: " "Criterion revision: " ^ observed.criterion_revision)
       @ wrapped ~width Quiet (text "검토 요청: " "Review request: " ^ observed.request_id) in
   rows @ scope
 
@@ -594,14 +601,15 @@ let timeline_unavailability_detail = function
   | Tui_decode.Approval_queue_failure detail ->
       "Approval queue unavailable · Cause: " ^ detail
 
-let timeline ~width ~goal_id
+let timeline ~ko ~width ~goal_id
     (loaded : (string, Tui_decode.goal_timeline_event list) Masc_tui_fetched.t) =
+  let text korean english = if ko then korean else english in
   let header =
-    { tone = Heading; text = "RELATED ACTIVITY · latest state per linked item" }
+    { tone = Heading; text = (text "관련 기록 · 연결 항목별 마지막 상태" "RELATED ACTIVITY · latest state per linked item") }
   in
   let observed = function
         | [] ->
-            [ { tone = Quiet; text = "  (no events recorded)" } ]
+            [ { tone = Quiet; text = (text "  (기록 없음)" "  (no events recorded)") } ]
         | events ->
             List.concat_map
               (fun (event : Tui_decode.goal_timeline_event) ->
@@ -618,18 +626,18 @@ let timeline ~width ~goal_id
     | Masc_tui_fetched.Ready value -> observed value
     | Masc_tui_fetched.Stale (value, detail) ->
         wrapped ~width Unreadable
-          ("  refresh failed; previous observation: " ^ Terminal_text.single_line detail)
+          ((text "  갱신 실패 · 이전 관측: " "  refresh failed; previous observation: ") ^ Terminal_text.single_line detail)
         @ observed value
     | Masc_tui_fetched.Failed detail -> wrapped ~width Unreadable
-        ("  timeline load failed: " ^ Terminal_text.single_line detail)
-    | Masc_tui_fetched.Absent -> [ { tone = Quiet; text = "  timeline not requested" } ]
-    | Masc_tui_fetched.Loading -> [ { tone = Quiet; text = "  loading..." } ]
+        ((text "  기록 조회 실패: " "  timeline load failed: ") ^ Terminal_text.single_line detail)
+    | Masc_tui_fetched.Absent -> [ { tone = Quiet; text = (text "  기록 미조회" "  timeline not requested") } ]
+    | Masc_tui_fetched.Loading -> [ { tone = Quiet; text = (text "  조회 중" "  loading...") } ]
   in
   let pending =
     if not (Masc_tui_fetched.in_flight loaded) then []
     else match view with
       | Masc_tui_fetched.Ready _ | Masc_tui_fetched.Stale _ ->
-          [ { tone = Quiet; text = "  refreshing; previous observation" } ]
-      | Masc_tui_fetched.Failed _ -> [ { tone = Quiet; text = "  retrying; previous failure remains" } ]
+          [ { tone = Quiet; text = (text "  갱신 중 · 이전 관측" "  refreshing; previous observation") } ]
+      | Masc_tui_fetched.Failed _ -> [ { tone = Quiet; text = (text "  재조회 중 · 이전 실패 유지" "  retrying; previous failure remains") } ]
       | Masc_tui_fetched.Absent | Masc_tui_fetched.Loading -> [] in
   ({ tone = Quiet; text = "" } :: header :: (pending @ rows))

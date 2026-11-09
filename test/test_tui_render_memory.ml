@@ -74,7 +74,7 @@ let test_detail_keeps_the_claim_line_breaks () =
     }
   in
   check_claim_rows ~what:"fact"
-    (Render_memory.memory_fact_detail_lines ~cols:40 (Types.Memory_row_fact fact));
+    (Render_memory.memory_fact_detail_lines ~ko:false ~cols:40 (Types.Memory_row_fact fact));
   let sfact : Masc.Tui_decode_memory_facts.memory_source_fact =
     { msf_keeper = "alpha"
     ; msf_claim = multi_line_claim
@@ -84,7 +84,7 @@ let test_detail_keeps_the_claim_line_breaks () =
     }
   in
   check_claim_rows ~what:"source-bound fact"
-    (Render_memory.memory_fact_detail_lines ~cols:40
+    (Render_memory.memory_fact_detail_lines ~ko:false ~cols:40
        (Types.Memory_row_source_fact sfact))
 ;;
 
@@ -398,7 +398,7 @@ let test_category_rail_wrapped_range_and_overflow () =
   let compact text = String.split_on_char ' ' text |> String.concat "" in
   List.iter
     (fun cols ->
-      let lines = Render_memory.memory_fact_detail_lines ~cols fact_row in
+      let lines = Render_memory.memory_fact_detail_lines ~ko:false ~cols fact_row in
       let body = match lines with [] -> [] | _heading :: body -> body in
       List.iter
         (fun line ->
@@ -412,7 +412,7 @@ let test_category_rail_wrapped_range_and_overflow () =
         (contains (compact long_cat_name) text))
     [ 80; 40; 30; 16 ];
   let detail_cols = 40 in
-  let detail_lines = Render_memory.memory_fact_detail_lines ~cols:detail_cols fact_row in
+  let detail_lines = Render_memory.memory_fact_detail_lines ~ko:false ~cols:detail_cols fact_row in
   let count = List.length detail_lines in
   let small_height = 4 in
   check bool "detail lines overflow small viewport" true (count > small_height);

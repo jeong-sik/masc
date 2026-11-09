@@ -306,6 +306,43 @@ let test_search_matches_the_keeper_only_where_it_is_shown () =
     (List.length (Types.memory_fact_rows fleet))
 ;;
 
+let test_counts_preserve_store_availability () =
+  let open Masc.Tui_decode_memory_facts in
+  let ordinary = make_fact ~category:Cat.Constraint ~claim:"keep the source" "one" in
+  let source = make_source_fact ~path:"source.ml" ~claim:"bound fact" "sha" in
+  let dropped = make_invalidation ~path:"old.ml" ~reason:"source_changed" 10. in
+  let snapshot = make_snapshot ~ordinary_facts:[ordinary] ~source_facts:[source]
+      ~invalidations:[dropped] in
+  let expect label wanted snapshot scope =
+    check (option int) label wanted (memory_fact_count ~complete:true snapshot scope) in
+  expect "all stored rows" (Some 3) snapshot All_facts;
+  expect "ordinary category" (Some 1) snapshot (Ordinary_facts (Some Cat.Constraint));
+  expect "known empty category" (Some 0) snapshot (Ordinary_facts (Some Cat.Goal));
+  let missing = { snapshot with mfs_ordinary = Memory_store_absent;
+      mfs_source = Memory_store_absent } in
+  List.iter (expect "missing store is known empty" (Some 0) missing)
+    [All_facts; Ordinary_facts None; Ordinary_facts (Some Cat.Constraint); Source_facts; Dropped_facts];
+  let ordinary_failed = { snapshot with mfs_ordinary = Memory_store_read_error "ordinary denied" } in
+  List.iter (expect "ordinary count is unknown" None ordinary_failed)
+    [All_facts; Ordinary_facts None; Ordinary_facts (Some Cat.Goal)];
+  expect "readable source survives" (Some 1) ordinary_failed Source_facts;
+  expect "readable invalidations survive" (Some 1) ordinary_failed Dropped_facts;
+  let source_failed = { snapshot with mfs_source = Memory_store_read_error "source denied" } in
+  List.iter (expect "source count is unknown" None source_failed)
+    [All_facts; Source_facts; Dropped_facts];
+  expect "readable ordinary survives" (Some 1) source_failed (Ordinary_facts None);
+  List.iter (fun merged ->
+    List.iter (fun scope ->
+      check (option int) "partial fleet totals are unknown" None
+        (memory_fact_count ~complete:false merged scope))
+      [All_facts; Ordinary_facts None; Ordinary_facts (Some Cat.Constraint); Source_facts; Dropped_facts])
+    [make_snapshot ~ordinary_facts:[] ~source_facts:[] ~invalidations:[]; snapshot];
+  expect "complete merged empty is known empty" (Some 0)
+    (make_snapshot ~ordinary_facts:[] ~source_facts:[] ~invalidations:[]) All_facts;
+  expect "events failure does not erase stored rows" (Some 3)
+    { snapshot with mfs_events_read_error = Some "events denied" } All_facts
+;;
+
 let () =
   run "masc_tui_memory_facts_explorer"
     [ ( "navigation"
@@ -322,7 +359,7 @@ let () =
         ; test_case "search matches the keeper only where it is shown" `Quick
             test_search_matches_the_keeper_only_where_it_is_shown
         ] )
-    ; ( "layout"
-      , [] )
+    ; ( "observed counts"
+      , [test_case "missing and unreadable stores remain distinct" `Quick test_counts_preserve_store_availability] )
     ]
 ;;

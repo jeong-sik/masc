@@ -769,7 +769,7 @@ let keeper_health_entry_to_json ~now (h : keeper_health) =
     ]
 ;;
 
-let schema = "keeper.memory_os.current_health.v10"
+let schema = "keeper.memory_os.current_health.v11"
 
 let fleet_cache_key ~base_path = "keeper_memory_health:" ^ base_path
 

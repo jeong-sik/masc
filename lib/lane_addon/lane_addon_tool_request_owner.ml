@@ -102,6 +102,7 @@ let same_listed (a : Record.t) (b : Record.t) =
 let listed (r : retained) : Record.t =
   {scope=r.scope; request_id=r.request_id; installation_id=r.installation_id; package_id=r.package_id;
    tool=r.tool; request_digest=r.request_digest; summary=r.summary; progress=r.progress}
+let record_to_json record = to_json (with_request record `Null)
 let same_record a b = same_listed (listed a) (listed b)
 let load ~store ~scope ~request_id =
   let* () = validate_identity ["scope", scope; "request_id", request_id] in
@@ -365,6 +366,15 @@ let settle ~store ~date (expected : Record.t) =
 let settled ~store ~scope ~date ~request_id =
   Lane_addon_store.tool_request_settled store ~scope ~date ~request_id
   |> Result.map_error (fun detail -> Store_unavailable detail)
+let load_settled ~store ~scope ~date ~request_id =
+  let unavailable detail = Store_unavailable detail in
+  let* () = validate_identity ["scope",scope;"request_id",request_id] in
+  let* record = Lane_addon_store.load_settled_tool_request_owner store ~scope ~date ~request_id
+    |> Result.map_error unavailable in
+  match record with
+  | None -> Ok None
+  | Some json -> Result.map Option.some (decode ~scope ~request_id json)
+    |> Result.map_error unavailable
 let settle_error_to_string = function
   | Settle_unavailable detail -> "Add-on request ownership unavailable: " ^ detail
   | Settle_changed -> "Original Add-on request changed before it was settled"

@@ -41,6 +41,13 @@
 - 신뢰도: `High` 시각과 문구. 리더가 새 문장을 어디서 가져왔는지는 모른다.
 - 제한조건: 리더 턴이 읽은 checkout 에 라우팅 문서 병합이 언제 반영됐는지 확인하지 않았다.
 
+- 항목: [근거] 리더의 5분 순회 예약 메시지에 옛 규칙 "판정: Draft는 검토한 범위에 맞는 COMMENT를 남긴다"가 있었고, 예약이 울릴 때마다 「Scheduled Wake」 절로 리더 턴에 들어갔다(01:22~05:57Z 리더 턴 201개 중 56개).
+  05:17Z 부터 리더 위임에 옛 문장이 다시 실렸고, 05:18~05:58Z 에 Draft PR 8개(#50418·#50419·#50433·#50435·#50439·#50440·#50441·#50443)에 판정 대신 COMMENT 가 달렸다. 06:01:06Z 에 운영자 권한으로 예약 메시지에서 그 문장을 지웠다.
+- 출처: `<base-path>/.masc/schedules.json`(읽기 전용 조회, 수정은 `POST /api/v1/tools/masc_schedule_update`), 리더 `raw-traces/turn-*.jsonl` 첫 줄 `prompt`, GitHub GraphQL reviews
+- 확인일시: `2026-11-09T15:04:00+09:00`
+- 신뢰도: `High` 문장 위치와 시각. `Medium` 01:47Z 옛 위임의 출처가 이 메시지라는 해석(그 턴에도 들어 있었다는 사실로 판단).
+- 제한조건: 05:17Z 에 옛 문장으로 돌아간 계기는 확인하지 않았다. 수정 뒤 확인은 리더 턴 4개(06:01~06:03Z)뿐이다.
+
 - 항목: [근거] "Draft 면 COMMENT" 절은 라우팅 문서와 샘플 지시문에 있었다. 공유 프롬프트 `keeper.md` 에는 "COMMENT 전담자" 역할 문장만 있었고 Draft 언급은 없었다.
 - 출처: 커밋 `3687b61fc2d6`(#50261) diff 의 `config/prompts/pr-review-routing.md`, `config/keepers/code-reviewer.toml`, `config/prompts/keeper.md`
 - 확인일시: `2026-11-09T14:00:00+09:00`

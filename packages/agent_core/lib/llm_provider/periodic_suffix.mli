@@ -19,6 +19,3 @@ val find : string -> max_period:int -> min_copies:int -> t option
     min_copies * period]). [None] when no suffix qualifies, and for
     [max_period < 1] or [min_copies < 2]. Linear in the string length
     (prefix function of the reversed string). *)
-
-val cycle : string -> t -> string
-(** The repeated unit: the first [period] bytes of the periodic suffix. *)

@@ -67,3 +67,27 @@ val block :
     picks from them and [render] writes the block. A queue that cannot be read
     gives [None] and calls [on_unavailable] with the reason; the tracker is
     not touched, so the next round lists what this one could not. *)
+
+(** One block for a reader whose blocks can overlap, such as the tool results
+    of an official client that runs two tools side by side. {!block} counts the
+    rows of its latest round when {!confirm} runs, so a second block asked for
+    before that would take over the first one's rows. A claim keeps its own
+    rows instead. *)
+type claim =
+  { round : round  (** The rows [text] lists and the count it leaves for later. *)
+  ; text : string
+  ; confirm : unit -> unit
+    (** The block reached the model. Counts exactly the rows of [round], once
+        the caller knows the text was written to the client. A claim that
+        never confirms leaves its rows to the next one. *)
+  }
+
+val claim :
+  tracker ->
+  now:float ->
+  read:(unit -> (Keeper_event_queue_state.pending_selection list, string) result) ->
+  on_unavailable:(string -> unit) ->
+  claim option
+(** Like {!block}, with the confirmation held by the claim. [None] when nothing
+    new is listed or the queue cannot be read ([on_unavailable] is called for
+    the second). The tracker's own {!confirm} does not count a claim's rows. *)

@@ -17,26 +17,28 @@ let with_workspace f =
 let project_with_producer ?(result_scope=None) ?(hooks=Agent_core.Hooks.empty)
     ?(effect_state = Keeper_tools_agent_core.Terminal_effect_open)
     ?(on_result_handoff = fun ~invocation:_ ~content:_ -> ())
+    ?(loading_plan = Host.All_on_demand) ?read_arrived ?(raw_trace_run = None)
     ~base_path ~stop ~terminal_error handler =
   let tool = Agent_core.Tool.create ~name:"CompleteEffect" ~description:"Complete an effect once"
       ~parameters:[{Agent_core.Types.name="input";description="original call data";
         param_type=String;required=false}] handler in
-  match Host.dynamic_tools ~result_scope ~base_path ~content_transport:Runtime_official_client_tool.Mcp
+  match Host.dynamic_tools ~result_scope ~base_path ?read_arrived
+    ~content_transport:Runtime_official_client_tool.Mcp
     ~accepts_image_input:true ~tool_approval:None ~runtime_label:"host-result-fixture"
-    ~keeper_name ~turn_count:7 ~tools:[tool] ~loading_plan:Host.All_on_demand
+    ~keeper_name ~turn_count:7 ~tools:[tool] ~loading_plan
     ~hooks ~event_bus:None ~context_injector:None
     ~context:(Some (Agent_core.Context.create_sync ()))
     ~terminal_effect_state:(fun () -> effect_state)
     ~terminal_error ~pre_tool_rejects:(ref []) ~on_tool_boundary:(fun ~tool_name:_ -> Ok stop)
-    ~on_result_handoff ~raw_trace_run:None () with
+    ~on_result_handoff ~raw_trace_run () with
   | Ok ([tool], producer) -> tool, producer
   | Ok _ -> fail "one original tool required"
   | Error error -> fail (Agent_core.Error.to_string error)
 
-let project ?result_scope ?hooks ?effect_state ?on_result_handoff
-    ~base_path ~stop ~terminal_error handler =
+let project ?result_scope ?hooks ?effect_state ?on_result_handoff ?loading_plan ?read_arrived
+    ?raw_trace_run ~base_path ~stop ~terminal_error handler =
   fst (project_with_producer ?result_scope ?hooks ?effect_state ?on_result_handoff
-    ~base_path ~stop ~terminal_error handler)
+    ?loading_plan ?read_arrived ?raw_trace_run ~base_path ~stop ~terminal_error handler)
 
 let stop = Host.Terminal_tool_boundary {tool_name="CompleteEffect";outcome=Durable_stimulus_deferred}
 let load base_path = get (Outbox.load ~base_path ~keeper_name)
@@ -1088,6 +1090,170 @@ let test_run_carrier_reprojection_waits_for_the_load () = with_workspace (fun ba
     (Outbox.run_carrier_reprojection retained ~then_:memory ~refusal);
   check int "the memory hook ran again" 2 !calls)
 
+(* Rows that reached the Keeper's queue while the client ran the turn go out
+   after the tool's own text, once each, and the original result keeps its
+   retention marker. *)
+let arrived_row ~arrival ~arrived_at receipt : Keeper_event_queue_state.pending_selection =
+  { Keeper_event_queue_state.source =
+      { Keeper_event_queue.post_id = Printf.sprintf "post-%Ld" arrival
+      ; urgency = Keeper_event_queue.Normal
+      ; arrived_at
+      ; payload = Keeper_event_queue.Tool_result_ready receipt
+      }
+  ; admitted_revision = 1L
+  ; arrival
+  ; checkpoint_retentions = 0
+  ; first_admitted_at = None
+  }
+
+let after_projection () = Time_compat.now () +. 60.
+let arrival_banner = "--- Arrived While This Turn Ran ---"
+let has text needle = String_util.contains_substring text needle
+
+let notify (result : Host.dynamic_tool_result) =
+  match result.on_response_sent with
+  | Some notify -> notify ()
+  | None -> fail "the result has no physical-write token"
+
+let test_arrived_rows_follow_the_tool_text_and_the_original_stays_marked () = with_workspace (fun base_path ->
+  Eio.Switch.run (fun result_scope ->
+    let rows = [arrived_row ~arrival:1L ~arrived_at:(after_projection ()) "background-run"] in
+    let tool, producer = project_with_producer ~result_scope:(Some result_scope)
+      ~read_arrived:(fun () -> Ok rows)
+      ~base_path ~stop:None ~terminal_error:(ref None) (fun _ -> returned ()) in
+    let producer = match producer with Some producer -> producer | None -> fail "missing actual producer" in
+    let first = tool.call ~call_id:"first-with-arrival" (`Assoc []) in
+    check bool "the tool's own text comes first" true (String.starts_with ~prefix:marker first.content);
+    check bool "the block follows it" true (has first.content arrival_banner);
+    check bool "the block names the row" true
+      (has first.content "tool_result_ready receipt_id=background-run");
+    (match first.content_blocks with
+     | Some [Llm_provider.Types.Text original; Llm_provider.Types.Text block] ->
+       check string "the original block is untouched" "original-block-bytes" original;
+       check bool "the client reads the block as its own item" true (has block arrival_banner)
+     | Some _ | None -> fail "the original block and one block of arrived rows");
+    check bool "the response can be observed as projected" true
+      (Option.is_some (Runtime_official_client_tool.response_observer Mcp first));
+    notify first;
+    let second = tool.call ~call_id:"second-after-the-write" (`Assoc []) in
+    check string "a row the client already received is not listed again" marker second.content;
+    notify second;
+    check int "the marker of each original ran at its write, block or not" 2
+      (List.length (Outbox.receipt_ids (Outbox.close_delivery_frontier producer)))))
+
+let test_a_text_only_result_carries_the_block_in_its_content () = with_workspace (fun base_path ->
+  let rows = [arrived_row ~arrival:1L ~arrived_at:(after_projection ()) "background-run"] in
+  let tool = project ~read_arrived:(fun () -> Ok rows)
+    ~base_path ~stop:None ~terminal_error:(ref None)
+    (fun _ -> Ok {Agent_core.Types.content=marker;content_blocks=None;_meta=None}) in
+  let result = tool.call ~call_id:"text-only" (`Assoc []) in
+  check bool "the block follows the text" true
+    (String.starts_with ~prefix:marker result.content && has result.content arrival_banner);
+  check bool "no blocks are invented for a text-only result" true
+    (Option.is_none result.content_blocks))
+
+let test_results_asked_before_a_write_both_list_the_row () = with_workspace (fun base_path ->
+  let rows = [arrived_row ~arrival:1L ~arrived_at:(after_projection ()) "background-run"] in
+  let tool = project ~read_arrived:(fun () -> Ok rows)
+    ~base_path ~stop:None ~terminal_error:(ref None) (fun _ -> returned ()) in
+  let first = tool.call ~call_id:"side-by-side-one" (`Assoc []) in
+  let second = tool.call ~call_id:"side-by-side-two" (`Assoc []) in
+  check bool "the first lists the row" true (has first.content arrival_banner);
+  check bool "the second lists it too: nothing was written yet" true (has second.content arrival_banner);
+  notify first;
+  let third = tool.call ~call_id:"side-by-side-three" (`Assoc []) in
+  check string "the first write counted the row" marker third.content)
+
+let test_a_result_the_block_would_push_past_its_bound_goes_out_as_it_was () = with_workspace (fun base_path ->
+  let rows = [arrived_row ~arrival:1L ~arrived_at:(after_projection ()) "background-run"] in
+  let loading_plan = Host.Declared
+    {on_demand=[]; result_bounds=["CompleteEffect", String.length marker + 5]} in
+  let tool = project ~loading_plan ~read_arrived:(fun () -> Ok rows)
+    ~base_path ~stop:None ~terminal_error:(ref None) (fun _ -> returned ()) in
+  let result = tool.call ~call_id:"bounded" (`Assoc []) in
+  check string "the bounded result is unchanged" marker result.content;
+  check bool "its own marker is still there" true (Option.is_some result.on_response_sent))
+
+let test_a_result_that_ends_the_turn_carries_no_block () = with_workspace (fun base_path ->
+  let rows = [arrived_row ~arrival:1L ~arrived_at:(after_projection ()) "background-run"] in
+  let tool = project ~read_arrived:(fun () -> Ok rows)
+    ~base_path ~stop:(Some stop) ~terminal_error:(ref None) (fun _ -> returned ()) in
+  let result = tool.call ~call_id:"terminal" (`Assoc []) in
+  check bool "the result stops the turn" true (Option.is_some result.abort_turn);
+  check string "so nothing follows it" marker result.content)
+
+let test_an_unreadable_queue_costs_the_result_nothing () = with_workspace (fun base_path ->
+  let tool = project ~read_arrived:(fun () -> Error "queue file locked")
+    ~base_path ~stop:None ~terminal_error:(ref None) (fun _ -> returned ()) in
+  let result = tool.call ~call_id:"unreadable" (`Assoc []) in
+  check string "the result goes out as it was" marker result.content;
+  check bool "its own marker is still there" true (Option.is_some result.on_response_sent))
+
+let test_a_row_name_cut_inside_a_character_keeps_the_marker_bound () = with_workspace (fun base_path ->
+  let cut = "\xEB\xA1\x9C\xEC\x9D" in
+  let rows = [arrived_row ~arrival:1L ~arrived_at:(after_projection ()) cut] in
+  let tool = project ~read_arrived:(fun () -> Ok rows)
+    ~base_path ~stop:None ~terminal_error:(ref None) (fun _ -> returned ()) in
+  let result = tool.call ~call_id:"cut-row-name" (`Assoc []) in
+  check bool "the block was appended" true (has result.content arrival_banner);
+  check bool "the string sent to the client is valid UTF-8" true (String.is_valid_utf_8 result.content);
+  check bool "so the observer is still bound" true
+    (Option.is_some (Runtime_official_client_tool.response_observer Mcp result)))
+
+(* A row name cut inside a character is repaired to a longer text, so a bound
+   that is judged before the repair lets the result pass it by a few bytes. *)
+let test_the_bound_is_judged_on_the_text_the_client_receives () = with_workspace (fun base_path ->
+  let cut = "\xEB\xA1\x9C\xEC\x9D" in
+  let rows = [arrived_row ~arrival:1L ~arrived_at:(after_projection ()) cut] in
+  let call loading_plan call_id =
+    let tool = project ~loading_plan ~read_arrived:(fun () -> Ok rows)
+      ~base_path ~stop:None ~terminal_error:(ref None) (fun _ -> returned ()) in
+    tool.call ~call_id (`Assoc []) in
+  let bounded limit = Host.Declared {on_demand=[]; result_bounds=["CompleteEffect", limit]} in
+  let full = String.length (call Host.All_on_demand "unbounded").content in
+  check string "one byte under the repaired length: left alone" marker
+    (call (bounded (full - 1)) "one-under").content;
+  check bool "at the repaired length: appended" true
+    (has (call (bounded full) "exact").content arrival_banner))
+
+let test_a_row_older_than_the_projection_is_not_listed () = with_workspace (fun base_path ->
+  let rows = [arrived_row ~arrival:1L ~arrived_at:(Time_compat.now () -. 60.) "background-run"] in
+  let tool = project ~read_arrived:(fun () -> Ok rows)
+    ~base_path ~stop:None ~terminal_error:(ref None) (fun _ -> returned ()) in
+  let result = tool.call ~call_id:"older-row" (`Assoc []) in
+  check string "the turn's first request already carried it" marker result.content)
+
+(* The measurement reads this record: each listed row by queue entry number and
+   arrival time, and the tool whose result carried the block. *)
+let test_an_appended_block_is_recorded_in_the_raw_trace () = with_workspace (fun base_path ->
+  let path = Filename.concat base_path "raw-trace.jsonl" in
+  let traced = function Ok value -> value | Error error -> fail (Agent_core.Error.to_string error) in
+  let trace = traced (Agent_core.Raw_trace.create ~path ()) in
+  let active = traced (Agent_core.Raw_trace.start_run trace ~agent_name:keeper_name ~prompt:"fixture" ()) in
+  let arrived_at = after_projection () in
+  let rows = [arrived_row ~arrival:7L ~arrived_at "background-run"] in
+  let tool = project ~raw_trace_run:(Some active) ~read_arrived:(fun () -> Ok rows)
+    ~base_path ~stop:None ~terminal_error:(ref None) (fun _ -> returned ()) in
+  ignore (tool.call ~call_id:"traced" (`Assoc []));
+  let projections = traced (Agent_core.Raw_trace.read_all ~path ())
+    |> List.filter (fun (record : Agent_core.Raw_trace.record) ->
+         record.hook_name = Some "arrived_stimuli_projection") in
+  match projections with
+  | [record] ->
+    check (option string) "the record says the block was appended" (Some "appended") record.hook_decision;
+    let detail = match record.hook_detail with
+      | Some text -> Yojson.Safe.from_string text
+      | None -> fail "the record has no detail" in
+    let open Yojson.Safe.Util in
+    check string "the tool whose result carried it" "CompleteEffect" (detail |> member "tool" |> to_string);
+    check int "no row waits for a later result" 0 (detail |> member "later" |> to_int);
+    (match detail |> member "rows" |> to_list with
+     | [row] ->
+       check int "the row's queue entry number" 7 (row |> member "arrival" |> to_int);
+       check (float 0.001) "the row's arrival time" arrived_at (row |> member "arrived_at" |> to_float)
+     | rows -> failf "one listed row is expected, got %d" (List.length rows))
+  | records -> failf "one projection record is expected, got %d" (List.length records))
+
 let () = run "Original official-client host result retention"
   ["durable host stop",[
     test_case "typed stop retains original before transport continuation" `Quick test_stop_retains_before_transport_return;
@@ -1113,6 +1279,27 @@ let () = run "Original official-client host result retention"
     test_case "nested signed zero stays distinct" `Quick test_shared_nested_signed_zero;
     test_case "representation choice matches serialized size" `Quick test_representation_choice_uses_exact_serialized_size;
     test_case "mixed groups match serialized size" `Quick test_mixed_groups_use_exact_serialized_size];
+   "arrived rows after a tool result",[
+    test_case "rows follow the tool text and the original stays marked" `Quick
+      test_arrived_rows_follow_the_tool_text_and_the_original_stays_marked;
+    test_case "a text-only result carries the block in its content" `Quick
+      test_a_text_only_result_carries_the_block_in_its_content;
+    test_case "results asked before a write both list the row" `Quick
+      test_results_asked_before_a_write_both_list_the_row;
+    test_case "a result past its bound goes out as it was" `Quick
+      test_a_result_the_block_would_push_past_its_bound_goes_out_as_it_was;
+    test_case "a result that ends the turn carries no block" `Quick
+      test_a_result_that_ends_the_turn_carries_no_block;
+    test_case "an unreadable queue costs the result nothing" `Quick
+      test_an_unreadable_queue_costs_the_result_nothing;
+    test_case "a row name cut inside a character keeps the marker bound" `Quick
+      test_a_row_name_cut_inside_a_character_keeps_the_marker_bound;
+    test_case "the bound is judged on the text the client receives" `Quick
+      test_the_bound_is_judged_on_the_text_the_client_receives;
+    test_case "a row older than the projection is not listed" `Quick
+      test_a_row_older_than_the_projection_is_not_listed;
+    test_case "an appended block is recorded in the raw trace" `Quick
+      test_an_appended_block_is_recorded_in_the_raw_trace];
    "retained-results carrier form",[
     test_case "address text differs only in numbers" `Quick test_address_text_differs_only_in_numbers;
     test_case "address form carries the inline text by one blob" `Quick

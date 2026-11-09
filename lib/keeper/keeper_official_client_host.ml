@@ -1329,6 +1329,7 @@ type raw_trace_stage =
   | Native_tool_start
   | Native_tool_finish
   | Context_compaction
+  | Arrival_projection
   | Run_finish
 
 let raw_trace_stage_label = function
@@ -1341,6 +1342,7 @@ let raw_trace_stage_label = function
   | Native_tool_start -> "native_tool_start"
   | Native_tool_finish -> "native_tool_finish"
   | Context_compaction -> "context_compaction"
+  | Arrival_projection -> "arrival_projection"
   | Run_finish -> "run_finish"
 ;;
 
@@ -1644,12 +1646,114 @@ let retain_original_result producer ~invocation ~call_id ~tool_name ~input
     ~invocation_index:(Agent_core.Tool_contract.Invocation.planned_index invocation)
     ~call_id ~tool_name ~arguments:input ~response
 
+(* A queue is read when a turn starts, so a row that reaches it while an
+   official client runs the turn waits for the turn to end
+   (RFC-arrived-stimuli-reach-the-running-turn). The client owns its own model
+   loop and asks MASC for nothing between rounds, so a tool result is the one
+   place a MASC-written line reaches it. [arrival_source] gives the claim for
+   the next result: the rows that arrived since this projection was built and
+   that no earlier result of the run listed. *)
+type arrival_source = unit -> Keeper_arrived_stimuli.claim option
+
+let arrival_source ~keeper_name ~read : arrival_source =
+  let tracker = Keeper_arrived_stimuli.create_tracker ~run_started_at:(Time_compat.now ()) in
+  fun () ->
+    Keeper_arrived_stimuli.claim
+      tracker
+      ~now:(Time_compat.now ())
+      ~read
+      ~on_unavailable:(fun detail ->
+        Log.Keeper.warn
+          ~keeper_name
+          "arrived stimuli unavailable; this tool result carries none: %s"
+          detail)
+;;
+
+(* The line the run's RAW trace keeps of one appended block. It names each
+   listed row by its queue entry number and arrival time, so a later
+   measurement reads the run's own trace to count the rows an official-client
+   run was shown and how long each had waited when it was first shown: the
+   record's [ts] minus the row's [arrived_at]. The append is recorded, not the
+   write: an observer that runs at the write must not perform I/O. *)
+let record_arrival_projection ~keeper_name ~raw_trace_run ~invocation ~tool_name
+      (claim : Keeper_arrived_stimuli.claim) =
+  match raw_trace_run with
+  | None -> ()
+  | Some active ->
+    let detail =
+      `Assoc
+        [ "tool", `String tool_name
+        ; "later", `Int claim.round.later
+        ; "text_bytes", `Int (String.length claim.text)
+        ; ( "rows"
+          , `List
+              (List.map
+                 (fun (row : Keeper_arrived_stimuli.row) ->
+                    `Assoc
+                      [ "arrival", `Int (Int64.to_int row.arrival)
+                      ; "arrived_at", `Float row.arrived_at
+                      ])
+                 claim.round.listed) )
+        ]
+    in
+    ignore
+      (observe_raw_trace ~keeper_name ~stage:Arrival_projection (fun () ->
+         Agent_core.Raw_trace.record_hook_invoked
+           active
+           ~invocation
+           ~hook_name:"arrived_stimuli_projection"
+           ~hook_decision:"appended"
+           ~hook_detail:(Yojson.Safe.to_string detail)
+           ()))
+;;
+
+(* The last step on a settled result. An observer that parses [content] -- the
+   composition and skill delivery observers, the retention comparison -- has
+   run by now and never sees the block. A result that ends the turn is left as
+   it is: nothing reads a later block. A result that would pass the tool's
+   declared bound is left as it is too: Claude Code writes a result above
+   [maxResultSizeChars] to a file instead of passing it inline, which would hide
+   the whole result behind a path. The rows stay unlisted for the next result. *)
+let with_arrived_rows ~keeper_name ~raw_trace_run ~invocation ~tool_name
+      ~(bound : Runtime_official_client_tool.result_bound)
+      ~(arrival : arrival_source option) (result : dynamic_tool_result) =
+  match arrival, result.abort_turn with
+  | None, _ | Some _, Some _ -> result
+  | Some next_claim, None ->
+    (try
+       match next_claim () with
+       | None -> result
+       | Some claim ->
+         (match
+            Runtime_official_client_tool.append_host_text
+              result
+              ~text:claim.text
+              ~limit:bound
+              ~on_response_sent:claim.confirm
+          with
+          | None -> result
+          | Some appended ->
+            record_arrival_projection ~keeper_name ~raw_trace_run ~invocation ~tool_name claim;
+            appended)
+     with
+     | exn ->
+       if Keeper_operator_interrupt.is_operator_interrupt exn then raise exn;
+       Llm_provider.Reserved_exn.reraise_if_reserved exn;
+       Log.Keeper.warn
+         ~keeper_name
+         "arrived stimuli were not appended to the %s result: %s"
+         tool_name
+         (Printexc.to_string exn);
+       result)
+;;
+
 let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_approval
     ~runtime_label ~keeper_name
     ~turn_count ~context ~tools ~loading_plan
     ~(hooks : Agent_core.Hooks.hooks) ~event_bus ~context_injector
     ~terminal_effect_state ~terminal_error ~pre_tool_rejects ~raw_trace_run
     ~next_dynamic_invocation_index ~on_tool_boundary ~on_result_handoff ~result_producer
+    ~arrival
     (tool : Agent_core.Tool.t) =
   { name = tool.schema.name
   ; description = tool.schema.description
@@ -1983,6 +2087,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                  (Terminal_tool_boundary
                     { outcome = Terminal_completed | Durable_stimulus_deferred; _ }
                   as stop) -> { final_result with abort_turn = Some stop }) in
+          let settled =
           (match !captured_original with
            | Original_unseen -> result
            | Original_retained (original, delivery) ->
@@ -2021,7 +2126,15 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
                       { tool_name = tool.schema.name
                       ; outcome = Terminal_failed
                           { failure_class = Tool_result.Runtime_failure; effect_disposition; detail }
-                      }) })
+                      }) }) in
+          with_arrived_rows
+            ~keeper_name
+            ~raw_trace_run
+            ~invocation
+            ~tool_name:tool.schema.name
+            ~bound:(result_bound_of_plan loading_plan tool.schema.name)
+            ~arrival
+            settled
         | exception exn -> (* cancel-guard-ok: PROVISIONAL, delete with #37372. This arm ends by re-throwing with the original backtrace nine lines down. The site is correct; the marker exists only because the guard reads eight lines. *)
           let backtrace = Printexc.get_raw_backtrace () in
           Eio.Cancel.protect (fun () ->
@@ -2035,7 +2148,7 @@ let dynamic_tool_of_agent_core ~content_transport ~accepts_image_input ~tool_app
   }
 ;;
 
-let dynamic_tools ~result_scope ?base_path ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
+let dynamic_tools ~result_scope ?base_path ?read_arrived ~content_transport ~accepts_image_input ~tool_approval ~runtime_label
     ~keeper_name ~turn_count ~tools ~loading_plan
     ~hooks ~event_bus ~context_injector ~context ~terminal_effect_state
     ~terminal_error ~pre_tool_rejects
@@ -2062,6 +2175,17 @@ let dynamic_tools ~result_scope ?base_path ~content_transport ~accepts_image_inp
         producer |> Result.map Option.some
         |> Result.map_error (config_error ~field:"tool_result_producer") in
     let next_dynamic_invocation_index = Atomic.make 0 in
+    let arrival =
+      match read_arrived, base_path with
+      | Some read, _ -> Some (arrival_source ~keeper_name ~read)
+      | None, Some base_path ->
+        Some
+          (arrival_source
+             ~keeper_name
+             ~read:(fun () ->
+               Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name))
+      | None, None -> None
+    in
     Ok
       (List.map
          (dynamic_tool_of_agent_core
@@ -2084,7 +2208,8 @@ let dynamic_tools ~result_scope ?base_path ~content_transport ~accepts_image_inp
             ~next_dynamic_invocation_index
             ~on_tool_boundary
             ~on_result_handoff
-            ~result_producer)
+            ~result_producer
+            ~arrival)
          tools, result_producer)
 ;;
 

@@ -16,6 +16,11 @@ val lexical_normalize_abs : string -> string
     resolution would substitute host symlinks and macOS firmlinks into paths
     that only exist on the endpoint. *)
 
+val lexical_normalize_relative : string -> string
+(** Collapse empty, [.], and interior [..] segments of a relative path without
+    absolutizing. Leading [..] segments are preserved so callers can detect
+    root escape. *)
+
 val raw : t -> string
 val is_discard_sink : t -> bool
 (** [is_discard_sink t] is true for the canonical stdout/stderr discard

@@ -28,6 +28,12 @@ def sibling(name):
 
 REVIEWS = sibling('github-reviews')
 STACKS = sibling('stack-scope')
+GET = sibling('github-get')
+CLIENT = GET.Client(
+    run=lambda *args, **kwargs: subprocess.run(*args, **kwargs),
+    clock=lambda: time.time(), sleep=lambda seconds: time.sleep(seconds),
+    on_quota=lambda failure: emit(dict(failure.details, status='rate_limited',
+                                       retry_at=failure.retry_at)))
 REQUIRED_APPROVALS = 2  # Operator-requested distinct GitHub accounts.
 # One worker run follows its own receipt for at most this long. A longer
 # queue is reported as still_pending with the receipt; a rerun observes the
@@ -44,7 +50,6 @@ POLL_SECONDS = 10
 IN_FLIGHT = frozenset({'pending'})
 ACCEPTED = frozenset({'merged', 'enqueued'})
 SUCCESS = frozenset({'merged', 'eligible_dry_run', 'resume_dispatched'})
-GONE = ('HTTP 404', 'HTTP 410', 'Not Found')
 UNSETTLED = frozenset({'still_pending', 'observation_unavailable'})
 UUID = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}')
 SHA = re.compile(r'[0-9a-f]{40}')
@@ -55,14 +60,31 @@ class Hold(ValueError):
 
 
 def read(path):
-    return REVIEWS.gh_json('gh', path)
+    return CLIENT.read(path)
 
 
 def pages(path):
-    result = REVIEWS.gh_json('gh', '--paginate', '--slurp', path)
-    if not isinstance(result, list) or not all(isinstance(page, list) for page in result):
-        raise ValueError('expected paginated arrays')
-    return [row for page in result for row in page]
+    return CLIENT.pages(path)
+
+
+def scope_snapshot(repo, selected, head):
+    return STACKS.snapshot(repo, selected, head, get=read)
+
+
+def stable_reads(action):
+    """A quota pause discards read evidence, never repeats a write."""
+    while True:
+        pauses = CLIENT.pauses
+        try:
+            result = action()
+        except GET.ApiFailure:
+            raise
+        except ValueError:
+            if CLIENT.pauses == pauses:
+                raise
+            continue
+        if CLIENT.pauses == pauses:
+            return result
 
 
 def pull(repo, number):
@@ -99,29 +121,35 @@ def disable_reservation(repo, current):
                         '--disable-auto'], check=True)
 
 
-def auto_merge_default(repo, number):
-    """Arm ordinary Ready PRs; native stacks use the whole-scope worker."""
+def reservation_reads(repo, number):
+    """Plan a reservation using only reads, so a quota pause can restart it."""
     current = pull(repo, number)
     stack = current.get('stack')
     if stack is not None:
         live = read(f'repos/{repo}/stacks/{stack["number"]}')
-        for member in live['pull_requests']:
-            row = pull(repo, member['number'])
-            # A reservation on a lower PR could land only part of this
-            # stack. The worker submits the current whole scope instead.
-            disable_reservation(repo, row)
-        return None
+        return None, [pull(repo, member['number']) for member in live['pull_requests']]
     if (current['state'] != 'open' or current['draft'] is not False or
             current['base']['ref'] != 'main' or current['head']['ref'].startswith('release/')):
-        disable_reservation(repo, current)
-        return None
+        return None, [current]
     require_server_reviews(repo)
     selected, _, head = REVIEWS.pr_identity(current)
-    before = STACKS.snapshot(repo, selected, head)
+    before = scope_snapshot(repo, selected, head)
     if before['stack'] is not None or before['scope'][0]['identity']['base']['ref'] != 'main':
         raise Hold('merge scope changed before enabling auto-merge')
-    if STACKS.snapshot(repo, selected, head) != before:
+    if scope_snapshot(repo, selected, head) != before:
         raise Hold('PR identity changed before enabling auto-merge')
+    return (current, selected, head), []
+
+
+def auto_merge_default(repo, number):
+    """Arm ordinary Ready PRs; native stacks use the whole-scope worker."""
+    reservation, disabled = stable_reads(lambda: reservation_reads(repo, number))
+    for row in disabled:
+        # A lower layer's reservation could land only part of a native stack.
+        disable_reservation(repo, row)
+    if reservation is None:
+        return None
+    current, selected, head = reservation
     attempt = None
     if current.get('auto_merge') is None:
         emit({'status': 'enabling_auto_merge', 'pr': selected, 'head': head})
@@ -152,13 +180,13 @@ def review_evidence(repo, current):
     return history
 
 
-def prepare(repo, number):
+def prepare_reads(repo, number):
     require_server_reviews(repo)
     top = top_pull(repo, number)
     selected, _, head = REVIEWS.pr_identity(top)
     if top['state'] != 'open' or top['draft'] is not False or top['merged'] is not False:
         raise Hold(f'#{selected} is not open and ready')
-    before = STACKS.snapshot(repo, selected, head)
+    before = scope_snapshot(repo, selected, head)
     selected_identity = next(member['identity'] for member in before['scope']
                              if member['number'] == selected)
     destination = (before['stack']['base']['ref'] if before['stack'] else
@@ -183,9 +211,13 @@ def prepare(repo, number):
     for pr, history in histories.items():
         if pages(f'repos/{repo}/pulls/{pr}/reviews?per_page=100') != history:
             raise Hold(f'#{pr} reviews changed during admission')
-    if STACKS.snapshot(repo, selected, head) != before:
+    if scope_snapshot(repo, selected, head) != before:
         raise Hold('stack membership, head or base changed during admission')
     return selected, head, before
+
+
+def prepare(repo, number):
+    return stable_reads(lambda: prepare_reads(repo, number))
 
 
 def member_states(repo, scope):
@@ -213,48 +245,72 @@ def follow(repo, result_endpoint, receipt, scope):
     `enqueued` are final answers about the request, so the members decide.
     Only the request endpoint can establish that its receipt is gone; member
     read failures leave that request unsettled.
+    A quota wait past the budget returns here with the receipt instead of
+    sleeping inside the transport: the handoff keeps the UUID and no GET
+    goes out before the server time.
     """
     deadline = time.monotonic() + WAIT_SECONDS
-    observation = states = None
-    error = None
-    while True:
-        try:
-            observation = read(result_endpoint)
-            status = observation['status']
-        except (ValueError, KeyError, TypeError, OSError) as failure:
-            error = str(failure)
-            if any(marker in error for marker in GONE):
-                return dict(receipt, status='request_not_found', error=error)
-        else:
-            if status not in IN_FLIGHT and status not in ACCEPTED:
-                return dict(receipt, status=status, observation=observation,
-                            member_states=states, reason=observation.get('details'))
+    CLIENT.deadline = CLIENT.clock() + WAIT_SECONDS
+    receipt = dict(receipt)
+    retry_at = receipt.pop('retry_at', None)
+    try:
+        observation = states = None
+        error = None
+        if retry_at is not None:
             try:
-                states = member_states(repo, scope)
+                CLIENT.wait_for_quota(GET.QuotaLimited(
+                    result_endpoint, None, {}, 'quota retry time from the merge receipt', retry_at))
+            except GET.QuotaWaitCutShort as failure:
+                return dict(receipt, status='observation_unavailable', error=str(failure),
+                            retry_at=failure.retry_at, observation=observation, member_states=states)
+        while True:
+            try:
+                observation = read(result_endpoint)
+                status = observation['status']
+            except GET.QuotaWaitCutShort as failure:
+                return dict(receipt, status='observation_unavailable', error=str(failure),
+                            retry_at=failure.retry_at, observation=observation, member_states=states)
             except (ValueError, KeyError, TypeError, OSError) as failure:
                 error = str(failure)
+                if isinstance(failure, GET.ApiFailure) and failure.status in (404, 410):
+                    return dict(receipt, status='request_not_found', error=error)
             else:
-                error = None
-                abandoned = [n for n, row in states.items()
-                             if row.get('state') == 'closed' and not row['merged']]
-                if abandoned:
-                    return dict(receipt, status='member_closed_unmerged', members_closed=abandoned,
-                                observation=observation, member_states=states)
-                if status in ACCEPTED and all_landed(states):
-                    return dict(receipt, status='merged', observation=observation,
-                                member_states=states)
-        if time.monotonic() >= deadline:
-            break
-        time.sleep(POLL_SECONDS)
-    if error is not None:
-        return dict(receipt, status='observation_unavailable', error=error,
-                    observation=observation, member_states=states)
-    return dict(receipt, status='still_pending', observation=observation, member_states=states)
+                if status not in IN_FLIGHT and status not in ACCEPTED:
+                    return dict(receipt, status=status, observation=observation,
+                                member_states=states, reason=observation.get('details'))
+                try:
+                    states = member_states(repo, scope)
+                except GET.QuotaWaitCutShort as failure:
+                    return dict(receipt, status='observation_unavailable', error=str(failure),
+                                retry_at=failure.retry_at, observation=observation, member_states=states)
+                except (ValueError, KeyError, TypeError, OSError) as failure:
+                    error = str(failure)
+                else:
+                    error = None
+                    abandoned = [n for n, row in states.items()
+                                 if row.get('state') == 'closed' and not row['merged']]
+                    if abandoned:
+                        return dict(receipt, status='member_closed_unmerged', members_closed=abandoned,
+                                    observation=observation, member_states=states)
+                    if status in ACCEPTED and all_landed(states):
+                        return dict(receipt, status='merged', observation=observation,
+                                    member_states=states)
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(POLL_SECONDS)
+        if error is not None:
+            return dict(receipt, status='observation_unavailable', error=error,
+                        observation=observation, member_states=states)
+        return dict(receipt, status='still_pending', observation=observation, member_states=states)
+    finally:
+        CLIENT.deadline = None
 
 
 def hand_off(repo, outcome):
     """Continue an unsettled receipt in a new run; never submit a merge again."""
     receipt = {key: outcome[key] for key in ('uuid', 'pr', 'head', 'members', 'since')}
+    if 'retry_at' in outcome:
+        receipt['retry_at'] = outcome['retry_at']
     command = ['gh', 'workflow', 'run', 'approval-auto-merge.yml', '--repo', repo,
                '--ref', 'main', '-f', f'pr={receipt["pr"]}',
                '-f', f'receipt={json.dumps(receipt, separators=(",", ":"))}']
@@ -273,7 +329,7 @@ def parse_receipt(raw):
     except ValueError as error:
         raise ValueError(f'invalid receipt: {error}') from error
     if (not isinstance(receipt, dict) or
-            set(receipt) != {'uuid', 'pr', 'head', 'members', 'since'} or
+            set(receipt) - {'retry_at'} != {'uuid', 'pr', 'head', 'members', 'since'} or
             not isinstance(receipt['uuid'], str) or UUID.fullmatch(receipt['uuid']) is None or
             not isinstance(receipt['head'], str) or SHA.fullmatch(receipt['head']) is None or
             isinstance(receipt['pr'], bool) or not isinstance(receipt['pr'], int) or
@@ -283,6 +339,10 @@ def parse_receipt(raw):
                     for n in receipt['members']) or receipt['pr'] not in receipt['members'] or
             isinstance(receipt['since'], bool) or not isinstance(receipt['since'], (int, float))):
         raise ValueError('invalid receipt shape')
+    if 'retry_at' in receipt and (isinstance(receipt['retry_at'], bool) or
+            not isinstance(receipt['retry_at'], (int, float)) or
+            not 0 < receipt['retry_at'] < float('inf')):
+        raise ValueError('invalid receipt retry_at')
     return receipt
 
 

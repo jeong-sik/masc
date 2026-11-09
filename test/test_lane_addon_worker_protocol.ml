@@ -185,7 +185,7 @@ let standalone_protocol () = Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
     let other = require (Agent_core.Mcp.connect ~sw ~mgr:(Eio.Stdenv.process_mgr env)
       ~command:"python3" ~args:["-c";server] ~max_response_bytes:4096 ()) in
     Fun.protect ~finally:(fun () -> Eio.Cancel.protect (fun () -> Agent_core.Mcp.close other)) (fun () ->
-      require (Agent_core.Mcp.initialize other);
+      require (Agent_core.Mcp.initialize other ~client_version:"test");
       check bool "a distinct connection is also refused" true
         (Result.is_error (Protocol.initialize protocol other));
       check bool "refusal leaves the new connection owned by its caller" true

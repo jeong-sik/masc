@@ -779,22 +779,14 @@ let submit_agent_operation
 (* Whole seconds the target Keeper's live turn has run. A queued operation starts
    after that turn ends, so this is what the submitter can learn about the wait.
    The turn's age is a fact read from the registry, and the field only shows it:
-   whether to wait, cancel or send the work to another Keeper stays with the caller. *)
-let turn_age_seconds ~now ~started_at = Float.to_int (Float.max 0.0 (now -. started_at))
+   whether to wait, cancel or send the work to another Keeper stays with the caller.
 
-(* No field while the target is between turns or is not registered, so a result
+   No field while the target is between turns or is not registered, so a result
    without it means the target is idle. *)
 let target_turn_age_fields ~now ~base_path ~keeper_name =
-  match Keeper_registry.get ~base_path keeper_name with
-  | None -> []
-  | Some entry ->
-    (match Keeper_composite_observer.live_turn_observation entry with
-     | None -> []
-     | Some observation ->
-       [ ( "target_turn_age_s"
-         , `Int
-             (turn_age_seconds ~now ~started_at:observation.Keeper_registry.started_at) )
-       ])
+  match Keeper_delegate_targets.presence ~now ~base_path keeper_name with
+  | Keeper_delegate_targets.In_turn { age_s } -> [ "target_turn_age_s", `Int age_s ]
+  | Keeper_delegate_targets.Not_registered | Keeper_delegate_targets.Between_turns -> []
 ;;
 
 let tool_result_of_operation_acceptance

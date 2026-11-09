@@ -2,7 +2,7 @@ name = "masc_keeper_delegate"
 description = """
 Submit one typed Keeper chat operation and get its operation_id back.
 
-The id is durable and returns without waiting for the turn. A Keeper that submits one is woken with a completion notice when that turn ends. When the target Keeper is inside a turn at submit time, the result carries target_turn_age_s, the seconds that turn has run; the queued operation starts after it ends. The queued text is a preview and may be shortened. Use masc_keeper_delegate_status with the original target and operation_id to read state and, after completion, retrieve completed_reply with the original terminal text and rich blocks before acting on it. An unavailable reply is reported explicitly; do not re-delegate or relay through Board to retrieve the same answer."""
+The id is durable and returns without waiting for the turn. A Keeper that submits one is woken with a completion notice when that turn ends. When the target Keeper is inside a turn at submit time, the result carries target_turn_age_s, the seconds that turn has run; the queued operation starts after it ends. To compare candidate targets before you submit, masc_keeper_delegate_targets reads each one's queue and turn. The queued text is a preview and may be shortened. Use masc_keeper_delegate_status with the original target and operation_id to read state and, after completion, retrieve completed_reply with the original terminal text and rich blocks before acting on it. An unavailable reply is reported explicitly; do not re-delegate or relay through Board to retrieve the same answer."""
 additional_properties = false
 
 

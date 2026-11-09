@@ -1793,12 +1793,14 @@ let goal_list_output_schema =
     ~required:[ "status"; "generated_at"; "count"; "goals"; "rollup" ]
 ;;
 
-(* Producer: Run_eio.list over run_record_to_json. [agent_name] serializes
-   as string-or-null and stays undeclared. *)
+(* Producer: Run_eio.run_listing_to_json. [agent_name] serializes as
+   string-or-null and stays undeclared. A row carries [plan_bytes], not the
+   plan: masc_run_get reads one run's plan. *)
 let run_list_output_schema =
   object_output_schema
     ~properties:
       [ "count", `Assoc [ "type", `String "integer" ]
+      ; "shown", `Assoc [ "type", `String "integer" ]
       ; ( "runs"
         , `Assoc
             [ "type", `String "array"
@@ -1808,7 +1810,7 @@ let run_list_output_schema =
                   ; ( "properties"
                     , `Assoc
                         [ "task_id", `Assoc [ "type", `String "string" ]
-                        ; "plan", `Assoc [ "type", `String "string" ]
+                        ; "plan_bytes", `Assoc [ "type", `String "integer" ]
                         ; "created_at", `Assoc [ "type", `String "string" ]
                         ; "updated_at", `Assoc [ "type", `String "string" ]
                         ] )
@@ -1816,12 +1818,12 @@ let run_list_output_schema =
                     , `List
                         (List.map
                            (fun name -> `String name)
-                           [ "task_id"; "plan"; "created_at"; "updated_at" ]) )
+                           [ "task_id"; "plan_bytes"; "created_at"; "updated_at" ]) )
                   ; "additionalProperties", `Bool true
                   ] )
             ] )
       ]
-    ~required:[ "count"; "runs" ]
+    ~required:[ "count"; "shown"; "runs" ]
 ;;
 
 (* Producer: Metrics_store_eio.agent_metrics_to_yojson. Absence is explicit. *)
@@ -3162,6 +3164,11 @@ let internal_descriptors : t list =
       ~polling_read:true
   ; masc_keeper_descriptor ~keeper_model_projection:Internal_name "delegate_cancel" Keeper_tool_name.(to_string Keeper_delegate_cancel)
       ~readonly:false
+  ; masc_keeper_descriptor ~keeper_model_projection:Internal_name
+      ~ordinary_execution_mode:Concurrent "delegate_targets" Keeper_tool_name.(to_string Keeper_delegate_targets)
+      (* Concurrent: the owner's operation inventory is an immutable lock-free
+         projection and the registry read is a map lookup; pure render. *)
+      ~readonly:true
   ; masc_keeper_descriptor ~keeper_model_projection:Operator_only
       ~ordinary_execution_mode:Concurrent "delegate_list" Keeper_tool_name.(to_string Keeper_delegate_list)
       (* Concurrent: owner-registry reads behind its Eio.Mutex; pure render. *)

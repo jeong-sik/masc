@@ -9,8 +9,9 @@
     - [masc_run_get]         — retrieve the run record + plan for
       one run, creating an empty scaffold when missing; required
       [task_id].
-    - [masc_run_list]        — list all runs with status; no
-      required params.
+    - [masc_run_list]        — list the most recently updated
+      runs, newest first, one summary row each; no required params,
+      optional [limit].
 
     Concatenated by {!Tools} into the
     process-wide tool surface; list length and per-tool [name]

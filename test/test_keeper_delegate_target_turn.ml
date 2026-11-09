@@ -97,18 +97,6 @@ let test_the_age_belongs_to_the_named_target () =
     (fields ~now:(started_at +. 5.0) ~base "busy-one")
 ;;
 
-let test_age_never_goes_negative () =
-  check int "a clock behind the turn start reads as zero" 0
-    (Surface_ops.turn_age_seconds ~now:5.0 ~started_at:10.0)
-;;
-
-let test_age_drops_the_fraction () =
-  check int "whole seconds, rounded down" 90
-    (Surface_ops.turn_age_seconds ~now:100.9 ~started_at:10.0);
-  check int "a turn that started this instant is zero" 0
-    (Surface_ops.turn_age_seconds ~now:10.0 ~started_at:10.0)
-;;
-
 let () =
   run
     "keeper_delegate_target_turn"
@@ -126,10 +114,6 @@ let () =
             "the age belongs to the named target"
             `Quick
             test_the_age_belongs_to_the_named_target
-        ] )
-    ; ( "turn_age_seconds"
-      , [ test_case "never goes negative" `Quick test_age_never_goes_negative
-        ; test_case "drops the fraction" `Quick test_age_drops_the_fraction
         ] )
     ]
 ;;

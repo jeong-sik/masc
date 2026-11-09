@@ -96,7 +96,10 @@ val connect
   -> unit
   -> (t, Error.t) result
 
-val initialize : t -> (unit, Error.t) result
+val initialize : t -> client_version:string -> (unit, Error.t) result
+(** Send [initialize]. [client_version] is the version of the build that runs
+    this client; the server reads it in [clientInfo]. *)
+
 val request_stop : t -> unit
 (** Best-effort TERM through this connection's owned process handle. Does not
     wait for transport shutdown or prove child/group exit. *)

@@ -253,7 +253,11 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
       Goal_verification.load_records_by_goal_id_authoritative ctx.config
     in
     let measurements = Goal_measurement.load ctx.config in
-    let criterion_review_for_goal = Goal_criterion_review.projector (Goal_criterion_review.load ctx.config) in
+    (* A row carries the review's verdict. The reviewer's evidence is left out:
+       it was 517,662 of the 941,529 bytes of one 62-goal result. *)
+    let criterion_review_for_goal =
+      Goal_criterion_review.summary_projector (Goal_criterion_review.load ctx.config)
+    in
     let goal_json (goal : Goal_store.goal) =
       let verification =
         match records_by_goal_id with

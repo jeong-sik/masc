@@ -1,0 +1,35 @@
+{
+ "streams": 3,
+ "statuses": [
+  200,
+  200,
+  200
+ ],
+ "waited_s": 105.0,
+ "stall_bound_s": 90.0,
+ "server_stall_log_lines": 3,
+ "reset_by_server_while_stalled": [],
+ "data_bytes_while_stalled": {
+  "1": 0,
+  "3": 0,
+  "5": 0
+ },
+ "after_window_opened": {
+  "1": {
+   "data_bytes": 36839,
+   "ended": true,
+   "reset": false
+  },
+  "3": {
+   "data_bytes": 36839,
+   "ended": true,
+   "reset": false
+  },
+  "5": {
+   "data_bytes": 36839,
+   "ended": true,
+   "reset": false
+  }
+ },
+ "build": "57b928783c0b"
+}

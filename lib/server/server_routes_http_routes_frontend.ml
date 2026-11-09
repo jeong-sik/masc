@@ -134,7 +134,7 @@ let websocket_handler ?sw ?clock ~upgrade request reqd =
 
 let add_routes ?sw ?clock router =
   router
-  |> Server_route.get Server_route.Always_public "/health" health_handler
+  |> Server_route.get Server_route.Always_public Server_health_paths.health health_handler
   |> Server_route.get Server_route.Always_public Server_health_paths.liveness liveness_handler
   |> Server_route.get Server_route.Always_public Server_health_paths.readiness readiness_handler
   |> Server_route.get Server_route.Public_read "/.well-known/agent.json" (fun _state req reqd ->

@@ -15,6 +15,7 @@ type t =
   | Keeper_delegate_cancel
   | Keeper_delegate_list
   | Keeper_delegate_status
+  | Keeper_delegate_targets
   | Keeper_down
   | Keeper_list
   | Keeper_msg
@@ -32,6 +33,7 @@ let to_string = function
   | Keeper_delegate_cancel -> "masc_keeper_delegate_cancel"
   | Keeper_delegate_list -> "masc_keeper_delegate_list"
   | Keeper_delegate_status -> "masc_keeper_delegate_status"
+  | Keeper_delegate_targets -> "masc_keeper_delegate_targets"
   | Keeper_down -> "masc_keeper_down"
   | Keeper_list -> "masc_keeper_list"
   | Keeper_msg -> "masc_keeper_msg"

@@ -73,6 +73,15 @@ type schema_shape =
   ; errors : string list
   }
 
+val required_names : Yojson.Safe.t -> string list
+(** Top-level [required] array as a string list (empty when missing). *)
+
+val schema_properties : Yojson.Safe.t -> (string * Yojson.Safe.t) list
+(** Top-level [properties] table as an assoc list (empty when missing). *)
+
+val forbids_additional_properties : Yojson.Safe.t -> bool
+(** True when top-level [additionalProperties] is explicitly [false]. *)
+
 val schema_shape : Yojson.Safe.t -> schema_shape
 (** Validated JSON-schema shape projection used by dispatch diagnostics and
     descriptor discovery. Unexpected [properties], [required], or [oneOf]

@@ -101,7 +101,10 @@ let initialize t client =
   t.attachment <- Initializing client;
   let result = try
     let protocol_error error = Protocol_failed (Agent_core.Error.to_string error) in
-        let* () = Agent_core.Mcp.initialize client |> Result.map_error protocol_error in
+        let* () =
+          Agent_core.Mcp.initialize client ~client_version:Build_version.current
+          |> Result.map_error protocol_error
+        in
         let* tools = Agent_core.Mcp.list_tools_full client |> Result.map_error protocol_error in
         if not (List.exists (fun (tool : Mcp_protocol.Mcp_types.tool) ->
             String.equal tool.name "lane_observe") tools) then

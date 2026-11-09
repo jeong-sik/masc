@@ -30,6 +30,18 @@ val error_to_string : error -> string
 
 val run_record_to_json : run_record -> Yojson.Safe.t
 
+(** What {!list} found: [total] is every run there is, [shown] the most
+    recently updated ones, newest first. *)
+type run_listing = {
+  total : int;
+  shown : run_record list;
+}
+
+(** [{"count": total, "shown": n, "runs": [...]}]. A row is the record without
+    its plan text: [task_id], [agent_name] (string or null), [plan_bytes] (the
+    plan's length, 0 when none was written), [created_at], [updated_at]. *)
+val run_listing_to_json : run_listing -> Yojson.Safe.t
+
 val run_record_of_json : Yojson.Safe.t -> run_record option
 
 (** {1 Path builders} *)
@@ -76,9 +88,10 @@ val get :
   task_id:string ->
   (Yojson.Safe.t, string) result
 
-(** List all runs under {!runs_dir} as
-    [{"count": N, "runs": [...]}]. *)
-val list : Workspace_utils.config -> Yojson.Safe.t
+(** The [limit] most recently updated runs under {!runs_dir}, newest first,
+    and how many runs there are. A run whose [updated_at] does not parse comes
+    after every one that does. [limit] below 1 shows none. *)
+val list : Workspace_utils.config -> limit:int -> run_listing
 
 val runs_dirname : string
 (** The directory runs sit in below [<base>/.masc]. *)

@@ -31,10 +31,10 @@ let observe session bytes =
     let length=(byte 0 lsl 16) lor (byte 1 lsl 8) lor byte 2 in
     if String.length bytes-off < 9+length then off else (
       let kind=byte 3 and flags=byte 4 in
-      if kind=3 || ((kind=0 || kind=1) && flags land 1 <> 0) then (
-        if kind=3 then incr session.resets;
-        Registry.response_ended session.registry
-          ~stream_id:(Int32.to_int (String.get_int32_be bytes (off+5))));
+      let stream_id=Int32.to_int (String.get_int32_be bytes (off+5)) in
+      if kind=3 then (incr session.resets; Registry.reset_sent session.registry ~stream_id)
+      else if (kind=0 || kind=1) && flags land 1 <> 0 then
+        Registry.response_ended session.registry ~stream_id;
       frames (off+9+length)) in
   let consumed=frames 0 in
   session.wire_tail <- String.sub bytes consumed (String.length bytes-consumed)
@@ -207,8 +207,126 @@ let test_stream_overflow_resets_and_sibling_progresses () =
     reset session 2;
     until session (fun () -> Resources.pending_bytes resources=0))
 
+module Stream = Masc.Http_h2_stream
+
+exception Handler_failed
+exception First_report
+exception Second_report
+
+(* A fiber forked on the stream switch that waits for something h2 will not
+   answer, like a producer whose flush never comes back. It keeps the cause
+   its stream ended with. *)
+let wait_for_stream_end ended () =
+  try Eio.Fiber.await_cancel () with
+  | Eio.Cancel.Cancelled (Stream.Stream_reset cause) as exn -> ended:=Some cause; raise exn
+
+let test_handler_failure_after_headers_ends_the_scope () =
+  let ended=ref None in
+  let handler _ ~stream_sw reqd =
+    ignore (H2.Reqd.respond_with_streaming ~flush_headers_immediately:true reqd
+      (H2.Response.create `OK) : H2.Body.Writer.t);
+    Eio.Fiber.fork ~sw:stream_sw (wait_for_stream_end ended);
+    raise Handler_failed in
+  with_session ~capacity:1024 handler (fun _ session ->
+    request session 1;
+    until session (fun () ->
+      Option.is_some !ended && !(session.resets)>0
+      && Registry.active_streams session.registry=0);
+    check bool "the waiting fiber ended with the handler's failure" true
+      (match !ended with Some (Stream.Raised Handler_failed) -> true | _ -> false);
+    check int "the client saw the stream reset" 1 !(session.errors))
+
+(* With no response started, h2 answers the failure with its error handler's
+   response. The scope stays until that answer is out: its END_STREAM, then
+   the RST_STREAM h2 writes after an answer it opened for an error. *)
+let test_handler_failure_before_headers_keeps_the_error_answer () =
+  let ended=ref None in
+  let handler _ ~stream_sw _ =
+    Eio.Fiber.fork ~sw:stream_sw (wait_for_stream_end ended);
+    raise Handler_failed in
+  with_session ~capacity:1024 handler (fun _ session ->
+    request session 1;
+    until session (fun () ->
+      Option.is_some !ended && Registry.active_streams session.registry=0);
+    check bool "the error answer reached the client" true (Hashtbl.mem session.responses 1);
+    check bool "the scope ended with the RST_STREAM h2 wrote after the answer" true
+      (match !ended with Some Stream.Reset_by_us -> true | _ -> false))
+
+let test_second_report_raises_nothing () =
+  let second=ref None in
+  let handler _ ~stream_sw reqd =
+    H2.Reqd.report_exn reqd First_report;
+    second:=Some (match Stream.reset ~stream_sw reqd (Stream.Raised Second_report) with
+      | () -> Ok () | exception exn -> Error (Printexc.to_string exn)) in
+  with_session ~capacity:1024 handler (fun _ session ->
+    request session 1;
+    until session (fun () ->
+      Option.is_some !second && Registry.active_streams session.registry=0);
+    check (option (result unit string)) "the second report raised nothing" (Some (Ok ())) !second)
+
+module Http_reqd = Masc.Http_reqd
+
+let reqd_of ~stream_sw h2_reqd =
+  Http_reqd.of_h2 ~stream_sw ~ledger:(Resources.current_exn ()) h2_reqd
+
+(* h2 answers an error reported before any response, and the stream then
+   takes no response of its own. *)
+let test_response_after_a_report_gets_a_closed_writer () =
+  let ran=ref false and closed=ref None in
+  let handler _ ~stream_sw h2_reqd =
+    ran:=true;
+    let reqd=reqd_of ~stream_sw h2_reqd in
+    Http_reqd.report_exn reqd First_report;
+    let writer=Http_reqd.respond_with_streaming reqd (Httpun.Response.create `OK) in
+    Http_reqd.Body_writer.write_string writer "dropped";
+    closed:=Some (Http_reqd.Body_writer.is_closed writer) in
+  with_session ~capacity:1024 handler (fun _ session ->
+    request session 1;
+    until session (fun () -> !ran && Registry.active_streams session.registry=0);
+    check (option bool) "the response opened after the report got a closed writer"
+      (Some true) !closed)
+
+(* A fiber of the stream failed its switch. The handler's response comes after
+   that, and must not open an h2 response that nothing will finish. *)
+let test_response_after_the_scope_failed_gets_a_closed_writer () =
+  let ran=ref false and closed=ref None in
+  let handler _ ~stream_sw h2_reqd =
+    ran:=true;
+    let reqd=reqd_of ~stream_sw h2_reqd in
+    Eio.Fiber.fork ~sw:stream_sw (fun () -> raise Handler_failed);
+    let writer=Http_reqd.respond_with_streaming reqd (Httpun.Response.create `OK) in
+    closed:=Some (Http_reqd.Body_writer.is_closed writer) in
+  with_session ~capacity:1024 handler (fun _ session ->
+    request session 1;
+    until session (fun () -> !ran && Registry.active_streams session.registry=0);
+    check (option bool) "the response opened after the switch failed got a closed writer"
+      (Some true) !closed)
+
+let test_refused_write_ends_the_scope_with_the_refusal () =
+  let ended=ref None in
+  let handler _ ~stream_sw h2_reqd =
+    let reqd=reqd_of ~stream_sw h2_reqd in
+    let writer=Http_reqd.respond_with_streaming reqd (Httpun.Response.create `OK) in
+    Eio.Fiber.fork ~sw:stream_sw (wait_for_stream_end ended);
+    Http_reqd.Body_writer.write_string writer (String.make 64 'x') in
+  with_session ~capacity:16 handler (fun _ session ->
+    request session 1;
+    until session (fun () ->
+      Option.is_some !ended && Registry.active_streams session.registry=0);
+    check bool "the scope ended with the ledger's refusal" true
+      (match !ended with
+       | Some (Stream.Out_of_capacity Resources.Capacity_exhausted) -> true
+       | _ -> false);
+    check int "the client saw the stream reset" 1 !(session.errors))
+
 let () = run "H2 response resource boundary"
   ["transport",[
     test_case "whole response, slow consumption and reset reuse" `Quick test_whole_response_and_scope_release;
     test_case "overflow resets the stream and siblings progress" `Quick test_stream_overflow_resets_and_sibling_progresses;
-    test_case "scope cleanup and late flush do not double release" `Quick test_scope_cleanup_and_late_flush_are_idempotent]]
+    test_case "scope cleanup and late flush do not double release" `Quick test_scope_cleanup_and_late_flush_are_idempotent;
+    test_case "a handler failure after the headers ends the stream scope" `Quick test_handler_failure_after_headers_ends_the_scope;
+    test_case "a handler failure before the headers keeps h2's error answer" `Quick test_handler_failure_before_headers_keeps_the_error_answer;
+    test_case "a second report on a reported stream raises nothing" `Quick test_second_report_raises_nothing;
+    test_case "a response after a report gets a closed writer" `Quick test_response_after_a_report_gets_a_closed_writer;
+    test_case "a response after the scope failed gets a closed writer" `Quick test_response_after_the_scope_failed_gets_a_closed_writer;
+    test_case "a refused write ends the scope with the refusal" `Quick test_refused_write_ends_the_scope_with_the_refusal]]

@@ -688,14 +688,38 @@ let change_diff_halves (change : Masc.Tui_decode.file_change) =
   | Masc.Tui_decode.Fc_written { content } -> ("", content)
   | Masc.Tui_decode.Fc_materialized _ -> ("", "")
 
+type prepared_change_diff = {
+  diff_rows : Diff.row list;
+  removed : int;
+  added : int;
+  count : int;
+}
+
+let change_diff_cache :
+    (Masc.Tui_decode.file_change * prepared_change_diff) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+(* Preview and detail read the same recorded replacement. No rendered styles,
+   current selection or action authority are retained in this preparation. *)
+let prepared_change_diff change =
+  match Domain.DLS.get change_diff_cache with
+  | Some (seen, prepared) when seen == change -> prepared
+  | Some _ | None ->
+      let before, after = change_diff_halves change in
+      let diff_rows = Diff.rows ~before ~after in
+      let removed, added = Diff.counts diff_rows in
+      let prepared = { diff_rows; removed; added; count = List.length diff_rows } in
+      Domain.DLS.set change_diff_cache (Some (change, prepared));
+      prepared
+
 let render_changes_diff (state : state) (change : Masc.Tui_decode.file_change) =
   let terminal_rows, cols = get_terminal_size () in
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let buf = Buffer.create 4096 in
-  let before, after = change_diff_halves change in
-  let diff_rows = Diff.rows ~before ~after in
-  let removed, added = Diff.counts diff_rows in
-  let total = List.length diff_rows in
+  let prepared = prepared_change_diff change in
+  let diff_rows = prepared.diff_rows in
+  let removed, added = prepared.removed, prepared.added in
+  let total = prepared.count in
   let header =
     detail_heading ~cols ~lead:(Lead_text (screen_title " MASC Change" ^ " "))
       ~id:(change_row_address change)
@@ -947,9 +971,9 @@ let render_changes_list (state : state) =
   (match cursor_change with
    | None -> ()
    | Some change when preview_height >= 2 ->
-       let before, after = change_diff_halves change in
-       let diff_rows = Diff.rows ~before ~after in
-       let removed, added = Diff.counts diff_rows in
+       let prepared = prepared_change_diff change in
+       let diff_rows = prepared.diff_rows in
+       let removed, added = prepared.removed, prepared.added in
        box_divider buf cols;
        box_line_styled buf cols ~style:(Theme.recede ())
          (Printf.sprintf "  preview %s  -%d +%d  (Enter opens, scrolls)"

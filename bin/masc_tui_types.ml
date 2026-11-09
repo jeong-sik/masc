@@ -6285,6 +6285,20 @@ type memory_category_filter =
   | Category_source
   | Category_dropped
 
+let memory_category_text ~ko category =
+  let label = if not ko then Memory_category.category_to_string category
+  else match category with
+    | Memory_category.Code_change -> "코드 변경"
+    | Memory_category.Fact -> "사실"
+    | Memory_category.Preference -> "선호"
+    | Memory_category.Goal -> "목표"
+    | Memory_category.Constraint -> "제약"
+    | Memory_category.Validated_approach -> "검증된 방법"
+    | Memory_category.Lesson -> "교훈"
+    | Memory_category.Blocker -> "막힘"
+    | Memory_category.Custom _ -> Memory_category.category_to_string category in
+  Masc.Tui_terminal_text.sanitize_terminal_text label
+
 let memory_category_filter_label = function
   | Category_all -> "All"
   | Category_ordinary cat -> Memory_category.category_to_string cat
@@ -23128,6 +23142,7 @@ let memory_fact_search_text ~fleet row =
       with_keeper f.Masc.Tui_decode_memory_facts.mf_keeper
         (f.Masc.Tui_decode_memory_facts.mf_claim ^ " "
          ^ Memory_category.category_to_string f.Masc.Tui_decode_memory_facts.mf_category
+         ^ " " ^ memory_category_text ~ko:true f.Masc.Tui_decode_memory_facts.mf_category
          ^ " " ^ f.Masc.Tui_decode_memory_facts.mf_origin)
   | Memory_row_source_fact f ->
       with_keeper f.Masc.Tui_decode_memory_facts.msf_keeper

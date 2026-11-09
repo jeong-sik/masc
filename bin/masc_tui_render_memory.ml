@@ -92,20 +92,6 @@ let facts_stats_row ~ko ~ordinary ~source ~dropped ~sort_label =
     (Theme.recede ()) ordinary source dropped Ansi.reset
     (Theme.recede ()) Ansi.reset sort_label
 
-let memory_category_text ~ko category =
-  let label = if not ko then Memory_category.category_to_string category
-  else match category with
-    | Memory_category.Code_change -> "코드 변경"
-    | Memory_category.Fact -> "사실"
-    | Memory_category.Preference -> "선호"
-    | Memory_category.Goal -> "목표"
-    | Memory_category.Constraint -> "제약"
-    | Memory_category.Validated_approach -> "검증된 방법"
-    | Memory_category.Lesson -> "교훈"
-    | Memory_category.Blocker -> "막힘"
-    | Memory_category.Custom _ -> Memory_category.category_to_string category in
-  Terminal_text.single_line label
-
 let memory_category_filter_text ~ko = function
   | Category_all -> if ko then "전체" else "All"
   | Category_ordinary category -> memory_category_text ~ko category

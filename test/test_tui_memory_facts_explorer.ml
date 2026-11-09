@@ -284,6 +284,30 @@ let test_search_filtering () =
   check int "no match" 0 (List.length (Types.memory_fact_rows state))
 ;;
 
+let test_category_search_accepts_both_languages () =
+  let state = make_state () in
+  answer_memory_facts state
+    (make_snapshot
+       ~ordinary_facts:[
+         make_fact ~category:Cat.Blocker ~claim:"socket timeout" "blocked";
+         make_fact ~category:Cat.Constraint ~claim:"network policy" "constraint";
+         make_fact ~category:Cat.Fact ~claim:"clear weather" "other"]
+       ~source_facts:[] ~invalidations:[]);
+  List.iter (fun language ->
+    state.ui_language <- language;
+    List.iter (fun (query, wanted) ->
+      state.search_last <- query;
+      let matched = Types.memory_fact_rows state |> List.filter_map (function
+        | Types.Memory_row_fact fact -> Some fact.Masc.Tui_decode_memory_facts.mf_memory_id
+        | Memory_row_source_fact _ | Memory_row_invalidation _ -> None)
+        |> List.sort String.compare in
+      check (list string) "category and original text queries select the intended facts" wanted matched)
+      ["막힘", ["blocked"]; "blocker", ["blocked"];
+       "제약", ["constraint"]; "constraint", ["constraint"];
+       "socket", ["blocked"]])
+    [Types.Lang_ko; Types.Lang_en]
+;;
+
 (* The keeper is part of what the all-keepers list shows beside each row, so
    a query for its name finds that keeper's rows there. A single keeper's view
    does not show it, and its name matches nothing the view does not display. *)
@@ -356,6 +380,8 @@ let () =
         ] )
     ; ( "search"
       , [ test_case "search filtering" `Quick test_search_filtering
+        ; test_case "category queries accept both languages" `Quick
+            test_category_search_accepts_both_languages
         ; test_case "search matches the keeper only where it is shown" `Quick
             test_search_matches_the_keeper_only_where_it_is_shown
         ] )

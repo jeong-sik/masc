@@ -14,7 +14,6 @@
     while the explicit Keeper lifecycle is active. Runtime health and provider
     cooldown are observations, not reasons to suppress or drop board work. *)
 
-open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 

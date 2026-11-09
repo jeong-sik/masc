@@ -1,0 +1,35 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+  MASC Keepers (8)                                                        HTTP [partial] · operator quiz read failed +3
+   ! 0 attention   ◂ 3 failing   ▶ 0 active   ◌ 0 waiting   ○ 0 inactive   ? 5 unknown   detailed · priority
+    KEEPER                           NOW          Mode S    AGE DETAIL
+   selected · alpha-failing
+                                                    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+                                                    ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
+
+ ›  alpha-failing                    - unknown    A    D 48d09h ◂ no failure record · task task-0001 · health failing
+      task task-0001 · health failing                                           failing 3h05m  ◷ ?  mem ?  ··✓··⊘✓··✓✗✗
+    beta-unrecorded                  - unknown    A    D 48d09h ◂ no failure record · task task-0001 · health failing
+      task task-0001 · health failing                                               failing ?  ◷ ?  mem ?  ········✓··✗
+    gamma-skewed                     - unknown    A    D 48d09h ◂ no failure record · task task-0001 · health failing
+      task task-0001 · health failing                                               failing ?  ◷ ?  mem ?  ··········✗·
+    delta-mixed                      - unknown    A    D 48d09h task task-0001
+      task task-0001                                                                           ◷ ?  mem ?  ✓⊘··✓··✓·⊘✓✓
+    epsilon-busy                     - unknown    A    D 48d09h task task-0001
+      task task-0001                                                                           ◷ ?  mem ?  ????✓✓✓✓✓✓✓✓
+    eta-quiet                        - unknown    A    D 48d09h task task-0001
+      task task-0001                                                                                         ◷ ?  mem ?
+    theta-idle                       - unknown    A    D 48d09h task task-0001 · health idle
+      task task-0001 · health idle                                                             ◷ ?  mem ?  ✓✓✓✓✓✓✓✓✓✓✓✓
+    zeta-unseeded                    - unknown    A    D 48d09h task task-0001
+      task task-0001                                                                           ◷ ?  mem ?  ????????????
+
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  v:view  o:order  j/k:move  p:pause  w:wake  s:shutdown  x:delete  Right / Enter:detail  Esc:dashboard  q:quit  …?
+ › to alpha-failing   (i to write)

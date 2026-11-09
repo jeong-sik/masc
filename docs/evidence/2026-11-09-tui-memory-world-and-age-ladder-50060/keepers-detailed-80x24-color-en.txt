@@ -1,0 +1,24 @@
+ Dashboard  Work  ▸Keepers  Usage  Board  Workspace  System
+
+  MASC Keepers (8)                HTTP [partial] · operator quiz read failed +3
+   ! 0 attention   ◂ 3 failing   ▶ 0 active   ◌ 0 waiting   ? 5 unknown
+    KEEPER                           NOW             AGE DETAIL
+ ›  alpha-failing                    - unknown    48d09h ◂ no failure record ·…
+      ta… failing 3h05m  ◷ ?  lag 4  +13m02s +2 -1  ··✓··⊘✓··✓✗✗  facts 12 ▄▆█▆
+    beta-unrecorded                  - unknown    48d09h ◂ no failure record ·…
+      task task-… failing ?  ◷ ?  lag 0  +47s +1 -0  ········✓··✗  facts 5 00▅█
+    gamma-skewed                     - unknown    48d09h ◂ no failure record ·…
+      task task-0001 · health fai… failing ?  ◷ ?  lag 0  ··········✗·  facts ?
+    delta-mixed                      - unknown    48d09h task task-0001
+      task … ◷ ?  lag 12  +9m02s +14 -6  stale ×1  ✓⊘··✓··✓·⊘✓✓  facts 340 █▆▅▃
+    epsilon-busy                     - unknown    48d09h task task-0001
+      task task-0001  ◷ ?  lag 2  +4m02s +31 -12  ????✓✓✓✓✓✓✓✓  facts 1204 █▄▂▁
+    eta-quiet                        - unknown    48d09h task task-0001
+      task task-0001                     ◷ ?  lag 0  +8d02h +0 -0  facts 8 █000
+    theta-idle                       - unknown    48d09h task task-0001 · heal…
+      task task-0001 · … ◷ ?  lag 0  +25m02s +4 -2  ✓✓✓✓✓✓✓✓✓✓✓✓  facts 61 ▄▇█▄
+    zeta-unseeded                    - unknown    48d09h task task-0001
+      task task-0001    ◷ ?  lag 1  +35m02s +27 -0  ????????????  facts 27 000█
+ ──────────────────────────────────────────────────────────────────────────────
+  v:view  o:order  j/k:move  Right / Enter:detail  Esc:dashboard  q:quit  …?
+ › to alpha-failing   (i to write)

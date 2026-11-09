@@ -79,6 +79,7 @@
   keeper_gate_auto_judge_queue
   keeper_gate_auto_judge_worker
   keeper_gate_auto_judge_recovery
+  keeper_turn_sandbox_runtime_registry
   keeper_approval_queue_registry
   keeper_approval_queue_persist
   keeper_approval_queue_load

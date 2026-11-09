@@ -5,7 +5,6 @@
 
     @since God file decomposition *)
 
-open Keeper_meta_contract
 open Keeper_unified_turn_types
 open Keeper_unified_turn_phase_plan
 

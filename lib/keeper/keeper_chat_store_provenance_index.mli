@@ -186,17 +186,29 @@ type indexed_execution =
   | Unique_execution of execution_owner
   | Reused_execution
 
+type autonomous_input_index
+
 type provenance_index =
   { valid : indexed_provenance Provenance_index.t
   ; poisoned_delivery_keys : string Poisoned_delivery_keys.t
   ; tool_ordinals : indexed_tool_ordinal Tool_ordinal_index.t
   ; executions : indexed_execution Execution_index.t
+  ; autonomous_inputs : autonomous_input_index
   }
 
 val provenance_index_of_existing :
   string -> (provenance_index, string) result
 
 val transcript_provenance_readable : string -> (unit, string) result
+
+val validate_indexed_autonomous_inputs :
+  provenance_index ->
+  delivery_key:Keeper_chat_delivery_identity.delivery_key ->
+  Keeper_chat_delivery_identity.approval_input_binding list ->
+  (unit, string) result
+(** Before any append, require the existing turn's exact ordered binding.
+    An unseen turn can be bound once. Missing binding behind existing tools,
+    duplicate bindings or another vector are conflicts, never repair inputs. *)
 
 val find_indexed_provenance :
   provenance_index ->

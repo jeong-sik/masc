@@ -531,6 +531,7 @@ let run_turn
       ?trace_link
       ?continuation_channel
       ?hitl_resolutions
+      ?on_gate_inputs_prepared
       ?on_gate_deferred
       ?on_checkpoint_stage
       ()
@@ -957,6 +958,13 @@ let run_turn
       approval_gate in
     let original_gate_message = user_message in
     let prepared_gate_input = s.Keeper_run_tools.model_message in
+    Option.iter (fun observe ->
+      try observe ~turn_ref prepared_gate_input with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Log.Keeper.warn ~keeper_name:meta.name
+          "prepared Gate input observation failed turn_ref=%s: %s"
+          (Ids.Turn_ref.to_string turn_ref) (Printexc.to_string exn))
+      on_gate_inputs_prepared;
     let user_message = prepared_gate_input.text in
     let user_blocks =
       match user_blocks, prepared_gate_input.replay_evidence with

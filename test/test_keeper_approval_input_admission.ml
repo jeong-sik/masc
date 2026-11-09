@@ -387,6 +387,23 @@ let batched_replay_admission () = with_directory (fun root ->
   let model = Replay.compose_model_message ~base_path:root
     ~user_message:"Continue the original request."
     ~inputs:[ observed "approval-a" first_outcome; observed "approval-b" second_outcome ] in
+  let bindings = model.approval_input_bindings |> unwrap in
+  Alcotest.(check (list string)) "prepared vector preserves the canonical approval order"
+    [ "approval-a"; "approval-b" ]
+    (List.map (fun (binding : Keeper_chat_delivery_identity.approval_input_binding) ->
+       Keeper_chat_delivery_identity.Request_id.to_string binding.approval_id) bindings);
+  let recovered_first = Replay.Applied
+    { operation = "filesystem_write"; output_ref = artifact "first effect"
+    ; journal = Replay.Replay_journal_already_recorded } in
+  let recovered_second = Replay.Failed
+    { operation = "tool_execute"; detail_ref = artifact "second refusal"
+    ; journal = Replay.Replay_journal_already_recorded } in
+  let recovered = Replay.compose_model_message ~base_path:root
+    ~user_message:"A different base cue after recovery."
+    ~inputs:[ observed "approval-a" recovered_first; observed "approval-b" recovered_second ] in
+  Alcotest.(check bool) "recovery journal and base cue do not change canonical prepared inputs" true
+    (Keeper_chat_delivery_identity.approval_input_bindings_equal bindings
+       (recovered.approval_input_bindings |> unwrap));
   Alcotest.(check (list string)) "both source resolutions retain their order"
     [ "approval-a"; "approval-b" ]
     (List.map (fun (resolution : Keeper_event_queue.hitl_resolution) -> resolution.approval_id)

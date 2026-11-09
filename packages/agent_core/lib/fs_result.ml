@@ -142,22 +142,7 @@ let append_file path content =
   | exn -> io_error_of_exn ~op:"append" ~path exn
 ;;
 
-let read_dir path =
-  try Ok (Sys.readdir path |> Array.to_list |> List.sort String.compare) with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> io_error_of_exn ~op:"read_dir" ~path exn
-;;
-
 let file_exists path =
   try Sys.file_exists path && not (Sys.is_directory path) with
   | Sys_error _ -> false
-;;
-
-let remove_file path =
-  try
-    if Sys.file_exists path then Sys.remove path;
-    Ok ()
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn -> io_error_of_exn ~op:"remove" ~path exn
 ;;

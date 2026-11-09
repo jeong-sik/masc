@@ -28,18 +28,10 @@ val append_file : string -> string -> (unit, Error.t) result
     directory, or a directory creation syscall fails. *)
 val ensure_dir : string -> (unit, Error.t) result
 
-(** List directory entries. *)
-val read_dir : string -> (string list, Error.t) result
-
 (** {1 Queries} *)
 
 (** Check if path exists as a regular file. *)
 val file_exists : string -> bool
-
-(** {1 Deletion} *)
-
-(** Remove a file. Returns [Ok ()] if file does not exist. *)
-val remove_file : string -> (unit, Error.t) result
 
 (** {1 Utilities} *)
 

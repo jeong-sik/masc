@@ -182,37 +182,6 @@ let test_file_exists_directory () =
     (Fs_result.file_exists (Filename.get_temp_dir_name ()))
 ;;
 
-(* ── remove_file ──────────────────────────────────────── *)
-
-let test_remove_file_success () =
-  let path = Filename.temp_file "fs_remove_" ".txt" in
-  match Fs_result.remove_file path with
-  | Ok () -> check_bool "removed" false (Fs_result.file_exists path)
-  | Error _ -> Alcotest.fail "should succeed"
-;;
-
-let test_remove_file_nonexistent () =
-  match Fs_result.remove_file "/nonexistent/file.txt" with
-  | Ok () -> () (* remove_file succeeds if file doesn't exist *)
-  | Error _ -> Alcotest.fail "should succeed for nonexistent"
-;;
-
-(* ── read_dir ─────────────────────────────────────────── *)
-
-let test_read_dir_success () =
-  let dir = Filename.get_temp_dir_name () in
-  match Fs_result.read_dir dir with
-  | Ok entries -> check_bool "has entries" true (List.length entries >= 0)
-  | Error _ -> Alcotest.fail "should succeed"
-;;
-
-let test_read_dir_nonexistent () =
-  match Fs_result.read_dir "/nonexistent/dir" with
-  | Error (Error.Io (FileOpFailed { op; _ })) -> check_string "op" "read_dir" op
-  | Error _ -> Alcotest.fail "wrong error type"
-  | Ok _ -> Alcotest.fail "should fail"
-;;
-
 (* ── io_error_of_exn ──────────────────────────────────── *)
 
 let test_io_error_of_exn_sys_error () =
@@ -255,14 +224,6 @@ let () =
       , [ Alcotest.test_case "true" `Quick test_file_exists_true
         ; Alcotest.test_case "false" `Quick test_file_exists_false
         ; Alcotest.test_case "directory" `Quick test_file_exists_directory
-        ] )
-    ; ( "remove_file"
-      , [ Alcotest.test_case "success" `Quick test_remove_file_success
-        ; Alcotest.test_case "nonexistent" `Quick test_remove_file_nonexistent
-        ] )
-    ; ( "read_dir"
-      , [ Alcotest.test_case "success" `Quick test_read_dir_success
-        ; Alcotest.test_case "nonexistent" `Quick test_read_dir_nonexistent
         ] )
     ; ( "io_error_of_exn"
       , [ Alcotest.test_case "sys_error" `Quick test_io_error_of_exn_sys_error

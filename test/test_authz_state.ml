@@ -1559,7 +1559,13 @@ let runtime_record ~author event =
 ;;
 
 let made ?(runtime_id = first_runtime) ?(grant_id = first_grant) ~by () =
-  Re.Made { runtime_id; provider_account_id = first_account; user_id = by; grant_id }
+  Re.Made
+    { runtime_id
+    ; provider_account_id = first_account
+    ; user_id = by
+    ; grant_id
+    ; self_effects = Authz_types.Effect.Set.of_list Authz_types.Effect.[ Invoke_model; Use_tool ]
+    }
 ;;
 
 (* Plan D1: a person makes a Runtime on an account they own, with its Self
@@ -1584,6 +1590,13 @@ let test_runtimes () =
        (fun (id, (runtime : Rs.runtime)) ->
          ( Authz_types.Runtime_id.to_string id
          , Authz_types.Grant_id.to_string runtime.Rs.self_grant ))
+       (Rs.owned_by state.S.runtimes user));
+  Alcotest.(check (list string))
+    "its Self grant keeps the effects the record names"
+    [ "invoke_model"; "use_tool" ]
+    (List.concat_map
+       (fun (_, (runtime : Rs.runtime)) ->
+         List.map Authz_types.Effect.to_string (Authz_types.Effect.Set.elements runtime.Rs.self_effects))
        (Rs.owned_by state.S.runtimes user));
   Alcotest.(check int) "another person owns none" 0 (List.length (Rs.owned_by state.S.runtimes bob));
   refused_as

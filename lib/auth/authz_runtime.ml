@@ -16,7 +16,7 @@ let error_to_string = function
   | Commit_failed error -> Authz_zone.error_to_string error
 ;;
 
-let make zone ~user_id ~provider_account_id ~runtime_id ~draw =
+let make zone ~user_id ~provider_account_id ~runtime_id ~self_effects ~draw =
   let* grant_id =
     Result.map_error (fun error -> Id_not_drawn error) (Grant_id.of_string (draw ()))
   in
@@ -24,7 +24,8 @@ let make zone ~user_id ~provider_account_id ~runtime_id ~draw =
     Result.map_error
       (fun error -> Body_not_built error)
       (Authz_runtime_event.to_body
-         (Authz_runtime_event.Made { runtime_id; provider_account_id; user_id; grant_id }))
+         (Authz_runtime_event.Made
+            { runtime_id; provider_account_id; user_id; grant_id; self_effects }))
   in
   let draft =
     { Authz_zone.author = Author.Authenticated (Principal.Human user_id)

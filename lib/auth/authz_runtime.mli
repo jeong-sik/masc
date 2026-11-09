@@ -15,12 +15,14 @@ type error =
 val error_to_string : error -> string
 
 (** Writes the record that makes [runtime_id] on [provider_account_id] for
-    [user_id], with a Self grant whose id is [draw ()]. The result is that id. *)
+    [user_id], with a Self grant whose id is [draw ()] and that allows
+    [self_effects]. The result is that id. *)
 val make
   :  Authz_zone.t
   -> user_id:Authz_types.User_id.t
   -> provider_account_id:Authz_types.Provider_account_id.t
   -> runtime_id:Authz_types.Runtime_id.t
+  -> self_effects:Authz_types.Effect.Set.t
   -> draw:(unit -> string)
   -> (Authz_types.Grant_id.t, error) result
 

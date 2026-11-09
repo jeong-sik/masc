@@ -5363,7 +5363,7 @@ export function ChatComposer({
           <!-- Flush borderless textarea: prototype composer.jsx <textarea> has
                no inline styling; all box styling (border:0, outline:0,
                transparent bg, padding:9px 0) comes from .composer textarea in
-               chat.css (mirrors styles/v2.css:932-936). Removing the prior
+               chat.css (mirrors the prototype). Removing the prior
                inline Tailwind (control-textarea + border + rounded + px/py +
                bg + focus ring) drops the nested box the prototype lacks. -->
           ${voice.state === 'recording' || voice.state === 'transcribing'

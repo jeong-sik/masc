@@ -6,7 +6,7 @@
 # location are recorded as comments at the bottom, with the limit of what that
 # proves stated there. A comment line is not a `sha256sum -c` entry.
 cbeabfd89b14da3a60c56f3542f48d34cadcba24b8f5dfb48f4092d1fa67dd30  .gitignore
-a28c4b0820580e1722c27b688a9f901dd528d074ea7562f87b68fe0cfe62add9  README.md
+76e683f8875241f7b44813793854fef9318df96b84c4724b72969e1e1a5932c4  README.md
 b867f52cf05436058142526791d878ced6bf2c39ed8a5fa673b9feb8472b74cf  ci-dune-target.log
 a8eeaaece1d577af62c991054f88aae790bf425d2db2dab437edc5474d125053  drop.log
 7c8884e63d3c58ccead9245b9c1a146fd98cb54cdef32da0cf00eae9734e2c95  dune-attempt.log

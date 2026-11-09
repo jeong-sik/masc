@@ -343,10 +343,38 @@ let test_a_failure_that_is_not_a_turn_failure_has_no_attempts () =
   in
   Alcotest.(check (list int)) "ordinals" [] (ordinals_of attempts)
 
+let test_matrix_separates_failed_walk_and_next_head () =
+  let row = runtime ~last_failure:(reported Decode.Keeper_failure_turn)
+      ~lane_observation:(observed two_candidates) () in
+  let resting = { row with kr_runtime_path_rest = Ok (Some
+      (Decode.Path_rest_resting { runtime_id = "a"; release_at = 1200.;
+        release_basis = Decode.Stated_by_provider })) } in
+  let check id expected runtime = Alcotest.(check bool) id true
+      (Trail.matrix_cell ~runtime_id:id (Some runtime) = expected) in
+  check "a" { Trail.failure = Trail.Matrix_failed; head = Trail.Head_resting } resting;
+  check "b" { Trail.failure = Trail.Matrix_failed; head = Trail.Head_elsewhere } resting;
+  check "untried" { Trail.failure = Trail.Matrix_clear; head = Trail.Head_elsewhere } resting;
+  let serving = { row with kr_runtime_path_rest = Ok (Some
+      (Decode.Path_rest_serving { runtime_id = "next" })) } in
+  check "next" { Trail.failure = Trail.Matrix_clear; head = Trail.Head_serving } serving;
+  check "a" { Trail.failure = Trail.Matrix_failed; head = Trail.Head_unknown }
+    { row with kr_runtime_path_rest = Error "unread" };
+  check "a" { Trail.failure = Trail.Matrix_unknown; head = Trail.Head_unknown }
+    (runtime ~last_failure:(reported Decode.Keeper_failure_turn) ());
+  check "a" { Trail.failure = Trail.Matrix_unknown; head = Trail.Head_unknown }
+    (runtime ~last_failure:(reported Decode.Keeper_failure_heartbeat)
+       ~lane_observation:(observed two_candidates) ());
+  Alcotest.(check (list string)) "attempt and head identities only" [ "a"; "b"; "next" ]
+    (Trail.matrix_runtime_ids (Some serving));
+  Alcotest.(check bool) "missing runtime remains unknown" true
+    (Trail.matrix_cell ~runtime_id:"missing" None = { Trail.failure = Trail.Matrix_unknown; head = Trail.Head_unknown })
+
 let () =
   Alcotest.run "tui_keeper_trail"
     [ ( "decisions"
-      , [ Alcotest.test_case "only a failing health reading has a failed trail" `Quick
+      , [ Alcotest.test_case "matrix separates failed walk and next head" `Quick
+            test_matrix_separates_failed_walk_and_next_head
+        ; Alcotest.test_case "only a failing health reading has a failed trail" `Quick
             test_only_a_failing_health_reading_has_a_failed_trail
         ; Alcotest.test_case "a failing Keeper with no last failure reads no receipt" `Quick
             test_a_failing_keeper_with_no_last_failure_reads_no_receipt

@@ -197,28 +197,18 @@ let test_recent_and_name_have_deterministic_ties () =
   Alcotest.(check (list string)) "identical sort keys remain stable"
     [ "same-a"; "same-b" ] (names (Model.order_rows ~outside:unread ~view:Model.Plain ~now:0. ~sort:Model.Recent duplicates))
 
-let with_runtime_id runtime_id (runtime : Decode.keeper_runtime) = { runtime with kr_runtime_id = runtime_id }
-
-let test_runtime_view_groups_by_runtime_id () =
-  let healthy = health "healthy" in
+let test_runtime_view_contains_only_failing_rows () =
   let rows =
-    [ row ~health:healthy ~edit:(with_runtime_id "b.runtime") "b1"
+    [ row ~health:(health "healthy") "sound"
     ; row "unread"
-    ; row ~health:healthy ~edit:(with_runtime_id "a.runtime") "a1"
-    ; row ~health:healthy ~edit:(with_runtime_id "b.runtime") "b2"
-    ]
-  in
-  Alcotest.(check (list string)) "runtime ids in order, then the unread row"
-    [ "a1"; "b1"; "b2"; "unread" ]
+    ; row ~health:(health "failing") "b"
+    ; row ~health:(health "failing") "a" ] in
+  Alcotest.(check (list string)) "only failed health readings remain selectable"
+    [ "a"; "b" ]
     (names (Model.order_rows ~outside:unread ~view:Model.By_runtime ~sort:Model.Name ~now:0. rows));
-  Alcotest.(check bool) "a read row is grouped by its runtime id" true
-    (Model.group_of_view ~outside:unread Model.By_runtime (List.hd rows)
-     = Some (Model.Group_runtime (Model.Runtime_named "b.runtime")));
-  Alcotest.(check bool) "an unread row has its own group" true
-    (Model.group_of_view ~outside:unread Model.By_runtime (List.nth rows 1)
-     = Some (Model.Group_runtime Model.Runtime_unread));
-  Alcotest.(check bool) "the plain list does not group" true
-    (Model.group_of_view ~outside:unread Model.Plain (List.hd rows) = None)
+  Alcotest.(check bool) "the matrix uses the same cause grouping as failures" true
+    (Model.group_of_view ~outside:unread Model.By_runtime (List.nth rows 2)
+     = Some (Model.Group_cause Model.Cause_unnamed))
 
 let test_cause_view_puts_failing_rows_first () =
   let rows = [ row ~health:(health "healthy") "sound"; row ~health:(health "failing") "failing" ] in
@@ -364,7 +354,6 @@ let group_label = function
   | Model.Group_due _ -> "due"
   | Model.Group_memory _ -> "memory"
   | Model.Group_age _ -> "age"
-  | Model.Group_runtime _ -> "runtime"
 
 let stop_label = function
   | Model.Stop_heading group -> "heading " ^ group_label group
@@ -755,8 +744,8 @@ let () =
         ; Alcotest.test_case "waiting summary leaves out a failing Keeper" `Quick
             test_waiting_summary_leaves_out_a_failing_keeper
         ; Alcotest.test_case "group counts" `Quick test_group_counts
-        ; Alcotest.test_case "runtime view groups by runtime id" `Quick
-            test_runtime_view_groups_by_runtime_id
+        ; Alcotest.test_case "runtime view contains only failing rows" `Quick
+            test_runtime_view_contains_only_failing_rows
         ; Alcotest.test_case "cause view puts failing rows first" `Quick
             test_cause_view_puts_failing_rows_first
         ; Alcotest.test_case "day wall puts the most failed half-hours first" `Quick

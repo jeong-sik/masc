@@ -633,6 +633,12 @@ let authorize_muse ~account_request home =
   |> Result.map_error not_authorized
 ;;
 
+(* The host client starts on a credential of the host, whoever asks for the
+   check: only a single-user process shares it (plan D3b). *)
+let authorize_host client =
+  Runtime_account_access.authorize_host client |> Result.map_error not_authorized
+;;
+
 let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~account_request (runtime : Runtime_instance.t) =
   (* The refusal the client's latest report amounts to. Whichever ends the
      run first -- this window or the client's own timeout -- reads it. *)
@@ -757,13 +763,16 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
                   } ) as error)) ->
            Error (Provider_rejected (Runtime_muse_serve.error_to_string error))))
       | Runtime_execution.Antigravity_cli execution ->
+        (match authorize_host Runtime_account_access.Antigravity with
+         | Error failure -> Error failure
+         | Ok host ->
         let config = { (Runtime_antigravity.default_config ~cwd:cwd_path ~model:execution.model) with
           cli_path = execution.cli_path;
           effort = execution.effort;
           admission_timeout_s = Float.min timeout_s execution.timeout_s;
           timeout_s = Some timeout_s } in
         (match Runtime_verification_antigravity.run ~secure_random ~net ~mgr ~clock ~cwd
-           ~directory:cwd_path ~oauth_source:execution.oauth_source ~config ~tool ~prompt with
+           ~directory:cwd_path ~host ~oauth_source:execution.oauth_source ~config ~tool ~prompt with
          | Ok result -> Ok {model=result.model; text=result.text}
          | Error Runtime_verification_antigravity.Private_home_unavailable ->
            Error (Unavailable (Client_not_authenticated "Antigravity private authentication could not be prepared"))
@@ -781,7 +790,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
               | Runtime_antigravity.Process_exited _
               | Runtime_antigravity.Child_fd_ceiling_exceeded _
               | Runtime_antigravity.Unhandled_exception _ ) as err)) ->
-           Error (Provider_rejected (Runtime_antigravity.error_to_string err)))
+           Error (Provider_rejected (Runtime_antigravity.error_to_string err))))
       | Runtime_execution.Vibe_cli _ -> Error (Unavailable Unsupported_runtime)
       | Runtime_execution.Agent_core provider_cfg ->
         (match

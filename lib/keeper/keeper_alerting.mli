@@ -4,10 +4,7 @@
 
     @since v2.200.0 *)
 
-open Keeper_types
 open Keeper_meta_contract
-open Keeper_types_profile
-open Keeper_memory
 
 (** {1 Included: Keeper_alerting_path} *)
 

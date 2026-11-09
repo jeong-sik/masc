@@ -3,10 +3,7 @@
     Accessors, JSON codecs, save/load extracted to
     [Keeper_context_core_accessors] (godfile decomp). *)
 
-open Printf
 open Keeper_types
-open Keeper_meta_contract
-open Keeper_types_profile
 
 include Keeper_context_core_accessors
 

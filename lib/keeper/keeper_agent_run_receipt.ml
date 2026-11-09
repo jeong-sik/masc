@@ -5,9 +5,7 @@
     execution receipt record, writes receipt manifests, appends with
     coverage-gap tracking, and determines the final turn result. *)
 
-open Keeper_types
 open Keeper_meta_contract
-open Keeper_types_profile
 open Keeper_agent_result
 
 let lane_attempt_facts ~turn_succeeded ~last_attempt_index =

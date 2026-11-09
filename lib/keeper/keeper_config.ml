@@ -1,6 +1,5 @@
 (** Keeper configuration — defaults, environment variable parsing, profiles. *)
 
-open Tool_args
 include Keeper_config_rp_helpers
 
 (** Upper bound for keeper time configs expressed in seconds.  Repeated

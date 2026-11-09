@@ -8,8 +8,6 @@
 
     @since God file decomposition *)
 
-open Tool_args
-
 (* ── Bool / string parsing ──────────────────────────────────── *)
 
 let bool_of_string raw =

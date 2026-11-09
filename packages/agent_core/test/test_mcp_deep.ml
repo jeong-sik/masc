@@ -3,8 +3,7 @@
     Targets the 116 uncovered lines (54.33% coverage).
     Focuses on pure functions that do not require Eio context:
     - text_of_tool_result: exact content block extraction
-    - mcp_tool_of_json: JSON tool definition parsing
-    - merge_env: environment variable merging *)
+    - mcp_tool_of_json: JSON tool definition parsing *)
 
 open Agent_core
 module Sdk_types = Mcp_protocol.Mcp_types
@@ -142,36 +141,6 @@ let test_tool_json_no_schema () =
   | None -> Alcotest.fail "expected Some"
 ;;
 
-(* ── merge_env tests ─────────────────────────────────────────── *)
-
-let test_merge_env_empty_extras () =
-  let env = Mcp.merge_env [] in
-  let current = Unix.environment () in
-  Alcotest.(check int) "same length" (Array.length current) (Array.length env)
-;;
-
-let test_merge_env_adds_new () =
-  let key = "AGENT_CORE_TEST_MERGE_ENV_UNIQUE_KEY_12345" in
-  let env = Mcp.merge_env [ key, "test_value" ] in
-  let found =
-    Array.to_list env |> List.exists (fun entry -> entry = key ^ "=test_value")
-  in
-  Alcotest.(check bool) "new key present" true found
-;;
-
-let test_merge_env_overrides () =
-  let key = "PATH" in
-  let env = Mcp.merge_env [ key, "/custom/path" ] in
-  let matches =
-    Array.to_list env
-    |> List.filter (fun entry ->
-      String.length entry >= String.length key + 1
-      && String.sub entry 0 (String.length key + 1) = key ^ "=")
-  in
-  Alcotest.(check int) "exactly one PATH" 1 (List.length matches);
-  Alcotest.(check string) "overridden" (key ^ "=/custom/path") (List.hd matches)
-;;
-
 (* ── Runner ───────────────────────────────────────────────────── *)
 
 let () =
@@ -195,11 +164,6 @@ let () =
             `Quick
             test_tool_json_input_schema_underscore
         ; Alcotest.test_case "no schema" `Quick test_tool_json_no_schema
-        ] )
-    ; ( "merge_env"
-      , [ Alcotest.test_case "empty extras" `Quick test_merge_env_empty_extras
-        ; Alcotest.test_case "adds new" `Quick test_merge_env_adds_new
-        ; Alcotest.test_case "overrides" `Quick test_merge_env_overrides
         ] )
     ]
 ;;

@@ -110,12 +110,9 @@ val await_exit : t -> Eio.Process.exit_status
 
 (** {1 Tool operations} *)
 
-val list_tools : t -> (mcp_tool list, Error.t) result
-val call_tool : t -> name:string -> arguments:Yojson.Safe.t -> Types.tool_result
-
 (** Unabridged SDK values, including outputSchema and structuredContent.
     [list_tools_full] reads one page; it does not accumulate unbounded pages
-    from an optional server. [list_tools] retains its all-pages behavior.
+    from an optional server.
     [call_tool_full] preserves [is_error]; callers must inspect it.
     A connection's optional [max_response_bytes] is enforced by the NDJSON
     reader before allocating/parsing a complete server message. The same limit
@@ -130,15 +127,6 @@ val call_tool_full :
 
 (** {1 Managed connections} *)
 val text_of_tool_result : Mcp_schema.Sdk_types.tool_result -> string
-
-val merge_env : (string * string) list -> string array
-
-type server_spec =
-  { command : string
-  ; args : string list
-  ; env : (string * string) list
-  ; name : string
-  }
 
 type transport =
   | Stdio of { client : t }
@@ -156,12 +144,3 @@ type managed =
   ; name : string
   ; transport : transport
   }
-
-val connect_and_load
-  :  sw:Eio.Switch.t
-  -> mgr:_ Eio.Process.mgr
-  -> server_spec
-  -> (managed, Error.t) result
-
-val close_managed : managed -> unit
-val close_all : managed list -> unit

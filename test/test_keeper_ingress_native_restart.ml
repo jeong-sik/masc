@@ -117,35 +117,40 @@ let projection_events projection =
   read_pages (Projection.beginning_cursor projection) []
 
 let check_history_redaction (event : Projection.event) =
+  let original = Server_dashboard_http_keeper_execution_history.event_json
+      ~redact_text:Fun.id ~redact_json:Fun.id event in
   let masked = Server_dashboard_http_keeper_execution_history.event_json
       ~redact_text:(fun _ -> "[REDACTED]") ~redact_json:(fun _ -> `String "[REDACTED]") event in
   let member = Yojson.Safe.Util.member in
   check (of_pp Yojson.Safe.pp) "redaction preserves the canonical event identity"
     (`String (Projection.Event_id.to_string event.event_id)) (member "event_id" masked);
   let payload = member "payload" masked in
+  let original_payload = member "payload" original in
+  let same_fields label fields before after = List.iter (fun key ->
+    check (of_pp Yojson.Safe.pp) (label ^ " " ^ key) (member key before) (member key after)) fields in
   match event.payload with
-  | Projection.Node_opened {kind=Tool_invocation {provider_tool_use_id; schedule; completion; _}; _} ->
-    let node = member "node" payload in
-    check (of_pp Yojson.Safe.pp) "tool kind is protocol, even under maximal content masking"
-      (`String "tool_invocation") (member "kind" node);
-    check (of_pp Yojson.Safe.pp) "provider tool identity survives masking"
-      (match provider_tool_use_id with None -> `Null | Some id -> `String id) (member "provider_tool_use_id" node);
-    check (of_pp Yojson.Safe.pp) "execution mode is protocol"
-      (Agent_core.Tool_contract.execution_mode_to_yojson schedule.execution_mode)
-      (member "execution_mode" (member "schedule" node));
-    check (of_pp Yojson.Safe.pp) "completion is protocol"
-      (Agent_core.Tool_contract.completion_to_yojson completion) (member "completion" node)
-  | Node_closed {terminal=Succeeded; _} ->
-    check (of_pp Yojson.Safe.pp) "succeeded remains a typed terminal"
-      (`String "succeeded") (member "kind" (member "terminal" payload))
-  | Node_updated {update=Tool_input_snapshot (Agent_core.Types.ToolUse {id; _}); _} ->
-    let data = member "data" payload in
-    check (of_pp Yojson.Safe.pp) "typed tool-use ID survives masking" (`String id) (member "id" data);
-    check (of_pp Yojson.Safe.pp) "tool input content is masked" (`String "[REDACTED]") (member "input" data)
-  | Node_updated {update=Tool_result (Agent_core.Types.ToolResult {tool_use_id; _}); _} ->
-    check (of_pp Yojson.Safe.pp) "typed tool-result ID survives masking"
-      (`String tool_use_id) (member "tool_use_id" (member "data" payload))
-  | Node_opened _ | Node_closed _ | Node_updated _ -> ()
+  | Projection.Node_opened _ ->
+    same_fields "node protocol survives masking"
+      ["kind"; "ordinal"; "block_kind"; "provider_tool_use_id"; "schedule"; "completion"]
+      (member "node" original_payload) (member "node" payload)
+  | Node_closed _ ->
+    same_fields "terminal protocol survives masking" ["kind"; "failure_kind"]
+      (member "terminal" original_payload) (member "terminal" payload)
+  | Node_updated {update; _} ->
+    (match update with
+     | Projection.Output_snapshot _ | Tool_input_snapshot _ | Tool_result _ ->
+       let before = member "data" original_payload in
+       let after = member "data" payload in
+       same_fields "typed content protocol survives masking"
+         ["type"; "id"; "tool_use_id"; "is_error"] before after;
+       let source_type json = match member "source" json with
+         | `Assoc fields -> List.assoc "type" fields
+         | `Null -> `Null
+         | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> fail "invalid typed media source" in
+       check (of_pp Yojson.Safe.pp) "typed media source survives masking"
+         (source_type before) (source_type after)
+     | Turn_ready _ | Checkpoint_snapshot _ | Provider_event _ | Provider_request_snapshot _
+     | Provider_response_snapshot _ | Output_delta _ | Tool_input_delta _ | Tool_progress _ -> ())
 
 let check_original_input (checkpoint : Agent_core.Checkpoint.t) =
   let original = List.filter (fun (message : Agent_core.Types.message) ->

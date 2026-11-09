@@ -3719,6 +3719,20 @@ status: reference
   → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli),
     [Repository_pulls](../../lib/repository_pulls.mli)
 
+**PR Placement (PR 자리)**
+: 열린 PR 하나를 `Repository_pulls_placement` 표에서 위쪽부터 처음 맞는 자리 하나에만 넣는 분류
+  (RFC keeper-world-state-shows-open-work §4.2). draft, checks 실패, changes requested,
+  충돌, checks 실행 중을 차례로 보고, 그다음에 현재 head 커밋에 어느 계정의 마지막 리뷰가 있는지
+  (`head_review`)로 가른다. 리뷰는 판정(verdict)과 관계없이 세므로, head 에 리뷰가 있어도
+  리뷰 결정(review decision)이 아직 승인을 기다리면 `awaiting_approval` 에 든다.
+  `checks_failing`·`changes_requested`·`conflicting`·`unreviewed_on_head`·
+  `awaiting_approval` 다섯 자리(`Needs`)가 손볼 일이 있는 PR 이고, 나머지 다섯 자리는 수만
+  센다. head 커밋이나 리뷰 목록을 읽지 못한 PR 은 `head_review_unknown` 에 들며
+  "리뷰 없음"으로 세지 않는다. Keeper 도구 `keeper_pull_requests_list` 가 서버 스냅숏
+  (`Repository_pulls.current`)에서 저장소별 수와 행을 읽어 돌려준다. GitHub 은 부르지 않는다.
+  → [Repository_pulls_placement](../../lib/repository_pulls_placement.mli),
+    [Tool_pull_requests](../../lib/tool_pull_requests.mli)
+
 **Stacked PR (스택 PR)**
 : 대규모 변경이나 연속 작업을 20k 토큰 이하의 작은 단위로 쪼개어 계층적으로 쌓아 올리는 PR 구조.
   에이전트 협업의 컨텍스트 초과와 병목을 막고 빠른 릴리스 순환을 보장한다(헌법 `<work_unit>`·`<build_and_ci>`·`<merge>`).

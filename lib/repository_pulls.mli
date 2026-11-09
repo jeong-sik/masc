@@ -34,6 +34,49 @@ type mergeable =
   | Mergeable_unknown
       (** GitHub has not computed mergeability yet (its [UNKNOWN]). *)
 
+type actor =
+  | Actor_user of string  (** A GitHub user's login. *)
+  | Actor_bot of string  (** A bot account's login. *)
+  | Actor_other of
+      { typename : string option
+      ; login : string option
+      }
+      (** An actor type this reader does not name (an organization, a
+          mannequin), with GitHub's [__typename] and login as sent.
+          [typename] is [None] when the answer carried none. *)
+  | Actor_absent  (** GitHub gave [null]: the account was deleted. *)
+
+type review_verdict =
+  | Verdict_approved
+  | Verdict_changes_requested
+  | Verdict_commented
+  | Verdict_dismissed
+  | Verdict_pending
+  | Verdict_unrecognized of string
+      (** A review state GitHub sent that this build does not know, as sent.
+          It is shown, never branched on. *)
+
+type latest_review =
+  { reviewer : actor
+  ; verdict : review_verdict
+  ; commit_oid : string option
+      (** The commit the review was submitted against; [None] when GitHub
+          reports no commit for it. *)
+  }
+(** The last review one account left on a pull request (GitHub's
+    [latestReviews]). *)
+
+type latest_reviews =
+  | Reviews_not_read
+      (** The answer carried no readable review list. This is not "no
+          reviews". *)
+  | Reviews_read of
+      { reviews : latest_review list
+      ; truncated : bool
+          (** GitHub holds more accounts than the page read
+              ([pageInfo.hasNextPage]). *)
+      }
+
 type pull_request =
   { repo_slug : string  (** [owner/repo] *)
   ; number : int
@@ -47,7 +90,22 @@ type pull_request =
           is skipped because its author brought the base in. [None] when
           that window holds no such commit, or GitHub gives its author or
           name as [null]. *)
+  ; title : string option  (** [None] when the answer carried no title. *)
+  ; head_oid : string option
+      (** The head commit's object id ([headRefOid]); [None] when the answer
+          carried none. *)
+  ; reviews : latest_reviews
   }
+
+type head_review =
+  | Reviewed_on_head
+      (** The last review of some account is on the current head commit. *)
+  | Not_reviewed_on_head
+      (** The review list was read in full and none of it is on the head commit. *)
+  | Review_history_incomplete
+      (** The list was cut ([truncated]) and the part read has none on the head
+          commit, so the part not read may. *)
+  | Head_review_unknown  (** The head commit or the review list was not read. *)
 
 type failure =
   | Repository_not_visible
@@ -168,6 +226,39 @@ val keeper_of_author : keepers:string list -> pull_request -> string option
     branch. The result is for display
     only and is not an identity for authority: any committer can set the
     author name. *)
+
+val review_on_head : head:string -> latest_review -> bool
+(** Whether the review was submitted against the commit with object id [head].
+    A review that reports no commit is not on it. *)
+
+val head_review_of : pull_request -> head_review
+(** Whether some account's last review sits on the head commit. Only the
+    review's commit and the head's object id are compared: who wrote the
+    review, what it said and the pull request's comments do not count, and
+    a review of an older commit does not either. *)
+
+val check_state_to_string : check_state -> string
+(** [passing] | [failing] | [running] | [none]. *)
+
+val review_state_to_string : review_state -> string
+(** [approved] | [changes_requested] | [waiting] | [none]. *)
+
+val mergeable_to_string : mergeable -> string
+(** [mergeable] | [conflicting] | [unknown]. *)
+
+val verdict_to_string : review_verdict -> string
+(** [approved] | [changes_requested] | [commented] | [dismissed] | [pending]
+    | [unrecognized]. A {!Verdict_unrecognized} keeps its text in the
+    constructor, not here. *)
+
+val head_review_to_string : head_review -> string
+(** [reviewed_on_head] | [not_reviewed_on_head] | [review_history_incomplete]
+    | [unknown]. *)
+
+val actor_to_yojson : actor -> Yojson.Safe.t
+(** [{"kind": "user", "login": ...}], the same with ["bot"],
+    [{"kind": "other", "typename": ..., "login": ...}] (each a string or
+    [null]) and [{"kind": "absent"}]. *)
 
 val failure_to_yojson : failure -> Yojson.Safe.t
 (** [{"kind": ...}] plus the fields of that failure. The HTTP route and the

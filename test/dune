@@ -5508,6 +5508,9 @@
 ; RFC-0465: open pull requests of registered GitHub repositories.
 (include stanzas/test_server_repository_pulls.inc)
 
+; keeper_pull_requests_list: the placement table, the arguments and the answer.
+(include stanzas/test_tool_pull_requests.inc)
+
 (include stanzas/test_keeper_identity_declarations.inc)
 (include stanzas/test_keeper_oauth_identity.inc)
 

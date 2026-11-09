@@ -3079,6 +3079,11 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "candle_purchase" "keeper_candle_purchase" ~readonly:false
   ; masc_misc_descriptor "candle_equip" "keeper_candle_equip" ~readonly:false
   ; masc_misc_descriptor "candle_gift" "keeper_candle_gift" ~readonly:false
+  (* Concurrent: one Atomic.get of the published snapshot, then pure row
+     selection; nothing is written and GitHub is not called. *)
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
+       "pull_requests_list" "keeper_pull_requests_list"
+       ~readonly:true
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "dashboard"
        "masc_dashboard"
        (* Concurrent: config reads plus pure text generation; the dashboard

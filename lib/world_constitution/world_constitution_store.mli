@@ -64,6 +64,13 @@ type rejected_line = {
   detail : string;
 }
 
+type isolated_line = {
+  line_number : int;  (** 1-based, counting every line including blanks. *)
+  subject : string;
+      (** The name no roster resolved: the [author] of an [Added] line, the
+          [by] of a [Replaced] or [Removed] line. *)
+}
+
 type ledger = {
   end_offset : int;
       (** Bytes the ledger held when this was read. Pass it to {!append_at} so
@@ -71,15 +78,25 @@ type ledger = {
   articles : World_constitution_types.t list;
       (** The norms the world currently holds, in the order they were first
           written. An article written, removed and written again returns at the
-          end, because that is when the world decided to keep it. *)
+          end, because that is when the world decided to keep it. Lines whose
+          subject [resolve_subject] refused are folded out: they keep no
+          article in force and move none, because a norm from outside the
+          roster is not the world's to render (RFC-0504 §2.4). *)
   entries : World_constitution_types.entry list;
       (** Every decoded move, in ledger order. Removed entries retain who,
           when and why; the preceding Added entry retains the removed text.
-          History is evidence, not an active norm for the prompt. *)
+          History is evidence, not an active norm for the prompt. Isolated
+          lines stay here — what the file says happened is kept — while
+          {!isolated} names them for the reader. *)
   rejected : rejected_line list;
       (** Lines that did not decode, in file order. They stay in the file: a
           reader reports them rather than dropping them silently, because a
           line nobody can read is a norm somebody wrote. *)
+  isolated : isolated_line list;
+      (** Lines that decoded but whose subject [resolve_subject] refused, in
+          file order. They stay in the file and in [entries]; a reader
+          reports them beside [rejected], because a norm that stopped
+          rendering must not vanish quietly (RFC-0504 §2.4). *)
 }
 
 type read_error =
@@ -90,17 +107,32 @@ type read_error =
 
 val read_error_to_string : read_error -> string
 
-val load : base_path:string -> (ledger, read_error) result
+val load :
+  base_path:string ->
+  resolve_subject:(string -> bool) ->
+  (ledger, read_error) result
 (** Read the whole ledger and fold it, keeping every decoded move. History
     readers and writers use this; the per-turn prompt build uses
-    {!load_articles} instead. A missing file is an empty ledger. *)
+    {!load_articles} instead. A missing file is an empty ledger.
 
-val load_articles : base_path:string -> (World_constitution_types.t list, read_error) result
+    [resolve_subject] names the roster: a decoded line whose subject it
+    refuses folds out of [articles] and lands in [isolated] instead
+    (RFC-0504 §2.4). Production callers pass their world's keeper
+    registry; a test that owns no roster passes one that holds every
+    subject it wrote. *)
+
+val load_articles :
+  base_path:string ->
+  resolve_subject:(string -> bool) ->
+  (World_constitution_types.t list, read_error) result
 (** Read the ledger and fold it, keeping only the norms the world currently
     holds. The decoded history grows without bound while the held articles
     stay small, so an ordinary load must not build it: the per-turn prompt
     build renders articles and would otherwise retain every past article and
-    removal reason on every turn. A missing file is no articles. *)
+    removal reason on every turn. A missing file is no articles.
+    [resolve_subject] folds lines out exactly as {!load} does; this read
+    keeps no isolated-line report, so a roster change that newly isolates a
+    line surfaces through the tool read, not here. *)
 
 (** Which ledger bytes a read folded: their length and SHA-256. *)
 type position = {
@@ -110,11 +142,16 @@ type position = {
 
 val load_held :
   base_path:string ->
+  resolve_subject:(string -> bool) ->
   (World_constitution_types.t list * position, read_error) result
-(** {!load_articles} and the position of the bytes it folded. *)
+(** {!load_articles} and the position of the bytes it folded. The same
+    [resolve_subject] must fold both this read and the later
+    {!load_articles_at} at its position, or the basis and the turn disagree
+    about what the world holds. *)
 
 val load_articles_at :
   base_path:string ->
+  resolve_subject:(string -> bool) ->
   position ->
   (World_constitution_types.t list option, read_error) result
 (** The articles the world held when the ledger ended at [position]. The

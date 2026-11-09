@@ -159,7 +159,8 @@ let query =
     pullRequests(states: OPEN, first: $first, after: $after, orderBy: {field: UPDATED_AT, direction: DESC}) {
       pageInfo { hasNextPage endCursor }
       nodes {
-        number isDraft reviewDecision mergeable
+        number isDraft reviewDecision mergeable title headRefOid
+        latestReviews(first: 10) { pageInfo { hasNextPage } nodes { state author { __typename login } commit { oid } } }
         head: commits(last: 1) { nodes { commit { statusCheckRollup { state } } } }
         authored: commits(last: $authorWindow) { nodes { commit { parents { totalCount } author { name } } } }
       }
@@ -290,6 +291,79 @@ let decode_author node =
     newest_single_parent (List.rev nodes)
   | _ -> None
 
+(* The columns below do not decide whether a row stands: a title, a head
+   object id or a review list this reader cannot read is [None] or
+   [Reviews_not_read] on that row, and the row stays. *)
+let decode_string_member name node =
+  match Json_util.assoc_member_opt name node with
+  | Some (`String value) -> Some value
+  | _ -> None
+
+let decode_title node = decode_string_member "title" node
+let decode_head_oid node = decode_string_member "headRefOid" node
+
+(* A review state is shown as GitHub sent it when this build does not know it;
+   nothing branches on that text. *)
+let verdict_of_wire = function
+  | "APPROVED" -> Verdict_approved
+  | "CHANGES_REQUESTED" -> Verdict_changes_requested
+  | "COMMENTED" -> Verdict_commented
+  | "DISMISSED" -> Verdict_dismissed
+  | "PENDING" -> Verdict_pending
+  | other -> Verdict_unrecognized other
+
+(* [__typename] of a GitHub actor. [null] is a deleted account; a key the
+   query asked for but the answer lacks is an actor of unknown type. *)
+let decode_actor node =
+  match Json_util.assoc_member_opt "author" node with
+  | Some `Null -> Actor_absent
+  | Some (`Assoc _ as actor) ->
+    let typename = decode_string_member "__typename" actor in
+    let login = decode_string_member "login" actor in
+    (match typename, login with
+     | Some "User", Some login -> Actor_user login
+     | Some "Bot", Some login -> Actor_bot login
+     | Some _, _ | None, _ -> Actor_other { typename; login })
+  | Some _ | None -> Actor_other { typename = None; login = None }
+
+let decode_latest_review node =
+  match decode_string_member "state" node with
+  | None -> None
+  | Some state ->
+    let commit_oid =
+      Option.bind (Json_util.assoc_member_opt "commit" node) (decode_string_member "oid")
+    in
+    Some { reviewer = decode_actor node; verdict = verdict_of_wire state; commit_oid }
+
+(* One review that cannot be read makes the whole list unread: a list with a
+   hole in it would answer "no review on the head" for a review it skipped. *)
+let decode_latest_reviews node =
+  match Json_util.assoc_member_opt "latestReviews" node with
+  | Some (`Assoc _ as connection) ->
+    let truncated =
+      match
+        Option.bind
+          (Json_util.assoc_member_opt "pageInfo" connection)
+          (Json_util.assoc_member_opt "hasNextPage")
+      with
+      | Some (`Bool truncated) -> Some truncated
+      | _ -> None
+    in
+    (match truncated, Json_util.assoc_member_opt "nodes" connection with
+     | Some truncated, Some (`List nodes) ->
+       let rec read acc = function
+         | [] -> Some (List.rev acc)
+         | review :: rest ->
+           (match decode_latest_review review with
+            | Some review -> read (review :: acc) rest
+            | None -> None)
+       in
+       (match read [] nodes with
+        | Some reviews -> Reviews_read { reviews; truncated }
+        | None -> Reviews_not_read)
+     | _ -> Reviews_not_read)
+  | _ -> Reviews_not_read
+
 let decode_pull ~repo_slug node =
   match
     Json_util.assoc_member_opt "number" node, Json_util.assoc_member_opt "isDraft" node
@@ -297,7 +371,18 @@ let decode_pull ~repo_slug node =
   | Some (`Int number), Some (`Bool draft) ->
     (match decode_checks node, decode_review node, decode_mergeable node, decode_author node with
      | Some checks, Some review, Some mergeable, Some author ->
-       Some { repo_slug; number; draft; checks; review; mergeable; author }
+       Some
+         { repo_slug
+         ; number
+         ; draft
+         ; checks
+         ; review
+         ; mergeable
+         ; author
+         ; title = decode_title node
+         ; head_oid = decode_head_oid node
+         ; reviews = decode_latest_reviews node
+         }
      | _ -> None)
   | _ -> None
 

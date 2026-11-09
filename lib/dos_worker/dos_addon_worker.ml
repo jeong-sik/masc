@@ -225,7 +225,7 @@ let create ~base_path () =
           (Machine.of_lane ~base_path ~tool_name ~start_time
             ~extra:(Machine.png_fields ~width ~height ~png @ [Machine.core_field] @ pad observation) (Ok observation)) in
   let schemas = schemas () in
-  let server = Server.create ~name:"masc-dos-addon" ~version:"0.1.0" () in
+  let server = Server.create ~name:"masc-dos-addon" ~version:Build_version.current () in
   let server = List.fold_left (fun server (tool, (schema : Masc_domain.tool_schema)) ->
     Server.add_tool (definition tool schema) (fun _context _name _arguments ->
       Ok (response (Tool_result.make_err ~tool_name:schema.name ~start_time:(Tool_timing.start ())

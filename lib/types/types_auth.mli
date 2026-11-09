@@ -112,7 +112,8 @@ val agent_credential_to_yojson : agent_credential -> Yojson.Safe.t
 val agent_credential_of_yojson :
   Yojson.Safe.t -> (agent_credential, string) result
 (** Requires the exact current credential object. Unknown, duplicate, missing,
-    or mistyped fields are rejected; [role] is the sole role authority.
+    or mistyped fields are rejected; the optional fields [id], [agent_id] and
+    [expires_at] may be absent or null. [role] is the sole role authority.
     A present [expires_at] must parse and is normalized to UTC whole seconds. *)
 
 (** {1 Auth configuration} *)

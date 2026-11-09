@@ -90,6 +90,12 @@
  (name test_tui_play_room)
  (modules test_tui_play_room)
  (libraries alcotest yojson masc masc_tui_play_room))
+
+(test
+ (name test_auth_credential_optional_fields)
+ (modules test_auth_credential_optional_fields)
+ (libraries masc_types yojson))
+
 (include stanzas/test_oidc_id_token_signature.inc)
 (include stanzas/test_oidc_google.inc)
 (include stanzas/test_oidc_login_transaction.inc)

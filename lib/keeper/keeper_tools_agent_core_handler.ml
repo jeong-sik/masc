@@ -22,9 +22,7 @@ let make_keeper_tool_handler_with_authority
       ~(keeper_turn_id : unit -> int option)
       ?source_context
       ?owned_job_replay
-      ?prepared_read
-      ?prepared_edit
-      ?prepared_write
+      ?prepared_file
       ?turn_sandbox_factory
       ?artifact_draft_scope
       ?clock
@@ -44,24 +42,29 @@ let make_keeper_tool_handler_with_authority
     -> Yojson.Safe.t
     -> Tool_result.result
   =
-  (match prepared_read, prepared_edit, descriptor with
-   | None, _, _ -> ()
-   | Some _, None, Some descriptor
-     when descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_read_file -> ()
-   | Some _, (Some _ | None), _ ->
-     invalid_arg "prepared Read requires its canonical Read descriptor and no Edit resource");
-  (match prepared_edit, descriptor with
-   | None, _ -> ()
-   | Some _, Some descriptor
-     when descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_edit_file -> ()
-   | Some _, Some _ | Some _, None ->
-     invalid_arg "prepared Edit requires its canonical Edit descriptor");
-  (match prepared_write, prepared_read, prepared_edit, descriptor with
-   | None, _, _, _ -> ()
-   | Some _, None, None, Some descriptor
-     when descriptor.Keeper_tool_descriptor.runtime_handler = Keeper_tool_descriptor.Tool_write_file -> ()
-   | Some _, _, _, _ ->
-     invalid_arg "prepared Write requires its canonical Write descriptor and no other file resource");
+  let prepared_read, prepared_edit, prepared_write =
+    match prepared_file with
+    | None -> None, None, None
+    | Some op ->
+      let handler =
+        Option.map
+          (fun (d : Keeper_tool_descriptor.t) -> d.runtime_handler)
+          descriptor
+      in
+      (match op, handler with
+       | Keeper_prepared_inline_files.Read read, Some Keeper_tool_descriptor.Tool_read_file ->
+         Some read, None, None
+       | Keeper_prepared_inline_files.Read _, _ ->
+         invalid_arg "prepared Read requires its canonical Read descriptor"
+       | Keeper_prepared_inline_files.Edit edit, Some Keeper_tool_descriptor.Tool_edit_file ->
+         None, Some edit, None
+       | Keeper_prepared_inline_files.Edit _, _ ->
+         invalid_arg "prepared Edit requires its canonical Edit descriptor"
+       | Keeper_prepared_inline_files.Write write, Some Keeper_tool_descriptor.Tool_write_file ->
+         None, None, Some write
+       | Keeper_prepared_inline_files.Write _, _ ->
+         invalid_arg "prepared Write requires its canonical Write descriptor")
+  in
   let input_schema =
     match descriptor with
     | None -> input_schema

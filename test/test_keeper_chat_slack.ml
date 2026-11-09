@@ -239,7 +239,7 @@ let test_message_blocks_render_visible_stable_mentions () =
   check bool "raw mention syntax is escaped" false
     (contains markdown "<@U_UNTRUSTED>")
 
-let run_adapter ?post_stream ?edit_stream ?edit_blocks ?delete_stream ?now ?sleep
+let run_adapter ?streaming_transport ?now ?sleep
     ?set_activity_status events ~send_plain ~send_blocks =
   Eio_main.run @@ fun _env ->
   let stream = Masc.Keeper_chat_events.create () in
@@ -248,7 +248,7 @@ let run_adapter ?post_stream ?edit_stream ?edit_blocks ?delete_stream ?now ?slee
   Masc.Keeper_chat_events.close stream;
   let outcomes = ref [] in
   S.adapter_loop ~events:stream ~send_plain ~send_blocks
-    ?post_stream ?edit_stream ?edit_blocks ?delete_stream ?now ?sleep
+    ?streaming_transport ?now ?sleep
     ?set_activity_status
     ~on_send_result:(fun result -> outcomes := result :: !outcomes)
     ();
@@ -267,19 +267,25 @@ let test_adapter_streams_one_edited_reply () =
   let outcomes =
     run_adapter
       ~now
-      ~post_stream:(fun ~content ->
-        posts := content :: !posts;
-        Ok "slack-message-1")
-      ~edit_stream:(fun ~message_id ~content ->
-        check string "stream message identity" "slack-message-1" message_id;
-        stream_edits := content :: !stream_edits;
-        Ok ())
-      ~edit_blocks:(fun ~message_id ~content ~blocks ->
-        check string "final message identity" "slack-message-1" message_id;
-        final_edits := (content, blocks) :: !final_edits;
-        Ok ())
-      ~delete_stream:(fun ~message_id:_ ->
-        fail "successful streaming reply must not be deleted")
+      ~streaming_transport:
+        { S.post_stream =
+            (fun ~content ->
+              posts := content :: !posts;
+              Ok "slack-message-1")
+        ; edit_stream =
+            (fun ~message_id ~content ->
+              check string "stream message identity" "slack-message-1" message_id;
+              stream_edits := content :: !stream_edits;
+              Ok ())
+        ; edit_blocks =
+            (fun ~message_id ~content ~blocks ->
+              check string "final message identity" "slack-message-1" message_id;
+              final_edits := (content, blocks) :: !final_edits;
+              Ok ())
+        ; delete_stream =
+            (fun ~message_id:_ ->
+              fail "successful streaming reply must not be deleted")
+        }
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-stream"; thread_id = "thread-stream" }
       ; Masc.Keeper_chat_events.Text_delta {text="hello "; response=Unobserved_scope (None)}
@@ -309,14 +315,19 @@ let test_adapter_stream_error_edits_accepted_reply () =
   let error_edits = ref [] in
   let outcomes =
     run_adapter
-      ~post_stream:(fun ~content:_ -> Ok "slack-message-error")
-      ~edit_stream:(fun ~message_id ~content ->
-        error_edits := (message_id, content) :: !error_edits;
-        Ok ())
-      ~edit_blocks:(fun ~message_id:_ ~content:_ ~blocks:_ ->
-        fail "failed run must not use the success finalizer")
-      ~delete_stream:(fun ~message_id:_ ->
-        fail "failed run must not delete its error reply")
+      ~streaming_transport:
+        { S.post_stream = (fun ~content:_ -> Ok "slack-message-error")
+        ; edit_stream =
+            (fun ~message_id ~content ->
+              error_edits := (message_id, content) :: !error_edits;
+              Ok ())
+        ; edit_blocks =
+            (fun ~message_id:_ ~content:_ ~blocks:_ ->
+              fail "failed run must not use the success finalizer")
+        ; delete_stream =
+            (fun ~message_id:_ ->
+              fail "failed run must not delete its error reply")
+        }
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-error"; thread_id = "thread-error" }
       ; Masc.Keeper_chat_events.Text_delta {text="partial "; response=Unobserved_scope (None)}
@@ -392,10 +403,17 @@ let test_response_owner_survives_stream_and_retry () =
   let finals = ref [] in
   let outcomes =
     run_adapter ~now:(fun () -> 0.) ~sleep:(fun _ -> ())
-      ~post_stream:(fun ~content:_ -> Ok "stream-message")
-      ~edit_stream:(fun ~message_id:_ ~content:_ -> Ok ())
-      ~edit_blocks:(fun ~message_id:_ ~content ~blocks:_ -> finals := content :: !finals; Ok ())
-      ~delete_stream:(fun ~message_id:_ -> fail "the streamed message must not be deleted")
+      ~streaming_transport:
+        { S.post_stream = (fun ~content:_ -> Ok "stream-message")
+        ; edit_stream = (fun ~message_id:_ ~content:_ -> Ok ())
+        ; edit_blocks =
+            (fun ~message_id:_ ~content ~blocks:_ ->
+              finals := content :: !finals;
+              Ok ())
+        ; delete_stream =
+            (fun ~message_id:_ ->
+              fail "the streamed message must not be deleted")
+        }
       [ Masc.Keeper_chat_events.Run_started {run_id="run-owner";thread_id="thread-owner"}
       ; Masc.Keeper_chat_events.Text_delta {text="old ";response=response 1 1}
       ; Masc.Keeper_chat_events.Text_delta {text="newer ";response=response 1 2}
@@ -617,13 +635,17 @@ let test_completed_external_effect_deletes_streamed_draft () =
   let deleted = ref [] in
   let outcomes =
     run_adapter
-      ~post_stream:(fun ~content:_ -> Ok "slack-draft")
-      ~edit_stream:(fun ~message_id:_ ~content:_ -> Ok ())
-      ~edit_blocks:(fun ~message_id:_ ~content:_ ~blocks:_ ->
-        fail "external effect must not finalize the streamed draft")
-      ~delete_stream:(fun ~message_id ->
-        deleted := message_id :: !deleted;
-        Ok ())
+      ~streaming_transport:
+        { S.post_stream = (fun ~content:_ -> Ok "slack-draft")
+        ; edit_stream = (fun ~message_id:_ ~content:_ -> Ok ())
+        ; edit_blocks =
+            (fun ~message_id:_ ~content:_ ~blocks:_ ->
+              fail "external effect must not finalize the streamed draft")
+        ; delete_stream =
+            (fun ~message_id ->
+              deleted := message_id :: !deleted;
+              Ok ())
+        }
       [ Masc.Keeper_chat_events.Text_delta {text="partial "; response=Unobserved_scope (None)}
       ; Masc.Keeper_chat_events.External_effect_completed
           { target =
@@ -651,15 +673,20 @@ let test_terminal_edit_waits_for_slack_interval () =
       ~sleep:(fun seconds ->
         sleeps := seconds :: !sleeps;
         clock := !clock +. seconds)
-      ~post_stream:(fun ~content:_ -> Ok "slack-paced")
-      ~edit_stream:(fun ~message_id ~content ->
-        edits := (message_id, content) :: !edits;
-        Ok ())
-      ~edit_blocks:(fun ~message_id ~content ~blocks ->
-        final_edits := (message_id, content, blocks) :: !final_edits;
-        Ok ())
-      ~delete_stream:(fun ~message_id:_ ->
-        fail "successful streaming reply must not be deleted")
+      ~streaming_transport:
+        { S.post_stream = (fun ~content:_ -> Ok "slack-paced")
+        ; edit_stream =
+            (fun ~message_id ~content ->
+              edits := (message_id, content) :: !edits;
+              Ok ())
+        ; edit_blocks =
+            (fun ~message_id ~content ~blocks ->
+              final_edits := (message_id, content, blocks) :: !final_edits;
+              Ok ())
+        ; delete_stream =
+            (fun ~message_id:_ ->
+              fail "successful streaming reply must not be deleted")
+        }
       [ Masc.Keeper_chat_events.Text_delta {text="hello "; response=Unobserved_scope (None)}
       ; Masc.Keeper_chat_events.Text_delta {text="world"; response=Unobserved_scope (None)}
       ; Masc.Keeper_chat_events.Text_message_end
@@ -833,14 +860,19 @@ let test_failed_stream_edit_rearms_the_throttle () =
   let edits = ref [] in
   let outcomes =
     run_adapter ~now ~sleep:(fun _ -> ())
-      ~post_stream:(fun ~content:_ -> Ok "slack-message-1")
-      ~edit_stream:(fun ~message_id:_ ~content ->
-        edits := content :: !edits;
-        Error (Masc.Keeper_chat_slack.Network "rate limited"))
-      ~edit_blocks:(fun ~message_id:_ ~content:_ ~blocks:_ ->
-        Error (Masc.Keeper_chat_slack.Network "rate limited"))
-      ~delete_stream:(fun ~message_id:_ ->
-        fail "a rate-limited reply must not be deleted")
+      ~streaming_transport:
+        { S.post_stream = (fun ~content:_ -> Ok "slack-message-1")
+        ; edit_stream =
+            (fun ~message_id:_ ~content ->
+              edits := content :: !edits;
+              Error (Masc.Keeper_chat_slack.Network "rate limited"))
+        ; edit_blocks =
+            (fun ~message_id:_ ~content:_ ~blocks:_ ->
+              Error (Masc.Keeper_chat_slack.Network "rate limited"))
+        ; delete_stream =
+            (fun ~message_id:_ ->
+              fail "a rate-limited reply must not be deleted")
+        }
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-throttle"; thread_id = "thread-throttle" }
       ; Masc.Keeper_chat_events.Text_delta {text="a "; response=Unobserved_scope (None)}
@@ -868,13 +900,17 @@ let test_checkpoint_status_keeps_the_accumulated_stream_text () =
   let final_edits = ref [] in
   let outcomes =
     run_adapter
-      ~post_stream:(fun ~content:_ -> Ok "slack-message-ckpt")
-      ~edit_stream:(fun ~message_id:_ ~content:_ -> Ok ())
-      ~edit_blocks:(fun ~message_id:_ ~content ~blocks ->
-        final_edits := (content, blocks) :: !final_edits;
-        Ok ())
-      ~delete_stream:(fun ~message_id:_ ->
-        fail "a checkpointed reply must not be deleted")
+      ~streaming_transport:
+        { S.post_stream = (fun ~content:_ -> Ok "slack-message-ckpt")
+        ; edit_stream = (fun ~message_id:_ ~content:_ -> Ok ())
+        ; edit_blocks =
+            (fun ~message_id:_ ~content ~blocks ->
+              final_edits := (content, blocks) :: !final_edits;
+              Ok ())
+        ; delete_stream =
+            (fun ~message_id:_ ->
+              fail "a checkpointed reply must not be deleted")
+        }
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-ckpt"; thread_id = "thread-ckpt" }
       ; Masc.Keeper_chat_events.Text_delta {text="hello "; response=Unobserved_scope (None)}
@@ -908,15 +944,21 @@ let test_unknown_outcome_post_retries_once_then_degrades () =
   let finals = ref [] in
   let outcomes =
     run_adapter
-      ~post_stream:(fun ~content ->
-        posts := content :: !posts;
-        Error (Masc.Keeper_chat_slack.Network "connection reset after send"))
-      ~edit_stream:(fun ~message_id:_ ~content:_ ->
-        fail "without a message id there is nothing to edit")
-      ~edit_blocks:(fun ~message_id:_ ~content:_ ~blocks:_ ->
-        fail "without a message id there is nothing to finalize")
-      ~delete_stream:(fun ~message_id:_ ->
-        fail "without a message id there is nothing to delete")
+      ~streaming_transport:
+        { S.post_stream =
+            (fun ~content ->
+              posts := content :: !posts;
+              Error (Masc.Keeper_chat_slack.Network "connection reset after send"))
+        ; edit_stream =
+            (fun ~message_id:_ ~content:_ ->
+              fail "without a message id there is nothing to edit")
+        ; edit_blocks =
+            (fun ~message_id:_ ~content:_ ~blocks:_ ->
+              fail "without a message id there is nothing to finalize")
+        ; delete_stream =
+            (fun ~message_id:_ ->
+              fail "without a message id there is nothing to delete")
+        }
       [ Masc.Keeper_chat_events.Run_started
           { run_id = "run-post"; thread_id = "thread-post" }
       ; Masc.Keeper_chat_events.Text_delta {text="a "; response=Unobserved_scope (None)}

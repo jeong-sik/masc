@@ -568,6 +568,26 @@ type local_keeper_reading =
   ; lkr_error : string option
   }
 
+(* A returned worker can still report a source failure. Keep its useful partial
+   payload, but do not let it settle the source's observation revision. Optional
+   data that was not requested is not a failure; explicit read failures are. *)
+let local_workspace_observed (reading : local_reading) =
+  let rows_observed = match reading.lr_rows with
+    | Masc_tui_overview_tasks.Rows_read _ -> true
+    | Masc_tui_overview_tasks.Rows_unread | Masc_tui_overview_tasks.Rows_unavailable _ -> false in
+  let agenda_observed = function
+    | Masc_tui_agenda.Read_failed _ -> false
+    | Masc_tui_agenda.Not_read | Masc_tui_agenda.Read _ -> true in
+  let links_observed = match reading.lr_goal_task_links with
+    | Goal_links_read_failed _ -> false
+    | Goal_links_not_read | Goal_links_read _ -> true in
+  rows_observed && Option.is_none reading.lr_tasks_error && links_observed
+  && agenda_observed reading.lr_operator_stalled
+  && agenda_observed reading.lr_goals_to_confirm
+
+let local_keepers_observed (reading : local_keeper_reading) =
+  Option.is_none reading.lkr_error
+
 (* The metadata and archive caches have different resource owners. A work
    scan must not hold the metadata lock needed by input and saved chat opening. *)
 let local_work_read_mutex = Eio.Mutex.create ()

@@ -9958,9 +9958,9 @@ let owe_schedules_read state =
   state.schedules_page_owed <- Masc_tui_owed_read.changed state.schedules_page_owed
 
 (* The agenda strip says its list may be behind until a read that began after
-   this point answers: on a schedule change, on a newly opened observer and
-   after lost events. A read in flight is overtaken; its successor is the
-   owed read, which bursts share. *)
+   this point answers: on a schedule change, on an observer reopen that did
+   not resume cleanly, and after lost events. A read in flight is overtaken;
+   its successor is the owed read, which bursts share. *)
 let owe_agenda_revalidation state =
   state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
   owe_schedules_read state
@@ -18088,15 +18088,18 @@ let launch_local_source_followup state ~mailbox source =
     | Local_work ->
         launch_local_work_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path
 
-let observe_local_source state ~source request result =
-  let observation = Masc_tui_types.take_local_workspace_read state ~source request result in
+let observe_local_source state ~source ~is_observed request result =
+  let observation = Masc_tui_types.take_local_workspace_read state ~source ~is_observed request result in
   Log.Transport.info
     "tui_local_workspace_settled source=%s intent=%s request=%d demand_revision=%s started_ns=%Ld observed_ns=%Ld outcome=%s followup_pending=%b full_refresh_running=%b"
     (local_read_source_name source) (local_read_intent_name request.lwr_intent)
     (Local_read_order.request_id request.lwr_request)
     (Local_read_order.revision_to_string (Local_read_order.request_revision request.lwr_request))
     request.lwr_started_ns (Mtime_clock.elapsed_ns ())
-    (match observation with None -> "discarded" | Some (Ok _) -> "received" | Some (Error _) -> "failed")
+    (match observation with
+     | None -> "discarded"
+     | Some (Ok reading) -> if is_observed reading then "received" else "source_failed"
+     | Some (Error _) -> "failed")
     (Local_read_order.has_followup (local_source_order state source))
     (Option.is_some state.http_refresh_started_ns);
   observation
@@ -24101,16 +24104,25 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              state.observer_cursor <- None;
              state.observer_replay <- Observer_replay_unavailable "peer does not advertise scoped replay");
         record_observer_opened state ~session_id ~at:(Unix.gettimeofday ());
-        launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
-        owe_agenda_revalidation state;
-        (* A change can land between the initial read and subscription, or
-           during a disconnected interval. Read under the current authority. *)
-        launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
-        revalidate_visible_fusion state ~mailbox;
         (* The feed announces changes only while it is open. Unless this
            connection replays every event since the last applied one, the
-           visible surfaces read once more (RFC-0480 §3.3). *)
-        if not (Masc_tui_types.observer_replay_is_complete handshake) then begin
+           visible surfaces read once more (RFC-0480 §3.3): a change can land
+           between the initial read and subscription, or during a
+           disconnected interval, and the reads run under the current
+           authority. A Resumed replay missed no event, but a read owed by an
+           already applied event may still be missing, failed or running.
+           Recover only those local observations; successful reads need no
+           followup and replayed events owe their own reads. *)
+        if Masc_tui_types.observer_replay_is_complete handshake then begin
+          List.iter (fun source ->
+              note_local_source_observer_resume state source;
+              launch_local_source_followup state ~mailbox source)
+            [Local_keepers; Local_work]
+        end else begin
+          launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
+          owe_agenda_revalidation state;
+          launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
+          revalidate_visible_fusion state ~mailbox;
           state.play_room <- Option.map Masc_tui_play_room.revalidate state.play_room;
           if state.view = Memory then owe_memory_health_read state;
           start_http_refresh state ~host:server_peer_host ~port:state.port
@@ -24428,7 +24440,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       (* The local Keeper list is the metadata files and the Keepers runtime
          config declares without one. While the server or the feed is down
          nothing is announced; the Keepers run in the server, so their files
-         hold still, and a CLI write shows on reopen or [r]. *)
+         hold still, and a CLI write shows on a reopen that missed events or
+         on [r]. A clean resume replays the server's own roster events. *)
       if !local_keepers_changed || !observer_source_loss_seen || !runtime_config_changed then
         launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
       if !observer_source_loss_seen then owe_agenda_revalidation state;
@@ -24689,7 +24702,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       state.observer_machine <- None;
       state.observer_browser <- None;
       state.observer_play <- None;
-      state.schedules_agenda_freshness <- Masc_tui_agenda.Refresh_needed;
+      (* The disconnect itself is not agenda staleness: the observer status
+         display carries the broken-since time (RFC-0480 §3.3), and the reopen
+         settles the question -- a gap revalidates, a Resumed replay redelivers
+         the schedules events that changed anything. Marking Refresh_needed
+         here made every clean resume owe a read that proved nothing, and the
+         "may be out of date" marker then outlived the resume (review, PR
+         #50679). A real read debt is flagged where it is incurred. *)
       let was_opening = state.observer = Observer_opening in
       let reason =
         match outcome with
@@ -29016,7 +29035,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.verification_owed <- failed_read state.verification_owed;
           state.verification_error <- Some detail)
   | Local_msg (Local_workspace_read (request, result)) ->
-      (match observe_local_source state ~source:Local_work request result with
+      (match observe_local_source state ~source:Local_work
+          ~is_observed:Masc_tui_loader.local_workspace_observed request result with
        | None -> ()
        | Some result ->
            (match result with
@@ -29025,7 +29045,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 (Masc_tui_loader.apply_local_workspace state) reading);
            launch_local_source_followup state ~mailbox Local_work)
   | Local_msg (Local_keepers_read (request, result)) ->
-      (match observe_local_source state ~source:Local_keepers request result with
+      (match observe_local_source state ~source:Local_keepers
+          ~is_observed:Masc_tui_loader.local_keepers_observed request result with
        | None -> ()
        | Some result ->
            (match result with

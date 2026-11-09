@@ -2030,16 +2030,31 @@ let runtime_probe_subscription_timeout_s = 20.0
 
 let runtime_verification_timeout_s = 120.0
 
-let verify_runtime_execution runtime timeout_s =
-  Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
-    (* macOS TMPDIR sits under the /var -> /private/var symlink, and an
-       Antigravity runtime root must be its own realpath. *)
-    let private_path = Filename.temp_dir "masc-runtime-verify-" "" |> Unix.realpath in
-    Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree private_path);
-    (* The env and clock a provider request reads are installed inside; the
-       verification's own bound is the command's [timeout_s]. *)
-    Runtime_verification.verify_as_command ~env ~sw ~private_dir:private_path ~timeout_s
-      ~account_request:Runtime_account_access.Operator_call runtime))
+(* HIGH-RISK-UNREVIEWED: a host tool starts a client on an account only as the
+   single user of a base path never set up for accounts (plan D2-2, D2-3).
+   Every command that verifies a runtime publishes that access here, once,
+   before the verification: runtime-verify and the model check of setup
+   alike. On a base path set up for accounts the judgment refuses, so an
+   operator call stays closed there (plan D2-4). The error is the reasons of
+   the judgment. *)
+let verify_runtime_execution ~base_path runtime timeout_s =
+  match
+    Runtime_account_access.publish_host_tool ~base_path
+      ~config_dir:(Env_config_core.masc_config_dir_opt ())
+  with
+  | Error (first, rest) -> Error (first :: rest)
+  | Ok () ->
+    Ok (Eio_main.run (fun env -> Eio.Switch.run (fun sw ->
+      (* macOS TMPDIR sits under the /var -> /private/var symlink, and an
+         Antigravity runtime root must be its own realpath. *)
+      let private_path = Filename.temp_dir "masc-runtime-verify-" "" |> Unix.realpath in
+      Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree private_path);
+      (* The env and clock a provider request reads are installed inside; the
+         verification's own bound is the command's [timeout_s]. *)
+      Runtime_verification.verify_as_command ~env ~sw ~private_dir:private_path ~timeout_s
+        ~account_request:Runtime_account_access.Operator_call runtime)))
+
+let account_access_refused = "A host tool does not start a client on an account of this base path."
 
 let runtime_verify_cmd_exit base_path runtime_id timeout_s =
   let unavailable ?detail code message =
@@ -2067,23 +2082,16 @@ let runtime_verify_cmd_exit base_path runtime_id timeout_s =
       match List.find_opt (fun (runtime : Runtime_instance.t) -> runtime.id = runtime_id) runtimes with
       | None -> unavailable "runtime_not_configured" "The requested runtime is not an enabled configured binding."
       | Some runtime ->
-        (* HIGH-RISK-UNREVIEWED: a host tool starts a client on an account only
-           as the single user of a base path never set up for accounts (plan
-           D2-2, D2-3). *)
-        (match
-           Runtime_account_access.publish_host_tool ~base_path
-             ~config_dir:(Env_config_core.masc_config_dir_opt ())
-         with
-         | Error (first, rest) ->
-           unavailable ~detail:(String.concat "; " (first :: rest)) "account_access_refused"
-             "A host tool does not start a client on an account of this base path."
-         | Ok () ->
         (try
-          let result = verify_runtime_execution runtime timeout_s in
-          print_endline (Yojson.Safe.to_string (Runtime_verification.to_json result));
-          Runtime_verification.exit_code result
+          match verify_runtime_execution ~base_path runtime timeout_s with
+          | Error reasons ->
+            unavailable ~detail:(String.concat "; " reasons) "account_access_refused"
+              account_access_refused
+          | Ok result ->
+            print_endline (Yojson.Safe.to_string (Runtime_verification.to_json result));
+            Runtime_verification.exit_code result
          with Eio.Io _ | Unix.Unix_error _ | Sys_error _ ->
-           unavailable "verification_session_failed" "The isolated verification session could not start or finish."))
+           unavailable "verification_session_failed" "The isolated verification session could not start or finish.")
 
 let runtime_verify_cmd =
   let runtime_id = Arg.(required & pos 0 (some string) None & info [] ~docv:"RUNTIME_ID") in
@@ -4409,7 +4417,11 @@ let setup_validate_runtime base_path =
       if not runtime.model.tools_support then (
         prerr_endline "This model has tool calling disabled. Select a tool-capable model in the installation wizard before starting imp."; 1)
       else
-        let result = verify_runtime_execution runtime runtime_verification_timeout_s in
+        match verify_runtime_execution ~base_path runtime runtime_verification_timeout_s with
+        | Error reasons ->
+          Printf.eprintf "%s %s\n%!" account_access_refused (String.concat "; " reasons);
+          1
+        | Ok result ->
         let code = Runtime_verification.exit_code result in
         match result.failure with
         | None when code = 0 -> print_endline (Masc_cli_setup.ok_line "Model response and harmless tool roundtrip verified."); 0

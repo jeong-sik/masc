@@ -602,7 +602,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - D2-1 adapter. 한 snapshot에서 Keeper 턴의 `facts`를 만든다. 배정이 없으면 `NoAuthorizedRuntime`이다. 1단계에는 Runtime과 ProviderAccount의 상태 기록이 없어서 둘 다 `Active`다. 회수는 구역의 게이트 값(`revocation_pending`)이다. 의존은 `Cleared`다. 1단계에는 복원 창이 없고(F2는 2단계), A2가 복원된 로그를 거절한다.
   - D2-2 CLI 판정 `Authz_boot_mode_read.tool`.
   - D2-3 `Runtime_account_access`(봉인, 인가, 게시)와 게시 지점(owner state). 단일 사용자만 연다.
-  - D2-4 다계정 인가(Keeper 턴, 자기 계정)와 홈 경로 하나(`Runtime_account_home_layout`). 미리보기가 `Multi_account`를 게시한다. 로그인 확인과 verify가 요청을 넘긴다(단일 사용자 setup은 `Operator_call`, 사람은 `Own_account`). `runtime-verify` 명령은 `tool` 판정 뒤 게시한다. 클라이언트가 아직 config로 계정을 받으므로 인가된 계정을 그 칸에 넣는다(D2-5·D2-6에서 지운다). 2026-11-09 순서를 바꿨다. 클라이언트를 먼저 바꾸면 미리보기가 게시하지 않아 사람의 로그인 확인과 verify가 중간 층에서 멈춘다.
+  - D2-4 다계정 인가(Keeper 턴, 자기 계정)와 홈 경로 하나(`Runtime_account_home_layout`). 미리보기가 `Multi_account`를 게시한다. 로그인 확인과 verify가 요청을 넘긴다(단일 사용자 setup은 `Operator_call`, 사람은 `Own_account`). `runtime-verify`와 setup의 모델 확인은 검증을 시작하는 함수(`verify_runtime_execution`) 한 곳에서 `tool` 판정 뒤 게시한다. 처음에는 `runtime-verify`만 게시해서 setup의 확인이 공식 CLI 런타임에서 늘 `Not_published`로 끝났다(#50421 리뷰). 클라이언트가 아직 config로 계정을 받으므로 인가된 계정을 그 칸에 넣는다(D2-5·D2-6에서 지운다). 2026-11-09 순서를 바꿨다. 클라이언트를 먼저 바꾸면 미리보기가 게시하지 않아 사람의 로그인 확인과 verify가 중간 층에서 멈춘다.
   - D2-5 Claude Code 클라이언트가 `authorized`를 받는다. 호출처(Keeper 갈래, Fusion, capability probe, verify, dashboard probe, CLI probe, login)를 같이 바꾼다. Keeper 턴 드라이버는 시도마다 인가를 받는다.
   - D2-6 Codex 클라이언트가 같은 일을 한다.
   - D2-7 테이블이 봉인을 든다(`Runtime_execution`). 호출처는 테이블의 자격 증명을 더 꺼내지 못한다.

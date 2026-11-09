@@ -142,19 +142,18 @@ let turn_line at =
     at
 ;;
 
-let write_turns path ats =
+let chat_line at =
+  Printf.sprintf
+    {|{"event":"turn","ts_unix":%.1f,"outcome":"success","execution_path":"direct_turn"}|}
+    at
+;;
+
+let write_lines path lines =
   Out_channel.with_open_text path (fun oc ->
-    List.iter (fun at -> output_string oc (turn_line at ^ "\n")) ats)
+    List.iter (fun line -> output_string oc (line ^ "\n")) lines)
 ;;
 
-(* An empty value reads as the default, so restoring "" stands in for unset. *)
-let with_env name value f =
-  let previous = Option.value (Sys.getenv_opt name) ~default:"" in
-  Unix.putenv name value;
-  Fun.protect ~finally:(fun () -> Unix.putenv name previous) f
-;;
-
-let max_rotated = "MASC_KEEPER_METRICS_MAX_ROTATED"
+let write_turns path ats = write_lines path (List.map turn_line ats)
 
 let with_workspace f =
   Pulse.reset_for_tests ();
@@ -186,12 +185,11 @@ let check_known label expected = function
    passes, and every read of it fails. That is a log the pulse cannot read, as
    opposed to a log that is missing or holds no turns. *)
 let test_seed_reads_what_the_logs_can_tell () =
-  with_env max_rotated "1" @@ fun () ->
   with_workspace (fun config log_path ->
-    check_known "a missing log knows the whole window" window_start (seeded config "no-log");
+    check_known "a keeper with no log is known from now" now (seeded config "no-log");
     write_turns (log_path "whole") [ at_slot 90; at_slot 95 ];
     let whole = seeded config "whole" in
-    check_known "a whole log with no rotation knows the whole window" window_start whole;
+    check_known "a whole log with no rotation is known from its first row" (at_slot 90) whole;
     Alcotest.(check int) "its turns are slotted" 2 (List.length (Option.get whole).slots);
     write_turns (log_path "rotated-reaches" ^ ".1") [ window_start -. 60.0; at_slot 80 ];
     write_turns (log_path "rotated-reaches") [ at_slot 90 ];
@@ -239,14 +237,15 @@ let test_seed_reads_the_rotated_log_when_the_primary_is_missing () =
     Alcotest.(check int) "its turns are slotted" 2 (slot_count lone))
 ;;
 
-let test_seed_does_not_claim_a_day_rotation_deleted () =
+(* A chat row is not a pulse turn, but it shows how far back the log reaches. *)
+let test_seed_knows_the_log_from_rows_of_any_event () =
   with_workspace (fun config log_path ->
-    write_turns (log_path "discarded") [ at_slot 90; at_slot 95 ];
-    with_env max_rotated "0" (fun () ->
-      check_known
-        "with no rotated copy kept, a whole log is known from its oldest turn"
-        (at_slot 90)
-        (seeded config "discarded")))
+    write_lines (log_path "chat-before") [ chat_line (window_start -. 60.0); turn_line (at_slot 90) ];
+    let before = seeded config "chat-before" in
+    check_known "a chat row older than the window reaches the window" window_start before;
+    Alcotest.(check int) "only the autonomous turn is slotted" 1 (slot_count before);
+    write_lines (log_path "chat-inside") [ chat_line (at_slot 85); turn_line (at_slot 90) ];
+    check_known "a chat row is the log's first row" (at_slot 85) (seeded config "chat-inside"))
 ;;
 
 let test_seed_drops_turns_stamped_after_now () =
@@ -258,8 +257,8 @@ let test_seed_drops_turns_stamped_after_now () =
     | Some _ | None -> Alcotest.fail "expected one slot")
 ;;
 
-(* The reader stops at the line bound, so the oldest turns of a long log are
-   not read and the pulse is known only from the oldest one that was. *)
+(* The reader keeps the last 10,000 lines, so the oldest turns of a long log
+   are not read and the pulse is known only from the oldest one that was. *)
 let test_seed_knows_a_long_log_from_its_oldest_read_turn () =
   with_workspace (fun config log_path ->
     let first = window_start +. 60.0 in
@@ -302,8 +301,8 @@ let () =
             test_seed_reads_the_primary_log_alone_when_it_reaches_the_window
         ; Alcotest.test_case "seed reads the rotated log when the primary is missing" `Quick
             test_seed_reads_the_rotated_log_when_the_primary_is_missing
-        ; Alcotest.test_case "seed does not claim a day rotation deleted" `Quick
-            test_seed_does_not_claim_a_day_rotation_deleted
+        ; Alcotest.test_case "seed knows the log from rows of any event" `Quick
+            test_seed_knows_the_log_from_rows_of_any_event
         ; Alcotest.test_case "seed drops turns stamped after now" `Quick
             test_seed_drops_turns_stamped_after_now
         ; Alcotest.test_case "seed knows a long log from its oldest read turn" `Quick

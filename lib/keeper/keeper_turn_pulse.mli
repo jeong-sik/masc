@@ -64,13 +64,12 @@ val seed_from_decision_log :
   ?now:float -> config:Workspace.config -> keeper_name:string -> unit -> unit
 (** Fill a keeper's pulse from the tail of [decisions.jsonl], and from
     [decisions.jsonl.1] when the primary log is missing or was read whole
-    without reaching the window start. Turns stamped after [now] are dropped.
+    without reaching the window start. Rows stamped after [now] are dropped.
     Seeding leaves a keeper that already has a pulse alone.
 
-    [known_since] is the window start when no log exists, when the read
-    reached a turn older than the window, or when the primary log was read
-    whole, no rotated log exists and rotation keeps a copy. Otherwise it is
-    the oldest turn read, or [now] when no turn was read. A log that exists
+    [known_since] is the window start when a row older than the window was
+    read. Otherwise it is the oldest row read, of any event, since the logs
+    hold every turn after it; with no row read it is [now]. A log that exists
     but cannot be read leaves the keeper unseeded, so [get] stays [None]. *)
 
 val seed_all_from_decision_logs : ?now:float -> config:Workspace.config -> unit -> unit

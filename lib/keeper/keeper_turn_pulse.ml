@@ -105,41 +105,44 @@ type sample =
   ; outcome : outcome
   }
 
+(* Every decision row carries [ts_unix]. A row of any event shows the log was
+   being written at that time. *)
+let row_time json =
+  match Yojson.Safe.Util.member "ts_unix" json with
+  | `Float f when Float.is_finite f -> Some f
+  | `Int i -> Some (Float.of_int i)
+  | _ -> None
+;;
+
 (* Chat turns write the same [event = "turn"] row; only the autonomous cycle
    records into the live pulse, so only its rows seed it (#49984). *)
+let sample_of_row json =
+  let autonomous =
+    match Json_util.get_string json "execution_path" with
+    | Some label ->
+      (match Keeper_unified_metrics_decision.execution_path_of_string label with
+       | Some Autonomous_cycle -> true
+       | Some Direct_turn | None -> false)
+    | None -> false
+  in
+  let outcome =
+    match Json_util.get_string json "outcome" with
+    | Some label ->
+      (match Keeper_decision_outcome.of_string label with
+       | Some (Success | Checkpoint | Input_required) -> Some Turn_ok
+       | Some Failed -> Some Turn_failed
+       | None -> None)
+    | None -> None
+  in
+  match Json_util.get_string json "event", row_time json, outcome with
+  | Some "turn", Some at, Some outcome when autonomous -> Some { at; outcome }
+  | _ -> None
+;;
+
 let sample_of_decision_line line =
   match Yojson.Safe.from_string line with
   | exception _ -> None
-  | json ->
-    let autonomous =
-      match Json_util.get_string json "execution_path" with
-      | Some label ->
-        (match Keeper_unified_metrics_decision.execution_path_of_string label with
-         | Some Autonomous_cycle -> true
-         | Some Direct_turn | None -> false)
-      | None -> false
-    in
-    (match Json_util.get_string json "event" with
-     | Some "turn" when autonomous ->
-       let ts_opt =
-         match Yojson.Safe.Util.member "ts_unix" json with
-         | `Float f when Float.is_finite f -> Some f
-         | `Int i -> Some (Float.of_int i)
-         | _ -> None
-       in
-       let outcome_opt =
-         match Json_util.get_string json "outcome" with
-         | Some out_str ->
-           (match Keeper_decision_outcome.of_string out_str with
-            | Some (Success | Checkpoint | Input_required) -> Some Turn_ok
-            | Some Failed -> Some Turn_failed
-            | None -> None)
-         | None -> None
-       in
-       (match ts_opt, outcome_opt with
-        | Some at, Some outcome -> Some { at; outcome }
-        | _ -> None)
-     | _ -> None)
+  | json -> sample_of_row json
 ;;
 
 (* The tail a seed reads from each log. Measured 2026-11-09 on the live
@@ -152,16 +155,24 @@ let seed_tail_max_lines = 10_000
 type tail_reading =
   | Log_absent
   | Reaches_window_start of sample list
-      (** A turn older than the window was read; newest first. *)
+      (** A row older than the window was read; samples newest first. *)
   | Starts_inside_window of
       { samples : sample list  (** Newest first. *)
+      ; oldest_row : float option  (** The oldest row read, of any event. *)
       ; whole_file : bool  (** The read reached the start of the file. *)
       }
 
+let earliest a b =
+  match a, b with
+  | Some x, Some y -> Some (Float.min x y)
+  | (Some _ as x), None | None, (Some _ as x) -> x
+  | None, None -> None
+;;
+
 (* [Error] is a log that exists but could not be read. It says nothing about
-   its turns, so the caller must not turn it into an empty pulse. A turn
-   stamped after [now] is dropped: its slot would lie past every hour the TUI
-   draws and would prune the day behind it. *)
+   its turns, so the caller must not turn it into an empty pulse. A row stamped
+   after [now] is dropped: its slot would lie past every hour the TUI draws and
+   would prune the day behind it. *)
 let read_tail ~now ~window_start path =
   if not (Fs_compat.file_exists path)
   then Ok Log_absent
@@ -180,23 +191,27 @@ let read_tail ~now ~window_start path =
       Error exn_class
     | Ok { lines; completion = _; from_file_start } ->
       (* [lines] runs oldest to newest; walk it newest first. *)
-      let rec collect acc = function
-        | [] -> Starts_inside_window { samples = List.rev acc; whole_file = from_file_start }
+      let rec collect samples oldest_row = function
+        | [] ->
+          Starts_inside_window
+            { samples = List.rev samples; oldest_row; whole_file = from_file_start }
         | line :: rest ->
-          (match sample_of_decision_line line with
-           | Some s when s.at > now -> collect acc rest
-           | Some s when s.at >= window_start -> collect (s :: acc) rest
-           | Some _ -> Reaches_window_start (List.rev acc)
-           | None -> collect acc rest)
+          (match Yojson.Safe.from_string line with
+           | exception _ -> collect samples oldest_row rest
+           | json ->
+             (match row_time json with
+              | None -> collect samples oldest_row rest
+              | Some at when at > now -> collect samples oldest_row rest
+              | Some at when at < window_start -> Reaches_window_start (List.rev samples)
+              | Some at ->
+                let samples =
+                  match sample_of_row json with
+                  | Some sample -> sample :: samples
+                  | None -> samples
+                in
+                collect samples (earliest oldest_row (Some at)) rest))
       in
-      Ok (collect [] (List.rev lines)))
-;;
-
-(* Samples are newest first, so the last one is the oldest. *)
-let oldest_or ~now samples =
-  match List.rev samples with
-  | oldest :: _ -> oldest.at
-  | [] -> now
+      Ok (collect [] None (List.rev lines)))
 ;;
 
 let pulse_of_samples ~known_since samples =
@@ -206,47 +221,35 @@ let pulse_of_samples ~known_since samples =
     (List.rev samples)
 ;;
 
-(* With no rotated copy kept, rotation deletes the primary log, so a whole
-   primary without [.1] may follow a deleted day. With a copy kept, a missing
-   [.1] means the primary never rotated and holds the keeper's whole log. *)
-let rotation_discards_logs () =
-  Env_config.KeeperMetrics.max_file_bytes () > 0
-  && Env_config.KeeperMetrics.max_rotated_files () = 0
-;;
-
+(* The logs hold every turn since the oldest row read, so the pulse is known
+   from there; a row older than the window makes it the window start. With no
+   row read it is known from [now], when the server starts recording. *)
 let seed_from_decision_log ?(now = Time_compat.now ()) ~config ~keeper_name () =
   let base_path = config.Workspace.base_path in
   let primary_path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   let window_start = now -. float_of_int window_seconds in
   let read path = read_tail ~now ~window_start path in
-  (* [newer] are the turns read from the primary log, which ends where the
-     rotated log begins. [if_absent] is what a missing rotated log means. *)
-  let with_rotated ~if_absent newer =
+  let known_from oldest_row = Option.value oldest_row ~default:now in
+  (* [newer] were read from the primary log, which begins where the rotated log
+     ends. A rotated log read whole may still follow a [.2] or a deleted log,
+     so its first row is as far back as the seed knows. *)
+  let with_rotated ~newer ~newer_oldest =
     match read (primary_path ^ ".1") with
     | Error _ -> None
-    | Ok Log_absent -> Some (if_absent, newer)
+    | Ok Log_absent -> Some (known_from newer_oldest, newer)
     | Ok (Reaches_window_start older) -> Some (window_start, newer @ older)
-    | Ok (Starts_inside_window { samples = older; _ }) ->
-      (* Rotation dropped whatever came before the rotated log. *)
-      let samples = newer @ older in
-      Some (oldest_or ~now samples, samples)
+    | Ok (Starts_inside_window { samples = older; oldest_row; whole_file = _ }) ->
+      Some (known_from (earliest oldest_row newer_oldest), newer @ older)
   in
   let seeded =
     match read primary_path with
     | Error _ -> None
-    | Ok Log_absent ->
-      (* Rotation renames or deletes the primary and appends to a new one in
-         the same call, so a rotated log alone is one whose next append never
-         came, and no log at all is a keeper that never logged a turn. *)
-      with_rotated ~if_absent:window_start []
+    | Ok Log_absent -> with_rotated ~newer:[] ~newer_oldest:None
     | Ok (Reaches_window_start samples) -> Some (window_start, samples)
-    | Ok (Starts_inside_window { samples; whole_file = false }) ->
-      Some (oldest_or ~now samples, samples)
-    | Ok (Starts_inside_window { samples; whole_file = true }) ->
-      let if_absent =
-        if rotation_discards_logs () then oldest_or ~now samples else window_start
-      in
-      with_rotated ~if_absent samples
+    | Ok (Starts_inside_window { samples; oldest_row; whole_file = false }) ->
+      Some (known_from oldest_row, samples)
+    | Ok (Starts_inside_window { samples; oldest_row; whole_file = true }) ->
+      with_rotated ~newer:samples ~newer_oldest:oldest_row
   in
   match seeded with
   | Some (known_since, samples) ->

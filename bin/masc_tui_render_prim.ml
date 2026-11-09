@@ -921,11 +921,11 @@ let waiting_badge_gap_cells = 3
 let surface_strip (state : state) ~cols =
   (* An array because the strip is drawn by index: the width probe, the
      label and the cell each read entry [i], and a list answers that by
-     walking. Seven entries make that cost nothing -- it is an array so the
+     walking. The short ring makes that cost nothing -- it is an array so the
      renderer holds no row lookup that walks, with no exception to carry. *)
   let ring = Array.of_list Masc_tui_types.surface_ring in
   let n = Array.length ring in
-  let active = Masc_tui_surface_navigation.surface_ring_index state state.view in
+  let active = Masc_tui_surface_navigation.surface_ring_index state.view in
   (* A count rides the entry it belongs to, so pending work is visible from
      every surface without a spare row. Zero draws nothing -- an always-on
      badge would be texture, not information. *)
@@ -949,11 +949,28 @@ let surface_strip (state : state) ~cols =
     else Message_layout.display_width badge + waiting_badge_gap_cells
   in
   let budget = max 8 (cols - 1 - badge_reserved) in
+  let active_hidden_cells =
+    (if active > 0 then Message_layout.display_width (hidden_before_mark active) + 1 else 0)
+    + (if active < n - 1 then
+         Message_layout.display_width (hidden_after_mark (n - 1 - active)) + 1
+       else 0)
+  in
+  let active_label_cells =
+    max 0 (budget - active_hidden_cells
+           - Message_layout.display_width Masc_tui_theme.Glyph.current_entry)
+  in
   let label i =
     let surface, name = ring.(i) in
-    Masc_tui_types.surface_ring_display_label ~lang:state.ui_language
-      surface name
-    ^ badge_of_surface surface
+    let text =
+      Masc_tui_types.surface_ring_display_label ~lang:state.ui_language
+        surface name
+      ^ badge_of_surface surface
+    in
+    (* Even a window containing only the active entry must leave room for
+       its hidden-entry markers and the operator's waiting badge. Measurement
+       and drawing both use this same cell-bounded label. *)
+    if i = active then Message_layout.truncate_middle active_label_cells text
+    else text
   in
   (* Plain-cell width of entry [i] inside a window starting at [lo]. *)
   let entry_width ~lo i =
@@ -972,8 +989,9 @@ let surface_strip (state : state) ~cols =
   let lo, hi =
     if window_width 0 (n - 1) <= budget then (0, n - 1)
     else begin
-      (* Markers for hidden entries cost room; reserve it up front. *)
-      let budget = max 8 (budget - 10) in
+      (* The active-only window has the largest hidden-entry markers. Any
+         expansion can only reduce their cost; never borrow badge cells. *)
+      let budget = max 0 (budget - active_hidden_cells) in
       let lo = ref active and hi = ref active in
       let grew = ref true in
       while !grew do
@@ -3114,18 +3132,40 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
      spell them. The roster wrote [right/enter] in lowercase, which
      [Masc_tui_footer.never_dropped_keys] does not pin, and gave no way back
      to the Dashboard at all. *)
+  let accent key = (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ key ^ Ansi.reset in
+  (* The Story window belongs to the list. It takes Enter, Esc and Tab while it
+     is open, and [s] and [m] with them. *)
+  let story = if state.view = Keepers Keeper_list then state.keeper_story else None in
   let way =
     if offers_back then
       [ "Left / Esc", "Left / Esc:" ^ Ansi.dim ^ "back" ^ Ansi.reset ]
     else
-      (* A heading opens no Keeper; its arrows fold the group under it. *)
-      (let key, word =
-         if keeper_list_on_heading state then "Left / Right", "fold"
-         else "Right / Enter", "detail"
-       in
-       key, (Masc_tui_theme.tone Masc_tui_theme.Accent) ^ key ^ Ansi.reset ^ ":" ^ word)
-      :: [ "Esc", "Esc:" ^ Ansi.dim ^ "dashboard" ^ Ansi.reset ]
+      let esc =
+        "Esc",
+        "Esc:" ^ Ansi.dim ^ (match story with None -> "dashboard" | Some _ -> "close") ^ Ansi.reset
+      in
+      (* A heading opens no Keeper; its arrows fold the group under it. On a
+         Keeper, Enter and Right are one item so that the pinned Enter keeps
+         Right on the row too: they were one item while both opened the
+         detail, and Right alone would be the first key a narrow row loses
+         after [r]. The labels follow the keys in order. *)
+      if keeper_list_on_heading state then [ "Left / Right", accent "Left / Right" ^ ":fold"; esc ]
+      else
+        let enter =
+          match story with
+          | None -> "story"
+          | Some Masc_tui_keeper_story.Story -> "close"
+          | Some (Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory) -> "story"
+        in
+        [ "Enter / Right", accent "Enter / Right" ^ ":" ^ enter ^ " / detail"; esc ]
   in
+  let story_hints =
+    match story with
+    | None -> []
+    | Some _ -> [ accent "Tab" ^ ":page"; accent "s" ^ ":schedules"; accent "m" ^ ":memory" ]
+  in
+  (* [s] shuts a Keeper down only while the window is closed. *)
+  let taken = match story with None -> taken | Some _ -> "s" :: taken in
   let items =
       view_and_order
       @ [ "j/k", Ansi.dim ^ "j/k:move" ^ Ansi.reset
@@ -3165,13 +3205,14 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
         ; "q", "q:" ^ Ansi.dim ^ "quit" ^ Ansi.reset
         ]
   in
-  items
-  |> List.filter (fun (key, _) ->
-         not
-           (List.exists
-              (fun atom -> List.mem atom taken)
-              (Masc_tui_keys.key_atoms key)))
-  |> List.map snd
+  story_hints
+  @ (items
+     |> List.filter (fun (key, _) ->
+            not
+              (List.exists
+                 (fun atom -> List.mem atom taken)
+                 (Masc_tui_keys.key_atoms key)))
+     |> List.map snd)
   |> String.concat "  "
 
 
@@ -6062,6 +6103,23 @@ let lane_run_clock started_at =
 let detail_section_heading ?(first = false) title =
   let heading = [ Theme.info () ^ Ansi.bold, "  [ " ^ title ^ " ]" ] in
   if first then heading else (Ansi.dim, "") :: heading
+
+(* A detail page of headed blocks of [Page_line] lines. One label column
+   serves every block, so the values of the whole page start at one cell and
+   not at a different cell under each heading. *)
+let detail_page ~width blocks =
+  let label_cells =
+    Masc_tui_page_reading.widest_label_cells (List.concat_map snd blocks)
+  in
+  let max_cells =
+    max 1 (width - String.length Masc_tui_page_reading.detail_indent)
+  in
+  List.concat
+    (List.mapi
+       (fun index (title, lines) ->
+          detail_section_heading ~first:(index = 0) title
+          @ Masc_tui_page_reading.rows ~label_cells ~max_cells lines)
+       blocks)
 
 let detail_section_lines ?(first = false) title =
   let heading = [ "  " ^ Theme.info () ^ Ansi.bold ^ "[ " ^ title ^ " ]" ^ Ansi.reset ] in

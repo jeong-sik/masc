@@ -88,9 +88,23 @@ let handle_run_get ~tool_name ~start_time ctx args : Tool_result.result =
           ~start_time
           (Printf.sprintf "Failed to get run: %s" e)
 
-let handle_run_list ~tool_name ~start_time ctx _args : Tool_result.result =
-  let json = Run_eio.list ctx.config in
-  Tool_result.make_ok ~tool_name ~start_time ~data:json ()
+(* The newest 100 of the 787 runs in one workspace (2026-11-09) are 14,372 bytes
+   as rows and the newest 50 are 7,255 bytes; a row is 140 bytes on average and
+   161 at most. Common.max_tool_result_wire_bytes is 16,384, and above it a
+   result is stored as a blob and read in pages. config/tools/masc_run_list.toml
+   declares the same three numbers; test_run_tool_workflow reads that schema
+   and checks the handler against it. *)
+let default_list_limit = 50
+let max_list_limit = 100
+
+let handle_run_list ~tool_name ~start_time ctx args : Tool_result.result =
+  match
+    validate_int_range args "limit" ~min_v:1 ~max_v:max_list_limit ~default:default_list_limit
+  with
+  | Error error -> validation_error_result ~tool_name ~start_time [ error ]
+  | Ok limit ->
+    let json = Run_eio.run_listing_to_json (Run_eio.list ctx.config ~limit) in
+    Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 
 (** {1 Dispatcher} *)
 

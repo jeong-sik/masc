@@ -99,6 +99,26 @@ val dynamic_tool_bytes : dynamic_tool list -> int
 
 type content_transport = Codex | Mcp
 
+val append_host_text :
+  dynamic_tool_result ->
+  text:string ->
+  limit:result_bound ->
+  on_response_sent:(unit -> unit) ->
+  dynamic_tool_result option
+(** The result with a block of MASC's own text after the tool's, or [None] when
+    [content] with the text would pass [limit]. A result without
+    [content_blocks] carries the text in [content]; with them the blocks are
+    what the client reads, so a [Text] block follows them, and [content] gets
+    the same text so the two stay one view of the result. [text] is sanitized
+    to valid UTF-8 first, and [limit] is judged on the sanitized text: repair
+    can make it longer.
+
+    The result's own [on_response_sent] still runs, and [on_response_sent]
+    runs after it, both at the actual write of the whole response. The
+    original result is a prefix of what is written, so a retention marker on it
+    still describes delivered bytes. Appending is the last step on a result:
+    an observer that parses [content] has seen it before. *)
+
 val response_observer :
   content_transport -> dynamic_tool_result -> (unit -> unit) option
 (** Bind the optional observer only when the original model-visible content

@@ -3,9 +3,10 @@
     decides what each looks like. *)
 
 (** [Quiet] is background the reader may skip, [Plain] is the default,
+    [Info] is something live or just done that the reader may want to follow,
     [Attention] is what the reader has to know before acting on the page, and
     [Failure] is something that broke and has to be fixed. *)
-type tone = Quiet | Plain | Attention | Failure
+type tone = Quiet | Plain | Info | Attention | Failure
 
 type t =
   | Title of string

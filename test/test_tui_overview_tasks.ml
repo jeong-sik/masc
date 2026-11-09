@@ -93,15 +93,15 @@ let test_open_todo_highlights_nothing () =
   check (option string) "Enter and Ctrl-] name nothing" None
     (selected_id tasks ~selected);
   check (option string) "j from there goes to the first row"
-    (Some "task-1720")
+    (Some "task-1700")
     (Tasks.step tasks ~selected Tasks.Next)
 
 let test_open_held_task_highlights_its_row () =
   let selected = Some "task-1710" in
   check (option int) "an in-progress task opened from a link is its row"
-    (Some 1)
+    (Some 2)
     (Tasks.selected_index tasks ~selected);
-  check (option string) "j moves to its neighbour" (Some "task-1700")
+  check (option string) "j moves to its neighbour" (Some "task-1730")
     (Tasks.step tasks ~selected Tasks.Next);
   check (option string) "k moves to the row above" (Some "task-1720")
     (Tasks.step tasks ~selected Tasks.Previous)
@@ -112,14 +112,14 @@ let after_poll_without id =
   List.filter (fun (task : Tui_decode.task) -> not (String.equal task.id id)) tasks
 
 let test_a_poll_does_not_move_the_selection () =
-  let selected = Some "task-1700" in
+  let selected = Some "task-1710" in
   check (option int) "before the poll" (Some 2)
     (Tasks.selected_index tasks ~selected);
   let polled = after_poll_without "task-1720" in
   check (option int) "its row moved up" (Some 1)
     (Tasks.selected_index polled ~selected);
   check (option string) "Enter and Ctrl-] still name the same task"
-    (Some "task-1700")
+    (Some "task-1710")
     (selected_id polled ~selected)
 
 let test_a_finished_selection_selects_nothing () =
@@ -168,7 +168,7 @@ let test_a_landing_on_a_todo_task_focuses_its_work_row () =
 
 let test_t_chooses_the_first_row () =
   let focused = Tasks.toggle tasks Tasks.No_task_focus in
-  check focus_pair "t focuses the first held row" (true, Some "task-1720")
+  check focus_pair "t focuses the first held row" (true, Some "task-1700")
     (focus_state focused);
   check focus_pair "t again lets go of the list and its choice" (false, None)
     (focus_state (Tasks.toggle tasks focused));

@@ -375,6 +375,26 @@ let test_boot_entry () =
       (Result.is_ok (Read.boot ~base_path:dirs.base ~config_dir:(Some dirs.config) ~anonymous_mutations:true)))
 ;;
 
+(* Plan D2-2: a host tool judges from presence alone and writes nothing. *)
+let test_tool () =
+  with_dirs (fun dirs ->
+    let tool () = Read.tool ~base_path:dirs.base ~config_dir:(Some dirs.config) in
+    let auth_dir = Filename.dirname (L.path_of_base_path ~base_path:dirs.base) in
+    Alcotest.(check bool) "nothing set up" true (Result.is_ok (tool ()));
+    Alcotest.(check bool) "no auth directory" false (Sys.file_exists auth_dir);
+    write_config dirs {|{"enabled":true,"require_token":true,"account_mode":"Multi_account"}|};
+    (match tool () with
+     | Ok (_ : Read.single_user) -> Alcotest.fail "a Multi_account request ran a tool"
+     | Error (first, _) -> Alcotest.(check bool) "a reason" true (first <> ""));
+    bootstrap dirs;
+    let listing () = List.sort String.compare (Array.to_list (Sys.readdir auth_dir)) in
+    let before = listing () in
+    (match tool () with
+     | Ok (_ : Read.single_user) -> Alcotest.fail "a bootstrapped base path ran a tool"
+     | Error (_, found) -> Alcotest.(check int) "the log and the install record" 2 (List.length found));
+    Alcotest.(check (list string)) "no file opened or made" before (listing ()))
+;;
+
 let test_log_without_mode_event () =
   with_dirs (fun dirs ->
     let body =
@@ -595,6 +615,7 @@ let () =
         ; Alcotest.test_case "store gone" `Quick test_store_gone
         ; Alcotest.test_case "log of another bootstrap" `Quick test_log_of_another_bootstrap
         ; Alcotest.test_case "boot entry" `Quick test_boot_entry
+        ; Alcotest.test_case "host tool" `Quick test_tool
         ; Alcotest.test_case "same, with no record" `Quick test_config_dir_others_can_write_without_record
         ; Alcotest.test_case "store behind a dangling link" `Quick test_store_behind_a_dangling_link
         ; Alcotest.test_case

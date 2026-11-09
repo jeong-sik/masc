@@ -1,4 +1,4 @@
-type tone = Quiet | Plain | Attention | Failure
+type tone = Quiet | Plain | Info | Attention | Failure
 
 type t =
   | Title of string

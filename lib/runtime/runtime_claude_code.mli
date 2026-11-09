@@ -20,11 +20,13 @@ val api_provider_to_string : api_provider -> string
 
 type account = Runtime_official_account.claude_code Runtime_official_account.selection
 
+(** An account a CLI may start on ({!Runtime_account_access.authorize}). Every
+    function that starts the CLI takes one; the config holds no account. *)
+type authorized_account =
+  Runtime_official_account.claude_code Runtime_account_access.authorized
+
 type config =
   { cli_path : string
-  ; account_home : account
-    (** [Current None] selects the ordinary environment at call time.
-        [Captured] preserves the admitted home mode and credential environment. *)
   ; cwd : string
   ; model : string option
   ; system_prompt : string option
@@ -504,9 +506,10 @@ type error =
 
 val error_to_string : error -> string
 
-val client_environment : account -> (string array, error) result
-(** Shared child projection for execution/login. Captured input never reads
-    ambient credentials; Current input is selected and validated at call time. *)
+val login_environment : account_home:string -> (string array, error) result
+(** The environment of the login CLI on [account_home], which the login
+    creates the account in. It starts no CLI itself, and no turn or probe runs
+    on it: those take an {!authorized_account}. *)
 
 val validate_turn :
   ?dynamic_tools:dynamic_tool list ->
@@ -520,6 +523,7 @@ val probe_subscription :
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->
+  account:authorized_account ->
   config ->
   (subscription, error) result
 (** Measure the official CLI login without submitting a model turn. The child
@@ -591,6 +595,7 @@ val run_turn :
   ?on_input_observation:(Runtime_claude_input_attribution.observation -> unit) ->
   (* Optional invocation-local ticket/write/response metadata, separate from
      authored content and native tasks. It does not extend receiver lifetime. *)
+  account:authorized_account ->
   config ->
   prompt:string ->
   images:image_input list ->

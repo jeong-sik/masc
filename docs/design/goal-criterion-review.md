@@ -20,6 +20,11 @@ Goal 생성 실패나 기준 부적합으로 바꾸지 않고 `unavailable`로 �
 검토 결과는 `masc_goal_upsert`, `masc_goal_list`, Dashboard Goal 트리·상세,
 TUI Planning 상세의 `criterion_review`로 읽는다.
 
+`masc_goal_list` 행의 `criterion_review`는 `state`, `request_id`,
+`criterion_revision`, `reason`, `detail`, `authority`만 담는다. reviewer의
+구조화된 결과(`review`)와 도구 관측(`tools`)은 원장에 남고, 전체 투영
+(`Goal_criterion_review.projector`)에만 실린다.
+
 | 상태 | 의미 |
 |---|---|
 | `unchecked` | 현재 성공 기준의 검토 요청이 아직 기록되지 않음 |

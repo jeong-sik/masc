@@ -3139,6 +3139,8 @@
 
 (include stanzas/test_keeper_delegate_target_turn.inc)
 
+(include stanzas/test_keeper_delegate_targets.inc)
+
 (include stanzas/test_keeper_runtime_manifest_completeness.inc)
 
 (include stanzas/test_keeper_runtime_manifest_clock_separation.inc)
@@ -4509,7 +4511,10 @@
   masc_tui_types
   masc_tui_agenda
   masc_tui_keeper_axis_cell
-  masc_tui_keeper_next_run))
+  masc_tui_keeper_next_run
+  ;; The decode test reads a page through the agenda's own decoder.
+  masc_tui_loader
+  yojson))
 
 (test
  (name test_tui_keeper_axis)
@@ -4526,6 +4531,24 @@
   masc_tui_keeper_list_model
   masc_tui_keeper_memory_reading
   masc_tui_keeper_next_run))
+
+(test
+ (name test_tui_keeper_story)
+ (modules test_tui_keeper_story)
+ (libraries alcotest masc_tui_keeper_story))
+
+(test
+ (name test_tui_keeper_feed)
+ (modules test_tui_keeper_feed)
+ (libraries
+  alcotest
+  masc
+  masc.masc_schedule
+  masc.time_codec
+  masc_tui_types
+  masc_tui_keeper_turns
+  masc_tui_keeper_wakes
+  masc_tui_keeper_feed))
 
 (test
  (name test_tui_keeper_age_ladder)
@@ -4646,6 +4669,11 @@
  (name test_tui_memory_usage)
  (modules test_tui_memory_usage)
  (libraries alcotest masc_tui_memory_usage masc.masc_types))
+
+(test
+ (name test_tui_keeper_turns)
+ (modules test_tui_keeper_turns)
+ (libraries alcotest masc_tui_keeper_turns masc.masc_types))
 
 (test
  (name test_tui_render_memory)
@@ -7243,6 +7271,9 @@
 
 (include stanzas/test_authz_boot_mode.inc)
 (include stanzas/test_authz_boot_mode_read.inc)
+(include stanzas/test_runtime_account_access.inc)
+(include stanzas/test_runtime_account_access_multi.inc)
+(include stanzas/test_server_preview_keeper_turn.inc)
 (include stanzas/test_authz_state.inc)
 (include stanzas/test_authz_zone.inc)
 

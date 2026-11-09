@@ -480,8 +480,6 @@ let git_upstream_status path =
 let deployment_state_json
       ~(build : Build_identity.t)
       ~server_repo_commit
-      ~workspace_commit
-      ~resolved_base_commit
       ~upstream_status
   ~source_mismatch
   =
@@ -2080,8 +2078,8 @@ let runtime_resolution_json (config : Workspace.config) =
       ; ("keeper_runtime", Keeper_runtime_resolved.(current () |> to_yojson))
       ; "build", Build_identity.to_yojson build
       ; ( "deployment_state"
-        , deployment_state_json ~build ~server_repo_commit ~workspace_commit
-            ~resolved_base_commit ~upstream_status ~source_mismatch )
+        , deployment_state_json ~build ~server_repo_commit
+            ~upstream_status ~source_mismatch )
       ; "gate_hitl", gate_hitl_json ()
       ]
       @ Server_routes_http_runtime.keeper_fleet_runtime_resolution_fields () )

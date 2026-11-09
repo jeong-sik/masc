@@ -3,7 +3,7 @@ rfc: "arrived-stimuli-reach-the-running-turn"
 title: "도는 중에 큐에 도착한 행을 다음 요청에서 보여 준다 — 행은 큐에 그대로 둔다"
 status: Draft
 created: 2026-11-06
-updated: 2026-11-06
+updated: 2026-11-09
 author: claude
 supersedes: []
 superseded_by: null
@@ -15,12 +15,14 @@ related: ["backlog-never-preempts-a-running-turn", "keeper-async-fleet-continuit
 Keeper 의 실행 하나는 모델 요청을 여러 번 보낸다. 큐는 턴 사이에만 비우고, 시계와 세계 상태는 첫 요청에만 실린다.
 그래서 실행 중에 도착한 행은 실행이 끝날 때까지 모델 눈에 보이지 않는다. 실행이 몇 시간 도는 때도 있다.
 이 RFC 는 도구 결과 뒤 요청에 "이 실행이 시작된 뒤 도착한 행" 블록을 더하자고 제안한다. 행은 큐에 그대로 남고, 실행이 끝난 뒤 자기 턴을 시작한다.
+공식 클라이언트(Claude Code, Codex, Antigravity, Muse)는 모델 루프를 스스로 돌려서 요청을 조립하는 hook 이 없다. 그 실행에는 MASC 도구의 결과 끝에 같은 블록을 붙인다(3.3).
 
-- 다루는 것: 도는 실행의 뒤 요청에 도착 행을 보이는 블록, 그 블록을 언제 한 번씩만 보이는지.
+- 다루는 것: 도는 실행의 뒤 요청에 도착 행을 보이는 블록, 그 블록을 언제 한 번씩만 보이는지, 공식 클라이언트 실행에서 MASC 도구 결과 끝에 같은 블록을 붙이는 일.
 - 다루지 않는 것: 도는 실행을 끊는 일(`RFC-backlog-never-preempts-a-running-turn` 이 정했다), 행을 큐에서 지우거나 ack 하는 일, 비동기 도구(`RFC-0290`), 모델이 닫는 말을 쓰고 도구를 다시 부르는 버릇.
 - 근거 기준: 이 브랜치의 base `f2d98655513`(2026-11-06).
 - 측정: [`docs/evidence/runs-and-arrivals-2026-11/`](../evidence/runs-and-arrivals-2026-11/README.md). 2026-11-05T20:24Z 에 읽었어요. raw trace 는 오래된 순으로 지워져서 다시 재면 값이 달라져요.
 - 되풀이하는 호출 측정: [`docs/evidence/repeated-calls-2026-11/`](../evidence/repeated-calls-2026-11/README.md). 2026-11-05T20:36Z 에 읽었어요.
+- 공식 클라이언트 실행의 배포 전 기준선: 위 측정 폴더 README 의 "공식 클라이언트 실행에 붙인 블록". 2026-11-09T03:34Z 에 읽었다.
 
 ## 0. 요약
 
@@ -30,6 +32,8 @@ Keeper 의 실행 하나는 모델 요청을 여러 번 보낸다. 큐는 턴 �
 - **[제안]** 도구 결과 뒤 요청에 `Arrived_stimuli` 블록을 싣는다. 행을 한 번씩만, 모델이 그 요청에 답한 뒤 "보였다"고 친다. 큐는 건드리지 않는다.
 - **[사실]** 큐 snapshot 을 읽는 시간은 snapshot 복사본 4개로 쟀다. 파일이 그대로면 p50 0.03~0.04ms, 파일이 바뀐 뒤 첫 읽기는 p50 0.15~1.35ms 다(7.1).
 - **[확인 필요]** 모델이 블록을 읽고 무엇을 하는지, 중복 처리가 생기는지, 쓰는 쪽이 lock 을 잡은 동안 읽기가 기다리는 시간은 재지 않았다. 배포하기 전이라 잴 수 없다.
+- **[사실]** 공식 클라이언트 경로의 기준선(2026-11-09T03:34Z, 창 10-25~11-09): round 기록이 없는 실행은 3,428개이고 실행 시간은 중앙값 32.7초, p90 150.3초, 최대 4,674.2초다. 이 창에서 실행 중에 도착한 행 139개 중 7개가 이런 실행에 도착했고, 7개가 막힌 시간은 0.31시간이다. 전체 28.3시간의 1.1%다. 7개는 `board_signal` 6개와 `board_attention` 1개이고 Delegate 완료나 `Tool_result_ready` 행은 없었다.
+- **[제안]** 공식 클라이언트 실행에는 도구 결과 끝에 같은 블록을 붙인다(3.3). 위 7개로 replay 하면 6개는 같은 실행에 MASC 도구 결과가 뒤따르고, 도착부터 그 결과까지 중앙값 5.2초, p90 12.3초다. 실행 끝까지 기다리는 것보다 합쳐서 0.29시간 일찍 보인다. 이 창에서 이 변경이 앞당기는 시간은 0.31시간을 넘지 않는다.
 - 이 RFC 는 비동기 `Execute` 와 Delegate 를 풀지 않는다. 그 둘의 결과가 도는 중에 도착하는 길(`keeper_delegate_completed`, 비동기 결과)만 이 블록으로 보인다.
 
 ## 1. 지금 모양
@@ -97,12 +101,23 @@ raw trace(`.masc/keepers/<keeper>/raw-traces`)와 reaction ledger(`reaction-ledg
 
 없다. 실행 하나가 이미 보인 행의 `arrival` 번호를 메모리에 들고 있을 뿐이다(`recall_memo` 와 같은 수명). 옛 데이터를 읽는 코드와 migration 은 만들지 않는다.
 
+### 3.3 공식 클라이언트 실행: 도구 결과 끝에 붙인다
+
+**[제안]** 공식 클라이언트는 모델 루프를 스스로 돌리고 MASC 에 요청을 조립할 자리를 주지 않는다. MASC 가 쓴 글이 그 모델에 닿는 자리는 MASC 도구(dynamic tool)의 결과뿐이다. 호스트(`Keeper_official_client_host`)가 도구 결과를 돌려주기 직전에 3.1 과 같은 블록을 결과 뒤에 붙인다.
+
+- 같은 블록: 행을 고르는 규칙, 한 번에 8개, 머리말, 한 줄의 글은 3.1 과 같다(`Keeper_arrived_stimuli`). 실행 시작은 호스트가 그 턴의 도구 목록을 만든 시각이다.
+- 마지막 단계: 원본 결과를 보존(retention)하고 결과를 읽는 관측자가 지나간 뒤에 붙인다. 원본이 보낸 응답의 앞부분으로 남아서 보존 표시는 그대로 돈다. 블록 글은 UTF-8 로 고쳐서 붙인다. 안 고치면 응답 관측자가 묶이지 않는다.
+- 붙이지 않는 때: 턴을 끝내는 결과(`abort_turn`), 도구가 선언한 `Bounded_bytes` 상한을 블록이 넘기게 하는 결과(UTF-8 로 고친 뒤의 글로 센다. 고치면 글이 길어질 수 있다), 큐를 읽지 못한 때. Claude Code 는 `maxResultSizeChars` 를 넘는 결과를 파일에 쓰고 경로만 주기 때문에 상한을 넘기면 도구 결과 전체가 가려진다. 붙이지 않은 행은 다음 결과에 남는다.
+- "보였다"고 치는 때: 응답을 클라이언트에 실제로 쓴 뒤(`on_response_sent`)다. 쓰기 전에 두 결과가 나가면 둘 다 같은 행을 싣는다. Muse 의 MCP 다리는 호출을 겹쳐 돌릴 수 있어서, 블록마다 자기 행만 쥐는 `claim` 으로 센다.
+- 기록: 붙인 블록마다 raw trace 에 `arrived_stimuli_projection` hook 을 남긴다. 도구 이름, 못 실은 행 수, 글 바이트, 행별 큐 항목 번호와 도착 시각이 든다. 쓰기 시점의 관측자는 I/O 를 하면 안 돼서 쓴 때가 아니라 붙인 때를 기록한다.
+- 새로 저장하는 상태는 없다. 보인 행의 번호는 도구 목록과 같은 수명으로 메모리에 둔다.
+
 ## 4. 하지 않는 것
 
 - 행을 큐에서 지우거나 ack 하지 않는다. 행의 처리는 지금처럼 자기 턴이 한다.
 - 도는 실행을 끊지 않고, urgency 로 실행의 길이를 정하지 않는다.
 - 블록에 Keeper 가 해야 할 일을 적지 않는다. 개수, 종류, 나이, 설명만 있다.
-- `before_turn_params` 기록이 없는 실행에는 닿지 않는다. 블록은 그 hook 안에서 만든다. 그런 실행 2,775개 중 2,752개는 `client_context_submission` 기록을 남긴다. 이런 실행 안에서 도착한 행이 221개(12%)다.
+- 3.1 의 블록은 `before_turn_params` hook 안에서 만들어서 그 기록이 없는 실행에는 닿지 않는다. 그런 실행 2,775개 중 2,752개는 `client_context_submission` 기록을 남기고, 이런 실행 안에서 도착한 행이 221개(12%)다. 그 실행에는 3.3 의 도구 결과 끝 블록이 닿는다. MASC 도구를 한 번도 부르지 않는 실행은 어느 쪽에도 닿지 않는다.
 - 모델이 "닫는 말 + 도구 호출"을 되풀이하는 버릇은 고치지 않는다. 블록은 그 실행이 새 소식을 알게 할 뿐이다. 되풀이가 가장 긴 `music-sensei` 11-05 실행은 903 round 중 `masc_board_list` 를 901번 불렀고 899번이 같은 입력이었는데, 그 실행 안에 ack 된 행이 한 개도 도착하지 않아서 이 블록은 한 줄도 싣지 못한다(`docs/evidence/repeated-calls-2026-11/` 의 표본).
 
 ## 5. 검증
@@ -117,8 +132,12 @@ raw trace(`.masc/keepers/<keeper>/raw-traces`)와 reaction ledger(`reaction-ledg
 | 대시보드 | `tsc` 통과. `vitest run` 전체 13,045개 중 8개가 실패한다. 7개는 변경 없는 main(`f2d98655513`)에서도 실패한다(`keeper.test.ts` 3개 등). 1개(`artifact-pdf-export`)는 전체를 돌릴 때만 20초 시간 초과가 나고 그 파일만 돌리면 9개 모두 통과한다 |
 | `bin/masc_tui.exe` | 새 합타입 분기가 모두 있어서 컴파일 통과 |
 | 측정 스크립트(실행·도착) | 시험 22개, 새 필드 변형 9개를 모두 시험이 잡았다, pyright strict 오류 0, ruff 통과 |
+| 측정 스크립트(공식 클라이언트 블록·replay) | 시험 8개를 더해 30개 통과. 새 집계에 변형 17개를 넣어 모두 시험이 잡았다(처음에 하나가 살아남아 시험을 더했다). pyright strict 오류 0, ruff 통과 |
+| 3.3 의 타입 검사 | 바뀐 단위 3개(`Runtime_official_client_tool`, `Keeper_arrived_stimuli`, `Keeper_official_client_host`)와 시험 2개(`test_keeper_arrived_stimuli`, `test_keeper_host_result_retention`)를 로컬 heal 하네스로 검사했다. 미리 빌드한 snapshot 에서 바뀐 단위와 그것을 import 하는 단위만 다시 타입 검사한다. 로컬 `dune build` 가 아니다 |
+| 3.3 의 실행 | 미리 빌드한 `.cmxa` 에 바뀐 `.ml` 을 링크한 probe 로 돌렸다. `Keeper_arrived_stimuli` 시험 20개, `append_host_text` 검사 15개, 호스트 조각(`with_arrived_rows`) 검사 13개가 통과했고, 변형 21개를 하나씩 넣어 모두 검사가 잡았다 |
 | 측정 스크립트(되풀이 호출) | 시험 33개, 변형 34개를 모두 시험이 잡았다, pyright strict 오류 0, ruff 통과 |
 
+**[확인 필요]** `test_keeper_arrived_stimuli` 의 `claim` 시험과 `test_keeper_host_result_retention` 의 도착 행 시험은 타입 검사만 했고 alcotest 로 돌리지 않았다. 이 저장소의 CI 는 PR 에서 `dune build @check` 만 돌리고 시험은 nightly `test.yml` 이 돈다.
 **[확인 필요]** `assemble_hooks` 를 거치는 시험은 없다. Agent Core 턴 하나를 통째로 돌리는 fixture 가 없고, hook 에는 블록 호출 한 곳과 `after_turn` 의 확인 한 줄이 있다.
 이 로컬 결과는 CI 와 현재 head 의 독립 리뷰를 대신하지 않는다.
 
@@ -129,6 +148,7 @@ raw trace(`.masc/keepers/<keeper>/raw-traces`)와 reaction ledger(`reaction-ledg
 1. 노출: 턴 기록의 블록 목록에 `arrived_stimuli` 가 든 요청의 수와 한 요청의 행 수.
 2. 실행 길이: round 100개 이상인 실행의 수와 점유율(지금 35개, 22.7%)이 바뀌는지.
 3. 효과: 블록을 본 실행이 그 뒤 어떻게 끝나는지(남은 round 수, 마지막 도구). 정의가 아직 없다. **[확인 필요]**
+4. 공식 클라이언트 실행의 노출: raw trace 의 `arrived_stimuli_projection` 에서 `rows_shown`, `seconds_to_first_block`, `block_bytes` 를 읽어 기준선(블록 0개, replay 6개의 도착부터 도구 결과까지 중앙값 5.2초)과 견준다.
 
 ## 7. 위험과 열린 질문
 
@@ -146,10 +166,12 @@ raw trace(`.masc/keepers/<keeper>/raw-traces`)와 reaction ledger(`reaction-ledg
    **[확인 필요]** 쓰는 쪽이 owner lock 을 잡고 fsync 하는 동안 읽기가 기다리는 시간과, 서버에서 Keeper 여러 명이 동시에 읽을 때의 값은 재지 않았다. `RFC-backlog-never-preempts-a-running-turn` 3.5 는 경계마다 읽기를 피하려 했다. 이 RFC 는 도착이 실행 안에서 일어나서 턴 시작의 한 번 읽기로는 못 본다고 본다.
 2. **중복 처리.** 모델이 블록의 행을 실행 중에 처리해도 행은 큐에 남아서 자기 턴이 다시 admit 한다. 그 턴이 이미 끝난 일을 알아보는지는 정하지 않았고 재지 않았다. **[확인 필요]**
 3. **모델의 반응.** 블록이 돌고 도는 실행을 끝내는지 모른다. 7개 중 2개는 모델이 스스로 답해서 끝났고 3개는 한도 오류로 끝났다. 7개 중 3개에는 ack 된 도착 행이 0개라서, 같은 일이 다시 벌어져도 블록이 나타나지 않는다. 큐에서 ack 없이 사라진 행은 reaction ledger 에 없어서 이 측정에 들어 있지 않다.
-4. **시작 시각의 경계.** 실행 시작은 hook 을 조립하는 시각이다. 턴의 첫 intake 와 그 시각 사이에 도착한 행은 이 실행에서 보이지 않고 다음 턴이 처리한다. 그 틈의 길이는 재지 않았다.
-5. **다른 런타임.** `before_turn_params` 기록이 없는 실행의 도착 행(221개)은 이 RFC 로 닿지 않는다. 그 런타임에 닿는 길(Codex 의 `turn/steer` 등)은 `RFC-backlog-never-preempts-a-running-turn` 1.7 이 찾은 대로다. 이 RFC 는 다루지 않는다.
+4. **시작 시각의 경계.** 실행 시작은 hook 을 조립하는 시각이다(공식 클라이언트 경로는 그 턴의 도구 목록을 만드는 시각이다). 턴의 첫 intake 와 그 시각 사이에 도착한 행은 이 실행에서 보이지 않고 다음 턴이 처리한다. 그 틈의 길이는 재지 않았다.
+5. **다른 런타임.** Agent Core 경로는 3.1, 공식 클라이언트 경로는 3.3 이 닿는다. 닿지 않는 곳은 MASC 도구를 한 번도 부르지 않는 공식 클라이언트 실행과 클라이언트 자체 도구(Claude Code 의 Bash 등)의 결과다. Codex 의 `turn/steer` 처럼 도는 턴에 직접 말을 넣는 길은 `RFC-backlog-never-preempts-a-running-turn` 1.7 이 찾은 대로이고, 이 RFC 는 다루지 않는다.
 6. **한 줄의 글.** 설명은 ledger 의 preview 를 그대로 쓴다. 모델이 이 글로 행을 알아보는지는 재지 않았다.
 7. **측정 범위.** 도착 행의 91%가 이틀(11-04·11-05)에서 나왔다. 그 이틀의 부하(실행 1,495개와 2,048개)가 평소인지 모른다.
+8. **`Tool_result_ready` 한 줄.** 비동기 `Execute` 가 끝나서 큐에 든 행(`Tool_result_ready`)의 한 줄은 `tool_result_ready receipt_id=<sha256>` 이다. 모델은 이 글로 어떤 호출이 끝났는지 알 수 없다. 도구 이름과 호출 id 를 싣는 일은 두 경로 모두에 걸리는 별도 변경이다.
+9. **공식 클라이언트 블록의 크기.** 이 창에서는 공식 클라이언트 실행에 도착한 행이 7개뿐이라 블록 크기와 노출 횟수는 값이 없다. 배포 뒤 `block_bytes` 로 잰다.
 
 ## 8. 관련
 

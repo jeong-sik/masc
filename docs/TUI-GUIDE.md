@@ -7,11 +7,12 @@ status: runbook
 Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
-`bin/masc_tui_types.ml`: Dashboard, Work, Keepers, Usage, Board, Workspace,
-System. Dashboard is the first screen. It opens the decisions and conversations
+`bin/masc_tui_types.ml`: Operations, Work, Keepers, Features & plugins, Workspace,
+System. Operations is the first screen. It opens the decisions and conversations
 that need the operator. The full Goal and Task lists are
 under Work; provider quota scopes, Keeper costs and tokens, and daily provider
-reports are under Usage. Activity and server logs are under System (`A` / `L`).
+reports are under Usage (Operations `m`). Board is under Work with an explicit
+`: go Work / Board` palette destination. Activity and server logs are under System (`A` / `L`).
 Additional surfaces hang off parents instead of holding Tab stops:
 Work's `t` switches Goals and Tasks, and `v` cycles through Task Review and
 Task Verdicts, then back to Goals;
@@ -26,6 +27,12 @@ also keep `go <name>` palette entries, and each System pane has
 `go System / <pane>` (`runtime.toml`, `models`, `params`, `prompts`,
 `presets`, `themes`, `voice`). Changes follows the Keeper selected on
 Keepers. Keeper operations are reached from their parent only.
+Features & plugins exposes the existing lane inventory directly; Tools, Skills,
+Resources, Clients and Channels share that navigation family. Configuration is
+separate from observed worker state and successful execution. The static `/features`
+sheet remains help, not an availability report.
+The [operator information architecture](design/tui/OPERATOR-INFORMATION-ARCHITECTURE.md)
+defines the reading order and observation boundaries.
 The [screen inventory](design/tui/SCREENS.md) lists all surfaces, subviews and overlays.
 
 Header clocks and ordinary row times use the terminal's timezone. Usage trends
@@ -43,7 +50,7 @@ opens it (`/keeper <name>`, `Ctrl-L`, `masc_tool_help`, ...). Names are wire
 names, so a row can be copied and typed as it is printed. The key-level
 reference is [`?`](guides/TUI-KEYS.md); `/help` lists the slash commands.
 
-Opening `:` with no search shows the seven main destinations. Type a screen,
+Opening `:` with no search shows the six main destinations. Type a screen,
 Keeper, Task, post or setting name to find other actions. Detail screen names
 include their parent, for example `go Work / Task Review` and
 `go System / Runtime`. Short searches such as `go Task Review`, `settings`,
@@ -51,7 +58,7 @@ include their parent, for example `go Work / Task Review` and
 without adding duplicate entries. Candle payouts belong to a selected Goal's
 detail in Work.
 
-The sheet also names all seven main surfaces with their reading entrypoints:
+The sheet names the main surfaces and their reading entrypoints:
 Work's Goal/Task details, Keeper conversations and logs, Usage's account selector,
 Board's recorded successor, complete repository context, and complete model
 settings. Use `:` then `go <surface>` to reach a named surface; its `?` sheet
@@ -914,8 +921,62 @@ malformed or mismatched identities before applying any directive. Clients may
 omit the precondition entirely; the TUI always sends both components. On 409,
 refresh identity before issuing a new command; retained input stays local.
 
+`Enter` opens the Story window under the list for the Keeper the cursor is on.
+The window takes rows from the list, so the list keeps scrolling to the cursor
+in what is left, and it follows the cursor as `j`/`k` move. It has three pages
+named on its title row: `story`, `s schedules` and `m memory`.
+
+- `story` tells the Keeper as `◂ past`, `● now` and `▹ next`. Past holds the
+  failing-for and turn-pulse cells, the feed, the failure sentence and the
+  attempt chain. Now holds the activity word, the `DETAIL` text, `Mode S`,
+  `AGE` and the lifecycle. Next holds the schedule cell, the next dispatch path
+  and the memory lag. Except the feed, they are the cells and sentences the
+  list rows draw.
+  The feed lists the Keeper's newest turns, its newest two wakes and the
+  Librarian's last digest, oldest first, one line each with how long ago it
+  happened, so the newest is the last event of the feed. A turn line gives the
+  stop reason the receipt recorded, as written, or `turn no stop reason`. A wake
+  line gives its outcome, the schedule that woke the Keeper and, for a failed
+  wake, the error the schedule recorded. A schedule
+  records only its own last wake, so the two wakes are the last wakes of the
+  two schedules on the Keeper's first schedule page whose wakes are newest. A
+  page too short for the feed drops its oldest events first.
+  A source the window has not read, cannot read, has cut, is reading again or
+  whose read failed does not vanish from the feed: a line of its own after the
+  events says so, one line per source, for example `turns reading…`,
+  `wakes from the first page only` or `wakes (schedule read failed)`. The line
+  of a read that failed ends with the reason the read stored. These lines stay
+  when the page is short, and the lines of failed reads outlast the others. A
+  window with no line to spare for the feed shows none of it. A wake whose time
+  cannot be read makes the wakes unknown. The window reads turns and schedules while the story page is open,
+  one Keeper at a time as the cursor moves, and reads the turns again when the
+  server announces a change in that Keeper's turns.
+- `s schedules` is the first page of the Keeper's own schedules, the page the
+  Automation tab (`J`) draws first, led by the same `◷` cell the list draws and
+  the counts of what the store holds. The window reads that page from the
+  server while it is open, one Keeper at a time as the cursor moves, so the
+  fleet agenda's cap does not hide a Keeper whose schedules are closed. A page
+  that is cut, a reading that is read again and a read that failed say so. The
+  Automation tab has the full table and the other pages.
+- `m memory` shows the Keeper's memory-health row: state, update age, the fact
+  age ladder, the Librarian's lag and last digest, the gap and the stale
+  events.
+
+While the window is open it takes `Tab` (next page), `s`, `m`, `Enter`, `Esc`
+and `Right`, and `S` and `M` as it takes `s` and `m`; every other key reaches the
+list. `Enter` closes the window on the story page and returns to it from the
+other pages, `Esc` closes it, and `Right` closes it and opens the detail. While
+a settings editor is being prepared, the first `Esc` cancels that. A closed
+window takes `Enter` and nothing else, so `s` still shuts a Keeper down and `m`
+still opens the chat. Where no Keeper is under the cursor, on a group heading or
+in a list with no Keeper, the window says so, `Enter` opens nothing, and the
+arrows work as they do with the window closed: `Left` folds a group and `Right`
+unfolds it. When the screen has fewer than eight rows below the list's header,
+the window takes them all and covers the list. Leaving the list closes the
+window.
+
 Execution facts are not on the list. Open the selected Keeper's detail
-(`right`/`enter`); its Info tab shows `Lifecycle`, `Turn`, `Idle`,
+(`right`); its Info tab shows `Lifecycle`, `Turn`, `Idle`,
 `Last outcome` and `Last runtime` (the runtime that produced the last
 outcome, which after a failover is not the runtime the Keeper is assigned),
 read from
@@ -1088,7 +1149,7 @@ Verifier history is therefore not hidden behind a busier Librarian window.
 
 ### Keeper detail
 
-Right or `Enter` from the Keeper list or Lanes. Live context comes from the
+Right from the Keeper list, or Right or `Enter` from Lanes. Live context comes from the
 newest trace-matched TurnRecord; missing, malformed, unreadable, usage-less,
 and prior-trace observations stay distinct unavailable states rather than
 collapsing to zero.
@@ -1311,7 +1372,8 @@ What the transcript draws for a live, an observed and a settled turn is the
 table under the same diagram in
 [`diagrams/tui-chat-pane-anatomy.html`](diagrams/tui-chat-pane-anatomy.html).
 
-`c` (or `m`) from the roster or detail. Sends to the keeper over
+`c` (or `m`, except while the roster's Story window is open) from the roster or
+detail. Sends to the keeper over
 `POST /api/v1/keepers/chat/stream` with a durable UUIDv7 request ID. The send
 runs in the background, so refresh and navigation stay responsive while the
 turn runs. `Esc` returns to the roster when chat opened there, and to detail
@@ -2942,8 +3004,9 @@ Per surface:
 | `j` / `k` | Keeper detail, logs, Planning detail, Fusion detail | Scroll content |
 | `j` / `k` | Board read | Scroll the focused post body or comments |
 | `b` | Board read | Switch focus between the post body and comments |
-| Right / `Enter` | Keepers | Open keeper detail |
-| Mouse click | Keepers | Select a row; click the selected row again to open its detail |
+| `Right` | Keepers | Open keeper detail |
+| `Enter` | Keepers | Open the Story window under the list; on its story page, close it |
+| Mouse click | Keepers | Select a row; click the selected row to open the Story window, and click it again to open the detail |
 | Right / `Enter` | Lanes | Open the selected Lane's management surface |
 | `d` / `i` | Lanes overview | Read full selected-row observation / inventory diagnostics |
 | `c` / `m` | Lanes | Explain that standalone lanes have no Keeper chat target |
@@ -2977,7 +3040,7 @@ Per surface:
 | `Enter` | Memory | Browse the selected keeper's facts, both stores |
 | `c` | Memory facts | Cycle the category filter through the loaded categories |
 | `Esc` | Memory facts | Close the browser, back to the health table |
-| `c` / `m` | Keeper list or detail | Open message input for the selected keeper |
+| `c` / `m` | Keeper list or detail | Open message input for the selected keeper; `m` is the memory page while the Story window is open |
 | `y` / `n` | Approvals | Confirm / deny the selected request |
 | `n` | Schedules | Create a schedule through the `$EDITOR` JSON form |
 | `e` | Schedules | Modify the selected active schedule atomically |
@@ -3057,7 +3120,7 @@ Tab cycles the surfaces:
 
 Within a surface:
 
-  Keepers   --Right/Enter-->  Keeper detail  --o-->  Keeper logs
+  Keepers   --Right-->  Keeper detail  --o-->  Keeper logs
   Lanes     --Right/Enter-->  Selected Lane management
 
   Keeper list/detail  --c-->  Message input

@@ -230,6 +230,53 @@ sys.exit(int(open(exit_code).read()) if os.path.exists(exit_code) else 0)
                 self.assertIn('configured authentication=', result.stdout)
                 self.assertEqual(receipt.read_text(), str(selected))
 
+    def test_setup_starts_the_official_client_to_check_the_model(self):
+        # Setup checks imp's model in its own process, so it publishes the
+        # single-user access before the check (plan D2-4). Unpublished, the
+        # check of an official client is refused before the client starts.
+        assert BINARY is not None
+        with tempfile.TemporaryDirectory(prefix='masc-setup-official-') as tmp:
+            base = Path(tmp)
+            env = {'PATH': os.environ['PATH'], 'HOME': tmp,
+                   'XDG_CONFIG_HOME': str(base / 'user-config')}
+            def run(*args):
+                return subprocess.run([BINARY, *args, '--base-path', str(base)], env=env, text=True,
+                                      capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
+            initialized = run('init')
+            self.assertEqual(initialized.returncode, 0, initialized.stderr)
+            started = base / 'client-started'
+            client = base / 'claude'
+            client.write_text(
+                f'#!{sys.executable}\n'
+                'import json, sys\n'
+                'if "auth" in sys.argv:\n'
+                ' print(json.dumps(dict(loggedIn=True, authMethod="claude.ai", '
+                'apiProvider="firstParty")))\n'
+                ' sys.exit(0)\n'
+                f'open({str(started)!r}, "w").write("started")\n'
+                'sys.exit(1)\n')
+            client.chmod(0o755)
+            home = base / 'claude-home'
+            home.mkdir(mode=0o700)
+            (base / '.masc/config/runtime.toml').write_text(
+                '[runtime]\ndefault = "official_fixture.official_fixture"\n'
+                '[providers.official_fixture]\n'
+                'display-name = "Official fixture"\n'
+                'protocol = "claude-code"\n'
+                f'command = {json.dumps(str(client))}\n'
+                f'account-home = {json.dumps(str(home))}\n'
+                'is-non-interactive = true\n'
+                '[models.official_fixture]\napi-name = "fixture-model"\n'
+                'max-context = 32768\ntools-support = true\nstreaming = true\n'
+                '[official_fixture.official_fixture]\n')
+            result = run('setup', '--no-tui', '--port', '1')
+            self.assertIn('Model connection: Official fixture / fixture-model', result.stdout,
+                          result.stderr)
+            self.assertTrue(started.exists(), result.stdout + result.stderr)
+            self.assertNotIn('account_not_authorized', result.stderr)
+            # The fixture ends the turn after it starts, so the check fails.
+            self.assertNotEqual(result.returncode, 0)
+
     def test_recorded_workspace_survives_a_different_working_directory(self):
         assert BINARY is not None
         for spelling in ('.', 'workspace', 'workspace-link'):

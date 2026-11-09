@@ -1,9 +1,9 @@
 (** The Overview's Tasks section: which tasks get a row, in what order, and
     what stands in for the ones that do not.
 
-    The section answers "what is moving right now". Work someone holds gets a
-    row each -- [InProgress], then [AwaitingVerification], then [Claimed] --
-    and the [Todo] backlog is one line with its size and its oldest age.
+    Submitted work awaiting a ruling gets a row before work still running:
+    [AwaitingVerification], then [InProgress], then [Claimed]. The [Todo]
+    backlog is one line with its size and its oldest age.
     Pure over its arguments so a test can read it without the renderer. *)
 
 val rows : Masc.Tui_decode.task list -> Masc.Tui_decode.task list
@@ -14,8 +14,9 @@ val rows : Masc.Tui_decode.task list -> Masc.Tui_decode.task list
     use: a poll that drops a finished task shifts every index below it. *)
 
 val work_rows : Masc.Tui_decode.task list -> Masc.Tui_decode.task list
-(** Active held tasks followed by Todo rows, so Work can inspect the whole
-    open backlog. Terminal tasks remain available through direct references. *)
+(** Held tasks in {!rows} order followed by Todo rows, so Work first selects
+    submitted work awaiting a ruling and can inspect the whole open backlog.
+    Terminal tasks remain available through direct references. *)
 
 val work_selected_index :
   Masc.Tui_decode.task list -> selected:string option -> int option

@@ -12,44 +12,13 @@ let normalize_path ?base_dir path =
     else
       path
   in
-  let parts = String.split_on_char '/' abs in
-  let resolved =
-    List.fold_left
-      (fun acc part ->
-        match part with
-        | "" | "." -> acc
-        | ".." -> (
-            match acc with
-            | [] -> []
-            | _ :: rest -> rest)
-        | s -> s :: acc)
-      [] parts
-  in
-  "/" ^ String.concat "/" (List.rev resolved)
-
-(** Split a target path into the deepest existing ancestor and the missing
-    segments below it. This lets us resolve symlinks in the existing prefix
-    while still validating paths that don't exist yet. *)
-let rec split_existing_path path missing =
-  if Sys.file_exists path then
-    (path, missing)
-  else
-    let parent = Filename.dirname path in
-    if parent = path then
-      (path, missing)
-    else
-      split_existing_path parent (Filename.basename path :: missing)
+  Masc_exec.Path_scope.lexical_normalize_abs abs
 
 (** Resolve symlinks in the existing prefix of a path and then append the
     remaining missing path segments lexically. *)
 let resolve_path ?base_dir path =
   let abs = normalize_path ?base_dir path in
-  let existing_prefix, missing_segments = split_existing_path abs [] in
-  let resolved_prefix =
-    try Unix.realpath existing_prefix |> normalize_path with
-    | Unix.Unix_error _ -> normalize_path existing_prefix
-  in
-  List.fold_left Filename.concat resolved_prefix missing_segments |> normalize_path
+  Fs_compat.realpath_lenient abs |> normalize_path
 
 (** Check whether [path] is exactly [dir] or a descendant of [dir]. *)
 let is_within_dir ~dir path =

@@ -640,6 +640,7 @@ type owner_initialization_error =
   | Admin_credential_bootstrap_failed of Masc_domain.masc_error
   | Run_registry_already_installed of
       [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
+  | Account_access_already_published
   | Keeper_persistence_preparation_failed of
       Server_bootstrap_loops.keeper_persistence_prepare_error
   | Keeper_persistence_claim_failed of
@@ -693,6 +694,8 @@ let owner_initialization_error_to_string = function
     "Goal verification run registry already has a process owner"
   | Run_registry_already_installed `Exact_lane ->
     "Exact lane run registry already has a process owner"
+  | Account_access_already_published ->
+    Runtime_account_access.publish_error_to_string Runtime_account_access.Already_published
   | Keeper_persistence_preparation_failed error ->
     "Keeper persistence preparation failed: "
     ^ Server_bootstrap_loops.keeper_persistence_prepare_error_to_string error
@@ -740,6 +743,12 @@ let initialize_owner_state_blocking
       ~fs
       ()
   =
+  (* HIGH-RISK-UNREVIEWED: a CLI starts on an account only by the access the
+     process published (plan D2-3), and the boot judged this one. *)
+  (match Runtime_account_access.publish (Runtime_account_access.Single_user single_user) with
+   | Ok () -> ()
+   | Error Runtime_account_access.Already_published ->
+     raise (Owner_initialization_failed Account_access_already_published));
   let base_path = Authz_boot_mode_read.single_user_base_path single_user in
   (* DET-OK: the optional transport spelling and the required owner BasePath
      denote the same requested path when the former is absent. *)

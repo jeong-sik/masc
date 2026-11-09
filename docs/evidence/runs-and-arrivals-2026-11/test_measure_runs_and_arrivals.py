@@ -45,12 +45,33 @@ def write_run(
     error: str | None = None,
     spacing: float = 1.0,
     hooks: list[str] | None = None,
+    extra: list[JsonObject] | None = None,
 ) -> None:
     folder = base / ".masc" / "keepers" / keeper / "raw-traces"
     folder.mkdir(parents=True, exist_ok=True)
     rows = trace_rows(start, rounds, tools, agent, spacing, hooks or [])
+    rows.extend(extra or [])
     rows.append({"record_type": "run_finished", "ts": end, "error": error})
     folder.joinpath(file).write_text("\n".join(json.dumps(row) for row in rows) + "\n", encoding="utf-8")
+
+
+def projection_row(
+    ts: float, tool: str, listed: list[tuple[int, float]], later: int = 0, text_bytes: int = 200
+) -> JsonObject:
+    """The record the host writes when it appends a block of arrived rows to a tool result."""
+    detail = {
+        "tool": tool,
+        "later": later,
+        "text_bytes": text_bytes,
+        "rows": [{"arrival": arrival, "arrived_at": arrived_at} for arrival, arrived_at in listed],
+    }
+    return {
+        "record_type": "hook_invoked",
+        "ts": ts,
+        "hook_name": "arrived_stimuli_projection",
+        "hook_decision": "appended",
+        "hook_detail": json.dumps(detail),
+    }
 
 
 def ack_row(event_id: str, arrived: float, acked: float, urgency: str, kind: str) -> JsonObject:
@@ -118,6 +139,9 @@ class RunTests(unittest.TestCase):
         runs = obj(measured()["runs"])
         self.assertEqual(runs["runs"], 4)
         self.assertEqual(runs["runs_without_rounds"], 1)
+        self.assertEqual(
+            runs["wall_seconds_of_runs_without_rounds"], {"p50": 100.0, "p90": 100.0, "max": 100.0, "hours": 0.0}
+        )
         self.assertEqual(runs["rounds"], 164)
         self.assertEqual(obj(runs["rounds_per_run_of_runs_with_rounds"])["max"], 150.0)
 
@@ -241,6 +265,160 @@ class ReplayTests(unittest.TestCase):
         self.assertEqual(replay["seconds_to_next_round_max"], 4.0)
         self.assertEqual(replay["seconds_to_next_round_p50"], 4.0)
         self.assertEqual(replay["hours_earlier_than_the_run_end"], round(((5600 - 2504) + (5600 - 5000)) / 3600, 1))
+
+
+class ToolResultReplayTests(unittest.TestCase):
+    def test_a_row_in_a_run_without_rounds_waits_for_the_next_tool_result(self) -> None:
+        start = DAY1 + 1000
+        finished: list[JsonObject] = [
+            {"record_type": "tool_execution_finished", "ts": start + offset} for offset in (300, 100, 200)
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            write_run(base, "alpha", "turn-a1.jsonl", start, start + 400, 0, [], agent=None, extra=finished)
+            write_run(base, "alpha", "turn-a2.jsonl", start + 1000, start + 1100, 3, ["x"], spacing=10.0)
+            arrivals = [
+                ("a", 90),  # next tool result at 100: 10 s, 300 s earlier than the run end
+                ("b", 95),  # 5 s, 300 s earlier
+                ("c", 200),  # a result at the very second of the arrival counts: 0 s, 200 s earlier
+                ("d", 250),  # 50 s, 100 s earlier
+                ("e", 350),  # no tool result is left in the run
+                ("f", 1050),  # inside a run that has rounds: not a row of this replay
+            ]
+            write_acks(
+                base,
+                "alpha",
+                [json.dumps(ack_row(name, start + at, start + 2000, "normal", "board_signal")) for name, at in arrivals],
+            )
+            replay = obj(
+                obj(m.measure(base, None, None, 150, 0.85)["arrivals_during_runs"])["visible_at_next_tool_result"]
+            )
+        self.assertEqual(replay["rows_in_runs_without_rounds"], 5)
+        self.assertEqual(replay["blocked_hours"], round((310 + 305 + 200 + 150 + 50) / 3600, 2))
+        self.assertEqual(replay["rows_after_the_last_tool_result"], 1)
+        self.assertEqual(replay["rows"], 4)
+        self.assertEqual(replay["seconds_to_next_tool_result"], {"p50": 10.0, "p90": 50.0, "max": 50.0})
+        self.assertEqual(replay["hours_earlier_than_the_run_end"], round((300 + 300 + 200 + 100) / 3600, 2))
+
+    def test_a_tool_result_stamped_after_the_run_end_is_not_a_result_of_the_run(self) -> None:
+        start = DAY1 + 1000
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            late: list[JsonObject] = [{"record_type": "tool_execution_finished", "ts": start + 200}]
+            write_run(base, "alpha", "turn-a1.jsonl", start, start + 150, 0, [], agent=None, extra=late)
+            write_acks(base, "alpha", [json.dumps(ack_row("a", start + 120, start + 500, "normal", "board_signal"))])
+            replay = obj(
+                obj(m.measure(base, None, None, 150, 0.85)["arrivals_during_runs"])["visible_at_next_tool_result"]
+            )
+        self.assertEqual(
+            replay,
+            {"rows": 0, "rows_in_runs_without_rounds": 1, "blocked_hours": 0.01, "rows_after_the_last_tool_result": 1},
+        )
+
+    def test_a_window_without_such_rows_says_so(self) -> None:
+        replay = obj(obj(measured()["arrivals_during_runs"])["visible_at_next_tool_result"])
+        self.assertEqual(replay["rows"], 0)
+        self.assertEqual(replay["rows_in_runs_without_rounds"], 0)
+        self.assertEqual(replay["blocked_hours"], 0.0)
+
+
+class ProjectionTests(unittest.TestCase):
+    def test_a_window_with_no_block_says_so(self) -> None:
+        result = measured()
+        self.assertEqual(result["arrived_stimuli_projection"], {"blocks": 0})
+        self.assertEqual(result["unreadable_projection_records"], 0)
+
+    def test_a_row_is_counted_at_the_first_block_that_listed_it(self) -> None:
+        start = DAY1 + 1000
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            write_run(
+                base,
+                "alpha",
+                "turn-a1.jsonl",
+                start,
+                start + 100,
+                0,
+                [],
+                agent=None,
+                extra=[
+                    projection_row(start + 30, "Execute", [(1, start + 10), (2, start + 20)], text_bytes=300),
+                    # Row 2 comes again: the first block never reached the model. Row 3 is new.
+                    projection_row(start + 50, "masc_board_list", [(2, start + 20), (3, start + 40)], later=1, text_bytes=100),
+                ],
+            )
+            result = m.measure(base, None, None, 150, 0.85)
+        shown = obj(result["arrived_stimuli_projection"])
+        self.assertEqual(shown["blocks"], 2)
+        self.assertEqual(shown["runs_with_a_block"], 1)
+        self.assertEqual(shown["rows_shown"], 3)
+        self.assertEqual(shown["blocks_with_rows_left_for_later"], 1)
+        self.assertEqual(shown["blocks_by_tool"], {"Execute": 1, "masc_board_list": 1})
+        self.assertEqual(shown["block_bytes"], {"total": 400, "p50": 300, "p90": 300, "max": 300})
+        # Waits to the first block: row 1 20 s, row 2 10 s, row 3 10 s.
+        self.assertEqual(shown["seconds_to_first_block"], {"p50": 10.0, "p90": 20.0, "max": 20.0})
+        # The same rows would have waited to the run end: 90 s, 80 s, 60 s.
+        self.assertEqual(shown["seconds_to_run_end_of_the_same_rows"], {"p50": 80.0, "p90": 90.0, "max": 90.0})
+        self.assertEqual(shown["hours_earlier_than_the_run_end"], round((70 + 70 + 50) / 3600, 2))
+
+    def test_each_day_counts_its_blocks_and_the_rows_it_showed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            for day, name in ((DAY1, "turn-a1.jsonl"), (DAY2, "turn-a2.jsonl")):
+                write_run(
+                    base,
+                    "alpha",
+                    name,
+                    day + 100,
+                    day + 400,
+                    0,
+                    [],
+                    agent=None,
+                    extra=[projection_row(day + 200, "Execute", [(1, day + 150)])],
+                )
+            by_day = cast(
+                "list[JsonObject]", obj(m.measure(base, None, None, 150, 0.85)["arrived_stimuli_projection"])["by_day"]
+            )
+        self.assertEqual([row["day"] for row in by_day], ["2026-11-01", "2026-11-02"])
+        self.assertEqual([row["blocks"] for row in by_day], [1, 1])
+        self.assertEqual([row["rows_shown"] for row in by_day], [1, 1])
+        self.assertEqual([row["hours_earlier_than_the_run_end"] for row in by_day], [round(200 / 3600, 2)] * 2)
+
+    def test_a_row_belongs_to_the_day_it_was_shown_not_the_day_it_arrived(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            write_run(
+                base,
+                "alpha",
+                "turn-a1.jsonl",
+                DAY1 + 86_000,
+                DAY2 + 500,
+                0,
+                [],
+                agent=None,
+                extra=[projection_row(DAY2 + 100, "Execute", [(1, DAY1 + 86_300)])],
+            )
+            by_day = cast(
+                "list[JsonObject]", obj(m.measure(base, None, None, 150, 0.85)["arrived_stimuli_projection"])["by_day"]
+            )
+        self.assertEqual([(row["day"], row["blocks"], row["rows_shown"]) for row in by_day], [("2026-11-02", 1, 1)])
+
+    def test_a_record_the_host_does_not_write_is_reported_and_not_counted(self) -> None:
+        start = DAY1 + 1000
+        good = projection_row(start + 30, "Execute", [(1, start + 10)])
+        broken: list[JsonObject] = [
+            {**good, "hook_detail": "not json"},
+            {**good, "hook_detail": json.dumps({"tool": "Execute", "later": 0, "text_bytes": 5, "rows": []})},
+            {**good, "hook_detail": json.dumps({"tool": "Execute", "later": 0, "text_bytes": 5, "rows": [{"arrival": 1}]})},
+            {**good, "hook_detail": json.dumps({"tool": "Execute", "later": -1, "text_bytes": 5, "rows": [{"arrival": 1, "arrived_at": start}]})},
+            {key: value for key, value in good.items() if key != "hook_detail"},
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            base = pathlib.Path(directory)
+            write_run(base, "alpha", "turn-a1.jsonl", start, start + 100, 0, [], agent=None, extra=[good, *broken])
+            result = m.measure(base, None, None, 150, 0.85)
+        self.assertEqual(result["unreadable_projection_records"], 5)
+        self.assertEqual(obj(result["arrived_stimuli_projection"])["blocks"], 1)
 
 
 SVG = "{http://www.w3.org/2000/svg}"

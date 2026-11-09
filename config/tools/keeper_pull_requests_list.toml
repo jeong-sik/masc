@@ -28,7 +28,7 @@ key_constraints = [
   "matched is the rows that fit the filter and shown is the rows returned; limit cuts the rest.",
   "mine needs the server's Keeper list; without it the call fails.",
 ]
-details_markdown = "Rows are grouped under their repository. head_review compares each account's last review commit with head_oid; the verdict and the comments are not read, so a commented or dismissed review counts as reviewed. awaiting_approval is a head with a review while the review decision still waits for an approval; read reviews[].verdict for what the reviews said."
+details_markdown = "Rows are grouped under their repository. head_review compares each account's last review commit with head_oid; the verdict and the comments are not read, so a commented or dismissed review counts as reviewed. awaiting_approval is a head with a review while the review decision still waits for an approval; read reviews.latest[].verdict for what the reviews said. When reviews.state is \"not_read\" there is no latest list."
 examples = ["placement='unreviewed_on_head' limit=10", "repository='jeong-sik/masc' placement='checks_failing'", "mine=true placement='all'"]
 
 [[params]]

@@ -251,6 +251,134 @@ let test_a_block_lists_a_row_in_one_round_after_the_answer () =
   Alcotest.(check (option string)) "round 3 has nothing new" None (block [ first; second ])
 ;;
 
+(* [claim] is for results an official client runs side by side: the second one
+   is asked for before the first one's response was written. *)
+let claim_of tracker ~now rows =
+  Arrived.claim
+    tracker
+    ~now
+    ~read:(fun () -> Ok rows)
+    ~on_unavailable:(fun reason -> Alcotest.fail reason)
+;;
+
+let listed_claim = function
+  | Some (claim : Arrived.claim) -> claim
+  | None -> Alcotest.fail "a claim was expected"
+;;
+
+let test_a_claim_counts_only_the_rows_it_listed () =
+  let tracker = Arrived.create_tracker ~run_started_at in
+  let first = selection ~arrival:1L ~arrived_at:1001. "first" in
+  let second = selection ~arrival:2L ~arrived_at:1002. "second" in
+  let early = listed_claim (claim_of tracker ~now:1003. [ first ]) in
+  let late = listed_claim (claim_of tracker ~now:1004. [ first; second ]) in
+  Alcotest.check int64_list "the first claim" [ 1L ] (arrivals early.round);
+  Alcotest.check int64_list "the second claim lists the row again: nothing was written yet" [ 1L; 2L ] (arrivals late.round);
+  early.confirm ();
+  Alcotest.check
+    int64_list
+    "the first claim's write counted its own row only"
+    [ 2L ]
+    (arrivals (listed_claim (claim_of tracker ~now:1005. [ first; second ])).round);
+  late.confirm ();
+  Alcotest.(check bool)
+    "both written, nothing is left"
+    true
+    (Option.is_none (claim_of tracker ~now:1006. [ first; second ]))
+;;
+
+let test_a_claim_that_is_not_confirmed_lists_its_rows_again () =
+  let tracker = Arrived.create_tracker ~run_started_at in
+  let row = selection ~arrival:1L ~arrived_at:1001. "row" in
+  let lost = listed_claim (claim_of tracker ~now:1002. [ row ]) in
+  ignore lost.confirm;
+  Alcotest.check
+    int64_list
+    "a response that never reached the client lists the row on the next result"
+    [ 1L ]
+    (arrivals (listed_claim (claim_of tracker ~now:1003. [ row ])).round)
+;;
+
+let test_a_claim_is_not_counted_by_the_trackers_own_confirm () =
+  let tracker = Arrived.create_tracker ~run_started_at in
+  let row = selection ~arrival:1L ~arrived_at:1001. "row" in
+  ignore (listed_claim (claim_of tracker ~now:1002. [ row ]));
+  Arrived.confirm tracker;
+  Alcotest.check
+    int64_list
+    "only the claim's own confirm counts its row"
+    [ 1L ]
+    (arrivals (listed_claim (claim_of tracker ~now:1003. [ row ])).round)
+;;
+
+let test_a_claim_text_is_the_block_of_its_round () =
+  let tracker = Arrived.create_tracker ~run_started_at in
+  let claim =
+    listed_claim (claim_of tracker ~now:1060. [ selection ~arrival:1L ~arrived_at:1001. "row" ])
+  in
+  Alcotest.(check (option string))
+    "the text is what render writes for the claim's round"
+    (Arrived.render ~now:1060. claim.round)
+    (Some claim.text)
+;;
+
+let test_an_unreadable_queue_gives_no_claim_and_loses_no_row () =
+  let tracker = Arrived.create_tracker ~run_started_at in
+  let reasons = ref [] in
+  let row = selection ~arrival:1L ~arrived_at:1001. "row" in
+  Alcotest.(check bool)
+    "no claim"
+    true
+    (Option.is_none
+       (Arrived.claim
+          tracker
+          ~now:1060.
+          ~read:(fun () -> Error "queue file locked")
+          ~on_unavailable:(fun reason -> reasons := reason :: !reasons)));
+  Alcotest.(check (list string)) "the reason is reported once" [ "queue file locked" ] !reasons;
+  Alcotest.check
+    int64_list
+    "the next readable result lists the row"
+    [ 1L ]
+    (arrivals (listed_claim (claim_of tracker ~now:1061. [ row ])).round)
+;;
+
+let test_a_claim_postpones_rows_past_the_limit_and_loses_none () =
+  let tracker = Arrived.create_tracker ~run_started_at in
+  let total = Arrived.max_rows_per_round + 3 in
+  let rows =
+    List.init total (fun index ->
+      selection
+        ~arrival:(Int64.of_int (index + 1))
+        ~arrived_at:(1001. +. float_of_int index)
+        (Printf.sprintf "row-%d" index))
+  in
+  let first = listed_claim (claim_of tracker ~now:1100. rows) in
+  Alcotest.(check int) "the first claim lists the limit" Arrived.max_rows_per_round (List.length first.round.listed);
+  Alcotest.(check int) "and counts the rest" 3 first.round.later;
+  first.confirm ();
+  let second = listed_claim (claim_of tracker ~now:1101. rows) in
+  Alcotest.check
+    int64_list
+    "the rows past the limit are listed by the next claim"
+    [ 9L; 10L; 11L ]
+    (arrivals second.round);
+  second.confirm ();
+  Alcotest.(check bool) "then nothing is left" true (Option.is_none (claim_of tracker ~now:1102. rows))
+;;
+
+let test_a_claim_needs_a_new_row () =
+  let tracker = Arrived.create_tracker ~run_started_at in
+  Alcotest.(check bool)
+    "an empty queue gives no claim"
+    true
+    (Option.is_none (claim_of tracker ~now:1060. []));
+  Alcotest.(check bool)
+    "a row from before the run gives no claim"
+    true
+    (Option.is_none (claim_of tracker ~now:1060. [ selection ~arrival:1L ~arrived_at:999. "old" ]))
+;;
+
 let () =
   Alcotest.run
     "keeper_arrived_stimuli"
@@ -272,6 +400,15 @@ let () =
     ; ( "block"
       , [ Alcotest.test_case "unreadable queue" `Quick test_an_unreadable_queue_gives_no_block_and_loses_no_row
         ; Alcotest.test_case "one round per row" `Quick test_a_block_lists_a_row_in_one_round_after_the_answer
+        ] )
+    ; ( "claim"
+      , [ Alcotest.test_case "counts only its rows" `Quick test_a_claim_counts_only_the_rows_it_listed
+        ; Alcotest.test_case "unconfirmed lists again" `Quick test_a_claim_that_is_not_confirmed_lists_its_rows_again
+        ; Alcotest.test_case "tracker confirm ignores it" `Quick test_a_claim_is_not_counted_by_the_trackers_own_confirm
+        ; Alcotest.test_case "text is the round's block" `Quick test_a_claim_text_is_the_block_of_its_round
+        ; Alcotest.test_case "unreadable queue" `Quick test_an_unreadable_queue_gives_no_claim_and_loses_no_row
+        ; Alcotest.test_case "limit loses no row" `Quick test_a_claim_postpones_rows_past_the_limit_and_loses_none
+        ; Alcotest.test_case "needs a new row" `Quick test_a_claim_needs_a_new_row
         ] )
     ]
 ;;

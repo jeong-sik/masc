@@ -9159,8 +9159,8 @@ let composable_output_probes =
     ; needs_sandbox = false
     ; prepare =
         (fun ~config ~meta:_ ->
-           (* Same reason as the goal probe: the run item's task_id, plan and
-              timestamps are only reachable through a non-empty [runs]. *)
+           (* Same reason as the goal probe: the run item's task_id, plan_bytes
+              and timestamps are only reachable through a non-empty [runs]. *)
            let stamp = "2026-01-01T00:00:00Z" in
            (match Masc.Run_eio.write_run
              config

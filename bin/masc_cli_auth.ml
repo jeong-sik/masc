@@ -170,6 +170,15 @@ let serve_preview ~base_path ~store ~port github =
           (fun error -> "the authorization zone is not opened: " ^ Authz_zone.open_error_to_string error)
           (Authz_zone.open_at_start ~now_ms ~log_path ~store_path:store)
       in
+      (* A login check and a verification start an official client only on a
+         home of the person who asked (plan D2-4). *)
+      let* () =
+        Result.map_error
+          Runtime_account_access.publish_error_to_string
+          (Runtime_account_access.publish
+             (Runtime_account_access.Multi_account
+                { zone; base_path; now = (fun () -> Eio.Time.now clock) }))
+      in
       let* trust_policy =
         Result.map_error
           Server_request_authority.trust_policy_error_to_string
@@ -192,7 +201,7 @@ let serve_preview ~base_path ~store ~port github =
       let router =
         Masc.Http_server_eio.Router.create ()
         |> Server_login_http.add_routes routes
-        |> Server_login_http.add_preview_routes routes ~base_path
+        |> Server_login_http.add_preview_routes routes ~env ~base_path
       in
       let address = `Tcp (Eio.Net.Ipaddr.V4.loopback, port) in
       match Eio.Net.listen (Eio.Stdenv.net env) ~sw ~reuse_addr:true ~backlog:preview_backlog address with
@@ -202,9 +211,9 @@ let serve_preview ~base_path ~store ~port github =
         let base_url = Printf.sprintf "http://%s:%d" preview_host port in
         Printf.printf
           "The multi-account preview listens on %s. Open %s/ in a browser, or the link of \
-           masc auth invite made with MASC_HTTP_BASE_URL=%s. It serves the login routes \
-           and the connection of a person's own subscription, no Keeper or Runtime. Stop it \
-           with Ctrl-C.\n%!"
+           masc auth invite made with MASC_HTTP_BASE_URL=%s. It serves the login routes, \
+           the connection of a person's own subscription, and their Keepers, whose turns run \
+           on that subscription. Stop it with Ctrl-C.\n%!"
           base_url
           base_url
           base_url;

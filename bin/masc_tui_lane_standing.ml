@@ -12,14 +12,15 @@ let mark = function
   | Off | Not_set_up -> "○"
   | Unobserved -> "?"
 
-let word = function
-  | Ready -> "ready"
-  | Waiting -> "waiting"
-  | Changing -> "changing"
-  | Failing -> "failing"
-  | Off -> "off"
-  | Not_set_up -> "not set up"
-  | Unobserved -> "unknown"
+let word ?(korean = false) standing =
+  match standing with
+  | Ready -> if korean then "사용 가능" else "ready"
+  | Waiting -> if korean then "대기" else "waiting"
+  | Changing -> if korean then "전환 중" else "changing"
+  | Failing -> if korean then "실패" else "failing"
+  | Off -> if korean then "꺼짐" else "off"
+  | Not_set_up -> if korean then "미설정" else "not set up"
+  | Unobserved -> if korean then "미관측" else "unknown"
 
 let status : t -> Masc_tui_theme.status = function
   | Ready -> Ok
@@ -37,9 +38,12 @@ let recedes = function
   | Off | Not_set_up | Unobserved -> true
   | Ready | Waiting | Changing | Failing -> false
 
-let count_items standings =
+let count_items ?(korean = false) standings =
   List.filter_map (fun standing ->
       match List.length (List.filter (( = ) standing) standings) with
       | 0 -> None
-      | count -> Some (Printf.sprintf "%d %s" count (word standing)))
+      | count ->
+          Some
+            (if korean then Printf.sprintf "%s %d" (word ~korean standing) count
+             else Printf.sprintf "%d %s" count (word standing)))
     all

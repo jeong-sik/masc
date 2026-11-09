@@ -586,12 +586,39 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - Keeper 턴의 `auth_binding`은 그 Keeper 기록이다. 기록이 있고 그 주인이 initiator일 때만 `Active`다.
   - verify는 Runtime 기록 전에 모델을 부르므로 `Stored_grant`가 없다. 설계 §6.1의 `Authorization_basis`에 "자기 구독 계정 확인" 근거를 하나 더한다.
 - 왜: A3 판정은 요청(세션, PAT)을 위해 설계됐다. 자율 턴, Board 턴, 예약 턴에는 정책, binding, Self 효과가 비어 있었다. 빈칸을 코드 기본값으로 채우면 휴리스틱이 된다. 그래서 빈칸을 모두 로그의 데이터로 채운다.
+- 근본 원인(2026-11-09 사용자 요청 "근본 작업 개선은?"). 실행 테이블이 자격 증명을 나눠 준다. `Runtime.get_runtime_by_id`가 돌려주는 `Runtime_instance.t`의 `execution.account_home`에는 부팅 때 잡은(capture) 계정 홈과 그 환경이 들어 있다. id 문자열만 알면 어떤 코드든 그 계정으로 공식 CLI를 띄운다. 이 필드를 읽어 CLI를 띄우는 곳이 `run_turn` 8곳과 그 밖의 조회 10곳쯤이다. 증명을 호출처마다 나르는 것은 N-of-M 패치다.
+- 설계(2026-11-09 사용자 승인).
+  - `Runtime_account_access` 모듈 하나가 봉인, 인가, 권한 게시를 맡는다. 클라이언트보다 아래 층(lib/runtime)에 있어서 Codex와 Claude Code 클라이언트가 그 타입을 받는다. `Runtime_authority`라는 이름은 쓰지 않는다. `Sse.runtime_authority`가 이미 작업 공간 경로의 신원이라는 다른 뜻으로 쓰인다.
+  - 테이블은 봉인된 계정(`'client sealed`)만 든다. 봉인된 값은 환경을 내주지 않는다. 홈 경로는 식별(quota 창, 다시 읽기 비교)에만 읽는다.
+  - 인가된 계정(`'client authorized`)은 `authorize`만 만든다. 생성자를 공개하지 않는다. 근거(`basis`: `Stored_grant of Grant_id.t`, `Single_user_operator`, `Own_account_check of Provider_account_id.t`)는 아직 두지 않는다. 읽는 곳이 없다. 근거를 lease record에 적는 E1에서 더한다.
+  - 프로세스 권한은 한 번 게시한다(`publish`). 모드는 부팅 때 정해지고 바뀌지 않는다(설계 §6.1). 서버와 stdio 서버는 owner state를 열 때(`initialize_owner_state_blocking`) 부팅 판정의 `single_user`를 게시한다. 두 서버가 판정을 넘기는 곳이 여기 하나다. CLI는 자기 호출처를 바꾸는 층(D2-4~D2-6)에서 `tool` 판정 뒤에 게시한다(`publish_host_tool`). 미리보기는 구역을 연 뒤 구역과 base path를 게시한다(D2-4). 두 번째 게시는 거절한다. 게시 전의 `authorize`는 거절한다. `Runtime.init_default`가 게시를 맡지 않는 까닭은 시험 호출 247곳(108파일)과 설정만 읽는 CLI까지 판정을 요구하게 되기 때문이다.
+  - host CLI(bin)는 서버처럼 로그를 열면 안 된다. 서버가 쓰는 중인 로그의 끝나지 않은 줄을 자르기 때문이다. 그래서 CLI의 판정(`Authz_boot_mode_read.tool`)은 파일이 있는지만 본다. 로그, 설치 기록, 외부 저장소 중 하나라도 있으면 거절한다. 없을 때만 같은 판정 규칙에 "로그 없음, 저장소 없음"을 넣어 묻는다.
+  - 단일 사용자의 `authorize`는 요청을 가리지 않고 봉인된 계정을 그대로 준다. 지금 동작과 같다.
+  - 다계정의 `authorize`는 요청(`request`)에 따라 판정한다. 요청은 `Keeper_turn {keeper_name; channel; runtime_id}`, `Own_account {user_id; provider_account_id}`, `Operator_call`이다. Keeper 턴은 `Authz_keeper_turn.decide`가 정하고, 배정된 Runtime이 아니면 거절한다. 자기 계정은 로그에 활성 principal과 membership이 있어야 한다. 둘 다 CLI를 띄울 홈을 그 사람(Keeper 턴이면 주인)의 namespace와 구독 계정 id로 만든 홈과 철자까지 비교한다. 선언된 홈이 아니면(상속된 홈은 프로세스 환경의 자격 증명을 든다) 거절한다. 홈 경로는 `Runtime_account_home_layout` 하나가 만들고 login·verify·authorize가 같이 쓴다. Claude는 keychain 항목을 그 경로 철자로 가른다. 그 밖의 목적(Fusion, capability probe, dashboard probe, librarian, vision)은 `Operator_call`이고 다계정에서 거절한다. D5·S1이 연다.
+  - 자기 계정 확인은 로그의 구독 계정 기록을 요구하지 않는다. 로그인 확인(`observe`)은 계정을 로그에 연결(`link`)하기 전에 돌기 때문이다. 홈이 그 사람의 namespace 아래 있으면 그 사람 것이다. namespace는 한 사람에게만 주어진다.
+  - CLI를 띄우는 클라이언트 함수(Claude Code `run_turn`·`probe_subscription`, Codex `run_turn`·`validate_turn`·`probe_subscription`·`list_models`·`read_rate_limits`·`delete_threads`)가 모두 `authorized`를 받는다. client `config`에는 계정 칸이 없다. login은 계정을 만드는 흐름이라 따로 둔다(`login_environment`).
 - 층.
   - D2-0 기록. Runtime 본문에 `self_effects`를, Keeper 본문에 `policy_id`와 `turn_scope`를 더한다. 두 본문은 미리보기에서만 쓰였으므로 hard cut이다. 미리보기 Keeper는 `autonomous`와 `direct` 채널을 허용하는 정책으로 만든다. Runtime과 효과는 배정과 Self grant가 제한한다.
   - D2-1 adapter. 한 snapshot에서 Keeper 턴의 `facts`를 만든다. 배정이 없으면 `NoAuthorizedRuntime`이다. 1단계에는 Runtime과 ProviderAccount의 상태 기록이 없어서 둘 다 `Active`다. 회수는 구역의 게이트 값(`revocation_pending`)이다. 의존은 `Cleared`다. 1단계에는 복원 창이 없고(F2는 2단계), A2가 복원된 로그를 거절한다.
-  - D2-2 `Authorized_runtime.t`와 `Runtime.authorize`. 모드에 따라 근거를 달리 내는 함수 하나다. `Single_user`는 지금 동작을 그대로 둔다.
-  - D2-3 Codex와 Claude Code의 `run_turn`이 `Authorized_runtime.t`를 요구한다. Fusion, verifier, capability probe는 컴파일러가 모아 같이 바꾼다.
-  - D2-4 Keeper 턴 드라이버가 시도마다 인가를 받는다.
+  - D2-2 CLI 판정 `Authz_boot_mode_read.tool`.
+  - D2-3 `Runtime_account_access`(봉인, 인가, 게시)와 게시 지점(owner state). 단일 사용자만 연다.
+  - D2-4 다계정 인가(Keeper 턴, 자기 계정)와 홈 경로 하나(`Runtime_account_home_layout`). 미리보기가 `Multi_account`를 게시한다. 로그인 확인과 verify가 요청을 넘긴다(단일 사용자 setup은 `Operator_call`, 사람은 `Own_account`). `runtime-verify`와 setup의 모델 확인은 검증을 시작하는 함수(`verify_runtime_execution`) 한 곳에서 `tool` 판정 뒤 게시한다. 처음에는 `runtime-verify`만 게시해서 setup의 확인이 공식 CLI 런타임에서 늘 `Not_published`로 끝났다(#50421 리뷰). 클라이언트가 아직 config로 계정을 받으므로 인가된 계정을 그 칸에 넣는다(D2-5·D2-6에서 지운다). 2026-11-09 순서를 바꿨다. 클라이언트를 먼저 바꾸면 미리보기가 게시하지 않아 사람의 로그인 확인과 verify가 중간 층에서 멈춘다.
+  - D2-5 Claude Code 클라이언트가 `authorized`를 받는다. 호출처(Keeper 갈래, Fusion, capability probe, verify, dashboard probe, CLI probe, login)를 같이 바꾼다. Keeper 턴 드라이버는 시도마다 인가를 받는다.
+    - client `config`에 계정 칸이 없다. CLI를 띄우는 함수(`run_turn`, `probe_subscription`)가 인가된 계정을 받고, 환경은 그 값에서만 나온다. 부를 때 환경을 고르던 선택은 Claude Code에 없다. login은 `login_environment ~account_home`으로 홈을 받는다.
+    - 드라이버의 `walk_owner`가 누구의 턴인지 든다. `Fleet_keeper_turn {keeper_name; channel}`은 `Keeper_turn`, `One_shot_walk`(완료 리뷰 등)는 `Operator_call`로 묻는다. 실패 표시의 recorder는 Keeper 이름에서 만든다(`keeper_recorder`). 같은 값을 두 번 들지 않는다.
+    - 채널은 `Turn_record.turn_kind`에서 온다. Keeper에게 온 메시지(`handle_keeper_msg`)는 `Direct`, 나머지 턴은 `Autonomous`다. 런타임이 그 밖의 종류를 가르지 않는다.
+    - 드라이버가 거절하면 그 시도는 `Agent_core.Error.Config (InvalidConfig {field = "account"})`로 끝난다. `provider_config_transform` 거절과 같은 모양이다. 분류는 `Config_mismatch`라서 다른 후보로 넘기지 않고, 공급자 증거(실패 표시, 계정 거절)를 남기지 않는다. 다계정에서는 배정된 Runtime 하나만 허용되므로 넘겨도 다른 후보는 거절된다.
+    - Fusion 패널, capability probe, dashboard probe, `masc runtime-probe`는 `Operator_call`이다. 거절은 각자 이미 있는 "프로세스를 띄우지 않음" 결과로 낸다(Fusion `Setup_failure`, capability probe `Account_not_authorized`, `runtime-probe`는 `account-not-authorized`와 종료 코드 5). dashboard probe의 로그인 상태는 대시보드가 닫힌 목록으로 읽으므로 `invalid_config`에 거절 이유를 붙인다. 단일 사용자 서버는 owner state를 열 때 게시하고 모든 요청을 허용하므로 거기서는 거절이 나오지 않는다.
+    - 서버 밖에서 CLI를 띄우는 bin은 base path를 정한 뒤 `publish_host_tool`로 게시한다: `masc runtime-probe`, `masc-fusion-run`, `masc-lane-cli-probe`, `masc-keeper-capability-probe`, `masc-librarian-continuity`. 시험 실행 파일은 `Masc_test_deps.publish_single_user_access`로 게시한다.
+  - D2-6 Codex 클라이언트가 같은 일을 한다.
+  - D2-7 테이블이 봉인을 든다(`Runtime_execution`). 호출처는 테이블의 자격 증명을 더 꺼내지 못한다.
+  - D2-8 미리보기 "내 Keeper 한 번 돌리기". 사람이 브라우저로 확인한다. 2026-11-09 D2-6·D2-7보다 먼저 했다. Claude Code는 D2-5부터 인가된 계정으로만 뜨므로, Codex를 기다리지 않고 사람의 구독으로 Keeper 턴이 도는지 먼저 확인할 수 있다.
+    - 라우트는 `POST /api/v1/auth/keepers/turn`이다. 본문은 `{"keeper_id","message"}`이고 메시지는 4096바이트까지다. 게이트는 `Manage_own_keeper`에 membership을 더한다(`Auth_preview.keeper_owner_person`). 턴이 그 사람 namespace 아래 홈에서 CLI를 띄우기 때문이다.
+    - 라우트는 기록만 읽는다. Keeper 기록이 Runtime을, Runtime 기록이 계정을 정한다. 런타임은 그 계정의 login receipt가 이름 붙인 workspace provider에 그 계정 홈과 binding 하나를 얹은 것이다(`Server_setup_account_login.person_runtime`). binding은 이 계정에서 만드는 Runtime id가 Keeper 기록의 id와 같은 것이다(`Runtime_account_runtime.Runtime`). id를 자르지 않고 binding마다 만든 id와 통째로 비교한다.
+    - 판정은 `authorize (Keeper_turn {channel = Direct; ...})` 하나다. 로그로 판정하고, 인가된 계정만 CLI를 띄운다. 남의 Keeper는 다른 Keeper 라우트처럼 404다.
+    - 한 계정에서는 한 호출만 돈다(`Server_setup_account_login.one_call_of`). verify와 턴이 같은 잠금을 쓴다. 한 홈의 자격 증명을 두 CLI가 동시에 갱신하지 않게 하기 위해서다. 다른 계정의 호출은 기다리지 않는다.
+    - CLI는 `default_config`의 자세로 뜬다. 내장 도구는 deferred tool 조회(`--tools ToolSearch`)뿐이고 MASC의 MCP 서버는 없다. 턴은 로그에 기록을 남기지 않는다. Claude Code Runtime만 돌고, Codex는 D2-6 뒤에 연다.
+  - 하지 않는 것: 다계정 Keeper 턴의 후보를 로그의 배정에서 고르는 드라이버 쪽 일(S1 전), Antigravity·Muse(D3), API provider(D4).
 
 **D6 범위**
 

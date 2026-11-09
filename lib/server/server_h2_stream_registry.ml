@@ -1,7 +1,5 @@
 (** See [server_h2_stream_registry.mli]. *)
 
-exception Peer_reset_stream
-
 type scope =
   | Admitted
   | Running of Eio.Switch.t
@@ -32,7 +30,7 @@ let run_scope entry reqd work =
     entry.scope <- Running stream_sw;
     (try work stream_sw with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | exn -> H2.Reqd.report_exn reqd exn);
+     | exn -> Http_h2_stream.reset ~stream_sw reqd (Http_h2_stream.Raised exn));
     Eio.Promise.await entry.response_ended)
 ;;
 
@@ -51,21 +49,28 @@ let dispatch t ~sw ~stream_id reqd work =
         then (
           match run_scope entry reqd work with
           | () -> ()
-          | exception Peer_reset_stream -> ()
+          | exception Http_h2_stream.Stream_reset _ -> ()
           | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
-          | exception exn -> H2.Reqd.report_exn reqd exn));
+          (* A fiber forked on the stream switch raised. The switch has
+             finished, so only the report is left. *)
+          | exception exn -> Http_h2_stream.report reqd exn));
     `Stop_daemon)
 ;;
 
-let peer_reset t ~stream_id =
+(* A reset on either side leaves no response to wait for. The entry goes at
+   once; a fiber that has not opened its scope yet then skips the work. *)
+let end_stream t ~stream_id cause =
   match Hashtbl.find_opt t stream_id with
   | None -> ()
   | Some entry ->
     Hashtbl.remove t stream_id;
     (match entry.scope with
      | Admitted -> ()
-     | Running stream_sw -> Eio.Switch.fail stream_sw Peer_reset_stream)
+     | Running stream_sw -> Http_h2_stream.end_scope stream_sw cause)
 ;;
+
+let peer_reset t ~stream_id = end_stream t ~stream_id Http_h2_stream.Reset_by_peer
+let reset_sent t ~stream_id = end_stream t ~stream_id Http_h2_stream.Reset_by_us
 
 let response_ended t ~stream_id =
   match Hashtbl.find_opt t stream_id with

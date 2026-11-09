@@ -47,7 +47,6 @@ let install_agent_core_tool_guidance () =
     ; Prompt_names.agent_core_unknown_tool_not_bare
     ; Prompt_names.agent_core_handoff_description
     ; Prompt_names.agent_core_handoff_prompt_param_description
-    ; Prompt_names.agent_core_agent_tool_prompt_param_description
     ]
   in
   let missing =
@@ -119,12 +118,6 @@ let install_agent_core_tool_guidance () =
               Prompt_names.agent_core_handoff_prompt_param_description
               []
               ~fallback:(defaults.handoff_prompt_param_description ()))
-      ; agent_tool_prompt_param_description =
-          (fun () ->
-            render
-              Prompt_names.agent_core_agent_tool_prompt_param_description
-              []
-              ~fallback:(defaults.agent_tool_prompt_param_description ()))
       })
 ;;
 

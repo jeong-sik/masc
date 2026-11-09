@@ -121,3 +121,34 @@ let block tracker ~now ~read ~on_unavailable =
     None
   | Ok selections -> render ~now (next tracker selections)
 ;;
+
+type claim =
+  { round : round
+  ; text : string
+  ; confirm : unit -> unit
+  }
+
+let claim tracker ~now ~read ~on_unavailable =
+  match read () with
+  | Error detail ->
+    on_unavailable detail;
+    None
+  | Ok selections ->
+    let round =
+      next_round
+        ~run_started_at:tracker.run_started_at
+        ~shown:tracker.listed_for_good
+        selections
+    in
+    Option.map
+      (fun text ->
+         { round
+         ; text
+         ; confirm =
+             (fun () ->
+               tracker.listed_for_good
+               <- List.map (fun (row : row) -> row.arrival) round.listed
+                  @ tracker.listed_for_good)
+         })
+      (render ~now round)
+;;

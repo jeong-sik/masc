@@ -195,6 +195,12 @@ val first_due_after : now:float -> recurrence -> float option
 (** Compute the first due time for calendar recurrences that do not need an
     explicit [due_at] anchor. Returns [None] for [One_shot] and [Interval]. *)
 
+val next_periodic_due_after : period:float -> now:float -> anchor:float -> float option
+(** The first time on [anchor + k * period] after [now] for a whole [k]:
+    [anchor] itself while it is after [now], [None] when [period <= 0].
+    {!next_due_after} steps an [Interval] with it from the request's
+    [due_at]. *)
+
 val next_due_after : now:float -> schedule_request -> float option
 val reschedule_after_due_signal : now:float -> schedule_request -> schedule_request option
 
@@ -225,6 +231,11 @@ val wake_status_to_string : wake_status -> string
 
 val actor_to_yojson : actor -> Yojson.Safe.t
 val recurrence_to_yojson : recurrence -> Yojson.Safe.t
+val recurrence_of_yojson : Yojson.Safe.t -> (recurrence, string) result
+(** Reads the shape {!recurrence_to_yojson} writes and checks it with
+    {!validate_recurrence}. The TUI reads a schedule row's recurrence with it,
+    so the store and the screen agree on what a recurrence is. *)
+
 val wake_record_to_yojson : wake_record -> Yojson.Safe.t
 val wake_record_of_yojson :
   Yojson.Safe.t -> (wake_record, string) result

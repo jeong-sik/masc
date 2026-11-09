@@ -104,3 +104,19 @@ val boot
   -> config_dir:string option
   -> anonymous_mutations:bool
   -> (single_user, string * string list) result
+
+(** A base path that a host tool may run turns on as its single user, judged
+    without opening a file (plan D2-2). A tool runs while a server may be
+    writing the authorization log, and opening the log cuts a last line that
+    never ended ({!Authz_log.open_at_start}), so a tool opens neither the log
+    nor the external store. A base path that has the log, or an install record
+    that names it, is refused whatever its mode: from presence alone a tool
+    does not tell a log turned back to [Off] from one in use. A config
+    directory that fails its owner test is refused too, as by {!boot}.
+    Otherwise [config.json] is judged by {!Authz_boot_mode.judge} with no mode
+    event and no store, so the tool runs a single user unless the config asks
+    for [Multi_account] or a mode it does not know. *)
+val tool
+  :  base_path:string
+  -> config_dir:string option
+  -> (single_user, string * string list) result

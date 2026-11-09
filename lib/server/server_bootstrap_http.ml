@@ -305,6 +305,8 @@ let serve_h2_connection
     Server_h2_frame_tap.wrap
       ~on_peer_reset:(fun stream_id ->
         Server_h2_stream_registry.peer_reset streams ~stream_id)
+      ~on_reset_sent:(fun stream_id ->
+        Server_h2_stream_registry.reset_sent streams ~stream_id)
       ~on_response_end:(fun stream_id ->
         Server_h2_stream_registry.response_ended streams ~stream_id)
       flow
@@ -331,8 +333,9 @@ let serve_h2_connection
                         h2_request_handler ~request_sw:stream_sw addr reqd)
                     with
                     | Eio.Cancel.Cancelled _ as exn -> raise exn
-                    | exn -> H2.Reqd.report_exn reqd exn))
-          | None -> H2.Reqd.report_exn reqd Request_without_header_block)
+                    | exn ->
+                      Http_h2_stream.reset ~stream_sw reqd (Http_h2_stream.Raised exn)))
+          | None -> Http_h2_stream.report reqd Request_without_header_block)
         ~error_handler:h2_error_handler client_addr (Server_h2_frame_tap.socket frames))
 ;;
 

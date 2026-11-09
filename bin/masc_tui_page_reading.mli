@@ -1,7 +1,7 @@
 (** A reading page drawn from [Masc_tui_page_line] lines. A fact's label sits
     receded in a column as wide as the page's longest label, so the values start
-    at one cell; a title is bold, a quiet line is receded and an attention line
-    is warned. A value with a word wider than the room beside its label (a hash,
+    at one cell; a title is bold, a quiet line is receded, an info line is drawn
+    in the info colour and an attention line is warned. A value with a word wider than the room beside its label (a hash,
     a path), or on a screen too narrow to leave it room, goes on the rows under
     the label, so no word is cut at a column in the middle.
 
@@ -25,10 +25,12 @@ val tone_style : Masc_tui_page_line.tone -> string
 (** The style a tone is drawn in. *)
 
 val widest_label_cells : Masc_tui_page_line.t list -> int
-(** The label column of a page: its longest label with the colon after it,
-    capped. A page drawn as several blocks under their own headings passes the
-    widest of its blocks to [rows], so the values of every block start at one
-    cell. *)
+(** The label column of a page: its longest label with the colon after it, among
+    the labels that fit the cap. A label wider than the column goes on a row of
+    its own with its value under it, so one long label does not widen the column
+    of every other row. A page drawn as several blocks under their own headings
+    passes the widest of its blocks to [rows], so the values of every block
+    start at one cell. *)
 
 val rows :
   ?label_cells:int ->

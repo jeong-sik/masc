@@ -17,10 +17,10 @@ let api_provider_to_string = function
   | Foundry -> "foundry" | Mantle -> "mantle"
 
 type account = Runtime_official_account.claude_code Runtime_official_account.selection
+type authorized_account = Runtime_official_account.claude_code Runtime_account_access.authorized
 
 type config =
   { cli_path : string
-  ; account_home : account
   ; cwd : string
   ; model : string option
   ; system_prompt : string option
@@ -42,7 +42,6 @@ let mcp_server_name = "masc"
 
 let default_config ~cwd =
   { cli_path = "claude"
-  ; account_home = Runtime_official_account.Current None
   ; cwd
   ; model = None
   ; system_prompt = None
@@ -560,7 +559,11 @@ let text_value stage fields =
    fail over from. Documented at https://code.claude.com/docs/en/mcp
    ("Configure tool search"). *)
 let client_environment account =
-  selected_account account
+  Runtime_official_account.environment (Runtime_account_access.account account)
+;;
+
+let login_environment ~account_home =
+  selected_account (Runtime_official_account.Current (Some account_home))
   |> Result.map Runtime_official_account.environment
   |> Result.map_error (fun detail -> Invalid_config detail)
 ;;
@@ -646,7 +649,7 @@ let open_stdout_capture ~sw ~cwd =
 
 (* The boolean is true when the CLI exited cleanly but its stdout was not a
    complete JSON document. *)
-let probe_auth_status ~mgr ~cwd config =
+let probe_auth_status ~mgr ~cwd ~account config =
   let stderr_buf = Buffer.create 256 in
   let enrich ~excerpt result =
     match result, excerpt with
@@ -662,9 +665,7 @@ let probe_auth_status ~mgr ~cwd config =
           | Unhandled_exception _ | Timeout _ ) ),
       (None | Some _) -> false, result
   in
-  match client_environment config.account_home with
-  | Error error -> Error error, false
-  | Ok environment ->
+  let environment = client_environment account in
     try
     let stdout =
       Eio.Switch.run (fun sw ->
@@ -719,8 +720,8 @@ let probe_auth_status ~mgr ~cwd config =
    document into a regular file stopped writing early, so one more probe is
    cheaper than failing the Keeper request. A second cut document is reported
    as the failure it is. *)
-let read_subscription ~mgr ~cwd config =
-  let first, cut_document = probe_auth_status ~mgr ~cwd config in
+let read_subscription ~mgr ~cwd ~account config =
+  let first, cut_document = probe_auth_status ~mgr ~cwd ~account config in
   if cut_document
   then (
     (* [cut_document] is only true for a [Protocol_error], so the first result
@@ -731,7 +732,7 @@ let read_subscription ~mgr ~cwd config =
        Log.Runtime_agent.warn
          "auth probe returned a cut document, retrying once: %s"
          (error_to_string error));
-    fst (probe_auth_status ~mgr ~cwd config))
+    fst (probe_auth_status ~mgr ~cwd ~account config))
   else first
 ;;
 
@@ -3098,7 +3099,7 @@ let with_system_prompt_file prompt use = match prompt with
         use (Some (absolute_path, contents)))
 ;;
 
-let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
+let run_spawned ?on_spawned ~mgr ~clock ~cwd ~account config ~dynamic_tools
     ~reasoning_effort ~session_mode ~session_id ~subscription ~prompt ~images
     ~on_session_ready ~on_turn_starting ~on_terminal_received ~on_turn_started ~on_prompt_sent ~on_context_submission
     ~on_stream_event ~on_input_observation =
@@ -3107,7 +3108,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
     with_system_prompt_file config.system_prompt (fun system_prompt ->
     let system_prompt_file = Option.map fst system_prompt in
     let* argv = command ~system_prompt_file config ~dynamic_tools ~reasoning_effort ~session_mode ~session_id in
-    let* environment = client_environment config.account_home in
+    let environment = client_environment account in
     Eio.Switch.run (fun sw ->
     let stdin_r, stdin_w = Eio.Process.pipe ~sw mgr in
     let stdout_r, stdout_w = Eio.Process.pipe ~sw mgr in
@@ -3231,10 +3232,7 @@ let run_spawned ?on_spawned ~mgr ~clock ~cwd config ~dynamic_tools
 let validate_process_config config =
   if String.trim config.cli_path = ""
   then Error (Invalid_config "cli_path must not be empty")
-  else
-  let* _ = selected_account config.account_home
-    |> Result.map_error (fun detail -> Invalid_config detail) in
-  if String.trim config.cwd = "" || Filename.is_relative config.cwd
+  else if String.trim config.cwd = "" || Filename.is_relative config.cwd
   then Error (Invalid_config "cwd must be an absolute path")
   else if
     not (Float.is_finite config.admission_timeout_s)
@@ -3304,11 +3302,11 @@ let bounded_subscription_probe_config
   | None -> { turn_config with timeout_s = Some fallback_timeout_s }
 ;;
 
-let probe_subscription ~mgr ~clock ~cwd config =
+let probe_subscription ~mgr ~clock ~cwd ~account config =
   let* () = validate_process_config config in
   try
     with_idle_timeout clock config.admission_timeout_s (fun () ->
-      read_subscription ~mgr ~cwd config)
+      read_subscription ~mgr ~cwd ~account config)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | Idle_timeout seconds -> Error (Timeout seconds)
@@ -3321,7 +3319,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
     ?(on_session_ready = fun ~session_id:_ -> Ok ())
     ?(on_turn_starting = fun ~session_id:_ -> Ok ())
     ?(on_turn_started = fun ~session_id:_ ~turn_id:_ -> Ok ())
-    ?(on_terminal_received = fun () -> ()) ?on_stream_event ?on_input_observation config
+    ?(on_terminal_received = fun () -> ()) ?on_stream_event ?on_input_observation ~account config
     ~prompt ~images =
   let result =
     let* () = validate_turn ~dynamic_tools ~session_mode config ~prompt ~images in
@@ -3335,7 +3333,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
             ~fallback_timeout_s:default_timeout_s
             config
         in
-        probe_subscription ~mgr ~clock ~cwd probe_config
+        probe_subscription ~mgr ~clock ~cwd ~account probe_config
     in
     let session_id =
       match session_mode with
@@ -3351,6 +3349,7 @@ let run_turn ?(dynamic_tools = []) ?reasoning_effort ?(session_mode = Start)
         ~mgr
         ~clock
         ~cwd
+        ~account
         config
         ~dynamic_tools
         ~reasoning_effort

@@ -64,3 +64,8 @@ val projection : (record list, error) result -> Goal_store.goal -> Yojson.Safe.t
 val projector : (record list, error) result -> (Goal_store.goal -> Yojson.Safe.t)
 (** A strict unavailable marker, unchecked, or the exact current revision's
     review. Does not read stores, dispatch a reviewer or assert completion. *)
+val summary_projector : (record list, error) result -> (Goal_store.goal -> Yojson.Safe.t)
+(** {!projector} without the reviewer's evidence, the [review] result and the
+    [tools] it called. The state, request id, revision, reason, detail and
+    authority stay. For a list of many goals, where the evidence is most of the
+    bytes. *)

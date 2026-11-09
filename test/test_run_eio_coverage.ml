@@ -174,21 +174,79 @@ let test_get_nonexistent () =
       check bool "run.json created" true
         (Sys.file_exists (Run_eio.run_json_path config "nonexistent"))
 
+let plenty = 100
+
 let test_list_empty () =
   with_initialized_masc @@ fun config ->
-  let json = Run_eio.list config in
-  let open Yojson.Safe.Util in
-  let runs = json |> member "runs" |> to_list in
-  check int "empty list" 0 (List.length runs)
+  let listing = Run_eio.list config ~limit:plenty in
+  check int "no runs" 0 listing.total;
+  check int "nothing shown" 0 (List.length listing.shown)
 
 let test_list_multiple () =
   with_initialized_masc @@ fun config ->
   ignore (Run_eio.init config ~task_id:"task-list-001" ~agent_name:(Some "a1"));
   ignore (Run_eio.init config ~task_id:"task-list-002" ~agent_name:(Some "a2"));
-  let json = Run_eio.list config in
+  let listing = Run_eio.list config ~limit:plenty in
+  check int "two runs" 2 listing.total;
+  check int "two shown" 2 (List.length listing.shown)
+
+let write_at config ~task_id ~updated_at ~plan =
+  match
+    Run_eio.write_run config
+      { Run_eio.task_id; agent_name = None; plan; created_at = "2026-01-01T00:00:00Z"; updated_at }
+  with
+  | Ok () -> ()
+  | Error e -> failf "write_run failed: %s" (Run_eio.error_to_string e)
+
+let shown_ids (listing : Run_eio.run_listing) =
+  List.map (fun (r : Run_eio.run_record) -> r.task_id) listing.shown
+
+(* The listing is read to find abandoned work, so the runs touched last come
+   first, and a limit cuts the old ones while count still says how many exist. *)
+let test_list_newest_first_and_limited () =
+  with_initialized_masc @@ fun config ->
+  write_at config ~task_id:"old" ~updated_at:"2026-01-01T00:00:00Z" ~plan:"";
+  write_at config ~task_id:"newest" ~updated_at:"2026-03-01T00:00:00Z" ~plan:"";
+  write_at config ~task_id:"middle" ~updated_at:"2026-02-01T00:00:00Z" ~plan:"";
+  let all = Run_eio.list config ~limit:plenty in
+  check (list string) "newest update first" [ "newest"; "middle"; "old" ] (shown_ids all);
+  let two = Run_eio.list config ~limit:2 in
+  check (list string) "limit keeps the newest" [ "newest"; "middle" ] (shown_ids two);
+  check int "total ignores the limit" 3 two.total;
+  check (list string) "limit below one shows none" [] (shown_ids (Run_eio.list config ~limit:0))
+
+(* Same instant, same order every time; an unreadable stamp neither hides the
+   run nor outranks one that reads. *)
+let test_list_order_is_total () =
+  with_initialized_masc @@ fun config ->
+  write_at config ~task_id:"b-same" ~updated_at:"2026-02-01T00:00:00Z" ~plan:"";
+  write_at config ~task_id:"a-same" ~updated_at:"2026-02-01T00:00:00Z" ~plan:"";
+  write_at config ~task_id:"garbled" ~updated_at:"yesterday" ~plan:"";
+  write_at config ~task_id:"early" ~updated_at:"2026-01-01T00:00:00Z" ~plan:"";
+  check (list string) "ties by task id, unreadable stamp last"
+    [ "a-same"; "b-same"; "early"; "garbled" ]
+    (shown_ids (Run_eio.list config ~limit:plenty))
+
+(* Rows name the plan's size; the plan stays in masc_run_get. *)
+let test_listing_rows_leave_the_plan_out () =
+  with_initialized_masc @@ fun config ->
+  let plan = "# Plan\n- a step that is long enough to show up in the size" in
+  write_at config ~task_id:"with-plan" ~updated_at:"2026-02-01T00:00:00Z" ~plan;
+  write_at config ~task_id:"no-plan" ~updated_at:"2026-01-01T00:00:00Z" ~plan:"";
+  let json = Run_eio.run_listing_to_json (Run_eio.list config ~limit:plenty) in
   let open Yojson.Safe.Util in
-  let runs = json |> member "runs" |> to_list in
-  check int "two runs" 2 (List.length runs)
+  check int "count is every run" 2 (json |> member "count" |> to_int);
+  check int "shown is the rows returned" 2 (json |> member "shown" |> to_int);
+  let rows = json |> member "runs" |> to_list in
+  let row id = List.find (fun r -> r |> member "task_id" |> to_string = id) rows in
+  check int "plan size" (String.length plan) (row "with-plan" |> member "plan_bytes" |> to_int);
+  check int "no plan is zero bytes" 0 (row "no-plan" |> member "plan_bytes" |> to_int);
+  List.iter
+    (fun r ->
+       check bool "no plan text in a row" false (List.mem_assoc "plan" (to_assoc r)))
+    rows;
+  check bool "agent_name stays a key when absent" true
+    ((row "no-plan" |> member "agent_name") = `Null)
 
 (* ============================================================
    JSON Deserialization Edge Cases
@@ -291,6 +349,9 @@ let () =
       test_case "get nonexistent" `Quick test_get_nonexistent;
       test_case "list empty" `Quick test_list_empty;
       test_case "list multiple" `Quick test_list_multiple;
+      test_case "list newest first and limited" `Quick test_list_newest_first_and_limited;
+      test_case "list order is total" `Quick test_list_order_is_total;
+      test_case "listing rows leave the plan out" `Quick test_listing_rows_leave_the_plan_out;
     ];
     "json_edge_cases", [
       test_case "run_record missing field" `Quick test_run_record_of_json_missing_field;

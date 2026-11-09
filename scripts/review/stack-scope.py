@@ -13,10 +13,11 @@ import subprocess
 import sys
 
 
-def snapshot(repo, selected, expected_head):
-    def get(path):
-        return json.loads(subprocess.check_output(
-            [os.environ.get('MASC_REVIEW_GH', 'gh'), 'api', path, '--jq', '.'], text=True))
+def snapshot(repo, selected, expected_head, *, get=None):
+    if get is None:
+        def get(path):
+            return json.loads(subprocess.check_output(
+                [os.environ.get('MASC_REVIEW_GH', 'gh'), 'api', path, '--jq', '.'], text=True))
 
     def require(condition, message):
         if not condition:

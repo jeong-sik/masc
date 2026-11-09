@@ -594,7 +594,11 @@ let for_surface = function
       :: (b Navigate "o" "order" ~help:"cycle priority / recent / oldest / activity / name")
       :: (b Act "J" "jobs" ~help:"open the selected Keeper's schedules")
       :: (b Act "K" "relations" ~help:"browse Keeper-origin requests queued for the selected Keeper")
-      :: (b Act "Right / Enter" "detail" ~help:"keeper detail")
+      :: (b Act "Enter" "story"
+            ~help:"open the Story window below the list for the Keeper under the cursor; on its story page it closes the window")
+      :: (b Act "Right" "detail" ~help:"keeper detail")
+      :: (b Act "Tab / s / m" "pages"
+            ~help:"with the Story window open: next page / schedules / memory; Esc closes it")
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
         ; b Search "n / N" "next / previous match"
@@ -1314,11 +1318,15 @@ let for_surface = function
       ; row_list_page
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while detail is open, inspect the adjacent visible log entry"
-      ; b Act "l" "level floor"
+      (* The three filter keys put the cursor back on the first row. An open
+         entry keeps its place, so [ and ] would then step from the wrong row
+         and closing the entry would land on a list nobody saw change. They
+         answer on the list only. *)
+      ; b Act "l" "level floor" ~detail:List_only
           ~help:"raise the minimum level; after error, back to everything"
-      ; b Act "v" "verbose"
+      ; b Act "v" "verbose" ~detail:List_only
           ~help:"toggle DEBUG rows directly; off uses the INFO floor"
-      ; b Act "c" "category"
+      ; b Act "c" "category" ~detail:List_only
           ~help:"cycle through the categories this page carries"
       (* Opens the entry under the cursor. Inside the detail the dispatcher
          has nothing left to open, and a list the filters emptied has no
@@ -2215,11 +2223,11 @@ let acting_evidence_hints = hints_of_bindings bindings_acting_evidence
 (* One section per surface family; the strip's spelling names it. Keepers
    sub-modes collapse into the two sections an operator thinks in. *)
 let help_surfaces : (string * surface) list =
-  [ "Dashboard", Overview
+  [ "Operations", Overview
   ; "Work", Planning
   ; "Keepers", Keepers Keeper_list
-  ; "Usage", Metrics
-  ; "Board", Board
+  ; "Operations / Usage", Metrics
+  ; "Work / Board", Board
   ; "Workspace", Repositories
   ; "System", Config
   ; "Activity", Acting
@@ -2234,8 +2242,8 @@ let help_surfaces : (string * surface) list =
   ; "Keepers / Logs", Keepers Keeper_logs
   ; "Keepers / Calls", Keepers Keeper_calls
   ; "Keepers / Runtime", Keepers Keeper_runtime_pick
-  ; "Features", Lanes
-  ; "System / Runtime / Clients", Clients
+  ; "Features & plugins", Lanes
+  ; "Features & plugins / Clients", Clients
   ; "Approvals", Approvals
   ; "Work / Task Review", Verification
   ; "Work / Task Verdicts", Harness
@@ -2251,8 +2259,8 @@ let help_surfaces : (string * surface) list =
   ; "Workspace / Code", Code
   ; "Changes", Changes
   ; "System / Runtime", Runtime
-  ; "System / Resources", Resources
-  ; "System / Tools", Tools
+  ; "Features & plugins / Resources", Resources
+  ; "Features & plugins / Tools", Tools
   ; "System / Logs", System_logs
   (* Its keys are the least guessable on the product -- [B] opens the Browser
      Lane, [Ctrl-O] previews a tab, [b / u] bind and unbind a channel -- and

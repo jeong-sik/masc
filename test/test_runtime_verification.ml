@@ -280,6 +280,7 @@ streaming = true
         let directory = Unix.realpath directory in
         Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree directory);
         Verify.verify
+          ~account_request:Runtime_account_access.Operator_call
           ~secure_random:env#secure_random
           ~sw
           ~net:env#net
@@ -478,7 +479,8 @@ let verify_under_guard ~env ~sw ~timeout_s ~guard_s runtime =
     try
       Some
         (Eio.Time.with_timeout_exn clock guard_s (fun () ->
-           Verify.verify_as_command ~env ~sw ~private_dir:directory ~timeout_s runtime))
+           Verify.verify_as_command ~env ~sw ~private_dir:directory ~timeout_s
+             ~account_request:Runtime_account_access.Operator_call runtime))
     with
     | Eio.Time.Timeout -> None
   in
@@ -981,7 +983,7 @@ accepted_reasoning_efforts = ["low"]
             install_colliding_catalog ();
             let private_dir =
               Filename.temp_dir ~temp_dir:directory "readiness-" "" |> Unix.realpath in
-            let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
+            let result = Verify.verify ~account_request:Runtime_account_access.Operator_call ~secure_random:env#secure_random ~sw ~net:env#net
               ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / private_dir)
               ~cwd_path:private_dir ~timeout_s:15. selected in
             check (option string) (protocol ^ " actual readiness roundtrip") None
@@ -1194,7 +1196,7 @@ default = "fixture.selected"
       let prepared = List.mapi prepare steps_per_case in
       List.map
         (fun (selected, private_dir) ->
-           (Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
+           (Verify.verify ~account_request:Runtime_account_access.Operator_call ~secure_random:env#secure_random ~sw ~net:env#net
               ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / private_dir)
               ~cwd_path:private_dir ~timeout_s:3. selected).failure)
         prepared)))
@@ -1691,7 +1693,7 @@ tools-support = true
     let check_case mode expected_failure =
       let script = Filename.concat directory mode in
       write script muse_readiness_fixture; Unix.chmod script 0o700;
-      let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
+      let result = Verify.verify ~account_request:Runtime_account_access.Operator_call ~secure_random:env#secure_random ~sw ~net:env#net
         ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
         ~cwd_path:directory ~timeout_s:(if mode = "muse-hang" then 1. else 15.) (runtime script) in
       check (option string) (mode ^ " verdict") expected_failure
@@ -1748,7 +1750,7 @@ tools-support = true
       write script muse_quota_fixture; Unix.chmod script 0o700;
       Runtime_quota_window.reset_for_testing ();
       let selected = runtime script in
-      let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
+      let result = Verify.verify ~account_request:Runtime_account_access.Operator_call ~secure_random:env#secure_random ~sw ~net:env#net
         ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
         ~cwd_path:directory ~timeout_s:15. selected in
       check (option string) (mode ^ " verdict") (Some expected)
@@ -1762,7 +1764,7 @@ tools-support = true
       ["muse-quota-spent", "quota_exhausted"; "muse-quota-open", "provider_rejected";
        "muse-quota-typed", "quota_exhausted"; "muse-quota-typed-retryable", "quota_exhausted"];
     Unix.unlink source;
-    let result = Verify.verify ~secure_random:env#secure_random ~sw ~net:env#net
+    let result = Verify.verify ~account_request:Runtime_account_access.Operator_call ~secure_random:env#secure_random ~sw ~net:env#net
       ~mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
       ~cwd_path:directory ~timeout_s:15. (runtime (Filename.concat directory "not-started")) in
     check (option string) "missing selected sign-in refuses before spawn"
@@ -1811,7 +1813,10 @@ streaming = true
     (Result.is_error (provider_config_for_binding unsafe_config binding))
 ;;
 
+(* The cases verify as [masc runtime-verify] does, which publishes the single
+   user of a base path never set up for accounts. *)
 let () =
+  Masc_test_deps.publish_single_user_access ();
   run
     "runtime verification"
     [ ( "selected probe idle",

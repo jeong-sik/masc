@@ -2249,6 +2249,21 @@ let fetch_keeper_memory_input ~host ~port ~keeper_name =
        | exception Yojson.Json_error detail ->
            Error ("Memory input was not JSON: " ^ detail))
 
+(** The Keeper's newest few turns, read for the Story window's feed. The page is
+    the one Memory reads, cut to the newest few records. *)
+let fetch_keeper_story_turns ~host ~port ~keeper_name =
+  let path = Printf.sprintf "/api/v1/keepers/%s/turn-records?limit=%d"
+      (percent_encode_path_segment keeper_name) Masc_tui_keeper_turns.page_limit in
+  match http_get ~host ~port ~path with
+  | Error detail -> Error detail
+  | Ok (status, body) when not (Masc.Tui_decode.is_success_http_status status) ->
+      Error (named_refusal "Story turns" ~status ~body)
+  | Ok (_, body) ->
+      (match Yojson.Safe.from_string body with
+       | json -> Masc_tui_keeper_turns.decode ~keeper:keeper_name json
+       | exception Yojson.Json_error detail ->
+           Error ("Story turns were not JSON: " ^ detail))
+
 (** One part the provider-input list named, read when a pane shows it. The
     list itself carries no text, so opening a request costs its parts' counts
     and digests, not every message it carried. *)

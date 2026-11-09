@@ -1,5 +1,5 @@
 type client = Codex | Claude | Antigravity | Muse
-type native = Codex_home | Claude_home | Muse_home
+type native = Runtime_account_home_layout.client = Codex_home | Claude_home | Muse_home
 type t =
   | Native of { client : native; account_home : string }
   | Antigravity_home of { home : Runtime_antigravity_setup.t; timeout_s : float }
@@ -24,31 +24,26 @@ let child parent leaf =
   Fun.protect ~finally:(fun () -> Unix.close fd) (fun () -> Unix.fsync fd);
   Ok path
 
-let clients_dir = "official-clients"
-let client_dir = function Codex_home -> "codex" | Claude_home -> "claude" | Muse_home -> "muse"
-
+(* Each directory on the way is made from the spelling of the layout, so the
+   home made here is the home every later reader computes. *)
 let new_home ~runtime_root ~account_id ~client = filesystem (fun () ->
-  if not (Fs_compat.is_capability_leaf account_id) then Error "Invalid login account identity."
-  else if Filename.is_relative runtime_root then Error "The runtime directory must be absolute."
-  else
-    let runtime_root = Unix.realpath runtime_root in
-    let* () = directory ~private_:false runtime_root in
-    let* clients = child runtime_root clients_dir in
-    let* client_root = child clients (client_dir client) in
-    child client_root account_id)
+  let* home = Runtime_account_home_layout.home ~runtime_root client ~account_id in
+  let client_root = Filename.dirname home in
+  let clients = Filename.dirname client_root in
+  let root = Filename.dirname clients in
+  let* () = directory ~private_:false root in
+  let* (_ : string) = child root (Filename.basename clients) in
+  let* (_ : string) = child clients (Filename.basename client_root) in
+  child client_root account_id)
 
 let account_home ~runtime_root ~account_id ~client =
   let* native = match client with
     | Codex -> Ok Codex_home | Claude -> Ok Claude_home | Muse -> Ok Muse_home
     | Antigravity -> Error "An Antigravity login keeps no account home." in
   filesystem (fun () ->
-    if not (Fs_compat.is_capability_leaf account_id) then Error "Invalid login account identity."
-    else if Filename.is_relative runtime_root then Error "The runtime directory must be absolute."
-    else
-      let home = List.fold_left Filename.concat (Unix.realpath runtime_root)
-        [clients_dir; client_dir native; account_id] in
-      let* () = directory ~private_:true home in
-      Ok home)
+    let* home = Runtime_account_home_layout.home ~runtime_root native ~account_id in
+    let* () = directory ~private_:true home in
+    Ok home)
 
 let native_home ~runtime_root ~account_id ~client existing =
   let* account_home = match existing with
@@ -105,7 +100,7 @@ let environment = function
     Runtime_codex_app_server.client_environment (Runtime_official_account.Current (Some account_home))
     |> Result.map_error Runtime_codex_app_server.error_to_string
   | Native {client=Claude_home; account_home} ->
-    Runtime_claude_code.client_environment (Runtime_official_account.Current (Some account_home))
+    Runtime_claude_code.login_environment ~account_home
     |> Result.map_error Runtime_claude_code.error_to_string
   | Native {client=Muse_home; account_home} ->
     Ok (Runtime_muse_serve.login_environment ~account_home)
@@ -113,10 +108,22 @@ let environment = function
 
 let is_pty = function Native _ -> false | Antigravity_home _ -> true
 
-let observe ~mgr ~clock ~cwd ~cli_path = function
+let authorize ~account_request ~client ~account_home =
+  let* captured = Runtime_official_account.capture ~client ~declaration:(Some account_home) in
+  Runtime_account_access.authorize account_request (Runtime_account_access.seal captured)
+  |> Result.map_error Runtime_account_access.refusal_to_string
+
+let observe ~mgr ~clock ~cwd ~cli_path ~account_request = function
   | Native {client=Codex_home; account_home} ->
+    (* WORKAROUND: the Codex client still takes the account in its config, so
+       the authorized account goes there. Root fix: plan D2-6, where every
+       Codex function that starts the CLI takes the authorized account. *)
+    let* account =
+      authorize ~account_request ~client:Codex ~account_home
+      |> Result.map Runtime_account_access.account
+    in
     let config = { (Runtime_codex_app_server.default_config ()) with
-      cli_path; account_home=Runtime_official_account.Current (Some account_home) } in
+      cli_path; account_home=Runtime_official_account.Captured account } in
     let* result = Runtime_codex_app_server.probe_subscription ~mgr ~clock ~cwd config
       |> Result.map_error Runtime_codex_app_server.error_to_string in
     (match result.subscription with
@@ -124,9 +131,9 @@ let observe ~mgr ~clock ~cwd ~cli_path = function
      | Provider_managed | Amazon_bedrock ->
        Error "Codex did not report authentication for this selected login account.")
   | Native {client=Claude_home; account_home} ->
-    let config = { (Runtime_claude_code.default_config ~cwd:account_home) with
-      cli_path; account_home=Runtime_official_account.Current (Some account_home) } in
-    let* result = Runtime_claude_code.probe_subscription ~mgr ~clock ~cwd config
+    let* account = authorize ~account_request ~client:Claude_code ~account_home in
+    let config = { (Runtime_claude_code.default_config ~cwd:account_home) with cli_path } in
+    let* result = Runtime_claude_code.probe_subscription ~mgr ~clock ~cwd ~account config
       |> Result.map_error Runtime_claude_code.error_to_string in
     (match result.authentication with
      | Runtime_claude_code.Claude_ai | Api_key | OAuth_token -> Ok Authenticated

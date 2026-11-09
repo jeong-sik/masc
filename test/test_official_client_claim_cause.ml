@@ -48,7 +48,8 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
         ~tools:[] ~initial_messages:[] ~model_input_projection:None
         ~on_transmitted_model_input:transmitted ~hooks:None
         ~context_injector:None ~context:None ~event_bus:None
-        ~raw_trace:None ~on_event:None ~config () in
+        ~raw_trace:None ~on_event:None
+        ~account:(Masc_test_deps.authorized_account config.account_home) ~config () in
     outcome.result, outcome.settled_session, outcome.effect_disposition
   | S.Antigravity ->
     let config : Runtime_execution.antigravity_cli =
@@ -385,6 +386,7 @@ let check_remote_fence () =
   | _ -> Alcotest.fail "remote attempt fence was conflated with local claim refusal"
 
 let () =
+  Masc_test_deps.publish_single_user_access ();
   Alcotest.run "official-client claim cause"
     [ "typed contract", [ Alcotest.test_case "strict codec" `Quick check_codec
                         ; Alcotest.test_case "remote fence stays distinct" `Quick check_remote_fence

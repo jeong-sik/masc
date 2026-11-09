@@ -54,23 +54,22 @@ let actor_of = function
   | Operator { actor } -> Session.Agent actor
   | Person { user_id; _ } -> Session.Person (Authz_types.User_id.to_string user_id)
 
-let accounts_dir = "accounts"
-
 let private_child parent leaf =
   let path = Filename.concat parent leaf in
   (try Unix.mkdir path 0o700 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
   path
 
 (* A person's account homes go under their namespace, which the admission
-   fixed (design 4.1 and 5.4), so no other person's login reaches them. *)
+   fixed (design 4.1 and 5.4), so no other person's login reaches them. The two
+   directories are made from the spelling of the layout. *)
 let runtime_root_of ~base_path = function
   | Operator _ -> Ok (Common.masc_dir_from_base_path ~base_path)
   | Person { namespace; _ } ->
+    let root = Runtime_account_home_layout.person_runtime_root ~base_path ~namespace in
+    let accounts = Filename.dirname root in
     (try
-       Ok
-         (private_child
-            (private_child (Common.masc_dir_from_base_path ~base_path) accounts_dir)
-            (Authz_types.Account_home_namespace.to_string namespace))
+       let accounts = private_child (Filename.dirname accounts) (Filename.basename accounts) in
+       Ok (private_child accounts (Filename.basename root))
      with Unix.Unix_error _ | Sys_error _ -> Error account_failure)
 
 let person_reference_refused =
@@ -176,8 +175,18 @@ let start ~owner ~base_path ~body request reqd =
           let clock = Eio.Stdenv.clock env in
           let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock
             ~grace_seconds:Process_eio.child_exit_grace_seconds in
+          (* A person checks the account of their own login, which the log
+             links to them only once the check is done. *)
+          let* account_request = match owner with
+            | Operator _ -> Ok Runtime_account_access.Operator_call
+            | Person { user_id; _ } ->
+              Authz_types.Provider_account_id.of_string (Session.id session)
+              |> Result.map (fun provider_account_id ->
+                Runtime_account_access.Own_account { user_id; provider_account_id })
+              |> Result.map_error (fun _ -> account_failure) in
           Client.observe ~mgr ~clock
-            ~cwd:Eio.Path.(Eio.Stdenv.fs env / Client.home_dir home) ~cli_path:spawn_path home in
+            ~cwd:Eio.Path.(Eio.Stdenv.fs env / Client.home_dir home) ~cli_path:spawn_path
+            ~account_request home in
         let recover status =
           (* A cancelled CLI may already have saved its selected credential. Only
              Antigravity needs capture: native homes were published before spawn.
@@ -331,16 +340,15 @@ let template_error (error : Runtime_account_runtime.error) =
   | Runtime_account_runtime.Not_materialized _ ->
     Log.Server.warn "Account runtime did not load: %s" (Runtime_account_runtime.error_to_string error);
     `Bad_request, "The runtime of this account does not load."
-  | Runtime_account_runtime.Template_not_declared _ | Runtime_account_runtime.Model_not_bound _ ->
+  | Runtime_account_runtime.Template_not_declared _ | Runtime_account_runtime.Model_not_bound _
+  | Runtime_account_runtime.Runtime_not_bound _ ->
     `Bad_request, Runtime_account_runtime.error_to_string error
 
 (* The account of the person, its integration as the login receipt names it,
-   and the runtime of [model] on its home. An account of another person is
+   and the runtime of [binding] on its home. An account of another person is
    answered as one that does not exist (design 4.2: an id grants nothing). *)
-let person_runtime person ~base_path ~provider_account_id ~model =
-  let* id =
-    Authz_types.Provider_account_id.of_string provider_account_id
-    |> Result.map_error (fun _ -> `Not_found, unknown_account) in
+let person_runtime person ~base_path ~provider_account_id:id ~binding =
+  let provider_account_id = Authz_types.Provider_account_id.to_string id in
   let state = (Authz_zone.snapshot person.zone).Authz_zone.state in
   let* () = match Authz_provider_account_state.owner state.Authz_state.provider_accounts id with
     | Some owner when Authz_types.User_id.equal owner person.user_id -> Ok ()
@@ -360,29 +368,31 @@ let person_runtime person ~base_path ~provider_account_id ~model =
     |> Result.map_error (fun message -> `Service_unavailable, message) in
   let* config = Server_runtime_setup_actions.config ~base_path |> Result.map_error setup_error in
   let* runtime = Runtime_account_runtime.of_template config ~template:receipt.integration_id
-      ~provider_id:provider_account_id ~account_home ~model
+      ~provider_id:provider_account_id ~account_home ~binding
     |> Result.map_error template_error in
   (* Checked before the call, so a model that makes no Runtime id is not
-     called for two minutes first. *)
+     called for two minutes first. A [Runtime] binding makes the id it was
+     chosen by, which is one. *)
   let* runtime_id = Authz_types.Runtime_id.of_string runtime.Runtime_instance.id
     |> Result.map_error (fun _ -> `Bad_request, "This model makes no valid Runtime id.") in
   Ok { provider_account_id = id; runtime_id; runtime }
 
-(* One verification of an account at a time: each starts the official client
-   for up to [verification_timeout_s], so a second one while the first runs
-   is answered 409 (issue #50018). An account has one owner, so its id is the
-   key. *)
-let verifying = Hashtbl.create 8
-let verifying_mutex = Mutex.create ()
-let verify_running = "A verification of this account is running."
+(* One call of an account at a time, a verification or a turn of a Keeper:
+   each starts the official client on the home of the account, and no two
+   clients refresh the credential of one home at once. A call while another
+   runs gets [busy] (issue #50018). An account has one owner, so its id is
+   the key. *)
+let calling = Hashtbl.create 8
+let calling_mutex = Mutex.create ()
+let call_running = "A call of this account is running."
 
-let while_verifying provider_account_id f =
+let one_call_of provider_account_id ~busy f =
   let key = Authz_types.Provider_account_id.to_string provider_account_id in
-  let claimed = Mutex.protect verifying_mutex (fun () ->
-    if Hashtbl.mem verifying key then false else (Hashtbl.replace verifying key (); true)) in
-  if not claimed then Error (`Conflict, verify_running)
+  let claimed = Mutex.protect calling_mutex (fun () ->
+    if Hashtbl.mem calling key then false else (Hashtbl.replace calling key (); true)) in
+  if not claimed then Error busy
   else Fun.protect f ~finally:(fun () ->
-    Mutex.protect verifying_mutex (fun () -> Hashtbl.remove verifying key))
+    Mutex.protect calling_mutex (fun () -> Hashtbl.remove calling key))
 
 type recorded = Made | Existing
 
@@ -422,7 +432,7 @@ let log_detail (result : Runtime_verification.result) =
   | Some detail -> Log.Server.warn "Account verification %s failed: %s" result.runtime_id detail
   | None -> ()
 
-let call ~env prepared =
+let call ~env ~person prepared =
   (* macOS TMPDIR sits under the /var -> /private/var symlink, and a runtime
      root must be its own realpath, as the runtime-verify command has it. *)
   match Filename.temp_dir "masc-account-verify-" "" |> Unix.realpath with
@@ -432,17 +442,23 @@ let call ~env prepared =
     Ok (Eio.Switch.run (fun sw ->
       Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree private_dir);
       Runtime_verification.verify_as_command ~env ~sw ~private_dir
-        ~timeout_s:verification_timeout_s prepared.runtime))
+        ~timeout_s:verification_timeout_s
+        ~account_request:(Runtime_account_access.Own_account
+          { user_id = person.user_id; provider_account_id = prepared.provider_account_id })
+        prepared.runtime))
 
 let verify ~person ~base_path ~body request reqd =
   let answer =
     let* provider_account_id, model = verify_request body
       |> Result.map_error (fun message -> `Bad_request, message) in
-    let* prepared = person_runtime person ~base_path ~provider_account_id ~model in
+    let* provider_account_id = Authz_types.Provider_account_id.of_string provider_account_id
+      |> Result.map_error (fun _ -> `Not_found, unknown_account) in
+    let* prepared = person_runtime person ~base_path ~provider_account_id
+        ~binding:(Runtime_account_runtime.Model model) in
     let* env = Option.to_result (Eio_context.get_env_opt ())
       ~none:(`Service_unavailable, "Verification requires the server process environment.") in
-    while_verifying prepared.provider_account_id (fun () ->
-      let* result = call ~env prepared in
+    one_call_of prepared.provider_account_id ~busy:(`Conflict, call_running) (fun () ->
+      let* result = call ~env ~person prepared in
       log_detail result;
       let* runtime = match result.Runtime_verification.failure with
         | Some _ -> Ok `Null

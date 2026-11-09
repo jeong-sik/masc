@@ -4,7 +4,6 @@
     keeping the pure SDK bridge helpers for tests. This lets AGENT_CORE talk to
     MCP servers that paginate [tools/list] and add non-standard fields. *)
 
-open Types
 include Mcp_schema
 module Stdio_transport = struct
   module Transport = Mcp_protocol_eio.Stdio_transport
@@ -153,9 +152,9 @@ let mcp_tool_of_json = function
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
-let initialize t =
+let initialize t ~client_version =
   match
-    Sdk_client.initialize t.client ~client_name:"agent-core-mcp-client" ~client_version:"0.10.0"
+    Sdk_client.initialize t.client ~client_name:"agent-core-mcp-client" ~client_version
   with
   | Ok _ -> Ok ()
   | Error detail -> Error (Error.Mcp (InitializeFailed { detail }))
@@ -168,33 +167,10 @@ let list_tools_full t =
   | Ok tools -> Ok tools
 ;;
 
-let list_tools t =
-  match Sdk_client.list_tools_all t.client with
-  | Error detail -> Error (Error.Mcp (ToolListFailed { detail }))
-  | Ok tools -> Ok (List.map mcp_tool_of_agent_core_tool tools)
-;;
-
 let call_tool_full t ~name ~arguments =
   match Sdk_client.call_tool t.client ~name ~arguments () with
   | Error detail -> Error (Error.Mcp (ToolCallFailed { tool_name = name; detail }))
   | Ok result -> Ok result
-;;
-
-(** Invoke a tool on the MCP server.
-    Returns the concatenated text content on success. *)
-let call_tool t ~name ~arguments : Types.tool_result =
-  match Sdk_client.call_tool t.client ~name ~arguments () with
-  | Error detail ->
-    Error
-      { message = Printf.sprintf "MCP tools/call '%s' failed: %s" name detail
-      ; recoverable = true
-      ; error_class = None
-      }
-  | Ok result ->
-    let text = text_of_tool_result result in
-    if Option.value ~default:false result.Sdk_types.is_error
-    then Error { message = text; recoverable = true; error_class = None }
-    else Ok { content = text; content_blocks = None; _meta = None }
 ;;
 
 (** One MCP tool whose input schema could not be converted into a
@@ -317,18 +293,6 @@ let%test "close attempts process release and preserves the client-close exceptio
 
 (* ── Managed lifecycle ─────────────────────────────────────────── *)
 
-(** Server start specification.
-    [command] is the executable, [args] its arguments.
-    [env] contains explicit overrides applied to the inherited process
-    environment. [name] identifies the server. AGENT_CORE passes the caller's argv
-    unchanged and does not infer command meaning. *)
-type server_spec =
-  { command : string
-  ; args : string list
-  ; env : (string * string) list
-  ; name : string
-  }
-
 (** Transport backend for a managed MCP connection. *)
 type transport =
   | Stdio of { client : t }
@@ -345,95 +309,6 @@ type managed =
   ; name : string
   ; transport : transport
   }
-
-(** Merge extra key-value pairs into the current process environment.
-    Existing keys listed in [extras] are overridden. *)
-let merge_env extras =
-  if extras = []
-  then Unix.environment ()
-  else (
-    let extra_keys = List.map fst extras in
-    let base_filtered =
-      Array.to_list (Unix.environment ())
-      |> List.filter (fun entry ->
-        let key =
-          match String.split_on_char '=' entry with
-          | k :: _ -> k
-          | [] -> ""
-        in
-        not (List.mem key extra_keys))
-    in
-    let extra_entries = List.map (fun (k, v) -> k ^ "=" ^ v) extras in
-    Array.of_list (base_filtered @ extra_entries))
-;;
-
-(** Close a single managed MCP connection (transport-aware). *)
-let close_managed m =
-  match m.transport with
-  | Stdio { client } ->
-    (try close client with
-     | Eio.Io _ | Unix.Unix_error _ | Failure _ -> ())
-  | Http { close_fn; _ } ->
-    (try close_fn () with
-     | Eio.Io _ | Unix.Unix_error _ | Failure _ -> ())
-;;
-
-(** Close all managed MCP server connections.
-    Exceptions from individual servers are swallowed (best-effort). *)
-let close_all managed_list = List.iter close_managed managed_list
-
-(** Connect to an MCP server, perform the initialize handshake, fetch
-    tools, and convert them to SDK [Tool.t] values.
-    On any failure the subprocess is closed before returning [Error]. *)
-let connect_and_load ~sw ~mgr (spec : server_spec) =
-  Llm_provider.Diag.info "mcp" "spawn %s: args=%d" spec.name (List.length spec.args);
-  let env = merge_env spec.env in
-  match connect ~sw ~mgr ~command:spec.command ~args:spec.args ~env () with
-  | Error e -> Error e
-  | Ok client ->
-    (try
-       match initialize client with
-       | Error e ->
-         close client;
-         Error e
-       | Ok () ->
-         (match list_tools client with
-          | Error e ->
-            close client;
-            Error e
-          | Ok mcp_tools ->
-            let tools, skipped_tools =
-              convert_tools
-                ~server_name:spec.name
-                ~call_fn_for:(fun (mt : mcp_tool) input ->
-                  call_tool client ~name:mt.name ~arguments:input)
-                mcp_tools
-            in
-            Ok
-              { tools
-              ; skipped_tools
-              ; name = spec.name
-              ; transport = Stdio { client }
-              })
-     with
-     | Out_of_memory ->
-       close client;
-       raise Out_of_memory
-     | Stack_overflow ->
-       close client;
-       raise Stack_overflow
-     | Sys.Break ->
-       close client;
-       raise Sys.Break
-     | exn ->
-       close client;
-       Error
-         (Error.Mcp
-            (InitializeFailed
-               { detail =
-                   Printf.sprintf "MCP server '%s': %s" spec.name (Printexc.to_string exn)
-               })))
-;;
 
 [@@@coverage off]
 (* === Inline tests === *)
@@ -532,27 +407,6 @@ let%test "mcp_tool_of_json missing schema defaults to empty assoc" =
   | None -> false
 ;;
 
-let%test "merge_env empty extras returns environment unchanged" =
-  let env = merge_env [] in
-  Array.length env = Array.length (Unix.environment ())
-;;
-
-let%test "merge_env adds new entries" =
-  let env = merge_env [ "__AGENT_CORE_TEST_VAR_INLINE__", "test_value" ] in
-  Array.exists (fun entry -> entry = "__AGENT_CORE_TEST_VAR_INLINE__=test_value") env
-;;
-
-let%test "merge_env overrides existing keys" =
-  let env = merge_env [ "PATH", "/override/path" ] in
-  let path_entries =
-    Array.to_list env
-    |> List.filter (fun e -> String.length e >= 5 && String.sub e 0 5 = "PATH=")
-  in
-  match path_entries with
-  | [ entry ] -> entry = "PATH=/override/path"
-  | _ -> false
-;;
-
 let%test "text_of_tool_result skips non-text content" =
   let r : Sdk_types.tool_result =
     test_tool_result
@@ -569,10 +423,4 @@ let%test "mcp_tool_of_json description not a string defaults to empty" =
   match mcp_tool_of_json json with
   | Some tool -> tool.description = ""
   | None -> false
-;;
-
-let%test "merge_env multiple overrides" =
-  let env = merge_env [ "__AGENT_CORE_TEST_A__", "val_a"; "__AGENT_CORE_TEST_B__", "val_b" ] in
-  Array.exists (fun e -> e = "__AGENT_CORE_TEST_A__=val_a") env
-  && Array.exists (fun e -> e = "__AGENT_CORE_TEST_B__=val_b") env
 ;;

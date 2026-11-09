@@ -1,0 +1,25 @@
+name = "masc_keeper_delegate_targets"
+description = """
+Read the chat queue and live turn of each named Keeper before you choose a \
+masc_keeper_delegate target. A row carries queued_count, oldest_queued_age_s \
+while work waits, and turn_age_s while the Keeper is inside a turn; a queued \
+operation starts after that turn ends. The numbers are facts at call time. \
+Which Keeper takes the work stays with you."""
+additional_properties = false
+
+
+# Held back from the request until the model asks for it by name, as
+# masc_keeper_delegate_status is. It is read at the moment a delegate target
+# is chosen, so a Keeper that never delegates does not carry its schema.
+defer_loading = true
+[[params]]
+name = "names"
+type = "array"
+required = true
+min_items = 1
+max_items = 16
+unique_items = true
+description = "Keeper names to read, for example the reviewers you could send one pull request to."
+
+[params.items]
+type = "string"

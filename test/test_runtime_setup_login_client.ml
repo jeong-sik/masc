@@ -122,7 +122,8 @@ let muse_capture_and_reference () = fixture (fun root env ->
      "XDG_RUNTIME_DIR", ".local/run"];
   check (option string) "no invented Muse auth override" None (value child_env "MUSE_AUTH_PATH");
   let observe () = Login.observe ~mgr:(Eio.Stdenv.process_mgr env)
-    ~clock:(Eio.Stdenv.clock env) ~cwd:(Eio.Stdenv.fs env) ~cli_path:"unused" login in
+    ~clock:(Eio.Stdenv.clock env) ~cwd:(Eio.Stdenv.fs env) ~cli_path:"unused"
+    ~account_request:Runtime_account_access.Operator_call login in
   check bool "missing captured login is rejected" true (Result.is_error (observe ()));
   Fs_compat.mkdir_p (Filename.concat home ".config/muse");
   let auth = Filename.concat home ".config/muse/auth.json" in
@@ -165,7 +166,8 @@ let native_authentication_observation () = fixture (fun root env ->
   let observe client id cli_path =
     let login = Login.prepare ~runtime_root:root ~account_id:id ~client ~existing:None |> ok in
     Login.observe ~mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env)
-      ~cwd:Eio.Path.(Eio.Stdenv.fs env / root) ~cli_path login in
+      ~cwd:Eio.Path.(Eio.Stdenv.fs env / root) ~cli_path
+      ~account_request:Runtime_account_access.Operator_call login in
   let codex name account = script name
       ("[ \"$1\" = app-server ]\nIFS= read -r request\n"
        ^ emit {|{"id":1,"result":{"userAgent":"fixture"}}|}
@@ -197,7 +199,7 @@ let a_new_logins_home_is_found_again () = fixture (fun root _ ->
   check bool "none for Antigravity" true
     (Result.is_error (Login.account_home ~runtime_root:root ~account_id:"acct-1" ~client:Login.Antigravity)))
 
-let () = run "official login adapters" ["selected accounts", [
+let () = Masc_test_deps.publish_single_user_access (); run "official login adapters" ["selected accounts", [
   test_case "native login isolation" `Quick isolated_native_login;
   test_case "a login's email reaches the provider saved from it" `Quick login_email_reaches_the_saved_provider;
   test_case "native authentication without model calls" `Quick native_authentication_observation;

@@ -43,6 +43,31 @@ let run_record_to_json (r : run_record) : Yojson.Safe.t =
     ("updated_at", `String r.updated_at);
   ]
 
+(** What {!list} found: every run there is, and the most recently updated
+    ones. *)
+type run_listing = {
+  total: int;
+  shown: run_record list;
+}
+
+(* A plan can run to kilobytes and [get] reads it for one run, so a row of the
+   listing carries the plan's length instead of its text. *)
+let run_row_to_json (r : run_record) : Yojson.Safe.t =
+  `Assoc [
+    ("task_id", `String r.task_id);
+    ("agent_name", Json_util.string_opt_to_json r.agent_name);
+    ("plan_bytes", `Int (String.length r.plan));
+    ("created_at", `String r.created_at);
+    ("updated_at", `String r.updated_at);
+  ]
+
+let run_listing_to_json (l : run_listing) : Yojson.Safe.t =
+  `Assoc [
+    ("count", `Int l.total);
+    ("shown", `Int (List.length l.shown));
+    ("runs", `List (List.map run_row_to_json l.shown));
+  ]
+
 let run_record_of_json (json : Yojson.Safe.t) : run_record option =
   let task_id = Safe_ops.json_string_opt "task_id" json in
   let created_at = Safe_ops.json_string_opt "created_at" json in
@@ -181,11 +206,26 @@ let get ?agent_name config ~task_id : (Yojson.Safe.t, string) result =
     ] in
     Ok json
 
-(** List runs *)
-let list config : Yojson.Safe.t =
+(* Most recently updated first. A timestamp that does not parse sorts after
+   every one that does, so the run still shows and the order stays total. Equal
+   instants fall back to the task id. *)
+let newest_first (a, a_at) (b, b_at) =
+  let by_id () = String.compare a.task_id b.task_id in
+  match a_at, b_at with
+  | Some x, Some y -> (match Float.compare y x with 0 -> by_id () | order -> order)
+  | Some _, None -> -1
+  | None, Some _ -> 1
+  | None, None -> by_id ()
+
+let rec take n = function
+  | x :: rest when n > 0 -> x :: take (n - 1) rest
+  | _ -> []
+
+(** List runs: how many there are, and the [limit] most recently updated. *)
+let list config ~limit : run_listing =
   let dir = runs_dir config in
   if not (Sys.file_exists dir) then
-    `Assoc [("count", `Int 0); ("runs", `List [])]
+    { total = 0; shown = [] }
   else
     let entries = Sys.readdir dir |> Array.to_list in
     let runs = List.filter_map (fun task_id ->
@@ -194,7 +234,10 @@ let list config : Yojson.Safe.t =
         run_record_of_json (read_json config path)
       else None
     ) entries in
-    `Assoc [
-      ("count", `Int (List.length runs));
-      ("runs", `List (List.map run_record_to_json runs));
-    ]
+    let newest =
+      runs
+      |> List.map (fun run -> run, Masc_domain.parse_iso8601_opt run.updated_at)
+      |> List.sort newest_first
+      |> List.map fst
+    in
+    { total = List.length runs; shown = take limit newest }

@@ -176,6 +176,9 @@ type owner_initialization_error =
   | Admin_credential_bootstrap_failed of Masc_domain.masc_error
   | Run_registry_already_installed of
       [ `Exact_lane | `Fusion | `Goal_verification | `Verification ]
+  | Account_access_already_published
+      (** The process published whether a CLI may start on an account before
+          its owner state opened ({!Runtime_account_access.publish}). *)
   | Keeper_persistence_preparation_failed of
       Server_bootstrap_loops.keeper_persistence_prepare_error
   | Keeper_persistence_claim_failed of
@@ -218,7 +221,10 @@ val initialize_owner_state_blocking
   -> initialized_owner_state
 (** The owner state opens the base path of [single_user], which only
     {!Authz_boot_mode_read.boot} makes; every runtime that opens a base path
-    passes the account mode judgment first.
+    passes the account mode judgment first. Before it opens anything, it
+    publishes the access of the process for that judgment
+    ({!Runtime_account_access.publish}), so an owner state opens once per
+    process.
     [runtime_sw] must outlive [sw], including session journal cleanup.
     Complete every transport-neutral, fallible owner-initialization step and
     return the still-unclaimed persistence preparation. A transport must

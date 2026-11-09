@@ -128,7 +128,6 @@
   test_mcp
   test_mcp_coverage
   test_mcp_deep
-  test_mcp_http
   test_mcp_integration
   test_mcp_session
   test_metrics
@@ -253,7 +252,6 @@
   test_mcp
   test_mcp_coverage
   test_mcp_deep
-  test_mcp_http
   test_mcp_integration
   test_mcp_session
   test_metrics

@@ -61,17 +61,23 @@ val github_callback_path : string
     - [GET] and [POST /api/v1/auth/keepers] and
       [POST /api/v1/auth/keepers/assign], the Keepers of the person
       ({!Auth_preview_keeper}, plan D1-5)
+    - [POST /api/v1/auth/keepers/turn], one turn of the person's Keeper on
+      the Runtime they gave it ({!Server_preview_keeper_turn}, plan D2-8)
 
     The subscription routes are judged as [Manage_own_provider] by
     {!Auth_preview.person} on one snapshot of the zone, and a request that does
     not pass gets its 401 or 403 before the connect handler reads anything.
     The Keeper routes are judged the same way as [Manage_own_keeper] by
-    {!Auth_preview.keeper_owner}.
+    {!Auth_preview.keeper_owner}, and the turn by
+    {!Auth_preview.keeper_owner_person}, which gives the namespace of the
+    person as well.
 
     Only the preview command registers them; {!add_routes} is what a server
-    registers (S1). *)
+    registers (S1). [env] is the environment of the preview process, from
+    which a turn starts the client. *)
 val add_preview_routes
   :  Login_routes.t
+  -> env:Eio_unix.Stdenv.base
   -> base_path:string
   -> Http_server_eio.Router.t
   -> Http_server_eio.Router.t

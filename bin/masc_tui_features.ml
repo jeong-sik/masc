@@ -28,9 +28,8 @@ let opener_text = function
   | Surface route -> route
   | Token token -> token
 
-(* Widest opener spelled above: "masc_tool_help" and "System / Tools" are 14
-   cells. A longer opener pads by the minimum and its row simply starts its
-   sentence further right, the way the help sheet's long usages do. *)
+(* Short openers share a sentence column. Longer paths retain two spaces
+   and use their actual cell width for wrapping and continuation rows. *)
 let opener_cells = 14
 
 let sections =
@@ -46,18 +45,20 @@ let sections =
         ; description = "switch this pane to another keeper: /keeper <name>" }
       ; { opener = Key "&"
         ; description = "Collab: watch MSX/DOS, manage play links" }
-      ; { opener = Surface "Dashboard"
+      ; { opener = Surface "Operations"
         ; description = "decisions and remembered conversations; Enter opens the selected destination" }
       ; { opener = Surface "Work"
         ; description = "Goals, Tasks and evidence; t switches lists, Enter reads details" }
       ; { opener = Surface "Keepers"
         ; description = "conversations, settings and history; c opens chat, l opens logs" }
-      ; { opener = Surface "Usage"
+      ; { opener = Surface "Operations / Usage"
         ; description = "f selects an account, v cycles Plan/Trend/Keepers/Calls, a restores all accounts" }
-      ; { opener = Surface "Board"
+      ; { opener = Surface "Work / Board"
         ; description = "Enter reads a discussion; S follows its recorded successor, Esc returns" }
       ; { opener = Surface "Workspace"
         ; description = "Enter browses files; Ctrl-P in Code finds checkout files; v reads selected repository context" }
+      ; { opener = Surface "Features & plugins"
+        ; description = "observed capabilities and plugin workers; Enter reads evidence, d opens full details" }
       ; { opener = Surface "System"
         ; description = "p cycles settings panes; on Models, v reads complete account/model details" }
       ] )
@@ -127,7 +128,7 @@ let sections =
            first word is the Experimental mark. *)
         { opener = Token "masc_wiki_lint"
         ; description = "check the wiki, write nothing (Experimental)" }
-      ; { opener = Surface "System / Tools"
+      ; { opener = Surface "Features & plugins / Tools"
         ; description = "the tool catalog, receipts and usage" }
       ; { opener = Command "addons"
         ; description = "cross-lane observations and packaging: /addons" }
@@ -148,12 +149,13 @@ let lines ~width =
   (* The item marker also keeps a fence name at the start of a row from
      opening a Markdown block when this sheet is placed in a chat notice. *)
   let prefix = "  \xe2\x80\xa2 " in
-  let column = Masc_tui_message_layout.display_width prefix + opener_cells + 2 in
   let row_lines row =
     let opener = opener_text row.opener in
     let pad =
       max 2 (opener_cells - Masc_tui_message_layout.display_width opener)
     in
+    let lead = prefix ^ opener ^ String.make pad ' ' in
+    let column = Masc_tui_message_layout.display_width lead in
     match
       Masc_tui_message_layout.wrap_words
         ~max_cells:(max 1 (width - column))
@@ -161,7 +163,6 @@ let lines ~width =
     with
     | [] -> []
     | first :: rest ->
-      let lead = prefix ^ opener ^ String.make pad ' ' in
       (lead ^ first)
       :: List.map (fun piece -> String.make column ' ' ^ piece) rest
   in

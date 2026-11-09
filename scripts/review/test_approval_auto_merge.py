@@ -85,10 +85,10 @@ class FakeGitHub:
                 value = self.pulls[number]
             else:
                 assert suffix[1] == 'reviews?per_page=100', path
-                # Multiple pages exercise the production pagination flattening.
-                history = self.reviews[number]
-                value = [history[:1], history[1:]]
-        return json.dumps(value)
+                value = self.reviews[number]
+        body = json.dumps(value)
+        return ('HTTP/2.0 200 OK\nContent-Type: application/json\n\n' + body
+                if '--include' in command else body)
 
     def run(self, command, **kwargs):
         if command[:3] == ['gh', 'pr', 'merge']:
@@ -598,7 +598,8 @@ class FollowingAcceptedMerges(unittest.TestCase):
 
     def test_a_request_that_is_gone_or_a_closed_member_ends_the_chain_visibly(self):
         receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102), 'members': [101, 102], 'since': 1.0}
-        with patch.object(MERGE, 'read', side_effect=ValueError('gh: Not Found (HTTP 404)')), \
+        with patch.object(MERGE, 'read', side_effect=MERGE.GET.ApiFailure(
+                'result', 404, {}, 'unavailable')), \
              patch.object(MERGE.subprocess, 'run') as run:
             gone = MERGE.resume(REPO, receipt)
         self.assertEqual(gone['status'], 'request_not_found')
@@ -640,6 +641,262 @@ class FollowingAcceptedMerges(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     MERGE.parse_receipt(raw)
                 read.assert_not_called()
+
+
+def http_response(status, value, headers=None):
+    lines = [f'HTTP/2.0 {status} response']
+    lines.extend(f'{key}: {value}' for key, value in (headers or {}).items())
+    return subprocess.CompletedProcess([], int(status >= 400),
+                                       '\n'.join(lines) + '\n\n' + json.dumps(value), '')
+
+
+class QuotaGetIntegration(unittest.TestCase):
+    def quota_client(self, github, path, attempt, on_pause=lambda: None):
+        clock = types.SimpleNamespace(now=1000.0, sleeps=[])
+        counts = {}
+        def sleep(seconds):
+            clock.sleeps.append(seconds)
+            on_pause()
+            clock.now += seconds
+        def run(command, **kwargs):
+            endpoint = command[-1]
+            counts[endpoint] = counts.get(endpoint, 0) + 1
+            if endpoint == path and counts[endpoint] == attempt:
+                return http_response(403, {'message': 'limited'},
+                                     {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1030'})
+            return github.run(command, **kwargs)
+        return (MERGE.GET.Client(run=run, clock=lambda: clock.now, sleep=sleep), clock, counts)
+
+    def test_a_quota_pause_rechecks_head_base_and_later_reviews_before_admission(self):
+        for changed in ('head', 'base', 'review'):
+            with self.subTest(changed=changed), FakeGitHub() as github:
+                def change():
+                    if changed == 'head':
+                        github.pulls[101]['head']['sha'] = sha(9001)
+                    elif changed == 'base':
+                        github.pulls[101]['base']['ref'] = 'other'
+                    else:
+                        github.reviews[101].append(review(9001, 4, 'CHANGES_REQUESTED', when=T2))
+                # The last snapshot is after both review reads: resuming just
+                # that GET would otherwise approve the old review history.
+                client, clock, counts = self.quota_client(github, PREFIX + '/pulls/101', 4, change)
+                with patch.object(MERGE, 'CLIENT', client), self.assertRaises(ValueError):
+                    MERGE.prepare(REPO, 101)
+                self.assertEqual(clock.sleeps, [30])
+                self.assertEqual(github.mutations, [])
+                self.assertEqual(counts[PREFIX + '/rules/branches/main'], 2)
+                if changed == 'review':
+                    self.assertGreaterEqual(counts[PREFIX + '/pulls/101/reviews?per_page=100'], 3)
+
+    def test_a_new_head_with_its_own_two_reviews_is_admitted_only_after_fresh_reads(self):
+        with FakeGitHub() as github:
+            def change():
+                github.pulls[101]['head']['sha'] = sha(9001)
+                github.reviews[101] = [review(9001, 2, head=sha(9001)), review(9002, 3, head=sha(9001))]
+            client, _, counts = self.quota_client(github, PREFIX + '/pulls/101', 4, change)
+            with patch.object(MERGE, 'CLIENT', client):
+                selected, head, _ = MERGE.prepare(REPO, 101)
+        self.assertEqual((selected, head), (101, sha(9001)))
+        self.assertEqual(counts[PREFIX + '/rules/branches/main'], 2)
+        self.assertEqual(github.mutations, [])
+
+    def test_an_auth_failure_after_a_quota_pause_is_not_restarted_or_held(self):
+        clock, calls = types.SimpleNamespace(now=1000.0), []
+        def run(command, **kwargs):
+            calls.append(command)
+            return http_response(403, {'message': 'refused'},
+                {'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1030'} if len(calls) == 1 else {})
+        client = MERGE.GET.Client(run=run, clock=lambda: clock.now,
+                                 sleep=lambda seconds: setattr(clock, 'now', clock.now + seconds))
+        with patch.object(MERGE, 'CLIENT', client), self.assertRaises(MERGE.GET.ApiFailure):
+            MERGE.prepare(REPO, 101)
+        self.assertEqual(len(calls), 2)
+
+    def test_native_snapshot_uses_the_same_get_transport(self):
+        with FakeGitHub(['open', 'open']) as github:
+            client, clock, _ = self.quota_client(github, PREFIX + '/pulls/101', 2)
+            with patch.object(MERGE, 'CLIENT', client), \
+                 patch.object(MERGE.subprocess, 'check_output') as legacy:
+                selected, _, scope = MERGE.prepare(REPO, 101)
+            legacy.assert_not_called()
+        self.assertEqual((selected, scope['members'], client.pauses), (102, [101, 102], 1))
+        self.assertEqual(clock.sleeps, [30])
+
+    def test_a_quota_on_post_reservation_readback_never_replays_the_write(self):
+        with FakeGitHub() as github, redirect_stdout(io.StringIO()):
+            client, clock, _ = self.quota_client(github, PREFIX + '/pulls/101', 4)
+            with patch.object(MERGE, 'CLIENT', client):
+                result = MERGE.auto_merge_default(REPO, 101)
+        self.assertEqual(result['status'], 'auto_merge_enabled')
+        self.assertEqual((len(github.mutations), clock.sleeps), (1, [30]))
+
+    def test_an_accepted_uuid_survives_a_quota_pause_without_another_put(self):
+        clock = types.SimpleNamespace(now=1000.0)
+        puts, reads = [], []
+        endpoint = PREFIX + f'/pulls/102/merge-async/{UUID}'
+        def run(command, **kwargs):
+            if command[:2] == ['gh', 'api'] and command[command.index('--method') + 1] == 'PUT':
+                puts.append(command)
+                return subprocess.CompletedProcess(command, 0,
+                    json.dumps({'status': 'pending', 'details': {'uuid': UUID}}), '')
+            reads.append(command[-1])
+            if command[-1] == endpoint:
+                return (http_response(429, {'message': 'limited'}, {'Retry-After': '12'})
+                        if reads.count(endpoint) == 1 else http_response(200, {'status': 'enqueued'}))
+            return http_response(200, {'merged': True, 'state': 'closed', 'merge_commit_sha': sha(9999)})
+        client = MERGE.GET.Client(run=run, clock=lambda: clock.now,
+                                 sleep=lambda seconds: setattr(clock, 'now', clock.now + seconds))
+        scope = {'stack': {'number': 900}, 'scope': [{'number': 101}, {'number': 102}]}
+        with patch.object(MERGE, 'CLIENT', client), \
+             patch.object(MERGE.subprocess, 'run', side_effect=run), redirect_stdout(io.StringIO()):
+            result = MERGE.submit(REPO, 102, sha(102), scope)
+        self.assertEqual((result['status'], result['uuid'], len(puts)), ('merged', UUID, 1))
+        self.assertEqual(reads.count(endpoint), 2)
+        self.assertEqual(clock.now, 1012)
+
+    def test_only_a_typed_result_endpoint_404_or_410_means_the_request_is_gone(self):
+        receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102), 'members': [101, 102], 'since': 1}
+        endpoint = PREFIX + f'/pulls/102/merge-async/{UUID}'
+        scope = {'scope': [{'number': 101}, {'number': 102}]}
+        for status in (403, 404, 410, 500):
+            with self.subTest(status=status), patch.object(MERGE, 'WAIT_SECONDS', 0), \
+                 patch.object(MERGE, 'read', side_effect=MERGE.GET.ApiFailure(
+                     endpoint, status, {}, 'hidden' if status in (404, 410) else 'Not Found')):
+                result = MERGE.follow(REPO, endpoint, receipt, scope)
+            self.assertEqual(result['status'], 'request_not_found' if status in (404, 410)
+                             else 'observation_unavailable')
+            self.assertEqual(result['uuid'], UUID)
+
+    def test_a_typed_member_404_keeps_the_request_unsettled(self):
+        receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102), 'members': [101, 102], 'since': 1}
+        endpoint = PREFIX + f'/pulls/102/merge-async/{UUID}'
+        scope = {'scope': [{'number': 101}, {'number': 102}]}
+        with patch.object(MERGE, 'WAIT_SECONDS', 0), \
+             patch.object(MERGE, 'read', return_value={'status': 'enqueued'}), \
+             patch.object(MERGE, 'pull', side_effect=MERGE.GET.ApiFailure('member', 404, {}, 'gone')):
+            result = MERGE.follow(REPO, endpoint, receipt, scope)
+        self.assertEqual((result['status'], result['uuid']), ('observation_unavailable', UUID))
+
+    def test_a_quota_wait_past_the_follow_budget_hands_off_the_same_uuid(self):
+        for quota_path in ('endpoint', 'member'):
+            with self.subTest(quota_path=quota_path):
+                clock = types.SimpleNamespace(now=1000.0, sleeps=[])
+                puts, reads = [], []
+                endpoint = PREFIX + f'/pulls/102/merge-async/{UUID}'
+                member = PREFIX + '/pulls/101'
+                def run(command, **kwargs):
+                    if command[:2] == ['gh', 'api'] and command[command.index('--method') + 1] == 'PUT':
+                        puts.append(command)
+                        return subprocess.CompletedProcess(command, 0,
+                            json.dumps({'status': 'pending', 'details': {'uuid': UUID}}), '')
+                    reads.append(command[-1])
+                    limited = ((quota_path == 'endpoint' and command[-1] == endpoint) or
+                               (quota_path == 'member' and command[-1] == member))
+                    if limited:
+                        return http_response(429, {'message': 'limited'}, {'Retry-After': '3600'})
+                    if command[-1] == endpoint:
+                        return http_response(200, {'status': 'pending'})
+                    return http_response(200, {'merged': False, 'state': 'open'})
+                def sleep(seconds):
+                    clock.sleeps.append(seconds)
+                    clock.now += seconds
+                client = MERGE.GET.Client(run=run, clock=lambda: clock.now, sleep=sleep)
+                scope = {'stack': {'number': 900}, 'scope': [{'number': 101}, {'number': 102}]}
+                with patch.object(MERGE, 'CLIENT', client), \
+                     patch.object(MERGE.subprocess, 'run', side_effect=run), \
+                     patch.object(MERGE, 'hand_off',
+                                  side_effect=lambda repo, outcome: outcome) as hand, \
+                     redirect_stdout(io.StringIO()):
+                    result = MERGE.submit(REPO, 102, sha(102), scope)
+                self.assertEqual(result['status'], 'observation_unavailable')
+                self.assertEqual(result['uuid'], UUID)
+                self.assertEqual(len(puts), 1)
+                self.assertEqual(reads.count(endpoint if quota_path == 'endpoint' else member), 1)
+                self.assertEqual(clock.sleeps, [MERGE.WAIT_SECONDS])
+                self.assertEqual(client.pauses, 1)
+                self.assertIsNone(client.deadline)
+                hand.assert_called_once()
+                self.assertIn('cut short', result['error'])
+
+    def test_quota_retry_times_survive_fresh_runs_for_result_and_member_reads(self):
+        for quota_path in ('endpoint', 'member'):
+            with self.subTest(quota_path=quota_path):
+                clock = types.SimpleNamespace(now=1000.0, sleeps=[])
+                resets = (4600.0, 8200.0)
+                puts, reads, quotas, handed, clients = [], [], [], [], []
+                endpoint = PREFIX + f'/pulls/102/merge-async/{UUID}'
+                member = PREFIX + '/pulls/101'
+
+                def run(command, **kwargs):
+                    if command[:3] == ['gh', 'workflow', 'run']:
+                        handed.append(json.loads(next(v.removeprefix('receipt=')
+                            for v in command if v.startswith('receipt='))))
+                        return subprocess.CompletedProcess(command, 0, '', '')
+                    method = command[command.index('--method') + 1]
+                    if method == 'PUT':
+                        puts.append(command)
+                        return subprocess.CompletedProcess(command, 0,
+                            json.dumps({'status': 'pending', 'details': {'uuid': UUID}}), '')
+                    self.assertEqual(method, 'GET')
+                    if quotas:
+                        self.assertGreaterEqual(clock.now, quotas[-1]['retry_at'])
+                    reads.append((clock.now, command[-1]))
+                    limited = command[-1] == (endpoint if quota_path == 'endpoint' else member)
+                    if limited:
+                        for retry_at in resets:
+                            if clock.now < retry_at:
+                                quotas.append({'at': clock.now, 'retry_at': retry_at})
+                                return http_response(403, {'message': 'limited'},
+                                    {'X-RateLimit-Remaining': '0',
+                                     'X-RateLimit-Reset': str(int(retry_at))})
+                    if command[-1] == endpoint:
+                        return http_response(200, {'status': 'enqueued'})
+                    return http_response(200, {'merged': True, 'state': 'closed',
+                                               'merge_commit_sha': sha(9999)})
+
+                def sleep(seconds):
+                    clock.sleeps.append(seconds)
+                    clock.now += seconds
+
+                def fresh_client():
+                    client = MERGE.GET.Client(run=run, clock=lambda: clock.now, sleep=sleep)
+                    clients.append(client)
+                    return client
+
+                scope = {'stack': {'number': 900}, 'scope': [{'number': 101}, {'number': 102}]}
+                time = types.SimpleNamespace(time=lambda: clock.now,
+                    monotonic=lambda: clock.now - 1000, sleep=sleep)
+                with patch.object(MERGE, 'time', time), \
+                     patch.object(MERGE.subprocess, 'run', side_effect=run), \
+                     patch.object(MERGE, 'prepare') as admission, redirect_stdout(io.StringIO()):
+                    with patch.object(MERGE, 'CLIENT', fresh_client()):
+                        outcome = MERGE.submit(REPO, 102, sha(102), scope)
+                    while outcome['status'] == 'resume_dispatched':
+                        receipt = MERGE.parse_receipt(json.dumps(handed[-1]))
+                        with patch.object(MERGE, 'CLIENT', fresh_client()):
+                            outcome = MERGE.resume(REPO, receipt)
+                admission.assert_not_called()
+                self.assertEqual((outcome['status'], outcome['uuid'], len(puts)), ('merged', UUID, 1))
+                self.assertEqual(quotas, [{'at': 1000, 'retry_at': 4600},
+                                         {'at': 4600, 'retry_at': 8200}])
+                self.assertTrue(all(row['uuid'] == UUID and row['head'] == sha(102) and
+                                    row['members'] == [101, 102] and row['since'] == 1000 and
+                                    row['retry_at'] in resets for row in handed))
+                self.assertTrue(all(seconds <= MERGE.WAIT_SECONDS for seconds in clock.sleeps))
+                self.assertTrue(all(client.deadline is None for client in clients))
+                self.assertEqual((clock.now, reads[-1][0]), (8200, 8200))
+                self.assertNotIn('retry_at', outcome)
+
+    def test_retry_metadata_keeps_saved_receipts_and_rejects_untrusted_shapes(self):
+        receipt = {'uuid': UUID, 'pr': 102, 'head': sha(102), 'members': [101, 102], 'since': 1}
+        self.assertEqual(MERGE.parse_receipt(json.dumps(receipt)), receipt)
+        deferred = dict(receipt, retry_at=4600)
+        self.assertEqual(MERGE.parse_receipt(json.dumps(deferred)), deferred)
+        for retry_at in (True, None, '4600', -1, 0, float('inf'), float('-inf'), float('nan')):
+            with self.subTest(retry_at=retry_at), self.assertRaises(ValueError):
+                MERGE.parse_receipt(json.dumps(dict(receipt, retry_at=retry_at)))
+        with self.assertRaises(ValueError):
+            MERGE.parse_receipt(json.dumps(dict(deferred, extra=True)))
 
 
 if __name__ == '__main__':

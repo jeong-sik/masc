@@ -1033,19 +1033,17 @@ let test_new_declared_output_schemas_admit_producer_shapes () =
        ]);
   accepts
     "masc_run_list"
-    (`Assoc
-       [ "count", `Int 1
-       ; ( "runs"
-         , `List
-             [ Masc.Run_eio.run_record_to_json
-                 { Masc.Run_eio.task_id = "task-1"
-                 ; agent_name = None
-                 ; plan = "plan body"
-                 ; created_at = "2026-08-18T00:00:00Z"
-                 ; updated_at = "2026-08-18T00:00:00Z"
-                 }
-             ] )
-       ]);
+    (Masc.Run_eio.run_listing_to_json
+       { Masc.Run_eio.total = 1
+       ; shown =
+           [ { Masc.Run_eio.task_id = "task-1"
+             ; agent_name = None
+             ; plan = "plan body"
+             ; created_at = "2026-08-18T00:00:00Z"
+             ; updated_at = "2026-08-18T00:00:00Z"
+             }
+           ]
+       });
   accepts "masc_get_metrics" metrics_value;
   (* PR #33019 removed requested_agent_name/resolved_agent_name aliases from
      the schema, so outputs carrying those ghost fields must be rejected. *)

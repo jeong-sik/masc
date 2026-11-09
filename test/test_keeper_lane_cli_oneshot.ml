@@ -1210,6 +1210,7 @@ let test_input_size_guard_and_refusal_classification () =
 ;;
 
 let () =
+  Masc_test_deps.publish_single_user_access ();
   Alcotest.run
     "keeper_lane_cli_oneshot"
     [ ( "typed capability admission (Track 2A)"

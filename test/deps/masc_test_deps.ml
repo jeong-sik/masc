@@ -23,6 +23,33 @@ let claude_account ?(home="/synthetic/claude-account") () =
 let codex_account ?(home="/synthetic/codex-account") () =
   official_account ~client:Codex ~home
 
+(** A CLI starts on an account only by the access its process published
+    ({!Runtime_account_access}), once per process. A test executable that
+    starts a client calls this once, before [Alcotest.run]: it publishes the
+    single user of a fresh base path never set up for accounts, as a host
+    tool publishes it. *)
+let publish_single_user_access () =
+  let root = Filename.temp_dir "masc-test-account-access-" "" in
+  let published =
+    Eio_main.run (fun _env ->
+      Runtime_account_access.publish_host_tool
+        ~base_path:root ~config_dir:(Some (Filename.concat root "config")))
+  in
+  Unix.rmdir root;
+  match published with
+  | Ok () -> ()
+  | Error (first, _) -> failwith first
+
+(** [account] authorized for an operator call, after
+    {!publish_single_user_access}. *)
+let authorized_account account =
+  match
+    Runtime_account_access.authorize Runtime_account_access.Operator_call
+      (Runtime_account_access.seal account)
+  with
+  | Ok authorized -> authorized
+  | Error refusal -> failwith (Runtime_account_access.refusal_to_string refusal)
+
 (** Install the Eio clock + optional switch in every registry the lib
     code reads from.
 

@@ -1,12 +1,8 @@
-(** Extended MCP coverage tests — targets uncovered paths in mcp.ml and mcp_http.ml.
+(** Extended MCP coverage tests — targets uncovered paths in mcp.ml.
 
     Focuses on:
-    - merge_env with actual overrides
     - mcp_tool_of_json edge cases (missing description, numeric name)
-    - exact text_of_tool_result extraction with EmbeddedResource content
-    - close_managed and close_all with Http transport
-    - MCP HTTP explicit config type verification
-    - Mcp_http.parse/SSE body parsing (internal but covered via connect path) *)
+    - exact text_of_tool_result extraction with EmbeddedResource content *)
 
 open Agent_core
 
@@ -29,28 +25,6 @@ let make_tool_result ?is_error ?structured_content content =
   match Mcp_protocol.Mcp_types.tool_result_of_yojson (`Assoc fields) with
   | Ok result -> result
   | Error detail -> failwith ("tool_result_of_yojson failed: " ^ detail)
-;;
-
-(* ── merge_env tests ──────────────────────────────────────── *)
-
-let test_merge_env_empty () =
-  let result = Mcp.merge_env [] in
-  (* Should return current environment unchanged *)
-  Alcotest.(check bool) "non-empty" true (Array.length result > 0)
-;;
-
-let test_merge_env_override () =
-  let result = Mcp.merge_env [ "AGENT_CORE_TEST_KEY_XYZ", "test_value" ] in
-  let found = Array.exists (fun entry -> entry = "AGENT_CORE_TEST_KEY_XYZ=test_value") result in
-  Alcotest.(check bool) "contains override" true found
-;;
-
-let test_merge_env_multiple () =
-  let result = Mcp.merge_env [ "AGENT_CORE_KEY_A", "val_a"; "AGENT_CORE_KEY_B", "val_b" ] in
-  let has_a = Array.exists (fun e -> e = "AGENT_CORE_KEY_A=val_a") result in
-  let has_b = Array.exists (fun e -> e = "AGENT_CORE_KEY_B=val_b") result in
-  Alcotest.(check bool) "has key_a" true has_a;
-  Alcotest.(check bool) "has key_b" true has_b
 ;;
 
 (* ── mcp_tool_of_json extended ────────────────────────────── *)
@@ -122,80 +96,6 @@ let test_text_of_tool_result_single_text () =
   Alcotest.(check string) "single text" "single line" text
 ;;
 
-(* ── close_managed / close_all ────────────────────────────── *)
-
-let test_close_managed_http () =
-  let closed = ref false in
-  let managed : Mcp.managed =
-    { tools = []
-    ; skipped_tools = []
-    ; name = "http-test"
-    ; transport =
-        Http
-          { close_fn = (fun () -> closed := true)
-          ; base_url = "http://127.0.0.1:8935/mcp"
-          ; headers = []
-          }
-    }
-  in
-  Mcp.close_managed managed;
-  Alcotest.(check bool) "close_fn called" true !closed
-;;
-
-let test_close_all_empty () =
-  Mcp.close_all [];
-  (* No crash on empty list *)
-  Alcotest.(check bool) "ok" true true
-;;
-
-let test_close_all_mixed () =
-  let count = ref 0 in
-  let m1 : Mcp.managed =
-    { tools = []
-    ; skipped_tools = []
-    ; name = "srv1"
-    ; transport =
-        Http
-          { close_fn = (fun () -> incr count)
-          ; base_url = "http://127.0.0.1:1/mcp"
-          ; headers = []
-          }
-    }
-  in
-  let m2 : Mcp.managed =
-    { tools = []
-    ; skipped_tools = []
-    ; name = "srv2"
-    ; transport =
-        Http
-          { close_fn = (fun () -> incr count)
-          ; base_url = "http://127.0.0.1:2/mcp"
-          ; headers = []
-          }
-    }
-  in
-  Mcp.close_all [ m1; m2 ];
-  Alcotest.(check int) "both closed" 2 !count
-;;
-
-let test_close_managed_http_exception () =
-  (* close_fn that raises should be swallowed *)
-  let managed : Mcp.managed =
-    { tools = []
-    ; skipped_tools = []
-    ; name = "bad-close"
-    ; transport =
-        Http
-          { close_fn = (fun () -> failwith "close error")
-          ; base_url = "http://127.0.0.1:3/mcp"
-          ; headers = []
-          }
-    }
-  in
-  Mcp.close_managed managed;
-  Alcotest.(check bool) "no crash" true true
-;;
-
 (* ── json_schema_type_to_param_type extended ──────────────── *)
 
 let test_type_mapping_all () =
@@ -237,35 +137,12 @@ let test_mcp_tool_to_agent_core_tool_empty_schema () =
   | Error _ -> Alcotest.fail "expected Ok"
 ;;
 
-(* MCP HTTP explicit config *)
-
-(* ── Server spec construction ─────────────────────────────── *)
-
-let test_server_spec_construction () =
-  let spec : Mcp.server_spec =
-    { command = "node"
-    ; args = [ "server.js"; "--port"; "3000" ]
-    ; env = [ "NODE_ENV", "production" ]
-    ; name = "test-server"
-    }
-  in
-  Alcotest.(check string) "command" "node" spec.command;
-  Alcotest.(check int) "args count" 3 (List.length spec.args);
-  Alcotest.(check string) "name" "test-server" spec.name;
-  Alcotest.(check int) "env count" 1 (List.length spec.env)
-;;
-
 (* ── Suite ────────────────────────────────────────────────── *)
 
 let () =
   Alcotest.run
     "MCP_coverage"
-    [ ( "merge_env"
-      , [ Alcotest.test_case "empty extras" `Quick test_merge_env_empty
-        ; Alcotest.test_case "override key" `Quick test_merge_env_override
-        ; Alcotest.test_case "multiple keys" `Quick test_merge_env_multiple
-        ] )
-    ; ( "mcp_tool_of_json"
+    [ ( "mcp_tool_of_json"
       , [ Alcotest.test_case "no description" `Quick test_mcp_tool_of_json_no_description
         ; Alcotest.test_case "integer name" `Quick test_mcp_tool_of_json_integer_name
         ; Alcotest.test_case "null input" `Quick test_mcp_tool_of_json_null
@@ -278,17 +155,9 @@ let () =
             test_text_of_tool_result_resource_content
         ; Alcotest.test_case "single text" `Quick test_text_of_tool_result_single_text
         ] )
-    ; ( "close_managed"
-      , [ Alcotest.test_case "http transport" `Quick test_close_managed_http
-        ; Alcotest.test_case "close_all empty" `Quick test_close_all_empty
-        ; Alcotest.test_case "close_all mixed" `Quick test_close_all_mixed
-        ; Alcotest.test_case "close_fn exception" `Quick test_close_managed_http_exception
-        ] )
     ; "type_mapping", [ Alcotest.test_case "all types" `Quick test_type_mapping_all ]
     ; ( "tool_bridge"
       , [ Alcotest.test_case "empty schema" `Quick test_mcp_tool_to_agent_core_tool_empty_schema
         ] )
-    ; ( "server_spec"
-      , [ Alcotest.test_case "construction" `Quick test_server_spec_construction ] )
     ]
 ;;

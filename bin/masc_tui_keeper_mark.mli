@@ -104,6 +104,7 @@ val axis_next_header : string
 val fact_age_header : string
 val librarian_header : string
 val updated_header : string
+(** The snapshot's saved time, not a source-revalidation result. *)
 val lag_digest_gap_header : string
 val lag_stale_facts_header : string
 (** The header words over the cells of the memory and age views. *)

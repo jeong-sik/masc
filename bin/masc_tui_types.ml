@@ -1305,8 +1305,8 @@ type keeper_logs_owed = {
   klgo_read : Masc_tui_owed_read.t;
 }
 
-(* The read the schedules of one Keeper owe while the chat pane or the
-   Automation tab draws them. *)
+(* The read the schedules of one Keeper owe while the chat pane, the
+   Automation tab or the Story window draws them. *)
 type keeper_schedules_owed = {
   kso_keeper : string;
   kso_read : Masc_tui_owed_read.t;
@@ -2815,7 +2815,11 @@ type schedule_row = {
   sch_next_due_at_iso: string option;
   sch_expires_at_iso: string option;
   sch_recurrence_summary: string;
-  sch_recurrence: Yojson.Safe.t;
+  sch_recurrence: (Schedule_domain.recurrence, string) result;
+      (** Read with [Schedule_domain.recurrence_of_yojson]. A recurrence this
+          build cannot read keeps the row and stays [Error]: the wake strip
+          stops knowing after the row's first wake, and the modify form does
+          not open. *)
   sch_payload_digest: string;
   sch_payload: Yojson.Safe.t;
   sch_payload_kind: string option;
@@ -2881,13 +2885,6 @@ let schedule_json_string field = function
        | Some (`String value) -> value
        | Some _ | None -> "")
   | _ -> ""
-
-let schedule_json_int field = function
-  | `Assoc fields ->
-      (match List.assoc_opt field fields with
-       | Some (`Int value) -> Some value
-       | Some _ | None -> None)
-  | _ -> None
 
 let schedule_payload_body = function
   | `Assoc fields ->
@@ -2960,27 +2957,34 @@ let schedule_modify_refusal (row : schedule_row) : string option =
               read; refresh if it has changed)"
              row.sch_status)
 
-let schedule_update_form_json (row : schedule_row) =
+(* The recurrence fields of both schedule forms. The defaults are what a new
+   schedule starts with; the modify form passes only the fields of the row's
+   own kind, so switching the kind in the editor starts from the same values
+   as a new schedule. *)
+let schedule_form_recurrence_fields ?(interval_sec = 3600) ?(hour = 9)
+    ?(minute = 0) ?(second = 0) ?(cron = "0 9 * * *")
+    ?(timezone = "Asia/Seoul") () =
+  [ "recurrence_interval_sec", `Int interval_sec
+  ; "recurrence_hour", `Int hour
+  ; "recurrence_minute", `Int minute
+  ; "recurrence_second", `Int second
+  ; "recurrence_cron", `String cron
+  ; "recurrence_timezone", `String timezone
+  ]
+
+let schedule_form_fields_of_recurrence = function
+  | Schedule_domain.One_shot -> schedule_form_recurrence_fields ()
+  | Schedule_domain.Interval { interval_sec } ->
+      schedule_form_recurrence_fields ~interval_sec ()
+  | Schedule_domain.Daily { hour; minute; second; timezone } ->
+      schedule_form_recurrence_fields ~hour ~minute ~second ~timezone ()
+  | Schedule_domain.Cron { expression; timezone } ->
+      schedule_form_recurrence_fields ~cron:expression ~timezone ()
+
+let schedule_modify_form (row : schedule_row) recurrence =
   let body = schedule_payload_body row.sch_payload in
-  let recurrence_kind = schedule_json_string "kind" row.sch_recurrence in
-  let int_or source fallback =
-    Option.value ~default:fallback
-      (schedule_json_int source row.sch_recurrence)
-  in
-  let string_or source fallback =
-    let value = schedule_json_string source row.sch_recurrence in
-    if String.trim value = "" then fallback else value
-  in
-  let recurrence_fields =
-    [ "recurrence_interval_sec", `Int (int_or "interval_sec" 3600)
-    ; "recurrence_hour", `Int (int_or "hour" 9)
-    ; "recurrence_minute", `Int (int_or "minute" 0)
-    ; "recurrence_second", `Int (int_or "second" 0)
-    ; "recurrence_cron", `String (string_or "expression" "0 9 * * *")
-    ; "recurrence_timezone",
-      `String (string_or "timezone" "Asia/Seoul")
-    ]
-  in
+  let recurrence_kind = Schedule_domain.recurrence_kind_to_string recurrence in
+  let recurrence_fields = schedule_form_fields_of_recurrence recurrence in
   let expires =
     Option.bind row.sch_expires_at_iso Time_codec.parse_rfc3339_opt
     |> Option.fold ~none:[] ~some:(fun value -> [ "expires_at_unix", `Float value ])
@@ -3015,23 +3019,35 @@ let schedule_update_form_json (row : schedule_row) =
      @ run_watch @ recurrence_fields @ expires)
   |> Yojson.Safe.pretty_to_string
 
+(** The form the modify editor opens with, or why it does not open.
+
+    [Error] first carries {!schedule_modify_refusal}. A row whose recurrence
+    this build cannot read is refused too: the update replaces the whole
+    definition, so a form built without that recurrence would save a default
+    over it. *)
+let schedule_update_form_json (row : schedule_row) : (string, string) result =
+  match schedule_modify_refusal row, row.sch_recurrence with
+  | Some reason, (Ok _ | Error _) -> Error reason
+  | None, Error detail ->
+      Error
+        (Printf.sprintf
+           "this build cannot read the schedule's recurrence (%s); the form \
+            would save a default over it"
+           detail)
+  | None, Ok recurrence -> Ok (schedule_modify_form row recurrence)
+
 let schedule_create_form_json () =
   `Assoc
-    [ "schedule_id", `String ""
-    ; "keeper_name", `String ""
-    ; "message", `String ""
-    ; "title", `String ""
-    ; "urgency", `String "normal"
-    ; "due_at_iso", `String ""
-    ; "recurrence_kind", `String "one_shot"
-    ; "recurrence_interval_sec", `Int 3600
-    ; "recurrence_hour", `Int 9
-    ; "recurrence_minute", `Int 0
-    ; "recurrence_second", `Int 0
-    ; "recurrence_cron", `String "0 9 * * *"
-    ; "recurrence_timezone", `String "Asia/Seoul"
-    ; "allow_unregistered_keeper", `Bool false
-    ]
+    ([ "schedule_id", `String ""
+     ; "keeper_name", `String ""
+     ; "message", `String ""
+     ; "title", `String ""
+     ; "urgency", `String "normal"
+     ; "due_at_iso", `String ""
+     ; "recurrence_kind", `String "one_shot"
+     ]
+     @ schedule_form_recurrence_fields ()
+     @ [ "allow_unregistered_keeper", `Bool false ])
   |> Yojson.Safe.pretty_to_string
 
 type schedule_paging =
@@ -4503,15 +4519,14 @@ type browser_lane_visibility =
       return_composer_focused : bool;
     }
 
-(* The Tab cycle and strip share seven destinations. Detail surfaces map to
-   their parent below; Activity and logs live under System, and Goals, Tasks,
-   approvals, review, and verdicts live under Work. *)
+(* The strip follows the operator's questions. Usage belongs to Operations;
+   Board, approvals and verification belong to Work. Features and plugins
+   have their own entry instead of hiding behind runtime configuration. *)
 let surface_ring : (surface * string) list =
-  [ (Overview, "Dashboard");
+  [ (Overview, "Operations");
     (Planning, "Work");
     (Keepers Keeper_list, "Keepers");
-    (Metrics, "Usage");
-    (Board, "Board");
+    (Lanes, "Features & plugins");
     (Repositories, "Workspace");
     (Config, "System");
   ]
@@ -5755,14 +5770,15 @@ let surface_ring_display_label ~lang (surface : surface) fallback =
   | Lang_en -> fallback
   | Lang_ko ->
       (match surface with
-       | Overview -> "대시보드"
+       | Overview -> "운영"
        | Planning -> "작업"
        | Keepers _ -> "키퍼"
+       | Lanes -> "기능·플러그인"
        | Metrics -> "사용량"
        | Board -> "보드"
        | Repositories -> "워크스페이스"
        | Config -> "시스템"
-       | Acting | Memory | Lanes | Clients | Approvals | Schedules
+       | Acting | Memory | Clients | Approvals | Schedules
        | Verification | Harness | Fusion | Code | Changes | Connectors
        | Runtime | Resources | Tools | System_logs ->
            fallback)
@@ -9848,6 +9864,18 @@ type state = {
      choice [tui-keepers.toml] stores. *)
   mutable keeper_list_heading: Masc_tui_keeper_list_model.heading_focus option;
   mutable keeper_list_folded: Masc_tui_keeper_list_model.group list;
+  mutable keeper_story: Masc_tui_keeper_story.page option;
+  (** The Story window below the Keepers list: [None] while it is closed,
+      otherwise the page it shows. It follows the list cursor (RFC-0515
+      section 2.5). The loop closes it once the view is not the Keepers list
+      ([reconcile_keeper_story]), and [transition_keeper_view] closes it at
+      once. *)
+  (* The newest turns of the Keeper under the cursor, read while the Story
+     window shows its story page (RFC-0515 section 2.5). Keyed by Keeper. *)
+  mutable keeper_story_turns: (string, Masc_tui_keeper_turns.turn list) Masc_tui_fetched.t;
+  (* The read those turns owe: drawing them, a push about the Keeper's turns, a
+     revalidation and a failed read each owe it. *)
+  mutable keeper_story_turns_owed: Masc_tui_owed_read.t;
   mutable keeper_list_sort: Masc_tui_keeper_list_model.sort;
   mutable keeper_list_preference_notice: string option;
   mutable keeper_list_preference_startup_error: string option;
@@ -12856,6 +12884,9 @@ let select_activity_keeper state keeper_name =
 let transition_keeper_view state view =
   let resting = resting_keeper_name state in
   state.view <- view;
+  (* A transition closes the Story window even to the list itself; every other
+     assignment of [view] is caught by [reconcile_keeper_story]. *)
+  state.keeper_story <- None;
   Option.iter (select_keeper_name state) resting
 
 (* A heading keeps the cursor on its group's first row, so the Keeper the
@@ -14798,6 +14829,8 @@ let suspend_workspace_readings state =
   state.schedules_agenda_owed <- Masc_tui_owed_read.settled;
   state.schedules_page_owed <- Masc_tui_owed_read.settled;
   state.keeper_schedules_owed <- None;
+  state.keeper_story_turns <- Masc_tui_fetched.suspend state.keeper_story_turns;
+  state.keeper_story_turns_owed <- Masc_tui_owed_read.settled;
   state.chat_native_tasks_owed <- None;
   state.chat_child_content_owed <- None;
   (* Resumed authority reads the Gate again. *)
@@ -15729,6 +15762,15 @@ let withdraw_fusion_workspace (state : state) =
    notice: dropping the form does not unsend the request. *)
 let reconcile_fusion_launch (state : state) =
   state.view <> Fusion && abandon_fusion_launch state
+
+(* The Story window belongs to the Keepers list and to nothing else, so the loop
+   closes it whenever the surface under it is not that list, for the reason
+   [reconcile_fusion_launch] gives. The chat entry, the chat's way back, the
+   browser lane's way back and the roster's reconcile all assign [view]
+   directly, and a window left open through any of them came back open with the
+   list. *)
+let reconcile_keeper_story (state : state) =
+  if state.view <> Keepers Keeper_list then state.keeper_story <- None
 
 type text_input_target =
   | Text_collab_form
@@ -17581,6 +17623,29 @@ let keeper_schedule_first_page_available state keeper_name =
        | Schedule_paging { page_cursor = Some _; _ } -> false)
   | Some _ | None -> false
 
+(* Whether the pane that draws a Keeper's schedules takes the answer of a
+   read: the Keeper is the one it draws, the chat pane takes only the first
+   page, and a navigation read answers only the tab it was made on. *)
+let keeper_schedules_answer_reaches_pane state request =
+  let detail = request.kspr_detail in
+  server_authority_ready state
+  && (if view_is_chat state.view then
+      state.msg_target_keeper_name = Some detail.drr_keeper
+      && Option.is_none request.kspr_page.sp_cursor
+    else keeper_detail_target_matches state detail.drr_keeper)
+  && (not request.kspr_navigation
+      || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_automation
+          && state.detail_scroll = request.kspr_scroll)
+      || (view_is_chat state.view && Option.is_none request.kspr_page.sp_cursor))
+
+(* Whether the answer is what the pane owed. The Automation tab draws the page
+   it asked for; the chat pane and the Story window draw the first page, which
+   another page stored for the same Keeper does not stand in for. *)
+let keeper_schedules_answer_settles state request =
+  keeper_schedules_answer_reaches_pane state request
+  && (Option.is_none request.kspr_page.sp_cursor
+      || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_automation))
+
 (* Retirement belongs to the request even off screen; presentation belongs
    only to the currently selected Keeper and the newest request generation. *)
 let apply_keeper_schedules_read state request result =
@@ -17590,15 +17655,7 @@ let apply_keeper_schedules_read state request result =
    | Some (pending, _, _) when pending.drr_generation = detail.drr_generation ->
        state.keeper_schedules_pending <- None
    | Some _ | None -> ());
-  if current && server_authority_ready state
-     && (if view_is_chat state.view then
-         state.msg_target_keeper_name = Some detail.drr_keeper
-         && Option.is_none request.kspr_page.sp_cursor
-       else keeper_detail_target_matches state detail.drr_keeper)
-     && (not request.kspr_navigation
-         || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_automation
-             && state.detail_scroll = request.kspr_scroll)
-         || (view_is_chat state.view && Option.is_none request.kspr_page.sp_cursor)) then
+  if current && keeper_schedules_answer_reaches_pane state request then
     match result with
     | Ok snapshot ->
         let same_page = match state.keeper_schedules_page with
@@ -19920,7 +19977,7 @@ let create_state
   runtime_config_generation = 0;
   runtime_config_read = `Idle;
   runtime_config_owed = Masc_tui_owed_read.settled;
-  runtime_config_status_open = false;
+  runtime_config_status_open = true;
   runtime_config_status_scroll = 0;
   runtime_account_form = None;
   memory_recall_form = None;
@@ -20048,6 +20105,9 @@ let create_state
   keeper_list_density = Masc_tui_keeper_list_model.Two_lines;
   keeper_list_heading = None;
   keeper_list_folded = [];
+  keeper_story = None;
+  keeper_story_turns = Masc_tui_fetched.initial;
+  keeper_story_turns_owed = Masc_tui_owed_read.settled;
   keeper_list_sort = Masc_tui_keeper_list_model.Priority;
   keeper_list_preference_notice = None;
   keeper_list_preference_startup_error = None;
@@ -20687,6 +20747,9 @@ let observer_play_of_state state =
 let system_logs_page (state : state) = System_logs_view.current state.system_logs
 let edit_system_logs_page (state : state) change =
   state.system_logs <- System_logs_view.update_current change state.system_logs
+(* A log entry is open while the page names one. The dispatcher, the footer
+   and the surface's needs all ask this one question. *)
+let system_log_detail_open (state : state) = Option.is_some (system_logs_page state).lp_detail_seq
 let visible_system_log_entries (state : state) = System_logs_view.visible (system_logs_page state)
 
 (* The row the renderer draws and the row this counts have to come from one
@@ -24961,7 +25024,7 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
   in
   function
   | System_logs ->
-      if Option.is_some (System_logs_view.current state.system_logs).lp_detail_seq then None
+      if system_log_detail_open state then None
       else Some
         { sc_count =
             (match (System_logs_view.current state.system_logs).lp_snapshot with
@@ -26205,10 +26268,6 @@ let keeper_message_frame_for_viewport ?scroll state ~now ~terminal_rows ~termina
   { frame with kmsf_schedule_rows = keeper_message_schedule_rows state ~now ~max_rows:budget }
 
 let keeper_message_command_window ?status_frame ?scroll state ~terminal_rows ~terminal_cols =
-  let status_frame = Some (match status_frame with
-    | Some frame -> frame
-    | None -> keeper_message_frame_for_viewport ?scroll state ~now:(Unix.gettimeofday ())
-                ~terminal_rows ~terminal_cols) in
   match state.view, state.keeper_message_focus, state.voice_capture,
         current_recall_edit state with
   | Keepers Keeper_message, Right_pane, None, None
@@ -26218,6 +26277,10 @@ let keeper_message_command_window ?status_frame ?scroll state ~terminal_rows ~te
         (Masc_tui_message_input.contents state.msg_input) with
      | None -> None
      | Some menu ->
+       let status_frame = Some (match status_frame with
+         | Some frame -> frame
+         | None -> keeper_message_frame_for_viewport ?scroll state ~now:(Unix.gettimeofday ())
+                     ~terminal_rows ~terminal_cols) in
        let status_rows = keeper_message_status_rows ?status_frame ?scroll state + 1 in
        let chat_cols = Masc_tui_roster_pane.content_cols
            ~hidden:(roster_pane_hidden state) ~cols:terminal_cols in

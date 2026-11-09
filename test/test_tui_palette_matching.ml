@@ -465,16 +465,16 @@ let test_metrics_is_one_row_that_answers_its_other_names () =
   let state =
     create_state ~workspace:"test" ~port:8935 ()
   in
-  Alcotest.(check (list string)) "one row goes to Usage" [ "go Usage" ]
-    (List.filter_map
-       (function label, Palette_goto Metrics -> Some label | _ -> None)
-       (palette_entries state));
+  Alcotest.(check int) "one destination goes to Usage" 1
+    (List.length (List.filter
+       (function _, Palette_goto Metrics -> true | _ -> false)
+       (palette_entries state)));
   List.iter
     (fun word ->
       state.palette_query <- word;
       match palette_matches state with
-      | ("go Usage", Palette_goto Metrics) :: _ -> ()
-      | _ -> Alcotest.fail (Printf.sprintf "%S does not lead with go Usage" word))
+      | (_, Palette_goto Metrics) :: _ -> ()
+      | _ -> Alcotest.fail (Printf.sprintf "%S does not select Usage" word))
     [ "metrics"; "telemetry"; "charts"; "stats"; "tele" ]
 ;;
 

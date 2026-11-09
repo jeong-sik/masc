@@ -632,24 +632,14 @@ and validate_schema_object ~path schema_fields value =
     (match first_duplicate_field fields with
      | Some field -> Error (Duplicate_value_field { path; field })
      | None ->
-       let properties =
-         match List.assoc_opt "properties" schema_fields with
-         | Some (`Assoc properties) -> properties
-         | None | Some _ -> []
-       in
-       let required =
-         match List.assoc_opt "required" schema_fields with
-         | Some (`List values) ->
-           List.filter_map (function `String name -> Some name | _ -> None) values
-         | None | Some _ -> []
-       in
+       let schema = `Assoc schema_fields in
+       let properties = Tool_input_contract.schema_properties schema in
+       let required = Tool_input_contract.required_names schema in
        (match List.find_opt (fun name -> not (List.mem_assoc name fields)) required with
         | Some field -> Error (Missing_required_field { path; field })
         | None ->
           let additional_forbidden =
-            match List.assoc_opt "additionalProperties" schema_fields with
-            | Some (`Bool false) -> true
-            | None | Some _ -> false
+            Tool_input_contract.forbids_additional_properties schema
           in
           (match
              if additional_forbidden

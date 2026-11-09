@@ -136,6 +136,73 @@ let test_memory_commit_survives_metadata_mirror_failure () =
   check string "plan remains readable" "committed plan" (actual |> member "plan" |> to_string);
   check bool "metadata mirror remains unwritable" true (Sys.is_directory run_path)
 
+(* masc_run_list: the rows the model reads and the limit it may pass. *)
+
+let list_limit_declaration () =
+  match
+    List.find_opt
+      (fun (s : Masc_domain.tool_schema) -> String.equal s.name "masc_run_list")
+      Masc.Tool_run.schemas
+  with
+  | None -> fail "masc_run_list is not published"
+  | Some schema ->
+    let open Yojson.Safe.Util in
+    let limit = schema.input_schema |> member "properties" |> member "limit" in
+    ( limit |> member "minimum" |> to_int
+    , limit |> member "default" |> to_int
+    , limit |> member "maximum" |> to_int )
+
+let write_runs config count =
+  for i = 1 to count do
+    let task_id = Printf.sprintf "task-%03d" i in
+    (* A higher number was updated later. *)
+    let updated_at = Printf.sprintf "2026-01-01T00:%02d:%02dZ" (i / 60) (i mod 60) in
+    match
+      Masc.Run_eio.write_run config
+        { Masc.Run_eio.task_id
+        ; agent_name = None
+        ; plan = "plan text of " ^ task_id
+        ; created_at = "2026-01-01T00:00:00Z"
+        ; updated_at
+        }
+    with
+    | Ok () -> ()
+    | Error e -> fail (Masc.Run_eio.error_to_string e)
+  done
+
+let rows_of data =
+  let open Yojson.Safe.Util in
+  data |> member "runs" |> to_list
+
+let require_failed (result : Tool_result.result) =
+  match result with
+  | Tool_result.Failed _ -> ()
+  | Tool_result.Completed _ | Tool_result.Deferred _ -> fail "expected the call to be refused"
+
+let test_run_list_answers_what_its_schema_declares () =
+  with_workspace @@ fun config ->
+  let minimum, default, maximum = list_limit_declaration () in
+  write_runs config (maximum + 10);
+  let open Yojson.Safe.Util in
+  let by_default = require_success (call config "masc_run_list" []) in
+  check int "count is every run" (maximum + 10) (by_default |> member "count" |> to_int);
+  check int "no limit returns the declared default" default
+    (by_default |> member "shown" |> to_int);
+  check int "shown matches the rows" default (List.length (rows_of by_default));
+  let newest = List.hd (rows_of by_default) in
+  check string "newest update first" (Printf.sprintf "task-%03d" (maximum + 10))
+    (newest |> member "task_id" |> to_string);
+  check int "a row names the plan's size, not its text"
+    (String.length (Printf.sprintf "plan text of task-%03d" (maximum + 10)))
+    (newest |> member "plan_bytes" |> to_int);
+  check bool "no plan text in a row" false (List.mem_assoc "plan" (to_assoc newest));
+  let at_maximum = require_success (call config "masc_run_list" [ "limit", `Int maximum ]) in
+  check int "the declared maximum is accepted" maximum (List.length (rows_of at_maximum));
+  let at_minimum = require_success (call config "masc_run_list" [ "limit", `Int minimum ]) in
+  check int "the declared minimum is accepted" minimum (List.length (rows_of at_minimum));
+  require_failed (call config "masc_run_list" [ "limit", `Int (maximum + 1) ]);
+  require_failed (call config "masc_run_list" [ "limit", `Int (minimum - 1) ])
+
 let () = run "Run tool workflow" [ "plan", [
   test_case "missing init then successful plan readback" `Quick test_initialize_after_missing_plan;
   test_case "invalid stored record remains a runtime failure" `Quick test_invalid_record_is_not_a_missing_precondition;
@@ -143,4 +210,6 @@ let () = run "Run tool workflow" [ "plan", [
   test_case "metadata init failure is not success" `Quick test_init_metadata_failure_is_not_success;
   test_case "metadata plan failure preserves partial effect" `Quick test_plan_metadata_failure_preserves_partial_effect;
   test_case "memory commit survives metadata mirror failure" `Quick test_memory_commit_survives_metadata_mirror_failure;
+]; "list", [
+  test_case "answers what its schema declares" `Quick test_run_list_answers_what_its_schema_declares;
 ] ]

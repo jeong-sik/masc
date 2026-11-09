@@ -38,7 +38,6 @@ module Execution_json = Execution_json
 module Execution_tool_schedule : module type of Execution_tool_schedule
 module Tool = Agent_core_base.Tool
 module Mcp = Mcp
-module Mcp_http = Mcp_http
 module Mcp_session = Mcp_session
 module Telemetry_event = Llm_provider.Telemetry_event
 module Response_shape = Llm_provider.Response_shape

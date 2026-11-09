@@ -1,0 +1,36 @@
+{
+ "bundle": {
+  "path": "/dashboard/assets/index-DkWp4Tg-.js",
+  "bytes": 861256,
+  "requests_per_sample": 60
+ },
+ "build": "57b928783c0b",
+ "picked_when_all_offered": "New, TLSv1.3, Cipher is TLS_AES_128_GCM_SHA256",
+ "throughput": {
+  "cleartext-h1": {
+   "MB_s_median": 325.8,
+   "MB_s_min": 232.1,
+   "MB_s_max": 539.0
+  },
+  "TLS_AES_128_GCM_SHA256": {
+   "MB_s_median": 27.8,
+   "MB_s_min": 18.7,
+   "MB_s_max": 40.4
+  },
+  "TLS_AES_256_GCM_SHA384": {
+   "MB_s_median": 42.8,
+   "MB_s_min": 24.5,
+   "MB_s_max": 58.7
+  },
+  "TLS_CHACHA20_POLY1305_SHA256": {
+   "MB_s_median": 42.5,
+   "MB_s_min": 26.7,
+   "MB_s_max": 54.9
+  }
+ },
+ "handshake_ms": {
+  "median": 5.77,
+  "p90": 6.62,
+  "max": 7.82
+ }
+}

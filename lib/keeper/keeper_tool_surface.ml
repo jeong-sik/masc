@@ -499,6 +499,10 @@ let dispatch ?invocation_ref ctx ~name ~args : tool_result option =
           (tool_result_with_tool_name ~tool_name:name
              (Keeper_tool_surface_ops.keeper_delegate_list_body
                 ~config:ctx.config ~caller:ctx.agent_name args))
+    | Keeper_tool_name.Keeper_delegate_targets ->
+        Some
+          (tool_result_with_tool_name ~tool_name:name
+             (Keeper_delegate_targets.body ~config:ctx.config args))
     | Keeper_tool_name.Keeper_down -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_down ctx args))
     | Keeper_tool_name.Keeper_list -> Some (tool_result_with_tool_name ~tool_name:name (handle_keeper_list ctx args))
     | Keeper_tool_name.Keeper_audit ->
@@ -691,6 +695,11 @@ let () =
                 ~config
                 ~caller:agent_name
                 args))
+      | Keeper_tool_name.Keeper_delegate_targets ->
+        Some
+          (tool_result_with_tool_name
+             ~tool_name:name
+             (Keeper_delegate_targets.body ~config args))
       | Keeper_tool_name.Keeper_clear ->
         run_external_effect (fun () ->
           Some (tool_result_with_tool_name ~tool_name:name (keeper_clear_body ~config args)))

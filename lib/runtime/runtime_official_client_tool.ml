@@ -204,6 +204,37 @@ let mcp_tool_result_content ~success ~content ~content_blocks =
       ]
     , true )
 
+let host_text_separator = "\n\n"
+
+let append_host_text (result : dynamic_tool_result) ~text ~limit ~on_response_sent =
+  (* Sanitized here for the reason [response_observer] states: it binds an
+     observer only for text that needs no repair, and text that reaches the
+     client repaired would leave the original result's observer unbound. The
+     limit is judged on the sanitized text because repair can make it longer. *)
+  let text = Llm_provider.Utf8_sanitize.sanitize text in
+  let content = result.content ^ host_text_separator ^ text in
+  let fits =
+    match limit with
+    | Unbounded -> true
+    | Bounded_bytes bytes -> String.length content <= bytes
+  in
+  if not fits
+  then None
+  else
+    Some
+      { result with
+        content
+      ; content_blocks =
+          Option.map
+            (fun blocks -> blocks @ [ Llm_provider.Types.Text text ])
+            result.content_blocks
+      ; on_response_sent =
+          Some
+            (fun () ->
+              Option.iter (fun observe -> observe ()) result.on_response_sent;
+              on_response_sent ())
+      }
+
 let response_observer transport (result : dynamic_tool_result) =
   match result.on_response_sent with
   | None -> None

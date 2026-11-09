@@ -427,6 +427,9 @@ let stage_release_mirror base_path =
   let ssh_bootstrap = Filename.concat dir ("masc-exec-ssh-bootstrap-" ^ suffix) in
   unlink_if_exists ssh_bootstrap;
   Unix.symlink (Unix.realpath (real_masc_binary ())) ssh_bootstrap;
+  let antigravity_hook = Filename.concat dir ("masc-antigravity-path-hook-" ^ suffix) in
+  unlink_if_exists antigravity_hook;
+  Unix.symlink (Unix.realpath (real_masc_binary ())) antigravity_hook;
   (* The installer places but does not execute the guest shim. As with the
      companion fixtures, reuse the test binary bytes and retain the production
      asset name so missing-shim failures cannot hide wizard behavior. *)
@@ -506,7 +509,8 @@ with tarfile.open(archive, 'w:gz') as output:
       [ "masc-tui", tui
       ; "masc-deployment-preflight-helper", helper
       ; "masc-check-runtime-deployment-preflight", gate
-      ; "masc-exec-ssh-bootstrap", ssh_bootstrap ]
+      ; "masc-exec-ssh-bootstrap", ssh_bootstrap
+      ; "masc-antigravity-path-hook", antigravity_hook ]
   in
   let package_command =
     String.concat " "
@@ -572,7 +576,8 @@ let install_real_masc_binary prefix mirror_dir =
       "masc-deployment-preflight-helper-" ^ suffix
     ; "masc-check-runtime-deployment-preflight",
       "masc-check-runtime-deployment-preflight-" ^ suffix
-    ; "masc-exec-ssh-bootstrap", "masc-exec-ssh-bootstrap-" ^ suffix ]
+    ; "masc-exec-ssh-bootstrap", "masc-exec-ssh-bootstrap-" ^ suffix
+    ; "masc-antigravity-path-hook", "masc-antigravity-path-hook-" ^ suffix ]
     |> List.map (fun (name, asset) -> (name, Filename.concat mirror_tag_dir asset))
   in
   let companion_args =

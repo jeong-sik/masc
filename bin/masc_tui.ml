@@ -10062,8 +10062,9 @@ let keeper_schedules_answer_current state (request : keeper_schedule_page_reques
   | None -> false
 
 (* Runs on every loop iteration. The record follows the Keeper drawn: a
-   Keeper no longer drawn drops it, and a Keeper newly drawn owes the read,
-   which a read already on the wire for it answers. *)
+   Keeper no longer drawn drops it, and a Keeper newly drawn owes the read.
+   A read already on the wire for it answers that, once its answer is the page
+   the pane draws ([keeper_schedules_answer_settles]). *)
 let launch_owed_keeper_schedules state ~mailbox =
   match keeper_schedules_on_screen state with
   | None -> state.keeper_schedules_owed <- None

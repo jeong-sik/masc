@@ -530,7 +530,7 @@ let run_turn
       ?event_bus
       ?trace_link
       ?continuation_channel
-      ?hitl_resolution
+      ?hitl_resolutions
       ?on_gate_deferred
       ?on_checkpoint_stage
       ()
@@ -819,9 +819,10 @@ let run_turn
      and user message append — Keeper_run_prompt. *)
   let prompt_user_turn_record =
     if Option.is_some native_resume then Keeper_run_prompt.Skip_already_checkpointed_user_turn
-    else match direct_resume, hitl_resolution with
-    | Some _, _ | None, Some _ -> Keeper_run_prompt.Skip_already_checkpointed_user_turn
-    | None, None -> user_turn_record
+    else match direct_resume,
+      Option.fold ~none:[] ~some:Keeper_hitl_resolution_batch.resolutions hitl_resolutions with
+    | Some _, _ | None, _ :: _ -> Keeper_run_prompt.Skip_already_checkpointed_user_turn
+    | None, [] -> user_turn_record
   in
   let range_turn_start =
     Keeper_run_prompt.range_turn_start prompt_user_turn_record ~history_at_start
@@ -910,7 +911,7 @@ let run_turn
       ?on_tool_stream_observation
       ?on_tool_result_ready
       ?tool_result_commit_policy
-      ?hitl_resolution
+      ?hitl_resolutions
       ?on_gate_deferred
       ?composition_plan_index
       ~turn_ctx_cell
@@ -974,8 +975,8 @@ let run_turn
          the stored resolution. Preserve their existing input path until those
          blocks have their own durable admission identity. *)
       if Option.is_some official_client_continuation then Ok None else
-      match hitl_resolution, prepared_gate_input.replay_evidence, user_blocks with
-      | Some _, evidence :: remaining_evidence, blocks
+      match prepared_gate_input.resolutions, prepared_gate_input.replay_evidence, user_blocks with
+      | _ :: _, evidence :: remaining_evidence, blocks
         when Option.is_none blocks || (match direct_resume with
           | Some (Gate_continuation _) -> true
           | Some (Checkpoint_continuation _ | Runtime_continuation _) | None -> false) ->
@@ -1065,9 +1066,9 @@ let run_turn
         , user_blocks )
       | None ->
         let ctx_work =
-          match hitl_resolution with
-          | None -> ctx_work
-          | Some _ ->
+          match prepared_gate_input.resolutions with
+          | [] -> ctx_work
+          | _ :: _ ->
             Keeper_context_runtime.append ctx_work
               (Agent_core.Types.make_message ~metadata:input_metadata
                  ~role:Agent_core.Types.User [ Agent_core.Types.Text user_message ])

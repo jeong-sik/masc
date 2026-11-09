@@ -60,7 +60,7 @@ type ctx =
       (* Reply route for a continuation-bearing wake, handed to tool setup so
          surface posts know the admitted external destination. *)
   ; approval_admission : Keeper_approval_origin.admission
-  ; hitl_resolution : Keeper_event_queue.hitl_resolution option
+  ; hitl_resolutions : Keeper_hitl_resolution_batch.t option
       (* Typed decision for the originating Keeper's exact external-effect
          Gate. It is never converted to a generic AGENT_CORE approval. *)
   ; config : Workspace.config
@@ -102,7 +102,7 @@ let run (ctx : ctx)
       ; channel
       ; continuation_channel
       ; approval_admission
-      ; hitl_resolution
+      ; hitl_resolutions
       ; shared_context
       ; base_dir
       ; build_turn_prompt
@@ -117,6 +117,9 @@ let run (ctx : ctx)
       ; on_deferred_runtime_consumed
       } =
     ctx
+  in
+  let hitl_resolution =
+    Option.bind hitl_resolutions Keeper_hitl_resolution_batch.singleton_resolution
   in
   (match Eio_context.get_clock () with
    | Error msg -> Error (Agent_core.Error.Internal msg), turn_state
@@ -228,7 +231,7 @@ let run (ctx : ctx)
                  ~publication_recovery
                  ~profile_defaults
                  ?continuation_channel
-                 ?hitl_resolution
+                 ?hitl_resolutions
                  ~turn_ctx_cell
                  ~base_dir
                  ~max_context:execution.max_context

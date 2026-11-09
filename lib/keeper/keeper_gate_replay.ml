@@ -592,7 +592,7 @@ type resolution_input =
   | Stored_resolution of Keeper_event_queue.hitl_resolution
   | Approved_replay of
       { resolution : Keeper_event_queue.hitl_resolution
-      ; outcome : outcome
+      ; execution : replay_execution
       }
 
 type resolution_input_error =
@@ -609,15 +609,22 @@ let resolution_input_error_to_string = function
 let resolution_input ~(resolution : Keeper_event_queue.hitl_resolution) ~replay_delivery =
   match replay_delivery with
   | None -> Ok (Stored_resolution resolution)
-  | Some (replay_id, outcome) ->
+  | Some (replay_id, execution) ->
     if not (String.equal resolution.approval_id replay_id)
     then Error (Replay_approval_mismatch { resolution_id = resolution.approval_id; replay_id })
     else
       (match resolution.decision with
-       | Keeper_event_queue.Hitl_approved -> Ok (Approved_replay { resolution; outcome })
+       | Keeper_event_queue.Hitl_approved -> Ok (Approved_replay { resolution; execution })
        | Keeper_event_queue.Hitl_rejected _ ->
          Error (Replay_for_rejected_resolution resolution.approval_id))
 ;;
+
+let input_resolution = function
+  | Stored_resolution resolution | Approved_replay { resolution; _ } -> resolution
+
+let input_replay_execution = function
+  | Stored_resolution _ -> None
+  | Approved_replay { execution; _ } -> Some execution
 
 let plain_model_message text =
   { text; resolutions = []; replay_evidence = []; instruction_resolutions = [] }
@@ -996,14 +1003,16 @@ let compose_model_message
            | Stored_resolution resolution ->
              user_message_with_hitl_resolution
                ~base_path ~user_message:text (Some resolution)
-           | Approved_replay { resolution; outcome = Not_applicable } ->
+           | Approved_replay { resolution; execution = { outcome = Not_applicable; _ } } ->
              user_message_with_hitl_resolution
                ~base_path ~user_message:text (Some resolution)
            | Approved_replay
                { resolution
-               ; outcome =
-                   ( Applied _ | Applied_with_warning _ | Failed _
-                   | Indeterminate _ | Repair_required _ | Resolution_absent _ ) as outcome
+               ; execution =
+                   { outcome =
+                       ( Applied _ | Applied_with_warning _ | Failed _
+                       | Indeterminate _ | Repair_required _ | Resolution_absent _ ) as outcome
+                   ; _ }
                } ->
              append_model_evidence
                ~approval_id:resolution.approval_id ~user_message:text outcome
@@ -1334,6 +1343,75 @@ let replay_approved_effect
      ~approval_id
      ())
     .outcome
+;;
+
+let replay_resolution_inputs ~config ~meta ~publication_recovery
+    ~turn_sandbox_factory ?gate_context batch =
+  let resolutions = Keeper_hitl_resolution_batch.resolutions batch in
+  let multiple = match resolutions with [] | [ _ ] -> false | _ :: _ :: _ -> true in
+  let check_nonterminal execution =
+    if not multiple then execution
+    else
+      match execution.outcome, execution.terminal_effect_receipt with
+      | Repair_required _, _
+      | (Applied _ | Applied_with_warning _ | Failed _ | Indeterminate _), None -> execution
+      | (Not_applicable | Resolution_absent _), _
+      | (Applied _ | Applied_with_warning _ | Failed _ | Indeterminate _), Some _ ->
+        { execution with outcome = Repair_required
+            { operation = "HITL cohort continuation"; stage = Invalid_resolution_state
+            ; detail = "A nonterminal host replay cohort produced an incompatible continuation"
+            } }
+  in
+  let rec replay reversed = function
+    | [] -> List.rev reversed
+    | (resolution : Keeper_event_queue.hitl_resolution) :: rest ->
+      let input = match resolution.decision with
+        | Keeper_event_queue.Hitl_rejected _ -> Stored_resolution resolution
+        | Keeper_event_queue.Hitl_approved ->
+          let execution = match Keeper_gate.cycle_grant_of_resolution resolution with
+            | Some grant ->
+              replay_approved_effect_with_receipt
+                ~config ~meta ~publication_recovery ~turn_sandbox_factory
+                ~continuation_channel:resolution.channel ?gate_context
+                ~grant ~approval_id:resolution.approval_id ()
+              |> check_nonterminal
+            | None -> replay_execution (Repair_required
+                { operation = "HITL cohort continuation"; stage = Invalid_resolution_state
+                ; detail = "Approved resolution has no exact cycle grant" }) in
+          (match execution.outcome with
+           | Not_applicable -> ()
+           | Applied _ -> Log.Keeper.info "gate replay approval=%s %s"
+               resolution.approval_id (outcome_to_string execution.outcome)
+           | Resolution_absent _ -> Log.Keeper.warn "gate replay approval=%s %s"
+               resolution.approval_id (outcome_to_string execution.outcome)
+           | Applied_with_warning _ | Failed _ | Indeterminate _ | Repair_required _ ->
+             Log.Keeper.error "gate replay approval=%s %s"
+               resolution.approval_id (outcome_to_string execution.outcome));
+          Approved_replay { resolution; execution }
+      in
+      let reversed = input :: reversed in
+      match input_replay_execution input with
+      | Some { outcome = Repair_required _; _ } -> List.rev reversed
+      | None
+      | Some { outcome = (Not_applicable | Applied _ | Applied_with_warning _
+                        | Failed _ | Indeterminate _ | Resolution_absent _); _ } ->
+        replay reversed rest
+  in
+  match Keeper_hitl_resolution_batch.validate_scope
+    ~base_path:config.Workspace.base_path ~keeper_name:meta.Keeper_meta_contract.name batch with
+  | Ok () -> replay [] resolutions
+  | Error error ->
+    (* A scope error is possible only for an opaque cohort, whose members
+       were all approved at construction. No grant or effect is touched. *)
+    match resolutions with
+    | [] -> []
+    | resolution :: _ ->
+      [ Approved_replay
+          { resolution
+          ; execution = replay_execution (Repair_required
+              { operation = "HITL cohort continuation"; stage = Invalid_resolution_state
+              ; detail = Keeper_hitl_resolution_batch.join_error_to_string error })
+          } ]
 ;;
 
 module For_testing = struct

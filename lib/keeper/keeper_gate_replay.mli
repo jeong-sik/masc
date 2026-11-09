@@ -75,6 +75,14 @@ val outcome_to_string : outcome -> string
 (** Render operation, journal state, exact evidence byte count, and SHA-256
     only. Full replay output is never copied into operational logs. *)
 
+type replay_execution =
+  { outcome : outcome
+  ; terminal_effect_receipt :
+      Keeper_tool_execution.terminal_effect_receipt option
+  }
+(** The outcome and its producer-owned turn-settlement receipt stay together.
+    Only a successfully applied connector post carries a terminal receipt. *)
+
 type model_evidence
 
 type model_message = private
@@ -100,11 +108,16 @@ val resolution_input_error_to_string : resolution_input_error -> string
 
 val resolution_input :
   resolution:Keeper_event_queue.hitl_resolution ->
-  replay_delivery:(string * outcome) option ->
+  replay_delivery:(string * replay_execution) option ->
   (resolution_input, resolution_input_error) result
 (** Bind one observed resolution to its own host replay outcome. A replay
     for a different approval or a rejected resolution is refused; two lists
     cannot be joined by their positions. No grant is created or consumed. *)
+
+val input_resolution : resolution_input -> Keeper_event_queue.hitl_resolution
+val input_replay_execution : resolution_input -> replay_execution option
+(** Read-only projections of one bound input; its source, outcome and terminal
+    receipt cannot be assigned to another approval by parallel list position. *)
 
 val append_model_evidence :
   approval_id:string -> user_message:string -> outcome -> model_message
@@ -188,15 +201,6 @@ type replayable = Keeper_gate.replayable
 
 val replayable_of_operation : string -> replayable option
 
-type replay_execution =
-  { outcome : outcome
-  ; terminal_effect_receipt :
-      Keeper_tool_execution.terminal_effect_receipt option
-  }
-(** The durable replay outcome plus the turn-settlement receipt owned by a
-    successfully applied connector post. Other replayable operations and
-    unapplied or indeterminate connector effects carry [None]. *)
-
 (** Replay the approved effect behind [approval_id] exactly once.
 
     Covers operations whose approvals a Keeper must otherwise re-earn by
@@ -241,6 +245,22 @@ val replay_approved_effect_with_receipt :
 (** Replay exactly once and retain the typed connector-post receipt needed by
     turn finalization. [replay_approved_effect] is the outcome-only projection
     for callers that do not own a turn boundary. *)
+
+val replay_resolution_inputs :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  publication_recovery:Keeper_publication_recovery_availability.turn_context ->
+  turn_sandbox_factory:Keeper_sandbox_factory.t option ->
+  ?gate_context:(unit -> Keeper_gate.causal_context) ->
+  Keeper_hitl_resolution_batch.t ->
+  resolution_input list
+(** Serial host replay in frozen source order. Each approval spends only its
+    own grant and uses its own captured continuation channel. A repair stops
+    before later effects, returning the completed prefix and repair input;
+    the caller must refuse provider dispatch and retain all wakes. The same
+    turn's runtime fallback recovers this vector rather than selecting anew.
+    A multiple cohort cannot fall back to a representative provider grant or
+    acquire a terminal connector receipt. Cancellation propagates unchanged. *)
 
 module For_testing : sig
   val persist_replay_artifact :

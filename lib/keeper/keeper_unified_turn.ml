@@ -171,7 +171,7 @@ let run_keeper_cycle
       ~(turn_decision : Keeper_world_observation.keeper_cycle_decision)
       ?shared_context
       ?event_bus
-      ?hitl_resolution
+      ?hitl_resolutions
       ()
   : (turn_success, turn_failure) result
   =
@@ -773,7 +773,7 @@ let run_keeper_cycle
                            ; approval_admission = Keeper_approval_origin.Admitted
                                (Keeper_heartbeat_source_batch.selections
                                   (Keeper_heartbeat_source_batch.sources turn_input))
-                           ; hitl_resolution
+                           ; hitl_resolutions
                            ; config
                            ; drain_turn_event_bus
                            ; event_bus

@@ -131,7 +131,7 @@ Coding agents follow [the repository execution protocol](docs/constitution.xml).
 git clone https://github.com/jeong-sik/masc.git
 cd masc
 opam init --bare
-opam switch create . ocaml-base-compiler.5.5.1 --no-install
+opam switch create . ocaml-base-compiler.5.5.2 --no-install
 eval "$(opam env)"
 scripts/opam-pin-external-deps.sh
 opam install ./masc.opam --deps-only --locked

@@ -926,7 +926,11 @@ named on its title row: `story`, `s schedules` and `m memory`.
   schedule cell, the next dispatch path and the memory lag. Except the last
   wake, they are the cells and sentences the list rows draw. The last wake is
   the newest wake any schedule on the Keeper's first schedule page recorded,
-  with its age, the schedule and its outcome.
+  with its age, the schedule and its outcome. When the page is cut the line
+  reads `last wake on the first page`, since a later page may hold a newer one.
+  A reading that is read again or whose read failed says so in brackets at the
+  head of the line, and a wake whose time cannot be read makes the last wake
+  unknown.
 - `s schedules` is the first page of the Keeper's own schedules, the page the
   Automation tab (`J`) draws first, led by the same `◷` cell the list draws and
   the counts of what the store holds. The window reads that page from the

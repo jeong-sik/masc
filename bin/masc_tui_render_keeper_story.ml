@@ -182,10 +182,19 @@ let schedules (state : Masc_tui_types.state) ~keeper_name =
   | Some snapshot, None -> Page { snapshot; refresh = (if waiting then Refreshing else Current) }
 ;;
 
+(* A page drawn from an earlier reading, or whose re-read failed, is the last
+   reading and not the Keeper's present one. The note sits at the head of the
+   line, where a narrow screen's cut does not reach it. *)
+let refresh_note = function
+  | Current -> ""
+  | Refreshing -> dim " (reading again)"
+  | Refresh_failed _ -> warn " (schedule read failed)"
+;;
+
 (* The newest wake among the Keeper's schedules. A schedule that is closed or
    held still counts: its wake happened. *)
-let wake_text ~now (wake : Masc_tui_keeper_last_wake.t) =
-  let row = wake.row in
+let wake_text ~now ~head (wake : Masc_tui_keeper_last_wake.t) =
+  let row = Masc_tui_keeper_last_wake.row wake in
   let outcome = Terminal_text.single_line (Masc_tui_render_work.schedule_outcome_word row) in
   let outcome_text =
     if String.equal outcome Masc_tui_theme.Glyph.no_value then ""
@@ -201,10 +210,12 @@ let wake_text ~now (wake : Masc_tui_keeper_last_wake.t) =
     | Some (Schedule_contract_values.Wake_running | Schedule_contract_values.Wake_succeeded)
     | None -> ""
   in
-  dim
-    (Printf.sprintf "last wake %s · %s" (ago ~now wake.at)
-       (Terminal_text.single_line
-          (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))
+  head
+  ^ dim
+      (Printf.sprintf " %s · %s"
+         (ago ~now (Masc_tui_keeper_last_wake.at wake))
+         (Terminal_text.single_line
+            (Option.value ~default:row.sch_schedule_id row.sch_payload_summary)))
   ^ outcome_text ^ error_text
 ;;
 
@@ -214,12 +225,25 @@ let last_wake_entry (state : Masc_tui_types.state) ~now ~keeper_name =
   | Reading -> Some (dim "last wake reading…")
   | Read_failed _ -> Some (warn "last wake unknown, the schedule read failed")
   | Store_unreadable _ -> Some (warn "last wake unknown, the schedule store is unreadable")
-  | Page { snapshot; refresh = Current | Refreshing | Refresh_failed _ } ->
-      (match Masc_tui_keeper_last_wake.newest snapshot.scs_rows with
-       | Some wake -> Some (wake_text ~now wake)
-       | None ->
-           if snapshot.scs_truncated then Some (dim "last wake not on the first page")
-           else None)
+  | Page { snapshot; refresh } ->
+      let note = refresh_note refresh in
+      (match
+         Masc_tui_keeper_last_wake.of_page ~truncated:snapshot.scs_truncated snapshot.scs_rows
+       with
+       | Masc_tui_keeper_last_wake.Newest wake ->
+           Some (wake_text ~now ~head:(dim "last wake" ^ note) wake)
+       | Masc_tui_keeper_last_wake.Newest_on_first_page wake ->
+           Some (wake_text ~now ~head:(dim "last wake on the first page" ^ note) wake)
+       | Masc_tui_keeper_last_wake.Not_on_first_page ->
+           Some (dim "last wake not on the first page" ^ note)
+       | Masc_tui_keeper_last_wake.Unplaced ->
+           Some (warn "last wake unknown, a wake time is unreadable" ^ note)
+       | Masc_tui_keeper_last_wake.No_wake ->
+           (match refresh with
+            | Current | Refreshing -> None
+            (* The earlier reading found no wake; whether one came since is
+               not known. *)
+            | Refresh_failed _ -> Some (warn "last wake unknown, the schedule read failed")))
 ;;
 
 let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =

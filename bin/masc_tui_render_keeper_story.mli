@@ -50,9 +50,12 @@ val schedule_lines :
 val last_wake_entry :
   Masc_tui_types.state -> now:float -> keeper_name:string -> string option
 (** The line of the story page's past group that tells the Keeper's last wake,
-    from the same page of schedules. [None] when the page is read and no
-    schedule on it has woken the Keeper. A page that is not read, or not
-    readable, says so instead of saying nothing. *)
+    from the same page of schedules. [None] when the page is whole and read and
+    no schedule on it has woken the Keeper. A page that is not read, not
+    readable or cut says so instead of saying nothing, and so does a reading
+    that is read again or whose re-read failed. A wake on a cut page is called
+    the latest on the first page, since a later page may hold a newer one, and a
+    wake whose time cannot be read leaves the last wake unknown. *)
 
 val memory_lines :
   Masc_tui_types.state -> now:float -> keeper_name:string -> string list

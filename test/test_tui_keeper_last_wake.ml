@@ -1,5 +1,6 @@
-(* The newest wake among a Keeper's schedule rows (RFC-0515 section 2.5). The
-   screen text is not tested; the choice of which row's wake is the last is. *)
+(* The last wake told from one page of a Keeper's schedule rows (RFC-0515
+   section 2.5). The screen text is not tested; which wake the page lets the
+   story page call the last, and whether it may call one at all, is. *)
 
 let make_row ?wake_started_at_iso id : Masc_tui_types.schedule_row =
   { sch_schedule_id = id
@@ -54,27 +55,33 @@ let make_row ?wake_started_at_iso id : Masc_tui_types.schedule_row =
   }
 ;;
 
-let newest_id rows =
-  Option.map
-    (fun (wake : Masc_tui_keeper_last_wake.t) ->
-       wake.Masc_tui_keeper_last_wake.row.Masc_tui_types.sch_schedule_id)
-    (Masc_tui_keeper_last_wake.newest rows)
+let describe = function
+  | Masc_tui_keeper_last_wake.No_wake -> "no wake"
+  | Masc_tui_keeper_last_wake.Not_on_first_page -> "not on the first page"
+  | Masc_tui_keeper_last_wake.Newest wake ->
+      "newest " ^ (Masc_tui_keeper_last_wake.row wake).Masc_tui_types.sch_schedule_id
+  | Masc_tui_keeper_last_wake.Newest_on_first_page wake ->
+      "newest on the first page "
+      ^ (Masc_tui_keeper_last_wake.row wake).Masc_tui_types.sch_schedule_id
+  | Masc_tui_keeper_last_wake.Unplaced -> "unplaced"
 ;;
 
-let id_option = Alcotest.(option string)
+let reading ?(truncated = false) rows =
+  describe (Masc_tui_keeper_last_wake.of_page ~truncated rows)
+;;
 
 let test_no_rows () =
-  Alcotest.check id_option "no rows, no wake" None (newest_id [])
+  Alcotest.check Alcotest.string "no rows, no wake" "no wake" (reading [])
 ;;
 
 let test_rows_without_a_wake () =
-  Alcotest.check id_option "rows that never woke are not candidates" None
-    (newest_id [ make_row "a"; make_row "b" ])
+  Alcotest.check Alcotest.string "rows that never woke are not candidates" "no wake"
+    (reading [ make_row "a"; make_row "b" ])
 ;;
 
 let test_latest_instant_wins_over_list_order () =
-  Alcotest.check id_option "the later wake wins wherever it sits" (Some "b")
-    (newest_id
+  Alcotest.check Alcotest.string "the later wake wins wherever it sits" "newest b"
+    (reading
        [ make_row ~wake_started_at_iso:"2026-11-07T09:00:00Z" "a"
        ; make_row ~wake_started_at_iso:"2026-11-07T10:00:00Z" "b"
        ; make_row "c"
@@ -82,8 +89,8 @@ let test_latest_instant_wins_over_list_order () =
 ;;
 
 let test_equal_instants_keep_the_first_row () =
-  Alcotest.check id_option "on a tie the server's order decides" (Some "a")
-    (newest_id
+  Alcotest.check Alcotest.string "on a tie the server's order decides" "newest a"
+    (reading
        [ make_row ~wake_started_at_iso:"2026-11-07T09:00:00Z" "a"
        ; make_row ~wake_started_at_iso:"2026-11-07T09:00:00Z" "b"
        ])
@@ -91,27 +98,49 @@ let test_equal_instants_keep_the_first_row () =
 
 let test_offsets_compare_as_instants () =
   (* 10:00+09:00 is 01:00Z, earlier than 02:00Z although its text sorts later. *)
-  Alcotest.check id_option "instants, not text" (Some "utc")
-    (newest_id
+  Alcotest.check Alcotest.string "instants, not text" "newest utc"
+    (reading
        [ make_row ~wake_started_at_iso:"2026-11-07T10:00:00+09:00" "seoul"
        ; make_row ~wake_started_at_iso:"2026-11-07T02:00:00Z" "utc"
        ])
 ;;
 
-let test_unreadable_time_is_skipped () =
-  Alcotest.check id_option "a wake without a readable time cannot be placed" (Some "a")
-    (newest_id
+let test_unreadable_time_leaves_the_last_wake_unknown () =
+  (* The wake with the unreadable time may be the newest, so the readable one
+     beside it is not the last wake. *)
+  Alcotest.check Alcotest.string "a wake without a readable time cannot be placed" "unplaced"
+    (reading
        [ make_row ~wake_started_at_iso:"2026-11-07T09:00:00Z" "a"
        ; make_row ~wake_started_at_iso:"zzz" "b"
        ]);
-  (* Alone, it is not the newest of anything: no instant stands in for it. *)
-  Alcotest.check id_option "an unreadable time alone names no wake" None
-    (newest_id [ make_row ~wake_started_at_iso:"zzz" "b" ])
+  Alcotest.check Alcotest.string "an unreadable time alone is not a wake of no time"
+    "unplaced"
+    (reading [ make_row ~wake_started_at_iso:"zzz" "b" ]);
+  Alcotest.check Alcotest.string "a status without a start time is a wake too" "unplaced"
+    (reading
+       [ { (make_row "r") with
+           sch_last_wake_status = Some Schedule_contract_values.Wake_running
+         }
+       ])
+;;
+
+let test_a_cut_page_says_so () =
+  Alcotest.check Alcotest.string "a cut page with no wake leaves a later page open"
+    "not on the first page"
+    (reading ~truncated:true [ make_row "a" ]);
+  Alcotest.check Alcotest.string
+    "the latest wake of a cut page is not called the last" "newest on the first page b"
+    (reading ~truncated:true
+       [ make_row ~wake_started_at_iso:"2026-11-07T09:00:00Z" "a"
+       ; make_row ~wake_started_at_iso:"2026-11-07T10:00:00Z" "b"
+       ]);
+  Alcotest.check Alcotest.string "an unplaced wake outranks the cut" "unplaced"
+    (reading ~truncated:true [ make_row ~wake_started_at_iso:"zzz" "b" ])
 ;;
 
 let () =
   Alcotest.run "tui_keeper_last_wake"
-    [ ( "newest"
+    [ ( "of_page"
       , [ Alcotest.test_case "no rows" `Quick test_no_rows
         ; Alcotest.test_case "rows without a wake" `Quick test_rows_without_a_wake
         ; Alcotest.test_case "latest instant wins" `Quick
@@ -120,8 +149,9 @@ let () =
             test_equal_instants_keep_the_first_row
         ; Alcotest.test_case "offsets compare as instants" `Quick
             test_offsets_compare_as_instants
-        ; Alcotest.test_case "unreadable time is skipped" `Quick
-            test_unreadable_time_is_skipped
+        ; Alcotest.test_case "unreadable time leaves the last wake unknown" `Quick
+            test_unreadable_time_leaves_the_last_wake_unknown
+        ; Alcotest.test_case "a cut page says so" `Quick test_a_cut_page_says_so
         ] )
     ]
 ;;

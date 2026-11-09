@@ -324,10 +324,12 @@ let query_thread ~reader post_id =
   Board_tool.handle_tool ~reader ~result_boundary:Tool_output.Sent_to_client
     "masc_board_post_get" (`Assoc ["post_id", `String post_id])
 
-let detail_status ~reader post_id =
-  fst (Server_routes_http_runtime.board_post_detail_json ~reader ~config:None
+let detail ~reader post_id =
+  Server_routes_http_runtime.board_post_detail_json ~reader ~config:None
     ~voter:None ~reaction_actor:None
-    ~response_format:Server_board_post_response_format.Nested ~post_id ())
+    ~response_format:Server_board_post_response_format.Nested ~post_id ()
+
+let detail_status ~reader post_id = fst (detail ~reader post_id)
 
 let check_runtime_failure label result =
   Alcotest.(check bool) label true
@@ -412,7 +414,7 @@ let test_query_boundary source base_path =
         bytes (Fs_compat.load_file path))
 
 let test_incomplete_queries_preserve_hidden_target_boundary base_path =
-  let store, _ = seed base_path in
+  let store, public_post = seed base_path in
   let post = match Board.create_post store ~lookup:Recipient_lookup.none_declared
       ~author:"private-owner" ~content:"private thread" ~visibility:Board.Direct
       ~post_kind:Board.Human_post ~ttl_hours:0 () with
@@ -420,12 +422,31 @@ let test_incomplete_queries_preserve_hidden_target_boundary base_path =
     | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error) in
   let comment = require (append store post "private reply") in
   let path = Board.comments_path store in
-  let bytes = Fs_compat.load_file path ^ "{invalid-row}\n" in
+  let private_marker = "PRIVATE_COMMENT_BODY" in
+  let bytes = Fs_compat.load_file path ^ "!" ^ private_marker ^ "\n" in
   Out_channel.with_open_bin path (fun output -> output_string output bytes);
   with_started_store base_path (fun restarted ->
     let reader = Masc_board_handlers.Board_access.named "stranger" in
     let post_id = Board.Post_id.to_string post.id in
+    let public_id = Board.Post_id.to_string public_post.id in
     let absent_post = Board.Post_id.to_string (Board.Post_id.generate ()) in
+    let observed = observe_comments restarted post in
+    Alcotest.(check bool) "fixture parser diagnosis contains the private row fragment" true
+      (match observed.completeness with
+       | Board.Source_incomplete (Board.Io_error diagnostic) ->
+         String_util.contains_substring diagnostic private_marker
+       | Board.Source_incomplete _ | Board.Source_complete -> false);
+    let no_private_fragment label text =
+      Alcotest.(check bool) label false (String_util.contains_substring text private_marker);
+      Alcotest.(check bool) (label ^ ": no source path") false
+        (String_util.contains_substring text path) in
+    let public_result = query_thread ~reader public_id in
+    check_runtime_failure "unrelated readable public thread reports source failure" public_result;
+    no_private_fragment "MCP response hides private parser content" (Tool_result.message public_result);
+    let public_status, public_body = detail ~reader public_id in
+    Alcotest.(check bool) "readable public thread HTTP reports 503" true
+      (public_status = `Service_unavailable);
+    no_private_fragment "HTTP response hides private parser content" public_body;
     List.iter (fun id -> Alcotest.(check bool) "hidden and absent posts both answer 404" true
       (detail_status ~reader id = `Not_found)) [post_id; absent_post];
     Alcotest.(check bool) "operator sees source failure on the same thread" true
@@ -433,8 +454,10 @@ let test_incomplete_queries_preserve_hidden_target_boundary base_path =
     let reaction_query id = Board_tool.handle_tool ~reader
       ~result_boundary:Tool_output.Sent_to_client "masc_board_reaction"
       (`Assoc ["target_type", `String "comment"; "target_id", `String id; "emoji", `String "👍"]) in
-    List.iter (fun id -> check_runtime_failure "hidden and absent comment targets share source failure"
-      (reaction_query id))
+    List.iter (fun id ->
+      let result = reaction_query id in
+      check_runtime_failure "hidden and absent comment targets share source failure" result;
+      no_private_fragment "reaction gate hides private parser content" (Tool_result.message result))
       [Board.Comment_id.to_string comment.id; Board.Comment_id.to_string (Board.Comment_id.generate ())];
     let posts_path = Board.persist_path restarted in
     let posts_bytes = Fs_compat.load_file posts_path ^ "{invalid-post}\n" in

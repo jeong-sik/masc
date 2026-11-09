@@ -254,38 +254,6 @@ let task_projection_to_string = function
   | Full -> "full"
 ;;
 
-(* Cluster sub-dispatch via closed sum type — string [name] is converted
-   into [task_op] exactly once at the entry boundary; downstream match
-   is exhaustive, so adding a new op forces the compiler to flag every
-   site that did not handle it.  Removes the substring-classifier
-   anti-pattern (CLAUDE.md §2) from this cluster. *)
-type task_op =
-  | Tasks_list
-  | Tasks_audit
-  | Broadcast
-  | Task_create
-  | Task_claim
-  | Task_done
-  | Task_cancel
-  | Task_release
-
-let task_op_of_keeper_tool = function
-  | Keeper_tooling.Name.Tasks_list -> Some Tasks_list
-  | Keeper_tooling.Name.Tasks_audit -> Some Tasks_audit
-  | Keeper_tooling.Name.Broadcast -> Some Broadcast
-  | Keeper_tooling.Name.Task_create -> Some Task_create
-  | Keeper_tooling.Name.Task_claim -> Some Task_claim
-  | Keeper_tooling.Name.Task_done -> Some Task_done
-  | Keeper_tooling.Name.Task_cancel -> Some Task_cancel
-  | Keeper_tooling.Name.Task_release -> Some Task_release
-;;
-
-let task_op_of_name name =
-  match Keeper_tooling.Name.of_string name with
-  | Some tool -> task_op_of_keeper_tool tool
-  | None -> None
-;;
-
 (* Entry validity is a parse fact and is rejected here. A missing or empty
    evidence_refs list proceeds to the Task transition, which decides
    completion. *)
@@ -353,14 +321,14 @@ let handle_keeper_task_tool_with_outcome
       ~(name : string)
       ~(args : Yojson.Safe.t)
   =
-  match task_op_of_name name with
+  match Keeper_tooling.Name.of_string name with
   | None ->
     Keeper_tool_execution.failure
       ~class_:Tool_result.Policy_rejection
       (error_json ~fields:[ "tool", `String name ] "unknown_task_tool")
   | Some op ->
     match op with
-    | Tasks_list ->
+    | Keeper_tooling.Name.Tasks_list ->
     let limit = Safe_ops.json_int ~default:50 "limit" args |> max 1 |> min 100 in
     let projection_and_revision =
       match task_projection_of_args args,
@@ -589,7 +557,7 @@ let handle_keeper_task_tool_with_outcome
          | payload -> payload
        in
        Keeper_tool_execution.success_data data))
-    | Tasks_audit ->
+    | Keeper_tooling.Name.Tasks_audit ->
     let limit = Safe_ops.json_int ~default:20 "limit" args |> max 1 |> min 50 in
     let orphans =
       Workspace.audit_orphan_tasks config
@@ -619,7 +587,7 @@ let handle_keeper_task_tool_with_outcome
                    then Keeper_tool_outcome.No_progress { reason = No_work_available }
                    else Keeper_tool_outcome.Progress) )
             ]))
-    | Broadcast ->
+    | Keeper_tooling.Name.Broadcast ->
     let message = Safe_ops.json_string ~default:"" "content" args |> String.trim in
     let task_cache_signal_result = Workspace_broadcast.task_cache_signal_of_args args in
     if message = ""
@@ -676,7 +644,7 @@ let handle_keeper_task_tool_with_outcome
                   (Tool_guidance.Broadcast_delivery_rejected
                      { request_id = delivery.request_id }))
              data))
-    | Task_create ->
+    | Keeper_tooling.Name.Task_create ->
     let title = Safe_ops.json_string ~default:"" "title" args |> String.trim in
     let description = Safe_ops.json_string ~default:"" "description" args |> String.trim in
     let priority = Safe_ops.json_int ~default:3 "priority" args |> max 1 |> min 5 in
@@ -765,7 +733,7 @@ let handle_keeper_task_tool_with_outcome
                           ; "typed_outcome", Keeper_tool_outcome.to_json typed_outcome
                           ]
                         message)))))
-    | Task_claim ->
+    | Keeper_tooling.Name.Task_claim ->
     let requested_task_id =
       Safe_ops.json_string ~default:"" "task_id" args |> String.trim
     in
@@ -866,7 +834,7 @@ let handle_keeper_task_tool_with_outcome
        Keeper_tool_execution.failure ~class_:Tool_result.Workflow_rejection payload
      | Workspace.Claim_next_claimed _
      | Workspace.Claim_next_no_unclaimed -> Keeper_tool_execution.success payload)
-    | Task_release ->
+    | Keeper_tooling.Name.Task_release ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let summary = Safe_ops.json_string ~default:"" "summary" args |> String.trim in
     let optional_field name =
@@ -929,7 +897,7 @@ let handle_keeper_task_tool_with_outcome
         Keeper_tool_execution.deferred_data ?metadata (Tool_result.data transition_result)
       | Tool_result.Failed { class_; _ } ->
         Keeper_tool_execution.failure ~class_ payload)
-    | Task_cancel ->
+    | Keeper_tooling.Name.Task_cancel ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let reason = Safe_ops.json_string ~default:"" "reason" args |> String.trim in
     if task_id = ""
@@ -976,7 +944,7 @@ let handle_keeper_task_tool_with_outcome
         Keeper_tool_execution.deferred_data ?metadata (Tool_result.data transition_result)
       | Tool_result.Failed { class_; _ } ->
         Keeper_tool_execution.failure ~class_ payload)
-    | Task_done ->
+    | Keeper_tooling.Name.Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
     (* Preserve the optional handoff note independently of the result summary.

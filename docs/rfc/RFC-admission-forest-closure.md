@@ -45,6 +45,12 @@ body 제거 완료, candidate 커밋 또는 ACK를 입증하지 않는다.
 5. 새 tail은 다른 candidate로 남을 수 있다. 후보 하나라도 미처리이거나
    unknown/cut, 게시 대기, 누락·손상된 증거가 있으면 그 forest를 남긴다.
 
+마지막 commit·ACK를 마친 pass는 이 전체 자격을 다시 읽고, 적격일 때만
+기존 latest-wins Memory lane에 한 번 더 알린다. 조용한 Keeper도 새 외부
+입력을 기다리지 않고 다음 pass에서 닫는다. 부분 subset의 Finished,
+미해결 sibling 또는 빈 queue만으로 재예약하지 않는다. 이 사후 관측의
+오류는 실제 Memory commit 결과를 바꾸지 않고 경고를 남긴다.
+
 현재 strict discovery가 거부하는 과거 conflict/receipt 조합을 closure가
 허용하지 않는다. 그런 상태의 별도 복구는 이 제안의 범위 밖이다.
 
@@ -89,6 +95,16 @@ parent를 완료로 해석하지 않는다. 이 검사는 이동이나 완료 �
 archive sweep은 closure manifest가 가리키는 marker를 보호한다. closure가
 끝난 뒤의 archive 정책은 기존 sweep을 따른다. live backlog의 임의 삭제,
 나이 기준 삭제, 검사 생략 옵션과 수동 bulk cleanup은 추가하지 않는다.
+
+마지막 anchor의 record 이동과 body 제거 사이에 중단되면, 다른 기존 settle과
+같이 참조 없는 anchor body가 남을 수 있다. 이 제안은 archive 전체를 다시
+검색하거나 그 body를 추정 삭제하지 않는다. 이후 실행을 막거나 원래 후보를
+재실행시키지는 않지만, startup의 body inventory에는 비용이 남을 수 있다.
+member의 큰 execution body는 anchor를 닫기 전에 모두 제거·동기화한다.
+
+기존 active part/execution 형식은 바꾸지 않아 별도 hard cut이 필요하지 않다.
+다만 live closure를 모르는 구버전은 그 scope의 검사에서 멈춘다. 부분 이동
+중인 상태를 구버전으로 복구할 수 있다고 주장하지 않는다.
 
 ## 검증과 비교
 

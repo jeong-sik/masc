@@ -433,6 +433,7 @@ let test_preflight_checks_previous_step_links () =
       ~read:(fun ~scope ~request_id -> Ok (List.find_opt (fun (record:Owner.retained) ->
         record.scope=scope && record.request_id=request_id) records))
       ~read_scope:(fun ~scope:_ -> fail "floor preflight read an unrelated scope inventory")
+      ~read_archive:(fun ~scope:_ ~date:_ ~request_id:_ -> fail "floor preflight read an unrelated archive")
       ~read_body:(fun ~scope:_ ~request_digest:_ -> fail "captured steps have no gate retry body") in
   let second = retain ~store chain.second_step (Step.to_json chain.second_step) in
   validate [first] second |> ok;

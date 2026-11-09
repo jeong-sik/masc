@@ -63,10 +63,19 @@ let progress_ids progress =
     (Progress.events progress)
 
 (* The function each gate inventory groups its records by. *)
-let gate_parent = function
-  | Librarian Preflight.Admission_gate -> Some Keeper_librarian_admission_gate.parent_execution_id
-  | Librarian Preflight.History_gate -> Some Keeper_librarian_durable_gate.parent_execution_id
-  | Librarian Preflight.Floor_gate -> Some Keeper_librarian_floor_step_gate.parent_execution_id
+let payload_ids =
+  let gate parent original=Result.map (fun id -> [id]) (parent original) in
+  function
+  | Librarian Preflight.Admission_gate -> Some (gate Keeper_librarian_admission_gate.parent_execution_id)
+  | Librarian Preflight.History_gate -> Some (gate Keeper_librarian_durable_gate.parent_execution_id)
+  | Librarian Preflight.Floor_gate -> Some (gate Keeper_librarian_floor_step_gate.parent_execution_id)
+  | Librarian Preflight.Admission_closure -> Some (fun (original:Owner.retained) ->
+      let* owner=match original.request with
+        | `Assoc fields -> Option.to_result ~none:"Closure has no captured owner" (List.assoc_opt "owner" fields)
+        | _ -> Error "Closure payload is not an object" in
+      let* owner=Keeper_librarian_admission_capture.owner_of_json owner in
+      let+ closure=Keeper_librarian_admission_closure.restore ~owner original in
+      Keeper_librarian_admission_closure.named_ids closure)
   | Librarian
       ( Preflight.Admission_execution | Preflight.Admission_part | Preflight.Admission_partition
       | Preflight.History_execution | Preflight.Floor_execution )
@@ -93,18 +102,18 @@ let live_names ~store =
             (kind_of_scope (Owner.Record.scope record))
         in
         let* parent =
-          match gate_parent kind with
+          match payload_ids kind with
           | None -> Ok []
-          | Some parent_execution_id ->
+          | Some named_ids ->
             let* original =
               Owner.load_listed ~store record
               |> Result.map_error (refuse "a live gate record could not be loaded")
             in
-            let+ id =
-              parent_execution_id original
+            let+ ids =
+              named_ids original
               |> Result.map_error (refuse "a live gate record names no parent execution")
             in
-            [ id ]
+            ids
         in
         Ok
           (List.fold_left

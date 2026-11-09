@@ -844,9 +844,9 @@ let tool_request_consumer scope =
 
 let validate_tool_request () =
   let librarian = Masc.Keeper_librarian_store_preflight.validator () in
-  fun ~read ~read_scope ~read_body (record : Masc.Lane_addon_tool_request_owner.retained) ->
+  fun ~read ~read_scope ~read_body ~read_archive (record : Masc.Lane_addon_tool_request_owner.retained) ->
     match tool_request_consumer record.scope with
-    | Some Librarian -> librarian ~read ~read_scope ~read_body record
+    | Some Librarian -> librarian ~read ~read_scope ~read_body ~read_archive record
     | Some Workspace_curator -> Masc.Workspace_memory_execution_capture.check_retained record
     | Some Verifier_review -> Masc.Verifier_review_owner.check_retained record
     | Some Goal_proof_review -> Masc.Goal_verifier_worker.check_retained record

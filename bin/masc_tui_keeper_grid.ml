@@ -50,15 +50,21 @@ let minute_seconds = int_of_float Masc_time_constants.minute
 let slot_minutes = Pulse.slot_seconds / minute_seconds
 let minutes_per_hour = Masc_time_constants.hour_int / minute_seconds
 
-let window_label ~slots =
-  let minutes = slots * slot_minutes in
+let window_of_minutes minutes =
   let hours = minutes / minutes_per_hour and rest = minutes mod minutes_per_hour in
   if hours = 0 then Printf.sprintf "%dm" rest
   else if rest = 0 then Printf.sprintf "%dh" hours
   else Printf.sprintf "%dh%02dm" hours rest
 ;;
 
+let window_label ~slots = window_of_minutes (slots * slot_minutes)
+
 let slot_label = window_label ~slots:1
+
+(* G1a draws whole clock hours; G2 draws half-hour cells and returns the
+   headers to [window_label]/[slot_label]. *)
+let hour_window_label ~hours = window_of_minutes (hours * minutes_per_hour)
+let hour_slot_label = hour_window_label ~hours:1
 
 type verdict =
   | Failing of { resting : bool }

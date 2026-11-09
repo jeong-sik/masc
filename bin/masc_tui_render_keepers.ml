@@ -874,13 +874,16 @@ let grid_spread ~cells lead tail =
 let grid_activity_header (grid : Grid.t) =
   let recede text = Theme.recede () ^ text ^ Ansi.reset in
   let line = " " ^ Theme.info () ^ Keeper_mark.grid_now_line ^ Ansi.reset ^ " " in
-  let window = Grid.window_label ~slots:grid.side_cells in
+  (* The pulse column draws whole clock hours, newest last; a column wider
+     than the pulse pads the left with blanks. The header names the drawn
+     hours, not ledger half hours. *)
+  let window = Grid.hour_window_label ~hours:(min grid.side_cells Keeper_mark.pulse_hours) in
   let side = grid.side_cells > 0 in
   String.concat ""
     [ String.make Grid.gutter_cells ' '
     ; recede (fit_width Keeper_mark.grid_keeper_header grid.name_cells)
     ; (if side then
-         " " ^ recede (grid_spread ~cells:grid.side_cells (Keeper_mark.grid_pulse_header ~window) Grid.slot_label)
+         " " ^ recede (grid_spread ~cells:grid.side_cells (Keeper_mark.grid_pulse_header ~window) Grid.hour_slot_label)
        else "")
     ; line
     ; Ansi.bold ^ fit_width Keeper_mark.axis_now_header Grid.now_cells ^ Ansi.reset

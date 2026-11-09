@@ -41,6 +41,17 @@ val window_label : slots:int -> string
 val slot_label : string
 (** How long one half-hour slot lasts: [30m]. *)
 
+val hour_window_label : hours:int -> string
+(** How long [hours] drawn hour cells last, as the G1a column headers write
+    it: [12h], [8h]. G1a draws whole clock hours
+    (Masc_tui_keeper_pulse.slots, at most Masc_tui_keeper_mark.pulse_hours);
+    G2 draws half-hour cells and switches the headers back to
+    {!window_label}. *)
+
+val hour_slot_label : string
+(** How long one drawn hour cell lasts: [1h]. G2 replaces it with
+    {!slot_label}. *)
+
 (** {1 Verdicts} (§2.4.2) *)
 
 type verdict =

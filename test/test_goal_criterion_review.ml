@@ -235,6 +235,26 @@ let test_actual_goal_list_observation_fits_descriptor_output () = with_workspace
   match P.validate_output plan ~run_id:(P.Run_id.fresh ()) ~node_id (tool config "masc_goal_list" []) with
   | Ok _ -> () | Error _ -> Alcotest.fail "B2 observation broke the declared Goal output contract")
 
+(* A list row carries the verdict. The reviewer's result and the tool calls it
+   made stay in the ledger and in the full projection the dashboard reads. *)
+let test_goal_list_row_leaves_the_reviewer_evidence_out () = with_workspace (fun config _ ->
+  let goal_id = create config in
+  let reason = "The subject exists and the declared measurement can reach the target." in
+  with_reviewer (reviewer config goal_id (ref 0) (fun () -> ()) (Some (AR.Approve reason))) (fun () ->
+    get (Agent.For_testing.process config ~goal_id));
+  let open Yojson.Safe.Util in
+  let row = tool config "masc_goal_list" [] |> member "goals" |> to_list
+    |> List.find (fun json -> (json |> member "id" |> to_string) = goal_id)
+    |> member "criterion_review" in
+  Alcotest.(check (list string)) "a list row keeps the verdict"
+    ["state"; "request_id"; "criterion_revision"; "reason"; "detail"; "authority"] (keys row);
+  Alcotest.(check string) "the reason is the reviewer's" reason (row |> member "reason" |> to_string);
+  let full = R.projection (R.load config) (goal config goal_id) in
+  Alcotest.(check (list string)) "the full projection keeps the evidence"
+    ["state"; "request_id"; "criterion_revision"; "reason"; "detail"; "authority"; "review"; "tools"]
+    (keys full);
+  Alcotest.(check int) "its tools are the actual lookup" 1 (full |> member "tools" |> to_list |> List.length))
+
 let test_started_agent_consumes_public_upsert_wake () = with_workspace (fun config env ->
   let called, resolve = Eio.Promise.create () in
   let calls = ref 0 in
@@ -361,6 +381,7 @@ let () = Alcotest.run "Goal criterion review" ["behavior", [
   Alcotest.test_case "unreadable ledger remains unavailable" `Quick test_unreadable_ledger_is_not_unchecked;
   Alcotest.test_case "missing primary never resets an uncertain original" `Quick test_missing_primary_cannot_replay_a_dispatched_original;
   Alcotest.test_case "actual observation fits the descriptor output" `Quick test_actual_goal_list_observation_fits_descriptor_output;
+  Alcotest.test_case "list row leaves the reviewer evidence out" `Quick test_goal_list_row_leaves_the_reviewer_evidence_out;
   Alcotest.test_case "started application lane consumes public upsert" `Quick test_started_agent_consumes_public_upsert_wake;
   Alcotest.test_case "new lane preserves interrupted original as unknown" `Quick test_started_agent_reconciles_interrupted_dispatch;
   Alcotest.test_case "retained replies recover after Goal mutation" `Quick test_retained_judgments_recover_after_goal_mutation;

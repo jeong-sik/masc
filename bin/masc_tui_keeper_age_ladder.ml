@@ -84,14 +84,21 @@ let strip bins =
 
 let cell_label = "facts"
 
+let count_text = function
+  | None -> cell_label ^ " " ^ unmeasured_mark
+  | Some bins -> Printf.sprintf "%s %d" cell_label (Bins.total bins)
+;;
+
 let cell bins : Masc_tui_keeper_axis_cell.t =
   let text =
     match bins with
-    | None -> cell_label ^ " " ^ unmeasured_mark
-    | Some bins -> Printf.sprintf "%s %d %s" cell_label (Bins.total bins) (strip bins)
+    | None -> count_text None
+    | Some measured -> count_text bins ^ " " ^ strip measured
   in
   { text; tone = Quiet }
 ;;
+
+let count_cell bins : Masc_tui_keeper_axis_cell.t = { text = count_text bins; tone = Quiet }
 
 let legend =
   Printf.sprintf

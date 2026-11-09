@@ -34,6 +34,12 @@ type mark =
 val marks : Masc.Keeper_memory_age_bins.t -> mark list
 (** One mark per bin, in {!oldest_first} order. *)
 
+val strip : Masc.Keeper_memory_age_bins.t -> string
+(** The {!marks} as one mark per bin: a bar, or [0] for a bin with no facts. *)
+
+val unmeasured_mark : string
+(** What a ladder the server did not measure draws in place of its strip. *)
+
 val cell_label : string
 (** The word the second-row cell opens with. *)
 
@@ -42,6 +48,10 @@ val cell : Masc.Keeper_memory_age_bins.t option -> Masc_tui_keeper_axis_cell.t
     and a [?] when the server did not measure the ladder (the snapshot is
     absent or its read failed). [None] is not a count of zero. Always
     {!Masc_tui_keeper_axis_cell.Quiet}. *)
+
+val count_cell : Masc.Keeper_memory_age_bins.t option -> Masc_tui_keeper_axis_cell.t
+(** {!cell} without the strip, for a row that draws the strip in a cell of
+    its own. *)
 
 val legend : string
 (** The sentence the key sheet prints for the cell. It names the bins, says that

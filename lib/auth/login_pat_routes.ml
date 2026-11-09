@@ -5,6 +5,7 @@ module S = Authz_state
 module State = Authz_pat_state
 
 let ( let* ) = Result.bind
+let path = "/api/v1/auth/pats"
 let refused status text = R.json status [ "error", `String text ]
 let ms_of instant = Float.to_int (Ptime.to_float_s instant *. 1000.)
 

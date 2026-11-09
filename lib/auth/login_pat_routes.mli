@@ -17,6 +17,10 @@
     Like {!Login_routes}, this module holds no HTTP type, and the routes are
     registered at boot (S1). *)
 
+(** [/api/v1/auth/pats], the path of the collection. A PAT is at
+    [<path>/<id>]. *)
+val path : string
+
 (** [body] is [{"scope": ..., "expires_at_ms": ...}], these two members in this
     order. [scope] is the object {!Authz_scope_body} reads, and
     [expires_at_ms] is milliseconds since the epoch, or [null] for a PAT that

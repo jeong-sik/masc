@@ -1219,6 +1219,28 @@ let for_surface = function
           ~help:"jump the cursor to a match: the tree, or the open file's \
                  lines"
       ; b Search "n / N" "next / previous match"
+        (* The view actions come first among the file keys. Each answers on
+           any open file and needs nothing configured. A row gives up keys from
+           its back, and the language-server keys, which need a server, and the
+           draft keys, which write, stood ahead of them: on the fixture server
+           the file footer at 300 cells named K R D B e S V X and none of
+           d H m b y. *)
+      ; b Act "d" "diff"
+          ~help:"on the project tree, list every working-tree change; on an \
+                 open file, show that file's diff against HEAD; in the file's \
+                 history, on a commit row, show what that commit changed"
+      ; b Act "H" "history"
+          ~help:"the commits that touched the open file, newest first \
+                 (H or Esc closes)"
+      ; b Act "b" "blame"
+          ~help:"who last touched each run of lines, in the margin; b again \
+                 drops it"
+      ; b Act "m" "notes"
+          ~help:"the memos in the open file: comments on their own row \
+                 reading masc(name): text, or masc(name) question: text; m \
+                 again closes the list"
+      ; b Act "y" "copy source"
+          ~help:"send the whole readable file's original bytes to the terminal clipboard via OSC 52; terminal support is unconfirmed"
       ; b Act "K" "hover"
           ~help:"ask the language server what a name on the cursor line is \
                  (one name asks at once; several open the palette as \
@@ -1237,25 +1259,9 @@ let for_surface = function
       ; b Act "V" "draft comparison" ~help:"compare original/current server source with the retained draft"
       ; b Act "X" "discard draft" ~help:"discard only the local draft, after any submitted save settles"
       ; b Act "A (draft)" "adopt revision" ~help:"after rereading and comparing a conflict, explicitly adopt the server revision"
-      ; b Act "y" "copy source"
-          ~help:"send the whole readable file's original bytes to the terminal clipboard via OSC 52; terminal support is unconfirmed"
-      ; b Act "b" "blame"
-          ~help:"who last touched each run of lines, in the margin; b again \
-                 drops it"
-      ; b Act "m" "notes"
-          ~help:"the memos in the open file: comments on their own row \
-                 reading masc(name): text, or masc(name) question: text; m \
-                 again closes the list"
-      ; b Act "d" "diff"
-          ~help:"on the project tree, list every working-tree change; on an \
-                 open file, show that file's diff against HEAD; in the file's \
-                 history, on a commit row, show what that commit changed"
       ; b Act "Enter (history)" "open"
           ~help:"a commit answers with its pull request, from its (#N) and \
                  the repository's remote"
-      ; b Act "H" "history"
-          ~help:"the commits that touched the open file, newest first \
-                 (H or Esc closes)"
       ]
       @ row_list_jumps @ listing_meta
   | Tools ->
@@ -1871,14 +1877,19 @@ let footer_hints_code ~pane =
      Esc alone goes on, to the ring parent. *)
   let esc_alone b =
     if String.equal b.key "Left / Esc" then { b with key = "Esc" } else b in
+  (* The footer spells the pan key in arrows: 13 cells with its label where the
+     words take 28. The sheet keeps the words. *)
+  let pan_arrows b =
+    if String.equal b.key "Shift-Left / Shift-Right" then { b with key = "Shift-←/→" }
+    else b in
   let visible = match pane with
     | Code_diff ->
         let pan, others = List.partition
             (fun b -> String.equal b.key "Shift-Left / Shift-Right") visible in
-        List.map (fun b -> { b with key = "Shift-←/→" }) pan
-        @ List.map esc_alone others
+        List.map pan_arrows pan @ List.map esc_alone others
     | Code_root _ -> List.map esc_alone visible
-    | Code_tree _ | Code_file | Code_notes | Code_history -> visible in
+    | Code_file -> List.map pan_arrows visible
+    | Code_tree _ | Code_notes | Code_history -> visible in
   visible
   |> List.map (fun b ->
        if String.equal b.key "j/k" then

@@ -19,18 +19,6 @@ let keeper_lane_idle_text seconds =
   else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
   else Printf.sprintf "%dd" (seconds / 86400)
 
-(* What the operator reads for how the last Librarian pass ended. The wire
-   words name code paths ("not_committed"); these say what happened. *)
-let librarian_pass_end_words = function
-  | Masc.Tui_decode_memory_health.Pass_off -> "switched off"
-  | Masc.Tui_decode_memory_health.Pass_lane_unconfigured -> "no model lane set up"
-  | Masc.Tui_decode_memory_health.Pass_drained -> "caught up"
-  | Masc.Tui_decode_memory_health.Pass_yielded_to_waiting_unit -> "yielded to waiting work"
-  | Masc.Tui_decode_memory_health.Pass_pending -> "work still pending"
-  | Masc.Tui_decode_memory_health.Pass_not_committed -> "last pass saved nothing"
-  | Masc.Tui_decode_memory_health.Pass_stopped _ -> "stopped on an error"
-  | Masc.Tui_decode_memory_health.Pass_raised _ -> "crashed"
-
 let librarian_failure_words = function
   | Masc.Tui_decode_memory_health.Failure_prompt_render -> "prompt could not be built"
   | Masc.Tui_decode_memory_health.Failure_execution_clock_unavailable -> "no clock to run on"
@@ -290,7 +278,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
   let librarian_clauses =
     [ "Librarian"
     ; (match librarian.mlh_state with
-       | Some state -> librarian_pass_end_words state
+       | Some state -> Masc_tui_keeper_memory_reading.pass_word state
        | None -> "not measured")
     ; unread
     ; continuity

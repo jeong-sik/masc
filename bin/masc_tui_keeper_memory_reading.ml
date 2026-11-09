@@ -33,7 +33,6 @@ type index =
   { ind_snapshot : Tui_decode_memory_health.memory_health_snapshot option
   ; ind_has_anonymous_refusal : bool
   ; ind_keepers : (string, t) Hashtbl.t
-  ; ind_peak_lag : int
   }
 
 let unread_lag (librarian : Tui_decode_memory_health.memory_librarian_health) =
@@ -48,7 +47,6 @@ let index_of_snapshot (snap_opt : Tui_decode_memory_health.memory_health_snapsho
       { ind_snapshot = None
       ; ind_has_anonymous_refusal = false
       ; ind_keepers = Hashtbl.create 0
-      ; ind_peak_lag = 0
       }
   | Some snap ->
       let has_anonymous_refusal =
@@ -98,18 +96,9 @@ let index_of_snapshot (snap_opt : Tui_decode_memory_health.memory_health_snapsho
           in
           Hashtbl.replace table k.mkh_keeper_id row)
         snap.mhs_keepers;
-      let peak_lag =
-        List.fold_left
-          (fun peak (k : Tui_decode_memory_health.memory_keeper_health) ->
-            match unread_lag k.mkh_librarian with
-            | Some turns -> max peak turns
-            | None -> peak)
-          0 snap.mhs_keepers
-      in
       { ind_snapshot = Some snap
       ; ind_has_anonymous_refusal = has_anonymous_refusal
       ; ind_keepers = table
-      ; ind_peak_lag = peak_lag
       }
 ;;
 
@@ -126,11 +115,14 @@ let find (idx : index) ~keeper_name : t =
             No_row
 ;;
 
-(* A value the row came without. The header above a view's cell names the
-   value; the second row's cells name it before the mark. *)
-let unmeasured_mark = "?"
+(* A value the row came without draws the age ladder's mark, so one mark
+   says "not measured" on every memory cell. *)
+let unknown_cell =
+  { Masc_tui_keeper_axis_cell.text = "mem " ^ Masc_tui_keeper_age_ladder.unmeasured_mark
+  ; tone = Quiet
+  }
+;;
 
-let unknown_cell = { Masc_tui_keeper_axis_cell.text = "mem " ^ unmeasured_mark; tone = Quiet }
 let refused_cell = { Masc_tui_keeper_axis_cell.text = "mem !"; tone = Failure }
 
 let lag_tone turns =
@@ -139,7 +131,10 @@ let lag_tone turns =
 
 let cell_of_lag = function
   | Lag n -> { Masc_tui_keeper_axis_cell.text = Printf.sprintf "lag %d" n; tone = lag_tone n }
-  | Lag_unmeasured -> { Masc_tui_keeper_axis_cell.text = "lag " ^ unmeasured_mark; tone = Quiet }
+  | Lag_unmeasured ->
+      { Masc_tui_keeper_axis_cell.text = "lag " ^ Masc_tui_keeper_age_ladder.unmeasured_mark
+      ; tone = Quiet
+      }
 ;;
 
 let lag_cell = function
@@ -154,7 +149,9 @@ let gap_cells = function
       let count = past_last_atom - first_atom in
       [ { Masc_tui_keeper_axis_cell.text = Printf.sprintf "gap %d" count; tone = Attention } ]
   | Gap_unmeasured ->
-      [ { Masc_tui_keeper_axis_cell.text = "gap " ^ unmeasured_mark; tone = Attention } ]
+      [ { Masc_tui_keeper_axis_cell.text = "gap " ^ Masc_tui_keeper_age_ladder.unmeasured_mark
+        ; tone = Attention
+        } ]
   | No_gap -> []
 ;;
 
@@ -188,6 +185,7 @@ let cells ~now = function
 type 'a field =
   | Measured of 'a
   | Unmeasured
+  | No_snapshot
   | Snapshot_unknown
   | Row_absent
   | Row_refused
@@ -205,7 +203,15 @@ let updated_at = function
   | No_row -> Row_absent
   | Refused _ -> Row_refused
   | Row { updated_at = Some at; _ } -> Measured at
-  | Row { updated_at = None; _ } -> Unmeasured
+  | Row { updated_at = None; _ } -> No_snapshot
+;;
+
+let digest_at = function
+  | Unknown -> Snapshot_unknown
+  | No_row -> Row_absent
+  | Refused _ -> Row_refused
+  | Row { digest_at = Some at; _ } -> Measured at
+  | Row { digest_at = None; _ } -> Unmeasured
 ;;
 
 let age_bins = function
@@ -216,21 +222,31 @@ let age_bins = function
   | Row { age_bins = None; _ } -> Unmeasured
 ;;
 
-let peak_lag index = index.ind_peak_lag
+let peak_lag readings =
+  List.fold_left
+    (fun peak -> function
+      | Row { lag = Lag turns; _ } -> max peak turns
+      | Row { lag = Lag_unmeasured; _ } | Unknown | No_row | Refused _ -> peak)
+    0 readings
+;;
+
+let no_memory_cell = { Masc_tui_keeper_axis_cell.text = Masc_tui_theme.Glyph.no_value; tone = Quiet }
 
 let field_cell ~unmeasured ~measured = function
   | Measured value -> measured value
   | Unmeasured -> { Masc_tui_keeper_axis_cell.text = unmeasured; tone = Quiet }
+  | No_snapshot | Row_absent -> no_memory_cell
   | Snapshot_unknown -> unknown_cell
   | Row_refused -> refused_cell
-  | Row_absent -> { Masc_tui_keeper_axis_cell.text = Masc_tui_theme.Glyph.no_value; tone = Quiet }
 ;;
 
-(* The Memory pane's sentence for each ending ("caught up", "work still
-   pending"), shortened to a word for the axis row's ● column. *)
+(* What the operator reads for how the last Librarian pass ended, on the
+   Memory pane and in the memory view's ● column. The wire words name code
+   paths ("not_committed"); these say what happened, in a word that fits the
+   column. *)
 let pass_word = function
   | Tui_decode_memory_health.Pass_off -> "switched off"
-  | Tui_decode_memory_health.Pass_lane_unconfigured -> "no lane"
+  | Tui_decode_memory_health.Pass_lane_unconfigured -> "no lane set"
   | Tui_decode_memory_health.Pass_drained -> "caught up"
   | Tui_decode_memory_health.Pass_yielded_to_waiting_unit -> "yielded"
   | Tui_decode_memory_health.Pass_pending -> "pending"
@@ -252,13 +268,13 @@ let pass_tone = function
 ;;
 
 let pass_cell reading =
-  field_cell ~unmeasured:unmeasured_mark
+  field_cell ~unmeasured:Masc_tui_keeper_age_ladder.unmeasured_mark
     ~measured:(fun ending -> { Masc_tui_keeper_axis_cell.text = pass_word ending; tone = pass_tone ending })
     (pass_end reading)
 ;;
 
 let updated_cell ~now reading =
-  field_cell ~unmeasured:unmeasured_mark
+  field_cell ~unmeasured:Masc_tui_keeper_age_ladder.unmeasured_mark
     ~measured:(fun at -> { Masc_tui_keeper_axis_cell.text = span_since ~now at; tone = Quiet })
     (updated_at reading)
 ;;
@@ -279,21 +295,23 @@ let lag_bar_cell ~peak_lag = function
   | Lag_unmeasured -> cell_of_lag Lag_unmeasured
 ;;
 
-let digest_cell ~now digest_at =
-  let age =
-    match digest_at with
-    | Some at -> span_since ~now at
-    | None -> Masc_tui_theme.Glyph.no_value
-  in
-  { Masc_tui_keeper_axis_cell.text = "digest " ^ age; tone = Quiet }
+let digest_label = "digest"
+
+let digest_cell ~now field =
+  field_cell
+    ~unmeasured:(digest_label ^ " " ^ Masc_tui_keeper_age_ladder.unmeasured_mark)
+    ~measured:(fun at ->
+      { Masc_tui_keeper_axis_cell.text = digest_label ^ " " ^ span_since ~now at; tone = Quiet })
+    field
 ;;
 
 (* The ● cell of both views is read from the same reading and already marks
    a reading without a row, so the next cells draw only a row's values. *)
-let lag_digest_gap_cells ~now ~peak_lag = function
+let lag_digest_gap_cells ~now ~peak_lag reading =
+  match reading with
   | Unknown | No_row | Refused _ -> []
-  | Row { lag; digest_at; gap; _ } ->
-      [ lag_bar_cell ~peak_lag lag; digest_cell ~now digest_at ] @ gap_cells gap
+  | Row { lag; gap; _ } ->
+      [ lag_bar_cell ~peak_lag lag; digest_cell ~now (digest_at reading) ] @ gap_cells gap
 ;;
 
 let lag_stale_facts_cells ~peak_lag = function

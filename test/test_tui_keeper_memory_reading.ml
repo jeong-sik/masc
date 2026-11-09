@@ -217,81 +217,134 @@ let test_cells_formatting () =
 
 module Reading = Masc_tui_keeper_memory_reading
 module Health = Masc.Tui_decode_memory_health
+module Cell = Masc_tui_keeper_axis_cell
 
-let check_field name expected actual = Alcotest.(check bool) name true (expected = actual)
+let field_label = function
+  | Reading.Measured _ -> "measured"
+  | Reading.Unmeasured -> "unmeasured"
+  | Reading.No_snapshot -> "no snapshot"
+  | Reading.Snapshot_unknown -> "snapshot unknown"
+  | Reading.Row_absent -> "row absent"
+  | Reading.Row_refused -> "row refused"
+
+let check_field name expected actual =
+  Alcotest.(check string) name (field_label expected) (field_label actual);
+  Alcotest.(check bool) (name ^ ": same value") true (expected = actual)
+
+let bins : Masc.Keeper_memory_age_bins.t =
+  { under_hour = 1; under_day = 2; under_week = 3; older = 4 }
+
+let reading_of keepers ?(refusals = []) keeper_name =
+  Reading.find
+    (Reading.index_of_snapshot (Some (make_snapshot ~refusals keepers)))
+    ~keeper_name
 
 let test_a_reading_gives_its_value_or_why_it_has_none () =
-  let bins : Masc.Keeper_memory_age_bins.t =
-    { under_hour = 1; under_day = 2; under_week = 3; older = 4 }
-  in
   let measured =
     make_keeper_health ~keeper_id:"alpha" ~updated_at:1794040000.0 ~age_bins:bins
-      (make_librarian ~state:Health.Pass_pending ())
+      (make_librarian ~state:Health.Pass_pending ~last_success_at:1794030000.0 ())
   in
   let unmeasured = make_keeper_health ~keeper_id:"beta" (make_librarian ()) in
+  let alpha = reading_of [ measured; unmeasured ] "alpha" in
+  let beta = reading_of [ measured; unmeasured ] "beta" in
+  check_field "the pass end comes from the row's librarian" (Reading.Measured Health.Pass_pending)
+    (Reading.pass_end alpha);
+  check_field "the digest time comes from the row's librarian" (Reading.Measured 1794030000.0)
+    (Reading.digest_at alpha);
+  check_field "the update time comes from the row" (Reading.Measured 1794040000.0)
+    (Reading.updated_at alpha);
+  check_field "the age bins come from the row" (Reading.Measured bins) (Reading.age_bins alpha);
+  check_field "a pass the server did not measure" Reading.Unmeasured (Reading.pass_end beta);
+  check_field "a digest the server did not measure" Reading.Unmeasured (Reading.digest_at beta);
+  check_field "a row without an update has no snapshot" Reading.No_snapshot
+    (Reading.updated_at beta);
+  check_field "a ladder the server did not count" Reading.Unmeasured (Reading.age_bins beta)
+
+let test_a_reading_without_a_row_names_why_in_every_field () =
   let refusal : Health.memory_keeper_refusal =
     { mkr_keeper_id = Some "gamma"; mkr_reason = "corrupt snapshot" }
   in
-  let index =
-    Reading.index_of_snapshot (Some (make_snapshot ~refusals:[ refusal ] [ measured; unmeasured ]))
-  in
-  let reading keeper_name = Reading.find index ~keeper_name in
+  let refused = reading_of ~refusals:[ refusal ] [] "gamma" in
+  let absent = reading_of [] "delta" in
   let unknown = Reading.find (Reading.index_of_snapshot None) ~keeper_name:"alpha" in
-  check_field "the pass end comes from the row's librarian" (Reading.Measured Health.Pass_pending)
-    (Reading.pass_end (reading "alpha"));
-  check_field "the update time comes from the row" (Reading.Measured 1794040000.0)
-    (Reading.updated_at (reading "alpha"));
-  check_field "the age bins come from the row" (Reading.Measured bins)
-    (Reading.age_bins (reading "alpha"));
-  check_field "a pass the server did not measure" Reading.Unmeasured
-    (Reading.pass_end (reading "beta"));
-  check_field "an update the server did not stamp" Reading.Unmeasured
-    (Reading.updated_at (reading "beta"));
-  check_field "a ladder the server did not count" Reading.Unmeasured
-    (Reading.age_bins (reading "beta"));
-  check_field "a refused row" Reading.Row_refused (Reading.pass_end (reading "gamma"));
-  check_field "a Keeper the snapshot has no row for" Reading.Row_absent
-    (Reading.updated_at (reading "delta"));
-  check_field "no snapshot" Reading.Snapshot_unknown (Reading.age_bins unknown)
+  (* Each field has its own value type, so the expected reason is its label. *)
+  List.iter
+    (fun (name, reading, expected) ->
+      let check field actual =
+        Alcotest.(check string) (name ^ ": " ^ field) (field_label expected) actual
+      in
+      check "pass" (field_label (Reading.pass_end reading));
+      check "digest" (field_label (Reading.digest_at reading));
+      check "update" (field_label (Reading.updated_at reading));
+      check "ages" (field_label (Reading.age_bins reading)))
+    [ "no snapshot read", unknown, (Reading.Snapshot_unknown : unit Reading.field)
+    ; "no row", absent, Reading.Row_absent
+    ; "a refused row", refused, Reading.Row_refused
+    ]
 
 let test_the_pass_cell_tone_follows_how_the_pass_ended () =
   let tone_of state =
-    let keeper = make_keeper_health ~keeper_id:"alpha" (make_librarian ?state ()) in
-    let index = Reading.index_of_snapshot (Some (make_snapshot [ keeper ])) in
-    (Reading.pass_cell (Reading.find index ~keeper_name:"alpha")).tone
+    (Reading.pass_cell
+       (reading_of [ make_keeper_health ~keeper_id:"alpha" (make_librarian ?state ()) ] "alpha"))
+      .tone
   in
-  let check name expected state =
-    Alcotest.(check bool) name true (expected = tone_of state)
-  in
-  check "a stopped pass is a failure" Masc_tui_keeper_axis_cell.Failure
-    (Some (Health.Pass_stopped "lane gone"));
-  check "a crashed pass is a failure" Masc_tui_keeper_axis_cell.Failure
-    (Some (Health.Pass_raised "exception"));
-  check "a pass that saved nothing asks for attention" Masc_tui_keeper_axis_cell.Attention
+  let check name expected state = Alcotest.(check bool) name true (expected = tone_of state) in
+  check "a stopped pass is a failure" Cell.Failure (Some (Health.Pass_stopped "lane gone"));
+  check "a crashed pass is a failure" Cell.Failure (Some (Health.Pass_raised "exception"));
+  check "a pass that saved nothing asks for attention" Cell.Attention
     (Some Health.Pass_not_committed);
-  check "a librarian with no lane asks for attention" Masc_tui_keeper_axis_cell.Attention
+  check "a librarian with no lane asks for attention" Cell.Attention
     (Some Health.Pass_lane_unconfigured);
-  check "a caught-up pass is quiet" Masc_tui_keeper_axis_cell.Quiet (Some Health.Pass_drained);
-  check "a pending pass is quiet" Masc_tui_keeper_axis_cell.Quiet (Some Health.Pass_pending);
-  check "an unmeasured pass is quiet" Masc_tui_keeper_axis_cell.Quiet None;
-  let refused = Reading.Refused "corrupt snapshot" in
+  check "a caught-up pass is quiet" Cell.Quiet (Some Health.Pass_drained);
+  check "a pending pass is quiet" Cell.Quiet (Some Health.Pass_pending);
+  check "a pass that yielded to waiting work is quiet" Cell.Quiet
+    (Some Health.Pass_yielded_to_waiting_unit);
+  check "a librarian switched off is quiet" Cell.Quiet (Some Health.Pass_off);
+  check "an unmeasured pass is quiet" Cell.Quiet None;
   Alcotest.(check bool) "a refused row is a failure" true
-    ((Reading.pass_cell refused).tone = Masc_tui_keeper_axis_cell.Failure)
+    ((Reading.pass_cell (Reading.Refused "corrupt snapshot")).tone = Cell.Failure)
 
-let test_the_peak_lag_is_the_furthest_behind_row () =
-  let keeper keeper_id librarian = make_keeper_health ~keeper_id librarian in
-  let index =
-    Reading.index_of_snapshot
-      (Some
-         (make_snapshot
-            [ keeper "alpha" (make_librarian ~unread_atom_turns:5 ~unread_official_turns:3 ())
-            ; keeper "beta" (make_librarian ~unread_atom_turns:1 ~unread_official_turns:2 ())
-            ; keeper "gamma" (make_librarian ~unread_atom_turns:40 ())
-            ]))
+let test_the_peak_lag_is_the_drawn_keeper_furthest_behind () =
+  let keepers =
+    [ make_keeper_health ~keeper_id:"alpha"
+        (make_librarian ~unread_atom_turns:5 ~unread_official_turns:3 ())
+    ; make_keeper_health ~keeper_id:"beta"
+        (make_librarian ~unread_atom_turns:1 ~unread_official_turns:2 ())
+    ; make_keeper_health ~keeper_id:"gamma" (make_librarian ~unread_atom_turns:40 ())
+    ; make_keeper_health ~keeper_id:"ghost"
+        (make_librarian ~unread_atom_turns:30 ~unread_official_turns:10 ())
+    ]
   in
-  Alcotest.(check int) "an unmeasured lag does not set the peak" 8 (Reading.peak_lag index);
-  Alcotest.(check int) "no snapshot has no peak" 0
-    (Reading.peak_lag (Reading.index_of_snapshot None))
+  let index = Reading.index_of_snapshot (Some (make_snapshot keepers)) in
+  let peak names =
+    Reading.peak_lag (List.map (fun keeper_name -> Reading.find index ~keeper_name) names)
+  in
+  Alcotest.(check int) "a snapshot row the list does not draw does not set the peak" 8
+    (peak [ "alpha"; "beta"; "gamma"; "delta" ]);
+  Alcotest.(check int) "a drawn keeper further behind sets it" 40
+    (peak [ "alpha"; "ghost" ]);
+  Alcotest.(check int) "no measured lag has no peak" 0 (peak [ "gamma"; "delta" ])
+
+let test_the_lag_cell_opens_the_next_cells_of_a_row () =
+  let first_tone cells =
+    match cells with
+    | (cell : Cell.t) :: _ -> Some cell.tone
+    | [] -> None
+  in
+  List.iter
+    (fun (name, librarian, expected) ->
+      let reading = reading_of [ make_keeper_health ~keeper_id:"alpha" librarian ] "alpha" in
+      let check view cells =
+        Alcotest.(check bool) (name ^ ": " ^ view) true (Some expected = first_tone cells)
+      in
+      check "memory view" (Reading.lag_digest_gap_cells ~now:1794050000.0 ~peak_lag:8 reading);
+      check "age view" (Reading.lag_stale_facts_cells ~peak_lag:8 reading))
+    [ "an unmeasured lag is quiet", make_librarian ~unread_atom_turns:5 (), Cell.Quiet
+    ; "no unread turn is quiet", make_librarian ~unread_atom_turns:0 ~unread_official_turns:0 (),
+      Cell.Quiet
+    ; "unread turns ask for attention",
+      make_librarian ~unread_atom_turns:2 ~unread_official_turns:1 (), Cell.Attention
+    ]
 
 let test_a_reading_without_a_row_draws_no_next_cells () =
   List.iter
@@ -313,10 +366,14 @@ let () =
     ; ( "view cells"
       , [ Alcotest.test_case "a reading gives its value or why it has none" `Quick
             test_a_reading_gives_its_value_or_why_it_has_none
+        ; Alcotest.test_case "a reading without a row names why in every field" `Quick
+            test_a_reading_without_a_row_names_why_in_every_field
         ; Alcotest.test_case "the pass cell tone follows how the pass ended" `Quick
             test_the_pass_cell_tone_follows_how_the_pass_ended
-        ; Alcotest.test_case "the peak lag is the furthest behind row" `Quick
-            test_the_peak_lag_is_the_furthest_behind_row
+        ; Alcotest.test_case "the peak lag is the drawn keeper furthest behind" `Quick
+            test_the_peak_lag_is_the_drawn_keeper_furthest_behind
+        ; Alcotest.test_case "the lag cell opens the next cells of a row" `Quick
+            test_the_lag_cell_opens_the_next_cells_of_a_row
         ; Alcotest.test_case "a reading without a row draws no next cells" `Quick
             test_a_reading_without_a_row_draws_no_next_cells
         ] )

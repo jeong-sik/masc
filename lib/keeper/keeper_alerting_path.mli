@@ -245,9 +245,6 @@ val resolve_keeper_target_path :
 (** Re-export of [Playground_paths.sanitize_keeper_name]. *)
 val sanitize_keeper_name : string -> string
 
-(** Re-export of [Playground_paths.bundle_root]. *)
-val playground_path_of_keeper : string -> string
-
 (** Sandbox host root path for [meta]. *)
 val sandbox_path_of_meta : meta:Keeper_meta_contract.keeper_meta -> string
 

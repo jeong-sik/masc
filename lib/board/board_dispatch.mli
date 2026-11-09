@@ -334,9 +334,9 @@ val list_recent_posts_matching_author :
     substring-based author search. *)
 
 val current_post_cursor : unit -> float * string option
-(** Atomic high-water mark for initializing a Board observation cursor. *)
-(** Current Board cursor head without sorting or materializing the full post
-    history. *)
+(** Atomic high-water mark for initializing a Board observation cursor: the
+    current Board cursor head, read without sorting or materializing the full
+    post history. *)
 
 val delete_post :
   post_id:string -> (Board.deletion_outcome, Board.board_error) Result.t

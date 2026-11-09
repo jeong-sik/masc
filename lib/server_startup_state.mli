@@ -39,12 +39,9 @@ val is_live : unit -> bool
 
 val pending_lazy_tasks : unit -> string list
 
-(** [true] iff {!pending_lazy_tasks} is empty. *)
 (** Seconds elapsed since startup began. *)
 val elapsed_since_start : unit -> float
 
-(** Default startup watchdog timeout in seconds
-    ([MASC_STARTUP_WATCHDOG_SEC] default). *)
 (** Effective watchdog timeout from env, clamped to [[30, 600]]. *)
 val watchdog_timeout_sec : unit -> float
 

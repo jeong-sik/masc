@@ -1,7 +1,10 @@
 open Alcotest
 module Response = Masc.Http_server_eio.Response
 
-let wire_response ~handler ~headers target =
+(* These exchanges finish at once; no response flush comes near this. *)
+let stalled_after_s = 90.0
+
+let wire_response ~clock ~handler ~headers target =
   Eio.Switch.run (fun sw ->
   let resources = Masc.Http_h2_response_ledger.create
     ~max_pending_bytes:H2_response_limits.default_max_pending_bytes in
@@ -25,7 +28,9 @@ let wire_response ~handler ~headers target =
       consume ()) in
   H2.Body.Writer.close writer;
   let server = H2.Server_connection.create (fun h2_reqd ->
-    handler (Masc.Http_reqd.of_h2 ~stream_sw:sw
+    let stream_end =
+      Masc.Http_h2_stream.Stream_end.create ~stream_sw:sw ~clock ~stalled_after_s h2_reqd in
+    handler (Masc.Http_reqd.of_h2 ~stream_end
       ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd)) in
   let transfer next_write report_write read =
     let rec drain progressed = match next_write () with
@@ -88,7 +93,7 @@ let test_wire_parity () =
   let payload revision = `Assoc ["revision", `Int revision;
                                 "text", `String (String.make 8192 'x' ^ " 끝단")] in
   let serve encoder ~compress encoding json =
-    wire_response ~headers:["accept-encoding", encoding] "/json"
+    wire_response ~clock:(Eio.Stdenv.clock env) ~headers:["accept-encoding", encoding] "/json"
       ~handler:(fun reqd -> match encoder with
         | Inline -> Response.json_value
             ~status:`Accepted ~extra_headers ~compress json reqd
@@ -141,7 +146,7 @@ let test_timeout_status_on_wire () =
       List.iter (fun encoder ->
         List.iter (fun encoding ->
           List.iter (fun (explicit_status, json, expected) ->
-            let status, headers, body = wire_response
+            let status, headers, body = wire_response ~clock:(Eio.Stdenv.clock env)
               ~headers:["accept-encoding", encoding] "/dashboard-timeout"
               ~handler:(fun reqd ->
                 let extra_headers = ["access-control-allow-origin", "https://dashboard.example"] in

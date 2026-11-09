@@ -11,8 +11,14 @@ let () = Masc.Server_startup_state.mark_state_ready () |> Result.get_ok
 module Response = Masc.Http_server_eio.Response
 module Request = Masc.Http_server_eio.Request
 
+(* An in-memory request runs on the test's switch, on a clock nobody moves:
+   no response flush stalls in these exchanges. *)
+let stream_end_of ~sw h2_reqd =
+  Masc.Http_h2_stream.Stream_end.create ~stream_sw:sw ~clock:(Eio_mock.Clock.make ())
+    ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s h2_reqd
+
 let reqd_of_h2 ~sw h2_reqd =
-  Masc.Http_reqd.of_h2 ~stream_sw:sw
+  Masc.Http_reqd.of_h2 ~stream_end:(stream_end_of ~sw h2_reqd)
     ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd
 module Mcp_error_code = Masc.Mcp_error_code
 
@@ -473,10 +479,13 @@ let with_gateway_and_switch ?(prepare_workspace=Fun.id) f =
               enabled = true
             ; require_token = true
             };
-          let handler =
+          let gateway =
             Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:(Eio.Stdenv.clock env))
-              ~trust_policy:(trust_policy ()) ~request_sw:sw
-              (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
+              ~trust_policy:(trust_policy ())
+          in
+          let handler h2_reqd =
+            gateway ~stream_end:(stream_end_of ~sw h2_reqd)
+              (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) h2_reqd
           in
           f ~base_path ~clock:(Eio.Stdenv.clock env) ~sw handler))
 
@@ -765,10 +774,13 @@ let test_oauth_scope_refusal_preserves_request_ids () =
     | Ok policy -> policy
     | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
   in
-  let public_handler =
+  let public_gateway =
     Server_h2_gateway.make_request_handler ~routes:(Server_routes_http.make_routes ~port:0 ~host:"127.0.0.1" ~sw ~clock:clock)
-      ~trust_policy:public_policy ~request_sw:sw
-      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321))
+      ~trust_policy:public_policy
+  in
+  let public_handler h2_reqd =
+    public_gateway ~stream_end:(stream_end_of ~sw h2_reqd)
+      (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) h2_reqd
   in
   let public_session = create_session ~clock ~handler:public_handler () in
   let discovery = exchange_on public_session ~meth:`GET

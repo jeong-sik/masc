@@ -35,7 +35,7 @@ let with_gateway run =
         let server_flow, client_flow = Eio_unix.Net.socketpair_stream ~sw () in
         let server = Eio.Fiber.fork_promise ~sw (fun () ->
           Eio.Switch.run @@ fun conn_sw ->
-          Server_bootstrap_http.serve_h2_connection ~sw:conn_sw
+          Server_bootstrap_http.serve_h2_connection ~clock:(Eio.Stdenv.clock env) ~sw:conn_sw
             ~h2_request_handler:handler
             ~h2_error_handler:(Server_h2_gateway.make_error_handler ())
             (`Tcp (Eio.Net.Ipaddr.V4.loopback, 54321)) server_flow) in

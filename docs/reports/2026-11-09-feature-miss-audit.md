@@ -9,7 +9,7 @@
 
 | 기능 | 실패 조건과 결과 | 수정 | PR |
 | --- | --- | --- | --- |
-| HTTPS Dashboard 실시간 연결 | 새 세션이 HTTP/2로 `GET /ws`를 보내 연결 정보를 읽으면 Router가 업그레이드 capability 부재만으로426을 반환한다. 클라이언트는 재시도만 하고 `new WebSocket`에 도달하지 못한다. | 일반 연결 정보 조회는200으로 처리하고, 실제 미지원 업그레이드만426으로 거절한다. 기존 인증·Origin 검사는 유지한다. | [#50251](https://github.com/jeong-sik/masc/pull/50251) |
+| HTTPS Dashboard 실시간 연결 | 새 세션이 HTTP/2로 `GET /ws`를 보내 연결 정보를 읽으면 Router가 업그레이드 capability 부재만으로 426을 반환한다. 클라이언트는 재시도만 하고 `new WebSocket`에 도달하지 못한다. | 일반 연결 정보 조회는 200으로 처리하고, 실제 미지원 업그레이드만 426으로 거절한다. 기존 인증·Origin 검사는 유지한다. | [#50251](https://github.com/jeong-sik/masc/pull/50251) |
 | Grep 정규식 | 입력을 `String.trim`해서 `needle `가 `needleX`까지 찾고, 공백만 있는 유효한 regex는 거절한다. 앞의 개행도 지워져 잘못된 패턴을 정상 검색으로 바꾼다. | descriptor의 기존 `-i` 변환 뒤 패턴 바이트를 그대로 rg에 전달한다. 빈 문자열은 계속 거절한다. | [#50252](https://github.com/jeong-sik/masc/pull/50252) |
 | GitHub 실행 완료 감시 | one-shot 행을 읽어 감시를 허용한 뒤 다른 호출이 반복 일정으로 바꾸면, 첫 호출이 반복 일정에 감시를 저장하고 성공한다. 감시기는 one-shot만 읽어 실행하지 않는다. | 감시를 붙이는 update만 검사한 instance에 결속한다. 저장소 잠금 안에서 이미 있는 CAS로 거절한다. 일반 update의 최신 timing 유지 동작은 보존한다. | [#50253](https://github.com/jeong-sik/masc/pull/50253) |
 
@@ -19,8 +19,8 @@ Grep 패턴 변경은 이전부터 있던 결함이며 이번 주에 도입됐�
 
 ### 재현·검증 범위
 
-- **HTTPS:** 같은 실행 중 TLS 리스너에서 HTTP/2 `/ws`는426, HTTP/1.1 `/ws`는200과 `wss` URL을 반환하는 것을 읽기 요청으로 확인했다.
-  운영 Router/handler를 그대로 추출한 전후 실행은 일반 discovery426→200, 미지원 upgrade426→426, capability가 있는 upgrade101→101이었다.
+- **HTTPS:** 같은 실행 중 TLS 리스너에서 HTTP/2 `/ws`는 426, HTTP/1.1 `/ws`는 200과 `wss` URL을 반환하는 것을 읽기 요청으로 확인했다.
+  운영 Router/handler를 그대로 추출한 전후 실행은 일반 discovery 426→200, 미지원 upgrade 426→426, capability가 있는 upgrade 101→101이었다.
   이 실행의 인증·attachment·wire sink는 stub이므로 실제 TLS WebSocket 연결 증거는 아니다.
   실제 production H2 gateway를 통하는 회귀 시험을 추가했고 파싱했다. 실행·브라우저 캡처·배포는 하지 않았다.
 - **Grep:** 실제 Safe_ops·descriptor와 변경 전후 패턴 추출을 사용한 OCaml 실행 후 `rg`를 실행했다.
@@ -36,7 +36,7 @@ Grep 패턴 변경은 이전부터 있던 결함이며 이번 주에 도입됐�
 ### Goal 생성 시 성공조건의 실현 가능성 심사
 
 [Goal 생성](../../lib/workspace_goals.ml)은 `Goal_store.upsert_goal_with_events`를 부르고,
-[저장소 계약](../../lib/goal/goal_store.mli)은 title·metric·target의 비어 있지 않음만 입력 불변식으로 검사한다고 명시한다.
+[저장소 계약](../../lib/goal/goal_store.mli)은 성공조건 입력의 title·metric·target에 대해 빈값 여부를 입력 불변식으로 검사한다고 명시한다.
 성공조건이 현실에 존재하고 도달 가능한지를 모델이 생성 시 심사하는 경로는 없다.
 [헌법](../constitution.xml)의 B2도 이 갭을 명시한다. 완료 시 proof 검증과는 별도의 기능이다.
 이번 세 PR은 생성 시 심사를 구현하지 않는다.

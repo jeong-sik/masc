@@ -11,7 +11,8 @@ type source =
   | Inherited_user_home
 
 type 'client t =
-  { home : string
+  { client : 'client client
+  ; home : string
   ; source : source
   ; environment : string array
   }
@@ -138,7 +139,7 @@ let capture (type owner) ~(client : owner client) ~declaration : (owner t, strin
       Ok (Runtime_codex_environment_projection.project
         ~explicit_account:(Option.is_some declaration) ~home:(Some home) ~configured inherited) in
   let* () = validate_environment environment in
-  Ok {home; source; environment = Array.copy environment}
+  Ok {client; home; source; environment = Array.copy environment}
 
 let private_codex_environment ~home selected =
   let ( let* ) = Result.bind in
@@ -150,6 +151,7 @@ let private_codex_environment ~home selected =
   Ok environment
 
 let home selected = selected.home
+let client selected = selected.client
 let source selected = selected.source
 let environment selected = Array.copy selected.environment
 let environment_value selected name = value name selected.environment

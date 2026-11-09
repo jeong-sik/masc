@@ -902,19 +902,26 @@ let test_vote_survives_snapshot_before_persistence_release
     }
   in
   (* The existing completion observer runs under persistence after its work.
-     Invoke the actual snapshot renderer/writer at that boundary, without
-     recursively acquiring persistence. Before the fix this erases the new
-     append while the old committed ledger is still empty. No scheduler or
-     wall-clock delay is needed to select that ordering. *)
+     Reproduce a competing snapshot from the committed vote identities using
+     the actual appended rows and the shared atomic writer. The private vote
+     renderer stays private, and no recursive persistence lock is acquired.
+     Before the fix the old ledger omits the new append, so this erases it.
+     No scheduler or wall-clock delay selects the ordering. *)
   let observer =
     { noop with observe_persist_lock_held_sec = (fun _ ->
         if !snapshot_pending then (
           snapshot_pending := false;
-          let content = Board.with_lock store (fun () ->
-            Masc_board_handlers.Board_voting.vote_log_jsonl store) in
-          match Masc_board_handlers.Board_voting.save_vote_log_jsonl store content with
+          let path = Board_votes.vote_log_path store in
+          let rows = Fs_compat.load_jsonl path in
+          let retained = Board.with_lock store (fun () ->
+            List.filter (fun row ->
+              let target = Yojson.Safe.Util.(row |> member "target" |> to_string) in
+              Hashtbl.mem store.Board.vote_log target) rows) in
+          let content = retained |> List.map (fun row ->
+            Yojson.Safe.to_string row ^ "\n") |> String.concat "" in
+          match Fs_compat.save_file_atomic path content with
           | Ok () -> ()
-          | Error error -> Alcotest.fail (Board.show_board_error error))) }
+          | Error error -> Alcotest.fail error)) }
   in
   Fun.protect
     ~finally:(fun () -> Board_metrics_hooks.set_observer noop)

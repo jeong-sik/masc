@@ -948,37 +948,7 @@ let test_correlation_fields_roundtrip () =
   | _ -> fail "expected TurnStarted"
 ;;
 
-(* ── envelope filters ─────────────────────────────────────────────── *)
-
-let test_filter_correlation () =
-  Eio_main.run
-  @@ fun _env ->
-  let bus = Event_bus.create () in
-  let sub = subscribe_routing ~filter:(Event_bus.filter_correlation "c1") bus in
-  Event_bus.publish
-    bus
-    (Event_bus.mk_event ~correlation_id:"c1" (TurnStarted { agent_name = "a"; turn = 0 }));
-  Event_bus.publish
-    bus
-    (Event_bus.mk_event ~correlation_id:"c2" (TurnStarted { agent_name = "a"; turn = 1 }));
-  let events = Event_bus.drain sub in
-  check int "only c1 events" 1 (List.length events)
-;;
-
-let test_filter_run () =
-  Eio_main.run
-  @@ fun _env ->
-  let bus = Event_bus.create () in
-  let sub = subscribe_routing ~filter:(Event_bus.filter_run "r1") bus in
-  Event_bus.publish
-    bus
-    (Event_bus.mk_event ~run_id:"r1" (TurnStarted { agent_name = "a"; turn = 0 }));
-  Event_bus.publish
-    bus
-    (Event_bus.mk_event ~run_id:"r2" (TurnStarted { agent_name = "a"; turn = 1 }));
-  let events = Event_bus.drain sub in
-  check int "only r1 events" 1 (List.length events)
-;;
+(* ── envelope ─────────────────────────────────────────────────────── *)
 
 let test_fresh_id_unique () =
   let id1 = Event_bus.fresh_id () in
@@ -1714,9 +1684,7 @@ let () =
             test_on_error_silent_on_successful_dispatch
         ] )
     ; ( "envelope"
-      , [ test_case "filter_correlation" `Quick test_filter_correlation
-        ; test_case "filter_run" `Quick test_filter_run
-        ; test_case "fresh_id unique" `Quick test_fresh_id_unique
+      , [ test_case "fresh_id unique" `Quick test_fresh_id_unique
         ; test_case "mk_envelope defaults" `Quick test_mk_envelope_defaults
         ; test_case "mk_envelope explicit" `Quick test_mk_envelope_explicit
         ; test_case "mk_envelope with caused_by" `Quick test_mk_envelope_with_caused_by

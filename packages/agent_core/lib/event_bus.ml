@@ -164,10 +164,7 @@ type filter =
   | Agent of string
   | Tools_only
   | Topic of string
-  | Correlation of string
-  | Run of string
   | Caller_scope of Caller_scope.t
-  | Any of filter list
   | All of filter list
 
 type overflow =
@@ -239,10 +236,7 @@ let accept_all = Accept_all
 let filter_agent name = Agent name
 let filter_tools_only = Tools_only
 let filter_topic topic = Topic topic
-let filter_correlation id = Correlation id
-let filter_run id = Run id
 let filter_caller_scope scope = Caller_scope scope
-let filter_any filters = Any filters
 let filter_all filters = All filters
 
 let rec matches filter event =
@@ -301,14 +295,11 @@ let rec matches filter event =
      | ElicitationCompleted _
      | ToolApprovalCompleted _
      | InferenceTelemetry _ -> false)
-  | Correlation id -> String.equal event.meta.correlation_id id
-  | Run id -> String.equal event.meta.run_id id
   | Caller_scope expected ->
     (match event.meta.caller_scope with
      | None -> false
      | Some actual ->
        String.equal (Caller_scope.to_string expected) (Caller_scope.to_string actual))
-  | Any filters -> List.exists (fun filter -> matches filter event) filters
   | All filters -> List.for_all (fun filter -> matches filter event) filters
 ;;
 

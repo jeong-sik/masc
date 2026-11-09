@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-11-08T18:37:33Z (HEAD: 6e8af3370838)
+Generated: 2026-11-09T05:36:44Z (HEAD: 498d0415b592)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 38 |
-| Manual specs | 38 |
+| Total .tla files | 39 |
+| Manual specs | 39 |
 | TTrace (auto-generated) | 0 |
 | Directories | 9 |
-| Total .cfg files | 125 |
-| Buggy .cfg (bug-model pair) | 81 |
+| Total .cfg files | 132 |
+| Buggy .cfg (bug-model pair) | 87 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -41,7 +41,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | SandboxDispatch.tla | SandboxDispatch | manual | 2 | 1 | clean={inv:TypeOK, inv:BackendImpliesBackendVia, inv:RemoteSshImpliesSshVia} buggy={inv:BackendImpliesBackendVia, inv:RemoteSshImpliesSshVia} | 4c6c55a9e9eb |
 | TurnEvidenceChain.tla | TurnEvidenceChain | manual | 2 | 1 | clean={inv:TypeOK, inv:TerminalHasFullEvidence, inv:TerminalVisibleInRuntimeLens, inv:AgentCoreBoundaryGeneric} buggy={inv:TerminalHasFullEvidence} | ae0c4b3f330f |
 
-### specs/bug-models (15 specs)
+### specs/bug-models (16 specs)
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
@@ -59,6 +59,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | OllamaBodyIntegrity.tla | OllamaBodyIntegrity | manual | 2 | 1 | clean={inv:BalancedNeverFails, inv:ParseErrorImpliesUnbalanced} buggy={inv:BalancedNeverFails} | 08e878c2fde0 |
 | RetainedResultCarrier.tla | RetainedResultCarrier | manual | 4 | 3 | clean={inv:TypeOK, inv:NoLockWhileFloorFits, inv:SwitchBeforeShrink, prop:ReceiptsLeaveOnlyOnAccept, prop:RunEnds} buggy={inv:TypeOK, inv:NoLockWhileFloorFits} shrink-first-buggy={inv:TypeOK, inv:SwitchBeforeShrink} switch-back-buggy={inv:TypeOK, prop:RunEnds} | ff559a0803e3 |
 | SSEBroadcastBlock.tla | SSEBroadcastBlock | manual | 2 | 1 | clean={inv:TypeOK, inv:NoPermanentBlock} buggy={inv:TypeOK, inv:NoPermanentBlock} | baa8b016ef40 |
+| SizeRefusalRetryAdmission.tla | SizeRefusalRetryAdmission | manual | 7 | 6 | clean={inv:TypeOK, inv:WritesOnlyForTheFloor, inv:EndsOnlyWhenNoRungIsLeft, inv:NoPrematureEnd, prop:EveryResendStepsDown, prop:NoResendOverTheBound, prop:FreshStartCarriesEverything, prop:RunEnds} commit-first-buggy={inv:TypeOK, inv:WritesOnlyForTheFloor} cut-on-drop-buggy={inv:TypeOK, prop:FreshStartCarriesEverything} over-bound-buggy={inv:TypeOK, prop:NoResendOverTheBound} resend-refused-buggy={inv:TypeOK, prop:EveryResendStepsDown} skip-floor-buggy={inv:TypeOK, inv:EndsOnlyWhenNoRungIsLeft} write-failure-buggy={inv:TypeOK, inv:NoPrematureEnd} | 9f847a430a0c |
 | SlotScheduler.tla | SlotScheduler | manual | 2 | 1 | clean={inv:TypeOK, inv:MutualExclusion, inv:NeverStuck} buggy={inv:TypeOK, inv:NeverStuck} | 71a2d144944a |
 
 ### specs/keeper-state-machine (8 specs)

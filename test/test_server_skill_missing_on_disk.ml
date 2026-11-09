@@ -162,6 +162,28 @@ let snapshot_of base_path config_text =
      | Workspace_retired -> fail "workspace retired during snapshot fixture")
 ;;
 
+let with_ghost_workspace ~activated_at operation =
+  with_workspace @@ fun root ->
+  write_skill root ~source:"src-skills" ~package:"present-skill" ~description:"Present" "body";
+  let workspace_config = Workspace.default_config root in
+  let trace = trace_id "trace-dedup-ghost" in
+  create_session workspace_config trace;
+  record workspace_config trace
+    (activation ~trace ~tool_use_id:"toolu_dedup_01" ~activated_at
+       (reference ~package:"ghost-skill" 'b'));
+  let snapshot = snapshot_of root (config (source_row "workspace-src" "src-skills")) in
+  operation root workspace_config trace snapshot
+;;
+
+let ghost_rows workspace_config =
+  Audit_log.read_entries_matching
+    ~keep:(fun (entry : Audit_log.audit_entry) ->
+       String.equal entry.agent_id "skill-catalog"
+       && entry.action = Audit_log.Custom Detection.event_type
+       && entry.outcome = Audit_log.Success)
+    workspace_config
+;;
+
 let test_detects_and_records_ghost_skill () =
   with_workspace @@ fun root ->
   write_skill root ~source:"src-skills" ~package:"present-skill" ~description:"Present" "body";
@@ -231,6 +253,106 @@ let test_detects_and_records_ghost_skill () =
     (List.length rows_after_second = 1)
 ;;
 
+let test_observation_identity_and_reactivation () =
+  let recent = Time_codec.rfc3339_of_unix (Time_compat.now () -. 120.) in
+  with_ghost_workspace ~activated_at:recent @@ fun root workspace_config trace snapshot ->
+  let prior_row ~agent_id ~action ~outcome ~skill_name ~source_id =
+    Audit_log.append_entry workspace_config
+      { Audit_log.timestamp = Time_compat.now ()
+      ; agent_id
+      ; action
+      ; details =
+          `Assoc
+            [ "skill_name", `String skill_name
+            ; "source_id", `String source_id
+            ; "last_activated_at", `String recent
+            ]
+      ; outcome
+      ; cost_estimate = None
+      ; token_count = None
+      ; trace_id = None
+      }
+  in
+  let append_prior =
+    prior_row ~action:(Audit_log.Custom Detection.event_type)
+      ~skill_name:"ghost-skill" ~source_id:"workspace-src"
+  in
+  append_prior ~agent_id:"another-observer" ~outcome:Audit_log.Success;
+  append_prior ~agent_id:"skill-catalog" ~outcome:(Audit_log.Failure "not recorded");
+  prior_row ~agent_id:"skill-catalog" ~action:(Audit_log.Custom "another-event")
+    ~outcome:Audit_log.Success ~skill_name:"ghost-skill" ~source_id:"workspace-src";
+  prior_row ~agent_id:"skill-catalog" ~action:(Audit_log.Custom Detection.event_type)
+    ~outcome:Audit_log.Success ~skill_name:"ghost-skill" ~source_id:"another-source";
+  prior_row ~agent_id:"skill-catalog" ~action:(Audit_log.Custom Detection.event_type)
+    ~outcome:Audit_log.Success ~skill_name:"another-skill" ~source_id:"workspace-src";
+  check int "only the exact successful observer key suppresses a ghost" 1
+    (List.length (Detection.detect_and_record ~base_path:root ~snapshot));
+  let newer = Time_codec.rfc3339_of_unix (Time_compat.now () -. 60.) in
+  record workspace_config trace
+    (activation ~trace ~tool_use_id:"toolu_dedup_02" ~activated_at:newer
+       (reference ~package:"ghost-skill" 'b'));
+  check int "a fresh activation records a fresh observation" 1
+    (List.length (Detection.detect_and_record ~base_path:root ~snapshot));
+  check int "that activation is then suppressed" 0
+    (List.length (Detection.detect_and_record ~base_path:root ~snapshot));
+  with_ghost_workspace ~activated_at:recent @@ fun other_root other_config _ other_snapshot ->
+  check int "another workspace owns an independent observation" 1
+    (List.length (Detection.detect_and_record ~base_path:other_root ~snapshot:other_snapshot));
+  check int "its audit has one observation" 1 (List.length (ghost_rows other_config))
+;;
+
+let test_failed_append_can_retry () =
+  let recent = Time_codec.rfc3339_of_unix (Time_compat.now () -. 60.) in
+  with_ghost_workspace ~activated_at:recent @@ fun root workspace_config _ snapshot ->
+  let audit_path = Filename.concat (Workspace.masc_dir workspace_config) Audit_log.store_dirname in
+  (* A regular file at the store directory blocks the real audit append,
+     without relying on uid-specific permission behavior. *)
+  write_file audit_path "blocked audit directory";
+  ignore (Detection.detect_and_record ~base_path:root ~snapshot);
+  check int "failed append leaves no successful observation key" 0
+    (List.length (ghost_rows workspace_config));
+  Sys.remove audit_path;
+  check int "the same observation is retried after storage recovers" 1
+    (List.length (Detection.detect_and_record ~base_path:root ~snapshot));
+  check int "one successful observation is now retained" 1
+    (List.length (ghost_rows workspace_config));
+  check int "the successful retry suppresses further duplicates" 0
+    (List.length (Detection.detect_and_record ~base_path:root ~snapshot))
+;;
+
+let test_concurrent_observations_use_canonical_workspace () =
+  let recent = Time_codec.rfc3339_of_unix (Time_compat.now () -. 60.) in
+  with_ghost_workspace ~activated_at:recent @@ fun root workspace_config _ snapshot ->
+  let alias = Filename.concat root "." in
+  ignore (Workspace.default_config alias);
+  let events = Atomic.make 0 in
+  let subscriber = "ghost-observation-concurrency" in
+  Sse.subscribe_external ~id:subscriber
+    ~runtime_authority:(Sse.runtime_authority_exn ~base_path:root)
+    ~callback:(fun (event : Sse.external_event) ->
+       match event.ext_payload with
+       | `Assoc fields when List.assoc_opt "type" fields = Some (`String Detection.event_type) ->
+         Atomic.incr events
+       | _ -> ()) ();
+  Fun.protect
+    ~finally:(fun () -> Sse.unsubscribe_external subscriber)
+    (fun () ->
+       let ready = Atomic.make 0 and go = Atomic.make false in
+       let observe base_path =
+         Atomic.incr ready;
+         while not (Atomic.get go) do Domain.cpu_relax () done;
+         Detection.detect_and_record ~base_path ~snapshot
+       in
+       let first = Domain.spawn (fun () -> observe root) in
+       let second = Domain.spawn (fun () -> observe alias) in
+       while Atomic.get ready < 2 do Domain.cpu_relax () done;
+       Atomic.set go true;
+       let recorded = List.length (Domain.join first) + List.length (Domain.join second) in
+       check int "concurrent observers record one fresh ghost" 1 recorded;
+       check int "one audit row survives" 1 (List.length (ghost_rows workspace_config));
+       check int "one runtime-observer event is sent" 1 (Atomic.get events))
+;;
+
 let test_window_excludes_old_and_keeps_unparseable () =
   with_workspace @@ fun root ->
   write_skill root ~source:"src-skills" ~package:"present-skill" ~description:"Present" "body";
@@ -270,6 +392,12 @@ let () =
             test_detects_and_records_ghost_skill
         ; test_case "window excludes old activations, keeps unparseable" `Quick
             test_window_excludes_old_and_keeps_unparseable
+        ; test_case "observation identity, reactivation and workspace scope" `Quick
+            test_observation_identity_and_reactivation
+        ; test_case "failed audit append can retry" `Quick
+            test_failed_append_can_retry
+        ; test_case "concurrent observations share a canonical workspace" `Quick
+            test_concurrent_observations_use_canonical_workspace
         ] )
     ]
 ;;

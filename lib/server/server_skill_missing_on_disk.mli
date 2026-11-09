@@ -35,13 +35,20 @@ val ghosts :
   ghost list
 
 (** Scan the workspace's retained activation ledgers against [snapshot] and
-    record every ghost: one WARN log line, one [skill_missing_on_disk] audit
-    row and one runtime-observer event each. A ghost whose
-    (skill_name, source_id, last_activated_at) triple was already recorded
-    by an earlier publication is not recorded again — repeated publications
-    re-check but do not duplicate rows, and a fresh activation timestamp
-    re-records. Never raises; a detection failure is logged and leaves the
-    publication that triggered it untouched. Returns only the ghosts that
-    were recorded now. *)
+    record new ghost observations as a WARN, audit row and best-effort
+    runtime-observer event. A successful [skill-catalog] audit row with the
+    exact (skill_name, source_id, last_activated_at) triple suppresses repeated
+    observations while that row is retained by the workspace audit store.
+    A fresh activation timestamp or source records a new observation.
+
+    Audit lookup and recording share a canonical workspace transaction lock
+    across contexts and processes. An audit append failure leaves no new
+    suppression key, so a later observation may retry. An already appended
+    row remains authoritative if later notification or lock release fails;
+    this is not an exactly-once notification delivery guarantee.
+
+    Returns the fresh ghosts whose recording was attempted now. Detection
+    failures are logged without changing the triggering publication;
+    cancellation is re-raised. *)
 val detect_and_record :
   base_path:string -> snapshot:Skill_catalog_snapshot.t -> ghost list

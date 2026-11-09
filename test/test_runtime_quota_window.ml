@@ -94,7 +94,9 @@ let test_an_observation_demotes_and_a_success_clears_it () =
 let reset_after_the_wall_clock = 4_000_000_000.0
 
 (* The provider's own answer outranks an observation in both directions, and a
-   success inside a stated window does not make that window untrue. *)
+   call that gets through ends it: an Exact-output lane holds its slots on a
+   stated reset, so a reset kept past a success would hold a scope that
+   answers (RFC-exact-lane-waits-for-a-stated-reset R6). *)
 let test_a_stated_window_outranks_an_observation () =
   reset ();
   let scope = provider_scope "api_z_ai" in
@@ -112,11 +114,11 @@ let test_a_stated_window_outranks_an_observation () =
     (Q.active_until ~scope ~now:100.0);
   Q.note_succeeded ~scope;
   Alcotest.(check (option (float 0.0)))
-    "a success does not end a stated window"
-    (Some resets_at)
+    "a success ends a stated window"
+    None
     (Q.active_until ~scope ~now:100.0);
-  Alcotest.(check bool) "and the stated window still expires on time" false
-    (Q.is_exhausted ~scope ~now:(resets_at +. 0.1))
+  Alcotest.(check bool) "and nothing rests the scope after it" false
+    (Q.is_exhausted ~scope ~now:100.0)
 ;;
 
 (* A stated window that has passed but that no read has pruned yet names no

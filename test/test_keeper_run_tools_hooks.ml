@@ -1568,6 +1568,8 @@ let test_a_refused_call_reaches_the_dispatch_observers_once () =
     check bool "counted as a failure" true (Tool_result.is_failed observed);
     check bool "a rejected request, not a runtime fault" true
       (Tool_result.failure_class observed = Some Tool_result.Policy_rejection);
+    check (float 0.0) "the failure hook's measured validation duration" 1.0
+      (Tool_result.duration_ms observed);
     check bool "the refusal text is the message" true
       (Tool_result.message observed = {|"message": MISSING (required: string)|})
   | observed ->

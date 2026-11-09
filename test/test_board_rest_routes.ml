@@ -1773,6 +1773,7 @@ let test_board_detail_defaults_to_latest_comments_with_older_pages () =
 ;;
 
 let test_direct_board_http_readership_and_cache () =
+  let open Masc in
   with_authenticated_activity_router
     ~prefix:"board-direct-http-" ~agent_name:"direct-operator"
   @@ fun ~base_path ~config:_ ~state:_ ~sw ~clock ~router ~token ->

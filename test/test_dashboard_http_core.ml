@@ -6693,7 +6693,7 @@ let test_board_close_route_rejects_wrong_typed_decisions_without_closing () =
       let post_id = create "thread" in
       let successor_id = create "successor" in
       let check_open label =
-        match Lib.Board_dispatch.get_post ~post_id with
+        match Lib.Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
         | Ok post -> check bool (label ^ " leaves post open") true
                        (Option.is_none post.closed)
         | Error error -> fail (Lib.Board.show_board_error error)

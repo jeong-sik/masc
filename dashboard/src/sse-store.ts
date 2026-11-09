@@ -929,6 +929,12 @@ export function hydrateServerPushEvent(event: SSEEvent): boolean {
     if (handleBoardPostCreated(event)) return true
   }
 
+  if (event.type === 'board_changed') {
+    // Non-public posts (including Unlisted fusion board-sink posts) emit
+    // board_changed instead of post_created; refresh the fusion surface too.
+    scheduleFusionBoardRefresh()
+  }
+
   return false
 }
 

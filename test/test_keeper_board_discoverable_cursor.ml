@@ -322,7 +322,7 @@ let test_replayed_comment_discovery_respects_parent_visibility () =
              | Keeper_event_queue.Board_signal
                  { kind = Keeper_event_queue.Comment_added identity; _ } ->
                String.equal identity.comment_id (Board.Comment_id.to_string comment.id)
-             | Keeper_event_queue.Board_signal _ | Board_attention _ | Bootstrap
+             | Keeper_event_queue.Board_signal _ | Board_routing_pending _ | Board_attention _ | Bootstrap
              | Fusion_completed _ | Schedule_due _ | Connector_attention _
              | Hitl_resolved _ | Ask_answered _ | Completion_authority_rejected _
              | Task_cancelled _ | Workspace_message _ | Delegate_completed _

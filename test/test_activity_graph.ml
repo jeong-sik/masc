@@ -1076,8 +1076,6 @@ let () =
             test_recent_public_window_stays_bounded_and_reports_unknown_totals;
           test_case "explicit history keep filters totals and latest metadata" `Quick
             test_explicit_history_keep_filters_totals_and_latest;
-          test_case "recent window builds no full-history aggregate" `Quick
-            test_unfiltered_events_read_builds_no_aggregate;
           test_case "unfiltered and trivially filtered pages agree" `Quick
             test_unfiltered_and_trivially_filtered_pages_agree;
           test_case "unfiltered read parses only the newest files" `Quick

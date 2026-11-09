@@ -1,0 +1,218 @@
+{
+  "arguments": {
+    "assets_dir": "~/me/assets",
+    "base_url": null,
+    "binary": "~/.local/bin/masc",
+    "burst_path": [
+      "/health",
+      "/favicon.svg"
+    ],
+    "concurrency": 100,
+    "curl_samples": 5,
+    "download_concurrency": 4,
+    "h2_mode": null,
+    "https_base_url": null,
+    "output": "artifacts/http-multiplex/after-download-20261108T234030Z",
+    "repeats": 3,
+    "repo": "~/me/workspace/yousleepwhen/masc/.worktrees/openapi-servers-url",
+    "requests": 600,
+    "scenarios": [
+      "download",
+      "curl"
+    ],
+    "serial_requests": 100,
+    "sse_hold_s": 32.0,
+    "sse_path": "/api/v1/stream/fleet",
+    "sse_streams": 50,
+    "transports": "h1-6,h1,h2c,tls-h1,tls-h2"
+  },
+  "binary": {
+    "build_commit": "9c7452c0e2086d3c1b557cba9f7e649089bf86d7",
+    "path": "~/.local/bin/masc",
+    "sha256": "f6e3db697c5816f030359c3b926638c3576ff2f10bbc0db1a833dd6aef646c3a",
+    "version": "0.69.0"
+  },
+  "client": {
+    "h2": "4.4.1",
+    "httpcore": "1.0.9",
+    "httpx": "0.28.1"
+  },
+  "finished_at": "2026-11-08T23:40:33Z",
+  "health": {
+    "build": {
+      "binary_commit": "9c7452c0e2086d3c1b557cba9f7e649089bf86d7",
+      "binary_commit_age_seconds": 2344,
+      "binary_commit_source": "embedded",
+      "binary_commit_unix_ts": 1794178887.0,
+      "binary_version": "0.69.0",
+      "commit": "9c7452c0e2086d3c1b557cba9f7e649089bf86d7",
+      "commit_source": "embedded",
+      "executable_dir": "~/.local/bin",
+      "executable_path": "~/.local/bin/masc",
+      "executable_sha256": "f6e3db697c5816f030359c3b926638c3576ff2f10bbc0db1a833dd6aef646c3a",
+      "provenance_source": "self_observed",
+      "release_version": "0.69.0",
+      "runtime_instance_id": "01a1bd88-f155-7000-ac3d-6efe4fe17585",
+      "started_at": "2026-11-08T23:40:30Z",
+      "uptime_seconds": 0
+    },
+    "dashboard_surface": {
+      "asset_file_count": null,
+      "asset_tree_sha256": null,
+      "assets_root": "~/me/assets",
+      "build_environment_path_executable_count": null,
+      "build_environment_path_executable_sha256": null,
+      "build_environment_path_identity_sha256": null,
+      "build_environment_profile_sha256": null,
+      "build_head_tree": null,
+      "build_index_tree": null,
+      "build_input_file_count": null,
+      "build_input_matches_head": null,
+      "build_input_sha256": null,
+      "build_lock_sha256": null,
+      "build_producer": null,
+      "build_runtime": null,
+      "build_source_commit": null,
+      "build_stamp_path": "~/me/assets/dashboard/.build-stamp",
+      "dashboard_asset_root": "~/me/assets/dashboard",
+      "dashboard_manifest_root": null,
+      "index_present": true,
+      "index_sha256": "b10e1dc3c965209365ef528db92bd8c75e07c92ae5c79c928a75e8422398f4de",
+      "installed_release": null,
+      "recovery": {
+        "kind": "install_matching_ci_artifacts",
+        "reason": "unbound_identity_unavailable",
+        "restart_required": false
+      },
+      "schema": "masc.dashboard_surface.v1",
+      "source_provenance": "unknown",
+      "status": "unknown"
+    },
+    "http_listener": {
+      "accept_errors_total": 0,
+      "accepted_total": 2,
+      "active_connections": 1,
+      "last_accept_age_seconds": 0.0008749961853027344,
+      "last_accept_unix": 1794181231.623625,
+      "last_error": null,
+      "mode": "auto",
+      "rate_limit_responses": [
+        {
+          "protocol": "h1",
+          "scope": "client_ip",
+          "total": 0
+        },
+        {
+          "protocol": "h1",
+          "scope": "agent",
+          "total": 0
+        },
+        {
+          "protocol": "h1",
+          "scope": "sse_connection",
+          "total": 0
+        },
+        {
+          "protocol": "h2",
+          "scope": "client_ip",
+          "total": 0
+        },
+        {
+          "protocol": "h2",
+          "scope": "agent",
+          "total": 0
+        },
+        {
+          "protocol": "h2",
+          "scope": "sse_connection",
+          "total": 0
+        }
+      ],
+      "rate_limit_responses_total": 0,
+      "status": "listening"
+    },
+    "release_version": "0.69.0",
+    "transport": {
+      "enabled_protocols": [
+        "json-rpc",
+        "sse"
+      ],
+      "grpc": {
+        "configured": false,
+        "enabled": false,
+        "health_service": "grpc.health.v1.Health",
+        "listen_failure": null,
+        "listen_status": "disabled",
+        "listening": false,
+        "port": 8936,
+        "reachable": false,
+        "service": "masc.workspace.v1.MascWorkspace"
+      },
+      "http": {
+        "auth_policy_present": false,
+        "base_url": "http://127.0.0.1:57021",
+        "configured": true,
+        "enabled": true,
+        "mcp_url": "http://127.0.0.1:57021/mcp",
+        "protocol_capable": true,
+        "sse_url": "http://127.0.0.1:57021/mcp?sse_kind=observer"
+      },
+      "streamable_http_default": true,
+      "total_sessions": 0,
+      "websocket": {
+        "configured": false,
+        "discovery_path": "/ws",
+        "enabled": false,
+        "listening": false,
+        "mode": "same_origin",
+        "reachable": false,
+        "request_host": "127.0.0.1",
+        "session_count": 0,
+        "upgrade_path": "/ws"
+      }
+    },
+    "version": "0.69.0"
+  },
+  "host": {
+    "cpu": "arm",
+    "machine": "arm64",
+    "python": "3.13.2",
+    "system": "macOS-27.2-arm64-arm-64bit-Mach-O"
+  },
+  "probe_sha256": "d273a093e4a7893700442c2ddb327604ae3f7aac5b5ce4b6864a05ada2e312e3",
+  "server": {
+    "assets_dir": "~/me/assets",
+    "base_url": "http://127.0.0.1:57021",
+    "boot_s": 0.8422005830798298,
+    "credential": "loopback dashboard dev-token (not recorded)",
+    "environment_keys": [
+      "HOME",
+      "LANG",
+      "MASC_AGENT_RATE_BURST",
+      "MASC_AGENT_RATE_LIMIT",
+      "MASC_ASSETS_DIR",
+      "MASC_BASE_PATH",
+      "MASC_CONFIG_BOOTSTRAP",
+      "MASC_CONFIG_DIR",
+      "MASC_GRPC_ENABLED",
+      "MASC_HTTPS_PORT",
+      "MASC_KEEPER_AUTONOMOUS_ENABLED",
+      "MASC_RATE_BURST",
+      "MASC_RATE_LIMIT",
+      "MASC_WS_ENABLED",
+      "PATH"
+    ],
+    "exit_code": 0,
+    "fixture_sha256": "ccbe65e399f47a3abddbf4299e15dd0fd55001dd785b2e0d75948ad86acf7cfd",
+    "h2_mode_env": null,
+    "https_base_url": "https://127.0.0.1:57022",
+    "owned": true,
+    "rate_limit_env": {
+      "MASC_AGENT_RATE_BURST": "1000000",
+      "MASC_AGENT_RATE_LIMIT": "1000000",
+      "MASC_RATE_BURST": "1000000",
+      "MASC_RATE_LIMIT": "1000000"
+    }
+  },
+  "started_at": "2026-11-08T23:40:30Z"
+}

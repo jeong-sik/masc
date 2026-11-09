@@ -1,0 +1,932 @@
+[
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 8.62475,
+      "min_ms": 8.148375,
+      "n": 4,
+      "p50_ms": 8.405875,
+      "p95_ms": 8.62475,
+      "p99_ms": 8.62475
+    },
+    "megabytes_per_s": 378.9007223888365,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h1-6",
+    "wall_s": 0.009276583
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 7.5835,
+      "min_ms": 4.649042,
+      "n": 4,
+      "p50_ms": 6.932958,
+      "p95_ms": 7.5835,
+      "p99_ms": 7.5835
+    },
+    "megabytes_per_s": 425.9241868170259,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h1",
+    "wall_s": 0.008252417
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 19.890208,
+      "min_ms": 14.804542,
+      "n": 4,
+      "p50_ms": 16.339709,
+      "p95_ms": 19.890208,
+      "p99_ms": 19.890208
+    },
+    "megabytes_per_s": 171.76105630217322,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h2c",
+    "wall_s": 0.020463917
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 38.176375,
+      "min_ms": 37.783667,
+      "n": 4,
+      "p50_ms": 38.072083,
+      "p95_ms": 38.176375,
+      "p99_ms": 38.176375
+    },
+    "megabytes_per_s": 90.55549675799891,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "tls-h1",
+    "wall_s": 0.038814916
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 39.079208,
+      "min_ms": 38.815292,
+      "n": 4,
+      "p50_ms": 38.820334,
+      "p95_ms": 39.079208,
+      "p99_ms": 39.079208
+    },
+    "megabytes_per_s": 88.63085468802701,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "tls-h2",
+    "wall_s": 0.039657792
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 589.748993,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.00149
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 596.555329,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.001473
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 597.772789,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.00147
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 669.250571,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.001313
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 434.153162,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.002024
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 427.603892,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.002055
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 400.878649,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.002192
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 436.092307,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.002015
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 496.736009,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.001769
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 378.761206,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.00232
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 19.137269,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.045917
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 62.631931,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.01403
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 56.564274,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.015535
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 54.255742,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.016196
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 59.675789,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 0,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.014725
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 7.840292,
+      "min_ms": 6.622416,
+      "n": 4,
+      "p50_ms": 6.759708,
+      "p95_ms": 7.840292,
+      "p99_ms": 7.840292
+    },
+    "megabytes_per_s": 423.1022293462091,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h1",
+    "wall_s": 0.008307458
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 16.96025,
+      "min_ms": 13.309,
+      "n": 4,
+      "p50_ms": 16.111166,
+      "p95_ms": 16.96025,
+      "p99_ms": 16.96025
+    },
+    "megabytes_per_s": 199.5942135971948,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h2c",
+    "wall_s": 0.01761025
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 37.387208,
+      "min_ms": 36.730084,
+      "n": 4,
+      "p50_ms": 36.828084,
+      "p95_ms": 37.387208,
+      "p99_ms": 37.387208
+    },
+    "megabytes_per_s": 92.81867515217134,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "tls-h1",
+    "wall_s": 0.0378685
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 39.651167,
+      "min_ms": 39.481458,
+      "n": 4,
+      "p50_ms": 39.527583,
+      "p95_ms": 39.651167,
+      "p99_ms": 39.651167
+    },
+    "megabytes_per_s": 87.42545377412685,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "tls-h2",
+    "wall_s": 0.040204584
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 5.834084,
+      "min_ms": 4.592334,
+      "n": 4,
+      "p50_ms": 5.43375,
+      "p95_ms": 5.834084,
+      "p99_ms": 5.834084
+    },
+    "megabytes_per_s": 548.8785394653668,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h1-6",
+    "wall_s": 0.006403792
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 680.128482,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.001292
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 649.464892,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.001353
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 685.968774,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.001281
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 576.970453,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.001523
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 621.446958,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.001414
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 518.116745,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.001696
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 462.730911,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.001899
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 443.80101,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.00198
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 502.991413,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.001747
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 455.770746,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.001928
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 61.908271,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.014194
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 61.11176,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.014379
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 62.078841,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.014155
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 61.747312,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.014231
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 61.15429,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 1,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.014369
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 16.950459,
+      "min_ms": 13.461292,
+      "n": 4,
+      "p50_ms": 16.162083,
+      "p95_ms": 16.950459,
+      "p99_ms": 16.950459
+    },
+    "megabytes_per_s": 196.26467139427103,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h2c",
+    "wall_s": 0.017909
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 36.557333,
+      "min_ms": 35.7495,
+      "n": 4,
+      "p50_ms": 36.161417,
+      "p95_ms": 36.557333,
+      "p99_ms": 36.557333
+    },
+    "megabytes_per_s": 94.83720741989883,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "tls-h1",
+    "wall_s": 0.0370625
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/2"
+    ],
+    "latency": {
+      "max_ms": 41.10225,
+      "min_ms": 40.748167,
+      "n": 4,
+      "p50_ms": 40.90375,
+      "p95_ms": 41.10225,
+      "p99_ms": 41.10225
+    },
+    "megabytes_per_s": 84.2980972452476,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "tls-h2",
+    "wall_s": 0.041696125
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 7.933208,
+      "min_ms": 6.720166,
+      "n": 4,
+      "p50_ms": 6.980083,
+      "p95_ms": 7.933208,
+      "p99_ms": 7.933208
+    },
+    "megabytes_per_s": 423.1659019374424,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h1-6",
+    "wall_s": 0.008306208
+  },
+  {
+    "body_bytes_each": [
+      878726
+    ],
+    "concurrency": 4,
+    "errors": [],
+    "http_versions": [
+      "HTTP/1.1"
+    ],
+    "latency": {
+      "max_ms": 6.370708,
+      "min_ms": 5.133542,
+      "n": 4,
+      "p50_ms": 5.8285,
+      "p95_ms": 6.370708,
+      "p99_ms": 6.370708
+    },
+    "megabytes_per_s": 501.55293019077226,
+    "ok": 4,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "download",
+    "statuses": [
+      200
+    ],
+    "total_bytes": 3514904,
+    "transport": "h1",
+    "wall_s": 0.007008042
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 624.538734,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.001407
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 484.146556,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.001815
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 479.392253,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.001833
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 448.329591,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.00196
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "1.1",
+    "megabytes_per_s": 446.280345,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h1",
+    "wall_s": 0.001969
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 396.358141,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.002217
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 356.336577,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.002466
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 440.243486,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.001996
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 405.129552,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.002169
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 346.637475,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "h2c",
+    "wall_s": 0.002535
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 58.718743,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.014965
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 57.35435,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.015321
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 58.88795,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.014922
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 55.56282,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.015815
+  },
+  {
+    "body_bytes": 878726,
+    "http_version": "2",
+    "megabytes_per_s": 47.93661,
+    "path": "/dashboard/assets/index-Z7C9n29H.js",
+    "repeat": 2,
+    "scenario": "curl",
+    "status": 200,
+    "transport": "tls-h2",
+    "wall_s": 0.018331
+  }
+]

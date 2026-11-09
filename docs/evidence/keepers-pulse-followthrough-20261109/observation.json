@@ -461,5 +461,12 @@
     },
     "total_tests": 43,
     "full_regression": false
+  },
+  "type_verification": {
+    "workflow": "PR type-check (dune build @check)",
+    "run_id": 42625243301,
+    "head": "a96ec36efb3f7d3248f0d4e85d07644f08a1a2f4",
+    "ref": "feat/keepers-world-absence",
+    "conclusion": "success"
   }
 }

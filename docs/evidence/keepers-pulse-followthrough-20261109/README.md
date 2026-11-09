@@ -39,6 +39,8 @@ At 2026-11-09 13:28:43 UTC the owned private native process was absent after SIG
 
 [Test run 42625266384](https://github.com/jeong-sik/masc/actions/runs/42625266384), head `a96ec36efb3f7d3248f0d4e85d07644f08a1a2f4`, ref `feat/keepers-world-absence`, conclusion `success`: TARGET_SUITES=`test_workspace_memory_ledger,test_workspace_memory_ledger_view,test_tui_decode_workspace_memory,test_tui_memory_world,test_tui_keeper_axis`, minimal=true. The five suites passed 18 / 7 / 7 / 6 / 5 tests (43 total). This is focused verification, not full regression.
 
-PR type-check (dune build @check), run 42625243301, uses that same head/ref. It was still `in_progress / no conclusion` at the evidence boundary. The earlier `677fe1e` type/key/Story successes remain attached to that earlier source.
+PR type-check (dune build @check), run 42625243301, uses that same head/ref. Its final observed conclusion is `success`. The earlier `677fe1e` type/key/Story successes remain attached to that earlier source.
 
 [cleanup.json](cleanup.json) records the final dedicated tmux check (`no server running`), stale owned socket removal and absent transport-fault flag.
+
+A concurrent session subsequently began rebasing the lower G4 layer onto newer main. This evidence remains frozen to the named 677fe1e native pair and a96ec36 focused/type checks; later main/rebase heads do not inherit these execution verdicts. No new main scope is certified by this record.

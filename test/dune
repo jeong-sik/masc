@@ -2430,7 +2430,8 @@
   masc.keeper_chat_delivery_identity
   masc.keeper_runtime
   masc.runtime
-  unix))
+  unix
+  yojson))
 
 (test
  (name test_keeper_stream_media_accum)

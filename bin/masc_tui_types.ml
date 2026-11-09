@@ -3970,6 +3970,7 @@ type planning_goal = Tui_decode.planning_goal
   pg_metric: string option;
   pg_target_value: string option;
   pg_proof: Tui_decode.goal_proof;
+  pg_criterion_review: Tui_decode.goal_criterion_review;
   pg_retry_binding: Tui_decode.goal_retry_binding option;
   pg_verifier_unreconciled: Tui_decode.verifier_unreconciled option;
   pg_last_review_note: string option;

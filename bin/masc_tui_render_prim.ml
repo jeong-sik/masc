@@ -1708,9 +1708,10 @@ let surface_chrome ~overflow ?help_door ?(frame = Chrome_screen) ?status ?sideba
    | Some row, Chrome_overlay ->
        let text = row.recovery_text in
        let remaining = max 0 (framed_rule_width cols - Message_layout.display_width text) in
+       let edge = Theme.recede () in
        Buffer.add_string buf
-         (Ansi.gray ^ Ansi.box_bl ^ Ansi.reset ^ Theme.warn () ^ text ^ Ansi.reset
-          ^ Ansi.gray ^ draw_hline remaining ^ Ansi.box_br ^ Ansi.reset ^ "\n"));
+         (edge ^ Ansi.box_bl ^ Ansi.reset ^ Theme.warn () ^ text ^ Ansi.reset
+          ^ edge ^ draw_hline remaining ^ Ansi.box_br ^ Ansi.reset ^ "\n"));
   let buf = match sidebar with
     | None -> buf
     | Some (left_cols, draw) ->

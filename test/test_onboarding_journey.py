@@ -3132,7 +3132,10 @@ for line in sys.stdin:
             client.chmod(0o700)
             env = dict(os.environ, HOME=home, PATH='/usr/bin:/bin')
             env.pop('CODEX_INSTALL_DIR', None)
-            result = subprocess.run([BINARY, 'runtime-codex-models', '--cli-path', 'codex'],
+            workspace = Path(home, 'workspace')
+            workspace.mkdir()
+            result = subprocess.run([BINARY, 'runtime-codex-models', '--base-path', str(workspace),
+                                     '--cli-path', 'codex'],
                                     env=env, cwd=home, capture_output=True, text=True, timeout=60)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertTrue(marker.is_file(),

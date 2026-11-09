@@ -1188,7 +1188,9 @@ let render_lane_run_list (state : state) ~(lane : Lane_run_identity.t) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:Masc_tui_keys.footer_hints_lanes_run_list);
+       ~hints:
+         (Masc_tui_keys.footer_hints_lanes_run_list ~has_runs:(shown > 0)
+            ~has_older:(Option.is_some state.lane_runs_next)));
   finish_surface state ~surface_key:"lane-runs" ~rows:terminal_rows ~cols buf
 
 (* The total preview includes labels, fences and notices. Complete payloads

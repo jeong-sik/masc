@@ -61,6 +61,12 @@ let surfaces =
       T.Changes,
       [ "j/k"; "Right / Enter"; "d"; "v"; "/"; "n / N"; "o"; "PgUp/PgDn"; "Home/End" ],
       [ "[ / ]"; "Esc"; "r"; "q" ] )
+  (* A level floor or category can leave the Logs list with no entry. The keys
+     that change the filters are how it comes back, so they stay. *)
+  ; ( "Logs",
+      T.System_logs,
+      [ "j/k"; "PgUp/PgDn"; "Right / Enter"; "n / N"; "Home/End" ],
+      [ "o"; "e"; "l"; "v"; "c"; "/"; "Esc"; "r"; "q" ] )
   ]
 
 let test_each_surface_scopes_a_key_to_a_row () =
@@ -191,6 +197,24 @@ let check_keys label hints ~named ~absent =
       check bool (label ^ " does not name " ^ key) false (names_item hints key))
     absent
 
+(* The Features run list draws from a builder of its own. [j/k] and [Enter]
+   act on a run; the older-page key acts only while the server has named an
+   older page, which is what the header spells as "] older" and "end". *)
+let test_the_lane_run_list_names_keys_by_its_runs_and_older_page () =
+  let hints ~has_runs ~has_older =
+    Keys.footer_hints_lanes_run_list ~has_runs ~has_older
+  in
+  check_keys "Lane runs with none" (hints ~has_runs:false ~has_older:false)
+    ~named:[ "Left / Esc"; "r"; "q" ]
+    ~absent:[ "j/k"; "Right / Enter"; "]" ];
+  check_keys "Lane runs on the last page" (hints ~has_runs:true ~has_older:false)
+    ~named:[ "j/k"; "Right / Enter"; "Left / Esc"; "r"; "q" ]
+    ~absent:[ "]" ];
+  check_keys "Lane runs with an older page named"
+    (hints ~has_runs:true ~has_older:true)
+    ~named:[ "j/k"; "Right / Enter"; "]"; "Left / Esc"; "r"; "q" ]
+    ~absent:[]
+
 let test_an_empty_approvals_queue_names_only_the_keys_that_act () =
   check_keys "Approvals with nothing waiting" (approvals_footer ())
     ~named:approvals_always
@@ -251,6 +275,8 @@ let () =
             test_an_empty_goal_list_names_no_key_that_needs_a_row
         ; test_case "a goal list with a row names every key" `Quick
             test_a_goal_list_with_a_row_names_every_key
+        ; test_case "the lane run list names keys by its runs and older page"
+            `Quick test_the_lane_run_list_names_keys_by_its_runs_and_older_page
         ; test_case "an empty approvals queue names only the keys that act"
             `Quick test_an_empty_approvals_queue_names_only_the_keys_that_act
         ; test_case "an approval row brings the keys that decide" `Quick

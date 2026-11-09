@@ -1298,8 +1298,8 @@ let for_surface = function
   | System_logs ->
       [ b Navigate "o" "log origin" ~help:"switch between server logs and this TUI's own observations"
       ; b Navigate "e" "Events"
-      ; b Navigate "j/k" "move / scroll"
-      ; b Navigate "PgUp/PgDn" "detail page"
+      ; b Navigate "j/k" "move / scroll" ~rows:Needs_row
+      ; row_list_page
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while detail is open, inspect the adjacent visible log entry"
       ; b Act "l" "level floor"
@@ -1308,14 +1308,17 @@ let for_surface = function
           ~help:"toggle DEBUG rows directly; off uses the INFO floor"
       ; b Act "c" "category"
           ~help:"cycle through the categories this page carries"
-      ; b Act "Right / Enter" "detail"
+      (* Opens the entry under the cursor. Inside the detail the dispatcher
+         has nothing left to open, and a list the filters emptied has no
+         entry. *)
+      ; b Act "Right / Enter" "detail" ~detail:List_only ~rows:Needs_row
           ~help:"show the full message, source, category, turn, and JSON details"
       ; b Act "Esc" "back" ~detail:List_only ~help:"back to Activity"
       ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the detail"
       ; b Search "/" "find" ~detail:List_only
           ~help:"jump the cursor to a matching module, keeper, or message, \
                  over the rows the level and category filters leave"
-      ; b Search "n / N" "next / previous match" ~detail:List_only
+      ; b Search "n / N" "next / previous match" ~detail:List_only ~rows:Needs_row
       ]
       @ row_list_edges @ listing_meta
 
@@ -2082,13 +2085,22 @@ let footer_hints_fusion_detail =
 (* Lanes sub-modes ([lanes_mode] owns overview/list/detail/notice —
    masc_tui_types.ml). The overview footer stays [for_surface Lanes]; these
    name the drill-downs the same way the Fusion detail footer does. *)
-let footer_hints_lanes_run_list =
+(* [has_runs] is whether the list holds a run; [has_older] is whether the
+   server named a page before it (lane_runs_next), the same fact the header
+   spells as "] older" or "end". The dispatcher does nothing for j/k and Enter
+   without the first, and nothing for the older-page key without the second. *)
+let footer_hints_lanes_run_list ~has_runs ~has_older =
   hints_of_bindings
-    ([ b Navigate "j/k" "move" ~help:"move the run cursor"
-     ; b Act "Right / Enter" "prompt" ~help:"open the run's prompt and output"
-     ; b Act "]" "older" ~help:"load the next retained-run page from the server"
-     ; b Act "Left / Esc" "back" ~help:"back to the lane overview"
-     ]
+    (List.filter (fun binding -> answers_in_state ~has_rows:has_runs binding)
+       ([ b Navigate "j/k" "move" ~rows:Needs_row ~help:"move the run cursor"
+        ; b Act "Right / Enter" "prompt" ~rows:Needs_row
+            ~help:"open the run's prompt and output"
+        ]
+        @ (if has_older then
+             [ b Act "]" "older"
+                 ~help:"load the next retained-run page from the server" ]
+           else [])
+        @ [ b Act "Left / Esc" "back" ~help:"back to the lane overview" ])
      @ listing_meta)
 
 (* The position travels as [Masc_tui_footer.line]'s [?position], for the

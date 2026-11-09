@@ -144,7 +144,7 @@ def state_ok(label: S.CandidateLabel, outcome: str, claim: str | None, left: Lef
             return new_claim and label.absorbs is not None and left.absorbed.get(label.absorbs) == claim
         case "restates":
             restated = ids.get(label.already_claim) if label.already_claim is not None else None
-            return outcome == "already_represented" or (
+            return (outcome == "already_represented" and label.already_claim in left.after) or (
                 new_claim and restated is not None and left.absorbed.get(restated) == claim)
         case "transient":
             return outcome in ("not_durable", "already_represented")

@@ -23,9 +23,11 @@ type status =
   | Forbidden_403
   | Not_found_404
   | Conflict_409
+  | Too_many_requests_429
   | Internal_error_500
   | Bad_gateway_502
   | Service_unavailable_503
+  | Gateway_timeout_504
 
 val status_code : status -> int
 

@@ -15,9 +15,11 @@ type status =
   | Forbidden_403
   | Not_found_404
   | Conflict_409
+  | Too_many_requests_429
   | Internal_error_500
   | Bad_gateway_502
   | Service_unavailable_503
+  | Gateway_timeout_504
 
 let status_code = function
   | Ok_200 -> 200
@@ -28,9 +30,11 @@ let status_code = function
   | Forbidden_403 -> 403
   | Not_found_404 -> 404
   | Conflict_409 -> 409
+  | Too_many_requests_429 -> 429
   | Internal_error_500 -> 500
   | Bad_gateway_502 -> 502
   | Service_unavailable_503 -> 503
+  | Gateway_timeout_504 -> 504
 ;;
 
 type answer =

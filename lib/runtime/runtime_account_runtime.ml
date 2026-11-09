@@ -1,8 +1,16 @@
+type binding =
+  | Model of string
+  | Runtime of string
+
 type error =
   | Template_not_declared of string
   | Model_not_bound of
       { template : string
       ; model : string
+      }
+  | Runtime_not_bound of
+      { template : string
+      ; runtime_id : string
       }
   | Not_materialized of string
 
@@ -10,13 +18,28 @@ let error_to_string = function
   | Template_not_declared template -> Printf.sprintf "no provider %s is declared" template
   | Model_not_bound { template; model } ->
     Printf.sprintf "the provider %s has no binding of the model %s" template model
+  | Runtime_not_bound { template; runtime_id } ->
+    Printf.sprintf "no binding of the provider %s makes the Runtime %s on this account" template runtime_id
   | Not_materialized diagnostic -> "the runtime of the account does not load: " ^ diagnostic
 ;;
 
 (* The label a load diagnostic names the configuration by: it is no file. *)
 let config_label = "the runtime of one account"
 
-let of_template (config : Runtime_schema.config) ~template ~provider_id ~account_home ~model =
+(* A binding of the template, moved onto the account: its Runtime id is the
+   one a verification records, so the same function answers both choices. *)
+let on_account ~provider_id (binding : Runtime_schema.binding) = { binding with provider_id; enabled = true }
+
+let chosen ~provider_id (binding : Runtime_schema.binding) = function
+  | Model model -> String.equal binding.model_id model
+  | Runtime runtime_id ->
+    String.equal (Runtime_schema.binding_key (on_account ~provider_id binding)) runtime_id
+
+let not_bound ~template = function
+  | Model model -> Model_not_bound { template; model }
+  | Runtime runtime_id -> Runtime_not_bound { template; runtime_id }
+
+let of_template (config : Runtime_schema.config) ~template ~provider_id ~account_home ~binding:choice =
   match
     List.find_opt (fun (provider : Runtime_schema.provider) -> String.equal provider.id template) config.providers
   with
@@ -25,12 +48,12 @@ let of_template (config : Runtime_schema.config) ~template ~provider_id ~account
     (match
        List.find_opt
          (fun (binding : Runtime_schema.binding) ->
-           String.equal binding.provider_id template && String.equal binding.model_id model)
+           String.equal binding.provider_id template && chosen ~provider_id binding choice)
          config.bindings
      with
-     | None -> Error (Model_not_bound { template; model })
+     | None -> Error (not_bound ~template choice)
      | Some binding ->
-       let binding = { binding with provider_id; enabled = true } in
+       let binding = on_account ~provider_id binding in
        let id = Runtime_schema.binding_key binding in
        let alone =
          { config with

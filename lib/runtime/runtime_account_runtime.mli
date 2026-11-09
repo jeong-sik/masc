@@ -1,9 +1,19 @@
-(** The runtime of one model on an account home that no provider of
+(** The runtime of one binding on an account home that no provider of
     runtime.toml declares: a person's own subscription in the multi-account
     preview (plan D1-6a). It is the workspace's provider [template] with its id
-    and account home replaced, and the template's binding of [model], in a
+    and account home replaced, and one binding of the template, in a
     configuration that holds them alone. Nothing is written and nothing is
-    published: the runtime exists for the call that measures it. *)
+    published: the runtime exists for the call that uses it. *)
+
+(** Which binding of the template. *)
+type binding =
+  | Model of string
+      (** The binding of this model: a verification, which then records the
+          Runtime id the binding makes on the account. *)
+  | Runtime of string
+      (** The binding whose Runtime id on the account is this id: the Runtime
+          a record of the authorization log names (plan D2-8). The id is
+          compared whole with the id each binding makes, never cut apart. *)
 
 type error =
   | Template_not_declared of string  (** No provider of the configuration has this id. *)
@@ -11,6 +21,10 @@ type error =
       { template : string
       ; model : string
       }  (** The template has no binding of this model. *)
+  | Runtime_not_bound of
+      { template : string
+      ; runtime_id : string
+      }  (** No binding of the template makes this Runtime id on the account. *)
   | Not_materialized of string
       (** The configuration of the one runtime does not load; the diagnostic
           of {!Runtime.runtimes_of_config}. *)
@@ -22,5 +36,5 @@ val of_template
   -> template:string
   -> provider_id:string
   -> account_home:string
-  -> model:string
+  -> binding:binding
   -> (Runtime_instance.t, error) result

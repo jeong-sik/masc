@@ -65,8 +65,9 @@ type t =
           a Member alike, and a PAT needs [Manage_own_provider] in its scope;
           a service may not. *)
   | Manage_own_keeper
-      (** A person manages their own Keepers: they make one and give it one
-          of their Runtimes (design 4.3, plan D1-5). It is open as
+      (** A person manages their own Keepers: they make one, give it one of
+          their Runtimes (design 4.3, plan D1-5), and send it a message that
+          it answers on that Runtime (plan D2-8). It is open as
           [Manage_own_provider] is, with [Manage_own_keeper] in the scope of a
           PAT. *)
   | Self_authenticated of self_authenticated_reason

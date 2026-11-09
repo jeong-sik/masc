@@ -105,6 +105,8 @@ const keepers = document.getElementById("keepers");
 const keeper = document.getElementById("keeper");
 const keeperRuntime = document.getElementById("keeper-runtime");
 const keeperVerdict = document.getElementById("keeper-verdict");
+const turnMessage = document.getElementById("turn-message");
+const turnAnswer = document.getElementById("turn-answer");
 let csrf = null;
 let loginId = null;
 async function read(path) {
@@ -213,6 +215,16 @@ document.getElementById("assign").addEventListener("click", async () => {
   keeperVerdict.textContent = "assign (" + answer.status + "): " + await answer.text();
   await listKeepers();
 });
+document.getElementById("run-turn").addEventListener("click", async () => {
+  turnAnswer.textContent = "running the Keeper";
+  const answer = await post("%s", { keeper_id: keeper.value, message: turnMessage.value });
+  const text = await answer.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch (_) {}
+  turnAnswer.textContent = answer.ok && json !== null
+    ? json.keeper_id + " on " + json.runtime_id + " (" + json.model + "):\n" + json.text
+    : "run (" + answer.status + "): " + text;
+});
 show().then(listAccounts).then(listKeepers);|}
     Authz_browser_request.csrf_header
     provider_accounts_path
@@ -223,6 +235,7 @@ show().then(listAccounts).then(listKeepers);|}
     Auth_preview_keeper.keepers_path
     Auth_preview_keeper.keepers_path
     Auth_preview_keeper.assign_path
+    Auth_preview_keeper.turn_path
 ;;
 
 let home_page ~nonce =
@@ -256,6 +269,9 @@ let home_page ~nonce =
            ; "<label>Runtime (one of My Runtimes) <input id=\"keeper-runtime\"></label>"
            ; "<button id=\"assign\">Assign</button>"
            ; "<pre id=\"keeper-verdict\"></pre>"
+           ; "<label>Message to the Keeper <input id=\"turn-message\" autocomplete=\"off\"></label>"
+           ; "<button id=\"run-turn\">Run</button>"
+           ; "<pre id=\"turn-answer\"></pre>"
            ])
     ~script:home_script
 ;;
@@ -315,15 +331,10 @@ let human state ~now_ms access ~service_refused request =
     Error (refused Auth_gate.Credential_required)
 ;;
 
-let person state ~now_ms request =
-  match
-    human
-      state
-      ~now_ms
-      Route_access.Manage_own_provider
-      ~service_refused:(fun service_id -> Auth_gate.Service_owns_no_provider service_id)
-      request
-  with
+(* The human a [Manage_own_*] route lets through, with the namespace their
+   admission fixed. *)
+let member state ~now_ms access ~service_refused request =
+  match human state ~now_ms access ~service_refused request with
   | Error _ as refused -> refused
   | Ok user_id ->
     (match Authz_principal_state.find_membership state.Authz_state.principals user_id with
@@ -335,8 +346,26 @@ let person state ~now_ms request =
        Error (R.json R.Internal_error_500 [ "error", `String "the principal has no membership" ]))
 ;;
 
+let person state ~now_ms request =
+  member
+    state
+    ~now_ms
+    Route_access.Manage_own_provider
+    ~service_refused:(fun service_id -> Auth_gate.Service_owns_no_provider service_id)
+    request
+;;
+
 let keeper_owner state ~now_ms request =
   human
+    state
+    ~now_ms
+    Route_access.Manage_own_keeper
+    ~service_refused:(fun service_id -> Auth_gate.Service_owns_no_keeper service_id)
+    request
+;;
+
+let keeper_owner_person state ~now_ms request =
+  member
     state
     ~now_ms
     Route_access.Manage_own_keeper

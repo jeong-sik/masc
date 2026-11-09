@@ -272,6 +272,26 @@ type tool_stream_observation =
 
 type tool_result_commit_policy = Require_commit | Observe_commit
 
+(* Agent Core refused this call's arguments before any handler ran, so the call
+   never entered [Tool_dispatch] and no dispatch observer saw it. The dashboard
+   series ([Tool_metrics_persist]) is written by one of those observers, so it
+   counted the call in neither its calls nor its failures.
+   docs/evidence/tool-metrics-refused-calls-2026-11 compares the series with the
+   tool-call ledger per tool and day. The result names the rejection class and
+   says no effect began, the shape [handle_validation_error] gives a
+   descriptor-level rejection, under the internal tool name the other observers
+   receive. *)
+let observe_refused_call ~tool_name ~error =
+  Tool_dispatch.run_dispatch_observers
+    Dispatch_outcome.Handled
+    (Some
+       (Tool_result.make_err
+          ~tool_name:(Keeper_tool_descriptor_resolution.canonical_tool_name tool_name)
+          ~class_:Tool_result.Policy_rejection
+          ~effect_disposition:Tool_result.Proven_pre_effect
+          ~start_time:(Tool_timing.start ())
+          error))
+
 let make_hooks
     ?preview
     ?observation_token
@@ -1180,7 +1200,8 @@ let make_hooks
               object it got refused for, and repeated it. *)
            log_call_without_result ~disposition:None ~board_action_evidence:None
              ~wire_outcome:Tool_result.Error
-             ~result_ready:true ~call_label:"rejected-call"
+             ~result_ready:true ~call_label:"rejected-call";
+           observe_refused_call ~tool_name ~error
          | Agent_core.Hooks.Cancelled_during_execution ->
            (* The call was cancelled while its handler ran: it ended with no
               result and its effect may or may not have happened. [Unknown]

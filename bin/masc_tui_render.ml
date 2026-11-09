@@ -415,7 +415,7 @@ let render_memory (state : state) =
     | None ->
         let reading_note =
           match state.memory_health_error with
-          | None -> title_missing_reading ~error:None
+          | None -> ui_text state ~ko:"(미조회)" ~en:(title_missing_reading ~error:None)
           | Some _ -> ""
         in
         Printf.sprintf "%s  %s  %s  %s"
@@ -515,7 +515,9 @@ and render_memory_facts_list (state : state) =
         (match Masc_tui_types.memory_facts_snapshot state with
          | None ->
            Render_memory.Facts_unread
-             { reading = title_missing_reading ~error:(Masc_tui_types.memory_facts_failure state) }
+             { reading = ui_text state
+                 ~ko:(if Option.is_some (Masc_tui_types.memory_facts_failure state) then "(조회 실패)" else "(미조회)")
+                 ~en:(title_missing_reading ~error:(Masc_tui_types.memory_facts_failure state)) }
          | Some _ ->
            Render_memory.Facts_loaded { total; filter_label; query_label })
       ~timestamp

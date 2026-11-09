@@ -441,7 +441,7 @@ let render_board_list (state : state) =
     (match Masc_tui_fetched.value observation with
      | Some _ ->
          list_count_text ~loaded:count ~holding
-     | None -> if pending then (words state "(글 조회 중)" "(reading posts)") else title_missing_reading ~error:list_error)
+     | None -> if pending then (words state "(글 조회 중)" "(reading posts)") else words state (if Option.is_some list_error then "(조회 실패)" else "(미조회)") (title_missing_reading ~error:list_error))
     hearth timestamp
     (connection_badge state) in
 
@@ -492,7 +492,7 @@ let render_board_list (state : state) =
       if count = 0 then
         (match observation with
          | Masc_tui_fetched.Failed _ | Stale _ -> Option.iter render_list_error list_error
-         | Absent -> c.push (Ansi.dim ^ page_unread_note ^ Ansi.reset)
+         | Absent -> c.push (Ansi.dim ^ words state "  (미조회 · r:다시 읽기)" page_unread_note ^ Ansi.reset)
          | Loading -> c.push (Ansi.dim ^ (words state "  (글 조회 중)" "  (reading Board posts)") ^ Ansi.reset)
          | Ready _ -> c.push (Ansi.dim
              ^ (if pending then (words state "  (이전 목록은 비어 있음 · 글 조회 중)" "  (last listing empty; reading posts)")
@@ -694,7 +694,7 @@ let draw_board_read_side ~focus buf (state : state) document ~rows ~body_cols
     if i = 0 && comment_header_rows > 0 then
       box_line comment_buf comment_cols
         (Ansi.bold
-        ^ Printf.sprintf "%sComments (%d)"
+        ^ Printf.sprintf (words state "%s댓글 (%d)" "%sComments (%d)")
             (if focus = Right_pane && state.board_comments_focused
              then "> " else "  ")
             detail_comment_count

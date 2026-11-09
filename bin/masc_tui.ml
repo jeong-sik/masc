@@ -6585,6 +6585,28 @@ let launch_memory_input_load state ~mailbox ~refresh =
             (fun () -> Masc_tui_http.fetch_keeper_memory_input ~host ~port ~keeper_name:key)
   end
 
+(* The newest turns of the Keeper the Story window draws. The window follows
+   the cursor, so a read for another Keeper replaces the one held: the answer
+   to the replaced one is dropped when it lands. *)
+let launch_keeper_story_turns_load state ~mailbox ~keeper_name ~refresh =
+  if server_authority_ready state then begin
+    let current = Masc_tui_fetched.current_key state.keeper_story_turns in
+    if refresh || current <> Some keeper_name then
+      match
+        Masc_tui_fetched.start ~equal:String.equal state.keeper_story_turns ~key:keeper_name
+      with
+      | Masc_tui_fetched.Already_loading -> ()
+      | Masc_tui_fetched.Started (next, request) ->
+          state.keeper_story_turns <- next;
+          state.keeper_story_turns_owed <-
+            Masc_tui_owed_read.started state.keeper_story_turns_owed;
+          let host = server_peer_host and port = state.port in
+          launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+            ~deliver:(fun result ->
+              Keeper_msg (Keeper_story_turns_loaded (request, result)))
+            (fun () -> Masc_tui_http.fetch_keeper_story_turns ~host ~port ~keeper_name)
+  end
+
 let launch_memory_health_load state ~mailbox =
   if server_authority_ready state then begin
   if state.memory_health_inflight
@@ -9991,6 +10013,18 @@ let keeper_schedules_on_screen state =
   | Runtime | Config | Resources | Tools | System_logs ->
       None
 
+(* The Keeper whose newest turns the story page draws: the Keeper under the
+   cursor while the Story window is open on that page. *)
+let keeper_story_turns_on_screen state =
+  match state.keeper_story with
+  | Some Masc_tui_keeper_story.Story when state.view = Keepers Keeper_list ->
+      keeper_schedules_on_screen state
+  | Some
+      ( Masc_tui_keeper_story.Story
+      | Masc_tui_keeper_story.Schedule
+      | Masc_tui_keeper_story.Memory )
+  | None -> None
+
 (* One Keeper's schedules read again under the same rules as the fleet list,
    while the chat pane, the Automation tab or the Story window draws them:
    drawing a Keeper owes the read, and so do a change, a revalidation, a
@@ -10104,6 +10138,41 @@ let launch_owed_keeper_schedules state ~mailbox =
           state.keeper_schedules_owed <-
             Some { owed with kso_read = Masc_tui_owed_read.started read }
       end
+
+(* The story page's turns are read again after a push about the Keeper's
+   turns, a revalidation, a resumed authority and a failed read. *)
+let owe_keeper_story_turns_read state =
+  state.keeper_story_turns_owed <- Masc_tui_owed_read.changed state.keeper_story_turns_owed
+
+(* A push about turns owes the read only where the page draws that Keeper
+   (RFC-0480 §7: filter by the name first). *)
+let owe_keeper_story_turns_read_for state ~keepers =
+  match keeper_story_turns_on_screen state with
+  | Some keeper when List.mem keeper keepers -> owe_keeper_story_turns_read state
+  | Some _ | None -> ()
+
+(* Runs on every loop iteration. While the page is not drawn the read stays
+   owed, so drawing it again reads it again: turns held from before the window
+   closed are not the newest. One read is on the wire at a time: the Keeper the
+   cursor has come to waits for the read in flight, and every Keeper the cursor
+   passed meanwhile starts none. *)
+let launch_owed_keeper_story_turns state ~mailbox =
+  match keeper_story_turns_on_screen state with
+  | None ->
+      state.keeper_story_turns_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled
+  | Some keeper_name ->
+      let reading = Masc_tui_fetched.in_flight state.keeper_story_turns in
+      let read =
+        if reading then state.keeper_story_turns_owed
+        else Masc_tui_owed_read.abandoned state.keeper_story_turns_owed
+      in
+      state.keeper_story_turns_owed <- read;
+      let other_keeper_reading =
+        reading && Masc_tui_fetched.current_key state.keeper_story_turns <> Some keeper_name
+      in
+      if not other_keeper_reading then
+        launch_keeper_story_turns_load state ~mailbox ~keeper_name
+          ~refresh:(Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read)
 
 (* The Keeper whose chat pane is open; its native tasks and child content are
    drawn beside the transcript. *)
@@ -17388,6 +17457,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
      reads it once that workspace can be read (RFC-0487). *)
   state.memory_input <- Masc_tui_fetched.clear state.memory_input;
   state.memory_input_owed <- Masc_tui_owed_read.settled;
+  state.keeper_story_turns <- Masc_tui_fetched.clear state.keeper_story_turns;
+  state.keeper_story_turns_owed <- Masc_tui_owed_read.settled;
   state.memory_health <- None;
   state.memory_health_error <- None;
   state.memory_health_inflight <- false;
@@ -19792,6 +19863,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_tools_reads state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;
+       owe_keeper_story_turns_read state;
        owe_chat_journal_reads state;
        owe_overview_read state;
        owe_push_owned_revalidation state
@@ -20151,6 +20223,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     owe_pending_confirms_read state;
     owe_schedules_read state;
     owe_keeper_schedules_read state;
+    owe_keeper_story_turns_read state;
     owe_chat_journal_reads state;
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
@@ -23152,7 +23225,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_action_done (_, _, _, _))
         | (Board_msg (Board_publication_done _ | Board_comment_done _)) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _)) | Goal_msg (Goal_transition_done _
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _)) | Schedule_msg (Schedules_loaded (_, _)
-        | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _))
+        | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _))
         | System_log_streamed _ | Schedule_msg (Schedule_cancel_done (_, _)) | Verification_msg (Verification_verdict_done _)
         | Harness_msg (Harness_label_done _) | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _) | Chat_msg (Chat_call_loaded _) | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_msg (Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _))
         | Task_msg (Task_history_loaded (_, _) | Task_cancel_done (_, _, _))
@@ -24051,6 +24124,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let local_keepers_changed = ref false in
       let waiting_inventory_changed = ref [] in
       let turns_changed = ref false in
+      let turn_state_keepers = ref [] in
       let datasets_owed = ref [] in
       let connectors_changed = ref false in
       let transport_measured = ref false in
@@ -24141,7 +24215,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.gate_connector_changed event then connectors_changed := true;
               if Masc_tui_observer.goal_projection_changed event then goals_changed := true;
               (match Masc_tui_observer.turn_change event with
-               | Some (_, Masc_tui_observer.Turn_state) -> turns_changed := true
+               | Some (keeper, Masc_tui_observer.Turn_state) ->
+                   turns_changed := true;
+                   turn_state_keepers := keeper :: !turn_state_keepers
                | Some (keeper, Masc_tui_observer.Turn_preview) ->
                    previews_changed := keeper :: !previews_changed
                | None -> ());
@@ -24372,6 +24448,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if waiting_keepers <> [] || waiting_unattributed then
         launch_keeper_waiting_load state ~mailbox;
       (if !turns_changed && not !observer_source_loss_seen then owe_keeper_turns_read state);
+      (if !turn_state_keepers <> [] && not !observer_source_loss_seen then
+         owe_keeper_story_turns_read_for state ~keepers:!turn_state_keepers);
       (if !execution_snapshot_seen && not !observer_source_loss_seen then begin
          owe_verification_read state;
          owe_goal_projection_reads state;
@@ -26324,6 +26402,16 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if current then
         settle_keeper_schedules_read state ~keeper:request.kspr_detail.drr_keeper ~settles
           result
+  | Keeper_msg (Keeper_story_turns_loaded (request, result)) ->
+      (* An answer for a Keeper the cursor has left settles nothing; the read
+         of the Keeper it stands on does. *)
+      if Masc_tui_fetched.is_current ~equal:String.equal state.keeper_story_turns request then
+        state.keeper_story_turns_owed <-
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded state.keeper_story_turns_owed
+           | Error _ -> failed_read state.keeper_story_turns_owed);
+      state.keeper_story_turns <-
+        Masc_tui_fetched.complete ~equal:String.equal state.keeper_story_turns request result
   | Schedule_msg (Schedule_cancel_done (schedule_id, result)) -> (
       match result with
       | Ok message ->
@@ -33903,6 +33991,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_pending_confirms state ~mailbox:async_messages;
       launch_owed_schedules state ~mailbox:async_messages;
       launch_owed_keeper_schedules state ~mailbox:async_messages;
+      launch_owed_keeper_story_turns state ~mailbox:async_messages;
       launch_owed_chat_journals state ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup

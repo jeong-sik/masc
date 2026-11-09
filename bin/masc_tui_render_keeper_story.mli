@@ -57,6 +57,20 @@ val last_wake_entry :
     the latest on the first page, since a later page may hold a newer one, and a
     wake whose time cannot be read leaves the last wake unknown. *)
 
+val turns_entry :
+  Masc_tui_types.state ->
+  now:float ->
+  cells:int ->
+  keeper_name:string ->
+  string option
+(** The line of the story page's past group that tells the Keeper's newest
+    turns, newest first, each with the stop reason the receipt recorded and how
+    long ago the turn ended. A turn whose record holds no stop reason says so.
+    Turns that do not fit in [cells] are left out whole from the oldest. [None]
+    when the Keeper has no turn on record. A read that has not answered, or that
+    failed with nothing to show, says so instead of saying nothing. The window
+    asks for the read while the story page is open. *)
+
 val memory_lines :
   Masc_tui_types.state -> now:float -> keeper_name:string -> string list
 (** The memory-health row of [keeper_name] with its fact age ladder. *)

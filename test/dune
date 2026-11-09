@@ -4663,6 +4663,11 @@
  (libraries alcotest masc_tui_memory_usage masc.masc_types))
 
 (test
+ (name test_tui_keeper_turns)
+ (modules test_tui_keeper_turns)
+ (libraries alcotest masc_tui_keeper_turns masc.masc_types))
+
+(test
  (name test_tui_render_memory)
  (modules test_tui_render_memory)
  (libraries masc_tui_memory_usage masc_tui_surface_search

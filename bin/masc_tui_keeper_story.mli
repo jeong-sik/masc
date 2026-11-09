@@ -23,18 +23,20 @@ type action =
   | Show of page  (** Open the window on this page, or move it to this page. *)
   | Close  (** Close the window. *)
   | Open_detail  (** Close the window and open the Keeper's detail. *)
+  | Open_world  (** Select World in a memory/age view and open its own dock. *)
 
 val action_of_key : selection:selection -> page option -> string -> action option
 (** What [key] does to the window, [None] when it is closed. [key] is a name
     from the input decoder. [None] means the window does not take the key and
     the list handles it as it does with the window closed. A closed window
-    takes Enter alone, and an open one takes the keys of its pages, [s] and [m]
-    in either case.
+    takes Enter for the selected row, and an open one takes the keys of its
+    pages, [s] and [m] in either case. [W] opens World from any list view;
+    lowercase [w] remains the Keeper wake action.
 
     [selection] distinguishes a Keeper, the shared World, and a heading.
     World Enter opens its own dock; its s/m/Tab/Right never dispatch Keeper
     actions. The Keeper tabs in {!pages} exclude the World dock.
     Without a selected Keeper or World --
-    the cursor stands on a group heading, or the list has no Keeper -- a closed
-    window opens nothing and an open one leaves Enter and Right to the list,
+    the cursor stands on a group heading, or the list has no Keeper -- Enter
+    opens nothing and an open window leaves Enter and Right to the list,
     where on a heading Left folds the group and Right unfolds it. *)

@@ -311,7 +311,7 @@ type diagram = {
 type block = { origin : origin; source : Masc_tui_markdown.source_block }
 type document_layout = { lines : string list; pictures : diagram list; blocks : block list }
 
-let anchored_layout ~cols (reading : t) =
+let prepare_anchored_layout ~cols (reading : t) =
   let width = max 1 (framed_inner_width cols - 4) in
   let diagram_size image diagrams =
     let cw,ch = Masc_tui_resource_diagrams.cell_pixels diagrams in
@@ -380,6 +380,24 @@ let anchored_layout ~cols (reading : t) =
     offset := !offset + List.length rows;
     rows) pieces in
   {lines=rows;pictures=List.rev !pictures;blocks=List.rev !blocks}
+
+let document_layout_cache :
+    ((t * int * int * bool * bool) * document_layout) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let anchored_layout ~cols reading =
+  let palette = Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
+  let lift = Masc_tui_theme.lift_is_enabled () in
+  let table_frame = !(Masc_tui_markdown_theme.table_frame_enabled) in
+  match Domain.DLS.get document_layout_cache with
+  | Some ((seen, width, seen_palette, seen_lift, seen_frame), layout)
+      when width=cols && seen_palette=palette && seen_lift=lift && seen_frame=table_frame
+        && Reading.same_reading seen reading -> layout
+  | Some _ | None ->
+      let layout = prepare_anchored_layout ~cols reading in
+      Domain.DLS.set document_layout_cache
+        (Some ((reading, cols, palette, lift, table_frame), layout));
+      layout
 
 let layout ~cols reading =
   let rendered = anchored_layout ~cols reading in

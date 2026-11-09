@@ -42,7 +42,9 @@ type diagram = {
 }
 val layout : cols:int -> t -> string list * diagram list
 (** One row projection and its prepared PNG slots. Drawing, scrolling and
-    placement use this same result. Source mode contains no image slots. *)
+    placement use this same result. Source mode contains no image slots.
+    Reuses one prepared layout per domain only while the complete reading,
+    pane width, palette/lift and table-frame preference remain unchanged. *)
 val layout_with_search : cols:int -> Masc_tui_types.state -> t ->
   (string * Masc_tui_detail_reading.search_mark) list * diagram list
 (** Search marks and image slots from one immutable layout. The marks are the

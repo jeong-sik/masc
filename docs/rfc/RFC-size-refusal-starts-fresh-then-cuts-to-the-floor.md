@@ -135,7 +135,9 @@ related: ["retained-results-carrier-shrinks-to-an-address", "claude-code-context
   - 다음 단계를 보낼 때 `resolve_input_rejected_for_shrink_retry`가 푼다. floor까지 거절되면 남아서 다음 claim을 막는다(§7).
 - Gate continuation의 Resume은 지금처럼 `Protocol_failed`다. L3는 이 경우를 따로 match해 지금 판정을 지킨다(§6).
 - Completion review run도 다시 보내지 않는다(`keeper_codex_runtime.ml:2137-2139`). Gate가 아니라서 그 기록은 `Input_rejected Bootstrap_floor_exceeded`가 된다(`:1821-1823`). 걸음 없이 막는 기록이 남는다.
-  - review는 Keeper와 다른 root에서 다른 이름으로 돈다. root는 임시 디렉터리이거나 `verifier-executions/<digest>`이고, 이름은 `completion-review-<digest>`다(`workspace_metric_hooks.ml:376-384`, `verifier_review_execution.ml:10-17`).
+  - review는 Keeper와 다른 root에서 다른 이름으로 돈다(`workspace_metric_hooks.ml:394`, `:400`).
+    - verifier review worker가 부른 review는 `verifier-executions/<digest>`에서 `completion-review-<digest>`로 돈다(`verifier_review_worker.ml:121-125`, `verifier_review_execution.ml:10-17`).
+    - 그 밖의 review는 임시 디렉터리에서 `completion-review-<uuid v7>`로 돈다(`workspace_metric_hooks.ml:357-359`, `:379-384`).
   - 그래서 그 기록은 review 쪽에 남고 Keeper의 claim을 막지 않는다. 창 거절도 지금 그렇다.
 - L3는 L2 뒤에 온다. 막는 기록은 걸음이 늘 floor까지 갈 수 있게 된 뒤에 들어와야 한다.
   - L2 전의 걸음은 hook이 `Error`를 돌려주면 Resume 바로 뒤에서 끝난다(`keeper_turn_driver_try_provider.ml:3086-3087`).
@@ -506,8 +508,9 @@ TLC 1.8.0으로 로컬에서 돌렸다. 플래그는 `scripts/tla-check.sh`와 �
 - 경계 시험(`test_runtime_codex_app_server.ml:1372-1425`)은 `input_capacity_refusal`을 부르지 않고 run이 돌려준 생성자를 본다.
   - 새 생성자로 오는 것은 구조화된 data가 실린 `turn/start` -32602뿐이다.
   - data 사례 여섯은 `Rpc_error`로 남는다. data가 없거나, null이거나, 다른 key이거나, 글자 수가 문자열이거나, 한도가 음수이거나, 한도를 넘지 않은 경우다.
-  - 다른 method·code(`thread/start` -32602, `turn/start` -32603, code 없음)는 지금 손으로 만든 `Rpc_error`로 본다. L1에서는 fixture로 보내 `Rpc_error`인지 본다.
-  - 손으로 만든 key 중복 사례(`:1410-1415`)는 뺀다. wire의 key 중복은 분류 전에 `Protocol_error`로 걸린다. 그 시험(`:1416-1424`)은 그대로다.
+  - 다른 method·code(`thread/start` -32602, `turn/start` -32603)는 지금 손으로 만든 `Rpc_error`로 본다. L1에서는 fixture로 보내 `Rpc_error`인지 본다.
+  - 손으로 만든 key 중복 사례(`test_runtime_codex_app_server.ml:1410-1415`)는 뺀다. wire의 key 중복은 분류 전에 `Protocol_error`로 걸린다. 그 시험(`:1416-1424`)은 `Protocol_error`인지만 본다. `input_capacity_refusal`을 부르는 줄(`:1421-1422`)은 지운다.
+  - 손으로 만든 code 없는 사례도 뺀다. 경계는 code가 없는 오류를 `Protocol_error`로 돌려준다(`runtime_codex_app_server.ml:613-617`, `:654-656`).
 - `Rpc_error`에 input_too_large data를 직접 넣어 만드는 Librarian 시험 fixture는 생성자로 바꾼다. 경계를 거치지 않은 그 값은 운영에서 생기지 않는다.
 
 **L2. 단계** (`keeper_turn_driver_try_provider.ml`, `keeper_codex_runtime.ml`, `keeper_claude_code_runtime.ml`, outbox, memory 두 모듈, `keeper_run_tools_hooks.ml`, `runtime_model_input_tail_window.ml(i)`)

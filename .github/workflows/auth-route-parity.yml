@@ -2,10 +2,14 @@ name: Auth route transport parity (RFC-0512)
 
 # Builds the server and the route inventory, probes every route over HTTP/1.1
 # and over HTTP/2 (h2c) with scripts/auth-route-baseline/run.sh in the default
-# and the strict configuration, and fails when any route answers the two
-# transports differently. One route table serves both transports (RFC-0512),
-# so the expected count is 0. Runs on demand; docs/evidence keeps the result
-# of a run, and #50192 asked for a repeatable way to produce it.
+# and the strict configuration, and fails when a route answers something other
+# than what the one route table predicts (RFC-0512): a plain route answers the
+# same status on both transports, and a WebSocket route answers 426 on HTTP/2,
+# which has no upgrade (D5). A probe without an answer is a finding too, and a
+# run whose server stopped part-way fails instead of passing with fewer routes.
+# extra.json (dev_token per transport) is not compared. Runs on demand;
+# docs/evidence keeps the result of a run, and #50192 asked for a repeatable
+# way to produce it.
 
 on:
   workflow_dispatch:
@@ -19,6 +23,8 @@ jobs:
     timeout-minutes: 120
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Dune build cache location
         run: echo "DUNE_CACHE_ROOT=$RUNNER_TEMP/masc-dune-cache-pr" >> "$GITHUB_ENV"
@@ -28,7 +34,7 @@ jobs:
       - uses: ./.github/actions/install-ocaml-deps
         with:
           install-flags: --with-test
-          os-packages: curl jq lsof
+          os-packages: curl lsof
 
       - name: Reuse Dune build artifacts
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -54,7 +60,7 @@ jobs:
             _build/default/bin/main_eio.exe _build/default/tools/auth_route_inventory/main.exe \
             18936 "$RUNNER_TEMP/a1-strict" "$RUNNER_TEMP/out/strict" MASC_HTTP_AUTH_STRICT=true
 
-      - name: Transport differences (0 expected)
+      - name: Transport findings (0 expected; ws routes answer 426 on HTTP/2)
         shell: bash
         run: python3 scripts/auth-route-baseline/transport_diff.py "$RUNNER_TEMP/out" | tee -a "$GITHUB_STEP_SUMMARY"
 

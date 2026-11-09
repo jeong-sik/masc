@@ -5,8 +5,6 @@ module Owner = Keeper_owner
 module Registry = Keeper_owner_registry
 module Public_error = Server_keeper_chat_public_error
 
-let mutation_permission = Masc_domain.CanBroadcast
-
 type get_route =
   | Operation_list of { keeper_name : string }
   | Operation_exact of

@@ -119,12 +119,19 @@ let add_routes ~sw ~clock router =
        | None ->
        match Keeper_chat_operations.get_route (Http.Request.path request) with
        | Some route ->
-         with_token_permission_auth
-           ~permission:(Keeper_chat_operations.get_permission route)
-           (fun state _agent_name req reqd ->
-             Keeper_chat_operations.handle_get state req reqd route)
-           request
-           reqd
+         let handle state req reqd =
+           Keeper_chat_operations.handle_get state req reqd route
+         in
+         (match route with
+          | Operation_list _ | Operation_exact _ ->
+            with_permission_auth
+              ~permission:(Keeper_chat_operations.get_permission route)
+              handle request reqd
+          | Chat_events _ | Turn_events _ ->
+            with_token_permission_auth
+              ~permission:(Keeper_chat_operations.get_permission route)
+              (fun state _agent_name req reqd -> handle state req reqd)
+              request reqd)
        | None ->
          (match
             Keeper_api.keeper_get_permission
@@ -234,9 +241,11 @@ let add_routes ~sw ~clock router =
        | None ->
        match Keeper_chat_operations.mutation_route (Http.Request.path request) with
        | Some route ->
-         with_token_permission_auth
-           ~permission:Keeper_chat_operations.mutation_permission
-           (fun state _agent_name req reqd ->
+         (* Queue control follows chat submission's credential and same-origin
+            policy, including workspaces that do not require a token. *)
+         with_tool_auth
+           ~tool_name:Keeper_tool_name.(to_string Keeper_delegate)
+           (fun state req reqd ->
              Http.Request.read_body_async reqd (fun body_str ->
                Keeper_chat_operations.handle_mutation
                  state

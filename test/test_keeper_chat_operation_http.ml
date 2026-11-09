@@ -30,11 +30,7 @@ let test_dashboard_worker_permissions () =
        (Api.get_permission (Api.Chat_events { keeper_name = "alpha" })));
   check bool "autonomous reasoning journal requires admin authority" true
     (Api.get_permission (Api.Turn_events {keeper_name="alpha";raw_turn_ref="trace#1"})
-     = Masc_domain.CanAdmin);
-  check bool
-    "queued mutations use chat broadcast authority"
-    true
-    (Api.mutation_permission = Masc_domain.CanBroadcast)
+     = Masc_domain.CanAdmin)
 ;;
 
 let test_exact_routes () =

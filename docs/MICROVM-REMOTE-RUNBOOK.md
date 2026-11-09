@@ -59,9 +59,9 @@ CLI 문법과 볼륨 동작이 다르므로 `container` 만 다른 이름으로 
 
 아래는 Apple `container` 게스트 기준의 운영
 절차. 게스트는 호스트 playground 를 마운트하지 않는다. 트리는 게스트가
-마운트한 ext4 볼륨(`/masc-work`)에 있고, 명령은 호스트가 게스트 안의
-`masc-exec-shim` 에 `container exec` 로 넣어 준다. OpenSSH 엔드포인트와 같은
-프로토콜, 다른 전송이다.
+마운트한 ext4 볼륨(`/masc-work`)에 있고, 명령은 호스트가 게스트의 첫 프로세스로
+떠 있는 `masc-exec-shim --serve` agent 소켓(`<base>/.masc/microvm/agent/`)으로
+넣어 준다. OpenSSH 엔드포인트와 같은 프로토콜, 다른 전송이다.
 
 ## 계약: 호스트에 필요한 것
 
@@ -97,10 +97,13 @@ shim 이 서버와 다른 릴리즈에서 나온 것이면 서버는 `remote_shi
 남기고 계속 돈다. 그 줄에는 이 호스트에서 바꿀 파일 경로가 적혀 있다
 (`<base>/.masc/microvm/shim/masc-exec-shim` 과 옆의 `.sha256`). 바꾸는 방법은 아래
 "shim 받기"다. SSH 엔드포인트용 `masc-exec-ssh-bootstrap` 은 게스트에 쓰지 않는다.
-게스트는 이 디렉터리를 마운트로 읽고 서버는 요청마다 shim 을 새로 실행하므로
-(`Keeper_sandbox_remote.Exec_per_request`,
-`Keeper_sandbox_remote.carrier` 의 `Local_process`), 켜져 있는 게스트도 다음 요청부터 새 shim 을
-쓴다. 2026-10-13 에 0.49.0 을 0.52.0 으로 바꿨을 때 재시작 없이 게스트 18개가 새
+게스트는 이 디렉터리를 마운트로 읽고, 요청마다 마운트된 shim 이 새로 실행된다.
+Apple 게스트에서는 게스트 agent 가 요청마다 그 경로의 shim 을 띄우고
+(`Keeper_sandbox_remote.Agent_socket`, `Keeper_sandbox_remote.carrier` 의 `Guest_agent`),
+`nerdctl_kata`·`microsandbox` 게스트에서는 서버가 요청마다 exec 로 띄운다
+(`Keeper_sandbox_remote.Exec_per_request`, `Local_process`). 그래서 켜져 있는 게스트도
+다음 요청부터 새 shim 을 쓴다. Apple 게스트의 agent 자신은 부팅 때의 바이너리로 남는다.
+2026-10-13 에 0.49.0 을 0.52.0 으로 바꿨을 때 재시작 없이 게스트 18개가 새
 릴리즈로 답했다(#42726). 다만 서버는 probe 답을 프로세스가 사는 동안 들고 있고
 게스트는 다시 probe 하지 않는다. 그래서 `keeper_lane_status` 의 `shim_release` 와 이
 WARN 은 서버를 다시 띄운 뒤에야 새 shim 을 반영한다.
@@ -247,6 +250,13 @@ container exec --env MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.co
 
 # 호스트 fd 가 파일 수를 따라가지 않는지 (게스트 VM 프로세스)
 lsof -p <vm pid> | wc -l     # 활동 중에도 100 안쪽
+
+# 모든 Apple Keeper 게스트가 agent plan(--serve 소켓 publish)으로 떠 있는지 확인
+container list --format json | jq -r '.[] | select(.configuration.id | startswith("masc-keeper-vm-")) | [.configuration.id, (.configuration.initProcess.arguments | join(" "))] | @tsv'
+#  → 모두 --serve <게스트 소켓 경로> 로 떠 있어야 한다.
+#    전환 전 옛 게스트가 남아 있으면 그 Keeper 의 다음 턴이 새 게스트로 바꾸며,
+#    바뀌기 전까지 턴 없이 읽는 경로(lane 상태·운영자 화면·Diagnostic_read)는
+#    microvm_agent_not_published 로 거절된다.
 ```
 
 ## 못 하는 것

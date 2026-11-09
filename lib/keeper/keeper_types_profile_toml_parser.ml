@@ -33,7 +33,6 @@ let keeper_toml_fields =
   ; "microvm_backend", Field_string
   ; "microvm_memory", Field_string
   ; "microvm_cpus", Field_int
-  ; "microvm_delivery", Field_string
   ; "observation_run", Field_string
   ; "max_context_override", Field_int
   ; "telemetry_feedback_enabled", Field_bool
@@ -284,45 +283,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           "microvm_backend_requires_microvm: keeper.microvm_backend is only \
            valid with sandbox_profile = \"microvm\""
   in
-  (* RFC microvm-guest-agent-over-socket §3.9: [microvm_delivery] chooses how
-     requests reach the guest, one keeper at a time while the agent is a
-     canary. Like [microvm_backend] it means something only under
-     sandbox_profile = "microvm". [agent_socket] also needs a runtime that
-     publishes a guest socket to the host, and only Apple [container] does;
-     the backend has to be named here for that to be checked. *)
-  let* microvm_delivery =
-    closed "microvm_delivery" microvm_delivery_of_string ~invalid:(fun raw ->
-      Printf.sprintf
-        "microvm_delivery_unknown: keeper.microvm_delivery = %S is not one \
-         of: %s"
-        raw
-        (String.concat ", " valid_microvm_delivery_strings))
-  in
-  let* () =
-    let open Keeper_microvm_backend in
-    match sandbox_profile, microvm_backend, microvm_delivery with
-    | ( (None | Some (Docker | Micro_vm | Remote_ssh))
-      , (None | Some (Apple_container | Nerdctl_kata | Microsandbox))
-      , None )
-    | ( Some Micro_vm
-      , (None | Some (Apple_container | Nerdctl_kata | Microsandbox))
-      , Some Exec_per_request )
-    | Some Micro_vm, Some Apple_container, Some Agent_socket -> Ok ()
-    | Some Micro_vm, (None | Some (Nerdctl_kata | Microsandbox)), Some Agent_socket ->
-        Error
-          "microvm_delivery_requires_apple_container: keeper.microvm_delivery \
-           = \"agent_socket\" needs microvm_backend = \"apple_container\" \
-           written in this file, the runtime that publishes the agent's socket \
-           to the host. A keeper that leaves the backend to the host default \
-           writes the line too; otherwise remove microvm_delivery"
-    | ( (None | Some (Docker | Remote_ssh))
-      , (None | Some (Apple_container | Nerdctl_kata | Microsandbox))
-      , Some (Exec_per_request | Agent_socket) ) ->
-        Error
-          "microvm_delivery_requires_microvm: keeper.microvm_delivery is only \
-           valid with sandbox_profile = \"microvm\"; set that profile, or \
-           remove microvm_delivery"
-  in
   (* RFC-0422 §3.4: [observation_run] chooses the box a tool_execute runs in
      before the judge is asked. The spelling is checked whether or not a
      profile is declared; the profile pairing
@@ -408,7 +368,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
       microvm_backend;
       microvm_memory;
       microvm_cpus;
-      microvm_delivery;
       observation_run;
       max_context_override;
       telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";

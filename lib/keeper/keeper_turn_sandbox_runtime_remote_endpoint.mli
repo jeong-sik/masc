@@ -1,6 +1,8 @@
 (** The remote endpoint a microvm guest is reached through: the check that a
-    keeper runs a microvm profile, and the builder of the endpoint, which uses
-    the agent socket of an Apple guest or the shim exec prefix of the backend.
+    keeper runs a microvm profile, and the builder of the endpoint. The
+    backend decides the delivery ({!Keeper_microvm_backend.request_delivery}):
+    the agent socket of an Apple guest, or the shim exec prefix of the other
+    runtimes.
 
     [Keeper_turn_sandbox_runtime] includes this module. *)
 
@@ -17,5 +19,4 @@ val build_microvm_endpoint :
   gid:int ->
   container_name:string ->
   identity_environment:(string * string) list ->
-  delivery:Keeper_types_profile_sandbox.microvm_delivery ->
   (Keeper_sandbox_remote.t, string) result

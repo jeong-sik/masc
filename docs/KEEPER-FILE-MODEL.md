@@ -49,7 +49,6 @@ Current `[keeper]` fields:
 - `microvm_backend`
 - `microvm_memory`
 - `microvm_cpus`
-- `microvm_delivery`
 - `observation_run`
 - `max_context_override`
 - `telemetry_feedback_enabled`
@@ -64,11 +63,7 @@ Current `[keeper]` fields:
 
 Any other TOML key fails closed as `unknown keeper TOML keys`.
 
-`microvm_backend` and `microvm_delivery` are valid only with
-`sandbox_profile = "microvm"`. `microvm_delivery = "agent_socket"` also needs
-`microvm_backend = "apple_container"` written in the file: a Keeper that
-leaves the backend to the host default writes that line too, because the
-default is resolved after this file is read.
+`microvm_backend` is valid only with `sandbox_profile = "microvm"`.
 
 `mention_targets` are exact direct-address tokens. `board_interests` are
 semantic topics for targetless Board discovery; `[]` (and omission for a new

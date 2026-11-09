@@ -24,27 +24,34 @@ val relay_label : string * string
     an agent it would refuse. *)
 
 val plan :
-  uid:int -> gid:int -> host_socket:string -> Keeper_microvm_boot_plan.t ->
+  uid:int ->
+  gid:int ->
+  host_socket:string ->
+  image:string ->
+  guest_size:Keeper_microvm_guest_size.t ->
+  mounts:Keeper_microvm_boot_plan.guest_mount list ->
+  network:Keeper_microvm_boot_plan.network ->
+  environment:(string * string) list ->
+  labels:(string * string) list ->
   Keeper_microvm_boot_plan.t
-(** The agent form of an exec-per-request plan (RFC 0, 3.2). The first
+(** The plan every Apple Keeper guest boots with (RFC 0, 3.2). The first
     process is [masc-exec-shim --serve] started as [0:0]; it binds
-    {!guest_path}, re-mounts the root read-only and drops to [uid:gid]. So the
-    plan leaves out [Read_only_rootfs], gives back [CAP_SETUID], [CAP_SETGID]
-    and [CAP_SYS_ADMIN] after dropping all, and publishes the socket at
+    {!guest_path}, re-mounts the root read-only and drops to [uid:gid]. So
+    the plan holds every {!Keeper_microvm_backend.all_guest_constraints} but
+    [Read_only_rootfs], gives back [CAP_SETUID], [CAP_SETGID] and
+    [CAP_SYS_ADMIN] after dropping all, and publishes the socket at
     [host_socket]. The agent hands its own environment and working directory
-    to every request, so {!Keeper_sandbox_microvm.request_environment}, which
-    an exec request gets as [--env], is in the plan's environment. Everything
-    else is the exec plan's. *)
+    ({!Keeper_sandbox_microvm.work_volume_guest_root}) to every request, so
+    {!Keeper_sandbox_microvm.request_environment} follows [environment].
+    {!relay_label} follows [labels]. *)
 
-val delivery_of_facts :
-  base_path:string -> guest_name:string -> Keeper_microvm_boot_plan.facts ->
-  Keeper_types_profile_sandbox.microvm_delivery
-(** How a running guest is reached, read from what the runtime reports it
-    publishes rather than from the keeper TOML. A guest that publishes
-    {!guest_path} at {!host_path} serves requests through its agent; any
-    other guest takes an exec per request. A reader that did not assess the
-    guest so talks to it the way it was booted, also while a changed choice
-    waits for its keeper's next turn to replace it. *)
+val publishes_agent :
+  base_path:string -> guest_name:string -> Keeper_microvm_boot_plan.facts -> bool
+(** Whether a running guest publishes {!guest_path} at {!host_path}, read from
+    what the runtime reports rather than from a plan. A reader attaches without
+    assessing the guest, so it asks this before it reaches the guest through
+    the agent. A guest that does not publish the agent has another plan, and
+    its keeper's next turn replaces it. *)
 
 type agent_check =
   | Agent_answered

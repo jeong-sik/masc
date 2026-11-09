@@ -3,13 +3,17 @@
 
 A case (`e_synth_audit.render_case`) shows candidates k1, k2, … and memory facts
 in full, and the judge classifies every one of them by `e_synth_audit.JUDGE`.
-`classes` checks a decision against its case's key.
+`classes` reads a decision into `Classed` values and checks it against its
+case's key.
 
-The label audit compares the classes with the label (`misfits`). The verdict
-reads them for off-label drops (`adjudicate`): memory IDs a valid answer drops
-that are neither planted stale facts nor correction targets of the label. G3
-needs drop precision 1.0, and a generated memory can hold a fact its label keeps
-that a careful reader drops. In the audit's agreement check, one judge kept and
+The label audit compares the classes with the label (`misfits`). A fact misfit
+that involves a candidate (`superseded:<k>` on either side) puts the request in
+doubt; any other fact misfit puts the memory in doubt. The verdict reads the
+classes for off-label drops (`adjudicate`): memory IDs a valid answer drops
+that the label neither asks to drop (planted stale facts, correction targets)
+nor asks to absorb (complement targets, facts of a duplicate pair). G3 needs
+drop precision 1.0, and a generated memory can hold a fact its label keeps that
+a careful reader drops. In the audit's agreement check, one judge kept and
 another dropped one of 372 facts shown in full: it copied the role material.
 
 `e_synth_audit.py drops` makes one case per request with an off-label drop.
@@ -18,11 +22,12 @@ picks on any request of that memory, each fact an answer dropped off label on
 it, and a fill drawn once for that memory. Laid side by side, the cases have no
 fact in common that marks a drop, and none shows the answer, the label or the
 target. `adjudicate` refuses cases of one memory that show different facts.
-Each drop is judged in the case of the request it was made on. When the judge takes the fact out as well
-(`drop`, or `superseded:<k>`), the label is in doubt, and the verdict scores no
-request on that memory for any target. When the judge keeps the fact, the drop
-stays wrong, also when its memory leaves scoring for another drop:
-`wrong_outside` counts it against the target that made it.
+Each drop is judged in the case of the request it was made on. Unless the judge
+keeps the fact, the label is in doubt, and the verdict scores no request on that
+memory for any target. A fact the judge keeps, or finds restating another fact,
+was dropped wrongly: a restated fact leaves by being absorbed. Such a drop stays
+wrong when its memory leaves scoring, and so does a drop of a fact the label
+asks to absorb: `wrong_outside` counts both against the target that made them.
 
 The judge gets one folder, JUDGE_DIR, decides in that folder itself and writes
 its decisions there. Beside the key, JUDGE_FILES records the sha256 of each
@@ -39,14 +44,62 @@ import hashlib
 import json
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 type JsonObject = dict[str, object]
 # item → memory ID → the targets whose valid answer dropped it off label
 type OffLabel = dict[str, dict[str, list[str]]]
+type CandidateVerb = Literal["new", "transient", "corrects", "complements", "restates"]
+type FactVerb = Literal["keep", "drop", "superseded", "restates"]
 
-CANDIDATE_VERBS = frozenset({"new", "transient", "restates", "corrects"})
-FACT_VERBS = frozenset({"keep", "drop", "superseded"})
+
+@dataclass(frozen=True, slots=True)
+class Classed[V: str]:
+    """One class in JUDGE's terms: the verb and the refs written after its colon."""
+
+    verb: V
+    names: frozenset[str]
+
+    def text(self) -> str:
+        return f"{self.verb}:{','.join(sorted(self.names))}" if self.names else self.verb
+
+
+def names_of(written: str) -> frozenset[str] | None:
+    """The refs written after a verb's colon, or None when one is empty or written twice."""
+    names = written.split(",")
+    return frozenset(names) if all(names) and len(set(names)) == len(names) else None
+
+
+def candidate_class(text: str) -> Classed[CandidateVerb] | None:
+    """A candidate's class as JUDGE writes it, or None when JUDGE has no such class."""
+    verb, _, written = text.partition(":")
+    names = names_of(written)
+    match verb:
+        case "new" | "transient":
+            return Classed[CandidateVerb](verb, frozenset()) if text == verb else None
+        case "corrects" | "complements":
+            return Classed[CandidateVerb](verb, names) if names is not None and len(names) == 1 else None
+        case "restates":
+            return Classed[CandidateVerb](verb, names) if names is not None else None
+        case _:
+            return None
+
+
+def fact_class(text: str) -> Classed[FactVerb] | None:
+    """A fact's class as JUDGE writes it, or None when JUDGE has no such class."""
+    verb, _, written = text.partition(":")
+    names = names_of(written)
+    match verb:
+        case "keep" | "drop":
+            return Classed[FactVerb](verb, frozenset()) if text == verb else None
+        case "superseded":
+            return Classed[FactVerb](verb, names) if names is not None and len(names) == 1 else None
+        case "restates":
+            return Classed[FactVerb](verb, names) if names is not None else None
+        case _:
+            return None
+
+
 # The folder a judge gets: the cases and the judging text, never the key.
 JUDGE_DIR = "judge"
 # The rules the judging text names, by repository path. The judge's folder holds a copy at that path.
@@ -100,46 +153,50 @@ def decisions_by_case(decisions: list[JsonObject]) -> dict[str, JsonObject]:
     return by_case
 
 
-def classes(key: JsonObject, decision: JsonObject) -> tuple[dict[str, str], dict[str, str]]:
+def classes(key: JsonObject, decision: JsonObject) -> tuple[dict[str, Classed[CandidateVerb]],
+                                                            dict[str, Classed[FactVerb]]]:
     """The decision's candidate and fact classes. SystemExit unless it classifies exactly the
-    case's candidates and facts, each in the judge's terms and naming only what the case shows."""
+    case's candidates and facts, each in JUDGE's terms and naming only what the case shows: a
+    `superseded` fact names a candidate, any other class names facts, and a fact never itself."""
     case = cast(str, key["case"])
-    refs = set(cast(list[str], key["refs"]))
-    want_c, want_f = cast(dict[str, str], key["candidates"]), cast(dict[str, str], key["facts"])
-    got_c, got_f = cast(dict[str, str], decision.get("candidates", {})), cast(dict[str, str], decision.get("facts", {}))
+    refs = frozenset(cast(list[str], key["refs"]))
+    want_c, want_f = cast(dict[str, object], key["candidates"]), cast(dict[str, object], key["facts"])
+    got_c = cast(dict[str, object], decision.get("candidates", {}))
+    got_f = cast(dict[str, object], decision.get("facts", {}))
     if set(got_c) != set(want_c) or set(got_f) != set(want_f):
         raise SystemExit(f"{case}: the decision does not classify exactly the case's candidates and facts")
-    for ref in want_c:
-        got = got_c[ref]
-        verb, _, target = got.partition(":")
-        if verb not in CANDIDATE_VERBS or (bool(target) != (verb in {"restates", "corrects"})):
-            raise SystemExit(f"{case}: {ref} has an unknown classification {got!r}")
-        named = target.split(",") if verb == "restates" else [target] if target else []
-        if any(m not in refs for m in named):
-            raise SystemExit(f"{case}: {ref} names {target}, which the case does not show")
-    for mid in want_f:
-        got = got_f[mid]
-        verb, _, target = got.partition(":")
-        if verb not in FACT_VERBS or (bool(target) != (verb == "superseded")):
-            raise SystemExit(f"{case}: {mid} has an unknown classification {got!r}")
-        if target and target not in want_c:
-            raise SystemExit(f"{case}: {mid} names {target}, which is not a candidate of the case")
-    return got_c, got_f
+    candidates: dict[str, Classed[CandidateVerb]] = {}
+    for ref, text in got_c.items():
+        got = candidate_class(text) if isinstance(text, str) else None
+        if got is None:
+            raise SystemExit(f"{case}: {ref} has an unknown classification {text!r}")
+        if not got.names <= refs:
+            raise SystemExit(f"{case}: {ref} names {text}, which the case does not show")
+        candidates[ref] = got
+    facts: dict[str, Classed[FactVerb]] = {}
+    for mid, text in got_f.items():
+        got = fact_class(text) if isinstance(text, str) else None
+        if got is None:
+            raise SystemExit(f"{case}: {mid} has an unknown classification {text!r}")
+        if not got.names <= (frozenset(want_c) if got.verb == "superseded" else refs - {mid}):
+            raise SystemExit(f"{case}: {mid} names {text}, which the case does not show")
+        facts[mid] = got
+    return candidates, facts
 
 
 def misfits(key: JsonObject, decision: JsonObject) -> tuple[list[str], list[str]]:
-    """(request-level misfits, memory-level misfits) as ID-only strings, or SystemExit on a malformed decision."""
+    """(request-level misfits, memory-level misfits) as ID-only strings, or SystemExit on a malformed
+    decision or key. A fact misfit is request-level when either class names a candidate."""
+    want_c, want_f = classes(key, key)
     got_c, got_f = classes(key, decision)
-    request = [f"{ref} expect {want} got {got_c[ref]}"
-               for ref, want in cast(dict[str, str], key["candidates"]).items() if got_c[ref] != want]
+    request = [f"{ref} expect {want.text()} got {got_c[ref].text()}"
+               for ref, want in want_c.items() if got_c[ref] != want]
     memory: list[str] = []
-    for mid, want in cast(dict[str, str], key["facts"]).items():
+    for mid, want in want_f.items():
         got = got_f[mid]
-        if got == want:
-            continue
-        line = f"{mid} expect {want} got {got}"
-        flawed = (want == "keep" and got == "drop") or (want == "drop" and got == "keep")
-        (memory if flawed else request).append(line)
+        if got != want:
+            line = f"{mid} expect {want.text()} got {got.text()}"
+            (request if "superseded" in (want.verb, got.verb) else memory).append(line)
     return request, memory
 
 
@@ -165,7 +222,7 @@ class Judged:
     item: str
     memory_id: str
     targets: tuple[str, ...]
-    judged: str
+    judged: Classed[FactVerb]
 
 
 @dataclass(frozen=True, slots=True)
@@ -180,21 +237,26 @@ class Adjudication:
         """The E-synth rows the verdict scores: none on an excluded memory, whatever the target."""
         return [r for r in rows if memory_of(cast(str, r["item"])) not in self.excluded]
 
-    def wrong_outside(self) -> dict[str, int]:
-        """Per target, its drops the judge kept that sit on an excluded memory. They are wrong
-        drops whose rows `scored` leaves out, so drop precision counts them apart."""
+    def wrong_outside(self, rows: list[JsonObject]) -> dict[str, int]:
+        """Per target, its wrong drops on excluded memories, whose rows `scored` leaves out, so drop
+        precision counts them apart: off-label drops of a fact the judge keeps or finds restating
+        another, and drops of a fact the label asks to absorb (`dropped_unmerged`)."""
         out: dict[str, int] = {}
         for d in self.drops:
-            if d.judged == "keep" and memory_of(d.item) in self.excluded:
+            if d.judged.verb in ("keep", "restates") and memory_of(d.item) in self.excluded:
                 for target in d.targets:
                     out[target] = out.get(target, 0) + 1
+        for r in rows:
+            unmerged = len(cast(list[str], r["dropped_unmerged"]))
+            if unmerged and memory_of(cast(str, r["item"])) in self.excluded:
+                out[cast(str, r["target"])] = out.get(cast(str, r["target"]), 0) + unmerged
         return dict(sorted(out.items()))
 
-    def record(self, items_scored: int) -> JsonObject:
+    def record(self, rows: list[JsonObject]) -> JsonObject:
         return {"off_label_drops": [{"item": d.item, "memory_id": d.memory_id, "targets": list(d.targets),
-                                     "judged": d.judged} for d in self.drops],
-                "excluded_memories": sorted(self.excluded), "wrong_outside": self.wrong_outside(),
-                "items_scored": items_scored, "judge_files": dict(self.judge_files)}
+                                     "judged": d.judged.text()} for d in self.drops],
+                "excluded_memories": sorted(self.excluded), "wrong_outside": self.wrong_outside(rows),
+                "items_scored": len({r["item"] for r in self.scored(rows)}), "judge_files": dict(self.judge_files)}
 
 
 NO_DROPS = Adjudication((), frozenset())
@@ -221,7 +283,7 @@ def adjudicate(keys: list[JsonObject], decisions: list[JsonObject], drops: OffLa
             raise SystemExit(f"{key['case']}: the case does not show every off-label drop of its memory")
         _, facts = classes(key, by_case[cast(str, key["case"])])
         judged += [Judged(item, mid, tuple(targets), facts[mid]) for mid, targets in drops[item].items()]
-    return Adjudication(tuple(judged), frozenset(memory_of(d.item) for d in judged if d.judged != "keep"))
+    return Adjudication(tuple(judged), frozenset(memory_of(d.item) for d in judged if d.judged.verb != "keep"))
 
 
 def read_adjudication(folder: Path, drops: OffLabel, rules: Path) -> Adjudication:

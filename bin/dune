@@ -2818,6 +2818,7 @@
   masc_tui_render_activity
   masc_tui_render_config
   masc_tui_render_keepers
+  masc_tui_keeper_wall
   masc_tui_render_keeper_story
   masc_tui_render_runtime
   masc_tui_render_overlays

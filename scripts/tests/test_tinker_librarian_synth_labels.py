@@ -162,7 +162,7 @@ class TeacherTest(unittest.TestCase):
 
 
 def record(req: S.SynthRequest, answer: str) -> dict[str, object]:
-    return {"item": req.item_id, "attempt": 0, "answer": answer, "reasoning": "생각"}
+    return {"item": req.item_id, "attempt": 0, "answer": answer}
 
 
 class TeacherMergeTest(unittest.TestCase):

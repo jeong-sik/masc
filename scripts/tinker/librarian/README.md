@@ -57,7 +57,7 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `eval_admission.py` | Measures targets on E-real and E-synth, then applies the gates |
 | `memory_scores.py` | Scores one answer: E-real against the live answer, E-synth by the memory it leaves |
 | `teacher_sample.py` | Keeps teacher answers that leave the memory their training labels ask for, and those that absorb a memory once the merge judge finds each absorb mergeable |
-| `train_sft.py` | Trains branch A (answer only) or B (teacher thinking and answer) |
+| `train_sft.py` | Trains the candidate A on the teacher's answers |
 
 The tests are `scripts/tests/test_tinker_librarian_*.py`. They read only
 invented rows and the invented Keepers in
@@ -91,14 +91,19 @@ carries none, and the endpoint applies its default.
 1. Write the E-real manifest and generate E-synth.
 2. Run the base model on E-synth, audit the labels with a judge that sees
    neither the labels nor the answers, and keep the requests it confirms.
-3. Fix `pass_lines.json` and commit it before any training.
+3. Fix `pass_lines.json` and commit it before any training. The G6 merge lines
+   come from the base model's merge numbers on the fixed E-synth:
+   `eval_admission.py synth-numbers` prints them once the drop and merge judges
+   (steps 6 and 7) have classed that run's answers. It reads no gate, choice
+   or trained run. `verdict` and `train_sft.py` refuse while a gate has no
+   number.
 4. Generate the training split and sample the teacher (`teacher_sample.py
    sample`). An answer that absorbs a memory waits for the merge judge, also
    when its label expects the merge: `teacher_sample.py cases` gives the judge
    the absorb gate's question as `merge_cases.py` does, and `apply` keeps the
-   answer only when every absorb is judged mergeable. Train branch A and
-   branch B on the `accepted.jsonl` that `apply` writes.
-5. Measure the base model, A and B in one run per set, from an empty `--out`.
+   answer only when every absorb is judged mergeable. Train A on the
+   `accepted.jsonl` that `apply` writes.
+5. Measure the base model and A in one run per set, from an empty `--out`.
 6. When a valid E-synth answer dropped a fact its label does not name (not
    planted stale, not a correction or complement target, not a fact of a
    duplicate pair), a judge that sees neither the labels nor the answers
@@ -133,12 +138,12 @@ uv run scripts/tinker/librarian/e_synth_audit.py apply \
   --final artifacts/tinker/librarian/e-synth/requests.jsonl
 MASC_BASE_PATH=<base> uv run scripts/tinker/librarian/eval_admission.py run --set real \
   --target base=thinkingmachines/Inkling-2-Small:peft:262144 \
-  --target A=<sampler path of A> --target B=<sampler path of B> \
+  --target A=<sampler path of A> \
   --out artifacts/tinker/librarian/verdict-real --budget 6
 uv run scripts/tinker/librarian/eval_admission.py run --set synth \
   --requests artifacts/tinker/librarian/e-synth/requests.jsonl \
   --target base=thinkingmachines/Inkling-2-Small:peft:262144 \
-  --target A=<sampler path of A> --target B=<sampler path of B> \
+  --target A=<sampler path of A> \
   --out artifacts/tinker/librarian/verdict-synth --budget 9
 uv run scripts/tinker/librarian/e_synth_audit.py drops \
   --requests artifacts/tinker/librarian/e-synth/requests.jsonl \
@@ -149,7 +154,7 @@ uv run scripts/tinker/librarian/merge_cases.py \
 uv run scripts/tinker/librarian/eval_admission.py verdict \
   --real artifacts/tinker/librarian/verdict-real --synth artifacts/tinker/librarian/verdict-synth \
   --drops artifacts/tinker/librarian/verdict-drops --merges artifacts/tinker/librarian/verdict-merges \
-  --train A=artifacts/tinker/librarian/train-A --train B=artifacts/tinker/librarian/train-B
+  --train A=artifacts/tinker/librarian/train-A
 ```
 
 `cases`, `drops` and `merge_cases.py` keep the key in `--out` and put the

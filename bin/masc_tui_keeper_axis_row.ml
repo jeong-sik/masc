@@ -5,6 +5,7 @@ type columns =
 
 type shape =
   | List_columns
+  | Wall_columns
   | Grid of columns
 
 (* The runtime and day views draw the state view's columns until their own are
@@ -17,7 +18,7 @@ let shape_of_view = function
   | Masc_tui_keeper_list_model.By_memory -> Grid Memory_columns
   | Masc_tui_keeper_list_model.By_age -> Grid Age_columns
   | Masc_tui_keeper_list_model.By_runtime -> Grid Activity_columns
-  | Masc_tui_keeper_list_model.Day_wall -> Grid Activity_columns
+  | Masc_tui_keeper_list_model.Day_wall -> Wall_columns
 
 type second_line =
   | No_second_line

@@ -197,28 +197,18 @@ let test_recent_and_name_have_deterministic_ties () =
   Alcotest.(check (list string)) "identical sort keys remain stable"
     [ "same-a"; "same-b" ] (names (Model.order_rows ~outside:unread ~view:Model.Plain ~now:0. ~sort:Model.Recent duplicates))
 
-let with_runtime_id runtime_id (runtime : Decode.keeper_runtime) = { runtime with kr_runtime_id = runtime_id }
-
-let test_runtime_view_groups_by_runtime_id () =
-  let healthy = health "healthy" in
+let test_runtime_view_contains_only_failing_rows () =
   let rows =
-    [ row ~health:healthy ~edit:(with_runtime_id "b.runtime") "b1"
+    [ row ~health:(health "healthy") "sound"
     ; row "unread"
-    ; row ~health:healthy ~edit:(with_runtime_id "a.runtime") "a1"
-    ; row ~health:healthy ~edit:(with_runtime_id "b.runtime") "b2"
-    ]
-  in
-  Alcotest.(check (list string)) "runtime ids in order, then the unread row"
-    [ "a1"; "b1"; "b2"; "unread" ]
+    ; row ~health:(health "failing") "b"
+    ; row ~health:(health "failing") "a" ] in
+  Alcotest.(check (list string)) "only failed health readings remain selectable"
+    [ "a"; "b" ]
     (names (Model.order_rows ~outside:unread ~view:Model.By_runtime ~sort:Model.Name ~now:0. rows));
-  Alcotest.(check bool) "a read row is grouped by its runtime id" true
-    (Model.group_of_view ~outside:unread Model.By_runtime (List.hd rows)
-     = Some (Model.Group_runtime (Model.Runtime_named "b.runtime")));
-  Alcotest.(check bool) "an unread row has its own group" true
-    (Model.group_of_view ~outside:unread Model.By_runtime (List.nth rows 1)
-     = Some (Model.Group_runtime Model.Runtime_unread));
-  Alcotest.(check bool) "the plain list does not group" true
-    (Model.group_of_view ~outside:unread Model.Plain (List.hd rows) = None)
+  Alcotest.(check bool) "the matrix uses the same cause grouping as failures" true
+    (Model.group_of_view ~outside:unread Model.By_runtime (List.nth rows 2)
+     = Some (Model.Group_cause Model.Cause_unnamed))
 
 let test_cause_view_puts_failing_rows_first () =
   let rows = [ row ~health:(health "healthy") "sound"; row ~health:(health "failing") "failing" ] in
@@ -256,8 +246,8 @@ let test_day_wall_puts_the_most_failed_half_hours_first () =
   Alcotest.(check (list (option int))) "failed half-hours within the last day"
     [ None; Some 1; Some 0; Some 2 ]
     (List.map (Model.failed_half_hours ~now) rows);
-  Alcotest.(check (list string)) "most failed first, rows without a pulse last"
-    [ "two"; "one"; "older"; "no-pulse" ]
+  Alcotest.(check (list string)) "failed slots first, unread before known clean rows"
+    [ "two"; "one"; "no-pulse"; "older" ]
     (names (Model.order_rows ~outside:unread ~view:Model.Day_wall ~sort:Model.Name ~now rows));
   Alcotest.(check bool) "the day wall does not group" true
     (Model.group_of_view ~outside:unread Model.Day_wall (List.hd rows) = None);
@@ -265,6 +255,16 @@ let test_day_wall_puts_the_most_failed_half_hours_first () =
     (Model.order_clock_step Model.Day_wall = Some (float_of_int slot_seconds));
   Alcotest.(check bool) "the state view only reorders on new readings" true
     (Model.order_clock_step Model.By_state = None)
+
+let test_day_wall_counts_rested_and_clamps_future () =
+  let newest = Masc.Keeper_turn_pulse.slot_start now in
+  let slot starts_at rested failed : Masc.Keeper_turn_pulse.slot =
+    { starts_at; tally = { ok = 0; rested; failed } } in
+  let r = row ~health:(health "healthy")
+    ~edit:(with_pulse [slot newest 1 0; slot (newest + slot_seconds) 0 1;
+      slot (newest - Masc.Keeper_turn_pulse.window_seconds) 1 0]) "rested" in
+  Alcotest.(check (option int)) "rest and future share newest; 24h boundary excluded"
+    (Some 1) (Model.failed_half_hours ~now r)
 
 let reading_by_name readings ~keeper_name =
   match List.assoc_opt keeper_name readings with
@@ -364,7 +364,6 @@ let group_label = function
   | Model.Group_due _ -> "due"
   | Model.Group_memory _ -> "memory"
   | Model.Group_age _ -> "age"
-  | Model.Group_runtime _ -> "runtime"
 
 let stop_label = function
   | Model.Stop_heading group -> "heading " ^ group_label group
@@ -755,10 +754,12 @@ let () =
         ; Alcotest.test_case "waiting summary leaves out a failing Keeper" `Quick
             test_waiting_summary_leaves_out_a_failing_keeper
         ; Alcotest.test_case "group counts" `Quick test_group_counts
-        ; Alcotest.test_case "runtime view groups by runtime id" `Quick
-            test_runtime_view_groups_by_runtime_id
+        ; Alcotest.test_case "runtime view contains only failing rows" `Quick
+            test_runtime_view_contains_only_failing_rows
         ; Alcotest.test_case "cause view puts failing rows first" `Quick
             test_cause_view_puts_failing_rows_first
+        ; Alcotest.test_case "day wall counts rest and clamps future" `Quick
+            test_day_wall_counts_rested_and_clamps_future
         ; Alcotest.test_case "day wall puts the most failed half-hours first" `Quick
             test_day_wall_puts_the_most_failed_half_hours_first
         ; Alcotest.test_case "time, memory and age views follow the outside reading" `Quick

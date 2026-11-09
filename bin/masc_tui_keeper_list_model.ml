@@ -410,10 +410,6 @@ type cause_bucket =
   | Cause_unnamed
   | Not_failing
 
-type runtime_bucket =
-  | Runtime_named of string
-  | Runtime_unread
-
 type due =
   | Due_late
   | Due_held
@@ -447,7 +443,6 @@ type group =
   | Group_due of due
   | Group_memory of memory_follow
   | Group_age of memory_age
-  | Group_runtime of runtime_bucket
 
 let cause_bucket_of_row row =
   match trail_of_row row with
@@ -461,11 +456,6 @@ let cause_bucket_of_row row =
             | Walk_unreadable | Walk_absent | Walk_not_applicable)
       ; _ } -> Cause_unnamed
 
-let runtime_bucket_of_row row =
-  match runtime_of_row row with
-  | Some runtime -> Runtime_named runtime.Masc.Tui_decode.kr_runtime_id
-  | None -> Runtime_unread
-
 let keeper_name_of_row row = row.keeper.Masc.Tui_decode.k_name
 
 let group_of_view ~outside view row =
@@ -476,7 +466,7 @@ let group_of_view ~outside view row =
   | By_time -> Some (Group_due (outside ~keeper_name:(keeper_name_of_row row)).due)
   | By_memory -> Some (Group_memory (outside ~keeper_name:(keeper_name_of_row row)).follow)
   | By_age -> Some (Group_age (outside ~keeper_name:(keeper_name_of_row row)).age)
-  | By_runtime -> Some (Group_runtime (runtime_bucket_of_row row))
+  | By_runtime -> Some (Group_cause (cause_bucket_of_row row))
 
 let failed_half_hours ~now row =
   match runtime_of_row row with
@@ -484,13 +474,24 @@ let failed_half_hours ~now row =
   | Some runtime ->
       Option.map
         (fun (pulse : Masc.Keeper_turn_pulse.pulse) ->
-          let since = now -. float_of_int Masc.Keeper_turn_pulse.window_seconds in
-          List.length
-            (List.filter
-               (fun (slot : Masc.Keeper_turn_pulse.slot) ->
-                 slot.tally.failed > 0 && float_of_int slot.starts_at >= since)
-               pulse.slots))
+          let newest = Masc.Keeper_turn_pulse.slot_start now in
+          let oldest = newest - Masc.Keeper_turn_pulse.window_seconds + Masc.Keeper_turn_pulse.slot_seconds in
+          pulse.slots
+          |> List.filter (fun (slot : Masc.Keeper_turn_pulse.slot) ->
+               slot.tally.failed + slot.tally.rested > 0 && slot.starts_at >= oldest)
+          |> List.map (fun (slot : Masc.Keeper_turn_pulse.slot) -> min newest slot.starts_at)
+          |> List.sort_uniq Int.compare |> List.length)
         runtime.Masc.Tui_decode.kr_recent_turns
+
+let day_rank ~now row =
+  match runtime_of_row row with
+  | Some runtime when not runtime.Masc.Tui_decode.kr_paused &&
+      Masc.Tui_decode.keeper_health_reading runtime.kr_health = Masc.Tui_decode.Health_failing -> 0
+  | Some runtime when not runtime.Masc.Tui_decode.kr_paused &&
+      (Masc.Tui_decode.keeper_health_reading runtime.kr_health = Masc.Tui_decode.Health_running ||
+       Masc.Tui_decode.keeper_health_reading runtime.kr_health = Masc.Tui_decode.Health_idle) &&
+      (match failed_half_hours ~now row with Some 0 -> true | None | Some _ -> false) -> 2
+  | Some _ | None -> 1
 
 (* A slot leaves the last day once every half hour; a due time and a
    snapshot age cross their bounds by the minute. *)
@@ -549,14 +550,8 @@ let view_key ~now ~outside view ranked =
   | By_time -> due_rank (outside ~keeper_name:(keeper_name_of_row ranked.row)).due, ""
   | By_memory -> follow_rank (outside ~keeper_name:(keeper_name_of_row ranked.row)).follow, ""
   | By_age -> age_rank (outside ~keeper_name:(keeper_name_of_row ranked.row)).age, ""
-  | By_runtime ->
-      (match runtime_bucket_of_row ranked.row with
-       | Runtime_named runtime_id -> 0, runtime_id
-       | Runtime_unread -> 1, "")
-  | Day_wall ->
-      (match failed_half_hours ~now ranked.row with
-       | Some failed -> -failed, ""
-       | None -> 1, "")
+  | By_runtime -> cause_rank (cause_bucket_of_row ranked.row), ""
+  | Day_wall -> day_rank ~now ranked.row, ""
 
 let compare_view_key (left_rank, left_name) (right_rank, right_name) =
   let order = Int.compare left_rank right_rank in
@@ -575,10 +570,18 @@ let compare_sorted sort left right =
       if order = 0 then compare_recent left.row right.row else order
 
 let order_rows ~view ~sort ~now ~outside rows =
+  let rows = match view with
+    | By_runtime -> List.filter trail_is_failed rows
+    | Plain | By_state | By_cause | By_time | By_memory | By_age | Day_wall -> rows
+  in
   List.map (fun row -> let ranked = rank row in ranked, view_key ~now ~outside view ranked) rows
   |> List.stable_sort (fun (left, left_key) (right, right_key) ->
     let order = compare_view_key left_key right_key in
-    if order <> 0 then order else compare_sorted sort left right)
+    if order <> 0 then order else
+    let day_order = match view with
+      | Day_wall -> compare (failed_half_hours ~now right.row) (failed_half_hours ~now left.row)
+      | Plain | By_state | By_cause | By_time | By_memory | By_age | By_runtime -> 0 in
+    if day_order <> 0 then day_order else compare_sorted sort left right)
   |> List.map (fun (ranked, _) -> ranked.row)
 
 type stop =

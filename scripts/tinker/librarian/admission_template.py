@@ -217,6 +217,14 @@ def _split_body(body: str) -> tuple[str, tuple[tuple[str, str], ...]]:
     return ocaml_trim("\n".join(preamble)), tuple(slots)
 
 
+def slots_of(content: str) -> dict[str, str]:
+    """Each slot's paragraph by marker, as MASC resolves them from librarian.md: the first slot of a name."""
+    out: dict[str, str] = {}
+    for marker, text in _split_body(_frontmatter_body(content))[1]:
+        out.setdefault(marker, text)
+    return out
+
+
 def template_from_markdown(content: str) -> AdmissionTemplate | TemplateError:
     """The template as MASC resolves `librarian` and its slots from librarian.md, with no override."""
     preamble, slots = _split_body(_frontmatter_body(content))

@@ -66,8 +66,3 @@ let source name =
     match Sys.getenv_opt name with
     | Some _ -> Env
     | None -> boot_or_default ()
-
-let source_to_string = function
-  | Env -> "env"
-  | Boot_override -> "boot_override"
-  | Default -> "default"

@@ -27,10 +27,6 @@ let create ~lane result =
 let lane t = t.lane
 let result t = t.result
 let response_text t = t.result.Keeper_agent_run.response_text
-let completion_contract_result t =
-  t.result.Keeper_agent_run.completion_contract_result
-;;
-
 
 let terminal t = t.terminal
 

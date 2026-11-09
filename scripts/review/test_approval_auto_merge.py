@@ -38,6 +38,8 @@ class FakeGitHub:
 
     def __init__(self, states=None):
         self.pulls, self.reviews, self.counts = {}, {}, {}
+        self.mutations = []
+        self.merge_returncode = 0
         self.hook = lambda path, count: None
         self.rules = [{'type': 'pull_request', 'parameters': {
             'required_approving_review_count': 2, 'dismiss_stale_reviews_on_push': True}}]
@@ -48,7 +50,7 @@ class FakeGitHub:
             self.pulls[number] = {
                 'number': number, 'user': {'id': 100, 'login': 'author'},
                 'state': 'open' if state == 'open' else 'closed',
-                'draft': False, 'merged': state == 'merged',
+                'draft': False, 'merged': state == 'merged', 'auto_merge': None,
                 'base': {'ref': 'main' if position == 1 else f'layer-{number - 1}',
                          'sha': sha(number - 1), 'repo': {'full_name': REPO}},
                 'head': {'ref': f'layer-{number}', 'sha': sha(number),
@@ -88,6 +90,19 @@ class FakeGitHub:
         return json.dumps(value)
 
     def run(self, command, **kwargs):
+        if command[:3] == ['gh', 'pr', 'merge']:
+            self.mutations.append(command)
+            number = int(command[3])
+            if '--disable-auto' in command:
+                self.pulls[number]['auto_merge'] = None
+            elif '--auto' in command:
+                self.pulls[number]['auto_merge'] = {'merge_method': 'squash'}
+            else:
+                raise AssertionError(f'unexpected mutation: {command}')
+            result = subprocess.CompletedProcess(command, self.merge_returncode, '', '')
+            if kwargs.get('check'):
+                result.check_returncode()
+            return result
         return subprocess.CompletedProcess(command, 0, self.output(command), '')
 
     def check_output(self, command, **kwargs):
@@ -183,6 +198,90 @@ class AutomaticMergeAdmission(unittest.TestCase):
                     MERGE.prepare(REPO, 101)
 
 
+class DefaultAutoMergeReservation(unittest.TestCase):
+    def test_ready_standalone_is_armed_before_any_approval(self):
+        with FakeGitHub() as github, redirect_stdout(io.StringIO()):
+            github.reviews[101] = []
+            result = MERGE.auto_merge_default(REPO, 101)
+        self.assertEqual(github.mutations, [
+            ['gh', 'pr', 'merge', '101', '--repo', REPO,
+             '--auto', '--squash', '--match-head-commit', sha(101)]])
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result['status'], 'auto_merge_enabled')
+        self.assertFalse(any('/reviews' in path for path in github.counts))
+
+    def test_an_existing_reservation_does_not_repeat_the_cli_mutation(self):
+        with FakeGitHub() as github:
+            github.pulls[101]['auto_merge'] = {'merge_method': 'squash'}
+            result = MERGE.auto_merge_default(REPO, 101)
+        self.assertEqual(github.mutations, [])
+        assert result is not None
+        self.assertEqual(result['status'], 'auto_merge_enabled')
+
+    def test_draft_non_main_and_release_prs_are_not_armed(self):
+        for excluded in ('draft', 'non-main', 'release'):
+            with self.subTest(excluded=excluded), FakeGitHub() as github:
+                row = github.pulls[101]
+                if excluded == 'draft':
+                    row['draft'] = True
+                elif excluded == 'non-main':
+                    row['base']['ref'] = 'parent-branch'
+                else:
+                    row['head']['ref'] = 'release/v1.2.3'
+                self.assertIsNone(MERGE.auto_merge_default(REPO, 101))
+                self.assertEqual(github.mutations, [])
+
+    def test_native_members_disable_lower_reservations_and_never_arm_a_layer(self):
+        with FakeGitHub(['open', 'open']) as github:
+            github.pulls[101]['auto_merge'] = {'merge_method': 'squash'}
+            self.assertIsNone(MERGE.auto_merge_default(REPO, 102))
+        self.assertEqual(github.mutations, [
+            ['gh', 'pr', 'merge', '101', '--repo', REPO, '--disable-auto']])
+        self.assertFalse(any('--auto' in command for command in github.mutations))
+
+    def test_excluded_prs_drop_an_existing_reservation(self):
+        for excluded in ('draft', 'non-main', 'release'):
+            with self.subTest(excluded=excluded), FakeGitHub() as github:
+                row = github.pulls[101]
+                row['auto_merge'] = {'merge_method': 'squash'}
+                if excluded == 'draft':
+                    row['draft'] = True
+                elif excluded == 'non-main':
+                    row['base']['ref'] = 'parent-branch'
+                else:
+                    row['head']['ref'] = 'release/v1.2.3'
+                self.assertIsNone(MERGE.auto_merge_default(REPO, 101))
+                self.assertIsNone(row['auto_merge'])
+                self.assertEqual(github.mutations, [
+                    ['gh', 'pr', 'merge', '101', '--repo', REPO, '--disable-auto']])
+
+    def test_concurrent_enable_confirms_the_server_reservation_after_cli_failure(self):
+        with FakeGitHub() as github, redirect_stdout(io.StringIO()):
+            github.merge_returncode = 1
+            result = MERGE.auto_merge_default(REPO, 101)
+        assert result is not None
+        self.assertEqual(result['status'], 'auto_merge_enabled')
+        self.assertEqual(len(github.mutations), 1)
+
+    def test_identity_changes_before_arming_refuse_without_a_mutation(self):
+        for changed in ('head', 'base', 'draft'):
+            with self.subTest(changed=changed), FakeGitHub() as github:
+                def change(path, count):
+                    if path != PREFIX + '/pulls/101' or count != 3:
+                        return
+                    if changed == 'head':
+                        github.pulls[101]['head']['sha'] = sha(9999)
+                    elif changed == 'base':
+                        github.pulls[101]['base']['ref'] = 'different-target'
+                    else:
+                        github.pulls[101]['draft'] = True
+                github.hook = change
+                with self.assertRaises(ValueError):
+                    MERGE.auto_merge_default(REPO, 101)
+                self.assertEqual(github.mutations, [])
+
+
 class AutomaticMergeReceipts(unittest.TestCase):
     def setUp(self):
         self.scope = {'stack': {'number': 900},
@@ -224,6 +323,7 @@ class AutomaticMergeReceipts(unittest.TestCase):
         environment = {'GITHUB_REPOSITORY': REPO, 'GITHUB_EVENT_NAME': 'workflow_dispatch',
                        'DISPATCH_PR': '102', 'GITHUB_STEP_SUMMARY': ''}
         with patch.dict(os.environ, environment), patch.object(sys, 'argv', ['auto-merge']), \
+             patch.object(MERGE, 'auto_merge_default', return_value=None), \
              patch.object(MERGE, 'prepare', return_value=(102, sha(102), self.scope)), \
              patch.object(MERGE.subprocess, 'run', return_value=self.operation()), \
              patch.object(MERGE, 'read', return_value={'status': 'failed',

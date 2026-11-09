@@ -379,6 +379,8 @@
     </review>
     <merge>
       운영자가 요청한 일반 PR 자동 병합은 서로 다른 GitHub 계정 2개의 현재 head 정식 승인을 조건으로 한다.
+      Native Stack 이 아닌 main 대상 Ready PR 은 생성·Ready 전환 시 GitHub Auto-merge 를 기본으로 켠다.
+      이 기본 예약은 --auto 를 사용할 수 있다. Draft 와 Release/Tag 는 자동 예약하지 않는다.
       리뷰어는 승인 전에 소스와 미해결 지적을 확인한다. 자동화는 정식 리뷰 상태를 읽으며,
       COMMENTED 본문의 FAIL·HOLD 를 자동 해석하지 않는다. 자동 병합을 막을 판정은 CHANGES_REQUESTED 로 등록한다.
       Native Stack 은 모든 미병합 PR 이 이 조건을 충족할 때 맨 위 PR 로 전체를 병합한다.
@@ -401,7 +403,8 @@
       PUT pulls/{맨 위 PR 번호}/merge-async 에 맨 위 PR 의 현재 head 를 sha 로 전달한다.
       일반 PR 의 실제 병합은 gh pr merge --match-head-commit (현재 head) 로 한다.
       비동기 접수와 완료를 구분하고 반환된 details.uuid 의 비동기 결과 및 각 PR 의 merged 상태·병합 커밋을 확인한다.
-      --auto 와 --admin 을 쓰지 않는다. 구체 절차는 docs/guides/NATIVE-GITHUB-STACKS.md 를 따른다.
+      Native Stack 의 개별 PR 에 --auto 를 쓰거나 --admin 으로 규칙을 우회하지 않는다.
+      구체 절차는 docs/guides/NATIVE-GITHUB-STACKS.md 를 따른다.
     </merge>
     <evidence_basis note="2026-10-06 내부 규약 제안 #14 채택 문구를 코딩 에이전트 계약으로 옮긴 것이다. 재읽기 의무일 뿐 강제 대기·스냅샷·상시 폴링을 만들지 않는다.">
       리뷰·승인을 인용하기 직전에 GitHub reviews API 의 상태와 commit_id 를 현재 head 와 대조한다.

@@ -14,7 +14,7 @@ on:
 permissions:
   actions: read
   contents: write
-  pull-requests: read
+  pull-requests: write
 
 # Do not use one repository-wide concurrency group: Actions replaces older
 # pending runs, which would lose a different PR's final approval event. GitHub

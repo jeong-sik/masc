@@ -72,6 +72,52 @@ def require_server_reviews(repo):
         raise Hold('main must enforce two reviews and dismiss stale approvals on GitHub')
 
 
+def disable_reservation(repo, current):
+    if current['state'] == 'open' and current.get('auto_merge') is not None:
+        subprocess.run(['gh', 'pr', 'merge', str(current['number']), '--repo', repo,
+                        '--disable-auto'], check=True)
+
+
+def auto_merge_default(repo, number):
+    """Arm ordinary Ready PRs; native stacks use the whole-scope worker."""
+    current = pull(repo, number)
+    stack = current.get('stack')
+    if stack is not None:
+        live = read(f'repos/{repo}/stacks/{stack["number"]}')
+        for member in live['pull_requests']:
+            row = pull(repo, member['number'])
+            # A reservation on a lower PR could land only part of this
+            # stack. The worker submits the current whole scope instead.
+            disable_reservation(repo, row)
+        return None
+    if (current['state'] != 'open' or current['draft'] is not False or
+            current['base']['ref'] != 'main' or current['head']['ref'].startswith('release/')):
+        disable_reservation(repo, current)
+        return None
+    require_server_reviews(repo)
+    selected, _, head = REVIEWS.pr_identity(current)
+    before = STACKS.snapshot(repo, selected, head)
+    if before['stack'] is not None or before['scope'][0]['identity']['base']['ref'] != 'main':
+        raise Hold('merge scope changed before enabling auto-merge')
+    if STACKS.snapshot(repo, selected, head) != before:
+        raise Hold('PR identity changed before enabling auto-merge')
+    attempt = None
+    if current.get('auto_merge') is None:
+        emit({'status': 'enabling_auto_merge', 'pr': selected, 'head': head})
+        attempt = subprocess.run(['gh', 'pr', 'merge', str(selected), '--repo', repo,
+                                  '--auto', '--squash', '--match-head-commit', head],
+                                 capture_output=True, text=True, check=False)
+    after = pull(repo, selected)
+    if after['merged'] is True:
+        return {'status': 'merged', 'pr': selected, 'merge_commit_sha': after['merge_commit_sha']}
+    if after.get('auto_merge') is None:
+        if attempt is not None and attempt.returncode:
+            raise ValueError(attempt.stderr.strip() or 'gh could not enable auto-merge')
+        raise ValueError('GitHub has not confirmed auto-merge is enabled')
+    return {'status': 'auto_merge_enabled', 'pr': selected, 'head': after['head']['sha'],
+            'auto_merge': after['auto_merge']}
+
+
 def review_evidence(repo, current):
     number, _, head = REVIEWS.pr_identity(current)
     history = pages(f'repos/{repo}/pulls/{number}/reviews?per_page=100')
@@ -188,6 +234,11 @@ def main():
         if REVIEWS.REPO.fullmatch(repo) is None:
             raise ValueError('invalid repository')
         number = requested_pr()
+        if not args.dry_run:
+            automatic = auto_merge_default(repo, number)
+            if automatic is not None:
+                emit(automatic)
+                return 0
         selected, head, scope = prepare(repo, number)
         if not args.dry_run:
             emit({'status': 'admitted', 'pr': selected, 'head': head, 'scope': scope})

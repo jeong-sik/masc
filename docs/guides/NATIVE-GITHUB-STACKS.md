@@ -95,6 +95,15 @@ affected changes again. GitHub evaluates repository rules during the operation.
 
 ### Operator-requested automatic merge
 
+Non-native Ready PRs targeting `main` have GitHub **Auto-merge enabled by
+default** on creation/Ready transitions and subsequent review/lifecycle events.
+The UI reservation waits for GitHub's two-approval rule; no one needs to click
+the button. Drafts arm when marked Ready. Release branches stay manual.
+Before extending an auto-merge-enabled standalone PR into a native stack or
+retargeting its base, disable that reservation first. Native stack members use the whole-scope
+worker instead of per-layer reservations; the worker clears existing reservations
+when it observes native membership, Draft status, a non-main base or a release head.
+
 Ordinary PRs targeting `main` merge automatically after **two distinct GitHub
 accounts** have submitted APPROVE for each unmerged member's current head.
 Repeated approvals from one account count once. Author approvals, old heads,

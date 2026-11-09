@@ -231,6 +231,7 @@ Dispatch에는 저장소 권한이 필요하며 fork 기여자는 maintainer에�
 ## 5. 리뷰하고 통합하기
 
 main으로 들어가는 일반 PR은 [운영자가 요청한 자동 병합](NATIVE-GITHUB-STACKS.md#operator-requested-automatic-merge)을 적용합니다.
+Ready가 되면 기본으로 켭니다. 일반 PR은 GitHub의 Auto-merge 예약으로 표시하고, Native Stack은 전체를 함께 병합하는 작업을 실행합니다.
 스택의 미병합 PR마다 서로 다른 계정 2명이 현재 커밋을 승인하면 스택 전체를 병합합니다.
 병합을 막아야 하는 지적은 CHANGES_REQUESTED로 남깁니다. COMMENTED 본문만으로는 자동 병합을 막지 않습니다.
 리뷰어는 승인 전에 소스와 남은 지적을 확인합니다. Release/Tag는 전체 검증 후 수동으로 병합합니다.

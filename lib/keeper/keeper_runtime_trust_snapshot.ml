@@ -882,7 +882,7 @@ let collect_raw_snapshot_with_pending_reader
     Keeper_registry.get ~base_path:config.base_path meta.name
   in
   let runtime_contract =
-    Keeper_runtime_contract.runtime_observability_contract_json ~config meta
+    Keeper_runtime_contract.runtime_observability_contract_json meta
   in
   let recent_tool_call_rows =
     Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:6 ()

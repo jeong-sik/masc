@@ -121,7 +121,6 @@ let rollback_reservation ~config ~keeper_name operation_id =
 let read_guarded_meta
     ~config
     ~(observed : Keeper_meta_contract.keeper_meta)
-    ~cleanup_reason
   =
   match Keeper_meta_store.read_meta config observed.name with
   | Error detail -> Error (Meta_snapshot_read_failed detail)
@@ -132,9 +131,7 @@ let read_guarded_meta
               latest.runtime.trace_id
               observed.runtime.trace_id) ->
     Error Meta_snapshot_identity_changed
-  | Ok (Some latest) ->
-    ignore cleanup_reason;
-    Ok latest
+  | Ok (Some latest) -> Ok latest
 ;;
 
 let persist_blocked ~config operation stage detail =
@@ -243,7 +240,6 @@ let prepare ~config ~(entry : Keeper_registry.registry_entry) ~request =
               read_guarded_meta
                 ~config
                 ~observed:current.meta
-                ~cleanup_reason:request.cleanup_intent.reason
             with
             | Error _ as error -> error
             | Ok durable_meta ->
@@ -331,7 +327,6 @@ let prepare_dormant
               read_guarded_meta
                 ~config
                 ~observed:meta
-                ~cleanup_reason:request.cleanup_intent.reason
             with
             | Error _ as error -> error
             | Ok durable_meta ->

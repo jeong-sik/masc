@@ -682,8 +682,7 @@ let executable_in ?boot ~identity_name ~ownership_root dir =
    refused before it reaches the filesystem. *)
 let escapes = Dos_lane.escapes
 
-let left_inventory ~root shown =
-  let _ = root in
+let left_inventory shown =
   Printf.sprintf "%s leaves the DOS inventory" shown
 ;;
 
@@ -703,7 +702,7 @@ let resolve_program ?boot ~base_path name =
     Error (Printf.sprintf "no program named %S: put it under the DOS inventory" trimmed)
   else
     match within ~root (Filename.concat root trimmed) with
-    | None -> Error (left_inventory ~root (Printf.sprintf "%S" trimmed))
+    | None -> Error (left_inventory (Printf.sprintf "%S" trimmed))
     | Some path ->
       (match entry_kind path with
        | Unavailable -> Error "program is unavailable"
@@ -719,7 +718,7 @@ let resolve_program ?boot ~base_path name =
             (match read_regular_file ~ownership_root:root real with
              | Ok bytes -> Ok (f, bytes)
              | Error reason -> Error (Printf.sprintf "%s is unavailable: %s" f reason))
-          | None -> Error (left_inventory ~root (trimmed ^ "/" ^ f))
+          | None -> Error (left_inventory (trimmed ^ "/" ^ f))
         in
         let rec gather acc = function
           | [] -> Ok (List.rev acc)

@@ -6,10 +6,7 @@
 
     Extracted from Keeper_context_runtime as part of #4955 god-file split. *)
 
-open Printf
 open Keeper_types
-open Keeper_meta_contract
-open Keeper_types_profile
 
 module Message_json = Keeper_context_core_message_json
 module Canonical_tool = Agent_core.Canonical_tool

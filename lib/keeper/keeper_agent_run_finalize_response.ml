@@ -6,7 +6,6 @@
 
 open Keeper_types
 open Keeper_meta_contract
-open Keeper_types_profile
 open Keeper_agent_result
 
 (* Where this finished turn left the durable history (RFC librarian-lifecycle

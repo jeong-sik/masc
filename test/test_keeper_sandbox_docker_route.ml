@@ -1032,6 +1032,31 @@ let fake_docker_daemon_down_script =
 printf 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock\n' >&2\n\
 exit 1\n"
 
+let test_replay_network_drift_rejected_before_always_allow () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  Masc_test_deps.write_sandbox_image_catalog
+    ~base_path:config.Workspace.base_path [ "base", "alpine:test" ];
+  let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base";
+    network_mode = Keeper_types_profile_sandbox.Network_inherit; always_allow = Some true } in
+  let args = tool_execute_typed_exec_args ~cwd:playground "touch" ~argv:[ "mounted-file" ] in
+  let approved = Keeper_tool_execute_runtime.execute_gate_input
+    ~input:args ~cwd:playground ~sandbox_profile:"docker"
+    ~sandbox_target:"docker:alpine:test"
+    ~network_mode:Keeper_types_profile_sandbox.Network_none in
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let outcome = Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+    ~turn_sandbox_factory:(Some factory) ~config ~meta
+    ~replay_gate_input:approved
+    ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+    ~result_projection:Tool_output.default_model_projection ~args () in
+  Alcotest.(check bool) "changed network is rejected even under always allow" true
+    (String_util.contains_substring outcome.raw_output "approval_input_drifted");
+  Alcotest.(check bool) "no mounted file was written" false
+    (Sys.file_exists (Filename.concat playground "mounted-file"))
+;;
+
 let test_execute_guest_start_failure_reports_sandbox_and_conditions () =
   with_fake_docker fake_docker_daemon_down_script @@ fun () ->
   setup_with_sandbox ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -3117,6 +3142,9 @@ let () =
           Alcotest.test_case
             "turn runtime redacts its mounted GitHub snapshot"
             `Quick test_turn_runtime_redacts_the_stable_identity_mount;
+          Alcotest.test_case
+            "replay network drift rejects even always allow"
+            `Quick test_replay_network_drift_rejected_before_always_allow;
           Alcotest.test_case
             "Execute guest start failure reports sandbox and conditions"
             `Quick test_execute_guest_start_failure_reports_sandbox_and_conditions;

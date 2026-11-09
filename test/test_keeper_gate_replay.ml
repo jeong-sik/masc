@@ -206,6 +206,7 @@ let approved_execute_input =
     ~cwd:"/repo"
     ~sandbox_profile:"docker"
     ~sandbox_target:"docker:masc"
+    ~network_mode:Keeper_types_profile_sandbox.Network_none
 ;;
 
 let test_execute_args_are_the_approved_arguments () =
@@ -234,6 +235,7 @@ let test_execute_gate_input_round_trips () =
       ~cwd:"/approved"
       ~sandbox_profile:"docker"
       ~sandbox_target:"docker:masc"
+    ~network_mode:Keeper_types_profile_sandbox.Network_none
   in
   let submitted =
     producer
@@ -293,7 +295,7 @@ let test_execute_envelope_is_not_replayed () =
            (key ^ " is not carried into the replayed arguments")
            false
            (List.mem_assoc key fields))
-      [ "sandbox_profile"; "sandbox_target"; "schema" ]
+      [ "sandbox_profile"; "sandbox_target"; "network_mode"; "schema" ]
   | Ok _ -> Alcotest.fail "replayed execute arguments are not an object"
 ;;
 
@@ -993,6 +995,7 @@ let test_execute_summary_is_the_first_command_line () =
       ~cwd:"/repo"
       ~sandbox_profile:"docker"
       ~sandbox_target:"docker:masc"
+    ~network_mode:Keeper_types_profile_sandbox.Network_none
   in
   Alcotest.check
     summary

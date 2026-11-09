@@ -246,6 +246,49 @@ let test_reset_releases_stream_scopes () =
     check string "connection keeps serving after the resets" "alive"
       (snd (await_reply (request client "/fast"))))
 
+(* RFC 9113 DATA frame with END_STREAM and a one-byte payload for one client
+   stream. On a stream that is already half-closed (remote) it is a stream
+   error of type STREAM_CLOSED, which h2 answers with RST_STREAM by itself
+   (RFC 9113 §6.1). *)
+let closing_data_frame stream_id =
+  let frame = Bytes.of_string "\000\000\001\000\001\000\000\000\000x" in
+  Bytes.set_int32_be frame 5 (Int32.of_int stream_id);
+  Bytes.to_string frame
+
+let test_reset_sent_ends_stream_scope () =
+  let streams = Server_h2_stream_registry.create () in
+  let held, hold = Eio.Promise.create () in
+  let ended, record_end = Eio.Promise.create () in
+  let handler ~request_sw _ h2_reqd =
+    match (H2.Reqd.request h2_reqd).target with
+    | "/hold" ->
+      Eio.Promise.resolve hold ();
+      (try Eio.Fiber.await_cancel () with
+       | Eio.Cancel.Cancelled (Masc.Http_h2_stream.Stream_reset cause) as exn ->
+         Eio.Promise.resolve record_end cause;
+         raise exn)
+    | "/fast" -> Response.json ~compress:false "alive" (reqd_of_h2 ~sw:request_sw h2_reqd)
+    | path -> failf "unexpected path %s" path in
+  with_connection ~streams Request_fibers handler
+    (fun ~env:_ ~client ~client_flow ~release:_ ~close_client:_ ~server:_ ->
+    let reply = request client "/hold" in
+    Eio.Promise.await held;
+    (* Whichever of these two frames, or the client's own END_STREAM, arrives
+       second lands on a half-closed stream. masc reports nothing here; the
+       RST_STREAM is h2's own. *)
+    Eio.Flow.copy_string (closing_data_frame 1 ^ closing_data_frame 1) client_flow;
+    check bool "the scope ended because h2 wrote RST_STREAM" true
+      (match Eio.Promise.await ended with
+       | Masc.Http_h2_stream.Reset_by_us -> true
+       | _ -> false);
+    check bool "the client saw its stream reset" true
+      (Result.is_error (Eio.Promise.await reply));
+    ping client;
+    check int "the reset stream leaves no scope behind" 0
+      (Server_h2_stream_registry.active_streams streams);
+    check string "connection keeps serving after the reset" "alive"
+      (snd (await_reply (request client "/fast"))))
+
 let test_connection_closes_pending_work () =
   let admitted, admit = Eio.Promise.create () in
   let cancelled, mark_cancelled = Eio.Promise.create () in
@@ -301,6 +344,7 @@ let () = run "H2 request fibers" ["connection progress", [
   test_case "POST completion preserves PING and WINDOW_UPDATE" `Quick (fun () -> test_multiplexed_progress `POST);
   test_case "RST_STREAM isolates delayed response" `Quick test_reset_does_not_break_siblings;
   test_case "RST_STREAM releases stream scopes and fibers" `Quick test_reset_releases_stream_scopes;
+  test_case "RST_STREAM h2 writes ends the stream scope" `Quick test_reset_sent_ends_stream_scope;
   test_case "disconnect cancels requests and child fibers" `Quick test_connection_closes_pending_work;
   test_case "handler failure stays on its stream" `Quick test_handler_error_is_stream_local;
 ]]

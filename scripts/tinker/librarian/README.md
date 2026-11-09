@@ -121,8 +121,10 @@ uv run scripts/tinker/librarian/eval_admission.py verdict \
 ```
 
 `cases` and `drops` keep the key in `--out` and put the judge's material in
-`--out/judge/`. Give the judge only that folder: it reads `judge.md` and
-`cases.jsonl` there and writes `decisions.jsonl` next to them. `judge.md` names
+`--out/judge/`. Give the judge that folder itself, not a copy, and nothing
+else: it reads `judge.md` and `cases.jsonl` there and writes `decisions.jsonl`
+next to them. `cases` and `drops` refuse an `--out` whose judge folder already
+holds `decisions.jsonl`. `judge.md` names
 its rules as `config/prompts/librarian.md`, and the folder holds a copy at that
 path. The key holds the label's classes and the dropped facts.
 `--out/judge-files.json` holds the sha256 of the three files the judge was

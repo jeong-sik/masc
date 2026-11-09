@@ -105,11 +105,32 @@ class CaseTest(unittest.TestCase):
             recorded = cast(dict[str, str], json.loads((out / D.JUDGE_FILES).read_text(encoding="utf-8")))
             self.assertEqual(recorded, {name: D.file_sha256(judge / name) for name in given})
 
+    def test_cases_are_not_written_over_a_judge_folder_that_holds_decisions(self) -> None:
+        # Decisions left there were made on the cases and rules written before.
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}])
+            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}])
+            (out / D.JUDGE_DIR / D.DECISIONS).write_text('{"case": "d001"}\n', encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "already holds"):
+                A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}])
+
+    def test_a_record_that_leaves_out_a_given_file_stops_the_reading(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            out = Path(tmp)
+            A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}])
+            (out / D.JUDGE_DIR / D.DECISIONS).write_text('{"case": "d001"}\n', encoding="utf-8")
+            record = out / D.JUDGE_FILES
+            files = cast(dict[str, str], json.loads(record.read_text(encoding="utf-8")))
+            record.write_text(json.dumps({D.RULES.as_posix(): files[D.RULES.as_posix()]}), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "other files"):
+                D.judge_decisions(out, synth_render.TEMPLATE)
+
     def test_decisions_are_read_only_beside_the_files_the_judge_was_given(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             out = Path(tmp)
             A.write_cases(out, [{"case": "d001"}], [{"case": "d001", "item": "eval-k-0"}])
-            (out / D.JUDGE_DIR / "decisions.jsonl").write_text('{"case": "d001"}\n', encoding="utf-8")
+            (out / D.JUDGE_DIR / D.DECISIONS).write_text('{"case": "d001"}\n', encoding="utf-8")
             self.assertEqual(D.judge_decisions(out, synth_render.TEMPLATE)[1], [{"case": "d001"}])
             with self.assertRaisesRegex(SystemExit, "is not"):
                 D.judge_decisions(out, out / D.JUDGE_DIR / "judge.md")

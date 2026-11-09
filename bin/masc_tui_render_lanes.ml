@@ -409,17 +409,17 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
     | rows -> List.map Page_line.note rows
   in
   let state =
-    [ fact ~tone:state_tone "현재 상태" (standalone_lane_headline_state ~now lane)
+    [ fact ~tone:state_tone "상태" (standalone_lane_headline_state ~now lane)
     ; fact "구분" (standalone_lane_obligation lane)
     ; fact ~tone:state_tone "설정"
         (Tui_decode.standalone_lane_configuration_phrase lane.sl_configuration_state)
     ; fact
         ~tone:(if lane.sl_failed_count > 0 then Page_line.Attention else Page_line.Plain)
-        "실행 성적" (standalone_lane_run_score_summary lane)
+        "보존된 실행" (standalone_lane_run_score_summary lane)
     ]
     @ (match standalone_lane_latency_summary lane with
        | None -> []
-       | Some latency -> [ fact "소요 시간" latency ])
+       | Some latency -> [ fact "속도" latency ])
     @ (match standalone_lane_jev_summary lane with
        | None -> []
        | Some (tone, text) -> [ fact ~tone "JEV" text ])
@@ -446,8 +446,8 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
     ]
   @ [ Ansi.reset, "" ]
   @ detail_page ~width
-      [ "1. 현재 상태 · 실행 성적", state
-      ; "2. 모델 호출 순서 (Failover) · 설정 위치", failover
+      [ "1. 현재 관측 · 최근 실행", state
+      ; "2. 설정된 실행 후보 · 설정 위치", failover
       ; "3. 모델별 누적 응답 횟수 (Slot Selection History)", slot_history
       ; ( "4. 레인 출력 의미 · 실행 증거 (Contract)"
         , [ fact "Output meaning" answer.sla_output_meaning

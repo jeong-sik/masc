@@ -3419,12 +3419,6 @@ let readonly_internal_names () =
   |> List.sort_uniq String.compare
 ;;
 
-let public_name_for_internal internal_name =
-  match public_descriptors_for_internal internal_name with
-  | [] -> None
-  | first :: _ -> Some first.public_name
-;;
-
 let translate_input ~public input =
   match find_public public with
   | Some descriptor -> translate_input_for_descriptor descriptor input

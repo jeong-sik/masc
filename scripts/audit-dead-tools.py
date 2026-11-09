@@ -466,6 +466,18 @@ def source_label(key: str, sources: list[SourceResult]) -> str:
     return key
 
 
+def observed_span(report: Report, source: SourceResult) -> tuple[str, float | None]:
+    """Return the (cell text, fraction of the window covered) for one source."""
+    if not source.available or source.first_ts is None or source.last_ts is None:
+        return "-", None
+    window = report.window_end - report.window_start
+    fraction = (source.last_ts - source.first_ts) / window if window > 0 else None
+    text = f"{iso(source.first_ts)} ~ {iso(source.last_ts)}"
+    if fraction is not None:
+        text += f" (창의 {min(fraction, 1.0) * 100:.2f}%)"
+    return text, fraction
+
+
 def render_markdown(report: Report) -> str:
     registry = report.registry
     unused = report.by_status("unused")
@@ -486,12 +498,22 @@ def render_markdown(report: Report) -> str:
     lines.append("")
     lines.append("## 원천")
     lines.append("")
-    lines.append("| 원천 | 위치 | 상태 | 내용 |")
-    lines.append("|---|---|---|---|")
+    lines.append("| 원천 | 위치 | 상태 | 내용 | 관측 구간 |")
+    lines.append("|---|---|---|---|---|")
+    short_sources: list[tuple[SourceResult, float]] = []
     for source in report.sources:
         state = "사용" if source.available else "없음"
         detail = source.detail or ""
-        lines.append(f"| `{source.name}` | `{source.location}` | {state} | {detail} |")
+        span, fraction = observed_span(report, source)
+        if fraction is not None and fraction < 1.0:
+            short_sources.append((source, fraction))
+        lines.append(f"| `{source.name}` | `{source.location}` | {state} | {detail} | {span} |")
+    for source, fraction in short_sources:
+        lines.append("")
+        lines.append(
+            f"> 경고: `{source.name}` 가 창의 {fraction * 100:.2f}% 만 덮음 — "
+            f"0회는 그 구간의 0회이며 {report.window_days}일 동안의 0회가 아닙니다."
+        )
     lines.append("")
     lines.append("## 원천 커버리지 (계열별)")
     lines.append("")

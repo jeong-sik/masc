@@ -1039,22 +1039,29 @@ let test_replay_network_drift_rejected_before_always_allow () =
   Masc_test_deps.write_sandbox_image_catalog
     ~base_path:config.Workspace.base_path [ "base", "alpine:test" ];
   let meta = { meta with Keeper_meta_contract.sandbox_image = Some "base";
-    network_mode = Keeper_types_profile_sandbox.Network_inherit; always_allow = Some true } in
+    network_mode = Keeper_types_profile_sandbox.Network_none; always_allow = Some true } in
   let args = tool_execute_typed_exec_args ~cwd:playground "touch" ~argv:[ "mounted-file" ] in
   let approved = Keeper_tool_execute_runtime.execute_gate_input
     ~input:args ~cwd:playground ~sandbox_profile:"docker"
     ~sandbox_target:"docker:alpine:test"
     ~network_mode:Keeper_types_profile_sandbox.Network_none in
-  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
-  let outcome = Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
-    ~turn_sandbox_factory:(Some factory) ~config ~meta
-    ~replay_gate_input:approved
-    ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
-    ~result_projection:Tool_output.default_model_projection ~args () in
-  Alcotest.(check bool) "changed network is rejected even under always allow" true
-    (String_util.contains_substring outcome.raw_output "approval_input_drifted");
-  Alcotest.(check bool) "no mounted file was written" false
-    (Sys.file_exists (Filename.concat playground "mounted-file"))
+  let factory = Keeper_sandbox_factory.create ~config ~meta
+    ~default_network_override:Keeper_types_profile_sandbox.Network_inherit () in
+  let override = Keeper_tool_execute_runtime.For_testing.dispatch_override in
+  let previous_override = !override in
+  let dispatched = ref false in
+  override := Some (fun () -> dispatched := true; failwith "unexpected dispatch");
+  Fun.protect
+    ~finally:(fun () -> override := previous_override; Keeper_sandbox_factory.cleanup factory)
+    (fun () ->
+      let outcome = Keeper_tool_execute_runtime.handle_tool_execute_with_outcome
+        ~turn_sandbox_factory:(Some factory) ~config ~meta
+        ~replay_gate_input:approved
+        ~shell_ir_rewrite:Masc.Keeper_shell_tool_command.refuse_reserved_command
+        ~result_projection:Tool_output.default_model_projection ~args () in
+      Alcotest.(check bool) "changed factory network is rejected even under always allow" true
+        (String_util.contains_substring outcome.raw_output "approval_input_drifted");
+      Alcotest.(check bool) "no payload dispatch occurs" false !dispatched)
 ;;
 
 let test_execute_guest_start_failure_reports_sandbox_and_conditions () =

@@ -199,18 +199,21 @@ let test_disconnect_releases_waiter () = with_clients (fun sw connect ->
    | _ -> fail "disconnect left waiter blocked");
   check bool "late result refused" true
     (Result.is_error (Lane.deliver_result ~client_id:client.client_id ~id:command.id ~payload:(payload "late"))))
-let test_sources_and_live_policy () = with_clients (fun _ connect ->
+let test_sources_and_live_policy () = with_clients (fun sw connect ->
   let client = connect Lane.Ego_lite in
   check bool "missing transport UUID rejected" true (Result.is_error (Lane.client_id_of_string ""));
-  (* No ego connection sends touch input; a touch is refused as a selection,
-     with nothing queued. *)
+  (* The ego connection serves page touch since #49295, so a tap reaches the
+     connection as a queued command instead of being refused as an unserved
+     capability. [live_transport] has one constructor and it serves every
+     capability, so no issue path can produce [Transport_unsupported] today. *)
   let tap = Lane.Page_interact {tab_id=2; expected_url=Some "https://example.org";
     action=Lane.Tap_at {point={x=0.5;y=0.5};
       viewport={document_id="observed-page"; width=800.; height=600.; scroll_x=0.; scroll_y=0.}}} in
-  check bool "a touch is refused as a selection" true
-    (Lane.issue_for_actor ~actor:None ~target:(target client.client_id) ~verb:tap ~timeout_sec:0.1
-     = Error (Lane.Transport_unsupported
-         {client_id=client.client_id; transport=client.transport; capability=Lane.Touch_input})))
+  let issued = Eio.Fiber.fork_promise ~sw (fun () -> Lane.issue_for_actor ~actor:None
+    ~target:(target client.client_id) ~verb:tap ~timeout_sec:0.05) in
+  let _command = take client in
+  check bool "a served tap waits for its answer, then times out unexecuted" true
+    (match Eio.Promise.await issued with Ok (Ok Lane.Timed_out) -> true | _ -> false))
 
 (* One live verb for each capability, so a capability added to the lane has
    to be given a verb here before this file's table checks pass. *)
@@ -371,9 +374,16 @@ let test_answers_state_their_connection () = with_clients (fun sw connect ->
 
 let test_unsupported_message_names_the_serving_transport () =
   let client_id = (info Lane.Ego_lite).client_id in
-  check string "touch on ego names the transports that serve it, here none"
+  (* [live_transport] has one constructor and it serves every capability, so
+     [live_transports_serving] is never empty: no issue path can build
+     [Transport_unsupported] any more, and the "no connection serves it"
+     branch is unreachable. What the message still has to say is which
+     connection does serve the capability named in the refusal. That wording
+     repeats the reported transport when it is itself the serving one -- a
+     follow-up, not a reason to keep the pre-#49295 premise. *)
+  check string "touch on ego names the ego connection as serving it"
     "live_transport_unsupported: this browser is connected over ego_task_space, which does not serve \
-     touch_input; no connection serves it"
+     touch_input; a ego_task_space connection does"
     (Lane.selection_error_message (Lane.Transport_unsupported
        {client_id; transport=Ego_task_space; capability=Touch_input}))
 

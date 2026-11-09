@@ -252,7 +252,7 @@ let test_connect_and_load_bad_command () =
   let spec : Mcp.server_spec =
     { command = "/this/does/not/exist"; args = []; env = []; name = "ghost" }
   in
-  match Mcp.connect_and_load ~sw ~mgr spec with
+  match Mcp.connect_and_load ~sw ~mgr ~client_version:"test" spec with
   | Ok _ -> Alcotest.fail "Expected Error"
   | Error e ->
     Alcotest.(check bool)

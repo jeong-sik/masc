@@ -163,6 +163,7 @@ type managed =
 val connect_and_load
   :  sw:Eio.Switch.t
   -> mgr:_ Eio.Process.mgr
+  -> client_version:string
   -> server_spec
   -> (managed, Error.t) result
 

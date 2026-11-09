@@ -385,14 +385,14 @@ let close_all managed_list = List.iter close_managed managed_list
 (** Connect to an MCP server, perform the initialize handshake, fetch
     tools, and convert them to SDK [Tool.t] values.
     On any failure the subprocess is closed before returning [Error]. *)
-let connect_and_load ~sw ~mgr (spec : server_spec) =
+let connect_and_load ~sw ~mgr ~client_version (spec : server_spec) =
   Llm_provider.Diag.info "mcp" "spawn %s: args=%d" spec.name (List.length spec.args);
   let env = merge_env spec.env in
   match connect ~sw ~mgr ~command:spec.command ~args:spec.args ~env () with
   | Error e -> Error e
   | Ok client ->
     (try
-       match initialize client with
+       match initialize client ~client_version with
        | Error e ->
          close client;
          Error e

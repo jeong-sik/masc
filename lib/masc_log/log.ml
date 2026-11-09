@@ -775,7 +775,9 @@ module Ring = struct
      matching is allowed: decoding wire where a string is all that remains
      (the same rule RFC-0371 §6.1(3) applies to rehydrated provider wire).
      The signal row's text comes from a format string, so the literal
-     "Received SIGTERM" does not appear at its emission site. *)
+     "Received SIGTERM" does not appear at its emission site. If the JSONL
+     sink writes the kind, restored rows carry it and this function goes
+     away. *)
   let classify_restored_diagnostic (e : entry) : entry =
     match e.diagnostic_kind with
     | Some _ -> e

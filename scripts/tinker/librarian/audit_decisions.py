@@ -24,11 +24,12 @@ request on that memory for any target. When the judge keeps the fact, the drop
 stays wrong, also when its memory leaves scoring for another drop:
 `wrong_outside` counts it against the target that made it.
 
-The judge gets one folder, JUDGE_DIR, and writes its decisions there. Beside the
-key, JUDGE_FILES records the sha256 of each file the folder was given.
-`judge_decisions` reads the decisions only while those files are unchanged and
-the rules copy is the checkout's rules, so a judge cannot decide under rules it
-rewrote.
+The judge gets one folder, JUDGE_DIR, decides in that folder itself and writes
+its decisions there. Beside the key, JUDGE_FILES records the sha256 of each
+GIVEN file. `judge_decisions` reads the decisions only while those files are
+unchanged and the rules copy is the checkout's rules, so a judge cannot decide
+under rules it rewrote. The cases are written once: `e_synth_audit.write_cases`
+refuses a folder that already holds decisions.
 """
 
 from __future__ import annotations
@@ -49,7 +50,10 @@ FACT_VERBS = frozenset({"keep", "drop", "superseded"})
 JUDGE_DIR = "judge"
 # The rules the judging text names, by repository path. The judge's folder holds a copy at that path.
 RULES = Path("config") / "prompts" / "librarian.md"
-# Beside the key: the sha256 of each file the judge's folder was given.
+# The files the judge's folder is given; the judge writes DECISIONS next to them.
+GIVEN = ("cases.jsonl", "judge.md", RULES.as_posix())
+DECISIONS = "decisions.jsonl"
+# Beside the key: the sha256 of each GIVEN file.
 JUDGE_FILES = "judge-files.json"
 
 
@@ -61,22 +65,25 @@ def file_sha256(path: Path) -> str | None:
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
 
 
-def record_judge_files(folder: Path, names: list[str]) -> None:
-    """Write <folder>/JUDGE_FILES: the sha256 of each named file in <folder>/JUDGE_DIR."""
-    files = {name: file_sha256(folder / JUDGE_DIR / name) for name in sorted(names)}
+def record_judge_files(folder: Path) -> None:
+    """Write <folder>/JUDGE_FILES: the sha256 of each GIVEN file in <folder>/JUDGE_DIR."""
+    files = {name: file_sha256(folder / JUDGE_DIR / name) for name in sorted(GIVEN)}
     (folder / JUDGE_FILES).write_text(json.dumps(files, indent=1) + "\n", encoding="utf-8")
 
 
 def judge_decisions(folder: Path, rules: Path) -> tuple[dict[str, str], list[JsonObject]]:
-    """The sha256 of the files the judge was given, and its decisions. SystemExit when one of those
-    files changed after the cases were written, or the rules copy is not `rules`."""
+    """The sha256 of the files the judge was given, and its decisions. SystemExit when the record
+    names other files than GIVEN, one of them changed after the cases were written, or the rules
+    copy is not `rules`."""
     files = cast(dict[str, str], json.loads((folder / JUDGE_FILES).read_text(encoding="utf-8")))
+    if set(files) != set(GIVEN):
+        raise SystemExit(f"{folder / JUDGE_FILES} records other files than the judge is given")
     changed = sorted(name for name, sha in files.items() if file_sha256(folder / JUDGE_DIR / name) != sha)
     if changed:
         raise SystemExit(f"{folder / JUDGE_DIR}: {', '.join(changed)} changed after the cases were written")
-    if files.get(RULES.as_posix()) != file_sha256(rules):
+    if files[RULES.as_posix()] != file_sha256(rules):
         raise SystemExit(f"{folder / JUDGE_DIR}: its {RULES} is not {rules}")
-    return files, read_jsonl(folder / JUDGE_DIR / "decisions.jsonl")
+    return files, read_jsonl(folder / JUDGE_DIR / DECISIONS)
 
 
 def memory_of(item_id: str) -> str:

@@ -434,7 +434,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
            (Standalone_lane.to_id lane.sl_lane))
     ; candidate_items "1차 HTTP 후보 (순서대로 시도)" lane.sl_admitted_slots
     ; candidate_items "2차 CLI 후보 (HTTP 모두 실패 시)" lane.sl_cli_slots
-    ; candidate_items ~tone:Page_line.Attention "실행 전 탈락한 후보"
+    ; candidate_items ~tone:Page_line.Attention "탈락 후보"
         lane.sl_dropped_slots
     ]
   in

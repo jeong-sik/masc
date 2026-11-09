@@ -1723,21 +1723,26 @@ let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list
   let next_entries =
     match next_parts with [] -> [ dim "nothing announced" ] | _ -> [ join next_parts ]
   in
-  (* The feed takes the lines the rest of the page leaves in the window. With
-     none left it tells nothing, not even that a source failed, so an empty past
-     says "nothing recorded" only where the feed had room to say more. *)
+  (* Source cautions in the feed precede the optional trail and flags. Keep
+     the current activity and next reading, then let the feed use its own
+     caution-first policy before filling spare rows with older detail. *)
+  let primary_now = List.take 1 now_entries in
   let feed_room =
-    body_rows - List.length past_head - List.length past_tail - List.length now_entries
-    - List.length next_entries
+    max 0 (body_rows - List.length past_head - List.length primary_now
+           - List.length next_entries)
   in
   let feed =
     Masc_tui_render_keeper_story.feed_lines state ~now ~max_lines:feed_room ~keeper_name
   in
+  let feed =
+    if feed = [] && past_head = [] && past_tail = [] && feed_room > 0
+    then [ dim "nothing recorded" ] else feed in
+  let detail_room = max 0 (feed_room - List.length feed) in
+  let past_tail = List.take detail_room past_tail in
+  let now_entries = primary_now
+    @ List.take (max 0 (detail_room - List.length past_tail)) (List.drop 1 now_entries) in
   let past_entries = past_head @ feed @ past_tail in
-  labelled_lines "◂ past"
-    (match past_entries with
-     | [] when feed_room > 0 -> [ dim "nothing recorded" ]
-     | [] | _ :: _ -> past_entries)
+  labelled_lines "◂ past" past_entries
   @ labelled_lines "● now" now_entries
   @ labelled_lines "▹ next" next_entries
 
@@ -2051,6 +2056,44 @@ let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
             (result ^ " · " ^ keeper_plain_turn_record state ~now ~keeper_name:name)
         @ [""] @ List.map (fun line -> Theme.info () ^ fit line ^ Ansi.reset) routes
 
+let keeper_pulse_headers (state : state) ~now ~inner ~(grid : Grid.t) ~selected_row all_rows =
+  let selected = Option.map (fun row -> row.Keeper_list_model.keeper.Tui_decode.k_name) selected_row in
+  let header = Masc_tui_keeper_strip.header ~now ~cells:inner
+      ~view:state.keeper_list_view ~selected
+      ~age:(fun row -> (Masc_tui_keeper_axis.outside state ~now
+          ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name).age) all_rows in
+  header :: (match state.keeper_list_view with
+  | Keeper_list_model.By_age -> []
+  | Keeper_list_model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
+      let fleet = Masc_tui_keeper_strip.fleet_cells ~now ~grid
+          ~wakes:(fun row -> Masc_tui_keeper_axis.wake_strip state ~now
+            ~ahead:grid.side_cells ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name) all_rows in
+      [(grid_line grid
+        { gutter = String.make Grid.gutter_cells ' '; name = fit_width fleet.name grid.name_cells
+        ; pulse = fleet.pulse; now_cell = still_row grid_blank_now; strip = fleet.strip
+        ; due = fit_width fleet.due Grid.due_cells; right = String.make grid.mem_cells ' ' }).text])
+
+let keeper_selected_summary (state : state) ~now (row : Keeper_list_model.row) =
+  let keeper_name = row.keeper.Tui_decode.k_name in
+  let now_cell = keeper_now_cell ~ko:(state.ui_language = Lang_ko)
+      ~padded:false ~frame:state.activity_frame row in
+  let text = Masc_tui_keeper_strip.selected_summary ~now
+    ~activity_cell:now_cell.text
+    ~next_run:(match state.schedules_agenda_error with
+      | Some _ -> Masc_tui_keeper_next_run.Unknown
+      | None -> Masc_tui_keeper_axis.next_run state ~keeper_name)
+    ~recurrence:(Masc_tui_keeper_axis.next_recurrence state ~keeper_name)
+    ~memory:(keeper_memory_reading state row) row in
+  { text; motion = shift_motion
+      ~prefix:(Terminal_text.single_line keeper_name ^ " ") now_cell.motion }
+
+let draw_keeper_selected_summary buf ~cols summary =
+  (match summary.motion with
+   | Masc_tui_answering.Still -> ()
+   | Moving through_cell -> Render_schedule.Activity_tick.note_motion_if_visible
+       ~text:summary.text ~width:(framed_inner_width cols) ~through_cell);
+  box_line buf cols summary.text
+
 let keeper_plain_fleet_lines (state : state) ~now ~inner =
   let text ko en = ui_text state ~ko ~en in
   let warning value = Theme.warn () ^ "  " ^ value ^ Ansi.reset in
@@ -2073,7 +2116,8 @@ let keeper_plain_fleet_lines (state : state) ~now ~inner =
       let clauses = lead :: Option.to_list (Masc_tui_fleet_line.blocker_text fleet)
         @ [text
              (Printf.sprintf "실행 %d/%d" fleet.fs_running_count fleet.fs_bootable_count)
-             (Printf.sprintf "running %d/%d" fleet.fs_running_count fleet.fs_bootable_count)]
+             (Printf.sprintf "running %d/%d" fleet.fs_running_count fleet.fs_bootable_count)
+           ; Masc_tui_fleet_line.proactive_text fleet ]
       in
       let tone = match trouble with
         | Some _ -> Theme.warn ()
@@ -2085,7 +2129,7 @@ let keeper_plain_fleet_lines (state : state) ~now ~inner =
       @ Option.to_list (Option.map
           (fun trouble -> warning (Masc_tui_fleet_line.trouble_text ~now trouble)) trouble)
 
-let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading =
+let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading ~pulse_headers =
   let text ko en = ui_text state ~ko ~en in
   let heading = screen_title (text " MASC Keepers · 일과 도움" " MASC Keepers · work and help") in
   let badge = connection_badge state in
@@ -2138,9 +2182,10 @@ let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading =
    ^ heading ^ String.make gap ' ' ^ badge]
   @ keeper_plain_fleet_lines state ~now ~inner
   @ errors @ roster @ waiting
+  @ [keeper_view_tabs ~cols state.keeper_list_view]
+  @ pulse_headers
   @ Option.to_list (Option.map (warning (text "보기 설정: " "view preferences: ")) state.keeper_list_preference_notice)
   @ Option.to_list (local_source_pending_note state Local_keepers)
-  @ [keeper_view_tabs ~cols state.keeper_list_view]
 
 type keeper_plain_projection =
   { kpp_headers : string list
@@ -2155,6 +2200,7 @@ type keeper_plain_projection =
   ; kpp_count : int
   ; kpp_density : Keeper_list_model.density
   ; kpp_selected_reading : Keeper_control.reading option
+  ; kpp_selected_summary : keeper_primary_row option
   }
 
 let keeper_plain_entry_height density = function
@@ -2182,16 +2228,18 @@ let keeper_plain_projection (state : state) ~terminal_rows ~cols ~now =
   let detail = keeper_plain_detail_lines state ~now
       ~width:(Option.value detail_width ~default:inner) ~compact:(not side_by_side) selected_row in
   let list_floor = 1 + List.fold_left max 1 desired_heights + (if List.length entries > 1 then 1 else 0) in
-  let headers = keeper_plain_headers state ~now ~cols ~inner ~selected_reading in
+  let selected_summary = match state.keeper_story, selected_row with
+    | None, Some row when rows - 1 - 2 > list_floor -> Some (keeper_selected_summary state ~now row)
+    | (Some _ | None), (Some _ | None) -> None in
+  let summary_rows = match selected_summary with Some _ -> 1 | None -> 0 in
+  let pulse_headers = keeper_pulse_headers state ~now ~inner ~grid:(Grid.layout ~cols:inner)
+      ~selected_row reading.klr_all_rows in
+  let headers = keeper_plain_headers state ~now ~cols ~inner ~selected_reading ~pulse_headers in
   (* A long list of failed reads must not evict the selectable Keeper or the
-     action footer. Reserve the selected card and a useful list first, then
-     fold the header. A shorter terminal yields detail before the primary row.
-     The retained-reading qualifier stays at the start of the title. *)
-  let wanted_body = match detail_width with
-    | Some _ -> max list_floor (List.length detail)
-    | None -> list_floor + (if detail = [] then 0 else 1 + List.length detail)
-  in
-  let body_floor = min wanted_body (max 1 (rows - 1 - 2 - 1)) in
+     action footer. Keep a useful list and its selected summary first; source
+     errors and Pulse headers then take rows before optional card detail and
+     preference metadata. The title still qualifies retained readings. *)
+  let body_floor = min (list_floor + summary_rows) (max 1 (rows - 1 - 2 - 1)) in
   let header_budget = max 0 (rows - 1 - 2 - body_floor) in
   let headers =
     if List.length headers <= header_budget then headers
@@ -2208,7 +2256,7 @@ let keeper_plain_projection (state : state) ~terminal_rows ~cols ~now =
   in
   (* The initial blank and the divider/footer have the same ownership as the
      axis renderer. Both keyboard paging and drawing use this allocation. *)
-  let body_rows = max 0 (rows - 1 - List.length headers - 2) in
+  let body_rows = max 0 (rows - 1 - List.length headers - 2 - summary_rows) in
   let detail_budget = match detail_width with
     | Some _ -> body_rows
     | None ->
@@ -2242,7 +2290,7 @@ let keeper_plain_projection (state : state) ~terminal_rows ~cols ~now =
   ; kpp_window = List.take count (List.drop scroll entries); kpp_scroll = scroll
   ; kpp_overflow = overflowing; kpp_count = List.length reading.klr_rows
   ; kpp_density = density
-  ; kpp_selected_reading = selected_reading }
+  ; kpp_selected_reading = selected_reading; kpp_selected_summary = selected_summary }
 
 let keeper_plain_page_rows state ~terminal_rows ~cols =
   match state.keeper_list_view, state.keeper_story with
@@ -2338,6 +2386,7 @@ let render_keeper_plain (state : state) =
            box_line buf cols (fit_width left projection.kpp_list_width ^ Theme.recede () ^ " │ " ^ Ansi.reset
                               ^ fit_width right detail_width))
          roster);
+  Option.iter (draw_keeper_selected_summary buf ~cols) projection.kpp_selected_summary;
   box_divider buf cols;
   Buffer.add_string buf
     (footer_line state ~status:(keeper_action_status state) ~max_cells:cols
@@ -2398,21 +2447,8 @@ let render_keeper_axes (state : state) =
   in
   box_line buf cols (heading ^ String.make gap ' ' ^ badge);
   box_line buf cols (keeper_view_tabs ~cols state.keeper_list_view);
-  let selected_name = Option.map (fun row -> row.Keeper_list_model.keeper.Tui_decode.k_name) selected_row in
-  box_line buf cols (Masc_tui_keeper_strip.header ~now:now_unix ~cells:inner
-    ~view:state.keeper_list_view ~selected:selected_name
-    ~age:(fun row -> (Masc_tui_keeper_axis.outside state ~now:now_unix
-        ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name).age) all_rows);
-  (match state.keeper_list_view with
-   | Keeper_list_model.By_age -> ()
-   | Keeper_list_model.(Plain | By_state | By_cause | By_time | By_memory | By_runtime | Day_wall) ->
-       let fleet = Masc_tui_keeper_strip.fleet_cells ~now:now_unix ~grid
-           ~wakes:(fun row -> Masc_tui_keeper_axis.wake_strip state ~now:now_unix
-             ~ahead:grid.side_cells ~keeper_name:row.Keeper_list_model.keeper.Tui_decode.k_name) all_rows in
-       box_line buf cols ((grid_line grid
-         { gutter = String.make Grid.gutter_cells ' '; name = fit_width fleet.name grid.name_cells
-         ; pulse = fleet.pulse; now_cell = still_row grid_blank_now; strip = fleet.strip
-         ; due = fit_width fleet.due Grid.due_cells; right = String.make grid.mem_cells ' ' }).text));
+  List.iter (box_line buf cols)
+    (keeper_pulse_headers state ~now:now_unix ~inner ~grid ~selected_row all_rows);
   Option.iter
     (fun message -> box_line buf cols
       (Theme.warn () ^ "  preferences: " ^ Terminal_text.single_line message ^ Ansi.reset))
@@ -2757,17 +2793,7 @@ let render_keeper_axes (state : state) =
   in
   let selected_summary = match state.keeper_story, selected_row with
     | None, Some row when available_rows > 0 ->
-        let keeper_name = row.Keeper_list_model.keeper.Tui_decode.k_name in
-        let now_cell = keeper_now_cell ~padded:false ~frame:state.activity_frame row in
-        let text = Masc_tui_keeper_strip.selected_summary ~now:now_unix
-          ~activity_cell:now_cell.text
-          ~next_run:(match state.schedules_agenda_error with
-            | Some _ -> Masc_tui_keeper_next_run.Unknown
-            | None -> Masc_tui_keeper_axis.next_run state ~keeper_name)
-          ~recurrence:(Masc_tui_keeper_axis.next_recurrence state ~keeper_name)
-          ~memory:(keeper_memory_reading state row) row in
-        Some { text; motion = shift_motion
-          ~prefix:(Terminal_text.single_line keeper_name ^ " ") now_cell.motion }
+        Some (keeper_selected_summary state ~now:now_unix row)
     | (Some _ | None), (Some _ | None) -> None in
   let summary_rows = match selected_summary with Some _ -> 1 | None -> 0 in
   let content_rows = max 0 (available_rows - story_rows - summary_rows) in
@@ -2940,12 +2966,7 @@ let render_keeper_axes (state : state) =
       draw_keeper_story buf ~cols ~rows:story_rows ~now:now_unix ~inner state page selected_row)
     state.keeper_story;
 
-  Option.iter (fun summary ->
-    (match summary.motion with
-     | Masc_tui_answering.Still -> ()
-     | Moving through_cell -> Render_schedule.Activity_tick.note_motion_if_visible
-         ~text:summary.text ~width:inner ~through_cell);
-    box_line buf cols summary.text) selected_summary;
+  Option.iter (draw_keeper_selected_summary buf ~cols) selected_summary;
   box_divider buf cols;
   Buffer.add_string buf
     (footer_line state

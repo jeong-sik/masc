@@ -19244,11 +19244,12 @@ let keeper_story_action state key =
       state.keeper_story key
 ;;
 
-(* What a key or a press does to the Story window. Only [Open_detail] leaves
-   the list, so it is the one that needs the mailbox. *)
+(* World selects its own row before opening; it never borrows the Keeper
+   that was under the cursor. Only [Open_detail] leaves the list. *)
 let apply_keeper_story_action state ~mailbox = function
   | Masc_tui_keeper_story.Show page -> state.keeper_story <- Some page
   | Masc_tui_keeper_story.Close -> state.keeper_story <- None
+  | Masc_tui_keeper_story.Open_world -> open_keeper_world state
   | Masc_tui_keeper_story.Open_detail ->
       state.keeper_story <- None;
       Option.iter (open_keeper_detail state ~mailbox) (selected_keeper state)
@@ -39415,7 +39416,7 @@ Use relative paths for resources already held in the package. -->
                 keeper.k_name)
        (* The Story window under the list takes its keys before the list and the
           surface ring do: an open window owns Tab, Esc, [s] and [m] (RFC-0515
-          section 2.5, E15). A closed one takes Enter alone. *)
+          section 2.5, E15). W explicitly selects the World dock. *)
        | Some key
          when state.view = Keepers Keeper_list
               && Option.is_some (keeper_story_action state key) ->
@@ -39530,8 +39531,7 @@ Use relative paths for resources already held in the package. -->
             | Connectors | Runtime | Config | Code | Tools
             | System_logs -> ())
        | Some k when Masc_tui_keys.opens_keepers ~message_mode k ->
-           state.detail_focus_recovery <- None;
-           transition_keeper_view state (Keepers Keeper_list)
+           goto_surface state ~mailbox:async_messages (Keepers Keeper_list)
        (* Following preserves the source surface; Esc returns to it. *)
        | Some "\x1d" ->
            (match

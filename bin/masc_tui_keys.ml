@@ -596,6 +596,8 @@ let for_surface = function
       :: (b Act "K" "relations" ~help:"browse Keeper-origin requests queued for the selected Keeper")
       :: (b Act "Enter" "story"
             ~help:"open the selected Keeper Story or shared World window; Enter closes its story/world page")
+      :: (b Act "W" "world"
+            ~help:"select shared World and open its dock; outside memory/age, switch to age; lowercase w still wakes a Keeper")
       :: (b Act "Right" "detail" ~help:"keeper detail")
       :: (b Act "Tab / s / m" "pages"
             ~help:"with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window")

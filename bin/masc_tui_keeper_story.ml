@@ -26,6 +26,7 @@ type action =
   | Show of page
   | Close
   | Open_detail
+  | Open_world
 
 (* Enter closes the window on the story page and returns to the story page from
    another. [s] and [m] belong to the window only while it is open: the list
@@ -40,6 +41,7 @@ type action =
 let action_of_key ~selection window key =
   let on_keeper = match selection with Keeper_selected -> true | World_selected | No_selection -> false in
   match window, key with
+  | (None | Some (Story | Schedule | Memory | World)), "W" -> Some Open_world
   | (None | Some (Story | Schedule | Memory)), ("\r" | "\n" | "enter")
       when selection = World_selected -> Some (Show World)
   | Some World, ("\r" | "\n" | "enter" | "esc") -> Some Close

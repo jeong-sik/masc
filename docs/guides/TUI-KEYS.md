@@ -84,6 +84,7 @@ The command palette is `:`.
 | `J` | open the selected Keeper's schedules |
 | `K` | browse Keeper-origin requests queued for the selected Keeper |
 | `Enter` | open the selected Keeper Story or shared World window; Enter closes its story/world page |
+| `W` | select shared World and open its dock; outside memory/age, switch to age; lowercase w still wakes a Keeper |
 | `Right` | keeper detail |
 | `Tab / s / m` | with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window |
 | `c` | chat with the keeper |

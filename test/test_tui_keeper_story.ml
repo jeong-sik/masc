@@ -5,6 +5,7 @@ let action =
     | Story.Show page -> Format.fprintf ppf "Show %s" (Story.tab_label page)
     | Story.Close -> Format.pp_print_string ppf "Close"
     | Story.Open_detail -> Format.pp_print_string ppf "Open_detail"
+    | Story.Open_world -> Format.pp_print_string ppf "Open_world"
   in
   Alcotest.testable pp ( = )
 
@@ -24,7 +25,7 @@ let check_every_page ?(of_key = on_row) ~key ~expected () =
 let shown_by_tab page =
   match on_row (Some page) "\t" with
   | Some (Story.Show next) -> next
-  | Some (Story.Close | Story.Open_detail) | None ->
+  | Some (Story.Close | Story.Open_detail | Story.Open_world) | None ->
       Alcotest.fail "Tab must show a page"
 
 (* The window is a ring of pages: one lap of Tab returns to the first page
@@ -77,9 +78,9 @@ let test_list_keys_pass_through () =
     (fun key -> check_every_page ~key ~expected:None ())
     [ "j"; "k"; "up"; "down"; "left"; "v"; "V"; "o"; "J"; "K"; "w"; "x"; "n"; "t"; "shift-tab" ]
 
-(* A closed window takes Enter and nothing else: s still shuts a Keeper down,
-   Right still opens the detail, Tab and Esc still leave the surface. *)
-let test_closed_window_takes_only_enter () =
+(* Outside the explicit World shortcut, a closed window takes Enter alone:
+   s still shuts a Keeper down, Right opens detail, Tab and Esc leave. *)
+let test_closed_window_leaves_keeper_actions_to_the_list () =
   List.iter
     (fun key ->
        Alcotest.check (Alcotest.option action)
@@ -129,10 +130,22 @@ let test_world_dock_cannot_dispatch_keeper_actions () =
   Alcotest.check (Alcotest.option action) "stale Keeper page cannot open detail for World"
     (Some (Story.Show Story.World)) (world (Some Story.Story) "right")
 
+let test_world_shortcut_is_read_only_without_a_keeper () =
+  List.iter (fun selection ->
+    List.iter (fun window ->
+      let of_key = Story.action_of_key ~selection window in
+      Alcotest.check (Alcotest.option action) "World opens without a Keeper target"
+        (Some Story.Open_world) (of_key "W");
+      Alcotest.check (Alcotest.option action) "wake remains owned by the list"
+        None (of_key "w"))
+      (None :: List.map Option.some (Story.World :: Story.pages)))
+    [Story.Keeper_selected; Story.World_selected; Story.No_selection]
+
 let () =
   Alcotest.run "tui_keeper_story"
     [ ( "story window keys"
-      , [ Alcotest.test_case "World dock cannot dispatch Keeper actions" `Quick test_world_dock_cannot_dispatch_keeper_actions
+      , [ Alcotest.test_case "World shortcut is read-only without a Keeper" `Quick test_world_shortcut_is_read_only_without_a_keeper
+        ; Alcotest.test_case "World dock cannot dispatch Keeper actions" `Quick test_world_dock_cannot_dispatch_keeper_actions
         ; Alcotest.test_case "Tab makes one lap of the pages" `Quick test_tab_makes_one_lap
         ; Alcotest.test_case "s and m name their pages, capitals too" `Quick test_s_and_m_name_their_pages
         ; Alcotest.test_case "Enter closes the story page and returns to it" `Quick
@@ -141,8 +154,8 @@ let () =
             test_escape_closes_and_right_opens_the_detail
         ; Alcotest.test_case "the list's own keys pass through" `Quick
             test_list_keys_pass_through
-        ; Alcotest.test_case "a closed window takes only Enter" `Quick
-            test_closed_window_takes_only_enter
+        ; Alcotest.test_case "a closed window leaves Keeper actions to the list" `Quick
+            test_closed_window_leaves_keeper_actions_to_the_list
         ; Alcotest.test_case "no Keeper under the cursor" `Quick
             test_no_keeper_under_the_cursor
         ] )

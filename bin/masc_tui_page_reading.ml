@@ -35,9 +35,10 @@ let fact_rows ~max_cells ~label_cells ~tone label value =
   let value = Terminal_text.single_line value in
   let styled_label = Theme.recede () ^ label ^ Ansi.reset in
   let styled_value text = tone_style tone ^ text ^ Ansi.reset in
-  let column = max label_cells (Message_layout.display_width label) in
-  let value_cells = max_cells - column - 1 in
-  if value_cells < min_value_cells || widest_word_cells value > value_cells
+  let value_cells = max_cells - label_cells - 1 in
+  if Message_layout.display_width label > label_cells
+     || value_cells < min_value_cells
+     || widest_word_cells value > value_cells
   then
     (Ansi.reset, detail_indent ^ styled_label)
     :: List.map
@@ -46,25 +47,26 @@ let fact_rows ~max_cells ~label_cells ~tone label value =
             ~max_cells:(max 1 (max_cells - String.length detail_indent))
             value)
   else
-    let pad = String.make (column + 1 - Message_layout.display_width label) ' ' in
+    let pad = String.make (label_cells + 1 - Message_layout.display_width label) ' ' in
     match Message_layout.wrap_words ~max_cells:value_cells value with
     | [] -> [ Ansi.reset, detail_indent ^ styled_label ]
     | first :: rest ->
       (Ansi.reset, detail_indent ^ styled_label ^ pad ^ styled_value first)
       :: List.map
            (fun line ->
-              Ansi.reset, detail_indent ^ String.make (column + 1) ' ' ^ styled_value line)
+              Ansi.reset, detail_indent ^ String.make (label_cells + 1) ' ' ^ styled_value line)
            rest
 
 let widest_label_cells lines =
   List.fold_left
     (fun widest -> function
        | Page_line.Fact { label; _ } ->
-         max widest
-           (Message_layout.display_width (Terminal_text.single_line label) + 1)
+         let cells =
+           Message_layout.display_width (Terminal_text.single_line label) + 1
+         in
+         if cells <= label_cells_cap then max widest cells else widest
        | Page_line.Title _ | Page_line.Note _ -> widest)
     0 lines
-  |> min label_cells_cap
 
 let rows ?label_cells ~max_cells (lines : Page_line.t list) =
   let label_cells =

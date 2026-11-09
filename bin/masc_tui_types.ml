@@ -4837,6 +4837,10 @@ module Surface_read_order : sig
       the enclosing collector. A superseded dataset leaves the state intact. *)
   val owns_dataset : t -> request -> dataset -> bool
   val pending_dataset : t -> dataset -> bool
+  val pending_dataset_age : t -> dataset -> int64 option
+  (** How long the read owning this dataset has been running, monotonic ns.
+      [None] when the dataset is not pending. The pending flag alone cannot
+      tell a pane's ordinary poll from a stalled one; the age can. *)
   val finish : t -> request -> t
   val invalidate : t -> t
   val pending : needs:surface_needs -> t -> source list
@@ -4923,6 +4927,10 @@ end = struct
   let take current request = release_datasets current request, owned current request
   let owns_dataset current request dataset = List.mem dataset (owned current request)
   let pending_dataset current dataset = List.mem_assoc dataset current.owners
+  let pending_dataset_age current dataset =
+    Option.map
+      (fun (request : request) -> Int64.sub (Mtime_clock.elapsed_ns ()) request.started_ns)
+      (List.assoc_opt dataset current.owners)
   let take_dataset current request dataset =
     if owns_dataset current request dataset then
       {current with owners=List.filter (fun (candidate, _) -> candidate <> dataset) current.owners}, true

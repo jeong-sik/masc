@@ -1190,6 +1190,8 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
            @ Planning_detail.body ~width goal.pg_proof goal.pg_last_review_note)
   in
   let measurement = planning_measurement_lines state goal in
+  let criterion_review = Planning_detail.criterion_review_lines ~width
+    ~ko:(state.ui_language = Lang_ko) goal.pg_criterion_review in
   let timeline = Planning_detail.timeline ~width ~goal_id:goal.pg_id state.goal_timeline in
   let candle =
     let open Candle_goal_observation in
@@ -1296,9 +1298,9 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
      long event list wedging itself between them. *)
   let proof =
     (match confirmation with
-     | `Inspect Masc_tui_fetched.Absent -> measurement @ confirmation_rows @ timeline
+     | `Inspect Masc_tui_fetched.Absent -> criterion_review @ measurement @ confirmation_rows @ timeline
      | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
-         confirmation_rows @ measurement) in
+         confirmation_rows @ criterion_review @ measurement) in
   let wrapped_proof = planning_proof_rows ~width proof in
   let before_candle, after_candle = match confirmation with
     | `Inspect Masc_tui_fetched.Absent ->

@@ -54,7 +54,7 @@ cd masc
 git config core.hooksPath .githooks       # pre-commit and pre-push guards
 
 opam init --bare                         # initialize a fresh opam installation
-opam switch create . ocaml-base-compiler.5.5.1 --no-install
+opam switch create . ocaml-base-compiler.5.5.2 --no-install
 eval "$(opam env)"
 scripts/opam-pin-external-deps.sh         # pin external OCaml dependencies
 opam install ./masc.opam --deps-only --locked --with-test

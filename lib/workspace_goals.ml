@@ -253,6 +253,7 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
       Goal_verification.load_records_by_goal_id_authoritative ctx.config
     in
     let measurements = Goal_measurement.load ctx.config in
+    let criterion_review_for_goal = Goal_criterion_review.projector (Goal_criterion_review.load ctx.config) in
     let goal_json (goal : Goal_store.goal) =
       let verification =
         match records_by_goal_id with
@@ -266,6 +267,7 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.r
       match Goal_store.goal_to_yojson goal with
       | `Assoc fields ->
           `Assoc (fields @ [ "verification", verification
+                           ; "criterion_review", criterion_review_for_goal goal
                            ; "measurement", Goal_measurement.projection measurements goal ])
       | json -> json
     in
@@ -349,6 +351,18 @@ let handle_goal_upsert_validated ~tool_name ~start_time (ctx : context) args : T
           error_result_typed ~tool_name ~start_time ~code:Internal_error
             (Goal_store.write_error_to_string error)
         | Ok (goal, action, events) ->
+          let criterion_review = Goal_criterion_review.request
+            ~expected_criterion:(Goal_store.criterion_of_goal goal)
+            ctx.config ~goal_id:goal.id ~actor:ctx.agent_name ~retry:true in
+          (match criterion_review with
+           | Error error -> Log.Misc.warn
+               "goal criterion request deferred after Goal commit goal_id=%s detail=%s"
+               goal.id (Goal_criterion_review.error_to_string error)
+           | Ok _ ->
+             (try (Atomic.get Workspace_hooks.goal_criterion_review_pending_fn) ctx.config ~goal_id:goal.id with
+              | Eio.Cancel.Cancelled _ as exn -> raise exn
+              | exn -> Log.Misc.warn "goal criterion wake failed after durable request goal_id=%s detail=%s"
+                  goal.id (Printexc.to_string exn)));
           let action_name = match action with
             | `created -> "created" | `updated _ -> "updated" in
           let delivery = Goal_store.flush_pending_events ctx.config in
@@ -363,6 +377,8 @@ let handle_goal_upsert_validated ~tool_name ~start_time (ctx : context) args : T
             [ "action", `String action_name
             ; "goal_id", `String goal.id
             ; "goal", Goal_store.goal_to_yojson goal
+            ; "criterion_review", Goal_criterion_review.projection
+                (Result.map (fun record -> [record]) criterion_review) goal
             ; "event_recordings", `List
                 (List.map (goal_event_recording_to_yojson delivery) events)
             ; ( "task_goal_id_example"

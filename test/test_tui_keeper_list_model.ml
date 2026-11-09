@@ -677,6 +677,19 @@ let test_group_counts () =
      = { Model.attention_rows = 1; failing_rows = 1; active_rows = 1; waiting_rows = 1
        ; inactive_rows = 0; unobserved_rows = 1 })
 
+let test_portrait_shows_only_in_the_two_line_list () =
+  let shows view density = Model.shows_portrait view density in
+  Alcotest.(check bool) "list, two lines" true (shows Model.Plain Model.Two_lines);
+  Alcotest.(check bool) "list, one line" false (shows Model.Plain Model.One_line);
+  List.iter
+    (fun view ->
+      if view <> Model.Plain then
+        List.iter
+          (fun density ->
+            Alcotest.(check bool) (Model.view_label view) false (shows view density))
+          [ Model.One_line; Model.Two_lines ])
+    Model.views
+
 let () =
   Alcotest.run "tui_keeper_list_model"
     [ ( "decisions"
@@ -712,6 +725,8 @@ let () =
             test_day_wall_puts_the_most_failed_half_hours_first
         ; Alcotest.test_case "time, memory and age views follow the outside reading" `Quick
             test_time_memory_and_age_views_follow_the_outside_reading
+        ; Alcotest.test_case "the portrait shows only in the two-line list" `Quick
+            test_portrait_shows_only_in_the_two_line_list
         ] )
     ; ( "stops"
       , [ Alcotest.test_case "each group opens with its heading" `Quick

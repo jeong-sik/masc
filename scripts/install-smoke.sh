@@ -42,6 +42,7 @@ ASSETS=(
   "masc-deployment-preflight-helper-$ARCH"
   "masc-check-runtime-deployment-preflight-$ARCH"
   "masc-exec-ssh-bootstrap-$ARCH"
+  "masc-antigravity-path-hook-$ARCH"
   "masc-dashboard-$ARCH.tar.gz"
   "masc-release-dashboard-bundle-$ARCH.py"
   "masc-runtime-$ARCH.tar.gz"
@@ -120,10 +121,10 @@ case "$ARCH" in
   macos-*) PATH="$(dirname "$(readlink "$prefix/masc")")/python/bin:$PATH"; export PATH ;;
 esac
 
-for a in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deployment-preflight masc-exec-ssh-bootstrap; do
+for a in masc masc-tui masc-deployment-preflight-helper masc-check-runtime-deployment-preflight masc-exec-ssh-bootstrap masc-antigravity-path-hook; do
   [ -x "$prefix/$a" ] || { echo "install-smoke: installer did not place $a" >&2; exit 1; }
 done
-echo "install-smoke: installer placed all five executables"
+echo "install-smoke: installer placed all required executables"
 "$prefix/masc-tui" --help > "$work/tui-help.txt"
 "$prefix/masc-exec-ssh-bootstrap" --help > "$work/ssh-bootstrap-help.txt"
 grep -q -- '--endpoint' "$work/ssh-bootstrap-help.txt"

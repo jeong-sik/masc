@@ -1,0 +1,75 @@
+name: Auth route transport parity (RFC-0512)
+
+# Builds the server and the route inventory, probes every route over HTTP/1.1
+# and over HTTP/2 (h2c) with scripts/auth-route-baseline/run.sh in the default
+# and the strict configuration, and fails when a route answers something other
+# than what the one route table predicts (RFC-0512): a plain route answers the
+# same status on both transports. The ordinary GET /ws probe serves discovery
+# on both transports; WebSocket-only routes answer 426 on HTTP/2, which has no
+# upgrade (D5). Actual HTTP/1.1 Upgrade attempts are separate extra.json cases.
+# A probe without an answer is a finding too, and a
+# run whose server stopped part-way fails instead of passing with fewer routes.
+# extra.json (dev_token per transport) is not compared. Runs on demand;
+# docs/evidence keeps the result of a run, and #50192 asked for a repeatable
+# way to produce it.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  parity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Dune build cache location
+        run: echo "DUNE_CACHE_ROOT=$RUNNER_TEMP/masc-dune-cache-pr" >> "$GITHUB_ENV"
+
+      - uses: ./.github/actions/setup-ocaml-toolchain
+      - uses: ./.github/actions/pin-ocaml-deps
+      - uses: ./.github/actions/install-ocaml-deps
+        with:
+          install-flags: --with-test
+          os-packages: curl lsof
+
+      - name: Reuse Dune build artifacts
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/masc-dune-cache-pr
+          key: pr-dune-v1-${{ runner.os }}-${{ hashFiles('dune-project', '**/dune', '*.opam') }}-${{ github.sha }}
+          restore-keys: |
+            pr-dune-v1-${{ runner.os }}-${{ hashFiles('dune-project', '**/dune', '*.opam') }}-
+            pr-dune-v1-${{ runner.os }}-
+
+      - name: Build the server and the route inventory
+        run: opam exec -- dune build --root . bin/main_eio.exe tools/auth_route_inventory/main.exe
+
+      - name: Probe every route over both transports (default configuration)
+        run: |
+          scripts/auth-route-baseline/run.sh \
+            _build/default/bin/main_eio.exe _build/default/tools/auth_route_inventory/main.exe \
+            18935 "$RUNNER_TEMP/a1-default" "$RUNNER_TEMP/out/default"
+
+      - name: Probe every route over both transports (strict configuration)
+        run: |
+          scripts/auth-route-baseline/run.sh \
+            _build/default/bin/main_eio.exe _build/default/tools/auth_route_inventory/main.exe \
+            18936 "$RUNNER_TEMP/a1-strict" "$RUNNER_TEMP/out/strict" MASC_HTTP_AUTH_STRICT=true
+
+      - name: Transport findings (0 expected; distinguish discovery from WebSocket-only routes)
+        shell: bash
+        run: python3 scripts/auth-route-baseline/transport_diff.py "$RUNNER_TEMP/out" | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the probe results
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: auth-route-parity
+          path: ${{ runner.temp }}/out
+          if-no-files-found: ignore

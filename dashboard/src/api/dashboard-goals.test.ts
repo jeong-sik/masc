@@ -708,3 +708,33 @@ describe('Goal–Task link source unavailable', () => {
     await expect(fetch()).rejects.toThrow('primary registry is missing')
   })
 })
+
+
+describe('creation criterion review observations', () => {
+  it.each(['pending', 'execution_pending', 'execution_unknown', 'judgment_pending', 'deferred', 'viable', 'needs_revision', 'superseded'])(
+    'preserves %s separately from the Goal lifecycle', async state => {
+      const review = { state, criterion_revision: 'revision-current', request_id: 'criterion-request-1',
+        reason: state === 'viable' || state === 'needs_revision' ? 'actual reviewer reason' : null,
+        detail: state === 'execution_unknown' ? 'execution receipt was lost' : null }
+      const goal = validNode('criterion-goal', 'Goal', { criterion_revision: 'revision-current', criterion_review: review })
+      getMock.mockResolvedValueOnce({ approval_queue_state: { state: 'ready' }, tree: [goal], summary: emptySummary() })
+      const tree = await fetchDashboardGoalsTree()
+      expect(tree.tree[0]?.criterion_review).toEqual(review)
+      expect(tree.tree[0]?.phase).toBe('executing')
+      getMock.mockResolvedValueOnce({ approval_queue_state: { state: 'ready' }, goal, linked_tasks: [], linked_keepers: [], approvals: [], execution_receipts: [], timeline: [] })
+      expect((await fetchDashboardGoalDetail('criterion-goal')).goal.criterion_review).toEqual(review)
+    },
+  )
+
+  it('does not turn an absent, malformed, or stale review into viability or unchecked', async () => {
+    for (const review of [undefined, { state: 'unknown' }, { state: 'unavailable', detail: 'ledger unreadable' },
+      { state: 'viable', criterion_revision: 'old', request_id: 'old-request', reason: 'old verdict', detail: null },
+      { state: 'viable', criterion_revision: 'revision-current', request_id: 'request', reason: '', detail: null }]) {
+      getMock.mockResolvedValueOnce({ approval_queue_state: { state: 'ready' }, tree: [validNode('criterion-goal', 'Goal', {
+        criterion_revision: 'revision-current', criterion_review: review })], summary: emptySummary() })
+      expect((await fetchDashboardGoalsTree()).tree[0]?.criterion_review?.state).toBe('unavailable')
+    }
+    getMock.mockResolvedValueOnce({ approval_queue_state: { state: 'ready' }, tree: [validNode('criterion-goal', 'Goal', { criterion_review: { state: 'unchecked' } })], summary: emptySummary() })
+    expect((await fetchDashboardGoalsTree()).tree[0]?.criterion_review).toEqual({ state: 'unchecked' })
+  })
+})

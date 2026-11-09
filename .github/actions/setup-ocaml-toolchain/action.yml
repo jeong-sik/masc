@@ -3,9 +3,9 @@ description: Shared OCaml toolchain bootstrap, one opam switch per runner OS, ca
 
 inputs:
   ocaml-compiler:
-    description: OCaml compiler version (MASC supports exactly 5.5.1)
+    description: OCaml compiler version (MASC supports exactly 5.5.2)
     required: false
-    default: "5.5.1"
+    default: "5.5.2"
   cache-prefix:
     description: Prefix for the OCaml toolchain cache key
     required: false
@@ -19,8 +19,8 @@ runs:
       env:
         OCAML_COMPILER_INPUT: ${{ inputs.ocaml-compiler }}
       run: |
-        if [[ "${OCAML_COMPILER_INPUT}" != "5.5.1" ]]; then
-          echo "Unsupported ocaml-compiler input: ${OCAML_COMPILER_INPUT}; MASC requires exactly 5.5.1" >&2
+        if [[ "${OCAML_COMPILER_INPUT}" != "5.5.2" ]]; then
+          echo "Unsupported ocaml-compiler input: ${OCAML_COMPILER_INPUT}; MASC requires exactly 5.5.2" >&2
           exit 1
         fi
 
@@ -100,7 +100,7 @@ runs:
         # and its output is empty.
         OPAM_CACHE_EXACT_HIT="${OPAM_CACHE_EXACT_HIT:-${OPAM_CACHE_EXACT_HIT_STORE:-}}"
 
-        compiler_pkg="ocaml-base-compiler.5.5.1"
+        compiler_pkg="ocaml-base-compiler.${OCAML_COMPILER_INPUT}"
 
         switch_name="ci-${OCAML_COMPILER_INPUT//[^A-Za-z0-9]/-}"
 

@@ -69,13 +69,13 @@ sed -n 143,208p config/prompts/librarian.md | rg -o "$P" | wc -l  # 유지·삭�
 | --- | --- |
 | 새 사실 (`new`) | 더한다 |
 | 교정 (`corrects`) | 더하고, 교정 대상이 기억에서 빠진다 (`dropped` 또는 `absorbs`) |
-| 바꿔 말하기 (`restates`) | 더하지 않고 원래 fact가 남는다. 또는 후보가 가리킨 최종 claim이 원래 fact를 흡수한다 |
+| 바꿔 말하기 (`restates`) | 더하지 않았으면 원래 fact가 남거나 최종 claim에 흡수된다. 더했으면 그 claim이 원래 fact를 흡수한다 |
 | 일시 상태 (`transient`) | 더하지 않는다 |
 
 판정 단어는 G3가 지금 채점하는 방식이다. 판정이 라벨과 같고 `eval_admission.claim_matches`가 맞아야 한다.
 
 리뷰에서 원래 fact를 지우고 무관한 fact를 가리키는 유효 답을 반례로 확인해, 원래 fact가 남는지도 검사하도록 보완했다.
-`already_represented`가 새 claim을 가리키고 그 claim이 원래 fact를 흡수한 답은 남는 기억이 맞으므로 계속 인정한다.
+원래 fact의 지식이 최종 claim에 흡수됐다면 `already_represented`가 다른 claim을 가리켜도 남는 기억은 맞다. 가리킨 claim이 틀렸다는 것은 판정 단어 점수가 따로 센다.
 같은 고정 하네스와 저장된 답으로 보완 전후를 다시 셌으며, `memory_state.py`의 세 출력은 `outputs.txt`의 해당 줄과도 모두 같았다. 모델은 부르지 않았다.
 
 | 답 | 유효 | 판정 단어 | 남는 기억 |
@@ -179,7 +179,7 @@ MASC는 incorporated나 already_represented 후보가 지지할 때만 기억 �
 | 파일 | sha256 | 설명 |
 | --- | --- | --- |
 | `stored.py` | `acc5ccdc…` | 다섯 스크립트가 같이 쓰는 run 경로, 라벨 읽기, 후보 종류 정의 |
-| `memory_state.py` | `88d29a58…` | 남는 기억 채점, 흡수, 심은 낡은 fact, 교정 대상 |
+| `memory_state.py` | `cb989d46…` | 남는 기억 채점, 흡수, 심은 낡은 fact, 교정 대상 |
 | `confusion.py` | `4533bda9…` | 종류별 판정, 일시 상태가 가리킨 claim, 교사 필터 |
 | `effort_compare.py` | `72abf0de…` | effort 비교와 교사 답이 유효하지 않은 이유 |
 | `reachable_recall.py` | `3ccd2769…` | 계약이 허락하는 최고 재현율 |

@@ -124,7 +124,7 @@ let has_header name headers =
 let ensure_default_headers headers =
   if has_header "user-agent" headers
   then headers
-  else ("User-Agent", "masc/0.31.0") :: headers
+  else ("User-Agent", "masc/" ^ Build_version.current) :: headers
 ;;
 
 let post_sync ?clock ?timeout_sec ~url ~headers ~body () =

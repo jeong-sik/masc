@@ -59,3 +59,9 @@ files at that combined source; it remains parsing-only with 5.5.1. The five
 actual-MCP regression registrations (including post-append uncertainty) and the
 transcript slot regression were authored, not executed. The earlier browser
 source files remain byte-identical; these responses do not enlarge its proof.
+
+Final main rebase: `postrebase-compatibility.json` compares the 38 OCaml file
+hashes against the earlier parse receipt. Only an upstream Execute allowed-field
+expectation changed in the inline fixture file; that file was parsed again.
+Auth optional-field decoding changed upstream without changing the interfaces
+used here. These are source/parse observations, with no additional runtime proof.

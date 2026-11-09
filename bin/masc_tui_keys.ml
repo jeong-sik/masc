@@ -389,12 +389,8 @@ let tools_refresh =
 (* The views [v] walks, named from the walk itself so the sheet cannot list
    one the key skips. *)
 let keeper_list_view_names =
-  let first = Masc_tui_keeper_list_model.Plain in
-  let rec walk view =
-    let next = Masc_tui_keeper_list_model.next_view view in
-    view :: (if next = first then [] else walk next)
-  in
-  String.concat " / " (List.map Masc_tui_keeper_list_model.view_label (walk first))
+  String.concat " / "
+    (List.map Masc_tui_keeper_list_model.view_label Masc_tui_keeper_list_model.views)
 
 let keeper_actions =
   [ b Act "c" "chat" ~help:"chat with the keeper"
@@ -587,9 +583,14 @@ let for_surface = function
       ; b Meta "q" "quit"
       ]
   | Keepers Keeper_list ->
-      (b Navigate "j/k" "move" ~help:"move the roster cursor")
-      :: (b Navigate "v" "view" ~help:("cycle " ^ keeper_list_view_names))
+      (b Navigate "j/k" "move"
+         ~help:"move the roster cursor; a grouping view also stops on each group heading")
+      :: (b Navigate "v" "view"
+            ~help:("cycle " ^ keeper_list_view_names ^ "; a press on a name opens that view"))
       :: (b Navigate "V" "density" ~help:"one or two lines per Keeper")
+      :: (b Navigate "[ / ]" "group"
+            ~help:"jump to the previous or next group heading in a grouping view")
+      :: (b Navigate "Left / Right" "fold" ~help:"on a group heading, fold or unfold its rows")
       :: (b Navigate "o" "order" ~help:"cycle priority / recent / oldest / activity / name")
       :: (b Act "J" "jobs" ~help:"open the selected Keeper's schedules")
       :: (b Act "K" "relations" ~help:"browse Keeper-origin requests queued for the selected Keeper")

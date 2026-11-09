@@ -748,7 +748,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
        candidate. *)
     (match
        Runtime_account_access.authorize Runtime_account_access.Operator_call
-         (Runtime_account_access.seal execution.account_home)
+         execution.account_home
      with
      | Error refusal -> Error (Setup_failure (Runtime_account_access.refusal_to_string refusal))
      | Ok account ->
@@ -807,7 +807,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
        refusal starts no process and observes nothing of the candidate. *)
     (match
        Runtime_account_access.authorize Runtime_account_access.Operator_call
-         (Runtime_account_access.seal execution.account_home)
+         execution.account_home
      with
      | Error refusal -> Error (Setup_failure (Runtime_account_access.refusal_to_string refusal))
      | Ok account ->

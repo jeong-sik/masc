@@ -281,9 +281,7 @@ let account_request walk_owner ~runtime_id =
    made before anything is sent, so it is the non-rotating local refusal of a
    provider_config_transform: no provider evidence names the candidate. *)
 let authorize_account walk_owner ~runtime_id account =
-  Runtime_account_access.authorize
-    (account_request walk_owner ~runtime_id)
-    (Runtime_account_access.seal account)
+  Runtime_account_access.authorize (account_request walk_owner ~runtime_id) account
   |> Result.map_error (fun refusal ->
     Agent_core.Error.Config
       (Agent_core.Error.InvalidConfig

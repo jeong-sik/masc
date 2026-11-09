@@ -1,0 +1,315 @@
+{
+  "since": "2026-11-08T00:00:00Z",
+  "until": "2026-11-09T05:00:00Z",
+  "sender": "code-reviewer",
+  "family": [
+    "code-reviewer-brother",
+    "code-reviewer-father",
+    "code-reviewer-mother",
+    "code-reviewer-sister",
+    "code-reviewer-uncle"
+  ],
+  "delegations_by_sender": {
+    "code-reviewer": 355,
+    "e-masc-the-leader": 5
+  },
+  "delegations": 340,
+  "picks": {
+    "code-reviewer-sister": 77,
+    "code-reviewer-brother": 73,
+    "code-reviewer-uncle": 73,
+    "code-reviewer-father": 69,
+    "code-reviewer-mother": 48
+  },
+  "actual_wait": {
+    "n": 340,
+    "sum_hours": 4.278,
+    "p50_s": 0.0,
+    "p90_s": 37.1,
+    "max_s": 3763.6,
+    "at_least_60s": 29,
+    "at_least_600s": 5
+  },
+  "best_of_family_wait": {
+    "n": 340,
+    "sum_hours": 0.33,
+    "p50_s": 0.0,
+    "p90_s": 0.0,
+    "max_s": 235.7,
+    "at_least_60s": 8,
+    "at_least_600s": 0
+  },
+  "long_waits": {
+    "count": 29,
+    "hours": 4.114,
+    "count_with_free_alternative": 18,
+    "hours_with_free_alternative": 2.449
+  },
+  "long_wait_rows": [
+    {
+      "operation_id": "kmsg-e0f21e97b98f5d1eccec1a6d1a5f05ca",
+      "created": 1794130383.193347,
+      "target": "code-reviewer-uncle",
+      "wait_s": 78,
+      "free": [
+        "code-reviewer-brother",
+        "code-reviewer-father",
+        "code-reviewer-sister"
+      ]
+    },
+    {
+      "operation_id": "kmsg-4ee7b0ee634383100d5730db7c8ec4cf",
+      "created": 1794146426.551277,
+      "target": "code-reviewer-uncle",
+      "wait_s": 504,
+      "free": [
+        "code-reviewer-brother",
+        "code-reviewer-father",
+        "code-reviewer-mother",
+        "code-reviewer-sister"
+      ]
+    },
+    {
+      "operation_id": "kmsg-e277ec813d50648599d175bab9e2d8dd",
+      "created": 1794147129.108413,
+      "target": "code-reviewer-uncle",
+      "wait_s": 260,
+      "free": [
+        "code-reviewer-father",
+        "code-reviewer-mother",
+        "code-reviewer-sister"
+      ]
+    },
+    {
+      "operation_id": "kmsg-a241ec9db4243a304ca2cd4db718fb2e",
+      "created": 1794152873.902104,
+      "target": "code-reviewer-father",
+      "wait_s": 871,
+      "free": [
+        "code-reviewer-brother",
+        "code-reviewer-mother",
+        "code-reviewer-sister"
+      ]
+    },
+    {
+      "operation_id": "kmsg-fd18502df4bb486b37a8abf50b1849f0",
+      "created": 1794173676.023964,
+      "target": "code-reviewer-father",
+      "wait_s": 99,
+      "free": [
+        "code-reviewer-brother",
+        "code-reviewer-mother"
+      ]
+    },
+    {
+      "operation_id": "kmsg-3981ed0b7f36c0b62276cad6131db216",
+      "created": 1794177913.344797,
+      "target": "code-reviewer-father",
+      "wait_s": 84,
+      "free": [
+        "code-reviewer-brother",
+        "code-reviewer-mother",
+        "code-reviewer-sister"
+      ]
+    },
+    {
+      "operation_id": "kmsg-42fd0620b86f70217e9d929e3b39b2fe",
+      "created": 1794184706.390094,
+      "target": "code-reviewer-mother",
+      "wait_s": 1629,
+      "free": [
+        "code-reviewer-father",
+        "code-reviewer-uncle"
+      ]
+    },
+    {
+      "operation_id": "kmsg-d95e76742486d1a44421911752339ff6",
+      "created": 1794186751.598073,
+      "target": "code-reviewer-mother",
+      "wait_s": 404,
+      "free": []
+    },
+    {
+      "operation_id": "kmsg-65be39007b3e1ef3d93695f183228883",
+      "created": 1794187345.363867,
+      "target": "code-reviewer-uncle",
+      "wait_s": 305,
+      "free": []
+    },
+    {
+      "operation_id": "kmsg-e4bccf034dd99d523b62b1931c82804b",
+      "created": 1794187871.456645,
+      "target": "code-reviewer-sister",
+      "wait_s": 202,
+      "free": []
+    },
+    {
+      "operation_id": "kmsg-d247fb66b09cd45a72cf54770b97d8b3",
+      "created": 1794187900.924046,
+      "target": "code-reviewer-uncle",
+      "wait_s": 303,
+      "free": []
+    },
+    {
+      "operation_id": "kmsg-07128d52ce7f6b900b688b5adbc4ef71",
+      "created": 1794188005.892324,
+      "target": "code-reviewer-father",
+      "wait_s": 131,
+      "free": []
+    },
+    {
+      "operation_id": "kmsg-07bbf4f31b21f3619974f5d9329c8c01",
+      "created": 1794188155.198435,
+      "target": "code-reviewer-brother",
+      "wait_s": 90,
+      "free": []
+    },
+    {
+      "operation_id": "kmsg-ecf3d19dad6e4e0869939ded5cafe363",
+      "created": 1794190062.296418,
+      "target": "code-reviewer-mother",
+      "wait_s": 1097,
+      "free": [
+        "code-reviewer-father",
+        "code-reviewer-sister",
+        "code-reviewer-uncle"
+      ]
+    },
+    {
+      "operation_id": "kmsg-2d1a1b5b3ac14d5dc93818456efc40f8",
+      "created": 1794191276.097141,
+      "target": "code-reviewer-father",
+      "wait_s": 120,
+      "free": [
+        "code-reviewer-brother",
+        "code-reviewer-sister"
+      ]
+    },
+    {
+      "operation_id": "kmsg-4357c52b1b73920784508087453d67ec",
+      "created": 1794191315.318971,
+      "target": "code-reviewer-mother",
+      "wait_s": 145,
+      "free": [
+        "code-reviewer-sister"
+      ]
+    },
+    {
+      "operation_id": "kmsg-fb7c48f0fd607b89d5fac1d561c21cae",
+      "created": 1794192176.500538,
+      "target": "code-reviewer-mother",
+      "wait_s": 287,
+      "free": [
+        "code-reviewer-uncle"
+      ]
+    },
+    {
+      "operation_id": "kmsg-e692de231463aaa519d42cc46503ce9e",
+      "created": 1794193861.948156,
+      "target": "code-reviewer-uncle",
+      "wait_s": 133,
+      "free": [
+        "code-reviewer-father",
+        "code-reviewer-sister"
+      ]
+    },
+    {
+      "operation_id": "kmsg-a698b06f75d71a1700f4858ca85c8967",
+      "created": 1794194498.729497,
+      "target": "code-reviewer-sister",
+      "wait_s": 242,
+      "free": [
+        "code-reviewer-brother",
+        "code-reviewer-uncle"
+      ]
+    },
+    {
+      "operation_id": "kmsg-35f2c7bf498d82053b4d120f2923a9da",
+      "created": 1794194762.893195,
+      "target": "code-reviewer-mother",
+      "wait_s": 3764,
+      "free": []
+    },
+    {
+      "operation_id": "kmsg-51046ac4aeb3256c09dde2fe449cc608",
+      "created": 1794195535.139911,
+      "target": "code-reviewer-father",
+      "wait_s": 390,
+      "free": [
+        "code-reviewer-sister",
+        "code-reviewer-uncle"
+      ]
+    },
+    {
+      "operation_id": "kmsg-f34f53f961c5b8e44ff72ab0a6e64587",
+      "created": 1794196081.241343,
+      "target": "code-reviewer-uncle",
+      "wait_s": 179,
+      "free": [
+        "code-reviewer-father",
+        "code-reviewer-sister"
+      ]
+    },
+    {
+      "operation_id": "kmsg-c2c54169a56578132b31a019d7000860",
+      "created": 1794196089.6103,
+      "target": "code-reviewer-mother",
+      "wait_s": 2437,
+      "free": [
+        "code-reviewer-father"
+      ]
+    },
+    {
+      "operation_id": "kmsg-306409f13ea9e9b029ad626b8df52221",
+      "created": 1794196154.060143,
+      "target": "code-reviewer-father",
+      "wait_s": 96,
+      "free": []
+    },
+    {
+      "operation_id": "kmsg-35900fca686f309896d85e3004dd54ca",
+      "created": 1794196156.145268,
+      "target": "code-reviewer-brother",
+      "wait_s": 162,
+      "free": []
+    },
+    {
+      "operation_id": "kmsg-3ac6437d863f11b838b115d5b015fa49",
+      "created": 1794196157.938508,
+      "target": "code-reviewer-uncle",
+      "wait_s": 103,
+      "free": []
+    },
+    {
+      "operation_id": "kmsg-86d6b5d0573a4384fd8994d6efb4c37e",
+      "created": 1794196361.129165,
+      "target": "code-reviewer-uncle",
+      "wait_s": 167,
+      "free": [
+        "code-reviewer-sister"
+      ]
+    },
+    {
+      "operation_id": "kmsg-c23362d64f0a5a6be6c35d38eadd960f",
+      "created": 1794196431.432997,
+      "target": "code-reviewer-uncle",
+      "wait_s": 97,
+      "free": [
+        "code-reviewer-sister"
+      ]
+    },
+    {
+      "operation_id": "kmsg-9e1aa92cb60c7dc1178d02ce76631fbc",
+      "created": 1794198935.849795,
+      "target": "code-reviewer-brother",
+      "wait_s": 432,
+      "free": []
+    }
+  ],
+  "model_check_on_actual_target": {
+    "p50_abs_error_s": 0.0,
+    "p90_abs_error_s": 0.2,
+    "within_5s": 319,
+    "of": 340
+  }
+}

@@ -617,6 +617,9 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - 운영자 호출: Fusion 패널, capability probe, dashboard probe, `masc runtime-probe`, 서버 시작 때의 사용량 읽기, 모델 목록 갱신. 거절은 각자 이미 있는 결과로 낸다. 사용량 읽기는 읽기 실패로 로그에 남는다.
     - `masc runtime-codex-models`는 base path를 받지 않았다. 다른 host tool처럼 작업 공간을 정하고(`--base-path`, 환경 변수, 현재 디렉터리) 게시한다. 다계정 작업 공간이거나 거절되면 종료 코드 1로 끝나고, setup은 이것을 이미 "갱신 불가"로 읽는다. 서버의 setup 동작과 설치 wizard가 base path를 넘긴다.
   - D2-7 테이블이 봉인을 든다(`Runtime_execution`). 호출처는 테이블의 자격 증명을 더 꺼내지 못한다.
+    - Codex와 Claude Code 실행 레코드의 `account_home`은 `'client Runtime_account_access.sealed`다. 잡은 계정을 봉인하는 곳은 테이블을 만드는 `Runtime_adapter` 하나다.
+    - 봉인된 값은 홈 문자열(`Runtime_account_access.home`)과 같은 캡처인지(`Runtime_account_access.same`)만 내준다. quota 창과 다시 읽기 비교가 이것을 쓴다. 환경은 인가된 계정에서만 나온다.
+    - 테이블을 읽는 호출처는 봉인된 값을 그대로 `authorize`에 넘긴다. 읽자마자 봉인하던 일이 없어졌다. 계정을 잡자마자 인가받는 곳(setup의 로그인 확인, `masc runtime-codex-models`)만 직접 봉인한다.
   - D2-8 미리보기 "내 Keeper 한 번 돌리기". 사람이 브라우저로 확인한다. 2026-11-09 D2-6·D2-7보다 먼저 했다. Claude Code는 D2-5부터 인가된 계정으로만 뜨므로, Codex를 기다리지 않고 사람의 구독으로 Keeper 턴이 도는지 먼저 확인할 수 있다.
     - 라우트는 `POST /api/v1/auth/keepers/turn`이다. 본문은 `{"keeper_id","message"}`이고 메시지는 4096바이트까지다. 게이트는 `Manage_own_keeper`에 membership을 더한다(`Auth_preview.keeper_owner_person`). 턴이 그 사람 namespace 아래 홈에서 CLI를 띄우기 때문이다.
     - 라우트는 기록만 읽는다. Keeper 기록이 Runtime을, Runtime 기록이 계정을 정한다. 런타임은 그 계정의 login receipt가 이름 붙인 workspace provider에 그 계정 홈과 binding 하나를 얹은 것이다(`Server_setup_account_login.person_runtime`). binding은 이 계정에서 만드는 Runtime id가 Keeper 기록의 id와 같은 것이다(`Runtime_account_runtime.Runtime`). id를 자르지 않고 binding마다 만든 id와 통째로 비교한다.

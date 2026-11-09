@@ -621,7 +621,7 @@ let muse_account_spent ~mgr ~clock ~cwd ~scope config =
       | Error _ -> false)
 
 let authorize ~account_request account =
-  Runtime_account_access.authorize account_request (Runtime_account_access.seal account)
+  Runtime_account_access.authorize account_request account
   |> Result.map_error (fun refusal ->
     Unavailable (Account_not_authorized (Runtime_account_access.refusal_to_string refusal)))
 ;;

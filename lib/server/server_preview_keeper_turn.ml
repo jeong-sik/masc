@@ -256,9 +256,8 @@ let run ~env ~(person : Login.person) ~base_path ~body =
         ; runtime_id = Authz_types.Runtime_id.to_string prepared.Login.runtime_id
         }
     in
-    let authorize account_home =
-      Runtime_account_access.authorize request (Runtime_account_access.seal account_home)
-      |> Result.map_error refusal_answer
+    let authorize account =
+      Runtime_account_access.authorize request account |> Result.map_error refusal_answer
     in
     let one_call turn =
       Login.one_call_of provider_account_id ~busy:(error R.Conflict_409 call_running) turn

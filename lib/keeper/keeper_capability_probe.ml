@@ -496,7 +496,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                 CLI starts only where the access allows one (plan D2-5). *)
              (match
                 Runtime_account_access.authorize Runtime_account_access.Operator_call
-                  (Runtime_account_access.seal exec.account_home)
+                  exec.account_home
               with
               | Error refusal ->
                 Error (Account_not_authorized (Runtime_account_access.refusal_to_string refusal))
@@ -548,7 +548,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                 app-server starts only where the access allows one (plan D2-6). *)
              (match
                 Runtime_account_access.authorize Runtime_account_access.Operator_call
-                  (Runtime_account_access.seal exec.account_home)
+                  exec.account_home
               with
               | Error refusal ->
                 Error (Account_not_authorized (Runtime_account_access.refusal_to_string refusal))

@@ -11,7 +11,7 @@
 
 type codex_app_server =
   { cli_path : string
-  ; account_home : Runtime_official_account.codex Runtime_official_account.t
+  ; account_home : Runtime_official_account.codex Runtime_account_access.sealed
   ; model : string option
   ; timeout_s : float
   }
@@ -30,7 +30,7 @@ type antigravity_cli =
 
 type claude_code =
   { cli_path : string
-  ; account_home : Runtime_official_account.claude_code Runtime_official_account.t
+  ; account_home : Runtime_official_account.claude_code Runtime_account_access.sealed
   ; model : string option
   ; timeout_s : float
   }

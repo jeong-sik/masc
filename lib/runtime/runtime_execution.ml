@@ -1,6 +1,6 @@
 type codex_app_server =
   { cli_path : string
-  ; account_home : Runtime_official_account.codex Runtime_official_account.t
+  ; account_home : Runtime_official_account.codex Runtime_account_access.sealed
   ; model : string option
   ; timeout_s : float
   }
@@ -17,7 +17,7 @@ type antigravity_cli =
 
 type claude_code =
   { cli_path : string
-  ; account_home : Runtime_official_account.claude_code Runtime_official_account.t
+  ; account_home : Runtime_official_account.claude_code Runtime_account_access.sealed
   ; model : string option
   ; timeout_s : float
   }
@@ -45,9 +45,9 @@ type t =
 let same_account_selection left right =
   match left, right with
   | Claude_code left, Claude_code right ->
-    Runtime_official_account.same left.account_home right.account_home
+    Runtime_account_access.same left.account_home right.account_home
   | Codex_app_server left, Codex_app_server right ->
-    Runtime_official_account.same left.account_home right.account_home
+    Runtime_account_access.same left.account_home right.account_home
   | Agent_core _, Agent_core _
   | Antigravity_cli _, Antigravity_cli _
   | Muse_serve _, Muse_serve _

@@ -90,7 +90,7 @@ let read_codex_report ~mgr ~clock ~cwd ~scope ~account codex =
 let read_codex ~mgr ~clock ~cwd ~scope (codex : Runtime_execution.codex_app_server) =
   match
     Runtime_account_access.authorize Runtime_account_access.Operator_call
-      (Runtime_account_access.seal codex.account_home)
+      codex.account_home
   with
   | Error refusal -> Error (Runtime_account_access.refusal_to_string refusal)
   | Ok account ->

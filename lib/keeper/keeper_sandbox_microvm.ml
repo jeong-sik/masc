@@ -26,7 +26,10 @@
     ([Keeper_sandbox_remote]) drives the guest's shim over [container exec].
     The guest's working tree is on a Keeper-named volume (RFC-0400), which
     can be shared by same-named Keepers in different workspaces. The host
-    playground is never mounted into it. *)
+    playground is never mounted into it.
+
+    The definitions live in the [Keeper_sandbox_microvm_*] modules included
+    below, one per topic. [keeper_sandbox_microvm.mli] stays the contract. *)
 
 include Keeper_sandbox_microvm_base
 include Keeper_sandbox_microvm_network
@@ -41,7 +44,4 @@ include Keeper_sandbox_microvm_work_root
 include Keeper_sandbox_microvm_inspect
 include Keeper_sandbox_microvm_inventory
 include Keeper_sandbox_microvm_listing
-
-module Backend = Keeper_microvm_backend
-module Kata_vmm = Keeper_microvm_kata_vmm
 

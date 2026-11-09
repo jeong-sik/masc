@@ -320,10 +320,13 @@ let defer_preparation config record ~detail = update config record (function
   | Dispatching _ | Judged _ | Reviewed _ | Deferred _ | Execution_unknown _ | Superseded _ ->
     Error (Conflict "Preparation observation cannot replace an execution"))
   |> Result.map (fun _ -> ())
-let project current records goal = match records with
-  | Error error -> `Assoc ["state", `String "unavailable"; "detail", `String (error_to_string error)]
+(* A goal's review as the verdict a reader acts on, and the reviewer's evidence
+   (its structured result and the tool calls it made) behind a thunk, so a
+   projection that leaves the evidence out never builds it. *)
+let project_fields current records goal = match records with
+  | Error error -> ["state", `String "unavailable"; "detail", `String (error_to_string error)], (fun () -> [])
   | Ok _ -> match current goal with
-    | None -> `Assoc ["state", `String "unchecked"]
+    | None -> ["state", `String "unchecked"], (fun () -> [])
     | Some record ->
       let state, detail, receipt = match record.phase with
         | Pending detail -> "pending", detail, None
@@ -337,7 +340,7 @@ let project current records goal = match records with
             | Some (AR.Reject reason) -> "needs_revision", Some reason, Some receipt
             | None -> "deferred", receipt.result.fallback_reason, Some receipt) in
       let Goal_store.Criterion {revision; _} = record.criterion in
-      `Assoc (["state", `String state; "request_id", `String record.request_id;
+      ["state", `String state; "request_id", `String record.request_id;
         "criterion_revision", `String revision;
         "reason", (match record.phase with
           | Reviewed receipt -> (match receipt.result.verdict with
@@ -345,14 +348,19 @@ let project current records goal = match records with
               | None -> `Null)
           | Pending _ | Dispatching _ | Judged _ | Deferred _ | Execution_unknown _ | Superseded _ -> `Null);
         "detail", (match detail with None -> `Null | Some detail -> `String detail)]
-        @ (match receipt with None -> [] | Some receipt -> [
-          "authority", authority_json;
+        @ (match receipt with None -> [] | Some _ -> ["authority", authority_json]),
+      (fun () ->
+        (match receipt with None -> [] | Some receipt -> [
           "review", Verifier_review_owner.result_to_json receipt.result;
           "tools", tools_to_json receipt.tools])
         @ (match record.phase with
           | Execution_unknown {tools; _} -> ["tools", tools_to_json tools]
           | Pending _ | Dispatching _ | Judged _ | Reviewed _ | Deferred _ | Superseded _ -> []))
+let current_of records = match records with Ok rows -> current_lookup rows | Error _ -> (fun _ -> None)
 let projector records =
-  let current = match records with Ok rows -> current_lookup rows | Error _ -> (fun _ -> None) in
-  project current records
+  let current = current_of records in
+  fun goal -> let verdict, evidence = project_fields current records goal in `Assoc (verdict @ evidence ())
+let summary_projector records =
+  let current = current_of records in
+  fun goal -> `Assoc (fst (project_fields current records goal))
 let projection records goal = projector records goal

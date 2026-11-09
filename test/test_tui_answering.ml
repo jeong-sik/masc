@@ -282,9 +282,25 @@ let test_chat_shows_background_work_and_uncertainty () =
     (Astring.String.is_infix ~affix:"editing the report" (String.concat "\n" (text drawn)))
 ;;
 
+let test_motion_demand_uses_only_a_fresh_running_observation () =
+  let has_motion rows = List.exists (fun (row : Masc_tui_answering.chat_activity_row) ->
+      match row.motion with Still -> false | Moving through -> through > 0) rows in
+  let activity ~error state = Masc_tui_answering.chat_activity ~frame:0 ~now:1000.
+      ~keeper_name:"echo" ~error [state] in
+  let running = running ~lane:Tui_decode.Turn_lane_autonomous ~started:900. "echo" in
+  Alcotest.(check bool) "a fresh observed turn requests the motion clock" true
+    (has_motion (activity ~error:None running));
+  Alcotest.(check bool) "a stale observation keeps the seconds clock only" false
+    (has_motion (activity ~error:(Some "timeout") running));
+  Alcotest.(check bool) "an idle observation cannot request motion" false
+    (has_motion (activity ~error:None (row "echo" Tui_decode.Keeper_turn_idle)))
+;;
+
 let () =
   Alcotest.run "tui_answering"
-    [ ( "chat activity", [Alcotest.test_case "background work and missing observation" `Quick
+    [ ( "chat activity", [Alcotest.test_case "motion demand follows observation freshness" `Quick
+          test_motion_demand_uses_only_a_fresh_running_observation
+      ; test_case "background work and missing observation" `Quick
           test_chat_shows_background_work_and_uncertainty])
     ; ( "duration"
       , [] )

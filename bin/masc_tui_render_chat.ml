@@ -4632,13 +4632,21 @@ let render_keeper_message (state : state) =
           if Message_layout.display_width row.rest <= room then row.rest
           else fit_width row.rest (max 0 room)
         in
-        box_line chat_buf chat_cols
-          (Printf.sprintf "  %s%s%s%s%s%s%s"
-             (match state.msg_tool_visibility with Tools_full -> Theme.warn ()
-              | Tools_compact | Tools_results ->
-                  if Masc_tui_types.keeper_message_activity_needs_attention state
-                  then Theme.warn () else Theme.recede ()) lead Ansi.reset
-             (Theme.recede ()) rest keys Ansi.reset))
+        let content = Printf.sprintf "  %s%s%s%s%s%s%s"
+            (match state.msg_tool_visibility with Tools_full -> Theme.warn ()
+             | Tools_compact | Tools_results ->
+                 if Masc_tui_types.keeper_message_activity_needs_attention state
+                 then Theme.warn () else Theme.recede ()) lead Ansi.reset
+            (Theme.recede ()) rest keys Ansi.reset in
+        (match row.motion with
+         | Masc_tui_answering.Still -> ()
+         | Moving through_cell ->
+             let source_bytes = Message_layout.fitted_source_bytes row.lead lead_room in
+             let source_cells = Message_layout.display_width (String.sub row.lead 0 source_bytes) in
+             if source_cells >= through_cell then
+               Render_schedule.Activity_tick.note_motion_if_visible ~text:content
+                 ~width:(framed_inner_width chat_cols) ~through_cell:(2 + through_cell));
+        box_line chat_buf chat_cols content)
       status_frame.kmsf_activity_rows;
     List.iter (fun text -> box_line_styled chat_buf chat_cols ~style:(Theme.warn ()) ("  " ^ text))
       status_frame.kmsf_interrupt_rows;
@@ -4807,20 +4815,26 @@ let render_keeper_message (state : state) =
            (fun (kind, text) ->
              (match kind with
               | Keeper_chat_transcript.Progress ->
-                  if state.msg_origin_display = Message_layout.Origin_bare then
-                    box_line_styled chat_buf chat_cols
-                      ~style:(match Keeper_chat_transcript.phase live with
-                        | Stream_failed _ -> Theme.bad ()
-                        | Waiting | Working | Stream_ended -> Theme.recede ())
-                      ("  " ^ running_mark ^ " " ^ text
-                       ^ (if folded_away > 0 then
-                            " · " ^ Masc_tui_keys.expand_turn_label ^ ":details"
-                          else ""))
-                  else
-                    box_line_styled chat_buf chat_cols ~style:(Masc_tui_theme.tone Masc_tui_theme.Accent)
-                      ("  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
-                       ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
-                       ^ " · " ^ text ^ queue_hint ^ fold_suffix)
+                  let style, content =
+                    if state.msg_origin_display = Message_layout.Origin_bare then
+                      ( (match Keeper_chat_transcript.phase live with
+                          | Stream_failed _ -> Theme.bad ()
+                          | Waiting | Working | Stream_ended -> Theme.recede ())
+                      , "  " ^ running_mark ^ " " ^ text
+                        ^ (if folded_away > 0 then
+                             " · " ^ Masc_tui_keys.expand_turn_label ^ ":details"
+                           else "") )
+                    else
+                      ( Masc_tui_theme.tone Masc_tui_theme.Accent
+                      , "  " ^ running_mark ^ " " ^ Ansi.bold ^ progress_heading
+                        ^ Ansi.reset ^ (Masc_tui_theme.tone Masc_tui_theme.Accent)
+                        ^ " · " ^ text ^ queue_hint ^ fold_suffix ) in
+                  (match Keeper_chat_transcript.phase live with
+                   | Working -> Render_schedule.Activity_tick.note_motion_if_visible
+                       ~text:content ~width:(framed_inner_width chat_cols)
+                       ~through_cell:(2 + Message_layout.display_width running_mark)
+                   | Waiting | Stream_ended | Stream_failed _ -> ());
+                  box_line_styled chat_buf chat_cols ~style content
               | Keeper_chat_transcript.Diagnostic ->
                   box_line_styled chat_buf chat_cols ~style:(Theme.recede ())
                     ("  " ^ text)

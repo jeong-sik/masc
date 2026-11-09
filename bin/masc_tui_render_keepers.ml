@@ -415,6 +415,12 @@ let keeper_row_name ~width ~yolo (row : Keeper_list_model.row) =
   in
   if yolo then Theme.bad () ^ name ^ Ansi.reset else name
 
+type keeper_primary_row = { text : string; motion : Masc_tui_answering.motion }
+let still_row text = { text; motion = Masc_tui_answering.Still }
+let shift_motion ~prefix = function
+  | Masc_tui_answering.Still -> Masc_tui_answering.Still
+  | Moving through -> Moving (Message_layout.display_width prefix + through)
+
 (* The NOW cell: the activity's mark and word, or the receipt's operator
    disposition where nothing on the row is newer than the receipt. *)
 let keeper_now_cell ?(ko = false) ~frame (row : Keeper_list_model.row) =
@@ -451,9 +457,18 @@ let keeper_now_cell ?(ko = false) ~frame (row : Keeper_list_model.row) =
     | Some disp -> Masc_tui_keeper_mark.operator_disposition_word disp
     | None -> keeper_activity_word ~ko activity
   in
-  status_color ^ glyph ^ " "
-  ^ Message_layout.fit_width status_word (Render_schedule.keeper_status_width - 2)
-  ^ Ansi.reset
+  let text = status_color ^ glyph ^ " "
+    ^ Message_layout.fit_width status_word (Render_schedule.keeper_status_width - 2)
+    ^ Ansi.reset in
+  let motion = match operator_disposition, activity with
+    | None, (Preparing | Running) -> Masc_tui_answering.Moving (Message_layout.display_width glyph)
+    | Some _, (Preparing | Running | Held_call | Question | Confirmation | Attempt_failed
+        | Streaming | Async_working _ | Deferred | Tool_waiting | Model_waiting | Delegate_result
+        | Verifying | External_waiting | Idle | Paused | Offline | Unknown)
+    | None, (Held_call | Question | Confirmation | Attempt_failed | Streaming | Async_working _
+        | Deferred | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting
+        | Idle | Paused | Offline | Unknown) -> Masc_tui_answering.Still in
+  { text; motion }
 
 let keeper_row_content ~(columns : Render_schedule.keeper_columns)
     ~now ~frame ~yolo ~selected (row : Keeper_list_model.row) =
@@ -467,11 +482,12 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
         ~default:Masc_tui_theme.Glyph.no_value
     | None -> Masc_tui_theme.Glyph.no_value
   in
-  String.concat ""
-    [ keeper_row_marker ~selected
-    ; keeper_row_name ~width:columns.kcol_name ~yolo row
-    ; " "
-    ; keeper_now_cell ~frame row
+  let prefix = keeper_row_marker ~selected
+    ^ keeper_row_name ~width:columns.kcol_name ~yolo row ^ " " in
+  let now_cell = keeper_now_cell ~frame row in
+  let text = String.concat ""
+    [ prefix
+    ; now_cell.text
     ; (if columns.kcol_show_flags then " " ^ keeper_flag_cell runtime else "")
     ; " " ^ Theme.recede ()
       ^ Message_layout.pad_left age Render_schedule.keeper_last_turn_width
@@ -487,7 +503,8 @@ let keeper_row_content ~(columns : Render_schedule.keeper_columns)
                   ~show_runtime:columns.kcol_show_runtime failure_context)
              row
        else "")
-    ]
+    ] in
+  { text; motion = shift_motion ~prefix now_cell.motion }
 
 let format_attempt_node (a : Masc_tui_keeper_trail.attempt) =
   let fault_clause =
@@ -658,7 +675,7 @@ type grid_cells =
   { gutter : string
   ; name : string
   ; pulse : string
-  ; now_cell : string
+  ; now_cell : keeper_primary_row
   ; strip : string
   ; due : string
   ; right : string
@@ -666,17 +683,20 @@ type grid_cells =
 
 let grid_line (grid : Grid.t) cells =
   let side = grid.side_cells > 0 in
-  String.concat ""
-    [ cells.gutter
-    ; cells.name
-    ; (if side then " " ^ cells.pulse else "")
-    ; " "
-    ; grid_band cells.now_cell
+  let prefix = String.concat ""
+    [ cells.gutter; cells.name; (if side then " " ^ cells.pulse else ""); " " ] in
+  let text = String.concat ""
+    [ prefix
+    ; grid_band cells.now_cell.text
     ; " "
     ; (if side then cells.strip ^ " " else "")
     ; cells.due
     ; (if grid.mem_cells > 0 then " " ^ cells.right else "")
-    ]
+    ] in
+  (* The band's style/background sequences take no cells. Its left line and
+     following space precede the source NOW cell. *)
+  { text; motion = shift_motion ~prefix:(prefix ^ Keeper_mark.grid_now_line ^ " ")
+      cells.now_cell.motion }
 
 (* The cells before the band: the gutter, the name and the pulse. *)
 let grid_lead_cells (grid : Grid.t) =
@@ -961,7 +981,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
          { gutter
          ; name
          ; pulse = pulse ()
-         ; now_cell = grid_librarian memory
+         ; now_cell = still_row (grid_librarian memory)
          ; strip = grid_lag_bar grid ~peak_lag memory
          ; due = grid_digest ~now memory
          ; right = grid_gap grid memory
@@ -970,7 +990,7 @@ let grid_keeper_row state (grid : Grid.t) columns ~view ~peak_lag ~peak_facts ~n
          { gutter
          ; name
          ; pulse = grid_fact_ages grid memory
-         ; now_cell = grid_saved ~now memory
+         ; now_cell = still_row (grid_saved ~now memory)
          ; strip = grid_lag_bar grid ~peak_lag memory
          ; due = grid_stale memory
          ; right = grid_facts grid ~peak_facts memory
@@ -2723,10 +2743,10 @@ let render_keeper_axes (state : state) =
           let primary =
             match matrix, shape with
             | Some matrix, (Axis_row.List_columns | Axis_row.Wall_columns | Axis_row.Grid _) ->
-                matrix_keeper_row matrix ~now:now_unix row
+                still_row (matrix_keeper_row matrix ~now:now_unix row)
             | None, Axis_row.Wall_columns ->
-                Masc_tui_keeper_wall.row ~cols:inner ~now:now_unix
-                  ~name:row.Keeper_list_model.keeper.Tui_decode.k_name (keeper_row_runtime row)
+                still_row (Masc_tui_keeper_wall.row ~cols:inner ~now:now_unix
+                  ~name:row.Keeper_list_model.keeper.Tui_decode.k_name (keeper_row_runtime row))
             | None, Axis_row.List_columns ->
                 keeper_row_content ~columns ~now:now_unix ~frame:state.activity_frame ~yolo
                   ~selected row
@@ -2743,7 +2763,11 @@ let render_keeper_axes (state : state) =
               box_line_selected buf cols (press (Masc_tui_theme.strip_sgr text))
             else box_line buf cols (press text)
           in
-          emit primary;
+          (match primary.motion with
+           | Masc_tui_answering.Still -> ()
+           | Moving through_cell -> Render_schedule.Activity_tick.note_motion_if_visible
+               ~text:primary.text ~width:inner ~through_cell);
+          emit primary.text;
           (* Only a row that draws a second line builds one. *)
           (match second_line row with
            | Axis_row.No_second_line -> ()

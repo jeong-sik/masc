@@ -18083,15 +18083,18 @@ let launch_local_source_followup state ~mailbox source =
     | Local_work ->
         launch_local_work_read state ~mailbox ~intent:Snapshot_read.Poll state.local_base_path
 
-let observe_local_source state ~source request result =
-  let observation = Masc_tui_types.take_local_workspace_read state ~source request result in
+let observe_local_source state ~source ~is_observed request result =
+  let observation = Masc_tui_types.take_local_workspace_read state ~source ~is_observed request result in
   Log.Transport.info
     "tui_local_workspace_settled source=%s intent=%s request=%d demand_revision=%s started_ns=%Ld observed_ns=%Ld outcome=%s followup_pending=%b full_refresh_running=%b"
     (local_read_source_name source) (local_read_intent_name request.lwr_intent)
     (Local_read_order.request_id request.lwr_request)
     (Local_read_order.revision_to_string (Local_read_order.request_revision request.lwr_request))
     request.lwr_started_ns (Mtime_clock.elapsed_ns ())
-    (match observation with None -> "discarded" | Some (Ok _) -> "received" | Some (Error _) -> "failed")
+    (match observation with
+     | None -> "discarded"
+     | Some (Ok reading) -> if is_observed reading then "received" else "source_failed"
+     | Some (Error _) -> "failed")
     (Local_read_order.has_followup (local_source_order state source))
     (Option.is_some state.http_refresh_started_ns);
   observation
@@ -24101,10 +24104,16 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
            visible surfaces read once more (RFC-0480 §3.3): a change can land
            between the initial read and subscription, or during a
            disconnected interval, and the reads run under the current
-           authority. A Resumed replay missed nothing -- the server read its
-           retained window before answering -- so it re-reads none of them;
-           the replayed events owe their own reads. *)
-        if not (Masc_tui_types.observer_replay_is_complete handshake) then begin
+           authority. A Resumed replay missed no event, but a read owed by an
+           already applied event may still be missing, failed or running.
+           Recover only those local observations; successful reads need no
+           followup and replayed events owe their own reads. *)
+        if Masc_tui_types.observer_replay_is_complete handshake then begin
+          List.iter (fun source ->
+              note_local_source_observer_resume state source;
+              launch_local_source_followup state ~mailbox source)
+            [Local_keepers; Local_work]
+        end else begin
           launch_keeper_waiting_load ~change:Waiting_all state ~mailbox;
           owe_agenda_revalidation state;
           launch_local_workspace_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
@@ -24115,24 +24124,6 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
             ~intent:Revalidate ~refresh_inflight:http_refresh_inflight
             ~scoped_refresh_inflight:http_scoped_refresh_inflight
             ~scoped_refresh_followup ~mailbox end
-        else begin
-          (* A Resumed replay proves event continuity, not that the reads
-             those events owed settled. A local refresh whose demanded
-             revision was never observed -- the read failed, and the order
-             does not re-register it, because immediate re-registration
-             would hot-loop a persistent failure (backoff retry is
-             RFC-0480 L1b) -- finds its retry point here: the reconnect,
-             whether the failure landed before or after this handshake. A
-             settled source keeps its value and reads nothing. Review, PR
-             #50679. *)
-          let local_demand_unmet source =
-            let order = local_source_order state source in
-            not (Local_read_order.covers order (Local_read_order.demanded_revision order)) in
-          if local_demand_unmet Local_keepers then
-            launch_local_keeper_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path;
-          if local_demand_unmet Local_work then
-            launch_local_work_read state ~mailbox ~intent:Snapshot_read.Refresh state.local_base_path
-        end
       end
   | Observer_msg (Observer_received (owner, (instance_id, decoded)))
     when Masc_tui_async_protocol.observer_stream_owned state owner ->
@@ -29020,7 +29011,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           state.verification_owed <- failed_read state.verification_owed;
           state.verification_error <- Some detail)
   | Local_msg (Local_workspace_read (request, result)) ->
-      (match observe_local_source state ~source:Local_work request result with
+      (match observe_local_source state ~source:Local_work
+          ~is_observed:Masc_tui_loader.local_workspace_observed request result with
        | None -> ()
        | Some result ->
            (match result with
@@ -29029,7 +29021,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 (Masc_tui_loader.apply_local_workspace state) reading);
            launch_local_source_followup state ~mailbox Local_work)
   | Local_msg (Local_keepers_read (request, result)) ->
-      (match observe_local_source state ~source:Local_keepers request result with
+      (match observe_local_source state ~source:Local_keepers
+          ~is_observed:Masc_tui_loader.local_keepers_observed request result with
        | None -> ()
        | Some result ->
            (match result with

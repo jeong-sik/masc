@@ -1932,13 +1932,13 @@ let test_local_read_and_http_sources_progress_independently () =
     ; lr_task_payloads = Masc_tui_task_payloads.empty; lr_tasks_error = None; lr_task_flow = None
     ; lr_operator_stalled = Masc_tui_agenda.Read []; lr_goal_task_links = Goal_links_not_read
     ; lr_goals_to_confirm = Masc_tui_agenda.Read [] } in
-  (match take_local_workspace_read state ~source:Local_work request (Ok reading) with
+  (match take_local_workspace_read ~is_observed:Masc_tui_loader.local_workspace_observed state ~source:Local_work request (Ok reading) with
    | Some (Ok observed) -> Masc_tui_loader.apply_local_workspace state observed
    | Some (Error _) | None -> Alcotest.fail "current local result was not admitted");
   Alcotest.(check bool) "local observation lands before enclosing collector completes" true
     (state.local_workspace = Local_workspace_read && state.http_refresh_started_ns = Some 0L);
   Alcotest.(check bool) "duplicate completion cannot apply again" true
-    (take_local_workspace_read state ~source:Local_work request (Ok reading) = None)
+    (take_local_workspace_read ~is_observed:Masc_tui_loader.local_workspace_observed state ~source:Local_work request (Ok reading) = None)
 
 let test_local_read_refuses_retired_epoch_and_wrong_path () =
   let open Masc_tui_types in
@@ -1948,35 +1948,35 @@ let test_local_read_refuses_retired_epoch_and_wrong_path () =
   state.workspace_identity <- Workspace_identity_match;
   let current = local_workspace_request_exn state Local_work 7L in
   Alcotest.(check bool) "same path after suspension cannot accept the old epoch" true
-    (take_local_workspace_read state ~source:Local_work old (Error "old failure") = None
+    (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work old (Error "old failure") = None
      && Local_read_order.in_flight state.local_workspace_read_order
      && state.local_workspace = Local_workspace_unread);
   let wrong_path = { current with lwr_base_path = "/workspace/foreign" } in
   Alcotest.(check bool) "foreign path cannot settle the successor slot" true
-    (take_local_workspace_read state ~source:Local_work wrong_path (Ok ()) = None);
+    (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work wrong_path (Ok ()) = None);
   let Workspace_authority generation = state.workspace_authority in
   let wrong_epoch = { current with lwr_authority = Workspace_authority (generation + 1) } in
   Alcotest.(check bool) "foreign authority cannot spend a matching path and request" true
-    (take_local_workspace_read state ~source:Local_work wrong_epoch (Ok ()) = None);
+    (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work wrong_epoch (Ok ()) = None);
   Alcotest.(check bool) "only the successor can settle" true
-    (take_local_workspace_read state ~source:Local_work current (Ok ()) = Some (Ok ()))
+    (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work current (Ok ()) = Some (Ok ()))
 
 let test_local_read_failure_settles_and_can_be_retried () =
   let open Masc_tui_types in
   let state, _ = early_roster_fixture () in
   let request = local_workspace_request_exn state Local_work 5L in
   Alcotest.(check bool) "owned failure is observed" true
-    (take_local_workspace_read state ~source:Local_work request (Error "directory unavailable") = Some (Error "directory unavailable"));
+    (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work request (Error "directory unavailable") = Some (Error "directory unavailable"));
   Alcotest.(check bool) "failure is distinct from unread or empty and releases its slot" true
     (state.local_workspace = Local_workspace_failed "directory unavailable"
      && not (Local_read_order.in_flight state.local_workspace_read_order)
      && local_rows_page state ~error:None = Page_failed);
   let retry = local_workspace_request_exn state Local_work 7L in
   Alcotest.(check bool) "late failed attempt cannot release the retry" true
-    (take_local_workspace_read state ~source:Local_work request (Error "late failure") = None
+    (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work request (Error "late failure") = None
      && Local_read_order.in_flight state.local_workspace_read_order);
   Alcotest.(check bool) "fresh retry can settle" true
-    (take_local_workspace_read state ~source:Local_work retry (Ok ()) = Some (Ok ()))
+    (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work retry (Ok ()) = Some (Ok ()))
 
 let local_keeper_source_fixture () =
   let state, _ = early_roster_fixture () in
@@ -1989,13 +1989,284 @@ let local_keeper_source_fixture () =
   state, keeper, metadata
 
 let apply_metadata_observation state request metadata =
-  match Masc_tui_types.take_local_workspace_read state ~source:Local_keepers request (Ok metadata) with
+  match Masc_tui_types.take_local_workspace_read ~is_observed:Masc_tui_loader.local_keepers_observed state ~source:Local_keepers request (Ok metadata) with
   | Some (Ok observed) -> Masc_tui_loader.apply_local_keepers state observed
   | Some (Error _) | None -> Alcotest.fail "metadata observation was not admitted"
 
 let request_local_refresh state source at =
   Masc_tui_types.begin_local_workspace_read state ~intent:Masc_tui_types.Snapshot_read.Refresh
     ~source ~base_path:state.Masc_tui_types.local_base_path ~started_ns:at
+
+let local_work_observation_fixture () : Masc_tui_loader.local_reading =
+  { lr_rows = Masc_tui_overview_tasks.Rows_read []
+  ; lr_task_payloads = Masc_tui_task_payloads.empty; lr_tasks_error = None; lr_task_flow = None
+  ; lr_operator_stalled = Masc_tui_agenda.Not_read; lr_goal_task_links = Goal_links_not_read
+  ; lr_goals_to_confirm = Masc_tui_agenda.Not_read }
+
+let test_local_observation_accepts_empty_and_optional_unrequested_sources () =
+  let metadata : Masc_tui_loader.local_keeper_reading = { lkr_keepers = []; lkr_error = None } in
+  Alcotest.(check bool) "empty observed roster is healthy" true
+    (Masc_tui_loader.local_keepers_observed metadata);
+  Alcotest.(check bool) "empty work and unrequested optional data are healthy" true
+    (Masc_tui_loader.local_workspace_observed (local_work_observation_fixture ()))
+
+let check_returned_local_failure_recovery ~source ~is_observed ~failed ~complete
+    ~apply ~partial_applied failure_after_resume =
+  let open Masc_tui_types in
+  let state, keeper, metadata = local_keeper_source_fixture () in
+  Masc_tui_loader.apply_local_keepers state metadata;
+  let active = match request_local_refresh state source 1L with
+    | Some request -> request | None -> Alcotest.fail "source refresh did not start" in
+  let required = Local_read_order.demanded_revision (local_source_order state source) in
+  let apply_returned request reading =
+    match take_local_workspace_read state ~source ~is_observed request (Ok reading) with
+    | Some (Ok reading) -> apply state reading
+    | Some (Error _) | None -> Alcotest.fail "returned source payload was discarded" in
+  if failure_after_resume then note_local_source_observer_resume state source;
+  apply_returned active failed;
+  Alcotest.(check bool) "wire success with a source failure cannot cover demand" true
+    (partial_applied state failed
+     && not (Local_read_order.covers (local_source_order state source) required)
+     && match (Local_read_observation.facts active.lwr_observation).ui_admission with
+        | Some (_, Local_read_observation.Accepted_failure) -> true
+        | Some (_, (Local_read_observation.Accepted | Local_read_observation.Rejected _))
+        | None -> false);
+  if not failure_after_resume then note_local_source_observer_resume state source;
+  Alcotest.(check bool) "returned failure retains resume recovery" true
+    (Local_read_order.has_followup (local_source_order state source));
+  let fallback = local_workspace_request_exn state source 2L in
+  apply_returned fallback failed;
+  Alcotest.(check bool) "returned fallback failure cannot loop or claim coverage" true
+    (partial_applied state failed
+     && not (Local_read_order.has_followup (local_source_order state source))
+     && not (Local_read_order.covers (local_source_order state source) required));
+  (match source with
+   | Local_keepers -> Alcotest.(check bool) "partial metadata still withholds input" false
+       (keeper_available_for_new_message state keeper.k_name)
+   | Local_work -> ());
+  note_local_source_observer_resume state source;
+  let recovery = local_workspace_request_exn state source 3L in
+  apply_returned recovery complete;
+  Alcotest.(check bool) "owned complete source observation covers the original demand" true
+    (Local_read_order.covers (local_source_order state source) required
+     && not (Local_read_order.has_followup (local_source_order state source)));
+  (match source with
+   | Local_keepers -> Alcotest.(check bool) "complete metadata restores input" true
+       (keeper_available_for_new_message state keeper.k_name)
+   | Local_work -> Alcotest.(check bool) "complete work replaces source failure" true
+       (state.task_reading = Masc_tui_overview_tasks.Rows_read [] && state.tasks_error = None))
+
+let test_returned_source_failures_keep_resume_recovery () =
+  let open Masc_tui_types in
+  let _, _, metadata = local_keeper_source_fixture () in
+  List.iter (fun failed -> List.iter
+    (check_returned_local_failure_recovery ~source:Local_keepers
+      ~is_observed:Masc_tui_loader.local_keepers_observed ~failed ~complete:metadata
+      ~apply:(fun state reading -> Masc_tui_loader.apply_local_keepers state reading)
+      ~partial_applied:(fun state reading -> state.keepers_error = reading.Masc_tui_loader.lkr_error))
+    [false; true])
+    [{ metadata with lkr_error = Some "one metadata row failed" };
+     { metadata with lkr_keepers = []; lkr_error = Some "metadata inventory failed" }];
+  let work = local_work_observation_fixture () in
+  let failures =
+    [ { work with lr_rows = Masc_tui_overview_tasks.Rows_unread }
+    ; { work with lr_rows = Masc_tui_overview_tasks.Rows_unavailable "backlog failed" }
+    ; { work with lr_tasks_error = Some "archive failed" }
+    ; { work with lr_goal_task_links = Goal_links_read_failed "goal links failed" }
+    ; { work with lr_operator_stalled = Masc_tui_agenda.Read_failed "attention failed" }
+    ; { work with lr_goals_to_confirm = Masc_tui_agenda.Read_failed "goal confirmation failed" } ] in
+  List.iter (fun failed -> List.iter
+    (check_returned_local_failure_recovery ~source:Local_work
+      ~is_observed:Masc_tui_loader.local_workspace_observed ~failed ~complete:work
+      ~apply:Masc_tui_loader.apply_local_workspace
+      ~partial_applied:(fun state reading ->
+        state.task_reading = reading.Masc_tui_loader.lr_rows
+        && state.tasks_error = reading.lr_tasks_error
+        && state.goal_task_links = reading.lr_goal_task_links
+        && state.operator_stalled = reading.lr_operator_stalled
+        && state.goals_to_confirm = reading.lr_goals_to_confirm))
+    [false; true]) failures
+
+let check_observer_resume_recovers_local_failure ~failure_after_resume () =
+  let open Masc_tui_types in
+  List.iter (fun source -> List.iter (fun retry_succeeds ->
+    let state, keeper, metadata = local_keeper_source_fixture () in
+    Masc_tui_loader.apply_local_keepers state metadata;
+    let active = match request_local_refresh state source 1L with
+      | Some request -> request
+      | None -> Alcotest.fail "event refresh did not start" in
+    let required = Local_read_order.demanded_revision (local_source_order state source) in
+    if failure_after_resume then begin
+      note_local_source_observer_resume state source;
+      note_local_source_observer_resume state source;
+      Alcotest.(check bool) "resume shares the active source read" true
+        (Local_read_order.in_flight (local_source_order state source)
+         && not (Local_read_order.has_followup (local_source_order state source)))
+    end;
+    ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source active (Error "source unavailable"));
+    if not failure_after_resume then note_local_source_observer_resume state source;
+    Alcotest.(check bool) "failed demand survives either completion order" true
+      (Local_read_order.has_followup (local_source_order state source)
+       && not (Local_read_order.covers (local_source_order state source) required)
+       && Local_read_order.demanded_revision (local_source_order state source) = required);
+    (match source with
+     | Local_keepers -> Alcotest.(check bool) "failed metadata still withholds input" false
+         (keeper_available_for_new_message state keeper.k_name)
+     | Local_work -> ());
+    let retry = local_workspace_request_exn state source 2L in
+    Alcotest.(check bool) "one fresh read carries the original demand" true
+      (retry.lwr_intent = Snapshot_read.Refresh
+       && Local_read_order.request_revision retry.lwr_request = required
+       && not (Local_read_order.has_followup (local_source_order state source)));
+    Alcotest.(check bool) "late failure cannot settle the recovery read" true
+      (take_local_workspace_read ~is_observed:(Fun.const true) state ~source active (Error "duplicate") = None
+       && Local_read_order.in_flight (local_source_order state source));
+    if retry_succeeds then begin
+      (match source with
+       | Local_keepers -> apply_metadata_observation state retry metadata;
+           Alcotest.(check bool) "owned metadata recovery restores input" true
+             (keeper_available_for_new_message state keeper.k_name)
+       | Local_work ->
+           let reading : Masc_tui_loader.local_reading =
+             { lr_rows = Masc_tui_overview_tasks.Rows_read []
+             ; lr_task_payloads = Masc_tui_task_payloads.empty; lr_tasks_error = None; lr_task_flow = None
+             ; lr_operator_stalled = Masc_tui_agenda.Read []; lr_goal_task_links = Goal_links_not_read
+             ; lr_goals_to_confirm = Masc_tui_agenda.Read [] } in
+           (match take_local_workspace_read ~is_observed:Masc_tui_loader.local_workspace_observed state ~source retry (Ok reading) with
+            | Some (Ok observed) -> Masc_tui_loader.apply_local_workspace state observed
+            | Some (Error _) | None -> Alcotest.fail "work recovery was not admitted");
+           Alcotest.(check bool) "owned work recovery replaces its failure" true
+             (state.local_workspace = Local_workspace_read));
+      Alcotest.(check bool) "successful recovery covers the owed demand" true
+        (Local_read_order.covers (local_source_order state source) required)
+    end else begin
+      ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source retry (Error "still unavailable"));
+      Alcotest.(check bool) "failed recovery does not invent source coverage" false
+        (Local_read_order.covers (local_source_order state source) required)
+    end;
+    Alcotest.(check bool) "recovery cannot retry itself immediately" true
+      (not (Local_read_order.in_flight (local_source_order state source))
+       && not (Local_read_order.has_followup (local_source_order state source)))
+  ) [false; true]) [Local_keepers; Local_work]
+
+let test_observer_resume_keeps_healthy_local_reads () =
+  let open Masc_tui_types in
+  List.iter (fun source ->
+    let state, _, _ = local_keeper_source_fixture () in
+    let active = local_workspace_request_exn state source 1L in
+    ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source active (Ok ()));
+    note_local_source_observer_resume state source;
+    Alcotest.(check bool) "healthy idle source owes no resume read" false
+      (Local_read_order.has_followup (local_source_order state source));
+    let active = local_workspace_request_exn state source 2L in
+    note_local_source_observer_resume state source;
+    ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source active (Ok ()));
+    Alcotest.(check bool) "successful in-flight source owes no resume read" false
+      (Local_read_order.has_followup (local_source_order state source));
+    let active = local_workspace_request_exn state source 3L in
+    note_local_source_observer_resume state source;
+    ignore (request_local_refresh state source 4L);
+    let required = Local_read_order.demanded_revision (local_source_order state source) in
+    ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source active (Ok ()));
+    Alcotest.(check bool) "success retains a real event's newer demand" true
+      (Local_read_order.has_followup (local_source_order state source)
+       && not (Local_read_order.covers (local_source_order state source) required));
+    let followup = local_workspace_request_exn state source 5L in
+    ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source followup (Error "later failure"));
+    Alcotest.(check bool) "success consumed the earlier failure-only fallback" false
+      (Local_read_order.has_followup (local_source_order state source))
+  ) [Local_keepers; Local_work]
+
+let test_observer_resume_preserves_already_owed_local_read () =
+  let open Masc_tui_types in
+  List.iter (fun source -> List.iter (fun older_succeeds -> List.iter (fun newer_succeeds ->
+    let state, _, _ = local_keeper_source_fixture () in
+    let older = local_workspace_request_exn state source 1L in
+    ignore (request_local_refresh state source 2L);
+    let required = Local_read_order.demanded_revision (local_source_order state source) in
+    note_local_source_observer_resume state source;
+    note_local_source_observer_resume state source;
+    ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source older
+      (if older_succeeds then Ok () else Error "older read failed"));
+    Alcotest.(check bool) "older completion leaves the newer event demand owed" true
+      (Local_read_order.has_followup (local_source_order state source)
+       && not (Local_read_order.covers (local_source_order state source) required));
+    let newer = local_workspace_request_exn state source 3L in
+    if newer_succeeds then begin
+      ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source newer (Ok ()));
+      Alcotest.(check bool) "newer success consumes recovery without an extra read" true
+        (Local_read_order.covers (local_source_order state source) required
+         && not (Local_read_order.has_followup (local_source_order state source)))
+    end else begin
+      ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source newer (Error "newer read failed"));
+      Alcotest.(check bool) "older completion did not consume the newer read's fallback" true
+        (Local_read_order.has_followup (local_source_order state source));
+      let retry = local_workspace_request_exn state source 4L in
+      ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source retry (Error "still unavailable"));
+      Alcotest.(check bool) "newer read's fallback cannot retry itself" true
+        (not (Local_read_order.has_followup (local_source_order state source))
+         && not (Local_read_order.covers (local_source_order state source) required))
+    end
+  ) [false; true]) [false; true]) [Local_keepers; Local_work]
+
+let test_observer_resume_reads_a_cold_current_source_once () =
+  let open Masc_tui_types in
+  List.iter (fun source -> List.iter (fun succeeds ->
+    let state, _, _ = local_keeper_source_fixture () in
+    let required = Local_read_order.demanded_revision (local_source_order state source) in
+    note_local_source_observer_resume state source;
+    note_local_source_observer_resume state source;
+    Alcotest.(check bool) "duplicate resumes coalesce one fresh missing observation" true
+      (not (Local_read_order.in_flight (local_source_order state source))
+       && Local_read_order.has_followup (local_source_order state source)
+       && Local_read_order.demanded_revision (local_source_order state source) = required);
+    let request = local_workspace_request_exn state source 1L in
+    Alcotest.(check bool) "cold resume starts one fresh read and shares it" true
+      (request.lwr_intent = Snapshot_read.Refresh
+       && begin_local_workspace_read state ~intent:Snapshot_read.Poll ~source
+            ~base_path:state.local_base_path ~started_ns:2L = None);
+    ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source request
+      (if succeeds then Ok () else Error "initial source failure"));
+    Alcotest.(check bool) "cold source completion cannot retry itself" false
+      (Local_read_order.has_followup (local_source_order state source));
+    if succeeds then begin
+      note_local_source_observer_resume state source;
+      Alcotest.(check bool) "an observed current source needs no further resume read" false
+        (Local_read_order.has_followup (local_source_order state source))
+    end
+  ) [false; true]) [Local_keepers; Local_work]
+
+let test_observer_resume_recovery_retires_with_workspace () =
+  let open Masc_tui_types in
+  List.iter (fun source -> List.iter (fun fail_before_retirement ->
+    let state, _, _ = local_keeper_source_fixture () in
+    let old = local_workspace_request_exn state source 1L in
+    note_local_source_observer_resume state source;
+    if fail_before_retirement then
+      ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source old (Error "retired failure"));
+    suspend_workspace_readings state;
+    state.workspace_identity <- Workspace_identity_match_unconfirmed "new scope unconfirmed";
+    note_local_source_observer_resume state source;
+    Alcotest.(check bool) "retired credit cannot owe a read under unconfirmed authority" true
+      (not (Local_read_order.in_flight (local_source_order state source))
+       && not (Local_read_order.has_followup (local_source_order state source)));
+    state.workspace_identity <- Workspace_identity_match;
+    note_local_source_observer_resume state source;
+    note_local_source_observer_resume state source;
+    Alcotest.(check bool) "confirmed current scope can owe one missing observation" true
+      (Local_read_order.has_followup (local_source_order state source));
+    let current = local_workspace_request_exn state source 2L in
+    Alcotest.(check bool) "retired completion cannot settle the successor" true
+      (take_local_workspace_read ~is_observed:(Fun.const true) state ~source old (Error "late failure") = None
+       && Local_read_order.in_flight (local_source_order state source));
+    ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source current (Error "successor failure"));
+    Alcotest.(check bool) "new initial failure cannot inherit retired fallback credit" false
+      (Local_read_order.has_followup (local_source_order state source));
+    state.workspace_identity <- Workspace_identity_match_unconfirmed "rechecking";
+    note_local_source_observer_resume state source;
+    Alcotest.(check bool) "unconfirmed workspace cannot register resume recovery" false
+      (Local_read_order.has_followup (local_source_order state source))
+  ) [false; true]) [Local_keepers; Local_work]
 
 let test_local_refresh_burst_keeps_active_read_and_one_followup () =
   let open Masc_tui_types in
@@ -2026,14 +2297,14 @@ let test_local_refresh_burst_keeps_active_read_and_one_followup () =
      | Some (held, _) -> held == new_token
      | None -> false);
   Alcotest.(check bool) "duplicate earlier result cannot settle the followup" true
-    (take_local_workspace_read state ~source:Local_keepers active (Error "duplicate") = None
+    (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_keepers active (Error "duplicate") = None
      && Local_read_order.in_flight state.local_keeper_read_order);
   apply_metadata_observation state followup metadata;
   Alcotest.(check bool) "followup covers the accumulated burst" true
     (Local_read_order.covers state.local_keeper_read_order required
      && not (Local_read_order.has_followup state.local_keeper_read_order));
   Alcotest.(check bool) "optional Work kept its own active request" true
-    (take_local_workspace_read state ~source:Local_work work (Ok ()) = Some (Ok ()))
+    (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work work (Ok ()) = Some (Ok ()))
 
 let test_created_keeper_waits_for_owned_metadata_without_work () =
   let open Masc_tui_types in
@@ -2079,7 +2350,7 @@ let test_created_keeper_waits_for_owned_metadata_without_work () =
        composer.target = Masc_tui_composer.Ready created.k_name
        && Masc_tui_composer_projection.classify_key state Masc_tui_composer.send_key = Masc_tui_composer.Send created.k_name)
   end;
-  ignore (take_local_workspace_read state ~source:Local_work work (Error "optional work unavailable"));
+  ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work work (Error "optional work unavailable"));
   Alcotest.(check bool) "Work failure cannot revoke creation coverage" true
     (keeper_available_for_new_message state created.k_name)) [false; true]
 
@@ -2100,7 +2371,7 @@ let test_deleted_keeper_reconciles_after_fresh_metadata () =
     (state.view = Keepers Keeper_list && state.keepers = [survivor]
      && not (keeper_available_for_new_message state keeper.k_name));
   Alcotest.(check bool) "late older rows cannot restore deleted Keeper" true
-    (take_local_workspace_read state ~source:Local_keepers old (Ok metadata) = None);
+    (take_local_workspace_read ~is_observed:Masc_tui_loader.local_keepers_observed state ~source:Local_keepers old (Ok metadata) = None);
   Alcotest.(check string) "reconciliation retains draft"
     "retained draft" (Masc_tui_message_input.contents state.msg_input)
 
@@ -2132,7 +2403,7 @@ let test_failed_read_keeps_followup_and_withdrawal_retires_it () =
   let state, _, _ = local_keeper_source_fixture () in
   let active = local_workspace_request_exn state Local_work 1L in
   ignore (request_local_refresh state Local_work 2L);
-  ignore (take_local_workspace_read state ~source:Local_work active (Error "read failed"));
+  ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work active (Error "read failed"));
   Alcotest.(check bool) "owned failure leaves accumulated demand eligible" true
     (state.local_workspace = Local_workspace_failed "read failed"
      && Local_read_order.has_followup state.local_workspace_read_order);
@@ -2142,10 +2413,10 @@ let test_failed_read_keeps_followup_and_withdrawal_retires_it () =
   state.workspace_identity <- Workspace_identity_match;
   Alcotest.(check bool) "withdrawal retires active read and queued demand" true
     (not (Local_read_order.has_followup state.local_workspace_read_order)
-     && take_local_workspace_read state ~source:Local_work followup (Ok ()) = None);
+     && take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work followup (Ok ()) = None);
   let resumed = local_workspace_request_exn state Local_work 5L in
   Alcotest.(check bool) "reconfirmed workspace can observe a new source read" true
-    (take_local_workspace_read state ~source:Local_work resumed (Ok ()) = Some (Ok ()))
+    (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work resumed (Ok ()) = Some (Ok ()))
 
 let test_observer_machine_only_follows_control () =
   let open Masc_tui_types in
@@ -2507,7 +2778,7 @@ let test_keeper_metadata_admits_input_before_work_completes () =
     ; lr_task_payloads = Masc_tui_task_payloads.empty; lr_tasks_error = None; lr_task_flow = None
     ; lr_operator_stalled = Masc_tui_agenda.Read []; lr_goal_task_links = Goal_links_not_read
     ; lr_goals_to_confirm = Masc_tui_agenda.Read [] } in
-  (match take_local_workspace_read state ~source:Local_work work (Ok work_reading) with
+  (match take_local_workspace_read ~is_observed:Masc_tui_loader.local_workspace_observed state ~source:Local_work work (Ok work_reading) with
    | Some (Ok observed) -> Masc_tui_loader.apply_local_workspace state observed
    | Some (Error _) | None -> Alcotest.fail "work result was not admitted");
   Alcotest.(check bool) "later work cannot replace metadata or revoke input" true
@@ -2523,7 +2794,7 @@ let test_local_source_failures_are_independent () =
   Masc_tui_message_input.insert state.msg_input "original draft survives metadata failure";
   let work = local_workspace_request_exn state Local_work 5L in
   let required = local_workspace_request_exn state Local_keepers 6L in
-  ignore (take_local_workspace_read state ~source:Local_work work (Error "archive unavailable"));
+  ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work work (Error "archive unavailable"));
   Alcotest.(check bool) "work failure leaves metadata pending and unmodified" true
     (state.local_workspace = Local_workspace_failed "archive unavailable"
      && state.local_keepers = Local_workspace_unread
@@ -2532,7 +2803,7 @@ let test_local_source_failures_are_independent () =
   Alcotest.(check bool) "work failure does not prevent metadata-authorized input" true
     (keeper_available_for_new_message state keeper.k_name);
   let retry = local_workspace_request_exn state Local_keepers 7L in
-  ignore (take_local_workspace_read state ~source:Local_keepers retry (Error "metadata unavailable"));
+  ignore (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_keepers retry (Error "metadata unavailable"));
   Alcotest.(check bool) "metadata failure withdraws input without rewriting work state" true
     (not (keeper_available_for_new_message state keeper.k_name)
      && state.local_workspace = Local_workspace_failed "archive unavailable"
@@ -2673,21 +2944,21 @@ let test_local_source_tickets_cannot_cross_or_survive_suspension () =
   Alcotest.(check int) "source counters may legitimately coincide"
     (Local_read_order.request_id work.lwr_request) (Local_read_order.request_id required.lwr_request);
   Alcotest.(check bool) "matching numeric ticket cannot spend the other source owner" true
-    (take_local_workspace_read state ~source:Local_keepers work (Ok ()) = None
-     && take_local_workspace_read state ~source:Local_work required (Ok ()) = None
+    (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_keepers work (Ok ()) = None
+     && take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work required (Ok ()) = None
      && Local_read_order.in_flight state.local_keeper_read_order
      && Local_read_order.in_flight state.local_workspace_read_order);
   suspend_workspace_readings state;
   let new_work = local_workspace_request_exn state Local_work 7L in
   let new_required = local_workspace_request_exn state Local_keepers 8L in
   Alcotest.(check bool) "same-path late results cannot retire either successor" true
-    (take_local_workspace_read state ~source:Local_work work (Error "old work") = None
-     && take_local_workspace_read state ~source:Local_keepers required (Error "old metadata") = None
+    (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work work (Error "old work") = None
+     && take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_keepers required (Error "old metadata") = None
      && Local_read_order.in_flight state.local_keeper_read_order
      && Local_read_order.in_flight state.local_workspace_read_order);
   Alcotest.(check bool) "each current source still settles independently" true
-    (take_local_workspace_read state ~source:Local_work new_work (Ok ()) = Some (Ok ())
-     && take_local_workspace_read state ~source:Local_keepers new_required (Ok ()) = Some (Ok ()))
+    (take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_work new_work (Ok ()) = Some (Ok ())
+     && take_local_workspace_read ~is_observed:(Fun.const true) state ~source:Local_keepers new_required (Ok ()) = Some (Ok ()))
 
 let test_question_origin_survives_answer_and_workspace_change () =
   let open Masc_tui_types in
@@ -6758,6 +7029,22 @@ let () =
             test_local_read_refuses_retired_epoch_and_wrong_path
         ; Alcotest.test_case "local read failure releases its slot for retry" `Quick
             test_local_read_failure_settles_and_can_be_retried
+        ; Alcotest.test_case "empty and unrequested optional local sources are observed" `Quick
+            test_local_observation_accepts_empty_and_optional_unrequested_sources
+        ; Alcotest.test_case "returned source failures retain resume recovery" `Quick
+            test_returned_source_failures_keep_resume_recovery
+        ; Alcotest.test_case "observer resume recovers an already failed local read" `Quick
+            (check_observer_resume_recovers_local_failure ~failure_after_resume:false)
+        ; Alcotest.test_case "observer resume recovers a later failing local read" `Quick
+            (check_observer_resume_recovers_local_failure ~failure_after_resume:true)
+        ; Alcotest.test_case "healthy observer resume keeps local reads settled" `Quick
+            test_observer_resume_keeps_healthy_local_reads
+        ; Alcotest.test_case "observer resume preserves an already owed newer local read" `Quick
+            test_observer_resume_preserves_already_owed_local_read
+        ; Alcotest.test_case "observer resume reads a cold current source once" `Quick
+            test_observer_resume_reads_a_cold_current_source_once
+        ; Alcotest.test_case "observer resume recovery retires with workspace" `Quick
+            test_observer_resume_recovery_retires_with_workspace
         ; Alcotest.test_case "metadata admits input before work completes" `Quick
             test_keeper_metadata_admits_input_before_work_completes
         ; Alcotest.test_case "local source failures remain independent" `Quick

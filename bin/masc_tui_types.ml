@@ -343,19 +343,27 @@ module Local_read_order : sig
   val request_revision : request -> revision
   val start : intent:Snapshot_read.intent -> t -> t * (request * Snapshot_read.intent) option
   val settle : t -> request -> observed:bool -> t option
+  (** A complete event replay cannot repair a failed source observation. Queue
+      that read again, or retain one failure-only followup until a successful
+      read covers the demand present at resume. Older attempts and already owed
+      work preserve it; the followup does not retry itself. An idle source with
+      unmet demand requests one fresh observation without inherited credit. *)
+  val after_observer_resume : t -> t
   val invalidate : t -> t
 end = struct
   type revision = int64
   type request = { ticket : Snapshot_read.request; revision : revision }
   type followup = No_followup | Refresh_requested
+  type recovery = No_recovery | Read_failed | Retry_if_failed of revision
   type t = {
     tickets : Snapshot_read.t;
     demanded : revision;
     observed : revision option;
     followup : followup;
+    recovery : recovery;
   }
   let idle = { tickets = Snapshot_read.idle; demanded = 0L;
-               observed = None; followup = No_followup }
+               observed = None; followup = No_followup; recovery = No_recovery }
   let in_flight state = Snapshot_read.in_flight state.tickets
   let has_followup state = state.followup = Refresh_requested
   let demanded_revision state = state.demanded
@@ -376,16 +384,34 @@ end = struct
         | No_followup -> Snapshot_read.Poll
         | Refresh_requested -> Snapshot_read.Refresh in
       let tickets, ticket = Snapshot_read.start ~intent:Snapshot_read.Poll state.tickets in
-      let next = {state with tickets; followup = No_followup} in
+      let recovery = match state.recovery with
+        | Retry_if_failed _ -> state.recovery
+        | No_recovery | Read_failed -> No_recovery in
+      let next = {state with tickets; followup = No_followup; recovery} in
       next, Option.map (fun ticket -> {ticket; revision = state.demanded}, intent) ticket
   let settle state request ~observed =
     Option.map (fun tickets ->
+        let followup, recovery = match state.recovery with
+          | Retry_if_failed required when Int64.compare request.revision required < 0 ->
+              state.followup, state.recovery
+          | Retry_if_failed _ ->
+              if observed then state.followup, No_recovery else Refresh_requested, Read_failed
+          | No_recovery | Read_failed ->
+              state.followup, (if observed then No_recovery else Read_failed) in
         {state with tickets;
-          observed = if observed then Some request.revision else state.observed})
+          observed = if observed then Some request.revision else state.observed;
+          followup; recovery})
       (Snapshot_read.settle state.tickets request.ticket)
+  let after_observer_resume state =
+    if in_flight state then {state with recovery = Retry_if_failed state.demanded}
+    else match state.recovery with
+      | Read_failed -> {state with followup = Refresh_requested}
+      | No_recovery when not (covers state state.demanded) ->
+          {state with followup = Refresh_requested}
+      | No_recovery | Retry_if_failed _ -> state
   let invalidate state =
     {state with tickets = Snapshot_read.invalidate state.tickets;
-      observed = None; followup = No_followup}
+      observed = None; followup = No_followup; recovery = No_recovery}
 end
 
 module Surface_read_source = struct
@@ -12122,6 +12148,11 @@ let set_local_source_order (state : state) source reading =
   | Local_keepers -> state.local_keeper_read_order <- reading
   | Local_work -> state.local_workspace_read_order <- reading
 
+let note_local_source_observer_resume (state : state) source =
+  if state.workspace_identity = Workspace_identity_match then
+    set_local_source_order state source
+      (Local_read_order.after_observer_resume (local_source_order state source))
+
 let local_source_observation (state : state) = function
   | Local_keepers -> state.local_keeper_observation
   | Local_work -> state.local_work_observation
@@ -12208,20 +12239,21 @@ let begin_local_workspace_read (state : state) ~intent ~source ~base_path ~start
           lwr_previous_tasks = (match source with
             | Local_work -> state.task_payloads | Local_keepers -> Task_payloads.empty) }) request
 
-let take_local_workspace_read (state : state) ~source request result =
+let take_local_workspace_read (state : state) ~source ~is_observed request result =
   let observation=request.lwr_observation in
   let reject reason = Local_read_observation.observe observation (Ui_admission (Rejected reason));None in
   if source <> request.lwr_source then reject Wrong_source
   else if state.workspace_identity <> Workspace_identity_match
      || request.lwr_authority <> state.workspace_authority
      || not (String.equal request.lwr_base_path state.local_base_path) then reject Workspace_withdrawn
-  else match Local_read_order.settle (local_source_order state source) request.lwr_request
-      ~observed:(Result.is_ok result) with
+  else
+    let observed = match result with Ok reading -> is_observed reading | Error _ -> false in
+    match Local_read_order.settle (local_source_order state source) request.lwr_request ~observed with
     | None -> reject Superseded
     | Some reading ->
         set_local_source_order state source reading;
         Local_read_observation.observe observation (Ui_admission
-          (match result with Ok _ -> Accepted | Error _ -> Accepted_failure));
+          (if observed then Accepted else Accepted_failure));
         (match result with
          | Ok _ -> ()
          | Error detail ->

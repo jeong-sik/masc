@@ -92,6 +92,13 @@ type model_message = private
           produce neither canonical evidence nor an exact-call instruction. *)
   ; replay_evidence : model_evidence list
   ; instruction_resolutions : Keeper_event_queue.hitl_resolution list
+  ; approval_input_bindings :
+      (Keeper_chat_delivery_identity.approval_input_binding list, string) result
+      (** Prepared canonical input identities, in source order. Replay inputs
+          exclude execution/recovery journal disposition; singleton notices
+          identify their own rendered fragment without the base user cue.
+          These are neither admission witnesses nor provider wire-byte hashes.
+          Failure drops optional tool projection and never grants replay/ACK. *)
   }
 (** Each resolution keeps its own evidence identity. The text contains the
     original user input once; a list grants neither replay nor queue ACK

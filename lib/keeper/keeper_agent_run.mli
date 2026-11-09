@@ -259,6 +259,11 @@ val run_turn
   -> ?trace_link:string * string
   -> ?continuation_channel:Keeper_continuation_channel.t
   -> ?hitl_resolutions:Keeper_hitl_resolution_batch.t
+  -> ?on_gate_inputs_prepared:
+       (turn_ref:Ids.Turn_ref.t -> Keeper_gate_replay.model_message -> unit)
+       (** Observation of the actual prepared input and actual turn owner.
+           Non-cancellation callback failures are logged, never admission,
+           provider dispatch, grant or queue ACK authority. *)
   -> ?on_gate_deferred:(string -> unit)
   -> ?on_checkpoint_stage:(Agent_core.Agent.checkpoint_stage -> unit)
   -> unit

@@ -208,7 +208,8 @@ let existing_approval_lifecycle_at_slot
                 | Fusion_run _
                 | Workspace_message _
                 | Connector_message _
-                | Approval_lifecycle _ )
+                | Approval_lifecycle _
+                | Autonomous_turn _ )
             ; _
             } )
       , (None | Some _) ) -> None)

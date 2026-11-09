@@ -586,6 +586,8 @@ type model_message =
   ; resolutions : Keeper_event_queue.hitl_resolution list
   ; replay_evidence : model_evidence list
   ; instruction_resolutions : Keeper_event_queue.hitl_resolution list
+  ; approval_input_bindings :
+      (Keeper_chat_delivery_identity.approval_input_binding list, string) result
   }
 
 type resolution_input =
@@ -627,7 +629,8 @@ let input_replay_execution = function
   | Approved_replay { execution; _ } -> Some execution
 
 let plain_model_message text =
-  { text; resolutions = []; replay_evidence = []; instruction_resolutions = [] }
+  { text; resolutions = []; replay_evidence = []; instruction_resolutions = []
+  ; approval_input_bindings = Ok [] }
 
 let replay_evidence_effect_to_string = function
   | Evidence_applied -> "applied"
@@ -668,9 +671,12 @@ let replay_evidence_fragment ?(include_journal = true) evidence =
   |> Inference_utils.sanitize_text_utf8
 ;;
 
+let canonical_evidence_fingerprint evidence =
+  payload_fingerprint (replay_evidence_json ~include_journal:false evidence)
+;;
+
 let approval_input evidence =
-  let stable = replay_evidence_json ~include_journal:false evidence in
-  let fingerprint = Agent_core_sha256.(digest_string stable |> to_hex) in
+  let fingerprint = canonical_evidence_fingerprint evidence in
   match Keeper_approval_input_admission.identity
           ~approval_id:evidence.approval_id ~evidence_fingerprint:fingerprint with
   | Error _ as error -> error
@@ -702,6 +708,7 @@ let replay_model_message
   ; resolutions = []
   ; replay_evidence = [ replay_evidence ]
   ; instruction_resolutions = []
+  ; approval_input_bindings = Ok []
   }
 ;;
 
@@ -980,9 +987,38 @@ let message_for_stored_resolution ~base_path ~user_message = function
   | None -> plain_model_message user_message
 ;;
 
-let user_message_with_hitl_resolution ~base_path ~user_message resolution =
-  let message = message_for_stored_resolution ~base_path ~user_message resolution in
-  { message with resolutions = Option.to_list resolution }
+let binding_for_fragment ~(resolution : Keeper_event_queue.hitl_resolution) fragment =
+  let input = match fragment.replay_evidence with
+    | [] -> Ok ("resolution_fragment", payload_fingerprint fragment.text)
+    | [ evidence ] when String.equal evidence.approval_id resolution.approval_id ->
+      Ok ("canonical_replay_evidence", canonical_evidence_fingerprint evidence)
+    | [ _ ] -> Error "prepared Gate evidence belongs to another approval"
+    | _ :: _ :: _ -> Error "one resolution produced multiple canonical evidence inputs" in
+  Result.bind input (fun (input_kind, input_fingerprint) ->
+    let decision = match resolution.decision with
+      | Keeper_event_queue.Hitl_approved -> `String "approved"
+      | Keeper_event_queue.Hitl_rejected rationale -> `Assoc [ "rejected", `String rationale ] in
+    let source = `Assoc
+      [ "approval_id", `String resolution.approval_id; "decision", decision
+      ; "channel", Keeper_continuation_channel.to_yojson resolution.channel
+      ; "input_kind", `String input_kind; "input_fingerprint", `String input_fingerprint ] in
+    Keeper_chat_delivery_identity.approval_input_binding
+      ~approval_id:resolution.approval_id
+      ~input_fingerprint:(payload_fingerprint (Yojson.Safe.to_string source)))
+;;
+
+let bind_model_fragment ~resolution fragment =
+  { fragment with resolutions = [ resolution ]
+  ; approval_input_bindings =
+      binding_for_fragment ~resolution fragment |> Result.map (fun binding -> [ binding ]) }
+;;
+
+let user_message_with_hitl_resolution ~base_path ~user_message = function
+  | None -> plain_model_message user_message
+  | Some resolution ->
+    let fragment = message_for_stored_resolution ~base_path ~user_message:"" (Some resolution)
+      |> bind_model_fragment ~resolution in
+    { fragment with text = user_message ^ fragment.text }
 ;;
 
 let compose_model_message
@@ -990,9 +1026,9 @@ let compose_model_message
       ~user_message
       ~inputs
   =
-  let text, resolutions_rev, evidence_rev, instructions_rev =
+  let text, resolutions_rev, evidence_rev, instructions_rev, bindings_rev =
     List.fold_left
-      (fun (text, resolutions_rev, evidence_rev, instructions_rev) input ->
+      (fun (text, resolutions_rev, evidence_rev, instructions_rev, bindings_rev) input ->
          let resolution =
            match input with
            | Stored_resolution resolution
@@ -1002,10 +1038,10 @@ let compose_model_message
            match input with
            | Stored_resolution resolution ->
              user_message_with_hitl_resolution
-               ~base_path ~user_message:text (Some resolution)
+               ~base_path ~user_message:"" (Some resolution)
            | Approved_replay { resolution; execution = { outcome = Not_applicable; _ } } ->
              user_message_with_hitl_resolution
-               ~base_path ~user_message:text (Some resolution)
+               ~base_path ~user_message:"" (Some resolution)
            | Approved_replay
                { resolution
                ; execution =
@@ -1015,18 +1051,29 @@ let compose_model_message
                    ; _ }
                } ->
              append_model_evidence
-               ~approval_id:resolution.approval_id ~user_message:text outcome
+               ~approval_id:resolution.approval_id ~user_message:"" outcome
+             |> bind_model_fragment ~resolution
          in
-         next.text,
+         text ^ next.text,
          resolution :: resolutions_rev,
          List.rev_append next.replay_evidence evidence_rev,
-         List.rev_append next.instruction_resolutions instructions_rev)
-      (user_message, [], [], []) inputs
+         List.rev_append next.instruction_resolutions instructions_rev,
+         Result.bind bindings_rev (fun reversed ->
+           Result.map (fun bindings -> List.rev_append bindings reversed)
+             next.approval_input_bindings))
+      (user_message, [], [], [], Ok []) inputs
   in
+  let approval_input_bindings = Result.bind bindings_rev (fun reversed ->
+    let bindings = List.rev reversed in
+    match bindings with
+    | [] -> Ok []
+    | _ :: _ -> Keeper_chat_delivery_identity.validate_approval_input_bindings bindings
+      |> Result.map (fun () -> bindings)) in
   { text
   ; resolutions = List.rev resolutions_rev
   ; replay_evidence = List.rev evidence_rev
   ; instruction_resolutions = List.rev instructions_rev
+  ; approval_input_bindings
   }
 ;;
 

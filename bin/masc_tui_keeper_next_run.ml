@@ -186,8 +186,23 @@ let unknown_until_expiry row =
   | Error _ -> unknown_row
 ;;
 
+(* The request's own next due. The server sends it as [next_due_at_iso]
+   while the request is Scheduled or Due, and as [due_at_iso] in every status
+   (Server_dashboard_schedule_projection [schedule_request_dashboard_json]).
+   The strip walks the recurrence from it, not from the delivered occurrence
+   that [Masc_tui_types.schedule_row_due_time] shows while that one is still
+   unsettled: the runner steps from the request. *)
+let request_due_time (row : Masc_tui_types.schedule_row) =
+  let at =
+    match row.sch_next_due_at_iso with
+    | Some _ as at -> at
+    | None -> row.sch_due_at_iso
+  in
+  Option.bind at Time_codec.parse_rfc3339_opt
+;;
+
 let row_wakes window (row : Masc_tui_types.schedule_row) =
-  match Masc_tui_types.schedule_row_due_time row, row_expiry row with
+  match request_due_time row, row_expiry row with
   | None, (Ok _ | Error _) | Some _, Error _ -> unknown_row
   | Some first, Ok stops_at ->
       let on_strip at =
@@ -219,14 +234,11 @@ let row_wakes window (row : Masc_tui_types.schedule_row) =
        | Ok Schedule_domain.One_shot ->
            { known = first_known; unknown_after = None; stops_at }
        | Ok (Schedule_domain.Interval { interval_sec }) ->
-           (* The occurrences stay on [first + k * period]. A quotient that
-              rounds just below [k] would give [cursor] back, so that case
-              takes the next [k]. *)
+           (* The runner's own step ([Schedule_domain.next_due_after]), so the
+              occurrences stay on [first + k * period]. *)
            let period = float_of_int interval_sec in
            repeat (fun cursor ->
-             let k = Float.floor ((cursor -. first) /. period) +. 1. in
-             let at = first +. (k *. period) in
-             Some (if at > cursor then at else first +. ((k +. 1.) *. period)))
+             Schedule_domain.next_periodic_due_after ~period ~now:cursor ~anchor:first)
        | Ok ((Schedule_domain.Daily _ | Schedule_domain.Cron _) as recurrence) ->
            repeat (fun cursor -> Schedule_domain.first_due_after ~now:cursor recurrence))
 ;;

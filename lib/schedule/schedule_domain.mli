@@ -195,6 +195,12 @@ val first_due_after : now:float -> recurrence -> float option
 (** Compute the first due time for calendar recurrences that do not need an
     explicit [due_at] anchor. Returns [None] for [One_shot] and [Interval]. *)
 
+val next_periodic_due_after : period:float -> now:float -> anchor:float -> float option
+(** The first time on [anchor + k * period] after [now] for a whole [k]:
+    [anchor] itself while it is after [now], [None] when [period <= 0].
+    {!next_due_after} steps an [Interval] with it from the request's
+    [due_at]. *)
+
 val next_due_after : now:float -> schedule_request -> float option
 val reschedule_after_due_signal : now:float -> schedule_request -> schedule_request option
 

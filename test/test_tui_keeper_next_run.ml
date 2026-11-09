@@ -455,6 +455,46 @@ let test_interval_wakes_every_period () =
     (strip_of [ scheduled ~h:0 ~m:0 ~recurrence:(interval 600) () ])
 ;;
 
+(* A 45-minute interval from yesterday's 23:50 stays on its own grid: 00:35,
+   01:20, 02:05 and on, so every third slot after the now slot is empty. The
+   missed 23:50 is the now slot's one wake. *)
+let test_an_interval_stays_on_its_own_grid () =
+  Alcotest.check strip "23:50 + k * 45 min"
+    (List.init (ahead + 1) (fun index ->
+       Masc_tui_keeper_next_run.Wakes (if index = 0 || index mod 3 <> 0 then 1 else 0)))
+    (strip_of
+       [ make_row ~keeper_name:"alpha" ~due_at_iso:"2026-11-06T23:50:00Z"
+           ~recurrence:(interval 2700) () ])
+;;
+
+(* While the 00:00 occurrence is still queued, the request already says
+   00:10. The strip walks from the request, as the runner steps it. *)
+let test_strip_walks_from_the_request_due () =
+  let row =
+    make_row ~keeper_name:"alpha" ~due_at_iso:(iso ~h:0 ~m:10) ~next_due_at_iso:(iso ~h:0 ~m:10)
+      ~occurrence_stage:Masc.Tui_schedule_observation.Queued
+      ~occurrence_due_at_iso:(iso ~h:0 ~m:0) ~recurrence:(interval 600) ()
+  in
+  Alcotest.check strip "00:10 and 00:20 in the now slot, then three a slot"
+    (List.init (ahead + 1) (fun index ->
+       Masc_tui_keeper_next_run.Wakes (if index = 0 then 2 else 3)))
+    (strip_of [ row ])
+;;
+
+(* Two days of missed 03:00 runs are one firing in the now slot, and the
+   next 03:00 is today's. *)
+let test_a_row_missed_by_more_than_a_day_counts_once () =
+  let missed recurrence =
+    strip_of [ make_row ~keeper_name:"alpha" ~due_at_iso:"2026-11-05T03:00:00Z" ~recurrence () ]
+  in
+  Alcotest.check strip "daily"
+    (once_in [ 0; 6 ])
+    (missed (Ok (Schedule_domain.Daily { hour = 3; minute = 0; second = 0; timezone = "UTC" })));
+  Alcotest.check strip "cron"
+    (once_in [ 0; 6 ])
+    (missed (Ok (Schedule_domain.Cron { expression = "0 3 * * *"; timezone = "UTC" })))
+;;
+
 (* A due before the now slot and not late: the runner fires it once, so the
    occurrences between it and the slot start are not counted. An occurrence
    on the slot start, 00:00, counts in the now slot beside the missed due. *)
@@ -713,6 +753,12 @@ let () =
         ] )
     ; ( "wake strip"
       , [ Alcotest.test_case "interval" `Quick test_interval_wakes_every_period
+        ; Alcotest.test_case "interval off the slot grid" `Quick
+            test_an_interval_stays_on_its_own_grid
+        ; Alcotest.test_case "walks from the request due" `Quick
+            test_strip_walks_from_the_request_due
+        ; Alcotest.test_case "missed by more than a day" `Quick
+            test_a_row_missed_by_more_than_a_day_counts_once
         ; Alcotest.test_case "occurrence on the slot start" `Quick
             test_an_occurrence_on_the_slot_start_counts
         ; Alcotest.test_case "same strip within one slot" `Quick

@@ -38,8 +38,9 @@ val wake_strip :
     same 1800-second boundaries as the pulse. [ahead] below 0 gives no slot.
 
     The wakes are the Keeper's schedule rows walked through their recurrence:
-    the first is {!Masc_tui_types.schedule_row_due_time}, an [Interval] adds
-    its period, and [Daily] and [Cron] repeat
+    the first is the request's next due ([sch_next_due_at_iso], else
+    [sch_due_at_iso]), an [Interval] steps with
+    [Schedule_domain.next_periodic_due_after], and [Daily] and [Cron] repeat
     [Schedule_domain.first_due_after]. A wake at or after the row's expiry is
     not counted. Every occurrence inside the now slot counts in it, whether
     it lies before or after [now], so the strip is the same for every [now]

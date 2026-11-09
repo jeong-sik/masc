@@ -1,5 +1,3 @@
-open Masc_domain
-
 let warn_telemetry_drop ~(event : Workspace_telemetry_drop_event.t) exn =
   let exn_str = Printexc.to_string exn in
   let event_family = Workspace_telemetry_drop_event.family_to_wire event in

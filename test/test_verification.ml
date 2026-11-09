@@ -1173,27 +1173,33 @@ let test_system_llm_rejection_is_durably_delivered_to_producer_keeper () =
         ~authority:(Masc_domain.System_llm_agent { agent_run_id = "system-agent-test" })
     in
     (match delivery with
-     | Masc.Completion_authority_wakeup.Durable_deferred
-         { keeper_name = actual_keeper
-         ; wakeup = Masc.Keeper_registry.Deferred_unregistered
-         }
+     | Masc.Completion_authority_wakeup.Delivery
+         (Masc.Keeper_task_outcome_wake.Durable_deferred
+            { keeper_name = actual_keeper
+            ; wakeup = Masc.Keeper_registry.Deferred_unregistered
+            })
        ->
        Alcotest.(check string)
          "rejection routes to the canonical producer Keeper"
          keeper_name
          actual_keeper
-     | Masc.Completion_authority_wakeup.Durable_deferred _ ->
+     | Masc.Completion_authority_wakeup.Delivery
+         (Masc.Keeper_task_outcome_wake.Durable_deferred _) ->
        Alcotest.fail "unregistered producer Keeper wake should be deferred"
-     | Masc.Completion_authority_wakeup.Signaled _ ->
+     | Masc.Completion_authority_wakeup.Delivery
+         (Masc.Keeper_task_outcome_wake.Signaled _) ->
        Alcotest.fail "unregistered producer Keeper cannot be signaled"
-     | Masc.Completion_authority_wakeup.Durable_wake_failed { detail; _ }
-     | Masc.Completion_authority_wakeup.Durable_queue_failed { detail; _ } ->
+     | Masc.Completion_authority_wakeup.Delivery
+         ( Masc.Keeper_task_outcome_wake.Durable_wake_failed { detail; _ }
+         | Masc.Keeper_task_outcome_wake.Durable_queue_failed { detail; _ } ) ->
        Alcotest.fail detail
-     | Masc.Completion_authority_wakeup.Producer_identity_lookup_failed { detail; _ } ->
+     | Masc.Completion_authority_wakeup.Delivery
+         (Masc.Keeper_task_outcome_wake.Producer_identity_lookup_failed { detail; _ }) ->
        Alcotest.fail detail
      | Masc.Completion_authority_wakeup.Rejection_superseded _ ->
        Alcotest.fail "current committed rejection was superseded"
-     | Masc.Completion_authority_wakeup.Unroutable_producer { producer; _ } ->
+     | Masc.Completion_authority_wakeup.Delivery
+         (Masc.Keeper_task_outcome_wake.Unroutable_producer { producer; _ }) ->
        Alcotest.failf "producer was unexpectedly unroutable: %s" producer);
     match Keeper_event_queue_persistence.load_result ~base_path ~keeper_name with
     | Error detail -> Alcotest.fail detail
@@ -1260,21 +1266,25 @@ let test_system_llm_rejection_prefers_registered_producer_binding () =
                   { agent_run_id = "system-agent-registered" })
          in
          (match delivery with
-          | Masc.Completion_authority_wakeup.Signaled { keeper_name = actual }
-          | Masc.Completion_authority_wakeup.Durable_deferred
-              { keeper_name = actual; _ } ->
+          | Masc.Completion_authority_wakeup.Delivery
+              ( Masc.Keeper_task_outcome_wake.Signaled { keeper_name = actual }
+              | Masc.Keeper_task_outcome_wake.Durable_deferred
+                  { keeper_name = actual; _ } ) ->
             Alcotest.(check string)
               "registered agent binding selects the registry keeper"
               keeper_name
               actual
-          | Masc.Completion_authority_wakeup.Durable_wake_failed { detail; _ }
-          | Masc.Completion_authority_wakeup.Durable_queue_failed { detail; _ } ->
+          | Masc.Completion_authority_wakeup.Delivery
+              ( Masc.Keeper_task_outcome_wake.Durable_wake_failed { detail; _ }
+              | Masc.Keeper_task_outcome_wake.Durable_queue_failed { detail; _ } ) ->
             Alcotest.fail detail
-          | Masc.Completion_authority_wakeup.Producer_identity_lookup_failed { detail; _ } ->
+          | Masc.Completion_authority_wakeup.Delivery
+              (Masc.Keeper_task_outcome_wake.Producer_identity_lookup_failed { detail; _ }) ->
             Alcotest.fail detail
           | Masc.Completion_authority_wakeup.Rejection_superseded _ ->
             Alcotest.fail "current registered rejection was superseded"
-          | Masc.Completion_authority_wakeup.Unroutable_producer { producer; _ } ->
+          | Masc.Completion_authority_wakeup.Delivery
+              (Masc.Keeper_task_outcome_wake.Unroutable_producer { producer; _ }) ->
             Alcotest.failf "registered producer was unexpectedly unroutable: %s" producer);
          match
            Keeper_event_queue_persistence.load_result
@@ -1326,21 +1336,24 @@ let test_system_llm_rejection_does_not_derive_unregistered_keeper () =
                (Masc_domain.System_llm_agent
                   { agent_run_id = "system-agent-unregistered" })
          with
-         | Masc.Completion_authority_wakeup.Unroutable_producer
-             { producer = actual; task_id } ->
+         | Masc.Completion_authority_wakeup.Delivery
+             (Masc.Keeper_task_outcome_wake.Unroutable_producer
+                { producer = actual; task_id }) ->
            Alcotest.(check string) "unroutable producer identity" producer actual;
            Alcotest.(check string)
              "unroutable task identity"
              expected_task_id
              task_id
-         | Masc.Completion_authority_wakeup.Producer_identity_lookup_failed { detail; _ } ->
+         | Masc.Completion_authority_wakeup.Delivery
+             (Masc.Keeper_task_outcome_wake.Producer_identity_lookup_failed { detail; _ }) ->
            Alcotest.fail detail
          | Masc.Completion_authority_wakeup.Rejection_superseded _ ->
            Alcotest.fail "current unroutable rejection was superseded"
-         | Masc.Completion_authority_wakeup.Signaled _
-         | Masc.Completion_authority_wakeup.Durable_deferred _
-         | Masc.Completion_authority_wakeup.Durable_wake_failed _
-         | Masc.Completion_authority_wakeup.Durable_queue_failed _ ->
+         | Masc.Completion_authority_wakeup.Delivery
+             ( Masc.Keeper_task_outcome_wake.Signaled _
+             | Masc.Keeper_task_outcome_wake.Durable_deferred _
+             | Masc.Keeper_task_outcome_wake.Durable_wake_failed _
+             | Masc.Keeper_task_outcome_wake.Durable_queue_failed _ ) ->
            Alcotest.fail "unregistered producer must not derive or enqueue a Keeper name")
   )
 

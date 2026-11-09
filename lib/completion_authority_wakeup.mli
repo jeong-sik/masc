@@ -3,24 +3,16 @@
     rejection is committed to the producer Keeper's queue first. The producer
     is resolved by {!Keeper_producer_route}: a live registry entry, then a
     Keeper meta file at the producer's name. A producer with neither is
-    {!Unroutable_producer} — no Keeper queue exists for it — while a meta file
-    this binary cannot decode is {!Producer_identity_lookup_failed}. *)
+    {!Keeper_task_outcome_wake.Unroutable_producer} — no Keeper queue exists
+    for it — while a meta file this binary cannot decode is
+    {!Keeper_task_outcome_wake.Producer_identity_lookup_failed}. *)
 
-type delivery =
-  | Signaled of { keeper_name : string }
-  | Durable_deferred of {
-      keeper_name : string;
-      wakeup : Keeper_registry.wakeup_outcome;
-    }
-  | Durable_wake_failed of { keeper_name : string; detail : string }
-  | Unroutable_producer of { producer : string; task_id : string }
-  | Producer_identity_lookup_failed of {
-      producer : string;
-      task_id : string;
-      detail : string;
-    }
-  | Durable_queue_failed of { keeper_name : string; detail : string }
+type rejection_outcome =
+  | Delivery of Keeper_task_outcome_wake.delivery
+      (** How the delivery to the producer Keeper ended; the approval path
+          ends in the same outcomes. *)
   | Rejection_superseded of { task_id : string; verification_id : string }
+      (** The rejection is no longer the pending one; nothing was written. *)
 
 val wake_rejected_producer :
   config:Workspace_utils_backend_setup.config ->
@@ -29,7 +21,7 @@ val wake_rejected_producer :
   verification_id:string ->
   reason:string ->
   authority:Masc_domain.completion_authority ->
-  delivery
+  rejection_outcome
 (** Publishes only a still-pending current rejection. The Keeper intake lock
     precedes the backlog lock and lease fence. Queue observers and the live
     wake run after both locks are released. Already delivered or superseded
@@ -45,7 +37,8 @@ val release_unroutable_task :
     string )
   result
 (** The step {!reconcile_pending} takes after {!wake_rejected_producer}
-    answered {!Unroutable_producer}: return the Task to the backlog, asking
+    answered {!Keeper_task_outcome_wake.Unroutable_producer}: return the Task
+    to the backlog, asking
     the route again inside the backlog lock. [Error] is the answer
     {!reconcile_pending} retains for the next interval: a Keeper queue or an
     undecodable Keeper meta appeared at the producer's name before the lock,
@@ -62,7 +55,8 @@ val reconcile_pending :
     Approval delivery never changes the completed Task back to an active state.
     A durable Keeper queue write precedes exact-key source acknowledgment.
     Identity lookup, queue and acknowledgement failures retain the obligation
-    for the next recovery. An {!Unroutable_producer} returns the Task to the
+    for the next recovery. An {!Keeper_task_outcome_wake.Unroutable_producer}
+    returns the Task to the
     backlog and is then acknowledged and counted in [unroutable]: retrying
     cannot create a Keeper queue, and a Task whose producer will never act
     again has to be claimable by someone else. The route is read once more

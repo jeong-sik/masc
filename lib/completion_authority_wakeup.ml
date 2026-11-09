@@ -1,20 +1,8 @@
 (** Durable verdict delivery to the producer Keeper after a completion
     authority settles submitted evidence. *)
 
-type delivery =
-  | Signaled of { keeper_name : string }
-  | Durable_deferred of {
-      keeper_name : string;
-      wakeup : Keeper_registry.wakeup_outcome;
-    }
-  | Durable_wake_failed of { keeper_name : string; detail : string }
-  | Unroutable_producer of { producer : string; task_id : string }
-  | Producer_identity_lookup_failed of {
-      producer : string;
-      task_id : string;
-      detail : string;
-    }
-  | Durable_queue_failed of { keeper_name : string; detail : string }
+type rejection_outcome =
+  | Delivery of Keeper_task_outcome_wake.delivery
   | Rejection_superseded of { task_id : string; verification_id : string }
 
 let wake_rejected_producer
@@ -25,12 +13,9 @@ let wake_rejected_producer
       ~reason
       ~authority
   =
-  match Keeper_producer_route.resolve ~config producer with
-  | Error detail ->
-    Producer_identity_lookup_failed { producer; task_id; detail }
-  | Ok Keeper_producer_route.No_keeper ->
-    Unroutable_producer { producer; task_id }
-  | Ok (Keeper_producer_route.Keeper keeper_name) ->
+  match Keeper_task_outcome_wake.producer_keeper ~config ~producer ~task_id with
+  | Error delivery -> Delivery delivery
+  | Ok keeper_name ->
     let rejection : Keeper_event_queue.completion_authority_rejection =
       { car_task_id = task_id
       ; car_verification_id = verification_id
@@ -56,7 +41,8 @@ let wake_rejected_producer
                 ~intake_token ~base_path:config.base_path keeper_name stimulus))
     in
     (match publication with
-     | Error detail -> Durable_queue_failed { keeper_name; detail }
+     | Error detail ->
+       Delivery (Keeper_task_outcome_wake.Durable_queue_failed { keeper_name; detail })
      | Ok Workspace_task_rejection_outbox.Superseded ->
        Rejection_superseded { task_id; verification_id }
      | Ok (Workspace_task_rejection_outbox.Published notify) ->
@@ -65,24 +51,7 @@ let wake_rejected_producer
           renders this durable rejection stimulus. Keeping that mutation out
           of the authority-to-queue boundary means a best-effort Keeper
           projection can never prevent durable delivery or the live wake. *)
-       (try
-          notify ();
-          match
-            Keeper_registry.wakeup_running
-              ~intent:Keeper_registry.Reactive_signal
-              ~base_path:config.base_path
-              keeper_name
-          with
-          | Keeper_registry.Signaled -> Signaled { keeper_name }
-          | ( Keeper_registry.Deferred_unregistered
-            | Keeper_registry.Deferred_not_running _
-            | Keeper_registry.Deferred_lifecycle _ ) as wakeup ->
-            Durable_deferred { keeper_name; wakeup }
-        with
-        | Eio.Cancel.Cancelled _ as exn -> raise exn
-        | exn ->
-          Durable_wake_failed
-            { keeper_name; detail = Printexc.to_string exn }))
+       Delivery (Keeper_task_outcome_wake.wake_producer_keeper ~notify ~config ~keeper_name))
 
 
 type recovery_report = { delivered : int; unroutable : int; retained : int }
@@ -210,13 +179,13 @@ let reconcile_rejections ~config =
                 ~task_id:item.task_id ~verification_id:item.verification_id
                 ~reason:item.reason ~authority:item.authority with
         | Rejection_superseded _ -> Ok `Superseded
-        | Signaled _ -> Ok `Queued
-        | Durable_deferred { keeper_name; _ } ->
+        | Delivery (Keeper_task_outcome_wake.Signaled _) -> Ok `Queued
+        | Delivery (Keeper_task_outcome_wake.Durable_deferred { keeper_name; _ }) ->
           Log.Misc.warn
             "completion repair queued; Keeper wake deferred task_id=%s keeper=%s"
             item.task_id keeper_name;
           Ok `Queued
-        | Durable_wake_failed { keeper_name; detail } ->
+        | Delivery (Keeper_task_outcome_wake.Durable_wake_failed { keeper_name; detail }) ->
           Log.Misc.error
             "completion repair queued; live wake failed task_id=%s keeper=%s detail=%s"
             item.task_id keeper_name detail;
@@ -228,9 +197,12 @@ let reconcile_rejections ~config =
            handoff committed with it), so the obligation ends here instead of
            being retried every interval for good — and the Task goes back to
            the backlog, because the producer named on it cannot act again. *)
-        | Unroutable_producer _ -> release_unroutable_task ~config item
-        | Producer_identity_lookup_failed { detail; _ }
-        | Durable_queue_failed { detail; _ } -> Error detail
+        | Delivery (Keeper_task_outcome_wake.Unroutable_producer _) ->
+          release_unroutable_task ~config item
+        | Delivery
+            ( Keeper_task_outcome_wake.Producer_identity_lookup_failed { detail; _ }
+            | Keeper_task_outcome_wake.Durable_queue_failed { detail; _ } ) ->
+          Error detail
       in
       let acknowledged =
         match queued with

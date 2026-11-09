@@ -8,8 +8,8 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Dashboard, Work, Keepers, Usage, Board, Workspace,
-System. Dashboard is the first screen. It shows Goal measurements, Task flow,
-usage coverage, and what needs the operator. The full Goal and Task lists are
+System. Dashboard is the first screen. It opens the decisions and conversations
+that need the operator. The full Goal and Task lists are
 under Work; provider quota scopes, Keeper costs and tokens, and daily provider
 reports are under Usage. Activity and server logs are under System (`A` / `L`).
 Additional surfaces hang off parents instead of holding Tab stops:
@@ -26,6 +26,7 @@ also keep `go <name>` palette entries, and each System pane has
 `go System / <pane>` (`runtime.toml`, `models`, `params`, `prompts`,
 `presets`, `themes`, `voice`). Changes follows the Keeper selected on
 Keepers. Keeper operations are reached from their parent only.
+The [screen inventory](design/tui/SCREENS.md) lists all surfaces, subviews and overlays.
 
 Header clocks and ordinary row times use the terminal's timezone. Usage trends
 and Task completion days are explicitly labeled UTC.

@@ -63,9 +63,10 @@ module Stream_end = struct
 end
 
 (* The body writer [respond_with_streaming] opened on an HTTP/2 stream.
-   [closed_by_route] is set by [Body_writer.close]. h2 closes the writer only
-   once the bytes written before the close have drained (close_after_flush),
-   so until then the writer looks open although the route finished it. *)
+   [closed_by_route] is set by [Body_writer.close]. masc closes the h2 writer
+   only once the bytes written before the close have drained
+   (close_after_flush, h2#278), so until then the writer looks open although
+   the route finished it. *)
 type h2_body =
   { writer : H2.Body.Writer.t
   ; mutable closed_by_route : bool

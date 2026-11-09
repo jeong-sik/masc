@@ -52,6 +52,7 @@ related: ["0512", "0493", "0350"]
   - `Not_started`: 500 으로 답하고 예외를 error 로 남긴다. `Auth.Auth_config_error` 는 지금처럼 503 으로 답한다.
   - `Streaming_open`: `Http_reqd.report_exn` 으로 끊는다. HTTP/2 는 `reset (Raised exn)` 이다. HTTP/1.1 은 본문을 멈추고 그 응답 뒤 연결을 닫는다. chunked 본문은 마지막 chunk 가 빠져 잘린 것이 보인다. 길이 없이 `connection: close` 로 끝을 알리는 본문(masc 의 SSE 응답들)은 끝난 것처럼 보인다(httpun reqd.ml 228~230줄, body.ml 195~199줄). 이미 나간 헤더 뒤에는 500 을 쓸 수 없다. 이 갈래가 없으면 h2 는 그 500 을 `response already started` 로 거절하고, 스트림은 상대가 끊거나 연결이 끝날 때까지 열려 있다.
   - `Answered`: 예외만 error 로 남긴다. 라우트가 writer 를 닫은 뒤 낸 예외도 여기다. 닫기 전에 쓴 바이트는 그대로 나간다.
+  - 닫기는 응답이 끝났다는 라우트의 선언이다. 실패한 라우트는 닫지 않는다. 그래야 예외가 열린 응답과 함께 ingress 에 닿고, `Streaming_open` 갈래가 응답을 끊는다. `Server_sse_response.close_after` 는 라우트가 정상으로 끝날 때만 닫는다. GitHub 로그인 스트림과 계정 로그인 스트림이 `Fun.protect ~finally` 로 닫던 것을 이것으로 바꾼다.
   - 늦은 응답 모양(`Http_reqd.Late_response`)은 `Streaming_open` 이 아닐 때 지금처럼 warn 으로 남긴다.
   - `Http_reqd` 는 `respond_with_streaming` 이 연 writer 를 기억한다. 두 라이브러리 모두 그 writer 를 돌려주지 않는다.
 - **내보낸 RST_STREAM 도 스트림을 끝낸다.** frame tap 은 나가는 RST_STREAM 과 END_STREAM 을 이미 가른다(`server_h2_frame_tap.ml` 197·198줄). 나가는 RST_STREAM 이면 레지스트리가 그 항목을 지우고 스트림 switch 를 `Stream_reset Reset_by_us` 로 실패시킨다(같은 조건).
@@ -210,7 +211,8 @@ upstream tls-eio main 도 같은 4 KiB 경로다(조사 §1.8). 릴리스를 기
 - 창을 열지 않거나 읽지 않는 HTTP/2 클라이언트의 스트림은 90초 뒤 RST_STREAM(INTERNAL_ERROR)을 받는다. 서버 로그에 경로가 든 warn 한 줄이 남는다.
 - handler 가 응답 도중 예외를 내거나 h2 가 스트림을 끊으면, 그 스트림에서 돌던 남은 일(본문 생산자, 미룬 본문 콜백)이 바로 취소된다. 완결한 응답 뒤 h2 가 RST_STREAM(NO_ERROR)을 보낼 때도 같다.
 - 라우트가 스트리밍 응답 도중 예외를 내면, HTTP/2 스트림은 RST_STREAM(INTERNAL_ERROR)을 받고 HTTP/1.1 연결은 닫힌다. chunked 본문은 마지막 chunk 가 빠진다. masc 의 HTTP/1.1 SSE 는 연결 종료로 끝을 알리므로, 클라이언트에게는 끝난 스트림처럼 보인다. 전에는 스스로 닫지 않는 라우트의 응답이 열린 채 남았다. 라우트 예외는 error 로 한 번 남는다(늦은 응답 모양은 지금처럼 warn). 응답 전 예외는 전에는 500 본문에만 있었다.
-- HTTP/1.1 클라이언트가 요청 본문 도중 떠나면 라우트는 받은 데까지의 본문으로 돌지 않는다. httpun 이 400 으로 답한다. 전에는 잘린 본문이 온전한 본문처럼 라우트에 넘어갔다.
+- HTTP/1.1 클라이언트가 요청 본문 도중 떠나면 라우트는 받은 데까지의 본문으로 돌지 않는다. 응답 전이면 httpun 이 400 으로 답한다. 응답이 시작됐으면 그 응답이 끊긴다. 전에는 잘린 본문이 온전한 본문처럼 라우트에 넘어갔다. 읽기가 EOF·reset 이 아닌 오류로 끝나면 gluten 이 보고하고 500 이 된다(gluten_eio.ml 149줄).
+- GitHub 로그인 스트림과 계정 로그인 스트림이 예외로 끝나면 HTTP/2 스트림은 RST_STREAM(INTERNAL_ERROR)을 받는다. 전에는 응답을 닫은 뒤 예외를 냈다. 그래서 쓴 바이트가 다 나간 스트림은 끝난 스트림처럼 보였다.
 - 소켓 쓰기가 90초 동안 끝나지 않는 연결은 닫힌다. 먼저 shutdown 이 FIN 을 보낸다. 연결을 놓으며 fd 를 닫을 때(`server_bootstrap_http.ml` 122~133줄) `SO_LINGER 0` 이라 RST 가 간다.
 - TLS 연결은 handshake 가 30초 안에 끝나지 않으면 닫힌다. 평문 연결은 30초 안에 첫 바이트를 보내지 않으면 닫힌다. TLS handshake 뒤의 첫 읽기에는 기한이 없다(§7.4).
 - 대시보드 asset 응답은 원장을 쓰지 않는다. 압축은 asset 판마다 한 번 한다.

@@ -1099,7 +1099,7 @@ let test_batch_disposition_of_cycle_outcome_pure_branches () =
   (match
      Keeper_heartbeat_loop.batch_disposition_of_cycle_outcome
        (Some
-          (Keeper_heartbeat_loop_cycle.Checkpointed { meta }))
+          (Keeper_heartbeat_loop_cycle.Checkpointed { meta; followup = Keeper_agent_result.Keep_cadence }))
    with
    | Keeper_heartbeat_loop.Batch_ack_attention_only -> ()
    | _ ->

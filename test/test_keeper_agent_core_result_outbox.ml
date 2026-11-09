@@ -44,6 +44,7 @@ let run_case ?(host=false) scenario () =
   let original_ids = Outbox.receipt_ids (snapshot ()) in
   let requests = ref [] and projections = ref [] and effects = ref 0 in
   let tool_boundary_saved = ref false in
+  let observed_handoff = ref Keeper_agent_result.Keep_cadence in
   let chat_settled, resolve_chat_settled = Eio.Promise.create () in
   let chat_id = get (Keeper_operation_id.of_string "chat-after-autonomous-tool") in
   let owner_ok = function Ok value -> value | Error error -> fail (Keeper_owner.error_to_string error) in
@@ -189,12 +190,27 @@ streaming = false
       ?agent_core_checkpoint:checkpoint ~continue_from_checkpoint:(Option.is_some checkpoint)
       ?cooperative_yield_probe:probe
       ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk ~sw ~net:env#net () in
+  let selected_source = match scenario with
+    | Deferred ->
+      let receipt_id = match original_ids with
+        | [id] -> id | [] | _ :: _ :: _ -> fail "expected one original result" in
+      let source : Keeper_event_queue.stimulus =
+        {post_id="keeper-tool-result:" ^ receipt_id;urgency=Immediate;
+         arrived_at=Time_compat.now ();payload=Tool_result_ready receipt_id} in
+      get (Keeper_registry_event_queue.enqueue_durable_result ~base_path keeper_name source);
+      (match get (Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name) with
+       | [selection] -> Some selection
+       | [] | _ :: _ :: _ -> fail "expected one original pending source")
+    | Completed | Projection_failed | Provider_failed | Rejected | Save_failed
+    | Stale_save | Noop_sink | No_sink | Review -> None in
   let result = run_on_owner (fun () -> run ?probe:(match scenario with Deferred ->
       Some (fun _ -> Keeper_agent_run.For_testing.tool_boundary_state
-        ~repetition_execution:None ~chat_handoff:(fun () ->
+        ~repetition_execution:None
+        ~chat_handoff:(Keeper_agent_run.For_testing.observe_chat_handoff
+          ~observed:observed_handoff (fun () ->
           check bool "the real provider loop probes after its checkpoint save" true !tool_boundary_saved;
           Keeper_owner.autonomous_chat_handoff_ready (Option.get owner)
-          |> Result.map_error (fun error -> Agent_core.Error.Internal (Keeper_owner.error_to_string error)))
+          |> Result.map_error (fun error -> Agent_core.Error.Internal (Keeper_owner.error_to_string error))))
         Keeper_tools_agent_core.Terminal_effect_open)
     | Completed | Projection_failed | Provider_failed | Rejected | Save_failed
     | Stale_save | Noop_sink | No_sink | Review -> None) ()) in
@@ -211,6 +227,17 @@ streaming = false
         fail "consumer did not yield at its settled tool boundary");
      check (list string) "checkpoint keeps the original result pending" original_ids
        (Outbox.receipt_ids (snapshot ()));
+     let selected = Option.get selected_source in
+     get (Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
+       ~base_path ~keeper_name [selected]);
+     (match get (Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name) with
+      | [retained] ->
+        check int "the original source has one durable checkpoint retention" 1 retained.checkpoint_retentions;
+        check int64 "retention preserves the exact admitted incarnation"
+          selected.admitted_revision retained.admitted_revision
+      | [] | _ :: _ :: _ -> fail "checkpoint lost or added an admitted source");
+     let followup = Keeper_agent_run.For_testing.checkpoint_followup_of_stop_reason
+       ~observed:!observed_handoff result.run_result.stop_reason in
      let settled =
        match Eio.Time.with_timeout_exn env#clock 10. (fun () -> Eio.Promise.await chat_settled) with
        | operations -> operations
@@ -228,14 +255,36 @@ streaming = false
        (match chat.state with
         | Succeeded _ -> true
         | Queued | Running _ | Failed _ | Cancelled _ -> false);
+     check bool "settled chat leaves no claimable queued operation" false
+       (Keeper_owner.operation_projection (Option.get owner)).has_claimable_queued;
      (match result.run_result.checkpoint with
       | Some _ -> () | None -> fail "yield lost the original checkpoint");
      let checkpoint = Keeper_checkpoint_store.load_agent_core ~session_dir ~session_id
        |> Result.map_error Keeper_checkpoint_store.checkpoint_load_error_to_string |> get in
-     ignore (core (run_on_owner (fun () -> run ~checkpoint ())));
+     let meta = get (Masc_test_deps.meta_of_json_fixture
+       (`Assoc ["name",`String keeper_name;"trace_id",`String session_id])) in
+     let checkpoint_followup = Keeper_heartbeat_loop.For_testing.checkpoint_followup_after_retention
+       ~cycle_outcome:(Some (Keeper_heartbeat_loop_cycle.Checkpointed {meta;followup}))
+       ~retained_stimulus:true in
+     let starts_now = Keeper_heartbeat_loop.For_testing.next_cycle_starts_now
+       ~after_failure:None ~stimuli_acked:false ~checkpoint_followup
+       ~pending_stimulus:(fun () ->
+         get (Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name) <> []) in
+     check bool "the retained original source resumes without another event or cadence tick" true starts_now;
+     let resumed = core (run_on_owner (fun () -> run ~checkpoint ())) in
+     (match resumed.run_result.stop_reason with
+      | Runtime_agent.Completed _ -> ()
+      | Yielded_to_durable_stimulus _ | InputRequired _ -> fail "original result did not finish");
      check int "the completed local effect is not replayed" 1 !effects;
      check (list string) "completed resumed consumer ACKs original result" []
-       (Outbox.receipt_ids (snapshot ()))
+       (Outbox.receipt_ids (snapshot ()));
+     (match get (Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+       ~base_path keeper_name ~applied_at:(Time_compat.now ()) ~selection:selected) with
+      | Turn_source_acked (Acked _) -> ()
+      | Turn_source_acked (Already_acked _ | Ack_committed_followup_failed _) | Turn_selection_withdrawn ->
+        fail "completed continuation did not settle its exact original source");
+     check int "the single original source drains with no new stimulus" 0
+       (List.length (get (Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name)))
    | Completed ->
      let result = core result in
      check bool "consumer completion was persisted" true (!saved_assistants > 0);

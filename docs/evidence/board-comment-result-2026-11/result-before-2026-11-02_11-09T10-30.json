@@ -1,0 +1,20 @@
+{
+  "window": {
+    "since": "2026-11-02T00:00:00+00:00",
+    "end": "2026-11-09T10:30:00+00:00"
+  },
+  "successful_calls": 5855,
+  "failed_calls": 119,
+  "refused_calls": 586,
+  "answer_bytes": 11268077,
+  "answer_bytes_median": 1878,
+  "repeated_text_bytes": 8930558,
+  "repeated_text_share": 0.7926,
+  "calls_repeating_text": 5409,
+  "answers_cut_short": 289,
+  "read_after_write": {
+    "within_s": 60.0,
+    "calls": 379,
+    "share": 0.0647
+  }
+}

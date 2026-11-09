@@ -203,6 +203,36 @@ class LibrarianWorker(unittest.TestCase):
                 replies = self.run_worker(directory, [read(original), listing(), submit(original)])
                 self.assertTrue(all(x["isError"] for x in replies))
 
+    def test_capacity_refusal_restart_and_released_frame_keep_original_identity(self):
+        contract = runpy.run_path(str(SERVER))["CONTRACT"]
+        from exact_worker import InvalidInput, Worker, encode_output, tool_result
+        with tempfile.TemporaryDirectory() as directory:
+            first = request("admission", "original-before-capacity")
+            second = request("durable", "original-waiting-for-frame")
+            worker = Worker(Path(directory), 4194304, contract)
+            frames = [{"jsonrpc": "2.0", "id": 2 ** 53,
+                       "result": tool_result({"requests": [worker.host_request(x)]})}
+                      for x in (first, second)]
+            frame_bytes = max(len((encode_output(x) + "\n").encode("utf-8")) for x in frames)
+            worker.max_reply_bytes = frame_bytes
+            caller = {"kind": "operator"}
+            invoke = lambda w, x: w.invoke({"kind": "submit", "request": x}, caller,
+                                          tool_name=tool(x["output"]))
+            self.assertEqual(invoke(worker, first)["state"], "pending")
+            self.assertEqual(invoke(worker, second)["state"], "capacity_wait")
+            self.assertFalse(worker.store.path(second["request_id"]).exists())
+            reopened = Worker(Path(directory), frame_bytes, contract)
+            self.assertEqual(invoke(reopened, second)["state"], "capacity_wait")
+            self.assertEqual(reopened.invoke({"kind": "read", "request_id": second["request_id"]},
+                                            caller, tool_name=tool("durable"))["state"], "absent")
+            reopened.host_result({"request_id": first["request_id"], "result": {"status": "outcome_unknown"}})
+            restarted = Worker(Path(directory), frame_bytes, contract)
+            self.assertEqual(invoke(restarted, second)["state"], "pending")
+            self.assertEqual(invoke(restarted, second)["state"], "pending")
+            self.assertEqual(restarted.host_requests({})["requests"], [second])
+            with self.assertRaises(InvalidInput):
+                invoke(restarted, {**second, "system": "different frozen input"})
+
     def test_manifest_and_discovery_expose_two_purpose_specific_tools(self):
         manifest = tomllib.loads((SERVER.parent / "lane.toml").read_text())
         self.assertEqual(manifest["world"]["tools"]["export"], ["admit_memory", "derive_memory"])

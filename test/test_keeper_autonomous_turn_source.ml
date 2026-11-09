@@ -220,7 +220,7 @@ let test_execution_identity_joins_exact_occurrence () =
   let second_finish = replace [ "seq", `Int 6; "ts", `Float 2005.; "tool_turn", `Int 2 ] finish in
   write_lines path [ List.nth original 0; List.nth original 1; start; finish;
     second_start; second_finish; replace [ "seq", `Int 7; "ts", `Float 2006. ] (List.nth original 4) ];
-  let execution_ids = List.map Ids.Execution_id.of_string [ "exec-first"; "exec-second"; "exec-foreign" ] in
+  let execution_ids = List.map Ids.Execution_id.of_string [ "exec-first"; "exec-second"; "exec-foreign"; "exec-child"; "exec-second-child"; "exec-malformed-child" ] in
   let selected_run = { (run_ref ~path ~worker_run_id ~start_seq:1) with end_seq = 7 } in
   write_turn_record ~execution_ids config ~absolute_turn:428 ~turn_kind:Turn_record.Autonomous
     ~raw_trace_run_ref:(Some selected_run);
@@ -239,7 +239,17 @@ let test_execution_identity_joins_exact_occurrence () =
   List.iter (Dated_jsonl.append ledger)
     [ row ~id:"exec-first" ~invocation_turn:1 ~keeper_turn:428;
       row ~id:"exec-second" ~invocation_turn:2 ~keeper_turn:428;
-      row ~id:"exec-foreign" ~invocation_turn:1 ~keeper_turn:429 ];
+      row ~id:"exec-foreign" ~invocation_turn:1 ~keeper_turn:429;
+      (* The TurnRecord also owns these committed inline child executions.
+         Their local slot zero must not obscure the outer raw invocation. *)
+      replace [ "composition_node_id", `String "comment";
+        "tool", `String "masc_board_comment" ]
+        (row ~id:"exec-child" ~invocation_turn:1 ~keeper_turn:428);
+      replace [ "composition_node_id", `String "reaction";
+        "tool", `String "masc_board_reaction" ]
+        (row ~id:"exec-second-child" ~invocation_turn:2 ~keeper_turn:428);
+      replace [ "composition_node_id", `Int 0 ]
+        (row ~id:"exec-malformed-child" ~invocation_turn:1 ~keeper_turn:428) ];
   let ids () =
     match Keeper_autonomous_turn_source.load_recent ~config ~keeper_name () with
     | [ turn ] -> List.filter_map (function
@@ -247,7 +257,7 @@ let test_execution_identity_joins_exact_occurrence () =
         | _ -> None) turn.trace
     | _ -> Alcotest.fail "expected selected autonomous turn"
   in
-  Alcotest.(check (list (option string))) "repeated provider id joins its exact invocation"
+  Alcotest.(check (list (option string))) "top-level identities survive repeated provider ids and inline child slots"
     [ Some "exec-first"; Some "exec-second" ] (ids ());
   Dated_jsonl.append ledger (row ~id:"exec-first" ~invocation_turn:1 ~keeper_turn:428);
   Alcotest.(check (list (option string))) "ambiguous canonical id remains unlinked"

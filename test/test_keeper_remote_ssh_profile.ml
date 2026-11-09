@@ -287,82 +287,6 @@ let test_remote_endpoint_requires_remote_ssh () =
      rejected. *)
   reject []
 
-(* ── microvm_delivery (RFC microvm-guest-agent-over-socket §3.9) ──────── *)
-
-let apple = Masc.Keeper_microvm_backend.(to_string Apple_container)
-
-let delivery pairs =
-  Result.map
-    (fun (defaults : Masc.Keeper_types_profile_toml_parser.keeper_profile_defaults) ->
-       Option.map Keeper_types_profile_sandbox.microvm_delivery_to_string
-         defaults.microvm_delivery)
-    (defaults_of pairs)
-;;
-
-let refused_with code pairs =
-  match defaults_of pairs with
-  | Ok _ -> failf "%s: the load must be refused" code
-  | Error msg -> check bool ("names " ^ code) true (contains code msg)
-;;
-
-let test_agent_socket_parses_under_an_apple_microvm () =
-  let microvm_apple = [ "keeper.sandbox_profile", "microvm"; "keeper.microvm_backend", apple ] in
-  check (result (option string) string) "agent_socket is carried" (Ok (Some "agent_socket"))
-    (delivery (microvm_apple @ [ "keeper.microvm_delivery", "agent_socket" ]));
-  check (result (option string) string) "exec_per_request is carried"
-    (Ok (Some "exec_per_request"))
-    (delivery (microvm_apple @ [ "keeper.microvm_delivery", "exec_per_request" ]));
-  check (result (option string) string) "an absent key stays absent" (Ok None)
-    (delivery microvm_apple);
-  check string "and an absent key means an exec per request" "exec_per_request"
-    (Keeper_types_profile_sandbox.microvm_delivery_to_string
-       Keeper_types_profile_sandbox.default_microvm_delivery)
-;;
-
-(* Every microVM runtime already runs an exec per request, so naming it is
-   allowed on each; only the agent needs the runtime that publishes its
-   socket. *)
-let test_only_apple_container_publishes_the_agent_socket () =
-  List.iter
-    (fun backend ->
-       check (result (option string) string) (backend ^ " keeps an exec per request")
-         (Ok (Some "exec_per_request"))
-         (delivery
-            [ "keeper.sandbox_profile", "microvm"; "keeper.microvm_backend", backend
-            ; "keeper.microvm_delivery", "exec_per_request" ]);
-       refused_with "microvm_delivery_requires_apple_container"
-         [ "keeper.sandbox_profile", "microvm"; "keeper.microvm_backend", backend
-         ; "keeper.microvm_delivery", "agent_socket" ])
-    Masc.Keeper_microvm_backend.(List.map to_string [ Microsandbox; Nerdctl_kata ]);
-  refused_with "microvm_delivery_requires_apple_container"
-    [ "keeper.sandbox_profile", "microvm"; "keeper.microvm_delivery", "agent_socket" ]
-;;
-
-let test_microvm_delivery_requires_microvm () =
-  List.iter
-    (fun profile_pair ->
-       List.iter
-         (fun value ->
-            refused_with "microvm_delivery_requires_microvm"
-              (profile_pair @ [ "keeper.microvm_delivery", value ]))
-         Keeper_types_profile_sandbox.valid_microvm_delivery_strings)
-    [ [ "keeper.sandbox_profile", "docker" ]; [ "keeper.sandbox_profile", "remote_ssh" ]; [] ]
-;;
-
-let test_an_unknown_delivery_is_refused_by_name () =
-  match
-    defaults_of
-      [ "keeper.sandbox_profile", "microvm"; "keeper.microvm_backend", apple
-      ; "keeper.microvm_delivery", "agent" ]
-  with
-  | Ok _ -> fail "an unknown delivery must not load"
-  | Error msg ->
-    check bool "names the key" true (contains "microvm_delivery_unknown" msg);
-    List.iter
-      (fun value -> check bool ("names " ^ value) true (contains value msg))
-      Keeper_types_profile_sandbox.valid_microvm_delivery_strings
-;;
-
 let () =
   run "remote_ssh profile"
     [ "profile", [ test_case "roundtrip" `Quick test_profile_roundtrip
@@ -389,12 +313,4 @@ let () =
                          ; test_case "unknown refused by name" `Quick
                              test_an_unknown_observation_run_is_refused_by_name
                          ; test_case "rejection table and default are closed" `Quick
-                             test_the_rejection_table_and_default_are_closed ]
-    ; "microvm_delivery", [ test_case "agent_socket parses under an Apple microVM" `Quick
-                              test_agent_socket_parses_under_an_apple_microvm
-                          ; test_case "only Apple container publishes the agent socket" `Quick
-                              test_only_apple_container_publishes_the_agent_socket
-                          ; test_case "requires microvm" `Quick
-                              test_microvm_delivery_requires_microvm
-                          ; test_case "unknown refused by name" `Quick
-                              test_an_unknown_delivery_is_refused_by_name ] ]
+                             test_the_rejection_table_and_default_are_closed ] ]

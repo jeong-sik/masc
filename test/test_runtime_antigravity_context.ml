@@ -1,3 +1,7 @@
+(* A start of Antigravity, by the access the suite publishes first. *)
+let antigravity_host () =
+  Masc_test_deps.host_account Runtime_account_access.Antigravity
+
 open Alcotest
 module Context = Runtime_antigravity_context
 module Setup = Runtime_antigravity_setup
@@ -173,7 +177,7 @@ time.sleep(60)
        Out_channel.with_open_bin cli_path (fun out -> output_string out script);
        Unix.chmod cli_path 0o700;
        (match
-          Context.observe
+          Context.observe ~host:(antigravity_host ())
             ~python_path
             ~cli_path
             ~timeout_s:10.
@@ -227,7 +231,7 @@ sys.exit(3)
        Out_channel.with_open_bin cli_path (fun out -> output_string out script);
        Unix.chmod cli_path 0o700;
        match
-         Context.observe ~python_path ~cli_path ~timeout_s:10. ~oauth_source:source ~model
+         Context.observe ~host:(antigravity_host ()) ~python_path ~cli_path ~timeout_s:10. ~oauth_source:source ~model
        with
        | Ok _ -> fail "fixture version probe unexpectedly succeeded"
        | Error error ->
@@ -255,6 +259,7 @@ sys.exit(3)
 ;;
 
 let () =
+  Masc_test_deps.publish_single_user_access ();
   run
     "Antigravity context"
     [ ( "status-line authority"

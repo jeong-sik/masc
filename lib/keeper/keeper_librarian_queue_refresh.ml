@@ -4,7 +4,7 @@ type pass_end =
   | Drained
   | Yielded_to_waiting_unit
   | Not_committed
-  | Pending
+  | Pending of Keeper_librarian_pending.t
   | Stopped of Keeper_librarian_durable_consumer.error
   | Raised of string
 
@@ -15,6 +15,8 @@ type measurement =
   }
 
 let measurements : ((string * string), measurement) Hashtbl.t = Hashtbl.create 16
+let admission_waits :
+    ((string * string), Keeper_librarian_pending.worker) Hashtbl.t = Hashtbl.create 16
 let input_capacities :
     ((string * string), Keeper_lane_cli_oneshot.input_capacity) Hashtbl.t =
   Hashtbl.create 16
@@ -43,6 +45,54 @@ let limited_reads : ((string * string), limited_read) Hashtbl.t = Hashtbl.create
 let reported_problems : (((string * string) * problem_site), string) Hashtbl.t =
   Hashtbl.create 16
 let measurements_mu = Stdlib.Mutex.create ()
+(* A completion can arrive between a capacity refusal and publication of its
+   measurement. Immutable marks close that race without a timer or replay. *)
+let capacity_marks : (string, (string * unit ref) list) Hashtbl.t = Hashtbl.create 4
+
+let capacity_mark_snapshot ~config =
+  let root = Workspace.keepers_runtime_dir config in
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    match Hashtbl.find_opt capacity_marks root with Some marks -> marks | None -> [])
+
+let capacity_released ~config ~installation_id =
+  let root = Workspace.keepers_runtime_dir config in
+  let keepers = Stdlib.Mutex.protect measurements_mu (fun () ->
+    let previous = match Hashtbl.find_opt capacity_marks root with
+      | Some marks -> marks | None -> [] in
+    Hashtbl.replace capacity_marks root
+      ((installation_id, ref ()) :: List.remove_assoc installation_id previous);
+    let durable = Hashtbl.fold (fun (directory, keeper) (measurement : measurement) names ->
+      match measurement.last_pass with
+      | Pending pending ->
+        let waiting = match pending with
+          | Keeper_librarian_pending.Worker waiting ->
+            (match waiting.wait with
+             | Capacity -> String.equal waiting.installation_id installation_id
+             | Processing | Outcome_unknown | Unreachable
+             | Missing_after_dispatch | Journal_recheck -> false)
+          | Publication _ | Basis_changed _ | Message_floor _ | Local_failure _ -> false in
+        if String.equal directory root && waiting then keeper :: names else names
+      | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
+      | Not_committed | Stopped _ | Raised _ -> names) measurements [] in
+    Hashtbl.fold (fun (directory, keeper) (waiting : Keeper_librarian_pending.worker) names ->
+      match waiting.wait with
+      | Capacity when String.equal directory root
+                      && String.equal waiting.installation_id installation_id -> keeper :: names
+      | Capacity | Processing | Outcome_unknown | Unreachable
+      | Missing_after_dispatch | Journal_recheck -> names) admission_waits durable
+    |> List.sort_uniq String.compare) in
+  List.iter (fun keeper_name ->
+    Keeper_librarian_queue_signal.changed ~base_path:config.Workspace.base_path ~keeper_name) keepers
+
+let recheck_capacity_release ~config ~keeper_name ~before
+    (waiting : Keeper_librarian_pending.worker) =
+  match waiting.wait with
+  | Capacity ->
+    let earlier = List.assoc_opt waiting.installation_id before in
+    let later = List.assoc_opt waiting.installation_id (capacity_mark_snapshot ~config) in
+    if not (Option.equal ( == ) earlier later) then
+      Keeper_librarian_queue_signal.changed ~base_path:config.Workspace.base_path ~keeper_name
+  | Processing | Outcome_unknown | Unreachable | Missing_after_dispatch | Journal_recheck -> ()
 
 let measurement_key ~config ~keeper_name =
   Workspace.keepers_runtime_dir config, keeper_name
@@ -75,11 +125,17 @@ let last_measurement ~config ~keeper_name =
   Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.find_opt measurements key)
 ;;
 
+let last_admission_wait ~config ~keeper_name =
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () -> Hashtbl.find_opt admission_waits key)
+;;
+
 let forget_measurement ~config ~keeper_name =
   Keeper_memory_cleanup.forget ~base_path:config.Workspace.base_path ~keeper_name;
   let key = measurement_key ~config ~keeper_name in
   Stdlib.Mutex.protect measurements_mu (fun () ->
     Hashtbl.remove measurements key;
+    Hashtbl.remove admission_waits key;
     Hashtbl.remove input_capacities key;
     Hashtbl.remove limited_reads key;
     List.iter
@@ -204,6 +260,7 @@ let uncommitted_pass () =
 ;;
 
 let run_durable_with_consumer ~config ~keeper_name ~consume =
+  let capacity_before = capacity_mark_snapshot ~config in
   let rec drain () =
     match Env_config.KeeperMemoryOs.librarian_config_state () with
     | Disabled | Invalid ->
@@ -214,9 +271,9 @@ let run_durable_with_consumer ~config ~keeper_name ~consume =
       | Ok Keeper_librarian_durable_consumer.Nothing_to_read ->
         clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
         Drained
-      | Ok Keeper_librarian_durable_consumer.Pending ->
+      | Ok (Keeper_librarian_durable_consumer.Pending pending) ->
         clear_reported_problem ~config ~keeper_name ~site:Durable_drain;
-        Pending
+        Pending pending
       | Ok (Memory_not_committed reports) ->
         (match reports with
          | [] -> clear_reported_problem ~config ~keeper_name ~site:Durable_drain
@@ -261,7 +318,7 @@ let run_durable_with_consumer ~config ~keeper_name ~consume =
       | Drained
       | Yielded_to_waiting_unit
       | Not_committed
-      | Pending
+      | Pending _
       | Stopped
           (Keeper_librarian_durable_consumer.
              ( Keeper_meta_unreadable _
@@ -291,6 +348,14 @@ let run_durable_with_consumer ~config ~keeper_name ~consume =
         measure_unread ~config ~keeper_name
     in
     publish_measurement ~config ~keeper_name ~last_pass ~unread;
+    (match last_pass with
+     | Pending pending ->
+       (match pending with
+        | Keeper_librarian_pending.Worker waiting ->
+          recheck_capacity_release ~config ~keeper_name ~before:capacity_before waiting
+        | Publication _ | Basis_changed _ | Message_floor _ | Local_failure _ -> ())
+     | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
+     | Not_committed | Stopped _ | Raised _ -> ());
     last_pass
   with
   | Eio.Cancel.Cancelled _ as exn ->
@@ -904,7 +969,7 @@ exception Blank_keeper_name
 
 let after_durable ~durable ~following =
   match durable () with
-  | Pending -> ()
+  | Pending _ -> ()
   | Stopped error ->
     if not (Keeper_librarian_durable_consumer.publication_unfinished error) then following ()
   | Off | Lane_unconfigured | Drained | Yielded_to_waiting_unit
@@ -960,9 +1025,25 @@ let run_memory_cleanup ~base_path ~keeper_name =
       Log.Keeper.warn ~keeper_name "Librarian memory count cleanup unavailable: %s" detail
 ;;
 
-let run_explicit_admission ~base_path ~keeper_name =
+let run_explicit_admission_with ~base_path ~keeper_name ~run =
   let config = Workspace.default_config base_path in
-  match Keeper_memory_admission_worker.run ~base_path ~keeper_name with
+  let capacity_before = capacity_mark_snapshot ~config in
+  let outcome = run () in
+  let waiting = match outcome with
+    | Keeper_memory_admission_worker.Awaiting_worker waiting -> Some waiting
+    | Disabled | Idle | Recheck_new_input | Settled _ | Pending _
+    | Addon_unattached _ | Unavailable _ -> None in
+  let key = measurement_key ~config ~keeper_name in
+  Stdlib.Mutex.protect measurements_mu (fun () ->
+    match waiting with
+    | Some waiting -> Hashtbl.replace admission_waits key waiting
+    | None -> Hashtbl.remove admission_waits key);
+  !change_observer ~config ~keeper_name;
+  Keeper_memory_health_input.written
+    ~keepers_dir:(Workspace.keepers_runtime_dir config) ~keeper_id:keeper_name;
+  Option.iter
+    (recheck_capacity_release ~config ~keeper_name ~before:capacity_before) waiting;
+  match outcome with
   | Disabled | Idle ->
     clear_reported_problem ~config ~keeper_name ~site:Explicit_admission
   | Recheck_new_input ->
@@ -976,6 +1057,10 @@ let run_explicit_admission ~base_path ~keeper_name =
   | Pending detail ->
     clear_reported_problem ~config ~keeper_name ~site:Explicit_admission;
     Log.Keeper.info ~keeper_name "Librarian explicit admission remains pending: %s" detail
+  | Awaiting_worker waiting ->
+    clear_reported_problem ~config ~keeper_name ~site:Explicit_admission;
+    Log.Keeper.info ~keeper_name "Librarian explicit admission remains pending: %s"
+      (Keeper_librarian_pending.description (Worker waiting))
   | Addon_unattached {pending} ->
     (* Off by configuration, not a failure. Say it once per waiting count, so
        the operator sees the queue grow without a line every pass. *)
@@ -987,6 +1072,11 @@ let run_explicit_admission ~base_path ~keeper_name =
   | Unavailable detail ->
     if should_report_problem ~config ~keeper_name ~site:Explicit_admission detail then
       Log.Keeper.warn ~keeper_name "Librarian explicit admission unavailable: %s" detail
+;;
+
+let run_explicit_admission ~base_path ~keeper_name =
+  run_explicit_admission_with ~base_path ~keeper_name
+    ~run:(fun () -> Keeper_memory_admission_worker.run ~base_path ~keeper_name)
 ;;
 
 let run ~base_path ~keeper_name =
@@ -1012,7 +1102,6 @@ let install () =
         in ()))
 
 let submit_durable ~base_path ~keeper_name =
-  let (_ : Keeper_memory_lane.outcome) =
     Keeper_memory_lane.submit ~base_path ~keeper_name (fun () ->
       run_explicit_admission ~base_path ~keeper_name;
       after_durable
@@ -1020,8 +1109,6 @@ let submit_durable ~base_path ~keeper_name =
         ~following:(fun () ->
           run_continuity ~base_path ~keeper_name ();
           run_memory_cleanup ~base_path ~keeper_name))
-  in
-  ()
 ;;
 
 let with_purge_then_catch_up ~base_path ~keeper_name action =
@@ -1032,12 +1119,12 @@ let with_purge_then_catch_up ~base_path ~keeper_name action =
      submission with nothing unread ends at once. *)
   match Keeper_memory_lane.with_librarian_purge ~base_path ~keeper_name action with
   | result ->
-    submit_durable ~base_path ~keeper_name;
+    ignore (submit_durable ~base_path ~keeper_name);
     result
   | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
   | exception exn ->
     let backtrace = Printexc.get_raw_backtrace () in
-    submit_durable ~base_path ~keeper_name;
+    ignore (submit_durable ~base_path ~keeper_name);
     Printexc.raise_with_backtrace exn backtrace
 ;;
 
@@ -1055,11 +1142,12 @@ let submit_durable_for_unlaunched ~base_path ~persisted ~launched =
       [] in
   let persisted = List.sort_uniq String.compare (persisted @ queued) in
   let names = unlaunched_keeper_names ~persisted ~launched in
-  List.iter (fun keeper_name -> submit_durable ~base_path ~keeper_name) names;
+  List.iter (fun keeper_name -> ignore (submit_durable ~base_path ~keeper_name)) names;
   names
 ;;
 
 module For_testing = struct
+  let run_explicit_admission_with = run_explicit_admission_with
   let read_limit ~config ~keeper_name ~trace_id =
     Option.map (fun limited -> limited.mode) (limited_read ~config ~keeper_name ~trace_id)
   let last_input_capacity = last_input_capacity

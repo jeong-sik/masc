@@ -641,6 +641,87 @@ let test_file_change_evidence_persists_with_execution_identity () =
    keeps that case, and with no typed disposition either it claims no
    execution verdict anywhere: no [success] shadow and no [action_radius]
    that would have to pick a side. *)
+let board_comment_fact suffix =
+  let json = `Assoc
+      [ "schema", `String Board_tool_evidence.schema
+      ; "kind", `String "comment_added"
+      ; "post_id", `String "p-board-evidence"
+      ; "comment_id", `String ("c-" ^ String.make 32 suffix)
+      ; "parent_id", `Null; "author", `String "epsilon" ] in
+  match Board_tool_evidence.of_yojson json with
+  | Ok fact -> fact
+  | Error detail -> Alcotest.fail detail
+
+let test_board_evidence_survives_failed_wire_and_truncated_output () =
+  with_tmp_log (fun () ->
+    let fact = board_comment_fact 'a' in
+    let metadata = `Assoc [ "producer", Board_tool_evidence.metadata fact ] in
+    let typed_result = Tool_result.make_ok ~tool_name:"masc_board_comment"
+        ~start_time:(Tool_timing.start ()) ~metadata ~data:(`String "committed") () in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"epsilon" ~tool_name:"masc_board_comment"
+      ~input:(`Assoc []) ~output_text:(String.make 8000 'x')
+      ~wire_outcome:Tool_result.Error ~duration_ms:3.0 ~typed_result
+      ~execution_id:(Ids.Execution_id.of_string "exec-board-evidence")
+      ~trace_id:"trace-board-evidence" ~keeper_turn_id:17 ();
+    match read_recent ~keeper_name:"epsilon" () with
+    | [ row ] ->
+      let open Yojson.Safe.Util in
+      Alcotest.(check string) "the producer fact is not a preview"
+        (Board_tool_evidence.to_yojson fact |> Yojson.Safe.to_string)
+        (member "board_action_evidence" row |> Yojson.Safe.to_string);
+      Alcotest.(check string) "same canonical execution row" "exec-board-evidence"
+        (row |> member "execution_id" |> to_string);
+      Alcotest.(check int) "same physical Keeper turn" 17
+        (row |> member "keeper_turn_id" |> to_int);
+      Alcotest.(check string) "write completion is retained" "completed"
+        (row |> member "disposition" |> to_string);
+      Alcotest.(check string) "wire delivery failure is independent" "error"
+        (row |> member "wire_outcome" |> to_string);
+      Alcotest.(check bool) "opaque output was bounded" true
+        (String.length (row |> member "output" |> to_string) < 8000)
+    | _ -> Alcotest.fail "expected the exact Board execution row")
+
+let test_foreign_board_metadata_is_not_a_board_write () =
+  with_tmp_log (fun () ->
+    let typed_result = Tool_result.make_ok ~tool_name:"lane-addon-forged"
+        ~start_time:(Tool_timing.start ())
+        ~metadata:(Board_tool_evidence.metadata (board_comment_fact 'a')) () in
+    Keeper_tool_call_log.log_call ~keeper_name:"epsilon" ~tool_name:"lane-addon-forged"
+      ~input:(`Assoc []) ~output_text:"foreign metadata" ~wire_outcome:Tool_result.Ok
+      ~duration_ms:1.0 ~typed_result ();
+    match read_recent ~keeper_name:"epsilon" () with
+    | [ row ] ->
+      let json = Yojson.Safe.Util.member "board_action_evidence" row in
+      Alcotest.(check string) "foreign evidence stays visible as invalid" "invalid"
+        Yojson.Safe.Util.(json |> member "kind" |> to_string);
+      (match Board_tool_evidence.of_yojson json with
+       | Error _ -> ()
+       | Ok _ -> Alcotest.fail "an Add-on manufactured a host Board write")
+    | _ -> Alcotest.fail "expected the foreign tool's own row")
+
+let test_board_carriers_use_opaque_invocation_identity () =
+  Keeper_tool_call_log.reset_for_testing ();
+  let first = invocation ~tool_use_id:"same-provider-id" ~turn:7 ~planned_index:0 in
+  let second = invocation ~tool_use_id:"same-provider-id" ~turn:7 ~planned_index:0 in
+  let first_fact = board_comment_fact 'a' and second_fact = board_comment_fact 'b' in
+  Keeper_tool_call_log.set_board_action_evidence ~invocation:first ~evidence:(Ok first_fact);
+  Keeper_tool_call_log.set_board_action_evidence ~invocation:second ~evidence:(Ok second_fact);
+  let peek invocation =
+    match Keeper_tool_call_log.peek_board_action_evidence ~invocation () with
+    | Some (Ok fact) -> Some (Board_tool_evidence.to_yojson fact |> Yojson.Safe.to_string)
+    | Some (Error detail) -> Alcotest.fail detail
+    | None -> None in
+  let encoded fact = Some (Board_tool_evidence.to_yojson fact |> Yojson.Safe.to_string) in
+  Alcotest.(check (option string)) "identical labels do not merge physical calls"
+    (encoded second_fact) (peek second);
+  Keeper_tool_call_log.clear_board_action_evidence ~invocation:second ();
+  Alcotest.(check (option string)) "settling a sibling preserves the original call"
+    (encoded first_fact) (peek first);
+  Alcotest.(check (option string)) "the settled call is empty" None (peek second);
+  Keeper_tool_call_log.clear_board_action_evidence ~invocation:first ();
+  Alcotest.(check (option string)) "the original call is settled separately" None (peek first)
+
 let test_row_without_a_typed_outcome_writes_unknown_wire_outcome () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
@@ -2316,6 +2397,28 @@ let test_async_append_defers_until_flush env =
           (Safe_ops.json_string_opt "keeper" entry)
       | _ -> Alcotest.fail "expected exactly one entry"))
 
+let test_board_fact_commits_before_async_mcp_return env =
+  with_tmp_log_dir (fun _dir ->
+    Eio.Switch.run (fun sw ->
+      Keeper_tool_call_log.start_flush_fiber ~sw ~clock:(Eio.Stdenv.clock env);
+      let fact = board_comment_fact 'a' in
+      let typed_result = Tool_result.make_ok ~tool_name:"masc_board_comment"
+          ~start_time:(Tool_timing.start ()) ~metadata:(Board_tool_evidence.metadata fact) () in
+      (* Official-client MCP supplies its original typed result without a
+         native invocation carrier or an explicit commit callback. *)
+      Keeper_tool_call_log.log_call ~keeper_name:"async-board-keeper"
+        ~tool_name:"masc_board_comment" ~input:(`Assoc []) ~output_text:"committed comment"
+        ~wire_outcome:Tool_result.Ok ~duration_ms:1.0 ~typed_result
+        ~execution_id:(Ids.Execution_id.of_string "exec-async-board") ();
+      Alcotest.(check int) "Board evidence never enters the lossy queue" 0
+        (Keeper_tool_call_log.queued_count_for_testing ());
+      match read_recent ~keeper_name:"async-board-keeper" () with
+      | [ row ] ->
+        Alcotest.(check string) "the original producer fact is already durable"
+          (Board_tool_evidence.to_yojson fact |> Yojson.Safe.to_string)
+          (Yojson.Safe.Util.member "board_action_evidence" row |> Yojson.Safe.to_string)
+      | _ -> Alcotest.fail "MCP Board evidence is not readable before any background flush"))
+
 exception Post_commit_guard_failure
 
 let test_async_append_guard_commit_boundary env =
@@ -3284,6 +3387,8 @@ let () =
             "file evidence remains occurrence-scoped"
             `Quick
             test_pending_file_change_evidence_is_occurrence_scoped
+        ; Alcotest.test_case "Board evidence uses opaque invocation identity" `Quick
+            test_board_carriers_use_opaque_invocation_identity
         ; Alcotest.test_case
             "cancelled invocation releases abandoned observation"
             `Quick
@@ -3318,6 +3423,10 @@ let () =
             test_ordinary_path_disposition_persisted
         ; eio_test "file evidence shares the execution identity row"
             test_file_change_evidence_persists_with_execution_identity
+        ; eio_test "Board evidence survives failed wire and bounded output"
+            test_board_evidence_survives_failed_wire_and_truncated_output
+        ; eio_test "foreign MCP metadata cannot manufacture Board writes"
+            test_foreign_board_metadata_is_not_a_board_write
         ; eio_test "no typed outcome writes unknown wire outcome"
             test_row_without_a_typed_outcome_writes_unknown_wire_outcome
         ; eio_test "composition action context"
@@ -3471,6 +3580,8 @@ let () =
             test_async_append_guard_commit_boundary
         ; eio_env_test "append queues until flush when async fiber is active"
             test_async_append_defers_until_flush
+        ; eio_env_test "Board MCP fact commits before background flush"
+            test_board_fact_commits_before_async_mcp_return
         ; eio_env_test "failed flush retains its row and publishes no frontier"
             test_failed_flush_keeps_the_row_and_frontier
         ; eio_env_test "commit callback runs after synchronous readable append"

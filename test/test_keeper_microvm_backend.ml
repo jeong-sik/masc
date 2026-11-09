@@ -398,9 +398,9 @@ let test_the_command_separator_is_per_runtime () =
        ~command_argv:[ "sh" ])
 ;;
 
-let shim_prefix backend =
+let shim_prefix runtime =
   Microvm.shim_exec_prefix_for
-    backend
+    runtime
     ~container_name:"g"
     ~uid:1
     ~gid:2
@@ -409,7 +409,7 @@ let shim_prefix backend =
 ;;
 
 (* The prefix carries two things the shim cannot run without: where its
-   config is, and which identity it runs as. All three CLIs document the env
+   config is, and which identity it runs as. Both CLIs document the env
    entry; msb's --user documents a guest user name and no uid:gid form, so
    the identity is the half that cannot be said and the prefix refuses rather
    than sending a value read from no help output. *)
@@ -417,22 +417,12 @@ let test_the_shim_prefix_refuses_where_the_identity_cannot_be_named () =
   let writable_home = "HOME=" ^ Backend.scratch_guest_root in
   check
     (Alcotest.list Alcotest.string)
-    "container carries the config env"
-    [ "container"; "exec"; "-i"; "--user"; "1:2"; "-w"; "/masc-work"
-    ; "--env"; writable_home
-    ; "--env"; "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
-    ; "g" ]
-    (match shim_prefix Backend.Apple_container with
-     | Ok argv -> argv
-     | Error detail -> fail detail);
-  check
-    (Alcotest.list Alcotest.string)
-    "nerdctl carries it too"
+    "nerdctl carries the config env"
     [ "nerdctl"; "exec"; "-i"; "--user"; "1:2"; "-w"; "/masc-work"
     ; "--env"; writable_home
     ; "--env"; "MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.conf"
     ; "g" ]
-    (match shim_prefix Backend.Nerdctl_kata with
+    (match shim_prefix Backend.Nerdctl_kata_exec with
      | Ok argv -> argv
      | Error detail -> fail detail);
   check
@@ -450,7 +440,7 @@ let test_the_shim_prefix_refuses_where_the_identity_cannot_be_named () =
     ; "g"
     ; "--"
     ]
-    (match shim_prefix Backend.Microsandbox with
+    (match shim_prefix Backend.Microsandbox_exec with
      | Ok argv -> argv
      | Error detail -> fail detail);
 ;;

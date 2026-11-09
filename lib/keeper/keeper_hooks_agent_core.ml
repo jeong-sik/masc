@@ -826,6 +826,14 @@ let make_hooks
         let file_change_evidence =
           Keeper_tool_call_log.peek_file_change_evidence ~invocation ()
         in
+        let board_action_evidence =
+          match Keeper_tool_call_log.peek_board_action_evidence ~invocation () with
+          | Some evidence -> Some evidence
+          | None ->
+            (match output with
+             | Ok { Agent_core.Types._meta; _ } -> Board_tool_evidence.of_metadata _meta
+             | Error _ -> None)
+        in
         (* Producer evidence and prior page observations cannot be reconstructed
            from current state. Supplying [on_committed] forces this row through the
            synchronous append boundary; only that acknowledgement removes the
@@ -837,6 +845,7 @@ let make_hooks
               (fun () ->
                  log_committed := true;
                  Keeper_tool_call_log.clear_retained_artifacts ~invocation ();
+                 Keeper_tool_call_log.clear_board_action_evidence ~invocation ();
                  (match file_change_evidence with
                   | Some _ ->
                     ignore
@@ -866,6 +875,7 @@ let make_hooks
              ?disposition:
                (Keeper_tool_call_log.consume_disposition ~invocation ())
              ?file_change_evidence
+             ?board_action_evidence
              ?execution_evidence
              ~artifact_refs:(retained_artifacts @ Keeper_tool_call_log.peek_file_change_artifact_refs ~invocation ())
              ~duration_ms
@@ -1084,7 +1094,8 @@ let make_hooks
           tool_name error;
         (* A call whose handler produced no result: [post_tool_use] never
            fires for it, so this row is its only record. *)
-        let log_call_without_result ~disposition ~wire_outcome ~result_ready ~call_label =
+        let log_call_without_result ~disposition ~board_action_evidence
+              ~wire_outcome ~result_ready ~call_label =
           let tctx : Keeper_tool_call_log_context.turn_context =
             Keeper_tool_call_log_context.get_turn_context_record
               ~cell:turn_ctx_cell ()
@@ -1107,6 +1118,7 @@ let make_hooks
                ~tool_name ~input ~output_text:error
                ~wire_outcome
                ?disposition
+               ?board_action_evidence
                ~duration_ms
                ~model:(current_keeper_model meta)
                ?agent_name:tctx.agent_name
@@ -1127,6 +1139,7 @@ let make_hooks
                ~result_bytes:(String.length error)
                ~on_committed:(fun () ->
                  log_committed := true;
+                 Keeper_tool_call_log.clear_board_action_evidence ~invocation ();
                  Option.iter
                    (fun notify -> notify ~tool_call_id:tool_use_id ~turn
                      ~planned_index:schedule.planned_index ~execution_id)
@@ -1165,7 +1178,8 @@ let make_hooks
               other site records the call. Until this row existed a rejected
               call left only a counter: the keeper could not see the argument
               object it got refused for, and repeated it. *)
-           log_call_without_result ~disposition:None ~wire_outcome:Tool_result.Error
+           log_call_without_result ~disposition:None ~board_action_evidence:None
+             ~wire_outcome:Tool_result.Error
              ~result_ready:true ~call_label:"rejected-call"
          | Agent_core.Hooks.Cancelled_during_execution ->
            (* The call was cancelled while its handler ran: it ended with no
@@ -1177,6 +1191,7 @@ let make_hooks
               finished before the cancellation reached the dispatcher; the row
               carries it. *)
            log_call_without_result
+             ~board_action_evidence:(Keeper_tool_call_log.peek_board_action_evidence ~invocation ())
              ~disposition:(Keeper_tool_call_log.consume_disposition ~invocation ())
              ~wire_outcome:Tool_result.Unknown
              ~result_ready:false ~call_label:"cancelled-call");

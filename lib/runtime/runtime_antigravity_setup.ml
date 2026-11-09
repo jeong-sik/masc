@@ -14,8 +14,8 @@ let error_message = function
   | Invalid_catalog -> "The official Antigravity model catalog has an unsupported response format."
   | Keychain_unavailable -> "The selected Antigravity keychain could not be read or its private account could not be switched. Unlock that account and retry; no fallback account was selected."
 open Result.Syntax
-let prepare ~runtime_root ~account_id =
-  Runtime_antigravity_home.prepare_for_login ~runtime_root ~owner_leaf:account_id
+let prepare ~host ~runtime_root ~account_id =
+  Runtime_antigravity_home.prepare_for_login ~host ~runtime_root ~owner_leaf:account_id
   |> Result.map_error (fun _ -> Private_home_unavailable)
 let credential_file_error = function
   | Runtime_antigravity_home.Invalid_oauth_source _ -> Unsafe_credential
@@ -24,8 +24,8 @@ let credential_file_error = function
   | Invalid_runtime_root _ | Invalid_owner_leaf _ | Unsafe_directory _ | Invalid_managed_oauth _
   | Settings_write_failed _ | Mcp_config_write_failed _ | Mcp_config_cleanup_failed _ ->
     Private_home_unavailable
-let prepare_from_credential_file ~runtime_root ~account_id ~oauth_source =
-  Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:account_id ~oauth_source
+let prepare_from_credential_file ~host ~runtime_root ~account_id ~oauth_source =
+  Runtime_antigravity_home.prepare ~host ~runtime_root ~owner_leaf:account_id ~oauth_source
   |> Result.map_error credential_file_error
 let home_dir = Runtime_antigravity_home.home_dir
 let environment home = Runtime_antigravity.official_client_environment ~home_dir:(home_dir home) ()

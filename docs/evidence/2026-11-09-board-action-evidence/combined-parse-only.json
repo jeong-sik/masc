@@ -1,0 +1,248 @@
+{
+  "recorded_at": "2026-11-09T14:25:00.502917+00:00",
+  "base": "e3e163a1c037202fb20d5b9fadfe228da3cf747a",
+  "source_parent": "978758a616d4d2e3541393db9e16dff136f673b5",
+  "uncommitted_scope": [
+    "lib/keeper/keeper_autonomous_turn_source.mli",
+    "lib/keeper/keeper_autonomous_turn_source.ml",
+    "test/test_keeper_autonomous_turn_source.ml"
+  ],
+  "compiler": "5.5.1",
+  "target_compiler": "5.5.2",
+  "scope": "parsing_only",
+  "typecheck": false,
+  "ocaml_test_execution": false,
+  "local_dune": false,
+  "ci_execution": false,
+  "results": [
+    {
+      "file": "lib/board/board_dispatch.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "8c2bf4f076a50d92f78821591e876710e357f563c2f74e9817ce112420d818bf"
+    },
+    {
+      "file": "lib/board/board_dispatch.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "b77752d1dfa9dea46f3837e19ace1191aa6217dfe23af090722e0ed8a6eff5e5"
+    },
+    {
+      "file": "lib/board_tool_adapter/board_tool_evidence.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "c329304bf07b51aae0411476f1c376913fba792c70c2b04fbf3dca623974f446"
+    },
+    {
+      "file": "lib/board_tool_adapter/board_tool_evidence.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "5aa8d469102c03a1635e6bb741c8c8016a40f86d9b3214ddb4b5b8a7ca777871"
+    },
+    {
+      "file": "lib/board_tool_adapter/board_tool_handlers.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "67467792115cd3f8fb97d5c7237b0be159e2eb5f8b3665142298ecf80a30f511"
+    },
+    {
+      "file": "lib/board_tool_adapter/board_tool_post.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "15b6fec2f7f906dbe59d05c64841f6d2b1c7ce9aeb5791368e4652c6f3b73e67"
+    },
+    {
+      "file": "lib/keeper/keeper_agent_run.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "c649fe22baa34b7be009bce2eb04e2c9a82b8fbd8833cc79c7e110c1477d7b3d"
+    },
+    {
+      "file": "lib/keeper/keeper_autonomous_turn_source.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "0cc1476d84c6be945f474d3aab0bed39af8642185d24057cf498aee80a138f17"
+    },
+    {
+      "file": "lib/keeper/keeper_autonomous_turn_source.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "f412d1716814bc972e1c39c47d7992e9e1460da676aa181ceffe242ec985bb61"
+    },
+    {
+      "file": "lib/keeper/keeper_hooks_agent_core.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "65e5bb44d7a1adeefee2dc93bceaba13d044daac8c86ff5f6cc8db78e1d554f8"
+    },
+    {
+      "file": "lib/keeper/keeper_run_tools.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "df09d589eb95ff23f44335165397af1b3d82c55d8edcddffe5d741ac7db2957d"
+    },
+    {
+      "file": "lib/keeper/keeper_run_tools.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "a2abcd9b2a6f9c7f2eba2c9048d635f9a7e5c30fb508813e58e59491fe4a8edd"
+    },
+    {
+      "file": "lib/keeper/keeper_run_tools_hook_accumulator.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "0b6a3c784bef5a5aa62e556678a796d98bf37333e95b2be6e16615fa1f99ccea"
+    },
+    {
+      "file": "lib/keeper/keeper_run_tools_hook_accumulator.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "0b35ec59ba9d00d7701523c987ff58d906291ddef7735a51faba6fa0d9c41343"
+    },
+    {
+      "file": "lib/keeper/keeper_run_tools_setup.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "f67f0b451e1bed14dbfcb3a2715067927707843d7264d93c198508266b2201e6"
+    },
+    {
+      "file": "lib/keeper/keeper_tool_composition_surface.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "6d66e4f177159f832e8138cde7f575d0018185f11f8b314bf88a56639af7b263"
+    },
+    {
+      "file": "lib/keeper/keeper_tool_composition_surface_tools.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "aa62e7c54c59c61513e7c83286b3cd49873ab8dc615d235daf9918aa36108901"
+    },
+    {
+      "file": "lib/keeper/keeper_tool_composition_surface_tools.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "a86b6342097c552217a8d70ec59c323001d69fc8d42cda06bcc808c2bbbb2d7d"
+    },
+    {
+      "file": "lib/keeper/keeper_tool_plan_executor.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "1eff2d2d402e888f209f0fe43debda6f8b47698b101e3f6a120f58f579e1d832"
+    },
+    {
+      "file": "lib/keeper/keeper_tools_agent_core_bundle.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "68904786cee9fe39964dd68b05b6af33832e17815b465f0069c41cbc404be6a0"
+    },
+    {
+      "file": "lib/keeper/keeper_tools_agent_core_bundle.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "dcc72f5f7bcd83a48cf06a53f6a65702ca39bbe49f18d9d0e6efc46d6264bf65"
+    },
+    {
+      "file": "lib/keeper/keeper_tools_agent_core_handler_exec.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "95bb5fd57d8f3a21a4a4f2d4d16168eb35550817ffc32f6e20fd1078048ced1b"
+    },
+    {
+      "file": "lib/keeper_tool_call_log.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "0d8e73b4001bd22c6fff6af03236e4418a2ab305411ed659ebf95f0768f1e474"
+    },
+    {
+      "file": "lib/keeper_tool_call_log.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "8dc248563568c3f6f19b601e17e4e911138166029570b4a90c58712094a45cf9"
+    },
+    {
+      "file": "lib/mcp_server_eio_call_tool.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "043eca1be3ce281c1453c5e8c9bb2e74ae066e4ad67675abfda09ca1cbc3b99e"
+    },
+    {
+      "file": "lib/mcp_server_eio_call_tool.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "a017f98f034af1ada9a1638cc30ff30f6ebb49dc671dacb4b5fae0700b6a1871"
+    },
+    {
+      "file": "lib/server/server_board_reaction_http.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "41493172acf80a34bba6f71f9c33a1194c35854a4caa026ae588d72b16f2a458"
+    },
+    {
+      "file": "lib/server/server_dashboard_http_keeper_tool_calls.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "0f794d89a9931ed0b2980a8257be94ae07eb300c518790743af5351b6c7768ae"
+    },
+    {
+      "file": "lib/server/server_dashboard_http_keeper_tool_calls.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "c4195d62d9cc79f186fe29597f49ed361bf6f2707d01020957b85884a6e5374e"
+    },
+    {
+      "file": "lib/tool_types/tool_result.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "9d0e7a331ed9944c8edead341689a6d4ddf24ce3c250b1594169c1358aefd291"
+    },
+    {
+      "file": "test/test_board_dispatch.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "e888a1195efc088f1d938de3b43b70e64ef7b8144f99656d09d202db868ec73f"
+    },
+    {
+      "file": "test/test_keeper_autonomous_turn_source.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "4fedd4b9c01054c518c7edde1a30900cd5764a52ad4eabd84fe1516d2c21c782"
+    },
+    {
+      "file": "test/test_keeper_tool_call_log.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "34f50719b7a119a42b0371c88bbaa0022266319ffaa03ea120c9d77839743fdc"
+    },
+    {
+      "file": "test/test_keeper_tool_dispatch_runtime.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "eb4c0fd25f226e5a5d25919147fb564a1be67cb88b5c0ee3168db8650c63f6e9"
+    },
+    {
+      "file": "test/test_keeper_tool_plan_executor.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "f0e78c3e4b31a5eda17cb290df7cfec73723d08964b3c2859ef498b83f769283"
+    },
+    {
+      "file": "test/test_mcp_server_eio_call_tool.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "7f59802be3a570fead9560864eb3ffdb5bff4b42f5b83f986daa42877870ea15"
+    },
+    {
+      "file": "test/test_server_dashboard_http_keeper_tool_lookup.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "e0cf4d306ea19fb9380274a4a2833fac63e6b0104d18b72797792c063be076e8"
+    },
+    {
+      "file": "test/test_tool_board_coverage.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "19b43d69aab6aecdb51c8a0e2c9a7f45cac0d22cdb83f96a48fec7541d543ad3"
+    }
+  ],
+  "preserved_external_repair": "0add9784d911c816b0bd773046e0884adb840ede (public Board wrapper imports in both codec files)"
+}

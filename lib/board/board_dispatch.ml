@@ -942,15 +942,19 @@ let post_for_reaction_target store ~target_type ~target_id =
            Board.read_post store ~post_id
            |> Result.map_error Board.board_error_of_read_error)
 
-let require_readable_target ~reader ~target_type ~target_id =
+let readable_reaction_target ~reader ~target_type ~target_id =
   let store = backend () in
   match post_for_reaction_target store ~target_type ~target_id with
-  | Ok post when Board_access.can_read ~reader post -> Ok ()
+  | Ok post when Board_access.can_read ~reader post -> Ok post
   | Ok _ ->
     Error (match target_type with
       | Board.Reaction_post -> Board.Post_not_found target_id
       | Board.Reaction_comment -> Board.Comment_not_found target_id)
   | Error _ as error -> error
+
+let require_readable_target ~reader ~target_type ~target_id =
+  readable_reaction_target ~reader ~target_type ~target_id
+  |> Result.map (fun _post -> ())
 
 let emit_reaction_board_signal store (toggled : Board.reaction_toggle_result) =
   match
@@ -984,10 +988,15 @@ let emit_reaction_board_signal store (toggled : Board.reaction_toggle_result) =
         toggled.target_id toggled.user_id toggled.emoji
         (Board_types.show_board_error e)
 
+type reaction_write =
+  { post_id : Board.Post_id.t
+  ; reaction : Board.reaction_toggle_result
+  }
+
 let toggle_reaction ~reader ~target_type ~target_id ~user_id ~emoji =
-  match require_readable_target ~reader ~target_type ~target_id with
+  match readable_reaction_target ~reader ~target_type ~target_id with
   | Error _ as error -> error
-  | Ok () ->
+  | Ok parent ->
   let result =
     let store = backend () in
         (match Board.toggle_reaction store ~target_type ~target_id ~user_id ~emoji with
@@ -1016,7 +1025,7 @@ let toggle_reaction ~reader ~target_type ~target_id ~user_id ~emoji =
          ~ids:(Printf.sprintf "target=%s:%s user=%s emoji=%s"
            (Board.reaction_target_type_to_string target_type)
            target_id user_id emoji) e);
-  result
+  Result.map (fun reaction -> { post_id = parent.Board.id; reaction }) result
 
 let list_reactions ~reader ~target_type ~target_id ?user_id () =
   match require_readable_target ~reader ~target_type ~target_id with

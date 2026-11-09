@@ -447,12 +447,19 @@ val vote_comment :
   direction:Board.vote_direction ->
   (int, Board.board_error) Result.t
 
+type reaction_write =
+  { post_id : Board.Post_id.t
+  ; reaction : Board.reaction_toggle_result
+  }
+(** The parent already resolved by the write's read-access check, alongside
+    the committed reaction. This is write evidence, not a later Board read. *)
+
 val toggle_reaction : reader:Board_access.reader ->
   target_type:Board.reaction_target_type ->
   target_id:string ->
   user_id:string ->
   emoji:string ->
-  (Board.reaction_toggle_result, Board.board_error) Result.t
+  (reaction_write, Board.board_error) Result.t
 
 val list_reactions : reader:Board_access.reader ->
   target_type:Board.reaction_target_type ->

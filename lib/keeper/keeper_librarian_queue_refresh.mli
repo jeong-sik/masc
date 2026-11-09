@@ -4,7 +4,7 @@ type pass_end =
   | Drained
   | Yielded_to_waiting_unit
   | Not_committed
-  | Pending
+  | Pending of Keeper_librarian_pending.t
       (** An unfinished durable commit suspends the remaining phases of this
           wake. This is neither failure nor an invitation to retry inline. *)
   | Stopped of Keeper_librarian_durable_consumer.error
@@ -21,9 +21,23 @@ val install_change_observer :
 
 val last_measurement : config:Workspace.config -> keeper_name:string -> measurement option
 (** Latest completed durable drain observation in this process, scoped to the
-    runtime Keeper directory. [None] means no observation; this is never used
-    for admission or scheduling. An unread count unavailable at that pass is
+    runtime Keeper directory. [None] means no observation. Counts never grant
+    execution or scheduling; a typed pre-admission capacity wait may be woken
+    when that installation delivers a result. An unread count unavailable at that pass is
     [None], not the prior pass's count. *)
+
+val capacity_released : config:Workspace.config -> installation_id:string -> unit
+(** A delivered worker result freed space in its pending-request listing.
+    Wake only the same installation's last observed pre-admission capacity
+    waiters in both admission and durable history. A concurrent pass cannot miss
+    the release while publishing its measurement. This never replays an
+    unconfirmed dispatch. *)
+
+val last_admission_wait :
+  config:Workspace.config -> keeper_name:string -> Keeper_librarian_pending.worker option
+(** The latest completed explicit-admission pass's actual worker wait, independent of the
+    durable-history measurement. None means the latest pass had no worker wait
+    or this process has not observed that admission lane. Never replay authority. *)
 
 val forget_measurement : config:Workspace.config -> keeper_name:string -> unit
 (** Clear after the purge has quiesced the lane and while submissions remain
@@ -34,7 +48,7 @@ val install : unit -> unit
 (** Install after the detached memory executor. Queue producers never wait for
     this extraction; source selection happens when the latest unit runs. *)
 
-val submit_durable : base_path:string -> keeper_name:string -> unit
+val submit_durable : base_path:string -> keeper_name:string -> Keeper_memory_lane.outcome
 (** Submit disk-selected catch-up for this Keeper on the server-owned
     Librarian lane. Pending explicit candidates are recovered and judged
     independently of current Memory limits before conversation catch-up.
@@ -55,7 +69,8 @@ val submit_durable : base_path:string -> keeper_name:string -> unit
     on unchanged input is remembered until the input changes or the process
     restarts. Saved cleanup progress that leaves excess requests another unit
     on the same lane; neither category nor item excess may worsen. A retained
-    excess or failed pass waits for a later external wake. *)
+    excess or failed pass waits for a later external wake. The returned lane
+    receipt is submission only, never completed extraction or Memory commit. *)
 
 val with_purge_then_catch_up
   :  base_path:string
@@ -105,6 +120,11 @@ val submit_durable_for_unlaunched
 type read_limit = Oldest_turn | Oldest_turn_messages
 
 module For_testing : sig
+  val run_explicit_admission_with :
+    base_path:string -> keeper_name:string ->
+    run:(unit -> Keeper_memory_admission_worker.outcome) -> unit
+  (** Production admission observation, wake reconciliation and reporting with
+      its worker edge supplied by the caller. *)
   val read_limit :
     config:Workspace.config -> keeper_name:string -> trace_id:string -> read_limit option
   (** The source unit a refusal selected for the next signal. No atom count

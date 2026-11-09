@@ -284,7 +284,8 @@ let toggle_json ~reader ~actor request =
     ~target_id:request.target.target_id
     ~user_id:actor
     ~emoji:request.emoji
-  |> Result.map Board.reaction_toggle_result_to_yojson
+  |> Result.map (fun (receipt : Board_dispatch.reaction_write) ->
+       Board.reaction_toggle_result_to_yojson receipt.reaction)
   |> Result.map_error of_board_error
 ;;
 

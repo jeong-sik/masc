@@ -48,13 +48,13 @@ chmod +x "$FIXTURE_DIR/repo/_build/default/bin/deployment_preflight_helper.exe"
 # binary.
 cp "$ROOT_DIR/scripts/install-local-build.sh" \
     "$FIXTURE_DIR/repo/scripts/install-local-build.sh"
-# The install asks for the three browser Add-on programs unless it is told
-# --no-browser-addon, and this case means to reach the runtime.toml check.
+# Provide every required executable so this case reaches the runtime.toml check.
 INSTALL_BINARIES=(
     "$FIXTURE_DIR/repo/_build/default/bin/masc_tui.exe"
     "$FIXTURE_DIR/repo/_build/default/bin/masc_native_addon_launcher.exe"
     "$FIXTURE_DIR/repo/_build/default/bin/masc_browser_addon_worker.exe"
     "$FIXTURE_DIR/repo/_build/default/bin/masc_exec_ssh_bootstrap.exe"
+    "$FIXTURE_DIR/repo/_build/default/bin/masc_antigravity_path_hook.exe"
 )
 touch "${INSTALL_BINARIES[@]}"
 chmod +x "${INSTALL_BINARIES[@]}"

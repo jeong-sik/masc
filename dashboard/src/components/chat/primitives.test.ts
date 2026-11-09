@@ -2969,6 +2969,35 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     resetToolCallOutputs()
   })
 
+  it('keeps product observations beside Core history for an identified direct operation', () => {
+    render(html`<${ChatTranscript} keeperName="sangsu"
+      entries=${[entry({
+        id: 'identified-direct-answer', text: '요청을 처리했습니다.', role: 'assistant', source: 'direct_assistant',
+        deliveryProvenance: operationDeliveryProvenance('identified-direct-operation', 'terminal_result'),
+        traceSteps: [{ kind: 'progress', text: '공식 클라이언트가 작업을 마쳤습니다.' }],
+      })]}
+      emptyText="empty" groupToolCalls=${true}
+    />`, container)
+
+    expect(container.querySelector('[data-chat-tool-trace]')?.textContent).toContain('대화·도구 관측')
+    expect(container.querySelector('[data-native-execution-history]')?.textContent).toContain('Core 실행 이력')
+    expect(container.textContent).toContain('요청을 처리했습니다.')
+  })
+
+  it('shows Core history without inventing product observations for a text-only direct operation', () => {
+    render(html`<${ChatTranscript} keeperName="sangsu"
+      entries=${[entry({
+        id: 'text-only-direct-answer', text: '기록된 답변입니다.', role: 'assistant', source: 'direct_assistant',
+        deliveryProvenance: operationDeliveryProvenance('text-only-direct-operation', 'terminal_result'),
+      })]}
+      emptyText="empty" groupToolCalls=${true}
+    />`, container)
+
+    expect(container.querySelector('[data-chat-tool-trace]')).toBeNull()
+    expect(container.querySelector('[data-native-execution-history]')?.textContent).toContain('Core 실행 이력')
+    expect(container.textContent).toContain('기록된 답변입니다.')
+  })
+
   it('folds consecutive tool calls into one turn timeline card when grouping is on', () => {
     recordVerifiedToolCallOutputs([
       toolCallOutput({ tool_use_id: 't1', output: 'r1' }),

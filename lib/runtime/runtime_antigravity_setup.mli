@@ -4,8 +4,11 @@ type error = Private_home_unavailable | Sign_in_required | Unsafe_credential
   | Unrecognized_credential | Unrecognized_managed_credential | Command_failed | Invalid_catalog
   | Keychain_unavailable
 val error_message : error -> string
-val prepare : runtime_root:string -> account_id:string -> (t, error) result
-val prepare_from_credential_file : runtime_root:string -> account_id:string ->
+val prepare :
+  host:Runtime_account_access.host_account -> runtime_root:string -> account_id:string ->
+  (t, error) result
+val prepare_from_credential_file :
+  host:Runtime_account_access.host_account -> runtime_root:string -> account_id:string ->
   oauth_source:string -> (t, error) result
 val home_dir : t -> string
 val environment : t -> string array

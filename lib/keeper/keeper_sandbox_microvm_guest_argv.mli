@@ -54,7 +54,7 @@ val request_environment : shim_config_path:string -> (string * string) list
 
 val shim_exec_prefix_for :
   ?stdin:bool ->
-  Keeper_microvm_backend.t ->
+  Keeper_microvm_backend.exec_runtime ->
   container_name:string ->
   uid:int ->
   gid:int ->

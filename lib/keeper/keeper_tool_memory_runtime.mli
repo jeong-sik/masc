@@ -1,8 +1,8 @@
 (** Agent memory tool runtime — search, context status, write. *)
 
-(** Issue #8484: Variant SSOT for memory search scope.  Mirror in
-    [Tool_shard.memory_search_source_enum_strings] (cycle avoidance,
-    sync regression test catches drift). *)
+(** Issue #8484: Variant SSOT for memory search scope.  The memory search tool
+    schema lists the same strings by hand (cycle avoidance); the sync regression
+    test catches drift. *)
 type memory_search_source =
   | Current
       (** Ordinary and source-bound facts that are current now. This is the

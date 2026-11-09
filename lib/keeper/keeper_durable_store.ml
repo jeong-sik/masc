@@ -855,8 +855,9 @@ let keeper_chat_operation_store =
   ; on_refusal =
       "that keeper's owner does not start, so it takes no chat message and \
        settles no queued or running operation; with the server stopped, \
-       prepare the journal with `masc workspace-upgrade journal` before this \
-       build serves it"
+       preserve the journal, SQLite sidecars and dependent checkpoint evidence, \
+       then follow docs/guides/DURABLE-STORE-HARD-CUT.md and the build's \
+       Fresh state required entry, or choose a separate fresh base path"
   ; scan =
       (fun ~base_path ->
          let module Store = Keeper_chat_operation_store in

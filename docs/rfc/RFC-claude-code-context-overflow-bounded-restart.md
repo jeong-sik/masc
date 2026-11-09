@@ -7,7 +7,7 @@ updated: 2026-11-09
 author: codex
 supersedes: []
 superseded_by: null
-related: ["0351", "0353", "0368", "0371", "retained-results-carrier-shrinks-to-an-address", "size-refusal-starts-fresh-then-cuts-to-the-floor"]
+related: ["0351", "0353", "0368", "0371", "retained-results-carrier-shrinks-to-an-address"]
 ---
 
 # RFC: Claude Code bootstrap admission and rejected-episode fence
@@ -24,9 +24,8 @@ Claude의 **현재 User prompt 한 개**로 전달한다. 따라서 Claude가 �
 1. provider-bound 입력과 hook 결과를 한 번만 준비해 frozen episode를 만든다.
 2. 아직 거부된 적 없는 episode는 full-history view를 정확히 한 번 보낸다.
 3. effect와 response가 시작되기 전 typed context overflow만 더 작은 history view를
-   허가한다. 그 view는 **bootstrap floor** 하나다.
-4. full view가 거부되면 다음 시도는 반드시 **bootstrap floor**다. 중간 view는 두지 않는다
-   (2026-11-09 개정, RFC-size-refusal-starts-fresh-then-cuts-to-the-floor).
+   허가한다.
+4. 제한된 중간 view 뒤 마지막 시도는 반드시 **bootstrap floor**를 보낸다.
 5. floor도 거부되면 같은 episode의 재진입을 durable하게 차단한다.
 6. episode identity가 바뀌면 floor rejection fence는 자동으로 무효화된다.
 7. effect 또는 response가 관측된 episode는 입력 변경만으로 해제하지 않으며 기존
@@ -117,16 +116,15 @@ view가 없을 때까지). 이는 필요한 adapter 수리지만
 - model/reasoning parameters
 - official-client context codec version
 
-축소 attempt는 frozen value를 재사용하고 **history selection, retained tool-result
-carrier의 꼴, memory delivery의 꼴만** 바꾼다. retry가
+축소 attempt는 frozen value를 재사용하고 **history selection과 retained tool-result
+carrier의 꼴만** 바꾼다. retry가
 `before_turn`, `before_turn_params`, operator-note consumption, Gate replay projection,
 prompt capture, tool assignment을 다시 실행해서는 안 된다.
 
 retained tool-result carrier(끝나지 못한 vendor 턴이 남긴 receipt 묶음)는 history
-밖에 붙지만 view에 속한다. 그 꼴은 floor에서, `By_address`가 엄격히 짧으면
-`Inline`에서 `By_address`로 바뀐다. memory delivery도 floor에서 모든 행을 미룬 꼴로
-간다(RFC-retained-results-carrier-shrinks-to-an-address,
-RFC-size-refusal-starts-fresh-then-cuts-to-the-floor).
+밖에 붙지만 view에 속한다. 그 꼴은 첫 typed 크기 거절에서, `By_address`가 엄격히
+짧으면 `Inline`에서 `By_address`로 한 번 바뀐다
+(RFC-retained-results-carrier-shrinks-to-an-address).
 
 ### 4.2 Episode identity
 
@@ -146,7 +144,7 @@ sha256(
 
 volatile timestamp나 retry capacity는 identity에 넣지 않는다. 동일 work item이 매
 heartbeat마다 다른 fingerprint를 얻어 fence를 우회하면 안 된다. retained tool-result
-carrier와 memory delivery의 꼴도 넣지 않는다. 꼴은 같은 episode의 view가 고른다.
+carrier의 꼴도 넣지 않는다. 꼴은 같은 episode의 view가 고른다.
 
 입력 identity가 바뀌는 예는 다음과 같다.
 
@@ -158,7 +156,7 @@ carrier와 memory delivery의 꼴도 넣지 않는다. 꼴은 같은 episode의 
 ### 4.3 View identity
 
 각 attempt는 별도의 `view_sha256`, retained/dropped atom 수, measured history bytes,
-retained tool-result carrier와 memory delivery의 꼴을 기록한다. 이것은 관측용이며 episode re-entry
+retained tool-result carrier의 꼴을 기록한다. 이것은 관측용이며 episode re-entry
 admission에는 사용하지 않는다.
 
 ## 5. Bootstrap floor
@@ -172,8 +170,7 @@ current goal이 history 밖에 별도로 존재하므로 모든 prior-history at
 - exact dynamic-tool surface
 - pinned extra-system-context
 - history omission preamble
-- retained tool-result carrier, `By_address` 꼴(`By_address`가 엄격히 짧을 때)
-- memory delivery, 모든 행을 미룬 꼴
+- retained tool-result carrier, 그 run의 꼴(첫 typed 크기 거절 뒤에는 `By_address`)
 - **zero shrinkable prior-history atoms**
 
 System/extra-context message가 history list에 있으면 pinned component로 floor에 남는다.
@@ -182,20 +179,24 @@ retained tool-result carrier는 history list 밖에 붙으므로 floor 바이트
 (`Runtime_model_input_tail_window.minimum_capacity_bytes`)에 들지 않는다. 그 길이는 꼴이
 묶는다. `By_address` 꼴은 receipt 개수와 상관없이 도구 종류와 개수 자릿수로만 길어진다.
 
-거부됐을 때 다음 시도는 다음과 같다(2026-11-09 개정,
-RFC-size-refusal-starts-fresh-then-cuts-to-the-floor).
+full view가 거부됐을 때 시도 순서는 다음과 같다.
 
 ```text
-Resume 거부 -> fresh Start (range 전체, carrier Inline)
-full 거부   -> mandatory floor
-floor 거부  -> 끝
+full
+  -> optional same-capacity view with the carrier By_address
+  -> optional midpoint 1
+  -> optional midpoint 2
+  -> mandatory floor
 ```
 
-- 크기를 재서 view를 고르지 않는다. 들어가는지는 provider가 판정한다.
+- view는 항상 strictly smaller여야 한다.
+- 중복 boundary는 건너뛴다.
 - floor와 현재 view가 같으면 provider를 다시 호출하지 않는다.
-- provider dispatch 수는 run마다 많아야 셋이다. 처음 요청 하나와 다시 보내기 둘이다.
-- 마지막 dispatch가 floor가 아니면 “attempts exhausted”를 선언할 수 없다. 거절 종류와
-  상관없다. Codex `input_too_large`도 floor까지 간다(같은 RFC §7).
+- provider dispatch 수는 strictly smaller view의 수로 bounded다. halving이면 history
+  바이트의 log2 이고, view마다 atom을 하나 이상 버리므로 atom 수를 넘지 않는다.
+  carrier를 `By_address`로 바꾼 view는 atom을 버리지 않는다. 그 view는 run마다 한 번뿐이라
+  이 bound에 하나를 더한다.
+- 마지막 dispatch가 floor가 아니면 “attempts exhausted”를 선언할 수 없다.
 
 floor 성공은 durable history가 불필요하다는 뜻이 아니다. 그 turn의 provider bootstrap
 view만 최소화됐다는 뜻이며, durable checkpoint와 memory retrieval은 그대로 남는다.
@@ -230,7 +231,7 @@ context-overflow episode에 사용하지 않는다.
 
 ### 6.3 Internal retry authority
 
-safe overflow 뒤 다음 단계가 있을 때만 현재 process가 exact recovery id에 대해
+safe overflow 뒤 더 작은 view가 존재할 때만 현재 process가 exact recovery id에 대해
 `Restart_fresh`를 CAS로 승인한다. 다음 attempt가 그 resolution을 소비한다.
 
 승인 조건은 모두 참이어야 한다.
@@ -238,9 +239,10 @@ safe overflow 뒤 다음 단계가 있을 때만 현재 process가 exact recover
 - error가 typed Claude context overflow다.
 - `tool_effect_attempted = false`
 - `response_emitted = false`
-- 다음 단계가 있다. Resume 다음은 fresh Start, full 다음은 floor이고, floor 다음은 없다.
-  floor가 현재 view와 같으면 다음 단계가 없다.
-- walk는 floor에서 끝나고, floor rejection이 마지막이다. (2026-09-05 geek-scout 실측: 4.1MB history가 1.9MB, 507KB,
+- next view가 current view보다 strictly smaller다. retained tool-result carrier를
+  `By_address`로 바꾼 view는 같은 capacity에서 carrier만 strictly smaller인 view다.
+- next view가 있다. walk는 attempt 횟수가 아니라 더 작은 view가 없는 floor에서 끝나고,
+  floor rejection이 마지막이다. (2026-09-05 geek-scout 실측: 4.1MB history가 1.9MB, 507KB,
   498KB에서 거절된 뒤 floor를 묻지 않은 채 `Bootstrap_floor_exceeded`로 commit됐고,
   keeper는 두 번만 더 줄이면 빠져나올 자리에서 operator recovery에 멈춰 있었다.)
 
@@ -266,16 +268,11 @@ Claude process spawn 자체는 outer lane에서 계속
 
 두 실패를 구분해 노출한다.
 
-- `context_overflow_recoverable`: 다음 단계(fresh Start나 floor)를 같은 run에서 시도 중
+- `context_overflow_recoverable`: 더 작은 bootstrap view를 같은 run에서 시도 중
 - `bootstrap_floor_exceeded`: MASC가 소유한 history 축을 모두 제거했지만 provider가
   거부함; system prompt, current goal, tool surface, pinned context를 줄이거나 runtime을
-  변경해야 함. retained tool-result carrier가 floor에 `By_address`로 실렸으면 receipt를
-  outbox에서 옮기는 것은 조치가 아니다. floor의 한 부분이 floor 꼴을 만들지 못했으면
-  (blob 쓰기 실패 등) 그 부분은 지금 꼴로 실리고, 그 실패는 warn 로그에 남는다
-  (RFC-size-refusal-starts-fresh-then-cuts-to-the-floor §8).
-  Codex `input_too_large`도 floor까지 간다. floor의 `turn/start` 글은 거절된 Start의
-  글과 같아서 floor도 거절되고 이 기록이 남는다(같은 RFC §7). 그때 줄일 것은 current
-  goal과 start context다
+  변경해야 함. retained tool-result carrier는 floor에 이미 `By_address`로 실렸으니,
+  receipt를 outbox에서 옮기는 것은 조치가 아니다
 
 same-episode local refusal은 provider error처럼 위장하지 않는다. dashboard blocker와
 turn receipt는 다음을 포함한다.
@@ -289,7 +286,6 @@ turn receipt는 다음을 포함한다.
 - tool count/tool surface bytes
 - current goal bytes
 - retained tool-result carrier 꼴, receipt 수, carrier bytes
-- memory delivery 꼴, 미룬 행 수
 - operator next action
 
 provider token 수치는 진단 원문으로 보존하되 byte/token 환산 상수로 admission을
@@ -317,38 +313,39 @@ generic untyped `tool_call(name, json)`로 policy boundary를 우회하는 설�
 
 (2026-08-12 개정: CLI 2.1.228 result frame의 `terminal_reason` enum이
 `prompt_too_long`을 실제 방출함을 강제 overflow stdio 캡처로 확증하여 분류
-권위를 typed 축으로 이관했다. 2026-09-22 #37667이 문구 폴백을 지웠다.)
+권위를 typed 축으로 이관했다.)
 
-1. quota 막힘을 먼저 본다. `api_error_status`가 429이거나 rate limit이 거절이면
-   `Quota_blocked`다. 거절된 창이 없는 429는 `Rate_throttled`다
-   (`runtime_claude_code.ml:2128-2149`, `:2212-2220`).
+1. quota 막힘을 먼저 본다. `api_error_status`가 429이거나 이 턴의 마지막 rate limit
+   상태가 거절이면 `Quota_blocked`다. 막힘 종류는 거절된 창이 있으면 `Quota_spent`,
+   없으면 `Rate_throttled`다 (`runtime_claude_code.ml:2129-2149`, `:2213-2221`).
 2. 그다음 `is_error`가 참이고 `terminal_reason`이 `prompt_too_long`, `blocking_limit`,
    `rapid_refill_breaker`인 frame은 문구와 무관하게 typed context overflow가 된다
-   (`:2033-2045`, `:2199-2229`).
-3. `terminal_reason`이 다른 값이거나 없으면 문구가 overflow 문장과 같아도 generic
-   failure로 남는다. 문구는 읽지 않는다.
-4. tool/response activity flag가 terminal error에 보존된다.
+   (`:2042-2053`, `:2200-2230`).
+3. `is_error`가 참이고 `terminal_reason`이 다른 값이거나 없으면, 문구가 overflow 문장과
+   같아도 `Turn_failed_with_observation`으로 남는다 (`:2231-2244`). 문구는 읽지 않는다.
+4. `Quota_blocked`, `Context_window_exceeded`, `Turn_failed_with_observation`은
+   tool/response activity flag를 보존한다.
 
 ### 10.2 Frozen episode
 
 1. full + shrink retries 전체에서 preparation hook은 한 번만 실행된다.
 2. source projection과 operator-note consumption은 한 번만 실행된다.
 3. tool surface와 base system prompt는 모든 view에서 동일하다. Start의 system prompt에
-   실리는 retained tool-result carrier와 memory delivery만 꼴에 따라 달라진다.
+   실리는 retained tool-result carrier만 꼴에 따라 달라진다.
 4. capacity만 달라지고 `episode_sha256`은 동일하다.
 
 ### 10.3 Floor convergence
 
-1. full rejection 뒤 다음 attempt는 zero-history floor다. 중간 view는 없다.
-2. Resume rejection 뒤 다음 attempt는 range 전체와 carrier `Inline`의 fresh Start다.
+1. full rejection 뒤 midpoint가 성공한다.
+2. midpoint가 계속 실패하면 마지막 attempt는 zero-history floor다.
 3. floor 성공 뒤 turn이 settle된다.
 4. floor rejection 뒤 provider attempt는 더 발생하지 않는다.
 5. prior history가 단일 atom이어도 zero-history floor를 시도한다.
 6. oversized current goal/pinned context는 floor rejection으로 분류된다.
-7. retained tool-result carrier만으로 창을 넘으면 첫 typed 거절 뒤 floor가 `By_address`로
-   가고 받아들여진다.
-8. `By_address` floor도 거절되면 `Bootstrap_floor_exceeded`다. floor로 갈 때 blob 쓰기가
-   실패하면 carrier는 `Inline`으로 floor에 실려 간다.
+7. retained tool-result carrier만으로 창을 넘으면 첫 typed 거절 뒤 같은 capacity에서
+   `By_address`로 다시 보내고, floor에 닿기 전에 받아들여진다.
+8. `By_address`로 바꿔도 넘치면 history 줄이기가 이어지고, floor까지 `By_address`가
+   실린다. 그 floor도 거절되면 `Bootstrap_floor_exceeded`다.
 
 ### 10.4 Durable re-entry
 
@@ -367,7 +364,7 @@ sanitized fixture는 최소 다음 shape를 유지한다.
 - 97 tools / 약 115 KB schema
 - fresh Claude `Start`
 
-fake provider는 full을 거부하고 floor를 수락하는 경우, floor도 거부하는
+fake provider는 full과 midpoint를 거부하고 floor를 수락하는 경우, floor도 거부하는
 경우를 각각 검증한다. 어떤 경우에도 다음 cycle에서 동일 full prompt가 재전송되면
 실패다.
 
@@ -398,7 +395,7 @@ fake provider는 full을 거부하고 floor를 수락하는 경우, floor도 거
 - exact-head focused tests와 full CI
 - incident-size sanitized fixture
 - deployed process/commit 확인
-- live full -> floor -> settle 또는 durable block 관측
+- live full -> smaller/floor -> settle 또는 durable block 관측
 - 동일 episode provider dispatch가 다시 생기지 않음을 heartbeat 두 번 이상 확인
 
 ## 12. Current PR status
@@ -416,9 +413,6 @@ root fix 또는 merge-ready로 부르지 않는다.
 
 - **checkpoint clear/purge**: incident recovery일 뿐 재발 방지가 아니다.
 - **fixed three halvings only**: 한 call은 끝내지만 다음 heartbeat replay를 막지 못한다.
-- **중간 view(halving, midpoint)**: 2026-11-09에 버렸다. typed 거절은 크기를 알려 주지
-  않는다. 2026-09-05 geek-scout에서 중간 view 셋이 모두 거절됐고, #31684에서는 어느 view도
-  들어갈 수 없었다(RFC-size-refusal-starts-fresh-then-cuts-to-the-floor §3).
 - **process-local rejected-capacity cache**: restart가 loop를 다시 연다.
 - **provider 문구의 token 숫자로 byte cap 계산**: provider tokenization과 MASC byte
   measurement를 같은 축으로 가장한다.

@@ -128,6 +128,17 @@ let test_the_lag_bar_fills_its_share_of_the_peak () =
   Alcotest.(check int) "a peak of zero reads the lag as the peak" 17 (fill 17 0 5);
   Alcotest.(check int) "a bar of no cells fills none" 0 (fill 0 40 40)
 
+(* A Keeper row's strip draws one mark per half hour, whatever the count
+   (RFC-0515 §2.4.4, the mock's [drawRuler]). *)
+let test_a_strip_half_hour_draws_one_mark () =
+  let mark slot = Grid.strip_mark (Grid.strip_cell slot) in
+  Alcotest.(check string) "no wake" "\xc2\xb7" (mark (Masc_tui_keeper_next_run.Wakes 0));
+  Alcotest.(check string) "one wake" "\xe2\x97\xb7" (mark (Masc_tui_keeper_next_run.Wakes 1));
+  Alcotest.(check string) "three wakes draw the same mark" "\xe2\x97\xb7"
+    (mark (Masc_tui_keeper_next_run.Wakes 3));
+  Alcotest.(check string) "a half hour this build cannot list" "?"
+    (mark Masc_tui_keeper_next_run.Wakes_unknown)
+
 let () =
   Alcotest.run "tui_keeper_grid"
     [ ( "verdict"
@@ -145,5 +156,9 @@ let () =
     ; ( "lag bar"
       , [ Alcotest.test_case "the lag bar fills its share of the peak" `Quick
             test_the_lag_bar_fills_its_share_of_the_peak
+        ] )
+    ; ( "strip"
+      , [ Alcotest.test_case "a strip half hour draws one mark" `Quick
+            test_a_strip_half_hour_draws_one_mark
         ] )
     ]

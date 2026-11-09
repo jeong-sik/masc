@@ -477,8 +477,20 @@ let test_operator_interrupt_preserves_previous_native_settlement () =
     (List.length (requests "turn/start"));
   check int "continuation did not create a new native thread" 0
     (List.length (requests "thread/start"));
-  check int "continuation did not replay history" 0
-    (List.length (requests "thread/inject_items"));
+  (* The continuation refreshes the standing System over the acknowledged
+     Developer injection path (#47580). The conversation itself is never
+     replayed: the injected items carry no user or assistant message. *)
+  let continuation_injections = requests "thread/inject_items" in
+  check int "continuation refreshes the standing system over one injection" 1
+    (List.length continuation_injections);
+  let injected_items =
+    List.hd continuation_injections
+    |> member "params" |> member "items" |> items in
+  check bool "continuation replays no conversation history" true
+    (List.for_all (fun item ->
+         let role = member "role" item |> text in
+         role <> "user" && role <> "assistant")
+       injected_items);
   let resumed_thread =
     List.hd (requests "thread/resume")
     |> member "params" |> member "threadId" |> text in
@@ -498,10 +510,13 @@ let turn_text rows =
   |> member "params" |> member "input" |> items |> List.hd |> member "text" |> text
 
 let test_resume_carries_per_turn_context_in_front_of_the_goal ?(worker_pool = false) () =
-  (* The thread holds the conversation, so a Resume sends none of it. The
+  (* The thread holds the conversation, so a Resume never replays it. The
      per-turn context goes in front of the goal, as the Claude Code lane sends
      it, and stays out of [developerInstructions], which Codex applies only
-     when it compacts the thread. *)
+     when it compacts the thread. A resumed thread refreshes its standing
+     System through the acknowledged Developer injection path when the exact
+     bytes change (#47580), so the wire carries one [thread/inject_items]
+     before the turn. *)
   with_fixture ~worker_pool @@ fun ~run ~capture ~reports ->
   successful (run ~instructions:"Keeper revision 1: publish the first artifact."
     ~world:"World State: task-001 done; goal awaiting confirmation." ());
@@ -512,8 +527,8 @@ let test_resume_carries_per_turn_context_in_front_of_the_goal ?(worker_pool = fa
   let resumed = List.filteri (fun index _ -> index >= List.length first_requests) requests in
   let methods rows = List.filter_map (fun row -> match member "method" row with
       | `String method_ -> Some method_ | _ -> None) rows in
-  check (list string) "a resume submits its turn and writes no thread items"
-    ["initialize";"initialized";"account/read";"thread/resume";"turn/start"]
+  check (list string) "a resume submits its turn and refreshes the standing system"
+    ["initialize";"initialized";"account/read";"thread/resume";"thread/inject_items";"turn/start"]
     (methods resumed);
   let params method_ rows = List.find (fun row -> member "method" row = `String method_) rows |> member "params" in
   check string "same vendor session retained" "context-thread"
@@ -717,13 +732,18 @@ let test_recall_lifecycle_across_native_ticks () =
        (fun (held : Keeper_official_client_session_store.held_context) -> held.context)
        frontier.held_context in
      let module Store = Keeper_official_client_session_store in
-     check bool "delivery receipts contain only the two blocks and frozen unread identity" true
+     (* The first resume refreshes the standing System (#47580) and its
+        receipt is retained once across the following ticks. *)
+     check int "repeated ticks retain one receipt per context identity" 4
+       (List.length frontier.held_context);
+     check bool
+       "delivery receipts contain the standing system, the two blocks and frozen unread identity"
+       true
        (List.sort_uniq Stdlib.compare contexts =
         List.sort Stdlib.compare
-          [Store.Context_block Prompt_block_id.Memory_os_recall;
-           Store.Context_block Prompt_block_id.Temporal_summary; Store.Librarian_unread]);
-     check int "repeated ticks retain one receipt per context identity" 3
-       (List.length frontier.held_context)
+          [Store.Codex_system_prompt;
+           Store.Context_block Prompt_block_id.Memory_os_recall;
+           Store.Context_block Prompt_block_id.Temporal_summary; Store.Librarian_unread])
    | Ok _ | Error _ -> fail "settled native session lost its context frontier")
 
 let test_rejected_context_never_submits_turn () =

@@ -16,15 +16,19 @@ open Masc
 let temp_dir () =
   Filename.temp_dir "goal_store_test" ""
 
+(* [Sys.is_directory] follows a link, so a directory alias is descended into and
+   then refused by [Unix.rmdir] (ENOTDIR), and a dangling link reads false from
+   [Sys.file_exists] and is skipped, leaving the parent non-empty (#26648).
+   [Unix.lstat] decides: only a real directory is descended. *)
 let rm_rf dir =
   let rec rm path =
-    if Sys.file_exists path then
-      if Sys.is_directory path then begin
-        Sys.readdir path
-        |> Array.iter (fun entry -> rm (Filename.concat path entry));
-        Unix.rmdir path
-      end else
-        Sys.remove path
+    match Unix.lstat path with
+    | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      Sys.readdir path
+      |> Array.iter (fun entry -> rm (Filename.concat path entry));
+      Unix.rmdir path
+    | _ -> Sys.remove path
   in
   try rm dir with _ -> ()
 
@@ -2214,13 +2218,32 @@ let test_audit_intents_survive_other_goal_mutations () =
    | Ok _ -> () | Error error -> fail (Goal_store.delete_goal_error_to_string error));
   check_pending "deletion preserves audit attribution"
 
+(* [with_goal_file_link] builds the link this fixture later cleans; the cleanup
+   alone must finish it, both for a live link into a directory and for a dangling
+   one, and must not reach the target (#26648). *)
+let test_rm_rf_unlinks_symlinks () =
+  let root = temp_dir () in
+  let kept_dir = temp_dir () in
+  let kept = Filename.concat kept_dir "kept" in
+  Out_channel.with_open_bin kept (fun oc -> output_string oc "kept");
+  Unix.mkdir (Filename.concat root "owner") 0o755;
+  Unix.symlink kept_dir (Filename.concat root "live_link");
+  Unix.symlink (Filename.concat root "gone") (Filename.concat root "dangling");
+  rm_rf root;
+  check bool "the tree is gone" false (Sys.file_exists root);
+  check bool "the link target survived" true (Sys.file_exists kept);
+  rm_rf kept_dir
+
 let () =
   match Array.to_list Sys.argv with
   | [_; "--goal-fifo-case"; "primary"; dir] -> fifo_primary_case dir
   | [_; "--goal-fifo-case"; "mirror-link"; dir] -> fifo_mirror_link_case dir
   | [_; "--goal-fifo-case"; "mirror-direct"; dir] -> fifo_mirror_direct_case dir
   | _ -> run "Goal_store"
-    [ ( "audit outbox",
+    [ ( "temp directory cleanup",
+        [ test_case "rm_rf unlinks live and dangling links" `Quick
+            test_rm_rf_unlinks_symlinks ] );
+      ( "audit outbox",
         [ test_case "refused audited upserts preserve store and outbox" `Quick
             test_refused_audited_upserts_preserve_store_and_outbox;
           test_case "identical audited update still commits" `Quick

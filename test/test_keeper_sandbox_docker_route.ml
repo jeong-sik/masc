@@ -2657,7 +2657,7 @@ let test_execute_blocks_file_redirect_before_docker () =
     "typed boundary error"
     (Some
        "$.cmd is not a supported typed Execute field; accepted: argv, command, \
-        shell, cwd, timeout_sec, intent")
+        shell, cwd, timeout_sec, intent, run_in_background")
     (parse_string_field raw "error");
   Alcotest.(check bool) "docker was not invoked" false
     (Sys.file_exists log_path)

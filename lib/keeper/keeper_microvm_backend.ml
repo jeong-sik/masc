@@ -51,6 +51,20 @@ let recipe_delivery = function
   | Microsandbox -> Builds_no_images
   | Nerdctl_kata -> On_stdin
 
+type exec_runtime =
+  | Microsandbox_exec
+  | Nerdctl_kata_exec
+
+type request_delivery =
+  | Guest_agent
+  | Exec_per_request of exec_runtime
+
+let request_delivery = function
+  | Apple_container -> Guest_agent
+  | Microsandbox -> Exec_per_request Microsandbox_exec
+  | Nerdctl_kata -> Exec_per_request Nerdctl_kata_exec
+;;
+
 let default_for_host () =
   match Sys.os_type with
   | "Unix" when Sys.file_exists "/System/Library/CoreServices/SystemVersion.plist" ->

@@ -3,7 +3,7 @@ module Answer = Masc.Keeper_volume_gc_answer
 let single_line = Masc.Tui_terminal_text.sanitize_terminal_text
 let tool = "masc_sandbox_volume_gc"
 let key = "V"
-let claims_image = "base"
+let claims_image = Masc.Keeper_volume_gc_host.claims_image
 let timeout_sec = 60.0
 
 type answer =
@@ -73,18 +73,9 @@ let sending t request =
   | Reclaim_request _ -> { t with phase = Reclaiming }
 ;;
 
-let candidates (report : Answer.t) =
-  List.filter_map
-    (fun (verdict : Answer.verdict) ->
-       match verdict.kind with
-       | Answer.Reclaim_candidate -> Some verdict.keeper_name
-       | Answer.Kept | Answer.Reclaimed | Answer.Reclaim_failed -> None)
-    report.keepers
-;;
-
 let phase_after = function
   | Report report when not report.Answer.executed ->
-    (match candidates report with
+    (match Answer.reclaim_candidates report with
      | [] -> Idle
      | names -> Armed names)
   | Report _ | Refused _ | Unreadable _ -> Idle
@@ -188,8 +179,23 @@ let phase_line = function
   | Reclaiming -> Dim, "회수를 요청했습니다. 보낸 이름 가운데 지금도 후보인 Keeper 만 지웁니다."
 ;;
 
-let lines t =
-  (Plain, "은퇴 Keeper 볼륨 (" ^ tool ^ ")") :: phase_line t.phase :: shown_lines t.shown
+let server_report_line ~timestamp = function
+  | None -> Dim, "서버 주기 보고: 아직 없습니다."
+  | Some { Masc.Keeper_volume_gc_periodic.observed_at; outcome } ->
+    let head = "서버 주기 보고 " ^ timestamp observed_at ^ " · " in
+    (match outcome with
+     | Masc.Keeper_volume_gc_periodic.Reported report ->
+       (match Answer.reclaim_candidates report with
+        | [] -> Dim, head ^ "회수 후보 없음"
+        | names ->
+          Plain, Printf.sprintf "%s회수 후보 %d (%s)" head (List.length names) (names_text names))
+     | Masc.Keeper_volume_gc_periodic.Skipped reason -> Dim, head ^ "건너뜀 · " ^ single_line reason
+     | Masc.Keeper_volume_gc_periodic.Failed reason -> Bad, head ^ "실패 · " ^ single_line reason)
+;;
+
+let lines ~server_report t =
+  ((Plain, "은퇴 Keeper 볼륨 (" ^ tool ^ ")") :: phase_line t.phase :: Option.to_list server_report)
+  @ shown_lines t.shown
 ;;
 
 let status_line t =

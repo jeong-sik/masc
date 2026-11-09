@@ -330,10 +330,6 @@ val mark_turn_finished :
 val set_turn_switch :
   base_path:string -> string -> Eio.Switch.t option -> unit
 
-(** Reset [current_turn_switch] to [None]. Idempotent no-op if the
-    keeper is not registered. *)
-val clear_turn_switch : base_path:string -> string -> unit
-
 val clear_turn_switch_if_current :
   base_path:string -> string -> Eio.Switch.t -> unit
 

@@ -1,8 +1,10 @@
-(** Memory surface and fact explorer renderer for the MASC TUI.
+(** Memory observations and fact explorer for the MASC TUI.
 
     Decomposed from masc_tui_render.ml.
-    Renders fleet keeper memory health, ordinary/source/invalidated fact rows,
-    category filters, sorting, KPI banners, and structured fact inspector cards.
+    The selected Keeper is read through five independent axes: fact age,
+    snapshot save, source invalidation, Librarian processing and workspace World.
+    The overview and cursor share the same bounded row projection. Full input,
+    source and processing evidence remains in the captured reading and facts.
 
     Pure by construction: no terminal I/O, no mutation, no unhandled exceptions. *)
 
@@ -71,8 +73,8 @@ val memory_fact_detail_lines : cols:int -> memory_fact_row -> string list
     terminal. Each returned row occupies one scrollable display row. *)
 
 val memory_fleet_header_rows : cols:int -> state -> string list
-(** The Total, Ordinary (counts, then the age ladder), Source and Librarian
-    rows above the sort row, each wrapped to the frame [cols] gives. *)
+(** Full fleet observation rows for the diagnostic and captured reading:
+    Ordinary, Source, Librarian and World retain their independent counts. *)
 
 val memory_overview_reading : cols:int -> state -> Masc_tui_detail_reading.t
 (** A captured, scrollable fleet summary and selected Keeper health reading.
@@ -80,8 +82,8 @@ val memory_overview_reading : cols:int -> state -> Masc_tui_detail_reading.t
 
 val memory_overview_scrolled : cols:int -> budget:int -> ?cursor:int -> state -> scrolled
 (** The overview's scroll layout at [cols], with summary, rejected Keeper
-    rows and selected Keeper detail limited to the same body [budget] used by
-    the renderer. *)
+    rows and selected Keeper cards limited to the same body [budget] used by
+    the renderer. Short frames use the same compact cards for both counts. *)
 
 val render_memory_body :
   cols:int ->

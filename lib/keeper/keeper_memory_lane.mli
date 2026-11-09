@@ -50,6 +50,10 @@ val init : sw:Eio.Switch.t -> unit
 (** Record the long-lived switch that owns detached memory fibers. Call once at
     server startup, after [Eio_context.set_switch]. *)
 
+val initialized : unit -> bool
+(** Whether a detached executor was installed. Operator requests check this
+    before submission so an HTTP request cannot run extraction inline. *)
+
 val submit
   :  base_path:string
   -> keeper_name:string

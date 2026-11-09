@@ -273,8 +273,9 @@ let render_resources (state : state) =
       framed_line pane_buf pane_cols
         (Theme.recede () ^ unselected_marker
          ^ Masc_tui_table.header_row (list_cells table None) ^ Ansi.reset);
+    let visible = Rows.of_list ~first ~height:budget rows_list in
     for i = 0 to budget - 1 do
-      match List.nth_opt rows_list (first + i) with
+      match Rows.at visible (first + i) with
       | Some resource ->
           let selected = first + i = cursor in
           let check = match resource with

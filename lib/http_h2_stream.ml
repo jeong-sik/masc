@@ -46,13 +46,15 @@ let end_scope stream_sw cause =
   | None -> Eio.Switch.fail stream_sw (Stream_reset cause)
 ;;
 
-(* After a report the stream is either closed (h2 reset a started response)
-   or answering with the error handler's response, which h2 opens when no
-   response had started. That answer owns the stream until its END_STREAM and
-   the RST_STREAM h2 writes after it (reqd.ml [close_stream]); ending the scope
-   first would cut it. Only that answer has both a response and an error code:
-   h2 ignores a report on a response the handler already completed and sets
-   no code (reqd.ml 370), and that scope ends here. *)
+(* After a report the stream is either closed or answering with the error
+   handler's response, which h2 opens when no response had started. That
+   answer owns the stream until its END_STREAM and the RST_STREAM h2 writes
+   after it (reqd.ml [close_stream]); ending the scope first would cut it.
+   Only that answer has both a response and an error code. A response h2
+   is still sending, a fixed body included, is reset and the stream closed,
+   so it has no response (reqd.ml [_report_error], the [Streaming] and
+   [Fixed] arms). A response h2 marked [Complete] ignores the report and
+   gets no code (the last arm). Both scopes end here. *)
 let answering reqd =
   Option.is_some (H2.Reqd.error_code reqd) && Option.is_some (H2.Reqd.response reqd)
 ;;

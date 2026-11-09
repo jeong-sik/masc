@@ -655,8 +655,16 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
              (* The probe runs in the HOME's own empty folder. [base_path] would
                 make every Keeper's account files under [.masc] its workspace,
                 which agy reads without a rule (RFC-0490 2.2). *)
+             (* HIGH-RISK-UNREVIEWED: the probe starts the client on a
+                credential of the host, which a multi-account process shares
+                with no person (plan D3b). *)
+             (match Runtime_account_access.authorize_host Runtime_account_access.Antigravity with
+              | Error refusal ->
+                Error (Account_not_authorized (Runtime_account_access.refusal_to_string refusal))
+              | Ok host ->
              (match
                 Runtime_antigravity_home.prepare_native
+                  ~host
                   ~runtime_root
                   ~owner_leaf:antigravity_probe_owner_leaf
                   ~oauth_source:exec.oauth_source
@@ -735,6 +743,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                    (match
                       Runtime_antigravity.run_turn
                         ~home_dir:(Runtime_antigravity_home.home_dir home)
+                        ~host
                         ~mgr
                         ~clock
                         ~cwd:Eio.Path.(fs / native_cwd)
@@ -752,7 +761,7 @@ let probe_antigravity_invocation ~sw ~net ~secure_random ~mgr ~clock ~fs ~base_p
                            ~seen
                            ~elapsed_s:(now () -. started)
                            ~text:(Some turn.text)
-                           ~dynamic_tool_calls:(List.length !seen))))))))
+                           ~dynamic_tool_calls:(List.length !seen)))))))))
 ;;
 
 (* The same isolated, selected-account MCP runner used by setup verification.
@@ -771,10 +780,19 @@ let probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path ~now
           String.equal schema.name model_facing_name) (Keeper_tool_descriptor.model_visible_schemas ()) with
         | None -> Error (Tool_schema_rejected (model_facing_name ^ " is absent from model_visible_schemas"))
         | Some schema ->
+          (* HIGH-RISK-UNREVIEWED: a probe is a call of the operator, so Muse
+             starts only where the access allows one (plan D3). *)
+          (match
+             Runtime_account_access.authorize_muse Runtime_account_access.Operator_call
+               (Runtime_account_access.Declared_home exec.account_home)
+           with
+           | Error refusal ->
+             Error (Account_not_authorized (Runtime_account_access.refusal_to_string refusal))
+           | Ok account ->
           let seen = ref [] in
           let tool = recording_dynamic_tool ~schema ~seen in
           let config = { (Runtime_muse_serve.default_config ()) with
-            cli_path=exec.cli_path; account_home=Some exec.account_home;
+            cli_path=exec.cli_path;
             model=Some exec.model; admission_timeout_s=exec.timeout_s;
             timeout_s=(match runtime.model.turn_timeout_s with
               | None -> Some exec.timeout_s | Some 0. -> None | Some seconds -> Some seconds) } in
@@ -784,7 +802,7 @@ let probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path ~now
           let quota_scope = Runtime_instance.quota_scope_of_runtime runtime in
           let started = now () in
           (match Runtime_verification_muse.run ~secure_random ~net ~mgr ~clock
-              ~cwd:Eio.Path.(fs / base_path) ~directory:base_path ~account_home:exec.account_home ~quota_scope
+              ~cwd:Eio.Path.(fs / base_path) ~directory:base_path ~account ~quota_scope
               ~config ~reasoning_effort ~tool ~prompt with
            | Error (Runtime_verification_muse.Home_error error) ->
              Error (Muse_home_unavailable (Runtime_muse_home.error_to_string error))
@@ -794,7 +812,7 @@ let probe_muse_invocation ~net ~secure_random ~mgr ~clock ~fs ~base_path ~now
              Ok (Provider_rejected {detail=Runtime_muse_serve.error_to_string error})
            | Ok turn -> Ok (classify_official_client_turn ~model_facing_name ~seen
                ~elapsed_s:(now () -. started) ~text:turn.text
-               ~dynamic_tool_calls:(List.length !seen))))
+               ~dynamic_tool_calls:(List.length !seen)))))
      | Some
          ({ Runtime_instance.execution =
               ( Runtime_execution.Agent_core _

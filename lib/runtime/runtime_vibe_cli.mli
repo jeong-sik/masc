@@ -126,8 +126,9 @@ val classify
     [export.json], or [None] when the file does not exist. Pure; exposed for
     the tests and for callers that ran the process another way. *)
 
-val run : config -> prompt:string -> (run, error) result
-(** Validate [config], write the prompt into a new call directory, run the
+val run : host:Runtime_account_access.host_account -> config -> prompt:string -> (run, error) result
+(** [host] is the start the access allows: Vibe reads the configuration of
+    the host user (multi-account plan D3b). Validate [config], write the prompt into a new call directory, run the
     process with {!child_environment} and {!argv} through [Process_eio],
     classify it, and remove the call directory. The removal is an Eio switch
     release hook, which Eio runs with cancellation off, so a cancelled call

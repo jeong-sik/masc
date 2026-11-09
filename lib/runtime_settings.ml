@@ -407,6 +407,22 @@ let keeper_remote_workspace_cleanup_retention_sec =
             value_type = "float";
             min_value = None; max_value = None; choices = [] }
 
+(* The sweep keeps this Keeper's cleanup reservation until the payload
+   returns, and a later pass skips a reserved Keeper, so the default stays in
+   minutes. On 2026-11-08 a report run over each of the three largest review
+   roots (700 to 2,400 entries) took 1 to 2 s; each git repository it
+   inspects can add a 20 s ls-remote. *)
+let keeper_remote_workspace_cleanup_timeout_sec =
+  register_cleanup_duration ~key:"keeper_remote_workspace_cleanup_timeout_sec"
+    ~default:(fun () -> 5. *. Masc_time_constants.minute)
+    ~meta:{ Runtime_params.description =
+              "키퍼 한 명의 작업 폴더 정리가 endpoint 에서 돌 수 있는 최대 \
+               시간(초). 넘기면 endpoint 가 정리를 멈추고, 그 키퍼는 경고 \
+               줄을 남긴다. 그때까지 지운 항목은 지워진 채로 두고, 나머지는 \
+               다음 주기에 다시 본다. 0 보다 커야 한다";
+            value_type = "float";
+            min_value = None; max_value = None; choices = [] }
+
 let surfaces =
   [
     {
@@ -417,9 +433,10 @@ let surfaces =
     };
     {
       id = "keeper_remote_workspace_cleanup";
-      description = "Idle remote_ssh Keeper workspace cleanup";
+      description = "remote_ssh Keeper workspace cleanup";
       param_keys = [ "keeper_remote_workspace_cleanup_enabled";
-        "keeper_remote_workspace_cleanup_retention_sec" ];
+        "keeper_remote_workspace_cleanup_retention_sec";
+        "keeper_remote_workspace_cleanup_timeout_sec" ];
     };
     {
       id = "keeper_lifecycle";

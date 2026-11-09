@@ -686,6 +686,13 @@ let keeper_operation_writes =
     [ "edit"; "move-to-end"; "cancel"; "retry-preparation" ]
 ;;
 
+let keeper_reasoning_reads =
+  [ "/api/v1/keepers/alpha/chat/events?operation_id=%21"
+  ; "/api/v1/keepers/alpha/chat/operations/%21/native-calls"
+  ; "/api/v1/keepers/alpha/chat/operations/%21/native-calls/call/events"
+  ]
+;;
+
 let test_keeper_queue_controls_follow_submit_auth_without_required_tokens () =
   with_authentication ~strict:false
   @@ fun ~base_path ~worker:_ ~admin:_ ~clock ->
@@ -707,8 +714,9 @@ let test_keeper_queue_controls_follow_submit_auth_without_required_tokens () =
             (dispatch ~method_:"POST" ~origin routes path).status)
           keeper_operation_writes)
         [ Same_origin, 400; No_origin, 401; Origin "http://elsewhere.invalid:8935", 403 ];
-      check int "anonymous reasoning remains token-bound" 401
-        (dispatch routes "/api/v1/keepers/alpha/chat/events?operation_id=%21").status)
+      List.iter (fun path ->
+        check int "anonymous reasoning remains token-bound" 401
+          (dispatch routes path).status) keeper_reasoning_reads)
       [ false; true ])
 ;;
 
@@ -725,10 +733,10 @@ let test_keeper_queue_controls_preserve_token_and_reasoning_authority () =
       check int "queue control enforces required credentials" expected
         (dispatch ~method_:"POST" ?token routes path).status) keeper_operation_writes)
     [ None, 401; Some "invalid-token", 401; Some worker, 400; Some admin, 400 ];
-  let events = "/api/v1/keepers/alpha/chat/events?operation_id=%21" in
-  check int "worker cannot read reasoning" 403 (dispatch ~token:worker routes events).status;
-  check int "admin reasoning read reaches input validation" 400
-    (dispatch ~token:admin routes events).status
+  List.iter (fun path ->
+    check int "worker cannot read reasoning" 403 (dispatch ~token:worker routes path).status;
+    check int "admin reasoning read reaches input validation" 400
+      (dispatch ~token:admin routes path).status) keeper_reasoning_reads
 ;;
 
 (* ---- the canonical-host redirect runs before the public read ---- *)

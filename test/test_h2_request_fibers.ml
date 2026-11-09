@@ -109,6 +109,16 @@ let ping client =
   | Ok () -> ()
   | Error `EOF -> fail "connection closed instead of acknowledging PING"
 
+(* Runs [run] with the console sink captured. [run] gets [logged], the
+   number of captured lines naming a text. *)
+let with_log_capture run =
+  let lines = ref [] in
+  let logged text =
+    List.length (List.filter (fun line -> String_util.contains_substring line text) !lines) in
+  Console_sink.For_testing.reset ();
+  Console_sink.For_testing.set_writer (Some (fun line -> lines := line :: !lines));
+  Fun.protect ~finally:Console_sink.For_testing.reset (fun () -> run logged)
+
 let large_json = `Assoc ["text", `String (String.make 20000 'x')]
 let flow_control_body = String.make (2 * 65535) 'w'
 
@@ -298,12 +308,14 @@ let test_reset_sent_ends_stream_scope () =
 (* A handler that fails after its headers went out ends at the catch site in
    [serve_h2_connection]. Its body producer, forked on the stream switch, is
    cancelled with the handler's own exception; the bytes it reserved and never
-   flushed go back to the ledger; the client sees its stream reset. *)
+   flushed go back to the ledger; the client sees its stream reset. No error
+   handler answers a started response, so the reset logs the failure, once. *)
 let test_failure_after_headers_releases_the_stream () =
   let streams = Server_h2_stream_registry.create () in
   let resources = Masc.Http_h2_response_ledger.create
     ~max_pending_bytes:H2_response_limits.default_max_pending_bytes in
   let partial = "partial" in
+  let failure = "fixture failure after the headers" in
   let reserved = ref 0 in
   let ended, record_end = Eio.Promise.create () in
   let handler ~request_sw _ h2_reqd =
@@ -319,9 +331,10 @@ let test_failure_after_headers_releases_the_stream () =
         reqd (Httpun.Response.create `OK) in
       Masc.Http_reqd.Body_writer.write_string writer partial;
       reserved := Masc.Http_h2_response_ledger.pending_bytes resources;
-      failwith "fixture failure after the headers"
+      failwith failure
     | "/fast" -> Response.json ~compress:false "alive" reqd
     | path -> failf "unexpected path %s" path in
+  with_log_capture @@ fun logged ->
   with_connection ~streams ~resources Request_fibers handler
     (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
     let reply = request client "/partial" in
@@ -338,6 +351,7 @@ let test_failure_after_headers_releases_the_stream () =
       (Masc.Http_h2_response_ledger.pending_bytes resources);
     check int "the stream left no scope behind" 0
       (Server_h2_stream_registry.active_streams streams);
+    check int "the reset logs the failure once" 1 (logged failure);
     check string "connection keeps serving after the failure" "alive"
       (snd (await_reply (request client "/fast"))))
 
@@ -377,16 +391,21 @@ let test_connection_closes_pending_work () =
     Eio.Promise.await cancelled;
     Eio.Promise.await child_cancelled)
 
+(* A handler that fails before any response is answered by the connection's
+   error handler, which logs the failure. Nothing else logs it again. *)
 let test_handler_error_is_stream_local () =
+  let failure = "fixture handler failure" in
   let handler ~request_sw _ h2_reqd =
     match (H2.Reqd.request h2_reqd).target with
-    | "/fail" -> failwith "fixture handler failure"
+    | "/fail" -> failwith failure
     | "/fast" -> Response.json ~compress:false "alive" (reqd_of_h2 ~sw:request_sw h2_reqd)
     | path -> failf "unexpected path %s" path in
+  with_log_capture @@ fun logged ->
   with_connection Request_fibers handler (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
     check int "handler exception becomes stream 500" 500
       (fst (await_reply (request client "/fail")));
     ping client;
+    check int "the error handler's line is the only one" 1 (logged failure);
     check string "sibling survives handler exception" "alive"
       (snd (await_reply (request client "/fast"))))
 

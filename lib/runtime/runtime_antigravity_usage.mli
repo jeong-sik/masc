@@ -46,7 +46,8 @@ val parse_version : string -> (int * int * int) option
     [None]. *)
 
 val read
-  :  cli_path:string
+  :  host:Runtime_account_access.host_account
+  -> cli_path:string
   -> oauth_source:string
   -> (Runtime_provider_usage_window.report, error) result
 (** Prepare a disposable HOME from [oauth_source], check the CLI version, run

@@ -15,6 +15,7 @@ open Keeper_agent_result
 type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : tool_call_detail list
+  ; mutable committed_inline_execution_ids_rev : Ids.Execution_id.t list option
   ; mutable current_turn : int
   ; mutable tool_surface : tool_surface_metrics
   ; mutable requested_tool_names : string list
@@ -43,6 +44,7 @@ type hook_accumulator =
 let create ~meta ~tool_surface =
   { meta
   ; tool_calls = []
+  ; committed_inline_execution_ids_rev = Some []
   ; current_turn = 0
   ; tool_surface
   ; requested_tool_names = []
@@ -62,6 +64,37 @@ let extra_system_context_receipt (acc : hook_accumulator) =
 
 let record_requested_tool_names (acc : hook_accumulator) requested =
   acc.requested_tool_names <- requested
+;;
+
+let record_inline_receipt_committed (acc : hook_accumulator) ~keeper_turn_id =
+  let keeper_name = acc.meta.name in
+  let trace_id = Keeper_id.Trace_id.to_string acc.meta.runtime.trace_id in
+  fun ~keeper_name:source_keeper
+      ~(turn_context : Keeper_tool_call_log_context.turn_context) execution_id ->
+    if String.equal source_keeper keeper_name
+       && turn_context.trace_id = Some trace_id
+       && turn_context.keeper_turn_id = Some keeper_turn_id
+    then
+      match acc.committed_inline_execution_ids_rev with
+      | None -> ()
+      | Some ids -> acc.committed_inline_execution_ids_rev <- Some (execution_id :: ids)
+;;
+
+let take_execution_ids (acc : hook_accumulator) ~trajectory_execution_ids =
+  let inline_ids =
+    match acc.committed_inline_execution_ids_rev with
+    | None -> []
+    | Some ids ->
+      acc.committed_inline_execution_ids_rev <- None;
+      List.rev ids
+  in
+  let seen = Hashtbl.create (List.length trajectory_execution_ids + List.length inline_ids) in
+  List.filter
+    (fun execution_id ->
+       let key = Ids.Execution_id.to_string execution_id in
+       if Hashtbl.mem seen key then false
+       else (Hashtbl.add seen key (); true))
+    (trajectory_execution_ids @ inline_ids)
 ;;
 
 let record_wire_prompt_tokens

@@ -515,6 +515,17 @@ let with_temp_runtime_toml content f =
       init_runtime_or_fail path;
       f ())
 
+(* The browser fixture attaches its workers under its own runtime.toml, a
+   codex-only config with no media_failover, and restores the caller's
+   runtime state when it returns. A test that reads pixels through the vision
+   reader inside that body re-establishes its vision runtime first: under the
+   fixture's config the vision candidate set is empty, so the reader answers
+   no image-capable runtime instead of calling the provider. *)
+let reinit_vision_runtime_from_stack () =
+  match !runtime_config_stack with
+  | path :: _ -> init_runtime_or_fail path
+  | [] -> ()
+
 let vision_failover_runtime_toml =
   {|
 [runtime]
@@ -2412,6 +2423,7 @@ let test_browser_screenshot_reaches_vision_reader () =
           Browser_addon_fixture.with_workers ~env ~config
             ~workers:[{serves=Browser_lane.Backend.Ego;clients=[first;second];exports=true}]
             ~respond:(fun ~serves:_ ~route verb -> respond ~route verb) (fun _workers ->
+          reinit_vision_runtime_from_stack ();
           let client_id = Browser_lane.client_id_to_string first.client_id in
           let screenshot = `Assoc ["lane",`String "live";"clientId",`String client_id;
             "mode",`String "screenshot";"tabId",`Int 73] in
@@ -2553,6 +2565,7 @@ let test_native_browser_screenshot_artifact_scope () =
       Browser_addon_fixture.with_workers ~env ~config
         ~workers:[{serves=Browser_lane.Backend.Ego;clients=[client];exports=true}]
         ~respond:(fun ~serves:_ ~route verb -> respond ~route verb) (fun _workers ->
+        reinit_vision_runtime_from_stack ();
         let capture options = Masc.Keeper_tool_in_process_runtime.handle_browser_read_with_outcome
           ~config ~meta ~args:(`Assoc ["lane",`String "live";
             "clientId",`String (Browser_lane.client_id_to_string client_id);

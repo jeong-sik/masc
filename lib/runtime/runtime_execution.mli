@@ -37,8 +37,9 @@ type claude_code =
 
 type muse_serve =
   { cli_path : string
-  ; account_home : string
-    (** Explicit, validated account directory; no ambient account selection. *)
+  ; account_home : Runtime_account_access.muse_home
+    (** The declared account home. A Muse process starts only on it once
+        {!Runtime_account_access.authorize_muse} allows the call. *)
   ; model : string
         (** The binding's [api-name], sent as [session/start]'s [modelId]. *)
   ; timeout_s : float

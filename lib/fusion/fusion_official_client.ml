@@ -156,7 +156,6 @@ let muse_config ~turn_timeout_s ~override_s (execution : Runtime_execution.muse_
   =
   { (Runtime_muse_serve.default_config ()) with
     cli_path = execution.cli_path
-  ; account_home = Some execution.account_home
   ; model = Some execution.model
   ; (* Read posture uses the managed policy overlay and host write/shell
        suppression. A panelist receives no mutable operator workspace. *)
@@ -585,10 +584,18 @@ let remove_antigravity_panel_root root =
       (Printexc.to_string exn))
 ;;
 
-let prepare_antigravity_panel_home ~runtime_root ~oauth_source =
+(* A host client starts on an account of the host, whoever asks for the
+   panelist: only a single-user process shares it (plan D3b). *)
+let authorize_host client =
+  Runtime_account_access.authorize_host client
+  |> Result.map_error (fun refusal ->
+    Setup_failure (Runtime_account_access.refusal_to_string refusal))
+;;
+
+let prepare_antigravity_panel_home ~host ~runtime_root ~oauth_source =
   let open Result.Syntax in
   let* home, cwd = Runtime_antigravity_home.prepare_native
-      ~runtime_root ~owner_leaf:"panelist" ~oauth_source
+      ~host ~runtime_root ~owner_leaf:"panelist" ~oauth_source
       ~posture:Runtime_native_tools.Native_read
       ~workspace:Runtime_antigravity_home.Private_workspace
       ~additional_workspaces:[]
@@ -706,6 +713,10 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          "a Mistral Vibe call has no MASC time limit, so a declared timeout_s \
           cannot be held")
   | Runtime_execution.Vibe_cli execution ->
+    (* HIGH-RISK-UNREVIEWED: a panelist starts Vibe on the configuration of the
+       host user, which a multi-account process shares with no person (plan
+       D3b). A refusal starts no process. *)
+    let* host = authorize_host Runtime_account_access.Vibe in
     let* prompt =
       framed_prompt ~system_prompt ~prompt
       |> Result.map_error (fun detail -> Setup_failure detail)
@@ -726,7 +737,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
       ; time_limit_s = None
       }
     in
-    (match Runtime_vibe_cli.run config ~prompt with
+    (match Runtime_vibe_cli.run ~host config ~prompt with
      | Error error ->
        Option.iter
          (fun usage -> on_usage (vibe_usage usage))
@@ -848,6 +859,10 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
   | Runtime_execution.Antigravity_cli _ when not (List.is_empty images) ->
     Error (Setup_failure "Antigravity transport does not support image input")
   | Runtime_execution.Antigravity_cli execution ->
+    (* HIGH-RISK-UNREVIEWED: a panelist starts the client on a credential of
+       the host, which a multi-account process shares with no person (plan
+       D3b). A refusal starts no process. *)
+    let* host = authorize_host Runtime_account_access.Antigravity in
     let config =
       antigravity_config ~base_dir ~turn_timeout_s:runtime.model.turn_timeout_s
         ~override_s:timeout_s ~output_schema execution
@@ -868,9 +883,10 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
        registered cleanup; the worker must not outlive the tree it fills. *)
     let* home, native_cwd = Eio.Cancel.protect (fun () ->
       prepare_antigravity_panel_home
-        ~runtime_root:panel_root ~oauth_source:execution.oauth_source) in
+        ~host ~runtime_root:panel_root ~oauth_source:execution.oauth_source) in
     let config = { config with Runtime_antigravity.cwd = native_cwd } in
     (match Runtime_antigravity.run_turn
+       ~host
        ~before_spawn:(fun () ->
          match Antigravity_panel_root_owner.before_spawn ~root:panel_root with
          | Ok () -> ()
@@ -898,6 +914,15 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          "Muse Code's session protocol has no output-schema channel, so a \
           schema-held answer cannot be asked of it")
   | Runtime_execution.Muse_serve execution ->
+    (* HIGH-RISK-UNREVIEWED: a panelist is a call of the operator, so Muse
+       starts only where the access allows one (plan D3). A refusal starts no
+       process. *)
+    (match
+       Runtime_account_access.authorize_muse Runtime_account_access.Operator_call
+         (Runtime_account_access.Declared_home execution.account_home)
+     with
+     | Error refusal -> Error (Setup_failure (Runtime_account_access.refusal_to_string refusal))
+     | Ok account ->
     let config = muse_config ~turn_timeout_s:runtime.model.turn_timeout_s ~override_s:timeout_s execution in
     let* prompt =
       framed_prompt ~system_prompt ~prompt
@@ -945,6 +970,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          ~mgr
          ~clock
          ~cwd:Eio.Path.(Eio.Stdenv.fs env / workspace_root)
+         ~account
          config
          ~workspace_root
          ~prompt
@@ -966,7 +992,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
        (match result.text with
         | Some text -> succeeded { text; model; usage = optional_usage muse_usage result.usage }
         | None -> Error Missing_reply)
-     | Error error -> Error (Muse_failure error))
+     | Error error -> Error (Muse_failure error)))
 ;;
 
 let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema ~prompt () =

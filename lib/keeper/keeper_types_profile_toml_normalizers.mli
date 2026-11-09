@@ -61,7 +61,6 @@ type keeper_profile_defaults =
   microvm_backend : Keeper_microvm_backend.t option;
   microvm_memory : Keeper_microvm_guest_size.memory option;
   microvm_cpus : Keeper_microvm_guest_size.cpus option;
-  microvm_delivery : Keeper_types_profile_sandbox.microvm_delivery option;
   observation_run : Keeper_types_profile_sandbox.observation_run option;
   max_context_override : int option;
   telemetry_feedback_enabled : bool option;

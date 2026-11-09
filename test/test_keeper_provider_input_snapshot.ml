@@ -165,6 +165,36 @@ let test_exact_turn_round_trip () =
     | Error error -> failf "%s" (Snapshot.read_error_to_string error))
 ;;
 
+let test_exact_snapshot_field_sets () =
+  with_workspace (fun config ->
+    write config 7;
+    let snapshot = Snapshot.to_json (read config 7).mf_snapshot in
+    let fields = Yojson.Safe.Util.to_assoc in
+    let replace key value json =
+      `Assoc (List.map (fun (name, previous) ->
+        name, if String.equal name key then value else previous) (fields json)) in
+    let first key =
+      snapshot |> fields |> List.assoc key |> Yojson.Safe.Util.to_list |> List.hd in
+    let check_object label object_json restore =
+      let object_fields = fields object_json in
+      let first_field = List.hd object_fields in
+      let remaining = List.tl object_fields in
+      let admit fields = Result.is_ok (Snapshot.of_json (restore (`Assoc fields))) in
+      check bool (label ^ " accepts reordered fields") true (admit (List.rev object_fields));
+      check bool (label ^ " rejects a missing field") false (admit remaining);
+      check bool (label ^ " rejects an unknown field at equal length") false
+        (admit (("unknown", `Null) :: remaining));
+      check bool (label ^ " rejects a duplicate replacing another field") false
+        (admit (first_field :: first_field :: List.tl remaining)) in
+    check_object "snapshot" snapshot Fun.id;
+    check_object "artifact" (snapshot |> fields |> List.assoc "system_prompt")
+      (fun value -> replace "system_prompt" value snapshot);
+    check_object "message" (first "messages")
+      (fun value -> replace "messages" (`List [value]) snapshot);
+    check_object "tool schema" (first "tool_schemas")
+      (fun value -> replace "tool_schemas" (`List [value]) snapshot))
+;;
+
 let test_shared_pool_and_nested_worker_round_trip () =
   with_workspace_env (fun env sw config ->
     let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
@@ -625,6 +655,8 @@ let () =
     "keeper provider input snapshot"
     [ ( "round trip"
       , [ test_case "exact turn lists and reads every part" `Quick test_exact_turn_round_trip
+        ; test_case "snapshot field sets reject missing, unknown and duplicate keys" `Quick
+            test_exact_snapshot_field_sets
         ; test_case
             "shared pool and nested worker preserve exact parts"
             `Quick

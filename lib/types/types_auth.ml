@@ -147,9 +147,7 @@ let require_credential_optional_string fields name =
          "agent_credential_of_yojson: field %S must be a string or null, got %s"
          name
          (Json_util.kind_name value))
-  | None ->
-    Error
-      (Printf.sprintf "agent_credential_of_yojson: missing required field %S" name)
+  | None -> Ok None
 
 let agent_credential_of_yojson json =
   let open Result.Syntax in

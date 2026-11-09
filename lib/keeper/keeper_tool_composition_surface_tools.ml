@@ -20,6 +20,7 @@ let make_tools_with_authority
       ?record_nested_composition_activation
       ?nested_activation_context
       ?result_delivery
+      ?on_inline_receipt_committed
       ~(config : Workspace.config)
       ~meta
       ~capability_authority
@@ -293,7 +294,10 @@ let make_tools_with_authority
                       (fun turn_context ->
                          observe_node_result
                            ~on_receipt_committed:(fun execution_id ->
-                             committed_receipts := execution_id :: !committed_receipts)
+                             committed_receipts := execution_id :: !committed_receipts;
+                             Option.iter (fun record ->
+                               record ~keeper_name:meta.name ~turn_context execution_id)
+                               on_inline_receipt_committed)
                            ~composition_tool:tool_name
                            ~composition_execution:entry.execution
                            ~composition_tool_kind:(Catalog.tool_kind entry)
@@ -557,7 +561,10 @@ let make_tools_with_authority
                         ?on_deferred ?on_external_effect_deferred
                         ~admit_node:(Keeper_composition_nested_run.admit_node nested_run)
                         ?observe_node_result:(Option.map (fun turn_context ->
-                          observe_node_result ?on_receipt_committed:None
+                          observe_node_result
+                            ?on_receipt_committed:(Option.map (fun record execution_id ->
+                              record ~keeper_name:meta.name ~turn_context execution_id)
+                              on_inline_receipt_committed)
                             ~composition_tool:Draft.run_tool_name ~composition_execution:Catalog.Inline
                             ~composition_tool_kind:Keeper_tool_descriptor.Composition_tool ~composition_run_id
                             ~parent_invocation ~meta ~turn_context) turn_context) () in

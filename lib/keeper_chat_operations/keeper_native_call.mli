@@ -17,6 +17,22 @@ type state =
   | Active of t
   | Terminal_unacknowledged of t * Agent_core.Agent.execution_terminal_disposition
 
+type history_ref = private
+  { call_id : string
+  ; runtime_id : string
+  ; operation_digest : string
+  ; trace_id : Keeper_id.Trace_id.t
+  ; locator : Agent_core.Agent.execution_locator
+  }
+(** Immutable association for reading a native execution after its live state
+    has retired. The trace identifies the session directory. No checkpoint,
+    terminal decision or dispatch authority is retained by this reference. *)
+
+val history_ref : t -> history_ref
+val equal_history_ref : history_ref -> history_ref -> bool
+val history_ref_to_json : history_ref -> Yojson.Safe.t
+val history_ref_of_json : Yojson.Safe.t -> (history_ref, string) result
+
 type change =
   | Bind of { observed : state; call : t }
   | Checkpoint of { call_id : string; observed : Keeper_checkpoint_ref.t; checkpoint : Keeper_checkpoint_ref.t }

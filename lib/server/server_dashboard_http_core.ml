@@ -253,10 +253,6 @@ let dashboard_message_json = Server_dashboard_http_core_entities.dashboard_messa
 let dashboard_tasks_safe = Server_dashboard_http_core_entities.dashboard_tasks_safe
 let dashboard_agents_safe = Server_dashboard_http_core_entities.dashboard_agents_safe
 
-let dashboard_messages_safe config ~since_seq ~limit =
-  Server_dashboard_http_core_entities.dashboard_messages_safe config ~since_seq ~limit
-;;
-
 let dashboard_general_agent_count =
   Server_dashboard_http_core_entities.dashboard_general_agent_count
 ;;

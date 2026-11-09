@@ -1085,7 +1085,7 @@ let muse_serve_execution (provider : Runtime_schema.provider)
        let* account_home = match provider.account_home with
          | None -> Error (Printf.sprintf
              "provider %S uses muse-serve and requires an explicit account-home" provider.id)
-         | Some home -> Runtime_account_home.of_string home in
+         | Some home -> Runtime_account_access.declare_muse_home home in
        Ok
          (Runtime_execution.Muse_serve
             { cli_path = Runtime_official_cli_install.spawn_path Muse ~command

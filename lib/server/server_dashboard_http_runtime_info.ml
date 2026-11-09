@@ -2283,6 +2283,8 @@ let dashboard_tools_http_result ?keeper ?timing (config : Workspace.config) =
         (fields
          @ [ "effective_keeper_surface", effective_keeper_surface
            ; "keeper_waiting_inventory", keeper_waiting_inventory
+           ; ( Keeper_volume_gc_periodic.envelope_field
+             , Server_sandbox_volume_gc_report.envelope_json () )
            ])
     | other -> other
   in

@@ -260,7 +260,7 @@ let gh_config_dir = "/masc-runtime/.masc/keepers/keeper-a/github-cli"
 
 (* The prefix is built by the declaring microVM runtime and handed over whole
    ({!Keeper_sandbox_microvm.shim_exec_prefix_for}), so the fixture spells out
-   what Apple's runtime produces rather than letting this file re-derive it. *)
+   what nerdctl's runtime produces rather than letting this file re-derive it. *)
 let exec_prefix ~cli =
   [ cli; "exec"; "-i"; "--user"; "501:20"; "-w"; remote_root
   ; "--env"; "HOME=" ^ Masc.Keeper_microvm_backend.scratch_guest_root
@@ -306,8 +306,8 @@ let process_argvs state =
 ;;
 
 let test_transport_and_probe_argv () =
-  let state = make_state ~base_path:"/workspace" ~cli:"container" in
-  let prefix = exec_prefix ~cli:"container" in
+  let state = make_state ~base_path:"/workspace" ~cli:"nerdctl" in
+  let prefix = exec_prefix ~cli:"nerdctl" in
   (* The other tests here drive a stub CLI, so the fixture has to stay
      parameterised by executable. This one is about the argv, so it first
      pins the fixture against the builder that actually runs: without this
@@ -315,7 +315,7 @@ let test_transport_and_probe_argv () =
      a prefix production no longer produces. *)
   (match
      Keeper_sandbox_microvm.shim_exec_prefix_for
-       Keeper_microvm_backend.Apple_container
+       Keeper_microvm_backend.Nerdctl_kata_exec
        ~container_name:guest_name
        ~uid:501
        ~gid:20

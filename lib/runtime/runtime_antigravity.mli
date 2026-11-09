@@ -274,6 +274,8 @@ val run_turn :
     (** Pure observer after the matching result is decoded, before stream or
         usage callbacks and process draining; not successful completion or a
         consumption ACK. Includes non-completed result states. *)
+  host:Runtime_account_access.host_account ->
+    (** The client starts on the credential of the host (plan D3b). *)
   mgr:_ Eio.Process.mgr ->
   clock:_ Eio.Time.clock ->
   cwd:Eio.Fs.dir_ty Eio.Path.t ->

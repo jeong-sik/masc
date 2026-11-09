@@ -163,6 +163,12 @@ val make_tools
            submissions retain their recorded context on replay. *)
   -> ?result_delivery:Keeper_composition_result_delivery.t
        (** The owning turn's typed status-result correlation registry. *)
+  -> ?on_inline_receipt_committed:
+       (keeper_name:string ->
+        turn_context:Keeper_tool_call_log_context.turn_context ->
+        Ids.Execution_id.t -> unit)
+       (** Called only for inline child rows after durable log commit, with
+           the original captured source identity. Not passed to async work. *)
   -> config:Workspace.config
   -> meta:Keeper_meta_contract.keeper_meta
   -> publication_recovery:
@@ -220,6 +226,10 @@ module Compatibility : sig
     -> ?record_nested_composition_activation:Keeper_composition_nested_run.record_activation
     -> ?nested_activation_context:Keeper_skill_activation_recorder.t
     -> ?result_delivery:Keeper_composition_result_delivery.t
+    -> ?on_inline_receipt_committed:
+         (keeper_name:string ->
+          turn_context:Keeper_tool_call_log_context.turn_context ->
+          Ids.Execution_id.t -> unit)
     -> config:Workspace.config
     -> meta:Keeper_meta_contract.keeper_meta
     -> publication_recovery:

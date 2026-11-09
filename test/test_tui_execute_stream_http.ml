@@ -1020,7 +1020,10 @@ let test_standalone_observer_reconnects_with_response_identifiers env =
     let pending = ref [] in
     let await promise = Eio.Time.with_timeout_exn clock 3. (fun () -> Eio.Promise.await promise) in
     let url = Printf.sprintf "http://127.0.0.1:%d/mcp?sse_kind=observer" port in
-    let base_headers = ["Accept", "text/event-stream"; "Authorization", "Bearer " ^ token] in
+    (* This legacy revision emits session identifiers before the fix. *)
+    let legacy_version = "2025-03-26" in
+    let base_headers = ["Accept", "text/event-stream"; "Authorization", "Bearer " ^ token;
+                        "Mcp-Protocol-Version", legacy_version] in
     let open_stream extra_headers =
       let response, publish_response = Eio.Promise.create () in
       let ended, publish_ended = Eio.Promise.create () in
@@ -1047,6 +1050,8 @@ let test_standalone_observer_reconnects_with_response_identifiers env =
         Alcotest.(check int) "initial standalone observer opens" 200 status;
         let header name = List.find_map (fun (key, value) ->
           if String.equal (String.lowercase_ascii key) name then Some value else None) headers in
+        Alcotest.(check (option string)) "observer uses the legacy protocol"
+          (Some legacy_version) (header "mcp-protocol-version");
         let cookie = Option.map (fun value ->
           match String.split_on_char ';' value with first :: _ -> first | [] -> value)
           (header "set-cookie") in

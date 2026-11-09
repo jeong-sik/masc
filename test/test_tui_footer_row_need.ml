@@ -61,6 +61,12 @@ let surfaces =
       T.Changes,
       [ "j/k"; "Right / Enter"; "d"; "v"; "/"; "n / N"; "o"; "PgUp/PgDn"; "Home/End" ],
       [ "[ / ]"; "Esc"; "r"; "q" ] )
+  (* A level floor or category can leave the Logs list with no entry. The keys
+     that change the filters are how it comes back, so they stay. *)
+  ; ( "Logs",
+      T.System_logs,
+      [ "j/k"; "PgUp/PgDn"; "Right / Enter"; "n / N"; "Home/End" ],
+      [ "o"; "e"; "l"; "v"; "c"; "/"; "Esc"; "r"; "q" ] )
   ]
 
 let test_each_surface_scopes_a_key_to_a_row () =

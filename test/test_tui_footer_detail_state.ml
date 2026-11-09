@@ -124,6 +124,12 @@ let scoped_keys =
   ; search_keys "Verification" Masc_tui_types.Verification
   ; search_keys "Harness" Masc_tui_types.Harness
   ; search_keys "System_logs" Masc_tui_types.System_logs
+  (* Right and Enter open the entry under the cursor. An open log entry has
+     nothing under them, so its footer is the list's without that key. *)
+  ; ( "System_logs Right / Enter",
+      Keys.footer_hints ~detail_open:false Masc_tui_types.System_logs,
+      Keys.footer_hints ~detail_open:true Masc_tui_types.System_logs,
+      [ "Right / Enter" ] )
   (* The Approvals queue and an open approval draw from two builders of their
      own ([footer_hints_approvals], [footer_hints_approval_detail]), so no
      [footer_hints ~detail_open] call reaches them. [v] reads a Gate string's

@@ -353,7 +353,9 @@ let render_system_logs (state : state) =
   box_bottom buf cols;
   Buffer.add_string buf
     (footer_line state ~max_cells:cols
-       ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view));
+       ~hints:
+         (Masc_tui_keys.footer_hints ~detail_open:false
+            ~has_rows:(total_entries > 0) state.view));
   finish_surface state ~surface_key:"system-logs" ~rows:terminal_rows
       ~cols buf
 

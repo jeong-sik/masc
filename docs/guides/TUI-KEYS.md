@@ -799,7 +799,7 @@ or completion.
 | `o` | switch between server logs and this TUI's own observations |
 | `e` | Events |
 | `j/k` | move / scroll |
-| `PgUp/PgDn` | detail page |
+| `PgUp/PgDn` | page |
 | `[ / ]` | while detail is open, inspect the adjacent visible log entry |
 | `l` | raise the minimum level; after error, back to everything |
 | `v` | toggle DEBUG rows directly; off uses the INFO floor |

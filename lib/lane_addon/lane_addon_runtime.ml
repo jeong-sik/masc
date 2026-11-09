@@ -514,8 +514,8 @@ let authorize_retained_read ~bindings ~access json =
   | _ -> Error "retained instance identity is ambiguous or absent"
 (* [persist] writes the binding a commit proposes; every other reader sees the
    published state through [entry_json]. *)
-let entry_json_with ~state ~seq ~(output : output) e =
-  `Assoc ["instance_id", `String e.instance_id; "incarnation", `String e.instance_id;
+let entry_fields_with ~state ~seq ~(output : output) e =
+  ["instance_id", `String e.instance_id; "incarnation", `String e.instance_id;
     "action_schema", (match e.connection with None -> `Null
       | Some c -> Option.fold ~none:`Null ~some:Fun.id (c.worker.action_schema ()));
     "run_id", `String e.run_id;
@@ -533,7 +533,8 @@ let entry_json_with ~state ~seq ~(output : output) e =
     "visibility", visibility_to_json e.visibility;
     "configuration", Option.fold ~none:`Null ~some:configuration_owner_json e.configuration;
     "resource", (match e.connection with None -> `Null | Some c -> Lifecycle.resource_to_json c.worker.resource)]
-let entry_json e = entry_json_with ~state:e.state ~seq:e.seq ~output:e.output e
+let entry_fields e = entry_fields_with ~state:e.state ~seq:e.seq ~output:e.output e
+let entry_json e = `Assoc (entry_fields e)
 (* A released worker that never held a resource and never committed an
    observation leaves nothing for Inspect, Slice or Evidence.  When
    its start returned [Error], the masc:lane:resource:acquire_failed event in
@@ -684,24 +685,21 @@ let resolve_machine_output m ~consumer_id machine =
   | [] -> Error "no shared machine worker is attached"
   | _ -> Error "multiple shared workers provide the machine"
 let resolve_lane_output m ~access ~visibility ~run_id ~installation_id =
-  let producers = entries m |> List.filter (fun e -> match e.configuration with
-    | Some owner -> owner.id = installation_id | None -> false) in
+  let producers = entries m |> List.filter_map (fun e -> match e.configuration with
+    | Some owner when owner.id = installation_id -> Some (e, owner) | Some _ | None -> None) in
   match producers with
-  | [e] when not (can_read access e.visibility) -> Error "upstream installation is unavailable to this caller"
-  | [e] when not (visibility_covers visibility e.visibility) ->
+  | [e, _] when not (can_read access e.visibility) -> Error "upstream installation is unavailable to this caller"
+  | [e, _] when not (visibility_covers visibility e.visibility) ->
       Error "upstream read visibility changed; reattach this consumer before capturing new output"
-  | [e] when e.run_id <> run_id -> Error "upstream installation belongs to another run"
-  | [e] when e.stopping -> Error "upstream installation is being replaced or removed"
-  | [e] when e.seq = 0 -> Error (match readiness e with
+  | [e, _] when e.run_id <> run_id -> Error "upstream installation belongs to another run"
+  | [e, _] when e.stopping -> Error "upstream installation is being replaced or removed"
+  | [e, _] when e.seq = 0 -> Error (match readiness e with
       | Unready reason -> unready_message e reason
       | Ready _ | Gone -> "upstream installation has no completed output")
-  | [e] ->
-      (match e.configuration with
-       | Some owner -> Ok {Lane_addon_sources.installation_id; instance_id=e.instance_id;
-           run_id=e.run_id; configuration_revision=owner.revision; package_revision=e.package.revision;
-           outputs=e.package.outputs;
-           observation_seq=e.seq; output=e.output; status=status_coverage e}
-       | None -> assert false)
+  | [e, owner] -> Ok {Lane_addon_sources.installation_id; instance_id=e.instance_id;
+      run_id=e.run_id; configuration_revision=owner.revision; package_revision=e.package.revision;
+      outputs=e.package.outputs;
+      observation_seq=e.seq; output=e.output; status=status_coverage e}
   | [] -> Error "upstream installation is unavailable"
   | _ -> Error "multiple workers claim the upstream installation"
 let wake_dependents m producer =
@@ -772,7 +770,7 @@ let persist m e = Eio.Mutex.use_ro e.persistence_mutex (fun () ->
     let proposed = match held with
       | Some (_, _, settle) when not e.stopping -> settle e.state
       | Some _ | None -> e.state in
-    let json = entry_json_with ~state:proposed ~seq ~output e in
+    let json = `Assoc (entry_fields_with ~state:proposed ~seq ~output e) in
     let write = match Eio.Fiber.get binding_writer_key with
       | Some write -> write
       | None -> (fun ~store ~instance_id json -> Lane_addon_store.save_binding_staged store ~instance_id json) in
@@ -3090,14 +3088,10 @@ let snapshot m ~access ?instance_id () =
   let past = List.map retained past in
   let output = { rows = List.concat_map (fun (e : entry) -> e.output.rows) live;
     coverage = List.concat_map (fun e -> status_coverage e :: e.output.coverage) live } in
-  let live_json entry = match entry_json entry with
-    | `Assoc fields -> `Assoc (("runtime_presence", `String "live")
-        :: ("host_requests", host_status_json entry.host_status) :: fields)
-    | _ -> assert false in
-  match output_to_json output with
-  | `Assoc fields -> Ok (`Assoc (("configuration", configuration_json m ~access)
-      :: ("instances", `List (List.map live_json live @ past)) :: fields))
-  | _ -> assert false
+  let live_json (entry : entry) = `Assoc (("runtime_presence", `String "live")
+      :: ("host_requests", host_status_json entry.host_status) :: entry_fields entry) in
+  Ok (`Assoc (("configuration", configuration_json m ~access)
+    :: ("instances", `List (List.map live_json live @ past)) :: output_fields output))
 (* An unreadable record has no recorded reader, so it cannot be shown to
    anyone but the operator. Every caller still learns that the reading is
    incomplete. *)
@@ -3156,9 +3150,7 @@ let slice m ~access args =
   let coverage = List.concat_map (fun output -> output.coverage) outputs @ statuses
     @ unreadable_coverage ~access reading.faults in
   let complete = outputs <> [] && List.for_all (fun (c : coverage) -> c.complete) coverage in
-  match output_to_json { rows; coverage } with
-  | `Assoc fields -> Ok (`Assoc (("complete", `Bool complete) :: fields))
-  | _ -> assert false
+  Ok (`Assoc (("complete", `Bool complete) :: output_fields { rows; coverage }))
 
 let validate_connection m ~run_id ~configuration_id ~binding =
   let* input_installations = Lane_addon_sources.dependencies binding in

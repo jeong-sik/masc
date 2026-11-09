@@ -255,24 +255,22 @@ let row_to_json row = `Assoc (["id",str row.id;"label",str row.label;"purpose",s
   "selection",selection_json row.selection;"state",state_json row.state]
   @ (match builtin_category row.selection with None -> []
      | Some category -> ["ui_category",Lane_addon_category.to_json category]))
-let to_json t = `Assoc ["schema",str "masc.lane-inventory/v1";"observed_at",`Float t.observed_at;
+let inventory_fields t = ["schema",str "masc.lane-inventory/v1";"observed_at",`Float t.observed_at;
   "rows",`List (List.map row_to_json t.rows);"exact_snapshot",Exact_projection.observation_to_json t.exact;
   "package_read",`Assoc ["directory",str t.directory;"complete",`Bool t.complete;
     "owner_present",`Bool t.owner_present;"issues",`List (List.map (fun (path,detail) ->
       `Assoc ["source_path",str path;"message",str detail]) t.issues)]]
+let to_json t = `Assoc (inventory_fields t)
 let without_fields names fields =
   List.filter (fun (name, _) -> not (List.mem name names)) fields
 
 let display_json t =
-  match to_json t with
-  | `Assoc fields ->
-      let fields = without_fields ["observed_at"] fields in
-      `Assoc (List.map (fun (name, json) ->
-        name, match name, json with
-          | "exact_snapshot", `Assoc exact ->
-              `Assoc (without_fields ["generated_at"; "observed_at_unix"] exact)
-          | _, _ -> json) fields)
-  | _ -> assert false
+  let fields = without_fields ["observed_at"] (inventory_fields t) in
+  `Assoc (List.map (fun (name, json) ->
+    name, match name, json with
+      | "exact_snapshot", `Assoc exact ->
+          `Assoc (without_fields ["generated_at"; "observed_at_unix"] exact)
+      | _, _ -> json) fields)
 
 let publish_if_changed ~base_path before after =
   let changed = match before with

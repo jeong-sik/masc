@@ -190,9 +190,10 @@ let coverage_of_json json =
   let* complete = match field f "complete" with `Bool b -> Ok b | _ -> Error "complete: expected bool" in
   let* detail = nullable (text "detail") (field f "detail") in
   Ok { source_id; incarnation; cursor; complete; detail }
-let output_to_json (o : output) =
-  `Assoc ["rows", `List (List.map row_to_json o.rows);
-          "coverage", `List (List.map coverage_to_json o.coverage)]
+let output_fields (o : output) =
+  ["rows", `List (List.map row_to_json o.rows);
+   "coverage", `List (List.map coverage_to_json o.coverage)]
+let output_to_json (o : output) = `Assoc (output_fields o)
 let output_of_json json =
   let* f = object_fields ["rows"; "coverage"] json in
   let* rows = list row_of_json (field f "rows") in

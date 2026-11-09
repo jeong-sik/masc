@@ -398,6 +398,18 @@ let with_fixture_sequence ?capture_path first_lines second_lines f =
     (fun () -> f path)
 ;;
 
+(* The account a fixture app-server starts on: the declared home, or the home
+   of the process environment when none is declared, authorized for an
+   operator call. *)
+let fixture_account ?account_home () =
+  match
+    Runtime_official_account.capture ~client:Runtime_official_account.Codex
+      ~declaration:account_home
+  with
+  | Ok captured -> Masc_test_deps.authorized_account captured
+  | Error detail -> failwith detail
+;;
+
 let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_tools = []) ?model ?reasoning_effort
     ?(thread = Runtime_codex_app_server.Persistent Runtime_codex_app_server.Start) ?(history = [])
     ?(developer_context = []) ?developer_instructions ?context_window ?(cwd = "/tmp")
@@ -428,7 +440,6 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
       { (Runtime_codex_app_server.default_config ()) with
         cli_path = path
       ; model
-      ; account_home = Runtime_official_account.Current account_home
       ; isolated_home
       ; context_window
       ; native
@@ -467,6 +478,7 @@ let run_fixture ?account_home ?(worker_pool = false) ?isolated_home ?(dynamic_to
         Option.iter (Eio.Time.sleep clock) on_context_submission_delay_s;
         Option.iter (fun callback -> callback event) on_context_submission)
       ?on_reasoning_effort_resolved
+      ~account:(fixture_account ?account_home ())
       config
       ~prompt
       ~images)) in
@@ -2279,6 +2291,7 @@ let test_subscription_probe_stops_before_thread () =
             ~mgr:(Eio.Stdenv.process_mgr env)
             ~clock:(Eio.Stdenv.clock env)
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+            ~account:(fixture_account ())
             config)
       in
       match outcome with
@@ -2436,7 +2449,8 @@ let test_metadata_listing_pages_without_turn () =
         let outcome = Eio_main.run (fun env ->
           let config = { (Runtime_codex_app_server.default_config ()) with cli_path=path; admission_timeout_s=2. } in
           Runtime_codex_app_server.list_models ~mgr:(Eio.Stdenv.process_mgr env)
-            ~clock:(Eio.Stdenv.clock env) ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp") config) in
+            ~clock:(Eio.Stdenv.clock env) ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+            ~account:(fixture_account ()) config) in
         let rows = match outcome with Ok rows -> rows | Error error -> fail (Runtime_codex_app_server.error_to_string error) in
         check (list string) "exact models across pages" ["exact-first";"exact-second"]
           (List.map (fun (row : Runtime_codex_app_server.listed_model) -> row.model) rows);
@@ -2471,7 +2485,8 @@ let test_rate_limits_read_without_turn () =
         let outcome = Eio_main.run (fun env ->
           let config = { (Runtime_codex_app_server.default_config ()) with cli_path=path; admission_timeout_s=2. } in
           Runtime_codex_app_server.read_rate_limits ~mgr:(Eio.Stdenv.process_mgr env)
-            ~clock:(Eio.Stdenv.clock env) ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp") config) in
+            ~clock:(Eio.Stdenv.clock env) ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+            ~account:(fixture_account ()) config) in
         let report = match outcome with Ok report -> report | Error error -> fail (Runtime_codex_app_server.error_to_string error) in
         check string "source" "codex.account_rate_limits_read"
           (Runtime_provider_usage_window.source_to_string report.source);
@@ -2513,7 +2528,8 @@ let test_thread_delete_answers_each_id () =
         let outcome = Eio_main.run (fun env ->
           let config = { (Runtime_codex_app_server.default_config ()) with cli_path=path; admission_timeout_s=2. } in
           Runtime_codex_app_server.delete_threads ~mgr:(Eio.Stdenv.process_mgr env)
-            ~clock:(Eio.Stdenv.clock env) ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp") config
+            ~clock:(Eio.Stdenv.clock env) ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+            ~account:(fixture_account ()) config
             [ "thread-kept"; "thread-gone" ]) in
         let answers = match outcome with
           | Ok answers -> answers
@@ -2576,10 +2592,12 @@ let test_background_read_outlives_the_turn () =
                 Eio.Switch.run (fun turn_sw ->
                   Eio_context.with_turn_switch turn_sw (fun () ->
                     let first =
-                      Runtime_provider_usage_read.read_codex_after_spent_usage_refusal ~clock ~cwd ~scope codex
+                      Runtime_provider_usage_read.read_codex_after_spent_usage_refusal ~clock ~cwd ~scope
+                        ~account:(Masc_test_deps.authorized_account codex.account_home) codex
                     in
                     let second =
-                      Runtime_provider_usage_read.read_codex_after_spent_usage_refusal ~clock ~cwd ~scope codex
+                      Runtime_provider_usage_read.read_codex_after_spent_usage_refusal ~clock ~cwd ~scope
+                        ~account:(Masc_test_deps.authorized_account codex.account_home) codex
                     in
                     first, second))
               in
@@ -2643,7 +2661,8 @@ let read_after_spent_usage_refusal ~provider_id read_result =
         Eio.Switch.run (fun root_sw ->
           Eio_context.set_switch root_sw;
           check bool "the refusal starts a read" true
-            (Runtime_provider_usage_read.read_codex_after_spent_usage_refusal ~clock ~cwd ~scope codex
+            (Runtime_provider_usage_read.read_codex_after_spent_usage_refusal ~clock ~cwd ~scope
+                        ~account:(Masc_test_deps.authorized_account codex.account_home) codex
              = Runtime_provider_usage_read.Started)))));
   (match Runtime_provider_usage_window.state ~scope with
    | Runtime_provider_usage_window.Reported _ -> ()
@@ -3773,6 +3792,7 @@ let test_worker_encoding_wait_is_bounded () =
                     ~mgr:(Eio.Stdenv.process_mgr env) ~clock
                     ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
                     ~on_prompt_sent:(fun () -> incr sent)
+                    ~account:(fixture_account ())
                     config ~prompt:"fixture" ~images:[] in
                 (match outcome with
                  | Error (Runtime_codex_app_server.Timeout
@@ -3891,6 +3911,7 @@ let test_no_deadline_keeps_admission_bounded () =
           ~on_thread_ready:(fun ~thread_id:_ ->
             Eio.Time.sleep clock 0.75;
             Ok ())
+          ~account:(fixture_account ())
           config
           ~prompt:"fixture"
           ~images:[])
@@ -3923,6 +3944,7 @@ let test_no_deadline_begins_after_turn_dispatch () =
              ~mgr:(Eio.Stdenv.process_mgr env)
              ~clock:(Eio.Stdenv.clock env)
              ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+             ~account:(fixture_account ())
              config
              ~prompt:"fixture"
              ~images:[])
@@ -4034,6 +4056,7 @@ let test_callback_timeout_origin_is_preserved_without_deadline () =
              ~clock:(Eio.Stdenv.clock env)
              ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
              ~on_thread_ready:(fun ~thread_id:_ -> raise Eio.Time.Timeout)
+             ~account:(fixture_account ())
              config
              ~prompt:"fixture"
              ~images:[]
@@ -4058,6 +4081,7 @@ let test_operator_interrupt_callback_keeps_typed_cause () =
             ~clock:(Eio.Stdenv.clock env)
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
             ~on_thread_ready:(fun ~thread_id:_ -> raise combined)
+            ~account:(fixture_account ())
             config ~prompt:"fixture" ~images:[] |> ignore);
         None
       with exn -> Some exn in
@@ -4530,10 +4554,12 @@ let check_declared_provider_environment ~relative =
           | Ok turn -> check string "turn completed" "MASC_SUBSCRIPTION_OK" turn.text));
     let output = open_out config_path in
     output_string output "[model_providers.fixture]\nenv_key = 42\n"; close_out output;
-    match run_fixture "/not/spawned/invalid-provider-config" with
-    | Error (Runtime_codex_app_server.Invalid_config _) -> ()
-    | Error error -> fail (Runtime_codex_app_server.error_to_string error)
-    | Ok _ -> fail "malformed credential declaration admitted")
+    (* A client starts only on a captured account, and the capture reads the
+       declaration, so a malformed one is refused before any client exists. *)
+    match Runtime_official_account.capture ~client:Runtime_official_account.Codex ~declaration:None with
+    | Error (_ : string) -> ()
+    | Ok (_ : Runtime_official_account.codex Runtime_official_account.t) ->
+      fail "malformed credential declaration admitted")
 ;;
 
 let test_declared_provider_environment () =
@@ -4546,6 +4572,11 @@ let test_readiness_home_overrides_inherited_home () =
     [ init_result; account_chatgpt; thread_result; turn_result; item_completed; turn_completed ]
     (fun fixture ->
       let wrapper = Filename.temp_file "masc-codex-isolated-wrapper-" ".sh" in
+      (* The account the turn is authorized on. Its home is not the CODEX_HOME
+         of the client: the private readiness home replaces it. *)
+      let account_home = Filename.temp_file "masc-codex-readiness-account-" "" in
+      Sys.remove account_home;
+      Unix.mkdir account_home 0o700;
       let isolated_home = Filename.temp_file "masc-private-readiness-home-" "" in
       Sys.remove isolated_home;
       Unix.mkdir isolated_home 0o700;
@@ -4553,7 +4584,9 @@ let test_readiness_home_overrides_inherited_home () =
       let config_output = open_out private_config in
       output_string config_output "[mcp_servers.dangerous]\nenabled = false\n";
       close_out config_output;
-      Fun.protect ~finally:(fun () -> Sys.remove wrapper; Sys.remove private_config; Unix.rmdir isolated_home) (fun () ->
+      Fun.protect ~finally:(fun () ->
+        Sys.remove wrapper; Sys.remove private_config; Unix.rmdir isolated_home;
+        Unix.rmdir account_home) (fun () ->
         let output = open_out_bin wrapper in
         output_string output "#!/bin/sh\n";
         output_string output ("[ \"$CODEX_HOME\" = " ^ shell_quote isolated_home ^ " ] || exit 73\n");
@@ -4563,10 +4596,10 @@ let test_readiness_home_overrides_inherited_home () =
         Unix.chmod wrapper 0o700;
         Masc_test_deps.with_process_env "HOME" (Some "") (fun () ->
           Masc_test_deps.with_process_env "CODEX_HOME" (Some "") (fun () ->
-            (match run_fixture ~isolated_home wrapper with
+            (match run_fixture ~account_home ~isolated_home wrapper with
              | Error error -> fail (Runtime_codex_app_server.error_to_string error)
              | Ok _ -> ());
-            match run_fixture ~isolated_home:"relative-readiness-home" wrapper with
+            match run_fixture ~account_home ~isolated_home:"relative-readiness-home" wrapper with
             | Error (Runtime_codex_app_server.Invalid_config _) -> ()
             | Error error -> fail (Runtime_codex_app_server.error_to_string error)
             | Ok _ -> fail "relative isolated home was accepted"))))
@@ -9534,6 +9567,7 @@ let test_live_chatgpt_subscription () =
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+          ~account:(fixture_account ())
           config
           ~prompt:"Reply with exactly MASC_SUBSCRIPTION_OK and do not use tools."
           ~images:[])
@@ -9579,6 +9613,7 @@ let test_live_dynamic_tool_subscription () =
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
           ~dynamic_tools:[ tool ]
+          ~account:(fixture_account ())
           config
           ~prompt:
             "Call masc_probe exactly once, then reply with exactly MASC_TOOL_OK."
@@ -9615,7 +9650,8 @@ let test_live_developer_context_comparison () =
           match Runtime_codex_app_server.run_turn
               ~mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env)
               ~cwd:Eio.Path.(Eio.Stdenv.fs env / Filename.get_temp_dir_name ())
-              ~thread:(Runtime_codex_app_server.Persistent !thread_mode) ~developer_context config
+              ~thread:(Runtime_codex_app_server.Persistent !thread_mode) ~developer_context
+              ~account:(fixture_account ()) config
               ~prompt:"Return the current marker." ~images:[] with
           | Error error -> fail (Runtime_codex_app_server.error_to_string error)
           | Ok result ->
@@ -9669,6 +9705,7 @@ let test_live_history_injection_subscription () =
             [ { role = User; text = "The continuity marker is MASC_HISTORY_OK." }
             ; { role = Assistant; text = "I will retain that marker." }
             ]
+          ~account:(fixture_account ())
           config
           ~prompt:"Reply with exactly the continuity marker from the prior history."
           ~images:[])
@@ -9946,6 +9983,7 @@ let test_native_action_observer_keeps_exact_provider_identity () =
 ;;
 
 let () =
+  Masc_test_deps.publish_single_user_access ();
   run "runtime codex app-server"
     [ ( "reasoning", [test_case "Keeper retains reasoning before native tools and answer" `Quick
             test_keeper_preserves_codex_reasoning_and_tool_order

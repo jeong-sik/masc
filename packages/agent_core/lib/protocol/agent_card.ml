@@ -521,17 +521,3 @@ let of_info (info : agent_info) : agent_card =
   ; metadata = []
   }
 ;;
-
-(* ── Queries ───────────────────────────────────────────── *)
-
-let has_capability (card : agent_card) cap =
-  List.exists (fun c -> c = cap) card.capabilities
-;;
-
-let can_handle_tool (card : agent_card) tool_name =
-  List.exists (fun (t : Types.tool_schema) -> t.name = tool_name) card.tools
-;;
-
-let has_skill (card : agent_card) skill_name =
-  List.exists (fun (s : skill_meta) -> s.name = skill_name) card.skills
-;;

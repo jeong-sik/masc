@@ -2461,7 +2461,6 @@
   masc_tui_pick_list
   masc_tui_planning_proof_mark
   masc_tui_runtime_config_view
-  masc_tui_runtime_config_edit
   masc_tui_token_scale
   masc_tui_context_inspector
   masc_tui_command

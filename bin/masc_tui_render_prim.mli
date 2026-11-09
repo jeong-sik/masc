@@ -709,12 +709,6 @@ val config_pane_title :
 val config_metadata_summary :
   Masc_tui_types.state -> (Masc_tui_runtime_config_view.tone * string) list
 
-val runtime_config_unmatched_current :
-  Masc_tui_types.state -> Masc_tui_runtime_config_edit.document option
-(** The currently read source when its revision has no matching application
-    observation. [None] means no such unmatched source is being displayed;
-    it does not itself prove successful validation or application. *)
-
 val runtime_config_status_lines :
   Masc_tui_types.state -> cols:int -> (string * string) list
 (** The runtime configuration's status page as styled rows, drawn as headed

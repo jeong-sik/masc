@@ -69,10 +69,10 @@ let decision_rows_of_state (state : state) =
     if list_is_read reading.questions then
       Option.value ~default:[] (approvals_open_questions state)
       |> List.map (fun (row : Masc.Tui_decode_asks.ask_row) ->
-          let why = match row.ar_context, row.ar_questions with
-            | Some reason, _ -> reason
-            | None, question :: _ -> question.aq_prompt
-            | None, [] -> "open question"
+          let why = match row.ar_questions, row.ar_context with
+            | question :: _, _ -> question.aq_prompt
+            | [], Some reason -> reason
+            | [], None -> "open question"
           in
           Home_request (Home_question (Masc.Tui_decode_asks.ask_key row)),
           Printf.sprintf "Question · %s [%s] · %s" (clean (Masc.Tui_decode_asks.ask_asker_label row.ar_asker))

@@ -782,8 +782,9 @@ val run_try_provider_with_truncation_recovery :
 (** One run: every provider attempt to this candidate. The history recovery
     sends a completion review once with its original evidence; the
     continuation below may follow it. A Keeper input retains memory
-    reprojection, verified boundary resend and current-tool demotion under
-    the existing checkpoint/effect retry authority; on a typed size refusal
+    reprojection, verified boundary resend, current-tool demotion and the
+    resend from where this turn began, under the existing checkpoint/effect
+    retry authority; on a typed size refusal
     the retained-result carrier is offered before [on_memory_capacity_refusal]
     ({!Keeper_client_tool_outbox.run_carrier_reprojection}).
 

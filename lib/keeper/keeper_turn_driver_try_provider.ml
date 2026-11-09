@@ -1842,7 +1842,9 @@ let bounded_model_input_projection
   (* Core may deserialize a retained native checkpoint after dispatch. Bind
      once to its first actual request, while closure eligibility still comes
      exclusively from the pre-admission seed. Result resends never rebind it.
-     The bound set is demoted only by the resend that answers a size refusal. *)
+     The bound set is demoted only once a size refusal has demoted the current
+     turn's results: by the resend that answers it and by every later request
+     of the run, the max-tokens continuation among them. *)
   let argument_binding = ref Arguments_unbound in
   let argument_protection_reported = ref false in
   let completed_arguments_for messages =
@@ -1981,8 +1983,10 @@ let bounded_model_input_projection
       | None | Some Without_snapshot -> None
     in
     let current_turn_results = !(state.current_turn_results) in
-    (* The bound arguments ride only on a resend that answers a size refusal;
-       any other request sends every argument as the range first sent it. *)
+    (* The bound arguments ride only on the requests sent after a size refusal
+       demoted the current turn's results: the resend that answers it and every
+       later request of the run, the max-tokens continuation among them. Any
+       other request sends every argument as the range first sent it. *)
     let view_arguments =
       match current_turn_results with
       | Current_turn_verbatim -> None

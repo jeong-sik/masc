@@ -462,7 +462,7 @@ let discover ~binary ~sw:_ ~net ~base_path request =
     | Antigravity ->
       let* command=text (value "command" template) in
       let* credential=text (value "credential_file" template) in
-      let* json=native_json ~binary ["runtime-antigravity-models";"--cli-path";command;"--credential-file";credential] in
+      let* json=native_json ~binary ["runtime-antigravity-models";"--base-path";base_path;"--cli-path";command;"--credential-file";credential] in
       project_client_models ~source:"antigravity_selected_account_models" ~catalog:false json
     | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages ->
       let* connection=Runtime_model_discovery.connection_of_json (`Assoc (("provider_id",`String id)::template))

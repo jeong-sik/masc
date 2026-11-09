@@ -25,15 +25,16 @@ let make_meta name =
   | Error error -> Alcotest.fail ("meta fixture failed: " ^ error)
   | Ok meta -> meta
 
-(* The tool reads the ledger through the keeper roster: a norm whose author
-   is not registered folds out of the live set (RFC-0504 §2.4). Every world
-   here registers the two keepers its helpers write as, so the tools under
-   test see their own writes; the isolation test below adds the outsider. *)
+(* Durable metadata names form the roster, independently of whether the live
+   registry can currently operate the Keeper. *)
 let with_world f =
   let dir = Filename.temp_file "world-constitution-tools-" ".tmp" in
   Sys.remove dir;
   Unix.mkdir dir 0o700;
   let register keeper =
+    let config = Masc.Workspace.default_config dir in
+    let path = Masc.Keeper_types_profile.keeper_meta_path config keeper in
+    Yojson.Safe.to_file path (Masc.Keeper_meta_json.meta_to_json (make_meta keeper));
     ignore
       (Masc.Keeper_registry.For_testing.register ~base_path:dir keeper
          (make_meta keeper))
@@ -674,6 +675,36 @@ let test_isolated_lines_are_reported_to_the_caller () =
           Alcotest.failf "the isolated line was not reported: %s" (output execution))
       | _ -> Alcotest.failf "unexpected output %s" (output execution))
 
+let test_a_retained_author_survives_registry_loss_and_bad_metadata () =
+  with_world (fun base_path ->
+      let config = Masc.Workspace.default_config base_path in
+      ignore (write ~base_path (`Assoc [ "text", `String "a retained norm" ]));
+      Masc.Keeper_registry.For_testing.unregister ~base_path "lane-smith";
+      let path = Masc.Keeper_types_profile.keeper_meta_path config "lane-smith" in
+      let channel = open_out path in
+      output_string channel "not current metadata";
+      close_out channel;
+      let execution = Tools.read_with_outcome ~config in
+      Alcotest.(check bool) "the read succeeds" false (failed execution);
+      match Yojson.Safe.from_string (output execution) with
+      | `Assoc fields ->
+          Alcotest.(check bool) "the retained author's norm still holds" true
+            (List.assoc_opt "articles_held" fields = Some (`Int 1));
+          Alcotest.(check bool) "a retained name is not an isolated subject" true
+            (List.assoc_opt "isolated_ledger_lines" fields = None)
+      | _ -> Alcotest.failf "unexpected output %s" (output execution))
+
+let test_an_unreadable_roster_refuses_the_read () =
+  with_world (fun base_path ->
+      let config = Masc.Workspace.default_config base_path in
+      let root = Masc.Workspace.keepers_runtime_dir config in
+      Unix.rename root (root ^ ".retained");
+      let channel = open_out root in
+      close_out channel;
+      let execution = Tools.read_with_outcome ~config in
+      Alcotest.(check (option string)) "a roster failure is not an empty world"
+        (Some "runtime_failure") (failure_class execution))
+
 let () =
   Alcotest.run "world_constitution_tools"
     [ ( "end to end",
@@ -681,6 +712,10 @@ let () =
             test_a_written_norm_reaches_the_turn_prompt;
           Alcotest.test_case "an unreadable ledger is not rendered as no articles"
             `Quick test_an_unreadable_ledger_is_not_rendered_as_no_articles;
+          Alcotest.test_case "a retained author survives unavailable runtime metadata"
+            `Quick test_a_retained_author_survives_registry_loss_and_bad_metadata;
+          Alcotest.test_case "an unreadable roster refuses the read"
+            `Quick test_an_unreadable_roster_refuses_the_read;
         ] );
       ( "write",
         [ Alcotest.test_case "a written norm reaches the rendered articles"

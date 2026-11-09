@@ -55,14 +55,14 @@ let replace ~base_path ?(by = "critic") superseded article =
   | Ok () -> ()
   | Error error -> Alcotest.failf "%s" (Store.append_error_to_string error)
 
-let load_or_fail ?(resolve_subject = fun _ -> true) ~base_path =
+let load_or_fail ?(resolve_subject = fun _ -> true) ~base_path () =
   match Store.load ~base_path ~resolve_subject with
   | Ok ledger -> ledger
   | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
 
 let texts (ledger : Store.ledger) = List.map (fun (a : t) -> a.text) ledger.articles
 
-let load_articles_or_fail ?(resolve_subject = fun _ -> true) ~base_path =
+let load_articles_or_fail ?(resolve_subject = fun _ -> true) ~base_path () =
   match Store.load_articles ~base_path ~resolve_subject with
   | Ok articles -> articles
   | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
@@ -77,7 +77,7 @@ let test_ledger_path_is_base_path_scoped () =
 
 let test_a_world_without_a_ledger_has_no_articles () =
   with_world (fun base_path ->
-      let ledger = load_or_fail ~base_path in
+      let ledger = load_or_fail ~base_path () in
       Alcotest.(check int) "no articles" 0 (List.length ledger.articles);
       Alcotest.(check int) "no history" 0 (List.length ledger.entries);
       Alcotest.(check int) "nothing rejected" 0 (List.length ledger.rejected);
@@ -89,7 +89,7 @@ let test_written_norms_come_back_in_order () =
       add ~base_path (article "second norm");
       Alcotest.(check (list string))
         "order of writing is kept" [ "first norm"; "second norm" ]
-        (texts (load_or_fail ~base_path)))
+        (texts (load_or_fail ~base_path ())))
 
 let test_removing_takes_a_norm_out_of_force () =
   with_world (fun base_path ->
@@ -97,7 +97,7 @@ let test_removing_takes_a_norm_out_of_force () =
       add ~base_path (article "a norm that stays");
       add ~base_path doomed;
       remove ~base_path doomed;
-      let ledger = load_or_fail ~base_path in
+      let ledger = load_or_fail ~base_path () in
       Alcotest.(check (list string))
         "only the surviving norm is held" [ "a norm that stays" ] (texts ledger);
       Alcotest.(check int) "nothing was rejected" 0 (List.length ledger.rejected))
@@ -120,7 +120,7 @@ let test_rewriting_a_held_norm_edits_it_in_place () =
       Alcotest.(check (list string))
         "the edit lands in place, not at the end"
         [ "a norm without a typo"; "a trailing norm" ]
-        (texts (load_or_fail ~base_path)))
+        (texts (load_or_fail ~base_path ())))
 
 let test_a_norm_written_again_after_removal_returns_at_the_end () =
   with_world (fun base_path ->
@@ -132,7 +132,7 @@ let test_a_norm_written_again_after_removal_returns_at_the_end () =
       Alcotest.(check (list string))
         "the world changed its mind, and that is when"
         [ "an undisputed norm"; "a disputed norm" ]
-        (texts (load_or_fail ~base_path)))
+        (texts (load_or_fail ~base_path ())))
 
 (* Two keepers reading the same world, one writing first. The second decided
    something from what it read -- the byte ceiling is decided exactly this way
@@ -153,7 +153,7 @@ let test_a_write_built_on_a_stale_read_is_refused () =
         Alcotest.(check (list string))
           "the stale write did not land"
           [ "first norm"; "a norm written by someone else" ]
-          (texts (load_or_fail ~base_path))
+          (texts (load_or_fail ~base_path ()))
       | Ok () -> Alcotest.fail "a write built on a stale read landed"
       | Error other ->
         Alcotest.failf "wrong error: %s" (Store.append_error_to_string other))
@@ -166,13 +166,13 @@ let test_articles_only_load_folds_the_same_articles () =
       remove ~base_path doomed;
       Alcotest.(check (list string))
         "ordinary loads fold what the full load folds"
-        (texts (load_or_fail ~base_path))
-        (article_texts (load_articles_or_fail ~base_path)))
+        (texts (load_or_fail ~base_path ()))
+        (article_texts (load_articles_or_fail ~base_path ())))
 
 let test_articles_only_load_of_a_missing_ledger_is_empty () =
   with_world (fun base_path ->
       Alcotest.(check int) "no ledger, no articles" 0
-        (List.length (load_articles_or_fail ~base_path)))
+        (List.length (load_articles_or_fail ~base_path ())))
 
 let held_or_fail ~base_path =
   match Store.load_held ~base_path ~resolve_subject:(fun _ -> true) with
@@ -232,7 +232,7 @@ let test_a_line_that_does_not_decode_is_reported_not_dropped () =
       output_string channel "{\"kind\":\"added\",\"article\":{}}\n";
       close_out channel;
       add ~base_path (article "another readable norm");
-      let ledger = load_or_fail ~base_path in
+      let ledger = load_or_fail ~base_path () in
       Alcotest.(check (list string))
         "readable norms survive the broken line"
         [ "a readable norm"; "another readable norm" ]
@@ -260,7 +260,7 @@ let test_an_unterminated_last_line_is_reported_as_such () =
       in
       output_string channel "{\"kind\":\"added\",\"artic";
       close_out channel;
-      let ledger = load_or_fail ~base_path in
+      let ledger = load_or_fail ~base_path () in
       Alcotest.(check (list string))
         "the norm before the cut still holds" [ "a readable norm" ] (texts ledger);
       match ledger.rejected with
@@ -280,7 +280,7 @@ let test_replacing_retires_the_bundle_and_adds_the_replacement () =
       add ~base_path first;
       add ~base_path second;
       replace ~base_path [ first; second ] (article "the merged norm");
-      let ledger = load_or_fail ~base_path in
+      let ledger = load_or_fail ~base_path () in
       Alcotest.(check (list string))
         "only the replacement is held" [ "the merged norm" ] (texts ledger);
       Alcotest.(check int) "every move stays in the history" 3
@@ -300,7 +300,7 @@ let test_replacing_keeps_unrelated_norms_in_place () =
       Alcotest.(check (list string))
         "the unrelated norm stays where it was, the merge lands last"
         [ "an unrelated norm"; "the merged norm" ]
-        (texts (load_or_fail ~base_path)))
+        (texts (load_or_fail ~base_path ())))
 
 (* RFC-0504 §2.4: a line whose subject the roster does not resolve folds out
    of the live set and is reported beside the rejected lines, never dropped
@@ -311,7 +311,7 @@ let test_a_line_from_outside_the_roster_is_isolated_not_dropped () =
       add ~base_path (article ~author:"codex-operator" "a norm from outside the tool");
       let ledger =
         load_or_fail ~base_path
-          ~resolve_subject:(String.equal "lane-smith")
+          ~resolve_subject:(String.equal "lane-smith") ()
       in
       Alcotest.(check (list string))
         "only the roster's norm is held" [ "a norm the world holds" ] (texts ledger);
@@ -338,7 +338,7 @@ let test_an_isolated_removal_moves_nothing () =
       | Error error -> Alcotest.failf "%s" (Store.append_error_to_string error));
       let ledger =
         load_or_fail ~base_path
-          ~resolve_subject:(String.equal "lane-smith")
+          ~resolve_subject:(String.equal "lane-smith") ()
       in
       Alcotest.(check (list string))
         "a removal from outside the roster removes nothing" [ "a norm that stays" ]
@@ -354,7 +354,7 @@ let test_articles_only_load_folds_out_isolated_lines () =
         "the prompt load holds the roster's norm only" [ "a norm the world holds" ]
         (article_texts
            (load_articles_or_fail ~base_path
-              ~resolve_subject:(String.equal "lane-smith"))))
+              ~resolve_subject:(String.equal "lane-smith") ())))
 
 let () =
   Alcotest.run "world_constitution_store"

@@ -120,7 +120,10 @@ let issue_system ~config ~profile_defaults ~(meta : keeper_meta) ~runtime_id ~he
     |> Result.map_error (fun detail -> Workspace_unavailable detail)
   in
   let base_path = config.Workspace.base_path in
-  let resolve_subject = Keeper_registry.is_registered ~base_path in
+  let* resolve_subject =
+    Keeper_constitution_roster.read ~config
+    |> Result.map_error (fun error -> Constitution_unreadable error)
+  in
   let* current, at =
     World_constitution_store.load_held ~base_path ~resolve_subject
     |> Result.map_error (fun error -> Constitution_unreadable error)

@@ -301,9 +301,10 @@ let keeper_config_json_once ~config_revision (config : Workspace.config) (name :
             system_prompt_json ~world_state:world_state_preview
               ~constitution_ledger:
                 (lazy
-                  (World_constitution_store.load ~base_path:config.base_path
-                     ~resolve_subject:
-                       (Keeper_registry.is_registered ~base_path:config.base_path)))
+                  (Result.bind (Keeper_constitution_roster.read ~config)
+                     (fun resolve_subject ->
+                       World_constitution_store.load ~base_path:config.base_path
+                         ~resolve_subject)))
               effective_system_prompt );
           ("unified_user_message_preview", `String unified_user_message_preview);
         ]

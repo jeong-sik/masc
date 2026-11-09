@@ -21,11 +21,13 @@ let string_arg args field =
     | Some _ | None -> None)
   | _ -> None
 
-let load_ledger ~base_path =
-  match
-    World_constitution_store.load ~base_path
-      ~resolve_subject:(Keeper_registry.is_registered ~base_path)
-  with
+let load_ledger ~(config : Workspace.config) =
+  let result =
+    let open Result.Syntax in
+    let* resolve_subject = Keeper_constitution_roster.read ~config in
+    World_constitution_store.load ~base_path:config.base_path ~resolve_subject
+  in
+  match result with
   | Ok ledger -> Ok ledger
   | Error error ->
     Error (World_constitution_store.read_error_to_string error)
@@ -81,7 +83,7 @@ let with_line_diagnostics (ledger : World_constitution_store.ledger) fields =
       ]
 
 let read_with_outcome ~(config : Workspace.config) =
-  match load_ledger ~base_path:config.base_path with
+  match load_ledger ~config with
   | Error detail -> Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure detail
   | Ok ledger ->
     Keeper_tool_execution.success_data
@@ -228,7 +230,7 @@ let write_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args 
         ~class_
         (World_constitution_types.invalid_to_string invalid)
     | Ok article -> (
-      match load_ledger ~base_path with
+      match load_ledger ~config with
       | Error detail -> Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure detail
       | Ok ledger ->
         let held = ledger.World_constitution_store.articles in
@@ -353,7 +355,7 @@ let remove_with_outcome ~(config : Workspace.config) ~(meta : keeper_meta) ~args
       | Error detail ->
         Keeper_tool_execution.failure ~class_:Tool_result.Policy_rejection detail
       | Ok reason -> (
-        match load_ledger ~base_path with
+        match load_ledger ~config with
         | Error detail ->
           Keeper_tool_execution.failure ~class_:Tool_result.Runtime_failure detail
         | Ok ledger ->

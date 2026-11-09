@@ -22,12 +22,16 @@ type verdict =
   }
 
 type t =
-  { executed : bool  (** The call asked to reclaim ([execute]). *)
+  { executed : bool
+        (** The call asked to reclaim the keepers it named ([execute]). *)
   ; image_given : bool
         (** A claims image was given. Without one no marker is read, and an
             unowned keeper is kept as unverified. *)
   ; foreign_volumes : string list
   ; keepers : verdict list
+  ; unlisted_keepers : string list
+        (** Named keepers the volume listing did not show; nothing was
+            deleted for them. Empty when [executed] is false. *)
   }
 
 type summary =
@@ -47,6 +51,7 @@ val summary : t -> summary
 val to_json : t -> Yojson.Safe.t
 
 (** Refuses a missing, duplicate or unknown field, an unknown
-    [outcome_kind], a blank keeper name or volume name, and a summary that
-    does not match the keepers. *)
+    [outcome_kind], a blank keeper name or volume name, an unlisted keeper on
+    an answer that did not execute, and a summary that does not match the
+    keepers. *)
 val of_json : Yojson.Safe.t -> (t, string) result

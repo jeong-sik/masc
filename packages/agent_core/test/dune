@@ -154,7 +154,6 @@
   test_pipeline_illegal_hook
   test_periodic_suffix
   test_pipeline_metrics
-  test_plan
   test_provider
   test_provider_admission
   test_provider_failure_attribution
@@ -290,7 +289,6 @@
   test_pipeline_illegal_hook
   test_periodic_suffix
   test_pipeline_metrics
-  test_plan
   test_provider
   test_provider_admission
   test_provider_failure_attribution

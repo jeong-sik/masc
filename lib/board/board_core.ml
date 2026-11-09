@@ -71,20 +71,13 @@ let observe_post_and_comments store ~post_id
   | Error e -> Error e
   | Ok pid ->
     with_persist_lock store (fun () ->
-      with_lock store (fun () ->
-        let posts_source = require_posts_source_readable store in
-        match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
-        | None ->
-          (match posts_source with
-           | Error error -> Error (Read_source_unavailable error)
-           | Ok () -> Error (Read_post_not_found post_id))
-        | Some post ->
-          let observation = Board_comments.observe_comments_unlocked store pid in
-          let observation = match posts_source with
-            | Ok () -> observation
-            | Error error -> { observation with completeness = Source_incomplete error }
-          in
-          Ok (post, observation)))
+      match require_posts_source_readable store with
+      | Error error -> Error (Read_source_unavailable error)
+      | Ok () ->
+        with_lock store (fun () ->
+          match Hashtbl.find_opt store.posts (Post_id.to_string pid) with
+          | None -> Error (Read_post_not_found post_id)
+          | Some post -> Ok (post, Board_comments.observe_comments_unlocked store pid)))
 ;;
 
 let read_post_and_comments store ~post_id

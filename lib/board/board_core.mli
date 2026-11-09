@@ -418,9 +418,10 @@ val observe_post_and_comments
   : store
   -> post_id:string
   -> (post * comments_observation, board_read_error) Result.t
-(** Capture a post, indexed comments and source completeness together under
-    persistence then state locks. Retains display rows when either source is
-    incomplete. A missing post in an incomplete posts source is unavailable. *)
+(** Capture a post, indexed comments and comments-source completeness together
+    under persistence then state locks. Retains comment display rows when that
+    source is incomplete. Refuses an incomplete posts source before looking up
+    any post, so a source failure cannot distinguish hidden from absent posts. *)
 
 (** Complete thread in {!read_comments} order, observed in one persistence
     then state critical section. Refuses an incomplete posts or comments source

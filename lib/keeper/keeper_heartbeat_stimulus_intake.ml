@@ -893,23 +893,24 @@ let heartbeat_event_intake
       None
   in
   let ready_batch selections =
-    let hitl_selected = ref false in
+    let hitl_batch = ref (Ok Keeper_hitl_resolution_batch.empty) in
     let admitted =
       List.filter
         (fun (selection : Keeper_event_queue_state.pending_selection) ->
            stimulus_ready_for_intake ~base_path selection.source
            &&
            match selection.source.payload with
-           | Keeper_event_queue.Hitl_resolved _ ->
-             (* One tool bundle carries one exact cycle grant. Admitting two
-                HITL resolutions would replay only the first while a completed
-                turn ACKed both durable sources. Leave later resolutions queued
-                for their own exact replay turn. *)
-             if !hitl_selected
-             then false
-             else (
-               hitl_selected := true;
-               true)
+           | Keeper_event_queue.Hitl_resolved resolution ->
+             (* An incompatible ready input fences the remaining HITL suffix.
+                Independent source families keep their existing admission;
+                an unready input never reaches this compatibility decision. *)
+             (match !hitl_batch with
+              | Error _ -> false
+              | Ok batch ->
+                match Keeper_hitl_resolution_batch.try_append
+                  ~base_path ~keeper_name batch resolution with
+                | Ok joined -> hitl_batch := Ok joined; true
+                | Error error -> hitl_batch := Error error; false)
            (* Every other kind is eligible here; the Connector snapshot
               below selects one readable conversation. A new kind is listed here on
               purpose, so whether it may share a batch is decided, not

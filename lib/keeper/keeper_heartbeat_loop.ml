@@ -705,7 +705,7 @@ let batch_disposition_of_cycle_outcome
        a guarantee that observation text survives in resumed model input.
        Retaining the batch replays the same attention into the
        continuation. For a HITL resolution the cost was a full turn per wake:
-       the intake admits one resolution per turn and the resumed turn ended
+       the intake admitted one resolution per turn and the resumed turn ended
        on the same deferred call, so a spent grant at the queue head was
        re-delivered on every cycle and the resolutions behind it never
        reached the model (edgar.a.poe, 2026-09-02, eight turns on one
@@ -774,6 +774,56 @@ let continuation_settlement_of_cycle_outcome
         (batch_disposition_of_cycle_outcome cycle_outcome)
     then Continuation_settled_recorded
     else Continuation_unsettled
+;;
+
+let select_hitl_resolutions ~base_path ~keeper_name ~stimuli ~peek =
+  let resolutions = List.filter_map
+    (fun (stimulus : Keeper_event_queue.stimulus) ->
+      match stimulus.payload with
+      | Keeper_event_queue.Hitl_resolved resolution -> Some resolution
+      | Keeper_event_queue.Bootstrap | Board_routing_pending _ | Board_signal _
+      | Board_attention _ | Fusion_completed _ | Schedule_due _ | Connector_attention _
+      | Ask_answered _ | Completion_authority_rejected _ | Task_cancelled _
+      | Workspace_message _ | Delegate_completed _ | Composition_completed _
+      | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ -> None)
+    stimuli in
+  match resolutions with
+  | [] -> Ok (Option.fold ~none:Keeper_hitl_resolution_batch.empty
+      ~some:Keeper_hitl_resolution_batch.singleton (peek ()))
+  | _ :: _ -> Keeper_hitl_resolution_batch.of_resolutions ~base_path ~keeper_name resolutions
+;;
+
+let settle_hitl_continuations ~base_path ~keeper_name ~cycle_outcome ~resolutions =
+  let project_each write = List.map (fun resolution ->
+    let result = try write resolution with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn -> Error (Printexc.to_string exn) in
+    resolution, result) resolutions in
+  match continuation_settlement_of_cycle_outcome cycle_outcome with
+  | Continuation_unsettled -> []
+  | Continuation_settled_recorded ->
+    project_each (fun resolution -> Keeper_approval_queue.ensure_settled_continuation_chat_projection
+      ~base_path ~keeper_name ~resolution)
+  | Continuation_settled_failed { route } ->
+    project_each (fun resolution -> Keeper_approval_queue.ensure_failed_continuation_chat_projection
+      ~base_path ~keeper_name ~resolution ~route)
+;;
+
+let hitl_selection_has_recorded_continuation ~projections
+    (selection : Keeper_event_queue_state.pending_selection) =
+  match selection.source.payload with
+  | Keeper_event_queue.Hitl_resolved resolution ->
+    List.exists (fun ((projected : Keeper_event_queue.hitl_resolution), result) ->
+      String.equal projected.approval_id resolution.approval_id
+      && match result with
+         | Ok Keeper_approval_queue.Continuation_projection_recorded -> true
+         | Ok Keeper_approval_queue.Continuation_projection_not_ready | Error _ -> false)
+      projections
+  | Keeper_event_queue.Bootstrap | Board_routing_pending _ | Board_signal _
+  | Board_attention _ | Fusion_completed _ | Schedule_due _ | Connector_attention _
+  | Ask_answered _ | Completion_authority_rejected _ | Task_cancelled _
+  | Workspace_message _ | Delegate_completed _ | Composition_completed _
+  | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ -> true
 ;;
 
 
@@ -957,8 +1007,7 @@ let run_keepalive_unified_turn
     let source_batch = ref Keeper_heartbeat_source_batch.empty in
     let diagnostic_selection = ref None in
     let cycle_outcome_ref = ref None in
-    let hitl_resolution_for_cycle = ref None in
-    let hitl_continuation_projection_ok = ref true in
+    let hitl_resolutions_for_cycle = ref [] in
     let selection_acked = ref false in
     let stimuli_acked = ref false in
     let retained_checkpoint_stimulus = ref false in
@@ -1218,66 +1267,48 @@ let run_keepalive_unified_turn
           let event_bus = Event_bus_slots.get_keeper () in
           (* Preserve the typed resolution as input to the originating
              Keeper's external-effect Gate. It is not an AGENT_CORE approval. *)
-          let hitl_resolution =
-            match
-              List.find_map
-                (fun (stim : Keeper_event_queue.stimulus) ->
-                  match stim.Keeper_event_queue.payload with
-                  | Keeper_event_queue.Hitl_resolved resolution -> Some resolution
-                  | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
-                  | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
-                  | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
-                  | Keeper_event_queue.Ask_answered _
-                  | Keeper_event_queue.Completion_authority_rejected _
-                  | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-                  | Keeper_event_queue.Delegate_completed _
-                  | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Task_outcome _ -> None)
-                (Keeper_heartbeat_source_batch.stimuli !source_batch)
-            with
-            | Some resolution -> Some resolution
-            | None ->
-              (* #28809: a ready resolution may be queued behind the stimulus
-                 that woke this turn (e.g. a redelivered workspace message
-                 whose own earlier turn deferred on this very approval).
-                 Project the durable resolution into this turn instead of
-                 waiting for its queue position; the untouched queue entry is
-                 retired as a spent grant by [reconcile_spent_selection]
-                 without costing a turn. *)
-              (match
-                 Stimulus_intake.ready_hitl_resolution_peek
-                   ~base_path:ctx.config.base_path
-                   ~keeper_name:meta_after_triage.name
-               with
-               | None -> None
-               | Some resolution ->
-                 Log.Keeper.info
-                   "hitl resolution projected from pending queue approval=%s \
-                    decision=%s (keeper=%s)"
-                   resolution.Keeper_event_queue.approval_id
-                   (Keeper_event_queue.hitl_resolution_decision_to_string
-                      resolution.Keeper_event_queue.decision)
-                   meta_after_triage.name;
-                 Some resolution)
+          let hitl_resolutions = select_hitl_resolutions
+            ~base_path:ctx.config.base_path ~keeper_name:meta_after_triage.name
+            ~stimuli:turn_stimuli
+            ~peek:(fun () ->
+              let peeked = Stimulus_intake.ready_hitl_resolution_peek
+                ~base_path:ctx.config.base_path ~keeper_name:meta_after_triage.name in
+              Option.iter (fun (resolution : Keeper_event_queue.hitl_resolution) ->
+                Log.Keeper.info
+                  "hitl resolution projected from pending queue approval=%s decision=%s (keeper=%s)"
+                  resolution.approval_id
+                  (Keeper_event_queue.hitl_resolution_decision_to_string resolution.decision)
+                  meta_after_triage.name) peeked;
+              peeked)
           in
-          hitl_resolution_for_cycle := hitl_resolution;
           let turn_input =
             Keeper_heartbeat_source_batch.for_turn ~reactive:reactive_wake !source_batch
           in
           let run_fresh_cycle () =
-            run_keeper_cycle
-              ~admission_token
-              ?deferred_runtime_lane
-              ~on_deferred_runtime_consumed
-              ?event_bus
-              ?hitl_resolutions:(Option.map Keeper_hitl_resolution_batch.singleton hitl_resolution)
-              ~ctx
-              ~meta_after_triage
-              ~stop
-              ~obs
-              ~turn_decision
-              ~shared_context
-              ~turn_input
-              ()
+            match hitl_resolutions with
+            | Error error ->
+              (* No host replay or provider dispatch may start on a changed
+                 admitted vector. Every exact wake remains pending for intake
+                 to classify again; a peek never repairs a nonempty vector. *)
+              record_event_queue_failure
+                ("HITL input revalidation failed: " ^ Keeper_hitl_resolution_batch.join_error_to_string error);
+              Cycle.Skipped meta_after_triage
+            | Ok hitl_resolutions ->
+              hitl_resolutions_for_cycle := Keeper_hitl_resolution_batch.resolutions hitl_resolutions;
+              run_keeper_cycle
+                ~admission_token
+                ?deferred_runtime_lane
+                ~on_deferred_runtime_consumed
+                ?event_bus
+                ~hitl_resolutions
+                ~ctx
+                ~meta_after_triage
+                ~stop
+                ~obs
+                ~turn_decision
+                ~shared_context
+                ~turn_input
+                ()
           in
           let run_cycle () = run_fresh_cycle () in
           let cycle_outcome =
@@ -1333,74 +1364,32 @@ let run_keepalive_unified_turn
       let disposition =
         batch_disposition_of_cycle_outcome !cycle_outcome_ref
       in
-      (match
-         ( continuation_settlement_of_cycle_outcome !cycle_outcome_ref
-         , !hitl_resolution_for_cycle )
-       with
-       | Continuation_settled_recorded, Some resolution ->
-         (match
-            Keeper_approval_queue.ensure_settled_continuation_chat_projection
-              ~base_path:ctx.config.base_path
-              ~keeper_name:meta_after_triage.name
-              ~resolution
-          with
-          | Ok Keeper_approval_queue.Continuation_projection_recorded -> ()
-          | Ok Keeper_approval_queue.Continuation_projection_not_ready ->
-            hitl_continuation_projection_ok := false
-          | Error detail ->
-            hitl_continuation_projection_ok := false;
-            record_event_queue_failure
-              ("approval continuation projection failed: " ^ detail))
-       | Continuation_settled_failed { route }, Some resolution ->
-         (* The failed turn keeps [Batch_no_action] below: only the
-            continuation slot is settled, and the intake retires the queued
-            wake when it reaches it. A grant this turn never spent stays
-            unsettled ([Continuation_projection_not_ready]): the model was not
-            shown its outcome, so the wake is kept. *)
-         (match
-            Keeper_approval_queue.ensure_failed_continuation_chat_projection
-              ~base_path:ctx.config.base_path
-              ~keeper_name:meta_after_triage.name
-              ~resolution
-              ~route
-          with
-          | Ok Keeper_approval_queue.Continuation_projection_recorded
-          | Ok Keeper_approval_queue.Continuation_projection_not_ready -> ()
-          | Error detail ->
-            (* [record_event_queue_failure] keeps no message after a failed
-               turn, so the detail is logged here. *)
-            Log.Keeper.warn
-              ~keeper_name:meta_after_triage.name
-              "approval continuation failure projection failed: %s"
-              detail;
-            record_event_queue_failure
-              ("approval continuation failure projection failed: " ^ detail))
-       | Continuation_unsettled, _
-       | (Continuation_settled_recorded | Continuation_settled_failed _), None ->
-         ());
+      let projections = settle_hitl_continuations
+        ~base_path:ctx.config.base_path ~keeper_name:meta_after_triage.name
+        ~cycle_outcome:!cycle_outcome_ref ~resolutions:!hitl_resolutions_for_cycle in
+      List.iter (fun ((resolution : Keeper_event_queue.hitl_resolution), result) ->
+        match result with
+        | Ok Keeper_approval_queue.Continuation_projection_recorded
+        | Ok Keeper_approval_queue.Continuation_projection_not_ready -> ()
+        | Error detail ->
+          Log.Keeper.warn ~keeper_name:meta_after_triage.name
+            "approval continuation projection failed approval=%s: %s" resolution.approval_id detail;
+          record_event_queue_failure
+            ("approval continuation projection failed approval=" ^ resolution.approval_id ^ ": " ^ detail))
+        projections;
       (* RFC-0377: every entry admitted into this turn (the primary plus any
          Connector_attention batch companions) shares the turn's outcome. A
-         turn completion acks all of them; a turn failure applies the same
-         quarantine/defer/preserve disposition to all of them, so a
-         companion is never silently left un-acked while the primary is. *)
+         completed turn acknowledges delivered members; each HITL member
+         additionally needs its own continuation receipt. Failed turns retain
+         their existing quarantine/defer/preserve disposition. *)
       (match Keeper_heartbeat_source_batch.selections !source_batch with
        | [] -> ()
        | (_ :: _) as selections ->
            let remove_completed_selections ~should_ack =
              let should_ack selection =
                should_ack selection
-               &&
-               match selection.Keeper_event_queue_state.source.payload with
-               | Keeper_event_queue.Hitl_resolved _ ->
-                 !hitl_continuation_projection_ok
-               | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
-               | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
-               | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Connector_attention _
-               | Keeper_event_queue.Ask_answered _
-               | Keeper_event_queue.Completion_authority_rejected _
-               | Keeper_event_queue.Task_cancelled _ | Keeper_event_queue.Workspace_message _
-               | Keeper_event_queue.Delegate_completed _
-               | Keeper_event_queue.Composition_completed _ | Keeper_event_queue.Tool_result_ready _ | Keeper_event_queue.Owned_job_completed _ | Keeper_event_queue.Task_outcome _ -> true
+               && hitl_selection_has_recorded_continuation
+                    ~projections selection
              in
              let selections_to_ack, retained_selections =
                List.partition should_ack selections
@@ -2012,6 +2001,10 @@ let run_heartbeat_loop
 ;;
 
 module For_testing = struct
+  let select_hitl_resolutions = select_hitl_resolutions
+  let settle_hitl_continuations = settle_hitl_continuations
+  let hitl_selection_has_recorded_continuation = hitl_selection_has_recorded_continuation
+
   let record_replay_owned_turn_started_reactions =
     record_replay_owned_turn_started_reactions
 

@@ -124,7 +124,7 @@ let turn_success_of_stop_reason ~meta ~followup = function
 
 (* RFC-0377 admits a whole conversation backlog as one wake: intake batches
    one connector conversation's pending rows together with every other ready
-   payload (at most one HITL resolution), so a batch is not connector rows
+   payload, including a compatible HITL cohort, so a batch is not connector rows
    only. The batch continues on one channel only when every member has a routable
    channel and all of them are the same conversation; one channel-less member
    ([Board_signal], [Bootstrap], ...) routes the batch nowhere. The chosen

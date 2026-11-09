@@ -24,7 +24,7 @@ Synthetic Keepers, memories and candidates are invented by the model from
 
 | File | Role |
 | --- | --- |
-| `pass_lines.json` | Fixed request shape, evaluation sets, baseline, candidates, gates and the files whose bytes they assume |
+| `pass_lines.json` | Fixed request shape, evaluation sets, baseline, candidates, gates and the files whose bytes they assume: every module `eval_admission.py` and `e_synth_audit.py` import, and the prompt template |
 | `e_real_manifest.json` | E-real: the answered admission records, by digest and sha256 |
 | `exact_store.py` | Reads answered admission records from the store, read only |
 | `e_real_manifest.py` | Writes the manifest |

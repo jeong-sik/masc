@@ -1,6 +1,6 @@
-open Keeper_types
-open Keeper_meta_contract
-open Keeper_types_profile
+(* The definitions live in the Keeper_turn_sandbox_runtime_* modules included
+   below, one per topic and in dependency order: a module reads only the ones
+   above it. keeper_turn_sandbox_runtime.mli stays the contract. *)
 
 include Keeper_turn_sandbox_runtime_registry
 include Keeper_turn_sandbox_runtime_work_root
@@ -19,4 +19,3 @@ include Keeper_turn_sandbox_runtime_endpoint
 include Keeper_turn_sandbox_runtime_identity_refresh
 include Keeper_turn_sandbox_runtime_exec
 include Keeper_turn_sandbox_runtime_maintenance
-

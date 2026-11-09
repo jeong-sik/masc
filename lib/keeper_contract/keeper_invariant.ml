@@ -37,12 +37,12 @@ let sandbox_isolation ~sandbox_roots ~sandbox_paths =
                    let root_norm = normalize_path root in
                    (* A path equal to the sandbox root itself is treated as
                       in-sandbox, matching [container_path_of_host] in
-                      keeper_turn_sandbox_runtime.ml which accepts host_root
-                      as a valid sandbox path. When [root_norm] is "/", every
-                      absolute path is inside it; using "/" directly as the
-                      prefix (instead of "//") avoids the degenerate
-                      double-slash that would otherwise reject all non-root
-                      paths. *)
+                      keeper_turn_sandbox_runtime_run_argv.ml which accepts
+                      host_root as a valid sandbox path. When [root_norm] is
+                      "/", every absolute path is inside it; using "/"
+                      directly as the prefix (instead of "//") avoids the
+                      degenerate double-slash that would otherwise reject all
+                      non-root paths. *)
                    let prefix =
                      if String.equal root_norm "/" then "/" else root_norm ^ "/"
                    in

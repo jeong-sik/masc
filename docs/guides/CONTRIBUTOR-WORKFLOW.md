@@ -252,9 +252,9 @@ not add a Core build or full CI admission requirement to every ordinary PR.
 ## 5. Review and integrate
 
 Ordinary PRs targeting main have [operator-requested automatic merge](NATIVE-GITHUB-STACKS.md#operator-requested-automatic-merge)
-enabled by default when Ready. Non-native PRs show GitHub's Auto-merge reservation;
-native stacks use the whole-scope worker. Integration proceeds
-after two distinct accounts approve the current head of every unmerged stack
+enabled by default when Ready. Non-native PRs show GitHub's Auto-merge reservation
+and use GitHub's valid-approval rules. Native stacks use the whole-scope worker
+after two distinct accounts approve the exact current head of every unmerged
 member. Use CHANGES_REQUESTED for blocking findings; COMMENTED prose is not an
 automatic stop. Reviewers still inspect source before approving. Release/Tag
 integration remains manual and requires full verification.

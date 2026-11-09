@@ -104,11 +104,16 @@ retargeting its base, disable that reservation first. Native stack members use t
 worker instead of per-layer reservations; the worker clears existing reservations
 when it observes native membership, Draft status, a non-main base or a release head.
 
-Ordinary PRs targeting `main` merge automatically after **two distinct GitHub
-accounts** have submitted APPROVE for each unmerged member's current head.
-Repeated approvals from one account count once. Author approvals, old heads,
-dismissed reviews, outstanding change requests and ambiguous formal decisions
-do not satisfy admission. Reviewers still inspect source and outstanding findings
+For standalone reservations, GitHub determines which **two distinct account**
+approvals remain valid, including dismissal after new reviewable changes.
+An unchanged-diff rebase may retain approvals; the worker does not assert that
+every retained standalone review has the new commit ID.
+
+Native stacks merge after **two distinct GitHub accounts** have submitted APPROVE
+with the exact current head as commit_id for every unmerged member. Repeated
+approvals from one account count once. Author approvals, old heads, dismissed
+reviews, outstanding change requests and ambiguous formal decisions do not
+satisfy that worker admission. Reviewers still inspect source and outstanding findings
 before approving. Record a blocking FAIL/HOLD as **CHANGES_REQUESTED**: automation
 does not interpret COMMENTED review prose or establish Keeper-session independence.
 Release branches retain manual full-CI admission.

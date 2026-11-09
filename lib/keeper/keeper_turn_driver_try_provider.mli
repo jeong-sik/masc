@@ -594,8 +594,10 @@ val default_context_overflow_shrink_capacity : capacity:int -> int
 (** The two typed refusals that say the request outgrew what carries it. *)
 type size_refusal =
   | Window_exceeded
-      (** The provider's context overflow. It counts everything the model
-          reads. *)
+      (** A context overflow: the provider's, or the one masc reports before
+          sending when its own byte budget is exceeded
+          ([Runtime_model_input_tail_window.budget_error_to_core_error]). It
+          counts everything the model reads. *)
   | Body_refused
       (** The provider's refusal of the request body. It counts the request
           it refused, which leaves out what a lane sent by another request:

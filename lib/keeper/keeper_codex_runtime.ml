@@ -711,10 +711,13 @@ let codex_error_to_core_error = function
     (* The app-server refuses a turn/start whose input text exceeds its own
        character limit with invalid_params (-32602) and typed data
        (input_error_code = "input_too_large"), before any tool runs
-       (turn_processor.rs, input_too_large_error). Lower it to the typed size
-       refusal so the shrink ladder narrows the carried front and retries on
-       the same candidate; [InputCapacity] would rotate to a candidate that
-       refuses the same input. The status is the canonical payload-too-large
+       (turn_processor.rs, input_too_large_error). It counts that input
+       alone, not what thread/start or thread/inject_items sent. Lowered to
+       the typed size refusal, it is retried on the same candidate;
+       [InputCapacity] would rotate to a candidate that refuses the same
+       input. The retry starts a fresh thread, whose turn input is not a
+       refused Resume's; narrowing the carried range changes neither input
+       (#50255). The status is the canonical payload-too-large
        signal this type names; the app-server's own code is a generic
        invalid-params, and the size fact is the typed data the parser already
        witnessed. *)
@@ -2116,12 +2119,15 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
         (Result.is_ok (Keeper_recovery_transmission.require_reader tools))
   in
   (* The carrier step answers a window overflow before memory and history
-     do. [input_too_large] counts only the turn/start input, the current-turn
-     context and the goal (codex-rs turn_processor.rs, turn_start_inner). The
-     carrier goes in by thread/inject_items, which nothing counts that way,
-     so its address form cannot shorten what was refused; it would only take
-     the receipts out of the model's sight. That refusal goes to memory
-     alone. *)
+     do. [input_too_large] counts only the turn/start input (codex-rs
+     turn_processor.rs, turn_start_inner): the current-turn context and the
+     goal on a Start, and on a Resume also the context blocks the thread does
+     not hold yet ([Host.resume_prompt]). The carrier goes in by
+     thread/inject_items on both, which nothing counts that way, so its
+     address form cannot shorten what was refused; it would only take the
+     receipts out of the model's sight. That refusal goes to memory alone,
+     as it did before the carrier step existed (#50255 asks what memory and
+     history can shorten there). *)
   let on_memory_capacity_refusal =
     let memory =
       Option.value on_memory_capacity_refusal
@@ -2133,7 +2139,10 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
     fun ~refusal ->
       match Keeper_turn_driver_try_provider.size_refusal refusal with
       | Some Keeper_turn_driver_try_provider.Window_exceeded -> carrier_then_memory ~refusal
-      | Some Keeper_turn_driver_try_provider.Body_refused | None -> memory ~refusal
+      | Some Keeper_turn_driver_try_provider.Body_refused -> memory ~refusal
+      (* Not a size refusal, so nothing here shortens it. The shrink sequence
+         asks this hook only about size refusals ([is_size_refusal]). *)
+      | None -> Ok Keeper_memory_delivery_reprojection.Unchanged
   in
   let result =
     Eio.Switch.run (fun result_scope ->

@@ -2982,13 +2982,15 @@ let default_context_overflow_shrink_capacity ~capacity =
 ;;
 
 (* The refusals that say the request outgrew what carries it. Each is
-   answered by moving the carried front, never by rotating first: a shorter
-   range of the SAME conversation can still answer the same turn.
-   - [Window_exceeded], the provider's context overflow, counts everything
-     the model reads.
+   answered on the same candidate, never by rotating first: another
+   candidate is sent the same input.
+   - [Window_exceeded], a context overflow, counts everything the model
+     reads, so a shorter range of the SAME conversation can still answer the
+     same turn.
    - [Body_refused], the provider's refusal of the request body, counts the
      request it refused. A lane that sends part of its input by another
-     request leaves that part out ([Keeper_codex_runtime]).
+     request leaves that part out; when the range is that part, a shorter
+     range does not answer it ([Keeper_codex_runtime], #50255).
    Enumerated so a new variant forces a decision here instead of a silent
    [None]. *)
 type size_refusal =

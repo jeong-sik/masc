@@ -4051,6 +4051,7 @@ type fleet_safety = Masc.Fleet_stream.fleet
   fs_active_task_owner_without_fiber_count: int;
   fs_completion_authority_pending_count: int;
   fs_active_task_owner_scan_error_count: int;
+  fs_proactive_interval: Masc.Fleet_stream.Proactive_interval.t;
 }
 
 type planning_goal_history = Tui_decode.planning_goal_history

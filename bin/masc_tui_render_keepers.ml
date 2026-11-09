@@ -1775,6 +1775,10 @@ let render_keeper_list (state : state) =
            - fleet.fs_reaction_capacity_shortfall)
            fleet.fs_target_reaction_capacity
        in
+       (* [select] keeps a prefix, so the last reading is the first a narrow
+          screen drops. The proactive interval goes last: it is a setting the
+          operator chose, the same on every scan, while the counts and the
+          blocker are what changed and what needs an answer. *)
        let readings =
          [ Masc_tui_fleet_summary.Running, running
          ; Masc_tui_fleet_summary.Turn_capacity, turn_capacity
@@ -1782,6 +1786,8 @@ let render_keeper_list (state : state) =
          @ (match Masc_tui_fleet_line.blocker_text fleet with
            | None -> []
            | Some text -> [ Masc_tui_fleet_summary.Blocker, text ])
+         @ [ ( Masc_tui_fleet_summary.Proactive_interval
+             , Masc_tui_fleet_line.proactive_text fleet ) ]
        in
        let separator = "   " in
        let selected =

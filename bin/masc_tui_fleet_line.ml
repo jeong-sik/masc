@@ -20,6 +20,11 @@ let status_is_ok = function
 
 let blocker_text (fleet : F.fleet) = Option.map blocker_phrase fleet.fs_blocker
 
+let proactive_text (fleet : F.fleet) =
+  "proactive every "
+  ^ Masc_tui_message_layout.span_text
+      (Float.of_int (F.Proactive_interval.to_seconds fleet.fs_proactive_interval))
+
 (* The phase snapshot partitions failing Keepers into retrying, configuration
    errors and official-client session recovery, so the classes drawn sum to
    the failing count. The latter two need more than the same turn again. *)

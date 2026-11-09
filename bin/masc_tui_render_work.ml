@@ -189,7 +189,9 @@ let work_tasks_context_lines (state : state) ~cols =
        | Goal_links_not_read | Goal_links_read _ -> None) ]
     |> List.filter_map Fun.id in
   [ work_hub_navigation state ~cols
-  ; " " ^ (if warning then Theme.warn () else Theme.recede ()) ^ scope ^ Ansi.reset ]
+  ; " " ^ (if warning then Theme.warn () else Theme.recede ()) ^ scope ^ Ansi.reset
+    ^ Theme.recede ()
+    ^ text " · 정렬: 검증 대기 먼저" " · Sort: awaiting review first" ^ Ansi.reset ]
   @ Option.to_list (local_source_pending_note state Local_work)
   @ (if reasons = [] then [] else
        [" " ^ Theme.warn () ^ text "조회 범위: " "Coverage: " ^ String.concat " · " reasons ^ Ansi.reset])
@@ -429,7 +431,7 @@ let render_work_tasks (state : state) =
             text "선택한 Task" "Selected Task",
             [text "j/k로 Task를 고른 뒤 Enter로 읽기" "Choose a Task with j/k, then Enter to read"] in
       List.iter c.push (work_panel_lines geometry
-        ~list_title:(text "검증 대기 → 진행 → 담당 → 할 일" "Awaiting review → active → claimed → todo")
+        ~list_title:(text "열린 작업" "Open tasks")
         ~list_lines ~preview_title ~preview_lines))
 
 (* The lifecycle as a rail, not a single word. The phase says where the goal

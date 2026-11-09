@@ -277,10 +277,10 @@ let detail_lines (row : row) =
             | None -> []
             | Some detail -> [L.fact ~tone:L.Failure "Admission" detail])
      | Exact_state (Unconfigured detail | Registry_unavailable detail) -> [L.note ~tone:L.Attention detail]
-     | Browser_clients _ -> [L.note ~tone:L.Quiet browser_switch_line]
+     | Browser_clients _ -> [L.note browser_switch_line]
      | Machine_state _ ->
          [L.note ~tone:L.Quiet "Off refuses new execution and input; existing machine state and checkpoints are retained.";
-          L.note ~tone:L.Quiet "Select this machine in All Lanes and press Space for activity settings."]
+          L.note "Select this machine in All Lanes and press Space for activity settings."]
      | Package_state {declaration;instances} ->
          (match declaration with
           | None -> []

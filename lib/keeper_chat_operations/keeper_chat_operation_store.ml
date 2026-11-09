@@ -1217,7 +1217,8 @@ let inspect_store_with ~scope ~path =
          | _ -> Error (Integrity_error "operation journal exists without its database")
          | exception Unix.Unix_error (Unix.ENOENT, _, _) -> absent_companions rest
          | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error)))
-    in absent_companions [ "-journal"; "-wal"; "-shm" ]
+    in absent_companions
+      [ Common.sqlite_journal_suffix; Common.sqlite_wal_suffix; Common.sqlite_shm_suffix ]
   | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error))
 ;;
 

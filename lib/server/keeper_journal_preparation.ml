@@ -112,7 +112,7 @@ let no_companions path =
       (match Unix.lstat companion with
        | _ -> error (Companion_present companion)
        | exception Unix.Unix_error (Unix.ENOENT,_,_) -> check rest) in
-  check ["-journal";"-wal";"-shm"]
+  check [Common.sqlite_journal_suffix; Common.sqlite_wal_suffix; Common.sqlite_shm_suffix]
 
 let assess ~base_path ~keeper_name = blocking (fun () -> boundary base_path (fun () ->
   if not (Keeper_config.validate_name keeper_name) then error (Invalid_keeper keeper_name) else

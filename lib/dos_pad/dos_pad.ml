@@ -72,7 +72,7 @@ let parse contents =
   | Ok ((Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _ | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _ | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _ | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _) as other) -> Error (Printf.sprintf "a layout is a table of buttons, got %s" (kind_name other))
 
 let pads_dir ~base_path =
-  Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) "dos") "pads"
+  Filename.concat (Filename.concat (Common.masc_dir_from_base_path ~base_path) Common.dos_dirname) "pads"
 
 (* Builtin layouts are data assets, not cases in the pad implementation. A
    game package can ship [config/pads/<inventory-name>.toml] and the generic

@@ -7269,6 +7269,7 @@
 
 (include stanzas/test_authz_boot_mode.inc)
 (include stanzas/test_authz_boot_mode_read.inc)
+(include stanzas/test_runtime_account_access.inc)
 (include stanzas/test_authz_state.inc)
 (include stanzas/test_authz_zone.inc)
 

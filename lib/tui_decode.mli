@@ -116,6 +116,26 @@ type goal_retry_binding = {
     Verifying until [request_complete] retries it or a later scan settles it,
     or the operator takes it back or drops it. *)
 
+type goal_criterion_review_state =
+  | Criterion_pending
+  | Criterion_execution_pending
+  | Criterion_execution_unknown
+  | Criterion_judgment_pending
+  | Criterion_deferred
+  | Criterion_viable of string
+  | Criterion_needs_revision of string
+  | Criterion_superseded
+
+type goal_criterion_review =
+  | Criterion_unchecked
+  | Criterion_unavailable of string
+  | Criterion_observed of {
+      state : goal_criterion_review_state;
+      criterion_revision : string;
+      request_id : string;
+      detail : string option;
+    }
+
 type planning_goal = {
   pg_id : string;
   pg_criterion_revision : string option;
@@ -126,6 +146,7 @@ type planning_goal = {
   pg_metric : string option;
   pg_target_value : string option;
   pg_proof : goal_proof;
+  pg_criterion_review : goal_criterion_review;
   pg_retry_binding : goal_retry_binding option;
   pg_verifier_unreconciled : verifier_unreconciled option;
   pg_last_review_note : string option;

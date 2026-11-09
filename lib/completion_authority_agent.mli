@@ -11,6 +11,10 @@ val start :
   config:Workspace_utils_backend_setup.config ->
   unit
 
+(** Share the existing completion-review resource slots with another
+    application-owned reviewer. Cancellation while queued owns no slot. *)
+val with_review_slot : (unit -> 'a) -> 'a
+
 module For_testing : sig
   val unless_original_publication :
     store:Verifier_review_owner.store -> verification_id:string -> task_id:string ->

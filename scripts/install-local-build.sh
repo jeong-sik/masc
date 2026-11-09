@@ -5,9 +5,11 @@
 # (#39224).
 #
 # Before anything is replaced, the new build judges the runtime.toml of the
-# workspace its server runs on (#39311) and reads every durable store there,
-# as the deploy preflight does (#43483). A refusal leaves every binary and
-# process as it was. An install that cannot run the check stops the same way,
+# workspace its server runs on (#39311). Stored-state audits are separate:
+# run the candidate helper's validate-stores command when inspecting a storage
+# format change or investigating a runtime refusal. A runtime.toml refusal
+# leaves every binary and process as it was. An install that cannot run the
+# configuration check stops the same way,
 # with exit status 2: no workspace found, no helper in --build-dir, or a helper
 # that predates the check. A workspace that does not exist yet has no
 # runtime.toml to judge (the server creates it on its first start), so the
@@ -274,18 +276,6 @@ PY
           "$repo/scripts/check-runtime-deployment-preflight.sh" \
           --base-path "$workspace_root" \
           --runtime-config-only
-        # Boot reads only the stores it refuses on; a Preflight_only store is
-        # read before a start by the deploy preflight alone (RFC
-        # every-durable-store-has-one-boot-policy). This install read
-        # runtime.toml alone, so the Memory admission queues #42020 hard-cut
-        # stayed unreadable from 2026-10-10 to 10-17 while every server ran
-        # (#43483). The scan uses this build's decoders; Memory publication
-        # recovery remains the running owner's responsibility.
-        echo "install-local-build: checking stored state of $workspace_root"
-        if ! "$preflight_helper" validate-stores --base-path "$workspace_root"; then
-          echo "install-local-build: this build could not confirm compatibility with the stored state listed above; nothing installed. Stop every writer on $workspace_root, delete what each refused store's Fresh state required entry (CHANGELOG.md, or changelog.d/ before a release) or fresh state line above names, and run this install again before starting the server. See docs/guides/DURABLE-STORE-HARD-CUT.md." >&2
-          exit 1
-        fi
       else
         echo "install-local-build: runtime.toml not checked: workspace $workspace_root (from $workspace_source) does not exist yet"
       fi

@@ -267,7 +267,7 @@ let trace_step_of_run_step ~executions = function
       }
 ;;
 
-let reading_of_records ~keeper_name (run_ref : Turn_record.raw_trace_run_ref) = function
+let reading_of_records ~include_trace ~keeper_name (run_ref : Turn_record.raw_trace_run_ref) = function
   | [] ->
     Log.Keeper.warn ~keeper_name
       "autonomous turn source: exact run %s has no records"
@@ -294,6 +294,7 @@ let reading_of_records ~keeper_name (run_ref : Turn_record.raw_trace_run_ref) = 
          |> Option.map (fun (row : Agent_core.Raw_trace.record) -> row.final_text)
          |> Option.join
        in
+       let steps = if not include_trace then [] else
        let records_by_seq = List.fold_left
          (fun index (row : Agent_core.Raw_trace.record) ->
            Sequence_map.update row.seq (function None -> Some [ row ] | Some rows -> Some (row :: rows)) index)
@@ -318,7 +319,6 @@ let reading_of_records ~keeper_name (run_ref : Turn_record.raw_trace_run_ref) = 
              , (Some _ | None) ) -> index)
          Invocation_map.empty records
        in
-       let steps =
          (Agent_core.Trajectory.of_raw_trace_records records).steps
          |> List.filter_map
               (run_step_of_trajectory ~records:records_by_seq ~raw_occurrences)
@@ -404,7 +404,7 @@ let run_key (run_ref : Turn_record.raw_trace_run_ref) =
     ]
 ;;
 
-let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
+let turn_of_record ~include_trace ~config ~keeper_name ~execution_rows ~previous ~used
     (record : Turn_record.t) =
   let open Result.Syntax in
   match record.turn_kind, record.raw_trace_run_ref with
@@ -500,7 +500,7 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
                    (Agent_core.Error.to_string err);
                  Error (Agent_core.Error.to_string err)
                | Ok records ->
-                 let reading = reading_of_records ~keeper_name run_ref records in
+                 let reading = reading_of_records ~include_trace ~keeper_name run_ref records in
                  (* Remembered only when the file statted before the read is
                     the one still there after it: a rewrite in between would
                     pair the new identity with the old records. *)
@@ -518,7 +518,8 @@ let turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used
               { turn_id = Ids.Turn_ref.to_string record.turn_ref
               ; started_at = run_started_at
               ; final_text = run_final_text
-              ; trace = List.map (trace_step_of_run_step ~executions) steps
+              ; trace = if include_trace then
+                  List.map (trace_step_of_run_step ~executions) steps else []
               })
           | Some (Run_has_no_records | Run_identity_mismatch _) | None -> Ok None)
 ;;
@@ -563,7 +564,7 @@ let project_records ~config ~keeper_name ?since records =
     let used = Hashtbl.create (List.length records) in
     let turns_rev, unavailable =
       List.fold_left (fun (turns, unavailable) record ->
-        match turn_of_record ~config ~keeper_name ~execution_rows ~previous ~used record with
+        match turn_of_record ~include_trace:true ~config ~keeper_name ~execution_rows ~previous ~used record with
         | Ok (Some turn) -> turn :: turns, unavailable
         | Ok None -> turns, unavailable
         | Error detail ->
@@ -635,6 +636,26 @@ let project_snapshot_result ~config ~keeper_name snapshot =
   match projection.unavailable with
   | None -> Ok projection.turns
   | Some detail -> Error detail
+;;
+
+let project_latest_reply_result ~config ~keeper_name snapshot =
+  if not (String.equal snapshot.keeper_name keeper_name
+          && String.equal snapshot.source_root (Dated_jsonl.base_dir (read_store config keeper_name)))
+  then Error "TurnRecord snapshot belongs to another Keeper store"
+  else
+    match List.rev snapshot.records with
+    | [] -> Ok None
+    | record :: _ ->
+      let dir = Keeper_types_support.keeper_raw_trace_dir config keeper_name in
+      let previous = with_run_tables (fun () -> Hashtbl.find_opt run_readings dir) in
+      let used = Hashtbl.create 1 in
+      (* This one-record read must not evict the aggregate's retained run set. *)
+      Result.map (function
+        | Some turn when Option.exists (fun text -> String.trim text <> "") turn.final_text ->
+          Some {turn with trace=[]}
+        | Some _ | None -> None)
+        (turn_of_record ~include_trace:false ~config ~keeper_name ~execution_rows:Execution_map.empty
+           ~previous ~used record)
 ;;
 
 let load_recent ~config ~keeper_name ?(limit = default_limit) ?since () =

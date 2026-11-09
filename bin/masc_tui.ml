@@ -9009,6 +9009,7 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
             let detail = Printexc.to_string exn in
             Error (match source with
               | Keeper_history_read.History -> detail
+              | Keeper_history_read.Initial_reply -> "initial reply: " ^ detail
               | Keeper_history_read.Memory -> "memory journal: " ^ detail)
       in
       publish source result
@@ -9032,6 +9033,7 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
     let not_run detail =
       publish Keeper_history_read.History (Error detail);
       publish Keeper_history_read.Memory (Error detail);
+      publish Keeper_history_read.Initial_reply (Error detail);
       Keeper_history_read.publish_page request ~ready_at_ns:(Mtime_clock.elapsed_ns ())
         (Error (Keeper_chat_history.Page_read_failed detail)) in
     (match Eio_context.get_switch_opt () with
@@ -9041,7 +9043,10 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
               Eio.Fiber.all
                 ([ (fun () -> read Keeper_history_read.History Masc_tui_http.fetch_keeper_chat_history)
                  ; (fun () -> read Keeper_history_read.Memory Masc_tui_http.fetch_keeper_memory_journal) ]
-                 @ if first_page then [read_page] else []))
+                 @ if first_page then
+                     [read_page; (fun () -> read Keeper_history_read.Initial_reply
+                         Masc_tui_http.fetch_keeper_chat_initial_reply)]
+                   else []))
           with
           | Eio.Cancel.Cancelled _ as exn -> raise exn
           | exn -> not_run (Printexc.to_string exn))
@@ -27794,14 +27799,12 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                      keeper_name assessment characters (String.length row.text)
                      (Masc_tui_clipboard.copy_outcome_text outcome) unreadable)))
   | Keeper_msg (Keeper_chat_history_loaded (request, source, result)) ->
-      (* The current refresh owns both slots until each has been admitted.
+      (* The current refresh owns its slots until each has been admitted.
          A collected old result cannot settle a replacement request. *)
       let owned = match state.msg_history_inflight with
         | Some current when current == request -> Keeper_history_read.settle request source
         | Some _ | None -> false in
       if owned then begin
-        if not (Keeper_history_read.pending request) then
-          state.msg_history_inflight <- None;
         let generation = Keeper_history_read.generation request in
         let keeper_name = Keeper_history_read.keeper request in
         if generation = state.msg_history_load_generation
@@ -27816,6 +27819,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              let journal_targets = ref [] in
              let history_entries = match result with
               | Ok { Keeper_chat_history.rows; dropped } ->
+                 Keeper_history_read.retire_initial_reply request;
                  state.msg_loaded_error <- None;
                  state.msg_loaded_dropped <- dropped;
                  (* The turns this page names that the session does not hold as
@@ -27866,6 +27870,17 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
              launch_keeper_chat_journal_loads state ~mailbox ~keeper_name !journal_targets;
              launch_current_autonomous_journals state ~mailbox ~keeper_name;
              launch_unavailable_journal_operations state ~mailbox ~keeper_name
+           | Keeper_history_read.Initial_reply ->
+             (match result with
+              | Ok { Keeper_chat_history.rows; dropped=_ } ->
+                let initial = msg_entries_of_history_rows state keeper_name rows in
+                let history = prepend_older_history_page ~older:initial ~held:prior_history in
+                (* This is only a partial reply. The full source and physical
+                   page retain their own pending/error/cursor authority. *)
+                if initial <> [] then
+                  set_keeper_chat_sources state {prior_sources with kcs_history=Some history}
+              | Error detail ->
+                Log.Transport.debug "keeper initial reply unavailable for %s: %s" keeper_name detail)
            | Keeper_history_read.Memory ->
              let memory_entries = match result with
                | Ok { Keeper_chat_history.rows; dropped } ->
@@ -27888,7 +27903,13 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                    Masc_tui_owed_read.failed ~retry_s:stream_reconnect_s
                      ~max_retry_s:keeper_execute_stream_max_reconnect_s
                      ~now:(monotonic_now_s ()))
-        end
+        end;
+        (* Full-history admission can retire the optional slot above. Check
+           after admission so an unneeded late reply cannot strand this read. *)
+        if not (Keeper_history_read.pending request) then
+          match state.msg_history_inflight with
+          | Some current when current == request -> state.msg_history_inflight <- None
+          | Some _ | None -> ()
       end
   | Keeper_msg (Keeper_chat_first_page_loaded (request, result)) ->
       let owned = match state.msg_history_inflight with

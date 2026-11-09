@@ -38,6 +38,15 @@ val project_snapshot_result :
     evidence remains absent. Actual trace inspection/read/parse failures, store
     reads and invalid TurnRecords cannot become an empty successful history. *)
 
+val project_latest_reply_result :
+  config:Workspace.config -> keeper_name:string -> snapshot ->
+  (turn option, string) result
+(** Read only the newest selected committed record's exact autonomous reply.
+    Direct turns and absent final replies return [None]. The returned [trace]
+    is empty: this partial observation makes no execution-link or complete
+    history claim and never reads the canonical tool ledger. It can reuse the
+    full reader's run observations without replacing that reader's cache. *)
+
 val load_recent :
   config:Workspace.config ->
   keeper_name:string ->

@@ -788,6 +788,71 @@ let test_snapshot_revalidation_keeps_storage_errors () =
       | Ok _ -> Alcotest.fail "previous snapshot hid a current symbolic-link store")
 ;;
 
+let test_initial_reply_reads_only_latest_exact_run_without_tool_ledger () =
+  with_workspace @@ fun config ->
+  let old_path = trace_path config "initial-old" in
+  let latest_path = trace_path config "initial-latest" in
+  let oc = open_out old_path in
+  output_string oc "not JSON\n"; close_out oc;
+  write_turn_record config ~absolute_turn:600 ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:(Some (run_ref ~path:old_path ~worker_run_id:"old" ~start_seq:1));
+  write_lines latest_path (run_lines ~worker_run_id:"initial-latest" ~start_seq:1
+    ~base_ts:3000. ~prompt:"wake" ~final_text:"latest committed reply");
+  write_turn_record ~execution_ids:[Ids.Execution_id.of_string "initial-execution"]
+    config ~absolute_turn:601 ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:(Some (run_ref ~path:latest_path ~worker_run_id:"initial-latest" ~start_seq:1));
+  (* A tool-ledger read would fail: the store root is a regular file. *)
+  let ledger_root = Dated_jsonl.Store.dir
+      (Dated_jsonl.Store.at (Workspace.dated_store_root config) Tool_calls) in
+  write_lines ledger_root [];
+  let read () = Server_dashboard_http_keeper_chat_history.keeper_chat_initial_reply_json
+      config keeper_name in
+  (match read () with
+   | Ok (`List [`Assoc fields]) ->
+     Alcotest.(check (option string)) "exact newest committed reply" (Some "latest committed reply")
+       (Json_util.get_string (`Assoc fields) "content");
+     Alcotest.(check (option string)) "identity survives partial/full merge"
+       (Some "autonomous:trace-test-0000#601") (Json_util.get_string (`Assoc fields) "id");
+     Alcotest.(check bool) "no unverified execution blocks" false (List.mem_assoc "blocks" fields)
+   | Ok _ -> Alcotest.fail "latest reply was not one canonical row"
+   | Error error -> Alcotest.fail (Server_keeper_chat_history_read.error_to_string error));
+  write_turn_record config ~absolute_turn:602 ~turn_kind:Turn_record.Direct
+    ~raw_trace_run_ref:None;
+  (match read () with
+   | Ok (`List []) -> ()
+   | Ok _ -> Alcotest.fail "a newer direct turn reused an older autonomous reply"
+   | Error error -> Alcotest.fail (Server_keeper_chat_history_read.error_to_string error));
+  let store = Dated_jsonl.open_store
+      (Dated_jsonl.Store.keeper (Workspace.dated_store_root config)
+         ~keeper:keeper_name Dated_jsonl.Store.Keeper.Turn_records) in
+  Dated_jsonl.append store (`Assoc ["invalid_turn_record", `Bool true]);
+  match read () with
+  | Error (Server_keeper_chat_history_read.History_unavailable _) -> ()
+  | Error Server_keeper_chat_history_read.Unknown_keeper | Ok _ ->
+    Alcotest.fail "invalid newest TurnRecord became an empty successful partial read"
+;;
+
+let test_initial_reply_preserves_owner_and_trace_read_failures () =
+  with_workspace @@ fun config ->
+  let module Source = Keeper_autonomous_turn_source in
+  let path = trace_path config "initial-failure" in
+  write_lines path (run_lines ~worker_run_id:"initial-failure" ~start_seq:1
+    ~base_ts:4000. ~prompt:"wake" ~final_text:"same exact run");
+  write_turn_record config ~absolute_turn:610 ~turn_kind:Turn_record.Autonomous
+    ~raw_trace_run_ref:(Some (run_ref ~path ~worker_run_id:"initial-failure" ~start_seq:1));
+  let snapshot = Source.read_snapshot_result ~config ~keeper_name ~limit:1 () |> require_snapshot in
+  (match Source.project_latest_reply_result ~config ~keeper_name:"foreign" snapshot with
+   | Error _ -> () | Ok _ -> Alcotest.fail "foreign Keeper accepted snapshot");
+  let foreign_config = Workspace.default_config (Filename.concat config.base_path "another-workspace") in
+  (match Source.project_latest_reply_result ~config:foreign_config ~keeper_name snapshot with
+   | Error _ -> () | Ok _ -> Alcotest.fail "foreign workspace accepted snapshot");
+  let oc = open_out path in output_string oc "not JSON\n"; close_out oc;
+  match Server_dashboard_http_keeper_chat_history.keeper_chat_initial_reply_json config keeper_name with
+  | Error (Server_keeper_chat_history_read.History_unavailable _) -> ()
+  | Error Server_keeper_chat_history_read.Unknown_keeper | Ok _ ->
+    Alcotest.fail "unreadable latest exact run became successful partial history"
+;;
+
 let () =
   Alcotest.run "keeper_autonomous_turn_source"
     [ ( "load_recent"
@@ -829,6 +894,10 @@ let () =
     ; ( "dashboard_history"
       , [ Alcotest.test_case "autonomous rows carry a schema-required id" `Quick
             test_dashboard_history_autonomous_rows_carry_id
+        ; Alcotest.test_case "initial reply reads one exact run without tool ledger" `Quick
+            test_initial_reply_reads_only_latest_exact_run_without_tool_ledger
+        ; Alcotest.test_case "initial reply preserves owner and trace failures" `Quick
+            test_initial_reply_preserves_owner_and_trace_read_failures
         ; Alcotest.test_case "transcript rows keep stream_contract" `Quick
             test_transcript_rows_keep_stream_contract
         ; Alcotest.test_case "failed exact run never caches empty history" `Quick

@@ -39,7 +39,7 @@ let directory_stamp path =
     else Error (History_unavailable
         (Printf.sprintf "%s(%s): %s" operation argument (Unix.error_message cause)))
 
-let inspect ~previous ~config ~keeper_name =
+let inspect ~limit ~previous ~config ~keeper_name =
   let open Result.Syntax in
   let physical path = Physical.inspect_source ~path
       |> Result.map_error (fun error -> History_unavailable (Physical.error_to_string error)) in
@@ -51,7 +51,7 @@ let inspect ~previous ~config ~keeper_name =
   let meta_path = Filename.concat (Workspace.keepers_runtime_dir config)
       (Keeper_runtime_root_entry.keeper_basename ~keeper_name Keeper_runtime_root_entry.Metadata) in
   let meta = metadata_evidence ~config meta_path in
-  let* autonomous = Autonomous.read_snapshot_result ~config ~keeper_name ?previous ()
+  let* autonomous = Autonomous.read_snapshot_result ~config ~keeper_name ?previous ?limit ()
       |> Result.map_error (fun detail -> History_unavailable detail) in
   let retained_elsewhere =
     Keeper_registry.is_registered ~base_path:config.Workspace.base_path keeper_name
@@ -88,8 +88,16 @@ let read_source_json ~config ~keeper_name ~render source =
 let read_json ~config ~keeper_name ~render =
   Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
     let open Result.Syntax in
-    let* source = inspect ~previous:None ~config ~keeper_name in
+    let* source = inspect ~limit:None ~previous:None ~config ~keeper_name in
     read_source_json ~config ~keeper_name ~render source)
+
+let initial_reply_json ~config ~keeper_name ~render =
+  Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
+    let open Result.Syntax in
+    let* source = inspect ~limit:(Some 1) ~previous:None ~config ~keeper_name in
+    let* turn = Autonomous.project_latest_reply_result ~config ~keeper_name source.autonomous
+      |> Result.map_error (fun detail -> History_unavailable detail) in
+    Ok (render turn))
 
 (* Dashboard_cache publishes JSON values and uses exceptions to reject a
    failed compute. This local adapter keeps read failures out of that JSON
@@ -106,12 +114,12 @@ let cached_json ~config ~keeper_name ~ttl ~render =
      make the already-read body an unreadable or empty successful transcript. *)
   let retire_if_changed ~previous fingerprint =
     match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-      inspect ~previous:(Some previous) ~config ~keeper_name) with
+      inspect ~limit:None ~previous:(Some previous) ~config ~keeper_name) with
     | Ok after when String.equal fingerprint after.fingerprint -> ()
     | Ok _ | Error (Unknown_keeper | History_unavailable _) -> Dashboard_cache.invalidate key
   in
   match Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
-    inspect ~previous:None ~config ~keeper_name) with
+    inspect ~limit:None ~previous:None ~config ~keeper_name) with
   | Error error -> refuse error
   | Ok source ->
     (match Dashboard_cache.peek key with

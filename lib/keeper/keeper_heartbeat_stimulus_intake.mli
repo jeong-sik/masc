@@ -234,7 +234,12 @@ val reconcile_spent_selection
     Scheduled requests without result delivery share the unrouted general batch;
     they cannot remove another source's captured reply route. Requests
     with result delivery share a batch only with scheduled requests for the same
-    exact reply route, preserving thread and reply-message coordinates. Every
+    exact reply route, preserving thread and reply-message coordinates. Because
+    batch scope narrows monotonically as queue entries are scanned in arrival
+    order, batch composition is deterministic and order-dependent rather than
+    associative across arbitrary permutations. When general sources join a
+    routed connector batch, the batch's reply route is the first routed
+    conversation admitted into that batch. Every
     exact occurrence remains continuation input until the turn completes or it
     is withdrawn; batching does not retire a request based on its message text.
     [source_batch] carries all exact admitted selections. Payloads and counts

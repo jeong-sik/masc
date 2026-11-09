@@ -104,7 +104,6 @@ let rejection_outcome dispatch = function
 ;;
 
 let operation_id_to_string (Measurement_operation_id value) = value
-let receipt_request_body_sha256 (receipt : receipt_snapshot) = receipt.request_body_sha256
 
 let snapshot_of_state (receipt : measurement_receipt) = function
   | Fence_committed ->
@@ -140,9 +139,6 @@ let snapshot_of_state (receipt : measurement_receipt) = function
 let receipt_snapshot (receipt : measurement_receipt) =
   snapshot_of_state receipt (Atomic.get receipt.state)
 ;;
-
-let receipt_phase (receipt : receipt_snapshot) = receipt.phase
-let receipt_outcome (receipt : receipt_snapshot) = receipt.outcome
 
 let state_rank = function
   | Fence_committed -> 0

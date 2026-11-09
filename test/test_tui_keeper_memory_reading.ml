@@ -117,9 +117,7 @@ let test_lag_rules () =
 
 let test_row_carries_the_servers_age_ladder () =
   let lib = make_librarian ~unread_atom_turns:0 ~unread_official_turns:0 () in
-  let bins : Masc.Keeper_memory_age_bins.t =
-    { under_hour = 1; under_day = 2; under_week = 3; older = 4 }
-  in
+  let bins = Masc.Keeper_memory_age_bins.of_first_seen ~now:7200.0 [ 0.0; 3600.0; 7200.0 ] in
   let snap =
     make_snapshot
       [ make_keeper_health ~keeper_id:"alpha" ~age_bins:bins lib
@@ -231,8 +229,7 @@ let check_field name expected actual =
   Alcotest.(check string) name (field_label expected) (field_label actual);
   Alcotest.(check bool) (name ^ ": same value") true (expected = actual)
 
-let bins : Masc.Keeper_memory_age_bins.t =
-  { under_hour = 1; under_day = 2; under_week = 3; older = 4 }
+let bins = Masc.Keeper_memory_age_bins.of_first_seen ~now:7200.0 [ 0.0; 3600.0; 7200.0 ]
 
 let reading_of keepers ?(refusals = []) keeper_name =
   Reading.find

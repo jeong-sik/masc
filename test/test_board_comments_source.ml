@@ -469,8 +469,13 @@ let test_incomplete_queries_preserve_hidden_target_boundary base_path =
     Out_channel.with_open_bin posts_path (fun output -> output_string output posts_bytes);
     Alcotest.(check bool) "posts reload reports corruption" true
       (Result.is_error (Rows.load_persisted_posts restarted));
-    List.iter (fun id -> Alcotest.(check bool) "unavailable posts source treats every ID alike" true
-      (detail_status ~reader id = `Service_unavailable)) [post_id; absent_post])
+    List.iter (fun id ->
+      Alcotest.(check bool) "unavailable posts source treats every HTTP ID alike" true
+        (detail_status ~reader id = `Service_unavailable);
+      let result = query_thread ~reader id in
+      check_runtime_failure "MCP source failure cannot become a permanent lookup miss" result;
+      no_private_fragment "MCP posts-source failure retains public redaction" (Tool_result.message result))
+      [post_id; absent_post])
 
 let () = Alcotest.run "board comments source"
   ["persistence",

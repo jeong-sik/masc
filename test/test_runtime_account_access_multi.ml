@@ -335,6 +335,20 @@ let test_multi_account () =
         muse_refused "an operator call on her Muse home" Access.Operator_call (muse alice) (function
           | Access.No_operator -> true
           | _ -> false);
+        (* A host client starts on an account of the host, which a
+           multi-account process shares with no person (plan D3b). *)
+        List.iter
+          (fun client ->
+            match client, Access.authorize_host client with
+            | (Access.Antigravity | Access.Vibe), Ok (_ : Access.host_account) ->
+              Alcotest.fail "a host client was allowed"
+            | Access.Antigravity, Error (Access.Host_account Access.Antigravity)
+            | Access.Vibe, Error (Access.Host_account Access.Vibe) -> ()
+            | (Access.Antigravity | Access.Vibe), Error refusal ->
+              Alcotest.failf
+                "a host client was refused for another reason: %s"
+                (Access.refusal_to_string refusal))
+          [ Access.Antigravity; Access.Vibe ];
         match
           Access.publish
             (Access.Multi_account { zone; base_path; now = (fun () -> 0.) })

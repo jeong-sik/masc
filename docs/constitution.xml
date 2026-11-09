@@ -132,9 +132,9 @@
       <rule>Board 는 post / comment / reaction / vote 로 이루어진 공개 대화면이다.</rule>
       <rule>sub_board 로 주제를 나눈다. slug 는 URL 안전한 소문자다.</rule>
 
-      <visibility note="시맨틱은 타입이 강제하지 않고 docstring 선언이다. enforced by callers.">
+      <visibility note="Direct 읽기는 Board_access.reader 로 검사한다. 다른 범위는 기존 caller 정책을 따른다. 인증 없는 비엄격 로컬 호출은 Operator다.">
         Public (federation 노출) | Unlisted (피드 제외, 접근 가능)
-        | Internal (이 MASC 인스턴스만) | Direct (멘션된 에이전트만)</visibility>
+        | Internal (이 MASC 인스턴스만) | Direct (작성자·저장된 수신자·운영자)</visibility>
       <audience>Targets of Agent_id.t list | Broadcast | Thread_participants | Discoverable</audience>
       <post_kind>Human_post | Automation_post | System_post</post_kind>
       <sub_board_access>Open | Members_only | Owner_only</sub_board_access>

@@ -56,7 +56,7 @@ PTY ECHO가 꺼져 있는지도 확인했다. 누락·미완료·오류를 버�
 
 일반 조건은 typing 간격 50ms와 scroll 간격 20ms를 요청했다. 실제 run별 평균
 간격의 중앙값은 각각 54.12ms, 24.08ms였다. 빠른 조건은 25ms/5ms를 요청했고
-실제 중앙값은 28.59ms/6.20ms였다. 호스트 1분 load는 일반 조건 68.6–259.7,
+실제 중앙값은 28.59ms/6.20ms였다. 실행 전후 호스트 1분 load는 일반 조건 66.6–259.7,
 빠른 조건 48.5–303.4로 변했다. 조용한 호스트에서의 결과가 아니다.
 
 아래 pooled p95는 `(n-1)*.95` 위치의 내림 정렬값이다. 유의성이나 전체 사용자
@@ -118,6 +118,72 @@ A/B는 별도 repository flow에서 07:42:00/07:42:02 UTC에 병합됐다. 이 �
 Ready 전환하거나 병합한 것은 아니다. 병합 커밋은 각각 a3f324e3dc960658402b62a03e017fd13c3f1621,
 cda4dd1302da3a466c83a18cd18bec85627e6d74다. 설치·실행 검증은 별도 기록한다.
 
+## 보정한 최종 소스의 추가 50회
+
+소스 ff1cc7700b081c6ce7f1abebea42ef352d518ed5의 새 macOS arm64 바이너리
+SHA-256은 1181f65f190aa4894aa6d1067448159cdd3acd4b06bf6eaf4af1223a078e4bd6다.
+**Minimal manual checks 42585592312**, 실행 ref main/workflow head
+e26416eace6d3f1bc7f47e751b6f27041e1d225e는 **completed/success**였고, 영수증은
+source ff1과 바이너리를 별도로 결속한다. TUI·keydoc와 세 ownership suite 범위다.
+이후 c379de5e39ef11a2f26a2b0bb8cd89f187fe47d9까지 추가된 파일은 증거 문서와
+changelog뿐이다. [비교 기록](followup/source-equivalence-ff1-c379.json)은 모든
+non-documentation Git file entry가 native source와 동일함을 보인다. 바이너리의
+build-commit은 문서 head가 아니라 ff1이다.
+
+원본과 같은 800개 history·32자 입력·25ms/5ms 요청 간격을 유지하고, 선행
+PageUp write를 PageDown에서 200회, WheelDown에서 50회로 늘렸다. 새 helper
+SHA-256은 6f4332edf51fad53d73ebbcb1908f1bcb07b322a952583b413c2a5749a6b1428이다.
+각 조건 5쌍, 총 50개 process-run을 모두 보존했으며 1,600개 문자 prefix와
+50개 nonce가 빠짐없이 관측됐다. source·history·probe hash, 실제 send 간격,
+누락과 오류를 다시 확인했다. 이전 100회와 합쳐 하나의 pooled 수치로 만들지 않는다.
+
+| 보정한 빠른 조건 | pooled p95 before→after (ms) | 개선된 쌍/5 | paired p95 delta 중앙값 (ms) |
+| --- | --- | --- | --- |
+| 입력만 | 13.58→6.20 | 3 | -4.81 |
+| PageUp | 61.49→47.04 | 4 | -13.47 |
+| PageDown | 22.73→27.13 | 3 | -4.23 |
+| WheelUp | 39.64→20.93 | 3 | -23.49 |
+| WheelDown | 23.83→13.88 | 3 | -11.49 |
+
+PageDown pooled p95 증가는 그대로 남긴다. 모든 paired 중앙값이 음수여도 전 조건
+개선이나 무회귀가 증명되지는 않는다. child lifecycle CPU는 25/25쌍에서 감소했고
+합계 28.3251→19.4368초(31.4% 감소)였다. 입력만의 CPU가 아니라 process 시작부터
+종료까지다. 1분 load는 162.8–263.9였다. 이 수치도 조사 시작 설치본 eb4에서 최종
+후보 ff1로의 업그레이드 비교이며, C만의 인과 효과를 분리하지 않았다.
+[전체 집계](followup/paired-summary.json)에 각 쌍의 수치가 있다.
+
+실제 timed scroll write 최대치는 153이었다. 151을 전제한 초기 source 리뷰는
+그대로 보존하고 이를 다시 계산했다. 안정된 page 크기 P≤37과 6400개 이상 body
+row에서 PgDown은 최소 min(47P,702)행, PgUp은 최소 332행의 경계 여유가 있다.
+WheelDown의 page-size 조건과 history 적용 여부는 write 수만으로 확정하지 않았다.
+
+추가로 원본 ANSI를 [pyte의 Screen/ByteStream](https://github.com/selectel/pyte/blob/master/docs/tutorial.rst)
+0.8.2, wcwidth 0.9.4로 종료 후 재생했다. 네 방향 40개 run 모두 선행 위치의
+Record 식별자가 있었고, 측정 중 식별자 집합이 바뀌었다. 관측된 범위는 PgUp
+519–781, PgDown 453–718, WheelUp 758–782, WheelDown 712–736으로 양쪽 경계
+0/799에 닿지 않았다. 마지막 scroll write 반환 후 read 시각에 실제 present 종료
+표식도 모든 scroll run에서 관측됐다. read 시각은 emission의 상한이며, 늦게 보낸
+모든 키가 소비됐다는 뜻은 아니다. 정확한 row offset이나 물리 화면 지연도 아니다.
+
+초기 재생기는 종료 cleanup의 wrap-enable 표식까지 frame으로 셌다. 원본 결과와
+재생기를 보존하고, 대응하는 wrap-disable/enable만 세는 v2에서 제외했다.
+[v2 관측](followup/viewport-observations-v2.json)을 현재 근거로 쓰고, v1은 정정
+전 기록이다. 입력 prefix 시각과 원본 latency 집계는 이 정정으로 바꾸지 않았다.
+
+ff1 바이너리의 네 방향 Unicode 요청도 각각 16개 scalar prefix와 POST 본문이
+정확히 일치했다. 합성 peer가 거절한 요청이며 실제 Keeper나 모델을 실행하지 않았다.
+같은 SHA-256 바이너리를 설치 직전 설치본 9d67e41d1c4f43fa7522e41a5f4dbd0fe8f3302a와
+조상 관계를 확인하고 백업한 뒤 실행 파일 하나만 atomic replace했다.
+[설치 영수증](followup/installed-receipt-ff1cc770.json)에 실제 전후 hash와 백업이 있다.
+기존에 실행 중이던 TUI는 재시작하거나 신호를 보내지 않았다.
+
+설치 후 실제 127.0.0.1:8935 서버에서 새 소유 PTY로 채팅 진입과 각 20회
+navigation을 관측했다. 측정 전후 서버 runtime과 base /Users/dancer/me,
+설치 바이너리 hash가 같았고 keeper-message surface가 기록됐다.
+[필드를 추린 관측](followup/installed-smoke-observation.json)은 원본 hash와 생략한
+범위를 표시한다. private chat screen은 저장하지 않았다. 이 확인은 실제 서버의
+진입·탐색 증거이며 causal typing, 물리 터미널 paint, 전체 회귀의 대체가 아니다.
+
 ## 보존과 재현
 
 [observations-original.zip](observations-original.zip)은 원본 result.json,
@@ -141,6 +207,15 @@ python3 scripts/check-evidence-locations.py \
 `--output`은 비어 있는 `artifacts/<new-run>`을 지정한다. 원본 driver의 빠른
 down 조건은 위 경계 문제가 있어 그대로 재현해도 active-scroll 증명이 되지 않는다.
 새로운 positioning과 실제 write 수 감사 결과는 후속 기록으로 분리한다.
+
+보정한 50회와 ff1 Unicode 4회의 raw result·PTY capture·frame timing은
+[followup ZIP](followup/observations-ff1-active.zip)에 별도로 보존한다.
+새 helper·재생기와 독립 감사는 [followup](followup/)에 있으며 원본과 섞거나
+실패한 관측을 제거하지 않았다. [후속 위치 색인](followup/current-locations.json)도
+같은 위치 검사기로 확인한다. 압축 member의 hash는 별도 archive-members.json을
+따른다. absolute path는 캡처 당시 값이며, 다른 환경의 재분석은 별도 경로 연결을
+만들고 원본 order/result를 덮어쓰지 않는다. 공개 bundle에는 이 호스트의 홈 경로가
+포함돼 있다. 검사한 credential 패턴의 부재를 모든 민감정보의 부재로 일반화하지 않는다.
 
 이전 reader가 ANSI 분석으로 PTY drain을 막던 trial, 선행 이동이 부족했던
 PageDown trial, profiler 실행은 비교값에서 제외했다. 실패와 원본은 로컬

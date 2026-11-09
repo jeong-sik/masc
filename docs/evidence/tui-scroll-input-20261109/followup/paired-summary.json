@@ -1,0 +1,2455 @@
+{
+  "scope": "PTY input write to causal draft prefix emission, not physical terminal paint; typing samples within each run are correlated",
+  "expected_runs": 50,
+  "observed_runs": 50,
+  "complete": true,
+  "errors": [],
+  "identities": {
+    "before": [
+      "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b"
+    ],
+    "history": [
+      "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b"
+    ],
+    "probe": [
+      "6f4332edf51fad53d73ebbcb1908f1bcb07b322a952583b413c2a5749a6b1428"
+    ],
+    "after": [
+      "1181f65f190aa4894aa6d1067448159cdd3acd4b06bf6eaf4af1223a078e4bd6"
+    ]
+  },
+  "comparisons": {
+    "typing": {
+      "pooled_descriptive_ms": {
+        "before": {
+          "n": 160,
+          "p50": 1.6714580124244094,
+          "p95": 13.580708997324109,
+          "p99": 19.013999961316586,
+          "max": 23.903457913547754,
+          "mean": 3.1109828007174656
+        },
+        "after": {
+          "n": 160,
+          "p50": 1.090791542083025,
+          "p95": 6.202624994330108,
+          "p99": 11.017333017662168,
+          "max": 22.286541992798448,
+          "mean": 1.9390367495361716
+        }
+      },
+      "pairs": [
+        {
+          "pair": 0,
+          "before_p95_ms": 9.324499987997115,
+          "after_p95_ms": 1.7987500177696347,
+          "p95_delta_ms": -7.52574997022748,
+          "cpu_delta_s": -0.13114399999999982
+        },
+        {
+          "pair": 1,
+          "before_p95_ms": 16.092333011329174,
+          "after_p95_ms": 6.163291051052511,
+          "p95_delta_ms": -9.929041960276663,
+          "cpu_delta_s": -0.11653300000000222
+        },
+        {
+          "pair": 2,
+          "before_p95_ms": 5.116416956298053,
+          "after_p95_ms": 6.804749951697886,
+          "p95_delta_ms": 1.6883329953998327,
+          "cpu_delta_s": -0.12349099999999957
+        },
+        {
+          "pair": 3,
+          "before_p95_ms": 4.698542063124478,
+          "after_p95_ms": 4.831874975934625,
+          "p95_delta_ms": 0.1333329128101468,
+          "cpu_delta_s": -0.08257400000000015
+        },
+        {
+          "pair": 4,
+          "before_p95_ms": 8.748249965719879,
+          "after_p95_ms": 3.9410829776898026,
+          "p95_delta_ms": -4.807166988030076,
+          "cpu_delta_s": -0.10441400000000023
+        }
+      ],
+      "p95_decreased_pairs": 3,
+      "median_paired_p95_delta_ms": -4.807166988030076,
+      "cpu_decreased_pairs": 5
+    },
+    "pageup": {
+      "pooled_descriptive_ms": {
+        "before": {
+          "n": 160,
+          "p50": 9.575333504471928,
+          "p95": 61.48891698103398,
+          "p99": 90.80537501722574,
+          "max": 142.1059580752626,
+          "mean": 17.68413515383145
+        },
+        "after": {
+          "n": 160,
+          "p50": 4.406312480568886,
+          "p95": 47.03858389984816,
+          "p99": 88.44429207965732,
+          "max": 142.4866250017658,
+          "mean": 11.253272357134847
+        }
+      },
+      "pairs": [
+        {
+          "pair": 0,
+          "before_p95_ms": 65.38916600402445,
+          "after_p95_ms": 63.24258306995034,
+          "p95_delta_ms": -2.146582934074104,
+          "cpu_delta_s": -0.12081599999999992
+        },
+        {
+          "pair": 1,
+          "before_p95_ms": 47.111624968238175,
+          "after_p95_ms": 16.57750003505498,
+          "p95_delta_ms": -30.534124933183193,
+          "cpu_delta_s": -0.4055930000000001
+        },
+        {
+          "pair": 2,
+          "before_p95_ms": 38.72449998743832,
+          "after_p95_ms": 86.39666601084173,
+          "p95_delta_ms": 47.672166023403406,
+          "cpu_delta_s": -0.5857089999999969
+        },
+        {
+          "pair": 3,
+          "before_p95_ms": 61.48891698103398,
+          "after_p95_ms": 25.687041925266385,
+          "p95_delta_ms": -35.801875055767596,
+          "cpu_delta_s": -0.2908899999999992
+        },
+        {
+          "pair": 4,
+          "before_p95_ms": 37.260166951455176,
+          "after_p95_ms": 23.79483391996473,
+          "p95_delta_ms": -13.465333031490445,
+          "cpu_delta_s": -0.49136899999999883
+        }
+      ],
+      "p95_decreased_pairs": 4,
+      "median_paired_p95_delta_ms": -13.465333031490445,
+      "cpu_decreased_pairs": 5
+    },
+    "pagedown": {
+      "pooled_descriptive_ms": {
+        "before": {
+          "n": 160,
+          "p50": 2.133854490239173,
+          "p95": 22.727542091161013,
+          "p99": 33.3164589246735,
+          "max": 35.39870900567621,
+          "mean": 5.245308869780274
+        },
+        "after": {
+          "n": 160,
+          "p50": 1.5008124755695462,
+          "p95": 27.125374996103346,
+          "p99": 53.0439589638263,
+          "max": 80.86245902813971,
+          "mean": 5.3068252142111305
+        }
+      },
+      "pairs": [
+        {
+          "pair": 0,
+          "before_p95_ms": 22.464417037554085,
+          "after_p95_ms": 4.250832949765027,
+          "p95_delta_ms": -18.21358408778906,
+          "cpu_delta_s": -0.6990620000000001
+        },
+        {
+          "pair": 1,
+          "before_p95_ms": 16.748666064813733,
+          "after_p95_ms": 6.525583914481103,
+          "p95_delta_ms": -10.22308215033263,
+          "cpu_delta_s": -0.8477850000000005
+        },
+        {
+          "pair": 2,
+          "before_p95_ms": 15.248292009346187,
+          "after_p95_ms": 11.013415991328657,
+          "p95_delta_ms": -4.23487601801753,
+          "cpu_delta_s": -0.6553729999999973
+        },
+        {
+          "pair": 3,
+          "before_p95_ms": 9.061541990377009,
+          "after_p95_ms": 22.766790934838355,
+          "p95_delta_ms": 13.705248944461346,
+          "cpu_delta_s": -0.6704790000000038
+        },
+        {
+          "pair": 4,
+          "before_p95_ms": 28.516499907709658,
+          "after_p95_ms": 53.0439589638263,
+          "p95_delta_ms": 24.52745905611664,
+          "cpu_delta_s": -0.9261749999999953
+        }
+      ],
+      "p95_decreased_pairs": 3,
+      "median_paired_p95_delta_ms": -4.23487601801753,
+      "cpu_decreased_pairs": 5
+    },
+    "wheelup": {
+      "pooled_descriptive_ms": {
+        "before": {
+          "n": 160,
+          "p50": 3.200229548383504,
+          "p95": 39.64425006415695,
+          "p99": 73.37983406614512,
+          "max": 99.87604105845094,
+          "mean": 8.823639067850308
+        },
+        "after": {
+          "n": 160,
+          "p50": 1.9071870483458042,
+          "p95": 20.9332910599187,
+          "p99": 39.955458021722734,
+          "max": 42.502958909608424,
+          "mean": 4.832096301106503
+        }
+      },
+      "pairs": [
+        {
+          "pair": 0,
+          "before_p95_ms": 31.422667088918388,
+          "after_p95_ms": 7.93029204942286,
+          "p95_delta_ms": -23.492375039495528,
+          "cpu_delta_s": -0.2471750000000008
+        },
+        {
+          "pair": 1,
+          "before_p95_ms": 32.09308395162225,
+          "after_p95_ms": 3.883749945089221,
+          "p95_delta_ms": -28.209334006533027,
+          "cpu_delta_s": -0.31678500000000076
+        },
+        {
+          "pair": 2,
+          "before_p95_ms": 8.86537495534867,
+          "after_p95_ms": 18.299417104572058,
+          "p95_delta_ms": 9.434042149223387,
+          "cpu_delta_s": -0.20289899999999683
+        },
+        {
+          "pair": 3,
+          "before_p95_ms": 52.12770798243582,
+          "after_p95_ms": 12.727500055916607,
+          "p95_delta_ms": -39.400207926519215,
+          "cpu_delta_s": -0.17005699999999813
+        },
+        {
+          "pair": 4,
+          "before_p95_ms": 29.15954205673188,
+          "after_p95_ms": 29.262666939757764,
+          "p95_delta_ms": 0.10312488302588463,
+          "cpu_delta_s": -0.20727799999999874
+        }
+      ],
+      "p95_decreased_pairs": 3,
+      "median_paired_p95_delta_ms": -23.492375039495528,
+      "cpu_decreased_pairs": 5
+    },
+    "wheeldown": {
+      "pooled_descriptive_ms": {
+        "before": {
+          "n": 160,
+          "p50": 1.982396061066538,
+          "p95": 23.828875040635467,
+          "p99": 45.2297079609707,
+          "max": 54.9907919485122,
+          "mean": 5.840934903244488
+        },
+        "after": {
+          "n": 160,
+          "p50": 1.2229375424794853,
+          "p95": 13.884417014196515,
+          "p99": 30.938249896280468,
+          "max": 39.21616601292044,
+          "mean": 3.086331750091631
+        }
+      },
+      "pairs": [
+        {
+          "pair": 0,
+          "before_p95_ms": 37.27595799136907,
+          "after_p95_ms": 3.1559580238536,
+          "p95_delta_ms": -34.11999996751547,
+          "cpu_delta_s": -0.33893700000000004
+        },
+        {
+          "pair": 1,
+          "before_p95_ms": 23.33799994084984,
+          "after_p95_ms": 11.852749972604215,
+          "p95_delta_ms": -11.485249968245625,
+          "cpu_delta_s": -0.29576899999999995
+        },
+        {
+          "pair": 2,
+          "before_p95_ms": 19.979374948889017,
+          "after_p95_ms": 3.880332922562957,
+          "p95_delta_ms": -16.09904202632606,
+          "cpu_delta_s": -0.33491000000000337
+        },
+        {
+          "pair": 3,
+          "before_p95_ms": 1.8364579882472754,
+          "after_p95_ms": 6.897250073961914,
+          "p95_delta_ms": 5.060792085714638,
+          "cpu_delta_s": -0.2215999999999987
+        },
+        {
+          "pair": 4,
+          "before_p95_ms": 12.054792023263872,
+          "after_p95_ms": 26.92487509921193,
+          "p95_delta_ms": 14.87008307594806,
+          "cpu_delta_s": -0.30148800000000087
+        }
+      ],
+      "p95_decreased_pairs": 3,
+      "median_paired_p95_delta_ms": -11.485249968245625,
+      "cpu_decreased_pairs": 5
+    }
+  },
+  "runs": [
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "typing",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-00-before-typing/typing/result.json",
+      "result_sha256": "83b0f140886d132a221c6f391f638024b9e37af06772c72e37e608dfb1c6d914",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.704604015685618,
+        "p95": 9.324499987997115,
+        "p99": 13.580708997324109,
+        "max": 19.013999961316586,
+        "mean": 3.306871083623264
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.6633859999999999,
+      "load_before": [
+        263.88720703125,
+        271.95361328125,
+        218.0400390625
+      ],
+      "load_after": [
+        246.9091796875,
+        268.0390625,
+        217.27978515625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.666457976214588,
+        "p95": 30.3668329725042,
+        "p99": 31.200667028315365,
+        "max": 33.25358300935477,
+        "mean": 28.34630377530571
+      },
+      "scroll_gap_ms": null,
+      "scroll_writes": 0
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "typing",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-00-after-typing/typing/result.json",
+      "result_sha256": "4435426875d92c0f712aaf6afe9b3a8848e9f3cffe37e58100d200b69ff4c33b",
+      "latency_ms": {
+        "n": 32,
+        "p50": 0.9306254796683788,
+        "p95": 1.7987500177696347,
+        "p99": 1.802957965992391,
+        "max": 1.9334160024300218,
+        "mean": 1.03215630952036
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.5322420000000001,
+      "load_before": [
+        246.9091796875,
+        268.0390625,
+        217.27978515625
+      ],
+      "load_after": [
+        238.02734375,
+        265.8466796875,
+        216.80322265625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 27.770916931331158,
+        "p95": 29.643625020980835,
+        "p99": 29.980291961692274,
+        "max": 30.099084018729627,
+        "mean": 27.87141128998971
+      },
+      "scroll_gap_ms": null,
+      "scroll_writes": 0
+    },
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "pageup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-00-before-pageup/pageup/result.json",
+      "result_sha256": "2ece4ac90850bd871c00952d7419c85e8a1996757658e5ec27dd95168e224d5e",
+      "latency_ms": {
+        "n": 32,
+        "p50": 17.048812995199114,
+        "p95": 65.38916600402445,
+        "p99": 90.80537501722574,
+        "max": 91.01049997843802,
+        "mean": 28.035947914759163
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.110264,
+      "load_before": [
+        238.02734375,
+        265.8466796875,
+        216.80322265625
+      ],
+      "load_after": [
+        228.17529296875,
+        263.34228515625,
+        216.20654296875
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.9224999723956,
+        "p95": 30.633209040388465,
+        "p99": 31.232916051521897,
+        "max": 34.1977080097422,
+        "mean": 28.73051613043513
+      },
+      "scroll_gap_ms": {
+        "n": 147,
+        "p50": 6.299291038885713,
+        "p95": 7.168708019889891,
+        "p99": 8.73024994507432,
+        "max": 11.828375048935413,
+        "mean": 6.252717122207491
+      },
+      "scroll_writes": 148
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "pageup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-00-after-pageup/pageup/result.json",
+      "result_sha256": "79c3337eae8fdd7a521776170208cc518ff95b72a3d76eafe9cee615ccf09a45",
+      "latency_ms": {
+        "n": 32,
+        "p50": 4.096666467376053,
+        "p95": 63.24258306995034,
+        "p99": 71.35387498419732,
+        "max": 88.44429207965732,
+        "mean": 12.434139309334569
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.989448,
+      "load_before": [
+        228.17529296875,
+        263.34228515625,
+        216.20654296875
+      ],
+      "load_after": [
+        222.3251953125,
+        260.9013671875,
+        215.88916015625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.21608299948275,
+        "p95": 30.053416034206748,
+        "p99": 30.077208066359162,
+        "max": 30.141708091832697,
+        "mean": 28.458006710054413
+      },
+      "scroll_gap_ms": {
+        "n": 150,
+        "p50": 6.058833037968725,
+        "p95": 6.862166919745505,
+        "p99": 7.583957980386913,
+        "max": 8.644624962471426,
+        "mean": 6.036928333342075
+      },
+      "scroll_writes": 151
+    },
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-00-before-pagedown/pagedown/result.json",
+      "result_sha256": "5090ac48af9b9e11d17af44d1ca402e3d298a18e9bb5123c4147fa48062db303",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.5063544851727784,
+        "p95": 22.464417037554085,
+        "p99": 22.727542091161013,
+        "max": 33.3164589246735,
+        "mean": 5.110303511173697
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.947273,
+      "load_before": [
+        222.3251953125,
+        260.9013671875,
+        215.88916015625
+      ],
+      "load_after": [
+        212.3935546875,
+        257.47119140625,
+        215.19580078125
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.517666971310973,
+        "p95": 30.024625011719763,
+        "p99": 30.05612501874566,
+        "max": 32.6824999647215,
+        "mean": 28.35480377243291
+      },
+      "scroll_gap_ms": {
+        "n": 148,
+        "p50": 6.125395477283746,
+        "p95": 6.806124933063984,
+        "p99": 8.399207959882915,
+        "max": 12.85670802462846,
+        "mean": 6.1144563573966355
+      },
+      "scroll_writes": 149
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-00-after-pagedown/pagedown/result.json",
+      "result_sha256": "3e6795b1e99f849c8517f5ee457095fb836664b04b05d7fc940e418f8bddf5d2",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.6154375043697655,
+        "p95": 4.250832949765027,
+        "p99": 15.193999977782369,
+        "max": 23.79904210101813,
+        "mean": 2.8078267678210977
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.248211,
+      "load_before": [
+        212.3935546875,
+        257.47119140625,
+        215.19580078125
+      ],
+      "load_after": [
+        203.00830078125,
+        254.00634765625,
+        214.4619140625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.091208009049296,
+        "p95": 30.17591603565961,
+        "p99": 30.240499996580184,
+        "max": 31.926499912515283,
+        "mean": 28.74647041842822
+      },
+      "scroll_gap_ms": {
+        "n": 152,
+        "p50": 6.043208995833993,
+        "p95": 6.560166017152369,
+        "p99": 8.106208988465369,
+        "max": 10.197083000093699,
+        "mean": 6.007666670484468
+      },
+      "scroll_writes": 153
+    },
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "wheelup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-00-before-wheelup/wheelup/result.json",
+      "result_sha256": "5500a14355453a00613ae66bc3edaed4f83b46052d8ae301c4dbed15e36a3bca",
+      "latency_ms": {
+        "n": 32,
+        "p50": 4.118375014513731,
+        "p95": 31.422667088918388,
+        "p99": 34.056250005960464,
+        "max": 36.72008402645588,
+        "mean": 10.279552079737186
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.8892690000000003,
+      "load_before": [
+        203.00830078125,
+        254.00634765625,
+        214.4619140625
+      ],
+      "load_after": [
+        198.44287109375,
+        252.212890625,
+        214.060546875
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.043750022538006,
+        "p95": 30.745667056180537,
+        "p99": 31.229916960000992,
+        "max": 31.898000044748187,
+        "mean": 28.69592606270265
+      },
+      "scroll_gap_ms": {
+        "n": 148,
+        "p50": 6.156541465315968,
+        "p95": 7.6528750360012054,
+        "p99": 8.37775005493313,
+        "max": 8.554166997782886,
+        "mean": 6.175981419211304
+      },
+      "scroll_writes": 149
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "wheelup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-00-after-wheelup/wheelup/result.json",
+      "result_sha256": "f541142f7ca6e2b0058ebc1da8c930c18ce3710254f1f698688d06d29c6a4d11",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.8513125251047313,
+        "p95": 7.93029204942286,
+        "p99": 11.034750030376017,
+        "max": 15.088208019733429,
+        "mean": 3.1359049025923014
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.6420939999999995,
+      "load_before": [
+        198.44287109375,
+        252.212890625,
+        214.060546875
+      ],
+      "load_after": [
+        204.8935546875,
+        252.6572265625,
+        214.44091796875
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.86304201092571,
+        "p95": 30.080833937972784,
+        "p99": 30.1500839414075,
+        "max": 30.21129104308784,
+        "mean": 28.64473387073245
+      },
+      "scroll_gap_ms": {
+        "n": 151,
+        "p50": 6.226708996109664,
+        "p95": 6.500166957266629,
+        "p99": 6.709583103656769,
+        "max": 7.348709041252732,
+        "mean": 6.05963603963471
+      },
+      "scroll_writes": 152
+    },
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-00-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "33a90cced87209c7488552147446de4897017da02f316f2b56ee607643c29143",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.9017915474250913,
+        "p95": 37.27595799136907,
+        "p99": 45.2297079609707,
+        "max": 53.78579208627343,
+        "mean": 9.249578080925858
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.0321860000000003,
+      "load_before": [
+        208.34521484375,
+        252.57958984375,
+        214.63720703125
+      ],
+      "load_after": [
+        210.4794921875,
+        252.28759765625,
+        214.75634765625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.14345799945295,
+        "p95": 30.652375076897442,
+        "p99": 30.69816599600017,
+        "max": 34.77654198650271,
+        "mean": 28.94504167770426
+      },
+      "scroll_gap_ms": {
+        "n": 143,
+        "p50": 6.297125015407801,
+        "p95": 8.350166957825422,
+        "p99": 10.654291952960193,
+        "max": 15.494958031922579,
+        "mean": 6.457160251423508
+      },
+      "scroll_writes": 144
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-00-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "37fd64d7936b1f4b2c81af270fe294b4ca60afbcb0b68f3ef97eec8c7db524fd",
+      "latency_ms": {
+        "n": 32,
+        "p50": 0.9506249916739762,
+        "p95": 3.1559580238536,
+        "p99": 5.052999942563474,
+        "max": 7.715374929830432,
+        "mean": 1.3479048830049578
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.6932490000000002,
+      "load_before": [
+        210.4794921875,
+        252.28759765625,
+        214.75634765625
+      ],
+      "load_after": [
+        207.31787109375,
+        250.93798828125,
+        214.49951171875
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.18283292092383,
+        "p95": 30.045374995097518,
+        "p99": 30.04683298058808,
+        "max": 30.608083005063236,
+        "mean": 28.761364260478125
+      },
+      "scroll_gap_ms": {
+        "n": 149,
+        "p50": 6.296874955296516,
+        "p95": 6.905791931785643,
+        "p99": 7.915250025689602,
+        "max": 8.810750092379749,
+        "mean": 6.134604309348002
+      },
+      "scroll_writes": 150
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "pageup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-01-after-pageup/pageup/result.json",
+      "result_sha256": "d67d3678e95c6e6260db575a2d08e49e84d7e9b8cf53ce69c99f0d51ed0101b2",
+      "latency_ms": {
+        "n": 32,
+        "p50": 2.98241653945297,
+        "p95": 16.57750003505498,
+        "p99": 22.87137508392334,
+        "max": 31.302125076763332,
+        "mean": 6.479457031673519
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.8329140000000002,
+      "load_before": [
+        207.31787109375,
+        250.93798828125,
+        214.49951171875
+      ],
+      "load_after": [
+        204.7294921875,
+        249.67724609375,
+        214.26806640625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.64637498371303,
+        "p95": 30.307666980661452,
+        "p99": 30.797042069025338,
+        "max": 31.40987502411008,
+        "mean": 29.034829289171725
+      },
+      "scroll_gap_ms": {
+        "n": 146,
+        "p50": 6.299500004388392,
+        "p95": 8.538000052794814,
+        "p99": 9.925459045916796,
+        "max": 10.638374951668084,
+        "mean": 6.365545377077867
+      },
+      "scroll_writes": 147
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "pageup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-01-before-pageup/pageup/result.json",
+      "result_sha256": "7eec39c7937cebaef5f8fc61d065266385e88ab899561693a8a1a1816ac0083b",
+      "latency_ms": {
+        "n": 32,
+        "p50": 4.396104020997882,
+        "p95": 47.111624968238175,
+        "p99": 47.43725003208965,
+        "max": 53.011166979558766,
+        "mean": 10.785759091959335
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.2385070000000002,
+      "load_before": [
+        204.7294921875,
+        249.67724609375,
+        214.26806640625
+      ],
+      "load_after": [
+        199.1455078125,
+        247.77294921875,
+        213.80322265625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.099584091454744,
+        "p95": 30.101084033958614,
+        "p99": 30.368292005732656,
+        "max": 30.61445790808648,
+        "mean": 28.859567227623156
+      },
+      "scroll_gap_ms": {
+        "n": 149,
+        "p50": 6.292541977018118,
+        "p95": 7.316792034544051,
+        "p99": 8.471333072520792,
+        "max": 9.86204098444432,
+        "mean": 6.17407298656243
+      },
+      "scroll_writes": 150
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-01-after-pagedown/pagedown/result.json",
+      "result_sha256": "20a02562031ac1ec2cf09bcf1d0b8b681cc2b4b3c0e2f09d30e88f55f53b299d",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.1707915109582245,
+        "p95": 6.525583914481103,
+        "p99": 7.488874951377511,
+        "max": 25.280250003561378,
+        "mean": 2.6655924048100132
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.2008909999999995,
+      "load_before": [
+        199.1455078125,
+        247.77294921875,
+        213.80322265625
+      ],
+      "load_after": [
+        186.6630859375,
+        243.4990234375,
+        212.68359375
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.92175002489239,
+        "p95": 30.19095805939287,
+        "p99": 30.42379196267575,
+        "max": 30.52549995481968,
+        "mean": 28.788272869743167
+      },
+      "scroll_gap_ms": {
+        "n": 150,
+        "p50": 6.282125483267009,
+        "p95": 7.011207984760404,
+        "p99": 7.511458010412753,
+        "max": 7.97641696408391,
+        "mean": 6.114228332880884
+      },
+      "scroll_writes": 151
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-01-before-pagedown/pagedown/result.json",
+      "result_sha256": "651e5498bfe8b929f5c247903e76554ff478eaa79e17d04c29aab86cc706bcdf",
+      "latency_ms": {
+        "n": 32,
+        "p50": 2.025020483415574,
+        "p95": 16.748666064813733,
+        "p99": 20.324416924268007,
+        "max": 31.00858407560736,
+        "mean": 4.701189984189114
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 2.048676,
+      "load_before": [
+        186.6630859375,
+        243.4990234375,
+        212.68359375
+      ],
+      "load_after": [
+        173.92041015625,
+        237.826171875,
+        211.193359375
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.790874988771975,
+        "p95": 30.205750023014843,
+        "p99": 31.183250015601516,
+        "max": 32.79204200953245,
+        "mean": 28.465067194173894
+      },
+      "scroll_gap_ms": {
+        "n": 143,
+        "p50": 6.3035000348463655,
+        "p95": 7.650875020772219,
+        "p99": 9.488082956522703,
+        "max": 12.145458022132516,
+        "mean": 6.3509618256149905
+      },
+      "scroll_writes": 144
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "wheelup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-01-after-wheelup/wheelup/result.json",
+      "result_sha256": "b390b729b59f1f75d877a1ef8e7c4a3c0ec837369f923a324c7d8723dd50b28f",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.0216039954684675,
+        "p95": 3.883749945089221,
+        "p99": 25.351124932058156,
+        "max": 29.002832947298884,
+        "mean": 2.9289205522218253
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.6119789999999994,
+      "load_before": [
+        173.92041015625,
+        237.826171875,
+        211.193359375
+      ],
+      "load_after": [
+        171.4443359375,
+        236.25146484375,
+        210.79345703125
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.09608301706612,
+        "p95": 30.073249945417047,
+        "p99": 30.223459005355835,
+        "max": 30.911791953258216,
+        "mean": 28.72551209668839
+      },
+      "scroll_gap_ms": {
+        "n": 149,
+        "p50": 6.21395802590996,
+        "p95": 6.749541964381933,
+        "p99": 8.49041691981256,
+        "max": 11.244375025853515,
+        "mean": 6.163234617748617
+      },
+      "scroll_writes": 150
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "wheelup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-01-before-wheelup/wheelup/result.json",
+      "result_sha256": "9c0754c5f02ea1f28a22bf738da8bdd4b5e33c62837cd25e3a7776dc83a0c46a",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.905521028675139,
+        "p95": 32.09308395162225,
+        "p99": 44.69370795413852,
+        "max": 48.25791693292558,
+        "mean": 7.357716218393762
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.9287640000000001,
+      "load_before": [
+        171.4443359375,
+        236.25146484375,
+        210.79345703125
+      ],
+      "load_after": [
+        168.36572265625,
+        234.537109375,
+        210.33740234375
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.846499975770712,
+        "p95": 30.905500054359436,
+        "p99": 32.36191696487367,
+        "max": 35.617834073491395,
+        "mean": 28.502207001551024
+      },
+      "scroll_gap_ms": {
+        "n": 141,
+        "p50": 6.28216692712158,
+        "p95": 8.852583006955683,
+        "p99": 10.15295903198421,
+        "max": 15.570916002616286,
+        "mean": 6.432935872101985
+      },
+      "scroll_writes": 142
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-01-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "9a2dff067a99b5a9cfa307b69bfbe256d9597be4de327c115c6d82d0332dee83",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.0945204994641244,
+        "p95": 11.852749972604215,
+        "p99": 24.011833011172712,
+        "max": 25.467542000114918,
+        "mean": 2.979127584694652
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.7071560000000003,
+      "load_before": [
+        168.36572265625,
+        234.537109375,
+        210.33740234375
+      ],
+      "load_after": [
+        163.45166015625,
+        232.41943359375,
+        209.7314453125
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.96562498062849,
+        "p95": 30.063917045481503,
+        "p99": 30.628667096607387,
+        "max": 31.24549996573478,
+        "mean": 28.607499999775282
+      },
+      "scroll_gap_ms": {
+        "n": 149,
+        "p50": 6.232790998183191,
+        "p95": 7.007417036220431,
+        "p99": 9.889915934763849,
+        "max": 10.516791953705251,
+        "mean": 6.1319667249042915
+      },
+      "scroll_writes": 150
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-01-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "4c5d84033ed40f6e674186a46d3fc86ff477af74a0e293a230e5b62ec911e9e1",
+      "latency_ms": {
+        "n": 32,
+        "p50": 3.571916022337973,
+        "p95": 23.33799994084984,
+        "p99": 27.765417005866766,
+        "max": 54.9907919485122,
+        "mean": 8.441815127298469
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.0029250000000003,
+      "load_before": [
+        163.45166015625,
+        232.41943359375,
+        209.7314453125
+      ],
+      "load_after": [
+        162.7744140625,
+        231.1337890625,
+        209.41064453125
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.463417013175786,
+        "p95": 30.90995899401605,
+        "p99": 31.65062505286187,
+        "max": 32.629083027131855,
+        "mean": 29.030592740333127
+      },
+      "scroll_gap_ms": {
+        "n": 145,
+        "p50": 6.308292038738728,
+        "p95": 7.789457915350795,
+        "p99": 9.083207929506898,
+        "max": 9.414167026989162,
+        "mean": 6.396884773055027
+      },
+      "scroll_writes": 146
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "typing",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-01-after-typing/typing/result.json",
+      "result_sha256": "7c84ed9ac8a192b52f1e51fd1d90be6c27686611c87ff395479e06ac7b9a1ee9",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.113707956392318,
+        "p95": 6.163291051052511,
+        "p99": 11.017333017662168,
+        "max": 11.025082902051508,
+        "mean": 1.985206934477901
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.490918999999999,
+      "load_before": [
+        162.7744140625,
+        231.1337890625,
+        209.41064453125
+      ],
+      "load_after": [
+        163.9931640625,
+        230.25146484375,
+        209.2265625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.753416030667722,
+        "p95": 30.296499957330525,
+        "p99": 30.7035829173401,
+        "max": 33.30533392727375,
+        "mean": 28.784451611910857
+      },
+      "scroll_gap_ms": null,
+      "scroll_writes": 0
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "typing",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-01-before-typing/typing/result.json",
+      "result_sha256": "2f93e52e36ef64a3f146e1822e94daba3aa178b1dd83df870542e57b55b7e83c",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.3160415110178292,
+        "p95": 16.092333011329174,
+        "p99": 18.171958974562585,
+        "max": 23.903457913547754,
+        "mean": 3.9502173422079068
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.6074520000000012,
+      "load_before": [
+        163.9931640625,
+        230.25146484375,
+        209.2265625
+      ],
+      "load_after": [
+        171.52099609375,
+        230.7119140625,
+        209.51220703125
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.242791002616286,
+        "p95": 30.930083943530917,
+        "p99": 31.871709041297436,
+        "max": 34.11141596734524,
+        "mean": 28.996501354530693
+      },
+      "scroll_gap_ms": null,
+      "scroll_writes": 0
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-02-before-pagedown/pagedown/result.json",
+      "result_sha256": "94d3ab348617c259e7bbe9773f5e4e4712081b90c7adeec2f316b5bb579181e0",
+      "latency_ms": {
+        "n": 32,
+        "p50": 2.605812973342836,
+        "p95": 15.248292009346187,
+        "p99": 30.863874941132963,
+        "max": 35.39870900567621,
+        "mean": 6.109363424911862
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.910258999999999,
+      "load_before": [
+        171.52099609375,
+        230.7119140625,
+        209.51220703125
+      ],
+      "load_after": [
+        184.734375,
+        230.73974609375,
+        209.89208984375
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.060999931767583,
+        "p95": 30.040708952583373,
+        "p99": 30.04416706971824,
+        "max": 33.51037495303899,
+        "mean": 28.112860223759085
+      },
+      "scroll_gap_ms": {
+        "n": 147,
+        "p50": 6.288415985181928,
+        "p95": 6.752207991667092,
+        "p99": 7.559165940620005,
+        "max": 8.379542035982013,
+        "mean": 6.092416387064015
+      },
+      "scroll_writes": 148
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-02-after-pagedown/pagedown/result.json",
+      "result_sha256": "b2d497f56aefb79015d37841543a864ef426f9102e1a7d9f76cd2fcb8adc548f",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.5756880748085678,
+        "p95": 11.013415991328657,
+        "p99": 14.605875010602176,
+        "max": 27.125374996103346,
+        "mean": 3.417221254494507
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.2548860000000017,
+      "load_before": [
+        184.734375,
+        230.73974609375,
+        209.89208984375
+      ],
+      "load_after": [
+        196.28955078125,
+        231.71484375,
+        210.482421875
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.49375007301569,
+        "p95": 32.2433749679476,
+        "p99": 32.73420804180205,
+        "max": 33.60487497411668,
+        "mean": 29.374760740827167
+      },
+      "scroll_gap_ms": {
+        "n": 150,
+        "p50": 6.142208527307957,
+        "p95": 7.802416919730604,
+        "p99": 9.07512498088181,
+        "max": 10.243625030852854,
+        "mean": 6.243454727033774
+      },
+      "scroll_writes": 151
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "wheelup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-02-before-wheelup/wheelup/result.json",
+      "result_sha256": "b2a0a4e262f75ffc604727e4b78d9f53ccf0164a7cc05a54a403d3c8f8214fcd",
+      "latency_ms": {
+        "n": 32,
+        "p50": 2.953166433144361,
+        "p95": 8.86537495534867,
+        "p99": 22.454541991464794,
+        "max": 33.52670802269131,
+        "mean": 4.978285149263684
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.799516999999998,
+      "load_before": [
+        196.28955078125,
+        231.71484375,
+        210.482421875
+      ],
+      "load_after": [
+        204.67431640625,
+        232.86474609375,
+        211.0126953125
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.082541936077178,
+        "p95": 30.12174996547401,
+        "p99": 30.368958017788827,
+        "max": 30.39037494454533,
+        "mean": 28.733108872397533
+      },
+      "scroll_gap_ms": {
+        "n": 148,
+        "p50": 6.27306301612407,
+        "p95": 6.93608308210969,
+        "p99": 8.861165959388018,
+        "max": 10.09837503079325,
+        "mean": 6.178355290447487
+      },
+      "scroll_writes": 149
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "wheelup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-02-after-wheelup/wheelup/result.json",
+      "result_sha256": "ba7c55a3900c862d7ef04e814229dc705fa04c4b6c4ecab5cb811441361531d0",
+      "latency_ms": {
+        "n": 32,
+        "p50": 2.2124785464257,
+        "p95": 18.299417104572058,
+        "p99": 20.9332910599187,
+        "max": 42.502958909608424,
+        "mean": 5.685126216121716
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.5966180000000012,
+      "load_before": [
+        204.67431640625,
+        232.86474609375,
+        211.0126953125
+      ],
+      "load_after": [
+        196.2919921875,
+        230.65869140625,
+        210.36181640625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.874791925773025,
+        "p95": 30.17633396666497,
+        "p99": 30.25774995330721,
+        "max": 32.44470793288201,
+        "mean": 28.694293029876725
+      },
+      "scroll_gap_ms": {
+        "n": 147,
+        "p50": 6.210832973010838,
+        "p95": 7.664417033083737,
+        "p99": 8.803749922662973,
+        "max": 9.61158296559006,
+        "mean": 6.242127271787244
+      },
+      "scroll_writes": 148
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-02-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "a758191a1134916e54f7d791c9a7fbd25aefd45de74976971cf6703b92dc5331",
+      "latency_ms": {
+        "n": 32,
+        "p50": 2.8476870502345264,
+        "p95": 19.979374948889017,
+        "p99": 22.345665958710015,
+        "max": 28.658083989284933,
+        "mean": 5.736070375860436
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.0403320000000011,
+      "load_before": [
+        196.2919921875,
+        230.65869140625,
+        210.36181640625
+      ],
+      "load_after": [
+        198.6708984375,
+        230.5810546875,
+        210.453125
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.813833952881396,
+        "p95": 31.366290990263224,
+        "p99": 31.40366601292044,
+        "max": 33.39691599830985,
+        "mean": 28.7110214835153
+      },
+      "scroll_gap_ms": {
+        "n": 139,
+        "p50": 6.305874907411635,
+        "p95": 9.270000038668513,
+        "p99": 10.609999997541308,
+        "max": 11.088749975897372,
+        "mean": 6.5641807553043465
+      },
+      "scroll_writes": 140
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-02-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "898b838459e29103616091be76f3f2c91626e185e85b8499031bb552123a7818",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.6696879756636918,
+        "p95": 3.880332922562957,
+        "p99": 3.893124987371266,
+        "max": 30.938249896280468,
+        "mean": 2.6422682785778306
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.7054219999999978,
+      "load_before": [
+        198.6708984375,
+        230.5810546875,
+        210.453125
+      ],
+      "load_after": [
+        202.06005859375,
+        230.75390625,
+        210.6318359375
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.896416071802378,
+        "p95": 30.24699992965907,
+        "p99": 33.563333097845316,
+        "max": 34.259791020303965,
+        "mean": 28.991564514956647
+      },
+      "scroll_gap_ms": {
+        "n": 147,
+        "p50": 6.269291043281555,
+        "p95": 7.629625033587217,
+        "p99": 8.638040977530181,
+        "max": 10.671791969798505,
+        "mean": 6.317640306288693
+      },
+      "scroll_writes": 148
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "typing",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-02-before-typing/typing/result.json",
+      "result_sha256": "1135f6bf60b9611e3d0d3031d6c8e34895033d68ed1e1c6f25d0e64842405514",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.8806045409291983,
+        "p95": 5.116416956298053,
+        "p99": 9.199292049743235,
+        "max": 9.646292077377439,
+        "mean": 2.612173280795105
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.5951500000000012,
+      "load_before": [
+        202.06005859375,
+        230.75390625,
+        210.6318359375
+      ],
+      "load_after": [
+        207.90087890625,
+        231.48828125,
+        211.0087890625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.62408389430493,
+        "p95": 30.590042006224394,
+        "p99": 31.486624968238175,
+        "max": 31.88145800959319,
+        "mean": 29.0869569683808
+      },
+      "scroll_gap_ms": null,
+      "scroll_writes": 0
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "typing",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-02-after-typing/typing/result.json",
+      "result_sha256": "95563d40be2f4d0bb1e75cb7b54d99cf710c90d8d3422cb3698d1a6a8c7222bf",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.2584165087901056,
+        "p95": 6.804749951697886,
+        "p99": 9.532957919873297,
+        "max": 22.286541992798448,
+        "mean": 2.7598477208812255
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.4716590000000016,
+      "load_before": [
+        207.90087890625,
+        231.48828125,
+        211.0087890625
+      ],
+      "load_after": [
+        208.22900390625,
+        231.16455078125,
+        211.01416015625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.256624984554946,
+        "p95": 30.616584001109004,
+        "p99": 31.04100003838539,
+        "max": 32.07137493882328,
+        "mean": 28.812294356494903
+      },
+      "scroll_gap_ms": null,
+      "scroll_writes": 0
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "pageup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-02-before-pageup/pageup/result.json",
+      "result_sha256": "b11f0856869c847639b53742ecaddebe80aa274ef03b03dda0ac380fe462cc2c",
+      "latency_ms": {
+        "n": 32,
+        "p50": 9.51577047817409,
+        "p95": 38.72449998743832,
+        "p99": 40.332957985810935,
+        "max": 47.17512510251254,
+        "mean": 13.281358071253635
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.4090229999999968,
+      "load_before": [
+        208.22900390625,
+        231.16455078125,
+        211.01416015625
+      ],
+      "load_after": [
+        210.85302734375,
+        231.32763671875,
+        211.189453125
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.228625004179776,
+        "p95": 30.685750069096684,
+        "p99": 30.703332973644137,
+        "max": 30.707916943356395,
+        "mean": 28.816627710306598
+      },
+      "scroll_gap_ms": {
+        "n": 148,
+        "p50": 6.1502084718085825,
+        "p95": 7.586374995298684,
+        "p99": 9.801834006793797,
+        "max": 10.467292042449117,
+        "mean": 6.1977756220683755
+      },
+      "scroll_writes": 149
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "pageup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-02-after-pageup/pageup/result.json",
+      "result_sha256": "5a7db77329224cc301e702497ba72b934350f8d5f291f0f68bb5472ed57aa26d",
+      "latency_ms": {
+        "n": 32,
+        "p50": 4.952958493959159,
+        "p95": 86.39666601084173,
+        "p99": 112.95741598587483,
+        "max": 142.4866250017658,
+        "mean": 17.841545399278402
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.8233139999999999,
+      "load_before": [
+        210.85302734375,
+        231.32763671875,
+        211.189453125
+      ],
+      "load_after": [
+        218.47216796875,
+        232.56689453125,
+        211.74462890625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.440916958265007,
+        "p95": 30.286290915682912,
+        "p99": 30.813083983957767,
+        "max": 31.540125026367605,
+        "mean": 29.064611546815403
+      },
+      "scroll_gap_ms": {
+        "n": 152,
+        "p50": 6.2234579818323255,
+        "p95": 6.661709048785269,
+        "p99": 7.022166042588651,
+        "max": 9.363832999952137,
+        "mean": 6.122936677696233
+      },
+      "scroll_writes": 153
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "wheelup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-03-after-wheelup/wheelup/result.json",
+      "result_sha256": "12899a774d69a32e086b80d188155627d11264e248d69b3bc75c24f495a64230",
+      "latency_ms": {
+        "n": 32,
+        "p50": 2.6603954611346126,
+        "p95": 12.727500055916607,
+        "p99": 26.397999958135188,
+        "max": 41.695083025842905,
+        "mean": 5.48611581325531
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.601904000000002,
+      "load_before": [
+        224.03955078125,
+        233.48681640625,
+        212.19140625
+      ],
+      "load_after": [
+        224.03955078125,
+        233.48681640625,
+        212.19140625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.88254204299301,
+        "p95": 30.4110839497298,
+        "p99": 31.765207997523248,
+        "max": 33.24970894027501,
+        "mean": 28.4846693525211
+      },
+      "scroll_gap_ms": {
+        "n": 144,
+        "p50": 6.157249503303319,
+        "p95": 7.797917001880705,
+        "p99": 8.90729099046439,
+        "max": 17.46737491339445,
+        "mean": 6.30946209760926
+      },
+      "scroll_writes": 145
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "wheelup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-03-before-wheelup/wheelup/result.json",
+      "result_sha256": "f339f32e52c75f60268a6b691cb271971cbc5f11dfdb2baeb7f3caea6f6b8166",
+      "latency_ms": {
+        "n": 32,
+        "p50": 3.819291538093239,
+        "p95": 52.12770798243582,
+        "p99": 83.71483290102333,
+        "max": 99.87604105845094,
+        "mean": 13.907865853980184
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.7719610000000001,
+      "load_before": [
+        230.4423828125,
+        234.6572265625,
+        212.72900390625
+      ],
+      "load_after": [
+        233.20947265625,
+        235.16064453125,
+        213.03515625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.557542013004422,
+        "p95": 30.8319159084931,
+        "p99": 31.58791596069932,
+        "max": 31.662459019571543,
+        "mean": 28.66076613070383
+      },
+      "scroll_gap_ms": {
+        "n": 144,
+        "p50": 6.301770510617644,
+        "p95": 8.128416957333684,
+        "p99": 8.840458001941442,
+        "max": 13.779708999209106,
+        "mean": 6.372868639623953
+      },
+      "scroll_writes": 145
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-03-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "78603bf38d523cc40b845fe3203b941f1d99492c3f9673d80c18161d4321b0a1",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.5075000119395554,
+        "p95": 6.897250073961914,
+        "p99": 12.42212497163564,
+        "max": 17.15454098302871,
+        "mean": 2.7276340988464653
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.7129500000000002,
+      "load_before": [
+        233.20947265625,
+        235.16064453125,
+        213.03515625
+      ],
+      "load_after": [
+        237.1162109375,
+        235.93798828125,
+        213.43896484375
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.828792041167617,
+        "p95": 30.146874953061342,
+        "p99": 30.415999935939908,
+        "max": 31.041125068441033,
+        "mean": 28.535888451451978
+      },
+      "scroll_gap_ms": {
+        "n": 146,
+        "p50": 6.267208489589393,
+        "p95": 6.983208004385233,
+        "p99": 8.832084015011787,
+        "max": 11.308250017464161,
+        "mean": 6.236877000558969
+      },
+      "scroll_writes": 147
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-03-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "98f3e7f9e2b440c88038536d7e77d7f17ebab58759f633d637235c5464036a52",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.0680414852686226,
+        "p95": 1.8364579882472754,
+        "p99": 2.0356669556349516,
+        "max": 29.524833080358803,
+        "mean": 2.0525259897112846
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.9345499999999989,
+      "load_before": [
+        237.1162109375,
+        235.93798828125,
+        213.43896484375
+      ],
+      "load_after": [
+        239.4287109375,
+        236.43701171875,
+        213.74658203125
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.00187496561557,
+        "p95": 30.040042009204626,
+        "p99": 30.04862496163696,
+        "max": 30.09912499692291,
+        "mean": 28.5278225820812
+      },
+      "scroll_gap_ms": {
+        "n": 147,
+        "p50": 6.302790949121118,
+        "p95": 6.46929198410362,
+        "p99": 7.00204202439636,
+        "max": 13.475708081386983,
+        "mean": 6.197005667134511
+      },
+      "scroll_writes": 148
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "typing",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-03-after-typing/typing/result.json",
+      "result_sha256": "2a05481235c0d16a803599308a2b83eb5ad7be94aecb65b64ee18f0dea5134f8",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.1693959240801632,
+        "p95": 4.831874975934625,
+        "p99": 5.523792002350092,
+        "max": 7.544292020611465,
+        "mean": 2.131015728082275
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.4791660000000002,
+      "load_before": [
+        239.4287109375,
+        236.43701171875,
+        213.74658203125
+      ],
+      "load_after": [
+        233.78857421875,
+        235.3173828125,
+        213.484375
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.053749982267618,
+        "p95": 30.78154195100069,
+        "p99": 31.663959030993283,
+        "max": 35.13887501321733,
+        "mean": 28.838168029793568
+      },
+      "scroll_gap_ms": null,
+      "scroll_writes": 0
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "typing",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-03-before-typing/typing/result.json",
+      "result_sha256": "54d6d18f428601064e8baafebb91d961757ccc7f6725506c044b10616c10e2d4",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.4916459913365543,
+        "p95": 4.698542063124478,
+        "p99": 7.2355830343440175,
+        "max": 19.869958981871605,
+        "mean": 2.5014739294419996
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.5617400000000004,
+      "load_before": [
+        233.78857421875,
+        235.3173828125,
+        213.484375
+      ],
+      "load_after": [
+        234.92626953125,
+        235.52783203125,
+        213.6865234375
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.363583074882627,
+        "p95": 30.417583999224007,
+        "p99": 31.614582985639572,
+        "max": 32.29108301457018,
+        "mean": 28.853807808651077
+      },
+      "scroll_gap_ms": null,
+      "scroll_writes": 0
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "pageup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-03-after-pageup/pageup/result.json",
+      "result_sha256": "e77b5c274530331800949d1303ebd5559c05033e3ef46a2e6c23345f75502c92",
+      "latency_ms": {
+        "n": 32,
+        "p50": 6.934542034287006,
+        "p95": 25.687041925266385,
+        "p99": 47.03858389984816,
+        "max": 57.83962504938245,
+        "mean": 11.496938819618663
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.8272750000000002,
+      "load_before": [
+        234.92626953125,
+        235.52783203125,
+        213.6865234375
+      ],
+      "load_after": [
+        238.93603515625,
+        236.34912109375,
+        214.10400390625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.570624930784106,
+        "p95": 30.239708023145795,
+        "p99": 31.325208954513073,
+        "max": 38.25904207769781,
+        "mean": 29.273782255909136
+      },
+      "scroll_gap_ms": {
+        "n": 149,
+        "p50": 6.30141596775502,
+        "p95": 7.398959016427398,
+        "p99": 8.786709047853947,
+        "max": 15.068709035404027,
+        "mean": 6.29017085943296
+      },
+      "scroll_writes": 150
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "pageup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-03-before-pageup/pageup/result.json",
+      "result_sha256": "a4f531f49bc315831f9377c4bdf08f87f027a10692dbb29cfaad61851cf783fb",
+      "latency_ms": {
+        "n": 32,
+        "p50": 13.421583455055952,
+        "p95": 61.48891698103398,
+        "p99": 69.99908399302512,
+        "max": 142.1059580752626,
+        "mean": 23.880223994638072
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.1181649999999994,
+      "load_before": [
+        238.93603515625,
+        236.34912109375,
+        214.10400390625
+      ],
+      "load_after": [
+        241.02294921875,
+        236.82470703125,
+        214.40185546875
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.496042010374367,
+        "p95": 30.251458985731006,
+        "p99": 30.523792025633156,
+        "max": 30.972708016633987,
+        "mean": 28.55739380878907
+      },
+      "scroll_gap_ms": {
+        "n": 146,
+        "p50": 6.2924789963290095,
+        "p95": 7.33625004068017,
+        "p99": 9.486791910603642,
+        "max": 11.286415974609554,
+        "mean": 6.24076056147428
+      },
+      "scroll_writes": 147
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-03-after-pagedown/pagedown/result.json",
+      "result_sha256": "ecbc367c4113cb163b3c658661da86b1e4ec789b1067cb6e79fabcdde6b95fc5",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.4030209858901799,
+        "p95": 22.766790934838355,
+        "p99": 28.79195800051093,
+        "max": 37.90100000333041,
+        "mean": 5.690691326890374
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.203104999999999,
+      "load_before": [
+        241.02294921875,
+        236.82470703125,
+        214.40185546875
+      ],
+      "load_after": [
+        239.9951171875,
+        236.81298828125,
+        214.7900390625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.95266597624868,
+        "p95": 32.38291700836271,
+        "p99": 33.965167007409036,
+        "max": 35.58420902118087,
+        "mean": 28.907677421586648
+      },
+      "scroll_gap_ms": {
+        "n": 147,
+        "p50": 6.28950004465878,
+        "p95": 8.17775004543364,
+        "p99": 10.52191702183336,
+        "max": 19.26279196050018,
+        "mean": 6.292403632059035
+      },
+      "scroll_writes": 148
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-03-before-pagedown/pagedown/result.json",
+      "result_sha256": "b73bd59ede429c25db179811ad26e8807ca6124f0c6b05dc05076d4fcd6c6eaa",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.9207499572075903,
+        "p95": 9.061541990377009,
+        "p99": 12.575499946251512,
+        "max": 15.016125049442053,
+        "mean": 3.087682318437146
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.8735840000000028,
+      "load_before": [
+        239.9951171875,
+        236.81298828125,
+        214.7900390625
+      ],
+      "load_after": [
+        237.615234375,
+        236.43359375,
+        214.9140625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.74425007030368,
+        "p95": 30.19645798485726,
+        "p99": 30.336166033521295,
+        "max": 30.763749964535236,
+        "mean": 28.58122983842247
+      },
+      "scroll_gap_ms": {
+        "n": 144,
+        "p50": 6.301854446064681,
+        "p95": 7.331957924179733,
+        "p99": 8.761833072640002,
+        "max": 14.030500082299113,
+        "mean": 6.3161828745958495
+      },
+      "scroll_writes": 145
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-04-before-wheeldown/wheeldown/result.json",
+      "result_sha256": "f6b66d5034afb0d4b89f9d6b1b045b7d425e93196d89d29897f5cc1bf2cadca0",
+      "latency_ms": {
+        "n": 32,
+        "p50": 2.086729451548308,
+        "p95": 12.054792023263872,
+        "p99": 15.636541997082531,
+        "max": 15.863000066019595,
+        "mean": 3.724684942426393
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.0067989999999991,
+      "load_before": [
+        237.615234375,
+        236.43359375,
+        214.9140625
+      ],
+      "load_after": [
+        238.20654296875,
+        236.57568359375,
+        215.09033203125
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.491666005924344,
+        "p95": 30.761958099901676,
+        "p99": 30.87533393409103,
+        "max": 31.13554196897894,
+        "mean": 29.22936022702244
+      },
+      "scroll_gap_ms": {
+        "n": 148,
+        "p50": 6.261833477765322,
+        "p95": 8.046417031437159,
+        "p99": 8.517208974808455,
+        "max": 8.695582975633442,
+        "mean": 6.289367398838638
+      },
+      "scroll_writes": 149
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-04-after-wheeldown/wheeldown/result.json",
+      "result_sha256": "c0fc911840f85e30babb724280a2a5f91701735d1d0e1b6f75464c73f6c47f87",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.5652294969186187,
+        "p95": 26.92487509921193,
+        "p99": 33.04004098754376,
+        "max": 39.21616601292044,
+        "mean": 5.734723905334249
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.7053109999999982,
+      "load_before": [
+        238.20654296875,
+        236.57568359375,
+        215.09033203125
+      ],
+      "load_after": [
+        236.58837890625,
+        236.26708984375,
+        215.10693359375
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.278083005920053,
+        "p95": 30.59933299664408,
+        "p99": 30.929917003959417,
+        "max": 32.51799999270588,
+        "mean": 29.15049864414839
+      },
+      "scroll_gap_ms": {
+        "n": 143,
+        "p50": 6.312417099252343,
+        "p95": 8.01533309277147,
+        "p99": 10.29087498318404,
+        "max": 13.882374973036349,
+        "mean": 6.492675699690891
+      },
+      "scroll_writes": 144
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "typing",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-04-before-typing/typing/result.json",
+      "result_sha256": "5774f3c74efb59bee66d5cca2e807431cf49b2572f8ca989bb237c323ac52205",
+      "latency_ms": {
+        "n": 32,
+        "p50": 2.0477084908634424,
+        "p95": 8.748249965719879,
+        "p99": 14.315125066787004,
+        "max": 15.57974994648248,
+        "mean": 3.1841783675190527
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.5841160000000016,
+      "load_before": [
+        236.58837890625,
+        236.26708984375,
+        215.10693359375
+      ],
+      "load_after": [
+        239.423828125,
+        236.85986328125,
+        215.43994140625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.180165962316096,
+        "p95": 31.965209054760635,
+        "p99": 31.9884589407593,
+        "max": 37.806250038556755,
+        "mean": 28.968954289842756
+      },
+      "scroll_gap_ms": null,
+      "scroll_writes": 0
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "typing",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-04-after-typing/typing/result.json",
+      "result_sha256": "9a8096f708402a7582e5fab11d06a706276e8d19ff00715e065f3a4c75702023",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.0584164992906153,
+        "p95": 3.9410829776898026,
+        "p99": 6.4497500425204635,
+        "max": 8.428792003542185,
+        "mean": 1.786957054719096
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.4797020000000014,
+      "load_before": [
+        239.423828125,
+        236.85986328125,
+        215.43994140625
+      ],
+      "load_after": [
+        242.8330078125,
+        237.60888671875,
+        215.82958984375
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.412708012387156,
+        "p95": 31.62258304655552,
+        "p99": 31.710500014014542,
+        "max": 31.793874921277165,
+        "mean": 28.895087356138372
+      },
+      "scroll_gap_ms": null,
+      "scroll_writes": 0
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "pageup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-04-before-pageup/pageup/result.json",
+      "result_sha256": "7851b8284de7720ba954886b20d1fd7a63454ee4560f5ad036382713ff7da99b",
+      "latency_ms": {
+        "n": 32,
+        "p50": 8.323979505803436,
+        "p95": 37.260166951455176,
+        "p99": 37.73862507659942,
+        "max": 41.62770800758153,
+        "mean": 12.437386696547037
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.330931999999999,
+      "load_before": [
+        242.8330078125,
+        237.60888671875,
+        215.82958984375
+      ],
+      "load_after": [
+        242.68603515625,
+        237.6650390625,
+        215.97705078125
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.185707913711667,
+        "p95": 30.32687504310161,
+        "p99": 32.65087504405528,
+        "max": 40.24504194967449,
+        "mean": 29.143744647773282
+      },
+      "scroll_gap_ms": {
+        "n": 144,
+        "p50": 6.305999995674938,
+        "p95": 7.896541967056692,
+        "p99": 11.544583016075194,
+        "max": 15.057125012390316,
+        "mean": 6.4487282983868175
+      },
+      "scroll_writes": 145
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "pageup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-04-after-pageup/pageup/result.json",
+      "result_sha256": "2c53e14dc5e214be1f5b910e5ee522198fcf75607c2946b05490ea05957eefa0",
+      "latency_ms": {
+        "n": 32,
+        "p50": 4.03087493032217,
+        "p95": 23.79483391996473,
+        "p99": 43.63220802042633,
+        "max": 44.5657919626683,
+        "mean": 8.014281225769082
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.8395630000000001,
+      "load_before": [
+        242.68603515625,
+        237.6650390625,
+        215.97705078125
+      ],
+      "load_after": [
+        244.47265625,
+        238.11865234375,
+        216.26416015625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.44033297151327,
+        "p95": 30.45608289539814,
+        "p99": 30.747042037546635,
+        "max": 31.619040993973613,
+        "mean": 28.341798389691018
+      },
+      "scroll_gap_ms": {
+        "n": 144,
+        "p50": 6.297520536463708,
+        "p95": 7.393790991045535,
+        "p99": 9.511791984550655,
+        "max": 9.667209000326693,
+        "mean": 6.274131944034404
+      },
+      "scroll_writes": 145
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-04-before-pagedown/pagedown/result.json",
+      "result_sha256": "110d400f341f4fe05bc734a04123001393996ed4d01138aa85bc1308f907dc5d",
+      "latency_ms": {
+        "n": 32,
+        "p50": 2.6109794853255153,
+        "p95": 28.516499907709658,
+        "p99": 29.861291986890137,
+        "max": 34.81133293826133,
+        "mean": 7.2180051101895515
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 2.113363999999999,
+      "load_before": [
+        244.47265625,
+        238.11865234375,
+        216.26416015625
+      ],
+      "load_after": [
+        255.86865234375,
+        240.89990234375,
+        217.634765625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.59104091860354,
+        "p95": 30.651208013296127,
+        "p99": 30.820250045508146,
+        "max": 31.360665918327868,
+        "mean": 28.89228764651043
+      },
+      "scroll_gap_ms": {
+        "n": 148,
+        "p50": 6.268625031225383,
+        "p95": 7.668124977499247,
+        "p99": 8.63508298061788,
+        "max": 8.791791973635554,
+        "mean": 6.2246784871456695
+      },
+      "scroll_writes": 149
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-04-after-pagedown/pagedown/result.json",
+      "result_sha256": "d92b6804fced6ebdd51b344c3c7c7afd00dc5f5add40ae1f8424ef3a0fb89ad4",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.5477705746889114,
+        "p95": 53.0439589638263,
+        "p99": 58.25454194564372,
+        "max": 80.86245902813971,
+        "mean": 11.952794317039661
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 1.1871890000000036,
+      "load_before": [
+        255.86865234375,
+        240.89990234375,
+        217.634765625
+      ],
+      "load_after": [
+        259.36669921875,
+        242.125,
+        218.34033203125
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 28.553958050906658,
+        "p95": 30.039833043701947,
+        "p99": 30.04025004338473,
+        "max": 30.17479192931205,
+        "mean": 28.344451611290776
+      },
+      "scroll_gap_ms": {
+        "n": 146,
+        "p50": 6.150229484774172,
+        "p95": 7.873499998822808,
+        "p99": 8.72637506108731,
+        "max": 10.682207997888327,
+        "mean": 6.202500000155901
+      },
+      "scroll_writes": 147
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "wheelup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-04-before-wheelup/wheelup/result.json",
+      "result_sha256": "24d4d8173d10845d7652fdca75650b630a7c7723689878d1f286988662cab15b",
+      "latency_ms": {
+        "n": 32,
+        "p50": 2.430125023238361,
+        "p95": 29.15954205673188,
+        "p99": 41.785458102822304,
+        "max": 73.37983406614512,
+        "mean": 7.594776037876727
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.8068869999999961,
+      "load_before": [
+        259.36669921875,
+        242.125,
+        218.34033203125
+      ],
+      "load_after": [
+        261.7392578125,
+        242.90283203125,
+        218.75390625
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.4915420236066,
+        "p95": 31.43708291463554,
+        "p99": 31.443416024558246,
+        "max": 32.239958993159235,
+        "mean": 28.905646518744046
+      },
+      "scroll_gap_ms": {
+        "n": 147,
+        "p50": 6.093209027312696,
+        "p95": 7.9431249760091305,
+        "p99": 9.344000020064414,
+        "max": 10.31104102730751,
+        "mean": 6.247278061365949
+      },
+      "scroll_writes": 148
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "wheelup",
+      "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-ff1-active-burst/pair-04-after-wheelup/wheelup/result.json",
+      "result_sha256": "cc06ea6e44af94406a91983a0e87ab56694f9fe5385015ec39fe8322fd74f45a",
+      "latency_ms": {
+        "n": 32,
+        "p50": 1.9652085029520094,
+        "p95": 29.262666939757764,
+        "p99": 32.1129160001874,
+        "max": 39.955458021722734,
+        "mean": 6.924414021341363
+      },
+      "errors": [],
+      "cpu_lifecycle_s": 0.5996089999999974,
+      "load_before": [
+        261.7392578125,
+        242.90283203125,
+        218.75390625
+      ],
+      "load_after": [
+        262.080078125,
+        243.2861328125,
+        219.0302734375
+      ],
+      "typing_gap_ms": {
+        "n": 31,
+        "p50": 29.31145904585719,
+        "p95": 30.329499975778162,
+        "p99": 30.943165998905897,
+        "max": 31.20341699104756,
+        "mean": 29.30473387166257
+      },
+      "scroll_gap_ms": {
+        "n": 145,
+        "p50": 6.303207948803902,
+        "p95": 8.560082991607487,
+        "p99": 11.270874994806945,
+        "max": 12.410875060595572,
+        "mean": 6.433866379365068
+      },
+      "scroll_writes": 146
+    }
+  ]
+}

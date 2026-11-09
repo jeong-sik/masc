@@ -1,0 +1,11 @@
+{
+  "at": "2026-11-09T08:47:13.987745+00:00",
+  "destination": "/Users/dancer/.local/bin/masc-tui",
+  "before_source": "9d67e41d1c4f43fa7522e41a5f4dbd0fe8f3302a",
+  "before_sha256": "a816b8a90e85d0f6cbc5d5b3a874509fa46d73dff72b8477a658dfd7b1ba8431",
+  "after_source": "ff1cc7700b081c6ce7f1abebea42ef352d518ed5",
+  "after_sha256": "1181f65f190aa4894aa6d1067448159cdd3acd4b06bf6eaf4af1223a078e4bd6",
+  "backup": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/installed-backup-a816b8a90e85d0f6",
+  "backup_sha256": "a816b8a90e85d0f6cbc5d5b3a874509fa46d73dff72b8477a658dfd7b1ba8431",
+  "scope": "Only the executable was replaced. No running client was signaled and no server file was changed."
+}

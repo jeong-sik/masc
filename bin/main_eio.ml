@@ -2821,6 +2821,25 @@ let runtime_probe_cmd_exit base_path runtime_id =
                 runtime_id;
               3
           | Runtime_execution.Claude_code exec ->
+              (* HIGH-RISK-UNREVIEWED: a probe is a call of the operator. As a
+                 host tool it publishes its access after its own judgment, and
+                 the client starts only on an account that access allows
+                 (plan D2-5). *)
+              (match
+                 Result.bind
+                   (Runtime_account_access.publish_host_tool ~base_path
+                      ~config_dir:(Env_config_core.masc_config_dir_opt ()))
+                   (fun () ->
+                     Runtime_account_access.authorize Runtime_account_access.Operator_call
+                       (Runtime_account_access.seal exec.account_home)
+                     |> Result.map_error (fun refusal ->
+                       Runtime_account_access.refusal_to_string refusal, []))
+               with
+               | Error (first, rest) ->
+                   print_string "account-not-authorized\n";
+                   Printf.eprintf "%s\n" (String.concat "; " (first :: rest));
+                   5
+               | Ok account ->
               Eio_main.run @@ fun env ->
               let bound =
                 Float.min runtime_probe_subscription_timeout_s exec.timeout_s
@@ -2828,7 +2847,6 @@ let runtime_probe_cmd_exit base_path runtime_id =
               let config =
                 { (Runtime_claude_code.default_config ~cwd:base_path) with
                   cli_path = exec.cli_path
-                ; account_home = Runtime_official_account.Captured exec.account_home
                 ; model = exec.model
                 ; admission_timeout_s = bound
                 ; timeout_s = Some bound
@@ -2841,6 +2859,7 @@ let runtime_probe_cmd_exit base_path runtime_id =
                      ~grace_seconds:Process_eio.child_exit_grace_seconds)
                    ~clock:(Eio.Stdenv.clock env)
                    ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
+                   ~account
                    config
                with
                | Ok sub ->
@@ -2852,7 +2871,7 @@ let runtime_probe_cmd_exit base_path runtime_id =
                | Error e ->
                    print_string "not-authenticated\n";
                    Printf.eprintf "%s\n" (Runtime_claude_code.error_to_string e);
-                   1)
+                   1))
           | Runtime_execution.Codex_app_server exec ->
               Eio_main.run @@ fun env ->
               let bound =

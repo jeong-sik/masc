@@ -604,6 +604,12 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - D2-3 `Runtime_account_access`(봉인, 인가, 게시)와 게시 지점(owner state). 단일 사용자만 연다.
   - D2-4 다계정 인가(Keeper 턴, 자기 계정)와 홈 경로 하나(`Runtime_account_home_layout`). 미리보기가 `Multi_account`를 게시한다. 로그인 확인과 verify가 요청을 넘긴다(단일 사용자 setup은 `Operator_call`, 사람은 `Own_account`). `runtime-verify`와 setup의 모델 확인은 검증을 시작하는 함수(`verify_runtime_execution`) 한 곳에서 `tool` 판정 뒤 게시한다. 처음에는 `runtime-verify`만 게시해서 setup의 확인이 공식 CLI 런타임에서 늘 `Not_published`로 끝났다(#50421 리뷰). 클라이언트가 아직 config로 계정을 받으므로 인가된 계정을 그 칸에 넣는다(D2-5·D2-6에서 지운다). 2026-11-09 순서를 바꿨다. 클라이언트를 먼저 바꾸면 미리보기가 게시하지 않아 사람의 로그인 확인과 verify가 중간 층에서 멈춘다.
   - D2-5 Claude Code 클라이언트가 `authorized`를 받는다. 호출처(Keeper 갈래, Fusion, capability probe, verify, dashboard probe, CLI probe, login)를 같이 바꾼다. Keeper 턴 드라이버는 시도마다 인가를 받는다.
+    - client `config`에 계정 칸이 없다. CLI를 띄우는 함수(`run_turn`, `probe_subscription`)가 인가된 계정을 받고, 환경은 그 값에서만 나온다. 부를 때 환경을 고르던 선택은 Claude Code에 없다. login은 `login_environment ~account_home`으로 홈을 받는다.
+    - 드라이버의 `walk_owner`가 누구의 턴인지 든다. `Fleet_keeper_turn {keeper_name; channel}`은 `Keeper_turn`, `One_shot_walk`(완료 리뷰 등)는 `Operator_call`로 묻는다. 실패 표시의 recorder는 Keeper 이름에서 만든다(`keeper_recorder`). 같은 값을 두 번 들지 않는다.
+    - 채널은 `Turn_record.turn_kind`에서 온다. Keeper에게 온 메시지(`handle_keeper_msg`)는 `Direct`, 나머지 턴은 `Autonomous`다. 런타임이 그 밖의 종류를 가르지 않는다.
+    - 드라이버가 거절하면 그 시도는 `Agent_core.Error.Config (InvalidConfig {field = "account"})`로 끝난다. `provider_config_transform` 거절과 같은 모양이다. 분류는 `Config_mismatch`라서 다른 후보로 넘기지 않고, 공급자 증거(실패 표시, 계정 거절)를 남기지 않는다. 다계정에서는 배정된 Runtime 하나만 허용되므로 넘겨도 다른 후보는 거절된다.
+    - Fusion 패널, capability probe, dashboard probe, `masc runtime-probe`는 `Operator_call`이다. 거절은 각자 이미 있는 "프로세스를 띄우지 않음" 결과로 낸다(Fusion `Setup_failure`, capability probe `Account_not_authorized`, `runtime-probe`는 `account-not-authorized`와 종료 코드 5). dashboard probe의 로그인 상태는 대시보드가 닫힌 목록으로 읽으므로 `invalid_config`에 거절 이유를 붙인다. 단일 사용자 서버는 owner state를 열 때 게시하고 모든 요청을 허용하므로 거기서는 거절이 나오지 않는다.
+    - 서버 밖에서 CLI를 띄우는 bin은 base path를 정한 뒤 `publish_host_tool`로 게시한다: `masc runtime-probe`, `masc-fusion-run`, `masc-lane-cli-probe`, `masc-keeper-capability-probe`, `masc-librarian-continuity`. 시험 실행 파일은 `Masc_test_deps.publish_single_user_access`로 게시한다.
   - D2-6 Codex 클라이언트가 같은 일을 한다.
   - D2-7 테이블이 봉인을 든다(`Runtime_execution`). 호출처는 테이블의 자격 증명을 더 꺼내지 못한다.
   - D2-8 미리보기 "내 Keeper 한 번 돌리기". 사람이 브라우저로 확인한다.

@@ -66,9 +66,9 @@ let materialize ?account_home client =
 let child_environment runtime =
   match runtime.Runtime_instance.execution with
   | Runtime_execution.Claude_code execution ->
-    (match Runtime_claude_code.client_environment (Runtime_official_account.Captured execution.account_home) with
-     | Ok environment -> environment
-     | Error error -> fail (Runtime_claude_code.error_to_string error))
+    (* The Claude Code client starts its CLI with the environment of the
+       captured account it is authorized on, unchanged. *)
+    Runtime_official_account.environment execution.account_home
   | Codex_app_server execution ->
     (match Runtime_codex_app_server.client_environment (Runtime_official_account.Captured execution.account_home) with
      | Ok environment -> environment
@@ -158,24 +158,21 @@ let test_environment_copy client () =
       check (option string) "spawn-array mutation cannot alter the admitted context"
         (Some home) (env_value "HOME" (child_environment runtime))))
 
-let current_environment = function
-  | Claude ->
-    (match Runtime_claude_code.client_environment (Runtime_official_account.Current None) with
-     | Ok environment -> environment
-     | Error error -> fail (Runtime_claude_code.error_to_string error))
-  | Codex ->
-    (match Runtime_codex_app_server.client_environment (Runtime_official_account.Current None) with
-     | Ok environment -> environment
-     | Error error -> fail (Runtime_codex_app_server.error_to_string error))
+(* Only Codex still selects its account at call time; a Claude Code turn or
+   probe starts on an authorized captured account (plan D2-5). *)
+let current_environment () =
+  match Runtime_codex_app_server.client_environment (Runtime_official_account.Current None) with
+  | Ok environment -> environment
+  | Error error -> fail (Runtime_codex_app_server.error_to_string error)
 
-let test_current_call_timing client () =
+let test_current_call_timing () =
   with_directory (fun first -> with_directory (fun second ->
     with_env (("HOME", Some first) :: environment) (fun () ->
       check (option string) "direct current call starts with the caller's HOME"
-        (Some first) (env_value "HOME" (current_environment client));
+        (Some first) (env_value "HOME" (current_environment ()));
       with_env ["HOME", Some second] (fun () ->
         check (option string) "a later direct current call reads its current declaration"
-          (Some second) (env_value "HOME" (current_environment client))))))
+          (Some second) (env_value "HOME" (current_environment ()))))))
 
 let test_claude_credential_diagnosis () =
   with_directory (fun home ->
@@ -384,8 +381,7 @@ let () = run "native account selection"
    "captured context boundaries",
     [test_case "Claude spawn environment is a copy" `Quick (test_environment_copy Claude);
      test_case "Codex spawn environment is a copy" `Quick (test_environment_copy Codex);
-     test_case "Claude direct current calls keep call-time selection" `Quick (test_current_call_timing Claude);
-     test_case "Codex direct current calls keep call-time selection" `Quick (test_current_call_timing Codex);
+     test_case "Codex direct current calls keep call-time selection" `Quick test_current_call_timing;
      test_case "Claude refusal diagnosis retains admitted credentials" `Quick test_claude_credential_diagnosis;
      test_case "Codex private home blocks unconfigured credentials" `Quick (test_private_codex_environment false);
      test_case "Codex private home retains declared captured credentials" `Quick (test_private_codex_environment true);

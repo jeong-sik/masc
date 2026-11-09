@@ -567,6 +567,18 @@ let () =
      server. *)
   Eio_context.set_env env;
   Eio_context.set_clock (Eio.Stdenv.clock env);
+  (* HIGH-RISK-UNREVIEWED: for the same reason the harness publishes the
+     account access of a host tool after its judgment of the base path, or
+     every official-client panelist is refused before its CLI starts (plan
+     D2-5). *)
+  (match
+     Runtime_account_access.publish_host_tool ~base_path
+       ~config_dir:(Env_config_core.masc_config_dir_opt ())
+   with
+   | Ok () -> ()
+   | Error (first, rest) ->
+     Printf.eprintf "fusion_run: %s\n" (String.concat "; " (first :: rest));
+     exit 1);
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
   (match Runtime.init_default_strict ~config_path with
    | Error msg ->

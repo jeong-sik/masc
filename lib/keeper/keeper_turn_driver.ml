@@ -236,13 +236,20 @@ type lane_terminal_error =
    therefore resolvable-active, then resolvable-exhausted, then unresolvable —
    declared relative order preserved within each class (PR #28219 review). *)
 (* Who a walk runs for. A fleet Keeper's turn comes back every cycle, so the
-   failures it sees name it as their recorder. A one-shot walk (a completion
-   review) never walks again: a mark naming it would have no one to retry it,
-   so it records no failed-attempt mark (timeout, 5xx, 529, network). Its 429 and
-   402 evidence is recorded as any walk's, and an answer it receives clears
-   the candidate's evidence (RFC-0458 §3.4 rule 5). *)
+   failures it sees name the Keeper as their recorder. A one-shot walk (a
+   completion review) never walks again: a mark naming it would have no one to
+   retry it, so it records no failed-attempt mark (timeout, 5xx, 529, network).
+   Its 429 and 402 evidence is recorded as any walk's, and an answer it
+   receives clears the candidate's evidence (RFC-0458 §3.4 rule 5). An
+   official CLI starts for a fleet turn as that Keeper's turn on the channel
+   that started it, and for a one-shot walk as an operator call (plan D2-5). *)
+type fleet_turn =
+  { keeper_name : string
+  ; channel : Authz_types.Channel.t
+  }
+
 type walk_owner =
-  | Fleet_keeper_turn of Runtime_candidate_backpressure.recorder
+  | Fleet_keeper_turn of fleet_turn
   | One_shot_walk
 
 (* Whose walk is ordering the lane. A failed attempt holds until its candidate
@@ -258,8 +265,28 @@ type walk_start = Runtime_candidate_standing.walk_start =
   | Every_mark_demotes
 
 let fresh_walk_of = function
-  | Fleet_keeper_turn recorder -> Fresh_walk_by recorder
+  | Fleet_keeper_turn { keeper_name; channel = _ } ->
+    Fresh_walk_by (Runtime_candidate_backpressure.keeper_recorder ~keeper_name)
   | One_shot_walk -> Every_mark_demotes
+
+let account_request walk_owner ~runtime_id =
+  match walk_owner with
+  | Fleet_keeper_turn { keeper_name; channel } ->
+    Runtime_account_access.Keeper_turn { keeper_name; channel; runtime_id }
+  | One_shot_walk -> Runtime_account_access.Operator_call
+
+(* HIGH-RISK-UNREVIEWED: an attempt starts an official CLI only on an account
+   the access authorized for this walk (plan D2-5). The refusal is masc's own,
+   made before anything is sent, so it is the non-rotating local refusal of a
+   provider_config_transform: no provider evidence names the candidate. *)
+let authorize_account walk_owner ~runtime_id account =
+  Runtime_account_access.authorize
+    (account_request walk_owner ~runtime_id)
+    (Runtime_account_access.seal account)
+  |> Result.map_error (fun refusal ->
+    Agent_core.Error.Config
+      (Agent_core.Error.InvalidConfig
+         { field = "account"; detail = Runtime_account_access.refusal_to_string refusal }))
 
 (* How long a rate observation holds its path back: the provider's usable
    wait, or the throttle floor (RFC-provider-path-rest §3.3). The walk order
@@ -960,11 +987,12 @@ let attempt_runtime_candidates
        in
        let note_failed_attempt failure =
          match walk_owner with
-         | Fleet_keeper_turn recorder ->
+         | Fleet_keeper_turn { keeper_name; channel = _ } ->
            Option.iter
              (fun candidate ->
                 Runtime_candidate_backpressure.note_failed_attempt
-                  ~candidate ~failure ~recorded_by:recorder)
+                  ~candidate ~failure
+                  ~recorded_by:(Runtime_candidate_backpressure.keeper_recorder ~keeper_name))
              attempt_candidate_backpressure
          | One_shot_walk -> ()
        in
@@ -3334,6 +3362,13 @@ let run_named
           official_model_input_observation hooks
         in
         let run_claude ~initial_messages () =
+          match
+            authorize_account walk_owner ~runtime_id:attempt_runtime_id config.account_home
+          with
+          | Error error -> {Keeper_claude_code_runtime.result=Error error;
+              pending_result_receipts=None;settled_session=None;
+              effect_disposition=Keeper_provider_attempt_effect.No_effect_observed}
+          | Ok account ->
           match on_guidance_prepared () with
           | Error error -> {Keeper_claude_code_runtime.result=Error error;
               pending_result_receipts=None;settled_session=None;
@@ -3414,6 +3449,7 @@ let run_named
             ~event_bus
             ~raw_trace
             ~on_event
+            ~account
             ~config
             ()
         in

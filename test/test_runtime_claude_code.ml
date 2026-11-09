@@ -230,6 +230,18 @@ let with_fixture ?auth_json ?before_initialize_response ?close_before_user steps
    two kinds cannot share one number. *)
 let window_outlasting_process_start_s = 5.0
 
+(* The account a fixture CLI starts on: the declared home, or the home of the
+   process environment when none is declared, authorized for an operator
+   call. *)
+let fixture_account ?account_home () =
+  match
+    Runtime_official_account.capture ~client:Runtime_official_account.Claude_code
+      ~declaration:account_home
+  with
+  | Ok captured -> Masc_test_deps.authorized_account captured
+  | Error detail -> failwith detail
+;;
+
 let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
     ?(native = Runtime_native_tools.claude_code_default)
     ?account_home
@@ -242,7 +254,6 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
     let config =
       { (Runtime_claude_code.default_config ~cwd:"/tmp") with
         cli_path = path
-      ; account_home = Runtime_official_account.Current account_home
       ; native
       ; admission_timeout_s = Option.value admission_timeout_s ~default:timeout_s
       ; timeout_s = if no_turn_deadline then None else Some timeout_s
@@ -276,6 +287,7 @@ let run_fixture ?(dynamic_tools = []) ?session_mode ?(timeout_s = 2.0)
       ?on_prompt_sent
       ?on_spawned
       ?on_context_submission
+      ~account:(fixture_account ?account_home ())
       config
       ~prompt
       ~images)
@@ -703,6 +715,7 @@ let test_callback_timeout_origin_is_preserved_without_deadline () =
              ~clock:(Eio.Stdenv.clock env)
              ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
              ~on_session_ready:(fun ~session_id:_ -> raise Eio.Time.Timeout)
+             ~account:(fixture_account ())
              config
              ~prompt:"fixture"
              ~images:[]
@@ -726,6 +739,7 @@ let test_operator_interrupt_callback_keeps_typed_cause () =
             ~clock:(Eio.Stdenv.clock env)
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
             ~on_session_ready:(fun ~session_id:_ -> raise combined)
+            ~account:(fixture_account ())
             config ~prompt:"fixture" ~images:[] |> ignore);
         None
       with exn -> Some exn in
@@ -1087,6 +1101,7 @@ let test_missing_cli_is_not_reported_as_logout () =
         ~mgr:(Eio.Stdenv.process_mgr env)
         ~clock:(Eio.Stdenv.clock env)
         ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+        ~account:(fixture_account ())
         config)
   in
   match outcome with
@@ -1118,6 +1133,7 @@ let test_auth_status_reaches_a_regular_file () =
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+          ~account:(fixture_account ())
           config)
     in
     match outcome with
@@ -4557,6 +4573,7 @@ let test_live_subscription () =
           ~mgr:(Eio.Stdenv.process_mgr env)
           ~clock:(Eio.Stdenv.clock env)
           ~cwd:Eio.Path.(Eio.Stdenv.fs env / "/tmp")
+          ~account:(fixture_account ())
           config
           ~prompt:"Reply with exactly MASC_CLAUDE_LIVE_OK"
           ~images:[])
@@ -4790,6 +4807,7 @@ let test_provider_retry_with_duplicate_field_is_ignored_without_failing_turn () 
 ;;
 
 let () =
+  Masc_test_deps.publish_single_user_access ();
   run
     "runtime_claude_code"
     [ ( "provider retry",

@@ -186,6 +186,7 @@ type invocation_error =
   | No_tool_channel of string
   | Not_muse_lane of string
   | Muse_home_unavailable of string
+  | Account_not_authorized of string
   | Not_antigravity_lane of string
   | Antigravity_home_unavailable of string
   | Tool_schema_rejected of string
@@ -208,6 +209,8 @@ let invocation_error_to_string = function
     Printf.sprintf "%s has no channel for MASC tools, so no probe can observe a call" label
   | Not_muse_lane label -> Printf.sprintf "%s is not the Muse lane" label
   | Muse_home_unavailable detail -> Printf.sprintf "Muse probe home unavailable: %s" detail
+  | Account_not_authorized detail ->
+    Printf.sprintf "the probe may not start the client on the account of this runtime: %s" detail
   | Not_antigravity_lane label ->
     Printf.sprintf "%s is not the antigravity lane" label
   | Antigravity_home_unavailable detail ->
@@ -487,10 +490,19 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                 [--exclude-dynamic-system-prompt-sections] names.
 
                 Session mode is left at its default -- a fresh session per
-                probe, abandoned when the turn ends. *)
+                probe, abandoned when the turn ends.
+
+                HIGH-RISK-UNREVIEWED: a probe is a call of the operator, so the
+                CLI starts only where the access allows one (plan D2-5). *)
+             (match
+                Runtime_account_access.authorize Runtime_account_access.Operator_call
+                  (Runtime_account_access.seal exec.account_home)
+              with
+              | Error refusal ->
+                Error (Account_not_authorized (Runtime_account_access.refusal_to_string refusal))
+              | Ok account ->
              let config : Runtime_claude_code.config =
                { cli_path = exec.cli_path
-               ; account_home = Runtime_official_account.Captured exec.account_home
                ; cwd = base_path
                ; model = exec.model
                ; native = Runtime_native_tools.claude_code_default
@@ -514,6 +526,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                   ~mgr
                   ~clock
                   ~cwd:Eio.Path.(fs / base_path)
+                  ~account
                   config
                   ~prompt
                   ~images:[]
@@ -529,7 +542,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                      ~seen
                      ~elapsed_s:(now () -. started)
                      ~text:(Some turn.text)
-                     ~dynamic_tool_calls:turn.dynamic_tool_calls))
+                     ~dynamic_tool_calls:turn.dynamic_tool_calls)))
            | Runtime_execution.Codex_app_server exec ->
              let config : Runtime_codex_app_server.config =
                { cli_path = exec.cli_path

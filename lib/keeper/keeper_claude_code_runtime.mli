@@ -160,6 +160,10 @@ val run :
   event_bus:Agent_core.Event_bus.t option ->
   raw_trace:Agent_core.Raw_trace.t option ->
   on_event:(Agent_core.Types.sse_event -> unit) option ->
+  account:Runtime_claude_code.authorized_account ->
+  (* The account the CLI starts on ({!Runtime_account_access.authorize}). The
+     turn reads the account home, its environment and its quota window from
+     this value, not from [config]. *)
   config:Runtime_execution.claude_code ->
   unit ->
   attempt_outcome

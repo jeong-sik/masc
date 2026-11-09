@@ -185,6 +185,8 @@ let invocation_error_json (err : Probe.invocation_error) =
     `Assoc [ "kind", `String "not_muse_lane"; "lane", `String lane ]
   | Probe.Muse_home_unavailable detail ->
     `Assoc [ "kind", `String "muse_home_unavailable"; "detail", `String detail ]
+  | Probe.Account_not_authorized detail ->
+    `Assoc [ "kind", `String "account_not_authorized"; "detail", `String detail ]
   | Probe.Not_antigravity_lane lane ->
     `Assoc [ "kind", `String "not_antigravity_lane"; "lane", `String lane ]
   | Probe.Antigravity_home_unavailable detail ->
@@ -400,6 +402,15 @@ let () =
    | () -> ()
    | exception Env_config_core.Config_error message -> error message);
   Server_runtime_bootstrap.bootstrap_prompt_registry_from_binary ~base_path;
+  (* HIGH-RISK-UNREVIEWED: a probe is a call of the operator. This host tool
+     publishes its account access after its judgment of the base path, or the
+     probe is refused before an official CLI starts (plan D2-5). *)
+  (match
+     Runtime_account_access.publish_host_tool ~base_path
+       ~config_dir:(Env_config_core.masc_config_dir_opt ())
+   with
+   | Ok () -> ()
+   | Error (first, rest) -> error (String.concat "; " (first :: rest)));
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
   let cfg =
     if String.trim cfg.prompt <> "" then cfg

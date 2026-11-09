@@ -3327,6 +3327,7 @@ let run_direct_attempt
                     ~event_bus:None
                     ~raw_trace:None
                     ~on_event
+                    ~account:(Masc_test_deps.authorized_account config.account_home)
                     ~config
                     ())))))
 ;;
@@ -7129,6 +7130,7 @@ let () =
      reads like a lifecycle regression and has already been misattributed as
      one. Sibling keeper suites pin the same directory the same way. *)
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  Masc_test_deps.publish_single_user_access ();
   run
     "keeper_claude_code_runtime"
     [ ( "native effort authority",

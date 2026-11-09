@@ -186,7 +186,6 @@ let probe_claude ~mgr ~clock ~cwd ~process_cwd ~runtime_id ~model
     (config : Runtime_execution.claude_code) =
   let probe_config : Runtime_claude_code.config =
     { cli_path = config.cli_path
-    ; account_home = Runtime_official_account.Captured config.account_home
     ; cwd
     ; model = config.model
     ; native = Runtime_native_tools.claude_code_default
@@ -203,11 +202,31 @@ let probe_claude ~mgr ~clock ~cwd ~process_cwd ~runtime_id ~model
       ; output_schema = None
     }
   in
+  (* HIGH-RISK-UNREVIEWED: a dashboard probe is a call of the operator (plan
+     D2-5). A refusal starts no CLI. The probe's vocabulary has no status for
+     it, so it answers as a configuration the probe cannot run, with the
+     refusal as its detail. *)
+  match
+    Runtime_account_access.authorize Runtime_account_access.Operator_call
+      (Runtime_account_access.seal config.account_home)
+  with
+  | Error refusal ->
+    response_json
+      ~runtime_id
+      ~client_kind:"claude_code"
+      ~model
+      ~login:
+        (failed_login_json
+           ~status:"invalid_config"
+           ~detail:(Runtime_account_access.refusal_to_string refusal))
+      ~client:empty_client_json
+  | Ok account ->
   match
     Runtime_claude_code.probe_subscription
       ~mgr
       ~clock
       ~cwd:process_cwd
+      ~account
       probe_config
   with
   | Ok measured ->

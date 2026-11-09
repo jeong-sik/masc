@@ -20,7 +20,6 @@ type t =
   ; unknown_tool_not_bare : unit -> string
   ; handoff_description : name:string -> description:string -> string
   ; handoff_prompt_param_description : unit -> string
-  ; agent_tool_prompt_param_description : unit -> string
   }
 
 let defaults =
@@ -50,7 +49,6 @@ let defaults =
   ; handoff_description =
       (fun ~name ~description -> Printf.sprintf "Hand off to %s: %s" name description)
   ; handoff_prompt_param_description = (fun () -> "Instructions for the sub-agent")
-  ; agent_tool_prompt_param_description = (fun () -> "The prompt to send to the agent")
   }
 ;;
 

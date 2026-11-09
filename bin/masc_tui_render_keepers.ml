@@ -1223,6 +1223,9 @@ let keeper_story_lines (state : state) ~now ~inner (row : Keeper_list_model.row)
     (match past_parts with [] -> [] | _ -> [ join past_parts ])
     @ Option.to_list (Masc_tui_render_keeper_story.last_wake_entry state ~now ~keeper_name)
     @ Option.to_list
+        (Masc_tui_render_keeper_story.turns_entry state ~now
+           ~cells:(max 0 (inner - story_label_cells)) ~keeper_name)
+    @ Option.to_list
         (Option.map
            (fun sentence -> Theme.warn () ^ sentence ^ Ansi.reset)
            (keeper_row_trail_sentence ~age:(keeper_trail_age ~now) row))

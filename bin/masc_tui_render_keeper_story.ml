@@ -4,13 +4,13 @@ module Message_layout = Masc_tui_message_layout
 module Story = Masc_tui_keeper_story
 module Memory_reading = Masc_tui_keeper_memory_reading
 
-(* The window is a rule, a title and up to seven lines: the story page of a
-   failing Keeper with a last wake is that long. The list keeps four rows
-   whenever the window can keep its own four beside them, which takes eight
-   rows. On a shorter screen the window takes every row and covers the list --
-   the overlay RFC-0515 section 2.5 gives a screen too short for both -- rather
-   than leave a list of one to three rows. *)
-let target_rows = 9
+(* The window is a rule, a title and up to eight lines: the story page of a
+   failing Keeper with a last wake and its newest turns is that long. The list
+   keeps four rows whenever the window can keep its own four beside them, which
+   takes eight rows. On a shorter screen the window takes every row and covers
+   the list -- the overlay RFC-0515 section 2.5 gives a screen too short for
+   both -- rather than leave a list of one to three rows. *)
+let target_rows = 10
 let least_rows = 4
 let list_floor = 4
 
@@ -244,6 +244,45 @@ let last_wake_entry (state : Masc_tui_types.state) ~now ~keeper_name =
             (* The earlier reading found no wake; whether one came since is
                not known. *)
             | Refresh_failed _ -> Some (warn "last wake unknown, the schedule read failed")))
+;;
+
+(* One turn the way the page tells it: the stop reason as the receipt wrote it
+   and how long ago the turn ended. A record without a stop reason is told as
+   that, in the warning colour. No reason is sorted into ok or failed here. *)
+let turn_text ~now (turn : Masc_tui_keeper_turns.turn) =
+  let age = ago ~now turn.at in
+  match turn.stop with
+  | Masc_tui_keeper_turns.Stopped reason ->
+      dim (Printf.sprintf "%s %s" (Terminal_text.single_line reason) age)
+  | Masc_tui_keeper_turns.No_stop_reason -> warn (Printf.sprintf "no stop reason %s" age)
+;;
+
+(* The Keeper's newest turns, newest first, so that a narrow screen leaves out
+   the oldest and not the last. *)
+let turns_entry (state : Masc_tui_types.state) ~now ~cells ~keeper_name =
+  let told ~note turns =
+    match List.rev turns with
+    | [] -> None
+    | newest_first ->
+        let head = dim "last turns" ^ note ^ dim " · " in
+        Some
+          (head
+           ^ Message_layout.join_fitting
+               ~sep:(dim " · ")
+               ~cells:(max 0 (cells - Message_layout.display_width head))
+               (List.map (turn_text ~now) newest_first))
+  in
+  match
+    Masc_tui_fetched.view_for ~equal:String.equal state.keeper_story_turns ~key:keeper_name
+  with
+  | Masc_tui_fetched.Absent -> Some (dim "turns not read yet")
+  | Masc_tui_fetched.Loading -> Some (dim "turns reading…")
+  | Masc_tui_fetched.Ready turns -> told ~note:"" turns
+  (* Whether a turn came since is not known, and nothing held to show. *)
+  | Masc_tui_fetched.Stale ([], _) | Masc_tui_fetched.Failed _ ->
+      Some (warn "turns unknown, the read failed")
+  | Masc_tui_fetched.Stale ((_ :: _ as turns), _) ->
+      told ~note:(warn " (read failed)") turns
 ;;
 
 let schedule_lines (state : Masc_tui_types.state) ~now ~keeper_name =

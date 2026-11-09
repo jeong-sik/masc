@@ -9854,6 +9854,12 @@ type state = {
       section 2.5). The loop closes it once the view is not the Keepers list
       ([reconcile_keeper_story]), and [transition_keeper_view] closes it at
       once. *)
+  (* The newest turns of the Keeper under the cursor, read while the Story
+     window shows its story page (RFC-0515 section 2.5). Keyed by Keeper. *)
+  mutable keeper_story_turns: (string, Masc_tui_keeper_turns.turn list) Masc_tui_fetched.t;
+  (* The read those turns owe: drawing them, a push about the Keeper's turns, a
+     revalidation and a failed read each owe it. *)
+  mutable keeper_story_turns_owed: Masc_tui_owed_read.t;
   mutable keeper_list_sort: Masc_tui_keeper_list_model.sort;
   mutable keeper_list_preference_notice: string option;
   mutable keeper_list_preference_startup_error: string option;
@@ -14807,6 +14813,8 @@ let suspend_workspace_readings state =
   state.schedules_agenda_owed <- Masc_tui_owed_read.settled;
   state.schedules_page_owed <- Masc_tui_owed_read.settled;
   state.keeper_schedules_owed <- None;
+  state.keeper_story_turns <- Masc_tui_fetched.suspend state.keeper_story_turns;
+  state.keeper_story_turns_owed <- Masc_tui_owed_read.settled;
   state.chat_native_tasks_owed <- None;
   state.chat_child_content_owed <- None;
   (* Resumed authority reads the Gate again. *)
@@ -20082,6 +20090,8 @@ let create_state
   keeper_list_heading = None;
   keeper_list_folded = [];
   keeper_story = None;
+  keeper_story_turns = Masc_tui_fetched.initial;
+  keeper_story_turns_owed = Masc_tui_owed_read.settled;
   keeper_list_sort = Masc_tui_keeper_list_model.Priority;
   keeper_list_preference_notice = None;
   keeper_list_preference_startup_error = None;

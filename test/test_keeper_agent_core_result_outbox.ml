@@ -43,6 +43,10 @@ let run_case ?(host=false) scenario () =
   retain "original-turn";
   let original_ids = Outbox.receipt_ids (snapshot ()) in
   let requests = ref [] and projections = ref [] and effects = ref 0 in
+  let tool_boundary_saved = ref false in
+  let chat_settled, resolve_chat_settled = Eio.Promise.create () in
+  let chat_id = get (Keeper_operation_id.of_string "chat-after-autonomous-tool") in
+  let owner_ok = function Ok value -> value | Error error -> fail (Keeper_owner.error_to_string error) in
   let answer = {|{"id":"consumer-completed","model":"result-consumer-fixture","choices":[{"index":0,"message":{"role":"assistant","content":"Used the original returned result."},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}|} in
   let tool_response = {|{"id":"independent-tool","model":"result-consumer-fixture","choices":[{"index":0,"message":{"role":"assistant","content":null,"tool_calls":[{"id":"independent-call","type":"function","function":{"name":"independent_work","arguments":"{}"}}]},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":8,"completion_tokens":3,"total_tokens":11}}|} in
   let server = Exact_output_fixture.start_server ~sw ~net:env#net ~clock:env#clock
@@ -111,14 +115,53 @@ streaming = false
        | Ok (Keeper_checkpoint_store.Saved _) ->
          Keeper_turn_driver_try_provider.observe_checkpoint_saved progress snapshot.stage;
          (match snapshot.stage with
+          | After_tool_results_appended -> tool_boundary_saved := true
+          | After_assistant_collected | After_input_wait_changed
+          | After_context_injection | After_rejected_response_dropped -> ());
+         (match snapshot.stage with
           | After_assistant_collected -> incr saved_assistants
           | Agent_core.Agent.After_input_wait_changed | After_tool_results_appended
           | After_context_injection | After_rejected_response_dropped -> ());
          Ok ()
        | Ok (Keeper_checkpoint_store.Stale_noop _) -> incr stale_noops; Ok ()
        | Error _ as error -> error) in
+  let owner = match scenario with
+    | Deferred ->
+      let meta = get (Masc_test_deps.meta_of_json_fixture
+        (`Assoc ["name",`String keeper_name;"trace_id",`String session_id])) in
+      let execute ~sw:_ ~keeper_name:_ ~claim =
+        let operation = match owner_ok (claim ()) with
+          | Some operation -> operation | None -> fail "ready chat was not claimed" in
+        check bool "chat starts after the autonomous tool checkpoint is durable" true !tool_boundary_saved;
+        check int "the autonomous effect finished before chat starts" 1 !effects;
+        Keeper_owner.Operation_succeeded
+          {outcome_ref="turn:" ^ Keeper_operation_id.to_string operation.operation_id} in
+      let on_execution_settled ~keeper_name:_ ~claimed_operation_id:_ ~operations ~execution:_ =
+        Eio.Promise.resolve resolve_chat_settled operations in
+      Some (owner_ok (Keeper_owner.start ~base_path ~sw
+        ~store:{replace=(fun _ -> Ok ());remove=(fun _ -> Ok ())}
+        ~operation_store_path:(Filename.concat base_path "handoff-chat.sqlite3")
+        ~session_root:(Filename.concat base_path "traces") ~now:Time_compat.now
+        ~operation_runner:(Some {ready=(fun ~keeper_name:_ -> true);execute;on_execution_settled})
+        ~on_turn_slot_released:None ~keeper_name ~initial_meta:(Some meta)))
+    | Completed | Projection_failed | Provider_failed | Rejected | Save_failed
+    | Stale_save | Noop_sink | No_sink | Review -> None in
+  let run_on_owner run = match owner with
+    | None -> run ()
+    | Some owner ->
+      match Keeper_owner.run_autonomous_if_idle owner run with
+      | Ok (`Ran result) -> result
+      | Ok (`Busy _) -> fail "the queued chat did not release the autonomous slot"
+      | Ok `Interrupted -> fail "nothing interrupted the autonomous fixture"
+      | Error error -> fail (Keeper_owner.error_to_string error) in
   let tool = Agent_core.Tool.create ~name:"independent_work" ~description:"Complete independent work"
       ~parameters:[] (fun _ -> incr effects;
+        Option.iter (fun owner ->
+          let accepted = owner_ok (Keeper_owner.submit_operation owner ~operation_id:chat_id
+            ~source:(`Assoc ["kind",`String "dashboard"])
+            ~input:(`Assoc ["message",`String "respond while autonomous work is running"])) in
+          check bool "a chat arriving during the tool stays queued until handoff" true
+            (accepted.operation.state = Keeper_chat_operation.Queued)) owner;
         Ok {Agent_core.Types.content="independent-result";content_blocks=None;_meta=None}) in
   let project messages = match scenario with
     | Projection_failed -> Error (Agent_core.Error.Internal "fixture final projection unavailable")
@@ -146,12 +189,15 @@ streaming = false
       ?agent_core_checkpoint:checkpoint ~continue_from_checkpoint:(Option.is_some checkpoint)
       ?cooperative_yield_probe:probe
       ~raw_trace:None ~walk_owner:Keeper_turn_driver.One_shot_walk ~sw ~net:env#net () in
-  let result = run ?probe:(match scenario with Deferred ->
+  let result = run_on_owner (fun () -> run ?probe:(match scenario with Deferred ->
       Some (fun _ -> Keeper_agent_run.For_testing.tool_boundary_state
-        ~repetition_execution:None ~chat_handoff:(fun () -> Ok true)
+        ~repetition_execution:None ~chat_handoff:(fun () ->
+          check bool "the real provider loop probes after its checkpoint save" true !tool_boundary_saved;
+          Keeper_owner.autonomous_chat_handoff_ready (Option.get owner)
+          |> Result.map_error (fun error -> Agent_core.Error.Internal (Keeper_owner.error_to_string error)))
         Keeper_tools_agent_core.Terminal_effect_open)
     | Completed | Projection_failed | Provider_failed | Rejected | Save_failed
-    | Stale_save | Noop_sink | No_sink | Review -> None) () in
+    | Stale_save | Noop_sink | No_sink | Review -> None) ()) in
   (match scenario with
    | Projection_failed | Provider_failed | Rejected | Save_failed ->
      (match result with Error _ -> () | Ok _ -> fail "failed consumer unexpectedly succeeded");
@@ -165,9 +211,22 @@ streaming = false
         fail "consumer did not yield at its settled tool boundary");
      check (list string) "checkpoint keeps the original result pending" original_ids
        (Outbox.receipt_ids (snapshot ()));
+     let settled = Eio.Promise.await chat_settled in
+     check bool "the Owner durably settles the queued chat" true
+       (List.exists (fun (operation : Keeper_chat_operation.t) ->
+          Keeper_operation_id.equal operation.operation_id chat_id
+          && match operation.state with
+            | Succeeded _ -> true
+            | Queued | Running _ | Failed _ | Cancelled _ -> false) settled);
+     let chat = match owner_ok (Keeper_owner.exact_operation (Option.get owner) chat_id) with
+       | Some operation -> operation | None -> fail "the settled chat disappeared" in
+     check bool "real queued chat reaches succeeded before autonomous resumption" true
+       (match chat.state with
+        | Succeeded _ -> true
+        | Queued | Running _ | Failed _ | Cancelled _ -> false);
      let checkpoint = match result.run_result.checkpoint with
        | Some value -> value | None -> fail "yield lost the original checkpoint" in
-     ignore (core (run ~checkpoint ()));
+     ignore (core (run_on_owner (fun () -> run ~checkpoint ())));
      check int "the completed local effect is not replayed" 1 !effects;
      check (list string) "completed resumed consumer ACKs original result" []
        (Outbox.receipt_ids (snapshot ()))

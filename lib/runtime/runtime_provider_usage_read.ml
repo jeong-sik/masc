@@ -283,12 +283,6 @@ let read_scopes ~codex ~antigravity ~fetch readables =
   List.iter (read_scope ~codex ~antigravity ~fetch) readables
 ;;
 
-let read_all ~mgr ~net ~clock ~cwd =
-  let codex ~scope exec = read_codex ~mgr ~clock ~cwd ~scope exec in
-  let fetch ~api_key url = get_usage ~net ~clock ~api_key url in
-  read_scopes ~codex ~antigravity:read_antigravity ~fetch (readable_scopes ())
-;;
-
 (* A static key that is empty never reaches a request ([usage_report]
    refuses it first) and stays empty while the runtime lives, so repeating
    its read would only repeat the warning the start read logged.  A

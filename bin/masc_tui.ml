@@ -41467,13 +41467,7 @@ Use relative paths for resources already held in the package. -->
        | Some "v" | Some "V"
          when state.view = Planning || state.view = Verification
               || state.view = Harness ->
-           (* Planning is the parent workspace; [v] walks its child modes
-              without putting any of them back on the top-level ring. The
-              order is the life of one piece of work: the goals it hangs
-              off, the queue waiting for a ruling, and the rulings the judge
-              recorded. Wakes and fusion runs left this walk when they became
-              tabs of the selected Keeper (RFC-tui-operator-ia section 3.1): they
-              belong to one Keeper, not to the fleet's planning workspace. *)
+           (* Work cycles from Goals through pending review to recorded verdicts. *)
            goto_surface state ~mailbox:async_messages
              (match state.view with
               | Planning -> Verification

@@ -118,7 +118,7 @@
 - (a) 공용 층 없음, Board 로 공유. 지금 Board 가 이미 명시적이고 판정을 거친 전파 채널이다(7일 1,363건). 부족한 것은 Board 글이 기억으로 남지 않는다는 점. keeper 가 Board 에서 읽은 것은 자기 저장소에 사실로 적을 때만 남고(Board 출처 12건), 그 전환은 librarian 의 판단에 맡겨져 있다. (a) 를 택하면 "Board → 저장소" 전환을 측정하고 필요하면 librarian 계약에 Board 출처 필드를 두는 것이 다음 일이다.
 - (b) 판정으로 승격하는 공용 층. MemClaw 의 primitive 넷을 masc 타입으로 세워야 한다. 승격은 keeper 의 명시적 쓰기(authored)이고 빈도·점수는 쓰지 않는다. 읽기 측에 역할 필터가 없으면 LLMA-Mem 의 cross-role interference 가 그대로 온다. 공유 후보를 분류로 제한(validated_approach·constraint·lesson)하는 것이 그 필터의 가장 싼 형태다.
 
-**TUI 질문의 답은 어느 쪽이든 같다.** 상위 Memory 탭은 저장소 브라우저(은퇴 keeper 의 저장소가 남는 것이 그 증거), Keepers 하위는 "이 keeper 가 다음 턴에 아는 것". 공용 층이 생기면 그 브라우저에 한 줄이 더 생긴다. RFC-tui-operator-ia §3.4 와 같다.
+**TUI 질문의 답은 어느 쪽이든 같다.** Memory는 저장소 브라우저(은퇴 keeper 의 저장소가 남는 것이 그 증거), Keepers 하위는 "이 keeper 가 다음 턴에 아는 것". 공용 층이 생기면 그 브라우저에 한 줄이 더 생긴다. 현재 화면의 소속은 [TUI 화면 목록](../design/tui/SCREENS.md)을 따른다.
 
 ## 5. 다음
 

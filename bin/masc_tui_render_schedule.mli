@@ -887,12 +887,13 @@ val board_layout : inner_width:int -> board_column Masc_tui_table.layout
     leave, never below its floor. *)
 
 val board_header_row :
-  age_header:string -> layout:board_column Masc_tui_table.layout -> string
+  ko:bool -> age_header:string -> layout:board_column Masc_tui_table.layout -> string
 (** [age_header] is the word over the age column, which names the time the
     column holds. *)
 
 val board_row :
   ?close:string ->
+  ko:bool ->
   styles:board_row_styles ->
   age_header:string ->
   layout:board_column Masc_tui_table.layout ->

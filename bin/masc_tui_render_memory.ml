@@ -19,23 +19,25 @@ let keeper_lane_idle_text seconds =
   else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
   else Printf.sprintf "%dd" (seconds / 86400)
 
-let librarian_failure_words = function
-  | Masc.Tui_decode_memory_health.Failure_prompt_render -> "prompt could not be built"
-  | Masc.Tui_decode_memory_health.Failure_execution_clock_unavailable -> "no clock to run on"
-  | Masc.Tui_decode_memory_health.Failure_exact_setup -> "model call could not be set up"
-  | Masc.Tui_decode_memory_health.Failure_exact_execution -> "model call failed"
-  | Masc.Tui_decode_memory_health.Failure_domain_output_invalid -> "model answer was not usable"
-  | Masc.Tui_decode_memory_health.Failure_absorb_judgment -> "copy check failed; nothing saved"
-  | Masc.Tui_decode_memory_health.Failure_memory_snapshot_write -> "Memory could not be saved"
-  | Masc.Tui_decode_memory_health.Failure_runtime_context_unavailable -> "no runtime context"
-  | Masc.Tui_decode_memory_health.Failure_lane_cancelled -> "cancelled before saving"
-  | Masc.Tui_decode_memory_health.Failure_unhandled_exception -> "unexpected crash"
+let librarian_failure_words ~ko kind =
+  let text korean english = if ko then korean else english in
+  match kind with
+  | Masc.Tui_decode_memory_health.Failure_prompt_render -> text "프롬프트 구성 실패" "prompt could not be built"
+  | Masc.Tui_decode_memory_health.Failure_execution_clock_unavailable -> text "실행 시계 미확인" "no clock to run on"
+  | Masc.Tui_decode_memory_health.Failure_exact_setup -> text "모델 호출 준비 실패" "model call could not be set up"
+  | Masc.Tui_decode_memory_health.Failure_exact_execution -> text "모델 호출 실패" "model call failed"
+  | Masc.Tui_decode_memory_health.Failure_domain_output_invalid -> text "모델 응답 사용 불가" "model answer was not usable"
+  | Masc.Tui_decode_memory_health.Failure_absorb_judgment -> text "복사 검증 실패 · 저장 없음" "copy check failed; nothing saved"
+  | Masc.Tui_decode_memory_health.Failure_memory_snapshot_write -> text "기억 저장 실패" "Memory could not be saved"
+  | Masc.Tui_decode_memory_health.Failure_runtime_context_unavailable -> text "런타임 문맥 없음" "no runtime context"
+  | Masc.Tui_decode_memory_health.Failure_lane_cancelled -> text "저장 전 취소" "cancelled before saving"
+  | Masc.Tui_decode_memory_health.Failure_unhandled_exception -> text "예상하지 못한 실패" "unexpected crash"
 
 (* How the facts title reads its own keeper. "*" is how the fleet view is asked
    for, not how it should be read, so the title reads it as a phrase. The title
    is drawn at every terminal size; a body row is not. *)
-let facts_keeper_label = function
-  | Some "*" -> "all keepers"
+let facts_keeper_label ~ko = function
+  | Some "*" -> if ko then "전체 Keeper" else "all keepers"
   | Some name -> name
   | None -> ""
 
@@ -63,13 +65,13 @@ type facts_reading =
    tail and are never shortened; when the row is narrow the keeper's name
    folds to its floor, the counts and filters are cut at their end, and only
    then the name goes further ([detail_heading]). *)
-let facts_title ~cols ~screen ~keeper ~reading ~timestamp ~badge =
+let facts_title ~ko ~cols ~screen ~keeper ~reading ~timestamp ~badge =
   let after =
     match reading with
     | Facts_unread { reading } -> "  " ^ reading
     | Facts_loaded { total; filter_label; query_label } ->
       Printf.sprintf " (%s \xc2\xb7 %s%s)"
-        (Masc_tui_message_layout.count_noun total "fact") filter_label
+        (if ko then Printf.sprintf "읽힌 사실 %d개" total else Masc_tui_message_layout.count_noun total "listed fact") filter_label
         query_label
   in
   detail_heading ~cols ~lead:(Lead_text (screen ^ " \xe2\x96\xb8 ")) ~id:keeper
@@ -84,10 +86,69 @@ let facts_title ~cols ~screen ~keeper ~reading ~timestamp ~badge =
    clock and the badge.
 
    [grand_total] is not passed in because it is not drawn here. *)
-let facts_stats_row ~ordinary ~source ~dropped ~sort_label =
-  Printf.sprintf "  %s(%d ord \xc2\xb7 %d src \xc2\xb7 %d drop)%s \xc2\xb7 %sSort [s]:%s %s"
+let facts_stats_row ~ko ~ordinary ~source ~dropped ~sort_label =
+  Printf.sprintf (if ko then "  %s읽힌 사실: 일반 %d · 원본 %d · 무효화 %d%s · %s정렬 [s]:%s %s"
+    else "  %sListed: %d ordinary · %d source · %d dropped%s · %sSort [s]:%s %s")
     (Theme.recede ()) ordinary source dropped Ansi.reset
     (Theme.recede ()) Ansi.reset sort_label
+
+let memory_category_filter_text ~ko = function
+  | Category_all -> if ko then "전체" else "All"
+  | Category_ordinary category -> memory_category_text ~ko category
+  | Category_source -> if ko then "원본" else "source"
+  | Category_dropped -> if ko then "무효화" else "dropped"
+
+let memory_sort_text ~ko sort =
+  if not ko then memory_sort_order_label sort
+  else match sort with
+    | Sort_recency -> "최근 관측순"
+    | Sort_last_retrieved -> "최근 조회순"
+    | Sort_retrieved_count -> "조회 많은 순"
+    | Sort_category -> "분류순"
+    | Sort_claim -> "내용순"
+
+let memory_counts_complete state =
+  match memory_facts_view state with
+  | Masc_tui_fetched.Ready (_, unread)
+  | Stale ((_, unread), _) -> Option.is_none unread
+  | Absent | Loading | Failed _ -> false
+
+let category_count state snapshot category =
+  let scope = match category with
+    | Category_all -> All_facts
+    | Category_ordinary category -> Ordinary_facts (Some category)
+    | Category_source -> Source_facts
+    | Category_dropped -> Dropped_facts in
+  memory_fact_count ~complete:(memory_counts_complete state) snapshot scope
+
+let memory_facts_scope_lines ?(full = false) ~cols (state : state) =
+  let text ko en = ui_text state ~ko ~en in
+  let lines = (match memory_facts_view state with
+    | Masc_tui_fetched.Stale ((_, unread), detail) ->
+        [text "이전 관측 · 갱신 실패: " "Previous observation; refresh failed: " ^ Terminal_text.single_line detail]
+        @ (match unread with None -> [] | Some detail ->
+            [text "일부 관측: " "Partial observation: " ^ Terminal_text.single_line detail])
+    | Ready (_, Some detail) ->
+        [text "일부 관측: " "Partial observation: " ^ Terminal_text.single_line detail]
+    | Failed detail -> [text "조회 실패: " "Read failed: " ^ Terminal_text.single_line detail]
+    | Absent | Loading | Ready (_, None) -> [])
+    @ (match memory_facts_snapshot state with
+       | None -> []
+       | Some snapshot ->
+           (match snapshot.mfs_ordinary with
+            | Memory_store_read_error detail -> [text "일반 저장소 조회 실패: " "Ordinary store unreadable: " ^ Terminal_text.single_line detail]
+            | Memory_store_absent | Memory_store_present _ -> [])
+           @ (match snapshot.mfs_source with
+              | Memory_store_read_error detail -> [text "원본 저장소 조회 실패: " "Source store unreadable: " ^ Terminal_text.single_line detail]
+              | Memory_store_absent | Memory_store_present _ -> [])
+           @ (match snapshot.mfs_events_read_error with
+              | None -> []
+              | Some detail -> [text "조회·수정 기록 미확인: " "Retrieval/change history unreadable: " ^ Terminal_text.single_line detail])) in
+  let width = max 1 (framed_inner_width cols - 2) in
+  List.concat_map (fun line ->
+    (if full then Message_layout.wrap_words ~max_cells:width line
+     else [Message_layout.truncate_middle width line])
+    |> List.map (fun row -> "  " ^ row)) lines
 
 let memory_fact_age_label ts =
   keeper_lane_idle_text (int_of_float (Unix.gettimeofday () -. ts))
@@ -223,7 +284,37 @@ type memory_context_projection =
   ; stalled_row : (int * string) option
   }
 
-let memory_librarian_stalled_lines (librarian : memory_librarian_health) =
+let memory_pass_text ~ko ending =
+  if not ko then Masc_tui_keeper_memory_reading.pass_word ending
+  else match ending with
+    | Pass_off -> "꺼짐"
+    | Pass_lane_unconfigured -> "처리 레인 없음"
+    | Pass_drained -> "현재까지 처리됨"
+    | Pass_yielded_to_waiting_unit -> "대기 중인 처리에 양보"
+    | Pass_pending _ -> "처리 대기"
+    | Pass_not_committed -> "저장 없음"
+    | Pass_stopped _ -> "중단됨"
+    | Pass_raised _ -> "처리 실패"
+
+let memory_state_text ~ko keeper =
+  let text korean english = if ko then korean else english in
+  let pass () = match keeper.mkh_librarian.mlh_state with
+    | Some ending -> memory_pass_text ~ko ending
+    | None -> text "처리 결과 미관측" "pass not observed" in
+  match memory_state keeper with
+  | Memory_ordinary -> text "기억 관측됨" "memory observed"
+  | Memory_warning -> text "보고된 주의" "warning reported"
+  | Memory_degraded -> "Librarian " ^ pass ()
+  | Memory_no_current -> text "스냅샷 없음" "no snapshot"
+  | Memory_source_only -> text "출처 기억만 있음" "source memory only"
+  | Memory_starving -> text "스냅샷 없음 · " "no snapshot; " ^ "Librarian " ^ pass ()
+  | Memory_read_error -> text "기억 읽기 실패" "memory read failed"
+
+let memory_operator_state (state : state) keeper =
+  memory_state_text ~ko:(state.ui_language = Lang_ko) keeper
+
+let memory_librarian_stalled_lines ~ko (librarian : memory_librarian_health) =
+  let text korean english = if ko then korean else english in
   match librarian.mlh_stalled with
   | Some (Masc.Tui_decode_memory_health.Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }) ->
     let atoms =
@@ -231,39 +322,40 @@ let memory_librarian_stalled_lines (librarian : memory_librarian_health) =
       then Printf.sprintf "atom %d is" mls_gap_start_atom
       else Printf.sprintf "atoms %d-%d are" mls_gap_start_atom (mls_gap_end_atom - 1)
     in
-    [ Printf.sprintf "  Librarian stalled · %s in neither the request nor memory" atoms ]
+    [ Printf.sprintf (if ko then "  Librarian 처리 지연 · %s 요청과 기억 모두에서 빠짐" else "  Librarian stalled · %s in neither the request nor memory") atoms ]
   | Some (Masc.Tui_decode_memory_health.Stalled_unmeasured { mls_cause; mls_detail }) ->
     let cause =
       match mls_cause with
-      | Masc.Tui_decode_memory_health.Stall_meta_unreadable -> "keeper meta unreadable"
-      | Masc.Tui_decode_memory_health.Stall_turn_records_unreadable -> "turn records unreadable"
-      | Masc.Tui_decode_memory_health.Stall_turn_boundary_refused -> "turn boundaries unreadable"
-      | Masc.Tui_decode_memory_health.Stall_snapshot_unreadable -> "continuity snapshot unreadable"
-      | Masc.Tui_decode_memory_health.Stall_read_position_unreadable -> "read position unreadable"
+      | Masc.Tui_decode_memory_health.Stall_meta_unreadable -> text "Keeper 메타 읽기 실패" "keeper meta unreadable"
+      | Masc.Tui_decode_memory_health.Stall_turn_records_unreadable -> text "턴 기록 읽기 실패" "turn records unreadable"
+      | Masc.Tui_decode_memory_health.Stall_turn_boundary_refused -> text "턴 경계 읽기 실패" "turn boundaries unreadable"
+      | Masc.Tui_decode_memory_health.Stall_snapshot_unreadable -> text "연속성 스냅샷 읽기 실패" "continuity snapshot unreadable"
+      | Masc.Tui_decode_memory_health.Stall_read_position_unreadable -> text "읽은 위치 미확인" "read position unreadable"
     in
-    [ Printf.sprintf "  Librarian stalled · not measured, %s · %s" cause
+    [ Printf.sprintf (if ko then "  Librarian 처리 지연 · 미측정, %s · %s" else "  Librarian stalled · not measured, %s · %s") cause
         (Terminal_text.preview_line mls_detail) ]
   | None -> []
 
 let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
+  let text korean english = if ko then korean else english in
   let input_rows = memory_input_lines ~ko ~cols ~unit input in
   let stored_rows =
     match k.mkh_read_error, k.mkh_source_read_error with
     | None, None ->
       clause_rows ~full ~cols
-        [ "Stored " ^ stored_amount unit (k.mkh_snapshot_bytes + k.mkh_source_snapshot_bytes)
-        ; (match unit with Memory_usage.Tokens -> "estimated knowledge size" | Memory_usage.Bytes -> "rendered knowledge") ]
-    | Some _, _ | _, Some _ -> clause_rows ~full ~cols ["Stored: unreadable"]
+        [ text "저장 " "Stored " ^ stored_amount unit (k.mkh_snapshot_bytes + k.mkh_source_snapshot_bytes)
+        ; (match unit with Memory_usage.Tokens -> text "저장 지식 추정량" "estimated knowledge size" | Memory_usage.Bytes -> text "저장된 지식" "rendered knowledge") ]
+    | Some _, _ | _, Some _ -> clause_rows ~full ~cols [text "저장량 미확인" "Stored: unreadable"]
   in
   let current_line =
-    Printf.sprintf "  %s · %s · snapshot r%d · stored %s · updated %s"
-      k.mkh_keeper_id (memory_state_label (memory_state k)) k.mkh_revision
+    Printf.sprintf (if ko then "  %s · %s · 저장 r%d · 저장량 %s · 갱신 %s" else "  %s · %s · snapshot r%d · stored %s · updated %s")
+      k.mkh_keeper_id (memory_state_text ~ko k) k.mkh_revision
       (stored_amount unit k.mkh_snapshot_bytes)
       (memory_updated_text k.mkh_updated_at)
   in
   let facts_line =
     Printf.sprintf
-      "  facts %d (observed %d / derived %d) · last change +%d / -%d / support-invalidated %d"
+      (if ko then "  사실 %d개 (관측 %d / 파생 %d) · 최근 변경 +%d / -%d / 근거 무효화 %d" else "  facts %d (observed %d / derived %d) · last change +%d / -%d / support-invalidated %d")
       k.mkh_facts k.mkh_observed_facts k.mkh_derived_facts k.mkh_added
       k.mkh_removed k.mkh_support_invalidations
   in
@@ -280,33 +372,33 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
   let unread_lag = Masc_tui_keeper_memory_reading.unread_lag librarian in
   let unread =
     match unread_lag with
-    | Some behind -> Printf.sprintf "unread %d" behind
-    | None -> "unread ?"
+    | Some behind -> Printf.sprintf (if ko then "미읽은 턴 %d개" else "unread %d") behind
+    | None -> text "미읽은 턴 ?" "unread ?"
   in
   (* The two rounds fall behind separately, so the continuity lag prints
      beside the drain's count rather than folded into it. "?" is its own
      reading: no snapshot, an unreadable one, or one from another trace. *)
   let continuity =
     match librarian.mlh_continuity_unread_atoms with
-    | Some atoms -> Printf.sprintf "continuity behind %d" atoms
-    | None -> "continuity behind ?"
+    | Some atoms -> Printf.sprintf (if ko then "연속성 지연 %d개" else "continuity behind %d") atoms
+    | None -> text "연속성 지연 ?" "continuity behind ?"
   in
-  let memory_saved = "Memory saved " ^ memory_updated_text librarian.mlh_last_success_at in
+  let memory_saved = text "기억 저장 " "Memory saved " ^ memory_updated_text librarian.mlh_last_success_at in
   let last_failure =
-    "last failure "
+    text "최근 실패 " "last failure "
     ^ (match librarian.mlh_last_failure_kind with
-       | Some kind -> librarian_failure_words kind
+       | Some kind -> librarian_failure_words ~ko kind
        | None -> Masc_tui_theme.Glyph.no_value)
   in
-  let failed = Printf.sprintf "failed %d since server start" k.mkh_librarian_failures in
+  let failed = Printf.sprintf (if ko then "서버 시작 후 실패 %d회" else "failed %d since server start") k.mkh_librarian_failures in
   let librarian_clauses =
     [ "Librarian"
     ; (match librarian.mlh_state with
-       | Some state -> Masc_tui_keeper_memory_reading.pass_word state
-       | None -> "not measured")
+       | Some state -> memory_pass_text ~ko state
+       | None -> text "미측정" "not measured")
     ; unread
     ; continuity
-    ; "measured " ^ memory_updated_text librarian.mlh_measured_at
+    ; text "관측 " "measured " ^ memory_updated_text librarian.mlh_measured_at
     ; memory_saved
     ; last_failure
     ; failed
@@ -318,12 +410,12 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
      so the frame cutting a long Librarian line never cuts its atom numbers.
      A file the gap is read from that did not read gets the same row, naming
      which file: it is neither "no gap" nor a gap. *)
-  let librarian_stalled_lines = memory_librarian_stalled_lines librarian in
+  let librarian_stalled_lines = memory_librarian_stalled_lines ~ko librarian in
   let librarian_cause_lines =
     (* The cause is drawn on its own row because it is the part of the
        Librarian row an operator acts on. *)
     match Option.bind k.mkh_librarian.mlh_state Masc.Tui_decode_memory_health.memory_librarian_pass_end_cause with
-    | Some cause -> [ "  Librarian cause · " ^ Terminal_text.preview_line cause ]
+    | Some cause -> [ text "  Librarian 사유 · " "  Librarian cause · " ^ Terminal_text.preview_line cause ]
     | None -> []
   in
   let context_lines =
@@ -400,22 +492,22 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
   in
   let source_line =
     Printf.sprintf
-      "  source-bound snapshot r%d · facts %d · invalidations %d · stored %s · %s"
+      (if ko then "  원본 저장 r%d · 사실 %d개 · 무효화 %d건 · 저장량 %s · %s" else "  source-bound snapshot r%d · facts %d · invalidations %d · stored %s · %s")
       k.mkh_source_revision k.mkh_source_facts k.mkh_source_invalidations
       (stored_amount unit k.mkh_source_snapshot_bytes)
-      (if k.mkh_source_snapshot_present then "present" else "absent")
+      (if k.mkh_source_snapshot_present then text "저장됨" "present" else text "스냅샷 없음" "absent")
   in
   let vision_line =
     let reasons =
       match k.mkh_vision_ingest_error_reasons with
-      | [] -> "none"
+      | [] -> text "없음" "none"
       | reasons ->
         String.concat ", "
           (List.map
              (fun (reason, count) -> Printf.sprintf "%s x%d" reason count)
              reasons)
     in
-    Printf.sprintf "  vision ingest errors %d · reasons %s"
+    Printf.sprintf (if ko then "  이미지 수집 오류 %d건 · 사유 %s" else "  vision ingest errors %d · reasons %s")
       k.mkh_vision_ingest_errors reasons
   in
   let alert_lines =
@@ -435,11 +527,11 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
     List.filter_map Fun.id
       [ Option.map
           (fun message ->
-            "  ordinary read error: " ^ Terminal_text.single_line message)
+            text "  일반 기억 조회 실패: " "  ordinary read error: " ^ Terminal_text.single_line message)
           k.mkh_read_error
       ; Option.map
           (fun message ->
-            "  source-bound read error: " ^ Terminal_text.single_line message)
+            text "  원본 기억 조회 실패: " "  source-bound read error: " ^ Terminal_text.single_line message)
           k.mkh_source_read_error
       ]
   in
@@ -462,7 +554,8 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
       @ [ facts_line ]
       @ ladder_rows
       @ [ source_line;
-          "  Recall block detail: open Keeper chat /context." ]
+          text "  불러온 기억: Keeper 대화의 /context에서 확인"
+            "  Recall block detail: open Keeper chat /context." ]
       @ clause_rows ~full ~cols librarian_clauses
       @ librarian_stalled_lines
       @ librarian_cause_lines @ context_lines
@@ -581,143 +674,39 @@ type memory_row_badge =
   | Badge_source
   | Badge_dropped
 
-(* The word comes from [category_to_string], the one place that spells the
-   taxonomy, so the badge, the category strip and the detail all read one
-   value. A table used to answer both the word and its colour by matching the
-   string: across the fleet's 1768 facts it recognised 749 and let 1019 fall
-   through a catch-all, nine of its eleven spellings matched nothing any
-   keeper writes, and [preference] was renamed to PREF on the row while the
-   detail under it read "preference".
-
-   Only [Blocker] is dressed, because it is the one category whose name is an
-   alarm; the table used to draw it in the same receded style as every word it
-   did not know. The rest share one style: which of them matters is the
-   reader's question, not this cell's. *)
-let format_row_badge badge =
-  let cat_style, label =
-    match badge with
-    | Badge_source -> (Theme.info (), "SOURCE")
-    | Badge_dropped -> (Theme.bad (), "DROPPED")
-    | Badge_category category ->
-        let style =
-          match category with
-          | Memory_category.Blocker -> Theme.warn ()
-          | Memory_category.Code_change | Memory_category.Fact
-          | Memory_category.Preference | Memory_category.Goal
-          | Memory_category.Constraint | Memory_category.Validated_approach
-          | Memory_category.Lesson | Memory_category.Custom _ ->
-              Theme.recede ()
-        in
-        ( style
-        , String.uppercase_ascii
-            (Memory_category.category_to_string category) )
-  in
-  let cat_str =
-    if Message_layout.display_width label > 10 then
-      match badge with
-      | Badge_category (Memory_category.Custom _) ->
-          Message_layout.take_cells label 4 ^ "\xe2\x80\xa6"
-          ^ Message_layout.drop_cells label (Message_layout.display_width label - 5)
-      | Badge_category
-          ( Memory_category.Blocker | Memory_category.Code_change
-          | Memory_category.Fact | Memory_category.Preference
-          | Memory_category.Goal | Memory_category.Constraint
-          | Memory_category.Validated_approach | Memory_category.Lesson )
-      | Badge_source | Badge_dropped ->
-          Message_layout.take_cells label 9 ^ "\xe2\x80\xa6"
-    else label
-  in
-  let pad = String.make (max 0 (10 - Message_layout.display_width cat_str)) ' ' in
-  Printf.sprintf "%s%s[%s%s]%s" Ansi.bold cat_style cat_str pad Ansi.reset
-
-let memory_fact_row_line ?(is_fleet = false) ~cols (row : memory_fact_row) =
-  let inner_width = max 10 (framed_inner_width cols) in
-  let keeper_prefix =
-    if not is_fleet then ""
-    else
-      let keeper =
-        match row with
-        | Memory_row_fact fact -> fact.mf_keeper
-        | Memory_row_source_fact fact -> fact.msf_keeper
-        | Memory_row_invalidation row -> row.mi_keeper
-      in
-      let clean = Terminal_text.single_line keeper in
-      let truncated =
-        if Message_layout.display_width clean > 8 then
-          Message_layout.take_cells clean 7 ^ "\xe2\x80\xa6"
-        else clean
-      in
-      let pad = String.make (max 0 (8 - Message_layout.display_width truncated)) ' ' in
-      Printf.sprintf "%s[%s%s]%s " (Theme.info ()) truncated pad Ansi.reset
-  in
-  let keeper_cells = if is_fleet then 11 else 0 in
-  match row with
-  | Memory_row_fact fact ->
-      let cat_badge = format_row_badge (Badge_category fact.mf_category) in
-      let age = memory_fact_age_label fact.mf_last_seen in
-      let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
-      let prefix = Printf.sprintf "  %s%s %s " keeper_prefix cat_badge age_badge in
-      let prefix_cells = 2 + keeper_cells + 12 + 1 + 6 + 1 in
-      let claim_budget = max 4 (inner_width - prefix_cells) in
-      let claim = Terminal_text.single_line fact.mf_claim in
-      let claim_display =
-        if Message_layout.display_width claim > claim_budget then
-          if claim_budget > 1 then
-            Message_layout.take_cells claim (claim_budget - 1) ^ "\xe2\x80\xa6"
-          else Message_layout.take_cells claim claim_budget
-        else claim
-      in
-      prefix ^ claim_display
-  | Memory_row_source_fact fact ->
-      let cat_badge = format_row_badge Badge_source in
-      let age = memory_fact_age_label fact.msf_first_seen in
-      let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
-      let path_raw = Terminal_text.single_line fact.msf_path in
-      let path_width = Message_layout.display_width path_raw in
-      let path_str =
-        if path_width > 16 then
-          "\xe2\x80\xa6" ^ Message_layout.drop_cells path_raw (path_width - 15)
-        else path_raw
-      in
-      let pad = String.make (max 0 (16 - Message_layout.display_width path_str)) ' ' in
-      let path_badge = Printf.sprintf "%s%s%s%s" (Theme.info ()) path_str pad Ansi.reset in
-      let prefix = Printf.sprintf "  %s%s %s %s " keeper_prefix cat_badge age_badge path_badge in
-      let prefix_cells = 2 + keeper_cells + 12 + 1 + 6 + 1 + 16 + 1 in
-      let claim_budget = max 4 (inner_width - prefix_cells) in
-      let claim = Terminal_text.single_line fact.msf_claim in
-      let claim_display =
-        if Message_layout.display_width claim > claim_budget then
-          if claim_budget > 1 then
-            Message_layout.take_cells claim (claim_budget - 1) ^ "\xe2\x80\xa6"
-          else Message_layout.take_cells claim claim_budget
-        else claim
-      in
-      prefix ^ claim_display
-  | Memory_row_invalidation row ->
-      let cat_badge = format_row_badge Badge_dropped in
-      let age = memory_fact_age_label row.mi_invalidated_at in
-      let age_badge = Printf.sprintf "%s%6s%s" (Theme.recede ()) age Ansi.reset in
-      let path_raw = Terminal_text.single_line row.mi_source_path in
-      let path_width = Message_layout.display_width path_raw in
-      let path_str =
-        if path_width > 16 then
-          "\xe2\x80\xa6" ^ Message_layout.drop_cells path_raw (path_width - 15)
-        else path_raw
-      in
-      let pad = String.make (max 0 (16 - Message_layout.display_width path_str)) ' ' in
-      let path_badge = Printf.sprintf "%s%s%s%s" (Theme.recede ()) path_str pad Ansi.reset in
-      let prefix = Printf.sprintf "  %s%s %s %s " keeper_prefix cat_badge age_badge path_badge in
-      let prefix_cells = 2 + keeper_cells + 12 + 1 + 6 + 1 + 16 + 1 in
-      let claim_budget = max 4 (inner_width - prefix_cells) in
-      let reason = Terminal_text.single_line row.mi_reason in
-      let reason_display =
-        if Message_layout.display_width reason > claim_budget then
-          if claim_budget > 1 then
-            Message_layout.take_cells reason (claim_budget - 1) ^ "\xe2\x80\xa6"
-          else Message_layout.take_cells reason claim_budget
-        else reason
-      in
-      prefix ^ reason_display
+let memory_fact_row_line ~ko ?(is_fleet = false) ~cols (row : memory_fact_row) =
+  let inner_width = max 1 (framed_inner_width cols) in
+  let keeper, badge, claim, at, path = match row with
+    | Memory_row_fact fact ->
+        fact.mf_keeper, Badge_category fact.mf_category, fact.mf_claim, fact.mf_last_seen, None
+    | Memory_row_source_fact fact ->
+        fact.msf_keeper, Badge_source, fact.msf_claim, fact.msf_first_seen, Some fact.msf_path
+    | Memory_row_invalidation row ->
+        row.mi_keeper, Badge_dropped, row.mi_reason, row.mi_invalidated_at, Some row.mi_source_path in
+  let label = match badge with
+    | Badge_category category -> memory_category_text ~ko category
+    | Badge_source -> if ko then "원본" else "source"
+    | Badge_dropped -> if ko then "무효화" else "dropped" in
+  let owner = if is_fleet then
+      Message_layout.truncate_middle (min 8 (max 1 (inner_width / 6)))
+        (Terminal_text.single_line keeper) ^ " "
+    else "" in
+  let label_room = min 10 (max 0 (inner_width / 5)) in
+  let label = Message_layout.truncate_middle label_room label in
+  let prefix = "  " ^ owner ^ (if label = "" then "" else "[" ^ label ^ "] ") in
+  let room = max 0 (inner_width - Message_layout.display_width prefix) in
+  let age = memory_fact_age_label at in
+  let path = Option.map (fun path -> Message_layout.truncate_middle 16
+      (Terminal_text.single_line path)) path in
+  let metadata = String.concat " · " (Option.to_list path @ [age]) in
+  let tail = " · " ^ metadata in
+  (* Content owns the row. A path and clock fit only in the spare third;
+     the complete source and all timestamps remain in the fact reading. *)
+  let tail = if Message_layout.display_width tail <= room / 3 then tail else "" in
+  let claim = Message_layout.truncate_middle
+      (max 0 (room - Message_layout.display_width tail)) (Terminal_text.single_line claim) in
+  Message_layout.take_cells
+    (prefix ^ claim ^ Theme.recede () ^ tail ^ Ansi.reset) inner_width
 
 (* One label column for the three detail blocks. They take turns in the same
    rows as the cursor moves down the list, and each line padded its own label
@@ -790,9 +779,10 @@ type fact_detail_parts = {
   other_lines : string list;
 }
 
-let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
+let memory_fact_detail_parts ?state ~ko ~cols (row : memory_fact_row) =
   let width = max 1 (framed_inner_width cols) in
   let field = detail_field ~width in
+  let text korean english = if ko then korean else english in
   match row with
   | Memory_row_fact fact ->
       let claim_lines, claim_line_count =
@@ -809,65 +799,66 @@ let memory_fact_detail_parts ?state ~cols (row : memory_fact_row) =
            read as "not measured" -- the shape RFC-0462 closed. *)
         let read =
           match fact.mf_events.mfe_retrieval with
-          | Never_retrieved -> "Never retrieved"
+          | Never_retrieved -> text "조회된 적 없음" "Never retrieved"
           | Retrieved { count; distinct_days; last_at } ->
-              Printf.sprintf "Retrieved %d on %s · last %s" count
-                (Message_layout.count_noun distinct_days "day")
+              Printf.sprintf (if ko then "조회 %d회 · %s · 최근 %s" else "Retrieved %d on %s · last %s") count
+                (if ko then Printf.sprintf "%d일에 걸쳐" distinct_days else Message_layout.count_noun distinct_days "day")
                 (memory_fact_age_label last_at)
         in
-        Printf.sprintf "%s · Retracted %d · Revised from %d" read
+        Printf.sprintf (if ko then "%s · 철회 %d회 · 이전 사실 %d개" else "%s · Retracted %d · Revised from %d") read
           fact.mf_events.mfe_retracted_count
           (List.length fact.mf_events.mfe_revised_from)
       in
-      let history_lines = field "History:" history in
+      let history_lines = field (text "조회·수정:" "History:") history in
       { heading =
-          Printf.sprintf "  %s%sFact Detail%s" Ansi.bold (Theme.info ()) Ansi.reset
+          Printf.sprintf "  %s%s%s%s" Ansi.bold (Theme.info ()) (text "기억한 사실" "Fact Detail") Ansi.reset
       ; claim_lines
       ; claim_line_count
       ; other_lines =
         (* The word comes from [Keeper_memory_os_types.category], a closed
              set this build spells itself, so it is printed rather than
              escaped: there is no wire text left in it to escape. *)
-        field "Keeper:" (Terminal_text.single_line fact.mf_keeper)
-        @ field "Category:" (Memory_category.category_to_string fact.mf_category)
-        @ field "Origin:" (Terminal_text.single_line fact.mf_origin)
-        @ field "Timeline:"
-            (Printf.sprintf "First: %s \xc2\xb7 Last: %s"
+        field (text "Keeper:" "Keeper:") (Terminal_text.single_line fact.mf_keeper)
+        @ field (text "분류:" "Category:") (memory_category_text ~ko fact.mf_category)
+        @ field (text "기록 출처:" "Origin:") (Terminal_text.single_line fact.mf_origin)
+        @ field (text "관측 시점:" "Timeline:")
+            (Printf.sprintf (if ko then "처음 %s · 마지막 %s" else "First: %s · Last: %s")
                (memory_fact_age_label fact.mf_first_seen)
                (memory_fact_age_label fact.mf_last_seen))
         @ history_lines
-        @ field "Memory ID:" (Terminal_text.single_line fact.mf_memory_id)
+        @ field (text "기억 ID:" "Memory ID:") (Terminal_text.single_line fact.mf_memory_id)
       }
   | Memory_row_source_fact fact ->
       let claim_lines, claim_line_count =
         detail_claim_lines ?state ~inner_width:width fact.msf_claim
       in
       { heading =
-          Printf.sprintf "  %s%sSource-Bound Fact Detail%s" Ansi.bold
-            (Theme.info ()) Ansi.reset
+          Printf.sprintf "  %s%s%s%s" Ansi.bold
+            (Theme.info ()) (text "원본에 묶인 사실" "Source-Bound Fact Detail") Ansi.reset
       ; claim_lines
       ; claim_line_count
       ; other_lines =
-        field "Keeper:" (Terminal_text.single_line fact.msf_keeper)
-        @ field "Bound Path:" (Terminal_text.single_line fact.msf_path)
-        @ field "File SHA:"
-            (Printf.sprintf "%s · %sFirst Seen:%s %s" 
+        field (text "Keeper:" "Keeper:") (Terminal_text.single_line fact.msf_keeper)
+        @ field (text "원본 경로:" "Bound Path:") (Terminal_text.single_line fact.msf_path)
+        @ field (text "파일 SHA:" "File SHA:")
+            (Printf.sprintf (if ko then "%s · %s처음 관측:%s %s" else "%s · %sFirst Seen:%s %s")
                (Terminal_text.single_line fact.msf_sha256)
                (Theme.recede ()) Ansi.reset
                (memory_fact_age_label fact.msf_first_seen))
       }
   | Memory_row_invalidation row ->
+      let claim_lines, claim_line_count =
+        detail_claim_lines ?state ~inner_width:width row.mi_reason in
       { heading =
-          Printf.sprintf "  %s%sDropped / Invalidated Fact%s" Ansi.bold
-            (Theme.bad ()) Ansi.reset
-      ; claim_lines = []
-      ; claim_line_count = 0
+          Printf.sprintf "  %s%s%s%s" Ansi.bold
+            (Theme.bad ()) (text "무효화된 사실" "Dropped / Invalidated Fact") Ansi.reset
+      ; claim_lines
+      ; claim_line_count
       ; other_lines =
-        field "Keeper:" (Terminal_text.single_line row.mi_keeper)
-        @ field "Reason:" (Terminal_text.single_line row.mi_reason)
-        @ field "Source Path:" (Terminal_text.single_line row.mi_source_path)
-        @ field "Dropped At:"
-            (memory_fact_age_label row.mi_invalidated_at ^ " ago")
+        field (text "Keeper:" "Keeper:") (Terminal_text.single_line row.mi_keeper)
+        @ field (text "원본 경로:" "Source Path:") (Terminal_text.single_line row.mi_source_path)
+        @ field (text "무효화 시점:" "Dropped At:")
+            (memory_fact_age_label row.mi_invalidated_at ^ text " 전" " ago")
       }
 
 let fact_detail_line_count parts =
@@ -889,8 +880,8 @@ let fact_detail_prefix parts count =
     :: (first_lines claim_kept parts.claim_lines
        @ first_lines (count - 1 - claim_kept) parts.other_lines)
 
-let memory_fact_detail_lines ~cols row =
-  let parts = memory_fact_detail_parts ~cols row in
+let memory_fact_detail_lines ~ko ~cols row =
+  let parts = memory_fact_detail_parts ~ko ~cols row in
   fact_detail_prefix parts (fact_detail_line_count parts)
 
 (* The world line: what the workspace curator's ledger and briefing say. The
@@ -1115,18 +1106,6 @@ let memory_refused_keeper_lines (state : state) =
           (Terminal_text.single_line refusal.mkr_reason))
       refused
 
-let memory_operator_state (state : state) keeper =
-  let ko, en = match memory_state keeper with
-    | Memory_ordinary -> "기억 관측됨", "memory observed"
-    | Memory_warning -> "보고된 주의", "warning reported"
-    | Memory_degraded -> "Librarian 실패", "Librarian failed"
-    | Memory_no_current -> "스냅샷 없음", "no snapshot"
-    | Memory_source_only -> "출처 기억만 있음", "source memory only"
-    | Memory_starving -> "스냅샷 없음 · 처리 실패", "no snapshot; processing failed"
-    | Memory_read_error -> "기억 읽기 실패", "memory read failed"
-  in
-  ui_text state ~ko ~en
-
 (* The world's denominator is the workspace ledger, never a Keeper's facts.
    Qualify retained values before counts, rather than appending a stale tail. *)
 let memory_world_axis (state : state) ~room =
@@ -1140,7 +1119,7 @@ let memory_world_axis (state : state) ~room =
         [ui_text state ~ko:"마지막 관측 · 갱신 실패" ~en:"last observation; refresh failed"]
     | Masc_tui_memory_world.Loaded { refresh_failure = None; _ } -> []
   in
-  ( ui_text state ~ko:"05 공유 World" ~en:"05 Shared World"
+  ( ui_text state ~ko:"공유 기억" ~en:"Shared memory"
   , provenance @ Masc_tui_memory_world.clauses ~ko ~room reading )
 
 let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_health) =
@@ -1174,17 +1153,17 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
   in
   let continuity = match librarian.mlh_continuity_unread_atoms with
     | None -> text ~ko:"연속성 지연 미측정" ~en:"continuity lag unmeasured"
-    | Some atoms -> Printf.sprintf (if ko then "연속성 지연 %d atoms" else "continuity behind %d atoms") atoms
+    | Some atoms -> Printf.sprintf (if ko then "연속성 지연 원자 %d개" else "continuity behind %d atoms") atoms
   in
   let pass = match librarian.mlh_state with
-    | None -> text ~ko:"pass 미관측" ~en:"pass not observed"
-    | Some ending -> "pass " ^ Masc_tui_keeper_memory_reading.pass_word ending
+    | None -> text ~ko:"처리 결과 미관측" ~en:"pass not observed"
+    | Some ending -> text ~ko:"처리 " ~en:"pass " ^ memory_pass_text ~ko ending
   in
   let axes =
-    [ text ~ko:"01 사실 나이 · First seen" ~en:"01 Fact age · first seen", age
-    ; text ~ko:"02 저장 갱신" ~en:"02 Snapshot saved", saved
-    ; text ~ko:"03 출처 무효화" ~en:"03 Source invalidation", source
-    ; text ~ko:"04 Librarian" ~en:"04 Librarian",
+    [ text ~ko:"사실 나이 · 처음 관측" ~en:"Fact age · first seen", age
+    ; text ~ko:"저장 갱신" ~en:"Snapshot saved", saved
+    ; text ~ko:"출처 무효화" ~en:"Source invalidation", source
+    ; text ~ko:"Librarian" ~en:"Librarian",
         [unread; continuity; pass;
          text ~ko:"현재 모델 실행 여부와 별개" ~en:"not current model execution"]
     ; memory_world_axis state ~room:width
@@ -1223,7 +1202,7 @@ let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_h
       ; Option.map (fun reason -> "Librarian: " ^ Terminal_text.single_line reason)
           (Option.bind librarian.mlh_state memory_librarian_pass_end_cause)
       ] in
-  let stalled = memory_librarian_stalled_lines librarian in
+  let stalled = memory_librarian_stalled_lines ~ko librarian in
   let alerts = if keeper.mkh_alerts = [] then [] else
       [Printf.sprintf
          (if ko then "보고된 알림 %d건 (이력 포함) · v:근거" else "%d reported alerts (including history) · v:evidence")
@@ -1270,7 +1249,7 @@ let memory_overview_reading ~cols (state : state) =
             ~key:keeper.mkh_keeper_id in
         let context = memory_context_lines ~full:true ~ko ~cols ~detail:true ~unit:state.memory_unit ~input keeper in
         let axes = memory_axis_context state ~cols ~compact:false keeper in
-        [ section (if ko then "기억의 다섯 축" else "Five memory observations") axes.rows
+        [ section (if ko then "선택한 기억의 관측" else "Selected memory observations") axes.rows
         ; section
            ((if ko then "선택한 키퍼 · " else "Selected Keeper · ") ^ keeper.mkh_keeper_id)
            context.rows]
@@ -1292,8 +1271,8 @@ let memory_overview_reading ~cols (state : state) =
   in
   Masc_tui_detail_reading.create
     ~ko
-    ~title:(if ko then "메모리 관측 상세" else "Memory observation details")
-    ([section (if ko then "전체 메모리" else "Fleet memory")
+    ~title:(if ko then "기억 관측 상세" else "Memory observation details")
+    ([section (if ko then "전체 기억" else "Fleet memory")
         (observed @ memory_fleet_header_rows ~cols state)]
      @ (if warnings = [] then [] else
           [section (if ko then "조회 경고" else "Read warnings") warnings])
@@ -1308,7 +1287,7 @@ let memory_compact_fleet_row ~cols (state : state) =
   let ko = state.ui_language = Lang_ko in
   let hint = if ko then "  v:전체 · " else "  v:details · " in
   let detail, attention_present = match state.memory_health with
-    | None -> (if ko then "메모리 관측 없음" else "no memory observation"), false
+    | None -> (if ko then "기억 관측 없음" else "no memory observation"), false
     | Some snapshot ->
         let attention =
           (if snapshot.mhs_refused_keepers <> [] then
@@ -1524,8 +1503,8 @@ let render_memory_body ~cols ~budget (state : state)
   push_styled ~style:(Theme.recede ())
     (if state.memory_overview_detail then "  " ^ Render_schedule.memory_header_row ~ko columns
      else ui_text state
-       ~ko:"  Keeper 선택 · j/k:이동  Enter:사실·출처  d:처리 진단  v:전체 근거"
-       ~en:"  Select Keeper · j/k:move  Enter:facts & sources  d:diagnostics  v:evidence");
+       ~ko:"  Keeper · 상태"
+       ~en:"  Keeper · state");
   push_divider ();
   (match state.memory_health_error with
    | None -> ()
@@ -1566,12 +1545,16 @@ let render_memory_body ~cols ~budget (state : state)
       match
         empty_page_of ~snapshot:state.memory_health ~error:state.memory_health_error
       with
-      | Page_failed -> page_failed_note
-      | Page_unread -> page_unread_note_while ~reading:state.memory_health_inflight
+      | Page_failed -> if ko then "  (조회 실패 · 현재 기억 미확인)" else page_failed_note
+      | Page_unread -> if ko then
+          (if state.memory_health_inflight then "  (기억 조회 중)" else "  (기억 미조회)")
+          else page_unread_note_while ~reading:state.memory_health_inflight
       | Page_empty when query <> "" ->
-        Printf.sprintf "  (no keepers matching \"%s\" \xe2\x80\x94 Esc clears filter)"
+        Printf.sprintf (if ko then "  (\"%s\"에 맞는 Keeper 없음 · Esc:필터 해제)"
+          else "  (no keepers matching \"%s\" — Esc clears filter)")
           (Terminal_text.single_line query)
-      | Page_empty -> "  (no keepers with a memory config or snapshot)"
+      | Page_empty -> if ko then "  (기억 설정이나 스냅샷이 있는 Keeper 없음)"
+          else "  (no keepers with a memory config or snapshot)"
     in
     push_styled ~style:(Theme.recede ()) note
   else begin
@@ -1614,23 +1597,12 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
   let total = List.length rows in
   let cursor = max 0 (min cursor (total - 1)) in
   let detail =
-    Option.map (memory_fact_detail_parts ~state ~cols) (List.nth_opt rows cursor)
+    Option.map (memory_fact_detail_parts ~state ~ko:(state.ui_language = Lang_ko) ~cols) (List.nth_opt rows cursor)
   in
   let total_detail_lines =
     Option.fold ~none:0 ~some:fact_detail_line_count detail
   in
-  let store_error_rows =
-    match memory_facts_snapshot state with
-    | None -> 0
-    | Some snapshot ->
-        (match snapshot.mfs_ordinary with
-         | Memory_store_read_error _ -> 1
-         | Memory_store_absent | Memory_store_present _ -> 0)
-        + (match snapshot.mfs_source with
-           | Memory_store_read_error _ -> 1
-           | Memory_store_absent | Memory_store_present _ -> 0)
-        + (match snapshot.mfs_events_read_error with None -> 0 | Some _ -> 1)
-  in
+  let scope_rows = List.length (memory_facts_scope_lines ~cols state) in
   (* Stats, optional categories/search, two dividers and the column header.
      These are the rows rendered above the list below; detail owns its own
      divider. Input asks for the target cursor because wrapped details can
@@ -1640,8 +1612,8 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
     4
     + (if Option.is_some (memory_facts_snapshot state) then 1 else 0)
     + (if String.trim (memory_search_query state) <> "" then 1 else 0)
-    + store_error_rows
-    + (if Option.is_some (memory_facts_failure state) then 2 else 0)
+    + scope_rows
+    + (if scope_rows > 0 then 1 else 0)
   in
   (* The detail is as tall as the fact under the cursor, and a fact can be
      any length. On the live store at thirty rows one fact filled fifteen of
@@ -1669,7 +1641,7 @@ let memory_facts_layout ~cols ~budget ~cursor (state : state) rows =
         (* The last row it can draw says what is under the fold, in the
            window the list below and the other reading panes draw. *)
         fact_detail_prefix parts (kept - 1)
-        @ [ Printf.sprintf "      [fact %s \xc2\xb7 Enter for the whole fact]"
+        @ [ Printf.sprintf (if state.ui_language = Lang_ko then "      [사실 %s · Enter:전체 사실]" else "      [fact %s · Enter for the whole fact]")
               (Masc_tui_scroll.window_text ~scroll:0
                  ~height:(kept - 1) total_detail_lines) ]
   in
@@ -1708,7 +1680,9 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
   let rows = memory_fact_rows state in
   let total = List.length rows in
   let cursor = max 0 (min state.memory_facts_cursor (total - 1)) in
-  let sort_label = memory_sort_order_label state.memory_facts_sort in
+  let ko = state.ui_language = Lang_ko in
+  let text korean english = if ko then korean else english in
+  let sort_label = memory_sort_text ~ko state.memory_facts_sort in
   (* The parts of the total the title draws, counted from the rows this screen
      is about to list, so the title's total and this breakdown count the same
      set. Counting the store instead gives a filtered title saying "2 facts"
@@ -1728,52 +1702,24 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
      this row looked only at whether facts were held. *)
   let stats_line, pills_line =
     match memory_facts_view state with
-    | Masc_tui_fetched.Loading -> ("  (loading facts\xe2\x80\xa6)", "")
-    | Masc_tui_fetched.Absent -> ("  " ^ title_unread, "")
-    | Masc_tui_fetched.Failed _ -> ("  " ^ title_failed, "")
+    | Masc_tui_fetched.Loading -> (text "  (사실 조회 중)" "  (loading facts…)", "")
+    | Masc_tui_fetched.Absent -> (text "  미조회" ("  " ^ title_unread), "")
+    | Masc_tui_fetched.Failed _ -> (text "  조회 실패" ("  " ^ title_failed), "")
     | Masc_tui_fetched.Ready (snapshot, _) | Masc_tui_fetched.Stale ((snapshot, _), _) ->
-        let store_ordinary, store_ordinary_facts =
-          match snapshot.mfs_ordinary with
-          | Memory_store_present store ->
-              (List.length store.mos_facts, store.mos_facts)
-          | Memory_store_absent | Memory_store_read_error _ -> (0, [])
-        in
-        let store_source, store_dropped =
-          match snapshot.mfs_source with
-          | Memory_store_present store ->
-              (List.length store.mss_facts, List.length store.mss_invalidations)
-          | Memory_store_absent | Memory_store_read_error _ -> (0, 0)
-        in
-        let grand_total = store_ordinary + store_source + store_dropped in
         let stats =
-          facts_stats_row ~ordinary:ordinary_count ~source:source_count
-            ~dropped:dropped_count ~sort_label
-        in
+          facts_stats_row ~ko ~ordinary:ordinary_count ~source:source_count
+            ~dropped:dropped_count ~sort_label in
         let all_categories = if show_category_strip then memory_fact_categories state else [] in
-        (* Through [tab_strip], the one drawing every in-screen strip shares,
-           the way the Themes filter draws its chips: the key that walks the
-           entries first, then the entries with the one being read marked.
-           This row drew its own "[● All: 4] [○ blocker: 1]" -- a third
-           shape for a strip, with the key in brackets the footer spells as
-           "c / C:category". *)
-        let count_of = function
-          | Category_all -> grand_total
-          | Category_source -> store_source
-          | Category_dropped -> store_dropped
-          | Category_ordinary cat ->
-              List.length
-                (List.filter
-                   (fun (f : memory_fact) -> f.mf_category = cat)
-                   store_ordinary_facts)
-        in
-        let keys = "  c/C:category  " in
+        let count_of category = match category_count state snapshot category with
+          | None -> "?" | Some count -> string_of_int count in
+        let keys = text "  c/C:분류  " "  c/C:category  " in
         let after =
           if cols < Masc_tui_roster_pane.threshold_cols then ""
-          else if state.memory_facts_categories_open then "  d:접기"
-          else "  d:Category 펼치기"
+          else if state.memory_facts_categories_open then text "  d:분류 접기" "  d:hide categories"
+          else text "  d:분류 펼치기" "  d:show categories"
         in
         let pills =
-          if not show_category_strip then "  c/C:category · Enter:fact detail"
+          if not show_category_strip then text "  c/C:분류 · Enter:사실 상세" "  c/C:category · Enter:fact detail"
           else Ansi.dim ^ keys ^ Ansi.reset
           ^ tab_strip
               ~width:(tab_strip_width ~cols ~before:keys ~after)
@@ -1781,7 +1727,7 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
                 Masc_tui_press.(pressable (Press_memory_category filt) text))
               (List.map
                  (fun filt ->
-                   ( Printf.sprintf "%s %d" (memory_category_filter_label filt)
+                   ( Printf.sprintf "%s %s" (memory_category_filter_text ~ko filt)
                        (count_of filt)
                    , state.memory_facts_category = filt
                    , filt ))
@@ -1800,43 +1746,21 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
        applied one drew the old word above rows the new one had left. *)
     let filter = memory_search_query state in
     if String.trim filter <> "" then
-      Printf.sprintf "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s"
+      Printf.sprintf (if ko then "  %s필터 [/]:%s \"%s\" (%s)  %s[Esc:해제]%s" else "  %sFilter [/]:%s \"%s\" (%s)  %s[Esc to clear]%s")
         Ansi.bold Ansi.reset (Terminal_text.single_line filter)
-        (Masc_tui_message_layout.count_noun total "matching fact")
+        (if ko then Printf.sprintf "일치 %d개" total else Masc_tui_message_layout.count_noun total "matching fact")
         (Theme.recede ()) Ansi.reset
     else ""
   in
   if search_banner <> "" then push search_banner;
   push_divider ();
-  (match memory_facts_failure state with
-   | None -> ()
-   | Some detail ->
-       push_styled ~style:(Theme.bad ())
-         ("  " ^ Terminal_text.single_line detail);
-       push_divider ());
-  (match memory_facts_snapshot state with
-   | None -> ()
-   | Some snapshot ->
-       (match snapshot.mfs_ordinary with
-        | Memory_store_read_error detail ->
-            push_styled ~style:(Theme.bad ())
-              ("  ordinary store: " ^ Terminal_text.single_line detail)
-        | Memory_store_absent | Memory_store_present _ -> ());
-       (match snapshot.mfs_source with
-        | Memory_store_read_error detail ->
-            push_styled ~style:(Theme.bad ())
-              ("  source-bound store: " ^ Terminal_text.single_line detail)
-        | Memory_store_absent | Memory_store_present _ -> ());
-       (match snapshot.mfs_events_read_error with
-        | None -> ()
-        | Some detail ->
-          push_styled ~style:(Theme.bad ())
-            ("  events sidecar: " ^ Terminal_text.single_line detail)));
-  let col_header =
-    if is_fleet then
-      Printf.sprintf "  %-10s %-12s %6s %s" "KEEPER" "CATEGORY" "AGE" "CLAIM / BOUND PATH"
-    else
-      Printf.sprintf "  %-12s %6s %s" "CATEGORY" "AGE" "CLAIM / BOUND PATH"
+  let scope = memory_facts_scope_lines ~cols state in
+  if scope <> [] then begin
+    List.iter (push_styled ~style:(Theme.bad ())) scope;
+    push_divider ()
+  end;
+  let col_header = if is_fleet then text "  Keeper · 분류 · 내용" "  Keeper · category · content"
+    else text "  분류 · 내용" "  Category · content"
   in
   push_styled ~style:(Theme.recede ()) col_header;
   push_divider ();
@@ -1850,24 +1774,27 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
          state.memory_facts_category
        with
        | (Page_failed, Category_all) | (Page_failed, Category_ordinary _)
-       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> page_failed_note
+       | (Page_failed, Category_source) | (Page_failed, Category_dropped) -> text "  (조회 실패 · 현재 사실 미확인)" page_failed_note
        | (Page_unread, Category_all) | (Page_unread, Category_ordinary _)
        | (Page_unread, Category_source) | (Page_unread, Category_dropped) ->
-           page_unread_note_while ~reading:(view_is_loading (memory_facts_view state))
+           text (if view_is_loading (memory_facts_view state) then "  (조회 중)" else "  (미조회)")
+             (page_unread_note_while ~reading:(view_is_loading (memory_facts_view state)))
        | Page_empty, Category_all ->
            (* [total] counts rows filtered by [memory_search_query], so the
               note reads the same value; the store is not empty just because
               a filter being typed matched nothing. *)
            let filter = memory_search_query state in
            if String.trim filter <> "" then
-             Printf.sprintf "  (no facts matching \"%s\" \xe2\x80\x94 Esc clears filter)"
+             Printf.sprintf (if ko then "  (\"%s\"에 맞는 사실 없음 · Esc:필터 해제)" else "  (no facts matching \"%s\" — Esc clears filter)")
                (Terminal_text.single_line filter)
-           else if is_fleet then
-             "  (no facts across any keeper in the fleet)"
-           else "  (no facts in either store)"
+           else if Option.bind (memory_facts_snapshot state) (fun snapshot ->
+             memory_fact_count ~complete:(memory_counts_complete state) snapshot All_facts) = None then
+             text "  (읽힌 사실 없음 · 일부 저장소 미확인)" "  (no facts read; a store is unavailable)"
+           else if is_fleet then text "  (읽힌 Keeper에 사실 없음)" "  (no facts across the observed keepers)"
+           else text "  (두 저장소에 사실 없음)" "  (no facts in either store)"
        | Page_empty, filt ->
-           Printf.sprintf "  (no facts in category %s \xe2\x80\x94 c/C cycles)"
-             (memory_category_filter_label filt)
+           Printf.sprintf (if ko then "  (분류 %s에 읽힌 사실 없음 · c/C:변경)" else "  (no facts read in category %s — c/C cycles)")
+             (memory_category_filter_text ~ko filt)
      in
      push_styled ~style:(Theme.recede ()) empty)
   else begin
@@ -1877,13 +1804,13 @@ let render_memory_facts_body_single ?(show_category_strip = true) ~cols ~budget 
       match Rows.at rows_window idx with
       | None -> push_empty ()
       | Some row ->
-          let line = memory_fact_row_line ~is_fleet ~cols row in
+          let line = memory_fact_row_line ~ko ~is_fleet ~cols row in
           if idx = cursor then push_selected (Masc_tui_theme.strip_sgr line)
           else push line
     done;
     if overflowing then
       push_styled ~style:(Theme.recede ())
-        (Printf.sprintf "  [facts %s]" (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
+        (Printf.sprintf (if ko then "  [사실 %s]" else "  [facts %s]") (Masc_tui_scroll.window_text ~scroll ~height:content_height total))
   end;
   (match detail_lines with
    | [] -> ()
@@ -1910,30 +1837,12 @@ let render_memory_facts_body ~cols ~budget (state : state)
       ~push_divider:(fun () ->
         collect (Theme.recede () ^ draw_hline fact_inner_cols ^ Ansi.reset))
       ~push_empty:(fun () -> collect "");
-    let count category =
-      match memory_facts_snapshot state with
-      | None -> None
-      | Some snapshot ->
-        let ordinary = match snapshot.mfs_ordinary with
-          | Memory_store_present store -> Some store.mos_facts
-          | Memory_store_absent -> Some [] | Memory_store_read_error _ -> None in
-        let source = match snapshot.mfs_source with
-          | Memory_store_present store -> Some (List.length store.mss_facts, List.length store.mss_invalidations)
-          | Memory_store_absent -> Some (0,0) | Memory_store_read_error _ -> None in
-        match category, ordinary, source with
-        | Category_ordinary cat, Some facts, _ ->
-          Some (List.length (List.filter (fun (fact : memory_fact) -> fact.mf_category = cat) facts))
-        | Category_source, _, Some (count, _) | Category_dropped, _, Some (_, count) -> Some count
-        | Category_all, Some facts, Some (source, dropped) -> Some (List.length facts + source + dropped)
-        | Category_ordinary _, None, _
-        | Category_source, _, None
-        | Category_dropped, _, None
-        | Category_all, None, _
-        | Category_all, _, None -> None
-    in
+    let ko = state.ui_language = Lang_ko in
+    let count category = Option.bind (memory_facts_snapshot state)
+        (fun snapshot -> category_count state snapshot category) in
     let header =
-      [ Theme.info () ^ "CATEGORIES" ^ Ansi.reset ^ Ansi.dim ^ "  d:접기" ^ Ansi.reset
-      ; Theme.recede () ^ "c/C 순서 이동 · 클릭 선택" ^ Ansi.reset
+      [ Theme.info () ^ (if ko then "분류" else "Categories") ^ Ansi.reset ^ Ansi.dim ^ (if ko then "  d:접기" else "  d:hide") ^ Ansi.reset
+      ; Theme.recede () ^ (if ko then "c/C:이동 · 클릭:선택" else "c/C:move · click:select") ^ Ansi.reset
       ; Theme.recede () ^ draw_hline width ^ Ansi.reset
       ]
     in
@@ -1955,7 +1864,7 @@ let render_memory_facts_body ~cols ~budget (state : state)
            complete category value. *)
         let rows = if category = state.memory_facts_category then max 1 height else 1 in
         let room = max 1 (rows * (width - 2) - Message_layout.display_width suffix) in
-        let name = Terminal_text.single_line (memory_category_filter_label category) in
+        let name = Terminal_text.single_line (memory_category_filter_text ~ko category) in
         let name =
           if Message_layout.display_width name <= room then name
           else Message_layout.take_cells name (max 0 (room - 1)) ^ "…"

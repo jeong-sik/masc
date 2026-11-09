@@ -18,6 +18,23 @@ module Link = Masc_tui_link
 module Board_composer = Masc_tui_board_composer
 module Board_attachments = Masc_tui_board_attachments
 
+let words state ko en = ui_text state ~ko ~en
+
+let board_sort_text state sort =
+  if state.ui_language <> Lang_ko then board_sort_explanation sort
+  else match sort with
+    | Board_hot -> "점수 높은 순 · 같으면 최신 글"
+    | Board_trending -> "점수와 게시 경과 기준"
+    | Board_recent -> "최신 글부터"
+    | Board_updated -> "최근 바뀐 글부터"
+    | Board_discussed -> "댓글 많은 순 · 같으면 최신 글"
+
+let board_query_text state query =
+  board_sort_text state query.bq_sort ^ " · "
+  ^ (match query.bq_hearth with
+     | None -> words state "전체 게시판" "all hearths"
+     | Some hearth -> "#" ^ Terminal_text.single_line hearth)
+
 (* Board accepts ordinary Markdown, so JSON detection is deliberately the
    narrow whole-document case. Objects and arrays are operational payloads;
    a post containing a scalar or a JSON-shaped fragment remains exactly the
@@ -100,7 +117,7 @@ let render_board_compose (state : state) =
         Printf.sprintf "first line: title  rest: body  hearth: %s" hearth_label
   in
   let header = Printf.sprintf "%s  %s[%s]%s  %s  %s(%s, %s)%s"
-    (screen_title " MASC Board")
+    (screen_title (words state " MASC 게시판" " MASC Board"))
     (Masc_tui_theme.tone Masc_tui_theme.Accent)
     (match state.board_compose_reply_to with
      | Some _ -> "reply" | None -> "new post")
@@ -195,14 +212,14 @@ let render_board_compose (state : state) =
     | Some _ ->
         (* The path input owns the keys, so the footer names its two; the
            path itself is on the pane above. *)
-        Masc_tui_keys.footer_hints_board_attach_input
+        Masc_tui_keys.footer_hints_board_attach_input ~lang:state.ui_language
     | None ->
         if state.board_compose_armed then
-          Masc_tui_keys.footer_hints_board_compose_armed
+          Masc_tui_keys.footer_hints_board_compose_armed ~lang:state.ui_language
             ~reply:(Option.is_some state.board_compose_reply_to)
         else
           (* Projected from the key table; the table says why there is no [q]. *)
-          Masc_tui_keys.footer_hints_board_compose_writing
+          Masc_tui_keys.footer_hints_board_compose_writing ~lang:state.ui_language
             ~reply:(Option.is_some state.board_compose_reply_to)
   in
   let cursor =
@@ -247,23 +264,24 @@ let census_separator = "  \xc2\xb7  "
 (* Retained values stay readable here, with their availability. The title and
    reader index only borrow totals from a received, non-pending census. *)
 let board_hearth_census_line ~cols (state : state) =
+  let words ko en = words state ko en in
   let observation,pending=board_census_reading state in
   let status=match observation with
-    | Masc_tui_fetched.Absent -> Some (if pending then "reading census" else "census not read")
-    | Loading -> Some "reading census"
-    | Ready _ -> if pending then Some "refreshing; last observed" else None
-    | Stale (_,detail) -> Some ((if pending then "refreshing; " else "")
-        ^ "last observed; unavailable: " ^ Terminal_text.single_line detail)
-    | Failed detail -> Some ((if pending then "retrying; " else "")
-        ^ "unavailable: " ^ Terminal_text.single_line detail) in
+    | Masc_tui_fetched.Absent -> Some (if pending then (words "게시판 집계 조회 중" "reading census") else (words "게시판 집계 미조회" "census not read"))
+    | Loading -> Some (words "게시판 집계 조회 중" "reading census")
+    | Ready _ -> if pending then Some (words "갱신 중 · 이전 관측" "refreshing; last observed") else None
+    | Stale (_,detail) -> Some ((if pending then (words "갱신 중 · " "refreshing; ") else "")
+        ^ (words "이전 관측 · 조회 실패: " "last observed; unavailable: ") ^ Terminal_text.single_line detail)
+    | Failed detail -> Some ((if pending then (words "재조회 중 · " "retrying; ") else "")
+        ^ (words "조회 실패: " "unavailable: ") ^ Terminal_text.single_line detail) in
   let tone=match observation with
     | Masc_tui_fetched.Stale _ | Failed _ -> Theme.bad ()
     | Absent | Loading | Ready _ -> Ansi.dim in
   let notice text = tone
-    ^ Message_layout.truncate_middle (framed_inner_width cols) ("hearths · " ^ text) ^ Ansi.reset in
+    ^ Message_layout.truncate_middle (framed_inner_width cols) ((words "게시판 · " "hearths · ") ^ text) ^ Ansi.reset in
   match Masc_tui_fetched.value observation with
-  | None -> notice (match status with Some text -> text | None -> "census not observed")
-  | Some [] -> notice (match status with Some text -> "last census empty; " ^ text | None -> "census empty")
+  | None -> notice (match status with Some text -> text | None -> (words "집계 미관측" "census not observed"))
+  | Some [] -> notice (match status with Some text -> (words "이전 집계는 비어 있음 · " "last census empty; ") ^ text | None -> (words "집계 결과 없음" "census empty"))
   | Some census ->
       let total = List.fold_left (fun sum (_, count) -> sum + count) 0 census in
       (* Banded over the whole census, then cut to what fits. Banding the
@@ -304,15 +322,16 @@ let board_hearth_census_line ~cols (state : state) =
          ends on -- was cut to "19". *)
       let cells = Message_layout.display_width in
       let tail =
-        Printf.sprintf "   %s" (Masc_tui_message_layout.count_noun total "post")
+        Printf.sprintf "   %s" (if state.ui_language = Lang_ko then Printf.sprintf "글 %d개" total
+          else Masc_tui_message_layout.count_noun total "post")
       in
       let dropped_note count = Printf.sprintf "%s+%d" census_separator count in
       let label_gap = " " in
       let label=match status with
-        | None -> "hearths"
+        | None -> words "게시판" "hearths"
         | Some text -> Message_layout.truncate_middle
             (max 0 (framed_inner_width cols - cells label_gap - cells tail
-              - cells (dropped_note (List.length hearths)))) ("hearths · " ^ text) in
+              - cells (dropped_note (List.length hearths)))) ((words "게시판 · " "hearths · ") ^ text) in
       let lead = label ^ label_gap in
       let room = framed_inner_width cols - cells lead - cells tail in
       (* The hearths that fit in [budget] cells, in census order, and how many
@@ -360,18 +379,19 @@ let board_hearth_census_line ~cols (state : state) =
         (Printf.sprintf "%s%s%s" Ansi.dim tail Ansi.reset)
 
 let board_posts_status state =
+  let words ko en = words state ko en in
   let observation,pending=board_posts_reading state in
   let status=match observation with
-    | Masc_tui_fetched.Absent -> Some "posts not read"
-    | Loading -> Some "reading posts"
-    | Ready _ -> if pending then Some "refreshing posts; last observed" else None
-    | Stale _ -> Some (if pending then "refreshing posts; last failure retained" else "last observed posts; unavailable")
-    | Failed _ -> Some (if pending then "retrying posts; unavailable" else "posts unavailable") in
+    | Masc_tui_fetched.Absent -> Some (words "글 미조회" "posts not read")
+    | Loading -> Some (words "글 조회 중" "reading posts")
+    | Ready _ -> if pending then Some (words "글 갱신 중 · 이전 관측" "refreshing posts; last observed") else None
+    | Stale _ -> Some (if pending then (words "글 갱신 중 · 이전 실패" "refreshing posts; last failure retained") else (words "이전 글 목록 · 조회 실패" "last observed posts; unavailable"))
+    | Failed _ -> Some (if pending then (words "글 재조회 중 · 조회 실패" "retrying posts; unavailable") else (words "글 조회 실패" "posts unavailable")) in
   match board_posts_snapshot state with
   | Some snapshot when not (board_listing_matches_requested state) ->
-      let origin=Printf.sprintf "last observed: %s; requested: %s"
-        (Terminal_text.single_line (board_query_label snapshot.bl_query))
-        (Terminal_text.single_line (board_query_label (board_query state))) in
+      let origin=Printf.sprintf (if state.ui_language = Lang_ko then "이전 관측: %s · 요청: %s" else "last observed: %s; requested: %s")
+        (board_query_text state snapshot.bl_query)
+        (board_query_text state (board_query state)) in
       Some (origin ^ (match status with None -> "" | Some status -> "; " ^ status))
   | Some _ | None -> status
 
@@ -387,7 +407,9 @@ let render_board_list (state : state) =
      disagreed. *)
   let query = board_posts_query state in
   let age_time = board_sort_time query.bq_sort in
-  let age_header = board_age_header age_time in
+  let ko = state.ui_language = Lang_ko in
+  let age_header = if ko then (match age_time with Board_time_posted -> "게시 후" | Board_time_changed -> "변경 후")
+    else board_age_header age_time in
   (* Which sub-board is being read. Said only when the list is narrowed: "all
      hearths" is what a reader assumes, and 24 of them share this board with
      1550 of 2171 posts in one, so a narrowed list that did not say so would
@@ -396,7 +418,7 @@ let render_board_list (state : state) =
     match query.bq_hearth with
     | None -> ""
     | Some hearth ->
-        Printf.sprintf "  %shearth:%s%s" (Masc_tui_theme.tone Masc_tui_theme.Accent)
+        Printf.sprintf (if state.ui_language = Lang_ko then "  %s게시판:%s%s" else "  %shearth:%s%s") (Masc_tui_theme.tone Masc_tui_theme.Accent)
           (Terminal_text.single_line hearth) Ansi.reset
   in
   let observation,pending=board_posts_reading state in
@@ -415,11 +437,11 @@ let render_board_list (state : state) =
      still the last reading. *)
   let holding = board_census_holding state ~hearth:query.bq_hearth in
   let header = Printf.sprintf "%s %s%s  %s  %s"
-    (screen_title " MASC Board")
+    (screen_title (words state " MASC 게시판" " MASC Board"))
     (match Masc_tui_fetched.value observation with
      | Some _ ->
          list_count_text ~loaded:count ~holding
-     | None -> if pending then "(reading posts)" else title_missing_reading ~error:list_error)
+     | None -> if pending then (words state "(글 조회 중)" "(reading posts)") else words state (if Option.is_some list_error then "(조회 실패)" else "(미조회)") (title_missing_reading ~error:list_error))
     hearth timestamp
     (connection_badge state) in
 
@@ -428,7 +450,7 @@ let render_board_list (state : state) =
      counted them by hand and counted two rows it no longer draws, so the
      footer stood two rows above the composer. *)
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"board-list"
-    ~title:header ~hints:(Masc_tui_keys.footer_hints ~detail_open:false state.view)
+    ~title:header ~hints:(Masc_tui_keys.footer_hints ~lang:state.ui_language ~detail_open:false state.view)
     ~body:(fun ~budget c ->
       (* The header is laid out by the same arithmetic as the rows below it,
          because a header laid out by its own is a header that stops
@@ -454,22 +476,14 @@ let render_board_list (state : state) =
                sheet under [?]. *)
             c.push_styled ~style:(Theme.recede ())
               (board_heading_with_tail ~cols
-                 (Printf.sprintf "%sSort [s]: %s"
+                 (Printf.sprintf (if state.ui_language = Lang_ko then "%s정렬 [s]: %s" else "%sSort [s]: %s")
                     (match board_posts_status state with None -> "" | Some status -> status ^ " · ")
-                    (board_sort_explanation query.bq_sort))
-                 " · H:choose hearth"))
+                    (board_sort_text state query.bq_sort))
+                 (words state " · H:게시판 선택" " · H:choose hearth")))
         ; (fun () -> c.push (board_hearth_census_line ~cols state))
         ; (fun () ->
-            match List.nth_opt (board_posts state)
-                (max 0 (min state.board_cursor (count - 1))) with
-            | None -> c.push_empty ()
-            | Some post ->
-                c.push ("Selected post · " ^ Ansi.bold
-                  ^ Terminal_text.single_line post.bp_title ^ Ansi.reset))
-        ; c.push_divider
-        ; (fun () ->
             c.push_styled ~style:(Theme.recede ())
-              (Render_schedule.board_header_row ~age_header ~layout))
+              (Render_schedule.board_header_row ~ko ~age_header ~layout))
         ; c.push_divider
         ]
       in
@@ -478,12 +492,12 @@ let render_board_list (state : state) =
       if count = 0 then
         (match observation with
          | Masc_tui_fetched.Failed _ | Stale _ -> Option.iter render_list_error list_error
-         | Absent -> c.push (Ansi.dim ^ page_unread_note ^ Ansi.reset)
-         | Loading -> c.push (Ansi.dim ^ "  (reading Board posts)" ^ Ansi.reset)
+         | Absent -> c.push (Ansi.dim ^ words state "  (미조회 · r:다시 읽기)" page_unread_note ^ Ansi.reset)
+         | Loading -> c.push (Ansi.dim ^ (words state "  (글 조회 중)" "  (reading Board posts)") ^ Ansi.reset)
          | Ready _ -> c.push (Ansi.dim
-             ^ (if pending then "  (last listing empty; reading posts)"
-                else if not (board_listing_matches_requested state) then "  (last listing empty; requested query not observed)"
-                else "  (no board posts)") ^ Ansi.reset))
+             ^ (if pending then (words state "  (이전 목록은 비어 있음 · 글 조회 중)" "  (last listing empty; reading posts)")
+                else if not (board_listing_matches_requested state) then (words state "  (이전 목록은 비어 있음 · 요청한 목록 미관측)" "  (last listing empty; requested query not observed)")
+                else (words state "  (게시글 없음)" "  (no board posts)")) ^ Ansi.reset))
       else begin
         Option.iter render_list_error list_error;
         let error_rows = if Option.is_some list_error then 1 else 0 in
@@ -571,7 +585,7 @@ let render_board_list (state : state) =
               }
             in
             let content =
-              Render_schedule.board_row ~styles ~age_header ~layout values
+              Render_schedule.board_row ~ko ~styles ~age_header ~layout values
             in
             if is_selected then
               c.push_selected (Masc_tui_theme.strip_sgr content)
@@ -680,7 +694,7 @@ let draw_board_read_side ~focus buf (state : state) document ~rows ~body_cols
     if i = 0 && comment_header_rows > 0 then
       box_line comment_buf comment_cols
         (Ansi.bold
-        ^ Printf.sprintf "%sComments (%d)"
+        ^ Printf.sprintf (if state.ui_language = Lang_ko then "%s댓글 (%d)" else "%sComments (%d)")
             (if focus = Right_pane && state.board_comments_focused
              then "> " else "  ")
             detail_comment_count
@@ -713,16 +727,12 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
         list_post
   in
 
-  let header =
-    board_read_title ~screen:(screen_title " MASC Board")
-      ~id:(Terminal_text.single_line post.bp_id)
-      ~hearth:(Terminal_text.optional_single_line post.bp_hearth)
-      ~votes:post.bp_votes ~replies:post.bp_comment_count
-  in
+  let header = screen_title (words state " MASC 게시판" " MASC Board")
+    ^ (match Terminal_text.optional_single_line post.bp_hearth with
+       | None -> "" | Some hearth -> " · #" ^ hearth) in
 
   box_top buf cols;
   box_line buf cols header;
-  box_divider buf cols;
 
   let title_line = Printf.sprintf "%s%s%s%s"
     (if focus = Right_pane && not state.board_comments_focused
@@ -743,7 +753,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
           (Theme.warn ())
           Ansi.reset
     | Some Post_by_person ->
-        Printf.sprintf "%s@%s%s %s[Author]%s"
+        Printf.sprintf (if state.ui_language = Lang_ko then "%s@%s%s %s[작성자]%s" else "%s@%s%s %s[Author]%s")
           (Masc_tui_theme.tone Masc_tui_theme.Accent)
           author_name
           Ansi.reset
@@ -755,14 +765,12 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
           Ansi.reset
   in
   box_line buf cols
-    (Printf.sprintf "  %s  %s\xc2\xb7%s  %s  %s\xc2\xb7%s  %s%s%s"
-       author_chip
-       Ansi.dim Ansi.reset
-       (Terminal_text.short_timestamp post.bp_created_at)
-       Ansi.dim Ansi.reset
-       Ansi.dim
-       (Link.reference Board_post (Terminal_text.single_line post.bp_id))
-       Ansi.reset);
+    (Printf.sprintf "  %s · %s · %s · %s%d%s"
+       author_chip (Terminal_text.short_timestamp post.bp_created_at)
+       (match post.bp_closed with None -> words state "열린 글" "open"
+        | Some _ -> words state "종료된 글" "closed")
+       (words state "댓글 " "replies ") post.bp_comment_count
+       (if post.bp_votes = 0 then "" else " · " ^ board_score_text post.bp_votes));
   box_divider buf cols;
 
   (* The thread sits beside the post, not under it, when the pane is wide
@@ -796,7 +804,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
   let source : Board_read_layout.source =
     { post; detail; related_posts = (board_posts state);
       keeper_names = List.map (fun (k : Tui_decode.keeper) -> k.k_name) state.keepers;
-      columns = cols;
+      columns = cols; language = state.ui_language;
       styles = [ Theme.info (); Theme.warn (); Theme.bad (); Theme.recede ();
                  Masc_tui_theme.tone Masc_tui_theme.Accent ];
       table_frame = !table_frame_enabled }
@@ -846,7 +854,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
         | [] -> []
         | referenced ->
           (Ansi.dim ^ "" ^ Ansi.reset)
-          :: (Ansi.bold ^ "  POINTS AT" ^ Ansi.reset)
+          :: (Ansi.bold ^ words state "  연결" "  Points at" ^ Ansi.reset)
           :: List.map
                (fun (kind, id) ->
                  (* [Link.parse] percent-decodes the id segment, so a body that
@@ -866,7 +874,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
         | related ->
           (Ansi.dim ^ "" ^ Ansi.reset)
           :: (Ansi.bold
-              ^ Printf.sprintf "  ALSO ABOUT THIS (%d)" (List.length related)
+              ^ Printf.sprintf (if state.ui_language = Lang_ko then "  같은 대상을 다룬 글 (%d)" else "  Also about this (%d)") (List.length related)
               ^ Ansi.reset)
           :: (related
               |> List.filteri (fun index _ -> index < 5)
@@ -890,7 +898,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
         | [] -> []
         | attachments ->
           (Ansi.dim ^ "" ^ Ansi.reset)
-          :: (Ansi.bold ^ "  ATTACHMENTS" ^ Ansi.reset)
+          :: (Ansi.bold ^ words state "  첨부" "  Attachments" ^ Ansi.reset)
           :: List.mapi
                (fun index (entry : board_attachment_entry) ->
                  Printf.sprintf "  [%d] %s%s%s" (index + 1) Ansi.reset
@@ -906,20 +914,20 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
             let field label value =
               Masc_tui_text_block.rows ~max_cells:(max 1 text_width) (label ^ value)
               |> List.map (fun line -> "  " ^ line) in
-            [Ansi.bold ^ "  Resolution" ^ Ansi.reset]
-            @ field "Closed by " closed.bpc_closed_by
+            [Ansi.bold ^ words state "  종료 결론" "  Resolution" ^ Ansi.reset]
+            @ field (words state "종료한 사람 " "Closed by ") closed.bpc_closed_by
             @ (match closed.bpc_closed_at with
                | None -> []
                | Some at ->
                    (match Board_read_layout.close_time at with
-                    | Ok time -> field "Closed at " time
-                    | Error raw -> field "Close time unavailable · raw Unix seconds "
+                    | Ok time -> field (words state "종료 시각 " "Closed at ") time
+                    | Error raw -> field (words state "종료 시각 미확인 · 원래 Unix 초 " "Close time unavailable · raw Unix seconds ")
                         (Printf.sprintf "%.17g" raw)))
             @ (match closed.bpc_successor_id with
                | None -> []
                | Some successor ->
                    field (if String.trim successor<>"" && not (String.equal successor post.bp_id)
-                          then "Successor · S:open · " else "Successor · ")
+                          then words state "후속 글 · S:열기 · " "Successor · S:open · " else words state "후속 글 · " "Successor · ")
                      (Link.reference Board_post successor))
             @ (match closed.bpc_summary with
                | None -> []
@@ -928,17 +936,19 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
                      ~max_cells:(max 1 text_width) ~sanitize:Terminal_text.single_line summary)
             @ [""] in
       let body_lines =
-        closure_lines @ body_lines @ attachment_lines @ reference_lines @ related_lines
+        body_lines @ closure_lines @ attachment_lines @ reference_lines @ related_lines
+        @ [""; "  " ^ words state "글 주소 · " "Post reference · "
+            ^ Link.reference Board_post (Terminal_text.single_line post.bp_id)]
       in
       let initial_comment_offset = ref None in
       let detail_lines =
         match detail with
         | Board_detail.Absent ->
             [ Board_read_layout.Thread_note
-                (Ansi.dim ^ "  Board detail unavailable" ^ Ansi.reset) ]
+                (Ansi.dim ^ (words state "  상세 미관측" "  Board detail unavailable") ^ Ansi.reset) ]
         | Board_detail.Loading ->
             [ Board_read_layout.Thread_note
-                (Ansi.dim ^ "  Loading Board detail..." ^ Ansi.reset) ]
+                (Ansi.dim ^ (words state "  상세 조회 중" "  Loading Board detail...") ^ Ansi.reset) ]
         | Board_detail.Failed error ->
             [ Board_read_layout.Thread_note
                 ((Theme.bad ()) ^ "  "
@@ -973,7 +983,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
                  let created_at = Terminal_text.short_timestamp c.bc_created_at in
                  let author_role =
                    if String.equal author (Terminal_text.single_line post.bp_author) then
-                     " " ^ (Theme.info ()) ^ "[Author]" ^ Ansi.reset
+                     " " ^ (Theme.info ()) ^ (words state "[작성자]" "[Author]") ^ Ansi.reset
                    else if List.exists (fun (k : Tui_decode.keeper) -> String.equal k.k_name author) state.keepers then
                      " " ^ (Theme.warn ()) ^ "[Keeper]" ^ Ansi.reset
                    else ""
@@ -1054,7 +1064,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
                 Option.map (fun (comment_id, row) -> comment_id, row + 1)
                   !initial_comment_offset;
               Board_read_layout.Thread_note
-                (Printf.sprintf "  Showing %d of %d comments (o: all comments)"
+                (Printf.sprintf (if state.ui_language = Lang_ko then "  댓글 %d/%d개 (o:전체 댓글)" else "  Showing %d of %d comments (o: all comments)")
                    (List.length comments) post.bp_comment_count)
               :: comment_lines
             end else
@@ -1109,7 +1119,7 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
           box_line buf cols
             (Ansi.bold
              ^ (if focus = Right_pane && state.board_comments_focused
-                then "> Comments" else "  Comments")
+                then words state "> 댓글" "> Comments" else words state "  댓글" "  Comments")
              ^ Ansi.reset);
           let gutter = comment_row_gutter ~focus state in
           for i = 0 to comment_height - 1 do
@@ -1134,11 +1144,11 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
   then
     box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "%s%s"
-         (Masc_tui_scroll.window_reading ~noun:"post rows"
+         (Masc_tui_scroll.window_reading ~noun:(words state "본문 행" "post rows")
             ~scroll:scroll.body_offset ~height:body_lines_drawn total_lines)
          (if detail_line_count > comment_lines_drawn then
             "  \xc2\xb7  "
-            ^ Masc_tui_scroll.window_reading ~noun:"comment rows"
+            ^ Masc_tui_scroll.window_reading ~noun:(words state "댓글 행" "comment rows")
                 ~scroll:scroll.comment_offset ~height:comment_lines_drawn
                 detail_line_count
           else ""));
@@ -1181,7 +1191,7 @@ let board_list_pane (state : state) ~(open_post : board_post) ~rows ~cols buf =
     Printf.sprintf "%s%s%s" hearth_prefix vote_prefix
       (Terminal_text.single_line post.bp_title)
   in
-  let title=match board_posts_status state with None -> "Board" | Some status -> "Board · " ^ status in
+  let title=match board_posts_status state with None -> words state "게시판" "Board" | Some status -> words state "게시판 · " "Board · " ^ status in
   write_list_sidebar buf ~rows ~cols ~title
     ~focused:(state.board_focus = Left_pane)
     ~holding:(board_census_holding state ~hearth:(board_posts_query state).bq_hearth)
@@ -1204,7 +1214,7 @@ let render_board_read (state : state) (list_post : board_post) =
   let footer =
     footer_line state ~max_cells:cols
       ~hints:
-        (Masc_tui_keys.footer_hints_board_read
+        (Masc_tui_keys.footer_hints_board_read ~lang:state.ui_language
            ~focus_posts:(focus = Left_pane)
            ~focus_comments:state.board_comments_focused
            ~full_history:(state.board_history_post_id = Some list_post.bp_id)

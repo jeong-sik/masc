@@ -34,7 +34,7 @@ type memory_row_visibility =
 
 val memory_row_visibility : memory_row_kind -> memory_row_visibility
 
-val facts_keeper_label : string option -> string
+val facts_keeper_label : ko:bool -> string option -> string
 (** How the facts title names the keeper it is reading. The fleet view is asked
     for as "*" and read as a phrase. *)
 
@@ -47,6 +47,7 @@ type facts_reading =
       }
 
 val facts_title :
+  ko:bool ->
   cols:int ->
   screen:string ->
   keeper:string ->
@@ -67,10 +68,16 @@ val storage_size : int -> string
     marks its conversion as an estimate. *)
 
 val memory_fact_age_label : float -> string
-val memory_fact_row_line : ?is_fleet:bool -> cols:int -> memory_fact_row -> string
-val memory_fact_detail_lines : cols:int -> memory_fact_row -> string list
+val memory_category_filter_text : ko:bool -> memory_category_filter -> string
+val memory_fact_row_line : ko:bool -> ?is_fleet:bool -> cols:int -> memory_fact_row -> string
+val memory_fact_detail_lines : ko:bool -> cols:int -> memory_fact_row -> string list
 (** Full claim and provenance rows, wrapped to the frame of a [cols]-column
     terminal. Each returned row occupies one scrollable display row. *)
+
+val memory_facts_scope_lines : ?full:bool -> cols:int -> state -> string list
+(** Read failures, retained observations and partial store scope shared by
+    the fact list and full fact reading. [full] wraps the complete causes;
+    the list keeps each cause to one row. *)
 
 val memory_fleet_header_rows : cols:int -> state -> string list
 (** Full fleet observation rows for the diagnostic and captured reading:

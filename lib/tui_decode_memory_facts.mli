@@ -83,6 +83,21 @@ type memory_fact_snapshot = {
   mfs_events_read_error : string option;
 }
 
+type memory_fact_count_scope =
+  | All_facts
+  | Ordinary_facts of Keeper_memory_os_types.category option
+  | Source_facts
+  | Dropped_facts
+
+val memory_fact_count : complete:bool -> memory_fact_snapshot -> memory_fact_count_scope -> int option
+(** Count an observed store, or [None] when a required store could not be
+    read. Missing stores are known empty. [All_facts] includes ordinary,
+    source and dropped rows and is unknown if either store is unreadable.
+    Incomplete fleet coverage ([complete=false]) makes every total unknown,
+    including a merged snapshot carrying readable rows. [Ordinary_facts
+    None] counts every ordinary category. Event-sidecar
+    availability does not change stored fact counts. *)
+
 val decode_memory_fact_snapshot :
   Yojson.Safe.t -> (memory_fact_snapshot, string) result
 (** Decode one keeper's fact listing served at

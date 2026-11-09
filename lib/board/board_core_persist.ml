@@ -697,6 +697,7 @@ let capture_comments_snapshot = Board_comments_source.capture
 let save_comments_snapshot store snapshot =
   finish_comments_write (Board_comments_source.rewrite store snapshot)
 let settle_comments_source store = finish_comments_write (Board_comments_source.settle store)
+let acknowledge_comments_recovery = Board_comments_source.acknowledge_recovery
 let append_comment store comment = match Board_comments_source.append store comment with
   | Written { value; _ } -> Ok value
   | (Not_written _ | Unknown _) as outcome -> finish_comments_write outcome

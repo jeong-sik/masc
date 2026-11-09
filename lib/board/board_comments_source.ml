@@ -7,6 +7,8 @@ type read =
                  errors : comments_row_error list; diagnostics : comments_source_diagnostic list }
   | Unavailable of { failure : comments_source_failure;
                      diagnostics : comments_source_diagnostic list }
+  | Display_only of { comments : comment list; failure : comments_source_failure;
+                      diagnostics : comments_source_diagnostic list }
 
 type 'a write_outcome =
   | Written of { value : 'a; diagnostics : comments_source_diagnostic list }
@@ -23,6 +25,13 @@ let reserved_diagnostics = List.find_map (function
   | Comments_file_diagnostic error -> Board_posts_source.reserved_transaction error
   | Comments_workspace_diagnostic rejection ->
     Option.bind (Board_workspace_binding.raised rejection) Board_posts_source.reserved_exception
+  | Comments_display_diagnostic error ->
+    (match error with
+     | Fs_compat.Private_jsonl_unique_fold.Non_regular_file _ | Snapshot_changed -> None
+     | Binding_refused error -> Board_posts_source.reserved_transaction error
+     | Operation_failed failure -> Board_posts_source.reserved_exception (failure.exception_, failure.backtrace))
+  | Comments_display_cleanup_diagnostic failure ->
+    Board_posts_source.reserved_exception (failure.exception_, failure.backtrace)
   | Comments_raised_diagnostic { exception_; backtrace; _ } ->
     Board_posts_source.reserved_exception (exception_, backtrace))
 
@@ -34,6 +43,8 @@ let stage_name = function
 let diagnostic_to_string = function
   | Comments_file_diagnostic error -> Fs_compat.private_jsonl_transaction_error_to_string error
   | Comments_workspace_diagnostic rejection -> Board_workspace_binding.rejection_to_string rejection
+  | Comments_display_diagnostic error -> Fs_compat.Private_jsonl_unique_fold.error_to_string error
+  | Comments_display_cleanup_diagnostic failure -> Fs_compat.private_jsonl_operation_failure_to_string failure
   | Comments_raised_diagnostic { stage; exception_; _ } ->
     stage_name stage ^ ": " ^ Printexc.to_string exception_
 
@@ -54,16 +65,28 @@ let failure_to_board_error failure = Io_error (match failure with
   | Comments_raised { exception_; _ } -> Printexc.to_string exception_)
 
 let history = function
-  | Comments_unobserved -> None
-  | Comments_readable receipt | Comments_publishing receipt -> Some receipt.observation
+  | Comments_unobserved -> No_comments_observation
+  | Comments_readable receipt | Comments_publishing receipt -> Comments_observed receipt.observation
+  | Comments_recovered receipt -> Comments_observed receipt.fence
   | Comments_refused { last_observed; _ } -> last_observed
-  | Comments_unsettled { pending; _ } -> Some pending.expected
+  | Comments_unsettled { pending; _ } -> Comments_observed pending.expected
 
 let refuse store failure diagnostics = match store.comments_source with
-  | Comments_unsettled _ | Comments_publishing _ -> ()
+  | Comments_unsettled _ | Comments_publishing _ | Comments_recovered _ -> ()
   | Comments_unobserved | Comments_readable _ | Comments_refused _ ->
     store.comments_source <- Comments_refused {
       last_observed = history store.comments_source; failure; diagnostics }
+
+let refuse_present store failure diagnostics =
+  let last_observed = match history store.comments_source with
+    | No_comments_observation | Comments_present_without_snapshot -> Comments_present_without_snapshot
+    | Comments_observed observation as previous ->
+      if Fs_compat.Private_jsonl_cursor.is_missing observation.snapshot.cursor
+      then Comments_present_without_snapshot else previous in
+  match store.comments_source with
+  | Comments_unsettled _ | Comments_publishing _ | Comments_recovered _ -> ()
+  | Comments_unobserved | Comments_readable _ | Comments_refused _ ->
+    store.comments_source <- Comments_refused { last_observed; failure; diagnostics }
 
 let expected store = match store.comments_source with
   | Comments_readable { observation; _ } ->
@@ -71,6 +94,7 @@ let expected store = match store.comments_source with
     then Ok observation else Error Comments_source_binding_mismatch
   | Comments_unobserved -> Error Comments_not_observed
   | Comments_publishing _ -> Error Comments_publication_pending
+  | Comments_recovered _ -> Error Comments_reload_required
   | Comments_refused { failure; _ } | Comments_unsettled { failure; _ } -> Error failure
 
 let require_readable store = expected store |> Result.map (fun _ -> ())
@@ -78,7 +102,7 @@ let require_readable store = expected store |> Result.map (fun _ -> ())
 
 let read_diagnostics = function
   | Complete { diagnostics; _ } | Partial { diagnostics; _ }
-  | Unavailable { diagnostics; _ } -> diagnostics
+  | Unavailable { diagnostics; _ } | Display_only { diagnostics; _ } -> diagnostics
 
 let write_diagnostics = function
   | Written { diagnostics; _ } | Not_written { diagnostics; _ } | Unknown { diagnostics; _ } -> diagnostics
@@ -96,7 +120,7 @@ let finish_read outcome =
   let result = match outcome with
     | Complete _ -> Ok ()
     | Partial { errors; _ } -> Error (failure_to_board_error (Comments_rows_rejected errors))
-    | Unavailable { failure; _ } -> Error (failure_to_board_error failure) in
+    | Unavailable { failure; _ } | Display_only { failure; _ } -> Error (failure_to_board_error failure) in
   Option.iter (fun (exception_, backtrace) ->
     Board_posts_source.defer_reserved ~result exception_ backtrace)
     (reserved_diagnostics (read_diagnostics outcome));
@@ -131,18 +155,48 @@ let rewrite_file store path ~expected bytes = match store.comments_source_io wit
       ~io ~before_sync_rewrite_parent:io.before_sync_parent path ~expected bytes
 
 let missing_allowed store = match history store.comments_source with
-  | None -> true
-  | Some observation -> Fs_compat.Private_jsonl_cursor.is_missing observation.snapshot.cursor
+  | No_comments_observation -> true
+  | Comments_present_without_snapshot -> false
+  | Comments_observed observation -> Fs_compat.Private_jsonl_cursor.is_missing observation.snapshot.cursor
 
 let receipt_diagnostics error = match error with
   | None -> [] | Some error -> [Comments_file_diagnostic error]
 
+(* The fold callback is pure and runs in the Fs worker. This second read is
+   display-only: it does not fabricate a stable snapshot from prefix bytes. *)
+let read_display_prefix store path =
+  let decode (comments, diagnostics) text =
+    if String.trim text = "" then comments, diagnostics
+    else match Yojson.Safe.from_string text with
+      | json ->
+        let decoded = Board_content_json.comment_of_yojson json in
+        let comments = match decoded.value with None -> comments | Some comment -> comment :: comments in
+        comments, List.rev_append decoded.diagnostics diagnostics
+      | exception Yojson.Json_error _ -> comments, diagnostics in
+  let result = match store.comments_source_io with
+    | None -> Fs_compat.fold_private_jsonl_unique_regular_locked_result path ~init:([], []) ~f:decode
+    | Some io -> Fs_compat.fold_private_jsonl_unique_regular_locked_with_io_for_testing
+        ~io path ~init:([], []) ~f:decode in
+  let value, diagnostics = match result with
+    | Fs_compat.Private_file_succeeded value -> Some value, []
+    | Private_file_succeeded_with_cleanup_failure { value; cleanup_failure } ->
+      Some value, [Comments_display_cleanup_diagnostic cleanup_failure]
+    | Private_file_failed error -> None, [Comments_display_diagnostic error]
+    | Private_file_failed_with_cleanup_failure { error; cleanup_failure } ->
+      None, [Comments_display_diagnostic error; Comments_display_cleanup_diagnostic cleanup_failure] in
+  let rows = match value with
+    | None | Some Fs_compat.Private_jsonl_fold.Missing -> None
+    | Some (Present { value; _ }) -> Some value in
+  rows, diagnostics
+
 let read store = match store.comments_source with
   | Comments_unsettled { failure; _ } -> Unavailable { failure; diagnostics = [] }
   | Comments_publishing _ -> Unavailable { failure = Comments_publication_pending; diagnostics = [] }
+  | Comments_recovered _ -> Unavailable { failure = Comments_reload_required; diagnostics = [] }
   | Comments_unobserved | Comments_readable _ | Comments_refused _ ->
-    let diagnostics = ref [] and stage = ref Read_comments in
-    let unavailable failure = refuse store failure !diagnostics;
+    let diagnostics = ref [] and stage = ref Read_comments and saw_present = ref false in
+    let unavailable failure =
+      (if !saw_present then refuse_present else refuse) store failure !diagnostics;
       Unavailable { failure; diagnostics = !diagnostics } in
     try
       match observe_workspace store with
@@ -151,10 +205,34 @@ let read store = match store.comments_source with
       | Ok before ->
         let path = Board_paths.comments_path store in
         match Fs_compat.private_jsonl_snapshot_success_receipt (read_file store path) with
-        | Error error -> diagnostics := [Comments_file_diagnostic error];
-          unavailable (Comments_transaction_failed error)
+        | Error error ->
+          diagnostics := [Comments_file_diagnostic error];
+          let failure = Comments_transaction_failed error in
+          if not (Fs_compat.private_jsonl_transaction_error_is_incomplete_tail error)
+          then unavailable failure
+          else (
+            saw_present := true;
+            refuse_present store failure !diagnostics;
+            match reserved_diagnostics !diagnostics with
+            | Some _ -> unavailable failure
+            | None ->
+              let rows, display_diagnostics = read_display_prefix store path in
+              diagnostics := !diagnostics @ display_diagnostics;
+              match reserved_diagnostics !diagnostics, rows with
+              | Some _, _ | None, None -> unavailable failure
+              | None, Some (comments, content_diagnostics) ->
+                match finish_workspace store before with
+                | Error rejection ->
+                  diagnostics := !diagnostics @ [Comments_workspace_diagnostic rejection];
+                  unavailable (Comments_workspace_refused rejection)
+                | Ok _ ->
+                  stage := Decode_comments;
+                  Board_content_diagnostics.emit (List.rev content_diagnostics);
+                  refuse_present store failure !diagnostics;
+                  Display_only { comments = List.rev comments; failure; diagnostics = !diagnostics })
         | Ok receipt ->
           diagnostics := receipt_diagnostics receipt.settlement_error;
+          saw_present := not (Fs_compat.Private_jsonl_cursor.is_missing receipt.value.cursor);
           match reserved_diagnostics !diagnostics with
           | Some (exception_, backtrace) -> unavailable (Comments_raised { exception_; backtrace })
           | None ->
@@ -189,22 +267,32 @@ let read store = match store.comments_source with
       unavailable (Comments_raised { exception_; backtrace })
 
 let publish_read store outcome = match store.comments_source with
-  | Comments_unsettled _ | Comments_publishing _ -> ()
+  | Comments_unsettled _ | Comments_publishing _ | Comments_recovered _ -> ()
   | Comments_unobserved | Comments_readable _ | Comments_refused _ ->
     match outcome with
     | Complete { observation; diagnostics; _ } ->
       store.comments_source <- Comments_readable { observation; diagnostics }
     | Partial { observation; errors; diagnostics; _ } ->
-      store.comments_source <- Comments_refused { last_observed = Some observation;
+      store.comments_source <- Comments_refused { last_observed = Comments_observed observation;
         failure = Comments_rows_rejected errors; diagnostics }
+    | Display_only { failure; diagnostics; _ } -> refuse_present store failure diagnostics
     | Unavailable { failure; diagnostics } -> refuse store failure diagnostics
 
 let fail_read store outcome ~stage exception_ backtrace =
   let diagnostics = read_diagnostics outcome @ [Comments_raised_diagnostic { stage; exception_; backtrace }] in
   let failure = match outcome with
-    | Unavailable { failure; _ } -> failure
+    | Unavailable { failure; _ } | Display_only { failure; _ } -> failure
     | Complete _ | Partial _ -> Comments_raised { exception_; backtrace } in
-  refuse store failure diagnostics;
+  (match outcome, store.comments_source with
+   | (Complete { observation; _ } | Partial { observation; _ }),
+     (Comments_unobserved | Comments_readable _ | Comments_refused _) ->
+     store.comments_source <- Comments_refused { last_observed = Comments_observed observation;
+       failure; diagnostics }
+   | (Complete _ | Partial _), (Comments_unsettled _ | Comments_publishing _ | Comments_recovered _)
+   | (Unavailable _ | Display_only _),
+     (Comments_unobserved | Comments_readable _ | Comments_refused _
+      | Comments_unsettled _ | Comments_publishing _ | Comments_recovered _) ->
+     refuse store failure diagnostics);
   Unavailable { failure; diagnostics }
 
 let rec contradicts_observation = function
@@ -278,7 +366,7 @@ let publish_append store receipt = match store.comments_source with
     store.comments_source <- Comments_readable receipt;
     Written { value = (); diagnostics = receipt.diagnostics }
   | Comments_publishing _ | Comments_unobserved | Comments_readable _
-  | Comments_refused _ | Comments_unsettled _ -> not_written Comments_snapshot_stale []
+  | Comments_refused _ | Comments_unsettled _ | Comments_recovered _ -> not_written Comments_snapshot_stale []
 
 let capture store =
   let expected = expected store in
@@ -308,6 +396,7 @@ let rewrite store snapshot =
 
 let settle store = match store.comments_source with
   | Comments_publishing _ -> not_written Comments_publication_pending []
+  | Comments_recovered receipt -> Written { value = Some receipt; diagnostics = [] }
   | Comments_unobserved | Comments_readable _ | Comments_refused _ -> Written { value = None; diagnostics = [] }
   | Comments_unsettled { pending; failure = prior_failure; _ } ->
     let diagnostics = ref [] in
@@ -348,11 +437,20 @@ let settle store = match store.comments_source with
                      && String.equal fence.snapshot.bytes pending.expected.snapshot.bytes
                   then inconclusive Comments_snapshot_stale
                   else (
-                    store.comments_source <- Comments_refused { last_observed = Some fence;
-                      failure = Comments_reload_required; diagnostics = !diagnostics };
-                    Written { value = Some { interrupted = pending; prior_failure; fence };
+                    let receipt = { interrupted = pending; prior_failure; fence; diagnostics = !diagnostics } in
+                    store.comments_source <- Comments_recovered receipt;
+                    Written { value = Some receipt;
                       diagnostics = !diagnostics })
     with exception_ ->
       let backtrace = Printexc.get_raw_backtrace () in
       diagnostics := !diagnostics @ [Comments_raised_diagnostic { stage = Write_comments; exception_; backtrace }];
       inconclusive (Comments_raised { exception_; backtrace })
+
+let acknowledge_recovery store receipt = match store.comments_source with
+  | Comments_recovered current when current == receipt ->
+    store.comments_source <- Comments_refused { last_observed = Comments_observed receipt.fence;
+      failure = Comments_reload_required; diagnostics = receipt.diagnostics };
+    Ok ()
+  | Comments_unobserved | Comments_readable _ | Comments_refused _
+  | Comments_unsettled _ | Comments_publishing _ | Comments_recovered _ ->
+    Error (failure_to_board_error Comments_snapshot_stale)

@@ -924,6 +924,14 @@ type comments_source_observation = {
   workspace_observation : Board_workspace_binding.observation;
 }
 
+type comments_source_history =
+  | No_comments_observation
+  | Comments_observed of comments_source_observation
+  | Comments_present_without_snapshot
+(** A validated nonauthoritative read can prove Present without granting an
+    exact snapshot for mutation. This still prevents later Missing from being
+    treated as an uninitialized source. *)
+
 type comments_row_error =
   | Invalid_comments_json of { line : int; detail : string }
   | Invalid_comments_row of { line : int }
@@ -935,6 +943,8 @@ type comments_source_stage =
 type comments_source_diagnostic =
   | Comments_file_diagnostic of Fs_compat.private_jsonl_transaction_error
   | Comments_workspace_diagnostic of Board_workspace_binding.rejection
+  | Comments_display_diagnostic of Fs_compat.Private_jsonl_unique_fold.error
+  | Comments_display_cleanup_diagnostic of Fs_compat.private_jsonl_operation_failure
   | Comments_raised_diagnostic of {
       stage : comments_source_stage;
       exception_ : exn;
@@ -965,6 +975,7 @@ type comments_recovery_receipt = {
   interrupted : comments_unsettled_write;
   prior_failure : comments_source_failure;
   fence : comments_source_observation;
+  diagnostics : comments_source_diagnostic list;
 }
 (** Explicit storage recovery superseded an interrupted attempt. This is not
     a verdict that the original operation was written or not written. *)
@@ -981,8 +992,12 @@ type comments_source_state =
   | Comments_unobserved
   | Comments_readable of comments_publication
   | Comments_publishing of comments_publication
+  | Comments_recovered of comments_recovery_receipt
+  (** Completed recovery, retained before finishing can raise. Repeated settle
+      returns this same receipt without IO or replaying historical exceptions;
+      acknowledge it explicitly before a full model reload. *)
   | Comments_refused of {
-      last_observed : comments_source_observation option;
+      last_observed : comments_source_history;
       failure : comments_source_failure;
       diagnostics : comments_source_diagnostic list;
     }
@@ -991,8 +1006,8 @@ type comments_source_state =
       failure : comments_source_failure;
       diagnostics : comments_source_diagnostic list;
     }
-(** [last_observed = None] means this store has never accepted a source
-    observation. A first observed Missing source is legitimate empty input;
+(** [No_comments_observation] means this store has never observed this source.
+    A first observed Missing source is legitimate empty input;
     losing a source this store observed Present is refused. This lifetime
     evidence does not prove absence across different processes. *)
 

@@ -230,8 +230,10 @@ val save_comments_snapshot : store -> comments_snapshot -> (unit, board_error) r
     Failed/unknown loads and stale source changes grant no write authority. *)
 val require_comments_source_readable : store -> (unit, board_error) result
 val settle_comments_source : store -> (comments_recovery_receipt option, board_error) result
-(** Explicitly fence a fresh comments source after an unknown write without
-    replaying it. Full model reload is still required after recovery success. *)
+val acknowledge_comments_recovery : store -> comments_recovery_receipt -> (unit, board_error) result
+(** Explicitly fence a fresh source without replay. Completed receipts survive
+    cleanup exceptions and can be retrieved again. Receive and acknowledge the
+    exact receipt under persistence, then reload the complete model. *)
 
 (** Atomically rewrites {!comments_path} from
     [store.comments]. The snapshot is captured under the state lock and written

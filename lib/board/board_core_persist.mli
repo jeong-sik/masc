@@ -168,8 +168,10 @@ val capture_comments_snapshot : store -> comments_snapshot
 val save_comments_snapshot : store -> comments_snapshot -> (unit, board_error) result
 val require_comments_source_readable : store -> (unit, board_error) result
 val settle_comments_source : store -> (comments_recovery_receipt option, board_error) result
-(** Explicit storage recovery; a successful fence still requires full comments
-    reload before model authority. Does not replay the interrupted operation. *)
+val acknowledge_comments_recovery : store -> comments_recovery_receipt -> (unit, board_error) result
+(** Explicit storage recovery retains its completed receipt through cleanup
+    exceptions. Receive and acknowledge it under persistence, then fully reload
+    comments before model authority. Does not replay the interrupted operation. *)
 type comment_append_receipt
 val append_comment : store -> comment -> (comment_append_receipt, board_error) result
 val publish_comment_append : store -> comment_append_receipt -> (unit, board_error) result

@@ -18,6 +18,13 @@ type read =
       failure : comments_source_failure;
       diagnostics : comments_source_diagnostic list;
     }
+  | Display_only of {
+      comments : comment list;
+      failure : comments_source_failure;
+      diagnostics : comments_source_diagnostic list;
+    }
+(** Display-only complete prefix rows have no stable snapshot, durability or
+    mutation/negative-read authority. A torn tail never permits truncation. *)
 
 val read : store -> read
 val publish_read : store -> read -> unit
@@ -69,8 +76,12 @@ val reserved_diagnostics : comments_source_diagnostic list ->
 val settle : store -> comments_recovery_receipt option write_outcome
 (** Explicit recovery of an unknown write. Fence a fresh snapshot with a durable
     exact-snapshot rewrite of those same bytes; never replay the old intended
-    bytes or classify the old operation as written/nonwritten. Success leaves
-    the source refused until a full explicit model reload. Missing after a
+    bytes or classify the old operation as written/nonwritten. Success retains
+    the completed receipt before finishing can raise. Explicitly acknowledge
+    receipt ownership, then perform a full model reload. Missing after a
     Present expectation is refused. Publishing is not storage uncertainty and
     cannot be cleared here. Some returns the interrupted operation and actual
     fence for caller retention; None means no unsettled write required IO. *)
+val acknowledge_recovery : store -> comments_recovery_receipt -> (unit, board_error) result
+(** Consume only the exact store-owned completed receipt once. The caller has
+    received and retains the receipt; source authority still needs full reload. *)

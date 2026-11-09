@@ -75,6 +75,17 @@ let replace_loaded_comments store comments =
     if not (List.mem id ids) then Hashtbl.replace store.comments_by_post post_id (id :: ids)) comments;
   store.karma_cache <- None
 
+let merge_loaded_comments store comments =
+  List.iter (fun (comment : comment) ->
+    Hashtbl.replace store.comments (Comment_id.to_string comment.id) comment) comments;
+  Hashtbl.clear store.comments_by_post;
+  Hashtbl.iter (fun id (comment : comment) ->
+    let pid = Post_id.to_string comment.post_id in
+    let ids = match Hashtbl.find_opt store.comments_by_post pid with
+      | None -> [] | Some ids -> ids in
+    Hashtbl.replace store.comments_by_post pid (id :: ids)) store.comments;
+  invalidate_comment_caches store
+
 let merge_loaded_posts store posts =
   List.iter (fun (post : post) ->
     Hashtbl.replace store.posts (Post_id.to_string post.id) post;
@@ -144,16 +155,11 @@ let load_persisted_comments store =
             replace_loaded_comments store comments;
             Ok (List.length comments)
           | Source.Partial { comments; errors; _ } ->
-            List.iter (fun (comment : comment) ->
-              Hashtbl.replace store.comments (Comment_id.to_string comment.id) comment) comments;
-            Hashtbl.clear store.comments_by_post;
-            Hashtbl.iter (fun id (comment : comment) ->
-              let pid = Post_id.to_string comment.post_id in
-              let ids = match Hashtbl.find_opt store.comments_by_post pid with
-                | None -> [] | Some ids -> ids in
-              Hashtbl.replace store.comments_by_post pid (id :: ids)) store.comments;
-            invalidate_comment_caches store;
+            merge_loaded_comments store comments;
             error (Comments_rows_rejected errors)
+          | Source.Display_only { comments; failure; _ } ->
+            merge_loaded_comments store comments;
+            error failure
           | Source.Unavailable { failure; _ } -> error failure) in
         Source.publish_read store outcome;
         outcome, result
@@ -162,14 +168,15 @@ let load_persisted_comments store =
             (Printexc.get_raw_backtrace ()) in
         let result = match outcome with
           | Source.Unavailable { failure; _ } -> error failure
-          | Source.Complete _ | Source.Partial _ -> error Comments_publication_pending in
+          | Source.Complete _ | Source.Partial _ | Source.Display_only _ -> error Comments_publication_pending in
         outcome, result in
     try
       let _ = Source.finish_read outcome in
       List.iter (fun diagnostic -> record_persist_error ~where:"comments read settlement"
         (Source.diagnostic_to_string diagnostic)) (Source.read_diagnostics outcome);
       let loaded = match outcome with
-        | Source.Complete { comments; _ } | Source.Partial { comments; _ } -> List.length comments
+        | Source.Complete { comments; _ } | Source.Partial { comments; _ }
+        | Source.Display_only { comments; _ } -> List.length comments
         | Source.Unavailable _ -> 0 in
       log_loaded ~noun:"comments" ~loaded ~path ~elapsed:(Time_compat.now () -. t0)
         (Result.map (fun _ -> ()) result);
@@ -182,5 +189,5 @@ let load_persisted_comments store =
       let _ = Source.finish_read outcome in
       (match outcome with
        | Source.Unavailable { failure; _ } -> error failure
-       | Source.Complete _ | Source.Partial _ -> error Comments_publication_pending))
+       | Source.Complete _ | Source.Partial _ | Source.Display_only _ -> error Comments_publication_pending))
 ;;

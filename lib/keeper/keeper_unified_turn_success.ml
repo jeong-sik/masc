@@ -83,8 +83,6 @@ let append_metrics_snapshot
       ~usage_resolution
       ~turn_cost
       ~(lifecycle : KEC.post_turn_lifecycle)
-      ~terminal_outcome
-      ~execution_outcome
   =
   (* Single typed channel for the whole cycle: post helpers + the metrics
      snapshot + the failure-path label all derive from one value, so the
@@ -237,7 +235,6 @@ let emit_usage_metrics_and_log
       ~latency_ms
       ~usage_trust
       ~turn_mode_label
-      ~(lifecycle : KEC.post_turn_lifecycle)
       ~terminal_outcome
   =
   let outcome_str =
@@ -455,22 +452,7 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
 ;;
 
 module For_testing = struct
-  type nonrec terminal_outcome = terminal_outcome =
-    | Terminal_done
-    | Terminal_checkpoint
-    | Terminal_input_required
-
-  let persist_terminal_turn_meta_for_outcome
-        ~config
-        ~original_meta
-        ~updated_meta
-        ~terminal_outcome
-    =
-    persist_terminal_turn_meta
-      ~config
-      ~original_meta
-      ~updated_meta
-
+  let persist_terminal_turn_meta = persist_terminal_turn_meta
   let reset_turn_failures_for_stop_reason = reset_turn_failures_for_stop_reason
 end
 
@@ -621,9 +603,7 @@ let handle
     ~latency_ms
     ~usage_resolution
     ~turn_cost
-    ~lifecycle
-    ~terminal_outcome
-    ~execution_outcome;
+    ~lifecycle;
   let turn_mode = KUM.turn_mode_of_result result in
   let turn_mode_label = KUM.turn_mode_to_string turn_mode in
   let usage_trust =
@@ -679,7 +659,6 @@ let handle
       ~latency_ms
       ~usage_trust
       ~turn_mode_label
-      ~lifecycle
       ~terminal_outcome);
   run_projection KTP.Usage_metrics (fun () ->
     Keeper_hooks_agent_core.broadcast_resolved_turn_complete

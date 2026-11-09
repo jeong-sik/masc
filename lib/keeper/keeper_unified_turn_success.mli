@@ -3,17 +3,10 @@
     Keeper lifecycle failure. *)
 
 module For_testing : sig
-  type terminal_outcome =
-    | Terminal_done
-    | Terminal_checkpoint
-    | Terminal_input_required
-
-
-  val persist_terminal_turn_meta_for_outcome
+  val persist_terminal_turn_meta
     :  config:Workspace.config
     -> original_meta:Keeper_meta_contract.keeper_meta
     -> updated_meta:Keeper_meta_contract.keeper_meta
-    -> terminal_outcome:terminal_outcome
     -> Keeper_meta_contract.keeper_meta
 
   val reset_turn_failures_for_stop_reason

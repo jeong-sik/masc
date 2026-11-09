@@ -1088,14 +1088,12 @@ let () =
         }
     }
   in
-  let terminal_outcome = UTS.Terminal_checkpoint in
   let returned =
     with_owner_inventory config (fun () ->
-      UTS.persist_terminal_turn_meta_for_outcome
+      UTS.persist_terminal_turn_meta
         ~config
         ~original_meta
-        ~updated_meta
-        ~terminal_outcome)
+        ~updated_meta)
   in
   let persisted = read_meta_exn config keeper_name in
   check "checkpoint returns advanced turn usage"

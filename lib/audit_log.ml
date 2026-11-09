@@ -53,7 +53,6 @@ type audit_entry = {
   timestamp: float;
   agent_id: string;
   action: action;
-  workspace_id: string option;
   details: Yojson.Safe.t;
   outcome: outcome;
   cost_estimate: float option;
@@ -164,7 +163,6 @@ let entry_to_json (e : audit_entry) : Yojson.Safe.t =
     ("timestamp", `Float e.timestamp);
     ("agent_id", `String e.agent_id);
     ("action", `String (action_to_string e.action));
-    ("workspace_id", Json_util.string_opt_to_json e.workspace_id);
     ("details", e.details);
     ("outcome", outcome_to_json e.outcome);
   ] in
@@ -189,7 +187,6 @@ let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
     let timestamp = Json_util.get_float json "timestamp" in
     let agent_id = Json_util.get_string json "agent_id" in
     let action_raw = Json_util.get_string json "action" in
-    let workspace_id = Json_util.get_string json "workspace_id" in
     let details =
       match Safe_ops.json_member_opt "details" json with
       | Some v -> v
@@ -211,7 +208,7 @@ let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
     match timestamp, agent_id, action_raw with
     | Some timestamp, Some agent_id, Some action_raw ->
       let action = string_to_action action_raw in
-      Ok { timestamp; agent_id; action; workspace_id; details; outcome; cost_estimate; token_count; trace_id }
+      Ok { timestamp; agent_id; action; details; outcome; cost_estimate; token_count; trace_id }
     | _ -> Error "missing required fields (timestamp, agent_id, action)"
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     (* Redact details field to prevent sensitive content leaking into logs *)
@@ -630,7 +627,6 @@ let log_action
     (config : config)
     ~agent_id
     ~action
-    ?(workspace_id : string option)
     ?(details : Yojson.Safe.t = `Null)
     ?(cost_estimate : float option)
     ?(token_count : int option)
@@ -641,7 +637,6 @@ let log_action
     timestamp = Time_compat.now ();
     agent_id;
     action;
-    workspace_id;
     details;
     outcome;
     cost_estimate;

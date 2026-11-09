@@ -961,9 +961,12 @@ let run_turn
       match user_blocks, prepared_gate_input.replay_evidence with
       | Some blocks, _ when Option.is_some official_client_continuation ->
         Some (blocks @ [Agent_core.Types.Text prepared_gate_input.text])
-      | Some blocks, Some evidence ->
-        Some (Keeper_gate_replay.append_model_evidence_block evidence blocks)
-      | (Some _ as blocks), None -> blocks
+      | Some blocks, evidence ->
+        Some
+          (List.fold_left
+             (fun blocks evidence ->
+                Keeper_gate_replay.append_model_evidence_block evidence blocks)
+             blocks evidence)
       | None, _ -> None
     in
     let admission =
@@ -972,7 +975,7 @@ let run_turn
          blocks have their own durable admission identity. *)
       if Option.is_some official_client_continuation then Ok None else
       match hitl_resolution, prepared_gate_input.replay_evidence, user_blocks with
-      | Some _, Some evidence, blocks
+      | Some _, evidence :: remaining_evidence, blocks
         when Option.is_none blocks || (match direct_resume with
           | Some (Gate_continuation _) -> true
           | Some (Checkpoint_continuation _ | Runtime_continuation _) | None -> false) ->
@@ -985,6 +988,16 @@ let run_turn
               answerer as the speaker. Stamped before admission so the admitted
               copy already carries it; the admission digest leaves the speaker
               out, so stamping does not change what was admitted. *)
+           let co_inputs =
+             List.fold_left
+               (fun result evidence ->
+                  Result.bind result (fun inputs_rev ->
+                    Keeper_gate_replay.approval_input evidence
+                    |> Result.map_error Keeper_approval_input_admission.error_to_string
+                    |> Result.map (fun input -> input :: inputs_rev)))
+               (Ok []) remaining_evidence
+             |> Result.map List.rev
+           in
            let co_inputs =
              List.fold_left
                (fun result
@@ -1007,7 +1020,7 @@ let run_turn
                      ~evidence_fingerprint
                    |> Result.map_error Keeper_approval_input_admission.error_to_string
                    |> Result.map (fun identity -> inputs @ [ identity, message ])))
-               (Ok [])
+               co_inputs
                answered_ask_inputs
            in
            Result.bind co_inputs (fun co_inputs ->

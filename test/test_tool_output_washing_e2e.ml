@@ -191,7 +191,7 @@ let test_full_flow_externalize_reference_serve () =
         match
           K.project_model_input
             ~base_path:dir
-            ~gate_replay_evidence:None
+            ~gate_replay_evidence:[]
             [ msg ]
         with
         | Ok messages -> messages

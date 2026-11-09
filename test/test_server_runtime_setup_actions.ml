@@ -385,7 +385,7 @@ let test_configured_codex_account_save () = fixture (fun base runtime binary net
     let args = Yojson.Safe.from_file (Filename.concat base "codex-args.json")
       |> Yojson.Safe.Util.to_list |> List.map Yojson.Safe.Util.to_string in
     Alcotest.check (Alcotest.list Alcotest.string) "configured selected account reaches native discovery"
-      ["runtime-codex-models";"--cli-path";"selected-codex";"--account-home";account_home] args;
+      ["runtime-codex-models";"--base-path";base;"--cli-path";"selected-codex";"--account-home";account_home] args;
     Alcotest.check Alcotest.bool "discovery response does not leak the selected path" false
       (String_util.contains_substring (Yojson.Safe.to_string result) account_home);
     Alcotest.check Alcotest.bool "browser cannot override the configured home" true

@@ -544,9 +544,17 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                      ~text:(Some turn.text)
                      ~dynamic_tool_calls:turn.dynamic_tool_calls)))
            | Runtime_execution.Codex_app_server exec ->
+             (* HIGH-RISK-UNREVIEWED: a probe is a call of the operator, so the
+                app-server starts only where the access allows one (plan D2-6). *)
+             (match
+                Runtime_account_access.authorize Runtime_account_access.Operator_call
+                  (Runtime_account_access.seal exec.account_home)
+              with
+              | Error refusal ->
+                Error (Account_not_authorized (Runtime_account_access.refusal_to_string refusal))
+              | Ok account ->
              let config : Runtime_codex_app_server.config =
                { cli_path = exec.cli_path
-               ; account_home = Runtime_official_account.Captured exec.account_home
                ; isolated_home = None
                ; model = exec.model
                ; context_window = Some (Runtime_instance.max_context_of_runtime rt)
@@ -571,6 +579,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                   ~mgr
                   ~clock
                   ~cwd:Eio.Path.(fs / base_path)
+                  ~account
                   config
                   ~prompt
                   ~images:[]
@@ -586,7 +595,7 @@ let probe_official_client_invocation ~mgr ~clock ~fs ~base_path ~now ~runtime_id
                      ~seen
                      ~elapsed_s:(now () -. started)
                      ~text:(Some turn.text)
-                     ~dynamic_tool_calls:turn.dynamic_tool_calls)))))
+                     ~dynamic_tool_calls:turn.dynamic_tool_calls))))))
 ;;
 
 (* --- Antigravity lane --- *)

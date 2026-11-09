@@ -596,7 +596,7 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
   - 단일 사용자의 `authorize`는 요청을 가리지 않고 봉인된 계정을 그대로 준다. 지금 동작과 같다.
   - 다계정의 `authorize`는 요청(`request`)에 따라 판정한다. 요청은 `Keeper_turn {keeper_name; channel; runtime_id}`, `Own_account {user_id; provider_account_id}`, `Operator_call`이다. Keeper 턴은 `Authz_keeper_turn.decide`가 정하고, 배정된 Runtime이 아니면 거절한다. 자기 계정은 로그에 활성 principal과 membership이 있어야 한다. 둘 다 CLI를 띄울 홈을 그 사람(Keeper 턴이면 주인)의 namespace와 구독 계정 id로 만든 홈과 철자까지 비교한다. 선언된 홈이 아니면(상속된 홈은 프로세스 환경의 자격 증명을 든다) 거절한다. 홈 경로는 `Runtime_account_home_layout` 하나가 만들고 login·verify·authorize가 같이 쓴다. Claude는 keychain 항목을 그 경로 철자로 가른다. 그 밖의 목적(Fusion, capability probe, dashboard probe, librarian, vision)은 `Operator_call`이고 다계정에서 거절한다. D5·S1이 연다.
   - 자기 계정 확인은 로그의 구독 계정 기록을 요구하지 않는다. 로그인 확인(`observe`)은 계정을 로그에 연결(`link`)하기 전에 돌기 때문이다. 홈이 그 사람의 namespace 아래 있으면 그 사람 것이다. namespace는 한 사람에게만 주어진다.
-  - CLI를 띄우는 클라이언트 함수(Claude Code `run_turn`·`probe_subscription`, Codex `run_turn`·`validate_turn`·`probe_subscription`·`list_models`·`read_rate_limits`·`delete_threads`)가 모두 `authorized`를 받는다. client `config`에는 계정 칸이 없다. login은 계정을 만드는 흐름이라 따로 둔다(`login_environment`).
+  - CLI를 띄우는 클라이언트 함수(Claude Code `run_turn`·`probe_subscription`, Codex `run_turn`·`probe_subscription`·`list_models`·`read_rate_limits`·`delete_threads`)가 모두 `authorized`를 받는다. `validate_turn`은 CLI를 띄우지 않으므로 받지 않는다. client `config`에는 계정 칸이 없다. login은 계정을 만드는 흐름이라 따로 둔다(`login_environment`).
 - 층.
   - D2-0 기록. Runtime 본문에 `self_effects`를, Keeper 본문에 `policy_id`와 `turn_scope`를 더한다. 두 본문은 미리보기에서만 쓰였으므로 hard cut이다. 미리보기 Keeper는 `autonomous`와 `direct` 채널을 허용하는 정책으로 만든다. Runtime과 효과는 배정과 Self grant가 제한한다.
   - D2-1 adapter. 한 snapshot에서 Keeper 턴의 `facts`를 만든다. 배정이 없으면 `NoAuthorizedRuntime`이다. 1단계에는 Runtime과 ProviderAccount의 상태 기록이 없어서 둘 다 `Active`다. 회수는 구역의 게이트 값(`revocation_pending`)이다. 의존은 `Cleared`다. 1단계에는 복원 창이 없고(F2는 2단계), A2가 복원된 로그를 거절한다.
@@ -611,6 +611,11 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
     - Fusion 패널, capability probe, dashboard probe, `masc runtime-probe`는 `Operator_call`이다. 거절은 각자 이미 있는 "프로세스를 띄우지 않음" 결과로 낸다(Fusion `Setup_failure`, capability probe `Account_not_authorized`, `runtime-probe`는 `account-not-authorized`와 종료 코드 5). dashboard probe의 로그인 상태는 대시보드가 닫힌 목록으로 읽으므로 `invalid_config`에 거절 이유를 붙인다. 단일 사용자 서버는 owner state를 열 때 게시하고 모든 요청을 허용하므로 거기서는 거절이 나오지 않는다.
     - 서버 밖에서 CLI를 띄우는 bin은 base path를 정한 뒤 `publish_host_tool`로 게시한다: `masc runtime-probe`, `masc-fusion-run`, `masc-lane-cli-probe`, `masc-keeper-capability-probe`, `masc-librarian-continuity`. 시험 실행 파일은 `Masc_test_deps.publish_single_user_access`로 게시한다.
   - D2-6 Codex 클라이언트가 같은 일을 한다.
+    - client `config`에 계정 칸이 없다. app-server를 띄우는 함수 다섯 개(`run_turn`, `probe_subscription`, `list_models`, `read_rate_limits`, `delete_threads`)가 인가된 계정을 받는다. 호출할 때 계정을 고르던 선택(`Current`)은 Codex에서도 없어졌다. login은 `login_environment ~account_home`으로 홈을 받는다.
+    - verify와 모델 목록 갱신의 private home은 인가된 계정의 환경에 CODEX_HOME만 private home으로 바꾼 것이다(`Runtime_official_account.private_codex_environment`). 계정 홈의 연결 설정은 그 계정 값에서 복사한다.
+    - 드라이버는 Claude Code 시도와 같은 요청으로 Codex 시도마다 인가를 받는다. Codex Keeper 런타임은 턴, 스레드 지우기, 쿼터 소진 뒤 사용량 읽기, 도구 표면 해시, 쿼터 창을 모두 그 계정 값에서 읽는다.
+    - 운영자 호출: Fusion 패널, capability probe, dashboard probe, `masc runtime-probe`, 서버 시작 때의 사용량 읽기, 모델 목록 갱신. 거절은 각자 이미 있는 결과로 낸다. 사용량 읽기는 읽기 실패로 로그에 남는다.
+    - `masc runtime-codex-models`는 base path를 받지 않았다. 다른 host tool처럼 작업 공간을 정하고(`--base-path`, 환경 변수, 현재 디렉터리) 게시한다. 다계정 작업 공간이거나 거절되면 종료 코드 1로 끝나고, setup은 이것을 이미 "갱신 불가"로 읽는다. 서버의 setup 동작과 설치 wizard가 base path를 넘긴다.
   - D2-7 테이블이 봉인을 든다(`Runtime_execution`). 호출처는 테이블의 자격 증명을 더 꺼내지 못한다.
   - D2-8 미리보기 "내 Keeper 한 번 돌리기". 사람이 브라우저로 확인한다. 2026-11-09 D2-6·D2-7보다 먼저 했다. Claude Code는 D2-5부터 인가된 계정으로만 뜨므로, Codex를 기다리지 않고 사람의 구독으로 Keeper 턴이 도는지 먼저 확인할 수 있다.
     - 라우트는 `POST /api/v1/auth/keepers/turn`이다. 본문은 `{"keeper_id","message"}`이고 메시지는 4096바이트까지다. 게이트는 `Manage_own_keeper`에 membership을 더한다(`Auth_preview.keeper_owner_person`). 턴이 그 사람 namespace 아래 홈에서 CLI를 띄우기 때문이다.

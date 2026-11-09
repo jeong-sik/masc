@@ -35,7 +35,8 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
         ~tools:[] ~initial_messages:[] ~model_input_projection:None
         ~on_transmitted_model_input:transmitted ~hooks:None
         ~context_injector:None ~context:None ~event_bus:None
-        ~raw_trace:None ~on_event:None ~config () in
+        ~raw_trace:None ~on_event:None
+        ~account:(Masc_test_deps.authorized_account config.account_home) ~config () in
     outcome.result, outcome.settled_session, outcome.effect_disposition
   | S.Claude_code ->
     let config : Runtime_execution.claude_code =

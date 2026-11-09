@@ -199,21 +199,7 @@ let a_new_logins_home_is_found_again () = fixture (fun root _ ->
   check bool "none for Antigravity" true
     (Result.is_error (Login.account_home ~runtime_root:root ~account_id:"acct-1" ~client:Login.Antigravity)))
 
-(* A login check starts a client on an account only by the access the process
-   published: the single user of a fresh base path never set up for accounts,
-   as a host tool publishes it. *)
-let publish_single_user () =
-  let root = Filename.temp_dir "setup-login-client-access-" "" in
-  let published =
-    Eio_main.run (fun _env ->
-      Runtime_account_access.publish_host_tool
-        ~base_path:root ~config_dir:(Some (Filename.concat root "config"))) in
-  Unix.rmdir root;
-  match published with
-  | Ok () -> ()
-  | Error (first, _) -> failwith first
-
-let () = publish_single_user (); run "official login adapters" ["selected accounts", [
+let () = Masc_test_deps.publish_single_user_access (); run "official login adapters" ["selected accounts", [
   test_case "native login isolation" `Quick isolated_native_login;
   test_case "a login's email reaches the provider saved from it" `Quick login_email_reaches_the_saved_provider;
   test_case "native authentication without model calls" `Quick native_authentication_observation;

@@ -1813,25 +1813,10 @@ streaming = true
     (Result.is_error (provider_config_for_binding unsafe_config binding))
 ;;
 
-(* A client starts on an account only by the access the process published.
-   The cases verify as [masc runtime-verify] does, which publishes the single
-   user of a base path never set up for accounts: here a fresh empty one. *)
-let publish_single_user () =
-  let root = Filename.temp_dir "runtime-verification-access-" "" in
-  let published =
-    Eio_main.run (fun _env ->
-      Runtime_account_access.publish_host_tool
-        ~base_path:root
-        ~config_dir:(Some (Filename.concat root "config")))
-  in
-  Unix.rmdir root;
-  match published with
-  | Ok () -> ()
-  | Error (first, _) -> failwith first
-;;
-
+(* The cases verify as [masc runtime-verify] does, which publishes the single
+   user of a base path never set up for accounts. *)
 let () =
-  publish_single_user ();
+  Masc_test_deps.publish_single_user_access ();
   run
     "runtime verification"
     [ ( "selected probe idle",

@@ -221,10 +221,64 @@ let test_segments_extracts_scheduled_and_memory_cells () =
   Alcotest.(check int) "other has 0 cells when absent from snapshot" 0 (List.length other_clean)
 ;;
 
+(* Column widths of the cells in the order the row draws them, as #50022
+   counts them: failing, schedule, the four memory cells, pulse, ladder. *)
+let widest_row = [ 14; 18; 5; 5; 13; 8; 12; 13 ]
+let healthy_row = [ 8; 5; 12; 12; 13 ]
+
+let fit ~available ~detail_floor widths =
+  let { Masc_tui_keeper_axis_cell.drawn; left_width; _ } =
+    Masc_tui_keeper_axis_cell.fit ~available ~detail_floor ~width:Fun.id widths
+  in
+  drawn, left_width
+;;
+
+let test_fit_leaves_the_detail_its_floor () =
+  let drawn_left = Alcotest.(pair (list int) int) in
+  (* Without a floor the widest row at 80 columns (73 after the marker) draws
+     six cells and leaves the DETAIL nothing. *)
+  Alcotest.check drawn_left "no floor"
+    ([ 14; 18; 5; 5; 13; 8 ], 0)
+    (fit ~available:73 ~detail_floor:None widest_row);
+  (* With DETAIL text the last cells go until the DETAIL has its floor. *)
+  Alcotest.check drawn_left "a floor of 10"
+    ([ 14; 18; 5; 5 ], 24)
+    (fit ~available:73 ~detail_floor:(Some 10) widest_row);
+  (* A row whose cells fit with room to spare is not changed. *)
+  Alcotest.check drawn_left "healthy row"
+    (healthy_row, 14)
+    (fit ~available:73 ~detail_floor:(Some 10) healthy_row);
+  (* The first cell stays even when it leaves the DETAIL less than the floor,
+     and a row too narrow for it draws none. *)
+  Alcotest.check drawn_left "first cell stays" ([ 14 ], 5)
+    (fit ~available:20 ~detail_floor:(Some 10) [ 14; 5 ]);
+  Alcotest.check drawn_left "too narrow for the first cell" ([], 10)
+    (fit ~available:10 ~detail_floor:(Some 10) [ 14; 5 ]);
+  (* At every width a second cell is drawn only when the DETAIL keeps its
+     floor, and the cells drawn are the ones the row draws without a floor,
+     minus the last ones. *)
+  List.iter
+    (fun widths ->
+      for available = 0 to 200 do
+        let drawn, left = fit ~available ~detail_floor:(Some 10) widths in
+        let all, _ = fit ~available ~detail_floor:None widths in
+        let kept = List.length drawn in
+        Alcotest.(check bool)
+          (Printf.sprintf "%d of %d cells at %d columns" kept (List.length widths) available)
+          true
+          ((kept <= 1 || left >= 10) && drawn = List.filteri (fun i _ -> i < kept) all)
+      done)
+    [ widest_row; healthy_row ]
+;;
+
 let () =
   Alcotest.run "tui_keeper_axis"
     [ ( "axis segments"
       , [ Alcotest.test_case "extracts scheduled and memory cells" `Quick
             test_segments_extracts_scheduled_and_memory_cells
+        ] )
+    ; ( "axis cell fit"
+      , [ Alcotest.test_case "leaves the DETAIL its floor" `Quick
+            test_fit_leaves_the_detail_its_floor
         ] )
     ]

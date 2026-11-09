@@ -245,17 +245,26 @@ let keeper_badge_text (badge : Keeper_list_model.badge) =
   | Badge_schedule -> glyph ^ " schedule"
   | Badge_quota_spent -> glyph ^ " quota spent"
 
+(* Between two pieces of DETAIL. *)
+let detail_separator = " · "
+
 let keeper_task_detail (row : Keeper_list_model.row) =
   match row.task with
   | Some task ->
       let id = Terminal_text.single_line task.Tui_decode.id in
       let title = Terminal_text.single_line task.Tui_decode.title in
-      Some ("task " ^ id ^ if String.equal title "" then "" else " · " ^ title)
+      Some ("task " ^ id ^ if String.equal title "" then "" else detail_separator ^ title)
   | None -> (
       match row.keeper.Tui_decode.k_activity with
       | Some activity -> Option.map (fun id -> "task " ^ Terminal_text.single_line id)
           activity.Tui_decode.k_current_task_id
       | None -> Some "task not observed")
+
+let keeper_waiting_item_text (item : Tui_decode.waiting_item) =
+  Terminal_text.single_line
+    (if not (String.equal (String.trim item.kwi_what) "") then item.kwi_what
+     else if not (String.equal (String.trim item.kwi_next_action) "") then item.kwi_next_action
+     else item.kwi_waiting_on)
 
 let keeper_waiting_detail (row : Keeper_list_model.row) =
   match row.waiting with
@@ -269,12 +278,7 @@ let keeper_waiting_detail (row : Keeper_list_model.row) =
         | Some result -> result
         | None -> first
       in
-      let detail =
-        if not (String.equal (String.trim item.Tui_decode.kwi_what) "") then item.kwi_what
-        else if not (String.equal (String.trim item.kwi_next_action) "") then item.kwi_next_action
-        else item.kwi_waiting_on
-      in
-      Some (Terminal_text.single_line detail
+      Some (keeper_waiting_item_text item
         ^ (match rest with [] -> "" | _ -> Printf.sprintf " (+%d more)" (List.length rest)))
   | Keeper_list_model.Waiting_observed { kwr_waiting_on = []; _ }
   | Keeper_list_model.Waiting_unobserved | Keeper_list_model.Waiting_unavailable -> None
@@ -335,19 +339,12 @@ let keeper_next_text ?now (row : Keeper_list_model.row) =
   | Some (Path_resting text) -> Some (if after_failure () then marked text else text)
   | Some (Path_unread text) -> Some text
 
-let detail_separator = " · "
+let keeper_approval_text (approval : Tui_decode.keeper_tool_approval) =
+  "hold " ^ Terminal_text.single_line approval.kta_tool
+  ^ detail_separator ^ Terminal_text.single_line approval.kta_question
 
-let keeper_approval_text (row : Keeper_list_model.row) =
-  Option.map
-    (fun (approval : Tui_decode.keeper_tool_approval) ->
-      "hold " ^ Terminal_text.single_line approval.kta_tool
-      ^ detail_separator ^ Terminal_text.single_line approval.kta_question)
-    row.approval
-
-let keeper_questions_text (row : Keeper_list_model.row) =
-  if row.open_questions > 0 then
-    Some (Masc_tui_message_layout.count_noun row.open_questions "question" ^ " awaiting you")
-  else None
+let keeper_questions_text count =
+  Masc_tui_message_layout.count_noun count "question" ^ " awaiting you"
 
 let keeper_detail_text ?now (row : Keeper_list_model.row) =
   let health =
@@ -357,25 +354,20 @@ let keeper_detail_text ?now (row : Keeper_list_model.row) =
   in
   List.map keeper_badge_text (Keeper_list_model.badges_of_row row)
   @ List.filter_map Fun.id
-      [ keeper_approval_text row; keeper_questions_text row; keeper_waiting_detail row
-      ; keeper_task_detail row; health; keeper_next_text ?now row ]
+      [ Option.map keeper_approval_text row.approval
+      ; (if row.open_questions > 0 then Some (keeper_questions_text row.open_questions) else None)
+      ; keeper_waiting_detail row; keeper_task_detail row; health; keeper_next_text ?now row ]
   |> String.concat detail_separator
 
-(* What a Keeper that waits on a person waits for, in the words of DETAIL:
-   the held call, the open questions and the waiting item. [None] for a
-   Keeper whose activity waits on no person. *)
+(* What a Keeper waits on a person for, in the words of DETAIL. *)
 let keeper_person_wait_text (row : Keeper_list_model.row) =
-  match Keeper_list_model.primary_activity_of_row row with
-  | Held_call | Question | Confirmation -> (
-      match
-        List.filter_map Fun.id
-          [ keeper_approval_text row; keeper_questions_text row; keeper_waiting_detail row ]
-      with
-      | [] -> None
-      | parts -> Some (String.concat detail_separator parts))
-  | Attempt_failed | Preparing | Streaming | Running | Async_working _ | Deferred
-  | Tool_waiting | Model_waiting | Delegate_result | Verifying | External_waiting | Idle
-  | Paused | Offline | Unknown -> None
+  Option.map
+    (function
+      | Keeper_list_model.Held_tool approval -> keeper_approval_text approval
+      | Keeper_list_model.Open_questions count -> keeper_questions_text count
+      | Keeper_list_model.Held_item item | Keeper_list_model.Confirmation_item item ->
+          keeper_waiting_item_text item)
+    (Keeper_list_model.person_wait row)
 
 (* The DETAIL cell. When the RUNTIME column is not drawn, the sentence about
    the past leads this cell in the warning colour and the rest stays receded.
@@ -388,7 +380,7 @@ let keeper_detail_cell ?now ~width ~failure_context row =
   | None -> Theme.recede () ^ fit_width rest width ^ Ansi.reset
   | Some sentence ->
       let sentence_cells = Message_layout.display_width sentence in
-      let tail = if String.equal rest "" then "" else " · " ^ rest in
+      let tail = if String.equal rest "" then "" else detail_separator ^ rest in
       if sentence_cells >= width then
         Theme.warn () ^ fit_width (sentence ^ tail) width ^ Ansi.reset
       else

@@ -21,9 +21,15 @@ val make_request_handler
   -> H2.Reqd.t
   -> unit
 (** [routes] is the table the HTTP/1.1 listener dispatches on. [request_sw]
-    belongs to this request stream and is cancelled when the peer resets the
-    stream or connection I/O ends; deferred body work and SSE producers use
-    that scope. The [:authority] field set is classified as the HTTP/1.1
-    [Host] set is, then the request takes the shared path, client-IP rate
-    limit included. A handler called outside a listener's request scope gets
-    its own response capacity. *)
+    belongs to this request stream; deferred body work and SSE producers use
+    that scope. It is cancelled when a RST_STREAM goes either way, when the
+    handler raises, when a response flush stalls, and when connection I/O
+    ends ({!Server_bootstrap_http.serve_h2_connection}). The [:authority]
+    field set is classified as the HTTP/1.1 [Host] set is, then the request
+    takes the shared path, client-IP rate limit included.
+
+    The handler runs in a stream registry's scope
+    ({!Server_h2_stream_registry.dispatch}), which binds the stream's
+    {!Http_h2_stream.Stream_end}; outside one it raises [Invalid_argument].
+    A handler called outside a listener's request ledger scope gets its own
+    response capacity. *)

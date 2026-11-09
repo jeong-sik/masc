@@ -41,7 +41,12 @@ let make_request_handler ~trust_policy ~routes =
           work (Http_h2_response_ledger.current_exn ()))
     in
     within_request (fun ledger ->
-      let reqd = Http_reqd.of_h2 ~stream_sw:request_sw ~ledger h2_reqd in
+      let stream_end =
+        match Http_h2_stream.Stream_end.current () with
+        | Some stream_end -> stream_end
+        | None -> invalid_arg "Server_h2_gateway: an HTTP/2 request outside a stream registry"
+      in
+      let reqd = Http_reqd.of_h2 ~stream_end ~ledger h2_reqd in
       match
         Server_request_authority.classify_h2_request ~trust_policy (H2.Reqd.request h2_reqd)
       with

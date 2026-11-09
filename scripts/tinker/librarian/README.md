@@ -56,8 +56,8 @@ Synthetic Keepers, memories and candidates are invented by the model from
 | `glm_chat.py` | Capped calls to Z.AI's GLM coding endpoint in the request MASC's GLM slot sends, cached for resume |
 | `eval_admission.py` | Measures targets on E-real and E-synth, then applies the gates |
 | `memory_scores.py` | Scores one answer: E-real against the live answer, E-synth by the memory it leaves |
-| `teacher_sample.py` | Keeps teacher answers that match the training labels |
-| `train_sft.py` | Trains branch A (answer only) or B (teacher thinking and answer) |
+| `teacher_sample.py` | Keeps teacher answers that leave the memory their training labels ask for, and those that absorb a memory once the merge judge finds each absorb mergeable |
+| `train_sft.py` | Trains the candidate A on the teacher's answers |
 
 The tests are `scripts/tests/test_tinker_librarian_*.py`. They read only
 invented rows and the invented Keepers in
@@ -75,24 +75,35 @@ then the schema instruction as the last user message, with
 `reasoning_effort: "low"` and `max_tokens: 32768`.
 
 An exact request carries `max_tokens` only when its lane declares
-`max_output_tokens`. A binding's `max-tokens` does not reach it. MASC clamps the
-lane's value to each slot's declared or catalog output ceiling. At rollout the
-checkpoint's binding declares an output ceiling of 32,768, and the lane's
-`max_output_tokens` is at least that, so the checkpoint receives 32,768.
+`max_output_tokens`. A binding's `max-tokens` does not reach it. MASC sends the
+lane's value to every slot of the lane, clamped to each slot's declared or
+catalog output ceiling. Rollout saves 32,768 as the lane's
+`max_output_tokens`, and the checkpoint's binding declares an output ceiling of
+32,768, so the checkpoint receives 32,768.
 
-A GLM run sends what MASC's GLM slot sends: the same two messages, with
-thinking enabled and a `json_object` response format. The slot declares no
-output ceiling and no effort, so the request carries neither, and the endpoint
-applies its own defaults.
+A GLM run sends what MASC's GLM slot then sends: the same two messages, with
+thinking enabled, a `json_object` response format and the same `max_tokens`
+(GLM's output ceiling is higher). The slot declares no effort, so the request
+carries none, and the endpoint applies its default.
 
 ## Order
 
 1. Write the E-real manifest and generate E-synth.
 2. Run the base model on E-synth, audit the labels with a judge that sees
    neither the labels nor the answers, and keep the requests it confirms.
-3. Fix `pass_lines.json` and commit it before any training.
-4. Generate the training split, sample the teacher, train branch A and branch B.
-5. Measure the base model, A and B in one run per set, from an empty `--out`.
+3. Fix `pass_lines.json` and commit it before any training. The G6 merge lines
+   come from the base model's merge numbers on the fixed E-synth:
+   `eval_admission.py synth-numbers` prints them once the drop and merge judges
+   (steps 6 and 7) have classed that run's answers. It reads no gate, choice
+   or trained run. `verdict` and `train_sft.py` refuse while a gate has no
+   number.
+4. Generate the training split and sample the teacher (`teacher_sample.py
+   sample`). An answer that absorbs a memory waits for the merge judge, also
+   when its label expects the merge: `teacher_sample.py cases` gives the judge
+   the absorb gate's question as `merge_cases.py` does, and `apply` keeps the
+   answer only when every absorb is judged mergeable. Train A on the
+   `accepted.jsonl` that `apply` writes.
+5. Measure the base model and A in one run per set, from an empty `--out`.
 6. When a valid E-synth answer dropped a fact its label does not name (not
    planted stale, not a correction or complement target, not a fact of a
    duplicate pair), a judge that sees neither the labels nor the answers
@@ -127,12 +138,12 @@ uv run scripts/tinker/librarian/e_synth_audit.py apply \
   --final artifacts/tinker/librarian/e-synth/requests.jsonl
 MASC_BASE_PATH=<base> uv run scripts/tinker/librarian/eval_admission.py run --set real \
   --target base=thinkingmachines/Inkling-2-Small:peft:262144 \
-  --target A=<sampler path of A> --target B=<sampler path of B> \
+  --target A=<sampler path of A> \
   --out artifacts/tinker/librarian/verdict-real --budget 6
 uv run scripts/tinker/librarian/eval_admission.py run --set synth \
   --requests artifacts/tinker/librarian/e-synth/requests.jsonl \
   --target base=thinkingmachines/Inkling-2-Small:peft:262144 \
-  --target A=<sampler path of A> --target B=<sampler path of B> \
+  --target A=<sampler path of A> \
   --out artifacts/tinker/librarian/verdict-synth --budget 9
 uv run scripts/tinker/librarian/e_synth_audit.py drops \
   --requests artifacts/tinker/librarian/e-synth/requests.jsonl \
@@ -143,7 +154,7 @@ uv run scripts/tinker/librarian/merge_cases.py \
 uv run scripts/tinker/librarian/eval_admission.py verdict \
   --real artifacts/tinker/librarian/verdict-real --synth artifacts/tinker/librarian/verdict-synth \
   --drops artifacts/tinker/librarian/verdict-drops --merges artifacts/tinker/librarian/verdict-merges \
-  --train A=artifacts/tinker/librarian/train-A --train B=artifacts/tinker/librarian/train-B
+  --train A=artifacts/tinker/librarian/train-A
 ```
 
 `cases`, `drops` and `merge_cases.py` keep the key in `--out` and put the
@@ -177,18 +188,23 @@ stand in for the one G5 compares against.
 
 `run --template <librarian.md>` measures a prompt change on the same sets: it
 draws every prompt with that file's template from the same request data. An
-E-real prompt is first read with the pinned template. `summary.json` records
-the sha256 of the template the prompts were drawn with, and `verdict` refuses
-a run whose template is not the pinned one.
+E-real prompt is first read with the pinned template, and its retirement
+evidence goes out under the new template's retirement policy. `summary.json`
+records the sha256 of the template the prompts were drawn with, and `verdict`
+refuses a run whose template is not the pinned one.
 
 `run --provider glm --target glm=<model> --max-calls <n>` measures the same
 sets on GLM (`glm_chat.py`). It sends no warm call, and its rows cost nothing
 per token. `--max-calls` caps the requests under `--out`, counting the ones
-already logged. The code GLM states in the body decides before the HTTP status:
-a spent usage window, plan or balance (1113, 1308-1311, 1313, 1314, 1316-1321)
-or an auth code stops the run with GLM's message, which names the reset time,
-and exits with status 2. A rerun with the same `--out` after the reset sends
-only the rest. A rate limit, a server code, no response, or a 408, 429 or 5xx
-without a code is sent again; any other failure leaves that answer not valid.
+already logged; a run killed mid-call can pass the cap by the calls that were
+in flight, since an attempt counts once its row is logged. GLM's code is read
+as MASC reads it: under another status than 200, only a quota, auth or
+context-overflow code takes the status's place, and in a 200 body the code
+decides. A spent usage window, plan or balance (1113, 1308-1311, 1313, 1314,
+1316-1321) or an auth code stops the run with GLM's message, which names the
+reset time, and exits with status 2. A rerun with the same `--out` after the
+reset sends only the rest. No response, a 408, 429 or 5xx that no code
+overrides, and a rate-limit or server code in a 200 body are sent again; any
+other failure leaves that answer not valid.
 Keep GLM and Tinker runs in separate `--out` folders: each caller counts every
 row of its log against its own limit.

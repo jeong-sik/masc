@@ -1,0 +1,60 @@
+{
+  "schema": "masc.tui.pty_observation.v1",
+  "binary": "/Users/dancer/.local/bin/masc-tui",
+  "started_at": "2026-11-09T08:47:24.929711+00:00",
+  "base_path": "/Users/dancer/me",
+  "port": 8935,
+  "scenario": "chat",
+  "rows": 45,
+  "cols": 150,
+  "observation_complete": true,
+  "scope": "next observed PTY output and application frame timings; no causal key response or physical display latency",
+  "error": null,
+  "same_runtime": true,
+  "same_effective_base": true,
+  "same_binary": true,
+  "requested_surface_recorded": true,
+  "observed_surfaces": [
+    "keeper-list",
+    "keeper-message",
+    "overview"
+  ],
+  "binary_sha256_before": "1181f65f190aa4894aa6d1067448159cdd3acd4b06bf6eaf4af1223a078e4bd6",
+  "binary_sha256_after": "1181f65f190aa4894aa6d1067448159cdd3acd4b06bf6eaf4af1223a078e4bd6",
+  "exit_code": 0,
+  "forced_kill": false,
+  "reader_error": null,
+  "server_before": {
+    "status": "ok",
+    "build": {
+      "commit": "8eb5365f11dd8889fb03eaf920c53b35fed81045",
+      "binary_commit": "8eb5365f11dd8889fb03eaf920c53b35fed81045",
+      "executable_sha256": "31fa6725d9f908f6ae080797f8ecb8dd05acd1c8299d36b221a804517c8228de",
+      "runtime_instance_id": "01a1bf59-9ecb-7000-a4e4-95bb46ceef1c",
+      "started_at": "2026-11-09T08:08:04Z"
+    },
+    "paths": {
+      "effective_base_path": "/Users/dancer/me",
+      "effective_masc_root": "/Users/dancer/me/.masc"
+    }
+  },
+  "server_after": {
+    "status": "ok",
+    "build": {
+      "commit": "8eb5365f11dd8889fb03eaf920c53b35fed81045",
+      "binary_commit": "8eb5365f11dd8889fb03eaf920c53b35fed81045",
+      "executable_sha256": "31fa6725d9f908f6ae080797f8ecb8dd05acd1c8299d36b221a804517c8228de",
+      "runtime_instance_id": "01a1bf59-9ecb-7000-a4e4-95bb46ceef1c",
+      "started_at": "2026-11-09T08:08:04Z"
+    },
+    "paths": {
+      "effective_base_path": "/Users/dancer/me",
+      "effective_masc_root": "/Users/dancer/me/.masc"
+    }
+  },
+  "derivative_of": {
+    "path": "artifacts/tui-scroll-input-20261109/installed-smoke-ff1/result.json",
+    "sha256": "bf106f379d021d59724d6ff4086bee0ffcd2155a09f10e1135cd5c0b8109e3cc",
+    "selection": "Identity, navigation-surface, lifecycle and hash fields only; internal health counters omitted. No raw live screen was captured."
+  }
+}

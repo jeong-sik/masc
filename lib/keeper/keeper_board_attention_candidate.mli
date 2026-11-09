@@ -402,10 +402,11 @@ val filter_comment_parent_visibility :
 
 val candidate_parent_visibility_filter :
   candidate -> (comment_parent_visibility_filter, string) result
-(** Evaluate {!filter_comment_parent_visibility} for a [Board_comment_added]
-    candidate against its parent post. An unreadable source is an error and
-    leaves the candidate retained; a confirmed absent or non-discoverable
-    parent is skipped. Non-comment candidates return [Keep_discoverable_comment]. *)
+(** Recheck every retained candidate against its authoritative parent before
+    judgment or delivery. [Direct] posts never enter semantic discovery;
+    their recorded targets use deterministic delivery. Comments on [Unlisted]
+    posts are also skipped. An unreadable source retains the candidate as an
+    error; a confirmed absent parent is skipped. *)
 
 type judgment_delivery_outcome =
   | Delivered of candidate

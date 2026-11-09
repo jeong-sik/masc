@@ -4,6 +4,12 @@ module Hub = Masc.Fleet_stream_hub
 module Grade = Masc.Keeper_fleet_grade
 module Client = Masc_tui_fleet_stream
 
+let proactive_interval =
+  match F.Proactive_interval.of_seconds 300 with
+  | Some interval -> interval
+  | None -> failwith "300 seconds is a proactive interval"
+;;
+
 let fleet ?(running = 1) () : F.fleet =
   { F.fs_status = Grade.Fleet_ok
   ; fs_blocker = None
@@ -26,6 +32,7 @@ let fleet ?(running = 1) () : F.fleet =
   ; fs_active_task_owner_without_fiber_count = 0
   ; fs_completion_authority_pending_count = 0
   ; fs_active_task_owner_scan_error_count = 0
+  ; fs_proactive_interval = proactive_interval
   }
 ;;
 

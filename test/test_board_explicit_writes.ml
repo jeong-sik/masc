@@ -54,7 +54,7 @@ let test_identical_posts_are_distinct_writes () =
   Alcotest.(check int)
     "both persisted"
     2
-    (List.length (Board_dispatch.list_posts ~sort_by:Board_dispatch.Recent ~limit:10 ()))
+    (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~sort_by:Board_dispatch.Recent ~limit:10 ()))
 ;;
 
 let test_identical_comments_are_distinct_writes () =
@@ -80,7 +80,7 @@ let test_identical_comments_are_distinct_writes () =
        (String.equal
           (Board.Comment_id.to_string first.id)
           (Board.Comment_id.to_string second.id)));
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Error error -> Alcotest.fail (Board.show_board_error error)
   | Ok updated -> Alcotest.(check int) "reply count" 2 updated.reply_count
 ;;
@@ -164,7 +164,7 @@ let test_post_file_past_ten_mib_is_not_renamed () =
     ~recipient_lookup:Recipient_lookup.none_declared ());
   List.iter
     (fun (label, (post : Board.post)) ->
-       match Board_dispatch.get_post ~post_id:(Board.Post_id.to_string post.id) with
+       match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(Board.Post_id.to_string post.id) with
        | Ok _ -> ()
        | Error error ->
          Alcotest.failf

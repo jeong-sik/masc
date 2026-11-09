@@ -40,7 +40,9 @@ let rec remove_tree path =
 
 let with_temp_base prefix f =
   let base_path = Filename.temp_dir prefix "" in
-  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f base_path)
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
+    Masc_test_deps.Board_attention_parent_fixture.with_source ~base_path
+      (fun () -> f base_path))
 ;;
 
 let prepare_exact ~net candidate =
@@ -66,6 +68,7 @@ let prepare_exact ~net candidate =
 ;;
 
 let signal post_id : Board_dispatch.board_signal =
+  let post_id = Masc_test_deps.Board_attention_parent_fixture.post_id post_id in
   { kind = Board_dispatch.Board_post_created
   ; post_id
   ; author = "external-author"
@@ -2018,6 +2021,8 @@ let with_board_admission_workspace f =
       ignore (Workspace.init config ~agent_name:None : string);
       Board_dispatch.reset_for_test ();
       Board.reset_global_for_test ();
+      Result.get_ok (Board_dispatch.init_jsonl ~base_path
+        ~recipient_lookup:Recipient_lookup.none_declared ());
       f config))
 ;;
 

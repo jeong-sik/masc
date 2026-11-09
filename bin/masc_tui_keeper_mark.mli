@@ -95,10 +95,9 @@ val axis_next_glyph : string
 (** ▹: what comes next. It opens the next cell of the views' header, and
     DETAIL puts it before the runtime the next dispatch of a failed turn takes. *)
 
-val pulse_header : string
 val axis_now_header : string
-(** The header words over the views' axis row (RFC-0515 §2.4): the turn pulse
-    and the NOW cell. {!column_legend} names them. *)
+(** The header word over the NOW cell of the views' axis row (RFC-0515 §2.4).
+    {!column_legend} names it. *)
 
 (** {1 The views' grid} (RFC-0515 §2.4.1 – §2.4.3) *)
 
@@ -109,7 +108,8 @@ val grid_now_line : string
 (** [┃]: the two lines on either side of the now cell. *)
 
 val grid_dot_mark : string
-(** [·]: a strip cell with nothing in it. *)
+(** [·]: a strip cell with nothing in it, and a pulse half hour in which no
+    turn ended. *)
 
 val grid_failing_mark : string
 val grid_paused_mark : string
@@ -133,11 +133,17 @@ val grid_pulse_header : window:string -> string
 val grid_next_header : window:string -> string
 (** [next ▹ 12h]: the strip column's header for a strip that spans [window]. *)
 
+val grid_pulse_ok_mark : string
+val grid_pulse_failed_and_ok_mark : string
+(** [▁] a pulse half hour of ok turns only, [▄] one that holds a failed turn
+    and an ok one. A half hour of failed turns only draws {!grid_full_mark}. *)
+
 val grid_wait_glyph : string
 (** [◌]: a next dispatch that waits out a rest, on the failure line. *)
 
 val grid_full_mark : string
-(** [█]: a filled cell of the lag bar. *)
+(** [█]: a filled cell of the lag bar, and a pulse half hour of failed turns
+    only. *)
 
 val grid_chain_link : string
 val grid_more_mark : string

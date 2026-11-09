@@ -589,33 +589,38 @@ let karma_event_to_yojson (e : karma_event) : Yojson.Safe.t =
     silently lost.  Hashtbl iteration / fold / List.sort are pure CPU
     with no fiber yields, so holding the Eio mutex during the rebuild
     is safe. *)
-let get_all_karma store =
+let get_karma_rollup store =
   with_lock store (fun () ->
     match store.karma_cache with
     | Some cached -> cached
     | None ->
-        let by_recipient =
-          Hashtbl.fold
-            (fun key vote acc ->
-               match karma_event_of_vote store key vote with
-               | None -> acc
-               | Some (e : karma_event) ->
-                 let prev =
-                   String_map.find_opt e.recipient acc
-                   |> Option.value ~default:0
-                 in
-                 String_map.add e.recipient (prev + e.delta) acc)
-            store.vote_log
-            String_map.empty
-        in
-        let result =
-          String_map.bindings by_recipient
-          |> List.sort (fun (kl, a) (kr, b) ->
-               let c = Int.compare b a in
-               if c <> 0 then c else String.compare kl kr)
-        in
-        store.karma_cache <- Some result;
-        result)
+      let by_recipient, by_post = Hashtbl.fold (fun key vote (totals, index) ->
+        match karma_event_of_vote store key vote with
+        | None -> totals, index
+        | Some (event : karma_event) ->
+          let previous = match String_map.find_opt event.recipient totals with None -> 0 | Some n -> n in
+          let totals = String_map.add event.recipient (previous + event.delta) totals in
+          let post_id = match event.target_kind with
+            | Board_vote_key.Post -> Some event.target_id
+            | Board_vote_key.Comment ->
+              Option.map (fun (comment : comment) -> Post_id.to_string comment.post_id)
+                (Hashtbl.find_opt store.comments event.target_id) in
+          match post_id with
+          | None -> totals, index
+          | Some post_id ->
+            let posts = match String_map.find_opt event.recipient index with None -> String_map.empty | Some posts -> posts in
+            let previous = match String_map.find_opt post_id posts with None -> 0 | Some n -> n in
+            totals, String_map.add event.recipient (String_map.add post_id (previous + event.delta) posts) index)
+        store.vote_log (String_map.empty, String_map.empty) in
+      let totals = String_map.bindings by_recipient |> List.sort (fun (a, x) (b, y) ->
+        let c = Int.compare y x in if c = 0 then String.compare a b else c) in
+      let index = String_map.bindings by_post |> List.map (fun (author, posts) -> author, String_map.bindings posts) in
+      let result = totals, index in
+      store.karma_cache <- Some result;
+      result)
+
+let get_all_karma store = fst (get_karma_rollup store)
+let get_karma_by_post store = snd (get_karma_rollup store)
 
 (** Calculate karma (total peer upvotes) for an agent *)
 let get_agent_karma store ~agent_name =

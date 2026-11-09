@@ -1,0 +1,117 @@
+{
+  "reviewed_at": "2026-11-09T07:21:11.287545+00:00",
+  "reviewer": "antigravity_diagnosis_review",
+  "base": "e16382ef5471e15cd5002c674d2e93b87faa20d6",
+  "head": "bae45a3e0e70de9c238e2a16410ccf15d295a4be",
+  "source_sha256": {
+    "bin/masc_tui.ml": "7b675ed34604658c1df05be1317f63ebd782a6e6a7a4104c6ece376ba25208f1",
+    "bin/masc_tui_types.ml": "d278ea699ecc92f2c5dc39d4f2df52f1e872148ea34cb761177d28025bacda53",
+    "bin/masc_tui_render_chat.ml": "939fd794837e2313633b73d7bf0283db37beb769a274298e1d175eb3e0cec4ea"
+  },
+  "verdict": "NO_UNRESOLVED_P0_P1_P2_SOURCE_FINDINGS",
+  "findings": [],
+  "changes": [
+    {
+      "path": "bin/masc_tui_types.ml",
+      "line": 26217,
+      "verdict": "Semantics preserved",
+      "reason": "Only actual Some menu requests a missing status frame; view/focus/voice/recall/reading-back and None-menu paths return the same value without unused status projection. Supplied draw frame remains reused."
+    },
+    {
+      "path": "bin/masc_tui_render_chat.ml",
+      "line": 3819,
+      "verdict": "Semantics preserved",
+      "reason": "At the live edge, find_map over reversed positions is exactly the first successful result previously selected from filter_map. Non-live positions still use filter_map; searched-point retention, semantic source identity and held transients are unchanged. It intentionally stops cache warming for unused visible entries."
+    },
+    {
+      "path": "bin/masc_tui.ml",
+      "line": 42683,
+      "verdict": "Supported one-worker policy with a real throughput tradeoff",
+      "reason": "Domain_pool accepts one domain by contract; worker-context nested submissions run inline. Direct search submit starts in a UI daemon. HTTP request transport retains its independent domain, and existing submissions remain off the UI domain."
+    }
+  ],
+  "one_worker_tradeoff": {
+    "new_deadlock_found": false,
+    "head_of_line_risk": true,
+    "evidence": [
+      "Installed Eio executor_pool.ml uses one Sync queue; a worker forks accepted jobs eagerly. CPU weight is 1.0 and IO is 0.05, with no CPU/IO priority isolation.",
+      "Context.load at bin/masc_tui.ml:17996 and Metrics_tail.load_keeper at :18543 are submitted as IO work. Local reads and form preparation share this process pool with Masc_tui_response_decode.run and chat search.",
+      "Blocking non-yielding IO or a long CPU job can occupy the sole worker and defer subsequent jobs. These inspected local reads wait in fork_workspace_job, preserving the main input loop, but data-arrival and cancellation settlement can be delayed.",
+      "Executor_pool_submission relays cancellation and joins already entered worker cleanup. Domain-count reduction does not change this contract or introduce replay, but it does not make a blocking worker preemptible."
+    ],
+    "validation_limit": "Native candidate must demonstrate mixed input latency together with progressing response decode/local reads. Input-to-PTY-output latency alone does not prove unchanged background completion or physical terminal paint."
+  },
+  "measured_hypothesis": {
+    "sample_path": "mixed-eb4-profile-fast/pageup/sample.txt",
+    "sample_sha256": "46e8a5d8137edb717b7cfeeb48bd1bb6e32485be885e812ea5f6b848aed06068",
+    "main_samples": 595,
+    "Array_init_samples": 183,
+    "minor_collection_subtree_samples": 153,
+    "interpretation": "Allocation-triggered GC and cross-domain barrier time are a strong measured candidate for reducing TUI worker-domain fanout. The unsymbolized Array.init call site is not proven. render_chat.ml:257 creates per-body-byte origin arrays when source maps are built, so skipping unused live-edge mappings also addresses a concrete allocation source.",
+    "sample_result_complete": false,
+    "sample_cpu_includes_sampler": true,
+    "sample_result_not_valid_for_latency_improvement_claim": true
+  },
+  "remaining_source_hypotheses": [
+    {
+      "priority": "follow-up after candidate measurement",
+      "source": "bin/masc_tui_message_layout.ml:2464,2536,2593",
+      "finding": "Cached cumulative row counts do not cache row records. A pinned target entry is materialized by scroll_for_body_row and again for viewport gathering; a cold count extension can materialize it once more. rows_of_entry builds list/string/gutter row data despite warm markdown text.",
+      "safe_direction": "If still material in profiling, share exact entry rows within one synchronous draw, keyed by immutable entry, previous entry, width, origin and the same frozen markdown provider. Avoid an unkeyed persistent cache across preview/palette/visibility changes."
+    },
+    {
+      "priority": "deprioritized",
+      "source": "bin/masc_tui_ansi.ml:688-717; bin/masc_tui_frame_presenter.ml:262-340",
+      "finding": "Terminal size reads already use Terminal_size_cache; the presenter writes one buffered diff and flush per changed frame. Source does not support blaming repeated size getter calls for repeated per-key ioctl or full-transcript output."
+    }
+  ],
+  "baseline_observations": [
+    {
+      "path": "mixed-eb4-fast-drain/typing/result.json",
+      "sha256": "aad4d7721a48a7c78c8786374e008eb7b83b4dac88cef0a84fa9e2b7a7c76547",
+      "exe_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "messages": 800,
+      "condition": "typing",
+      "latency": {
+        "n": 32,
+        "p50_ms": 2.6357080787420273,
+        "p95_ms": 17.684958991594613,
+        "max_ms": 67.25866592023522,
+        "mean_ms": 7.1540637727594
+      },
+      "observation": {
+        "phase_start": 599040.100932791,
+        "phase_end": 599041.827573875,
+        "echo_off": true,
+        "complete": true
+      },
+      "scope": "PTY input write to causally matching draft prefix output; not physical terminal paint"
+    },
+    {
+      "path": "mixed-eb4-fast-drain/pageup/result.json",
+      "sha256": "79f627dde1da81c03c3fc7da464818db06bacc1e1ae91ebffbb3ce85d4f7177b",
+      "exe_sha256": "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b",
+      "messages": 800,
+      "condition": "pageup",
+      "latency": {
+        "n": 32,
+        "p50_ms": 14.895500033162534,
+        "p95_ms": 88.10508297756314,
+        "max_ms": 135.95575001090765,
+        "mean_ms": 29.107324226060882
+      },
+      "observation": {
+        "phase_start": 599047.279808625,
+        "phase_end": 599049.08477825,
+        "echo_off": true,
+        "complete": true
+      },
+      "scope": "PTY input write to causally matching draft prefix output; not physical terminal paint"
+    }
+  ],
+  "scope_limits": [
+    "Independent source and retained-artifact review only. No product edit, local build, CI execution, PR publication or user TUI/preference mutation.",
+    "No candidate binary, mixed PTY run or measured before/after improvement was produced by this reviewer.",
+    "Legacy observer-heavy probe runs were excluded; sampled runs are diagnostic and not interchangeable with unprofiled latency runs."
+  ]
+}

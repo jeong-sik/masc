@@ -79,6 +79,7 @@ end
 (** {1 MCP runtime fallback} *)
 
 val dispatch :
+  reader:Masc_board_handlers.Board_access.reader ->
   config:Workspace.config ->
   agent_name:string ->
   arguments:Yojson.Safe.t ->

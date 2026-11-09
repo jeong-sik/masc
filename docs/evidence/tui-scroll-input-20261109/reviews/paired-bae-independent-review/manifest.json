@@ -1,0 +1,20 @@
+{
+  "scope": "derived independent measurement review; original captures remain in ../paired-bae",
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 6585,
+      "sha256": "f1e02e1824e4abe741918831974fc09a73328fd49ce1d02574c884e071639c67"
+    },
+    {
+      "path": "analyze.py",
+      "bytes": 15778,
+      "sha256": "39be041be186d556804f55c6b0c7b4e29a721bfaf7f948ad297405faa6a2e561"
+    },
+    {
+      "path": "observations.json",
+      "bytes": 156109,
+      "sha256": "4abe625e8fa50e2bd21b29be1ce553a2416e9c13323f61e5bb23d67a70c46152"
+    }
+  ]
+}

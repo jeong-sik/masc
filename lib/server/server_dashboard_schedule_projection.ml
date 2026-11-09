@@ -322,7 +322,7 @@ let schedule_queue_match
       && String.equal wake.schedule_id schedule_id
       && Float.equal wake.due_at due_at
       && String.equal wake.payload_digest payload_digest
-    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
     | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
     | Keeper_event_queue.Connector_attention _ | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
@@ -336,7 +336,7 @@ let schedule_queue_match_fields ~now bucket (stimulus : Keeper_event_queue.stimu
   let scheduled_wake =
     match stimulus.payload with
     | Keeper_event_queue.Schedule_due wake -> Some wake
-    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
     | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
     | Keeper_event_queue.Connector_attention _ | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _

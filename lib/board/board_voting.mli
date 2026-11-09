@@ -1,7 +1,8 @@
 (** Voting and vote-log effects for one canonical Board store.
 
     Cast operations stage under the state lock, append under persistence,
-    release persistence, then commit under a fresh state lock. *)
+    release persistence, then commit under a fresh state lock. The primary
+    posts source must be authoritative before the vote append is admitted. *)
 
 open Board_types
 

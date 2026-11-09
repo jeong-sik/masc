@@ -59,7 +59,7 @@ let of_disposition ?source ?summary ?next_action disposition =
 ;;
 
 let success () = make ~source:"turn_result" "success"
-let of_failure ?(tool_call_count = 0) ~raw_error err =
+let of_failure ~raw_error err =
   match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Official_client_recovery_required recovery) ->
       of_disposition

@@ -83,7 +83,6 @@ type keeper_phase_snapshot = {
   official_client_recovery_required_names : string list;
 }
 val keeper_phase_snapshot : ?base_path:string -> unit -> keeper_phase_snapshot
-val keeper_phase_counts : ?base_path:string -> unit -> keeper_phase_counts
 type keeper_execution_owner = {
   keeper_name : string;
   truth : Keeper_activation_readiness.owner_execution_truth;

@@ -144,7 +144,7 @@ let test_held_observer_failure_keeps_the_committed_receipt () =
     ["unresolved-receipt"] creation.unresolved;
   Alcotest.(check bool) "the admitted audience is retained" true
     (creation.post.audience = Some creation.audience);
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Ok post ->
      Alcotest.(check string) "receipt identifies the actual committed post"
        creation.post.body post.body;
@@ -167,7 +167,7 @@ let test_held_observer_failure_keeps_the_committed_receipt () =
   Alcotest.(check bool) "the later write has its own identity" false
     (String.equal post_id (Board.Post_id.to_string later.id));
   Alcotest.(check int) "both real posts remain in memory" 2
-    (List.length (Board_dispatch.list_posts ()));
+    (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()));
   Alcotest.(check int) "both actual writes reached the WAL" 2
     (List.length (post_rows ()))
 
@@ -196,7 +196,7 @@ let test_combined_reserved_held_observer_is_reraised_after_commit () =
   Alcotest.(check bool) "the original combined exception is rethrown" true (raised == original);
   Alcotest.(check int) "the held observer failed once" 1 !calls;
   Alcotest.(check bool) "the original store is retained" true (active == Board.global ());
-  let post = match Board_dispatch.list_posts () with
+  let post = match Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator () with
     | [post] -> post
     | posts -> Alcotest.failf "expected one actual committed post, got %d" (List.length posts)
   in
@@ -217,7 +217,7 @@ let test_combined_reserved_held_observer_is_reraised_after_commit () =
   Alcotest.(check bool) "the later write has a distinct identity" false
     (String.equal post_id (Board.Post_id.to_string later.id));
   Alcotest.(check int) "both actual posts remain in memory" 2
-    (List.length (Board_dispatch.list_posts ()));
+    (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()));
   Alcotest.(check int) "both actual writes remain on disk" 2 (List.length (post_rows ()))
 
 let test_fusion_combined_held_observer_preserves_replay_and_later_creation () =
@@ -255,7 +255,7 @@ let test_fusion_combined_held_observer_preserves_replay_and_later_creation () =
   Alcotest.(check bool) "Fusion rethrows the original combined exception" true
     (raised == original);
   Alcotest.(check int) "the actual Fusion held observer failed once" 1 !calls;
-  let committed = match Board_dispatch.list_posts () with
+  let committed = match Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator () with
     | [post] -> post
     | posts -> Alcotest.failf "expected one committed Fusion post, got %d" (List.length posts)
   in
@@ -281,7 +281,7 @@ let test_fusion_combined_held_observer_preserves_replay_and_later_creation () =
    | Ok (Board.Post_created _) -> Alcotest.fail "the Fusion replay created a duplicate"
    | Error failure -> Alcotest.fail (Board.Post_publication_failure.to_string failure));
   Alcotest.(check int) "the Fusion replay adds no model post" 1
-    (List.length (Board_dispatch.list_posts ()));
+    (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()));
   Alcotest.(check (list string)) "the Fusion replay adds no disk row"
     [committed_id] (persisted_ids ());
   let later = match create "fusion-combined-observer-next" with
@@ -297,7 +297,7 @@ let test_fusion_combined_held_observer_preserves_replay_and_later_creation () =
   let ids = [committed_id; later_id] |> List.sort String.compare in
   Alcotest.(check (list string)) "both Fusion identities remain in the original model"
     ids
-    (Board_dispatch.list_posts ()
+    (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()
      |> List.map (fun (post : Board.post) -> Board.Post_id.to_string post.id)
      |> List.sort String.compare);
   Alcotest.(check (list string)) "both Fusion writes remain on disk"
@@ -321,7 +321,7 @@ let test_acquire_observer_failure_proves_no_publication () =
   Alcotest.(check bool) "pre-effect failure has no committed receipt" true
     (Option.is_none (Board.Post_publication_failure.committed failure));
   Alcotest.(check int) "pre-effect failure publishes no post" 0
-    (List.length (Board_dispatch.list_posts ()));
+    (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()));
   Alcotest.(check int) "pre-effect failure appends no WAL row" 0
     (List.length (post_rows ()));
   ignore (create_post_exn ~author:"receipt-author" ~content:"healthy after refusal");
@@ -349,13 +349,13 @@ let test_comment_append_failure_commits_nothing () =
    | Error e ->
      Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e))
   );
-  (match Board_dispatch.get_comments ~post_id with
+  (match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Ok [] -> ()
    | Ok comments ->
      Alcotest.failf "failed append left %d comment(s) in memory"
        (List.length comments)
    | Error e -> Alcotest.fail (Board.show_board_error e));
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Ok loaded ->
      Alcotest.(check int)
        "failed append leaves reply_count untouched" 0 loaded.reply_count
@@ -373,7 +373,7 @@ let test_comment_append_failure_commits_nothing () =
   Alcotest.(check int)
     "comment WAL has exactly the retried row, no ghost from the failure" 1
     (List.length (comment_rows ()));
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Ok loaded ->
     Alcotest.(check int) "retry bumped reply_count" 1 loaded.reply_count
   | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -400,7 +400,7 @@ let test_post_append_failure_commits_nothing () =
   );
   (* Same store, no reset: the failed create must have left nothing in
      memory for the healthy-path retry to collide with. *)
-  (match Board_dispatch.list_posts () with
+  (match Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator () with
    | [] -> ()
    | posts ->
      Alcotest.failf "failed create left %d post(s) behind" (List.length posts));
@@ -414,7 +414,7 @@ let test_post_append_failure_commits_nothing () =
        Board.Post_publication_failure.to_string e));
   Alcotest.(check int)
     "exactly the retried post is listed" 1
-    (List.length (Board_dispatch.list_posts ()));
+    (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()));
   Alcotest.(check int)
     "posts WAL has exactly the retried row, no ghost from the failure" 1
     (List.length (Fs_compat.load_jsonl (Board.persist_path (Board.global ()))))
@@ -466,12 +466,12 @@ let test_restart_recomputes_reply_count_from_comment_wal () =
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Ok loaded ->
     Alcotest.(check int)
       "restart recomputes reply_count from the comment WAL" 1
       loaded.reply_count;
-    (match Board_dispatch.get_comments ~post_id with
+    (match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
      | Ok [ c ] ->
        Alcotest.(check (float 0.0))
          "restart restores updated_at to the comment high-water mark"
@@ -550,7 +550,7 @@ let test_creation_commits_before_releasing_persistence () =
        ~author:"commit-commenter" ~content:"durable comment" () with
      | Ok _ -> ()
      | Error e -> Alcotest.fail (Board.show_board_error e));
-    (match Board_dispatch.create_sub_board ~slug:"commit-board"
+    (match Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug:"commit-board"
        ~name:"Commit board" ~description:"Persistence boundary"
        ~owner:"commit-author" () with
      | Ok _ -> ()
@@ -626,7 +626,7 @@ let test_dispatch_preparation_failure_proves_no_publication () =
         2 !preparation_calls;
       Alcotest.(check int) "neither call entered persistence" 0 !persistence_calls;
       Alcotest.(check int) "neither call published a post" 0
-        (List.length (Board_dispatch.list_posts ()));
+        (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()));
       Alcotest.(check int) "neither call appended a WAL row" 0 (List.length (post_rows ()));
       (* The auto-initialized backend remains usable; do not replace it or
          install a lookup to make these unaddressed publications succeed. *)
@@ -637,7 +637,7 @@ let test_dispatch_preparation_failure_proves_no_publication () =
          Alcotest.fail "the failed preparation must not reserve the fusion publication"
        | Error failure -> Alcotest.fail (Board.Post_publication_failure.to_string failure));
       Alcotest.(check int) "both healthy publications reached the same store" 2
-        (List.length (Board_dispatch.list_posts ()));
+        (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()));
       Alcotest.(check int) "both healthy publications reached the WAL" 2
         (List.length (post_rows ()))))
 
@@ -654,7 +654,7 @@ let board_result_exn = function
   | Error error -> Alcotest.fail (Board.show_board_error error)
 
 let create_policy_board ?(access = Board.Open) slug =
-  Board_dispatch.create_sub_board ~slug ~name:"Policy admission"
+  Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug ~name:"Policy admission"
     ~description:"Concurrent producer policy" ~owner:"policy-owner" ~access ()
 
 let policy_post hearth =
@@ -688,7 +688,7 @@ let fanout_counts () =
 
 let check_no_posts () =
   Alcotest.(check int) "no post reached memory" 0
-    (List.length (Board_dispatch.list_posts ()));
+    (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()));
   Alcotest.(check int) "no post reached the WAL" 0 (List.length (post_rows ()))
 
 let sub_board_rows () =
@@ -714,7 +714,7 @@ let test_queued_post_uses_the_policy_before_append () =
           end) }
       (fun () ->
         ignore (board_result_exn
-          (Board_dispatch.update_sub_board ~sub_board_id:"queued-policy"
+          (Board_dispatch.update_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"queued-policy"
              ~access:Board.Owner_only ()));
         Eio.Promise.await posted |> post_refusal_exn))
   in
@@ -725,7 +725,7 @@ let test_queued_post_uses_the_policy_before_append () =
   restart_board ();
   check_no_posts ();
   let policy = board_result_exn
-      (Board_dispatch.get_sub_board ~sub_board_id:"queued-policy") in
+      (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"queued-policy") in
   Alcotest.(check bool) "the denying policy survives restart" true
     (policy.access = Board.Owner_only)
 
@@ -743,12 +743,12 @@ let test_post_admission_defers_the_policy_update () =
                competing API must wait before mutating the policy. *)
             Eio.Fiber.fork ~sw (fun () ->
               Eio.Promise.resolve resolve_updated
-                (Board_dispatch.update_sub_board ~sub_board_id:"admitted-policy"
+                (Board_dispatch.update_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"admitted-policy"
                    ~access:Board.Owner_only ()));
             Alcotest.(check bool) "the updater waits for post admission" false
               (Eio.Promise.is_resolved updated);
             let policy = board_result_exn
-                (Board_dispatch.get_sub_board ~sub_board_id:"admitted-policy") in
+                (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"admitted-policy") in
             Alcotest.(check bool) "a waiting update has not changed policy" true
               (policy.access = Board.Open)
           end) }
@@ -770,13 +770,13 @@ let test_post_admission_defers_the_policy_update () =
   Alcotest.(check int) "the later refusal appends nothing" 1
     (List.length (post_rows ()));
   restart_board ();
-  let post = board_result_exn (Board_dispatch.get_post ~post_id) in
+  let post = board_result_exn (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id) in
   Alcotest.(check string) "restart retains the exact admitted post" post_id
     (Board.Post_id.to_string post.id);
   Alcotest.(check string) "the retained receipt body survives restart"
     creation.post.body post.body;
   let policy = board_result_exn
-      (Board_dispatch.get_sub_board ~sub_board_id:"admitted-policy") in
+      (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"admitted-policy") in
   Alcotest.(check bool) "the serialized update survives restart" true
     (policy.access = Board.Owner_only)
 
@@ -815,7 +815,7 @@ let test_same_slug_loser_never_appends () =
   Alcotest.(check int) "one sub-board row remains" 1 (List.length (sub_board_rows ()));
   restart_board ();
   let reloaded = board_result_exn
-      (Board_dispatch.get_sub_board ~sub_board_id:"one-policy") in
+      (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"one-policy") in
   Alcotest.(check string) "the winner keeps its identity after restart"
     (Board.Sub_board_id.to_string winner.id)
     (Board.Sub_board_id.to_string reloaded.id)
@@ -846,7 +846,7 @@ let test_new_restrictive_board_rechecks_a_queued_unknown_hearth () =
   restart_board ();
   check_no_posts ();
   let policy = board_result_exn
-      (Board_dispatch.get_sub_board ~sub_board_id:"new-private-policy") in
+      (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"new-private-policy") in
   Alcotest.(check bool) "the new restrictive policy survives restart" true
     (policy.access = Board.Owner_only)
 
@@ -855,7 +855,7 @@ let test_partial_policy_source_refuses_only_hearth_posts () =
   Fs_compat.append_file (Board.sub_boards_path (Board.global ())) "{broken-policy-row\n";
   restart_board ();
   Alcotest.(check int) "best-effort reads retain the valid policy row" 1
-    (List.length (Board_dispatch.list_sub_boards ()));
+    (List.length (Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator ()));
   let observations = fanout_counts () in
   List.iter (fun hearth ->
     let failure = post_refusal_exn (policy_post hearth) in
@@ -873,7 +873,7 @@ let test_partial_policy_source_refuses_only_hearth_posts () =
     (List.length (post_rows ()));
   restart_board ();
   let reloaded = board_result_exn
-      (Board_dispatch.get_post ~post_id:(Board.Post_id.to_string post.id)) in
+      (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(Board.Post_id.to_string post.id)) in
   Alcotest.(check string) "the hearth-free post survives the partial policy reload"
     post.body reloaded.body
 
@@ -894,12 +894,12 @@ let test_partial_policy_source_refuses_comment_publication () =
    | Error (Board.Io_error _) -> ()
    | Error error -> Alcotest.fail (Board.show_board_error error)
    | Ok _ -> Alcotest.fail "partial policy source admitted a comment");
-  let comments = board_result_exn (Board_dispatch.get_comments ~post_id) in
+  let comments = board_result_exn (Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id) in
   Alcotest.(check int) "no comment reached memory" 0 (List.length comments);
   let comment_path = Board.comments_path (Board.global ()) in
   let rows = if Sys.file_exists comment_path then comment_rows () else [] in
   Alcotest.(check int) "no comment reached the WAL" 0 (List.length rows);
-  let retained = board_result_exn (Board_dispatch.get_post ~post_id) in
+  let retained = board_result_exn (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id) in
   Alcotest.(check int) "the refused comment leaves reply count unchanged" 0
     retained.reply_count;
   Alcotest.(check string) "the existing post remains readable" post.body retained.body;
@@ -921,7 +921,7 @@ let test_queued_update_does_not_resurrect_a_deleted_policy () =
             start_update := false;
             Eio.Fiber.fork ~sw (fun () ->
               Eio.Promise.resolve resolve_updated
-                (Board_dispatch.update_sub_board ~sub_board_id:"deleted-policy"
+                (Board_dispatch.update_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"deleted-policy"
                    ~name:"must not resurrect" ()));
             Alcotest.(check bool) "the updater waits for deletion" false
               (Eio.Promise.is_resolved updated)
@@ -938,7 +938,7 @@ let test_queued_update_does_not_resurrect_a_deleted_policy () =
     (List.length (sub_board_rows ()));
   restart_board ();
   Alcotest.(check int) "a stale queued update does not revive the policy" 0
-    (List.length (Board_dispatch.list_sub_boards ()))
+    (List.length (Board_dispatch.list_sub_boards ~reader:Masc_board_handlers.Board_access.Operator ()))
 
 let () =
   Alcotest.run "board_comment_post_write_ahead"

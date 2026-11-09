@@ -70,7 +70,7 @@ describe('IdeActivityPanel', () => {
     expect(container.textContent).toContain('older events are not loaded')
   })
 
-  it.each([undefined, -1, true, '1972'])('does not invent a total from invalid or missing metadata (%s)', async total => {
+  it.each([undefined, null, -1, true, '1972'])('does not invent a total from invalid or missing metadata (%s)', async total => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ events: [], total_matching_events: total }), {
       status: 200, headers: { 'Content-Type': 'application/json' },
     })))

@@ -1,0 +1,302 @@
+[
+  {
+    "pair": 0,
+    "label": "before",
+    "condition": "typing",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-00-before-typing/typing/result.json"
+  },
+  {
+    "pair": 0,
+    "label": "after",
+    "condition": "typing",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-00-after-typing/typing/result.json"
+  },
+  {
+    "pair": 0,
+    "label": "before",
+    "condition": "pageup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-00-before-pageup/pageup/result.json"
+  },
+  {
+    "pair": 0,
+    "label": "after",
+    "condition": "pageup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-00-after-pageup/pageup/result.json"
+  },
+  {
+    "pair": 0,
+    "label": "before",
+    "condition": "pagedown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-00-before-pagedown/pagedown/result.json"
+  },
+  {
+    "pair": 0,
+    "label": "after",
+    "condition": "pagedown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-00-after-pagedown/pagedown/result.json"
+  },
+  {
+    "pair": 0,
+    "label": "before",
+    "condition": "wheelup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-00-before-wheelup/wheelup/result.json"
+  },
+  {
+    "pair": 0,
+    "label": "after",
+    "condition": "wheelup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-00-after-wheelup/wheelup/result.json"
+  },
+  {
+    "pair": 0,
+    "label": "before",
+    "condition": "wheeldown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-00-before-wheeldown/wheeldown/result.json"
+  },
+  {
+    "pair": 0,
+    "label": "after",
+    "condition": "wheeldown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-00-after-wheeldown/wheeldown/result.json"
+  },
+  {
+    "pair": 1,
+    "label": "after",
+    "condition": "pageup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-01-after-pageup/pageup/result.json"
+  },
+  {
+    "pair": 1,
+    "label": "before",
+    "condition": "pageup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-01-before-pageup/pageup/result.json"
+  },
+  {
+    "pair": 1,
+    "label": "after",
+    "condition": "pagedown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-01-after-pagedown/pagedown/result.json"
+  },
+  {
+    "pair": 1,
+    "label": "before",
+    "condition": "pagedown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-01-before-pagedown/pagedown/result.json"
+  },
+  {
+    "pair": 1,
+    "label": "after",
+    "condition": "wheelup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-01-after-wheelup/wheelup/result.json"
+  },
+  {
+    "pair": 1,
+    "label": "before",
+    "condition": "wheelup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-01-before-wheelup/wheelup/result.json"
+  },
+  {
+    "pair": 1,
+    "label": "after",
+    "condition": "wheeldown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-01-after-wheeldown/wheeldown/result.json"
+  },
+  {
+    "pair": 1,
+    "label": "before",
+    "condition": "wheeldown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-01-before-wheeldown/wheeldown/result.json"
+  },
+  {
+    "pair": 1,
+    "label": "after",
+    "condition": "typing",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-01-after-typing/typing/result.json"
+  },
+  {
+    "pair": 1,
+    "label": "before",
+    "condition": "typing",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-01-before-typing/typing/result.json"
+  },
+  {
+    "pair": 2,
+    "label": "before",
+    "condition": "pagedown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-02-before-pagedown/pagedown/result.json"
+  },
+  {
+    "pair": 2,
+    "label": "after",
+    "condition": "pagedown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-02-after-pagedown/pagedown/result.json"
+  },
+  {
+    "pair": 2,
+    "label": "before",
+    "condition": "wheelup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-02-before-wheelup/wheelup/result.json"
+  },
+  {
+    "pair": 2,
+    "label": "after",
+    "condition": "wheelup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-02-after-wheelup/wheelup/result.json"
+  },
+  {
+    "pair": 2,
+    "label": "before",
+    "condition": "wheeldown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-02-before-wheeldown/wheeldown/result.json"
+  },
+  {
+    "pair": 2,
+    "label": "after",
+    "condition": "wheeldown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-02-after-wheeldown/wheeldown/result.json"
+  },
+  {
+    "pair": 2,
+    "label": "before",
+    "condition": "typing",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-02-before-typing/typing/result.json"
+  },
+  {
+    "pair": 2,
+    "label": "after",
+    "condition": "typing",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-02-after-typing/typing/result.json"
+  },
+  {
+    "pair": 2,
+    "label": "before",
+    "condition": "pageup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-02-before-pageup/pageup/result.json"
+  },
+  {
+    "pair": 2,
+    "label": "after",
+    "condition": "pageup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-02-after-pageup/pageup/result.json"
+  },
+  {
+    "pair": 3,
+    "label": "after",
+    "condition": "wheelup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-03-after-wheelup/wheelup/result.json"
+  },
+  {
+    "pair": 3,
+    "label": "before",
+    "condition": "wheelup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-03-before-wheelup/wheelup/result.json"
+  },
+  {
+    "pair": 3,
+    "label": "after",
+    "condition": "wheeldown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-03-after-wheeldown/wheeldown/result.json"
+  },
+  {
+    "pair": 3,
+    "label": "before",
+    "condition": "wheeldown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-03-before-wheeldown/wheeldown/result.json"
+  },
+  {
+    "pair": 3,
+    "label": "after",
+    "condition": "typing",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-03-after-typing/typing/result.json"
+  },
+  {
+    "pair": 3,
+    "label": "before",
+    "condition": "typing",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-03-before-typing/typing/result.json"
+  },
+  {
+    "pair": 3,
+    "label": "after",
+    "condition": "pageup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-03-after-pageup/pageup/result.json"
+  },
+  {
+    "pair": 3,
+    "label": "before",
+    "condition": "pageup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-03-before-pageup/pageup/result.json"
+  },
+  {
+    "pair": 3,
+    "label": "after",
+    "condition": "pagedown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-03-after-pagedown/pagedown/result.json"
+  },
+  {
+    "pair": 3,
+    "label": "before",
+    "condition": "pagedown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-03-before-pagedown/pagedown/result.json"
+  },
+  {
+    "pair": 4,
+    "label": "before",
+    "condition": "wheeldown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-04-before-wheeldown/wheeldown/result.json"
+  },
+  {
+    "pair": 4,
+    "label": "after",
+    "condition": "wheeldown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-04-after-wheeldown/wheeldown/result.json"
+  },
+  {
+    "pair": 4,
+    "label": "before",
+    "condition": "typing",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-04-before-typing/typing/result.json"
+  },
+  {
+    "pair": 4,
+    "label": "after",
+    "condition": "typing",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-04-after-typing/typing/result.json"
+  },
+  {
+    "pair": 4,
+    "label": "before",
+    "condition": "pageup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-04-before-pageup/pageup/result.json"
+  },
+  {
+    "pair": 4,
+    "label": "after",
+    "condition": "pageup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-04-after-pageup/pageup/result.json"
+  },
+  {
+    "pair": 4,
+    "label": "before",
+    "condition": "pagedown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-04-before-pagedown/pagedown/result.json"
+  },
+  {
+    "pair": 4,
+    "label": "after",
+    "condition": "pagedown",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-04-after-pagedown/pagedown/result.json"
+  },
+  {
+    "pair": 4,
+    "label": "before",
+    "condition": "wheelup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-04-before-wheelup/wheelup/result.json"
+  },
+  {
+    "pair": 4,
+    "label": "after",
+    "condition": "wheelup",
+    "result": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/tui-scroll-input-20261109/paired-final-burst/pair-04-after-wheelup/wheelup/result.json"
+  }
+]

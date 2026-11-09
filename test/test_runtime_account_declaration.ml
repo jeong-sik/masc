@@ -170,10 +170,8 @@ let test_codex_copy_signs_in_at_the_new_home () =
       binding.max_concurrent;
     (match execution_for_binding config binding with
      | Ok (Runtime_execution.Codex_app_server execution) ->
-       Alcotest.(check string) "the turn runs in the new home"
-         "/home/op/.codex-account2" (Runtime_official_account.home execution.account_home);
-       Alcotest.(check bool) "the account home is explicitly declared" true
-         (Runtime_official_account.source execution.account_home = Runtime_official_account.Declared_directory)
+       Alcotest.(check string) "the turn runs in the declared new home"
+         "/home/op/.codex-account2" (Runtime_account_access.home execution.account_home)
      | Ok _ -> Alcotest.fail "the copy is no longer a Codex runtime"
      | Error detail -> Alcotest.failf "copy does not materialize: %s" detail)
   | bindings -> Alcotest.failf "expected one binding, got %d" (List.length bindings)
@@ -197,10 +195,8 @@ let test_claude_copy_keeps_the_command () =
       binding.wizard_default;
     (match execution_for_binding config binding with
      | Ok (Runtime_execution.Claude_code execution) ->
-       Alcotest.(check string) "the turn runs in the new home"
-         "/home/op/.claude-account2" (Runtime_official_account.home execution.account_home);
-       Alcotest.(check bool) "the account home is explicitly declared" true
-         (Runtime_official_account.source execution.account_home = Runtime_official_account.Declared_directory)
+       Alcotest.(check string) "the turn runs in the declared new home"
+         "/home/op/.claude-account2" (Runtime_account_access.home execution.account_home)
      | Ok _ -> Alcotest.fail "the copy is no longer a Claude Code runtime"
      | Error detail -> Alcotest.failf "copy does not materialize: %s" detail)
   | bindings -> Alcotest.failf "expected one binding, got %d" (List.length bindings)

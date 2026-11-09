@@ -6,7 +6,7 @@ open Result.Syntax
 let matches schedule_id (source : Keeper_event_queue.stimulus) =
   match source.payload with
   | Schedule_due wake -> String.equal schedule_id wake.schedule_id
-  | Bootstrap | Board_signal _ | Board_attention _ | Fusion_completed _
+  | Bootstrap | Board_routing_pending _ | Board_signal _ | Board_attention _ | Fusion_completed _
   | Connector_attention _ | Hitl_resolved _ | Ask_answered _
   | Completion_authority_rejected _ | Task_cancelled _ | Workspace_message _
   | Delegate_completed _ | Composition_completed _ | Tool_result_ready _

@@ -83,6 +83,3 @@ val load_file : string -> (t, string) result
     before comparison). {!of_entries} and {!of_json} reject empty, padded, or
     duplicate identities, including collisions between ids and aliases. *)
 val lookup : t -> string -> entry option
-
-(** Return an entry's explicit default model by id or alias. *)
-val default_model_for_provider : t -> string -> string option

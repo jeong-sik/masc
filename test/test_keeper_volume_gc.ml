@@ -134,13 +134,13 @@ let scripted_gc ~volumes ~containers ~claims ~delete_answers () =
         Unix.WEXITED 0, "", ""))
     else Alcotest.failf "unexpected command: %s" (String.concat " " argv)
   in
-  let call ?(registered = fun _ -> false) ?(claims_image = Some "masc-test-minimal:image") ~execute () =
+  let call ?(registered = fun _ -> false) ?(claims_image = Some "masc-test-minimal:image") ~request () =
     let report =
       ok_exn
         (Gc.apple_keeper_volume_gc ~run ~timeout_sec:1.0
            ~registered_keeper:registered
            ~claims_image
-           ~execute)
+           ~request)
     in
     report, List.rev !sent
   in
@@ -188,7 +188,15 @@ let test_the_decision_table_keeps_every_protected_volume () =
   let call =
     scripted_gc ~volumes ~containers:(guest_listing "live") ~claims ~delete_answers:[] ()
   in
-  let report, sent = call ~registered:(fun name -> String.equal name "registered") ~execute:true () in
+  (* Every keeper is named, so each protection below holds against a
+     request that asks for it. *)
+  let every_keeper = [ "retired"; "shared"; "registered"; "legacy"; "live"; "orphan" ] in
+  let report, sent =
+    call
+      ~registered:(fun name -> String.equal name "registered")
+      ~request:(Gc.Reclaim_named every_keeper)
+      ()
+  in
   Alcotest.(check (list string)) "a foreign volume is named, not judged"
     [ "unrelated-volume" ] report.Gc.foreign_volumes;
   let outcome_of keeper_name =
@@ -240,12 +248,46 @@ let test_a_report_without_execute_touches_nothing () =
       ~claims:(fun _ -> Unix.WEXITED 0, "[]\n", "")
       ~delete_answers:[] ()
   in
-  let report, sent = call ~execute:false () in
+  let report, sent = call ~request:Gc.Report_only () in
   (match report.Gc.keepers with
    | [ { Gc.keeper_name = "retired"; Gc.outcome = Gc.Reclaim_candidate; _ } ] -> ()
    | keepers ->
      Alcotest.failf "one candidate reported, got %d keepers" (List.length keepers));
   Alcotest.(check (list string)) "a report deletes nothing" [] (deleted_volume_names sent)
+;;
+
+(* The second press sends the names the first report showed. A candidate
+   that is not named stays a candidate, and a name with no listed volume is
+   reported back, not dropped. *)
+let test_a_reclaim_deletes_only_the_keepers_it_names () =
+  let volumes = {|["masc-keeper-build-named","masc-keeper-build-unnamed"]|} in
+  let call =
+    scripted_gc ~volumes ~containers:"[]"
+      ~claims:(fun _ -> Unix.WEXITED 0, "[]\n", "")
+      ~delete_answers:[] ()
+  in
+  let report, sent = call ~request:(Gc.Reclaim_named [ "named"; "vanished" ]) () in
+  let outcome_of keeper_name =
+    match
+      List.find_opt
+        (fun (verdict : Gc.keeper_verdict) -> String.equal verdict.Gc.keeper_name keeper_name)
+        report.Gc.keepers
+    with
+    | Some { Gc.outcome; _ } -> outcome
+    | None -> Alcotest.failf "keeper %s was not judged" keeper_name
+  in
+  (match outcome_of "named" with
+   | Gc.Reclaimed -> ()
+   | other -> Alcotest.failf "a named candidate is reclaimed: %s" (Gc.keeper_outcome_to_string other));
+  (match outcome_of "unnamed" with
+   | Gc.Reclaim_candidate -> ()
+   | other ->
+     Alcotest.failf "a candidate the request did not name stays a candidate: %s"
+       (Gc.keeper_outcome_to_string other));
+  Alcotest.(check (list string)) "a name without a listed volume comes back"
+    [ "vanished" ] report.Gc.unlisted_keepers;
+  Alcotest.(check (list string)) "only the named build volume is deleted"
+    [ "masc-keeper-build-named" ] (deleted_volume_names sent)
 ;;
 
 let test_a_failed_deletion_is_reported () =
@@ -257,7 +299,7 @@ let test_a_failed_deletion_is_reported () =
       ~claims:(fun _ -> Unix.WEXITED 0, "", "")
       ~delete_answers:[ "masc-keeper-build-broken" ] ()
   in
-  let report, _sent = call ~execute:true () in
+  let report, _sent = call ~request:(Gc.Reclaim_named [ "broken" ]) () in
   (match report.Gc.keepers with
    | [ { Gc.outcome = Gc.Reclaim_failed detail; _ } ] ->
      Alcotest.(check bool) "the failed removal is named" true
@@ -291,7 +333,7 @@ let test_build_only_cleanup_preserves_a_keeper_whose_work_volume_appeared () =
       (Gc.apple_keeper_volume_gc ~run ~timeout_sec:1.0
          ~registered_keeper:(fun _ -> false)
          ~claims_image:(Some "masc-test-minimal:image")
-         ~execute:true)
+         ~request:(Gc.Reclaim_named [ "racing" ]))
   in
   (match report.Gc.keepers with
    | [ { Gc.outcome = Gc.Kept (Gc.Unverified detail); _ } ] ->
@@ -324,7 +366,7 @@ let test_build_only_cleanup_preserves_a_keeper_whose_build_volume_vanished () =
       (Gc.apple_keeper_volume_gc ~run ~timeout_sec:1.0
          ~registered_keeper:(fun _ -> false)
          ~claims_image:(Some "masc-test-minimal:image")
-         ~execute:true)
+         ~request:(Gc.Reclaim_named [ "gone" ]))
   in
   (match report.Gc.keepers with
    | [ { Gc.outcome = Gc.Kept (Gc.Unverified detail); _ } ] ->
@@ -356,7 +398,7 @@ let test_build_only_cleanup_preserves_a_keeper_whose_confirmation_fails () =
       (Gc.apple_keeper_volume_gc ~run ~timeout_sec:1.0
          ~registered_keeper:(fun _ -> false)
          ~claims_image:(Some "masc-test-minimal:image")
-         ~execute:true)
+         ~request:(Gc.Reclaim_named [ "unconfirmed" ]))
   in
   (match report.Gc.keepers with
    | [ { Gc.outcome = Gc.Kept (Gc.Unverified detail); _ } ] ->
@@ -382,7 +424,7 @@ let test_without_an_image_there_is_no_claim_evidence () =
       (Gc.apple_keeper_volume_gc ~run ~timeout_sec:1.0
          ~registered_keeper:(fun _ -> false)
          ~claims_image:None
-         ~execute:true)
+         ~request:(Gc.Reclaim_named [ "retired" ]))
   in
   (match report.Gc.keepers with
    | [ { Gc.outcome = Gc.Kept (Gc.Unverified detail); _ } ] ->
@@ -405,7 +447,7 @@ let test_an_unreadable_claims_marker_keeps_the_volumes () =
       ~claims:(fun _ -> Unix.WEXITED 0, "not json", "")
       ~delete_answers:[] ()
   in
-  let report, sent = call ~execute:true () in
+  let report, sent = call ~request:(Gc.Reclaim_named [ "corrupt" ]) () in
   (match report.Gc.keepers with
    | [ { Gc.outcome = Gc.Kept (Gc.Unverified detail); _ } ] ->
      Alcotest.(check bool) "the unreadable marker is named" true
@@ -427,7 +469,7 @@ let test_a_failed_volume_listing_is_an_error_and_nothing_runs () =
      Gc.apple_keeper_volume_gc ~run ~timeout_sec:1.0
        ~registered_keeper:(fun _ -> false)
        ~claims_image:(Some "masc-test-minimal:image")
-       ~execute:true
+       ~request:(Gc.Reclaim_named [ "retired" ])
    with
    | Error detail ->
      Alcotest.(check bool) "the failed listing is named" true
@@ -448,7 +490,7 @@ let test_a_malformed_initial_listing_never_starts_reclamation () =
     Gc.apple_keeper_volume_gc ~run ~timeout_sec:1.0
       ~registered_keeper:(fun _ -> false)
       ~claims_image:(Some "masc-test-minimal:image")
-      ~execute:true
+      ~request:(Gc.Reclaim_named [ "retired" ])
   in
   Alcotest.(check bool) "a partial inventory is refused" true (Result.is_error result);
   Alcotest.(check int) "only the listing was attempted" 1 (List.length !sent);
@@ -478,7 +520,7 @@ let test_a_malformed_settling_listing_does_not_prove_reclamation () =
       (Gc.apple_keeper_volume_gc ~run ~timeout_sec:1.0
          ~registered_keeper:(fun _ -> false)
          ~claims_image:(Some "masc-test-minimal:image")
-         ~execute:true)
+         ~request:(Gc.Reclaim_named [ "retired" ]))
   in
   (match report.Gc.keepers with
    | [ { Gc.outcome = Gc.Reclaim_failed _; _ } ] -> ()
@@ -503,7 +545,12 @@ let answer_after ~execute =
       ~claims:(fun _ -> Unix.WEXITED 0, "[]\n", "")
       ~delete_answers:[] ()
   in
-  let report, _sent = call ~registered:(fun name -> String.equal name "registered") ~execute () in
+  (* The reclaim names one keeper the listing does not show, so its answer
+     carries an unlisted name. *)
+  let request = if execute then Gc.Reclaim_named [ "retired"; "vanished" ] else Gc.Report_only in
+  let report, _sent =
+    call ~registered:(fun name -> String.equal name "registered") ~request ()
+  in
   Answer.of_report ~executed:execute ~image_given:true report
 ;;
 
@@ -527,7 +574,7 @@ let summary_counts (summary : Answer.summary) =
 
 let test_the_answer_reads_back_what_the_tool_writes () =
   List.iter
-    (fun (execute, retired_kind, counts) ->
+    (fun (execute, retired_kind, counts, unlisted) ->
        let written = answer_after ~execute in
        let json = Answer.to_json written in
        let read = ok_exn (Answer.of_json json) in
@@ -535,6 +582,8 @@ let test_the_answer_reads_back_what_the_tool_writes () =
        Alcotest.(check bool) "image_given comes back" true read.Answer.image_given;
        Alcotest.(check (list string)) "a foreign volume comes back"
          [ "unrelated-volume" ] read.Answer.foreign_volumes;
+       Alcotest.(check (list string)) "the unlisted names come back"
+         unlisted read.Answer.unlisted_keepers;
        Alcotest.(check (list (pair string string))) "every keeper comes back with its kind"
          [ "registered", "kept"; "retired", retired_kind ]
          (kinds read);
@@ -548,8 +597,8 @@ let test_the_answer_reads_back_what_the_tool_writes () =
          (Some "masc-keeper-build-retired") retired.Answer.build_volume;
        Alcotest.(check (option string)) "an absent work volume is null"
          None retired.Answer.work_volume)
-    [ false, "reclaim_candidate", [ 1; 1; 0; 0 ]
-    ; true, "reclaimed", [ 1; 0; 1; 0 ] ]
+    [ false, "reclaim_candidate", [ 1; 1; 0; 0 ], []
+    ; true, "reclaimed", [ 1; 0; 1; 0 ], [ "vanished" ] ]
 ;;
 
 let map_object f = function
@@ -594,7 +643,9 @@ let test_the_answer_reader_refuses_what_it_cannot_trust () =
   refused "an unknown outcome kind"
     (map_first_keeper (replace "outcome_kind" (`String "deleted")) json);
   refused "a blank keeper name" (map_first_keeper (replace "keeper_name" (`String " ")) json);
-  refused "a blank volume name" (map_first_keeper (replace "build_volume" (`String "")) json)
+  refused "a blank volume name" (map_first_keeper (replace "build_volume" (`String "")) json);
+  refused "an unlisted name on an answer that did not execute"
+    (map_object (replace "unlisted_keepers" (`List [ `String "vanished" ])) json)
 ;;
 
 let () =
@@ -607,6 +658,8 @@ let () =
             test_the_decision_table_keeps_every_protected_volume
         ; Alcotest.test_case "a report without execute touches nothing" `Quick
             test_a_report_without_execute_touches_nothing
+        ; Alcotest.test_case "a reclaim deletes only the keepers it names" `Quick
+            test_a_reclaim_deletes_only_the_keepers_it_names
         ; Alcotest.test_case "a failed deletion is reported" `Quick
             test_a_failed_deletion_is_reported
         ; Alcotest.test_case "a work volume that appears after the verdict preserves the keeper" `Quick

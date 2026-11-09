@@ -111,6 +111,31 @@ let test_tool_call_event_uses_canonical_disposition () =
      | _ -> None)
 ;;
 
+let test_board_tool_sse_omits_private_io_and_error_text () =
+  List.iter (fun tool ->
+    let tool_name = Tool_name.Board_name.to_string tool in
+    let io = Keeper_tools_agent_core_handler_telemetry.tool_io_preview_fields
+      ~tool_name ~input:(`Assoc [ "content", `String "private-input" ])
+      ~output:"private-output" () in
+    let event = Keeper_tools_agent_core_handler_telemetry.keeper_tool_call_event_json
+      ~keeper_name:"reader" ~keeper_turn_id:(Some 1) ~tool_name ~duration_ms:1
+      ~disposition:(Tool_result.Completed ()) ~error_text:"private-error"
+      ~extra_fields:(io @ [ "tool_args", `String "injected-private-args"
+        ; "tool_result", `String "injected-private-result"
+        ; "tool_use_id", `String "occurrence-1"; "turn", `Int 1 ])
+      ~ts:1. () in
+    Alcotest.(check (option bool)) "Board I/O is explicitly redacted" (Some true)
+      (bool_member "tool_io_redacted" event);
+    Alcotest.(check (option string)) "occurrence remains observable" (Some "occurrence-1")
+      (string_member "tool_use_id" event);
+    List.iter (fun key -> Alcotest.(check bool) (tool_name ^ " omits " ^ key) true
+      (member key event = `Null))
+      [ "tool_args"; "tool_result"; "tool_args_preview"; "tool_output_preview"; "error_text" ];
+    Alcotest.(check bool) "no private text reaches the public event" false
+      (String_util.contains_substring (Yojson.Safe.to_string event) "private-"))
+    Tool_name.Board_name.all
+;;
+
 let test_agent_core_invocation_fields_preserve_exact_occurrence () =
   let invocation =
     Agent_core.Tool_contract.Invocation.create
@@ -164,6 +189,10 @@ let () =
             "preserves redacted sensitive-named tool io"
             `Quick
             test_sensitive_named_tool_preserves_redacted_io
+        ; Alcotest.test_case
+            "Board tools omit private io and error text"
+            `Quick
+            test_board_tool_sse_omits_private_io_and_error_text
         ; Alcotest.test_case
             "preserves canonical disposition"
             `Quick

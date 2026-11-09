@@ -1,0 +1,53 @@
+{
+  "status": "recommendations only; no product edits or tests executed",
+  "tests": [
+    {
+      "case": "heavy frame yields a new input window",
+      "setup": "interval16ms; take(initial Force, t0) -> Render; completed(t64); request Input",
+      "decisions": "take(pending=true,t65) -> Wait_until80; request Input/take at66 -> Wait_until80; Input timeout remains0, so no sleep blocks queued input",
+      "risk_detected": "start-anchored deadline still expired, or repeated invalidation extending the window"
+    },
+    {
+      "case": "last drained event is immediate",
+      "setup": "same completed64 and pending Input",
+      "decisions": "take(pending=false,t67) -> Render, without waiting until80",
+      "risk_detected": "new cooldown delays final key when no more ready input exists"
+    },
+    {
+      "case": "continuous input still gets a frame at due",
+      "setup": "same completed64 and pending Input",
+      "decisions": "take(pending=true,t80) -> Render; earlier Wait_until calls do not move80",
+      "risk_detected": "unbounded starvation while keys continue"
+    },
+    {
+      "case": "completion preserves work produced during rendering",
+      "setup": "take Render at0; request Background/Input/Force while frame is being prepared; completed64",
+      "decisions": "Background -> Wait80 at65 and timeout15ms; Input -> Wait80 if ready or immediate Render if drained; Force -> immediate Render even if ready; none -> Idle",
+      "risk_detected": "completed clears pending or overwrites request priority; example production Input request at main30096"
+    },
+    {
+      "case": "deferred owned frame keeps existing attempt pacing",
+      "setup": "take Render at16; caller defers actual Build and requests Background; no completed call",
+      "decisions": "input timeout at17 remains15ms; next pending take before32 waits rather than using an obsolete deadline",
+      "risk_detected": "removing start fallback causes a retry spin on granted/incomplete owned input"
+    },
+    {
+      "case": "completion with no work adds no timer wakeup",
+      "setup": "take Render, completed64, no new request",
+      "decisions": "take65 -> Idle; input_timeout_seconds returns the existing maximum",
+      "risk_detected": "completed fabricates work or forces idle polling"
+    },
+    {
+      "case": "background completion-based cadence is explicit",
+      "setup": "take Render0, completed64, request Background",
+      "decisions": "take65 -> Wait80 even with no input; this is the chosen completion-based interval policy, not unchanged start cadence",
+      "risk_detected": "silent animation/background throughput policy change"
+    },
+    {
+      "case": "unchanged render work is also paced",
+      "setup": "a real Build returns Frame_presenter.Unchanged; call completed after the synchronous present wrapper returns",
+      "decisions": "next dirty/pending burst waits from completion; no semantic Presented state is minted",
+      "risk_detected": "expensive unchanged Build cycles bypass pacing or are misclassified as emitted frames"
+    }
+  ]
+}

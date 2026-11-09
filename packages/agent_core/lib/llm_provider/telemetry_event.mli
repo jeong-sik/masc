@@ -83,6 +83,3 @@ type t =
       }
   | Wire_observer_failure of Wire_observer.failure
 [@@deriving yojson, show]
-
-(** Human-readable event type label for metrics and logging. *)
-val event_type_name : t -> string

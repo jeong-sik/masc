@@ -47,6 +47,15 @@ let activity_plain_string value = Safe_ops.sanitize_text_utf8 value
 
 let activity_tool_called_payload ~tool_name ~success ~duration_ms ~source
     ?error_detail ?tool_args_preview arguments =
+  (* This activity is broadcast to every observer. Board requests can name or
+     contain Direct posts, including when the tool returns an error. Keep the
+     operation observable, but never publish its request or error text here.
+     The request's own retained execution record remains the detailed source. *)
+  let arguments, error_detail, tool_args_preview, board_io_redacted =
+    match Tool_name.Board_name.of_string tool_name with
+    | Some _ -> `Assoc [], None, None, true
+    | None -> arguments, error_detail, tool_args_preview, false
+  in
   let activity_string_field key =
     match Safe_ops.json_string_opt key arguments with
     | Some value ->
@@ -74,6 +83,7 @@ let activity_tool_called_payload ~tool_name ~success ~duration_ms ~source
          | Some preview -> `String (activity_plain_string preview)
          | None -> `Null );
      ]
+     @ (if board_io_redacted then ["tool_io_redacted", `Bool true] else [])
      @ List.filter_map activity_string_field
          [
            "cmd";

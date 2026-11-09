@@ -122,6 +122,116 @@ let test_projection_cache_retains_last_good_and_successful_null () =
             (fun () -> failwith "cold")))
 ;;
 
+let test_activity_events_cache_retains_last_good () =
+  let now_value = ref 100.0 in
+  let now () = !now_value in
+  let calls = ref 0 in
+  let cache = Dashboard_snapshot.For_testing.make_activity_cache () in
+  let refresh compute =
+    Dashboard_snapshot.For_testing.refresh_activity_events
+      ~config ~now ~ttl:10.0 ~cache compute
+  in
+  let dummy1 = `String "e1" in
+  let dummy2 = `String "e2" in
+  let first = refresh (fun ~keep:_ -> incr calls; dummy1) in
+  Alcotest.(check string) "first success" "e1"
+    (Yojson.Safe.Util.to_string first);
+  now_value := 105.0;
+  let hit = refresh (fun ~keep:_ -> incr calls; dummy2) in
+  Alcotest.(check string) "fresh hit" "e1"
+    (Yojson.Safe.Util.to_string hit);
+  Alcotest.(check int) "fresh hit skips callback" 1 !calls;
+  now_value := 111.0;
+  let fallback = refresh (fun ~keep:_ -> incr calls; failwith "refresh failed") in
+  Alcotest.(check string) "failed refresh keeps last good" "e1"
+    (Yojson.Safe.Util.to_string fallback);
+  let cold_cache = Dashboard_snapshot.For_testing.make_activity_cache () in
+  Alcotest.check_raises "cold failure aborts publish" (Failure "cold")
+    (fun () ->
+       ignore
+         (Dashboard_snapshot.For_testing.refresh_activity_events
+            ~config ~now ~ttl:10.0 ~cache:cold_cache
+            (fun ~keep:_ -> failwith "cold")))
+;;
+
+let test_activity_events_revalidate_public_parents () =
+  Masc_test_deps.ensure_rng_initialized ();
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = Filename.temp_dir "board-activity-access" "" in
+  let config = Workspace.default_config base_path in
+  let rec remove path =
+    if Sys.is_directory path then (
+      Sys.readdir path |> Array.iter (fun child -> remove (Filename.concat path child));
+      Unix.rmdir path)
+    else Sys.remove path
+  in
+  Fun.protect ~finally:(fun () ->
+    Board_dispatch.reset_for_test ();
+    Board.reset_global_for_test ();
+    remove base_path) @@ fun () ->
+  ignore (Workspace.init config ~agent_name:None : string);
+  Board_dispatch.reset_for_test ();
+  Board.reset_global_for_test ();
+  let lookup = Recipient_lookup.make (fun candidate ->
+    Ok (Result.to_option (Board.Agent_id.parse (Recipient_lookup.Candidate.to_string candidate)))) in
+  Result.get_ok (Board_dispatch.init_jsonl ~base_path ~recipient_lookup:lookup ());
+  let create visibility content =
+    match Board_dispatch.create_post ~author:"writer" ~content ~visibility
+      ~post_kind:Board.Human_post () with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error)
+  in
+  let public = create Board.Public "public body" in
+  let private_ = create Board.Direct "@reader private body" in
+  let public_id = Board.Post_id.to_string public.id in
+  let private_id = Board.Post_id.to_string private_.id in
+  let emit post_id content = ignore (Activity_graph.emit config ~kind:"board.posted"
+    ~subject:(Activity_graph.entity ~kind:"post" post_id)
+    ~payload:(`Assoc [ "post_id", `String post_id; "content", `String content ]) ()) in
+  emit public_id "public body";
+  emit private_id "private body from old runtime";
+  emit "p-deleted" "orphaned old body";
+  let private_comment = Result.get_ok (Board_dispatch.add_comment ~post_id:private_id
+    ~author:"writer" ~content:"private comment" ()) in
+  ignore (Activity_graph.emit config ~kind:"board.voted"
+    ~subject:(Activity_graph.entity ~kind:"comment" (Board.Comment_id.to_string private_comment.id))
+    ~payload:(`Assoc [ "target_kind", `String "comment"
+      ; "target_id", `String (Board.Comment_id.to_string private_comment.id) ]) ());
+  let board_tool = Tool_name.Board_name.to_string Tool_name.Board_name.Board_post in
+  List.iter (fun fields ->
+    ignore (Activity_graph.emit config ~kind:"tool.called"
+      ~payload:(`Assoc (("tool_name", `String board_tool) :: fields)) ()))
+    [ [ "tool_args_preview", `String "private body in old tool preview" ]
+    ; [ "tool_io_redacted", `Bool true
+      ; "content", `String "private body despite a forged redaction flag" ] ];
+  ignore (Activity_graph.emit config ~kind:"tool.called"
+    ~payload:(`Assoc [ "tool_name", `String board_tool
+      ; "success", `Bool true; "tool_io_redacted", `Bool true ]) ());
+  let cache = Dashboard_snapshot.For_testing.make_activity_cache () in
+  let calls = ref 0 in
+  let refresh compute = Dashboard_snapshot.For_testing.refresh_activity_events
+    ~config ~now:(fun () -> 100.) ~ttl:10.0 ~cache compute in
+  let compute ~keep = incr calls; Activity_graph.recent_json_response config ~raw_limit:1000 ~keep () in
+  let first = refresh compute in
+  let text = Yojson.Safe.to_string first in
+  Alcotest.(check bool) "old private/orphan rows are filtered" false
+    (String_util.contains_substring text "private body"
+     || String_util.contains_substring text "orphaned old body");
+  Alcotest.(check int) "public row and redacted tool metadata remain" 2
+    Yojson.Safe.Util.(first |> member "count" |> to_int);
+  let second = refresh compute in
+  Alcotest.(check bool) "warm projection is reused" true (first == second);
+  Alcotest.(check int) "warm request does not rescan Activity" 1 !calls;
+  ignore (Result.get_ok (Board_dispatch.delete_post ~post_id:public_id));
+  Alcotest.check_raises "deleted parent cannot authorize fallback" (Failure "refresh failed")
+    (fun () -> ignore (refresh (fun ~keep:_ -> failwith "refresh failed")));
+  let after = refresh compute in
+  Alcotest.(check int) "deletion invalidates the still-warm projection" 2 !calls;
+  Alcotest.(check int) "deleted parent is absent but tool metadata remains" 1
+    Yojson.Safe.Util.(after |> member "count" |> to_int)
+;;
+
 let test_tools_component_reuses_complete_representations () =
   let now_value = ref 100. in
   let cache = Dashboard_snapshot.For_testing.make_tools_cache () in
@@ -230,6 +340,10 @@ let () =
             `Quick test_projection_ttl_reuse_boundaries;
           Alcotest.test_case "projection cache keeps last good and null"
             `Quick test_projection_cache_retains_last_good_and_successful_null;
+          Alcotest.test_case "activity events retain last good with valid authority"
+            `Quick test_activity_events_cache_retains_last_good;
+          Alcotest.test_case "activity events revalidate Public parents"
+            `Quick test_activity_events_revalidate_public_parents;
           Alcotest.test_case "tools component reuses final HTTP representations"
             `Quick test_tools_component_reuses_complete_representations;
           Alcotest.test_case "tools pending and errors never renew the ready TTL"

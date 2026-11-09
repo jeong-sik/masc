@@ -103,7 +103,7 @@ let cleanup ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_me
   match meta.sandbox_profile with
   | Keeper_types_profile_sandbox.(Docker | Micro_vm) as profile ->
     Error
-      (Printf.sprintf "stored sandbox_profile is %s, not remote_ssh"
+      (Printf.sprintf "declared sandbox_profile is %s, not remote_ssh"
          (Keeper_types_profile_sandbox.sandbox_profile_to_string profile))
   | Keeper_types_profile_sandbox.Remote_ssh ->
     (match Embedded_config.read payload_path with

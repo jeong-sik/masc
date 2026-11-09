@@ -45,6 +45,7 @@
   masc_cancel_safe
   masc_process
   masc.board_tool_adapter
+  masc.masc_tool_dispatch
   masc_workspace
   masc_goal
   masc.config

@@ -1,0 +1,37 @@
+{
+  "source_head": "16dd4aa47803259dc516a1c2acbc244d9985c0cd",
+  "B_head": "bae45a3e0e70de9c238e2a16410ccf15d295a4be",
+  "core_files_equal_to_B": true,
+  "hypothesis": "Source-supported for backlog with ready input after slow normal Build+Present. Not a measured latency conclusion.",
+  "minimal_contract": {
+    "api": "val completed : t -> now_ns:int64 -> unit",
+    "mutations": "Only update the scheduling timestamp; preserve pending and request priority. Keep take current start timestamp as fallback.",
+    "callsite": "End of the normal Render branch, after time_present returns; not outside the whole match.",
+    "includes": "Presented and Unchanged, title and portrait writes plus post-output bookkeeping",
+    "excludes": "image/msx external branch, defer_owned_frame, Idle, Wait_until, exceptions"
+  },
+  "counterexamples": [
+    "Only one queued event remains: input_pending=false already gives immediate Render, so change has no coalescing benefit.",
+    "Force-heavy paths intentionally bypass the window.",
+    "Per-event main-loop work itself may exceed16ms; completion anchoring does not preempt it.",
+    "The following64ms frame still blocks the UI domain and can accrue input; opening a drain window is not proof of stable queue recovery.",
+    "Background-only cadence changes from approximately max(interval,work) to work+interval.",
+    "Image/MSX output outside the normal presenter is not improved by the proposed single normal-branch checkpoint."
+  ],
+  "preserved_safety": [
+    "Current ready_input definition, including byte buffer/probe replay/terminal readiness/hangul queue",
+    "Existing distinction between ready input and an incomplete sequence with no bytes",
+    "Owned frame deferral, compact recovery and post-presentation input quarantine",
+    "Force invalidation from resize/console damage",
+    "Pending Input request made inside present_frame before completed is called",
+    "Frame presenter authority commits only for actual Presented output; Unchanged keeps old semantic owner"
+  ],
+  "not_run": [
+    "No product file edits",
+    "No C implementation",
+    "No actual TUI or PTY",
+    "No build or CI",
+    "No functional test execution"
+  ],
+  "next_decision": "Wait for B native mixed input and background-progress measurements; then decide whether C pacing merits a bounded implementation."
+}

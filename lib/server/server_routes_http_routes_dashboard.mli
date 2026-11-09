@@ -91,10 +91,12 @@ module For_testing : sig
     unit
 
   val fusion_run_detail_response :
+    reader:Masc_board_handlers.Board_access.reader ->
     registry:Fusion_run_registry.t ->
     path:string ->
     [ `Bad_request | `Not_found | `OK ] * Yojson.Safe.t
 
   val fusion_run_list_response :
+    reader:Masc_board_handlers.Board_access.reader ->
     registry:Fusion_run_registry.t -> Yojson.Safe.t
 end

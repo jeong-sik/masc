@@ -1,0 +1,13 @@
+{
+  "id": 42581927332,
+  "name": "Test",
+  "head_branch": "perf/tui-overrun-input-drain-20261109",
+  "head_sha": "b7d717df36de2aa91b62b413df3cad67739c499d",
+  "event": "workflow_dispatch",
+  "status": "completed",
+  "conclusion": "success",
+  "path": ".github/workflows/test.yml",
+  "created_at": "2026-11-09T07:51:14Z",
+  "updated_at": "2026-11-09T07:55:58Z",
+  "html_url": "https://github.com/jeong-sik/masc/actions/runs/42581927332"
+}

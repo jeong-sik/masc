@@ -1,0 +1,84 @@
+{
+  "reviewed_at_utc": "2026-11-09T07:37:32.571859+00:00",
+  "review_kind": "independent adversarial exact-head source review",
+  "scope": "committed projection identities memo only",
+  "worktree": "/Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/tui-scroll-input-20261109",
+  "head": "16dd4aa47803259dc516a1c2acbc244d9985c0cd",
+  "base": "c63ecd3094eeda1fe5bc7d0e03a0057961a45a81",
+  "sources": [
+    {
+      "path": "bin/masc_tui_render_chat.ml",
+      "sha256": "a31655fc4e45e82dcae44b828b5becfc0e72d725f6add536842b842d1ec69a0d",
+      "insertions": 21,
+      "deletions": 5
+    }
+  ],
+  "verdict": "No unresolved P0, P1 or P2 source finding in the reviewed delta.",
+  "findings": [],
+  "evidence": [
+    {
+      "claim": "The memo derives only messages and Tagged_row/entry pairs from its complete two input values; it reads no workspace, keeper, state, live logs or preview data.",
+      "locations": [
+        "bin/masc_tui_render_chat.ml:2671-2686"
+      ]
+    },
+    {
+      "claim": "Both timeline and layout list must be physically identical for reuse. A new timeline rebuilds row tags even if upstream layout entries can be reused.",
+      "locations": [
+        "bin/masc_tui_render_chat.ml:2677-2679"
+      ]
+    },
+    {
+      "claim": "msg_entry and msg_identity anchor fields are immutable records/variants. The repository scan found no mutable me_ field or me_ field assignment in bin/test.",
+      "locations": [
+        "bin/masc_tui_types.ml:1153-1228"
+      ]
+    },
+    {
+      "claim": "Upstream chat rows include keeper/history/session/settled/selected-transcript revision/queue/tool state in their reuse boundary. Visible timeline includes visibility state.",
+      "locations": [
+        "bin/masc_tui_types.ml:21517-21569",
+        "bin/masc_tui_render_chat.ml:1369-1425"
+      ]
+    },
+    {
+      "claim": "Layout reuse covers keeper, width, previews, memory/reasoning/origin/tools, file changes, calls, palette and owners. Preview generation copies list spine to invalidate dependent indexes.",
+      "locations": [
+        "bin/masc_tui_render_chat.ml:2181-2244"
+      ]
+    },
+    {
+      "claim": "Search index consumes immutable row identity/role/request/phase/sequence/reply source only. It does not consume workspace or layout state; stable row tags safely preserve its index.",
+      "locations": [
+        "bin/masc_tui_render_chat.ml:3453-3468",
+        "bin/masc_tui_render_chat.ml:3508-3555"
+      ]
+    },
+    {
+      "claim": "Request-owner diagnostic de-duplication and live/polled/held/pending/child/native projection remain downstream of the new memo and keep their existing keys/derivations.",
+      "locations": [
+        "bin/masc_tui_render_chat.ml:3194-3254",
+        "bin/masc_tui_render_chat.ml:3358-3451"
+      ]
+    },
+    {
+      "claim": "The cache is a single-slot derived value; it adds no durable source or wire/API variant. It memoizes no row rendering, mutable live turn_log or computed preview body.",
+      "locations": [
+        "bin/masc_tui_render_chat.ml:2671-2686"
+      ]
+    }
+  ],
+  "validation": {
+    "git_diff_check": "PASS",
+    "worktree_clean_when_observed": true,
+    "build": "not run (source-review scope)",
+    "tests": "not run (source-review scope)",
+    "ci": "not queried",
+    "product_files_modified": false
+  },
+  "limits": [
+    "No measured end-to-end latency, GC reduction or allocation improvement is established by this source review.",
+    "Source review does not establish compilation or runtime search/pin semantics; candidate-head native build and existing semantic suites remain separate evidence.",
+    "Mapping work moved between timing-stage boundaries, so component-stage timing attribution should not be compared as an overall speedup."
+  ]
+}

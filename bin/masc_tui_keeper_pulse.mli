@@ -66,3 +66,31 @@ val pulse_cell :
     holds every hour of the window and none holds a turn: there is nothing to
     draw, which is not the same as not knowing. *)
 
+(** What the server says about one half hour of the views' pulse column
+    (RFC-0515 §2.4.3). A rested turn counts as a failed one, as the decision
+    log writes it. *)
+type half_hour =
+  | Half_hour_unknown
+      (** No turn is counted in it and it starts before the server's
+          [known_since], so turns may have ended in it unseen; or the server
+          sent no pulse at all. *)
+  | Half_hour_quiet  (** The server holds it and no autonomous turn ended in it. *)
+  | Half_hour_ok  (** Turns ended in it and none failed or rested. *)
+  | Half_hour_failed  (** A turn failed or rested in it and none finished ok. *)
+  | Half_hour_failed_and_ok
+      (** A turn failed or rested in it and another finished ok. The server
+          counts each outcome without their order. *)
+
+val half_hours :
+  now:float -> count:int -> Masc.Keeper_turn_pulse.pulse option -> half_hour list
+(** The last [count] half hours, oldest first, one per server slot. The newest
+    is the slot that holds [now], and a slot stamped after it (the two clocks
+    disagree) belongs to it. A count of 0 or less is no half hour.
+
+    [None] is a pulse the server did not send: every half hour is unknown. So
+    is any pulse read against a [now] that is not a finite number. *)
+
+val half_hour_mark : half_hour -> string
+(** The mark one half hour draws: [·] quiet, [▁] ok, [█] failed, [▄] failed
+    and ok, {!Masc_tui_keeper_mark.unknown_mark} unknown. *)
+

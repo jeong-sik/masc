@@ -24,18 +24,6 @@ type run_window =
   | Session of string
   | Rolling_seconds of float
 
-type run_event_record =
-  { event_id : string
-  ; session_id : string
-  ; event : event
-  }
-
-type run_window_events =
-  { runs : run_record list
-  ; events : run_event_record list
-  ; failures : run_load_failure list
-  }
-
 let sessions_dir store = Filename.concat store.root "sessions"
 let session_dir store session_id = Filename.concat (sessions_dir store) session_id
 
@@ -256,7 +244,6 @@ let select_from_listing store (listing : run_listing) = function
 ;;
 
 module String_set = Set.Make (String)
-module String_map = Map.Make (String)
 
 let dedupe_runs runs =
   let _, rev =
@@ -346,119 +333,3 @@ let read_events store session_id ?after_seq () =
          (Ok [])
     |> Result.map List.rev)
 ;;
-
-let run_event_id session_id (event : event) = Printf.sprintf "%s#%d" session_id event.seq
-
-let read_window_events store windows =
-  let* listing = select_run_windows store windows in
-  let _, run_order =
-    List.fold_left
-      (fun (index, acc) run ->
-         index + 1, String_map.add run.session.session_id index acc)
-      (0, String_map.empty)
-      listing.runs
-  in
-  let _, events, event_failures =
-    List.fold_left
-      (fun (event_seen, events, failures) run ->
-         let session_id = run.session.session_id in
-         match read_events store session_id () with
-         | Error err ->
-           event_seen, events, run_failure store session_id (Error.to_string err) :: failures
-         | Ok loaded ->
-           let event_seen, new_events_rev =
-             List.fold_left
-               (fun (seen, acc) event ->
-                  let event_id = run_event_id session_id event in
-                  if String_set.mem event_id seen
-                  then seen, acc
-                  else
-                    ( String_set.add event_id seen
-                    , { event_id; session_id; event } :: acc ))
-               (event_seen, [])
-               loaded
-           in
-           event_seen, List.rev_append new_events_rev events, failures)
-      (String_set.empty, [], [])
-      listing.runs
-  in
-  Ok
-    ({ runs = listing.runs
-     ; events =
-         List.sort
-           (fun left right ->
-              match
-                Int.compare
-                  (Option.value
-                     (String_map.find_opt left.session_id run_order)
-                     ~default:max_int)
-                  (Option.value
-                     (String_map.find_opt right.session_id run_order)
-                     ~default:max_int)
-              with
-              | 0 -> Int.compare left.event.seq right.event.seq
-              | order -> order)
-           events
-     ; failures = dedupe_failures (listing.failures @ event_failures)
-     }
-     : run_window_events)
-;;
-
-let snapshot_path store session_id ~seq ~label =
-  let base =
-    match label with
-    | Some value when String.trim value <> "" ->
-      Printf.sprintf
-        "%04d-%s.json"
-        seq
-        (String.map
-           (function
-             | '/' | ' ' -> '_'
-             | c -> c)
-           value)
-    | Some _ | None -> Printf.sprintf "%04d.json" seq
-  in
-  Filename.concat (snapshots_dir store session_id) base
-;;
-
-let save_snapshot store (session : session) ~label =
-  let path = snapshot_path store session.session_id ~seq:session.last_seq ~label in
-  let* () = ensure_tree store session.session_id in
-  let* () =
-    save_text path (session |> session_to_yojson |> Yojson.Safe.pretty_to_string)
-  in
-  Ok path
-;;
-
-let save_artifact_text store session_id ~name ~kind ~content =
-  let safe_name =
-    if String.trim name = ""
-    then "artifact"
-    else
-      String.map
-        (function
-          | '/' | ' ' -> '_'
-          | c -> c)
-        name
-  in
-  let extension =
-    let normalized = String.lowercase_ascii kind in
-    if normalized = ""
-    then "txt"
-    else (
-      match normalized with
-      | "markdown" | "md" -> "md"
-      | "json" -> "json"
-      | "text" | "txt" -> "txt"
-      | other -> other)
-  in
-  let path =
-    Filename.concat
-      (artifacts_dir store session_id)
-      (Printf.sprintf "%s.%s" safe_name extension)
-  in
-  let* () = ensure_tree store session_id in
-  let* () = save_text path content in
-  Ok path
-;;
-

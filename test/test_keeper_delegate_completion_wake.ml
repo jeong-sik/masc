@@ -95,7 +95,7 @@ let queued_answers ~base_path ~keeper_name =
       match stimulus.payload with
       | Event_queue.Delegate_completed completion -> Some (stimulus, completion)
       | Event_queue.Board_signal _
-      | Event_queue.Board_attention _
+      | Event_queue.Board_routing_pending _ | Event_queue.Board_attention _
       | Event_queue.Bootstrap
       | Event_queue.Fusion_completed _
       | Event_queue.Schedule_due _

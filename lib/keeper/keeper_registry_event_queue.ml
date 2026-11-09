@@ -322,7 +322,7 @@ type enqueue_if_missing_durable_result =
 let board_attention_event_id (stimulus : Keeper_event_queue.stimulus) =
   match stimulus.payload with
   | Keeper_event_queue.Board_attention attention -> Some attention.candidate_id
-  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Schedule_due _
@@ -827,7 +827,7 @@ let cancel_scheduled_wakes_result ~base_path name ~applied_at ~schedule_ids ~rea
       Array.exists
         (fun schedule_id -> String.equal wake.schedule_id schedule_id)
         schedule_ids
-    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
     | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
     | Keeper_event_queue.Connector_attention _ | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _

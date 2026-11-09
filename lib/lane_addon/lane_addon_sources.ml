@@ -285,7 +285,7 @@ let authorize ~access binding =
     (Ok ()) sources
 let fusion_run ~access ~store ~max_bytes ~id ~run_id =
       let* run = authorized_fusion_run ~access ~run_id in
-      let* post = match Board_dispatch.find_post_by_run_id ~run_id with
+      let* post = match Board_dispatch.find_post_by_run_id_unchecked ~run_id with
         | Some post ->
             (match post.Board.origin with
              | Some {source=Some source;fusion_run_id=Some origin_id;fusion_producer=Some producer;_}

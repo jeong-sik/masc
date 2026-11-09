@@ -86,7 +86,7 @@ let test_list_and_unknown_detail_responses () =
     ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple
     ~started_at:1.0;
   let list_json =
-    Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response
+    Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response ~reader:Masc_board_handlers.Board_access.Operator
       ~registry
   in
   check int "list count" 1 Yojson.Safe.Util.(list_json |> member "count" |> to_int);
@@ -107,7 +107,7 @@ let test_list_and_unknown_detail_responses () =
       (Fusion_run_registry.Progress_judge_running
          { expected = 3; answered = 2; failed = 1 });
   let progressing_json =
-    Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response
+    Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response ~reader:Masc_board_handlers.Board_access.Operator
       ~registry
   in
   let progressing = Yojson.Safe.Util.(progressing_json |> member "runs" |> index 0) in
@@ -116,7 +116,7 @@ let test_list_and_unknown_detail_responses () =
   check int "list exposes answered count" 2
     Yojson.Safe.Util.(progressing |> member "progress" |> member "panel_answered" |> to_int);
   let status, json =
-    Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
+    Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response ~reader:Masc_board_handlers.Board_access.Operator
       ~registry
       ~path:"/api/v1/dashboard/fusion-runs/unknown-fusion-run"
   in
@@ -166,7 +166,7 @@ let test_detail_uses_exact_typed_board_origin () =
    | Ok _ -> ()
    | Error error -> fail (Board.Post_publication_failure.to_string error));
   let pending_status, pending_json =
-    Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
+    Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response ~reader:Masc_board_handlers.Board_access.Operator
       ~registry
       ~path:("/api/v1/dashboard/fusion-runs/" ^ pending_run_id)
   in
@@ -185,7 +185,7 @@ let test_detail_uses_exact_typed_board_origin () =
     ~run_id:pending_run_id
     ~outcome:Fusion_run_registry.Succeeded;
   let completed_status, completed_json =
-    Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
+    Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response ~reader:Masc_board_handlers.Board_access.Operator
       ~registry
       ~path:("/api/v1/dashboard/fusion-runs/" ^ pending_run_id)
   in
@@ -251,7 +251,7 @@ let test_detail_uses_exact_typed_board_origin () =
          ; summary = "answer-sentinel"
          });
   let recorded_status, recorded_json =
-    Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
+    Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response ~reader:Masc_board_handlers.Board_access.Operator
       ~registry
       ~path:("/api/v1/dashboard/fusion-runs/" ^ recorded_run_id)
   in
@@ -308,7 +308,7 @@ let test_replay_failure_keeps_historical_evidence_readable () =
   (match Board_dispatch.create_post ~author:"caller" ~content:lost_id
       ~post_kind:Board.System_post ~origin:wrong_origin () with
    | Ok _ -> () | Error error -> fail (Board.Post_publication_failure.to_string error));
-  let response = Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response
+  let response = Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response ~reader:Masc_board_handlers.Board_access.Operator
       ~registry in
   let open Yojson.Safe.Util in
   check int "invalid completion never becomes a lifecycle row" 0
@@ -335,19 +335,19 @@ let test_replay_failure_keeps_historical_evidence_readable () =
           | Masc.Tui_decode_fusion.Fusion_replayed { malformed_lines = 1; dropped_running = 1;
                                         incomplete = false } -> true
           | _ -> false));
-  let status, detail = Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response
+  let status, detail = Server_routes_http_routes_dashboard.For_testing.fusion_run_detail_response ~reader:Masc_board_handlers.Board_access.Operator
       ~registry
       ~path:("/api/v1/dashboard/fusion-runs/" ^ lost_id) in
   check bool "unretained lifecycle remains 404" true (status = `Not_found);
   check string "404 offers an exact Board reference" (Board.Post_id.to_string post.id)
     (detail |> member "historical_evidence" |> member "post_id" |> to_string);
-  (match Board_dispatch.get_post ~post_id:(Board.Post_id.to_string post.id) with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:(Board.Post_id.to_string post.id) with
    | Ok actual -> check string "original result remains readable" post.body actual.body
    | Error error -> fail (Board.show_board_error error));
   check string "diagnostic read preserves malformed source" before (Fs_compat.load_file replay_path);
   Fusion_run_registry.register_running registry ~run_id:lost_id ~keeper:"caller"
     ~preset:"test" ~roster:Fusion_types.preset_roster ~topology:Fusion_types.Simple ~started_at:20.;
-  let retained = Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response
+  let retained = Server_routes_http_routes_dashboard.For_testing.fusion_run_list_response ~reader:Masc_board_handlers.Board_access.Operator
       ~registry in
   check int "retained run does not duplicate its Board history" 0
     (retained |> member "historical_evidence" |> to_list |> List.length)

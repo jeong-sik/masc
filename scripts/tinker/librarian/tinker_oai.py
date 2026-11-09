@@ -53,7 +53,7 @@ class Call:
     status: int  # NO_RESPONSE when no HTTP response arrived
     finish: str | None
     content: str | None
-    reasoning: str | None  # reasoning_content, kept for training on the teacher's thinking
+    reasoning: str | None  # reasoning_content; eval rows count its length
     prompt_tokens: int
     cached_tokens: int
     completion_tokens: int
@@ -62,7 +62,8 @@ class Call:
     error: str | None = None  # the provider's error code and message for a failed attempt, when it gave one
 
     def replied(self) -> bool:
-        """HTTP 200 with no provider error: the call holds the model's reply."""
+        """HTTP 200 with no provider error: the attempt is the call's result, and a rerun reuses it.
+        The reply can still hold no answer (`answer`), which scores as not valid."""
         return self.status == HTTP_OK and self.error is None
 
     def cost(self) -> float:
@@ -92,18 +93,27 @@ def call_from_row(row: object) -> Call | None:
                 float(sent) if sent is not None else None, error)
 
 
+def _member(value: object, name: str) -> object:
+    return cast(dict[str, object], value).get(name) if isinstance(value, dict) else None
+
+
+def _text(value: object) -> str | None:
+    return value if isinstance(value, str) else None
+
+
+def _count(value: object) -> int:
+    return value if isinstance(value, int) and not isinstance(value, bool) else 0
+
+
 def completion_call(key: str, label: str, status: int, data: dict[str, object], wall: float, sent: float) -> Call:
-    """The call an OpenAI-shaped chat completion body describes."""
-    choices = cast(list[dict[str, object]], data.get("choices") or [{}])
-    message = cast(dict[str, object], choices[0].get("message") or {})
-    usage = cast(dict[str, object], data.get("usage") or {})
-    details = cast(dict[str, object], usage.get("prompt_tokens_details") or {})
-    content, finish, reasoning = message.get("content"), choices[0].get("finish_reason"), message.get(
-        "reasoning_content")
-    return Call(key, label, status, finish if isinstance(finish, str) else None,
-                content if isinstance(content, str) else None, reasoning if isinstance(reasoning, str) else None,
-                int(cast(int, usage.get("prompt_tokens") or 0)), int(cast(int, details.get("cached_tokens") or 0)),
-                int(cast(int, usage.get("completion_tokens") or 0)), wall, sent)
+    """The call an OpenAI-shaped chat completion body describes. A member of another shape reads as absent."""
+    choices = data.get("choices")
+    first = cast(list[object], choices)[0] if isinstance(choices, list) and choices else None
+    message, usage = _member(first, "message"), data.get("usage")
+    return Call(key, label, status, _text(_member(first, "finish_reason")), _text(_member(message, "content")),
+                _text(_member(message, "reasoning_content")), _count(_member(usage, "prompt_tokens")),
+                _count(_member(_member(usage, "prompt_tokens_details"), "cached_tokens")),
+                _count(_member(usage, "completion_tokens")), wall, sent)
 
 
 def call_key(model: str, effort: str, max_tokens: int, attempt: int, messages: Sequence[str]) -> str:

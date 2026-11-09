@@ -42,18 +42,6 @@ type run_window =
   | Session of string
   | Rolling_seconds of float
 
-type run_event_record =
-  { event_id : string
-  ; session_id : string
-  ; event : Runtime.event
-  }
-
-type run_window_events =
-  { runs : run_record list
-  ; events : run_event_record list
-  ; failures : run_load_failure list
-  }
-
 (** {1 Store creation} *)
 
 val create : ?root:string -> unit -> (t, Error.t) result
@@ -80,11 +68,6 @@ val load_session : t -> string -> (Runtime.session, Error.t) result
 val list_runs : t -> (run_listing, Error.t) result
 val select_run_windows : t -> run_window list -> (run_listing, Error.t) result
 
-val read_window_events
-  :  t
-  -> run_window list
-  -> (run_window_events, Error.t) result
-
 (** {1 Event I/O} *)
 
 val append_event : t -> string -> Runtime.event -> (unit, Error.t) result
@@ -95,23 +78,3 @@ val read_events
   -> ?after_seq:int
   -> unit
   -> (Runtime.event list, Error.t) result
-
-(** {1 Snapshots} *)
-
-val snapshot_path : t -> string -> seq:int -> label:string option -> string
-
-val save_snapshot
-  :  t
-  -> Runtime.session
-  -> label:string option
-  -> (string, Error.t) result
-
-(** {1 Artifacts} *)
-
-val save_artifact_text
-  :  t
-  -> string
-  -> name:string
-  -> kind:string
-  -> content:string
-  -> (string, Error.t) result

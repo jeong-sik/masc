@@ -23,8 +23,8 @@ let same_agent_id left right =
   String.equal (Board.Agent_id.to_string left) (Board.Agent_id.to_string right)
 ;;
 
-let require_post_author ~action ~post_id ~author =
-  match Board_dispatch.get_post ~post_id with
+let require_post_author ~reader ~action ~post_id ~author =
+  match Board_dispatch.get_post ~reader ~post_id with
   | Error _ as err -> err
   | Ok post ->
     if same_agent_id post.Board.author author
@@ -106,8 +106,8 @@ let configured_board_moderators () =
           | Ok contents -> board_moderators_from_toml ~missing:(Ok default) contents))
 ;;
 
-let require_post_close_actor ~action ~post_id ~actor =
-  match Board_dispatch.get_post ~post_id with
+let require_post_close_actor ~reader ~action ~post_id ~actor =
+  match Board_dispatch.get_post ~reader ~post_id with
   | Error _ as err -> err
   | Ok post ->
     if same_agent_id post.Board.author actor
@@ -166,7 +166,7 @@ let missing_vote_direction ~tool_name ~start_time : Tool_result.result =
     "vote direction required; expected up or down"
 ;;
 
-let handle_vote ~tool_name ~start_time args =
+let handle_vote ~reader ~tool_name ~start_time args =
   let post_id = get_string args "post_id" "" in
   let voter = get_string args "voter" "anonymous" in
   match Safe_ops.json_string_opt "direction" args with
@@ -191,7 +191,7 @@ let handle_vote ~tool_name ~start_time args =
         | Error (Board.Already_voted _) ->
           (* Idempotent: same-direction duplicate vote is a no-op success.
              The desired state already exists, so the tool call succeeds. *)
-          (match Board_dispatch.get_post ~post_id with
+          (match Board_dispatch.get_post ~reader ~post_id with
            | Ok post ->
              let score = post.votes_up - post.votes_down in
              let arrow = if direction = Board.Up then "↑" else "↓" in
@@ -223,13 +223,13 @@ let handle_vote ~tool_name ~start_time args =
           Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
-let handle_stats ~tool_name ~start_time _args : Tool_result.result =
-  let stats = Board_dispatch.stats () in
+let handle_stats ~reader ~tool_name ~start_time _args : Tool_result.result =
+  let stats = Board_dispatch.stats ~reader () in
   Tool_result.make_ok ~tool_name ~start_time ~data:stats ()
 ;;
 
 (** Search posts by keyword. *)
-let handle_search ~tool_name ~start_time args : Tool_result.result =
+let handle_search ~reader ~tool_name ~start_time args : Tool_result.result =
   let query = get_string args "query" "" in
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let compact = get_bool args "compact" true in
@@ -241,7 +241,7 @@ let handle_search ~tool_name ~start_time args : Tool_result.result =
       ~start_time
       "query required"
   else (
-    let results = Board_dispatch.search ~query ~limit in
+    let results = Board_dispatch.search ~reader ~query ~limit in
     if Stdlib.List.length results = 0
     then
       Tool_result.make_ok
@@ -324,7 +324,7 @@ let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
         Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
-let handle_reaction ~tool_name ~start_time args : Tool_result.result =
+let handle_reaction ~reader ~tool_name ~start_time args : Tool_result.result =
   let target_type_raw = get_string args "target_type" "" in
   let target_id = get_string args "target_id" "" in
   let user_id = get_string args "user_id" (get_string args "user" "anonymous") in
@@ -354,7 +354,7 @@ let handle_reaction ~tool_name ~start_time args : Tool_result.result =
         ~start_time
         "user_id required"
     else (
-      match Board_dispatch.toggle_reaction ~target_type ~target_id ~user_id ~emoji with
+      match Board_dispatch.toggle_reaction ~reader ~target_type ~target_id ~user_id ~emoji with
       | Ok result ->
         (* Pass structured [data] directly (no prose label here), instead of a
            `String holding stringified JSON that consumers would double-encode. *)
@@ -368,7 +368,7 @@ let handle_reaction ~tool_name ~start_time args : Tool_result.result =
 ;;
 
 (** Agent profile. *)
-let handle_profile ~tool_name ~start_time args : Tool_result.result =
+let handle_profile ~reader ~tool_name ~start_time args : Tool_result.result =
   let agent = get_string args "agent" "" in
   if String.equal agent ""
   then
@@ -378,7 +378,7 @@ let handle_profile ~tool_name ~start_time args : Tool_result.result =
       ~start_time
       "agent required"
   else (
-    let all_posts : Board.post list = Board_dispatch.list_posts ~limit:1000 () in
+    let all_posts : Board.post list = Board_dispatch.list_posts ~reader ~limit:1000 () in
     let norm s = String.lowercase_ascii (String.trim s) in
     let agent_norm = norm agent in
     let agent_posts =
@@ -393,7 +393,7 @@ let handle_profile ~tool_name ~start_time args : Tool_result.result =
         0
         agent_posts
     in
-    let all_comments : Board.comment list = Board_dispatch.list_comments () in
+    let all_comments : Board.comment list = Board_dispatch.list_comments ~reader () in
     let agent_comments =
       List.filter
         (fun (c : Board.comment) ->
@@ -423,8 +423,8 @@ let handle_profile ~tool_name ~start_time args : Tool_result.result =
 ;;
 
 (** Hearth list. *)
-let handle_hearth_list ~tool_name ~start_time _args : Tool_result.result =
-  let hearths = Board_dispatch.list_hearths () in
+let handle_hearth_list ~reader ~tool_name ~start_time _args : Tool_result.result =
+  let hearths = Board_dispatch.list_hearths ~reader () in
   if Stdlib.List.length hearths = 0
   then
     Tool_result.make_ok
@@ -449,7 +449,7 @@ let handle_hearth_list ~tool_name ~start_time _args : Tool_result.result =
 
 (** {1 Delete / cleanup handlers} *)
 
-let handle_delete ~tool_name ~start_time args : Tool_result.result =
+let handle_delete ~reader ~tool_name ~start_time args : Tool_result.result =
   let refused error =
     Tool_result.make_err ~tool_name ~start_time
       ~class_:(Board_tool_format.board_error_failure_class error)
@@ -469,7 +469,7 @@ let handle_delete ~tool_name ~start_time args : Tool_result.result =
     match agent_id_arg ~field:"author" args with
     | Error e -> refused e
     | Ok author ->
-    match require_post_author ~action:"delete" ~post_id ~author with
+    match require_post_author ~reader ~action:"delete" ~post_id ~author with
     | Error e -> refused e
     | Ok () ->
     match Board_dispatch.delete_post ~post_id with
@@ -501,7 +501,7 @@ let handle_delete ~tool_name ~start_time args : Tool_result.result =
     moderator uses this agent-facing tool; the operator uses the [CanAdmin]
     dashboard route. The storage boundary requires a non-empty [summary]
     and an explicit successor decision on both surfaces. *)
-let handle_close ~tool_name ~start_time args : Tool_result.result =
+let handle_close ~reader ~tool_name ~start_time args : Tool_result.result =
   let post_id = String.trim (get_string args "post_id" "") in
   if String.equal post_id ""
   then
@@ -514,7 +514,7 @@ let handle_close ~tool_name ~start_time args : Tool_result.result =
     match agent_id_arg ~field:"closed_by" args with
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok closed_by ->
-    match require_post_close_actor ~action:"close" ~post_id ~actor:closed_by with
+    match require_post_close_actor ~reader ~action:"close" ~post_id ~actor:closed_by with
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok () ->
     let summary = get_string args "summary" "" in
@@ -565,7 +565,7 @@ let handle_close ~tool_name ~start_time args : Tool_result.result =
 (** Reopen a closed post (task-1758/#39356). The author or a configured
     Board moderator uses this tool; the operator uses the dashboard route.
     Idempotent on an already-open post, same as {!Board_votes.reopen}. *)
-let handle_reopen ~tool_name ~start_time args : Tool_result.result =
+let handle_reopen ~reader ~tool_name ~start_time args : Tool_result.result =
   let post_id = String.trim (get_string args "post_id" "") in
   if String.equal post_id ""
   then
@@ -578,7 +578,7 @@ let handle_reopen ~tool_name ~start_time args : Tool_result.result =
     match agent_id_arg ~field:"reopened_by" args with
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok reopened_by ->
-    match require_post_close_actor ~action:"reopen" ~post_id ~actor:reopened_by with
+    match require_post_close_actor ~reader ~action:"reopen" ~post_id ~actor:reopened_by with
     | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
     | Ok () ->
     match Board_dispatch.reopen ~post_id with
@@ -596,7 +596,7 @@ let handle_reopen ~tool_name ~start_time args : Tool_result.result =
         (Printf.sprintf "Reopen failed: %s" (Board_tool_format.board_error_to_string e)))
 ;;
 
-let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
+let handle_board_cleanup ~reader ~tool_name ~start_time args : Tool_result.result =
   let max_age_hours = get_int args "max_age_hours" 24 |> max 1 in
   let require_no_comments = get_bool args "require_no_comments" true in
   let require_no_votes = get_bool args "require_no_votes" true in
@@ -614,7 +614,7 @@ let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
     | Some n -> String_util.contains_substring (String.lowercase_ascii s) n
   in
   let all_posts =
-    Board_dispatch.list_posts ~sort_by:Board_tool_format.Recent ~limit:500 ()
+    Board_dispatch.list_posts ~reader ~sort_by:Board_tool_format.Recent ~limit:500 ()
   in
   let candidates =
     List.filter

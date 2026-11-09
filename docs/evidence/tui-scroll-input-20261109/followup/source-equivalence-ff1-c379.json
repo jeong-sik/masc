@@ -1,0 +1,12 @@
+{
+  "native_source": "ff1cc7700b081c6ce7f1abebea42ef352d518ed5",
+  "reviewed_pr_head": "c379de5e39ef11a2f26a2b0bb8cd89f187fe47d9",
+  "excluded_prefixes": [
+    "docs/",
+    "changelog.d/"
+  ],
+  "non_documentation_tree_entry_count": 14708,
+  "non_documentation_tree_sha256": "d2d56a4e488b47f0598857e58d17af1c79cd9efd14db277333834867b15caa7f",
+  "identical": true,
+  "scope": "All non-documentation Git file entries, including production, test, configuration and build inputs, are byte-identical by blob identity. The built binary still reports ff1cc770, not the later documentation head."
+}

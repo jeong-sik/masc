@@ -4,6 +4,7 @@ type reading =
   | Running
   | Turn_capacity
   | Blocker
+  | Proactive_interval
 
 val select :
   cells:int ->

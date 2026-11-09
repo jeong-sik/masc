@@ -117,7 +117,6 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime ~runtime_id ~model
     (config : Runtime_execution.codex_app_server) =
   let probe_config : Runtime_codex_app_server.config =
     { cli_path = config.cli_path
-    ; account_home = Runtime_official_account.Captured config.account_home
     ; isolated_home = None
     ; model = config.model
     ; context_window = Some (Runtime_instance.max_context_of_runtime runtime)
@@ -135,11 +134,31 @@ let probe_codex ~mgr ~clock ~process_cwd ~runtime ~runtime_id ~model
       ; output_schema = None
     }
   in
+  (* HIGH-RISK-UNREVIEWED: a dashboard probe is a call of the operator (plan
+     D2-6). A refusal starts no app-server and answers as the configuration
+     the probe cannot run, with the refusal as its detail, the same answer a
+     refused Claude Code probe gives. *)
+  match
+    Runtime_account_access.authorize Runtime_account_access.Operator_call
+      config.account_home
+  with
+  | Error refusal ->
+    response_json
+      ~runtime_id
+      ~client_kind:"codex"
+      ~model
+      ~login:
+        (failed_login_json
+           ~status:"invalid_config"
+           ~detail:(Runtime_account_access.refusal_to_string refusal))
+      ~client:empty_client_json
+  | Ok account ->
   match
     Runtime_codex_app_server.probe_subscription
       ~mgr
       ~clock
       ~cwd:process_cwd
+      ~account
       probe_config
   with
   | Ok measured ->
@@ -208,7 +227,7 @@ let probe_claude ~mgr ~clock ~cwd ~process_cwd ~runtime_id ~model
      refusal as its detail. *)
   match
     Runtime_account_access.authorize Runtime_account_access.Operator_call
-      (Runtime_account_access.seal config.account_home)
+      config.account_home
   with
   | Error refusal ->
     response_json

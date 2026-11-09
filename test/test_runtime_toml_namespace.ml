@@ -228,10 +228,8 @@ worker = "second.sol"
         let runtime = List.find (fun (r : Runtime_instance.t) -> r.id = id) runtimes in
         match runtime.execution with
         | Runtime_execution.Codex_app_server client ->
-          Alcotest.(check string) (id ^ " account home") expected_home
-            (Runtime_official_account.home client.account_home);
-          Alcotest.(check bool) (id ^ " account home is explicitly declared") true
-            (Runtime_official_account.source client.account_home = Runtime_official_account.Declared_directory)
+          Alcotest.(check string) (id ^ " declared account home") expected_home
+            (Runtime_account_access.home client.account_home)
         | _ -> Alcotest.fail "generated binding changed execution protocol")
         [ "first.sol", "/tmp/codex-first"; "second.sol", "/tmp/codex-second" ])
 

@@ -63,8 +63,6 @@ let entry ~timestamp ~agent_id ~action ~outcome =
     action;
     details = `Null;
     outcome;
-    cost_estimate = None;
-    token_count = None;
     trace_id = None;
   }
 
@@ -288,8 +286,6 @@ let test_runtime_config_write_event_projection () =
             ("lines", `Int 5);
           ];
       outcome = Audit_log.Success;
-      cost_estimate = None;
-      token_count = None;
       trace_id = None;
     }
   in
@@ -326,8 +322,6 @@ let test_runtime_config_write_assignment_projection () =
             ("lines", `Int 464);
           ];
       outcome = Audit_log.Success;
-      cost_estimate = None;
-      token_count = None;
       trace_id = None;
     }
   in
@@ -364,8 +358,6 @@ let test_runtime_config_write_routing_list_projection () =
             ("lines", `Int 464);
           ];
       outcome = Audit_log.Success;
-      cost_estimate = None;
-      token_count = None;
       trace_id = None;
     }
   in

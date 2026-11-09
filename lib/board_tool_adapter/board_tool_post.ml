@@ -244,7 +244,7 @@ let handle_post_edit ~tool_name ~start_time args : Tool_result.result =
        | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
-let handle_post_list ~tool_name ~start_time args : Tool_result.result =
+let handle_post_list ~reader ~tool_name ~start_time args : Tool_result.result =
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let compact = get_bool args "compact" true in
   let visibility_str = get_string_opt args "visibility" in
@@ -292,10 +292,10 @@ let handle_post_list ~tool_name ~start_time args : Tool_result.result =
       msg
   | Ok sort_by ->
     (* Fetch exactly what we need: offset posts to skip + limit posts to show.
-       Board_dispatch.list_posts already applies visibility/hearth/author filters. *)
+       Board_dispatch.list_posts ~reader already applies visibility/hearth/author filters. *)
     let fetch_limit = limit + offset in
     let sorted_posts =
-      Board_dispatch.list_posts
+      Board_dispatch.list_posts ~reader
         ~visibility_filter
         ?hearth
         ?author_filter
@@ -403,19 +403,18 @@ let render_thread ~post_block ~total ~comment_lines =
     Printf.sprintf "%s\n\n**Comments**:\n%s" post_block (String.concat "\n" comment_lines)
 ;;
 
-let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.result =
+let handle_post_get ~reader ~result_boundary ~tool_name ~start_time args : Tool_result.result =
   let post_id = get_string args "post_id" "" in
-  (* Injected by the MCP dispatch from the caller's own identity, never
-     model-supplied (same rewrite as vote's [voter]). Absent on paths with no
-     caller identity, which render no marker. *)
-  let viewer = get_string_opt args "viewer" in
+  (* The bound reader also owns the vote marker. Model arguments cannot
+     select another identity's vote state. *)
+  let viewer = Masc_board_handlers.Board_access.name reader in
   (* A vote-store read error degrades to "no marker" rather than failing the
      whole read: the listing's tallies are still current, and the marker is a
      projection of the reader's own durable vote, not a gate. *)
   let viewer_vote_of_comment comment_id =
     Option.bind viewer (fun voter ->
       match
-        Board_dispatch.current_vote_for_comment
+        Board_dispatch.current_vote_for_comment ~reader
           ~voter
           ~comment_id:(Board.Comment_id.to_string comment_id)
       with
@@ -425,7 +424,7 @@ let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.r
   let viewer_vote_of_post post_id =
     Option.bind viewer (fun voter ->
       match
-        Board_dispatch.current_vote_for_post
+        Board_dispatch.current_vote_for_post ~reader
           ~voter
           ~post_id:(Board.Post_id.to_string post_id)
       with
@@ -440,7 +439,7 @@ let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.r
       ~start_time
       (Board.Comment_page.request_error_to_string error)
   | Ok request ->
-    (match Board_dispatch.get_post_and_comments ~post_id with
+    (match Board_dispatch.get_post_and_comments ~reader ~post_id with
      | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e
      | Ok (post, comments) ->
        let total = List.length comments in
@@ -545,8 +544,8 @@ let handle_post_get ~result_boundary ~tool_name ~start_time args : Tool_result.r
    thread size plus one. The list is the one [handle_post_get] pages through,
    so an offset here is an offset there. A failed read leaves both fields out
    and is logged: the comment is already stored. *)
-let thread_position_fields ~post_id (comment : Board.comment) =
-  match Board_dispatch.get_post_and_comments ~post_id with
+let thread_position_fields ~reader ~post_id (comment : Board.comment) =
+  match Board_dispatch.get_post_and_comments ~reader ~post_id with
   | Error error ->
     Log.BoardLog.warn
       "comment position unavailable for %s: %s"
@@ -574,7 +573,7 @@ let with_thread_position json fields =
   | other -> `Assoc (("result", other) :: fields)
 ;;
 
-let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
+let handle_comment_add ~reader ~tool_name ~start_time args : Tool_result.result =
   let post_id = get_string args "post_id" "" in
   let content = body_or_content_arg args in
   let author = get_string_opt args "author" |> Option.map String.trim in
@@ -618,7 +617,7 @@ let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
          let json =
            with_thread_position
              (Board_tool_format.with_unresolved (Board.comment_to_yojson comment) unresolved)
-             (thread_position_fields ~post_id comment)
+             (thread_position_fields ~reader ~post_id comment)
          in
          Tool_result.make_ok ~tool_name ~start_time ~data:json ()
        | Error e ->

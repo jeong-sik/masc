@@ -921,15 +921,22 @@ let emit config ?actor ?subject ?(tags = []) ~kind ~payload () =
 (* JSON response                                                    *)
 (* ================================================================ *)
 
+type projection_coverage = Full_history | Recent_window of int
+
+let coverage_fields = function
+  | Full_history -> [ "coverage", `String "full_history" ]
+  | Recent_window raw_limit ->
+    [ "coverage", `String "recent_window"; "raw_window_limit", `Int raw_limit ]
+
 let build_json_response config ~events ~total_matching ~latest_store_seq
-    ~latest_matching_seq ~after_seq ~limit ~kinds =
+    ~latest_matching_seq ~after_seq ~limit ~kinds ~coverage =
   let next_after_seq =
     match List.rev events with
     | last :: _ -> last.seq
     | [] -> after_seq
   in
   `Assoc
-    [
+    ([
       ("generated_at_iso", `String (Masc_domain.now_iso ()));
       ("dashboard_surface", `String "/api/v1/activity/events");
       ("source", `String "activity_graph_jsonl");
@@ -954,22 +961,34 @@ let build_json_response config ~events ~total_matching ~latest_store_seq
           ] );
       ("events", `List (List.map event_to_yojson events));
       ("count", `Int (List.length events));
-      ("total_matching_events", `Int total_matching);
+      ("total_matching_events", Json_util.int_opt_to_json total_matching);
       ("after_seq", `Int after_seq);
       ("next_after_seq", `Int next_after_seq);
       ("limit", `Int limit);
       ("kinds", `List (List.map (fun value -> `String value) kinds));
       ("latest_seq", `Int latest_store_seq);
-      ("latest_matching_seq", `Int latest_matching_seq);
-    ]
+      ("latest_matching_seq", Json_util.int_opt_to_json latest_matching_seq);
+    ] @ coverage_fields coverage)
 ;;
 
-let json_response config ?(kinds = []) ~after_seq ~limit () =
+let json_response config ?(kinds = []) ~after_seq ~limit ~keep () =
   let events, total_matching, latest_store_seq, latest_matching_seq =
-    list_events_with_meta config ~kinds ~after_seq ~limit ()
+    list_events_with_meta config ~kinds ~after_seq ~limit ~keep ()
   in
-  build_json_response config ~events ~total_matching ~latest_store_seq
-    ~latest_matching_seq ~after_seq ~limit ~kinds
+  build_json_response config ~events ~total_matching:(Some total_matching) ~latest_store_seq
+    ~latest_matching_seq:(Some latest_matching_seq) ~after_seq ~limit ~kinds ~coverage:Full_history
+;;
+
+let recent_json_response config ~raw_limit ~keep () =
+  (* Preserve the existing reverse-read window: checking historical private
+     rows must not cold-parse the whole retained store on every default poll. *)
+  let recent = read_recent_events config ~limit:raw_limit in
+  let latest_store_seq = max (read_current_seq config) (max_event_seq recent) in
+  let recent = List.drop (max 0 (List.length recent - raw_limit)) recent in
+  let events = List.filter keep recent in
+  build_json_response config ~events ~total_matching:None ~latest_store_seq
+    ~latest_matching_seq:None ~after_seq:0 ~limit:raw_limit ~kinds:[]
+    ~coverage:(Recent_window raw_limit)
 ;;
 
 module For_testing = struct

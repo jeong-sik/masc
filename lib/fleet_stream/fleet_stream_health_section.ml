@@ -52,6 +52,7 @@ module Key = struct
 
   let completion_authority_pending_count = "completion_authority_pending_task_count"
   let active_task_owner_scan_error_count = "active_task_owner_scan_error_count"
+  let proactive_interval_sec = "proactive_interval_sec"
 end
 
 let member section key = List.assoc_opt key section
@@ -88,6 +89,17 @@ let names_field section key =
     in
     strings [] items
   | Some _ -> unreadable "%s.%s is not a list" Key.section key
+  | None -> unreadable "%s has no field %s" Key.section key
+;;
+
+let proactive_interval_field section key =
+  match member section key with
+  | Some (`Int seconds) ->
+    (match Fleet_stream.Proactive_interval.of_seconds seconds with
+     | Some interval -> Ok interval
+     | None -> unreadable "%s.%s is not a positive number of seconds" Key.section key)
+  | Some (`Null | `Bool _ | `Intlit _ | `Float _ | `String _ | `Assoc _ | `List _) ->
+    unreadable "%s.%s is not an integer" Key.section key
   | None -> unreadable "%s has no field %s" Key.section key
 ;;
 
@@ -147,6 +159,9 @@ let fleet_of_section section : (Fleet_stream.fleet, error) result =
   let* fs_active_task_owner_scan_error_count =
     count_field section Key.active_task_owner_scan_error_count
   in
+  let* fs_proactive_interval =
+    proactive_interval_field section Key.proactive_interval_sec
+  in
   Ok
     { Fleet_stream.fs_status
     ; fs_blocker
@@ -169,6 +184,7 @@ let fleet_of_section section : (Fleet_stream.fleet, error) result =
     ; fs_active_task_owner_without_fiber_count
     ; fs_completion_authority_pending_count
     ; fs_active_task_owner_scan_error_count
+    ; fs_proactive_interval
     }
 ;;
 

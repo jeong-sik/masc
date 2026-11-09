@@ -942,9 +942,3 @@ let lookup t provider_id =
        || List.exists (fun alias -> normalize_id alias = needle) entry.aliases)
     t
 ;;
-
-let default_model_for_provider t provider_id =
-  match lookup t provider_id with
-  | Some entry -> entry.default_model
-  | None -> None
-;;

@@ -1,8 +1,9 @@
 (* One turn of a person's Keeper in the localhost preview (plan D2-8). The
    zone is on real files, made by the real bootstrap, and its records are made
    by the real writers. The runtime is the provider of a runtime.toml with a
-   login receipt of each account, and the Claude Code CLI is a script that
-   answers the stream-json protocol and writes down what it was started with.
+   login receipt of each account. The Claude Code CLI is a script that answers
+   the stream-json protocol, the Codex CLI is a script that answers the
+   app-server protocol, and each writes down what it was started with.
    The access is published once per process, so the executable has one case
    and it runs in order. *)
 
@@ -86,7 +87,47 @@ for line in sys.stdin:
     pass
 |}
 
-let runtime_toml ~claude =
+(* The Codex CLI of the template. It answers the app-server protocol as a
+   signed-in subscription, and a turn with "echo: " and the message. It writes
+   the home it was started on, its arguments, the parameters of
+   [thread/start] and the message to [<script>.turn.json]. *)
+let fake_codex = {|#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+
+args = sys.argv[1:]
+script = sys.argv[0]
+
+def emit(frame):
+    print(json.dumps(frame), flush=True)
+
+thread = None
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if method == "initialize":
+        emit({"id": request["id"], "result": {"userAgent": "fixture/0.1"}})
+    elif method == "account/read":
+        emit({"id": request["id"], "result": {"account": {"type": "chatgpt", "planType": "fixture-plan"},
+            "requiresOpenaiAuth": True}})
+    elif method == "thread/start":
+        thread = request["params"]
+        emit({"id": request["id"], "result": {"thread": {"id": "thread-1"}, "model": thread["model"]}})
+    elif method == "turn/start":
+        prompt = "".join(item.get("text", "") for item in request["params"]["input"])
+        Path(script + ".turn.json").write_text(json.dumps({"home": os.environ.get("CODEX_HOME"),
+            "args": args, "thread": thread, "prompt": prompt}))
+        emit({"id": request["id"], "result": {"turn": {"id": "turn-1"}}})
+        message = {"type": "agentMessage", "id": "message-1", "text": "echo: " + prompt, "phase": "final_answer"}
+        emit({"method": "item/completed", "params": {"threadId": "thread-1", "turnId": "turn-1",
+            "completedAtMs": 1, "item": message}})
+        emit({"method": "turn/completed", "params": {"threadId": "thread-1",
+            "turn": {"id": "turn-1", "items": [message], "status": "completed"}}})
+|}
+
+let runtime_toml ~claude ~codex =
   Printf.sprintf
     {|[runtime]
 default = "claude_code.claude-sonnet-5"
@@ -100,7 +141,7 @@ is-non-interactive = true
 [providers.codex]
 display-name = "Codex"
 protocol = "codex-app-server"
-command = "/usr/bin/true"
+command = %S
 is-non-interactive = true
 
 [models."claude-sonnet-5"]
@@ -120,6 +161,7 @@ streaming = true
 [codex."gpt-5.5"]
 |}
     claude
+    codex
 ;;
 
 type someone =
@@ -127,12 +169,12 @@ type someone =
   ; account_id : string
   }
 
-(* The home of the account, as the layout spells it. *)
-let home_of ~base_path (who : someone) =
+(* The home of the account of [client], as the layout spells it. *)
+let home_of ?(client = Layout.Claude_home) ~base_path (who : someone) =
   get_text
     (Layout.home
        ~runtime_root:(Layout.person_runtime_root ~base_path ~namespace:who.person.namespace)
-       Layout.Claude_home
+       client
        ~account_id:who.account_id)
 ;;
 
@@ -247,6 +289,12 @@ let seen script =
   | _ -> Alcotest.fail "the CLI wrote no record"
 ;;
 
+let member_of fields name =
+  match List.assoc_opt name fields with
+  | Some (`Assoc members) -> members
+  | _ -> Alcotest.failf "the CLI record has no %s" name
+;;
+
 let text_of fields name =
   match List.assoc_opt name fields with
   | Some (`String value) -> value
@@ -308,14 +356,19 @@ let test_turn () =
           | Ok zone -> zone
           | Error error -> Alcotest.failf "zone not opened: %s" (Z.open_error_to_string error)
         in
-        let claude = Filename.concat root "claude" in
-        Out_channel.with_open_bin claude (fun out -> output_string out fake_claude);
-        Unix.chmod claude 0o700;
+        let script name body =
+          let path = Filename.concat root name in
+          Out_channel.with_open_bin path (fun out -> output_string out body);
+          Unix.chmod path 0o700;
+          path
+        in
+        let claude = script "claude" fake_claude in
+        let codex = script "codex" fake_codex in
         let config = Filename.concat (Common.masc_dir_from_base_path ~base_path) "config" in
         Fs_compat.mkdir_p config;
         Out_channel.with_open_bin
           (Filename.concat config Config_dir_resolver.runtime_toml_filename)
-          (fun out -> output_string out (runtime_toml ~claude));
+          (fun out -> output_string out (runtime_toml ~claude ~codex));
         let alice, alice_runtime =
           join zone ~base_path ~name:"alice" ~hex:'a' ~integration:"claude_code"
             ~client:Runtime_setup_login_client.Claude ~model:"claude-sonnet-5"
@@ -339,12 +392,13 @@ let test_turn () =
          with
          | Ok () -> ()
          | Error error -> Alcotest.fail (Access.publish_error_to_string error));
-        let answered keeper runtime text =
+        let answered ?(model = "claude-sonnet-5") keeper runtime text =
           ( 200
           , Printf.sprintf
-              {|{"keeper_id":"%s","runtime_id":"%s","model":"claude-sonnet-5","text":"%s"}|}
+              {|{"keeper_id":"%s","runtime_id":"%s","model":"%s","text":"%s"}|}
               keeper
               (Runtime_id.to_string runtime)
+              model
               text )
         in
         let reply (who : someone) body =
@@ -391,10 +445,6 @@ let test_turn () =
           "her Keeper with no Runtime"
           (409, {|{"error":"The Keeper has no Runtime. Give it one of yours first."}|})
           (reply alice (body ~keeper:"keeper-alice-idle" ~message:"hello"));
-        check_reply
-          "a Codex Runtime"
-          (400, {|{"error":"A Keeper turn runs here only on a Claude Code Runtime."}|})
-          (reply carol (body ~keeper:"keeper-carol" ~message:"hello"));
         check_reply
           "a blank message"
           (400, {|{"error":"The message is blank."}|})
@@ -466,7 +516,39 @@ let test_turn () =
         Alcotest.(check bool)
           "a home of its own"
           false
-          (String.equal (home_of ~base_path alice) (home_of ~base_path bob))))
+          (String.equal (home_of ~base_path alice) (home_of ~base_path bob));
+        (* Carol's Keeper answers on Codex, on the home of her account, in
+           a thread Codex keeps nothing of. *)
+        check_reply
+          "her Codex Keeper answers"
+          (answered ~model:"gpt-5.5" "keeper-carol" carol_runtime "echo: hello")
+          (reply carol (body ~keeper:"keeper-carol" ~message:"hello"));
+        let codex_turn = seen codex in
+        Alcotest.(check string)
+          "on the Codex home of her account"
+          (home_of ~client:Layout.Codex_home ~base_path carol)
+          (text_of codex_turn "home");
+        Alcotest.(check string) "with her message to Codex" "hello" (text_of codex_turn "prompt");
+        let thread = member_of codex_turn "thread" in
+        Alcotest.(check bool)
+          "in an ephemeral thread"
+          true
+          (List.assoc_opt "ephemeral" thread = Some (`Bool true));
+        Alcotest.(check (option string))
+          "with read-only permissions"
+          (Some ":read-only")
+          (match List.assoc_opt "permissions" thread with
+           | Some (`String profile) -> Some profile
+           | _ -> None);
+        Alcotest.(check bool)
+          "with no shell"
+          true
+          (List.mem "features.shell_tool=false" (args_of codex_turn)
+           && List.mem "features.unified_exec=false" (args_of codex_turn));
+        Alcotest.(check bool)
+          "in a private directory that is gone after the Codex turn"
+          false
+          (Sys.file_exists (text_of thread "cwd"))))
 ;;
 
 let () =

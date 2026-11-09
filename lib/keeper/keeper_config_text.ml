@@ -21,11 +21,6 @@ let bool_of_env_default name ~(default : bool) =
   | None -> default
   | Some raw -> Option.value (bool_of_string raw) ~default
 
-let bool_of_env_opt name =
-  match Env_config_core.raw_value_opt name with
-  | None -> None
-  | Some raw -> bool_of_string raw
-
 (* ── Name validation ────────────────────────────────────────── *)
 
 (* A keeper's directory is [keepers/<name>], beside the stores kept directly

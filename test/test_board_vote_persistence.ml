@@ -238,7 +238,7 @@ let test_comment_vote_flips_and_duplicate_survive_restart () =
   let comment_id = Board.Comment_id.to_string comment.id in
   let voter = "comment-vote-flipper" in
   let check_counts label votes_up votes_down =
-    match Board_dispatch.get_comments ~post_id with
+    match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
     | Error error -> Alcotest.fail (Board.show_board_error error)
     | Ok [ loaded ] ->
       Alcotest.(check int) (label ^ " up") votes_up loaded.votes_up;
@@ -271,7 +271,7 @@ let test_comment_vote_flips_and_duplicate_survive_restart () =
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   check_counts "restarted comment" 0 1;
-  (match Board_dispatch.current_vote_for_comment ~voter ~comment_id with
+  (match Board_dispatch.current_vote_for_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter ~comment_id with
    | Ok (Some Board.Down) -> ()
    | Ok (Some Board.Up) -> Alcotest.fail "restart restored the previous direction"
    | Ok None -> Alcotest.fail "restart lost the comment vote"
@@ -322,7 +322,7 @@ let test_restart_loads_only_current_vote_rows () =
     1
     (Hashtbl.length store.vote_log);
   match
-    Board_dispatch.current_vote_for_post
+    Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator
       ~voter:"current-voter"
       ~post_id
   with
@@ -354,12 +354,12 @@ let test_namespaced_voter_survives_snapshot_and_restart () =
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
-  (match Board_dispatch.current_vote_for_post ~voter ~post_id with
+  (match Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator ~voter ~post_id with
    | Ok (Some Board.Up) -> ()
    | Ok (Some Board.Down) -> Alcotest.fail "snapshot changed vote direction"
    | Ok None -> Alcotest.fail "snapshot lost namespaced voter"
    | Error error -> Alcotest.fail (Board.show_board_error error));
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Error error -> Alcotest.fail (Board.show_board_error error)
   | Ok loaded ->
     Alcotest.(check int) "ledger rebuilds post votes_up" 1 loaded.votes_up;
@@ -407,7 +407,7 @@ let test_restart_uses_last_vote_row_and_rebuilds_counts () =
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
   (match
-     Board_dispatch.current_vote_for_post
+     Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator
        ~voter:"flip-voter"
        ~post_id
    with
@@ -415,12 +415,12 @@ let test_restart_uses_last_vote_row_and_rebuilds_counts () =
    | Ok (Some Board.Up) -> Alcotest.fail "first row incorrectly won"
    | Ok None -> Alcotest.fail "last vote row was not loaded"
    | Error error -> Alcotest.fail (Board.show_board_error error));
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error error -> Alcotest.fail (Board.show_board_error error)
    | Ok loaded ->
      Alcotest.(check int) "post votes_up rebuilt from ledger" 0 loaded.votes_up;
      Alcotest.(check int) "post votes_down rebuilt from ledger" 1 loaded.votes_down);
-  match Board_dispatch.get_comments ~post_id with
+  match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Error error -> Alcotest.fail (Board.show_board_error error)
   | Ok [ loaded ] ->
     Alcotest.(check string)
@@ -454,7 +454,7 @@ let test_missing_ledger_resets_persisted_vote_counts () =
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Error error -> Alcotest.fail (Board.show_board_error error)
   | Ok loaded ->
     Alcotest.(check int) "missing ledger clears votes_up" 0 loaded.votes_up;
@@ -477,12 +477,12 @@ let test_vote_persistence_failure_leaves_nothing_committed () =
     "persist error counter incremented"
     true
     (Board.persist_error_count () > before_errors);
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok loaded ->
      Alcotest.(check int) "write-ahead: post keeps votes_up at 0" 0 loaded.votes_up;
      Alcotest.(check int) "write-ahead: post keeps votes_down at 0" 0 loaded.votes_down);
-  (match Board_dispatch.current_vote_for_post ~voter ~post_id with
+  (match Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator ~voter ~post_id with
    | Ok None -> ()
    | Ok (Some _) -> Alcotest.fail "a failed append must not leave a vote log entry"
    | Error e -> Alcotest.fail (Board.show_board_error e))
@@ -521,12 +521,12 @@ let test_vote_flip_persistence_failure_leaves_original_direction_committed () =
     "persist error counter incremented"
     true
     (Board.persist_error_count () > before_errors);
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok loaded ->
      Alcotest.(check int) "write-ahead: flip never applied, votes_up stays 1" 1 loaded.votes_up;
      Alcotest.(check int) "write-ahead: flip never applied, votes_down stays 0" 0 loaded.votes_down);
-  (match Board_dispatch.current_vote_for_post ~voter ~post_id with
+  (match Board_dispatch.current_vote_for_post ~reader:Masc_board_handlers.Board_access.Operator ~voter ~post_id with
    | Ok (Some Board.Up) -> ()
    | Ok (Some Board.Down) -> Alcotest.fail "a failed flip must not persist the new direction"
    | Ok None -> Alcotest.fail "a failed flip must not erase the original vote"
@@ -567,13 +567,13 @@ let test_vote_comment_persistence_failure_leaves_nothing_committed () =
     "persist error counter incremented"
     true
     (Board.persist_error_count () > before_errors);
-  (match Board_dispatch.get_comments ~post_id with
+  (match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok [ loaded ] ->
      Alcotest.(check int) "write-ahead: comment keeps votes_up at 0" 0 loaded.votes_up;
      Alcotest.(check int) "write-ahead: comment keeps votes_down at 0" 0 loaded.votes_down
    | Ok comments -> Alcotest.failf "expected one comment, got %d" (List.length comments));
-  (match Board_dispatch.current_vote_for_comment ~voter ~comment_id with
+  (match Board_dispatch.current_vote_for_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter ~comment_id with
    | Ok None -> ()
    | Ok (Some _) -> Alcotest.fail "a failed append must not leave a vote log entry"
    | Error e -> Alcotest.fail (Board.show_board_error e))
@@ -677,12 +677,12 @@ let test_flush_writes_only_changed_primary_table () =
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok p ->
        Alcotest.(check int) "post vote survives" 1 p.Board.votes_up;
        Alcotest.(check int) "both comments survive" 2 p.Board.reply_count);
-  (match Board_dispatch.get_comments ~post_id with
+  (match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok comments ->
        match List.find_opt (fun (c : Board.comment) ->
@@ -800,14 +800,14 @@ let test_unreadable_snapshots_reject_mutation_and_survive_flush () =
     (Board_dispatch.vote ~voter:"blocked-voter" ~post_id ~direction:Board.Up);
   expect_io_error
     "reaction"
-    (Board_dispatch.toggle_reaction
+    (Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator
        ~target_type:Board.Reaction_post
        ~target_id:post_id
        ~user_id:"blocked-reactor"
        ~emoji:"safe");
   expect_io_error
     "sub-board create"
-    (Board_dispatch.create_sub_board
+    (Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator
        ~slug:"blocked-sub-board"
        ~name:"Blocked"
        ~description:"must not replace the unreadable snapshot"
@@ -869,7 +869,7 @@ let test_snapshot_waiting_after_edit_keeps_edited_post
   Result.get_ok (Board_dispatch.init_jsonl
     ~base_path:(Env_config_core.base_path ())
     ~recipient_lookup:Recipient_lookup.none_declared ());
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Error error -> Alcotest.fail (Board.show_board_error error)
   | Ok loaded ->
     Alcotest.(check string)
@@ -897,10 +897,59 @@ let test_delete_waiting_after_edit_keeps_other_edited_post () =
       | Ok (Board.Deletion_persistence_pending detail) -> Alcotest.fail detail
       | Error error -> Alcotest.fail (Board.show_board_error error))
     ();
-  match Board_dispatch.get_post ~post_id:victim_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:victim_id with
   | Error (Board.Post_not_found _) -> ()
   | Error error -> Alcotest.fail (Board.show_board_error error)
   | Ok _ -> Alcotest.fail "deleted post returned after restart"
+
+
+let test_refused_posts_source_blocks_vote_and_reaction_effects () =
+  let post = create_post_exn ~author:"source-author" ~content:"source authority" in
+  let post_id = Board.Post_id.to_string post.id in
+  let comment = add_comment_exn ~post_id ~author:"comment-author" ~content:"comment" in
+  let comment_id = Board.Comment_id.to_string comment.id in
+  let store = Board.global () in
+  let posts = Board.persist_path store in
+  let held = posts ^ ".test-held" in
+  let signals = ref 0 in
+  let snapshot path =
+    if not (Sys.file_exists path) then None else
+      let ic = open_in_bin path in
+      Some (Fun.protect ~finally:(fun () -> close_in_noerr ic)
+        (fun () -> really_input_string ic (in_channel_length ic))) in
+  let before_votes = snapshot (Board.vote_log_path store) in
+  let before_reactions = snapshot (Board.reactions_path store) in
+  Board_dispatch.set_board_signal_hook (fun _ -> incr signals);
+  Fun.protect ~finally:(fun () ->
+    Board_dispatch.set_board_signal_hook (fun _ -> ());
+    if Sys.file_exists held then Unix.rename held posts)
+  @@ fun () ->
+  Unix.rename posts held;
+  (match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
+   | Error _ -> () | Ok _ -> Alcotest.fail "missing primary was admitted");
+  expect_io_error "post vote" (Board_dispatch.vote ~voter:"blocked-voter" ~post_id ~direction:Board.Up);
+  expect_io_error "comment vote" (Board_dispatch.vote_comment ~voter:"blocked-voter" ~comment_id ~direction:Board.Up);
+  List.iter (fun (target_type,target_id) ->
+    expect_io_error "reaction" (Board_dispatch.toggle_reaction
+      ~reader:Masc_board_handlers.Board_access.Operator ~target_type ~target_id
+      ~user_id:"blocked-reactor" ~emoji:"safe"))
+    [Board.Reaction_post,post_id; Board.Reaction_comment,comment_id];
+  Alcotest.(check int) "no signal follows a refused write" 0 !signals;
+  Alcotest.(check int) "in-memory votes unchanged" 0 (Hashtbl.length store.vote_log);
+  Alcotest.(check bool) "vote ledger bytes unchanged" true
+    (before_votes = snapshot (Board.vote_log_path store));
+  Alcotest.(check bool) "reaction ledger bytes unchanged" true
+    (before_reactions = snapshot (Board.reactions_path store));
+  Unix.rename held posts;
+  (match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
+   | Ok _ -> () | Error (_,error) -> Alcotest.fail (Printexc.to_string error));
+  ignore (Result.get_ok (Board_dispatch.vote ~voter:"blocked-voter" ~post_id ~direction:Board.Up));
+  ignore (Result.get_ok (Board_dispatch.vote_comment ~voter:"blocked-voter" ~comment_id ~direction:Board.Up));
+  ignore (Result.get_ok (Board_dispatch.toggle_reaction
+    ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
+    ~target_id:post_id ~user_id:"blocked-reactor" ~emoji:"safe"));
+  Alcotest.(check int) "same operations work after source recovery" 3 !signals
+;;
 
 let () =
   Alcotest.run "board_vote_persistence"
@@ -926,6 +975,8 @@ let () =
         ] );
       ( "durability",
         [
+          Alcotest.test_case "refused posts block vote and reaction effects" `Quick
+            (with_eio test_refused_posts_source_blocks_vote_and_reaction_effects);
           Alcotest.test_case
             "flush queued after an edit preserves it across restart"
             `Quick

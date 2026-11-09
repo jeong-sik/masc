@@ -116,6 +116,48 @@ let test_dirty_timeout_wakes_at_deadline () =
   check (float 0.000_001) "deadline caps the select wait" 0.006
     (Schedule.input_timeout_seconds schedule ~now_ns:(ms 10) ~maximum:0.1)
 
+let test_overrun_leaves_a_window_to_consume_pending_input () =
+  let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
+  check_render "begin slow frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
+  Schedule.completed schedule ~now_ns:(ms 64);
+  Schedule.request schedule Schedule.Input;
+  (match Schedule.take ~input_pending:true schedule ~now_ns:(ms 65) with
+   | Schedule.Wait_until due -> check int64 "pace from completion" (ms 80) due
+   | Schedule.Render -> fail "another slow frame displaced queued input"
+   | Schedule.Idle -> fail "pending input was lost");
+  check (float 0.0) "queued input can be read immediately" 0.0
+    (Schedule.input_timeout_seconds schedule ~now_ns:(ms 65) ~maximum:0.1);
+  check_render "the last input does not wait for the new deadline"
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 66))
+
+let test_completion_keeps_requests_and_force_preempts_it () =
+  let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
+  check_render "begin frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
+  Schedule.request schedule Schedule.Input;
+  Schedule.completed schedule ~now_ns:(ms 64);
+  (match Schedule.take ~input_pending:true schedule ~now_ns:(ms 65) with
+   | Schedule.Wait_until due -> check int64 "request survived completion" (ms 80) due
+   | Schedule.Render -> fail "queued input ignored completion"
+   | Schedule.Idle -> fail "completion discarded a request raised during presentation");
+  Schedule.request schedule Schedule.Force;
+  check_render "force remains immediate with queued input"
+    (Schedule.take ~input_pending:true schedule ~now_ns:(ms 66))
+
+let test_completion_preserves_background_and_deferred_pacing () =
+  let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
+  check_render "begin slow frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
+  Schedule.completed schedule ~now_ns:(ms 64);
+  Schedule.request schedule Schedule.Background;
+  check_render "background keeps the original start deadline"
+    (Schedule.take ~input_pending:false schedule ~now_ns:(ms 65));
+  (* The caller deferred this frame before Build: its start is the fallback,
+     and completion of the preceding frame cannot make it immediately due. *)
+  Schedule.request schedule Schedule.Input;
+  (match Schedule.take ~input_pending:true schedule ~now_ns:(ms 66) with
+   | Schedule.Wait_until due -> check int64 "deferred frame fallback" (ms 81) due
+   | Schedule.Render -> fail "deferred frame reused an old completion deadline"
+   | Schedule.Idle -> fail "deferred frame lost pending input")
+
 let test_input_preempts_pending_background_frame () =
   let schedule = Schedule.create ~min_interval_ns:(ms 16) () in
   check_render "initial frame" (Schedule.take ~input_pending:false schedule ~now_ns:0L);
@@ -337,6 +379,12 @@ let () =
             test_separate_repeated_inputs_render_when_drained
         ; test_case "continuous input is paced and final input is immediate" `Quick
             test_continuous_input_is_paced_and_final_input_is_immediate
+        ; test_case "overrun leaves a window to consume queued input" `Quick
+            test_overrun_leaves_a_window_to_consume_pending_input
+        ; test_case "completion preserves pending work and force" `Quick
+            test_completion_keeps_requests_and_force_preempts_it
+        ; test_case "completion preserves background and deferred pacing" `Quick
+            test_completion_preserves_background_and_deferred_pacing
         ; test_case "buffered input paints when drained" `Quick
             test_buffered_input_renders_when_drained
         ; test_case "dirty input wait uses the frame deadline" `Quick

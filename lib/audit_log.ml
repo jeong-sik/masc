@@ -57,8 +57,6 @@ type audit_entry = {
   action: action;
   details: Yojson.Safe.t;
   outcome: outcome;
-  cost_estimate: float option;
-  token_count: int option;
   trace_id: string option;
 }
 
@@ -168,17 +166,9 @@ let entry_to_json (e : audit_entry) : Yojson.Safe.t =
     ("details", e.details);
     ("outcome", outcome_to_json e.outcome);
   ] in
-  let with_cost = match e.cost_estimate with
-    | Some c -> base @ [("cost_estimate", `Float c)]
-    | None -> base
-  in
-  let with_tokens = match e.token_count with
-    | Some t -> with_cost @ [("token_count", `Int t)]
-    | None -> with_cost
-  in
   let with_trace = match e.trace_id with
-    | Some tid -> with_tokens @ [("trace_id", `String tid)]
-    | None -> with_tokens
+    | Some tid -> base @ [("trace_id", `String tid)]
+    | None -> base
   in
   `Assoc with_trace
 
@@ -205,13 +195,11 @@ let entry_of_json_r (json : Yojson.Safe.t) : (audit_entry, string) result =
            Failure reason)
       | None -> Failure "missing outcome"
     in
-    let cost_estimate = Safe_ops.json_float_opt "cost_estimate" json in
-    let token_count = Safe_ops.json_int_opt "token_count" json in
     let trace_id = Safe_ops.json_string_opt "trace_id" json in
     match timestamp, agent_id, action_raw with
     | Some timestamp, Some agent_id, Some action_raw ->
       let action = string_to_action action_raw in
-      Ok { timestamp; agent_id; action; details; outcome; cost_estimate; token_count; trace_id }
+      Ok { timestamp; agent_id; action; details; outcome; trace_id }
     | _ -> Error "missing required fields (timestamp, agent_id, action)"
   with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
     (* Redact details field to prevent sensitive content leaking into logs *)
@@ -631,8 +619,6 @@ let log_action
     ~agent_id
     ~action
     ?(details : Yojson.Safe.t = `Null)
-    ?(cost_estimate : float option)
-    ?(token_count : int option)
     ?(trace_id : string option)
     ~outcome
     () =
@@ -642,8 +628,6 @@ let log_action
     action;
     details;
     outcome;
-    cost_estimate;
-    token_count;
     trace_id;
   } in
   append_entry config entry;
@@ -660,25 +644,25 @@ let log_action
 
 (** Convenience functions for common events *)
 
-let log_broadcast config ~agent_id ~message_preview ?cost_estimate ?token_count () =
+let log_broadcast config ~agent_id ~message_preview () =
   (* Truncate message for privacy/size *)
   let preview = preview ~max_len:100 message_preview in
   log_action config ~agent_id ~action:Broadcast
     ~details:(`Assoc [("preview", `String preview)])
-    ?cost_estimate ?token_count ~outcome:Success ()
+    ~outcome:Success ()
 
 let outcome_of ~success ~error_msg =
   if success then Success else Failure (Option.value error_msg ~default:"unknown")
 
-let log_tool_call config ~agent_id ~tool_name ~success ~error_msg ?cost_estimate ?token_count ?trace_id () =
-  log_action config ~agent_id ~action:(ToolCall tool_name) ?cost_estimate ?token_count ?trace_id
+let log_tool_call config ~agent_id ~tool_name ~success ~error_msg ?trace_id () =
+  log_action config ~agent_id ~action:(ToolCall tool_name) ?trace_id
     ~outcome:(outcome_of ~success ~error_msg) ()
 
 let remove_assoc_keys keys fields =
   List.filter (fun (key, _) -> not (List.mem key keys)) fields
 
 let log_non_public_tool_call config ~agent_id ~tool_name ~success ~error_msg
-    ?(details : Yojson.Safe.t = `Null) ?cost_estimate ?token_count ?trace_id () =
+    ?(details : Yojson.Safe.t = `Null) ?trace_id () =
   let outcome = outcome_of ~success ~error_msg in
   let details =
     match details with
@@ -697,7 +681,7 @@ let log_non_public_tool_call config ~agent_id ~tool_name ~success ~error_msg
           ]
   in
   log_action config ~agent_id ~action:(Custom "non_public_tool_call")
-    ~details ?cost_estimate ?token_count ?trace_id ~outcome ()
+    ~details ?trace_id ~outcome ()
 
 let log_client_tool_host_failure config ~agent_id ~reported_agent ~client_name ~tool_name
     ~transport ~message ?phase ?request_id ?session_id ?trace_id ?timeout_ms () =

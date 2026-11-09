@@ -307,7 +307,7 @@ let test_read_source_ownership_and_no_adoption () = with_fixture (fun config _ _
    | Error _ -> ()
    | Ok _ -> fail "create_post accepted mismatched author vs fusion_producer");
   check bool "mismatched origin did not index or persist run-mismatch" true
-    (Option.is_none (Board_dispatch.find_post_by_run_id ~run_id:"run-mismatch"));
+    (Option.is_none (Board_dispatch.find_post_by_run_id ~reader:Masc_board_handlers.Board_access.Operator ~run_id:"run-mismatch"));
   let _still_owned =
     Fusion_decision.source ~keeper:"fusion-keeper" ~run_id:"run-advice"
     |> require "original fusion_producer retains ownership after author transfer"

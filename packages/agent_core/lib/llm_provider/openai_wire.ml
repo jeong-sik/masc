@@ -60,27 +60,6 @@ type openai_sse_parse_result =
       ; raw : string
       }
 
-(* Agent Core contract: TTFT classification for OpenAI-compat / Gemini /
-   Ollama chunk streams. [true] when this chunk would surface a
-   visible token (or tool-call argument) to the application;
-   [false] for role-prelude chunks, [DONE]-only finalisers, and
-   empty deltas. *)
-let chunk_has_non_empty_delta (c : openai_chunk) : bool =
-  let non_empty_opt = function
-    | Some s -> String.length s > 0
-    | None -> false
-  in
-  let non_empty_reasoning_details = function
-    | Some { delta_reasoning_content; delta_details } ->
-      non_empty_opt delta_reasoning_content || delta_details <> []
-    | None -> false
-  in
-  non_empty_opt c.delta_content
-  || non_empty_opt c.delta_reasoning
-  || non_empty_reasoning_details c.delta_reasoning_details
-  || c.delta_tool_calls <> []
-;;
-
 (* OpenAI-compatible / GLM / Kimi streams terminate with this
    literal SSE payload (the bare token after [data: ]), not a JSON object. SSOT
    for the sentinel shared by the chunk parser and the Responses reader in

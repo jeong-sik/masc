@@ -154,6 +154,61 @@ let refresh_tools_projection ~now ~ttl ~cache ~config compute =
         | None -> raise exn))
 ;;
 
+type activity_events_entry =
+  { refreshed_at : float
+  ; value : Yojson.Safe.t
+  ; base_path : string
+  ; workspace_path : string
+  ; public_parents : Board_activity_access.proof
+  }
+
+type activity_events_cache = activity_events_entry option Atomic.t
+
+let make_activity_events_cache () : activity_events_cache = Atomic.make None
+
+let refresh_activity_events ~(config : Workspace.config) ~now ~ttl
+    ~(cache : activity_events_cache) compute =
+  let started_at = now () in
+  let still_public entry =
+    String.equal entry.base_path config.base_path
+    && String.equal entry.workspace_path config.workspace_path
+    && Board_activity_access.is_current entry.public_parents
+  in
+  match Atomic.get cache with
+  | Some entry
+    when should_reuse_projection
+           ~now:started_at
+           ~ttl
+           ~refreshed_at:entry.refreshed_at
+         && still_public entry ->
+    entry.value
+  | previous ->
+    let reader = Board_activity_access.create () in
+    (match compute ~keep:(Board_activity_access.keep reader) with
+     | value ->
+       Atomic.set cache (Some
+         { refreshed_at = now (); value; base_path = config.base_path
+         ; workspace_path = config.workspace_path
+         ; public_parents = Board_activity_access.proof reader });
+       value
+     | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+     | exception exn ->
+       (match previous with
+        | Some entry when still_public entry -> entry.value
+        | Some _ -> raise exn
+        | None -> raise exn))
+;;
+
+let public_activity_cache = make_activity_events_cache ()
+let public_activity_mutex = Cross_context_mutex.create ()
+
+let public_activity_events config =
+  Cross_context_mutex.with_lock public_activity_mutex (fun () ->
+    refresh_activity_events ~config ~now:Unix.gettimeofday ~ttl:10.0
+      ~cache:public_activity_cache (fun ~keep ->
+        Activity_graph.recent_json_response config ~raw_limit:1000 ~keep ()))
+;;
+
 let dashboard_shell_payload_json_ref :
   (?light:bool -> Workspace.config -> Yojson.Safe.t) ref =
   ref (fun ?light:_ _config -> `Null)
@@ -194,7 +249,6 @@ let refresh_loop
   let tools_cache = make_tools_cache () in
   let telemetry_cache = make_projection_cache () in
   let namespace_truth_cache = make_projection_cache () in
-  let activity_events_cache = make_projection_cache () in
   let cached_projection ~ttl ~cache label f =
     (* NDT-OK: wall time only gates cache freshness; it is not durable output. *)
     refresh_projection ~now:Unix.gettimeofday ~ttl ~cache (fun () ->
@@ -273,11 +327,8 @@ let refresh_loop
              | None -> `Null))
     in
     let activity_events_default =
-      (* RFC-0201 Step 1: the default-shaped events query (no kinds, no
-         cursor, newest 1000). *)
-      cached_projection ~ttl:10.0 ~cache:activity_events_cache
-        "activity_events_default" (fun () ->
-        Activity_graph.json_response config ~after_seq:0 ~limit:1000 ())
+      (* HTTP and the refresh fiber share the same parent-validated window. *)
+      public_activity_events config
     in
     {
       generated_at = Unix.gettimeofday ();
@@ -338,10 +389,13 @@ let reset_for_test () = Atomic.set slot None
 module For_testing = struct
   type cache = Yojson.Safe.t projection_cache
   type nonrec tools_cache = tools_cache
+  type activity_cache = activity_events_cache
 
   let make_cache = make_projection_cache
   let refresh_projection = refresh_projection
   let make_tools_cache = make_tools_cache
   let refresh_tools = refresh_tools_projection
+  let make_activity_cache = make_activity_events_cache
+  let refresh_activity_events = refresh_activity_events
   let should_reuse_projection = should_reuse_projection
 end

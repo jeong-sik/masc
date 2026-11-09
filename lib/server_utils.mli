@@ -126,20 +126,25 @@ val board_voter_query : Httpun.Request.t -> string option
     absent or blank. *)
 
 val board_current_vote_for_post :
+  reader:Masc_board_handlers.Board_access.reader ->
   voter:string option -> post_id:string -> Board.vote_direction option option
 (** [None] means no voter was supplied; [Some None] means a voter was
     supplied but has not voted on this post. *)
 
 val board_current_vote_for_comment :
+  reader:Masc_board_handlers.Board_access.reader ->
   voter:string option -> comment_id:string -> Board.vote_direction option option
 
 val board_reactions_for_post :
+  reader:Masc_board_handlers.Board_access.reader ->
   voter:string option -> post_id:string -> Board.reaction_summary list
 
 val board_reactions_for_comment :
+  reader:Masc_board_handlers.Board_access.reader ->
   voter:string option -> comment_id:string -> Board.reaction_summary list
 
 val board_reactions_batch :
+  reader:Masc_board_handlers.Board_access.reader ->
   targets:(Board.reaction_target_type * string) list ->
   voter:string option ->
   ((Board.reaction_target_type * string) * Board.reaction_summary list) list

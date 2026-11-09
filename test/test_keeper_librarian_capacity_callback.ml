@@ -819,7 +819,7 @@ let test_durable_runtime_returns_refusal_reports ~base_path () =
     | Error error -> Alcotest.fail (Keeper_librarian_durable_consumer.error_to_string error) in
   (match consume (fun _ -> Alcotest.fail "baseline dispatched a provider") with
    | Keeper_librarian_durable_consumer.Baseline_advanced _ -> ()
-   | Nothing_to_read | Pending | Memory_not_committed _ | Progress_advanced _ | Official_advanced _ ->
+   | Nothing_to_read | Pending _ | Memory_not_committed _ | Progress_advanced _ | Official_advanced _ ->
      Alcotest.fail "the durable refusal fixture did not establish its baseline");
   let result = ref None in
   ignore (consume (fun original ->

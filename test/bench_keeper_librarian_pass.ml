@@ -157,7 +157,7 @@ let await_delivery fixture ~after=Eio.Time.with_timeout_exn fixture.clock bench_
     if !(fixture.deliveries)>after then Some () else None))
 let advanced = function
   | Ok (Consumer.Progress_advanced _ | Official_advanced _) -> true
-  | Ok (Nothing_to_read | Baseline_advanced _ | Memory_not_committed _ | Pending) -> false
+  | Ok (Nothing_to_read | Baseline_advanced _ | Memory_not_committed _ | Pending _) -> false
   | Error error -> fail (Consumer.error_to_string error)
 let drive_advanced fixture =
   let before= !(fixture.deliveries) in

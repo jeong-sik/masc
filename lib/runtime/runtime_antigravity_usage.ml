@@ -124,9 +124,9 @@ let environment ~home_dir ~runtime_root =
   |> Array.of_list
 ;;
 
-let read_in ~cli_path ~oauth_source runtime_root =
+let read_in ~host ~cli_path ~oauth_source runtime_root =
   let* home =
-    Runtime_antigravity_home.prepare ~runtime_root ~owner_leaf:"usage-read" ~oauth_source
+    Runtime_antigravity_home.prepare ~host ~runtime_root ~owner_leaf:"usage-read" ~oauth_source
     |> Result.map_error (fun (_ : Runtime_antigravity_home.error) -> Private_home_unavailable)
   in
   let* () =
@@ -170,12 +170,12 @@ let remove_root runtime_root =
       (Printexc.to_string exn)
 ;;
 
-let read ~cli_path ~oauth_source =
+let read ~host ~cli_path ~oauth_source =
   match Filename.temp_dir "masc-antigravity-usage-" "" |> Unix.realpath with
   | exception (Sys_error _ | Unix.Unix_error _) -> Error Private_home_unavailable
   | runtime_root ->
     let run () =
-      try read_in ~cli_path ~oauth_source runtime_root with
+      try read_in ~host ~cli_path ~oauth_source runtime_root with
       | Sys_error _ | Unix.Unix_error _ -> Error Private_home_unavailable
     in
     (match Eio_context.get_switch_opt () with

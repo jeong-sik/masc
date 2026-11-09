@@ -157,9 +157,10 @@ let parse_transport ~model ~cli_version (status, body, stderr) =
     Error (command_failed ~phase:Status_transport ~status:(Some status) ~stderr)
 ;;
 
-let measure ~python_path ~cli_path ~timeout_s ~oauth_source ~model runtime_root =
+let measure ~host ~python_path ~cli_path ~timeout_s ~oauth_source ~model runtime_root =
   let* home =
     Runtime_antigravity_home.prepare
+      ~host
       ~runtime_root
       ~owner_leaf:"context-observation"
       ~oauth_source
@@ -266,7 +267,7 @@ let executable_path command =
   | None -> Error (command_failed ~phase:(Executable_lookup command) ~status:None ~stderr:"")
 ;;
 
-let observe ~python_path ~cli_path ~timeout_s ~oauth_source ~model =
+let observe ~host ~python_path ~cli_path ~timeout_s ~oauth_source ~model =
   if (not (Float.is_finite timeout_s)) || timeout_s <= 0.
   then
     Error
@@ -280,7 +281,7 @@ let observe ~python_path ~cli_path ~timeout_s ~oauth_source ~model =
         Filename.temp_dir "masc-antigravity-context-" "" |> Unix.realpath
       in
       let run () =
-        measure ~python_path ~cli_path ~timeout_s ~oauth_source ~model runtime_root
+        measure ~host ~python_path ~cli_path ~timeout_s ~oauth_source ~model runtime_root
       in
       match Eio_context.get_switch_opt () with
       | None -> Fun.protect ~finally:(fun () -> Fs_compat.remove_tree runtime_root) run

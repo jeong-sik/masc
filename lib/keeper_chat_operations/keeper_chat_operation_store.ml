@@ -77,6 +77,11 @@ type durable_snapshot =
       ; input_checkpoints : Keeper_checkpoint_ref.t list
       ; input_history : input_history
       }
+
+type native_history =
+  { execution_operation_id : Operation.Operation_id.t
+  ; calls : Keeper_native_call.history_ref list
+  }
 let database_schema = "masc.keeper_chat_operations.v3"
 let database_application_id = 0x4d4b4f50L
 let database_user_version = 3L
@@ -748,6 +753,36 @@ let validate_schema db =
   Ok ()
 ;;
 
+let decode_semantic stmt =
+  let identity = "semantic execution " ^ Sqlite3.column_text stmt 0 in
+  let* json = json_of_stored identity (Sqlite3.column_text stmt 3) in
+  let* execution = Semantic.of_json json
+    |> Result.map_error (fun error ->
+      Integrity_error (identity ^ ": " ^ Semantic.error_to_string error)) in
+  if scope_key execution.id <> Sqlite3.column_text stmt 0
+     || execution.revision <> Sqlite3.column_int64 stmt 1
+     || Semantic.phase_name execution.phase <> Sqlite3.column_text stmt 2 then
+    Error (Integrity_error (identity ^ ": index and record disagree"))
+  else Ok execution
+;;
+
+let validate_saved_state db =
+  let* () = validate_schema db in
+  let operation = "validate saved semantic executions" in
+  with_statement db ~operation
+    "SELECT scope_key, revision, phase, record_json FROM semantic_executions ORDER BY scope_key"
+    (fun stmt ->
+      let rec loop () =
+        let rc = Sqlite3.step stmt in
+        if rc = Sqlite3.Rc.DONE then Ok ()
+        else if rc = Sqlite3.Rc.ROW then
+          let* _execution = decode_semantic stmt in
+          loop ()
+        else Error (Store_unavailable (sqlite_error db operation rc))
+      in
+      loop ())
+;;
+
 let configure db =
   (* Boot opens several stores at once; a sibling writer holding the lock for
      a moment must be waited out. Without this, the first concurrent commit
@@ -783,7 +818,7 @@ let validate_open_candidate db =
     let* version = single_int64 db ~operation:"inspect empty schema version" "PRAGMA user_version" in
     if application_id = 0L && version = 0L then Ok ()
     else Error (Integrity_error "empty database has a foreign or damaged identity")
-  else validate_schema db
+  else validate_saved_state db
 ;;
 
 let open_or_create ~path =
@@ -821,7 +856,7 @@ let open_existing ~path =
   | exception Sqlite3.Error detail -> Error (Store_unavailable detail)
   | db ->
     let result =
-      let* () = validate_schema db in
+      let* () = validate_saved_state db in
       let* () = configure db in
       Ok { db; path; closed = Atomic.make false; dropped = Atomic.make []; released = Atomic.make [] }
     in
@@ -847,17 +882,6 @@ let close store =
     then Ok ()
     else Error (Store_unavailable "failed to close SQLite database")
   else Ok ()
-;;
-
-let decode_semantic stmt =
-  let* json = json_of_stored "semantic execution" (Sqlite3.column_text stmt 3) in
-  let* execution = Semantic.of_json json
-    |> Result.map_error (fun error -> Integrity_error (Semantic.error_to_string error)) in
-  if scope_key execution.id <> Sqlite3.column_text stmt 0
-     || execution.revision <> Sqlite3.column_int64 stmt 1
-     || Semantic.phase_name execution.phase <> Sqlite3.column_text stmt 2 then
-    Error (Integrity_error "semantic execution index and record disagree")
-  else Ok execution
 ;;
 
 let semantic_get_with_db db id =
@@ -1149,6 +1173,36 @@ let read_batch_member_inputs db =
       in read [])
 ;;
 
+let inspect_file ~path inspect =
+  let inspect_existing () =
+    match Sqlite3.db_open ~mode:`READONLY path with
+    | exception Sqlite3.Error detail -> Error (Store_unavailable detail)
+    | db ->
+      let result =
+        try inspect db with
+        | Sqlite3.Error detail -> Error (Store_unavailable detail)
+      in
+      if close_db db then result
+      else Error (Store_unavailable "failed to close read-only operation store")
+  in
+  match Unix.lstat path with
+  | { Unix.st_kind = Unix.S_REG; _ } -> inspect_existing ()
+  | { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _ } ->
+    Error (Integrity_error "operation store path is not a regular file")
+  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
+    (* A journal without its database is damaged evidence, not an empty queue. *)
+    let rec absent_companions = function
+      | [] -> Ok None
+      | suffix :: rest ->
+        (match Unix.lstat (path ^ suffix) with
+         | _ -> Error (Integrity_error "operation journal exists without its database")
+         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> absent_companions rest
+         | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error)))
+    in absent_companions
+      [ Common.sqlite_journal_suffix; Common.sqlite_wal_suffix; Common.sqlite_shm_suffix ]
+  | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error))
+;;
+
 let inspect_store_with ~scope ~path =
   let inspect db =
     let* () = exec db ~operation:"begin read-only inspection" "BEGIN" in
@@ -1193,33 +1247,7 @@ let inspect_store_with ~scope ~path =
     let* () = exec db ~operation:"end read-only inspection" "COMMIT" in
     Ok (Some (chat_operations, batch_member_inputs, semantic_executions, input_checkpoints, input_history))
   in
-  let inspect_existing () =
-    match Sqlite3.db_open ~mode:`READONLY path with
-    | exception Sqlite3.Error detail -> Error (Store_unavailable detail)
-    | db ->
-      let result =
-        try inspect db with
-        | Sqlite3.Error detail -> Error (Store_unavailable detail)
-      in
-      if close_db db then result
-      else Error (Store_unavailable "failed to close read-only operation store")
-  in
-  match Unix.lstat path with
-  | { Unix.st_kind = Unix.S_REG; _ } -> inspect_existing ()
-  | { Unix.st_kind = (Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK); _ } ->
-    Error (Integrity_error "operation store path is not a regular file")
-  | exception Unix.Unix_error (Unix.ENOENT, _, _) ->
-    (* A journal without its database is damaged evidence, not an empty queue. *)
-    let rec absent_companions = function
-      | [] -> Ok None
-      | suffix :: rest ->
-        (match Unix.lstat (path ^ suffix) with
-         | _ -> Error (Integrity_error "operation journal exists without its database")
-         | exception Unix.Unix_error (Unix.ENOENT, _, _) -> absent_companions rest
-         | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error)))
-    in absent_companions
-      [ Common.sqlite_journal_suffix; Common.sqlite_wal_suffix; Common.sqlite_shm_suffix ]
-  | exception Unix.Unix_error (error, _, _) -> Error (Store_unavailable (Unix.error_message error))
+  inspect_file ~path inspect
 ;;
 
 let inspect_outstanding ~path =
@@ -2263,6 +2291,8 @@ let direct_execution_with_db db (operation : Operation.t) =
   match execution with
   | None -> Ok None
   | Some execution ->
+    let* () = if String.equal execution.Semantic.input_sha256 operation.execution_digest
+      then Ok () else Error (Integrity_error "direct continuation operation digest changed") in
     let* () = match operation.input, execution.Semantic.input with
       | Some input, Some saved when String.equal execution.input_sha256 operation.execution_digest ->
         let* input = canonical_json "operation continuation input" input in
@@ -2273,6 +2303,22 @@ let direct_execution_with_db db (operation : Operation.t) =
       | _ -> Error (Integrity_error "direct continuation input binding is not current") in
     Ok (Some execution)
 ;;
+
+let inspect_native_history ~path ~operation_id =
+  inspect_file ~path (fun db ->
+    let* () = exec db ~operation:"begin native history inspection" "BEGIN" in
+    let* () = validate_schema db in
+    let* requested = operation_or_unknown db operation_id in
+    let* operation = match requested.batch_membership with
+      | Some member when not (Id.equal member.execution_id operation_id) ->
+        operation_or_unknown db member.execution_id
+      | Some _ | None -> Ok requested in
+    let* execution = direct_execution_with_db db operation in
+    let calls = match execution with
+      | None -> []
+      | Some execution -> execution.Semantic.native_calls in
+    let* () = exec db ~operation:"end native history inspection" "COMMIT" in
+    Ok (Some {execution_operation_id=operation.operation_id; calls}))
 
 let pending_retry = function
   | Some { Semantic.phase = Semantic.Recovering { origin = Semantic.Runtime_retry continuation; _ }; _ } -> Some continuation

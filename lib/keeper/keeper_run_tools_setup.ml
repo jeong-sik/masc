@@ -566,6 +566,9 @@ let prepare_agent_setup
       ?composition_plan_index
       ~skill_activation_context
       ~composition_result_delivery
+      ~on_inline_receipt_committed:
+        (Keeper_run_tools_hook_accumulator.record_inline_receipt_committed
+           acc ~keeper_turn_id)
       ~turn_ctx_cell
       ~checkpoint_owner:(fun () -> !active_checkpoint_owner)
       ~tool_result_inline_ceiling_bytes:(fun () -> !active_tool_result_inline_ceiling_bytes)

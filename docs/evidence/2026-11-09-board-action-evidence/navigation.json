@@ -1,0 +1,21 @@
+{
+  "hash": "#workspace?section=board&post=p-fixture&comment=c-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/fixture-reviewer/tool-calls?execution_ids=%5B%22fixture-comment%22%2C%22fixture-reaction-remove%22%2C%22fixture-reaction-add%22%5D",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/keepers/fixture-reviewer/runtime-trace?trace_id=fixture-trace&turn_id=7&limit=500",
+      "status": 200
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/dashboard/skill-activations/physical-turn?turn_ref=fixture-trace%237",
+      "status": 200
+    }
+  ],
+  "failures": []
+}

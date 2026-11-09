@@ -250,6 +250,59 @@ let owned_plain_message_is_not_reparsed () =
   let _, other = Command.parse_with_message_source "/task title\n[paste]" in
   check bool "another command exposes no message-data projection" true (Option.is_none other)
 
+(* These are saved draft bytes and edit ownership, not terminal rows. Cache
+   reuse must survive tail edits and be retired when segmentation can change. *)
+let retained_boundaries_follow_replacement_text () =
+  let draft = Input.create () in
+  Input.insert draft "앞é🙂x";
+  Input.move_left draft;
+  Input.move_right draft;
+  Input.backspace draft;
+  Input.backspace draft;
+  Input.insert draft "👩‍💻";
+  Input.backspace draft;
+  Input.backspace draft;
+  check string "tail edits retain the complete earlier Korean scalar" "앞"
+    (Input.snapshot_text (Input.snapshot draft));
+  Input.clear draft;
+  Input.insert draft "éX\255";
+  Input.move_left draft;
+  Input.move_right draft;
+  Input.backspace draft;
+  Input.backspace draft;
+  Input.backspace draft;
+  check string "removing invalid UTF8 resegments the newly valid prefix" ""
+    (Input.snapshot_text (Input.snapshot draft));
+  Input.append draft "\xc3";
+  Input.move_left draft;
+  Input.append draft "\xa9";
+  Input.backspace draft;
+  check string "completing UTF8 replaces an earlier invalid-byte index" ""
+    (Input.snapshot_text (Input.snapshot draft))
+
+let middle_edits_resegment_the_whole_replacement () =
+  let draft = Input.create () in
+  Input.insert draft "🇦🇧🇨🇩🇪🇫";
+  Input.move_left draft;
+  Input.move_left draft;
+  Input.insert draft "🇬";
+  Input.backspace draft;
+  check string "a middle RI changes the following pairs before deletion"
+    "🇦🇧🇩🇪🇫" (Input.snapshot_text (Input.snapshot draft));
+  Input.clear draft;
+  let owner = Input.insert_owned draft "👩" in
+  Input.insert draft "💻";
+  Input.move_left draft;
+  Input.insert draft "‍";
+  let revision = Input.revision draft in
+  Input.backspace draft;
+  check string "joining across a middle insertion deletes the whole new cluster" ""
+    (Input.snapshot_text (Input.snapshot draft));
+  check bool "deletion invalidates the submitted edit revision" false
+    (Input.has_revision draft revision);
+  check bool "joined deletion retires its overlapped source owner" true
+    (Option.is_none (current_owned_view draft owner))
+
 let () = run "Chat composer cursor"
   [ "editing", [ test_case "empty Left boundary" `Quick empty_boundary;
                   test_case "Unicode insertion and erasure" `Quick unicode_editing;
@@ -260,6 +313,8 @@ let () = run "Chat composer cursor"
                   test_case "grapheme boundaries can change on insertion" `Quick boundary_changes_across_insertions;
                   test_case "cursor works after appended text" `Quick cursor_after_appended_text;
                   test_case "separated append retains exact bytes" `Quick separated_append_keeps_exact_bytes;
+                  test_case "retained boundaries follow replacement text" `Quick retained_boundaries_follow_replacement_text;
+                  test_case "middle edits resegment the replacement" `Quick middle_edits_resegment_the_whole_replacement;
                   test_case "owned extent ignores identical literals" `Quick owned_literal_provenance;
                   test_case "edited owner never revives" `Quick retired_owned_bytes_do_not_revive;
                   test_case "deleting owner leaves literal copies" `Quick deleted_owner_keeps_other_literal;

@@ -74,6 +74,13 @@ val handle_keeper_run_next :
 (** Prioritize the authenticated caller's exact queued operation, then signal
     only the observed current turn. Existing inputs and other queue order stay intact. *)
 
+val handle_keeper_memory_catch_up :
+  actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
+(** [POST /api/v1/keepers/memory-catch-up], admin only. Validates the expected
+    workspace and persisted Keeper, then schedules its existing serialized
+    Librarian path. The receipt never authorizes replay of an unknown dispatch
+    or reports its Memory as caught up. Paused Keepers can use this path. *)
+
 val handle_keeper_turn_interrupt :
   actor:string -> Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> unit
 (** Drives [POST /api/v1/keepers/turn/interrupt].

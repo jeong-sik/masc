@@ -259,11 +259,6 @@ type wake_reason =
           — collapsing the two would report an operator's message as autonomous
           activity. *)
 
-val wake_reason_label : wake_reason -> string
-(** Stable low-cardinality label: ["proactive_tick"], ["woken"], or
-    ["chat_request"]. Use {!Keeper_event_queue.payload_kind_label} on the
-    carried stimuli (for [Woken]) to surface the finer-grained wake cause. *)
-
 type turn_measurement = {
   tm_captured_at : float;
   tm_context_actions : Keeper_state_machine.context_actions;

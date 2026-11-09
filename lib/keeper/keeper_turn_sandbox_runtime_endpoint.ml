@@ -35,11 +35,10 @@ let apple_endpoint_of_snapshot_owned ~fs ~scope
   match snapshot with
   | None -> Error "microvm host credential snapshot is missing"
   | Some snapshot ->
-    (* A guest that was read is reached the way it was booted; a snapshot
-       alone has only the keeper TOML's choice to go by. *)
-    let* delivery = match observation with
-      | Apple_snapshot_only ->
-        microvm_delivery_for ~base_path:config.base_path ~keeper_name:meta.name
+    (* Every Apple guest is reached through its agent. A guest that was read
+       must publish the agent's socket; a snapshot alone reads no guest. *)
+    let* () = match observation with
+      | Apple_snapshot_only -> Ok ()
       | Apple_running_guest {timeout_sec; admission} ->
         let* observed = read_apple_guest ~timeout_sec ~container_name
           |> Result.map_error microvm_start_failure_message in
@@ -56,33 +55,40 @@ let apple_endpoint_of_snapshot_owned ~fs ~scope
          | Apple_running reading ->
            let* () = check_apple_guest_scope ~base_path:config.base_path
                ~keeper_name:meta.name ~network_mode ~container_name reading in
+           (* Checked before the admission below writes any build state. *)
+           let* () = match reading with
+             | Keeper_microvm_boot_plan.Facts facts ->
+               if Keeper_microvm_agent_socket.publishes_agent ~base_path:config.base_path
+                   ~guest_name:container_name facts
+               then Ok ()
+               else Error (Printf.sprintf
+                   "microvm_agent_not_published: guest %s does not publish its agent's \
+                    socket, so no request can reach it; the keeper's next turn replaces \
+                    the guest"
+                   container_name)
+             | Keeper_microvm_boot_plan.Unreadable detail -> Error detail in
            let* () = match admission with
              | Diagnostic_read -> Ok ()
              | Existing_execution | Prepared_execution ->
                let* () = microvm_build_cleanup_admission ~backend ~keeper_name:meta.name in
                microvm_build_link_effect_admission ~backend ~keeper_name:meta.name in
-           let* () = match admission with
-             | Diagnostic_read -> Ok ()
-             | Existing_execution ->
-               (* This endpoint can start new work without first preparing it.
-                  A later ordinary handoff must not clean that new output. *)
-               ignore (set_microvm_build_cleanup_state ~backend ~keeper_name:meta.name
-                 ~expected:Build_cleanup_available Build_cleanup_skipped_not_sent);
-               Ok ()
-             | Prepared_execution ->
-               microvm_build_links_admission ~base_path:config.base_path ~backend
-                 ~keeper_name:meta.name ~container_name in
-           match reading with
-           | Keeper_microvm_boot_plan.Facts facts ->
-             Ok (Keeper_microvm_agent_socket.delivery_of_facts ~base_path:config.base_path
-                   ~guest_name:container_name facts)
-           | Keeper_microvm_boot_plan.Unreadable detail -> Error detail) in
+           match admission with
+           | Diagnostic_read -> Ok ()
+           | Existing_execution ->
+             (* This endpoint can start new work without first preparing it.
+                A later ordinary handoff must not clean that new output. *)
+             ignore (set_microvm_build_cleanup_state ~backend ~keeper_name:meta.name
+               ~expected:Build_cleanup_available Build_cleanup_skipped_not_sent);
+             Ok ()
+           | Prepared_execution ->
+             microvm_build_links_admission ~base_path:config.base_path ~backend
+               ~keeper_name:meta.name ~container_name) in
     let* () = Keeper_microvm_shim_readiness.verify ~fs ~base_path:config.base_path
         ~backend ~guest_name:container_name
       |> Result.map_error Keeper_microvm_shim_readiness.error_message in
     let identity_environment = Keeper_microvm_github_identity.environment snapshot ~container_config_dir in
     let* endpoint = build_microvm_endpoint ~config ~meta ~container_root ~uid ~gid
-        ~container_name ~identity_environment ~delivery in
+        ~container_name ~identity_environment in
     Ok (endpoint, Keeper_microvm_github_identity.revision snapshot)
 ;;
 
@@ -101,9 +107,7 @@ let microvm_remote_endpoint_of_running_fields
     let* () = verify_microvm_shim ~base_path:config.base_path
         ~backend ~guest_name:container_name
       |> Result.map_error Keeper_microvm_shim_readiness.error_message in
-    (* Only Apple publishes a guest socket; the TOML refuses the agent elsewhere. *)
-    build_microvm_endpoint ~config ~meta ~container_root ~uid ~gid ~container_name ~identity_environment
-      ~delivery:Keeper_types_profile_sandbox.Exec_per_request in
+    build_microvm_endpoint ~config ~meta ~container_root ~uid ~gid ~container_name ~identity_environment in
   match backend with
   | Keeper_microvm_backend.Apple_container ->
     with_apple_lifecycle_scope ~keeper_name:meta.name

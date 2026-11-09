@@ -1401,10 +1401,6 @@ let set_turn_switch ~base_path name sw_opt =
   | None -> ()
 ;;
 
-let clear_turn_switch ~base_path name =
-  set_turn_switch ~base_path name None
-;;
-
 let clear_turn_switch_if_current ~base_path name switch =
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | None -> ()

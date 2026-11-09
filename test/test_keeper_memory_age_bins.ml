@@ -8,54 +8,55 @@ let day = Masc_time_constants.day
    rounding from subtracting it off a large clock. *)
 let index_at age = Age_bins.index (Age_bins.classify ~now:age 0.0)
 
-let test_the_ladder_edges () =
+(* The four exact edges, written out here rather than read from the module. *)
+let exact_edges =
+  [ "1h", Age_bins.Hour, hour, 1
+  ; "1d", Age_bins.Day, day, 9
+  ; "7d", Age_bins.Week, Masc_time_constants.days_to_seconds 7, 17
+  ; "30d", Age_bins.Month, Masc_time_constants.days_to_seconds 30, 23
+  ]
+;;
+
+let test_an_age_on_an_edge_starts_the_next_bin () =
+  Alcotest.(check int) "24 bins" 24 (List.length Age_bins.bins);
+  Alcotest.(check (list int)) "the bins run newest first"
+    (List.init 24 Fun.id) (List.map Age_bins.index Age_bins.bins);
   Alcotest.(check int) "a first_seen ahead of now is in the newest bin" 0
     (Age_bins.index (Age_bins.classify ~now (now +. 100.0)));
   Alcotest.(check int) "a fact seen now is in the newest bin" 0 (index_at 0.0);
-  Alcotest.(check int) "one second under an hour is in the newest bin" 0 (index_at (hour -. 1.0));
-  Alcotest.(check int) "exactly one hour starts bin 1" 1 (index_at hour);
-  Alcotest.(check int) "one second under 30 days is in bin 22" 22
-    (index_at (Masc_time_constants.days_to_seconds 30 -. 1.0));
-  Alcotest.(check int) "exactly 30 days starts the oldest bin" 23
-    (index_at (Masc_time_constants.days_to_seconds 30));
+  List.iter
+    (fun (label, edge, age, bin) ->
+      Alcotest.(check int) (label ^ " starts its bin") bin (Age_bins.index (Age_bins.edge_bin edge));
+      Alcotest.(check int) ("an age of exactly " ^ label) bin (index_at age);
+      Alcotest.(check int) ("one second under " ^ label) (bin - 1) (index_at (age -. 1.0)))
+    exact_edges;
   Alcotest.(check int) "a year is in the oldest bin" 23
     (index_at (Masc_time_constants.days_to_seconds 365))
 ;;
 
-(* Each bin starts where the formula of RFC-0515 §2.4.5 says, and the edge
-   [lower_edge] names is the one [classify] counts with. *)
-let test_every_edge_starts_its_bin () =
-  Alcotest.(check int) "24 bins" 24 (List.length Age_bins.bins);
-  Alcotest.(check (list int)) "the bins run newest first"
-    (List.init 24 Fun.id) (List.map Age_bins.index Age_bins.bins);
-  let r = Float.log 720.0 /. 22.0 in
+(* Between two edges the bins start on equal log steps: the age halfway
+   (on the log axis) through step j of a span is in the span's bin j. *)
+let test_the_bins_between_two_edges_are_equal_log_steps () =
+  let spans =
+    [ "1h to 1d", hour, day, 1, 8
+    ; "1d to 7d", day, 7.0 *. day, 9, 8
+    ; "7d to 30d", 7.0 *. day, 30.0 *. day, 17, 6
+    ]
+  in
   List.iter
-    (fun bin ->
-      let k = Age_bins.index bin in
-      let edge = Age_bins.lower_edge bin in
-      if k = 0 then Alcotest.(check (float 0.0)) "bin 0 starts at age 0" 0.0 edge
-      else begin
-        Alcotest.(check (float 1e-6)) (Printf.sprintf "bin %d starts on its log step" k)
-          (hour *. Float.exp (float_of_int (k - 1) *. r)) edge;
-        Alcotest.(check int) (Printf.sprintf "the edge of bin %d is in bin %d" k k) k (index_at edge);
-        Alcotest.(check int) (Printf.sprintf "one second under the edge of bin %d is in bin %d" k (k - 1))
-          (k - 1) (index_at (edge -. 1.0))
-      end)
-    Age_bins.bins
+    (fun (label, low, high, first, steps) ->
+      List.iter
+        (fun step ->
+          let age = low *. Float.pow (high /. low) ((float_of_int step +. 0.5) /. float_of_int steps) in
+          Alcotest.(check int) (Printf.sprintf "%s, step %d" label step) (first + step) (index_at age))
+        (List.init steps Fun.id))
+    spans
 ;;
 
-let test_the_tick_ages_land_on_their_nearest_edge () =
-  List.iter
-    (fun (label, age, expected) ->
-      Alcotest.(check int) label expected (Age_bins.index (Age_bins.nearest_edge age)))
-    [ "1h", hour, 1
-    ; "6h", 6.0 *. hour, 7
-    ; "1d", day, 12
-    ; "7d", 7.0 *. day, 18
-    ; "30d", 30.0 *. day, 23
-    ; "under an hour", 60.0, 1
-    ; "past 30 days", 400.0 *. day, 23
-    ]
+let test_the_edge_words_are_the_edges () =
+  Alcotest.(check bool) "the edges, youngest first, in the units people read" true
+    (List.map Age_bins.edge_span Age_bins.edges
+     = Age_bins.[ Hours 1; Days 1; Days 7; Days 30 ])
 ;;
 
 let test_the_bins_add_up_to_the_facts () =
@@ -114,10 +115,11 @@ let () =
   Alcotest.run
     "keeper_memory_age_bins"
     [ ( "bins"
-      , [ Alcotest.test_case "the ladder edges" `Quick test_the_ladder_edges
-        ; Alcotest.test_case "every edge starts its bin" `Quick test_every_edge_starts_its_bin
-        ; Alcotest.test_case "tick ages land on their nearest edge" `Quick
-            test_the_tick_ages_land_on_their_nearest_edge
+      , [ Alcotest.test_case "an age on an edge starts the next bin" `Quick
+            test_an_age_on_an_edge_starts_the_next_bin
+        ; Alcotest.test_case "the bins between two edges are equal log steps" `Quick
+            test_the_bins_between_two_edges_are_equal_log_steps
+        ; Alcotest.test_case "the edge words are the edges" `Quick test_the_edge_words_are_the_edges
         ; Alcotest.test_case "the bins add up to the facts" `Quick test_the_bins_add_up_to_the_facts
         ; Alcotest.test_case "json roundtrip" `Quick test_json_roundtrip
         ; Alcotest.test_case "json rejects every other shape" `Quick

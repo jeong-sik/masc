@@ -631,6 +631,25 @@ Runtime 조회: rg -n --glob '*.ml' '\bRuntime\.(get_runtime_by_id|resolve_assig
       - 실패 답은 두 클라이언트가 같은 문장을 쓴다. Codex는 구독 소진을 턴 실패로 보내므로(`refused_for_spent_usage`) 실패 종류보다 먼저 보고 429로 답한다.
   - 하지 않는 것: 다계정 Keeper 턴의 후보를 로그의 배정에서 고르는 드라이버 쪽 일(S1 전), Antigravity·Muse(D3), API provider(D4).
 
+**D3 범위** (나머지 실행 진입, 2026-11-09)
+
+- 조사(main `9d67e41d` 위 D2-7).
+  - Muse는 사람이 다계정에서 로그인할 수 있다(`server_setup_account_login.ml`의 `Person _, Muse`). 홈은 `Runtime_account_home_layout.Muse_home`으로 사람 namespace 아래에 생긴다. 그래서 Muse는 Codex·Claude Code처럼 사람의 계정이다.
+  - Antigravity는 사람이 다계정에서 로그인하지 못한다(`person_antigravity_refused`). 자격 증명은 주인 없는 setup registry의 사본이다. Vibe는 호스트 사용자의 설정을 읽는다. 둘은 호스트 계정이다.
+  - Codex `probe_metadata`와 Claude `probe_auth_status`는 D2-5·D2-6에서 이미 인가된 계정만 받는다.
+  - Vibe Keeper 턴은 이미 거절된다(`vibe_keeper_turn_refused`). Vibe는 Fusion과 `masc lane-cli-probe`에서만 뜬다.
+- 층.
+  - D3a Muse. 실행 테이블이 Muse 홈을 선언된 홈(`Runtime_account_access.muse_home`)으로 든다. Muse 클라이언트(`run_turn`, `read_usage`, `list_models`)는 config에 홈이 없고 인가된 계정만 받는다.
+    - 판정은 Codex·Claude Code와 같은 함수다. 다계정에서는 요청한 사람 namespace 아래에 선언된 홈이어야 한다. 프로세스 환경의 홈(`Process_environment`)은 거절한다.
+    - 선언된 홈이 꼭 있어야 하는 호출(Keeper 턴, verify)은 타입 인자 `declared`로 그 홈만 받는다. 프로토콜 fixture만 프로세스 환경을 쓴다.
+    - 호출처: 턴 드라이버(시도마다 Keeper 턴 요청), verify, Fusion, capability probe, 사용량 읽기(실패한 턴의 계정), `masc runtime-muse-models`(작업 공간 판정 뒤 운영자 호출), setup의 모델 조회.
+  - D3b Antigravity·Vibe. 호스트 계정은 1단계에서 공유하지 않으므로 다계정에서 시작을 모두 거절한다. 단일 사용자에서는 지금처럼 뜬다.
+    - `Runtime_account_access.authorize_host`가 단일 사용자 프로세스에만 `host_account`를 준다. 다계정은 `Host_account`로 거절한다. 판정에 요청은 쓰지 않는다. 1단계에서는 누가 묻든 같다.
+    - 토큰을 받는 곳은 호스트 자격 증명에 닿는 함수 전부다. Antigravity 턴(`run_turn`), 홈 준비(`prepare`, `prepare_account`, `prepare_native`, `prepare_for_login`), `/usage` 읽기, readiness 턴, 컨텍스트 관찰, Vibe 호출(`Runtime_vibe_cli.run`), vibe-acp readiness.
+    - 홈 준비도 토큰을 받는다. 홈에는 호스트 자격 증명의 사본이 들어가므로, 거절된 시작은 사본도 만들지 않는다.
+    - 호출처: 턴 드라이버(시도마다), verify, capability probe, Fusion, 사용량 읽기, setup 로그인, `masc runtime-antigravity-{account,models,context}`(작업 공간 판정 뒤), `masc lane-cli-probe`.
+  - D3c lane 증거. 설계 §11.1의 lane 종류마다 다른 owner의 account-home을 읽으려다 거절되는 시험이다.
+
 **D6 범위**
 
 - 사람 initiator가 없는 dispatch(autonomous, system)가 만든 상태는 `Service(system)` 표시를 달고 `Read_state`가 허용된 initiator에게만 보인다(§3-11).

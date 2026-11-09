@@ -126,7 +126,7 @@ run_installer() {
     mkdir -p "$dir/repo/scripts/lib" "$dir/repo/config" "$dir/repo/_build/default/bin" "$dir/runtime/.masc/logs"
     cp "$ROOT_DIR/scripts/check-runtime-deployment-preflight.sh" "$ROOT_DIR/scripts/install-local-build.sh" "$dir/repo/scripts/"
     cp "$ROOT_DIR/scripts/lib/install-workspace-dashboard.sh" "$dir/repo/scripts/lib/"
-    for exe in main_eio masc_tui masc_native_addon_launcher masc_browser_addon_worker masc_exec_ssh_bootstrap; do
+    for exe in main_eio masc_tui masc_native_addon_launcher masc_browser_addon_worker masc_exec_ssh_bootstrap masc_antigravity_path_hook; do
         printf '#!/usr/bin/env bash\nexit 0\n' > "$dir/repo/_build/default/bin/$exe.exe"
         chmod +x "$dir/repo/_build/default/bin/$exe.exe"
     done

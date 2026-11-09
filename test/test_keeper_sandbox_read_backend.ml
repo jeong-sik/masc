@@ -116,8 +116,14 @@ let make_meta ~name ~sandbox =
 
 (* ── container_path_of_host pure mapping ─────────────────────────── *)
 
-let setup_config name =
-  let base = temp_dir () in
+(* An Apple guest publishes its agent at
+   [<base>/.masc/microvm/agent/<16 hex>.sock], and a socket path holds at
+   most 103 bytes on macOS, where the per-user TMPDIR alone takes about
+   half. A base that serves an agent is made under /tmp. *)
+let agent_base_parent = "/tmp"
+let agent_temp_dir () = Filename.temp_dir ~temp_dir:agent_base_parent ~perms:0o755 "masc-rb-" ""
+
+let setup_config ?(base = temp_dir ()) name =
   Unix.mkdir (Filename.concat base Common.masc_dirname) 0o755;
   let config = Workspace.default_config base in
   let meta =
@@ -470,6 +476,25 @@ let test_microvm_without_a_turn_factory_routes_to_the_attached_guest () =
   | Error message ->
     Alcotest.failf "a running guest was reported unreachable: %s" message
 
+let fake_shim_probe =
+  Exec_ssh_protocol.render_probe
+    { name = "masc-exec-shim"
+    ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
+    ; capabilities = [ Exec_ssh_protocol.observe_capability ]
+    ; release = None
+    ; boot_id = None
+    }
+
+let fake_shim_trailer =
+  Exec_ssh_protocol.render_trailer
+    { v = Exec_ssh_protocol.newest
+    ; exit = Some 0
+    ; signal = None
+    ; timed_out = false
+    ; shim_error = None
+    ; observed_syscalls = []
+    }
+
 let fake_ssh_success_script =
   Printf.sprintf
     {|#!/bin/sh
@@ -482,21 +507,7 @@ printf 'remote-file-content'
 printf '%%s' '%s' >&2
 exit 0
 |}
-    (Exec_ssh_protocol.render_probe
-       { name = "masc-exec-shim"
-       ; version = string_of_int Exec_ssh_protocol.protocol_version ^ ".0.0"
-       ; capabilities = [ Exec_ssh_protocol.observe_capability ]
-       ; release = None
-       ; boot_id = None
-       })
-    (Exec_ssh_protocol.render_trailer
-       { v = Exec_ssh_protocol.newest
-       ; exit = Some 0
-       ; signal = None
-       ; timed_out = false
-       ; shim_error = None
-       ; observed_syscalls = []
-       })
+    fake_shim_probe fake_shim_trailer
 
 (* Publish the identity against an empty inventory first; afterwards inspect
    reports the exact guest and full facts while exec retains the shim fixture. *)
@@ -512,7 +523,44 @@ fi
 %s|} (Filename.quote guest) (Filename.quote (Filename.concat base "guest-inspect.json"))
     (Filename.quote (Filename.concat base "guest-inspect.json")) fake_ssh_success_script
 
-let initialize_apple_attached_read_fixture
+(* The agent an Apple guest publishes (RFC microvm-guest-agent-over-socket
+   3.5), with the answers [fake_ssh_success_script] gives: a hello this
+   host's check accepts, then the shim's probe, or for a request the remote
+   file and a clean trailer once the whole frame has arrived. It serves
+   until [sw] ends. *)
+let serve_fake_apple_agent ~sw ~net ~host_socket =
+  let module Relay = Exec_ssh_protocol.Relay in
+  ensure_dir (Filename.dirname host_socket);
+  let listening = Eio.Net.listen ~sw ~backlog:8 net (`Unix host_socket) in
+  let read flow length =
+    let buffer = Cstruct.create length in
+    Eio.Flow.read_exact flow buffer;
+    Cstruct.to_string buffer
+  in
+  let answer flow =
+    let send chunk = Eio.Flow.copy_string (Relay.encode chunk) flow in
+    send (Relay.Hello { Relay.relay_version = Relay.version; root_read_only = true;
+      uid = Unix.getuid (); gid = Unix.getgid (); no_new_privs = true });
+    match Relay.request_kind_of_byte (read flow 1).[0] with
+    | Some Relay.Probe ->
+      send (Relay.Stdout fake_shim_probe);
+      send (Relay.Exit (Relay.Exited 0))
+    | Some Relay.Run ->
+      let header = read flow 8 in
+      ignore (read flow (Int64.to_int (String.get_int64_be header 0)));
+      send (Relay.Stdout "remote-file-content");
+      send (Relay.Stderr fake_shim_trailer);
+      send (Relay.Exit (Relay.Exited 0))
+    | None -> Alcotest.fail "the fake agent received an unknown request kind"
+  in
+  Eio.Fiber.fork_daemon ~sw (fun () ->
+    let rec serve () =
+      Eio.Net.accept_fork ~sw listening ~on_error:raise (fun flow _ -> answer flow);
+      serve ()
+    in
+    serve ())
+
+let initialize_apple_attached_read_fixture ~sw ~net
     ~base ~(config : Workspace.config) ~(meta : Masc.Keeper_meta_contract.keeper_meta) =
   let shim_dir = Config_dir_resolver.microvm_shim_dir ~base_path:base in
   Fs_compat.mkdir_p shim_dir;
@@ -541,6 +589,8 @@ let initialize_apple_attached_read_fixture
     | Error error -> Alcotest.fail (Masc.Keeper_microvm_github_identity.error_message error));
   let guest = Keeper_turn_sandbox_runtime.For_testing_microvm.microvm_container_name
       ~config ~keeper_name:meta.name ~network_mode:meta.network_mode in
+  let host_socket = Masc.Keeper_microvm_agent_socket.host_path ~base_path:base ~guest_name:guest in
+  serve_fake_apple_agent ~sw ~net ~host_socket;
   let labels = Masc.Keeper_sandbox_runtime_setup.stable_labels ~base_path:base
       ~keeper_name:meta.name ~container_kind:Keeper_sandbox_microvm.keeper_vm_container_kind
       ~network_label:(Keeper_types_profile_sandbox.network_mode_to_string meta.network_mode)
@@ -556,18 +606,20 @@ let initialize_apple_attached_read_fixture
         "workingDirectory", `String "/masc-work"; "executable", `String "tail";
         "arguments", `List [`String "-f"; `String "/dev/null"]; "environment", `List []];
       "mounts", `List []; "readOnly", `Bool true; "capDrop", `List []; "capAdd", `List [];
-      "publishedSockets", `List []; "useInit", `Bool false;
+      "publishedSockets", `List [`Assoc ["containerPath", `String Masc.Keeper_microvm_agent_socket.guest_path;
+        "hostPath", `String host_socket]]; "useInit", `Bool false;
       "networks", `List []; "labels", `Assoc (List.map (fun (key, value) -> key, `String value) labels)]]] in
   write_file (Filename.concat base "guest-inspect.json") (Yojson.Safe.to_string inspect)
 ;;
 
-let test_attached_guest_endpoint_names_the_derived_guest ~fs () =
+let test_attached_guest_endpoint_names_the_derived_guest ~fs ~net () =
   let context = Eio_context.snapshot_state () in
   let previous_fs = Fs_compat.get_fs_opt () in
   Eio.Switch.run @@ fun sw ->
   Eio_context.set_switch sw;
+  Eio_context.set_net net;
   Fs_compat.set_fs fs;
-  let base, config, docker = setup_config "read-microvm-attach" in
+  let base, config, docker = setup_config ~base:(agent_temp_dir ()) "read-microvm-attach" in
   let microvm =
     { docker with
       sandbox_profile = Keeper_types_profile_sandbox.Micro_vm
@@ -587,7 +639,7 @@ let test_attached_guest_endpoint_names_the_derived_guest ~fs () =
       cleanup_dir bin_dir)
   @@ fun () ->
   with_env "PATH" path @@ fun () ->
-  initialize_apple_attached_read_fixture ~base ~config ~meta:microvm;
+  initialize_apple_attached_read_fixture ~sw ~net ~base ~config ~meta:microvm;
   match
     Keeper_sandbox_remote_lane.attached_guest_endpoint ~config ~meta:microvm ()
   with
@@ -1344,8 +1396,8 @@ exit 2\n"
    [allowed_paths]. Execute may already name it (#38603); a Read of the same
    file must reach the endpoint as that path instead of failing the host
    bookkeeping check with path_outside_sandbox. *)
-let remote_reader_with_allowed_paths ~allowed_paths =
-  let base, config, meta = setup_config "remote-reader" in
+let remote_reader_at ~base ~allowed_paths =
+  let base, config, meta = setup_config ~base "remote-reader" in
   let allowed_paths = allowed_paths base in
   let meta = { meta with sandbox_profile = Keeper_types_profile_sandbox.Remote_ssh } in
   let keepers_dir = Filename.concat base ".masc/config/keepers" in
@@ -1375,6 +1427,9 @@ remote_endpoint = "fixture"
          ; allowed_paths
          });
   base, config, meta
+
+let remote_reader_with_allowed_paths ~allowed_paths =
+  remote_reader_at ~base:(temp_dir ()) ~allowed_paths
 
 (* The shim's stdin is the framed request; keep it so the test can read the
    argv the endpoint was asked to run. The runner holds stdin open until the
@@ -1575,7 +1630,7 @@ esac
 
 (* Exercise the public result producers through real endpoint dispatch, with
    the existing SSH shim fixture and an Apple-container CLI fixture. *)
-let test_read_and_grep_report_the_endpoint_profile ~fs () =
+let test_read_and_grep_report_the_endpoint_profile ~fs ~net () =
   let check_results ~config ~meta ~expected =
     let check tool body_field expected_body (result : Masc.Keeper_tool_execution.t) =
       let json = Yojson.Safe.from_string result.raw_output in
@@ -1602,7 +1657,7 @@ let test_read_and_grep_report_the_endpoint_profile ~fs () =
       check "Grep" "matches" (`List [ `String "remote-file-content" ]) result
   in
   with_env "MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED" "false" @@ fun () ->
-  let base, config, meta = remote_reader_with_allowed_paths ~allowed_paths:(fun _ -> []) in
+  let base, config, meta = remote_reader_at ~base:(agent_temp_dir ()) ~allowed_paths:(fun _ -> []) in
   Fun.protect ~finally:(fun () -> cleanup_fixture_dir base) @@ fun () ->
   with_fake_ssh fake_ssh_success_script (fun () ->
     check_results ~config ~meta ~expected:"remote_ssh");
@@ -1629,9 +1684,10 @@ sandbox_profile = "microvm"
     match previous_fs with None -> Fs_compat.clear_fs () | Some fs -> Fs_compat.set_fs fs) @@ fun () ->
   Eio.Switch.run @@ fun sw ->
   Eio_context.set_switch sw;
+  Eio_context.set_net net;
   Fs_compat.set_fs fs;
   with_env "PATH" path (fun () ->
-    initialize_apple_attached_read_fixture ~base ~config ~meta;
+    initialize_apple_attached_read_fixture ~sw ~net ~base ~config ~meta;
     check_results ~config ~meta ~expected:"microvm")
 
 let test_read_of_a_declared_path_asks_the_endpoint_for_that_path () =
@@ -3403,7 +3459,7 @@ let test_read_window_directory_fails () =
       | (Unix.WSIGNALED _ | Unix.WSTOPPED _), _ -> Alcotest.fail "read window was signalled")
     [ 1; 10 ]
 
-let run_tests ~clock ~fs () =
+let run_tests ~clock ~fs ~net () =
   Alcotest.run "Keeper_sandbox_read_backend"
     [
       ( "read_window_argv",
@@ -3489,7 +3545,7 @@ let run_tests ~clock ~fs () =
           Alcotest.test_case "own tree translates even under a declared root" `Quick
             test_own_tree_translates_even_under_a_declared_root;
           Alcotest.test_case "Read and Grep report the endpoint profile" `Quick
-            (test_read_and_grep_report_the_endpoint_profile ~fs);
+            (test_read_and_grep_report_the_endpoint_profile ~fs ~net);
           Alcotest.test_case "read of a declared path asks the endpoint for that path"
             `Quick test_read_of_a_declared_path_asks_the_endpoint_for_that_path;
           Alcotest.test_case "Grep preserves regex bytes through remote dispatch"
@@ -3510,7 +3566,7 @@ let run_tests ~clock ~fs () =
           Alcotest.test_case "microvm without a turn factory routes to the attached guest"
             `Quick test_microvm_without_a_turn_factory_routes_to_the_attached_guest;
           Alcotest.test_case "an attached endpoint names the derived guest" `Quick
-            (test_attached_guest_endpoint_names_the_derived_guest ~fs);
+            (test_attached_guest_endpoint_names_the_derived_guest ~fs ~net);
           Alcotest.test_case "attaching refuses a docker keeper" `Quick
             test_attached_guest_endpoint_refuses_docker;
           Alcotest.test_case "docker without a turn factory keeps the container route"
@@ -3625,4 +3681,4 @@ let () =
     ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
     ~proc_mgr:(Eio.Stdenv.process_mgr env)
     ~clock;
-  run_tests ~clock ~fs:(Eio.Stdenv.fs env) ()
+  run_tests ~clock ~fs:(Eio.Stdenv.fs env) ~net:(Eio.Stdenv.net env) ()

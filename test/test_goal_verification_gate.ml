@@ -39,15 +39,19 @@ let temp_dir () =
   path
 ;;
 
+(* [Sys.is_directory] follows a link, so a directory alias is descended into and
+   then refused by [Unix.rmdir] (ENOTDIR), while a dangling link reads false from
+   [Sys.file_exists] and stays behind (#26648). Classify with [Unix.lstat] so a
+   link always loses only itself. *)
 let rm_rf dir =
   let rec rm path =
-    if Sys.file_exists path
-    then
-      if Sys.is_directory path
-      then (
-        Sys.readdir path |> Array.iter (fun entry -> rm (Filename.concat path entry));
-        Unix.rmdir path)
-      else Sys.remove path
+    match Unix.lstat path with
+    | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
+    | { Unix.st_kind = Unix.S_DIR; _ } ->
+      Sys.readdir path
+      |> Array.iter (fun entry -> rm (Filename.concat path entry));
+      Unix.rmdir path
+    | _ -> Sys.remove path
   in
   try rm dir with
   | _ -> ()
@@ -521,11 +525,19 @@ let test_measurement_requires_current_criterion_and_evidence () =
          (json_state goal_json [ "measurement"; "record"; "observed_value" ])
    | _ -> fail "expected one listed Goal");
   let cache_before = Goal_projection_generation.current () in
-  (match Goal_measurement.record config ~goal_id
-           ~criterion_revision:goal.criterion_revision ~observed_value:"1"
-           ~evidence:"artifact:updated-count" ~actor:"test" with
-   | Ok _ -> ()
-   | Error error -> fail (Goal_measurement.error_to_string error));
+  let notifications = ref 0 in
+  let previous_hook = Atomic.get Workspace_hooks.on_goal_projection_mutation_fn in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.on_goal_projection_mutation_fn previous_hook)
+    (fun () ->
+      Atomic.set Workspace_hooks.on_goal_projection_mutation_fn
+        (fun ~base_path:_ -> incr notifications);
+      match Goal_measurement.record config ~goal_id
+              ~criterion_revision:goal.criterion_revision ~observed_value:"1"
+              ~evidence:"artifact:updated-count" ~actor:"test" with
+      | Ok _ -> ()
+      | Error error -> fail (Goal_measurement.error_to_string error));
+  check int "one measurement sends one projection notification" 1 !notifications;
   check int "successful write changes dashboard cache key" (cache_before + 1)
     (Goal_projection_generation.current ());
   (match Goal_measurement.load config with
@@ -1639,7 +1651,10 @@ let test_goal_cache_scope_tracks_the_resolved_store () =
   let base = temp_dir () in
   let first = Filename.concat base "first" and second = Filename.concat base "second" in
   let link = Filename.concat base ".masc" in
-  Fun.protect ~finally:(fun () -> (try Unix.unlink link with Unix.Unix_error _ -> ()); rm_rf base)
+  (* [rm_rf] classifies with [lstat], so the link is removed as a link and the
+     [first]/[second] targets it points at stay inside [base] too. Nothing here
+     has to unlink it first, and no leftover depends on that ordering. *)
+  Fun.protect ~finally:(fun () -> rm_rf base)
     (fun () ->
       Unix.mkdir first 0o755;
       Unix.mkdir second 0o755;
@@ -2536,12 +2551,31 @@ let test_proof_request_follows_the_phase_machine () =
   check string "a completed goal gets no new proof request" ledger_before (ledger_bytes config)
 ;;
 
+(* The fixture links [.masc] at a directory inside the tree it later removes, so
+   the cleanup alone has to finish that link; a dangling one must not be skipped
+   either (#26648). *)
+let test_rm_rf_unlinks_symlinks () =
+  let dir = temp_dir () in
+  let root = Filename.concat dir "base" in
+  Unix.mkdir root 0o755;
+  let first = Filename.concat root "first" in
+  Unix.mkdir first 0o755;
+  Unix.symlink first (Filename.concat root ".masc");
+  Unix.symlink (Filename.concat root "gone") (Filename.concat root "dangling");
+  rm_rf root;
+  check bool "the tree is gone" false (Sys.file_exists root);
+  rm_rf dir
+;;
+
 let () =
   if Array.length Sys.argv = 2 && String.equal Sys.argv.(1) "--proof-mirror-presence" then
     proof_mirror_presence_scenario ()
   else run
     "goal_verification_gate"
-    [ ( "durable proof effects"
+    [ ( "temp directory cleanup"
+      , [ test_case "rm_rf unlinks live and dangling links" `Quick
+            test_rm_rf_unlinks_symlinks ] )
+    ; ( "durable proof effects"
       , [ test_case "proof request follows the phase machine" `Quick
             test_proof_request_follows_the_phase_machine
         ; test_case "audit and partial recipient failures recover exactly once" `Quick

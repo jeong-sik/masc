@@ -447,6 +447,13 @@ let test_explicit_native_boundary_reasons () =
   check bool "open effect state continues" true
     (Masc.Keeper_agent_run.For_testing.tool_boundary_state
        ~repetition_execution:None
+       ~chat_handoff:(fun () -> Ok false)
+       Masc.Keeper_tools_agent_core.Terminal_effect_open
+     = Ok Runtime_agent.Continue);
+  check bool "chat handoff probe failure degrades to continue without failing settled tool" true
+    (Masc.Keeper_agent_run.For_testing.tool_boundary_state
+       ~repetition_execution:None
+       ~chat_handoff:(fun () -> Error (Agent_core.Error.Internal "inventory stopping"))
        Masc.Keeper_tools_agent_core.Terminal_effect_open
      = Ok Runtime_agent.Continue)
 ;;

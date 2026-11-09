@@ -3282,6 +3282,201 @@ let test_comment_add_anonymous_author_rejected () =
    asked for the thread size plus one. The offset is the one
    [masc_board_post_get] takes, so reading at it returns the comment that was
    just written. *)
+let test_comment_write_evidence_crosses_mcp_and_native_projection () =
+  with_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:1 in
+  let parent =
+    match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
+    | Ok [ comment ] -> comment
+    | Ok _ -> Alcotest.fail "expected one persisted parent comment"
+    | Error error -> Alcotest.fail (Board.show_board_error error)
+  in
+  let parent_id = Board.Comment_id.to_string parent.id in
+  let state = Mcp_server.For_testing.create_state ~base_path:_test_base_path in
+  let config = Mcp_server.workspace_config state in
+  let name = "masc_board_comment" in
+  let arguments = make_args
+      [ "post_id", `String post_id; "parent_id", `String parent_id
+      ; "content", `String "a reply with durable Board identity"
+      ; "author", `String "spoofed-author" ] in
+  let request = Mcp_server_eio_call_request.decode
+      (Some (`Assoc [ "name", `String name; "arguments", arguments ])) |> Result.get_ok in
+  let observed = ref None in
+  let response = Mcp_server_eio_call_tool.handle_call_tool_eio
+      ~execute_tool_eio:(fun ~sw:_ ~clock:_ ~workspace_scope:_ ?profile:_
+        ?mcp_session_id:_ ?invocation_ref:_ ?auth_token:_ ?internal_keeper_runtime:_
+        ?on_caller_resolved:_ state ~name ~arguments ->
+        let result = match Mcp_tool_runtime_board.dispatch
+            ~reader:Masc_board_handlers.Board_access.Operator ~config ~state ~name ~arguments
+            ~agent_name:"evidence-writer" with
+          | Some result -> result
+          | None -> Alcotest.fail "Board comment route missing" in
+        observed := Some result;
+        result)
+      ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
+      ~broadcast_tools_list_changed:(fun () -> ())
+      ~sw ~clock:(Eio.Stdenv.clock env) state (`Int 1) request in
+  let result = match !observed with
+    | Some result -> result
+    | None -> Alcotest.fail "MCP never entered the Board writer" in
+  let fact = match Board_tool_evidence.of_metadata (Tool_result.metadata result) with
+    | Some (Ok fact) -> fact
+    | Some (Error detail) -> Alcotest.fail detail
+    | None -> Alcotest.fail "committed reply lost its producer evidence" in
+  let reply_id = Yojson.Safe.Util.(Tool_result.data result |> member "id" |> to_string) in
+  (match fact with
+   | Board_tool_evidence.Comment_added value ->
+     Alcotest.(check string) "actual post" post_id value.post_id;
+     Alcotest.(check string) "actual reply" reply_id value.comment_id;
+     Alcotest.(check (option string)) "actual parent" (Some parent_id) value.parent_id;
+     Alcotest.(check string) "caller identity is bound before the write"
+       "evidence-writer" value.author
+   | Board_tool_evidence.Reaction_changed _ -> Alcotest.fail "reply became reaction evidence");
+  let expected = Board_tool_evidence.to_yojson fact |> Yojson.Safe.to_string in
+  let check_metadata label metadata =
+    match Board_tool_evidence.of_metadata metadata with
+    | Some (Ok fact) -> Alcotest.(check string) label expected
+        (Board_tool_evidence.to_yojson fact |> Yojson.Safe.to_string)
+    | Some (Error detail) -> Alcotest.fail detail
+    | None -> Alcotest.fail (label ^ ": missing Board fact") in
+  let open Yojson.Safe.Util in
+  let wire = member "result" response in
+  Alcotest.(check bool) "MCP reports the completed write" false
+    (wire |> member "isError" |> to_bool);
+  check_metadata "official-client MCP metadata retains the reply"
+    (Some (wire |> member "_meta" |> member Mcp_server.tool_call_meta_key |> member "metadata"));
+  (match Tool_bridge.to_agent_core_typed_result result with
+   | Ok output -> check_metadata "native projection retains the same reply" output.Agent_core.Types._meta
+   | Error error -> Alcotest.fail error.Agent_core.Types.message);
+  match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
+  | Ok comments ->
+    Alcotest.(check int) "one parent and one committed reply" 2 (List.length comments);
+    Alcotest.(check bool) "the evidence addresses the persisted reply" true
+      (List.exists (fun (comment : Board.comment) ->
+         String.equal (Board.Comment_id.to_string comment.id) reply_id
+         && Option.map Board.Comment_id.to_string comment.parent_id = Some parent_id) comments)
+  | Error error -> Alcotest.fail (Board.show_board_error error)
+
+let test_native_board_evidence_survives_lost_output ~cancelled () =
+  with_eio @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let module Log = Keeper_tool_call_log in
+  Keeper_registry.For_testing.clear ();
+  Fun.protect ~finally:(fun () ->
+    Keeper_execution_join.For_testing.clear ();
+    Keeper_registry.For_testing.clear ();
+    Log.reset_for_testing ()) @@ fun () ->
+  Log.reset_for_testing ();
+  Log.init ~base_path:_test_base_path ();
+  let post_id = create_post_with_comments ~count:0 in
+  let config = Workspace.default_config _test_base_path in
+  let meta = make_keeper_meta ~name:"native-board-evidence" () in
+  ignore (Keeper_registry.For_testing.register ~base_path:_test_base_path meta.name meta);
+  Masc_test_deps.with_publication_recovery_registry
+    ~sw ~fs:(Eio.Stdenv.fs env) ~registry_root:(Workspace.masc_dir config)
+  @@ fun registry ->
+  let publication_recovery =
+    { Keeper_publication_recovery_availability.provider =
+        Masc_test_deps.publication_recovery_provider registry
+    ; keeper_name = meta.name } in
+  let descriptor = match Keeper_tool_descriptor.all_descriptors ()
+      |> List.find_opt (fun descriptor ->
+        List.mem "masc_board_comment" (Keeper_tool_descriptor.keeper_model_names descriptor)) with
+    | Some descriptor -> descriptor
+    | None -> Alcotest.fail "Board comment descriptor missing" in
+  let invocation = Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"board-lost-output" ~turn:1
+      ~completion:Agent_core.Tool_contract.Continue_after_success
+      ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1
+                ; execution_mode = Agent_core.Tool_contract.Serial } in
+  let input = make_args [ "post_id", `String post_id
+                        ; "content", `String "the write completed before output was lost" ] in
+  let handler = Keeper_tools_agent_core_handler.make_keeper_tool_handler_from_meta
+      ~name:descriptor.internal_name ~descriptor ~model_name:"masc_board_comment"
+      ~input_schema:descriptor.input_schema ~config ~meta ~publication_recovery
+      ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"test")
+      ~keeper_turn_id:(fun () -> Some 17) () in
+  let result = handler ~agent_core_invocation:invocation input in
+  Alcotest.(check bool) "the actual handler completed the Board write" true
+    (Tool_result.is_success result);
+  let expected = match Log.peek_board_action_evidence ~invocation () with
+    | Some (Ok fact) -> Board_tool_evidence.to_yojson fact |> Yojson.Safe.to_string
+    | Some (Error detail) -> Alcotest.fail detail
+    | None -> Alcotest.fail "the native dispatch never retained the Board producer fact" in
+  let output = Tool_bridge.to_agent_core_typed_result
+      ~model_projection:(Tool_output.Inline_up_to { maximum_bytes = 1 }) result in
+  (match output with
+   | Error _ -> ()
+   | Ok _ -> Alcotest.fail "the deliberately insufficient wire budget did not fail");
+  let cell = Log.create_turn_ctx_cell () in
+  Log.set_turn_context ~cell ~trace_id:"native-board-evidence-trace"
+    ~keeper_turn_id:17 ~turn:1 ~turn_kind:Turn_record.Autonomous ();
+  let hooks = Keeper_hooks_agent_core.make_hooks ~config ~meta_ref:(ref meta)
+      ~turn_ctx_cell:cell ~trace_id:"native-board-evidence-trace" ~keeper_turn_id:17 () in
+  if cancelled then
+    (match hooks.Agent_core.Hooks.post_tool_use_failure with
+     | None -> Alcotest.fail "native failure hook missing"
+     | Some hook -> ignore (hook (Agent_core.Hooks.PostToolUseFailure
+         { invocation; tool_name = "masc_board_comment"; input
+         ; stage = Agent_core.Hooks.Cancelled_during_execution
+         ; duration_ms = 1.; error = "cancelled after the producer returned" })))
+  else
+    (match hooks.Agent_core.Hooks.post_tool_use with
+     | None -> Alcotest.fail "native completion hook missing"
+     | Some hook -> ignore (hook (Agent_core.Hooks.PostToolUse
+         { invocation; tool_name = "masc_board_comment"; input; output
+         ; result_bytes = String.length (Tool_result.message result); duration_ms = 1. })));
+  let row = match Log.read_recent ~keeper_name:meta.name () with
+    | Ok [ row ] -> row
+    | Ok _ -> Alcotest.fail "expected one exact native Board execution row"
+    | Error (Log.Index_unavailable detail) -> Alcotest.fail detail in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string) "the committed fact survives without wire metadata" expected
+    (row |> member "board_action_evidence" |> Yojson.Safe.to_string);
+  Alcotest.(check string) "producer completion is separate from delivery" "completed"
+    (row |> member "disposition" |> to_string);
+  Alcotest.(check string) "wire loss keeps its actual outcome"
+    (if cancelled then "unknown" else "error") (row |> member "wire_outcome" |> to_string);
+  Alcotest.(check int) "exact Keeper turn survives" 17 (row |> member "keeper_turn_id" |> to_int);
+  Alcotest.(check bool) "commit acknowledgement releases the exact carrier" true
+    (Option.is_none (Log.peek_board_action_evidence ~invocation ()))
+
+let test_reaction_evidence_preserves_parent_and_removal () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:1 in
+  let comment_id =
+    match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
+    | Ok [ comment ] -> Board.Comment_id.to_string comment.id
+    | Ok _ -> Alcotest.fail "expected one reaction target"
+    | Error error -> Alcotest.fail (Board.show_board_error error) in
+  let meta = make_keeper_meta ~name:"reaction-evidence-keeper" () in
+  List.iter (fun expected_reacted ->
+    let result = Keeper_tool_board_runtime.handle_board_tool_with_outcome
+        ~meta ~result_projection:Tool_output.default_model_projection
+        ~name:"masc_board_reaction"
+        ~args:(make_args [ "target_type", `String "comment"; "target_id", `String comment_id
+                        ; "user_id", `String "spoofed-user"; "emoji", `String "👍" ]) in
+    Alcotest.(check bool) "reaction write completed" true
+      (result.disposition = Tool_result.Completed ());
+    match Board_tool_evidence.of_metadata result.metadata with
+    | Some (Ok (Board_tool_evidence.Reaction_changed value)) ->
+      Alcotest.(check string) "parent comes from the original write" post_id value.post_id;
+      Alcotest.(check bool) "target is a comment" true (value.target_type = Board.Reaction_comment);
+      Alcotest.(check string) "exact target" comment_id value.target_id;
+      Alcotest.(check string) "actor is runtime-bound" meta.name value.user_id;
+      Alcotest.(check string) "exact reaction" "👍" value.emoji;
+      Alcotest.(check bool) "add and remove remain different facts" expected_reacted value.reacted
+    | Some (Ok (Board_tool_evidence.Comment_added _)) -> Alcotest.fail "reaction became comment evidence"
+    | Some (Error detail) -> Alcotest.fail detail
+    | None -> Alcotest.fail "reaction writer supplied no Board evidence") [ true; false ]
+
 let test_comment_add_reports_its_position () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -3370,8 +3565,53 @@ let test_comment_add_accepts_body () =
          ])
   in
   Alcotest.(check bool) "comment with body accepted" true ok;
-  Alcotest.(check bool) "comment body echoed" true
-    (String_util.contains_substring body "sent as body, not content")
+  (* The write does not repeat the text it was sent, so the thread is where the
+     body shows up as the comment's content. *)
+  Alcotest.(check bool)
+    "the answer does not repeat the body"
+    false
+    (String_util.contains_substring body "sent as body, not content");
+  let ok, page = dispatch "masc_board_post_get" (post_get_args post_id []) in
+  Alcotest.(check bool) "thread read ok" true ok;
+  Alcotest.(check bool)
+    "the body is stored as the comment's content"
+    true
+    (String_util.contains_substring page "sent as body, not content")
+
+(* The writer sent the text in this call, so the answer does not carry it back:
+   it names the comment, its post and author, and where it landed. A text long
+   enough to be cut in an answer is stored whole. *)
+let test_comment_add_does_not_repeat_the_text () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:0 in
+  let text = "echo-probe " ^ String.concat " " (List.init 400 (fun i -> Printf.sprintf "word%03d" i)) in
+  let result =
+    dispatch_result
+      "masc_board_comment"
+      (make_args
+         [ "post_id", `String post_id; "content", `String text; "author", `String "writer-a" ])
+  in
+  Alcotest.(check bool) "comment ok" true (Tool_result.is_success result);
+  let message = Tool_result.message result in
+  Alcotest.(check bool) "the answer does not hold the probe word" false (contains message "echo-probe");
+  Alcotest.(check bool) "nor any of the text" false (contains message "word200");
+  let written = parse_create_response_json message in
+  let open Yojson.Safe.Util in
+  Alcotest.(check bool) "no content member" true (member "content" written = `Null);
+  Alcotest.(check string) "its post" post_id (written |> member "post_id" |> to_string);
+  Alcotest.(check string) "its author" "writer-a" (written |> member "author" |> to_string);
+  Alcotest.(check bool)
+    "it is named by a comment id"
+    true
+    (String.length (written |> member "id" |> to_string) > 2
+     && String.equal (String.sub (written |> member "id" |> to_string) 0 2) "c-");
+  Alcotest.(check int) "where it landed" 0 (written |> member "comment_offset" |> to_int);
+  let ok, page = dispatch "masc_board_post_get" (post_get_args post_id []) in
+  Alcotest.(check bool) "thread read ok" true ok;
+  Alcotest.(check bool) "the first word is stored" true (contains page "echo-probe");
+  Alcotest.(check bool) "so is the last one" true (contains page "word399")
 
 let test_comment_vote_missing () =
   with_eio @@ fun env ->
@@ -3861,6 +4101,14 @@ let () =
         ] );
       ( "comments",
         [
+          Alcotest.test_case "reply evidence crosses MCP and native projection" `Quick
+            test_comment_write_evidence_crosses_mcp_and_native_projection;
+          Alcotest.test_case "native Board evidence survives output projection failure" `Quick
+            (test_native_board_evidence_survives_lost_output ~cancelled:false);
+          Alcotest.test_case "native Board evidence survives post-producer cancellation" `Quick
+            (test_native_board_evidence_survives_lost_output ~cancelled:true);
+          Alcotest.test_case "reaction evidence retains parent and removal" `Quick
+            test_reaction_evidence_preserves_parent_and_removal;
           Alcotest.test_case "comment missing post" `Quick test_comment_add_missing_post;
           Alcotest.test_case "comment missing author rejected" `Quick
             test_comment_add_missing_author_rejected;
@@ -3872,6 +4120,8 @@ let () =
             test_comment_add_reports_its_position;
           Alcotest.test_case "comment write position follows the thread" `Quick
             test_comment_add_position_follows_the_thread;
+          Alcotest.test_case "comment write does not repeat the text" `Quick
+            test_comment_add_does_not_repeat_the_text;
           Alcotest.test_case "comment vote missing" `Quick test_comment_vote_missing;
           Alcotest.test_case "comment vote not found" `Quick
             test_comment_vote_not_found;

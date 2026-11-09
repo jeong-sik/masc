@@ -53,22 +53,25 @@ val assemble_extra_system_context :
     is handled at the MASC lane boundary. *)
 
 val assemble_request_context :
+  checkpoint_owner:Runtime_execution.checkpoint_owner ->
   system:Keeper_turn_system.t ->
   post_tool_round:bool ->
   previous_assembly:extra_system_context_assembly option ->
   dynamic_context_partition:Keeper_context_layers.rendered option ->
   existing_extra_system_context:string option ->
   blocks:(Prompt_block_id.t * string) list -> extra_system_context_assembly
-(** Split uniquely renderer-attributed Active Goals into a stable system
-    suffix, and Goals Awaiting Proof and Completion Authority into context
-    blocks of their own. Missing, stale or duplicate renderer sections acquire
-    none of these identities.
+(** Split uniquely renderer-attributed Active Goals into a system suffix.
+    Agent Core carries Goals Awaiting Proof in that same issued System;
+    official clients keep it in their turn-scoped context carrier. Completion
+    Authority remains a context block. Missing, stale or duplicate renderer
+    sections acquire none of these identities.
     [system] is the System the request sends: the turn's own, or
     {!Keeper_turn_system.with_bytes} of a pre-existing override. Its
     amendments ride every round as the
     {!Prompt_block_id.Constitution_amendments} block. Later tool rounds
-    retain only that exact issued observation, the Goals Awaiting Proof and
-    Completion Authority blocks the previous round of this turn carried, and
+    retain the exact issued observations and Completion Authority the previous
+    round of this turn carried. Proof state follows [checkpoint_owner], even
+    when a fallback changes the execution owner. They also retain
     permitted extra blocks.
     Other world state stays first-round only. No store read or
     conversation-history write. *)

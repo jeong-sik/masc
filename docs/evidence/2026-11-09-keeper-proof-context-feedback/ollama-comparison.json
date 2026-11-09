@@ -1,0 +1,138 @@
+{
+  "scope": "synthetic sanitized request comparison; not the deployed Keeper",
+  "source": "Ollama Cloud /v1/chat/completions",
+  "samples": [
+    {
+      "variant": "tail_user",
+      "sample": 0,
+      "request_sha256": "1984ed20115432b430041d675bbfec550d028afd57d68d734116c7b388273aa7",
+      "request_last_role": "user",
+      "http_status": 200,
+      "model": "deepseek-v4.1-flash",
+      "finish_reason": "stop",
+      "content": "리뷰 결과입니다.\n\n**a.ml** — 검토 완료, 기능적 문제 없음.\n\n**b.ml** — 전문 확인 결과:\n```\nlet add a b = a + b\n```\n- 두 인자를 받아 합을 반환하는 단순 함수로, 실패 경로(예외·분기)가 없습니다.\n- 정수/부동소수 모두에서 의도대로 동작하나, 문자열이나 리스트 등 `+`가 정의되지 않은 타입을 넘기면 컴파일 단계에서 걸립니다(런타임 실패 경로 없음). 함수명·시그니처가 용도와 일치합니다.\n- 제품 영향: 호출부가 없어 부작용 없음.\n\n**총평**: 두 파일 모두 이 PR 범위에서 수정이 필요한 기능적 결함은 없습니다. 외부 게시나 파일 수정은 하지 않았습니다.\n\n참고로 `goal-unrelated-fixture`는 verifier가 proof를 검토 중인 별도 건이라 이번 리뷰와 분리해 두었습니다.",
+      "tool_calls": [],
+      "usage": {
+        "prompt_tokens": 732,
+        "completion_tokens": 391,
+        "total_tokens": 1123,
+        "prompt_tokens_details": {
+          "cached_tokens": 640
+        }
+      },
+      "reasoning_present": true,
+      "elapsed_seconds": 3.8493688106536865,
+      "mentions_unrelated_goal": true
+    },
+    {
+      "variant": "system_observation",
+      "sample": 0,
+      "request_sha256": "afcf0fe9122c28cff53a618321d2d4b763e7791ab7054b3f5f83207318a73f16",
+      "request_last_role": "tool",
+      "http_status": 200,
+      "model": "deepseek-v4.1-flash",
+      "finish_reason": "stop",
+      "content": "b.ml 검토를 마쳤습니다. 리뷰 결과입니다.\n\n**b.ml** — `let add a b = a + b`\n- 기능적 정확성: 두 인자를 받아 합을 반환하는 단순 함수로, 의도한 동작과 일치합니다. 실패 경로(예외·None 처리)가 발생할 여지가 없습니다.\n- 제품 영향: 부수 효과 없는 순수 함수라 호출부에 부작용을 만들지 않습니다.\n- 지적 사항: 없음. (참고로 다형성 추론에 맡겨져 있어 타입 표기는 없지만, 이는 스타일 선호이며 결함은 아닙니다.)\n\n**a.ml** — 이전 턴에서 검토 완료했고, 그때 확인된 문제는 없었습니다.\n\n**종합**: 두 파일 모두 반영을 막을 만한 결함은 없습니다. 다만 이 판단은 두 파일의 실제 내용에 대한 것이며, 실행·테스트 증거는 없습니다(소스 정적 검토만 수행). 외부 게시나 파일 수정은 하지 않았습니다.",
+      "tool_calls": [],
+      "usage": {
+        "prompt_tokens": 729,
+        "completion_tokens": 367,
+        "total_tokens": 1096,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "reasoning_present": true,
+      "elapsed_seconds": 3.7850730419158936,
+      "mentions_unrelated_goal": false
+    },
+    {
+      "variant": "no_goal_notice",
+      "sample": 0,
+      "request_sha256": "a82073412737422dda5a1ecaa9514731294a418229f86dd526601f63949cadb8",
+      "request_last_role": "tool",
+      "http_status": 200,
+      "model": "deepseek-v4.1-flash",
+      "finish_reason": "stop",
+      "content": "b.ml 확인 완료. 두 파일 리뷰 결과입니다.\n\n**a.ml** — 검토 완료, 기능적 결함 없음. (세부 지적 없음)\n\n**b.ml** — 내용은 `let add a b = a + b` 한 줄입니다.\n- 정확성: 두 인자의 합을 그대로 반환. 실패 경로 없음(예외·분기 없음).\n- 제품 영향: 순수 함수, 부작용 없음. 호출부에서 타입이 맞으면 동작 문제 없음.\n- 참고(비차단): 타입 애노테이션이 없어 추론에 의존하고, int 오버플로는 검사되지 않음. 현재 요구사항상 문제는 아니므로 approve 가능.\n\n외부 게시·수정은 하지 않았습니다.",
+      "tool_calls": [],
+      "usage": {
+        "prompt_tokens": 697,
+        "completion_tokens": 300,
+        "total_tokens": 997,
+        "prompt_tokens_details": {
+          "cached_tokens": 0
+        }
+      },
+      "reasoning_present": true,
+      "elapsed_seconds": 2.8350000381469727,
+      "mentions_unrelated_goal": false
+    },
+    {
+      "variant": "tail_user",
+      "sample": 1,
+      "request_sha256": "f6e2e225efb5f2553a39cff6a4102bcd11911073bd7ca39fb05cf76c6a346033",
+      "request_last_role": "user",
+      "http_status": 200,
+      "model": "deepseek-v4.1-flash",
+      "finish_reason": "stop",
+      "content": "두 파일 리뷰 결과입니다.\n\n**a.ml** — 이전 턴에서 검토 완료. 문제 없음.\n\n**b.ml** — 방금 원문 확인. 내용은 한 줄입니다.\n```ocaml\nlet add a b = a + b\n```\n- 기능적 정확성: 정수/실수 등 `+`가 정의된 타입에서 덧셈을 그대로 반환. 오류 없음.\n- 실패 경로: 예외를 던지거나 부분 적용 외에 별도 실패 경로 없음. `+` 자체가 정의되지 않은 타입에 적용하면 컴파일 단계에서 걸러짐(런타임 실패 아님).\n- 제품 영향: 순수 함수, 부작용 없음. 리뷰에서 지적할 사항 없음.\n\n**종합**: 두 파일 모두 승인 가능한 상태이며, 요청된 리뷰는 완료했습니다. 외부 게시나 수정은 하지 않았습니다.\n\ngoal-unrelated-fixture는 verifier가 proof를 검토 중인 별도 건이라 손대지 않았습니다.",
+      "tool_calls": [],
+      "usage": {
+        "prompt_tokens": 732,
+        "completion_tokens": 450,
+        "total_tokens": 1182,
+        "prompt_tokens_details": {
+          "cached_tokens": 640
+        }
+      },
+      "reasoning_present": true,
+      "elapsed_seconds": 3.773113965988159,
+      "mentions_unrelated_goal": true
+    },
+    {
+      "variant": "system_observation",
+      "sample": 1,
+      "request_sha256": "626b5d364307e54d3eec1e88108a024c2bed1837b4a2458fe093e01f9161ee75",
+      "request_last_role": "tool",
+      "http_status": 200,
+      "model": "deepseek-v4.1-flash",
+      "finish_reason": "stop",
+      "content": "리뷰 결과 정리합니다. 원문 확인 범위를 구분해서 말합니다.\n\n**b.ml — 확인함 (방금 읽은 원문)**\n```\nlet add a b = a + b\n```\n- 기능: 두 정수 합. OCaml 타입 추론으로 `int -> int -> int`.\n- 정확성: 그 자체로는 정상 동작. 실패 경로 없음(예외 발생 안 함).\n- 지적 사항:\n  1. **타입 주석 없음** — `float` 용도로 호출하는 곳이 있으면 조용히 타입 오류가 나거나, 호출부에서 `+.`로 바꿔야 하는데 이 함수를 재사용하면 컴파일 에러로만 드러남. `float` 의도가 없다면 문제 아님.\n  2. **정수 오버플로** — OCaml `int`는 63비트. 큰 값 합산 시 예외 없이 wrap-around 하므로, 금액·카운터 등에 쓰이면 silent wrong result 위험.\n  3. 명명(`add`)이 일반적이라 도메인 의미가 드러나지 않음. 사소한 스타일.\n\n**a.ml — 현재 대화 컨텍스트에 원문이 없습니다**\n- 앞선 턴에서 제가 \"문제 없음\"이라고 했지만, 지금 이 컨텍스트에는 a.ml의 실제 코드가 남아 있지 않아 인용하거나 재검증할 수 없습니다. 확인된 사실로 취급하지 않는 게 맞습니다.\n- 원하시면 a.ml을 다시 읽어 원문 기준으로 리뷰하겠습니다.\n\n**기타**\n- `goal-unrelated-fixture`는 별도 프로젝트 건이고 verifier가 proof 검토 중이라 손대지 않았습니다.\n- 파일 수정·외부 게시는 하지 않았습니다(요청 없음).\n\na.ml 재확인할까요?",
+      "tool_calls": [],
+      "usage": {
+        "prompt_tokens": 729,
+        "completion_tokens": 710,
+        "total_tokens": 1439,
+        "prompt_tokens_details": {
+          "cached_tokens": 640
+        }
+      },
+      "reasoning_present": true,
+      "elapsed_seconds": 4.809160947799683,
+      "mentions_unrelated_goal": true
+    },
+    {
+      "variant": "no_goal_notice",
+      "sample": 1,
+      "request_sha256": "f9b4121190436d91f3f11b27b1d4269b4e60c7ae3febd611ad3df41a7cc7712b",
+      "request_last_role": "tool",
+      "http_status": 200,
+      "model": "deepseek-v4.1-flash",
+      "finish_reason": "stop",
+      "content": "리뷰 결과입니다.\n\n**a.ml** — 위반 없음. (이미 검토 완료)\n\n**b.ml** — `let add a b = a + b`. 기능적으로 정확하고, 실패 경로·부작용 없음. 지적할 사항 없습니다.\n\n두 파일 모두 읽고 확인했으며, 수정이나 외부 게시는 하지 않았습니다. 참고로 goal-unrelated-fixture는 이 리뷰와 무관한 verifier 소유 항목이라 손대지 않았습니다.",
+      "tool_calls": [],
+      "usage": {
+        "prompt_tokens": 697,
+        "completion_tokens": 150,
+        "total_tokens": 847,
+        "prompt_tokens_details": {
+          "cached_tokens": 640
+        }
+      },
+      "reasoning_present": true,
+      "elapsed_seconds": 1.5332388877868652,
+      "mentions_unrelated_goal": true
+    }
+  ]
+}

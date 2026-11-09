@@ -401,6 +401,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
   let config = Mcp_server.workspace_config state in
   Server_keeper_build_maintenance.start ~sw ~clock ~config;
   Server_keeper_volume_maintenance.start ~sw ~clock ~config;
+  Server_sandbox_volume_gc_report.start ~sw ~clock ~config;
   Server_tool_blob_sweep.start ~sw ~clock ~config;
   Server_provider_usage_history.install config;
   Lane_addon_runtime.register_skill_export_handler

@@ -34,6 +34,27 @@ val collapse_consecutive : key:('a -> string) -> 'a list -> ('a * int) list
     identical lines (six manual refreshes, a broadcast fan-out) as one row with
     a [×N] tail instead of spending its rows repeating itself. *)
 
+module Activity_tick : sig
+  type t
+  type decision = Quiet | Advance | Stop
+  val create : motion_interval_ns:int64 -> now_ns:int64 -> t
+  val take : t -> now_ns:int64 -> running:bool -> motion_visible:bool -> decision
+  (** Visible running marks retain the motion interval. Other running work
+      retains a one-second clock for elapsed/read/age notices. Stop emits one
+      reset only after this controller advanced. Input and source events use
+      the separate immediate render scheduler. *)
+  val begin_frame : unit -> unit
+  val note_motion : unit -> unit
+  val note_motion_if_visible : text:string -> width:int -> through_cell:int -> unit
+  (** Record a semantic moving span only if the original source cells through
+      its end survive the same fitting used by the row, including ellipsis. *)
+  val motion_visible : unit -> bool
+  (** UI-domain observation of the most recently built top frame. Renderers
+      note only a running glyph they emit; overlays and externally owned
+      picture/machine frames start with no observed motion. This is scheduling
+      demand, never activity/read authority or terminal acknowledgement. *)
+end
+
 module Input_wait : sig
   type 'a poll_result =
     | Ready of 'a

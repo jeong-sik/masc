@@ -2,7 +2,8 @@
    official account. A wrong answer starts a CLI on the subscription of
    another person. Read it against plan D2. *)
 
-(** Whether a CLI may start on an official account (multi-account plan D2).
+(** Whether a CLI may start on an official account (multi-account plan D2,
+    and D3 for Muse and the host clients).
 
     A captured account ({!Runtime_official_account.t}) holds the environment
     its CLI starts with, and that environment can hold a credential. A CLI
@@ -48,6 +49,64 @@ type 'client authorized
 
 (** The account, for the client that starts the CLI. *)
 val account : 'client authorized -> 'client Runtime_official_account.t
+
+(** {1 Muse}
+
+    Muse keeps its login in a home of its own, as Codex and Claude Code do,
+    and its client builds the environment of the process from that home when
+    the process starts. So a Muse account is its home alone, and
+    {!authorize_muse} judges it as {!authorize} judges a captured account. *)
+
+(** A declared Muse home. No Muse process starts on it: the runtime table
+    holds this. *)
+type muse_home
+
+(** Parses a declared home as {!Runtime_account_home.of_string} does. *)
+val declare_muse_home : string -> (muse_home, string) result
+
+(** The path of a declared home. It names the account, as its quota window
+    does, and carries no credential. *)
+val muse_home_path : muse_home -> string
+
+(** Where a Muse account is: a declared home, or the environment of the
+    process. *)
+type declared
+type process_environment
+
+(** What a Muse process starts on. *)
+type _ muse_account =
+  | Declared_home : muse_home -> declared muse_account
+  | Process_environment : process_environment muse_account
+      (** The home the environment of the process names, which protocol
+          fixtures use. A multi-account process refuses it, as it refuses an
+          inherited home of Codex and Claude Code. *)
+
+(** A Muse account a process may start on. Only {!authorize_muse} makes one. *)
+type 'where muse_authorized
+
+(** The home the Muse process starts on, for its client: the declared path,
+    or [None] for {!Process_environment}. *)
+val muse_account_home : _ muse_authorized -> string option
+
+(** The declared home, for a caller that prepares it before the call. *)
+val declared_muse_home : declared muse_authorized -> string
+
+(** {1 Host accounts}
+
+    Antigravity and Vibe start on accounts of the host, not of a person. The
+    credential of Antigravity is a copy in the setup registry, which has no
+    owner, and Vibe reads the configuration of the host user. A
+    multi-account process shares no account of its host (plan D3b), so only
+    a single-user process starts them. *)
+
+(** A client that starts on an account of the host. *)
+type host_client =
+  | Antigravity
+  | Vibe
+
+(** A start of a host client that the published access allows. Only
+    {!authorize_host} makes one. *)
+type host_account
 
 (** The access of a process. *)
 type t =
@@ -109,12 +168,25 @@ type refusal =
   | Not_active of Authz_types.User_id.t  (** The log has no active principal of this id. *)
   | No_membership of Authz_types.User_id.t
   | Home_unresolved of string  (** The home of the account could not be spelled. *)
-  | Not_a_declared_home  (** The account was captured from an inherited home. *)
+  | Not_a_declared_home
+      (** The account was captured from an inherited home, or a Muse process
+          would start on the environment of the process. *)
   | Not_the_account_home of Authz_types.Provider_account_id.t
       (** The account was captured from another home than the one of this
           account of the person. *)
+  | Host_account of host_client
+      (** A host client in a multi-account process, which shares no account
+          of its host. *)
 
 val refusal_to_string : refusal -> string
 
 (** Authorizes [sealed] for [request] by the access the process published. *)
 val authorize : request -> 'client sealed -> ('client authorized, refusal) result
+
+(** Authorizes a Muse account for [request] by the access the process
+    published, by the rule of {!authorize}. *)
+val authorize_muse : request -> 'where muse_account -> ('where muse_authorized, refusal) result
+
+(** Allows a start of a host client in a single-user process, and refuses it
+    in a multi-account process with {!Host_account}. *)
+val authorize_host : host_client -> (host_account, refusal) result

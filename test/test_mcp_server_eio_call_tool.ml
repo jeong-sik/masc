@@ -958,6 +958,175 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       with Eio.Cancel.Cancelled _ as error -> raise error | _ -> true in
       check bool "native retained receipt requires successful log commit" true failed)
 
+type board_trace_fault =
+  | Trace_available
+  | Trace_store_unavailable
+  | Trace_append_skipped
+  | Trace_post_commit_failure
+
+exception Board_trace_post_commit_failure of string
+
+let with_runtime_mcp_board_call
+      ?(attributed = true)
+      ?(requested_name = "masc_board_comment")
+      ?(project_result = Fun.id)
+      fault check_response
+  =
+  let module Call_log = Masc.Keeper_tool_call_log in
+  with_call_tool_state (fun env sw state ->
+    let config = Masc.Mcp_server.workspace_config state in
+    let base_path = config.base_path in
+    let keeper_name = "board-recording-keeper" in
+    let meta = make_keeper_meta keeper_name in
+    Masc.Board_dispatch.reset_for_test ();
+    Masc.Board.reset_global_for_test ();
+    Call_log.reset_for_testing ();
+    Fun.protect ~finally:(fun () ->
+      Dated_jsonl.set_append_guard (fun run -> run ());
+      Masc.Keeper_registry.For_testing.unregister ~base_path keeper_name;
+      Call_log.reset_for_testing ();
+      Masc.Board_dispatch.reset_for_test ();
+      Masc.Board.reset_global_for_test ()) @@ fun () ->
+    (match Masc.Board_dispatch.init_jsonl ~base_path
+        ~recipient_lookup:Masc_board_handlers.Recipient_lookup.none_declared () with
+     | Ok () -> () | Error detail -> fail detail);
+    ignore (Masc.Keeper_registry.register_offline ~base_path keeper_name meta);
+    Masc.Keeper_registry.mark_turn_started
+      ~observation_token:(Masc.Keeper_turn_observation_token.fresh ()) ~base_path
+      ~wake:Masc.Keeper_registry.Proactive_tick keeper_name;
+    (match fault with
+     | Trace_store_unavailable -> ()
+     | Trace_available | Trace_append_skipped | Trace_post_commit_failure ->
+       Call_log.init ~base_path ());
+    let post = Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator
+        ~result_boundary:Tool_output.Sent_to_client "masc_board_post"
+        (`Assoc ["author", `String keeper_name; "content", `String "Recording target"]) in
+    check bool "real Board target created" true (Tool_result.is_success post);
+    let post_id = U.(Tool_result.data post |> member "id" |> to_string) in
+    let arguments = `Assoc ["post_id", `String post_id; "content", `String "Committed once"] in
+    let dispatches = ref 0 and caller_notifications = ref 0 and guard_calls = ref 0 in
+    let produced = ref None in
+    let response = Masc.Mcp_server_eio_call_tool.handle_call_tool_eio
+      ~execute_tool_eio:(fun ~sw:_ ~clock:_ ~workspace_scope:_ ?profile:_
+        ?mcp_session_id:_ ?invocation_ref:_ ?auth_token:_ ?internal_keeper_runtime:_
+        ?on_caller_resolved state ~name:_ ~arguments ->
+        if attributed then
+          Option.iter (fun notify ->
+            incr caller_notifications;
+            notify { Masc.Mcp_server_eio_caller_identity.agent_name = keeper_name
+                   ; agent_name_is_ephemeral = false; token = None
+                   ; has_explicit_agent_name = true; verified_internal_keeper_runtime = true
+                   ; owner_keeper_identity = Some (keeper_name, None); mode_gate_error = None })
+            on_caller_resolved;
+        incr dispatches;
+        let result = match Masc.Mcp_tool_runtime_board.dispatch
+            ~reader:Masc_board_handlers.Board_access.Operator ~config ~state
+            ~agent_name:keeper_name ~name:"masc_board_comment" ~arguments with
+          | Some result -> project_result result
+          | None -> fail "the actual MCP Board comment route is missing" in
+        produced := Some result;
+        (* Fault only the trace append after the Board writer has returned.
+           Restore the wrapper before later request-audit/activity appends. *)
+        (match fault with
+         | Trace_available | Trace_store_unavailable -> ()
+         | Trace_append_skipped ->
+           Dated_jsonl.set_append_guard (fun _run ->
+             incr guard_calls;
+             Dated_jsonl.set_append_guard (fun run -> run ()))
+         | Trace_post_commit_failure ->
+           Dated_jsonl.set_append_guard (fun run ->
+             incr guard_calls;
+             Dated_jsonl.set_append_guard (fun run -> run ());
+             run ();
+             raise (Board_trace_post_commit_failure "/private/recording-fixture/secret")));
+        result)
+      ~maybe_emit_resource_notifications:(fun ~success:_ ~tool_name:_ -> ())
+      ~broadcast_tools_list_changed:(fun () -> ())
+      ~sw ~clock:(Eio.Stdenv.clock env) state (`Int 7)
+      (admit_call (`Assoc ["name", `String requested_name; "arguments", arguments])) in
+    let original = match !produced with
+      | Some value -> value | None -> fail "the actual MCP Board writer never ran" in
+    check int "MCP dispatches the Board mutation once" 1 !dispatches;
+    check int "the fixture actually reports resolved Keeper ownership"
+      (if attributed then 1 else 0) !caller_notifications;
+    (match Masc.Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
+     | Ok [comment] -> check string "one committed Board comment remains" "Committed once" comment.content
+     | Ok _ -> fail "the Board effect was omitted or retried"
+     | Error error -> fail (Masc.Board.show_board_error error));
+    check bool "recording uncertainty does not turn the Board effect into a failed Tool" false
+      U.(result_fields response |> member "isError" |> to_bool);
+    check string "original Board response content is preserved" (Tool_result.message original)
+      U.(result_fields response |> member "content" |> index 0 |> member "text" |> to_string);
+    check yojson "original Board result data is preserved" (Tool_result.data original)
+      U.(result_fields response |> member "structuredContent");
+    let expected_metadata = match Tool_result.metadata original with
+      | Some value -> value | None -> `Null in
+    check yojson "original producer metadata is preserved" expected_metadata
+      U.(call_meta response |> member "metadata");
+    check bool "private recording exception details never reach the response" false
+      (String_util.contains_substring (Yojson.Safe.to_string response) "/private/recording-fixture/secret");
+    check_response ~response ~original ~keeper_name ~guard_calls:!guard_calls)
+;;
+
+let test_runtime_mcp_board_recording_confirmation fault () =
+  with_runtime_mcp_board_call fault
+    (fun ~response ~original ~keeper_name ~guard_calls ->
+      let recording = U.(call_meta response |> member "board_action_recording") in
+      let execution_id = U.(recording |> member "execution_id" |> to_string) in
+      check bool "confirmation carries the actual minted execution identity" true
+        (String.trim execution_id <> "");
+      let fact = match Board_tool_evidence.of_metadata (Tool_result.metadata original) with
+        | Some (Ok fact) -> Board_tool_evidence.to_yojson fact
+        | Some (Error detail) -> fail detail
+        | None -> fail "the real comment producer supplied no Board fact" in
+      let caller_fact = Board_tool_evidence.of_metadata
+          (Some U.(call_meta response |> member "metadata")) in
+      check yojson "the caller retains the same committed Board fact" fact
+        (match caller_fact with
+         | Some (Ok fact) -> Board_tool_evidence.to_yojson fact
+         | Some (Error detail) -> fail detail
+         | None -> fail "the caller lost the Board fact");
+      let expected = match fault with
+        | Trace_available ->
+          `Assoc ["status", `String "confirmed"; "execution_id", `String execution_id]
+        | Trace_store_unavailable | Trace_append_skipped | Trace_post_commit_failure ->
+          `Assoc ["status", `String "unconfirmed"; "execution_id", `String execution_id
+                 ; "reason", `String "recording_confirmation_unavailable"] in
+      check yojson "recording status has only the owned closed fields" expected recording;
+      (match fault with
+       | Trace_available | Trace_post_commit_failure ->
+         let rows = tool_call_rows ~keeper_name () in
+         let row = match rows with
+           | [row] -> row | _ -> fail "expected the one canonical Board execution row" in
+         check string "the response and durable row share the same execution ID" execution_id
+           U.(row |> member "execution_id" |> to_string);
+         check yojson "the same producer fact reached the durable row" fact
+           U.(row |> member "board_action_evidence")
+       | Trace_store_unavailable -> ()
+       | Trace_append_skipped ->
+         check int "the declined trace append was actually skipped" 0
+           (List.length (tool_call_rows ~keeper_name ())));
+      check int "only the selected trace append receives the injected fault"
+        (match fault with Trace_available | Trace_store_unavailable -> 0
+         | Trace_append_skipped | Trace_post_commit_failure -> 1) guard_calls)
+;;
+
+let test_runtime_mcp_board_confirmation_requires_reserved_keeper_fact () =
+  let absent ~response ~original:_ ~keeper_name:_ ~guard_calls:_ =
+    check bool "non-authoritative metadata receives no recording confirmation" false
+      (has_field "board_action_recording" (call_meta response)) in
+  with_runtime_mcp_board_call ~attributed:false Trace_available absent;
+  with_runtime_mcp_board_call ~requested_name:"addon_board_comment" Trace_available absent;
+  with_runtime_mcp_board_call ~requested_name:"masc_board_reaction" Trace_available absent;
+  with_runtime_mcp_board_call ~requested_name:"masc_status" Trace_available absent;
+  with_runtime_mcp_board_call
+    ~project_result:(Tool_result.with_metadata (`Assoc [])) Trace_available absent;
+  with_runtime_mcp_board_call
+    ~project_result:(Tool_result.with_metadata
+      (`Assoc ["masc.board_action_evidence", `Assoc ["schema", `String Board_tool_evidence.schema;
+        "kind", `String "invalid"]])) Trace_available absent
+;;
+
 (* A result's media reaches an MCP client after its text, through the same
    projection the official-client bridge uses; media MCP cannot carry is named
    as not sent, never dropped quietly. *)
@@ -1062,5 +1231,15 @@ let () =
             test_runtime_mcp_keeper_log_context_loads_current_task_contract;
           test_case "runtime MCP trace logs and broadcasts" `Quick
             test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts;
+          test_case "actual MCP confirms the exact committed Board row" `Quick
+            (test_runtime_mcp_board_recording_confirmation Trace_available);
+          test_case "actual MCP preserves Board success with unavailable recording" `Quick
+            (test_runtime_mcp_board_recording_confirmation Trace_store_unavailable);
+          test_case "actual MCP distinguishes declined recording from Board success" `Quick
+            (test_runtime_mcp_board_recording_confirmation Trace_append_skipped);
+          test_case "actual MCP reports unconfirmed recording even after append" `Quick
+            (test_runtime_mcp_board_recording_confirmation Trace_post_commit_failure);
+          test_case "actual MCP recording confirmation requires reserved Keeper fact" `Quick
+            test_runtime_mcp_board_confirmation_requires_reserved_keeper_fact;
         ] );
     ]

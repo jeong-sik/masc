@@ -257,14 +257,6 @@ val run_next_operation : ?priority_predecessors:Keeper_chat_operation.Operation_
   unit ->
   (Keeper_owner.run_next_result, command_error) result
 
-val interrupt_running_operation
-  :  base_path:string
-  -> keeper_name:string
-  -> Keeper_chat_operation.Operation_id.t
-  -> (Keeper_owner.operation_interrupt_result, command_error) result
-(** Mailbox-linearized exact-operation interrupt. A request naming an older
-    operation cannot cancel a newer child for the same Keeper. *)
-
 type interactive_target =
   | Observed_turn_token of Keeper_interrupt_token.t
   | Direct_operation_id of Keeper_owner.Chat_operation.Operation_id.t

@@ -1,4 +1,22 @@
-let run ~cli_path ~account_home ~timeout_s =
+(* HIGH-RISK-UNREVIEWED: a model list is a call of the operator. This host
+   tool publishes its account access after its judgment of the base path, and
+   Muse starts only on an account that access allows (plan D3). *)
+let authorized ~base_path ~account_home =
+  let ( let* ) = Result.bind in
+  let* () =
+    Runtime_account_access.publish_host_tool ~base_path
+      ~config_dir:(Env_config_core.masc_config_dir_opt ())
+    |> Result.map_error (fun (first, rest) -> String.concat "; " (first :: rest))
+  in
+  let* home = Runtime_account_access.declare_muse_home account_home in
+  Runtime_account_access.authorize_muse Runtime_account_access.Operator_call
+    (Runtime_account_access.Declared_home home)
+  |> Result.map_error Runtime_account_access.refusal_to_string
+
+let run ~base_path ~cli_path ~account_home ~timeout_s =
+  match authorized ~base_path ~account_home with
+  | Error message -> prerr_endline message; 1
+  | Ok account ->
   let result =
     try
       let directory = Filename.temp_dir ~perms:0o700 "masc-muse-model-list-" "" |> Unix.realpath in
@@ -9,7 +27,7 @@ let run ~cli_path ~account_home ~timeout_s =
               ~grace_seconds:Process_eio.child_exit_grace_seconds in
           Runtime_muse_model_discovery.run ~mgr ~clock
             ~cwd:Eio.Path.(Eio.Stdenv.fs env / directory)
-            ~account_home ~cli_path ~timeout_s))
+            ~account ~cli_path ~timeout_s))
     with Sys_error _ | Unix.Unix_error _ ->
       Error (Runtime_muse_serve.Invalid_config
         "Muse model discovery could not prepare its private directory")

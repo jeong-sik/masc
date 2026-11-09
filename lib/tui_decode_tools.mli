@@ -294,11 +294,15 @@ type tool_snapshot = {
           carried no per-tool counts: the warming placeholder has totals and no
           [by_tool]. A tool with no row in a [Some] reading was not called,
           which is a different answer. *)
+  ts_volume_gc_report : Keeper_volume_gc_periodic.t option;
+      (** The server's last periodic [masc_sandbox_volume_gc] report. [None]
+          until the server's first pass ends, and from a server that runs
+          no pass. *)
 }
 
 val decode_tool_snapshot : Yojson.Safe.t -> (tool_snapshot, string) result
-(** Reads [tool_inventory] and [tool_usage.by_tool] out of the
-    /dashboard/tools envelope. *)
+(** Reads [tool_inventory], [tool_usage.by_tool] and
+    [sandbox_volume_gc_report] out of the /dashboard/tools envelope. *)
 
 val tool_usage_for : tool_usage_row list -> name:string -> tool_usage_row option
 (** The row for the tool the catalog lists as [name]. The server counts under

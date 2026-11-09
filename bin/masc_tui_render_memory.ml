@@ -223,6 +223,28 @@ type memory_context_projection =
   ; stalled_row : (int * string) option
   }
 
+let memory_librarian_stalled_lines (librarian : memory_librarian_health) =
+  match librarian.mlh_stalled with
+  | Some (Masc.Tui_decode_memory_health.Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }) ->
+    let atoms =
+      if mls_gap_end_atom - mls_gap_start_atom = 1
+      then Printf.sprintf "atom %d is" mls_gap_start_atom
+      else Printf.sprintf "atoms %d-%d are" mls_gap_start_atom (mls_gap_end_atom - 1)
+    in
+    [ Printf.sprintf "  Librarian stalled · %s in neither the request nor memory" atoms ]
+  | Some (Masc.Tui_decode_memory_health.Stalled_unmeasured { mls_cause; mls_detail }) ->
+    let cause =
+      match mls_cause with
+      | Masc.Tui_decode_memory_health.Stall_meta_unreadable -> "keeper meta unreadable"
+      | Masc.Tui_decode_memory_health.Stall_turn_records_unreadable -> "turn records unreadable"
+      | Masc.Tui_decode_memory_health.Stall_turn_boundary_refused -> "turn boundaries unreadable"
+      | Masc.Tui_decode_memory_health.Stall_snapshot_unreadable -> "continuity snapshot unreadable"
+      | Masc.Tui_decode_memory_health.Stall_read_position_unreadable -> "read position unreadable"
+    in
+    [ Printf.sprintf "  Librarian stalled · not measured, %s · %s" cause
+        (Terminal_text.preview_line mls_detail) ]
+  | None -> []
+
 let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
   let input_rows = memory_input_lines ~ko ~cols ~unit input in
   let stored_rows =
@@ -245,9 +267,11 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
       k.mkh_facts k.mkh_observed_facts k.mkh_derived_facts k.mkh_added
       k.mkh_removed k.mkh_support_invalidations
   in
+  (* The facts line above already counts the facts, so the ages follow
+     without a count of their own. *)
   let ladder_rows =
     clause_rows ~full ~cols
-      (Masc_tui_keeper_age_ladder.keeper_clauses ~ko k.mkh_age_bins)
+      (Masc_tui_keeper_age_ladder.ages_clauses ~ko k.mkh_age_bins)
   in
   (* RFC librarian-lifecycle §4.9: how far behind, when that was counted,
      and what the journal last said. A count the durable drain could not take prints
@@ -294,28 +318,7 @@ let memory_context_lines ?(full = false) ~ko ~cols ~detail ~unit ~input (k : Mas
      so the frame cutting a long Librarian line never cuts its atom numbers.
      A file the gap is read from that did not read gets the same row, naming
      which file: it is neither "no gap" nor a gap. *)
-  let librarian_stalled_lines =
-    match k.mkh_librarian.mlh_stalled with
-    | Some (Masc.Tui_decode_memory_health.Stalled_gap { mls_gap_start_atom; mls_gap_end_atom }) ->
-      let atoms =
-        if mls_gap_end_atom - mls_gap_start_atom = 1
-        then Printf.sprintf "atom %d is" mls_gap_start_atom
-        else Printf.sprintf "atoms %d-%d are" mls_gap_start_atom (mls_gap_end_atom - 1)
-      in
-      [ Printf.sprintf "  Librarian stalled · %s in neither the request nor memory" atoms ]
-    | Some (Masc.Tui_decode_memory_health.Stalled_unmeasured { mls_cause; mls_detail }) ->
-      let cause =
-        match mls_cause with
-        | Masc.Tui_decode_memory_health.Stall_meta_unreadable -> "keeper meta unreadable"
-        | Masc.Tui_decode_memory_health.Stall_turn_records_unreadable -> "turn records unreadable"
-        | Masc.Tui_decode_memory_health.Stall_turn_boundary_refused -> "turn boundaries unreadable"
-        | Masc.Tui_decode_memory_health.Stall_snapshot_unreadable -> "continuity snapshot unreadable"
-        | Masc.Tui_decode_memory_health.Stall_read_position_unreadable -> "read position unreadable"
-      in
-      [ Printf.sprintf "  Librarian stalled · not measured, %s · %s" cause
-          (Terminal_text.preview_line mls_detail) ]
-    | None -> []
-  in
+  let librarian_stalled_lines = memory_librarian_stalled_lines librarian in
   let librarian_cause_lines =
     (* The cause is drawn on its own row because it is the part of the
        Librarian row an operator acts on. *)
@@ -962,7 +965,7 @@ let memory_fleet_header_rows ~cols (state : state) : string list =
          ]
   in
   (* The ordinary facts counted by time since first seen, summed over the
-     Keepers whose row carries the server's ladder (RFC-0511 D2). A Keeper
+     Keepers whose row carries the server's ladder (RFC-0515 §2.4.5). A Keeper
      without one, and a row this build refused, are counted at the end of the
      row, so a partial sum does not read as the whole. *)
   let age_ladder_rows (snapshot : memory_health_snapshot) =
@@ -1112,6 +1115,134 @@ let memory_refused_keeper_lines (state : state) =
           (Terminal_text.single_line refusal.mkr_reason))
       refused
 
+let memory_operator_state (state : state) keeper =
+  let ko, en = match memory_state keeper with
+    | Memory_ordinary -> "기억 관측됨", "memory observed"
+    | Memory_warning -> "보고된 주의", "warning reported"
+    | Memory_degraded -> "Librarian 실패", "Librarian failed"
+    | Memory_no_current -> "스냅샷 없음", "no snapshot"
+    | Memory_source_only -> "출처 기억만 있음", "source memory only"
+    | Memory_starving -> "스냅샷 없음 · 처리 실패", "no snapshot; processing failed"
+    | Memory_read_error -> "기억 읽기 실패", "memory read failed"
+  in
+  ui_text state ~ko ~en
+
+(* The world's denominator is the workspace ledger, never a Keeper's facts.
+   Qualify retained values before counts, rather than appending a stale tail. *)
+let memory_world_axis (state : state) ~room =
+  let ko = state.ui_language = Lang_ko in
+  let reading = Masc_tui_memory_world.reading state.memory_world in
+  let provenance = match reading with
+    | Masc_tui_memory_world.Not_read -> [ui_text state ~ko:"미조회" ~en:"not read"]
+    | Masc_tui_memory_world.Reading -> [ui_text state ~ko:"조회 중" ~en:"reading"]
+    | Masc_tui_memory_world.Read_failed _ -> [ui_text state ~ko:"조회 실패 · 현재 값 미확인" ~en:"read failed; current value unknown"]
+    | Masc_tui_memory_world.Loaded { refresh_failure = Some _; _ } ->
+        [ui_text state ~ko:"마지막 관측 · 갱신 실패" ~en:"last observation; refresh failed"]
+    | Masc_tui_memory_world.Loaded { refresh_failure = None; _ } -> []
+  in
+  ( ui_text state ~ko:"05 공유 World" ~en:"05 Shared World"
+  , provenance @ Masc_tui_memory_world.clauses ~ko ~room reading )
+
+let memory_axis_context (state : state) ~cols ~compact (keeper : memory_keeper_health) =
+  let ko = state.ui_language = Lang_ko in
+  let text ~ko ~en = ui_text state ~ko ~en in
+  let width = max 1 (framed_inner_width cols - 2) in
+  let age = match keeper.mkh_read_error, keeper.mkh_snapshot_present with
+    | Some _, _ -> [text ~ko:"일반 사실 읽기 실패" ~en:"ordinary facts unreadable"]
+    | None, false -> [text ~ko:"일반 기억 스냅샷 없음" ~en:"no ordinary memory snapshot"]
+    | None, true -> Masc_tui_keeper_age_ladder.keeper_clauses ~ko keeper.mkh_age_bins
+  in
+  let saved = match keeper.mkh_read_error, keeper.mkh_snapshot_present with
+    | Some _, _ -> [text ~ko:"저장 시각 미확인" ~en:"save time unavailable"]
+    | None, false -> [text ~ko:"일반 기억 스냅샷 없음" ~en:"no ordinary memory snapshot"]
+    | None, true ->
+        [memory_updated_text keeper.mkh_updated_at;
+         text ~ko:"출처 재확인 시각과 별개" ~en:"not a source revalidation time"]
+  in
+  let source = match keeper.mkh_source_read_error, keeper.mkh_source_snapshot_present with
+    | Some _, _ -> [text ~ko:"출처 기억 읽기 실패" ~en:"source memory unreadable"]
+    | None, false -> [text ~ko:"출처 기억 스냅샷 없음" ~en:"no source memory snapshot"]
+    | None, true ->
+        [ Printf.sprintf (if ko then "출처 사실 %d개" else "%d source facts") keeper.mkh_source_facts
+        ; Printf.sprintf (if ko then "출처 무효화 %d건" else "%d source invalidations") keeper.mkh_source_invalidations
+        ]
+  in
+  let librarian = keeper.mkh_librarian in
+  let unread = match Masc_tui_keeper_memory_reading.unread_lag librarian with
+    | None -> text ~ko:"미읽은 턴 미측정" ~en:"unread turns unmeasured"
+    | Some turns -> Printf.sprintf (if ko then "미읽은 턴 %d개" else "%d unread turns") turns
+  in
+  let continuity = match librarian.mlh_continuity_unread_atoms with
+    | None -> text ~ko:"연속성 지연 미측정" ~en:"continuity lag unmeasured"
+    | Some atoms -> Printf.sprintf (if ko then "연속성 지연 %d atoms" else "continuity behind %d atoms") atoms
+  in
+  let pass = match librarian.mlh_state with
+    | None -> text ~ko:"pass 미관측" ~en:"pass not observed"
+    | Some ending -> "pass " ^ Masc_tui_keeper_memory_reading.pass_word ending
+  in
+  let axes =
+    [ text ~ko:"01 사실 나이 · First seen" ~en:"01 Fact age · first seen", age
+    ; text ~ko:"02 저장 갱신" ~en:"02 Snapshot saved", saved
+    ; text ~ko:"03 출처 무효화" ~en:"03 Source invalidation", source
+    ; text ~ko:"04 Librarian" ~en:"04 Librarian",
+        [unread; continuity; pass;
+         text ~ko:"현재 모델 실행 여부와 별개" ~en:"not current model execution"]
+    ; memory_world_axis state ~room:width
+    ]
+  in
+  let card ~cells (heading, clauses) =
+    heading :: Message_layout.pack_clauses ~max_cells:cells clauses
+  in
+  let axis_rows =
+    if compact then
+      List.map (fun (heading, clauses) ->
+        "  " ^ Message_layout.join_fitting ~sep:" · " ~cells:width (heading :: clauses)) axes
+    else if cols >= Masc_tui_roster_pane.threshold_cols then
+      let gap = "  │  " in
+      let cells = max 1 ((width - Message_layout.display_width gap) / 2) in
+      let rec pairs = function
+        | [] -> []
+        | [axis] -> List.map (fun row -> "  " ^ row) (card ~cells axis)
+        | left :: right :: rest ->
+            let left = card ~cells left and right = card ~cells right in
+            List.init (max (List.length left) (List.length right)) (fun index ->
+              "  " ^ Message_layout.fit_width
+                (Option.value (List.nth_opt left index) ~default:"") cells
+              ^ gap ^ Option.value (List.nth_opt right index) ~default:"")
+            @ (if rest = [] then [] else [""]) @ pairs rest
+      in
+      pairs axes
+    else
+      List.concat_map (fun (heading, clauses) ->
+        Message_layout.pack_clauses ~max_cells:width (heading :: clauses)
+        |> List.map (fun row -> "  " ^ row)) axes
+  in
+  let errors = List.filter_map Fun.id
+      [ Option.map (fun reason -> text ~ko:"일반 기억: " ~en:"Ordinary memory: " ^ Terminal_text.single_line reason) keeper.mkh_read_error
+      ; Option.map (fun reason -> text ~ko:"출처 기억: " ~en:"Source memory: " ^ Terminal_text.single_line reason) keeper.mkh_source_read_error
+      ; Option.map (fun reason -> "Librarian: " ^ Terminal_text.single_line reason)
+          (Option.bind librarian.mlh_state memory_librarian_pass_end_cause)
+      ] in
+  let stalled = memory_librarian_stalled_lines librarian in
+  let alerts = if keeper.mkh_alerts = [] then [] else
+      [Printf.sprintf
+         (if ko then "보고된 알림 %d건 (이력 포함) · v:근거" else "%d reported alerts (including history) · v:evidence")
+         (List.length keeper.mkh_alerts)] in
+  let warnings = List.map (fun row -> "  " ^ row) errors @ stalled
+      @ List.map (fun row -> "  " ^ row) alerts in
+  let observed = match state.memory_health with
+    | None -> ""
+    | Some snapshot ->
+        text ~ko:" · 관측 " ~en:" · observed " ^ memory_date snapshot.mhs_generated_at
+  in
+  let heading = "  " ^ text ~ko:"선택 · " ~en:"Selected · "
+      ^ Terminal_text.single_line keeper.mkh_keeper_id
+      ^ " · " ^ memory_operator_state state keeper ^ observed in
+  { rows = heading :: warnings @ axis_rows
+  ; primary_rows = 1 + List.length warnings
+  ; stalled_row = (match stalled with [] -> None | row :: _ -> Some (1 + List.length errors, row))
+  }
+
 (* The full fleet and selected Keeper readings remain reachable even when the
    small overview cannot fit them beside a useful list. This is a captured
    reading: selection and later refreshes do not change an open document. *)
@@ -1138,7 +1269,9 @@ let memory_overview_reading ~cols (state : state) =
         let input = Masc_tui_fetched.view_for ~equal:String.equal state.memory_input
             ~key:keeper.mkh_keeper_id in
         let context = memory_context_lines ~full:true ~ko ~cols ~detail:true ~unit:state.memory_unit ~input keeper in
-        [section
+        let axes = memory_axis_context state ~cols ~compact:false keeper in
+        [ section (if ko then "기억의 다섯 축" else "Five memory observations") axes.rows
+        ; section
            ((if ko then "선택한 키퍼 · " else "Selected Keeper · ") ^ keeper.mkh_keeper_id)
            context.rows]
   in
@@ -1228,9 +1361,12 @@ let refused_rows projection =
 let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   let keepers = visible_memory_keepers state in
   let cursor = Option.value cursor ~default:state.memory_health_cursor in
+  let selected = List.nth_opt keepers (max 0 (min cursor (List.length keepers - 1))) in
   let context =
-    match List.nth_opt keepers (max 0 (min cursor (List.length keepers - 1))) with
+    match selected with
     | None -> { rows = []; primary_rows = 0; stalled_row = None }
+    | Some keeper when not state.memory_overview_detail ->
+        memory_axis_context state ~cols ~compact:false keeper
     | Some keeper ->
       memory_context_lines ~ko:(state.ui_language = Lang_ko) ~cols ~detail:state.memory_overview_detail
         ~unit:state.memory_unit
@@ -1251,16 +1387,32 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
   let refused_min = if all_refused = [] then 0 else 1 in
   (* A compact selected reading keeps its state, an omission marker and an
      actionable stalled-gap row. [v] retains the full input and coverage. *)
+  let compact_context = match selected with
+    | Some keeper when not state.memory_overview_detail ->
+        memory_axis_context state ~cols ~compact:true keeper
+    | Some _ | None -> context
+  in
   let context_reserve =
     if context.rows = [] then 0
-    else 3 + (if Option.is_some context.stalled_row then 1 else 0)
+    else if state.memory_overview_detail then
+      3 + (if Option.is_some context.stalled_row then 1 else 0)
+    else List.length compact_context.rows + 1
   in
   let header_budget = max 0 (budget - fixed_rows - list_rows - refused_min - context_reserve) in
   (* On a very short frame the full list and selected detail must yield before
      a fleet warning does. Leave one row for the selected Keeper or empty
      state and one for a rejected-row notice when present. *)
   let compact_header_room = max 0 (budget - fixed_rows - 1 - refused_min) in
-  let full_header = memory_fleet_header_rows ~cols state in
+  let full_header =
+    if state.memory_overview_detail then memory_fleet_header_rows ~cols state
+    else
+      [memory_compact_fleet_row ~cols state]
+      @ (match selected with
+         | Some _ -> []
+         | None ->
+             let heading, clauses = memory_world_axis state ~room:(max 1 (framed_inner_width cols - 2)) in
+             clause_rows ~cols (heading :: clauses))
+  in
   let header =
     if List.length full_header <= header_budget then full_header
     else if compact_header_room > 0 then [memory_compact_fleet_row ~cols state]
@@ -1284,6 +1436,8 @@ let memory_overview_rows ~cols ~budget ?cursor (state : state) =
     in
     if context.rows = [] || available <= 1 then []
     else
+      let context =
+        if List.length context.rows <= available - 1 then context else compact_context in
       fold_memory_context_rows ~ko:(state.ui_language = Lang_ko) ~max_rows:(available - 1) context
   in
   { header; refused; refused_divider; context }
@@ -1294,6 +1448,14 @@ let memory_overview_scrolled ~cols ~budget ?cursor (state : state) =
     ~header_rows:(List.length projection.header)
     ~refused_rows:(refused_rows projection)
     ~context_rows:(List.length projection.context) state
+
+let memory_selector_line ~cols (state : state) keeper =
+  let width = max 1 (framed_inner_width cols - 2) in
+  let name_cells = max 1 (width / 2) in
+  let status_cells = max 1 (width - name_cells - 3) in
+  "  " ^ memory_state_cell (memory_state keeper) ^ " "
+  ^ Message_layout.fit_middle name_cells (Terminal_text.single_line keeper.mkh_keeper_id)
+  ^ " " ^ Message_layout.fit_width (memory_operator_state state keeper) status_cells
 
 let render_memory_body ~cols ~budget (state : state)
     ~(push : string -> unit)
@@ -1360,7 +1522,10 @@ let render_memory_body ~cols ~budget (state : state)
   if search_bar <> "" then push search_bar;
   push_divider ();
   push_styled ~style:(Theme.recede ())
-    ("  " ^ Render_schedule.memory_header_row ~ko columns);
+    (if state.memory_overview_detail then "  " ^ Render_schedule.memory_header_row ~ko columns
+     else ui_text state
+       ~ko:"  Keeper 선택 · j/k:이동  Enter:사실·출처  d:처리 진단  v:전체 근거"
+       ~en:"  Select Keeper · j/k:move  Enter:facts & sources  d:diagnostics  v:evidence");
   push_divider ();
   (match state.memory_health_error with
    | None -> ()
@@ -1418,9 +1583,12 @@ let render_memory_body ~cols ~budget (state : state)
       match Rows.at keepers_window idx with
       | None -> push_empty ()
       | Some k ->
+          let line =
+            if state.memory_overview_detail then memory_row_line ~unit:state.memory_unit columns k
+            else memory_selector_line ~cols state k in
           if idx = cursor then
-            push_selected (Masc_tui_theme.strip_sgr (memory_row_line ~unit:state.memory_unit columns k))
-          else push (memory_row_line ~unit:state.memory_unit columns k)
+            push_selected (Masc_tui_theme.strip_sgr line)
+          else push line
     done;
     if overflowing then
       push_styled ~style:(Theme.recede ())
@@ -1431,7 +1599,8 @@ let render_memory_body ~cols ~budget (state : state)
    | [] -> ()
    | lines ->
        push_divider ();
-       List.iter (push_styled ~style:(Theme.recede ())) lines)
+       if state.memory_overview_detail then List.iter (push_styled ~style:(Theme.recede ())) lines
+       else List.iter push lines)
 
 (* How many fact rows the list keeps before the detail below it takes any.
    Enough to read the cursor against its neighbours -- one row above, one

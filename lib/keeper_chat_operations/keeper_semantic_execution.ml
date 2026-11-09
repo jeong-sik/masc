@@ -254,6 +254,7 @@ type t =
   ; frame : Snapshot.t
   ; phase : phase
   ; native_call : Keeper_native_call.state
+  ; native_calls : Keeper_native_call.history_ref list
   ; input_response_intent : input_response_intent option
   ; input_branch : input_branch option
   ; created_at : float
@@ -403,7 +404,7 @@ let create ~id ~input ~sources ~now =
     let* input, input_sha256 = canonical_input input |> Result.map_error (fun detail -> Invalid_record detail) in
     let* frame = Snapshot.admit Snapshot.empty (Snapshot.Fresh id)
       |> Result.map_error (fun error -> Invalid_record (Snapshot.error_to_string error)) in
-    Ok { id; revision = 0L; input = Some input; input_sha256; gate_obligations=[]; sources; current_sources = sources; frame; phase = Preparing; native_call = Keeper_native_call.No_native_call; input_response_intent=None; input_branch=None; created_at = now; updated_at = now }
+    Ok { id; revision = 0L; input = Some input; input_sha256; gate_obligations=[]; sources; current_sources = sources; frame; phase = Preparing; native_call = Keeper_native_call.No_native_call; native_calls=[]; input_response_intent=None; input_branch=None; created_at = now; updated_at = now }
 
 let same_admission left right =
   Scope_id.equal left.id right.id && left.sources = right.sources
@@ -494,6 +495,39 @@ let validate_input_branch ~id ~revision ~phase ~native_call ~intent = function
           && Keeper_checkpoint_ref.equal intent.waiting.checkpoint branch.checkpoint then Ok ()
       else Error "input branch response intent names another input head"
 
+let same_history_locator (left : Keeper_native_call.history_ref) (right : Keeper_native_call.history_ref) =
+  Yojson.Safe.equal (Agent_core.Agent.execution_locator_to_yojson left.locator)
+    (Agent_core.Agent.execution_locator_to_yojson right.locator)
+
+let append_native_history history call =
+  let reference = Keeper_native_call.history_ref call in
+  if List.exists (fun (previous : Keeper_native_call.history_ref) ->
+      previous.call_id = reference.call_id || same_history_locator previous reference) history
+  then Error "native call identity or locator was already published"
+  else Ok (history @ [reference])
+
+let validate_native_history ~id ~input_sha256 ~native_call history =
+  let module Ids = Set.Make (String) in
+  let rec validate call_ids locators = function
+    | [] -> Ok ()
+    | (reference : Keeper_native_call.history_ref) :: rest ->
+      let locator = Yojson.Safe.to_string
+          (Agent_core.Agent.execution_locator_to_yojson reference.locator) in
+      if Option.is_none (Scope_id.direct_operation_id id) then
+        Error "native history requires a direct operation"
+      else if reference.operation_digest <> input_sha256 then
+        Error "historical native operation digest changed"
+      else if Ids.mem reference.call_id call_ids || Ids.mem locator locators then
+        Error "native history repeats a call identity or locator"
+      else validate (Ids.add reference.call_id call_ids) (Ids.add locator locators) rest in
+  let* () = validate Ids.empty Ids.empty history in
+  match native_call with
+  | Keeper_native_call.No_native_call -> Ok ()
+  | Keeper_native_call.Active call | Keeper_native_call.Terminal_unacknowledged (call, _) ->
+    (match List.rev history with
+     | latest :: _ when Keeper_native_call.equal_history_ref latest (Keeper_native_call.history_ref call) -> Ok ()
+     | _ :: _ | [] -> Error "current native call is not the latest historical association")
+
 let update_native_call ~now ~expected ~replacement current =
   let open Keeper_native_call in
   let invalid detail = Error (Invalid_transition detail) in
@@ -522,9 +556,15 @@ let update_native_call ~now ~expected ~replacement current =
     let* () = validate_input_branch ~id:current.id ~revision:current.revision
         ~phase:current.phase ~native_call:replacement ~intent:current.input_response_intent current.input_branch
       |> Result.map_error (fun detail -> Invalid_transition detail) in
+    let* native_calls = (match expected, replacement with
+      | (No_native_call | Terminal_unacknowledged _), Active call ->
+        append_native_history current.native_calls call
+      | (No_native_call | Active _ | Terminal_unacknowledged _),
+          (No_native_call | Active _ | Terminal_unacknowledged _) -> Ok current.native_calls)
+      |> Result.map_error (fun detail -> Invalid_transition detail) in
     if equal_state expected replacement then Ok current
     else if current.revision = Int64.max_int then Error Revision_exhausted
-    else Ok {current with native_call=replacement; revision=Int64.succ current.revision; updated_at=now}
+    else Ok {current with native_call=replacement; native_calls; revision=Int64.succ current.revision; updated_at=now}
 
 let apply ~now action current =
   if not (valid_time now) then Error (Invalid_transition "invalid transition time")
@@ -979,7 +1019,7 @@ let input_response_intent_json (intent : input_response_intent) =
       | Agent_core.Hooks.Timeout -> `Assoc ["kind",`String "timeout"])]
 
 let to_json execution =
-  `Assoc ([ "schema", `String "masc.keeper_semantic_execution.v1"
+  `Assoc ([ "schema", `String "masc.keeper_semantic_execution.v2"
          ; "id", Scope_id.to_json execution.id
          ; "revision", `Intlit (Int64.to_string execution.revision)
          ; "input", (match execution.input with None -> `Null | Some payload -> `Assoc ["payload", payload])
@@ -988,6 +1028,7 @@ let to_json execution =
          ; "current_sources", `List (List.map source_to_json execution.current_sources)
          ; "frame", Snapshot.to_json execution.frame
          ; "phase", phase_json execution.phase
+         ; "native_calls", `List (List.map Keeper_native_call.history_ref_to_json execution.native_calls)
          ; "created_at", `Float execution.created_at
          ; "updated_at", `Float execution.updated_at ]
           @ (match execution.native_call with Keeper_native_call.No_native_call -> []
@@ -1318,12 +1359,15 @@ let of_json json =
       | `Assoc fields when not (List.mem_assoc "gate_obligations" fields) ->
         `Assoc (("gate_obligations", `List []) :: fields)
       | json -> json in
-    let* fields = exact ["schema";"id";"revision";"input";"input_sha256";"gate_obligations";"sources";"current_sources";"frame";"phase";"created_at";"updated_at"] json in
+    let* fields = exact ["schema";"id";"revision";"input";"input_sha256";"gate_obligations";"sources";"current_sources";"frame";"phase";"native_calls";"created_at";"updated_at"] json in
     let* gate_obligations = match field "gate_obligations" fields with
       | `List rows -> decode_list gate_obligation_of_json rows
       | _ -> Error "Gate obligations must be a list" in
     let* schema = string "schema" fields in
-    let* () = if schema = "masc.keeper_semantic_execution.v1" then Ok () else Error "unsupported execution schema" in
+    let* () = if schema = "masc.keeper_semantic_execution.v2" then Ok () else Error "unsupported execution schema" in
+    let* native_calls = match field "native_calls" fields with
+      | `List rows -> decode_list Keeper_native_call.history_ref_of_json rows
+      | _ -> Error "native call history must be a list" in
     let* id = Scope_id.of_json (field "id" fields) in
     let* revision = int64 "revision" fields in
     let* () = if revision < 0L then Error "negative execution revision" else Ok () in
@@ -1386,6 +1430,7 @@ let of_json json =
     let* input_sha256 = string "input_sha256" fields in
     let* () = if canonical_sha input_sha256 then Ok () else Error "invalid admitted input digest" in
     let* () = validate_native_call ~id ~input_sha256 ~phase native_call in
+    let* () = validate_native_history ~id ~input_sha256 ~native_call native_calls in
     let* () = validate_input_branch ~id ~revision ~phase ~native_call ~intent:input_response_intent input_branch in
     let* input = match field "input" fields with
       | `Null -> Ok None
@@ -1418,5 +1463,5 @@ let of_json json =
       else Error "execution phase, revision and initial frame are incoherent" in
     let* created_at = time "created_at" fields in
     let* updated_at = time "updated_at" fields in
-    Ok { id; revision; input; input_sha256; gate_obligations; sources; current_sources; frame; phase; native_call; input_response_intent; input_branch; created_at; updated_at }
+    Ok { id; revision; input; input_sha256; gate_obligations; sources; current_sources; frame; phase; native_call; native_calls; input_response_intent; input_branch; created_at; updated_at }
   in decode () |> Result.map_error (fun detail -> Invalid_record detail)

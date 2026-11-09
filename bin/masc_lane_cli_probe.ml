@@ -64,7 +64,13 @@ let vibe_readiness_timeout_s = 30.0
 
 (* vibe-acp opens its session in an empty private directory, as the panelist
    call runs in one, so neither loads a project [.vibe]. *)
+(* HIGH-RISK-UNREVIEWED: vibe-acp reads the configuration of the host user,
+   which a multi-account workspace shares with no person (plan D3b). The probe
+   publishes its account access before the first read. *)
 let read_vibe_readiness env ~acp_path =
+  match Runtime_account_access.authorize_host Runtime_account_access.Vibe with
+  | Error refusal -> Error (Runtime_account_access.refusal_to_string refusal)
+  | Ok host ->
   match Filename.temp_dir ~perms:0o700 "masc-vibe-readiness-" "" with
   | exception Sys_error detail -> Error ("cannot create the readiness workdir: " ^ detail)
   | workdir ->
@@ -78,6 +84,7 @@ let read_vibe_readiness env ~acp_path =
           workdir
           (Printexc.to_string exn));
     Runtime_vibe_acp_readiness.read
+      ~host
       ~mgr:(Eio.Stdenv.process_mgr env)
       ~clock:(Eio.Stdenv.clock env)
       ~fs:(Eio.Stdenv.fs env)

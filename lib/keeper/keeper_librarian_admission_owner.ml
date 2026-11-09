@@ -52,7 +52,8 @@ let fresh_authority ~config ~reserved owner capture =
   admit ~config ~reserved ~destination:(Capture.destination capture) ~publish:(fun () -> Ok ())
 
 type outcome = Disabled | Idle | Recheck_new_input | Settled of {has_more:bool}
-  | Pending of string | Addon_unattached of {pending:int} | Unavailable of string
+  | Pending of string | Awaiting_worker of Keeper_librarian_pending.worker
+  | Addon_unattached of {pending:int} | Unavailable of string
 
 type original = {capture:Capture.t;record:Owner.retained}
 type inventory = {parts:Parts.inventory;executions:original list}
@@ -148,6 +149,7 @@ type part_result =
   | Terminal of Parts.terminal_source * bool
   | Children of Parts.part * Parts.part
   | Waiting of string
+  | Worker_wait of Keeper_librarian_pending.worker
   | Addon_off
   | Reprepared
 let source original part = Parts.Original_execution {
@@ -265,17 +267,12 @@ let settle_interrupted ~store ~owner part original =
     "Librarian explicit admission settled interrupted execution %s; part %s is prepared again"
     original.record.request_id (Parts.part_id part);
   Ok Reprepared
-(* A part with no original yet, or one still before admission, can only move
-   through a live worker read and submit. *)
-let needs_worker = function
-  | None -> true
-  | Some original -> (match Progress.phase original.record.progress with
-    | Progress.Captured | Admission_wait _ -> true
-    | Dispatch_pending _ | Judged _ | Committing _ | Commit_unknown _ | Finished _
-    | Conflicted _ | Rejected _ | Subdividing _ | Subdivided _ -> false)
 let evaluate ~store ~config ~reserved ~owner ~inventory part =
   let existing=for_part inventory part in
-  if needs_worker existing && unattached ~config ~reserved then Ok Addon_off else
+  (* No destination can capture a fresh original while Off. An existing
+     original still takes submit-once's actual wait/terminal observation, even
+     before admission; Off must not erase its identity or retained progress. *)
+  if Option.is_none existing && unattached ~config ~reserved then Ok Addon_off else
   let* original=match existing with
     | Some original -> Ok original
     | None -> new_capture ~config ~reserved ~owner part in
@@ -287,11 +284,9 @@ let evaluate ~store ~config ~reserved ~owner ~inventory part =
     ~validate_answer:(fun proposal -> Capture.validate_proposal original.capture proposal |> Result.map (fun _ -> ()))
     ~call:(call ~config ~reserved) |> Result.map_error Dispatch.error_to_string in
   match state with
-  (* A dispatched original whose worker cannot be reached while no Add-on is
-     attached is the Add-on being off, not a pending provider. *)
-  | Dispatch.Pending (Dispatch.Worker_unreachable,_) when unattached ~config ~reserved -> Ok Addon_off
-  | Dispatch.Pending ((Capacity | Worker_pending | Worker_unknown | Worker_unreachable
-      | Missing_after_dispatch | Journal_recheck),_) -> Ok (Waiting "Original Librarian Addon request is pending")
+  | Dispatch.Pending (wait, record) ->
+    Ok (Worker_wait (Keeper_librarian_pending.of_worker_wait
+      ~installation_id:record.installation_id ~request_id:record.request_id wait))
   | Refused (_,record) ->
     let original={original with record} in
     let* refusal=execution_refusal original in
@@ -426,6 +421,7 @@ let run_queue ~base_path ~keeper_name =
             Only a completed walk may request another immediate queue pass;
             actual Runtime/candidate events wake waiting originals. *)
          Ok (if committed then Settled {has_more=false} else Pending reason)
+       | Ok (Worker_wait wait) -> Ok (Awaiting_worker wait)
        | Ok Addon_off -> if committed then Ok (Settled {has_more=false}) else addon_unattached ()
        | Ok (Terminal (_,did_commit)) ->
          walk ~committed:(committed || did_commit) ~held:Written_since_read rest

@@ -1,6 +1,9 @@
 (** The editable chat draft. Cursor positions are UTF-8 byte offsets; every
     mutation keeps the cursor at a grapheme boundary. Restored drafts start at
-    their end, while typed and pasted text is inserted at the current cursor. *)
+    their end, while typed and pasted text is inserted at the current cursor.
+    Each immutable text retains its own lazy boundary index. End insertion
+    needs no boundary search; safe whole-grapheme tail deletion reuses the
+    index prefix. Other edits resegment the complete replacement. *)
 type t
 
 type revision

@@ -14,9 +14,6 @@ val browser_principal_for_caller :
 (** Mcp_server_eio_execute — inner [tools/call] dispatcher.
 
     Only a small set of entries reach callers:
-    - {!caller_agent_name_from_arguments} — isolates the
-      HTTP [_agent_name] caller identity contract without running
-      the full dispatcher.
     - {!execute_tool_eio} — invoked by
       [lib/server/server_runtime_bootstrap.ml] and threaded
       through {!Mcp_server_eio_call_tool.handle_call_tool_eio}
@@ -35,12 +32,6 @@ val browser_principal_for_caller :
     body itself contains many internal sub-helpers
     (audit wrappers, tool dispatchers, error formatters)
     that are local to its lexical scope. *)
-
-val caller_agent_name_from_arguments : Yojson.Safe.t -> string option
-(** Returns the explicit caller identity carried in [tools/call]
-    arguments.  Only the internal HTTP-auth marker [_agent_name] is
-    accepted; tool-domain [agent_name] arguments are not caller
-    identity.  Blank and ["unknown"] values are ignored. *)
 
 val resolve_bind_state :
   workspace_initialized:bool ->

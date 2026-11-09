@@ -166,6 +166,27 @@ let peek_file_change_artifact_refs ~invocation () =
     | None -> [])
 ;;
 
+let pending_board_action_evidence :
+      (Board_tool_evidence.t, string) result Invocation_table.t =
+  Invocation_table.create 8
+
+let pending_board_action_mu = Stdlib.Mutex.create ()
+let with_pending_board_action_lock f =
+  Stdlib.Mutex.lock pending_board_action_mu;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock pending_board_action_mu) f
+
+let set_board_action_evidence ~invocation ~evidence =
+  with_pending_board_action_lock (fun () ->
+    Invocation_table.replace pending_board_action_evidence invocation evidence)
+
+let peek_board_action_evidence ~invocation () =
+  with_pending_board_action_lock (fun () ->
+    Invocation_table.find_opt pending_board_action_evidence invocation)
+
+let clear_board_action_evidence ~invocation () =
+  with_pending_board_action_lock (fun () ->
+    Invocation_table.remove pending_board_action_evidence invocation)
+
 (* Complete observation artifacts must outlive their truncated log preview.
    The Agent Core hook keeps this carrier until it commits the exact
    invocation row; a composition executor takes a child call's entry and
@@ -460,6 +481,8 @@ let reset_for_testing () =
   with_invocation_execution_ids_lock (fun () -> Invocation_table.reset invocation_execution_ids);
   with_pending_file_change_evidence_lock (fun () ->
     Invocation_table.reset pending_file_change_evidence);
+  with_pending_board_action_lock (fun () ->
+    Invocation_table.reset pending_board_action_evidence);
   with_retained_artifacts_lock (fun () -> Invocation_table.reset pending_retained_artifacts)
 ;;
 
@@ -803,6 +826,7 @@ let log_call
       ?typed_result
       ?disposition
       ?file_change_evidence
+      ?board_action_evidence
       ?execution_evidence
       ?(artifact_refs = [])
       ?composition_tool
@@ -830,11 +854,19 @@ let log_call
       ?on_committed
       ()
   =
+  let board_action_evidence =
+    let evidence = match board_action_evidence with
+      | Some value -> Some value
+      | None -> Option.bind typed_result (fun result ->
+          Board_tool_evidence.of_metadata (Tool_result.metadata result)) in
+    Option.map (Board_tool_evidence.for_tool ~tool_name) evidence
+  in
   let commit_observer = current_commit_observer () in
   let requires_commit =
     Option.is_some commit_observer || Option.is_some on_committed
     || Option.is_some tool_observation || artifact_refs <> []
     || Option.exists (fun result -> Tool_result.retained_artifacts result <> []) typed_result
+    || (match board_action_evidence with Some (Ok _) -> true | Some (Error _) | None -> false)
   in
   match (Atomic.get store_state).store with
     | None ->
@@ -1042,6 +1074,14 @@ let log_call
           , `String (Tool_result.string_of_tool_call_outcome wire_outcome) )
         ]
       in
+      let board_action_evidence_field =
+        match board_action_evidence with
+        | None -> []
+        | Some (Ok fact) -> [ "board_action_evidence", Board_tool_evidence.to_yojson fact ]
+        | Some (Error _) ->
+          [ "board_action_evidence", `Assoc
+              [ "schema", `String Board_tool_evidence.schema; "kind", `String "invalid" ] ]
+      in
       let file_change_evidence_field =
         match file_change_evidence with
         | Some evidence ->
@@ -1214,6 +1254,7 @@ let log_call
            @ execution_mode_field
            @ wire_outcome_field
            @ typed_result_fields
+           @ board_action_evidence_field
            @ artifact_ref_fields
            @ file_change_evidence_field
            @ execution_evidence_field

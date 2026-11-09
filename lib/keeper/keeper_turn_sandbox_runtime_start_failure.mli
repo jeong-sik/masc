@@ -1,8 +1,7 @@
 (** Why a guest start fails and which side is at fault: the error of preparing
     a GitHub identity, the post-boot checks, the constructors of a microvm
     start failure with the sentence each one prints and the side it belongs
-    to, the delivery a keeper chose, and the request an Apple boot is compared
-    and run with.
+    to, and the request an Apple boot is compared and run with.
 
     [Keeper_turn_sandbox_runtime] includes this module. *)
 
@@ -42,9 +41,6 @@ type microvm_start_failure =
       (** Neither the keeper nor the workspace names a size that parses, so
           there is nothing to boot the guest with or compare a running one
           against. *)
-  | Delivery_unresolved of string
-      (** The keeper TOML could not be read for [microvm_delivery], so there
-          is no knowing which guest to boot or compare a running one with. *)
   | Agent_socket_unavailable of Keeper_microvm_agent_socket.preparation_error
       (** The host end of the agent's socket could not be made ready before
           the boot that publishes it. *)
@@ -92,14 +88,8 @@ val microvm_start_failure_message : microvm_start_failure -> string
 val microvm_start_failure_cause :
   microvm_start_failure -> github_identity_preparation_error
 
-val microvm_delivery_for :
-  base_path:string ->
-  keeper_name:string ->
-  (Keeper_types_profile_sandbox.microvm_delivery, string) result
-
 val requested_apple_plan :
   t ->
-  delivery:Keeper_types_profile_sandbox.microvm_delivery ->
   image:string ->
   guest_size:Keeper_microvm_guest_size.t ->
   identity_host_dir:string ->

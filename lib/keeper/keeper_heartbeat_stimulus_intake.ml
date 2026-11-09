@@ -822,23 +822,40 @@ let reconcile_spent_selection
 
 type intake_source_scope =
   | General_sources
-  | Scheduled_work of Keeper_event_queue_state.pending_selection
+  | Routed_attention
+  | Unrouted_scheduled_work
+  | Scheduled_delivery of Keeper_continuation_channel.t
 
 let source_scope (selection : Keeper_event_queue_state.pending_selection) =
   match selection.source.payload with
-  | Keeper_event_queue.Schedule_due _ -> Scheduled_work selection
+  | Keeper_event_queue.Schedule_due { result_delivery = None; _ } -> Unrouted_scheduled_work
+  | Keeper_event_queue.Schedule_due { result_delivery = Some channel; _ } ->
+    Scheduled_delivery channel
   | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _ | Board_attention _ | Bootstrap
   | Fusion_completed _ | Connector_attention _ | Hitl_resolved _
   | Ask_answered _ | Completion_authority_rejected _ | Task_cancelled _
   | Workspace_message _ | Delegate_completed _ | Composition_completed _
-  | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ -> General_sources
+  | Tool_result_ready _ | Owned_job_completed _ | Task_outcome _ ->
+    match Keeper_event_queue.continuation_channel_of_payload selection.source.payload with
+    | None -> General_sources
+    | Some _ -> Routed_attention
 
-let same_source_scope left right = match left,right with
-  | Scheduled_work left, Scheduled_work right ->
-      Keeper_event_queue_state.same_entry left right
-  | Scheduled_work _, General_sources
-  | General_sources, Scheduled_work _ -> false
-  | General_sources,General_sources -> true
+let merge_source_scope left right = match left,right with
+  | General_sources, General_sources -> Some General_sources
+  | General_sources, Routed_attention | Routed_attention, General_sources
+  | Routed_attention, Routed_attention -> Some Routed_attention
+  | General_sources, Unrouted_scheduled_work | Unrouted_scheduled_work, General_sources
+  | Unrouted_scheduled_work, Unrouted_scheduled_work -> Some Unrouted_scheduled_work
+  | Scheduled_delivery left, Scheduled_delivery right ->
+    if Keeper_continuation_channel.same_route left right then Some (Scheduled_delivery left)
+    else None
+  | Routed_attention, Unrouted_scheduled_work | Unrouted_scheduled_work, Routed_attention
+  | Scheduled_delivery _, (General_sources | Routed_attention | Unrouted_scheduled_work)
+  | (General_sources | Routed_attention | Unrouted_scheduled_work), Scheduled_delivery _ -> None
+
+let extended_source_scope admitted selection =
+  let scope = source_scope selection in
+  match admitted with None -> Some scope | Some current -> merge_source_scope current scope
 
 let heartbeat_event_intake
       ~ctx
@@ -998,9 +1015,7 @@ let heartbeat_event_intake
         , first_withdrawn
         , None )
       | _, (selection : Keeper_event_queue_state.pending_selection) :: rest
-        when (match !admitted_scope with
-          | None -> false
-          | Some scope -> not (same_source_scope scope (source_scope selection))) ->
+        when Option.is_none (extended_source_scope !admitted_scope selection) ->
         (* Another invocation/conversation, or a channel-less general source,
            stays durable for its own turn. Skipping does not ACK it or spend
            this batch's existing admission allowance. *)
@@ -1210,9 +1225,7 @@ let heartbeat_event_intake
             | Stimulus_consumed observations ->
               (* Choose only after canonical consumption succeeds. An unread
                  Add-on must not anchor the batch and starve independent work. *)
-              (match !admitted_scope with
-               | None -> admitted_scope:=Some (source_scope selection)
-               | Some _ -> ());
+              admitted_scope := extended_source_scope !admitted_scope selection;
               loop
                 (remaining - 1)
                 (List.rev_append observations observations_rev)

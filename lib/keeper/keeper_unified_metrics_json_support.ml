@@ -14,11 +14,6 @@ let decision_id ~(meta : keeper_meta) ~(ts : float) ~(suffix_seed : string) : st
     (Int64.of_float (ts *. 1000.0))
     (String.sub digest 0 8)
 
-let tool_call_detail_to_json
-    (detail : Keeper_agent_run.tool_call_detail)
-  : Yojson.Safe.t =
-  Keeper_agent_run.tool_call_detail_to_json detail
-
 let provider_context_json ~(meta : keeper_meta) ?executed_runtime_id
     (result : Keeper_agent_run.run_result option) =
   let observed_runtime_id =

@@ -16,9 +16,12 @@
     run together. Simultaneous notes share a column; its widest note decides
     the room they need. A tab wider than the pane breaks at bar lines into
     systems. A bar that cannot fit alone continues at beat boundaries, with
-    [>] at the open edges and the same bar number followed by [+]. Repeat
-    and ending signs remain at their original bar edges. No beat, chord or
-    held note is divided, dropped or given a new musical bar.
+    [>] at the open edges and the same bar number followed by [+]. A bar that
+    has to continue starts its own system: the line breaks at the bar line
+    before it breaks between beats, so a bar never begins in the middle of a
+    line another bar already fills. Repeat and ending signs remain at their
+    original bar edges. No beat, chord or held note is divided, dropped or
+    given a new musical bar.
 
     When the text is not a score, or one beat with its bar marks cannot fit, the
     result is an [Error]: the fence arm then shows the reason and the source,

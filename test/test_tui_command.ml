@@ -87,6 +87,8 @@ let describe = function
          | `Results -> "results"
          | `Full -> "full")
   | Command.Cycle_memory -> "cycle-memory"
+  | Command.Memory_status -> "memory-status"
+  | Command.Memory_sync -> "memory-sync"
   | Command.Open_fleet_memory -> "open-fleet-memory"
   | Command.Find_in_chat text -> "find:" ^ text
   | Command.Find_next -> "find-next"
@@ -262,6 +264,9 @@ let test_pane_commands_parse_by_word () =
     ; "tools:results"
     ; "tools:full"
     ; "cycle-memory"
+    ; "memory-status"
+    ; "memory-sync"
+    ; "unknown:memory retry-all"
     ; "open-fleet-memory"
     ; "find:caret"
     ; "find:two words"
@@ -333,6 +338,9 @@ let test_pane_commands_parse_by_word () =
        ; "/tools results"
        ; "/tools full"
        ; "/memory"
+       ; "/memory status"
+       ; "/memory sync"
+       ; "/memory retry-all"
        ; "/fleet-memory"
        (* The text is the rest of the line, spaces and all: a search phrase is
           not one word, and quoting it would be a second grammar. *)
@@ -822,7 +830,7 @@ let test_autocomplete_cycles_ambiguous_prefix () =
 let test_autocomplete_finished_word_does_not_mutate () =
   check (option string) "/settings stays /settings (no args)" None
     (Command.autocomplete "/settings");
-  check (option string) "/memory stays /memory (no args)" None
+  check (option string) "/memory offers its explicit status and sync arguments" (Some "/memory ")
     (Command.autocomplete "/memory");
   check (option string) "/help stays /help (no args)" None
     (Command.autocomplete "/help");

@@ -499,6 +499,14 @@ remote_ssh uses its configured endpoint root.
 The microVM volume name does not include the workspace, so same-named
 Keepers using one runtime store can share a tree across workspaces.
 
+Only the endpoint user may enter a remote_ssh Keeper's directory
+(`remote_root/<keeper>`); bootstrap creates it at mode `0700`. When group or
+others can enter it, the hourly workspace cleanup removes nothing for that
+Keeper and logs the directory's mode and the fix. A container entrypoint that
+creates the directory itself must use the same mode. The
+[SSH endpoint runbook](operations/ssh-endpoints-runbook.md#keeper-directory-mode)
+has the details.
+
 When a microVM sets `observation_run = "guest_local"`, the observation stage
 cannot establish exclusive volume ownership and sends the request to the judge
 instead of running that box. This does not prevent writes authorized through
@@ -588,16 +596,11 @@ A bare host admits port 443 and a wildcard does not include its apex. Other
 backends do not silently fall back to `inherit` when `policy` is unsupported;
 they refuse it.
 
-To send one Keeper's requests through a guest agent instead of one
-`container exec` per request, add `microvm_delivery = "agent_socket"` to its
-`[keeper]` table ([RFC](rfc/RFC-microvm-guest-agent-over-socket.md); a
-per-Keeper canary for now). It is accepted only beside
-`sandbox_profile = "microvm"` and `microvm_backend = "apple_container"`, as in
-the example above; a Keeper that leaves the backend to the host default adds
-the `microvm_backend` line as well. The Keeper's next turn replaces its guest with one whose first
-process is the shim's agent, and removing the line replaces it back on the
-turn after the change. The host end of the agent's socket is under
-`<base>/.masc/microvm/agent/`.
+An Apple container guest takes every request through its guest agent
+([RFC](rfc/RFC-microvm-guest-agent-over-socket.md)): the guest's first process
+is the shim's agent, and the host end of its socket is under
+`<base>/.masc/microvm/agent/`. No Keeper TOML key chooses this. A
+`nerdctl_kata` or `microsandbox` guest runs one exec of the shim per request.
 
 ### One Docker Keeper
 
@@ -870,11 +873,20 @@ absolute turn together — rather than joining nearby timestamps.
   snapshot references, admission revisions and first-admission clocks. This
   records intake. Queue outcomes are joined from the reaction ledger by the
   exact stimulus ID, snapshot reference and admission revision. The view keeps
-  completed-turn ACK, failed-attempt ACK, cancellation and transfer distinct.
+  completed-turn ACK, Fusion/HITL terminal ACK, cancellation and transfer distinct.
   It shows when the ledger was read and any damaged rows or storage failures.
   No matching receipt means only that none was observed in that read; it does
   not establish current queue status. An ACK is not proof of PR approval or
   another business result. Conflicting receipts remain unresolved.
+- **Board comments and reactions** links the writer-recorded comment, parent
+  reply and reaction target, including reaction removal. It reads the selected
+  turn's exact executions, including committed inline Skill children, beyond
+  the recent-call window and requires the
+  existing Admin permission for raw tool records. These are same-turn actions;
+  they do not establish which input caused each action. Missing or malformed
+  facts, including older records without this evidence, remain unconfirmed.
+  No-action intent is not inferred from missing writes. Async work completed
+  after the turn is not backfilled into that finished turn's actions.
 - **Runtime choices** shows the same turn's manifest events and recorded routing
   reasons. Multiple starts remain ambiguous; incomplete or damaged scans cannot
   establish that a start was unique.
@@ -935,6 +947,10 @@ A message that arrives while a direct Codex operation runs waits in the queue.
 MASC does not ask the running turn to stop. The turn finishes on its own, and
 the Owner then starts the waiting message. Use the interrupt controls to stop
 the running turn sooner.
+
+An autonomous turn can yield its Owner slot to runnable chat at a completed
+MASC tool boundary. It retains unfinished work for resumption. This does not
+interrupt a shell command or a vendor built-in tool that is still running.
 
 A direct operation can also end at a checkpoint instead of an answer, for
 example when a tool result arrives later. The retained continuation survives
@@ -1159,6 +1175,13 @@ not reset its pending deadline or create work by themselves.
 
 A due Keeper wake waits in the queue until the running turn ends; the next
 turn's intake admits it.
+
+Ready schedules without result delivery can share a turn with other work
+that has no reply route. Schedules with result delivery share only with
+schedules for the same exact reply route, including its thread and reply
+message. A checkpoint keeps unfinished requests pending; completion
+acknowledges the requests admitted to that turn. An arrival preview alone
+does not acknowledge a request.
 
 To investigate a delayed Job, inspect the exact schedule lookup at
 `/api/v1/dashboard/scheduled-automation?schedule_id=<id>`:

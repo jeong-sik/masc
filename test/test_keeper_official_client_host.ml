@@ -345,7 +345,7 @@ let test_repeated_browser_input_remains_deliverable () =
         let scope, _, target = prepare_direct_execution () in
         let on_tool_boundary = if with_boundary then
             Some (fun ~tool_name -> Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-              ~repetition_execution:(Some scope) ~tool_name) else None in
+              ~repetition_execution:(Some scope) ~chat_handoff:(fun () -> Ok false) ~tool_name) else None in
         let tool, terminal_error = one_dynamic_tool ~active ~runtime_label ~name:"BrowserInteract"
           ?on_tool_boundary
           ~on_result_handoff:(fun ~invocation:_ ~content:_ ->
@@ -382,7 +382,7 @@ let test_scoped_boundary_spans_official_attempts () =
         ~on_tool_boundary:(fun ~tool_name ->
           incr boundary_calls;
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~tool_name)
+            ~repetition_execution:(Some execution) ~chat_handoff:(fun () -> Ok false) ~tool_name)
         (fun _ -> incr executions;
           Ok { Agent_core.Types.content = "same-output"; content_blocks = None; _meta = None })
       in
@@ -406,7 +406,8 @@ let test_scoped_boundary_error_stops_immediately () =
             { scoped_observation with input_fingerprint = Some "invalid-hash" })
         ~on_tool_boundary:(fun ~tool_name ->
           Masc.Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:(Some execution) ~tool_name)
+            ~repetition_execution:(Some execution)
+            ~chat_handoff:(fun () -> fail "scope failure must precede chat handoff") ~tool_name)
         (fun _ -> Ok { Agent_core.Types.content = "effect returned"; content_blocks = None; _meta = None })
       in
       let result = tool.call ~call_id:"invalid-scope-observation" (`Assoc []) in
@@ -567,13 +568,14 @@ let test_boundary_preserves_explicit_terminal_outcomes () =
       ~terminal_effect_state:(fun () -> terminal)
       ~on_tool_boundary:(fun ~tool_name ->
         Keeper_agent_run.For_testing.official_client_tool_boundary
-          ~repetition_execution:None ~tool_name)
+          ~repetition_execution:None ~chat_handoff:(fun () -> Ok true) ~tool_name)
       (fun _ -> Ok {Agent_core.Types.content = "settled"; content_blocks = None; _meta = None}) in
     let result = tool.call ~call_id:"terminal-effect" (`Assoc []) in
     match terminal, result.abort_turn with
     | Tools.Terminal_effect_completed _, Some (Terminal_tool_boundary {outcome = Terminal_completed; _})
     | Tools.Deferred_tool_result, Some (Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}) -> ()
-    | Tools.External_effect_deferred, None -> ()
+    | Tools.External_effect_deferred,
+        Some (Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}) -> ()
     | Tools.Terminal_effect_failed _, Some (Terminal_tool_boundary {outcome = Terminal_failed _; _}) -> ()
     | _ -> fail "the boundary replaced an explicit terminal outcome"))
     [ Tools.Terminal_effect_completed
@@ -589,7 +591,7 @@ let test_boundary_preserves_explicit_terminal_outcomes () =
 ;;
 
 let test_settled_official_tool_keeps_turn_running () =
-  with_active_raw_trace (fun ~path:_ ~active ->
+  List.iter (fun handoff_outcome -> with_active_raw_trace (fun ~path:_ ~active ->
     let handed_off = ref false in
     let boundary_calls = ref 0 in
     let tool, terminal_error =
@@ -599,7 +601,7 @@ let test_settled_official_tool_keeps_turn_running () =
           incr boundary_calls;
           check bool "tool result handed off before boundary decision" true !handed_off;
           Keeper_agent_run.For_testing.official_client_tool_boundary
-            ~repetition_execution:None ~tool_name)
+            ~repetition_execution:None ~chat_handoff:(fun () -> handoff_outcome) ~tool_name)
         (fun _ ->
           Ok { Agent_core.Types.content = "settled result"; content_blocks = None; _meta = None })
     in
@@ -608,10 +610,14 @@ let test_settled_official_tool_keeps_turn_running () =
     check string "settled content remains intact" "settled result" result.content;
     check int "one boundary decision" 1 !boundary_calls;
     check (option string) "no terminal failure" None !terminal_error;
-    match result.abort_turn with
-    | None -> ()
-    | Some (Terminal_tool_boundary _) ->
-      fail "the official-client turn stopped after its tool result")
+    match handoff_outcome, result.abort_turn with
+    | (Ok false | Error _), None
+    | Ok true, Some (Terminal_tool_boundary {outcome = Durable_stimulus_deferred; _}) -> ()
+    | (Ok false | Error _), Some (Terminal_tool_boundary _)
+    | Ok true, (None | Some (Terminal_tool_boundary
+        {outcome = Terminal_completed | Terminal_failed _; _})) ->
+      fail "the official-client boundary did not preserve the chat handoff decision"))
+    [Ok false; Ok true; Error (Agent_core.Error.Internal "inventory stopping")]
 ;;
 
 let test_terminal_post_effect_failure_aborts_the_official_client_turn () =
@@ -1527,7 +1533,7 @@ let test_goal_observation_cannot_mask_blank_keeper_instructions () =
         let base_system_prompt = Option.value ~default:initial current_params.system_prompt_override in
         let partition = Keeper_context_layers.singleton Keeper_context_layers.Active_goals
             "Goal observation: current revision and reported measurement 1/3" in
-        let assembly = Keeper_run_prompt.assemble_request_context ~system:(system_of_text base_system_prompt)
+        let assembly = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client ~system:(system_of_text base_system_prompt)
             ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
             ~existing_extra_system_context:None
             ~blocks:[Prompt_block_id.Dynamic_context, Keeper_context_layers.text partition] in
@@ -2852,7 +2858,7 @@ let test_a_changed_system_goal_reaches_a_held_official_session () =
       | None -> Layers.unattributed Direct_turn "TASK GATE LANE"
       | Some text -> Layers.singleton Layers.Active_goals text
           |> fun goals -> Layers.append_unattributed goals Direct_turn "TASK GATE LANE" in
-    let assembly = Keeper_run_prompt.assemble_request_context
+    let assembly = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client
         ~system:(system_of_text "BASE_INSTRUCTIONS") ~post_tool_round:false ~previous_assembly:None
         ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
         ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
@@ -2944,7 +2950,7 @@ let test_carrier_authority_is_current_turn_input_on_official_start_and_resume ()
       | Layers.Completion_authority -> authority
       | Layers.Fleet_messages -> Some "FLEET-WORLD"
       | _ -> None) in
-    Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE")
+    Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client ~system:(system_of_text "BASE")
       ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
       ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
@@ -3085,7 +3091,7 @@ let test_carrier_authority_block_is_valid_utf8 () =
     | Layers.Completion_authority ->
       Some ("Approved task-cut " ^ truncated_dash ^ "; verification vrf-cut")
     | _ -> None) in
-  let assembly = Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE")
+  let assembly = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client ~system:(system_of_text "BASE")
       ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
       ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
@@ -3106,7 +3112,7 @@ let test_authority_leaves_the_carrier_when_the_sent_system_is_not_the_issued_one
     | Layers.Completion_authority -> Some authority_text
     | Layers.Fleet_messages -> Some "FLEET-WORLD"
     | _ -> None) in
-  let assembly = Keeper_run_prompt.assemble_request_context ~system:(system_of_text "ISSUED BASE")
+  let assembly = Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client ~system:(system_of_text "ISSUED BASE")
       ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
       ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
@@ -3167,7 +3173,7 @@ let assemble_world_round ~system ~post_tool_round previous_assembly =
   let partition = Layers.assemble ~content_of:(function
     | Layers.Fleet_messages -> Some "FLEET-WORLD"
     | _ -> None) in
-  Keeper_run_prompt.assemble_request_context ~system ~post_tool_round ~previous_assembly
+  Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client ~system ~post_tool_round ~previous_assembly
     ~dynamic_context_partition:(Some partition) ~existing_extra_system_context:None
     ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition]
 
@@ -3236,14 +3242,14 @@ let test_goals_awaiting_proof_are_current_turn_input_on_official_start_and_resum
       | Layers.Completion_authority -> Some authority_text
       | Layers.Fleet_messages -> Some "FLEET-WORLD"
       | _ -> None) in
-    Keeper_run_prompt.assemble_request_context ~system:(system_of_text "BASE")
+    Keeper_run_prompt.assemble_request_context ~checkpoint_owner:Runtime_execution.Official_client ~system:(system_of_text "BASE")
       ~post_tool_round:false ~previous_assembly:None ~dynamic_context_partition:(Some partition)
       ~existing_extra_system_context:None
       ~blocks:[Prompt_block_id.Dynamic_context, Layers.text partition] in
   let assembly = issue ~awaiting:(Some awaiting_text) in
-  check string "the Agent Core System carries no Goal phase" "BASE"
+  check string "the official issuer System carries no Goal phase" "BASE"
     (A.effective_system_prompt ~base_text:"BASE" assembly);
-  check (option string) "the Agent Core carrier holds the block" (Some awaiting_text)
+  check (option string) "the official issuer carrier holds the block" (Some awaiting_text)
     (List.assoc_opt Prompt_block_id.Goals_awaiting_proof assembly.blocks);
   let prepared = prepare_authority_turn ~system_prompt:"BASE" assembly in
   let carried needle = List.exists (fun message ->

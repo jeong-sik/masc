@@ -4,7 +4,8 @@ module Current = Keeper_memory_os_current
 type judgment_result = Committed | Awaiting_evidence | Deferred of string | Input_size_refused of string
 type outcome = Keeper_librarian_admission_owner.outcome =
   | Disabled | Idle | Recheck_new_input | Settled of {has_more : bool}
-  | Pending of string | Addon_unattached of {pending : int} | Unavailable of string
+  | Pending of string | Awaiting_worker of Keeper_librarian_pending.worker
+  | Addon_unattached of {pending : int} | Unavailable of string
 
 let io f = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ f
 

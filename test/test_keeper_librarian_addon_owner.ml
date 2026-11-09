@@ -187,12 +187,12 @@ let drive_until fixture predicate =
       else match outcome with
         | Worker.Unavailable detail -> fail detail
         | Addon_unattached _ -> fail "The configured Addon has no live exported admission tool"
-        | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ ->
+        | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ ->
           await_delivery fixture ~after:before;loop () in loop ())
 let assert_settled = function Worker.Settled _ -> ()
-  | Disabled | Idle | Recheck_new_input | Pending _ | Addon_unattached _ | Unavailable _ -> fail "actual original decision did not commit Memory"
+  | Disabled | Idle | Recheck_new_input | Pending _ | Awaiting_worker _ | Addon_unattached _ | Unavailable _ -> fail "actual original decision did not commit Memory"
 let settled = function Worker.Settled _ -> true
-  | Disabled | Idle | Recheck_new_input | Pending _ | Addon_unattached _ | Unavailable _ -> false
+  | Disabled | Idle | Recheck_new_input | Pending _ | Awaiting_worker _ | Addon_unattached _ | Unavailable _ -> false
 let terminal (original,capture)=match Progress.phase original.Owner.progress with
   | Progress.Finished _ | Conflicted _ | Rejected _ | Subdivided _ -> true
   | Judged judgment ->
@@ -382,7 +382,7 @@ let test_pass_without_new_input_after_commit_is_idle ()=with_fixture (fun ~sw:_ 
   let posts=F.post_count fixture.server in
   check bool "a pass with no new input over finished parts reports Idle" true
     (match run_worker fixture with Worker.Idle -> true
-     | Disabled | Recheck_new_input | Settled _ | Pending _ | Addon_unattached _ | Unavailable _ -> false);
+     | Disabled | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ | Addon_unattached _ | Unavailable _ -> false);
   check int "the idle pass starts no provider call" posts (F.post_count fixture.server))
 
 let test_unchanged_deferred_does_not_remint ()=with_fixture (fun ~sw:_ fixture ->
@@ -659,7 +659,7 @@ let test_purge_cancels_waiting_memory_unit_without_consumption ()=with_fixture (
 let original_path fixture ~scope ~request_id=Filename.concat (Store.root fixture.store)
   (Filename.concat "tool-request-owners" (Filename.concat (Store.digest scope) (Store.digest request_id ^ ".json")))
 let assert_unavailable = function Worker.Unavailable _ -> ()
-  | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Addon_unattached _ -> fail "invalid complete original history must refuse before local repair"
+  | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ | Addon_unattached _ -> fail "invalid complete original history must refuse before local repair"
 let test_invalid_original_blocks_receipt_backed_ack ()=with_fixture (fun ~sw:_ fixture ->
   let queue_path=Queue.path ~keepers_dir:fixture.keepers_dir ~keeper_id:keeper_name in
   let original_queue=io (fun () -> Fs_compat.load_file queue_path) in
@@ -875,10 +875,18 @@ let test_purge_joins_provider_after_memory_unit_returned ()=with_fixture (fun ~s
     ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release;
     `OK,F.openai_response (answer (fun _ -> true) capture));
   Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
-    (match run_worker fixture with Worker.Pending _ -> ()
-     | Disabled | Idle | Recheck_new_input | Settled _ | Addon_unattached _ | Unavailable _ ->
-       fail "the actual ordinary Memory unit must return while its provider is pending");
+    let waiting = match run_worker fixture with Worker.Awaiting_worker waiting -> waiting
+     | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Addon_unattached _ | Unavailable _ ->
+       fail "the actual ordinary Memory unit must return while its provider is pending" in
     Eio.Promise.await arrived;
+    let original = match observed_originals fixture with
+      | [original, _] -> original
+      | [] | _ :: _ :: _ -> fail "a pending admission worker must retain exactly one original" in
+    check string "the admission wait retains its actual installation"
+      original.installation_id waiting.installation_id;
+    check string "the admission wait retains its actual request" original.request_id waiting.request_id;
+    check bool "the actual admission worker is processing" true
+      (waiting.wait = Keeper_librarian_pending.Processing);
     Memory_lane.For_testing.await_idle ~base_path:fixture.base_path ~keeper_name;
     check int "the real provider outlives the exited ordinary Memory unit" 1
       (Memory_lane.For_testing.external_active ~base_path:fixture.base_path ~keeper_name);
@@ -913,8 +921,8 @@ let with_cut_original fixture ~before_cut k =
     if Atomic.get hold then (ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release);
     `OK,F.openai_response (answer (fun _ -> true) capture));
   Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
-    (match run_worker fixture with Worker.Pending _ -> ()
-     | Disabled | Idle | Recheck_new_input | Settled _ | Addon_unattached _ | Unavailable _ ->
+    (match run_worker fixture with Worker.Awaiting_worker _ -> ()
+     | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Addon_unattached _ | Unavailable _ ->
        fail "the first provider call must still be open");
     Eio.Promise.await arrived;
     let record,capture=match observed_originals fixture with [original] -> original
@@ -971,7 +979,7 @@ let test_cut_original_keeps_its_part_waiting ()=with_fixture (fun ~sw:_ fixture 
     let posts=F.post_count fixture.server in
     let rec until_refused ()=
       let before= !(fixture.deliveries) in
-      (match run_worker fixture with Worker.Pending _ -> ()
+      (match run_worker fixture with Worker.Pending _ | Awaiting_worker _ -> ()
        | Disabled | Idle | Recheck_new_input | Settled _ | Addon_unattached _ | Unavailable _ ->
          fail "a cut original must keep its part waiting");
       match observed_originals fixture with
@@ -984,7 +992,7 @@ let test_cut_original_keeps_its_part_waiting ()=with_fixture (fun ~sw:_ fixture 
            fail "a cut original reaches only an execution refusal")
       | [] | _::_ -> fail "the cut original must stay the part's only execution" in
     until_refused ();
-    (match run_worker fixture with Worker.Pending _ -> ()
+    (match run_worker fixture with Worker.Pending _ | Awaiting_worker _ -> ()
      | Disabled | Idle | Recheck_new_input | Settled _ | Addon_unattached _ | Unavailable _ ->
        fail "a refused cut original must keep its part waiting");
     check bool "the cut original stays in its scope" true (listed fixture record);
@@ -1573,8 +1581,8 @@ let test_production_refresh_new_tail_quiesces_while_provider_pending ()=with_fix
   Fun.protect ~finally:(fun () ->
     Keeper_librarian_queue_signal.install (fun ~base_path:_ ~keeper_name:_ -> ());
     ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
-    (match run_worker fixture with Worker.Pending _ -> ()
-     | Disabled | Idle | Recheck_new_input | Settled _ | Addon_unattached _ | Unavailable _ ->
+    (match run_worker fixture with Worker.Awaiting_worker _ -> ()
+     | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Addon_unattached _ | Unavailable _ ->
        fail "the original actual provider must remain pending");
     Eio.Promise.await arrived;
     Keeper_librarian_queue_refresh.install ();
@@ -1606,8 +1614,8 @@ let test_purged_original_does_not_block_another_keeper ()=with_fixture (fun ~sw:
       ignore (Eio.Promise.try_resolve signal ());Eio.Promise.await release);
     `OK,F.openai_response (answer (fun _ -> true) capture));
   Fun.protect ~finally:(fun () -> ignore (Eio.Promise.try_resolve unblock ())) (fun () ->
-    (match run_worker fixture with Worker.Pending _ -> ()
-     | Disabled | Idle | Recheck_new_input | Settled _ | Addon_unattached _ | Unavailable _ -> fail "first actual provider must be pending");
+    (match run_worker fixture with Worker.Awaiting_worker _ -> ()
+     | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Addon_unattached _ | Unavailable _ -> fail "first actual provider must be pending");
     Eio.Promise.await arrived;
     let record,capture=match observed_originals fixture with [original] -> original
       | [] | _::_::_ -> fail "expected the one original belonging to the purged Keeper" in
@@ -1637,7 +1645,7 @@ let test_purged_original_does_not_block_another_keeper ()=with_fixture (fun ~sw:
         Worker.run ~base_path:fixture.base_path ~keeper_name:second_keeper) in
       match outcome with
       | Worker.Settled _ -> ()
-      | Pending _ | Recheck_new_input -> await_delivery fixture ~after:before;drive_second ()
+      | Pending _ | Awaiting_worker _ | Recheck_new_input -> await_delivery fixture ~after:before;drive_second ()
       | Disabled | Idle | Addon_unattached _ | Unavailable _ -> fail "a stale original prevented the other Keeper from making progress" in
     drive_second ();
     let second_record=io (fun () -> originals_for ~keeper_name:second_keeper
@@ -1686,7 +1694,7 @@ let test_unattached_addon_reports_off_and_keeps_candidates ()=with_fixture (fun 
   let posts=F.post_count fixture.server in
   (match run_worker fixture with
    | Worker.Addon_unattached {pending} -> check int "every explicit candidate is reported waiting" 2 pending
-   | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Unavailable _ ->
+   | Disabled | Idle | Recheck_new_input | Settled _ | Pending _ | Awaiting_worker _ | Unavailable _ ->
      fail "a missing keeper-librarian Add-on must report explicit admission off");
   check int "no original capture is minted without the Add-on" 0 (List.length (observed_originals fixture));
   check int "no provider call starts without the Add-on" posts (F.post_count fixture.server);

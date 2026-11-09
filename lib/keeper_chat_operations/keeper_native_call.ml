@@ -167,3 +167,43 @@ let unknown_effect_disposition =
   { Agent.outcome = Agent.Terminal_cancelled
   ; recovery = Agent.Operator_repair_required Agent.Effect_outcome_unknown
   }
+
+type history_ref =
+  { call_id : string
+  ; runtime_id : string
+  ; operation_digest : string
+  ; trace_id : Keeper_id.Trace_id.t
+  ; locator : Agent.execution_locator
+  }
+
+let history_ref (call : t) =
+  { call_id=call.call_id; runtime_id=call.runtime_id
+  ; operation_digest=call.operation_digest
+  ; trace_id=call.seed_checkpoint.trace_id; locator=call.locator }
+
+let equal_history_ref (left : history_ref) (right : history_ref) =
+  left.call_id = right.call_id && left.runtime_id = right.runtime_id
+  && left.operation_digest = right.operation_digest
+  && Keeper_id.Trace_id.equal left.trace_id right.trace_id
+  && Yojson.Safe.equal (Agent.execution_locator_to_yojson left.locator)
+       (Agent.execution_locator_to_yojson right.locator)
+
+let history_ref_to_json (reference : history_ref) = `Assoc [
+  "call_id", `String reference.call_id;
+  "runtime_id", `String reference.runtime_id;
+  "operation_digest", `String reference.operation_digest;
+  "trace_id", `String (Keeper_id.Trace_id.to_string reference.trace_id);
+  "locator", Agent.execution_locator_to_yojson reference.locator]
+
+let history_ref_of_json json =
+  let* fields = exact ["call_id"; "runtime_id"; "operation_digest"; "trace_id"; "locator"] json in
+  let* call_id = string "call_id" fields in
+  let* runtime_id = string "runtime_id" fields in
+  let* operation_digest = string "operation_digest" fields in
+  let* trace = string "trace_id" fields in
+  let* trace_id = Keeper_id.Trace_id.of_string trace in
+  let* locator = Agent.execution_locator_of_yojson (field "locator" fields) in
+  if not (valid_component call_id) then Error "invalid historical native call identity"
+  else if String.trim runtime_id = "" then Error "historical native runtime is empty"
+  else if not (valid_digest operation_digest) then Error "invalid historical operation digest"
+  else Ok {call_id; runtime_id; operation_digest; trace_id; locator}

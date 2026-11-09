@@ -84,6 +84,20 @@ val due_text : now:float -> localtime:(float -> Unix.tm) -> Masc_tui_keeper_next
     a lower bound nearer than that, or no reading. A Keeper with no schedule
     draws nothing. *)
 
+(** A half hour of a Keeper row's strip (§2.4.4). *)
+type strip_cell =
+  | Strip_wake  (** It holds one known wake or more. *)
+  | Strip_empty  (** It is known to hold no wake. *)
+  | Strip_unknown  (** It holds no known wake and may hold one this build cannot list. *)
+
+val strip_cell : Masc_tui_keeper_next_run.wake_slot -> strip_cell
+(** [Wakes n] is [Strip_wake] for [n] of 1 or more, as the mock's
+    [drawRuler]: a Keeper row draws one mark however many wakes the half hour
+    holds. *)
+
+val strip_mark : strip_cell -> string
+(** [◷] a wake, [·] none, [?] unknown. *)
+
 val lag_fill : cells:int -> peak:int -> int -> int
 (** How many of [cells] cells the lag bar fills for [lag] unread turns against
     [peak]: [round (lag / peak × cells)], at least one for any lag above 0, and

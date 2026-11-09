@@ -1,0 +1,7 @@
+[
+  "/api/v1/keepers/fixture-keeper/chat/operations/fixture-completed-operation/native-calls?limit=50",
+  "/api/v1/keepers/fixture-keeper/chat/operations/fixture-completed-operation/native-calls/019a0010-1000-7000-8000-000000000001/events?limit=200",
+  "/api/v1/keepers/fixture-keeper/chat/operations/fixture-completed-operation/native-calls/019a0010-1000-7000-8000-000000000001/events?limit=200&after=%7B%22version%22%3A1%2C%22scope_id%22%3A%22019a0010-1000-7000-8000-000000000001%22%2C%22sequence%22%3A3%7D&through=%7B%22version%22%3A1%2C%22scope_id%22%3A%22019a0010-1000-7000-8000-000000000001%22%2C%22sequence%22%3A7%7D",
+  "/api/v1/keepers/fixture-keeper/chat/operations/fixture-completed-operation/native-calls/019a0010-1000-7000-8000-000000000001/events?limit=200&after=%7B%22version%22%3A1%2C%22scope_id%22%3A%22019a0010-1000-7000-8000-000000000001%22%2C%22sequence%22%3A6%7D&through=%7B%22version%22%3A1%2C%22scope_id%22%3A%22019a0010-1000-7000-8000-000000000001%22%2C%22sequence%22%3A7%7D",
+  "/api/v1/keepers/fixture-keeper/chat/operations/fixture-completed-operation/native-calls/019a0010-1000-7000-8000-000000000002/events?limit=200"
+]

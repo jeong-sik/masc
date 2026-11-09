@@ -2,8 +2,6 @@
     every keeper sees (context status, memory r/w,
     tool self-introspection). *)
 
-open Tool_shard_types_enum_mirrors
-
 let base_tools : Masc_domain.tool_schema list =
   [ (* Context status *)
     Tool_shard_types_schemas_base_toml.context_status

@@ -8,6 +8,7 @@
     focused on per-tool handler construction. *)
 
 open Keeper_tools_agent_core
+open Result.Syntax
 
 type model_input_requirement = No_model_image | Model_image
 
@@ -101,7 +102,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ?(tool_result_inline_ceiling_bytes = fun () -> Common.max_tool_result_wire_bytes)
       ~(descriptors : Keeper_tool_descriptor.t list)
       ()
-  : tool_bundle
+  : (tool_bundle, Tool_bridge.schema_error) result
   =
   (* Which lane will execute this call. The bundle is built before the turn
      resolves a runtime, so this is asked per call rather than read now.
@@ -149,6 +150,43 @@ let make_tool_bundle_for_descriptors_with_policy
                 "Keeper tool bundle received unknown descriptor id %S"
                 descriptor.id))
       descriptors
+  in
+  (* Validate the immutable schemas before replaying any approved effect. *)
+  let rec validate_descriptors = function
+    | [] -> Ok []
+    | (descriptor : Keeper_tool_descriptor.t) :: rest ->
+      let name = match Keeper_tool_descriptor.keeper_model_names descriptor with
+        | name :: _ -> name | [] -> descriptor.internal_name in
+      let* schema =
+        Keeper_schema_observation.with_definition descriptor (fun () ->
+          Keeper_descriptor_schema.for_descriptor descriptor)
+        |> Result.map_error (fun detail -> Tool_bridge.Invalid_tool_schema { name; detail })
+      in
+      let+ rest = validate_descriptors rest in
+      (descriptor, schema) :: rest
+  in
+  let* validated_descriptors = validate_descriptors descriptors in
+  let skill_compositions =
+    Keeper_skill_catalog.compositions skill_catalog
+    |> List.map (fun (composition : Keeper_skill_catalog.composition) ->
+      composition.entry, composition.provenance)
+  in
+  let schema_rows = Keeper_tool_composition_surface.schema_tool_rows
+      ~include_drafts:(Option.is_some capability_surface) ~skill_compositions () in
+  let rec validate_rows = function
+    | [] -> Ok ()
+    | (_, schema) :: rest ->
+      let* _ = schema in
+      validate_rows rest
+  in
+  let* () = validate_rows schema_rows in
+  let instruction_skills =
+    Keeper_tool_composition_surface.instruction_skills_of_catalog skill_catalog in
+  let* () = match instruction_skills with
+    | [] -> Ok ()
+    | skills ->
+      let+ _ = Keeper_tool_composition_surface.instruction_skill_schema_tool
+          ~instruction_skills:skills in ()
   in
   Option.iter (fun index ->
     Keeper_tool_composition_plan_index.bind_descriptors index descriptors)
@@ -360,7 +398,7 @@ let make_tool_bundle_for_descriptors_with_policy
      [descriptor.input_schema] provides the LLM-facing schema. *)
   let descriptor_tool_rows =
     List.concat_map
-      (fun (descriptor : Keeper_tool_descriptor.t) ->
+      (fun ((descriptor : Keeper_tool_descriptor.t), schema) ->
          let internal = descriptor.internal_name in
          (* A static declaration holds even when a hook normalizes the input.
             Input-dependent or missing declarations remain effect-possible. *)
@@ -476,13 +514,6 @@ let make_tool_bundle_for_descriptors_with_policy
                    ()
              in
              let bridge h =
-               Keeper_schema_observation.with_definition descriptor @@ fun () ->
-               let schema =
-                 match Keeper_descriptor_schema.for_descriptor descriptor with
-                 | Ok schema -> schema
-                 | Error detail ->
-                   invalid_arg (Printf.sprintf "tool %S schema invalid: %s" model_name detail)
-               in
                Tool_bridge.agent_core_tool_of_schema_with_execution_env
                ~base_path:config.base_path
                ~answer_reader:(fun output_text ->
@@ -556,7 +587,7 @@ let make_tool_bundle_for_descriptors_with_policy
              , Keeper_tool_descriptor.declared_loading descriptor
              , (if descriptor_admitted Image_input_unavailable descriptor
                 then No_model_image else Model_image) )))
-      descriptors
+      validated_descriptors
   in
   let descriptor_tools_with_loading =
     List.map (fun (tool, loading, _) -> tool, loading) descriptor_tool_rows
@@ -571,7 +602,7 @@ let make_tool_bundle_for_descriptors_with_policy
       descriptor_tool_rows
   in
   let descriptor_tools = List.map fst descriptor_tools_with_loading in
-  let composition_tools_with_loading, task_required_tool_names =
+  let* composition_tools_with_loading, task_required_tool_names =
     let instruction_skills =
       Keeper_tool_composition_surface.instruction_skills_of_catalog skill_catalog
     in
@@ -635,7 +666,7 @@ let make_tool_bundle_for_descriptors_with_policy
         Keeper_tool_composition_surface.Compatibility.make_tools ~descriptors ?record_nested_composition_activation
           ?nested_activation_context:skill_activation_context
     in
-    let tools = make_composition_tools
+    let+ tools = make_composition_tools
         ?result_delivery:composition_result_delivery
         ?on_inline_receipt_committed
         ~instruction_skills
@@ -907,7 +938,7 @@ let make_tool_bundle_for_descriptors_with_policy
       ~result_bounds:(List.filter (fun (name, _) -> List.mem name names) result_bounds)
       ~listing:(placement deferred listing)
   in
-  { tools
+  Ok { tools
   ; agent_core_tools = agent_core_view ~admitted:(fun _ -> true) ~deferred:deferred_builtin_tools identity_listing
   ; on_demand_tool_names =
       (* What an official client holds back: the same built-ins the Agent
@@ -1021,6 +1052,7 @@ module For_testing = struct
       ~allow_unrecorded_skill_surface:true
       ?turn_ctx_cell
       ()
+    |> Result.get_ok
   ;;
 
   let make_tools
@@ -1062,7 +1094,7 @@ module For_testing = struct
        ~descriptors
        ?skill_catalog
        ~allow_unrecorded_skill_surface:true
-       ())
+       () |> Result.get_ok)
       .tools
   ;;
 

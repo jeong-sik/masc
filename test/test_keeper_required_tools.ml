@@ -136,6 +136,28 @@ candidates = ["native.no_tools", "binding.sample"]
      refuses the only candidate before dispatch, which is the point -- left
      Optional this runtime is dispatched with its tools replaced by [] and no
      channel left to report a verdict on. *)
+  let rejected_dispatches = ref 0 in
+  let invalid_schema_result =
+    Keeper_turn_driver_wrappers.run_named_with_masc_tools
+      ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "invalid-schema-wrapper" })
+      ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk
+      ~runtime_id:"native.no_tools" ~keeper_name:"invalid-schema-wrapper"
+      ~base_path:root ~media_store:(Tool_blob_media_store.of_base_path ~base_path:root)
+      ~system_prompt:"Invalid schema fixture." ~goal:"Answer the request."
+      ~masc_tools:[ { Masc_domain.name = "broken_tool"; description = "Bad schema"
+                    ; input_schema = `Assoc [ "type", `String "array" ] } ]
+      ~dispatch:(fun ~name ~args:_ ->
+        incr rejected_dispatches;
+        Tool_result.ok ~tool_name:name ~start_time:(Tool_timing.start ()) "unexpected")
+      ~sw ~net:env#net ()
+  in
+  (match invalid_schema_result with
+   | Error (Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })) ->
+     check string "schema failure field" "tool input_schema" field;
+     check bool "schema failure names tool" true (String.starts_with ~prefix:"tool \"broken_tool\"" detail)
+   | Error error -> fail (Agent_core.Error.to_string error)
+   | Ok _ -> fail "invalid tool schema must refuse turn setup");
+  check int "invalid schema never dispatches" 0 !rejected_dispatches;
   let wrapper_attempts = ref [] in
   ignore
     (Keeper_turn_driver_wrappers.run_named_with_masc_tools ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = "required-tools-wrapper" }) ~raw_trace:None ~walk_owner:Masc.Keeper_turn_driver.One_shot_walk

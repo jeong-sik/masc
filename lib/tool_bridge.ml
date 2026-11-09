@@ -63,12 +63,22 @@ let declares_disjoint_alternatives = function
   | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 ;;
 
+type schema_error =
+  | Schema_conversion_error of string
+  | Unprojected_property of string
+  | Invalid_tool_schema of { name : string; detail : string }
+
+let schema_error_to_string = function
+  | Schema_conversion_error detail -> detail
+  | Unprojected_property name ->
+    Printf.sprintf "property %S cannot be represented by the typed tool parameter surface" name
+  | Invalid_tool_schema { name; detail } ->
+    Printf.sprintf "tool %S schema invalid: %s" name detail
+
 let params_of_json_schema schema =
-  let params =
-    match Agent_core.Mcp.json_schema_to_params_result schema with
-    | Ok params -> params
-    | Error detail -> invalid_arg detail
-  in
+  match Agent_core.Mcp.json_schema_to_params_result schema with
+  | Error detail -> Error (Schema_conversion_error detail)
+  | Ok params ->
   let unprojected_property =
     match schema with
     | `Assoc fields ->
@@ -88,12 +98,8 @@ let params_of_json_schema schema =
       None
   in
   match unprojected_property with
-  | None -> params
-  | Some (name, _) ->
-    invalid_arg
-      (Printf.sprintf
-         "property %S cannot be represented by the typed tool parameter surface"
-         name)
+  | None -> Ok params
+  | Some (name, _) -> Error (Unprojected_property name)
 ;;
 
 (** {1 AGENT_CORE Tool.t Creation}
@@ -121,7 +127,7 @@ let agent_core_tool_of_masc
     ~name
     ~description
     ~input_schema
-    handler : Agent_core.Tool.t =
+    handler : (Agent_core.Tool.t, schema_error) result =
   let agent_core_handler json_args =
     Tool_projection.to_agent_core_typed_result
       ?base_path
@@ -133,10 +139,9 @@ let agent_core_tool_of_masc
           ~site:Bridge_plain_constructor
           (fun () -> Agent_core.Types.tool_schema_of_input_schema ~name ~description ~input_schema ()) with
   | Ok schema ->
-    Agent_core.Tool.of_schema ?descriptor schema
-      (Agent_core.Tool.ignoring_execution_env agent_core_handler)
-  | Error detail ->
-    invalid_arg (Printf.sprintf "tool %S schema invalid: %s" name detail)
+    Ok (Agent_core.Tool.of_schema ?descriptor schema
+      (Agent_core.Tool.ignoring_execution_env agent_core_handler))
+  | Error detail -> Error (Invalid_tool_schema { name; detail })
 
 let agent_core_tool_of_schema_with_execution_env
     ?descriptor
@@ -171,14 +176,13 @@ let agent_core_tool_of_masc_with_execution_env
     ~description
     ~input_schema
     handler
-  : Agent_core.Tool.t
+  : (Agent_core.Tool.t, schema_error) result
   =
   match Agent_core.Base.Schema_observation.constructor
           ~site:Bridge_execution_env_constructor
           (fun () -> Agent_core.Types.tool_schema_of_input_schema ~name ~description ~input_schema ()) with
   | Ok schema ->
-    agent_core_tool_of_schema_with_execution_env
+    Ok (agent_core_tool_of_schema_with_execution_env
       ?descriptor ?base_path ?answer_reader ?model_projection
-      ?on_externalization_error ~schema handler
-  | Error detail ->
-    invalid_arg (Printf.sprintf "tool %S schema invalid: %s" name detail)
+      ?on_externalization_error ~schema handler)
+  | Error detail -> Error (Invalid_tool_schema { name; detail })

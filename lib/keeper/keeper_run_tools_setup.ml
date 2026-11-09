@@ -531,7 +531,7 @@ let prepare_agent_setup
   let turn_model_visible_descriptors =
     Keeper_capability_surface.descriptors capability_surface
   in
-  let
+  let*
     { Keeper_tools_agent_core.tools = keeper_tools
     ; agent_core_tools = keeper_agent_core_tools
     ; on_demand_tool_names
@@ -573,6 +573,10 @@ let prepare_agent_setup
       ~checkpoint_owner:(fun () -> !active_checkpoint_owner)
       ~tool_result_inline_ceiling_bytes:(fun () -> !active_tool_result_inline_ceiling_bytes)
       ()
+    |> Result.map_error (fun error ->
+         Agent_core.Error.Config
+           (Agent_core.Error.InvalidConfig
+              { field = "tool input_schema"; detail = Tool_bridge.schema_error_to_string error }))
   in
   let replay_delivery =
     Option.map

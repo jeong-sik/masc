@@ -362,6 +362,7 @@ streaming = false
             Tool_result.make_err ~tool_name:schema.name ~class_
               ~start_time:(Tool_timing.start ()) execution.raw_output
           | Tool_result.Deferred () -> fail "artifact read unexpectedly deferred")
+    |> Result.get_ok
   in
   let tools = [active_tool; reader] in
   check bool "the canonical offered reader grants retrieval" true

@@ -180,7 +180,7 @@ let public_bundle ?snapshot ?(sourceful = true) ?(with_read = false) ?(with_writ
       ~publication_recovery:recovery ~capability_surface:surface ~clock:env#clock ~gate_context:causal
       ?skill_activation_context
       ?turn_ctx_cell:(if sourceful then Some cell else None)
-      ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"public Edit feature fixture") () in
+      ~ctx_snapshot:(Keeper_context_runtime.create ~eio:false ~system_prompt:"public Edit feature fixture") () |> Result.get_ok in
   Eio.Switch.on_release sw bundle.cleanup;
   operation meta task.task_id cell causal bundle
 ;;

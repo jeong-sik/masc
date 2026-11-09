@@ -105,20 +105,29 @@ Keeper 채팅에서:
 `submitted` 또는 `coalesced`, `completion: "unobserved"`를 돌려준다.
 이 경로도 기존 원본을 먼저 복구하므로 불확실한 원본을 우회하지 않는다.
 
-health v11은 원본 request ID·installation ID와 구체적인 pending 원인을 보존한다.
+health v12는 원본 request ID·installation ID와 구체적인 pending 원인을 보존한다.
 별도의 `admission_wait`는 durable pass가 drained여도 explicit admission의
-실제 worker 대기를 보여 준다. main의 나이 구간 변경이 v10을 사용하므로
-후보는 v11로 분리했다. v9/v10 서버와 새 decoder를 혼용하면 읽기 실패를
-표시하므로 서버와 TUI/dashboard를 함께 갱신해야 한다.
+실제 worker 대기를 보여 준다. #50641이 main의 나이 구간 계약을 v11로
+올렸으므로 이번 필수 필드 추가는 v12로 구분한다. v11 서버에는 두 필드가
+없다. 새 클라이언트를 먼저 설치하면 v11 응답을 schema 단계에서 거절하므로
+서버와 TUI/dashboard를 함께 갱신해야 한다. `/memory status`도 v12 행을 읽는다.
 
 실제 결과가 전달되면 같은 workspace·installation의 알려진 Capacity 대기자만
 다시 깨운다. durable, explicit admission, floor의 대기에 적용한다.
 다른 원인 대기를 임의로 실패 또는 재전송 가능 상태로 바꾸지 않는다.
+이 경로는 확정된 결과 전달을 계기로 하며 별도 주기 타이머는 추가하지 않는다.
+다른 계기의 재관측은 기존 Memory lane의 wake 경로를 따른다. 대기 관측과
+capacity mark는 프로세스 메모리이며 재시작 후 원본에서 다시 관측한다.
+Add-on이 해제돼도 원본이 남아 있으면 원본의 실제 대기를 보여 준다.
+이때 `Unreachable`은 원본 worker에 닿지 못했다는 뜻이며 Add-on 재설치나
+원본 재전송을 자동으로 허가하지 않는다.
 
 ## 검증 범위와 남은 운영 문제
 
-worker 회귀 8개와 admission wait를 포함한 dashboard 관련 테스트 103개,
-TypeScript 검사가 통과했다. 변경한 OCaml 50개 파일의 문법 검사도 통과했다.
+초기 후보에서 worker 회귀 8개, dashboard 관련 테스트 103개와 TypeScript
+검사가 통과했다. 당시 변경한 OCaml 50개 파일은 문법 검사만 통과했다.
+v12 수정 후에는 이전 schema 거절을 포함한 dashboard 테스트 105개,
+추가로 수정한 OCaml 4개와 Python fixture 2개의 문법 검사가 통과했다.
 host/OCaml 회귀 테스트는 작성했으나 이 세션에서 실행하지 않았다.
 저장소 실행 규약에 따라 로컬 Dune 빌드와 CI 대기 루프는 실행하지 않는다.
 OCaml 문법 검사와 소스 리뷰는 타입 검사·실행 검증을 대신하지 않는다.
@@ -127,3 +136,17 @@ OCaml 문법 검사와 소스 리뷰는 타입 검사·실행 검증을 대신�
 수동 sync와 새 wake 경로도 이 사실을 해소하지 않는다. 실제 원본의 실행·완료
 증거 또는 명시적인 접수 전 거절 증거가 필요하다. 이번 작업은 그 상태를 숨기지
 않고 진단·제어할 경로와, 확정된 Capacity 대기가 방치되는 예방 경로를 제공한다.
+
+### 후속 타입 검사 실패와 수정
+
+이전 PR 자동 타입 검사는 실패했다. Core의
+[run 42608838083](https://github.com/jeong-sik/masc/actions/runs/42608838083)는
+`36d2774ec88c35e08583b0a16bd941253f4fd5e0` / `fix/memory-catchup-control-20261109`,
+Top의 [run 42608864446](https://github.com/jeong-sik/masc/actions/runs/42608864446)는
+`7fd874b5a29eedbf0f11d1c9a63be788085047cc` / `feat/tui-memory-catchup-20261109`에서
+실행한 `PR type-check (dune build @check)`이며 두 conclusion은 `failure`다.
+
+fixture의 `Pending` 인자와 `admission_wait` 필드를 보완했고, TUI는 공개
+`Candle_json` 모듈과 그 라이브러리를 직접 참조하도록 수정했다. 그 수정의
+소스 점검이나 이번 v12 변경은 새 head의 빌드 성공·실제 서버/TUI 동작·운영
+설치를 증명하지 않는다.

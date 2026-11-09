@@ -53,8 +53,7 @@ val of_disposition
   -> t
 
 val of_failure
-  :  ?tool_call_count:int
-  -> raw_error:string
+  :  raw_error:string
   -> Agent_core.Error.t
   -> t
 

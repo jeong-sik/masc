@@ -9,12 +9,6 @@ let tool_execution_event_kind_to_string = function
   | Keeper_in_turn_tool_executed -> "keeper.tool_exec"
 ;;
 
-let tool_execution_event_kind_of_string = function
-  | "tool.called" -> Some External_tool_called
-  | "keeper.tool_exec" -> Some Keeper_in_turn_tool_executed
-  | _ -> None
-;;
-
 let all_tool_execution_event_kinds =
   [ External_tool_called; Keeper_in_turn_tool_executed ]
 ;;

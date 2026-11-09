@@ -33,7 +33,7 @@ documentId/nodeId를 그대로 쓰고, snapshot ref나 native selector로 바꿔
 
 ### native 동작과 대기를 한 번에 실행하기
 
-`BrowserInteract`에 `action=workflow`, `lane=live`, 관측한 `clientId`·`tabId`, 시작
+`BrowserInteract`에 `action=workflow`, 관측한 `clientId`·`tabId`, 시작
 페이지의 `expectedUrl`, `steps` 배열을 준다. 각 step은 다음 `method`와 해당 필드만 쓴다.
 
 | method | 필드 |

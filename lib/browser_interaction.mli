@@ -2,7 +2,9 @@
 type request = { route : Browser_selection.preference; tab_id : int;
   expected_url : string option; action : Browser_lane.interaction }
 val route_names : string list
-(** The argument names that pick the browser, not the action: [lane] and [clientId]. *)
+(** The argument name a Keeper uses to pick the browser, not the action:
+    [clientId]. [parse] also takes [lane], which the Add-on wire, the HTTP
+    view and the ego worker send. *)
 val wire_fields : string list
 (** Every other argument name [parse] accepts. The one list the Add-on wire
     parser ([page.interact]) and the tool schema's tests read. *)

@@ -189,7 +189,6 @@
   test_trajectory
   test_trajectory_unit
   test_turn_params
-  test_typed_tool
   test_usage_accumulation
   test_types
   test_util)
@@ -319,7 +318,6 @@
   test_trajectory
   test_trajectory_unit
   test_turn_params
-  test_typed_tool
   test_usage_accumulation
   test_types
   test_util)

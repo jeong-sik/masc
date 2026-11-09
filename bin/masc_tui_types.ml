@@ -12186,9 +12186,20 @@ let board_census_values (state : state) =
   match Masc_tui_fetched.value state.board_census with
   | Some census -> census | None -> []
 
+(* Totals stay borrowable while an ordinary poll is in flight -- the census
+   on screen is the last reading until a newer one lands, and dropping the
+   totals for every poll made the title's count flip "(N of M)"↔"(N)" at
+   read cadence. A read running past the pending display bar lets go of
+   them: totals gone stale are worth retiring, a poll is not. *)
 let board_census_holding (state : state) ~hearth =
   match board_census_reading state with
-  | Masc_tui_fetched.Ready census,false ->
+  | Masc_tui_fetched.Ready census, pending
+    when not pending
+         || (match
+              Surface_read_order.pending_dataset_age state.http_surface_reads
+                Surface_read_order.Board_hearths with
+             | Some age -> past_pending_display_bar age
+             | None -> false) ->
       (match hearth with
        | Some hearth -> List.assoc_opt hearth census
        | None -> Some (List.fold_left (fun total (_,count) -> total+count) 0 census))

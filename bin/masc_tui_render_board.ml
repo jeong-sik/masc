@@ -425,7 +425,7 @@ let board_hearth_census_line ~cols (state : state) =
 
 let board_posts_status state =
   let words ko en = words state ko en in
-  let observation,pending=board_posts_reading state in
+  let observation,_=board_posts_reading state in
   let slow=board_dataset_refresh_slow state Surface_read_order.Board_posts in
   let status=match observation with
     | Masc_tui_fetched.Absent -> Some (words "글 미조회" "posts not read")

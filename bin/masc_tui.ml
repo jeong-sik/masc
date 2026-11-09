@@ -36665,7 +36665,6 @@ Use relative paths for resources already held in the package. -->
                         | Masc_tui_palette.Palette_addon_results _
                         | Masc_tui_palette.Palette_lane_history _
                         | Masc_tui_palette.Palette_goto _
-                        | Masc_tui_palette.Palette_goal_payouts
                         | Masc_tui_palette.Palette_usage_scope _
                         | Masc_tui_palette.Palette_config _
                         | Masc_tui_palette.Palette_ui_language _
@@ -36724,12 +36723,6 @@ Use relative paths for resources already held in the package. -->
                  | Some (_, Masc_tui_palette.Palette_lane_addons) ->
                      launch_lane_addons state ~mailbox:async_messages
                        Masc_tui_lane_addons.Inspect
-                 | Some (_, Masc_tui_palette.Palette_goal_payouts) ->
-                     goto_surface state ~mailbox:async_messages Planning;
-                     state.planning_filter <- Planning_filter_all;
-                     state.planning_mode <- Planning_list;
-                     state.planning_cursor <- 0;
-                     state.planning_scroll <- Planning_scroll_offset 0
                  | Some (_, Masc_tui_palette.Palette_addon_results declaration_id) ->
                      open_installation_results state ~mailbox:async_messages declaration_id
                  | Some (_, Masc_tui_palette.Palette_lane_history lane) ->
@@ -36786,9 +36779,7 @@ Use relative paths for resources already held in the package. -->
                        report_action state "error"
                          "Original Task creation is unavailable for this Keeper and confirmed workspace"
                  | Some (_, Masc_tui_palette.Palette_task task_id) ->
-                     (* The palette lands where Enter on the task list would:
-                        Overview with the task's detail open and the cursor
-                        on its row. *)
+                     (* Open the exact Task in Work, as the task list does. *)
                      goto_surface state ~mailbox:async_messages Planning;
                      state.planning_mode <- Planning_list;
                      state.task_detail_id <- Some task_id;

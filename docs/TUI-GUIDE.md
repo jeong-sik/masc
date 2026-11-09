@@ -43,6 +43,14 @@ opens it (`/keeper <name>`, `Ctrl-L`, `masc_tool_help`, ...). Names are wire
 names, so a row can be copied and typed as it is printed. The key-level
 reference is [`?`](guides/TUI-KEYS.md); `/help` lists the slash commands.
 
+Opening `:` with no search shows the seven main destinations. Type a screen,
+Keeper, Task, post or setting name to find other actions. Detail screen names
+include their parent, for example `go Work / Task Review` and
+`go System / Runtime`. Short searches such as `go Task Review`, `settings`,
+`go Connectors`, `go Collab` and `go Play links` select the same actions
+without adding duplicate entries. Candle payouts belong to a selected Goal's
+detail in Work.
+
 The sheet also names all seven main surfaces with their reading entrypoints:
 Work's Goal/Task details, Keeper conversations and logs, Usage's account selector,
 Board's recorded successor, complete repository context, and complete model

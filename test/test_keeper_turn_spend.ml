@@ -280,7 +280,7 @@ let test_the_turn_resumes_from_the_cursor_it_started_with () =
   let cursor : Keeper_usage_resolution.cursor =
     { runtime_id = "codex"
     ; conversation_id = "thread-1"
-    ; cumulative = Keeper_usage_resolution.sample_of_api_usage (usage ~input:40 ~output:4)
+    ; cumulative = usage ~input:40 ~output:4
     }
   in
   let t =
@@ -318,7 +318,7 @@ let test_a_fill_loses_nothing_before_it_and_restarts_after_it () =
   let cursor : Keeper_usage_resolution.cursor =
     { runtime_id = "codex"
     ; conversation_id = "thread-1"
-    ; cumulative = Keeper_usage_resolution.sample_of_api_usage (usage ~input:40 ~output:4)
+    ; cumulative = usage ~input:40 ~output:4
     }
   in
   let t =

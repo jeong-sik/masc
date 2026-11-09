@@ -3467,7 +3467,7 @@
  (name masc_tui_page_reading)
  (wrapped false)
  (modules masc_tui_page_reading)
- (libraries masc_tui_ansi masc_tui_message_layout masc_tui_page_line))
+ (libraries masc_tui_ansi masc_tui_message_layout masc_tui_numbered_list masc_tui_page_line))
 
 (library
  (name masc_tui_machine_activity)

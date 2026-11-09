@@ -3,7 +3,9 @@
     at one cell; a title is bold, a quiet line is receded, an info line is drawn
     in the info colour and an attention line is warned. A value with a word wider than the room beside its label (a hash,
     a path), or on a screen too narrow to leave it room, goes on the rows under
-    the label, so no word is cut at a column in the middle.
+    the label, so no word is cut at a column in the middle. A list is its label
+    receded on a row of its own and a numbered row for each value under it, so a
+    value that wraps stays under its own number.
 
     Every row is a pair of the style it is drawn in and its text; a fact's text
     carries the escapes for its receded label and its value, and its pair holds

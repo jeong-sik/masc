@@ -51,11 +51,3 @@ let unregister session_id =
   with_registry_rw (fun () ->
       if Hashtbl.mem clients session_id then
         Hashtbl.remove clients session_id)
-
-let unregister_if_current session_id client_id =
-  with_registry_rw (fun () ->
-      match Hashtbl.find_opt clients session_id with
-      | Some client when client.client_id = client_id ->
-          Hashtbl.remove clients session_id
-      | Some _ -> ()
-      | None -> ())

@@ -1198,17 +1198,27 @@ let execute_keeper_with_authority
        raised after the handler kept them: a failed result has no payload to
        carry them. *)
     let kept_roots () = Keeper_tool_call_log.peek_retained_artifacts ~invocation () in
+    let with_board_evidence result =
+      match Keeper_tool_call_log.peek_board_action_evidence ~invocation () with
+      | None -> result
+      | Some evidence ->
+        Tool_result.with_metadata
+          (Board_tool_evidence.with_metadata evidence (Tool_result.metadata result)) result
+    in
     Fun.protect
-      ~finally:(fun () -> Keeper_tool_call_log.clear_retained_artifacts ~invocation ())
+      ~finally:(fun () ->
+        Keeper_tool_call_log.clear_retained_artifacts ~invocation ();
+        Keeper_tool_call_log.clear_board_action_evidence ~invocation ())
     @@ fun () ->
     Cancel_safe.protect
       ~on_exn:(fun exn -> dispatch_result ~physical_execution_id
         ~failure_effect_disposition:Tool_result.Effect_outcome_unknown
         ~retained_artifacts:(kept_roots ())
-        (Tool_result.make_err_of_exn ~class_:Tool_result.Runtime_failure
-          ~tool_name:node.tool_name ~start_time:invocation_started exn))
+        (with_board_evidence
+          (Tool_result.make_err_of_exn ~class_:Tool_result.Runtime_failure
+            ~tool_name:node.tool_name ~start_time:invocation_started exn)))
       (fun () ->
-        let result = handler ~agent_core_invocation:invocation input in
+        let result = handler ~agent_core_invocation:invocation input |> with_board_evidence in
         let retained_artifacts = kept_roots () in
         let original_bytes, truncated_to =
           Keeper_tool_call_log.consume_truncation_info ~invocation ()

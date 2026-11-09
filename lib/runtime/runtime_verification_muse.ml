@@ -3,10 +3,10 @@ type error =
   | Private_workspace_unavailable
   | Client_error of Runtime_muse_serve.error
 
-let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_scope ~config
+let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account ~quota_scope ~config
     ~reasoning_effort ~tool ~prompt =
   let open Result.Syntax in
-  match Runtime_muse_home.prepare ~account_home with
+  match Runtime_muse_home.prepare ~account_home:(Runtime_account_access.declared_muse_home account) with
   | Error error -> Error (Home_error error)
   | Ok home ->
     Eio.Switch.run (fun sw ->
@@ -48,8 +48,8 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_sco
       let mcp_servers = [{ Runtime_muse_serve.name = "masc";
         server = Runtime_muse_msp.Streamable_http { url; headers; required = true };
         tool_names = [tool.name] }] in
-      let config = { config with Runtime_muse_serve.account_home = Some account_home;
-        prepared_home = Some home; native = Runtime_native_tools.Native_read } in
+      let config = { config with Runtime_muse_serve.prepared_home = Some home;
+        native = Runtime_native_tools.Native_read } in
       Runtime_muse_serve.run_turn
         ~on_stream_event:(function
           | Runtime_muse_serve.Subscription_usage_observed usage ->
@@ -64,6 +64,6 @@ let run ~secure_random ~net ~mgr ~clock ~cwd ~directory ~account_home ~quota_sco
           | Runtime_muse_serve.Usage_reported _
           | Runtime_muse_serve.Turn_finished _ -> ())
         ~storage:(Runtime_muse_serve.Stateless storage_root) ?reasoning_effort ~mcp_servers ~mgr ~clock
-        ~cwd:Eio.Path.(cwd / Filename.basename root / "workspace") config
+        ~cwd:Eio.Path.(cwd / Filename.basename root / "workspace") ~account config
         ~workspace_root:workspace ~prompt ~images:[]
       |> Result.map_error (fun error -> Client_error error))

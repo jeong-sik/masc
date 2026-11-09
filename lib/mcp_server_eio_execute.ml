@@ -7,10 +7,6 @@
 
 let wait_for_message_eio = Mcp_server_eio_helpers.wait_for_message_eio
 
-let caller_agent_name_from_arguments arguments =
-  Mcp_server_eio_caller_identity.caller_agent_name_from_arguments arguments
-;;
-
 let resolve_bind_state ~workspace_initialized ~bind_required ~agent_name ~check_join =
   workspace_initialized
   && bind_required

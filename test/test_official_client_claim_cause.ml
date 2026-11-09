@@ -1,3 +1,7 @@
+(* A start of Antigravity, by the access the suite publishes first. *)
+let antigravity_host () =
+  Masc_test_deps.host_account Runtime_account_access.Antigravity
+
 (* Uses the actual durable store and all four adapters, then the production
    terminal, registry, heartbeat projection and public blocker projection.
    No client process/provider is called. This does not execute the full loop. *)
@@ -57,7 +61,7 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
       { cli_path; model = "synthetic-model"; agent = None; effort = None
       ; oauth_source = Filename.concat base_path "absent-synthetic-oauth"
       ; timeout_s = 1.; add_dirs = [] } in
-    let outcome = Keeper_antigravity_runtime.run ~configured_reasoning_effort:None ~turn_timeout_s:None ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
+    let outcome = Keeper_antigravity_runtime.run ~host:(antigravity_host ()) ~configured_reasoning_effort:None ~turn_timeout_s:None ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
         ~turn_start:(Masc.Keeper_carried_front.Turn_boundary { end_atom = 0 }) ~accepts_image_input:false ~runtime_id ~keeper_name
         ~pre_tool_rejects:(ref []) ~base_path ~goal:"synthetic claim probe"
         ~goal_blocks:None ~system_prompt:"Synthetic claim probe."
@@ -67,9 +71,12 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
         ~raw_trace:None ~on_event:None ~config () in
     outcome.result, outcome.settled_session, outcome.effect_disposition
   | S.Muse ->
+    let account =
+      Masc_test_deps.authorized_muse
+        (Runtime_account_access.Declared_home
+           (Masc_test_deps.muse_home (Filename.concat base_path "absent-synthetic-account"))) in
     let config : Runtime_muse_serve.config =
       { (Runtime_muse_serve.default_config ()) with cli_path
-      ; account_home = Some (Filename.concat base_path "absent-synthetic-account")
       ; model = Some "synthetic-model"
       ; admission_timeout_s = 1.; timeout_s = Some 1. } in
     let outcome = Keeper_muse_runtime.run ~input_source:(Masc.Keeper_request_source.Keeper_history { trace_id = keeper_name })
@@ -84,7 +91,7 @@ let run_adapter client_kind ~base_path ~keeper_name ~runtime_id ~cli_path =
         ~tools:[] ~initial_messages:[] ~model_input_projection:None
         ~on_transmitted_model_input:transmitted ~hooks:None
         ~context_injector:None ~context:None ~event_bus:None
-        ~raw_trace:None ~on_event:None ~config () in
+        ~raw_trace:None ~on_event:None ~account ~config () in
     outcome.result, outcome.settled_session, outcome.effect_disposition
 
 let read_recovery ~base_path ~keeper_name =

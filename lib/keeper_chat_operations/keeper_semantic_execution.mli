@@ -152,6 +152,11 @@ type t = private
   ; frame : Keeper_repetition_snapshot.t
   ; phase : phase
   ; native_call : Keeper_native_call.state
+  ; native_calls : Keeper_native_call.history_ref list
+      (** Every published native call, in admission order, including calls
+          retired before a later call and calls of settled executions.
+          Observation only; these references never pin checkpoint payloads
+          or authorize continuation. *)
   ; input_response_intent : input_response_intent option
   ; input_branch : input_branch option
   ; created_at : float
@@ -271,7 +276,9 @@ val update_native_call : now:float -> expected:Keeper_native_call.state ->
   replacement:Keeper_native_call.state -> t -> (t, error) result
 (** Direct-operation-only CAS. A terminal call remains evidence until the
     Owner's settlement transaction resolves retirement. Unknown effects keep
-    their receipt. *)
+    their receipt. Publishing a distinct call appends its immutable history
+    reference in the same transition. A previous call identity or locator
+    cannot be published again after retirement. *)
 val same_admission : t -> t -> bool
 val to_json : t -> Yojson.Safe.t
 val of_json : Yojson.Safe.t -> (t, error) result

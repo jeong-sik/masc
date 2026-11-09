@@ -303,7 +303,6 @@ val registered_names : t -> string list
 val public_names_of_descriptor : t -> string list
 val public_names : unit -> string list
 val find_public : string -> t option
-val public_name_for_internal : string -> string option
 val public_descriptors_for_internal : string -> t list
 
 (** [descriptors_for_internal name] walks [all_descriptors ()]. Use this from

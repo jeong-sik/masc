@@ -33,9 +33,10 @@ type fresh = {
 type outcome =
   | Finished of Keeper_librarian_message_floor.Machine.finished
       (** Every message is decided and the ordered program is validated. *)
-  | Pending of string
+  | Pending of Keeper_librarian_pending.t
       (** A step awaits its worker, or a judgment awaits the gate. A later wake
-          runs the chain again. *)
+          runs the chain again. Worker waits retain the actual leaf request and
+          installation; they are not replaced with the chain root's identity. *)
   | Stopped of {position : int; report : Keeper_librarian_runtime.not_committed}
       (** The step at [position] ended in a refusal that does not show reading
           less could help, or the question is a host observation that cannot become

@@ -21,7 +21,14 @@ val keeper_tool_call_lookup_response :
     handle the request. Blank or repeated parameters return 400. A unique
     authoritative row returns 200, absence 404, multiple canonical rows 409,
     and unavailable storage 503. The request workspace and keeper scope every
-    lookup; the recent-row window is never used. *)
+    lookup; the recent-row window is never used.
+
+    [execution_ids] is a JSON array of distinct non-blank identities. It
+    returns [keeper], [requested_execution_ids] in request order and all
+    matching [entries] in one index read. Duplicate stored rows remain visible
+    so a reader cannot silently choose one. Missing retained rows are unknown,
+    not proof that no effect happened. Malformed or mixed single/batch queries
+    return 400. Both forms use the existing Admin-protected tool-call door. *)
 
 val handle_stats_get :
   Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
@@ -38,7 +45,8 @@ val handle_result_get :
 val handle_calls_get :
   Mcp_server.server_state -> Httpun.Request.t -> Http_reqd.t -> string -> unit
 (** Answer [GET /api/v1/keepers/<name>/tool-calls]: the exact lookup of
-    [keeper_tool_call_lookup_response] when the query names an [execution_id],
+    [keeper_tool_call_lookup_response] when the query names [execution_id] or
+    [execution_ids],
     otherwise the most recent calls ([limit], default 50, from 1 to 200) with the
     freshness of their source. A missing or invalid keeper name answers 400 and an
     unreadable index 503. *)

@@ -573,6 +573,19 @@ let with_thread_position json fields =
   | other -> `Assoc (("result", other) :: fields)
 ;;
 
+(* What the write answers with. The writer sent [content] in this very call, so
+   the text is already in its context, and the board stores it as sent. The
+   answer names the comment and says where it landed, and leaves the text out.
+   docs/evidence/board-comment-result-2026-11 counts it in the tool-call
+   ledger: the text was 79.3% of the answer bytes (2026-11-02T00:00Z to
+   11-09T10:30Z). *)
+let comment_acknowledgement (comment : Board.comment) =
+  match Board.comment_to_yojson comment with
+  | `Assoc fields -> `Assoc (List.remove_assoc "content" fields)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) as other ->
+    other
+;;
+
 let handle_comment_add ~reader ~tool_name ~start_time args : Tool_result.result =
   let post_id = get_string args "post_id" "" in
   let content = body_or_content_arg args in
@@ -616,10 +629,11 @@ let handle_comment_add ~reader ~tool_name ~start_time args : Tool_result.result 
        | Ok (comment, unresolved) ->
          let json =
            with_thread_position
-             (Board_tool_format.with_unresolved (Board.comment_to_yojson comment) unresolved)
+             (Board_tool_format.with_unresolved (comment_acknowledgement comment) unresolved)
              (thread_position_fields ~reader ~post_id comment)
          in
-         Tool_result.make_ok ~tool_name ~start_time ~data:json ()
+         Tool_result.make_ok ~tool_name ~start_time ~data:json
+           ~metadata:(Board_tool_evidence.metadata (Board_tool_evidence.comment comment)) ()
        | Error e ->
          Board_tool_format.error_of_board_error ~tool_name ~start_time e)
 ;;

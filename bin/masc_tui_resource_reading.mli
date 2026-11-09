@@ -28,6 +28,9 @@ val create : entry:Masc_tui_resource_catalog.t ->
   recovery_preview:string option ->
   public_url:(string, string) result option ->
   diagrams:Masc_tui_resource_diagrams.t option -> t
+val same_reading : t -> t -> bool
+(** All immutable display inputs, including content identity, read/share state,
+    selected parts and diagram preparation. This never authorizes an action. *)
 val searchable : t -> bool
 (** The current reading has admitted contents and no read failure. A retained
     same-key body may still be searched while its refresh is pending. *)

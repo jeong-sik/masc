@@ -44,14 +44,15 @@ related: ["0512", "0493", "0350"]
   - 이 호출이 `Eio.Cancel.Cancelled` 가 아닌 예외를 내면 잡아서 warn 으로 남긴다. error handler 는 masc 코드라 예외를 낼 수 있다. 그 예외가 연결의 모든 스트림이 도는 switch 를 실패시키면 안 된다.
   - `reset ~stream_sw reqd cause` 는 보고한 뒤 스트림 switch 를 `Stream_reset cause` 로 실패시킨다(`end_scope`). 보고가 취소돼도 실패시킨다. `Eio.Switch.get_error` 가 이미 있으면 건너뛴다. 이미 실패했거나 끝난 switch 다. 그래서 reset 끼리는 `Eio.Exn.Multiple` 을 만들지 않는다. fork 한 fiber 의 예외와 release hook 의 예외는 지금처럼 합쳐진다(eio exn.ml 96~103줄).
   - 스트림 일이 낸 예외(`Raised`)는 `report_failure` 로 보고하고 error 로 한 번 남긴다. h2 는 응답도 오류도 없는 스트림의 보고만 error handler 에 넘긴다(reqd.ml 345줄). masc 가 다는 error handler 둘(gateway, grpc-direct)은 받은 예외를 스스로 남기므로, 그때는 여기서 남기지 않는다. 응답이 시작된 뒤에는 h2 가 error handler 없이 스트림을 끊는다. 그 예외는 여기서 남기지 않으면 아무도 남기지 않는다.
-  - 스트림 switch 가 없는 두 곳은 보고만 한다. frame tap 이 스트림 번호를 주지 못한 요청(`server_bootstrap_http.ml` 335줄)과, switch 가 끝난 뒤 그 위 fiber 의 예외를 받는 레지스트리 56줄이다.
+  - 스트림 switch 가 없는 두 곳은 switch 를 끝내지 않고 보고한다. frame tap 이 스트림 번호를 주지 못한 요청은 `report` 로 보고만 한다(`serve_h2_connection`). switch 가 끝난 뒤 그 위 fiber 가 낸 예외는 레지스트리 `dispatch` 가 `report_failure` 로 보고하고 error 로 남긴다.
   - peer 가 보낸 RST_STREAM 과 h2 가 쓴 RST_STREAM 에는 보고하지 않고 switch 만 끝낸다. RST_STREAM 에 RST_STREAM 으로 답하지 않는다(RFC 9113 §5.4.2).
 - **응답 전에 보고하면 오류 응답이 스트림을 가진다.** h2 는 error handler 로 응답을 연다. 그 응답의 END_STREAM 이 레지스트리로 범위를 끝낸다. h2 는 오류 응답 뒤에 RST_STREAM 을 하나 더 쓰고, 그것도 범위를 끝낸다. 코드는 저장한 오류 코드(INTERNAL_ERROR)이고, 요청이 열려 있든 반쯤 닫혔든 같다(reqd.ml 456~457줄). 그래서 `Raised`·`Out_of_capacity` 는 이때 switch 를 실패시키지 않는다. 먼저 끝내면 D2 의 `Stream_end` 가 그 응답의 flush 에 `` `Closed `` 로 답한다. 창이 본문보다 작으면 h2#278 처럼 본문이 잘린다. `Stalled` 는 이때도 끝낸다. 멈춘 것이 바로 그 응답이다.
-  - 오류 응답인지는 응답과 오류 코드가 둘 다 있는지로 가린다. handler 가 이미 완결한 응답에 온 보고는 h2 가 무시하고 오류 코드도 두지 않는다(reqd.ml 370줄). 그 범위는 바로 끝낸다.
-- **라우트의 예외는 ingress 가 응답 상태를 보고 처리한다.** `Server_http_ingress` 가 라우트의 예외를 모두 잡으므로, 그 예외는 위 `Raised` 경로에 닿지 않는다. ingress 는 `Http_reqd.response_state` 로 처리를 고른다.
-  - `Not_started`: 500 으로 답하고 예외를 error 로 남긴다.
-  - `Streaming_open`: `Http_reqd.report_exn` 으로 끊는다. HTTP/2 는 `reset (Raised exn)` 이다. HTTP/1.1 은 마지막 chunk 없이 본문을 닫고, 그 응답 뒤 연결을 닫는다. 이미 나간 헤더 뒤에는 500 을 쓸 수 없다. 이 갈래가 없으면 h2 는 그 500 을 `response already started` 로 거절하고, 스트림은 상대가 끊거나 연결이 끝날 때까지 열려 있다.
-  - `Answered`: 예외만 error 로 남긴다.
+  - 오류 응답인지는 응답과 오류 코드가 둘 다 있는지로 가린다. h2 가 아직 보내는 응답은 보고를 받으면 끊긴다. 통째 본문도 같다(reqd.ml 355~364줄). 그러면 스트림이 `Closed` 라 응답이 없다. h2 가 `Complete` 로 표시한 응답은 보고를 무시하고 오류 코드도 두지 않는다(370줄). 두 경우 모두 그 범위는 바로 끝낸다.
+- **라우트의 예외는 ingress 가 응답 상태를 보고 처리한다.** `Server_http_ingress` 가 라우트의 예외를 잡으므로, 그 예외는 `dispatch` 까지 올라가지 않는다. ingress 는 `Http_reqd.response_state` 로 처리를 고른다.
+  - `Not_started`: 500 으로 답하고 예외를 error 로 남긴다. `Auth.Auth_config_error` 는 지금처럼 503 으로 답한다.
+  - `Streaming_open`: `Http_reqd.report_exn` 으로 끊는다. HTTP/2 는 `reset (Raised exn)` 이다. HTTP/1.1 은 본문을 멈추고 그 응답 뒤 연결을 닫는다. chunked 본문은 마지막 chunk 가 빠져 잘린 것이 보인다. 길이 없이 `connection: close` 로 끝을 알리는 본문(masc 의 SSE 응답들)은 끝난 것처럼 보인다(httpun reqd.ml 228~230줄, body.ml 195~199줄). 이미 나간 헤더 뒤에는 500 을 쓸 수 없다. 이 갈래가 없으면 h2 는 그 500 을 `response already started` 로 거절하고, 스트림은 상대가 끊거나 연결이 끝날 때까지 열려 있다.
+  - `Answered`: 예외만 error 로 남긴다. 라우트가 writer 를 닫은 뒤 낸 예외도 여기다. 닫기 전에 쓴 바이트는 그대로 나간다.
+  - 닫기는 응답이 끝났다는 라우트의 선언이다. 실패한 라우트는 닫지 않는다. 그래야 예외가 열린 응답과 함께 ingress 에 닿고, `Streaming_open` 갈래가 응답을 끊는다. `Server_sse_response.close_after` 는 라우트가 정상으로 끝날 때만 닫는다. GitHub 로그인 스트림과 계정 로그인 스트림이 `Fun.protect ~finally` 로 닫던 것을 이것으로 바꾼다.
   - 늦은 응답 모양(`Http_reqd.Late_response`)은 `Streaming_open` 이 아닐 때 지금처럼 warn 으로 남긴다.
   - `Http_reqd` 는 `respond_with_streaming` 이 연 writer 를 기억한다. 두 라이브러리 모두 그 writer 를 돌려주지 않는다.
 - **내보낸 RST_STREAM 도 스트림을 끝낸다.** frame tap 은 나가는 RST_STREAM 과 END_STREAM 을 이미 가른다(`server_h2_frame_tap.ml` 197·198줄). 나가는 RST_STREAM 이면 레지스트리가 그 항목을 지우고 스트림 switch 를 `Stream_reset Reset_by_us` 로 실패시킨다(같은 조건).
@@ -76,7 +77,11 @@ related: ["0512", "0493", "0350"]
   - 소켓이 막혀 있으면 RST_STREAM 이 나가지 않아 그 사이가 끝나지 않는다.
   - 이 `Assert_failure` 는 `Raised` 로 그 스트림만 끝낸다. 닫힌 스트림의 보고는 아무것도 하지 않는다(reqd.ml 388줄).
   - h2 의 공개 `Reqd` API 에는 닫힘을 묻는 함수가 없다. 근본 해결은 포크가 `Reqd.is_closed` 를 공개하는 것이다(§7.3).
-- **HTTP/1.1 에는 끊을 스트림이 없다.** `Httpun.Reqd.report_exn` 은 본문을 force-close 하고(마지막 chunk 를 보내지 않음) 연결을 non-persistent 로 만든다. 막힌 소켓 쓰기는 풀지 못한다. httpun 은 흐름 제어가 없고 flush 답은 소켓 쓰기 뒤에 온다. 그래서 HTTP/1.1 의 정체는 TCP 정체이고 D4 가 소켓을 닫는다.
+- **끝까지 오지 않은 HTTP/1.1 요청 본문은 라우트에 넘기지 않는다.** httpun 은 보고로 끊은 본문도 다 읽은 본문처럼 닫는다. 기다리던 읽기는 받은 데까지로 끝을 본다. 그래서 `Http_reqd.read_body` 가 본문이 다 왔는지 직접 가린다.
+  - 길이가 있는 본문은 그 길이만큼 왔는지 본다. 길이는 httpun 파서가 읽는 기준(`Httpun.Request.body_length`)이다.
+  - chunked 본문은 보고의 흔적을 본다. masc 의 `report_exn` 은 표시를 남기고, 응답 전 httpun 의 보고는 오류 코드를 남긴다.
+  - httpun 이 응답 뒤에 스스로 끊은 chunked 본문은 흔적이 없어 그대로 넘어간다. 근본 해결은 httpun 읽기에 h2 처럼 완료 상태를 두는 것이다.
+- **HTTP/1.1 에는 끊을 스트림이 없다.** `Httpun.Reqd.report_exn` 은 본문을 force-close 하고 연결을 non-persistent 로 만든다. chunked 본문이면 마지막 chunk 를 보내지 않는다. 연결 종료로 끝을 알리는 본문은 끝난 것처럼 보인다. 막힌 소켓 쓰기는 풀지 못한다. httpun 은 흐름 제어가 없고 flush 답은 소켓 쓰기 뒤에 온다. 그래서 HTTP/1.1 의 정체는 TCP 정체이고 D4 가 소켓을 닫는다.
 
 ### D2. HTTP/2 스트림 안의 flush 는 정체 상한 안에 답을 받는다
 
@@ -205,7 +210,9 @@ upstream tls-eio main 도 같은 4 KiB 경로다(조사 §1.8). 릴리스를 기
 
 - 창을 열지 않거나 읽지 않는 HTTP/2 클라이언트의 스트림은 90초 뒤 RST_STREAM(INTERNAL_ERROR)을 받는다. 서버 로그에 경로가 든 warn 한 줄이 남는다.
 - handler 가 응답 도중 예외를 내거나 h2 가 스트림을 끊으면, 그 스트림에서 돌던 남은 일(본문 생산자, 미룬 본문 콜백)이 바로 취소된다. 완결한 응답 뒤 h2 가 RST_STREAM(NO_ERROR)을 보낼 때도 같다.
-- 라우트가 스트리밍 응답 도중 예외를 내면, HTTP/2 스트림은 RST_STREAM(INTERNAL_ERROR)을 받고 HTTP/1.1 연결은 마지막 chunk 없이 닫힌다. 전에는 스스로 닫지 않는 라우트의 응답이 열린 채 남았다. 라우트 예외는 error 로 한 번 남는다(늦은 응답 모양은 지금처럼 warn). 응답 전 예외는 전에는 500 본문에만 있었다.
+- 라우트가 스트리밍 응답 도중 예외를 내면, HTTP/2 스트림은 RST_STREAM(INTERNAL_ERROR)을 받고 HTTP/1.1 연결은 닫힌다. chunked 본문은 마지막 chunk 가 빠진다. masc 의 HTTP/1.1 SSE 는 연결 종료로 끝을 알리므로, 클라이언트에게는 끝난 스트림처럼 보인다. 전에는 스스로 닫지 않는 라우트의 응답이 열린 채 남았다. 라우트 예외는 error 로 한 번 남는다(늦은 응답 모양은 지금처럼 warn). 응답 전 예외는 전에는 500 본문에만 있었다.
+- HTTP/1.1 클라이언트가 요청 본문 도중 떠나면 라우트는 받은 데까지의 본문으로 돌지 않는다. 응답 전이면 httpun 이 400 으로 답한다. 응답이 시작됐으면 그 응답이 끊긴다. 전에는 잘린 본문이 온전한 본문처럼 라우트에 넘어갔다. 읽기가 EOF·reset 이 아닌 오류로 끝나면 gluten 이 보고하고 500 이 된다(gluten_eio.ml 149줄).
+- GitHub 로그인 스트림과 계정 로그인 스트림이 예외로 끝나면 HTTP/2 스트림은 RST_STREAM(INTERNAL_ERROR)을 받는다. 전에는 응답을 닫은 뒤 예외를 냈다. 그래서 쓴 바이트가 다 나간 스트림은 끝난 스트림처럼 보였다.
 - 소켓 쓰기가 90초 동안 끝나지 않는 연결은 닫힌다. 먼저 shutdown 이 FIN 을 보낸다. 연결을 놓으며 fd 를 닫을 때(`server_bootstrap_http.ml` 122~133줄) `SO_LINGER 0` 이라 RST 가 간다.
 - TLS 연결은 handshake 가 30초 안에 끝나지 않으면 닫힌다. 평문 연결은 30초 안에 첫 바이트를 보내지 않으면 닫힌다. TLS handshake 뒤의 첫 읽기에는 기한이 없다(§7.4).
 - 대시보드 asset 응답은 원장을 쓰지 않는다. 압축은 asset 판마다 한 번 한다.

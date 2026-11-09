@@ -267,9 +267,139 @@ let initialize_build_filesystem root =
   Fs_compat.mkdir_p (Filename.concat work "new/_build");
   write (Filename.concat work "new/_build/old-output") "output before the first handoff"
 
-let provider root args =
+(* The guest agent behind [--publish-socket] (RFC
+   microvm-guest-agent-over-socket 3.5), as this fixture runs it: a process
+   that outlives the [run -d] call that started it, as a guest's first
+   process does. It serves while the lease file holds its token; [delete]
+   and the next [run -d] take the lease away, and so does removing the
+   fixture root. An agent whose test runner was killed before it removed
+   the root stops after its lifetime; every test ends well within it. *)
+let fixture_agent_lease root = Filename.concat root "agent-lease"
+let fixture_agent_poll_sec = 0.05
+let fixture_agent_backlog = 16
+let fixture_agent_lifetime_sec = 600.
+
+let published_host_sockets row =
+  match field "configuration" row |> field "publishedSockets" with
+  | `List sockets -> List.map (fun socket -> text (field "hostPath" socket)) sockets
+  | _ -> fail "fixture guest published sockets are not an array"
+
+(* The facts the production check reads from a hello: this build's relay,
+   a read-only root, the Keeper's uid and gid (this host's in the fixture)
+   and no_new_privs. *)
+let fixture_agent_hello () : Exec_ssh_protocol.Relay.hello =
+  { relay_version = Exec_ssh_protocol.Relay.version; root_read_only = true;
+    uid = Unix.getuid (); gid = Unix.getgid (); no_new_privs = true }
+
+let rec write_all fd bytes offset =
+  if offset < String.length bytes then
+    write_all fd bytes (offset + Unix.write_substring fd bytes offset (String.length bytes - offset))
+
+(* One connection: the hello, the kind byte, then one provider process that
+   reads the rest of the connection as its stdin, so a request reaches the
+   shim emulation an exec request reaches. Its stdout and stderr go back as
+   chunks and its exit code as the exit chunk. The provider always exits on
+   its own; one ended by a signal leaves the connection without an exit
+   chunk, which the host reads as a broken stream. *)
+let relay_fixture_agent ~root ~guest conn =
+  let module Relay = Exec_ssh_protocol.Relay in
+  let send chunk = write_all conn (Relay.encode chunk) 0 in
+  send (Relay.Hello (fixture_agent_hello ()));
+  let kind = Bytes.create 1 in
+  let request = match Unix.read conn kind 0 1 with
+    | 0 -> None
+    | _ -> Relay.request_kind_of_byte (Bytes.get kind 0) in
+  match request with
+  | None -> ()
+  | Some request ->
+    let request = match request with Relay.Run -> "run" | Relay.Probe -> "probe" in
+    let stdout_r, stdout_w = Unix.pipe ~cloexec:true () in
+    let stderr_r, stderr_w = Unix.pipe ~cloexec:true () in
+    let executable = Unix.realpath Sys.executable_name in
+    let pid = Unix.create_process executable
+        [|executable; "--provider"; root; "agent"; request; guest|] conn stdout_w stderr_w in
+    Unix.close stdout_w; Unix.close stderr_w;
+    let buffer = Bytes.create Relay.max_payload_bytes in
+    let rec pump outputs =
+      if outputs <> [] then (
+        let ready, _, _ = Unix.select (List.map fst outputs) [] [] (-1.) in
+        pump (List.filter (fun (fd, chunk) ->
+          not (List.mem fd ready)
+          || (match Unix.read fd buffer 0 (Bytes.length buffer) with
+              | 0 -> Unix.close fd; false
+              | count -> send (chunk (Bytes.sub_string buffer 0 count)); true)) outputs)) in
+    pump [stdout_r, (fun bytes -> Relay.Stdout bytes); stderr_r, (fun bytes -> Relay.Stderr bytes)];
+    match Unix.waitpid [] pid with
+    | _, Unix.WEXITED code -> send (Relay.Exit (Relay.Exited code))
+    | _, (Unix.WSIGNALED _ | Unix.WSTOPPED _) -> ()
+
+let serve_fixture_agent ~root ~token ~guest listener =
+  let deadline = Unix.gettimeofday () +. fixture_agent_lifetime_sec in
+  let leased () = Unix.gettimeofday () < deadline && match read (fixture_agent_lease root) with
+    | current -> String.equal current token
+    | exception Sys_error _ -> false in
+  let rec reap () = match Unix.waitpid [Unix.WNOHANG] (-1) with
+    | 0, _ -> ()
+    | _, _ -> reap ()
+    | exception Unix.Unix_error (Unix.ECHILD, _, _) -> () in
+  let rec loop () =
+    reap ();
+    if leased () then (
+      (match Unix.select [listener] [] [] fixture_agent_poll_sec with
+       | [], _, _ -> ()
+       | _ :: _, _, _ ->
+         (match Unix.accept ~cloexec:true listener with
+          | conn, _ ->
+            (match Unix.fork () with
+             | 0 ->
+               Unix.close listener;
+               (* A forked relay never returns into the loop it came from. *)
+               (match relay_fixture_agent ~root ~guest conn with
+                | () -> Unix._exit 0
+                | exception _ -> Unix._exit 3)
+             | _ -> Unix.close conn)
+          | exception Unix.Unix_error ((Unix.EINTR | Unix.EAGAIN | Unix.ECONNABORTED), _, _) -> ())
+       | exception Unix.Unix_error (Unix.EINTR, _, _) -> ());
+      loop ()) in
+  loop ()
+
+(* Started before [run -d] reports the guest: the socket listens by then,
+   and the agent is detached from the step that booted it. A socket file
+   already at the path fails the bind, as it stops [container run]. *)
+let start_fixture_agent ~root row =
+  match published_host_sockets row with
+  | [] -> ()
+  | [host_socket] ->
+    let guest = text (field "id" row) in
+    let listener = Unix.socket ~cloexec:true Unix.PF_UNIX Unix.SOCK_STREAM 0 in
+    Unix.bind listener (Unix.ADDR_UNIX host_socket);
+    Unix.listen listener fixture_agent_backlog;
+    let token = Printf.sprintf "%d:%.9f" (Unix.getpid ()) (Unix.gettimeofday ()) in
+    write (fixture_agent_lease root) token;
+    (match Unix.fork () with
+     | 0 ->
+       ignore (Unix.setsid ());
+       Sys.set_signal Sys.sigpipe Sys.Signal_ignore;
+       let null = Unix.openfile "/dev/null" [Unix.O_RDWR] 0 in
+       List.iter (fun fd -> Unix.dup2 ~cloexec:false null fd) [Unix.stdin; Unix.stdout; Unix.stderr];
+       Unix.close null;
+       (match serve_fixture_agent ~root ~token ~guest listener with
+        | () -> Unix._exit 0
+        | exception _ -> Unix._exit 3)
+     | _ -> Unix.close listener)
+  | _ :: _ :: _ -> fail "the fixture guest publishes more than its agent socket"
+
+(* A guest that ends cleanly takes its agent with it, and the runtime
+   removes the published socket file (RFC 4.5). *)
+let retire_fixture_agent ~root row =
+  List.iter (fun path ->
+    match Unix.unlink path with
+    | () -> ()
+    | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ())
+    (fixture_agent_lease root :: published_host_sockets row)
+
+let rec provider_command root args =
   let file name = Filename.concat root name in
-  append (file "calls") (strings args);
   let answer value = print_string (Yojson.Safe.to_string value); flush stdout in
   let guest_rows () = if Sys.file_exists (file "guest.json") then [json (file "guest.json")] else [] in
   let hold ~marker ~started ~released =
@@ -328,7 +458,10 @@ let provider root args =
     if models_build_filesystem root && name = value (Microvm.build_volume_name ~keeper_name:keeper) then
       Fs_compat.mkdir_p (fixture_build_root root)
   | "run" :: rest ->
-    if List.mem "-d" rest then save_json (file "guest.json") (inspect_from_run root rest)
+    if List.mem "-d" rest then (
+      let row = inspect_from_run root rest in
+      start_fixture_agent ~root row;
+      save_json (file "guest.json") row)
     else (
       let rec claimant = function
         | "--env" :: value :: _ when String.starts_with ~prefix:"MASC_VOLUME_CLAIMANT=" value ->
@@ -362,8 +495,14 @@ let provider root args =
   | "delete" :: rest ->
     if Sys.file_exists (file "replacement-keep-guest") then exit 19;
     (match guest_rows () with
-     | [row] when List.mem (text (field "id" row)) rest -> Unix.unlink (file "guest.json")
+     | [row] when List.mem (text (field "id" row)) rest ->
+       Unix.unlink (file "guest.json");
+       retire_fixture_agent ~root row
      | [] | [_] -> () | _ -> fail "provider invalid rows")
+  (* A request through the agent is the one an exec of the shim carries, so
+     it is served by that branch; the call record says it came by the agent. *)
+  | ["agent"; "run"; guest] -> provider_command root ["exec"; guest; Microvm.shim_guest_path]
+  | ["agent"; "probe"; guest] -> provider_command root ["exec"; guest; Microvm.shim_guest_path; "--probe"]
   | "exec" :: rest ->
     let work_mount_probe = match guest_rows () with
       | [guest] ->
@@ -501,6 +640,10 @@ let provider root args =
       if refused then exit 1))
   | _ -> fail ("unsupported provider command " ^ String.concat " " args)
 
+let provider root args =
+  append (Filename.concat root "calls") (strings args);
+  provider_command root args
+
 let meta () =
   let meta = value (Masc_test_deps.meta_of_json_fixture
       (`Assoc ["name", `String keeper; "trace_id", `String "survival-process-fixture"])) in
@@ -526,6 +669,9 @@ let process_step root operation =
   Eio_main.run @@ fun env ->
   let fs = Eio.Stdenv.fs env in
   Fs_compat.set_fs fs;
+  (* The agent transport connects from this fiber with these. *)
+  Eio_context.set_net (Eio.Stdenv.net env);
+  Eio_context.set_clock (Eio.Stdenv.clock env);
   Process_eio.init ~cwd_default:Eio.Path.(fs / root)
     ~proc_mgr:(Eio.Stdenv.process_mgr env) ~clock:(Eio.Stdenv.clock env);
   let base, other_base =
@@ -618,17 +764,20 @@ let process_step root operation =
           | Ok None -> fail "Apple authority was missing"
           | Error detail -> fail detail in
         let first_projection = projection () in
-        let argv =
+        let agent_socket =
           match Keeper_sandbox_remote.carrier first_endpoint with
-          | Keeper_sandbox_remote.Local_process { request; _ } -> strings request
-          | Keeper_sandbox_remote.Guest_agent _ -> fail "the Apple guest has an exec argv"
+          | Keeper_sandbox_remote.Guest_agent {host_socket; expected} ->
+            `Assoc ["guest", `String (Keeper_sandbox_remote.name first_endpoint);
+              "host_socket", `String host_socket;
+              "uid", `Int expected.Keeper_guest_socket.uid; "gid", `Int expected.gid]
+          | Keeper_sandbox_remote.Local_process _ -> fail "the Apple guest is reached without its agent"
         in
         let remote_root = Keeper_sandbox_remote.workspace_root first_endpoint in
         (* This is the exact pre-change projection. Credential and route
            revalidation are process-local and must not rewrite old originals. *)
         let legacy_identity = `Assoc ["workspace", `String base; "keeper", `String keeper;
           "profile", `String "microvm"; "workspace_root", `String remote_root;
-          "transport_argv", argv; "declaration", `Null] in
+          "agent_socket", agent_socket; "declaration", `Null] in
         check string "Apple authority preserves the legacy identity bytes"
           (Yojson.Safe.to_string legacy_identity) (Yojson.Safe.to_string first_projection);
         let old = authority () in
@@ -637,7 +786,8 @@ let process_step root operation =
           | AR.Producer_tree _ | AR.Producer_root_absent _ -> fail "unexpected review namespace" in
         let legacy_route = `Assoc ["kind", `String "keeper"; "name", `String keeper;
           "profile", `String "microvm"; "network", `String "none";
-          "route", `Assoc ["kind", `String "microvm"; "argv", argv; "root", `String remote_root]] in
+          "route", `Assoc ["kind", `String "microvm"; "agent_socket", agent_socket;
+            "root", `String remote_root]] in
         let schema_json (schema : Types_core.tool_schema) =
           `Assoc ["name", `String schema.name; "description", `String schema.description;
             "input_schema", schema.input_schema] in
@@ -790,8 +940,8 @@ let process_step root operation =
           let calls = calls_since before in
           check bool (label ^ " inspected the named guest") true
             (List.mem (strings ["inspect"; guest]) calls);
-          check bool (label ^ " sent no guest exec") false
-            (List.exists (function `List (`String "exec" :: _) -> true | _ -> false) calls) in
+          check bool (label ^ " sent no guest exec or agent request") false
+            (List.exists (function `List (`String ("exec" | "agent") :: _) -> true | _ -> false) calls) in
         let calls = ref 0 in
         let previous = Atomic.get AR.run_llm_reviewer_fn in
         let previous_slots = Atomic.get Workspace_hooks.get_verifier_exact_lane_slots_fn in
@@ -1342,8 +1492,8 @@ let process_step root operation =
               |> List.filter (fun line -> line <> "") |> List.drop before |> List.map Yojson.Safe.from_string in
             check bool (label ^ " performs both endpoint and absence inspection") true
               (List.length (List.filter ((=) (strings ["inspect"; guest])) after) >= 2);
-            check bool (label ^ " sends no guest exec") false
-              (List.exists (function `List (`String "exec" :: _) -> true | _ -> false) after) in
+            check bool (label ^ " sends no guest exec or agent request") false
+              (List.exists (function `List (`String ("exec" | "agent") :: _) -> true | _ -> false) after) in
           let before_read = call_count () in
           (match Keeper_sandbox_read_backend.run_command_with_status ~config ~meta:apple_meta
               ~command_argv:["/bin/true"] ~max_bytes:1024 ~timeout_sec:10. () with
@@ -1544,7 +1694,7 @@ let process_step root operation =
         let after = read (Filename.concat root "calls") |> String.split_on_char '\n'
           |> List.filter (fun line -> line <> "") |> List.drop before |> List.map Yojson.Safe.from_string in
         check bool "observation has no guest or volume effect" true
-          (List.for_all (function `List (`String ("run" | "stop" | "delete" | "exec" | "volume") :: _) -> false
+          (List.for_all (function `List (`String ("run" | "stop" | "delete" | "exec" | "agent" | "volume") :: _) -> false
             | _ -> true) after);
         if operation = "checkout-absent" || operation = "checkout-unknown" then
           Unix.rename held_snapshot snapshot;
@@ -1649,8 +1799,14 @@ let rec writable path = match (Unix.lstat path).st_kind with
   | Unix.S_DIR -> Unix.chmod path 0o700; Sys.readdir path |> Array.iter (fun leaf -> writable (Filename.concat path leaf))
   | Unix.S_REG | Unix.S_LNK | Unix.S_FIFO | Unix.S_SOCK | Unix.S_CHR | Unix.S_BLK -> ()
 
+(* The agent socket is [<root>/.masc/microvm/agent/<16 hex>.sock], and a
+   socket path holds at most 103 bytes on macOS. macOS's per-user TMPDIR
+   (/var/folders/../T/) takes about half of that already, and one step
+   works under a base path one level below the root. *)
+let fixture_temp_parent = "/tmp"
+
 let with_fixture use =
-  let root = Filename.temp_dir "masc-guest-survival-" "" in
+  let root = Filename.temp_dir ~temp_dir:fixture_temp_parent "masc-gs-" "" in
   let previous_path = Sys.getenv "PATH" in
   Fun.protect ~finally:(fun () -> Unix.putenv "PATH" previous_path; writable root; Fs_compat.remove_tree root)
   (fun () ->
@@ -1783,7 +1939,7 @@ let snapshot_path root = Keeper_microvm_github_identity.host_path ~base_path:roo
 let adoption_read = function
   | ["image"; "inspect"; "fixture:image"] -> true
   | ["list"; "--all"; "--format"; "json"] -> true
-  | ("inspect" | "exec") :: _ -> true
+  | ("inspect" | "exec" | "agent") :: _ -> true
   | _ -> false
 
 let test_absent_discard_never_runs_the_legacy_helper () = with_fixture @@ fun root ->
@@ -1864,7 +2020,7 @@ let test_fresh_process_adopts_without_boot_effects () = with_fixture @@ fun root
   check string "provider guest creation is retained" original (read (Filename.concat root "guest.json"));
   check int "durable snapshot inode retained" inode (Unix.lstat (snapshot_path root)).st_ino;
   let after = calls root |> List.drop (List.length before) in
-  check bool "adoption performs only guest/image observation and exec" true
+  check bool "adoption performs only guest/image observation, exec and agent requests" true
     (List.for_all adoption_read after);
   check int "one cold run total" 1 (count_guest_runs root);
   check int "one first-handoff frame per process" 2 (List.length (entries root "requests"))
@@ -2387,9 +2543,11 @@ let test_wrapped_image_adopts_without_relabelling_or_boot_effects () = with_fixt
   check string "provider identifies the actual image argument" "fixture:image"
     (text (field "reference" (field "image" config)));
   let init = field "initProcess" config in
-  check string "the requested entrypoint overrides the image" "tail" (text (field "executable" init));
+  check string "the requested entrypoint overrides the image" Microvm.shim_guest_path
+    (text (field "executable" init));
   check (list string) "image Cmd is replaced by explicit Keeper argv"
-    ["-f"; "/dev/null"]
+    [Exec_ssh_protocol.Relay.serve_flag; Keeper_microvm_agent_socket.guest_path;
+     Printf.sprintf "%d:%d" (Unix.getuid ()) (Unix.getgid ())]
     (match field "arguments" init with `List values -> List.map text values | _ -> fail "missing init argv");
   let inode = (Unix.lstat (snapshot_path root)).st_ino in
   let before = List.length (calls root) in
@@ -2398,7 +2556,7 @@ let test_wrapped_image_adopts_without_relabelling_or_boot_effects () = with_fixt
     original (read (Filename.concat root "guest.json"));
   check int "same sealed credential snapshot" inode (Unix.lstat (snapshot_path root)).st_ino;
   let after = calls root |> List.drop before in
-  check bool "wrapped adoption performs only guest/image observations and exec" true
+  check bool "wrapped adoption performs only guest/image observations, exec and agent requests" true
     (List.for_all adoption_read after);
   check int "wrapped guest is never booted twice" 1 (count_guest_runs root);
   check int "each process still performs its first handoff" 2 (List.length (entries root "requests"))
@@ -2432,9 +2590,13 @@ let test_helper_uncertainty_preserves_guest_on_adopt_and_replace () =
       let after = calls root |> List.drop before in
       check bool "the real helper inventory was requested" true
         (List.mem ["list"; "--all"; "--format"; "json"] after);
+      (* A guest that matches its plan gets one agent probe before it is
+         adopted (RFC microvm-guest-agent-over-socket 3.6); the probe reads
+         the shim's answer and changes nothing. *)
       check bool "refusal only reads provider state" true
         (List.for_all (function ["list"; "--all"; "--format"; "json"] -> true
           | ["image"; "inspect"; "fixture:image"] -> true
+          | ["agent"; "probe"; _] -> true
           | "inspect" :: _ -> true | _ -> false) after);
       check string "existing guest remains unchanged" original (read (Filename.concat root "guest.json"));
       check int "existing credential snapshot remains" inode (Unix.lstat (snapshot_path root)).st_ino;
@@ -2498,14 +2660,14 @@ let test_attached_endpoint_uses_host_snapshot_without_cleanup () = with_fixture 
   let before = calls root |> List.length in
   check bool "fresh attached process reaches shim" true (step root "attached" = Unix.WEXITED 0);
   let after = calls root |> List.drop before in
-  check bool "attached reader only observes the guest and issues exec calls" true
-    (List.for_all (function ("inspect" | "exec") :: _ -> true | _ -> false) after);
+  check bool "attached reader only observes the guest and asks its agent" true
+    (List.for_all (function ("inspect" | "agent") :: _ -> true | _ -> false) after);
   check int "attached reader observes the guest once" 1
     (List.length (List.filter (function "inspect" :: _ -> true | _ -> false) after));
-  let execs = List.filter (function "exec" :: _ -> true | _ -> false) after in
-  let probes, payloads = List.partition (List.mem "--probe") execs in
-  check int "one actual protocol negotiation" 1 (List.length probes);
-  check int "one actual requested payload dispatch" 1 (List.length payloads);
+  check int "one actual protocol negotiation" 1
+    (List.length (List.filter (function ["agent"; "probe"; _] -> true | _ -> false) after));
+  check int "one actual requested payload dispatch" 1
+    (List.length (List.filter (function ["agent"; "run"; _] -> true | _ -> false) after));
   check string "attached reader preserves guest" original (read (Filename.concat root "guest.json"));
   let last = List.hd (List.rev (entries root "requests")) in
   check (list string) "reader did not run first-handoff cleanup" ["/bin/true"]
@@ -2555,7 +2717,7 @@ let configure_identity root token =
 let assert_no_foreign_guest_effects operations =
   check bool "no guest or volume effect followed the foreign observation" true
     (List.for_all (function
-      | ("stop" | "delete" | "run" | "exec") :: _ -> false
+      | ("stop" | "delete" | "run" | "exec" | "agent") :: _ -> false
       | "volume" :: ("delete" | "create") :: _ -> false
       | [] | _ :: _ -> true) operations)
 

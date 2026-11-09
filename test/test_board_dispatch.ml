@@ -1450,7 +1450,10 @@ let test_reaction_toggle_and_summary () =
            ~target_id:post_id ~user_id:"reactor" ~emoji:"🚀"
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
-       | Ok result ->
+       | Ok (receipt : Board_dispatch.reaction_write) ->
+           Alcotest.(check string) "reaction parent from write" post_id
+             (Board.Post_id.to_string receipt.post_id);
+           let result = receipt.reaction in
            Alcotest.(check bool) "reacted" true result.reacted;
            Alcotest.(check int) "summary length" 1 (List.length result.summary);
            (match result.summary with
@@ -1474,7 +1477,8 @@ let test_reaction_toggle_and_summary () =
            ~target_id:post_id ~user_id:"reactor" ~emoji:"🚀"
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
-       | Ok result ->
+       | Ok (receipt : Board_dispatch.reaction_write) ->
+           let result = receipt.reaction in
            Alcotest.(check bool) "reacted after untoggle" false
              result.reacted;
            Alcotest.(check int) "summary empty after untoggle" 0

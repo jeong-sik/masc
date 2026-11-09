@@ -118,11 +118,13 @@ def live_paths(proc: Path, root: Path) -> list[Path]:
     does that for privilege-dropping or setuid programs, such as the sshd
     session this payload itself runs under. Keeper work runs inspectable,
     so such a process is passed over too. Any other unreadable process
-    keeps every entry.
+    keeps every entry. When that process belongs to another user, the root
+    let it in, so the reason names the root's mode and how to close it.
     """
     if not proc.is_dir():
         raise Unreadable("/proc unavailable")
-    private = root.stat().st_mode & (stat.S_IXGRP | stat.S_IXOTH) == 0
+    mode = stat.S_IMODE(root.stat().st_mode)
+    private = mode & (stat.S_IXGRP | stat.S_IXOTH) == 0
     me = os.getuid()
     paths: list[Path] = []
     for process in proc.iterdir():
@@ -146,7 +148,13 @@ def live_paths(proc: Path, root: Path) -> list[Path]:
             except PermissionError as error:
                 if owner == me and (process / "cwd").lstat().st_uid != me:
                     continue
-                raise Unreadable(f"process {process.name}: {error}") from error
+                if owner == me:
+                    raise Unreadable(f"process {process.name}: {error}") from error
+                raise Unreadable(
+                    f"process {process.name}: {error}; {root} has mode {mode:04o},"
+                    " so another user's process can be inside it; rerun"
+                    " masc-exec-ssh-bootstrap for this Keeper or chmod go-rwx it"
+                ) from error
         except FileNotFoundError:
             # The process exited while it was being read.
             continue

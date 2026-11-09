@@ -11,6 +11,46 @@ let home sealed = Runtime_official_account.home sealed
 let same left right = Runtime_official_account.same left right
 let account authorized = authorized
 
+type muse_home = string
+
+let declare_muse_home home = Runtime_account_home.of_string home
+let muse_home_path home = home
+
+(* A constructor for each kind: with these, OCaml 5.5.1 refutes the other kind
+   in a match on a declared account, and with empty types it did not. *)
+type declared = Declared_kind
+type process_environment = Process_environment_kind
+
+type _ muse_account =
+  | Declared_home : muse_home -> declared muse_account
+  | Process_environment : process_environment muse_account
+
+type 'where muse_authorized = 'where muse_account
+
+let muse_account_home (type where) (authorized : where muse_authorized) =
+  match authorized with
+  | Declared_home home -> Some home
+  | Process_environment -> None
+;;
+
+let declared_muse_home (authorized : declared muse_authorized) =
+  match authorized with
+  | Declared_home home -> home
+;;
+
+type host_client =
+  | Antigravity
+  | Vibe
+
+(* The proof carries nothing: a single-user process shares every account of
+   its host, so one start of a host client is as allowed as another. *)
+type host_account = Shared_by_single_user
+
+let host_client_name = function
+  | Antigravity -> "Antigravity"
+  | Vibe -> "Vibe"
+;;
+
 type t =
   | Single_user of Authz_boot_mode_read.single_user
   | Multi_account of
@@ -76,6 +116,7 @@ type refusal =
   | Home_unresolved of string
   | Not_a_declared_home
   | Not_the_account_home of Authz_types.Provider_account_id.t
+  | Host_account of host_client
 
 let refusal_to_string = function
   | Not_published -> "this process has not published whether a CLI may start on an account"
@@ -92,11 +133,18 @@ let refusal_to_string = function
   | No_membership user_id ->
     Printf.sprintf "%s has no membership" (Authz_types.User_id.to_string user_id)
   | Home_unresolved detail -> "the home of the account could not be spelled: " ^ detail
-  | Not_a_declared_home -> "the account was captured from an inherited home"
+  | Not_a_declared_home ->
+    "the account was captured from an inherited home, or a Muse process would start on \
+     the environment of the process"
   | Not_the_account_home provider_account_id ->
     Printf.sprintf
       "the account was captured from another home than the one of %s"
       (Authz_types.Provider_account_id.to_string provider_account_id)
+  | Host_account client ->
+    Printf.sprintf
+      "%s starts on an account of the host, and a multi-account process shares no \
+       account of its host"
+      (host_client_name client)
 ;;
 
 let layout_client (type client) (client : client Runtime_official_account.client) =
@@ -105,9 +153,17 @@ let layout_client (type client) (client : client Runtime_official_account.client
   | Runtime_official_account.Codex -> Layout.Codex_home
 ;;
 
-(* The home of [provider_account_id] under the namespace of [user_id]: the one
-   home a CLI for that person starts on. *)
-let own_home ~base_path (state : Authz_state.t) user_id provider_account_id sealed =
+(* What a start claims, whichever client it is for: the client whose login
+   keeps the home, and the home when a declaration chose it. [None] is a home
+   the environment of the process chose. *)
+type claim =
+  { client : Layout.client
+  ; declared_home : string option
+  }
+
+(* The home of [provider_account_id] under the namespace of [user_id] is the
+   one home a CLI for that person starts on. *)
+let own_home ~base_path (state : Authz_state.t) user_id provider_account_id claim =
   match Ps.find_membership state.Authz_state.principals user_id with
   | None -> Error (No_membership user_id)
   | Some membership ->
@@ -117,29 +173,28 @@ let own_home ~base_path (state : Authz_state.t) user_id provider_account_id seal
     (match
        Layout.home
          ~runtime_root
-         (layout_client (Runtime_official_account.client sealed))
+         claim.client
          ~account_id:(Authz_types.Provider_account_id.to_string provider_account_id)
      with
      | Error detail -> Error (Home_unresolved detail)
      | Ok expected ->
-       (match Runtime_official_account.source sealed with
-        | Runtime_official_account.Inherited_directory
-        | Runtime_official_account.Inherited_user_home -> Error Not_a_declared_home
-        | Runtime_official_account.Declared_directory ->
-          if String.equal expected (Runtime_official_account.home sealed)
-          then Ok sealed
+       (match claim.declared_home with
+        | None -> Error Not_a_declared_home
+        | Some home ->
+          if String.equal expected home
+          then Ok ()
           else Error (Not_the_account_home provider_account_id)))
 ;;
 
 let state_of zone = (Authz_zone.snapshot zone).Authz_zone.state
 
-let multi_account ~zone ~base_path ~now request sealed =
+let multi_account ~zone ~base_path ~now request claim =
   match request with
   | Operator_call -> Error No_operator
   | Own_account { user_id; provider_account_id } ->
     let state = state_of zone in
     (match Ps.find state.Authz_state.principals user_id with
-     | Some { Ps.status = Ps.Active; _ } -> own_home ~base_path state user_id provider_account_id sealed
+     | Some { Ps.status = Ps.Active; _ } -> own_home ~base_path state user_id provider_account_id claim
      | Some { Ps.status = Ps.Disabled; _ } | None -> Error (Not_active user_id))
   | Keeper_turn { keeper_name; channel; runtime_id } ->
     (match Authz_types.Keeper_id.of_string keeper_name with
@@ -158,17 +213,43 @@ let multi_account ~zone ~base_path ~now request sealed =
               (state_of zone)
               turn.Authz_keeper_turn.owner
               turn.Authz_keeper_turn.provider_account_id
-              sealed
+              claim
           else
             Error
               (Not_the_assigned_runtime
                  { requested = runtime_id; assigned = turn.Authz_keeper_turn.runtime_id })))
 ;;
 
-let authorize request sealed =
+let judge request claim =
   match Atomic.get state with
   | Unpublished -> Error Not_published
-  | Published (Single_user (_ : Authz_boot_mode_read.single_user)) -> Ok sealed
+  | Published (Single_user (_ : Authz_boot_mode_read.single_user)) -> Ok ()
   | Published (Multi_account { zone; base_path; now }) ->
-    multi_account ~zone ~base_path ~now request sealed
+    multi_account ~zone ~base_path ~now request claim
+;;
+
+let official_claim sealed =
+  { client = layout_client (Runtime_official_account.client sealed)
+  ; declared_home =
+      (match Runtime_official_account.source sealed with
+       | Runtime_official_account.Declared_directory -> Some (Runtime_official_account.home sealed)
+       | Runtime_official_account.Inherited_directory
+       | Runtime_official_account.Inherited_user_home -> None)
+  }
+;;
+
+let authorize request sealed =
+  judge request (official_claim sealed) |> Result.map (fun () -> sealed)
+;;
+
+let authorize_muse request account =
+  judge request { client = Layout.Muse_home; declared_home = muse_account_home account }
+  |> Result.map (fun () -> account)
+;;
+
+let authorize_host client =
+  match Atomic.get state with
+  | Unpublished -> Error Not_published
+  | Published (Single_user (_ : Authz_boot_mode_read.single_user)) -> Ok Shared_by_single_user
+  | Published (Multi_account { zone = _; base_path = _; now = _ }) -> Error (Host_account client)
 ;;

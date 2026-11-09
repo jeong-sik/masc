@@ -50,6 +50,14 @@ let close t =
   ignore (Eio.Promise.try_resolve t.resolve_closed () : bool)
 ;;
 
+(* A close says the response is complete. A route that fails leaves it
+   open, so the request's error handling cuts it (Server_http_ingress). *)
+let close_after t f =
+  let result = f () in
+  close t;
+  result
+;;
+
 (* Nothing between the write and the flush registration suspends, so a frame
    from another fiber cannot land inside this one. [flush] answers once the
    bytes written so far were handed to the socket ([`Written]), or once the

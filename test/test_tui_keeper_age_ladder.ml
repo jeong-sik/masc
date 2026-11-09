@@ -1,6 +1,7 @@
-(* The decisions behind the memory age ladder: which bin is drawn where, when a
-   bin draws nothing, when a ladder is unmeasured instead of zero, and how a
-   fleet's Keepers add up. What the words and glyphs look like is not tested. *)
+(* The decisions behind the memory age ladder: which group a bin belongs to,
+   how a narrow column adds bins into cells, when a group draws nothing, when
+   a ladder is unmeasured instead of zero, and how a fleet's Keepers add up.
+   What the words, glyphs and tick places look like is not tested. *)
 
 module Ladder = Masc_tui_keeper_age_ladder
 module Bins = Masc.Keeper_memory_age_bins
@@ -46,6 +47,7 @@ let make_keeper ~keeper_id age_bins : Masc.Tui_decode_memory_health.memory_keepe
       }
   ; mkh_librarian =
       { mlh_state = None
+      ; mlh_admission_wait = None
       ; mlh_measured_at = None
       ; mlh_unread_atom_turns = None
       ; mlh_unread_official_turns = None
@@ -68,25 +70,103 @@ let make_keeper ~keeper_id age_bins : Masc.Tui_decode_memory_health.memory_keepe
   }
 ;;
 
-let test_every_bin_is_drawn_once () =
-  Alcotest.(check int)
-    "24 bins are drawn" Bins.bin_count (List.length Ladder.oldest_first);
-  Alcotest.(check (list int))
-    "the oldest bin is on the left and the newest on the right"
-    (List.rev (List.init Bins.bin_count Fun.id))
-    (List.map Bins.index Ladder.oldest_first)
+let group_letter = function
+  | Ladder.Past_week -> 'P'
+  | Ladder.Within_week -> 'W'
+  | Ladder.Within_day -> 'D'
 ;;
 
-let test_an_empty_bin_never_draws_a_bar () =
+let letters groups = String.of_seq (List.to_seq (List.map group_letter groups))
+
+(* The server's day edge starts bin 9 and its week edge bin 17: bins 0–8 are
+   under a day, 9–16 a day to seven days, 17–23 older. *)
+let test_a_bin_belongs_to_the_group_between_its_edges () =
+  Alcotest.(check string)
+    "groups of bins 0 to 23"
+    (String.make 9 'D' ^ String.make 8 'W' ^ String.make 7 'P')
+    (letters (List.map Ladder.group_of_bin Bins.bins))
+;;
+
+let test_the_groups_add_up_to_the_facts () =
   List.iter
     (fun (label, b) ->
-      let counts = List.map (Bins.count b) Ladder.oldest_first in
+      Alcotest.(check int)
+        label
+        (Bins.total b)
+        (List.fold_left (fun sum group -> sum + Ladder.group_count b group) 0
+           Ladder.groups_oldest_first))
+    [ "no facts", Bins.zero
+    ; "a fact in every bin, each bin a different count", ladder (List.init Bins.bin_count (fun k -> 1 lsl k))
+    ; "only the two ends", ladder ((3 :: List.init 22 (fun _ -> 0)) @ [ 5 ])
+    ]
+;;
+
+let test_a_column_adds_one_two_or_four_bins_to_a_cell () =
+  List.iter
+    (fun (column, expected) ->
+      Alcotest.(check (option int))
+        (Printf.sprintf "a column of %d cells" column)
+        expected
+        (Option.map Ladder.bins_per_cell (Ladder.merge_of_column column)))
+    [ 24, Some 1; 23, Some 2; 16, Some 2; 15, Some 2; 12, Some 2; 11, Some 4; 6, Some 4
+    ; 5, None; 0, None ]
+;;
+
+(* Counts that differ in every bin, so a cell that adds the wrong bins shows. *)
+let distinct = ladder (List.init Bins.bin_count (fun k -> 1 lsl k))
+
+let test_a_cell_adds_its_bins_and_takes_the_newest_ones_group () =
+  List.iter
+    (fun column ->
+      match Ladder.merge_of_column column with
+      | None -> Alcotest.fail "the column draws a ladder"
+      | Some merge ->
+        let per_cell = Ladder.bins_per_cell merge in
+        let cells = Ladder.cells merge distinct in
+        Alcotest.(check int)
+          (Printf.sprintf "%d bins to a cell: cell count" per_cell)
+          (Bins.bin_count / per_cell)
+          (List.length cells);
+        (* Cell c from the right adds bins c × merge to c × merge + merge − 1. *)
+        List.iteri
+          (fun c (cell : Ladder.cell) ->
+            let first = c * per_cell in
+            let bins = List.filteri (fun k _ -> k >= first && k < first + per_cell) Bins.bins in
+            Alcotest.(check int)
+              (Printf.sprintf "%d bins to a cell: cell %d from the right" per_cell c)
+              (List.fold_left (fun sum bin -> sum + Bins.count distinct bin) 0 bins)
+              cell.count;
+            Alcotest.(check char)
+              (Printf.sprintf "%d bins to a cell: cell %d takes its newest bin's group" per_cell c)
+              (group_letter (Ladder.group_of_bin (List.nth Bins.bins first)))
+              (group_letter cell.group))
+          (List.rev cells);
+        Alcotest.(check int)
+          (Printf.sprintf "%d bins to a cell: no fact is lost" per_cell)
+          (Bins.total distinct)
+          (List.fold_left (fun sum (cell : Ladder.cell) -> sum + cell.count) 0 cells))
+    [ 24; 15; 6 ]
+;;
+
+let test_an_empty_group_never_draws_a_bar () =
+  List.iter
+    (fun (label, b) ->
+      let counts =
+        List.map
+          (fun group ->
+            List.fold_left
+              (fun sum bin ->
+                if Ladder.group_of_bin bin = group then sum + Bins.count b bin else sum)
+              0 Bins.bins)
+          Ladder.groups_oldest_first
+      in
       let marks = Ladder.marks b in
-      Alcotest.(check int) (label ^ ": one mark per bin") Bins.bin_count (List.length marks);
+      Alcotest.(check int) (label ^ ": one mark per group")
+        (List.length Ladder.groups_oldest_first) (List.length marks);
       List.iter2
         (fun count mark ->
           Alcotest.(check bool)
-            (label ^ ": a bin draws nothing exactly when it holds nothing")
+            (label ^ ": a group draws nothing exactly when it holds nothing")
             (count = 0)
             (is_empty mark))
         counts
@@ -100,14 +180,13 @@ let test_an_empty_bin_never_draws_a_bar () =
 
 let test_the_oldest_is_drawn_first () =
   let drawn b = List.map (fun mark -> not (is_empty mark)) (Ladder.marks b) in
-  let only k = List.init Bins.bin_count (fun i -> i = k) in
   Alcotest.(check (list bool))
     "facts 30 days or older draw the leftmost mark"
-    (only 0)
+    [ true; false; false ]
     (drawn (ends ~newest:0 ~oldest:5));
   Alcotest.(check (list bool))
     "facts first seen in the last hour draw the rightmost mark"
-    (only (Bins.bin_count - 1))
+    [ false; false; true ]
     (drawn (ends ~newest:5 ~oldest:0))
 ;;
 
@@ -187,11 +266,23 @@ let () =
   Alcotest.run
     "tui_keeper_age_ladder"
     [ ( "age ladder"
-      , [ Alcotest.test_case "every bin is drawn once" `Quick test_every_bin_is_drawn_once
-        ; Alcotest.test_case
-            "an empty bin never draws a bar"
+      , [ Alcotest.test_case
+            "a bin belongs to the group between its edges"
             `Quick
-            test_an_empty_bin_never_draws_a_bar
+            test_a_bin_belongs_to_the_group_between_its_edges
+        ; Alcotest.test_case "the groups add up to the facts" `Quick test_the_groups_add_up_to_the_facts
+        ; Alcotest.test_case
+            "a column adds one, two or four bins to a cell"
+            `Quick
+            test_a_column_adds_one_two_or_four_bins_to_a_cell
+        ; Alcotest.test_case
+            "a cell adds its bins and takes the newest one's group"
+            `Quick
+            test_a_cell_adds_its_bins_and_takes_the_newest_ones_group
+        ; Alcotest.test_case
+            "an empty group never draws a bar"
+            `Quick
+            test_an_empty_group_never_draws_a_bar
         ; Alcotest.test_case "the oldest is drawn first" `Quick test_the_oldest_is_drawn_first
         ; Alcotest.test_case "unmeasured is not zero" `Quick test_unmeasured_is_not_zero
         ; Alcotest.test_case "the cell carries no tone" `Quick test_the_cell_carries_no_tone

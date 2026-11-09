@@ -197,7 +197,7 @@ let establish_progress config ~trace_id first =
     check int "initial end" 1 progress.position.end_atom
   | Consumer.Nothing_to_read
   | Consumer.Official_advanced _
-  | Consumer.Pending
+  | Consumer.Pending _
   | Consumer.Memory_not_committed _ -> fail "initial range did not advance"
 ;;
 
@@ -354,7 +354,7 @@ let test_n_tick_reads_every_intermediate_turn () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "unread range did not commit");
   check (list string) "both unread turns are delivered" [ "turn-2"; "turn-3" ] !carried
 ;;
@@ -381,7 +381,7 @@ let test_unread_turns_counts_what_a_pass_has_left () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "unread range did not commit");
   match Consumer.unread_turns ~config ~keeper_name with
   | Ok { atoms; official } ->
@@ -405,7 +405,7 @@ let test_failed_commit_and_restart_retry_the_same_range () =
        (Consumer.Memory_refused []))
    with
    | Consumer.Memory_not_committed _ -> ()
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
@@ -426,7 +426,7 @@ let test_failed_commit_and_restart_retry_the_same_range () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "restart did not retry unread range");
   check (list string) "restart reads identical range" !first !after_restart
 ;;
@@ -541,7 +541,7 @@ let test_undecodable_current_snapshot_routes_through_write_path_quarantine () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "undecodable snapshot blocked the pass");
   check int "memory commit ran once" 1 !commits;
   let recovered =
@@ -911,7 +911,7 @@ let test_memory_the_continuity_round_saved_is_not_sent_again ~batched () =
   save_checkpoint config ~trace_id through_three 3;
   (match consume config (fun _original -> (Consumer.Memory_refused [])) with
    | Consumer.Memory_not_committed _ -> ()
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
@@ -943,7 +943,7 @@ let test_memory_the_continuity_round_saved_is_not_sent_again ~batched () =
       | Consumer.Progress_advanced _ -> drain (remaining - 1)
       | Consumer.Baseline_advanced _
       | Consumer.Official_advanced _
-      | Consumer.Pending
+      | Consumer.Pending _
       | Consumer.Memory_not_committed _ -> fail "unexpected durable outcome")
   in
   drain rounds_until_settled;
@@ -1060,7 +1060,7 @@ let test_historical_range_does_not_borrow_the_current_task () =
        (Consumer.Memory_refused []))
    with
    | Consumer.Memory_not_committed _ -> ()
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
@@ -1082,7 +1082,7 @@ let test_historical_range_does_not_borrow_the_current_task () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "historical retry did not advance");
   (match !retry_context with
    | Some context -> check_no_task "retried catch-up" context
@@ -1091,7 +1091,7 @@ let test_historical_range_does_not_borrow_the_current_task () =
   (match consume config (fun _original -> fail "quiet tick recommitted") with
    | Consumer.Nothing_to_read -> ()
    | Consumer.Baseline_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _
    | Consumer.Official_advanced _
    | Consumer.Progress_advanced _ -> fail "quiet tick did not stay quiet")
@@ -1150,6 +1150,116 @@ let commit_pending_memory config ~expected_revision:_ ~range_id ~official_range_
   | Error detail -> fail detail
 ;;
 
+let test_capacity_release_wakes_only_proven_pre_admission_waits () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
+  with_workspace @@ fun config ->
+  let trace_id = "trace-capacity-release" in
+  prepare_three_unread_turns config ~trace_id;
+  let memory_path = seed_pending_memory config ~trace_id in
+  let memory_before = Fs_compat.load_file memory_path in
+  let progress_before = read_progress config in
+  let installation_id = "[\"configuration\",\"keeper-librarian\"]" in
+  let wakes = ref [] in
+  Masc.Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
+    wakes := (base_path, keeper_name) :: !wakes);
+  Fun.protect ~finally:(fun () ->
+    Queue_refresh.forget_measurement ~config ~keeper_name;
+    Queue_refresh.install ()) (fun () ->
+    let run ?(during = fun () -> ()) wait =
+      ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+        ~commit:(fun _source ->
+          during ();
+          Consumer.Memory_pending (Masc.Keeper_librarian_pending.Worker
+            { installation_id; request_id = "original-capacity-request"; wait }))) in
+    let released ?(config = config) ?(installation_id = installation_id) () =
+      Queue_refresh.capacity_released ~config ~installation_id in
+    run Masc.Keeper_librarian_pending.Capacity;
+    check int "no completion has arrived" 0 (List.length !wakes);
+    released ~installation_id:"another-installation" ();
+    released ~config:(Workspace.default_config (config.base_path ^ "-other-workspace")) ();
+    check int "another installation or workspace grants no wake" 0 (List.length !wakes);
+    released ();
+    check (list (pair string string)) "a released frame wakes its waiting Keeper"
+      [config.base_path, keeper_name] !wakes;
+    wakes := [];
+    run Masc.Keeper_librarian_pending.Missing_after_dispatch;
+    released ();
+    check int "a missing dispatched request is not a capacity waiter" 0 (List.length !wakes);
+    run ~during:(fun () -> released ()) Masc.Keeper_librarian_pending.Capacity;
+    check (list (pair string string)) "completion before measurement publication is retained"
+      [config.base_path, keeper_name] !wakes;
+    check bool "wake scheduling does not advance the source cursor" true
+      (read_progress config = progress_before);
+    check string "wake scheduling does not publish Memory" memory_before
+      (Fs_compat.load_file memory_path))
+;;
+
+let test_admission_wait_survives_durable_measurement_and_release_race () =
+  Masc_test_deps.with_process_env Env_config.KeeperMemoryOs.librarian_env_key (Some "true") @@ fun () ->
+  with_workspace @@ fun config ->
+  let module Pending = Masc.Keeper_librarian_pending in
+  let module Worker = Masc.Keeper_memory_admission_worker in
+  let trace_id = "trace-admission-capacity-release" in
+  prepare_three_unread_turns config ~trace_id;
+  let memory_path = seed_pending_memory config ~trace_id in
+  let memory_before = Fs_compat.load_file memory_path in
+  let progress_before = read_progress config in
+  let installation_id = "[\"configuration\",\"keeper-librarian\"]" in
+  let waiting wait : Pending.worker =
+    {installation_id; request_id="admission-original"; wait} in
+  let wakes = ref [] in
+  Masc.Keeper_librarian_queue_signal.install (fun ~base_path ~keeper_name ->
+    wakes := (base_path, keeper_name) :: !wakes);
+  Fun.protect ~finally:(fun () ->
+    Queue_refresh.forget_measurement ~config ~keeper_name;
+    Queue_refresh.install ()) (fun () ->
+    let released ?(config = config) ?(installation_id = installation_id) () =
+      Queue_refresh.capacity_released ~config ~installation_id in
+    let admission ?(during = fun () -> ()) wait =
+      Queue_refresh.For_testing.run_explicit_admission_with ~base_path:config.base_path
+        ~keeper_name ~run:(fun () -> during (); Worker.Awaiting_worker (waiting wait)) in
+    let durable wait =
+      ignore (Queue_refresh.For_testing.run_durable_with_commit ~config ~keeper_name
+        ~commit:(fun _source -> Consumer.Memory_pending (Pending.Worker
+          {installation_id; request_id="durable-original"; wait}))) in
+    admission Pending.Capacity;
+    durable Pending.Missing_after_dispatch;
+    check bool "durable observation preserves the separate original admission wait" true
+      (Queue_refresh.last_admission_wait ~config ~keeper_name = Some (waiting Pending.Capacity));
+    released ~installation_id:"another-installation" ();
+    released ~config:(Workspace.default_config (config.base_path ^ "-other-workspace")) ();
+    check int "another workspace or installation cannot wake admission" 0 (List.length !wakes);
+    released ();
+    check (list (pair string string)) "capacity completion wakes the explicit admission waiter"
+      [config.base_path, keeper_name] !wakes;
+    wakes := [];
+    durable Pending.Capacity;
+    released ();
+    check (list (pair string string)) "one completion deduplicates both lanes of the same Keeper"
+      [config.base_path, keeper_name] !wakes;
+    wakes := [];
+    durable Pending.Missing_after_dispatch;
+    List.iter (fun wait ->
+      admission wait;
+      released ();
+      check int "a capacity release grants no wake for another admission wait" 0 (List.length !wakes))
+      Pending.[Processing; Outcome_unknown; Unreachable; Missing_after_dispatch; Journal_recheck];
+    admission ~during:(fun () -> released ()) Pending.Capacity;
+    check (list (pair string string)) "completion before admission observation is retained"
+      [config.base_path, keeper_name] !wakes;
+    wakes := [];
+    Queue_refresh.For_testing.run_explicit_admission_with ~base_path:config.base_path
+      ~keeper_name ~run:(fun () -> Worker.Idle);
+    check bool "a finished admission pass clears its previous wait" true
+      (Queue_refresh.last_admission_wait ~config ~keeper_name = None);
+    released ();
+    check int "an old admission observation grants no later wake" 0 (List.length !wakes);
+    check bool "admission wake scheduling never advances the history cursor" true
+      (read_progress config = progress_before);
+    check string "admission wake scheduling never publishes Memory" memory_before
+      (Fs_compat.load_file memory_path))
+;;
+
 let test_pending_preserves_selection_and_memory ~after_failure () =
   with_workspace @@ fun config ->
   let trace_id = "trace-pending-selection" in
@@ -1172,10 +1282,10 @@ let test_pending_preserves_selection_and_memory ~after_failure () =
     check bool "real selected range has an atom receipt" true (Option.is_some range_id);
     check (list string) "Pending does not change the prior selection mode"
       selected (text_markers input);
-    Consumer.Memory_pending in
+    Consumer.Memory_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" }) in
   List.iter (fun () ->
     (match consume config pending with
-     | Consumer.Pending -> ()
+     | Consumer.Pending _ -> ()
      | _ -> fail "an unfinished commit did not suspend the durable pass");
     check bool "Pending preserves the actual atom position" true
       (read_progress config=progress_before);
@@ -1305,7 +1415,7 @@ let test_pending_wake_suspends_following_phases () =
     record "pending";
     check (list string) "the actual drain selects all unread turns"
       ["turn-2";"turn-3";"turn-4"] (text_markers input);
-    Consumer.Memory_pending in
+    Consumer.Memory_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" }) in
   run pending;
   run pending;
   check (list string) "an unfinished commit suppresses both following phases"
@@ -1314,7 +1424,7 @@ let test_pending_wake_suspends_following_phases () =
   check string "same-wake cleanup cannot change Memory" memory_before
     (Fs_compat.load_file memory_path);
   (match Queue_refresh.last_measurement ~config ~keeper_name with
-   | Some {last_pass=Queue_refresh.Pending;unread=Some {atoms=3;official=0};_} -> ()
+   | Some {last_pass=Queue_refresh.Pending _;unread=Some {atoms=3;official=0};_} -> ()
    | _ -> fail "Pending must retain the real unread observation");
 
     let commit original =
@@ -1497,7 +1607,7 @@ let test_unchanged_boundaries_do_not_require_checkpoint () =
   match consume config (fun _original -> fail "commit was called") with
   | Consumer.Nothing_to_read -> ()
   | Consumer.Baseline_advanced _
-  | Consumer.Pending
+  | Consumer.Pending _
   | Consumer.Memory_not_committed _
   | Consumer.Official_advanced _
   | Consumer.Progress_advanced _ -> fail "unchanged boundaries did not stop before checkpoint"
@@ -1911,7 +2021,7 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
   save_checkpoint config ~trace_id first_two 2;
   (match consume config (fun _original -> (Consumer.Memory_refused [])) with
    | Consumer.Memory_not_committed _ -> ()
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
@@ -1933,7 +2043,7 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "bounded retry did not advance");
   check (list string) "retry does not grow with later turns" [ "turn-2" ] !retry;
   let remaining = ref [] in
@@ -1948,7 +2058,7 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "remaining range did not advance");
   check (list string) "bounded catch-up remains active" [ "turn-3" ] !remaining;
   let final = ref [] in
@@ -1963,7 +2073,7 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "final range did not advance");
   check (list string) "final turn remains readable" [ "turn-4" ] !final;
   (match consume config (fun _original -> fail "empty range called commit") with
@@ -1971,7 +2081,7 @@ let test_failed_long_range_retries_only_oldest_cut_point () =
    | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "empty pass did not clear bounded catch-up")
 ;;
 
@@ -1994,7 +2104,7 @@ let test_last_matching_boundary_wins_when_clock_moves_backward () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "clock regression range did not advance");
   check (option int) "last appended boundary is authoritative" (Some 3) !selected_turn
 ;;
@@ -2010,7 +2120,7 @@ let test_distinct_boundaries_reject_non_monotone_counterpart_interval () =
    | Consumer.Baseline_advanced _ | Consumer.Progress_advanced _ -> ()
    | Consumer.Nothing_to_read
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "fixture progress did not advance");
   let messages = first @ [ message "turn-2" ] in
   append_boundary config ~trace_id ~turn:2 ~recorded_at:10.0 messages;
@@ -2050,7 +2160,7 @@ let test_equal_boundary_timestamps_form_an_empty_counterpart_interval () =
    | Consumer.Baseline_advanced _ | Consumer.Progress_advanced _ -> ()
    | Consumer.Nothing_to_read
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "fixture progress did not advance");
   let messages = first @ [ message "turn-2" ] in
   append_boundary config ~trace_id ~turn:2 ~recorded_at:20.0 messages;
@@ -2902,7 +3012,7 @@ let test_an_official_only_keeper_is_read_from_its_fragments () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "official turns were not read");
   check (list string) "both turns, each in its order" [ "q1"; "a1"; "q2"; "a2" ] !carried;
   check (list string) "the tool the first turn called" [ "masc_tasks" ] !tools;
@@ -2916,7 +3026,7 @@ let test_an_official_only_keeper_is_read_from_its_fragments () =
   | Consumer.Official_advanced _
   | Consumer.Baseline_advanced _
   | Consumer.Progress_advanced _
-  | Consumer.Pending
+  | Consumer.Pending _
   | Consumer.Memory_not_committed _ -> fail "read turns were read again"
 ;;
 
@@ -3066,7 +3176,7 @@ let test_a_failed_official_turn_is_read ?(tool_only=false) () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "the failed turn left nothing to read");
   check (list string) "the failed turn's input, then the next turn" (if tool_only then [] else [ "q-failed"; "q2"; "a2" ])
     !carried;
@@ -3113,7 +3223,7 @@ let test_refused_mixed_range_preserves_reports_and_both_cursors ~with_reports ()
     Consumer.Memory_refused reports) with
    | Consumer.Memory_not_committed actual ->
      check bool "all reports survive in callback order" true (actual = reports)
-   | Consumer.Pending | Consumer.Nothing_to_read | Consumer.Baseline_advanced _
+   | Consumer.Pending _ | Consumer.Nothing_to_read | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _ | Consumer.Official_advanced _ ->
      fail "refused mixed range advanced");
   check bool "refusal preserves atom cursor" true (read_progress config = atom_before);
@@ -3128,7 +3238,7 @@ let test_refused_mixed_range_preserves_reports_and_both_cursors ~with_reports ()
      check int "only the successful retry advances official lines" 2 official.boundary_line
    | Consumer.Nothing_to_read | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _ | Consumer.Official_advanced {atom=None;_}
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "successful mixed retry did not advance")
 
 let test_pending_official_sources_preserve_memory_and_ack ~mixed () =
@@ -3188,10 +3298,10 @@ let test_pending_official_sources_preserve_memory_and_ack ~mixed () =
     let official_range_id = Original.official_range_id original in
     let input = Original.input original in
     check_selected ~range_id ~official_range_id input;
-    Consumer.Memory_pending in
+    Consumer.Memory_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" }) in
   List.iter (fun () ->
     (match consume config pending with
-     | Consumer.Pending -> ()
+     | Consumer.Pending _ -> ()
      | _ -> fail "official source did not suspend at its unfinished commit");
     check bool "Pending preserves atom cursor" true (read_progress config=atom_before);
     check bool "Pending preserves official cursor" true (read_official config=official_before);
@@ -3256,7 +3366,7 @@ let test_a_mixed_keeper_is_read_in_line_order () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "the mixed pass did not advance");
   check (list string) "T2 before T3, T1 not again" [ "q2"; "a2"; "t3" ] !carried
 ;;
@@ -4127,7 +4237,7 @@ let test_untagged_fragments_are_passed_without_a_commit () =
   | Consumer.Nothing_to_read
   | Consumer.Baseline_advanced _
   | Consumer.Progress_advanced _
-  | Consumer.Pending
+  | Consumer.Pending _
   | Consumer.Memory_not_committed _ -> fail "the untagged line was not passed"
 ;;
 
@@ -4185,8 +4295,8 @@ let test_untagged_turn_preserves_counterparts ~fail_position_after_commit () =
     check bool "official receipt remains bound to the turn" true
       (Option.is_some (Original.official_range_id original));
     input in
-  (match consume config (fun original -> ignore (check_input original); Consumer.Memory_pending) with
-   | Consumer.Pending -> () | _ -> fail "counterparts did not remain pending");
+  (match consume config (fun original -> ignore (check_input original); Consumer.Memory_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" })) with
+   | Consumer.Pending _ -> () | _ -> fail "counterparts did not remain pending");
   check bool "pending preserves the official cursor" true (Option.is_none (read_official config));
   check_external ~after:0 ~prepared:true;
   (match consume config (fun original -> ignore (check_input original); Consumer.Memory_refused []) with
@@ -4328,8 +4438,8 @@ let test_counterpart_capacity_refusal_preserves_complete_source () =
          (Original.extent value=Masc.Keeper_librarian_range.All_unread);
        check (list int) "the immediate next selection retains both official rows" [1;2]
          (Original.official_range_id value |> Option.get |> fun range -> List.map fst range.turns);
-       Consumer.Memory_pending) with
-   | Consumer.Pending -> ()
+       Consumer.Memory_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" })) with
+   | Consumer.Pending _ -> ()
    | _ -> fail "the complete recovery selection should remain pending");
   let ordinary = {report with Runtime.input_capacity_evidence = Runtime.No_input_capacity_refusal;
     input_capacity_only = false;
@@ -4361,8 +4471,8 @@ let test_counterpart_capacity_refusal_preserves_complete_source () =
   (match consume config (fun value -> check_input value; Consumer.Memory_refused [unknown]) with
    | Consumer.Memory_not_committed [actual] -> check bool "unexecuted unknown remains ordinary" true (actual=unknown)
    | _ -> fail "unknown runtime was mislabeled as a capacity-only refusal");
-  (match consume config (fun value -> check_input value; Consumer.Memory_pending) with
-   | Consumer.Pending -> () | _ -> fail "pending work was mislabeled a capacity refusal");
+  (match consume config (fun value -> check_input value; Consumer.Memory_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" })) with
+   | Consumer.Pending _ -> () | _ -> fail "pending work was mislabeled a capacity refusal");
   check bool "all refusals and Pending leave the official position intact" true (Option.is_none (read_official config));
   (match consume config (fun value ->
        check_input value;
@@ -4432,7 +4542,7 @@ let test_an_official_line_older_than_the_baseline_is_read () =
    | Consumer.Nothing_to_read
    | Consumer.Progress_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "the first pass did not set the baseline");
   let carried = ref [] in
   match
@@ -4448,7 +4558,7 @@ let test_an_official_line_older_than_the_baseline_is_read () =
   | Consumer.Nothing_to_read
   | Consumer.Baseline_advanced _
   | Consumer.Progress_advanced _
-  | Consumer.Pending
+  | Consumer.Pending _
   | Consumer.Memory_not_committed _ -> fail "the older official line was not read"
 ;;
 
@@ -4507,7 +4617,7 @@ let test_an_official_stop_does_not_hold_the_atom_part () =
        ( Consumer.Nothing_to_read
        | Consumer.Baseline_advanced _
        | Consumer.Official_advanced _
-       | Consumer.Pending
+       | Consumer.Pending _
        | Consumer.Memory_not_committed _ ) -> fail "the atom part did not advance"
    | Error error -> fail (Consumer.error_to_string error));
   check (list string) "the settled round reads from atom zero" [ "t1"; "t2" ] !carried;
@@ -4533,7 +4643,7 @@ let check_next_pass_reads_both config ~trace_id =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "the two turns were not read");
   check (list string) "one pass carries both turns" [ "t3"; "t4" ] !carried
 ;;
@@ -4557,7 +4667,7 @@ let test_an_official_stop_does_not_narrow_later_passes () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "the atom part did not advance");
   check_official_stop config ~line:2;
   check_next_pass_reads_both config ~trace_id
@@ -4577,7 +4687,7 @@ let test_a_drained_pass_does_not_narrow_later_passes () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "the atom part did not advance");
   (match consume config (fun _original ->
      fail "a drained pass called commit") with
@@ -4585,7 +4695,7 @@ let test_a_drained_pass_does_not_narrow_later_passes () =
    | Consumer.Progress_advanced _
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "the drained pass was not quiet");
   check_next_pass_reads_both config ~trace_id
 ;;
@@ -4648,7 +4758,7 @@ let test_a_refused_boundary_line_is_not_lifted_for_official_turns () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Official_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "the atom part did not advance");
   check_official_stop config ~line:2
 ;;
@@ -4680,7 +4790,7 @@ let test_an_official_turn_before_a_refused_boundary_line_is_read () =
    | Consumer.Nothing_to_read
    | Consumer.Baseline_advanced _
    | Consumer.Progress_advanced _
-   | Consumer.Pending
+   | Consumer.Pending _
    | Consumer.Memory_not_committed _ -> fail "the turn before the refused line was not read");
   check (list string) "the turn before the refused line is carried" [ "q1"; "a1" ] !carried;
   (match !committed_range with
@@ -5270,7 +5380,11 @@ let () =
             test_official_cursor_above_the_range_end_refuses_the_hand_off
         ] )
     ; ( "production wake"
-      , [ test_case "count overflow is reviewed without unread history" `Quick
+      , [ test_case "capacity release wakes proven waiters before or after registration" `Quick
+            test_capacity_release_wakes_only_proven_pre_admission_waits
+        ; test_case "admission wait survives history observations and result-before-registration" `Quick
+            test_admission_wait_survives_durable_measurement_and_release_race
+        ; test_case "count overflow is reviewed without unread history" `Quick
             test_memory_count_cleanup_without_history
         ; test_case "saved count progress continues without an external wake" `Quick
             test_memory_count_cleanup_continues_without_external_wake

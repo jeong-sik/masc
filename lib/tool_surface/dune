@@ -23,7 +23,6 @@
   tool_shard_types_schemas_base_toml
   tool_shard_types_schemas_voice_toml
   tool_shard_types_schemas_surface_toml
-  tool_shard_types_enum_mirrors
   tool_shard_types_schemas_base
   tool_shard_types_board_keeper_projection
   tool_shard_types_schemas_execute

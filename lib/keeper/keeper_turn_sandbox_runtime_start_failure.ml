@@ -39,9 +39,6 @@ type microvm_start_failure =
       (** Neither the keeper nor the workspace names a size that parses, so
           there is nothing to boot the guest with or compare a running one
           against. *)
-  | Delivery_unresolved of string
-      (** The keeper TOML could not be read for [microvm_delivery], so there
-          is no knowing which guest to boot or compare a running one with. *)
   | Agent_socket_unavailable of Keeper_microvm_agent_socket.preparation_error
       (** The host end of the agent's socket could not be made ready before
           the boot that publishes it. *)
@@ -107,7 +104,6 @@ let microvm_start_failure_message failure =
   | Network_unexpressible detail -> failed detail
   | Image_unresolved error -> failed (image_unresolved_message error)
   | Guest_size_invalid detail -> failed ("microvm_guest_size_invalid: " ^ detail)
-  | Delivery_unresolved detail -> failed ("microvm_delivery_unresolved: " ^ detail)
   | Agent_socket_unavailable error ->
     failed (Keeper_microvm_agent_socket.preparation_error_message error)
   | Agent_unchecked detail -> failed ("microvm_agent_unchecked: " ^ detail)
@@ -161,7 +157,6 @@ let microvm_start_failure_cause failure =
   | Image_unresolved _
   | Guest_state_unreadable _
   | Guest_size_invalid _
-  | Delivery_unresolved _
   | Agent_socket_unavailable _
   | Agent_unchecked _
   | Unadoptable_guest_not_removed _
@@ -177,36 +172,11 @@ let microvm_start_failure_cause failure =
   | Boot_command_failed _ -> Sandbox_unavailable detail
 ;;
 
-(* Read where a guest's plan is made, as [observation_run] is read where a
-   route is built: the switch is TOML-owned, and every turn assesses its
-   keeper's guest again, so a changed choice is the next turn's plan.
-
-   A keeper with no declaration has chosen nothing, the same as a declaration
-   without the key. A running keeper was admitted with one, so this is a
-   declaration removed since, or a guest started with meta alone. A
-   declaration that is there and cannot be read is no choice to fall back
-   from: the plan waits until it can be read. *)
-let microvm_delivery_for ~base_path ~keeper_name =
-  let default = Keeper_types_profile_sandbox.default_microvm_delivery in
-  match
-    Keeper_types_profile.load_keeper_profile_defaults_result_for_base_path
-      ~base_path
-      keeper_name
-  with
-  | Ok defaults -> Ok (Option.value defaults.microvm_delivery ~default)
-  | Error { Keeper_types_profile.kind = Declaration_not_found _; _ } -> Ok default
-  | Error
-      ({ Keeper_types_profile.kind =
-           Keeper_types_profile.(
-             Read_error | Parse_error | Profile_error | Invalid_name | Unknown_deny_tool _)
-       ; _
-       } as error) -> Error (Keeper_types_profile.keeper_toml_load_error_to_string error)
-;;
-
 (* The same immutable request drives comparison and Boot argv. Volume names,
    mount sources and stable labels are projections here; provisioning and
-   policy route discovery belong to the Boot execution. *)
-let requested_apple_plan (t : t) ~delivery ~image ~guest_size ~identity_host_dir ~environment
+   policy route discovery belong to the Boot execution. An Apple guest's first
+   process is always the shim's agent ({!Keeper_microvm_backend.request_delivery}). *)
+let requested_apple_plan (t : t) ~image ~guest_size ~identity_host_dir ~environment
     ~config_mount ~stable_labels =
   let open Result.Syntax in
   let volume_name result = Result.map_error (fun detail -> Guest_provisions_unavailable detail) result in
@@ -220,25 +190,14 @@ let requested_apple_plan (t : t) ~delivery ~image ~guest_size ~identity_host_dir
     | None -> []
     | Some (source, destination) -> [Plan.Host_dir {source; destination; read_only=true}] in
   let network = Keeper_sandbox_microvm.boot_plan_network ~keeper_name:t.meta.name t.network_mode in
-  let exec_plan =
-    { Plan.image; guest_size; user=Printf.sprintf "%d:%d" t.uid t.gid
-    ; working_directory=Keeper_sandbox_microvm.work_volume_guest_root
-    ; command=["tail"; "-f"; "/dev/null"]
-    ; mounts=config_mount
-        @ [Plan.Host_dir {source=identity_host_dir; destination=identity_destination; read_only=true}
-          ; Plan.Named_volume {name=work_volume_name; destination=Keeper_sandbox_microvm.work_volume_guest_root}
-          ; Plan.Named_volume {name=build_volume_name; destination=Keeper_sandbox_microvm.build_volume_guest_root}
-          ; Plan.Host_dir {source=microvm_shim_host_dir t; destination=Keeper_sandbox_microvm.shim_guest_dir; read_only=true}]
-    ; isolation=Keeper_microvm_backend.all_guest_constraints
-    ; capabilities_added=[]; published_sockets=[]
-    ; network; environment
-    ; labels=stable_labels @ [Keeper_sandbox_microvm.microvm_backend_label_key,
-           Keeper_microvm_backend.to_string Keeper_microvm_backend.Apple_container]
-    } in
-  match delivery with
-  | Keeper_types_profile_sandbox.Exec_per_request -> Ok exec_plan
-  | Keeper_types_profile_sandbox.Agent_socket ->
-    Ok (Keeper_microvm_agent_socket.plan ~uid:t.uid ~gid:t.gid
-          ~host_socket:(Keeper_microvm_agent_socket.host_path ~base_path:t.config.base_path
-                          ~guest_name:(keeper_vm_name t))
-          exec_plan)
+  let mounts = config_mount
+    @ [Plan.Host_dir {source=identity_host_dir; destination=identity_destination; read_only=true}
+      ; Plan.Named_volume {name=work_volume_name; destination=Keeper_sandbox_microvm.work_volume_guest_root}
+      ; Plan.Named_volume {name=build_volume_name; destination=Keeper_sandbox_microvm.build_volume_guest_root}
+      ; Plan.Host_dir {source=microvm_shim_host_dir t; destination=Keeper_sandbox_microvm.shim_guest_dir; read_only=true}] in
+  Ok (Keeper_microvm_agent_socket.plan ~uid:t.uid ~gid:t.gid
+        ~host_socket:(Keeper_microvm_agent_socket.host_path ~base_path:t.config.base_path
+                        ~guest_name:(keeper_vm_name t))
+        ~image ~guest_size ~mounts ~network ~environment
+        ~labels:(stable_labels @ [Keeper_sandbox_microvm.microvm_backend_label_key,
+          Keeper_microvm_backend.to_string Keeper_microvm_backend.Apple_container]))

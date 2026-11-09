@@ -105,7 +105,8 @@ let run_step ~config ~meta = function
     |> Result.map (Option.map (fun report -> Builds report))
   | Remote_workspace ->
     Keeper_remote_workspace_cleanup.cleanup ~config ~meta
-      ~retention_sec:(Runtime_params.get Runtime_settings.keeper_remote_workspace_cleanup_retention_sec) ()
+      ~retention_sec:(Runtime_params.get Runtime_settings.keeper_remote_workspace_cleanup_retention_sec)
+      ~timeout_sec:(Runtime_params.get Runtime_settings.keeper_remote_workspace_cleanup_timeout_sec) ()
     |> Result.map (fun report -> Some (Workspace report))
 
 let log_report ~keeper_name = function

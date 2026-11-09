@@ -906,7 +906,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
     ~observe_effect_attempted ~observe_transport_uncertain ~observe_quiet_turn
     ~on_official_client_tool_boundary
     ~on_official_client_result_handoff ~on_native_action ~on_native_tool_completion ~on_usage_report ~on_tool_execution
-    ~(config : Serve.config) =
+    ~account ~(config : Serve.config) =
   on_results_ready None;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
   | None, _ ->
@@ -969,11 +969,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
           ~field:Prompt_names.keeper_muse_native_read)
     in
     let* () = on_guidance_prepared () in
-    let* account_home = match config.account_home with
-      | None -> Error (config_error ~field:"account_home"
-          "Keeper Muse requires an explicitly selected account home")
-      | Some home -> Runtime_account_home.of_string home
-          |> Result.map_error (config_error ~field:"account_home") in
+    let account_home = Runtime_account_access.declared_muse_home account in
     let* prepared_home = Runtime_muse_home.prepare ~account_home
       |> Result.map_error (function
         | Runtime_muse_home.Sign_in_required _ as error ->
@@ -1672,6 +1668,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                     ~mgr:process_mgr
                     ~clock
                     ~cwd:process_cwd
+                    ~account
                     client_config
                     ~workspace_root
                     ~prompt
@@ -1696,7 +1693,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
                   account's typed usage/read can identify a spent window;
                   never infer it from the error sentence or replay this turn. *)
                (match Runtime_provider_usage_read.read_muse_in_background
-                        ~clock ~cwd:process_cwd ~scope:quota_scope client_config with
+                        ~clock ~cwd:process_cwd ~scope:quota_scope ~account client_config with
                 | Runtime_provider_usage_read.Started
                 | Runtime_provider_usage_read.Already_reading -> ()
                 | Runtime_provider_usage_read.No_root_switch ->
@@ -1737,7 +1734,7 @@ let run_without_lifecycle ~on_guidance_prepared ~result_scope ~media_store ~inpu
               | Some model ->
                 (match
                    Eio.Time.with_timeout_exn clock catalog_read_s (fun () ->
-                     Serve.list_models ~mgr:process_mgr ~clock ~cwd:process_cwd client_config)
+                     Serve.list_models ~mgr:process_mgr ~clock ~cwd:process_cwd ~account client_config)
                  with
                  | Ok listed -> Some (catalog_reading ~model listed)
                  | Error read_error ->
@@ -1949,7 +1946,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
     ?on_model_input_window_observation ?carried_front_seed ?librarian_front ?on_carried_front
     ~turn_start ?on_official_client_tool_boundary
     ?(on_official_client_result_handoff = fun ~invocation:_ ~content:_ -> ())
-    ?on_native_action ?on_native_tool_completion ?on_usage_report ?on_tool_execution ~event_bus ~raw_trace ~on_event ~config () =
+    ?on_native_action ?on_native_tool_completion ?on_usage_report ?on_tool_execution ~event_bus ~raw_trace ~on_event ~account ~config () =
   let settled_session = Atomic.make None in
   let pending_result_receipts = Atomic.make None in
   let on_results_ready value = Atomic.set pending_result_receipts value in
@@ -2028,6 +2025,7 @@ let run ?(on_guidance_prepared = fun () -> Ok ()) ~input_source ~media_store ?ar
         ~on_native_tool_completion
         ~on_usage_report
         ~on_tool_execution
+        ~account
         ~config))
   in
   { result

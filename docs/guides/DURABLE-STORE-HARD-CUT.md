@@ -52,6 +52,38 @@ _build/default/bin/deployment_preflight_helper.exe validate-stores \
 
 ## What goes with each store
 
+### Keeper chat operation journals
+
+The journal is
+`<base-path>/.masc/keepers/<keeper>/chat-operations.sqlite3`
+(`Common.chat_operation_store_basename`). Its SQLite sidecars, when present,
+are `chat-operations.sqlite3-wal`, `chat-operations.sqlite3-shm` and
+`chat-operations.sqlite3-journal` in the same directory. Treat these as one
+store, with every writer stopped before any fresh-state removal.
+
+The current semantic record format is
+`masc.keeper_semantic_execution.v2`, with an explicit `native_calls` list.
+Earlier records are refused without conversion or inferred empty history.
+Both ordinary open paths check every semantic row, including settled records,
+and its indexed scope, revision and phase before configuring the existing
+database. Deployment preflight also reads every durable record. Refusal names
+the affected scope and codec or index error; no Owner handle is returned to
+perform startup settlement or accept new work.
+
+Choosing fresh state for this journal discards the Keeper's queued, running
+and settled operations, original inputs and batch-member input history,
+semantic continuations, native-call history associations and trace input and
+checkpoint ownership references. It does not remove the actual Core journals
+under `.masc/traces/<trace>/native-executions/` or retained checkpoint payloads
+under `.masc/traces/<trace>/accepted-checkpoints/<sha256>.json`. Once the
+fresh journal no longer names those accepted checkpoints, a later startup
+sweep may collect payloads no other journal names. Preserve the old journal,
+sidecars and dependent session/checkpoint evidence together before choosing
+fresh state; payloads left on disk do not restore the removed ownership or
+authorize continuation. A separate fresh base path keeps the old workspace
+and its ownership records intact. See the
+[#50583 fresh-state entry](../../changelog.d/50583.md) for this format change.
+
 ### Keeper turn records
 
 Files live under `.masc/keepers/<keeper>/turn-records/YYYY-MM/DD.jsonl`. The

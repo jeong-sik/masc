@@ -12,30 +12,30 @@ let tool_call_entries ~keeper_name ~limit =
 ;;
 
 let keeper_tool_call_lookup_response ~config ~keeper_name req =
+  let query = Uri.query (Uri.of_string req.Httpun.Request.target) in
   let execution_parameters =
-    Uri.query (Uri.of_string req.Httpun.Request.target)
-    |> List.filter (fun (name, _) -> String.equal name "execution_id")
+    List.filter (fun (name, _) -> String.equal name "execution_id") query
+  in
+  let batch_parameters =
+    List.filter (fun (name, _) -> String.equal name "execution_ids") query
   in
   let error status code detail =
     Some
       (status, `Assoc [ "error", `String detail; "code", `String code ])
   in
-  match execution_parameters with
+  let lookup execution_ids =
+    let store = Dated_jsonl.open_store
+        (Dated_jsonl.Store.at (Workspace.dated_store_root config)
+           Dated_jsonl.Store.Root.Tool_calls) in
+    Keeper_tool_call_index.by_execution_ids ~store ~keeper_name ~execution_ids
+  in
+  let single () = match execution_parameters with
   | [] -> None
   | [ _, [ execution_id ] ] when String.trim execution_id <> "" ->
     if not (Keeper_config.validate_name keeper_name) then
       error `Bad_request "invalid_keeper_name" "invalid keeper name"
     else
-      let store =
-        Dated_jsonl.open_store
-          (Dated_jsonl.Store.at
-             (Workspace.dated_store_root config)
-             Dated_jsonl.Store.Root.Tool_calls)
-      in
-      (match
-         Keeper_tool_call_index.by_execution_ids
-           ~store ~keeper_name ~execution_ids:[ execution_id ]
-       with
+      (match lookup [ execution_id ] with
        | Error detail -> error `Service_unavailable "tool_call_store_unavailable" detail
        | Ok [] ->
          error `Not_found "tool_call_not_found"
@@ -54,6 +54,44 @@ let keeper_tool_call_lookup_response ~config ~keeper_name req =
   | _ ->
     error `Bad_request "invalid_execution_id"
       "execution_id must occur exactly once with a non-blank value"
+  in
+  match batch_parameters, execution_parameters with
+  | [], _ -> single ()
+  | _ :: _, _ :: _ ->
+    error `Bad_request "invalid_execution_query"
+      "execution_id and execution_ids cannot be combined"
+  | [ _, [ encoded ] ], [] ->
+    let module Id_set = Set.Make (String) in
+    let rec decode seen kept = function
+      | [] -> Some (List.rev kept)
+      | `String id :: rest
+        when String.trim id <> "" && not (Id_set.mem id seen) ->
+        decode (Id_set.add id seen) (id :: kept) rest
+      | _ :: _ -> None
+    in
+    let ids =
+      match Yojson.Safe.from_string encoded with
+      | `List rows -> decode Id_set.empty [] rows
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> None
+      | exception Yojson.Json_error _ -> None
+    in
+    (match ids with
+     | None -> error `Bad_request "invalid_execution_ids"
+         "execution_ids must be a JSON array of distinct non-blank strings"
+     | Some _ when not (Keeper_config.validate_name keeper_name) ->
+       error `Bad_request "invalid_keeper_name" "invalid keeper name"
+     | Some execution_ids ->
+       (match lookup execution_ids with
+        | Error detail -> error `Service_unavailable "tool_call_store_unavailable" detail
+        | Ok rows ->
+          Some (`OK, `Assoc
+            [ "keeper", `String keeper_name
+            ; "requested_execution_ids", `List (List.map (fun id -> `String id) execution_ids)
+            ; "entries", `List (List.map Keeper_tool_definition_source.annotate_row rows)
+            ])))
+  | (_ :: _ :: _ | [ _, ([] | _ :: _ :: _) ]), [] ->
+    error `Bad_request "invalid_execution_ids"
+      "execution_ids must occur exactly once with one JSON array"
 ;;
 
 (* An index the reader cannot open is answered as the same 503 the exact

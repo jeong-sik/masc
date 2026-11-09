@@ -53,9 +53,19 @@ val send : t -> string -> outcome
     still written if the client reads on. *)
 
 val close : t -> unit
-(** Ends the response. A [send] waiting at that moment returns [Closed]
-    unless its frame reached the socket first, and every later [send] returns
-    [Closed]. Closing twice is the same as closing once. *)
+(** Ends the response as complete. A [send] waiting at that moment returns
+    [Closed] unless its frame reached the socket first, and every later
+    [send] returns [Closed]. Closing twice is the same as closing once.
+
+    A route that fails does not close: the exception then reaches the
+    request's error handling with the response still open, and that cuts it
+    (an HTTP/2 stream gets RST_STREAM, {!Server_http_ingress.serve}). A
+    response the route closed first stays whole, and the exception is only
+    logged. {!close_after} closes only when the route ends normally. *)
+
+val close_after : t -> (unit -> 'a) -> 'a
+(** [close_after t f] runs [f] and {!close}s [t] when [f] returns. When [f]
+    raises, [t] stays open and the exception goes on. *)
 
 val is_closed : t -> bool
 

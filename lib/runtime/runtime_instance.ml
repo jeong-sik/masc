@@ -136,8 +136,9 @@ let quota_scope_of_materialized
     Ok (Runtime_quota_window.scope_of_codex_home
       (Some (Runtime_account_access.home client.account_home)))
   | Runtime_execution.Muse_serve client ->
-    Runtime_account_home.of_string client.account_home
-    |> Result.map Runtime_quota_window.scope_of_muse_home
+    Ok
+      (Runtime_quota_window.scope_of_muse_home
+         (Runtime_account_access.muse_home_path client.account_home))
   | Runtime_execution.Agent_core _ ->
     (match credential_admission with
      | Some admission -> Ok (Runtime_credential_selection.quota_scope admission)

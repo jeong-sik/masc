@@ -23,8 +23,8 @@ type layer_id =
           (docs/rfc/RFC-goal-observations-leave-the-system-prompt.md). *)
   | Goals_awaiting_proof
       (** The ids of the Goals in [Verifying] with the proof-pending mark.
-          Changes on a completion request, a refuted proof or a reopen, so it
-          stays out of the System as well (RFC-0491 §3.3). *)
+          Agent Core carries this turn's state in System; official clients
+          receive it through their turn-scoped input (RFC-0491 §3.3). *)
   | Current_task
   | Approval_authority
   | Connected_surfaces

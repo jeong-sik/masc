@@ -50,14 +50,30 @@ type raw_trace_sink_outcome =
   | Sink_ready of Agent_core.Raw_trace.t
   | Sink_degraded of Agent_core.Error.t
 
-(** Official tools stop the host loop only on an explicit terminal effect,
-    which the host derives itself. Repetition observation failures stop the
-    turn here; receipts alone never do. *)
-let official_client_tool_boundary ~repetition_execution ~tool_name:_ =
+(** The host's explicit terminal effect takes priority. Otherwise a settled
+    tool can hand an autonomous slot to ready chat; repetition observation
+    failures remain errors and receipts alone never request a handoff.
+    A read-only chat handoff probe failure degrades to keeping the current turn
+    running so a settled tool is never reclassified as an unknown-outcome
+    failure when the owner pool is stopping or unavailable. *)
+let official_client_tool_boundary ~repetition_execution ~chat_handoff ~tool_name =
   match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
   | Some error ->
     Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
-  | None -> Ok None
+  | None ->
+    (match chat_handoff () with
+     | Ok true ->
+       Ok
+         (Some
+            (Keeper_official_client_host.Terminal_tool_boundary
+               { tool_name; outcome = Durable_stimulus_deferred }))
+     | Ok false -> Ok None
+     | Error error ->
+       Log.Keeper.warn
+         "autonomous chat handoff probe failed at official tool boundary (%s); continuing turn: %s"
+         tool_name
+         (Agent_core.Error.to_string error);
+       Ok None)
 ;;
 
 let keeper_raw_trace_sink
@@ -336,7 +352,7 @@ let terminal_effect_failure_error error terminal_effect_state =
   | Agent_core.Error.Orchestration _ | Agent_core.Error.Media _ -> error
 ;;
 
-let tool_boundary_state ~repetition_execution state =
+let tool_boundary_state ~repetition_execution ~chat_handoff state =
   match terminal_effect_boundary_decision state with
   | Error _ as error -> error
   | Ok (Runtime_agent.Yield _ as decision) -> Ok decision
@@ -344,7 +360,15 @@ let tool_boundary_state ~repetition_execution state =
     match Option.bind repetition_execution Keeper_repetition_scope.Execution.failure with
     | Some error ->
       Error (Agent_core.Error.Internal (Keeper_repetition_snapshot.error_to_string error))
-    | None -> Ok Runtime_agent.Continue
+    | None ->
+      (match chat_handoff () with
+       | Ok true -> Ok (Runtime_agent.Yield Runtime_agent.Durable_stimulus_waiting)
+       | Ok false -> Ok Runtime_agent.Continue
+       | Error error ->
+         Log.Keeper.warn
+           "autonomous chat handoff probe failed at tool boundary; continuing turn: %s"
+           (Agent_core.Error.to_string error);
+         Ok Runtime_agent.Continue)
 ;;
 
 let finalize_turn_surface ~response_text ~stop_reason terminal_effect_state =
@@ -1303,8 +1327,31 @@ let run_turn
           how the error path below knows the turn ran on an official client. *)
        let last_dispatched_checkpoint_owner = ref None in
        let turn_result =
+         let chat_handoff () =
+           match turn_kind, Keeper_turn_preview_owner.current () with
+           | Turn_record.Direct, _ | Turn_record.Autonomous, None -> Ok false
+           | Turn_record.Autonomous, Some _ ->
+             let ready =
+               match Keeper_owner_registry.get ~base_path:config.base_path ~keeper_name:meta.name with
+               | Error error -> Error (Keeper_owner_registry.lookup_error_to_string error)
+               | Ok owner ->
+                 Keeper_owner.autonomous_chat_handoff_ready owner
+                 |> Result.map_error Keeper_owner.error_to_string
+             in
+             (match ready with
+              | Error detail ->
+                Log.Keeper.warn ~keeper_name:meta.name
+                  "autonomous chat handoff probe unavailable; continuing current turn: %s"
+                  detail;
+                Ok false
+              | Ok false -> Ok false
+              | Ok true ->
+                Log.Keeper.info ~keeper_name:meta.name
+                  "turn checkpoint: handing the autonomous slot to ready queued chat";
+                Ok true)
+         in
          let on_official_client_tool_boundary ~tool_name =
-           official_client_tool_boundary ~repetition_execution ~tool_name
+           official_client_tool_boundary ~repetition_execution ~chat_handoff ~tool_name
          in
          let cooperative_yield_probe =
            Some
@@ -1316,6 +1363,7 @@ let run_turn
                      neither state can re-enter the provider loop. *)
                   tool_boundary_state
                     ~repetition_execution
+                    ~chat_handoff
                     (s.terminal_effect_state ())
                 with
                 | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -2013,15 +2061,15 @@ let run_turn
            ()
        in
        (* RFC-0233 PR-3: TurnRecord — same per-keeper-turn cadence as the
-          receipt above. execution_ids come from the trajectory
-          accumulator (every entry of this run carries the id minted at
-          the dispatch boundary); sampling reads the last agent-core turn's
-          effective values from the turn context cell. *)
+          receipt above. Trajectory IDs cover direct calls; committed inline
+          child rows contribute their own canonical IDs from this run's scoped
+          collector. Sampling reads the last agent-core turn's effective values
+          from the turn context cell. *)
        (let tctx =
           Keeper_tool_call_log_context.get_turn_context_record
             ~cell:turn_ctx_cell ()
         in
-        let execution_ids =
+        let trajectory_execution_ids =
           match trajectory_acc with
           | None -> []
           | Some tacc ->
@@ -2031,6 +2079,10 @@ let run_turn
                  (fun (e : Trajectory.tool_call_entry) ->
                     Option.map Ids.Execution_id.of_string e.execution_id)
                  tacc.Trajectory.entries)
+        in
+        let execution_ids =
+          Keeper_run_tools_hook_accumulator.take_execution_ids acc
+            ~trajectory_execution_ids
         in
         let usage : Turn_record.usage =
           match turn_result with

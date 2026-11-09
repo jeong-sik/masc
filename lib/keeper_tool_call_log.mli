@@ -85,6 +85,19 @@ val peek_file_change_artifact_refs :
   invocation:Agent_core.Tool_contract.Invocation.t -> unit -> Tool_output.artifact_ref list
 (** Producer-owned snapshot references, retained with line evidence until row commit. *)
 
+val set_board_action_evidence :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  evidence:(Board_tool_evidence.t, string) result -> unit
+val peek_board_action_evidence :
+  invocation:Agent_core.Tool_contract.Invocation.t ->
+  unit -> (Board_tool_evidence.t, string) result option
+val clear_board_action_evidence :
+  invocation:Agent_core.Tool_contract.Invocation.t -> unit -> unit
+(** Retain the exact invocation's producer fact before model projection.
+    A projection failure must not erase an already committed Board write.
+    Clear only after its canonical tool-call row commits; weak ownership
+    releases abandoned invocations. Invalid producer metadata stays explicit. *)
+
 val set_retained_artifacts : invocation:Agent_core.Tool_contract.Invocation.t -> Tool_output.artifact_ref list -> unit
 val peek_retained_artifacts : invocation:Agent_core.Tool_contract.Invocation.t -> unit -> Tool_output.artifact_ref list
 val clear_retained_artifacts : invocation:Agent_core.Tool_contract.Invocation.t -> unit -> unit
@@ -297,6 +310,7 @@ val log_call :
   ?disposition:
     (unit, unit, Tool_result.tool_failure_class) Tool_result.disposition ->
   ?file_change_evidence:Keeper_file_change_evidence.t ->
+  ?board_action_evidence:(Board_tool_evidence.t, string) result ->
   ?execution_evidence:Yojson.Safe.t ->
   ?artifact_refs:Tool_output.artifact_ref list ->
   ?composition_tool:string ->

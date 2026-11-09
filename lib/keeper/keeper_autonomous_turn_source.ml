@@ -88,6 +88,11 @@ let check_raw_trace_identity
 
 (* Parse the declared ledger rows once per Keeper turn. Duplicate canonical
    ids and conflicting invocation coordinates stay ambiguous. *)
+let is_top_level_execution = function
+  | `Assoc fields -> not (List.mem_assoc "composition_node_id" fields)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
+;;
+
 let executions_for_turn (record : Turn_record.t) execution_rows =
   List.fold_left (fun index id ->
     match Execution_map.find_opt (Ids.Execution_id.to_string id) execution_rows with
@@ -97,6 +102,9 @@ let executions_for_turn (record : Turn_record.t) execution_rows =
       (match int "turn", int "planned_index" with
        | Some turn, Some planned_index when turn >= 0 && planned_index >= 0
            && str "record_kind" = Some "tool_call"
+           (* Child schedules restart at slot zero inside their parent turn.
+              Their explicit node marker keeps those separate from raw starts. *)
+           && is_top_level_execution row
            && str "keeper" = Some record.keeper
            && str "trace_id" = Some record.trace_id
            && str "session_id" = Some record.trace_id

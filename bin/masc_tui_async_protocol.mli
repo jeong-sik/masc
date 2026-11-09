@@ -269,6 +269,10 @@ type memory_health_read =
       { keeper : string
       ; result : (Masc.Tui_decode_memory_health.memory_health_row_answer, string) result
       }
+  | Command_health_read of
+      { keeper : string
+      ; result : (Masc.Tui_decode_memory_health.memory_health_row_answer, string) result
+      }
 
 (* The answers of one domain share one type named after it, and [async_msg]
    carries that type in one constructor: [keeper_msg] in [Keeper_msg]. A
@@ -403,6 +407,12 @@ type keeper_msg =
   | Keeper_execute_streamed of keeper_execute_follow * keeper_execute_follow_event
   | Keeper_settings_save_changed of keeper_settings_save_request * keeper_settings_save_status * int64
   | Keeper_creation_changed of keeper_creation_request * keeper_creation_status
+  | Keeper_memory_catch_up_done of
+      { keeper : string
+      ; workspace : Masc.Tui_decode.server_identity
+      ; authority : workspace_authority
+      ; outcome : Masc_tui_http.keeper_memory_catch_up_outcome
+      }
   | Keeper_action_done of
       Masc.Tui_decode.server_identity option
       * string

@@ -289,7 +289,7 @@ val request_environment : shim_config_path:string -> (string * string) list
 
 val shim_exec_prefix_for :
   ?stdin:bool ->
-  Keeper_microvm_backend.t ->
+  Keeper_microvm_backend.exec_runtime ->
   container_name:string ->
   uid:int ->
   gid:int ->
@@ -297,18 +297,19 @@ val shim_exec_prefix_for :
   shim_config_path:string ->
   (string list, string) result
 (** The prefix the remote lane delivers a framed request through, ending at
-    the guest name so the caller appends the shim path.
+    the guest name so the caller appends the shim path. Only a runtime that
+    takes a request as one exec has one; an Apple guest takes its requests
+    through its agent ({!Keeper_microvm_backend.request_delivery}).
 
     The prefix carries the writable guest [HOME]
     ({!Keeper_microvm_backend.scratch_guest_root}, so the shim does not inherit
     an image [HOME] on the read-only rootfs), the config location, and the
-    identity the shim runs under. All three CLIs document the environment
-    entries the first two need ([msb exec] has [-e, --env]).
+    identity the shim runs under. Both CLIs document the environment entries
+    the first two need ([msb exec] has [-e, --env]).
 
-    [container exec --user] documents [name|uid[:gid]] and nerdctl takes
-    Docker's. [msb exec --user] documents a guest user name and no numeric form,
-    so msb omits [--user]; the work volume's [uid=,gid=] mount places writes
-    at the right host uid. *)
+    nerdctl takes Docker's [--user uid:gid]. [msb exec --user] documents a
+    guest user name and no numeric form, so msb omits [--user]; the work
+    volume's [uid=,gid=] mount places writes at the right host uid. *)
 
 val stop_argv_for :
   Keeper_microvm_backend.t -> container_name:string -> string list

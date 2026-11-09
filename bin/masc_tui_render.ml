@@ -131,34 +131,63 @@ let acting_pane_chunk_projection (state : state) ~terminal_rows ~terminal_cols ~
   else Some (recent_chunk_projection state)
 ;;
 
-let workspace_health_label = function
-  | Workspace_health_critical -> "critical"
-  | Workspace_health_bad -> "bad"
-  | Workspace_health_risk -> "risk"
-  | Workspace_health_warning -> "warning"
-  | Workspace_health_degraded -> "degraded"
-  | Workspace_health_initializing -> "initializing"
-  | Workspace_health_ok -> "ok"
-  | Workspace_health_unknown -> "unknown"
+(* Requests and capacity have separate observation paths. In particular a
+   working HTTP connection does not make a retained fleet reading current. *)
+let overview_capacity_lines (state : state) =
+  let text ko en = ui_text state ~ko ~en in
+  let quiet line = Theme.recede () ^ line ^ Ansi.reset in
+  let warning line = Theme.warn () ^ line ^ Ansi.reset in
+  let now = Unix.gettimeofday () in
+  match fleet_stream_view state with
+  | Masc_tui_fleet_stream.Awaiting_first_reading ->
+      [warning (text "미관측 · fleet 첫 관측 대기" "Not observed · awaiting fleet reading")]
+  | Unreachable { since } ->
+      [warning (text "미관측 · fleet에 연결하지 못함" "Not observed · fleet unreachable")
+      ; quiet (Masc_tui_fleet_line.unreachable_text ~now ~since)]
+  | Unavailable { degradation; disconnected_since } ->
+      [warning (text "미관측 · fleet 스캔 실패" "Not observed · fleet scan unavailable")
+      ; quiet (Masc_tui_fleet_line.unavailable_text ~now ~degradation ~disconnected_since)]
+  | Cannot_read failure ->
+      [warning (text "미관측 · fleet 응답을 읽지 못함" "Not observed · fleet response unreadable")
+      ; quiet (Masc_tui_fleet_line.failure_text failure)]
+  | Reading { reading; trouble } ->
+      let fleet = reading.fleet in
+      let retained = Option.is_some trouble
+        || state.workspace_identity <> Workspace_identity_match in
+      let scope =
+        if retained then
+          warning (text "보존 관측 · 현재 여력 미확인" "Retained reading · current capacity unknown")
+        else text "현재 관측 · fleet 스트림" "Current reading · fleet stream"
+      in
+      let grade = Masc_tui_fleet_line.status_text fleet.fs_status in
+      let grade_style =
+        if retained then Theme.warn ()
+        else if fleet.fs_operator_action_required then Theme.bad ()
+        else if not (Masc_tui_fleet_line.status_is_ok fleet.fs_status)
+        then Theme.warn () else Theme.ok () in
+      [scope
+      ; grade_style ^ grade ^ Ansi.reset
+      ; text
+          (Printf.sprintf "실행 중 %d · 기동 가능 %d" fleet.fs_running_count fleet.fs_bootable_count)
+          (Printf.sprintf "Running %d · bootable %d" fleet.fs_running_count fleet.fs_bootable_count)
+      ; text
+          (Printf.sprintf "턴 여력 %d/%d · 부족 %d"
+             (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
+             fleet.fs_target_reaction_capacity fleet.fs_reaction_capacity_shortfall)
+          (Printf.sprintf "Turn capacity %d/%d · shortfall %d"
+             (fleet.fs_target_reaction_capacity - fleet.fs_reaction_capacity_shortfall)
+             fleet.fs_target_reaction_capacity fleet.fs_reaction_capacity_shortfall)]
+      @ Option.to_list (Option.map (fun detail -> warning (Masc_tui_fleet_line.trouble_text ~now detail)) trouble)
+      @ (if state.workspace_identity = Workspace_identity_match then [] else
+           [warning (text "워크스페이스 식별 미확인" "Workspace identity unconfirmed")])
+      @ Option.to_list (Option.map (fun detail ->
+          (if retained then quiet else warning) (Terminal_text.single_line detail))
+          (Masc_tui_fleet_line.blocker_text fleet))
+      @ Option.to_list (Option.map quiet (Masc_tui_fleet_line.owner_scan_text fleet))
 
-(* The state word after "Health:" is drawn in the colour the connection badge
-   uses for the same kind of state: green for ok, red for the server's error
-   rung and yellow for the rest, an unknown state included. *)
-let workspace_health_tone = function
-  | Workspace_health_critical | Workspace_health_bad -> Masc_tui_theme.Bad
-  | Workspace_health_risk | Workspace_health_warning | Workspace_health_degraded
-  | Workspace_health_initializing | Workspace_health_unknown -> Masc_tui_theme.Warn
-  | Workspace_health_ok -> Masc_tui_theme.Ok
-
-let health_word tone word = Theme.text_status tone ^ word ^ Ansi.reset
-
-(* Dashboard rows summarize sources without changing their meaning. The full
-   task list lives in Work, Keeper rows in Keepers, and account windows in
-   Usage. A missing reading is never projected as a zero. *)
-(* The Dashboard keeps its working layout through loading and failure. *)
 let overview_header (state : state) ~cols =
   badge_row ~cols
-    ~lead:(screen_title (ui_text state ~ko:" MASC 운영" ~en:" MASC Operations"))
+    ~lead:(screen_title (ui_text state ~ko:" 운영 · 지금 내 결정이 필요한 일" ~en:" Operations · What needs my decision?"))
     ~label:(Terminal_text.single_line state.workspace)
     ~badge:(connection_badge state)
 
@@ -175,59 +204,7 @@ let render_overview (state : state) home =
   let all_decisions = Masc_tui_home.home_decision_rows home in
   let continuation = Masc_tui_home.home_continue_rows home in
   let selected = Masc_tui_home.home_selected_action home in
-  let overview_error, overview = state.overview_error, state.overview in
-  let health =
-    match Terminal_text.optional_single_line overview_error, overview with
-    | Some error, _ ->
-        " Health: " ^ health_word Masc_tui_theme.Bad "unavailable" ^ " · " ^ error
-    | None, None ->
-        let status =
-          match state.connection_status, state.http_refresh_started_ns with
-          | Connecting, _ -> "Connecting to workspace…"
-          | Booting, _ -> "Workspace server is starting…"
-          | (Connected | Degraded | Disconnected), Some _ ->
-              "Loading Dashboard…"
-          | (Connected | Degraded | Disconnected), None ->
-              "Health: " ^ health_word Masc_tui_theme.Warn "not observed"
-              ^ " — press 'r' to refresh"
-        in
-        " " ^ status
-    | None, Some overview ->
-        " Health: "
-        ^ health_word (workspace_health_tone overview.ov_workspace_health)
-            (workspace_health_label overview.ov_workspace_health)
-        ^ (match overview.ov_keeper_listing with
-           | Keeper_snapshot_unread.Unreadable detail ->
-               " · Keepers unlisted: " ^ Terminal_text.single_line detail
-           | Not_listed -> " · Keepers not observed"
-           | Listed ->
-               match overview.ov_unreadable_keepers with
-               | 0 -> ""
-               | count -> Printf.sprintf " · %d Keeper states unreadable" count)
-  in
-  let quiz =
-    match Masc_tui_types.quiz_scorecard_reading state with
-    | Some line -> line
-    | None -> ""
-  in
-  (* The reading, then where its details live. The pointer is a separate
-     item so the Status card leaves it out whole when it does not fit, rather
-     than wrapping its last word onto a line of its own. *)
-  let work_separator = " · " in
-  let work_details_pointer = "details in Work" in
-  let work_items =
-    match state.task_flow, state.tasks_error with
-    | _, Some _ -> [ "Work: reading unavailable · open Work for the source" ]
-    | None, None -> [ "Work: not observed" ]
-    | Some flow, None ->
-        if flow.Masc_tui_task_flow.unparseable_timestamps > 0 then
-          [ "Work: partial timestamp coverage"; work_details_pointer ]
-        else
-          [ Printf.sprintf "Work: %d currently done in the last 24h"
-              flow.Masc_tui_task_flow.recent.completed
-          ; work_details_pointer ]
-  in
-  let work = " " ^ String.concat work_separator work_items in
+  let capacity_lines = overview_capacity_lines state in
   (* The last day of tool calls, whatever window Usage's [w] holds
      ([tool_series_days]). A reading that is missing says so in words, never as
      a count of zero. A press on the line opens Usage on its Calls section. *)
@@ -272,6 +249,13 @@ let render_overview (state : state) home =
         if Option.equal equal_home_action (Some action) selected then c.push_selected line else c.push line
       in
       let operator_actions = Masc_tui_types.operator_actions state in
+      let titles : Masc_tui_overview_cards.titles =
+        { decisions = ui_text state ~ko:"지금 필요한 결정" ~en:"Needs your decision"
+        ; continuation = ui_text state ~ko:"이어가기" ~en:"Continue"
+        ; capacity = ui_text state ~ko:"실행 여력" ~en:"Execution capacity"
+        ; actions = ui_text state ~ko:"조치가 필요한 이유" ~en:"Why action is needed"
+        }
+      in
       let selection_changed =
         Masc_tui_home.home_selection_changed home
       in
@@ -293,18 +277,11 @@ let render_overview (state : state) home =
       if budget >= essential_rows && (all_decisions = [] || capacity > 0) then begin
         let card_rows =
           let status ~cells =
-            let wrapped line =
-              Message_layout.wrap_words ~max_cells:(max 1 cells)
-                (Terminal_text.single_line line)
-            in
-            Message_layout.wrap_styled_words ~max_cells:(max 1 cells) (String.trim health)
-            @ List.map (fun line -> Theme.recede () ^ line ^ Ansi.reset)
-                (wrapped
-                   (Message_layout.join_fitting ~sep:work_separator ~cells work_items))
-            @ List.concat_map wrapped
-                (Masc_tui_candle.summary_lines ~now:(Unix.gettimeofday ()) state.candle_observation)
+            List.concat_map
+              (Message_layout.wrap_styled_words ~max_cells:(max 1 cells))
+              capacity_lines
           in
-          Masc_tui_overview_cards.draw ~inner:(framed_inner_width cols)
+          Masc_tui_overview_cards.draw ~titles ~inner:(framed_inner_width cols)
             ~rows:(budget - warning_rows)
             ~is_selected:(fun action -> Some action = selected)
             ~decisions
@@ -332,19 +309,9 @@ let render_overview (state : state) home =
             operator_actions
         in
         let spare = budget - essential_rows - List.length reasons in
-        let candle = Masc_tui_candle.summary_lines ~now:(Unix.gettimeofday ()) state.candle_observation
-          |> List.concat_map (fun line ->
-            Message_layout.wrap_words ~max_cells:(max 1 (framed_inner_width cols))
-              (Terminal_text.single_line line))
-          |> List.map (fun line -> None, " " ^ line) in
-        let candle_fits = spare >= 2 + List.length candle in
-        let health = if candle_fits then health else
-          match Masc_tui_candle.compact_status state.candle_observation with
-          | None -> health
-          | Some status -> " " ^ status ^ " ·" ^ health in
-        let readings = [None, health; Some (Theme.recede ()), work]
-          @ (if quiz = "" then [] else [Some (Theme.recede ()), quiz])
-          @ (if candle_fits then candle else [])
+        let readings =
+          (Some Ansi.bold, " " ^ titles.capacity)
+          :: List.map (fun line -> None, " " ^ line) capacity_lines
           @ [None, tool_calls_line ~cells:(framed_inner_width cols)] in
         let shown_readings = List.take spare readings in
         let draw_rows = List.iter (function
@@ -364,12 +331,12 @@ let render_overview (state : state) home =
               else " Decision rows above · j/k to choose")
          | _ :: _ ->
              c.push_styled ~style:Ansi.bold
-               (if List.length decisions = List.length all_decisions then " Needs your decision"
-                else Printf.sprintf " Needs your decision · rows %d-%d/%d · j/k for more"
-                  (first + 1) (first + List.length decisions) (List.length all_decisions));
+               (if List.length decisions = List.length all_decisions then " " ^ titles.decisions
+                else Printf.sprintf " %s · %d-%d/%d · j/k"
+                  titles.decisions (first + 1) (first + List.length decisions) (List.length all_decisions));
              List.iter draw_row decisions);
         blank_row ();
-        c.push_styled ~style:Ansi.bold " Continue";
+        c.push_styled ~style:Ansi.bold (" " ^ titles.continuation);
         List.iter draw_row continuation;
         if reasons <> [] then blank_row ();
         draw_rows reasons;
@@ -830,6 +797,7 @@ let render ~home ~compact_recovery_notice (state : state) =
   reset_chat_row_actions ();
   (* And the candle, and any placed picture, is on this frame only if this
      frame draws it. *)
+  Render_schedule.Activity_tick.begin_frame ();
   Masc_tui_emblem_screen.begin_frame ();
   Masc_tui_portrait_view.begin_frame ();
   let frame, clamped, approval, drawn =

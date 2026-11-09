@@ -1,0 +1,50 @@
+{
+  "source_head": "ea6228b4b3552e545253f85f83ebb29d565cc7a3",
+  "recorded_at": "2026-11-09T10:52:42.301271+00:00",
+  "checks": [
+    {
+      "name": "frontend-tests",
+      "command": [
+        "./node_modules/.bin/vitest",
+        "run",
+        "src/api/keeper-native-history.test.ts",
+        "src/components/chat/native-execution-history.test.ts",
+        "src/components/chat/primitives.test.ts",
+        "--no-file-parallelism",
+        "--maxWorkers=1"
+      ],
+      "exit_code": 0,
+      "log": "history-final-frontend-tests.log"
+    },
+    {
+      "name": "dashboard-typecheck",
+      "command": [
+        "./node_modules/.bin/tsc",
+        "--noEmit",
+        "--pretty",
+        "false",
+        "--incremental",
+        "--tsBuildInfoFile",
+        "<artifacts>/history-dashboard.tsbuildinfo"
+      ],
+      "exit_code": 0,
+      "log": "history-final-dashboard-typecheck.log"
+    },
+    {
+      "name": "history-eslint",
+      "command": [
+        "./node_modules/.bin/eslint",
+        "src/api/keeper-native-history.ts",
+        "src/api/keeper-native-history.test.ts",
+        "src/components/chat/native-execution-history.ts",
+        "src/components/chat/native-execution-history.test.ts"
+      ],
+      "exit_code": 0,
+      "log": "history-final-history-eslint.log"
+    }
+  ],
+  "scope": "Frontend only; no OCaml typecheck or executed Core/Owner regression, CI, install or deployment.",
+  "paths_sanitized": true,
+  "frontend_test_files": 3,
+  "frontend_tests_passed": 183
+}

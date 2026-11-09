@@ -15,7 +15,6 @@ let build_microvm_endpoint
       ~gid
       ~container_name
       ~identity_environment
-      ~delivery
   =
   let open Result.Syntax in
   let* () = microvm_profile_check meta in
@@ -30,12 +29,12 @@ let build_microvm_endpoint
       Keeper_sandbox_runtime.docker_config_env ~base_path:config.base_path ~container_root
       @ identity_environment
     in
-    (* The exec prefix is the declaring runtime's, built here because this is
-       where the runtime, the work root and the shim config path are all in
-       hand. *)
+    (* The runtime decides how a request reaches its guest. An exec prefix is
+       the declaring runtime's, built here because this is where the runtime,
+       the work root and the shim config path are all in hand. *)
     Result.bind (microvm_backend_of_meta meta) (fun backend ->
-      match (delivery : Keeper_types_profile_sandbox.microvm_delivery), backend with
-      | Keeper_types_profile_sandbox.Agent_socket, Keeper_microvm_backend.Apple_container ->
+      match Keeper_microvm_backend.request_delivery backend with
+      | Keeper_microvm_backend.Guest_agent ->
         Ok
           (Keeper_sandbox_remote.of_agent_socket
              ~base_path:config.base_path
@@ -52,20 +51,11 @@ let build_microvm_endpoint
                (Keeper_microvm_agent_socket.host_path ~base_path:config.base_path
                   ~guest_name:container_name)
              ~expected:{ Keeper_guest_socket.uid; gid })
-      | ( Keeper_types_profile_sandbox.Agent_socket
-        , (Keeper_microvm_backend.Nerdctl_kata | Keeper_microvm_backend.Microsandbox) ) ->
-        Error
-          (Printf.sprintf
-             "microvm_agent_requires_apple_container: keeper %s has no guest agent \
-              on microvm_backend = %S"
-             meta.name (Keeper_microvm_backend.to_string backend))
-      | ( Keeper_types_profile_sandbox.Exec_per_request
-        , ( Keeper_microvm_backend.Apple_container | Keeper_microvm_backend.Nerdctl_kata
-          | Keeper_microvm_backend.Microsandbox ) ) ->
+      | Keeper_microvm_backend.Exec_per_request runtime ->
       Result.bind
         (Keeper_sandbox_microvm.shim_exec_prefix_for
            ~stdin:true
-           backend
+           runtime
            ~container_name
            ~uid
            ~gid
@@ -91,7 +81,7 @@ let build_microvm_endpoint
                 })
             (Keeper_sandbox_microvm.shim_exec_prefix_for
                ~stdin:false
-               backend
+               runtime
                ~container_name
                ~uid
                ~gid

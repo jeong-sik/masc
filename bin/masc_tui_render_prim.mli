@@ -23,8 +23,10 @@ module Span = Masc_tui_span
 module Status = Masc.Keeper_status_runtime
 
 val local_source_pending_note : state -> local_read_source -> string option
-(** The original local read's pending phase for the Work and Keeper surfaces.
-    [None] means that this source has no pending read. *)
+(** One recessed header row for a local read that has been in flight past the
+    display bar in [Masc_tui_types.pending_display_bar_ns], naming its stage
+    and elapsed seconds. A read inside the bar, or none at all, is [None]; the
+    stage words for younger reads live in the tui_local_read structured log. *)
 
 val runtime_assignment_label : runtime_assignment -> string
 (** The assignment shown in the runtime picker and Runtime Stats value. *)
@@ -708,6 +710,12 @@ val config_pane_title :
 
 val config_metadata_summary :
   Masc_tui_types.state -> (Masc_tui_runtime_config_view.tone * string) list
+
+val runtime_config_unmatched_current :
+  Masc_tui_types.state -> Masc_tui_runtime_config_edit.document option
+(** The displayed current-file comparison when its revision differs from the
+    status reading. [None] means no distinct current snapshot is displayed.
+    This is the same source selection used by [runtime_config_status_lines]. *)
 
 val runtime_config_status_lines :
   Masc_tui_types.state -> cols:int -> (string * string) list

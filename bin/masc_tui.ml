@@ -96,6 +96,10 @@ let scrolled_surface state surface =
       let terminal_rows, cols = get_terminal_size () in
       let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
       Masc_tui_types.runtime_scrolled ~rows ~cols state
+  | Lanes when state.lanes_mode = Lanes_overview ->
+      let terminal_rows, cols = get_terminal_size () in
+      let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+      Some (Masc_tui_types.lanes_overview_projection state ~rows ~cols).lop_scroll
   (* The models pane's document depends on the pane width: narrow panes draw
      one wrapped item per binding, taller than the table it replaces. *)
   | Config when state.config_pane = Config_models ->
@@ -103,12 +107,8 @@ let scrolled_surface state surface =
   | Overview | Acting | Metrics | Lanes | Clients | Board | Approvals | Planning | Schedules
   | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Resources
   | System_logs | Keepers _ | (Memory|Config) ->
-      (* The Lanes overview's chrome counts the rows a multi-line refusal
-         wraps to, so it is read at the terminal width like the Memory
-         overview's and Runtime's. The Config runtime pane's chrome reads the
-         width too. The arm is not split per surface because
-         [Masc_tui_types.scrolled_surface] takes [~cols] for every surface,
-         and only those two arms use it. *)
+      (* The Config runtime pane's chrome reads the terminal width too. The
+         dimension-dependent Lanes overview is handled above. *)
       let _terminal_rows, cols = get_terminal_size () in
       Masc_tui_types.scrolled_surface state ~cols surface
 ;;
@@ -15221,7 +15221,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
     | Acting_pane_call_order_unknown _ | Scroll_acting_pane _ | Acting_pane_scroll_unknown _
     | Switch_keeper _ | Switch_keeper_missing_name | Queue _ | Run_next | Priority _
     | Answer_tool_approval _ | Interrupt_turn | Interrupt_keeper_turn _ | Steer_turn _
-    | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory
+    | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory | Memory_status | Memory_sync
     | Open_fleet_memory | Find_in_chat _ | Find_next | Open_measurement _ | Measurement_missing_sha
     | Inspect_context | View_image _ | View_image_missing_path | Attach_image _ | Attach_image_missing_path
     | Attach_image_ref _ | Attach_image_ref_missing_value | Preset_list | Preset_restore _
@@ -15256,7 +15256,7 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
       | Set_acting_pane_call_order _ | Acting_pane_call_order_unknown _ | Scroll_acting_pane _
       | Acting_pane_scroll_unknown _ | Switch_keeper _ | Switch_keeper_missing_name | Queue _
       | Run_next | Priority _ | Answer_tool_approval _ | Interrupt_turn | Interrupt_keeper_turn _
-      | Steer_turn _ | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory
+      | Steer_turn _ | Steer_missing_message | Set_thinking _ | Open_calls | Set_tools _ | Cycle_memory | Memory_status | Memory_sync
       | Open_fleet_memory | Find_in_chat _ | Find_next | Open_measurement _
       | Measurement_missing_sha | Inspect_context | View_image _ | View_image_missing_path
       | Attach_image _ | Attach_image_missing_path | Attach_image_ref _
@@ -15899,6 +15899,53 @@ let send_operator_text ?keeper_name state ~base_path ~mailbox snapshot =
         ("Librarian/Memory timeline: "
          ^ memory_visibility_to_string state.msg_memory_visibility
          ^ " (Ctrl-N or /memory to cycle)")
+  | Masc_tui_command.Memory_status ->
+      (match target with
+       | None -> notice ~kind:Notice_failure "먼저 Keeper를 선택하세요."
+       | Some _ when not (server_authority_ready state) ->
+         notice ~kind:Notice_failure "서버와 작업 공간을 확인한 뒤 다시 조회하세요."
+       | Some keeper ->
+         Masc_tui_message_input.clear state.msg_input;
+         notice ~kind:Notice_reply (keeper ^ ": 메모리 처리 상태 조회 중");
+         let ticket = ref () in
+         state.chat_command_reads <-
+           (ticket, state.workspace_read_authority, "/memory status") :: state.chat_command_reads;
+         let host = server_peer_host and port = state.port in
+         launch_workspace_json_read state ~mailbox
+           ~deliver:(fun result -> Chat_command_read_completed
+             (ticket, Memory_msg (Memory_loaded (Command_health_read {keeper; result}))))
+           (fun () -> Masc_tui_loader.load_memory_health_row ~host ~port ~keeper))
+  | Masc_tui_command.Memory_sync ->
+      (match target, state.server_identity with
+       | Some keeper, Some workspace
+         when server_authority_ready state ->
+           let check = capture_workspace_check state ~mailbox in
+           let authority = state.workspace_authority in
+           let host = server_peer_host and port = state.port in
+           let posting = Atomic.make false in
+           let interrupted detail =
+             if Atomic.get posting then Masc_tui_http.Catch_up_unconfirmed detail
+             else Masc_tui_http.Catch_up_not_sent detail in
+           let message outcome =
+             Keeper_msg (Keeper_memory_catch_up_done {keeper; workspace; authority; outcome}) in
+           Masc_tui_message_input.clear state.msg_input;
+           notice ~kind:Notice_reply (keeper ^ ": 메모리 따라잡기 요청 중");
+           (* Keep this original operation receipt through workspace withdrawal.
+              Its delivery grants no read or retry authority in a successor. *)
+           Masc_tui_workspace_result.launch state ~results:mailbox.workspace_results
+             ~cancelled_by:(fun () -> message (interrupted "작업 공간 연결이 변경되었습니다."))
+             ~boundary_error:interrupted
+             ~deliver:(fun result -> message (match result with Ok outcome | Error outcome -> outcome))
+             (fun () ->
+               match check () with
+               | Error detail -> Ok (Masc_tui_http.Catch_up_not_sent detail)
+               | Ok () ->
+                 Atomic.set posting true;
+                 Ok (Masc_tui_http.post_keeper_memory_catch_up ~expected_workspace:workspace
+                   ~host ~port ~keeper_name:keeper))
+       | None, _ -> notice ~kind:Notice_failure "먼저 Keeper를 선택하세요."
+       | Some _, (None | Some _) ->
+           notice ~kind:Notice_failure "서버와 작업 공간을 확인한 뒤 다시 요청하세요.")
   | Masc_tui_command.Open_fleet_memory ->
       Masc_tui_message_input.clear state.msg_input;
       goto_surface state ~mailbox Memory;
@@ -22686,11 +22733,12 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Switch_keeper _ ->
            (* The switch handler owns the view change. *)
            set_msg_scroll state 0
-       (* The preset answers are chat notices — a listing, a saved line, a
-          restore report. Typed from the roster they would land in a pane the
+       (* These answers are chat notices, including Memory status and catch-up
+          receipts. Typed from the roster they would land in a pane the
           operator is not looking at, so the chat pane comes forward the way
           it does for a message. *)
        | Masc_tui_command.Queue _
+       | Masc_tui_command.Memory_status | Masc_tui_command.Memory_sync
        | Masc_tui_command.Play_invites | Masc_tui_command.Play_link _
        | Masc_tui_command.Play_invite _
        | Masc_tui_command.Play_revoke _ | Masc_tui_command.Play_invalid _
@@ -23223,7 +23271,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _) | Keeper_gate_settings_loaded _
         | Keeper_tool_modes_loaded (_, _) | Keeper_tool_mode_set (_, _, _, _)
         | Keeper_chat_dispatch_blocked (_, _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _
-        | Keeper_action_done (_, _, _, _))
+        | Keeper_action_done (_, _, _, _) | Keeper_memory_catch_up_done _)
         | (Board_msg (Board_publication_done _ | Board_comment_done _)) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _)) | Goal_msg (Goal_transition_done _
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _)) | Schedule_msg (Schedules_loaded (_, _)
         | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _))
@@ -24993,6 +25041,24 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                report_action state "error"
                  (prefix ^ "creation outcome unconfirmed; declaration retained. Inspect the original roster before retrying: " ^ detail))
       end
+  | Keeper_msg (Keeper_memory_catch_up_done {keeper; workspace; authority; outcome}) ->
+      let original_is_current = authority = state.workspace_authority
+        && same_workspace_identity (Some workspace) state.server_identity in
+      let kind, detail = match outcome with
+        | Masc_tui_http.Catch_up_submitted ->
+          Notice_reply, "메모리 따라잡기 요청 접수. 처리 상태는 /memory status로 조회하세요."
+        | Catch_up_coalesced ->
+          Notice_reply, "대기 중인 따라잡기 요청에 합쳤습니다. 처리 상태는 /memory status로 조회하세요."
+        | Catch_up_not_sent detail -> Notice_failure, "요청을 전송하지 못했습니다: " ^ detail
+        | Catch_up_refused detail -> Notice_failure, "서버가 요청을 거절했습니다: " ^ detail
+        | Catch_up_unconfirmed detail ->
+          Notice_failure, "접수 결과 미확인: " ^ detail ^ " · 원래 작업 공간에서 /memory status로 확인하세요." in
+      if original_is_current then
+        chat_notice state ~keeper_name:(Some keeper) ~kind (keeper ^ ": " ^ detail)
+      else
+        report_action state (match kind with Notice_failure -> "error" | Notice_reply -> "system")
+          (Masc.Tui_decode.Canonical_path.to_string workspace.sid_base_path
+           ^ "의 원래 요청 · " ^ keeper ^ ": " ^ detail)
   | Keeper_msg (Keeper_action_done (origin, keeper_name, action, result)) ->
       let origin_matches =
         Option.for_all
@@ -28410,8 +28476,42 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
        | Ok snapshot, (Some _ | None) -> apply_memory_health_snapshot state snapshot
        | Error detail, (Some _ | None) -> state.memory_health_error <- Some detail);
       owe_memory_input_read state
-  | Memory_msg (Memory_loaded (Row_health_read { keeper; result })) ->
-      state.memory_health_inflight <- false;
+  | Memory_msg (Memory_loaded ((Row_health_read { keeper; result }
+      | Command_health_read { keeper; result }) as reading)) ->
+      (match reading with
+       | Row_health_read _ -> state.memory_health_inflight <- false
+       | Command_health_read _ | Fleet_health_read _ -> ());
+      (match reading with
+       | Row_health_read _ | Fleet_health_read _ -> ()
+       | Command_health_read _ ->
+         let notice = chat_notice state ~keeper_name:(Some keeper) in
+         match result with
+         | Error detail -> notice ~kind:Notice_failure (keeper ^ ": 상태 조회 실패 · " ^ detail)
+         | Ok {mhr_keeper = Row_absent; _} ->
+           notice ~kind:Notice_failure (keeper ^ ": 메모리 관측 행이 없습니다.")
+         | Ok {mhr_keeper = Row_refused refusal; _} ->
+           notice ~kind:Notice_failure (keeper ^ ": 상태를 읽지 못했습니다 · " ^ refusal.mkr_reason)
+         | Ok {mhr_keeper = Row_present row; mhr_generated_at} ->
+           let librarian = row.mkh_librarian in
+           let pass = match librarian.mlh_state with
+             | None -> "이번 서버에서 처리 결과 미관측"
+             | Some state -> Masc_tui_keeper_memory_reading.pass_word state in
+           let lag = match Masc_tui_keeper_memory_reading.unread_lag librarian with
+             | None -> "미처리 턴 미관측"
+             | Some count -> Printf.sprintf "미처리 %d턴" count in
+           let measured = match librarian.mlh_measured_at with
+             | None -> "처리 관측 시각 없음"
+             | Some at -> "처리 관측 " ^ Masc_tui_message_layout.span_text
+                 (max 0. (Unix.gettimeofday () -. at)) ^ " 전" in
+           let cause = Option.bind librarian.mlh_state
+             Masc.Tui_decode_memory_health.memory_librarian_pass_end_cause in
+           let admission = Option.map (fun worker ->
+             "명시적 메모리 후보: " ^ Masc.Keeper_librarian_pending.description
+               (Masc.Keeper_librarian_pending.Worker worker)) librarian.mlh_admission_wait in
+           let reading_age = "상태 조회 " ^ Masc_tui_message_layout.span_text
+             (max 0. (Unix.gettimeofday () -. mhr_generated_at)) ^ " 전" in
+           notice ~kind:Notice_reply (String.concat " · "
+             ([keeper; pass; lag; measured; reading_age] @ Option.to_list cause @ Option.to_list admission)));
       (* The row replaces the Keeper's row in the fleet answer, or removes it
          when the Keeper has none, and the totals are counted again
          (RFC-0487). A row that cannot be merged -- no fleet answer yet, a
@@ -30296,7 +30396,8 @@ let main
   let machine_input_timeout_s = 0.3 in
   let roster_marquee_target = ref None in
   let roster_marquee_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
-  let activity_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
+  let activity_tick = Render_schedule.Activity_tick.create
+      ~motion_interval_ns:Masc_tui_types.motion_step_ns ~now_ns:(Mtime_clock.elapsed_ns ()) in
   let emblem_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
   (* A datum that is fetched only while its surface is open has nothing to draw
      the moment that surface opens, and waiting out the refresh interval would
@@ -39600,11 +39701,25 @@ Use relative paths for resources already held in the package. -->
              if state.view = Planning && state.planning_mode = Planning_list
                 && not (Masc_tui_overview_tasks.is_focused state.task_focus)
              then state.planning_list_page_rows
+             else if state.view = Planning && state.planning_mode = Planning_list
+                     && Masc_tui_overview_tasks.is_focused state.task_focus then
+               let terminal_rows, cols = get_terminal_size () in
+               Masc_tui_render_work.work_tasks_page_rows state ~terminal_rows ~cols
+             else if state.view = Keepers Keeper_list then
+               let terminal_rows, cols = get_terminal_size () in
+               Option.value
+                 (Masc_tui_render_keepers.keeper_plain_page_rows state ~terminal_rows ~cols)
+                 ~default:(surface_page_rows state)
              else if state.view = Repositories then
                let _, cols = get_terminal_size () in
                Masc_tui_render.repository_studio_content_height state ~cols
                  ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
                  ~cursor:state.repositories_cursor
+             else if state.view = Lanes && state.lanes_mode = Lanes_overview then
+               let terminal_rows, cols = get_terminal_size () in
+               let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+               let projection = Masc_tui_types.lanes_overview_projection state ~rows ~cols in
+               Masc_tui_scroll.page_step ~height:projection.lop_list_height
              else surface_page_rows state
            in
            let direction = if key = Some "pagedown" then 1 else -1 in
@@ -42536,22 +42651,10 @@ Use relative paths for resources already held in the package. -->
           else state.roster_marquee_frame + 1;
         Render_schedule.request render_schedule Render_schedule.Background
       end;
-      (* The running-turn mark, advanced on its own clock rather than the
-         poll's. The poll is two seconds; a mark that changed on it would
-         read as a stall rather than as work. Nothing is fetched here -- the
-         frame is derived and the presenter writes only the cells that
-         differ, so a repaint that changes one glyph costs one glyph.
-
-         It runs only while a turn is running, and returns to [-1] when none
-         is. A screen with nothing to say stops repainting entirely, which
-         is also what makes the elapsed seconds honest: they tick because
-         this is what redraws them. *)
-      (* Every surface that draws a moving mark, not just the first one. A
-         lane can be running while no keeper turn is, and a frame counter
-         that only watched turns would leave that mark frozen on whatever
-         quarter it stopped at -- which reads as a lane stuck there. *)
-      (* Status and container-log reads have separate lifetimes. A log read
-         still needs repaints after the Sandbox status has already arrived. *)
+      (* Only a moving mark emitted by the top frame needs the motion
+         interval. Hidden work still keeps a whole-second clock for visible
+         elapsed/read/age notices, including overlays and the Activity pane.
+         About and roster marquee keep their independent clocks above/below. *)
       let awaiting_detail_read =
         state.view = Keepers Keeper_detail
         && (match Masc_tui_types.selected_keeper state with
@@ -42565,24 +42668,33 @@ Use relative paths for resources already held in the package. -->
           ~live_transcript:(Option.is_some state.msg_live)
           ~lanes:state.standalone_lanes ~awaiting_detail_read
       in
-      if not anything_running then begin
-        if state.activity_frame >= 0 then begin
-          state.activity_frame <- -1;
-          Render_schedule.request render_schedule Render_schedule.Background
-        end
-      end
-      else if
-        Int64.compare
-          (Int64.sub now_ns !activity_last_step_ns)
-          Masc_tui_types.motion_step_ns
-        >= 0
-      then begin
-        activity_last_step_ns := now_ns;
-        state.activity_frame <-
-          (if state.activity_frame < 0 || state.activity_frame = max_int then 0
-           else state.activity_frame + 1);
+      (* An in-flight read keeps its age-gated row current without fetching
+         again or advancing a running mark. The existing activity controller
+         supplies its read clock when no moving mark is visible. *)
+      let pending_row_live =
+        Option.is_some (local_source_pending state Local_keepers)
+        || Option.is_some (local_source_pending state Local_work)
+      in
+      if not anything_running && state.activity_frame >= 0 then begin
+        state.activity_frame <- -1;
         Render_schedule.request render_schedule Render_schedule.Background
       end;
+      (match Render_schedule.Activity_tick.take activity_tick ~now_ns
+          ~running:(anything_running || pending_row_live)
+          ~motion_visible:(anything_running
+            && Render_schedule.Activity_tick.motion_visible ()
+            && not state.image_open && not state.msx_open) with
+       | Quiet -> ()
+       | Stop ->
+           state.activity_frame <- -1;
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Advance ->
+           if anything_running then begin
+             state.activity_frame <-
+               (if state.activity_frame < 0 || state.activity_frame = max_int then 0
+                else state.activity_frame + 1)
+           end;
+           Render_schedule.request render_schedule Render_schedule.Background);
       (* /about has a finite arrival. A closed overlay and a final frame
          schedule no further candle work, even when the previous frame drew
          motion immediately before the reader left. *)
@@ -42683,6 +42795,7 @@ Use relative paths for resources already held in the package. -->
               last frame comes down rather than float over the picture.
               Closing the picture repaints in full, and the candle steps
               again from that frame. *)
+           Render_schedule.Activity_tick.begin_frame ();
            Masc_tui_emblem_screen.begin_frame ();
            Masc_tui_portrait_view.begin_frame ();
            Masc_tui_message_layout.begin_frame ();

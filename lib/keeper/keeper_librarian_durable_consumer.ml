@@ -10,12 +10,12 @@ module History = Keeper_checkpoint_store.Saved_history
 
 type commit_result =
   | Memory_committed
-  | Memory_pending
+  | Memory_pending of Keeper_librarian_pending.t
   | Memory_refused of Keeper_librarian_runtime.not_committed list
 
 type outcome =
   | Nothing_to_read
-  | Pending
+  | Pending of Keeper_librarian_pending.t
   | Baseline_advanced of P.t
   | Memory_not_committed of Keeper_librarian_runtime.not_committed list
   | Progress_advanced of P.t
@@ -1646,10 +1646,10 @@ let consume_one_with_extent
              checkpoint_message_floor ?cli_runner ~config ~keeper_name ~lines ~progress ~official_cursor
                ~selection_progress ~messages ~selected_range ~range ~external_cursor ~external_through reports input
            | (None | Some _), (None | Some _), ([] | _::_), (None | Some _), ([] | _::_) -> result)
-        | (Memory_committed | Memory_pending | Memory_refused _),
+        | (Memory_committed | Memory_pending _ | Memory_refused _),
           (No_message_floor | Runtime_message_floor _) -> result in
       match result with
-      | Memory_pending -> Ok Pending
+      | Memory_pending pending -> Ok (Pending pending)
       | Memory_refused reports -> refused_original original reports
       | Memory_committed ->
         let* _ = Domain_pool_ref.submit_io_or_inline ~name:__FUNCTION__ (fun () ->
@@ -1690,7 +1690,7 @@ let consume_one_with_progress_writer_and_floor
       ~commit
   in
   (match result, extent with
-   | Ok Pending, _ ->
+   | Ok (Pending _), _ ->
      (* Pending is not a failed attempt: retain an earlier failure marker, but
         undo the provisional marker this wrapper installs for exceptions. *)
      if not had_failed_range then clear_failed key

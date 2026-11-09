@@ -3963,6 +3963,47 @@ let fetch_keeper_memory_health_row ~(host : string) ~(port : int) ~(keeper : str
   get_json ~host ~port
     ~path:("/api/v1/dashboard/keeper-memory-health?keeper=" ^ percent_encode_query_value keeper)
 
+type keeper_memory_catch_up_outcome =
+  | Catch_up_submitted
+  | Catch_up_coalesced
+  | Catch_up_not_sent of string
+  | Catch_up_refused of string
+  | Catch_up_unconfirmed of string
+
+let decode_keeper_memory_catch_up_receipt ~keeper_name json =
+  let open Result.Syntax in
+  let context = "Librarian catch-up receipt" in
+  let* fields = Candle_json.object_fields ~context json in
+  let* schema, fields = Candle_json.field ~context "schema" Candle_json.as_string fields in
+  let* keeper, fields = Candle_json.field ~context "keeper" Candle_json.as_non_blank fields in
+  let* submission, fields = Candle_json.field ~context "submission" Candle_json.as_string fields in
+  let* completion, fields = Candle_json.field ~context "completion" Candle_json.as_string fields in
+  let* () = Candle_json.finish ~context fields in
+  if schema <> "keeper.memory.catch_up.v1" || keeper <> keeper_name || completion <> "unobserved"
+  then Error "Librarian catch-up receipt does not match the requested Keeper and contract"
+  else match submission with
+    | "submitted" -> Ok Catch_up_submitted
+    | "coalesced" -> Ok Catch_up_coalesced
+    | value -> Error ("unknown Librarian catch-up submission: " ^ value)
+
+let keeper_memory_catch_up_outcome ~keeper_name = function
+  | Post_refused detail -> Catch_up_refused detail
+  | Post_unanswered detail -> Catch_up_unconfirmed detail
+  | Post_answered json ->
+    match decode_keeper_memory_catch_up_receipt ~keeper_name json with
+    | Ok outcome -> outcome
+    | Error detail -> Catch_up_unconfirmed detail
+
+let post_keeper_memory_catch_up ~(expected_workspace : Masc.Tui_decode.server_identity)
+    ~host ~port ~keeper_name =
+  let expected = `Assoc [
+    "base_path", `String (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_base_path);
+    "masc_root", `String (Masc.Tui_decode.Canonical_path.to_string expected_workspace.sid_masc_root)] in
+  let body = Yojson.Safe.to_string (`Assoc ["name", `String keeper_name;
+    "expected_workspace", expected]) in
+  post_json_outcome ~host ~port ~path:"/api/v1/keepers/memory-catch-up" ~body
+  |> keeper_memory_catch_up_outcome ~keeper_name
+
 (** Fetch /api/v1/dashboard/workspace-memory-inventory: the curator's ledger
     counts and the briefing's state, one object for the workspace (RFC-0511
     W3). The server answers from a 60 s cache. *)

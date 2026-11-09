@@ -524,6 +524,16 @@ let prepare_directory_command ?owner ~privilege ~path ~mode () =
      @ (match owner with None -> [] | Some user -> [ shell_quote user ]))
 ;;
 
+(* Each endpoint user passes through the shared root to reach its Keepers'
+   directories under it. *)
+let remote_root_mode = 0o755
+
+(* Only the endpoint user can enter a Keeper's own directory. The hourly
+   workspace cleanup relies on it: no other user's process can be inside
+   such a root, so the processes it cannot read are passed over. A root
+   that group or others can enter stops that cleanup instead. *)
+let keeper_root_mode = 0o700
+
 let install_shim ssh ~privilege endpoint shim_path =
   let* stat =
     try Ok (Unix.lstat shim_path) with
@@ -538,7 +548,8 @@ let install_shim ssh ~privilege endpoint shim_path =
     let* config = endpoint_shim_config ssh endpoint in
     let* prepare_root =
       pinned_ssh ssh
-        (prepare_directory_command ~privilege ~path:endpoint.remote_root ~mode:0o755 ())
+        (prepare_directory_command ~privilege ~path:endpoint.remote_root
+           ~mode:remote_root_mode ())
     in
     let* () = run_inherited prepare_root in
     let remote_temp = Printf.sprintf "/tmp/masc-exec-shim.%d" (Unix.getpid ()) in
@@ -578,7 +589,8 @@ let provision_keeper_workspace ssh ~privilege (endpoint : Exec_ssh_endpoint.t) k
   let keeper_root = Filename.concat endpoint.remote_root keeper in
   let* prepare =
     pinned_ssh ssh
-      (prepare_directory_command ~owner:endpoint.user ~privilege ~path:keeper_root ~mode:0o700 ())
+      (prepare_directory_command ~owner:endpoint.user ~privilege ~path:keeper_root
+         ~mode:keeper_root_mode ())
   in
   run_inherited prepare
 ;;

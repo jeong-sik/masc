@@ -106,80 +106,33 @@ let sandbox_volume_gc_request args =
    without it there is no claim evidence, and every unowned keeper stays
    kept as unverified rather than reclaimed on a guess. *)
 let handle_sandbox_volume_gc ~tool_name ~start_time (ctx : context) args : Tool_result.result =
-  let resolve_gc_image image =
-    if String.equal image ""
-    then Ok None
-    else
-      match Keeper_sandbox_image_catalog.name_error ~field:"image" image with
-      | None ->
-        (match
-           Keeper_sandbox_image_resolver.resolve_in_workspace
-             ~base_path:ctx.config.Workspace.base_path
-             ~store:
-               (Keeper_sandbox_image_catalog.Microvm Keeper_microvm_backend.Apple_container)
-             (Some image)
-         with
-         | Ok pinned -> Ok (Some pinned.Keeper_sandbox_image_catalog.reference)
-         | Error error ->
-           Error (Keeper_sandbox_image_resolver.error_to_string error))
-      | Some _ ->
-        if Keeper_sandbox_image_catalog.is_reference image
-        then Ok (Some image)
-        else Error (Printf.sprintf "%S is neither a catalog name nor a repository:tag reference" image)
-  in
+  let base_path = ctx.config.Workspace.base_path in
   match get_float_opt args "timeout_sec" with
   | Some seconds when seconds <= 0. ->
     workflow_err ~tool_name ~start_time "timeout_sec must be > 0"
   | timeout_opt ->
     let timeout_sec =
-      Option.value timeout_opt
-        ~default:
-          (Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Env_config_sandbox.Shell_timeout.Io ())
+      Option.value timeout_opt ~default:(Keeper_volume_gc_host.default_timeout_sec ())
     in
     let image_argument = String.trim (get_string args "image" "") in
     match sandbox_volume_gc_request args with
     | Error detail -> workflow_err ~tool_name ~start_time detail
     | Ok request ->
-    match resolve_gc_image image_argument with
+    match Keeper_volume_gc_host.resolve_claims_image ~base_path image_argument with
     | Error detail -> workflow_err ~tool_name ~start_time detail
     | Ok claims_image ->
-    let run = Sandbox_readiness.system_runner in
-    match Sandbox_readiness.apple_container_service ~host:(Sandbox_readiness.detect_host ~run) ~run with
-    | ( Sandbox_readiness.Missing_prerequisite _ | Sandbox_readiness.Unsupported_host _
-      | Sandbox_readiness.Unsupported_capability _ | Sandbox_readiness.Probe_failed _
-      | Sandbox_readiness.Needs_configuration _ ) as service ->
+    match Keeper_volume_gc_host.apple_container_ready () with
+    | Error reason ->
       (* Without an answering Apple Container there are no Keeper volumes to
          read, so the tool refuses before running a command that cannot start. *)
       Tool_result.make_err
         ~tool_name
         ~class_:Tool_result.Dependency_unavailable
         ~start_time
-        ("Apple Container is not available on this host: "
-         ^ Sandbox_readiness.state_message service)
-    | Sandbox_readiness.Service_ready ->
-      let registered_keeper name =
-        Option.is_some
-          (Config_dir_resolver.keeper_toml_path_opt_for_base_path
-             ~base_path:ctx.config.Workspace.base_path
-             name)
-      in
+        ("Apple Container is not available on this host: " ^ reason)
+    | Ok ready ->
       (match
-         Keeper_volume_gc.apple_keeper_volume_gc
-           ~run:(fun ~timeout_sec argv ->
-              (* The same boundary every keeper CLI spawn crosses: the
-                 environment is scrubbed of keeper-secret keys and the
-                 descriptor is accounted, so the operator tool cannot leak
-                 what a keeper lane would not see. *)
-              Fd_accountant.observe ~kind:Fd_accountant.Docker_spawn (fun () ->
-                  Process_eio.run_argv_with_status_split
-                    ~timeout_sec
-                    ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-                    ~cwd:(Config_dir_resolver.current_working_dir ())
-                    argv))
-           ~timeout_sec
-           ~registered_keeper
-           ~claims_image
-           ~request
+         Keeper_volume_gc_host.run ready ~base_path ~claims_image ~timeout_sec ~request
        with
        | Error detail ->
          Tool_result.make_err

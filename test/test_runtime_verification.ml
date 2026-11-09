@@ -1,3 +1,7 @@
+(* A start of Antigravity, by the access the suite publishes first. *)
+let antigravity_host () =
+  Masc_test_deps.host_account Runtime_account_access.Antigravity
+
 let provider_config_for_binding config binding =
   Runtime_adapter.materialize_provider_binding
     ~construction:(Runtime_adapter.create_construction ()) config binding
@@ -1399,7 +1403,7 @@ let test_antigravity_private_tool_roundtrip () =
     let result = Verify.For_testing.measure ~runtime_id:"antigravity.fixture" ~selected_model:"fixture-selected-model"
       ~challenge:"private-nonce-fixture"
       ~run:(fun tool ~prompt ->
-        match Runtime_verification_antigravity.run ~secure_random:env#secure_random ~net:env#net
+        match Runtime_verification_antigravity.run ~host:(antigravity_host ()) ~secure_random:env#secure_random ~net:env#net
           ~mgr:env#process_mgr ~clock:env#clock ~cwd:Eio.Path.(env#fs / directory)
           ~directory ~oauth_source:source ~config ~tool ~prompt with
         | Ok result -> Ok { Verify.model=result.model; text=result.text }

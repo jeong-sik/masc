@@ -648,6 +648,111 @@ let test_the_answer_reader_refuses_what_it_cannot_trust () =
     (map_object (replace "unlisted_keepers" (`List [ `String "vanished" ])) json)
 ;;
 
+(* The server's periodic pass and the TUI that reads it share
+   Keeper_volume_gc_periodic. A pass asks only for a report, and the first
+   step that fails ends it before the later steps run. *)
+module Periodic = Masc.Keeper_volume_gc_periodic
+
+let observed_at = 1_700_000_000.0
+
+let periodic_judge ~requests () ~claims_image ~request =
+  requests := request :: !requests;
+  let call =
+    scripted_gc
+      ~volumes:{|["masc-keeper-build-retired","masc-keeper-work-registered"]|}
+      ~containers:"[]"
+      ~claims:(fun _ -> Unix.WEXITED 0, "[]\n", "")
+      ~delete_answers:[] ()
+  in
+  let report, sent =
+    call ~registered:(fun name -> String.equal name "registered") ~claims_image ~request ()
+  in
+  Alcotest.(check (list string)) "a periodic pass deletes no volume" [] (deleted_volume_names sent);
+  Ok report
+;;
+
+let not_reached step () = Alcotest.failf "%s ran after a failed step" step
+
+let outcome_name (pass : Periodic.t) =
+  match pass.Periodic.outcome with
+  | Periodic.Reported _ -> "reported"
+  | Periodic.Skipped reason -> "skipped: " ^ reason
+  | Periodic.Failed reason -> "failed: " ^ reason
+;;
+
+let test_a_periodic_pass_only_reports_and_stops_at_the_first_failed_step () =
+  let requests = ref [] in
+  let pass =
+    Periodic.observe ~now:(fun () -> observed_at)
+      ~ready:(fun () -> Ok ())
+      ~resolve_claims_image:(fun () -> Ok (Some "masc-test-minimal:image"))
+      ~judge:(periodic_judge ~requests)
+  in
+  (match pass.Periodic.outcome, !requests with
+   | Periodic.Reported answer, [ Gc.Report_only ] ->
+     Alcotest.(check bool) "the answer did not execute" false answer.Answer.executed;
+     Alcotest.(check (list string)) "the candidate is listed by name" [ "retired" ]
+       (Answer.reclaim_candidates answer)
+   | _ -> Alcotest.failf "expected one report-only judgement, got %s" (outcome_name pass));
+  Alcotest.(check (float 0.0)) "the pass carries its time" observed_at pass.Periodic.observed_at;
+  let ended ~ready ~resolve ~judge =
+    outcome_name
+      (Periodic.observe ~now:(fun () -> observed_at) ~ready ~resolve_claims_image:resolve ~judge)
+  in
+  let never_judged () ~claims_image:_ ~request:_ = not_reached "the judgement" () in
+  Alcotest.(check string) "a host without Apple Container skips before anything else"
+    "skipped: no Apple Container"
+    (ended ~ready:(fun () -> Error "no Apple Container") ~resolve:(not_reached "the image")
+       ~judge:never_judged);
+  Alcotest.(check string) "an image that does not resolve fails before the judgement"
+    "failed: no pinned image"
+    (ended ~ready:(fun () -> Ok ()) ~resolve:(fun () -> Error "no pinned image")
+       ~judge:never_judged);
+  Alcotest.(check string) "a failed judgement fails the pass" "failed: volume listing failed"
+    (ended ~ready:(fun () -> Ok ()) ~resolve:(fun () -> Ok None)
+       ~judge:(fun () ~claims_image:_ ~request:_ -> Error "volume listing failed"));
+  Alcotest.(check string) "a raised step fails the pass"
+    ("failed: " ^ Printexc.to_string (Failure "probe crashed"))
+    (ended ~ready:(fun () -> failwith "probe crashed") ~resolve:(not_reached "the image")
+       ~judge:never_judged)
+;;
+
+let test_the_periodic_report_reads_back_what_the_server_writes () =
+  let reported =
+    { Periodic.observed_at; outcome = Periodic.Reported (answer_after ~execute:false) }
+  in
+  List.iter
+    (fun (pass : Periodic.t) ->
+       let read = ok_exn (Periodic.of_json (Periodic.to_json pass)) in
+       Alcotest.(check string) "the outcome comes back" (outcome_name pass) (outcome_name read);
+       Alcotest.(check (float 0.0)) "the time comes back"
+         pass.Periodic.observed_at read.Periodic.observed_at)
+    [ reported
+    ; { observed_at; outcome = Periodic.Skipped "no Apple Container" }
+    ; { observed_at; outcome = Periodic.Failed "volume listing failed" }
+    ];
+  (match (ok_exn (Periodic.of_json (Periodic.to_json reported))).Periodic.outcome with
+   | Periodic.Reported answer ->
+     Alcotest.(check (list string)) "the candidates come back" [ "retired" ]
+       (Answer.reclaim_candidates answer)
+   | Periodic.Skipped _ | Periodic.Failed _ -> Alcotest.fail "a report comes back as a report");
+  let refused label json =
+    match Periodic.of_json json with
+    | Error _ -> ()
+    | Ok _ -> Alcotest.failf "%s is refused" label
+  in
+  let pass outcome = `Assoc (("observed_at", `Float observed_at) :: outcome) in
+  let report_answer = Answer.to_json (answer_after ~execute:false) in
+  refused "an answer that executed"
+    (pass [ "outcome", `String "reported"; "answer", Answer.to_json (answer_after ~execute:true) ]);
+  refused "an unknown outcome" (pass [ "outcome", `String "deleted"; "reason", `String "gone" ]);
+  refused "a reason on a report"
+    (pass [ "outcome", `String "reported"; "answer", report_answer; "reason", `String "gone" ]);
+  refused "a report without its answer" (pass [ "outcome", `String "reported" ]);
+  refused "a blank reason" (pass [ "outcome", `String "skipped"; "reason", `String " " ]);
+  refused "a pass without its time" (`Assoc [ "outcome", `String "failed"; "reason", `String "gone" ])
+;;
+
 let () =
   Alcotest.run
     "keeper_volume_gc"
@@ -684,6 +789,12 @@ let () =
             test_the_answer_reads_back_what_the_tool_writes
         ; Alcotest.test_case "the answer reader refuses what it cannot trust" `Quick
             test_the_answer_reader_refuses_what_it_cannot_trust
+        ] )
+    ; ( "periodic report"
+      , [ Alcotest.test_case "a pass only reports and stops at the first failed step" `Quick
+            test_a_periodic_pass_only_reports_and_stops_at_the_first_failed_step
+        ; Alcotest.test_case "the report reads back what the server writes" `Quick
+            test_the_periodic_report_reads_back_what_the_server_writes
         ] )
     ]
 ;;

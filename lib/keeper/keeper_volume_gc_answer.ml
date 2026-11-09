@@ -80,6 +80,15 @@ let summary t =
     t.keepers
 ;;
 
+let reclaim_candidates t =
+  List.filter_map
+    (fun v ->
+       match v.kind with
+       | Reclaim_candidate -> Some v.keeper_name
+       | Kept | Reclaimed | Reclaim_failed -> None)
+    t.keepers
+;;
+
 let summary_equal a b =
   Int.equal a.kept b.kept
   && Int.equal a.reclaim_candidates b.reclaim_candidates

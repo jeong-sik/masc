@@ -1145,11 +1145,14 @@ let run_turn_with ?on_guidance_prepared ?raw_trace ?composed_context ?goal_block
   let transmitted = ref [] in
   let native_actions = ref [] in
   let selected_home = Option.value account_home ~default:(Filename.concat base_path "account-home") in
+  let account =
+    Masc_test_deps.authorized_muse
+      (Runtime_account_access.Declared_home (Masc_test_deps.muse_home selected_home))
+  in
   let config =
     { (Serve.default_config ()) with
       cli_path = launcher ~base_path
     ; model
-    ; account_home = Some selected_home
     ; admission_timeout_s
     ; timeout_s = Some idle_timeout_s
     }
@@ -1196,6 +1199,7 @@ let run_turn_with ?on_guidance_prepared ?raw_trace ?composed_context ?goal_block
            (fun event ->
               events := event :: !events;
               on_stream_event event))
+      ~account
       ~config
       ()
   in
@@ -1859,17 +1863,16 @@ let test_muse_usage_read_rests_only_the_selected_account () =
         (Filename.concat base_path "other-account") in
       let env = Option.get (Eio_context.get_env_opt ()) in
       let clock = Eio.Stdenv.clock env in
-      let config =
-        { (Serve.default_config ()) with
-          cli_path = launcher ~base_path
-        ; account_home = Some account_home
-        }
+      let config = { (Serve.default_config ()) with cli_path = launcher ~base_path } in
+      let account =
+        Masc_test_deps.authorized_muse
+          (Runtime_account_access.Declared_home (Masc_test_deps.muse_home account_home))
       in
       (match Runtime_provider_usage_read.read_muse
                ~mgr:(Posix_spawn_process_mgr.foreground_mgr ~clock
                  ~grace_seconds:Process_eio.child_exit_grace_seconds)
                ~clock ~cwd:Eio.Path.(Eio.Stdenv.fs env / base_path)
-               ~scope config with
+               ~scope ~account config with
        | Ok () -> ()
        | Error detail -> fail detail);
       check (option (float 0.)) "weekly reset recorded from usage/read"
@@ -4011,6 +4014,7 @@ let () =
   (* The Muse start prompt uses the shared Antigravity framing assets. Pin
      their source directory so selected cases also run outside Dune. *)
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
+  Masc_test_deps.publish_single_user_access ();
   run
     "keeper_muse_runtime"
     [ ( "MSP reasoning authority"

@@ -14,17 +14,10 @@
 type config =
   { cli_path : string
   ; prepared_home : Runtime_muse_home.t option
-    (** Prepared managed config for [account_home]. Keeper prepares this before
-        claiming a session so its revision enters the binding. When absent
-        with a selected account, run and usage read prepare it before spawn. *)
-  ; account_home : string option
-    (** [Some absolute_path] selects this process's HOME and XDG config,
-        data, cache, state and runtime roots. Ambient XDG roots are discarded.
-        [None] is the low-level caller environment used by protocol fixtures;
-        product routing selects an explicit account. Managed preparation
-        imports file-backed auth into a durable private generation, sets
-        XDG_CONFIG_HOME there, and replaces TMPDIR with its private directory. This is not a separate
-        macOS Keychain identity, and does not confine filesystem access. *)
+    (** Prepared managed config for the home of the account the call runs on.
+        Keeper prepares this before claiming a session so its revision enters
+        the binding. When absent with a declared home, run and usage read
+        prepare it before spawn. *)
   ; model : string option
     (** The model every turn runs on: [session/start]'s [modelId], and the
         [session/setModel] selection on every resumed session.
@@ -385,12 +378,22 @@ val run_turn
   -> mgr:_ Eio.Process.mgr
   -> clock:_ Eio.Time.clock
   -> cwd:Eio.Fs.dir_ty Eio.Path.t
+  -> account:_ Runtime_account_access.muse_authorized
   -> config
   -> workspace_root:string
   -> prompt:string
   -> images:image_input list
   -> (turn_result, error) result
-(** [storage] says where the host keeps its native files (see {!storage}).
+(** [account] is the account the process starts on. A declared home selects
+    the process's HOME and XDG config, data, cache, state and runtime roots,
+    and ambient XDG roots are discarded. Managed preparation imports
+    file-backed auth into a durable private generation, sets XDG_CONFIG_HOME
+    there, and replaces TMPDIR with its private directory. This is not a
+    separate macOS Keychain identity, and does not confine filesystem access.
+    {!Runtime_account_access.Process_environment} keeps the environment of
+    the caller, which protocol fixtures use.
+
+    [storage] says where the host keeps its native files (see {!storage}).
     Native durability and completion notifications remain enabled for both.
 
     [workspace_root] is the absolute directory the session works in.
@@ -422,6 +425,7 @@ val read_usage
   :  mgr:_ Eio.Process.mgr
   -> clock:_ Eio.Time.clock
   -> cwd:Eio.Fs.dir_ty Eio.Path.t
+  -> account:_ Runtime_account_access.muse_authorized
   -> config
   -> (Runtime_muse_msp.subscription_usage option, error) result
 (** Handshake plus [usage/read], with no session and no model call. [None]
@@ -429,7 +433,7 @@ val read_usage
 
 val list_models :
   mgr:_ Eio.Process.mgr -> clock:_ Eio.Time.clock ->
-  cwd:Eio.Fs.dir_ty Eio.Path.t -> config ->
+  cwd:Eio.Fs.dir_ty Eio.Path.t -> account:_ Runtime_account_access.muse_authorized -> config ->
   (Runtime_muse_msp.model_catalog, error) result
 (** Handshake plus [model/list], without session admission or model work.
     Ephemeral servers can provide metadata too. The reported catalog source

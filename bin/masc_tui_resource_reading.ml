@@ -29,15 +29,21 @@ type search_position =
 let first = Cursor 0
 let cursor = function Cursor index | Landed {index;_} -> index
 let record_landing ~cols ~query ~index reading = Landed {index;cols;query;reading}
-let same_reading a b =
-  a.entry=b.entry && Option.equal (==) a.contents b.contents
-  && a.error=b.error && a.requested=b.requested
-  && a.image_cursor=b.image_cursor && a.text_cursor=b.text_cursor
-  && a.revisions=b.revisions && a.presentation=b.presentation
-  && a.metadata_expanded=b.metadata_expanded && a.confirmation=b.confirmation
-  && a.shared=b.shared && a.share_uncertain=b.share_uncertain
-  && a.recovery_preview=b.recovery_preview && a.public_url=b.public_url
-  && Option.equal (==) a.diagrams b.diagrams
+(* Name and compare every field: future display inputs must also invalidate
+   search landings and prepared document layouts. *)
+let[@warning "+9+27"] same_reading
+    { entry; contents; error; requested; image_cursor; text_cursor; revisions;
+      presentation; metadata_expanded; confirmation; shared; share_uncertain;
+      recovery_preview; public_url; diagrams } b =
+  entry=b.entry && Option.equal (==) contents b.contents
+  && error=b.error && requested=b.requested
+  && image_cursor=b.image_cursor && text_cursor=b.text_cursor
+  && revisions=b.revisions && presentation=b.presentation
+  && metadata_expanded=b.metadata_expanded && confirmation=b.confirmation
+  && shared=b.shared && share_uncertain=b.share_uncertain
+  && recovery_preview=b.recovery_preview && public_url=b.public_url
+  && Option.equal (==) diagrams b.diagrams
+
 let landing ~cols ~query reading = function
   | Landed original when original.cols=cols && original.query=query
       && query<>"" && same_reading original.reading reading -> Some original.index

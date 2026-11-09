@@ -111,7 +111,8 @@ let test_materializes_the_muse_serve_owner () =
      | Runtime_execution.Muse_serve execution ->
        check string "the command, as configured when no client is installed" "muse"
          execution.cli_path;
-       check string "the selected account home" "/synthetic/muse-home" execution.account_home;
+       check string "the selected account home" "/synthetic/muse-home"
+         (Runtime_account_access.muse_home_path execution.account_home);
        check string "the api-name is the session model" "muse-spark-1.3" execution.model;
        check (float 0.) "the serve client's own bound" Runtime_muse_serve.default_timeout_s
          execution.timeout_s

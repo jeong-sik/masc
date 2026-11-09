@@ -2093,6 +2093,101 @@ let test_failed_node_row_keeps_its_producer_roots () =
      |> List.map (fun (reference : Tool_output.artifact_ref) -> reference.sha256))
 ;;
 
+let test_board_write_survives_composition_output_schema_failure () =
+  let module Log = Masc.Keeper_tool_call_log in
+  let module Board = Masc.Board in
+  let module Board_dispatch = Masc.Board_dispatch in
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Time_compat.set_clock (Eio.Stdenv.clock env);
+  Mirage_crypto_rng_unix.use_default ();
+  with_export_base @@ fun base_path ->
+  Fun.protect ~finally:(fun () ->
+    Log.reset_for_testing ();
+    Board_dispatch.reset_for_test ();
+    Board.reset_global_for_test ()) @@ fun () ->
+  Board_dispatch.reset_for_test ();
+  Board.reset_global_for_test ();
+  (match Board_dispatch.init_jsonl ~base_path
+      ~recipient_lookup:Masc_board_handlers.Recipient_lookup.none_declared () with
+   | Ok () -> ()
+   | Error detail -> fail detail);
+  Log.reset_for_testing ();
+  Log.init ~base_path ();
+  let write name args = Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator
+      ~result_boundary:Tool_output.Sent_to_client name args in
+  let created = write "masc_board_post"
+      (`Assoc [ "author", `String "schema-board-keeper"; "content", `String "schema failure target" ]) in
+  check bool "the target exists" true (Tool_result.is_success created);
+  let post_id = Yojson.Safe.Util.(Tool_result.data created |> member "id" |> to_string) in
+  let canonical = canonical_descriptor "masc_board_comment" in
+  (* The producer really writes a comment. The consumer's deliberately stricter
+     output contract then refuses it, after the effect has committed. *)
+  let descriptor = { canonical with composable_output = Descriptor.Json_output
+      { schema = `Assoc [ "type", `String "object"
+              ; "properties", `Assoc [ "consumer_marker", `Assoc [ "type", `String "string" ] ]
+              ; "required", `List [ `String "consumer_marker" ]
+              ; "additionalProperties", `Bool true ] } } in
+  let node = Plan.node ~id:(node_id "comment") ~tool_name:"masc_board_comment"
+      ~input:(Plan.Json_template.literal
+        (`Assoc [ "post_id", `String post_id; "content", `String "committed before schema refusal" ])) () in
+  let plan = match Plan.create ~descriptors:[ descriptor ] [ node ] with
+    | Ok plan -> plan
+    | Error error -> fail (Plan.error_to_string error) in
+  let meta = Masc_test_deps.meta_of_json_fixture
+      (`Assoc [ "name", `String "schema-board-keeper"; "activation_mode", `String "manual" ])
+      |> Result.get_ok in
+  let parent_invocation = Agent_core.Tool_contract.Invocation.create
+      ~tool_use_id:"schema-board-parent" ~turn:1
+      ~schedule:{ planned_index = 0; batch_index = 0; batch_size = 1
+                ; execution_mode = Agent_core.Tool_contract.Serial }
+      ~completion:Agent_core.Tool_contract.Continue_after_success in
+  let observed = ref None and producer_fact = ref None in
+  let record = Masc.Keeper_tool_composition_surface_observation.observe_node_result
+      ~composition_tool:"keeper_compose_board-schema-fixture"
+      ~composition_execution:Masc.Keeper_tool_composition_catalog.Inline
+      ~composition_tool_kind:Descriptor.Composition_tool
+      ~composition_run_id:(Plan.Composition_run_id.fresh ()) ~parent_invocation ~meta
+      ~turn_context:Masc.Keeper_tool_call_log_context.empty_turn_context in
+  let observe_node_result result = observed := Some result; record result in
+  let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input () =
+    let args = match input with
+      | `Assoc fields -> `Assoc (("author", `String "schema-board-keeper") :: fields)
+      | _ -> fail "comment node input is not an object" in
+    let result = write node.Plan.tool_name args in
+    check bool "actual Board producer completed" true (Tool_result.is_success result);
+    producer_fact := Board_tool_evidence.of_metadata (Tool_result.metadata result);
+    Executor.dispatch_result result in
+  (match Executor.execute ~plan ~run_id:(Plan.Run_id.fresh ()) ~dispatch ~observe_node_result () with
+   | Ok _ -> fail "the stricter output contract must reject the comment result"
+   | Error _ -> ());
+  let node = match !observed with
+    | Some node -> node
+    | None -> fail "the rejected output never reached the production observer" in
+  check bool "output validation happened after the producer" true
+    (Option.is_some node.Executor.output_validation_error);
+  let fact = match !producer_fact with
+    | Some (Ok fact) -> fact
+    | Some (Error detail) -> fail detail
+    | None -> fail "actual comment producer supplied no fact" in
+  let rows = match Log.read_recent ~keeper_name:meta.name () with
+    | Ok rows -> rows
+    | Error (Log.Index_unavailable detail) -> fail detail in
+  let row = match rows with [ row ] -> row | _ -> fail "expected one comment-node row" in
+  let open Yojson.Safe.Util in
+  check string "consumer failure remains a failure" "failed" (row |> member "disposition" |> to_string);
+  check string "the original committed write survives that failure"
+    (Board_tool_evidence.to_yojson fact |> Yojson.Safe.to_string)
+    (row |> member "board_action_evidence" |> Yojson.Safe.to_string);
+  check string "evidence belongs to the original node execution"
+    (Ids.Execution_id.to_string node.execution_id) (row |> member "execution_id" |> to_string);
+  match Board_dispatch.get_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
+  | Ok [ comment ] -> check string "the failed consumer did not replay or undo the comment"
+      "committed before schema refusal" comment.content
+  | Ok _ -> fail "expected exactly one committed comment"
+  | Error error -> fail (Board.show_board_error error)
+;;
+
 (* Only its row keeps a failed node's roots. When that row cannot be written,
    execution stops, as it does for a completed node with roots. A failed node
    without roots keeps its own failure. *)
@@ -2179,6 +2274,8 @@ let () =
             test_completed_node_roots_come_from_its_payload
         ; test_case "failed node row keeps its producer roots" `Quick
             test_failed_node_row_keeps_its_producer_roots
+        ; test_case "Board write survives composition output schema failure" `Quick
+            test_board_write_survives_composition_output_schema_failure
         ; test_case "unwritten failed node row stops only when it kept roots" `Quick
             test_unwritten_failed_node_row_stops_only_with_roots
         ; Alcotest.test_case

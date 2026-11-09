@@ -1,6 +1,12 @@
 import { html } from 'htm/preact'
-import { useEffect, useMemo } from 'preact/hooks'
+import { useEffect, useMemo, useRef } from 'preact/hooks'
 import type { TurnRecordEntry, ToolCallEntry } from '../api/dashboard'
+import { decodeBoardActionEvidence, fetchKeeperToolCallsByExecutionIds,
+  type BoardActionEvidence } from '../api/dashboard-keeper-tool-calls'
+import { ApiRequestError } from '../api/core'
+import { ADMIN_REQUIRED_MESSAGE, isAdminRequired } from '../api/admin-required'
+import { RouteLink } from './common/route-link'
+import { boardRouteTarget } from './board/board-route'
 import {
   fetchTurnFlow, type TurnFlow, type TurnIntake,
 } from '../api/keeper-turn-flow'
@@ -12,6 +18,12 @@ import type { TurnSourceOutcomes, SourceOutcome, SourceReceiptKind } from '../ap
 
 type FlowRecord = Pick<TurnRecordEntry,
   'keeper' | 'trace_id' | 'absolute_turn' | 'turn_ref' | 'execution_ids' | 'blocks'>
+
+function completeBoardTurn(record: FlowRecord): boolean {
+  return record.keeper.trim().length > 0 && record.trace_id.trim().length > 0
+    && record.turn_ref === `${record.trace_id}#${record.absolute_turn}`
+    && Number.isSafeInteger(record.absolute_turn) && record.absolute_turn >= 0
+}
 
 export function turnToolEvidence(record: FlowRecord, entries: readonly ToolCallEntry[]) {
   const byId = new Map<string, ToolCallEntry | null>()
@@ -27,6 +39,161 @@ export function turnToolEvidence(record: FlowRecord, entries: readonly ToolCallE
       && (entry.keeper_turn_id === undefined || entry.keeper_turn_id === record.absolute_turn)
     return { id, entry: belongs && entry ? entry : undefined }
   })
+}
+
+/** Board authorship requires the complete recorded turn identity. Ordinary
+ * tool evidence intentionally retains its separate legacy association rule. */
+function boardJoinIdentity(entry: ToolCallEntry) {
+  return entry.board_action_identity ?? entry
+}
+
+export function turnBoardActionEvidence(record: FlowRecord, entries: readonly ToolCallEntry[]) {
+  const byId = new Map<string, ToolCallEntry | null>()
+  for (const entry of entries) {
+    const identity = boardJoinIdentity(entry)
+    if (identity.execution_id?.trim()) {
+      byId.set(identity.execution_id, byId.has(identity.execution_id) ? null : entry)
+    }
+  }
+  const requested = new Map<string, number>()
+  for (const id of record.execution_ids) requested.set(id, (requested.get(id) ?? 0) + 1)
+  const completeTurn = completeBoardTurn(record)
+  return [...requested].map(([id, count]) => {
+    const entry = byId.get(id)
+    const identity = entry ? boardJoinIdentity(entry) : undefined
+    const belongs = completeTurn && id.trim().length > 0 && count === 1
+      && identity?.keeper === record.keeper && identity.trace_id === record.trace_id
+      && identity.keeper_turn_id === record.absolute_turn
+    return { id, entry: belongs && entry ? entry : undefined }
+  })
+}
+
+function BoardAction({ evidence }: { evidence: BoardActionEvidence }) {
+  if (evidence.kind === 'invalid') return html`<p>Board 행동 기록 확인 불가</p>`
+  const post = boardRouteTarget({ post: evidence.post_id })
+  const commentId = evidence.kind === 'comment_added' ? evidence.comment_id
+    : evidence.target_type === 'comment' ? evidence.target_id : null
+  const comment = commentId === null ? null : boardRouteTarget({ post: evidence.post_id, comment: commentId })
+  const parent = evidence.kind === 'comment_added' && evidence.parent_id !== null
+    ? boardRouteTarget({ post: evidence.post_id, comment: evidence.parent_id }) : null
+  return html`
+    <p>${evidence.kind === 'comment_added' ? `댓글 작성 · ${evidence.author}`
+      : `${evidence.reacted ? '반응 추가' : '반응 제거'} · ${evidence.emoji} · ${evidence.user_id}`}</p>
+    <div class="flex flex-wrap gap-2">
+      <${RouteLink} tab=${post.tab} params=${post.params}>Board 글 ${evidence.post_id}</${RouteLink}>
+      ${comment && html`<${RouteLink} tab=${comment.tab} params=${comment.params}>댓글 ${commentId}</${RouteLink}>`}
+      ${parent && evidence.kind === 'comment_added' && html`
+        <${RouteLink} tab=${parent.tab} params=${parent.params}>부모 댓글 ${evidence.parent_id}</${RouteLink}>`}
+    </div>
+  `
+}
+
+function BoardActions({ record, entries, error }: {
+  record: FlowRecord; entries: readonly ToolCallEntry[]; error: string | null
+}) {
+  const targetKey = JSON.stringify([record.keeper, record.trace_id, record.absolute_turn,
+    record.turn_ref, record.execution_ids])
+  const lookup = useManagedAsyncResource<{ targetKey: string; entries: ToolCallEntry[] }>(null)
+  const selection = useRef<{
+    targetKey: string; resource: object; record: FlowRecord
+    ambiguous: Set<string>; started: boolean
+  } | null>(null)
+  if (selection.current === null || selection.current.targetKey !== targetKey || selection.current.resource !== lookup) {
+    selection.current = { targetKey, resource: lookup, record: { ...record,
+      execution_ids: [...record.execution_ids] }, ambiguous: new Set(), started: false }
+  }
+  const selected = selection.current
+  const selectedIds = new Set(record.execution_ids)
+  const suppliedCounts = new Map<string, number>()
+  for (const entry of entries) {
+    const id = boardJoinIdentity(entry).execution_id
+    if (id !== undefined && selectedIds.has(id)) {
+      suppliedCounts.set(id, (suppliedCounts.get(id) ?? 0) + 1)
+    }
+  }
+  for (const [id, count] of suppliedCounts) {
+    if (count > 1) {
+      selected.ambiguous.add(id)
+    }
+  }
+  useEffect(() => {
+    const current = selection.current
+    lookup.reset()
+    if (!current || current.targetKey !== targetKey || current.resource !== lookup
+      || !completeBoardTurn(current.record)) return () => { lookup.cancel() }
+    current.started = true
+    // A recent-tail match cannot establish uniqueness across the retained
+    // ledger. Every selected identity is checked through the exact batch door.
+    const requested = [...new Set(current.record.execution_ids)].filter(id => id.trim().length > 0)
+    if (requested.length > 0) {
+      void lookup.load(async signal => {
+        try {
+          const response = await fetchKeeperToolCallsByExecutionIds(current.record.keeper, requested, { signal })
+          return { targetKey, entries: response.entries }
+        } catch (failure) {
+          if (isAdminRequired(failure)) throw new Error(ADMIN_REQUIRED_MESSAGE)
+          if (failure instanceof ApiRequestError) {
+            throw new Error(failure.detail ?? '선택한 실행 기록을 조회할 수 없습니다.')
+          }
+          throw failure
+        }
+      })
+    }
+    return () => { lookup.cancel() }
+    // Tail refreshes can reveal ambiguity, but do not start another request
+    // for this selection. The resource also changes with the credential.
+  }, [targetKey, lookup])
+  const lookupState = lookup.state.value
+  const lookupLoading = selected.started && lookupState.loading
+  const lookupError = selected.started ? lookupState.error : null
+  const loaded = selected.started && lookupState.data?.targetKey === targetKey ? lookupState.data.entries : []
+  const loadedCounts = new Map<string, number>()
+  for (const entry of loaded) {
+    const id = boardJoinIdentity(entry).execution_id
+    if (id !== undefined) {
+      loadedCounts.set(id, (loadedCounts.get(id) ?? 0) + 1)
+    }
+  }
+  for (const [id, count] of loadedCounts) {
+    if (count > 1) {
+      selected.ambiguous.add(id)
+    }
+  }
+  const resolved = loaded.filter(entry => {
+    // Any observed ambiguity stays unknown for this selection, including
+    // after the recent tail changes. Only exact lookup rows can be positive.
+    const id = boardJoinIdentity(entry).execution_id
+    return id !== undefined && !selected.ambiguous.has(id)
+  })
+  const tools = turnBoardActionEvidence(record, resolved)
+  const unconfirmed = tools.filter(tool => tool.entry === undefined).length
+  const unrecorded = tools.filter(tool => tool.entry !== undefined
+    && (tool.entry.tool === 'masc_board_comment' || tool.entry.tool === 'masc_board_reaction')
+    && tool.entry.board_action_evidence === undefined).length
+  const rows = tools.flatMap(({ id, entry }) => {
+    if (!entry) return []
+    const evidence = decodeBoardActionEvidence(entry.tool, entry.board_action_evidence)
+    return evidence === undefined ? [] : [{ id, entry, evidence }]
+  })
+  return html`
+    <section aria-label="같은 턴의 Board 댓글·반응">
+      <h4>같은 턴의 Board 댓글·반응</h4>
+      <p class="rt-note">같은 턴에 기록된 행동입니다. 각 입력 자극에 대한 응답인지는 확정하지 않습니다.</p>
+      ${error && html`<p class="rt-note">도구 기록 조회 실패: ${error}</p>`}
+      ${lookupLoading && html`<p class="rt-note">선택한 실행 기록 조회 중…</p>`}
+      ${lookupError && html`<p class="rt-note">선택한 실행 기록 조회 실패: ${lookupError}</p>`}
+      ${unconfirmed > 0 && html`<p class="rt-note">정확한 턴·실행 기록 미확인 ${unconfirmed}개</p>`}
+      ${unrecorded > 0 && html`<p class="rt-note">Board 댓글·반응 미기록 실행 ${unrecorded}개</p>`}
+      ${rows.length === 0 && !lookupLoading && !lookupError && !error
+        && html`<p class="rt-note">이 턴에서 확인할 수 있는 Board 행동 기록이 없습니다.</p>`}
+      <ol>${rows.map(({ id, entry, evidence }) => html`<li key=${id} class="rt-note break-all mb-3">
+        <p class="font-mono">${record.turn_ref} · ${id}</p>
+        <${BoardAction} evidence=${evidence} />
+        <p>도구 응답 ${entry.wire_outcome} · 처리 상태 ${entry.disposition ?? '미기록'}</p>
+      </li>`)}</ol>
+      <p class="rt-note">기록이 없으면 댓글·반응 여부와 무응답 이유를 알 수 없습니다.</p>
+    </section>
+  `
 }
 
 const receiptLabels: Record<SourceReceiptKind, string> = {
@@ -168,6 +335,7 @@ export function KeeperTurnFlow({ record, toolEntries, toolCallError, onMessages,
             : html`<p class="rt-note">자극·선택 기록 조회 중…</p>`}
         <p class="rt-note">ACK는 큐 처리 기록입니다. 실제 요청 전송과 PR 승인 같은 업무 결과는 해당 증거에서 확인하세요.</p>
       </section>
+      <${BoardActions} record=${record} entries=${toolEntries} error=${toolCallError} />
       <section aria-label="실제 입력 확인">
         <h4>프롬프트와 실제 입력</h4>
         <p class="rt-note">이 턴의 프롬프트 블록 ${record.blocks.length}개. 요청 캡처의 메시지와 도구 스키마를 같은 턴 기준으로 확인합니다.</p>
@@ -203,9 +371,9 @@ export function KeeperTurnFlow({ record, toolEntries, toolCallError, onMessages,
       <section aria-label="도구 실행 결과">
         <h4>도구 실행 결과</h4>
         ${toolCallError && html`<p class="rt-note">도구 기록 조회 실패: ${toolCallError}</p>`}
-        <p class="rt-note">이 턴의 실행 ID ${tools.length}개 · 일치하는 도구 기록 ${tools.filter(tool => tool.entry).length}개</p>
+        <p class="rt-note">이 턴의 실행 ID ${tools.length}개 · 최근 도구 목록에서 일치 ${tools.filter(tool => tool.entry).length}개</p>
         <ol>${tools.map(({ id, entry }) => html`<li key=${id} class="rt-note break-all">
-          ${entry ? `${entry.tool} · ${entry.wire_outcome}` : '실행 상세 미확인'} · ${id}
+          ${entry ? `${entry.tool} · ${entry.wire_outcome}` : '최근 목록에 실행 상세 없음'} · ${id}
         </li>`)}</ol>
         <p class="rt-note">도구 반환 상태입니다. PR 승인·병합 같은 외부 결과의 성공을 대신하지 않습니다.</p>
       </section>

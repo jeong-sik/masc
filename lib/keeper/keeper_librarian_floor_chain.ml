@@ -23,7 +23,7 @@ type fresh = {
 }
 type outcome =
   | Finished of Machine.finished
-  | Pending of string
+  | Pending of Keeper_librarian_pending.t
   | Stopped of {position : int; report : Memory_runtime.not_committed}
   | Superseded
 
@@ -124,12 +124,10 @@ let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~current ~
       let* outcome = Step_owner.resume ~store ~config ~reserved ~original:record ~step
         ~call:(Edge.call ~config ~reserved) |> Result.map_error owner_error in
       (match outcome with
-       | Step_owner.Pending (wait, _) ->
-         Ok (Pending (Printf.sprintf "Floor step %d is waiting on its worker (%s)" question.position
-           (match wait with
-            | Capacity -> "capacity" | Worker_pending -> "pending" | Worker_unknown -> "outcome unknown"
-            | Worker_unreachable -> "unreachable" | Missing_after_dispatch -> "missing after dispatch"
-            | Journal_recheck -> "journal recheck")))
+       | Step_owner.Pending (wait, record) ->
+         Ok (Pending (Keeper_librarian_pending.Worker
+           (Keeper_librarian_pending.of_worker_wait ~installation_id:record.installation_id
+              ~request_id:record.request_id wait)))
        | Step_owner.Refused (final, record) ->
          let* ()=Memory_runtime.require_counterpart_template (Step.step step).preparation in
          let detail = Printf.sprintf "Floor step %d was refused: %s" question.position
@@ -150,7 +148,9 @@ let run ~store ~config ~reserved ~owner ~range ~input ~sources ~fresh ~current ~
          let* judged = Judgment.judge ~store ~step ~record ~answer ~fresh_authority:(fresh_authority step)
            ~inventory in
          (match judged with
-          | Judgment.Pending detail -> Ok (Pending detail)
+          | Judgment.Pending detail ->
+            Ok (Pending (Keeper_librarian_pending.Message_floor
+              { request_id = record.request_id; detail }))
           | Judgment.Decided decision ->
             let* machine = Machine.answered machine decision in
             go machine ~previous:(Some (link_of record)))) in

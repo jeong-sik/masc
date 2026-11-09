@@ -57,25 +57,6 @@ val observation_run_rejection : sandbox_profile -> observation_run -> string opt
     endpoint's declaration, not the profile's, and is answered where the route
     is built. *)
 
-(** How a microVM keeper's requests reach its guest (RFC
-    microvm-guest-agent-over-socket §3.9). [Exec_per_request] starts one
-    runtime exec per request. [Agent_socket] boots the guest with the shim's
-    agent as its first process and connects to the socket the runtime
-    publishes for it; only Apple [container] publishes one. The two are held
-    side by side only while the agent is a per-keeper canary. *)
-type microvm_delivery =
-  | Exec_per_request
-  | Agent_socket
-
-val microvm_delivery_to_string : microvm_delivery -> string
-val microvm_delivery_of_string : string -> microvm_delivery option
-val all_microvm_deliveries : microvm_delivery list
-val valid_microvm_delivery_strings : string list
-
-val default_microvm_delivery : microvm_delivery
-(** [Exec_per_request]: what every guest runs until its keeper TOML asks for
-    the agent. *)
-
 val sandbox_profile_to_string : sandbox_profile -> string
 val sandbox_profile_of_string : string -> sandbox_profile option
 val all_sandbox_profiles : sandbox_profile list

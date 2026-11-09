@@ -329,12 +329,13 @@ let serve_h2_connection
           match Server_h2_frame_tap.request_stream frames with
           | Some stream_id ->
             Server_h2_stream_registry.dispatch streams ~sw:request_sw ~stream_id reqd
-              (fun stream_sw ->
+              (fun stream_end ->
+                let stream_sw = Http_h2_stream.Stream_end.switch stream_end in
                 Http_h2_response_ledger.with_request resources ~sw:stream_sw
                   (fun () ->
                     try
                       with_request_lane (H2.Reqd.request reqd).meth (fun () ->
-                        h2_request_handler ~request_sw:stream_sw addr reqd)
+                        h2_request_handler ~stream_end addr reqd)
                     with
                     | Eio.Cancel.Cancelled _ as exn -> raise exn
                     | exn ->

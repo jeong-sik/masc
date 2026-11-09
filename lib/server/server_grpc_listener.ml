@@ -49,8 +49,12 @@ let serve_socket ~sw ~clock ~socket server =
           Server_bootstrap_http.serve_h2_connection
             ~clock
             ~sw:conn_sw
-            ~h2_request_handler:(fun ~request_sw _peer reqd ->
-              Grpc_eio.Server.request_handler ~sw:request_sw ~clock server reqd)
+            ~h2_request_handler:(fun ~stream_end _peer reqd ->
+              Grpc_eio.Server.request_handler
+                ~sw:(Http_h2_stream.Stream_end.switch stream_end)
+                ~clock
+                server
+                reqd)
             ~h2_error_handler:Grpc_eio.Server.error_handler
             peer flow));
     accept ()

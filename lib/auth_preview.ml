@@ -107,6 +107,12 @@ const keeperRuntime = document.getElementById("keeper-runtime");
 const keeperVerdict = document.getElementById("keeper-verdict");
 const turnMessage = document.getElementById("turn-message");
 const turnAnswer = document.getElementById("turn-answer");
+const pats = document.getElementById("pats");
+const patScope = document.getElementById("pat-scope");
+const patExpiry = document.getElementById("pat-expiry");
+const patToken = document.getElementById("pat-token");
+const patId = document.getElementById("pat-id");
+const patVerdict = document.getElementById("pat-verdict");
 let csrf = null;
 let loginId = null;
 async function read(path) {
@@ -225,7 +231,45 @@ document.getElementById("run-turn").addEventListener("click", async () => {
     ? json.keeper_id + " on " + json.runtime_id + " (" + json.model + "):\n" + json.text
     : "run (" + answer.status + "): " + text;
 });
-show().then(listAccounts).then(listKeepers);|}
+async function listPats() {
+  const [answer, json] = await read("%s");
+  pats.textContent = answer.ok
+    ? (json.pats.length === 0 ? "none"
+       : json.pats.map((p) =>
+           p.pat_id + " " + p.status + " " + JSON.stringify(p.scope) +
+           (p.expires_at_ms === null ? "" : " until " + new Date(p.expires_at_ms).toISOString())).join("\n"))
+    : "(" + answer.status + "): " + json.error;
+}
+document.getElementById("issue-pat").addEventListener("click", async () => {
+  let scope = null;
+  try { scope = JSON.parse(patScope.value); } catch (_) {
+    patToken.textContent = "the scope is not JSON";
+    return;
+  }
+  const expiry = patExpiry.value.trim() === "" ? null : Number(patExpiry.value);
+  const answer = await post("%s", { scope: scope, expires_at_ms: expiry });
+  const text = await answer.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch (_) {}
+  if (answer.ok && json !== null) {
+    patId.value = json.pat_id;
+    patToken.textContent =
+      "Shown once. Who it acts as:\ncurl -H 'Authorization: Bearer " + json.token + "' " +
+      location.origin + "/api/v1/auth/whoami";
+  } else {
+    patToken.textContent = "issue (" + answer.status + "): " + text;
+  }
+  await listPats();
+});
+document.getElementById("revoke-pat").addEventListener("click", async () => {
+  const answer = await fetch("%s/" + encodeURIComponent(patId.value), {
+    method: "DELETE",
+    headers: { "%s": csrf }
+  });
+  patVerdict.textContent = "revoke (" + answer.status + "): " + await answer.text();
+  await listPats();
+});
+show().then(listAccounts).then(listKeepers).then(listPats);|}
     Authz_browser_request.csrf_header
     provider_accounts_path
     Authz_browser_request.csrf_header
@@ -236,6 +280,10 @@ show().then(listAccounts).then(listKeepers);|}
     Auth_preview_keeper.keepers_path
     Auth_preview_keeper.assign_path
     Auth_preview_keeper.turn_path
+    Login_pat_routes.path
+    Login_pat_routes.path
+    Login_pat_routes.path
+    Authz_browser_request.csrf_header
 ;;
 
 let home_page ~nonce =
@@ -272,6 +320,17 @@ let home_page ~nonce =
            ; "<label>Message to the Keeper <input id=\"turn-message\" autocomplete=\"off\"></label>"
            ; "<button id=\"run-turn\">Run</button>"
            ; "<pre id=\"turn-answer\"></pre>"
+           ; "<h2>My PATs</h2>"
+           ; "<pre id=\"pats\">reading</pre>"
+           ; "<label>Scope <textarea id=\"pat-scope\" rows=\"2\" cols=\"72\">"
+             ^ {|{"runtimes":"all","channels":["direct"],"allowed_effects":["read_state"]}|}
+             ^ "</textarea></label>"
+           ; "<label>Expires at (ms since the epoch, empty for none) <input id=\"pat-expiry\"></label>"
+           ; "<button id=\"issue-pat\">Issue</button>"
+           ; "<pre id=\"pat-token\"></pre>"
+           ; "<label>PAT id <input id=\"pat-id\"></label>"
+           ; "<button id=\"revoke-pat\">Revoke</button>"
+           ; "<pre id=\"pat-verdict\"></pre>"
            ])
     ~script:home_script
 ;;

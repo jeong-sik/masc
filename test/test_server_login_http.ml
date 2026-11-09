@@ -610,6 +610,61 @@ let the_preview_follows_a_login () =
       (send admin router ~meth:"GET" ~path:Masc.Auth_preview.provider_accounts_path).status)
 ;;
 
+(* A PAT through the routes a browser calls (plan C4-10): the person issues
+   one with their session, it acts as them where a bearer is read, and once
+   they revoke it, it does not. A bearer alone does not reach the PAT routes,
+   so a PAT issues no other PAT. *)
+let a_pat_acts_until_it_is_revoked () =
+  with_installation (fun t ->
+    let router = Server_login_http.add_preview_routes t.routes ~env:t.env ~base_path:t.base t.router in
+    let admin = fresh_browser () in
+    Alcotest.(check int)
+      "the Admin joins"
+      200
+      (sign_in t admin ~fields:[ "invite", admin_token ] ~user_id:583231).status;
+    let csrf = csrf_of t admin in
+    let issue browser headers =
+      send
+        browser
+        router
+        ~meth:"POST"
+        ~path:"/api/v1/auth/pats"
+        ~headers:(("Content-Type", "application/json") :: headers)
+        ~body:
+          {|{"scope":{"runtimes":"all","channels":["direct"],"allowed_effects":["read_state"]},"expires_at_ms":null}|}
+    in
+    let issued = issue admin (changing ~csrf ()) in
+    Alcotest.(check int) ("issued: " ^ issued.body) 200 issued.status;
+    let pat_id, token =
+      match member "pat_id" issued, member "token" issued with
+      | Some (`String pat_id), Some (`String token) -> pat_id, token
+      | _ -> Alcotest.failf "no PAT in %S" issued.body
+    in
+    let listed = send admin router ~meth:"GET" ~path:"/api/v1/auth/pats" in
+    Alcotest.(check int) ("listed: " ^ listed.body) 200 listed.status;
+    Alcotest.(check (pair bool bool))
+      "the list holds the PAT and not its token"
+      (true, false)
+      (contains ~sub:pat_id listed.body, contains ~sub:token listed.body);
+    let bearer = [ "Authorization", "Bearer " ^ token ] in
+    Alcotest.(check string)
+      "the PAT acts as the Admin"
+      "200 admin human by pat"
+      (whoami router (fresh_browser ()) ~headers:bearer ());
+    Alcotest.(check int)
+      "a bearer alone issues no PAT"
+      401
+      (issue (fresh_browser ()) (bearer @ changing ())).status;
+    let revoked =
+      send admin router ~meth:"DELETE" ~path:("/api/v1/auth/pats/" ^ pat_id) ~headers:(changing ~csrf ())
+    in
+    Alcotest.(check int) ("revoked: " ^ revoked.body) 204 revoked.status;
+    Alcotest.(check string)
+      "the revoked PAT does not act"
+      ("401 " ^ Masc.Auth_gate.reason_to_string (Masc.Auth_gate.Pat_refused Authz_pat.Ended))
+      (whoami router (fresh_browser ()) ~headers:bearer ()))
+;;
+
 let what_the_server_reads () =
   with_installation (fun t ->
     let check label expected (reply : reply) = Alcotest.(check int) (label ^ ": " ^ reply.body) expected reply.status in
@@ -674,6 +729,9 @@ let the_route_table () =
       "the paths"
       [ "/api/v1/auth/allowlist"
       ; "/api/v1/auth/allowlist/"
+      ; "/api/v1/auth/pats"
+      ; "/api/v1/auth/pats"
+      ; "/api/v1/auth/pats/"
       ; "/auth/github/callback"
       ; "/auth/github/start"
       ; "/auth/logout"
@@ -715,6 +773,7 @@ let () =
     [ ( "login"
       , [ Alcotest.test_case "a browser signs in, acts and signs out" `Quick a_browser_signs_in_acts_and_signs_out
         ; Alcotest.test_case "the preview follows a login" `Quick the_preview_follows_a_login
+        ; Alcotest.test_case "a PAT acts until it is revoked" `Quick a_pat_acts_until_it_is_revoked
         ; Alcotest.test_case "what the server reads" `Quick what_the_server_reads
         ; Alcotest.test_case "the route table" `Quick the_route_table
         ; Alcotest.test_case "the query credential" `Quick the_query_credential

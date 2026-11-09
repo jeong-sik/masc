@@ -51,12 +51,14 @@ val resolve : t -> keeper_name:string -> mode
 val overrides : t -> (string * mode) list
 (** Every keeper currently moved off [Auto], in the order they were set. *)
 
-type override_row =
+type 'mode override_row_t = 'mode Keeper_gate_mode.override_row_t =
   { keeper_name : string
-  ; mode : mode
+  ; mode : 'mode
   ; actor : string
   ; changed_at : string
   }
+
+type override_row = mode override_row_t
 
 val keeper_overrides : base_path:string -> (override_row list, string) result
 (** The persisted overrides. A missing file is an empty list; a file that

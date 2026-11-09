@@ -11,13 +11,15 @@ type agent_core_tool_binding = {
   arg_bindings : (string * arg_source) list;
 }
 
-let identity_arg_bindings = function
-  | `Assoc schema_fields ->
-    (match List.assoc_opt "properties" schema_fields with
-     | Some (`Assoc properties) ->
-       List.map (fun (name, _schema) -> name, Input_field name) properties
-     | Some _ | None -> [])
-  | _ -> []
+let required_names = Tool_input_contract.required_names
+
+let property_map = Tool_input_contract.schema_properties
+
+let identity_arg_bindings schema =
+  List.map
+    (fun (name, _schema) -> name, Input_field name)
+    (property_map schema)
+;;
 
 let canonical_add_task =
   match
@@ -90,22 +92,8 @@ let agent_core_aliases_for_operation operation_id =
     (fun binding -> String.equal binding.canonical_operation operation_id)
     agent_core_bindings
 
-module String_set = Set.Make (String)
-
-let dedupe_strings values =
-  let _, rev_values =
-    List.fold_left
-      (fun (seen, rev_acc) value ->
-         if String_set.mem value seen
-         then seen, rev_acc
-         else String_set.add value seen, value :: rev_acc)
-      (String_set.empty, [])
-      values
-  in
-  List.rev rev_values
-
 let core_remote_operation_names =
-  dedupe_strings
+  Json_util.dedupe_keep_order
     (List.map (fun binding -> binding.canonical_operation) agent_core_bindings
     @ [
         "masc_status";
@@ -116,33 +104,9 @@ let core_remote_operation_names =
         "masc_operator_confirm";
       ])
 
-let find_property properties key =
-  List.assoc_opt key properties
+let string_member name json = Json_util.get_string json name
 
-let assoc_members = function
-  | `Assoc pairs -> Some pairs
-  | _ -> None
-
-let string_member name json =
-  match Option.bind (assoc_members json) (fun pairs -> find_property pairs name) with
-  | Some (`String value) -> Some value
-  | _ -> None
-
-let int_member name json =
-  match Option.bind (assoc_members json) (fun pairs -> find_property pairs name) with
-  | Some (`Int value) -> Some value
-  | _ -> None
-
-let required_names schema =
-  match Option.bind (assoc_members schema) (fun pairs -> find_property pairs "required") with
-  | Some (`List items) ->
-      List.filter_map (function `String value -> Some value | _ -> None) items
-  | _ -> []
-
-let property_map schema =
-  match Option.bind (assoc_members schema) (fun pairs -> find_property pairs "properties") with
-  | Some (`Assoc props) -> props
-  | _ -> []
+let int_member name json = Json_util.assoc_int_opt name json
 
 let schema_type schema =
   match string_member "type" schema with
@@ -193,7 +157,7 @@ let rec validate_json_value ?label schema value =
           if min_items > 0 && List.length items < min_items then
             Error (Printf.sprintf "%s must be a non-empty JSON array" label)
           else (
-            match Option.bind (assoc_members schema) (fun pairs -> find_property pairs "items") with
+            match Json_util.assoc_member_opt "items" schema with
             | None -> Ok ()
             | Some item_schema ->
                 let rec validate_items = function

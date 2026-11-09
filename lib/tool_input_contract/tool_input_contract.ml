@@ -73,10 +73,14 @@ let required_names schema =
   | _ -> []
 ;;
 
-let schema_property_names schema =
+let schema_properties schema =
   match Json_util.assoc_member_opt "properties" schema with
-  | Some (`Assoc props) -> List.map fst props
+  | Some (`Assoc props) -> props
   | _ -> []
+;;
+
+let schema_property_names schema =
+  List.map fst (schema_properties schema)
 ;;
 
 type schema_shape =

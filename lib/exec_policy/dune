@@ -8,6 +8,7 @@
   masc.masc_exec
   masc.masc_exec_bash_parser
   masc.masc_exec_command_gate
+  masc.fs_compat
   masc_core
   masc.host_config
   ; The short block reasons and the cwd sibling-dirs hint are managed prompt

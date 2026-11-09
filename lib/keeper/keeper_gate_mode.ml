@@ -143,37 +143,39 @@ type keeper_change =
   ; keeper_changed_at : string
   }
 
-type keeper_override =
+type 'mode override_row_t =
   { keeper_name : string
-  ; mode : t
+  ; mode : 'mode
   ; actor : string
   ; changed_at : string
   }
 
-let keeper_override_json o =
+type keeper_override = t override_row_t
+
+let override_row_to_json mode_to_string o =
   `Assoc
     [ "keeper_name", `String o.keeper_name
-    ; "mode", `String (to_string o.mode)
+    ; "mode", `String (mode_to_string o.mode)
     ; "updated_by", `String o.actor
     ; "updated_at", `String o.changed_at
     ]
 ;;
 
-let keeper_override_of_json = function
+let override_row_of_json ~label ~parse_mode = function
   | `Assoc fields ->
     let string_field key =
       match List.assoc_opt key fields with
       | Some (`String value) when String.trim value <> "" -> Ok value
       | Some _ | None ->
-        Error (Printf.sprintf "keeper Gate mode override is missing %s" key)
+        Error (Printf.sprintf "%s is missing %s" label key)
     in
     (match string_field "keeper_name" with
      | Error detail -> Error detail
      | Ok keeper_name ->
        (match List.assoc_opt "mode" fields with
-        | None -> Error "keeper Gate mode override is missing mode"
+        | None -> Error (Printf.sprintf "%s is missing mode" label)
         | Some mode ->
-          (match parse_json mode with
+          (match parse_mode mode with
            | Error detail -> Error detail
            | Ok mode ->
              let or_unknown = function Ok value -> value | Error _ -> "" in
@@ -183,7 +185,39 @@ let keeper_override_of_json = function
                ; actor = or_unknown (string_field "updated_by")
                ; changed_at = or_unknown (string_field "updated_at")
                })))
-  | _ -> Error "keeper Gate mode override must be an object"
+  | _ -> Error (Printf.sprintf "%s must be an object" label)
+;;
+
+let override_rows_of_json_list ~decode_row rows =
+  List.fold_left
+    (fun acc row ->
+      match acc, decode_row row with
+      | Error detail, _ -> Error detail
+      | Ok _, Error detail -> Error detail
+      | Ok kept, Ok parsed -> Ok (parsed :: kept))
+    (Ok []) rows
+  |> Result.map List.rev
+;;
+
+let upsert_override_row ~keeper_name ~actor ~changed_at mode rows =
+  let without =
+    List.filter (fun o -> not (String.equal o.keeper_name keeper_name)) rows
+  in
+  (* Removing rather than storing a synonym for "no opinion": the file is
+     then also the list of keepers an operator has actually singled out,
+     and a screen showing it does not have to filter. *)
+  match mode with
+  | None -> without
+  | Some mode -> without @ [ { keeper_name; mode; actor; changed_at } ]
+;;
+
+let keeper_override_json o = override_row_to_json to_string o
+
+let keeper_override_of_json json =
+  override_row_of_json
+    ~label:"keeper Gate mode override"
+    ~parse_mode:parse_json
+    json
 ;;
 
 (* An unreadable override file is an error rather than an empty list. Reading
@@ -199,14 +233,7 @@ let keeper_overrides ~base_path =
     | Error detail ->
       Error (Printf.sprintf "keeper Gate mode overrides read failed: %s" detail)
     | Ok (`List rows) ->
-      List.fold_left
-        (fun acc row ->
-          match acc, keeper_override_of_json row with
-          | Error detail, _ -> Error detail
-          | Ok _, Error detail -> Error detail
-          | Ok kept, Ok parsed -> Ok (parsed :: kept))
-        (Ok []) rows
-      |> Result.map List.rev
+      override_rows_of_json_list ~decode_row:keeper_override_of_json rows
     | Ok _ -> Error "keeper Gate mode overrides must be a list"
 ;;
 
@@ -240,16 +267,8 @@ let set_for_keeper (config : Workspace.config) ~actor ~keeper_name mode =
       |> Option.map (fun o -> o.mode)
     in
     let changed_at = Masc_domain.now_iso () in
-    let without =
-      List.filter (fun o -> not (String.equal o.keeper_name keeper_name)) rows
-    in
-    (* Removing rather than storing a synonym for "no opinion": the file is
-       then also the list of keepers an operator has actually singled out,
-       and a screen showing it does not have to filter. *)
     let rows =
-      match mode with
-      | None -> without
-      | Some mode -> without @ [ { keeper_name; mode; actor; changed_at } ]
+      upsert_override_row ~keeper_name ~actor ~changed_at mode rows
     in
     let dir = Keeper_gate_path.dir ~base_path in
     Fs_compat.mkdir_p dir;

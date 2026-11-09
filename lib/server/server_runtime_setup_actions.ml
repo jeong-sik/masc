@@ -371,9 +371,9 @@ let selected_home_args template = match value "account_home" template with
   | `String home -> ["--account-home"; home]
   | _ -> []
 
-let muse_catalog ~binary template =
+let muse_catalog ~binary ~base_path template =
   let* command=text (value "command" template) in
-  let* json=native_json ~binary (["runtime-muse-models";"--cli-path";command] @ selected_home_args template) in
+  let* json=native_json ~binary (["runtime-muse-models";"--base-path";base_path;"--cli-path";command] @ selected_home_args template) in
   let* fields = match json with
     | `Assoc fields when value "schema" fields=`String "masc.muse_models.v1"
         && value "invocation_verified" fields=`Bool false
@@ -454,7 +454,7 @@ let discover ~binary ~sw:_ ~net ~base_path request =
       Ok (client_models_json ~source:"codex_isolated_account_model_list"
         (with_catalog_image_capabilities models catalog))
     | Muse ->
-      let* source,models=muse_catalog ~binary template in
+      let* source,models=muse_catalog ~binary ~base_path template in
       Ok (client_models_json ~source models)
     | Claude_code ->
       let* json=native_json ~binary ["runtime-model-list";"claude-code"] in
@@ -567,7 +567,7 @@ let save ~binary ~base_path request =
           Ok (Some (with_catalog_image_capabilities selected catalog)) in
         let* reported_models=match choice with
           | Runtime_setup_spec.Muse ->
-            let* _,models=muse_catalog ~binary template in Ok (Some models)
+            let* _,models=muse_catalog ~binary ~base_path template in Ok (Some models)
           | Claude_code -> native_client_models "claude-code"
           | Codex -> native_client_models "codex"
           | Ollama | Llama_cpp | Vllm | Openai_compatible | Messages

@@ -156,7 +156,6 @@ let muse_config ~turn_timeout_s ~override_s (execution : Runtime_execution.muse_
   =
   { (Runtime_muse_serve.default_config ()) with
     cli_path = execution.cli_path
-  ; account_home = Some execution.account_home
   ; model = Some execution.model
   ; (* Read posture uses the managed policy overlay and host write/shell
        suppression. A panelist receives no mutable operator workspace. *)
@@ -898,6 +897,15 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          "Muse Code's session protocol has no output-schema channel, so a \
           schema-held answer cannot be asked of it")
   | Runtime_execution.Muse_serve execution ->
+    (* HIGH-RISK-UNREVIEWED: a panelist is a call of the operator, so Muse
+       starts only where the access allows one (plan D3). A refusal starts no
+       process. *)
+    (match
+       Runtime_account_access.authorize_muse Runtime_account_access.Operator_call
+         (Runtime_account_access.Declared_home execution.account_home)
+     with
+     | Error refusal -> Error (Setup_failure (Runtime_account_access.refusal_to_string refusal))
+     | Ok account ->
     let config = muse_config ~turn_timeout_s:runtime.model.turn_timeout_s ~override_s:timeout_s execution in
     let* prompt =
       framed_prompt ~system_prompt ~prompt
@@ -945,6 +953,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
          ~mgr
          ~clock
          ~cwd:Eio.Path.(Eio.Stdenv.fs env / workspace_root)
+         ~account
          config
          ~workspace_root
          ~prompt
@@ -966,7 +975,7 @@ let run_with_images ?(on_usage = fun _ -> ()) ~images ~base_dir ~(runtime : Runt
        (match result.text with
         | Some text -> succeeded { text; model; usage = optional_usage muse_usage result.usage }
         | None -> Error Missing_reply)
-     | Error error -> Error (Muse_failure error))
+     | Error error -> Error (Muse_failure error)))
 ;;
 
 let run_panelist ~base_dir ~runtime_id ~system_prompt ?timeout_s ?output_schema ~prompt () =

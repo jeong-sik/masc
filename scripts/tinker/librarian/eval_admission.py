@@ -450,7 +450,7 @@ def verdict(args: argparse.Namespace) -> int:
     if drops and args.drops is None:
         raise SystemExit(f"{sum(len(m) for m in drops.values())} off-label E-synth drops need the blind judge: "
                          "run e_synth_audit.py drops, then pass its --out as --drops")
-    judged = D.read_adjudication(Path(cast(str, args.drops)), drops) if drops else D.NO_DROPS
+    judged = D.read_adjudication(Path(cast(str, args.drops)), drops, synth_render.TEMPLATE) if drops else D.NO_DROPS
     scored = judged.scored(synth_rows)
     if not scored:
         raise SystemExit("the judge's drops leave no E-synth request to score")

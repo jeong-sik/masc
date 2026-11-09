@@ -29,8 +29,10 @@ type cli_walk_outcome =
   | Cli_summary
       (* A cli slot answered; the summary is completed and delivered. *)
   | Cli_settled
-      (* Every cli slot failed and the entry was quarantined under the last
-         cli identity. Nothing left for the caller to settle. *)
+      (* Every cli slot failed or waits for its provider, and the entry was
+         settled here: under the last cli identity, under the caller's
+         binding when no slot ran, or under a held slot's identity when
+         nothing was bound. Nothing left for the caller to settle. *)
   | Cli_fell_back
       (* The walk could not take over (release/bind persistence refused);
          the pre-cli binding state is intact, so the caller settles exactly
@@ -38,6 +40,68 @@ type cli_walk_outcome =
 
 let cli_prompt ~context_bundle =
   Hitl_judge_original.canonical_output_contract () ^ "\n\n" ^ Yojson.Safe.to_string context_bundle
+;;
+
+(* ── Slots whose provider stated a time (RFC-exact-lane-waits-for-a-stated-reset)
+   A held slot is not called. Called, it would have been refused for its
+   account, and the entry quarantined as an execution failure under the last
+   identity the walk bound (R5). [settle_held_slot] and the end of the walk
+   reach that state without the call. *)
+
+let earliest_held = function
+  | [] -> None
+  | first :: rest ->
+    Some
+      (List.fold_left
+         (fun ((_, earliest_until) as earliest) ((_, until) as held) ->
+            if until < earliest_until then held else earliest)
+         first
+         rest)
+;;
+
+let note_slots_held (entry : pending_approval) ~slot_id ~until =
+  record_outcome Slots_held;
+  Log.Keeper.warn
+    ~keeper_name:entry.keeper_name
+    "HITL exact-output approval_id=%s: every remaining slot waits for its provider \
+     (earliest %s until %s); settled without a call"
+    entry.id
+    slot_id
+    (Masc_domain.iso8601_of_unix_seconds until)
+;;
+
+let settle_held_slot ~queue_ops (prepared : prepared_flow) ~slot_id ~until =
+  let entry = prepared.entry in
+  note_slots_held entry ~slot_id ~until;
+  (* Nothing is bound, and a quarantine needs an identity. A held slot sends
+     no request, so like a cli one-shot the prompt's sha256 fills both
+     fingerprints; the [held:] fingerprint and [held-hitl-] call id keep it
+     apart from an identity that dispatched. *)
+  let prompt_sha =
+    Agent_core_sha256.(
+      digest_string (cli_prompt ~context_bundle:prepared.context_bundle) |> to_hex)
+  in
+  let identity : exact_identity =
+    { slot_id
+    ; call_id = Random_id.prefixed ~prefix:"held-hitl-" ~bytes:16
+    ; plan_fingerprint = "held:" ^ prompt_sha
+    ; request_body_sha256 = prompt_sha
+    }
+  in
+  let settle_unbound detail =
+    log_exact_error entry "held slot bind" detail;
+    settle_current_or_signal
+      ~queue_ops
+      entry
+      ~reason:"HITL held slot could not bind its identity"
+      ~cause:Exact_flow_execution_failed
+  in
+  match bind_exact_attempt queue_ops entry identity with
+  | Ok { write_outcome = Fsync_completed; _ } ->
+    quarantine_identity ~queue_ops entry identity Exact_flow_execution_failed
+  | Ok { write_outcome = Visible_sync_unconfirmed detail; _ } -> settle_unbound detail
+  | Error error ->
+    settle_unbound (Keeper_approval_queue_result.exact_attempt_error_to_string error)
 ;;
 
 let try_cli_slots
@@ -59,7 +123,8 @@ let try_cli_slots
       | Keeper_lane_cli_oneshot.Invalid_domain_output _ -> Exact_domain_invalid_output
       | Keeper_lane_cli_oneshot.Unknown_runtime _
       | Keeper_lane_cli_oneshot.Not_an_official_client _
-      | Keeper_lane_cli_oneshot.Execution_failed _ -> Exact_flow_execution_failed
+      | Keeper_lane_cli_oneshot.Execution_failed _
+      | Keeper_lane_cli_oneshot.Held _ -> Exact_flow_execution_failed
     in
     let release identity =
       match release_exact_attempt queue_ops entry identity with
@@ -68,8 +133,15 @@ let try_cli_slots
       | Error error ->
         Error (Keeper_approval_queue_result.exact_attempt_error_to_string error)
     in
-    let rec walk ~bound ~released_entry_binding ~last_cli_failure slots =
-      match Keeper_lane_cli_oneshot.order_slots slots with
+    let rec walk ~bound ~released_entry_binding ~last_cli_failure ~held slots =
+      (* A slot whose provider stated a time is set aside by the read that
+         finds it and never called; [held] keeps every slot set aside so far
+         for the end of the walk. *)
+      let { Runtime_candidate_standing.walk = callable; held = held_now } =
+        Keeper_lane_cli_oneshot.order_slots slots
+      in
+      let held = held @ held_now in
+      match callable with
       | [] ->
         (match bound, last_cli_failure with
          | Some identity, Some failure ->
@@ -89,12 +161,16 @@ let try_cli_slots
              (quarantine_cause_of_failure failure);
            Cli_settled
          | Some identity, None ->
-           (* Unreachable by construction: [bound] becomes [Some] only for a
-              cli identity whose run already recorded a failure, and a
-              success returns before the walk recurses. Treat it as the
-              exhausted case with an execution cause rather than hiding it
-              under a wildcard. *)
-           record_outcome Cli_slots_exhausted;
+           (* No cli slot ran: [bound] becomes a cli identity only together
+              with that identity's failure, so this is still the caller's
+              binding. The first read set every slot aside as held, and
+              their refusals would have quarantined the entry as an execution
+              failure; the caller's binding settles that way. With nothing
+              held this cannot be reached, and it settles as an exhausted
+              walk rather than hiding under a wildcard. *)
+           (match earliest_held held with
+            | Some (slot_id, until) -> note_slots_held entry ~slot_id ~until
+            | None -> record_outcome Cli_slots_exhausted);
            quarantine_identity ~queue_ops entry identity Exact_flow_execution_failed;
            Cli_settled
          | None, (Some _ | None) ->
@@ -114,10 +190,19 @@ let try_cli_slots
                ~cause:Exact_flow_execution_failed;
              Cli_settled)
            else (
-             (* Nothing was released and nothing bound: the pre-cli state is
-                intact and the caller's ordinary settlement still applies. *)
-             record_outcome Cli_walk_fell_back;
-             Cli_fell_back))
+             match earliest_held held with
+             | Some (slot_id, until) ->
+               (* Nothing was released and nothing bound, and the slots the
+                  walk could not bind or set aside include held ones. Those,
+                  called, would have bound and been refused, so the entry
+                  settles under a held slot's identity. *)
+               settle_held_slot ~queue_ops prepared ~slot_id ~until;
+               Cli_settled
+             | None ->
+               (* Nothing was released and nothing bound: the pre-cli state is
+                  intact and the caller's ordinary settlement still applies. *)
+               record_outcome Cli_walk_fell_back;
+               Cli_fell_back))
       | runtime_id :: rest ->
         (* Rebind discipline: whatever is bound (the exhausted HTTP candidate
            or the previous cli slot) is released before the next identity
@@ -159,7 +244,7 @@ let try_cli_slots
                 (Keeper_approval_queue_result.exact_attempt_error_to_string error);
               (* This slot never bound; the previous binding was already
                  released, so continue the walk with nothing bound. *)
-              walk ~bound:None ~released_entry_binding ~last_cli_failure rest
+              walk ~bound:None ~released_entry_binding ~last_cli_failure ~held rest
             | Ok { write_outcome = Fsync_completed; _ } ->
               queue_ops.after_bind ();
               (match
@@ -178,6 +263,7 @@ let try_cli_slots
                    ~bound:(Some identity)
                    ~released_entry_binding
                    ~last_cli_failure:(Some failure)
+                   ~held
                    rest
                | Ok output ->
                  (match
@@ -196,6 +282,7 @@ let try_cli_slots
                       ~bound:(Some identity)
                       ~released_entry_binding
                       ~last_cli_failure:(Some failure)
+                      ~held
                       rest
                   | Ok summary ->
                     (match complete_exact_attempt queue_ops entry identity summary with
@@ -230,5 +317,5 @@ let try_cli_slots
                          Exact_terminal_persistence_failure;
                        Cli_settled)))))
     in
-    walk ~bound ~released_entry_binding:false ~last_cli_failure:None slots
+    walk ~bound ~released_entry_binding:false ~last_cli_failure:None ~held:[] slots
 ;;

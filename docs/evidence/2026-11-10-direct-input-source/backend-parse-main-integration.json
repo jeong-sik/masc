@@ -1,0 +1,181 @@
+{
+  "scope": "OCaml parsing only after main conflict resolution; NOT type/warning/build/test/CI/runtime proof",
+  "observed_at": "2026-11-09T16:12:09.668038+00:00",
+  "worktree": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26049-peer-source",
+  "base_head": "6a20db266c6b612936272609d4ef793c292ec0e0",
+  "ocamlc_version": "5.5.1",
+  "target_ocaml": "5.5.2",
+  "command": [
+    "ocamlc",
+    "-stop-after",
+    "parsing",
+    "-c",
+    "<file>"
+  ],
+  "files": [
+    {
+      "file": "bin/masc_tui_context_inspector.ml",
+      "sha256": "b645bbd6daf45be341991aaa8f4cf9990a4c4148eb63073e75166dfc318cc038",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_context_assembly.ml",
+      "sha256": "7e42edf4457e176f9d7c2f1709e973c6fdbcfb49be549117ce2ced80b13a3340",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_context_assembly.mli",
+      "sha256": "dc9ca3fe835c1debe9dfd04e47b954154ca59c7181c2e340766c2d67bfca9d7a",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_context_layers.ml",
+      "sha256": "e6d958a44139e0650ec91b9dd4f6ac1d05a2c75db11165e7a51de64fbaf2cd16",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_context_layers.mli",
+      "sha256": "0f7dcb6367200a97a09d2c25dc07ba99b62ff9e120c8c720433a75330446ddfb",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_context_submission_link.ml",
+      "sha256": "d462ebb2e46361c0405b496b5c1ace1cc53998403fa51095f8885b38b7b4b787",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_direct_input_source.ml",
+      "sha256": "64612cbe518d237ee078684aa112bd48aff728787adcdeec569dc347606e1a15",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_direct_input_source.mli",
+      "sha256": "4b3198da4a9f79c98cf3dadb7358d7c1a2b23ce7ec87ca2416dba83f94197d3c",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_direct_turn_context.ml",
+      "sha256": "f52b9f6ce033f23dfa327534b34b693ac4af41cf1323eb2d66270a1f2435fd9a",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_direct_turn_context.mli",
+      "sha256": "b98b89ea4738235ddf478ca9d9f47ad0af6a067c550ad16e69710eabd44e8c6b",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_input_speaker.mli",
+      "sha256": "82f1de356b71c073580f99d6413a6c069d6a2849c56d449c1642f1d8edae4752",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_next_request_forecast.ml",
+      "sha256": "9f8ff465e1393ff3c470ec8e83b67aac7bb328c39b52d34b5fea1d5f0e6ae1bf",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_official_client_context_projection.ml",
+      "sha256": "353d5c7ee8ac0300ce5bfe5525da32e0fe43128504f78ad4d35b4d335225017f",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_run_prompt.ml",
+      "sha256": "76c68fe247cbfd51988b3b2dc23bab643d67e42c23ff134f5fbd2a3fad989a04",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_run_prompt.mli",
+      "sha256": "56de6ab944d2c7e0c0724eeefdc6cfbd4dfd1cdc5d38980e5a0e65156d657477",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_turn.ml",
+      "sha256": "ac42bb6c6a9b4fad9e01ec9bede8088fd655adb30496151e6a41225f99f41497",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/keeper/keeper_unified_prompt.ml",
+      "sha256": "3e5e5bad33eb6c44aa9d5d0b0de23fa76fd52e15e8b9e488e53d5048f3697944",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/prompt_registry/prompt_names.ml",
+      "sha256": "fa9f19ac1a94b93e6d538118ad31e868a61c07bf0ba5ad7710ed32e88fa50817",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/prompt_registry/prompt_names.mli",
+      "sha256": "4016161ea26c0cc3f5cead4896d80e1564efa662a9ceec4866d1a923dc40b06c",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/types/prompt_block_id.ml",
+      "sha256": "3b3fa461355e1868da6e561237ea9c5df144cf17d2128cb853f7baebb4dd9991",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "lib/types/prompt_block_id.mli",
+      "sha256": "785f0a60c548c479a6713975616017f8d635a51be2d918ab3b230bd976f5afec",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "test/test_keeper_context_layers.ml",
+      "sha256": "3fdb7fca76c4490970a9ff76fa4b3945e64703d014fb1c647b99ae580eecef29",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "test/test_keeper_direct_goal_provider_wire.ml",
+      "sha256": "1096d0f1040cf7a5d1019d13ba6783796863cc7d55348c3bacec22e067c228e2",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "test/test_keeper_goal_phase_projection.ml",
+      "sha256": "be251ac881d1144e71d9733a86255fb36f42bd291dc755b90870255e1332e94a",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "test/test_keeper_official_client_host.ml",
+      "sha256": "9fee0bbeb290608a615fbbc75c20b9839f51395006ba8ad42b6de44417c5c986",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "test/test_runtime_codex_app_server.ml",
+      "sha256": "e67e775189e442494598376c3fc9b904a925702ec67fdb11459ec79e5a20d353",
+      "exit_code": 0,
+      "stderr": ""
+    },
+    {
+      "file": "test/test_turn_record.ml",
+      "sha256": "49eefda0f7d2a21ee7de146134d0cf11b51cfc70c7a36c538261e5f13f5bbf5a",
+      "exit_code": 0,
+      "stderr": ""
+    }
+  ],
+  "typed_or_behavior_tests_executed": false,
+  "ci_executed": false
+}

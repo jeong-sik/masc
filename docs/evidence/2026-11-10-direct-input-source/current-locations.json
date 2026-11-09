@@ -4,7 +4,7 @@
   "paths_relative_to": "repository_root",
   "recorded_manifest": {
     "path": "retained-sha256.json",
-    "sha256": "a9979383fcca3dd4044151d0a69eff0b83946b9672330909434e1708d590ab39"
+    "sha256": "6f4b1fd8e76c61681fa49967ee9302ff40fb38251dd7aabf24f10710578a0bdf"
   },
   "files": {
     "docs/evidence/2026-11-10-direct-input-source/browser/README.md": {
@@ -105,6 +105,16 @@
     "docs/evidence/2026-11-10-direct-input-source/backend-parse-before-rebase.json": {
       "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/combined-parse-only.json",
       "recorded_sha256": "e0f09ae71d833ae5c45ab1a3c819cca21cefbf2152d701058e22fd0a806b72c2",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/backend-parse-main-integration.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/backend-parse-main-integration.json",
+      "recorded_sha256": "6d2db0767786fc0aa46ed647513bdcaf9aad6616aa15aff4bdd91f0825f76c2a",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/2026-11-10-direct-input-source/source-binding-after-rebase.json": {
+      "recorded_path": "artifacts/issue-campaign-20261109/26049-peer-source/source-binding-after-rebase.json",
+      "recorded_sha256": "94edbd624f5c06e1fcb66614abcca7c7dc1fae101c75518f622487d392193e47",
       "content_kind": "retained_capture"
     }
   },

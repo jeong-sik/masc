@@ -82,5 +82,7 @@
   "artifacts/issue-campaign-20261109/26049-peer-source/browser/task-space-finish.json": "f9d75bcc32c815b3a986ab2fd4b1dc4a36a3e6399a66338a3c93b8e815f8dff9",
   "artifacts/issue-campaign-20261109/26049-peer-source/browser/artifact-hashes.json": "c21b3c732d975d2ea630dd1d00e1329878d043aead498b3c1aab4d1dee11a1a4",
   "artifacts/issue-campaign-20261109/26049-peer-source/frontend-tests.txt": "92c01d802fbfd5946747a2c886882b9f5e1f2ad92b74f12676db01a2de8b5912",
-  "artifacts/issue-campaign-20261109/26049-peer-source/combined-parse-only.json": "e0f09ae71d833ae5c45ab1a3c819cca21cefbf2152d701058e22fd0a806b72c2"
+  "artifacts/issue-campaign-20261109/26049-peer-source/combined-parse-only.json": "e0f09ae71d833ae5c45ab1a3c819cca21cefbf2152d701058e22fd0a806b72c2",
+  "artifacts/issue-campaign-20261109/26049-peer-source/backend-parse-main-integration.json": "6d2db0767786fc0aa46ed647513bdcaf9aad6616aa15aff4bdd91f0825f76c2a",
+  "artifacts/issue-campaign-20261109/26049-peer-source/source-binding-after-rebase.json": "94edbd624f5c06e1fcb66614abcca7c7dc1fae101c75518f622487d392193e47"
 }

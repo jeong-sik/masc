@@ -40,6 +40,10 @@ The UI source was committed during capture as
 were stable across capture and were individually checked against that commit.
 Its dashboard Git tree is `70ae81a7c2da78fbb631673a9f09541f1851980d`.
 The loaded-source manifest has a broader, explicitly stated 274-file scope.
+[After the whole-stack rebase](source-binding-after-rebase.json), that complete
+Dashboard tree was unchanged, so the frontend checks and browser capture were
+not repeated. Backend integration with main's proof-state owner routing was
+reviewed separately.
 
 [current-locations.json](current-locations.json) locates retained captures and
 the 64 historical source blobs. [retained-sha256.json](retained-sha256.json) was
@@ -64,6 +68,9 @@ raw capture digests.
 - [25 changed OCaml files parsed](backend-parse-before-rebase.json) using
   OCaml 5.5.1 before the main rebase. The repository targets 5.5.2. Parsing is
   neither type/warning checking nor execution of the authored backend tests.
+- After integrating main's proof-state delivery change, [all 27 changed OCaml
+  files parsed again](backend-parse-main-integration.json). The source and proof
+  owner-fallback regression was extended, but its behavior was not executed.
 - Backend HTTP tool-loop and official-client Start/Resume regression cases were
   authored but not executed. No local Dune build, CI, live multi-Keeper acceptance
   run, installation or deployment was performed for this change.

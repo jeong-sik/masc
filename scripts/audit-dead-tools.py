@@ -275,12 +275,9 @@ class SourceResult:
     files: int = 0
     first_ts: float | None = None
     last_ts: float | None = None
-    # Newest timestamp among the rows this window could have counted, i.e. the
-    # rows before the window end. A ledger whose newest such row predates the
-    # window start is a stale copy, and its silence is not evidence that nothing
-    # was called (#50504). Rows after the window end are deliberately excluded:
-    # a report pinned with `--now` in the past must not be qualified by rows that
-    # fall outside the window it asked about (#50544).
+    # Newest timestamp seen anywhere in the source, including rows outside the
+    # window. A ledger whose newest row predates the window is a stale copy, and
+    # its silence is not evidence that nothing was called (#50504).
     newest_ts: float | None = None
     # Cumulative sources (a dashboard snapshot) have no window, so staleness is
     # not defined for them.
@@ -321,12 +318,10 @@ def load_ledger(directory: Path, start: float, end: float) -> SourceResult:
                 ts = record.get("ts")
                 if not isinstance(ts, (int, float)):
                     continue
-                # Remember the newest row that the window includes. A row after
-                # the window end is future data relative to this report (the
-                # `--now` flag can pin the end in the past), and counting it
-                # would let a ledger with zero in-window rows claim it was
-                # watching (#50507 P3).
-                if ts < end and (result.newest_ts is None or ts > result.newest_ts):
+                # Remember the newest row even when it falls outside the window.
+                # That single number is what tells a live-but-quiet ledger from
+                # a stale copy (#50504).
+                if result.newest_ts is None or ts > result.newest_ts:
                     result.newest_ts = ts
                 if ts < start or ts >= end:
                     continue
@@ -789,7 +784,7 @@ def render_markdown(report: Report) -> str:
         for name, per_source in report.unregistered_observed:
             cells = " | ".join(str(per_source.get(source.name, "")) for source in report.sources)
             lines.append(f"| `{name}` | 없음 | {cells} |")
-    if registry.errors or registry.duplicates:
+    if registry.errors or registry.duplicates or registry.addon_errors:
         lines.append("")
         lines.append("## 등록부 경고")
         lines.append("")
@@ -797,6 +792,12 @@ def render_markdown(report: Report) -> str:
             lines.append(f"- {error}")
         for duplicate in registry.duplicates:
             lines.append(f"- 이름 중복: {duplicate}")
+        # An addon lane.toml that cannot be read or that exports one name twice
+        # silently shrinks the second registry, which is the same failure the
+        # config/tools errors are reported for. JSON already carried these;
+        # the markdown report must not drop them (review on #50548).
+        for error in registry.addon_errors:
+            lines.append(f"- addon: {error}")
     lines.append("")
     return "\n".join(lines)
 

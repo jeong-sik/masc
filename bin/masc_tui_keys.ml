@@ -1079,17 +1079,17 @@ let for_surface = function
          the first opens the editor to register one, the second opens the
          search line. [v] needs a reading, not a row: after a failed read it
          opens the failure with no repository selected. *)
-      [ b Navigate "v" "full details" ~rows:Needs_reading
+      [ b ~ko:"전체 정보" Navigate "v" "full details" ~rows:Needs_reading
           ~help:"read the complete selected path, Keeper assignments and errors"
-      ; b Navigate "j/k" "scroll" ~rows:Needs_row
-      ; b Act "Enter" "browse" ~rows:Needs_row
+      ; b ~ko:"이동" Navigate "j/k" "scroll" ~rows:Needs_row
+      ; b ~ko:"파일" Act "Enter" "browse" ~rows:Needs_row
           ~help:"open the repository tree, or the selected changed file"
-      ; b Navigate "H" "recent activity" ~rows:Needs_row
+      ; b ~ko:"쓰기 이력" Navigate "H" "recent activity" ~rows:Needs_row
           ~help:"recorded clone writes by Keeper and Task in the last day"
-      ; b Act "d" "Git changes" ~rows:Needs_row
+      ; b ~ko:"Git 변경" Act "d" "Git changes" ~rows:Needs_row
           ~help:"show the selected repository's current working-tree changes"
-      ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"
-      ; b Act "Esc" "back"
+      ; b ~ko:"등록" Act "a" "add" ~help:"register a repository; opens $EDITOR"
+      ; b ~ko:"뒤로" Act "Esc" "back"
           ~help:"return to Dashboard; inside Git changes, close the diff, \
                  then Git changes (Left does the same there)"
       ; b Search "/" "find"

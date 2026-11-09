@@ -1,6 +1,13 @@
 (** Pure activity, grouping, and ordering decisions for the Keepers list. *)
 
-type layout = Compact | Detailed | Grouped
+type view = Plain | By_state | By_cause | By_runtime | Day_wall
+(** How the Keepers list groups its rows (RFC-0515 §2.3). [Plain] and
+    [Day_wall] do not group; [Day_wall] puts the rows with the most failed
+    half-hours of the last day first. *)
+
+type density = One_line | Two_lines
+(** Whether each row also draws its second line (RFC-0515 §2.6). *)
+
 type sort = Priority | Recent | Oldest | Activity | Name
 type attention = Attention | Failing | Active | Waiting | Inactive | Unobserved
 (** [Attention] holds what a person has to answer. [Failing] holds the other
@@ -110,11 +117,18 @@ type waiting_summary = {
 }
 (** Primary waiting reasons and actual background async running in that group. *)
 
-val next_layout : layout -> layout
+val next_view : view -> view
+val view_label : view -> string
+val view_of_string : string -> view option
+(** The labels are the values [tui-keepers.toml] stores under [view]. *)
+
+val next_density : density -> density
+val density_label : density -> string
+val density_of_string : string -> density option
+(** The labels are the values [tui-keepers.toml] stores under [density]. *)
+
 val next_sort : sort -> sort
-val layout_label : layout -> string
 val sort_label : sort -> string
-val layout_of_string : string -> layout option
 val sort_of_string : string -> sort option
 type verification_holders
 (** The assignees of tasks that await their verdict, read once from a task
@@ -135,9 +149,37 @@ val trail_of_row : row -> Masc_tui_keeper_trail.trail
     is failing. A row without a human decision is in the [Failing] group when
     its trail is failed, and also when its activity is [Attempt_failed]; that
     second kind has no failure sentence unless its health is failing too. *)
-val order_rows : layout:layout -> sort:sort -> row list -> row list
-(** Grouped layout orders groups first and applies [sort] within each group.
-    The same order is used for drawing, navigation, and search. *)
+type cause_bucket =
+  | Cause_named of Masc_tui_keeper_trail.cause_group
+      (** The trail is failed and its last receipt names the cause. *)
+  | Cause_unnamed  (** The trail is failed and no receipt names a cause. *)
+  | Not_failing
+
+type runtime_bucket =
+  | Runtime_named of string  (** The roster row's current runtime id. *)
+  | Runtime_unread  (** The roster did not read this Keeper. *)
+
+type group =
+  | Group_state of attention
+  | Group_cause of cause_bucket
+  | Group_runtime of runtime_bucket
+
+val group_of_view : view -> row -> group option
+(** The heading [row] sits under in [view]; [None] for a view that does not
+    group. {!order_rows} keeps the rows of one group next to each other. *)
+
+val failed_half_hours : now:float -> row -> int option
+(** The half-hour slots that started within the last day and hold a failed
+    turn. [None] when the roster carries no pulse for the row. *)
+
+val order_clock_step : view -> float option
+(** How often, in seconds, the clock alone can change the order of [view];
+    [None] when only the readings change it. *)
+
+val order_rows : view:view -> sort:sort -> now:float -> row list -> row list
+(** The groups of [view] in a fixed order, and [sort] within each group.
+    [Day_wall] orders by {!failed_half_hours}, most first, rows without a
+    pulse last. The same order is used for drawing, navigation, and search. *)
 type group_counts = {
   attention_rows : int;
   failing_rows : int;

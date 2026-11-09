@@ -144,9 +144,23 @@ let host_request_cycle_decodes_and_fails_alone () =
       (E.not_final_of_json (E.not_final_to_json reason) = Ok reason))
     [ E.Lane_unavailable E.Lane_unconfigured; E.Lane_unavailable E.Lane_off; E.Lane_unavailable E.No_admitted_slots;
       E.Lane_unavailable (E.Lane_registry_unavailable { detail = "d" });
+      E.Lane_unavailable (E.Every_slot_held { until = 1_762_732_800.0 });
       E.Provider_refused (E.Provider_unavailable { detail = "d" });
       E.Provider_refused (E.Provider_auth_refused { detail = "d" });
-      E.Provider_refused (E.Provider_configuration_refused { detail = "d" }); E.Attempt_in_progress ]
+      E.Provider_refused (E.Provider_configuration_refused { detail = "d" }); E.Attempt_in_progress ];
+  (* The host stores a held time as JSON text; a whole second must not come
+     back as an integer that the strict reader then refuses. *)
+  List.iter (fun until ->
+    let held = E.Lane_unavailable (E.Every_slot_held { until }) in
+    check bool "a held time survives the stored text" true
+      (E.not_final_of_json (Yojson.Safe.from_string (Yojson.Safe.to_string (E.not_final_to_json held)))
+       = Ok held))
+    [ 1_762_732_800.0; 1_762_732_800.125 ];
+  List.iter (fun until ->
+    check bool "a held time that cannot be a stated reset is refused" true
+      (Result.is_error
+         (E.not_final_of_json (`Assoc [ "reason", `String "every_slot_held"; "until", until ]))))
+    [ `Int 1_762_732_800; `Float 0.0; `Float Float.nan; `String "2026-11-10T00:00:00Z" ]
 
 (* Every issue the host writes reads back as its own kind, a blank detail
    included: the detail is the failure's text, not a name. *)

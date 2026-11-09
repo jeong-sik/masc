@@ -22733,11 +22733,12 @@ let handle_composer_key state ~base_path ~mailbox key =
        | Masc_tui_command.Switch_keeper _ ->
            (* The switch handler owns the view change. *)
            set_msg_scroll state 0
-       (* The preset answers are chat notices — a listing, a saved line, a
-          restore report. Typed from the roster they would land in a pane the
+       (* These answers are chat notices, including Memory status and catch-up
+          receipts. Typed from the roster they would land in a pane the
           operator is not looking at, so the chat pane comes forward the way
           it does for a message. *)
        | Masc_tui_command.Queue _
+       | Masc_tui_command.Memory_status | Masc_tui_command.Memory_sync
        | Masc_tui_command.Play_invites | Masc_tui_command.Play_link _
        | Masc_tui_command.Play_invite _
        | Masc_tui_command.Play_revoke _ | Masc_tui_command.Play_invalid _

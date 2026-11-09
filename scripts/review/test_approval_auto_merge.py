@@ -777,6 +777,47 @@ class QuotaGetIntegration(unittest.TestCase):
             result = MERGE.follow(REPO, endpoint, receipt, scope)
         self.assertEqual((result['status'], result['uuid']), ('observation_unavailable', UUID))
 
+    def test_a_quota_wait_past_the_follow_budget_hands_off_the_same_uuid(self):
+        for quota_path in ('endpoint', 'member'):
+            with self.subTest(quota_path=quota_path):
+                clock = types.SimpleNamespace(now=1000.0, sleeps=[])
+                puts, reads = [], []
+                endpoint = PREFIX + f'/pulls/102/merge-async/{UUID}'
+                member = PREFIX + '/pulls/101'
+                def run(command, **kwargs):
+                    if command[:2] == ['gh', 'api'] and command[command.index('--method') + 1] == 'PUT':
+                        puts.append(command)
+                        return subprocess.CompletedProcess(command, 0,
+                            json.dumps({'status': 'pending', 'details': {'uuid': UUID}}), '')
+                    reads.append(command[-1])
+                    limited = ((quota_path == 'endpoint' and command[-1] == endpoint) or
+                               (quota_path == 'member' and command[-1] == member))
+                    if limited:
+                        return http_response(429, {'message': 'limited'}, {'Retry-After': '3600'})
+                    if command[-1] == endpoint:
+                        return http_response(200, {'status': 'pending'})
+                    return http_response(200, {'merged': False, 'state': 'open'})
+                def sleep(seconds):
+                    clock.sleeps.append(seconds)
+                    clock.now += seconds
+                client = MERGE.GET.Client(run=run, clock=lambda: clock.now, sleep=sleep)
+                scope = {'stack': {'number': 900}, 'scope': [{'number': 101}, {'number': 102}]}
+                with patch.object(MERGE, 'CLIENT', client), \
+                     patch.object(MERGE.subprocess, 'run', side_effect=run), \
+                     patch.object(MERGE, 'hand_off',
+                                  side_effect=lambda repo, outcome: outcome) as hand, \
+                     redirect_stdout(io.StringIO()):
+                    result = MERGE.submit(REPO, 102, sha(102), scope)
+                self.assertEqual(result['status'], 'observation_unavailable')
+                self.assertEqual(result['uuid'], UUID)
+                self.assertEqual(len(puts), 1)
+                self.assertEqual(reads.count(endpoint if quota_path == 'endpoint' else member), 1)
+                self.assertEqual(clock.sleeps, [MERGE.WAIT_SECONDS])
+                self.assertEqual(client.pauses, 1)
+                self.assertIsNone(client.deadline)
+                hand.assert_called_once()
+                self.assertIn('cut short', result['error'])
+
 
 if __name__ == '__main__':
     unittest.main()

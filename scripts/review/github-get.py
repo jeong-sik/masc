@@ -30,6 +30,14 @@ class QuotaLimited(ApiFailure):
         self.retry_at = retry_at
 
 
+class QuotaWaitCutShort(QuotaLimited):
+    """A quota wait ended at the caller's deadline with retry_at still ahead.
+
+    The server time was honored: no further GET went out after the quota was
+    observed. The caller hands its receipt to a fresh run instead of waiting.
+    """
+
+
 class Response(NamedTuple):
     data: object
     status: int
@@ -89,6 +97,10 @@ class Client:
         self.sleep = sleep or time.sleep
         self.on_quota = on_quota or (lambda failure: None)
         self.pauses = 0
+        # Latest client-clock time a quota wait may sleep until; None waits
+        # out the server time. A caller with its own deadline (follow's wait)
+        # sets this so a long quota cannot outlive the handoff.
+        self.deadline = None
 
     def once(self, path):
         result = self.run(['gh', 'api', '--method', 'GET', '--include', '--', path],
@@ -120,7 +132,14 @@ class Client:
                 self.pauses += 1
                 self.on_quota(failure)
                 while (remaining := failure.retry_at - self.clock()) > 0:
-                    self.sleep(remaining)
+                    budget = None if self.deadline is None else self.deadline - self.clock()
+                    if budget is not None and budget <= 0:
+                        raise QuotaWaitCutShort(
+                            failure.path, failure.status, failure.headers,
+                            f'{failure.details["message"]} (quota wait cut short; '
+                            f'retry at {failure.retry_at})',
+                            failure.retry_at) from failure
+                    self.sleep(min(remaining, budget) if budget is not None else remaining)
 
     def read(self, path):
         return self.get(path).data

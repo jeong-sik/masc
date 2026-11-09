@@ -245,43 +245,56 @@ def follow(repo, result_endpoint, receipt, scope):
     `enqueued` are final answers about the request, so the members decide.
     Only the request endpoint can establish that its receipt is gone; member
     read failures leave that request unsettled.
+    A quota wait past the budget returns here with the receipt instead of
+    sleeping inside the transport: the handoff keeps the UUID and no GET
+    goes out before the server time.
     """
     deadline = time.monotonic() + WAIT_SECONDS
-    observation = states = None
-    error = None
-    while True:
-        try:
-            observation = read(result_endpoint)
-            status = observation['status']
-        except (ValueError, KeyError, TypeError, OSError) as failure:
-            error = str(failure)
-            if isinstance(failure, GET.ApiFailure) and failure.status in (404, 410):
-                return dict(receipt, status='request_not_found', error=error)
-        else:
-            if status not in IN_FLIGHT and status not in ACCEPTED:
-                return dict(receipt, status=status, observation=observation,
-                            member_states=states, reason=observation.get('details'))
+    CLIENT.deadline = CLIENT.clock() + WAIT_SECONDS
+    try:
+        observation = states = None
+        error = None
+        while True:
             try:
-                states = member_states(repo, scope)
+                observation = read(result_endpoint)
+                status = observation['status']
+            except GET.QuotaWaitCutShort as failure:
+                return dict(receipt, status='observation_unavailable', error=str(failure),
+                            observation=observation, member_states=states)
             except (ValueError, KeyError, TypeError, OSError) as failure:
                 error = str(failure)
+                if isinstance(failure, GET.ApiFailure) and failure.status in (404, 410):
+                    return dict(receipt, status='request_not_found', error=error)
             else:
-                error = None
-                abandoned = [n for n, row in states.items()
-                             if row.get('state') == 'closed' and not row['merged']]
-                if abandoned:
-                    return dict(receipt, status='member_closed_unmerged', members_closed=abandoned,
+                if status not in IN_FLIGHT and status not in ACCEPTED:
+                    return dict(receipt, status=status, observation=observation,
+                                member_states=states, reason=observation.get('details'))
+                try:
+                    states = member_states(repo, scope)
+                except GET.QuotaWaitCutShort as failure:
+                    return dict(receipt, status='observation_unavailable', error=str(failure),
                                 observation=observation, member_states=states)
-                if status in ACCEPTED and all_landed(states):
-                    return dict(receipt, status='merged', observation=observation,
-                                member_states=states)
-        if time.monotonic() >= deadline:
-            break
-        time.sleep(POLL_SECONDS)
-    if error is not None:
-        return dict(receipt, status='observation_unavailable', error=error,
-                    observation=observation, member_states=states)
-    return dict(receipt, status='still_pending', observation=observation, member_states=states)
+                except (ValueError, KeyError, TypeError, OSError) as failure:
+                    error = str(failure)
+                else:
+                    error = None
+                    abandoned = [n for n, row in states.items()
+                                 if row.get('state') == 'closed' and not row['merged']]
+                    if abandoned:
+                        return dict(receipt, status='member_closed_unmerged', members_closed=abandoned,
+                                    observation=observation, member_states=states)
+                    if status in ACCEPTED and all_landed(states):
+                        return dict(receipt, status='merged', observation=observation,
+                                    member_states=states)
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(POLL_SECONDS)
+        if error is not None:
+            return dict(receipt, status='observation_unavailable', error=error,
+                        observation=observation, member_states=states)
+        return dict(receipt, status='still_pending', observation=observation, member_states=states)
+    finally:
+        CLIENT.deadline = None
 
 
 def hand_off(repo, outcome):

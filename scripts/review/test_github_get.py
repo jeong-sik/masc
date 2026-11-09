@@ -144,6 +144,38 @@ class GitHubGet(unittest.TestCase):
                     client.read('repos/o/r/pulls/1')
                 self.assertEqual((len(calls), clock.sleeps), (1, []))
 
+    def test_a_caller_deadline_cuts_a_quota_wait_short_without_an_early_retry(self):
+        for deadline, sleeps in ((1010.0, [10.0]), (1000.0, [])):
+            with self.subTest(deadline=deadline):
+                clock, calls, failures = Clock(), [], []
+                def run(command, **kwargs):
+                    calls.append(clock.now)
+                    return response(429, {'message': 'limited'}, {'Retry-After': '3600'})
+                client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep,
+                                    on_quota=failures.append)
+                client.deadline = deadline
+                with self.assertRaises(GET.QuotaWaitCutShort) as raised:
+                    client.read('repos/o/r/pulls/1')
+                self.assertIsInstance(raised.exception, GET.QuotaLimited)
+                self.assertEqual(raised.exception.retry_at, 4600.0)
+                self.assertEqual(calls, [1000.0])
+                self.assertEqual(clock.sleeps, sleeps)
+                self.assertEqual(client.pauses, 1)
+                self.assertEqual(len(failures), 1)
+
+    def test_a_deadline_past_the_server_time_waits_out_the_quota(self):
+        clock, calls = Clock(), []
+        def run(command, **kwargs):
+            calls.append(clock.now)
+            return (response(429, {'message': 'limited'}, {'Retry-After': '12'})
+                    if len(calls) == 1 else response(200, {'ok': True}))
+        client = GET.Client(run=run, clock=lambda: clock.now, sleep=clock.sleep)
+        client.deadline = 5000.0
+        self.assertEqual(client.read('repos/o/r/pulls/1'), {'ok': True})
+        self.assertEqual(calls, [1000.0, 1012.0])
+        self.assertEqual(clock.sleeps, [12])
+        self.assertEqual(client.pauses, 1)
+
 
 if __name__ == '__main__':
     unittest.main()

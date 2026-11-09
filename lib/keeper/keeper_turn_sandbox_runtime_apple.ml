@@ -141,7 +141,7 @@ let with_apple_lifecycle_scope ~keeper_name ~unavailable callback =
       (fun scope -> callback ~fs ~scope)
   | Fs_compat.Non_eio, _ | Fs_compat.Eio_fiber, None -> Error unavailable
 
-let prepare_apple_first_handoff ~timeout_sec (t : t) snapshot ~container_name ~delivery =
+let prepare_apple_first_handoff ~timeout_sec (t : t) snapshot ~container_name =
   let open Result.Syntax in
   let backend = Keeper_microvm_backend.Apple_container in
   let* () = ensure_apple_volume_helpers_absent ~keeper_name:t.meta.name ~timeout_sec
@@ -169,8 +169,7 @@ let prepare_apple_first_handoff ~timeout_sec (t : t) snapshot ~container_name ~d
            ~keeper_name:t.meta.name in
        let endpoint = build_microvm_endpoint ~config:t.config ~meta:t.meta
            ~container_root:t.container_root ~uid:t.uid ~gid:t.gid ~container_name
-           ~identity_environment:(Keeper_microvm_github_identity.environment snapshot ~container_config_dir)
-           ~delivery in
+           ~identity_environment:(Keeper_microvm_github_identity.environment snapshot ~container_config_dir) in
        let observed = match endpoint with
          | Error detail ->
            Log.Keeper.warn ~keeper_name:t.meta.name
@@ -281,16 +280,14 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
       ~network_label:(Keeper_types_profile_sandbox.network_mode_to_string t.network_mode) in
   let identity_host_dir = Store.host_path ~base_path:t.config.base_path
       ~keeper_name:t.meta.name ~backend ~network_mode:t.network_mode in
-  let* delivery = microvm_delivery_for ~base_path:t.config.base_path ~keeper_name:t.meta.name
-    |> Result.map_error (fun detail -> Delivery_unresolved detail) in
-  let* plan = requested_apple_plan t ~delivery ~image ~guest_size ~identity_host_dir
+  let* plan = requested_apple_plan t ~image ~guest_size ~identity_host_dir
       ~environment:identity_environment ~config_mount ~stable_labels in
   let* () = Plan.validate plan |> Result.map_error (fun errors -> Invalid_boot_plan errors) in
   let identity_reading = match stored with
     | Ok (Some _) -> Plan.Identity_readable
     | Ok None | Error _ -> Plan.Identity_unreadable in
   let adopt snapshot =
-    let* () = prepare_apple_first_handoff ~timeout_sec t snapshot ~container_name ~delivery in
+    let* () = prepare_apple_first_handoff ~timeout_sec t snapshot ~container_name in
     bind_github_identity_snapshot t (Guest_identity snapshot);
     set_state t (Running {container_name});
     Ok container_name in
@@ -306,27 +303,24 @@ let start_apple_microvm_container ~fs ~scope ~timeout_sec (t : t) =
       | Plan.Refuse refusal -> Error (Guest_facts_refused refusal)
       | Plan.Replace _ -> Ok `Boot
       | Plan.Matches_plan ->
-        match delivery with
-        | Keeper_types_profile_sandbox.Exec_per_request -> Ok `Adopt
-        | Keeper_types_profile_sandbox.Agent_socket ->
-          (* The plan matched, but the plan cannot see the agent: only its
-             hello says it is there, answers, and speaks this relay (RFC
-             microvm-guest-agent-over-socket 3.6). One that does not is
-             replaced rather than adopted. *)
-          (match
-             Keeper_microvm_agent_socket.check_agent
-               ~host_socket:(Keeper_microvm_agent_socket.host_path
-                               ~base_path:t.config.base_path ~guest_name:container_name)
-               ~expected:{ Keeper_guest_socket.uid = t.uid; gid = t.gid }
-               ~connect_budget_sec:(float_of_int Keeper_sandbox_microvm.remote_connect_timeout_sec)
-               ~budget_sec:timeout_sec
-           with
-           | Keeper_microvm_agent_socket.Agent_answered -> Ok `Adopt
-           | Keeper_microvm_agent_socket.Agent_unusable reason ->
-             Log.Keeper.info "microvm agent guest replaced instead of adopted keeper=%s name=%s: %s"
-               t.meta.name container_name reason;
-             Ok `Boot
-           | Keeper_microvm_agent_socket.Check_unavailable detail -> Error (Agent_unchecked detail)) in
+        (* The plan matched, but the plan cannot see the agent: only its
+           hello says it is there, answers, and speaks this relay (RFC
+           microvm-guest-agent-over-socket 3.6). One that does not is
+           replaced rather than adopted. *)
+        (match
+           Keeper_microvm_agent_socket.check_agent
+             ~host_socket:(Keeper_microvm_agent_socket.host_path
+                             ~base_path:t.config.base_path ~guest_name:container_name)
+             ~expected:{ Keeper_guest_socket.uid = t.uid; gid = t.gid }
+             ~connect_budget_sec:(float_of_int Keeper_sandbox_microvm.remote_connect_timeout_sec)
+             ~budget_sec:timeout_sec
+         with
+         | Keeper_microvm_agent_socket.Agent_answered -> Ok `Adopt
+         | Keeper_microvm_agent_socket.Agent_unusable reason ->
+           Log.Keeper.info "microvm agent guest replaced instead of adopted keeper=%s name=%s: %s"
+             t.meta.name container_name reason;
+           Ok `Boot
+         | Keeper_microvm_agent_socket.Check_unavailable detail -> Error (Agent_unchecked detail)) in
   let* decision = decision in
   match decision with
   | `Adopt ->

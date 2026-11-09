@@ -758,10 +758,7 @@ let require_persisted_sources_readable () =
       Board.with_persist_lock store (fun () ->
         let open Result.Syntax in
         let* () = Board.require_posts_source_readable store in
-        Board.with_lock store (fun () ->
-          match store.Board.comments_load_result with
-          | Ok () -> Ok ()
-          | Error detail -> Error (Board.Io_error detail)))
+        Board.require_comments_source_readable store)
 
 let get_post_and_comments_unchecked ~post_id =
   let store = backend () in

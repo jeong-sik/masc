@@ -651,13 +651,95 @@ type posts_source_io = {
 (** Immutable real-transaction seam for the posts file. None selects
     production IO. *)
 
+type comments_source_observation = {
+  source_path : string;
+  snapshot : Fs_compat.private_jsonl_snapshot;
+  workspace_observation : Board_workspace_binding.observation;
+}
+
+type comments_row_error =
+  | Invalid_comments_json of { line : int; detail : string }
+  | Invalid_comments_row of { line : int }
+
+type comments_source_stage =
+  | Read_comments | Decode_comments | Encode_comments
+  | Write_comments | Project_comments | Report_comments
+
+type comments_source_diagnostic =
+  | Comments_file_diagnostic of Fs_compat.private_jsonl_transaction_error
+  | Comments_workspace_diagnostic of Board_workspace_binding.rejection
+  | Comments_raised_diagnostic of {
+      stage : comments_source_stage;
+      exception_ : exn;
+      backtrace : Printexc.raw_backtrace;
+    }
+
+type comments_source_failure =
+  | Comments_not_observed
+  | Comments_rows_rejected of comments_row_error list
+  | Comments_transaction_failed of Fs_compat.private_jsonl_transaction_error
+  | Comments_missing
+  | Comments_source_binding_mismatch
+  | Comments_snapshot_stale
+  | Comments_publication_pending
+  | Comments_reload_required
+  | Comments_workspace_refused of Board_workspace_binding.rejection
+  | Comments_raised of { exception_ : exn; backtrace : Printexc.raw_backtrace }
+
+type comments_write_kind = Comments_append | Comments_rewrite
+
+type comments_unsettled_write = {
+  expected : comments_source_observation;
+  kind : comments_write_kind;
+  intended_bytes : string;
+}
+
+type comments_recovery_receipt = {
+  interrupted : comments_unsettled_write;
+  prior_failure : comments_source_failure;
+  fence : comments_source_observation;
+}
+(** Explicit storage recovery superseded an interrupted attempt. This is not
+    a verdict that the original operation was written or not written. *)
+
+type comments_publication = {
+  observation : comments_source_observation;
+  diagnostics : comments_source_diagnostic list;
+}
+(** The actual successful append receipt, retained before model publication.
+    Only its owning store may acknowledge it after a normal publication or
+    after recording the exact appended row's rejected-publication cleanup. *)
+
+type comments_source_state =
+  | Comments_unobserved
+  | Comments_readable of comments_publication
+  | Comments_publishing of comments_publication
+  | Comments_refused of {
+      last_observed : comments_source_observation option;
+      failure : comments_source_failure;
+      diagnostics : comments_source_diagnostic list;
+    }
+  | Comments_unsettled of {
+      pending : comments_unsettled_write;
+      failure : comments_source_failure;
+      diagnostics : comments_source_diagnostic list;
+    }
+(** [last_observed = None] means this store has never accepted a source
+    observation. A first observed Missing source is legitimate empty input;
+    losing a source this store observed Present is refused. This lifetime
+    evidence does not prove absence across different processes. *)
+
 type store = {
   (** Canonical posts observation/refusal/uncertainty, owned by persist_mutex.
       Successful loads and writes advance it; dirty cards need not equal its bytes. *)
   mutable posts_source : posts_source_state;
   posts_source_io : posts_source_io;
-  (** Derived outcomes of the other four source loads. *)
-  mutable comments_load_result : (unit, string) result;
+  (** Comments' source, uncertainty and unfinished model publication are owned
+      by persist_mutex; no separate load-success flag grants authority. *)
+  mutable comments_source : comments_source_state;
+  comments_source_io : Fs_compat.private_jsonl_transaction_io_for_testing option;
+  (** None selects production comments IO. *)
+  (** Derived outcomes of the other three source loads. *)
   mutable votes_load_result : (unit, string) result;
   mutable reactions_load_result : (unit, string) result;
   mutable sub_boards_load_result : (unit, string) result;

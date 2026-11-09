@@ -45,6 +45,11 @@ val create_store_with_source_io_for_testing :
     A None slot uses production IO. Faults must be armed after an explicit
     load; the constructor itself creates and admits nothing. *)
 
+val create_store_with_comments_io_for_testing :
+  base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
+  unit -> store
+(** Same store with one immutable comments transaction IO seam. *)
+
 val require_persisted_snapshot_readable :
   (unit, string) result -> (unit, board_error) result
 (** Reject a mutation whose full-snapshot source did not load completely.
@@ -158,12 +163,27 @@ val inspect_posts_source_with_io_for_testing :
   workspace_masc_dir:string ->
   io:Fs_compat.private_jsonl_transaction_io_for_testing -> posts_inspection
 
-val save_comments_snapshot : store -> string -> (unit, board_error) result
+type comments_snapshot
+val capture_comments_snapshot : store -> comments_snapshot
+val save_comments_snapshot : store -> comments_snapshot -> (unit, board_error) result
+val require_comments_source_readable : store -> (unit, board_error) result
+val settle_comments_source : store -> (comments_recovery_receipt option, board_error) result
+(** Explicit storage recovery; a successful fence still requires full comments
+    reload before model authority. Does not replay the interrupted operation. *)
+type comment_append_receipt
+val append_comment : store -> comment -> (comment_append_receipt, board_error) result
+val publish_comment_append : store -> comment_append_receipt -> (unit, board_error) result
+(** Caller retains persistence through append and normal model publication.
+    On a typed publication rejection, record the owned row's cleanup as dirty
+    before acknowledging the receipt. Finish reserved cleanup after the state
+    callback, before any further IO. Exceptions retain unfinished publication. *)
 val rewrite_comments : store -> unit
+val rewrite_comments_under_persistence : store -> unit
+(** Same capture, write and dirty retry, for a caller already holding
+    persistence through an append's typed publication rejection. *)
 val reactions_jsonl_unlocked : store -> string
 val save_reactions_jsonl_result : store -> string -> (unit, board_error) result
 val append_post : store -> post -> posts_write_outcome
-val append_comment : store -> comment -> (unit, board_error) result
 
 val sub_board_access_to_string : sub_board_access -> string
 val sub_board_access_of_string_opt : string -> sub_board_access option

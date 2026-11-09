@@ -57,6 +57,11 @@ val create_store_with_source_io_for_testing :
     A None slot uses production IO; the constructor creates/adopts nothing and
     leaves posts unobserved until explicit load. *)
 
+val create_store_with_comments_io_for_testing :
+  base_path:string -> io:Fs_compat.private_jsonl_transaction_io_for_testing ->
+  unit -> store
+(** One immutable comments transaction IO seam; creates/adopts nothing. *)
+
 (** {1 Locking + cache invalidation} *)
 
 (** [with_lock store f] runs [f ()] under
@@ -134,8 +139,13 @@ val reindex_hot_post : store -> previous:post -> updated:post -> unit
 val put_post : store -> post -> unit
 val rebuild_hot_post_index : store -> unit
 
-(** Appends one comment snapshot to {!comments_path}. *)
-val append_comment : store -> comment -> (unit, board_error) result
+type comment_append_receipt = Board_core_persist.comment_append_receipt
+val append_comment : store -> comment -> (comment_append_receipt, board_error) result
+val publish_comment_append : store -> comment_append_receipt -> (unit, board_error) result
+(** Append against the exact loaded comments observation while holding
+    persistence. Retain the receipt through a normal model publication; typed
+    rejection must record its owned row's dirty cleanup before acknowledgement.
+    A projection exception retains unfinished publication and denies rewrites. *)
 
 (** {1 Whole-state JSONL rewrite} *)
 
@@ -212,9 +222,16 @@ val inspect_posts_source_with_io_for_testing :
   io:Fs_compat.private_jsonl_transaction_io_for_testing -> posts_inspection
 
 
-(** {!save_posts_snapshot} for {!comments_path}, guarded by
-    [store.comments_load_result]. *)
-val save_comments_snapshot : store -> string -> (unit, board_error) result
+type comments_snapshot = Board_core_persist.comments_snapshot
+val capture_comments_snapshot : store -> comments_snapshot
+val save_comments_snapshot : store -> comments_snapshot -> (unit, board_error) result
+(** Capture under persist then state, retain persistence through the write.
+    The candidate is bound to its captured source bytes, cursor and workspace.
+    Failed/unknown loads and stale source changes grant no write authority. *)
+val require_comments_source_readable : store -> (unit, board_error) result
+val settle_comments_source : store -> (comments_recovery_receipt option, board_error) result
+(** Explicitly fence a fresh comments source after an unknown write without
+    replaying it. Full model reload is still required after recovery success. *)
 
 (** Atomically rewrites {!comments_path} from
     [store.comments]. The snapshot is captured under the state lock and written

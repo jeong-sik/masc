@@ -164,14 +164,13 @@ let add_comment_with_audience
     (match staged with
      | Error _ as e -> e
      | Ok comment ->
-        (match with_persist_lock store (fun () ->
+        with_persist_lock store (fun () ->
           (* A display-only parent cannot authorize a durable comment or its
              later participant routing. Check before the append while holding
              the same lock that serializes the posts source. *)
           let* () = require_posts_source_readable store in
-          match append_comment store comment with
-          | Error _ as e -> e
-          | Ok () -> Ok (with_lock store (fun () ->
+          let* receipt = append_comment store comment in
+          let committed = with_lock store (fun () ->
               (* Commit from a fresh read: the post can change or vanish
                  while the append is in flight; bumping the stale staged
                  copy would clobber a concurrent unrelated mutation. The
@@ -223,23 +222,24 @@ let add_comment_with_audience
                    mark_dirty_comment store comment_key;
                    invalidate_post_caches store;
                    invalidate_comment_caches store;
-                   Ok { comment; audience; unresolved }))))) with
-        | Error _ as e -> e
-        | Ok committed ->
+                   Ok { comment; audience; unresolved }))) in
+          (* A normal typed rejection precedes every model mutation above.
+             Record deletion of our own appended row before acknowledging
+             its known receipt. An exception leaves publication unfinished. *)
+          (match committed with
+           | Ok _ -> ()
+           | Error _ -> with_lock store (fun () ->
+               mark_dirty_comment store (Comment_id.to_string comment.id)));
+          let* () = publish_comment_append store receipt in
           (match committed with
            | Ok _ as ok -> ok
-           | Error _ as e ->
-             (* The durable append won but the commit lost (post deleted
-                or policy flipped mid-append), so the appended row is an
-                orphan on disk. Rewrite the comments snapshot to dispose
-                of it — the snapshot cannot contain the orphan because
-                it never reached memory. If the rewrite itself fails,
-                the next successful snapshot rewrite disposes of the
-                row; until then reply-count recalculation on load skips
-                comments whose post is gone, so the orphan cannot
-                distort counts. *)
-             rewrite_comments store;
-             e)))
+           | Error _ as error ->
+             (* Retain the same persistence interval and exact append receipt.
+                A foreign append makes cleanup CAS fail instead of deleting
+                its rows. Dirty retry is volatile; restart before cleanup can
+                still reload this rejected row (#26378). *)
+             rewrite_comments_under_persistence store;
+             error)))
 ;;
 
 let add_comment store ~lookup ~post_id ~author ~content ?parent_id ?ttl_hours () =

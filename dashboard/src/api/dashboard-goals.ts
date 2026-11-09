@@ -1,3 +1,4 @@
+import { decodeGoalCriterionReview } from './goal-criterion-review'
 import { decodeGoalProof } from './goal-proof'
 import { decodeGoalResumePhase } from './goal-lifecycle'
 // MASC Dashboard — Goals projections (goal tree + detail).
@@ -427,6 +428,7 @@ function decodeGoalTreeNode(raw: unknown): GoalTreeNode | null {
     last_review_note: asNullableString(raw.last_review_note),
     criterion_revision: criterionRevision,
     measurement,
+    criterion_review: decodeGoalCriterionReview(raw.criterion_review, criterionRevision),
     tasks,
     task_count: taskCount,
     task_done_count: taskDoneCount,

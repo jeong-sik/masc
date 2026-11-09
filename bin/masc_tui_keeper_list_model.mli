@@ -137,6 +137,11 @@ val density_label : density -> string
 val density_of_string : string -> density option
 (** The labels are the values [tui-keepers.toml] stores under [density]. *)
 
+val shows_portrait : view -> density -> bool
+(** Whether the list draws the selected Keeper's portrait above its rows:
+    only the [Plain] view in [Two_lines]. The axis views spend those rows on
+    Keepers (RFC-0515 E20). *)
+
 val next_sort : sort -> sort
 val sort_label : sort -> string
 val sort_of_string : string -> sort option

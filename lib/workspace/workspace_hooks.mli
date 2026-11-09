@@ -232,6 +232,11 @@ val verification_submitted_fn :
 val goal_verification_pending_fn :
   (Workspace_utils_backend_setup.config -> goal_id:string -> unit) Atomic.t
 
+(** Schedule the separate creation-time success-criterion reviewer after its
+    request is durable. This grants neither proof nor human-confirmation authority. *)
+val goal_criterion_review_pending_fn :
+  (Workspace_utils_backend_setup.config -> goal_id:string -> unit) Atomic.t
+
 (** Tell the goal verifier lane that an operator Drop or Reopen moved a Goal,
     so a review still running for it is cancelled and its claim released. A
     verdict such a review would deliver is refused anyway, because the Goal is

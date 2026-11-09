@@ -7,7 +7,7 @@ updated: 2026-09-02
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0247", "0251", "0257", "tui-operator-ia"]
+related: ["0247", "0251", "0257"]
 ---
 
 ## 1. 결정

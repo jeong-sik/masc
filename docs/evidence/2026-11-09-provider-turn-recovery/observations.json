@@ -1,0 +1,26 @@
+{
+  "schema": "masc.provider_turn_recovery_observation.v1",
+  "observed_date": "2026-11-09",
+  "agy_version": "1.5.3",
+  "model": "gemini-3.8-flash-medium",
+  "native_compiled_binary_tested": false,
+  "ocaml_hook_source_sha256": "ffd1a208cb3f4433b63942a1dd54e52cc9219120f156808dc752ca549de270d1",
+  "live_source_probe": {
+    "status": "SUCCESS",
+    "denied_actions": null,
+    "inside_sentinel_seen": true,
+    "denied_actions_present": false
+  },
+  "boundary_suite": {
+    "tests": 8,
+    "result": "PASS",
+    "execution": "OCaml interpreter, no local Dune build"
+  },
+  "source_base_commit": "e3c6479ec1b100e2b2fa007e8a2676dd015de051",
+  "retained_cli_events": {
+    "path": "cli-events.sanitized.jsonl",
+    "provenance": "selected and path-redacted derivative of captured stdout",
+    "original_stdout_sha256": "bf43e854df3367e23195dfe125ca3dfd125391236f0edd97b851bcbddf89f549",
+    "derivative_sha256": "b03154c8c4840e9889c94b266e7df6aa2b88cf510d59fd41351a3e6181e18441"
+  }
+}

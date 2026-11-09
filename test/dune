@@ -1,5 +1,19 @@
 ; task-2245: the shared input table the TUI suite and the dashboard vitest
 ; suite both assert on (lib/tool_display.ml / dashboard toolDisplayLabel).
+(rule
+ (target masc-antigravity-path-hook)
+ (action (copy %{exe:../bin/masc_antigravity_path_hook.exe} %{target})))
+
+(rule
+ (alias runtest-test_antigravity_path_hook)
+ (deps test_antigravity_path_hook.py)
+ (action (run python3 %{dep:test_antigravity_path_hook.py}
+   %{exe:../bin/masc_antigravity_path_hook.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_antigravity_path_hook)))
+
 (copy_files# fixtures/tool-display-labels.json)
 
 (rule
@@ -1173,6 +1187,7 @@
 (test
  (name test_keeper_tool_execute_stream_close)
  (modules test_keeper_tool_execute_stream_close)
+ (deps masc-antigravity-path-hook)
  (libraries masc_test_deps))
 
 (test
@@ -3044,6 +3059,7 @@
 (include stanzas/test_goal_verification_gate.inc)
 
 (include stanzas/test_goal_verification_agent.inc)
+(include stanzas/test_goal_criterion_review.inc)
 (include stanzas/test_goal_verification_run_registry.inc)
 (include stanzas/test_reliable_change_g1.inc)
 
@@ -6913,6 +6929,7 @@
 (include stanzas/test_keeper_memory_select_provider_wire.inc)
 
 (include stanzas/test_provider_connection_cache_wiring.inc)
+(include stanzas/test_keeper_provider_connection_recovery.inc)
 
 (include stanzas/test_keeper_event_genealogy_capture.inc)
 

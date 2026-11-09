@@ -11,7 +11,7 @@ compiles the OCaml server and dashboard and can take several minutes.
 ## Prerequisites
 
 - **macOS or Linux**
-- **OCaml** 5.5.1, with `opam`
+- **OCaml** 5.5.2, with `opam`
 - **Node.js** 22+ (only for the web dashboard)
 - **Native libraries** (gmp, OpenSSL, zstd, SQLite, libpq, libev, libffi, zlib,
   ncurses, and a `protoc` that supports proto3 `optional`): the package lists per OS are in the
@@ -24,7 +24,7 @@ git clone https://github.com/jeong-sik/masc.git
 cd masc
 
 # Create a local OCaml switch without resolving MASC's deps yet
-opam switch create . ocaml-base-compiler.5.5.1 --no-install
+opam switch create . ocaml-base-compiler.5.5.2 --no-install
 eval "$(opam env)"
 
 # Pin and install the OCaml dependencies at the versions CI uses

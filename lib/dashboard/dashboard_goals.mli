@@ -112,10 +112,15 @@ val verification_projection :
 (** Load the authoritative proof ledger once, then project each Goal against
     its criterion revision. *)
 
+val criterion_review_projection :
+  config:Workspace.config -> Goal_store.goal -> Yojson.Safe.t
+(** Read and index the creation-criterion review ledger once for this projection. *)
+
 val tree_node_to_json :
   ?events_for_goal:(string -> Yojson.Safe.t list) ->
   ?verification_for_goal:(Goal_store.goal -> Yojson.Safe.t) ->
   ?measurement_for_goal:(Goal_store.goal -> Yojson.Safe.t) ->
+  ?criterion_review_for_goal:(Goal_store.goal -> Yojson.Safe.t) ->
   tree_node ->
   Yojson.Safe.t
 (** Renders a single {!tree_node} as JSON. The optional callback supplies

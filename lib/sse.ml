@@ -536,15 +536,8 @@ let invoke_disconnect_hook_for session_id client =
            Log.Server.error "SSE disconnect hook failed for %s: %s"
              session_id (Printexc.to_string exn))
 
-(** Validate the bearer token and MCP session pair for an SSE registration.
-    Token resolution is delegated to [Auth.find_credential_by_token]; session
-    existence and expiry are checked via [Session.McpSessionStore.peek] so
-    the validation read does not refresh the session's activity window.
-
-    Session creation is intentionally not performed here: an SSE registration
-    must reference a session already issued by the initialize handler
-    (RFC-0099 § session lifecycle; credential surface RFC-0008 / RFC-0019). *)
-let validate_registration ~(auth : registration_auth) session_id : (Masc_domain.agent_credential, registration_error) result =
+let registration_credential ~(auth : registration_auth) :
+    (Masc_domain.agent_credential, registration_error) result =
   let open Masc_domain in
   match auth.token with
   | None ->
@@ -564,27 +557,29 @@ let validate_registration ~(auth : registration_auth) session_id : (Masc_domain.
         Log.Server.warn "SSE registration auth lookup failed: %s"
           (masc_error_to_string e);
         Error (Auth_lookup_error { reason = e })
-    | Ok credential ->
-        match Session.McpSessionStore.peek session_id with
-        | None ->
-            Error (Unknown_session { session_id })
-        | Some session ->
-            let now = Time_compat.now () in
-            if now -. session.last_activity > Env_config.Session.max_age_seconds then
-              Error (Session_expired { session_id })
-            else
-              match session.agent_name with
-              | Some session_agent when not (String.equal session_agent credential.agent_name) ->
-                  Error (Session_owner_mismatch { session_agent; token_agent = credential.agent_name })
-              | _ ->
-                  Ok credential
+    | Ok credential -> Ok credential
 
-let register_with_client ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
-    ~(auth : registration_auth) session_id ~last_event_id =
-  match validate_registration ~auth session_id with
-  | Error e -> Error e
+(** A supplied MCP session retains its existence, expiry and owner checks.
+    Reading it must not create a session or refresh its activity window. *)
+let validate_registration ~auth session_id =
+  match registration_credential ~auth with
+  | Error error -> Error error
   | Ok credential ->
-  let runtime_authority = runtime_authority_exn ~base_path:auth.config in
+    match Session.McpSessionStore.peek session_id with
+    | None -> Error (Unknown_session { session_id })
+    | Some session ->
+      let now = Time_compat.now () in
+      if now -. session.last_activity > Env_config.Session.max_age_seconds then
+        Error (Session_expired { session_id })
+      else
+        match session.agent_name with
+        | Some session_agent when not (String.equal session_agent credential.agent_name) ->
+          Error (Session_owner_mismatch { session_agent; token_agent = credential.agent_name })
+        | Some _ | None -> Ok credential
+
+let register_validated_client ~kind ?on_disconnect ?observer_instance_id
+    ~base_path (credential : Masc_domain.agent_credential) session_id ~last_event_id =
+  let runtime_authority = runtime_authority_exn ~base_path in
   let observer_scope = Option.map
       (fun instance_id -> observer_scope ~runtime_authority ~instance_id) observer_instance_id in
   let client_id = Atomic.fetch_and_add client_id_counter 1 + 1 in
@@ -682,6 +677,22 @@ let register_with_client ?(kind = Agent_stream) ?on_disconnect ?observer_instanc
          ());
     sync_transport_snapshot ();
     Ok (client, previous, Option.map fst evicted)
+
+let register_with_client ?(kind = Agent_stream) ?on_disconnect ?observer_instance_id
+    ~(auth : registration_auth) session_id ~last_event_id =
+  match validate_registration ~auth session_id with
+  | Error error -> Error error
+  | Ok credential ->
+    register_validated_client ~kind ?on_disconnect ?observer_instance_id
+      ~base_path:auth.config credential session_id ~last_event_id
+
+let register_standalone_observer_with_client ?on_disconnect ~observer_instance_id
+    ~(auth : registration_auth) session_id ~last_event_id =
+  match registration_credential ~auth with
+  | Error error -> Error error
+  | Ok credential ->
+    register_validated_client ~kind:Observer ?on_disconnect ~observer_instance_id
+      ~base_path:auth.config credential session_id ~last_event_id
 
 (** Register a new SSE client.
     Returns (client_id, event_stream, evicted_session_id option). *)

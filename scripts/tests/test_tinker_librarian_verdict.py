@@ -22,9 +22,11 @@ from typing import cast
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tinker" / "librarian"))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+import admission_request as R
 import admission_validator as AV
 import eval_admission as V
 import memory_scores as M
+import synth_render
 import synth_rows as RW
 import synth_spec as S
 
@@ -221,6 +223,10 @@ class ScoreTest(unittest.TestCase):
                 assert isinstance(part, dict)
                 self.assertEqual(part["drop_precision"], precision)
 
+    def test_a_reply_that_states_an_error_is_a_failed_call(self) -> None:
+        part = part_of(V.summarize("synth", [synth_row(), synth_row(error="GLM 1305: busy", wall_s=9.0, valid=False)]))
+        self.assertEqual((part["http_errors"], part["latency_p50_s"]), (1, 1.0))
+
     def test_synth_without_drops_has_full_precision(self) -> None:
         part = V.summarize("synth", [synth_row()])["A"]
         assert isinstance(part, dict)
@@ -258,6 +264,40 @@ class SynthItemsTest(unittest.TestCase):
             with self.assertRaises(SystemExit) as stop:
                 V.synth_items(path)
             self.assertEqual(str(stop.exception), f"{path}:2: the request is not one synth_generate.py writes")
+
+
+class PinnedTest(unittest.TestCase):
+    PIN, TEMPLATE = "p" * 64, "t" * 64
+
+    def test_both_runs_are_made_under_the_pass_lines_with_the_pinned_template(self) -> None:
+        made: dict[str, object] = {"pass_lines_sha256": self.PIN, "template_sha256": self.TEMPLATE}
+        self.assertIsNone(V.pinned_problem([made, dict(made)], self.PIN, self.TEMPLATE))
+        self.assertEqual(V.pinned_problem([made, {**made, "pass_lines_sha256": "q" * 64}], self.PIN, self.TEMPLATE),
+                         "a run used other pass lines")
+        self.assertEqual(V.pinned_problem([{**made, "template_sha256": "u" * 64}, made], self.PIN, self.TEMPLATE),
+                         "a run drew its prompts with another template than the pinned one")
+
+
+class RetemplateTest(unittest.TestCase):
+    def test_another_template_draws_the_same_data_and_the_pinned_one_the_same_prompt(self) -> None:
+        req = request(PLANTED, candidates_of((S.CandidateKind.COMPLEMENT, S.CandidateKind.NEW_DURABLE)))
+        rules = synth_render.TEMPLATE.read_text(encoding="utf-8")
+        added = "규칙 문장 하나를 더한 템플릿입니다."
+        first_slot = rules.index("\n### ")
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "requests.jsonl"
+            path.write_text(json.dumps({"request": RW.row_of(req)}, ensure_ascii=False) + "\n", encoding="utf-8")
+            [item] = V.synth_items(path)
+            other_rules = Path(tmp) / "librarian.md"
+            other_rules.write_text(rules[:first_slot] + "\n" + added + rules[first_slot:], encoding="utf-8")
+            other = V.retemplated(item, synth_render.template_at(other_rules))
+        self.assertEqual(V.retemplated(item, synth_render.template()), item)
+        self.assertNotIn(added, item.text)
+        self.assertIn(added, other.text)
+        self.assertEqual((other.prompt.current_memory, other.prompt.candidates),
+                         (item.prompt.current_memory, item.prompt.candidates))
+        data = item.text.index(R.CANDIDATE_HEADER)
+        self.assertTrue(other.text.endswith(item.text[data:]))
 
 
 if __name__ == "__main__":

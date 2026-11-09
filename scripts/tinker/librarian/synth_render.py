@@ -25,12 +25,17 @@ FACTS_MAX_BYTES = 524288
 type JsonObject = dict[str, object]
 
 
+def template_at(path: Path) -> R.AdmissionTemplate:
+    """The admission template of the librarian.md at `path`. SystemExit when MASC could not use it."""
+    loaded = R.template_from_markdown(path.read_text(encoding="utf-8"))
+    if isinstance(loaded, R.TemplateError):
+        raise SystemExit(f"{path}: {loaded.detail}")
+    return loaded
+
+
 @functools.cache
 def template() -> R.AdmissionTemplate:
-    loaded = R.template_from_markdown(TEMPLATE.read_text(encoding="utf-8"))
-    if isinstance(loaded, R.TemplateError):
-        raise SystemExit(f"{TEMPLATE}: {loaded.detail}")
-    return loaded
+    return template_at(TEMPLATE)
 
 
 def basis(board: object) -> R.Transcript | R.Board:

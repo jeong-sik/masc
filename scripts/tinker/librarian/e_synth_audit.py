@@ -85,7 +85,7 @@ import memory_scores as M
 import synth_render
 import synth_rows as RW
 import synth_spec as S
-from tinker_oai import HTTP_OK, Call, call_from_row
+from tinker_oai import Call, call_from_row
 
 FULL_FACTS = 12
 MIN_DISTRACTORS = 2
@@ -165,7 +165,7 @@ def answers(run: Path, baseline: str) -> dict[str, Call]:
     out: dict[str, Call] = {}
     for row in D.read_jsonl(run / "calls.jsonl"):
         call = call_from_row(row)
-        if call is not None and call.label.startswith(prefix) and call.status == HTTP_OK:
+        if call is not None and call.label.startswith(prefix) and call.replied():
             out[call.label.removeprefix(prefix)] = call
     return out
 

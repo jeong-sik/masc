@@ -134,7 +134,8 @@ let refusal message =
    or state defect, hence Runtime_failure; [None] only arises without an
    execution identity, also a wiring defect. Every refusal below is proven
    pre-effect: no tool is extended or dispatched on those paths. *)
-let metrics_result ~tool_name ~start_time = function
+let metrics_result ~tool_name ~start_time (outcome : Agent_core.Types.tool_result) =
+  match outcome with
   | Ok { Agent_core.Types.content; _ } ->
     Tool_result.make_ok ~tool_name ~start_time ~data:(`String content) ()
   | Error { Agent_core.Types.message = message; recoverable; error_class } ->

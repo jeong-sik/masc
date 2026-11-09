@@ -49,9 +49,6 @@ val cell : Masc.Keeper_memory_age_bins.t option -> Masc_tui_keeper_axis_cell.t
     absent or its read failed). [None] is not a count of zero. Always
     {!Masc_tui_keeper_axis_cell.Quiet}. *)
 
-val count_cell : Masc.Keeper_memory_age_bins.t option -> Masc_tui_keeper_axis_cell.t
-(** {!cell} without the strip, for a row that draws the strip in a cell of
-    its own. *)
 
 val legend : string
 (** The sentence the key sheet prints for the cell. It names the bins, says that

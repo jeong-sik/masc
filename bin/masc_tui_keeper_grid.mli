@@ -94,3 +94,20 @@ val due_text : now:float -> localtime:(float -> Unix.tm) -> Masc_tui_keeper_next
     for a lower bound past twelve hours, and [?] for a time that is not known:
     a lower bound nearer than that, or no reading. A Keeper with no schedule
     draws nothing. *)
+
+val lag_fill : cells:int -> peak:int -> int -> int
+(** How many of [cells] cells the lag bar fills for [lag] unread turns against
+    [peak]: [round (lag / peak × cells)], at least one for any lag above 0, and
+    none for a lag of 0 or less or a bar of no cells. A [peak] below [lag] is
+    read as [lag], so the bar never runs past its cells. *)
+
+val short_span : float -> string
+(** A span of seconds in at most five cells, the mock's [dur]: [42s], [17m],
+    [3h05m], [27h], [9d]. A negative span reads as [0s]. *)
+
+val dated_clock_text : now:float -> localtime:(float -> Unix.tm) -> float -> string
+(** The clock time of [at], [HH:MM], with the date in front, [MM-DD HH:MM],
+    from half a day before [now] back: an older time of day reads as today's. *)
+
+val chain_attempts : int
+(** How many attempts the failure line draws before it cuts the chain: 4. *)

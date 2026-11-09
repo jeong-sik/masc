@@ -33,10 +33,6 @@ val bar_filled_cells : width:int -> value:int -> max_value:int -> int
     value, and all of them at [max_value] or above. {!gauge} fills its bar by
     the same rule. *)
 
-val bar : width:int -> value:int -> max_value:int -> string
-(** [width] cells: {!bar_filled_cells} full blocks, then light shade.
-    Uncoloured, so one style covers the whole bar. *)
-
 val gauge :
   width:int ->
   value:int ->

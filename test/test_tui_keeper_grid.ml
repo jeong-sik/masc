@@ -1,4 +1,5 @@
-(* The verdicts and the level of the views' grid (RFC-0515 §2.4.2, §2.4.3).
+(* The verdicts, the level and the lag bar of the views' grid (RFC-0515 §2.4.2,
+   §2.4.3).
    The columns and the words they draw are not checked here (constitution
    354-355); these are the decisions the columns draw from. *)
 
@@ -115,6 +116,18 @@ let test_the_level_rises_with_the_value () =
   let steps = List.sort_uniq String.compare (List.init 8 (fun i -> level 8 (i + 1))) in
   Alcotest.(check int) "eight values over a peak of eight draw eight levels" 8 (List.length steps)
 
+let test_the_lag_bar_fills_its_share_of_the_peak () =
+  let fill cells peak lag = Grid.lag_fill ~cells ~peak lag in
+  Alcotest.(check int) "no lag fills nothing" 0 (fill 25 40 0);
+  Alcotest.(check int) "a negative lag fills nothing" 0 (fill 25 40 (-2));
+  Alcotest.(check int) "the peak fills the bar" 25 (fill 25 40 40);
+  Alcotest.(check int) "a quarter of the peak rounds down" 6 (fill 25 40 10);
+  Alcotest.(check int) "half the peak rounds half a cell up" 13 (fill 25 40 20);
+  Alcotest.(check int) "a lag too small for a cell still fills one" 1 (fill 25 1000 1);
+  Alcotest.(check int) "a lag over a smaller peak stops at the end" 25 (fill 25 3 9);
+  Alcotest.(check int) "a peak of zero reads the lag as the peak" 17 (fill 17 0 5);
+  Alcotest.(check int) "a bar of no cells fills none" 0 (fill 0 40 40)
+
 let () =
   Alcotest.run "tui_keeper_grid"
     [ ( "verdict"
@@ -128,5 +141,9 @@ let () =
     ; ( "level"
       , [ Alcotest.test_case "the level rises with the value" `Quick
             test_the_level_rises_with_the_value
+        ] )
+    ; ( "lag bar"
+      , [ Alcotest.test_case "the lag bar fills its share of the peak" `Quick
+            test_the_lag_bar_fills_its_share_of_the_peak
         ] )
     ]

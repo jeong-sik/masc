@@ -133,13 +133,46 @@ val grid_pulse_header : window:string -> string
 val grid_next_header : window:string -> string
 (** [next ▹ 12h]: the strip column's header for a strip that spans [window]. *)
 
-val fact_age_header : string
-val librarian_header : string
-val updated_header : string
-(** The snapshot's saved time, not a source-revalidation result. *)
-val lag_digest_gap_header : string
-val lag_stale_facts_header : string
-(** The header words over the cells of the memory and age views. *)
+val grid_wait_glyph : string
+(** [◌]: a next dispatch that waits out a rest, on the failure line. *)
+
+val grid_full_mark : string
+(** [█]: a filled cell of the lag bar. *)
+
+val grid_chain_link : string
+val grid_more_mark : string
+(** [━] between two failed attempts of the failure line, and […] after the
+    attempts it cuts. *)
+
+val grid_open_mark : string
+val grid_folded_mark : string
+(** [−] an open group title, [+] a folded one. *)
+
+val grid_saved_mark : string
+val grid_stale_mark : string
+(** [+] before the age view's time since the memory snapshot was saved, and
+    [×] before its count of invalidated sources. *)
+
+val grid_since_word : string
+val grid_ago_word : string
+val grid_wait_word : string
+val grid_no_data_word : string
+val grid_no_snapshot_word : string
+val grid_turns_word : string
+(** The words of the memory and age views and the failure line. *)
+
+val grid_librarian_header : string
+val grid_lag_bar_short_header : string
+val grid_lag_bar_header : string
+val grid_digest_header : string
+val grid_gap_header : string
+val grid_facts_by_age_header : string
+val grid_saved_header : string
+val grid_stale_header : string
+val grid_facts_header : string
+(** The column headers of the memory and age views. The lag bar's header is
+    [lag ▹], or [lag · unread turns ▹] over a bar wide enough for it. [saved]
+    is the snapshot's saved time, not a source-revalidation result. *)
 
 val column_legend : (string * string) list
 (** The Keepers header words, the sentence about a failing keeper's past and

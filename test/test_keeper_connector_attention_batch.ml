@@ -336,7 +336,7 @@ let start_owner ~(ctx : _ Keeper_types_profile.context) ~base_path ~meta
   | Error error -> fail (Keeper_owner_registry.command_error_to_string error)
 ;;
 
-let test_scheduled_work_is_not_batched_with_other_requests () =
+let test_scheduled_work_without_delivery_shares_the_ready_batch () =
   with_ctx "all-ready-batch" (fun ~base_path ~keeper_name ~meta ~ctx ->
     let board =
       List.init 5 (fun index ->
@@ -365,19 +365,119 @@ let test_scheduled_work_is_not_batched_with_other_requests () =
         ~meta_after_triage:meta
         ~pending_board_events:[]
     in
-    check int "one scheduled occurrence owns the turn" 1
+    check int "ready schedules and general sources share one turn" 9
       (Keeper_heartbeat_source_batch.count intake.source_batch);
     check
       (list string)
-      "only the first exact scheduled occurrence is admitted"
-      [ (List.hd schedules).post_id ]
+      "every exact scheduled occurrence and general source is admitted"
+      (List.map (fun (source : Q.stimulus) -> source.post_id) sources)
       (List.map (fun (source : Q.stimulus) -> source.post_id) (Keeper_heartbeat_source_batch.stimuli intake.source_batch));
-    check int "only the owning scheduled request reaches the turn" 1
+    check int "every scheduled request and Board event reaches the turn" 8
       (List.length intake.pending_board_events);
     check int "intake alone never ACKs actionable sources" 9
       (Keeper_registry_event_queue.snapshot_result ~base_path keeper_name
        |> Result.map Q.length
        |> Result.value ~default:(-1)))
+;;
+
+let test_scheduled_batches_preserve_result_delivery () =
+  with_ctx "schedule-delivery-batches" (fun ~base_path ~keeper_name ~meta ~ctx ->
+    let module Batch = Keeper_heartbeat_source_batch in
+    let require = function Ok value -> value | Error detail -> fail detail in
+    let route thread_id = Keeper_continuation_channel.slack
+      ~team_id:(Some "schedule-team") ~channel_id:"same-slack-channel"
+      ~thread_ts:(Some thread_id) ~user_id:"schedule-user" |> require in
+    let a = route "schedule-origin-a" and b = route "schedule-origin-b" in
+    let scheduled id arrived_at result_delivery : Q.stimulus =
+      { post_id = id; urgency = Q.Immediate; arrived_at
+      ; payload = Q.Schedule_due
+          { occurrence_id = id; schedule_instance_id = "instance-" ^ id
+          ; schedule_id = "schedule-" ^ id; due_at = arrived_at
+          ; payload_digest = "digest-" ^ id; title = None
+          ; message = "independent request " ^ id; result_delivery } } in
+    let first = scheduled "no-delivery-1" 1. None in
+    let a1 = scheduled "origin-a-1" 2. (Some a) in
+    let b1 = scheduled "origin-b-1" 3. (Some b) in
+    let a2 = scheduled "origin-a-2" 4. (Some a) in
+    let last = scheduled "no-delivery-2" 5. None in
+    let board = board_attention_stimulus ~label:"board-between-schedules" ~arrived_at:6. in
+    List.iter (enqueue_exn ~base_path keeper_name) [first; a1; b1; a2; last; board];
+    let intake () = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+      ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+    let ids batch = Batch.stimuli batch |> List.map (fun (s : Q.stimulus) -> s.post_id) in
+    let complete batch = List.iter (fun selection ->
+      Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+        ~base_path keeper_name ~applied_at:100. ~selection |> require |> ignore)
+      (Batch.selections batch) in
+    let general = (intake ()).source_batch in
+    check (list string) "unrouted one-shots and Board work share a completed turn"
+      [first.post_id; last.post_id; board.post_id] (ids general);
+    check bool "general batch has no captured reply route" true
+      (Option.is_none (Keeper_unified_turn.continuation_channel_of_wake
+        (Batch.for_turn ~reactive:true general |> Batch.wake)));
+    complete general;
+    let routed_a = (intake ()).source_batch in
+    check (list string) "distinct requests to the same exact reply route share a turn"
+      [a1.post_id; a2.post_id] (ids routed_a);
+    let channel = Keeper_unified_turn.continuation_channel_of_wake
+      (Batch.for_turn ~reactive:true routed_a |> Batch.wake) in
+    check bool "the origin reply route survives batching" true
+      (Option.exists (Keeper_continuation_channel.same_route a) channel);
+    (* A chat handoff retains both original requests; it cannot certify their
+       completion just because the model reached a tool boundary. *)
+    Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
+      ~base_path ~keeper_name (Batch.selections routed_a) |> require;
+    check int "a checkpoint leaves every uncompleted routed request pending" 3
+      (Keeper_registry_event_queue.snapshot_result ~base_path keeper_name
+       |> require |> Q.length);
+    let routed_b = (intake ()).source_batch in
+    check (list string) "the other origin is not blocked by a retained batch"
+      [b1.post_id] (ids routed_b);
+    check bool "another thread in the same Slack channel keeps its own route" true
+      (Option.exists (Keeper_continuation_channel.same_route b)
+        (Keeper_unified_turn.continuation_channel_of_wake
+          (Batch.for_turn ~reactive:true routed_b |> Batch.wake)));
+    complete routed_b;
+    let resumed_a = (intake ()).source_batch in
+    check (list string) "the original requests resume together"
+      [a1.post_id; a2.post_id] (ids resumed_a);
+    complete resumed_a;
+    check int "successful batches drain every exact occurrence" 0
+      (Keeper_registry_event_queue.snapshot_result ~base_path keeper_name
+       |> require |> Q.length))
+;;
+
+let test_unrouted_schedule_does_not_take_a_connector_reply_route () =
+  List.iter (fun schedule_first ->
+    with_ctx "schedule-connector-routes" (fun ~base_path ~keeper_name ~meta ~ctx ->
+      let module Batch = Keeper_heartbeat_source_batch in
+      let require = function Ok value -> value | Error detail -> fail detail in
+      let schedule = { (scheduled_wake_stimulus ~occurrence:1
+        ~arrived_at:(if schedule_first then 1. else 2.)) with urgency = Q.Low } in
+      let connector = connector_attention_stimulus ~base_path ~keeper_name
+        ~channel_id:"connector-schedule-origin" ~message_id:"connector-schedule-message"
+        ~arrived_at:(if schedule_first then 2. else 1.) ~content:"reply to this message" in
+      List.iter (enqueue_exn ~base_path keeper_name) [schedule; connector];
+      let intake () = Keeper_heartbeat_stimulus_intake.heartbeat_event_intake
+        ~ctx ~meta_after_triage:meta ~pending_board_events:[] in
+      let inspect batch =
+        let sources = Batch.stimuli batch in
+        let expected = match sources with
+          | [source] -> Q.continuation_channel_of_payload source.payload
+          | [] | _ :: _ :: _ -> fail "a no-delivery schedule swallowed routed input" in
+        let actual = Keeper_unified_turn.continuation_channel_of_wake
+          (Batch.for_turn ~reactive:true batch |> Batch.wake) in
+        check bool "each batch preserves its original reply route" true
+          (Option.equal Keeper_continuation_channel.same_route expected actual);
+        List.iter (fun selection ->
+          Keeper_registry_event_queue.terminalize_pending_turn_completed_result
+            ~base_path keeper_name ~applied_at:100. ~selection |> require |> ignore)
+          (Batch.selections batch) in
+      inspect (intake ()).source_batch;
+      inspect (intake ()).source_batch;
+      check int "both sources complete without stealing the other's destination" 0
+        (Keeper_registry_event_queue.snapshot_result ~base_path keeper_name |> require |> Q.length)))
+    [false; true]
 ;;
 
 let test_scheduled_continuation_withdrawal_and_reinsertion () =
@@ -1732,9 +1832,13 @@ let () =
         ; test_case "exact batch reaches dispatch and settlement" `Quick
             test_exact_batch_reaches_dispatch_and_settlement
         ; test_case
-            "scheduled work owns one occurrence, separate from attention"
+            "scheduled work without result delivery shares the ready batch"
             `Quick
-            test_scheduled_work_is_not_batched_with_other_requests
+            test_scheduled_work_without_delivery_shares_the_ready_batch
+        ; test_case "scheduled batches keep reply routes and resume uncompleted requests" `Quick
+            test_scheduled_batches_preserve_result_delivery
+        ; test_case "no-delivery schedules preserve connector reply routes in either queue order" `Quick
+            test_unrouted_schedule_does_not_take_a_connector_reply_route
         ; test_case
             "admits only one exact HITL resolution per turn"
             `Quick

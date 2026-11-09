@@ -24,31 +24,34 @@ let agent_keeps = function
   | Keeper_microvm_backend.Scratch_tmpfs -> true
 ;;
 
-let plan ~uid ~gid ~host_socket (exec_plan : Plan.t) : Plan.t =
-  { exec_plan with
-    user = "0:0"
+let plan ~uid ~gid ~host_socket ~image ~guest_size ~mounts ~network ~environment ~labels
+  : Plan.t
+  =
+  { Plan.image
+  ; guest_size
+  ; user = "0:0"
+  ; working_directory = Keeper_sandbox_microvm.work_volume_guest_root
   ; command =
       [ Keeper_sandbox_microvm.shim_guest_path
       ; Exec_ssh_protocol.Relay.serve_flag
       ; guest_path
       ; Printf.sprintf "%d:%d" uid gid
       ]
-  ; isolation = List.filter agent_keeps exec_plan.isolation
+  ; mounts
+  ; isolation = List.filter agent_keeps Keeper_microvm_backend.all_guest_constraints
   ; capabilities_added = [ Plan.Cap_setuid; Plan.Cap_setgid; Plan.Cap_sys_admin ]
   ; published_sockets = [ { Plan.host_path = host_socket; guest_path } ]
+  ; network
   ; environment =
-      exec_plan.environment
+      environment
       @ Keeper_sandbox_microvm.request_environment
           ~shim_config_path:Keeper_sandbox_microvm.shim_config_guest_path
-  ; labels = exec_plan.labels @ [ relay_label ]
+  ; labels = labels @ [ relay_label ]
   }
 ;;
 
-let delivery_of_facts ~base_path ~guest_name (facts : Plan.facts) =
-  let agent = { Plan.host_path = host_path ~base_path ~guest_name; guest_path } in
-  if List.mem agent facts.published_sockets
-  then Keeper_types_profile_sandbox.Agent_socket
-  else Keeper_types_profile_sandbox.Exec_per_request
+let publishes_agent ~base_path ~guest_name (facts : Plan.facts) =
+  List.mem { Plan.host_path = host_path ~base_path ~guest_name; guest_path } facts.published_sockets
 ;;
 
 type agent_check =

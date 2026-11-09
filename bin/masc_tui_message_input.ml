@@ -7,10 +7,20 @@ type owned_view = { source : string; range : source_range; revision : revision }
 (* Printable ASCII, LF and tab each form a one-byte input boundary. Other
    input, including escapes and CR, stays on the shared grapheme path. *)
 type boundaries = One_byte | Graphemes | Unknown
+type boundary_index = { offsets : int array; count : int; prefix_stable : bool }
+
+let fresh_index text = lazy (
+  let offsets = Masc_tui_message_layout.input_boundary_index text in
+  { offsets; count = Array.length offsets;
+    (* Invalid UTF-8 changes the display segmenter's whole-range fallback;
+       deleting an ANSI suffix can also change an earlier escape's extent. *)
+    prefix_stable = String.is_valid_utf_8 text && not (String.contains text '\x1b') })
+
 type content = {
   text : string;
   revision : revision;
   boundaries : boundaries;
+  index : boundary_index Lazy.t;
   owned : owned_extent option;
 }
 type snapshot = content
@@ -34,7 +44,7 @@ let invalidate_revision t =
   t.content <- {content with revision = ref ()}
 
 let create () =
-  {content = {text = ""; revision = ref (); boundaries = One_byte; owned = None}; cursor = 0}
+  {content = {text = ""; revision = ref (); boundaries = One_byte; index = fresh_index ""; owned = None}; cursor = 0}
 let contents t = t.content.text
 let length t = String.length t.content.text
 let cursor t = t.cursor
@@ -61,7 +71,7 @@ let edit t transition =
       Printexc.raise_with_backtrace exn backtrace
 
 let clear t =
-  edit t (fun _ _ revision -> {text = ""; revision; boundaries = One_byte; owned = None}, 0)
+  edit t (fun _ _ revision -> {text = ""; revision; boundaries = One_byte; index = fresh_index ""; owned = None}, 0)
 
 let after_edit (owned : owned_extent option) ~offset ~removed ~inserted =
   match owned with
@@ -74,22 +84,44 @@ let after_edit (owned : owned_extent option) ~offset ~removed ~inserted =
       else if offset >= start + length then owned
       else None
 
-let boundary_at_or_after text boundaries cursor =
-  match boundaries with
-  | One_byte -> min (String.length text) cursor
+(* Lower-bound search within the retained prefix; suffix offsets may belong
+   to earlier text after a tail deletion and are never consulted. *)
+let boundary_position index cursor =
+  let rec find first after =
+    if first >= after then first
+    else
+      let middle = first + (after - first) / 2 in
+      if index.offsets.(middle) < cursor then find (middle + 1) after
+      else find first middle in
+  find 0 index.count
+
+let boundary_at_or_after content cursor =
+  let length = String.length content.text in
+  if cursor >= length then length
+  else match content.boundaries with
+  | One_byte -> cursor
   | Graphemes | Unknown ->
-      (match List.find_opt (fun offset -> offset >= cursor)
-        (Masc_tui_message_layout.input_boundaries text) with
-       | Some offset -> offset
-       | None -> String.length text)
+      let index = Lazy.force content.index in
+      let at = boundary_position index cursor in
+      if at < index.count then index.offsets.(at) else length
 
 let previous_boundary content cursor =
   match content.boundaries with
   | One_byte -> max 0 (cursor - 1)
   | Graphemes | Unknown ->
-      List.fold_left
-        (fun previous offset -> if offset < cursor then offset else previous) 0
-        (Masc_tui_message_layout.input_boundaries content.text)
+      let index = Lazy.force content.index in
+      index.offsets.(max 0 (boundary_position index cursor - 1))
+
+let index_after_deletion content ~cursor ~previous updated =
+  if cursor = previous then content.index
+  else if cursor = String.length content.text && Lazy.is_val content.index then
+    let index = Lazy.force content.index in
+    if index.prefix_stable then
+      (* UAX #29 grapheme boundaries before this complete tail cluster do not
+         change. Keep an immutable view of the array, without copying it. *)
+      lazy { index with count = boundary_position index previous + 1 }
+    else fresh_index updated
+  else fresh_index updated
 
 let insert t text =
   edit t (fun content cursor revision ->
@@ -100,8 +132,9 @@ let insert t text =
       | Graphemes -> Graphemes
       | Unknown -> classify updated in
     let owned = after_edit content.owned ~offset:cursor ~removed:0 ~inserted:(String.length text) in
-    let cursor = boundary_at_or_after updated boundaries (cursor + String.length text) in
-    {text = updated; revision; boundaries; owned}, cursor)
+    let next = {text = updated; revision; boundaries; index = fresh_index updated; owned} in
+    let cursor = boundary_at_or_after next (cursor + String.length text) in
+    next, cursor)
 
 let insert_owned t text =
   let owner = ref () and offset = t.cursor in
@@ -157,7 +190,7 @@ let append t text =
       match content.boundaries with
       | One_byte | Unknown -> Unknown
       | Graphemes -> Graphemes in
-    {text = updated; revision; boundaries; owned = content.owned}
+    {text = updated; revision; boundaries; index = fresh_index updated; owned = content.owned}
   with
   | next ->
     let cursor = String.length next.text in
@@ -184,7 +217,7 @@ let append_separated t ~separator text =
       match content.boundaries with
       | One_byte | Unknown -> Unknown
       | Graphemes -> Graphemes in
-    {text = updated; revision; boundaries; owned = content.owned}
+    {text = updated; revision; boundaries; index = fresh_index updated; owned = content.owned}
   with
   | next ->
     let cursor = String.length next.text in
@@ -205,7 +238,7 @@ let move_left t =
 let move_right t =
   let content = t.content in
   let resolved = resolve content in
-  let cursor = boundary_at_or_after resolved.text resolved.boundaries
+  let cursor = boundary_at_or_after resolved
       (min (String.length resolved.text) (t.cursor + 1)) in
   if resolved != content then t.content <- resolved;
   t.cursor <- cursor
@@ -218,8 +251,9 @@ let replace_prefix t prefix =
       | Graphemes | Unknown -> Unknown in
     let owned = after_edit content.owned ~offset:(String.length prefix)
         ~removed:(cursor - String.length prefix) ~inserted:0 in
-    let cursor = boundary_at_or_after updated boundaries (String.length prefix) in
-    {text = updated; revision; boundaries; owned}, cursor)
+    let next = {text = updated; revision; boundaries; index = fresh_index updated; owned} in
+    let cursor = boundary_at_or_after next (String.length prefix) in
+    next, cursor)
 
 let backspace t =
   edit t (fun content cursor revision ->
@@ -231,8 +265,10 @@ let backspace t =
       | One_byte -> One_byte
       | Graphemes | Unknown -> Unknown in
     let owned = after_edit content.owned ~offset:previous ~removed:(cursor - previous) ~inserted:0 in
-    let cursor = boundary_at_or_after updated boundaries previous in
-    {text = updated; revision; boundaries; owned}, cursor)
+    let index = index_after_deletion content ~cursor ~previous updated in
+    let next = {text = updated; revision; boundaries; index; owned} in
+    let cursor = boundary_at_or_after next previous in
+    next, cursor)
 
 let delete_word t =
   replace_prefix t

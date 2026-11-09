@@ -98,9 +98,7 @@ let handle_keeper_github_login_post ~clock state req reqd =
           ~stalled_after_s:Server_mcp_transport_http_headers.sse_stalled_after_s
           reqd (Httpun.Response.create ~headers `OK)
       in
-      Fun.protect
-        ~finally:(fun () -> Server_sse_response.close response)
-        (fun () ->
+      Server_sse_response.close_after response (fun () ->
            match
              Keeper_github_identity.stream_login
                ~config

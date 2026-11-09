@@ -42,7 +42,16 @@ val plain_reasons :
     there is no reason, or when the first one does not fit under the heading
     (with the note, when there is more than one reason). *)
 
+type titles =
+  { decisions : string
+  ; continuation : string
+  ; capacity : string
+  ; actions : string
+  }
+(** The caller owns the language and observation scope of each heading. *)
+
 val draw :
+  titles:titles ->
   inner:int ->
   rows:int ->
   is_selected:('action -> bool) ->

@@ -22,4 +22,6 @@ val render_code : Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
 val code_draft_rows : Masc_tui_types.state -> cols:int -> string list
-(** The same draft comparison rows supply drawing and scrolling. *)
+(** The same immutable draft comparison supplies drawing and scrolling.
+    Preparation is reused only for that draft value at the same pane width;
+    edits, source observations and save-phase changes produce a new value. *)

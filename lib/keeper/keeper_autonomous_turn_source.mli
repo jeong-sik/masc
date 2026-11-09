@@ -6,7 +6,9 @@
     Final text and typed execution steps come from the same exact raw trace;
     it never scans or concatenates provider runs. Tool steps carry a canonical
     execution id only when the declared execution ledger row matches the exact
-    raw invocation occurrence. Ambiguous or missing evidence remains unlinked. *)
+    raw invocation occurrence. Inline composition child rows stay available to
+    TurnRecord consumers but do not compete with top-level raw invocation slots.
+    Ambiguous or missing evidence remains unlinked. *)
 
 type turn =
   { turn_id : string

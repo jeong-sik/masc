@@ -197,6 +197,11 @@ let execute_with_observers_with_authority
          Keeper_tool_call_log.set_disposition
            ~invocation
            ~disposition:result.Keeper_tool_execution.disposition;
+         Option.iter
+           (fun evidence -> Keeper_tool_call_log.set_board_action_evidence
+               ~invocation
+               ~evidence:(Board_tool_evidence.for_tool ~tool_name:name evidence))
+           (Board_tool_evidence.of_metadata result.metadata);
          if result.retained_artifacts <> [] then
            Keeper_tool_call_log.set_retained_artifacts ~invocation result.retained_artifacts;
          Option.iter

@@ -1,0 +1,133 @@
+{
+  "base": "3d1271ef26b82b604b8f88dd6c126947ee4578bd",
+  "recorded_at": "2026-11-09T13:32:52.266462+00:00",
+  "parse_compiler": "5.5.1",
+  "parse_only": true,
+  "typecheck": false,
+  "ocaml_tests_executed": false,
+  "local_dune": false,
+  "ci": false,
+  "independent_source_review": "issue_disposition_review found no remaining P0-P2 in lib and root batch tests; root read agent-authored test deltas",
+  "results": [
+    {
+      "file": "lib/board/board_dispatch.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "8c2bf4f076a50d92f78821591e876710e357f563c2f74e9817ce112420d818bf"
+    },
+    {
+      "file": "lib/board/board_dispatch.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "b77752d1dfa9dea46f3837e19ace1191aa6217dfe23af090722e0ed8a6eff5e5"
+    },
+    {
+      "file": "lib/board_tool_adapter/board_tool_evidence.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "78b576cc81197b4dcbc7189ad56dfdc08d3c0ff7630291ffb4f34bced5420035"
+    },
+    {
+      "file": "lib/board_tool_adapter/board_tool_evidence.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "78bf5394a98ddc7891b3e9d3c874cbe03156e19d394abbb6835bf926ee276863"
+    },
+    {
+      "file": "lib/board_tool_adapter/board_tool_handlers.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "67467792115cd3f8fb97d5c7237b0be159e2eb5f8b3665142298ecf80a30f511"
+    },
+    {
+      "file": "lib/board_tool_adapter/board_tool_post.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "15b6fec2f7f906dbe59d05c64841f6d2b1c7ce9aeb5791368e4652c6f3b73e67"
+    },
+    {
+      "file": "lib/keeper/keeper_hooks_agent_core.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "65e5bb44d7a1adeefee2dc93bceaba13d044daac8c86ff5f6cc8db78e1d554f8"
+    },
+    {
+      "file": "lib/keeper/keeper_tool_plan_executor.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "1eff2d2d402e888f209f0fe43debda6f8b47698b101e3f6a120f58f579e1d832"
+    },
+    {
+      "file": "lib/keeper/keeper_tools_agent_core_handler_exec.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "95bb5fd57d8f3a21a4a4f2d4d16168eb35550817ffc32f6e20fd1078048ced1b"
+    },
+    {
+      "file": "lib/keeper_tool_call_log.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "0d8e73b4001bd22c6fff6af03236e4418a2ab305411ed659ebf95f0768f1e474"
+    },
+    {
+      "file": "lib/keeper_tool_call_log.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "8dc248563568c3f6f19b601e17e4e911138166029570b4a90c58712094a45cf9"
+    },
+    {
+      "file": "lib/server/server_board_reaction_http.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "41493172acf80a34bba6f71f9c33a1194c35854a4caa026ae588d72b16f2a458"
+    },
+    {
+      "file": "lib/server/server_dashboard_http_keeper_tool_calls.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "0f794d89a9931ed0b2980a8257be94ae07eb300c518790743af5351b6c7768ae"
+    },
+    {
+      "file": "lib/server/server_dashboard_http_keeper_tool_calls.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "c4195d62d9cc79f186fe29597f49ed361bf6f2707d01020957b85884a6e5374e"
+    },
+    {
+      "file": "lib/tool_types/tool_result.mli",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "9d0e7a331ed9944c8edead341689a6d4ddf24ce3c250b1594169c1358aefd291"
+    },
+    {
+      "file": "test/test_board_dispatch.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "e888a1195efc088f1d938de3b43b70e64ef7b8144f99656d09d202db868ec73f"
+    },
+    {
+      "file": "test/test_keeper_tool_call_log.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "34f50719b7a119a42b0371c88bbaa0022266319ffaa03ea120c9d77839743fdc"
+    },
+    {
+      "file": "test/test_keeper_tool_plan_executor.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "f0e78c3e4b31a5eda17cb290df7cfec73723d08964b3c2859ef498b83f769283"
+    },
+    {
+      "file": "test/test_server_dashboard_http_keeper_tool_lookup.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "e0cf4d306ea19fb9380274a4a2833fac63e6b0104d18b72797792c063be076e8"
+    },
+    {
+      "file": "test/test_tool_board_coverage.ml",
+      "exit_code": 0,
+      "diagnostic": "",
+      "sha256": "19b43d69aab6aecdb51c8a0e2c9a7f45cac0d22cdb83f96a48fec7541d543ad3"
+    }
+  ]
+}

@@ -18,6 +18,7 @@ import {
 } from './keeper-turn-inspector'
 import { TurnInspectorDrawer } from './keeper-turn-inspector-drawer'
 import type { KeeperConversationEntry } from '../types'
+import type * as KeeperToolCallsApi from '../api/dashboard-keeper-tool-calls'
 
 vi.mock('../api/dashboard', () => {
   return {
@@ -27,6 +28,13 @@ vi.mock('../api/dashboard', () => {
     fetchKeeperTurnRecords: vi.fn(),
   }
 })
+
+vi.mock('../api/dashboard-keeper-tool-calls', async importOriginal => ({
+  ...await importOriginal<typeof KeeperToolCallsApi>(),
+  fetchKeeperToolCallsByExecutionIds: vi.fn(async (keeper: string, ids: readonly string[]) => ({
+    keeper, requested_execution_ids: [...ids], entries: [],
+  })),
+}))
 
 const fetchKeeperProviderInputMock = vi.mocked(fetchKeeperProviderInput)
 const fetchKeeperProviderInputPartMock = vi.mocked(fetchKeeperProviderInputPart)

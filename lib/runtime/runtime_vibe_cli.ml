@@ -311,7 +311,7 @@ let remove_call_dir call_dir =
       (Printexc.to_string exn)
 ;;
 
-let run config ~prompt =
+let run ~host:(_ : Runtime_account_access.host_account) config ~prompt =
   match validate_config config with
   | Error detail -> Error (Invalid_config detail)
   | Ok () when not (Process_eio.is_initialized ()) -> Error Process_runtime_unavailable

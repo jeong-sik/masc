@@ -1085,7 +1085,8 @@ let run_spawned ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_
 ;;
 
 let run_turn ?(conversation_mode = Start) ?home_dir ?before_spawn ?on_spawned ?on_prompt_sent ?on_context_submission
-    ?(on_terminal_received = fun () -> ()) ~mgr ~clock ~cwd
+    ?(on_terminal_received = fun () -> ()) ~host:(_ : Runtime_account_access.host_account)
+    ~mgr ~clock ~cwd
     ?(on_conversation_ready = fun ~conversation_id:_ -> Ok ()) ?on_stream_event
     config ~prompt =
   let* () =

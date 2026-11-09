@@ -1,0 +1,12 @@
+
+ RUN  v5.0.2 /Users/dancer/me/workspace/yousleepwhen/masc-issue-26034-board-response/dashboard
+
+
+ Test Files  5 passed (5)
+      Tests  144 passed (144)
+   Start at  22:56:23
+   Duration  5.36s (environment 30%, import 20%, setup 20%, transform 17%, tests 12%, worker 1%)
+
+    Isolate  5 workers spawned · ~442ms startup each (spawn + environment, per file)
+             at least ~1.77s faster with isolate: false — reuses workers across files instead of one per file
+

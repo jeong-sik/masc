@@ -8,25 +8,23 @@ module Size = Keeper_microvm_guest_size
 
 let value = function Ok value -> value | Error detail -> fail detail
 
-(* An exec-per-request plan in the shape requested_apple_plan builds. *)
-let exec_plan : Plan.t =
-  { image = "fixture:image"
-  ; guest_size = {Size.memory = value (Size.memory_of_string "2g"); cpus = value (Size.cpus_of_int 4)}
-  ; user = "502:20"; working_directory = Sandbox.work_volume_guest_root
-  ; command = ["tail"; "-f"; "/dev/null"]
-  ; mounts =
-      [ Plan.Host_dir {source = "/host/identity"; destination = "/guest/identity"; read_only = true}
-      ; Plan.Named_volume {name = "masc-keeper-work-fixture"; destination = Sandbox.work_volume_guest_root}
-      ; Plan.Host_dir {source = "/host/shim"; destination = Sandbox.shim_guest_dir; read_only = true} ]
-  ; isolation = Backend.all_guest_constraints
-  ; capabilities_added = []; published_sockets = []
-  ; network = Plan.Network_none
-  ; environment = ["GH_CONFIG_DIR", "/guest/identity"]
-  ; labels = ["masc.mcp.keeper", "fixture"; Sandbox.microvm_backend_label_key, "apple_container"]
-  }
+(* The keeper's own parts of the plan, as requested_apple_plan passes them. *)
+let fixture_image = "fixture:image"
+let fixture_size = {Size.memory = value (Size.memory_of_string "2g"); cpus = value (Size.cpus_of_int 4)}
+let fixture_mounts =
+  [ Plan.Host_dir {source = "/host/identity"; destination = "/guest/identity"; read_only = true}
+  ; Plan.Named_volume {name = "masc-keeper-work-fixture"; destination = Sandbox.work_volume_guest_root}
+  ; Plan.Host_dir {source = "/host/shim"; destination = Sandbox.shim_guest_dir; read_only = true} ]
+let fixture_environment = ["GH_CONFIG_DIR", "/guest/identity"]
+let fixture_labels = ["masc.mcp.keeper", "fixture"; Sandbox.microvm_backend_label_key, "apple_container"]
+
+let plan_publishing host_socket =
+  Agent.plan ~uid:502 ~gid:20 ~host_socket ~image:fixture_image ~guest_size:fixture_size
+    ~mounts:fixture_mounts ~network:Plan.Network_none ~environment:fixture_environment
+    ~labels:fixture_labels
 
 let host_socket = Agent.host_path ~base_path:"/Users/keeper/me" ~guest_name:"masc-keeper-vm-fixture"
-let agent_plan = Agent.plan ~uid:502 ~gid:20 ~host_socket exec_plan
+let agent_plan = plan_publishing host_socket
 
 (* ── where the socket is ─────────────────────────────────────────────── *)
 
@@ -56,11 +54,11 @@ let test_the_longest_guest_name_fits_the_socket_limit () =
       |> to_string) in
   let path = Agent.host_path ~base_path ~guest_name:longest in
   check bool "the plan's socket path check accepts it" true
-    (Plan.validate (Agent.plan ~uid:502 ~gid:20 ~host_socket:path exec_plan) = Ok ())
+    (Plan.validate (plan_publishing path) = Ok ())
 
 let test_a_base_path_too_long_for_a_socket_is_refused () =
   let path = Agent.host_path ~base_path:("/" ^ String.make 90 'b') ~guest_name:"masc-keeper-vm-fixture" in
-  match Plan.validate (Agent.plan ~uid:502 ~gid:20 ~host_socket:path exec_plan) with
+  match Plan.validate (plan_publishing path) with
   | Error [Plan.Invalid_published_socket {path = refused; problem = Plan.Too_long _}] ->
     check string "the host path is named" path refused
   | Error _ | Ok () -> fail "a host socket past the limit is refused before boot"
@@ -76,53 +74,37 @@ let test_the_agent_plan_starts_the_agent_as_root () =
     (List.mem Backend.Read_only_rootfs agent_plan.isolation);
   check bool "every other constraint holds, in order" true
     (agent_plan.isolation
-     = List.filter (fun c -> c <> Backend.Read_only_rootfs) exec_plan.isolation);
+     = List.filter (fun c -> c <> Backend.Read_only_rootfs) Backend.all_guest_constraints);
   check (list string) "three capabilities come back"
     ["CAP_SETUID"; "CAP_SETGID"; "CAP_SYS_ADMIN"]
     (List.map Plan.capability_to_string agent_plan.capabilities_added);
   check bool "the socket is published" true
     (agent_plan.published_sockets = [{Plan.host_path = host_socket; guest_path = Agent.guest_path}])
 
-(* The agent hands its own environment, working directory and the keeper's
-   ids to every request; an exec request is given the same on each call. *)
-let test_the_agent_carries_what_an_exec_request_sets () =
-  let exec_prefix =
-    value
-      (Sandbox.shim_exec_prefix_for Backend.Apple_container ~container_name:"fixture"
-         ~uid:502 ~gid:20 ~remote_root:Sandbox.work_volume_guest_root
-         ~shim_config_path:Sandbox.shim_config_guest_path) in
-  let rec flag_values name = function
-    | flag :: value :: rest when String.equal flag name -> value :: flag_values name rest
-    | _ :: rest -> flag_values name rest
-    | [] -> [] in
-  let inherited = List.length exec_plan.environment in
+(* The agent hands its own environment and working directory to every
+   request, so the shim finds its config and a writable HOME. *)
+let test_the_agent_carries_what_each_request_runs_with () =
+  let inherited = List.length fixture_environment in
   let added = List.filteri (fun index _ -> index >= inherited) agent_plan.environment in
-  check (list string) "the environment an exec sets"
-    (flag_values "--env" exec_prefix)
-    (List.map (fun (key, value) -> key ^ "=" ^ value) added);
-  check (list string) "the working directory an exec sets"
-    (flag_values "-w" exec_prefix) [agent_plan.working_directory];
-  (match agent_plan.command with
-   | [_shim; _serve; _socket; ids] ->
-     check (list string) "the ids an exec runs as" (flag_values "--user" exec_prefix) [ids]
-   | _ -> fail "the agent command ends with the keeper's ids");
+  check (list (pair string string)) "the environment a request runs with"
+    (Sandbox.request_environment ~shim_config_path:Sandbox.shim_config_guest_path) added;
+  check string "a request starts on the work volume"
+    Sandbox.work_volume_guest_root agent_plan.working_directory;
   check bool "the identity wiring comes first, unchanged" true
-    (List.filteri (fun index _ -> index < inherited) agent_plan.environment = exec_plan.environment)
+    (List.filteri (fun index _ -> index < inherited) agent_plan.environment = fixture_environment)
 
 let test_the_relay_version_is_part_of_the_plan () =
   check (pair string string) "the relay label"
     ("masc.mcp.agent_relay", string_of_int Exec_ssh_protocol.Relay.version) Agent.relay_label;
   check bool "carried as a stable label" true (List.mem Agent.relay_label agent_plan.labels);
-  let other_relay = {agent_plan with labels = exec_plan.labels @ [fst Agent.relay_label, "0"]} in
+  let other_relay = {agent_plan with labels = fixture_labels @ [fst Agent.relay_label, "0"]} in
   check bool "another relay version is another plan" true
-    (Plan.digest other_relay <> Plan.digest agent_plan);
-  check bool "and the agent plan is not the exec plan" true
-    (Plan.digest agent_plan <> Plan.digest exec_plan)
+    (Plan.digest other_relay <> Plan.digest agent_plan)
 
-let test_the_rest_is_the_exec_plan () =
-  check bool "image, size, mounts and network are the exec plan's" true
-    (agent_plan.image = exec_plan.image && agent_plan.guest_size = exec_plan.guest_size
-     && agent_plan.mounts = exec_plan.mounts && agent_plan.network = exec_plan.network);
+let test_the_rest_is_the_keepers () =
+  check bool "image, size, mounts and network are the keeper's" true
+    (agent_plan.image = fixture_image && agent_plan.guest_size = fixture_size
+     && agent_plan.mounts = fixture_mounts && agent_plan.network = Plan.Network_none);
   check bool "the plan is admissible" true (Plan.validate agent_plan = Ok ());
   match Sandbox.apple_turn_start_argv ~container_name:"fixture" ~plan:agent_plan
           ~lifecycle_labels:[] ~dns:None ~policy_proxy:None with
@@ -145,18 +127,17 @@ let facts_publishing published_sockets : Plan.facts =
   ; cap_add = List.map Plan.capability_to_string agent_plan.capabilities_added
   ; published_sockets; use_init = false; networks = []; environment = []; labels = [] }
 
-let test_a_guest_is_reached_the_way_it_publishes () =
+let test_only_its_own_socket_is_the_agent () =
   let base_path = "/Users/keeper/me" and guest_name = "masc-keeper-vm-fixture" in
-  let delivery published =
-    Keeper_types_profile_sandbox.microvm_delivery_to_string
-      (Agent.delivery_of_facts ~base_path ~guest_name (facts_publishing published)) in
+  let publishes published =
+    Agent.publishes_agent ~base_path ~guest_name (facts_publishing published) in
   let own = {Plan.host_path = Agent.host_path ~base_path ~guest_name; guest_path = Agent.guest_path} in
-  check string "the agent socket at its own host path" "agent_socket" (delivery [own]);
-  check string "nothing published" "exec_per_request" (delivery []);
-  check string "another guest's host path" "exec_per_request"
-    (delivery [{own with host_path = Agent.host_path ~base_path ~guest_name:"masc-keeper-vm-other"}]);
-  check string "another guest-side path" "exec_per_request"
-    (delivery [{own with guest_path = "/run/other.sock"}])
+  check bool "the agent socket at its own host path" true (publishes [own]);
+  check bool "nothing published" false (publishes []);
+  check bool "another guest's host path" false
+    (publishes [{own with host_path = Agent.host_path ~base_path ~guest_name:"masc-keeper-vm-other"}]);
+  check bool "another guest-side path" false
+    (publishes [{own with guest_path = "/run/other.sock"}])
 
 (* ── the host path before boot ───────────────────────────────────────── *)
 
@@ -262,12 +243,12 @@ let () =
       ; test_case "a base path too long is refused" `Quick test_a_base_path_too_long_for_a_socket_is_refused ]
     ; "plan",
       [ test_case "the agent starts as root" `Quick test_the_agent_plan_starts_the_agent_as_root
-      ; test_case "carries what an exec request sets" `Quick test_the_agent_carries_what_an_exec_request_sets
+      ; test_case "carries what each request runs with" `Quick
+          test_the_agent_carries_what_each_request_runs_with
       ; test_case "the relay version is part of the plan" `Quick test_the_relay_version_is_part_of_the_plan
-      ; test_case "the rest is the exec plan" `Quick test_the_rest_is_the_exec_plan ]
+      ; test_case "the rest is the keeper's" `Quick test_the_rest_is_the_keepers ]
     ; "reached",
-      [ test_case "a guest is reached the way it publishes" `Quick
-          test_a_guest_is_reached_the_way_it_publishes ]
+      [ test_case "only its own socket is the agent" `Quick test_only_its_own_socket_is_the_agent ]
     ; "before boot",
       [ test_case "a missing directory is made private" `Quick test_a_missing_directory_is_made_private
       ; test_case "an open directory is closed" `Quick test_an_open_directory_is_closed

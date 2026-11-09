@@ -156,8 +156,8 @@ let with_fixture ?(refused_boundary=false) kind f =
       ~speaker:{speaker_id=Some "owner";speaker_name=Some "Owner";speaker_authority=Keeper_chat_store.Owner} ();
     let captured=ref None in
     (match Consumer.consume_one ~config ~keeper_name ~commit:(fun original ->
-       captured:=Some original;Consumer.Memory_pending) with
-     | Ok Consumer.Pending -> ()
+       captured:=Some original;Consumer.Memory_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" })) with
+     | Ok (Consumer.Pending _) -> ()
      | Ok _ -> fail "actual original commit edge did not suspend"
      | Error error -> fail (Consumer.error_to_string error));
     let original=match !captured with Some original -> original | None -> fail "no original reached the real commit edge" in

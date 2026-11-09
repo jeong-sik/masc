@@ -62,10 +62,12 @@ module For_testing : sig
      Agent_core.Error.t) result
   val tool_boundary_state :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
+    chat_handoff:(unit -> (bool, Agent_core.Error.t) result) ->
     Keeper_tools_agent_core.terminal_effect_state ->
     (Runtime_agent.cooperative_yield_decision, Agent_core.Error.t) result
   val official_client_tool_boundary :
     repetition_execution:Keeper_repetition_scope.Execution.t option ->
+    chat_handoff:(unit -> (bool, Agent_core.Error.t) result) ->
     tool_name:string ->
     (Keeper_official_client_host.host_stop option, Agent_core.Error.t) result
   val registry_progress_on_event

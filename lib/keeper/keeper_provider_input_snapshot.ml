@@ -171,13 +171,11 @@ let to_json snapshot =
 ;;
 
 let exact_fields expected fields =
+  (* Each schema below lists distinct keys. Equal cardinality plus membership
+     of every key also excludes unknown and duplicate fields, without building
+     a filtered list for each key in every retained message and tool schema. *)
   List.length expected = List.length fields
-  && List.for_all
-       (fun name ->
-          match List.filter (fun (key, _) -> String.equal key name) fields with
-          | [ _ ] -> true
-          | [] | _ :: _ :: _ -> false)
-       expected
+  && List.for_all (fun name -> List.mem_assoc name fields) expected
 ;;
 
 let field name fields =

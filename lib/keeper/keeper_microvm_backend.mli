@@ -72,6 +72,29 @@ type recipe_delivery =
 val recipe_delivery : t -> recipe_delivery
 (** How this backend's CLI takes a build recipe. *)
 
+(** The runtimes whose guests take each keeper request as one [exec] of the
+    shim. Apple's [container] is not one of them ({!request_delivery}). *)
+type exec_runtime =
+  | Microsandbox_exec  (** [msb exec] *)
+  | Nerdctl_kata_exec  (** [nerdctl exec] into the Kata pod *)
+
+(** How a keeper request reaches the shim in a running guest. The runtime
+    decides; a keeper TOML has no key for it. *)
+type request_delivery =
+  | Guest_agent
+      (** The guest's first process is the shim's agent
+          ([masc-exec-shim --serve]), and the runtime publishes its socket on
+          the host ([container run --publish-socket]). Each request is one
+          connection to that socket (RFC microvm-guest-agent-over-socket). *)
+  | Exec_per_request of exec_runtime
+      (** One [exec] of the shim per request, through the runtime's CLI. *)
+
+val request_delivery : t -> request_delivery
+(** [Guest_agent] for Apple's [container]: it is the one runtime that
+    publishes a guest socket, and its [container exec -i] leaves a pipe end
+    open in the VM runtime on every call (RFC 4.1). [Exec_per_request] for
+    [msb] and [nerdctl]. *)
+
 val default_for_host : unit -> t option
 (** The backend to assume when a keeper declares [Micro_vm] without naming
     one. [Some Apple_container] on macOS, where that runtime is the platform

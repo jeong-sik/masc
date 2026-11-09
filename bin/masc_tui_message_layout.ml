@@ -720,6 +720,15 @@ let input_window ~max_cells ~cursor input =
 let input_boundaries input =
   0 :: List.map (fun piece -> piece.end_offset) (display_pieces input)
 
+let input_boundary_index input =
+  let offsets = Dynarray.create () in
+  Dynarray.add_last offsets 0;
+  iter_display_pieces input
+    ~piece:(fun _ after _ _ -> Dynarray.add_last offsets after)
+    ~ascii:(fun first after ->
+      for offset = first + 1 to after do Dynarray.add_last offsets offset done);
+  Dynarray.to_array offsets
+
 type composer_window = { lines : string list; cursor_row : int; cursor_cells : int }
 
 let composer_window ~max_rows ~max_cells ~cursor input =

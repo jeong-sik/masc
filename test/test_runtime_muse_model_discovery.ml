@@ -96,7 +96,9 @@ let check_selected_account_metadata ~notify_before_reply () =
       let mgr = Posix_spawn_process_mgr.foreground_mgr ~clock
         ~grace_seconds:Process_eio.child_exit_grace_seconds in
       Discovery.run ~mgr ~clock ~cwd:Eio.Path.(Eio.Stdenv.fs env / root)
-        ~account_home ~cli_path:"/bin/sh"
+        ~account:(Masc_test_deps.authorized_muse
+          (Runtime_account_access.Declared_home (Masc_test_deps.muse_home account_home)))
+        ~cli_path:"/bin/sh"
         ~timeout_s:(if notify_before_reply then 0.5 else 10.)) in
     (match notify_before_reply, result with
      | true, Error (Runtime_muse_serve.Timeout {seconds; turn_accepted}) ->
@@ -118,7 +120,9 @@ let check_selected_account_metadata ~notify_before_reply () =
     | [] -> fail "model query missing")
 ;;
 
-let () = run "Muse model discovery"
+let () =
+  Masc_test_deps.publish_single_user_access ();
+  run "Muse model discovery"
   [ "metadata", [test_case "source and projection" `Quick test_sources_and_projection
                 ; test_case "nullable and old host" `Quick test_nullable_limits_and_old_host
                 ; test_case "malformed metadata" `Quick test_malformed_model_metadata]

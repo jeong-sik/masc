@@ -3,6 +3,13 @@ module Ansi = Masc_tui_ansi.Ansi
 module Theme = Masc_tui_ansi.Theme
 module Terminal_text = Masc_tui_ansi.Terminal_text
 
+type titles =
+  { decisions : string
+  ; continuation : string
+  ; capacity : string
+  ; actions : string
+  }
+
 let column_gap = 2
 let min_card_width = 44
 let card_row_gap = 1
@@ -77,7 +84,7 @@ let row_body ~is_selected ~cells (action, label) =
   let lines = row_lines ~cells label in
   if is_selected action then List.map (band ~cells) lines else lines
 
-let draw ~inner ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status ~actions =
+let draw ~(titles : titles) ~inner ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~status ~actions =
   let fits =
     Masc_tui_card.columns_that_fit ~inner_width:inner ~gap:column_gap
       ~min_card_width ~max_columns:column_count
@@ -88,7 +95,7 @@ let draw ~inner ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~st
       List.concat_map (row_body ~is_selected ~cells) entries
     in
     let decision_card =
-      { Masc_tui_card.title = "Needs your decision"
+      { Masc_tui_card.title = titles.decisions
       ; body =
           (fun ~cells ->
              match decisions with
@@ -99,13 +106,13 @@ let draw ~inner ~rows ~is_selected ~decisions ~decisions_whole ~continuation ~st
       }
     in
     let continue_card =
-      { Masc_tui_card.title = "Continue"; body = rows_of continuation }
+      { Masc_tui_card.title = titles.continuation; body = rows_of continuation }
     in
     let status_card =
-      { Masc_tui_card.title = "Status"; body = (fun ~cells -> status ~cells) }
+      { Masc_tui_card.title = titles.capacity; body = (fun ~cells -> status ~cells) }
     in
     let actions_card =
-      { Masc_tui_card.title = reasons_title (List.length actions)
+      { Masc_tui_card.title = titles.actions
       ; body = (fun ~cells -> List.concat_map (reason_lines ~cells) actions)
       }
     in

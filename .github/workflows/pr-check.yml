@@ -25,6 +25,7 @@ on:
           - browser-lane
           - source-readers
           - code-drafts
+          - tui-performance
 
 permissions:
   contents: read

@@ -366,7 +366,7 @@ let prompts_detail_layout state ~rows ~error_rows ~list_count =
       (min (combined - 1) (min 8 (max 1 (combined / 3)))) in
   (list_height, max 1 (combined - list_height))
 
-let prompts_detail_lines (state : state) ~cols =
+let prepare_prompts_detail_lines (state : state) ~cols =
   let prompts = Masc_tui_fetched.view_for ~equal:Unit.equal state.prompts ~key:() in
   let wrap text =
     Message_layout.wrap_body ~max_cells:(max 1 (framed_inner_width cols - 2))
@@ -495,6 +495,56 @@ let prompts_detail_lines (state : state) ~cols =
                     @ List.concat_map wrap lines))
   in
   status @ document
+
+type prompt_detail_inputs = {
+  prompt_source : (unit, Tui_decode.prompts_snapshot) Masc_tui_fetched.t;
+  prompt_cursor : int;
+  runtime_assets : bool;
+  fragments : bool;
+  librarian_input : (string * string list) option;
+  librarian_error : string option;
+  librarian_loading : bool;
+  language : ui_language;
+  width : int;
+  palette_generation : int;
+  lift_enabled : bool;
+  table_frame : bool;
+}
+
+let[@warning "+9+27"] same_prompt_detail_inputs
+    { prompt_source; prompt_cursor; runtime_assets; fragments; librarian_input;
+      librarian_error; librarian_loading; language; width; palette_generation;
+      lift_enabled; table_frame } b =
+  prompt_source == b.prompt_source && prompt_cursor = b.prompt_cursor
+  && runtime_assets = b.runtime_assets && fragments = b.fragments
+  && librarian_input == b.librarian_input && librarian_error = b.librarian_error
+  && librarian_loading = b.librarian_loading && language = b.language && width = b.width
+  && palette_generation = b.palette_generation && lift_enabled = b.lift_enabled
+  && table_frame = b.table_frame
+
+let prompt_detail_cache :
+    (prompt_detail_inputs * string list) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let prompts_detail_lines (state : state) ~cols =
+  let inputs = {
+    prompt_source = state.prompts; prompt_cursor = state.prompts_cursor;
+    runtime_assets = state.prompts_show_runtime_assets;
+    fragments = state.prompts_show_fragments;
+    librarian_input = state.prompts_librarian_input;
+    librarian_error = state.prompts_librarian_input_error;
+    librarian_loading = state.prompts_librarian_input_loading;
+    language = state.ui_language; width = cols;
+    palette_generation = Masc_tui_terminal_palette.(snapshot_generation (snapshot ()));
+    lift_enabled = Masc_tui_theme.lift_is_enabled ();
+    table_frame = !table_frame_enabled;
+  } in
+  match Domain.DLS.get prompt_detail_cache with
+  | Some (seen, rows) when same_prompt_detail_inputs seen inputs -> rows
+  | Some _ | None ->
+      let rows = prepare_prompts_detail_lines state ~cols in
+      Domain.DLS.set prompt_detail_cache (Some (inputs, rows));
+      rows
 
 let prompts_detail_viewport (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -1634,15 +1684,35 @@ let config_content_height (state : state) =
      - surface_chrome_rows - config_heading_rows ~cols state)
 
 (* The System landing and its scroll bounds use these same physical rows.
-   Identity rows already account for their indentation and clickable menu;
-   status rows reserve the two cells the source-status reader leaves out. *)
+   Identity rows already account for their indentation and clickable menu. *)
+let runtime_status_cache = Domain.DLS.new_key (fun () -> None)
+
+let runtime_config_status_body state ~cols =
+  let source = state.runtime_config_view in
+  let error = state.runtime_config_view_error in
+  let current = runtime_config_unmatched_current state in
+  let palette = Masc_tui_terminal_palette.(snapshot_generation (snapshot ())) in
+  let lift = Masc_tui_theme.lift_is_enabled () in
+  match Domain.DLS.get runtime_status_cache with
+  | Some ((seen, seen_error, seen_current, width, seen_palette, seen_lift), rows)
+      when Option.equal (==) seen source && seen_error = error
+        && Option.equal (==) seen_current current && width = cols
+        && seen_palette = palette && seen_lift = lift -> rows
+  | Some _ | None ->
+      let rows = runtime_config_status_lines state ~cols in
+      Domain.DLS.set runtime_status_cache
+        (Some ((source, error, current, cols, palette, lift), rows));
+      rows
+
 let runtime_config_status_rows state ~cols =
+  (* Identity chrome registers this frame's clickable menu. Only the pure
+     source-status document is retained across viewport and draw calls. *)
   List.map (fun line -> config_metadata_style Masc_tui_runtime_config_view.Neutral, line)
     (config_identity_rows ~cols state)
-  @ runtime_config_status_lines state ~cols
+  @ runtime_config_status_body state ~cols
 
 let runtime_config_status_scroll_limit state ~terminal_rows ~cols =
-  let room = max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5) in
+  let room = max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - surface_chrome_rows) in
   max 0 (List.length (runtime_config_status_rows state ~cols) - room)
 
 let render_runtime_config_status state =

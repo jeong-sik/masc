@@ -1,12 +1,16 @@
 (** Memory fact age ladder based on first_seen timestamps (RFC-0515 §2.4.5,
-    E17).
+    E17, E28).
 
     The server counts a Keeper's ordinary facts into {!bin_count} bins by the
-    time since each fact was first seen. Bin 0 is under an hour. Bins 1 – 22
-    split one hour to 30 days into equal steps on a log axis, and bin 23 is
-    30 days or older: bin [k] (1 ≤ k ≤ 23) starts at
-    [1h × 720 ^ ((k − 1) ÷ 22)]. This is the mock's [ladderBins] with n = 24,
-    [r = ln 720 ÷ 22].
+    time since each fact was first seen. Bin 0 is under an hour. Each of the
+    four {!edge}s (1h, 1d, 7d, 30d) starts a bin exactly. Between two edges
+    the bins start on equal steps of a log axis: 8 bins from an hour to a
+    day, 8 from a day to seven days, 6 from seven days to 30 days. The last
+    bin is 30 days or older.
+
+    The edges are declared here once. The screens read their ticks, colours
+    and words from {!edge_span} and {!edge_bin}, never from numbers of their
+    own.
 
     A first_seen ahead of [now] has age 0. Pure: no clock of its own. *)
 
@@ -23,15 +27,30 @@ val index : bin -> int
 (** The bin's place in {!bins} and in the wire array: 0 for under an hour,
     23 for 30 days or older. *)
 
-val lower_edge : bin -> float
-(** The youngest age, in seconds, the bin counts: 0 for bin 0, one hour for
-    bin 1, 30 days for bin 23. {!classify} puts an age exactly on an edge in
-    the bin the edge starts. *)
+(** {1 The exact edges} *)
 
-val nearest_edge : float -> bin
-(** The bin whose lower edge lies nearest [age] seconds on the log axis,
-    [round (ln (age ÷ 1h) ÷ r) + 1] held to bins 1 – 23: the mock's
-    [ladderTicks]. An age of one hour or less is bin 1. *)
+type edge =
+  | Hour
+  | Day
+  | Week
+  | Month
+
+val edges : edge list
+(** The four edges, the youngest (one hour) first. *)
+
+(** An age in the unit a person reads it in. *)
+type span =
+  | Hours of int
+  | Days of int
+
+val edge_span : edge -> span
+(** One hour, one day, seven days, 30 days. *)
+
+val edge_bin : edge -> bin
+(** The bin the edge starts: bins 1, 9, 17 and 23. An age exactly on the
+    edge is in this bin, one second younger in the bin before it. *)
+
+(** {1 Counts} *)
 
 type t
 (** {!bin_count} counts, none below zero. *)

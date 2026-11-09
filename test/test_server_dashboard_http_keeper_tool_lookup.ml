@@ -98,6 +98,11 @@ let target keeper id =
   Uri.make ~path:("/api/v1/keepers/" ^ keeper ^ "/tool-calls")
     ~query:[ "execution_id", [ id ] ] () |> Uri.to_string
 
+let batch_target keeper ids =
+  Uri.make ~path:("/api/v1/keepers/" ^ keeper ^ "/tool-calls")
+    ~query:[ "execution_ids", [ Yojson.Safe.to_string (`List (List.map (fun id -> `String id) ids)) ] ] ()
+  |> Uri.to_string
+
 let row ~keeper ~execution_id ~ts ~output =
   let evidence =
     Keeper_file_change_evidence.edit_occurrence
@@ -152,6 +157,42 @@ let test_old_edit_and_peer_identity () =
     let unknown, _ = get state (target "editor" "unknown") in
     Alcotest.(check int) "unknown identity is absent" 404 unknown)
 
+let test_batch_uses_exact_index_and_keeps_ambiguity () =
+  with_workspace (fun _env _sw state _config store ->
+    let opaque = "old Board execution/+?&= 한글" in
+    append store (row ~keeper:"editor" ~execution_id:opaque ~ts:1. ~output:"original");
+    append store (row ~keeper:"peer" ~execution_id:opaque ~ts:2. ~output:"foreign");
+    let duplicate = row ~keeper:"editor" ~execution_id:"ambiguous" ~ts:3. ~output:"duplicate" in
+    append store duplicate;
+    append store duplicate;
+    List.init 250 (fun i -> row ~keeper:"editor" ~execution_id:("new-" ^ string_of_int i)
+      ~ts:(float_of_int (i + 4)) ~output:"new") |> List.iter (append store);
+    let ids = [ "ambiguous"; opaque; "not-retained" ] in
+    let status, body = get state (batch_target "editor" ids) in
+    Alcotest.(check int) "batch is an indexed read outside the tail" 200 status;
+    Alcotest.(check (list string)) "exact requested order echoed" ids
+      (body |> member "requested_execution_ids" |> to_list |> List.map to_string);
+    let entries = body |> member "entries" |> to_list in
+    Alcotest.(check int) "duplicate rows remain, missing rows are not invented" 3 (List.length entries);
+    Alcotest.(check bool) "foreign Keeper row never joins" false
+      (List.exists (fun entry -> entry |> member "output" = `String "foreign") entries);
+    Alcotest.(check int) "ambiguous identity has both rows" 2
+      (List.length (List.filter (fun entry -> entry |> member "execution_id" = `String "ambiguous") entries));
+    Alcotest.(check bool) "old exact row remains visible" true
+      (List.exists (fun entry -> entry |> member "execution_id" = `String opaque) entries);
+    List.iter (fun encoded ->
+      let path = Uri.make ~path:"/api/v1/keepers/editor/tool-calls"
+          ~query:[ "execution_ids", [ encoded ] ] () |> Uri.to_string in
+      let status, _ = get state path in
+      Alcotest.(check int) "invalid batch identity does not select a tail" 400 status)
+      [ "{"; "{}"; "[1]"; "[\"\"]"; "[\" \"]"; "[\"x\",null]"; "[\"x\",\"x\"]" ];
+    List.iter (fun query ->
+      let path = Uri.make ~path:"/api/v1/keepers/editor/tool-calls" ~query () |> Uri.to_string in
+      let status, _ = get state path in
+      Alcotest.(check int) "mixed or repeated batch parameters rejected" 400 status)
+      [ [ "execution_ids", [ "[]"; "[]" ] ]
+      ; [ "execution_id", [ opaque ]; "execution_ids", [ "[]" ] ] ])
+
 let test_ambiguity_and_invalid_query () =
   with_workspace (fun _env _sw state config store ->
     let stored = row ~keeper:"editor" ~execution_id:"duplicate" ~ts:1. ~output:"first" in
@@ -185,7 +226,9 @@ let test_store_failure_is_unavailable () =
     let status, body = get state (target "editor" "unknown") in
     Alcotest.(check int) "unreadable ledger is not an empty success" 503 status;
     Alcotest.(check string) "storage error is explicit" "tool_call_store_unavailable"
-      (body |> member "code" |> to_string))
+      (body |> member "code" |> to_string);
+    let status, _ = get state (batch_target "editor" [ "unknown" ]) in
+    Alcotest.(check int) "unreadable batch is not an empty success" 503 status)
 
 let test_raw_io_routes_require_admin () =
   with_workspace (fun env sw state config store ->
@@ -220,7 +263,8 @@ let test_raw_io_routes_require_admin () =
       Alcotest.(check int) "Admin allowed" 200 allowed;
       Alcotest.(check bool) "Admin receives retained raw I/O" true
         (String_util.contains_substring (Yojson.Safe.to_string body) secret))
-      [target "editor" "protected"; "/api/v1/keepers/editor/tool-calls?limit=200"];
+      [ target "editor" "protected"; batch_target "editor" [ "protected" ]
+      ; "/api/v1/keepers/editor/tool-calls?limit=200" ];
     let trace_id="trace-protected-original" in
     let turn_ref=Ids.Turn_ref.make ~trace_id ~absolute_turn:1 in
     append store (`Assoc ["ts",`Float (Unix.gettimeofday ());
@@ -311,6 +355,7 @@ let () =
   Alcotest.run "keeper_exact_tool_output_http"
     [ "GET /tool-calls?execution_id",
       [ Alcotest.test_case "old edit survives tail and peer traffic" `Quick test_old_edit_and_peer_identity
+      ; Alcotest.test_case "batch keeps old exact rows and ambiguity" `Quick test_batch_uses_exact_index_and_keeps_ambiguity
       ; Alcotest.test_case "ambiguity and invalid query are rejected" `Quick test_ambiguity_and_invalid_query
       ; Alcotest.test_case "storage failure remains unavailable" `Quick test_store_failure_is_unavailable
       ; Alcotest.test_case "raw I/O requires an Admin token" `Quick test_raw_io_routes_require_admin

@@ -516,9 +516,18 @@ let skill_source_lines ~config ~(sources : Masc.Tui_decode_tools.skill_catalog_s
 ;;
 
 (* The catalog pane's volume GC block, drawn above the catalog: what the
-   next press sends and the last answer. A reading would own every key and
-   its closing key would take an armed reclaim back. *)
+   next press sends, the server's last periodic report from the catalog
+   reading, and the last answer. A reading would own every key and its
+   closing key would take an armed reclaim back. *)
 let volume_gc_lines (state : state) =
+  let server_report =
+    Option.map
+      (fun (snapshot : Masc.Tui_decode_tools.tool_snapshot) ->
+         Masc_tui_volume_gc.server_report_line
+           ~timestamp:Terminal_text.short_timestamp_of_unix
+           snapshot.Masc.Tui_decode_tools.ts_volume_gc_report)
+      state.tools_inventory
+  in
   List.map
     (fun (tone, text) ->
        let color =
@@ -528,7 +537,7 @@ let volume_gc_lines (state : state) =
          | Masc_tui_volume_gc.Bad -> Theme.bad ()
        in
        color, " " ^ text)
-    (Masc_tui_volume_gc.lines state.volume_gc)
+    (Masc_tui_volume_gc.lines ~server_report state.volume_gc)
 ;;
 
 (* Through [tab_strip], the one drawing every in-screen strip shares. This one

@@ -399,6 +399,8 @@ class LocalBuildInstall(unittest.TestCase):
                     scripts = checkout / "scripts"
                     scripts.mkdir(parents=True)
                     shutil.copy2(SCRIPT, scripts / SCRIPT.name)
+                    (scripts / "lib").mkdir()
+                    shutil.copy2(REPO / "scripts/lib/install-workspace-dashboard.sh", scripts / "lib")
                     build_root = checkout / "_build"
                     build = build_root / "default/bin"
                     build.mkdir(parents=True)
@@ -455,6 +457,8 @@ class LocalBuildInstall(unittest.TestCase):
                 scripts = checkout / "scripts"
                 scripts.mkdir(parents=True)
                 shutil.copy2(SCRIPT, scripts / SCRIPT.name)
+                (scripts / "lib").mkdir()
+                shutil.copy2(REPO / "scripts/lib/install-workspace-dashboard.sh", scripts / "lib")
                 build = checkout / "_build/default/bin"
                 build.mkdir(parents=True)
                 binaries(build)

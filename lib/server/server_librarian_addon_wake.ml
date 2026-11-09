@@ -134,9 +134,10 @@ let install ~sw ~config =
               let bt=Printexc.get_raw_backtrace () in
               Atomic.set rescan_state Idle;
               Printexc.raise_with_backtrace exn bt)
-      | Exact_result_delivered _ ->
+      | Exact_result_delivered { installation_id; _ } ->
         Eio.Fiber.fork ~sw (fun () ->
           Eio.Fiber.yield ();
+          Keeper_librarian_queue_refresh.capacity_released ~config ~installation_id;
           run_discovery event)) in
   let unsubscribe=Runtime.subscribe_owner_events ~config ~package_id:Capture.package_id signal in
   Eio.Switch.on_release sw (fun () -> Atomic.set stopped true;unsubscribe ())

@@ -2,11 +2,9 @@
 
     Stage 11 (docs/audit/2026-05-18-godfile-decomposition-build-plan.html):
     the original 1750 LOC file was split into cohesive sub-modules so that
-    each schema family and the hand-mirrored enum strings can evolve in
-    isolation while [Tool_shard_types]'s public API stays byte-identical
-    for [Tool_shard.include Tool_shard_types]. *)
+    each schema family can evolve in isolation while [Tool_shard_types]'s
+    public API stays byte-identical for [Tool_shard.include Tool_shard_types]. *)
 
-include Tool_shard_types_enum_mirrors
 include Tool_shard_types_schemas_base
 include Tool_shard_types_board_keeper_projection
 include Tool_shard_types_schemas_filesystem

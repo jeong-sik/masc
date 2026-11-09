@@ -20,7 +20,7 @@ let replace_prepared ~title ~hints ~width rows reading =
   {reading with title;sections=[];prepared=Some (width,rows);hints=Some hints;
     search=forget_landing reading.search}
 
-let rows ~width reading = match reading.prepared with
+let prepare_rows ~width reading = match reading.prepared with
   | Some (prepared_width, rows) when prepared_width=width -> rows
   | Some _ -> [Note "Preparing document for this width…"]
   | None ->
@@ -39,6 +39,26 @@ let rows ~width reading = match reading.prepared with
       Content "" ::
       (List.map (fun line -> Heading line) (wrap section.heading)
        @ List.map (fun line -> Content line) (wrap section.body))) reading.sections
+
+type document_rows = { rows : row list; count : int }
+let document_rows_cache :
+    ((section list * document_kind * (int * row list) option * int)
+     * document_rows) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let document_rows ~width reading =
+  match Domain.DLS.get document_rows_cache with
+  | Some ((sections, kind, prepared, seen_width), projection)
+      when sections == reading.sections && kind = reading.kind
+        && prepared == reading.prepared && seen_width = width -> projection
+  | Some _ | None ->
+      let rows = prepare_rows ~width reading in
+      let projection = { rows; count = List.length rows } in
+      Domain.DLS.set document_rows_cache
+        (Some ((reading.sections, reading.kind, reading.prepared, width), projection));
+      projection
+
+let rows ~width reading = (document_rows ~width reading).rows
 
 let scroll ~count ~height reading =
   Position.offset ~count ~height reading.position
@@ -84,30 +104,63 @@ let search_editing reading = match reading.search with
   | Some search -> search.editing
   | None -> false
 let search_query reading = Option.map (fun search -> search.query) reading.search
-let searchable_rows ~width reading = match reading.prepared with
-  | Some (prepared_width, _) when prepared_width<>width -> []
-  | Some _ | None -> rows ~width reading
+let search_available ~width reading = match reading.prepared with
+  | Some (prepared_width, _) -> prepared_width=width
+  | None -> true
+
+type search_rows = {
+  marked : (row * search_mark) list;
+  matches : int list;
+}
+let search_rows_cache :
+    ((row list * bool * string) * search_rows) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let search_rows ~width reading =
+  let document = rows ~width reading in
+  let available = search_available ~width reading in
+  let query = Option.fold ~none:"" ~some:(fun search -> search.query) reading.search in
+  match Domain.DLS.get search_rows_cache with
+  | Some ((seen, seen_available, seen_query), projection)
+      when seen == document && seen_available = available && String.equal seen_query query -> projection
+  | Some _ | None ->
+      let matches = ref [] in
+      let marked = List.mapi (fun index row ->
+        let text = match row with Heading text | Content text | Note text -> text in
+        let mark =
+          if available && query<>"" && Masc_tui_pick_list.lowercase_contains ~needle:query
+              (Masc_tui_theme.strip_sgr text) then begin
+            matches := index :: !matches;
+            Match
+          end else No_match in
+        row,mark) document in
+      let projection = { marked; matches = List.rev !matches } in
+      Domain.DLS.set search_rows_cache (Some ((document, available, query), projection));
+      projection
+
+let marked_rows_cache :
+    (search_rows * int option * (row * search_mark) list) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
 let rows_with_search ~width reading =
-  let available = match reading.prepared with
-    | Some (prepared_width, _) -> prepared_width=width
-    | None -> true in
-  rows ~width reading
-  |> List.mapi (fun index row ->
-    let mark = match reading.search with
-      | Some search when available && search.query<>"" ->
-          let text=match row with Heading text | Content text | Note text -> text in
-          if Masc_tui_pick_list.lowercase_contains ~needle:search.query
-              (Masc_tui_theme.strip_sgr text) then
-            if search.landing=Some (width,index) then Current_match else Match
-          else No_match
-      | Some _ | None -> No_match in
-    row,mark)
-let matches ~width reading =
-  rows_with_search ~width reading
-  |> List.mapi (fun index (_,mark) -> match mark with
-      | No_match -> None
-      | Match | Current_match -> Some index)
-  |> List.filter_map Fun.id
+  let projection = search_rows ~width reading in
+  let landing = match reading.search with
+    | Some {landing=Some (seen_width,index);_} when seen_width=width -> Some index
+    | Some _ | None -> None in
+  match landing with
+  | None -> projection.marked
+  | Some current ->
+      match Domain.DLS.get marked_rows_cache with
+      | Some (seen, seen_landing, rows) when seen == projection && seen_landing=landing -> rows
+      | Some _ | None ->
+          let rows = List.mapi (fun index (row,mark) ->
+            row, (match mark with
+              | Match when index=current -> Current_match
+              | Match | No_match | Current_match -> mark)) projection.marked in
+          Domain.DLS.set marked_rows_cache (Some (projection, landing, rows));
+          rows
+
+let matches ~width reading = (search_rows ~width reading).matches
 let search_count ~width reading = match reading.search with
   | None -> 0
   | Some _ -> List.length (matches ~width reading)
@@ -115,7 +168,7 @@ let search_land ~width ~height ~backwards ~from_start reading = match reading.se
   | None -> reading
   | Some search ->
     let candidates=matches ~width reading in
-    let count=List.length (searchable_rows ~width reading) in
+    let count=if search_available ~width reading then (document_rows ~width reading).count else 0 in
     let after=if from_start then -1 else match search.landing with
       | Some (landing_width,index) when landing_width=width -> index
       | Some _ | None -> scroll ~count ~height reading in

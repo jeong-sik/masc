@@ -6214,7 +6214,7 @@ let memory_state (k : Masc.Tui_decode_memory_health.memory_keeper_health) =
            | Masc.Tui_decode_memory_health.Pass_lane_unconfigured
            | Masc.Tui_decode_memory_health.Pass_drained
            | Masc.Tui_decode_memory_health.Pass_yielded_to_waiting_unit
-           | Masc.Tui_decode_memory_health.Pass_pending
+           | Masc.Tui_decode_memory_health.Pass_pending _
            | Masc.Tui_decode_memory_health.Pass_not_committed)
     | None -> false in
   if Option.is_some k.mkh_read_error || Option.is_some k.mkh_source_read_error
@@ -12115,6 +12115,27 @@ let set_local_source_observation (state : state) source observation =
 let local_source_pending state source =
   if Local_read_order.in_flight (local_source_order state source) then
     Option.map Local_read_observation.pending (local_source_observation state source)
+  else None
+
+(* A display bar, not a gate on the read. A pending read younger than this is
+   expected to settle before a person could read a line about it, so drawing
+   its phase only makes the header grow and shrink on every poll. Past the
+   bar the same line is a readable symptom: the phase word is stable at that
+   age and the elapsed seconds say how long it has been stuck. *)
+let pending_display_bar_ns = 1_000_000_000L
+
+let past_pending_display_bar age = Int64.compare age pending_display_bar_ns >= 0
+
+let local_source_slow_pending state source =
+  if Local_read_order.in_flight (local_source_order state source) then
+    match local_source_observation state source with
+    | Some observation ->
+        let requested = (Local_read_observation.facts observation).requested_ns in
+        let age = Int64.sub (Mtime_clock.elapsed_ns ()) requested in
+        if past_pending_display_bar age then
+          Some (Local_read_observation.pending observation, age)
+        else None
+    | None -> None
   else None
 
 let local_source_cancellation (state : state) = function
@@ -20101,7 +20122,7 @@ let create_state
   opening_notice = None;
   followed_from = None;
   keeper_cursor = 0;
-  keeper_list_view = Masc_tui_keeper_list_model.By_state;
+  keeper_list_view = Masc_tui_keeper_list_model.Plain;
   keeper_outside_reading = (fun _ ~now:_ ~keeper_name:_ -> Masc_tui_keeper_list_model.outside_unread);
   keeper_list_density = Masc_tui_keeper_list_model.Two_lines;
   keeper_list_heading = None;
@@ -22971,39 +22992,6 @@ let lane_inventory_notice_lines ~cols state =
   List.concat_map (fun line -> Masc.Tui_terminal_text.sanitize_terminal_text line
     |> Masc_tui_message_layout.wrap_words ~max_cells:(max 1 (Masc_tui_frame.inner_width ~cols - 2))) notices
 
-let lanes_scrolled (state : state) ~cols =
-  match state.lanes_mode with
-  | Lanes_run_list _ ->
-      (* The run list replaces the two-section overview, so the typed model
-         counts its rows instead of the Keeper table's. *)
-      { sc_count =
-          (match state.lane_runs with
-           | None -> 0
-           | Some runs -> List.length runs)
-      ; sc_chrome = listing_chrome ~error:state.lane_runs_error
-      ; sc_overflow_takes_row = true
-      ; sc_preview_keep = None
-      }
-  | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
-      (* The detail's lines are built by the drawing; the frame reports the
-         clamp through [clamped_scroll], so no count is knowable here. *)
-      { sc_count = 0
-      ; sc_chrome = 0
-      ; sc_overflow_takes_row = false
-      ; sc_preview_keep = None
-      }
-  | Lanes_overview ->
-      let notices = lane_inventory_notice_lines ~cols state in
-      { sc_count = List.length (lane_inventory_entries state)
-      ; sc_chrome = Masc_tui_frame.chrome_rows + 3
-          + List.length notices
-          + lanes_action_error_row_count ~cols state.lanes_action_error
-          + runtime_lane_notice_lines ~cols state.runtime_lane_notice
-          + List.length (runtime_lane_stale_lines state)
-      ; sc_overflow_takes_row = true
-      ; sc_preview_keep = Some 1
-      }
-
 (* One browsable row of the Memory fact browser. The three kinds keep their
    sections apart -- an ordinary fact, a fact bound to a file, and a fact
    the store dropped -- while the cursor walks them as one flat list. *)
@@ -23098,15 +23086,19 @@ let memory_back (state : state) =
         Memory_stays
     | None -> Memory_leaves
 
-let visible_memory_keepers (state : state) =
+(* Only immutable snapshot data enters these projections. Reading state,
+   errors and selection still come from the current state at every call.
+   Retain one answer per domain, rather than a history of private readings. *)
+let memory_keeper_projection :
+    ((Masc.Tui_decode_memory_health.memory_health_snapshot * memory_overview_sort * string)
+     * Masc.Tui_decode_memory_health.memory_keeper_health list) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let project_memory_keepers ~sort ~query snapshot =
   let open Masc.Tui_decode_memory_health in
-  let raw_keepers =
-    match state.memory_health with
-    | None -> []
-    | Some s -> s.mhs_keepers
-  in
+  let raw_keepers = snapshot.mhs_keepers in
   let sorted_keepers =
-    match state.memory_overview_sort with
+    match sort with
     | Mem_overview_facts ->
         List.sort
           (fun (a : Masc.Tui_decode_memory_health.memory_keeper_health) (b : Masc.Tui_decode_memory_health.memory_keeper_health) ->
@@ -23146,16 +23138,29 @@ let visible_memory_keepers (state : state) =
           (fun a b -> String.compare a.mkh_keeper_id b.mkh_keeper_id)
           raw_keepers
   in
-  let query = memory_overview_query state in
-    if query = "" then sorted_keepers
-    else
-      List.filter
-        (fun k ->
-          Masc_tui_pick_list.lowercase_contains ~needle:query k.mkh_keeper_id
-          || Masc_tui_pick_list.lowercase_contains ~needle:query (memory_state_label (memory_state k)))
-        sorted_keepers
+  if query = "" then sorted_keepers
+  else
+    List.filter
+      (fun k ->
+        Masc_tui_pick_list.lowercase_contains ~needle:query k.mkh_keeper_id
+        || Masc_tui_pick_list.lowercase_contains ~needle:query (memory_state_label (memory_state k)))
+      sorted_keepers
 
-
+let visible_memory_keepers (state : state) =
+  match state.memory_health with
+  | None ->
+      Domain.DLS.set memory_keeper_projection None;
+      []
+  | Some snapshot ->
+      let sort = state.memory_overview_sort in
+      let query = memory_overview_query state in
+      match Domain.DLS.get memory_keeper_projection with
+      | Some ((seen, seen_sort, seen_query), rows)
+          when seen == snapshot && seen_sort = sort && String.equal seen_query query -> rows
+      | Some _ | None ->
+          let rows = project_memory_keepers ~sort ~query snapshot in
+          Domain.DLS.set memory_keeper_projection (Some ((snapshot, sort, query), rows));
+          rows
 
 let selected_memory_keeper (state : state) =
   let rows = visible_memory_keepers state in
@@ -23237,145 +23242,165 @@ let memory_facts_failure (state : state) =
    category, and hiding them under a category filter would read as the store
    losing them. A store that failed to read or has no snapshot contributes
    no rows here; the render names that state in its section header. *)
+let memory_fact_projection :
+    ((Masc.Tui_decode_memory_facts.memory_fact_snapshot * memory_category_filter
+      * memory_sort_order * string * bool) * memory_fact_row list) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let project_memory_facts ~category ~sort ~query ~fleet snapshot : memory_fact_row list =
+  let ordinary =
+    match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
+    | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
+      ->
+        []
+    | Masc.Tui_decode_memory_facts.Memory_store_present store ->
+        let facts =
+          match category with
+          | Category_all -> store.Masc.Tui_decode_memory_facts.mos_facts
+          | Category_ordinary category ->
+              List.filter
+                (fun (fact : Masc.Tui_decode_memory_facts.memory_fact) ->
+                  fact.Masc.Tui_decode_memory_facts.mf_category = category)
+                store.Masc.Tui_decode_memory_facts.mos_facts
+          | Category_source | Category_dropped -> []
+        in
+        List.map (fun fact -> Memory_row_fact fact) facts
+  in
+  let source_rows, invalidation_rows =
+    match snapshot.Masc.Tui_decode_memory_facts.mfs_source with
+    | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
+      ->
+        ([], [])
+    | Masc.Tui_decode_memory_facts.Memory_store_present store ->
+        let src =
+          match category with
+          | Category_all | Category_source ->
+              List.map
+                (fun fact -> Memory_row_source_fact fact)
+                store.Masc.Tui_decode_memory_facts.mss_facts
+          | Category_ordinary _ | Category_dropped -> []
+        in
+        let inv =
+          match category with
+          | Category_all | Category_dropped ->
+              List.map
+                (fun row -> Memory_row_invalidation row)
+                store.Masc.Tui_decode_memory_facts.mss_invalidations
+          | Category_ordinary _ | Category_source -> []
+        in
+        (src, inv)
+  in
+  let all_rows = ordinary @ source_rows @ invalidation_rows in
+  let filtered_rows =
+    if query = "" then all_rows
+    else
+      List.filter
+        (fun row ->
+          Masc_tui_pick_list.lowercase_contains ~needle:query
+            (memory_fact_search_text ~fleet row))
+        all_rows
+  in
+  (match sort with
+   | Sort_recency ->
+       List.sort
+         (fun a b ->
+           let ts = function
+             | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_last_seen
+             | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_first_seen
+             | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_invalidated_at
+           in
+           Stdlib.compare (ts b) (ts a))
+         filtered_rows
+   | Sort_last_retrieved ->
+       (* Facts by their last retrieval, newest first. A fact never
+          retrieved, then the source and dropped rows, follow in their
+          recency order: the record says nothing about them, so nothing
+          is invented. *)
+       List.sort
+         (fun a b ->
+           let key = function
+             | Memory_row_fact f ->
+               (match f.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retrieval with
+                | Masc.Tui_decode_memory_facts.Retrieved { last_at; _ } -> (0, last_at)
+                | Masc.Tui_decode_memory_facts.Never_retrieved -> (1, f.Masc.Tui_decode_memory_facts.mf_last_seen))
+             | Memory_row_source_fact f -> (2, f.Masc.Tui_decode_memory_facts.msf_first_seen)
+             | Memory_row_invalidation f -> (2, f.Masc.Tui_decode_memory_facts.mi_invalidated_at)
+           in
+           let g_a, t_a = key a in
+           let g_b, t_b = key b in
+           if g_a <> g_b then Stdlib.compare g_a g_b else Stdlib.compare t_b t_a)
+         filtered_rows
+   | Sort_retrieved_count ->
+       List.sort
+         (fun a b ->
+           let key = function
+             | Memory_row_fact f ->
+               ( 0
+               , (match f.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retrieval with
+                  | Masc.Tui_decode_memory_facts.Retrieved { count; _ } -> count
+                  | Masc.Tui_decode_memory_facts.Never_retrieved -> 0)
+               , f.Masc.Tui_decode_memory_facts.mf_last_seen )
+             | Memory_row_source_fact f -> (1, 0, f.Masc.Tui_decode_memory_facts.msf_first_seen)
+             | Memory_row_invalidation f -> (1, 0, f.Masc.Tui_decode_memory_facts.mi_invalidated_at)
+           in
+           let g_a, n_a, t_a = key a in
+           let g_b, n_b, t_b = key b in
+           if g_a <> g_b then Stdlib.compare g_a g_b
+           else if n_a <> n_b then Stdlib.compare n_b n_a
+           else Stdlib.compare t_b t_a)
+         filtered_rows
+   | Sort_category ->
+       List.sort
+         (fun a b ->
+           let cat = function
+             | Memory_row_fact f ->
+                 (0, Memory_category.category_to_string f.Masc.Tui_decode_memory_facts.mf_category)
+             | Memory_row_source_fact _ -> (1, "source")
+             | Memory_row_invalidation _ -> (2, "dropped")
+           in
+           let p_a, c_a = cat a in
+           let p_b, c_b = cat b in
+           let c = String.compare c_a c_b in
+           if c <> 0 then c
+           else if p_a <> p_b then Stdlib.compare p_a p_b
+           else
+             let claim = function
+               | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_claim
+               | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_claim
+               | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_reason
+             in
+             String.compare (claim a) (claim b))
+         filtered_rows
+   | Sort_claim ->
+       List.sort
+         (fun a b ->
+           let claim = function
+             | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_claim
+             | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_claim
+             | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_reason
+           in
+           String.compare (claim a) (claim b))
+         filtered_rows)
+
 let memory_fact_rows (state : state) : memory_fact_row list =
   match memory_facts_snapshot state with
-  | None -> []
+  | None ->
+      Domain.DLS.set memory_fact_projection None;
+      []
   | Some snapshot ->
-      let ordinary =
-        match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
-        | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
-          ->
-            []
-        | Masc.Tui_decode_memory_facts.Memory_store_present store ->
-            let facts =
-              match state.memory_facts_category with
-              | Category_all -> store.Masc.Tui_decode_memory_facts.mos_facts
-              | Category_ordinary category ->
-                  List.filter
-                    (fun (fact : Masc.Tui_decode_memory_facts.memory_fact) ->
-                      fact.Masc.Tui_decode_memory_facts.mf_category = category)
-                    store.Masc.Tui_decode_memory_facts.mos_facts
-              | Category_source | Category_dropped -> []
-            in
-            List.map (fun fact -> Memory_row_fact fact) facts
-      in
-      let source_rows, invalidation_rows =
-        match snapshot.Masc.Tui_decode_memory_facts.mfs_source with
-        | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
-          ->
-            ([], [])
-        | Masc.Tui_decode_memory_facts.Memory_store_present store ->
-            let src =
-              match state.memory_facts_category with
-              | Category_all | Category_source ->
-                  List.map
-                    (fun fact -> Memory_row_source_fact fact)
-                    store.Masc.Tui_decode_memory_facts.mss_facts
-              | Category_ordinary _ | Category_dropped -> []
-            in
-            let inv =
-              match state.memory_facts_category with
-              | Category_all | Category_dropped ->
-                  List.map
-                    (fun row -> Memory_row_invalidation row)
-                    store.Masc.Tui_decode_memory_facts.mss_invalidations
-              | Category_ordinary _ | Category_source -> []
-            in
-            (src, inv)
-      in
-      let all_rows = ordinary @ source_rows @ invalidation_rows in
+      let category = state.memory_facts_category in
+      let sort = state.memory_facts_sort in
       let query = memory_search_query state in
       let fleet = memory_facts_is_fleet state in
-      let filtered_rows =
-        if query = "" then all_rows
-        else
-          List.filter
-            (fun row ->
-              Masc_tui_pick_list.lowercase_contains ~needle:query
-                (memory_fact_search_text ~fleet row))
-            all_rows
-      in
-      (match state.memory_facts_sort with
-       | Sort_recency ->
-           List.sort
-             (fun a b ->
-               let ts = function
-                 | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_last_seen
-                 | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_first_seen
-                 | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_invalidated_at
-               in
-               Stdlib.compare (ts b) (ts a))
-             filtered_rows
-       | Sort_last_retrieved ->
-           (* Facts by their last retrieval, newest first. A fact never
-              retrieved, then the source and dropped rows, follow in their
-              recency order: the record says nothing about them, so nothing
-              is invented. *)
-           List.sort
-             (fun a b ->
-               let key = function
-                 | Memory_row_fact f ->
-                   (match f.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retrieval with
-                    | Masc.Tui_decode_memory_facts.Retrieved { last_at; _ } -> (0, last_at)
-                    | Masc.Tui_decode_memory_facts.Never_retrieved -> (1, f.Masc.Tui_decode_memory_facts.mf_last_seen))
-                 | Memory_row_source_fact f -> (2, f.Masc.Tui_decode_memory_facts.msf_first_seen)
-                 | Memory_row_invalidation f -> (2, f.Masc.Tui_decode_memory_facts.mi_invalidated_at)
-               in
-               let g_a, t_a = key a in
-               let g_b, t_b = key b in
-               if g_a <> g_b then Stdlib.compare g_a g_b else Stdlib.compare t_b t_a)
-             filtered_rows
-       | Sort_retrieved_count ->
-           List.sort
-             (fun a b ->
-               let key = function
-                 | Memory_row_fact f ->
-                   ( 0
-                   , (match f.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retrieval with
-                      | Masc.Tui_decode_memory_facts.Retrieved { count; _ } -> count
-                      | Masc.Tui_decode_memory_facts.Never_retrieved -> 0)
-                   , f.Masc.Tui_decode_memory_facts.mf_last_seen )
-                 | Memory_row_source_fact f -> (1, 0, f.Masc.Tui_decode_memory_facts.msf_first_seen)
-                 | Memory_row_invalidation f -> (1, 0, f.Masc.Tui_decode_memory_facts.mi_invalidated_at)
-               in
-               let g_a, n_a, t_a = key a in
-               let g_b, n_b, t_b = key b in
-               if g_a <> g_b then Stdlib.compare g_a g_b
-               else if n_a <> n_b then Stdlib.compare n_b n_a
-               else Stdlib.compare t_b t_a)
-             filtered_rows
-       | Sort_category ->
-           List.sort
-             (fun a b ->
-               let cat = function
-                 | Memory_row_fact f ->
-                     (0, Memory_category.category_to_string f.Masc.Tui_decode_memory_facts.mf_category)
-                 | Memory_row_source_fact _ -> (1, "source")
-                 | Memory_row_invalidation _ -> (2, "dropped")
-               in
-               let p_a, c_a = cat a in
-               let p_b, c_b = cat b in
-               let c = String.compare c_a c_b in
-               if c <> 0 then c
-               else if p_a <> p_b then Stdlib.compare p_a p_b
-               else
-                 let claim = function
-                   | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_claim
-                   | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_claim
-                   | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_reason
-                 in
-                 String.compare (claim a) (claim b))
-             filtered_rows
-       | Sort_claim ->
-           List.sort
-             (fun a b ->
-               let claim = function
-                 | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_claim
-                 | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_claim
-                 | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_reason
-               in
-               String.compare (claim a) (claim b))
-             filtered_rows)
+      match Domain.DLS.get memory_fact_projection with
+      | Some ((seen, seen_category, seen_sort, seen_query, seen_fleet), rows)
+          when seen == snapshot && seen_category = category && seen_sort = sort
+            && String.equal seen_query query && seen_fleet = fleet -> rows
+      | Some _ | None ->
+          let rows = project_memory_facts ~category ~sort ~query ~fleet snapshot in
+          Domain.DLS.set memory_fact_projection
+            (Some ((snapshot, category, sort, query, fleet), rows));
+          rows
 
 let toggle_memory_facts_categories ~cols (state : state) =
   match Masc_tui_roster_pane.toggle_hidden
@@ -23795,6 +23820,171 @@ let runtime_picker_projection ?(page=runtime_picker_page) (state : state) =
         runtime_catalog_reading_suffix state.runtime_catalog_reading;
       rlp_filter = view.Masc_tui_pick_list.filter })
     state.runtime_lane_pick
+
+(* The feature landing and its key viewport share the complete physical
+   heading, catalogue links and panel geometry. Destinations stay in Types;
+   the renderer alone adds click marks and native panel styling. *)
+let lanes_overview_heading_rows (state : state) ~cols =
+  let cells = max 1 (Masc_tui_frame.inner_width ~cols) in
+  [ ui_text state ~ko:"여기서 무엇을 사용할 수 있나" ~en:"What can be used here"
+  ; ui_text state ~ko:"기능과 관측 상태를 고르고, 설정·워커·조치를 읽습니다."
+      ~en:"Select a capability and observation, then read configuration, workers and actions."
+  ] |> List.concat_map (Masc_tui_message_layout.wrap_words ~max_cells:cells)
+
+let lanes_overview_link_rows (state : state) ~cols =
+  let cells = max 1 (Masc_tui_frame.inner_width ~cols) in
+  let links =
+    [ Some Tools, ui_text state ~ko:"도구·스킬" ~en:"Tools & skills"
+    ; Some Resources, ui_text state ~ko:"리소스" ~en:"Resources"
+    ; Some Connectors, ui_text state ~ko:"채널" ~en:"Channels"
+    ; Some Clients, ui_text state ~ko:"클라이언트" ~en:"Clients"
+    ; None, ui_text state ~ko:"플러그인 /addons" ~en:"Plugins /addons"
+    ] in
+  let rec group used current groups = function
+    | [] -> List.rev (if current = [] then groups else List.rev current :: groups)
+    | (target, label) :: rest ->
+        let label = Masc_tui_message_layout.truncate_middle cells label in
+        let needed = Masc_tui_message_layout.display_width label + (if current = [] then 0 else 3) in
+        if current <> [] && used + needed > cells then
+          group 0 [] (List.rev current :: groups) ((target, label) :: rest)
+        else group (used + needed) ((target, label) :: current) groups rest
+  in
+  group 0 [] [] links
+
+let lanes_overview_panel_widths (state : state) ~cols =
+  let width = max 1 (Masc_tui_frame.inner_width ~cols) in
+  let list_min = 4 + 20 + Masc_tui_message_layout.display_width
+      (ui_text state ~ko:"기능 · 하는 일" ~en:"Feature · purpose") in
+  let detail_min = 4 + 20 + Masc_tui_message_layout.display_width
+      (ui_text state ~ko:"설정 선언" ~en:"Declaration") in
+  if width >= list_min + detail_min + 2 then
+    let list_width = max list_min ((width - 2) * 3 / 5) in
+    let list_width = min list_width (width - 2 - detail_min) in
+    true, list_width, width - 2 - list_width
+  else false, width, width
+
+let lanes_overview_picker_rows (state : state) =
+  match runtime_picker_projection state with
+  | None -> 0
+  | Some picker ->
+      1 + max 1 (List.fold_left (fun count -> function
+        | Lane_choice _ -> count
+        | Runtime_choice _ -> count + 2) 0 picker.rlp_choices)
+
+let lanes_scrolled (state : state) ~cols:_ =
+  match state.lanes_mode with
+  | Lanes_run_list _ ->
+      (* The run list replaces the two-section overview, so the typed model
+         counts its rows instead of the Keeper table's. *)
+      { sc_count =
+          (match state.lane_runs with
+           | None -> 0
+           | Some runs -> List.length runs)
+      ; sc_chrome = listing_chrome ~error:state.lane_runs_error
+      ; sc_overflow_takes_row = true
+      ; sc_preview_keep = None
+      }
+  | Lanes_overview | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ ->
+      (* The detail's lines are built by the drawing; the frame reports the
+         clamp through [clamped_scroll]. The overview needs both terminal
+         dimensions and is counted by [lanes_overview_projection] below. *)
+      { sc_count = 0
+      ; sc_chrome = 0
+      ; sc_overflow_takes_row = false
+      ; sc_preview_keep = None
+      }
+
+type lanes_overview_projection = {
+  lop_headings : string list;
+  lop_links : (surface option * string) list list;
+  lop_observation : bool;
+  lop_notices : string list;
+  lop_boxed : bool;
+  lop_split : bool;
+  lop_list_width : int;
+  lop_detail_width : int;
+  lop_list_height : int;
+  lop_detail_height : int;
+  lop_position : bool;
+  lop_tail : string list option;
+  lop_scroll : scrolled;
+}
+
+let lanes_overview_projection (state : state) ~rows ~cols =
+  let budget = max 0 (rows - Masc_tui_frame.chrome_rows) in
+  let width = max 1 (Masc_tui_frame.inner_width ~cols) in
+  let headings = lanes_overview_heading_rows state ~cols in
+  let links = lanes_overview_link_rows state ~cols in
+  let notices = lane_inventory_notice_lines ~cols state in
+  let split, list_width, detail_width = lanes_overview_panel_widths state ~cols in
+  let safe_boxed_rows text =
+    Masc.Tui_terminal_text.sanitize_terminal_lines text
+    |> boxed_row_count ~cols in
+  let full_tail_rows = Option.fold ~none:0 ~some:safe_boxed_rows state.lanes_action_error
+      + Option.fold ~none:0 ~some:(fun notice ->
+          safe_boxed_rows (runtime_lane_notice_text notice)) state.runtime_lane_notice
+      + List.length (runtime_lane_stale_lines state)
+      + lanes_overview_picker_rows state in
+  let panel_edges = 2 in
+  let native_minimum = (panel_edges + 1) * (if split then 1 else 2) in
+  let full = List.length headings + List.length links + List.length notices
+      + 1 + full_tail_rows + native_minimum <= budget in
+  let compact_tail =
+    let picker = match runtime_picker_projection state with
+      | None -> []
+      | Some picker ->
+          let choice = match Option.bind picker.rlp_selected_row (List.nth_opt picker.rlp_choices) with
+             | Some (Runtime_choice runtime) ->
+                 let refusal = match runtime_pick_availability picker.rlp_pick runtime with
+                   | Pick_available -> ""
+                   | Pick_refused refusal -> "[" ^ runtime_pick_refusal_tag refusal ^ "] " in
+                 "> " ^ refusal ^ runtime_model_picker_title runtime
+             | Some (Lane_choice _) | None -> runtime_picker_empty_note picker in
+          [ui_text state ~ko:"후보 추가 · " ~en:"Add candidate · " ^ choice
+           ^ " → " ^ picker.rlp_lane
+           ^ runtime_catalog_reading_suffix picker.rlp_catalog_reading] in
+    let failures = Option.to_list state.lanes_action_error
+      @ Option.to_list (Option.map runtime_lane_notice_text state.runtime_lane_notice)
+      @ runtime_lane_stale_lines state in
+    (* The picker owns Enter while open. Its selected action target survives
+       even when only one body row fits; with another row the feature list
+       keeps its selection too. *)
+    let reserved_list = min 1 (max 0 (budget - List.length picker)) in
+    picker @ failures
+    |> List.map (fun line -> Masc.Tui_terminal_text.sanitize_terminal_text line
+         |> Masc_tui_message_layout.truncate_middle width)
+    |> List.take (max 0 (budget - reserved_list)) in
+  let tail = if full then None else Some compact_tail in
+  let tail_rows = if full then full_tail_rows else List.length compact_tail in
+  let minimum_body = min 2 (max 0 (budget - tail_rows)) in
+  let intro_room = max 0 (budget - tail_rows - minimum_body) in
+  let headings, links, observation, notices = if full then headings, links, true, notices
+    else
+      let observation = intro_room > 0 in
+      let room = max 0 (intro_room - if observation then 1 else 0) in
+      let notices = List.take room notices in
+      let links = List.take (max 0 (room - List.length notices)) links in
+      [], links, observation, notices in
+  let intro_rows = List.length headings + List.length links
+      + (if observation then 1 else 0) + List.length notices in
+  let boxed = full in
+  let split = boxed && split in
+  let list_width, detail_width = if split then list_width, detail_width else width, width in
+  let pane_rows = max 0 (budget - intro_rows - tail_rows
+      - if boxed then panel_edges * (if split then 1 else 2) else 0) in
+  let list_slots, detail_height =
+    if split then pane_rows, pane_rows
+    else (pane_rows + 1) / 2, pane_rows / 2 in
+  let count = List.length (lane_inventory_entries state) in
+  let position = list_slots > 1 && count > list_slots in
+  let list_height = max 0 (list_slots - if position then 1 else 0) in
+  { lop_headings = headings; lop_links = links; lop_observation = observation;
+    lop_notices = notices; lop_boxed = boxed; lop_split = split;
+    lop_list_width = list_width; lop_detail_width = detail_width;
+    lop_list_height = list_height; lop_detail_height = detail_height;
+    lop_position = position; lop_tail = tail;
+    lop_scroll = {sc_count = count; sc_chrome = rows - list_height;
+      sc_overflow_takes_row = false; sc_preview_keep = None} }
 
 (* The one-line prompt the lane editor puts above the Runtime rows: a name
    being typed for a new lane or for a rename, or the lane a second [D] would
@@ -25079,7 +25269,12 @@ let scrolled_surface_rows (state : state) ~cols : surface -> scrolled option =
   | Lanes ->
       (match state.lanes_mode with
        | Lanes_run_detail _ | Lanes_measurement_detail _ | Lanes_inventory_detail _ -> None
-       | Lanes_overview | Lanes_run_list _ -> Some (lanes_scrolled state ~cols))
+       | Lanes_overview ->
+           (* The overview's compact fallback depends on the available rows
+              as well as columns. Its main-loop wrapper shares the complete
+              [lanes_overview_projection] with the renderer. *)
+           None
+       | Lanes_run_list _ -> Some (lanes_scrolled state ~cols))
   | Clients ->
       listing ~error:state.clients_surface_error
         (match state.clients_surface with
@@ -25675,7 +25870,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
               ^ Masc_tui_keeper_chat_projection.terminal_safe_text
                   (Masc_tui_keeper_chat_transcript.execution_id entry.log.tl_transcript)
               ^ " · in progress"
-          ; keys = "" } ]
+          ; motion = Masc_tui_answering.Still; keys = "" } ]
       | None ->
         Masc_tui_answering.chat_activity ~frame:state.activity_frame
           ~show_timing:(keeper_message_timing_visible state)
@@ -25696,7 +25891,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
         | Rechecking_delivery -> awaiting, queued, rechecking + 1)
         (0, 0, 0) waiting_items in
     let retained = keeper_input_retained state keeper_name in
-    let plain text = { Masc_tui_answering.lead = text; rest = ""; keys = "" } in
+    let plain text = { Masc_tui_answering.lead = text; rest = ""; motion = Masc_tui_answering.Still; keys = "" } in
     let queue_rows =
       match waiting_items with
       | [] -> []
@@ -25719,14 +25914,14 @@ let keeper_message_diagnostic_activity_rows (state : state) =
               | Next | Next_without_auto_priority -> "" in
             [ { Masc_tui_answering.lead = "Local NEXT" ^ intent_str
               ; rest = Printf.sprintf ": \"%s\"" preview
-              ; keys = "" } ] in
+              ; motion = Masc_tui_answering.Still; keys = "" } ] in
         let auto_tag = if state.user_input_priority_next then "auto-next:on" else "auto-next:off" in
         (* The renderer reserves [keys] before fitting [rest]. Keep the
            aggregate, delivery evidence and local preview on separate rows;
            the status budget counts this same projection. *)
         [ { Masc_tui_answering.lead = Printf.sprintf "Queue (%d pending)" waiting_count
           ; rest = " · " ^ auto_tag
-          ; keys = " · Ctrl-T:queue" } ]
+          ; motion = Masc_tui_answering.Still; keys = " · Ctrl-T:queue" } ]
         @ count_row keeper_queued "queued at Keeper · /queue"
         @ count_row awaiting_receipt "awaiting receipt"
         @ count_row rechecking "rechecking delivery"
@@ -25738,7 +25933,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
            name = keeper_name && intervention = Retained_after_stop)
            state.keeper_interactive_waiting
          then " · after stop" else " · before sending")
-       ; keys = " · /queue resume" }]
+       ; motion = Masc_tui_answering.Still; keys = " · /queue resume" }]
       else []) @ queue_rows
 ;;
 
@@ -25761,7 +25956,7 @@ let keeper_message_activity_rows (state : state) =
             else Some { Masc_tui_answering.lead = (if Requests.mem request provisional then "Priority (control pending) "
                 else match result with Ok _ -> "Priority " | Error _ -> "Priority confirmation unavailable ") ^ Masc_tui_keeper_chat_projection.terminal_safe_text request.request_id;
               rest = " · " ^ (match result with Ok detail | Error detail ->
-                Masc_tui_keeper_chat_projection.terminal_safe_text detail); keys = "" })
+                Masc_tui_keeper_chat_projection.terminal_safe_text detail); motion = Masc_tui_answering.Still; keys = "" })
             state.keeper_run_next_receipts in
       keeper_message_diagnostic_activity_rows state @ receipts
   | (Tools_compact | Tools_results), None -> []
@@ -25873,12 +26068,12 @@ let keeper_message_activity_rows (state : state) =
         if retained_after_stop || retained_before_dispatch then
           [{ Masc_tui_answering.lead = "Held"
            ; rest = (if retained_after_stop then " · after stop" else " · before sending")
-           ; keys = " · /queue resume" }]
+           ; motion = Masc_tui_answering.Still; keys = " · /queue resume" }]
         else [] in
       let activity_rows = match List.rev !urgent @ List.rev !clauses with
         | [] -> []
         | parts -> [{ Masc_tui_answering.lead = String.concat " · " parts;
-            rest = ""; keys }] in
+            rest = ""; motion = Masc_tui_answering.Still; keys }] in
       held_rows @ activity_rows
 ;;
 

@@ -90,6 +90,12 @@
  (name test_tui_play_room)
  (modules test_tui_play_room)
  (libraries alcotest yojson masc masc_tui_play_room))
+
+(test
+ (name test_auth_credential_optional_fields)
+ (modules test_auth_credential_optional_fields)
+ (libraries masc_types yojson))
+
 (include stanzas/test_oidc_id_token_signature.inc)
 (include stanzas/test_oidc_google.inc)
 (include stanzas/test_oidc_login_transaction.inc)
@@ -1429,19 +1435,6 @@
  (name test_runtime_defaults_json)
  (modules test_runtime_defaults_json)
  (libraries masc_test_deps))
-
-; RFC-0266: fusion async-completion wake — closed-sum classification +
-; actionable pending_board_event delivery.
-
-; Case 12 (completion wake deferred, keeper no longer registered) raises an
-; Eio Timeout in CI and not locally, so the suite has no stable verdict to
-; record either way (#29064). It is off the runtest alias until it has one;
-; MASC_RUN_FLAKY_TESTS=true runs it.
-(test
- (name test_fusion_wake)
- (modules test_fusion_wake)
- (enabled_if (= %{env:MASC_RUN_FLAKY_TESTS=false} "true"))
- (libraries masc_test_deps masc.fusion_core))
 
 (test
  (name test_fusion_delivery_obligation)
@@ -5180,6 +5173,7 @@
 (include stanzas/test_tui_execute_stream.inc)
 (include stanzas/test_tui_execute_stream_job.inc)
 (include stanzas/test_tui_execute_stream_http.inc)
+(include stanzas/test_tui_memory_catch_up.inc)
 (include stanzas/test_tui_sse_eof.inc)
 (include stanzas/test_tui_keeper_terminal_state.inc)
 (include stanzas/test_tui_keeper_terminal_stream_state.inc)
@@ -5991,7 +5985,8 @@
   test_install_local_build_guest_shim.py
   test_install_local_build.py
   ../scripts/install-local-build.sh
-  ../scripts/check-runtime-deployment-preflight.sh)
+  ../scripts/check-runtime-deployment-preflight.sh
+  ../scripts/lib/install-workspace-dashboard.sh)
  (action
   (run python3 %{dep:test_install_local_build_guest_shim.py})))
 
@@ -6008,7 +6003,8 @@
   test_install_local_build.py
   ../scripts/ci/runtime-install-artifact.py
   ../scripts/install-local-build.sh
-  ../scripts/check-runtime-deployment-preflight.sh)
+  ../scripts/check-runtime-deployment-preflight.sh
+  ../scripts/lib/install-workspace-dashboard.sh)
  (action
   (run python3 %{dep:test_runtime_install_artifact.py})))
 

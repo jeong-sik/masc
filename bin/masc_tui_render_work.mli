@@ -39,6 +39,11 @@ val render_work_tasks :
   Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
 
+val work_tasks_page_rows :
+  Masc_tui_types.state -> terminal_rows:int -> cols:int -> int
+(** The actual Task list window, sharing the renderer's source notices and
+    panel geometry. Paging must not use the full surface height. *)
+
 val render_planning_list :
   Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option

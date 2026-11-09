@@ -107,6 +107,7 @@ let make_keeper_health ~keeper_id ~facts ~snapshot_bytes : Masc.Tui_decode_memor
         mcc_prepared = None; mcc_synthesis = None; mcc_unread_snapshot = Ok []; mcc_unread_memory = Ok [] }
   ; mkh_librarian =
       { Masc.Tui_decode_memory_health.mlh_state = Some Masc.Tui_decode_memory_health.Pass_drained
+      ; mlh_admission_wait = None
       ; mlh_measured_at = Some 1_775_000_000.0
       ; mlh_unread_atom_turns = Some 0
       ; mlh_unread_official_turns = Some 0

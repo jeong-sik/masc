@@ -20,6 +20,10 @@ module Keeper_shutdown_reconciliation =
 
 let add_routes ~sw ~clock router =
   router
+  |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin)
+       "/api/v1/keepers/memory-catch-up" (fun state actor request reqd ->
+         Server_routes_http_keeper_control.handle_keeper_memory_catch_up
+           ~actor state request reqd)
   (* Bulk keeper directive — operator can pause/resume/wakeup N keepers in
      one round-trip with a single batch cache invalidate at the end. The
      URL prefix is intentionally outside [/api/v1/keepers/] so it does not
@@ -115,6 +119,14 @@ let add_routes ~sw ~clock router =
            ~permission:Server_dashboard_http_keeper_native_tasks.permission
            (fun state _agent_name req reqd ->
              Server_dashboard_http_keeper_native_tasks.handle_get state req reqd route)
+           request reqd
+       | None ->
+       match Server_dashboard_http_keeper_execution_history.route (Http.Request.path request) with
+       | Some route ->
+         with_token_permission_auth
+           ~permission:Server_dashboard_http_keeper_execution_history.permission
+           (fun state _agent_name req reqd ->
+             Server_dashboard_http_keeper_execution_history.handle_get state req reqd route)
            request reqd
        | None ->
        match Keeper_chat_operations.get_route (Http.Request.path request) with

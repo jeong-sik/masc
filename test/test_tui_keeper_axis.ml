@@ -7,6 +7,7 @@ let make_librarian
     ?last_success_at
     () : Tui_decode_memory_health.memory_librarian_health =
   { mlh_state = None
+  ; mlh_admission_wait = None
   ; mlh_measured_at = None
   ; mlh_unread_atom_turns = unread_atom_turns
   ; mlh_unread_official_turns = unread_official_turns
@@ -303,6 +304,7 @@ let memory_row ?(lag = Reading.Lag 0) ?(gap = Reading.No_gap) ?updated_at () =
     ; source_invalidations = 0
     ; age_bins = None
     ; pass_end = None
+    ; admission_wait = None
     }
 ;;
 

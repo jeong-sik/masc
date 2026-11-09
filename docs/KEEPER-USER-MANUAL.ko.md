@@ -407,6 +407,13 @@ Docker 안의 작업 디렉토리는 `/home/keeper/playground/<이름>/`이고 �
 remote_ssh는 엔드포인트의 작업 루트를 사용한다. microVM 볼륨 이름에는 작업 공간이
 없으므로 같은 런타임 저장소의 동명 Keeper는 서로의 트리를 공유할 수 있다.
 
+remote_ssh Keeper 폴더(`remote_root/<keeper>`)에는 엔드포인트 사용자만 들어갈 수
+있어야 한다. bootstrap 이 그 폴더를 `0700` 으로 만든다. 그룹이나 다른 사용자가
+들어올 수 있는 권한이면 매시간 도는 작업 폴더 정리가 그 Keeper 는 아무것도 지우지
+않는다. 이때 서버 로그에 폴더 권한과 고치는 방법이 남는다. 컨테이너 entrypoint 가
+폴더를 직접 만들 때도 같은 권한으로 둔다. 자세한 내용은
+[SSH endpoint runbook](operations/ssh-endpoints-runbook.md#keeper-directory-mode)에 있다.
+
 microVM에서 `observation_run = "guest_local"`을 설정해도 관측 단계는 볼륨의
 독점 소유권을 확인할 수 없어 이 상자를 실행하지 않고 judge로 넘긴다. 다른 허가
 경로나 승인된 실행에서 공유 볼륨에 쓰는 것은 이 제한만으로 막지 못한다. 현재
@@ -491,14 +498,11 @@ allow = ["github.com", "api.github.com", "*.githubusercontent.com"]
 `githubusercontent.com` 자체를 포함하지 않습니다. `policy`를 지원하지 않는
 backend는 `inherit`로 몰래 바꾸지 않고 요청을 거부합니다.
 
-요청마다 `container exec` 를 띄우는 대신 게스트 agent 로 요청을 보내려면, 그 Keeper 의
-`[keeper]` 표에 `microvm_delivery = "agent_socket"` 을 적습니다
-([RFC](rfc/RFC-microvm-guest-agent-over-socket.md), 지금은 Keeper 별 canary).
-위 예처럼 `sandbox_profile = "microvm"` 과 `microvm_backend = "apple_container"` 가 있어야
-받습니다. backend 를 적지 않고 호스트 기본값으로 뜨던 Keeper 도 `microvm_backend` 줄을
-적습니다. 다음 턴에 첫 프로세스가
-shim agent 인 게스트로 바뀌고, 이 줄을 지우면 그다음 턴에 원래대로 바뀝니다.
+Apple container 게스트는 모든 요청을 게스트 agent 로 받습니다
+([RFC](rfc/RFC-microvm-guest-agent-over-socket.md)). 게스트의 첫 프로세스가 shim agent 이고,
 agent 소켓의 호스트 쪽 끝은 `<base>/.masc/microvm/agent/` 아래에 있습니다.
+Keeper TOML 에는 이것을 고르는 키가 없습니다. `nerdctl_kata` 와 `microsandbox` 게스트는
+요청마다 shim 을 exec 로 하나씩 띄웁니다.
 
 ### Keeper 한 명에 Docker 컨테이너 하나
 
@@ -719,6 +723,19 @@ masc_keeper_down(name="reviewer")
 
 Gate 는 승인 절차입니다. 샌드박스도 아니고 자격증명 경계도 아닙니다.
 `local` 프로파일은 내 컴퓨터에서 내 권한으로 그대로 돕니다.
+
+## 턴에서 Board 댓글·반응 확인하기
+
+Keeper의 턴을 열고 **입력과 실행**을 선택합니다. **같은 턴의 Board 댓글·반응**에서
+작성한 댓글, 부모 댓글, 반응 대상 글이나 댓글을 원본으로 엽니다. 반응 추가와 제거도
+구분합니다. 최근 목록 밖의 실행은 해당 턴의 실행 ID로 읽습니다. 같은 턴 안에서
+끝난 Skill의 하위 실행도 포함합니다. 턴이 끝난 뒤 완료된 비동기 작업을 이미 끝난
+턴의 행동으로 덧붙이지는 않습니다.
+
+도구 기록 조회에는 기존 Admin 권한이 필요하며, 원본 Board의 읽기 권한도 그대로
+적용됩니다. 여러 입력을 받은 턴의 동작이 어느 입력 때문인지는 확정하지 않습니다.
+기록이 없으면 댓글·반응 여부와 무응답 이유를 알 수 없습니다. 이 증거가 추가되기 전의
+기록도 미확인으로 남습니다.
 
 ## 뭔가 잘못됐을 때
 

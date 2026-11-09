@@ -4001,6 +4001,49 @@ let test_decode_tool_snapshot_keeps_the_warming_flag () =
       Alcotest.(check bool) "an empty built inventory does mean none" true
         (snapshot.Masc.Tui_decode_tools.ts_freshness = Masc.Tui_decode_tools.Settled)
 
+(* The server's periodic volume GC pass rides the same envelope. The field is
+   null until the first pass ends, and a server without the pass sends none;
+   neither is a report. A pass that does not decode is an error, not a
+   missing report. *)
+let test_decode_tool_snapshot_reads_the_volume_gc_report () =
+  let with_report value =
+    match tool_snapshot_json [] with
+    | `Assoc fields -> `Assoc (fields @ [ ("sandbox_volume_gc_report", value) ])
+    | other -> other
+  in
+  let report_of json =
+    Result.map
+      (fun snapshot -> snapshot.Masc.Tui_decode_tools.ts_volume_gc_report)
+      (Masc.Tui_decode_tools.decode_tool_snapshot json)
+  in
+  (match (report_of (tool_snapshot_json []), report_of (with_report `Null)) with
+   | Ok None, Ok None -> ()
+   | _ -> Alcotest.fail "an absent or null report is no report");
+  (match
+     report_of
+       (with_report
+          (`Assoc
+              [ ("observed_at", `Float 1.0)
+              ; ("outcome", `String "skipped")
+              ; ("reason", `String "no Apple Container")
+              ]))
+   with
+   | Ok
+       (Some
+          { Masc.Keeper_volume_gc_periodic.outcome =
+              Masc.Keeper_volume_gc_periodic.Skipped reason
+          ; _
+          }) ->
+       Alcotest.(check string) "the reason comes back" "no Apple Container" reason
+   | Ok _ | Error _ -> Alcotest.fail "a skipped pass decodes as skipped");
+  match
+    report_of
+      (with_report
+         (`Assoc [ ("observed_at", `Float 1.0); ("outcome", `String "deleted") ]))
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "an unknown outcome is an error"
+
 let test_decode_tool_projected_nowhere () =
   (* A registered tool on no surface is reachable by nothing. Kept as an empty
      list rather than dropped: that it exists and is projected nowhere is the
@@ -5366,6 +5409,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
         , `Assoc
             [ ("state", `String "drained")
             ; ("detail", `Null)
+            ; ("pending", `Null)
+            ; ("admission_wait", `Null)
             ; ("measured_at", `Float 1_775_000_000.0)
             ; ("unread_atom_turns", `Int 0)
             ; ("unread_official_turns", `Int 0)
@@ -5409,7 +5454,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v10")
+      [ ("schema", `String "keeper.memory_os.current_health.v12")
       ; ("execution", disabled_memory_execution)
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
@@ -5612,15 +5657,46 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    | Error detail -> Alcotest.fail detail);
   (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
            (with_librarian ~stopped_keepers:0
-              [ "state", `String "pending"; "detail", `Null ]) with
+              [ "state", `String "pending"; "detail", `Null;
+                "pending", Masc.Keeper_librarian_pending.to_json (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" }) ]) with
    | Ok snapshot ->
      let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
      Alcotest.(check bool) "suspended original work is a distinct nonfailure state" true
-       (librarian.mlh_state = Some Masc.Tui_decode_memory_health.Pass_pending);
-     Alcotest.(check bool) "suspended work does not invent a failure cause" true
+       (librarian.mlh_state = Some (Masc.Tui_decode_memory_health.Pass_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" })));
+     Alcotest.(check bool) "suspended work preserves its publication cause" true
        (Masc.Tui_decode_memory_health.memory_librarian_pass_end_cause
-          Masc.Tui_decode_memory_health.Pass_pending = None)
+          (Masc.Tui_decode_memory_health.Pass_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" }))
+          = Some (Masc.Keeper_librarian_pending.description (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" })))
    | Error detail -> Alcotest.fail detail);
+  let admission_worker : Masc.Keeper_librarian_pending.worker =
+    { installation_id = "admission-installation"; request_id = "admission-request";
+      wait = Masc.Keeper_librarian_pending.Capacity } in
+  let admission_json = Masc.Keeper_librarian_pending.to_json (Worker admission_worker) in
+  List.iter (fun (label, updates, expected_state, expected_time) ->
+    match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
+      (with_librarian ~stopped_keepers:0 (("admission_wait", admission_json) :: updates)) with
+    | Error detail -> Alcotest.fail detail
+    | Ok snapshot ->
+      let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
+      Alcotest.(check bool) (label ^ ": original admission owner retained") true
+        (librarian.mlh_admission_wait = Some admission_worker);
+      Alcotest.(check bool) (label ^ ": durable state retained") true
+        (librarian.mlh_state = expected_state);
+      Alcotest.(check (option (float 0.))) (label ^ ": durable measurement time retained")
+        expected_time librarian.mlh_measured_at)
+    [ "measured durable pass", [], Some Masc.Tui_decode_memory_health.Pass_drained,
+      Some 1_775_000_000.0
+    ; "unobserved durable pass",
+      [ "state", `Null; "measured_at", `Null; "unread_atom_turns", `Null;
+        "unread_official_turns", `Null ], None, None ];
+  List.iter (fun admission_wait ->
+    Alcotest.(check bool) "admission wait requires a supported original worker" true
+      (memory_health_rejects (with_librarian ~stopped_keepers:0 ["admission_wait", admission_wait])))
+    [ Masc.Keeper_librarian_pending.to_json
+        (Publication { request_id = "original"; detail = "settling" })
+    ; replace_field "wait" (`String "retry_anyway") admission_json
+    ; replace_field "installation_id" (`String "") admission_json
+    ; `Assoc ["kind", `String "worker"; "request_id", `String "original"] ];
   (* A row this build cannot read is refused on its own: the other keeper
      still decodes and the refusal names the keeper and the reason, so a newer
      server does not blank the pane. *)
@@ -5767,6 +5843,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
          (`Assoc
             [ ("state", `String "drained")
             ; ("detail", `Null)
+            ; ("pending", `Null)
+            ; ("admission_wait", `Null)
             ; ("measured_at", `Float 1_775_000_000.0)
             ; ("unread_atom_turns", `Int (-1))
             ; ("unread_official_turns", `Int 0)
@@ -5785,6 +5863,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
          (`Assoc
             [ ("state", `String "resting")
             ; ("detail", `Null)
+            ; ("pending", `Null)
+            ; ("admission_wait", `Null)
             ; ("measured_at", `Float 1_775_000_000.0)
             ; ("unread_atom_turns", `Int 0)
             ; ("unread_official_turns", `Int 0)
@@ -5934,7 +6014,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v10")
+    [ ("schema", `String "keeper.memory_os.current_health.v12")
     ; ("execution", disabled_memory_execution)
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ( "keepers"
@@ -5957,6 +6037,8 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
                 , `Assoc
                     [ ("state", `String "drained")
                     ; ("detail", `Null)
+                    ; ("pending", `Null)
+                    ; ("admission_wait", `Null)
                     ; ("measured_at", `Float 1_775_000_000.0)
                     ; ("unread_atom_turns", `Int 0)
                     ; ("unread_official_turns", `Int 0)
@@ -6068,7 +6150,7 @@ let test_decode_memory_alert_keeps_the_code_contract () =
 let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
   let snapshot_with context_cycle =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v10")
+      [ ("schema", `String "keeper.memory_os.current_health.v12")
       ; ("execution", disabled_memory_execution)
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
@@ -6091,6 +6173,8 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
                   , `Assoc
                       [ ("state", `String "drained")
                       ; ("detail", `Null)
+                      ; ("pending", `Null)
+                      ; ("admission_wait", `Null)
                       ; ("measured_at", `Float 1_775_000_000.0)
                       ; ("unread_atom_turns", `Int 0)
                       ; ("unread_official_turns", `Int 0)
@@ -6211,18 +6295,29 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
                 ~rewriting_through:(Some 12888) ()))))
 
 let test_decode_memory_health_rejects_stale_schema () =
-  let json =
-    `Assoc
-      [ "schema", `String "keeper.memory_os.current_health.v1"
-      ; "generated_at", `Float 1_775_000_000.0
-      ; "execution", disabled_memory_execution
-      ; "keepers", `List []
-      ; "totals", `Assoc []
-      ; "alert_summary", `Assoc []
-      ]
+  let current =
+    memory_alert_snapshot ~code:"librarian_starvation" ~severity:"error"
+      ~target:"librarian_starvation"
   in
-  Alcotest.(check bool) "v1 cannot masquerade as the source-aware shape" true
-    (memory_health_rejects (json))
+  Alcotest.(check bool) "the current contract accepts the fixture" false
+    (memory_health_rejects current);
+  List.iter
+    (fun schema ->
+       let json =
+         match current with
+         | `Assoc fields ->
+           `Assoc (("schema", `String schema) :: List.remove_assoc "schema" fields)
+         | _ -> Alcotest.fail "expected a memory-health object"
+       in
+       Alcotest.(check bool) "an older contract is rejected at the envelope" true
+         (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot json with
+          | Error _ -> true
+          | Ok _ -> false))
+    [ "keeper.memory_os.current_health.v1"
+    ; "keeper.memory_os.current_health.v9"
+    ; "keeper.memory_os.current_health.v10"
+    ; "keeper.memory_os.current_health.v11"
+    ]
 
 let memory_fact_snapshot_json ?events_read_error ~ordinary ~source_bound () =
   `Assoc
@@ -14584,6 +14679,8 @@ let () =
           test_decode_tool_snapshot_reads_the_live_shape;
         Alcotest.test_case "keeps the warming flag" `Quick
           test_decode_tool_snapshot_keeps_the_warming_flag;
+        Alcotest.test_case "reads the server's volume GC report" `Quick
+          test_decode_tool_snapshot_reads_the_volume_gc_report;
         Alcotest.test_case "usage rows keep calls, failures and p95" `Quick
           test_decode_tool_usage_reads_the_rows;
         Alcotest.test_case "usage without by_tool is no reading" `Quick

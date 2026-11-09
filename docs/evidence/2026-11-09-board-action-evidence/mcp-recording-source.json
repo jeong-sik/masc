@@ -1,0 +1,30 @@
+{
+  "head": "e8c36f2301dc8ba3cf8bb4e71b5a0b39b76a3c33",
+  "branch": "fix/26034-board-action-evidence",
+  "diff_sha256": "e0b0f6e3c64d4ef19db3611089a45f27884d21759449f1c6f43c723240dd53a0",
+  "parse_log_sha256": "cb8a13d807c75c6d31035486717a84f053843de35c7b8a6ccaa43746f0b4b756",
+  "files": {
+    "lib/mcp_server_eio_call_tool.mli": "a017f98f034af1ada9a1638cc30ff30f6ebb49dc671dacb4b5fae0700b6a1871",
+    "lib/mcp_server_eio_call_tool.ml": "043eca1be3ce281c1453c5e8c9bb2e74ae066e4ad67675abfda09ca1cbc3b99e",
+    "test/test_mcp_server_eio_call_tool.ml": "7f59802be3a570fead9560864eb3ffdb5bff4b42f5b83f986daa42877870ea15"
+  },
+  "outside_scoped_diff": [
+    "changelog.d/50684.md"
+  ],
+  "diff_check_exit": 0,
+  "review": {
+    "id": 5826980707,
+    "url": "https://github.com/jeong-sik/masc/pull/50684#pullrequestreview-5826980707",
+    "commit_id": "e8c36f2301dc8ba3cf8bb4e71b5a0b39b76a3c33"
+  },
+  "response_comment": {
+    "id": 6742128741,
+    "url": "https://github.com/jeong-sik/masc/pull/50684#issuecomment-6742128741"
+  },
+  "wire": "_meta[tool_call_meta_key].board_action_recording",
+  "validation": "ocamlc -stop-after parsing only",
+  "compiler": "5.5.1",
+  "target_compiler": "5.5.2",
+  "test_execution": "not run",
+  "typecheck_or_build": "not run"
+}

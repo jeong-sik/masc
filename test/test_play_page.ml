@@ -430,7 +430,11 @@ let test_the_seat () =
           match status_of response with
           | 200 ->
             let answer = Yojson.Safe.from_string (snd (split_response response)) in
-            if member "machine" answer = Some (`Bool true) then answer
+            (* Both May_change wakes must land before the seat settles: the load
+               refresh names the machine, the pass refresh names the holder.
+               Waiting only for the machine read the handoff's previous row. *)
+            if member "machine" answer = Some (`Bool true)
+               && member "controller" answer = Some (`String "minsu") then answer
             else (Eio.Time.sleep (Eio.Stdenv.clock env) 0.01; settled ())
           | _ -> Eio.Time.sleep (Eio.Stdenv.clock env) 0.01; settled () in
         let answer = settled () in

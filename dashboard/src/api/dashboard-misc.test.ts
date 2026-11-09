@@ -15,7 +15,7 @@ import {
 
 function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v11',
+    schema: 'keeper.memory_os.current_health.v12',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'healthy',
@@ -132,7 +132,7 @@ function keeperMemoryHealthPayload(): KeeperMemoryHealthResponse {
 
 function starvingKeeperPayload(): KeeperMemoryHealthResponse {
   return {
-    schema: 'keeper.memory_os.current_health.v11',
+    schema: 'keeper.memory_os.current_health.v12',
     generated_at: 1_700_000_000,
     keepers: [{
       keeper_id: 'starving',
@@ -426,12 +426,23 @@ describe('fetchKeeperMemoryHealth', () => {
     await expect(fetchKeeperMemoryHealth()).rejects.toThrow('유효하지 않은 keeper memory health payload')
   })
 
+  it.each([
+    'keeper.memory_os.current_health.v10',
+    'keeper.memory_os.current_health.v11',
+  ])('rejects an older memory-health envelope: %s', async schema => {
+    getMock.mockResolvedValue({ ...keeperMemoryHealthPayload(), schema })
+
+    await expect(fetchKeeperMemoryHealth()).rejects.toThrow(
+      '유효하지 않은 keeper memory health payload',
+    )
+  })
+
   it('decodes the exact current-snapshot health contract', async () => {
     getMock.mockResolvedValue(keeperMemoryHealthPayload())
 
     const response = await fetchKeeperMemoryHealth()
 
-    expect(response.schema).toBe('keeper.memory_os.current_health.v11')
+    expect(response.schema).toBe('keeper.memory_os.current_health.v12')
     expect(response.keepers[0]).toMatchObject({
       keeper_id: 'healthy',
       revision: 7,

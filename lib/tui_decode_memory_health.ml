@@ -5,7 +5,7 @@ open Tui_decode_fields
 open Result.Syntax
 
 (* The fleet response and the one-Keeper row carry the same schema. *)
-let current_health_schema = "keeper.memory_os.current_health.v11"
+let current_health_schema = "keeper.memory_os.current_health.v12"
 
 type memory_alert_code =
   | Snapshot_read_error

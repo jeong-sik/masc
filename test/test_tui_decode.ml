@@ -5454,7 +5454,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
   in
   let json =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v11")
+      [ ("schema", `String "keeper.memory_os.current_health.v12")
       ; ("execution", disabled_memory_execution)
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
@@ -6014,7 +6014,7 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    that disagrees rather than trusting the string it was handed. *)
 let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target =
   `Assoc
-    [ ("schema", `String "keeper.memory_os.current_health.v11")
+    [ ("schema", `String "keeper.memory_os.current_health.v12")
     ; ("execution", disabled_memory_execution)
     ; ("generated_at", `Float 1_775_000_000.0)
     ; ( "keepers"
@@ -6150,7 +6150,7 @@ let test_decode_memory_alert_keeps_the_code_contract () =
 let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
   let snapshot_with context_cycle =
     `Assoc
-      [ ("schema", `String "keeper.memory_os.current_health.v11")
+      [ ("schema", `String "keeper.memory_os.current_health.v12")
       ; ("execution", disabled_memory_execution)
       ; ("generated_at", `Float 1_775_000_000.0)
       ; ( "keepers"
@@ -6295,21 +6295,29 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
                 ~rewriting_through:(Some 12888) ()))))
 
 let test_decode_memory_health_rejects_stale_schema () =
-  let json schema =
-    `Assoc
-      [ "schema", `String schema
-      ; "generated_at", `Float 1_775_000_000.0
-      ; "execution", disabled_memory_execution
-      ; "keepers", `List []
-      ; "totals", `Assoc []
-      ; "alert_summary", `Assoc []
-      ]
+  let current =
+    memory_alert_snapshot ~code:"librarian_starvation" ~severity:"error"
+      ~target:"librarian_starvation"
   in
-  Alcotest.(check bool) "v1 cannot masquerade as the source-aware shape" true
-    (memory_health_rejects (json "keeper.memory_os.current_health.v1"));
-  (* v10 carried the same 24 age_bins counts on the earlier bin edges (RFC-0515 E28). *)
-  Alcotest.(check bool) "v10 age bins on the earlier edges are refused" true
-    (memory_health_rejects (json "keeper.memory_os.current_health.v10"))
+  Alcotest.(check bool) "the current contract accepts the fixture" false
+    (memory_health_rejects current);
+  List.iter
+    (fun schema ->
+       let json =
+         match current with
+         | `Assoc fields ->
+           `Assoc (("schema", `String schema) :: List.remove_assoc "schema" fields)
+         | _ -> Alcotest.fail "expected a memory-health object"
+       in
+       Alcotest.(check bool) "an older contract is rejected at the envelope" true
+         (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot json with
+          | Error _ -> true
+          | Ok _ -> false))
+    [ "keeper.memory_os.current_health.v1"
+    ; "keeper.memory_os.current_health.v9"
+    ; "keeper.memory_os.current_health.v10"
+    ; "keeper.memory_os.current_health.v11"
+    ]
 
 let memory_fact_snapshot_json ?events_read_error ~ordinary ~source_bound () =
   `Assoc

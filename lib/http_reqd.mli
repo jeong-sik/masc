@@ -134,11 +134,13 @@ val respond_with_streaming
 type response_state =
   | Not_started  (** No response has started. *)
   | Streaming_open
-      (** {!respond_with_streaming} returned a writer that is still open
-          ({!Body_writer.is_closed} is false). *)
+      (** {!respond_with_streaming} returned a writer that the route has not
+          closed and that is still open ({!Body_writer.is_closed} is false). *)
   | Answered
       (** A response started and nothing more will be added to it: a whole
-          response, a 101, or a streaming response whose writer is closed. *)
+          response, a 101, or a streaming response whose writer the route
+          closed or the transport closed. On HTTP/2 the route's close waits
+          for the bytes already written, so those still go out. *)
 
 val response_state : t -> response_state
 (** Read from the transport and from the writer {!respond_with_streaming}
@@ -164,16 +166,28 @@ val read_body
     excess stops the read and reports [Too_large]; [on_body] runs once with
     the complete body. On HTTP/2 both callbacks run in a fiber of the stream
     switch after a yield (RFC-0350), and completion is checked again there, so
-    a stream reset after EOF delivers nothing. *)
+    a stream reset after EOF delivers nothing.
+
+    A body cut short delivers nothing, and the request has its answer or its
+    end by then. On HTTP/1.1 that is a body with fewer bytes than its
+    declared length, or a chunked body whose request was reported failed:
+    by {!report_exn}, or by httpun itself before a response started. httpun
+    leaves no trace of a chunked body it cut after a response started, and
+    that body is delivered as it came. *)
 
 val report_exn : t -> exn -> unit
 (** Tells the transport the request failed with [exn]. Before a response,
     both transports answer with the connection's error handler (500). After
-    a streaming response started, HTTP/1.1 cuts the body without its last
-    chunk and closes the connection after it; HTTP/2 resets the stream
-    ({!Http_h2_stream.reset} with [Raised]). [exn] is logged once at error:
-    on HTTP/2 the error handler logs the ones it answers
-    ({!Http_h2_stream.report_failure}). *)
+    a streaming response started, HTTP/2 resets the stream
+    ({!Http_h2_stream.reset} with [Raised]). HTTP/1.1 stops the body and
+    closes the connection after it: a chunked body then lacks its last
+    chunk, but a body that ends with the connection (no length, no chunks,
+    as masc's HTTP/1.1 SSE) looks to the client like one that finished.
+    [exn] is logged once at error: on HTTP/2 the error handler logs the ones
+    it answers ({!Http_h2_stream.report_failure}).
+
+    On HTTP/1.1 httpun also ends the request body, and a {!read_body} still
+    waiting for it delivers nothing. *)
 
 (** The late-response failure shapes of both libraries (#13059). *)
 module Late_response : sig

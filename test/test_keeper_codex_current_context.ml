@@ -21,7 +21,7 @@ let text = Yojson.Safe.Util.to_string
 let items = Yojson.Safe.Util.to_list
 let require = function Ok value -> value | Error detail -> fail detail
 
-let fixture root ~reject_context ~overflow_resume ~overflow_over_injected_bytes ~refuse_first_turn_input ~hold_first_resume ~compact_resume ~compact_item ~checkpoint_tool ~accepted_efforts ~turn_delay_s =
+let fixture root ~reject_context ~overflow_resume ~overflow_over_injected_bytes ~refuse_first_turn_input ~refuse_resume_input ~hold_first_resume ~compact_resume ~compact_item ~checkpoint_tool ~accepted_efforts ~turn_delay_s =
   let capture = Filename.concat root "requests.jsonl" in
   write capture "";
   let command = Filename.concat root "codex-fixture" in
@@ -44,6 +44,7 @@ accepted_efforts = %s
 turn_delay_s = %g
 overflow_over_injected_bytes = %s
 refuse_first_turn_input = %s
+refuse_resume_input = %s
 injected_bytes = 0
 turn_id = 'fresh-turn'
 def emit(value):
@@ -75,7 +76,8 @@ for line in sys.stdin:
             injected_bytes += len(json.dumps(request['params']['items']))
             emit({'id':ident,'result':{}})
     elif method == 'turn/start':
-        if refuse_first_turn_input and not os.path.exists(capture+'.input-refused'):
+        refuse_this_input = refuse_first_turn_input or (refuse_resume_input and turn_id == 'resumed-turn')
+        if refuse_this_input and not os.path.exists(capture+'.input-refused'):
             with open(capture+'.input-refused', 'w') as out:
                 out.write('turn input refused before any effect')
             emit({'id':ident,'error':{'code':-32602,'message':'Input exceeds the maximum length of 1048576 characters.',
@@ -125,11 +127,12 @@ for line in sys.stdin:
     (Yojson.Safe.to_string (`List (List.map (fun effort -> `String effort) accepted_efforts)))
     turn_delay_s
     (match overflow_over_injected_bytes with None -> "None" | Some bytes -> string_of_int bytes)
-    (if refuse_first_turn_input then "True" else "False"));
+    (if refuse_first_turn_input then "True" else "False")
+    (if refuse_resume_input then "True" else "False"));
   Unix.chmod command 0o700;
   command, capture
 
-let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?overflow_over_injected_bytes ?(refuse_first_turn_input = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?(checkpoint_tool = false) ?catalog_context_window
+let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_resume = false) ?overflow_over_injected_bytes ?(refuse_first_turn_input = false) ?(refuse_resume_input = false) ?(hold_first_resume = false) ?(compact_resume = false) ?(compact_item = false) ?(checkpoint_tool = false) ?catalog_context_window
     ?(reasoning_effort = None) ?(turn_timeout_s = None) ?catalog_inference
     ?(remove_runtime = false) ?(turn_delay_s = 0.)
     ?(accepted_efforts = ["none"; "minimal"; "low"; "medium"; "high"; "xhigh"; "max"; "ultra"])
@@ -156,7 +159,7 @@ let with_fixture ?(worker_pool = false) ?(reject_context = false) ?(overflow_res
     ~base_path:root ~sandbox_profile:None "context-fixture";
   let saved = Runtime.For_testing.snapshot () in
   Eio.Switch.on_release sw (fun () -> Runtime.For_testing.restore saved; Fs_compat.remove_tree root);
-  let command, capture = fixture root ~reject_context ~overflow_resume ~overflow_over_injected_bytes ~refuse_first_turn_input ~hold_first_resume ~compact_resume ~compact_item ~checkpoint_tool ~accepted_efforts ~turn_delay_s in
+  let command, capture = fixture root ~reject_context ~overflow_resume ~overflow_over_injected_bytes ~refuse_first_turn_input ~refuse_resume_input ~hold_first_resume ~compact_resume ~compact_item ~checkpoint_tool ~accepted_efforts ~turn_delay_s in
   let config_path = Filename.concat root "runtime.toml" in
   let write_catalog ~model_id max_context reasoning_effort turn_timeout_s =
     let inference =
@@ -1705,6 +1708,48 @@ let test_an_input_too_large_refusal_leaves_the_carrier_inline () =
     fail (Printf.sprintf "expected the refused and the retried injection, saw %d"
       (List.length injected))
 
+(* [input_too_large] as a Keeper meets it. A Resume sends, in front of the
+   goal, the context blocks its vendor thread does not hold yet
+   ({!Keeper_official_client_host.resume_prompt}), so its turn/start input is
+   the one that outgrows the limit. The retry is a fresh Start, which sends
+   those blocks in the thread's developer instructions. Memory answers
+   [Unchanged] here: a body refusal that fell through to the carrier step
+   would switch it, and the receipts would leave the model's sight. *)
+let test_a_refused_resume_input_restarts_with_the_carrier_inline () =
+  with_fixture ~refuse_resume_input:true @@ fun ~run ~capture ~reports:_ ->
+  let base_path = Filename.dirname capture and keeper_name = "context-fixture" in
+  successful (run ~instructions:"Keeper instructions" ~world:"world" ());
+  retain_overflow_receipts ~base_path ~keeper_name;
+  let inline = inline_carrier ~base_path ~keeper_name in
+  let sha256 = Agent_core_sha256.(to_hex (digest_string inline)) in
+  let asked, on_memory_capacity_refusal =
+    recording_memory ~first:Keeper_memory_delivery_reprojection.Unchanged in
+  let before = List.length (read_requests capture) in
+  successful (run ~on_memory_capacity_refusal
+    ~instructions:"Keeper instructions" ~world:"world" ());
+  check (list bool) "memory is asked once, about the body refusal" [true]
+    (List.map is_body_refusal !asked);
+  let rows = read_requests capture |> List.filteri (fun index _ -> index >= before) in
+  (match params_of "thread/resume" rows, params_of "thread/start" rows with
+   | [_], [_] -> ()
+   | resumes, starts ->
+     fail (Printf.sprintf "expected a Resume then a fresh Start, saw %d resumes and %d starts"
+       (List.length resumes) (List.length starts)));
+  match List.map Yojson.Safe.to_string (params_of "thread/inject_items" rows) with
+  | [refused; restarted] ->
+    check bool "the refused Resume carried every receipt inline" true
+      (carries_each_receipt refused);
+    check bool "the fresh Start carries every receipt inline" true
+      (carries_each_receipt restarted);
+    check (option string) "no blob holds the inline text" None
+      (held_blob ~base_path sha256);
+    check int "the completed Start acknowledges every loaded receipt" 0
+      (List.length (Keeper_client_tool_outbox.receipt_ids
+         (pending_receipts ~base_path ~keeper_name)))
+  | injected ->
+    fail (Printf.sprintf "expected the refused and the restarted injection, saw %d"
+      (List.length injected))
+
 (* A run offered keeper_artifact_read names it in the address form, so the
    model knows what reads the receipts. *)
 let test_the_address_form_names_the_offered_reader () =
@@ -1734,14 +1779,17 @@ let test_the_address_form_names_the_offered_reader () =
 let test_a_continuation_overflow_keeps_every_receipt () =
   with_fixture ~overflow_over_injected_bytes:carrier_window_bytes @@ fun ~run ~capture ~reports:_ ->
   let base_path = Filename.dirname capture and keeper_name = "context-fixture" in
+  let asked, on_memory_capacity_refusal =
+    recording_memory ~first:Keeper_memory_delivery_reprojection.Unchanged in
   let attempt, rows = resume_large_history ~capture
     ~start:(fun () -> run ~instructions:"Keeper instructions" ~world:"world" ())
     ~resume:(fun checkpoint ->
       retain_overflow_receipts ~base_path ~keeper_name;
-      run ~official_client_continuation:checkpoint
+      run ~on_memory_capacity_refusal ~official_client_continuation:checkpoint
         ~instructions:"Keeper instructions" ~world:"world" ()) in
   check bool "the overflow ends the turn" true
     (Result.is_error attempt.Keeper_codex_runtime.result);
+  check int "memory is never asked" 0 (List.length !asked);
   check int "the continuation starts no fresh thread" 0
     (List.length (params_of "thread/start" rows));
   (match List.map Yojson.Safe.to_string (params_of "thread/inject_items" rows) with
@@ -1892,6 +1940,8 @@ let () = run "Keeper current Codex context" ["native requests",[
       test_codex_resume_overflow_restarts_with_the_address_form;
     test_case "an input_too_large refusal leaves the carrier inline" `Quick
       test_an_input_too_large_refusal_leaves_the_carrier_inline;
+    test_case "a refused resume input restarts with the carrier inline" `Quick
+      test_a_refused_resume_input_restarts_with_the_carrier_inline;
     test_case "the address form names the offered reader" `Quick
       test_the_address_form_names_the_offered_reader;
     test_case "a continuation overflow keeps every receipt" `Quick

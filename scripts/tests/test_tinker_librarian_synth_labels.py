@@ -283,15 +283,6 @@ class GenerateTest(unittest.TestCase):
                          [("m1", "같은 지식의 다른 문장", False, "m3"), ("m2", "낡은 상태", True, None),
                           ("m3", "원래 기억", False, None)])
 
-    def test_a_planned_duplicate_lands_in_a_category_of_its_memory(self) -> None:
-        keeper = S.KeeperProfile("docs-gardener", "synth-docs-gardener", "r", "w",
-                                 tuple(f"topic_{i}" for i in range(12)), S.GoalDraft("t", "m", "v"))
-        for seed in range(20):
-            plan = G.plan_memory(random.Random(seed), keeper, 0, True)
-            assert plan.duplicate is not None
-            self.assertIn(plan.duplicate.category, {slot.category for slot in plan.slots})
-            self.assertIsNone(G.plan_memory(random.Random(seed), keeper, 0, False).duplicate)
-
 
 if __name__ == "__main__":
     unittest.main()

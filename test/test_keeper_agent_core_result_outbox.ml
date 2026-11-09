@@ -230,12 +230,15 @@ streaming = false
      let selected = Option.get selected_source in
      get (Keeper_heartbeat_loop.For_testing.retain_checkpoint_continuations
        ~base_path ~keeper_name [selected]);
-     (match get (Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name) with
+     let retained = match get (Keeper_registry_event_queue.pending_selections_result ~base_path keeper_name) with
       | [retained] ->
         check int "the original source has one durable checkpoint retention" 1 retained.checkpoint_retentions;
-        check int64 "retention preserves the exact admitted incarnation"
-          selected.admitted_revision retained.admitted_revision
-      | [] | _ :: _ :: _ -> fail "checkpoint lost or added an admitted source");
+        check bool "retention preserves the original source" true (selected.source = retained.source);
+        check int64 "retention preserves original arrival" selected.arrival retained.arrival;
+        check bool "retention rotates the admitted incarnation" true
+          (Int64.compare retained.admitted_revision selected.admitted_revision > 0);
+        retained
+      | [] | _ :: _ :: _ -> fail "checkpoint lost or added an admitted source" in
      let followup = Keeper_agent_run.For_testing.checkpoint_followup_of_stop_reason
        ~observed:!observed_handoff result.run_result.stop_reason in
      let settled =
@@ -279,7 +282,7 @@ streaming = false
      check (list string) "completed resumed consumer ACKs original result" []
        (Outbox.receipt_ids (snapshot ()));
      (match get (Keeper_registry_event_queue.terminalize_pending_turn_completed_result
-       ~base_path keeper_name ~applied_at:(Time_compat.now ()) ~selection:selected) with
+       ~base_path keeper_name ~applied_at:(Time_compat.now ()) ~selection:retained) with
       | Turn_source_acked (Acked _) -> ()
       | Turn_source_acked (Already_acked _ | Ack_committed_followup_failed _) | Turn_selection_withdrawn ->
         fail "completed continuation did not settle its exact original source");

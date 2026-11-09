@@ -15,9 +15,9 @@
 9. 성능: HTTP 쿼리 파라미터 파싱 최대 47배 가속·제로 할당화(#49683), provider 입력 스냅샷 디코딩 무할당화, 대형 JSON 검사의 GC 부담 절감(#50665).
 10. 업그레이드 주의 3가지: Keeper TOML 의 `microvm_delivery` 키 제거(#50589), TUI·서버 함께 업데이트(fleet 스트림 요구), `tui-keepers.toml` 의 `layout` 줄 무시(#50264) — 나머지는 업그레이드 노트 5항목에.
 11. 배포·검증 축: 설치 검증(install 2종, #50673)·browser_lane(#50700)·goal_verification_gate(#50701)·TUI memory_push 회귀가 이번 사이클에서 실측 초록으로 닫혔습니다.
-12. Known issues: TUI 시그널·전송 계열 python 15사례(task-3471)·muse deadline 1사례(#50591) — 제품 경로가 아닌 시험 잔여이며 v0.71.0 창에서 수리합니다. GuestShim(#50050) 16건과 LocalBuildInstall 21건은 이번 창에 회복됐습니다.
+12. Known issues: TUI 시그널·전송 계열 python 15사례(task-3471)·muse deadline 4 subtest(#50591 — RC 검증에서 시험 fixture 누락 확인, 제품 무결함, #50756 으로 이 트리에서 수리) — 나머지는 제품 경로가 아닌 시험 잔여이며 v0.71.0 창에서 수리합니다. GuestShim(#50050) 16건과 LocalBuildInstall 21건은 이번 창에 회복됐습니다.
 13. Known issues 추가: 이번 컷 창 도입 비필수 3건 — executor 합성 수령 1건(task-3483, #50684 의 retention receipt, 효과는 이미 커밋된 뒤 증거 수령이 상점 부재시 실행을 멈추는 경계), tui_decode memory-health 디코드 1건(task-3489), sandbox read_backend run_command 1건(task-3490). 기준선 상존 OCaml RED 54스위트는 Known issues 표에 군집으로 기재했습니다.
-14. 게이트 증거: 컷 635a443a(15:28Z) + 게이트 수리 #50721 = RC 8f3b2a57 — Test 전체 회귀 42657800048(필수 10/10 통과, 전체 실패는 Known issues 기재)·Release full checks 42657805305(4잡 초록)·RC 검증은 태그 전 dispatch 단계에 있습니다.
+14. 게이트 증거: 컷 635a443a(15:28Z) + 게이트 수리 #50721 = RC 8f3b2a57 — Test 전체 회귀 42657800048(필수 10/10 통과, 전체 실패는 Known issues 기재)·Release full checks 42657805305(4잡 초록)·첫 RC 검증 42681028060 은 installation 축 4잡이 muse 4 subtest 로 실패해(취소된 이전 run 들의 'Release checks passed'·'Record candidate verification' failure 표기는 잡 취소 파생이며 시험 실패가 아님) 시험 fixture 수리 #50756 을 rc 에 cherry-pick한 뒤 재검증을 거쳐 태그합니다.
 15. 다음: v0.71.0 창에는 동결 시각(15:28Z) 이후 main 에 착지한 조각 23건 — 전체 명세는 아래 Known issues 의 '동결 이월' 줄 — 과 위 Known issues 수리가 들어갑니다.
 
 
@@ -1045,7 +1045,7 @@
 test_a_board_write_about_the_open_post_is_read·test_a_board_write_reads_the_list_and_census·test_a_change_of_the_detail_keeper_is_read·test_a_held_call_change_reads_the_held_calls_on_the_dashboard·test_a_transport_measurement_reads_the_transport·test_account_emails_read_once_per_reason·test_an_entry_read_superseded_by_a_refresh_is_read_again·test_changes_while_reading_coalesce_without_cadence·test_failed_composite_reads_are_read_again_with_growing_waits·test_failed_held_call_reads_are_read_again_with_growing_waits·test_failed_list_reads_are_read_again_with_growing_waits·test_failed_post_reads_are_read_again_with_growing_waits·test_failed_transport_reads_are_read_again·test_only_the_repositories_dataset_reads_the_list·test_same_path_epoch_change_retires_old_reads_and_revalidates — 제품 경로가 아닌 시험 잔여이며 도입 창 핀포인트는 (02:53, 03:32Z]로 좁혀져 있다.
 
 **그 외 기준선 상존 (b577c0b5 run 42610395195 와 같은 상태)**
-- `test_muse` deadline 경계 1사례(#50591 term 순서, task-3480 계열).
+- `test_muse` deadline 경계 4 subtest(#50591 창 도입) — 첫 RC 검증에서 시험 fixture 누락(호출이 workspace 를 만들지 않아 인자 검증 대신 workspace 오류를 만남)으로 확인되었고 제품 코드는 무결함이어서, #50756 이 이 트리에서 수리했다(더 이상 알려진 문제가 아님).
 - OCaml 축 RED 54스위트 — 대상: board_persistence/board_rest_routes/board_vote_persistence 등 board 계열, Candle·Curator·DOS·Dashboard·Exact·H2·Keeper·Lane·Provider·Telemetry·Tool·Tool_plan 등 모듈 스위트. 11-09 11:36Z 기준선(56)과 같은 인구에서 5스위트가 이번 창에 회복(Endpoint·Keeper_sandbox_docker_route·goal_projection_announce·goal_verification_gate·keeper_claude_code_runtime).
 - 기준선 대조 판정: python 추가 실패 0(40→16, GuestShim #50050 16건·LocalBuildInstall 21건은 이번 창에 회복), OCaml 신규 RED 3(위 기재, 전부 비필수·1사례).
 - #50125 dashboard vitest 2건 — fixture 키 원인, 제품 결함 아님.

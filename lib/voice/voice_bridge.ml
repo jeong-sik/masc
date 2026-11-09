@@ -2,8 +2,6 @@
 
 include Voice_bridge_core
 
-open Result.Syntax
-
 
 (* ── Voice_catalogue re-exports (E09 Phase 1, task-2526): the pure catalogue
    layer moved to {!Voice_catalogue}; the names callers used are kept here.

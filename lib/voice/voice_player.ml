@@ -7,8 +7,6 @@
 
 include Voice_bridge_core
 
-open Result.Syntax
-
 let run_voice_status = Voice_bridge_transport.run_voice_status
 
 (** Clean up old audio files (>24 hours) and enforce a size cap.

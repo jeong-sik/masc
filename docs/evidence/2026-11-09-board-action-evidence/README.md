@@ -65,3 +65,11 @@ hashes against the earlier parse receipt. Only an upstream Execute allowed-field
 expectation changed in the inline fixture file; that file was parsed again.
 Auth optional-field decoding changed upstream without changing the interfaces
 used here. These are source/parse observations, with no additional runtime proof.
+
+A later compiler diagnostic identified unqualified `Recipient_lookup` in three
+new fixtures. `recipient-lookup-namespace-parse-only.json` records their repair
+to the existing public `Masc_board_handlers.Recipient_lookup` path: 35 source
+files remain unchanged and the three fixture files were parsed again with
+5.5.1. The existing test dependency surface already reexports this library.
+This repairs the received source diagnostic; it does not claim a completed
+type check or executed OCaml regression on the updated source.

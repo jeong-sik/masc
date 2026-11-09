@@ -8211,7 +8211,7 @@ let test_inline_board_children_join_only_their_committed_turn () =
          Masc.Board_dispatch.reset_for_test ();
          Masc.Board.reset_global_for_test ()) @@ fun () ->
        (match Masc.Board_dispatch.init_jsonl ~base_path:config.base_path
-           ~recipient_lookup:Recipient_lookup.none_declared () with
+           ~recipient_lookup:Masc_board_handlers.Recipient_lookup.none_declared () with
         | Ok () -> () | Error detail -> fail detail);
        (match Masc.Keeper_gate_mode.set config ~actor:"composition-test"
            Masc.Keeper_gate_mode.Always_allow with

@@ -243,6 +243,19 @@ let () =
               "error"
               true
               (Result.is_error (Mcp_session.info_of_json missing_endpoint)))
+        ; test_case "missing transport_kind rejected" `Quick (fun () ->
+            let json =
+              `Assoc
+                [ "server_name", `String "old-srv"
+                ; "command", `String "cmd"
+                ; "args", `List []
+                ; "env", `List []
+                ; "http_base_url", `Null
+                ; "http_headers", `List []
+                ; "tool_schemas", `List []
+                ]
+            in
+            check bool "error" true (Result.is_error (Mcp_session.info_of_json json)))
         ; test_case "unknown info field rejected" `Quick (fun () ->
             let json =
               match

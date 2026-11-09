@@ -321,6 +321,11 @@ let test_retryable_mcp_start () =
   check bool "mcp start not retryable" false (Error.is_retryable err)
 ;;
 
+let test_retryable_mcp_http_transport () =
+  let err = Error.Mcp (HttpTransportFailed { url = "http://x"; detail = "" }) in
+  check bool "mcp http transport is retryable" true (Error.is_retryable err)
+;;
+
 let test_retryable_config () =
   let err = Error.Config (MissingEnvVar { var_name = "X" }) in
   check bool "config not retryable" false (Error.is_retryable err)
@@ -381,6 +386,7 @@ let () =
         ; test_case "Agent" `Quick test_retryable_agent
         ; test_case "Mcp InitializeFailed" `Quick test_retryable_mcp_init
         ; test_case "Mcp ServerStartFailed" `Quick test_retryable_mcp_start
+        ; test_case "Mcp HttpTransportFailed" `Quick test_retryable_mcp_http_transport
         ; test_case "Config" `Quick test_retryable_config
         ; test_case "Internal" `Quick test_retryable_internal
         ] )

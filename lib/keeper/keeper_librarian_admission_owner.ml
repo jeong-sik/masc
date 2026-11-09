@@ -133,8 +133,7 @@ let new_capture ~config ~reserved ~owner part =
       let* capture=Capture.create ~request_id ~parent_part_id:(Parts.part_id part) ~owner ~destination
         ~batch:(Parts.batch part) ~input ~expected_revision ~now ~retirement ~preparation in
       Ok (capture,Capture.to_json capture,`Null)) |> Result.map_error runtime_error in
-  let* record=io (fun () -> owned (Owner.load ~store:(Lane_addon_store.create
-    ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons")) ~scope:(Capture.scope owner) ~request_id)) in
+  let* record=io (fun () -> owned (Owner.load ~store:(Lane_addon_store.of_config config) ~scope:(Capture.scope owner) ~request_id)) in
   let* record=Option.to_result ~none:"Original captured admission disappeared" record in
   Ok {capture;record}
 let call ~config ~reserved ~expected ~(original : Owner.retained) ~arguments =
@@ -347,7 +346,7 @@ let run_queue ~base_path ~keeper_name =
   let config=Workspace.default_config base_path in
   let reserved=reserved () in
   let keepers_dir=Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let store=Lane_addon_store.create ~root:(Filename.concat (Workspace.masc_dir config) "lane-addons") in
+  let store=Lane_addon_store.of_config config in
   let read ()=io (fun () -> Queue.read_pending ~keepers_dir ~keeper_id:keeper_name) in
   let* _anchor=io (fun () -> Current.capture_program_anchor ~keepers_dir ~keeper_id:keeper_name) in
   let* owner=io (fun () -> Capture.observe_owner ~base_path ~keepers_dir ~keeper_id:keeper_name) in

@@ -1817,7 +1817,8 @@ let handle_masc_misc_with_outcome ~(config : Workspace.config) ~(meta : keeper_m
    | (Some (Tool_schemas_misc.Misc_dos_type), None) | (Some (Tool_schemas_misc.Misc_dos_peek), None)
    | (Some (Tool_schemas_misc.Misc_play_room), None)
    | (Some (Tool_schemas_misc.Misc_dos_pass), None) | (Some (Tool_schemas_misc.Misc_dos_save), None)
-   | (Some (Tool_schemas_misc.Misc_dos_restore), None) ->
+   | (Some (Tool_schemas_misc.Misc_dos_restore), None)
+   | (Some (Tool_schemas_misc.Misc_pull_requests), None) ->
      Tool_misc.dispatch ?ask_source_turn_ref ~lane_access:(Lane_addon_sources.Keeper meta.name)
        ~browser_principal:(Lane_addon_call_context.Keeper meta.name) ctx ~name ~args)
   |> dispatch_option_to_execution ~name

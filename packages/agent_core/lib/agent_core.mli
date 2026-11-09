@@ -37,7 +37,6 @@ module Execution_json = Execution_json
 (* Expose the codec signature, not an alias requiring its private CMI. *)
 module Execution_tool_schedule : module type of Execution_tool_schedule
 module Tool = Agent_core_base.Tool
-module Typed_tool = Typed_tool
 module Mcp = Mcp
 module Mcp_http = Mcp_http
 module Mcp_session = Mcp_session
@@ -105,7 +104,6 @@ module Terminal_tool_receipt = Terminal_tool_receipt
 module Agent = Agent
 module Builder = Builder
 module Agent_card = Agent_card
-module Agent_tool = Agent_tool
 module Tool_guidance_text = Tool_guidance_text
 module Otel_tracer = Otel_tracer
 module Otel_export = Otel_export

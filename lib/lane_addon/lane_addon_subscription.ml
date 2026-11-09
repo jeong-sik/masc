@@ -41,7 +41,7 @@ let decode value =
   let* keeper_name = get "keeper_name" text value in let* run_id = get "run_id" text value in
   let* installation_id = get "installation_id" text value in let* output_id = get "output_id" text value in
   Ok {keeper_name;run_id;installation_id;output_id}
-let root config = Filename.concat (Workspace.masc_dir config) "lane-addons"
+let root config = Store.directory ~masc_dir:(Workspace.masc_dir config)
 let config_path config =
   let resolution = Config_dir_resolver.resolve_for_base_path ~base_path:config.Workspace.base_path in
   Filename.concat resolution.config_root.path "lane-subscriptions.toml"
@@ -208,7 +208,7 @@ let observe_with ~io ~config ~keeper_name =
   let subscriptions = List.filter (fun s -> s.keeper_name=keeper_name) subscriptions in
   let* bindings = match subscriptions with
     | [] -> Ok []
-    | _ -> Store.bindings (Store.create ~root:(root config)) in
+    | _ -> Store.bindings (Store.of_config config) in
   let rec loop = function [] -> Ok [] | s::rest ->
     let* value=notice ~io ~access:(Lane_addon_sources.Keeper keeper_name) config bindings s in let* rest=loop rest in Ok(value::rest) in
   let* notices=loop subscriptions in
@@ -228,7 +228,7 @@ let configuration_snapshot ~io ~access ~caller config subscriptions revision =
     | Keeper keeper when String.equal keeper caller -> List.filter (fun s -> String.equal s.keeper_name keeper) subscriptions
     | Keeper _ | Unauthenticated -> [] in
   let bindings = match subscriptions with [] -> Ok []
-    | _ -> Store.bindings (Store.create ~root:(root config)) in
+    | _ -> Store.bindings (Store.of_config config) in
   let reader_states = List.map (fun s ->
     match protect (fun () -> let* bindings=bindings in notice ~io ~access config bindings s) with
     | Ok value -> value
@@ -250,7 +250,7 @@ let dispatch_with ~io ?(access=Lane_addon_sources.Unauthenticated) ~config ~call
       | Keeper keeper when String.equal keeper caller -> Ok ()
       | Keeper _ | Unauthenticated -> Error "Authenticated subscription owner required" in
     let* s=select_subscription ~caller args subscriptions in
-    let store=Store.create ~root:(root config) in
+    let store=Store.of_config config in
     let* bindings=Store.bindings store in
     let* instance,latest,lanes,max_bytes=producer ~access bindings s in
     let* prior=cursor ~io ~verification:Durable config s in

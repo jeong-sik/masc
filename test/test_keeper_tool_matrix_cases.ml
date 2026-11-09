@@ -342,6 +342,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "keeper_tasks_audit"
   | "keeper_candle_balance"
   | "keeper_candle_catalog"
+  | "keeper_pull_requests_list"
   | "keeper_task_claim"
   | "keeper_voice_agent" ->
       `Assoc []

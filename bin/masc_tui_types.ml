@@ -69,7 +69,7 @@ module Keeper_waiting_read : sig
   val clear : t -> t
   val in_flight : t -> bool
   val change_pending : t -> bool
-  val awaiting_change : t -> bool
+  val awaiting_age : t -> int64 option
   val needs_revalidation : t -> bool
   val poll_receipt : t -> (int * int) option
   val accepts_poll : t -> (int * int) option -> bool
@@ -81,15 +81,25 @@ module Keeper_waiting_read : sig
   val exclusive : t -> t
 end = struct
   type request = { ticket : Snapshot_read.request; after_change : bool; revision : int; publication : int }
+  (* [awaiting_since] is the first change of the current burst, monotonic
+     clock. A burst of changes does not restart it: the age answers how long
+     the screen has been behind, which is what a display bar gates on. *)
   type t = { reading : Snapshot_read.t; pending : bool; active_after_change : bool;
-             awaiting : bool; revision : int; publication : int; exclusive : bool }
+             awaiting : bool; awaiting_since : int64 option; revision : int; publication : int
+           ; exclusive : bool }
 
   let idle = { reading = Snapshot_read.idle; pending = false; active_after_change = false;
-               awaiting = false; revision = 0; publication = 0; exclusive = false }
-  let note_change t = { t with pending = true; awaiting = true; revision = t.revision + 1 }
+               awaiting = false; awaiting_since = None; revision = 0; publication = 0
+             ; exclusive = false }
+  let note_change t =
+    let awaiting_since = if t.awaiting then t.awaiting_since else Some (Mtime_clock.elapsed_ns ()) in
+    { t with pending = true; awaiting = true; awaiting_since; revision = t.revision + 1 }
   let in_flight t = Snapshot_read.in_flight t.reading
   let change_pending t = t.pending
-  let awaiting_change t = t.awaiting
+  let awaiting_age t =
+    if t.awaiting then
+      Option.map (fun since -> Int64.sub (Mtime_clock.elapsed_ns ()) since) t.awaiting_since
+    else None
   let needs_revalidation t = t.pending || t.active_after_change
   let poll_receipt t = if t.exclusive then None else Some (t.revision, t.publication)
   let accepts_poll t = function
@@ -97,7 +107,9 @@ end = struct
         revision = t.revision && publication = t.publication && not t.exclusive
     | None -> false
   let settle_poll t ~success =
-    if success then { t with pending = false; awaiting = false; publication = t.publication + 1 }
+    if success then
+      { t with pending = false; awaiting = false; awaiting_since = None
+      ; publication = t.publication + 1 }
     else { t with pending = t.pending || t.active_after_change;
                   publication = t.publication + 1 }
   let accepts_event (t : t) (request : request) = request.publication = t.publication
@@ -125,7 +137,13 @@ end = struct
       let follow_up = t.pending in
       let pending = t.pending || (request.after_change && not success) in
       let awaiting = t.pending || (request.after_change && not observed) in
-      Some ({ t with reading; pending; active_after_change = false; awaiting;
+      let awaiting_since =
+        if awaiting then
+          match t.awaiting_since with
+          | Some since -> Some since
+          | None -> Some (Mtime_clock.elapsed_ns ())
+        else None in
+      Some ({ t with reading; pending; active_after_change = false; awaiting; awaiting_since;
                      exclusive = t.exclusive && follow_up }, follow_up)
 
   let suspend t =
@@ -133,6 +151,7 @@ end = struct
     ; pending = t.pending || t.active_after_change
     ; active_after_change = false
     ; awaiting = t.awaiting
+    ; awaiting_since = t.awaiting_since
     ; revision = t.revision + 1
     ; publication = t.publication + 1
     ; exclusive = false
@@ -140,7 +159,7 @@ end = struct
 
   let clear t =
     { reading = Snapshot_read.invalidate t.reading; pending = false; active_after_change = false;
-      awaiting = false; revision = t.revision + 1; publication = t.publication + 1;
+      awaiting = false; awaiting_since = None; revision = t.revision + 1; publication = t.publication + 1;
       exclusive = false }
 end
 

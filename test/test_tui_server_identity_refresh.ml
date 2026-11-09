@@ -6184,7 +6184,7 @@ let test_keeper_turns_event_demand_coalesces () =
   let state, first = Read.start state in
   let first = Option.get first in
   Alcotest.(check bool) "waiting remains unavailable while the read runs" true
-    (Read.awaiting_change state);
+    (Option.is_some (Read.awaiting_age state));
   let state = Read.note_change (Read.note_change state) in
   let state, overlapping = Read.start state in
   Alcotest.(check bool) "an in-flight read is not duplicated" true (Option.is_none overlapping);
@@ -6580,7 +6580,7 @@ let test_continuous_waiting_events_preserve_turn_controls () =
   Alcotest.(check bool) "the turns read cannot overwrite pending waiting" true
     (state.keeper_waiting = [waiting]);
   Alcotest.(check bool) "waiting remains pending independently" true
-    (Keeper_waiting_read.awaiting_change state.keeper_waiting_read)
+    (Option.is_some (Keeper_waiting_read.awaiting_age state.keeper_waiting_read))
 ;;
 
 let () =

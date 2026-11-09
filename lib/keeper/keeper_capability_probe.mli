@@ -160,7 +160,8 @@ type invocation_error =
   | Account_not_authorized of string
       (** The access refused to start the official CLI on the account of the
           runtime ({!Runtime_account_access.authorize},
-          {!Runtime_account_access.authorize_muse}); no process started. *)
+          {!Runtime_account_access.authorize_muse},
+          {!Runtime_account_access.authorize_host}); no process started. *)
   | Not_antigravity_lane of string
       (** {!probe_antigravity_invocation} was asked about a lane that declares
           its tools directly. Use {!probe_invocation} or

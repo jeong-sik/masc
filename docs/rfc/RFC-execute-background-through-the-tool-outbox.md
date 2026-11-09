@@ -175,9 +175,16 @@ backend, and the receipt claims neither.
   arrival block (`keeper_run_tools_hooks.ml`, `RFC-arrived-stimuli-reach-the-running-turn`),
   the queue row of the receipt is listed in a later round as
   `tool_result_ready receipt_id=<id>` (`Keeper_reaction_ledger.stimulus_payload_preview`).
-  The id is the SHA-256 of the receipt (`Keeper_client_tool_outbox.receipt_ids`), so
-  the line names neither the request id the model holds nor the outcome. The run's own way to see
-  the result is `keeper_composition_status`. Five background runs ended 4.3 to
+  The id is the SHA-256 of the receipt (`Keeper_client_tool_outbox.receipt_ids`), a
+  number the model never held, so the line goes on with the receipt's own
+  `call_id`, `tool` and `outcome`, each a JSON string.
+  `Keeper_client_tool_outbox.summary_reader` reads them from the outbox when the
+  row is listed. For a background run `call_id` is the request id the start
+  result named, and `outcome` is `completed`, `deferred`, `failed` or
+  `unfinished`; a vendor turn's receipt has no `outcome`. A receipt the outbox no
+  longer holds, or an outbox that cannot be read, leaves the line as it was. The
+  line does not carry the result: the run's own way to see it is
+  `keeper_composition_status`. Five background runs ended 4.3 to
   197.1 s after the start. The run that started each one made 10 to 104 more
   tool calls after the end. The next run's first tool call came 130 to 472 s
   after the end in four cases, and the fifth had none when it was read. One of
@@ -185,8 +192,10 @@ backend, and the receipt claims neither.
   of the five ran on the Muse lane and one on the Claude Code lane.
   `keeper_turn_driver.ml` runs them through `Keeper_muse_runtime.run` and
   `Keeper_claude_code_runtime.run`, and neither file references
-  `Keeper_run_tools`, the only user of the arrival block, so those runs show no
-  line for the receipt. A command that ends in 4 to 16 s returns in that time
+  `Keeper_run_tools`, so when the five runs were read those runs showed no line for
+  the receipt. #50365 appends the arrived rows to the tool results of official
+  clients (`Keeper_official_client_host.arrival_source`), and the line above is
+  the one they show. A command that ends in 4 to 16 s returns in that time
   as a foreground call (three of the five). Figures and definitions are in
   `docs/evidence/tool-efficiency-before-after-2026-11/README.md`, section
   「스크립트 밖에서 센 값」, entry 「background Execute 5건」. Carrying newer

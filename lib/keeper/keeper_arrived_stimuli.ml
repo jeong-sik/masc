@@ -3,6 +3,7 @@ type row =
   ; urgency : Keeper_event_queue.urgency
   ; arrived_at : float
   ; preview : string
+  ; receipt_id : string option
   }
 
 let max_rows_per_round = 8
@@ -12,11 +13,32 @@ type round =
   ; later : int
   }
 
+let receipt_id_of_payload : Keeper_event_queue.stimulus_payload -> string option = function
+  | Keeper_event_queue.Tool_result_ready receipt_id -> Some receipt_id
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_routing_pending _
+  | Keeper_event_queue.Board_attention _
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Schedule_due _
+  | Keeper_event_queue.Connector_attention _
+  | Keeper_event_queue.Hitl_resolved _
+  | Keeper_event_queue.Ask_answered _
+  | Keeper_event_queue.Completion_authority_rejected _
+  | Keeper_event_queue.Task_cancelled _
+  | Keeper_event_queue.Workspace_message _
+  | Keeper_event_queue.Delegate_completed _
+  | Keeper_event_queue.Composition_completed _
+  | Keeper_event_queue.Owned_job_completed _
+  | Keeper_event_queue.Task_outcome _ -> None
+;;
+
 let row_of_selection (selection : Keeper_event_queue_state.pending_selection) =
   { arrival = selection.arrival
   ; urgency = selection.source.urgency
   ; arrived_at = selection.source.arrived_at
   ; preview = Keeper_reaction_ledger.stimulus_payload_preview selection.source.payload
+  ; receipt_id = receipt_id_of_payload selection.source.payload
   }
 ;;
 
@@ -62,7 +84,31 @@ let urgency_text = function
   | Keeper_event_queue.Low -> "low"
 ;;
 
-let render ~now { listed; later } =
+(* The other completion rows name what finished and how it ended
+   (keeper_delegate_completed, keeper_composition_completed, fusion_completed).
+   A retained result's row holds only the SHA-256 of its receipt, so the line
+   asks [receipt] for the receipt's own coordinates. *)
+let max_receipt_field_bytes = 96
+
+let receipt_detail (summary : Keeper_client_tool_outbox.Summary.t) =
+  let field name text =
+    name
+    ^ "="
+    ^ Yojson.Safe.to_string (`String (String_util.utf8_prefix ~max_bytes:max_receipt_field_bytes text))
+  in
+  String.concat
+    " "
+    ([ field "call_id" summary.call_id; field "tool" summary.tool_name ]
+     @ Option.fold ~none:[] ~some:(fun outcome -> [ field "outcome" outcome ]) summary.outcome)
+;;
+
+let line_text ~receipt (row : row) =
+  match Option.bind row.receipt_id receipt with
+  | None -> row.preview
+  | Some summary -> row.preview ^ " " ^ receipt_detail summary
+;;
+
+let render ~now ?(receipt = fun _ -> None) { listed; later } =
   match listed with
   | [] -> None
   | _ :: _ ->
@@ -74,7 +120,7 @@ let render ~now { listed; later } =
              "- %s, %s ago: %s"
              (urgency_text row.urgency)
              (age_text (now -. row.arrived_at))
-             row.preview)
+             (line_text ~receipt row))
         listed
     in
     let more =
@@ -114,12 +160,12 @@ let confirm tracker =
   tracker.awaiting_answer <- []
 ;;
 
-let block tracker ~now ~read ~on_unavailable =
+let block ?receipt tracker ~now ~read ~on_unavailable =
   match read () with
   | Error detail ->
     on_unavailable detail;
     None
-  | Ok selections -> render ~now (next tracker selections)
+  | Ok selections -> render ~now ?receipt (next tracker selections)
 ;;
 
 type claim =
@@ -128,7 +174,7 @@ type claim =
   ; confirm : unit -> unit
   }
 
-let claim tracker ~now ~read ~on_unavailable =
+let claim ?receipt tracker ~now ~read ~on_unavailable =
   match read () with
   | Error detail ->
     on_unavailable detail;
@@ -150,5 +196,5 @@ let claim tracker ~now ~read ~on_unavailable =
                <- List.map (fun (row : row) -> row.arrival) round.listed
                   @ tracker.listed_for_good)
          })
-      (render ~now round)
+      (render ~now ?receipt round)
 ;;

@@ -264,6 +264,61 @@ let test_second_report_raises_nothing () =
       Option.is_some !second && Registry.active_streams session.registry=0);
     check (option (result unit string)) "the second report raised nothing" (Some (Ok ())) !second)
 
+module Http_reqd = Masc.Http_reqd
+
+let reqd_of ~stream_sw h2_reqd =
+  Http_reqd.of_h2 ~stream_sw ~ledger:(Resources.current_exn ()) h2_reqd
+
+(* h2 answers an error reported before any response, and the stream then
+   takes no response of its own. *)
+let test_response_after_a_report_gets_a_closed_writer () =
+  let ran=ref false and closed=ref None in
+  let handler _ ~stream_sw h2_reqd =
+    ran:=true;
+    let reqd=reqd_of ~stream_sw h2_reqd in
+    Http_reqd.report_exn reqd First_report;
+    let writer=Http_reqd.respond_with_streaming reqd (Httpun.Response.create `OK) in
+    Http_reqd.Body_writer.write_string writer "dropped";
+    closed:=Some (Http_reqd.Body_writer.is_closed writer) in
+  with_session ~capacity:1024 handler (fun _ session ->
+    request session 1;
+    until session (fun () -> !ran && Registry.active_streams session.registry=0);
+    check (option bool) "the response opened after the report got a closed writer"
+      (Some true) !closed)
+
+(* A fiber of the stream failed its switch. The handler's response comes after
+   that, and must not open an h2 response that nothing will finish. *)
+let test_response_after_the_scope_failed_gets_a_closed_writer () =
+  let ran=ref false and closed=ref None in
+  let handler _ ~stream_sw h2_reqd =
+    ran:=true;
+    let reqd=reqd_of ~stream_sw h2_reqd in
+    Eio.Fiber.fork ~sw:stream_sw (fun () -> raise Handler_failed);
+    let writer=Http_reqd.respond_with_streaming reqd (Httpun.Response.create `OK) in
+    closed:=Some (Http_reqd.Body_writer.is_closed writer) in
+  with_session ~capacity:1024 handler (fun _ session ->
+    request session 1;
+    until session (fun () -> !ran && Registry.active_streams session.registry=0);
+    check (option bool) "the response opened after the switch failed got a closed writer"
+      (Some true) !closed)
+
+let test_refused_write_ends_the_scope_with_the_refusal () =
+  let ended=ref None in
+  let handler _ ~stream_sw h2_reqd =
+    let reqd=reqd_of ~stream_sw h2_reqd in
+    let writer=Http_reqd.respond_with_streaming reqd (Httpun.Response.create `OK) in
+    Eio.Fiber.fork ~sw:stream_sw (wait_for_stream_end ended);
+    Http_reqd.Body_writer.write_string writer (String.make 64 'x') in
+  with_session ~capacity:16 handler (fun _ session ->
+    request session 1;
+    until session (fun () ->
+      Option.is_some !ended && Registry.active_streams session.registry=0);
+    check bool "the scope ended with the ledger's refusal" true
+      (match !ended with
+       | Some (Stream.Out_of_capacity Resources.Capacity_exhausted) -> true
+       | _ -> false);
+    check int "the client saw the stream reset" 1 !(session.errors))
+
 let () = run "H2 response resource boundary"
   ["transport",[
     test_case "whole response, slow consumption and reset reuse" `Quick test_whole_response_and_scope_release;
@@ -271,4 +326,7 @@ let () = run "H2 response resource boundary"
     test_case "scope cleanup and late flush do not double release" `Quick test_scope_cleanup_and_late_flush_are_idempotent;
     test_case "a handler failure after the headers ends the stream scope" `Quick test_handler_failure_after_headers_ends_the_scope;
     test_case "a handler failure before the headers keeps h2's error answer" `Quick test_handler_failure_before_headers_keeps_the_error_answer;
-    test_case "a second report on a reported stream raises nothing" `Quick test_second_report_raises_nothing]]
+    test_case "a second report on a reported stream raises nothing" `Quick test_second_report_raises_nothing;
+    test_case "a response after a report gets a closed writer" `Quick test_response_after_a_report_gets_a_closed_writer;
+    test_case "a response after the scope failed gets a closed writer" `Quick test_response_after_the_scope_failed_gets_a_closed_writer;
+    test_case "a refused write ends the scope with the refusal" `Quick test_refused_write_ends_the_scope_with_the_refusal]]

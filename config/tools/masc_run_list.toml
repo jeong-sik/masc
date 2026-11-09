@@ -1,11 +1,10 @@
 name = "masc_run_list"
 description = """
-List all task runs with their status (active/completed) and plan presence.
-
-\
-\\nUse when starting a session to find abandoned work or review completed \
-runs. \\nAfter finding a run, call masc_run_get for full details or \
-masc_run_init to start a new one."""
+List task runs, most recently updated first. A row has task_id, agent_name, \
+plan_bytes (0 when no plan was written), created_at and updated_at; the plan \
+text is not in it. count is every run, shown the rows returned (at most \
+limit). Use it when starting a session to find abandoned work. masc_run_get \
+reads one run's plan; masc_run_init starts a new run."""
 additional_properties = false
 
 
@@ -15,3 +14,11 @@ additional_properties = false
 # one extra request on those 10 turns and saves the 369 B on the rest.
 # What that trade does not cover is in Tool_loading_declarations.
 defer_loading = true
+
+[[params]]
+name = "limit"
+type = "integer"
+description = "Most rows to return, newest update first."
+default = 50
+minimum = 1
+maximum = 100

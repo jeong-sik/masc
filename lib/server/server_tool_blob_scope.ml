@@ -41,7 +41,7 @@ let dated_store root =
 
 let lane_addons =
   M.Place
-    { name = Lane_addon_runtime.lane_addons_dirname
+    { name = Lane_addon_store.name_in_masc_dir
     ; entries =
         [ (* Prepared evidence stays owned before its message commits. *)
           tree Lane_addon_store.broadcasts_directory

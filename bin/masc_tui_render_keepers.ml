@@ -1121,7 +1121,7 @@ let count_chips_that_fit ~sep ~room chips =
    needs, so they lead and the density and sort name trail; the view strip
    above names the view. An item that does not fit whole is left out,
    because "0 inactiv…" reads as a number. *)
-let keeper_view_summary ~cells rows view density sort =
+let keeper_view_summary ~ko ~cells rows view density sort =
   let mode =
     String.concat " · "
       [ Keeper_list_model.density_label density; Keeper_list_model.sort_label sort ]
@@ -1132,8 +1132,17 @@ let keeper_view_summary ~cells rows view density sort =
   let texts =
     (* A grouping view counts its rows in the headings. *)
     match view with
+    | Keeper_list_model.By_age ->
+        (if ko then
+           [ "stale: 출처 무효화"; "나이: 처음 본 시각"; "saved: 저장 갱신"; mode ]
+         else
+           [ "stale: source invalidated"; "age: first seen"; "saved: snapshot"; mode ])
+    | Keeper_list_model.By_memory ->
+        (if ko then
+           [ "Librarian: 처리 관측"; "lag: 읽지 않은 턴"; mode ]
+         else [ "Librarian: observed pass"; "lag: unread turns"; mode ])
     | Keeper_list_model.By_state | Keeper_list_model.By_cause | Keeper_list_model.By_time
-    | Keeper_list_model.By_memory | Keeper_list_model.By_age | Keeper_list_model.By_runtime ->
+    | Keeper_list_model.By_runtime ->
         [ mode ]
     | Keeper_list_model.Plain | Keeper_list_model.Day_wall ->
         let counts : Keeper_list_model.group_counts = Keeper_list_model.group_counts rows in
@@ -1152,6 +1161,150 @@ let keeper_view_summary ~cells rows view density sort =
   in
   lead ^ Message_layout.join_fitting ~sep ~cells:room texts
 
+(* The columns a Story window label takes: two of indent, the mark and the word. *)
+let story_label_cells = 10
+
+(* The story page of the Story window (RFC-0515 section 2.5): the Keeper under
+   the cursor told as past, now and next. Every part is a cell or a sentence the
+   list rows already draw, so the window states no value a row does not. *)
+let keeper_story_lines (state : state) ~now ~inner ~body_rows (row : Keeper_list_model.row) =
+  let keeper_name = row.keeper.Tui_decode.k_name in
+  let runtime =
+    match row.reading.Keeper_control.liveness with
+    | Keeper_control.Present runtime -> Some runtime
+    | Keeper_control.Absent | Keeper_control.Unobserved | Keeper_control.Invalid _ -> None
+  in
+  let memory = Masc_tui_render_keeper_story.memory_reading state ~keeper_name in
+  let dim text = Ansi.dim ^ text ^ Ansi.reset in
+  let join parts = String.concat (dim "  ·  ") parts in
+  let labelled_lines name entries =
+    let label = dim (Message_layout.fit_width ("  " ^ name) story_label_cells) in
+    match entries with
+    | [] -> []
+    | first :: rest ->
+        (label ^ first) :: List.map (fun entry -> String.make story_label_cells ' ' ^ entry) rest
+  in
+  let failing_cell, pulse_cell =
+    match runtime with
+    | None -> None, None
+    | Some runtime ->
+        ( Masc_tui_keeper_pulse.failing_cell ~now
+            (Masc_tui_keeper_pulse.failing_of_health
+               ~health:(Tui_decode.keeper_health_reading runtime.kr_health)
+               ~failing_since:runtime.kr_failing_since)
+        , Masc_tui_keeper_pulse.pulse_cell ~now runtime.kr_recent_turns )
+  in
+  let lag =
+    match memory with
+    | Masc_tui_keeper_memory_reading.Row { lag = Masc_tui_keeper_memory_reading.Lag turns; _ }
+      when turns > 0 ->
+        Some (Theme.warn () ^ Printf.sprintf "lag %d" turns ^ Ansi.reset)
+    | Masc_tui_keeper_memory_reading.Row
+        { lag = Masc_tui_keeper_memory_reading.Lag _ | Masc_tui_keeper_memory_reading.Lag_unmeasured
+        ; _ }
+    | Masc_tui_keeper_memory_reading.Unknown | Masc_tui_keeper_memory_reading.No_row
+    | Masc_tui_keeper_memory_reading.Refused _ -> None
+  in
+  let past_parts =
+    List.filter_map Fun.id
+      [ Option.map style_axis_cell failing_cell
+      ; Option.map
+          (fun (cell : Masc_tui_keeper_axis_cell.t) ->
+            style_axis_cell
+              { cell with
+                Masc_tui_keeper_axis_cell.text =
+                  Printf.sprintf "last %dh %s" Masc_tui_keeper_mark.pulse_hours cell.text
+              })
+          pulse_cell
+      ]
+  in
+  let past_head = match past_parts with [] -> [] | _ -> [ join past_parts ] in
+  let past_tail =
+    Option.to_list
+      (Option.map
+         (fun sentence -> Theme.warn () ^ sentence ^ Ansi.reset)
+         (keeper_row_trail_sentence ~age:(keeper_trail_age ~now) row))
+    @ Option.to_list
+        (render_attempt_chain
+           ~max_cells:(max 0 (inner - story_label_cells))
+           (Masc_tui_keeper_trail.attempts_of_runtime runtime))
+  in
+  let activity = Keeper_list_model.primary_activity_of_row row in
+  let age =
+    match row.last_activity_at with
+    | Some since ->
+        Option.value (Message_layout.age_text ~now ~since) ~default:Masc_tui_theme.Glyph.no_value
+    | None -> Masc_tui_theme.Glyph.no_value
+  in
+  let detail = keeper_detail_text ~now row in
+  let now_entries =
+    [ keeper_activity_style activity
+      ^ Masc_tui_keeper_mark.activity_glyph activity ^ " " ^ keeper_activity_word activity
+      ^ Ansi.reset
+      ^ (if String.equal detail "" then "" else dim (" · " ^ detail))
+    ; dim (Render_schedule.keeper_flags_header ^ " ")
+      ^ keeper_flag_cell runtime
+      ^ dim
+          (Printf.sprintf "   %s %s   %s" Masc_tui_keeper_mark.age_header age
+             (keeper_runtime_label runtime))
+    ]
+  in
+  let next_parts =
+    List.filter_map Fun.id
+      [ Option.map style_axis_cell
+          (Masc_tui_render_keeper_story.next_run_cell state ~now ~keeper_name)
+      ; Option.map dim (keeper_next_text ~now row)
+      ; lag
+      ]
+  in
+  let next_entries =
+    match next_parts with [] -> [ dim "nothing announced" ] | _ -> [ join next_parts ]
+  in
+  (* The feed takes the lines the rest of the page leaves in the window. With
+     none left it tells nothing, not even that a source failed, so an empty past
+     says "nothing recorded" only where the feed had room to say more. *)
+  let feed_room =
+    body_rows - List.length past_head - List.length past_tail - List.length now_entries
+    - List.length next_entries
+  in
+  let feed =
+    Masc_tui_render_keeper_story.feed_lines state ~now ~max_lines:feed_room ~keeper_name
+  in
+  let past_entries = past_head @ feed @ past_tail in
+  labelled_lines "◂ past"
+    (match past_entries with
+     | [] when feed_room > 0 -> [ dim "nothing recorded" ]
+     | [] | _ :: _ -> past_entries)
+  @ labelled_lines "● now" now_entries
+  @ labelled_lines "▹ next" next_entries
+
+(* The Keeper's name and what it is doing, at the left of the window's title. *)
+let keeper_story_lead (row : Keeper_list_model.row) =
+  let activity = Keeper_list_model.primary_activity_of_row row in
+  "  " ^ Ansi.bold ^ Terminal_text.single_line row.keeper.Tui_decode.k_name ^ Ansi.reset ^ "  "
+  ^ keeper_activity_style activity ^ keeper_activity_word activity ^ Ansi.reset
+
+let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
+    (row : Keeper_list_model.row option) =
+  let lead, lines =
+    match row with
+    | None ->
+        ( "  " ^ Ansi.dim ^ "no Keeper" ^ Ansi.reset
+        , [ Ansi.dim ^ "  no Keeper under the cursor" ^ Ansi.reset ] )
+    | Some row ->
+        let keeper_name = row.keeper.Tui_decode.k_name in
+        ( keeper_story_lead row
+        , (match page with
+           | Masc_tui_keeper_story.Story ->
+               keeper_story_lines state ~now ~inner
+                 ~body_rows:(Masc_tui_render_keeper_story.body_rows ~rows) row
+           | Masc_tui_keeper_story.Schedule ->
+               Masc_tui_render_keeper_story.schedule_lines state ~now ~keeper_name
+           | Masc_tui_keeper_story.Memory ->
+               Masc_tui_render_keeper_story.memory_lines state ~now ~keeper_name) )
+  in
+  Masc_tui_render_keeper_story.draw buf ~cols ~rows ~lead ~current:page lines
+
 let render_keeper_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
@@ -1165,12 +1318,13 @@ let render_keeper_list (state : state) =
   (* Selection already follows this ordered model in list mode. Reuse it in
      this synchronous draw rather than rebuilding it through selected_keeper.
      A heading selects no Keeper. *)
-  let selected_reading =
+  let selected_row =
     match stop with
-    | Some (Keeper_list_model.Stop_row position) ->
-        Option.map (fun (row : Keeper_list_model.row) -> row.reading)
-          (List.nth_opt model_rows position)
+    | Some (Keeper_list_model.Stop_row position) -> List.nth_opt model_rows position
     | Some (Keeper_list_model.Stop_heading _) | None -> None
+  in
+  let selected_reading =
+    Option.map (fun (row : Keeper_list_model.row) -> row.reading) selected_row
   in
   let keepers_error = Terminal_text.optional_single_line state.keepers_error in
 
@@ -1204,7 +1358,7 @@ let render_keeper_list (state : state) =
   box_line buf cols (keeper_view_tabs ~cols state.keeper_list_view);
   box_line buf cols
     (Theme.recede ()
-     ^ keeper_view_summary ~cells:inner model_rows state.keeper_list_view
+     ^ keeper_view_summary ~ko:(state.ui_language = Lang_ko) ~cells:inner model_rows state.keeper_list_view
          state.keeper_list_density state.keeper_list_sort
      ^ Ansi.reset);
   Option.iter
@@ -1229,10 +1383,23 @@ let render_keeper_list (state : state) =
           ^ Masc_tui_fleet_line.unavailable_text ~now:now_unix ~degradation ~disconnected_since
           ^ Ansi.reset)
    | Masc_tui_fleet_stream.Reading { reading = { fleet; _ }; trouble } ->
-       let tone =
-         if fleet.fs_operator_action_required then (Theme.bad ())
-         else if Masc_tui_fleet_line.status_is_ok fleet.fs_status then (Theme.ok ())
-         else (Theme.warn ())
+       let tone, lead =
+         let status = Masc_tui_fleet_line.status_text fleet.fs_status in
+         match trouble with
+         | None ->
+             let tone =
+               if fleet.fs_operator_action_required then Theme.bad ()
+               else if Masc_tui_fleet_line.status_is_ok fleet.fs_status then Theme.ok ()
+               else Theme.warn ()
+             in
+             tone, Printf.sprintf "  fleet %s" status
+         | Some
+             (Masc_tui_fleet_stream.Scans_failing _
+             | Masc_tui_fleet_stream.Disconnected _) ->
+             (* The grade, counts and blocker below all belong to the retained
+                reading. Qualify that same row before any stale zero or blocker
+                can be read as the fleet's current state. *)
+             Theme.warn (), Printf.sprintf "  fleet last observed: %s" status
        in
        let running =
          Printf.sprintf "running %d/%d" fleet.fs_running_count
@@ -1251,10 +1418,6 @@ let render_keeper_list (state : state) =
          @ (match Masc_tui_fleet_line.blocker_text fleet with
            | None -> []
            | Some text -> [ Masc_tui_fleet_summary.Blocker, text ])
-       in
-       let lead =
-         Printf.sprintf "  fleet %s"
-           (Masc_tui_fleet_line.status_text fleet.fs_status)
        in
        let separator = "   " in
        let selected =
@@ -1467,6 +1630,9 @@ let render_keeper_list (state : state) =
   in
   let entries = keeper_display_entries ~folded:state.keeper_list_folded list_reading in
   let portrait_candidate =
+    (* The portrait and the Story window both want the rows under the list. *)
+    if Option.is_some state.keeper_story then None
+    else
     match
       Keeper_list_model.shows_portrait state.keeper_list_view state.keeper_list_density,
       selected_reading
@@ -1502,7 +1668,13 @@ let render_keeper_list (state : state) =
     | None -> rows
     | Some (_, portrait) -> portrait.Masc_tui_chat_portrait.roster_rows
   in
-  let content_rows = max 0 (roster_rows - chrome_rows - footer_rows) in
+  let available_rows = max 0 (roster_rows - chrome_rows - footer_rows) in
+  let story_rows =
+    match state.keeper_story with
+    | Some _ -> Masc_tui_render_keeper_story.rows ~budget:available_rows
+    | None -> 0
+  in
+  let content_rows = available_rows - story_rows in
   Option.iter
     (fun (name, portrait) ->
       box_line buf cols
@@ -1622,6 +1794,13 @@ let render_keeper_list (state : state) =
     box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "  [keepers %s]" range)
   end;
+
+  (* The window follows the list cursor and takes its rows out of the list's.
+     A heading selects no Keeper, so the window has none to show there. *)
+  Option.iter
+    (fun page ->
+      draw_keeper_story buf ~cols ~rows:story_rows ~now:now_unix ~inner state page selected_row)
+    state.keeper_story;
 
   box_divider buf cols;
   Buffer.add_string buf

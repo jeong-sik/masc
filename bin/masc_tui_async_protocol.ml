@@ -423,6 +423,10 @@ type keeper_msg =
      load is in flight, and an answer that did not say whose it was would be
      filed under whoever is selected when it lands. *)
   | Keeper_schedules_loaded of keeper_schedule_page_request * (schedule_snapshot, string) result
+  (* The newest turns of the Keeper the Story window draws. The request names
+     the Keeper: an answer for one the cursor has left is dropped. *)
+  | Keeper_story_turns_loaded of
+      string Masc_tui_fetched.request * (Masc_tui_keeper_turns.turn list, string) result
   | Keeper_calls_loaded of
       int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Keeper_settings_editor_loaded of Masc_tui_types.keeper_settings_request *
@@ -1162,7 +1166,7 @@ let rec workspace_message_is_read = function
   | Goal_msg (Goal_confirmation_loaded _)
   | Schedule_msg (Schedules_loaded _
   | Schedule_wake_history_loaded _)
-  | Keeper_msg (Keeper_schedules_loaded _)
+  | Keeper_msg (Keeper_schedules_loaded _ | Keeper_story_turns_loaded _)
   | System_log_streamed _
   | Ask_msg (Ask_followup_observed _ | Ask_followup_finished _)
   | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _) | Chat_msg (Chat_call_loaded _) | Task_msg (Task_creation_read_done _) | Keeper_msg (Keeper_calls_loaded _)
@@ -1352,7 +1356,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_creation_changed _ | Keeper_action_done _)
   | Board_msg (Board_publication_done _ | Board_comment_done _ | Board_vote_done _) | Goal_msg (Goal_transition_done _
   | Goal_confirmation_submitted _ | Goal_confirmation_loaded _) | Schedule_msg (Schedules_loaded _
-  | Schedule_wake_history_loaded _) | Keeper_msg (Keeper_schedules_loaded _) | System_log_streamed _
+  | Schedule_wake_history_loaded _) | Keeper_msg (Keeper_schedules_loaded _ | Keeper_story_turns_loaded _) | System_log_streamed _
   | Schedule_msg (Schedule_cancel_done _) | Verification_msg (Verification_verdict_done _) | Harness_msg (Harness_label_done _)
   | Chat_msg (Chat_call_loaded _) | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _)
   | Keeper_msg (Keeper_calls_loaded _) | Goal_msg (Goal_timeline_loaded _ | Goal_candle_loaded _)
@@ -1517,7 +1521,7 @@ let retired_operation_observation state ~authority ~reading message =
     | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _)) | Board_msg (Board_publication_done _ | Board_comment_done _)
     | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _)) | Goal_msg (Goal_transition_done _ | Goal_confirmation_submitted _
     | Goal_confirmation_loaded (_, _)) | Schedule_msg (Schedules_loaded (_, _)
-    | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _))
+    | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _))
     | System_log_streamed _ | Schedule_msg (Schedule_cancel_done (_, _))
     | Verification_msg (Verification_verdict_done _) | Harness_msg (Harness_label_done _)
     | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _) | Chat_msg (Chat_call_loaded _) | Task_msg (Task_creation_read_done _) | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_msg (Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _))
@@ -1662,7 +1666,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _)) | Board_msg (Board_publication_done _ | Board_comment_done _) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _))
   | Goal_msg (Goal_transition_done _ | Goal_confirmation_submitted _
   | Goal_confirmation_loaded (_, _)) | Schedule_msg (Schedules_loaded (_, _)
-  | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _))
+  | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _))
   | System_log_streamed _ | Schedule_msg (Schedule_cancel_done (_, _))
   | Verification_msg (Verification_verdict_done _) | Harness_msg (Harness_label_done _)
   | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _) | Chat_msg (Chat_call_loaded _) | Task_msg (Task_creation_read_done _) | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_msg (Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _))

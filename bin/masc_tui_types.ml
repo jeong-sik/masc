@@ -1305,8 +1305,8 @@ type keeper_logs_owed = {
   klgo_read : Masc_tui_owed_read.t;
 }
 
-(* The read the schedules of one Keeper owe while the chat pane or the
-   Automation tab draws them. *)
+(* The read the schedules of one Keeper owe while the chat pane, the
+   Automation tab or the Story window draws them. *)
 type keeper_schedules_owed = {
   kso_keeper : string;
   kso_read : Masc_tui_owed_read.t;
@@ -4503,15 +4503,14 @@ type browser_lane_visibility =
       return_composer_focused : bool;
     }
 
-(* The Tab cycle and strip share seven destinations. Detail surfaces map to
-   their parent below; Activity and logs live under System, and Goals, Tasks,
-   approvals, review, and verdicts live under Work. *)
+(* The strip follows the operator's questions. Usage belongs to Operations;
+   Board, approvals and verification belong to Work. Features and plugins
+   have their own entry instead of hiding behind runtime configuration. *)
 let surface_ring : (surface * string) list =
-  [ (Overview, "Dashboard");
+  [ (Overview, "Operations");
     (Planning, "Work");
     (Keepers Keeper_list, "Keepers");
-    (Metrics, "Usage");
-    (Board, "Board");
+    (Lanes, "Features & plugins");
     (Repositories, "Workspace");
     (Config, "System");
   ]
@@ -5755,14 +5754,15 @@ let surface_ring_display_label ~lang (surface : surface) fallback =
   | Lang_en -> fallback
   | Lang_ko ->
       (match surface with
-       | Overview -> "대시보드"
+       | Overview -> "운영"
        | Planning -> "작업"
        | Keepers _ -> "키퍼"
+       | Lanes -> "기능·플러그인"
        | Metrics -> "사용량"
        | Board -> "보드"
        | Repositories -> "워크스페이스"
        | Config -> "시스템"
-       | Acting | Memory | Lanes | Clients | Approvals | Schedules
+       | Acting | Memory | Clients | Approvals | Schedules
        | Verification | Harness | Fusion | Code | Changes | Connectors
        | Runtime | Resources | Tools | System_logs ->
            fallback)
@@ -9848,6 +9848,18 @@ type state = {
      choice [tui-keepers.toml] stores. *)
   mutable keeper_list_heading: Masc_tui_keeper_list_model.heading_focus option;
   mutable keeper_list_folded: Masc_tui_keeper_list_model.group list;
+  mutable keeper_story: Masc_tui_keeper_story.page option;
+  (** The Story window below the Keepers list: [None] while it is closed,
+      otherwise the page it shows. It follows the list cursor (RFC-0515
+      section 2.5). The loop closes it once the view is not the Keepers list
+      ([reconcile_keeper_story]), and [transition_keeper_view] closes it at
+      once. *)
+  (* The newest turns of the Keeper under the cursor, read while the Story
+     window shows its story page (RFC-0515 section 2.5). Keyed by Keeper. *)
+  mutable keeper_story_turns: (string, Masc_tui_keeper_turns.turn list) Masc_tui_fetched.t;
+  (* The read those turns owe: drawing them, a push about the Keeper's turns, a
+     revalidation and a failed read each owe it. *)
+  mutable keeper_story_turns_owed: Masc_tui_owed_read.t;
   mutable keeper_list_sort: Masc_tui_keeper_list_model.sort;
   mutable keeper_list_preference_notice: string option;
   mutable keeper_list_preference_startup_error: string option;
@@ -12856,6 +12868,9 @@ let select_activity_keeper state keeper_name =
 let transition_keeper_view state view =
   let resting = resting_keeper_name state in
   state.view <- view;
+  (* A transition closes the Story window even to the list itself; every other
+     assignment of [view] is caught by [reconcile_keeper_story]. *)
+  state.keeper_story <- None;
   Option.iter (select_keeper_name state) resting
 
 (* A heading keeps the cursor on its group's first row, so the Keeper the
@@ -14798,6 +14813,8 @@ let suspend_workspace_readings state =
   state.schedules_agenda_owed <- Masc_tui_owed_read.settled;
   state.schedules_page_owed <- Masc_tui_owed_read.settled;
   state.keeper_schedules_owed <- None;
+  state.keeper_story_turns <- Masc_tui_fetched.suspend state.keeper_story_turns;
+  state.keeper_story_turns_owed <- Masc_tui_owed_read.settled;
   state.chat_native_tasks_owed <- None;
   state.chat_child_content_owed <- None;
   (* Resumed authority reads the Gate again. *)
@@ -15729,6 +15746,15 @@ let withdraw_fusion_workspace (state : state) =
    notice: dropping the form does not unsend the request. *)
 let reconcile_fusion_launch (state : state) =
   state.view <> Fusion && abandon_fusion_launch state
+
+(* The Story window belongs to the Keepers list and to nothing else, so the loop
+   closes it whenever the surface under it is not that list, for the reason
+   [reconcile_fusion_launch] gives. The chat entry, the chat's way back, the
+   browser lane's way back and the roster's reconcile all assign [view]
+   directly, and a window left open through any of them came back open with the
+   list. *)
+let reconcile_keeper_story (state : state) =
+  if state.view <> Keepers Keeper_list then state.keeper_story <- None
 
 type text_input_target =
   | Text_collab_form
@@ -17581,6 +17607,29 @@ let keeper_schedule_first_page_available state keeper_name =
        | Schedule_paging { page_cursor = Some _; _ } -> false)
   | Some _ | None -> false
 
+(* Whether the pane that draws a Keeper's schedules takes the answer of a
+   read: the Keeper is the one it draws, the chat pane takes only the first
+   page, and a navigation read answers only the tab it was made on. *)
+let keeper_schedules_answer_reaches_pane state request =
+  let detail = request.kspr_detail in
+  server_authority_ready state
+  && (if view_is_chat state.view then
+      state.msg_target_keeper_name = Some detail.drr_keeper
+      && Option.is_none request.kspr_page.sp_cursor
+    else keeper_detail_target_matches state detail.drr_keeper)
+  && (not request.kspr_navigation
+      || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_automation
+          && state.detail_scroll = request.kspr_scroll)
+      || (view_is_chat state.view && Option.is_none request.kspr_page.sp_cursor))
+
+(* Whether the answer is what the pane owed. The Automation tab draws the page
+   it asked for; the chat pane and the Story window draw the first page, which
+   another page stored for the same Keeper does not stand in for. *)
+let keeper_schedules_answer_settles state request =
+  keeper_schedules_answer_reaches_pane state request
+  && (Option.is_none request.kspr_page.sp_cursor
+      || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_automation))
+
 (* Retirement belongs to the request even off screen; presentation belongs
    only to the currently selected Keeper and the newest request generation. *)
 let apply_keeper_schedules_read state request result =
@@ -17590,15 +17639,7 @@ let apply_keeper_schedules_read state request result =
    | Some (pending, _, _) when pending.drr_generation = detail.drr_generation ->
        state.keeper_schedules_pending <- None
    | Some _ | None -> ());
-  if current && server_authority_ready state
-     && (if view_is_chat state.view then
-         state.msg_target_keeper_name = Some detail.drr_keeper
-         && Option.is_none request.kspr_page.sp_cursor
-       else keeper_detail_target_matches state detail.drr_keeper)
-     && (not request.kspr_navigation
-         || (state.view = Keepers Keeper_detail && state.detail_tab = Detail_automation
-             && state.detail_scroll = request.kspr_scroll)
-         || (view_is_chat state.view && Option.is_none request.kspr_page.sp_cursor)) then
+  if current && keeper_schedules_answer_reaches_pane state request then
     match result with
     | Ok snapshot ->
         let same_page = match state.keeper_schedules_page with
@@ -19920,7 +19961,7 @@ let create_state
   runtime_config_generation = 0;
   runtime_config_read = `Idle;
   runtime_config_owed = Masc_tui_owed_read.settled;
-  runtime_config_status_open = false;
+  runtime_config_status_open = true;
   runtime_config_status_scroll = 0;
   runtime_account_form = None;
   memory_recall_form = None;
@@ -20048,6 +20089,9 @@ let create_state
   keeper_list_density = Masc_tui_keeper_list_model.Two_lines;
   keeper_list_heading = None;
   keeper_list_folded = [];
+  keeper_story = None;
+  keeper_story_turns = Masc_tui_fetched.initial;
+  keeper_story_turns_owed = Masc_tui_owed_read.settled;
   keeper_list_sort = Masc_tui_keeper_list_model.Priority;
   keeper_list_preference_notice = None;
   keeper_list_preference_startup_error = None;

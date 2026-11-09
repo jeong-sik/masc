@@ -151,18 +151,18 @@ let test_forward_navigation_fetches_only_new_surface_datasets () =
   let _, dataset_count =
     List.fold_left add_delta (needs Types.Overview, 0) destinations
   in
-  (* Home no longer fetches Goal measurement. Entering Work now adds that
-     request beside planning: Work 2 + Keepers 3 + Usage 5 + Board 1. Keepers
-     reads its roster, held calls and open questions. Config
-     adds one: the Models pane names the account behind a provider id, so
-     entering Config reads account emails. *)
+  (* The six-entry ring adds Work 2 + Keepers 3 + Config 1. Work reads Goal
+     measurement beside planning; Keepers reads its roster, held calls and
+     open questions. Config reads account emails for provider identities.
+     Usage and Board are child destinations, so this ring walk does not
+     enter them. *)
   let work_delta =
     Types.surface_needs_delta ~previous:(needs Types.Overview)
       ~next:(needs Types.Planning)
   in
   check bool "entering Work adds the Goal measurement absent from Home" true
     work_delta.Types.needs_overview_goals;
-  check int "only newly visible scoped requests are planned" 12 dataset_count
+  check int "only newly visible scoped requests are planned" 6 dataset_count
 ;;
 
 let test_keepers_list_reads_operator_attention () =

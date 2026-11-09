@@ -4528,6 +4528,24 @@
   masc_tui_keeper_next_run))
 
 (test
+ (name test_tui_keeper_story)
+ (modules test_tui_keeper_story)
+ (libraries alcotest masc_tui_keeper_story))
+
+(test
+ (name test_tui_keeper_feed)
+ (modules test_tui_keeper_feed)
+ (libraries
+  alcotest
+  masc
+  masc.masc_schedule
+  masc.time_codec
+  masc_tui_types
+  masc_tui_keeper_turns
+  masc_tui_keeper_wakes
+  masc_tui_keeper_feed))
+
+(test
  (name test_tui_keeper_age_ladder)
  (modules test_tui_keeper_age_ladder)
  (libraries
@@ -4646,6 +4664,11 @@
  (name test_tui_memory_usage)
  (modules test_tui_memory_usage)
  (libraries alcotest masc_tui_memory_usage masc.masc_types))
+
+(test
+ (name test_tui_keeper_turns)
+ (modules test_tui_keeper_turns)
+ (libraries alcotest masc_tui_keeper_turns masc.masc_types))
 
 (test
  (name test_tui_render_memory)

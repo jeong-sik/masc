@@ -592,7 +592,6 @@ let test_count_steps_empty () =
     ; started_at = 0.0
     ; finished_at = None
     ; success = true
-    ; metrics = None
     ; error = None
     }
   in
@@ -614,7 +613,6 @@ let test_elapsed_s () =
     ; started_at = 100.0
     ; finished_at = Some 105.5
     ; success = true
-    ; metrics = None
     ; error = None
     }
   in
@@ -630,7 +628,6 @@ let test_elapsed_s_none () =
     ; started_at = 100.0
     ; finished_at = None
     ; success = true
-    ; metrics = None
     ; error = None
     }
   in

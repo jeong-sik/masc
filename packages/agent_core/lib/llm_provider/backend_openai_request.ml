@@ -259,7 +259,7 @@ let capabilities_of_config (config : Provider_config.t) =
    - caller [Some n] otherwise -> emitted as-is.
 
    Anthropic Messages REQUIRES the field on the wire; that envelope
-   resolves through [Backend_anthropic.required_max_output_tokens],
+   resolves through [Backend_anthropic.required_output_token_receipt],
    which applies an explicit AGENT_CORE required-envelope fallback (the
    catalog-declared model maximum, not a provider default) and fails loudly
    when no value is declared anywhere — no invented constants. *)
@@ -301,11 +301,6 @@ let output_token_receipt ~envelope (config : Provider_config.t) =
    | Required_catalog_fallback
    | Required_capability_override_fallback -> ());
   receipt
-;;
-
-let effective_max_output_tokens (config : Provider_config.t) =
-  output_token_receipt ~envelope:Types.Openai_chat_max_tokens config
-  |> Types.output_token_receipt_effective
 ;;
 
 (* Shared tool_choice emission gate for the Chat and Responses envelopes.
@@ -423,7 +418,7 @@ let build_request_assoc_artifact
   (* Per-model capabilities ([caps] above) drive the [top_k] / [min_p]
      sampling-field gates further down; the output-token budget (clamp
      WARN included) is resolved by the shared
-     [effective_max_output_tokens] policy and emitted here under the
+     [output_token_receipt] policy and emitted here under the
      Chat Completions [max_tokens] field name — omitted entirely when
      neither caller nor catalog declares a value. *)
   let body = [ "model", `String config.model_id; "messages", `List provider_messages ] in

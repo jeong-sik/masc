@@ -1633,25 +1633,34 @@ let config_content_height (state : state) =
     (Masc_tui_types.surface_body_rows state ~terminal_rows
      - surface_chrome_rows - config_heading_rows ~cols state)
 
+(* The System landing and its scroll bounds use these same physical rows.
+   Identity rows already account for their indentation and clickable menu;
+   status rows reserve the two cells the source-status reader leaves out. *)
+let runtime_config_status_rows state ~cols =
+  List.map (fun line -> Masc_tui_runtime_config_view.Neutral, line)
+    (config_identity_rows ~cols state)
+  @ List.map (fun (tone, line) -> tone, "  " ^ line)
+      (runtime_config_status_lines state ~cols)
+
 let runtime_config_status_scroll_limit state ~terminal_rows ~cols =
   let room = max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5) in
-  max 0 (List.length (runtime_config_status_lines state ~cols) - room)
+  max 0 (List.length (runtime_config_status_rows state ~cols) - room)
 
 let render_runtime_config_status state =
   let terminal_rows, cols = get_terminal_size () in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
     ~surface_key:"config-status"
-    ~title:
-      (screen_title
-         (ui_text state
-            ~ko:" MASC 시스템 / 설정 검증 및 적용 상태"
-            ~en:" MASC System / runtime.toml status"))
-    ~hints:"j/k:scroll  PgUp/PgDn:page  v/Esc:source  r:reload"
+    ~title:(config_pane_title ~cols
+      ~name:(screen_title (ui_text state
+        ~ko:" MASC 시스템 / 상태" ~en:" MASC System / Status")) state)
+    ~hints:(ui_text state
+      ~ko:"v/Esc:설정 원문  j/k:스크롤  PgUp/PgDn:페이지  r:새로고침"
+      ~en:"v/Esc:settings source  j/k:scroll  PgUp/PgDn:page  r:reload")
     ~body:(fun ~budget c ->
-      let lines = runtime_config_status_lines state ~cols in
+      let lines = runtime_config_status_rows state ~cols in
       let scroll = min state.runtime_config_status_scroll (max 0 (List.length lines - budget)) in
       lines |> List.filteri (fun i _ -> i >= scroll && i < scroll + budget)
-      |> List.iter (fun (tone, text) -> c.push_styled ~style:(config_metadata_style tone) ("  " ^ text)))
+      |> List.iter (fun (tone, text) -> c.push_styled ~style:(config_metadata_style tone) text))
 
 (* What voice resolved to, and on which microphone.
 

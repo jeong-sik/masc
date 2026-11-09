@@ -509,7 +509,6 @@ val agent_core_unknown_tool_not_bare_with_closest : string
 val agent_core_unknown_tool_not_bare : string
 val agent_core_handoff_description : string
 val agent_core_handoff_prompt_param_description : string
-val agent_core_agent_tool_prompt_param_description : string
 val keeper_context_workspace_memory_available : string
 val keeper_context_workspace_memory_retrieval_direct : string
 val keeper_context_workspace_memory_retrieval_discoverable : string

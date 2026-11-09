@@ -1,4 +1,4 @@
-(** Lanes and System / Runtime / Clients screen entry points and shared helpers. *)
+(** Features, plugin and client screen entry points and shared helpers. *)
 
 type lane_run_tool_counts = {
   completed : int;
@@ -6,6 +6,9 @@ type lane_run_tool_counts = {
   failed : int;
   other : int;
 }
+
+val runtime_lane_notice_tone :
+  Masc_tui_types.runtime_lane_notice -> Masc_tui_page_line.tone
 
 val runtime_lane_notice_style : Masc_tui_types.runtime_lane_notice -> string
 

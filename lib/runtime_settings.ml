@@ -368,8 +368,9 @@ let keeper_build_cleanup_interval_sec =
     ~default:(fun () -> Masc_time_constants.hour)
     ~meta:{ Runtime_params.description =
               "빌드 디렉터리와 remote_ssh 작업 폴더 정리 점검 주기(초). 둘 중 \
-               하나라도 켜져 있으면 한 번 돌 때 모든 키퍼를 훑고, 쉬고 있는 \
-               키퍼만 정리한다. 바꾼 값은 지금 기다리는 \
+               하나라도 켜져 있으면 한 번 돌 때 모든 키퍼를 훑는다. 빌드 \
+               디렉터리는 쉬고 있는 키퍼만, 작업 폴더는 턴 중인 키퍼도 \
+               정리한다. 바꾼 값은 지금 기다리는 \
                중인 주기가 끝난 뒤부터 적용된다. 0 보다 커야 한다";
             value_type = "float";
             min_value = None; max_value = None; choices = [] }
@@ -386,7 +387,7 @@ let keeper_build_cleanup_retention_sec =
 let keeper_remote_workspace_cleanup_enabled =
   register_bool ~key:"keeper_remote_workspace_cleanup_enabled" ~default:(fun () -> true)
     ~meta:{ Runtime_params.description =
-              "쉬고 있는 remote_ssh 키퍼의 작업 루트 바로 아래 항목 중 오래 안 \
+              "remote_ssh 키퍼의 작업 루트 바로 아래 항목 중 오래 안 \
                건드린 것을 그 endpoint 에서 주기적으로 지울지. 원격에 없는 \
                커밋이나 stash 가 있는 항목, 이름이 점으로 시작하는 항목, 살아 \
                있는 프로세스가 쓰는 항목은 남긴다. 커밋 안 한 변경과 untracked \

@@ -24,7 +24,6 @@ type t =
   ; unknown_tool_not_bare : unit -> string
   ; handoff_description : name:string -> description:string -> string
   ; handoff_prompt_param_description : unit -> string
-  ; agent_tool_prompt_param_description : unit -> string
   }
 
 (** The last-resort copy of the same sentences, byte-identical to what the

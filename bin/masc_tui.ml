@@ -6585,6 +6585,29 @@ let launch_memory_input_load state ~mailbox ~refresh =
             (fun () -> Masc_tui_http.fetch_keeper_memory_input ~host ~port ~keeper_name:key)
   end
 
+(* The newest turns of the Keeper the Story window draws. The window follows
+   the cursor, so asking for a Keeper other than the one held starts a read for
+   it and the held turns are no longer drawn. The caller asks for none while a
+   read for another Keeper is on the wire: see [launch_owed_keeper_story_turns]. *)
+let launch_keeper_story_turns_load state ~mailbox ~keeper_name ~refresh =
+  if server_authority_ready state then begin
+    let current = Masc_tui_fetched.current_key state.keeper_story_turns in
+    if refresh || current <> Some keeper_name then
+      match
+        Masc_tui_fetched.start ~equal:String.equal state.keeper_story_turns ~key:keeper_name
+      with
+      | Masc_tui_fetched.Already_loading -> ()
+      | Masc_tui_fetched.Started (next, request) ->
+          state.keeper_story_turns <- next;
+          state.keeper_story_turns_owed <-
+            Masc_tui_owed_read.started state.keeper_story_turns_owed;
+          let host = server_peer_host and port = state.port in
+          launch_workspace_request state ~mailbox ~boundary_error:Fun.id
+            ~deliver:(fun result ->
+              Keeper_msg (Keeper_story_turns_loaded (request, result)))
+            (fun () -> Masc_tui_http.fetch_keeper_story_turns ~host ~port ~keeper_name)
+  end
+
 let launch_memory_health_load state ~mailbox =
   if server_authority_ready state then begin
   if state.memory_health_inflight
@@ -8775,7 +8798,7 @@ let cycle_surface state ~mailbox ~backwards =
   if count > 0 then begin
     let step = if backwards then count - 1 else 1 in
     let index =
-      (Masc_tui_surface_navigation.surface_ring_index state state.view + step) mod count
+      (Masc_tui_surface_navigation.surface_ring_index state.view + step) mod count
     in
     goto_surface state ~mailbox (fst (List.nth ring index))
   end
@@ -9969,8 +9992,9 @@ let launch_owed_schedules state ~mailbox =
     then launch_schedule_agenda_load ~intent state ~mailbox
   end
 
-(* The Keeper whose schedules are drawn: the chat pane's Keeper, or the
-   Keeper the Automation tab shows. *)
+(* The Keeper whose schedules are drawn: the chat pane's Keeper, the Keeper
+   the Automation tab shows, or the Keeper under the cursor while the Story
+   window is open (its story page tells the last wake from the same page). *)
 let keeper_schedules_on_screen state =
   match state.view with
   | Keepers Keeper_message -> state.msg_target_keeper_name
@@ -9980,16 +10004,32 @@ let keeper_schedules_on_screen state =
       | Detail_info | Detail_items | Detail_sandbox | Detail_instructions | Detail_secrets
       | Detail_github | Detail_identity | Detail_channels | Detail_runs | Detail_terminal ->
           None)
-  | Keepers (Keeper_list | Keeper_logs | Keeper_calls | Keeper_runtime_pick)
+  | Keepers Keeper_list -> (
+      match state.keeper_story with
+      | Some _ -> Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
+      | None -> None)
+  | Keepers (Keeper_logs | Keeper_calls | Keeper_runtime_pick)
   | Overview | Approvals | Acting | Metrics | Memory | Lanes | Clients | Board | Planning
   | Schedules | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors
   | Runtime | Config | Resources | Tools | System_logs ->
       None
 
+(* The Keeper whose newest turns the story page draws: the Keeper under the
+   cursor while the Story window is open on that page. *)
+let keeper_story_turns_on_screen state =
+  match state.keeper_story with
+  | Some Masc_tui_keeper_story.Story when state.view = Keepers Keeper_list ->
+      keeper_schedules_on_screen state
+  | Some
+      ( Masc_tui_keeper_story.Story
+      | Masc_tui_keeper_story.Schedule
+      | Masc_tui_keeper_story.Memory )
+  | None -> None
+
 (* One Keeper's schedules read again under the same rules as the fleet list,
-   while the chat pane or the Automation tab draws them: drawing a Keeper owes
-   the read, and so do a change, a revalidation, a resumed authority and a
-   failed read. *)
+   while the chat pane, the Automation tab or the Story window draws them:
+   drawing a Keeper owes the read, and so do a change, a revalidation, a
+   resumed authority and a failed read. *)
 let owe_keeper_schedules_read state =
   Option.iter
     (fun keeper ->
@@ -10025,12 +10065,15 @@ let owe_schedule_reads_for_queue_writes state ~keepers =
       in
       if rows_read_the_queue then owe_keeper_schedules_read state
 
-let settle_keeper_schedules_read state ~keeper result =
+(* A good answer that the pane did not take, or that is not the page it draws,
+   read nothing for it: the record stays in flight, and the loop owes the read
+   again as soon as none is on the wire. *)
+let settle_keeper_schedules_read state ~keeper ~settles result =
   match state.keeper_schedules_owed with
   | Some owed when String.equal owed.kso_keeper keeper ->
       let read =
         match result with
-        | Ok _ -> Masc_tui_owed_read.succeeded owed.kso_read
+        | Ok _ -> if settles then Masc_tui_owed_read.succeeded owed.kso_read else owed.kso_read
         | Error _ -> failed_read owed.kso_read
       in
       state.keeper_schedules_owed <- Some { owed with kso_read = read }
@@ -10054,8 +10097,9 @@ let keeper_schedules_answer_current state (request : keeper_schedule_page_reques
   | None -> false
 
 (* Runs on every loop iteration. The record follows the Keeper drawn: a
-   Keeper no longer drawn drops it, and a Keeper newly drawn owes the read,
-   which a read already on the wire for it answers. *)
+   Keeper no longer drawn drops it, and a Keeper newly drawn owes the read.
+   A read already on the wire for it answers that, once its answer is the page
+   the pane draws ([keeper_schedules_answer_settles]). *)
 let launch_owed_keeper_schedules state ~mailbox =
   match keeper_schedules_on_screen state with
   | None -> state.keeper_schedules_owed <- None
@@ -10073,15 +10117,63 @@ let launch_owed_keeper_schedules state ~mailbox =
         if reading then owed.kso_read else Masc_tui_owed_read.abandoned owed.kso_read
       in
       state.keeper_schedules_owed <- Some { owed with kso_read = read };
+      (* The Story window follows the cursor, so it has one Keeper's page on
+         the wire at a time: the Keeper the cursor has come to waits for the
+         read in flight, and every Keeper the cursor passed meanwhile starts
+         none. *)
+      let window_waits =
+        state.view = Keepers Keeper_list
+        && List.exists
+             (fun (request : detail_read_request) ->
+                request.drr_tab = Detail_automation
+                && not (String.equal request.drr_keeper keeper_name))
+             state.detail_reads
+      in
       if Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read
          && server_authority_ready state
          && not reading
+         && not window_waits
       then begin
         launch_keeper_schedules_load state ~mailbox ~keeper_name;
         if keeper_schedules_reading state ~keeper_name then
           state.keeper_schedules_owed <-
             Some { owed with kso_read = Masc_tui_owed_read.started read }
       end
+
+(* The story page's turns are read again after a push about the Keeper's
+   turns, a revalidation, a resumed authority and a failed read. *)
+let owe_keeper_story_turns_read state =
+  state.keeper_story_turns_owed <- Masc_tui_owed_read.changed state.keeper_story_turns_owed
+
+(* A push about turns owes the read only where the page draws that Keeper
+   (RFC-0480 §7: filter by the name first). *)
+let owe_keeper_story_turns_read_for state ~keepers =
+  match keeper_story_turns_on_screen state with
+  | Some keeper when List.mem keeper keepers -> owe_keeper_story_turns_read state
+  | Some _ | None -> ()
+
+(* Runs on every loop iteration. While the page is not drawn the read stays
+   owed, so drawing it again reads it again: turns held from before the window
+   closed are not the newest. One read is on the wire at a time: the Keeper the
+   cursor has come to waits for the read in flight, and every Keeper the cursor
+   passed meanwhile starts none. *)
+let launch_owed_keeper_story_turns state ~mailbox =
+  match keeper_story_turns_on_screen state with
+  | None ->
+      state.keeper_story_turns_owed <- Masc_tui_owed_read.changed Masc_tui_owed_read.settled
+  | Some keeper_name ->
+      let reading = Masc_tui_fetched.in_flight state.keeper_story_turns in
+      let read =
+        if reading then state.keeper_story_turns_owed
+        else Masc_tui_owed_read.abandoned state.keeper_story_turns_owed
+      in
+      state.keeper_story_turns_owed <- read;
+      let other_keeper_reading =
+        reading && Masc_tui_fetched.current_key state.keeper_story_turns <> Some keeper_name
+      in
+      if not other_keeper_reading then
+        launch_keeper_story_turns_load state ~mailbox ~keeper_name
+          ~refresh:(Masc_tui_owed_read.due ~now:(monotonic_now_s ()) read)
 
 (* The Keeper whose chat pane is open; its native tasks and child content are
    drawn beside the transcript. *)
@@ -17366,6 +17458,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
      reads it once that workspace can be read (RFC-0487). *)
   state.memory_input <- Masc_tui_fetched.clear state.memory_input;
   state.memory_input_owed <- Masc_tui_owed_read.settled;
+  state.keeper_story_turns <- Masc_tui_fetched.clear state.keeper_story_turns;
+  state.keeper_story_turns_owed <- Masc_tui_owed_read.settled;
   state.memory_health <- None;
   state.memory_health_error <- None;
   state.memory_health_inflight <- false;
@@ -17397,7 +17491,8 @@ let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigati
   state.runtime_config_view_error <- None;
   withdraw_config_models state;
   state.runtime_config_jump_section <- None;
-  state.runtime_config_status_open <- false;
+  state.runtime_config_status_open <- true;
+  state.runtime_config_status_scroll <- 0;
   state.runtime_account_form <- None;
   state.memory_recall_form <- None;
   state.typesafeai_exclusion_form <- None;
@@ -18931,6 +19026,7 @@ let enter_config_pane state ~mailbox pane =
   state.runtime_config_jump_section <- None;
   let arriving = not (runtime_config_on_screen state) in
   state.config_pane <- pane;
+  if pane = Config_runtime then state.runtime_config_status_open <- false;
   (* Moving between panes stays inside the Config view, so
      [launch_surface_reads] never sees it. Arriving on a pane that draws
      runtime.toml owes it a read here instead. *)
@@ -19070,6 +19166,29 @@ let open_keeper_detail state ~mailbox (keeper : keeper) =
      without this the pane shows "(loading)" forever after a cursor move,
      because the stamped answer names the previous keeper. *)
   launch_detail_tab_reading state ~mailbox keeper
+;;
+
+(* What a key does to the Story window under the Keepers list. With no Keeper
+   under the cursor -- a group heading, a list with no Keeper -- the window
+   leaves Enter and Right to the list. Esc first cancels a settings editor that
+   is being prepared: that is the innermost intent it can cancel, and it would
+   open the editor behind a window that had just closed. *)
+let keeper_story_action state key =
+  if String.equal key "esc" && Option.is_some state.keeper_settings_intent then None
+  else
+    Masc_tui_keeper_story.action_of_key
+      ~on_keeper:(Option.is_some (selected_keeper state))
+      state.keeper_story key
+;;
+
+(* What a key or a press does to the Story window. Only [Open_detail] leaves
+   the list, so it is the one that needs the mailbox. *)
+let apply_keeper_story_action state ~mailbox = function
+  | Masc_tui_keeper_story.Show page -> state.keeper_story <- Some page
+  | Masc_tui_keeper_story.Close -> state.keeper_story <- None
+  | Masc_tui_keeper_story.Open_detail ->
+      state.keeper_story <- None;
+      Option.iter (open_keeper_detail state ~mailbox) (selected_keeper state)
 ;;
 
 (* The answer receipt of an installation's question leads to that
@@ -19249,9 +19368,14 @@ let press_marked_target state ~mailbox (target : press_target) =
       | Some _ when state.view <> Keepers Keeper_list -> ()
       | None -> ()
       (* On a heading the cursor rests on its group's first row, and a press
-         there chooses that row rather than opening it. *)
+         there chooses that row rather than opening it. A press on the Keeper
+         the cursor is on is Enter on it, which opens the window, and on an
+         open window it is Right, which opens the detail: a press is the
+         pointer's only way to either. *)
       | Some index when index = state.keeper_cursor && not (keeper_list_on_heading state) ->
-          Option.iter (open_keeper_detail state ~mailbox) (selected_keeper state)
+          let key = if Option.is_some state.keeper_story then "right" else "\r" in
+          Option.iter (apply_keeper_story_action state ~mailbox)
+            (Masc_tui_keeper_story.action_of_key ~on_keeper:true state.keeper_story key)
       | Some _ -> keeper_list_select_name state name)
   | Press_keeper_view view ->
       if state.view = Keepers Keeper_list && view <> state.keeper_list_view then begin
@@ -19740,6 +19864,7 @@ let start_http_refresh state ~host ~port ~intent ~refresh_inflight
        owe_tools_reads state;
        owe_schedules_read state;
        owe_keeper_schedules_read state;
+       owe_keeper_story_turns_read state;
        owe_chat_journal_reads state;
        owe_overview_read state;
        owe_push_owned_revalidation state
@@ -20099,6 +20224,7 @@ let resume_reads_after_authority_change state ~mailbox ~refresh_inflight
     owe_pending_confirms_read state;
     owe_schedules_read state;
     owe_keeper_schedules_read state;
+    owe_keeper_story_turns_read state;
     owe_chat_journal_reads state;
     (* Under the same condition the tick sends them: a server that is not
        booting, whether or not its workspace is this checkout's. *)
@@ -23100,7 +23226,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
         | Keeper_action_done (_, _, _, _))
         | (Board_msg (Board_publication_done _ | Board_comment_done _)) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _)) | Goal_msg (Goal_transition_done _
         | Goal_confirmation_submitted _ | Goal_confirmation_loaded (_, _)) | Schedule_msg (Schedules_loaded (_, _)
-        | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _))
+        | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _))
         | System_log_streamed _ | Schedule_msg (Schedule_cancel_done (_, _)) | Verification_msg (Verification_verdict_done _)
         | Harness_msg (Harness_label_done _) | Board_msg (Board_attachment_loaded _ | Board_attachment_prepared _ | Board_attachment_saved _) | Chat_msg (Chat_call_loaded _) | Keeper_msg (Keeper_calls_loaded (_, _, _)) | Goal_msg (Goal_timeline_loaded (_, _) | Goal_candle_loaded (_, _))
         | Task_msg (Task_history_loaded (_, _) | Task_cancel_done (_, _, _))
@@ -23999,6 +24125,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       let local_keepers_changed = ref false in
       let waiting_inventory_changed = ref [] in
       let turns_changed = ref false in
+      let turn_state_keepers = ref [] in
       let datasets_owed = ref [] in
       let connectors_changed = ref false in
       let transport_measured = ref false in
@@ -24089,7 +24216,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               if Masc_tui_observer.gate_connector_changed event then connectors_changed := true;
               if Masc_tui_observer.goal_projection_changed event then goals_changed := true;
               (match Masc_tui_observer.turn_change event with
-               | Some (_, Masc_tui_observer.Turn_state) -> turns_changed := true
+               | Some (keeper, Masc_tui_observer.Turn_state) ->
+                   turns_changed := true;
+                   turn_state_keepers := keeper :: !turn_state_keepers
                | Some (keeper, Masc_tui_observer.Turn_preview) ->
                    previews_changed := keeper :: !previews_changed
                | None -> ());
@@ -24320,6 +24449,8 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       if waiting_keepers <> [] || waiting_unattributed then
         launch_keeper_waiting_load state ~mailbox;
       (if !turns_changed && not !observer_source_loss_seen then owe_keeper_turns_read state);
+      (if !turn_state_keepers <> [] && not !observer_source_loss_seen then
+         owe_keeper_story_turns_read_for state ~keepers:!turn_state_keepers);
       (if !execution_snapshot_seen && not !observer_source_loss_seen then begin
          owe_verification_read state;
          owe_goal_projection_reads state;
@@ -26266,9 +26397,22 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
       then state.schedule_wake_history_inflight <- None
   | Keeper_msg (Keeper_schedules_loaded (request, result)) ->
       let current = keeper_schedules_answer_current state request in
+      (* Asked before the answer is applied, which retires its request. *)
+      let settles = keeper_schedules_answer_settles state request in
       apply_keeper_schedules_read state request result;
       if current then
-        settle_keeper_schedules_read state ~keeper:request.kspr_detail.drr_keeper result
+        settle_keeper_schedules_read state ~keeper:request.kspr_detail.drr_keeper ~settles
+          result
+  | Keeper_msg (Keeper_story_turns_loaded (request, result)) ->
+      (* An answer for a Keeper the cursor has left settles nothing; the read
+         of the Keeper it stands on does. *)
+      if Masc_tui_fetched.is_current ~equal:String.equal state.keeper_story_turns request then
+        state.keeper_story_turns_owed <-
+          (match result with
+           | Ok _ -> Masc_tui_owed_read.succeeded state.keeper_story_turns_owed
+           | Error _ -> failed_read state.keeper_story_turns_owed);
+      state.keeper_story_turns <-
+        Masc_tui_fetched.complete ~equal:String.equal state.keeper_story_turns request result
   | Schedule_msg (Schedule_cancel_done (schedule_id, result)) -> (
       match result with
       | Ok message ->
@@ -33848,6 +33992,7 @@ Use relative paths for resources already held in the package. -->
       launch_owed_pending_confirms state ~mailbox:async_messages;
       launch_owed_schedules state ~mailbox:async_messages;
       launch_owed_keeper_schedules state ~mailbox:async_messages;
+      launch_owed_keeper_story_turns state ~mailbox:async_messages;
       launch_owed_chat_journals state ~mailbox:async_messages;
       launch_owed_board_list state ~refresh_inflight:http_scoped_refresh_inflight
         ~full_refresh_inflight:http_refresh_inflight ~scoped_refresh_followup
@@ -33865,6 +34010,7 @@ Use relative paths for resources already held in the package. -->
       if Masc_tui_types.reconcile_fusion_launch state then
         report_action state "system"
           "Fusion launch left while its answer was out; the run may have started - r refreshes the list";
+      Masc_tui_types.reconcile_keeper_story state;
       let _terminal_rows, terminal_columns = get_terminal_size () in
       let message_mode =
         (not compact_viewport) && view_is_chat state.view
@@ -36756,6 +36902,7 @@ Use relative paths for resources already held in the package. -->
                      goto_surface state ~mailbox:async_messages Metrics
                  | Some (_, Masc_tui_palette.Palette_config pane) ->
                      state.config_pane <- pane;
+                     if pane = Config_runtime then state.runtime_config_status_open <- false;
                      state.config_scroll <- 0;
                      state.runtime_params_cursor <- 0;
                      state.runtime_param_edit <- None;
@@ -39080,6 +39227,14 @@ Use relative paths for resources already held in the package. -->
               state.keeper_sandbox_logs_error <- None;
               launch_keeper_sandbox_logs state ~mailbox:async_messages
                 keeper.k_name)
+       (* The Story window under the list takes its keys before the list and the
+          surface ring do: an open window owns Tab, Esc, [s] and [m] (RFC-0515
+          section 2.5, E15). A closed one takes Enter alone. *)
+       | Some key
+         when state.view = Keepers Keeper_list
+              && Option.is_some (keeper_story_action state key) ->
+           Option.iter (apply_keeper_story_action state ~mailbox:async_messages)
+             (keeper_story_action state key)
        | Some "v" when state.view = Keepers Keeper_list ->
            cycle_keeper_list_view state;
            let preference = keeper_view_preference state in

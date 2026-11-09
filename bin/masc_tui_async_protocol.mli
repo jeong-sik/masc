@@ -412,6 +412,10 @@ type keeper_msg =
      load is in flight, and an answer that did not say whose it was would be
      filed under whoever is selected when it lands. *)
   | Keeper_schedules_loaded of keeper_schedule_page_request * (schedule_snapshot, string) result
+  (* The newest turns of the Keeper the Story window draws. The request names
+     the Keeper: an answer for one the cursor has left is dropped. *)
+  | Keeper_story_turns_loaded of
+      string Masc_tui_fetched.request * (Masc_tui_keeper_turns.turn list, string) result
   | Keeper_calls_loaded of
       int * string * (Masc.Tui_decode.keeper_calls_snapshot, string) result
   | Keeper_settings_editor_loaded of Masc_tui_types.keeper_settings_request *

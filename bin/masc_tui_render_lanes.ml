@@ -1,4 +1,4 @@
-(** Lanes and System / Runtime / Clients screens. *)
+(** Features, plugins and clients. *)
 
 open Masc_tui_types
 open Tui_decode
@@ -20,12 +20,15 @@ let format_context_tokens = Masc_tui_types.format_context_tokens
 (* A refusal is bad news about the key pressed; a pending write is a warning
    about what the screen shows, as is a list that may be stale
    ([Masc_tui_types.runtime_lane_stale_lines], drawn in warn). *)
-let runtime_lane_notice_style = function
-  | Masc_tui_types.Lane_write_refused _ -> Theme.bad ()
-  | Masc_tui_types.Lane_write_pending -> Theme.warn ()
+let runtime_lane_notice_tone = function
+  | Masc_tui_types.Lane_write_refused _ -> Page_line.Failure
+  | Masc_tui_types.Lane_write_pending -> Page_line.Attention
   | Masc_tui_types.Lane_write_committed receipt ->
-    if Masc_tui_runtime_config_receipt.lane_needs_attention receipt then Theme.warn ()
-    else Theme.info ()
+    if Masc_tui_runtime_config_receipt.lane_needs_attention receipt then Page_line.Attention
+    else Page_line.Info
+
+let runtime_lane_notice_style notice =
+  Page_reading.tone_style (runtime_lane_notice_tone notice)
 
 (* What a list of candidates reads when it has none. *)
 let no_candidates = "(없음)"
@@ -198,11 +201,8 @@ let exact_lane_overview_actions =
   ; hint "d" "상세(슬롯통계·설정·계약)"
   ]
 
-(* Concise two-column summary for the bottom pane of MASC Features.
-   Focuses on the 3 operator questions:
-   1. Why is it in this state right now? (상태)
-   2. How well is it performing? (성적 · 속도)
-   3. Which models run in what order? (1차 HTTP · 2차 CLI 후보 순서) *)
+(* The selected feature's observation and configuration are separate readings.
+   Detailed accounting and diagnostic identities remain under [d]. *)
 let standalone_lane_summary_lines ~titled ~now ~cols
     (lane : Tui_decode.standalone_lane) =
   let state_style = standalone_lane_state_style lane in
@@ -213,20 +213,16 @@ let standalone_lane_summary_lines ~titled ~now ~cols
   in
   let left_rows =
     [ state_style, "상태: " ^ standalone_lane_headline_state ~now lane
-    ; runs_style, "성적: " ^ standalone_lane_run_score_summary lane
     ]
-    @ Option.to_list
-        (Option.map
-           (fun latency -> Ansi.reset, "속도: " ^ latency)
-           (standalone_lane_latency_summary lane))
-    @ Option.to_list
-        (Option.map
-           (fun (jstyle, jtext) -> jstyle, "JEV:  " ^ jtext)
-           (standalone_lane_jev_summary lane))
     @ Option.to_list
         (Option.map
            (fun error -> Theme.bad (), "오류: " ^ Terminal_text.single_line error)
            lane.sl_admission_error)
+    @ [ runs_style, "보존된 실행: " ^ standalone_lane_run_score_summary lane ]
+    @ Option.to_list
+        (Option.map
+           (fun latency -> Ansi.reset, "속도: " ^ latency)
+           (standalone_lane_latency_summary lane))
   in
   let right_rows =
     failover_candidate_rows
@@ -237,27 +233,18 @@ let standalone_lane_summary_lines ~titled ~now ~cols
   in
   lane_overview_summary_block ~titled ~cols ~label:lane.sl_label
     ~purpose:(standalone_lane_purpose lane)
-    ~left_title:"현재 상태 · 실행 성적" ~left_rows
-    ~right_title:"모델 호출 순서 (Failover)" ~right_rows
+    ~left_title:"현재 관측 · 최근 실행" ~left_rows
+    ~right_title:"설정된 실행 후보" ~right_rows
     ~actions:exact_lane_overview_actions
 
-let standing_word_ko = function
-  | Masc_tui_lane_standing.Ready -> "정상(ready)"
-  | Masc_tui_lane_standing.Waiting -> "대기(waiting)"
-  | Masc_tui_lane_standing.Changing -> "전환 중(changing)"
-  | Masc_tui_lane_standing.Failing -> "주의 필요(failing)"
-  | Masc_tui_lane_standing.Off -> "꺼짐(off)"
-  | Masc_tui_lane_standing.Not_set_up -> "미설정(not set up)"
-  | Masc_tui_lane_standing.Unobserved -> "미관측(unobserved)"
+let standing_word_ko = Masc_tui_lane_standing.word ~korean:true
 
 let toggleable_lane_summary_columns ~state_line ~off_note ~right_title
-    ~kind_label ~row_id ~open_hint =
+    ~kind_label ~open_hint =
   ( "현재 상태 · 동작"
   , [ state_line; Theme.recede (), "꺼짐 시: " ^ off_note ]
   , right_title
-  , [ Ansi.reset, "구분:   " ^ kind_label
-    ; Theme.recede (), "식별자: " ^ row_id
-    ]
+  , [ Ansi.reset, "제공 기능: " ^ kind_label ]
   , [ open_hint; hint "Space" "켜기/끄기"; hint "d" "전체 상세" ] )
 
 let inventory_row_summary_lines ~titled ~cols ~standing ~selected_output
@@ -268,8 +255,11 @@ let inventory_row_summary_lines ~titled ~cols ~standing ~selected_output
   in
   let state_line =
     ( standing_style
-    , Printf.sprintf "상태: %s · %s" (standing_word_ko standing)
-        (Masc_tui_lane_inventory.row_summary row) )
+    , "관측 상태: " ^ standing_word_ko standing
+      ^ (match row.state with
+         | Package_state _ -> ""
+         | Exact_state _ | Browser_clients _ | Machine_state _ ->
+             " · " ^ Masc_tui_lane_inventory.row_summary row) )
   in
   let left_title, left_rows, right_title, right_rows, actions =
     match row.state with
@@ -293,31 +283,47 @@ let inventory_row_summary_lines ~titled ~cols ~standing ~selected_output
           ( [ Theme.warn (), "원인: " ^ detail ]
           , [ Theme.recede (), "식별자: " ^ row.id ] )
       in
-      ( "현재 상태 · 승인"
+      ( "현재 관측 · 실행 준비"
       , state_line :: left_extra
-      , "모델 호출 순서 (Failover)"
+      , "설정된 실행 후보"
       , right_rows
       , exact_lane_overview_actions )
     | Browser_clients _ ->
       ( "현재 상태"
       , [ state_line ]
-      , "백엔드 · 식별자"
-      , [ Ansi.reset, "구분:   Browser 레인"
-        ; Theme.recede (), "식별자: " ^ row.id
+      , "제공 기능 · 설정"
+      , [ Ansi.reset, "제공 기능: 선택한 브라우저 연결과 화면"
+        ; Theme.recede (), "설정: 해당 브라우저 플러그인에서 연결 관리"
         ]
       , [ hint "Enter" "브라우저 열기"; hint "d" "전체 상세" ] )
     | Machine_state _ ->
       toggleable_lane_summary_columns ~state_line
         ~off_note:"머신 상태와 체크포인트 보존"
-        ~right_title:"화면 송출 · 식별자" ~kind_label:"Machines 레인"
-        ~row_id:row.id ~open_hint:(hint "Enter" "화면 보기")
+        ~right_title:"제공 기능 · 설정" ~kind_label:"머신 실행과 화면 송출"
+        ~open_hint:(hint "Enter" "화면 보기")
     | Package_state { declaration; instances } ->
       let decl_rows =
         match declaration with
         | Some (Valid value) ->
-          [ ( Ansi.reset
-            , Printf.sprintf "패키지: %s · %s (rev %s)"
-                value.package_id value.title value.desired_revision ) ]
+          let applied =
+            match value.application with
+            | Masc.Lane_addon_application.Applied _ ->
+                [ Ansi.reset, "설정 적용: 현재 서버의 워커에 적용됨" ]
+            | Starting_worker ->
+                [ Theme.info (), "설정 적용: 워커 시작 대기" ]
+            | Cleaning_workers ->
+                [ Theme.info (), "설정 적용: 이전 워커 정리 중" ]
+            | Inactive ->
+                [ Theme.recede (), "설정 적용: 실행 워커 정리 확인" ]
+            | Failed messages ->
+                (Theme.bad (), "설정 적용: 실패")
+                :: List.map (fun msg -> Theme.bad (), "원인: " ^ Terminal_text.single_line msg) messages
+            | Unknown messages ->
+                (Theme.warn (), "설정 적용: 미확인")
+                :: List.map (fun msg -> Theme.warn (), "원인: " ^ Terminal_text.single_line msg) messages
+          in
+          (Ansi.reset, "설정: " ^ (if value.enabled then "켜짐" else "꺼짐"))
+          :: applied
         | Some (Invalid messages) ->
           List.map (fun msg -> Theme.bad (), "오류: " ^ msg) messages
         | Some Absent ->
@@ -331,24 +337,23 @@ let inventory_row_summary_lines ~titled ~cols ~standing ~selected_output
         match instances with
         | [] -> [ Theme.recede (), "워커: 관측된 실행 워커 없음" ]
         | items ->
-          List.map
+          let live, retained = List.partition
+              (fun (item : instance) ->
+                match item.presence with Live -> true | Retained -> false)
+              items in
+          ( Ansi.reset
+          , Printf.sprintf "워커 관측: 현재 서버 %d개 · 보관 기록 %d개"
+              (List.length live) (List.length retained) )
+          :: List.filter_map
             (fun (item : instance) ->
-               let style, phase_str =
-                 match item.phase with
-                 | Failed detail -> Theme.bad (), "실패: " ^ detail
-                 | Attached -> Ansi.reset, "연결됨(attached)"
-                 | Observing -> Ansi.reset, "관측 중(observing)"
-                 | Detaching -> Theme.warn (), "정리 중(detaching)"
-                 | Detached -> Theme.recede (), "분리됨(detached)"
-               in
-               let presence_str =
-                 match item.presence with
-                 | Live -> "실행 중"
-                 | Retained -> "보관됨"
-               in
-               ( style
-               , Printf.sprintf "워커: %s (%s · %s)"
-                   item.instance_id presence_str phase_str ))
+               match item.phase with
+               | Failed detail ->
+                   let source = match item.presence with
+                     | Live -> "현재 워커 실패: "
+                     | Retained -> "보관된 워커 실패: " in
+                   Some (Theme.bad (), source ^ Terminal_text.single_line detail)
+               | Detaching -> Some (Theme.info (), "워커: 정리 중")
+               | Attached | Observing | Detached -> None)
             items
       in
       let output_or_source_rows =
@@ -357,16 +362,15 @@ let inventory_row_summary_lines ~titled ~cols ~standing ~selected_output
         | [] ->
           (match row.selection with
            | Declaration path -> [ Theme.recede (), "설정: " ^ path ]
-           | Exact _ | Browser _ | Machine _ | Manual_instance _ ->
-             [ Theme.recede (), "식별자: " ^ row.id ])
+           | Exact _ | Browser _ | Machine _ | Manual_instance _ -> [])
       in
       let has_outputs =
         Option.is_some
           (Masc_tui_lane_inventory.selected_exact_output ~selected:selected_output row)
       in
-      ( "현재 상태 · 선언 정보"
+      ( "현재 관측 · 설정 적용"
       , state_line :: decl_rows
-      , "실행 워커 · 출력 바인딩"
+      , "실행 관측 · 출력 설정"
       , worker_rows @ output_or_source_rows
       , if has_outputs then
           [ hint "Enter" "열기"
@@ -732,37 +736,35 @@ let render_lanes_overview (state : state) =
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
   let inner = max 1 (framed_inner_width cols) in
   let buf = Buffer.create 4096 in
-  let now = Unix.localtime (Unix.gettimeofday ()) in
-  let timestamp =
-    Printf.sprintf "%02d:%02d:%02d" now.Unix.tm_hour now.Unix.tm_min
-      now.Unix.tm_sec
-  in
+  let korean = state.ui_language = Lang_ko in
   let header =
-    let title = screen_title " MASC Features" in
+    let title = screen_title
+        (ui_text state ~ko:" MASC 기능·플러그인" ~en:" MASC Features & plugins") in
     match state.lane_inventory with
     | None ->
-        Printf.sprintf "%s  %s  %s  %s"
-          title (title_missing_reading ~error:state.standalone_lanes_error) timestamp
+        Printf.sprintf "%s  %s  %s"
+          title (title_missing_reading ~error:state.standalone_lanes_error)
           (connection_badge state)
     | Some _ ->
         runtime_substrate_heading state ~cols ~title ~current:`Features
-          ~after:[ "  " ^ timestamp ]
+          ~after:[]
   in
   box_top buf cols;
   box_line buf cols header;
   box_divider buf cols;
   let observed_heading = match state.lane_inventory with
-    | None -> "  All features"
+    | None -> ui_text state ~ko:"  기능 상태 미관측" ~en:"  Feature states not observed"
     | Some snapshot ->
         let observed = Unix.localtime snapshot.Masc.Tui_decode_lane_inventory.observed_at in
-        let standings = Masc_tui_lane_standing.count_items
+        let standings = Masc_tui_lane_standing.count_items ~korean
             (List.map (Masc_tui_lane_inventory.row_standing_in snapshot)
                snapshot.Masc.Tui_decode_lane_inventory.rows) in
         (* A count that does not fit is left out whole: "4 not …" read as
            a number with its word cut off. *)
         Message_layout.join_fitting ~sep:" · " ~cells:inner
-          ("  All features"
-           :: Printf.sprintf "observed %02d:%02d:%02d"
+          (ui_text state ~ko:"  기능 목록" ~en:"  Feature inventory"
+           :: Printf.sprintf
+                (if korean then "관측 %02d:%02d:%02d" else "observed %02d:%02d:%02d")
                 observed.Unix.tm_hour observed.Unix.tm_min observed.Unix.tm_sec
            :: standings) in
   box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ()) observed_heading;
@@ -784,16 +786,19 @@ let render_lanes_overview (state : state) =
   let standing row = match state.lane_inventory with
     | Some snapshot -> Masc_tui_lane_inventory.row_standing_in snapshot row
     | None -> Masc_tui_lane_inventory.row_standing row in
-  let summary row = Masc_tui_lane_standing.word (standing row) ^ " · "
-    ^ Terminal_text.single_line (match state.lane_inventory with
-      | Some snapshot -> Masc_tui_lane_inventory.row_summary_in snapshot row
-      | None -> Masc_tui_lane_inventory.row_summary row) in
+  let summary row = Masc_tui_lane_standing.word ~korean (standing row) in
+  let label (row : Masc.Tui_decode_lane_inventory.row) =
+    Terminal_text.single_line row.label ^ " · "
+    ^ Terminal_text.single_line row.purpose in
+  let state_heading = ui_text state ~ko:"현재 상태" ~en:"STATE" in
+  let feature_heading = ui_text state ~ko:"기능 · 하는 일" ~en:"FEATURE · PURPOSE" in
   let widest_summary = List.fold_left (fun width row -> max width
-      (Message_layout.display_width (summary row))) (String.length "STATE") inventory in
+      (Message_layout.display_width (summary row)))
+      (Message_layout.display_width state_heading) inventory in
   let widest_label = List.fold_left
       (fun width (row : Masc.Tui_decode_lane_inventory.row) -> max width
-        (Message_layout.display_width (Terminal_text.single_line row.label)))
-      (String.length "FEATURE") inventory in
+        (Message_layout.display_width (label row)))
+      (Message_layout.display_width feature_heading) inventory in
   let mark_width = 2 in
   let column_gap = 2 in
   (* Both columns take what their widest reading needs when the two fit
@@ -809,23 +814,23 @@ let render_lanes_overview (state : state) =
   in
   let gap = String.make column_gap ' ' in
   box_line_styled buf cols ~style:(Theme.recede ())
-    (String.make mark_width ' ' ^ fit_width "FEATURE" label_width ^ gap ^ fit_width "STATE" status_width);
+    (String.make mark_width ' ' ^ fit_width feature_heading label_width ^ gap ^ fit_width state_heading status_width);
   let window = Rows.of_list ~first:scroll ~height entries in
   for offset = 0 to height - 1 do
     let index = scroll + offset in
     match Rows.at window index with
     | None when offset = 0 && Option.is_none state.lane_inventory ->
         box_line_styled buf cols ~style:(Theme.recede ())
-          (if Option.is_some state.standalone_lanes_error then "  r: retry inventory"
-           else "  reading features…")
+          (if Option.is_some state.standalone_lanes_error then
+             ui_text state ~ko:"  r: 기능 목록 다시 조회" ~en:"  r: retry inventory"
+           else ui_text state ~ko:"  기능·플러그인 조회 중…" ~en:"  reading features & plugins…")
     | None -> box_empty buf cols
     | Some (Masc_tui_lane_inventory.Category_header category) ->
         box_line_styled buf cols ~style:(Ansi.bold ^ Theme.info ())
           ("  " ^ Masc_tui_lane_inventory.category_label category)
     | Some (Masc_tui_lane_inventory.Lane_row row) ->
         let standing = standing row in
-        let label = fit_width (Terminal_text.single_line
-            row.label) label_width in
+        let label = fit_width (label row) label_width in
         let mark = fit_width (Masc_tui_lane_standing.mark standing) mark_width in
         let state_text = fit_width (summary row) status_width in
         (* The final frame owns click geometry, including narrow terminals and
@@ -2207,7 +2212,7 @@ let render_clients (state : state) =
       now.Unix.tm_sec
   in
   let header =
-    let title = screen_title " MASC System / Runtime / Clients" in
+    let title = screen_title " MASC Features & plugins / Clients" in
     match state.clients_surface with
     | None ->
         Printf.sprintf "%s  %s  %s  %s"

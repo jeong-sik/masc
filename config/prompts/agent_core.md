@@ -26,6 +26,3 @@ Hand off to {{name}}: {{description}}
 
 ### handoff.prompt_param_description
 Instructions for the sub-agent
-
-### agent_tool.prompt_param_description
-The prompt to send to the agent

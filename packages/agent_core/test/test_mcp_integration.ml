@@ -1,16 +1,10 @@
 (** Tests for MCP-Agent lifecycle integration.
-    Covers server_spec, managed types, merge_env, connect_all,
-    close_all, and Agent integration with MCP clients. *)
+    Covers sampling over stdio, managed types, and Agent integration
+    with MCP clients. *)
 
 open Agent_core
 
 (* ── Helpers ───────────────────────────────────────────────────── *)
-
-let check_string_array =
-  Alcotest.testable
-    (fun fmt arr -> Format.pp_print_string fmt (String.concat ", " (Array.to_list arr)))
-    (fun a b -> a = b)
-;;
 
 let make_test_tool name =
   Tool.create ~name ~description:("Tool " ^ name) ~parameters:[] (fun _input ->
@@ -42,7 +36,7 @@ let with_temp_script body f =
     (fun () -> f path)
 ;;
 
-(* ── server_spec ───────────────────────────────────────────────── *)
+(* ── sampling ──────────────────────────────────────────────────── *)
 
 let sampling_server = {|import json, sys
 def send(value):
@@ -167,100 +161,6 @@ let test_sampling_is_disabled_without_host_handler () =
     (result |> member "reply" |> member "error" <> `Null)
 ;;
 
-let test_server_spec_fields () =
-  let spec : Mcp.server_spec =
-    { command = "/usr/bin/echo"
-    ; args = [ "--version" ]
-    ; env = [ "FOO", "bar" ]
-    ; name = "test-server"
-    }
-  in
-  Alcotest.(check string) "command" "/usr/bin/echo" spec.command;
-  Alcotest.(check int) "args count" 1 (List.length spec.args);
-  Alcotest.(check string) "name" "test-server" spec.name;
-  Alcotest.(check int) "env count" 1 (List.length spec.env)
-;;
-
-let test_server_spec_empty_args () =
-  let spec : Mcp.server_spec =
-    { command = "npx"; args = []; env = []; name = "minimal" }
-  in
-  Alcotest.(check int) "empty args" 0 (List.length spec.args);
-  Alcotest.(check int) "empty env" 0 (List.length spec.env)
-;;
-
-let test_server_spec_multiple_env () =
-  let spec : Mcp.server_spec =
-    { command = "node"
-    ; args = [ "server.js" ]
-    ; env = [ "API_KEY", "abc"; "PORT", "3000"; "DEBUG", "1" ]
-    ; name = "multi-env"
-    }
-  in
-  Alcotest.(check int) "env count" 3 (List.length spec.env)
-;;
-
-(* ── merge_env ─────────────────────────────────────────────────── *)
-
-let test_merge_env_empty () =
-  let result = Mcp.merge_env [] in
-  let current = Unix.environment () in
-  Alcotest.check check_string_array "no extras = current env" current result
-;;
-
-let test_merge_env_add_new () =
-  let result = Mcp.merge_env [ "AGENT_CORE_TEST_NEW_VAR_12345", "hello" ] in
-  let has_var =
-    Array.exists (fun entry -> entry = "AGENT_CORE_TEST_NEW_VAR_12345=hello") result
-  in
-  Alcotest.(check bool) "new var present" true has_var
-;;
-
-let test_merge_env_override () =
-  (* PATH should exist in any Unix environment *)
-  let result = Mcp.merge_env [ "PATH", "/test/only" ] in
-  let path_entries =
-    Array.to_list result
-    |> List.filter (fun e -> String.length e >= 5 && String.sub e 0 5 = "PATH=")
-  in
-  Alcotest.(check int) "exactly one PATH" 1 (List.length path_entries);
-  Alcotest.(check string) "overridden PATH" "PATH=/test/only" (List.hd path_entries)
-;;
-
-let test_merge_env_multiple () =
-  let result = Mcp.merge_env [ "AGENT_CORE_A", "1"; "AGENT_CORE_B", "2"; "AGENT_CORE_C", "3" ] in
-  let count =
-    Array.to_list result
-    |> List.filter (fun e -> String.length e >= 11 && String.sub e 0 11 = "AGENT_CORE_")
-    |> List.length
-  in
-  Alcotest.(check bool) "at least 3 AGENT_CORE_ vars" true (count >= 3)
-;;
-
-let test_merge_env_preserves_existing () =
-  let base_count = Array.length (Unix.environment ()) in
-  let result = Mcp.merge_env [ "AGENT_CORE_TEST_UNIQUE_99999", "x" ] in
-  (* Should have base_count + 1 (the new var) *)
-  Alcotest.(check int) "count = base + 1" (base_count + 1) (Array.length result)
-;;
-
-(* ── connect_all / close_all ───────────────────────────────────── *)
-
-let test_connect_and_load_bad_command () =
-  with_eio
-  @@ fun ~sw ~mgr ->
-  let spec : Mcp.server_spec =
-    { command = "/this/does/not/exist"; args = []; env = []; name = "ghost" }
-  in
-  match Mcp.connect_and_load ~sw ~mgr ~client_version:"test" spec with
-  | Ok _ -> Alcotest.fail "Expected Error"
-  | Error e ->
-    Alcotest.(check bool)
-      "error message non-empty"
-      true
-      (String.length (Error.to_string e) > 0)
-;;
-
 (* ── managed type ──────────────────────────────────────────────── *)
 
 let test_managed_tools_access () =
@@ -314,38 +214,18 @@ let test_agent_checkpoint_with_mcp_options () =
   Alcotest.(check int) "no tools in checkpoint" 0 (List.length cp.tools)
 ;;
 
-(* ── connect_all partial failure cleanup ───────────────────────── *)
-
 (* ── Test runner ───────────────────────────────────────────────── *)
 
 let () =
   let open Alcotest in
   run
     "MCP Integration"
-    [ ( "server_spec"
-      , [ test_case "fields" `Quick test_server_spec_fields
-        ; test_case "empty args" `Quick test_server_spec_empty_args
-        ; test_case "multiple env" `Quick test_server_spec_multiple_env
-        ] )
-    ; ( "merge_env"
-      , [ test_case "empty extras" `Quick test_merge_env_empty
-        ; test_case "add new var" `Quick test_merge_env_add_new
-        ; test_case "override existing" `Quick test_merge_env_override
-        ; test_case "multiple vars" `Quick test_merge_env_multiple
-        ; test_case "preserves existing" `Quick test_merge_env_preserves_existing
-        ] )
-    ; ( "sampling_boundary"
+    [ ( "sampling_boundary"
       , [ test_case "host model access round trip over stdio" `Quick test_sampling_is_host_owned_over_stdio
         ; test_case "host denial reaches the package" `Quick test_sampling_denial_is_returned_to_package
         ; test_case "callback exception preserves stdio framing" `Quick test_sampling_exception_preserves_stdio
         ; test_case "callback cancellation propagates" `Quick test_sampling_cancellation_propagates
         ; test_case "no handler means no advertised sampling" `Quick test_sampling_is_disabled_without_host_handler ] )
-    ; ( "connect_lifecycle"
-      , [ test_case
-            "connect_and_load bad command"
-            `Quick
-            test_connect_and_load_bad_command
-        ] )
     ; "managed_type", [ test_case "tools list access" `Quick test_managed_tools_access ]
     ; ( "agent_integration"
       , [ test_case

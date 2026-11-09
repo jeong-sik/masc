@@ -101,9 +101,11 @@ let run_payload ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keepe
 let cleanup ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta)
     ~retention_sec () =
   match meta.sandbox_profile with
-  | Keeper_types_profile_sandbox.(Docker | Micro_vm) -> Ok None
+  | Keeper_types_profile_sandbox.(Docker | Micro_vm) as profile ->
+    Error
+      (Printf.sprintf "stored sandbox_profile is %s, not remote_ssh"
+         (Keeper_types_profile_sandbox.sandbox_profile_to_string profile))
   | Keeper_types_profile_sandbox.Remote_ssh ->
     (match Embedded_config.read payload_path with
      | None -> Error "embedded Keeper workspace cleanup payload missing"
-     | Some payload ->
-       Result.map Option.some (run_payload ~config ~meta ~retention_sec payload))
+     | Some payload -> run_payload ~config ~meta ~retention_sec payload)

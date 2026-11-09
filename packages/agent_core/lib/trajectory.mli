@@ -62,7 +62,6 @@ type trajectory =
   ; started_at : float
   ; finished_at : float option
   ; success : bool
-  ; metrics : Eval.run_metrics option
   ; error : string option
   }
 

@@ -100,7 +100,6 @@
   test_context
   test_context_concurrency
   test_context_flow_proof
-  test_contract
   test_discovery
   test_discovery_http
   test_e2e_v024
@@ -108,7 +107,6 @@
   test_elicitation
   test_error
   test_error_domain
-  test_eval_coverage
   test_eval_stats
   test_event_bus
   test_event_envelope
@@ -130,7 +128,6 @@
   test_mcp
   test_mcp_coverage
   test_mcp_deep
-  test_mcp_http
   test_mcp_integration
   test_mcp_session
   test_metrics
@@ -227,7 +224,6 @@
   test_context
   test_context_concurrency
   test_context_flow_proof
-  test_contract
   test_discovery
   test_discovery_http
   test_e2e_v024
@@ -235,7 +231,6 @@
   test_elicitation
   test_error
   test_error_domain
-  test_eval_coverage
   test_eval_stats
   test_event_bus
   test_event_envelope
@@ -257,7 +252,6 @@
   test_mcp
   test_mcp_coverage
   test_mcp_deep
-  test_mcp_http
   test_mcp_integration
   test_mcp_session
   test_metrics

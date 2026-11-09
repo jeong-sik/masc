@@ -514,7 +514,19 @@ let run_queue ~after_settle ~base_path ~keeper_name =
     let* pending=read () in
     let has_more=Option.fold ~none:false ~some:(fun batch ->
       List.exists (fun (row : Queue.candidate) -> row.sequence>through) (Queue.candidates batch)) pending in
-    if committed then Ok (Settled {has_more})
+    if committed then (
+      (* A quiet Keeper may receive no further Runtime/input event. Notify
+         the existing latest-wins lane only after a complete normal frontier
+         qualifies, never merely because the queue is empty or one sibling
+         reconfirmed a prior commit. Keep the actual commit outcome even if
+         this subsequent maintenance observation fails. *)
+      let closing=io (fun () ->
+        let* current=discover ~store ~owner in completed_forest ~store ~owner current) in
+      (match closing with
+       | Ok (Some _) -> Keeper_librarian_queue_signal.changed ~base_path ~keeper_name
+       | Ok None -> ()
+       | Error detail -> Log.Keeper.warn ~keeper_name "Librarian admission closure postponed: %s" detail);
+      Ok (Settled {has_more}))
     else if has_more then Ok Recheck_new_input
     else match pending,parts with
       | None,[] -> Ok Idle

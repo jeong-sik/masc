@@ -104,27 +104,19 @@ let validator () =
     let* capture=floor_capture ~read ~owner parent in
     Gate.validate_payload ~read ~read_body ~owner ~capture ~parent ~record
   in
-  (* Only an empty closure scope is shared for this read-only scan, just as
-     the immutable forest proof above is. Present transactions are read again
-     because their journal and members can advance during a live install. *)
-  let absent=Hashtbl.create 16 in
+  (* Unlike the immutable forest payload, absence is not stable: a running
+     owner can publish its closing journal before the next scanned record. *)
   fun ~read ~read_scope ~read_body ~read_archive (record:Owner.retained) ->
   match purpose record.scope with
   | None | Some (History_execution | Floor_execution | History_gate | Floor_gate) ->
     validate ~read ~read_scope ~read_body record
   | Some (Admission_execution | Admission_part | Admission_partition | Admission_gate | Admission_closure) ->
     let* owner=admission_owner record in
-    let key=Closure.scope owner in
-    if Hashtbl.mem absent key && not (Closure.is_scope record.scope)
-    then validate ~read ~read_scope ~read_body record else
-    let ()=if Closure.is_scope record.scope then Hashtbl.remove absent key in
     let* view=Closure.project ~owner ~read ~read_scope ~read_body ~read_archive in
     match view.closure with
     | None ->
-      Hashtbl.replace absent key ();
       validate ~read ~read_scope ~read_body record
     | Some closure ->
-      Hashtbl.remove absent key;
       let* ()=if Closure.is_scope record.scope then
         let current=Closure.record closure in
         if Yojson.Safe.equal (Owner.record_to_json (Owner.listed current))

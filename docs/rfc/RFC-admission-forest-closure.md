@@ -45,6 +45,12 @@ body 제거 완료, candidate 커밋 또는 ACK를 입증하지 않는다.
 5. 새 tail은 다른 candidate로 남을 수 있다. 후보 하나라도 미처리이거나
    unknown/cut, 게시 대기, 누락·손상된 증거가 있으면 그 forest를 남긴다.
 
+마지막 commit·ACK를 마친 pass는 이 전체 자격을 다시 읽고, 적격일 때만
+기존 latest-wins Memory lane에 한 번 더 알린다. 조용한 Keeper도 새 외부
+입력을 기다리지 않고 다음 pass에서 닫는다. 부분 subset의 Finished,
+미해결 sibling 또는 빈 queue만으로 재예약하지 않는다. 이 사후 관측의
+오류는 실제 Memory commit 결과를 바꾸지 않고 경고를 남긴다.
+
 현재 strict discovery가 거부하는 과거 conflict/receipt 조합을 closure가
 허용하지 않는다. 그런 상태의 별도 복구는 이 제안의 범위 밖이다.
 

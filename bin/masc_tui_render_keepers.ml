@@ -3118,12 +3118,14 @@ let keeper_detail_pane (state : state) (k : keeper) ~framed ~rows ~cols
       | Keeper_control.Present runtime -> runtime.kr_portrait
       | Keeper_control.Unobserved -> Tui_decode.Unavailable "not yet read"
       | Keeper_control.Absent -> Tui_decode.Unavailable "absent from live roster"
-      (* The profile error's full text owns the failure section below, where
-         it wraps under its own heading. The portrait row is a status line:
-         a second unwrapped copy of the whole diagnosis there is what made
-         the pane read as broken, so it carries one sentence and a pointer. *)
+      (* The profile error's full text owns the failure section on the Info
+         tab, where it wraps under its own heading. The portrait row is a
+         status line read on the Items tab too, where no failure section
+         exists, so its sentence names the state and no location: a second
+         unwrapped copy of the whole diagnosis here is what made the pane
+         read as broken. *)
       | Keeper_control.Invalid _ ->
-          Tui_decode.Unavailable "invalid keeper profile; the failure section below carries the detail" in
+          Tui_decode.Unavailable "invalid keeper profile" in
     let account = selected_item_account state in
     let items = item_browser_items state in
     let cursor = Item_account.cursor ~items state.item_cursor in

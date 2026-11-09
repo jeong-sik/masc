@@ -47,9 +47,6 @@ val regex_match : Str.regexp -> string -> bool
 (** Filter out empty strings from a list. *)
 val filter_non_empty : string list -> string list
 
-(** Split on [sep], trim each fragment, discard empty results. *)
-val split_on_char_trim : char -> string -> string list
-
 (** [trim_non_empty s] trims [s] and returns [Some trimmed] if non-empty,
     [None] otherwise. *)
 val trim_non_empty : string -> string option

@@ -714,13 +714,6 @@ let validated_checkpoint_json_exn ~scope cp =
   | Error error -> invalid_arg (scope ^ ": " ^ Error.to_string error)
 ;;
 
-let checkpoint_hash cp =
-  Digest.string
-    (Yojson.Safe.to_string
-       (validated_checkpoint_json_exn ~scope:"Checkpoint.checkpoint_hash" cp))
-  |> Digest.to_hex
-;;
-
 let to_json cp = validated_checkpoint_json_exn ~scope:"Checkpoint.to_json" cp
 
 let checkpoint_json_version = function

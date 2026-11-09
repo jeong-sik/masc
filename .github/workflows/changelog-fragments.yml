@@ -12,7 +12,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
   check:
@@ -21,22 +20,34 @@ jobs:
     timeout-minutes: 2
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # A pull_request checkout is its synthetic merge; keep its base tree.
+          fetch-depth: 2
       - name: Check the fragments this pull request changes
         if: github.event_name == 'pull_request'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_URL: ${{ github.event.pull_request.url }}
         run: |
           set -euo pipefail
-          # Only the fragments this PR adds or edits: a stacked PR must not be
-          # refused for a lower fragment it does not carry, and a release fold
-          # deletes fragments, so removed files are skipped. The API call and
-          # the grep stay separate commands: an API failure fails the step,
-          # only an empty match falls through as an empty list.
-          listing=$(gh api --paginate --jq '.[] | select(.status != "removed") | .filename | select(. != "changelog.d/README.md")' \
-            "$PR_URL/files?per_page=100")
-          files=$(printf '%s\n' "$listing" | grep '^changelog\.d/' || true)
-          python3 scripts/changelog-fragments.py check-files $files
+          # The first parent is this PR's actual base, including lower stack
+          # layers. Treat renames as delete/add and skip removed paths, so only
+          # surviving destinations are checked. Keep filenames NUL-delimited
+          # until they become individual checker arguments.
+          python3 - <<'PY'
+          import os
+          import subprocess
+          import sys
+
+          changed = subprocess.check_output([
+              "git", "diff", "--name-only", "-z", "--no-renames",
+              "--diff-filter=d", "HEAD^1", "HEAD", "--", "changelog.d/",
+          ])
+          files = [
+              os.fsdecode(path) for path in changed.split(b"\0")
+              if path and path != b"changelog.d/README.md"
+          ]
+          subprocess.run([
+              sys.executable, "scripts/changelog-fragments.py", "check-files", *files,
+          ], check=True)
+          PY
       - name: Check every fragment cites its own pull request
         if: github.event_name == 'workflow_dispatch'
         run: python3 scripts/changelog-fragments.py check --dir changelog.d

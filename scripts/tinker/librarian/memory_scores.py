@@ -36,6 +36,11 @@ drop recall, pair merges and the label's growth count only requests whose
 label asks for a change: on the others MASC refuses one unless a candidate is
 misjudged. Growth is the claims an answer adds minus the memory IDs it takes
 out, beside the label's.
+
+Text comparison cannot tell whether a merge keeps the knowledge it absorbs.
+A row names, for each merge the label expects and the answer made, the memory
+IDs it absorbed, and the class of each absorbed ID; a blind judge classifies
+the absorbs at verdict time (`merge_decisions`).
 """
 
 from __future__ import annotations
@@ -206,6 +211,8 @@ def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
     got = judgments_of(mine)
     word: dict[str, bool] = {}
     by_kind: dict[Kind, list[int]] = {kind: [0, 0] for kind in KINDS}
+    # For each merge the label expects and the answer made, the memory IDs it absorbed.
+    complements_done: list[list[str]] = []
     for c in label.candidates:
         judgment = got.get(c.request_id)
         own = texts[c.request_id]
@@ -214,13 +221,16 @@ def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
                               and claim_matches(c, judgment.memory_claim, left, others))
         tally = by_kind[kind_of(c)]
         tally[0] += 1
-        tally[1] += state_ok(c, judgment, left, ids, own, others)
+        ok = state_ok(c, judgment, left, ids, own, others)
+        tally[1] += ok
+        if ok and kind_of(c) == "complements" and c.absorbs is not None:
+            complements_done.append([c.absorbs])
+    pairs_done = [sorted({a, b} & left.absorbed.keys()) for a, b in pairs if left_one(a, b, claims, left)]
     # The class of each absorbed ID, for the merge judge: what the label says of that fact.
     labeled = ({m: "correction" for m in corrected} | {m: "paraphrase" for m in restated}
                | {m: "complement" for m in complemented} | {m: "duplicate" for m in paired}
                | {m: "stale" for m in stale})
     asked, merged = stale | corrected, complemented | paired
-    pairs_merged = sum(left_one(a, b, claims, left) for a, b in pairs)
     return {"candidates": len(label.candidates), "correct": sum(word.values()), "per_candidate": word,
             "state_correct": sum(ok for _, ok in by_kind.values()),
             "state_by_kind": {kind: tally for kind, tally in by_kind.items() if tally[0]},
@@ -229,8 +239,9 @@ def score_synth(item: SynthItem, mine: AV.AdmissionAnswer | None) -> JsonObject:
             "absorbed": len(left.absorbed), "absorbs": {mid: labeled.get(mid, "other") for mid in sorted(left.absorbed)},
             "planted": len(planted), "planted_dropped": len(left.dropped & planted),
             "planted_absorbed": len(stale & left.absorbed.keys()),
-            "pairs": len(pairs), "pairs_merged": pairs_merged,
-            "merges": len(complemented) + len(pairs), "merges_done": by_kind["complements"][1] + pairs_merged,
+            "pairs": len(pairs), "pairs_merged": len(pairs_done),
+            "merges": len(complemented) + len(pairs), "merges_done": len(complements_done) + len(pairs_done),
+            "merges_absorbed": complements_done + pairs_done,
             "added": len(left.added), "removed": len(left.dropped | left.absorbed.keys()),
             "expected_added": sum(c.outcome == "incorporated" for c in label.candidates),
             "expected_removed": len(corrected) + len(complemented) + len(planted) + len(pairs)}

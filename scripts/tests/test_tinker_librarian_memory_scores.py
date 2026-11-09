@@ -289,6 +289,19 @@ class PairTest(unittest.TestCase):
                             claims=(claim_json(c1.claim, absorbs=("m5",)), claim_json(c2.claim, absorbs=("m6",))))
         self.assertEqual(scored(req, apart)["pairs_merged"], 0)
 
+    def test_a_made_merge_names_the_memories_it_absorbed(self) -> None:
+        # The merge judge's verdict on those absorbs decides whether the merge kept its knowledge.
+        req = request(PLANTED, candidates_of((K.COMPLEMENT,)))
+        self.assertEqual(scored(req, label_answer(req))["merges_absorbed"], [["m1"], ["m6"]])
+        req, c = one(K.NEW_DURABLE)
+        both = M5 + " " + c.claim
+        joined = scored(req, answer_text(((c.request_id, "incorporated", both),),
+                                         claims=(claim_json(both, absorbs=("m5", "m6")),)))
+        self.assertEqual(joined["merges_absorbed"], [["m5", "m6"]])
+        req, c = one(K.COMPLEMENT)
+        beside = scored(req, answer_text(((c.request_id, "incorporated", c.claim),), claims=(claim_json(c.claim),)))
+        self.assertEqual(beside["merges_absorbed"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

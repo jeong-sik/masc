@@ -75,7 +75,8 @@
   fs_compat_owned_file
   fs_compat_owned_inventory
   fs_compat_owned_reader
-  fs_compat_path_ops)
+  fs_compat_path_ops
+  fs_compat_private_jsonl_transaction)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4))

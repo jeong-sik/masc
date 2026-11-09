@@ -275,8 +275,9 @@ let account_request walk_owner ~runtime_id =
     Runtime_account_access.Keeper_turn { keeper_name; channel; runtime_id }
   | One_shot_walk -> Runtime_account_access.Operator_call
 
-(* HIGH-RISK-UNREVIEWED: an attempt starts an official CLI only on an account
-   the access authorized for this walk (plan D2-5). The refusal is masc's own,
+(* HIGH-RISK-UNREVIEWED: an attempt starts an official CLI, Claude Code (plan
+   D2-5) or Codex (plan D2-6), only on an account the access authorized for
+   this walk. The refusal is masc's own,
    made before anything is sent, so it is the non-rotating local refusal of a
    provider_config_transform: no provider evidence names the candidate. *)
 let authorize_account walk_owner ~runtime_id account =
@@ -2933,6 +2934,17 @@ let run_named
           official_model_input_observation hooks
         in
         let run_codex ~initial_messages () =
+          match
+            authorize_account walk_owner ~runtime_id:attempt_runtime_id config.account_home
+          with
+          | Error error ->
+            { Keeper_codex_runtime.result = Error error
+            ; pending_result_receipts = None
+            ; settled_session = None
+            ; effect_disposition = Keeper_provider_attempt_effect.No_effect_observed
+            ; successful_tool_completion = Keeper_codex_runtime.No_successful_tool_completion
+            }
+          | Ok account ->
           reset_model_input_observation ();
           let on_transmitted_model_input transmitted =
             record_transmitted_model_input transmitted;
@@ -2995,6 +3007,7 @@ let run_named
             ~event_bus
             ~raw_trace
             ~on_event
+            ~account
             ~config
             ()
         in

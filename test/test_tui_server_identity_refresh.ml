@@ -2537,7 +2537,8 @@ let test_local_source_failures_are_independent () =
     (not (keeper_available_for_new_message state keeper.k_name)
      && state.local_workspace = Local_workspace_failed "archive unavailable"
      && state.local_keepers = Local_workspace_failed "metadata unavailable");
-  let pending=local_workspace_request_exn state Local_keepers 8L in
+  let pending = local_workspace_request_exn state Local_keepers
+      (Int64.sub (Mtime_clock.elapsed_ns ()) pending_display_bar_ns) in
   let composer=Masc_tui_composer_projection.of_state state in
   Alcotest.(check bool) "retry retains the admitted failure and cannot send the retained draft" true
     (let retains_failure=match composer.reading with

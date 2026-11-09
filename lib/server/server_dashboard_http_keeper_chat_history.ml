@@ -297,10 +297,7 @@ let cached_keeper_chat_history_json config name =
 ;;
 
 let handle_page_get state req request reqd name =
-  if name = "" then
-    Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
-      (Types.error_json "missing keeper name")
-  else if not (Keeper_config.validate_name name) then
+  if not (Keeper_config.validate_name name) then
     Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
       (Types.error_json (Printf.sprintf "invalid keeper name: %s" name))
   else (
@@ -336,10 +333,7 @@ let handle_page_get state req request reqd name =
 ;;
 
 let handle_get state request reqd name =
-  if name = "" then
-    Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
-      (Types.error_json "missing keeper name")
-  else if not (Keeper_config.validate_name name) then
+  if not (Keeper_config.validate_name name) then
     (* Reject before touching the cache: the cache key embeds the raw
        name, so unvalidated garbage names would mint unbounded
        process-global cache entries (the sibling /tool-calls route

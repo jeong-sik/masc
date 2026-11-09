@@ -1,7 +1,6 @@
 (* See server_dashboard_http_keeper_turn_reads.mli. *)
 
 module Http = Http_server_eio
-module Api_post = Server_dashboard_http_keeper_api_post
 module Limits = Server_dashboard_http_keeper_read_limits
 module Memory_reads = Server_dashboard_http_keeper_memory_reads
 
@@ -88,9 +87,7 @@ let handle_records_get state req reqd name =
   (* RFC-0233 §2.3 PR-4: serve TurnRecords with server-side
      consecutive-pair block diffs so the dashboard stays a renderer
      of the tested OCaml diff (views derive; no view-side repair). *)
-  if String.length name = 0 then
-    Api_post.respond_error reqd "keeper name is required"
-  else if not (Keeper_config.validate_name name) then
+  if not (Keeper_config.validate_name name) then
     Http.Response.json_value ~status:`Bad_request
       (`Assoc
          [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
@@ -224,9 +221,7 @@ let handle_transcript_get state req reqd name =
      turn-records list. Content is the load-time redacted view the chat
      history endpoint already serves (RFC-0132); an unmatched turn_ref
      returns [found:false] rather than a fabricated transcript. *)
-  if String.length name = 0 then
-    Api_post.respond_error reqd "keeper name is required"
-  else if not (Keeper_config.validate_name name) then
+  if not (Keeper_config.validate_name name) then
     Http.Response.json_value ~status:`Bad_request
       (`Assoc
          [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])

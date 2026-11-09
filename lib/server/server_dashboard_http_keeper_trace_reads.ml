@@ -86,9 +86,7 @@ let handle_raw_trace_get state req reqd name =
 ;;
 
 let handle_trajectory_get state req reqd name =
-  if String.length name = 0 then
-    Api_post.respond_error reqd "keeper name is required"
-  else if not (Keeper_config.validate_name name) then
+  if not (Keeper_config.validate_name name) then
     Http.Response.json_value ~status:`Bad_request
       (`Assoc
          [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])

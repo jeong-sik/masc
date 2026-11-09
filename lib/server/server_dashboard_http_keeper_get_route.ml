@@ -99,8 +99,10 @@ let of_path path =
          let tail = suffix route in
          let slen = String.length tail in
          if tlen > plen + slen && String.ends_with ~suffix:tail path
-         then
-           Some (Keeper (route, String.trim (String.sub path plen (tlen - plen - slen))))
+         then (
+           match String.trim (String.sub path plen (tlen - plen - slen)) with
+           | "" -> None
+           | name -> Some (Keeper (route, name)))
          else None)
       all)
 ;;

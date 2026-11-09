@@ -281,10 +281,7 @@ let handle_keeper_get_subroutes state req request reqd =
       ~extra_headers:(Server_auth.cors_headers (Server_auth.get_origin request))
       json reqd)
   | Some Route.(Keeper (Github_identity, name)) -> (
-    if name = "" then
-      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
-        (error_json "missing keeper name")
-    else if not (Keeper_config.validate_name name) then
+    if not (Keeper_config.validate_name name) then
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json (Printf.sprintf "invalid keeper name: %s" name))
     else
@@ -316,10 +313,7 @@ let handle_keeper_get_subroutes state req request reqd =
        for the fleet, under the same public-read policy: same rows, same
        gate. The snapshot only builds them with [include_keepers], which the
        TUI's summary read turns off, so a Keeper detail asks here instead. *)
-    if name = "" then
-      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
-        (error_json "missing keeper name")
-    else if not (Keeper_config.validate_name name) then
+    if not (Keeper_config.validate_name name) then
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json (Printf.sprintf "invalid keeper name: %s" name))
     else
@@ -333,18 +327,13 @@ let handle_keeper_get_subroutes state req request reqd =
   | Some Route.(Keeper (Chat_history, name)) ->
     Chat_history.handle_get state request reqd name
   | Some Route.(Keeper (Checkpoints, name)) -> (
-    if String.length name = 0 then
-      respond_error reqd "keeper name is required"
-    else
-      let (st, json) = keeper_checkpoint_inventory_json (Mcp_server.workspace_config state) name in
-      let status : Httpun.Status.t =
-        match st with `OK -> `OK | `Not_found -> `Not_found
-      in
-      Http.Response.json_value ~status ~compress:true ~request:req json reqd)
+    let (st, json) = keeper_checkpoint_inventory_json (Mcp_server.workspace_config state) name in
+    let status : Httpun.Status.t =
+      match st with `OK -> `OK | `Not_found -> `Not_found
+    in
+    Http.Response.json_value ~status ~compress:true ~request:req json reqd)
   | Some Route.(Keeper (File_changes, name)) -> (
-    if String.length name = 0 then
-      respond_error reqd "keeper name is required"
-    else if not (Keeper_config.validate_name name) then
+    if not (Keeper_config.validate_name name) then
       (* A name that cannot belong to a keeper is refused rather than looked
          up. The window filters rows by an equal string, so a typo would
          otherwise come back as an empty answer -- indistinguishable from a
@@ -416,39 +405,33 @@ let handle_keeper_get_subroutes state req request reqd =
   | Some Route.(Keeper (Paused_work, _)) ->
     Server_dashboard_http_keeper_paused_work.handle_get state req reqd
   | Some Route.(Keeper (Runtime_trace, name)) -> (
-    if String.length name = 0 then
-      respond_error reqd "keeper name is required"
-    else
-      let trace_id = Server_utils.query_param req "trace_id" in
-      let turn_id =
-        match Server_utils.query_param req "turn_id" with
-        | Some raw -> int_of_string_opt (String.trim raw)
-        | None -> None
-      in
-      let limit =
-        Server_utils.int_query_param req "limit" ~default:200
-        |> max 1 |> min Limits.trajectory_max_limit
-      in
-      let st, json =
-        cached_keeper_runtime_trace_json (Mcp_server.workspace_config state) name
-          ?trace_id ?turn_id ~limit ()
-      in
-      let status : Httpun.Status.t =
-        match st with `OK -> `OK | `Not_found -> `Not_found
-      in
-      Http.Response.json_value ~status ~compress:true ~request:req json reqd)
+    let trace_id = Server_utils.query_param req "trace_id" in
+    let turn_id =
+      match Server_utils.query_param req "turn_id" with
+      | Some raw -> int_of_string_opt (String.trim raw)
+      | None -> None
+    in
+    let limit =
+      Server_utils.int_query_param req "limit" ~default:200
+      |> max 1 |> min Limits.trajectory_max_limit
+    in
+    let st, json =
+      cached_keeper_runtime_trace_json (Mcp_server.workspace_config state) name
+        ?trace_id ?turn_id ~limit ()
+    in
+    let status : Httpun.Status.t =
+      match st with `OK -> `OK | `Not_found -> `Not_found
+    in
+    Http.Response.json_value ~status ~compress:true ~request:req json reqd)
   | Some Route.(Keeper (Config, name)) -> (
-    if String.length name = 0 then
-      respond_error reqd "keeper name is required"
-    else
-      let config = (Mcp_server.workspace_config state) in
-      let (st, json) =
-        cached_keeper_config_json config name
-      in
-      let status : Httpun.Status.t =
-        match st with `OK -> `OK | `Not_found -> `Not_found
-      in
-      Http.Response.json_value ~status ~compress:true ~request:req json reqd)
+    let config = (Mcp_server.workspace_config state) in
+    let (st, json) =
+      cached_keeper_config_json config name
+    in
+    let status : Httpun.Status.t =
+      match st with `OK -> `OK | `Not_found -> `Not_found
+    in
+    Http.Response.json_value ~status ~compress:true ~request:req json reqd)
   | Some Route.(Keeper (Tool_stats, name)) ->
     Tool_calls.handle_stats_get state req reqd name
   | Some Route.(Keeper (Tool_result, keeper)) ->
@@ -456,9 +439,7 @@ let handle_keeper_get_subroutes state req request reqd =
   | Some Route.(Keeper (Tool_calls, name)) ->
     Tool_calls.handle_calls_get state req reqd name
   | Some Route.(Keeper (Waiting_inventory, name)) -> (
-    if String.length name = 0 then
-      respond_error reqd "keeper name is required"
-    else if not (Keeper_config.validate_name name) then
+    if not (Keeper_config.validate_name name) then
       Http.Response.json_value ~status:`Bad_request
         (`Assoc
            [ ("error", `String (Printf.sprintf "invalid keeper name: %s" name)) ])
@@ -485,8 +466,7 @@ let handle_keeper_get_subroutes state req request reqd =
        GET /api/v1/keepers/:name/feedback. The per-keeper feedback log is the
        SSOT; the view renders this tally (no view-side derivation). A read IO
        fault surfaces as 500, never a silently-empty success. *)
-    if String.length name = 0 then respond_error reqd "keeper name is required"
-    else if not (Keeper_config.validate_name name) then
+    if not (Keeper_config.validate_name name) then
       Http.Response.json_value ~status:`Bad_request
         (`Assoc
            [ ("error", `String (Printf.sprintf "invalid keeper name: %s" name)) ])
@@ -574,97 +554,85 @@ let handle_keeper_get_subroutes state req request reqd =
   | Some Route.(Keeper (Trajectory, name)) ->
     Trace_reads.handle_trajectory_get state req reqd name
   | Some Route.(Keeper (Transitions, name)) -> (
-    if String.length name = 0 then
-      respond_error reqd "keeper name is required"
-    else
-      let limit =
-        Server_utils.int_query_param req "limit" ~default:20
-        |> max 1 |> min 50
-      in
-      let base_path = (Mcp_server.workspace_config state).base_path in
-      let phase = Keeper_registry.get_phase ~base_path name in
-      let phase_str = match phase with
-        | Some p -> `String (Keeper_state_machine.phase_to_string p)
-        | None -> `Null
-      in
-      let transitions =
-        Keeper_transition_audit.recent_transitions_json
-          ~keeper_name:name ~limit
-      in
-      let json = `Assoc [
-        "keeper", `String name;
-        "current_phase", phase_str;
-        "count", `Int (json_list_length transitions);
-        "transitions", transitions;
-      ] in
-      Http.Response.json_value ~compress:true ~request:req json reqd)
+    let limit =
+      Server_utils.int_query_param req "limit" ~default:20
+      |> max 1 |> min 50
+    in
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let phase = Keeper_registry.get_phase ~base_path name in
+    let phase_str = match phase with
+      | Some p -> `String (Keeper_state_machine.phase_to_string p)
+      | None -> `Null
+    in
+    let transitions =
+      Keeper_transition_audit.recent_transitions_json
+        ~keeper_name:name ~limit
+    in
+    let json = `Assoc [
+      "keeper", `String name;
+      "current_phase", phase_str;
+      "count", `Int (json_list_length transitions);
+      "transitions", transitions;
+    ] in
+    Http.Response.json_value ~compress:true ~request:req json reqd)
   (* #12798 Dashboard Gaps: lifecycle event timeline per keeper. *)
   | Some Route.(Keeper (Lifecycle, name)) ->
-    if String.length name = 0 then
-      respond_error reqd "keeper name is required"
-    else
-      let limit =
-        Server_utils.int_query_param req "limit" ~default:50
-        |> max 1 |> min 200
-      in
-      let events =
-        Keeper_lifecycle_audit.recent_json ~keeper_name:name ~limit
-      in
-      let json = `Assoc [
-        "keeper", `String name;
-        "count", `Int (json_list_length events);
-        "events", events;
-      ] in
-      Http.Response.json_value ~compress:true ~request:req json reqd
+    let limit =
+      Server_utils.int_query_param req "limit" ~default:50
+      |> max 1 |> min 200
+    in
+    let events =
+      Keeper_lifecycle_audit.recent_json ~keeper_name:name ~limit
+    in
+    let json = `Assoc [
+      "keeper", `String name;
+      "count", `Int (json_list_length events);
+      "events", events;
+    ] in
+    Http.Response.json_value ~compress:true ~request:req json reqd
   | Some Route.(Keeper (Eval, name)) -> (
-    if String.length name = 0 then
-      respond_error reqd "keeper name is required"
-    else
-      let base_path = (Mcp_server.workspace_config state).base_path in
-      let limit =
-        Server_utils.int_query_param req "limit" ~default:10
-        |> max 1 |> min 100
-      in
-      let snapshots =
-        Dashboard_eval_feed.read_latest ~base_path ~agent_name:name ~limit
-      in
-      let latest_verdict =
-        match snapshots with
-        | s :: _ -> Some s.Dashboard_eval_feed.verdict
-        | [] -> None
-      in
-      let json = `Assoc [
-        ("keeper", `String name);
-        ("count", `Int (List.length snapshots));
-        ("latest_coverage",
-          match latest_verdict with
-          | Some v -> `Float v.Dashboard_eval_feed.coverage
-          | None -> `Null);
-        ("latest_all_passed",
-          match latest_verdict with
-          | Some v -> `Bool v.Dashboard_eval_feed.all_passed
-          | None -> `Null);
-        ("snapshots",
-          `List (List.map Dashboard_eval_feed.snapshot_to_json snapshots));
-      ] in
-      Http.Response.json_value ~compress:true ~request:req json reqd)
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let limit =
+      Server_utils.int_query_param req "limit" ~default:10
+      |> max 1 |> min 100
+    in
+    let snapshots =
+      Dashboard_eval_feed.read_latest ~base_path ~agent_name:name ~limit
+    in
+    let latest_verdict =
+      match snapshots with
+      | s :: _ -> Some s.Dashboard_eval_feed.verdict
+      | [] -> None
+    in
+    let json = `Assoc [
+      ("keeper", `String name);
+      ("count", `Int (List.length snapshots));
+      ("latest_coverage",
+        match latest_verdict with
+        | Some v -> `Float v.Dashboard_eval_feed.coverage
+        | None -> `Null);
+      ("latest_all_passed",
+        match latest_verdict with
+        | Some v -> `Bool v.Dashboard_eval_feed.all_passed
+        | None -> `Null);
+      ("snapshots",
+        `List (List.map Dashboard_eval_feed.snapshot_to_json snapshots));
+    ] in
+    Http.Response.json_value ~compress:true ~request:req json reqd)
   | Some Route.(Keeper (State_diagram, name)) -> (
-    if String.length name = 0 then
-      respond_error reqd "keeper name is required"
-    else
-      let base_path = (Mcp_server.workspace_config state).base_path in
-      let phase = Keeper_registry.get_phase ~base_path name in
-      let current = match phase with Some p -> p | None -> Keeper_state_machine.Offline in
-      let mermaid = Keeper_state_machine_mermaid.phase_to_mermaid ~current in
-      let phase_str = Keeper_state_machine.phase_to_string current in
-      let json =
-        `Assoc
-          [ "keeper", `String name
-          ; "current_phase", `String phase_str
-          ; "mermaid", `String mermaid
-          ]
-      in
-      Http.Response.json_value ~compress:true ~request:req json reqd)
+    let base_path = (Mcp_server.workspace_config state).base_path in
+    let phase = Keeper_registry.get_phase ~base_path name in
+    let current = match phase with Some p -> p | None -> Keeper_state_machine.Offline in
+    let mermaid = Keeper_state_machine_mermaid.phase_to_mermaid ~current in
+    let phase_str = Keeper_state_machine.phase_to_string current in
+    let json =
+      `Assoc
+        [ "keeper", `String name
+        ; "current_phase", `String phase_str
+        ; "mermaid", `String mermaid
+        ]
+    in
+    Http.Response.json_value ~compress:true ~request:req json reqd)
   | Some Route.Fleet_composite ->
     (* LT-16a: fleet-wide composite snapshot. Enumerates every
        registered keeper via [Keeper_registry.all] and projects each
@@ -687,17 +655,14 @@ let handle_keeper_get_subroutes state req request reqd =
     (* RFC-0003 §7: composite lifecycle snapshot derived from the
        registry entry via the [Keeper_composite_observer] pure
        projection. No mutation, no I/O, no provider/token access. *)
-    if String.length name = 0 then
-      respond_error reqd "keeper name is required"
-    else
-      let config = Mcp_server.workspace_config state in
-      let status, json = cached_keeper_composite_json config name in
-      let status : Httpun.Status.t =
-        match status with
-        | `OK -> `OK
-        | `Not_found -> `Not_found
-        | `Internal_server_error -> `Internal_server_error
-      in
-      Http.Response.json_value ~status ~compress:true ~request:req json reqd)
+    let config = Mcp_server.workspace_config state in
+    let status, json = cached_keeper_composite_json config name in
+    let status : Httpun.Status.t =
+      match status with
+      | `OK -> `OK
+      | `Not_found -> `Not_found
+      | `Internal_server_error -> `Internal_server_error
+    in
+    Http.Response.json_value ~status ~compress:true ~request:req json reqd)
   | None ->
     respond_error ~status:`Not_found reqd "not found"

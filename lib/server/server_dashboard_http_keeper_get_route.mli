@@ -45,7 +45,8 @@ type t =
   | Fleet_composite  (** [/api/v1/keepers/composite]: all keepers, no name. *)
   | Keeper of keeper_route * string
       (** The route and the keeper name between the prefix and the suffix,
-          trimmed. The name is not checked here and can hold [/]. *)
+          trimmed and never empty. The name is not checked further and can
+          hold [/]. *)
 
 val all : keeper_route list
 (** Every route once. *)
@@ -59,5 +60,6 @@ val of_path : string -> t option
     [/api/v1/keepers/a%2Fb/metrics] is [a%2Fb].
 
     [None] when the path is outside [/api/v1/keepers/] or names no route. A
-    keeper route needs at least one character before its suffix. No suffix
-    ends another, so at most one route fits a path. *)
+    keeper route needs a name: nothing, or only blanks, between the prefix and
+    the suffix is no route. No suffix ends another, so at most one route fits
+    a path. *)

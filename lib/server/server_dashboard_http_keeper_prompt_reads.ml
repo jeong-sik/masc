@@ -1,7 +1,6 @@
 (* See server_dashboard_http_keeper_prompt_reads.mli. *)
 
 module Http = Http_server_eio
-module Api_post = Server_dashboard_http_keeper_api_post
 module Types = Server_dashboard_http_keeper_api_types
 
 (* The two provider-input doors: the parts of one turn's request, and one of
@@ -15,9 +14,7 @@ let handle_provider_input_get state req reqd ~name ~surface ~read =
       (`Assoc [ "error", `String detail ])
       reqd
   in
-  if String.length name = 0
-  then Api_post.respond_error reqd "keeper name is required"
-  else if not (Keeper_config.validate_name name)
+  if not (Keeper_config.validate_name name)
   then bad_request (Printf.sprintf "invalid keeper name: %s" name)
   else
     match Server_utils.query_param req "turn_ref" with

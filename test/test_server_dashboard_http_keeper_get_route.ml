@@ -52,8 +52,10 @@ let test_keeper_name () =
   metrics " a /metrics" "a";
   (* The name is not percent-decoded. The handler refuses what is no name. *)
   metrics "a%2Fb/metrics" "a%2Fb";
-  (* A blank name reaches the handler, which refuses it. *)
-  metrics " /metrics" "";
+  (* A name that is empty or blank after trimming is no route, so a handler
+     never sees one. *)
+  check routed "a blank name" None (R.of_path (prefix ^ " /metrics"));
+  check routed "a form feed and a line break" None (R.of_path (prefix ^ "\012\r\n/metrics"));
   check routed "a route needs a name" None (R.of_path (prefix ^ "/metrics"))
 ;;
 

@@ -265,7 +265,9 @@ let native_refusal_to_string = function
     Printf.sprintf
       "a multi-account process runs a model turn only without native tools, and this turn \
        asks for the native posture %S: the CLI runs as the user of the server process, so \
-       its own tools could read the account homes of other people"
+       its own tools could read the account homes of other people. A Keeper whose client \
+       supports the posture none runs here with keeper.tools.native = \"none\" in its \
+       profile; a client without it runs no model turn here"
       (Runtime_native_tools.to_string posture)
 ;;
 

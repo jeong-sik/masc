@@ -647,7 +647,7 @@ let test_public_nested_run_records_only_admitted_children ?(execution=Masc.Keepe
   let cell = Call_log.create_turn_ctx_cell () in
   Call_log.set_turn_context ~cell ~agent_name:"fixture" ~task_id:"task-nested" ~turn:1 ~trace_id:"trace-nested-public" ();
   let tools = Tools.make_tools ~capability_surface:surface ~config ~meta ~publication_recovery ~ctx_snapshot
-      ~record_nested_composition_activation:record ~nested_activation_context:recorder ~turn_ctx_cell:cell () in
+      ~record_nested_composition_activation:record ~nested_activation_context:recorder ~turn_ctx_cell:cell () |> Result.get_ok in
   let execute id name input =
     let tool = List.find_map (fun (tool, _, _) -> if tool.Agent_core.Tool.schema.name = name then Some tool else None) tools
       |> function Some value -> value | None -> fail ("public control absent: " ^ name) in

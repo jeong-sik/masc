@@ -4010,7 +4010,7 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
       ~trace_id:(Keeper_id.Trace_id.to_string meta.Masc.Keeper_meta_contract.runtime.trace_id) ();
     let tools = Surface.make_tools ~capability_surface ~config ~meta ~publication_recovery
         ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"public original launch resume")
-        ~turn_ctx_cell:fixture.cell ~clock:(Eio.Stdenv.clock env) () in
+        ~turn_ctx_cell:fixture.cell ~clock:(Eio.Stdenv.clock env) () |> Result.get_ok in
     let tool = List.find_map (fun (tool,_,_) ->
         if tool.Agent_core.Tool.schema.name = Draft.run_tool_name then Some tool else None) tools
       |> Option.get in
@@ -4157,7 +4157,7 @@ let test_interrupted_prepared_launch_resumes_the_same_job keeper_turn_id () = wi
     ~trace_id:(Keeper_id.Trace_id.to_string final_meta.runtime.trace_id) ();
   let tools = Surface.make_tools ~capability_surface ~config ~meta:final_meta ~publication_recovery
       ~ctx_snapshot:(Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"pre-reserve launch resume")
-      ~turn_ctx_cell:fixture.cell ~clock:(Eio.Stdenv.clock env) () in
+      ~turn_ctx_cell:fixture.cell ~clock:(Eio.Stdenv.clock env) () |> Result.get_ok in
   let tool = List.find_map (fun (tool,_,_) ->
       if tool.Agent_core.Tool.schema.name = Draft.run_tool_name then Some tool else None) tools
     |> Option.get in

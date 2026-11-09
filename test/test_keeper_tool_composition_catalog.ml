@@ -1041,7 +1041,7 @@ let test_public_draft_run_preserves_one_execution_identity ?(observe = true) () 
   Option.iter (fun cell -> Call_log.set_turn_context ~cell ~agent_name:meta.name
     ~turn:7 ~keeper_turn_id:1 ()) turn_ctx_cell;
   let tools = Surface.make_tools ~capability_surface ~config ~meta ~publication_recovery
-      ~ctx_snapshot ?turn_ctx_cell () in
+      ~ctx_snapshot ?turn_ctx_cell () |> Result.get_ok in
   let find name =
     match List.find_opt (fun (tool, _, _) ->
       String.equal tool.Agent_core.Tool.schema.name name) tools with
@@ -1212,7 +1212,7 @@ esac
       ~ctx_snapshot ~turn_ctx_cell ~gate_causal_context:causal
       ~gate_context:(fun () -> Causal.snapshot causal) ~record_gate_result
       ~record_composition_activation:(fun ~invocation ~tool_name ~reference ->
-        Recorder.record_composition ~config activation_context ~invocation ~tool_name reference) () in
+        Recorder.record_composition ~config activation_context ~invocation ~tool_name reference) () |> Result.get_ok in
   let tool = match List.find_opt (fun (tool, _, _) ->
       String.equal tool.Agent_core.Tool.schema.name (Catalog.tool_name entry)) tools with
     | Some (tool, _, _) -> tool | None -> fail "read composition not materialized" in
@@ -1220,7 +1220,7 @@ esac
     (Agent_core.Tool.execution_mode tool ~input:(`Assoc []) = Agent_core.Tool_contract.Concurrent);
   let callback_only = Surface.make_tools ~capability_surface:(draft_surface ())
       ~skill_compositions:[ Surface.{ reference; entry } ] ~config ~meta ~publication_recovery
-      ~ctx_snapshot ~gate_context:(fun () -> Causal.snapshot causal) () in
+      ~ctx_snapshot ~gate_context:(fun () -> Causal.snapshot causal) () |> Result.get_ok in
   let callback_only_tool = match List.find_opt (fun (tool, _, _) ->
       String.equal tool.Agent_core.Tool.schema.name (Catalog.tool_name entry)) callback_only with
     | Some (tool, _, _) -> tool | None -> fail "callback-only composition not materialized" in

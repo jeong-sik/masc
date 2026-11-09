@@ -259,7 +259,7 @@ member. Use CHANGES_REQUESTED for blocking findings; COMMENTED prose is not an
 automatic stop. Reviewers still inspect source before approving. Release/Tag
 integration remains manual and requires full verification.
 
-Choose work using [review routing](../../config/prompts/pr-review-routing.md).
+Choose work using the [PR patrol skill](../../.agents/skills/masc-pr-patrol/SKILL.md).
 For MASC review requests, confirm the current code-review specialist Keepers and
 their roles, then deliver the request to each intended Keeper through MASC Board,
 Broadcast or a direct message exposed to the caller. Keeper callers use

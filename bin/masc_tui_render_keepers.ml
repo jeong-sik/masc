@@ -198,26 +198,27 @@ let keeper_flag_cell (runtime : keeper_runtime option) =
       in
       Mark.activation_letter row.kr_activation_mode ^ gap ^ sandbox
 
-let keeper_activity_word (activity : Keeper_list_model.activity) =
+let keeper_activity_word ?(ko = false) (activity : Keeper_list_model.activity) =
+  let text korean english = if ko then korean else english in
   match activity with
-  | Held_call -> "held call"
-  | Question -> "question"
-  | Confirmation -> "confirm"
-  | Attempt_failed -> "try failed"
-  | Preparing -> "preparing"
-  | Streaming -> "streaming"
-  | Running -> "running"
-  | Async_working count -> Printf.sprintf "async %d" count
-  | Deferred -> "deferred"
-  | Tool_waiting -> "tool wait"
-  | Model_waiting -> "model wait"
-  | Delegate_result -> "result in"
-  | Verifying -> "verify"
-  | External_waiting -> "external"
-  | Idle -> "idle"
-  | Paused -> "paused"
-  | Offline -> "offline"
-  | Unknown -> "unknown"
+  | Held_call -> text "승인 대기" "held call"
+  | Question -> text "답변 대기" "question"
+  | Confirmation -> text "확인 대기" "confirm"
+  | Attempt_failed -> text "시도 실패" "try failed"
+  | Preparing -> text "준비 중" "preparing"
+  | Streaming -> text "응답 중" "streaming"
+  | Running -> text "실행 중" "running"
+  | Async_working count -> text (Printf.sprintf "별도 실행 %d" count) (Printf.sprintf "async %d" count)
+  | Deferred -> text "실행 보류" "deferred"
+  | Tool_waiting -> text "도구 대기" "tool wait"
+  | Model_waiting -> text "모델 대기" "model wait"
+  | Delegate_result -> text "위임 결과" "result in"
+  | Verifying -> text "검증 대기" "verify"
+  | External_waiting -> text "외부 대기" "external"
+  | Idle -> text "대기 중" "idle"
+  | Paused -> text "일시정지" "paused"
+  | Offline -> text "오프라인" "offline"
+  | Unknown -> text "미확인" "unknown"
 
 let keeper_activity_style (activity : Keeper_list_model.activity) =
   match activity with
@@ -416,7 +417,7 @@ let keeper_row_name ~width ~yolo (row : Keeper_list_model.row) =
 
 (* The NOW cell: the activity's mark and word, or the receipt's operator
    disposition where nothing on the row is newer than the receipt. *)
-let keeper_now_cell ~frame (row : Keeper_list_model.row) =
+let keeper_now_cell ?(ko = false) ~frame (row : Keeper_list_model.row) =
   let activity = Keeper_list_model.primary_activity_of_row row in
   let runtime = keeper_row_runtime row in
   let operator_disposition =
@@ -448,7 +449,7 @@ let keeper_now_cell ~frame (row : Keeper_list_model.row) =
   let status_word =
     match operator_disposition with
     | Some disp -> Masc_tui_keeper_mark.operator_disposition_word disp
-    | None -> keeper_activity_word activity
+    | None -> keeper_activity_word ~ko activity
   in
   status_color ^ glyph ^ " "
   ^ Message_layout.fit_width status_word (Render_schedule.keeper_status_width - 2)
@@ -1725,7 +1726,483 @@ let matrix_legend ~inner matrix =
   "✗ failed in last walk · ▹ next head · ◌ resting head · ? unread head"
   :: Message_layout.wrap_words ~max_cells:inner (String.concat " · " (ids @ omitted))
 
-let render_keeper_list (state : state) =
+let proactive_outcome_word ?(ko = false) =
+  let text korean english = if ko then korean else english in
+  function
+  | Masc.Keeper_meta_contract.Proactive_never_started -> text "아직 시작하지 않음" "never started"
+  | Masc.Keeper_meta_contract.Proactive_unknown -> text "결과 미확인" "unknown"
+  | Masc.Keeper_meta_contract.Proactive_silent -> text "응답 없이 종료" "silent"
+  | Masc.Keeper_meta_contract.Proactive_text_response -> text "글로 응답함" "replied with text"
+  | Masc.Keeper_meta_contract.Proactive_tool_use -> text "도구를 사용함" "used tools"
+  | Masc.Keeper_meta_contract.Proactive_mixed_response -> text "글과 도구로 응답함" "text and tools"
+  | Masc.Keeper_meta_contract.Proactive_error -> text "오류 보고" "error"
+  | Masc.Keeper_meta_contract.Proactive_rested -> text "제공자 할당량을 기다림" "rested on a provider quota"
+
+(* The operator roster uses the same row readings as the axis views. These
+   sentences do not turn missing observations into idle work or no requests. *)
+let keeper_plain_work (state : state) (row : Keeper_list_model.row) =
+  let text ko en = ui_text state ~ko ~en in
+  match row.task with
+  | Some task ->
+      let title = Terminal_text.single_line task.Tui_decode.title in
+      let title = if String.equal (String.trim title) "" then Terminal_text.single_line task.id else title in
+      let task_source = match local_rows_page state ~error:state.tasks_error with
+        | Page_failed -> text "배정 목록 갱신 실패 · 보존된 배정 작업: " "assignment refresh failed · retained assignment: "
+        | Page_unread -> text "배정 목록 미확인 · 보존된 배정 작업: " "assignment source unread · retained assignment: "
+        | Page_empty ->
+            if Option.is_some (local_source_pending state Local_work) then
+              text "배정 목록 갱신 중 · 보존된 배정 작업: " "assignment refresh pending · retained assignment: "
+            else text "관측된 배정 작업: " "observed assignment: "
+      in
+      let keeper_source = match keeper_rows_page state ~error:state.keepers_error with
+        | Page_failed -> text "Keeper 배정 연결 갱신 실패 · " "Keeper assignment link refresh failed · "
+        | Page_unread -> text "Keeper 배정 연결 미확인 · " "Keeper assignment link unread · "
+        | Page_empty ->
+            if Option.is_some (local_source_pending state Local_keepers) then
+              text "Keeper 배정 연결 갱신 중 · " "Keeper assignment link refreshing · " else ""
+      in
+      (if row.reading.Keeper_control.paused then text "저장된 일시정지 · " "stored pause · " else "")
+      ^ keeper_source ^ task_source ^ title
+  | None ->
+      (match keeper_waiting_detail row with
+       | Some reason ->
+           (if Option.is_some state.keeper_waiting_error || Option.is_some state.keeper_waiting_failure
+               || Option.is_some state.keeper_turns_error then
+              text "마지막 대기 관측 · 갱신 실패: " "last waiting observation · refresh failed: "
+            else if Keeper_waiting_read.awaiting_change state.keeper_waiting_read then
+              text "마지막 대기 관측 · 갱신 대기: " "last waiting observation · refresh pending: "
+            else text "관측된 대기: " "observed wait: ") ^ reason
+       | None ->
+           let observed ko en =
+             (if Option.is_some state.keeper_turns_error then
+                text "마지막 턴 관측 · 갱신 실패: " "last turn observation · refresh failed: "
+              else if state.keeper_turns_inflight then
+                text "마지막 턴 관측 · 갱신 중: " "last turn observation · refreshing: "
+              else text "턴 관측: " "turn observation: ") ^ text ko en
+           in
+           match row.turn with
+           | Some (Tui_decode.Keeper_turn_running { preview = Some preview; _ }) ->
+               let status = Terminal_text.single_line preview.ktp_status_text in
+               if String.equal (String.trim status) "" then
+                 observed "실행 중 · 작업 이름 미관측" "running · work title not observed"
+               else observed status status
+           | Some (Tui_decode.Keeper_turn_unavailable reason) ->
+               text "실행 상태 미확인: " "execution unknown: " ^ Terminal_text.single_line reason
+           | Some (Tui_decode.Keeper_turn_running { preview = None; _ }) ->
+               observed "실행 중 · 작업 이름 미관측" "running · work title not observed"
+           | Some Tui_decode.Keeper_turn_idle ->
+               observed "실행 중인 턴 없음 · 작업 이름 미관측" "no running turn · work title not observed"
+           | None -> text "현재 작업 미관측" "current work not observed")
+
+let keeper_plain_help (state : state) (row : Keeper_list_model.row) =
+  let text ko en = ui_text state ~ko ~en in
+  match Keeper_list_model.person_wait row with
+  | Some request ->
+      let detail, retained = match request with
+        | Keeper_list_model.Held_tool approval ->
+            ( (let question = Terminal_text.single_line approval.Tui_decode.kta_question in
+               if String.equal (String.trim question) "" then
+                 text "도구 실행 승인: " "approve tool: " ^ Terminal_text.single_line approval.kta_tool
+               else question)
+            , Option.is_some state.keeper_tool_approvals_error )
+        | Keeper_list_model.Open_questions count ->
+            (text (Printf.sprintf "답하지 않은 질문 %d개" count)
+               (Printf.sprintf "%d unanswered questions" count), Option.is_some state.asks_error)
+        | Keeper_list_model.Held_item item | Keeper_list_model.Confirmation_item item ->
+            keeper_waiting_item_text item,
+            (Option.is_some state.keeper_waiting_error || Option.is_some state.keeper_waiting_failure
+             || Option.is_some state.keeper_turns_error)
+      in
+      let prefix = if retained then text "마지막 관측 · 갱신 실패 · " "last observed · refresh failed · "
+        else
+            (match request with
+             | Keeper_list_model.Held_item _ | Keeper_list_model.Confirmation_item _
+               when Keeper_waiting_read.awaiting_change state.keeper_waiting_read ->
+                 text "마지막 관측 · 갱신 대기 · " "last observed · refresh pending · "
+             | Keeper_list_model.Held_item _ | Keeper_list_model.Confirmation_item _
+             | Keeper_list_model.Held_tool _ | Keeper_list_model.Open_questions _ -> "")
+      in
+      Some (prefix ^ detail)
+  | None -> None
+
+let keeper_plain_turn_record (state : state) ~now ~keeper_name =
+  let text ko en = ui_text state ~ko ~en in
+  let observed turns =
+    match List.rev turns with
+    | [] -> text "조회된 턴 기록 없음" "no turn records in the reading"
+    | (turn : Masc_tui_keeper_turns.turn) :: _ ->
+        let ended = match Message_layout.age_text ~now ~since:turn.at with
+          | Some age -> age ^ text " 전 종료 · " " ago ended · "
+          | None -> text "종료 시각 미확인 · " "end time unknown · "
+        in
+        ended ^ (match turn.stop with
+          | Masc_tui_keeper_turns.Stopped reason -> Terminal_text.single_line reason
+          | Masc_tui_keeper_turns.No_stop_reason -> text "종료 사유 미기록" "stop reason not recorded")
+  in
+  match Masc_tui_fetched.view_for ~equal:String.equal state.keeper_story_turns ~key:keeper_name with
+  | Masc_tui_fetched.Absent -> text "턴 종료 기록 미조회 · Enter:Story" "turn records not read · Enter:Story"
+  | Masc_tui_fetched.Loading -> text "턴 종료 기록 조회 중" "reading turn records"
+  | Masc_tui_fetched.Ready turns -> observed turns
+  | Masc_tui_fetched.Stale (turns, reason) ->
+      text "마지막 관측 · " "last observed · " ^ observed turns
+      ^ text " · 갱신 실패: " " · refresh failed: " ^ Terminal_text.single_line reason
+  | Masc_tui_fetched.Failed reason ->
+      text "턴 종료 기록 미확인: " "turn records unknown: " ^ Terminal_text.single_line reason
+
+let keeper_plain_result (state : state) (row : Keeper_list_model.row) =
+  let ko = state.ui_language = Lang_ko in
+  let text ko en = ui_text state ~ko ~en in
+  match row.keeper.Tui_decode.k_activity with
+  | Some { k_last_proactive_outcome = Some outcome; _ } ->
+      text "최근 자율 턴: " "last autonomous cycle: " ^ proactive_outcome_word ~ko outcome
+  | Some { k_last_proactive_outcome = None; _ } | None ->
+      text "최근 자율 턴 결과 미관측" "last autonomous cycle outcome not observed"
+
+let keeper_plain_detail_lines (state : state) ~now ~width ~compact row =
+  let text ko en = ui_text state ~ko ~en in
+  let fit value = Message_layout.fit_width value width in
+  match row with
+  | None -> [ Theme.recede () ^ fit (text "선택한 Keeper 없음" "no Keeper selected") ^ Ansi.reset ]
+  | Some (row : Keeper_list_model.row) ->
+      let help = match keeper_plain_help state row with
+        | Some request -> Theme.warn () ^ request ^ Ansi.reset
+        | None ->
+            let waiting_observed = match row.waiting with
+              | Keeper_list_model.Waiting_observed _ -> true
+              | Keeper_list_model.Waiting_unobserved | Keeper_list_model.Waiting_unavailable -> false
+            in
+            let requests_observed = waiting_observed
+              && state.keeper_tool_approvals_observed && Option.is_some state.asks_snapshot
+              && state.keeper_tool_approvals_error = None && state.asks_error = None
+              && state.keeper_waiting_error = None && state.keeper_waiting_failure = None
+              && state.keeper_turns_error = None
+              && not (Keeper_waiting_read.awaiting_change state.keeper_waiting_read)
+            in
+            Theme.recede () ^ (if requests_observed then
+              text "관측된 사람 대기 없음 · Approvals에서 확인"
+                "no human wait in the reading · inspect Approvals"
+            else text "도움 요청 상태 미확인 · Approvals에서 확인"
+                "human waits unknown · inspect Approvals") ^ Ansi.reset
+      in
+      let current = keeper_plain_work state row in
+      let result = keeper_plain_result state row in
+      let name = Terminal_text.single_line row.keeper.Tui_decode.k_name in
+      let routes =
+        [ text "c:대화·원래 요청   →:상세   Enter:Story"
+            "c:chat / original request   →:detail   Enter:Story"
+        ; text "Enter→m:기억   J:일정   l:로그"
+            "Enter→m:memory   J:schedules   l:logs"
+        ]
+      in
+      let heading = Ansi.bold ^ fit name ^ Ansi.reset in
+      if compact then
+        let compact_result = match row.keeper.Tui_decode.k_activity with
+          | Some { k_last_proactive_outcome = Some _; _ } -> result
+          | Some { k_last_proactive_outcome = None; _ } | None ->
+              keeper_plain_turn_record state ~now ~keeper_name:name
+        in
+        heading
+        :: List.map fit
+          ([ text "현재 일  " "work  " ^ current
+           ; text "도움  " "help  " ^ help
+           ; text "최근 결과  " "last result  " ^ compact_result
+           ] @ routes)
+      else
+        let section title content =
+          let lines = Message_layout.wrap_words ~max_cells:(max 1 (width - 2)) content in
+          let lines = match lines with
+            | first :: second :: _ :: _ ->
+                [first; Message_layout.fit_width (second ^ " " ^ Message_layout.cut_mark) (max 1 (width - 2))]
+            | _ -> lines
+          in
+          (Ansi.bold ^ fit title ^ Ansi.reset)
+          :: List.map (fun line -> "  " ^ fit_width line (max 0 (width - 2))) lines
+        in
+        [heading; ""]
+        @ section (text "지금 하는 일" "CURRENT WORK") current
+        @ [""] @ section (text "사람의 도움" "HUMAN WAIT") help
+        @ [""] @ section (text "최근 관측 결과" "OBSERVED RESULT")
+            (result ^ " · " ^ keeper_plain_turn_record state ~now ~keeper_name:name)
+        @ [""] @ List.map (fun line -> Theme.info () ^ fit line ^ Ansi.reset) routes
+
+let keeper_plain_fleet_lines (state : state) ~now ~inner =
+  let text ko en = ui_text state ~ko ~en in
+  let warning value = Theme.warn () ^ "  " ^ value ^ Ansi.reset in
+  match fleet_stream_view state with
+  | Masc_tui_fleet_stream.Awaiting_first_reading ->
+      [Theme.recede () ^ text "  운영 상태 미조회" "  fleet status not read" ^ Ansi.reset]
+  | Masc_tui_fleet_stream.Unreachable { since } ->
+      [warning (Masc_tui_fleet_line.unreachable_text ~now ~since)]
+  | Masc_tui_fleet_stream.Cannot_read failure ->
+      [warning (Masc_tui_fleet_line.failure_text failure)]
+  | Masc_tui_fleet_stream.Unavailable { degradation; disconnected_since } ->
+      [warning (Masc_tui_fleet_line.unavailable_text ~now ~degradation ~disconnected_since)]
+  | Masc_tui_fleet_stream.Reading { reading = { fleet; _ }; trouble } ->
+      let lead = (match trouble with
+        | None -> text "운영 관측: " "fleet observation: "
+        | Some (Masc_tui_fleet_stream.Scans_failing _ | Masc_tui_fleet_stream.Disconnected _) ->
+            text "마지막 운영 관측: " "last fleet observation: ")
+        ^ Masc_tui_fleet_line.status_text fleet.fs_status
+      in
+      let clauses = lead :: Option.to_list (Masc_tui_fleet_line.blocker_text fleet)
+        @ [text
+             (Printf.sprintf "실행 %d/%d" fleet.fs_running_count fleet.fs_bootable_count)
+             (Printf.sprintf "running %d/%d" fleet.fs_running_count fleet.fs_bootable_count)]
+      in
+      let tone = match trouble with
+        | Some _ -> Theme.warn ()
+        | None -> if fleet.fs_operator_action_required then Theme.bad ()
+            else if Masc_tui_fleet_line.status_is_ok fleet.fs_status then Theme.ok ()
+            else Theme.warn ()
+      in
+      [tone ^ "  " ^ Message_layout.join_fitting ~sep:" · " ~cells:(max 0 (inner - 2)) clauses ^ Ansi.reset]
+      @ Option.to_list (Option.map
+          (fun trouble -> warning (Masc_tui_fleet_line.trouble_text ~now trouble)) trouble)
+
+let keeper_plain_headers (state : state) ~now ~cols ~inner ~selected_reading =
+  let text ko en = ui_text state ~ko ~en in
+  let heading = screen_title (text " MASC Keepers · 일과 도움" " MASC Keepers · work and help") in
+  let badge = connection_badge state in
+  let gap = max 1 (inner - Message_layout.display_width heading - Message_layout.display_width badge) in
+  let warning prefix reason = Theme.warn () ^ "  " ^ prefix ^ Terminal_text.single_line reason ^ Ansi.reset in
+  let errors = List.filter_map Fun.id
+      [ Option.map (warning (text "목록: " "roster metadata: ")) state.keepers_error
+      ; Option.map (warning (text "실행 관측: " "live roster: ")) state.keeper_roster_error
+      ; Option.map (warning (text "턴 관측: " "turn observation: ")) state.keeper_turns_error
+      ; Option.map (warning (text "대기 목록: " "waiting inventory: ")) state.keeper_waiting_error
+      ; Option.map (warning (text "별도 실행: " "async observation: ")) state.tools_async_observation_error
+      ; Option.map (warning (text "승인 요청: " "approval reading: ")) state.keeper_tool_approvals_error
+      ; Option.map (warning (text "질문: " "questions: ")) state.asks_error
+      ]
+  in
+  let roster = match Keeper_control.roster_view state.keeper_roster with
+    | Keeper_control.Roster_partial { observed; total } ->
+        [warning "" (text
+           (Printf.sprintf "실행 관측 %d/%d · 나머지는 미확인" (List.length observed) total)
+           (Printf.sprintf "live reading %d/%d · the rest unknown" (List.length observed) total))]
+    | Keeper_control.Roster_invalid { errors; _ } ->
+        [warning "" (text
+           (Printf.sprintf "설정 읽기 오류 %d개 · 상세에서 확인" (List.length errors))
+           (Printf.sprintf "%d configuration read errors · inspect detail" (List.length errors)))]
+        @ (match selected_reading with
+          | Some { Keeper_control.liveness = Keeper_control.Invalid detail; _ } -> [warning "" detail]
+          | Some { Keeper_control.liveness = (Keeper_control.Unobserved | Keeper_control.Absent | Keeper_control.Present _); _ }
+          | None -> [])
+    | Keeper_control.Roster_unobserved ->
+        [Theme.recede () ^ text "  실행 상태 미조회 · 저장된 목록을 표시합니다"
+           "  live status not read · showing stored roster" ^ Ansi.reset]
+    | Keeper_control.Roster_complete _ -> []
+  in
+  let waiting = match state.keeper_waiting_failure with
+    | Some (Tui_decode.Keeper_waiting_invalid reason) -> [warning (text "대기 관측 미확인: " "waiting unknown: ") reason]
+    | Some (Tui_decode.Keeper_waiting_sources_unavailable _) ->
+        [warning "" (text "대기 원본을 읽지 못했습니다 · 대기 목록이 업무 차단을 뜻하지는 않습니다"
+                       "waiting sources unavailable · inventory is not a work blocker")]
+    | None when Keeper_waiting_read.awaiting_change state.keeper_waiting_read ->
+        [warning "" (text "대기 목록 갱신 중 · 마지막 관측을 표시합니다" "waiting refresh pending · showing last observation")]
+    | None -> []
+  in
+  [(if errors <> [] || roster <> [] || waiting <> [] then
+      Theme.warn () ^ text "일부 관측 미확인 · " "some observations unknown · " ^ Ansi.reset else "")
+   ^ heading ^ String.make gap ' ' ^ badge]
+  @ keeper_plain_fleet_lines state ~now ~inner
+  @ errors @ roster @ waiting
+  @ Option.to_list (Option.map (warning (text "보기 설정: " "view preferences: ")) state.keeper_list_preference_notice)
+  @ Option.to_list (local_source_pending_note state Local_keepers)
+  @ [keeper_view_tabs ~cols state.keeper_list_view]
+
+type keeper_plain_projection =
+  { kpp_headers : string list
+  ; kpp_list_width : int
+  ; kpp_detail_width : int option
+  ; kpp_detail_lines : string list
+  ; kpp_list_rows : int
+  ; kpp_entry_rows : int
+  ; kpp_window : keeper_display_entry list
+  ; kpp_scroll : int
+  ; kpp_overflow : bool
+  ; kpp_count : int
+  ; kpp_density : Keeper_list_model.density
+  ; kpp_selected_reading : Keeper_control.reading option
+  }
+
+let keeper_plain_entry_height density = function
+  | Keeper_group_heading _ -> 1
+  | Keeper_display_row _ -> match density with
+    | Keeper_list_model.One_line -> 1
+    | Keeper_list_model.Two_lines -> 2
+
+let keeper_plain_projection (state : state) ~terminal_rows ~cols ~now =
+  let inner = max 1 (framed_inner_width cols) in
+  let reading = keeper_list_reading state in
+  let stop = keeper_list_stop state in
+  let selected_row = match stop with
+    | Some (Keeper_list_model.Stop_row position) -> List.nth_opt reading.klr_rows position
+    | Some (Keeper_list_model.Stop_heading _) | None -> None
+  in
+  let selected_reading = Option.map (fun (row : Keeper_list_model.row) -> row.reading) selected_row in
+  let rows = surface_body_rows state ~terminal_rows in
+  let entries = keeper_display_entries ~folded:state.keeper_list_folded reading in
+  let desired_heights = List.map (keeper_plain_entry_height state.keeper_list_density) entries in
+  let side_by_side = cols >= Masc_tui_roster_pane.threshold_cols in
+  let list_width = if side_by_side then max 1 ((inner - 3) * 2 / 5) else inner in
+  let detail_width = if side_by_side then Some (max 1 (inner - list_width - 3)) else None in
+  let detail = keeper_plain_detail_lines state ~now
+      ~width:(Option.value detail_width ~default:inner) ~compact:(not side_by_side) selected_row in
+  let list_floor = 1 + List.fold_left max 1 desired_heights + (if List.length entries > 1 then 1 else 0) in
+  let headers = keeper_plain_headers state ~now ~cols ~inner ~selected_reading in
+  (* A long list of failed reads must not evict the selectable Keeper or the
+     action footer. Reserve the selected card and a useful list first, then
+     fold the header. A shorter terminal yields detail before the primary row.
+     The retained-reading qualifier stays at the start of the title. *)
+  let wanted_body = match detail_width with
+    | Some _ -> max list_floor (List.length detail)
+    | None -> list_floor + (if detail = [] then 0 else 1 + List.length detail)
+  in
+  let body_floor = min wanted_body (max 1 (rows - 1 - 2 - 1)) in
+  let header_budget = max 0 (rows - 1 - 2 - body_floor) in
+  let headers =
+    if List.length headers <= header_budget then headers
+    else match List.take header_budget headers with
+      | [] -> []
+      | kept ->
+          let last = List.length kept - 1 in
+          List.mapi (fun index row ->
+            if index <> last then row else row ^ Theme.recede ()
+              ^ ui_text state
+                  ~ko:(Printf.sprintf " · 보기 %d행 생략" (List.length headers - header_budget))
+                  ~en:(Printf.sprintf " · %d header rows omitted" (List.length headers - header_budget))
+              ^ Ansi.reset) kept
+  in
+  (* The initial blank and the divider/footer have the same ownership as the
+     axis renderer. Both keyboard paging and drawing use this allocation. *)
+  let body_rows = max 0 (rows - 1 - List.length headers - 2) in
+  let detail_budget = match detail_width with
+    | Some _ -> body_rows
+    | None ->
+        min (List.length detail) (max 0 (body_rows - list_floor - 1))
+  in
+  let detail_lines =
+    if List.length detail <= detail_budget then detail
+    else if detail_budget = 0 then []
+    else List.take (detail_budget - 1) detail
+      @ [Theme.recede () ^ ui_text state ~ko:"→:상세에서 이어 보기" ~en:"→:continue in detail" ^ Ansi.reset]
+  in
+  let list_rows = match detail_width with
+    | Some _ -> body_rows
+    | None -> body_rows - List.length detail_lines - (if detail_lines = [] then 0 else 1)
+  in
+  let content_rows = max 0 (list_rows - if list_rows > 1 then 1 else 0) in
+  let density = match state.keeper_list_density with
+    | Keeper_list_model.Two_lines when content_rows = 1 -> Keeper_list_model.One_line
+    | Keeper_list_model.Two_lines -> Keeper_list_model.Two_lines
+    | Keeper_list_model.One_line -> Keeper_list_model.One_line
+  in
+  let heights = List.map (keeper_plain_entry_height density) entries in
+  let primary_entry_height = List.fold_left max 1 heights in
+  let overflowing = content_rows > primary_entry_height
+    && List.fold_left ( + ) 0 heights > content_rows in
+  let entry_rows = max 0 (content_rows - if overflowing then 1 else 0) in
+  let cursor = Option.value ~default:0 (List.find_index (keeper_entry_selected stop) entries) in
+  let scroll, count = Masc_tui_scroll.window_of_heights ~heights ~cursor ~rows:entry_rows state.keeper_list_scroll in
+  { kpp_headers = headers; kpp_list_width = list_width; kpp_detail_width = detail_width
+  ; kpp_detail_lines = detail_lines; kpp_list_rows = list_rows; kpp_entry_rows = entry_rows
+  ; kpp_window = List.take count (List.drop scroll entries); kpp_scroll = scroll
+  ; kpp_overflow = overflowing; kpp_count = List.length reading.klr_rows
+  ; kpp_density = density
+  ; kpp_selected_reading = selected_reading }
+
+let keeper_plain_page_rows state ~terminal_rows ~cols =
+  match state.keeper_list_view, state.keeper_story with
+  | Keeper_list_model.Plain, None ->
+      let projection = keeper_plain_projection state ~terminal_rows ~cols ~now:(Unix.gettimeofday ()) in
+      Some (max 1 (List.length projection.kpp_window))
+  | (Keeper_list_model.Plain | Keeper_list_model.By_state | Keeper_list_model.By_cause
+    | Keeper_list_model.By_time | Keeper_list_model.By_memory | Keeper_list_model.By_age
+    | Keeper_list_model.By_runtime | Keeper_list_model.Day_wall), Some _
+  | (Keeper_list_model.By_state | Keeper_list_model.By_cause | Keeper_list_model.By_time
+    | Keeper_list_model.By_memory | Keeper_list_model.By_age | Keeper_list_model.By_runtime
+    | Keeper_list_model.Day_wall), None -> None
+
+let keeper_plain_list_lines (state : state) ~now:_ projection =
+  let width = projection.kpp_list_width in
+  let text ko en = ui_text state ~ko ~en in
+  let stop = keeper_list_stop state in
+  let entry_lines = function
+    | Keeper_group_heading (group, count) as entry ->
+        let heading = keeper_group_lead ~folded:(List.mem group state.keeper_list_folded)
+          ^ keeper_group_heading_text ~available_cells:(width - 2) (keeper_list_rows state) group count in
+        [if keeper_entry_selected stop entry then Ansi.reverse ^ fit_width heading width ^ Ansi.reset else heading]
+    | Keeper_display_row (_, row) as entry ->
+        let selected = keeper_entry_selected stop entry in
+        let name_width = max 1 (width - Render_schedule.keeper_marker_width - Render_schedule.keeper_status_width - 1) in
+        let yolo = List.mem row.Keeper_list_model.keeper.Tui_decode.k_name state.keeper_yolo_names in
+        let primary = keeper_row_marker ~selected
+          ^ keeper_row_name ~width:name_width ~yolo row ^ " "
+          ^ keeper_now_cell ~ko:(state.ui_language = Lang_ko) ~frame:state.activity_frame row in
+        let emit value =
+          let value = fit_width value width in
+          let value = if selected then Ansi.reverse ^ Masc_tui_theme.strip_sgr value ^ Ansi.reset else value in
+          pressable (Press_keeper_row row.keeper.Tui_decode.k_name) value
+        in
+        let primary = emit primary in
+        match projection.kpp_density with
+        | Keeper_list_model.One_line -> [primary]
+        | Keeper_list_model.Two_lines ->
+            let detail = match keeper_plain_help state row with
+              | Some request -> Theme.warn () ^ request ^ Ansi.reset
+              | None -> keeper_plain_work state row
+            in
+            [primary; emit ("   " ^ Message_layout.fit_width detail (max 0 (width - 3)))]
+  in
+  let content = List.concat_map entry_lines projection.kpp_window in
+  let content = if content <> [] || projection.kpp_entry_rows = 0 then content else
+    [Theme.recede () ^ (if projection.kpp_count > 0 then text "창이 좁아 행을 표시할 수 없습니다" "window too short for a row"
+       else match keeper_rows_page state ~error:(Terminal_text.optional_single_line state.keepers_error) with
+         | Page_empty -> text "조회된 Keeper 목록이 비어 있습니다" "the Keeper roster reading is empty"
+         | Page_unread -> text "Keeper 목록 미조회" "Keeper roster not read"
+         | Page_failed -> text "Keeper 목록 읽기 실패" "Keeper roster read failed") ^ Ansi.reset]
+  in
+  if projection.kpp_list_rows = 0 then [] else
+    (if projection.kpp_list_rows > 1 then
+      [Theme.recede () ^ fit_width (text "Keeper 목록 · 현재 상태 / 일과 대기" "KEEPERS · current status / work and wait") width ^ Ansi.reset]
+     else [])
+    @ content
+    @ List.init (max 0 (projection.kpp_entry_rows - List.length content)) (fun _ -> "")
+    @ if projection.kpp_overflow then
+        [Theme.recede () ^ Printf.sprintf "  %d–%d / %d · j/k · PgUp/PgDn"
+           (if projection.kpp_window = [] then 0 else projection.kpp_scroll + 1)
+           (projection.kpp_scroll + List.length projection.kpp_window) projection.kpp_count ^ Ansi.reset]
+      else []
+
+let render_keeper_plain (state : state) =
+  let terminal_rows, cols = get_terminal_size () in
+  let now = Unix.gettimeofday () in
+  let projection = keeper_plain_projection state ~terminal_rows ~cols ~now in
+  let buf = Buffer.create 4096 in
+  Buffer.add_char buf '\n';
+  List.iter (box_line buf cols) projection.kpp_headers;
+  let roster = keeper_plain_list_lines state ~now projection in
+  (match projection.kpp_detail_width with
+   | None ->
+       List.iter (box_line buf cols) roster;
+       if projection.kpp_detail_lines <> [] then box_divider buf cols;
+       List.iter (box_line buf cols) projection.kpp_detail_lines
+   | Some detail_width ->
+       List.iteri
+         (fun position left ->
+           let right = Option.value (List.nth_opt projection.kpp_detail_lines position) ~default:"" in
+           box_line buf cols (fit_width left projection.kpp_list_width ^ Theme.recede () ^ " │ " ^ Ansi.reset
+                              ^ fit_width right detail_width))
+         roster);
+  box_divider buf cols;
+  Buffer.add_string buf
+    (footer_line state ~status:(keeper_action_status state) ~max_cells:cols
+       ~hints:(keeper_control_hints ~offers_back:false state projection.kpp_selected_reading));
+  finish_surface state ~clamped:(Keeper_list_scroll projection.kpp_scroll)
+    ~surface_key:"keeper-list" ~rows:terminal_rows ~cols buf
+
+let render_keeper_axes (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
@@ -2271,6 +2748,16 @@ let render_keeper_list (state : state) =
   finish_surface state ~clamped:(Keeper_list_scroll scroll_offset)
     ~surface_key:"keeper-list" ~rows:terminal_rows ~cols buf
 
+let render_keeper_list (state : state) =
+  match state.keeper_list_view, state.keeper_story with
+  | Keeper_list_model.Plain, None -> render_keeper_plain state
+  | (Keeper_list_model.Plain | Keeper_list_model.By_state | Keeper_list_model.By_cause
+    | Keeper_list_model.By_time | Keeper_list_model.By_memory | Keeper_list_model.By_age
+    | Keeper_list_model.By_runtime | Keeper_list_model.Day_wall), Some _
+  | (Keeper_list_model.By_state | Keeper_list_model.By_cause | Keeper_list_model.By_time
+    | Keeper_list_model.By_memory | Keeper_list_model.By_age | Keeper_list_model.By_runtime
+    | Keeper_list_model.Day_wall), None -> render_keeper_axes state
+
 (** Render keeper detail view with live context and scrolling *)
 (* The detail box alone -- borders, title, scrolled content -- written into
    [buf] at [cols] wide, footer excluded so a caller can lay it beside the
@@ -2338,16 +2825,6 @@ let secret_lines (state : state) (k : keeper) =
    [Masc_tui_identity_model.identity_connectable], which is also what the key handler
    indexes, so the number on screen and the provider a keypress starts are
    the same list. *)
-let proactive_outcome_word = function
-  | Masc.Keeper_meta_contract.Proactive_never_started -> "never started"
-  | Masc.Keeper_meta_contract.Proactive_unknown -> "unknown"
-  | Masc.Keeper_meta_contract.Proactive_silent -> "silent"
-  | Masc.Keeper_meta_contract.Proactive_text_response -> "replied with text"
-  | Masc.Keeper_meta_contract.Proactive_tool_use -> "used tools"
-  | Masc.Keeper_meta_contract.Proactive_mixed_response -> "text and tools"
-  | Masc.Keeper_meta_contract.Proactive_error -> "error"
-  | Masc.Keeper_meta_contract.Proactive_rested -> "rested on a provider quota"
-
 (* The Terminal tab: a Keeper's Execute output as a terminal draws it, oldest
    row first. [terminal_rows] scroll; [terminal_status] is the row under them
    that stays put. [width] is the cells a row may use. *)

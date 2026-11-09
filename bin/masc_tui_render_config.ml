@@ -1642,7 +1642,7 @@ let runtime_config_status_rows state ~cols =
   @ runtime_config_status_lines state ~cols
 
 let runtime_config_status_scroll_limit state ~terminal_rows ~cols =
-  let room = max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5) in
+  let room = max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - surface_chrome_rows) in
   max 0 (List.length (runtime_config_status_rows state ~cols) - room)
 
 let render_runtime_config_status state =

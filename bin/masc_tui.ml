@@ -96,6 +96,10 @@ let scrolled_surface state surface =
       let terminal_rows, cols = get_terminal_size () in
       let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
       Masc_tui_types.runtime_scrolled ~rows ~cols state
+  | Lanes when state.lanes_mode = Lanes_overview ->
+      let terminal_rows, cols = get_terminal_size () in
+      let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+      Some (Masc_tui_types.lanes_overview_projection state ~rows ~cols).lop_scroll
   (* The models pane's document depends on the pane width: narrow panes draw
      one wrapped item per binding, taller than the table it replaces. *)
   | Config when state.config_pane = Config_models ->
@@ -103,12 +107,8 @@ let scrolled_surface state surface =
   | Overview | Acting | Metrics | Lanes | Clients | Board | Approvals | Planning | Schedules
   | Verification | Harness | Fusion | Repositories | Code | Changes | Connectors | Resources
   | System_logs | Keepers _ | (Memory|Config) ->
-      (* The Lanes overview's chrome counts the rows a multi-line refusal
-         wraps to, so it is read at the terminal width like the Memory
-         overview's and Runtime's. The Config runtime pane's chrome reads the
-         width too. The arm is not split per surface because
-         [Masc_tui_types.scrolled_surface] takes [~cols] for every surface,
-         and only those two arms use it. *)
+      (* The Config runtime pane's chrome reads the terminal width too. The
+         dimension-dependent Lanes overview is handled above. *)
       let _terminal_rows, cols = get_terminal_size () in
       Masc_tui_types.scrolled_surface state ~cols surface
 ;;
@@ -39600,11 +39600,25 @@ Use relative paths for resources already held in the package. -->
              if state.view = Planning && state.planning_mode = Planning_list
                 && not (Masc_tui_overview_tasks.is_focused state.task_focus)
              then state.planning_list_page_rows
+             else if state.view = Planning && state.planning_mode = Planning_list
+                     && Masc_tui_overview_tasks.is_focused state.task_focus then
+               let terminal_rows, cols = get_terminal_size () in
+               Masc_tui_render_work.work_tasks_page_rows state ~terminal_rows ~cols
+             else if state.view = Keepers Keeper_list then
+               let terminal_rows, cols = get_terminal_size () in
+               Option.value
+                 (Masc_tui_render_keepers.keeper_plain_page_rows state ~terminal_rows ~cols)
+                 ~default:(surface_page_rows state)
              else if state.view = Repositories then
                let _, cols = get_terminal_size () in
                Masc_tui_render.repository_studio_content_height state ~cols
                  ~budget:(max 1 (surface_rows state - Masc_tui_frame.chrome_rows))
                  ~cursor:state.repositories_cursor
+             else if state.view = Lanes && state.lanes_mode = Lanes_overview then
+               let terminal_rows, cols = get_terminal_size () in
+               let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+               let projection = Masc_tui_types.lanes_overview_projection state ~rows ~cols in
+               Masc_tui_scroll.page_step ~height:projection.lop_list_height
              else surface_page_rows state
            in
            let direction = if key = Some "pagedown" then 1 else -1 in

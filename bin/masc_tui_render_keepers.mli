@@ -3,9 +3,21 @@
 val render_keeper_list :
   Masc_tui_types.state ->
   Masc_tui_frame_presenter.frame * Masc_tui_types.clamped_scroll option
-(** Render the list-mode state. Selection and fleet width/health summaries read
+(** Render the list-mode state. Plain presents an operator roster beside the
+    selected Keeper's current work, human waits, last observed result and
+    existing detail paths; narrow terminals stack those panes. The other
+    views and the explicitly opened Story keep their axis/window renderer.
+    Selection and fleet width/health summaries read
     the same synchronous ordered row model as the visible list. That model is
     not retained across draws or used by input handlers. *)
+
+val keeper_plain_page_rows :
+  Masc_tui_types.state -> terminal_rows:int -> cols:int -> int option
+(** The number of canonical list stops in Plain's actual visible window,
+    measured by the same header, selected-card and variable row-height
+    projection as the renderer. At least one for keyboard progress in a
+    window too short for a row. [None] for other views or an open Story,
+    whose existing page handling remains in charge. *)
 
 val render_keeper_detail :
   Masc_tui_types.state ->

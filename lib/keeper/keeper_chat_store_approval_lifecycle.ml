@@ -85,11 +85,13 @@ let approval_lifecycle_is_continuation = function
 let append_approval_lifecycle_at_slot_once
       ~base_dir
       ~keeper_name
-      ~lifecycle
+      ~(lifecycle : approval_lifecycle)
       ~transcript_slot
   =
   let open Keeper_chat_delivery_identity in
-  let approval_id = lifecycle.approval_id in
+  match Request_id.of_string lifecycle.approval_id with
+  | Error detail -> Error detail
+  | Ok approval_id ->
     (try
        ensure_dir_once ~base_dir;
        let redaction = redaction_for ~base_dir ~keeper_name in

@@ -2430,6 +2430,7 @@
   masc.keeper_chat_delivery_identity
   masc.keeper_runtime
   masc.runtime
+  yojson
   unix))
 
 (test

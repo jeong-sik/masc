@@ -1,0 +1,45 @@
+ 대시보드  작업  ▸키퍼  사용량  보드  워크스페이스  시스템
+                                                                                                                                                │[Recent] Changes · 8 keepers · feed closed: MCP initial
+  MASC 메모리 · 키퍼 8명 · 기억 필요 0 · 11/09 08:49 관측  HTTP [partial] · operator quiz read failed +3                                        │                   state     tool        calls  new tok
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │! alpha-failing    no events
+   전체 기억 1661개 · 일반 1657 + 원본 4 · 저장 ≈115.1k tok · 키퍼 8명 · 저장 추정량, 턴 입력 아님                                              │! beta-unrecorded  no events
+   일반: 관측 1497 / 파생 160 · 근거 무효화 5건                                                                                                 │● delta-mixed      no events
+   일반: 처음 본 뒤 █▄▃▂ · 7일 이상 840개 · 1일~7일 413개 · 1시간~1일 257개 · 1시간 미만 147개 · 미측정 키퍼 1명                                │● epsilon-busy     no events
+   원본: 무효화 1건                                                                                                                             │● eta-quiet        no events
+   Librarian: 미읽은 턴 19개 · 연속성 지연 원자 0개 (미측정 키퍼 0명) · 서버 시작 후 실패 0건                                                   │! gamma-skewed     no events
+   월드: 공유 주장 42건 · 충돌 3건 · 브리핑 current                                                                                             │· theta-idle       no events
+   정렬 [s]: 기억 많은 순  ·  [u]: 토큰  [/]: 필터                                                                                              │● zeta-unseeded    no events
+ ────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────── │───────────────────────────────────────────────────────
+   상 키퍼                                   갱신  기억      저장 원본                         Δ                                                │alpha-failing · no events on this feed yet
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   +  epsilon-busy               2026-11-09 08:45  1204    ≈77.3k —                      +31 -12
+   +  delta-mixed                2026-11-09 08:40   340    ≈26.0k r7 i1 ≈604              +14 -6
+   +  theta-idle                 2026-11-09 08:24    61     ≈6.2k —                        +4 -2
+   +  zeta-unseeded              2026-11-09 08:14    27     ≈2.7k —                          +27
+   +  alpha-failing              2026-11-09 08:36    12     ≈1.2k —                        +2 -1
+   +  eta-quiet                  2026-11-01 06:23     8      ≈678 —
+   +  beta-unrecorded            2026-11-09 08:49     5      ≈453 —                           +1
+   -  gamma-skewed                              —     —         — —
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   epsilon-busy · memory ok · Memory saved 2026-11-09 08:39
+   Stored ≈77.3k tok · estimated knowledge size
+   입력 토큰: Memory input: HTTP 404: fake server: no such route
+   Librarian · unread 2
+
+  j/k:move  PgUp/PgDn:page  Home/End:top/bottom  Enter:facts  v:health details  a / A:all fleet  s:sort  u:units  Esc:clear / back  q:quit  …?
+ › to alpha-failing   (i to write)

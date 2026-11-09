@@ -5,15 +5,18 @@ module Story = Masc_tui_keeper_story
 module Memory_reading = Masc_tui_keeper_memory_reading
 
 (* The window is a rule, a title and up to six lines. The list keeps four rows
-   when the screen can spare them, and the window keeps four when it can: on a
-   short screen both give way together instead of one taking the other's. *)
+   whenever the window can keep its own four beside them, which takes eight
+   rows. On a shorter screen the window takes every row and covers the list --
+   the overlay RFC-0515 section 2.5 gives a screen too short for both -- rather
+   than leave a list of one to three rows. *)
 let target_rows = 8
 let least_rows = 4
 let list_floor = 4
 
 let rows ~budget =
   if budget <= 0 then 0
-  else min budget (min target_rows (max least_rows (budget - list_floor)))
+  else if budget < list_floor + least_rows then budget
+  else min target_rows (budget - list_floor)
 ;;
 
 let dim text = Ansi.dim ^ text ^ Ansi.reset
@@ -216,7 +219,7 @@ let memory_lines (state : Masc_tui_types.state) ~now ~keeper_name =
            ^ Ansi.reset
            ^ dim (Printf.sprintf " · %s · +%d -%d" updated added removed))
       ; labelled "facts"
-          (dim (String.concat " · " (Masc_tui_keeper_age_ladder.keeper_clauses ~ko:false age_bins)))
+          (dim (String.concat " · " (Masc_tui_keeper_age_ladder.keeper_clauses ~ko:(state.ui_language = Masc_tui_types.Lang_ko) age_bins)))
       ; labelled "librarian" (lag_text lag ^ dim (" · " ^ digest))
       ; labelled "gap"
           (match gap with

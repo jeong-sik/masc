@@ -21,12 +21,14 @@ type action =
   | Close  (** Close the window. *)
   | Open_detail  (** Close the window and open the Keeper's detail. *)
 
-val action_of_key : on_heading:bool -> page option -> string -> action option
+val action_of_key : on_keeper:bool -> page option -> string -> action option
 (** What [key] does to the window, [None] when it is closed. [key] is a name
     from the input decoder. [None] means the window does not take the key and
     the list handles it as it does with the window closed. A closed window
-    takes Enter alone, and an open one takes the keys of its pages.
+    takes Enter alone, and an open one takes the keys of its pages, [s] and [m]
+    in either case.
 
-    [on_heading] is true while the list cursor stands on a group heading. A
-    heading names no Keeper, so a closed window opens nothing there and an open
-    one leaves Enter and Right to the list, where Right folds the group. *)
+    [on_keeper] is true while a Keeper is under the list cursor. Without one --
+    the cursor stands on a group heading, or the list has no Keeper -- a closed
+    window opens nothing and an open one leaves Enter and Right to the list,
+    where on a heading Left folds the group and Right unfolds it. *)

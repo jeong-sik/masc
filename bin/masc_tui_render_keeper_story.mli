@@ -8,9 +8,9 @@
 
 val rows : budget:int -> int
 (** How many of the [budget] rows below the list's header the open window takes:
-    the rule, the title and the page. The list keeps at least four rows when it
-    can, and the window keeps at least four when [budget] allows. [0] when
-    [budget] is not positive. *)
+    the rule, the title and the page. The list keeps four rows and the window
+    keeps four, which takes eight; on a shorter screen the window takes every
+    row and covers the list. [0] when [budget] is not positive. *)
 
 val draw :
   Buffer.t ->

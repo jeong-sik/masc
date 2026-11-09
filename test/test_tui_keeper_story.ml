@@ -8,8 +8,8 @@ let action =
   in
   Alcotest.testable pp ( = )
 
-let on_row = Story.action_of_key ~on_heading:false
-let on_heading = Story.action_of_key ~on_heading:true
+let on_row = Story.action_of_key ~on_keeper:true
+let no_keeper = Story.action_of_key ~on_keeper:false
 
 (* The same key on every page of an open window. *)
 let check_every_page ?(of_key = on_row) ~key ~expected () =
@@ -41,9 +41,15 @@ let test_tab_makes_one_lap () =
     (List.length Story.pages)
     (List.length (List.sort_uniq compare visited))
 
+(* The list reads [S] and [M] as [s] and [m], so the window does too: a capital
+   [S] must not arm a shutdown whose confirming [s] the window would take. *)
 let test_s_and_m_name_their_pages () =
-  check_every_page ~key:"s" ~expected:(Some (Story.Show Story.Schedule)) ();
-  check_every_page ~key:"m" ~expected:(Some (Story.Show Story.Memory)) ()
+  List.iter
+    (fun key -> check_every_page ~key ~expected:(Some (Story.Show Story.Schedule)) ())
+    [ "s"; "S" ];
+  List.iter
+    (fun key -> check_every_page ~key ~expected:(Some (Story.Show Story.Memory)) ())
+    [ "m"; "M" ]
 
 let test_enter_closes_the_story_page_and_returns_to_it_elsewhere () =
   Alcotest.check (Alcotest.option action) "story closes" (Some Story.Close)
@@ -87,34 +93,34 @@ let test_closed_window_takes_only_enter () =
          (Printf.sprintf "%S is left to the list" key)
          None
          (on_row None key))
-    [ "\t"; "tab"; "s"; "m"; "esc"; "right"; "j"; "k"; "v"; "V" ]
+    [ "\t"; "tab"; "s"; "S"; "m"; "M"; "esc"; "right"; "j"; "k"; "v"; "V" ]
 
-(* A heading names no Keeper. A closed window opens nothing there, and an open
-   one leaves Enter to the list and Right to the fold; the keys that only change
-   the window still work. *)
-let test_a_heading_names_no_keeper () =
+(* A group heading and an empty list name no Keeper. A closed window opens
+   nothing there, and an open one leaves Enter to the list and Right to the
+   fold; the keys that only change the window still work. *)
+let test_no_keeper_under_the_cursor () =
   List.iter
     (fun key ->
        Alcotest.check (Alcotest.option action)
-         (Printf.sprintf "%S opens nothing on a heading" key)
+         (Printf.sprintf "%S opens nothing without a Keeper" key)
          None
-         (on_heading None key))
+         (no_keeper None key))
     [ "\r"; "\n"; "enter" ];
   List.iter
-    (fun key -> check_every_page ~of_key:on_heading ~key ~expected:None ())
+    (fun key -> check_every_page ~of_key:no_keeper ~key ~expected:None ())
     [ "\r"; "\n"; "enter"; "right"; "left" ];
-  check_every_page ~of_key:on_heading ~key:"esc" ~expected:(Some Story.Close) ();
-  check_every_page ~of_key:on_heading ~key:"s" ~expected:(Some (Story.Show Story.Schedule)) ();
-  check_every_page ~of_key:on_heading ~key:"m" ~expected:(Some (Story.Show Story.Memory)) ();
-  Alcotest.check (Alcotest.option action) "Tab on a heading"
+  check_every_page ~of_key:no_keeper ~key:"esc" ~expected:(Some Story.Close) ();
+  check_every_page ~of_key:no_keeper ~key:"s" ~expected:(Some (Story.Show Story.Schedule)) ();
+  check_every_page ~of_key:no_keeper ~key:"m" ~expected:(Some (Story.Show Story.Memory)) ();
+  Alcotest.check (Alcotest.option action) "Tab without a Keeper"
     (Some (Story.Show Story.Schedule))
-    (on_heading (Some Story.Story) "\t")
+    (no_keeper (Some Story.Story) "\t")
 
 let () =
   Alcotest.run "tui_keeper_story"
     [ ( "story window keys"
       , [ Alcotest.test_case "Tab makes one lap of the pages" `Quick test_tab_makes_one_lap
-        ; Alcotest.test_case "s and m name their pages" `Quick test_s_and_m_name_their_pages
+        ; Alcotest.test_case "s and m name their pages, capitals too" `Quick test_s_and_m_name_their_pages
         ; Alcotest.test_case "Enter closes the story page and returns to it" `Quick
             test_enter_closes_the_story_page_and_returns_to_it_elsewhere
         ; Alcotest.test_case "Esc closes and Right opens the detail" `Quick
@@ -123,7 +129,7 @@ let () =
             test_list_keys_pass_through
         ; Alcotest.test_case "a closed window takes only Enter" `Quick
             test_closed_window_takes_only_enter
-        ; Alcotest.test_case "a heading names no Keeper" `Quick
-            test_a_heading_names_no_keeper
+        ; Alcotest.test_case "no Keeper under the cursor" `Quick
+            test_no_keeper_under_the_cursor
         ] )
     ]

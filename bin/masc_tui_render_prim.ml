@@ -3126,20 +3126,20 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
         "Esc",
         "Esc:" ^ Ansi.dim ^ (match story with None -> "dashboard" | Some _ -> "close") ^ Ansi.reset
       in
-      (* A heading opens no Keeper; its arrows fold the group under it. *)
+      (* A heading opens no Keeper; its arrows fold the group under it. On a
+         Keeper, Enter and Right are one item so that the pinned Enter keeps
+         Right on the row too: they were one item while both opened the
+         detail, and Right alone would be the first key a narrow row loses
+         after [r]. The labels follow the keys in order. *)
       if keeper_list_on_heading state then [ "Left / Right", accent "Left / Right" ^ ":fold"; esc ]
       else
-        match story with
-        | None -> [ "Right", accent "Right" ^ ":detail"; "Enter", accent "Enter" ^ ":story"; esc ]
-        | Some page ->
-            [ "Right", accent "Right" ^ ":detail"
-            ; ( "Enter"
-              , accent "Enter"
-                ^ (match page with
-                   | Masc_tui_keeper_story.Story -> ":close"
-                   | Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory -> ":story") )
-            ; esc
-            ]
+        let enter =
+          match story with
+          | None -> "story"
+          | Some Masc_tui_keeper_story.Story -> "close"
+          | Some (Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory) -> "story"
+        in
+        [ "Enter / Right", accent "Enter / Right" ^ ":" ^ enter ^ " / detail"; esc ]
   in
   let story_hints =
     match story with

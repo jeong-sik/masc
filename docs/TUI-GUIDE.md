@@ -920,15 +920,20 @@ in what is left, and it follows the cursor as `j`/`k` move. It has three pages
 named on its title row: `story`, `s schedules` and `m memory`.
 
 - `story` tells the Keeper as `◂ past`, `● now` and `▹ next`. Past holds the
-  failing-for and turn-pulse cells, the last Librarian success, the failure
-  sentence and the attempt chain. Now holds the activity word, the `DETAIL`
-  text, `Mode S`, `AGE` and the lifecycle. Next holds the schedule cell, the
-  next dispatch path and the memory lag. They are the cells and sentences the
-  list rows draw.
-- `s schedules` lists the fleet agenda's schedules aimed at this Keeper, led by
-  the same `◷` cell the list draws. When the agenda was cut, the page says
-  more schedules may exist. The full table, with the Keeper's own page from the
-  server, is the Automation tab (`J`).
+  failing-for and turn-pulse cells, the last Librarian success, the Keeper's
+  last wake, the failure sentence and the attempt chain. Now holds the activity
+  word, the `DETAIL` text, `Mode S`, `AGE` and the lifecycle. Next holds the
+  schedule cell, the next dispatch path and the memory lag. Except the last
+  wake, they are the cells and sentences the list rows draw. The last wake is
+  the newest wake any schedule on the Keeper's first schedule page recorded,
+  with its age, the schedule and its outcome.
+- `s schedules` is the first page of the Keeper's own schedules, the page the
+  Automation tab (`J`) draws first, led by the same `◷` cell the list draws and
+  the counts of what the store holds. The window reads that page from the
+  server while it is open, one Keeper at a time as the cursor moves, so the
+  fleet agenda's cap does not hide a Keeper whose schedules are closed. A page
+  that is cut, a reading that is read again and a read that failed say so. The
+  Automation tab has the full table and the other pages.
 - `m memory` shows the Keeper's memory-health row: state, update age, the fact
   age ladder, the Librarian's lag and last digest, the gap and the stale
   events.

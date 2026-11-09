@@ -136,6 +136,7 @@
   keeper_sandbox_microvm_work_root
   keeper_sandbox_microvm_inspect
   keeper_sandbox_microvm_inventory
+  keeper_sandbox_microvm_listing
   keeper_chat_store_paths
   keeper_chat_store_redaction
   keeper_chat_store_row_codec

@@ -618,9 +618,16 @@ let test_gap_and_new_tail_are_rejudged_together ()=with_fixture (fun ~sw:_ fixtu
   drive_until fixture settled |> assert_settled;
   check (list int) "original partial commit leaves a sparse gap" [1]
     (io (fun () -> List.map (fun (row:Queue.candidate) -> row.sequence) (pending_rows fixture.keepers_dir)));
-  let original_count=List.length (observed_originals fixture) in
-  ignore (run_worker fixture);
-  check int "Finished subset is not whole-batch completion" original_count (List.length (observed_originals fixture));
+  let originals=observed_originals fixture in
+  (* The partial commit added B to actual Memory. That changed context can
+     legitimately retain a new original for gap A before another queue tail.
+     Wait for that real Deferred answer before changing the fixture response. *)
+  drive_original_terminal fixture;
+  List.iter (fun (original,_) ->
+    let retained=io (fun () -> Owner.load ~store:fixture.store ~scope:original.Owner.scope
+      ~request_id:original.request_id |> owned) in
+    check bool "Finished subset preserves each original input" true
+      (match retained with Some current -> current.request_digest=original.request_digest | None -> false)) originals;
   let owner=io (fun () -> original_owner fixture.base_path fixture.keepers_dir) in
   check int "a deferred original gap prevents closure publication" 0
     (io (fun () -> Owner.discover ~store:fixture.store ~scope:(Closure.scope owner) |> owned |> List.length));

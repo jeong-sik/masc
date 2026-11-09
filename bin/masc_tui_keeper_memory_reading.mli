@@ -82,12 +82,5 @@ val fact_ages_cell : t -> Masc_tui_keeper_axis_cell.t
     age strip). A value the row came without draws
     {!Masc_tui_keeper_age_ladder.unmeasured_mark}. A Keeper without a memory
     snapshot, or without a row, draws the no-value mark; {!Unknown} draws
-    [mem ?] and {!Refused} draws [mem !]. None draws a value in their place. *)
-
-val lag_digest_gap_cells :
-  now:float -> peak_lag:int -> t -> Masc_tui_keeper_axis_cell.t list
-val lag_stale_facts_cells : peak_lag:int -> t -> Masc_tui_keeper_axis_cell.t list
-(** The ▹ cells of the memory view and of the age view. Both open with the
-    unread turns as a bar against [peak_lag], or with [lag ?] and no bar when
-    the lag was not measured. A reading without a row draws none: its ● cell
-    already marks it. *)
+    [mem ?] and {!Refused} draws [mem !]. None draws a value in their place.
+    The views draw their own value for a measured one and for a missing row. *)

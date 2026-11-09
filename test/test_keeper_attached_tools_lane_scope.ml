@@ -630,7 +630,7 @@ pointer = "/profile"
        | Error error ->
            failf "real load handler failed: %s" error.Agent_core.Types.message);
       let loaded = find name in
-      let before = Board_dispatch.list_posts () in
+      let before = Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator () in
       let result = execute "run-composition" loaded (`Assoc ["query", `String "board"]) in
       let actions = result |> member "actions" |> to_list in
       check (list string) "real executor settles producer then consumer" ["probe"; "lane"; "search"]
@@ -674,7 +674,7 @@ pointer = "/profile"
       check (list string) "failed real producer prevents both dependent dispatches" ["probe"]
         (List.map (fun row -> member "node_id" row |> to_string) failed);
       check int "read composition leaves Board post count unchanged"
-        (List.length before) (List.length (Board_dispatch.list_posts ())))
+        (List.length before) (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ())))
 ;;
 
 (* [Keeper_run_tools_setup] compares the bundle against what the descriptor

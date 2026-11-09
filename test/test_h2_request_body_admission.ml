@@ -870,7 +870,7 @@ let test_board_reads_require_a_token_under_strict_auth () =
   @@ fun () ->
   let slug = "h2-strict-read" in
   (match
-     Masc.Board_dispatch.create_sub_board ~slug ~name:"Strict" ~description:""
+     Masc.Board_dispatch.create_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~slug ~name:"Strict" ~description:""
        ~owner:"h2-board-reader" ~members:[] ()
    with
    | Ok _ -> ()

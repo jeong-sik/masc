@@ -58,12 +58,12 @@ description = "select_option, instead of value: distinct values; [] clears. The 
 [[params]]
 name = "x"
 type = "integer"
-description = "scroll/scroll_at horizontal CSS-pixel delta."
+description = "scroll/scroll_at horizontal CSS-pixel delta; left out means 0. Give x, y or both."
 
 [[params]]
 name = "y"
 type = "integer"
-description = "scroll/scroll_at vertical CSS-pixel delta."
+description = "scroll/scroll_at vertical CSS-pixel delta; left out means 0."
 
 [[params]]
 name = "button"

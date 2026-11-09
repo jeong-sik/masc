@@ -1,0 +1,78 @@
+{
+  "archives": [
+    {
+      "path": "docs/evidence/tui-scroll-input-20261109/observations-original.zip",
+      "present": true,
+      "sha256": "596e88c77ad986d6cc12b8e2f3a6c2b1311ea0c52452c51abf7239877b2ded3f",
+      "archive_bytes": 5999062,
+      "members": 316,
+      "manifest_members": 316,
+      "result_count": 104,
+      "extension_counts": {
+        "json": 105,
+        "ansi": 104,
+        "txt": 104,
+        "py": 3
+      },
+      "captures_bytes": 73441240,
+      "result_binary_hash_counts": {
+        "9941db5ae67c7da195ae220a8f75ec4988c0a8b09ebb28ca8e7c4990e952f6df": 54,
+        "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b": 50
+      },
+      "synthetic_history": [
+        {
+          "member": "frozen-fixture/history.json",
+          "sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b",
+          "known_synthetic": true
+        }
+      ],
+      "private_runtime_or_binary_member_candidates": [],
+      "errors": []
+    },
+    {
+      "path": "docs/evidence/tui-scroll-input-20261109/followup/observations-ff1-active.zip",
+      "present": true,
+      "sha256": "52391de3fb50b40217ccf28d1f9ea542aca06ae8a5c3b5b221056f4b5868379c",
+      "archive_bytes": 4276453,
+      "members": 162,
+      "manifest_members": 162,
+      "result_count": 54,
+      "extension_counts": {
+        "json": 54,
+        "ansi": 54,
+        "txt": 54
+      },
+      "captures_bytes": 61630573,
+      "result_binary_hash_counts": {
+        "1181f65f190aa4894aa6d1067448159cdd3acd4b06bf6eaf4af1223a078e4bd6": 29,
+        "ebcbe53ff38f8a60ce456bd20d8f05a9542f8deb7fa450400475505078fdb93b": 25
+      },
+      "synthetic_history": [],
+      "private_runtime_or_binary_member_candidates": [],
+      "errors": []
+    }
+  ],
+  "manifests": [
+    {
+      "file": "docs/evidence/tui-scroll-input-20261109/current-locations.json",
+      "present": true,
+      "files": 63,
+      "historical_records": 0,
+      "recorded_manifest_digest_matches": true,
+      "errors": []
+    },
+    {
+      "file": "docs/evidence/tui-scroll-input-20261109/followup/current-locations.json",
+      "present": true,
+      "files": 36,
+      "historical_records": 0,
+      "recorded_manifest_digest_matches": true,
+      "errors": []
+    }
+  ],
+  "credential_candidate_matches": [],
+  "json_credential_value_candidates": [],
+  "data_origins": {},
+  "errors": [],
+  "followup_present": true
+}

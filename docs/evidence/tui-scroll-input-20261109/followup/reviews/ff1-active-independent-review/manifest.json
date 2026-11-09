@@ -1,0 +1,19 @@
+{
+  "files": [
+    {
+      "path": "README.md",
+      "bytes": 7160,
+      "sha256": "5b29b43efc07b211611d468adba5cf88f13f595a0878b8f486f7241cdb4bb719"
+    },
+    {
+      "path": "analyze.py",
+      "bytes": 19306,
+      "sha256": "363e4c6099235d42ce61a54ebebac38f9a7effc6e778b1fefaca487f1646639e"
+    },
+    {
+      "path": "observations.json",
+      "bytes": 178057,
+      "sha256": "bfba12a8e80280fff44f48d1919df5cafc6d698930573242db603d94f65c2bd0"
+    }
+  ]
+}

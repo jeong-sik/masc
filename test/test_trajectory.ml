@@ -510,44 +510,6 @@ let test_execution_id_roundtrip () =
         decoded.Trajectory.execution_id
   | None -> Alcotest.fail "entry without execution_id did not decode"
 
-let has_assoc_key key = function
-  | `Assoc fields -> List.mem_assoc key fields
-  | _ -> false
-
-let test_runtime_contract_projection_redacts_backend_details () =
-  let keeper_visible =
-    Keeper_runtime_contract.runtime_contract_json_from_fields
-      ~keeper_name:"alpha"
-      ~trace_id:"trace-alpha"
-      ~sandbox_profile:"docker"
-      ~sandbox_root:"/workspace"
-      ~network_mode:"none"
-      ()
-  in
-  let observability =
-    Keeper_runtime_contract.runtime_observability_contract_json_from_fields
-      ~keeper_name:"alpha"
-      ~trace_id:"trace-alpha"
-      ~sandbox_profile:"docker"
-      ~sandbox_root:"/workspace"
-      ~network_mode:"none"
-      ()
-  in
-  let open Yojson.Safe.Util in
-  Alcotest.(check bool) "keeper contract redacts sandbox_profile" false
-    (has_assoc_key "sandbox_profile" keeper_visible);
-  Alcotest.(check bool) "keeper contract redacts network_mode" false
-    (has_assoc_key "network_mode" keeper_visible);
-  Alcotest.(check string) "keeper contract keeps sandbox root" "/workspace"
-    (keeper_visible |> member "sandbox_root" |> to_string);
-  Alcotest.(check bool) "keeper contract says Read has no implicit cwd" false
-    (keeper_visible |> member "path_resolution" |> member "read_implicit_cwd"
-     |> to_bool);
-  Alcotest.(check string) "observability keeps sandbox_profile" "docker"
-    (observability |> member "sandbox_profile" |> to_string);
-  Alcotest.(check string) "observability keeps network_mode" "none"
-    (observability |> member "network_mode" |> to_string)
-
 (* ================================================================ *)
 (* Test: read_entries_since (file-based)                             *)
 (* ================================================================ *)
@@ -1045,8 +1007,6 @@ let () =
         test_entry_to_json_includes_contract_and_radius;
       Alcotest.test_case "execution_id JSONL round-trip + legacy None" `Quick
         test_execution_id_roundtrip;
-      Alcotest.test_case "runtime contract redacts backend details" `Quick
-        test_runtime_contract_projection_redacts_backend_details;
     ]);
     ("next_round", [
       Alcotest.test_case "empty or missing file -> 1" `Quick

@@ -433,7 +433,7 @@ let collect_own_recent_board_posts ~(meta : keeper_meta) : Board.post list =
   else (
     let self_ids = self_ids meta in
     try
-      Board_dispatch.list_recent_posts_matching_author
+      Board_dispatch.list_recent_posts_matching_author_unchecked
         ~author_matches:(fun author ->
           is_self_author ~self_ids (Board.Agent_id.to_string author))
         ~limit:max_posts
@@ -610,12 +610,13 @@ let pending_board_event_kind_of_observation
 ;;
 
 let pending_board_event_of_board_observation
+      ~discoverable
       ~(meta : keeper_meta)
       ~(arrived_at : float)
       (observation : Board_signal.board_observation)
-  : (pending_board_event, Board_signal.board_unavailable) result
+  : (pending_board_event option, Board_signal.board_unavailable) result
   =
-  match Board_dispatch.read_post_for_evidence ~post_id:observation.post_id with
+  match Board_dispatch.read_post_for_evidence_unchecked ~post_id:observation.post_id with
   | Error error ->
     Error
       { Board_signal.operation = Board_signal.Get_post
@@ -623,6 +624,16 @@ let pending_board_event_of_board_observation
       ; error
       }
   | Ok post_snapshot ->
+    let readable = Masc_board_handlers.Board_access.can_read
+      ~reader:(Keeper_board_audience.reader_for_keeper meta) post_snapshot in
+    let discoverable_parent =
+      match post_snapshot.visibility, observation.kind with
+      | Board.Direct, _ -> false
+      | Board.Unlisted, Board_signal.Observed_comment_added _ -> false
+      | (Board.Public | Board.Internal), _
+      | Board.Unlisted, (Board_signal.Observed_post_created | Observed_post_updated _
+          | Observed_reaction_changed _ | Observed_vote_cast _) -> true in
+    if not readable || (discoverable && not discoverable_parent) then Ok None else
     let matched =
       Board_signal.match_observation
         ~post_kind:(post_snapshot : Board.post).post_kind
@@ -654,11 +665,11 @@ let pending_board_event_of_board_observation
       | Board_signal.Observed_post_created | Board_signal.Observed_post_updated _
       | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ -> None, None
     in
-    Ok
+    Ok (Some
       { event_kind; post_id = observation.post_id; author = observation.author
       ; title; preview; hearth; post_kind; updated_at
       ; explicit_mention = matched.explicit_mention; matched_targets = matched.matched_targets
-      ; replies_after_own_comment = None; latest_external_author; latest_external_preview }
+      ; replies_after_own_comment = None; latest_external_author; latest_external_preview })
 ;;
 
 (* RFC-0266: fusion answers are the deliberation result the keeper requested,
@@ -1195,38 +1206,48 @@ let pending_board_event_of_stimulus
   : (pending_board_event option, Board_signal.board_unavailable) result
   =
   match stimulus.payload with
+  | Keeper_event_queue.Board_routing_pending bs ->
+    let open Result.Syntax in
+    let* observation =
+      Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id bs in
+    let addressed = Board_signal.addressed_signal_of_observation observation in
+    let* audience =
+      Keeper_board_audience.of_board_audience addressed.audience
+      |> Result.map_error (fun error ->
+        { Board_signal.operation = Board_signal.Parse_queued_audience
+        ; post_id = stimulus.post_id
+        ; error = Board.Read_invalid_id (Keeper_board_audience.classification_error_to_string error) }) in
+    (match Keeper_board_audience.route_for_keeper ~audience ~meta ~signal:addressed.signal with
+     | Board_signal.Unavailable unavailable -> Error unavailable
+     | Board_signal.Available Keeper_board_audience.Ignore -> Ok None
+     | Board_signal.Available (Keeper_board_audience.Deliver _) ->
+       pending_board_event_of_board_observation
+         ~discoverable:false ~meta ~arrived_at:stimulus.arrived_at observation
+     | Board_signal.Available Keeper_board_audience.Judge_discoverable ->
+       let candidate = Keeper_board_attention_candidate.of_board_signal
+         ~meta ~recorded_at:stimulus.arrived_at addressed in
+       (* The candidate identity derives from the original immutable event.
+          Replaying after an ACK failure cannot submit a second judgment. *)
+       Keeper_board_attention_candidate.record_and_wake ~base_path candidate
+       |> Result.map (fun _ -> None)
+       |> Result.map_error (fun detail ->
+         { Board_signal.operation = Board_signal.Record_attention_candidate
+         ; post_id = stimulus.post_id
+         ; error = Board.Read_source_unavailable (Board.Io_error detail) }))
   | Keeper_event_queue.Board_signal bs ->
     Result.bind
       (Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id bs)
       (pending_board_event_of_board_observation
+         ~discoverable:false
          ~meta
          ~arrived_at:stimulus.arrived_at)
-    |> Result.map Option.some
   | Keeper_event_queue.Board_attention attention ->
     Result.bind
       (Board_signal.board_observation_of_board_stimulus ~post_id:stimulus.post_id attention.signal)
-      (fun observation ->
-         match observation.kind with
-         | Board_signal.Observed_comment_added _ ->
-           (match Board_dispatch.read_post_for_evidence ~post_id:observation.post_id with
-            | Error error ->
-              Error { Board_signal.operation = Board_signal.Get_post; post_id = observation.post_id; error }
-            | Ok post_snapshot ->
-              match Keeper_board_attention_candidate.filter_comment_parent_visibility post_snapshot.visibility with
-              | Keeper_board_attention_candidate.Skip_non_discoverable_comment -> Ok None
-              | Keeper_board_attention_candidate.Keep_discoverable_comment ->
-                pending_board_event_of_board_observation
-                  ~meta
-                  ~arrived_at:stimulus.arrived_at
-                  observation
-                |> Result.map Option.some)
-         | Board_signal.Observed_post_created | Board_signal.Observed_post_updated _
-         | Board_signal.Observed_reaction_changed _ | Board_signal.Observed_vote_cast _ ->
-           pending_board_event_of_board_observation
-             ~meta
-             ~arrived_at:stimulus.arrived_at
-             observation
-           |> Result.map Option.some)
+      (pending_board_event_of_board_observation
+         ~discoverable:true
+         ~meta
+         ~arrived_at:stimulus.arrived_at)
   | Keeper_event_queue.Fusion_completed fc ->
     Ok (Some (pending_board_event_of_fusion_completion ~meta ~arrived_at:stimulus.arrived_at fc))
   | Keeper_event_queue.Schedule_due sw ->
@@ -1453,9 +1474,9 @@ let collect_board_events_with_cursor_policy
                        ~signal
                        ~audience:pinned))
                  (pending_board_event_of_board_observation
+                    ~discoverable:false
                     ~meta
                     ~arrived_at:(Time_compat.now ()))
-               |> Result.map Option.some
                |> Result.map_error (fun error -> Source_unavailable error)
            in
            (match result with
@@ -1465,7 +1486,7 @@ let collect_board_events_with_cursor_policy
     in
     let events_of_post (p : Board.post) =
       let post_id = Board.Post_id.to_string p.id in
-      match Board_dispatch.read_comments ~post_id with
+      match Board_dispatch.read_comments_unchecked ~post_id with
       | Error error -> Error (Source_unavailable { Board_signal.operation = Board_signal.Get_comments; post_id; error })
       | Ok comments ->
         let post_signal : Board_dispatch.board_signal =

@@ -34,6 +34,7 @@ type board_read_operation =
   | Get_comments
   | Parse_queued_comment_identity
   | Parse_queued_audience
+  | Record_attention_candidate
 
 type board_unavailable =
   { operation : board_read_operation
@@ -64,6 +65,7 @@ let board_read_operation_to_string = function
   | Get_comments -> "get_comments"
   | Parse_queued_comment_identity -> "parse_queued_comment_identity"
   | Parse_queued_audience -> "parse_queued_audience"
+  | Record_attention_candidate -> "record_attention_candidate"
 ;;
 
 let unavailable_to_string unavailable =
@@ -275,6 +277,44 @@ let board_observation_of_board_stimulus
     }
 ;;
 
+let addressed_signal_of_observation (observation : board_observation)
+  : Board_dispatch.addressed_board_signal
+  =
+  { signal =
+      { kind =
+          (match observation.kind with
+           | Observed_post_created -> Board_dispatch.Board_post_created
+           | Observed_post_updated { content_updated_at } ->
+             Board_dispatch.Board_post_updated { content_updated_at }
+           | Observed_comment_added comment -> Board_dispatch.Board_comment_added comment
+           | Observed_reaction_changed reaction -> Board_dispatch.Board_reaction_changed reaction
+           | Observed_vote_cast vote -> Board_dispatch.Board_vote_cast vote)
+      ; post_id = observation.post_id
+      ; author = observation.author
+      ; title = observation.title
+      ; content = observation.content
+      ; hearth = observation.hearth
+      ; updated_at = observation.updated_at
+      }
+  ; audience = observation.audience
+  }
+;;
+
+let board_routing_pending_stimulus ~arrived_at
+      (addressed : Board_dispatch.addressed_board_signal)
+  =
+  { Keeper_event_queue.post_id = addressed.signal.post_id
+  ; urgency =
+      (* Preserve the existing audience's delivery priority without guessing
+         a recipient or a wake reason. This row alone never requests a wake. *)
+      (match addressed.audience with
+       | Board.Targets _ | Board.Broadcast -> Keeper_event_queue.Immediate
+       | Board.Thread_participants | Board.Discoverable -> Keeper_event_queue.Normal)
+  ; arrived_at
+  ; payload = Keeper_event_queue.Board_routing_pending (board_stimulus_of_board_signal addressed)
+  }
+;;
+
 let post_id_string (post : Board.post) = Board.Post_id.to_string post.id
 
 let compare_cursor_token (ts_a, post_id_a) (ts_b, post_id_b) =
@@ -289,7 +329,7 @@ let list_posts_after_cursor (cursor_ts, cursor_post_id) =
   let is_after_cursor post =
     compare_cursor_token (cursor_token_of_post post) (cursor_ts, cursor_post_id) > 0
   in
-  Board_dispatch.list_posts ~sort_by:Board_dispatch.Updated ~limit:max_int ()
+  Board_dispatch.list_posts_unchecked ~sort_by:Board_dispatch.Updated ~limit:max_int ()
   |> List.filter is_after_cursor
   |> List.sort (fun (a : Board.post) (b : Board.post) ->
     compare_cursor_token (cursor_token_of_post a) (cursor_token_of_post b))
@@ -414,7 +454,7 @@ let match_observation
     [comment_offset] is an offset that read accepts and the replies are
     exactly the comments from there to the end of the thread. *)
 let check_self_comment_status ~self_ids ~(post_id : string) : comment_status =
-  match Board_dispatch.read_comments ~post_id with
+  match Board_dispatch.read_comments_unchecked ~post_id with
   | Error error -> Unavailable { operation = Get_comments; post_id; error }
   | Ok comments ->
     let latest_own_offset =
@@ -519,7 +559,7 @@ let board_signal_stimulus
 ;;
 
 let self_authored_post ~self_ids ~(post_id : string) =
-  match Board_dispatch.read_post ~post_id with
+  match Board_dispatch.read_post_unchecked ~post_id with
   | Error error -> Unavailable { operation = Get_post; post_id; error }
   | Ok post ->
     Available
@@ -588,7 +628,7 @@ let wake_reason
        | Some reason -> Available (Wake reason)
        | None -> Available Not_addressed)
     | Board_dispatch.Board_comment_added identity ->
-      (match Board_dispatch.read_post ~post_id:signal.post_id with
+      (match Board_dispatch.read_post_unchecked ~post_id:signal.post_id with
        | Error error -> Unavailable { operation = Get_post; post_id = signal.post_id; error }
        | Ok post ->
          if Message_scope.is_self_author ~self_ids (Board.Agent_id.to_string post.author)
@@ -597,7 +637,7 @@ let wake_reason
          match identity.parent_id with
          | None -> Available (Unaddressed_comment post.visibility)
          | Some parent_id ->
-           match Board_dispatch.read_comments ~post_id:signal.post_id with
+           match Board_dispatch.read_comments_unchecked ~post_id:signal.post_id with
            | Error error -> Unavailable { operation = Get_comments; post_id = signal.post_id; error }
            | Ok comments ->
              match List.find_opt

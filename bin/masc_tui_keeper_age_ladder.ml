@@ -98,8 +98,6 @@ let cell bins : Masc_tui_keeper_axis_cell.t =
   { text; tone = Quiet }
 ;;
 
-let count_cell bins : Masc_tui_keeper_axis_cell.t = { text = count_text bins; tone = Quiet }
-
 let legend =
   Printf.sprintf
     "ordinary memory facts counted by time %s, oldest on the left (%s); bar height is \

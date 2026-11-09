@@ -61,6 +61,32 @@ let test_cleanup_reads_toml_owned_backend () =
         (meta.microvm_backend = Some Keeper_microvm_backend.Apple_container)
     | _ -> Alcotest.fail "cleanup did not read effective metadata")
 
+let remote_ssh_profile =
+  "[keeper]\ninstructions = \"fixture instructions for keeper build maintenance\"\nsandbox_profile = \"remote_ssh\"\nremote_endpoint = \"fixture-endpoint\"\n"
+
+let test_step_follows_the_declared_profile () =
+  with_fixture (fun config profile seed ->
+    profile "remote-owner" remote_ssh_profile;
+    seed ~owner:"remote-owner" ~payload_name:"remote-owner";
+    profile "guest-owner" microvm_profile;
+    seed ~owner:"guest-owner" ~payload_name:"guest-owner";
+    (match Keeper_meta_store.read_meta config "remote-owner" with
+     | Ok (Some raw) ->
+       Alcotest.(check bool) "stored meta carries the decoder placeholder" true
+         (raw.sandbox_profile = Keeper_types_profile_sandbox.Docker)
+     | _ -> Alcotest.fail "fixture disk meta missing");
+    let module M = Server_keeper_build_maintenance in
+    let selected keeper_name =
+      match M.select ~config ~builds:true ~remote_workspace:true ~keeper_name with
+      | M.Selected step -> Some step
+      | M.Unreadable detail -> Alcotest.fail detail
+      | M.No_stored_meta | M.Switched_off -> None
+    in
+    Alcotest.(check bool) "remote_ssh TOML selects the workspace step" true
+      (selected "remote-owner" = Some M.Remote_workspace);
+    Alcotest.(check bool) "microvm TOML selects the build step" true
+      (selected "guest-owner" = Some M.Guest_builds))
+
 let test_cleanup_rejects_other_owner () =
   with_fixture (fun config profile seed ->
     profile "cleanup-owner" microvm_profile;
@@ -203,6 +229,7 @@ let () =
   Alcotest.run "Keeper build maintenance admission"
     [ "metadata", [
       Alcotest.test_case "TOML resolves disk placeholders" `Quick test_cleanup_reads_toml_owned_backend;
+      Alcotest.test_case "Step follows the declared profile" `Quick test_step_follows_the_declared_profile;
       Alcotest.test_case "Owner identity must match" `Quick test_cleanup_rejects_other_owner;
       Alcotest.test_case "Profile errors refuse cleanup" `Quick test_cleanup_rejects_invalid_profile;
       Alcotest.test_case "Guest skip reason is not empty success" `Quick test_cleanup_report_keeps_guest_skip_reason;

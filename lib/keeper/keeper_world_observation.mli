@@ -462,11 +462,12 @@ val pending_board_event_of_external_attention :
 
 (** Convert a queued Event Layer stimulus into structured turn activity
     for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),
-    and [Schedule_due] produce [Some];
-    [Bootstrap] returns [None] (no prompt injection).
-    [Error unavailable] means the board read for [Board_signal] /
-    [Board_attention] answered no row: the post was swept or the queued id
-    does not parse. Reading again gives the same answer. *)
+    and [Schedule_due] can produce [Some]. Board delivery rechecks this
+    Keeper's current readership before projecting any queued content;
+    unreadable Direct stimuli and non-discoverable attention return [None].
+    [Bootstrap] returns [None] (no prompt injection). A Board primary-source
+    failure remains [Error unavailable] for retention, distinct from a
+    confirmed missing post or malformed identity. *)
 (** An original job result is admitted only with its exact canonical owner.
     Source read failure is returned for retention, never consumed as Board absence. *)
 val pending_board_event_of_owned_job_completion :

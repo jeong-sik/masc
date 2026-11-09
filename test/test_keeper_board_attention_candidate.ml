@@ -552,6 +552,42 @@ let test_comment_visibility_refuses_a_non_eio_caller () =
   | Ok _ -> Alcotest.fail "a non-Eio caller cannot read the Board parent"
 ;;
 
+let test_every_candidate_kind_checks_the_stored_parent () =
+  with_temp_base "board-attention-parent-kinds" @@ fun base_path ->
+  let recipient_lookup = Masc.Recipient_lookup.make (fun candidate ->
+    Ok (Result.to_option
+      (Masc.Board.Agent_id.parse (Masc.Recipient_lookup.Candidate.to_string candidate)))) in
+  Masc_test_deps.Board_attention_parent_fixture.with_source ~recipient_lookup
+    ~base_path @@ fun () ->
+  let public_id = Masc_test_deps.Board_attention_parent_fixture.post_id "public-parent" in
+  let direct = match Masc.Board_dispatch.create_post ~author:"external-author"
+      ~content:"@alpha retained Direct evidence" ~visibility:Masc.Board.Direct
+      ~post_kind:Masc.Board.Human_post () with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Masc.Board.Post_publication_failure.to_string error) in
+  let direct_id = Masc.Board.Post_id.to_string direct.id in
+  let kinds post_id =
+    [ Masc.Board_dispatch.Board_post_created
+    ; Board_post_updated { content_updated_at = 42.0 }
+    ; Board_comment_added
+        { comment_id = comment_id "c-00000000000000000000000000000001"; parent_id = None }
+    ; Board_reaction_changed
+        { target_type = Masc.Board.Reaction_post; target_id = post_id
+        ; user_id = "reactor"; emoji = "👍"; reacted = true }
+    ; Board_vote_cast
+        { target = Vote_on_post post_id; target_author = "external-author"
+        ; voter = "voter"; direction = Masc.Board.Up }
+    ] in
+  List.iter (fun (post_id, expected) ->
+    List.iter (fun kind ->
+      let row = candidate { (signal post_id) with kind } in
+      match A.candidate_parent_visibility_filter row with
+      | Ok actual -> Alcotest.(check bool) "stored parent controls every kind" true
+          (actual = expected)
+      | Error detail -> Alcotest.fail detail) (kinds post_id))
+    [public_id, A.Keep_discoverable_comment; direct_id, A.Skip_non_discoverable_comment]
+;;
+
 (* A purged keeper's Board attention ledgers go with it: a same-name successor
    must not inherit another keeper's Ready roots and quarantines. The plan
    names both ledgers, and the path the purge removes is the file [record]
@@ -1186,7 +1222,9 @@ let test_not_relevant_delivery_is_idempotent () =
 
 let test_relevant_delivery_uses_exact_candidate_identity () =
   with_temp_base "board-attention-candidate-relevant" @@ fun base_path ->
-  let persisted = record ~base_path (candidate (signal "post-relevant")) in
+  Masc_test_deps.Board_attention_parent_fixture.with_source ~base_path @@ fun () ->
+  let post_id = Masc_test_deps.Board_attention_parent_fixture.post_id "post-relevant" in
+  let persisted = record ~base_path (candidate (signal post_id)) in
   let consumed =
     delivered
       "apply relevant judgment"
@@ -1538,6 +1576,10 @@ let () =
             "comment visibility refuses a non-Eio caller"
             `Quick
             test_comment_visibility_refuses_a_non_eio_caller
+        ; Alcotest.test_case
+            "every candidate kind checks the stored parent"
+            `Quick
+            test_every_candidate_kind_checks_the_stored_parent
         ; Alcotest.test_case
             "pending row has no Board thread history"
             `Quick

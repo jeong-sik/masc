@@ -1339,6 +1339,12 @@ let update_post_with_outcome
                      `Finished
                        (match result with
                         | Error error -> Error error
+                        | Ok (_, _, _, audience, _)
+                          when (match existing.visibility with
+                            | Direct -> existing.audience <> Some audience
+                              || not (String.equal (Agent_id.to_string existing.author) (Agent_id.to_string next_author))
+                            | Public | Unlisted | Internal -> false) ->
+                          Error (Validation_error "Direct post readership cannot change during editing")
                         | Ok (normalized_title, normalized_body, normalized_meta, audience, unresolved) ->
                           let content_changed =
                             not (String.equal existing.title normalized_title

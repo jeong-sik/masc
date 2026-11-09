@@ -6,7 +6,6 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
-open Keeper_runtime
 
 include Keeper_tool_surface_ops
 

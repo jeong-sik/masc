@@ -285,38 +285,3 @@ let fact_ages_cell reading =
       { Masc_tui_keeper_axis_cell.text = Masc_tui_keeper_age_ladder.strip bins; tone = Quiet })
     (age_bins reading)
 ;;
-
-let lag_bar_cells = 8
-
-let lag_bar_cell ~peak_lag = function
-  | Lag turns ->
-      let bar = Masc_tui_chart.bar ~width:lag_bar_cells ~value:turns ~max_value:peak_lag in
-      { Masc_tui_keeper_axis_cell.text = Printf.sprintf "%s %d" bar turns; tone = lag_tone turns }
-  | Lag_unmeasured -> cell_of_lag Lag_unmeasured
-;;
-
-let digest_label = "digest"
-
-let digest_cell ~now field =
-  field_cell
-    ~unmeasured:(digest_label ^ " " ^ Masc_tui_keeper_age_ladder.unmeasured_mark)
-    ~measured:(fun at ->
-      { Masc_tui_keeper_axis_cell.text = digest_label ^ " " ^ span_since ~now at; tone = Quiet })
-    field
-;;
-
-(* The ● cell of both views is read from the same reading and already marks
-   a reading without a row, so the next cells draw only a row's values. *)
-let lag_digest_gap_cells ~now ~peak_lag reading =
-  match reading with
-  | Unknown | No_row | Refused _ -> []
-  | Row { lag; gap; _ } ->
-      [ lag_bar_cell ~peak_lag lag; digest_cell ~now (digest_at reading) ] @ gap_cells gap
-;;
-
-let lag_stale_facts_cells ~peak_lag = function
-  | Unknown | No_row | Refused _ -> []
-  | Row { lag; source_invalidations; age_bins; _ } ->
-      (lag_bar_cell ~peak_lag lag :: stale_cells source_invalidations)
-      @ [ Masc_tui_keeper_age_ladder.count_cell age_bins ]
-;;

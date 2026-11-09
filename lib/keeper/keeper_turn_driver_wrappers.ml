@@ -8,7 +8,7 @@
 open Result.Syntax
 include Keeper_turn_driver
 
-(* Bridges [masc_tools] into agent-core tools, appends [native_tools], runs
+(* Bridges [masc_tools] into agent-core tools, runs
    [Keeper_turn_driver.run_named], and reports the selected runtime id through
    [on_selected_runtime]. *)
 let run_named_with_masc_tools
@@ -21,7 +21,6 @@ let run_named_with_masc_tools
     ~base_path
     ~media_store
     ~system_prompt
-    ?(native_tools = [])
     ?tool_requirement
     ?required_native_posture
     ?tool_result_projection
@@ -29,16 +28,11 @@ let run_named_with_masc_tools
     ?on_request_execution_ready
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
-    ?temperature
-    ?(accept = fun (_ : Agent_core.Types.api_response) -> true)
-    ?hooks
     ~raw_trace
-    ?on_event
     ?on_yield
     ?on_resume
     ?attempt_continuation
     ?on_runtime_attempt_error
-    ?transport
     ?context
     ?output_contract
     ?provider_config_transform
@@ -54,7 +48,6 @@ let run_named_with_masc_tools
       ~input_schema:td.input_schema
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
-  let bridged_tools = bridged_tools @ native_tools in
   let+ selected =
     Keeper_turn_driver.run_named
       ~runtime_id
@@ -70,17 +63,12 @@ let run_named_with_masc_tools
       ~agent_core_tools:bridged_tools
       ?tool_requirement
       ?required_native_posture
-      ?temperature
-      ?hooks
-      ~accept
       ~raw_trace
-      ?on_event
       ?on_yield
       ?on_resume
       ?attempt_continuation
       ?on_runtime_attempt_error
       ?on_request_execution_ready
-      ?transport
       ?context
       ?output_contract
       ?provider_config_transform

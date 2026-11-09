@@ -94,11 +94,6 @@ let bar_filled_cells ~width ~value ~max_value =
   else Stdlib.max 1 (Stdlib.min width (Stdlib.min value max_value * width / max_value))
 ;;
 
-let bar ~width ~value ~max_value =
-  let filled = bar_filled_cells ~width ~value ~max_value in
-  repeat bar_full filled ^ repeat bar_light (width - filled)
-;;
-
 (* A gauge states a proportion and nothing else. It used to colour the bar
    Warn past 70% and Bad past 85%; no caller ever passed other levels and no
    domain the three callers draw from (task completion, fact count, snapshot

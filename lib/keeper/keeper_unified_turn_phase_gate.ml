@@ -3,10 +3,7 @@
    The gate owns the three pre-dispatch early-exit paths plus the FSM
    transition into Runtime_routing on the proceed path. *)
 
-open Keeper_types
 open Keeper_meta_contract
-open Keeper_types_profile
-open Keeper_context_runtime
 module Plan = Keeper_unified_turn_phase_plan
 
 type phase_gate_outcome =

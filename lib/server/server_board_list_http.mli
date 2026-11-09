@@ -2,6 +2,7 @@
 
 val payload :
   ?config:Workspace.config ->
+  reader:Masc_board_handlers.Board_access.reader ->
   reaction_actor:string option ->
   Httpun.Request.t ->
   Dashboard_cache.cached_payload

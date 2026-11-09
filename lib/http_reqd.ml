@@ -229,6 +229,8 @@ let h2_respond_with_string ~stream_end reqd ledger response body =
   (* A request whose body nobody read must still release its stream. *)
   H2.Body.Reader.discard (H2.Reqd.request_body reqd);
   match Http_h2_response_ledger.reserve ledger ~bytes:(String.length body) with
+  (* [Request_closed] does not come here: the ledger closes a request when its
+     stream switch is released, and [h2_stream_over] answered before that. *)
   | Error (Capacity_exhausted | Request_closed) ->
     h2_refuse_for_capacity ~stream_end reqd response;
     Rejected_by_writer
@@ -252,8 +254,9 @@ let h2_respond_with_string ~stream_end reqd ledger response body =
 (* A stream masc already ended, or one that already carries an error, takes no
    response, and h2 is not asked: it raises [Failure] once an error was
    reported on the stream and hits [assert false] once the stream is closed
-   (reqd.ml 276·283~285). A reset h2 made on its own is not seen here until its
-   RST_STREAM leaves the socket (RFC-0518 D1). *)
+   (reqd.ml 276·283~285). Two closed streams are not seen here while masc's
+   scope is still open: one h2 reset on its own, until its RST_STREAM leaves
+   the socket (RFC-0518 D1), and one whose response already ended. *)
 let h2_stream_over ~stream_sw reqd =
   Option.is_some (Eio.Switch.get_error stream_sw) || Option.is_some (H2.Reqd.error_code reqd)
 ;;
@@ -312,8 +315,10 @@ module Body_writer = struct
 
   let is_closed = function
     | H1 writer -> Httpun.Body.Writer.is_closed writer
-    | H2 { writer; stream_end; _ } ->
-      H2.Body.Writer.is_closed writer || Stream_end.ended stream_end
+    | H2 { reqd; writer; stream_sw; stream_end; _ } ->
+      H2.Body.Writer.is_closed writer
+      || Stream_end.ended stream_end
+      || h2_stream_over ~stream_sw reqd
     | Ended -> true
   ;;
 

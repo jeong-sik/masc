@@ -20,7 +20,7 @@ let filter_param request name =
    drops every [board:list:] entry
    ([Server_dashboard_http_core_cache.invalidate_board_projections]) before it
    broadcasts that event. *)
-let payload ?config ~reaction_actor request
+let payload ?config ~reader ~reaction_actor request
   : Dashboard_cache.cached_payload
   =
   let hearth = filter_param request "hearth" in
@@ -33,7 +33,10 @@ let payload ?config ~reaction_actor request
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
   let offset = int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000 in
   let base_fetch = board_fetch_limit ~exclude_system ~exclude_automation ~limit ~offset in
-  let voter = board_voter_query request in
+  let voter = match reaction_actor with
+    | Some _ -> reaction_actor
+    | None -> board_voter_query request
+  in
   let key_part = function
     | Some value -> Printf.sprintf "%d:%s" (String.length value) value
     | None -> "-"
@@ -44,7 +47,8 @@ let payload ?config ~reaction_actor request
     | None -> None
   in
   let cache_key =
-    Printf.sprintf "board:list:%s:%s:%s:%b:%b:%s:%d:%d:%s:%s"
+    Printf.sprintf "board:list:%s:%s:%s:%s:%b:%b:%s:%d:%d:%s:%s"
+      (Masc_board_handlers.Board_access.cache_key reader)
       (key_part base_path)
       (key_part hearth)
       (board_sort_label sort_by)
@@ -56,10 +60,10 @@ let payload ?config ~reaction_actor request
     ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
     (Pool_work.cpu ~name:__FUNCTION__ (fun () ->
        let posts =
-         Board_dispatch.list_posts ?hearth ~sort_by ~exclude_system
+         Board_dispatch.list_posts ~reader ?hearth ~sort_by ~exclude_system
            ~exclude_automation ?author_filter ~limit:base_fetch ()
        in
-       let karma_map = Board_dispatch.get_all_karma () in
+       let karma_map = Board_dispatch.get_all_karma ~reader () in
        let get_karma author =
          match List.assoc_opt author karma_map with
          | Some karma -> karma
@@ -67,7 +71,7 @@ let payload ?config ~reaction_actor request
        in
        let paged = posts |> drop offset |> take limit in
        let reaction_rows =
-         board_reactions_batch
+         board_reactions_batch ~reader
            ~targets:
              (List.map
                 (fun (p : Board.post) ->
@@ -81,7 +85,7 @@ let payload ?config ~reaction_actor request
            (fun (p : Board.post) ->
               let author = Board.Agent_id.to_string p.author in
               let post_id = Board.Post_id.to_string p.id in
-              let current_vote = board_current_vote_for_post ~voter ~post_id in
+              let current_vote = board_current_vote_for_post ~reader ~voter ~post_id in
               let reactions = reactions_for (Board.Reaction_post, post_id) in
               board_post_dashboard_json
                 ~reactions

@@ -1,0 +1,64 @@
+{
+  "pass": true,
+  "served_256k": {
+    "one": true,
+    "zero": true,
+    "base_256k": true
+  },
+  "train_tokens": 97,
+  "equivalence": {
+    "tokens": 321,
+    "max_abs_diff": 0.0
+  },
+  "sampler_paths": {
+    "zero": "tinker://<run-id>:train:0/sampler_weights/masc-256k-zero",
+    "one": "tinker://<run-id>:train:0/sampler_weights/masc-256k-one-step"
+  },
+  "config": {
+    "model_256k": "thinkingmachines/Inkling-2-Small:peft:262144",
+    "model_64k": "thinkingmachines/Inkling-2-Small",
+    "rank": 8,
+    "seed": 20261108,
+    "effort": [
+      "low",
+      0.2
+    ],
+    "max_tokens": 2048,
+    "prompt_tokens_local": {
+      "long_100k": 99981,
+      "long_230k": 229993
+    },
+    "plan": [
+      [
+        "one",
+        "long_100k"
+      ],
+      [
+        "one",
+        "long_230k"
+      ],
+      [
+        "zero",
+        "long_100k"
+      ],
+      [
+        "zero",
+        "long_230k"
+      ],
+      [
+        "base_256k",
+        "long_100k"
+      ],
+      [
+        "base_256k",
+        "long_230k"
+      ],
+      [
+        "base_64k_control",
+        "long_100k"
+      ]
+    ],
+    "estimate_usd": 0.3421,
+    "budget_usd": 2.0
+  }
+}

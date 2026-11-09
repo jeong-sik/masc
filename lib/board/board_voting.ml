@@ -84,13 +84,15 @@ let save_vote_log_jsonl store content : (unit, board_error) Result.t =
     record_persist_error ~where:"save_vote_log_jsonl" msg;
     Error (Io_error (Printf.sprintf "save_vote_log_jsonl: %s" msg))
 
-(* Append before publishing a vote in memory. The source gate precedes the
-   persistence lock; that lock protects only the append and is released before
-   the caller acquires a fresh state lock for its commit. *)
+(* Append before publishing a vote in memory. The vote-log gate precedes the
+   persistence lock; the primary posts gate shares that lock with the append.
+   Release persistence before the caller's fresh state-lock commit. *)
 let record_vote_side_effect store ~target ~voter ~direction ~ts
     : (unit, board_error) Result.t =
   let* () = require_persisted_snapshot_readable store.votes_load_result in
-  with_persist_lock store (fun () -> append_vote_log store ~target ~voter ~direction ~ts)
+  with_persist_lock store (fun () ->
+    let* () = require_posts_source_readable store in
+    append_vote_log store ~target ~voter ~direction ~ts)
 
 let current_vote_for_post store ~voter ~post_id
     : (vote_direction option, board_error) Result.t =

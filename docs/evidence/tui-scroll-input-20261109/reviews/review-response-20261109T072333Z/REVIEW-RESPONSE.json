@@ -1,0 +1,71 @@
+{
+  "at": "2026-11-09T07:30:24.996376+00:00",
+  "reviewer": "/root/stack50070_review",
+  "scope": "measurement helper review response only",
+  "candidate_product_head_context": "bae45a3e0e70de9c238e2a16410ccf15d295a4be",
+  "helper_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+  "current_helper_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+  "current_matches_reviewed": true,
+  "notes_sha256": "5381a7228e56f48fd78bef83a3ec77d09f73ef2be0722da8f07848e795a3ea83",
+  "unresolved_P0_P1_P2_in_reviewed_helper": [],
+  "resolved_findings": [
+    {
+      "id": "ACK16K",
+      "severity": "P2 measurement helper",
+      "initial_snapshot": "6254b195d835ecc344249359ceab56aba1a1214fa2724c8fcaead2ad1bfe22ce",
+      "initial_line": 309,
+      "status": "resolved in b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "reproduction": "17,013 valid plain bytes in one read: prefix ACK was None; same bytes and same timestamp split in two reads: ACK 2.0.",
+      "resolution": "Search the whole decoder feed plus prior boundary carry before retaining only max-prefix-byte-length minus one for the next chunk.",
+      "after_line": 311,
+      "after_pure_byte_verdict": "both chunkings ACK 2.0; Unicode byte boundaries and >16K prefix pass"
+    },
+    {
+      "id": "OPTIONAL_ENTER",
+      "severity": "P3 documentation",
+      "status": "resolved",
+      "detail": "Updated docstring and working notes distinguish default no-Enter runs from optional owned-peer verify-submit. The retained Unicode run has exactly one chat POST with exact final-prefix body."
+    }
+  ],
+  "four_requested_checks": [
+    {
+      "issue": "heavy ANSI parsing on live reader",
+      "verdict": "reader now only timestamps/stores chunks and checks a constant-length marker; protocol decode and prefix matching occur after child termination",
+      "scope_limit": "This source change reduces observer work but does not by itself prove candidate latency improvement."
+    },
+    {
+      "issue": "PageDown starting ten pages from tail",
+      "verdict": "setup emits100 PageUp writes for PageDown; retained corrected run has100 position writes and73 PageDown writes",
+      "scope_limit": "This verifies emitted input workload, not an independently observed scroll offset. Same setup and actual send gaps must be used across binaries."
+    },
+    {
+      "issue": "split frame-end marker",
+      "verdict": "five-byte marker uses four-byte carry; all six single-split positions passed"
+    },
+    {
+      "issue": "OSC/DCS split false ACK",
+      "verdict": "streaming state excludes OSC BEL/ST and DCS/PM/APC payloads; all single cuts and one-byte chunks passed. CSI splits also passed."
+    }
+  ],
+  "retained_capture_replay": {
+    "runs": 13,
+    "records": 413,
+    "timestamp_differences_from_original": 0,
+    "differences_from_full_feed_reference": 0,
+    "all_raw_chunk_sizes_match": true
+  },
+  "remaining_note_precision": [
+    {
+      "severity": "P3 wording",
+      "claim": "PageDown starts100 pages back",
+      "more_precise": "The helper sends100 PageUp positioning writes. Actual applied viewport offset was not independently measured."
+    }
+  ],
+  "evidence_limits": [
+    "No candidate-versus-baseline performance verdict",
+    "No physical terminal paint proof",
+    "Retained installed-baseline Unicode PageUp submission checks exact serialized body at owned loopback endpoint; no live Keeper/model delivery proof",
+    "Candidate GC/latency and background work completion remain unproven here",
+    "No TUI execution, PTY, network server, product edit, build, CI query or external post by this reviewer"
+  ]
+}

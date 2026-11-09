@@ -3,6 +3,68 @@
 
 module Server_grpc_tool_dispatch = Server_grpc_tool_dispatch
 
+(** Attention admission reads the authoritative Board parent, even for a
+    retained post/vote/reaction candidate. These fixtures write real parents;
+    a readable fixture label is never treated as proof of a stored post. *)
+module Board_attention_parent_fixture = struct
+  type source =
+    { config : Masc.Workspace.config
+    ; recipient_lookup : Masc.Recipient_lookup.t
+    ; parents : (string, string) Hashtbl.t
+    ; mutex : Cross_context_mutex.t
+    }
+
+  let current : source option ref = ref None
+
+  let reset () =
+    Masc.Board_dispatch.reset_for_test ();
+    Masc.Board.reset_global_for_test ()
+
+  let install source =
+    reset ();
+    Result.get_ok (Masc.Board_dispatch.init_jsonl ~base_path:source.config.base_path
+      ~recipient_lookup:source.recipient_lookup ())
+
+  let with_source ?(recipient_lookup = Masc.Recipient_lookup.none_declared)
+      ~base_path f =
+    let run () =
+      let source =
+        { config = Masc.Workspace.default_config base_path; recipient_lookup
+        ; parents = Hashtbl.create 8; mutex = Cross_context_mutex.create () }
+      in
+      let previous = !current in
+      Fun.protect ~finally:(fun () ->
+        reset ();
+        current := previous;
+        Option.iter install previous) (fun () ->
+        ignore (Masc.Workspace.init source.config ~agent_name:None : string);
+        install source;
+        current := Some source;
+        f ())
+    in
+    match Eio_guard.execution_context () with
+    | Eio_guard.Eio_fiber -> run ()
+    | Eio_guard.Non_eio -> Eio_main.run (fun _env -> run ())
+
+  let post_id label =
+    match !current with
+    | None -> label (* Pure codec fixtures do not enter Board admission. *)
+    | Some source ->
+      Cross_context_mutex.with_lock source.mutex (fun () ->
+        match Hashtbl.find_opt source.parents label with
+        | Some post_id -> post_id
+        | None ->
+          match Masc.Board_dispatch.create_post ~author:"external-author"
+              ~title:"Board update" ~content:"Persisted Board evidence"
+              ~hearth:"hearth-1" ~visibility:Masc.Board.Public
+              ~post_kind:Masc.Board.Human_post () with
+          | Error error -> Alcotest.fail (Masc.Board.Post_publication_failure.to_string error)
+          | Ok post ->
+            let post_id = Masc.Board.Post_id.to_string post.id in
+            Hashtbl.add source.parents label post_id;
+            post_id)
+end
+
 (** Pure fixture construction. Both inputs are explicit; publication and
     restoration use the ordinary complete-snapshot API in each scenario. *)
 let admit_catalogs ~models ~providers =
@@ -777,3 +839,12 @@ let checkpoint_head_with_version path version =
   checkpoint_head_bytes_with_field
     (In_channel.with_open_bin path In_channel.input_all)
     "version" (`Int version)
+
+(** [waitpid_nointr pid] is [Unix.waitpid [] pid] retried when a caught
+    signal interrupts the wait. EINTR is the kernel asking us to wait again,
+    not a failed wait; without the retry the same tree passes or fails by
+    signal-delivery timing, and inside a [Fun.protect] ~finally the
+    interruption surfaces as [Fun.Finally_raised] over the test outcome. *)
+let rec waitpid_nointr pid =
+  try Unix.waitpid [] pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid

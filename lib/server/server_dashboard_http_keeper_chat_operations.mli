@@ -33,8 +33,6 @@ val get_permission : get_route -> Masc_domain.permission
     journal carries reasoning in full, the same data [/raw-trace] and
     [/trajectory?include_thinking] already gate that way. *)
 
-val mutation_permission : Masc_domain.permission
-
 (** What a missing journal means for an operation the store may hold. *)
 type missing_journal =
   | Nothing_journaled_yet  (** Queued or Running: an empty page is the truth. *)

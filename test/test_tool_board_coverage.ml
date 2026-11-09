@@ -46,11 +46,11 @@ let cleanup () =
 
 (* The MCP route: MASC hands the result over whole. *)
 let dispatch name args =
-  let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name args in
+  let result = Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator ~result_boundary:Tool_output.Sent_to_client name args in
   ((Tool_result.is_success result), (Tool_result.message result))
 
 let dispatch_result name args =
-  Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client name args
+  Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator ~result_boundary:Tool_output.Sent_to_client name args
 
 let check_failure_class name expected result =
   let actual =
@@ -266,7 +266,7 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   in
   let post_id = Board.Post_id.to_string post.id in
   (match
-     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_post
+     Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
        ~target_id:post_id ~user_id:"reactor" ~emoji:"🚀"
    with
    | Ok _ -> ()
@@ -281,13 +281,13 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   in
   let comment_id = Board.Comment_id.to_string comment.id in
   (match
-     Board_dispatch.toggle_reaction ~target_type:Board.Reaction_comment
+     Board_dispatch.toggle_reaction ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_comment
        ~target_id:comment_id ~user_id:"reactor" ~emoji:"👏"
    with
    | Ok _ -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
   let post_reactions =
-    Server_utils.board_reactions_for_post ~voter:(Some "reactor") ~post_id
+    Server_utils.board_reactions_for_post ~reader:Masc_board_handlers.Board_access.Operator ~voter:(Some "reactor") ~post_id
   in
   let post_json =
     Server_utils.board_post_dashboard_json ~reactions:post_reactions
@@ -307,7 +307,7 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
   Alcotest.(check bool) "post reaction has one selection field" true
     (json_lacks_field post_summary "has_reacted");
   let comment_reactions =
-    Server_utils.board_reactions_for_comment ~voter:(Some "reactor") ~comment_id
+    Server_utils.board_reactions_for_comment ~reader:Masc_board_handlers.Board_access.Operator ~voter:(Some "reactor") ~comment_id
   in
   let comment_json =
     Server_utils.board_comment_dashboard_json ~reactions:comment_reactions comment
@@ -366,7 +366,7 @@ let test_board_dashboard_json_shows_closed_state_and_successor () =
    | Ok () -> ()
    | Error e -> Alcotest.fail (Board.show_board_error e));
   let closed_post =
-    match Board_dispatch.get_post ~post_id with
+    match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
     | Ok p -> p
     | Error e -> Alcotest.fail (Board.show_board_error e)
   in
@@ -1017,7 +1017,7 @@ let test_sub_board_unknown_access_is_rejected () =
     (String_util.contains_substring message "members_only");
   Alcotest.(check bool) "no sub-board was created" true
     (Result.is_error
-       (Board_dispatch.get_sub_board ~sub_board_id:"wrong-case-access"));
+       (Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"wrong-case-access"));
   let ok, _ =
     dispatch
       "masc_board_sub_board_create"
@@ -1041,7 +1041,7 @@ let test_sub_board_unknown_access_is_rejected () =
   Alcotest.(check bool) "update with unknown access fails" false ok;
   Alcotest.(check bool) "update error names owner_only" true
     (String_util.contains_substring message "owner_only");
-  match Board_dispatch.get_sub_board ~sub_board_id:"guarded-access" with
+  match Board_dispatch.get_sub_board ~reader:Masc_board_handlers.Board_access.Operator ~sub_board_id:"guarded-access" with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok sb ->
     Alcotest.(check bool) "stored access unchanged" true
@@ -1116,12 +1116,12 @@ let test_model_visible_board_maintenance_dispatches_in_process () =
   in
   Alcotest.(check bool) "delete reaches its Board handler" true
     (String_util.contains_substring delete_result post_id);
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Ok _ -> Alcotest.fail "model-visible in-process delete left the post behind"
   | Error _ -> ()
 
 (* task-1758/#39356: close/reopen admit the post author and configured
-   Board moderators. Exercised through direct [Board_tool.handle_tool]
+   Board moderators. Exercised through direct [Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator]
    (no identity rewriting), so a mismatched actor tests the handler gate
    independently of the MCP/Keeper identity binding. *)
 let test_masc_board_close_requires_the_post_author () =
@@ -1150,7 +1150,7 @@ let test_masc_board_close_requires_the_post_author () =
     (Tool_result.is_success denied);
   Alcotest.(check bool) "denial names Unauthorized" true
     (String_util.contains_substring (Tool_result.message denied) "Unauthorized");
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Ok post -> Alcotest.(check bool) "post stayed open after denied close" true
        (Option.is_none post.closed)
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -1167,7 +1167,7 @@ let test_masc_board_close_requires_the_post_author () =
   Alcotest.(check bool) "close by the real author succeeds" true ok;
   Alcotest.(check bool) "success message names the post" true
     (String_util.contains_substring closed_msg post_id);
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Ok post -> Alcotest.(check bool) "post is closed in memory" true
       (Option.is_some post.closed)
   | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1234,7 +1234,7 @@ let test_masc_board_configured_moderator_can_close_and_reopen () =
   Alcotest.(check bool) "invalid config is named" true
     (String_util.contains_substring (Tool_result.message invalid)
        "board.moderators configuration");
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Ok post -> Alcotest.(check bool) "refused closes leave post open" true
       (Option.is_none post.closed)
   | Error error -> Alcotest.fail (Board.show_board_error error)
@@ -1305,7 +1305,7 @@ let test_masc_board_close_requires_summary_and_successor_decision () =
   in
   Alcotest.(check bool) "blank-summary message names the summary" true
     (String_util.contains_substring blank "summary");
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Ok post -> Alcotest.(check bool) "post stayed open after refused closes" true
        (Option.is_none post.closed)
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -1361,7 +1361,7 @@ let test_masc_board_reopen_requires_the_post_author () =
   in
   Alcotest.(check bool) "reopen by a non-author fails" false
     (Tool_result.is_success denied);
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Ok post -> Alcotest.(check bool) "post stayed closed after denied reopen" true
        (Option.is_some post.closed)
    | Error e -> Alcotest.fail (Board.show_board_error e));
@@ -1374,7 +1374,7 @@ let test_masc_board_reopen_requires_the_post_author () =
   Alcotest.(check bool) "reopen by the real author succeeds" true ok;
   Alcotest.(check bool) "success message names the post" true
     (String_util.contains_substring reopened_msg post_id);
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Ok post -> Alcotest.(check bool) "post is open again in memory" true
       (Option.is_none post.closed)
   | Error e -> Alcotest.fail (Board.show_board_error e)
@@ -1581,7 +1581,7 @@ let test_created_post_id_reads_typed_data () =
 
 let mcp_runtime_board_dispatch name args =
   let state = Mcp_server.For_testing.create_state ~base_path:_test_base_path in
-  Mcp_tool_runtime_board.dispatch ~config:(Mcp_server.workspace_config state)
+  Mcp_tool_runtime_board.dispatch ~reader:Masc_board_handlers.Board_access.Operator ~config:(Mcp_server.workspace_config state)
     ~agent_name:"mcp-runtime-curator" ~arguments:args ~state ~name
 
 let require_mcp_runtime_result name args =
@@ -1610,7 +1610,7 @@ let test_committed_board_projection_failure_reaches_callers_as_completed () =
       ?mcp_session_id:_ ?invocation_ref:_ ?auth_token:_ ?internal_keeper_runtime:_
       ?on_caller_resolved:_ state ~name ~arguments ->
       incr dispatches;
-      let result = match Mcp_tool_runtime_board.dispatch ~config ~state ~name ~arguments
+      let result = match Mcp_tool_runtime_board.dispatch ~reader:Masc_board_handlers.Board_access.Operator ~config ~state ~name ~arguments
           ~agent_name:"projection-caller" with
         | Some result -> result | None -> Alcotest.fail "Board route missing" in
       observed := Some result;
@@ -1624,11 +1624,11 @@ let test_committed_board_projection_failure_reaches_callers_as_completed () =
     (wire |> member "isError" |> to_bool);
   Alcotest.(check int) "MCP executes the committed mutation once" 1 !dispatches;
   let post_id = wire |> member "structuredContent" |> member "id" |> to_string in
-  let post = Board_dispatch.get_post ~post_id |> Result.get_ok in
+  let post = Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id |> Result.get_ok in
   Alcotest.(check string) "authoritative Board reread retains the committed body"
     "A committed post survives projection failure" post.body;
   Alcotest.(check int) "the failed projection does not duplicate the Board post" 1
-    (List.length (Board_dispatch.list_posts ~author_filter:"projection-caller" ()));
+    (List.length (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~author_filter:"projection-caller" ()));
   let metadata = wire |> member "_meta" |> member Mcp_server.tool_call_meta_key
       |> member "metadata" in
   let check_projection metadata =
@@ -1669,7 +1669,7 @@ let test_board_activity_does_not_complete_tasks () =
           ["actual-task"] (List.map (fun (row : Metrics_store_eio.task_metric) -> row.task_id) rows)
   in
   let runtime name args =
-    let result = match Mcp_tool_runtime_board.dispatch ~config ~agent_name ~arguments:args
+    let result = match Mcp_tool_runtime_board.dispatch ~reader:Masc_board_handlers.Board_access.Operator ~config ~agent_name ~arguments:args
       ~state ~name with
       | Some result -> result
       | None -> Alcotest.failf "%s was not routed" name in
@@ -2008,7 +2008,7 @@ let test_dispatch_post_update_success () =
   Alcotest.(check bool) "edit ok" true ok_edit;
   Alcotest.(check bool) "edit msg contains new body" true
     (String_util.contains_substring msg_edit "edited tool body");
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok post -> Alcotest.(check string) "edit persisted" "edited tool body" post.body)
 
@@ -2036,7 +2036,7 @@ let test_dispatch_post_update_rejects_non_owner () =
   in
   Alcotest.(check bool) "non-owner edit rejected" false ok_edit;
   (* the rejected edit must not touch the stored content *)
-  (match Board_dispatch.get_post ~post_id with
+  (match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
    | Error e -> Alcotest.fail (Board.show_board_error e)
    | Ok post ->
      Alcotest.(check string) "original preserved on rejected edit" "owned tool body"
@@ -2070,7 +2070,7 @@ let test_dispatch_post_update_transfers_author () =
   Alcotest.(check bool) "transfer edit ok" true ok_edit;
   Alcotest.(check bool) "edit msg contains new author" true
     (String_util.contains_substring msg_edit "tool-transfer-next");
-  match Board_dispatch.get_post ~post_id with
+  match Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok post ->
       Alcotest.(check string) "tool transfer author persisted"
@@ -2266,7 +2266,7 @@ let page_view_of ~body ~metadata =
 
 let read_page ~result_boundary ~label post_id args =
   let result =
-    Board_tool.handle_tool
+    Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator
       ~result_boundary
       "masc_board_post_get"
       (post_get_args post_id args)
@@ -2485,7 +2485,7 @@ let test_post_get_comment_pages_carry_their_range () =
 (* The thread in the order a page reads it, oldest first. Comments made in the
    same instant are ordered by id, so the order is read back, not assumed. *)
 let thread_comment_ids post_id =
-  match Board_dispatch.get_post_and_comments ~post_id with
+  match Board_dispatch.get_post_and_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
   | Ok (_post, comments) ->
     List.map (fun (comment : Board.comment) -> Board.Comment_id.to_string comment.id) comments
   | Error error -> Alcotest.failf "thread %s: %s" post_id (Board_tool.board_error_to_string error)
@@ -2693,7 +2693,7 @@ let test_post_get_reaches_the_model_as_text () =
   cleanup ();
   let post_id = create_post_with_comments ~count:3 in
   let result =
-    Board_tool.handle_tool
+    Board_tool.handle_tool ~reader:Masc_board_handlers.Board_access.Operator
       ~result_boundary:official_client_lane
       "masc_board_post_get"
       (post_get_args post_id [])
@@ -2976,7 +2976,7 @@ let test_post_get_a_sweep_between_pages_shows_in_the_next_page () =
     ~next_offset:(Some page_limit);
   let store = Board_dispatch.backend () in
   let oldest =
-    match Board_dispatch.get_post_and_comments ~post_id with
+    match Board_dispatch.get_post_and_comments ~reader:Masc_board_handlers.Board_access.Operator ~post_id with
     | Ok (_, oldest :: _) -> oldest
     | Ok (_, []) | Error _ -> Alcotest.fail "the thread has no comment to expire"
   in
@@ -3629,6 +3629,47 @@ let test_a_well_shaped_name_is_still_a_target () =
   Alcotest.(check string) "namespaced name is prose" "thread_participants"
     (label_of (comment_audience "@keeper:delta please look"))
 
+let test_direct_tool_readers_cannot_be_supplied_in_arguments () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  Board_dispatch.reset_for_test ();
+  let lookup = Recipient_lookup.make (fun candidate ->
+    Ok (Result.to_option (Board.Agent_id.parse (Recipient_lookup.Candidate.to_string candidate)))) in
+  Result.get_ok (Board_dispatch.init_jsonl ~base_path:_test_base_path ~recipient_lookup:lookup ());
+  let created = dispatch_result "masc_board_post"
+    (make_args ["author", `String "owner"; "body", `String "@direct-team private payload";
+      "visibility", `String "direct"]) in
+  Alcotest.(check bool) "Direct post created through the public tool" true (Tool_result.is_success created);
+  let post_id = Yojson.Safe.Util.(Tool_result.data created |> member "id" |> to_string) in
+  let args = make_args ["post_id", `String post_id; "viewer", `String "direct-team"] in
+  let stranger = make_keeper_meta ~name:"stranger" () in
+  let target = { (make_keeper_meta ~name:"recipient" ()) with mention_targets = ["DIRECT-TEAM"] } in
+  let call meta name args = Keeper_tool_board_runtime.handle_board_tool_with_outcome
+    ~meta ~result_projection:Tool_output.default_model_projection ~name ~args in
+  let denied = call stranger "masc_board_post_get" args in
+  Alcotest.(check bool) "forged viewer cannot authorize a Keeper read" true
+    (match denied.disposition with Tool_result.Failed _ -> true | Tool_result.Completed _ | Tool_result.Deferred _ -> false);
+  let admitted = call target "masc_board_post_get" args in
+  Alcotest.(check bool) "recipient alias shares deterministic delivery identity" true
+    (match admitted.disposition with Tool_result.Completed _ -> true | Tool_result.Failed _ | Tool_result.Deferred _ -> false);
+  let listed = call stranger "masc_board_list" (make_args ["viewer", `String "direct-team"]) in
+  Alcotest.(check bool) "Keeper list omits private id" false
+    (String_util.contains_substring listed.raw_output post_id);
+  let state = Mcp_server.For_testing.create_state ~base_path:_test_base_path in
+  let mcp name arguments = match Mcp_tool_runtime_board.dispatch
+      ~reader:(Masc_board_handlers.Board_access.named "stranger") ~config:(Mcp_server.workspace_config state)
+      ~agent_name:"stranger" ~arguments ~state ~name with
+    | Some result -> result | None -> Alcotest.fail "Board tool not routed" in
+  Alcotest.(check bool) "MCP-bound reader also ignores forged viewer" false
+    (Tool_result.is_success (mcp "masc_board_post_get" args));
+  Alcotest.(check bool) "non-reader cannot comment on a private post" false
+    (Tool_result.is_success (mcp "masc_board_comment"
+      (make_args ["post_id", `String post_id; "content", `String "uninvited reply"])));
+  Alcotest.(check int) "denied comment made no row" 0
+    (List.length (Result.get_ok (Board_dispatch.read_comments_unchecked ~post_id)))
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   current_eio_env := Some env;
@@ -3637,6 +3678,8 @@ let () =
     (fun () ->
       Alcotest.run "Board_tool_coverage"
         [
+      ( "Direct tools", [Alcotest.test_case "trusted readers cross Keeper and MCP tool boundaries" `Quick
+          test_direct_tool_readers_cannot_be_supplied_in_arguments] );
       ( "helpers",
         [
           Alcotest.test_case "visibility_of_string" `Quick test_visibility_of_string;

@@ -1,0 +1,237 @@
+{
+  "source_heads": [
+    "eb4e550c0450f21f22ffe712aeac9a4e9a1a752d",
+    "b7d717df36de2aa91b62b413df3cad67739c499d"
+  ],
+  "source_coordinates": [
+    "bin/masc_tui_message_layout.ml:762-765 fixed chrome 8 and history height",
+    "bin/masc_tui.ml:184 wheel_notch_rows=3",
+    "bin/masc_tui.ml:993-1011 stable reserved page budget",
+    "bin/masc_tui.ml:1552-1562 downward scroll updates"
+  ],
+  "derivation": "At 45 terminal rows, page_rows<=37. Ten initial up pages leave offset<=370; 124 wheel-down notches subtract372. PageDown uses the same stable reserved page budget in the opposite direction, so100 down pages exhaust100 initial up pages.",
+  "scope": "Source projection from ordered sent keys and a fixed synthetic transcript, not a captured authoritative application offset. Actual tail transitions can happen earlier if positioning was clamped.",
+  "existing_caption_limit": "has_more=false means the current footer/notice says start for positive offsets and provides no numeric active offset. Do not treat that caption as proof of the oldest viewport.",
+  "runs": [
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "paired-final-burst/pair-00-before-pagedown/pagedown/result.json",
+      "initial_pageup_writes": 100,
+      "direction_writes": 144,
+      "source_conservative_tail_write": 100,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 9
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "paired-final-burst/pair-00-after-pagedown/pagedown/result.json",
+      "initial_pageup_writes": 100,
+      "direction_writes": 151,
+      "source_conservative_tail_write": 100,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 10
+    },
+    {
+      "pair": 0,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "paired-final-burst/pair-00-before-wheeldown/wheeldown/result.json",
+      "initial_pageup_writes": 10,
+      "direction_writes": 146,
+      "source_conservative_tail_write": 124,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 4
+    },
+    {
+      "pair": 0,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "paired-final-burst/pair-00-after-wheeldown/wheeldown/result.json",
+      "initial_pageup_writes": 10,
+      "direction_writes": 145,
+      "source_conservative_tail_write": 124,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 4
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "paired-final-burst/pair-01-after-pagedown/pagedown/result.json",
+      "initial_pageup_writes": 100,
+      "direction_writes": 151,
+      "source_conservative_tail_write": 100,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 11
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "paired-final-burst/pair-01-before-pagedown/pagedown/result.json",
+      "initial_pageup_writes": 100,
+      "direction_writes": 141,
+      "source_conservative_tail_write": 100,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 9
+    },
+    {
+      "pair": 1,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "paired-final-burst/pair-01-after-wheeldown/wheeldown/result.json",
+      "initial_pageup_writes": 10,
+      "direction_writes": 146,
+      "source_conservative_tail_write": 124,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 4
+    },
+    {
+      "pair": 1,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "paired-final-burst/pair-01-before-wheeldown/wheeldown/result.json",
+      "initial_pageup_writes": 10,
+      "direction_writes": 152,
+      "source_conservative_tail_write": 124,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 6
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "paired-final-burst/pair-02-before-pagedown/pagedown/result.json",
+      "initial_pageup_writes": 100,
+      "direction_writes": 148,
+      "source_conservative_tail_write": 100,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 10
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "paired-final-burst/pair-02-after-pagedown/pagedown/result.json",
+      "initial_pageup_writes": 100,
+      "direction_writes": 149,
+      "source_conservative_tail_write": 100,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 10
+    },
+    {
+      "pair": 2,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "paired-final-burst/pair-02-before-wheeldown/wheeldown/result.json",
+      "initial_pageup_writes": 10,
+      "direction_writes": 149,
+      "source_conservative_tail_write": 124,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 5
+    },
+    {
+      "pair": 2,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "paired-final-burst/pair-02-after-wheeldown/wheeldown/result.json",
+      "initial_pageup_writes": 10,
+      "direction_writes": 151,
+      "source_conservative_tail_write": 124,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 5
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "paired-final-burst/pair-03-after-wheeldown/wheeldown/result.json",
+      "initial_pageup_writes": 10,
+      "direction_writes": 151,
+      "source_conservative_tail_write": 124,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 5
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "paired-final-burst/pair-03-before-wheeldown/wheeldown/result.json",
+      "initial_pageup_writes": 10,
+      "direction_writes": 146,
+      "source_conservative_tail_write": 124,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 5
+    },
+    {
+      "pair": 3,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "paired-final-burst/pair-03-after-pagedown/pagedown/result.json",
+      "initial_pageup_writes": 100,
+      "direction_writes": 147,
+      "source_conservative_tail_write": 100,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 10
+    },
+    {
+      "pair": 3,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "paired-final-burst/pair-03-before-pagedown/pagedown/result.json",
+      "initial_pageup_writes": 100,
+      "direction_writes": 145,
+      "source_conservative_tail_write": 100,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 10
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "wheeldown",
+      "result": "paired-final-burst/pair-04-before-wheeldown/wheeldown/result.json",
+      "initial_pageup_writes": 10,
+      "direction_writes": 145,
+      "source_conservative_tail_write": 124,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 4
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "wheeldown",
+      "result": "paired-final-burst/pair-04-after-wheeldown/wheeldown/result.json",
+      "initial_pageup_writes": 10,
+      "direction_writes": 149,
+      "source_conservative_tail_write": 124,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 5
+    },
+    {
+      "pair": 4,
+      "label": "before",
+      "condition": "pagedown",
+      "result": "paired-final-burst/pair-04-before-pagedown/pagedown/result.json",
+      "initial_pageup_writes": 100,
+      "direction_writes": 151,
+      "source_conservative_tail_write": 100,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 11
+    },
+    {
+      "pair": 4,
+      "label": "after",
+      "condition": "pagedown",
+      "result": "paired-final-burst/pair-04-after-pagedown/pagedown/result.json",
+      "initial_pageup_writes": 100,
+      "direction_writes": 151,
+      "source_conservative_tail_write": 100,
+      "boundary_clock": "direction write returned before typing write started",
+      "typed_characters_after_tail_write": 11
+    }
+  ]
+}

@@ -203,7 +203,7 @@ let test_running_sweep_does_not_mutate_volumes () =
           Sweep.start ~sw:service_sw ~clock:one_sweep_clock ~config);
         check (list string) "no Owner maintenance admitted during the sweep"
           [] !maintenance_admissions);
-      let posts = Board_dispatch.list_posts ~limit:20 () in
+      let posts = Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~limit:20 () in
       check int "one actual Board post per damaged volume" 3 (List.length posts);
       let post_ids posts =
         List.map (fun (post : Board.post) -> Board.Post_id.to_string post.id) posts
@@ -216,7 +216,7 @@ let test_running_sweep_does_not_mutate_volumes () =
         ~base_path:(Env_config_core.base_path ())
         ~recipient_lookup:Recipient_lookup.none_declared ());
       check (list string) "damage notices survive a Board reload" recorded_ids
-        (post_ids (Board_dispatch.list_posts ~limit:20 ()));
+        (post_ids (Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ~limit:20 ()));
       List.iter
         (fun (keeper, kind, damaged) ->
            let name = volume_name kind keeper in

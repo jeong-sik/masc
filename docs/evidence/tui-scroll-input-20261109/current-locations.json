@@ -1,0 +1,327 @@
+{
+  "schema": "masc.evidence.current-locations.v1",
+  "purpose": "Locate retained synthetic observations and unchanged capture-time provenance.",
+  "paths_relative_to": "repository_root",
+  "recorded_manifest": {
+    "path": "recorded-paths.json",
+    "sha256": "66729eaf12381fa2b2b9b505ba53488daad19c45da5387b2dfd913eb622cbc23"
+  },
+  "files": {
+    "docs/evidence/tui-scroll-input-20261109/observations-original.zip": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/retained-v1/observations-original.zip",
+      "recorded_sha256": "596e88c77ad986d6cc12b8e2f3a6c2b1311ea0c52452c51abf7239877b2ded3f",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/archive-members.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/retained-v1/archive-members.json",
+      "recorded_sha256": "d0b023f821f6f03d8dfeaaba1a4472bec6d0a9ff517612d371c0a872b0bcee5c",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/provenance/native-run.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/native-run.json",
+      "recorded_sha256": "7b8f01a2573bfab18c03b26b81420cb8b1ba624de716f0b2d4203f24f95c3b96",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/provenance/native-run-16dd4aa4.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/native-run-16dd4aa4.json",
+      "recorded_sha256": "acdb3c46fd5d5ab546b24abd54a95756c1b618abf2fe53c11bee9c2b1d9ae321",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/provenance/native-run-b7d717df.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/native-run-b7d717df.json",
+      "recorded_sha256": "fce9d40c9bba39a7719869790059de8aaaf10a13cff36bb87afc8a5ae1ba3b8b",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/provenance/targeted-test-run-16dd4aa4.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/targeted-test-run-16dd4aa4.json",
+      "recorded_sha256": "026557db4bc2ecc3c0380653261fe41ba6858b7e612cfa2764056f3ee3ef28f3",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/provenance/targeted-test-run-b7d717df.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/targeted-test-run-b7d717df.json",
+      "recorded_sha256": "59b8578bc1dbd3ea22fad0de65660bb803b4dbc65c245fbe44a83c6a283bd9d4",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/provenance/targeted-test-b7d717df-excerpt.txt": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/targeted-test-b7d717df-excerpt.txt",
+      "recorded_sha256": "537f60de46da1098ca9ce8357c354fff650e3c5c1545fd8cfe3551aa9f3f5922",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/provenance/pr-50493-state.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/pr-50493-state.json",
+      "recorded_sha256": "c3ff5a649731d389491c3c6be013353d98811d67a3757bea0159744b8e613ca4",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/provenance/pr-50502-state.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/pr-50502-state.json",
+      "recorded_sha256": "0a3dbb6d917e2339c1e860952c4d4b3cff3abd0dd0cbba508bca5aa445d6eb7e",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/provenance/native-bae45a3e-receipt.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/native-bae45a3e/receipt.json",
+      "recorded_sha256": "2bee1bc40b92e0fbfba8a16ecba229f8dadab85c77f6f26367c02d7c80d63949",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/provenance/native-16dd4aa4-receipt.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/native-16dd4aa4/receipt.json",
+      "recorded_sha256": "8ec3a1df1464ef980a7dcf38627af1084674b73bea8ba7eefa82dbb297bbdfe7",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/provenance/native-b7d717df-receipt.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/native-b7d717df/receipt.json",
+      "recorded_sha256": "df022fd49e03339fdaff9e2f62a3d98cd94c8685984e74df2ae709667c52b7d0",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/paired-final-normal/paired-summary.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/paired-final-normal/paired-summary.json",
+      "recorded_sha256": "2a1b0981b70659ea2f3762fd4f0747d21f7e7c9a6a185399dbaf14033589f8cf",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/paired-final-normal/order.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/paired-final-normal/order.json",
+      "recorded_sha256": "bd3a2d6e67651fe91d937dbddc0094200fd380f89df67bc71aa23f5606948ef8",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/paired-final-burst/paired-summary.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/paired-final-burst/paired-summary.json",
+      "recorded_sha256": "334083d6d5f4710bfdf38b10e7cd1ef29b5ab29181bf6de0867dd83396f186ed",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/paired-final-burst/order.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/paired-final-burst/order.json",
+      "recorded_sha256": "30c7622ee1a512a3f663b9cac49a19cbe9ed1d371cb7402305f69b9965b02d07",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/independent-source-review-16dd4aa4.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/independent-source-review-16dd4aa4.json",
+      "recorded_sha256": "ce95a21455ecbcb9831bd49efa68511107bab445cac6eedc383f98657992703b",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/independent-source-review-16dd4aa4.md": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/independent-source-review-16dd4aa4.md",
+      "recorded_sha256": "0e8e3bcf668df2464fbb2f58478f6701c59436686d6c5d3294e3f065f889c722",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/independent-source-review-b7d717df.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/independent-source-review-b7d717df.json",
+      "recorded_sha256": "c1e30118195a4cc7aec972893e0219074530b2fcdf15e18786dde17c13121863",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/independent-source-review-b7d717df.md": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/independent-source-review-b7d717df.md",
+      "recorded_sha256": "8fee3f2c2f0dde28343e2a9b67a7c3d5a4709ba2c51b35238527a6752a3f96ea",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/independent-source-review-bae45a3e.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/independent-source-review-bae45a3e.json",
+      "recorded_sha256": "8f1675e19278c21b7fff1826c60415413b396d270a142db7d7bfe28dfc19d464",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/independent-source-review-bae45a3e.md": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/independent-source-review-bae45a3e.md",
+      "recorded_sha256": "04c4a18ce3add9f067df9fbbc36a6b1a2171abb841166d8886ff0f2449cbdffb",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/independent-source-review-ff1cc770.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/independent-source-review-ff1cc770.json",
+      "recorded_sha256": "6103396d42831903f64207e3dbc9bd22b97094de24515fdfcea38100e428193f",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/independent-source-review-ff1cc770.md": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/independent-source-review-ff1cc770.md",
+      "recorded_sha256": "204060efd9f91b1e1041351db844b3622d332c98c1a91feb7392c00e9d451c0d",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/paired-bae-independent-review/README.md": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/paired-bae-independent-review/README.md",
+      "recorded_sha256": "f1e02e1824e4abe741918831974fc09a73328fd49ce1d02574c884e071639c67",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/paired-bae-independent-review/analyze.py": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/paired-bae-independent-review/analyze.py",
+      "recorded_sha256": "39be041be186d556804f55c6b0c7b4e29a721bfaf7f948ad297405faa6a2e561",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/paired-bae-independent-review/manifest.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/paired-bae-independent-review/manifest.json",
+      "recorded_sha256": "869c11f70d5ba1ed8cadcf06a19425b097e55e00590c79190d6fd5a8d200135f",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/paired-bae-independent-review/observations.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/paired-bae-independent-review/observations.json",
+      "recorded_sha256": "4abe625e8fa50e2bd21b29be1ce553a2416e9c13323f61e5bb23d67a70c46152",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/REVIEW-RESPONSE.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/REVIEW-RESPONSE.json",
+      "recorded_sha256": "0e95e1a8a5b42b21dbc8734cf7fa10a21e57372e52a8e22f78e381862dd23602",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/REVIEW-RESPONSE.md": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/REVIEW-RESPONSE.md",
+      "recorded_sha256": "7ff08087fda057bb623fb7284700f5ee27ad37e39f307202f00f6af426b5b42a",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/WORKING-NOTES.after.md": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/WORKING-NOTES.after.md",
+      "recorded_sha256": "5381a7228e56f48fd78bef83a3ec77d09f73ef2be0722da8f07848e795a3ea83",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/WORKING-NOTES.md": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/WORKING-NOTES.md",
+      "recorded_sha256": "d57b2c8586499e093b7b51fb8ee1ad61e5993273fa51c93c8717023c8a1c5848",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/after-snapshot.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/after-snapshot.json",
+      "recorded_sha256": "17211ec0c7cdee368dae0b9c9c994288d93856fef89d4f08cc9295d730d9966b",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/capture-replay-results.after.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/capture-replay-results.after.json",
+      "recorded_sha256": "b802fd0f40cfbc4a0ab8e31cea18f692d6300aed0204aba26d1738f92ce26e6b",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/capture-replay-results.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/capture-replay-results.json",
+      "recorded_sha256": "54423718f841e909d38443459062a3b1c9d45e3000ed6332bbd94d67676fc61c",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/mixed_probe.after.py": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/mixed_probe.after.py",
+      "recorded_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/mixed_probe.py": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/mixed_probe.py",
+      "recorded_sha256": "6254b195d835ecc344249359ceab56aba1a1214fa2724c8fcaead2ad1bfe22ce",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/pure-byte-fixture-results.after.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/pure-byte-fixture-results.after.json",
+      "recorded_sha256": "0c21a0ac6cf04ef9723771013f71446a6aac9c19214ffea2c1c85effba09c999",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/pure-byte-fixture-results.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/pure-byte-fixture-results.json",
+      "recorded_sha256": "d9af5a639b97d01cc25637cb5864c456d148220635b26fecd89499adc808d3eb",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/pure_byte_audit.after.py": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/pure_byte_audit.after.py",
+      "recorded_sha256": "7c8a8c936c0aac86eeb5ae411e31e67440eb0435c27c2e1ff2ae5588eb1641f9",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/pure_byte_audit.py": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/pure_byte_audit.py",
+      "recorded_sha256": "688ddbd759499af45b70073e6ee3d68183991bcb637e356b04e31f9cd8c6f343",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/replay.after.stdout.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/replay.after.stdout.json",
+      "recorded_sha256": "b802fd0f40cfbc4a0ab8e31cea18f692d6300aed0204aba26d1738f92ce26e6b",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/replay_captures.after.py": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/replay_captures.after.py",
+      "recorded_sha256": "138e8575d2cc3875f0ad15892a9775538f088fc7ff0493d3efa2abdb7d92cbd7",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/replay_captures.py": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/replay_captures.py",
+      "recorded_sha256": "50c4f421517ac5005fd885e83da060b04c0a5bf424833d8b5ebec423f0841161",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/review-response-20261109T072333Z/snapshot.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/review-response-20261109T072333Z/snapshot.json",
+      "recorded_sha256": "b71b9627e16415f49774b61ad7d7b39631035622e429d77423a8804574a28e33",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/render-pacing-review-20261109T074948Z/ANALYSIS.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/render-pacing-review-20261109T074948Z/ANALYSIS.json",
+      "recorded_sha256": "27ec47dcdf603ea0652529f5a1cfb3d6dc5b85c30e1aa7cdd80b8b7b8529316c",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/render-pacing-review-20261109T074948Z/ANALYSIS.md": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/render-pacing-review-20261109T074948Z/ANALYSIS.md",
+      "recorded_sha256": "ec5db85a0621ef0365668d84cf9596a0b38a2a459ca592378637fb7324c28152",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/render-pacing-review-20261109T074948Z/TWO-CLOCK-FOLLOWUP.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/render-pacing-review-20261109T074948Z/TWO-CLOCK-FOLLOWUP.json",
+      "recorded_sha256": "7429724b2ad58f81f0349d7f3b15a948924c477d776a989e83694ff6520b6a5a",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/render-pacing-review-20261109T074948Z/TWO-CLOCK-FOLLOWUP.md": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/render-pacing-review-20261109T074948Z/TWO-CLOCK-FOLLOWUP.md",
+      "recorded_sha256": "4e7e04ed4657c95a8ab8740ab2dbdf9405b4bbb1666400b99a5afdaae6814305",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/render-pacing-review-20261109T074948Z/recommended-state-decision-tests.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/render-pacing-review-20261109T074948Z/recommended-state-decision-tests.json",
+      "recorded_sha256": "be9acc0f7992a2d04fb044847d759023f93e4ff6989e445ba05adbae3a502a70",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/render-pacing-review-20261109T074948Z/source-excerpts.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/render-pacing-review-20261109T074948Z/source-excerpts.json",
+      "recorded_sha256": "a816d10a4f93a4e4ccda97b7fb0d7656a96f1b94cb08768b6b38cc91b4c075e1",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/render-pacing-review-20261109T074948Z/source-identities.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/render-pacing-review-20261109T074948Z/source-identities.json",
+      "recorded_sha256": "b6dab85aa9ce4cab325ba71f299bf81e661f1185f30ebafeccd075a70406ca3b",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/schedule-reproducer/REVIEW-RESPONSE-b7d717df.md": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/schedule-reproducer/REVIEW-RESPONSE-b7d717df.md",
+      "recorded_sha256": "16c6908eb60e8aa3c92a7f167e8464f527bea9f3ce6ef7c305e2288e0fb64678",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/schedule-reproducer/after.ml": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/schedule-reproducer/after.ml",
+      "recorded_sha256": "e00e68adc30c30bf3a17f8bc017c436b008790bbfe68a8667c04eea66beb3e19",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/schedule-reproducer/before.ml": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/schedule-reproducer/before.ml",
+      "recorded_sha256": "b55e06b4a4a22028ce39467c31fff46590438a517cbc4610fb377763998b521a",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/schedule-reproducer/result.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/schedule-reproducer/result.json",
+      "recorded_sha256": "fc1545a5796e375ade3c7e1b7895f7c7b75e068a146433fdb22921201d3fed41",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/reviews/schedule-reproducer/review-response-hash-checks.json": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/schedule-reproducer/review-response-hash-checks.json",
+      "recorded_sha256": "715ce902807b00346617add2c6d7df9ec13164e6e14f47d18fdb99db0f72132f",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/replay/artifacts/tui-scroll-input-20261109/mixed_probe.py": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/mixed_probe.py",
+      "recorded_sha256": "b43594f33f14edbe18d07eb98fac62e8a99c3803f74b0a04fd215ed0e0d30efd",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/replay/artifacts/tui-scroll-input-20261109/paired_probe.py": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/paired_probe.py",
+      "recorded_sha256": "2e8e71ec9f7d3055bfc992acd0cc635d8c3c0bfd54c6816ae432015e5d2644b0",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/replay/artifacts/tui-scroll-input-20261109/aggregate_pairs.py": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/aggregate_pairs.py",
+      "recorded_sha256": "462b765f1cf729ee76245c10c0b6c7b4bcfeeb0630f15d6bc8113cdeb00aecb4",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/replay/test/test_tui_chat_owed_history.py": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/paired-final-normal/pair-03-before-pageup/pageup/test_tui_chat_owed_history.py",
+      "recorded_sha256": "1c71418a7fb85c958be82cb4b4a00ff6e374164debe65a1ab33affeeb096c928",
+      "content_kind": "retained_capture"
+    },
+    "docs/evidence/tui-scroll-input-20261109/replay/test/test_tui_fusion_recovery.py": {
+      "recorded_path": "artifacts/tui-scroll-input-20261109/paired-final-normal/pair-03-before-pageup/pageup/test_tui_fusion_recovery.py",
+      "recorded_sha256": "51a3675250ef38dfec902211bd3e4761063375bb16692837e73a1bdde28cf81a",
+      "content_kind": "retained_capture"
+    }
+  },
+  "historical_records": []
+}

@@ -1,5 +1,3 @@
-open Result.Syntax
-
 let config_error ~field detail =
   Agent_core.Error.Config (Agent_core.Error.InvalidConfig { field; detail })
 ;;

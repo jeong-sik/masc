@@ -2043,11 +2043,24 @@
  (libraries
   masc
   masc_tui_types
-  masc_tui_chart
   masc_tui_theme
   masc_tui_keeper_age_ladder
   masc_tui_keeper_axis_cell
   masc_tui_message_layout))
+
+(library
+ (name masc_tui_keeper_grid)
+ (wrapped false)
+ (modules masc_tui_keeper_grid)
+ (libraries
+  masc
+  masc.config
+  masc_tui_keeper_list_model
+  masc_tui_keeper_mark
+  masc_tui_keeper_next_run
+  masc_tui_keeper_pulse
+  masc_tui_message_layout
+  unix))
 
 (library
  (name masc_tui_composer_projection)
@@ -2830,6 +2843,7 @@
   masc_tui_keeper_story
   masc_tui_keeper_wakes
   masc_tui_keeper_feed
+  masc_tui_keeper_grid
   masc_tui_lane_standing
   masc_tui_async_protocol
   masc_tui_board_requests
@@ -3467,7 +3481,7 @@
  (name masc_tui_page_reading)
  (wrapped false)
  (modules masc_tui_page_reading)
- (libraries masc_tui_ansi masc_tui_message_layout masc_tui_page_line))
+ (libraries masc_tui_ansi masc_tui_message_layout masc_tui_numbered_list masc_tui_page_line))
 
 (library
  (name masc_tui_machine_activity)

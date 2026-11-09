@@ -1,0 +1,8 @@
+{
+ "requests": 144,
+ "baseline_invalid": 11,
+ "agree": 39,
+ "disagree": 94,
+ "sample": 50,
+ "cases": 144
+}

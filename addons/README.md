@@ -25,7 +25,6 @@ step in other Keeper activity.
 | [fusion-compute](fusion-compute/README.md) | Executes Fusion compute requests in an isolated worker and returns structured artifacts and receipts. | Owns its compute worker; credentials, publication and durable delivery stay in the existing host. |
 | [fusion-results](fusion-results/README.md) | Projects captured Fusion status and exact-run Board evidence into named outputs for downstream packages. | Owns its projection worker; Fusion compute, credentials and durable delivery stay in the existing host. |
 | [fusion-report](fusion-report/README.md) | Produces readable reports from Fusion outputs, preserving failures, incomplete input and exact evidence lineage. | Owns its report worker; publication and Keeper delivery remain host operations. |
-| [tinker-trainer](tinker-trainer/README.md) | Derives SFT/RLVR post-training datasets with Inkling effort conditioning from verified Keeper receipts and gates Tinker sampler checkpoints. | Keeps prepared datasets and checkpoint metadata on its persistent volume; Tinker API credentials and training execution stay on the host. |
 
 Removing an observer or metric package leaves the source owner intact. Removing
 the DOS package ends its own environment through its worker lifecycle. The host

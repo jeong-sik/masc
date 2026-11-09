@@ -1,0 +1,1099 @@
+{
+ "requests_in": 144,
+ "requests_out": 119,
+ "cases": 144,
+ "removed_items": [
+  "eval-docs-gardener-01-039",
+  "eval-docs-gardener-01-115",
+  "eval-docs-gardener-02-040",
+  "eval-docs-gardener-02-116",
+  "eval-docs-gardener-04-003",
+  "eval-docs-gardener-04-079",
+  "eval-docs-gardener-06-005",
+  "eval-docs-gardener-06-043",
+  "eval-docs-gardener-07-082",
+  "eval-infra-cost-watch-02-096",
+  "eval-infra-cost-watch-04-136",
+  "eval-infra-cost-watch-06-062",
+  "eval-qa-coordinator-01-029",
+  "eval-qa-coordinator-01-067",
+  "eval-qa-coordinator-01-143",
+  "eval-qa-coordinator-08-074",
+  "eval-qa-coordinator-08-112",
+  "eval-support-triage-00-047",
+  "eval-support-triage-03-125",
+  "eval-support-triage-04-088",
+  "eval-support-triage-04-126",
+  "eval-support-triage-05-013",
+  "eval-support-triage-06-090",
+  "eval-support-triage-06-128",
+  "eval-support-triage-07-053"
+ ],
+ "removed_memories": [],
+ "sample_cases": 50,
+ "sample_misfit_rate": 0.06,
+ "per_case": [
+  {
+   "case": "c001",
+   "item": "eval-docs-gardener-00-000",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c002",
+   "item": "eval-docs-gardener-00-038",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c003",
+   "item": "eval-docs-gardener-00-114",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c004",
+   "item": "eval-docs-gardener-01-001",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c005",
+   "item": "eval-docs-gardener-01-039",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k2 expect new got restates:m7,m11,m18"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c006",
+   "item": "eval-docs-gardener-01-077",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c007",
+   "item": "eval-docs-gardener-01-115",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m11,m2,m12"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c008",
+   "item": "eval-docs-gardener-02-002",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c009",
+   "item": "eval-docs-gardener-02-040",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m15"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c010",
+   "item": "eval-docs-gardener-02-078",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c011",
+   "item": "eval-docs-gardener-02-116",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m21"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c012",
+   "item": "eval-docs-gardener-04-003",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m59,m44"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c013",
+   "item": "eval-docs-gardener-04-079",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m42,m31"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c014",
+   "item": "eval-docs-gardener-04-117",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c015",
+   "item": "eval-docs-gardener-05-118",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c016",
+   "item": "eval-docs-gardener-06-005",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m9,m75,m76"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c017",
+   "item": "eval-docs-gardener-06-043",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m17,m81"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c018",
+   "item": "eval-docs-gardener-06-081",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c019",
+   "item": "eval-docs-gardener-06-119",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c020",
+   "item": "eval-docs-gardener-07-120",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c021",
+   "item": "eval-docs-gardener-09-046",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c022",
+   "item": "eval-infra-cost-watch-00-018",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c023",
+   "item": "eval-infra-cost-watch-01-057",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c024",
+   "item": "eval-infra-cost-watch-01-133",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c025",
+   "item": "eval-infra-cost-watch-02-096",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m49,m9,m17"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c026",
+   "item": "eval-infra-cost-watch-03-097",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c027",
+   "item": "eval-infra-cost-watch-03-135",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c028",
+   "item": "eval-infra-cost-watch-04-022",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c029",
+   "item": "eval-infra-cost-watch-04-060",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c030",
+   "item": "eval-infra-cost-watch-04-098",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c031",
+   "item": "eval-infra-cost-watch-05-099",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c032",
+   "item": "eval-infra-cost-watch-05-137",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c033",
+   "item": "eval-infra-cost-watch-06-024",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c034",
+   "item": "eval-infra-cost-watch-06-062",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k2 expect new got restates:m25,m26"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c035",
+   "item": "eval-infra-cost-watch-06-138",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c036",
+   "item": "eval-infra-cost-watch-07-025",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c037",
+   "item": "eval-infra-cost-watch-07-063",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c038",
+   "item": "eval-infra-cost-watch-07-101",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c039",
+   "item": "eval-infra-cost-watch-07-139",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c040",
+   "item": "eval-infra-cost-watch-08-026",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c041",
+   "item": "eval-infra-cost-watch-09-065",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c042",
+   "item": "eval-infra-cost-watch-09-103",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c043",
+   "item": "eval-infra-cost-watch-09-141",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c044",
+   "item": "eval-qa-coordinator-00-104",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c045",
+   "item": "eval-qa-coordinator-01-029",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m85,m18,m55"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c046",
+   "item": "eval-qa-coordinator-01-067",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m92,m20,m95,m21,m89"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c047",
+   "item": "eval-qa-coordinator-01-105",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c048",
+   "item": "eval-qa-coordinator-01-143",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m85,m87,m18,m55"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c049",
+   "item": "eval-qa-coordinator-02-106",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c050",
+   "item": "eval-qa-coordinator-03-031",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c051",
+   "item": "eval-qa-coordinator-03-069",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c052",
+   "item": "eval-qa-coordinator-03-107",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c053",
+   "item": "eval-qa-coordinator-05-033",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c054",
+   "item": "eval-qa-coordinator-05-071",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c055",
+   "item": "eval-qa-coordinator-05-109",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c056",
+   "item": "eval-qa-coordinator-05-147",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c057",
+   "item": "eval-qa-coordinator-06-072",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c058",
+   "item": "eval-qa-coordinator-06-110",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c059",
+   "item": "eval-qa-coordinator-06-148",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c060",
+   "item": "eval-qa-coordinator-07-035",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c061",
+   "item": "eval-qa-coordinator-07-073",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c062",
+   "item": "eval-qa-coordinator-07-111",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c063",
+   "item": "eval-qa-coordinator-08-036",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c064",
+   "item": "eval-qa-coordinator-08-074",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m63,m30"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c065",
+   "item": "eval-qa-coordinator-08-112",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m26,m53"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c066",
+   "item": "eval-qa-coordinator-09-113",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c067",
+   "item": "eval-support-triage-00-047",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m18,m46"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c068",
+   "item": "eval-support-triage-00-085",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c069",
+   "item": "eval-support-triage-00-123",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c070",
+   "item": "eval-support-triage-01-010",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c071",
+   "item": "eval-support-triage-01-048",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c072",
+   "item": "eval-support-triage-01-086",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c073",
+   "item": "eval-support-triage-01-124",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c074",
+   "item": "eval-support-triage-03-011",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c075",
+   "item": "eval-support-triage-03-049",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c076",
+   "item": "eval-support-triage-03-087",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c077",
+   "item": "eval-support-triage-04-012",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c078",
+   "item": "eval-support-triage-04-050",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c079",
+   "item": "eval-support-triage-04-088",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m45,m64"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c080",
+   "item": "eval-support-triage-04-126",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m32,m64",
+    "k2 expect new got restates:m14,m38,m22"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c081",
+   "item": "eval-support-triage-05-013",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m35,m37"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c082",
+   "item": "eval-support-triage-06-014",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c083",
+   "item": "eval-support-triage-06-052",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c084",
+   "item": "eval-support-triage-06-090",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect corrects:m28 got restates:m28",
+    "m28 expect superseded:k1 got keep"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c085",
+   "item": "eval-support-triage-06-128",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect new got restates:m34,m49"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c086",
+   "item": "eval-support-triage-07-015",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c087",
+   "item": "eval-support-triage-07-053",
+   "picked": "disagreement",
+   "request_misfits": [
+    "k1 expect corrects:m29 got corrects:m17",
+    "m17 expect keep got superseded:k1",
+    "m29 expect superseded:k1 got keep"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c088",
+   "item": "eval-support-triage-07-091",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c089",
+   "item": "eval-support-triage-07-129",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c090",
+   "item": "eval-support-triage-08-016",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c091",
+   "item": "eval-support-triage-08-054",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c092",
+   "item": "eval-support-triage-08-092",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c093",
+   "item": "eval-support-triage-08-130",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c094",
+   "item": "eval-support-triage-09-131",
+   "picked": "disagreement",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c095",
+   "item": "eval-docs-gardener-00-076",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c096",
+   "item": "eval-docs-gardener-04-041",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c097",
+   "item": "eval-docs-gardener-05-042",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c098",
+   "item": "eval-docs-gardener-05-080",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c099",
+   "item": "eval-docs-gardener-07-006",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c100",
+   "item": "eval-docs-gardener-07-044",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c101",
+   "item": "eval-docs-gardener-07-082",
+   "picked": "sample",
+   "request_misfits": [
+    "k1 expect new got restates:m14,m22,m42"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c102",
+   "item": "eval-docs-gardener-08-007",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c103",
+   "item": "eval-docs-gardener-08-045",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c104",
+   "item": "eval-docs-gardener-08-083",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c105",
+   "item": "eval-docs-gardener-08-121",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c106",
+   "item": "eval-docs-gardener-09-008",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c107",
+   "item": "eval-docs-gardener-09-084",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c108",
+   "item": "eval-infra-cost-watch-00-056",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c109",
+   "item": "eval-infra-cost-watch-00-094",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c110",
+   "item": "eval-infra-cost-watch-00-132",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c111",
+   "item": "eval-infra-cost-watch-01-019",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c112",
+   "item": "eval-infra-cost-watch-01-095",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c113",
+   "item": "eval-infra-cost-watch-02-020",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c114",
+   "item": "eval-infra-cost-watch-02-058",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c115",
+   "item": "eval-infra-cost-watch-02-134",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c116",
+   "item": "eval-infra-cost-watch-03-021",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c117",
+   "item": "eval-infra-cost-watch-03-059",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c118",
+   "item": "eval-infra-cost-watch-04-136",
+   "picked": "sample",
+   "request_misfits": [
+    "k1 expect restates:m54 got restates:m54,m46,m69"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c119",
+   "item": "eval-infra-cost-watch-05-023",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c120",
+   "item": "eval-infra-cost-watch-05-061",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c121",
+   "item": "eval-infra-cost-watch-06-100",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c122",
+   "item": "eval-infra-cost-watch-08-064",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c123",
+   "item": "eval-infra-cost-watch-08-102",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c124",
+   "item": "eval-infra-cost-watch-08-140",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c125",
+   "item": "eval-qa-coordinator-00-028",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c126",
+   "item": "eval-qa-coordinator-00-066",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c127",
+   "item": "eval-qa-coordinator-00-142",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c128",
+   "item": "eval-qa-coordinator-02-030",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c129",
+   "item": "eval-qa-coordinator-02-144",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c130",
+   "item": "eval-qa-coordinator-03-145",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c131",
+   "item": "eval-qa-coordinator-04-032",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c132",
+   "item": "eval-qa-coordinator-04-070",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c133",
+   "item": "eval-qa-coordinator-04-146",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c134",
+   "item": "eval-qa-coordinator-06-034",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c135",
+   "item": "eval-qa-coordinator-07-149",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c136",
+   "item": "eval-qa-coordinator-09-037",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c137",
+   "item": "eval-qa-coordinator-09-075",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c138",
+   "item": "eval-support-triage-00-009",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c139",
+   "item": "eval-support-triage-03-125",
+   "picked": "sample",
+   "request_misfits": [
+    "k2 expect new got restates:m32,m5"
+   ],
+   "memory_misfits": []
+  },
+  {
+   "case": "c140",
+   "item": "eval-support-triage-05-051",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c141",
+   "item": "eval-support-triage-05-089",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c142",
+   "item": "eval-support-triage-05-127",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c143",
+   "item": "eval-support-triage-09-017",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  },
+  {
+   "case": "c144",
+   "item": "eval-support-triage-09-093",
+   "picked": "sample",
+   "request_misfits": [],
+   "memory_misfits": []
+  }
+ ]
+}

@@ -214,8 +214,8 @@ let reaction_state_json summaries =
     ]
 ;;
 
-let list_json ~actor target =
-  Board_dispatch.list_reactions
+let list_json ~reader ~actor target =
+  Board_dispatch.list_reactions ~reader
     ~target_type:target.target_type
     ~target_id:target.target_id
     ~user_id:actor
@@ -242,9 +242,9 @@ module Target_map = Map.Make (struct
       if c <> 0 then c else String.compare idl idr
   end)
 
-let list_batch_json ~actor targets =
+let list_batch_json ~reader ~actor targets =
   let rows =
-    Board_dispatch.list_reactions_batch
+    Board_dispatch.list_reactions_batch ~reader
       ~targets:
         (List.map (fun target -> (target.target_type, target.target_id)) targets)
       ~user_id:actor
@@ -278,8 +278,8 @@ let list_batch_json ~actor targets =
     ]
 ;;
 
-let toggle_json ~actor request =
-  Board_dispatch.toggle_reaction
+let toggle_json ~reader ~actor request =
+  Board_dispatch.toggle_reaction ~reader
     ~target_type:request.target.target_type
     ~target_id:request.target.target_id
     ~user_id:actor

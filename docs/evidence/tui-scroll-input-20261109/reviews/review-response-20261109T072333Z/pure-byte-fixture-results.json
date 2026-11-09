@@ -1,0 +1,65 @@
+{
+  "scope": "pure byte fixtures; no imports of fixture servers, no PTY, no process or user TUI",
+  "snapshot_sha256": "6254b195d835ecc344249359ceab56aba1a1214fa2724c8fcaead2ad1bfe22ce",
+  "results": [
+    {
+      "case": "osc-bel",
+      "single_cut_count": 25,
+      "all_decoded_AB": true,
+      "all_hidden_prefix_unacknowledged": true,
+      "one_byte_chunks_decoded_AB": true
+    },
+    {
+      "case": "osc-st",
+      "single_cut_count": 26,
+      "all_decoded_AB": true,
+      "all_hidden_prefix_unacknowledged": true,
+      "one_byte_chunks_decoded_AB": true
+    },
+    {
+      "case": "dcs-st",
+      "single_cut_count": 21,
+      "all_decoded_AB": true,
+      "all_hidden_prefix_unacknowledged": true,
+      "one_byte_chunks_decoded_AB": true
+    },
+    {
+      "case": "pm-st",
+      "single_cut_count": 20,
+      "all_decoded_AB": true,
+      "all_hidden_prefix_unacknowledged": true,
+      "one_byte_chunks_decoded_AB": true
+    },
+    {
+      "case": "apc-st",
+      "single_cut_count": 20,
+      "all_decoded_AB": true,
+      "all_hidden_prefix_unacknowledged": true,
+      "one_byte_chunks_decoded_AB": true
+    },
+    {
+      "case": "csi-sgr",
+      "single_cut_count": 14,
+      "all_decoded_AB": true,
+      "all_hidden_prefix_unacknowledged": true,
+      "one_byte_chunks_decoded_AB": true
+    },
+    {
+      "case": "frame-end-marker-every-single-split",
+      "cuts": 6,
+      "all_recognized": true
+    },
+    {
+      "case": "valid-prefix-before-retained-tail",
+      "read_bytes": 17013,
+      "max_os_read_bytes": 65536,
+      "prefix_emit_at": 2.0,
+      "single_read_ack": null,
+      "same_stream_same_timestamp_split_reads_ack": 2.0,
+      "chunk_partition_invariance": false,
+      "expected_ack": 2.0,
+      "source_line": 309
+    }
+  ],
+  "ack_loop_lineno": 308
+}

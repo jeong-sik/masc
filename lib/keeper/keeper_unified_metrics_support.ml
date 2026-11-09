@@ -1,9 +1,7 @@
 (** Keeper_unified_metrics_support — shared observation, trust, and JSON helpers for Keeper_unified_metrics. *)
 
-open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
-open Keeper_context_runtime
 
 (* ── Observation / decision helpers ─────────────── *)
 

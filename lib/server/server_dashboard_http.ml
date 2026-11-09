@@ -16,6 +16,7 @@ let dashboard_namespace_truth_http_json =
 ;;
 
 let dashboard_board_payload
+      ~reader
       ?config
       ?hearth
       ?author_filter
@@ -38,7 +39,8 @@ let dashboard_board_payload
   in
   let cache_key =
     Printf.sprintf
-      "board:memory:%s;%s;%s;%b;%b;%d;%d;%s;%s"
+      "board:memory:%s;%s;%s;%s;%b;%b;%d;%d;%s;%s"
+      (Masc_board_handlers.Board_access.cache_key reader)
       (Option.value ~default:"-" hearth)
       (Option.value ~default:"-" author_filter)
       (board_sort_label sort_by)
@@ -67,6 +69,7 @@ let dashboard_board_payload
       let probe_fetch = base_fetch + 1 in
       let posts =
         Board_dispatch.list_posts
+          ~reader
           ?hearth
           ~sort_by
           ~exclude_system
@@ -75,7 +78,7 @@ let dashboard_board_payload
           ~limit:probe_fetch
           ()
       in
-      let karma_map = Board_dispatch.get_all_karma () in
+      let karma_map = Board_dispatch.get_all_karma ~reader () in
       let get_karma author = Option.value ~default:0 (List.assoc_opt author karma_map) in
       let fetched_len = List.length posts in
       let window_end = offset + limit in
@@ -87,7 +90,7 @@ let dashboard_board_payload
           (fun (post : Board.post) ->
              let author = Board.Agent_id.to_string post.author in
              let post_id = Board.Post_id.to_string post.id in
-             let current_vote = board_current_vote_for_post ~voter ~post_id in
+             let current_vote = board_current_vote_for_post ~reader ~voter ~post_id in
              board_post_dashboard_json
                ?current_vote
                ~author_karma:(get_karma author)
@@ -114,7 +117,7 @@ let dashboard_board_payload
 ;;
 
 
-let dashboard_memory_http_payload ?config request : Dashboard_cache.cached_payload =
+let dashboard_memory_http_payload ?config ~reader ~actor request : Dashboard_cache.cached_payload =
   let hearth = query_param request "hearth" in
   let author_filter =
     query_param request "author"
@@ -129,8 +132,12 @@ let dashboard_memory_http_payload ?config request : Dashboard_cache.cached_paylo
   let offset =
     int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000
   in
-  let voter = board_voter_query request in
+  let voter = match actor with
+    | Some _ -> actor
+    | None -> board_voter_query request
+  in
   dashboard_board_payload
+    ~reader
     ?config
     ?hearth
     ?author_filter
@@ -968,7 +975,7 @@ let warm_dashboard_surfaces (state : Mcp_server.server_state) =
     try
       let t_start = Time_compat.now () in
       (* fire-and-forget: pre-warm board cache *)
-      ignore (dashboard_board_payload ~config ~limit:100 ~offset:0 ());
+      ignore (dashboard_board_payload ~reader:Masc_board_handlers.Board_access.Operator ~config ~limit:100 ~offset:0 ());
       Log.Dashboard.info "board surface pre-warmed (%.1fms)" ((Time_compat.now () -. t_start) *. 1000.0)
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

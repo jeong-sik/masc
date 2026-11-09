@@ -57,7 +57,40 @@ let with_current ~keepers_dir ~keeper_name (snapshot : Context.snapshot) publish
       Error "working context version changed before publication"
     | Ok (Some _) -> publish ())
 
+let require_readable_board_sources ~base_path ~keeper_name (snapshot : Context.snapshot) =
+  let meta = ref None in
+  let reader_meta () =
+    match !meta with
+    | Some result -> result
+    | None ->
+      let result = Keeper_meta_store.read_effective_meta
+        (Workspace.default_config base_path) keeper_name in
+      meta := Some result;
+      result in
+  let rec check = function
+    | [] -> Ok ()
+    | (source : Context.source) :: rest ->
+      if not (String.starts_with ~prefix:"event:" source.reference) then check rest
+      else match Keeper_event_queue.stimulus_of_yojson source.content with
+        | Error _ -> Error "retained event source unavailable"
+        | Ok stimulus ->
+          (match stimulus.payload with
+           | Keeper_event_queue.Board_routing_pending _ ->
+             Error "retained Board routing is unresolved"
+           | Keeper_event_queue.Board_signal _ | Board_attention _ ->
+             (match reader_meta () with
+              | Ok (Some meta) when Keeper_board_audience.can_project_queued_stimulus ~meta stimulus -> check rest
+              | Ok None | Ok (Some _) | Error _ -> Error "retained Board source readership unavailable")
+           | Keeper_event_queue.Bootstrap | Fusion_completed _ | Schedule_due _
+           | Connector_attention _ | Hitl_resolved _ | Ask_answered _
+           | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
+           | Workspace_message _ | Delegate_completed _ | Composition_completed _
+           | Tool_result_ready _ | Owned_job_completed _ -> check rest)
+  in
+  check snapshot.sources
+
 let publish ~base_path ~keepers_dir ~keeper_name (snapshot : Context.snapshot) =
+  let* () = require_readable_board_sources ~base_path ~keeper_name snapshot in
   let file = path ~keepers_dir ~keeper_name in
   (* Unobserved sources cannot authorize next steps. The live Keeper receives
      admitted original inputs separately; this artifact supplies context only. *)
@@ -89,6 +122,7 @@ let publish ~base_path ~keepers_dir ~keeper_name (snapshot : Context.snapshot) =
 let notice key =
   Prompt_registry.render_prompt_template key []
   |> Result.map (fun text -> Some (String.trim text))
+
 
 let render_with ~before_retain ?(before_retire = fun () -> ())
     ?(artifact_reader_available = true) ~base_path ~keepers_dir ~keeper_name () =
@@ -126,6 +160,9 @@ let render_with ~before_retain ?(before_retire = fun () -> ())
   | Ok None -> empty ()
   | Error detail -> unavailable detail
   | Ok (Some current) ->
+    match require_readable_board_sources ~base_path ~keeper_name current with
+    | Error detail -> unavailable detail
+    | Ok () ->
     match current.pockets with
     | [] -> empty ()
     | _ :: _ ->

@@ -3,7 +3,7 @@ rfc: "board-read-access-follows-visibility"
 title: "Board 글을 읽을 수 있는 사람은 공개 범위가 정한다"
 status: Draft
 created: 2026-10-21
-updated: 2026-10-21
+updated: 2026-11-09
 author: claude
 related: []
 ---
@@ -14,6 +14,11 @@ related: []
 - 이슈: #37152. 논의: MASC 보드 글 `p-023bcdb056ce8deeb4e0fd29f1301766`. code-reviewer 가 첫 판의 결정 네 가지(검사 위치, 이름 없는 요청, `Internal`, 수신자가 `None` 인 옛 글)에 동의했고, goo-yang-bong 이 인용 좌표를 대조하고 §6 의 네 질문에 답했고, jazz-developer 가 좌표를 독립으로 다시 대조하면서 정리 도구를 짚었다.
 - 이 RFC 의 첫 판은 적대적 리뷰에서 틀린 전제 세 개(Keeper 경로 신원, `viewer` 이름 충돌, 밀어내기 훅 위치)와 빠진 읽기 길을 지적받아 다시 썼다. §7 에 무엇이 바뀌었는지 적었다.
 - 인증·권한 코드를 바꾸는 일이라 구현 PR 마다 `HIGH-RISK-UNREVIEWED` 표시와 사람 리뷰를 붙인다.
+
+> 2026-11-09 구현 검토: #50387 · #50388.
+> 현재 구현과 신뢰 경계는 [Direct 읽기 가이드](../design/board-direct-readers.md)를 따른다.
+> 아래 경로와 좌표는 제안 당시의 근거다. 현재 활동 HTTP는
+> `/api/v1/activity/events`를 사용하며 graph·swimlane 경로는 없다.
 
 ## 1. 문제
 

@@ -1,0 +1,11 @@
+2026-11-09T07:51:21.3282151Z   SUITES: test_tui_render_schedule,test_tui_chat_search_projection
+2026-11-09T07:52:35.3031655Z   TARGET_SUITES: test_tui_render_schedule,test_tui_chat_search_projection
+2026-11-09T07:52:35.3166785Z   TARGET_SUITES: test_tui_render_schedule,test_tui_chat_search_projection
+2026-11-09T07:55:52.8503314Z [targeted] test/test_tui_render_schedule: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false
+2026-11-09T07:55:52.8522814Z [targeted] test/test_tui_render_schedule: start 2026-11-09T07:55:52Z
+2026-11-09T07:55:52.9231089Z Test Successful in 0.009s. 21 tests run.
+2026-11-09T07:55:52.9231798Z [targeted] test/test_tui_render_schedule: OK in 0s
+2026-11-09T07:55:52.9697216Z [targeted] test/test_tui_chat_search_projection: stanza env MASC_BASE_PATH= ZAI_API_KEY= TYPESAFEAI_API_KEY= MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED=false
+2026-11-09T07:55:52.9716901Z [targeted] test/test_tui_chat_search_projection: start 2026-11-09T07:55:52Z
+2026-11-09T07:55:54.0384628Z Test Successful in 0.986s. 46 tests run.
+2026-11-09T07:55:54.0469943Z [targeted] test/test_tui_chat_search_projection: OK in 2s

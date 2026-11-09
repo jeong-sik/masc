@@ -64,6 +64,24 @@ let comment_count_cap_error_unlocked store pid =
     else None
 ;;
 
+(* Run with the parent captured under the Board lock, both before the append
+   and at commit. A comment cannot enlarge a Direct thread's readership. *)
+let validate_comment_readership (post : post) audience =
+  match post.visibility, audience with
+  | (Public | Unlisted | Internal), _ -> Ok ()
+  | Direct, Thread_participants -> Ok ()
+  | Direct, (Broadcast | Discoverable) ->
+    Error (Validation_error "Direct Board comments cannot broadcast")
+  | Direct, Targets targets ->
+    let readers = post.author :: (match post.audience with
+      | Some (Targets targets) -> targets
+      | Some (Broadcast | Thread_participants | Discoverable) | None -> []) in
+    if List.for_all (fun target ->
+        List.exists (fun reader -> String.equal (Agent_id.to_string target)
+          (Agent_id.to_string reader)) readers) targets
+    then Ok ()
+    else Error (Validation_error "Direct Board comments can address only the parent post's readers")
+
 let add_comment_with_audience
       store
       ~lookup
@@ -111,6 +129,7 @@ let add_comment_with_audience
              post can close while this append is in flight. *)
           Error (Validation_error (closed_post_rejection_message ~post_id closed))
         | Some post ->
+          let* () = validate_comment_readership post audience in
           (match comment_count_cap_error_unlocked store pid with
            | Some msg -> Error (Validation_error msg)
            | None ->
@@ -166,6 +185,7 @@ let add_comment_with_audience
                   (Validation_error
                      (closed_post_rejection_message ~post_id closed))
               | Some post ->
+                let* () = validate_comment_readership post audience in
                 (match comment_count_cap_error_unlocked store pid with
                  | Some msg -> Error (Validation_error msg)
                  | None ->

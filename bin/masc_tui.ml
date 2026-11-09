@@ -37751,25 +37751,28 @@ Use relative paths for resources already held in the package. -->
            (* This pane reads metadata. A source cursor retained behind it
               cannot authorize an edit or a search of that hidden source. *)
            ()
-       | Some (("esc" | "left" | "j" | "k" | "up" | "down" | "pageup" | "pagedown" | "home") as key)
+       | Some (("esc" | "left" | "j" | "k" | "up" | "down" | "pageup" | "pagedown" | "home" | "end" | "g" | "G") as key)
          when state.view = Config && state.config_pane = Config_runtime
               && state.runtime_config_status_open ->
            (match key with
             | "esc" | "left" -> state.runtime_config_status_open <- false
-            | "home" -> state.runtime_config_status_scroll <- 0
+            | "home" | "g" -> state.runtime_config_status_scroll <- 0
             | _ ->
                 let terminal_rows, cols = get_terminal_size () in
-                let step = match key with
-                  | "pageup" | "pagedown" ->
-                      (* Match the status surface's five chrome rows after
-                         composer/agenda space has been reserved. *)
-                      max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5)
-                  | _ -> 1
-                in
-                let delta = if List.mem key ["k"; "up"; "pageup"] then -step else step in
                 let limit = Masc_tui_render.runtime_config_status_scroll_limit state ~terminal_rows ~cols in
-                state.runtime_config_status_scroll <-
-                  max 0 (min limit (min limit state.runtime_config_status_scroll + delta)))
+                (match key with
+                 | "end" | "G" -> state.runtime_config_status_scroll <- limit
+                 | _ ->
+                     let step = match key with
+                       | "pageup" | "pagedown" ->
+                           (* Match the status surface's five chrome rows after
+                              composer/agenda space has been reserved. *)
+                           max 1 (Masc_tui_types.surface_body_rows state ~terminal_rows - 5)
+                       | _ -> 1
+                     in
+                     let delta = if List.mem key ["k"; "up"; "pageup"] then -step else step in
+                     state.runtime_config_status_scroll <-
+                       max 0 (min limit (min limit state.runtime_config_status_scroll + delta))))
        | Some "/"
          when Option.is_some (Masc_tui_surface_search.surface_row_texts ~cols:(snd (get_terminal_size ())) state state.view) ->
            state.search <- Some ""
@@ -42790,7 +42793,12 @@ Use relative paths for resources already held in the package. -->
              ~write:(output_string stdout) ~flush:(fun () -> flush stdout)
              (present_frame frame approval presses panes acting_pane chat_row_actions change_authority
                 ~drawn_detail_reading:!drawn_detail_reading ~drawn_tools_task
-                ~input_pending:asynchronous_input_pending clamped)
+                ~input_pending:asynchronous_input_pending clamped);
+           (* An overrun must leave time to consume the input it accumulated.
+              Measuring the interval from Build start made every queued key
+              start another overdue frame before the reader could catch up.
+              Drained input still bypasses the interval in [take]. *)
+           Render_schedule.completed render_schedule ~now_ns:(Mtime_clock.elapsed_ns ())
        | Render_schedule.Idle | Render_schedule.Wait_until _ -> ())
     done
   in

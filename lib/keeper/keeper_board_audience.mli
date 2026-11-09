@@ -32,11 +32,24 @@ val of_board_audience : Board.audience -> (t, classification_error) result
 (** Project generic Board identities into canonical Keeper lane identities.
     This is the only MASC-specific step; Board remains Keeper-independent. *)
 
+val reader_for_keeper : Keeper_meta_contract.keeper_meta -> Masc_board_handlers.Board_access.reader
+(** Server-bound Keeper name and the same canonical/alias target matching as
+    delivery. Callers never construct this reader from model-supplied fields. *)
+
 val route_for_keeper
   :  audience:t
   -> meta:Keeper_meta_contract.keeper_meta
   -> signal:Board_dispatch.board_signal
   -> route Keeper_world_observation_board_signal.board_read
+(** Check the current parent post's readership before any delivery or semantic
+    judgment. A missing/unreadable parent is unavailable, never discoverable. *)
 
 val label : t -> string
 val classification_error_to_string : classification_error -> string
+
+val can_project_queued_stimulus
+  : meta:Keeper_meta_contract.keeper_meta -> Keeper_event_queue.stimulus -> bool
+(** Model-side queue observers must recheck parent readership. Unresolved
+    routing rows and unavailable parents carry no raw payload into a prompt.
+    Attention rows also require a discoverable parent. This is read-only and
+    never consumes the stored source. *)

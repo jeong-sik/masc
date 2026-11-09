@@ -442,7 +442,7 @@ let restart_line_owed_at_finalize ~notice_pending ~saved_checkpoint_present =
   notice_pending && saved_checkpoint_present
 ;;
 
-let turn_progress_callbacks ~preview ~observation_token ~config ~keeper_name ~downstream ~turn_id =
+let turn_progress_callbacks ~preview ~observation_token ~config ~keeper_name ~downstream =
   let record_turn_progress event_kind =
     Keeper_registry.record_turn_progress
       ~observation_token

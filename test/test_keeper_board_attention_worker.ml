@@ -54,7 +54,9 @@ let register_owner ~base_path keeper_name =
 let with_temp_base name f =
   let base_path = Filename.temp_dir name "" in
   register_owner ~base_path "alpha";
-  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () -> f base_path)
+  Fun.protect ~finally:(fun () -> remove_tree base_path) (fun () ->
+    Masc_test_deps.Board_attention_parent_fixture.with_source ~base_path
+      (fun () -> f base_path))
 ;;
 
 let ok label = function
@@ -92,6 +94,7 @@ let delivered label = function
 ;;
 
 let signal post_id : Masc.Board_dispatch.board_signal =
+  let post_id = Masc_test_deps.Board_attention_parent_fixture.post_id post_id in
   { kind = Masc.Board_dispatch.Board_post_created
   ; post_id
   ; author = "external-author"
@@ -214,7 +217,7 @@ let relevant_delivery_count ~base_path ~candidate_id =
           match stimulus.payload with
           | Event_queue.Board_attention attention
             when String.equal attention.candidate_id candidate_id -> count + 1
-          | Event_queue.Board_attention _
+          | Event_queue.Board_routing_pending _ | Event_queue.Board_attention _
           | Event_queue.Board_signal _
           | Event_queue.Bootstrap
           | Event_queue.Fusion_completed _
@@ -2434,7 +2437,6 @@ let test_restart_returns_a_cut_bound_run_to_ready () =
   let exact = provenance "interrupted-bound" in
   let entered, publish_entered = Eio.Promise.create () in
   let never, _resolve_never = Eio.Promise.create () in
-  Eio_main.run @@ fun _env ->
   Eio.Fiber.first
     (fun () ->
        ignore

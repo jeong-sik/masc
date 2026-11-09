@@ -21,6 +21,7 @@
   board_store_lifecycle)
  (modules
   board
+  board_access
   board_audience
   board_content_json
   board_content_diagnostics

@@ -17,6 +17,7 @@ type tool_result = Mcp_tool_runtime_types.tool_result
 type context = Mcp_tool_runtime_types.context = {
   config : Workspace.config;
   agent_name : string;
+  board_reader : Masc_board_handlers.Board_access.reader;
   registry : Session.registry;
   state : Mcp_server.server_state;
   sw : Eio.Switch.t;
@@ -65,7 +66,7 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
   | None ->
-      Mcp_tool_runtime_board.dispatch ~config ~agent_name ~arguments ~state ~name
+      Mcp_tool_runtime_board.dispatch ~reader:ctx.board_reader ~config ~agent_name ~arguments ~state ~name
 
 (* ================================================================ *)
 (* Tool_spec registration (RFC-0182 §3.2)                           *)

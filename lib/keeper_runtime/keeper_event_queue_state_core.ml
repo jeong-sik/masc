@@ -286,7 +286,7 @@ let projected_kind_of_transition = function
 ;;
 
 let projected_source_kind = function
-  | Keeper_event_queue.Board_signal _ -> Source_board_signal
+  | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _ -> Source_board_signal
   | Keeper_event_queue.Board_attention _ -> Source_board_attention
   | Keeper_event_queue.Bootstrap -> Source_bootstrap
   | Keeper_event_queue.Fusion_completed _ -> Source_fusion_completed
@@ -810,7 +810,7 @@ let source_terminal_receipt_of_stimulus source =
   | Keeper_event_queue.Fusion_completed completion ->
     Ok (Fusion_terminal completion)
   | Keeper_event_queue.Hitl_resolved resolution -> Ok (Hitl_terminal resolution)
-  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Board_attention _
   | Keeper_event_queue.Bootstrap
   | Keeper_event_queue.Schedule_due _

@@ -154,62 +154,6 @@ let test_wire_observer_failure () =
   | _ -> fail "variant mismatch"
 ;;
 
-(* ── event_type_name ──────────────────────────────────────────────── *)
-
-let test_event_type_name () =
-  let cases : (Telemetry_event.t * string) list =
-    [ ( Streaming_first_chunk
-          { provider = ""; model = ""; ttfrc_ms = None; requested_at = 0.0 }
-      , "streaming_first_chunk" )
-    ; ( Streaming_summary
-          { provider = ""
-          ; model = ""
-          ; chunk_count = 0
-          ; kind_breakdown =
-              { thinking = 0
-              ; answer = 0
-              ; tool_call_start = 0
-              ; tool_call_arg_delta = 0
-              ; tool_call_complete = 0
-              ; substrate = 0
-              ; heartbeat = 0
-              ; done_ = 0
-              }
-          ; ttft_ms = None
-          ; prefill_ms = None
-          ; total_ms = None
-          ; inter_chunk_ms_p50 = None
-          ; inter_chunk_ms_p95 = None
-          ; inter_chunk_ms_max = None
-          ; terminal = Terminal_done
-          }
-      , "streaming_summary" )
-    ; ( Thinking_complete { provider = ""; model = ""; thinking_duration_ms = 0.0 }
-      , "thinking_complete" )
-    ; Timeout { provider = ""; model = ""; timeout_type = No_response }, "timeout"
-    ; ( Prefill_complete
-          { provider = ""
-          ; model = ""
-          ; prompt_eval_tokens = 0
-          ; prompt_eval_ms = 0.0
-          ; cache_hit = false
-          }
-      , "prefill_complete" )
-    ; ( Wire_observer_failure
-          { capture_id = Some ""
-          ; provider = ""
-          ; model = ""
-          ; cause = Observer_rejected { reason = "" }
-          }
-      , "wire_observer_failure" )
-    ]
-  in
-  List.iter
-    (fun (ev, expected) ->
-       check string expected expected (Telemetry_event.event_type_name ev))
-    cases
-;;
-
 (* ── Suite ────────────────────────────────────────────────────────── *)
 
 let () =
@@ -224,6 +168,5 @@ let () =
         ; test_case "Prefill_complete roundtrip" `Quick test_prefill_complete
         ; test_case "Wire_observer_failure roundtrip" `Quick test_wire_observer_failure
         ] )
-    ; "event_type_name", [ test_case "all variants" `Quick test_event_type_name ]
     ]
 ;;

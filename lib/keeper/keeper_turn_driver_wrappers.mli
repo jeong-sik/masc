@@ -16,7 +16,6 @@ val run_named_with_masc_tools :
   base_path:string ->
   media_store:Agent_core.History.media_store ->
   system_prompt:string ->
-  ?native_tools:Agent_core.Tool.t list ->
   ?tool_requirement:Keeper_required_tools.t ->
   ?required_native_posture:Runtime_native_tools.posture ->
   ?tool_result_projection:Tool_output.model_projection ->
@@ -24,11 +23,7 @@ val run_named_with_masc_tools :
   ?on_request_execution_ready:(runtime_id:string -> execution:Types_core.verifier_execution_reference -> (unit, string) result) ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
-  ?temperature:float ->
-  ?accept:(Agent_core.Types.api_response -> bool) ->
-  ?hooks:Agent_core.Hooks.hooks ->
   raw_trace:Agent_core.Raw_trace.t option ->
-  ?on_event:(Agent_core.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->
   ?on_resume:(unit -> unit) ->
   ?attempt_continuation:
@@ -39,7 +34,6 @@ val run_named_with_masc_tools :
     dispatch:Keeper_attempt_dispatch.t ->
     Agent_core.Error.t ->
     unit) ->
-  ?transport:Masc_grpc_transport.t ->
   ?context:Agent_core.Context.t ->
   ?output_contract:Keeper_turn_driver.output_contract ->
   ?provider_config_transform:
@@ -56,9 +50,6 @@ val run_named_with_masc_tools :
     the typed per-candidate observation from {!Keeper_turn_driver.run_named}
     without changing its terminal result. [attempt_continuation] separately
     forwards typed request-owner retry admission to the actual runtime walk.
-
-    [native_tools] adds native tools without losing invocation identity or
-    handler observations.
 
     [tool_requirement] and [required_native_posture] preserve the caller's
     invocation authority through candidate admission. A required native posture

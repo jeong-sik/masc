@@ -129,7 +129,7 @@ let connector_attention_pending_selections ~base_path ~keeper_name =
   |> List.filter (fun (selection : Keeper_event_queue_state.pending_selection) ->
     match selection.Keeper_event_queue_state.source.payload with
     | Keeper_event_queue.Connector_attention _ -> true
-    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+    | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
     | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
     | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
     | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _
@@ -145,7 +145,7 @@ let connector_attention_evidence ~keeper_name selections =
             match selection.Keeper_event_queue_state.source.payload with
             | Keeper_event_queue.Connector_attention { event_id; _ } ->
               Some (`String event_id)
-            | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_signal _
+            | Keeper_event_queue.Bootstrap | Keeper_event_queue.Board_routing_pending _ | Keeper_event_queue.Board_signal _
             | Keeper_event_queue.Board_attention _ | Keeper_event_queue.Fusion_completed _
             | Keeper_event_queue.Schedule_due _ | Keeper_event_queue.Hitl_resolved _
             | Keeper_event_queue.Ask_answered _ | Keeper_event_queue.Completion_authority_rejected _

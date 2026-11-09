@@ -1,0 +1,299 @@
+{
+  "fixture": {
+    "messages": 800,
+    "unique_ids": 800,
+    "roles": [
+      "assistant",
+      "user"
+    ],
+    "minimum_nonempty_bullet_lines_per_message": 8,
+    "payload_sha256": "b1d4d6fa6c3ffc1a1ee129bd2057d57f0460ee5ccc30b138e2dcaca7b584703b"
+  },
+  "conditional_source_bounds": {
+    "physical_rows_lower": 6400,
+    "terminal_rows": 45,
+    "fixed_chrome_rows": 8,
+    "history_height_upper": 37,
+    "max_scroll_lower": 6363,
+    "timed_scroll_writes_upper": 151,
+    "pagedown_clamped_margin_rows": 776,
+    "pageup_top_margin_rows": 406,
+    "wheeldown_requires_stable_page_rows_at_least": 10,
+    "wheeldown_min_margin_at_page10": 47
+  },
+  "assumptions": [
+    "All 800 valid fixture messages have been applied to the owned Keeper and painted with surviving source pins before positioning.",
+    "All positioning events are admitted to Keeper chat and applied.",
+    "Page size P and history projection remain stable through positioning and timed phase.",
+    "No history arrivals, no resize, no menu/multiline edit or new status-row change affects geometry.",
+    "Actual admitted timed scroll events do not exceed 151; request writes alone do not prove admission."
+  ],
+  "page_enumeration": [
+    {
+      "stable_page_rows": 1,
+      "pagedown_start_lower": 200,
+      "pagedown_end_lower": 49,
+      "pageup_end_upper": 161,
+      "wheeldown_end_lower": 0
+    },
+    {
+      "stable_page_rows": 2,
+      "pagedown_start_lower": 400,
+      "pagedown_end_lower": 98,
+      "pageup_end_upper": 322,
+      "wheeldown_end_lower": 0
+    },
+    {
+      "stable_page_rows": 3,
+      "pagedown_start_lower": 600,
+      "pagedown_end_lower": 147,
+      "pageup_end_upper": 483,
+      "wheeldown_end_lower": 0
+    },
+    {
+      "stable_page_rows": 4,
+      "pagedown_start_lower": 800,
+      "pagedown_end_lower": 196,
+      "pageup_end_upper": 644,
+      "wheeldown_end_lower": 0
+    },
+    {
+      "stable_page_rows": 5,
+      "pagedown_start_lower": 1000,
+      "pagedown_end_lower": 245,
+      "pageup_end_upper": 805,
+      "wheeldown_end_lower": 0
+    },
+    {
+      "stable_page_rows": 6,
+      "pagedown_start_lower": 1200,
+      "pagedown_end_lower": 294,
+      "pageup_end_upper": 966,
+      "wheeldown_end_lower": 0
+    },
+    {
+      "stable_page_rows": 7,
+      "pagedown_start_lower": 1400,
+      "pagedown_end_lower": 343,
+      "pageup_end_upper": 1127,
+      "wheeldown_end_lower": 0
+    },
+    {
+      "stable_page_rows": 8,
+      "pagedown_start_lower": 1600,
+      "pagedown_end_lower": 392,
+      "pageup_end_upper": 1288,
+      "wheeldown_end_lower": 0
+    },
+    {
+      "stable_page_rows": 9,
+      "pagedown_start_lower": 1800,
+      "pagedown_end_lower": 441,
+      "pageup_end_upper": 1449,
+      "wheeldown_end_lower": 0
+    },
+    {
+      "stable_page_rows": 10,
+      "pagedown_start_lower": 2000,
+      "pagedown_end_lower": 490,
+      "pageup_end_upper": 1610,
+      "wheeldown_end_lower": 47
+    },
+    {
+      "stable_page_rows": 11,
+      "pagedown_start_lower": 2200,
+      "pagedown_end_lower": 539,
+      "pageup_end_upper": 1771,
+      "wheeldown_end_lower": 97
+    },
+    {
+      "stable_page_rows": 12,
+      "pagedown_start_lower": 2400,
+      "pagedown_end_lower": 588,
+      "pageup_end_upper": 1932,
+      "wheeldown_end_lower": 147
+    },
+    {
+      "stable_page_rows": 13,
+      "pagedown_start_lower": 2600,
+      "pagedown_end_lower": 637,
+      "pageup_end_upper": 2093,
+      "wheeldown_end_lower": 197
+    },
+    {
+      "stable_page_rows": 14,
+      "pagedown_start_lower": 2800,
+      "pagedown_end_lower": 686,
+      "pageup_end_upper": 2254,
+      "wheeldown_end_lower": 247
+    },
+    {
+      "stable_page_rows": 15,
+      "pagedown_start_lower": 3000,
+      "pagedown_end_lower": 735,
+      "pageup_end_upper": 2415,
+      "wheeldown_end_lower": 297
+    },
+    {
+      "stable_page_rows": 16,
+      "pagedown_start_lower": 3200,
+      "pagedown_end_lower": 784,
+      "pageup_end_upper": 2576,
+      "wheeldown_end_lower": 347
+    },
+    {
+      "stable_page_rows": 17,
+      "pagedown_start_lower": 3400,
+      "pagedown_end_lower": 833,
+      "pageup_end_upper": 2737,
+      "wheeldown_end_lower": 397
+    },
+    {
+      "stable_page_rows": 18,
+      "pagedown_start_lower": 3600,
+      "pagedown_end_lower": 882,
+      "pageup_end_upper": 2898,
+      "wheeldown_end_lower": 447
+    },
+    {
+      "stable_page_rows": 19,
+      "pagedown_start_lower": 3800,
+      "pagedown_end_lower": 931,
+      "pageup_end_upper": 3059,
+      "wheeldown_end_lower": 497
+    },
+    {
+      "stable_page_rows": 20,
+      "pagedown_start_lower": 4000,
+      "pagedown_end_lower": 980,
+      "pageup_end_upper": 3220,
+      "wheeldown_end_lower": 547
+    },
+    {
+      "stable_page_rows": 21,
+      "pagedown_start_lower": 4200,
+      "pagedown_end_lower": 1029,
+      "pageup_end_upper": 3381,
+      "wheeldown_end_lower": 597
+    },
+    {
+      "stable_page_rows": 22,
+      "pagedown_start_lower": 4400,
+      "pagedown_end_lower": 1078,
+      "pageup_end_upper": 3542,
+      "wheeldown_end_lower": 647
+    },
+    {
+      "stable_page_rows": 23,
+      "pagedown_start_lower": 4600,
+      "pagedown_end_lower": 1127,
+      "pageup_end_upper": 3703,
+      "wheeldown_end_lower": 697
+    },
+    {
+      "stable_page_rows": 24,
+      "pagedown_start_lower": 4800,
+      "pagedown_end_lower": 1176,
+      "pageup_end_upper": 3864,
+      "wheeldown_end_lower": 747
+    },
+    {
+      "stable_page_rows": 25,
+      "pagedown_start_lower": 5000,
+      "pagedown_end_lower": 1225,
+      "pageup_end_upper": 4025,
+      "wheeldown_end_lower": 797
+    },
+    {
+      "stable_page_rows": 26,
+      "pagedown_start_lower": 5200,
+      "pagedown_end_lower": 1274,
+      "pageup_end_upper": 4186,
+      "wheeldown_end_lower": 847
+    },
+    {
+      "stable_page_rows": 27,
+      "pagedown_start_lower": 5400,
+      "pagedown_end_lower": 1323,
+      "pageup_end_upper": 4347,
+      "wheeldown_end_lower": 897
+    },
+    {
+      "stable_page_rows": 28,
+      "pagedown_start_lower": 5600,
+      "pagedown_end_lower": 1372,
+      "pageup_end_upper": 4508,
+      "wheeldown_end_lower": 947
+    },
+    {
+      "stable_page_rows": 29,
+      "pagedown_start_lower": 5800,
+      "pagedown_end_lower": 1421,
+      "pageup_end_upper": 4669,
+      "wheeldown_end_lower": 997
+    },
+    {
+      "stable_page_rows": 30,
+      "pagedown_start_lower": 6000,
+      "pagedown_end_lower": 1470,
+      "pageup_end_upper": 4830,
+      "wheeldown_end_lower": 1047
+    },
+    {
+      "stable_page_rows": 31,
+      "pagedown_start_lower": 6200,
+      "pagedown_end_lower": 1519,
+      "pageup_end_upper": 4991,
+      "wheeldown_end_lower": 1097
+    },
+    {
+      "stable_page_rows": 32,
+      "pagedown_start_lower": 6363,
+      "pagedown_end_lower": 1531,
+      "pageup_end_upper": 5152,
+      "wheeldown_end_lower": 1147
+    },
+    {
+      "stable_page_rows": 33,
+      "pagedown_start_lower": 6363,
+      "pagedown_end_lower": 1380,
+      "pageup_end_upper": 5313,
+      "wheeldown_end_lower": 1197
+    },
+    {
+      "stable_page_rows": 34,
+      "pagedown_start_lower": 6363,
+      "pagedown_end_lower": 1229,
+      "pageup_end_upper": 5474,
+      "wheeldown_end_lower": 1247
+    },
+    {
+      "stable_page_rows": 35,
+      "pagedown_start_lower": 6363,
+      "pagedown_end_lower": 1078,
+      "pageup_end_upper": 5635,
+      "wheeldown_end_lower": 1297
+    },
+    {
+      "stable_page_rows": 36,
+      "pagedown_start_lower": 6363,
+      "pagedown_end_lower": 927,
+      "pageup_end_upper": 5796,
+      "wheeldown_end_lower": 1347
+    },
+    {
+      "stable_page_rows": 37,
+      "pagedown_start_lower": 6363,
+      "pagedown_end_lower": 776,
+      "pageup_end_upper": 5957,
+      "wheeldown_end_lower": 1397
+    }
+  ],
+  "counterexample_to_unconditional_wheeldown_claim": {
+    "page_rows": 9,
+    "position_rows": 450,
+    "timed_notches": 151,
+    "timed_row_decrement": 453,
+    "result_rows": 0
+  }
+}

@@ -3672,45 +3672,45 @@ let standalone_lane_configuration_phrase = function
   | Lane_unconfigured -> "not configured"
   | Lane_registry_unavailable -> "registry unreadable"
 
-(* The lane detail's last two lines. Every lane has its own arm, so a lane
-   added to [Standalone_lane.t] fails here until it says what its output
-   means. *)
+(* The lane detail's last two facts, whose labels the screen draws. Every lane
+   has its own arm, so a lane added to [Standalone_lane.t] fails here until it
+   says what its output means. *)
 let standalone_lane_answer (lane : standalone_lane) =
   let structured_output_without_ledger =
-    "Evidence: structured-output generation, not a MASC tool loop; the run \
+    "structured-output generation, not a MASC tool loop; the run \
      retains exact Input/Output, outcome, and selected slot, so no tool-call \
      ledger exists."
   in
   match lane.sl_lane with
   | Standalone_lane.Board_attention ->
-    { sla_output_meaning = "Output meaning: the accepted candidate judgment JSON."
+    { sla_output_meaning = "the accepted candidate judgment JSON."
     ; sla_evidence =
-        "Evidence: structured-output generation, not a MASC tool loop; the run \
+        "structured-output generation, not a MASC tool loop; the run \
          retains exact Input/Output and outcome. HTTP/CLI attribution uses \
          selected slot; Vendor System One provenance stays in Output."
     }
   | Standalone_lane.Hitl_auto_judge ->
     { sla_output_meaning =
-        "Output meaning: the validated and durably settled approval-context \
+        "the validated and durably settled approval-context \
          judgment summary."
     ; sla_evidence = structured_output_without_ledger
     }
   | Standalone_lane.Librarian ->
     { sla_output_meaning =
-        "Output meaning: selected memory facts plus committed snapshot metadata."
+        "selected memory facts plus committed snapshot metadata."
     ; sla_evidence = structured_output_without_ledger
     }
   | Standalone_lane.Candle_appraiser ->
     { sla_output_meaning =
-        "Output meaning: the validated payout grade, each candidate Task's relation to the Goal, and Keeper weights, or no contributor."
+        "the validated payout grade, each candidate Task's relation to the Goal, and Keeper weights, or no contributor."
     ; sla_evidence = structured_output_without_ledger
     }
   | Standalone_lane.Verifier ->
     { sla_output_meaning =
-        "Output meaning: Task completion or Goal proof verdict, reason, and \
+        "Task completion or Goal proof verdict, reason, and \
          evaluator runtime."
     ; sla_evidence =
-        "Evidence: Verifier review records also retain MASC tool observations; \
+        "Verifier review records also retain MASC tool observations; \
          open a run to inspect inputs, dispositions, excerpts, duration, and \
          truncation."
     }

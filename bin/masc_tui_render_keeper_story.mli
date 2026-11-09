@@ -43,7 +43,9 @@ val schedule_lines :
   Masc_tui_types.state -> now:float -> keeper_name:string -> string list
 (** The schedule page of [keeper_name]: the first page of the Keeper's own
     read, the one the Automation tab draws first, led by the list's [◷] cell and
-    the store's counts. A page that is cut, a reading that is being read again
+    the store's counts. The rows run oldest first by the time each one shows,
+    and a held row or one whose delivered wake has not settled names that in
+    its status column. A page that is cut, a reading that is being read again
     and a read that failed say so. The window asks for the read while it is
     open. *)
 

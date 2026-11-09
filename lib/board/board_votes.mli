@@ -315,3 +315,7 @@ val post_to_yojson_with_karma :
     extracted [flair], and a
     pre-computed [score = votes_up - votes_down] so the
     client does not have to derive it. *)
+
+val get_karma_by_post : store -> (string * (string * int) list) list
+(** Cached recipient -> parent post -> earned delta, sharing the lifetime and
+    invalidation of [get_all_karma]. Comment votes resolve to their parent. *)

@@ -1,9 +1,7 @@
 open Tool_args
-open Keeper_types
 open Keeper_meta_contract
 open Keeper_meta_store
 open Keeper_types_profile
-open Keeper_runtime
 
 
 let existing_path_json ?(candidates = []) path_opt =

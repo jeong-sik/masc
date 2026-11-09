@@ -506,7 +506,14 @@ let classified ?(visibility = Board.Internal) signal =
   | Error error -> fail (Board.show_board_error error)
 ;;
 
-let route ~audience ~meta signal =
+let route ~audience ~meta (signal : Board_dispatch.board_signal) =
+  let signal = match Board_dispatch.read_post_unchecked ~post_id:signal.post_id with
+    | Ok _ -> signal
+    | Error _ ->
+      let post = match Board_dispatch.create_post ~author:signal.author ~title:signal.title
+          ~content:signal.content ~visibility:Board.Public ~post_kind:Board.Human_post () with
+        | Ok post -> post | Error error -> fail (Board.Post_publication_failure.to_string error) in
+      {signal with post_id=Board.Post_id.to_string post.id} in
   match KBA.route_for_keeper ~audience ~meta ~signal with
   | KWOBS.Available route -> route
   | KWOBS.Unavailable unavailable ->
@@ -514,6 +521,8 @@ let route ~audience ~meta signal =
 ;;
 
 let test_closed_board_audience_routes_only_its_authority () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun _config ->
   let alpha =
     { (make_board_resume_meta "alpha") with board_interests = [ "research" ] }
   in
@@ -664,6 +673,8 @@ let test_closed_board_audience_routes_only_its_authority () =
    not addressed. An Unlisted system post is thread activity; the lane that the
    same text names on a human post is delivered to. *)
 let test_system_post_text_does_not_wake_the_named_lane () =
+  Eio_main.run @@ fun _env ->
+  with_board_workspace @@ fun _config ->
   let alpha =
     { (make_board_resume_meta "alpha") with board_interests = [ "research" ] }
   in
@@ -1659,6 +1670,74 @@ let test_comments_address_post_and_direct_parent_only () =
          | _ -> false))
 ;;
 
+
+let test_committed_board_action_retains_unavailable_routing action () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_board_workspace @@ fun config ->
+  let meta = make_board_resume_meta "retainedlane" in
+  persist_and_register_board_lane config meta;
+  let post = match Board_dispatch.create_post ~author:meta.name
+    ~title:"private retained event" ~content:"@retainedlane private original"
+    ~post_kind:Board.Human_post ~visibility:Board.Direct () with
+    | Ok post -> post | Error error -> fail (Board.Post_publication_failure.to_string error) in
+  let post_id = Board.Post_id.to_string post.id in
+  let store = Board.global () in
+  let posts = Board.persist_path store in
+  let held = posts ^ ".test-held" in
+  let committed = ref None in
+  Fun.protect ~finally:(fun () ->
+    Board_dispatch.set_board_signal_hook (fun _ -> ());
+    if Sys.file_exists held then Unix.rename held posts;
+    Keeper_registry.For_testing.clear ())
+  @@ fun () ->
+  (* This hook runs after the actual vote/reaction commit. A different fiber's
+     source reload can observe precisely this refusal before routing reads. *)
+  Board_dispatch.set_board_signal_hook (fun addressed ->
+    committed := Some addressed;
+    Unix.rename posts held;
+    (match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
+     | Error _ -> () | Ok _ -> fail "missing primary was admitted");
+    KKS.wakeup_relevant_keeper_for_board_signal ~config addressed);
+  (match action with
+   | `Vote -> ignore (Result.get_ok (Board_dispatch.vote
+       ~voter:"external-voter" ~post_id ~direction:Board.Up))
+   | `Reaction -> ignore (Result.get_ok (Board_dispatch.toggle_reaction
+       ~reader:Masc_board_handlers.Board_access.Operator ~target_type:Board.Reaction_post
+       ~target_id:post_id ~user_id:"external-reactor" ~emoji:"safe")));
+  let addressed = Option.get !committed in
+  let pending () = match Keeper_registry_event_queue.pending_selections_result
+    ~base_path:config.base_path meta.name with
+    | Ok selections -> selections | Error detail -> fail detail in
+  let selection = match pending () with [selection] -> selection
+    | _ -> fail "a committed action did not retain one routing source" in
+  (match selection.source.payload with
+   | Keeper_event_queue.Board_routing_pending bs ->
+     check bool "original kind/content/audience retained" true
+       (bs = KWOBS.board_stimulus_of_board_signal addressed)
+   | _ -> fail "unavailable routing was admitted as a delivery");
+  let entry = Option.get (Keeper_registry.get ~base_path:config.base_path meta.name) in
+  check bool "unavailable routing requests no owner wake" false (Atomic.get entry.fiber_wakeup);
+  (match Keeper_world_observation.pending_board_event_of_stimulus
+    ~base_path:config.base_path ~meta selection.source with
+   | Error {error=Board.Read_source_unavailable _;_} -> ()
+   | _ -> fail "refused authority did not retain pending routing");
+  check bool "same durable selection remains after refused read" true
+    (match pending () with [same] -> Keeper_event_queue_state.same_entry selection same | _ -> false);
+  Unix.rename held posts;
+  (match Masc_board_handlers.Board_votes_json.load_persisted_posts store with
+   | Ok _ -> () | Error (_,error) -> fail (Printexc.to_string error));
+  let expected = match action with `Vote -> KWOBS.Vote_on_self_post
+    | `Reaction -> KWOBS.Reaction_after_self_activity in
+  (match KBA.route_for_keeper ~audience:KBA.Thread_participants ~meta ~signal:addressed.signal with
+   | KWOBS.Available (KBA.Deliver reason) -> check bool "original actual route recovers" true (reason=expected)
+   | _ -> fail "recovery changed original thread routing");
+  (match Keeper_world_observation.pending_board_event_of_stimulus
+    ~base_path:config.base_path ~meta selection.source with
+   | Ok (Some event) -> check string "same event parent is projected" post_id event.post_id
+   | _ -> fail "retained action did not project after recovery")
+;;
+
 let () =
   run
     "keeper keepalive helpers"
@@ -1711,6 +1790,10 @@ let () =
             test_unregistered_persisted_exact_mention_is_durable_across_registration
         ; test_case "lane metadata failure does not block next durable delivery" `Quick
             test_lane_meta_failure_does_not_block_next_durable_delivery
+        ; test_case "committed vote survives routing source refusal" `Quick
+            (test_committed_board_action_retains_unavailable_routing `Vote)
+        ; test_case "committed reaction survives routing source refusal" `Quick
+            (test_committed_board_action_retains_unavailable_routing `Reaction)
         ; test_case "thread signal for a swept post delivers nothing" `Quick
             test_thread_signal_for_a_swept_post_delivers_nothing
         ; test_case "comment routes bystander lane to attention judgment" `Quick

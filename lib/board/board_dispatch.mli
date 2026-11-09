@@ -102,6 +102,7 @@ val post_change_to_string : post_change -> string
 (** The [change] field of a [post_changed] board notification. *)
 
 type board_sse_event =
+  | Board_changed
   | Post_created of {
       post_id : string;
       author : string;
@@ -148,10 +149,11 @@ val set_board_sse_hook : (board_sse_event -> unit) -> unit
     store took the write, including an applied deletion whose snapshot
     persistence remains pending. A write the store refuses raises nothing. *)
 
-val emit_board_sse_event : board_sse_event -> unit
-(** Direct emission entry point for callers that want to broadcast
-    a synthetic event without going through one of the typed
-    operations. *)
+val emit_board_sse_event : visibility:Board.visibility option -> board_sse_event -> unit
+(** Publish a public event, or a payload-free [Board_changed] invalidation for
+    every other visibility. [None] means the parent could not be read and also
+    publishes only an invalidation. Private identity and content never enter
+    the shared hook, SSE bus or activity graph through this boundary. *)
 
 (** {1 Backend lifecycle} *)
 
@@ -264,6 +266,7 @@ val create_post_once_by_fusion_run_id :
     [new_author].  When provided by the current owner, [new_author] transfers
     persisted ownership.
 
+    Direct edits cannot change the recorded audience or transfer authorship.
     Unchanged normalized title and body keep an existing recorded audience.
     If the post has no recorded audience, the edit calculates one even for
     unchanged text; resolving address candidates may fail the edit. When only
@@ -291,25 +294,25 @@ val update_post_with_unresolved :
 (** {!update_post} that also returns the undeclared names, as
     {!create_post_with_unresolved} does. *)
 
-val read_post : post_id:string -> (Board.post, Board.board_read_error) Result.t
-(** The post with [post_id], from the in-memory store. A read answers no I/O
-    failure; see {!Board.board_read_error}. *)
+val read_post : reader:Board_access.reader -> post_id:string -> (Board.post, Board.board_read_error) Result.t
+(** A visible post from the in-memory store. A missing post and a Direct
+    post the reader cannot read both answer [Read_post_not_found]. *)
 
-val read_post_for_evidence : post_id:string -> (Board.post, Board.board_read_error) Result.t
+val read_post_for_evidence : reader:Board_access.reader -> post_id:string -> (Board.post, Board.board_read_error) Result.t
 (** Refuse an incomplete or unadmitted posts source before returning a post
     or establishing that it is absent. *)
 
-val get_post : post_id:string -> (Board.post, Board.board_error) Result.t
+val get_post : reader:Board_access.reader -> post_id:string -> (Board.post, Board.board_error) Result.t
 (** {!read_post} as a [board_error] result, for callers that also write. *)
 
-val list_posts_by_run_origin : unit -> Board.post list
+val list_posts_by_run_origin : reader:Board_access.reader -> unit -> Board.post list
 (** Exact run-origin index snapshot, newest publication first. *)
 
-val find_post_by_run_id : run_id:string -> Board.post option
+val find_post_by_run_id : reader:Board_access.reader -> run_id:string -> Board.post option
 (** Exact O(1) lookup through the Board typed-origin [fusion_run_id] index.
     Returns [None] on a miss; does not scan post text or [meta_json]. *)
 
-val list_posts :
+val list_posts : reader:Board_access.reader ->
   ?visibility_filter:Board.visibility option ->
   ?hearth:string ->
   ?author_filter:string ->
@@ -322,7 +325,7 @@ val list_posts :
   unit ->
   Board.post list
 
-val list_recent_posts_matching_author :
+val list_recent_posts_matching_author_unchecked :
   author_matches:(Board.Agent_id.t -> bool) ->
   limit:int ->
   unit ->
@@ -369,7 +372,7 @@ val reopen : post_id:string -> (unit, Board.board_error) Result.t
 (** Clears a post's [closed] state. Idempotent; ungated here, same
     permission boundary as [set_closed]. *)
 
-val search :
+val search : reader:Board_access.reader ->
   query:string ->
   limit:int ->
   Board.post list
@@ -399,14 +402,13 @@ val add_comment_with_unresolved :
 (** {!add_comment} that also returns the undeclared names, as
     {!create_post_with_unresolved} does. *)
 
-val read_comments :
+val read_comments : reader:Board_access.reader ->
   post_id:string ->
   (Board.comment list, Board.board_read_error) Result.t
-(** The comments on [post_id], oldest first, from the in-memory store. A post
-    that does not exist answers [Ok []], the same as a post with no comments;
-    use {!read_post} to tell them apart. *)
+(** Comments on a readable post, oldest first. Missing or hidden parents
+    answer [Read_post_not_found]; a readable post with no comments answers [[]]. *)
 
-val get_comments :
+val get_comments : reader:Board_access.reader ->
   post_id:string ->
   (Board.comment list, Board.board_error) Result.t
 (** {!read_comments} as a [board_error] result. *)
@@ -415,15 +417,15 @@ val require_persisted_sources_readable : unit -> (unit, Board.board_error) resul
 (** Evidence requires complete post/comment source loads. Ordinary Board reads
     remain best effort; a recorded failure clears only on a successful reload. *)
 
-val get_post_and_comments :
+val get_post_and_comments : reader:Board_access.reader ->
   post_id:string ->
   (Board.post * Board.comment list, Board.board_error) Result.t
 
-val list_comments : ?limit:int -> unit -> Board.comment list
+val list_comments : reader:Board_access.reader -> ?limit:int -> unit -> Board.comment list
 
 (** {1 Votes} *)
 
-val current_vote_for_post :
+val current_vote_for_post : reader:Board_access.reader ->
   voter:string ->
   post_id:string ->
   (Board.vote_direction option, Board.board_error) Result.t
@@ -434,7 +436,7 @@ val vote :
   direction:Board.vote_direction ->
   (int, Board.board_error) Result.t
 
-val current_vote_for_comment :
+val current_vote_for_comment : reader:Board_access.reader ->
   voter:string ->
   comment_id:string ->
   (Board.vote_direction option, Board.board_error) Result.t
@@ -445,21 +447,21 @@ val vote_comment :
   direction:Board.vote_direction ->
   (int, Board.board_error) Result.t
 
-val toggle_reaction :
+val toggle_reaction : reader:Board_access.reader ->
   target_type:Board.reaction_target_type ->
   target_id:string ->
   user_id:string ->
   emoji:string ->
   (Board.reaction_toggle_result, Board.board_error) Result.t
 
-val list_reactions :
+val list_reactions : reader:Board_access.reader ->
   target_type:Board.reaction_target_type ->
   target_id:string ->
   ?user_id:string ->
   unit ->
   (Board.reaction_summary list, Board.board_error) Result.t
 
-val list_reactions_batch :
+val list_reactions_batch : reader:Board_access.reader ->
   targets:(Board.reaction_target_type * string) list ->
   ?user_id:string ->
   unit ->
@@ -471,7 +473,7 @@ val karma_score_for_direction : Board.vote_direction -> int
 (** Scoring contract re-export: [Up] → [+1], [Down] → [0].
     See {!Board.karma_score_for_direction}. *)
 
-val get_karma_ledger :
+val get_karma_ledger : reader:Board_access.reader ->
   ?agent:string ->
   ?limit:int ->
   unit ->
@@ -487,24 +489,25 @@ val get_karma_ledger :
     @param limit  Caps the result list (applied after filtering).
                   Default: unlimited.
 
-    The rebuild contract: summing [delta] over the unfiltered
-    result must equal [get_all_karma ()] for every recipient. *)
+    Summing [delta] over the same reader's unbounded result equals that
+    reader's [get_all_karma] totals for every recipient. *)
 
-val get_all_karma : unit -> (string * int) list
+val get_all_karma : reader:Board_access.reader -> unit -> (string * int) list
 
-val get_agent_karma : agent_name:string -> int
+val get_agent_karma : reader:Board_access.reader -> agent_name:string -> int
 
 (** {1 Aggregates} *)
 
 val list_hearths
-  :  ?exclude_system:bool
+  :  reader:Board_access.reader
+  -> ?exclude_system:bool
   -> ?exclude_automation:bool
   -> unit
   -> (string * int) list
 (** Aggregates hearth counts over the same typed post-kind filter axis used by
     [list_posts]. Omitted filters preserve the complete Board aggregate. *)
 
-val stats : unit -> Yojson.Safe.t
+val stats : reader:Board_access.reader -> unit -> Yojson.Safe.t
 (** Board snapshot ([post_count] / [comment_count] / per-author /
     per-hearth aggregates) projected to JSON. *)
 
@@ -530,7 +533,7 @@ val submit_curation_snapshot :
     current latest snapshot.  Returns the snapshot (including its
     generated ID and timestamp) so callers can log or forward it. *)
 
-val latest_curation_snapshot :
+val latest_curation_snapshot : reader:Board_access.reader ->
   unit -> Board_curation.curation_snapshot option
 (** Return the most recently submitted curation snapshot, or [None] if
     none has been submitted in this process lifetime. *)
@@ -538,6 +541,7 @@ val latest_curation_snapshot :
 (** {1 SubBoard operations} *)
 
 val create_sub_board :
+  reader:Board_access.reader ->
   slug:string ->
   name:string ->
   description:string ->
@@ -547,17 +551,18 @@ val create_sub_board :
   unit ->
   (Board.sub_board, Board.board_error) Result.t
 
-val get_sub_board :
+val get_sub_board : reader:Board_access.reader ->
   sub_board_id:string ->
   (Board.sub_board, Board.board_error) Result.t
 
-val list_sub_boards : unit -> Board.sub_board list
+val list_sub_boards : reader:Board_access.reader -> unit -> Board.sub_board list
 
 val delete_sub_board :
   sub_board_id:string ->
   (unit, Board.board_error) Result.t
 
 val update_sub_board :
+  reader:Board_access.reader ->
   sub_board_id:string ->
   ?name:string ->
   ?description:string ->
@@ -565,3 +570,55 @@ val update_sub_board :
   ?access:Board.sub_board_access ->
   unit ->
   (Board.sub_board, Board.board_error) Result.t
+
+(** Trusted internal observations. These bypass Direct readership and must
+    not be used to answer a caller read. *)
+
+val read_post_unchecked : post_id:string -> (Board.post, Board.board_read_error) Result.t
+
+val read_post_for_evidence_unchecked : post_id:string -> (Board.post, Board.board_read_error) Result.t
+
+val get_comment_parent_for_evidence_unchecked :
+  comment_id:string -> (Board.post, Board.board_error) Result.t
+(** Internal projection lookup. Resolves the actual comment parent and applies
+    the primary posts-source gate before returning it. *)
+
+val get_post_unchecked : post_id:string -> (Board.post, Board.board_error) Result.t
+
+val list_posts_by_run_origin_unchecked : unit -> Board.post list
+
+val find_post_by_run_id_unchecked : run_id:string -> Board.post option
+
+val list_posts_unchecked :
+  ?visibility_filter:Board.visibility option ->
+  ?hearth:string ->
+  ?author_filter:string ->
+  ?exclude_author_filter:string ->
+  ?post_kind_filter:Board.post_kind ->
+  ?sort_by:sort_order ->
+  ?exclude_system:bool ->
+  ?exclude_automation:bool ->
+  ?limit:int ->
+  unit ->
+  Board.post list
+
+val read_comments_unchecked :
+  post_id:string ->
+  (Board.comment list, Board.board_read_error) Result.t
+
+val get_comments_unchecked :
+  post_id:string ->
+  (Board.comment list, Board.board_error) Result.t
+
+val get_post_and_comments_unchecked :
+  post_id:string ->
+  (Board.post * Board.comment list, Board.board_error) Result.t
+
+val list_comments_unchecked : ?limit:int -> unit -> Board.comment list
+
+val search_unchecked :
+  query:string ->
+  limit:int ->
+  Board.post list
+
+val require_readable_target : reader:Board_access.reader -> target_type:Board.reaction_target_type -> target_id:string -> (unit, Board.board_error) result

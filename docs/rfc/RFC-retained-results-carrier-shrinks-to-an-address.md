@@ -3,11 +3,11 @@ rfc: "retained-results-carrier-shrinks-to-an-address"
 title: "남은 도구 결과 묶음은 크기 거절을 받으면 주소 꼴로 바꿔 같은 턴에서 다시 보낸다"
 status: Draft
 created: 2026-11-08
-updated: 2026-11-08
+updated: 2026-11-09
 author: claude
 supersedes: []
 superseded_by: null
-related: ["claude-code-context-overflow-bounded-restart", "official-client-conversation-in-masc", "context-overflow-semantic-recovery", "0473"]
+related: ["claude-code-context-overflow-bounded-restart", "official-client-conversation-in-masc", "context-overflow-semantic-recovery", "0473", "size-refusal-starts-fresh-then-cuts-to-the-floor"]
 ---
 
 # RFC: 남은 도구 결과 묶음은 크기 거절을 받으면 주소 꼴로 바꿔 같은 턴에서 다시 보낸다
@@ -23,12 +23,20 @@ related: ["claude-code-context-overflow-bounded-restart", "official-client-conve
 
 run(runtime 호출 하나. 한 후보에게 보내는 provider 시도 전부)은 `Inline`으로 시작한다. lane이 다른 후보로 넘어가면 새 run이 다시 `Inline`으로 시작한다. typed 크기 거절이 오면 이미 있는 재투영 hook `on_memory_capacity_refusal`이 묶음을 `By_address`로 한 번 바꾼다. `By_address` 글이 엄격히 짧을 때만 바꾼다. 그러면 같은 capacity로 다시 보낸다(§5.2). 그다음 거절은 지금처럼 history를 줄인다. 그 view와 floor에도 `By_address`가 실린다.
 
-줄이기 단계(walk), floor 계산, tail window, blob 정리, ACK 규칙은 바꾸지 않는다.
+- RFC-size-refusal-starts-fresh-then-cuts-to-the-floor가 official-client lane(Claude Code, Codex)의 걸음을 바꾼다. 그 RFC 뒤로 그 lane은 hook을 부르지 않는다.
+  - Start가 typed 크기 거절을 받으면 다음 요청은 floor다. 묶음은 그 floor에서 `By_address`로 바뀐다. memory와 history도 같은 floor에서 가장 작은 꼴로 간다.
+  - 같은 capacity에서 묶음만 바꿔 다시 보내는 걸음은 없어진다.
+- agent_core lane은 이 RFC 그대로다.
+- 어느 쪽이든 `By_address` 글이 `Inline` 글보다 엄격히 짧을 때만 바꾼다.
+- 이 RFC 본문이 official-client lane의 hook, 같은 capacity 다시 보내기, history 줄이기를 말하는 곳(§1의 결과, §4.3, §5, §7, §9, §12)은 그 RFC 전의 동작이다. 그 lane의 걸음은 그 RFC가 정한다. 두 꼴(§4)과 ACK·reader(§6)는 두 lane 모두 그대로다.
+
+이 RFC는 줄이기 단계(walk), floor 계산, tail window, blob 정리, ACK 규칙을 바꾸지 않는다.
 
 결과는 이렇다. typed 크기 거절이 hook에 닿는 경로(§7)에서만 그렇다.
 
 - 고정부(system prompt, 도구, 목표)와 `By_address` 묶음이 창에 들어가면, 효과 전에 온 크기 거절로 그 Keeper가 floor에서 잠기지 않는다(`Bootstrap_floor_exceeded`). receipt 개수와 상관없다.
 - 넘친 턴은 같은 턴 안에서 사람 손 없이 다시 보내진다. 그 턴의 `Completed`가 receipt를 지운다.
+  - RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로 Codex Start `input_too_large`는 floor까지 내려간 뒤 막힌다. 묶음은 그 거절이 세는 `turn/start` 글에 없다(그 RFC §7).
 - 모델은 호출 몇 개가 이미 결과를 돌려줬는지 안다. reader가 있으면 그 결과도 읽는다. 「끝난 효과를 반복하지 말라」는 안내는 두 꼴 모두에 있다.
 - 효과 뒤에 턴 안에서 넘치는 경우(`Effect_fenced`)는 지금처럼 운영자 몫이다(§9).
 
@@ -130,6 +138,8 @@ blob은 하나다. 바이트는 `Inline` 글 그대로다.
 
 ### 4.3 blob 쓰기와 수명
 
+official-client lane에서는 RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로 floor가 같은 함수(`switch_to_address`)로 꼴을 바꾼다. 이 절의 「hook」은 그 floor도 뜻한다.
+
 - hook이 꼴을 바꿀 때 blob을 한 번 쓴다. `Tool_blob_store.put_durable_reuse`를 쓴다(`tool_blob_store.mli:129-135`).
   - 이 process가 이미 쓴 주소는 읽어서 비교만 한다. 없거나 깨졌으면 다시 쓴다.
   - 쓰기가 실패하면 `put_durable_reuse`는 `Sys_error`를 던진다. hook은 이것을 `Error`로 돌려주고 꼴을 바꾸지 않는다(§5.1). 예외는 run 밖으로 나가지 않는다.
@@ -157,6 +167,7 @@ blob은 하나다. 바이트는 `Inline` 글 그대로다.
   - `Reprojected`: `on_memory_retry ()` 뒤 같은 capacity로 다시 보낸다.
   - `Unchanged`: history를 줄인다.
   - `Error`: 그 거절로 끝난다.
+  - RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로는 이 hook을 부르지 않는다. floor로 갈 때 묶음 꼴을 바꾼다. 아래 꼴 바꾸기 조건은 그 floor에서도 같다(그 RFC §5).
 - agent_core의 `memory_capacity_retry_sequence`(`keeper_turn_driver_try_provider.ml:3320-3330`)
   - `Reprojected`면 다시 보내고, `Unchanged`면 history 쪽 복구로 넘긴다.
 
@@ -180,9 +191,11 @@ blob은 하나다. 바이트는 `Inline` 글 그대로다.
 - Claude Code와 Codex의 `on_memory_retry`는 `resolve_input_rejected_for_shrink_retry`다(`keeper_claude_code_runtime.ml:681-710`).
   - Claude Code의 크기 거절과 Codex의 `contextWindowExceeded`는 `Input_rejected Bootstrap_floor_exceeded`로 기록된다. `on_memory_retry`가 이것을 `Restart_fresh`로 푼다.
   - Codex의 `input_too_large`는 `Protocol_failed`로 기록된다(`keeper_codex_runtime.ml:826-828`). `on_memory_retry`는 아무것도 하지 않고, 다음 `plan_claim`이 fresh plan을 낸다(`keeper_official_client_session_store.ml:1520-1532`).
+    - RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로는 Gate가 아니면 창 거절과 같은 `Input_rejected Bootstrap_floor_exceeded`로 기록된다(그 RFC §4). Gate continuation은 지금처럼 `Protocol_failed`다(그 RFC §6, #50398).
   - 어느 쪽이든 다시 보내는 요청은 fresh Start다.
 - 같은 capacity로 다시 보내니 history는 그대로이고 묶음만 짧아진다.
 - 그다음 거절은 history를 줄인다. 그 view와 floor에도 `By_address`가 실린다.
+- RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로 official-client lane에는 같은 capacity 다시 보내기가 없다. 묶음은 floor에서 바뀐다.
 - floor는 history만 재니(§3) floor 계산은 그대로 맞다.
 
 ### 5.3 Resume
@@ -191,6 +204,7 @@ blob은 하나다. 바이트는 `Inline` 글 그대로다.
 - `Inline`이 넘치면 §5.1의 hook이 꼴을 바꾼다.
   - 다시 보내기는 fresh Start라서 vendor 세션을 버린다.
   - 지금의 Resume overflow도 같다(`keeper_claude_code_runtime.ml:681-684`).
+  - RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로는 Resume 거절에 꼴을 바꾸지 않는다. Resume에서 넘친 것은 vendor가 쥔 세션일 수 있다. fresh Start가 `Inline`으로 먼저 가고, 그 Start가 거절되면 floor에서 바뀐다(그 RFC §6).
 - Claude Code Resume은 vendor 세션이 이미 가진 carried context를 다시 보내지 않는다(`keeper_claude_code_runtime.ml:958-990`). receipt 묶음도 `Tool_result_receipts` carried context다(`keeper_official_client_context_projection.ml:413-414`). 이 점을 써서 Resume을 `By_address`로 시작하는 규칙은 닿는 길이 좁아서 두지 않는다(§11의 8).
 - Codex는 receipt를 Start와 Resume 모두 developer item으로 늘 다시 넣는다(`keeper_codex_runtime.ml:1251-1266`).
 
@@ -201,7 +215,7 @@ blob은 하나다. 바이트는 `Inline` 글 그대로다.
   - Codex: `keeper_codex_runtime.ml:2106-2114`
 - 묶음 때문에 넘치면 `Vendor_session_full`로 기록된다(`keeper_claude_code_runtime.ml:534-552`, `keeper_codex_runtime.ml:846-861`).
   - 실제로는 vendor 세션이 아니라 묶음이 넘친 것이다.
-  - 다음 일반 턴이 fresh 세션을 열고, 그 턴에서 hook이 꼴을 바꾼다.
+  - 다음 일반 턴이 fresh 세션을 열고, 그 턴에서 hook이 꼴을 바꾼다. RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로는 그 턴의 floor에서 바뀐다.
 - 같은 세션에서 다시 보내려면 실측이 먼저다. CLI가 거절된 resume prompt를 세션 기록에 남기지 않는지 봐야 한다. 이 RFC는 그 일을 하지 않는다.
 - 위 줄들의 주석은 「resume prompt는 어떤 capacity에서도 같다」고 말한다. 묶음 꼴이 바뀌면 이 말이 틀린다. 주석을 「history를 줄여도 같다」로 고친다.
 
@@ -229,7 +243,9 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
 
 - Claude Code: `prompt_too_long`이 `Context_window_exceeded`로 온다. Start와 Resume에서 닿고, Gate continuation에서는 닿지 않는다(§5.4).
 - Codex: `turn/start`가 돌려준 `contextWindowExceeded`와 `input_too_large`다.
+  - `input_too_large`는 `turn/start` 글만 센다. 묶음은 Start의 그 글에 없다.
 - agent_core: provider가 parse 경계에서 크기 거절을 typed로 줄 때만 닿는다.
+- RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로 Claude Code와 Codex에서는 hook이 아니라 그 RFC의 단계가 답한다(그 RFC §5, §7). 이 절의 「hook에 닿는다」는 그 lane에서는 그 단계에 닿는다는 뜻이다.
 
 **닿지 않는 경로** (이슈로 남긴다. §12의 4)
 
@@ -283,6 +299,7 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
   - receipt가 있는 run은 크기 거절을 받으면 history를 줄여 보지 않고 끝난다. 묶음이 작고 history가 넘친 경우도 그렇다.
   - agent_core에서는 그 run의 다른 다시 보내기(turn boundary resend, demotion)도 막힌다. `memory_capacity_retry_sequence`가 `Error`에 `on_projection_failure`를 부르기 때문이다(`keeper_turn_driver_try_provider.ml:3320-3330`).
   - blob 저장소가 고장 나면 큰 도구 결과와 그림 저장도 같이 실패한다. 그래서 묶음만 따로 살리는 길은 두지 않는다.
+  - RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로 official-client lane에서는 묶음만 `Inline`으로 두고 floor를 보낸다. 실패는 원래 거절로 덮지 않고 warn 로그에 남긴다(그 RFC §8, #50170).
 - Gate continuation이 묶음 때문에 넘치면 `Vendor_session_full`로 잘못 기록된다(§5.4).
 - Completion review 요청은 같은 run에서 다시 보내지 않는다(`keeper_claude_code_runtime.ml:1768`, `keeper_codex_runtime.ml:2112`). 그래도 묶음 때문에 넘치지는 않는다. review는 Keeper가 아닌 임시 base path에서 돌아서(`lib/workspace_metric_hooks.ml:369-394`) 그 Keeper의 receipt를 싣지 않는다.
 - ACK된 뒤의 blob은 배포 때 오프라인 검사 두 번이 지나면 지워질 수 있다. 그 뒤에 vendor 대화에 남은 주소로 읽으면 실패한다.
@@ -311,6 +328,7 @@ hook은 typed 크기 거절에만 불린다. 거절 문장을 읽어 크기 거�
   - `ShrinkBeforeSwitch`: 꼴을 바꿀 수 있는데 history부터 줄인다. §11의 2(floor에서만 바꾸기)다.
   - `SwitchBack`: hook이 꼴을 `Inline`으로 되돌린다.
 - 모델에 없는 것: 효과 뒤의 거절과 typed가 아닌 거절이다. 둘 다 hook에 닿지 않는다(§7, §9).
+- 이 모델의 걸음(같은 capacity에서 꼴을 바꾼 뒤 history를 반씩 줄인다)은 RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 전의 official-client 걸음이다. 그 RFC 뒤의 걸음은 `specs/bug-models/SizeRefusalRetryAdmission.tla`가 본다. 그 RFC의 L2가 이 모델의 걸음을 새 단계에 맞춘다.
 
 TLC 1.8.0(로컬, `-workers 1`) 결과는 이렇다.
 
@@ -329,6 +347,7 @@ TLC 1.8.0(로컬, `-workers 1`) 결과는 이렇다.
 2. **floor에서만 꼴 바꾸기**
    - 장점: 바꾸는 곳이 하나다.
    - 단점: Codex와 agent_core에는 floor hook이 없다. 묶음만으로 창을 넘으면 중간 view가 모두 거절된다. floor에 닿기 전에 provider 요청을 history 크기의 log2번 버린다.
+   - 2026-11-09 RFC-size-refusal-starts-fresh-then-cuts-to-the-floor가 official-client lane에 이 방법을 받아들였다. 그 RFC는 중간 view를 없애서 위 단점이 사라진다. Codex floor는 그 RFC의 L2가 만든다. agent_core는 이 RFC 그대로다.
 3. **receipt를 checkpoint history로 옮기기**
    - 장점: 묶음이 history가 되어 walk가 줄인다.
    - 단점: official-client-conversation-in-masc RFC §5.6(턴의 대화를 checkpoint에 남긴다)이 아직 Draft이고 구현이 없다. 효과 반복 금지 안내를 둘 자리도 새로 정해야 한다.
@@ -365,6 +384,8 @@ TLC 1.8.0(로컬, `-workers 1`) 결과는 이렇다.
 
 시험은 각 PR의 첫 커밋에 넣고, 그 뒤로 고치지 않는다. 검토가 찾은 빈 곳은 새 시험으로 더하고, 고정한 assertion은 바꾸지 않는다. 로컬 Dune 빌드는 하지 않는다. PR마다 type-check와 leader CI 시험 결과를 본다.
 
+RFC-size-refusal-starts-fresh-then-cuts-to-the-floor는 아래 시험 일부의 assertion을 바꾼다. 그 시험이 고정한 official-client 걸음을 그 RFC가 바꾸기 때문이다(그 RFC §16).
+
 **1. 이 문서 PR**
 
 - 이 RFC, bounded-restart RFC 고침, TLA+ 모델과 cfg 넷, `specs/INDEX.md`.
@@ -396,6 +417,7 @@ TLC 1.8.0(로컬, `-workers 1`) 결과는 이렇다.
   - Codex(`contextWindowExceeded`)와 agent_core도 같다.
 - 묶음을 바꿔도 창을 넘으면 history 줄이기가 이어지고, floor까지 `By_address`가 실린다.
 - Claude Code Resume: `Inline` 묶음이 넘치면 꼴을 바꾸고 fresh Start로 다시 보내 받아들여진다.
+- RFC-size-refusal-starts-fresh-then-cuts-to-the-floor 뒤로 위 두 줄은 바뀐다. Start 거절 다음은 floor 한 번이고, Resume 거절 뒤 fresh Start는 `Inline`으로 간다(그 RFC §5, §6).
 - Gate continuation: 묶음 넘침에 다시 보내지 않고 `Vendor_session_full`로 끝난다. 지금 동작을 고정한다.
 - 효과 뒤 넘침은 지금처럼 `Effect_fenced`로 끝나고 hook이 불리지 않는다. 지금 동작을 고정한다.
 - 기존 시험 「거절돼도 receipt는 남는다」(`test/test_keeper_claude_code_runtime.ml:6927-6929`)는 그대로 통과한다.

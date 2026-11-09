@@ -267,7 +267,7 @@ let test_real_committed_error_keeps_payload_and_late_input () = with_fixture
       | _ -> fail "the real upload must appear once in the prepared POST" in
     check (list string) "the retained digest names the actual stored artifact" [digest]
       (Tool_blob_store.list_all (Tool_blob_store.create ~base_path));
-    (match Masc.Board_dispatch.get_post ~post_id:committed_id with
+    (match Masc.Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator ~post_id:committed_id with
      | Ok post ->
        check string "the ID names the actual published body" "original body" post.body;
        check string "the actual route stamps the operator" Client.default_agent_name
@@ -319,7 +319,7 @@ let test_attachment_failure_never_posts_to_board () = with_fixture
      | Publication.Returned _ -> fail "an unreadable attachment must stop before Board POST");
     apply state outcome;
     check int "no Board POST reached the real router" 0 !posts;
-    check int "no actual post was created" 0 (List.length (Masc.Board_dispatch.list_posts ()));
+    check int "no actual post was created" 0 (List.length (Masc.Board_dispatch.list_posts ~reader:Masc_board_handlers.Board_access.Operator ()));
     check bool "the exact original staged object stays" true
       (match state.board_compose_attachments with [kept] -> kept == missing | _ -> false);
     check string "the unsent draft stays" "original draft" (Buffer.contents state.board_draft))

@@ -653,7 +653,7 @@ let test_fleet_board_pending_is_not_certified_by_same_post () =
     | Keeper_event_queue.Board_signal board ->
       { stimulus with payload = Board_signal
           { board with kind = Comment_added { comment_id = id; parent_id = None } } }
-    | Board_attention _ | Bootstrap | Fusion_completed _ | Schedule_due _
+    | Board_routing_pending _ | Board_attention _ | Bootstrap | Fusion_completed _ | Schedule_due _
     | Connector_attention _ | Hitl_resolved _ | Ask_answered _
     | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
     | Workspace_message _ | Delegate_completed _ | Composition_completed _
@@ -704,7 +704,7 @@ let test_fleet_schedule_occurrence_payload_identity () =
     let queued = match original.payload with
       | Keeper_event_queue.Schedule_due wake ->
         { original with payload = Schedule_due { wake with occurrence_id = queued_occurrence } }
-      | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+      | Board_signal _ | Board_routing_pending _ | Board_attention _ | Bootstrap | Fusion_completed _
       | Connector_attention _ | Hitl_resolved _ | Ask_answered _
       | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
       | Workspace_message _ | Delegate_completed _ | Composition_completed _
@@ -760,7 +760,7 @@ let test_fleet_duplicate_scheduled_queue_entries_require_attention () =
   let malformed_occurrence (stimulus : Keeper_event_queue.stimulus) = match stimulus.payload with
     | Keeper_event_queue.Schedule_due wake ->
       { stimulus with payload = Schedule_due { wake with occurrence_id = "different-occurrence" } }
-    | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+    | Board_signal _ | Board_routing_pending _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Connector_attention _ | Hitl_resolved _ | Ask_answered _
     | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
     | Workspace_message _ | Delegate_completed _ | Composition_completed _
@@ -805,7 +805,7 @@ let test_fleet_ambiguous_ledger_id_requires_attention () =
     | Keeper_event_queue.Schedule_due wake ->
       { initial with post_id = "board:shared-post";
         payload = Schedule_due { wake with occurrence_id = "board:shared-post" } }
-    | Board_signal _ | Board_attention _ | Bootstrap | Fusion_completed _
+    | Board_signal _ | Board_routing_pending _ | Board_attention _ | Bootstrap | Fusion_completed _
     | Connector_attention _ | Hitl_resolved _ | Ask_answered _
     | Completion_authority_rejected _ | Task_outcome _ | Task_cancelled _
     | Workspace_message _ | Delegate_completed _ | Composition_completed _

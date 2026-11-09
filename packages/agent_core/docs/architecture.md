@@ -50,8 +50,6 @@ Eio structured concurrency: every fiber runs within a `Switch.t`.
 - Switch guarantees cleanup on exit (normal or exception)
 - Parent switch cancellation propagates through the fiber tree
 - Timeout/error containment depends on the combinator contract:
-  - `Async_agent.race` is fail-fast; the first completion cancels
-    remaining siblings.
   - `Async_agent.all` is all-settled; per-agent timeouts and ordinary
     exceptions are returned in that agent's result while sibling agents finish.
 - Switch release hooks run on scope exit to clean up HTTP connections and child processes

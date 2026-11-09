@@ -1,9 +1,9 @@
 ---
 rfc: "0512"
 title: "경로 표 하나가 HTTP/1.1 과 HTTP/2 를 다 받고, TLS·ALPN 리스너가 HTTP/2 를 실제로 쓰이게 한다"
-status: Implemented (S0~S6 병합 2026-11-07~08, after 측정 2026-11-08. 경로 패리티·브라우저 증거는 #50192)
+status: Implemented (S0~S6 병합 2026-11-07~08, after 측정 2026-11-08. 경로 패리티는 #50192)
 created: 2026-11-07
-updated: 2026-11-08
+updated: 2026-11-09
 author: claude
 supersedes: []
 superseded_by: null
@@ -12,7 +12,7 @@ related: ["typed-route-auth", "0493", "0350", "0281", "0204"]
 
 # RFC-0512: 경로 표 하나가 HTTP/1.1 과 HTTP/2 를 다 받고, TLS·ALPN 리스너가 HTTP/2 를 실제로 쓰이게 한다
 
-- 상태: 구현됨. S0~S6 병합 2026-11-07~08, after 측정 2026-11-08. 남은 증거(전송별 경로 차이, 브라우저)는 #50192, Q1 은 #50198 이 추적한다.
+- 상태: 구현됨. S0~S6 병합 2026-11-07~08, after 측정 2026-11-08. 남은 증거(전송별 경로 차이)는 #50192, Q1 은 #50198 이 추적한다.
 - 이슈: #35592, #46676, #47255, #47348, #47534, #47551, #47609, #28161, #40063, #48713(전송별 경로 차이), #39050(h2 stream id)
 - 근거: 조사는 `docs/research/2026-11-07-http-transport-stack.md`, 기준선은 `docs/evidence/http2-one-table-2026-11/baseline/`(2026-11-07 09:43Z~09:52Z, 설치 바이너리 0.68.0 build-commit `6afc364dd90`). 코드 좌표는 `origin/main` `f8dbd356759` 에서 읽었다.
 - 먼저 있는 결정: `typed-route-auth` 가 HTTP/1.1 경로의 인증 종류를 등록 타입으로 적었다(`Router.Make_typed`). A4c 가 HTTP/2 게이트웨이에게 그 종류를 읽게 했다(`Server_h2_route_gate`). RFC-0493 이 SSE 프레임을 소켓 flush 까지 기다리게 했다. RFC-0350 이 H2 요청 fiber 의 admission 을 정했다. 이 RFC 는 그 위에서 응답 쪽을 전송 중립으로 만들고 리스너에 TLS 를 더한다.
@@ -123,7 +123,7 @@ piaf 0.2.0 은 HTTP/1.1·HTTP/2·TLS 를 한 API 로 주지만 핸들러가 `Res
 - 후(2026-11-08, 바이너리 `9c7452c0e208` = main 에 S0~S6 과 #49862·#49933·#50027 이 들어간 뒤): `docs/evidence/http2-one-table-2026-11/after/`. 전송 `h1-6`·`h1`·`h2c`·`tls-h1`·`tls-h2`, 기준선과 같은 인자. 절차는 그 디렉터리의 README 에 있다.
 - 본 것: SSE 50개가 `h2c`·`tls-h2` 에서 50/50 열린다(기준선의 h2c 는 50개 모두 404). HTTP/1.1 의 burst req/s·p50 은 기준선보다 나빠지지 않았다. 같은 측정 안에서 100개 동시 burst 는 한 연결의 h2c·tls-h2 가 h1-6·tls-h1 보다 req/s 1.4~2.3배이고 p99 는 그 19~38% 다. curl 다운로드(한 번에 하나씩)는 h2c 가 h1 의 0.84배(본 측정)·0.73배(교차 확인)이고 기준선(교차 확인 런)은 0.84 였다. tls-h2 는 curl 로 56~59 MB/s(curl h2c 의 1/7.4~1/7.5, curl tls-h1 은 재지 않음)이고 Python 4개 동시로는 tls-h1 88~93 / tls-h2 81~87 MB/s 라, TLS 위의 손실은 TLS 리스너의 비용이다. 한 요청 왕복에서 h2c 는 h1 보다 0.2~0.7 ms 더 든다(기준선 1.7~3.5 ms). 기준선과 사이에 이틀치 main 변경과 측정 시각 차이가 있어 HTTP/1.1 값의 개선은 이 스택의 효과로 읽지 않는다.
 - 전송별 경로 차이: 아직 재지 않았다. `tools/auth_route_inventory` 를 빌드해야 하고 그것을 돌리는 CI 워크플로가 없다. #50192 가 추적한다.
-- 브라우저: 아직 잡지 않았다. #50192 가 추적한다.
+- 브라우저(2026-11-09, `docs/evidence/http2-one-table-2026-11/after/browser.md`): ego lite 0.6.2.9(Chromium 156)로 연 대시보드 한 탭이 TLS 리스너에서는 문서와 자원 35개를 모두 `h2` 로 받고, load 5초 뒤 측정 순간 연결 1개를 열고 있었다. 같은 탭이 평문 리스너에서는 `http/1.1` 로 받고 같은 순간 연결 4개를 열고 있었다. 연 연결의 총수는 재지 않았다.
 
 ## 6. 열린 질문
 

@@ -130,6 +130,13 @@ let scoped_keys =
       Keys.footer_hints ~detail_open:false Masc_tui_types.System_logs,
       Keys.footer_hints ~detail_open:true Masc_tui_types.System_logs,
       [ "Right / Enter" ] )
+  (* [l], [v] and [c] change the list's filters and put its cursor back on the
+     first row. An open log entry keeps its place, so [ and ] would step from
+     the wrong row; the dispatcher declines all three while one is open. *)
+  ; ( "System_logs filters",
+      Keys.footer_hints ~detail_open:false Masc_tui_types.System_logs,
+      Keys.footer_hints ~detail_open:true Masc_tui_types.System_logs,
+      [ "l"; "v"; "c" ] )
   (* The Approvals queue and an open approval draw from two builders of their
      own ([footer_hints_approvals], [footer_hints_approval_detail]), so no
      [footer_hints ~detail_open] call reaches them. [v] reads a Gate string's

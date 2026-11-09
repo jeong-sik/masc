@@ -3,7 +3,7 @@ rfc: "0512"
 title: "경로 표 하나가 HTTP/1.1 과 HTTP/2 를 다 받고, TLS·ALPN 리스너가 HTTP/2 를 실제로 쓰이게 한다"
 status: Implemented (S0~S6 병합 2026-11-07~08, after 측정 2026-11-08. 경로 패리티는 #50192)
 created: 2026-11-07
-updated: 2026-11-08
+updated: 2026-11-09
 author: claude
 supersedes: []
 superseded_by: null

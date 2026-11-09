@@ -40,7 +40,6 @@ let mk_trajectory ?(steps = []) ?(success = true) ?finished ?error ()
   ; started_at = 100.0
   ; finished_at = finished
   ; success
-  ; metrics = None
   ; error
   }
 ;;
@@ -402,7 +401,6 @@ let test_trajectory_of_json_bad_step () =
       ; "started_at", `Float 1.0
       ; "finished_at", `Null
       ; "success", `Bool true
-      ; "metrics", `Null
       ; "error", `Null
       ]
   in

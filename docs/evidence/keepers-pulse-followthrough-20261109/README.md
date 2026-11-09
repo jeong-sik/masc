@@ -18,7 +18,7 @@ A new private base contained only canonical synthetic store inputs: three Keeper
 
 The terminal proxy passed native GET responses through and blocked every mutation. Only the deliberate memory-health fault closed a connection without contacting upstream or writing any HTTP status/body. The later R key tested the real failed-read path; Plain entry had no preceding R. Published frames and bodies are sanitized derivatives. Their own hashes are recorded separately from native wire hashes.
 
-Two initial controller attempts failed before useful product frames because the capture environment retained `TERM=dumb`; they were not product successes. The third 120-column controller explicitly used `TERM=xterm-256color`. Original local failure records were retained. No full 48-view matrix, provider recovery, production fleet behavior, installation, deployment or full regression result is claimed here.
+The first controller failed with ENOTTY before useful frames. The second retained a startup diagnostic requiring an interactive TTY and a non-dumb TERM; the capture environment had retained `TERM=dumb`. Neither was a product success. The third 120-column controller explicitly used `TERM=xterm-256color`. Original local failure records were retained. No full 48-view matrix, provider recovery, production fleet behavior, installation, deployment or full regression result is claimed here.
 
 ## Manual reading
 
@@ -40,3 +40,5 @@ At 2026-11-09 13:28:43 UTC the owned private native process was absent after SIG
 [Test run 42625266384](https://github.com/jeong-sik/masc/actions/runs/42625266384), head `a96ec36efb3f7d3248f0d4e85d07644f08a1a2f4`, ref `feat/keepers-world-absence`, conclusion `success`: TARGET_SUITES=`test_workspace_memory_ledger,test_workspace_memory_ledger_view,test_tui_decode_workspace_memory,test_tui_memory_world,test_tui_keeper_axis`, minimal=true. The five suites passed 18 / 7 / 7 / 6 / 5 tests (43 total). This is focused verification, not full regression.
 
 PR type-check (dune build @check), run 42625243301, uses that same head/ref. It was still `in_progress / no conclusion` at the evidence boundary. The earlier `677fe1e` type/key/Story successes remain attached to that earlier source.
+
+[cleanup.json](cleanup.json) records the final dedicated tmux check (`no server running`), stale owned socket removal and absent transport-fault flag.

@@ -56,7 +56,7 @@ owns that rule; this table records the remaining scope.
 | Work | Planning, Approvals, Verification, Harness, Board; Goal, Task, request, proof and discussion details | #50671 simplifies the Task list; #50688 wraps the goal and declared success criterion, retaining exceptional proof/binding notices and keeping identifiers in detail. Linked Task details qualify partial or retained observations rather than claiming absence or a complete count | Goal candidate execution; other Work readings, installation and input/confirmation ownership |
 | Keepers | Keepers, Memory, Schedules, Fusion, Changes; all six Keeper modes and detail tabs | Coordinate with existing Keeper Pulse and memory work (#50669, #50643) rather than duplicate it | Review those changes together; chat, schedule, result and error states |
 | Features and plugins | Lanes, Clients, Connectors, Resources, Tools; plugins, browser, tools, skills and result details | #50677 simplifies feature overview around purpose, standing, errors and existing actions. The a00f8aab candidate was observed in a native PTY at 150×40 and 80×24; narrow secondary action hints still displace current execution fields | Fix narrow summary priority; the other feature surfaces, input overlays and installation |
-| Workspace | Repositories, Code; checkout, Git changes, files, history, diff and navigation overlays | Registration and current Git readings remain distinct; inspect the repeated explanatory header and selected content next | Source audit, candidate execution and navigation/return behavior |
+| Workspace | Repositories, Code; checkout, Git changes, files, history, diff and navigation overlays | Repository selection now leads with its scoped last Git observation and assigned Keepers, before registered defaults and the path. The normal explanatory question and repeated inner heading are removed; retained/failed reads remain visible. Rendering and cursor paging share the revised row budget | Independent source review; candidate execution and navigation/return behavior; Code, history, diff and overlays |
 | System | Config, Runtime, Acting, System_logs; all settings tabs, account/model forms and diagnostic details | #50690 puts validation and application before full source identifiers and key lists, retaining failed-refresh notices before previous status facts; two independent source reviews found no P0–P2 | Candidate execution, other System readings and save/uncertain-result behavior |
 
 For each row, inspect wide and narrow native views, loading/empty/error and
@@ -97,3 +97,20 @@ with the narrow Feature summary finding from the a00f8aab PTY: current fields
 precede secondary action hints. Labels, typed standing, failures, full detail
 and existing key actions are preserved. Task detail uses #50698's implementation.
 Native execution of this follow-up is still pending.
+
+`Minimal manual checks` [run 42637409866](https://github.com/jeong-sik/masc/actions/runs/42637409866)
+completed with conclusion `success`: workflow `main` at 174196c9, selected source
+8ebbe020, scenario `detail-ownership`. The receipt records the TUI build and
+three completed suites (`test_tui_detail_reading`, `test_tui_board_successor`,
+`test_tui_usage_scope`), each with zero suite and log exit codes. The downloaded
+TUI digest and embedded source commit were verified. This is an executable
+candidate, not a visible-screen, same-version server, installation or full
+regression result. Later Memory pass-label and Workspace changes are outside
+that source.
+
+The targeted `Test` [run 42637437417](https://github.com/jeong-sik/masc/actions/runs/42637437417)
+also completed with conclusion `success` on `feat/tui-reading-priority-20261109`
+at 8ebbe020. Its retained runner log records the three selected suites:
+`test_tui_memory_facts_explorer` (9 cases), `test_tui_planning_detail` (8), and
+`test_tui_task_document_style` (4). These are category-search, proof-boundary and
+document-identity/style checks; they are not the complete TUI regression.

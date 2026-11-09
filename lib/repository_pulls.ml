@@ -138,13 +138,14 @@ let keeper_of_author ~keepers pull =
   | Some _ | None -> None
 
 (* Only the review's commit and the head's object id are compared. *)
+let review_on_head ~head (review : latest_review) =
+  Option.equal String.equal review.commit_oid (Some head)
+
 let head_review_of pull =
   match pull.head_oid, pull.reviews with
   | None, (Reviews_not_read | Reviews_read _) | Some _, Reviews_not_read -> Head_review_unknown
   | Some head, Reviews_read { reviews; truncated } ->
-    if List.exists
-         (fun (review : latest_review) -> Option.equal String.equal review.commit_oid (Some head))
-         reviews
+    if List.exists (review_on_head ~head) reviews
     then Reviewed_on_head
     else if truncated
     then Review_history_incomplete
@@ -207,7 +208,7 @@ let latest_review_to_yojson ~head_oid (review : latest_review) =
     ; "commit_oid", string_or_null review.commit_oid
     ; ( "on_head"
       , match head_oid with
-        | Some head -> `Bool (Option.equal String.equal review.commit_oid (Some head))
+        | Some head -> `Bool (review_on_head ~head review)
         | None -> `Null )
     ]
 

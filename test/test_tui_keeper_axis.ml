@@ -166,6 +166,11 @@ let test_segments_extracts_scheduled_and_memory_cells () =
     (List.hd cells).Masc_tui_keeper_axis_cell.text;
   Alcotest.(check string) "second cell is mem ?" "mem ?"
     (List.nth cells 1).Masc_tui_keeper_axis_cell.text;
+  (* The wake strip reads the same agenda: the 12:00:00Z run is two slots
+     after the 11:00 slot that holds now. *)
+  Alcotest.(check bool) "the wake strip reads the state's agenda" true
+    (Masc_tui_keeper_axis.wake_strip state ~now ~ahead:2 ~keeper_name:"edgar"
+     = Masc_tui_keeper_next_run.[ Wakes 0; Wakes 0; Wakes 1 ]);
 
   let other = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"other" ~runtime:None in
   Alcotest.(check int) "unscheduled keeper has mem ?" 1 (List.length other);

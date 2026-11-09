@@ -66,6 +66,10 @@ let run_cell (state : Masc_tui_types.state) ~now ~keeper_name =
     (Masc_tui_keeper_next_run.find (get_schedule_index state) ~keeper_name)
 ;;
 
+let wake_strip (state : Masc_tui_types.state) ~now ~ahead ~keeper_name =
+  Masc_tui_keeper_next_run.wake_strip (get_schedule_index state) ~now ~ahead ~keeper_name
+;;
+
 let segments (state : Masc_tui_types.state) ~now ~keeper_name ~runtime
   : Masc_tui_keeper_axis_cell.t list =
   let schedule_cells = Option.to_list (run_cell state ~now ~keeper_name) in

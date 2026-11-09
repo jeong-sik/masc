@@ -37,8 +37,9 @@ let release t stream_id entry =
 
 (* The stream switch stays open until the response ends, so deferred body
    callbacks and response producers forked on it outlive the header callback.
-   The work and every fiber it forks see the stream's end and flush bound
-   through the binding. *)
+   The work gets the stream's end and also runs with it bound: h2 calls the
+   connection's error handler inside the call that reports a failure, and that
+   handler has no other way to reach the stream's flush bound. *)
 let run_scope t entry reqd work =
   Eio.Switch.run (fun stream_sw ->
     entry.scope <- Running stream_sw;
@@ -50,7 +51,7 @@ let run_scope t entry reqd work =
         reqd
     in
     Http_h2_stream.Stream_end.with_current stream_end (fun () ->
-      try work stream_sw with
+      try work stream_end with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn -> Http_h2_stream.reset ~stream_sw reqd (Http_h2_stream.Raised exn));
     Eio.Promise.await entry.response_ended)

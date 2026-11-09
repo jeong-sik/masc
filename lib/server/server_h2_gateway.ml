@@ -32,20 +32,17 @@ let make_request_handler ~trust_policy ~routes =
     Http_h2_response_ledger.create
       ~max_pending_bytes:(H2_response_limits.max_pending_bytes ())
   in
-  fun ~request_sw client_addr h2_reqd ->
+  fun ~stream_end client_addr h2_reqd ->
     let within_request work =
       match Http_h2_response_ledger.current () with
       | Some ledger -> work ledger
       | None ->
-        Http_h2_response_ledger.with_request embedded_ledger ~sw:request_sw (fun () ->
-          work (Http_h2_response_ledger.current_exn ()))
+        Http_h2_response_ledger.with_request
+          embedded_ledger
+          ~sw:(Http_h2_stream.Stream_end.switch stream_end)
+          (fun () -> work (Http_h2_response_ledger.current_exn ()))
     in
     within_request (fun ledger ->
-      let stream_end =
-        match Http_h2_stream.Stream_end.current () with
-        | Some stream_end -> stream_end
-        | None -> invalid_arg "Server_h2_gateway: an HTTP/2 request outside a stream registry"
-      in
       let reqd = Http_reqd.of_h2 ~stream_end ~ledger h2_reqd in
       match
         Server_request_authority.classify_h2_request ~trust_policy (H2.Reqd.request h2_reqd)

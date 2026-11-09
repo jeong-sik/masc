@@ -36,6 +36,14 @@ let append store (post : Board.post) content =
 let has_comment store (comment : Board.comment) =
   Result.is_ok (Board.get_comment store ~comment_id:(Board.Comment_id.to_string comment.id))
 
+let observe_comments store (post : Board.post) =
+  match Board.observe_comments store ~post_id:(Board.Post_id.to_string post.id) with
+  | Ok observation -> observation
+  | Error error -> Alcotest.fail (Board.show_board_read_error error)
+
+let observation_has_comment (observation : Board.comments_observation) (comment : Board.comment) =
+  List.exists (fun (row : Board.comment) -> row.id = comment.id) observation.comments
+
 let require_io_error = function
   | Error (Board.Io_error _) -> ()
   | Error error -> Alcotest.fail (Board.show_board_error error)
@@ -134,8 +142,13 @@ let test_restart_keeps_complete_prefix_before_torn_tail base_path =
   Board_dispatch.reset_for_test ();
   Result.get_ok (Board_dispatch.init_jsonl ~base_path ~recipient_lookup:Recipient_lookup.none_declared ());
   let restarted = Board.global () in
-  Alcotest.(check bool) "complete prefix comment remains visible after startup" true
-    (has_comment restarted comment);
+  let observed = observe_comments restarted post in
+  Alcotest.(check bool) "complete prefix comment remains a display row after startup" true
+    (observation_has_comment observed comment);
+  Alcotest.(check bool) "display prefix cannot establish a complete thread" true
+    (match observed.completeness with
+     | Board.Source_incomplete (Board.Io_error _) -> true
+     | Board.Source_incomplete _ | Board.Source_complete -> false);
   let parent = require (Board_dispatch.get_post ~reader:Masc_board_handlers.Board_access.Operator
     ~post_id:(Board.Post_id.to_string post.id)) in
   Alcotest.(check int) "startup rebuilds reply count from retained display rows" 1 parent.reply_count;
@@ -299,6 +312,138 @@ let test_unfinished_publication_cannot_adopt_foreign_rows base_path =
   Alcotest.(check bool) "unsettled cleanup is not silently reported durable" true
     (has_comment restarted uncommitted)
 
+let with_started_store base_path f =
+  let reset () = Board_dispatch.reset_for_test (); Board.reset_global_for_test () in
+  reset ();
+  Fun.protect ~finally:reset (fun () ->
+    Result.get_ok (Board_dispatch.init_jsonl ~base_path
+      ~recipient_lookup:Recipient_lookup.none_declared ());
+    f (Board.global ()))
+
+let query_thread ~reader post_id =
+  Board_tool.handle_tool ~reader ~result_boundary:Tool_output.Sent_to_client
+    "masc_board_post_get" (`Assoc ["post_id", `String post_id])
+
+let detail_status ~reader post_id =
+  fst (Server_routes_http_runtime.board_post_detail_json ~reader ~config:None
+    ~voter:None ~reaction_actor:None
+    ~response_format:Server_board_post_response_format.Nested ~post_id ())
+
+let check_runtime_failure label result =
+  Alcotest.(check bool) label true
+    (match result with
+     | Tool_result.Failed { class_ = Tool_result.Runtime_failure; _ } -> true
+     | Tool_result.Failed _ | Tool_result.Completed _ | Tool_result.Deferred _ -> false)
+
+type query_source = Initial_missing | Present_empty | Non_regular | Invalid_row | Torn_tail
+
+let test_query_boundary source base_path =
+  let store, post = seed base_path in
+  let path = Board.comments_path store in
+  let retained = match source with
+    | Invalid_row | Torn_tail -> Some (require (append store post "accepted display row"))
+    | Initial_missing | Present_empty | Non_regular -> None in
+  let damage suffix =
+    let bytes = Fs_compat.load_file path ^ suffix in
+    Out_channel.with_open_bin path (fun output -> output_string output bytes);
+    Some bytes in
+  let damaged_bytes = match source with
+    | Initial_missing ->
+      (match Unix.lstat path with
+       | _ -> Alcotest.fail "Missing fixture already has a comments entry"
+       | exception Unix.Unix_error (Unix.ENOENT, _, _) -> ());
+      None
+    | Present_empty -> Out_channel.with_open_bin path (fun _ -> ()); None
+    | Non_regular -> Unix.mkdir path 0o700; None
+    | Invalid_row -> damage "{malformed-row}\n"
+    | Torn_tail -> damage "{unterminated-tail" in
+  with_started_store base_path (fun restarted ->
+    let post_id = Board.Post_id.to_string post.id in
+    let reader = Masc_board_handlers.Board_access.Operator in
+    let result = query_thread ~reader post_id in
+    let observed = observe_comments restarted post in
+    let missing_comment_id = Board.Comment_id.to_string (Board.Comment_id.generate ()) in
+    let module Signal = Keeper_world_observation_board_signal in
+    let self_ids = [Option.get (Keeper_identity.Keeper_id.of_string "comments-source-reader")] in
+    let self_status = Signal.check_self_comment_status ~self_ids ~post_id in
+    (match source with
+     | Initial_missing | Present_empty ->
+       Alcotest.(check bool) "legitimate empty source is complete" true
+         (observed.completeness = Board.Source_complete);
+       let page = match Board.Comment_page.Position.of_metadata (Tool_result.metadata result) with
+         | Some page when Tool_result.is_success result -> page
+         | Some _ | None -> Alcotest.fail "complete empty thread must return a successful page" in
+       Alcotest.(check int) "complete empty tool page has zero comments" 0 page.total;
+       (match Board.get_comment restarted ~comment_id:missing_comment_id with
+        | Error (Board.Comment_not_found id) when String.equal id missing_comment_id -> ()
+        | Error error -> Alcotest.fail (Board.show_board_error error)
+        | Ok _ -> Alcotest.fail "empty source returned an unknown comment");
+       Alcotest.(check bool) "complete HTTP detail succeeds" true (detail_status ~reader post_id = `OK);
+       Alcotest.(check bool) "complete empty source can establish no self comment" true
+         (match self_status with Signal.Available `Never -> true
+          | Signal.Available (`No_new_external | `New_external _) | Signal.Unavailable _ -> false)
+     | Non_regular | Invalid_row | Torn_tail ->
+       check_runtime_failure "MCP query refuses an incomplete source" result;
+       Alcotest.(check bool) "failed tool read carries no complete page" true
+         (Option.is_none (Board.Comment_page.Position.of_metadata (Tool_result.metadata result)));
+       Alcotest.(check bool) "HTTP source failure is 503" true
+         (detail_status ~reader post_id = `Service_unavailable);
+       Alcotest.(check bool) "Keeper refuses to infer self-comment absence" true
+         (match self_status with
+          | Signal.Unavailable { error = Board.Read_source_unavailable (Board.Io_error _); _ } -> true
+          | Signal.Unavailable _ | Signal.Available _ -> false);
+       (match Board.read_comments restarted ~post_id with
+        | Error (Board.Read_source_unavailable (Board.Io_error _)) -> ()
+        | Error error -> Alcotest.fail (Board.show_board_read_error error)
+        | Ok _ -> Alcotest.fail "complete-list query accepted an incomplete source");
+       require_io_error (Board.get_comment restarted ~comment_id:missing_comment_id));
+    (match retained with
+     | None -> ()
+     | Some comment ->
+       Alcotest.(check bool) "accepted row and incompleteness remain observable together" true
+         (observation_has_comment observed comment
+          && match observed.completeness with
+             | Board.Source_incomplete (Board.Io_error _) -> true
+             | Board.Source_incomplete _ | Board.Source_complete -> false);
+       require_io_error (Board.get_comment restarted ~comment_id:(Board.Comment_id.to_string comment.id)));
+    match damaged_bytes with
+    | None -> ()
+    | Some bytes -> Alcotest.(check string) "queries preserve damaged source bytes"
+        bytes (Fs_compat.load_file path))
+
+let test_incomplete_queries_preserve_hidden_target_boundary base_path =
+  let store, _ = seed base_path in
+  let post = match Board.create_post store ~lookup:Recipient_lookup.none_declared
+      ~author:"private-owner" ~content:"private thread" ~visibility:Board.Direct
+      ~post_kind:Board.Human_post ~ttl_hours:0 () with
+    | Ok post -> post
+    | Error error -> Alcotest.fail (Board.Post_publication_failure.to_string error) in
+  let comment = require (append store post "private reply") in
+  let path = Board.comments_path store in
+  let bytes = Fs_compat.load_file path ^ "{invalid-row}\n" in
+  Out_channel.with_open_bin path (fun output -> output_string output bytes);
+  with_started_store base_path (fun restarted ->
+    let reader = Masc_board_handlers.Board_access.named "stranger" in
+    let post_id = Board.Post_id.to_string post.id in
+    let absent_post = Board.Post_id.to_string (Board.Post_id.generate ()) in
+    List.iter (fun id -> Alcotest.(check bool) "hidden and absent posts both answer 404" true
+      (detail_status ~reader id = `Not_found)) [post_id; absent_post];
+    Alcotest.(check bool) "operator sees source failure on the same thread" true
+      (detail_status ~reader:Masc_board_handlers.Board_access.Operator post_id = `Service_unavailable);
+    let reaction_query id = Board_tool.handle_tool ~reader
+      ~result_boundary:Tool_output.Sent_to_client "masc_board_reaction"
+      (`Assoc ["target_type", `String "comment"; "target_id", `String id; "emoji", `String "👍"]) in
+    List.iter (fun id -> check_runtime_failure "hidden and absent comment targets share source failure"
+      (reaction_query id))
+      [Board.Comment_id.to_string comment.id; Board.Comment_id.to_string (Board.Comment_id.generate ())];
+    let posts_path = Board.persist_path restarted in
+    let posts_bytes = Fs_compat.load_file posts_path ^ "{invalid-post}\n" in
+    Out_channel.with_open_bin posts_path (fun output -> output_string output posts_bytes);
+    Alcotest.(check bool) "posts reload reports corruption" true
+      (Result.is_error (Rows.load_persisted_posts restarted));
+    List.iter (fun id -> Alcotest.(check bool) "unavailable posts source treats every ID alike" true
+      (detail_status ~reader id = `Service_unavailable)) [post_id; absent_post])
+
 let () = Alcotest.run "board comments source"
   ["persistence",
     [Alcotest.test_case "stale append requires model reload" `Quick (with_fixture test_stale_append_requires_full_reload);
@@ -316,4 +461,17 @@ let () = Alcotest.run "board comments source"
      Alcotest.test_case "completed recovery receipt survives reserved close" `Quick
        (with_fixture test_completed_recovery_survives_reserved_close);
      Alcotest.test_case "unfinished publication retains exact cleanup receipt" `Quick
-       (with_fixture test_unfinished_publication_cannot_adopt_foreign_rows)]]
+       (with_fixture test_unfinished_publication_cannot_adopt_foreign_rows)];
+   "query consumers",
+    [Alcotest.test_case "initial Missing is a complete empty thread" `Quick
+       (with_fixture (test_query_boundary Initial_missing));
+     Alcotest.test_case "present empty is a complete empty thread" `Quick
+       (with_fixture (test_query_boundary Present_empty));
+     Alcotest.test_case "nonregular comments are unavailable at consumers" `Quick
+       (with_fixture (test_query_boundary Non_regular));
+     Alcotest.test_case "rejected row preserves display but refuses complete queries" `Quick
+       (with_fixture (test_query_boundary Invalid_row));
+     Alcotest.test_case "torn tail preserves display but refuses complete queries" `Quick
+       (with_fixture (test_query_boundary Torn_tail));
+     Alcotest.test_case "incomplete queries preserve hidden target boundary" `Quick
+       (with_fixture test_incomplete_queries_preserve_hidden_target_boundary)]]

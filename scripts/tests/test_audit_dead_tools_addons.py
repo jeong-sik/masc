@@ -249,6 +249,51 @@ class Rendering(unittest.TestCase):
         self.assertEqual(len(payload["registry"]["addon_errors"]), 1)
         self.assertIn("shared_tool", payload["registry"]["addon_errors"][0])
 
+    def test_broken_lane_toml_error_appears_in_markdown(self):
+        # A lane.toml that cannot be parsed drops that addon's export names,
+        # which sends them back to "outside the registry". The human-readable
+        # report must say why, or the misclassification this change fixes
+        # reappears with no visible cause.
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            registry_dir = root / "config" / "tools"
+            write_registry_tool(registry_dir, "tool_read_file")
+            addon_dir = root / "addons"
+            broken = addon_dir / "broken-addon"
+            broken.mkdir(parents=True)
+            (broken / "lane.toml").write_text(
+                'id = "broken-addon"\n[world.tools\nexport = [\n', encoding="utf-8"
+            )
+            now = 1_800_000_000.0
+            ledger_dir = root / "ledger"
+            (ledger_dir / "2026-11").mkdir(parents=True)
+            (ledger_dir / "2026-11" / "09.jsonl").write_text("", encoding="utf-8")
+
+            registry = AUDIT.load_registry(registry_dir)
+            exports, files, errors = AUDIT.load_addon_exports(addon_dir)
+            self.assertEqual(len(errors), 1)
+            registry.addon_directory = str(addon_dir)
+            registry.addon_files = files
+            registry.addons = exports
+            registry.addon_errors = errors
+            end = datetime.fromtimestamp(now, tz=timezone.utc)
+            source = AUDIT.load_ledger(ledger_dir, now - 86400, now + 1)
+            report = AUDIT.build_report(
+                registry=registry,
+                sources=[source],
+                coverage=AUDIT.load_coverage(None),
+                window_start=end.timestamp() - 86400,
+                window_end=end.timestamp(),
+                window_days=1,
+                window_kind="trailing window",
+                retired_names=[],
+            )
+
+        rendered = AUDIT.render_markdown(report)
+        self.assertIn("등록부 경고", rendered)
+        self.assertIn("lane.toml", rendered)
+        self.assertIn("addon:", rendered)
+
 
 if __name__ == "__main__":
     unittest.main()

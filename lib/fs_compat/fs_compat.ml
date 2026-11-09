@@ -1980,17 +1980,6 @@ let file_size (path : string) : int option =
        | Unix.Unix_error _ -> None)
 ;;
 
-let file_mtime (path : string) : float option =
-  with_fs_or_fallback
-    ~path
-    ~fallback:(fun () ->
-      try Some (Unix.stat path).st_mtime with
-      | Unix.Unix_error _ -> None)
-    (fun _fs ->
-       try Some (Eio_unix.run_in_systhread ~label:(labelled "fs-compat-file-mtime" path) (fun () -> (Unix.stat path).st_mtime)) with
-       | Unix.Unix_error _ -> None)
-;;
-
 external publish_paths_raw : bool -> string -> string -> unit = "caml_masc_publish_paths"
 
 let publish_paths exchange left right =

@@ -316,13 +316,10 @@ let get_or_compute key ~ttl compute =
 ;;
 
 let invalidate_snapshot_cache () =
-  if Eio_guard.is_ready ()
-  then
-    (* Any in-flight compute that finishes after this will see its token gone
-       and discard its writeback. Waiters will see the slot removed and start
-       a fresh compute. *)
-    Atomic.set table SMap.empty
-  else Atomic.set table SMap.empty
+  (* Any in-flight compute that finishes after this will see its token gone
+     and discard its writeback. Waiters will see the slot removed and start
+     a fresh compute. *)
+  Atomic.set table SMap.empty
 ;;
 
 let peek key =
@@ -332,39 +329,4 @@ let peek key =
   | Some (Ready entry) when entry.stale_until > ts -> Some entry.value
   | Some (Computing { stale = Some stale_value; _ }) -> Some stale_value
   | Some (Computing { stale = None;_}) | None | Some (Ready _) -> None
-;;
-
-type slot_kind = Fresh | Stale | Expired | Computing_slot
-
-let slot_kind ~now_ts = function
-  | Ready e ->
-    if now_ts <= e.expires_at then Fresh
-    else if now_ts <= e.stale_until then Stale
-    else Expired
-  | Computing _ -> Computing_slot
-;;
-
-let stats () =
-  let map = Atomic.get table in
-  let now_ts = now () in
-  let fresh = ref 0 in
-  let stale = ref 0 in
-  let expired = ref 0 in
-  let computing = ref 0 in
-  SMap.iter
-    (fun _key slot ->
-       match slot_kind ~now_ts slot with
-       | Fresh -> incr fresh
-       | Stale -> incr stale
-       | Expired -> incr expired
-       | Computing_slot -> incr computing)
-    map;
-  `Assoc
-    [ ("entries", `Int (SMap.cardinal map))
-    ; ("fresh", `Int !fresh)
-    ; ("stale", `Int !stale)
-    ; ("expired", `Int !expired)
-    ; ("computing", `Int !computing)
-    ; ("max_entries", `Int max_entries)
-    ]
 ;;

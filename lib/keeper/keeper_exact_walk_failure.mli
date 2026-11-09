@@ -54,12 +54,6 @@ val input_capacity_only : t -> bool
 
 val of_cause : Agent_core.Exact_output.execution_error_cause -> t
 val of_disposition : Agent_core.Exact_output.candidate_rejection_disposition -> t
-val of_flow :
-  'callback_error Agent_core.Exact_output.flow_execution_error ->
-  Agent_core.Exact_output.flow_evidence * t
-(** Fold final-cause and advance evidence once. Candidate rejection is not a
-    size-independent execution failure. The returned flow evidence also owns
-    the generation-dispatch fact; token measurement is not generation. *)
 
 val of_cli_failure : Keeper_lane_cli_oneshot.failure -> t
 val after_cli_fallback : prior:t -> Keeper_lane_cli_oneshot.failure list -> t

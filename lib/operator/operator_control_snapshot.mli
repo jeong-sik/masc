@@ -126,9 +126,9 @@ include module type of struct
   include Operator_control_snapshot_cache
 end
 (** Re-exports {!Operator_control_snapshot_cache.get_or_compute},
-    {!Operator_control_snapshot_cache.peek},
-    {!Operator_control_snapshot_cache.invalidate_snapshot_cache}, and
-    {!Operator_control_snapshot_cache.stats} at the operator snapshot boundary. *)
+    {!Operator_control_snapshot_cache.peek}, and
+    {!Operator_control_snapshot_cache.invalidate_snapshot_cache} at the
+    operator snapshot boundary. *)
 
 (** {1 Snapshot + recent actions JSON} *)
 

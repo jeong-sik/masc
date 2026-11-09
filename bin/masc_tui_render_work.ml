@@ -188,8 +188,8 @@ let work_tasks_context_lines (state : state) ~cols =
        | Goal_links_read_failed reason -> Terminal_text.optional_single_line (Some reason)
        | Goal_links_not_read | Goal_links_read _ -> None) ]
     |> List.filter_map Fun.id in
-  [ work_hub_navigation state ~cols
-  ; " " ^ (if warning then Theme.warn () else Theme.recede ()) ^ scope ^ Ansi.reset ]
+  [work_hub_navigation state ~cols]
+  @ (if warning then [" " ^ Theme.warn () ^ scope ^ Ansi.reset] else [])
   @ Option.to_list (local_source_pending_note state Local_work)
   @ (if reasons = [] then [] else
        [" " ^ Theme.warn () ^ text "조회 범위: " "Coverage: " ^ String.concat " · " reasons ^ Ansi.reset])
@@ -215,40 +215,38 @@ let work_tasks_page_rows state ~terminal_rows ~cols =
   let _, _, window = work_tasks_projection state ~cols ~budget in
   max 1 window.capacity
 
-let task_preview_lines (state : state) ~cells (task : Tui_decode.task) =
+let task_preview_lines (state : state) ~cells ~rows (task : Tui_decode.task) =
+  if rows <= 0 then [] else
   let text ko en = ui_text state ~ko ~en in
   let field = work_preview_field ~cells in
   let original =
     List.find_opt (fun (full : Masc_domain.task) -> String.equal full.id task.id)
       (task_domain_values state) in
   let request = match original with
-    | None -> text "원래 요청 미관측" "Original request not observed"
+    | None -> text "요청 내용 미확인" "Request not available"
     | Some full ->
-        if String.trim full.description = "" then Terminal_text.single_line full.title
-        else Terminal_text.single_line full.description in
+        if String.trim full.description = "" then full.title
+        else full.description in
   let owner = match Masc_domain.task_assignee_of_status task.status with
     | Some owner -> owner
     | None -> text "미배정" "Unassigned" in
-  let submission = match task.status with
-    | Masc_domain.AwaitingVerification submitted ->
-        [ field (text "제출 근거: " "Submission: ") submitted.verification_id
-        ; field (text "제출 시각: " "Submitted: ") submitted.submitted_at
-        ; Theme.warn () ^ text "근거 원문·판정은 상세에서 확인" "Read submitted evidence and verdict in detail" ^ Ansi.reset ]
-    | Todo | Claimed _ | InProgress _ | Done _ | Cancelled _ ->
-        [field (text "제출: " "Submission: ")
-           (text "현재 상태에 검증 제출 없음" "No verification submission in this status")] in
-  [ field "Task: " task.id
-  ; field (text "원래 요청: " "Original request: ") request
-  ; field (text "담당 · 단계: " "Owner · stage: ")
-      (owner ^ " · " ^ Masc_domain.task_status_to_string task.status) ]
-  @ submission
-  @ [Theme.info () ^ text "Enter: 요청·제출 근거 읽기" "Enter: read request and evidence" ^ Ansi.reset]
-  @ (match task_goal_reading state ~task_id:task.id with
-     | Masc_tui_agenda.Read ids ->
-         [field "Goal: " (if ids = [] then text "연결 없음" "No link" else String.concat ", " ids)]
-     | Not_read -> [field "Goal: " (text "연결 미관측" "Links not observed")]
-     | Read_failed detail -> [field "Goal: " (text "연결 조회 실패: " "Links unavailable: " ^ detail)])
-  @ [field (text "우선순위: " "Priority: ") (Printf.sprintf "P%d" task.priority)]
+  let header =
+    if rows >= 3 then
+      [Theme.recede () ^ field "" (owner ^ " · " ^ task_status_word state task.status) ^ Ansi.reset]
+      @ (if rows >= 4 then [""] else [])
+    else [] in
+  let hint =
+    if rows >= 2 then [Theme.recede () ^ text "Enter: 상세" "Enter: details" ^ Ansi.reset]
+    else [] in
+  let request = Masc_tui_text_block.rows ~max_cells:(max 1 cells) request in
+  let room = max 0 (rows - List.length header - List.length hint) in
+  let shown = List.take room request in
+  let shown =
+    if List.length request <= room then shown
+    else List.mapi (fun index line ->
+      if index = room - 1 then Message_layout.take_cells line (max 0 (cells - 1)) ^ "…"
+      else line) shown in
+  header @ shown @ hint
 
 
 (* One task's event history, appended after the detail body so it rides the
@@ -386,7 +384,7 @@ let render_work_tasks (state : state) =
       ~selected:(Overview_tasks.selection state.task_focus) in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols
     ~surface_key:"work-tasks"
-    ~title:(screen_title (text " 작업 · 맡긴 일과 다음 조치" " Work · What needs to move next?"))
+    ~title:(screen_title (text " 작업" " Work"))
     ~hints:Masc_tui_keys.footer_hints_work_tasks
     ~body:(fun ~budget c ->
       let context, geometry, window = work_tasks_projection state ~cols ~budget in
@@ -423,13 +421,13 @@ let render_work_tasks (state : state) =
           ~selected:(Overview_tasks.selection state.task_focus) in
       let preview_title, preview_lines = match selected_task with
         | Some task ->
-            text "선택한 Task · 요청과 제출" "Selected Task · request and submission",
-            task_preview_lines state ~cells:geometry.preview_width task
+            text "요청" "Request",
+            task_preview_lines state ~cells:geometry.preview_width ~rows:geometry.preview_rows task
         | None ->
-            text "선택한 Task" "Selected Task",
-            [text "j/k로 Task를 고른 뒤 Enter로 읽기" "Choose a Task with j/k, then Enter to read"] in
+            text "요청" "Request",
+            [text "작업을 선택하세요" "Select a task"] in
       List.iter c.push (work_panel_lines geometry
-        ~list_title:(text "검증 대기 → 진행 → 담당 → 할 일" "Awaiting review → active → claimed → todo")
+        ~list_title:(text "작업" "Tasks")
         ~list_lines ~preview_title ~preview_lines))
 
 (* The lifecycle as a rail, not a single word. The phase says where the goal

@@ -1,0 +1,14 @@
+Testing `terminal text boundary'.
+This run has ID `PHE64WR5'.
+
+  [OK]          security              0   a control byte never reaches the te...
+  [OK]          security              1   visible text survives the escape.
+  [OK]          security              2   a C1 control uses the codepoint esc...
+  [OK]          security              3   sanitize is idempotent.
+  [OK]          preservation          0   plain text is returned unchanged.
+  [OK]          preservation          1   multi-byte letters are not read as ...
+  [OK]          preservation          2   lines keep LF and escape CR.
+
+Full test results in `/masc-work/rondo/repo/evidence/task-3491/_build/_tests/terminal text boundary'.
+Test Successful in 0.007s. 7 tests run.
+probe_exit=0

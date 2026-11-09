@@ -1,0 +1,4 @@
+# The repository ignores *.log globally. These three files are the evidence for
+# task-3491: the passing run, the failing mutant run, and the record of why the
+# dune path cannot execute in this lane. Without them the claim is unreadable.
+!*.log

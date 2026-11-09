@@ -194,7 +194,8 @@ stay in the full 23-surface scope.
 
 ## 2026-11-10: verification and recorded verdicts
 
-Task Review and Task Verdicts now lead each row with the original Task title
+[#50743](https://github.com/jeong-sik/masc/pull/50743) makes Task Review and Task
+Verdicts lead each row with the original Task title
 and its actual review/result label. Long identifiers, evidence counts and
 evaluator metadata stay in the complete reading. Workspace-wide calibration
 moves to the verdict detail, retaining the original denominator and unknown
@@ -216,6 +217,24 @@ Original failure details remain reachable by scrolling.
 
 Local OCaml 5.5.1 parsing and diff checks passed. No new wording, layout or
 row-order tests were added, and no local Dune build or native execution of this
-slice is claimed. The Requests candidate and its pending checks have a different
+slice is claimed. The Requests candidate and its selected checks have a different
 source. All six entry points, 23 surfaces and their child/input readings remain
 the full goal; source changes alone do not establish native or installed parity.
+
+## Requests candidate execution, separate from the verdict slice
+
+`Minimal manual checks` [run 42665508654](https://github.com/jeong-sik/masc/actions/runs/42665508654)
+completed with conclusion `success`: workflow `main` at ac37d6f0, selected source
+c2fa4c88, scenario `workspace-files`. The receipt records matching TUI/server
+builds and three completed suites (`test_repo_git`, `test_tui_workspace_entries`,
+`test_workspace_file_confidentiality`), all with zero suite/log exit codes.
+Downloaded hashes and both embedded build commits were checked; both binaries
+loaded locally and exited successfully for their build-commit command. This is
+not a running matching server, native screen, installation or restart result.
+
+The targeted `Test` [run 42665507307](https://github.com/jeong-sik/masc/actions/runs/42665507307)
+completed with conclusion `success` on `feat/tui-requests-simple-20261110` at
+c2fa4c88, `minimal=true`. The actual retained runner log records
+`test_tui_approval_authority` (15 cases) and `test_tui_ask_projection` (65 cases).
+Those 80 cases check approval/Ask identity and decisions; they are not the whole
+TUI regression and do not execute the later Verification/Harness changes.

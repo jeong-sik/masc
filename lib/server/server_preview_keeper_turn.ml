@@ -11,9 +11,18 @@ let error status text = R.json status [ "error", `String text ]
 let shape = {|The body is {"keeper_id": "<name>", "message": "<text>"}.|}
 let unknown_keeper = "No Keeper of yours has this name."
 let no_runtime = "The Keeper has no Runtime. Give it one of yours first."
-let not_claude_code = "A Keeper turn runs here only on a Claude Code Runtime."
+let not_official_client = "A Keeper turn runs here only on a Claude Code or a Codex Runtime."
 let call_running = "A call of the account of this Keeper's Runtime is running."
 let unexpected_refusal = "The turn was refused for a reason this preview does not expect."
+let not_signed_in = "The account of this Runtime is not signed in to a subscription."
+let no_quota = "The subscription of this Runtime has no quota left."
+let not_started = "The client did not start."
+let configuration_refused = "The client refused the configuration of the Runtime."
+let no_answer = "The client ended the turn without an answer."
+
+let silent () =
+  Printf.sprintf "The client sent nothing for %.0f seconds." turn_timeout_s
+;;
 
 let request_of body =
   match Yojson.Safe.from_string body with
@@ -102,23 +111,20 @@ let refusal_answer (refusal : Runtime_account_access.refusal) =
     error R.Internal_error_500 unexpected_refusal
 ;;
 
-let failure_answer ~keeper_id (failure : Runtime_claude_code.error) =
-  Log.Server.warn
-    "Keeper %s turn failed: %s"
-    (Authz_types.Keeper_id.to_string keeper_id)
-    (Runtime_claude_code.error_to_string failure);
+(* The detail of a failure can name a path of the server (issue #50018), so
+   it goes to the log and the answer is one of the fixed sentences. *)
+let logged ~keeper_id detail =
+  Log.Server.warn "Keeper %s turn failed: %s" (Authz_types.Keeper_id.to_string keeper_id) detail
+;;
+
+let claude_failure_answer ~keeper_id (failure : Runtime_claude_code.error) =
+  logged ~keeper_id (Runtime_claude_code.error_to_string failure);
   match failure with
-  | Runtime_claude_code.Subscription_required _ ->
-    error R.Conflict_409 "The account of this Runtime is not signed in to a subscription."
-  | Runtime_claude_code.Quota_blocked _ ->
-    error R.Too_many_requests_429 "The subscription of this Runtime has no quota left."
-  | Runtime_claude_code.Timeout _ ->
-    error
-      R.Gateway_timeout_504
-      (Printf.sprintf "The client sent nothing for %.0f seconds." turn_timeout_s)
-  | Runtime_claude_code.Spawn_failed _ -> error R.Service_unavailable_503 "The client did not start."
-  | Runtime_claude_code.Invalid_config _ ->
-    error R.Internal_error_500 "The client refused the configuration of the Runtime."
+  | Runtime_claude_code.Subscription_required _ -> error R.Conflict_409 not_signed_in
+  | Runtime_claude_code.Quota_blocked _ -> error R.Too_many_requests_429 no_quota
+  | Runtime_claude_code.Timeout _ -> error R.Gateway_timeout_504 (silent ())
+  | Runtime_claude_code.Spawn_failed _ -> error R.Service_unavailable_503 not_started
+  | Runtime_claude_code.Invalid_config _ -> error R.Internal_error_500 configuration_refused
   | Runtime_claude_code.Turn_failed_with_observation _
   | Runtime_claude_code.Protocol_error _
   | Runtime_claude_code.Unsupported_control_request _
@@ -127,13 +133,41 @@ let failure_answer ~keeper_id (failure : Runtime_claude_code.error) =
   | Runtime_claude_code.Turn_failed _
   | Runtime_claude_code.Stopped_by_host _
   | Runtime_claude_code.Process_exited _
-  | Runtime_claude_code.Unhandled_exception _ ->
-    error R.Bad_gateway_502 "The client ended the turn without an answer."
+  | Runtime_claude_code.Unhandled_exception _ -> error R.Bad_gateway_502 no_answer
+;;
+
+(* A spent subscription reaches Codex as a refused turn that names
+   usageLimitExceeded or sessionBudgetExceeded, so it is read before the
+   kind of the failure. *)
+let codex_failure_answer ~keeper_id (failure : Runtime_codex_app_server.error) =
+  logged ~keeper_id (Runtime_codex_app_server.error_to_string failure);
+  if Runtime_codex_app_server.refused_for_spent_usage failure
+  then error R.Too_many_requests_429 no_quota
+  else (
+    match failure with
+    | Runtime_codex_app_server.Subscription_required _ -> error R.Conflict_409 not_signed_in
+    | Runtime_codex_app_server.Timeout _ -> error R.Gateway_timeout_504 (silent ())
+    | Runtime_codex_app_server.Spawn_failed _ -> error R.Service_unavailable_503 not_started
+    | Runtime_codex_app_server.Invalid_config _ ->
+      error R.Internal_error_500 configuration_refused
+    | Runtime_codex_app_server.Reasoning_effort_admission_failed _
+    | Runtime_codex_app_server.Turn_input_write_failed _
+    | Runtime_codex_app_server.Protocol_error _
+    | Runtime_codex_app_server.Rpc_error _
+    | Runtime_codex_app_server.Account_read_failed _
+    | Runtime_codex_app_server.Unsupported_server_request _
+    | Runtime_codex_app_server.Context_window_exceeded _
+    | Runtime_codex_app_server.Turn_failed _
+    | Runtime_codex_app_server.Stopped_by_host _
+    | Runtime_codex_app_server.Turn_interrupted
+    | Runtime_codex_app_server.Runtime_shutting_down
+    | Runtime_codex_app_server.Process_exited _ -> error R.Bad_gateway_502 no_answer)
 ;;
 
 (* macOS TMPDIR sits under the /var -> /private/var symlink, and the client
-   gets the real path as its directory, as a verification does. *)
-let call ~env ~keeper_id ~(execution : Runtime_execution.claude_code) ~account ~message =
+   gets the real path as its directory, as a verification does. The
+   directory is removed after the turn. *)
+let in_private_dir ~env turn =
   match Filename.temp_dir "masc-keeper-turn-" "" |> Unix.realpath with
   | exception (Unix.Unix_error _ | Sys_error _) ->
     Error (error R.Service_unavailable_503 "The private turn directory could not be made.")
@@ -141,26 +175,63 @@ let call ~env ~keeper_id ~(execution : Runtime_execution.claude_code) ~account ~
     Eio.Switch.run (fun sw ->
       Eio.Switch.on_release sw (fun () -> Fs_compat.remove_tree private_dir);
       let clock = Eio.Stdenv.clock env in
-      let config =
-        { (Runtime_claude_code.default_config ~cwd:private_dir) with
-          cli_path = execution.cli_path
-        ; model = execution.model
-        ; admission_timeout_s = Float.min turn_timeout_s execution.timeout_s
-        ; timeout_s = Some turn_timeout_s
-        }
-      in
-      Runtime_claude_code.run_turn
+      turn
         ~mgr:
           (Posix_spawn_process_mgr.foreground_mgr
              ~clock
              ~grace_seconds:Process_eio.child_exit_grace_seconds)
         ~clock
-        ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_dir)
-        ~account
-        config
-        ~prompt:message
-        ~images:[]
-      |> Result.map_error (failure_answer ~keeper_id))
+        ~private_dir
+        ~cwd:Eio.Path.(Eio.Stdenv.fs env / private_dir))
+;;
+
+let call_claude ~env ~keeper_id ~(execution : Runtime_execution.claude_code) ~account ~message =
+  in_private_dir ~env (fun ~mgr ~clock ~private_dir ~cwd ->
+    let config =
+      { (Runtime_claude_code.default_config ~cwd:private_dir) with
+        cli_path = execution.cli_path
+      ; model = execution.model
+      ; admission_timeout_s = Float.min turn_timeout_s execution.timeout_s
+      ; timeout_s = Some turn_timeout_s
+      }
+    in
+    Runtime_claude_code.run_turn ~mgr ~clock ~cwd ~account config ~prompt:message ~images:[]
+    |> Result.map (fun (turn : Runtime_claude_code.turn_result) -> turn.model, turn.text)
+    |> Result.map_error (claude_failure_answer ~keeper_id))
+;;
+
+(* An ephemeral thread: Codex writes no rollout and no history for it, as
+   the turn writes nothing to the log. The posture is the default of the
+   client, its least one (Native_read): Codex has no Native_none. *)
+let call_codex
+      ~env
+      ~keeper_id
+      ~runtime
+      ~(execution : Runtime_execution.codex_app_server)
+      ~account
+      ~message
+  =
+  in_private_dir ~env (fun ~mgr ~clock ~private_dir:_ ~cwd ->
+    let config =
+      { (Runtime_codex_app_server.default_config ()) with
+        cli_path = execution.cli_path
+      ; model = execution.model
+      ; context_window = Some (Runtime_instance.max_context_of_runtime runtime)
+      ; admission_timeout_s = Float.min turn_timeout_s execution.timeout_s
+      ; timeout_s = Some turn_timeout_s
+      }
+    in
+    Runtime_codex_app_server.run_turn
+      ~thread:Runtime_codex_app_server.Ephemeral
+      ~mgr
+      ~clock
+      ~cwd
+      ~account
+      config
+      ~prompt:message
+      ~images:[]
+    |> Result.map (fun (turn : Runtime_codex_app_server.turn_result) -> turn.model, turn.text)
+    |> Result.map_error (codex_failure_answer ~keeper_id))
 ;;
 
 let run ~env ~(person : Login.person) ~base_path ~body =
@@ -178,38 +249,41 @@ let run ~env ~(person : Login.person) ~base_path ~body =
         ~binding:(Runtime_account_runtime.Runtime (Authz_types.Runtime_id.to_string runtime_id))
       |> Result.map_error login_answer
     in
-    let* execution =
+    let request =
+      Runtime_account_access.Keeper_turn
+        { keeper_name = Authz_types.Keeper_id.to_string keeper_id
+        ; channel = Authz_types.Channel.Direct
+        ; runtime_id = Authz_types.Runtime_id.to_string prepared.Login.runtime_id
+        }
+    in
+    let authorize account_home =
+      Runtime_account_access.authorize request (Runtime_account_access.seal account_home)
+      |> Result.map_error refusal_answer
+    in
+    let one_call turn =
+      Login.one_call_of provider_account_id ~busy:(error R.Conflict_409 call_running) turn
+    in
+    let* model, text =
       match prepared.Login.runtime.Runtime_instance.execution with
-      | Runtime_execution.Claude_code execution -> Ok execution
-      | Runtime_execution.Codex_app_server _
+      | Runtime_execution.Claude_code execution ->
+        let* account = authorize execution.account_home in
+        one_call (fun () -> call_claude ~env ~keeper_id ~execution ~account ~message)
+      | Runtime_execution.Codex_app_server execution ->
+        let* account = authorize execution.account_home in
+        one_call (fun () ->
+          call_codex ~env ~keeper_id ~runtime:prepared.Login.runtime ~execution ~account ~message)
       | Runtime_execution.Antigravity_cli _
       | Runtime_execution.Muse_serve _
       | Runtime_execution.Vibe_cli _
-      | Runtime_execution.Agent_core _ -> Error (error R.Bad_request_400 not_claude_code)
-    in
-    let* account =
-      Runtime_account_access.authorize
-        (Runtime_account_access.Keeper_turn
-           { keeper_name = Authz_types.Keeper_id.to_string keeper_id
-           ; channel = Authz_types.Channel.Direct
-           ; runtime_id = Authz_types.Runtime_id.to_string prepared.Login.runtime_id
-           })
-        (Runtime_account_access.seal execution.account_home)
-      |> Result.map_error refusal_answer
-    in
-    let* turn =
-      Login.one_call_of
-        provider_account_id
-        ~busy:(error R.Conflict_409 call_running)
-        (fun () -> call ~env ~keeper_id ~execution ~account ~message)
+      | Runtime_execution.Agent_core _ -> Error (error R.Bad_request_400 not_official_client)
     in
     Ok
       (R.json
          R.Ok_200
          [ "keeper_id", `String (Authz_types.Keeper_id.to_string keeper_id)
          ; "runtime_id", `String (Authz_types.Runtime_id.to_string prepared.Login.runtime_id)
-         ; "model", `String turn.Runtime_claude_code.model
-         ; "text", `String turn.Runtime_claude_code.text
+         ; "model", `String model
+         ; "text", `String text
          ])
   in
   Result.fold ~ok:Fun.id ~error:Fun.id answer

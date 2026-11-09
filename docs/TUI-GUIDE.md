@@ -8,8 +8,8 @@ Terminal UI over a MASC runtime root. It reads `.masc/` directly and, when a
 server is reachable, adds the surfaces that only exist over HTTP. Surfaces
 rotate with `Tab` in the order `surface_ring` spells in
 `bin/masc_tui_types.ml`: Dashboard, Work, Keepers, Usage, Board, Workspace,
-System. Dashboard is the first screen. It shows Goal measurements, Task flow,
-usage coverage, and what needs the operator. The full Goal and Task lists are
+System. Dashboard is the first screen. It opens the decisions and conversations
+that need the operator. The full Goal and Task lists are
 under Work; provider quota scopes, Keeper costs and tokens, and daily provider
 reports are under Usage. Activity and server logs are under System (`A` / `L`).
 Additional surfaces hang off parents instead of holding Tab stops:
@@ -26,6 +26,7 @@ also keep `go <name>` palette entries, and each System pane has
 `go System / <pane>` (`runtime.toml`, `models`, `params`, `prompts`,
 `presets`, `themes`, `voice`). Changes follows the Keeper selected on
 Keepers. Keeper operations are reached from their parent only.
+The [screen inventory](design/tui/SCREENS.md) lists all surfaces, subviews and overlays.
 
 Header clocks and ordinary row times use the terminal's timezone. Usage trends
 and Task completion days are explicitly labeled UTC.
@@ -41,6 +42,14 @@ can do — one sentence per feature, beside the command, key or name that
 opens it (`/keeper <name>`, `Ctrl-L`, `masc_tool_help`, ...). Names are wire
 names, so a row can be copied and typed as it is printed. The key-level
 reference is [`?`](guides/TUI-KEYS.md); `/help` lists the slash commands.
+
+Opening `:` with no search shows the seven main destinations. Type a screen,
+Keeper, Task, post or setting name to find other actions. Detail screen names
+include their parent, for example `go Work / Task Review` and
+`go System / Runtime`. Short searches such as `go Task Review`, `settings`,
+`go Connectors`, `go Collab` and `go Play links` select the same actions
+without adding duplicate entries. Candle payouts belong to a selected Goal's
+detail in Work.
 
 The sheet also names all seven main surfaces with their reading entrypoints:
 Work's Goal/Task details, Keeper conversations and logs, Usage's account selector,

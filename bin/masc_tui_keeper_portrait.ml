@@ -21,6 +21,14 @@ let band_size = function
       Some { rows = cols / 2; cols }
   | View.No_picture -> None
 
+(* A whole figure in a mosaic needs the Items preview's twenty-four cells:
+   at sixteen, observed equipment quantizes into the body colour. Placed
+   pixels keep the icon band, where the figure is drawn at full resolution. *)
+let whole_body_band_size = function
+  | View.Pixels _ as display -> band_size display
+  | View.Mosaic as display -> preview_band_size display
+  | View.No_picture -> None
+
 (* Leave room for operational diagnostics below the identity/work/context header. *)
 let rows_kept_for_facts = 8
 let min_content_rows size = size.rows + rows_kept_for_facts

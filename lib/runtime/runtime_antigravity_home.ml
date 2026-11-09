@@ -1105,6 +1105,36 @@ let prepare_native_tools t ~posture ~workspace ~additional_workspaces =
   Ok cwd
 ;;
 
+let prepare_read_hook t ~cwd ~additional_workspaces =
+  let path = Filename.concat (Filename.dirname t.mcp_config_path) "hooks.json" in
+  let failure detail = Error (Settings_write_failed {path; detail}) in
+  let* executable =
+    try
+      let directory = Unix.realpath Sys.executable_name |> Filename.dirname in
+      let hook = Filename.concat directory "masc-antigravity-path-hook" in
+      if (Unix.lstat hook).Unix.st_kind <> Unix.S_REG then
+        failure "the Antigravity read hook must be a regular executable beside MASC"
+      else (Unix.access hook [Unix.X_OK]; Ok hook)
+    with Unix.Unix_error (error, fn, arg) ->
+      failure ("install masc-antigravity-path-hook beside MASC: " ^ unix_error_detail error fn arg)
+  in
+  let* policy = policy_paths t in
+  let arguments =
+    [executable; "--cwd"; cwd; "--brain";
+     Filename.concat (Filename.dirname t.settings_path) "brain"]
+    @ List.concat_map (fun root -> ["--read-root"; root])
+        (policy.schema_dir :: cwd :: additional_workspaces)
+    @ List.concat_map (fun root -> ["--deny-root"; root])
+        [policy.config_dir; policy.token_path]
+  in
+  let command = String.concat " " (List.map Filename.quote arguments) in
+  let hooks = `Assoc ["masc-native-read", `Assoc ["PreToolUse", `List [
+    `Assoc ["matcher", `String "read_file"; "hooks", `List [
+      `Assoc ["type", `String "command"; "command", `String command]]]]]] in
+  write_private_file ~make_error:(fun path detail -> Settings_write_failed {path; detail})
+    path (Yojson.Safe.pretty_to_string hooks)
+;;
+
 (* Native callers publish their intended policy once. Resetting a shared
    account to the default policy first would revoke an overlapping reader's
    permissions between two atomic writes. The credential seed still only

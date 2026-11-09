@@ -10,7 +10,7 @@
 
 # ---- Stage 1: OCaml server from source --------------------------------------
 # Mirrors .github/workflows/release.yml: pin external deps, deps-only install,
-# `dune build --release bin/main_eio.exe`. OCaml 5.5.1 per dune-project.
+# `dune build --release bin/main_eio.exe`. OCaml 5.5.2 per dune-project.
 FROM ocaml/opam:ubuntu-24.04-ocaml-5.5 AS ocaml-builder
 
 USER root
@@ -36,6 +36,9 @@ COPY --chown=opam:opam \
 COPY --chown=opam:opam dune-project masc.opam ./
 RUN opam repository set-url default https://opam.ocaml.org \
     && opam update -y \
+    && opam pin remove ocaml-base-compiler --yes \
+    && opam switch set-invariant ocaml-base-compiler.5.5.2 --yes \
+    && opam install ocaml-base-compiler.5.5.2 --yes \
     && chmod +x scripts/opam-pin-external-deps.sh \
     && scripts/opam-pin-external-deps.sh --with-compact-protocol
 RUN ok=0; for attempt in 1 2 3; do \

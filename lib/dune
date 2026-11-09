@@ -124,6 +124,19 @@
   keeper_checkpoint_store_save
   keeper_sqlite_observation_io
   keeper_fs_durable_directory
+  keeper_sandbox_microvm_base
+  keeper_sandbox_microvm_network
+  keeper_sandbox_microvm_image_probe
+  keeper_sandbox_microvm_guest_argv
+  keeper_sandbox_microvm_work_volume
+  keeper_sandbox_microvm_shim
+  keeper_sandbox_microvm_volume_probe
+  keeper_sandbox_microvm_volume_claim_scripts
+  keeper_sandbox_microvm_volume_claims
+  keeper_sandbox_microvm_work_root
+  keeper_sandbox_microvm_inspect
+  keeper_sandbox_microvm_inventory
+  keeper_sandbox_microvm_listing
   keeper_chat_store_paths
   keeper_chat_store_redaction
   keeper_chat_store_row_codec

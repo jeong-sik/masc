@@ -1,0 +1,10 @@
+size	state	before	after
+80x24	list	ACTION NEEDED 3  o:log origin  Right / Enter:detail  Esc:back  q:quit  …?	ACTION NEEDED 3  o:log origin  Right / Enter:detail  Esc:back  q:quit  …?
+80x24	detail	ACTION NEEDED 3  Right / Enter:detail  Left / Esc:back  q:quit  1-17/18  …?	ACTION NEEDED 3  o:log origin  e:Events  Left / Esc:back  q:quit  1-17/18  …?
+80x24	empty	ACTION NEEDED 3  o:log origin  Right / Enter:detail  Esc:back  q:quit  …?	ACTION NEEDED 3  o:log origin  e:Events  l:level floor  Esc:back  q:quit  …?
+100x30	list	ACTION NEEDED 3  o:log origin  e:Events  Right / Enter:detail  Esc:back  q:quit  …?	ACTION NEEDED 3  o:log origin  e:Events  Right / Enter:detail  Esc:back  q:quit  …?
+100x30	detail	ACTION NEEDED 3  o:log origin  Right / Enter:detail  Left / Esc:back  q:quit  1-17/17  …?	ACTION NEEDED 3  o:log origin  e:Events  j/k:move / scroll  Left / Esc:back  q:quit  1-17/17  …?
+100x30	empty	ACTION NEEDED 3  o:log origin  e:Events  Right / Enter:detail  Esc:back  q:quit  …?	ACTION NEEDED 3 · keeper_fleet_safety:no_executable_keeper_fibers  Esc:back  q:quit  …?
+120x34	list	ACTION NEEDED 3 · keeper_fleet_safety:no_executable_keeper_fibers  Right / Enter:detail  Esc:back  q:quit  …?	ACTION NEEDED 3 · keeper_fleet_safety:no_executable_keeper_fibers  Right / Enter:detail  Esc:back  q:quit  …?
+120x34	detail	ACTION NEEDED 3  o:log origin  e:Events  j/k:move / scroll  Right / Enter:detail  Left / Esc:back  q:quit  1-17/17  …?	ACTION NEEDED 3 · keeper_fleet_safety:no_executable_keeper_fibers  o:log origin  Left / Esc:back  q:quit  1-17/17  …?
+120x34	empty	ACTION NEEDED 3 · keeper_fleet_safety:no_executable_keeper_fibers  Right / Enter:detail  Esc:back  q:quit  …?	ACTION NEEDED 3 · keeper_fleet_safety:no_executable_keeper_fibers  o:log origin  e:Events  Esc:back  q:quit  …?

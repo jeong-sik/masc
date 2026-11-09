@@ -16,7 +16,7 @@ let write ~masc_root ~agent_name ~task_id ~trace_id ~keeper_turn_id resolved =
          match resolved.resolution.delta with
          | Some delta -> delta, false
          | None ->
-           Keeper_usage_resolution.sample_of_api_usage Agent_core.Types.zero_api_usage, true
+           Agent_core.Types.zero_api_usage, true
        in
        let row =
          Keeper_hooks_agent_core.emit_cost_event

@@ -125,9 +125,7 @@ let with_attempt_spend (meta : keeper_meta)
          | Some delta ->
            ( input + delta.input_tokens
            , output + delta.output_tokens
-           , total
-             + Inference_utils.total_tokens
-                 (Keeper_usage_resolution.api_usage_of_sample delta) )
+           , total + Inference_utils.total_tokens delta )
          | None -> input, output, total)
       (0, 0, 0)
       resolved

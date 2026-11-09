@@ -11641,6 +11641,43 @@ let toggle_ask_origin (state : state) origin =
     | Some current when Masc_tui_ask_projection.same_origin current origin -> state.ask_origin <- None
     | Some _ | None -> state.ask_origin <- Some (state.workspace_authority,origin)
 
+(* The asks an operator can act on: the open ones, in the order the server
+   sent them. The pane and the key handlers read this one list, so the
+   cursor and the rows cannot drift apart. *)
+let open_ask_rows (state : state) =
+  match state.asks_snapshot with
+  | None -> []
+  | Some snapshot -> Masc_tui_ask_projection.open_rows snapshot
+
+let selected_ask_row (state : state) =
+  match state.ask_answer_mode with
+  | Ask_browsing ->
+      Masc_tui_ask_projection.selected_row (open_ask_rows state) state.ask_cursor
+  | Ask_answering { aam_ask } ->
+      List.find_opt
+        (fun row -> Masc.Tui_decode_asks.(equal_ask_key aam_ask (ask_key row)))
+        (open_ask_rows state)
+
+let selected_ask_origin (state : state) =
+  match current_ask_origin state with
+  | Some origin -> Some origin
+  | None ->
+      (match selected_ask_row state with
+       | Some row -> Masc_tui_ask_projection.origin_of_row row
+       | None ->
+           Option.bind (current_ask_answer_feedback state)
+             Masc_tui_ask_projection.origin_of_feedback)
+
+(* The question the ask cursor is on, or none when nothing is waiting. The
+   footer asks for it to decide which keys it can honestly name: a question
+   with no choices makes [1-9] a promise the surface cannot keep. *)
+let selected_ask_question (state : state) =
+  match selected_ask_row state with
+  | None -> None
+  | Some (row : Masc.Tui_decode_asks.ask_row) ->
+      List.nth_opt row.Masc.Tui_decode_asks.ar_questions
+        state.ask_question_cursor
+
 let current_ask_submission (state : state) submission =
   Option.exists (fun current -> current.as_request == submission.as_request)
     state.ask_submission_current

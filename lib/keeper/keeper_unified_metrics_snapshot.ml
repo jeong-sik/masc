@@ -47,7 +47,6 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
   let usage_json =
     match usage_resolution.delta with
     | Some delta ->
-      let delta_usage = Keeper_usage_resolution.api_usage_of_sample delta in
       `Assoc
         ([
           ( "usage_scope"
@@ -57,7 +56,7 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
           ("cache_creation_tokens", `Int delta.cache_creation_input_tokens);
           ("cache_read_tokens", `Int delta.cache_read_input_tokens);
           ("total_tokens",
-           `Int (Inference_utils.total_tokens delta_usage));
+           `Int (Inference_utils.total_tokens delta));
           ( "resolution_status"
           , `String
               (Keeper_usage_resolution.status_to_string usage_resolution.status) );

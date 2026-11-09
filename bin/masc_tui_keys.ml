@@ -20,6 +20,20 @@ type detail_state =
   | List_only  (** only while no detail is open *)
   | Detail_only  (** only while a detail is open *)
 
+(* Whether a binding needs a row under the cursor. A list with no rows has
+   nothing for [j/k] to step over, [Right / Enter] to open or [y / x] to
+   answer, and the dispatcher ends each of those in [()]. The footer drew them
+   anyway, first in line, so on a narrow terminal it gave up the keys that do
+   act -- [n] on an empty Schedules list -- before them. As with
+   [detail_state], the fact is a value in the table, so the footer and the
+   dispatcher stop disagreeing. *)
+type row_need =
+  | Rowless  (** answers with no row under the cursor; the default *)
+  | Needs_row  (** steps over, opens or answers a row; refused on an empty list *)
+  | Needs_reading
+      (** opens a reading: a row's details, or what replaced the list when
+          its read failed. An empty list has one only after a failed read. *)
+
 type binding = {
   key : string;
   label : string;
@@ -27,10 +41,20 @@ type binding = {
   help : string option;
   group : group;
   detail : detail_state;
+  rows : row_need;
 }
 
-let b ?help ?ko ?(detail = Either) group key label =
-  { key; label; label_ko = ko; help; group; detail }
+let b ?help ?ko ?(detail = Either) ?(rows = Rowless) group key label =
+  { key; label; label_ko = ko; help; group; detail; rows }
+
+(* The one spelling of "key:label". The footer atoms, the Keeper tab row and
+   the Questions heading all read it. Hand-written copies had drifted: the
+   queue footer said [a:answer a question] where the heading said
+   [a:open answers]. [label] replaces the binding's own: [hints_in_order]
+   passes the Korean wording, and the Approvals footer passes a shorter word
+   for one mode. *)
+let key_hint ?label (binding : binding) =
+  binding.key ^ ":" ^ (match label with Some word -> word | None -> binding.label)
 
 (* [None] is shared by all Config panes; [Some panes] belongs only to those
    input handlers. Keep availability beside the binding, not in a second key
@@ -391,16 +415,17 @@ let keeper_actions =
 (* The keys that move a row list by more than a step. Shared rather than
    retyped per surface: they answer wherever [row_list] in masc_tui.ml finds a
    list, and that is one decision, so the table should not be able to claim
-   them for one listing and forget them on the next. *)
-let row_list_page = b Navigate "PgUp/PgDn" "page"
+   them for one listing and forget them on the next. Each needs a row: with
+   [rl_count = 0] the dispatcher answers them with [()]. *)
+let row_list_page = b ~rows:Needs_row Navigate "PgUp/PgDn" "page"
 let row_list_jumps =
   [ row_list_page
-  ; b Navigate "Home/End" "top/bottom"
+  ; b ~rows:Needs_row Navigate "Home/End" "top/bottom"
   ]
 
 (* The same two, minus the page key, for the surfaces whose own entry already
    spells one because a detail pane under them pages too. *)
-let row_list_edges = [ b Navigate "Home/End" "top/bottom" ]
+let row_list_edges = [ b ~rows:Needs_row Navigate "Home/End" "top/bottom" ]
 
 (* The two keys the whole surface exists for, as one binding. Spelled apart
    ("y" and "n") they were two items a fitted row could drop one at a time,
@@ -425,6 +450,7 @@ let approval_value_bytes =
 let approval_answer =
   b Act "a" "answer a question"
     ~help:"open the selected question, from a Keeper or a Lane Add-on installation, in its own mode; Esc leaves it"
+let approval_answer_hint = key_hint approval_answer
 let approval_installation_results =
   b Act "g" "installation Results"
     ~help:"after answering an installation's question, open that installation's Results in Plugins, where the reveal appears"
@@ -482,8 +508,10 @@ let board_read_focus_key =
     ~help:"switch the focused reading window; on the comments, j/k select a \
            comment and PgUp/PgDn scroll by rows"
 
-let fusion_caller_key = b Navigate "K" "calling Keeper"
-let fusion_board_key = b Navigate "B" "Board evidence"
+(* Both read the run under the cursor. On the list with no run they answer
+   with a notice and move nothing; an open run has its own footer. *)
+let fusion_caller_key = b ~rows:Needs_row Navigate "K" "calling Keeper"
+let fusion_board_key = b ~rows:Needs_row Navigate "B" "Board evidence"
 
 let keeper_navigation_hints = "Up/Down:move  Enter:open  Right/Esc:back"
 
@@ -746,8 +774,9 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Clients ->
-      [ b Navigate "j/k" "move" ~help:"move the roster cursor"
-      ; b Act "Enter" "detail" ~help:"read the client's full identity and observation"
+      [ b Navigate "j/k" "move" ~rows:Needs_row ~help:"move the roster cursor"
+      ; b Act "Enter" "detail" ~rows:Needs_row
+          ~help:"read the client's full identity and observation"
         (* Two doors, one action: both call [goto_surface Runtime]. As two
            bindings the sheet printed the answer twice, one row under the
            other, and the second row's help differed from the first by a
@@ -756,9 +785,9 @@ let for_surface = function
            the footer keeps its Esc pin and both keys stay counted. *)
       ; b Act "p / Esc" "runtime"
           ~help:"back to the Runtime surface this hangs off"
-      ; b Search "/" "find"
+      ; b Search "/" "find" ~rows:Needs_row
           ~help:"jump the cursor to a matching attached name"
-      ; b Search "n / N" "next / previous match"
+      ; b Search "n / N" "next / previous match" ~rows:Needs_row
       ]
       @ row_list_jumps @ listing_meta
   | Board ->
@@ -844,7 +873,10 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Planning ->
-      [ b Navigate "j/k" "move"
+      (* With no Goal on the list, the keys that read the one under the cursor
+         do nothing or answer with a notice. [b], [t], [p], [v], [f] and [s]
+         still act: a filter that leaves no Goal is undone with [f]. *)
+      [ b Navigate "j/k" "move" ~rows:Needs_row
       ; b Act "b" "summary" ~detail:List_only
           ~help:"read captured Goal totals, the global Task backlog, history, and snapshot changes"
         (* [t] and [p] answer on the list only. In a Goal detail [p] is Pause
@@ -857,7 +889,7 @@ let for_surface = function
       ; b Navigate "v" "next Work tab"
           ~help:"Goals, then the two task surfaces: Task Review and \
                  Task Verdicts. Not stages of one flow"
-      ; b Act "Right / Enter" "detail" ~detail:List_only
+      ; b Act "Right / Enter" "detail" ~detail:List_only ~rows:Needs_row
         (* Left only closes an open Goal or Task detail ([Planning_list -> ()]
            in the [Some "left"] arm of masc_tui.ml); Esc also leaves Work. *)
       ; b Act "Esc" "back" ~detail:List_only ~help:"leave Work for the Dashboard"
@@ -874,22 +906,25 @@ let for_surface = function
           ~help:"in Goal detail, enter a reason and press Enter"
       ; b Act "o" "reopen" ~detail:Detail_only
           ~help:"in Goal detail, press twice to request reopening"
-      ; b Act goal_candle_refresh_key "Candle"
+      ; b Act goal_candle_refresh_key "Candle" ~rows:Needs_row
           ~help:"open the selected Goal's Candle payout from the list, or read it again in detail"
-      ; b Act "Y" "copy link" ~help:"copy the selected goal reference"
+      ; b Act "Y" "copy link" ~rows:Needs_row
+          ~help:"copy the selected goal reference"
         (* Over the goals [f] and [s] left on screen, in the order they are
            drawn: the search walks what the list shows, not the snapshot. *)
-      ; b Search "/" "find" ~detail:List_only
+      ; b Search "/" "find" ~detail:List_only ~rows:Needs_row
           ~help:"jump the cursor to a matching goal id or title"
       ; b Search "n / N" "next / previous match" ~detail:List_only
+          ~rows:Needs_row
       ]
       @ row_list_jumps @ listing_meta
   | Schedules ->
-      [ b Navigate "j/k" "move" ~help:"move; in details, scroll the payload"
-      ; b Navigate "PgUp/PgDn" "page"
+      [ b Navigate "j/k" "move" ~rows:Needs_row
+          ~help:"move; in details, scroll the payload"
+      ; b Navigate "PgUp/PgDn" "page" ~rows:Needs_row
       ; b Navigate "< / >" "schedule pages" ~detail:List_only
           ~help:"previous / next server page; pages are separate observations"
-      ; b Act "Right / Enter" "details" ~detail:List_only
+      ; b Act "Right / Enter" "details" ~detail:List_only ~rows:Needs_row
           ~help:"open schedule details"
       ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
       ; b Act "Left / Esc" "back" ~detail:Detail_only
@@ -897,20 +932,22 @@ let for_surface = function
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; b Act "n" "new" ~help:"create a schedule through a $EDITOR JSON form"
-      ; b Act "e" "modify"
+      ; b Act "e" "modify" ~rows:Needs_row
           ~help:"edit the selected active schedule; running/finished rows refuse"
-      ; b Act "x" "cancel" ~help:"arm / confirm cancellation"
-      ; b Act "Y" "copy link" ~help:"copy the selected schedule reference"
+      ; b Act "x" "cancel" ~rows:Needs_row ~help:"arm / confirm cancellation"
+      ; b Act "Y" "copy link" ~rows:Needs_row
+          ~help:"copy the selected schedule reference"
       ]
       @ row_list_edges @ listing_meta
   | Verification ->
-      [ b Navigate "j/k" "move" ~help:"move; in details, scroll the evidence"
+      [ b Navigate "j/k" "move" ~rows:Needs_row
+          ~help:"move; in details, scroll the evidence"
       ; b Navigate "v" "next Work tab"
           ~help:"on to Task Verdicts, then back to Goals"
       ; b Navigate "h" "queue / history"
           ~help:"the queue is what a task is still waiting on; the history is \
                  every request ever submitted, which nothing removes"
-      ; b Act "Right / Enter" "details" ~detail:List_only
+      ; b Act "Right / Enter" "details" ~detail:List_only ~rows:Needs_row
           ~help:"read the request and evidence"
       ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
       ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"back to the list"
@@ -932,7 +969,7 @@ let for_surface = function
           ~help:"download the retained copy and open it with a local application"
       ; b Act "s" "증거 사본 저장" ~detail:Detail_only
           ~help:"save this exact evidence item privately on this machine; its local path stays in the detail"
-      ; b Act "a / x" "approve / reject"
+      ; b Act "a / x" "approve / reject" ~rows:Needs_row
           ~help:"a approves the row under the cursor (press twice); x rejects \
                  with a reason ($EDITOR form)"
       (* The row search reads the list's rows. An open detail has none, so the
@@ -941,13 +978,15 @@ let for_surface = function
           ~help:"jump the cursor to a matching task id, title, or submitter; \
                  the queue answers this, an open detail does not"
       ; b Search "n / N" "next / previous match" ~detail:List_only
+          ~rows:Needs_row
       ]
       @ row_list_jumps @ listing_meta
   | Harness ->
-      [ b Navigate "j/k" "move" ~help:"move; in a verdict, scroll"
+      [ b Navigate "j/k" "move" ~rows:Needs_row
+          ~help:"move; in a verdict, scroll"
       ; b Navigate "v" "next Work tab" ~help:"back round to Goals"
-      ; b Navigate "PgUp/PgDn" "page"
-      ; b Act "Right / Enter" "verdict" ~detail:List_only
+      ; b Navigate "PgUp/PgDn" "page" ~rows:Needs_row
+      ; b Act "Right / Enter" "verdict" ~detail:List_only ~rows:Needs_row
           ~help:"open the full evaluator verdict"
       ; b Act "Esc" "back" ~detail:List_only ~help:"back to Work"
       ; b Act "Left / Esc" "back" ~detail:Detail_only
@@ -963,22 +1002,28 @@ let for_surface = function
 
            [x], not [n]: this surface answers the row search, and [n] / [N]
            step it. *)
-      ; b Act "y / x" "agree / overrule"
+      ; b Act "y / x" "agree / overrule" ~rows:Needs_row
           ~help:"y records the machine's verdict as yours; x records the \
                  opposite, with $EDITOR taking the reason"
-      ; b Act "Y" "copy task" ~help:"copy a link to the task in Work"
+      ; b Act "Y" "copy task" ~rows:Needs_row
+          ~help:"copy a link to the task in Work"
       ; b Search "/" "find" ~detail:List_only
           ~help:"jump the cursor to a matching task id or title"
+      (* [/] opens its prompt on a read list with no row, so it stays; the
+         jump has no match to step to and ends in [()] -- the same split
+         Task Review draws. *)
       ; b Search "n / N" "next / previous match" ~detail:List_only
+          ~rows:Needs_row
       ]
       @ row_list_edges @ listing_meta
   | Fusion ->
       (* [fusion_mode] owns list/detail (masc_tui_types.ml); the detail
          footer is [footer_hints_fusion_detail], which also appends the live
          scroll position this static table cannot know. *)
-      [ b Navigate "j/k" "move"
-      ; b Navigate "PgUp/PgDn" "page"
-      ; b Act "Enter" "open" ~help:"open a retained run or its historical Board evidence"
+      [ b Navigate "j/k" "move" ~rows:Needs_row
+      ; b Navigate "PgUp/PgDn" "page" ~rows:Needs_row
+      ; b Act "Enter" "open" ~rows:Needs_row
+          ~help:"open a retained run or its historical Board evidence"
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while a detail is open, step to the row before or after it"
       ; fusion_caller_key
@@ -990,11 +1035,12 @@ let for_surface = function
           ~help:"launch a Fusion run from the list: pick the Keeper, preset \
                  and topology, type the prompt, then Ctrl-S reviews and \
                  Enter starts it"
-      ; b Act "Y" "copy" ~help:"copy the selected Fusion run reference"
-      ; b Search "/" "find"
+      ; b Act "Y" "copy" ~rows:Needs_row
+          ~help:"copy the selected Fusion run reference"
+      ; b Search "/" "find" ~rows:Needs_row
           ~help:"jump the cursor to a matching run id, Keeper or preset; an \
                  open run's detail carries no searchable rows"
-      ; b Search "n / N" "next / previous match"
+      ; b Search "n / N" "next / previous match" ~rows:Needs_row
       ; b Act "Esc" "back" ~help:"leave detail, or return to Dashboard"
       ]
       @ row_list_edges @ listing_meta
@@ -1021,12 +1067,19 @@ let for_surface = function
       ]
       @ row_list_jumps @ listing_meta
   | Repositories ->
-      [ b Navigate "v" "full details" ~help:"read the complete selected path, Keeper assignments and errors"
-      ; b Navigate "j/k" "scroll"
-      ; b Act "Enter" "browse"
+      (* With no repository registered, the keys that read the one under the
+         cursor do nothing or answer with a notice. [a] and [/] still act:
+         the first opens the editor to register one, the second opens the
+         search line. [v] needs a reading, not a row: after a failed read it
+         opens the failure with no repository selected. *)
+      [ b Navigate "v" "full details" ~rows:Needs_reading
+          ~help:"read the complete selected path, Keeper assignments and errors"
+      ; b Navigate "j/k" "scroll" ~rows:Needs_row
+      ; b Act "Enter" "browse" ~rows:Needs_row
           ~help:"open the repository tree, or the selected changed file"
-      ; b Navigate "H" "recent activity" ~help:"recorded clone writes by Keeper and Task in the last day"
-      ; b Act "d" "Git changes"
+      ; b Navigate "H" "recent activity" ~rows:Needs_row
+          ~help:"recorded clone writes by Keeper and Task in the last day"
+      ; b Act "d" "Git changes" ~rows:Needs_row
           ~help:"show the selected repository's current working-tree changes"
       ; b Act "a" "add" ~help:"register a repository; opens $EDITOR"
       ; b Act "Esc" "back"
@@ -1035,15 +1088,19 @@ let for_surface = function
       ; b Search "/" "find"
           ~help:"jump the cursor to a matching repository, or to a changed \
                  path while Git changes is open"
-      ; b Search "n / N" "next / previous match"
+      ; b Search "n / N" "next / previous match" ~rows:Needs_row
       ]
       @ row_list_jumps @ listing_meta
   | Changes ->
       (* "move", not "scroll": the keys move the marked row and the window
-         follows it, which is also what the surface's own footer says. *)
-      [ b Navigate "j/k" "move"
+         follows it, which is also what the surface's own footer says.
+
+         A keeper that wrote nothing in the window has no row. The keys that
+         read the row under the cursor answer with a notice or do nothing;
+         [ / ] still switches to the next keeper, so it stays. *)
+      [ b Navigate "j/k" "move" ~rows:Needs_row
       ; b Navigate "[ / ]" "keeper" ~help:"previous / next keeper"
-      ; b Act "Right / Enter" "written diff"
+      ; b Act "Right / Enter" "written diff" ~rows:Needs_row
           ~help:"what the call wrote, as a diff"
         (* Left closes an open diff and does nothing on the list; Esc closes
            the diff too and, on the list, goes back to the Keeper screen the
@@ -1052,14 +1109,14 @@ let for_surface = function
       ; b Act "Esc" "back" ~detail:List_only
           ~help:"back to the Keeper screen this list was opened from"
       ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the diff"
-      ; b Act "d" "tree diff" ~help:"what the tree holds now"
-      ; b Act "v" "view code"
+      ; b Act "d" "tree diff" ~rows:Needs_row ~help:"what the tree holds now"
+      ; b Act "v" "view code" ~rows:Needs_row
           ~help:"the file on the Code surface, read from the keeper's own \
                  workspace"
-      ; b Search "/" "find"
+      ; b Search "/" "find" ~rows:Needs_row
           ~help:"jump the cursor to a matching written path"
-      ; b Search "n / N" "next / previous match"
-      ; b Act "o" "editor" ~help:"open in $EDITOR / $NVIM"
+      ; b Search "n / N" "next / previous match" ~rows:Needs_row
+      ; b Act "o" "editor" ~rows:Needs_row ~help:"open in $EDITOR / $NVIM"
       ]
       @ row_list_jumps @ listing_meta
   | Connectors ->
@@ -1173,6 +1230,28 @@ let for_surface = function
           ~help:"jump the cursor to a match: the tree, or the open file's \
                  lines"
       ; b Search "n / N" "next / previous match"
+        (* The view actions come first among the file keys. Each answers on
+           any open file and needs nothing configured. A row gives up keys from
+           its back, and the language-server keys, which need a server, and the
+           draft keys, which write, stood ahead of them: on the fixture server
+           the file footer at 300 cells named K R D B e S V X and none of
+           d H m b y. *)
+      ; b Act "d" "diff"
+          ~help:"on the project tree, list every working-tree change; on an \
+                 open file, show that file's diff against HEAD; in the file's \
+                 history, on a commit row, show what that commit changed"
+      ; b Act "H" "history"
+          ~help:"the commits that touched the open file, newest first \
+                 (H or Esc closes)"
+      ; b Act "b" "blame"
+          ~help:"who last touched each run of lines, in the margin; b again \
+                 drops it"
+      ; b Act "m" "notes"
+          ~help:"the memos in the open file: comments on their own row \
+                 reading masc(name): text, or masc(name) question: text; m \
+                 again closes the list"
+      ; b Act "y" "copy source"
+          ~help:"send the whole readable file's original bytes to the terminal clipboard via OSC 52; terminal support is unconfirmed"
       ; b Act "K" "hover"
           ~help:"ask the language server what a name on the cursor line is \
                  (one name asks at once; several open the palette as \
@@ -1191,25 +1270,9 @@ let for_surface = function
       ; b Act "V" "draft comparison" ~help:"compare original/current server source with the retained draft"
       ; b Act "X" "discard draft" ~help:"discard only the local draft, after any submitted save settles"
       ; b Act "A (draft)" "adopt revision" ~help:"after rereading and comparing a conflict, explicitly adopt the server revision"
-      ; b Act "y" "copy source"
-          ~help:"send the whole readable file's original bytes to the terminal clipboard via OSC 52; terminal support is unconfirmed"
-      ; b Act "b" "blame"
-          ~help:"who last touched each run of lines, in the margin; b again \
-                 drops it"
-      ; b Act "m" "notes"
-          ~help:"the memos in the open file: comments on their own row \
-                 reading masc(name): text, or masc(name) question: text; m \
-                 again closes the list"
-      ; b Act "d" "diff"
-          ~help:"on the project tree, list every working-tree change; on an \
-                 open file, show that file's diff against HEAD; in the file's \
-                 history, on a commit row, show what that commit changed"
       ; b Act "Enter (history)" "open"
           ~help:"a commit answers with its pull request, from its (#N) and \
                  the repository's remote"
-      ; b Act "H" "history"
-          ~help:"the commits that touched the open file, newest first \
-                 (H or Esc closes)"
       ]
       @ row_list_jumps @ listing_meta
   | Tools ->
@@ -1246,8 +1309,8 @@ let for_surface = function
   | System_logs ->
       [ b Navigate "o" "log origin" ~help:"switch between server logs and this TUI's own observations"
       ; b Navigate "e" "Events"
-      ; b Navigate "j/k" "move / scroll"
-      ; b Navigate "PgUp/PgDn" "detail page"
+      ; b Navigate "j/k" "move / scroll" ~rows:Needs_row
+      ; row_list_page
       ; b Navigate "[ / ]" "previous / next" ~detail:Detail_only
           ~help:"while detail is open, inspect the adjacent visible log entry"
       ; b Act "l" "level floor"
@@ -1256,14 +1319,17 @@ let for_surface = function
           ~help:"toggle DEBUG rows directly; off uses the INFO floor"
       ; b Act "c" "category"
           ~help:"cycle through the categories this page carries"
-      ; b Act "Right / Enter" "detail"
+      (* Opens the entry under the cursor. Inside the detail the dispatcher
+         has nothing left to open, and a list the filters emptied has no
+         entry. *)
+      ; b Act "Right / Enter" "detail" ~detail:List_only ~rows:Needs_row
           ~help:"show the full message, source, category, turn, and JSON details"
       ; b Act "Esc" "back" ~detail:List_only ~help:"back to Activity"
       ; b Act "Left / Esc" "back" ~detail:Detail_only ~help:"close the detail"
       ; b Search "/" "find" ~detail:List_only
           ~help:"jump the cursor to a matching module, keeper, or message, \
                  over the rows the level and category filters leave"
-      ; b Search "n / N" "next / previous match" ~detail:List_only
+      ; b Search "n / N" "next / previous match" ~detail:List_only ~rows:Needs_row
       ]
       @ row_list_edges @ listing_meta
 
@@ -1271,12 +1337,12 @@ let group_rank = function Navigate -> 0 | Act -> 1 | Search -> 2 | Meta -> 3
 
 let hints_in_order ?(lang = Lang_en) bindings =
   bindings
-  |> List.map (fun { key; label; label_ko; _ } ->
+  |> List.map (fun (binding : binding) ->
       let label = match lang with
-        | Lang_ko -> Option.value label_ko ~default:label
-        | Lang_en -> label
+        | Lang_ko -> Option.value binding.label_ko ~default:binding.label
+        | Lang_en -> binding.label
       in
-      key ^ ":" ^ label)
+      key_hint ~label binding)
   |> String.concat "  "
 
 (* Sort by group, then flatten to the footer's "key:label  key:label" form.
@@ -1298,29 +1364,44 @@ let hints_of_bindings ?(lang = Lang_en) bindings =
    function because two footers filter their surface's table by hand --
    Resources for the focused pane, Code for the open one -- and a second
    reading of this rule beside them is how a key comes back to a footer that
-   refuses it. *)
-let answers_in_state ?detail_open binding =
-  match detail_open, binding.detail with
-  | _, Either -> true
-  | None, (List_only | Detail_only) -> true
-  | Some open_, List_only -> not open_
-  | Some open_, Detail_only -> open_
+   refuses it.
 
-let footer_hints ?detail_open surface =
+   [has_rows] is how a list renderer says whether the list on screen holds a
+   row. [Some false] leaves out the keys that need one; a renderer that does
+   not pass it keeps every binding, as before. [has_reading] is the same
+   answer for the keys that open a reading, which a failed read can leave
+   with nothing selected. *)
+let answers_in_state ?detail_open ?has_rows ?has_reading binding =
+  (match detail_open, binding.detail with
+   | _, Either -> true
+   | None, (List_only | Detail_only) -> true
+   | Some open_, List_only -> not open_
+   | Some open_, Detail_only -> open_)
+  && (match binding.rows with
+      | Rowless -> true
+      | Needs_row -> (match has_rows with Some false -> false | Some true | None -> true)
+      | Needs_reading ->
+          (match has_reading with Some false -> false | Some true | None -> true))
+
+let footer_hints ?detail_open ?has_rows ?has_reading surface =
   hints_of_bindings
-    (List.filter (answers_in_state ?detail_open) (for_surface surface))
+    (List.filter (answers_in_state ?detail_open ?has_rows ?has_reading)
+       (for_surface surface))
 
 (* [r] is Resume for a paused Goal, so the generic refresh label must not
    advertise it as a read in this detail. The Candle read has its own key. *)
-let planning_goal_hints ~detail_open =
+let planning_goal_hints ~detail_open ~has_rows =
   let bindings = for_surface Planning
-    |> List.filter (answers_in_state ~detail_open)
+    |> List.filter (answers_in_state ~detail_open ?has_rows)
     |> List.filter (fun binding -> not detail_open || not (String.equal binding.key "r")) in
   let read, others = List.partition (fun binding -> String.equal binding.key goal_candle_refresh_key) bindings in
   hints_in_order (read @ List.stable_sort (fun a b -> compare (group_rank a.group) (group_rank b.group)) others)
 
-let footer_hints_planning_goal_list = planning_goal_hints ~detail_open:false
-let footer_hints_planning_goal_detail = planning_goal_hints ~detail_open:true
+let footer_hints_planning_goal_list ~has_rows =
+  planning_goal_hints ~detail_open:false ~has_rows:(Some has_rows)
+
+let footer_hints_planning_goal_detail =
+  planning_goal_hints ~detail_open:true ~has_rows:None
 
 let footer_hints_tools ~pane =
   let bracket = tools_bracket_binding ~pane in
@@ -1329,8 +1410,13 @@ let footer_hints_tools ~pane =
        if String.equal binding.key bracket.key then bracket else binding)
        (for_surface Tools))
 
+type ask_supply =
+  | No_asks
+  | Asks_unselected
+  | Ask_selected
+
 type approvals_footer =
-  | Approval_browsing
+  | Approval_browsing of { approvals : bool; asks : ask_supply; source : bool }
   | Approval_writing
   | Approval_armed
   | Approval_answering of { has_choices : bool; takes_text : bool }
@@ -1339,20 +1425,29 @@ type approvals_footer =
    Help. Their modes need a deliberate order and, for Enter, a mode-specific
    verb; the dispatcher gives that key a different action in each mode. *)
 let footer_hints_approvals mode =
-  let hint ?label (binding : binding) =
-    binding.key ^ ":" ^ (match label with Some word -> word | None -> binding.label)
-  in
+  let hint = key_hint in
   let row items = String.concat "  " items in
   match mode with
-  | Approval_browsing ->
+  | Approval_browsing { approvals; asks; source } ->
+      (* Three things a key can need. [j/k] and [y / n] act on an approval
+         row; with none the decision answers with a notice. [ / ] selects a
+         waiting question and [a] opens the selected one, so a cursor on none
+         of them keeps [ / ] and drops [a]. [o / O] read the source of a
+         question, the last answer's included. [w] and [e] open a palette and
+         act on an empty queue. *)
       row
-        [ hint approval_move; hint approval_decide; hint approval_workspace
-        ; hint approval_outside; hint approval_walk; hint approval_answer; hint approval_origin
-        ; hint listing_refresh; hint listing_next
-          (* The way out: the two keys a cut row keeps
-             ([Masc_tui_footer.never_dropped_keys]). *)
-        ; hint approval_back; hint listing_quit
-        ]
+        ((if approvals then [ hint approval_move; hint approval_decide ] else [])
+         @ [ hint approval_workspace; hint approval_outside ]
+         @ (match asks with
+            | No_asks -> []
+            | Asks_unselected -> [ hint approval_walk ]
+            | Ask_selected -> [ hint approval_walk; hint approval_answer ])
+         @ (if source then [ hint approval_origin ] else [])
+         @ [ hint listing_refresh; hint listing_next
+             (* The way out: the two keys a cut row keeps
+                ([Masc_tui_footer.never_dropped_keys]). *)
+           ; hint approval_back; hint listing_quit
+           ])
   | Approval_writing ->
       row [ hint ~label:"save" approval_read; hint ~label:"cancel" approval_back ]
   | Approval_armed ->
@@ -1377,6 +1472,18 @@ let has_detail_scoped_keys surface =
       match binding.detail with
       | Either -> false
       | List_only | Detail_only -> true)
+    (for_surface surface)
+
+(* The same question for rows: whether this surface's table holds a key that
+   needs one, and so owes [footer_hints] a [~has_rows] from its list renderer.
+   [test_tui_footer_row_need] reads this rather than a list written by hand
+   beside it. *)
+let has_row_scoped_keys surface =
+  List.exists
+    (fun binding ->
+      match binding.rows with
+      | Rowless -> false
+      | Needs_row | Needs_reading -> true)
     (for_surface surface)
 
 let footer_hints_metrics ~telemetry =
@@ -1688,11 +1795,21 @@ type code_file_presence =
 let code_file_is_current (state : state) =
   Option.is_some (Masc_tui_fetched.current_key state.code_file)
 
+(* [d] on the file list opens the project's Git changes. The arm answers the
+   project's own workspace only: a keeper's or a repository's tree has no arm
+   for the key and it ends in [()]. The dispatcher and the footer both read
+   this answer, so the pair is named exactly where it answers. *)
+let code_tree_opens_changes = function
+  | Code_scope_project -> true
+  | Code_scope_keeper _ | Code_scope_repo _ -> false
+
 type code_pane =
-  | Code_tree of code_file_presence
-      (** the file list has focus below the project root *)
-  | Code_root of code_file_presence
-      (** the file list has focus at the project root *)
+  | Code_tree of code_file_presence * code_workspace_scope
+      (** the file list has focus below the project root, over the workspace
+          the scope names *)
+  | Code_root of code_file_presence * code_workspace_scope
+      (** the file list has focus at the project root, over the workspace the
+          scope names *)
   | Code_file  (** a file is open and nothing covers it *)
   | Code_diff
   | Code_notes  (** wrapped memo document is drawn over the file *)
@@ -1701,8 +1818,9 @@ type code_pane =
 let code_pane_of (state : state) =
   if state.code_focus_file <> Right_pane then
     let file = if code_file_is_current state then File_current else No_file in
-    if code_back_step state = Leave_code_for_workspace then Code_root file
-    else Code_tree file
+    if code_back_step state = Leave_code_for_workspace then
+      Code_root (file, state.code_scope)
+    else Code_tree (file, state.code_scope)
   else if state.code_notes_open then Code_notes
   else if state.code_history_open then Code_history
   else if state.code_diff_open then Code_diff
@@ -1753,14 +1871,20 @@ let footer_hints_code ~pane =
   let overlay_keys = [ "Enter (history)" ] in
   let dead =
     match pane with
-    | Code_tree file | Code_root file ->
+    | Code_tree (file, scope) | Code_root (file, scope) ->
         (* With no file read current, [h] and [l] have no pane to move to
            ([code_file_is_current]), and the row named them on the first
            screen of Code. *)
         let pane_keys = match file with
           | No_file -> [ "h/l" ]
           | File_current -> [] in
-        overlay_keys @ file_keys @ pane_keys
+        (* [d] on the list is not a file key: it opens the project's Git
+           changes where the dispatcher has that arm. *)
+        let tree_file_keys =
+          if code_tree_opens_changes scope then
+            List.filter (fun key -> not (String.equal key "d")) file_keys
+          else file_keys in
+        overlay_keys @ tree_file_keys @ pane_keys
     | Code_file ->
         (* The arm behind Right and Enter opens a tree row or answers the
            history overlay. With the file pane focused and nothing over it, it
@@ -1784,20 +1908,31 @@ let footer_hints_code ~pane =
      Esc alone goes on, to the ring parent. *)
   let esc_alone b =
     if String.equal b.key "Left / Esc" then { b with key = "Esc" } else b in
+  (* The footer spells the pan key in arrows: 13 cells with its label where the
+     words take 28. The sheet keeps the words. *)
+  let pan_arrows b =
+    if String.equal b.key "Shift-Left / Shift-Right" then { b with key = "Shift-←/→" }
+    else b in
   let visible = match pane with
     | Code_diff ->
         let pan, others = List.partition
             (fun b -> String.equal b.key "Shift-Left / Shift-Right") visible in
-        List.map (fun b -> { b with key = "Shift-←/→" }) pan
-        @ List.map esc_alone others
+        List.map pan_arrows pan @ List.map esc_alone others
     | Code_root _ -> List.map esc_alone visible
-    | Code_tree _ | Code_file | Code_notes | Code_history -> visible in
+    | Code_file -> List.map pan_arrows visible
+    | Code_tree _ | Code_notes | Code_history -> visible in
   visible
   |> List.map (fun b ->
        if String.equal b.key "j/k" then
          { b with label = (match pane with
            | Code_tree _ | Code_root _ -> "move"
            | Code_file | Code_diff | Code_notes | Code_history -> "scroll") }
+       else if String.equal b.key "d" then
+         (* On the list the key shows the project's changes; on an open file
+            it shows that file's diff. *)
+         { b with label = (match pane with
+           | Code_tree _ | Code_root _ -> "changes"
+           | Code_file | Code_diff | Code_notes | Code_history -> b.label) }
        else b)
   |> hints_of_bindings
   |> fun hints ->
@@ -2440,7 +2575,7 @@ let keeper_detail_tab_hint tab =
   String.concat "  "
     ("[ ]:tab"
      :: List.map
-          (fun binding -> binding.key ^ ":" ^ binding.label)
+          (fun binding -> key_hint binding)
           (keeper_detail_tab_bindings tab))
 
 (* A surface's rows on the sheet. The shared tail -- r, Tab and q exactly as

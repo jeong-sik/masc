@@ -1,24 +1,11 @@
 (** Backend: OCaml 5.x Eio-native storage backend
 
-    Direct-style async I/O using Eio.
-
-    This module provides the same interface as Backend, but uses:
+    Direct-style async I/O using Eio:
     - Eio.Path for file operations
     - Eio.Mutex for concurrency control
-    - Direct style (no let*/>>= needed)
 
-    Migration path: Backend.FileSystemBackend -> Backend.FileSystem
-
-    Compact Protocol v4: Transparent zstd compression with Dictionary
-    - Uses trained multi-format dictionary for 32-2048 byte messages
-    - Dictionary achieves ~70% compression vs ~6% standard zstd on small data
-    - Automatically compresses data >32 bytes on save
-    - Automatically decompresses on load (ZSTD/ZSTDD header detection)
+    Values are stored and read as given.
 *)
-
-(** {1 Compression} *)
-
-module Compression = Backend_compression
 
 (** {1 Types} *)
 
@@ -263,19 +250,6 @@ module FileSystem = struct
                 raise exn)
     | None -> ()
 
-  let _compress = Compression.compress_with_header
-  let _decompress = Compression.decompress_auto
-
-  let has_zstd_header content =
-    String.starts_with content ~prefix:"ZSTD"
-
-  let decompress_with_context ~context content =
-    let had_header = has_zstd_header content in
-    let decompressed = _decompress content in
-    if had_header && String.equal decompressed content then
-      Log.Backend.warn "[EioFS] decompress fallback for %s" context;
-    decompressed
-
   (* eio_posix issues regular-file writev on the calling scheduler thread.
      Keep path resolution and lifetime under the original capability/switch,
      but pin its descriptor while the blocking payload write runs elsewhere.
@@ -290,7 +264,7 @@ module FileSystem = struct
           Eio_unix.Fd.use_exn "backend-save-payload" fd (fun unix_fd ->
             write_all_substring unix_fd content 0 (String.length content))))
 
-  (** Get value by key (auto-decompresses ZSTD if detected).
+  (** Get value by key.
 
       Reads run lock-free: writers in this module go through a sibling
       [.tmp-atomic] file and [Eio.Path.rename] into place (see [set] and
@@ -299,14 +273,10 @@ module FileSystem = struct
       never a partial/truncated payload. Holding [t.mutex] here would only
       serialise readers against unrelated writers without buying any extra
       atomicity, and would queue dashboard reads behind every keeper's
-      compress+write cycle. *)
+      write cycle. *)
   let get t key =
     let* path = key_to_path t key in
-    try
-      let content = Eio.Path.load path in
-      (* Compact Protocol v4: Auto-decompress if ZSTD header present *)
-      let decompressed = decompress_with_context ~context:key content in
-      Ok decompressed
+    try Ok (Eio.Path.load path)
     with
     | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
         Error (NotFound key)
@@ -314,7 +284,7 @@ module FileSystem = struct
     | exn ->
         Error (IOError (Printexc.to_string exn))
 
-  (** Set value (auto-compresses with ZSTD if beneficial).
+  (** Set value.
 
       Writes go through a sibling [.tmp-atomic] file and are then
       [Eio.Path.rename]d into place. Without this indirection a reader
@@ -339,8 +309,7 @@ module FileSystem = struct
       in
       try
         _ensure_parent_dir ~log_errors:true path;
-        let compressed = _compress value in
-        save_payload tmp_path compressed;
+        save_payload tmp_path value;
         Eio.Path.rename tmp_path path;
         ki_replace t key ();
         Ok ()
@@ -559,10 +528,8 @@ module FileSystem = struct
     end else
       list_keys_by_prefix_scan t ~prefix
 
-  (** Set if not exists (atomic, auto-compresses) *)
+  (** Set if not exists (atomic) *)
   let set_if_not_exists t key value =
-    (* Compact Protocol v4: Compress before saving *)
-    let compressed = _compress value in
     with_observed_mutex ~op:"set_if_not_exists" ~key t (fun () ->
       let* safe_key = validate_key key in
       let path_part =
@@ -584,7 +551,7 @@ module FileSystem = struct
       let publish_new () =
         try
           _ensure_parent_dir ~log_errors:true path;
-          save_payload tmp_path compressed;
+          save_payload tmp_path value;
           Eio.Path.rename tmp_path path;
           ki_replace t key ();
           Ok true
@@ -930,16 +897,13 @@ module FileSystem = struct
           let buf = Bytes.create size in
           let n = Unix.read fd buf 0 size in
           if n = 0 then None
-          else
-            let raw = Bytes.sub_string buf 0 n in
-            Some (decompress_with_context ~context:path_str raw)
+          else Some (Bytes.sub_string buf 0 n)
         end
       in
       let new_content = f current in
-      let compressed = _compress new_content in
       let _ = Unix.lseek fd 0 Unix.SEEK_SET in
       Unix.ftruncate fd 0;
-      write_all_substring fd compressed 0 (String.length compressed);
+      write_all_substring fd new_content 0 (String.length new_content);
       Ok new_content
     with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
       Error (IOError (Printf.sprintf "atomic_update failed: %s" (Printexc.to_string exn)))

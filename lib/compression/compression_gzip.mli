@@ -7,11 +7,10 @@
     one, a factor of 145. zstd is sent only by Chrome 123+ and Firefox 126+ in
     secure contexts; Safari, curl, and every programmatic client fall through.
 
-    This module is deliberately separate from {!Compression_codec} rather than a
-    third constructor in its [encoding] type: that type is also what
-    {!Compression_codec.decompress} dispatches on for stored payloads, and a
-    stored zstd blob has nothing to do with what an HTTP client will accept.
-    Negotiation is a transport concern and lives in [http_response_payload]. *)
+    This module is deliberately separate from {!Compression_codec}: a stored
+    zstd blob, which {!Compression_codec.decompress} reads, has nothing to do
+    with what an HTTP client will accept. Negotiation is a transport concern
+    and lives in [http_response_payload]. *)
 
 type compress_result =
   | Unchanged of string

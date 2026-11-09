@@ -2101,13 +2101,22 @@ let test_board_write_survives_composition_output_schema_failure () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Time_compat.set_clock (Eio.Stdenv.clock env);
   Mirage_crypto_rng_unix.use_default ();
+  let inherited_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
   with_export_base @@ fun base_path ->
   Fun.protect ~finally:(fun () ->
+    (match inherited_base_path with
+     | Some value -> Unix.putenv "MASC_BASE_PATH" value
+     | None -> Unix.unsetenv "MASC_BASE_PATH");
     Log.reset_for_testing ();
     Board_dispatch.reset_for_test ();
     Board.reset_global_for_test ()) @@ fun () ->
   Board_dispatch.reset_for_test ();
   Board.reset_global_for_test ();
+  (* The Board store resolves its own paths through MASC_BASE_PATH
+     (Board_paths.board_base_path -> Env_config_core.base_path), not through
+     init_jsonl's argument, so the env must agree with this case's base the
+     same way test_board_dispatch's with_eio aligns them (task-3483). *)
+  Unix.putenv "MASC_BASE_PATH" base_path;
   Result.get_ok (Board_dispatch.init_jsonl ~base_path
     ~recipient_lookup:Masc_board_handlers.Recipient_lookup.none_declared ());
   Log.reset_for_testing ();

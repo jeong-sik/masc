@@ -1,3 +1,5 @@
+open Masc_board_handlers
+
 type t =
   | Comment_added of
       { post_id : string

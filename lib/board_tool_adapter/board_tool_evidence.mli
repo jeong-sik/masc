@@ -1,3 +1,5 @@
+open Masc_board_handlers
+
 (** Small producer-owned Board write facts, independent of model output text.
     These facts describe a committed write, never the cause of a Keeper's
     decision, a queue acknowledgement, or a no-action verdict. *)

@@ -1,0 +1,109 @@
+{
+ "info": {
+  "build": "0a7164246935",
+  "openapi_bytes": 32892,
+  "token": true
+ },
+ "runs": [
+  {
+   "warmup": [
+    {
+     "path": "/api/v1/stream/fleet",
+     "streams": 180,
+     "statuses": {
+      "200": 180
+     },
+     "seconds": 0.2
+    },
+    {
+     "path": "/api/v1/dashboard/logs/stream",
+     "streams": 180,
+     "statuses": {
+      "200": 180
+     },
+     "seconds": 0.4
+    }
+   ]
+  },
+  {
+   "fleet_tls": {
+    "path": "/api/v1/stream/fleet",
+    "streams": 4500,
+    "statuses": {
+     "200": 4500
+    },
+    "seconds": 4.4
+   }
+  },
+  {
+   "logs_tls": {
+    "path": "/api/v1/dashboard/logs/stream",
+    "streams": 4500,
+    "statuses": {
+     "200": 4500
+    },
+    "seconds": 6.0
+   }
+  },
+  {
+   "mcp_get_tls": {
+    "sessions_per_round": 30,
+    "rounds": 10,
+    "statuses": {
+     "200": 300
+    },
+    "sse_clients_before": 0,
+    "sse_clients_peak": 30,
+    "seconds_until_sse_clients_back": [
+     0.0,
+     0.0,
+     0.01,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "fleet_h2c": {
+    "path": "/api/v1/stream/fleet",
+    "streams": 2250,
+    "statuses": {
+     "200": 2250
+    },
+    "seconds": 2.1
+   }
+  },
+  {
+   "tls_connection_churn": {
+    "connections": 200,
+    "streams_each": 5,
+    "statuses": {
+     "200": 1000
+    }
+   }
+  },
+  {
+   "tls_handshake_failures_sent": 200
+  },
+  {
+   "h1_fleet_close": {
+    "connections": 200,
+    "status_200": 0
+   }
+  },
+  {
+   "after_all_on_the_same_tls_connection": {
+    "openapi_gets": 300,
+    "statuses": {
+     "200": 300
+    },
+    "server_reset_streams": 0
+   }
+  }
+ ]
+}

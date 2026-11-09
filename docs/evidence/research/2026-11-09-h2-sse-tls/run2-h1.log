@@ -1,0 +1,9 @@
+Installed 10 packages in 15ms
+{"label": "cold", "http_active": 1, "rss_mb": 223.2, "live_mb": 15.6, "fds": 54}
+{"/api/v1/stream/fleet": {"HTTP/1.1 200 OK": 2000}}
+{"label": "after-fleet-0s", "http_active": 1, "rss_mb": 277.0, "live_mb": 35.5, "fds": 54}
+{"label": "after-fleet-35s", "http_active": 1, "rss_mb": 280.3, "live_mb": 38.7, "fds": 54}
+{"/api/v1/dashboard/logs/stream": {"HTTP/1.1 200 OK": 2000}}
+{"label": "after-stream-0s", "http_active": 1, "rss_mb": 704.3, "live_mb": 195.4, "fds": 54}
+{"label": "after-stream-35s", "http_active": 1, "rss_mb": 452.4, "live_mb": 227.4, "fds": 54}
+exit=0

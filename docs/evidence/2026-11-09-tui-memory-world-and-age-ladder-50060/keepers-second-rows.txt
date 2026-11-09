@@ -1,0 +1,143 @@
+# 이번에 돌린 Keepers 세션의 Detailed 둘째 줄이에요(들여쓰기와 오른쪽 패널은 뺐어요). 형식: <세트>/<크기>-<색>-<언어>
+# 아래에 keeper 이름과 둘째 줄이 와요.
+
+keepers/120x35-color-en
+  alpha-failing    task task-0001 · health failing             failing 3h05m  ◷ ?  lag 4  +13m02s +2 -1  ··✓··⊘✓··✓✗✗  facts 12 ▄▆█▆
+  beta-unrecorded  task task-0001 · health failing                     failing ?  ◷ ?  lag 0  +47s +1 -0  ········✓··✗  facts 5 00▅█
+  gamma-skewed     task task-0001 · health failing                                      failing ?  ◷ ?  lag 0  ··········✗·  facts ?
+  delta-mixed      task task-0001                                 ◷ ?  lag 12  +9m02s +14 -6  stale ×1  ✓⊘··✓··✓·⊘✓✓  facts 340 █▆▅▃
+  epsilon-busy     task task-0001                                          ◷ ?  lag 2  +4m02s +31 -12  ????✓✓✓✓✓✓✓✓  facts 1204 █▄▂▁
+  zeta-unseeded    task task-0001                                            ◷ ?  lag 1  +35m02s +27 -0  ????????????  facts 27 000█
+  eta-quiet        task task-0001                                                             ◷ ?  lag 0  +8d02h +0 -0  facts 8 █000
+  theta-idle       task task-0001 · health idle                               ◷ ?  lag 0  +25m02s +4 -2  ✓✓✓✓✓✓✓✓✓✓✓✓  facts 61 ▄▇█▄
+
+keepers/120x35-color-ko
+  alpha-failing    task task-0001 · health failing             failing 3h05m  ◷ ?  lag 4  +13m02s +2 -1  ··✓··⊘✓··✓✗✗  facts 12 ▄▆█▆
+  beta-unrecorded  task task-0001 · health failing                     failing ?  ◷ ?  lag 0  +47s +1 -0  ········✓··✗  facts 5 00▅█
+  gamma-skewed     task task-0001 · health failing                                      failing ?  ◷ ?  lag 0  ··········✗·  facts ?
+  delta-mixed      task task-0001                                 ◷ ?  lag 12  +9m02s +14 -6  stale ×1  ✓⊘··✓··✓·⊘✓✓  facts 340 █▆▅▃
+  epsilon-busy     task task-0001                                          ◷ ?  lag 2  +4m02s +31 -12  ????✓✓✓✓✓✓✓✓  facts 1204 █▄▂▁
+  zeta-unseeded    task task-0001                                            ◷ ?  lag 1  +35m02s +27 -0  ????????????  facts 27 000█
+  eta-quiet        task task-0001                                                             ◷ ?  lag 0  +8d02h +0 -0  facts 8 █000
+  theta-idle       task task-0001 · health idle                               ◷ ?  lag 0  +25m02s +4 -2  ✓✓✓✓✓✓✓✓✓✓✓✓  facts 61 ▄▇█▄
+
+keepers/120x35-nocolor-en
+  alpha-failing    task task-0001 · health failing             failing 3h05m  ◷ ?  lag 4  +13m02s +2 -1  ··✓··⊘✓··✓✗✗  facts 12 ▄▆█▆
+  beta-unrecorded  task task-0001 · health failing                     failing ?  ◷ ?  lag 0  +47s +1 -0  ········✓··✗  facts 5 00▅█
+  gamma-skewed     task task-0001 · health failing                                      failing ?  ◷ ?  lag 0  ··········✗·  facts ?
+  delta-mixed      task task-0001                                 ◷ ?  lag 12  +9m02s +14 -6  stale ×1  ✓⊘··✓··✓·⊘✓✓  facts 340 █▆▅▃
+  epsilon-busy     task task-0001                                          ◷ ?  lag 2  +4m02s +31 -12  ????✓✓✓✓✓✓✓✓  facts 1204 █▄▂▁
+  zeta-unseeded    task task-0001                                            ◷ ?  lag 1  +35m02s +27 -0  ????????????  facts 27 000█
+  eta-quiet        task task-0001                                                             ◷ ?  lag 0  +8d02h +0 -0  facts 8 █000
+  theta-idle       task task-0001 · health idle                               ◷ ?  lag 0  +25m02s +4 -2  ✓✓✓✓✓✓✓✓✓✓✓✓  facts 61 ▄▇█▄
+
+keepers/120x35-nocolor-ko
+  alpha-failing    task task-0001 · health failing             failing 3h05m  ◷ ?  lag 4  +13m02s +2 -1  ··✓··⊘✓··✓✗✗  facts 12 ▄▆█▆
+  beta-unrecorded  task task-0001 · health failing                     failing ?  ◷ ?  lag 0  +47s +1 -0  ········✓··✗  facts 5 00▅█
+  gamma-skewed     task task-0001 · health failing                                      failing ?  ◷ ?  lag 0  ··········✗·  facts ?
+  delta-mixed      task task-0001                                 ◷ ?  lag 12  +9m02s +14 -6  stale ×1  ✓⊘··✓··✓·⊘✓✓  facts 340 █▆▅▃
+  epsilon-busy     task task-0001                                          ◷ ?  lag 2  +4m02s +31 -12  ????✓✓✓✓✓✓✓✓  facts 1204 █▄▂▁
+  zeta-unseeded    task task-0001                                            ◷ ?  lag 1  +35m02s +27 -0  ????????????  facts 27 000█
+  eta-quiet        task task-0001                                                             ◷ ?  lag 0  +8d02h +0 -0  facts 8 █000
+  theta-idle       task task-0001 · health idle                               ◷ ?  lag 0  +25m02s +4 -2  ✓✓✓✓✓✓✓✓✓✓✓✓  facts 61 ▄▇█▄
+
+keepers/200x45-color-en
+  alpha-failing    task task-0001 · health failing                                     failing 3h05m  ◷ ?  lag 4  +13m02s +2 -1  ··✓··⊘✓··✓✗✗  facts 12 ▄▆█▆
+  beta-unrecorded  task task-0001 · health failing                                             failing ?  ◷ ?  lag 0  +47s +1 -0  ········✓··✗  facts 5 00▅█
+  gamma-skewed     task task-0001 · health failing                                                              failing ?  ◷ ?  lag 0  ··········✗·  facts ?
+  delta-mixed      task task-0001                                                         ◷ ?  lag 12  +9m02s +14 -6  stale ×1  ✓⊘··✓··✓·⊘✓✓  facts 340 █▆▅▃
+  epsilon-busy     task task-0001                                                                  ◷ ?  lag 2  +4m02s +31 -12  ????✓✓✓✓✓✓✓✓  facts 1204 █▄▂▁
+  zeta-unseeded    task task-0001                                                                    ◷ ?  lag 1  +35m02s +27 -0  ????????????  facts 27 000█
+  eta-quiet        task task-0001                                                                                     ◷ ?  lag 0  +8d02h +0 -0  facts 8 █000
+  theta-idle       task task-0001 · health idle                                                       ◷ ?  lag 0  +25m02s +4 -2  ✓✓✓✓✓✓✓✓✓✓✓✓  facts 61 ▄▇█▄
+
+keepers/200x45-color-ko
+  alpha-failing    task task-0001 · health failing                                     failing 3h05m  ◷ ?  lag 4  +13m02s +2 -1  ··✓··⊘✓··✓✗✗  facts 12 ▄▆█▆
+  beta-unrecorded  task task-0001 · health failing                                             failing ?  ◷ ?  lag 0  +47s +1 -0  ········✓··✗  facts 5 00▅█
+  gamma-skewed     task task-0001 · health failing                                                              failing ?  ◷ ?  lag 0  ··········✗·  facts ?
+  delta-mixed      task task-0001                                                         ◷ ?  lag 12  +9m02s +14 -6  stale ×1  ✓⊘··✓··✓·⊘✓✓  facts 340 █▆▅▃
+  epsilon-busy     task task-0001                                                                  ◷ ?  lag 2  +4m02s +31 -12  ????✓✓✓✓✓✓✓✓  facts 1204 █▄▂▁
+  zeta-unseeded    task task-0001                                                                    ◷ ?  lag 1  +35m02s +27 -0  ????????????  facts 27 000█
+  eta-quiet        task task-0001                                                                                     ◷ ?  lag 0  +8d02h +0 -0  facts 8 █000
+  theta-idle       task task-0001 · health idle                                                       ◷ ?  lag 0  +25m02s +4 -2  ✓✓✓✓✓✓✓✓✓✓✓✓  facts 61 ▄▇█▄
+
+keepers/200x45-nocolor-en
+  alpha-failing    task task-0001 · health failing                                     failing 3h05m  ◷ ?  lag 4  +13m02s +2 -1  ··✓··⊘✓··✓✗✗  facts 12 ▄▆█▆
+  beta-unrecorded  task task-0001 · health failing                                             failing ?  ◷ ?  lag 0  +47s +1 -0  ········✓··✗  facts 5 00▅█
+  gamma-skewed     task task-0001 · health failing                                                              failing ?  ◷ ?  lag 0  ··········✗·  facts ?
+  delta-mixed      task task-0001                                                         ◷ ?  lag 12  +9m02s +14 -6  stale ×1  ✓⊘··✓··✓·⊘✓✓  facts 340 █▆▅▃
+  epsilon-busy     task task-0001                                                                  ◷ ?  lag 2  +4m02s +31 -12  ????✓✓✓✓✓✓✓✓  facts 1204 █▄▂▁
+  zeta-unseeded    task task-0001                                                                    ◷ ?  lag 1  +35m02s +27 -0  ????????????  facts 27 000█
+  eta-quiet        task task-0001                                                                                     ◷ ?  lag 0  +8d02h +0 -0  facts 8 █000
+  theta-idle       task task-0001 · health idle                                                       ◷ ?  lag 0  +25m02s +4 -2  ✓✓✓✓✓✓✓✓✓✓✓✓  facts 61 ▄▇█▄
+
+keepers/200x45-nocolor-ko
+  alpha-failing    task task-0001 · health failing                                     failing 3h05m  ◷ ?  lag 4  +13m02s +2 -1  ··✓··⊘✓··✓✗✗  facts 12 ▄▆█▆
+  beta-unrecorded  task task-0001 · health failing                                             failing ?  ◷ ?  lag 0  +47s +1 -0  ········✓··✗  facts 5 00▅█
+  gamma-skewed     task task-0001 · health failing                                                              failing ?  ◷ ?  lag 0  ··········✗·  facts ?
+  delta-mixed      task task-0001                                                         ◷ ?  lag 12  +9m02s +14 -6  stale ×1  ✓⊘··✓··✓·⊘✓✓  facts 340 █▆▅▃
+  epsilon-busy     task task-0001                                                                  ◷ ?  lag 2  +4m02s +31 -12  ????✓✓✓✓✓✓✓✓  facts 1204 █▄▂▁
+  zeta-unseeded    task task-0001                                                                    ◷ ?  lag 1  +35m02s +27 -0  ????????????  facts 27 000█
+  eta-quiet        task task-0001                                                                                     ◷ ?  lag 0  +8d02h +0 -0  facts 8 █000
+  theta-idle       task task-0001 · health idle                                                       ◷ ?  lag 0  +25m02s +4 -2  ✓✓✓✓✓✓✓✓✓✓✓✓  facts 61 ▄▇█▄
+
+keepers/80x24-color-en
+  alpha-failing    ta… failing 3h05m  ◷ ?  lag 4  +13m02s +2 -1  ··✓··⊘✓··✓✗✗  facts 12 ▄▆█▆
+  beta-unrecorded  task task-… failing ?  ◷ ?  lag 0  +47s +1 -0  ········✓··✗  facts 5 00▅█
+  gamma-skewed     task task-0001 · health fai… failing ?  ◷ ?  lag 0  ··········✗·  facts ?
+  delta-mixed      task … ◷ ?  lag 12  +9m02s +14 -6  stale ×1  ✓⊘··✓··✓·⊘✓✓  facts 340 █▆▅▃
+  epsilon-busy     task task-0001  ◷ ?  lag 2  +4m02s +31 -12  ????✓✓✓✓✓✓✓✓  facts 1204 █▄▂▁
+  zeta-unseeded    task task-0001    ◷ ?  lag 1  +35m02s +27 -0  ????????????  facts 27 000█
+  eta-quiet        task task-0001                     ◷ ?  lag 0  +8d02h +0 -0  facts 8 █000
+  theta-idle       task task-0001 · … ◷ ?  lag 0  +25m02s +4 -2  ✓✓✓✓✓✓✓✓✓✓✓✓  facts 61 ▄▇█▄
+
+keepers/80x24-color-ko
+  alpha-failing    ta… failing 3h05m  ◷ ?  lag 4  +13m02s +2 -1  ··✓··⊘✓··✓✗✗  facts 12 ▄▆█▆
+  beta-unrecorded  task task-… failing ?  ◷ ?  lag 0  +47s +1 -0  ········✓··✗  facts 5 00▅█
+  gamma-skewed     task task-0001 · health fai… failing ?  ◷ ?  lag 0  ··········✗·  facts ?
+  delta-mixed      task … ◷ ?  lag 12  +9m02s +14 -6  stale ×1  ✓⊘··✓··✓·⊘✓✓  facts 340 █▆▅▃
+  epsilon-busy     task task-0001  ◷ ?  lag 2  +4m02s +31 -12  ????✓✓✓✓✓✓✓✓  facts 1204 █▄▂▁
+  zeta-unseeded    task task-0001    ◷ ?  lag 1  +35m02s +27 -0  ????????????  facts 27 000█
+  eta-quiet        task task-0001                     ◷ ?  lag 0  +8d02h +0 -0  facts 8 █000
+  theta-idle       task task-0001 · … ◷ ?  lag 0  +25m02s +4 -2  ✓✓✓✓✓✓✓✓✓✓✓✓  facts 61 ▄▇█▄
+
+keepers/80x24-nocolor-en
+  alpha-failing    ta… failing 3h05m  ◷ ?  lag 4  +13m02s +2 -1  ··✓··⊘✓··✓✗✗  facts 12 ▄▆█▆
+  beta-unrecorded  task task-… failing ?  ◷ ?  lag 0  +47s +1 -0  ········✓··✗  facts 5 00▅█
+  gamma-skewed     task task-0001 · health fai… failing ?  ◷ ?  lag 0  ··········✗·  facts ?
+  delta-mixed      task … ◷ ?  lag 12  +9m02s +14 -6  stale ×1  ✓⊘··✓··✓·⊘✓✓  facts 340 █▆▅▃
+  epsilon-busy     task task-0001  ◷ ?  lag 2  +4m02s +31 -12  ????✓✓✓✓✓✓✓✓  facts 1204 █▄▂▁
+  zeta-unseeded    task task-0001    ◷ ?  lag 1  +35m02s +27 -0  ????????????  facts 27 000█
+  eta-quiet        task task-0001                     ◷ ?  lag 0  +8d02h +0 -0  facts 8 █000
+  theta-idle       task task-0001 · … ◷ ?  lag 0  +25m02s +4 -2  ✓✓✓✓✓✓✓✓✓✓✓✓  facts 61 ▄▇█▄
+
+keepers/80x24-nocolor-ko
+  alpha-failing    ta… failing 3h05m  ◷ ?  lag 4  +13m02s +2 -1  ··✓··⊘✓··✓✗✗  facts 12 ▄▆█▆
+  beta-unrecorded  task task-… failing ?  ◷ ?  lag 0  +47s +1 -0  ········✓··✗  facts 5 00▅█
+  gamma-skewed     task task-0001 · health fai… failing ?  ◷ ?  lag 0  ··········✗·  facts ?
+  delta-mixed      task … ◷ ?  lag 12  +9m02s +14 -6  stale ×1  ✓⊘··✓··✓·⊘✓✓  facts 340 █▆▅▃
+  epsilon-busy     task task-0001  ◷ ?  lag 2  +4m02s +31 -12  ????✓✓✓✓✓✓✓✓  facts 1204 █▄▂▁
+  zeta-unseeded    task task-0001    ◷ ?  lag 1  +35m02s +27 -0  ????????????  facts 27 000█
+  eta-quiet        task task-0001                     ◷ ?  lag 0  +8d02h +0 -0  facts 8 █000
+  theta-idle       task task-0001 · … ◷ ?  lag 0  +25m02s +4 -2  ✓✓✓✓✓✓✓✓✓✓✓✓  facts 61 ▄▇█▄
+
+keepers-unread/120x35-color-en
+  alpha-failing    task task-0001 · health failing                                           failing 3h05m  ◷ ?  mem ?  ··✓··⊘✓··✓✗✗
+  beta-unrecorded  task task-0001 · health failing                                               failing ?  ◷ ?  mem ?  ········✓··✗
+  gamma-skewed     task task-0001 · health failing                                               failing ?  ◷ ?  mem ?  ··········✗·
+  delta-mixed      task task-0001                                                                           ◷ ?  mem ?  ✓⊘··✓··✓·⊘✓✓
+  epsilon-busy     task task-0001                                                                           ◷ ?  mem ?  ????✓✓✓✓✓✓✓✓
+  zeta-unseeded    task task-0001                                                                           ◷ ?  mem ?  ????????????
+  eta-quiet        task task-0001                                                                                         ◷ ?  mem ?
+  theta-idle       task task-0001 · health idle                                                             ◷ ?  mem ?  ✓✓✓✓✓✓✓✓✓✓✓✓
+
+keepers-unread/120x35-color-ko
+  alpha-failing    task task-0001 · health failing                                           failing 3h05m  ◷ ?  mem ?  ··✓··⊘✓··✓✗✗
+  beta-unrecorded  task task-0001 · health failing                                               failing ?  ◷ ?  mem ?  ········✓··✗
+  gamma-skewed     task task-0001 · health failing                                               failing ?  ◷ ?  mem ?  ··········✗·
+  delta-mixed      task task-0001                                                                           ◷ ?  mem ?  ✓⊘··✓··✓·⊘✓✓
+  epsilon-busy     task task-0001                                                                           ◷ ?  mem ?  ????✓✓✓✓✓✓✓✓
+  zeta-unseeded    task task-0001                                                                           ◷ ?  mem ?  ????????????
+  eta-quiet        task task-0001                                                                                         ◷ ?  mem ?
+  theta-idle       task task-0001 · health idle                                                             ◷ ?  mem ?  ✓✓✓✓✓✓✓✓✓✓✓✓
+

@@ -14,6 +14,8 @@
     uv run scripts/tinker/librarian/eval_admission.py verdict --real <dir> --synth <dir> \
         --drops <e_synth_audit.py drops --out> --merges <merge_cases.py --out> \
         --train A=artifacts/tinker/librarian/train-A
+    uv run scripts/tinker/librarian/eval_admission.py synth-numbers --synth <dir> \
+        --drops <e_synth_audit.py drops --out> --merges <merge_cases.py --out>
 
 `pass_lines.json` fixes the request, the sets, the baseline, the candidates and
 the gates. `run` refuses to start when a file it pins has changed. Each item
@@ -67,7 +69,8 @@ Definitions:
   supersedes the label's target, and the target is dropped. Reported, not
   gated.
 - E-synth drop precision (G3): dropped IDs that are planted stale facts or label
-  correction targets, over all dropped IDs of valid answers (1.0 with no drops).
+  correction targets, over all dropped IDs of valid answers (none with no drop,
+  which fails G3).
   A dropped complement target or duplicate fact counts against it, since the
   label absorbs those (`dropped_unmerged`). Any other dropped ID is an off-label
   drop. Rows list them, and `verdict` needs a blind judge's class for each one
@@ -82,14 +85,16 @@ Definitions:
 - E-synth absorb precision and judged merge recall (G6): `verdict` asks a
   blind judge what MASC's absorb gate asks of every absorb, in the gate's words
   (`merge_cases.py`, `merge_decisions`). Absorb precision is absorbs judged
-  mergeable over all absorbs; judged merge recall counts a merge the label
-  expects only when every absorb it made is judged mergeable. A run with no
-  expected merge has no judged merge recall and fails G6.
-- E-synth stale drop recall (G3): planted stale facts dropped, over the planted stale
-  facts the labels expect to leave. An absorbed stale fact is not dropped: its
-  text lives on in the new claim. Labels expect merges and stale drops only on
-  requests with a candidate that can support a change; elsewhere a dropped
-  stale fact still counts as a right drop.
+  mergeable over all absorbs; a run with no absorb has none and fails G6.
+  Judged merge recall counts a merge the label expects only when every absorb
+  it made is judged mergeable; a run with no expected merge has none and fails
+  G6.
+- E-synth stale drop recall (G3): planted stale facts dropped, over the planted
+  stale facts the labels expect to leave (none when they expect none, which
+  fails G3). An absorbed stale fact is not dropped: its text lives on in the
+  new claim. Labels expect merges and stale drops only on requests with a
+  candidate that can support a change; elsewhere a dropped stale fact still
+  counts as a right drop.
 - Growth: claims an answer adds minus the memory IDs it takes out, per item,
   beside the labels' (E-synth) or the live answers' (E-real).
 - latency p50 (G5): median wall time of E-real calls that returned HTTP 200.
@@ -101,8 +106,13 @@ Definitions:
 - `verdict` recomputes every number from rows.jsonl. It refuses unless both runs
   sent the same model under each name, and each candidate is the sampler_path
   `train_sft.py` saved for it under these pass lines. It also refuses while
-  pass_lines.json sets no number for a gate, or sets a gate it does not read.
-  The choice is the first candidate in `choice.order` that passes every gate.
+  pass_lines.json sets no finite number for a gate, sets a gate it does not
+  read, or holds another `choice` key than `order`. The choice is the first
+  candidate in `choice.order` that passes every gate.
+- `synth-numbers` prints each target's E-synth numbers as `verdict` computes
+  them, with the drop and merge judges' classes. It reads no gate, choice or
+  trained run, so the baseline's numbers can set a gate's line before any
+  training.
 
 Output: <out>/calls.jsonl holds raw answers (E-real answers carry Keeper memory;
 keep them local), <out>/rows.jsonl numbers, IDs and verdicts, each row naming
@@ -114,8 +124,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import statistics
 import sys
+from collections import Counter
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -362,10 +375,11 @@ def summarize(kind: str, rows: list[JsonObject], wrong_elsewhere: dict[str, int]
         else:
             drops = sum(cast(int, r["dropped"]) for r in mine) + (wrong_elsewhere or {}).get(name, 0)
             part["outcome_accuracy"] = sum(cast(int, r["correct"]) for r in mine) / cands
-            part["drop_precision"] = sum(cast(int, r["dropped_expected"]) for r in mine) / drops if drops else 1.0
+            part["drop_precision"] = sum(cast(int, r["dropped_expected"]) for r in mine) / drops if drops else None
             part["absorbed"] = sum(cast(int, r["absorbed"]) for r in mine)
-            part["stale_drop_recall"] = (sum(cast(int, r["planted_dropped"]) for r in mine)
-                                         / max(1, sum(cast(int, r["planted"]) for r in mine)))
+            planted = sum(cast(int, r["planted"]) for r in mine)
+            part["stale_drop_recall"] = (sum(cast(int, r["planted_dropped"]) for r in mine) / planted
+                                         if planted else None)
             part["memory_state_accuracy"] = sum(cast(int, r["state_correct"]) for r in mine) / cands
             part["state_by_kind"] = by_kind(mine)
             part["dropped_unmerged"] = sum(len(cast(list[str], r["dropped_unmerged"])) for r in mine)
@@ -486,15 +500,15 @@ class Gates:
 
 
 def gates_of(raw: JsonObject) -> Gates:
-    """The gates. SystemExit when pass_lines.json sets no number for one, or sets one the verdict does
-    not read: a gate left over from earlier pass lines would look applied and be ignored."""
+    """The gates. SystemExit when pass_lines.json sets no finite number for one, or sets one the verdict
+    does not read: a gate left over from earlier pass lines would look applied and be ignored."""
     read: list[str] = []
 
     def number(key: str) -> float:
         read.append(key)
         value = raw.get(key)
-        if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise SystemExit(f"pass_lines.json sets no number for {key}")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise SystemExit(f"pass_lines.json sets no finite number for {key}")
         return float(value)
 
     gates = Gates(
@@ -513,25 +527,55 @@ def gates_of(raw: JsonObject) -> Gates:
     return gates
 
 
+def choice_of(raw: JsonObject) -> list[str]:
+    """pass_lines.json `choice.order`: the candidates, in the order the verdict prefers them. SystemExit
+    for another key, which would look applied and be ignored, and for an order that names no candidate."""
+    order = raw.get("order")
+    names = cast(list[object], order) if isinstance(order, list) else []
+    if set(raw) != {"order"} or not names or not all(isinstance(n, str) for n in names):
+        raise SystemExit("pass_lines.json choice holds `order` alone, a list of candidate names")
+    return [cast(str, n) for n in names]
+
+
+def ready_to_train(lines: JsonObject, candidate: str) -> Gates:
+    """The gates `candidate` trains toward. SystemExit while a gate has no number or `choice.order` does
+    not name the candidate: no weights change before the verdict can judge them."""
+    gates = gates_of(cast(JsonObject, lines["gates"]))
+    if candidate not in choice_of(cast(JsonObject, lines["choice"])):
+        raise SystemExit(f"pass_lines.json choice.order does not name {candidate}")
+    return gates
+
+
+def at_least(value: object, line: float) -> bool:
+    """Whether a number reaches its line. A number with nothing to count over (None) reaches none."""
+    return value is not None and cast(float, value) >= line
+
+
 def gate_checks(gates: Gates, real: JsonObject, synth: JsonObject, merges: JsonObject, pair: JsonObject,
                 baseline_real: JsonObject) -> dict[str, bool]:
     """Each gate for one candidate: its E-real and E-synth numbers (`summarize`), its merge numbers
     (`merge_decisions.MergeAdjudication.numbers`), its pairing with the baseline (`paired`) and the
     baseline's E-real numbers."""
-    lead, p50, b50 = pair["lead"], real["latency_p50_s"], baseline_real["latency_p50_s"]
-    recall = merges["judged_merge_recall"]
+    p50, b50 = real["latency_p50_s"], baseline_real["latency_p50_s"]
     return {
-        "G1": cast(float, real["valid_rate"]) >= gates.g1_e_real_valid_rate_min,
+        "G1": at_least(real["valid_rate"], gates.g1_e_real_valid_rate_min),
         "G2": cast(int, real["dropped_not_in_live"]) <= gates.g2_e_real_dropped_not_in_live_max,
-        "G3": (cast(float, synth["memory_state_accuracy"]) >= gates.g3_e_synth_memory_state_accuracy_min
-               and cast(float, synth["drop_precision"]) >= gates.g3_e_synth_drop_precision_min
-               and cast(float, synth["stale_drop_recall"]) >= gates.g3_e_synth_stale_drop_recall_min),
-        "G4": lead is not None and cast(float, lead) >= gates.g4_e_real_paired_lead_min,
+        "G3": (at_least(synth["memory_state_accuracy"], gates.g3_e_synth_memory_state_accuracy_min)
+               and at_least(synth["drop_precision"], gates.g3_e_synth_drop_precision_min)
+               and at_least(synth["stale_drop_recall"], gates.g3_e_synth_stale_drop_recall_min)),
+        "G4": at_least(pair["lead"], gates.g4_e_real_paired_lead_min),
         "G5": (p50 is not None and b50 is not None
                and cast(float, p50) <= cast(float, b50) * gates.g5_e_real_latency_p50_ratio_max),
-        "G6": (cast(float, merges["absorb_precision"]) >= gates.g6_e_synth_absorb_precision_min
-               and recall is not None and cast(float, recall) >= gates.g6_e_synth_judged_merge_recall_min),
+        "G6": (at_least(merges["absorb_precision"], gates.g6_e_synth_absorb_precision_min)
+               and at_least(merges["judged_merge_recall"], gates.g6_e_synth_judged_merge_recall_min)),
     }
+
+
+def judged_candidate(gates: Gates, name: str, base: str, real: Mapping[str, JsonObject],
+                     synth: Mapping[str, JsonObject], merges: Mapping[str, JsonObject], pair: JsonObject) -> JsonObject:
+    """`name`'s gates on its own numbers, G5 against `base`'s E-real latency. It passes when every gate does."""
+    checks = gate_checks(gates, real[name], synth[name], merges[name], pair, real[base])
+    return {"pass": all(checks.values()), **checks, "paired": pair}
 
 
 def choose(names: list[str], result: JsonObject) -> str | None:
@@ -579,6 +623,45 @@ def binding_problem(real_targets: dict[str, str], synth_targets: dict[str, str],
     return None
 
 
+@dataclass(frozen=True, slots=True)
+class SynthMeasure:
+    """Each target's E-synth numbers on the rows the drop judge leaves scored, the drop judge's record,
+    and the merge judge's report (`merge_decisions.report`)."""
+
+    by_target: dict[str, JsonObject]
+    drops: JsonObject
+    merges: JsonObject
+
+
+def measure_synth(synth_dir: Path, items: int, targets: list[str], drops_dir: Path | None,
+                  merges_dir: Path | None) -> SynthMeasure:
+    """The E-synth numbers of `targets`, recomputed from rows.jsonl, so an edited or stale summary.json
+    cannot pass a gate. SystemExit when a target has not answered all `items`, an off-label drop has
+    no judge's folder, an absorb has no merge judge's folder, or the judged drops leave nothing to score."""
+    synth_rows = read_rows(synth_dir)
+    counts = Counter(cast(str, r["target"]) for r in synth_rows)
+    if any(counts[n] != items for n in targets):
+        raise SystemExit(f"the synth run has not answered every item for every target: {dict(counts)}")
+    off = D.off_label(synth_rows)
+    if not off:
+        judged = D.NO_DROPS
+    elif drops_dir is None:
+        raise SystemExit(f"{sum(len(m) for m in off.values())} off-label E-synth drops need the blind judge: "
+                         "run e_synth_audit.py drops, then pass its --out as --drops")
+    else:
+        judged = D.read_adjudication(drops_dir, off, synth_render.TEMPLATE)
+    scored = judged.scored(synth_rows)
+    if not scored:
+        raise SystemExit("the judge's drops leave no E-synth request to score")
+    by_target = cast(dict[str, JsonObject], summarize("synth", scored, judged.wrong_outside(synth_rows)))
+    merges = MD.report(synth_rows, scored, merges_dir, synth_render.TEMPLATE, synth_dir, targets)
+    return SynthMeasure(by_target, judged.record(synth_rows), merges)
+
+
+def folder(arg: object) -> Path | None:
+    return None if arg is None else Path(cast(str, arg))
+
+
 def verdict(args: argparse.Namespace) -> int:
     lines = load_pass_lines()
     real_dir, synth_dir = Path(cast(str, args.real)), Path(cast(str, args.synth))
@@ -589,32 +672,21 @@ def verdict(args: argparse.Namespace) -> int:
     if pinned is not None:
         raise SystemExit(pinned)
     gates, comparison = gates_of(cast(JsonObject, lines["gates"])), cast(JsonObject, lines["comparison"])
-    base, names = cast(str, comparison["baseline"]), cast(list[str], cast(JsonObject, lines["choice"])["order"])
+    base, names = cast(str, comparison["baseline"]), choice_of(cast(JsonObject, lines["choice"]))
     problem = binding_problem(cast(dict[str, str], real["targets"]), cast(dict[str, str], synth["targets"]),
                               base, cast(str, comparison["baseline_model"]), names,
                               trained_runs(cast(list[str], args.train)), pin)
     if problem is not None:
         raise SystemExit(problem)
-    rows, synth_rows = read_rows(real_dir), read_rows(synth_dir)
+    rows = read_rows(real_dir)
     # Recomputed from the rows, so an edited or stale summary.json cannot pass a gate.
     r_all = cast(dict[str, JsonObject], summarize("real", rows))
-    expected = {"real": cast(JsonObject, lines["e_real"])["items"], "synth": cast(JsonObject, lines["e_synth"])["items"]}
-    for kind, part in (("real", r_all), ("synth", cast(dict[str, JsonObject], summarize("synth", synth_rows)))):
-        counts = {n: t["items"] for n, t in part.items()}
-        if any(counts.get(n) != expected[kind] for n in [base, *names]):
-            raise SystemExit(f"the {kind} run has not answered every item for every target: {counts}")
-    drops = D.off_label(synth_rows)
-    if drops and args.drops is None:
-        raise SystemExit(f"{sum(len(m) for m in drops.values())} off-label E-synth drops need the blind judge: "
-                         "run e_synth_audit.py drops, then pass its --out as --drops")
-    judged = D.read_adjudication(Path(cast(str, args.drops)), drops, synth_render.TEMPLATE) if drops else D.NO_DROPS
-    scored = judged.scored(synth_rows)
-    if not scored:
-        raise SystemExit("the judge's drops leave no E-synth request to score")
-    s_all = cast(dict[str, JsonObject], summarize("synth", scored, judged.wrong_outside(synth_rows)))
-    merges = MD.report(synth_rows, scored, Path(cast(str, args.merges)) if args.merges is not None else None,
-                       synth_render.TEMPLATE, synth_dir, [base, *names])
-    m_all = cast(dict[str, JsonObject], merges["by_target"])
+    counts = {n: t["items"] for n, t in r_all.items()}
+    if any(counts.get(n) != cast(JsonObject, lines["e_real"])["items"] for n in [base, *names]):
+        raise SystemExit(f"the real run has not answered every item for every target: {counts}")
+    measure = measure_synth(synth_dir, cast(int, cast(JsonObject, lines["e_synth"])["items"]), [base, *names],
+                            folder(args.drops), folder(args.merges))
+    m_all = cast(dict[str, JsonObject], measure.merges["by_target"])
     window = cast(float, comparison["same_item_window_s"])
     result: JsonObject = {}
     warm_min = cast(float, comparison["warm_share_min"])
@@ -627,14 +699,35 @@ def verdict(args: argparse.Namespace) -> int:
             if share < warm_min:
                 raise SystemExit(f"{share:.2f} of {who}'s E-real calls met a warm cache, {warm_min} needed: "
                                  "G5 would compare unlike cache states")
-        pair = paired(rows, base, name)
-        checks = gate_checks(gates, r_all[name], s_all[name], m_all[name], pair, r_all[base])
-        result[name] = {"pass": all(checks.values()), **checks, "paired": pair, "widest_gap_s": round(gap, 1)}
-    result["e_synth_drops"] = judged.record(synth_rows)
-    result["e_synth_merges"] = merges
+        result[name] = {**judged_candidate(gates, name, base, r_all, measure.by_target, m_all,
+                                           paired(rows, base, name)),
+                        "widest_gap_s": round(gap, 1)}
+    result["e_synth_drops"] = measure.drops
+    result["e_synth_merges"] = measure.merges
     result["choice"] = choose(names, result)
     print(json.dumps(result))
     (real_dir / "verdict.json").write_text(json.dumps(result, indent=1) + "\n", encoding="utf-8")
+    return 0
+
+
+def synth_numbers(args: argparse.Namespace) -> int:
+    """Each target's E-synth numbers as `verdict` computes them, written to <synth>/synth-numbers.json."""
+    lines = load_pass_lines()
+    synth_dir = Path(cast(str, args.synth))
+    summary = cast(JsonObject, json.loads((synth_dir / "summary.json").read_text(encoding="utf-8")))
+    if summary["set"] != "synth":
+        raise SystemExit(f"{synth_dir} holds no E-synth run")
+    pinned = pinned_problem([summary], sha256_file(PASS_LINES), sha256_file(synth_render.TEMPLATE))
+    if pinned is not None:
+        raise SystemExit(pinned)
+    targets = list(cast(dict[str, str], summary["targets"]))
+    measure = measure_synth(synth_dir, cast(int, cast(JsonObject, lines["e_synth"])["items"]), targets,
+                            folder(args.drops), folder(args.merges))
+    m_all = cast(dict[str, JsonObject], measure.merges["by_target"])
+    numbers: JsonObject = {n: {**measure.by_target[n], "merges": m_all[n]} for n in targets}
+    print(json.dumps(numbers))
+    record = {**numbers, "e_synth_drops": measure.drops, "e_synth_merges": measure.merges}
+    (synth_dir / "synth-numbers.json").write_text(json.dumps(record, indent=1) + "\n", encoding="utf-8")
     return 0
 
 
@@ -654,16 +747,26 @@ def main() -> int:
                    help="a librarian.md to draw every prompt with (default: the pinned config/prompts/librarian.md)")
     v = sub.add_parser("verdict")
     v.add_argument("--real", required=True)
-    v.add_argument("--synth", required=True)
-    v.add_argument("--drops", default=None,
-                   help="e_synth_audit.py drops --out, with the judge's judge/decisions.jsonl; needed when an "
-                        "answer dropped a fact off label")
-    v.add_argument("--merges", default=None,
-                   help="merge_cases.py --out, with the judge's judge/decisions.jsonl; needed when an answer "
-                        "absorbed a memory")
     v.add_argument("--train", action="append", required=True, help="name=<train_sft --out>, one per candidate")
+    n = sub.add_parser("synth-numbers", help="each target's E-synth numbers, with no gate or trained run")
+    for p in (v, n):
+        p.add_argument("--synth", required=True)
+        p.add_argument("--drops", default=None,
+                       help="e_synth_audit.py drops --out, with the judge's judge/decisions.jsonl; needed when an "
+                            "answer dropped a fact off label")
+        p.add_argument("--merges", default=None,
+                       help="merge_cases.py --out, with the judge's judge/decisions.jsonl; needed when an answer "
+                            "absorbed a memory")
     args = ap.parse_args()
-    return run(args) if args.command == "run" else verdict(args)
+    match cast(str, args.command):
+        case "run":
+            return run(args)
+        case "verdict":
+            return verdict(args)
+        case "synth-numbers":
+            return synth_numbers(args)
+        case other:
+            raise SystemExit(f"no command {other}")
 
 
 if __name__ == "__main__":

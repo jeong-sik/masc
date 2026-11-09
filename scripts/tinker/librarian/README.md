@@ -92,8 +92,11 @@ carries none, and the endpoint applies its default.
 2. Run the base model on E-synth, audit the labels with a judge that sees
    neither the labels nor the answers, and keep the requests it confirms.
 3. Fix `pass_lines.json` and commit it before any training. The G6 merge lines
-   come from the base model's merge numbers on E-synth; `verdict` refuses while
-   a gate has no number.
+   come from the base model's merge numbers on the fixed E-synth:
+   `eval_admission.py synth-numbers` prints them once the drop and merge judges
+   (steps 6 and 7) have classed that run's answers. It reads no gate, choice
+   or trained run. `verdict` and `train_sft.py` refuse while a gate has no
+   number.
 4. Generate the training split and sample the teacher (`teacher_sample.py
    sample`). An answer that absorbs a memory waits for the merge judge, also
    when its label expects the merge: `teacher_sample.py cases` gives the judge

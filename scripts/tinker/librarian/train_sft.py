@@ -12,12 +12,14 @@
 
 The candidate learns the answer only, rendered with reasoning effort 0.2, the
 value the binding's `reasoning-effort = "low"` sends; the tml_v0 renderer would
-otherwise render 0.9. The run refuses to start unless pass_lines.json has the bytes it was fixed
-with, so the gates exist before any weights change. It also refuses while a file
-the pass lines pin has other bytes (`eval_admission.load_pass_lines`), so the
-prompts it trains on are the ones the verdict renders. It refuses requests from a
-Keeper whose memories belong to E-synth (`synth_spec.EVAL_KEEPERS`). A cost
-estimate above --budget stops the run before training.
+otherwise render 0.9. The run refuses to start unless pass_lines.json has the
+bytes it was fixed with, sets a number for every gate and names the candidate in
+`choice.order` (`eval_admission.ready_to_train`), so the gates exist before any
+weights change. It also refuses while a file the pass lines pin has other bytes
+(`eval_admission.load_pass_lines`), so the prompts it trains on are the ones the
+verdict renders. It refuses requests from a Keeper whose memories belong to
+E-synth (`synth_spec.EVAL_KEEPERS`). A cost estimate above --budget stops the
+run before training.
 Output: <out>/config.json, <out>/steps.jsonl, <out>/summary.json with the sampler path.
 """
 
@@ -45,7 +47,7 @@ from tinker_cookbook.tokenizer_utils import get_tokenizer
 import admission_request as R
 import synth_render
 import synth_spec as S
-from eval_admission import PASS_LINES, load_pass_lines, schema_instruction
+from eval_admission import PASS_LINES, load_pass_lines, ready_to_train, schema_instruction
 
 # sha256 of pass_lines.json as fixed on 2026-11-09, before any training run.
 PASS_LINES_SHA256 = "63fee812026ac6c830cc22455d029998017f47efa6ee779c3480505456d2b712"
@@ -99,7 +101,7 @@ def main() -> int:
     args = ap.parse_args()
     if hashlib.sha256(PASS_LINES.read_bytes()).hexdigest() != PASS_LINES_SHA256:
         raise SystemExit("pass_lines.json is not the fixed one; fix and commit the pass lines first")
-    load_pass_lines()
+    ready_to_train(load_pass_lines(), CANDIDATE)
     out = Path(cast(str, args.out))
     out.mkdir(parents=True, exist_ok=True)
     renderer = renderer_of(MODEL)

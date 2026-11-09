@@ -23,7 +23,7 @@ the key (RUN_FILES), and `for_run` reads no decision for other run files.
 
 From the classes the verdict reports, per target:
 - absorb precision: absorbs judged `mergeable` over every absorb its valid
-  answers make, planted stale facts included (1.0 with no absorbs). It counts
+  answers make, planted stale facts included (none with no absorb). It counts
   the rows the drop judge leaves out of scoring too: a class does not depend
   on the label, and a planted stale fact is stale by construction.
 - judged merge recall: merges the label expects (a complement target into the
@@ -88,7 +88,7 @@ class MergeAdjudication:
         made = sum(all(self.mergeable(r, mid) for mid in merge)
                    for r in mine for merge in cast(list[list[str]], r["merges_absorbed"]))
         return {"absorbs": len(absorbs), "absorbs_mergeable": right,
-                "absorb_precision": right / len(absorbs) if absorbs else 1.0,
+                "absorb_precision": right / len(absorbs) if absorbs else None,
                 "merges": merges, "merges_mergeable": made, "judged_merge_recall": made / merges if merges else None}
 
     def record(self) -> JsonObject:

@@ -224,6 +224,13 @@ class SourceResult:
     files: int = 0
     first_ts: float | None = None
     last_ts: float | None = None
+    # Newest timestamp seen anywhere in the source, including rows outside the
+    # window. A ledger whose newest row predates the window is a stale copy, and
+    # its silence is not evidence that nothing was called (#50504).
+    newest_ts: float | None = None
+    # Cumulative sources (a dashboard snapshot) have no window, so staleness is
+    # not defined for them.
+    windowed: bool = True
 
 
 def load_ledger(directory: Path, start: float, end: float) -> SourceResult:
@@ -260,6 +267,11 @@ def load_ledger(directory: Path, start: float, end: float) -> SourceResult:
                 ts = record.get("ts")
                 if not isinstance(ts, (int, float)):
                     continue
+                # Remember the newest row even when it falls outside the window.
+                # That single number is what tells a live-but-quiet ledger from
+                # a stale copy (#50504).
+                if result.newest_ts is None or ts > result.newest_ts:
+                    result.newest_ts = ts
                 if ts < start or ts >= end:
                     continue
                 tool = record.get("tool") or record.get("tool_name")
@@ -369,6 +381,9 @@ def load_snapshot(path: Path) -> SourceResult:
         result.detail = f"snapshot unreadable: {exc}"
         return result
     result.available = True
+    # Cumulative projection: it carries no timestamps, so the window and its
+    # staleness rule do not apply to it (#50504).
+    result.windowed = False
     metrics = payload.get("original_metrics") or {}
     top = metrics.get("top_20") or []
     for row in top:
@@ -419,6 +434,23 @@ class Report:
         return [row for row in self.rows if row.status == status]
 
 
+def can_judge_zero(source: SourceResult, window_start: float) -> bool:
+    """Whether this source may turn its silence into a `0회` verdict.
+
+    A ledger directory can exist with files whose rows all predate the window:
+    that copy stopped being written, so "no row for this tool" says nothing
+    about whether the tool is used (#50504). Only a row at or after the window
+    start proves the source was watching. Cumulative sources have no window and
+    are judged by having produced observations at all.
+    """
+    if not source.available:
+        return False
+    if not source.windowed:
+        return bool(source.counts)
+    newest = source.newest_ts if source.newest_ts is not None else source.last_ts
+    return newest is not None and newest >= window_start
+
+
 def build_report(
     registry: Registry,
     sources: list[SourceResult],
@@ -437,6 +469,13 @@ def build_report(
         silent_families: list[str] = []
         for source in sources:
             if not source.available:
+                continue
+            if not can_judge_zero(source, window_start):
+                silent_families.append(
+                    f"{source.name} has no row inside the window "
+                    f"(newest row: {iso(source.newest_ts) if source.newest_ts else 'none'}) "
+                    "so its silence is not evidence of absence (#50504)"
+                )
                 continue
             # An observed call beats a coverage declaration: if a source wrote
             # rows for this tool, the tool was called no matter what the family
@@ -544,7 +583,12 @@ def render_markdown(report: Report) -> str:
     lines.append("|---|---|---|---|---|")
     short_sources: list[tuple[SourceResult, float]] = []
     for source in report.sources:
-        state = "사용" if source.available else "없음"
+        if not source.available:
+            state = "없음"
+        elif can_judge_zero(source, report.window_start):
+            state = "사용"
+        else:
+            state = "창 밖만 있음"
         detail = source.detail or ""
         span, fraction = observed_span(report, source)
         if fraction is not None and fraction < 1.0:
@@ -680,6 +724,8 @@ def render_json(report: Report) -> str:
                 "files": source.files,
                 "first_ts": iso(source.first_ts) if source.first_ts else None,
                 "last_ts": iso(source.last_ts) if source.last_ts else None,
+                "newest_ts": iso(source.newest_ts) if source.newest_ts else None,
+                "can_judge_zero": can_judge_zero(source, report.window_start),
             }
             for source in report.sources
         ],

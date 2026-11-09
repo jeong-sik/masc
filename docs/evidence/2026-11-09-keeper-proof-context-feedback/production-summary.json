@@ -1,0 +1,20 @@
+{
+  "kind": "sanitized derivative; not original wire bytes",
+  "captured_at": "2026-11-09T13:14:21.712729+00:00",
+  "source_commit": "e2c38ca5ad1d850f2890b4e17d0ace08f7eea6b0",
+  "raw_prefix_bytes": 329071,
+  "raw_prefix_sha256": "80f0ff405334563b7a37a20ee5db8b529c7b24382c1fee9ba15a4a66214e2faa",
+  "scope": "one running operation beginning 2026-11-09T12:57:19Z",
+  "context_injection_count": 38,
+  "post_tool_injection_count": 37,
+  "goal_repetition_count": 20,
+  "model": "deepseek-v4.1-flash",
+  "reasoning_effort": "low",
+  "queued_chat_count": 2,
+  "state_shape": "Goals Awaiting Proof: one Goal, verifier reviewing proof",
+  "notes": [
+    "The model also read source and published review decisions during this operation.",
+    "Queued later chats were separate operations waiting for this operation to finish.",
+    "These observations establish repeated state delivery and repeated content, not the sole cause of long tool loops."
+  ]
+}

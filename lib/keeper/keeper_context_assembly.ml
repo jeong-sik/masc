@@ -13,10 +13,28 @@ type receipt =
   ; sha256 : string
   ; spans : span list
   }
-type system_observation = Active_goals of string
+type system_observation =
+  | Active_goals of string
+  | Goals_awaiting_proof of string
 
 let observation_block = function
   | Active_goals text -> Prompt_block_id.Active_goals, text
+  | Goals_awaiting_proof text -> Prompt_block_id.Goals_awaiting_proof, text
+
+type proof_state = { proof_text : string }
+
+let issue_proof_state partition =
+  let sections = Keeper_context_layers.sections partition
+    |> List.filter (fun (section : Keeper_context_layers.section) ->
+        section.section_source =
+          Keeper_context_layers.Layer Keeper_context_layers.Goals_awaiting_proof) in
+  match sections with
+  | [section] ->
+    (match section.section_text with
+     | "" -> None
+     | text -> Some { proof_text = Inference_utils.sanitize_text_utf8 text })
+  | [] | _ :: _ :: _ -> None
+;;
 
 type system_prompt =
   { base_text : string
@@ -30,7 +48,10 @@ type t =
   ; receipt : receipt option
   ; dynamic_context_partition : Keeper_context_layers.rendered option
   ; system_prompt : system_prompt option
+  ; proof_state : proof_state option
   }
+
+let with_proof_state proof_state assembly = { assembly with proof_state }
 
 let sha256 text = Agent_core_sha256.(digest_string text |> to_hex)
 
@@ -86,7 +107,7 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
     | Some _ | None -> None
   in
   if not !present
-  then { extra_system_context = None; blocks; receipt = None; dynamic_context_partition; system_prompt = None }
+  then { extra_system_context = None; blocks; receipt = None; dynamic_context_partition; system_prompt = None; proof_state = None }
   else
     let text = Buffer.contents buffer in
     { extra_system_context = Some text
@@ -95,6 +116,7 @@ let assemble ~dynamic_context_partition ~existing_extra_system_context ~blocks =
         Some { bytes = String.length text; sha256 = sha256 text; spans = List.rev !spans }
     ; dynamic_context_partition
     ; system_prompt = None
+    ; proof_state = None
     }
 ;;
 
@@ -113,7 +135,7 @@ let split_block block assembly =
         ~existing_extra_system_context
         ~blocks:(List.filter (fun block -> not (wanted block)) assembly.blocks)
     in
-    Some ({ rest with system_prompt = assembly.system_prompt }, text)
+    Some ({ rest with system_prompt = assembly.system_prompt; proof_state = assembly.proof_state }, text)
   | ([] | _ :: _ :: _), _, _ | [ _ ], None, _ | [ _ ], Some _, None -> None
 ;;
 

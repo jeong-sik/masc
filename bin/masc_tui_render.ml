@@ -550,7 +550,7 @@ and render_memory_facts_list (state : state) =
       ~badge:(connection_badge state)
   in
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"memory-facts"
-    ~title ~hints:(Masc_tui_keys.footer_hints_memory_facts ~cols)
+    ~title ~hints:(Masc_tui_keys.footer_hints_memory_facts ~cols ~has_rows:(total > 0))
     ~body:(fun ~budget c ->
       Render_memory.render_memory_facts_body ~cols ~budget state
         ~push:c.push ~push_styled:c.push_styled ~push_selected:c.push_selected

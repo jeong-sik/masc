@@ -19,7 +19,7 @@ These files are those specifications, moved to sit beside the code they govern.
 | `design/` | design notes for boundaries that are still live |
 | `provider-capabilities-spec.md` | capability axis definitions |
 | `provider-catalog.md`, `capability-manifest.md`, `example-capability-manifest.json` | catalog and manifest formats + sample manifest |
-| `architecture.md`, `api-stability.md` | library shape and stability commitments |
+| `architecture.md`, `api-stability.md` | library shape and module stability tiers |
 | `custom-providers.md`, `multi-endpoint-setup.md` | integration guides |
 | `resource-scoped-execution.md`, `http-request-observation.md`, `PERFORMANCE-SLO.md` | resource wave scheduling, HTTP request observation, and TTFT/prefill SLOs |
 | `EVENT-CATALOG.md`, `RUNTIME-OUTPUT-SCHEMA-INDEX.md` | event and output schema indexes |

@@ -375,9 +375,14 @@ let verification_projection ~config =
 let measurement_projection ~config =
   Goal_measurement.projection (Goal_measurement.load config)
 
+let criterion_review_projection ~config =
+  Goal_criterion_review.projector (Goal_criterion_review.load config)
+
 let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
     ?(verification_for_goal = fun _ -> Goal_verification.ledger_error_to_yojson "proof source not loaded")
-    ?(measurement_for_goal = fun _ -> `Assoc [ "state", `String "not_loaded" ]) node =
+    ?(measurement_for_goal = fun _ -> `Assoc [ "state", `String "not_loaded" ])
+    ?(criterion_review_for_goal = fun _ -> `Assoc
+      ["state", `String "unavailable"; "detail", `String "criterion review source not loaded"]) node =
   let goal = node.goal in
   let task_summary = task_summary_to_json node.tasks in
   `Assoc
@@ -387,6 +392,7 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
       ("criterion_revision", `String goal.criterion_revision);
       ("verification", verification_for_goal goal);
       ("measurement", measurement_for_goal goal);
+      ("criterion_review", criterion_review_for_goal goal);
       ("phase", `String (Goal_phase.to_string goal.phase));
       ("resume_phase", Goal_phase.resume_phase_to_yojson goal.phase);
       ("phase_color", `String (goal_phase_color goal.phase));
@@ -418,7 +424,7 @@ let rec tree_node_to_json ?(events_for_goal = fun _ -> [])
         `List
           (List.map
              (tree_node_to_json ~events_for_goal ~verification_for_goal
-                ~measurement_for_goal)
+                ~measurement_for_goal ~criterion_review_for_goal)
              node.children) );
       ("child_count", `Int (List.length node.children));
       ("last_activity_at", `String node.last_activity_at);
@@ -456,6 +462,7 @@ let goal_detail_json_ready ~(config : Workspace.config)
   let events_for_goal = build_goal_events_projection ~config goals in
   let verification_for_goal = verification_projection ~config in
   let measurement_for_goal = measurement_projection ~config in
+  let criterion_review_for_goal = criterion_review_projection ~config in
   match build_forest ~config ~goals ~tasks ~pending_approvals with
   | Error detail -> Ok (goal_task_links_unavailable_json detail)
   | Ok forest ->
@@ -517,7 +524,7 @@ let goal_detail_json_ready ~(config : Workspace.config)
             ( "approval_queue_state",
               Keeper_approval_queue_result.approval_queue_ready_state_json );
             ("goal", tree_node_to_json ~events_for_goal ~verification_for_goal
-                        ~measurement_for_goal node);
+                        ~measurement_for_goal ~criterion_review_for_goal node);
             ("linked_tasks", `List (List.map task_to_tree_json node.tasks));
             ("linked_keepers", `List (List.map goal_detail_keeper_json keeper_details));
             ("approvals", `List approvals);
@@ -566,6 +573,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
   let events_for_goal = build_goal_events_projection ~config goals in
   let verification_for_goal = verification_projection ~config in
   let measurement_for_goal = measurement_projection ~config in
+  let criterion_review_for_goal = criterion_review_projection ~config in
   match build_forest ~config ~goals ~tasks ~pending_approvals with
   | Error detail -> goal_task_links_unavailable_json detail
   | Ok forest ->
@@ -603,7 +611,7 @@ let dashboard_goals_tree_json_ready ~(config : Workspace.config)
         `List
           (List.map
              (tree_node_to_json ~events_for_goal ~verification_for_goal
-                ~measurement_for_goal)
+                ~measurement_for_goal ~criterion_review_for_goal)
              forest) );
       ( "summary",
         `Assoc

@@ -1,25 +1,5 @@
 (** Activity_graph_types — type definitions and JSON serde for activity graph. *)
 
-(** Node status: type-safe variant replacing stringly-typed status.
-    Flat variant — node [kind] field already carries the category.
-    @since 7182 *)
-type node_status =
-  (* Agent lifecycle *)
-  | Active
-  (* Task lifecycle *)
-  | Todo | Claimed | In_progress | Done | Cancelled
-  (* Board *)
-  | Posted | Discussed
-  (* Generic / fallback *)
-  | Observed | Workspace | Unset
-
-let node_status_to_string = function
-  | Active -> "active"
-  | Todo -> "todo" | Claimed -> "claimed" | In_progress -> "in_progress"
-  | Done -> "done" | Cancelled -> "cancelled"
-  | Posted -> "posted" | Discussed -> "discussed"
-  | Observed -> "observed" | Workspace -> "workspace" | Unset -> ""
-
 type tool_execution_event_kind =
   | External_tool_called
   | Keeper_in_turn_tool_executed
@@ -39,32 +19,6 @@ let all_tool_execution_event_kinds =
   [ External_tool_called; Keeper_in_turn_tool_executed ]
 ;;
 
-(* The event kinds the graph reducer and the span builder act on. [Event_kind]
-   owns the task, message and board families and tool execution has its own
-   type above, so a kind is decoded once here and the readers match the
-   decoded value. Any other kind decodes to [None]: it is stored and listed,
-   and neither reader acts on it. *)
-type drawn_event_kind =
-  | Tool_execution_event of tool_execution_event_kind
-  | Task_event of Event_kind.Task.t
-  | Message_event of Event_kind.Message.t
-  | Board_event of Event_kind.Board.t
-
-let drawn_event_kind_of_string kind =
-  match tool_execution_event_kind_of_string kind with
-  | Some tool -> Some (Tool_execution_event tool)
-  | None ->
-    (match Event_kind.Task.of_string kind with
-     | Some task -> Some (Task_event task)
-     | None ->
-       (match Event_kind.Message.of_string kind with
-        | Some message -> Some (Message_event message)
-        | None ->
-          (match Event_kind.Board.of_string kind with
-           | Some board -> Some (Board_event board)
-           | None -> None)))
-;;
-
 type entity_ref = {
   kind : string;
   id : string;
@@ -81,30 +35,7 @@ type event = {
   tags : string list;
 }
 
-type graph_node = {
-  id : string;
-  kind : string;
-  label : string;
-  status : node_status;
-  weight : int;
-  last_event_at : string;
-  meta : Yojson.Safe.t;
-}
-
-type graph_edge = {
-  id : string;
-  source : string;
-  target : string;
-  kind : string;
-  weight : int;
-  active : bool;
-  last_event_at : string;
-  meta : Yojson.Safe.t;
-}
-
 let entity ~kind id = { kind; id }
-
-let default_meta = `Assoc []
 
 let entity_to_yojson (value : entity_ref) =
   `Assoc [ ("kind", `String value.kind); ("id", `String value.id) ]
@@ -307,30 +238,5 @@ let event_of_yojson (json : Yojson.Safe.t) : event option =
     let tags = Safe_ops.json_string_list "tags" json in
     Some { seq; ts_ms; ts_iso; kind; actor; subject; payload; tags }
   | _ -> None
-
-let graph_node_to_yojson (value : graph_node) =
-  `Assoc
-    [
-      ("id", `String value.id);
-      ("kind", `String value.kind);
-      ("label", `String value.label);
-      ("status", `String (node_status_to_string value.status));
-      ("weight", `Int value.weight);
-      ("last_event_at", `String value.last_event_at);
-      ("meta", value.meta);
-    ]
-
-let graph_edge_to_yojson (value : graph_edge) =
-  `Assoc
-    [
-      ("id", `String value.id);
-      ("source", `String value.source);
-      ("target", `String value.target);
-      ("kind", `String value.kind);
-      ("weight", `Int value.weight);
-      ("active", `Bool value.active);
-      ("last_event_at", `String value.last_event_at);
-      ("meta", value.meta);
-    ]
 
 let now_ts_ms () = int_of_float (Time_compat.now () *. 1000.0)

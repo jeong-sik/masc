@@ -56,15 +56,6 @@ type t = private {
       default-shaped queries; non-default queries (cursor, kinds
       filter, since) fall through to the synchronous compute path.
       [`Null] until the refresh fiber's first successful publish. *)
-  activity_graph_default : Yojson.Safe.t;
-  (** RFC-0201 Step 2.  [Activity_graph.graph_json] computed against
-      the dashboard panel's default query ([kinds=[]], [limit=500],
-      [timeline_limit=80], [since_ms=None]).  Returned as-is to
-      default-shape callers — the result is aggregated (heatmap +
-      timeline + series counts) and cannot be sliced post-compute.
-      Non-default queries (kinds filter, alternate [limit] /
-      [timeline_limit], [since]) fall through to the synchronous
-      compute path.  [`Null] before first refresh-fiber publish. *)
 }
 
 val current : unit -> t option
@@ -109,7 +100,6 @@ val make_for_test :
   namespace_truth:Yojson.Safe.t ->
   telemetry_summary:Yojson.Safe.t ->
   ?activity_events_default:Yojson.Safe.t ->
-  ?activity_graph_default:Yojson.Safe.t ->
   unit ->
   t
 (** Test-only constructor.  Outside tests, snapshots are produced only
@@ -131,7 +121,6 @@ val register_namespace_truth_snapshot :
 module For_testing : sig
   type cache
   type tools_cache
-  type activity_cache
 
   val make_cache : unit -> cache
 
@@ -146,15 +135,6 @@ module For_testing : sig
     cache:cache ->
     (unit -> Yojson.Safe.t) ->
     Yojson.Safe.t
-
-  val make_activity_cache : unit -> activity_cache
-
-  val refresh_activity_defaults :
-    now:(unit -> float) ->
-    ttl:float ->
-    cache:activity_cache ->
-    (unit -> Activity_graph.default_projections) ->
-    Activity_graph.default_projections
 
   val should_reuse_projection :
     now:float -> ttl:float -> refreshed_at:float -> bool

@@ -22,7 +22,6 @@ type palette_action =
   | Palette_addon_results of string
       (** One installation's Results, by its declaration id. *)
   | Palette_goto of Masc_tui_types.surface
-  | Palette_goal_payouts
   | Palette_usage_scope of string option
   | Palette_config of Masc_tui_types.config_pane
   | Palette_ui_language of Masc_tui_types.ui_language
@@ -52,7 +51,9 @@ val lsp_question_prefixes : (string * string) list
 val palette_entries : Masc_tui_types.state -> (string * palette_action) list
 val palette_matches : Masc_tui_types.state -> (string * palette_action) list
 (** Search the existing typed destinations and content. Canonical top-level
-    surface names come from [surface_ring], alongside explicit aliases. An
+    surface names come from [surface_ring]. An empty jump query offers only
+    those destinations; other commands and content require a search. Aliases
+    are search terms on one action, never extra rows. An
     entry whose label or alias is the whole query comes first, then a prefix
     candidate, before unrelated substring matches; entry order decides only
     between entries of one rank. Matching does not introduce another

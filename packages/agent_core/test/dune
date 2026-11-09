@@ -92,7 +92,6 @@
   test_snapshot_provider_serialization
   test_thinking_control_dialects
   test_body_timeout
-  test_builder_coverage
   test_cache
   test_canonical_tool
   test_capabilities_wiring
@@ -173,7 +172,6 @@
   test_sessions_types
   test_sessions_types_deep
   test_skill_document
-  test_skill_discovery
   test_skill_registry
   test_stream_accumulator
   test_streaming_cov
@@ -200,7 +198,6 @@
   test_typed_tool
   test_usage_accumulation
   test_types
-  test_usability_v030
   test_util)
  (modules
   model_catalog_test_support
@@ -231,7 +228,6 @@
   test_snapshot_provider_serialization
   test_thinking_control_dialects
   test_body_timeout
-  test_builder_coverage
   test_cache
   test_canonical_tool
   test_capabilities_wiring
@@ -312,7 +308,6 @@
   test_sessions_types
   test_sessions_types_deep
   test_skill_document
-  test_skill_discovery
   test_skill_registry
   test_stream_accumulator
   test_streaming_cov
@@ -339,7 +334,6 @@
   test_typed_tool
   test_usage_accumulation
   test_types
-  test_usability_v030
   test_util)
  (libraries agent_core_test_deps agent_core llm_provider alcotest eio_main)
  (deps ../docs/example-capability-manifest.json ../models.toml)
@@ -607,11 +601,6 @@
  (name test_api)
  (modules test_api)
  (libraries agent_core_test_deps agent_core alcotest))
-
-(test
- (name test_builder)
- (modules test_builder)
- (libraries agent_core_test_deps agent_core alcotest eio_main))
 
 (test
  (name test_full_pipeline_cov)

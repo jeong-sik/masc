@@ -34,6 +34,7 @@ def row(
     disposition: str | None = None,
     call_input: object = None,
     output: object = "",
+    sandbox_profile: str | None = None,
 ) -> bytes:
     fields: dict[str, object] = {
         "ts": stamp,
@@ -47,6 +48,8 @@ def row(
     }
     if disposition is not None:
         fields["disposition"] = disposition
+    if sandbox_profile is not None:
+        fields["runtime_contract"] = {"sandbox_profile": sandbox_profile}
     return json.dumps(fields).encode("utf-8")
 
 
@@ -89,6 +92,27 @@ class WindowTest(unittest.TestCase):
         self.assertIsNone(before_after.parse_call(b'{"record_kind":"tool_call","ts":7}', 0, 1e12, skipped))
         self.assertIsNone(before_after.parse_call(b'{"record_kind":"lifecycle_event","tool":"Read","ts":7}', 0, 1e12, skipped))
         self.assertEqual(skipped.bad_lines, 3)
+
+
+class TurnTest(unittest.TestCase):
+    def turn_of(self, tool: str = "Execute", **fields: object) -> str | None:
+        line = {"ts": 7, "record_kind": "tool_call", "tool": tool, **fields}
+        call = before_after.parse_call(json.dumps(line).encode("utf-8"), 0, 1e12, before_after.Skipped())
+        return None if call is None else call.turn
+
+    def test_the_turn_is_the_trace_and_the_keeper_turn_number(self) -> None:
+        self.assertEqual(self.turn_of(trace_id="tr-1", keeper_turn_id=7), "tr-1:7")
+
+    def test_the_same_number_in_another_trace_is_another_turn(self) -> None:
+        self.assertNotEqual(self.turn_of(trace_id="tr-1", keeper_turn_id=7), self.turn_of(trace_id="tr-2", keeper_turn_id=7))
+
+    def test_a_row_without_a_whole_turn_number_has_no_turn(self) -> None:
+        for number in (None, True, "7", 7.5):
+            self.assertEqual(self.turn_of(trace_id="tr-1", keeper_turn_id=number), "", number)
+        self.assertEqual(self.turn_of(trace_id="tr-1"), "")
+
+    def test_only_execute_rows_keep_a_turn(self) -> None:
+        self.assertEqual(self.turn_of(tool="Read", trace_id="tr-1", keeper_turn_id=7), "")
 
 
 class SizedTest(unittest.TestCase):
@@ -184,6 +208,63 @@ class OverheadTest(unittest.TestCase):
     def test_no_reporting_call_leaves_the_share_empty(self) -> None:
         overhead = cast("dict[str, object]", compared([])["after"]["execute_overhead"])
         self.assertEqual((overhead["calls"], overhead["overhead_share"]), (0, None))
+
+    def test_overhead_is_split_by_sandbox_profile_and_slow_means_half_a_second_or_more(self) -> None:
+        def ran(
+            stamp: float, profile: str | None, held_ms: float, overhead_ms: float, disposition: str | None = None
+        ) -> bytes:
+            output = json.dumps({"execution_time_ms": held_ms - overhead_ms})
+            return row(
+                stamp, "Execute", duration_ms=held_ms, output=output, sandbox_profile=profile, disposition=disposition
+            )
+
+        result = compared(
+            [
+                ran(BOOT + 400, "remote_ssh", 3_600_000, 1_800_000),
+                ran(BOOT + 401, "remote_ssh", 10_000, 600),
+                ran(BOOT + 402, "remote_ssh", 10_000, 10),
+                ran(BOOT + 403, "microvm", 10_000, 100),
+                ran(BOOT + 404, None, 10_000, 4_000),
+                ran(BOOT + 405, "remote_ssh", 10_000, 9_000, disposition="failed"),
+            ]
+        )
+        split = cast("dict[str, dict[str, object]]", result["after"]["execute_overhead_by_sandbox"])
+        self.assertEqual(sorted(split), ["microvm", "remote_ssh", "unknown"])
+        remote = split["remote_ssh"]
+        self.assertEqual(remote["calls"], 3)
+        self.assertEqual(remote["overhead_hours"], 0.5)
+        self.assertEqual(remote["overhead_p50_s"], 0.6)
+        self.assertEqual((remote["slow_calls"], remote["slow_hours"], remote["slow_mean_s"]), (2, 0.5, 900.3))
+        self.assertEqual((split["microvm"]["calls"], split["microvm"]["slow_calls"], split["microvm"]["slow_mean_s"]), (1, 0, None))
+        self.assertEqual(split["unknown"]["slow_calls"], 1)
+
+
+    def test_the_slow_calls_of_a_sandbox_are_split_by_intent(self) -> None:
+        def ran(stamp: float, profile: str, overhead_ms: float, call_input: object) -> bytes:
+            output = json.dumps({"execution_time_ms": 1_000 - overhead_ms})
+            return row(stamp, "Execute", duration_ms=1_000, output=output, sandbox_profile=profile, call_input=call_input)
+
+        result = compared(
+            [
+                ran(BOOT + 400, "remote_ssh", 900, {"command": "gh pr view"}),
+                ran(BOOT + 401, "remote_ssh", 100, {"command": "gh pr view"}),
+                ran(BOOT + 402, "remote_ssh", 500, {"command": "gh pr list", "intent": "auto"}),
+                ran(BOOT + 403, "remote_ssh", 900, {"command": "rm x", "intent": "request_effect"}),
+                ran(BOOT + 404, "remote_ssh", 10, {"command": "rm y", "intent": "request_effect"}),
+                ran(BOOT + 405, "remote_ssh", 700, "not json"),
+                ran(BOOT + 406, "microvm", 900, {"command": "ls"}),
+            ]
+        )
+        split = cast("dict[str, dict[str, object]]", result["after"]["execute_overhead_by_sandbox"])
+        self.assertEqual(
+            split["remote_ssh"]["by_intent"],
+            {
+                "auto": {"calls": 3, "slow_calls": 2},
+                "request_effect": {"calls": 2, "slow_calls": 1},
+                "unknown": {"calls": 1, "slow_calls": 1},
+            },
+        )
+        self.assertEqual(split["microvm"]["by_intent"], {"auto": {"calls": 1, "slow_calls": 1}})
 
 
 class DiskLowTest(unittest.TestCase):

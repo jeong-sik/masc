@@ -1,0 +1,76 @@
+{
+  "window": [
+    "2026-11-08T23:08:04+00:00",
+    "2026-11-08T23:40:00+00:00"
+  ],
+  "warmup_hours": 0.0,
+  "files": 6,
+  "skipped": {
+    "bad_lines": 0
+  },
+  "remote_ssh_calls": {
+    "total": 247,
+    "read": 214,
+    "write": 33
+  },
+  "passes": [
+    {
+      "read_ttl_s": 60,
+      "write_ttl_s": 60.0,
+      "read": 57,
+      "write": 3,
+      "total": 60
+    },
+    {
+      "read_ttl_s": 300,
+      "write_ttl_s": 60.0,
+      "read": 29,
+      "write": 11,
+      "total": 40
+    }
+  ],
+  "overhead_by_gap": {
+    "0-10s": {
+      "calls": 121,
+      "overhead_p50_s": 0.024,
+      "overhead_mean_s": 0.16,
+      "slow_calls": 6,
+      "overhead_hours": 0.005
+    },
+    "10-30s": {
+      "calls": 26,
+      "overhead_p50_s": 0.019,
+      "overhead_mean_s": 0.04,
+      "slow_calls": 0,
+      "overhead_hours": 0.0
+    },
+    "30-60s": {
+      "calls": 11,
+      "overhead_p50_s": 0.022,
+      "overhead_mean_s": 0.03,
+      "slow_calls": 0,
+      "overhead_hours": 0.0
+    },
+    "60-120s": {
+      "calls": 6,
+      "overhead_p50_s": 0.021,
+      "overhead_mean_s": 0.02,
+      "slow_calls": 0,
+      "overhead_hours": 0.0
+    },
+    "120-600s": {
+      "calls": 25,
+      "overhead_p50_s": 0.037,
+      "overhead_mean_s": 1.06,
+      "slow_calls": 10,
+      "overhead_hours": 0.007
+    },
+    "600s+": {
+      "calls": 3,
+      "overhead_p50_s": 2.739,
+      "overhead_mean_s": 2.44,
+      "slow_calls": 3,
+      "overhead_hours": 0.002
+    }
+  }
+}

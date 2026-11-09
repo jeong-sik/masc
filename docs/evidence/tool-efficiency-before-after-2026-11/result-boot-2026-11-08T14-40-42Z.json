@@ -1,0 +1,286 @@
+{
+  "before": {
+    "calls": 1750,
+    "failed": 20,
+    "failed_by_tool": [
+      {
+        "tool": "Read",
+        "failed": 4
+      },
+      {
+        "tool": "BrowserTabs",
+        "failed": 3
+      },
+      {
+        "tool": "keeper_artifact_read",
+        "failed": 3
+      },
+      {
+        "tool": "BrowserGoto",
+        "failed": 2
+      }
+    ],
+    "sized": {
+      "Grep": {
+        "cap": 102400,
+        "calls": 34,
+        "p50": 1338,
+        "max": 6227,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "keeper_tools_list": {
+        "cap": 102400,
+        "calls": 8,
+        "p50": 9655,
+        "max": 9655,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "BrowserTabs": {
+        "cap": 16384,
+        "calls": 3,
+        "p50": 54,
+        "max": 695,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "masc_dashboard": {
+        "cap": 16384,
+        "calls": 0,
+        "p50": null,
+        "max": null,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      }
+    },
+    "execute": {
+      "calls": 465,
+      "held_hours": 2.019,
+      "background_calls": 0,
+      "background_by_keeper": {},
+      "held_60s_or_more_calls": 17,
+      "held_60s_or_more_hours": 1.396
+    },
+    "sleep_polls": {
+      "keepers": [
+        "github-pr-checker",
+        "pr-updater"
+      ],
+      "keeper_execute_calls": 62,
+      "calls": 0,
+      "hours": 0.0
+    },
+    "execute_overhead": {
+      "calls": 447,
+      "duration_hours": 1.951,
+      "execution_hours": 1.828,
+      "overhead_hours": 0.122,
+      "overhead_share": 0.063,
+      "overhead_5s_or_more_calls": 19,
+      "overhead_5s_or_more_hours": 0.033
+    },
+    "execute_overhead_by_sandbox": {
+      "microvm": {
+        "calls": 146,
+        "overhead_hours": 0.015,
+        "overhead_p50_s": 0.004,
+        "slow_calls": 18,
+        "slow_hours": 0.013,
+        "slow_mean_s": 2.67,
+        "by_intent": {
+          "auto": {
+            "calls": 118,
+            "slow_calls": 16
+          },
+          "request_effect": {
+            "calls": 28,
+            "slow_calls": 2
+          }
+        }
+      },
+      "remote_ssh": {
+        "calls": 301,
+        "overhead_hours": 0.107,
+        "overhead_p50_s": 0.253,
+        "slow_calls": 113,
+        "slow_hours": 0.101,
+        "slow_mean_s": 3.22,
+        "by_intent": {
+          "auto": {
+            "calls": 273,
+            "slow_calls": 101
+          },
+          "request_effect": {
+            "calls": 20,
+            "slow_calls": 5
+          },
+          "unknown": {
+            "calls": 8,
+            "slow_calls": 7
+          }
+        }
+      }
+    },
+    "disk_low": {
+      "calls": 0,
+      "by_tool": {},
+      "execute_by_intent": {}
+    },
+    "background_starts": {
+      "calls": 0,
+      "naming_both_handle_tools": 0
+    }
+  },
+  "after": {
+    "calls": 5633,
+    "failed": 40,
+    "failed_by_tool": [
+      {
+        "tool": "BrowserTabs",
+        "failed": 19
+      },
+      {
+        "tool": "keeper_artifact_read",
+        "failed": 8
+      },
+      {
+        "tool": "masc_board_post_get",
+        "failed": 3
+      },
+      {
+        "tool": "BrowserAct",
+        "failed": 2
+      }
+    ],
+    "sized": {
+      "Grep": {
+        "cap": 102400,
+        "calls": 55,
+        "p50": 1207,
+        "max": 10552,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "keeper_tools_list": {
+        "cap": 102400,
+        "calls": 16,
+        "p50": 9655,
+        "max": 9655,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "BrowserTabs": {
+        "cap": 16384,
+        "calls": 21,
+        "p50": 54,
+        "max": 695,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      },
+      "masc_dashboard": {
+        "cap": 16384,
+        "calls": 11,
+        "p50": 13980,
+        "max": 14662,
+        "at_or_over_cap": 0,
+        "bytes_at_or_over_cap": 0
+      }
+    },
+    "execute": {
+      "calls": 2231,
+      "held_hours": 6.263,
+      "background_calls": 1,
+      "background_by_keeper": {
+        "code-reviewer-father": 1
+      },
+      "held_60s_or_more_calls": 88,
+      "held_60s_or_more_hours": 2.462
+    },
+    "sleep_polls": {
+      "keepers": [
+        "github-pr-checker",
+        "pr-updater"
+      ],
+      "keeper_execute_calls": 333,
+      "calls": 5,
+      "hours": 0.147
+    },
+    "execute_overhead": {
+      "calls": 2188,
+      "duration_hours": 6.109,
+      "execution_hours": 5.257,
+      "overhead_hours": 0.852,
+      "overhead_share": 0.139,
+      "overhead_5s_or_more_calls": 114,
+      "overhead_5s_or_more_hours": 0.338
+    },
+    "execute_overhead_by_sandbox": {
+      "microvm": {
+        "calls": 424,
+        "overhead_hours": 0.062,
+        "overhead_p50_s": 0.27,
+        "slow_calls": 73,
+        "slow_hours": 0.048,
+        "slow_mean_s": 2.39,
+        "by_intent": {
+          "auto": {
+            "calls": 352,
+            "slow_calls": 69
+          },
+          "request_effect": {
+            "calls": 72,
+            "slow_calls": 4
+          }
+        }
+      },
+      "remote_ssh": {
+        "calls": 1764,
+        "overhead_hours": 0.79,
+        "overhead_p50_s": 0.096,
+        "slow_calls": 777,
+        "slow_hours": 0.779,
+        "slow_mean_s": 3.61,
+        "by_intent": {
+          "auto": {
+            "calls": 1658,
+            "slow_calls": 744
+          },
+          "request_effect": {
+            "calls": 49,
+            "slow_calls": 6
+          },
+          "unknown": {
+            "calls": 57,
+            "slow_calls": 27
+          }
+        }
+      }
+    },
+    "disk_low": {
+      "calls": 0,
+      "by_tool": {},
+      "execute_by_intent": {}
+    },
+    "background_starts": {
+      "calls": 1,
+      "naming_both_handle_tools": 1
+    }
+  },
+  "skipped": {
+    "bad_lines": 0
+  },
+  "window": {
+    "boot": "2026-11-08T14:40:42+00:00",
+    "settle_s": 60.0,
+    "before": [
+      "2026-11-08T11:10:42+00:00",
+      "2026-11-08T14:40:42+00:00"
+    ],
+    "after": [
+      "2026-11-08T14:41:42+00:00",
+      "2026-11-08T23:07:04+00:00"
+    ],
+    "files": 6
+  }
+}

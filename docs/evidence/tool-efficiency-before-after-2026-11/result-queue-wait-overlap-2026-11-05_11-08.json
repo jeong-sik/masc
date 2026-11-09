@@ -1,0 +1,82 @@
+{
+  "window": [
+    "2026-11-05T00:00:00+00:00",
+    "2026-11-08T15:30:00+00:00"
+  ],
+  "hold_seconds": 60.0,
+  "files": 30,
+  "skipped": {
+    "bad_lines": 0
+  },
+  "holds": {
+    "calls": 585,
+    "keepers": 20,
+    "hours": 46.923,
+    "hours_with_a_waiting_operation": 2.97,
+    "share_with_a_waiting_operation": 0.0633
+  },
+  "queue_wait": {
+    "operations": 981,
+    "hours_all_keepers": 122.099,
+    "hours_holding_keepers": 121.684
+  },
+  "overlap": {
+    "hours": 3.531,
+    "share_of_all_keepers": 0.0289,
+    "share_of_holding_keepers": 0.029
+  },
+  "top_keepers": [
+    {
+      "keeper": "wkbl-web-leader",
+      "overlap_hours": 0.565,
+      "hold_calls": 31,
+      "held_hours": 1.762,
+      "held_hours_with_a_waiting_operation": 0.49,
+      "queue_wait_hours": 3.41
+    },
+    {
+      "keeper": "wkbl-data",
+      "overlap_hours": 0.558,
+      "hold_calls": 9,
+      "held_hours": 1.003,
+      "held_hours_with_a_waiting_operation": 0.558,
+      "queue_wait_hours": 1.038
+    },
+    {
+      "keeper": "sangsu",
+      "overlap_hours": 0.469,
+      "hold_calls": 60,
+      "held_hours": 6.081,
+      "held_hours_with_a_waiting_operation": 0.469,
+      "queue_wait_hours": 2.072
+    },
+    {
+      "keeper": "code-reviewer-brother",
+      "overlap_hours": 0.375,
+      "hold_calls": 14,
+      "held_hours": 1.019,
+      "held_hours_with_a_waiting_operation": 0.251,
+      "queue_wait_hours": 1.399
+    },
+    {
+      "keeper": "code-reviewer-uncle",
+      "overlap_hours": 0.262,
+      "hold_calls": 17,
+      "held_hours": 0.491,
+      "held_hours_with_a_waiting_operation": 0.144,
+      "queue_wait_hours": 43.222
+    },
+    {
+      "keeper": "github-pr-checker",
+      "overlap_hours": 0.259,
+      "hold_calls": 243,
+      "held_hours": 25.861,
+      "held_hours_with_a_waiting_operation": 0.259,
+      "queue_wait_hours": 1.386
+    }
+  ],
+  "keepers_with_holds_and_no_store": [],
+  "unreadable_stores": [
+    "tool_usage"
+  ]
+}

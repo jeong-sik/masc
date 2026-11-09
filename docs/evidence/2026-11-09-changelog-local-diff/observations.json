@@ -1,0 +1,187 @@
+{
+  "recorded_at": "2026-11-09T04:54:37.640567+00:00",
+  "issue": "https://github.com/jeong-sik/masc/issues/50404",
+  "provenance": "Public derivative: selected fields and relative source locations; host paths and raw fixtures remain in artifacts.",
+  "base_commit": "1cab54b0abea9df91a3882604111ba987ee27f10",
+  "source": {
+    "workflow": ".github/workflows/changelog-fragments.yml",
+    "workflow_sha256": "a35ebd0145beb289739a3bc8061d816315908dae0587e3dbc198d0a33082158e",
+    "checker": "scripts/changelog-fragments.py",
+    "checker_sha256": "62d87251f0acc1cde7503459df2702adb057950cc56fbc8bad200918ed82e69c",
+    "reproducer_sha256": "4940de1c654f4e3c7e03529c64434d0d87bd859928cd68d788cd9bc4b9930bcf"
+  },
+  "original_failure_attempts": [
+    {
+      "conclusion": "failure",
+      "event": "pull_request",
+      "head_branch": "purge/lane-addon-store-path-1",
+      "head_sha": "abe368365a6b21327bc93f47fdb33ea25c66b4f4",
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/42562649386",
+      "id": 42562649386,
+      "name": "Changelog fragments",
+      "run_attempt": 1,
+      "status": "completed",
+      "pr": 50136,
+      "job": "Changelog fragment format",
+      "failure_boundary": "gh PR files listing before fragment checker",
+      "observed_error": "installation API rate limit (HTTP 403)",
+      "retained_log_sha256": "eca76ca4512630557be395630245990ab00e28be3c1c5779a3c7553e5a0cb5ac"
+    },
+    {
+      "conclusion": "failure",
+      "event": "pull_request",
+      "head_branch": "feat/pull-snapshot-head-reviews",
+      "head_sha": "a069903061f5951995fa4fa2d8b419abe646fb55",
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/42562757708",
+      "id": 42562757708,
+      "name": "Changelog fragments",
+      "run_attempt": 1,
+      "status": "completed",
+      "pr": 50214,
+      "job": "Changelog fragment format",
+      "failure_boundary": "gh PR files listing before fragment checker",
+      "observed_error": "installation API rate limit (HTTP 403)",
+      "retained_log_sha256": "39e607209d3e292ff5714e645dc19fbb079a9d90025a45db51d465f72037a880"
+    }
+  ],
+  "latest_run_read": [
+    {
+      "conclusion": "success",
+      "event": "pull_request",
+      "head_branch": "purge/lane-addon-store-path-1",
+      "head_sha": "abe368365a6b21327bc93f47fdb33ea25c66b4f4",
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/42562649386",
+      "id": 42562649386,
+      "name": "Changelog fragments",
+      "status": "completed"
+    },
+    {
+      "conclusion": "failure",
+      "event": "pull_request",
+      "head_branch": "feat/pull-snapshot-head-reviews",
+      "head_sha": "a069903061f5951995fa4fa2d8b419abe646fb55",
+      "html_url": "https://github.com/jeong-sik/masc/actions/runs/42562757708",
+      "id": 42562757708,
+      "name": "Changelog fragments",
+      "status": "completed"
+    }
+  ],
+  "latest_run_note": "The later success of run 42562649386 is not execution evidence for this local patch.",
+  "local_git_fixtures": {
+    "cases": 15,
+    "passed": 15,
+    "cases_observed": [
+      {
+        "name": "added",
+        "expected_exit": "success",
+        "returncode": 0,
+        "passed": true
+      },
+      {
+        "name": "modified",
+        "expected_exit": "success",
+        "returncode": 0,
+        "passed": true
+      },
+      {
+        "name": "invalid-citation",
+        "expected_exit": "failure",
+        "returncode": 1,
+        "passed": true
+      },
+      {
+        "name": "removed",
+        "expected_exit": "success",
+        "returncode": 0,
+        "passed": true
+      },
+      {
+        "name": "readme-only",
+        "expected_exit": "success",
+        "returncode": 0,
+        "passed": true
+      },
+      {
+        "name": "rename-within-invalid",
+        "expected_exit": "failure",
+        "returncode": 1,
+        "passed": true
+      },
+      {
+        "name": "rename-within-corrected",
+        "expected_exit": "success",
+        "returncode": 0,
+        "passed": true
+      },
+      {
+        "name": "rename-out",
+        "expected_exit": "success",
+        "returncode": 0,
+        "passed": true
+      },
+      {
+        "name": "rename-in",
+        "expected_exit": "success",
+        "returncode": 0,
+        "passed": true
+      },
+      {
+        "name": "nul-filenames",
+        "expected_exit": "failure",
+        "returncode": 1,
+        "passed": true
+      },
+      {
+        "name": "nested-path-still-refused",
+        "expected_exit": "failure",
+        "returncode": 1,
+        "passed": true
+      },
+      {
+        "name": "upper-layer-with-moving-base",
+        "expected_exit": "success",
+        "returncode": 0,
+        "passed": true
+      },
+      {
+        "name": "missing-parent-fails-closed",
+        "expected_exit": "failure",
+        "returncode": 1,
+        "passed": true
+      },
+      {
+        "name": "dispatch-checks-all-invalid",
+        "expected_exit": "failure",
+        "returncode": 1,
+        "passed": true
+      },
+      {
+        "name": "dispatch-checks-all-valid",
+        "expected_exit": "success",
+        "returncode": 0,
+        "passed": true
+      }
+    ]
+  },
+  "other_checks": [
+    {
+      "command": "actionlint .github/workflows/changelog-fragments.yml",
+      "version": "1.7.12",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0
+    }
+  ],
+  "raw_results": {
+    "artifact_location": "artifacts/changelog-local-diff/20261109T045201381393Z/results.json",
+    "sha256": "14ec6043cc6c5a623254bd6b73b7c602626894ad94b1fe67c69717e096f28242"
+  },
+  "unverified": [
+    "This patch on a GitHub Actions runner",
+    "Changes on main after base_commit",
+    "Dune build",
+    "Full CI"
+  ]
+}

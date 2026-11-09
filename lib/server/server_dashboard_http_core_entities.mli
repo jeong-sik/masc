@@ -15,8 +15,5 @@ val dashboard_general_agent_count_light : Workspace.config -> int
     Reads only the small status/type summary fields instead of materializing
     full agent records or running repair. *)
 
-val dashboard_messages_safe :
-  Workspace.config -> since_seq:int -> limit:int -> Masc_domain.message list
-
 val dashboard_general_agent_count : Masc_domain.agent list -> int
 val provider_capacity_json : unit -> Yojson.Safe.t

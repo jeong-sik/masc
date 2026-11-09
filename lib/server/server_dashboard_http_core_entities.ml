@@ -115,10 +115,6 @@ let dashboard_general_agent_count_light config =
          0
 ;;
 
-let dashboard_messages_safe config ~since_seq ~limit =
-  Workspace.get_messages_raw config ~since_seq ~limit
-;;
-
 let is_keeper_agent (agent : Masc_domain.agent) =
   String.equal (String.lowercase_ascii (String.trim agent.agent_type)) "keeper"
 ;;

@@ -114,13 +114,16 @@ type pulse = { known_since : float; slots : slot list }   (* 새 칸이 앞 *)
 | 목록 | — | 묶지 않는다 |
 | 상태별 | 누가 무엇을 기다리나 | `Keeper_list_model.attention`(지금의 `grouped`) |
 | 원인별 | 왜 실패하나 | `Masc_tui_keeper_trail.cause_group`, 실패 없음 |
-| 시간별 | 언제 일하나 | `Masc_tui_keeper_next_run.t` 를 늦음 · 1시간 안 · 12시간 안 · 그 뒤 · 일정 없음 · 모름 으로 |
-| 기억별 | 기억이 따라오나 | `Masc_tui_keeper_memory_reading` 의 gap 있음 · 밀림(lag > 0) · 따라옴 · 모름 |
+| 시간별 | 언제 일하나 | `Masc_tui_keeper_next_run.t` 를 늦음 · 1시간 안 · 12시간 안 · 그 뒤 · 보류 · 일정 없음 · 모름 으로 |
+| 기억별 | 기억이 따라오나 | `Masc_tui_keeper_memory_reading` 의 gap 있음 · 밀림(lag > 0) · 따라옴 · 거부 · 모름 |
 | 나이별 | 기억이 식어 가나 | 스냅샷 `updated_at` 나이 3시간 · 24시간 · 3일 · 그 뒤 · 모름 |
 | runtime | 어느 runtime 이 막혔나 | 행의 현재 runtime id |
 | 24h | 반나절 동안 어땠나 | 묶지 않고, 실패한 30분 칸 수가 많은 순. 행에 48칸 맥박 |
 
 - 묶음 안의 순서는 지금의 정렬(`o`)을 따른다.
+- 시간별의 보류는 `Held_current` · `Held_as_of` 다. `Not_before` 는 실제 시각을 몰라서 모름에 둔다.
+- 기억별의 거부는 `Refused` 다. `Gap_unmeasured` 는 gap 있음, `Lag_unmeasured` 는 모름에 둔다.
+- 경계값은 가까운 칸에 넣는다. 정확히 3시간이면 3시간 칸이다.
 - 나이 경계(3시간 · 24시간 · 3일)는 표시용 값이다. 서버 상태가 아니다. 나이를 `stale` 이라 부르지 않는다(RFC-0418).
 - 월드 줄(RFC-0511 D2c)은 기억별 · 나이별 보기의 맨 위에만 둔다.
 

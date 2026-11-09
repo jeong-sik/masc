@@ -76,6 +76,7 @@
   keeper_memory_os_current_read_anchor
   keeper_memory_os_current_update
   keeper_memory_os_current_revision_evidence
+  keeper_memory_os_current_program_apply
   keeper_memory_os_receipt_selection
   keeper_memory_os_support_core
   keeper_memory_os_disposition_core

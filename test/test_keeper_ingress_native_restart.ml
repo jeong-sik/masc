@@ -116,6 +116,37 @@ let projection_events projection =
     if page.has_more then read_pages page.next_cursor acc else List.rev acc in
   read_pages (Projection.beginning_cursor projection) []
 
+let check_history_redaction (event : Projection.event) =
+  let masked = Server_dashboard_http_keeper_execution_history.event_json
+      ~redact_text:(fun _ -> "[REDACTED]") ~redact_json:(fun _ -> `String "[REDACTED]") event in
+  let member = Yojson.Safe.Util.member in
+  check (of_pp Yojson.Safe.pp) "redaction preserves the canonical event identity"
+    (`String (Projection.Event_id.to_string event.event_id)) (member "event_id" masked);
+  let payload = member "payload" masked in
+  match event.payload with
+  | Projection.Node_opened {kind=Tool_invocation {provider_tool_use_id; schedule; completion; _}; _} ->
+    let node = member "node" payload in
+    check (of_pp Yojson.Safe.pp) "tool kind is protocol, even under maximal content masking"
+      (`String "tool_invocation") (member "kind" node);
+    check (of_pp Yojson.Safe.pp) "provider tool identity survives masking"
+      (match provider_tool_use_id with None -> `Null | Some id -> `String id) (member "provider_tool_use_id" node);
+    check (of_pp Yojson.Safe.pp) "execution mode is protocol"
+      (Agent_core.Tool_contract.execution_mode_to_yojson schedule.execution_mode)
+      (member "execution_mode" (member "schedule" node));
+    check (of_pp Yojson.Safe.pp) "completion is protocol"
+      (Agent_core.Tool_contract.completion_to_yojson completion) (member "completion" node)
+  | Node_closed {terminal=Succeeded; _} ->
+    check (of_pp Yojson.Safe.pp) "succeeded remains a typed terminal"
+      (`String "succeeded") (member "kind" (member "terminal" payload))
+  | Node_updated {update=Tool_input_snapshot (Agent_core.Types.ToolUse {id; _}); _} ->
+    let data = member "data" payload in
+    check (of_pp Yojson.Safe.pp) "typed tool-use ID survives masking" (`String id) (member "id" data);
+    check (of_pp Yojson.Safe.pp) "tool input content is masked" (`String "[REDACTED]") (member "input" data)
+  | Node_updated {update=Tool_result (Agent_core.Types.ToolResult {tool_use_id; _}); _} ->
+    check (of_pp Yojson.Safe.pp) "typed tool-result ID survives masking"
+      (`String tool_use_id) (member "tool_use_id" (member "data" payload))
+  | Node_opened _ | Node_closed _ | Node_updated _ -> ()
+
 let check_original_input (checkpoint : Agent_core.Checkpoint.t) =
   let original = List.filter (fun (message : Agent_core.Types.message) ->
     message.role = Agent_core.Types.User && Agent_core.Types.text_of_content message.content = goal)
@@ -371,8 +402,10 @@ is-default = true
       let dir = Eio.Path.(env#fs / session_dir / "native-executions" / terminal_call.call_id) in
       let projection = Agent_core.Agent.open_execution_projection ~runtime ~dir terminal_call.locator
         |> require "open completed call before Owner settlement" in
-      let events = projection_events projection |> List.map
-          (Server_dashboard_http_keeper_execution_history.event_json ~redact_json:Fun.id) in
+      let events = projection_events projection in
+      List.iter check_history_redaction events;
+      let events = List.map
+          (Server_dashboard_http_keeper_execution_history.event_json ~redact_text:Fun.id ~redact_json:Fun.id) events in
       write (Filename.concat root "history-before-settlement.json") (Yojson.Safe.to_string (`List events)));
     if child then Unix._exit (exit_code cut);
     Owner.Operation_succeeded {outcome_ref="real-ingress-native-recovered"}
@@ -458,7 +491,7 @@ let read_completed_history_in_new_process root =
     let result = Keeper_native_execution_history.read_page ~base_path:root ~keeper_name ~operation_id
         ~call_id:call.call_id ~after ~through ~limit:2 |> require "read completed Core page" in
     let page = result.page in
-    let events = List.map (Server_dashboard_http_keeper_execution_history.event_json ~redact_json:Fun.id) page.events in
+    let events = List.map (Server_dashboard_http_keeper_execution_history.event_json ~redact_text:Fun.id ~redact_json:Fun.id) page.events in
     let acc = List.rev_append events acc in
     if page.has_more then read_pages (Some page.next_cursor) (Some page.high_watermark) acc
     else List.rev acc in

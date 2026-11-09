@@ -78,6 +78,13 @@ type prepared_transport =
           has a slot. Carrying it here is what makes that unwritable: the
           walk cannot be asked to report "no slots declared" on a path whose
           value proves one. *)
+  | Http_held of { until : float }
+      (** Every slot is an HTTP slot waiting for a time its provider stated,
+          so no flow starts. Execution asks Jev as an HTTP lane does, then
+          ends as a walk whose every binding refused for its account's rest,
+          without a call (RFC-exact-lane-waits-for-a-stated-reset R5). The
+          worker then defers the candidate instead of stopping on a setup
+          error. [until] is the earliest stated time. *)
 
 type prepared =
   { candidate : Keeper_board_attention_candidate.candidate
@@ -193,7 +200,7 @@ let prepare ~base_path ~keeper_name ~net candidate =
       Runtime_exact_output_registry.resolve_lane registry ~lane_id
       |> Result.map_error (fun _ -> Lane_unavailable)
     in
-    let* resolved =
+    let* (ordered : Runtime_exact_lane_backpressure.ordered) =
       (Keeper_exact_lane_preference.apply
          ~base_path
          ~keeper_name
@@ -202,6 +209,7 @@ let prepare ~base_path ~keeper_name ~net candidate =
       |> Result.map_error (fun detail -> Lane_preference_unavailable detail)
       |> Result.map Runtime_exact_lane_backpressure.order
     in
+    let resolved = ordered.lane in
     let* candidates = flow_candidates resolved.selected_slots in
     let requirement =
       Exact_output.make_output_requirement
@@ -210,7 +218,19 @@ let prepare ~base_path ~keeper_name ~net candidate =
     in
     let* transport =
       match candidates, resolved.cli_slots with
-      | [], [] -> Error Lane_resolved_without_slots
+      | [], [] ->
+        (match ordered.held_http with
+         | [] -> Error Lane_resolved_without_slots
+         | (first : Runtime_exact_lane_backpressure.held_slot) :: rest ->
+           Ok
+             (Http_held
+                { until =
+                    List.fold_left
+                      (fun until (held : Runtime_exact_lane_backpressure.held_slot) ->
+                         Float.min until held.until)
+                      first.until
+                      rest
+                }))
       | [], first_slot :: other_slots -> Ok (Cli_only { first_slot; other_slots })
       | first :: rest, _ ->
         let* snapshot =
@@ -605,7 +625,7 @@ let ask_jev ~clock prepared =
     (
       (match prepared.transport with
        | Cli_only _ -> Jev_cli_only
-       | Http_flow _ ->
+       | Http_flow _ | Http_held _ ->
          (* The same view [prepare] admits by: a durably requeued pending
             candidate is judged like a pending one, so Jev is asked first for
             both. *)
@@ -882,6 +902,32 @@ let execute_current
            | Ok (slot_id, judgment) -> cli_selected_slot := Some slot_id; Ok judgment
            | Error failures ->
              Error (Cli_slots_exhausted { prior_error = None; failures }))
+        | Http_held { until } ->
+          (match jev_first with
+           | Jev_decided { provenance; verdict; judged_at; confidence = _ } ->
+             Ok
+               { Keeper_board_attention_candidate.verdict
+               ; slot_id = provenance.answering_model_id
+               ; source =
+                   Keeper_board_attention_candidate.Vendor_system_one provenance
+               ; judged_at
+               }
+           | Jev_off
+           | Jev_cli_only
+           | Jev_not_pending
+           | Jev_low_confidence _
+           | Jev_uncertain _
+           | Jev_failed _ ->
+             (* The walk the provider asked to wait for: every binding at
+                rest, and no attempt, because none was made. *)
+             Error
+               (Providers_exhausted
+                  { attempts = []
+                  ; detail =
+                      "every catalog slot waits for the time its provider stated, until "
+                      ^ Masc_domain.iso8601_of_unix_seconds until
+                  ; binding_standing = Exact_output.Every_binding_resting
+                  }))
         | Http_flow (attempt, resolved) ->
           (match jev_first with
            | Jev_decided { provenance; verdict; judged_at; confidence = _ } ->

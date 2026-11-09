@@ -2303,6 +2303,49 @@ let test_a_spent_lane_defers_and_the_next_drain_judges_the_candidate () =
     (List.length (ok "load partitions" (P.load ~base_path ~keeper_name:"alpha")))
 ;;
 
+(* RFC-exact-lane-waits-for-a-stated-reset R5: a lane whose every HTTP slot
+   waits for its provider ends as a resting walk with no attempt, because it
+   bound nothing. The running root still returns to Ready, the candidate stays
+   Pending, and the drain ends deferred instead of stopping the worker. *)
+let test_a_held_lane_defers_without_binding () =
+  with_temp_base "board-attention-worker-held-lane-defers" @@ fun base_path ->
+  let persisted = record ~base_path (candidate ()) in
+  let calls = ref 0 in
+  let held ~before_dispatch:_ ~before_advance:_ _candidate =
+    incr calls;
+    Error
+      (E.Providers_exhausted
+         { attempts = []
+         ; detail = "every catalog slot waits for the time its provider stated"
+         ; binding_standing = Agent_core.Exact_output.Every_binding_resting
+         })
+  in
+  (match
+     ok
+       "drain"
+       (W.For_testing.drain_available
+          ~yield:(fun () -> ())
+          ~now:(fun () -> 3.0)
+          ~worker_epoch:(P.Worker_epoch.generate ())
+          ~base_path
+          ~keeper_name:"alpha"
+          ~prepare:(fun candidate -> Ok candidate)
+          ~execute:held)
+   with
+   | W.Lane_deferred { candidate_id; progress = { judgments = 0; steps = 1 } }
+     when String.equal candidate_id persisted.candidate_id -> ()
+   | W.Lane_deferred _ | W.Drained _ | W.Retry_later _ | W.Awaiting_registry_fence _ ->
+     Alcotest.fail "a held lane did not end the drain as deferred");
+  Alcotest.(check int) "the lane ran once" 1 !calls;
+  (match (load_one_candidate ~base_path).status with
+   | A.Pending { last_delivery_failure = None } -> ()
+   | A.Pending _ | A.Judged _ | A.Consumed _ | A.Quarantine _ ->
+     Alcotest.fail "a held lane moved the candidate out of Pending");
+  match (load_one_partition ~base_path).state with
+  | P.Ready -> ()
+  | _ -> Alcotest.fail "the held root is not Ready"
+;;
+
 (* A 402 on the last HTTP slot of a lane that declares no CLI slot. AGENT_CORE
    reads a payment refusal as the binding's, so the lane defers. *)
 let test_a_payment_refusal_on_the_last_slot_defers () =
@@ -4841,6 +4884,10 @@ let () =
             "a spent lane defers and the next drain judges the candidate"
             `Quick
             test_a_spent_lane_defers_and_the_next_drain_judges_the_candidate
+        ; Alcotest.test_case
+            "a held lane defers without binding"
+            `Quick
+            test_a_held_lane_defers_without_binding
         ; Alcotest.test_case
             "a payment refusal on the last slot defers"
             `Quick

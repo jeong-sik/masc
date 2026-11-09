@@ -114,11 +114,11 @@ agent 소켓은 root 전용 디렉터리에 있어서 Keeper uid 는 경로로 �
 
 ### 3.9 옮기는 순서
 
+세 단계는 모두 끝났어요. 단계마다 바뀐 것은 10.1 에 있어요.
+
 1. `Agent_socket` 전달 방식을 Keeper 별 선택으로 더해요. canary 동안에만 두 경로가 같이 있어요. 되돌리기는 그 Keeper 의 선택을 원래대로 바꾸는 거예요.
-   - 선택은 Keeper TOML 의 `microvm_delivery` 예요(`exec_per_request` 가 기본, `agent_socket`). `sandbox_profile = "microvm"` 이고 `microvm_backend = "apple_container"` 일 때만 `agent_socket` 을 받아요. backend 를 적지 않은 Keeper 는 호스트 기본 backend 로 뜨지만, 그 값은 TOML 을 읽은 뒤에 정해져서 이 검사가 보지 못해요. 그래서 그런 Keeper 도 backend 줄을 적어요.
-   - 턴마다 게스트를 다시 판정하면서 TOML 을 읽어요. 값을 바꾸면 다음 턴에 plan 이 달라져 게스트가 교체돼요.
 2. canary 기준(7절)을 넘으면 나머지 Apple Keeper 를 옮겨요.
-3. 모두 옮기면 선택 값과 Apple 의 `Exec_per_request` 전달 방식을 한 PR 에서 지워요. Microsandbox·Nerdctl_kata 는 `Exec_per_request` 그대로예요(3.10, 사용자 결정 2026-11-09). 그 뒤 되돌리기는 그 PR 의 revert 예요. 진행 상황은 10절에 있어요.
+3. 모두 옮기면 선택 값과 Apple 의 `Exec_per_request` 전달 방식을 한 PR 에서 지워요. Microsandbox·Nerdctl_kata 는 `Exec_per_request` 그대로예요(3.10, 사용자 결정 2026-11-09). 그 뒤 되돌리기는 그 PR 의 revert 예요.
 
 ### 3.10 바뀌지 않는 것
 
@@ -239,6 +239,7 @@ masc 가 그리는 모양 그대로(`--entrypoint <shim>`, 인자 `--serve <게�
    - 전달 방식은 backend 가 정해요(`Keeper_microvm_backend.request_delivery`). Apple 은 `Guest_agent`, Microsandbox·Nerdctl_kata 는 `Exec_per_request` 예요.
    - `Keeper_sandbox_microvm.shim_exec_prefix_for` 는 `Keeper_microvm_backend.exec_runtime`(Microsandbox·Nerdctl_kata)만 받아요. Apple 용 exec 접두사는 만들 수 없어요.
    - Apple 게스트는 언제나 agent plan 으로 떠요. 붙이기(attach)는 게스트가 agent 소켓을 publish 하지 않으면 `microvm_agent_not_published` 로 거절해요. 그런 게스트는 plan 이 달라서 그 Keeper 의 다음 턴이 새 게스트로 바꿔요.
+   - 턴 없이 게스트를 읽는 길(lane 상태, 운영자 화면, 검증 조회, 붙잡아 둔 Apple 읽기 권한의 재확인)도 같은 검사를 지나요. 그래서 그 게스트가 바뀌기 전까지 같은 문구로 거절돼요.
    - 키가 남은 TOML 은 다른 모르는 키처럼 load 오류예요(`unknown keeper TOML keys`).
 
 ### 10.2 검증 계획(7절) 결과
@@ -251,3 +252,11 @@ masc 가 그리는 모양 그대로(`--entrypoint <shim>`, 인자 `--serve <게�
   - #49316 의 "배포 뒤" 재측정(서버 재시작 전후의 canary pipe)은 이 저장소에 기록이 없어요. 2026-11-09T09:23:29Z 에 같은 VM runtime 의 짝 없는 pipe 는 15개였어요. 11 에서 늘어난 원인은 나눠 보지 않았어요.
 - 7.4 pipe 용량: 2026-11-09T09:23:29Z 에 `bin/pipeleak.py once` 의 `bigwrite` 가 65,536 바이트였어요.
   - 그때 agent 소켓을 publish 하지 않는 옛 게스트가 둘 떠 있었어요(2026-11-02 부팅, 짝 없는 pipe 220개·109개). 두 Keeper 의 TOML 은 이미 `agent_socket` 이었지만 게스트는 그대로였어요.
+
+### 10.3 닫기 전에 남은 것
+
+상태를 `Active` 로 두는 이유예요. 아래를 마치고 closeout 하면 `Implemented` 예요.
+
+- 7.3 기준 3: p50 이 44ms 길었던 것이 잡음인지 봐요.
+- #49316 배포 뒤 canary pipe 를 다시 재요. 11 에서 15 로 늘어난 원인도 나눠 봐요.
+- 6절의 남은 질문 넷을 닫아요.

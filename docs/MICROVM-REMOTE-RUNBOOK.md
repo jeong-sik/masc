@@ -59,9 +59,9 @@ CLI 문법과 볼륨 동작이 다르므로 `container` 만 다른 이름으로 
 
 아래는 Apple `container` 게스트 기준의 운영
 절차. 게스트는 호스트 playground 를 마운트하지 않는다. 트리는 게스트가
-마운트한 ext4 볼륨(`/masc-work`)에 있고, 명령은 호스트가 게스트 안의
-`masc-exec-shim` 에 `container exec` 로 넣어 준다. OpenSSH 엔드포인트와 같은
-프로토콜, 다른 전송이다.
+마운트한 ext4 볼륨(`/masc-work`)에 있고, 명령은 호스트가 게스트의 첫 프로세스로
+떠 있는 `masc-exec-shim --serve` agent 소켓(`<base>/.masc/microvm/agent/`)으로
+넣어 준다. OpenSSH 엔드포인트와 같은 프로토콜, 다른 전송이다.
 
 ## 계약: 호스트에 필요한 것
 
@@ -250,6 +250,13 @@ container exec --env MASC_EXEC_SHIM_CONFIG=/opt/masc-exec-shim/masc-exec-shim.co
 
 # 호스트 fd 가 파일 수를 따라가지 않는지 (게스트 VM 프로세스)
 lsof -p <vm pid> | wc -l     # 활동 중에도 100 안쪽
+
+# 모든 Apple Keeper 게스트가 agent plan(--serve 소켓 publish)으로 떠 있는지 확인
+container list --format json | jq -r '.[] | select(.configuration.id | startswith("masc-keeper-vm-")) | [.configuration.id, (.configuration.initProcess.arguments | join(" "))] | @tsv'
+#  → 모두 --serve <게스트 소켓 경로> 로 떠 있어야 한다.
+#    전환 전 옛 게스트가 남아 있으면 그 Keeper 의 다음 턴이 새 게스트로 바꾸며,
+#    바뀌기 전까지 턴 없이 읽는 경로(lane 상태·운영자 화면·Diagnostic_read)는
+#    microvm_agent_not_published 로 거절된다.
 ```
 
 ## 못 하는 것

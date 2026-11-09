@@ -6724,7 +6724,7 @@
 (test
  (name test_tui_lane_inventory)
  (modules test_tui_lane_inventory)
- (libraries masc masc.runtime masc.browser_lane masc_tui_lane_inventory masc_tui_lane_standing alcotest))
+ (libraries masc masc.runtime masc.browser_lane masc_tui_lane_inventory masc_tui_lane_standing masc_tui_page_line alcotest))
 
 (test
  (name test_tui_lane_declaration_path)

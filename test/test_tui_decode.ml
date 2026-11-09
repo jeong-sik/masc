@@ -4001,6 +4001,49 @@ let test_decode_tool_snapshot_keeps_the_warming_flag () =
       Alcotest.(check bool) "an empty built inventory does mean none" true
         (snapshot.Masc.Tui_decode_tools.ts_freshness = Masc.Tui_decode_tools.Settled)
 
+(* The server's periodic volume GC pass rides the same envelope. The field is
+   null until the first pass ends, and a server without the pass sends none;
+   neither is a report. A pass that does not decode is an error, not a
+   missing report. *)
+let test_decode_tool_snapshot_reads_the_volume_gc_report () =
+  let with_report value =
+    match tool_snapshot_json [] with
+    | `Assoc fields -> `Assoc (fields @ [ ("sandbox_volume_gc_report", value) ])
+    | other -> other
+  in
+  let report_of json =
+    Result.map
+      (fun snapshot -> snapshot.Masc.Tui_decode_tools.ts_volume_gc_report)
+      (Masc.Tui_decode_tools.decode_tool_snapshot json)
+  in
+  (match (report_of (tool_snapshot_json []), report_of (with_report `Null)) with
+   | Ok None, Ok None -> ()
+   | _ -> Alcotest.fail "an absent or null report is no report");
+  (match
+     report_of
+       (with_report
+          (`Assoc
+              [ ("observed_at", `Float 1.0)
+              ; ("outcome", `String "skipped")
+              ; ("reason", `String "no Apple Container")
+              ]))
+   with
+   | Ok
+       (Some
+          { Masc.Keeper_volume_gc_periodic.outcome =
+              Masc.Keeper_volume_gc_periodic.Skipped reason
+          ; _
+          }) ->
+       Alcotest.(check string) "the reason comes back" "no Apple Container" reason
+   | Ok _ | Error _ -> Alcotest.fail "a skipped pass decodes as skipped");
+  match
+    report_of
+      (with_report
+         (`Assoc [ ("observed_at", `Float 1.0); ("outcome", `String "deleted") ]))
+  with
+  | Error _ -> ()
+  | Ok _ -> Alcotest.fail "an unknown outcome is an error"
+
 let test_decode_tool_projected_nowhere () =
   (* A registered tool on no surface is reachable by nothing. Kept as an empty
      list rather than dropped: that it exists and is projected nowhere is the
@@ -14587,6 +14630,8 @@ let () =
           test_decode_tool_snapshot_reads_the_live_shape;
         Alcotest.test_case "keeps the warming flag" `Quick
           test_decode_tool_snapshot_keeps_the_warming_flag;
+        Alcotest.test_case "reads the server's volume GC report" `Quick
+          test_decode_tool_snapshot_reads_the_volume_gc_report;
         Alcotest.test_case "usage rows keep calls, failures and p95" `Quick
           test_decode_tool_usage_reads_the_rows;
         Alcotest.test_case "usage without by_tool is no reading" `Quick

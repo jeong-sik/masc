@@ -62,7 +62,8 @@ let tools_state () =
          ; ts_count = 0
          ; ts_freshness = Masc.Tui_decode_tools.Settled
          ; ts_effective = None
-         ; ts_usage = None };
+         ; ts_usage = None
+         ; ts_volume_gc_report = None };
   state.tools_activations <-
     Some
       (Activations_read

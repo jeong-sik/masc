@@ -11,6 +11,7 @@ module Message_layout = Masc_tui_message_layout
 module Numbered_list = Masc_tui_numbered_list
 module Rows = Masc_tui_rows
 module Page_line = Masc_tui_page_line
+module Page_reading = Masc_tui_page_reading
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Render_schedule = Masc_tui_render_schedule
 
@@ -143,97 +144,18 @@ let standalone_lane_jev_summary (lane : Tui_decode.standalone_lane) =
         ^ Terminal_text.single_line
             (String.concat ", " (List.map named destinations)) )
 
-(* The cells every row of a detail block is indented by. *)
-let detail_indent = "  "
-
-let wrap_indented_line ~max_cells style text =
-  let single = Terminal_text.single_line text in
-  if String.equal (String.trim single) "" then [ style, "" ]
-  else
-    Message_layout.wrap_words ~max_cells:(max 1 max_cells) single
-    |> List.map (fun line -> style, detail_indent ^ line)
-
-let wrap_indented_lines ~max_cells style lines =
-  List.concat_map (wrap_indented_line ~max_cells style) lines
-
-(* A reading page of typed lines. A fact's label sits receded in a column as
-   wide as the page's longest label, so the values start at one cell; a title
-   is bold, a quiet line is receded and an attention line is warned. A value
-   with a word wider than the room beside its label (a hash, a path), or on a
-   screen too narrow to leave it room, goes on the rows under the label, so no
-   word is cut at a column in the middle. *)
-let reading_label_cells_cap = 24
-let reading_min_value_cells = 16
-
-let reading_tone_style = function
-  | Page_line.Quiet -> Theme.recede ()
-  | Page_line.Plain -> Ansi.reset
-  | Page_line.Attention -> Theme.warn ()
-  | Page_line.Failure -> Theme.bad ()
-
-let widest_word_cells text =
-  List.fold_left
-    (fun widest word -> max widest (Message_layout.display_width word))
-    0 (String.split_on_char ' ' text)
-
-let reading_fact_rows ~max_cells ~label_cells ~tone label value =
-  let label = Terminal_text.single_line label ^ ":" in
-  let value = Terminal_text.single_line value in
-  let styled_label = Theme.recede () ^ label ^ Ansi.reset in
-  let styled_value text = reading_tone_style tone ^ text ^ Ansi.reset in
-  let column = max label_cells (Message_layout.display_width label) in
-  let value_cells = max_cells - column - 1 in
-  if value_cells < reading_min_value_cells || widest_word_cells value > value_cells
-  then
-    (Ansi.reset, detail_indent ^ styled_label)
-    :: List.map
-         (fun line -> Ansi.reset, detail_indent ^ detail_indent ^ styled_value line)
-         (Message_layout.wrap_words
-            ~max_cells:(max 1 (max_cells - String.length detail_indent))
-            value)
-  else
-    let pad = String.make (column + 1 - Message_layout.display_width label) ' ' in
-    match Message_layout.wrap_words ~max_cells:value_cells value with
-    | [] -> [ Ansi.reset, detail_indent ^ styled_label ]
-    | first :: rest ->
-      (Ansi.reset, detail_indent ^ styled_label ^ pad ^ styled_value first)
-      :: List.map
-           (fun line ->
-              Ansi.reset, detail_indent ^ String.make (column + 1) ' ' ^ styled_value line)
-           rest
-
-let reading_rows ~max_cells (lines : Page_line.t list) =
-  let label_cells =
-    List.fold_left
-      (fun widest -> function
-         | Page_line.Fact { label; _ } ->
-           max widest
-             (Message_layout.display_width (Terminal_text.single_line label) + 1)
-         | Page_line.Title _ | Page_line.Note _ -> widest)
-      0 lines
-    |> min reading_label_cells_cap
-  in
-  List.concat_map
-    (function
-      | Page_line.Title text -> wrap_indented_line ~max_cells Ansi.bold text
-      | Page_line.Note { text; tone } ->
-        wrap_indented_line ~max_cells (reading_tone_style tone) text
-      | Page_line.Fact { label; value; tone } ->
-        reading_fact_rows ~max_cells ~label_cells ~tone label value)
-    lines
-
 (* A candidate list as its label and one numbered row per candidate, one indent
    under the label, so a long model id wraps under its own number and is not
    read as the next candidate. A list with no candidates stays on the label's
    row. *)
 let numbered_slot_lines ~max_cells style ~label values =
   match values with
-  | [] -> wrap_indented_line ~max_cells style (label ^ ": " ^ no_candidates)
+  | [] -> Page_reading.wrap_indented_line ~max_cells style (label ^ ": " ^ no_candidates)
   | values ->
-    let under_label = detail_indent in
-    wrap_indented_line ~max_cells style (label ^ ":")
+    let under_label = Page_reading.detail_indent in
+    Page_reading.wrap_indented_line ~max_cells style (label ^ ":")
     @ List.map
-        (fun row -> style, detail_indent ^ under_label ^ row)
+        (fun row -> style, Page_reading.detail_indent ^ under_label ^ row)
         (Numbered_list.rows
            ~max_cells:(max 1 (max_cells - Message_layout.display_width under_label))
            (List.map Terminal_text.single_line values))
@@ -241,7 +163,7 @@ let numbered_slot_lines ~max_cells style ~label values =
 let lane_overview_summary_block ~titled ~cols ~label ~purpose ~left_title
     ~left_rows ~right_title ~right_rows ~actions =
   let max_cells = max 1 (framed_inner_width cols - 2) in
-  wrap_indented_line ~max_cells Ansi.bold
+  Page_reading.wrap_indented_line ~max_cells Ansi.bold
     (Printf.sprintf "%s · %s"
        (Terminal_text.single_line label)
        (Terminal_text.single_line purpose))
@@ -342,7 +264,7 @@ let inventory_row_summary_lines ~titled ~cols ~standing ~selected_output
     (row : Masc.Tui_decode_lane_inventory.row) =
   let open Masc.Tui_decode_lane_inventory in
   let standing_style =
-    reading_tone_style (Masc_tui_lane_inventory.standing_tone standing)
+    Page_reading.tone_style (Masc_tui_lane_inventory.standing_tone standing)
   in
   let state_line =
     ( standing_style
@@ -476,7 +398,7 @@ let standalone_lane_without_slot_rows_ko (lane : Tui_decode.standalone_lane) =
 
 let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane) =
   let max_cells = max 1 (width - 4) in
-  let wrap style text = wrap_indented_line ~max_cells style text in
+  let wrap style text = Page_reading.wrap_indented_line ~max_cells style text in
   let purpose = standalone_lane_purpose lane in
   let answer = Tui_decode.standalone_lane_answer lane in
   let obligation = standalone_lane_obligation lane in
@@ -495,7 +417,7 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
     in
     match slot_rows @ standalone_lane_without_slot_rows_ko lane with
     | [] -> wrap (Theme.recede ()) "(기록된 슬롯 응답 이력이 없습니다)"
-    | rows -> wrap_indented_lines ~max_cells Ansi.reset rows
+    | rows -> Page_reading.wrap_indented_lines ~max_cells Ansi.reset rows
   in
   wrap Ansi.bold
     (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)
@@ -543,11 +465,11 @@ let inventory_row_detail_lines ~width ~selected_output
     | [] -> []
     | outputs ->
       detail_section_heading "2. 출력 스키마 바인딩 (Exact Output)"
-      @ wrap_indented_lines ~max_cells Ansi.reset outputs
+      @ Page_reading.wrap_indented_lines ~max_cells Ansi.reset outputs
   in
-  reading_rows ~max_cells [ Page_line.Title (row.label ^ " · " ^ row.purpose) ]
+  Page_reading.rows ~max_cells [ Page_line.Title (row.label ^ " · " ^ row.purpose) ]
   @ detail_section_heading "1. 설정 · 관측 상세 (Configuration · Observation)"
-  @ reading_rows ~max_cells (Masc_tui_lane_inventory.detail_lines row)
+  @ Page_reading.rows ~max_cells (Masc_tui_lane_inventory.detail_lines row)
   @ output_lines
 
 let rec take_rows remaining acc = function
@@ -2484,7 +2406,7 @@ let render_lane_scrollable_reading (state : state) ~terminal_rows ~cols
     ~surface_key ~title ~hints lines =
   let max_cells = max 1 (framed_inner_width cols - 2) in
   render_lane_scrollable_styled_reading state ~terminal_rows ~cols
-    ~surface_key ~title ~hints (reading_rows ~max_cells lines)
+    ~surface_key ~title ~hints (Page_reading.rows ~max_cells lines)
 
 let lane_activity_hints =
   "Space:draft  s:save  r:read  u:reapply  x:discard  ?:help  Esc:back"
@@ -2493,7 +2415,7 @@ let render_lane_inventory_detail (state : state) target =
   let terminal_rows, cols = get_terminal_size () in
   let width = max 1 (framed_inner_width cols - 2) in
   let max_cells = max 1 (width - 2) in
-  let wrap style text = wrap_indented_line ~max_cells style text in
+  let wrap style text = Page_reading.wrap_indented_line ~max_cells style text in
   let content = match state.lane_inventory with
     | None -> wrap (Theme.recede ()) "Lane inventory has not been read. r: refresh"
     | Some snapshot ->
@@ -2502,7 +2424,7 @@ let render_lane_inventory_detail (state : state) target =
              wrap Ansi.bold "Inventory diagnostics"
              @ (match Masc_tui_lane_inventory.snapshot_notices snapshot with
                 | [] -> wrap (Theme.recede ()) "No inventory read issues observed."
-                | notices -> wrap_indented_lines ~max_cells (Theme.warn ()) notices)
+                | notices -> Page_reading.wrap_indented_lines ~max_cells (Theme.warn ()) notices)
          | Some id ->
              (match List.find_opt (fun (row : Masc.Tui_decode_lane_inventory.row) -> String.equal row.id id) snapshot.rows with
               | None ->

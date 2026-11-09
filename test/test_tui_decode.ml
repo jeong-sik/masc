@@ -5661,10 +5661,35 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       Alcotest.(check (option (float 0.))) (label ^ ": durable measurement time retained")
         expected_time librarian.mlh_measured_at)
     [ "measured durable pass", [], Some Masc.Tui_decode_memory_health.Pass_drained,
-      Some 1_775_000_000.0
-    ; "unobserved durable pass",
-      [ "state", `Null; "measured_at", `Null; "unread_atom_turns", `Null;
-        "unread_official_turns", `Null ], None, None ];
+      Some 1_775_000_000.0 ];
+  (* A row the server could not read keeps its admission wait beside the
+     unknown reads, and the fleet unread total moves to unmeasured with the
+     row: reporting zero for unread rows disagrees with what the rows say. *)
+  let unobserved_json =
+    match
+      with_librarian ~stopped_keepers:0
+        [ ("admission_wait", admission_json); "state", `Null; "measured_at", `Null;
+          "unread_atom_turns", `Null; "unread_official_turns", `Null ]
+    with
+    | `Assoc fields ->
+      `Assoc
+        (List.map (fun (key, value) -> key,
+             if key = "totals"
+             then replace_field "librarian_unread_turns" `Null value
+             else value) fields)
+    | value -> value
+  in
+  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot unobserved_json with
+   | Error detail -> Alcotest.fail detail
+   | Ok snapshot ->
+     let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
+     Alcotest.(check bool) "unobserved durable pass: original admission owner retained" true
+       (librarian.mlh_admission_wait = Some admission_worker);
+     Alcotest.(check bool) "unobserved durable pass: durable state retained" true
+       (librarian.mlh_state = None);
+     Alcotest.(check (option (float 0.)))
+       "unobserved durable pass: durable measurement time retained" None
+       librarian.mlh_measured_at);
   List.iter (fun admission_wait ->
     Alcotest.(check bool) "admission wait requires a supported original worker" true
       (memory_health_rejects (with_librarian ~stopped_keepers:0 ["admission_wait", admission_wait])))

@@ -2,111 +2,11 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+include Keeper_turn_sandbox_runtime_registry
+
 type state =
   | Not_started
   | Running of { container_name : string }
-
-type process_github_identity_snapshot =
-  { args : string list
-  ; host_dir : string
-  ; revision : string
-  ; cleanup : unit -> unit
-  }
-
-type github_identity_snapshot =
-  | Process_identity of process_github_identity_snapshot
-  | Guest_identity of Keeper_microvm_github_identity.snapshot
-
-let identity_host_dir = function
-  | Process_identity snapshot -> snapshot.host_dir
-  | Guest_identity snapshot -> Keeper_microvm_github_identity.path snapshot
-
-let identity_revision = function
-  | Process_identity snapshot -> snapshot.revision
-  | Guest_identity snapshot -> Keeper_microvm_github_identity.revision snapshot
-
-type github_identity_snapshots =
-  { current : github_identity_snapshot option
-  ; retired : github_identity_snapshot list
-  }
-
-let no_github_identity_snapshots = { current = None; retired = [] }
-
-(* Backends whose inspect cannot establish a full boot identity retain their
-   process-owned snapshots. Apple credentials belong to its durable guest
-   store and are never registered for turn/process cleanup. *)
-let microvm_identity_snapshots :
-  (string * process_github_identity_snapshot) list Atomic.t
-  =
-  Atomic.make []
-;;
-
-(* A Keeper's guest names and volumes share lifecycle ownership. Different
-   Keepers must not wait behind an unrelated slow container CLI or boot.
-   Inventory maintenance still excludes all owners from listing to deletion,
-   preserving the stable-name adoption boundary. *)
-let microvm_lifecycle = Keeper_microvm_lifecycle.create ()
-
-let with_microvm_lifecycle_lock ~keeper_name ~operation f =
-  match Fs_compat.execution_context () with
-  | Fs_compat.Non_eio -> f ()
-  | Fs_compat.Eio_fiber ->
-    let requested_at = Time_compat.now () in
-    Keeper_microvm_lifecycle.with_keeper microvm_lifecycle ~keeper_name (fun () ->
-      Log.Keeper.debug "microvm lifecycle admitted keeper=%s operation=%s wait_ms=%.3f"
-        keeper_name operation ((Time_compat.now () -. requested_at) *. 1000.0);
-      f ())
-;;
-
-let with_microvm_inventory_lock f =
-  match Fs_compat.execution_context () with
-  | Fs_compat.Non_eio -> f ()
-  | Fs_compat.Eio_fiber -> Keeper_microvm_lifecycle.with_inventory microvm_lifecycle f
-;;
-
-let sweep_process_bound_microvm_guests
-      ~base_path ~command_available ~timeout_sec ~is_pid_alive ~run_argv =
-  Keeper_sandbox_microvm.sweep_abandoned_guests ~base_path
-    ~command_available:(fun command ->
-      not (String.equal command (Keeper_microvm_backend.cli_name Keeper_microvm_backend.Apple_container))
-      && command_available command)
-    ~timeout_sec ~is_pid_alive ~run_argv
-;;
-
-let microvm_identity_snapshot container_name =
-  Atomic.get microvm_identity_snapshots |> List.assoc_opt container_name
-;;
-
-let rec claim_microvm_identity_snapshot container_name snapshot =
-  let current = Atomic.get microvm_identity_snapshots in
-  match List.assoc_opt container_name current with
-  | Some existing -> `Existing existing
-  | None ->
-    if Atomic.compare_and_set
-         microvm_identity_snapshots
-         current
-         ((container_name, snapshot) :: current)
-    then `Claimed
-    else claim_microvm_identity_snapshot container_name snapshot
-;;
-
-let rec take_microvm_identity_snapshot_if container_name expected =
-  let current = Atomic.get microvm_identity_snapshots in
-  match List.assoc_opt container_name current with
-  | None -> None
-  | Some snapshot when Option.for_all (fun value -> value == snapshot) expected ->
-    let updated = List.remove_assoc container_name current in
-    if Atomic.compare_and_set microvm_identity_snapshots current updated
-    then Some snapshot
-    else take_microvm_identity_snapshot_if container_name expected
-  | Some _ -> None
-;;
-
-let release_registered_microvm_identity ?expected container_name =
-  match take_microvm_identity_snapshot_if container_name expected with
-  | None -> ()
-  | Some snapshot -> snapshot.cleanup ()
-;;
 
 (* Guests whose keeper root on the work volume this server process has made.
    Names have a shortened workspace hash and are shared across backend stores,
@@ -614,7 +514,6 @@ let create
   }
 ;;
 
-
 (* A Keeper whose image cannot be resolved starts no container. The catalog's
    reason carries the commands that fix it. *)
 let image_unresolved_message error =
@@ -651,7 +550,6 @@ let docker_container_name_for_image (t : t) ~image =
   |> Keeper_sandbox_container_name.to_string
 ;;
 
-
 module For_testing = struct
   let minimal_image = "masc-test-minimal:image"
 
@@ -681,7 +579,6 @@ module For_testing = struct
   let microvm_adoption = microvm_adoption
   let microvm_boot_nameserver = microvm_boot_nameserver
 end
-
 
 (* The cwd of every exec comes from a resolver that already confined it to
    this keeper's playground: Execute and spawn through
@@ -1345,7 +1242,6 @@ let ensure_microvm_work_volume_mounted ?timeout_sec (t : t) ~backend ~container_
              else "; unverified probe output: " ^ detail)))
 ;;
 
-
 (** The keeper's root on the work volume, made inside the guest once it is
     up. The volume outlives the guest, so this is a no-op after the first
     boot; it runs as root because the volume root is root-owned. The mount
@@ -1467,7 +1363,6 @@ module For_testing_microvm = struct
   let provision_guest t ~backend ~timeout_sec =
     microvm_guest_provisions t ~backend ~timeout_sec |> Result.map (fun _ -> ())
 end
-
 
 (** Apple build-link preparation. Its caller admits execution only after the
     current generation is prepared. A read-only scan failure can be

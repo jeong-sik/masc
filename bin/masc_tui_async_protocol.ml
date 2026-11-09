@@ -283,6 +283,10 @@ type memory_health_read =
       { keeper : string
       ; result : (Masc.Tui_decode_memory_health.memory_health_row_answer, string) result
       }
+  | Command_health_read of
+      { keeper : string
+      ; result : (Masc.Tui_decode_memory_health.memory_health_row_answer, string) result
+      }
 
 (* The answers of one domain share one type named after it, and [async_msg]
    carries that type in one constructor: [keeper_msg] in [Keeper_msg]. A
@@ -414,6 +418,12 @@ type keeper_msg =
   | Keeper_execute_streamed of keeper_execute_follow * keeper_execute_follow_event
   | Keeper_settings_save_changed of keeper_settings_save_request * keeper_settings_save_status * int64
   | Keeper_creation_changed of keeper_creation_request * keeper_creation_status
+  | Keeper_memory_catch_up_done of
+      { keeper : string
+      ; workspace : Masc.Tui_decode.server_identity
+      ; authority : workspace_authority
+      ; outcome : Masc_tui_http.keeper_memory_catch_up_outcome
+      }
   | Keeper_action_done of
       Masc.Tui_decode.server_identity option
       * string
@@ -1244,7 +1254,7 @@ let rec workspace_message_is_read = function
   | Schedule_msg (Schedule_form_authority_refused _)
   | Keeper_msg (Keeper_deletion_retry_done _)
   | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _
-  | Keeper_action_done _)
+  | Keeper_action_done _ | Keeper_memory_catch_up_done _)
   | Board_msg (Board_publication_done _ | Board_comment_done _)
   | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _))
   | Goal_msg (Goal_transition_done _
@@ -1353,7 +1363,7 @@ let rec message_waits_for_input ~resource_read ~recovery_loaded = function
   | Gate_auto_judge_retried _ | Gate_mode_set _) | Keeper_msg (Keeper_tool_approval_answered _
   | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded _ | Keeper_tool_mode_set _
   | Keeper_chat_dispatch_blocked _ | Keeper_logs_loaded _ | Keeper_settings_save_changed _)
-  | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_creation_changed _ | Keeper_action_done _)
+  | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_creation_changed _ | Keeper_action_done _ | Keeper_memory_catch_up_done _)
   | Board_msg (Board_publication_done _ | Board_comment_done _ | Board_vote_done _) | Goal_msg (Goal_transition_done _
   | Goal_confirmation_submitted _ | Goal_confirmation_loaded _) | Schedule_msg (Schedules_loaded _
   | Schedule_wake_history_loaded _) | Keeper_msg (Keeper_schedules_loaded _ | Keeper_story_turns_loaded _) | System_log_streamed _
@@ -1518,7 +1528,7 @@ let retired_operation_observation state ~authority ~reading message =
     | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _)
     | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
     | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _))
-    | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _)) | Board_msg (Board_publication_done _ | Board_comment_done _)
+    | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Keeper_memory_catch_up_done _) | Board_msg (Board_publication_done _ | Board_comment_done _)
     | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _)) | Goal_msg (Goal_transition_done _ | Goal_confirmation_submitted _
     | Goal_confirmation_loaded (_, _)) | Schedule_msg (Schedules_loaded (_, _)
     | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _))
@@ -1663,7 +1673,7 @@ let rec project_workspace_operation_reply state ~authority ~reading message =
   | Keeper_msg (Keeper_tool_approval_answered (_, _, _, _, _, _)
   | Keeper_gate_settings_loaded _ | Keeper_tool_modes_loaded (_, _)
   | Keeper_tool_mode_set (_, _, _, _) | Keeper_chat_dispatch_blocked (_, _))
-  | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _)) | Board_msg (Board_publication_done _ | Board_comment_done _) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _))
+  | (Keeper_msg (Keeper_logs_loaded _ | Keeper_execute_streamed _)) | Runtime_msg (Runtime_form_save_changed _) | Keeper_msg (Keeper_settings_save_changed _ | Keeper_creation_changed _ | Keeper_action_done (_, _, _, _) | Keeper_memory_catch_up_done _) | Board_msg (Board_publication_done _ | Board_comment_done _) | (Board_msg (Board_vote_done _) | Artifact_msg (Artifact_check_changed _))
   | Goal_msg (Goal_transition_done _ | Goal_confirmation_submitted _
   | Goal_confirmation_loaded (_, _)) | Schedule_msg (Schedules_loaded (_, _)
   | Schedule_wake_history_loaded (_, _)) | Keeper_msg (Keeper_schedules_loaded (_, _) | Keeper_story_turns_loaded (_, _))

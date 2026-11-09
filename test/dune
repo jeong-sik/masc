@@ -5180,6 +5180,7 @@
 (include stanzas/test_tui_execute_stream.inc)
 (include stanzas/test_tui_execute_stream_job.inc)
 (include stanzas/test_tui_execute_stream_http.inc)
+(include stanzas/test_tui_memory_catch_up.inc)
 (include stanzas/test_tui_sse_eof.inc)
 (include stanzas/test_tui_keeper_terminal_state.inc)
 (include stanzas/test_tui_keeper_terminal_stream_state.inc)

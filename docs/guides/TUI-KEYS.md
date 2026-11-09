@@ -442,6 +442,9 @@ and UI admission decision; these are not painted-frame or key-latency evidence.
 | `Ctrl-D` | cycle compact / results / full tool detail |
 | `Ctrl-S` | unfold the running turn's status rows, or fold them back to the progress line |
 | `Ctrl-N` | cycle Memory journal summary / full / hidden |
+| `/memory` | cycle Memory journal summary / full / hidden |
+| `/memory status` | read the selected Keeper's current memory health, including its last processing observation and waiting reason |
+| `/memory sync` | request catch-up on the existing Memory lane, including for a paused Keeper; acceptance does not mean completion |
 | `Ctrl-F` | cycle no clock / inline clock / full timestamp and request id |
 | `Ctrl-O` | preview the newest image or Mermaid diagram; /images lists all; any key returns |
 | `/approve /deny` | type a command and Enter to answer a tool approval |

@@ -87,6 +87,14 @@ val ensure_span_visible : start:int -> stop:int -> height:int -> int -> int
 val ensure_visible : cursor:int -> height:int -> int -> int
 (** The smallest move of [scroll] that keeps [cursor] inside the window. *)
 
+val window_of_heights : heights:int list -> cursor:int -> rows:int -> int -> int * int
+(** {!ensure_visible} for items that take different numbers of lines: item [i]
+    takes the [i]th of [heights] and the window holds [rows] lines. The first
+    item on screen after the smallest move of [scroll] that shows item
+    [cursor] whole, held where the last items still fill the window, and the
+    number of items from it that fit whole. An item taller than the window
+    is not drawn. [(0, 0)] for an empty list or a window of no lines. *)
+
 (** A surface that draws a preview under its list splits the rows it has. The
     split belongs here for the same reason the bound does: the keypress and
     the frame have to work it out the same way. A renderer that shrank its

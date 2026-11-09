@@ -452,7 +452,6 @@ let journal_restore_path = "/api/v1/keepers/hitl/late-approval-restore"
    rewrites rows, so the endpoint reports the documented repair instead of
    pretending the fence is gone. *)
 let handle_journal_restore state request reqd =
-  ignore request;
   let base_path = (Mcp_server.workspace_config state).Workspace.base_path in
   let store = Keeper_late_approval.shared () in
   Keeper_late_approval.restore ~base_path store;

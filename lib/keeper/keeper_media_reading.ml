@@ -302,7 +302,6 @@ let project projector ~needs_projection blocks =
       | Agent_core.Types.File_id _ ->
         Agent_core.Types.text_block (reference_text ~kind ~media_type ~source:"file_id")
       | Agent_core.Types.Stored stored ->
-        ignore block;
         (* The digest names the reading, so the bytes are read from the store
            only when no reading of them exists yet. *)
         let sha = stored.Agent_core.History.sha256 in

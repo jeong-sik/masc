@@ -139,6 +139,11 @@ let record_call_if_known
   then record_call ~source ?assignment_id ~tool_name ~disposition ~duration_ms ()
 ;;
 
+let find_stats tool_name : call_stats option =
+  with_registry_ro (fun () ->
+    Hashtbl.find_opt registry tool_name |> Option.map Atomic.get)
+;;
+
 (** Freeze each per-tool observation before sorting. The comparator and
     downstream renderers cannot observe subsequent counter updates. *)
 let get_stats () : (string * call_stats) list =

@@ -23065,15 +23065,19 @@ let memory_back (state : state) =
         Memory_stays
     | None -> Memory_leaves
 
-let visible_memory_keepers (state : state) =
+(* Only immutable snapshot data enters these projections. Reading state,
+   errors and selection still come from the current state at every call.
+   Retain one answer per domain, rather than a history of private readings. *)
+let memory_keeper_projection :
+    ((Masc.Tui_decode_memory_health.memory_health_snapshot * memory_overview_sort * string)
+     * Masc.Tui_decode_memory_health.memory_keeper_health list) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let project_memory_keepers ~sort ~query snapshot =
   let open Masc.Tui_decode_memory_health in
-  let raw_keepers =
-    match state.memory_health with
-    | None -> []
-    | Some s -> s.mhs_keepers
-  in
+  let raw_keepers = snapshot.mhs_keepers in
   let sorted_keepers =
-    match state.memory_overview_sort with
+    match sort with
     | Mem_overview_facts ->
         List.sort
           (fun (a : Masc.Tui_decode_memory_health.memory_keeper_health) (b : Masc.Tui_decode_memory_health.memory_keeper_health) ->
@@ -23113,16 +23117,29 @@ let visible_memory_keepers (state : state) =
           (fun a b -> String.compare a.mkh_keeper_id b.mkh_keeper_id)
           raw_keepers
   in
-  let query = memory_overview_query state in
-    if query = "" then sorted_keepers
-    else
-      List.filter
-        (fun k ->
-          Masc_tui_pick_list.lowercase_contains ~needle:query k.mkh_keeper_id
-          || Masc_tui_pick_list.lowercase_contains ~needle:query (memory_state_label (memory_state k)))
-        sorted_keepers
+  if query = "" then sorted_keepers
+  else
+    List.filter
+      (fun k ->
+        Masc_tui_pick_list.lowercase_contains ~needle:query k.mkh_keeper_id
+        || Masc_tui_pick_list.lowercase_contains ~needle:query (memory_state_label (memory_state k)))
+      sorted_keepers
 
-
+let visible_memory_keepers (state : state) =
+  match state.memory_health with
+  | None ->
+      Domain.DLS.set memory_keeper_projection None;
+      []
+  | Some snapshot ->
+      let sort = state.memory_overview_sort in
+      let query = memory_overview_query state in
+      match Domain.DLS.get memory_keeper_projection with
+      | Some ((seen, seen_sort, seen_query), rows)
+          when seen == snapshot && seen_sort = sort && String.equal seen_query query -> rows
+      | Some _ | None ->
+          let rows = project_memory_keepers ~sort ~query snapshot in
+          Domain.DLS.set memory_keeper_projection (Some ((snapshot, sort, query), rows));
+          rows
 
 let selected_memory_keeper (state : state) =
   let rows = visible_memory_keepers state in
@@ -23204,145 +23221,165 @@ let memory_facts_failure (state : state) =
    category, and hiding them under a category filter would read as the store
    losing them. A store that failed to read or has no snapshot contributes
    no rows here; the render names that state in its section header. *)
+let memory_fact_projection :
+    ((Masc.Tui_decode_memory_facts.memory_fact_snapshot * memory_category_filter
+      * memory_sort_order * string * bool) * memory_fact_row list) option Domain.DLS.key =
+  Domain.DLS.new_key (fun () -> None)
+
+let project_memory_facts ~category ~sort ~query ~fleet snapshot : memory_fact_row list =
+  let ordinary =
+    match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
+    | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
+      ->
+        []
+    | Masc.Tui_decode_memory_facts.Memory_store_present store ->
+        let facts =
+          match category with
+          | Category_all -> store.Masc.Tui_decode_memory_facts.mos_facts
+          | Category_ordinary category ->
+              List.filter
+                (fun (fact : Masc.Tui_decode_memory_facts.memory_fact) ->
+                  fact.Masc.Tui_decode_memory_facts.mf_category = category)
+                store.Masc.Tui_decode_memory_facts.mos_facts
+          | Category_source | Category_dropped -> []
+        in
+        List.map (fun fact -> Memory_row_fact fact) facts
+  in
+  let source_rows, invalidation_rows =
+    match snapshot.Masc.Tui_decode_memory_facts.mfs_source with
+    | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
+      ->
+        ([], [])
+    | Masc.Tui_decode_memory_facts.Memory_store_present store ->
+        let src =
+          match category with
+          | Category_all | Category_source ->
+              List.map
+                (fun fact -> Memory_row_source_fact fact)
+                store.Masc.Tui_decode_memory_facts.mss_facts
+          | Category_ordinary _ | Category_dropped -> []
+        in
+        let inv =
+          match category with
+          | Category_all | Category_dropped ->
+              List.map
+                (fun row -> Memory_row_invalidation row)
+                store.Masc.Tui_decode_memory_facts.mss_invalidations
+          | Category_ordinary _ | Category_source -> []
+        in
+        (src, inv)
+  in
+  let all_rows = ordinary @ source_rows @ invalidation_rows in
+  let filtered_rows =
+    if query = "" then all_rows
+    else
+      List.filter
+        (fun row ->
+          Masc_tui_pick_list.lowercase_contains ~needle:query
+            (memory_fact_search_text ~fleet row))
+        all_rows
+  in
+  (match sort with
+   | Sort_recency ->
+       List.sort
+         (fun a b ->
+           let ts = function
+             | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_last_seen
+             | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_first_seen
+             | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_invalidated_at
+           in
+           Stdlib.compare (ts b) (ts a))
+         filtered_rows
+   | Sort_last_retrieved ->
+       (* Facts by their last retrieval, newest first. A fact never
+          retrieved, then the source and dropped rows, follow in their
+          recency order: the record says nothing about them, so nothing
+          is invented. *)
+       List.sort
+         (fun a b ->
+           let key = function
+             | Memory_row_fact f ->
+               (match f.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retrieval with
+                | Masc.Tui_decode_memory_facts.Retrieved { last_at; _ } -> (0, last_at)
+                | Masc.Tui_decode_memory_facts.Never_retrieved -> (1, f.Masc.Tui_decode_memory_facts.mf_last_seen))
+             | Memory_row_source_fact f -> (2, f.Masc.Tui_decode_memory_facts.msf_first_seen)
+             | Memory_row_invalidation f -> (2, f.Masc.Tui_decode_memory_facts.mi_invalidated_at)
+           in
+           let g_a, t_a = key a in
+           let g_b, t_b = key b in
+           if g_a <> g_b then Stdlib.compare g_a g_b else Stdlib.compare t_b t_a)
+         filtered_rows
+   | Sort_retrieved_count ->
+       List.sort
+         (fun a b ->
+           let key = function
+             | Memory_row_fact f ->
+               ( 0
+               , (match f.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retrieval with
+                  | Masc.Tui_decode_memory_facts.Retrieved { count; _ } -> count
+                  | Masc.Tui_decode_memory_facts.Never_retrieved -> 0)
+               , f.Masc.Tui_decode_memory_facts.mf_last_seen )
+             | Memory_row_source_fact f -> (1, 0, f.Masc.Tui_decode_memory_facts.msf_first_seen)
+             | Memory_row_invalidation f -> (1, 0, f.Masc.Tui_decode_memory_facts.mi_invalidated_at)
+           in
+           let g_a, n_a, t_a = key a in
+           let g_b, n_b, t_b = key b in
+           if g_a <> g_b then Stdlib.compare g_a g_b
+           else if n_a <> n_b then Stdlib.compare n_b n_a
+           else Stdlib.compare t_b t_a)
+         filtered_rows
+   | Sort_category ->
+       List.sort
+         (fun a b ->
+           let cat = function
+             | Memory_row_fact f ->
+                 (0, Memory_category.category_to_string f.Masc.Tui_decode_memory_facts.mf_category)
+             | Memory_row_source_fact _ -> (1, "source")
+             | Memory_row_invalidation _ -> (2, "dropped")
+           in
+           let p_a, c_a = cat a in
+           let p_b, c_b = cat b in
+           let c = String.compare c_a c_b in
+           if c <> 0 then c
+           else if p_a <> p_b then Stdlib.compare p_a p_b
+           else
+             let claim = function
+               | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_claim
+               | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_claim
+               | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_reason
+             in
+             String.compare (claim a) (claim b))
+         filtered_rows
+   | Sort_claim ->
+       List.sort
+         (fun a b ->
+           let claim = function
+             | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_claim
+             | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_claim
+             | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_reason
+           in
+           String.compare (claim a) (claim b))
+         filtered_rows)
+
 let memory_fact_rows (state : state) : memory_fact_row list =
   match memory_facts_snapshot state with
-  | None -> []
+  | None ->
+      Domain.DLS.set memory_fact_projection None;
+      []
   | Some snapshot ->
-      let ordinary =
-        match snapshot.Masc.Tui_decode_memory_facts.mfs_ordinary with
-        | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
-          ->
-            []
-        | Masc.Tui_decode_memory_facts.Memory_store_present store ->
-            let facts =
-              match state.memory_facts_category with
-              | Category_all -> store.Masc.Tui_decode_memory_facts.mos_facts
-              | Category_ordinary category ->
-                  List.filter
-                    (fun (fact : Masc.Tui_decode_memory_facts.memory_fact) ->
-                      fact.Masc.Tui_decode_memory_facts.mf_category = category)
-                    store.Masc.Tui_decode_memory_facts.mos_facts
-              | Category_source | Category_dropped -> []
-            in
-            List.map (fun fact -> Memory_row_fact fact) facts
-      in
-      let source_rows, invalidation_rows =
-        match snapshot.Masc.Tui_decode_memory_facts.mfs_source with
-        | Masc.Tui_decode_memory_facts.Memory_store_read_error _ | Masc.Tui_decode_memory_facts.Memory_store_absent
-          ->
-            ([], [])
-        | Masc.Tui_decode_memory_facts.Memory_store_present store ->
-            let src =
-              match state.memory_facts_category with
-              | Category_all | Category_source ->
-                  List.map
-                    (fun fact -> Memory_row_source_fact fact)
-                    store.Masc.Tui_decode_memory_facts.mss_facts
-              | Category_ordinary _ | Category_dropped -> []
-            in
-            let inv =
-              match state.memory_facts_category with
-              | Category_all | Category_dropped ->
-                  List.map
-                    (fun row -> Memory_row_invalidation row)
-                    store.Masc.Tui_decode_memory_facts.mss_invalidations
-              | Category_ordinary _ | Category_source -> []
-            in
-            (src, inv)
-      in
-      let all_rows = ordinary @ source_rows @ invalidation_rows in
+      let category = state.memory_facts_category in
+      let sort = state.memory_facts_sort in
       let query = memory_search_query state in
       let fleet = memory_facts_is_fleet state in
-      let filtered_rows =
-        if query = "" then all_rows
-        else
-          List.filter
-            (fun row ->
-              Masc_tui_pick_list.lowercase_contains ~needle:query
-                (memory_fact_search_text ~fleet row))
-            all_rows
-      in
-      (match state.memory_facts_sort with
-       | Sort_recency ->
-           List.sort
-             (fun a b ->
-               let ts = function
-                 | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_last_seen
-                 | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_first_seen
-                 | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_invalidated_at
-               in
-               Stdlib.compare (ts b) (ts a))
-             filtered_rows
-       | Sort_last_retrieved ->
-           (* Facts by their last retrieval, newest first. A fact never
-              retrieved, then the source and dropped rows, follow in their
-              recency order: the record says nothing about them, so nothing
-              is invented. *)
-           List.sort
-             (fun a b ->
-               let key = function
-                 | Memory_row_fact f ->
-                   (match f.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retrieval with
-                    | Masc.Tui_decode_memory_facts.Retrieved { last_at; _ } -> (0, last_at)
-                    | Masc.Tui_decode_memory_facts.Never_retrieved -> (1, f.Masc.Tui_decode_memory_facts.mf_last_seen))
-                 | Memory_row_source_fact f -> (2, f.Masc.Tui_decode_memory_facts.msf_first_seen)
-                 | Memory_row_invalidation f -> (2, f.Masc.Tui_decode_memory_facts.mi_invalidated_at)
-               in
-               let g_a, t_a = key a in
-               let g_b, t_b = key b in
-               if g_a <> g_b then Stdlib.compare g_a g_b else Stdlib.compare t_b t_a)
-             filtered_rows
-       | Sort_retrieved_count ->
-           List.sort
-             (fun a b ->
-               let key = function
-                 | Memory_row_fact f ->
-                   ( 0
-                   , (match f.Masc.Tui_decode_memory_facts.mf_events.Masc.Tui_decode_memory_facts.mfe_retrieval with
-                      | Masc.Tui_decode_memory_facts.Retrieved { count; _ } -> count
-                      | Masc.Tui_decode_memory_facts.Never_retrieved -> 0)
-                   , f.Masc.Tui_decode_memory_facts.mf_last_seen )
-                 | Memory_row_source_fact f -> (1, 0, f.Masc.Tui_decode_memory_facts.msf_first_seen)
-                 | Memory_row_invalidation f -> (1, 0, f.Masc.Tui_decode_memory_facts.mi_invalidated_at)
-               in
-               let g_a, n_a, t_a = key a in
-               let g_b, n_b, t_b = key b in
-               if g_a <> g_b then Stdlib.compare g_a g_b
-               else if n_a <> n_b then Stdlib.compare n_b n_a
-               else Stdlib.compare t_b t_a)
-             filtered_rows
-       | Sort_category ->
-           List.sort
-             (fun a b ->
-               let cat = function
-                 | Memory_row_fact f ->
-                     (0, Memory_category.category_to_string f.Masc.Tui_decode_memory_facts.mf_category)
-                 | Memory_row_source_fact _ -> (1, "source")
-                 | Memory_row_invalidation _ -> (2, "dropped")
-               in
-               let p_a, c_a = cat a in
-               let p_b, c_b = cat b in
-               let c = String.compare c_a c_b in
-               if c <> 0 then c
-               else if p_a <> p_b then Stdlib.compare p_a p_b
-               else
-                 let claim = function
-                   | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_claim
-                   | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_claim
-                   | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_reason
-                 in
-                 String.compare (claim a) (claim b))
-             filtered_rows
-       | Sort_claim ->
-           List.sort
-             (fun a b ->
-               let claim = function
-                 | Memory_row_fact f -> f.Masc.Tui_decode_memory_facts.mf_claim
-                 | Memory_row_source_fact f -> f.Masc.Tui_decode_memory_facts.msf_claim
-                 | Memory_row_invalidation f -> f.Masc.Tui_decode_memory_facts.mi_reason
-               in
-               String.compare (claim a) (claim b))
-             filtered_rows)
+      match Domain.DLS.get memory_fact_projection with
+      | Some ((seen, seen_category, seen_sort, seen_query, seen_fleet), rows)
+          when seen == snapshot && seen_category = category && seen_sort = sort
+            && String.equal seen_query query && seen_fleet = fleet -> rows
+      | Some _ | None ->
+          let rows = project_memory_facts ~category ~sort ~query ~fleet snapshot in
+          Domain.DLS.set memory_fact_projection
+            (Some ((snapshot, category, sort, query, fleet), rows));
+          rows
 
 let toggle_memory_facts_categories ~cols (state : state) =
   match Masc_tui_roster_pane.toggle_hidden

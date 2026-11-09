@@ -15,6 +15,14 @@ val output_requirement : Agent_core.Exact_output.output_requirement
 
 type prepared_transport =
   | Http_attempt of Agent_core.Exact_output.flow_attempt * Registry.resolved_lane
+  | Http_held of
+      { slot_id : string
+      ; until : float
+      }
+      (** The lane has no CLI slot and every HTTP slot waits for a time its
+          provider stated (RFC-exact-lane-waits-for-a-stated-reset). [until]
+          is the earliest such time, Unix epoch seconds, and [slot_id] the
+          slot it belongs to. Nothing is called. *)
   | Cli_only
 
 type prepared_flow =

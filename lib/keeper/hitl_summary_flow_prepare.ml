@@ -26,6 +26,10 @@ let output_requirement =
 
 type prepared_transport =
   | Http_attempt of Exact_output.flow_attempt * Registry.resolved_lane
+  | Http_held of
+      { slot_id : string
+      ; until : float
+      }
   | Cli_only
 
 type prepared_flow =
@@ -104,7 +108,7 @@ let prepare_flow
   (* Which admitted exact-output slot this Keeper uses first for this lane.
      Only here: the readiness check below asks whether the lane can run at all,
      which is a workspace question with no Keeper in it. *)
-  let* resolved =
+  let* (ordered : Runtime_exact_lane_backpressure.ordered) =
     Keeper_exact_lane_preference.apply
       ~base_path:entry.Keeper_approval_queue_rules_types.audit_base_path
       ~keeper_name:entry.Keeper_approval_queue_rules_types.keeper_name
@@ -114,10 +118,25 @@ let prepare_flow
       "HITL exact-lane preference unavailable: " ^ detail)
     |> Result.map Runtime_exact_lane_backpressure.order
   in
+  let resolved = ordered.lane in
   let* transport =
-    match resolved.selected_slots, resolved.cli_slots with
-    | [], _ :: _ -> Ok Cli_only
-    | _ ->
+    match resolved.selected_slots, resolved.cli_slots, ordered.held_http with
+    | [], _ :: _, _ -> Ok Cli_only
+    | [], [], (first : Runtime_exact_lane_backpressure.held_slot) :: rest ->
+      (* Every HTTP slot waits for a time its provider stated. This is not a
+         lane without slots: the worker settles it as those slots, called and
+         refused for their accounts, would have
+         (RFC-exact-lane-waits-for-a-stated-reset R5). *)
+      let earliest =
+        List.fold_left
+          (fun (earliest : Runtime_exact_lane_backpressure.held_slot)
+               (held : Runtime_exact_lane_backpressure.held_slot) ->
+             if held.until < earliest.until then held else earliest)
+          first
+          rest
+      in
+      Ok (Http_held { slot_id = earliest.slot_id; until = earliest.until })
+    | _ :: _, _, _ | [], [], [] ->
       let* snapshot = snapshot_resolved_lane
         ~messages:(messages_for_summary ~system_prompt ~context_bundle) resolved in
       Exact_output.start_flow

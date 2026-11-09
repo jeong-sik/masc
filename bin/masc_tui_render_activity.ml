@@ -11,6 +11,8 @@ module Message_layout = Masc_tui_message_layout
 module Rows = Masc_tui_rows
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Render_schedule = Masc_tui_render_schedule
+module Page_line = Masc_tui_page_line
+module Page_reading = Masc_tui_page_reading
 
 let system_log_level_mark : Masc.Tui_decode.system_log_level -> string = function
   | System_debug -> "\xc2\xb7"
@@ -19,18 +21,28 @@ let system_log_level_mark : Masc.Tui_decode.system_log_level -> string = functio
   | System_error -> "\xc3\x97"
   | System_level_unknown _ -> "?"
 
-let system_log_detail_field ~width ~style label value =
-  let prefix = "  " ^ label ^ ": " in
-  let continuation = String.make (Message_layout.display_width prefix) ' ' in
-  match
-    Message_layout.wrap_words
-      ~max_cells:(max 1 (width - Message_layout.display_width prefix))
-      (Terminal_text.single_line value)
-  with
-  | [] -> [ style, prefix ^ Masc_tui_theme.Glyph.no_value ]
-  | first :: rest ->
-      (style, prefix ^ first)
-      :: List.map (fun line -> style, continuation ^ line) rest
+(* How loudly a level reads on the detail page. The list draws the same four
+   levels through [system_log_level_style]. *)
+let system_log_level_tone : Masc.Tui_decode.system_log_level -> Page_line.tone = function
+  | System_debug -> Page_line.Quiet
+  | System_info -> Page_line.Plain
+  | System_warn -> Page_line.Attention
+  | System_error -> Page_line.Failure
+  | System_level_unknown _ -> Page_line.Plain
+
+(* A field the entry did not record reads as the empty mark, receded, so a
+   missing value cannot be taken for a value that happens to be a dash. *)
+let system_log_missing_fact label =
+  Page_line.fact ~tone:Page_line.Quiet label Masc_tui_theme.Glyph.no_value
+
+let system_log_fact label value =
+  if String.equal (String.trim (Terminal_text.single_line value)) "" then
+    system_log_missing_fact label
+  else Page_line.fact label value
+
+let system_log_optional_fact label = function
+  | Some value -> system_log_fact label value
+  | None -> system_log_missing_fact label
 
 let system_logs_status state = match System_logs_view.source state.system_logs with
   | Server -> "Server  " ^ connection_badge state
@@ -51,51 +63,45 @@ let system_log_detail_lines (state : state) ~seq ~width =
         "  This log entry is no longer present in the retained page; reload or return to the list."
       ]
   | Some entry ->
-      let level_style = system_log_level_style entry.sl_level in
-      let keeper = Option.value ~default:"system" entry.sl_keeper in
-      let turn =
-        Option.map string_of_int entry.sl_turn
-        |> Option.value ~default:Masc_tui_theme.Glyph.no_value
+      let core_facts =
+        [ Page_line.fact ~tone:(system_log_level_tone entry.sl_level) "Level"
+            (system_log_level_mark entry.sl_level ^ " "
+             ^ String.trim (Masc.Tui_decode.system_log_level_label entry.sl_level))
+        ; system_log_fact "Message" entry.sl_message
+        ; system_log_fact "Timestamp" entry.sl_ts
+        ; system_log_optional_fact "Category" entry.sl_category
+        ]
       in
-      let core_fields =
-        system_log_detail_section ~first:true
-          "1. 로그 메시지 · 핵심 상태 (Message & Severity)"
-        @ system_log_detail_field ~width ~style:level_style "Level"
-            (Masc.Tui_decode.system_log_level_label entry.sl_level |> String.trim)
-        @ system_log_detail_field ~width ~style:Ansi.reset "Message"
-            entry.sl_message
-        @ system_log_detail_field ~width ~style:Ansi.reset "Timestamp" entry.sl_ts
-        @ system_log_detail_field ~width ~style:Ansi.reset "Category"
-            (system_log_category_text entry)
-      in
-      let metadata_fields =
-        system_log_detail_section "2. 발생 위치 · 메타데이터 (Origin & Context)"
-        @ system_log_detail_field ~width ~style:Ansi.dim "Keeper" keeper
-        @ system_log_detail_field ~width ~style:Ansi.dim "Turn" turn
-        @ system_log_detail_field ~width ~style:Ansi.dim "Module" entry.sl_module
-        @ system_log_detail_field ~width ~style:Ansi.dim "Source"
+      let metadata_facts =
+        [ system_log_fact "Keeper" (Option.value ~default:"system" entry.sl_keeper)
+        ; system_log_optional_fact "Turn" (Option.map string_of_int entry.sl_turn)
+        ; system_log_fact "Module" entry.sl_module
+        ; system_log_fact "Source"
             (Masc.Tui_decode.system_log_source_label entry.sl_source)
-        @ system_log_detail_field ~width ~style:Ansi.dim "Origin"
+        ; system_log_fact "Origin"
             (System_logs_view.source_label (System_logs_view.source state.system_logs))
-        @ system_log_detail_field ~width ~style:Ansi.dim "Sequence"
-            (string_of_int entry.sl_seq)
+        ; system_log_fact "Sequence" (string_of_int entry.sl_seq)
+        ]
       in
+      (* Both blocks share one label column, so the values of the whole page
+         start at one cell and the page reads as one table. *)
+      let label_cells = Page_reading.widest_label_cells (core_facts @ metadata_facts) in
+      let max_cells = max 1 (width - String.length Page_reading.detail_indent) in
+      let facts_rows facts = Page_reading.rows ~label_cells ~max_cells facts in
       let details =
-        (* One name for the section, whichever branch draws it: the empty
-           branch called it "Details" and the other "Structured details", so
-           the same part of the pane answered to two names depending on
-           whether it had anything in it. Caps for the heading, the way every
-           other detail pane spells one. *)
-        system_log_detail_section "3. 구조화 상세 (STRUCTURED DETAILS)"
-        @ (match entry.sl_details with
-           | `Null -> [ Ansi.dim, "  STRUCTURED DETAILS  none" ]
-           | json ->
-               let source = Yojson.Safe.pretty_to_string json in
-               (Ansi.bold, "  STRUCTURED DETAILS")
-               :: (document_json ~width source
-                   |> List.map (fun line -> Ansi.reset, "  " ^ line)))
+        match entry.sl_details with
+        | `Null -> Page_reading.rows ~max_cells [ Page_line.note ~tone:Page_line.Quiet "none" ]
+        | json ->
+            document_json ~width (Yojson.Safe.pretty_to_string json)
+            |> List.map (fun line -> Ansi.reset, "  " ^ line)
       in
-      core_fields @ metadata_fields @ details
+      system_log_detail_section ~first:true
+        "1. 로그 메시지 · 핵심 상태 (Message & Severity)"
+      @ facts_rows core_facts
+      @ system_log_detail_section "2. 발생 위치 · 메타데이터 (Origin & Context)"
+      @ facts_rows metadata_facts
+      @ system_log_detail_section "3. 구조화 상세 (STRUCTURED DETAILS)"
+      @ details
 
 let render_system_log_detail (state : state) seq =
   let terminal_rows, cols = get_terminal_size () in

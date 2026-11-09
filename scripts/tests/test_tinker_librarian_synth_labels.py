@@ -9,14 +9,13 @@ as training targets (teacher_sample.py).
 
 A label is a Memory decision MASC accepts: the answer it asks for passes
 `admission_validator` for the prompt `synth_render` makes from the request, and
-scores right on every count.
-`synth_generate` imports the Tinker caller, which imports openai, so this file
-runs with `uv run`.
+scores right on every count. Requests and answers come from
+`tinker_librarian_synth_fixtures.py`. `teacher_sample` imports the Tinker caller,
+which imports openai, so this file runs with `uv run`.
 """
 
 from __future__ import annotations
 
-import datetime as dt
 import itertools
 import json
 import sys
@@ -25,118 +24,25 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "tinker" / "librarian"))
 
-import admission_request as R
 import admission_result as AR
 import admission_validator as AV
 import eval_admission as V
 import memory_scores as M
-import synth_generate as G
-import synth_render as SR
 import synth_spec as S
 import teacher_sample as T
-
-KEEPER = S.KeeperProfile("docs-gardener", "synth-docs-gardener", "문서 사이트를 돌보는 Keeper.", "가상의 문서 저장소.",
-                         ("doc_links", "style_rules"), S.GoalDraft("깨진 링크 줄이기", "깨진 링크 수", "0"))
-NO_EVIDENCE: dict[str, object] = {"conversation": [], "tools": [], "counterpart": False, "task_contexts": False}
-KINDS = tuple(S.CandidateKind)
-CANDIDATE_SEEN = dt.datetime(2026, 11, 7, 9, 0, tzinfo=dt.UTC).timestamp()
-
-
-def fact(index: int, *, stale: bool = False, duplicate_of: str | None = None) -> S.MemoryFact:
-    seen = dt.datetime(2026, 10, 1, tzinfo=dt.UTC) + dt.timedelta(hours=index)
-    return S.MemoryFact(f"m{index}", f"기억 {index}: 문서 링크를 고칠 때 지키는 규칙 {index}번.", "doc_links", None,
-                        seen.strftime("%Y-%m-%dT%H:%M:%SZ"), stale, duplicate_of)
-
-
-def candidate(index: int, kind: S.CandidateKind, target: str | None) -> S.Candidate:
-    return S.Candidate(f"memory-admission-{index:032x}", index, f"후보 {index}: 이번 턴의 관측 {index}번.", "doc_links",
-                       CANDIDATE_SEEN + index, None, f"trace-{index:013d}-00000", kind, target)
-
-
-def request(facts: tuple[S.MemoryFact, ...], candidates: tuple[S.Candidate, ...]) -> S.SynthRequest:
-    return S.SynthRequest("eval-docs-gardener-00-000", KEEPER, facts, S.NoTask(), candidates)
-
-
-# A memory with every plant: m4 is stale, m6 restates m5. Targets come from m1, m2 and m3.
-PLANTED = (fact(1), fact(2), fact(3), fact(4, stale=True), fact(5), fact(6, duplicate_of="m5"))
-TARGETS = ("m1", "m2", "m3")
-
-
-def candidates_of(kinds: tuple[S.CandidateKind, ...]) -> tuple[S.Candidate, ...]:
-    """Candidates of these kinds; each one that needs a target gets its own."""
-    free = iter(TARGETS)
-    out: list[S.Candidate] = []
-    for index, kind in enumerate(kinds, start=1):
-        match kind:
-            case S.CandidateKind.CORRECTION | S.CandidateKind.COMPLEMENT | S.CandidateKind.PARAPHRASE:
-                out.append(candidate(index, kind, next(free)))
-            case S.CandidateKind.NEW_DURABLE | S.CandidateKind.TRANSIENT:
-                out.append(candidate(index, kind, None))
-    return tuple(out)
-
-
-def claim_json(claim: str, *, supersedes: str | None = None, absorbs: tuple[str, ...] = ()) -> dict[str, object]:
-    return {"claim": claim, "category": "doc_links", "board_post_id": None, "board_comment_id": None,
-            "supersedes": supersedes, "absorbs": list(absorbs), "evidence": NO_EVIDENCE}
-
-
-def drop_json(memory_id: str, reason: str) -> dict[str, object]:
-    return {"memory_id": memory_id, "reason": reason}
-
-
-def merged(target: S.MemoryFact, c: S.Candidate) -> str:
-    return target.claim + " " + c.claim
-
-
-type Judged = tuple[str, S.Outcome, str | None]
-
-
-def answer_text(judgments: tuple[Judged, ...], *, claims: tuple[dict[str, object], ...] = (),
-                dropped: tuple[str, ...] = ()) -> str:
-    """An admission answer whose support is every candidate that can give it."""
-    return json.dumps({"memory": {"new_claims": list(claims), "dropped": [drop_json(m, "근거") for m in dropped],
-                                  "working_state": None, "working_contexts": []},
-                       "candidates": [{"request_id": rid, "outcome": outcome, "memory_claim": claim, "reason": "근거"}
-                                      for rid, outcome, claim in judgments],
-                       "change_support": [rid for rid, outcome, _ in judgments if S.can_support(outcome)]},
-                      ensure_ascii=False)
-
-
-def label_answer(req: S.SynthRequest) -> str:
-    """The answer the label asks for. A complement's claim joins its target and the candidate;
-    a duplicate pair keeps its first fact, restated byte for byte with both IDs in `absorbs`."""
-    label = S.label_of(req)
-    by_id = {f.memory_id: f for f in req.facts}
-    by_request = {c.request_id: c for c in req.candidates}
-    judgments: list[Judged] = []
-    claims: list[dict[str, object]] = []
-    for cl in label.candidates:
-        c = by_request[cl.request_id]
-        match cl.outcome:
-            case "incorporated":
-                claim = merged(by_id[cl.absorbs], c) if cl.absorbs is not None else c.claim
-                claims.append(claim_json(claim, supersedes=cl.supersedes,
-                                         absorbs=(cl.absorbs,) if cl.absorbs is not None else ()))
-                judgments.append((cl.request_id, cl.outcome, claim))
-            case "already_represented":
-                judgments.append((cl.request_id, cl.outcome, cl.already_claim))
-            case "not_durable":
-                judgments.append((cl.request_id, cl.outcome, None))
-    claims += [claim_json(by_id[kept].claim, absorbs=(kept, gone)) for kept, gone in label.duplicates]
-    corrected = tuple(cl.supersedes for cl in label.candidates if cl.supersedes is not None)
-    return answer_text(tuple(judgments), claims=tuple(claims), dropped=corrected + tuple(sorted(label.planted_stale)))
-
-
-def prompt_of(req: S.SynthRequest) -> R.AdmissionPrompt:
-    return SR.prompt_of(json.loads(G.request_json(req))["request"])
-
-
-def accepted(req: S.SynthRequest, answer: str) -> AR.AdmissionAnswer:
-    result = AV.validate(prompt_of(req), answer)
-    if isinstance(result, AV.Invalid):
-        raise AssertionError(f"refused: {result.violations}")
-    return result.answer
-
+from tinker_librarian_synth_fixtures import (
+    KINDS,
+    PLANTED,
+    Judged,
+    accepted,
+    answer_text,
+    candidates_of,
+    claim_json,
+    label_answer,
+    merged,
+    prompt_of,
+    request,
+)
 
 class LabelTest(unittest.TestCase):
     def test_transient_candidates_alone_leave_the_planted_facts(self) -> None:
@@ -266,18 +172,6 @@ class MemoryStateTest(unittest.TestCase):
         req, c = one(S.CandidateKind.TRANSIENT)
         s = scored(req, answer_text(((c.request_id, "already_represented", PLANTED[1].claim),)))
         self.assertEqual((s["correct"], s["state_correct"], s["added"], s["removed"]), (0, 1, 0, 0))
-
-
-class ReadBackTest(unittest.TestCase):
-    def test_a_written_label_reads_back_and_others_do_not(self) -> None:
-        req = request(PLANTED, candidates_of((S.CandidateKind.COMPLEMENT, S.CandidateKind.PARAPHRASE)))
-        self.assertEqual(S.label_from_json(json.loads(G.request_json(req))["label"]), S.label_of(req))
-        earlier = {"candidates": [{"request_id": "r", "outcome": "not_durable", "supersedes": None,
-                                   "already_claim": None}], "planted_stale": []}
-        mismatched = {"candidates": [{"request_id": "r", "outcome": "not_durable", "supersedes": "m1",
-                                      "absorbs": None, "already_claim": None}], "planted_stale": [], "duplicates": []}
-        self.assertIsNone(S.label_from_json(earlier))
-        self.assertIsNone(S.label_from_json(mismatched))
 
 
 def teacher_answer(req: S.SynthRequest, *, absorbs: tuple[str, ...], pair: bool, dropped: tuple[str, ...]) -> str:

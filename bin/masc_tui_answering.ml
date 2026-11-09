@@ -82,8 +82,13 @@ let elapsed_text ~now started_at = duration_text (now -. started_at)
    status colour; [rest] is the detail after it, receded. The band used to
    be drawn in the status colour whole, five rows of it, and a screen where
    every word is the colour of a warning has no warning on it. *)
+(* The source-cell extent of a moving mark from the beginning of its row.
+   This metadata survives fitting without inspecting glyph spellings. *)
+type motion = Still | Moving of int
+
 type chat_activity_row =
   { lead : string
+  ; motion : motion
   ; rest : string
   ; keys : string
         (** What a key does about this row -- " · Esc stops it · /queue" on
@@ -105,7 +110,7 @@ let chat_activity_row_text row = row.lead ^ row.rest ^ row.keys
    carries only activity and the keys that act on it. *)
 let chat_activity ?(frame = -1) ?(stop_keys = "") ?(show_timing = true)
     ~now ~keeper_name ~error rows =
-  let plain text = { lead = text; rest = ""; keys = "" } in
+  let plain text = { lead = text; motion = Still; rest = ""; keys = "" } in
   let stale = match error with None -> [] | Some detail -> [plain ("Activity unavailable: " ^ detail)] in
   match List.find_opt (fun (row : Tui_decode.keeper_turn_row) ->
     String.equal row.ktr_keeper_name keeper_name) rows with
@@ -134,6 +139,7 @@ let chat_activity ?(frame = -1) ?(stop_keys = "") ?(show_timing = true)
     stale
     @ [ { lead = Printf.sprintf "%s %s%s%s" mark observed (lane_word lane)
                    (if show_timing then " · " ^ elapsed_text ~now started_at_unix else "")
+        ; motion = (match error with None -> Moving (Masc_tui_message_layout.display_width mark) | Some _ -> Still)
         ; rest = " · " ^ Masc.Tui_terminal_text.sanitize_terminal_text status
         ; keys = stop_keys
         } ]

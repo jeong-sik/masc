@@ -30296,7 +30296,8 @@ let main
   let machine_input_timeout_s = 0.3 in
   let roster_marquee_target = ref None in
   let roster_marquee_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
-  let activity_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
+  let activity_tick = Render_schedule.Activity_tick.create
+      ~motion_interval_ns:Masc_tui_types.motion_step_ns ~now_ns:(Mtime_clock.elapsed_ns ()) in
   let emblem_last_step_ns = ref (Mtime_clock.elapsed_ns ()) in
   (* A datum that is fetched only while its surface is open has nothing to draw
      the moment that surface opens, and waiting out the refresh interval would
@@ -42550,22 +42551,10 @@ Use relative paths for resources already held in the package. -->
           else state.roster_marquee_frame + 1;
         Render_schedule.request render_schedule Render_schedule.Background
       end;
-      (* The running-turn mark, advanced on its own clock rather than the
-         poll's. The poll is two seconds; a mark that changed on it would
-         read as a stall rather than as work. Nothing is fetched here -- the
-         frame is derived and the presenter writes only the cells that
-         differ, so a repaint that changes one glyph costs one glyph.
-
-         It runs only while a turn is running, and returns to [-1] when none
-         is. A screen with nothing to say stops repainting entirely, which
-         is also what makes the elapsed seconds honest: they tick because
-         this is what redraws them. *)
-      (* Every surface that draws a moving mark, not just the first one. A
-         lane can be running while no keeper turn is, and a frame counter
-         that only watched turns would leave that mark frozen on whatever
-         quarter it stopped at -- which reads as a lane stuck there. *)
-      (* Status and container-log reads have separate lifetimes. A log read
-         still needs repaints after the Sandbox status has already arrived. *)
+      (* Only a moving mark emitted by the top frame needs the motion
+         interval. Hidden work still keeps a whole-second clock for visible
+         elapsed/read/age notices, including overlays and the Activity pane.
+         About and roster marquee keep their independent clocks above/below. *)
       let awaiting_detail_read =
         state.view = Keepers Keeper_detail
         && (match Masc_tui_types.selected_keeper state with
@@ -42579,24 +42568,19 @@ Use relative paths for resources already held in the package. -->
           ~live_transcript:(Option.is_some state.msg_live)
           ~lanes:state.standalone_lanes ~awaiting_detail_read
       in
-      if not anything_running then begin
-        if state.activity_frame >= 0 then begin
-          state.activity_frame <- -1;
-          Render_schedule.request render_schedule Render_schedule.Background
-        end
-      end
-      else if
-        Int64.compare
-          (Int64.sub now_ns !activity_last_step_ns)
-          Masc_tui_types.motion_step_ns
-        >= 0
-      then begin
-        activity_last_step_ns := now_ns;
-        state.activity_frame <-
-          (if state.activity_frame < 0 || state.activity_frame = max_int then 0
-           else state.activity_frame + 1);
-        Render_schedule.request render_schedule Render_schedule.Background
-      end;
+      (match Render_schedule.Activity_tick.take activity_tick ~now_ns
+          ~running:anything_running
+          ~motion_visible:(Render_schedule.Activity_tick.motion_visible ()
+            && not state.image_open && not state.msx_open) with
+       | Quiet -> ()
+       | Stop ->
+           state.activity_frame <- -1;
+           Render_schedule.request render_schedule Render_schedule.Background
+       | Advance ->
+           state.activity_frame <-
+             (if state.activity_frame < 0 || state.activity_frame = max_int then 0
+              else state.activity_frame + 1);
+           Render_schedule.request render_schedule Render_schedule.Background);
       (* /about has a finite arrival. A closed overlay and a final frame
          schedule no further candle work, even when the previous frame drew
          motion immediately before the reader left. *)
@@ -42697,6 +42681,7 @@ Use relative paths for resources already held in the package. -->
               last frame comes down rather than float over the picture.
               Closing the picture repaints in full, and the candle steps
               again from that frame. *)
+           Render_schedule.Activity_tick.begin_frame ();
            Masc_tui_emblem_screen.begin_frame ();
            Masc_tui_portrait_view.begin_frame ();
            Masc_tui_message_layout.begin_frame ();

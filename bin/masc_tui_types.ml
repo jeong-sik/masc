@@ -25849,7 +25849,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
               ^ Masc_tui_keeper_chat_projection.terminal_safe_text
                   (Masc_tui_keeper_chat_transcript.execution_id entry.log.tl_transcript)
               ^ " · in progress"
-          ; keys = "" } ]
+          ; motion = Masc_tui_answering.Still; keys = "" } ]
       | None ->
         Masc_tui_answering.chat_activity ~frame:state.activity_frame
           ~show_timing:(keeper_message_timing_visible state)
@@ -25870,7 +25870,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
         | Rechecking_delivery -> awaiting, queued, rechecking + 1)
         (0, 0, 0) waiting_items in
     let retained = keeper_input_retained state keeper_name in
-    let plain text = { Masc_tui_answering.lead = text; rest = ""; keys = "" } in
+    let plain text = { Masc_tui_answering.lead = text; rest = ""; motion = Masc_tui_answering.Still; keys = "" } in
     let queue_rows =
       match waiting_items with
       | [] -> []
@@ -25893,14 +25893,14 @@ let keeper_message_diagnostic_activity_rows (state : state) =
               | Next | Next_without_auto_priority -> "" in
             [ { Masc_tui_answering.lead = "Local NEXT" ^ intent_str
               ; rest = Printf.sprintf ": \"%s\"" preview
-              ; keys = "" } ] in
+              ; motion = Masc_tui_answering.Still; keys = "" } ] in
         let auto_tag = if state.user_input_priority_next then "auto-next:on" else "auto-next:off" in
         (* The renderer reserves [keys] before fitting [rest]. Keep the
            aggregate, delivery evidence and local preview on separate rows;
            the status budget counts this same projection. *)
         [ { Masc_tui_answering.lead = Printf.sprintf "Queue (%d pending)" waiting_count
           ; rest = " · " ^ auto_tag
-          ; keys = " · Ctrl-T:queue" } ]
+          ; motion = Masc_tui_answering.Still; keys = " · Ctrl-T:queue" } ]
         @ count_row keeper_queued "queued at Keeper · /queue"
         @ count_row awaiting_receipt "awaiting receipt"
         @ count_row rechecking "rechecking delivery"
@@ -25912,7 +25912,7 @@ let keeper_message_diagnostic_activity_rows (state : state) =
            name = keeper_name && intervention = Retained_after_stop)
            state.keeper_interactive_waiting
          then " · after stop" else " · before sending")
-       ; keys = " · /queue resume" }]
+       ; motion = Masc_tui_answering.Still; keys = " · /queue resume" }]
       else []) @ queue_rows
 ;;
 
@@ -25935,7 +25935,7 @@ let keeper_message_activity_rows (state : state) =
             else Some { Masc_tui_answering.lead = (if Requests.mem request provisional then "Priority (control pending) "
                 else match result with Ok _ -> "Priority " | Error _ -> "Priority confirmation unavailable ") ^ Masc_tui_keeper_chat_projection.terminal_safe_text request.request_id;
               rest = " · " ^ (match result with Ok detail | Error detail ->
-                Masc_tui_keeper_chat_projection.terminal_safe_text detail); keys = "" })
+                Masc_tui_keeper_chat_projection.terminal_safe_text detail); motion = Masc_tui_answering.Still; keys = "" })
             state.keeper_run_next_receipts in
       keeper_message_diagnostic_activity_rows state @ receipts
   | (Tools_compact | Tools_results), None -> []
@@ -26047,12 +26047,12 @@ let keeper_message_activity_rows (state : state) =
         if retained_after_stop || retained_before_dispatch then
           [{ Masc_tui_answering.lead = "Held"
            ; rest = (if retained_after_stop then " · after stop" else " · before sending")
-           ; keys = " · /queue resume" }]
+           ; motion = Masc_tui_answering.Still; keys = " · /queue resume" }]
         else [] in
       let activity_rows = match List.rev !urgent @ List.rev !clauses with
         | [] -> []
         | parts -> [{ Masc_tui_answering.lead = String.concat " · " parts;
-            rest = ""; keys }] in
+            rest = ""; motion = Masc_tui_answering.Still; keys }] in
       held_rows @ activity_rows
 ;;
 

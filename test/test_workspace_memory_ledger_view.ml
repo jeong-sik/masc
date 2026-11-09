@@ -165,6 +165,10 @@ let test_inventory_representation () = with_base (fun base_path ->
     (missing |> member "schema" |> to_string);
   Alcotest.(check string) "missing status" "missing"
     (missing |> member "status" |> to_string);
+  Alcotest.(check string) "an existing empty workspace is fully observed" "complete"
+    (missing |> member "ordinary_absence" |> member "status" |> to_string);
+  Alcotest.(check int) "an existing empty workspace has no absent facts" 0
+    (missing |> member "ordinary_absence" |> member "absent" |> to_int);
   Alcotest.(check (list string)) "missing has no other keys"
     ["generated_at"; "ordinary_absence"; "schema"; "status"]
     (match missing with `Assoc fields -> List.sort String.compare (List.map fst fields) | _ -> []);
@@ -188,6 +192,21 @@ let test_inventory_representation () = with_base (fun base_path ->
   | Error _ -> ()
   | Ok _ -> Alcotest.fail "corrupt ledger answered successful inventory")
 
+let test_missing_workspace_is_not_a_missing_ledger () = with_base (fun base_path ->
+  let missing_base = Filename.concat base_path "absent" in
+  let expected = match Ledger.load ~base_path:missing_base with
+    | Error detail -> detail
+    | Ok _ -> Alcotest.fail "load accepted a nonexistent workspace" in
+  List.iter (fun (view, read) ->
+    match read ~base_path:missing_base with
+    | Error detail -> Alcotest.(check string) (view ^ " retains the workspace error") expected detail
+    | Ok _ -> Alcotest.fail (view ^ " fabricated a missing ledger in an invalid workspace"))
+    [ "inventory", (fun ~base_path -> View.inventory ~base_path ())
+    ; "briefing", (fun ~base_path -> View.briefing ~base_path ())
+    ; "index", View.summary ];
+  Alcotest.(check bool) "read requests do not create the missing workspace" false
+    (Sys.file_exists missing_base))
+
 let () = Alcotest.run "workspace memory ledger view"
   [ "summary consistency",
     [ Alcotest.test_case "atomic replacement never mixes versions" `Quick
@@ -198,6 +217,8 @@ let () = Alcotest.run "workspace memory ledger view"
         test_deferred_inventory_and_selected_search;
       Alcotest.test_case "inventory representation matches schema" `Quick
         test_inventory_representation;
+      Alcotest.test_case "a missing workspace is rejected across read views" `Quick
+        test_missing_workspace_is_not_a_missing_ledger;
       Alcotest.test_case "short Korean and ASCII queries remain retrievable" `Quick
         test_short_queries_remain_retrievable;
       Alcotest.test_case "index failure preserves matches without filler" `Quick

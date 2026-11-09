@@ -272,6 +272,10 @@ let test_store_missing_corrupt_and_round_trip () =
    | Ok _ -> Alcotest.fail "a corrupt ledger read as a ledger"
    | Error _ -> ());
   let missing_base = Filename.concat base_path "absent" in
+  (match Ledger.observe ~base_path:missing_base with
+   | Ledger.Unavailable _ -> ()
+   | Ledger.Missing | Ledger.Available _ ->
+     Alcotest.fail "an invalid workspace was observed as an absent or available ledger");
   (match Ledger.load ~base_path:missing_base with
    | Ok _ -> Alcotest.fail "a missing base read as a fresh workspace"
    | Error _ -> ());

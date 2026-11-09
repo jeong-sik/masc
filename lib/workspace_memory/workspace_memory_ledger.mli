@@ -105,7 +105,9 @@ type observation =
 
 val observe : base_path:string -> observation
 (** Current durable ledger only. Old proposal files and publication descriptors
-    never count as an available ledger. A corrupt ledger is unavailable. *)
+    never count as an available ledger. A corrupt ledger or invalid workspace
+    base is unavailable. [Missing] means the ledger is absent in an existing
+    workspace, consistently with [load]. *)
 
 (** A fact the stores hold that the ledger has no disposition for. *)
 type pending_fact =

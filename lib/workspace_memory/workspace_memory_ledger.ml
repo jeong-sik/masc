@@ -413,7 +413,10 @@ let observe ~base_path =
     | { Unix.st_kind = Unix.(S_DIR | S_CHR | S_BLK | S_LNK | S_FIFO | S_SOCK); _ } ->
       Unavailable (ledger_path ^ ": not a regular file")
   with
-  | Unix.Unix_error (Unix.ENOENT, _, _) -> Missing
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+    (match io (fun () -> require_base ~base_path) with
+     | Ok () -> Missing
+     | Error detail -> Unavailable detail)
   | Unix.Unix_error (error, fn, arg) ->
     Unavailable (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
 

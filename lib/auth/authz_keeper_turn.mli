@@ -1,0 +1,77 @@
+(* HIGH-RISK-UNREVIEWED: decides whether a turn of a Keeper may run on the
+   Runtime its owner gave it. A wrong answer runs a Keeper on another
+   account's provider credential. Read it against design 6.2 and plan D2. *)
+
+(** The decision of one turn of a Keeper in multi-account mode (plan D2-1).
+
+    It builds the facts of {!Authz_decision.allowed} from the authorization
+    log and asks that function. It adds no check of its own: every field of
+    the facts reads a record of the log, and this interface says which.
+
+    {b Who.} The owner of the Keeper is both the initiator and the executor of
+    its turns (user decision 2026-11-09). A person whose Board post wakes the
+    Keeper is an input of the turn, not a party to it.
+
+    {b Facts.}
+    - [principal] and [membership]: the principals of the log. A deleted
+      principal has no membership. A service is no principal of the log.
+    - [auth_binding]: the Keeper record. It binds the owner and no one else.
+    - [delegate_policy]: the policy the Keeper record names, for the owner to
+      the owner. A [Direct] turn needs none (design 6.2); every other channel
+      is limited by its [turn_scope].
+    - [runtime] and [grant]: the Runtime record and its Self grant, with the
+      effects the record names. The grant is the owner's only.
+    - Runtime and ProviderAccount status: the log of phase 1 has no record
+      that disables, blocks, quarantines or purges either one, so a Runtime
+      or an account the log has is [Active] (plan D2, D5 adds the records).
+    - [revocation]: the gate of the zone ({!Authz_zone.revocation}). A
+      stopped log or store answers [Unreadable].
+    - [dependencies]: [Cleared]. Phase 1 has no restore window (F2 is phase 2)
+      and a restored log is refused when the zone opens (plan A2).
+    - The request carries no PAT, and no durable work stores a scope in phase
+      1, so the stored scope puts no limit.
+
+    {b One snapshot.} The facts read one snapshot of the zone. The gate is
+    read after it, so the decision stands only when the head of the log is
+    the same after the decision as before it: a reduction that ends between
+    the two appends a record. Otherwise the decision runs again, up to
+    {!attempts} times. *)
+
+open Authz_types
+
+(** The effects a turn asks for: it calls the model and uses tools. *)
+val requested : Effect_request.t
+
+(** How many times a decision runs while records keep being appended. *)
+val attempts : int
+
+type refusal =
+  | Not_bootstrapped  (** The log was never bootstrapped: it has no workspace. *)
+  | Keeper_not_made of Keeper_id.t  (** No Keeper record makes this id. *)
+  | No_authorized_runtime of Keeper_id.t
+      (** The owner gave the Keeper no Runtime. It falls back to none (user
+          decision 2026-11-08). *)
+  | Denied of Authz_decision.deny_reason
+  | Log_kept_moving
+      (** A record was appended during each of the {!attempts} decisions. *)
+
+val refusal_to_string : refusal -> string
+
+(** An allowed turn. Only {!decide} makes one. *)
+type turn = private
+  { keeper_id : Keeper_id.t
+  ; owner : User_id.t
+  ; runtime_id : Runtime_id.t
+  ; provider_account_id : Provider_account_id.t
+  ; channel : Channel.t
+  ; allowance : Authz_decision.allowance
+  }
+
+(** Decides one turn of [keeper_id] on [channel] at [now] (seconds since the
+    epoch). *)
+val decide
+  :  Authz_zone.t
+  -> keeper_id:Keeper_id.t
+  -> channel:Channel.t
+  -> now:float
+  -> (turn, refusal) result

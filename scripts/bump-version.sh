@@ -33,29 +33,6 @@ echo "Bumping release version to $NEW_VERSION"
 # A malformed changelog fragment stops the bump before any file changes.
 python3 "$ROOT_DIR/scripts/changelog-fragments.py" check --dir "$ROOT_DIR/changelog.d"
 
-# 1) SSOT: dune-project
-sedi -E "s/^\(version [^)]+\)$/\(version $NEW_VERSION\)/" \
-  "$ROOT_DIR/dune-project"
-echo "  dune-project updated"
-
-# 2) README badge, if the README still carries one
-if grep -Eq 'version-[0-9]+\.[0-9]+\.[0-9]+-blue' "$ROOT_DIR/README.md"; then
-  sedi -E "s/version-[0-9]+\.[0-9]+\.[0-9]+-blue/version-$NEW_VERSION-blue/" \
-    "$ROOT_DIR/README.md"
-  echo "  README.md badge updated"
-else
-  echo "  README.md has no version badge — nothing to update"
-fi
-
-# 3) opam metadata (if tracked)
-if [ -f "$ROOT_DIR/masc.opam" ]; then
-  sedi -E "s/^version: \"[^\"]*\"$/version: \"$NEW_VERSION\"/" "$ROOT_DIR/masc.opam"
-  echo "  masc.opam version synchronized (CI verifies generated metadata)"
-fi
-
-# 4) CHANGELOG: fold the per-PR fragments (changelog.d/<PR>.md) into
-# [Unreleased], then add the version stub if missing. The release author moves
-# the [Unreleased] entries into the version section before tagging.
 # Before folding, list the pull requests merged since the last release whose
 # changes carry no fragment (#39079, #39095: nine entries had to be backfilled
 # after their releases). With --strict it refuses the bump when a merged
@@ -121,6 +98,31 @@ if [ -n "$base_ref" ]; then
   fi
   rm -f "$missing_err" "$missing_out"
 fi
+
+
+# 1) SSOT: dune-project
+sedi -E "s/^\(version [^)]+\)$/\(version $NEW_VERSION\)/" \
+  "$ROOT_DIR/dune-project"
+echo "  dune-project updated"
+
+# 2) README badge, if the README still carries one
+if grep -Eq 'version-[0-9]+\.[0-9]+\.[0-9]+-blue' "$ROOT_DIR/README.md"; then
+  sedi -E "s/version-[0-9]+\.[0-9]+\.[0-9]+-blue/version-$NEW_VERSION-blue/" \
+    "$ROOT_DIR/README.md"
+  echo "  README.md badge updated"
+else
+  echo "  README.md has no version badge — nothing to update"
+fi
+
+# 3) opam metadata (if tracked)
+if [ -f "$ROOT_DIR/masc.opam" ]; then
+  sedi -E "s/^version: \"[^\"]*\"$/version: \"$NEW_VERSION\"/" "$ROOT_DIR/masc.opam"
+  echo "  masc.opam version synchronized (CI verifies generated metadata)"
+fi
+
+# 4) CHANGELOG: fold the per-PR fragments (changelog.d/<PR>.md) into
+# [Unreleased], then add the version stub if missing. The release author moves
+# the [Unreleased] entries into the version section before tagging.
 python3 "$ROOT_DIR/scripts/changelog-fragments.py" assemble \
   --dir "$ROOT_DIR/changelog.d" --changelog "$ROOT_DIR/CHANGELOG.md"
 if ! grep -q "^## \[$NEW_VERSION\]" "$ROOT_DIR/CHANGELOG.md"; then

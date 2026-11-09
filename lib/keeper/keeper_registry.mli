@@ -10,7 +10,6 @@
 
 open Keeper_types
 open Keeper_meta_contract
-open Keeper_types_profile
 
 (** Failure-reason + turn_phase clusters live in Keeper_registry_types
     (intra-library file split, 2026-05-16). Re-exported here so existing

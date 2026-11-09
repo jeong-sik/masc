@@ -4,7 +4,6 @@
     their public API while guards, parsing, and serialization stay in
     smaller private modules. *)
 
-open Keeper_types_profile
 open Keeper_meta_contract
 include Keeper_meta_json_current_schema
 

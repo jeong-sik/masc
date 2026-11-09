@@ -2,10 +2,6 @@
     for keeper agents. AGENT_CORE-aligned: these functions define agent identity and
     text output. *)
 
-open Keeper_types
-open Keeper_meta_contract
-open Keeper_types_profile
-
 let warned_empty_body = ref false
 
 let render_instruction key vars =

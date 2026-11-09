@@ -2,8 +2,9 @@ import { KeeperToolOutputScope, ToolOutputLookupNotice, useToolOutputLookup } fr
 import { ChatEditEvidence } from './edit-evidence'
 import { PublishedArtifactCard } from './published-artifact-card'
 import { ChatFailureCard } from './failure-message'
+import { NativeExecutionHistory } from './native-execution-history'
 import { html } from 'htm/preact'
-import type { ComponentChildren, VNode } from 'preact'
+import { Fragment, type ComponentChildren, type VNode } from 'preact'
 import { JsonViewerCard } from '../common/json-viewer'
 import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
 import { escapeHtml } from '../../lib/html-escape'
@@ -3748,7 +3749,26 @@ export function _resetTraceCardOpenChoicesForTests(): void {
   traceCardOpenChoices.clear()
 }
 
-function ToolTraceCard({
+function nativeOperationId(entry: KeeperConversationEntry | null | undefined): string | null {
+  const key = entry?.deliveryProvenance?.delivery_key
+  return key?.kind === 'operation' || key?.kind === 'operation_native' || key?.kind === 'operation_checkpoint'
+    ? key.operation_id : null
+}
+
+function ToolTraceCard(props: Parameters<typeof ProductTurnTraceCard>[0]) {
+  const keeper = useContext(KeeperToolOutputScope)
+  const operation = nativeOperationId(props.assistant)
+  if (keeper !== null && operation !== null) {
+    const hasProductObservations = props.tools.length > 0 || (props.traceSteps?.length ?? 0) > 0
+    return html`<${Fragment}>
+      ${hasProductObservations ? html`<${ProductTurnTraceCard} ...${props} label="대화·도구 관측" />` : null}
+      <${NativeExecutionHistory} keeper=${keeper} operation=${operation} turnComplete=${props.turnComplete ?? false} />
+    </${Fragment}>`
+  }
+  return html`<${ProductTurnTraceCard} ...${props} />`
+}
+
+function ProductTurnTraceCard({
   tools,
   traceSteps = [],
   assistant = null,
@@ -3756,6 +3776,7 @@ function ToolTraceCard({
   toolOutputsCoveredSinceMs = null,
   toolOutputsCoveredThroughMs = null,
   toolOutputHydrationContract = null,
+  label = '턴 타임라인',
 }: {
   tools: KeeperConversationEntry[]
   traceSteps?: ChatTraceStep[]
@@ -3764,6 +3785,7 @@ function ToolTraceCard({
   toolOutputsCoveredSinceMs?: number | null
   toolOutputsCoveredThroughMs?: number | null
   toolOutputHydrationContract?: ToolCallOutputHydrationContract | null
+  label?: string
 }) {
   const liveTurn = assistant !== null && !turnComplete
   const structuralSummary = assistant?.source === 'autonomous_turn'
@@ -3875,7 +3897,7 @@ function ToolTraceCard({
       >
         <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>
         <span>◈</span>
-        <span class="chat-block-trace-label">턴 타임라인</span>
+        <span class="chat-block-trace-label">${label}</span>
         <span class="chat-block-trace-count">${stepN}단계</span>
         <span class="chat-block-trace-meta">
           ${thinkN > 0 ? html`<span>Think ${thinkN}</span>` : null}
@@ -4336,7 +4358,7 @@ export function buildChatRenderUnits(
         continue
       }
       flush()
-      if (ownsWork && (entry.traceSteps?.length ?? 0) > 0) {
+      if (ownsWork && ((entry.traceSteps?.length ?? 0) > 0 || nativeOperationId(entry) !== null)) {
         units.push({
           kind: 'turnBundle',
           id: `turn-${entry.id}`,

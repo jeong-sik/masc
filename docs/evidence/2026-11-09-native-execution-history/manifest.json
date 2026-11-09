@@ -1,0 +1,73 @@
+{
+  "source_head": "ea6228b4b3552e545253f85f83ebb29d565cc7a3",
+  "base": "ae1eab278fd3780ec5ba27201b14b7271e370660",
+  "source_files": [
+    {
+      "path": "dashboard/fixtures/native-execution-history/README.md",
+      "sha256": "980d25ab0ff0b7274068be31e1345e0b28d29b38325e6f5574c849c5f40d6798"
+    },
+    {
+      "path": "dashboard/fixtures/native-execution-history/fixture.html",
+      "sha256": "96cedd42786e940e0cb1b353b96d52aca1fa61ee60934b24d8cdb55493edea05"
+    },
+    {
+      "path": "dashboard/fixtures/native-execution-history/fixture.ts",
+      "sha256": "b86e90b36ce98a358c9a6e185eb30acdb7db1f2f5a1ed18f91ec471139b27c25"
+    },
+    {
+      "path": "dashboard/src/api/keeper-native-history.test.ts",
+      "sha256": "fb69c3e4e08ee1b0bd097043e1a7857ecb092e5e2b4e1032e7931d48104797f8"
+    },
+    {
+      "path": "dashboard/src/api/keeper-native-history.ts",
+      "sha256": "2a6c51e0b1d7d60324041efd183176cb83d15a72c2c32de5ac1cc2ad51a4e15d"
+    },
+    {
+      "path": "dashboard/src/components/chat/native-execution-history.test.ts",
+      "sha256": "5ea92dedcd1135e2e508a62f5fea1911849e7afb2f2a41221a72f704f00a9954"
+    },
+    {
+      "path": "dashboard/src/components/chat/native-execution-history.ts",
+      "sha256": "f420f0fc7fa774b68bda8c1ac6ffb4648e47dad85178dfee7a5aff623f1133d2"
+    },
+    {
+      "path": "dashboard/src/components/chat/primitives.test.ts",
+      "sha256": "eb676aa119eda975e3e784622737e819eb92a28d6394b81355492c51326dcf63"
+    },
+    {
+      "path": "dashboard/src/components/chat/primitives.ts",
+      "sha256": "0d8efaafd36fe91645a0012b7e48b6bec2c289a533fca209e1367927a7ec3da1"
+    },
+    {
+      "path": "docs/design/keeper-native-execution-history.md",
+      "sha256": "f9734cc2c48d424a4b98c8fd8b8b05706352c0071bba0278577b94f894cbfcfd"
+    }
+  ],
+  "retained_files": [
+    {
+      "path": "completed.png",
+      "bytes": 75251,
+      "sha256": "cf7e420170fb5eac60b33d2a87f7d9e386b3c9c3c327465aed77efd1856df6de"
+    },
+    {
+      "path": "missing-journal.png",
+      "bytes": 69470,
+      "sha256": "789dee793afc7e3e1b4ca276940898d588c9c3df5d03187e09db6e7e4cdea65a"
+    },
+    {
+      "path": "requests.json",
+      "bytes": 1149,
+      "sha256": "cb3ac3f611aaddaf2f61b48ce0e5a5767e168dc33881e7a143f7df55f8806efa"
+    },
+    {
+      "path": "second-call.png",
+      "bytes": 74519,
+      "sha256": "72ef208cb9ada422781207d9a7c38e75faf646d553faee9b4c18d900c5490790"
+    },
+    {
+      "path": "validation.json",
+      "bytes": 1496,
+      "sha256": "153512eb331424ee050f4ed9d04ac4496c6694aae5d2513c12140387a9ffb0a1"
+    }
+  ]
+}

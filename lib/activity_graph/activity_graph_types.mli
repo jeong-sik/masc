@@ -1,24 +1,7 @@
 (** Activity_graph_types — type definitions and JSON serde for activity graph. *)
 
-(** {1 Node status}
-
-    Type-safe variant replacing stringly-typed status. The [node kind]
-    field already carries the category, so this is a flat variant
-    spanning agent / task / board.
-
-    @since 7182 *)
-type node_status =
-  (* Agent lifecycle *)
-  | Active
-  (* Task lifecycle *)
-  | Todo | Claimed | In_progress | Done | Cancelled
-  (* Board *)
-  | Posted | Discussed
-  (* Generic / fallback *)
-  | Observed | Workspace | Unset
-
-(** Closed activity kinds whose payload describes one executed tool. Producers,
-    reducers, and timeline readers share this type rather than maintaining
+(** Closed activity kinds whose payload describes one executed tool. Producers
+    and timeline readers share this type rather than maintaining
     independent string lists. *)
 type tool_execution_event_kind =
   | External_tool_called
@@ -27,19 +10,6 @@ type tool_execution_event_kind =
 val tool_execution_event_kind_to_string : tool_execution_event_kind -> string
 val tool_execution_event_kind_of_string : string -> tool_execution_event_kind option
 val all_tool_execution_event_kinds : tool_execution_event_kind list
-
-(** The event kinds the graph reducer and the span builder act on, decoded
-    once from an event's [kind]. The task, message and board families are
-    {!Event_kind}'s. *)
-type drawn_event_kind =
-  | Tool_execution_event of tool_execution_event_kind
-  | Task_event of Event_kind.Task.t
-  | Message_event of Event_kind.Message.t
-  | Board_event of Event_kind.Board.t
-
-(** [None] for a kind neither reader acts on. Such an event is still stored
-    and listed. *)
-val drawn_event_kind_of_string : string -> drawn_event_kind option
 
 (** {1 Graph entities} *)
 
@@ -59,33 +29,9 @@ type event = {
   tags : string list;
 }
 
-type graph_node = {
-  id : string;
-  kind : string;
-  label : string;
-  status : node_status;
-  weight : int;
-  last_event_at : string;
-  meta : Yojson.Safe.t;
-}
-
-type graph_edge = {
-  id : string;
-  source : string;
-  target : string;
-  kind : string;
-  weight : int;
-  active : bool;
-  last_event_at : string;
-  meta : Yojson.Safe.t;
-}
-
-(** {1 Constructors and defaults} *)
+(** {1 Constructors} *)
 
 val entity : kind:string -> string -> entity_ref
-
-(** [`Assoc []] — a JSON object with no members. *)
-val default_meta : Yojson.Safe.t
 
 (** {1 JSON serde}
 
@@ -95,10 +41,6 @@ val default_meta : Yojson.Safe.t
 val event_to_yojson : event -> Yojson.Safe.t
 
 val event_of_yojson : Yojson.Safe.t -> event option
-
-val graph_node_to_yojson : graph_node -> Yojson.Safe.t
-
-val graph_edge_to_yojson : graph_edge -> Yojson.Safe.t
 
 (** {1 Utilities} *)
 

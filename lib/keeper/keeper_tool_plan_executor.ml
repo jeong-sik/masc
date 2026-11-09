@@ -1133,12 +1133,6 @@ let execute_keeper_with_authority
              ~effect_disposition:Tool_result.Effect_outcome_unknown
              ~start_time:(Tool_timing.start ()) detail)
     | Ok prepared_file, Ok owned_job_replay ->
-    let prepared_read, prepared_edit, prepared_write = match prepared_file with
-      | None -> None, None, None
-      | Some (Keeper_prepared_inline_files.Read read) -> Some read, None, None
-      | Some (Keeper_prepared_inline_files.Edit edit) -> None, Some edit, None
-      | Some (Keeper_prepared_inline_files.Write write) -> None, None, Some write
-    in
     let gate_context = match prepared_file, gate_context with
       | Some _, Some current ->
         let captured = current () in
@@ -1174,9 +1168,7 @@ let execute_keeper_with_authority
         ~keeper_turn_id
         ~source_context:(fun () -> source_context)
         ?owned_job_replay
-        ?prepared_read
-        ?prepared_edit
-        ?prepared_write
+        ?prepared_file
         ?turn_sandbox_factory
         ?clock
         ?continuation_channel

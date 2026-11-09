@@ -32,19 +32,19 @@ PR 에 실려 있다.
 | `slack_rest_client.ml:411-431` | **수리** | `List.find_opt Result.is_error` / `Some (Ok _)` / `List.map Result.get_ok` 짝을 `List.partition Result.is_ok` 로 바꾼다(순서 보존 — 첫 실패가 그대로 밝혀진다). 정정: 옛 `Some (Ok _)` 분기는 도달 불가가 아니라 타입 체커가 요구하는 분기였다 — 재검토 리뷰(adv-49973 F2·F3)가 바로잡았고, partition 은 그 요구를 `([] | Ok _ :: _)` or-패턴 하나로 흡수한다 |
 | `keeper_github_identity.ml:524-566` 6단 피라미드 | **판정: 무변경** | 각 단의 조기 탈출이 `Ok None`(성공)이라 `let*` 로는 펴지지 않는다 — 삼분 step result(Absent·Present·Error) 재설계가 필요하고 현재 코드는 각 단에 근거가 붙어 있다 |
 
-## 범주 4 option 튜플 + invalid_arg — 등기 1
+## 범주 4 option 튜플 + invalid_arg — 수리 2
 
 | 좌표 | 판정 | 근거 |
 | --- | --- | --- |
-| `keeper_chat_slack.ml:526-569` 4-튜플 + invalid_arg | **등기(후속 task)** | 바른 수리는 네 콜백을 담은 record 를 받는 단일 `?streaming_transport` 인자화 — 런타임 검사 자체가 사라진다. 호출처(832-845)와 `For_testing.adapter_loop` 노출, 시험 18곳(test/test_keeper_chat_slack.ml)까지 걸쳐 별도 층으로 나간다. 현행 invalid_arg 경로는 프로덕션 호출처(전달 1곳·전-None 별칭 1곳)에서 도달하지 않는다 |
-| `keeper_tools_agent_core_handler.ml:47-105` | **등기(후속 task, 같은 건)** | 세 optional 인자를 판별자(Keeper_tool_descriptor.runtime_handler 의 Tool_read_file/Tool_edit_file/Tool_write_file)에 맞춘 `?prepared_file_resource` 변형 하나로. 281-283 재전달까지 포함 |
+| `keeper_chat_slack.ml:526-569` 4-튜플 + invalid_arg | **수리** | 네 스트리밍 콜백(`post_stream`·`edit_stream`·`edit_blocks`·`delete_stream`)을 닫힌 레코드 타입 `streaming_transport`로 묶어 단일 `?streaming_transport` 인자로 전달한다. 부분 전달 상태 자체가 타입으로 불가능해져 `invalid_arg "Slack streaming transport must be supplied as one closed set"` 런타임 검사가 제거되었고, `For_testing.adapter_loop` 및 `test/test_keeper_chat_slack.ml` 호출처 전수를 함께 갱신했다 |
+| `keeper_tools_agent_core_handler.ml:47-105` | **수리** | 상호배타적인 세 optional 인자(`?prepared_read`, `?prepared_edit`, `?prepared_write`)와 3중 상호배타 `invalid_arg` 검사를 닫힌 합타입 `?prepared_file:Keeper_prepared_inline_files.operation`(`Read \| Edit \| Write`) 단일 인자로 통합했다. `keeper_tool_plan_executor.ml`의 불필요한 3-튜플 분해·재조립도 함께 제거됐다 |
 
-## 범주 5 bool 매칭·피라미드·항등 매칭·Call-by-Value·부분 함수 — 수리 3 + 판정 4
+## 범주 5 bool 매칭·피라미드·항등 매칭·Call-by-Value·부분 함수 — 수리 4 + 판정 4
 
 | 좌표 | 판정 | 근거 |
 | --- | --- | --- |
-| `match !natural_completion with true -> … | false -> []` 3벌(claude_code:1698·antigravity:1297·muse:1912) | **수리** | `if !natural_completion then … else []` 로 |
-| `keeper_tool_filesystem_runtime_owned_read.ml:66-74` | **수리** | `match Sys.is_directory p with true -> not (…) | _ -> false` → `Sys.is_directory p && not (…)` |
+| `match !natural_completion with true -> … \| false -> []` 3벌(claude_code:1698·antigravity:1297·muse:1912) | **수리** | `if !natural_completion then … else []` 로 |
+| `keeper_tool_filesystem_runtime_owned_read.ml:66-74` | **수리** | `match Sys.is_directory p with true -> not (…) \| _ -> false` → `Sys.is_directory p && not (…)` |
 | `keeper_claude_code_runtime.ml:181-194` 9-튜플 전-None match | **수리** | 서로 다른 함수 타입 9개라 튜플이 불가피하다 — 완전-None 검사만 구조적 `None` 비교 if 로 |
 | `keeper_owner.ml:1695-1715` 5단 계단식 | **수리** | payload 를 버리는 탐침 클로저 리스트 + `first_present` 재귀로. direct_* 다섯 함수의 성공 타입이 제각각이라 `Result.map (fun _ -> ())` 로 균일화한다 |
 | 항등 매칭 5곳(observability:23·markdown:153·otel_tracer:194·complete_stream:631·masc_cost:375) | **수리** | 전부 scrutinee 직접 사용으로 한 줄 해소 |
@@ -52,13 +52,11 @@ PR 에 실려 있다.
 | `tool_usage_log.ml:69` | **이전 해소 확인(#49776)** | fold 관용구+주석 |
 | `bin/masc_tui.ml:39718-39721` List.nth | **판정: 무변경** | index 가 `cursor mod List.length commands` 로 항상 범위 내 — 구조적으로 안전 |
 | `runtime_wizard_inventory.ml:278-286` List.hd | **수리** | `[binding]` 분해로(가드 `List.length bindings = 1` 제거) |
+| `lib/goal/reliable_change_g1.ml:6-10, 334, 551-554, 897-900` `last`(`invalid_arg`)·`List.hd` | **수리** | 부분 함수 `last`(`invalid_arg`)와 `List.hd sorted_attempts`를 완전 함수 `last_opt : 'a list -> 'a option`과 비공집합 패턴 매칭(`(first_attempt, _) :: _, Some (final_attempt, final_scenario)`) 및 `List.filter_map`으로 전면 교체했다 |
 | Result.get_ok 3곳(skill_activation_ledger_model:100·artifact_draft:74·keeper_artifact_draft:76) | **판정: 무변경** | 전부 사적으로 구성한 값의 불변식 위 사용 — artifact_draft:73 이 불변식을 주석으로 명시하고 같은 구조다 |
 
-## 감사 후속 (이번 전수로 새로 등기하는 것)
+## 수리 커밋
 
-1. Keeper_chat_slack 스트리밍 전달 4-튜플의 record 단일 인자화 + Keeper_tools_agent_core_handler prepared 자원 3-optional 변형화 — invalid_arg 런타임 검기를 타입으로 흡수한다. 시험 포함 별도 층.
-
-## 수리 커밋 (이 PR)
-
-1. `fix(agent_core)` — validate_tool_result_shape 합타입화 + Expected_object_or_array + 시험
-2. `refactor(keeper)` — 취소 재발산 2·slack_rest partition·항등 매칭 5·bool 관용구 4·keeper_owner 2·부분 함수 2
+1. PR #49973(병합 516d72b9f3b0) — `validate_tool_result_shape` 합타입화 + `Expected_object_or_array` + 취소 재발산 2·`slack_rest` partition·항등 매칭 5·bool 관용구 4·`keeper_owner` 2·부분 함수 2
+2. PR #49971 — `keeper_execution_receipt` `Provider_runtime_failure` 직접 매칭, `slack_rest_client` tail-recursive fold, `keeper_late_approval` 예외 좁힘
+3. 후속 완결 PR — `keeper_chat_slack` `streaming_transport` 레코드화, `keeper_tools_agent_core_handler` `?prepared_file` 합타입 인자화, `reliable_change_g1` 부분 함수(`last`·`List.hd`) 완전 함수화

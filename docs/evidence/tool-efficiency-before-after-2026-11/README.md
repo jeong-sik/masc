@@ -376,7 +376,7 @@ python3 docs/evidence/tool-efficiency-before-after-2026-11/retry_diff.py \
 - 재호출이 대부분 끝난 묶음은 `keeper_artifact_read`, `BrowserInteract` x 누락, `masc_schedule_create` 예요. x 누락 7건은 모두 `x` 를 더해 다시 불렀어요(PR #50513 이 이 거절을 다뤄요).
 - `keeper_artifact_read` 는 계약 함정이 아니었어요. 재호출이 쓴 sha 21개는 모두 같은 Keeper 의 `Execute` 가 저장한 blob 이에요. 그중 17개는 실패한 읽기와 같은 `keeper_turn_id`·`turn` 에서 `planned_index` 가 앞선 `Execute` 가 만들었어요. Keeper 가 `Execute` 와 읽기를 한 계획에 같이 내서, 아직 모르는 sha 를 지어낸 거예요. 이 읽기는 다음 라운드에 나갈 호출이라 왕복이 늘지 않고, 짧은 오류가 붙은 호출 하나만 더 들어요. 나머지 4개는 다음 라운드에서 틀린 sha 를 넣은 3건(`Execute` 3.7 ~ 12.1초 뒤)과 `Execute` 가 읽기보다 뒤에 저장된 1건이에요. 실패 30건 중 27건의 sha 는 `tool_blobs` 에 파일이 없어요. 그 27개 중 24개는 가장 가까운 저장 blob 과 맞는 앞 글자 수가 4 ~ 6자라서 무작위 64자리 16진수와 같아요(저장 blob 약 258만 개일 때 무작위 중앙값이 5자예요). 이 문단의 값은 손으로 센 값이라 스크립트에 없어요.
 - `Execute` 디스크 부족 51건(끝점 셋)은 재호출 2건이 끝났고, `BrowserTabs` 브라우저 없음 20건은 1건이 끝났어요.
-- 묶음이 오류 머리글 90자라서 id 길이가 다르면 같은 오류가 둘로 갈려요. `masc_board_post_get` 의 `Post not found` 는 12자 이상 16진수 id 와 8자 id 로 7건씩 두 묶음이 됐고(재호출이 끝난 것 3건과 7건), 위 표에는 넣지 않았어요.
+- 오류 머리글이 숫자를 모두 `N` 으로 바꿔서 HTTP 상태 코드처럼 숫자만 다른 오류는 한 묶음이 돼요. 반대로 90자라서 id 길이가 다르면 같은 오류가 둘로 갈려요. `masc_board_post_get` 의 `Post not found` 는 12자 이상 16진수 id 와 8자 id 로 7건씩 두 묶음이 됐고(재호출이 끝난 것 3건과 7건), 위 표에는 넣지 않았어요.
 - 재호출은 "같은 Keeper 가 부른 같은 도구의 다음 호출"이라서 목적이 다른 호출도 세요. 입력 차이는 묶음마다 상위 둘만 보여요. `completed` 는 도구가 오류 없이 끝났다는 뜻이고 원하는 결과를 얻었다는 뜻은 아니에요.
 - 배포 뒤에는 같은 명령으로 `x must be a JavaScript-safe integer` 묶음이 사라졌는지 봐요.
 

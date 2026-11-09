@@ -224,9 +224,12 @@ class SourceResult:
     files: int = 0
     first_ts: float | None = None
     last_ts: float | None = None
-    # Newest timestamp seen anywhere in the source, including rows outside the
-    # window. A ledger whose newest row predates the window is a stale copy, and
-    # its silence is not evidence that nothing was called (#50504).
+    # Newest timestamp among the rows this window could have counted, i.e. the
+    # rows before the window end. A ledger whose newest such row predates the
+    # window start is a stale copy, and its silence is not evidence that nothing
+    # was called (#50504). Rows after the window end are deliberately excluded:
+    # a report pinned with `--now` in the past must not be qualified by rows that
+    # fall outside the window it asked about (#50544).
     newest_ts: float | None = None
     # Cumulative sources (a dashboard snapshot) have no window, so staleness is
     # not defined for them.

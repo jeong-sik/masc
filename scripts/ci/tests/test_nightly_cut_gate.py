@@ -140,6 +140,20 @@ class NightlyCutGate(unittest.TestCase):
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("in_progress", result.stderr)
 
+    def test_running_ancestor_with_recorded_waiver_passes(self):
+        # The refusal message promises the baseline as the recorded way to
+        # cut over an unread nightly, so a recorded in-progress run must
+        # pass before any verdict exists (CR P3, PR #50784).
+        result = self.run_gate(
+            runs=[dict(NIGHTLY, status="in_progress", conclusion=None)],
+            baseline={"schema_version": 1, "allowed_failure_runs": [
+                {"run_id": 42667421470, "head_sha": NIGHTLY["head_sha"],
+                 "recorded_by": "release owner",
+                 "reviewed_failure": "nightly still running at cut time"}]})
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("recorded in the baseline", result.stdout)
+        self.assertIn("unread nightly", result.stdout)
+
     def test_no_ancestor_refuses(self):
         result = self.run_gate(runs=[NIGHTLY], compare="diverged")
         self.assertNotEqual(result.returncode, 0)

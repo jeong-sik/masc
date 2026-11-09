@@ -128,6 +128,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[rc-cut] nightly run {run['id']} @ {run['head_sha'][:12]} "
           f"({run.get('created_at')}): {run.get('conclusion') or run.get('status')}")
     if run.get("status") != "completed":
+        # The baseline waiver is a recorded decision about an unread
+        # nightly, so it applies before a verdict exists: the entry names
+        # the run id and the head it really reviewed.
+        if waived(args.baseline, run):
+            print(f"[rc-cut] the cut proceeds over an unread nightly "
+                  f"({run['status']}): run {run['id']} is recorded in the "
+                  "baseline")
+            return 0
         raise GateError(
             f"nightly run {run['id']} is {run['status']}; wait for its verdict "
             "or record it in the baseline to cut over an unread nightly")

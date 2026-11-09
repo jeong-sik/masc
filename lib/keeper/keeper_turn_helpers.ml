@@ -3,10 +3,7 @@
 
    Extracted from keeper_unified_turn.ml (L21-326) during the god-file split. *)
 
-open Keeper_types
 open Keeper_meta_contract
-open Keeper_types_profile
-open Keeper_context_runtime
 
 (* Interval (seconds) for the per-turn background fiber that drains the
    `keeper_turn` subscription on the AGENT_CORE event bus.  See

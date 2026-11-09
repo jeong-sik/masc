@@ -3,10 +3,7 @@
 
    Extracted from keeper_unified_turn.ml (L501-1079) during the god-file split. *)
 
-open Keeper_types
 open Keeper_meta_contract
-open Keeper_meta_store
-open Keeper_types_profile
 open Keeper_context_runtime
 module EC = Keeper_error_classify
 module StringMap = Set_util.StringMap

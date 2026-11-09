@@ -6,9 +6,12 @@
 One route table serves both transports, so the expected statuses are:
 
 - `plain` routes: for every credential the HTTP/2 status equals the HTTP/1.1 status.
-- `ws` routes: HTTP/2 answers 426 whatever HTTP/1.1 answers. `Router.dispatch` gets no
-  upgrade on HTTP/2 (lib/http_server_eio.ml) and the h2 library has no RFC 8441 extended
-  CONNECT (RFC-0512 D5). HTTP/1.1 reaches the handler, which answers on its own.
+- `GET /ws` is a discovery request here: probe.py sends no WebSocket Upgrade
+  headers, so it must answer the same status on both transports.
+- Other `ws` routes are WebSocket-only (`GET /api/v1/ide/lsp` today): their
+  handler gets no upgrade on HTTP/2 and answers 426 (RFC-0512 D5). HTTP/1.1
+  reaches the handler, which answers on its own. Actual HTTP/1.1 Upgrade
+  attempts are separate probe_extra.py cases and are not compared here.
 - A status of 0 means the probe got no status line in time (probe.py). It is a finding on
   either side: parity cannot be read from a missing answer.
 
@@ -36,7 +39,7 @@ CREDENTIALS: tuple[Credential, ...] = ("none", "bad")
 Target = Literal["plain", "ws"]
 Reason = Literal["differs", "h2_not_426", "no_answer"]
 
-# Router.dispatch answers this for a Ws route when the transport offers no upgrade.
+# A WebSocket-only handler answers this when the transport offers no upgrade.
 UPGRADE_REQUIRED = 426
 # probe.py records this when no status line arrived within its timeout.
 NO_ANSWER = 0
@@ -189,17 +192,21 @@ def parse_run(out_dir: Path, mode: Mode) -> Run | Problem:
     return Run(mode, tuple(rows))
 
 
-def reason(kind: Target, http1: int, h2: int) -> Reason | None:
+def reason(row: Row, http1: int, h2: int) -> Reason | None:
     """Why the pair is a finding, or None when it is what the route table predicts."""
     if http1 == NO_ANSWER or h2 == NO_ANSWER:
         return "no_answer"
-    match kind:
+    match row.target:
         case "plain":
             return None if http1 == h2 else "differs"
         case "ws":
+            # This exact endpoint serves discovery for an ordinary GET; a
+            # Ws registration alone does not make this an Upgrade attempt.
+            if (row.method, row.route_path) == ("GET", "/ws"):
+                return None if http1 == h2 else "differs"
             return None if h2 == UPGRADE_REQUIRED else "h2_not_426"
         case _:
-            assert_never(kind)
+            assert_never(row.target)
 
 
 def findings(run: Run) -> tuple[Finding, ...]:
@@ -207,7 +214,7 @@ def findings(run: Run) -> tuple[Finding, ...]:
     for row in run.rows:
         for credential in CREDENTIALS:
             http1, h2 = row.statuses(credential)
-            why = reason(row.target, http1, h2)
+            why = reason(row, http1, h2)
             if why is not None:
                 found.append(
                     Finding(
@@ -244,8 +251,9 @@ def render(run: Run, found: tuple[Finding, ...]) -> str:
         lines.append("")
     if ws_rows:
         lines.append(
-            f"ws routes answer {UPGRADE_REQUIRED} on HTTP/2 by design (RFC-0512 D5);"
-            " HTTP/1.1 reaches the handler:"
+            "Ordinary GET /ws serves discovery on both transports; WebSocket-only"
+            f" routes answer {UPGRADE_REQUIRED} on HTTP/2 (RFC-0512 D5)."
+            " Actual Upgrade probes are separate in extra.json:"
         )
         lines.append("")
         lines.append("| method | route | http1 none | http1 bad | h2 none | h2 bad |")

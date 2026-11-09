@@ -4,8 +4,10 @@ name: Auth route transport parity (RFC-0512)
 # and over HTTP/2 (h2c) with scripts/auth-route-baseline/run.sh in the default
 # and the strict configuration, and fails when a route answers something other
 # than what the one route table predicts (RFC-0512): a plain route answers the
-# same status on both transports, and a WebSocket route answers 426 on HTTP/2,
-# which has no upgrade (D5). A probe without an answer is a finding too, and a
+# same status on both transports. The ordinary GET /ws probe serves discovery
+# on both transports; WebSocket-only routes answer 426 on HTTP/2, which has no
+# upgrade (D5). Actual HTTP/1.1 Upgrade attempts are separate extra.json cases.
+# A probe without an answer is a finding too, and a
 # run whose server stopped part-way fails instead of passing with fewer routes.
 # extra.json (dev_token per transport) is not compared. Runs on demand;
 # docs/evidence keeps the result of a run, and #50192 asked for a repeatable
@@ -60,7 +62,7 @@ jobs:
             _build/default/bin/main_eio.exe _build/default/tools/auth_route_inventory/main.exe \
             18936 "$RUNNER_TEMP/a1-strict" "$RUNNER_TEMP/out/strict" MASC_HTTP_AUTH_STRICT=true
 
-      - name: Transport findings (0 expected; ws routes answer 426 on HTTP/2)
+      - name: Transport findings (0 expected; distinguish discovery from WebSocket-only routes)
         shell: bash
         run: python3 scripts/auth-route-baseline/transport_diff.py "$RUNNER_TEMP/out" | tee -a "$GITHUB_STEP_SUMMARY"
 

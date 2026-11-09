@@ -16,7 +16,8 @@ from pathlib import Path
 from transport_diff import Finding, Problem, Row, Run, findings, main, parse_run, render
 
 PLAIN = Row("GET", "/health", "/health", "plain", 200, 200, 200, 200)
-WS = Row("GET", "/ws", "/ws", "ws", 200, 200, 426, 426)
+WS = Row("GET", "/api/v1/ide/lsp", "/api/v1/ide/lsp", "ws", 200, 200, 426, 426)
+DISCOVERY = Row("GET", "/ws", "/ws", "ws", 200, 200, 200, 200)
 
 
 def row(**over: object) -> dict[str, object]:
@@ -70,9 +71,16 @@ class FindingsTest(unittest.TestCase):
         found = findings(Run("default", (replace(WS, h2_none=404),)))
         self.assertEqual([(f.credential, f.http1, f.h2, f.reason) for f in found], [("none", 200, 404, "h2_not_426")])
 
+    def test_a_plain_get_on_ws_is_discovery_on_both_transports(self) -> None:
+        self.assertEqual(findings(Run("default", (DISCOVERY,))), ())
+
+    def test_a_transport_that_refuses_ws_discovery_is_a_finding(self) -> None:
+        found = findings(Run("default", (replace(DISCOVERY, h2_bad=426),)))
+        self.assertEqual([(f.route_path, f.credential, f.reason) for f in found], [("/ws", "bad", "differs")])
+
     def test_no_answer_on_either_side_is_a_finding(self) -> None:
         found = findings(Run("default", (replace(PLAIN, h2_none=0), replace(WS, http1_bad=0))))
-        self.assertEqual([(f.route_path, f.credential, f.reason) for f in found], [("/health", "none", "no_answer"), ("/ws", "bad", "no_answer")])
+        self.assertEqual([(f.route_path, f.credential, f.reason) for f in found], [("/health", "none", "no_answer"), ("/api/v1/ide/lsp", "bad", "no_answer")])
 
 
 class ParseRunTest(unittest.TestCase):
@@ -84,7 +92,7 @@ class ParseRunTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_a_complete_run_parses_every_row(self) -> None:
-        write(self.out, "default", results([row(h2_none="200"), row(route_path="/ws", probed_path="/ws", target="ws", h2_none=426, h2_bad=426)]))
+        write(self.out, "default", results([row(h2_none="200"), row(route_path="/api/v1/ide/lsp", probed_path="/api/v1/ide/lsp", target="ws", h2_none=426, h2_bad=426)]))
         self.assertEqual(parse_run(self.out, "default"), Run("default", (PLAIN, WS)))
 
     def test_a_missing_file_is_a_problem(self) -> None:
@@ -132,7 +140,7 @@ class RenderTest(unittest.TestCase):
         text = render(run, findings(run))
         self.assertIn("### default: 3 routes (2 plain, 1 ws), 1 findings", text)
         self.assertIn("| GET | `/x` | `/x` | plain | bad | 200 | 500 | differs |", text)
-        self.assertIn("| GET | `/ws` | 200 | 200 | 426 | 426 |", text)
+        self.assertIn("| GET | `/api/v1/ide/lsp` | 200 | 200 | 426 | 426 |", text)
 
     def test_without_findings_or_ws_rows_only_the_header_is_printed(self) -> None:
         run = Run("strict", (PLAIN,))
@@ -155,7 +163,7 @@ class MainTest(unittest.TestCase):
 
     def test_exit_0_when_both_modes_match_the_route_table(self) -> None:
         for mode in ("default", "strict"):
-            write(self.out, mode, results([row(), row(route_path="/ws", probed_path="/ws", target="ws", h2_none=426, h2_bad=426)]))
+            write(self.out, mode, results([row(), row(route_path="/api/v1/ide/lsp", probed_path="/api/v1/ide/lsp", target="ws", h2_none=426, h2_bad=426)]))
         code, out, err = self.run_main()
         self.assertEqual((code, err), (0, ""))
         self.assertIn("### default: 2 routes (1 plain, 1 ws), 0 findings", out)

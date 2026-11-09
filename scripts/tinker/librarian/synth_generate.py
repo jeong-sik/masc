@@ -38,15 +38,16 @@ import json
 import random
 import sys
 from collections import Counter
+from collections.abc import Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import assert_never, cast
+from typing import Protocol, assert_never, cast
 
 import synth_candidate_plan as C
 import synth_prompts as P
 import synth_spec as S
-from tinker_oai import Caller
+from tinker_oai import Call, Caller
 
 MODEL = "thinkingmachines/Inkling-2-Small"
 ATTEMPTS = 3
@@ -80,7 +81,14 @@ SPLITS = {
 # --- stages ------------------------------------------------------------------
 
 
-def ask(caller: Caller, stage: str, prompt: str, attempt: int) -> str | None:
+class Asks(Protocol):
+    """The one call the generator makes: `tinker_oai.Caller.ask`."""
+
+    def ask(self, *, model: str, label: str, messages: Sequence[str], effort: str, max_tokens: int,
+            attempt: int = 0) -> Call | None: ...
+
+
+def ask(caller: Asks, stage: str, prompt: str, attempt: int) -> str | None:
     """The answer text, "" when the call failed or was cut off, None once the budget stops calls."""
     call = caller.ask(model=MODEL, label=stage, messages=[prompt], effort=EFFORT[stage],
                       max_tokens=MAX_TOKENS[stage], attempt=attempt)
@@ -93,7 +101,7 @@ def head(claim: str) -> str:
     return claim[:EXISTING_HEAD].replace("\n", " ")
 
 
-def profile_of(caller: Caller, seed: S.KeeperSeed, rng: random.Random) -> S.KeeperProfile | None:
+def profile_of(caller: Asks, seed: S.KeeperSeed, rng: random.Random) -> S.KeeperProfile | None:
     role_chars = int(round(S.sample_quantile(rng, ROLE_CHARS), -2))
     prompt = P.PROFILE_PROMPT.format(seed=seed.seed, role_chars=role_chars, style=P.STYLE)
     for attempt in range(ATTEMPTS):
@@ -140,27 +148,32 @@ class MemoryPlan:
 def plan_memory(rng: random.Random, keeper: S.KeeperProfile, index: int, duplicate: bool) -> MemoryPlan:
     """A planted stale fact lands in a category in proportion to its size, at a random place among
     the durable facts there, and draws its length, time and surface as a durable fact does. A
-    planted duplicate picks its category the same way and draws its own time and surface."""
+    planted duplicate picks its category the same way and draws its own time and surface. A
+    category's planted facts take the places of durable ones, so it never holds more than
+    FACTS_PER_CATEGORY_CAP facts: the prompt prints a count over the cap (`memory_variables`), and
+    only a planted fact would put one there."""
     n_facts = round(S.sample_quantile(rng, S.FACTS_PER_MEMORY))
     n_cats = min(len(keeper.categories), round(S.sample_quantile(rng, S.CATEGORIES_PER_MEMORY)))
     names = rng.sample(keeper.categories, n_cats)
     counts = S.allocate_counts(rng, n_facts, n_cats)
     names = names[: len(counts)]  # fewer facts than categories leaves the last categories empty
     stale_in = Counter(rng.choices(names, weights=counts, k=S.sample_weighted(rng, S.STALE_FACTS_PER_MEMORY_WEIGHTS)))
+    pair_category = rng.choices(names, weights=counts)[0] if duplicate else None
     end = MEMORY_END - dt.timedelta(seconds=rng.randrange(86400))
     start = end - dt.timedelta(days=S.sample_quantile(rng, S.MEMORY_SPAN_DAYS))
     slots: list[FactSlot] = []
     for name, count in zip(names, counts, strict=True):
-        kinds = [False] * count + [True] * stale_in[name]
+        planted = stale_in[name] + (name == pair_category)
+        kinds = [False] * min(count, S.FACTS_PER_CATEGORY_CAP - planted) + [True] * stale_in[name]
         rng.shuffle(kinds)
         for stale in kinds:
             seen = between(rng, start, end)
             length = int(round(S.sample_quantile(rng, S.CLAIM_CHARS), -1))
             slots.append(FactSlot(name, length, stale, seen, S.plan_surface(rng, S.FACT_SURFACE, seen)))
     pair: DuplicateSlot | None = None
-    if duplicate:
-        category, seen = rng.choices(names, weights=counts)[0], between(rng, start, end)
-        pair = DuplicateSlot(category, seen, S.plan_surface(rng, S.FACT_SURFACE, seen))
+    if pair_category is not None:
+        seen = between(rng, start, end)
+        pair = DuplicateSlot(pair_category, seen, S.plan_surface(rng, S.FACT_SURFACE, seen))
     return MemoryPlan(f"{keeper.key}-{index:02d}", keeper, tuple(slots), pair, rng.randrange(2**31))
 
 
@@ -172,7 +185,7 @@ def between(rng: random.Random, start: dt.datetime, end: dt.datetime) -> dt.date
     return start + dt.timedelta(seconds=rng.randrange(int((end - start).total_seconds())))
 
 
-def claims_for(caller: Caller, plan: MemoryPlan, category: str, slots: tuple[FactSlot, ...],
+def claims_for(caller: Asks, plan: MemoryPlan, category: str, slots: tuple[FactSlot, ...],
                existing: list[str]) -> list[tuple[FactSlot, str]] | None:
     """Claims for `slots`, matched by position. A claim counts only when its text carries exactly
     its slot's surface. An attempt is kept when every stale slot and DURABLE_KEEP_SHARE of the
@@ -226,7 +239,7 @@ def facts_of(rng: random.Random, written: list[Written]) -> tuple[S.MemoryFact, 
         for w in timed)
 
 
-def duplicate_for(caller: Caller, rng: random.Random, plan: MemoryPlan, slot: DuplicateSlot,
+def duplicate_for(caller: Asks, rng: random.Random, plan: MemoryPlan, slot: DuplicateSlot,
                   written: list[Written]) -> Written | None:
     """A restatement of one durable fact of the slot's category. It counts only when it carries the
     slot's marks and stays within the candidate length band of that fact. None when the category
@@ -251,7 +264,7 @@ def duplicate_for(caller: Caller, rng: random.Random, plan: MemoryPlan, slot: Du
     return None
 
 
-def build_memory(caller: Caller, plan: MemoryPlan) -> tuple[S.MemoryFact, ...] | None:
+def build_memory(caller: Asks, plan: MemoryPlan) -> tuple[S.MemoryFact, ...] | None:
     rng = random.Random(plan.seed)
     written: list[Written] = []
     for category, group in itertools.groupby(plan.slots, key=lambda slot: slot.category):
@@ -277,11 +290,18 @@ def target_choices(facts: tuple[S.MemoryFact, ...]) -> list[S.MemoryFact]:
     return [f for f in facts if not f.planted_stale and f.memory_id not in paired]
 
 
-def build_candidates(caller: Caller, rng: random.Random, keeper: S.KeeperProfile, facts: tuple[S.MemoryFact, ...],
+def untargeted_category(rng: random.Random, targets: list[S.MemoryFact], planned: int) -> str | None:
+    """The category of a new or transient candidate: that of a fact drawn the way a targeted
+    candidate draws its target (`synth_candidate_plan.target_near`). The prompt prints each
+    category's size, and a category drawn evenly instead would make a large one mark a targeted
+    candidate. None when no fact could be a target."""
+    return C.target_near(rng, targets, planned).category if targets else None
+
+
+def build_candidates(caller: Asks, rng: random.Random, keeper: S.KeeperProfile, facts: tuple[S.MemoryFact, ...],
                      plans: tuple[C.CandidatePlan, ...]) -> tuple[S.Candidate, ...] | None:
     durable = [f for f in facts if not f.planted_stale]
     targets = target_choices(facts)
-    categories = sorted({f.category for f in facts}, key=lambda s: s.encode())
     used: set[str] = set()
     out: list[S.Candidate] = []
     clock = between(rng, CANDIDATE_TIME_START, CANDIDATE_TIME_START + dt.timedelta(days=1))
@@ -300,12 +320,16 @@ def build_candidates(caller: Caller, rng: random.Random, keeper: S.KeeperProfile
                 category = target.category
                 task = P.targeted_task(plan.kind, target.claim)
             case S.CandidateKind.NEW_DURABLE:
-                category = rng.choice(categories)
+                category = untargeted_category(rng, targets, plan.length)
+                if category is None:
+                    return None
                 same = [f.claim for f in durable if f.category == category]
                 task = P.TASK_NEW.format(category=category,
                                        existing="\n".join(f"- {head(c)}" for c in same) or "(없음)")
             case S.CandidateKind.TRANSIENT:
-                category = rng.choice(categories)
+                category = untargeted_category(rng, targets, plan.length)
+                if category is None:
+                    return None
                 task = P.TASK_TRANSIENT.format(category=category)
         prompt = P.CANDIDATE_PROMPT.format(role=keeper.role_material, world=keeper.world, task=task,
                                          length=plan.length, surface="표기: " + P.surface_line(surface),

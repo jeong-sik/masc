@@ -2143,6 +2143,7 @@ type keeper_plain_projection =
   }
 
 let keeper_plain_entry_height density = function
+  | Keeper_world -> 0
   | Keeper_group_heading _ -> 1
   | Keeper_display_row _ -> match density with
     | Keeper_list_model.One_line -> 1
@@ -2154,11 +2155,11 @@ let keeper_plain_projection (state : state) ~terminal_rows ~cols ~now =
   let stop = keeper_list_stop state in
   let selected_row = match stop with
     | Some (Keeper_list_model.Stop_row position) -> List.nth_opt reading.klr_rows position
-    | Some (Keeper_list_model.Stop_heading _) | None -> None
+    | Some (Keeper_list_model.Stop_world | Keeper_list_model.Stop_heading _) | None -> None
   in
   let selected_reading = Option.map (fun (row : Keeper_list_model.row) -> row.reading) selected_row in
   let rows = surface_body_rows state ~terminal_rows in
-  let entries = keeper_display_entries ~folded:state.keeper_list_folded reading in
+  let entries = keeper_display_entries ~view:state.keeper_list_view ~folded:state.keeper_list_folded reading in
   let desired_heights = List.map (keeper_plain_entry_height state.keeper_list_density) entries in
   let side_by_side = cols >= Masc_tui_roster_pane.threshold_cols in
   let list_width = if side_by_side then max 1 ((inner - 3) * 2 / 5) else inner in
@@ -2245,6 +2246,7 @@ let keeper_plain_list_lines (state : state) ~now:_ projection =
   let text ko en = ui_text state ~ko ~en in
   let stop = keeper_list_stop state in
   let entry_lines = function
+    | Keeper_world -> []
     | Keeper_group_heading (group, count) as entry ->
         let heading =
           (if List.mem group state.keeper_list_folded then Keeper_mark.grid_folded_mark

@@ -198,8 +198,8 @@ module McpSessionStore : sig
   val remove : string -> bool
 end
 
-(** Start a background fiber that periodically cleans up stale
-    MCP sessions.  Call once at server startup. *)
+(** Start a background fiber that cleans up stale MCP sessions once every
+    tenth of [Env_config.Session.max_age_seconds].  Call once at server
+    startup. *)
 val start_mcp_session_cleanup_loop :
-  sw:Eio.Switch.t -> clock:_ Eio.Time.clock ->
-  ?interval:float -> unit -> unit
+  sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit -> unit

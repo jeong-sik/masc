@@ -19,8 +19,6 @@ type error =
   | Invalid_observation of string
   | Stopped
 
-type mount = { source : string; destination : string }
-
 (** [on_created] runs as soon as the exact created-container ID is known,
     before waiting for inspect or protocol initialization. Store the handle to
     allow concurrent detach even if either operation never responds. Packages expose
@@ -47,7 +45,6 @@ val start :
   instance_id:string ->
   package:Lane_addon_types.package ->
   ?state_owner:Lane_addon_worker_state.owner ->
-  ?mounts:mount list ->
   ?docker_command:string ->
   ?container_command:string ->
   ?on_engine:(Lane_addon_lifecycle.engine -> (unit, string) result) ->

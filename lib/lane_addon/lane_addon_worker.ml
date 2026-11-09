@@ -13,8 +13,6 @@ type error =
   | Invalid_observation of string
   | Stopped
 
-type mount = Engine.mount = { source : string; destination : string }
-
 type t = {
   id : string;
   name : string;
@@ -275,7 +273,7 @@ let stop t =
     Protocol.close t.protocol;
     Ok ()
 
-let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package) ?state_owner ?(mounts = [])
+let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package) ?state_owner
     ?(docker_command = "docker") ?(container_command = "container") ?(on_engine = fun _ -> Ok ()) ?(is_live_instance = fun _ -> true) ?scope ?(on_created = fun _ -> ()) ?artifact_store ?sampling_handler () =
   let* () = if String.trim instance_id = "" then Error (Invalid_package "instance_id must be non-blank")
     else Ok () in
@@ -301,13 +299,8 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
   let runtime = container.runtime in
   let command = command_for runtime ~docker_command ~container_command in
   let* package_mount = Engine.mount_argument runtime
-      { source = package.directory; destination = "/addon" }
+      { Engine.source = package.directory; destination = "/addon" }
       |> Result.map_error (fun detail -> Invalid_package detail) in
-  let* mounted = List.fold_left (fun acc mount ->
-      let* paths = acc in
-      let* path = Engine.mount_argument runtime mount
-        |> Result.map_error (fun detail -> Invalid_package detail) in
-      Ok (paths @ [ "--mount"; path ])) (Ok []) mounts in
   (* The binding is persisted before create. Its instance ID therefore also
      identifies a container when the process dies before receiving create's
      stdout or persisting [on_created]. Domain labels are checked before any
@@ -392,7 +385,7 @@ let start ~sw ~clock ~control_timeout_sec ~mgr ~instance_id ~(package : package)
     run ~operation:"create"
       (Engine.create_arguments container ~command:package.command ~name ~instance_id ~state_owner:mine
          ~image:(Engine.image_create_reference image ~requested:container.image)
-         ~scope ~package_mount ~mounts:mounted ~state_mounts:state_mount) in
+         ~scope ~package_mount ~state_mounts:state_mount) in
   let* created = match Lane_addon_slot.proven port ~expected:engine
       ~lift:(fun failure -> Lifecycle failure) create_on_engine with
     | Ok value -> Ok value

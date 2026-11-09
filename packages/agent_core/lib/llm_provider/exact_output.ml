@@ -585,7 +585,6 @@ let flow_evidence_generation_dispatch (evidence : flow_evidence) =
 
 let receipt_http_status = Generation_receipt.http_status
 let receipt_provider_trace = Generation_receipt.provider_trace
-let receipt_responses_lifecycle = Generation_receipt.responses_lifecycle
 let provider_trace_fingerprint = Trace.fingerprint
 let receipt_plan_fingerprint = Generation_receipt.plan_fingerprint
 let receipt_request_body_sha256 = Generation_receipt.request_body_sha256

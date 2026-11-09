@@ -36,7 +36,6 @@ val phase : t -> effect_phase
 val dispatch_count : t -> int
 val http_status : t -> int option
 val provider_trace : t -> provider_trace option
-val responses_lifecycle : t -> Backend_openai_responses.lifecycle_observation option
 val plan_fingerprint : t -> string
 val request_body_sha256 : t -> string
 val catalog_generation : t -> Exact_output_resolver.catalog_generation

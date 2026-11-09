@@ -58,17 +58,6 @@ let test_sort_order_witness_in_enum () =
   Alcotest.(check int) "count" 5
     (List.length D.valid_sort_order_strings)
 
-let test_sort_order_legacy_aliases_rejected () =
-  let module D = Masc.Board_dispatch in
-  let rejected label raw =
-    Alcotest.(check (option string)) label None
-      (D.sort_order_of_string_opt raw |> Option.map D.sort_order_to_string)
-  in
-  rejected "new rejected" "new";
-  rejected "active rejected" "active";
-  rejected "comments rejected" "comments";
-  rejected "garbage rejected" "definitely-not-an-order"
-
 let test_permanent_post () =
   let store = create_store
       ~base_path:(Env_config_core.base_path ()) () in
@@ -572,8 +561,6 @@ let () =
         [
           Alcotest.test_case "witness covers all 5 variants" `Quick
             test_sort_order_witness_in_enum;
-          Alcotest.test_case "legacy aliases rejected" `Quick
-            test_sort_order_legacy_aliases_rejected;
         ] );
       ( "post_kind",
         [

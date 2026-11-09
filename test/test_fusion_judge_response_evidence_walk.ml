@@ -130,4 +130,4 @@ let scenario () = with_workspace (fun work ->
    check bool "seat failure never exposes response bytes"false(String.contains detail '~')
   |Panel_attempt_failed _
   |Judge_attempt_failed(Timeout|Provider_error _|Empty_response _|Empty_result|Build_error _|Panels_unavailable _|Unknown_route _|Route_unavailable _|Internal_error _)->fail "actual parser failure was reclassified")route.failed_attempts records)
-let ()=run "actual Fusion judge evidence"["controlled official candidate walk",[test_case "two failures survive third success" `Quick scenario]]
+let ()=Masc_test_deps.publish_single_user_access ();run "actual Fusion judge evidence"["controlled official candidate walk",[test_case "two failures survive third success" `Quick scenario]]

@@ -266,6 +266,7 @@ let cases client =
 let () =
   Prompt_registry.set_markdown_dir (Masc_test_deps.source_path "config/prompts");
   Masc.Prompt_defaults.init ();
+  Masc_test_deps.publish_single_user_access ();
   run "Fusion selected model idle"
     ["selected timeout", List.concat_map cases [Claude; Codex; Antigravity; Muse]]
 ;;

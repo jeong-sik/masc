@@ -267,10 +267,12 @@ def load_ledger(directory: Path, start: float, end: float) -> SourceResult:
                 ts = record.get("ts")
                 if not isinstance(ts, (int, float)):
                     continue
-                # Remember the newest row even when it falls outside the window.
-                # That single number is what tells a live-but-quiet ledger from
-                # a stale copy (#50504).
-                if result.newest_ts is None or ts > result.newest_ts:
+                # Remember the newest row that the window includes. A row after
+                # the window end is future data relative to this report (the
+                # `--now` flag can pin the end in the past), and counting it
+                # would let a ledger with zero in-window rows claim it was
+                # watching (#50507 P3).
+                if ts < end and (result.newest_ts is None or ts > result.newest_ts):
                     result.newest_ts = ts
                 if ts < start or ts >= end:
                     continue

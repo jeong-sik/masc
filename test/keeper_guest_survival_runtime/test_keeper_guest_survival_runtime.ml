@@ -662,19 +662,6 @@ let colliding_fixture_bases root =
     | None -> Hashtbl.add seen prefix path; find (index + 1) in
   find 0
 
-(* Every step reads the Keeper's declaration as a server does. Its
-   [microvm_delivery] boots the Apple guest with its agent and sends every
-   request through that agent (RFC microvm-guest-agent-over-socket 3.9). *)
-let declare_keeper ~config ~base =
-  let local_config = Filename.concat (Workspace.masc_dir config) "config" in
-  Fs_compat.mkdir_p local_config;
-  Unix.putenv Env_config_core.config_dir_env_key local_config;
-  Config_dir_resolver.reset ();
-  let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:base keeper in
-  Fs_compat.mkdir_p (Filename.dirname declaration);
-  write declaration (Printf.sprintf
-    "[keeper]\nname = %S\ninstructions = \"fixture\"\nsandbox_profile = \"microvm\"\nsandbox_image = \"base\"\nmicrovm_backend = \"apple_container\"\nnetwork_mode = \"none\"\nmicrovm_delivery = \"agent_socket\"\n" keeper)
-
 let process_step root operation =
   (* This provider fixture opens no network. Declare its resolver explicitly
      instead of inheriting a host-only systemd resolver in Linux CI. *)
@@ -698,7 +685,6 @@ let process_step root operation =
       let binary = Filename.concat shim Microvm.shim_binary_name in
       write binary "#!/bin/sh\nexit 0\n"; Unix.chmod binary 0o700) [base; other]) other_base;
   let config = Workspace.default_config base in
-  declare_keeper ~config ~base;
   value (Keeper_microvm_shim_readiness.initialize ~fs ~base_path:base ~payload_path:"/usr/bin:/bin"
     |> Result.map_error Keeper_microvm_shim_readiness.error_message);
   Option.iter (fun other ->
@@ -734,6 +720,14 @@ let process_step root operation =
     Prompt_registry.set_markdown_dir prompts;
     Prompt_registry.load_prompts_from_directory prompts;
     Masc_test_deps.init_unified_tool_registry ();
+    let local_config = Filename.concat (Workspace.masc_dir config) "config" in
+    Fs_compat.mkdir_p local_config;
+    Unix.putenv Env_config_core.config_dir_env_key local_config;
+    Config_dir_resolver.reset ();
+    let declaration = Config_dir_resolver.keeper_toml_path_for_base_path ~base_path:base keeper in
+    Fs_compat.mkdir_p (Filename.dirname declaration);
+    write declaration (Printf.sprintf
+      "[keeper]\nname = %S\ninstructions = \"fixture\"\nsandbox_profile = \"microvm\"\nsandbox_image = \"base\"\nmicrovm_backend = \"apple_container\"\nnetwork_mode = \"none\"\n" keeper);
     value (Keeper_meta_store.replace_snapshot config (meta ())) in
   let diagnostic_read ~config ~meta =
     let endpoint = value (Turn.microvm_attached_endpoint ~timeout_sec:10. ~config ~meta ()) in

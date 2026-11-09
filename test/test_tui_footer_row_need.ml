@@ -176,6 +176,42 @@ let test_a_goal_list_with_a_row_names_every_key () =
         (names_item full key))
     (goal_list_needing @ goal_list_answering)
 
+(* The Memory fact browser is a mode of the Memory surface, so it draws from a
+   builder of its own and takes the width as well. [j/k], [Enter] and [n / N]
+   act on a fact. [c / C], [s], [a / A] and [/] change what the list holds, so
+   a store or a filter that left no fact is undone with them, and [Esc] is the
+   way back. The width is wide enough for the Category pane key [d]. *)
+let memory_facts_cols = 120
+let memory_facts_needing = [ "j/k"; "Enter"; "n / N"; "Home/End" ]
+
+let memory_facts_answering =
+  [ "c / C"; "d"; "s"; "a / A"; "/"; "Esc"; "r"; "q" ]
+
+let test_an_empty_fact_browser_names_no_key_that_needs_a_fact () =
+  let empty =
+    Keys.footer_hints_memory_facts ~cols:memory_facts_cols ~has_rows:false
+  in
+  List.iter
+    (fun key ->
+      check bool ("Memory facts empty browser does not name " ^ key) false
+        (names_item empty key))
+    memory_facts_needing;
+  List.iter
+    (fun key ->
+      check bool ("Memory facts empty browser still names " ^ key) true
+        (names_item empty key))
+    memory_facts_answering
+
+let test_a_fact_browser_with_a_fact_names_every_key () =
+  let full =
+    Keys.footer_hints_memory_facts ~cols:memory_facts_cols ~has_rows:true
+  in
+  List.iter
+    (fun key ->
+      check bool ("Memory facts browser with a fact names " ^ key) true
+        (names_item full key))
+    (memory_facts_needing @ memory_facts_answering)
+
 (* The approval queue draws from a builder of its own, and its keys need three
    different things. [j/k] and [y / n] act on an approval row and answer with a
    notice without one. [ / ] selects a waiting question and [a] opens the
@@ -257,6 +293,10 @@ let () =
             test_an_empty_goal_list_names_no_key_that_needs_a_row
         ; test_case "a goal list with a row names every key" `Quick
             test_a_goal_list_with_a_row_names_every_key
+        ; test_case "an empty fact browser names no key that needs a fact"
+            `Quick test_an_empty_fact_browser_names_no_key_that_needs_a_fact
+        ; test_case "a fact browser with a fact names every key" `Quick
+            test_a_fact_browser_with_a_fact_names_every_key
         ; test_case "an empty approvals queue names only the keys that act"
             `Quick test_an_empty_approvals_queue_names_only_the_keys_that_act
         ; test_case "an approval row brings the keys that decide" `Quick

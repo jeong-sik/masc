@@ -2147,25 +2147,29 @@ let footer_hints_git_diff =
    instead of pausing a keeper -- so a reader who has not pressed them learns
    them only from [?], which is what [?] answers. *)
 let bindings_memory_facts =
-  [ b Navigate "j/k" "move"
-  ; b Act "Enter" "detail"
+  [ b Navigate "j/k" "move" ~rows:Needs_row
+  ; b Act "Enter" "detail" ~rows:Needs_row
       ~help:"read the whole fact in a wide overlay that owns the terminal"
   ; b Act "c / C" "category" ~help:"cycle category filter (forward / backward)"
   ; b Act "d" "Category pane" ~help:"show or hide the Category rail on wide screens; facts use the full width by default"
   ; b Act "s" "sort" ~help:"cycle sort (recency, last retrieved, retrieved count, category, claim)"
   ; b Act "a / A" "all fleet" ~help:"switch to consolidated memory across entire fleet"
   ; b Search "/" "filter" ~help:"live text filter / search"
-  ; b Search "n / N" "next / previous match"
+  ; b Search "n / N" "next / previous match" ~rows:Needs_row
   ; b Act "Esc" "close / clear" ~help:"clear filter or exit to health table"
   ]
   @ row_list_edges @ listing_meta
 
-let footer_hints_memory_facts ~cols =
+(* [has_rows] is whether the browser holds a fact. A keeper with none, or a
+   filter that left none, has nothing for [j/k], [Enter] and [n / N] to act on.
+   [c / C], [s], [a / A] and [/] stay: a filter that left no fact is undone
+   with them. *)
+let footer_hints_memory_facts ~cols ~has_rows =
   let bindings =
     if cols >= Masc_tui_roster_pane.threshold_cols then bindings_memory_facts
     else List.filter (fun (binding : binding) -> binding.key <> "d") bindings_memory_facts
   in
-  hints_of_bindings bindings
+  hints_of_bindings (List.filter (answers_in_state ~has_rows) bindings)
 
 (* The reading the browser's Enter opens. One fact scrolls under the cursor
    instead of the cursor moving rows, so it owns page and edge keys the

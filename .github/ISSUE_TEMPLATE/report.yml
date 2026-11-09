@@ -7,9 +7,14 @@ body:
         Classification comes from the declaration block below and nothing else.
         Fill in the values from
         [`.github/issue-taxonomy.json`](https://github.com/jeong-sik/masc/blob/main/.github/issue-taxonomy.json),
-        which is the vocabulary SSOT. The `Issue Taxonomy` workflow reads the block and applies
-        the labels; if a value is wrong it replies with the full list of accepted values.
-        Do not set labels by hand.
+        which is the vocabulary SSOT.
+
+        Nothing applies these labels automatically any more: the hourly
+        `Issue Taxonomy` reconciliation workflow was removed in #41275. A triager
+        (a Keeper or an operator) reads the block and attaches the matching
+        labels; that is the normal path, not drift to be undone. A value outside
+        the SSOT will therefore go unnoticed — check your values against the file
+        before you file.
 
         Filing with `gh issue create`? Put the same fenced `masc-triage` block in the body.
 

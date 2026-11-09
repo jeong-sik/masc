@@ -11,7 +11,6 @@
     @since 2.130.0
     @since 2.149.0 — .mli added to stabilize module interface *)
 
-open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 

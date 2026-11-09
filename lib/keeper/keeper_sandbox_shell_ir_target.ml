@@ -1,6 +1,5 @@
 (* Sandbox target helpers for typed Shell IR dispatch. *)
 
-open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 

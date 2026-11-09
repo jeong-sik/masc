@@ -9,7 +9,6 @@
 
     @since 2.102.0 *)
 
-open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 

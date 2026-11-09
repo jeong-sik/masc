@@ -89,9 +89,7 @@ let append_approval_lifecycle_at_slot_once
       ~transcript_slot
   =
   let open Keeper_chat_delivery_identity in
-  match Request_id.of_string lifecycle.approval_id with
-  | Error detail -> Error detail
-  | Ok approval_id ->
+  let approval_id = lifecycle.approval_id in
     (try
        ensure_dir_once ~base_dir;
        let redaction = redaction_for ~base_dir ~keeper_name in

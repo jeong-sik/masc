@@ -227,7 +227,7 @@ BrowserRead `mode=regions`는 화면의 의미 영역을 관측한다. 반환된
 `set_viewport`는 `expectedUrl`과 함께 `width`·`height`(100~4096 CSS px)를 같이 주면 그 탭의 viewport 크기를 바꾼다.
 둘 다 빼면 브라우저 원래 크기로 돌아간다.
 바꾼 뒤에는 screenshot을 다시 찍는다.
-`hover_at`이나 `drag`가 `live_transport_unsupported`로 거절되면 `references/connection.md`의
+`hover_at`이 `live_transport_unsupported`로 거절되면 `references/connection.md`의
 같은 항목대로 한다. 같은 요청을 같은 연결에 반복하지 않는다. 필요한 조작을 지원하는 현재 페이지의 관측된 컨트롤이 있으면
 요청 범위 안에서 사용하고, 그렇지 않으면 미수행 상태를 남긴다.
 

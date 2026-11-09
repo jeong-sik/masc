@@ -73,13 +73,9 @@ let test_semantic_pointer_actions () =
        "destination",`Assoc ["selector",`String "#target"]];
      fields "click" @ ["selector",`String "button";"source",`Assoc observed]]
 let test_drag_options () =
-  let viewport = `Assoc ["documentId",`String "doc";"width",`Int 800;"height",`Int 600;
-    "scrollX",`Int 0;"scrollY",`Int 0] in
   let point x y = `Assoc ["x",`Float x;"y",`Float y] in
   let via = `List [point 0.3 0.2;point 0.4 0.7] in
   let cases = [
-    fields "drag" @ ["expectedUrl",`String "https://example.org";"viewport",viewport;
-      "from",point 0.1 0.2;"to",point 0.8 0.7];
     fields "drag_to" @ ["expectedUrl",`String "https://example.org";
       "source",`Assoc ["selector",`String "#source"];"destination",`Assoc ["selector",`String "#drop"]]] in
   List.iter (fun base ->
@@ -131,7 +127,7 @@ let test_pointer_actions () =
     ignore (match Interaction.parse wire with Ok _ -> () | Error e -> fail e);
     check bool "pointer action requires its observed URL" true
       (Result.is_error (Interaction.parse (`Assoc (List.remove_assoc "expectedUrl" input)))))
-    ["hover_at",["point",point];"click_at",["point",point];"drag",["from",point;"to",point];
+    ["hover_at",["point",point];"click_at",["point",point];
      "scroll_at",["point",point;"x",`Int 0;"y",`Int 120]];
   List.iter (fun bad ->
     check bool "invalid screenshot coordinates rejected before dispatch" true

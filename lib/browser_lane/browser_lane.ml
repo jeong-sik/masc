@@ -86,7 +86,6 @@ type interaction = Activate_tab | Click of string | Fill of { selector : string;
   | Swipe of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport; via : Pointer.point list; duration_ms : int }
   | Click_at of { point : Pointer.point; viewport : Pointer.viewport; button : Pointer.button }
   | Scroll_at of { point : Pointer.point; viewport : Pointer.viewport; x : int; y : int }
-  | Drag of { from : Pointer.point; to_ : Pointer.point; viewport : Pointer.viewport; via : Pointer.point list; duration_ms : int }
   | Follow_link of node_ref | Click_node of node_ref | Fill_node of { target : node_ref; text : string }
   | Click_target of snapshot_target | Fill_target of { target : snapshot_target; text : string }
   | Hover_target of snapshot_target | Double_click_target of snapshot_target
@@ -95,7 +94,6 @@ type interaction = Activate_tab | Click of string | Fill of { selector : string;
    their own native input contracts and dispatch paths. *)
 let ego_input_contract = function
   | Type_text _ -> Native_input.contract Native_input.Keyboard_type
-  | Drag _ -> Native_input.contract Native_input.Raw_pointer_drag
   | Drag_to {source;destination;via;_} ->
       (match source,destination,via with
        | Selector _,Selector _,[] -> Native_input.contract Native_input.Drag_and_drop
@@ -202,7 +200,7 @@ let ego_reply_policy = function
      | Hover (Scene_node _) | Double_click (Scene_node _)
      | Set_viewport _ | Double_click_at _ | Type_text _
      | Press_key _ | Scroll _ | Hover_at _ | Tap_at _ | Swipe _ | Click_at _
-     | Scroll_at _ | Drag _ | Follow_link _ | Click_node _ | Fill_node _ -> Reply_window)
+     | Scroll_at _ | Follow_link _ | Click_node _ | Fill_node _ -> Reply_window)
   | (Tabs_list | Page_read _ | Page_document _ | Page_downloads _ | Page_cookies _ | Page_network _ | Page_console _
     | Page_scene _ | Page_snapshot _
     | Page_native_workflow _
@@ -254,7 +252,6 @@ let interaction_verb = function
   | Tap_at _ -> "tap_at"
   | Swipe _ -> "swipe"
   | Click_at _ -> "click_at"
-  | Drag _ -> "drag"
   | Click _ | Click_node _ | Click_target _ -> "click"
   | Fill _ | Fill_node _ | Fill_target _ -> "fill"
   | Follow_link _ -> "follow_link"
@@ -347,9 +344,6 @@ let interaction_args ~tab_id ~expected_url action =
         @ (match button with
            | Pointer.Primary -> []
            | Pointer.Middle | Pointer.Secondary -> ["button", `String (Pointer.button_to_string button)])
-    | Drag {from;to_;viewport;via;duration_ms} -> [verb;
-        "from", Pointer.point_to_json from; "to", Pointer.point_to_json to_;
-        "viewport", Pointer.viewport_to_json viewport] @ drag_fields via duration_ms
     | Click selector -> [verb; "selector", `String selector]
     | Fill {selector; text} -> [verb; "selector", `String selector; "text", `String text]
     | Select_option {selector; selection} ->
@@ -556,7 +550,7 @@ let live_capability_of_interaction = function
   | Click_at {button = Pointer.Middle | Pointer.Secondary; _} -> Trusted_button_click
   | Scroll_at _ -> Point_scroll
   | Hover _ | Hover_at _ -> Trusted_hover
-  | Drag_to _ | Drag _ -> Trusted_drag
+  | Drag_to _ -> Trusted_drag
   | Tap_at _ | Swipe _ -> Touch_input
 ;;
 

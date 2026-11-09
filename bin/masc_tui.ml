@@ -14756,11 +14756,8 @@ let draw_browser_viewport state (shot : Browser_lane_view.screenshot) bytes =
   in
   let pointer_hint = match !image_cell_pixels with
     | Some (width, height) when width > 0 && height > 0 ->
-        let click = "click: link" in
-        (* A view that holds no clients answers "not listed" for a live shot. *)
-        let view = Option.value state.browser_lane ~default:(Browser_lane_view.create ()) in
-        click ^ "   " ^ Browser_lane_view.screenshot_drag_hint view shot
-    | _ -> "click/drag unavailable: terminal cell geometry unknown" in
+        "click: link"
+    | _ -> "click unavailable: terminal cell geometry unknown" in
   let wheel_hint = match !image_cell_pixels with
     | Some (width,height) when width > 0 && height > 0 -> "wheel:pane"
     | _ -> "wheel:center" in
@@ -32738,17 +32735,14 @@ Use relative paths for resources already held in the package. -->
                 (match pressed, !browser_image_region with
                  | Some (start_row,start_column,from), Some region ->
                      (match Masc_tui_graphics.image_point region ~row ~column with
-                      | Some (x,y) ->
-                          pointer
-                            (if row=start_row && column=start_column then
-                               Browser_lane.Click_at {point=from;viewport=shot.viewport;
-                                 button=Browser_lane.Pointer.Primary}
-                             else Browser_lane.Drag {from;to_={x;y};viewport=shot.viewport;
-                               via=[];duration_ms=0})
-                      | None -> ())
+                      | Some _ when row=start_row && column=start_column ->
+                          pointer (Browser_lane.Click_at {point=from;viewport=shot.viewport;
+                            button=Browser_lane.Pointer.Primary})
+                      | Some _ | None -> ())
                  | _ -> ())
-            (* Its own press and release say click or drag; the motion
-               between them moves nothing on the page. *)
+            (* A press and release on one cell is a click. A release on
+               another cell sends nothing: no connection takes a drag from
+               point to point. *)
             | Mouse_left_drag _ -> ()
             | Key ("esc" | "q") -> close ()
             | Key "r" -> launch_browser_lane state ~mailbox:async_messages (Viewport_refresh {tab_id=shot.tab_id; expected_url=shot.url})

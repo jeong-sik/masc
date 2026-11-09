@@ -6598,7 +6598,7 @@ module Browser_lane_view = struct
     | Backends_unavailable (Masc.Browser_addon_observation.Ego_user_owned_name _ :: _) ->
         Some (reload () ^ " · Ego user-owned at startup (last list); fix, Off→Inactive→On")
     | Backends_unavailable (Masc.Browser_addon_observation.Ego_space_missing _ :: _) ->
-        Some (reload () ^ " · Ego Space gone, connection ended (last list); take_over reopens")
+        Some (reload () ^ " · Ego Space gone, connection ended (last list); take_over reopens it if configured by name")
   let selection_label t = match t.selection with
     | Unbound | Bound_automatic -> "Automatic"
     | Live_unbound | Bound_explicit -> "Selected browser"
@@ -6771,28 +6771,9 @@ module Browser_lane_view = struct
   let browser_choice_observation = function
     | Connected_browser client -> space_observation_row client
     | Automatic_browser -> None
-  (* Whether the connection a screenshot came from takes a drag. A live
-     screenshot names its client, and the answer is the lane table's for that
-     client's transport. It is unknown when the view no longer holds that
-     client: the footer then says so instead of naming a rule. *)
-  type drag_support = Drag_served | Drag_needs of Browser_lane.live_transport list | Drag_unknown
   let screenshot_client t (shot : screenshot) =
     List.find_opt (fun (client : client) -> Some client.client_id = shot.client_id)
       (Option.to_list t.selected_client @ listed_clients t)
-  let screenshot_drag_support t (shot : screenshot) =
-    match shot.source with
-    | Live ->
-        (match screenshot_client t shot with
-         | None -> Drag_unknown
-         | Some client ->
-             if Browser_lane.live_transport_serves client.transport Browser_lane.Trusted_drag
-             then Drag_served
-             else Drag_needs (Browser_lane.live_transports_serving Browser_lane.Trusted_drag))
-  let screenshot_drag_hint t shot =
-    match screenshot_drag_support t shot with
-    | Drag_served -> "drag: move"
-    | Drag_needs transports -> "drag: needs a " ^ transport_names transports ^ " connection"
-    | Drag_unknown -> "drag: connection not listed"
   (* What becomes of a pointer gesture on a screenshot. Every gesture -- a
      click, a drag, a wheel notch, a scroll key -- is decided here, so none
      reaches a connection that does not serve it. A request in flight consumes
@@ -7737,7 +7718,7 @@ module Browser_lane_view = struct
                                                 | Type_text _ | Press_key _
                                                 | Hover _ | Drag_to _
                                                 | Scroll _ | Hover_at _
-                                                | Click_at _ | Drag _
+                                                | Click_at _
                                                 | Tap_at _ | Swipe _
                                                 | Follow_link _ | Click_node _
                                                 | Fill_node _ | Click_target _ | Fill_target _

@@ -2144,7 +2144,7 @@ let interact ?actor t args =
   let* () = match request.action with
     | Browser_lane.Drag_to {duration_ms;_} when duration_ms <> 0 ->
         Error (Live.Before_effect "ego drag requires durationMs=0; movement timing is not exposed by its mouse API")
-    | Browser_lane.Drag_to _ | Browser_lane.Drag _
+    | Browser_lane.Drag_to _
     | Browser_lane.Activate_tab | Browser_lane.Fill _ | Browser_lane.Select_option _
     | Browser_lane.Set_viewport _ | Browser_lane.Double_click_at _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
     | Browser_lane.Scroll _ | Browser_lane.Hover_at _ | Browser_lane.Tap_at _ | Browser_lane.Swipe _
@@ -2161,7 +2161,7 @@ let interact ?actor t args =
       | Browser_lane.Set_viewport _ | Browser_lane.Type_text _ | Browser_lane.Press_key _
       | Browser_lane.Scroll _ | Browser_lane.Hover_at _
       | Browser_lane.Tap_at _ | Browser_lane.Swipe _ | Browser_lane.Click_at _ | Browser_lane.Double_click_at _
-      | Browser_lane.Scroll_at _ | Browser_lane.Drag _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
+      | Browser_lane.Scroll_at _ | Browser_lane.Follow_link _ | Browser_lane.Click_node _
       | Browser_lane.Fill_node _ | Browser_lane.Click_target _ | Browser_lane.Fill_target _
       | Browser_lane.Hover_target _ | Browser_lane.Double_click_target _ -> Browser_interaction.needs_pointer_resolution request.action in
     if needs_resolution then
@@ -2251,7 +2251,6 @@ let interact ?actor t args =
   | Browser_lane.Double_click_at {point; viewport} -> pointer viewport point (Press {button = Browser_lane.Pointer.Primary; count = 2})
   | Browser_lane.Hover_at {point; viewport} -> pointer viewport point Move
   | Browser_lane.Scroll_at {point; viewport; x; y} -> pointer viewport point (Wheel {x; y})
-  | Browser_lane.Drag _ -> unavailable_input Browser_lane.Native_input.Raw_pointer_drag_void
   | Browser_lane.Type_text {document_id;text} -> native_type t ~id ~label ~expected_url ~document_id ~text
   | Browser_lane.Press_key {key; _} ->
     (match key.key with

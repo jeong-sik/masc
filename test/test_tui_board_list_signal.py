@@ -76,8 +76,10 @@ class BoardListSignalTest(unittest.TestCase):
         def opened(server: owed.ChatServer, step: Callable[..., None]) -> None:
             listing = cast(ListServer, server)
             listing.set_phase("open")
-            # Keepers -> Usage -> Board.
-            step("keys", "\t\t")
+            # Keepers -> Board via the palette (#50465 took Board off the tab ring).
+            step("keys", ":go Work / Board")
+            step("drain", 0.3)
+            step("keys", "\r")
             step(
                 "wait",
                 lambda: listing.response_count("open", LIST_PATH) >= 1,
@@ -146,8 +148,10 @@ class BoardListSignalTest(unittest.TestCase):
                 with listing.condition:
                     listing.hold_next_list = True
                 listing.set_phase("open")
-                # Keepers -> Usage -> Board.
-                step("keys", "\t\t")
+                # Keepers -> Board via the palette (#50465 took Board off the tab ring).
+                step("keys", ":go Work / Board")
+                step("drain", 0.3)
+                step("keys", "\r")
                 step("wait", listing.list_held.is_set, "the Board did not read its list")
                 listing.set_phase("superseded")
                 step(

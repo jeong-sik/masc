@@ -58,8 +58,10 @@ class UsagePushedReadsTest(unittest.TestCase):
         def opened(server: BaseChatServer, step: Callable[..., None]) -> None:
             usage = cast(UsageServer, server)
             usage.set_phase("open")
-            # Keepers -> Usage.
-            step("keys", "\t")
+            # Keepers -> Usage via the palette (#50465 took Usage off the tab ring).
+            step("keys", ":go Operations / Usage")
+            step("drain", 0.3)
+            step("keys", "\r")
             step(
                 "wait",
                 lambda: usage.response_count("open", ACCOUNT_EMAILS_PATH) >= 1,

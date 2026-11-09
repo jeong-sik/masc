@@ -103,8 +103,11 @@ class BoardPostSignalTest(unittest.TestCase):
         def opened(server: owed.ChatServer, step: Callable[..., None]) -> None:
             board = cast(BoardServer, server)
             board.set_phase("open")
-            # Keepers -> Usage -> Board, then open the first post.
-            step("keys", "\t\t")
+            # Keepers -> Board via the palette (#50465 took Board off the tab ring),
+            # then open the first post.
+            step("keys", ":go Work / Board")
+            step("drain", 0.3)
+            step("keys", "\r")
             step(
                 "wait",
                 lambda: board.count("open", "/api/v1/board") >= 1,

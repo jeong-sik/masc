@@ -596,38 +596,3 @@ module Model_grader = struct
       }
   ;;
 end
-
-(* ── JSON serialization (Swiss Verdict Schema v1) ──────────── *)
-
-let verdict_to_json (v : verdict) : Yojson.Safe.t =
-  `Assoc
-    [ "passed", `Bool v.passed
-    ; ( "score"
-      , match v.score with
-        | Some s -> `Float s
-        | None -> `Null )
-    ; "evidence", Util.json_of_string_list v.evidence
-    ; ( "detail"
-      , match v.detail with
-        | Some d -> `String d
-        | None -> `Null )
-    ]
-;;
-
-let swiss_verdict_to_json (sv : _ swiss_verdict) : Yojson.Safe.t =
-  let layer_result_to_json (lr : _ layer_result) : Yojson.Safe.t =
-    `Assoc
-      [ "layer_name", `String lr.layer_name
-      ; "passed", `Bool lr.layer_passed
-      ; "score", `Null
-      ; "evidence", `List [ `String lr.layer_evidence ]
-      ; "detail", `Null
-      ]
-  in
-  `Assoc
-    [ "schema_version", `Int 1
-    ; "all_passed", `Bool sv.all_passed
-    ; "coverage", `Float sv.coverage
-    ; "layer_results", `List (List.map layer_result_to_json sv.layer_results)
-    ]
-;;

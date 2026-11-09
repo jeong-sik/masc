@@ -180,7 +180,6 @@
   test_structured_deep
   test_structured_ext
   test_structured_stream
-  test_swiss_verdict_json
   test_tool
   test_tool_input_schema_fidelity
   test_tool_input_validation
@@ -309,7 +308,6 @@
   test_structured_deep
   test_structured_ext
   test_structured_stream
-  test_swiss_verdict_json
   test_tool
   test_tool_input_schema_fidelity
   test_tool_input_validation

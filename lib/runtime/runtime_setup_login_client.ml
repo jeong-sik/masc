@@ -100,7 +100,7 @@ let environment = function
     Runtime_codex_app_server.client_environment (Runtime_official_account.Current (Some account_home))
     |> Result.map_error Runtime_codex_app_server.error_to_string
   | Native {client=Claude_home; account_home} ->
-    Runtime_claude_code.client_environment (Runtime_official_account.Current (Some account_home))
+    Runtime_claude_code.login_environment ~account_home
     |> Result.map_error Runtime_claude_code.error_to_string
   | Native {client=Muse_home; account_home} ->
     Ok (Runtime_muse_serve.login_environment ~account_home)
@@ -108,18 +108,20 @@ let environment = function
 
 let is_pty = function Native _ -> false | Antigravity_home _ -> true
 
-(* WORKAROUND: the clients still take the account in their config, so the
-   authorized account goes there. Root fix: plan D2-5 and D2-6, where every
-   client function that starts the CLI takes the authorized account. *)
-let authorized ~account_request ~client ~account_home =
+let authorize ~account_request ~client ~account_home =
   let* captured = Runtime_official_account.capture ~client ~declaration:(Some account_home) in
   Runtime_account_access.authorize account_request (Runtime_account_access.seal captured)
-  |> Result.map Runtime_account_access.account
   |> Result.map_error Runtime_account_access.refusal_to_string
 
 let observe ~mgr ~clock ~cwd ~cli_path ~account_request = function
   | Native {client=Codex_home; account_home} ->
-    let* account = authorized ~account_request ~client:Codex ~account_home in
+    (* WORKAROUND: the Codex client still takes the account in its config, so
+       the authorized account goes there. Root fix: plan D2-6, where every
+       Codex function that starts the CLI takes the authorized account. *)
+    let* account =
+      authorize ~account_request ~client:Codex ~account_home
+      |> Result.map Runtime_account_access.account
+    in
     let config = { (Runtime_codex_app_server.default_config ()) with
       cli_path; account_home=Runtime_official_account.Captured account } in
     let* result = Runtime_codex_app_server.probe_subscription ~mgr ~clock ~cwd config
@@ -129,10 +131,9 @@ let observe ~mgr ~clock ~cwd ~cli_path ~account_request = function
      | Provider_managed | Amazon_bedrock ->
        Error "Codex did not report authentication for this selected login account.")
   | Native {client=Claude_home; account_home} ->
-    let* account = authorized ~account_request ~client:Claude_code ~account_home in
-    let config = { (Runtime_claude_code.default_config ~cwd:account_home) with
-      cli_path; account_home=Runtime_official_account.Captured account } in
-    let* result = Runtime_claude_code.probe_subscription ~mgr ~clock ~cwd config
+    let* account = authorize ~account_request ~client:Claude_code ~account_home in
+    let config = { (Runtime_claude_code.default_config ~cwd:account_home) with cli_path } in
+    let* result = Runtime_claude_code.probe_subscription ~mgr ~clock ~cwd ~account config
       |> Result.map_error Runtime_claude_code.error_to_string in
     (match result.authentication with
      | Runtime_claude_code.Claude_ai | Api_key | OAuth_token -> Ok Authenticated

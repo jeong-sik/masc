@@ -543,9 +543,10 @@ let claude_auth_status = function
 (* A child that inherits an environment credential runs on it before the
    signed-in account, so a refusal on that child names the credential's source
    as a candidate rather than the account the operator looks at first. *)
-let claude_auth_refusal ~account_home ~status detail =
+let claude_auth_refusal ~account ~status detail =
   let inherited =
-    if Runtime_claude_code.runs_on_environment_credential (Runtime_official_account.Captured account_home)
+    if Runtime_claude_code.runs_on_environment_credential
+         (Runtime_official_account.Captured (Runtime_account_access.account account))
     then
       " (this child inherited an environment credential, which Claude Code uses \
        before the signed-in account)"
@@ -619,12 +620,8 @@ let muse_account_spent ~mgr ~clock ~cwd ~scope config =
       | Ok () -> exhausted ()
       | Error _ -> false)
 
-(* WORKAROUND: the clients still take the account in their config, so the
-   authorized account goes there. Root fix: plan D2-5 and D2-6, where every
-   client function that starts the CLI takes the authorized account. *)
-let authorized ~account_request account =
+let authorize ~account_request account =
   Runtime_account_access.authorize account_request (Runtime_account_access.seal account)
-  |> Result.map Runtime_account_access.account
   |> Result.map_error (fun refusal ->
     Unavailable (Account_not_authorized (Runtime_account_access.refusal_to_string refusal)))
 ;;
@@ -912,12 +909,11 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
                       }
                   | (Runtime_agent_context.Yielded_to_durable_stimulus _ | Runtime_agent_context.InputRequired _) as stop_reason -> Error (Provider_rejected (unfinished_run_reason stop_reason))))))
       | Runtime_execution.Claude_code execution ->
-        (match authorized ~account_request execution.account_home with
+        (match authorize ~account_request execution.account_home with
          | Error failure -> Error failure
-         | Ok account_home ->
+         | Ok account ->
         let config =
           { (Runtime_claude_code.default_config ~cwd:cwd_path) with
-            account_home = Runtime_official_account.Captured account_home;
             cli_path = execution.cli_path
           ; model = execution.model
           ; admission_timeout_s = Float.min timeout_s execution.timeout_s
@@ -938,7 +934,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
                    Option.map
                      (fun status ->
                         claude_auth_refusal
-                          ~account_home
+                          ~account
                           ~status
                           (Printf.sprintf
                              "Claude Code was retrying the provider request (retry %d of %d)"
@@ -965,6 +961,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
              ~mgr
              ~clock
              ~cwd
+             ~account
              config
              ~prompt
              ~images:[]
@@ -987,7 +984,7 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
                 { api_error_status; detail; _ } as error) ->
            (match claude_auth_status api_error_status with
             | Some status ->
-              Error (claude_auth_refusal ~account_home ~status detail)
+              Error (claude_auth_refusal ~account ~status detail)
             | None -> Error (Provider_rejected (Runtime_claude_code.error_to_string error)))
          | Error (Runtime_claude_code.Quota_blocked { block; _ } as error) ->
            Error (claude_quota_failure block (Runtime_claude_code.error_to_string error))
@@ -1002,7 +999,14 @@ let verify ~secure_random ~sw ~net ~mgr ~clock ~cwd ~cwd_path ~timeout_s ~accoun
               | Runtime_claude_code.Unhandled_exception _ ) as error) ->
            Error (Provider_rejected (Runtime_claude_code.error_to_string error))))
       | Runtime_execution.Codex_app_server execution ->
-        (match authorized ~account_request execution.account_home with
+        (* WORKAROUND: the Codex client still takes the account in its config,
+           so the authorized account goes there. Root fix: plan D2-6, where
+           every Codex function that starts the CLI takes the authorized
+           account. *)
+        (match
+           authorize ~account_request execution.account_home
+           |> Result.map Runtime_account_access.account
+         with
          | Error failure -> Error failure
          | Ok account_home ->
         match Runtime_verification_codex_home.prepare

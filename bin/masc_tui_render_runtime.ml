@@ -1514,39 +1514,22 @@ let render_metrics (state : state) =
           ~push_selected:c.push_selected ~push_divider:c.push_divider
           ~push_empty:c.push_empty
       else begin
-        let pill section label =
-          if state.usage_section = section then Ansi.reverse ^ " " ^ label ^ " " ^ Ansi.reset
-          else Theme.recede () ^ " " ^ label ^ " " ^ Ansi.reset
+        (* The four sections go through the strip every other screen draws: a
+           mark on the one being read, the rest dim, and a count where a narrow
+           row has to hold sections back. *)
+        let usage_strip ~width =
+          tab_strip ~width ~press:(fun () text -> text)
+            (List.map
+               (fun (section, label) -> (label, state.usage_section = section, ()))
+               [ Usage_plan, "Plan"; Usage_trend, "Trend"; Usage_keepers, "Keepers"; Usage_calls, "Calls" ])
         in
-        let wide_navigation =
-          pill Usage_plan "Plan" ^ "  " ^ pill Usage_trend "Trend"
-          ^ "  " ^ pill Usage_keepers "Keepers" ^ "  " ^ pill Usage_calls "Calls"
-          ^ "   v:next view" in
-        let compact_navigation =
-          pill Usage_plan "Plan" ^ " " ^ pill Usage_trend "Trend"
-          ^ " " ^ pill Usage_keepers "Keepers" ^ " " ^ pill Usage_calls "Calls"
-          ^ " v:next" in
         let navigation =
-          if Message_layout.display_width wide_navigation <= width then wide_navigation
-          else if Message_layout.display_width compact_navigation <= width then
-            compact_navigation
-          else
-            let current = match state.usage_section with
-              | Usage_plan -> "Plan" | Usage_trend -> "Trend" | Usage_keepers -> "Keepers"
-              | Usage_calls -> "Calls" in
-            let current_width = Message_layout.display_width current in
-            let hint =
-              if current_width + 1 + Message_layout.display_width "v:next" <= width
-              then "v:next" else "v" in
-            let room = width - Message_layout.display_width hint - 1 in
-            if room <= 0 then
-              Ansi.reverse ^ Message_layout.take_cells current width ^ Ansi.reset
-            else
-              let label =
-                if room = 1 then Message_layout.take_cells current room
-                else Message_layout.fit_width current (min room current_width) in
-              Ansi.reverse
-              ^ label ^ Ansi.reset ^ " " ^ hint in
+          let lead = " " and wide_hint = "   v:next view" and compact_hint = "  v:next" in
+          let hint =
+            if Message_layout.display_width (lead ^ usage_strip ~width:max_int ^ wide_hint) <= width
+            then wide_hint else compact_hint in
+          lead ^ usage_strip ~width:(tab_strip_width ~cols ~before:lead ~after:hint) ^ hint
+        in
         (* Keep one navigation row so page movement still matches the body height. *)
         let navigation_rows = if budget >= 3 then 1 else 0 in
         let spacing_rows = if budget >= 6 then 1 else 0 in

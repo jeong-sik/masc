@@ -7,11 +7,6 @@
 
     @since 0.120.0 *)
 
-open Keeper_types
-open Keeper_meta_contract
-open Keeper_types_profile
-open Keeper_context_runtime
-
 include Keeper_unified_metrics_support
 include Keeper_unified_metrics_json_support
 

@@ -12,8 +12,6 @@
 
     @since God file decomposition *)
 
-open Keeper_meta_contract
-
 val append_manifest
   :  config:Workspace.config
   -> runtime_manifest_context:Keeper_runtime_manifest.turn_context

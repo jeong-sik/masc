@@ -141,6 +141,15 @@ let work_preview_field ~cells label value =
   let value = Terminal_text.single_line value in
   Message_layout.truncate_middle (max 1 cells) (label ^ value)
 
+let work_preview_body ~cells ~rows text =
+  if rows <= 0 then [] else
+  let lines = Masc_tui_text_block.rows ~max_cells:(max 1 cells) text in
+  let shown = List.take rows lines in
+  if List.length lines <= rows then shown
+  else List.mapi (fun index line ->
+    if index = rows - 1 then Message_layout.take_cells line (max 0 (cells - 1)) ^ "…"
+    else line) shown
+
 let work_task_rows_current (state : state) =
   state.workspace_identity = Workspace_identity_match
   && not (Local_read_order.in_flight state.local_workspace_read_order)
@@ -238,15 +247,8 @@ let task_preview_lines (state : state) ~cells ~rows (task : Tui_decode.task) =
   let hint =
     if rows >= 2 then [Theme.recede () ^ text "Enter: 상세" "Enter: details" ^ Ansi.reset]
     else [] in
-  let request = Masc_tui_text_block.rows ~max_cells:(max 1 cells) request in
   let room = max 0 (rows - List.length header - List.length hint) in
-  let shown = List.take room request in
-  let shown =
-    if List.length request <= room then shown
-    else List.mapi (fun index line ->
-      if index = room - 1 then Message_layout.take_cells line (max 0 (cells - 1)) ^ "…"
-      else line) shown in
-  header @ shown @ hint
+  header @ work_preview_body ~cells ~rows:room request @ hint
 
 
 (* One task's event history, appended after the detail body so it rides the
@@ -563,45 +565,6 @@ let planning_proof_detail ~ko (goal : planning_goal) =
         (Terminal_text.optional_single_line goal.pg_last_review_note)
 ;;
 
-let planning_selected_detail ~ko (goal : planning_goal) =
-  let metric =
-    match
-      Terminal_text.optional_single_line goal.pg_metric,
-      Terminal_text.optional_single_line goal.pg_target_value
-    with
-    | Some name, Some target ->
-        Printf.sprintf (if ko then "지표: %s → %s" else "metric: %s → %s") name target
-    | Some name, None -> (if ko then "지표: " else "metric: ") ^ name
-    | None, Some target -> (if ko then "목표값: " else "target: ") ^ target
-    | None, None -> if ko then "지표: —" else "metric: —"
-  in
-  match planning_proof_detail ~ko goal with
-  | None -> Ansi.dim,
-      (if ko then "판정 미관측" else "No verdict observed") ^ " · " ^ metric
-  | Some (colour, proof) ->
-      colour,
-      Printf.sprintf "%s \xc2\xb7 %s" proof metric
-;;
-
-(* Freshness in one short word: the exact timestamps live in the detail
-   pane; the row only needs to separate "touched today" from "quiet for
-   weeks". A timestamp that does not parse renders nothing here -- the raw
-   string is still shown unmodified in the detail pane. *)
-let planning_updated_age ~now (goal : planning_goal) =
-  match goal.pg_updated_at with
-  | None -> None
-  | Some iso ->
-      Option.map
-        (fun then_ ->
-           let delta = max 0. (now -. then_) in
-           if delta < 60. then "now"
-           else if delta < 3600. then
-             Printf.sprintf "%dm" (int_of_float (delta /. 60.))
-           else if delta < 86400. then
-             Printf.sprintf "%dh" (int_of_float (delta /. 3600.))
-           else Printf.sprintf "%dd" (int_of_float (delta /. 86400.)))
-        (Masc_domain.parse_iso8601_opt iso)
-
 (** Render the Planning surface (list view). *)
 
 
@@ -754,47 +717,48 @@ let planning_open_note (state : state) (goal : planning_goal) =
       else qualify (Printf.sprintf (if ko then "%d열림" else "%d open") (List.length tasks)),
         (if partial then Theme.warn () else Ansi.dim)
 
-let planning_preview_lines (state : state) ~cells ~now (goal : planning_goal) =
+let planning_preview_lines (state : state) ~cells ~rows (goal : planning_goal) =
+  if rows <= 0 then [] else
   let ko = state.ui_language = Lang_ko in
   let text korean english = if ko then korean else english in
   let field = work_preview_field ~cells in
   let phase = if ko then planning_phase_korean (Goal_phase.kind goal.pg_phase)
     else planning_phase_label goal.pg_phase in
-  let next_style, next = planning_next_step goal in
-  let proof_style, proof = planning_selected_detail ~ko goal in
-  let linked = match planning_linked_tasks state goal with
-    | None -> [field (text "연결 Task: " "Linked Tasks: ")
-                 (text "미관측 · Goal과 별도 조회" "Not observed · read separately from Goals")]
-    | Some tasks ->
-        let scope, _ = work_task_scope state in
-        let row_prefix =
-          if not (work_task_rows_current state) then text "↳ 보존 " "↳ retained "
-          else if not (work_task_rows_complete state) then text "↳ 일부 " "↳ partial "
-          else "↳ " in
-        field (text "Task 범위: " "Task scope: ") scope
-        :: (if tasks = [] then
-              [field (text "연결 Task: " "Linked Tasks: ")
-                 (if work_task_rows_complete state then text "열린 Task 없음" "No open Tasks"
-                  else if work_task_rows_current state then
-                    text "이 관측에 없음 · 전체 미확인" "None in this reading · total unknown"
-                  else text "보존한 목록에는 없음 · 현재 미확인" "None in retained list · current unknown")]
-            else List.map (fun (task : Tui_decode.task) ->
-             field row_prefix (task.id ^ " · "
-               ^ (match Masc_domain.task_assignee_of_status task.status with
-                  | Some owner -> owner | None -> text "미배정" "Unassigned")
-               ^ " · " ^ Masc_domain.task_status_to_string task.status)) tasks) in
-  [field "Goal: " goal.pg_id
-  ; field (text "원래 목표: " "Goal request: ") goal.pg_title
-  ; field (text "단계: " "Stage: ") phase
-  ; Theme.info () ^ text "Enter: 목표·기준·증거 읽기" "Enter: read Goal, criterion and proof" ^ Ansi.reset
-  ; next_style ^ field (text "상세 조치: " "In detail: ") next ^ Ansi.reset
-  ; proof_style ^ field (text "검증: " "Proof: ") proof ^ Ansi.reset]
-  @ linked
-  @ [field (text "우선순위: " "Priority: ") (Printf.sprintf "P%d" goal.pg_priority)]
-  @ Option.to_list (Option.map (field (text "기한: " "Due: "))
-       (Terminal_text.optional_single_line goal.pg_due_date))
-  @ Option.to_list (Option.map (field (text "목표 갱신 전: " "Goal updated: "))
-       (planning_updated_age ~now goal))
+  let notice =
+    if not (planning_goal_has_valid_id goal) then
+      Some (Theme.warn (), text "목표 ID 확인 필요" "Goal identifier needs inspection")
+    else if Option.is_some goal.pg_verifier_unreconciled then planning_proof_detail ~ko goal
+    else match goal.pg_proof with
+      | Proof_refuted _ | Proof_stale _ | Proof_unreadable _ -> planning_proof_detail ~ko goal
+      | Proof_idle | Proof_pending | Proof_proven _ -> None in
+  let notice = match notice with
+    | Some _ -> notice
+    | None ->
+        (match goal.pg_phase with
+         | (Goal_phase.Executing | Verifying) when Option.is_none goal.pg_retry_binding ->
+             Some (Theme.warn (), text "검증 요청 정보 미확인" "Verification request binding unavailable")
+         | Executing | Verifying | Awaiting_confirmation | Completed | Dropped
+         | Paused _ | Blocked _ -> None) in
+  let notice = Option.to_list (Option.map (fun (style, detail) ->
+      style ^ field "" detail ^ Ansi.reset) notice) in
+  let header =
+    (if rows >= 3 then [Theme.recede () ^ field "" phase ^ Ansi.reset] else [])
+    @ notice in
+  let hint =
+    if rows > List.length header && rows >= 2 then
+      [Theme.recede () ^ text "Enter: 상세" "Enter: details" ^ Ansi.reset]
+    else [] in
+  let criterion =
+    match goal.pg_metric, goal.pg_target_value with
+    | Some metric, Some target ->
+        text "성공 조건: " "Success criterion: " ^ metric ^ "\n"
+        ^ text "목표값: " "Target: " ^ target
+    | Some metric, None -> text "성공 조건: " "Success criterion: " ^ metric
+    | None, Some target -> text "목표값: " "Target: " ^ target
+    | None, None -> text "성공 조건 미확인" "Success criterion not observed" in
+  let request = goal.pg_title ^ "\n\n" ^ criterion in
+  let room = max 0 (rows - List.length header - List.length hint) in
+  header @ work_preview_body ~cells ~rows:room request @ hint
 
 let render_planning_list (state : state) =
   let terminal_rows, cols = get_terminal_size () in
@@ -806,7 +770,6 @@ let render_planning_list (state : state) =
     | Some snapshot -> planning_visible_goals ~filter:state.planning_filter
         ~sort:state.planning_sort snapshot.pl_goals in
   let count = List.length goals in
-  let now = Unix.gettimeofday () in
   let modes = if ko then
       let sort = match state.planning_sort with
         | Planning_sort_phase_priority -> "단계/우선순위"
@@ -817,6 +780,8 @@ let render_planning_list (state : state) =
       Printf.sprintf "정렬:%s  필터:%s" sort filter
     else Printf.sprintf "sort:%s  filter:%s"
       (planning_sort_label state.planning_sort) (planning_filter_label state.planning_filter) in
+  let show_modes = state.planning_sort <> Planning_sort_phase_priority
+    || state.planning_filter <> Planning_filter_active in
   let badge = "  " ^ connection_badge state in
   let title = planning_workspace_title state ~cols ~tab:Planning_goals ~window:"" ~after:badge ^ badge in
   surface_chrome
@@ -827,14 +792,12 @@ let render_planning_list (state : state) =
       let used = ref 0 in
       let push line = if !used < budget then (c.push line; incr used) in
       let push_context line = if !used < max 0 (budget - 1) then push line in
-      let heading = " " ^ Ansi.bold ^ text "맡긴 일은 어디까지 왔고, 다음 조치는 무엇인가?"
-          "Where does the work stand, and what comes next?" ^ Ansi.reset in
       let navigation = work_hub_navigation state ~cols in
       let current = state.workspace_identity = Workspace_identity_match
         && Option.is_none state.planning_error in
       (match state.planning with
        | None ->
-           List.iter push_context [heading; navigation];
+           push_context navigation;
            let note = match Terminal_text.optional_single_line state.planning_error with
              | Some detail -> text "Goal 조회 실패: " "Goal reading unavailable: " ^ detail
              | None -> text "Goal 미관측 · r:새로고침" "Goals not observed · r:refresh" in
@@ -844,13 +807,12 @@ let render_planning_list (state : state) =
              ^ text (if current then "현재 Goal 관측 · " else "보존한 Goal 관측 · ")
                     (if current then "Current Goal reading · " else "Retained Goal reading · ")
              ^ Terminal_text.single_line snapshot.pl_generated_at ^ Ansi.reset in
-           List.iter push_context
-             (if budget <= 3 then [scope; heading; navigation] else [heading; navigation; scope]);
+           List.iter push_context (if current then [navigation] else [scope; navigation]);
            let available = max 0 (budget - !used) in
            (* Modes and a read failure can use spare space, but never replace
               the one row Enter would open in a short terminal. *)
            if available >= 8 then begin
-             push_context (" " ^ Theme.recede () ^ modes ^ Ansi.reset);
+             if show_modes then push_context (" " ^ Theme.recede () ^ modes ^ Ansi.reset);
              Option.iter (fun detail -> push_context (" " ^ Theme.warn () ^ Terminal_text.single_line detail ^ Ansi.reset))
                state.planning_error
            end;
@@ -880,11 +842,11 @@ let render_planning_list (state : state) =
                     ~compact:(phase ^ linked)))
              @ work_list_position window ~count in
            let preview_lines = match List.nth_opt goals state.planning_cursor with
-             | None -> [text "j/k로 목표를 고르고 Enter로 읽기" "Choose a Goal with j/k, then Enter to read"]
-             | Some goal -> planning_preview_lines state ~cells:geometry.preview_width ~now goal in
+             | None -> [text "목표를 선택하세요" "Select a Goal"]
+             | Some goal -> planning_preview_lines state ~cells:geometry.preview_width ~rows:geometry.preview_rows goal in
            List.iter push (work_panel_lines geometry
-             ~list_title:(text "목표 · 원래 요청과 단계" "Goals · request and stage")
-             ~list_lines ~preview_title:(text "선택한 Goal · 다음 조치와 증거" "Selected Goal · next action and proof")
+             ~list_title:(text "목표" "Goals")
+             ~list_lines ~preview_title:(text "목표와 성공 조건" "Goal and success criterion")
              ~preview_lines)))
 
 let planning_measurement_lines (state : state) (goal : planning_goal) =
@@ -1054,28 +1016,37 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
   in
   let linked_tasks = List.filter (fun (row : Tui_decode.task) -> List.mem goal.pg_id row.goal_ids) state.tasks in
   let linked =
+    let scope, warning = work_task_scope state in
+    let links_complete, link_notices = match state.goal_task_links with
+      | Goal_links_read _ -> true, []
+      | Goal_links_not_read -> false,
+          field ~tone:Planning_detail.Unreadable "Goal links"
+            (ui_text state ~ko:"연결 정보 미관측" ~en:"links not read")
+      | Goal_links_read_failed reason -> false,
+          field ~tone:Planning_detail.Unreadable "Goal links" reason in
+    let complete = links_complete && work_task_rows_complete state in
+    let count = List.length linked_tasks in
+    let count_text =
+      if complete then string_of_int count
+      else if count = 0 then ui_text state ~ko:"미확인" ~en:"unknown"
+      else if state.ui_language = Lang_ko then Printf.sprintf "%d개 표시 · 전체 수 미확인" count
+      else Printf.sprintf "%d shown · total unknown" count in
     gap
     @ section
         (ui_text state ~ko:"2. 연결된 작업"
            ~en:"2. Linked Tasks")
-    @ match linked_tasks with
-    | [] ->
-        let note = match state.task_reading with
-          | Masc_tui_overview_tasks.Rows_unavailable _ -> page_failed_note
-          | Rows_unread -> page_unread_note
-          | Rows_read _ ->
-              (match state.goal_task_links with
-               | Goal_links_not_read -> "(links not read)"
-               | Goal_links_read_failed _ -> "(links unavailable)"
-               | Goal_links_read _ -> "(none)") in
-        field ~tone:Planning_detail.Quiet "Open tasks" note
-    | tasks -> field "Open tasks" (string_of_int (List.length tasks))
+    @ (if warning then field ~tone:Planning_detail.Unreadable "Task reading" scope else [])
+    @ (match state.tasks_error with
+       | None -> []
+       | Some reason -> field ~tone:Planning_detail.Unreadable "Task coverage" reason)
+    @ link_notices
+    @ field ~tone:(if complete then Planning_detail.Plain else Unreadable) "Open tasks" count_text
         (* One row per task, led by its id. Its [Link.reference] is that id
            under a fixed prefix, and only the board scans text for links, so
            a row of its own would repeat the id. *)
-        @ List.concat_map (fun (task : Tui_decode.task) ->
-            field ~separator:"  " task.id
-              (Masc_domain.task_status_to_string task.status ^ " · " ^ task.title)) tasks
+    @ List.concat_map (fun (task : Tui_decode.task) ->
+        field ~separator:"  " task.id
+          (Masc_domain.task_status_to_string task.status ^ " · " ^ task.title)) linked_tasks
   in
   let confirmation_rows =
     (match confirmation with

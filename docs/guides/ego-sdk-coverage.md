@@ -118,8 +118,8 @@ local Space is visible or that its login is complete.
 | --- | --- | --- |
 | `Page.mouse.click` | Trusted coordinates; workflow forwards button/clickCount/delay/label | New workflow requires real SDK and installed-route proof |
 | `Page.mouse.move` | Hover/path internals; workflow forwards steps/label | New workflow requires real SDK and installed-route proof |
-| `Page.mouse.down` | Not exposed. Current admission refuses coordinate, waypoint and scene-node drags before input; selector-to-selector drag uses native dragAndDrop | General held-button workflows and the native raw-input completion contract remain open |
-| `Page.mouse.up` | Not exposed. Raw drag is refused before input; no synthetic release is sent. Native selector drag keeps its observed receipt boundary | Explicit raw release acknowledgement and automatic uncertain-pointer recovery remain unsupported by the current integration |
+| `Page.mouse.down` | Not exposed. `drag_to` takes only selectors and uses native dragAndDrop | General held-button workflows and the native raw-input completion contract remain open |
+| `Page.mouse.up` | Not exposed; no synthetic release is sent. Native selector drag keeps its observed receipt boundary | Explicit raw release acknowledgement and automatic uncertain-pointer recovery remain unsupported by the current integration |
 | `Page.mouse.wheel` | Scroll at observed point; workflow forwards deltas/label | New workflow requires real SDK and installed-route proof; move over observed container first |
 | `Page.keyboard.down` | None | Held-key state and cancellation/release settlement |
 | `Page.keyboard.up` | None | Explicit release and uncertain-key recovery |
@@ -239,9 +239,8 @@ An input whose release the SDK did not declare is reported as
 `inputReadiness: release_uncertain` on the connection's answers. It does not
 refuse later input, and it lives with the connection.
 
-Current admission refuses raw typing and raw coordinate/waypoint/scene drags
-before input. That refusal preserves existing readiness; it does not clear an
-earlier uncertain command. Already-dispatched uncertain input must not be
+MASC sends no raw pointer drag, and raw typing uses only the bounded native-window
+path. Neither clears an earlier uncertain command. Already-dispatched uncertain input must not be
 replayed or inferred released from Page.info. See the
 [native workflow input contract](ego-native-workflow.md) for the supported
 fill, insertText, paste and selector-drag paths. Input readiness does not establish

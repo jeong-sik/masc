@@ -74,15 +74,8 @@ let native_input_admission () =
   let module Contract=Browser_lane.Native_input in
   let denied=request [step "fill" ["selector",str "#editor";"text",str "before"];
     step "keyboard.type" ["text",str "unsafe"];click] in
-  check bool "raw typing is admitted through its native-window contract" true
-    (W.validate_input_contract denied=Ok ());
   check bool "raw typing cannot use the receipt-only contract" true
     (Contract.contract Contract.Keyboard_type=Contract.Observed_native_window);
-  let admitted=request [step "fill" ["selector",str "#editor";"text",str "replace"];
-    step "keyboard.insertText" ["text",str "literal"];step "keyboard.paste" ["text",str "paste"];
-    step "keyboard.press" ["key",str "Enter"];click] in
-  check bool "explicit native alternatives remain executable" true
-    (W.validate_input_contract admitted=Ok ());
   let insertion=request [step "keyboard.insertText" ["text",str "literal"]] in
   (match insertion.steps with
    | [step] -> check bool "insertText creates no down/up ownership or release proof" true

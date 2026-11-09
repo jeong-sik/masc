@@ -13,9 +13,17 @@
     provider template, and no provider of [runtime.toml] declares them (user
     decision 2026-11-09).
 
-    {b Body.} [{"event":"made","keeper_id":...,"user_id":...}] and
-    [{"event":"assigned","keeper_id":...,"runtime_id":...}], with the members
-    in this order and every value a string. An assignment names no person: its
+    {b Turns.} The record that makes a Keeper also names the policy its turns
+    run under (user decision 2026-11-09): the owner is both the initiator and
+    the executor of every turn, and [turn_scope] limits the Runtimes, channels
+    and effects of that pair. The policy is data in the log, so a turn is
+    decided against what the owner wrote, never against a default in code.
+
+    {b Body.}
+    [{"event":"made","keeper_id":...,"user_id":...,"policy_id":...,"turn_scope":{...}}]
+    and [{"event":"assigned","keeper_id":...,"runtime_id":...}], with the
+    members in this order. [turn_scope] is a body of {!Authz_scope_body} and
+    every other value a string. An assignment names no person: its
     author is the owner who gives the Runtime. The labels are on disk and
     renaming one orphans every record written with it. A body with other
     members, the same members in another order, or a member of another type is
@@ -29,6 +37,9 @@ type t =
   | Made of
       { keeper_id : Authz_types.Keeper_id.t
       ; user_id : Authz_types.User_id.t  (** The owner, who makes it. *)
+      ; policy_id : Authz_types.Policy_id.t
+          (** The policy the owner's turns of this Keeper run under. *)
+      ; turn_scope : Authz_types.Authorization_scope.t  (** The limits of that policy. *)
       }
   | Assigned of
       { keeper_id : Authz_types.Keeper_id.t
@@ -38,7 +49,7 @@ type t =
 
 val equal : t -> t -> bool
 
-(** The body of the record. An error comes only from {!Authz_body.string}. *)
+(** The body of the record. An error comes only from {!Authz_body}. *)
 val to_body : t -> (Authz_body.t, Authz_body.error) result
 
 (** Why a body is not the body of a Keeper record. *)
@@ -47,10 +58,12 @@ type error =
   | Unknown_event of string  (** The first member is [event], but not a label of it. *)
   | Wrong_members
       (** An object, but not exactly the members of one event, in their order,
-          each a string. *)
+          each of its type. *)
   | Invalid_keeper_id of Authz_id.error
   | Invalid_user_id of Authz_id.error
   | Invalid_runtime_id of Authz_id.error
+  | Invalid_policy_id of Authz_id.error
+  | Invalid_turn_scope of Authz_scope_body.error
 
 val error_to_string : error -> string
 

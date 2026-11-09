@@ -10,6 +10,7 @@ module Hint_lines = Masc_tui_hint_lines
 module Message_layout = Masc_tui_message_layout
 module Numbered_list = Masc_tui_numbered_list
 module Rows = Masc_tui_rows
+module Page_line = Masc_tui_page_line
 module Keeper_chat = Masc_tui_keeper_chat_projection
 module Render_schedule = Masc_tui_render_schedule
 
@@ -154,6 +155,71 @@ let wrap_indented_line ~max_cells style text =
 
 let wrap_indented_lines ~max_cells style lines =
   List.concat_map (wrap_indented_line ~max_cells style) lines
+
+(* A reading page of typed lines. A fact's label sits receded in a column as
+   wide as the page's longest label, so the values start at one cell; a title
+   is bold, a quiet line is receded and an attention line is warned. A value
+   with a word wider than the room beside its label (a hash, a path), or on a
+   screen too narrow to leave it room, goes on the rows under the label, so no
+   word is cut at a column in the middle. *)
+let reading_label_cells_cap = 24
+let reading_min_value_cells = 16
+
+let reading_tone_style = function
+  | Page_line.Quiet -> Theme.recede ()
+  | Page_line.Plain -> Ansi.reset
+  | Page_line.Attention -> Theme.warn ()
+
+let widest_word_cells text =
+  List.fold_left
+    (fun widest word -> max widest (Message_layout.display_width word))
+    0 (String.split_on_char ' ' text)
+
+let reading_fact_rows ~max_cells ~label_cells ~tone label value =
+  let label = Terminal_text.single_line label ^ ":" in
+  let value = Terminal_text.single_line value in
+  let styled_label = Theme.recede () ^ label ^ Ansi.reset in
+  let styled_value text = reading_tone_style tone ^ text ^ Ansi.reset in
+  let column = max label_cells (Message_layout.display_width label) in
+  let value_cells = max_cells - column - 1 in
+  if value_cells < reading_min_value_cells || widest_word_cells value > value_cells
+  then
+    (Ansi.reset, detail_indent ^ styled_label)
+    :: List.map
+         (fun line -> Ansi.reset, detail_indent ^ detail_indent ^ styled_value line)
+         (Message_layout.wrap_words
+            ~max_cells:(max 1 (max_cells - String.length detail_indent))
+            value)
+  else
+    let pad = String.make (column + 1 - Message_layout.display_width label) ' ' in
+    match Message_layout.wrap_words ~max_cells:value_cells value with
+    | [] -> [ Ansi.reset, detail_indent ^ styled_label ]
+    | first :: rest ->
+      (Ansi.reset, detail_indent ^ styled_label ^ pad ^ styled_value first)
+      :: List.map
+           (fun line ->
+              Ansi.reset, detail_indent ^ String.make (column + 1) ' ' ^ styled_value line)
+           rest
+
+let reading_rows ~max_cells (lines : Page_line.t list) =
+  let label_cells =
+    List.fold_left
+      (fun widest -> function
+         | Page_line.Fact { label; _ } ->
+           max widest
+             (Message_layout.display_width (Terminal_text.single_line label) + 1)
+         | Page_line.Title _ | Page_line.Note _ -> widest)
+      0 lines
+    |> min reading_label_cells_cap
+  in
+  List.concat_map
+    (function
+      | Page_line.Title text -> wrap_indented_line ~max_cells Ansi.bold text
+      | Page_line.Note { text; tone } ->
+        wrap_indented_line ~max_cells (reading_tone_style tone) text
+      | Page_line.Fact { label; value; tone } ->
+        reading_fact_rows ~max_cells ~label_cells ~tone label value)
+    lines
 
 (* A candidate list as its label and one numbered row per candidate, one indent
    under the label, so a long model id wraps under its own number and is not
@@ -2390,7 +2456,9 @@ let render_clients (state : state) =
      which rides the same row. *)
   Buffer.add_string buf
     (footer_line state ~max_cells:cols ?position
-       ~hints:(Masc_tui_keys.footer_hints Masc_tui_types.Clients));
+       ~hints:
+         (Masc_tui_keys.footer_hints ~has_rows:(shown > 0)
+            Masc_tui_types.Clients));
   finish_surface state ~surface_key:"clients" ~rows:terminal_rows ~cols buf
 ;;
 
@@ -2422,11 +2490,10 @@ let render_lane_scrollable_styled_reading (state : state) ~terminal_rows ~cols
     ~surface_key ~rows:terminal_rows ~cols buf
 
 let render_lane_scrollable_reading (state : state) ~terminal_rows ~cols
-    ~surface_key ~title ~hints raw_lines =
+    ~surface_key ~title ~hints lines =
   let max_cells = max 1 (framed_inner_width cols - 2) in
   render_lane_scrollable_styled_reading state ~terminal_rows ~cols
-    ~surface_key ~title ~hints
-    (wrap_indented_lines ~max_cells Ansi.reset raw_lines)
+    ~surface_key ~title ~hints (reading_rows ~max_cells lines)
 
 let lane_activity_hints =
   "Space:draft  s:save  r:read  u:reapply  x:discard  ?:help  Esc:back"

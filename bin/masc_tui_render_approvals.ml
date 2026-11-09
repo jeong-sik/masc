@@ -496,9 +496,17 @@ let draw_ask_questions buf cols (state : state) ~budget =
         | [] -> Theme.recede ()
         | _ :: _ -> Ansi.bold ^ Theme.warn ()
       in
+      (* [a] opens the question under the cursor. With none under it the key
+         answers "Choose a question with [ or ] first", so the heading names it
+         only while one is selected, in the footer's words. *)
+      let selected_index = Ask_projection.selected_index open_rows state.ask_cursor in
+      let answer_hint =
+        if Option.is_some selected_index then " · " ^ Masc_tui_keys.approval_answer_hint
+        else ""
+      in
       box_line buf cols
-        (Printf.sprintf "  %s[?] Questions waiting on you (%d) · a:open answers%s" heading_tone
-           (Masc_tui_approvals_model.approvals_open_question_count state) Ansi.reset);
+        (Printf.sprintf "  %s[?] Questions waiting on you (%d)%s%s" heading_tone
+           (Masc_tui_approvals_model.approvals_open_question_count state) answer_hint Ansi.reset);
       match open_rows with
       | [] ->
           box_line buf cols
@@ -511,7 +519,7 @@ let draw_ask_questions buf cols (state : state) ~budget =
              budget -- an ask of four questions was enough to push the rest off
              the bottom, the cursor with it, so [/] and j/k moved a selection
              nothing on screen showed. *)
-          match Ask_projection.selected_index rows state.ask_cursor with
+          match selected_index with
           | None ->
               (* The selected ask left the list. No ask is drawn open, because
                  an open ask here is the one the next keys would answer. *)
@@ -1226,7 +1234,7 @@ let ask_question_scroll_limit state =
 let render_question_reader (state : state) =
   let terminal_rows, cols = get_terminal_size () in
   let buf = Buffer.create 4096 in
-  let asks = question_asks state in
+  let asks = open_ask_rows state in
   let selected_index = Ask_projection.selected_index asks state.ask_cursor in
   let selected = Option.bind selected_index (List.nth_opt asks) in
   box_top buf cols;

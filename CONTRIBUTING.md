@@ -54,7 +54,7 @@ cd masc
 git config core.hooksPath .githooks       # pre-commit and pre-push guards
 
 opam init --bare                         # initialize a fresh opam installation
-opam switch create . ocaml-base-compiler.5.5.1 --no-install
+opam switch create . ocaml-base-compiler.5.5.2 --no-install
 eval "$(opam env)"
 scripts/opam-pin-external-deps.sh         # pin external OCaml dependencies
 opam install ./masc.opam --deps-only --locked --with-test
@@ -248,9 +248,11 @@ check ran.
 ## Issues
 
 Issue classification comes from a `masc-triage` block in the issue body, and
-nothing else. Labels are a projection of that block, applied at issue creation.
-The vocabulary is `.github/issue-taxonomy.json`; a
-value that is not in that file does not exist.
+nothing else. Labels are a projection of that block, attached by whoever
+triages the issue: the hourly `Issue Taxonomy` reconciliation workflow was
+removed in #41275, so no automation reads the block any more. The vocabulary is
+`.github/issue-taxonomy.json`; a value that is not in that file does not exist,
+and nothing will tell you that you used one.
 
 ````text
 ```masc-triage
@@ -287,8 +289,9 @@ cannot recall its own last ten turns, when keepers stop talking to each
 other, or when output lands somewhere nobody reads.
 
 `gh issue create` uses the same block, so the web form and the CLI produce one
-shape and one parser. Do not edit labels by hand; edit the block and the
-workflow reconciles them. `APPLY=1 bash scripts/sync-issue-labels.sh`
+shape and one parser. Attach the labels that the block declares when you triage;
+edit the block first, then the labels, and never the labels alone.
+`APPLY=1 bash scripts/sync-issue-labels.sh`
 reconciles repository labels with the vocabulary file.
 
 When reporting a bug, include the OCaml version, the OS and version, steps to

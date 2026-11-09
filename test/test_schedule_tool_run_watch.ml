@@ -314,6 +314,65 @@ let test_update_refuses_a_run_on_a_recurring_schedule () =
     (describe_watch (watch_of_row (stored_exn config "watched")))
 ;;
 
+(* The injected admission runs after the tool has read and validated the
+   original row. Commit another public update there, before the first write
+   takes the schedule store lock, to make the interleaving deterministic. *)
+let test_update_after_concurrent_recurrence_change ~with_watch ~due_fields () =
+  with_config
+  @@ fun config ->
+  check_success "create one-shot"
+    (dispatch config ~name:create_name (create_fields ~message:"original" ()));
+  let original = stored_exn config "watched" in
+  let replacement = ref None in
+  let ordinary = schedule_ctx config in
+  let ctx = { ordinary with
+    admit_keeper_wake_creation = (fun config ~keeper_name write ->
+      check_success "concurrent recurring update"
+        (dispatch config ~name:update_name
+          [ "schedule_id", `String "watched"
+          ; "keeper_name", `String wake_keeper
+          ; "message", `String "concurrent recurring message"
+          ; "recurrence_kind", `String "interval"
+          ; "recurrence_interval_sec", `Int 3600
+          ; "due_at_unix", `Float future_due_at
+          ]);
+      replacement := Some (stored_exn config "watched");
+      ordinary.admit_keeper_wake_creation config ~keeper_name write) } in
+  let watch_fields = if with_watch then ["until_github_run", `String run_url] else [] in
+  let result = match Tool_schedule.dispatch ctx ~name:update_name
+      ~args:(`Assoc
+        ([ "schedule_id", `String "watched"
+         ; "keeper_name", `String wake_keeper
+         ; "message", `String "first caller's message"
+         ] @ watch_fields @ due_fields)) with
+    | Some result -> result
+    | None -> fail "schedule update dispatch returned None" in
+  let replacement = match !replacement with
+    | Some replacement -> replacement
+    | None -> fail "the concurrent update did not run" in
+  check bool "another instance was committed" false
+    (String.equal original.schedule_instance_id replacement.schedule_instance_id);
+  let final = stored_exn config "watched" in
+  (match final.recurrence with
+   | Schedule_domain.Interval { interval_sec } ->
+     check int "the concurrent interval is retained" 3600 interval_sec
+   | Schedule_domain.One_shot | Schedule_domain.Daily _ | Schedule_domain.Cron _ ->
+     fail "the concurrent recurrence was replaced");
+  check string "no inert run watch is stored" "no watch"
+    (describe_watch (watch_of_row final));
+  if with_watch then begin
+    check_refused "watch update used a superseded instance"
+      ~mentioning:["instance"] result;
+    check string "the concurrent instance survives" replacement.schedule_instance_id
+      final.schedule_instance_id;
+    check string "the concurrent message survives" "concurrent recurring message"
+      (message_of final)
+  end else begin
+    check_success "ordinary content update keeps latest timing" result;
+    check string "ordinary content still changes" "first caller's message" (message_of final)
+  end
+;;
+
 (* --- The tool schemas --- *)
 
 let schema_of action =
@@ -479,6 +538,13 @@ let () =
             "refuses a run on a recurring schedule"
             `Quick
             test_update_refuses_a_run_on_a_recurring_schedule
+        ; test_case "a watch rejects a concurrent recurrence change with retained timing"
+            `Quick (test_update_after_concurrent_recurrence_change ~with_watch:true ~due_fields:[])
+        ; test_case "a watch rejects a concurrent recurrence change with an explicit due"
+            `Quick (test_update_after_concurrent_recurrence_change ~with_watch:true
+              ~due_fields:["due_at_unix", `Float future_due_at])
+        ; test_case "an ordinary edit keeps the concurrent recurrence"
+            `Quick (test_update_after_concurrent_recurrence_change ~with_watch:false ~due_fields:[])
         ] )
     ; ( "schemas"
       , [ test_case "declare the param" `Quick test_schemas_declare_the_param

@@ -89,6 +89,12 @@ let websocket_upgrade_authorized ~base_path ~request_authority request =
 
 let websocket_handler ?sw ?clock ~upgrade request reqd =
   if is_websocket_upgrade_request request then
+    match upgrade with
+    | None ->
+      Http.Response.text ~status:`Upgrade_required
+        "426 Upgrade Required: WebSocket upgrade unavailable on this transport"
+        reqd
+    | Some upgrade ->
     match websocket_upgrade_unavailable_reason () with
     | None ->
       let base_path =

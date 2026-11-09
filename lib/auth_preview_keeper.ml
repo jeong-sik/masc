@@ -36,6 +36,20 @@ let runtime_id_of id =
   |> Result.map_error (fun (_ : Authz_id.error) -> error R.Bad_request_400 unknown_runtime)
 ;;
 
+(* The policy the turns of a Keeper made here run under: the owner runs it,
+   alone or on their own request, on any Runtime of theirs it is given, with
+   what that Runtime's Self grant allows (user decision 2026-11-09). The
+   Runtime and the effects are limited by the assignment and the Self grant,
+   so this policy limits only the channels. *)
+let own_keeper_turn_scope =
+  { Authz_types.Authorization_scope.runtimes = Authz_types.Runtime_scope.all
+  ; channels =
+      Authz_types.Channel_scope.only
+        (Authz_types.Channel.Set.of_list Authz_types.Channel.[ Autonomous; Direct ])
+  ; allowed_effects = Authz_types.Effect_scope.all
+  }
+;;
+
 let refusal_answer (refusal : Ks.refusal) =
   match refusal with
   | Ks.Already_made (_ : Authz_types.Keeper_id.t) -> error R.Conflict_409 taken
@@ -46,8 +60,12 @@ let refusal_answer (refusal : Ks.refusal) =
   | Ks.User_not_active (_ : Authz_types.User_id.t) ->
     (* An Admin disabled the person after the gate read the log. *)
     error R.Forbidden_403 "The principal is not active."
-  | Ks.Made_for_another _ | Ks.Not_a_human _ | Ks.Not_a_keeper_author _ ->
-    (* The gate let a human through, who writes in their own name. *)
+  | Ks.Made_for_another _
+  | Ks.Not_a_human _
+  | Ks.Not_a_keeper_author _
+  | Ks.Policy_named_before (_ : Authz_types.Policy_id.t) ->
+    (* The gate let a human through, who writes in their own name, and the
+       policy id is drawn fresh. *)
     Log.Server.warn "A Keeper record was refused: %s" (Ks.refusal_to_string refusal);
     error R.Internal_error_500 not_recorded
 ;;
@@ -55,7 +73,7 @@ let refusal_answer (refusal : Ks.refusal) =
 let failed (error_ : Authz_keeper.error) =
   match error_ with
   | Authz_keeper.Refused refusal -> refusal_answer refusal
-  | Authz_keeper.Body_not_built _ | Authz_keeper.Commit_failed _ ->
+  | Authz_keeper.Id_not_drawn _ | Authz_keeper.Body_not_built _ | Authz_keeper.Commit_failed _ ->
     Log.Server.warn "A Keeper record was not written: %s" (Authz_keeper.error_to_string error_);
     error R.Service_unavailable_503 not_recorded
 ;;
@@ -93,14 +111,31 @@ let make zone user_id ~body =
     in
     let* keeper_id = keeper_id_of name in
     let made record = keeper_json keeper_id [ "record", `String record ] in
-    match Ks.find (state_of zone).Authz_state.keepers keeper_id with
-    | Some { Ks.owner; runtime = _ } when Authz_types.User_id.equal owner user_id ->
-      Ok (made "existing")
-    | Some (_ : Ks.keeper) -> Error (error R.Conflict_409 taken)
+    let made_before () =
+      match Ks.find (state_of zone).Authz_state.keepers keeper_id with
+      | Some keeper when Authz_types.User_id.equal keeper.Ks.owner user_id ->
+        Some (Ok (made "existing"))
+      | Some (_ : Ks.keeper) -> Some (Error (error R.Conflict_409 taken))
+      | None -> None
+    in
+    match made_before () with
+    | Some answer -> answer
     | None ->
-      (match Authz_keeper.make zone ~user_id ~keeper_id with
+      (match
+         Authz_keeper.make
+           zone
+           ~user_id
+           ~keeper_id
+           ~turn_scope:own_keeper_turn_scope
+           ~draw:Auth.generate_token
+       with
        | Ok () -> Ok (made "made")
-       | Error error_ -> Error (failed error_))
+       | Error error_ ->
+         (* Another request can make the Keeper between the read above and
+            this write. The log then has it, and says whose it is. *)
+         (match made_before () with
+          | Some answer -> answer
+          | None -> Error (failed error_)))
   in
   Result.fold ~ok:Fun.id ~error:Fun.id answer
 ;;

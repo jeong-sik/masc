@@ -463,11 +463,11 @@ let journal_stats t = with_store t (fun () ->
                           !n)
                    in
                    Some (Int64.of_int st_size, rows)
-                 | exception _ -> None)
+                 | exception (Unix.Unix_error _ | Sys_error _) -> None)
       with
       | stats -> stats
       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
-      | exception _ -> None))
+      | exception (Unix.Unix_error _ | Sys_error _) -> None))
 let journal_uncertain t = with_store t (fun () -> List.length t.uncertain)
 let journal_error t = with_store t (fun () -> t.journal_error)
 let journal_skipped t = with_store t (fun () -> t.skipped_rows)

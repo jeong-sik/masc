@@ -672,12 +672,24 @@ let render_planning_list (state : state) =
   (* The composer owns the terminal's last row; everything this surface
      lays out fits above it. *)
   let rows = Masc_tui_types.surface_body_rows state ~terminal_rows in
+  (* The goals the filter and sort leave on screen. The footer asks for them
+     first: with none, the keys that read the Goal under the cursor do not
+     answer, and the dispatcher counts the same list. *)
+  let goals =
+    match state.planning with
+    | None -> []
+    | Some p ->
+        planning_visible_goals ~filter:state.planning_filter
+          ~sort:state.planning_sort p.pl_goals
+  in
+  let count = List.length goals in
   let buf = Buffer.create 4096 in
   let tail = Buffer.create 256 in
   box_bottom tail cols;
   Buffer.add_string tail
     (footer_line state ~max_cells:cols
-       ~hints:Masc_tui_keys.footer_hints_planning_goal_list);
+       ~hints:(Masc_tui_keys.footer_hints_planning_goal_list
+                 ~has_rows:(count > 0)));
   let tail_rows = count_frame_lines tail in
 
   let now_unix = Unix.gettimeofday () in
@@ -728,14 +740,6 @@ let render_planning_list (state : state) =
   List.iter (box_line buf cols) (planning_stale_notice_rows state ~cols);
   box_divider buf cols;
 
-  let goals =
-    match state.planning with
-    | None -> []
-    | Some p ->
-        planning_visible_goals ~filter:state.planning_filter
-          ~sort:state.planning_sort p.pl_goals
-  in
-  let count = List.length goals in
   let planning_error =
     Terminal_text.optional_single_line state.planning_error
   in
@@ -1186,6 +1190,8 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
            @ Planning_detail.body ~width goal.pg_proof goal.pg_last_review_note)
   in
   let measurement = planning_measurement_lines state goal in
+  let criterion_review = Planning_detail.criterion_review_lines ~width
+    ~ko:(state.ui_language = Lang_ko) goal.pg_criterion_review in
   let timeline = Planning_detail.timeline ~width ~goal_id:goal.pg_id state.goal_timeline in
   let candle =
     let open Candle_goal_observation in
@@ -1292,9 +1298,9 @@ let planning_detail_content (state : state) ~confirmation ~cols (goal : planning
      long event list wedging itself between them. *)
   let proof =
     (match confirmation with
-     | `Inspect Masc_tui_fetched.Absent -> measurement @ confirmation_rows @ timeline
+     | `Inspect Masc_tui_fetched.Absent -> criterion_review @ measurement @ confirmation_rows @ timeline
      | `Submitting | `Inspect (Masc_tui_fetched.Ready _ | Loading | Stale _ | Failed _) ->
-         confirmation_rows @ measurement) in
+         confirmation_rows @ criterion_review @ measurement) in
   let wrapped_proof = planning_proof_rows ~width proof in
   let before_candle, after_candle = match confirmation with
     | `Inspect Masc_tui_fetched.Absent ->
@@ -1675,6 +1681,13 @@ let schedule_delivery_rows = 2
 let schedule_rows_around_list =
   schedule_summary_rows + schedule_column_header_rows + schedule_delivery_rows
 
+(* Whether the list holds a row for [j/k], [Right / Enter], [e], [x] and [Y]
+   to act on. Read by the footer; the dispatcher reads the same rows. *)
+let schedule_list_has_rows (state : state) =
+  match state.schedules with
+  | Some snapshot -> snapshot.scs_rows <> []
+  | None -> false
+
 (** Render the Schedules surface: the scheduled-automation list, with an
     armed cancel. The server sorts active rows first by due time and caps the
     list at its own limit; [scs_truncated] and [scs_request_count] say what
@@ -1692,7 +1705,9 @@ let render_schedule_list (state : state) =
     (connection_badge state) in
 
   surface_chrome ~overflow:Paged_by_cursor state ~terminal_rows ~cols ~surface_key:"schedules" ~title:header
-    ~hints:(Masc_tui_keys.footer_hints ~detail_open:false Schedules)
+    ~hints:
+      (Masc_tui_keys.footer_hints ~detail_open:false
+         ~has_rows:(schedule_list_has_rows state) Schedules)
     ~body:(fun ~budget c ->
   (* The refusal rows go first and take what the list's fixed rows leave;
      past that, the last row says where the rest is. The fixed rows are the

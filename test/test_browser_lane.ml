@@ -235,7 +235,7 @@ let verb_asking_for : Lane.live_capability -> Lane.verb = Lane.(function
   | Point_click -> interact (Click_at {point;viewport;button=Pointer.Primary})
   | Point_scroll -> interact (Scroll_at {point;viewport;x=0;y=120})
   | Trusted_hover -> interact (Hover_at {point;viewport})
-  | Trusted_drag -> interact (Drag {from=point;to_=point;viewport;via=[];duration_ms=0})
+  | Trusted_drag -> interact (Drag_to {source="#source";destination="#destination"})
   | Trusted_double_click -> interact (Double_click_at {point;viewport})
   | Trusted_button_click -> interact (Click_at {point;viewport;button=Pointer.Secondary})
   | Viewport_resize -> interact (Set_viewport (Fit {width=800;height=600}))

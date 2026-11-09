@@ -1615,6 +1615,66 @@ let test_planning_proof_matches_producer_projection () =
    judge refused with a reason. Before this the pane could not tell them apart,
    and the reason — the whole product of the verification lane — stopped at the
    wire. *)
+let test_planning_preserves_creation_criterion_review () =
+  let decode ?(extra = []) review =
+    let base = match planning_goal_json "criterion-goal" "executing" 1 with
+      | `Assoc fields -> fields | _ -> Alcotest.fail "goal fixture is not an object" in
+    let fields = ("criterion_revision", `String "revision-current")
+        :: List.remove_assoc "criterion_revision" base @ extra in
+    let fields = match review with None -> fields | Some review -> ("criterion_review", review) :: fields in
+    match decode_planning_goals [`Assoc fields] with
+    | [goal] -> goal | _ -> Alcotest.fail "criterion observation lost the Goal" in
+  let review state revision reason = `Assoc
+    ["state", `String state; "criterion_revision", `String revision;
+     "request_id", `String "criterion-request"; "reason", reason; "detail", `Null] in
+  List.iter (fun (wire, reason) ->
+    let goal = decode (Some (review wire "revision-current" (`String reason))) in
+    Alcotest.(check bool) "criterion judgment leaves lifecycle unchanged" true
+      (goal.Tui_decode.pg_phase = Goal_phase.Executing);
+    match goal.pg_criterion_review with
+    | Tui_decode.Criterion_observed observed ->
+      Alcotest.(check string) "revision is retained" "revision-current" observed.criterion_revision;
+      Alcotest.(check string) "request is retained" "criterion-request" observed.request_id;
+      (match observed.state with
+       | Tui_decode.Criterion_viable actual ->
+         Alcotest.(check string) "viable state retained" "viable" wire;
+         Alcotest.(check string) "actual judgment reason is retained" reason actual
+       | Tui_decode.Criterion_needs_revision actual ->
+         Alcotest.(check string) "revision-needed state retained" "needs_revision" wire;
+         Alcotest.(check string) "actual judgment reason is retained" reason actual
+       | Tui_decode.Criterion_pending | Criterion_execution_pending | Criterion_execution_unknown
+       | Criterion_judgment_pending | Criterion_deferred | Criterion_superseded ->
+         Alcotest.fail "criterion judgment state was changed")
+    | Tui_decode.Criterion_unchecked | Tui_decode.Criterion_unavailable _ ->
+      Alcotest.fail "criterion judgment was not observed")
+    ["viable", "reachable using the named source"; "needs_revision", "the measurement source does not exist"];
+  List.iter (fun review ->
+    match (decode review).pg_criterion_review with
+    | Tui_decode.Criterion_unavailable _ -> ()
+    | Tui_decode.Criterion_unchecked | Tui_decode.Criterion_observed _ ->
+      Alcotest.fail "a missing, stale or unknown review became a current observation")
+    [None; Some (review "viable" "old-revision" (`String "old verdict"));
+     Some (`Assoc ["state", `String "future-state"])];
+  List.iter (fun (field, value) ->
+    let goal = decode ~extra:[field, value]
+        (Some (review "viable" "revision-current" (`String "current judgment"))) in
+    match goal.pg_criterion_review with
+    | Tui_decode.Criterion_unavailable _ -> ()
+    | Tui_decode.Criterion_unchecked | Tui_decode.Criterion_observed _ ->
+      Alcotest.fail "duplicate current Goal binding authorized a criterion judgment")
+    ["criterion_revision", `String "other-current-revision";
+     "id", `String "other-goal"];
+  (match (decode (Some (review "execution_unknown" "revision-current" `Null))).pg_criterion_review with
+   | Tui_decode.Criterion_observed observed ->
+     (match observed.state with
+      | Tui_decode.Criterion_execution_unknown -> ()
+      | Criterion_pending | Criterion_execution_pending | Criterion_judgment_pending
+      | Criterion_deferred | Criterion_viable _ | Criterion_needs_revision _ | Criterion_superseded ->
+        Alcotest.fail "uncertain execution became a judgment")
+   | Tui_decode.Criterion_unchecked | Tui_decode.Criterion_unavailable _ ->
+     Alcotest.fail "uncertain execution was confused with a missing ledger")
+;;
+
 let test_planning_goal_carries_the_judge_verdict () =
   let proof goal = goal.Tui_decode.pg_proof in
   Alcotest.check Alcotest.bool "an approval carries what was measured" true
@@ -14860,6 +14920,8 @@ let () =
           test_decode_planning_snapshot_requires_the_history_field;
         Alcotest.test_case "goal carries the judge verdict" `Quick
           test_planning_goal_carries_the_judge_verdict;
+        Alcotest.test_case "creation criterion observations retain their binding" `Quick
+          test_planning_preserves_creation_criterion_review;
         Alcotest.test_case "retry binds the observed proof request" `Quick
           test_planning_retry_binding_tracks_the_observed_request;
         Alcotest.test_case "proof requires a complete Goal-bound verdict" `Quick

@@ -7,6 +7,7 @@
     through {!Authz_keeper_state}. *)
 
 type error =
+  | Id_not_drawn of Authz_id.error  (** [draw] gave a value that is not a policy id. *)
   | Body_not_built of Authz_body.error
   | Refused of Authz_keeper_state.refusal
       (** The state of the zone, read just before the commit, refuses the
@@ -19,11 +20,15 @@ type error =
 
 val error_to_string : error -> string
 
-(** Writes the record that makes [keeper_id] for [user_id]. *)
+(** Writes the record that makes [keeper_id] for [user_id], whose turns run
+    under a policy of [user_id] to [user_id] with the id [draw ()] and the
+    limits [turn_scope]. *)
 val make
   :  Authz_zone.t
   -> user_id:Authz_types.User_id.t
   -> keeper_id:Authz_types.Keeper_id.t
+  -> turn_scope:Authz_types.Authorization_scope.t
+  -> draw:(unit -> string)
   -> (unit, error) result
 
 (** Writes the record by which [user_id], the owner of [keeper_id], gives it

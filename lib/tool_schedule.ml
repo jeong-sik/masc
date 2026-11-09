@@ -484,7 +484,8 @@ let validate_known_payload_request ~payload =
 let validate_run_watch_recurrence ~payload ~recurrence =
   match Schedule_run_watch.watch_of_payload payload, recurrence with
   | Error detail, _ -> Error detail
-  | Ok None, _ | Ok (Some _), Schedule_domain.One_shot -> Ok ()
+  | Ok None, _ -> Ok None
+  | Ok (Some _ as watch), Schedule_domain.One_shot -> Ok watch
   | ( Ok (Some _)
     , (Schedule_domain.Interval _ | Schedule_domain.Daily _ | Schedule_domain.Cron _) ) ->
     Error
@@ -868,7 +869,14 @@ let handle_write ~action ~tool_name ~start_time ctx args =
                  create parser's one_shot default decide an update. *)
               Error (Refusal "schedule not found")))
     in
-    let* () = plain (validate_run_watch_recurrence ~payload ~recurrence) in
+    let* run_watch = plain (validate_run_watch_recurrence ~payload ~recurrence) in
+    (* Attaching a watch depends on the recurrence that was just validated.
+       A concurrent edit must not replace that row with a recurring schedule
+       while Keep_timing/Keep_recurrence keeps its latest timing below. *)
+    let expected_instance_id = match run_watch, stored with
+      | Some _, Some request -> Some request.schedule_instance_id
+      | None, _ | Some _, None -> None
+    in
     let* requested_at =
       let* given = strict_number args "requested_at_unix" in
       (* NDT-OK: absent requested_at_unix means "schedule this from the tool
@@ -959,7 +967,8 @@ let handle_write ~action ~tool_name ~start_time ctx args =
           ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
       | Update_schedule, Some schedule_id ->
         Schedule_service.update
-          ctx.config ~authority ~now:dispatched_at ~runner_tick_sec ~timing_update ~schedule_id ~requested_at ?expires_at
+          ctx.config ~authority ~now:dispatched_at ~runner_tick_sec ~timing_update
+          ?expected_instance_id ~schedule_id ~requested_at ?expires_at
           ~requested_by ~scheduled_by ~due_at ~payload ~source ~recurrence ()
       | Update_schedule, None ->
         Error (Schedule_service.Invalid_request "schedule_id is required")

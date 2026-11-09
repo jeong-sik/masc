@@ -28,6 +28,20 @@ type detail_state =
   | List_only  (** only while no detail is open *)
   | Detail_only  (** only while a detail is open *)
 
+(** Whether a binding needs a row under the cursor.
+
+    A list with no rows has nothing for [j/k] to step over, [Right / Enter] to
+    open or [y / x] to answer, and the dispatcher ends each of those in [()].
+    The footer drew them anyway, first in line, so on a narrow terminal it
+    gave up the keys that do act -- [n] on an empty Schedules list -- before
+    them. The fact is a value in the table, as {!detail_state} is. *)
+type row_need =
+  | Rowless  (** answers with no row under the cursor; the default *)
+  | Needs_row  (** steps over, opens or answers a row; refused on an empty list *)
+  | Needs_reading
+      (** opens a reading: a row's details, or what replaced the list when
+          its read failed. An empty list has one only after a failed read. *)
+
 type binding = {
   key : string;
   label : string;      (** the footer's short word *)
@@ -35,6 +49,7 @@ type binding = {
   help : string option;  (** the overlay's longer sentence; [label] if absent *)
   group : group;
   detail : detail_state;  (** which of a detail-owning surface's two states *)
+  rows : row_need;  (** whether an empty list refuses it *)
 }
 
 val expand_turn_key : string
@@ -117,13 +132,20 @@ val goal_candle_refresh_key : string
 val keeper_navigation_hints : string
 (** Keys while the Keeper navigator opened with Left holds focus. *)
 
-val footer_hints_planning_goal_list : string
-(** The Goal list offers a direct route to its selected Candle record. *)
+val footer_hints_planning_goal_list : has_rows:bool -> string
+(** The Goal list offers a direct route to its selected Candle record.
+    [has_rows] is whether the list on screen holds a Goal: with none, the
+    keys that read the Goal under the cursor are left out. *)
 
 val footer_hints_planning_goal_detail : string
 (** The Goal detail has a separate Candle read key: its [r] may mean Resume. *)
 
-val footer_hints : ?detail_open:bool -> Masc_tui_types.surface -> string
+val footer_hints :
+  ?detail_open:bool ->
+  ?has_rows:bool ->
+  ?has_reading:bool ->
+  Masc_tui_types.surface ->
+  string
 (** [key:label] pairs joined by two spaces, groups in Navigate, Act, Search,
     Meta order.
 
@@ -132,7 +154,16 @@ val footer_hints : ?detail_open:bool -> Masc_tui_types.surface -> string
     there. A surface without a detail leaves it out and every binding stands.
     Left out by a surface that does own one, every binding stands too -- the
     behaviour from before this argument existed, and the one
-    {!has_detail_scoped_keys} exists to catch. *)
+    {!has_detail_scoped_keys} exists to catch.
+
+    [has_rows] is how a list renderer says whether the list on screen holds a
+    row. [false] leaves out the keys that need one; left out, every binding
+    stands.
+
+    [has_reading] is how it says whether the screen has a reading to open: a
+    row's details, or the failure that replaced the list. [false] leaves out
+    the keys that need one, [Needs_reading] in the table. A failed read leaves
+    no row and still has this, so the two answers differ there. *)
 
 val footer_hints_tools : pane:Masc_tui_types.tools_pane -> string
 (** Tools' bracket keys select retained runs in Available and Keepers in other panes. *)
@@ -141,8 +172,17 @@ val footer_hints_metrics : telemetry:bool -> string
 (** Usage footer, showing only the keys for the visible Usage or Telemetry
     reading. *)
 
+(** What the ask list offers under the cursor. *)
+type ask_supply =
+  | No_asks  (** no question is waiting *)
+  | Asks_unselected  (** questions wait and the cursor is on none of them *)
+  | Ask_selected  (** the cursor is on a question *)
+
+(** The browsing footer follows three facts: [approvals] says the queue has a
+    row, [asks] what the ask list offers, and [source] that a question source
+    is on hand to read, the last answer's included. *)
 type approvals_footer =
-  | Approval_browsing
+  | Approval_browsing of { approvals : bool; asks : ask_supply; source : bool }
   | Approval_writing
   | Approval_armed
   | Approval_answering of { has_choices : bool; takes_text : bool }
@@ -151,11 +191,21 @@ val footer_hints_approvals : approvals_footer -> string
 (** Project the Approvals queue and question reader's modal footers from the
     same binding records as the Help sheet. *)
 
+val approval_answer_hint : string
+(** The footer's words for the key that opens the selected question. The
+    Questions heading prints this one string, so the two cannot name the key
+    differently. *)
+
 val has_detail_scoped_keys : Masc_tui_types.surface -> bool
 (** Whether this surface's table scopes any binding to one of the two states,
     and so owes [footer_hints] a [~detail_open] from both of its renderers.
     Read by the test that keeps a new detail-owning surface from landing
     without it. *)
+
+val has_row_scoped_keys : Masc_tui_types.surface -> bool
+(** Whether this surface's table holds a key that needs a row, and so owes
+    [footer_hints] a [~has_rows] from its list renderer. Read by the test that
+    pins the surfaces whose empty list already leaves those keys out. *)
 
 val footer_hints_config : lang:Masc_tui_types.ui_language -> pane:Masc_tui_types.config_pane -> string
 (** Config bindings available on the active pane. The surface-wide help keeps
@@ -244,11 +294,19 @@ val code_file_is_current : Masc_tui_types.state -> bool
     footer read this one answer, so the pair is named exactly where it
     answers. *)
 
+val code_tree_opens_changes : Masc_tui_types.code_workspace_scope -> bool
+(** Whether [d] on the file list opens the project's Git changes. Only the
+    project's own workspace has that arm; a keeper's or a repository's tree
+    passes the key on. The dispatcher and the footer read this one answer, so
+    the pair is named exactly where it answers. *)
+
 type code_pane =
-  | Code_tree of code_file_presence
-      (** the file list has focus below the project root *)
-  | Code_root of code_file_presence
-      (** the file list has focus at the project root *)
+  | Code_tree of code_file_presence * Masc_tui_types.code_workspace_scope
+      (** the file list has focus below the project root, over the workspace
+          the scope names *)
+  | Code_root of code_file_presence * Masc_tui_types.code_workspace_scope
+      (** the file list has focus at the project root, over the workspace the
+          scope names *)
   | Code_file  (** a file is open and nothing covers it *)
   | Code_diff
   | Code_notes  (** wrapped memo document is drawn over the file *)
@@ -329,10 +387,11 @@ val footer_hints_git_changes : string
 val footer_hints_git_diff : string
 (** The Git diff view for a changed file in repository changes. *)
 
-val footer_hints_memory_facts : cols:int -> string
+val footer_hints_memory_facts : cols:int -> has_rows:bool -> string
 (** The Memory fact browser opened by Enter on a health row: row movement,
     the category cycle, search, and the way back to the table. Omits
-    [d:Category pane] on narrow frames where the Category rail does not fit. *)
+    [d:Category pane] on narrow frames where the Category rail does not fit,
+    and the keys that act on a fact when [has_rows] is false. *)
 
 val bindings_memory_facts : binding list
 (** The fact browser's own keys. Separate from {!for_surface} because they are

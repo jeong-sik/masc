@@ -13,6 +13,9 @@
 open Alcotest
 module Keys = Masc_tui_keys
 
+(* The workspace the Code tree tests read unless a test names another. *)
+let project_scope = Masc_tui_types.Code_scope_project
+
 (* Named so a failure says which surface, not just which assertion. *)
 let detail_surfaces =
   [ ("Planning", Masc_tui_types.Planning)
@@ -102,9 +105,16 @@ let back_keys_of_surface name surface =
     ~list:(Keys.footer_hints ~detail_open:false surface)
     ~detail:(Keys.footer_hints ~detail_open:true surface)
 
+(* The queue with a row, a question under the cursor and its source: every key
+   the browsing footer can name. *)
+let approvals_list_footer =
+  Keys.footer_hints_approvals
+    (Keys.Approval_browsing
+       { approvals = true; asks = Keys.Ask_selected; source = true })
+
 let scoped_keys =
   [ ( "Planning",
-      Keys.footer_hints_planning_goal_list,
+      Keys.footer_hints_planning_goal_list ~has_rows:true,
       Keys.footer_hints_planning_goal_detail,
       [ "t"; "p"; "/"; "n / N" ] )
   ; ( "Board",
@@ -114,6 +124,12 @@ let scoped_keys =
   ; search_keys "Verification" Masc_tui_types.Verification
   ; search_keys "Harness" Masc_tui_types.Harness
   ; search_keys "System_logs" Masc_tui_types.System_logs
+  (* Right and Enter open the entry under the cursor. An open log entry has
+     nothing under them, so its footer is the list's without that key. *)
+  ; ( "System_logs Right / Enter",
+      Keys.footer_hints ~detail_open:false Masc_tui_types.System_logs,
+      Keys.footer_hints ~detail_open:true Masc_tui_types.System_logs,
+      [ "Right / Enter" ] )
   (* The Approvals queue and an open approval draw from two builders of their
      own ([footer_hints_approvals], [footer_hints_approval_detail]), so no
      [footer_hints ~detail_open] call reaches them. [v] reads a Gate string's
@@ -122,15 +138,15 @@ let scoped_keys =
      read, as "string bytes" or, once they are shown, as "text". *)
   ; ( "Approvals string bytes",
       Keys.footer_hints_approval_detail ~value_hint:Keys.Readable_values,
-      Keys.footer_hints_approvals Keys.Approval_browsing,
+      approvals_list_footer,
       [ "v" ] )
   ; ( "Approvals text",
       Keys.footer_hints_approval_detail ~value_hint:Keys.Byte_values,
-      Keys.footer_hints_approvals Keys.Approval_browsing,
+      approvals_list_footer,
       [ "v" ] )
   ]
   @ back_keys "Planning"
-      ~list:Keys.footer_hints_planning_goal_list
+      ~list:(Keys.footer_hints_planning_goal_list ~has_rows:true)
       ~detail:Keys.footer_hints_planning_goal_detail
   @ back_keys_of_surface "Board" Masc_tui_types.Board
   @ back_keys_of_surface "Schedules" Masc_tui_types.Schedules
@@ -152,25 +168,38 @@ let scoped_keys =
   (* Code at the project root has no step for Left ([code_back_step]); a
      directory down, Left climbs one. *)
   @ back_keys "Code tree"
-      ~list:(Keys.footer_hints_code ~pane:(Keys.Code_root Keys.File_current))
-      ~detail:(Keys.footer_hints_code ~pane:(Keys.Code_tree Keys.File_current))
+      ~list:(Keys.footer_hints_code ~pane:(Keys.Code_root (Keys.File_current, project_scope)))
+      ~detail:(Keys.footer_hints_code ~pane:(Keys.Code_tree (Keys.File_current, project_scope)))
   (* Right and Enter open a tree row. An open file has nothing under them, so
      the file pane's footer is the tree's without that key. *)
   @ [ ( "Code Right / Enter",
-        Keys.footer_hints_code ~pane:(Keys.Code_tree Keys.File_current),
+        Keys.footer_hints_code ~pane:(Keys.Code_tree (Keys.File_current, project_scope)),
         Keys.footer_hints_code ~pane:Keys.Code_file,
         [ "Right / Enter" ] )
     (* [h] and [l] move focus between the tree and a file, and only while a
        file read is current ([Keys.code_file_is_current]); with none the
        dispatcher ends in [()]. *)
     ; ( "Code h/l below the project root",
-        Keys.footer_hints_code ~pane:(Keys.Code_tree Keys.File_current),
-        Keys.footer_hints_code ~pane:(Keys.Code_tree Keys.No_file),
+        Keys.footer_hints_code ~pane:(Keys.Code_tree (Keys.File_current, project_scope)),
+        Keys.footer_hints_code ~pane:(Keys.Code_tree (Keys.No_file, project_scope)),
         [ "h/l" ] )
     ; ( "Code h/l at the project root",
-        Keys.footer_hints_code ~pane:(Keys.Code_root Keys.File_current),
-        Keys.footer_hints_code ~pane:(Keys.Code_root Keys.No_file),
-        [ "h/l" ] ) ]
+        Keys.footer_hints_code ~pane:(Keys.Code_root (Keys.File_current, project_scope)),
+        Keys.footer_hints_code ~pane:(Keys.Code_root (Keys.No_file, project_scope)),
+        [ "h/l" ] )
+    (* [d] on the list opens the project's Git changes, and only the project's
+       own workspace has that arm ([Keys.code_tree_opens_changes]): a keeper's
+       or a repository's tree ends in [()]. *)
+    ; ( "Code d on a keeper's list",
+        Keys.footer_hints_code ~pane:(Keys.Code_tree (Keys.File_current, project_scope)),
+        Keys.footer_hints_code
+          ~pane:(Keys.Code_tree (Keys.File_current, Masc_tui_types.Code_scope_keeper "scout")),
+        [ "d" ] )
+    ; ( "Code d on a repository's list",
+        Keys.footer_hints_code ~pane:(Keys.Code_tree (Keys.File_current, project_scope)),
+        Keys.footer_hints_code
+          ~pane:(Keys.Code_tree (Keys.File_current, Masc_tui_types.Code_scope_repo "masc")),
+        [ "d" ] ) ]
 
 let test_a_scoped_key_is_named_only_where_it_answers () =
   List.iter
@@ -200,7 +229,7 @@ let test_code_draft_keys_are_named_only_on_the_file_pane () =
             (pane_name ^ " pane does not name " ^ key)
             false
             (names_item (Keys.footer_hints_code ~pane) key))
-        [ ("tree", Keys.Code_tree Keys.File_current); ("diff", Keys.Code_diff) ])
+        [ ("tree", Keys.Code_tree (Keys.File_current, project_scope)); ("diff", Keys.Code_diff) ])
     draft_keys
 
 (* The ladder Esc and Left walk on Code, and the footer pane drawn at each
@@ -303,6 +332,23 @@ let test_the_tree_names_h_l_once_a_file_read_is_current () =
   check bool "a started read is current" true (Keys.code_file_is_current state);
   check bool "the tree footer names h/l" true (names_h_l ())
 
+(* The dispatcher's [d] arm on the file list and the tree footer read
+   [code_tree_opens_changes], so the footer names the key for exactly the
+   workspaces whose list answers it. The scope reaches the footer through
+   [code_pane_of], the way the renderer hands it over. *)
+let test_the_tree_names_d_where_the_list_opens_the_changes () =
+  List.iter
+    (fun (name, scope) ->
+      let state = T.create_state ~workspace:"test" ~port:8935 () in
+      state.T.code_scope <- scope;
+      check bool
+        (name ^ ": the tree footer names d where the arm answers")
+        (Keys.code_tree_opens_changes scope)
+        (names_item (Keys.footer_hints_code ~pane:(Keys.code_pane_of state)) "d"))
+    [ ("the project", T.Code_scope_project)
+    ; ("a keeper", T.Code_scope_keeper "scout")
+    ; ("a repository", T.Code_scope_repo "masc") ]
+
 let test_every_scoped_surface_is_named () =
   let named =
     List.map (fun (_, surface, _) -> surface) list_footer_refusals
@@ -331,6 +377,8 @@ let () =
             test_the_footer_pane_follows_the_ladder_rung
         ; test_case "the tree names h/l once a file read is current" `Quick
             test_the_tree_names_h_l_once_a_file_read_is_current
+        ; test_case "the tree names d where the list opens the changes" `Quick
+            test_the_tree_names_d_where_the_list_opens_the_changes
         ; test_case "every scoped surface is named here" `Quick
             test_every_scoped_surface_is_named
         ] )

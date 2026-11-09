@@ -369,16 +369,36 @@ let keeper_list_preferences_cases =
         with_storable_base (fun ~base_path ->
           (match Config.set_keeper_list_sort ~base_path "oldest" with
            | Ok () -> () | Error message -> Alcotest.fail message);
-          (match Config.set_keeper_list_layout ~base_path "grouped" with
+          (match Config.set_keeper_list_view ~base_path ~view:"state" ~density:"detailed" with
            | Ok () -> () | Error message -> Alcotest.fail message);
           let read = keepers ~base_path in
           check_opt "stored order" (Some "oldest") read.keeper_list_sort;
-          check_opt "stored view" (Some "grouped") read.keeper_list_layout;
+          check_opt "stored view" (Some "state") read.keeper_list_view;
+          check_opt "stored density" (Some "detailed") read.keeper_list_density;
           (match Config.set_keeper_list_sort ~base_path "activity" with
            | Ok () -> () | Error message -> Alcotest.fail message);
           let read = keepers ~base_path in
           check_opt "changed order" (Some "activity") read.keeper_list_sort;
-          check_opt "view preserved" (Some "grouped") read.keeper_list_layout))
+          check_opt "view preserved" (Some "state") read.keeper_list_view;
+          check_opt "density preserved" (Some "detailed") read.keeper_list_density;
+          (match Config.set_keeper_list_view ~base_path ~view:"24h" ~density:"compact" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          let read = keepers ~base_path in
+          check_opt "order preserved by a view edit" (Some "activity") read.keeper_list_sort;
+          check_opt "changed view" (Some "24h") read.keeper_list_view;
+          check_opt "changed density" (Some "compact") read.keeper_list_density))
+  ; Alcotest.test_case "a key the reader does not know is not read" `Quick (fun () ->
+        with_temp_base (fun ~base ~config ->
+          write (Filename.concat config "tui-keepers.toml")
+            "[keepers]\nsort = \"name\"\nwidth = \"wide\"\n";
+          let read = keepers ~base_path:base in
+          check_opt "order is read" (Some "name") read.keeper_list_sort;
+          check_opt "no view" None read.keeper_list_view;
+          check_opt "no density" None read.keeper_list_density;
+          check_opt "no read error" None read.keeper_list_error;
+          (match Config.set_keeper_list_view ~base_path:base ~view:"state" ~density:"compact" with
+           | Ok () -> () | Error message -> Alcotest.fail message);
+          check_opt "a view saves beside it" (Some "state") (keepers ~base_path:base).keeper_list_view))
   ; Alcotest.test_case "first preference does not need runtime.toml" `Quick (fun () ->
         with_temp_base (fun ~base ~config:_ ->
           (match Config.set_keeper_list_sort ~base_path:base "name" with
@@ -389,7 +409,7 @@ let keeper_list_preferences_cases =
   ; Alcotest.test_case "a failed edit preserves the original preferences" `Quick (fun () ->
         with_temp_base (fun ~base ~config ->
           let path = Filename.concat config "tui-keepers.toml" in
-          let original = "keepers = { sort = \"name\", layout = \"grouped\" }\n" in
+          let original = "keepers = { sort = \"name\", view = \"state\" }\n" in
           write path original;
           Alcotest.(check bool) "unsupported table shape is reported" true
             (Option.is_some (keepers ~base_path:base).keeper_list_error);
@@ -399,10 +419,10 @@ let keeper_list_preferences_cases =
   ; Alcotest.test_case "wrong preference type is reported" `Quick (fun () ->
         with_temp_base (fun ~base ~config ->
           write (Filename.concat config "tui-keepers.toml")
-            "[keepers]\nsort = 42\nlayout = \"grouped\"\n";
+            "[keepers]\nsort = 42\nview = \"state\"\n";
           let read = keepers ~base_path:base in
           check_opt "invalid order is absent" None read.keeper_list_sort;
-          check_opt "valid view is retained" (Some "grouped") read.keeper_list_layout;
+          check_opt "valid view is retained" (Some "state") read.keeper_list_view;
           Alcotest.(check bool) "invalid order is reported" true (Option.is_some read.keeper_list_error)))
   ; Alcotest.test_case "a FIFO is refused without opening it" `Quick (fun () ->
         with_temp_base (fun ~base ~config ->
@@ -439,7 +459,7 @@ let keeper_list_preferences_cases =
               ~on_request_id:(fun request_id -> registered := request_id :: !registered)
               ~sw:(Some sw) ~base_path:base preference in
             let first = submit (Config.Keeper_order "recent") in
-            let second = submit (Config.Keeper_view "grouped") in
+            let second = submit (Config.Keeper_view { view = "state"; density = "detailed" }) in
             let third = submit (Config.Keeper_order "oldest") in
             let submitted = [first; second; third] in
             Alcotest.(check (list int)) "registered IDs match returned IDs" submitted (List.rev !registered);
@@ -455,7 +475,8 @@ let keeper_list_preferences_cases =
                 result.outcome = Config.Preference_saved) !results);
             let read = keepers ~base_path:base in
             check_opt "latest order" (Some "oldest") read.keeper_list_sort;
-            check_opt "view survives" (Some "grouped") read.keeper_list_layout))))
+            check_opt "view survives" (Some "state") read.keeper_list_view;
+            check_opt "density survives" (Some "detailed") read.keeper_list_density))))
   ; Alcotest.test_case "an unstarted later choice keeps its submission identity" `Quick (fun () ->
         with_temp_base (fun ~base ~config:_ ->
           Eio_main.run (fun _ -> Eio.Switch.run (fun sw ->

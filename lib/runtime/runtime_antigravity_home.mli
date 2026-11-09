@@ -155,6 +155,16 @@ val prepare_native_tools
     no command allow rule is emitted because it would grant sandbox escapes
     too. Unsandboxed requests retain the vendor's interactive approval gate. *)
 
+val prepare_read_hook
+  : t -> cwd:string -> additional_workspaces:string list -> (unit, error) result
+(** Publish a native read guard before launching the admitted Keeper client.
+    The guard must be installed beside the running executable; PATH is not
+    searched. It returns out-of-scope reads as tool errors before headless Ask
+    can end the turn, delegating permitted reads to the existing settings.
+    The settings, including [Native_none]'s broad deny, are unchanged. The
+    caller supplies the canonical roots returned by native policy preparation.
+    Missing/unusable helper binaries refuse preparation. *)
+
 val prepare_native
   : runtime_root:string -> owner_leaf:string -> oauth_source:string
   -> posture:Runtime_native_tools.posture -> workspace:native_workspace

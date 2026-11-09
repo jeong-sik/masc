@@ -58,7 +58,6 @@ description = "scene: visible content of the destination. regions: landmark map 
 id = "follow"
 tool = "BrowserInteract"
 input = { kind = "object", fields = [
-  { name = "lane", value = { kind = "literal", value = "live" } },
   { name = "action", value = { kind = "literal", value = "follow_link" } },
   { name = "clientId", value = { kind = "param", name = "clientId" } },
   { name = "tabId", value = { kind = "param", name = "tabId" } },

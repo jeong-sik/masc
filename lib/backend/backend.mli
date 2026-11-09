@@ -1,9 +1,5 @@
 (** Backend: OCaml 5.x Eio-native storage backend *)
 
-(** {1 Compression} *)
-
-module Compression = Backend_compression
-
 (** {1 Types (from Backend_types)} *)
 
 include module type of struct include Backend_types end

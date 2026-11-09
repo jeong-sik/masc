@@ -75,8 +75,11 @@ The command palette is `:`.
 
 | Keys | What it does |
 |---|---|
-| `j/k` | move the roster cursor |
-| `v` | cycle compact / detailed / grouped |
+| `j/k` | move the roster cursor; a grouping view also stops on each group heading |
+| `v` | cycle list / state / cause / time / memory / age / runtime / 24h; a press on a name opens that view |
+| `V` | one or two lines per Keeper |
+| `[ / ]` | jump to the previous or next group heading in a grouping view |
+| `Left / Right` | on a group heading, fold or unfold its rows |
 | `o` | cycle priority / recent / oldest / activity / name |
 | `J` | open the selected Keeper's schedules |
 | `K` | browse Keeper-origin requests queued for the selected Keeper |
@@ -660,6 +663,11 @@ count is drawn beyond the available space.
 | `Shift-Left / Shift-Right` | with a file open, scroll it sideways one cell at a time |
 | `/` | jump the cursor to a match: the tree, or the open file's lines |
 | `n / N` | next / previous match |
+| `d` | on the project tree, list every working-tree change; on an open file, show that file's diff against HEAD; in the file's history, on a commit row, show what that commit changed |
+| `H` | the commits that touched the open file, newest first (H or Esc closes) |
+| `b` | who last touched each run of lines, in the margin; b again drops it |
+| `m` | the memos in the open file: comments on their own row reading masc(name): text, or masc(name) question: text; m again closes the list |
+| `y` | send the whole readable file's original bytes to the terminal clipboard via OSC 52; terminal support is unconfirmed |
 | `K` | ask the language server what a name on the cursor line is (one name asks at once; several open the palette as choices); read the complete answer with j/k or paging, Esc returns to code |
 | `R` | ask the language server where a name on the cursor line is used; needs the project's reference index, and says which command builds it when there is none |
 | `D` | jump to where a name on the cursor line is defined (one name jumps at once; several open the palette as choices) |
@@ -669,12 +677,7 @@ count is drawn beyond the available space.
 | `V` | compare original/current server source with the retained draft |
 | `X` | discard only the local draft, after any submitted save settles |
 | `A (draft)` | after rereading and comparing a conflict, explicitly adopt the server revision |
-| `y` | send the whole readable file's original bytes to the terminal clipboard via OSC 52; terminal support is unconfirmed |
-| `b` | who last touched each run of lines, in the margin; b again drops it |
-| `m` | the memos in the open file: comments on their own row reading masc(name): text, or masc(name) question: text; m again closes the list |
-| `d` | on the project tree, list every working-tree change; on an open file, show that file's diff against HEAD; in the file's history, on a commit row, show what that commit changed |
 | `Enter (history)` | a commit answers with its pull request, from its (#N) and the repository's remote |
-| `H` | the commits that touched the open file, newest first (H or Esc closes) |
 | `PgUp/PgDn` | page |
 | `Home/End` | top/bottom |
 
@@ -799,7 +802,7 @@ or completion.
 | `o` | switch between server logs and this TUI's own observations |
 | `e` | Events |
 | `j/k` | move / scroll |
-| `PgUp/PgDn` | detail page |
+| `PgUp/PgDn` | page |
 | `[ / ]` | while detail is open, inspect the adjacent visible log entry |
 | `l` | raise the minimum level; after error, back to everything |
 | `v` | toggle DEBUG rows directly; off uses the INFO floor |

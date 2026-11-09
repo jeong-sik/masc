@@ -29,8 +29,6 @@ let otel_samples () =
 
 let otel_source_registered = Atomic.make false
 
-let register_histogram_buckets = Otel_metric_store_core.register_histogram_buckets
-
 let register_otel_source_once () =
   if not (Atomic.exchange otel_source_registered true) then
     Otel_metrics.register_source otel_samples

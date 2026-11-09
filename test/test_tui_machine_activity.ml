@@ -23,7 +23,8 @@ let same expected actual = Alcotest.(check string) "source" expected actual
 let has needle lines = List.exists (fun line ->
   let n=String.length needle in
   let rec scan i = i+n<=String.length line && (String.sub line i n=needle || scan (i+1)) in scan 0) lines
-let shows needle session = Alcotest.(check bool) needle true (has needle (A.lines session))
+let lines session = List.map Masc_tui_page_line.text (A.lines session)
+let shows needle session = Alcotest.(check bool) needle true (has needle (lines session))
 
 let draft_and_save () =
   let session=loaded (doc source) in
@@ -66,7 +67,7 @@ let clean_read_follows_changed_flag () =
   let current=off ^ "concurrent = 7\n" in
   let session=loaded (doc source) |> A.suspend |> read ~generation:2 (doc ~revision:"fresh" current) in
   shows "Activity draft: Off" session;
-  Alcotest.(check bool) "clean draft has no conflict" false (has "File changed" (A.lines session));
+  Alcotest.(check bool) "clean draft has no conflict" false (has "File changed" (lines session));
   let _,_,write=A.start_save ~generation:3 (A.toggle session) |> ok in
   same "fresh" write.expected_source_revision;
   same (source ^ "concurrent = 7\n") write.source_text
@@ -197,8 +198,26 @@ let table_shapes () =
   let session=A.toggle (loaded (doc fake)) in
   shows "Inline or dotted" session; rejected (A.start_save ~generation:2 session)
 
+let draft_tone session =
+  List.find_map
+    (function
+      | Masc_tui_page_line.Fact { label = "Activity draft"; tone; _ } -> Some tone
+      | Masc_tui_page_line.Fact _ | Masc_tui_page_line.Title _ | Masc_tui_page_line.Note _ -> None)
+    (A.lines session)
+
+let unsaved_draft_is_marked () =
+  let session=loaded (doc source) in
+  Alcotest.(check bool) "a draft equal to the file is plain" true
+    (draft_tone session = Some Masc_tui_page_line.Plain);
+  let toggled=A.toggle session in
+  Alcotest.(check bool) "a draft that differs from the file needs attention" true
+    (draft_tone toggled = Some Masc_tui_page_line.Attention);
+  Alcotest.(check bool) "discarding returns it to plain" true
+    (draft_tone (A.discard toggled) = Some Masc_tui_page_line.Plain)
+
 let () = Alcotest.run "Machine activity draft and save" ["operator flow",List.map (fun (name,f)->Alcotest.test_case name `Quick f)
   ["explicit save preserves other machine and source",draft_and_save;
+   "a draft that differs from the file needs attention",unsaved_draft_is_marked;
    "conflict reapplies activity only",conflict_reapply;
    "fresh read retains and discard resets",fresh_read_keeps_draft;
    "clean draft follows external activity and workspace return",clean_read_follows_changed_flag;

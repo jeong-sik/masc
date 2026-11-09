@@ -1,5 +1,19 @@
 ; task-2245: the shared input table the TUI suite and the dashboard vitest
 ; suite both assert on (lib/tool_display.ml / dashboard toolDisplayLabel).
+(rule
+ (target masc-antigravity-path-hook)
+ (action (copy %{exe:../bin/masc_antigravity_path_hook.exe} %{target})))
+
+(rule
+ (alias runtest-test_antigravity_path_hook)
+ (deps test_antigravity_path_hook.py)
+ (action (run python3 %{dep:test_antigravity_path_hook.py}
+   %{exe:../bin/masc_antigravity_path_hook.exe})))
+
+(alias
+ (name runtest)
+ (deps (alias runtest-test_antigravity_path_hook)))
+
 (copy_files# fixtures/tool-display-labels.json)
 
 (rule
@@ -1173,6 +1187,7 @@
 (test
  (name test_keeper_tool_execute_stream_close)
  (modules test_keeper_tool_execute_stream_close)
+ (deps masc-antigravity-path-hook)
  (libraries masc_test_deps))
 
 (test
@@ -3044,6 +3059,7 @@
 (include stanzas/test_goal_verification_gate.inc)
 
 (include stanzas/test_goal_verification_agent.inc)
+(include stanzas/test_goal_criterion_review.inc)
 (include stanzas/test_goal_verification_run_registry.inc)
 (include stanzas/test_reliable_change_g1.inc)
 
@@ -3716,6 +3732,11 @@
  (name test_tui_footer_detail_state)
  (modules test_tui_footer_detail_state)
  (libraries alcotest masc_tui_fetched masc_tui_keys masc_tui_types masc_tui_footer))
+
+(test
+ (name test_tui_footer_row_need)
+ (modules test_tui_footer_row_need)
+ (libraries alcotest masc_tui_keys masc_tui_types))
 
 (test
  (name test_tui_runtime_config_receipt)
@@ -4500,7 +4521,9 @@
   masc_tui_keeper_age_ladder
   masc_tui_keeper_axis_cell
   masc_tui_keeper_axis
-  masc_tui_keeper_memory_reading))
+  masc_tui_keeper_list_model
+  masc_tui_keeper_memory_reading
+  masc_tui_keeper_next_run))
 
 (test
  (name test_tui_keeper_age_ladder)
@@ -6712,7 +6735,7 @@
 (test
  (name test_tui_exact_activity)
  (modules test_tui_exact_activity)
- (libraries masc.runtime masc_tui_exact_activity masc_tui_runtime_config_edit
+ (libraries masc.runtime masc_tui_exact_activity masc_tui_page_line masc_tui_runtime_config_edit
   masc_tui_runtime_config_receipt alcotest))
 
 (test
@@ -6730,7 +6753,7 @@
  (name test_tui_machine_activity)
  (modules test_tui_machine_activity)
  (libraries alcotest otoml masc masc.machine_configuration
-  masc_tui_machine_activity masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
+  masc_tui_machine_activity masc_tui_page_line masc_tui_runtime_config_edit masc_tui_runtime_config_receipt))
 
 (test
  (name test_tui_model_form)
@@ -6904,6 +6927,7 @@
 (include stanzas/test_keeper_memory_select_provider_wire.inc)
 
 (include stanzas/test_provider_connection_cache_wiring.inc)
+(include stanzas/test_keeper_provider_connection_recovery.inc)
 
 (include stanzas/test_keeper_event_genealogy_capture.inc)
 

@@ -14,7 +14,7 @@ let rec remove_tree path =
     Unix.rmdir path)
   else Sys.remove path
 
-let with_gateway ?(on_routes = fun _ -> ()) ?(with_runtime = fun ~env:_ ~sw:_ run -> run ()) ~make_routes run =
+let with_gateway ?https_port ?(on_routes = fun _ -> ()) ?(with_runtime = fun ~env:_ ~sw:_ run -> run ()) ~make_routes run =
   let base_path = Filename.temp_dir "h2-gateway-" "" in
   let previous_state = Server_auth.For_testing.snapshot_server_state () in
   Fun.protect ~finally:(fun () ->
@@ -50,7 +50,7 @@ let with_gateway ?(on_routes = fun _ -> ()) ?(with_runtime = fun ~env:_ ~sw:_ ru
         let trust_policy =
           match
             Server_request_authority.make_trust_policy
-              ~bind_host:"localhost" ~bind_port:8935 ~https_port:None ~explicit_base_url:None
+              ~bind_host:"localhost" ~bind_port:8935 ~https_port ~explicit_base_url:None
           with
           | Ok policy -> policy
           | Error error -> fail (Server_request_authority.trust_policy_error_to_string error)
@@ -76,12 +76,13 @@ let with_gateway ?(on_routes = fun _ -> ()) ?(with_runtime = fun ~env:_ ~sw:_ ru
           Eio.Flow.shutdown client_flow `All) (fun () -> with_runtime ~env ~sw (fun () -> run ~player ~reader client));
         Eio.Promise.await_exn server))
 
-let request_with_headers ?token ?(extra_headers = []) ~meth client path =
+let request_with_headers ?token ?(extra_headers = []) ?(scheme = "http")
+    ?(authority = "localhost:8935") ~meth client path =
   let result, resolve = Eio.Promise.create () in
-  let headers = [":authority", "localhost:8935"]
+  let headers = [":authority", authority]
     @ (match token with None -> [] | Some token -> ["authorization", "Bearer " ^ token])
     @ extra_headers in
-  let req = H2.Request.create ~scheme:"http" meth path ~headers:(H2.Headers.of_list headers) in
+  let req = H2.Request.create ~scheme meth path ~headers:(H2.Headers.of_list headers) in
   let writer = H2_eio.Client.request client ~flush_headers_immediately:true req
     ~error_handler:(fun _ -> if not (Eio.Promise.is_resolved result) then
       Eio.Promise.resolve resolve (Error "stream failed"))
@@ -106,6 +107,31 @@ let production ~sw ~clock = Server_routes_http.make_routes ~port:0 ~host:"127.0.
 
 let strict value run =
   Masc_test_deps.with_process_env "MASC_HTTP_AUTH_STRICT" value run
+
+(* A browser fetches discovery over its HTTPS/h2 connection before opening
+   the separate HTTP/1.1 WebSocket. This does not request RFC 8441 CONNECT. *)
+let test_https_websocket_discovery () =
+  Masc_test_deps.with_process_env "MASC_WS_ENABLED" (Some "true") (fun () ->
+    let previous_ready = Masc.Transport_metrics.ws_same_origin_ready () in
+    Fun.protect
+      ~finally:(fun () -> Masc.Transport_metrics.set_ws_same_origin_runtime_ready previous_ready)
+      (fun () ->
+        Masc.Transport_metrics.set_ws_same_origin_runtime_ready true;
+        with_gateway ~https_port:8938 ~make_routes:production
+          (fun ~player:_ ~reader:_ client ->
+            let code, _, body =
+              request_with_headers ~scheme:"https" ~authority:"localhost:8938"
+                ~meth:`GET client "/ws"
+            in
+            check int "ordinary h2 discovery succeeds" 200 code;
+            let json = Yojson.Safe.from_string body in
+            check string "discovery advertises the TLS WebSocket URL"
+              "wss://127.0.0.1:8938/ws"
+              Yojson.Safe.Util.(json |> member "ws_url" |> to_string);
+            check bool "the same-origin upgrade is ready" true
+              Yojson.Safe.Util.(json |> member "same_origin_upgrade_enabled" |> to_bool);
+            check int "the upgrade-only LSP route remains unavailable on h2" 426
+              (status ~meth:`GET client "/api/v1/ide/lsp"))))
 
 (* A route registered as [Public_read] asks for a credential under strict auth
    on HTTP/2 as on HTTP/1.1. *)
@@ -598,7 +624,9 @@ let test_strict_auth_opens_a_path_by_its_kind () =
 let () =
   run "H2 gateway"
     [ ( "one table"
-      , [ test_case "public read follows the router" `Quick test_public_read_follows_the_router
+      , [ test_case "HTTPS WebSocket discovery succeeds before the upgrade" `Quick
+            test_https_websocket_discovery
+        ; test_case "public read follows the router" `Quick test_public_read_follows_the_router
         ; test_case "token permission follows the router" `Quick
             test_token_permission_follows_the_router
         ; test_case "subpath routes check the token themselves" `Quick

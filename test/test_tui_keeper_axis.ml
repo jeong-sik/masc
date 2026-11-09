@@ -271,6 +271,111 @@ let test_fit_leaves_the_detail_its_floor () =
     [ widest_row; healthy_row ]
 ;;
 
+module Axis = Masc_tui_keeper_axis
+module Model = Masc_tui_keeper_list_model
+module Next_run = Masc_tui_keeper_next_run
+module Reading = Masc_tui_keeper_memory_reading
+
+let hour = 3600.
+let reading_now = 1_794_000_000.
+
+let memory_row ?(lag = Reading.Lag 0) ?(gap = Reading.No_gap) ?updated_at () =
+  Reading.Row
+    { state = Masc_tui_types.Memory_ordinary
+    ; lag
+    ; gap
+    ; digest_at = None
+    ; updated_at
+    ; added = 0
+    ; removed = 0
+    ; source_invalidations = 0
+    ; age_bins = None
+    }
+;;
+
+let due_label = function
+  | Model.Due_late -> "late"
+  | Model.Due_held -> "held"
+  | Model.Due_within_hour -> "hour"
+  | Model.Due_within_half_day -> "half day"
+  | Model.Due_later -> "later"
+  | Model.Due_none -> "none"
+  | Model.Due_unknown -> "unknown"
+;;
+
+let test_due_buckets_every_next_run_reading () =
+  let due reading = due_label (Axis.due_of_next_run ~now:reading_now reading) in
+  let ahead seconds = reading_now +. seconds in
+  Alcotest.(check (list string)) "every next-run reading has a time bucket"
+    [ "none"; "unknown"; "late"; "held"; "held"
+    ; "hour"; "hour"; "half day"; "half day"; "later"
+    ; "unknown"; "later" ]
+    (List.map due
+       [ Next_run.No_schedule
+       ; Next_run.Unknown
+       ; Next_run.Late_since (ahead (-.hour))
+       ; Next_run.Held_current (ahead hour)
+       ; Next_run.Held_as_of (ahead hour)
+       ; Next_run.Scheduled_at (ahead (-.60.))
+       ; Next_run.Scheduled_at (ahead hour)
+       ; Next_run.Scheduled_at (ahead (hour +. 1.))
+       ; Next_run.Scheduled_at (ahead (12. *. hour))
+       ; Next_run.Scheduled_at (ahead ((12. *. hour) +. 1.))
+       ; Next_run.Not_before (ahead (12. *. hour))
+       ; Next_run.Not_before (ahead ((12. *. hour) +. 1.))
+       ])
+;;
+
+let follow_label = function
+  | Model.Memory_refused -> "refused"
+  | Model.Memory_gap -> "gap"
+  | Model.Memory_lagging -> "lagging"
+  | Model.Memory_following -> "following"
+  | Model.Memory_unread -> "unread"
+;;
+
+let test_follow_puts_a_gap_before_lag () =
+  Alcotest.(check (list string)) "gap, lag, following and unread readings"
+    [ "unread"; "unread"; "refused"; "gap"; "gap"; "lagging"; "following"; "unread" ]
+    (List.map
+       (fun reading -> follow_label (Axis.follow_of_memory reading))
+       [ Reading.Unknown
+       ; Reading.No_row
+       ; Reading.Refused "anonymous"
+       ; memory_row ~lag:(Reading.Lag 0) ~gap:(Reading.Gap { first_atom = 3; past_last_atom = 5 }) ()
+       ; memory_row ~lag:(Reading.Lag 4) ~gap:Reading.Gap_unmeasured ()
+       ; memory_row ~lag:(Reading.Lag 2) ()
+       ; memory_row ~lag:(Reading.Lag 0) ()
+       ; memory_row ~lag:Reading.Lag_unmeasured ()
+       ])
+;;
+
+let age_label = function
+  | Model.Age_within_3h -> "3h"
+  | Model.Age_within_day -> "24h"
+  | Model.Age_within_3d -> "3d"
+  | Model.Age_older -> "older"
+  | Model.Age_unknown -> "unknown"
+;;
+
+let test_age_buckets_the_last_update () =
+  let updated ago = memory_row ~updated_at:(reading_now -. ago) () in
+  Alcotest.(check (list string)) "the bounds belong to the nearer bucket"
+    [ "unknown"; "unknown"; "3h"; "3h"; "24h"; "24h"; "3d"; "3d"; "older" ]
+    (List.map
+       (fun reading -> age_label (Axis.age_of_memory ~now:reading_now reading))
+       [ Reading.No_row
+       ; memory_row ()
+       ; updated (-.60.)
+       ; updated (3. *. hour)
+       ; updated ((3. *. hour) +. 1.)
+       ; updated (24. *. hour)
+       ; updated ((24. *. hour) +. 1.)
+       ; updated (72. *. hour)
+       ; updated ((72. *. hour) +. 1.)
+       ])
+;;
+
 let () =
   Alcotest.run "tui_keeper_axis"
     [ ( "axis segments"
@@ -280,5 +385,12 @@ let () =
     ; ( "axis cell fit"
       , [ Alcotest.test_case "leaves the DETAIL its floor" `Quick
             test_fit_leaves_the_detail_its_floor
+        ] )
+    ; ( "view readings"
+      , [ Alcotest.test_case "every next-run reading has a time bucket" `Quick
+            test_due_buckets_every_next_run_reading
+        ; Alcotest.test_case "a gap comes before lag" `Quick test_follow_puts_a_gap_before_lag
+        ; Alcotest.test_case "age bounds belong to the nearer bucket" `Quick
+            test_age_buckets_the_last_update
         ] )
     ]

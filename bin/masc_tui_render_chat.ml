@@ -2668,6 +2668,22 @@ let join_child_notices notices native =
           child_notice_join_memo := Some (notices, native, joined);
           joined
 
+let committed_projection_memo = ref None
+
+let committed_projection
+    (timeline : (Masc_tui_types.msg_entry * float option) list)
+    (entries : Message_layout.entry list) =
+  match !committed_projection_memo with
+  | Some (previous_timeline, previous_entries, projection)
+    when previous_timeline == timeline && previous_entries == entries -> projection
+  | Some _ | None ->
+      let messages = List.map fst timeline in
+      let tagged = List.map2 (fun message entry -> Tagged_row message, entry)
+          messages entries in
+      let projection = messages, tagged in
+      committed_projection_memo := Some (timeline, entries, projection);
+      projection
+
 let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   (* The same pure derivation the committed rows used, asked again for the
      live ones: one call to one function with one argument, so the badge the
@@ -2683,13 +2699,17 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
   let committed_visible_timeline =
     keeper_message_visible_timeline state ~keeper_name
   in
-  let committed_messages = List.map fst committed_visible_timeline in
   Masc_tui_frame_timing.finish_stage ~name:"chat.rows" rows_started;
   let entries_started = Masc_tui_frame_timing.start_stage () in
   let committed_layout_entries =
     keeper_message_layout_entries state ~keeper_name ~chat_cols
   in
   Masc_tui_frame_timing.finish_stage ~name:"chat.layout_entries" entries_started;
+  (* These immutable inputs already own the row/layout revisions. Rebuilding
+     their tags on each paint also invalidated the search anchor index while
+     the conversation stood still. Changed input identity rebuilds both. *)
+  let committed_messages, committed_tagged =
+    committed_projection committed_visible_timeline committed_layout_entries in
   (* Rows for the turns this session holds as logs: every settled turn of
      this keeper that its log stands for, then the one still streaming. Each
      block follows the committed rows of its own request rather than
@@ -3169,10 +3189,6 @@ let keeper_message_projection (state : state) ~keeper_name ~chat_cols =
     List.filter (fun block ->
       not (Masc_tui_types.observed_log_has_ended state block.lb_log)
       && not (Masc_tui_types.observed_log_is_unavailable state block.lb_log)) blocks
-  in
-  let committed_tagged =
-    List.combine committed_messages committed_layout_entries
-    |> List.map (fun (message, entry) -> Tagged_row message, entry)
   in
   (* Persisted inputs and their projected log share exact request metadata.
      Keep each identity once in drawn order without parsing speech or

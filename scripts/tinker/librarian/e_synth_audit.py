@@ -56,9 +56,11 @@ verdict reads the judge's decisions with `--drops`.
 
 The key stays in <out>, since it names the label's classes and the dropped
 facts. The judge's folder <out>/judge/ holds the cases, JUDGE, and a copy of
-the rules JUDGE names at the same path (`audit_decisions.RULES`). The sha256 of
-those three files go beside the key, and `apply` and the verdict read the
-decisions only while the files are unchanged.
+the rules JUDGE names at the same path (`audit_decisions.RULES`). The judge
+decides in that folder itself. The sha256 of those three files go beside the
+key, and `apply` and the verdict read the decisions only while the files are
+unchanged. `cases` and `drops` refuse an <out> whose judge folder already holds
+decisions.
 """
 
 from __future__ import annotations
@@ -245,14 +247,17 @@ def drop_full_sets(drops: D.OffLabel, requests: dict[str, JsonObject], seed: int
 
 def write_cases(out: Path, case_rows: list[JsonObject], key_rows: list[JsonObject]) -> None:
     """The key and the sha256 of the judge's files in <out>; the cases, JUDGE and a copy of the rules
-    JUDGE names (synth_render.TEMPLATE) in the judge's folder, which the key never enters."""
+    JUDGE names (synth_render.TEMPLATE) in the judge's folder, which the key never enters. SystemExit
+    when that folder already holds decisions: they were made on the cases written there before."""
     judge = out / D.JUDGE_DIR
+    if (judge / D.DECISIONS).exists():
+        raise SystemExit(f"{judge} already holds a judge's {D.DECISIONS}: write the cases to a new --out")
     write_jsonl(out / "key.jsonl", key_rows)
     write_jsonl(judge / "cases.jsonl", case_rows)
     (judge / "judge.md").write_text(JUDGE, encoding="utf-8")
     (judge / D.RULES).parent.mkdir(parents=True, exist_ok=True)
     (judge / D.RULES).write_bytes(synth_render.TEMPLATE.read_bytes())
-    D.record_judge_files(out, ["cases.jsonl", "judge.md", D.RULES.as_posix()])
+    D.record_judge_files(out)
 
 
 def cases(args: argparse.Namespace) -> int:

@@ -482,6 +482,55 @@ let json_ensure_meta_source source = function
   | _non_object ->
       Error "json_ensure_meta_source: expected JSON object"
 
+(* The terminal's tool routes below answer a request the same way: [run] turns
+   the JSON body into a status and a response body, and every failure (a body
+   that is not JSON, a refusal from [run], an exception) is answered 400 with
+   its message. *)
+let respond_json_tool_request ~request reqd body_str run =
+  let bad_request message =
+    respond_json_value_with_cors ~status:`Bad_request request reqd
+      (activity_result_json ~ok:false ~message)
+  in
+  try
+    let args =
+      try Ok (Yojson.Safe.from_string body_str)
+      with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+    in
+    match Result.bind args run with
+    | Ok (status, body) -> respond_json_value_with_cors ~status request reqd body
+    | Error message -> bad_request message
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> bad_request (Printexc.to_string exn)
+
+(* A tool's answer: [success_status] when it succeeded, 400 when it did not,
+   with the tool's message either way. *)
+let tool_result_answer ~success_status result =
+  let ok = Tool_result.is_success result in
+  let status = if ok then success_status else `Bad_request in
+  Ok (status, activity_result_json ~ok ~message:(Tool_result.message result))
+
+(* A Board write on behalf of the authorised caller: the caller replaces
+   [actor_field] in the arguments, whatever the body says. *)
+let board_actor_write ~state ~agent_name ~tool_name ~actor_field ~success_status
+    args =
+  let ( let* ) = Result.bind in
+  let* args =
+    validate_write_workspace ~config:(Mcp_server.workspace_config state) args
+  in
+  let* args = json_upsert_string_field actor_field (String.trim agent_name) args in
+  Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client tool_name args
+  |> tool_result_answer ~success_status
+
+let goal_transition_write ~state ~agent_name args =
+  let config = (Mcp_server.workspace_scope state).Mcp_server.config in
+  Result.bind (validate_goal_workspace ~config args) (fun args ->
+    let ctx = { Workspace_types.config; agent_name } in
+    let start_time = Tool_timing.start () in
+    Workspace_goals.handle_goal_transition
+      ~tool_name:"masc_goal_transition" ~start_time ctx args
+    |> tool_result_answer ~success_status:`OK)
+
 let sub_board_owner_matches ~owner (sb : Board.sub_board) =
   String.equal (Board.Agent_id.to_string sb.Board.owner) owner
 
@@ -1167,30 +1216,9 @@ let add_routes ~sw ~clock router =
      These routes do not re-read the identity headers. *)
   |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_vote" }) "/api/v1/tools/masc_board_vote" (fun state agent_name request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let ( let* ) r f =
-               match r with
-               | Ok v -> f v
-               | Error msg ->
-                   respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (activity_result_json ~ok:false ~message:msg)
-             in
-             let* args =
-               try Ok (Yojson.Safe.from_string body_str)
-               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
-             in
-             let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
-             let voter = String.trim agent_name in
-             let* args = json_upsert_string_field "voter" voter args in
-             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_vote" args in
-             let ok = Tool_result.is_success result in
-             let msg = Tool_result.message result in
-             let status = if ok then `OK else `Bad_request in
-             respond_json_value_with_cors ~status request reqd
-               (activity_result_json ~ok ~message:msg)
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+           respond_json_tool_request ~request reqd body_str
+             (board_actor_write ~state ~agent_name ~tool_name:"masc_board_vote"
+                ~actor_field:"voter" ~success_status:`OK)
          )
        )
 
@@ -1254,30 +1282,9 @@ let add_routes ~sw ~clock router =
 
   |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_comment" }) "/api/v1/tools/masc_board_comment" (fun state agent_name request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let ( let* ) r f =
-               match r with
-               | Ok v -> f v
-               | Error msg ->
-                   respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (activity_result_json ~ok:false ~message:msg)
-             in
-             let* args =
-               try Ok (Yojson.Safe.from_string body_str)
-               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
-             in
-             let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
-             let author = String.trim agent_name in
-             let* args = json_upsert_string_field "author" author args in
-             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_comment" args in
-             let ok = Tool_result.is_success result in
-             let msg = Tool_result.message result in
-             let status = if ok then `Created else `Bad_request in
-             respond_json_value_with_cors ~status request reqd
-               (activity_result_json ~ok ~message:msg)
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+           respond_json_tool_request ~request reqd body_str
+             (board_actor_write ~state ~agent_name ~tool_name:"masc_board_comment"
+                ~actor_field:"author" ~success_status:`Created)
          )
        )
 
@@ -1286,30 +1293,10 @@ let add_routes ~sw ~clock router =
      supplied by an admitted token-less same-origin request. *)
   |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_board_comment_vote" }) "/api/v1/tools/masc_board_comment_vote" (fun state agent_name request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let ( let* ) r f =
-               match r with
-               | Ok v -> f v
-               | Error msg ->
-                   respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (activity_result_json ~ok:false ~message:msg)
-             in
-             let* args =
-               try Ok (Yojson.Safe.from_string body_str)
-               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
-             in
-             let* args = validate_write_workspace ~config:(Mcp_server.workspace_config state) args in
-             let voter = String.trim agent_name in
-             let* args = json_upsert_string_field "voter" voter args in
-             let result = Board_tool.handle_tool ~result_boundary:Tool_output.Sent_to_client "masc_board_comment_vote" args in
-             let ok = Tool_result.is_success result in
-             let msg = Tool_result.message result in
-             let status = if ok then `OK else `Bad_request in
-             respond_json_value_with_cors ~status request reqd
-               (activity_result_json ~ok ~message:msg)
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+           respond_json_tool_request ~request reqd body_str
+             (board_actor_write ~state ~agent_name
+                ~tool_name:"masc_board_comment_vote" ~actor_field:"voter"
+                ~success_status:`OK)
          )
        )
 
@@ -1320,34 +1307,8 @@ let add_routes ~sw ~clock router =
      rejection to make, not the route's. *)
   |> Server_route.post (Server_route.Tool_actor { tool_name = "masc_goal_transition" }) "/api/v1/tools/masc_goal_transition" (fun state agent_name request reqd ->
          Http.Request.read_body_async reqd (fun body_str ->
-           try
-             let ( let* ) r f =
-               match r with
-               | Ok v -> f v
-               | Error msg ->
-                   respond_json_value_with_cors ~status:`Bad_request request reqd
-                     (activity_result_json ~ok:false ~message:msg)
-             in
-             let* args =
-               try Ok (Yojson.Safe.from_string body_str)
-               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
-             in
-             let config = (Mcp_server.workspace_scope state).Mcp_server.config in
-             let* args = validate_goal_workspace ~config args in
-             let ctx = { Workspace_types.config; agent_name } in
-             let start_time = Tool_timing.start () in
-             let result =
-               Workspace_goals.handle_goal_transition
-                 ~tool_name:"masc_goal_transition" ~start_time ctx args
-             in
-             let ok = Tool_result.is_success result in
-             let msg = Tool_result.message result in
-             let status = if ok then `OK else `Bad_request in
-             respond_json_value_with_cors ~status request reqd
-               (activity_result_json ~ok ~message:msg)
-           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-             respond_json_value_with_cors ~status:`Bad_request request reqd
-               (activity_result_json ~ok:false ~message:(Printexc.to_string exn))
+           respond_json_tool_request ~request reqd body_str
+             (goal_transition_write ~state ~agent_name)
          )
        )
   (* Schedule create/modify from the terminal. Their schemas share the same

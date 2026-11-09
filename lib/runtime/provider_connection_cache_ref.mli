@@ -24,5 +24,11 @@ val for_this_domain : unit -> Llm_provider.Http_client.cache option
     keeps the cache it was built with, so it runs on the domain that built
     it; {!Runtime_agent} builds and runs a transport in one run. *)
 
+val with_fresh_connections : (unit -> 'a) -> 'a
+(** In the current Eio fiber and its children, build transports without the
+    installed idle connection cache. Restores the surrounding policy on return
+    or exception; other fibers keep using their own policy. This does not
+    resend a request or close another request's connection. *)
+
 val stats : unit -> Llm_provider.Http_client.cache_stats option
 (** The installed cache's statistics. Any domain may read them. *)

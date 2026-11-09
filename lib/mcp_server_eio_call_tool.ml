@@ -521,6 +521,24 @@ let record_runtime_mcp_keeper_tool_trace
    quietly downgraded the answer with nothing going red. *)
 exception Managed_agent_translation_failed of string
 
+type board_recording_reason = Recording_confirmation_unavailable
+
+type board_action_recording =
+  | Recording_confirmed of Ids.Execution_id.t
+  | Recording_unconfirmed of
+      { execution_id : Ids.Execution_id.t
+      ; reason : board_recording_reason
+      }
+
+let board_action_recording_to_yojson = function
+  | Recording_confirmed execution_id ->
+    `Assoc [ "status", `String "confirmed"
+           ; "execution_id", Ids.Execution_id.to_yojson execution_id ]
+  | Recording_unconfirmed { execution_id; reason = Recording_confirmation_unavailable } ->
+    `Assoc [ "status", `String "unconfirmed"
+           ; "execution_id", Ids.Execution_id.to_yojson execution_id
+           ; "reason", `String "recording_confirmation_unavailable" ]
+
 let resolve_managed_agent_call ?mcp_session_id request =
   let requested_name = Mcp_server_eio_call_request.requested_name request in
   let arguments = Mcp_server_eio_call_request.arguments request in
@@ -686,10 +704,20 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
   let execution_id =
     Option.map (fun _ -> Ids.Execution_id.generate ()) keeper_entry
   in
-  (* Commit retained roots before the following request audit and telemetry. *)
-  (match keeper_entry, execution_id with
+  let valid_board_fact =
+    match Board_tool_evidence.of_metadata (Tool_result.metadata result) with
+    | None -> false
+    | Some evidence ->
+      (match Board_tool_evidence.for_tool ~tool_name:name evidence with
+       | Ok _ -> true
+       | Error _ -> false)
+  in
+  (* Commit retained roots and Board facts before later audit and telemetry.
+     A Board-only recording fault cannot turn an already committed write into
+     a failed Tool response. Its exact recording confirmation travels separately. *)
+  let board_action_recording = match keeper_entry, execution_id with
    | Some entry, Some execution_id ->
-       (try
+       let confirmation = try
           record_runtime_mcp_keeper_tool_trace
             ~typed_result:result
             ?mcp_session_id
@@ -699,11 +727,16 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
             ~message
             ~disposition:result
             ~execution_id
-            ~duration_ms
+            ~duration_ms;
+          Recording_confirmed execution_id
         with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
           Mcp_server_eio_helpers.log_mcp_exn ~label:"runtime MCP keeper tool trace failed" exn;
-          if Tool_result.retained_artifacts result <> [] then raise exn)
-   | Some _, None | None, _ -> ());
+          if Tool_result.retained_artifacts result <> [] then raise exn;
+          Recording_unconfirmed { execution_id; reason = Recording_confirmation_unavailable }
+       in
+       if valid_board_fact then Some confirmation else None
+   | Some _, None | None, _ -> None
+  in
   Audit_log.log_tool_call config
     ~agent_id:agent_name ~tool_name:name ~success ~error_msg:error_detail
     ?trace_id:otel_trace_id ();
@@ -891,6 +924,10 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       ("attempts", `Int attempts);
       ("timestamp", `String (Masc_domain.now_iso ()));
     ]
+    @ (match board_action_recording with
+       | None -> []
+       | Some confirmation ->
+         [ "board_action_recording", board_action_recording_to_yojson confirmation ])
     @ (match Tool_result.failure_class result with
        | Some failure_class ->
          [ ( "failure_class"

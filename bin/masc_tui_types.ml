@@ -9863,7 +9863,7 @@ type state = {
   (* The group heading the cursor stands on, and the groups whose rows are
      folded away (RFC-0515 E12). Kept for this session only: neither is a
      choice [tui-keepers.toml] stores. *)
-  mutable keeper_list_heading: Masc_tui_keeper_list_model.heading_focus option;
+  mutable keeper_list_focus: Masc_tui_keeper_list_model.focus option;
   mutable keeper_list_folded: Masc_tui_keeper_list_model.group list;
   mutable keeper_list_seen_groups: Masc_tui_keeper_list_model.group list;
   mutable keeper_story: Masc_tui_keeper_story.page option;
@@ -12697,7 +12697,7 @@ let keeper_index state keeper_name =
 
 (* A Keeper chosen by name is a row, never the heading above it. *)
 let select_keeper_name_with keepers state keeper_name =
-  state.keeper_list_heading <- None;
+  state.keeper_list_focus <- None;
   match List.find_index (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name) keepers with
   | Some index -> state.keeper_cursor <- index
   | None ->
@@ -12710,41 +12710,45 @@ let keeper_list_select_name state keeper_name =
   select_keeper_name_with (ordered_keepers state) state keeper_name
 
 let keeper_list_stop (state : state) =
-  Masc_tui_keeper_list_model.current_stop ~folded:state.keeper_list_folded
-    ~focus:state.keeper_list_heading ~cursor:state.keeper_cursor
+  Masc_tui_keeper_list_model.current_stop ~view:state.keeper_list_view ~folded:state.keeper_list_folded
+    ~focus:state.keeper_list_focus ~cursor:state.keeper_cursor
     (keeper_list_reading state).klr_groups
 
 let keeper_list_stops (state : state) =
-  Masc_tui_keeper_list_model.stops ~folded:state.keeper_list_folded
+  Masc_tui_keeper_list_model.stops ~view:state.keeper_list_view ~folded:state.keeper_list_folded
     (keeper_list_reading state).klr_groups
 
 (* Only a focused heading or a folded group can put the cursor on a heading,
    so without either the list is not read. *)
 let keeper_list_on_heading (state : state) =
   state.view = Keepers Keeper_list
-  && (Option.is_some state.keeper_list_heading
+  && (Option.is_some state.keeper_list_focus
       || (match state.keeper_list_folded with [] -> false | _ :: _ -> true))
   && (match keeper_list_stop state with
       | Some (Masc_tui_keeper_list_model.Stop_heading _) -> true
-      | Some (Masc_tui_keeper_list_model.Stop_row _) | None -> false)
+      | Some (Masc_tui_keeper_list_model.Stop_world | Masc_tui_keeper_list_model.Stop_row _) | None -> false)
 
 (* A heading names no Keeper, so a key that acts on the selected Keeper finds
    none there. *)
 let selected_keeper (state : state) =
-  if keeper_list_on_heading state then None
+  if state.view = Keepers Keeper_list then
+    Option.bind (Masc_tui_keeper_list_model.keeper_position (keeper_list_stop state))
+      (List.nth_opt (keepers_for_selection state))
   else List.nth_opt (keepers_for_selection state) state.keeper_cursor
 
 (* The Keeper the cursor rests on. A heading rests the cursor on its group's
    first row, so this names a Keeper there too, where [selected_keeper] names
    none. A change that reorders or leaves the rows carries this one. *)
 let resting_keeper_name (state : state) =
-  Option.map (fun (keeper : keeper) -> keeper.k_name)
+  if state.view = Keepers Keeper_list
+     && keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world then None
+  else Option.map (fun (keeper : keeper) -> keeper.k_name)
     (List.nth_opt (keepers_for_selection state) state.keeper_cursor)
 
 (* A row chosen by name or position is that row, not the heading above it,
    and on the Keepers list a folded group opens so the chosen row is drawn. *)
 let choose_keeper_row (state : state) index =
-  state.keeper_list_heading <- None;
+  state.keeper_list_focus <- None;
   state.keeper_cursor <- index;
   if state.view = Keepers Keeper_list then
     (match List.nth_opt (keeper_list_reading state).klr_groups index with
@@ -12757,9 +12761,9 @@ let choose_keeper_row (state : state) index =
 let place_keeper_list_stop (state : state) stop =
   Option.iter
     (fun (focus, cursor) ->
-      state.keeper_list_heading <- focus;
+      state.keeper_list_focus <- focus;
       state.keeper_cursor <- cursor)
-    (Masc_tui_keeper_list_model.placement (keeper_list_reading state).klr_groups stop)
+    (Masc_tui_keeper_list_model.placement ~view:state.keeper_list_view (keeper_list_reading state).klr_groups stop)
 
 let step_keeper_list_stop (state : state) ~delta =
   Option.iter
@@ -12777,16 +12781,18 @@ let jump_keeper_list_group (state : state) direction =
 
 (* The heading the cursor was placed on, while the cursor still stands on it. *)
 let keeper_list_focused_heading (state : state) =
-  match state.keeper_list_heading, keeper_list_stop state with
-  | Some focus, Some (Masc_tui_keeper_list_model.Stop_heading group)
+  match state.keeper_list_focus, keeper_list_stop state with
+  | Some (Masc_tui_keeper_list_model.Focus_heading focus), Some (Masc_tui_keeper_list_model.Stop_heading group)
     when focus.Masc_tui_keeper_list_model.heading = group -> Some group
-  | (Some _ | None), (Some (Masc_tui_keeper_list_model.Stop_heading _
+  | (Some (Masc_tui_keeper_list_model.Focus_heading _ | Masc_tui_keeper_list_model.Focus_world) | None),
+      (Some (Masc_tui_keeper_list_model.Stop_heading _ | Masc_tui_keeper_list_model.Stop_world
                            | Masc_tui_keeper_list_model.Stop_row _) | None) -> None
 
 (* A change that reorders or regroups the rows keeps what the cursor stands
    on: the heading it was placed on while that group still has rows, else the
    Keeper it rests on, found again by name. *)
 let carry_keeper_list_selection (state : state) update =
+  let world = keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world in
   let heading = keeper_list_focused_heading state in
   let resting = resting_keeper_name state in
   let result = update () in
@@ -12794,17 +12800,18 @@ let carry_keeper_list_selection (state : state) update =
   Option.iter
     (fun group -> place_keeper_list_stop state (Masc_tui_keeper_list_model.Stop_heading group))
     heading;
+  if world then place_keeper_list_stop state Masc_tui_keeper_list_model.Stop_world;
   result
 
 (* A heading the cursor was placed on stays selected after either change.
    A heading that stood for the cursor's row inside a folded group gives way
    to that row once the group unfolds. *)
-let refold_keeper_list_heading (state : state) change =
+let refold_keeper_list_focus (state : state) change =
   match keeper_list_stop state with
   | Some (Masc_tui_keeper_list_model.Stop_heading group) ->
       state.keeper_list_folded <-
         Masc_tui_keeper_list_model.refold change group state.keeper_list_folded
-  | Some (Masc_tui_keeper_list_model.Stop_row _) | None -> ()
+  | Some (Masc_tui_keeper_list_model.Stop_world | Masc_tui_keeper_list_model.Stop_row _) | None -> ()
 
 let selected_tools_error (state : state) =
   held_tools_error
@@ -12900,7 +12907,7 @@ let transition_keeper_view state view =
 let set_keeper_list_view state view =
   let resting = resting_keeper_name state in
   state.keeper_list_view <- view;
-  state.keeper_list_heading <- None;
+  state.keeper_list_focus <- None;
   Option.iter (keeper_list_select_name state) resting
 
 let cycle_keeper_list_view state =
@@ -15776,6 +15783,19 @@ let reconcile_fusion_launch (state : state) =
    list. *)
 let reconcile_keeper_story (state : state) =
   if state.view <> Keepers Keeper_list then state.keeper_story <- None
+  else match state.keeper_story, keeper_list_stop state with
+    | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.Schedule
+            | Masc_tui_keeper_story.Memory | Masc_tui_keeper_story.World),
+        Some Masc_tui_keeper_list_model.Stop_world ->
+        state.keeper_story <- Some Masc_tui_keeper_story.World
+    | Some Masc_tui_keeper_story.World, Some (Masc_tui_keeper_list_model.Stop_row _) ->
+        state.keeper_story <- Some Masc_tui_keeper_story.Story
+    | Some Masc_tui_keeper_story.World, (Some (Masc_tui_keeper_list_model.Stop_heading _) | None) ->
+        state.keeper_story <- None
+    | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory),
+        (Some (Masc_tui_keeper_list_model.Stop_heading _ | Masc_tui_keeper_list_model.Stop_row _) | None)
+    | None, (Some (Masc_tui_keeper_list_model.Stop_world | Masc_tui_keeper_list_model.Stop_heading _
+                  | Masc_tui_keeper_list_model.Stop_row _) | None) -> ()
 
 type text_input_target =
   | Text_collab_form
@@ -20108,7 +20128,7 @@ let create_state
   keeper_list_view = Masc_tui_keeper_list_model.Plain;
   keeper_outside_reading = (fun _ ~now:_ ~keeper_name:_ -> Masc_tui_keeper_list_model.outside_unread);
   keeper_list_density = Masc_tui_keeper_list_model.Two_lines;
-  keeper_list_heading = None;
+  keeper_list_focus = None;
   keeper_list_folded = [];
   keeper_list_seen_groups = [];
   keeper_story = None;

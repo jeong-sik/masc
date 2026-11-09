@@ -389,6 +389,7 @@ let group_label = function
   | Model.Group_age _ -> "age"
 
 let stop_label = function
+  | Model.Stop_world -> "world"
   | Model.Stop_heading group -> "heading " ^ group_label group
   | Model.Stop_row position -> "row " ^ string_of_int position
 
@@ -398,16 +399,16 @@ let test_stops_open_each_group_with_its_heading () =
   Alcotest.(check (list string)) "a heading before each group's rows"
     [ "heading attention"; "row 0"; "row 1"; "heading failing"; "row 2"
     ; "heading active"; "row 3"; "row 4" ]
-    (stop_labels (Model.stops ~folded:[] grouped));
+    (stop_labels (Model.stops ~view:Model.By_state ~folded:[] grouped));
   Alcotest.(check (list string)) "a folded group keeps its heading and hides its rows"
     [ "heading attention"; "row 0"; "row 1"; "heading failing"; "heading active"; "row 3"; "row 4" ]
-    (stop_labels (Model.stops ~folded:[ failing_group ] grouped));
+    (stop_labels (Model.stops ~view:Model.By_state ~folded:[ failing_group ] grouped));
   Alcotest.(check (list string)) "a view that does not group has only rows"
     [ "row 0"; "row 1" ]
-    (stop_labels (Model.stops ~folded:[ failing_group ] [ None; None ]))
+    (stop_labels (Model.stops ~view:Model.By_state ~folded:[ failing_group ] [ None; None ]))
 
 let test_steps_stop_on_headings_and_hold_at_the_ends () =
-  let stops = Model.stops ~folded:[] grouped in
+  let stops = Model.stops ~view:Model.By_state ~folded:[] grouped in
   let step delta stop = Option.map stop_label (Model.step_stop ~delta stops stop) in
   Alcotest.(check (option string)) "down from a heading reaches its first row" (Some "row 0")
     (step 1 (Model.Stop_heading attention_group));
@@ -421,10 +422,10 @@ let test_steps_stop_on_headings_and_hold_at_the_ends () =
     (step 1 (Model.Stop_row 4));
   Alcotest.(check (option string)) "a folded group's row is not a stop" None
     (Option.map stop_label
-       (Model.step_stop ~delta:1 (Model.stops ~folded:[ failing_group ] grouped) (Model.Stop_row 2)))
+       (Model.step_stop ~delta:1 (Model.stops ~view:Model.By_state ~folded:[ failing_group ] grouped) (Model.Stop_row 2)))
 
 let test_group_jumps_reach_the_nearest_heading () =
-  let stops = Model.stops ~folded:[] grouped in
+  let stops = Model.stops ~view:Model.By_state ~folded:[] grouped in
   let jump direction stop = Option.map stop_label (Model.group_jump direction stops stop) in
   Alcotest.(check (option string)) "] from a row reaches the next group" (Some "heading failing")
     (jump Model.Next_group (Model.Stop_row 0));
@@ -438,11 +439,12 @@ let test_group_jumps_reach_the_nearest_heading () =
     (jump Model.Previous_group (Model.Stop_heading attention_group));
   Alcotest.(check (option string)) "a view without headings has no group to reach" None
     (Option.map stop_label
-       (Model.group_jump Model.Next_group (Model.stops ~folded:[] [ None; None ]) (Model.Stop_row 0)))
+       (Model.group_jump Model.Next_group (Model.stops ~view:Model.By_state ~folded:[] [ None; None ]) (Model.Stop_row 0)))
 
 let test_current_stop_follows_focus_folds_and_the_cursor () =
   let current ?(folded = []) ?focus cursor groups =
-    Option.map stop_label (Model.current_stop ~folded ~focus ~cursor groups)
+    Option.map stop_label (Model.current_stop ~view:Model.By_state ~folded
+      ~focus:(Option.map (fun focus -> Model.Focus_heading focus) focus) ~cursor groups)
   in
   let failing_focus = { Model.heading = failing_group; cursor_at = 2 } in
   Alcotest.(check (option string)) "no focus is the cursor's row" (Some "row 2") (current 2 grouped);
@@ -465,10 +467,11 @@ let test_a_heading_rests_the_cursor_on_its_first_row () =
       (fun (focus, cursor) ->
         (match focus with
          | None -> "no focus"
-         | Some { Model.heading; cursor_at } ->
+         | Some Model.Focus_world -> "world focus"
+         | Some (Model.Focus_heading { Model.heading; cursor_at }) ->
              "focus " ^ group_label heading ^ " at " ^ string_of_int cursor_at)
         ^ ", cursor " ^ string_of_int cursor)
-      (Model.placement grouped stop)
+      (Model.placement ~view:Model.By_state grouped stop)
   in
   Alcotest.(check (option string)) "a heading" (Some "focus active at 3, cursor 3")
     (placed (Model.Stop_heading active_group));
@@ -750,10 +753,27 @@ let test_portrait_shows_only_in_the_two_line_list () =
           [ Model.One_line; Model.Two_lines ])
     Model.views
 
+let test_world_is_a_distinct_non_keeper_stop () =
+  List.iter (fun view ->
+    let stops = Model.stops ~view ~folded:[] grouped in
+    Alcotest.(check bool) "world leads memory and age" true (List.hd stops = Model.Stop_world);
+    Alcotest.(check bool) "world survives empty roster" true
+      (Model.current_stop ~view ~folded:[] ~focus:None ~cursor:0 [] = Some Model.Stop_world);
+    Alcotest.(check bool) "world has no actionable Keeper index" true
+      (Model.keeper_position (Some Model.Stop_world) = None);
+    Alcotest.(check bool) "world placement cannot become row zero" true
+      (Model.placement ~view grouped Model.Stop_world = Some (Some Model.Focus_world, 0));
+    Alcotest.(check bool) "down from world reaches first heading" true
+      (Model.step_stop ~delta:1 stops Model.Stop_world = Some (Model.Stop_heading attention_group)))
+    [Model.By_memory; Model.By_age];
+  Alcotest.(check bool) "other views reject world placement" true
+    (Model.placement ~view:Model.By_state grouped Model.Stop_world = None)
+
 let () =
   Alcotest.run "tui_keeper_list_model"
     [ ( "decisions"
-      , [ Alcotest.test_case "view, density and sort cycles" `Quick test_cycles
+      , [ Alcotest.test_case "world is a distinct non-Keeper stop" `Quick test_world_is_a_distinct_non_keeper_stop
+        ; Alcotest.test_case "view, density and sort cycles" `Quick test_cycles
         ; Alcotest.test_case "priority order" `Quick test_priority_orders_attention_activity_waiting_then_inactive
         ; Alcotest.test_case "recent and name ordering" `Quick test_recent_and_name_have_deterministic_ties
         ; Alcotest.test_case "streaming keeps async and schedule badges" `Quick test_streaming_keeps_async_and_schedule_badges

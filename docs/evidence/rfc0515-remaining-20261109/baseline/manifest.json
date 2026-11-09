@@ -1,0 +1,956 @@
+{
+  "kind": "installed-baseline-through-read-only-header-preserving-proxy",
+  "installed_build_commit": "6a6ec4c28e2f26edcf272e37115ac2f655005f2b",
+  "installed_binary_sha256": "f20e88bc51a587bb595dbc66bd9fcf37168ea8e175b2d6360b5d592664a660e9",
+  "live_preferences_unchanged": true,
+  "candidate_source_capture": false,
+  "post_put_patch_delete_forwarded": false,
+  "files": {
+    "before-80x24-cause-detailed.txt": "7a0c487c5c3866ec5f607d8ae9b3f817970f4639e63af7bc6bedcdf23df4cc1c",
+    "before-120x35-list-compact.txt": "a56f26d53967c5d025cc48426f37d1f2d9d2f0b9d0066475095c893ee5eba896",
+    "before-80x24-memory-detailed.txt": "b6dca9c5d44529abdfc115d8f04f9309c361ef6fc49e58db7535c40124693415",
+    "before-80x24-24h-compact.txt": "ba3ef68033301cbfff0365e16c12b4b192e451e5efce802bdad848d458e633e0",
+    "before-80x24-cause-compact.txt": "123854cad3939c54891fa5a5f8bdc947187a3ea5f1a30d27a98c4ceca9581b59",
+    "before-80x24-time-compact.txt": "f8cfdc0d5040de0b5b89c978721630dd30d51459504ba330044ac1191a08a177",
+    "before-120x35-state-detailed.txt": "d58a000fdd26153dec2e1112919607ce2b343b85b3f48d2a40ed4f9b372db4fd",
+    "before-120x35-age-compact.txt": "8f5c6126abeaeb0cd3803bf5333133ecec7eefcd978d2a83b57ad1c8081e59ee",
+    "before-120x35-time-detailed.txt": "353e9fd808c6c5a6c2a42e07900da3f5aebf6420692f32dcd05883f698b207b2",
+    "before-120x35-runtime-detailed.txt": "23d4190f763091ac7943ecdd757e8bbcf766613103ee8a5830b200ef77be6348",
+    "before-80x24-memory-compact.txt": "e2261639359e6bde08e5170304eb075e751f0b91596408a6dd72e10162b210c0",
+    "before-80x24-list-detailed.txt": "d6b6f4d28c50f2e681683bb914fba2661ef7e6f1c2b1d9afb57f011453433731",
+    "before-120x35-memory-detailed.txt": "2664eef59092aa4702b57c1dd2a409ce8240351f7974def62ca1223a1610f400",
+    "before-80x24-list-compact.txt": "933d9bf43c15a6525426b3c2f4f07b903399f3f91c6a1802eef3348cc1ecbd94",
+    "before-120x35-time-compact.txt": "9c6e16672a73f6bf3dce6adca73528be002cf4c06edd11ad51d42e6103951250",
+    "before-120x35-state-compact.txt": "f19af88ff38cdcbc5d5160d346c7fde274aeee3c2dfd3563ac1c4ad27b1a3b51",
+    "before-80x24-age-detailed.txt": "73f833e7cd04c1c41b2e19bbf299e70f1b43bab2fc5a43b6e8bf198f0acfae03",
+    "before-80x24-time-detailed.txt": "ea413f2ed2960c20d7a553c4257c94966e6beac1b9d90a365930f95ec0b3f771",
+    "before-120x35-24h-compact.txt": "9865248c82034ee0d3576209d4c34521a70581ab7d7ce9e0f2bc6754b9ecadba",
+    "before-80x24-24h-detailed.txt": "2d534e052d0acc2fc61b6f37f631bf9d7b8d1b449381a22169a40469c3975fb9",
+    "before-120x35-memory-compact.txt": "c05b75725299d986825dffd24ff9f5ebfc0fcfaf48b2be6b335c6849012c7ead",
+    "before-120x35-runtime-compact.txt": "34eea60d659f742b0d0f9ebfc0fe431db73cef875cf4af6276ae6737f23549e7",
+    "before-120x35-cause-compact.txt": "46dd6f3552940ad299961a22f696b735431a74440e760b4395dd63eb8c168389",
+    "before-80x24-age-compact.txt": "a211bb180ce4648c6b563e88cad786d540631f5119a1c4689f97f297c51c6e74",
+    "before-120x35-list-detailed.txt": "27bb7b96139c2b9381289c9d3fecb35ef554bb76e1930372f4cb5aae45f56161",
+    "before-80x24-runtime-compact.txt": "9b62c26d9cde0c3227257c10db3162f611c7f839414c4f35b07f647481da899e",
+    "before-120x35-cause-detailed.txt": "04d6444d34b4925443a308bc34db4e297ea84d5aed3f49e5e98f84744ac67eb6",
+    "before-80x24-state-compact.txt": "b571a3a2633c896f47ba588bacc046a5cf22073678bbdb7fc799f005414851e8",
+    "before-120x35-age-detailed.txt": "994010ffe17f0d1fcb995ef8b37cb8ae3c8b594910d1af709c191763539dcc1a",
+    "before-80x24-runtime-detailed.txt": "78f56dd79db70aa186570837d5f0cc39c95f0bc5276f939cdb05af22c2dca954",
+    "before-120x35-24h-detailed.txt": "a79f57278859084db327fdcf5425c2083e2e1792caba4f5c19e5ecc8395e38d4",
+    "before-80x24-state-detailed.txt": "1064c3c348b5af20b94546229967c36e1f0f008124c2f89f20573690120d7c44"
+  },
+  "sanitization": "Text derivatives redact the home path and opaque account-specific runtime IDs; IDs are replaced with equal-length masks. Binary digest identifies original installed bytes; text digests identify these sanitized derivatives.",
+  "source_baseline_matches_current_main": false,
+  "capture_runs": [
+    {
+      "size": "120x35",
+      "start_utc": "2026-11-09T10:04:03Z",
+      "manifest_source": "baseline-final; HTTP audit covers healthy120x35 and excluded early80x24 attempt, while retained text files select120x35 only",
+      "proxy_requests": [
+        {
+          "method": "GET",
+          "path": "/api/v1/tui/preferences",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/tool-metrics/series?bucket=hour&since_hours=24&expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/health-line",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/stream/fleet?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/health-line",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/tool-metrics/series?bucket=hour&since_hours=24&expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "POST",
+          "path": "/api/v1/tui/preferences",
+          "blocked": true
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/tui/preferences",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/tool-metrics/series?bucket=hour&since_hours=24&expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/health-line",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/tui/preferences",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/stream/fleet?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/health-line",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/tool-metrics/series?bucket=hour&since_hours=24&expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/health-line",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/health-line",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/tool-metrics/series?bucket=hour&since_hours=24&expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        }
+      ]
+    },
+    {
+      "size": "80x24",
+      "start_utc": "2026-11-09T10:06:22Z",
+      "manifest_source": "baseline-narrow-ready (local working output)",
+      "proxy_requests": [
+        {
+          "method": "GET",
+          "path": "/api/v1/tui/preferences",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/tool-metrics/series?bucket=hour&since_hours=24&expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/health-line",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approvals",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/async-requests?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/scheduled-automation?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/stream/fleet?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/tool-approval-mode",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/health-line",
+          "status": 304
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/turns?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/gate/keeper-settings",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/operator?view=summary&include_messages=0&include_keepers=0",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/gate/keepers?detailed=true&fresh=true&expected_workspace=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/dashboard/keeper-memory-health",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/keepers/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/api/v1/lane-addons/asks?expected_base_path=<base-path>&expected_masc_root=<base-path>/.masc",
+          "status": 200
+        },
+        {
+          "method": "GET",
+          "path": "/health",
+          "status": 200
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        },
+        {
+          "method": "POST",
+          "path": "/mcp",
+          "blocked": true
+        }
+      ]
+    }
+  ],
+  "input_readiness": "80x24 recapture waited until the private pane termios ECHO flag was off before input, avoiding sending navigation keys during boot."
+}

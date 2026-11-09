@@ -9599,17 +9599,18 @@ let launch_owed_memory_health state ~mailbox =
    than that (RFC-0511 D11). *)
 let memory_world_read_interval_s = Server_dashboard_http_core_cache.standard_cache_ttl_s
 
-(* Runs on every loop iteration. Only the Memory overview draws the world line,
-   so only the Memory overview reads the world: the facts browser, Metrics and
-   the Keepers list have no use for it. Each answer sets the time before which
+(* Runs on every loop iteration. The Memory overview and the Keepers memory/age
+   views draw the same world reading. Each answer sets the time before which
    no read starts, so an open screen asks once per interval, a failed read
    waits the same interval, and a screen entered again within it draws the
    inventory already held. The read carries the expected workspace and needs
    the server's receipt for it, so an answer from another workspace is an
    error and not a count. *)
 let launch_owed_memory_world state ~mailbox =
-  if state.view = Memory && Option.is_none state.memory_facts_keeper
-     && server_authority_ready state then
+  let visible = (state.view = Memory && Option.is_none state.memory_facts_keeper)
+    || (state.view = Keepers Keeper_list
+        && Masc_tui_keeper_list_model.has_world state.keeper_list_view) in
+  if visible && server_authority_ready state then
     match Masc_tui_memory_world.start ~now:(monotonic_now_s ()) state.memory_world with
     | None -> ()
     | Some (next, request) ->
@@ -10023,7 +10024,8 @@ let keeper_story_turns_on_screen state =
   | Some
       ( Masc_tui_keeper_story.Story
       | Masc_tui_keeper_story.Schedule
-      | Masc_tui_keeper_story.Memory )
+      | Masc_tui_keeper_story.Memory
+      | Masc_tui_keeper_story.World )
   | None -> None
 
 (* One Keeper's schedules read again under the same rules as the fleet list,
@@ -17432,7 +17434,7 @@ let withdraw_currency_authority state =
    match reloads it, so a screen never shows rows from a workspace the server
    just stopped serving. *)
 let withdraw_keeper_workspace_presentation state ~previous ~keep_detail_navigation ~draft =
-  state.keeper_list_heading <- None;
+  state.keeper_list_focus <- None;
   state.keeper_list_folded <- [];
   state.keeper_list_seen_groups <- [];
   state.followed_from <- None;
@@ -19180,7 +19182,10 @@ let keeper_story_action state key =
   if String.equal key "esc" && Option.is_some state.keeper_settings_intent then None
   else
     Masc_tui_keeper_story.action_of_key
-      ~on_keeper:(Option.is_some (selected_keeper state))
+      ~selection:(match keeper_list_stop state with
+        | Some Masc_tui_keeper_list_model.Stop_world -> Masc_tui_keeper_story.World_selected
+        | Some (Masc_tui_keeper_list_model.Stop_row _) -> Masc_tui_keeper_story.Keeper_selected
+        | Some (Masc_tui_keeper_list_model.Stop_heading _) | None -> Masc_tui_keeper_story.No_selection)
       state.keeper_story key
 ;;
 
@@ -19364,6 +19369,14 @@ let press_marked_target state ~mailbox (target : press_target) =
                Masc_tui_lane_inventory.find_identity target [row])) ->
              open_lane_inventory_selection state ~mailbox
          | Some index -> Option.iter (fun list -> list.rl_place index) (row_list state))
+  | Press_keeper_world ->
+      if state.view = Keepers Keeper_list
+         && Masc_tui_keeper_list_model.has_world state.keeper_list_view then
+        if keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world then
+          Option.iter (apply_keeper_story_action state ~mailbox)
+            (Masc_tui_keeper_story.action_of_key ~selection:Masc_tui_keeper_story.World_selected
+               state.keeper_story "\r")
+        else place_keeper_list_stop state Masc_tui_keeper_list_model.Stop_world
   | Press_keeper_row name -> (
       match keeper_index state name with
       (* A press read against a list frame after a key in the same burst
@@ -19375,10 +19388,10 @@ let press_marked_target state ~mailbox (target : press_target) =
          the cursor is on is Enter on it, which opens the window, and on an
          open window it is Right, which opens the detail: a press is the
          pointer's only way to either. *)
-      | Some index when index = state.keeper_cursor && not (keeper_list_on_heading state) ->
+      | Some index when keeper_list_stop state = Some (Masc_tui_keeper_list_model.Stop_row index) ->
           let key = if Option.is_some state.keeper_story then "right" else "\r" in
           Option.iter (apply_keeper_story_action state ~mailbox)
-            (Masc_tui_keeper_story.action_of_key ~on_keeper:true state.keeper_story key)
+            (Masc_tui_keeper_story.action_of_key ~selection:Masc_tui_keeper_story.Keeper_selected state.keeper_story key)
       | Some _ -> keeper_list_select_name state name)
   | Press_keeper_view view ->
       if state.view = Keepers Keeper_list && view <> state.keeper_list_view then begin
@@ -39263,7 +39276,7 @@ Use relative paths for resources already held in the package. -->
        | Some (("left" | "right") as arrow)
          when state.view = Keepers Keeper_list && Option.is_none (current_detail_reading state)
               && keeper_list_on_heading state ->
-           refold_keeper_list_heading state
+           refold_keeper_list_focus state
              (if arrow = "left" then Masc_tui_keeper_list_model.Fold
               else Masc_tui_keeper_list_model.Unfold)
        | Some "o" when state.view = Keepers Keeper_list ->

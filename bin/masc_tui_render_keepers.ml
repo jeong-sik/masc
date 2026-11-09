@@ -1490,6 +1490,7 @@ let keeper_operations_fields (state : state) ~keeper_name =
   else fields
 
 type keeper_display_entry =
+  | Keeper_world
   | Keeper_group_heading of Keeper_list_model.group * int
   | Keeper_display_row of int * Keeper_list_model.row
 
@@ -1497,18 +1498,20 @@ type keeper_display_entry =
    the cursor can go cannot disagree. A heading counts every row of its group,
    folded or not. [klr_groups] is mapped from [klr_rows], so every row stop
    names a row. *)
-let keeper_display_entries ~folded (reading : Masc_tui_types.keeper_list_reading) =
+let keeper_display_entries ~view ~folded (reading : Masc_tui_types.keeper_list_reading) =
   let rows = Array.of_list reading.klr_rows in
   let members group =
     List.length (List.filter (fun other -> other = Some group) reading.klr_groups)
   in
   List.map
     (function
+      | Keeper_list_model.Stop_world -> Keeper_world
       | Keeper_list_model.Stop_heading group -> Keeper_group_heading (group, members group)
       | Keeper_list_model.Stop_row position -> Keeper_display_row (position, rows.(position)))
-    (Keeper_list_model.stops ~folded reading.klr_groups)
+    (Keeper_list_model.stops ~view ~folded reading.klr_groups)
 
 let keeper_entry_selected stop = function
+  | Keeper_world -> stop = Some Keeper_list_model.Stop_world
   | Keeper_group_heading (group, _) -> stop = Some (Keeper_list_model.Stop_heading group)
   | Keeper_display_row (position, _) -> stop = Some (Keeper_list_model.Stop_row position)
 
@@ -1747,15 +1750,20 @@ let keeper_story_lead (row : Keeper_list_model.row) =
 let draw_keeper_story buf ~cols ~rows ~now ~inner (state : state) page
     (row : Keeper_list_model.row option) =
   let lead, lines =
-    match row with
-    | None ->
+    match page, row with
+    | Masc_tui_keeper_story.World, (Some _ | None) ->
+        ("  " ^ Theme.info () ^ "world · shared workspace memory" ^ Ansi.reset,
+         Masc_tui_keeper_world.dock_lines ~health_error:state.memory_health_error
+           ~cells:inner ~max_lines:(Masc_tui_render_keeper_story.body_rows ~rows)
+           state.memory_health (Masc_tui_memory_world.reading state.memory_world))
+    | Masc_tui_keeper_story.(Story | Schedule | Memory), None ->
         ( "  " ^ Ansi.dim ^ "no Keeper" ^ Ansi.reset
         , [ Ansi.dim ^ "  no Keeper under the cursor" ^ Ansi.reset ] )
-    | Some row ->
+    | Masc_tui_keeper_story.(Story | Schedule | Memory), Some row ->
         let keeper_name = row.keeper.Tui_decode.k_name in
         ( keeper_story_lead row
         , (match page with
-           | Masc_tui_keeper_story.Story ->
+           | Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World ->
                keeper_story_lines state ~now ~inner
                  ~body_rows:(Masc_tui_render_keeper_story.body_rows ~rows) row
            | Masc_tui_keeper_story.Schedule ->
@@ -2337,7 +2345,7 @@ let render_keeper_axes (state : state) =
   let selected_row =
     match stop with
     | Some (Keeper_list_model.Stop_row position) -> List.nth_opt model_rows position
-    | Some (Keeper_list_model.Stop_heading _) | None -> None
+    | Some (Keeper_list_model.Stop_world | Keeper_list_model.Stop_heading _) | None -> None
   in
   let selected_reading =
     Option.map (fun (row : Keeper_list_model.row) -> row.reading) selected_row
@@ -2671,14 +2679,14 @@ let render_keeper_axes (state : state) =
         Masc_tui_keeper_wall.group ~now:now_unix (keeper_row_runtime previous)
     | (Axis_row.Wall_columns | Axis_row.List_columns | Axis_row.Grid _), (Some _ | None), (Some _ | None) -> false in
   let entry_lines = function
-    | Keeper_group_heading _ -> 1
+    | Keeper_world | Keeper_group_heading _ -> 1
     | Keeper_display_row (position, row) ->
         (if wall_separator position then 1 else 0) +
         (match second_line row with
         | Axis_row.No_second_line -> 1
         | Axis_row.List_detail | Axis_row.Failure_chain -> 2)
   in
-  let entries = keeper_display_entries ~folded:state.keeper_list_folded list_reading in
+  let entries = keeper_display_entries ~view:state.keeper_list_view ~folded:state.keeper_list_folded list_reading in
   let portrait_candidate =
     (* The portrait and the Story window both want the rows under the list. *)
     if Option.is_some state.keeper_story then None
@@ -2721,7 +2729,9 @@ let render_keeper_axes (state : state) =
   let available_rows = max 0 (roster_rows - chrome_rows - footer_rows) in
   let story_rows =
     match state.keeper_story with
-    | Some _ -> Masc_tui_render_keeper_story.rows ~budget:available_rows
+    | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.Schedule
+            | Masc_tui_keeper_story.Memory | Masc_tui_keeper_story.World) ->
+        Masc_tui_render_keeper_story.rows ~budget:available_rows
     | None -> 0
   in
   let selected_summary = match state.keeper_story, selected_row with
@@ -2772,6 +2782,22 @@ let render_keeper_axes (state : state) =
   let entries_window = List.take window_entries (List.drop scroll_offset entries) in
   List.iter
     (function
+      | Keeper_world as entry ->
+          let world = Masc_tui_keeper_world.row_cells ~view:state.keeper_list_view
+              ~health_error:state.memory_health_error state.memory_health
+              (Masc_tui_memory_world.reading state.memory_world) in
+          let text = grid_line grid
+            { gutter = Theme.info () ^ "▌ ■ " ^ Ansi.reset
+            ; name = fit_width "world · shared" grid.name_cells
+            ; pulse = fit_width world.pulse grid.side_cells
+            ; now_cell = fit_width world.now_cell Grid.now_cells
+            ; strip = fit_width world.strip (Grid.strip_cells grid)
+            ; due = fit_width world.due Grid.due_cells
+            ; right = Message_layout.pad_left world.right grid.mem_cells } in
+          let text = pressable Press_keeper_world (fit_width text inner) in
+          if keeper_entry_selected stop entry then
+            box_line_selected buf cols (Masc_tui_theme.strip_sgr text)
+          else box_line buf cols text
       | Keeper_group_heading (group, count) as entry ->
           let text =
             let title = keeper_group_heading_text ~available_cells:inner model_rows group count in
@@ -2847,11 +2873,11 @@ let render_keeper_axes (state : state) =
       | Page_unread -> Some page_unread_note
       | Page_failed -> None
   in
+  let room_for_note = List.fold_left (fun n entry -> n + entry_lines entry) 0 entries_window < entry_rows in
   Option.iter
     (fun text ->
-      if entry_rows > 0 then box_line buf cols (Theme.recede () ^ text ^ Ansi.reset))
-    note;
-  let note_rows = match note with Some _ when entry_rows > 0 -> 1 | Some _ | None -> 0 in
+      if room_for_note then box_line buf cols (Theme.recede () ^ text ^ Ansi.reset)) note;
+  let note_rows = match note with Some _ when room_for_note -> 1 | Some _ | None -> 0 in
   let drawn_rows =
     List.fold_left (fun drawn entry -> drawn + entry_lines entry) note_rows entries_window
   in
@@ -2870,7 +2896,7 @@ let render_keeper_axes (state : state) =
       List.filter_map
         (function
           | Keeper_display_row (position, _) -> Some position
-          | Keeper_group_heading _ -> None)
+          | Keeper_world | Keeper_group_heading _ -> None)
         entries_window
     in
     let range =

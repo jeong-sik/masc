@@ -595,10 +595,10 @@ let for_surface = function
       :: (b Act "J" "jobs" ~help:"open the selected Keeper's schedules")
       :: (b Act "K" "relations" ~help:"browse Keeper-origin requests queued for the selected Keeper")
       :: (b Act "Enter" "story"
-            ~help:"open the Story window below the list for the Keeper under the cursor; on its story page it closes the window")
+            ~help:"open the selected Keeper Story or shared World window; Enter closes its story/world page")
       :: (b Act "Right" "detail" ~help:"keeper detail")
       :: (b Act "Tab / s / m" "pages"
-            ~help:"with the Story window open: next page / schedules / memory; Esc closes it")
+            ~help:"with a Keeper Story open: next page / schedules / memory; World keeps its own page; Esc closes either window")
       :: keeper_actions
       @ [ b Search "/" "search" ~help:"search names; Enter keeps the query"
         ; b Search "n / N" "next / previous match"

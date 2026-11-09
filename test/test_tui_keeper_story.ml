@@ -8,8 +8,8 @@ let action =
   in
   Alcotest.testable pp ( = )
 
-let on_row = Story.action_of_key ~on_keeper:true
-let no_keeper = Story.action_of_key ~on_keeper:false
+let on_row = Story.action_of_key ~selection:Story.Keeper_selected
+let no_keeper = Story.action_of_key ~selection:Story.No_selection
 
 (* The same key on every page of an open window. *)
 let check_every_page ?(of_key = on_row) ~key ~expected () =
@@ -116,10 +116,24 @@ let test_no_keeper_under_the_cursor () =
     (Some (Story.Show Story.Schedule))
     (no_keeper (Some Story.Story) "\t")
 
+let test_world_dock_cannot_dispatch_keeper_actions () =
+  let world = Story.action_of_key ~selection:Story.World_selected in
+  Alcotest.check (Alcotest.option action) "World Enter opens its dock" (Some (Story.Show Story.World))
+    (world None "\r");
+  List.iter (fun key ->
+    Alcotest.check (Alcotest.option action) "world keys stay in world dock"
+      (Some (Story.Show Story.World)) (world (Some Story.World) key))
+    ["s"; "S"; "m"; "M"; "\t"; "tab"; "right"];
+  Alcotest.check (Alcotest.option action) "World Esc closes" (Some Story.Close)
+    (world (Some Story.World) "esc");
+  Alcotest.check (Alcotest.option action) "stale Keeper page cannot open detail for World"
+    (Some (Story.Show Story.World)) (world (Some Story.Story) "right")
+
 let () =
   Alcotest.run "tui_keeper_story"
     [ ( "story window keys"
-      , [ Alcotest.test_case "Tab makes one lap of the pages" `Quick test_tab_makes_one_lap
+      , [ Alcotest.test_case "World dock cannot dispatch Keeper actions" `Quick test_world_dock_cannot_dispatch_keeper_actions
+        ; Alcotest.test_case "Tab makes one lap of the pages" `Quick test_tab_makes_one_lap
         ; Alcotest.test_case "s and m name their pages, capitals too" `Quick test_s_and_m_name_their_pages
         ; Alcotest.test_case "Enter closes the story page and returns to it" `Quick
             test_enter_closes_the_story_page_and_returns_to_it_elsewhere

@@ -9,6 +9,7 @@ type page =
   | Story
   | Schedule
   | Memory
+  | World
 
 val pages : page list
 (** The pages in tab order. *)
@@ -16,19 +17,24 @@ val pages : page list
 val tab_label : page -> string
 (** The name drawn on the page's tab, with the key that jumps to it. *)
 
+type selection = Keeper_selected | World_selected | No_selection
+
 type action =
   | Show of page  (** Open the window on this page, or move it to this page. *)
   | Close  (** Close the window. *)
   | Open_detail  (** Close the window and open the Keeper's detail. *)
 
-val action_of_key : on_keeper:bool -> page option -> string -> action option
+val action_of_key : selection:selection -> page option -> string -> action option
 (** What [key] does to the window, [None] when it is closed. [key] is a name
     from the input decoder. [None] means the window does not take the key and
     the list handles it as it does with the window closed. A closed window
     takes Enter alone, and an open one takes the keys of its pages, [s] and [m]
     in either case.
 
-    [on_keeper] is true while a Keeper is under the list cursor. Without one --
+    [selection] distinguishes a Keeper, the shared World, and a heading.
+    World Enter opens its own dock; its s/m/Tab/Right never dispatch Keeper
+    actions. The Keeper tabs in {!pages} exclude the World dock.
+    Without a selected Keeper or World --
     the cursor stands on a group heading, or the list has no Keeper -- a closed
     window opens nothing and an open one leaves Enter and Right to the list,
     where on a heading Left folds the group and Right unfolds it. *)

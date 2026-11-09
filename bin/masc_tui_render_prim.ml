@@ -3150,11 +3150,14 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
          detail, and Right alone would be the first key a narrow row loses
          after [r]. The labels follow the keys in order. *)
       if keeper_list_on_heading state then [ "Left / Right", accent "Left / Right" ^ ":fold"; esc ]
+      else if state.view = Keepers Keeper_list
+              && keeper_list_stop state = Some Masc_tui_keeper_list_model.Stop_world then
+        ["Enter", accent "Enter" ^ (match story with None -> ":world" | Some _ -> ":close"); esc]
       else
         let enter =
           match story with
           | None -> "story"
-          | Some Masc_tui_keeper_story.Story -> "close"
+          | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.World) -> "close"
           | Some (Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory) -> "story"
         in
         [ "Enter / Right", accent "Enter / Right" ^ ":" ^ enter ^ " / detail"; esc ]
@@ -3162,7 +3165,9 @@ let keeper_control_hints ?(offers_chat = true) ?(offers_back = true) ?(taken = [
   let story_hints =
     match story with
     | None -> []
-    | Some _ -> [ accent "Tab" ^ ":page"; accent "s" ^ ":schedules"; accent "m" ^ ":memory" ]
+    | Some Masc_tui_keeper_story.World -> []
+    | Some (Masc_tui_keeper_story.Story | Masc_tui_keeper_story.Schedule | Masc_tui_keeper_story.Memory) ->
+        [ accent "Tab" ^ ":page"; accent "s" ^ ":schedules"; accent "m" ^ ":memory" ]
   in
   (* [s] shuts a Keeper down only while the window is closed. *)
   let taken = match story with None -> taken | Some _ -> "s" :: taken in

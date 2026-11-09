@@ -886,6 +886,28 @@ let roster_turn name : Tui_decode.keeper_turn_row =
 let selected_roster_name state =
   Option.map (fun keeper -> keeper.Tui_decode.k_name) (selected_keeper state)
 
+let test_world_selection_never_names_a_keeper () =
+  let module Model = Masc_tui_keeper_list_model in
+  let state = create_state ~workspace:"" ~port:0 () in
+  state.view <- Keepers Keeper_list;
+  state.keepers <- [roster_keeper "alpha"];
+  state.keeper_list_view <- Model.By_memory;
+  place_keeper_list_stop state Model.Stop_world;
+  Alcotest.(check (option string)) "World cannot target row zero" None (selected_roster_name state);
+  preserve_keeper_list_selection state (fun () -> state.keepers <- [roster_keeper "beta"]);
+  cycle_keeper_list_sort state;
+  Alcotest.(check bool) "refresh and sort retain typed World focus" true
+    (keeper_list_stop state = Some Model.Stop_world);
+  state.keepers <- [];
+  Alcotest.(check (option string)) "empty roster still has no Keeper" None (selected_roster_name state);
+  Alcotest.(check bool) "empty roster keeps World" true (keeper_list_stop state = Some Model.Stop_world);
+  state.keepers <- [roster_keeper "beta"];
+  choose_keeper_row state 0;
+  Alcotest.(check (option string)) "choosing a real Keeper clears World focus" (Some "beta") (selected_roster_name state);
+  place_keeper_list_stop state Model.Stop_world;
+  set_keeper_list_view state Model.Plain;
+  Alcotest.(check (option string)) "leaving World view selects a real row" (Some "beta") (selected_roster_name state)
+
 let test_keeper_list_cycles_preserve_selected_name () =
   let state = create_state ~workspace:"" ~port:0 () in
   state.view <- Keepers Keeper_list;
@@ -2332,6 +2354,7 @@ let () =
             test_keepers_jump_uses_one_binding_for_dispatch_and_help
         ; Alcotest.test_case "Keepers view and sort preserve the selected name" `Quick
             test_keeper_list_cycles_preserve_selected_name
+        ; Alcotest.test_case "World selection never names a Keeper" `Quick test_world_selection_never_names_a_keeper
         ; Alcotest.test_case "Keepers detail transition preserves the selected name" `Quick
             test_keeper_list_detail_transition_preserves_selected_name
         ; Alcotest.test_case "Activity keeps the requested Keeper through roster selection" `Quick

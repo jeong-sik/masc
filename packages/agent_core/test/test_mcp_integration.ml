@@ -254,11 +254,6 @@ let test_connect_all_empty () =
   | Error e -> Alcotest.fail ("Expected Ok [], got Error: " ^ Error.to_string e)
 ;;
 
-let test_close_all_empty () =
-  Mcp.close_all [];
-  Alcotest.(check bool) "no crash" true true
-;;
-
 let test_connect_all_bad_command () =
   with_eio
   @@ fun ~sw ~mgr ->
@@ -271,7 +266,7 @@ let test_connect_all_bad_command () =
   in
   match Mcp.connect_all ~sw ~mgr [ spec ] with
   | Ok _ -> Alcotest.fail "Expected Error for bad command"
-  | Error _ -> Alcotest.(check bool) "error returned" true true
+  | Error _ -> ()
 ;;
 
 let test_connect_and_load_bad_command () =
@@ -354,8 +349,8 @@ let test_connect_all_second_fails () =
     { command = "/nonexistent/binary"; args = []; env = []; name = "bad-server" }
   in
   match Mcp.connect_all ~sw ~mgr [ good_spec; bad_spec ] with
-  | Ok _ -> Alcotest.(check bool) "unexpected success" true true
-  | Error _ -> Alcotest.(check bool) "error from lifecycle" true true
+  | Ok _ -> Alcotest.fail "Expected Error when the second server fails to start"
+  | Error _ -> ()
 ;;
 
 let test_resources_and_prompts_roundtrip () =
@@ -495,7 +490,6 @@ let () =
         ; test_case "no handler means no advertised sampling" `Quick test_sampling_is_disabled_without_host_handler ] )
     ; ( "connect_lifecycle"
       , [ test_case "connect_all empty" `Quick test_connect_all_empty
-        ; test_case "close_all empty" `Quick test_close_all_empty
         ; test_case "connect_all bad command" `Quick test_connect_all_bad_command
         ; test_case
             "connect_and_load bad command"

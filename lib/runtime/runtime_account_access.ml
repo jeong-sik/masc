@@ -253,3 +253,31 @@ let authorize_host client =
   | Published (Single_user (_ : Authz_boot_mode_read.single_user)) -> Ok Shared_by_single_user
   | Published (Multi_account { zone = _; base_path = _; now = _ }) -> Error (Host_account client)
 ;;
+
+type native_refusal =
+  | Native_unpublished
+  | Native_tools_reach_other_homes of Runtime_native_tools.posture
+
+let native_refusal_to_string = function
+  | Native_unpublished ->
+    "this process has not published whether a model turn may use the native tools of its CLI"
+  | Native_tools_reach_other_homes posture ->
+    Printf.sprintf
+      "a multi-account process runs a model turn only without native tools, and this turn \
+       asks for the native posture %S: the CLI runs as the user of the server process, so \
+       its own tools could read the account homes of other people"
+      (Runtime_native_tools.to_string posture)
+;;
+
+let authorize_native posture =
+  match Atomic.get state, posture with
+  | Unpublished, (Runtime_native_tools.Native_none | Native_read | Native_full) ->
+    Error Native_unpublished
+  | ( Published (Single_user (_ : Authz_boot_mode_read.single_user))
+    , (Runtime_native_tools.Native_none | Native_read | Native_full) ) -> Ok ()
+  | Published (Multi_account { zone = _; base_path = _; now = _ }), Runtime_native_tools.Native_none
+    -> Ok ()
+  | ( Published (Multi_account { zone = _; base_path = _; now = _ })
+    , (Runtime_native_tools.Native_read | Native_full) ) ->
+    Error (Native_tools_reach_other_homes posture)
+;;

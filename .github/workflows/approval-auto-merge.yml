@@ -11,7 +11,7 @@ on:
         required: true
         type: string
       receipt:
-        description: JSON receipt of an unsettled merge-async request to resume (uuid, pr, head, members, since)
+        description: JSON receipt of an unsettled merge-async request to resume (uuid, pr, head, members, since, optional retry_at)
         required: false
         default: ''
         type: string

@@ -68,7 +68,8 @@
  (public_name masc.fs_compat)
  (modules
   fs_compat
-  fs_compat_base_io)
+  fs_compat_base_io
+  fs_compat_capability_write)
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4) + unused-value ratchet (warning 32)
  (flags
   (:standard -w +4))

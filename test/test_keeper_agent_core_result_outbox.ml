@@ -212,7 +212,7 @@ streaming = false
      check (list string) "checkpoint keeps the original result pending" original_ids
        (Outbox.receipt_ids (snapshot ()));
      let settled =
-       match Eio.Time.with_timeout env#clock 10. (fun () -> Eio.Promise.await chat_settled) with
+       match Eio.Time.with_timeout_exn env#clock 10. (fun () -> Eio.Promise.await chat_settled) with
        | operations -> operations
        | exception Eio.Time.Timeout -> fail "queued chat did not settle after the autonomous slot handoff"
      in

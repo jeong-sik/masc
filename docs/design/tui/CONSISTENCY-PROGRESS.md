@@ -52,12 +52,12 @@ owns that rule; this table records the remaining scope.
 
 | Entry point | Surfaces and child readings | Current work | Remaining evidence |
 | --- | --- | --- | --- |
-| Operations | Overview, Metrics; requests, account and call details | #50707 removes request IDs from summary labels while keeping the exact typed destination, and names continuation actions as conversation entry points. Normal current fleet scope/ok rows are omitted; retained scope, non-normal grade, counts and failure reasons remain. Main labels and key hints use the existing interface language. Two local agent source reviews found no P0–P2 in cd2523bd; these are not formal GitHub approvals. The Usage slice removes its wall clock and repeated Plan heading, and chooses localized key hints from typed view membership so account controls are not promoted in Keeper/tool-call readings | Usage source review and candidate execution; account/call readings and request input states |
-| Work | Planning, Approvals, Verification, Harness, Board; Goal, Task, request, proof and discussion details | #50671 simplifies the Task list; #50688 wraps the goal and declared success criterion, retaining exceptional proof/binding notices and keeping identifiers in detail. Linked Task details qualify partial or retained observations rather than claiming absence or a complete count | Goal candidate execution; other Work readings, installation and input/confirmation ownership |
-| Keepers | Keepers, Memory, Schedules, Fusion, Changes; all six Keeper modes and detail tabs | Coordinate with existing Keeper Pulse and memory work (#50669, #50643) rather than duplicate it | Review those changes together; chat, schedule, result and error states |
-| Features and plugins | Lanes, Clients, Connectors, Resources, Tools; plugins, browser, tools, skills and result details | #50677 simplifies feature overview around purpose, standing, errors and existing actions. The a00f8aab candidate was observed in a native PTY at 150×40 and 80×24; narrow secondary action hints still displace current execution fields | Fix narrow summary priority; the other feature surfaces, input overlays and installation |
+| Operations | Overview, Metrics; requests, account and call details | #50707 removes request IDs from summary labels while keeping the exact typed destination, and names continuation actions as conversation entry points. Normal current fleet scope/ok rows are omitted; retained scope, non-normal grade, counts and failure reasons remain. Main labels and key hints use the existing interface language. #50730 removes the Usage wall clock and repeated Plan heading, and chooses localized key hints from typed view membership so account controls are not promoted in Keeper/tool-call readings. Two local agent source reviews found no P0–P2 in Usage 53095e99 on Memory b5655270; these are not formal GitHub approvals | Matching-server candidate execution; account/call details and request input states |
+| Work | Planning, Approvals, Verification, Harness, Board; Goal, Task, request, proof and discussion details | #50671 simplifies the Task list; #50688 wraps the goal and declared success criterion, retaining exceptional proof/binding notices and keeping identifiers in detail. Linked Task details qualify partial or retained observations rather than claiming absence or a complete count. Goal/Task entry, detail and return were observed with native TUI 8ebbe020 against the older server | Matching-server observations; other Work readings, installation and input/confirmation ownership |
+| Keepers | Keepers, Memory, Schedules, Fusion, Changes; all six Keeper modes and detail tabs | Coordinate with existing Keeper Pulse and memory work (#50669, #50643) rather than duplicate it. #50708 aligns typed state/pass search and preserves refused fleet rows and retained observation scope; its b5655270 source was independently reread | Review those changes together in execution; chat, schedule, result and error states |
+| Features and plugins | Lanes, Clients, Connectors, Resources, Tools; plugins, browser, tools, skills and result details | #50677 simplifies feature overview around purpose, standing, errors and existing actions. #50695 repairs the narrow summary priority found in a00f8aab; native TUI 8ebbe020 observations at 150×40 and 80×24 showed current fields before secondary action hints, against the older server | Matching-server observations; the other feature surfaces, input overlays and installation |
 | Workspace | Repositories, Code; checkout, Git changes, files, history, diff and navigation overlays | #50704 leads repository selection with its scoped last Git observation and assigned Keepers, before registered defaults and the path. The normal explanatory question and repeated inner heading are removed; retained/failed reads remain visible. Rendering and cursor paging share the revised row budget. Two local agent source reviews found no P0–P2; their footer-language finding was repaired. These are local review results, not formal GitHub approvals | Candidate execution and navigation/return behavior; Code, history, diff and overlays |
-| System | Config, Runtime, Acting, System_logs; all settings tabs, account/model forms and diagnostic details | #50690 puts validation and application before full source identifiers and key lists, retaining failed-refresh notices before previous status facts; two independent source reviews found no P0–P2 | Candidate execution, other System readings and save/uncertain-result behavior |
+| System | Config, Runtime, Acting, System_logs; all settings tabs, account/model forms and diagnostic details | #50690 puts validation and application before full source identifiers and key lists, retaining failed-refresh notices before previous status facts; two independent source reviews found no P0–P2. Native TUI 8ebbe020 showed application facts before source identifiers at wide and narrow sizes, against the older server | Matching-server observations, other System readings and save/uncertain-result behavior |
 
 For each row, inspect wide and narrow native views, loading/empty/error and
 retained observations, selection/scroll/return ownership, and applicable input
@@ -114,6 +114,21 @@ at 8ebbe020. Its retained runner log records the three selected suites:
 `test_tui_memory_facts_explorer` (9 cases), `test_tui_planning_detail` (8), and
 `test_tui_task_document_style` (4). These are category-search, proof-boundary and
 document-identity/style checks; they are not the complete TUI regression.
+
+Manual native PTY observations of 8ebbe020 subsequently covered Operations,
+Goal and Task entry/detail/return, Features and settings status, at wide and
+narrow sizes. A separate Usage baseline covered Plan, Trend, Keepers and Calls.
+These used the existing e2c38ca server, not a matching server build; the baseline
+does not execute #50707, #50708 or #50730. Raw captures remain private under
+`artifacts/`. Neither observation establishes installation or a visible GUI
+screenshot. The 2026-11-10 health read reported server e2c38ca.
+
+The stack now includes the Memory author's b5655270 update rather than replacing
+it with a parallel repair. Two local source reviews covered its full
+7175899d-to-b5655270 diff and the unchanged Usage diff on that base. Operations
+7175899d also received an independent source reread against its current parent
+and direct interfaces. Parsing and source reviews remain separate from fixed
+toolchain compilation, native execution and formal current-head approvals.
 
 The [second four-surface source review](../../reports/2026-11-10-four-surface-reading-review.md)
 keeps Memory health queries aligned with the displayed canonical/KO/EN state

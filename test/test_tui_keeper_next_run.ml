@@ -530,7 +530,9 @@ let test_no_wake_at_or_after_expiry () =
     (strip_of [ row ])
 ;;
 
-let test_held_and_late_rows_are_not_on_the_strip () =
+(* A late or held row wakes again when it fires or the hold ends, a time
+   neither row carries, so its share of the strip is unknown. *)
+let test_held_and_late_rows_are_unknown () =
   let hold : Masc.Tui_decode.schedule_runner_hold =
     { srh_occurrence_id = "occ-1"
     ; srh_due_at_iso = iso ~h:1 ~m:0
@@ -541,12 +543,29 @@ let test_held_and_late_rows_are_not_on_the_strip () =
   let held = { (scheduled ~h:1 ~m:0 ()) with sch_runner_hold = Some hold } in
   let late = make_row ~id:"sch-late" ~status:"due" ~keeper_name:"alpha"
       ~due_at_iso:(iso ~h:0 ~m:0) ~recurrence:(interval 600) () in
-  Alcotest.check strip "a held row and a late row add nothing"
-    (every (Masc_tui_keeper_next_run.Wakes 0))
-    (strip_of [ held; late ]);
+  let unknown = every Masc_tui_keeper_next_run.Wakes_unknown in
+  Alcotest.check strip "a held row is unknown" unknown (strip_of [ held ]);
+  Alcotest.check strip "a late row is unknown" unknown (strip_of [ late ]);
+  Alcotest.check strip "another row's known wake shows through"
+    (List.init (ahead + 1) (fun index ->
+       if index = 2 then Masc_tui_keeper_next_run.Wakes 1
+       else Masc_tui_keeper_next_run.Wakes_unknown))
+    (strip_of [ held; late; make_row ~id:"sch-known" ~keeper_name:"alpha"
+                              ~due_at_iso:(iso ~h:1 ~m:0) () ]);
+  Alcotest.check strip "a late row is unknown only up to its expiry"
+    (List.init (ahead + 1) (fun index ->
+       if index < 2 then Masc_tui_keeper_next_run.Wakes_unknown
+       else Masc_tui_keeper_next_run.Wakes 0))
+    (strip_of [ { late with sch_expires_at_iso = Some (iso ~h:1 ~m:0) } ]);
   Alcotest.check strip "the same row without the hold wakes"
     (once_in [ 2 ])
     (strip_of [ { held with sch_runner_hold = None } ])
+;;
+
+let test_unreadable_status_is_unknown () =
+  Alcotest.check strip "a Keeper whose only row has an unknown status word"
+    (every Masc_tui_keeper_next_run.Wakes_unknown)
+    (strip_of [ make_row ~status:"paused" ~keeper_name:"alpha" ~due_at_iso:(iso ~h:1 ~m:0) () ])
 ;;
 
 let test_unread_recurrence_knows_only_the_first_wake () =
@@ -556,6 +575,74 @@ let test_unread_recurrence_knows_only_the_first_wake () =
        else if index = 2 then Masc_tui_keeper_next_run.Wakes 1
        else Masc_tui_keeper_next_run.Wakes_unknown))
     (strip_of [ scheduled ~h:1 ~m:0 ~recurrence:(Error "unknown recurrence kind") () ])
+;;
+
+(* A fleet page in the server's shape with one row of [recurrence]. The
+   actor and the readable recurrence go through the schedule contract's own
+   writers. *)
+let agenda_json recurrence =
+  let actor =
+    Schedule_domain.actor_to_yojson
+      { Schedule_domain.id = "operator"; kind = Schedule_domain.Human_operator; display_name = None }
+  in
+  `Assoc
+    [ "generated_at", `String (iso ~h:0 ~m:0)
+    ; "status", `String "ok"
+    ; "request_count", `Int 1
+    ; "truncated", `Bool false
+    ; "fsm", `Assoc [ "next_due_at", `Null ]
+    ; "counts", `Null
+    ; "schedule_runner", `Assoc [ "status", `String "ok" ]
+    ; ( "requests"
+      , `List
+          [ `Assoc
+              [ "schedule_instance_id", `String "inst-1"
+              ; "schedule_id", `String "sch-1"
+              ; "status", `String "scheduled"
+              ; "source", `String "operator_request"
+              ; "requested_by", actor
+              ; "scheduled_by", actor
+              ; "requested_at_iso", `String (iso ~h:0 ~m:0)
+              ; "due_at_iso", `String (iso ~h:1 ~m:0)
+              ; "next_due_at_iso", `String (iso ~h:1 ~m:0)
+              ; "expires_at_iso", `Null
+              ; "recurrence_summary", `String "every two weeks"
+              ; "recurrence", recurrence
+              ; "payload_digest", `String "digest"
+              ; "payload", `Assoc []
+              ; "payload_support", `String "supported"
+              ; "payload_keeper_name", `String "alpha"
+              ; "runner_hold", `Null
+              ]
+          ] )
+    ]
+;;
+
+let test_decode_keeps_a_row_whose_recurrence_it_cannot_read () =
+  let decode recurrence =
+    match Masc_tui_schedule_decode.snapshot_of_json (agenda_json recurrence) with
+    | Ok snapshot -> snapshot
+    | Error reason -> Alcotest.fail reason
+  in
+  let unread = decode (`Assoc [ "kind", `String "fortnightly" ]) in
+  (match unread.scs_rows with
+   | [ { Masc_tui_types.sch_recurrence = Error _; _ } ] -> ()
+   | [ { Masc_tui_types.sch_recurrence = Ok _; _ } ] -> Alcotest.fail "an unknown kind decoded"
+   | rows -> Alcotest.failf "the page kept %d rows, not 1" (List.length rows));
+  Alcotest.check strip "the kept row wakes at 01:00, then is unknown"
+    (List.init (ahead + 1) (fun index ->
+       if index < 2 then Masc_tui_keeper_next_run.Wakes 0
+       else if index = 2 then Masc_tui_keeper_next_run.Wakes 1
+       else Masc_tui_keeper_next_run.Wakes_unknown))
+    (Masc_tui_keeper_next_run.wake_strip (agenda_index (Some unread))
+       ~now ~ahead ~keeper_name:"alpha");
+  let readable =
+    decode (Schedule_domain.recurrence_to_yojson (Schedule_domain.Interval { interval_sec = 600 }))
+  in
+  match readable.scs_rows with
+  | [ { Masc_tui_types.sch_recurrence = Ok (Schedule_domain.Interval { interval_sec = 600 }); _ } ]
+    -> ()
+  | _ -> Alcotest.fail "a 600 s interval did not decode as itself"
 ;;
 
 let test_failed_or_missing_agenda_is_unknown () =
@@ -634,10 +721,12 @@ let () =
         ; Alcotest.test_case "cron" `Quick test_cron_every_half_hour
         ; Alcotest.test_case "one-shot" `Quick test_one_shot_wakes_once
         ; Alcotest.test_case "expiry" `Quick test_no_wake_at_or_after_expiry
-        ; Alcotest.test_case "held and late" `Quick
-            test_held_and_late_rows_are_not_on_the_strip
+        ; Alcotest.test_case "held and late" `Quick test_held_and_late_rows_are_unknown
+        ; Alcotest.test_case "unreadable status" `Quick test_unreadable_status_is_unknown
         ; Alcotest.test_case "unread recurrence" `Quick
             test_unread_recurrence_knows_only_the_first_wake
+        ; Alcotest.test_case "decode keeps an unread recurrence" `Quick
+            test_decode_keeps_a_row_whose_recurrence_it_cannot_read
         ; Alcotest.test_case "failed or missing agenda" `Quick
             test_failed_or_missing_agenda_is_unknown
         ; Alcotest.test_case "cut agenda" `Quick test_cut_agenda_is_unknown_from_its_last_due

@@ -66,8 +66,13 @@ let run_cell (state : Masc_tui_types.state) ~now ~keeper_name =
     (Masc_tui_keeper_next_run.find (get_schedule_index state) ~keeper_name)
 ;;
 
+(* A failed agenda read keeps the last list, so the strip says nothing about
+   it until a read succeeds (RFC-0515 §2.4.4). *)
 let wake_strip (state : Masc_tui_types.state) ~now ~ahead ~keeper_name =
-  Masc_tui_keeper_next_run.wake_strip (get_schedule_index state) ~now ~ahead ~keeper_name
+  match state.schedules_agenda_error with
+  | Some _ -> Masc_tui_keeper_next_run.unknown_strip ~ahead
+  | None ->
+      Masc_tui_keeper_next_run.wake_strip (get_schedule_index state) ~now ~ahead ~keeper_name
 ;;
 
 let segments (state : Masc_tui_types.state) ~now ~keeper_name ~runtime

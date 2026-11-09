@@ -171,6 +171,13 @@ let test_segments_extracts_scheduled_and_memory_cells () =
   Alcotest.(check bool) "the wake strip reads the state's agenda" true
     (Masc_tui_keeper_axis.wake_strip state ~now ~ahead:2 ~keeper_name:"edgar"
      = Masc_tui_keeper_next_run.[ Wakes 0; Wakes 0; Wakes 1 ]);
+  (* A failed read keeps the last agenda on hand, and the strip does not
+     vouch for it. *)
+  state.schedules_agenda_error <- Some "agenda read failed";
+  Alcotest.(check bool) "after a failed agenda read every slot is unknown" true
+    (Masc_tui_keeper_axis.wake_strip state ~now ~ahead:2 ~keeper_name:"edgar"
+     = Masc_tui_keeper_next_run.[ Wakes_unknown; Wakes_unknown; Wakes_unknown ]);
+  state.schedules_agenda_error <- None;
 
   let other = Masc_tui_keeper_axis.segments state ~now ~keeper_name:"other" ~runtime:None in
   Alcotest.(check int) "unscheduled keeper has mem ?" 1 (List.length other);

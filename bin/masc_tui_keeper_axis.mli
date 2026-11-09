@@ -23,7 +23,9 @@ val wake_strip :
   Masc_tui_keeper_next_run.wake_slot list
 (** [keeper_name]'s wake strip ({!Masc_tui_keeper_next_run.wake_strip}) from
     the state's schedule agenda, through the same cached index as
-    {!segments}, so a frame does not walk the recurrences again. *)
+    {!segments}, so a frame does not walk the recurrences again. While the
+    last agenda read failed, every slot is unknown: the list on hand is
+    older than the failure. *)
 
 val memory_index : Masc_tui_types.state -> Masc_tui_keeper_memory_reading.index
 (** The state's memory health as the index {!segments} reads, built once per

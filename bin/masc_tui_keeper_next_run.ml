@@ -126,9 +126,11 @@ type window =
   ; slots : int
   }
 
+let slots_of ~ahead = max 0 (ahead + 1)
+
 let window_of ~now ~ahead =
   { first_slot = float_of_int (Keeper_turn_pulse.slot_start now)
-  ; slots = max 0 (ahead + 1)
+  ; slots = slots_of ~ahead
   }
 ;;
 
@@ -149,13 +151,43 @@ type row_wakes =
 
 let unknown_row = { known = []; unknown_after = Some Float.neg_infinity; stops_at = None }
 
+(* What the strip makes of one row of the Keeper. *)
+type strip_row =
+  | Walked  (* Scheduled or running and not held: its recurrence is walked. *)
+  | Closed  (* A terminal status: the row never wakes again. *)
+  | Late_or_held
+      (* Late ([Due]) or held by the runner. It wakes again when it fires or
+         the hold ends, and a recurring row goes on after that
+         ([Schedule_domain.reschedule_after_due_signal]); neither time is on
+         the row. *)
+  | Status_unreadable  (* A status word this build does not know. *)
+
+let strip_row (row : Masc_tui_types.schedule_row) =
+  match Schedule_domain.schedule_status_of_string row.sch_status with
+  | Error _ -> Status_unreadable
+  | Ok (Succeeded | Failed | Cancelled | Expired) -> Closed
+  | Ok Due -> Late_or_held
+  | Ok (Scheduled | Running) ->
+      (match row.sch_runner_hold with
+       | Some _ -> Late_or_held
+       | None -> Walked)
+;;
+
+let row_expiry (row : Masc_tui_types.schedule_row) =
+  match row.sch_expires_at_iso with
+  | None -> Ok None
+  | Some iso -> Result.map Option.some (Time_codec.parse_rfc3339 iso)
+;;
+
+(* A row that wakes at times it does not say is unknown up to its expiry. *)
+let unknown_until_expiry row =
+  match row_expiry row with
+  | Ok stops_at -> { unknown_row with stops_at }
+  | Error _ -> unknown_row
+;;
+
 let row_wakes window (row : Masc_tui_types.schedule_row) =
-  let expiry =
-    match row.sch_expires_at_iso with
-    | None -> Ok None
-    | Some iso -> Result.map Option.some (Time_codec.parse_rfc3339 iso)
-  in
-  match Masc_tui_types.schedule_row_due_time row, expiry with
+  match Masc_tui_types.schedule_row_due_time row, row_expiry row with
   | None, (Ok _ | Error _) | Some _, Error _ -> unknown_row
   | Some first, Ok stops_at ->
       let on_strip at =
@@ -217,17 +249,6 @@ let strip_of_row_wakes window { known; unknown_after; stops_at } =
         else Wakes count)
 ;;
 
-(* A late row says so in the due column, and a held row has no wake until the
-   runner lets it go, so neither is on the strip. *)
-let wakes_on_strip (row : Masc_tui_types.schedule_row) =
-  match row.sch_runner_hold with
-  | Some _ -> false
-  | None ->
-      (match Schedule_domain.schedule_status_of_string row.sch_status with
-       | Ok (Scheduled | Running) | Error _ -> true
-       | Ok (Due | Succeeded | Failed | Cancelled | Expired) -> false)
-;;
-
 (* The agenda is the first page of the fleet list. The server sorts it active
    first, then by [due_at], then by id, and cuts it at its limit
    (Server_dashboard_schedule_projection [compare_schedule_order] and
@@ -253,14 +274,19 @@ let wake_strip_of_snapshot window ~keeper_name
   match snapshot.scs_read_error with
   | Some _ -> strip_of_row_wakes window unknown_row
   | None ->
-      let rows =
-        List.filter
-          (fun (row : Masc_tui_types.schedule_row) ->
-             row.sch_payload_keeper_name = Some keeper_name && wakes_on_strip row)
-          snapshot.scs_rows
+      let row_reading (row : Masc_tui_types.schedule_row) =
+        match strip_row row with
+        | Walked -> Some (row_wakes window row)
+        | Closed -> None
+        | Late_or_held | Status_unreadable -> Some (unknown_until_expiry row)
       in
       let readings =
-        List.map (row_wakes window) rows @ Option.to_list (truncation_wakes snapshot)
+        List.filter_map row_reading
+          (List.filter
+             (fun (row : Masc_tui_types.schedule_row) ->
+                row.sch_payload_keeper_name = Some keeper_name)
+             snapshot.scs_rows)
+        @ Option.to_list (truncation_wakes snapshot)
       in
       sum_wake_strips
         (List.init window.slots (fun _ -> Wakes 0)
@@ -318,6 +344,8 @@ let find index ~keeper_name =
            Hashtbl.add index.ind_table keeper_name t;
            t)
 ;;
+
+let unknown_strip ~ahead = List.init (slots_of ~ahead) (fun _ -> Wakes_unknown)
 
 let wake_strip index ~now ~ahead ~keeper_name =
   let window = window_of ~now ~ahead in

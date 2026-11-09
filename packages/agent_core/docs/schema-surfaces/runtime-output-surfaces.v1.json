@@ -1,7 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-08-14",
-  "description": "Operator-facing index of AGENT_CORE runtime output and schema surfaces. Entries whose producer referenced the deleted Runtime_server / Runtime_sync / Runtime_projection / Runtime_evidence cluster (removed in v0.217.x) are marked removed_in; their schema files under docs/schemas/ are retained for historical decode only.",
+  "updated_at": "2026-11-09",
+  "description": "Operator-facing index of AGENT_CORE runtime output and schema surfaces. Entries marked removed_in have no producer; their type truth stays in the .mli files listed in schema_source.",
   "surfaces": [
     {
       "id": "agent_core.event_bus.v1",
@@ -31,21 +31,6 @@
       "version_field": "Runtime.protocol_version",
       "notes": "Runtime protocol owns canonical request, response, event, report, proof, and system envelopes. Version 2 removes the implicit permission and hook control channel. Participant lifecycle events use one nested common participant record with disjoint live, completed, and failed payloads; legacy flat payloads are rejected. The Runtime_server subprocess that emitted these messages was removed in v0.217.x; the type truth in lib/runtime.mli is retained.",
       "removed_in": null
-    },
-    {
-      "id": "agent_core.runtime_sync_window.v1",
-      "kind": "json_schema",
-      "owner": "AGENT_CORE",
-      "producer": "removed in v0.217.x (was Runtime_sync)",
-      "consumer": ["offline/runtime sync clients", "downstream replay tooling", "external resume/A2A adapters"],
-      "wire_or_artifact": "Runtime sync window JSON",
-      "schema_source": ["docs/schemas/runtime-sync-window-v1.json"],
-      "validator": "removed in v0.217.x (was Runtime_sync.of_json)",
-      "tests": [],
-      "stability": "frozen",
-      "version_field": "schema_version",
-      "notes": "Schema file retained for historical decode of on-disk payloads. No shipped code produces or validates new runtime sync windows.",
-      "removed_in": "v0.217.x"
     },
     {
       "id": "agent_core.runtime_report.v1",
@@ -90,21 +75,6 @@
       "stability": "frozen",
       "version_field": null,
       "notes": "structured telemetry type truth (lib/sessions_types.mli) is retained. The telemetry report builder (Runtime_evidence.build_telemetry_report) was removed in v0.217.x; no shipped code writes new telemetry-report artifacts.",
-      "removed_in": "v0.217.x"
-    },
-    {
-      "id": "agent_core.runtime_evidence_bundle.v1",
-      "kind": "json_schema",
-      "owner": "AGENT_CORE",
-      "producer": "removed in v0.217.x (was Runtime_evidence)",
-      "consumer": ["session evidence readers", "downstream proof consumers"],
-      "wire_or_artifact": "runtime-evidence JSON artifact",
-      "schema_source": [],
-      "validator": "removed in v0.217.x (was Runtime_evidence.evidence_bundle_to_json)",
-      "tests": [],
-      "stability": "frozen",
-      "version_field": null,
-      "notes": "No shipped code produces new runtime evidence bundles. Sessions_types readers that consumed the bundle are retained.",
       "removed_in": "v0.217.x"
     },
     {

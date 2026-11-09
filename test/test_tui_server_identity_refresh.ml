@@ -2537,7 +2537,8 @@ let test_local_source_failures_are_independent () =
     (not (keeper_available_for_new_message state keeper.k_name)
      && state.local_workspace = Local_workspace_failed "archive unavailable"
      && state.local_keepers = Local_workspace_failed "metadata unavailable");
-  let pending=local_workspace_request_exn state Local_keepers 8L in
+  let pending = local_workspace_request_exn state Local_keepers
+      (Int64.sub (Mtime_clock.elapsed_ns ()) pending_display_bar_ns) in
   let composer=Masc_tui_composer_projection.of_state state in
   Alcotest.(check bool) "retry retains the admitted failure and cannot send the retained draft" true
     (let retains_failure=match composer.reading with
@@ -5702,6 +5703,78 @@ let test_keeper_history_request_sources_are_owned_and_independent () =
     (List.length (Protocol.collect_owned_results state))
 ;;
 
+let test_keeper_initial_reply_is_partial_and_can_be_withdrawn () =
+  let open Masc_tui_types in
+  let module Read = Keeper_history_read in
+  let module Protocol = Masc_tui_async_protocol in
+  let state = create_state ~workspace:"initial-reply" ~port:0 () in
+  state.msg_target_keeper_name <- Some "alpha";
+  state.msg_history_load_generation <- 1;
+  let request = Read.create ~generation:1 ~keeper:"alpha"
+      ~authority:state.workspace_authority ~reading:state.workspace_read_authority
+      ~first_page:true in
+  state.msg_history_inflight <- Some request;
+  Read.publish request Read.Initial_reply ~ready_at_ns:10L (Ok {rows=[];dropped=0});
+  (match Protocol.collect_owned_results state with
+   | [{Protocol.ready_at_ns; message=Protocol.Workspace_scoped (authority, Some reading,
+       Protocol.Keeper_msg (Protocol.Keeper_chat_history_loaded (owner, Read.Initial_reply, Ok _)))}] ->
+     Alcotest.(check int64) "partial ready time retained" 10L ready_at_ns;
+     Alcotest.(check bool) "request and workspace owner retained" true
+       (owner == request && authority = state.workspace_authority && reading == state.workspace_read_authority)
+   | _ -> Alcotest.fail "partial reply waited for the full history");
+  Alcotest.(check bool) "initial admission does not settle full history" true
+    (Read.sources_pending request);
+  Alcotest.(check bool) "partial result keeps history loading" true
+    (keeper_message_history_loading state);
+  Read.publish request Read.History ~ready_at_ns:20L (Ok {rows=[];dropped=0});
+  ignore (Protocol.collect_owned_results state);
+  ignore (Read.settle request Read.History);
+  Read.retire_initial_reply request;
+  Alcotest.(check bool) "full result withdraws an already offered partial reply" false
+    (Read.settle request Read.Initial_reply);
+  Read.publish request Read.Initial_reply ~ready_at_ns:21L (Error "late optional response");
+  Alcotest.(check bool) "full history ends its loading state" false
+    (keeper_message_history_loading state);
+  Read.retire_page request;
+  Read.publish request Read.Memory ~ready_at_ns:22L (Ok {rows=[];dropped=0});
+  ignore (Protocol.collect_owned_results state);
+  ignore (Read.settle request Read.Memory);
+  Alcotest.(check bool) "withdrawal cannot strand the request" false (Read.pending request);
+  let replacement = Read.create ~generation:2 ~keeper:"alpha"
+      ~authority:state.workspace_authority ~reading:state.workspace_read_authority
+      ~first_page:true in
+  state.msg_history_inflight <- Some replacement;
+  Read.publish request Read.Initial_reply ~ready_at_ns:23L (Ok {rows=[];dropped=0});
+  Alcotest.(check int) "retired read cannot deliver to replacement" 0
+    (List.length (Protocol.collect_owned_results state));
+  Alcotest.(check bool) "another generation cannot supply loading authority" false
+    (keeper_message_history_loading state);
+  state.msg_history_load_generation <- 2;
+  Alcotest.(check bool) "current replacement owns loading" true
+    (keeper_message_history_loading state);
+  state.msg_target_keeper_name <- Some "beta";
+  Alcotest.(check bool) "another Keeper cannot supply loading authority" false
+    (keeper_message_history_loading state);
+  state.msg_target_keeper_name <- Some "alpha";
+  state.workspace_read_authority <- ref ();
+  Alcotest.(check bool) "same name after a reading change is not current authority" false
+    (keeper_message_history_loading state);
+  let failed = Read.create ~generation:3 ~keeper:"alpha"
+      ~authority:state.workspace_authority ~reading:state.workspace_read_authority
+      ~first_page:true in
+  Read.retire_page failed;
+  Read.publish failed Read.History ~ready_at_ns:30L (Error "full history failed");
+  Read.publish failed Read.Memory ~ready_at_ns:31L (Ok {rows=[];dropped=0});
+  ignore (Read.take_ready failed);
+  ignore (Read.settle failed Read.History);
+  ignore (Read.settle failed Read.Memory);
+  Alcotest.(check bool) "an optional read cannot block retry after terminal source failure" false
+    (Read.pending failed);
+  Read.publish failed Read.Initial_reply ~ready_at_ns:32L (Ok {rows=[];dropped=0});
+  Alcotest.(check int) "late optional success cannot revive the failed read" 0
+    (List.length (Read.take_ready failed))
+;;
+
 let test_keeper_initial_page_is_not_an_explicit_older_demand () =
   let open Masc_tui_types in
   let module Read = Keeper_history_read in
@@ -6824,6 +6897,8 @@ let () =
             test_question_read_supersession_and_workspace_suspension
         ; Alcotest.test_case "initial page is not an explicit older demand" `Quick
             test_keeper_initial_page_is_not_an_explicit_older_demand
+        ; Alcotest.test_case "initial reply is partial and full history withdraws it" `Quick
+            test_keeper_initial_reply_is_partial_and_can_be_withdrawn
         ; Alcotest.test_case "history sources publish and settle independently" `Quick
             test_keeper_history_request_sources_are_owned_and_independent
         ; Alcotest.test_case "Child retirement preserves a running full audit" `Quick

@@ -1227,15 +1227,28 @@ type msg_entry = {
   me_at: float;
 }
 
-(* The canonical transcript and memory journal are distinct sources, even
-   when a transcript system row uses the Memory display role. [None] means
-   no successful transcript read yet; [Some []] is a received empty source. *)
+(* A partial reply does not establish receipt of the physical page or full
+   transcript. In particular it must not consume their first-read/retry rights.
+   A received empty history remains distinct from an unread source. *)
+type keeper_chat_history =
+  | Chat_history_unread
+  | Chat_history_partial of msg_entry list
+  | Chat_history_received of msg_entry list
+
+let keeper_chat_history_rows = function
+  | Chat_history_unread -> []
+  | Chat_history_partial rows | Chat_history_received rows -> rows
+
+let keeper_chat_history_received = function
+  | Chat_history_received _ -> true
+  | Chat_history_unread | Chat_history_partial _ -> false
+
 type keeper_chat_sources = {
-  kcs_history : msg_entry list option;
+  kcs_history : keeper_chat_history;
   kcs_memory : msg_entry list;
 }
 
-let empty_keeper_chat_sources = {kcs_history=None; kcs_memory=[]}
+let empty_keeper_chat_sources = {kcs_history=Chat_history_unread; kcs_memory=[]}
 
 (* Rows already read from one Keeper, with the paging authority supplied by
    those reads. This is a session cache, not another persistent transcript. *)
@@ -1337,7 +1350,7 @@ type keeper_history_owed = {
    the UI's owned-result drain offers each slot once without a mailbox wait.
    Offering is not settlement: the request stays busy until UI admission. *)
 module Keeper_history_read : sig
-  type source = History | Memory
+  type source = History | Memory | Initial_reply
   type result = (Masc_tui_keeper_chat_history.decoded, string) Result.t
   type page_result = (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) Result.t
   type 'a observed = { result : 'a; ready_at_ns : int64 }
@@ -1347,8 +1360,9 @@ module Keeper_history_read : sig
 
   val create : generation:int -> keeper:string -> authority:workspace_authority ->
     reading:unit ref -> first_page:bool -> t
-  (** A first page is requested only while this Keeper has no received history.
-      An unrequested page slot is already settled and never publishes data. *)
+  (** The physical first page and the optional latest reply are requested only
+      while this Keeper has no received history. Unrequested slots are already
+      settled and never publish data. *)
   val generation : t -> int
   val keeper : t -> string
   val authority : t -> workspace_authority
@@ -1356,18 +1370,24 @@ module Keeper_history_read : sig
   val publish : t -> source -> ready_at_ns:int64 -> result -> unit
   val take_ready : t -> (source * observation) list
   val settle : t -> source -> bool
+  (** Admit only an offered source once. When History and Memory have both
+      settled, withdraw the optional reply so it cannot block a failure retry. *)
   val publish_page : t -> ready_at_ns:int64 -> page_result -> unit
   val take_page_ready : t -> page_observation option
   val settle_page : t -> bool
   val retire_page : t -> unit
   (** A later explicit paging request withdraws initial-page application.
       This is not a claim that the first-page worker stopped. *)
+  val retire_initial_reply : t -> unit
+  (** A successful full transcript withdraws the optional initial reply,
+      including a result already offered but not yet admitted. *)
   val page_pending : t -> bool
+  val history_pending : t -> bool
   val sources_pending : t -> bool
   (** Whether the History or Memory answer of this request is not applied yet. *)
   val pending : t -> bool
 end = struct
-  type source = History | Memory
+  type source = History | Memory | Initial_reply
   type result = (Masc_tui_keeper_chat_history.decoded, string) Result.t
   type page_result = (Masc_tui_keeper_chat_history.page, Masc_tui_keeper_chat_history.page_error) Result.t
   type 'a observed = { result : 'a; ready_at_ns : int64 }
@@ -1381,18 +1401,23 @@ end = struct
     reading : unit ref;
     history : result slot Atomic.t;
     memory : result slot Atomic.t;
+    initial_reply : result slot Atomic.t;
     page : page_result slot Atomic.t;
   }
 
   let create ~generation ~keeper ~authority ~reading ~first_page =
     { generation; keeper; authority; reading;
       history = Atomic.make Waiting; memory = Atomic.make Waiting;
+      initial_reply = Atomic.make (if first_page then Waiting else Settled);
       page = Atomic.make (if first_page then Waiting else Settled) }
   let generation request = request.generation
   let keeper request = request.keeper
   let authority request = request.authority
   let reading request = request.reading
-  let slot request = function History -> request.history | Memory -> request.memory
+  let slot request = function
+    | History -> request.history
+    | Memory -> request.memory
+    | Initial_reply -> request.initial_reply
   let publish_cell cell ~ready_at_ns result =
     ignore (Atomic.compare_and_set cell Waiting (Ready {result; ready_at_ns}))
   let publish request source = publish_cell (slot request source)
@@ -1405,19 +1430,27 @@ end = struct
   let take_ready request =
     List.filter_map (fun source ->
       Option.map (fun observation -> source, observation) (take_cell (slot request source)))
-      [History; Memory]
+      [Initial_reply; History; Memory]
   let take_page_ready request = take_cell request.page
-  let settle request source =
-    Atomic.compare_and_set (slot request source) Offered Settled
-  let settle_page request = Atomic.compare_and_set request.page Offered Settled
-  let retire_page request = Atomic.set request.page Settled
   let unsettled cell = match Atomic.get cell with
     | Settled -> false
     | Waiting | Ready _ | Offered -> true
+  let settle request source =
+    let applied = Atomic.compare_and_set (slot request source) Offered Settled in
+    (* An optional accelerator must not hold a failed full read's retry.
+       Once both authoritative sources are admitted, withdraw it regardless
+       of their outcome. A successful History can withdraw it earlier. *)
+    if applied && not (unsettled request.history || unsettled request.memory) then
+      Atomic.set request.initial_reply Settled;
+    applied
+  let settle_page request = Atomic.compare_and_set request.page Offered Settled
+  let retire_page request = Atomic.set request.page Settled
+  let retire_initial_reply request = Atomic.set request.initial_reply Settled
   let page_pending request = unsettled request.page
+  let history_pending request = unsettled request.history
   let sources_pending request = unsettled request.history || unsettled request.memory
   let pending request =
-    unsettled request.history || unsettled request.memory || unsettled request.page
+    sources_pending request || unsettled request.initial_reply || unsettled request.page
 end
 
 (* The Memory lane in summary mode says where the memory ended up.
@@ -21176,10 +21209,10 @@ let transcript_replaces_session_output ~(fresh : msg_entry list)
    chat projection/search. All source updates rebuild that view here. *)
 let set_keeper_chat_sources (state : state) sources =
   state.msg_loaded_sources <- sources;
-  state.msg_loaded <- match sources.kcs_history, sources.kcs_memory with
-    | None, memory -> memory
-    | Some history, [] -> history
-    | Some history, memory -> history @ memory
+  state.msg_loaded <- match keeper_chat_history_rows sources.kcs_history, sources.kcs_memory with
+    | [], memory -> memory
+    | history, [] -> history
+    | history, memory -> history @ memory
 ;;
 
 let restore_keeper_chat_page (state : state) keeper_name =
@@ -21235,7 +21268,7 @@ let retire_keeper_chat_history (state : state) keeper_name =
   state.msg_loaded_pages <- List.remove_assoc keeper_name state.msg_loaded_pages;
   if state.msg_loaded_keeper = Some keeper_name then (
     retire_keeper_message_search state;
-    set_keeper_chat_sources state {state.msg_loaded_sources with kcs_history=None};
+    set_keeper_chat_sources state {state.msg_loaded_sources with kcs_history=Chat_history_unread};
     state.msg_loaded_error <- None;
     state.msg_loaded_dropped <- 0;
     state.msg_older_cursor <- None;
@@ -26167,6 +26200,16 @@ let keeper_message_inflight_drawn (state : state) =
 
 (* The current conversation's extra request diagnostics, shared by the
    renderer and its row budget. Background work stays on the Activity pane. *)
+let keeper_message_history_loading (state : state) =
+  match state.msg_history_inflight, state.msg_target_keeper_name with
+  | Some request, Some keeper_name ->
+    String.equal (Keeper_history_read.keeper request) keeper_name
+    && Keeper_history_read.generation request = state.msg_history_load_generation
+    && Keeper_history_read.authority request = state.workspace_authority
+    && Keeper_history_read.reading request == state.workspace_read_authority
+    && Keeper_history_read.history_pending request
+  | Some _, None | None, (Some _ | None) -> false
+
 let keeper_message_inflight_rows (state : state) ~now =
   let batch_label group =
     if group.count = 1 then ""
@@ -26200,6 +26243,9 @@ let keeper_message_inflight_rows (state : state) ~now =
   in
   List.map (fun group -> true, summary group)
     (keeper_message_inflight_drawn state)
+  @ if keeper_message_history_loading state then
+      [false, "  Loading conversation history…"]
+    else []
 
 let keeper_message_schedule_rows state ~now ~max_rows =
   if state.view <> Keepers Keeper_message || max_rows <= 0 then [] else

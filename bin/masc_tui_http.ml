@@ -2028,12 +2028,12 @@ let call_mcp_tool ~host ~port ~session_id ~request_id ~tool ~arguments =
 
     The pane's scrollback used to be session-local while the server kept the
     transcript all along. *)
-let fetch_keeper_chat_history ~(host : string) ~(port : int)
+let fetch_keeper_chat_rows ~suffix ~(host : string) ~(port : int)
     ~(keeper_name : string) :
     (Masc_tui_keeper_chat_history.decoded, string) result =
   let path =
-    Printf.sprintf "/api/v1/keepers/%s/chat/history"
-      (percent_encode_path_segment keeper_name)
+    Printf.sprintf "/api/v1/keepers/%s/chat/history%s"
+      (percent_encode_path_segment keeper_name) suffix
   in
   match http_get ~host ~port ~path with
   | Error detail -> Error detail
@@ -2044,6 +2044,9 @@ let fetch_keeper_chat_history ~(host : string) ~(port : int)
       | json -> Masc_tui_keeper_chat_history.rows_of_json json
       | exception Yojson.Json_error detail ->
           Error ("chat history was not JSON: " ^ detail))
+
+let fetch_keeper_chat_history = fetch_keeper_chat_rows ~suffix:""
+let fetch_keeper_chat_initial_reply = fetch_keeper_chat_rows ~suffix:"/initial-reply"
 
 let fetch_keeper_memory_journal ~(host : string) ~(port : int)
     ~(keeper_name : string) :

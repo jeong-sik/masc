@@ -237,7 +237,7 @@ PR 읽기가 붙든 시간은 하루 6.9 ~ 8.9 h 로 비슷해요. 나머지 Exe
 
 - 이 시간은 Keeper 턴을 붙든 시간이에요. 서버가 PR 을 한 번 읽어 두고 Keeper 가 그 값을 읽게 되면 이만큼 준다는 뜻은 아니에요. `gh` 를 띄우는 시간과 GitHub 응답 시간이 섞여 있어요.
 - 글자 맞춤이라 오차가 양쪽으로 있어요. 명령을 인용만 한 호출, PR 본문이나 댓글을 읽는 호출이 들어가요. `gh pr diff` 와 `curl`·MCP 로 GitHub 를 읽는 호출은 빠져요.
-- `RFC-keeper-world-state-shows-open-work` 가 이 읽기를 서버 PR 스냅숏(RFC-0465)과 Keeper 도구(`keeper_pull_requests_list`)로 바꾸자고 적었어요. 위 표는 그 구현이 서버에 오르기 전 값이에요. 구현 PR 은 그 RFC 머리말의 `implementation_prs` 에 있어요.
+- `RFC-keeper-world-state-shows-open-work` 가 이 읽기를 서버 PR 스냅숏(RFC-0465)과 Keeper 도구(`keeper_pull_requests_list`)로 바꾸자고 적었어요. 위 표는 Keeper 가 `gh` 로 PR 을 직접 읽던 측정 창의 값이에요. 서버 스냅숏의 공용 타입·JSON 투영은 #50213 으로 main 의 `Repository_pulls` 에 옮겨졌고, Keeper 도구 `keeper_pull_requests_list` 는 #50259 에서 검토 중이에요(2026-11-09 확인).
 - 그 RFC 의 M6 은 `gh pr view`·`gh pr list`·`gh pr checks` 의 하루 수예요. 위 표는 `gh pr status` 와 `/pulls` 를 부르는 `gh api` 도 세므로 M6 보다 넓어요. 같은 정의로 앞뒤를 견줄 때는 이 스크립트를 다시 돌려요.
 
 ## 스냅숏이 답할 수 있는 PR 읽기 (`pr_read_needs.py`)

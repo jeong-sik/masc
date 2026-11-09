@@ -98,7 +98,7 @@ import audit_decisions as D
 import exact_store as E
 import memory_scores as M
 import synth_render
-import synth_spec as S
+import synth_rows as RW
 import yojson_wire as Y
 from tinker_oai import HTTP_OK, Caller
 
@@ -177,15 +177,15 @@ def real_items(manifest: Path, base: Path) -> list[M.RealItem]:
 
 
 def synth_items(path: Path) -> list[M.SynthItem]:
-    """Rendered synthetic requests with their labels, from synth_generate.py output. SystemExit on a
-    label that is not a `synth_spec` label, such as one an earlier generator wrote."""
+    """Rendered synthetic requests with their labels (`synth_rows.label_of_row`), from synth_generate.py
+    output. SystemExit on a request the generator cannot write, such as one an earlier generator wrote."""
     items: list[M.SynthItem] = []
     for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
         row = cast(JsonObject, json.loads(line))
         request = cast(JsonObject, row["request"])
-        label = S.label_from_json(row["label"])
+        label = RW.label_of_row(request)
         if label is None:
-            raise SystemExit(f"{path}:{number}: the label is not a synth_spec label")
+            raise SystemExit(f"{path}:{number}: the request is not one synth_generate.py writes")
         prompt = synth_render.prompt_of(request)
         items.append(M.SynthItem(cast(str, request["item_id"]), prompt, R.render(prompt), label))
     return items

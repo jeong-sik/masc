@@ -238,6 +238,15 @@ class MemoryStateTest(unittest.TestCase):
         elsewhere = scored(req, answer_text(judged, claims=(claim_json(c.claim, absorbs=("m2",)),)))
         self.assertEqual(elsewhere["state_correct"], 0)
 
+    def test_a_restatement_deleted_while_naming_another_fact_does_not_survive(self) -> None:
+        req = request(PLANTED, candidates_of((S.CandidateKind.PARAPHRASE, S.CandidateKind.NEW_DURABLE)))
+        restated, new = req.candidates
+        judgments: tuple[Judged, ...] = ((restated.request_id, "already_represented", PLANTED[1].claim),
+                                        (new.request_id, "incorporated", new.claim))
+        s = scored(req, answer_text(judgments, claims=(claim_json(new.claim),), dropped=("m1",)))
+        self.assertEqual(s["state_correct"], 1)
+        self.assertEqual(s["state_by_kind"], {"new": [1, 1], "restates": [1, 0]})
+
     def test_a_stale_fact_absorbed_instead_of_dropped_is_counted_apart(self) -> None:
         req, c = one(S.CandidateKind.NEW_DURABLE)
         s = scored(req, answer_text(((c.request_id, "incorporated", c.claim),),

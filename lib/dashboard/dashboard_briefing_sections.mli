@@ -3,7 +3,7 @@ val json :
   ?force:bool ->
   config:Workspace.config ->
   sw:Eio.Switch.t ->
-  clock:([> float Eio.Time.clock_ty ] as 'a) Eio.Resource.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option ->
   unit ->
   Yojson.Safe.t

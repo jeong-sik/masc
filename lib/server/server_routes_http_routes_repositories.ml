@@ -507,8 +507,8 @@ let add_routes router =
   (* Exact, so it is found before the [/:id] prefix route below. *)
   |> Server_route.get Server_route.Public_read "/api/v1/repositories/pulls" (fun _state req reqd ->
            Http.Response.json_value ~request:req
-             (Server_repository_pulls.snapshot_to_yojson
-                (Server_repository_pulls.current ()))
+             (Repository_pulls.snapshot_to_yojson
+                (Repository_pulls.current ()))
              reqd)
   |> Server_route.prefix_get Server_route.Public_read repositories_prefix handle_get_repository_path
   |> Server_route.post (Server_route.Token_permission Masc_domain.CanAdmin) "/api/v1/repositories" handle_add_repository

@@ -6,6 +6,7 @@
     network. *)
 
 module Pulls = Server_repository_pulls
+module Facts = Masc.Repository_pulls
 
 let failf = Alcotest.failf
 
@@ -87,10 +88,10 @@ let never_called ~url:_ ~token:_ ~body:_ =
   failf "the reader must not reach GitHub in this case"
 
 let read_or_fail = function
-  | Pulls.Pulls_read { pulls; undecodable; _ } -> pulls, undecodable
-  | Pulls.Pulls_failed _ -> failf "expected Pulls_read, got Pulls_failed"
-  | Pulls.Pulls_not_read -> failf "expected Pulls_read, got Pulls_not_read"
-  | Pulls.Pulls_not_github -> failf "expected Pulls_read, got Pulls_not_github"
+  | Facts.Pulls_read { pulls; undecodable; _ } -> pulls, undecodable
+  | Facts.Pulls_failed _ -> failf "expected Pulls_read, got Pulls_failed"
+  | Facts.Pulls_not_read -> failf "expected Pulls_read, got Pulls_not_read"
+  | Facts.Pulls_not_github -> failf "expected Pulls_read, got Pulls_not_github"
 
 let test_decodes_two_pages () =
   let first =
@@ -122,16 +123,16 @@ let test_decodes_two_pages () =
   in
   Alcotest.(check int) "no row is undecodable" 0 undecodable;
   Alcotest.(check (list int)) "every page is read, in order" [ 38091; 38054; 38030 ]
-    (List.map (fun (p : Pulls.pull_request) -> p.number) pulls);
+    (List.map (fun (p : Facts.pull_request) -> p.number) pulls);
   (match pulls with
    | [ draft; approved; waiting ] ->
      Alcotest.(check bool) "draft" true draft.draft;
-     Alcotest.(check bool) "no rollup reads as no checks" true (draft.checks = Pulls.Checks_none);
-     Alcotest.(check bool) "no decision reads as no review" true (draft.review = Pulls.Review_none);
-     Alcotest.(check bool) "SUCCESS" true (approved.checks = Pulls.Checks_passing);
-     Alcotest.(check bool) "APPROVED" true (approved.review = Pulls.Review_approved);
-     Alcotest.(check bool) "PENDING" true (waiting.checks = Pulls.Checks_running);
-     Alcotest.(check bool) "REVIEW_REQUIRED" true (waiting.review = Pulls.Review_waiting);
+     Alcotest.(check bool) "no rollup reads as no checks" true (draft.checks = Facts.Checks_none);
+     Alcotest.(check bool) "no decision reads as no review" true (draft.review = Facts.Review_none);
+     Alcotest.(check bool) "SUCCESS" true (approved.checks = Facts.Checks_passing);
+     Alcotest.(check bool) "APPROVED" true (approved.review = Facts.Review_approved);
+     Alcotest.(check bool) "PENDING" true (waiting.checks = Facts.Checks_running);
+     Alcotest.(check bool) "REVIEW_REQUIRED" true (waiting.review = Facts.Review_waiting);
      Alcotest.(check string) "slug" "jeong-sik/masc" waiting.repo_slug
    | _ -> failf "expected three pull requests");
   match requests () with
@@ -162,13 +163,13 @@ let test_unknown_enum_is_counted () =
   in
   Alcotest.(check int) "unknown members and a missing rollup key are counted" 3 undecodable;
   Alcotest.(check (list int)) "they are not shown as some known state" [ 1 ]
-    (List.map (fun (p : Pulls.pull_request) -> p.number) pulls)
+    (List.map (fun (p : Facts.pull_request) -> p.number) pulls)
 
 let failure_or_fail = function
-  | Pulls.Pulls_failed { failure; _ } -> failure
-  | Pulls.Pulls_read _ -> failf "expected Pulls_failed, got Pulls_read"
-  | Pulls.Pulls_not_read -> failf "expected Pulls_failed, got Pulls_not_read"
-  | Pulls.Pulls_not_github -> failf "expected Pulls_failed, got Pulls_not_github"
+  | Facts.Pulls_failed { failure; _ } -> failure
+  | Facts.Pulls_read _ -> failf "expected Pulls_failed, got Pulls_read"
+  | Facts.Pulls_not_read -> failf "expected Pulls_failed, got Pulls_not_read"
+  | Facts.Pulls_not_github -> failf "expected Pulls_failed, got Pulls_not_github"
 
 let test_not_visible_is_a_failure_not_an_empty_list () =
   let graphql_not_found =
@@ -180,7 +181,7 @@ let test_not_visible_is_a_failure_not_an_empty_list () =
     (fun answer ->
       let http_post, _ = recording_stub [ answer ] in
       match Pulls.read_repository ~now ~http_post ~token:"t" "o/wkbl" |> failure_or_fail with
-      | Pulls.Repository_not_visible -> ()
+      | Facts.Repository_not_visible -> ()
       | _ -> failf "a repository the reader cannot see must read as not visible")
     [ graphql_not_found ]
 
@@ -196,7 +197,7 @@ let test_rate_limit_carries_reset () =
   in
   let http_post, _ = recording_stub [ limited ] in
   match Pulls.read_repository ~now ~http_post ~token:"t" "o/r" |> failure_or_fail with
-  | Pulls.Rate_limited { reset_at = Some at } ->
+  | Facts.Rate_limited { reset_at = Some at } ->
     Alcotest.(check (float 0.)) "GitHub's reset time" 1_790_003_600. at
   | _ -> failf "an exhausted limit must read as rate limited with its reset time"
 
@@ -228,20 +229,20 @@ let register base_path =
 
 let pulls_by_id snapshot =
   List.map
-    (fun (entry : Pulls.repository_entry) -> entry.repository_id, entry.pulls)
-    snapshot.Pulls.repositories
+    (fun (entry : Facts.repository_entry) -> entry.repository_id, entry.pulls)
+    snapshot.Facts.repositories
 
 let test_reader_not_declared_reads_nothing () =
   let base_path = temp_base_path () in
   register base_path;
   let snapshot =
-    Pulls.refresh ~now ~http_post:never_called ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+    Pulls.refresh ~now ~http_post:never_called ~config:(Masc.Workspace.default_config base_path) ~previous:Facts.initial
   in
   (match snapshot.reader with
-   | Pulls.Reader_not_declared -> ()
+   | Facts.Reader_not_declared -> ()
    | _ -> failf "no [repositories] pr_reader must read as not declared");
   match pulls_by_id snapshot with
-  | [ ("masc", Pulls.Pulls_not_read); ("mirror", Pulls.Pulls_not_github) ] -> ()
+  | [ ("masc", Facts.Pulls_not_read); ("mirror", Facts.Pulls_not_github) ] -> ()
   | _ -> failf "a GitHub repository stays unread and a non-GitHub one says so"
 
 let test_reader_keeper_missing () =
@@ -251,10 +252,10 @@ let test_reader_keeper_missing () =
     (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
     "[repositories]\npr_reader = \"nobody-here\"\n";
   let snapshot =
-    Pulls.refresh ~now ~http_post:never_called ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+    Pulls.refresh ~now ~http_post:never_called ~config:(Masc.Workspace.default_config base_path) ~previous:Facts.initial
   in
   match snapshot.reader with
-  | Pulls.Reader_keeper_missing { keeper = "nobody-here" } -> ()
+  | Facts.Reader_keeper_missing { keeper = "nobody-here" } -> ()
   | _ -> failf "a pr_reader naming no Keeper must say which Keeper is missing"
 
 let test_unknown_key_is_refused () =
@@ -263,10 +264,10 @@ let test_unknown_key_is_refused () =
     (Config_dir_resolver.runtime_toml_path_for_base_path ~base_path)
     "[repositories]\npr_raeder = \"edgar\"\n";
   let snapshot =
-    Pulls.refresh ~now ~http_post:never_called ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+    Pulls.refresh ~now ~http_post:never_called ~config:(Masc.Workspace.default_config base_path) ~previous:Facts.initial
   in
   match snapshot.reader with
-  | Pulls.Reader_declaration_invalid _ -> ()
+  | Facts.Reader_declaration_invalid _ -> ()
   | _ -> failf "a misspelt key must not read as no declaration"
 
 (* A workspace whose reader is ready: runtime.toml names [reader], the Keeper
@@ -361,17 +362,17 @@ let test_configured_endpoint_reads_its_own_host () =
     url_recording_stub (ok_response (page ~has_next:false ~cursor:None []))
   in
   let snapshot =
-    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Facts.initial
   in
   (match snapshot.reader with
-   | Pulls.Reader_ready { keeper } -> Alcotest.(check string) "reader" reader_keeper keeper
+   | Facts.Reader_ready { keeper } -> Alcotest.(check string) "reader" reader_keeper keeper
    | _ -> failf "a declared Keeper with a hosts.yml token for the host must be ready");
   Alcotest.(check (list string))
     "every page goes to the configured endpoint"
     [ enterprise_graphql_url ]
     !urls;
   match pulls_by_id snapshot with
-  | [ ("ghe", Pulls.Pulls_read { pulls = []; _ }); ("masc", Pulls.Pulls_not_github) ] -> ()
+  | [ ("ghe", Facts.Pulls_read { pulls = []; _ }); ("masc", Facts.Pulls_not_github) ] -> ()
   | _ -> failf "the enterprise remote is read and the github.com one is not this endpoint's"
 
 (* DNS names are case-insensitive (RFC 4343): a host declared in other case
@@ -396,14 +397,14 @@ let test_host_case_does_not_hide_the_remote () =
     url_recording_stub (ok_response (page ~has_next:false ~cursor:None []))
   in
   let snapshot =
-    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Facts.initial
   in
   (match snapshot.reader with
-   | Pulls.Reader_ready _ -> ()
+   | Facts.Reader_ready _ -> ()
    | _ -> failf "an upper-case host must find gh's lower-case hosts.yml section");
   Alcotest.(check (list string)) "the remote is read" [ enterprise_graphql_url ] !urls;
   match snapshot.repositories with
-  | [ { Pulls.repository_id = "ghe"; slug; pulls = Pulls.Pulls_read _; _ } ] ->
+  | [ { Facts.repository_id = "ghe"; slug; pulls = Facts.Pulls_read _; _ } ] ->
     Alcotest.(check (option string)) "the path keeps its case" (Some "Owner/Repo") slug
   | _ -> failf "a remote whose host differs only in case must be read"
 
@@ -418,14 +419,14 @@ let test_absent_endpoint_keys_keep_the_github_defaults () =
     url_recording_stub (ok_response (page ~has_next:false ~cursor:None []))
   in
   let snapshot =
-    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Facts.initial
   in
   Alcotest.(check (list string))
     "an undeclared endpoint posts to the default"
     [ Pulls.default_graphql_url ]
     !urls;
   match masc_pulls snapshot with
-  | Pulls.Pulls_read _ -> ()
+  | Facts.Pulls_read _ -> ()
   | _ -> failf "the default endpoint reads the github.com remote"
 
 let test_explicit_default_host_needs_no_endpoint () =
@@ -437,10 +438,10 @@ let test_explicit_default_host_needs_no_endpoint () =
     url_recording_stub (ok_response (page ~has_next:false ~cursor:None []))
   in
   let snapshot =
-    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Facts.initial
   in
   (match snapshot.reader with
-   | Pulls.Reader_ready _ -> ()
+   | Facts.Reader_ready _ -> ()
    | _ -> failf "naming the default host explicitly must still resolve");
   Alcotest.(check (list string))
     "the default host posts to the default endpoint"
@@ -457,14 +458,14 @@ let test_lone_endpoint_is_a_proxy_for_the_default_host () =
     url_recording_stub (ok_response (page ~has_next:false ~cursor:None []))
   in
   let snapshot =
-    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial
+    Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Facts.initial
   in
   (match snapshot.reader with
-   | Pulls.Reader_ready _ -> ()
+   | Facts.Reader_ready _ -> ()
    | _ -> failf "a lone endpoint must resolve as a proxy for the default host");
   Alcotest.(check (list string)) "pages go to the lone endpoint" [ proxy_url ] !urls;
   match masc_pulls snapshot with
-  | Pulls.Pulls_read _ -> ()
+  | Facts.Pulls_read _ -> ()
   | _ -> failf "the proxied read still parses the github.com remote"
 
 let test_bad_endpoint_keys_are_invalid () =
@@ -492,10 +493,10 @@ let test_bad_endpoint_keys_are_invalid () =
           ~now
           ~http_post:never_called
           ~config:(Masc.Workspace.default_config base_path)
-          ~previous:Pulls.initial
+          ~previous:Facts.initial
       in
       match snapshot.reader with
-      | Pulls.Reader_declaration_invalid _ -> ()
+      | Facts.Reader_declaration_invalid _ -> ()
       | _ -> failf "%s: %s" declaration why)
     cases
 
@@ -504,14 +505,14 @@ let test_reader_ready_reads_with_the_keeper_token () =
   let http_post, calls, tokens =
     counting_stub (ok_response (page ~has_next:false ~cursor:None []))
   in
-  let snapshot = Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial in
+  let snapshot = Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Facts.initial in
   (match snapshot.reader with
-   | Pulls.Reader_ready { keeper } -> Alcotest.(check string) "reader" reader_keeper keeper
+   | Facts.Reader_ready { keeper } -> Alcotest.(check string) "reader" reader_keeper keeper
    | _ -> failf "a declared Keeper with a hosts.yml token must be ready");
   Alcotest.(check int) "one call" 1 !calls;
   Alcotest.(check (list string)) "the hosts.yml token is sent" [ "gho_from_hosts" ] !tokens;
   match masc_pulls snapshot with
-  | Pulls.Pulls_read { pulls = []; undecodable = 0; _ } -> ()
+  | Facts.Pulls_read { pulls = []; undecodable = 0; _ } -> ()
   | _ -> failf "an empty page reads as no open pull requests"
 
 (* A refresh that raises keeps the last rows but marks them; the next
@@ -520,7 +521,7 @@ let test_a_raised_refresh_marks_the_rows_until_the_next_one_returns () =
   let base_path = ready_base_path ~token:"gho_from_hosts" in
   let config = Masc.Workspace.default_config base_path in
   let http_post, _, _ = counting_stub (ok_response (page ~has_next:false ~cursor:None [])) in
-  let first = Pulls.refresh ~now ~http_post ~config ~previous:Pulls.initial in
+  let first = Pulls.refresh ~now ~http_post ~config ~previous:Facts.initial in
   Alcotest.(check bool) "a returned refresh carries no mark" true
     (Option.is_none first.repositories_error);
   let raising ~url:_ ~token:_ ~body:_ = failwith "transport broke" in
@@ -585,11 +586,11 @@ let test_remote_ssh_reader_is_refused () =
   let http_post, calls, _ =
     counting_stub (ok_response (page ~has_next:false ~cursor:None []))
   in
-  let snapshot = Pulls.refresh ~now ~http_post ~config ~previous:Pulls.initial in
+  let snapshot = Pulls.refresh ~now ~http_post ~config ~previous:Facts.initial in
   (match snapshot.reader with
-   | Pulls.Reader_token_unavailable { keeper; reason = _ } ->
+   | Facts.Reader_token_unavailable { keeper; reason = _ } ->
      Alcotest.(check string) "the refusal names the reader" reader_keeper keeper
-   | Pulls.Reader_ready _ -> failf "a Remote_ssh reader was answered from this host's hosts.yml"
+   | Facts.Reader_ready _ -> failf "a Remote_ssh reader was answered from this host's hosts.yml"
    | _ -> failf "a Remote_ssh reader must be refused as token unavailable");
   Alcotest.(check int) "GitHub is not called" 0 !calls
 
@@ -599,16 +600,16 @@ let test_rejected_token_is_not_sent_again () =
     Ok { Pulls.status = 401; body = "{}"; rate_limit_remaining = None; rate_limit_reset = None; retry_after_s = None }
   in
   let http_post, calls, _ = counting_stub rejected in
-  let first = Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial in
+  let first = Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Facts.initial in
   let later () = now () +. 60. in
   let second = Pulls.refresh ~now:later ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:first in
   Alcotest.(check int) "the same refused token is sent once" 1 !calls;
   (match masc_pulls second with
-   | Pulls.Pulls_failed { failure = Pulls.Token_rejected; observed_at } ->
+   | Facts.Pulls_failed { failure = Facts.Token_rejected; observed_at } ->
      Alcotest.(check (float 0.)) "the first refusal's time stands" (now ()) observed_at
    | _ -> failf "the refusal must stay on screen while the token is unchanged");
   (match second.rejected_token with
-   | Some { Pulls.token_digest; graphql_url } ->
+   | Some { Facts.token_digest; graphql_url } ->
      Alcotest.(check bool) "the digest is not the token" false (String.equal token_digest "gho_revoked");
      Alcotest.(check string) "the refusing endpoint is kept" Pulls.default_graphql_url graphql_url
    | None -> failf "the refused token's digest must be kept");
@@ -637,9 +638,9 @@ let test_a_new_endpoint_asks_about_a_refused_token () =
   in
   let config = Masc.Workspace.default_config base_path in
   declare refusing_url;
-  let first = Pulls.refresh ~now ~http_post ~config ~previous:Pulls.initial in
+  let first = Pulls.refresh ~now ~http_post ~config ~previous:Facts.initial in
   (match masc_pulls first with
-   | Pulls.Pulls_failed { failure = Pulls.Token_rejected; _ } -> ()
+   | Facts.Pulls_failed { failure = Facts.Token_rejected; _ } -> ()
    | _ -> failf "the refusing endpoint's 401 must read as a rejected token");
   declare Pulls.default_graphql_url;
   let later () = now () +. 60. in
@@ -649,7 +650,7 @@ let test_a_new_endpoint_asks_about_a_refused_token () =
     [ refusing_url; Pulls.default_graphql_url ]
     (List.rev !urls);
   (match masc_pulls second with
-   | Pulls.Pulls_read _ -> ()
+   | Facts.Pulls_read _ -> ()
    | _ -> failf "the corrected endpoint's answer must replace the old refusal");
   match second.rejected_token with
   | None -> ()
@@ -672,10 +673,10 @@ let test_secondary_limit_waits_for_retry_after () =
   in
   let http_post, calls, _ = counting_stub limited in
   let config = Masc.Workspace.default_config base_path in
-  let first = Pulls.refresh ~now ~http_post ~config ~previous:Pulls.initial in
+  let first = Pulls.refresh ~now ~http_post ~config ~previous:Facts.initial in
   let wait_ends = now () +. Float.of_int retry_after_s in
   (match masc_pulls first with
-   | Pulls.Pulls_failed { failure = Pulls.Rate_limited { reset_at = Some at }; _ } ->
+   | Facts.Pulls_failed { failure = Facts.Rate_limited { reset_at = Some at }; _ } ->
      Alcotest.(check (float 0.)) "retry-after is the wait, not the primary reset" wait_ends at
    | _ -> failf "403 with retry-after must read as rate limited");
   let during () = wait_ends -. 1. in
@@ -697,7 +698,7 @@ let test_plain_403_is_forbidden () =
   in
   let http_post, _ = recording_stub [ forbidden ] in
   match Pulls.read_repository ~now ~http_post ~token:"t" "o/r" |> failure_or_fail with
-  | Pulls.Forbidden { status = 403 } -> ()
+  | Facts.Forbidden { status = 403 } -> ()
   | _ -> failf "403 without an exhausted limit or retry-after is forbidden"
 
 let test_rate_limit_waits_for_reset () =
@@ -713,12 +714,12 @@ let test_rate_limit_waits_for_reset () =
       }
   in
   let http_post, calls, _ = counting_stub limited in
-  let first = Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Pulls.initial in
+  let first = Pulls.refresh ~now ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:Facts.initial in
   let before_reset () = reset_at -. 1. in
   let second = Pulls.refresh ~now:before_reset ~http_post ~config:(Masc.Workspace.default_config base_path) ~previous:first in
   Alcotest.(check int) "no call before GitHub's reset" 1 !calls;
   (match masc_pulls second with
-   | Pulls.Pulls_failed { failure = Pulls.Rate_limited { reset_at = Some at }; _ } ->
+   | Facts.Pulls_failed { failure = Facts.Rate_limited { reset_at = Some at }; _ } ->
      Alcotest.(check (float 0.)) "the reset time stands" reset_at at
    | _ -> failf "the limit must stay on screen until its reset");
   let after_reset () = reset_at in
@@ -765,13 +766,13 @@ let test_author_and_mergeable_decode () =
   Alcotest.(check int) "every row decodes" 0 undecodable;
   let facts =
     List.map
-      (fun (p : Pulls.pull_request) ->
+      (fun (p : Facts.pull_request) ->
         ( p.number
         , p.author
         , match p.mergeable with
-          | Pulls.Mergeable -> "mergeable"
-          | Pulls.Conflicting -> "conflicting"
-          | Pulls.Mergeable_unknown -> "unknown" ))
+          | Facts.Mergeable -> "mergeable"
+          | Facts.Conflicting -> "conflicting"
+          | Facts.Mergeable_unknown -> "unknown" ))
       pulls
   in
   Alcotest.(check (list (triple int (option string) string)))
@@ -811,7 +812,7 @@ let test_unknown_mergeable_or_missing_author_is_counted () =
     4
     undecodable;
   Alcotest.(check (list int)) "none of them is shown as a known state" [ 5 ]
-    (List.map (fun (p : Pulls.pull_request) -> p.number) pulls)
+    (List.map (fun (p : Facts.pull_request) -> p.number) pulls)
 
 (* The head is a merge commit (GitHub's Update branch, an updater Keeper, a
    local [git merge origin/main]): the author is the commit under it that has
@@ -865,14 +866,14 @@ let test_a_merge_commit_head_keeps_the_writing_keeper () =
   let keepers = [ "edgar"; "older-keeper"; "pr-updater"; "jeong-sik" ] in
   let facts =
     List.map
-      (fun (p : Pulls.pull_request) ->
+      (fun (p : Facts.pull_request) ->
         ( p.number
-        , Pulls.keeper_of_author ~keepers p
+        , Facts.keeper_of_author ~keepers p
         , match p.checks with
-          | Pulls.Checks_passing -> "passing"
-          | Pulls.Checks_failing -> "failing"
-          | Pulls.Checks_running -> "running"
-          | Pulls.Checks_none -> "none" ))
+          | Facts.Checks_passing -> "passing"
+          | Facts.Checks_failing -> "failing"
+          | Facts.Checks_running -> "running"
+          | Facts.Checks_none -> "none" ))
       pulls
   in
   Alcotest.(check (list (triple int (option string) string)))
@@ -916,38 +917,38 @@ let test_the_query_reads_head_checks_and_an_author_window () =
   | _ -> failf "no request was sent"
 
 let pull ~number ~author =
-  { Pulls.repo_slug = "jeong-sik/masc"
+  { Facts.repo_slug = "jeong-sik/masc"
   ; number
   ; draft = false
-  ; checks = Pulls.Checks_none
-  ; review = Pulls.Review_none
-  ; mergeable = Pulls.Mergeable
+  ; checks = Facts.Checks_none
+  ; review = Facts.Review_none
+  ; mergeable = Facts.Mergeable
   ; author
   }
 
 let test_join_is_exact () =
   let keepers = [ "edgar"; "lucia" ] in
-  let join author = Pulls.keeper_of_author ~keepers (pull ~number:1 ~author) in
+  let join author = Facts.keeper_of_author ~keepers (pull ~number:1 ~author) in
   Alcotest.(check (option string)) "exact name" (Some "edgar") (join (Some "edgar"));
   Alcotest.(check (option string)) "case differs" None (join (Some "Edgar"));
   Alcotest.(check (option string)) "a person" None (join (Some "jeong-sik"));
   Alcotest.(check (option string)) "no author" None (join None)
 
 let pulls_json snapshot =
-  let json = Pulls.snapshot_to_yojson snapshot in
+  let json = Facts.snapshot_to_yojson snapshot in
   let open Yojson.Safe.Util in
   ( member "keepers" json
   , json |> member "repositories" |> to_list |> List.concat_map (fun entry ->
       entry |> member "pulls" |> member "pulls" |> to_list) )
 
 let snapshot_with ~keepers pulls =
-  { Pulls.initial with
+  { Facts.initial with
     keepers
   ; repositories =
-      [ { Pulls.repository_id = "masc"
+      [ { Facts.repository_id = "masc"
         ; url = "https://github.com/jeong-sik/masc.git"
         ; slug = Some "jeong-sik/masc"
-        ; pulls = Pulls.Pulls_read { observed_at = now (); pulls; undecodable = 0 }
+        ; pulls = Facts.Pulls_read { observed_at = now (); pulls; undecodable = 0 }
         }
       ]
   }
@@ -955,10 +956,10 @@ let snapshot_with ~keepers pulls =
 let test_json_shape () =
   let snapshot =
     snapshot_with
-      ~keepers:(Pulls.Keepers_listed [ "edgar" ])
+      ~keepers:(Facts.Keepers_listed [ "edgar" ])
       [ pull ~number:1 ~author:(Some "edgar")
-      ; { (pull ~number:2 ~author:(Some "Edgar")) with mergeable = Pulls.Conflicting }
-      ; { (pull ~number:3 ~author:None) with mergeable = Pulls.Mergeable_unknown }
+      ; { (pull ~number:2 ~author:(Some "Edgar")) with mergeable = Facts.Conflicting }
+      ; { (pull ~number:3 ~author:None) with mergeable = Facts.Mergeable_unknown }
       ]
   in
   let keepers, rows = pulls_json snapshot in
@@ -998,14 +999,14 @@ let test_unreadable_keeper_list_is_visible () =
   let snapshot =
     Fun.protect
       ~finally:(fun () -> Unix.chmod keepers_dir 0o700)
-      (fun () -> Pulls.refresh ~now ~http_post:never_called ~config ~previous:Pulls.initial)
+      (fun () -> Pulls.refresh ~now ~http_post:never_called ~config ~previous:Facts.initial)
   in
   (match snapshot.keepers with
-   | Pulls.Keepers_list_failed _ -> ()
-   | Pulls.Keepers_listed _ -> failf "an unreadable Keeper directory must not read as an empty Keeper list"
-   | Pulls.Keepers_not_listed -> failf "a refresh must list the Keepers");
+   | Facts.Keepers_list_failed _ -> ()
+   | Facts.Keepers_listed _ -> failf "an unreadable Keeper directory must not read as an empty Keeper list"
+   | Facts.Keepers_not_listed -> failf "a refresh must list the Keepers");
   let open Yojson.Safe.Util in
-  let keepers = Pulls.snapshot_to_yojson snapshot |> member "keepers" in
+  let keepers = Facts.snapshot_to_yojson snapshot |> member "keepers" in
   Alcotest.(check string) "state" "list_failed" (keepers |> member "state" |> to_string);
   Alcotest.(check bool) "the reason is carried" true (keepers |> member "reason" |> to_string <> "")
 
@@ -1036,18 +1037,18 @@ let test_a_raising_keeper_list_does_not_drop_the_refresh () =
           ~now
           ~http_post:never_called
           ~config
-          ~previous:(snapshot_with ~keepers:(Pulls.Keepers_listed [ "edgar" ]) []))
+          ~previous:(snapshot_with ~keepers:(Facts.Keepers_listed [ "edgar" ]) []))
   in
   (match snapshot.keepers with
-   | Pulls.Keepers_list_failed reason ->
+   | Facts.Keepers_list_failed reason ->
      Alcotest.(check bool) "the reason names the raise" true
        (String.starts_with ~prefix:"keeper list read raised" reason)
-   | Pulls.Keepers_listed _ -> failf "the previous Keeper list must not stand after a raise"
-   | Pulls.Keepers_not_listed -> failf "a refresh must list the Keepers");
+   | Facts.Keepers_listed _ -> failf "the previous Keeper list must not stand after a raise"
+   | Facts.Keepers_not_listed -> failf "a refresh must list the Keepers");
   Alcotest.(check bool) "the rows are this refresh's" true
     (Option.is_none snapshot.repositories_error);
   match pulls_by_id snapshot with
-  | [ ("masc", Pulls.Pulls_not_read); ("mirror", Pulls.Pulls_not_github) ] -> ()
+  | [ ("masc", Facts.Pulls_not_read); ("mirror", Facts.Pulls_not_github) ] -> ()
   | _ -> failf "the registered repositories must be published beside the failed Keeper list"
 
 (* The repository list cannot be read: the previous rows stand, and the
@@ -1056,7 +1057,7 @@ let test_unread_repositories_still_list_keepers () =
   let base_path = temp_base_path () in
   write_file (Config_dir_resolver.repositories_toml_path ~base_path) "not = [toml";
   let previous =
-    snapshot_with ~keepers:Pulls.Keepers_not_listed [ pull ~number:1 ~author:(Some "edgar") ]
+    snapshot_with ~keepers:Facts.Keepers_not_listed [ pull ~number:1 ~author:(Some "edgar") ]
   in
   let snapshot =
     Pulls.refresh
@@ -1068,10 +1069,10 @@ let test_unread_repositories_still_list_keepers () =
   Alcotest.(check bool) "the rows are marked old" true (Option.is_some snapshot.repositories_error);
   Alcotest.(check int) "the previous rows stand" 1 (List.length snapshot.repositories);
   match snapshot.keepers with
-  | Pulls.Keepers_listed [] -> ()
-  | Pulls.Keepers_listed _ -> failf "this workspace persists no Keeper"
-  | Pulls.Keepers_list_failed reason -> failf "the Keeper list must be read: %s" reason
-  | Pulls.Keepers_not_listed -> failf "the previous Keeper state must not stand"
+  | Facts.Keepers_listed [] -> ()
+  | Facts.Keepers_listed _ -> failf "this workspace persists no Keeper"
+  | Facts.Keepers_list_failed reason -> failf "the Keeper list must be read: %s" reason
+  | Facts.Keepers_not_listed -> failf "the previous Keeper state must not stand"
 
 (* While the list is unread, a pull whose author is a Keeper's name is not
    called that Keeper's; the snapshot state is what says the join is off. *)
@@ -1079,7 +1080,7 @@ let test_unlisted_keepers_join_nothing () =
   let _, rows =
     pulls_json
       (snapshot_with
-         ~keepers:(Pulls.Keepers_list_failed "keeper directory unreadable")
+         ~keepers:(Facts.Keepers_list_failed "keeper directory unreadable")
          [ pull ~number:1 ~author:(Some "edgar") ])
   in
   match rows with
@@ -1116,9 +1117,9 @@ let test_persisted_keeper_is_joined () =
       [ node ~number:1 authoring_keeper; node ~number:2 (String.capitalize_ascii authoring_keeper) ]
   in
   let http_post, _, _ = counting_stub (ok_response body) in
-  let snapshot = Pulls.refresh ~now ~http_post ~config ~previous:Pulls.initial in
+  let snapshot = Pulls.refresh ~now ~http_post ~config ~previous:Facts.initial in
   (match snapshot.keepers with
-   | Pulls.Keepers_listed names ->
+   | Facts.Keepers_listed names ->
      Alcotest.(check (list string)) "the persisted Keeper" [ authoring_keeper ] names
    | _ -> failf "a persisted Keeper must be listed");
   let _, rows = pulls_json snapshot in

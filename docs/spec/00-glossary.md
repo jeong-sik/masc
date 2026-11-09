@@ -3703,7 +3703,8 @@ status: reference
   `Reader_keeper_missing`·`Reader_token_unavailable`)를 말하고, 다른 자격으로 대신
   읽지 않는다. 결과는 메모리에만 두고 `GET /api/v1/repositories/pulls` 로 보인다
   (RFC-0465).
-  → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli)
+  → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli),
+    [Repository_pulls](../../lib/repository_pulls.mli)
 
 **PR Attribution (PR 귀속)**
 : 열린 GitHub Pull Request를 작업한 Keeper와 잇는 표시 규칙(RFC-0465).
@@ -3715,7 +3716,8 @@ status: reference
   PR을 일반(비-Keeper) PR로 오인하지 않고 목록 전체를 미결정으로 둔다. 이 귀속은
   TUI와 대시보드의 표시 전용(display only)이며, 커미터가 작성자 이름을 임의
   지정할 수 있으므로 권한(authority)이나 실행 증명으로 삼지 않는다.
-  → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli)
+  → [Server_repository_pulls](../../lib/server/server_repository_pulls.mli),
+    [Repository_pulls](../../lib/repository_pulls.mli)
 
 **Stacked PR (스택 PR)**
 : 대규모 변경이나 연속 작업을 20k 토큰 이하의 작은 단위로 쪼개어 계층적으로 쌓아 올리는 PR 구조.

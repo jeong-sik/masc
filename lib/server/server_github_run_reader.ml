@@ -1,4 +1,5 @@
 module Pulls = Server_repository_pulls
+module Facts = Repository_pulls
 module Watch = Schedule_run_watch
 
 let path_of_target (target : Watch.target) =
@@ -27,16 +28,16 @@ let longest_rate_limit_wait_sec = 3600.0
 let read_failure_of_status ~now_s response : Watch.read_failure option =
   match Pulls.failure_of_status ~now_s response with
   | None -> None
-  | Some Pulls.Token_rejected -> Some Watch.Token_rejected
-  | Some (Pulls.Rate_limited { reset_at }) ->
+  | Some Facts.Token_rejected -> Some Watch.Token_rejected
+  | Some (Facts.Rate_limited { reset_at }) ->
     let latest = now_s +. longest_rate_limit_wait_sec in
     Some (Watch.Rate_limited { reset_at = Option.map (Float.min latest) reset_at })
-  | Some (Pulls.Forbidden _) -> Some Watch.Forbidden
-  | Some (Pulls.Http_status { status }) when status = http_not_found -> Some Watch.Not_visible
-  | Some (Pulls.Http_status { status }) -> Some (Watch.Http_status status)
-  | Some (Pulls.Transport_failed message) -> Some (Watch.Transport_failed message)
-  | Some (Pulls.Response_unreadable message) -> Some (Watch.Response_unreadable message)
-  | Some (Pulls.Repository_not_visible | Pulls.Graphql_errors _) ->
+  | Some (Facts.Forbidden _) -> Some Watch.Forbidden
+  | Some (Facts.Http_status { status }) when status = http_not_found -> Some Watch.Not_visible
+  | Some (Facts.Http_status { status }) -> Some (Watch.Http_status status)
+  | Some (Facts.Transport_failed message) -> Some (Watch.Transport_failed message)
+  | Some (Facts.Response_unreadable message) -> Some (Watch.Response_unreadable message)
+  | Some (Facts.Repository_not_visible | Facts.Graphql_errors _) ->
     (* [failure_of_status] reads the status line and the rate-limit headers
        only; these two come from a GraphQL body. *)
     Some (Watch.Response_unreadable "an HTTP status was read as a GraphQL failure")
@@ -58,17 +59,17 @@ let interpret ~now_s target (response : Pulls.response) =
    so it names no Keeper or file. A declaration or a token that could not be
    read can come from a file being written or a descriptor limit; asking again
    can pass, and the detail goes to the server log only. *)
-let failure_of_reader (reader : Pulls.reader) : Watch.read_failure =
+let failure_of_reader (reader : Facts.reader) : Watch.read_failure =
   match reader with
-  | Pulls.Reader_not_declared ->
+  | Facts.Reader_not_declared ->
     Watch.Reader_unavailable "no [repositories] pr_reader is declared"
-  | Pulls.Reader_keeper_missing _ ->
+  | Facts.Reader_keeper_missing _ ->
     Watch.Reader_unavailable "the declared pr_reader is not a configured Keeper"
-  | Pulls.Reader_declaration_invalid reason ->
+  | Facts.Reader_declaration_invalid reason ->
     Watch.Reader_not_ready ("the declaration is invalid or unreadable: " ^ reason)
-  | Pulls.Reader_token_unavailable { keeper; reason } ->
+  | Facts.Reader_token_unavailable { keeper; reason } ->
     Watch.Reader_not_ready (Printf.sprintf "no token for %s: %s" keeper reason)
-  | Pulls.Reader_ready { keeper } ->
+  | Facts.Reader_ready { keeper } ->
     Watch.Reader_not_ready (Printf.sprintf "%s is ready but its read was refused" keeper)
 ;;
 

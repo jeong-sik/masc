@@ -235,7 +235,7 @@ masc 가 그리는 모양 그대로(`--entrypoint <shim>`, 인자 `--serve <게�
 
 1. 1단계는 2026-11-03 에 병합했어요. canary 는 7.3 결과대로예요.
 2. 2단계: 라이브 Keeper TOML 34개 중 microVM Keeper 20개가 모두 `microvm_backend = "apple_container"`, `microvm_delivery = "agent_socket"` 이었어요(2026-11-09 읽기).
-3. 3단계: 선택 값(`microvm_delivery`)과 Apple 의 `Exec_per_request` 를 지웠어요.
+3. 3단계: #50589 가 선택 값(`microvm_delivery`)과 Apple 의 `Exec_per_request` 를 지웠어요.
    - 전달 방식은 backend 가 정해요(`Keeper_microvm_backend.request_delivery`). Apple 은 `Guest_agent`, Microsandbox·Nerdctl_kata 는 `Exec_per_request` 예요.
    - `Keeper_sandbox_microvm.shim_exec_prefix_for` 는 `Keeper_microvm_backend.exec_runtime`(Microsandbox·Nerdctl_kata)만 받아요. Apple 용 exec 접두사는 만들 수 없어요.
    - Apple 게스트는 언제나 agent plan 으로 떠요. 붙이기(attach)는 게스트가 agent 소켓을 publish 하지 않으면 `microvm_agent_not_published` 로 거절해요. 그런 게스트는 plan 이 달라서 그 Keeper 의 다음 턴이 새 게스트로 바꿔요.

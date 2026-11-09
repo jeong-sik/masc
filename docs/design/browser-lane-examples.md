@@ -81,7 +81,7 @@ back, forward, reload, 대화상자, 업로드처럼 브라우저 수준 동작�
 ```text
 BrowserRead {"lane":"live","clientId":<id>,"tabId":<tab>,"mode":"elements"}
 BrowserInteract {"clientId":<id>,"action":"fill","tabId":<tab>,"selector":<관측한 selector>,"text":"검색어"}
-BrowserInteract {"clientId":<id>,"action":"press_key","tabId":<tab>,"expectedUrl":<읽은 URL>,"key":"Enter"}
+BrowserInteract {"clientId":<id>,"action":"press_key","tabId":<tab>,"documentId":<관측한 documentId>,"expectedUrl":<읽은 URL>,"key":"Enter"}
 BrowserRead {"lane":"live","clientId":<id>,"tabId":<tab>}
 BrowserRead {"lane":"live","clientId":<id>,"tabId":<tab>,"mode":"screenshot"}
 keeper_image_read {"artifact":<반환된 artifact>}

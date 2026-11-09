@@ -300,26 +300,7 @@ MASC_HTTP_DEV_MUTATION_ORIGINS="http://localhost:4173" ./start-masc.sh
 scripts/build-dashboard-if-needed.sh
 ```
 
-## 11. Health Snapshot Ratcheting
-
-Codebase health는 특정 anti-pattern 사용 횟수로 추적된다.
-
-**Current Baseline (`.ci/health-baseline.json`):**
-```json
-{
-  "lib_failwith": 21,        // lib/에서 failwith 사용
-  "lib_list_hd": 1,          // lib/에서 List.hd 사용
-  "lib_list_tl": 0,          // lib/에서 List.tl 사용
-  "lib_option_get": 0,       // lib/에서 Option.get 사용
-  "test_failwith": 520,      // test/에서 failwith 사용
-  "test_list_hd": 341        // test/에서 List.hd 사용
-}
-```
-
-**Ratcheting Rule:**
-- 현재 카운트를 초과하면 CI 실패 (`scripts/health_snapshot.sh --fail-on-lib-regression`)
-- 카운트 감소는 허용
-- 신규 anti-pattern 발견 시 baseline 업데이트
+## 11. Partial Functions
 
 **Before using partial functions:**
 ```ocaml
@@ -336,14 +317,6 @@ let value = Option.get my_option
 
 (* ✅ Option.value with default *)
 let value = Option.value ~default:fallback my_option
-```
-
-**PR이 health regression을 일으킨 경우:**
-```bash
-# CI fails when a lib_* counter increases above .ci/health-baseline.json.
-# 두 가지 선택:
-# 1. failwith를 Result/Option pattern으로 refactor (선호)
-# 2. 정당한 사유가 있다면 baseline 업데이트 (reviewer 승인 필요)
 ```
 
 ## 12. Concurrent Merge Semantic Validation

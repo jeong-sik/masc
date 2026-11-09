@@ -62,7 +62,7 @@
   flex-direction: column;
   border-right: 1px solid var(--border-main);
   background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep) 70%);
-  padding: 14px 9px; /* prototype surfaces.css:278 */
+  padding: 14px 9px;
   overflow: hidden;
   min-width: 0;
   min-height: 0;
@@ -86,12 +86,12 @@
      tokens, not the base rule (9.5px / weight 500). Our .v2-board-surface
      prefix raises specificity above the ladder, so the ladder is defeated —
      mirror the resolved T4 values here. --fs-t4=9px, --fw-t4=600,
-     --tr-t4=0.2em (v2.css:101). */
+     --tr-t4=0.2em. */
   font-size: var(--fs-9);
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--text-dim);
-  margin: 0 0 8px 7px; /* prototype surfaces.css:279 */
+  margin: 0 0 8px 7px;
   font-weight: 600;
 }
 
@@ -101,7 +101,7 @@
   gap: 8px;
   width: 100%;
   text-align: left;
-  padding: 7px 9px; /* prototype surfaces.css:280 */
+  padding: 7px 9px;
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: none;
@@ -175,7 +175,7 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 11px 18px; /* prototype surfaces.css:290 */
+  padding: 11px 18px;
   border-bottom: 1px solid var(--border-main);
   background: linear-gradient(180deg, var(--bg-panel), var(--bg-deep));
 }
@@ -184,8 +184,8 @@
   font-family: var(--font-display);
   font-weight: 600;
   /* Prototype: the TYPE LADDER (surfaces.css T2) loads after the base
-     .bd-feed-head h2 rule and wins, so the rendered size is --fs-t2=16px
-     (v2.css:99), not the base rule's 15px. Our .v2-board-surface prefix
+     .bd-feed-head h2 rule and wins, so the rendered size is --fs-t2=16px,
+     not the base rule's 15px. Our .v2-board-surface prefix
      raises specificity above the ladder, so mirror the resolved T2 size. */
   font-size: var(--fs-16);
   color: var(--text-bright);
@@ -203,7 +203,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 18px; /* prototype surfaces.css:298 */
+  padding: 14px 18px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -246,7 +246,7 @@
 .v2-board-surface .bd-post-h {
   display: flex;
   align-items: center;
-  gap: 9px; /* prototype surfaces.css:305 */
+  gap: 9px;
 }
 
 .v2-board-surface .bd-post-h .who {
@@ -299,7 +299,7 @@
   font-size: 12.5px;
   color: var(--text-mid);
   line-height: 1.55;
-  margin-top: 5px; /* prototype surfaces.css:319 */
+  margin-top: 5px;
   max-height: 5.2rem;
   display: -webkit-box;
   -webkit-line-clamp: 2;
@@ -341,14 +341,14 @@
 .v2-board-surface .bd-post-foot {
   display: flex;
   align-items: center;
-  gap: 7px; /* prototype surfaces.css:322 */
+  gap: 7px;
   margin-top: 10px;
 }
 
 .v2-board-surface .bd-react {
   display: inline-flex;
   align-items: center;
-  gap: 5px; /* prototype surfaces.css:323 */
+  gap: 5px;
   font-family: var(--font-mono);
   font-size: 10.5px;
   padding: 2px 8px;
@@ -395,7 +395,7 @@
   flex: none;
   border-top: 1px solid var(--border-main);
   background: linear-gradient(0deg, var(--bg-panel), var(--bg-deep));
-  padding: 10px 18px 14px; /* prototype surfaces.css:337 */
+  padding: 10px 18px 14px;
 }
 
 .v2-board-surface .bd-composer-mobile-summary {
@@ -415,7 +415,7 @@
 .v2-board-surface .bd-comp-tab {
   font-family: var(--font-ui);
   font-size: var(--fs-11);
-  padding: 4px 11px; /* prototype surfaces.css:339 */
+  padding: 4px 11px;
   border-radius: 4px 4px 0 0;
   border: 1px solid transparent;
   background: none;
@@ -438,7 +438,7 @@
   background: var(--bg-card);
   border: 1px solid var(--border-main);
   border-radius: var(--radius-md);
-  padding: 5px 5px 5px 13px; /* prototype surfaces.css:341 */
+  padding: 5px 5px 5px 13px;
 }
 
 .v2-board-surface .bd-comp-box.grid {
@@ -607,7 +607,7 @@
   flex: none;
   display: flex;
   align-items: center;
-  gap: 9px; /* prototype surfaces.css:348 */
+  gap: 9px;
   padding: 12px 14px;
   border-bottom: 1px solid var(--border-soft);
 }
@@ -648,19 +648,19 @@
   padding: 14px;
   display: flex;
   flex-direction: column;
-  gap: 11px; /* prototype surfaces.css:352 */
+  gap: 11px;
 }
 
 .v2-board-surface .bd-th {
   display: grid;
   grid-template-columns: 26px 1fr;
-  gap: 9px; /* prototype surfaces.css:353 */
+  gap: 9px;
 }
 
 .v2-board-surface .bd-th-hd {
   display: flex;
   align-items: baseline;
-  gap: 7px; /* prototype surfaces.css:354 */
+  gap: 7px;
 }
 
 .v2-board-surface .bd-th-hd .who {
@@ -719,9 +719,9 @@
 }
 
 /* ════ AUTHOR SIGIL ════ */
-/* Prototype SigilBadge style (fleet.jsx:8 -> .sigil v2.css:286-291): solid
+/* Prototype SigilBadge style (fleet.jsx:8 -> .sigil): solid
    fill + dark monogram, no border. The prototype's operator avatar
-   (board.jsx:8) is the .msg-av.op variant (v2.css:485): solid var(--volt)
+   (board.jsx:8) is the .msg-av.op variant: solid var(--volt)
    fill with var(--volt-ink) glyph, inline borderRadius:5 / fontSize:9.
    The 5px radius is a literal in the prototype (board.jsx:8 borderRadius:5),
    not --radius-sm (4px), so it is set as a literal px here. */
@@ -732,16 +732,16 @@
   border-radius: 5px; /* prototype board.jsx:8 inline borderRadius:5 (literal, not --radius-sm=4px) */
   font-family: var(--font-mono);
   font-size: var(--fs-9); /* prototype board.jsx:8 fontSize:9 */
-  font-weight: 700; /* prototype v2.css:291 .sigil font-weight:700 */
+  font-weight: 700; /* prototype .sigil font-weight:700 */
   letter-spacing: 0;
-  color: var(--volt-ink); /* prototype v2.css:485 .msg-av.op color:var(--volt-ink) */
-  background: var(--volt); /* solid volt fill, prototype v2.css:485 .msg-av.op background:var(--volt) */
+  color: var(--volt-ink); /* prototype .msg-av.op color:var(--volt-ink) */
+  background: var(--volt); /* solid volt fill, prototype .msg-av.op background:var(--volt) */
   flex: none;
 }
 
 .v2-board-surface .bd-sigil.op {
-  background: var(--volt); /* solid fill, not volt-wash; prototype v2.css:485 .msg-av.op */
-  color: var(--volt-ink); /* prototype v2.css:485 .msg-av.op color:var(--volt-ink) */
+  background: var(--volt); /* solid fill, not volt-wash; prototype .msg-av.op */
+  color: var(--volt-ink); /* prototype .msg-av.op color:var(--volt-ink) */
 }
 
 .v2-board-surface .bd-mobile-queues {

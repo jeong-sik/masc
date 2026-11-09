@@ -7,7 +7,7 @@ updated: 2026-09-20
 author: dancer + antigravity
 supersedes: []
 superseded_by: null
-related: ["0429", "tui-operator-ia", "tui-frame-budget"]
+related: ["0429", "tui-frame-budget"]
 ---
 
 # RFC-0459: TUI 시맨틱 토큰과 적응형 운영 워크벤치
@@ -196,4 +196,4 @@ baseline artifact와 측정 명령이 PR에 붙기 전에는 “Too_wide 제거�
 - Atlassian Design System: <https://atlassian.design/>
 - Diagram Design: <https://github.com/cathrynlavery/diagram-design>
 - `docs/rfc/RFC-tui-frame-budget.md`
-- `docs/rfc/RFC-tui-operator-ia.md`
+- [TUI 화면 목록](../design/tui/SCREENS.md)

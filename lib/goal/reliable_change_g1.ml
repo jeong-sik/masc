@@ -1,12 +1,10 @@
 open Yojson.Safe.Util
 
-(* Last element without building a reversed copy. The callers sort lists
-   they just built from non-empty inputs; the explicit [invalid_arg] replaces
-   the partial [List.hd (List.rev _)] crash with a named one. *)
-let last lst =
-  match lst with
-  | [] -> invalid_arg "reliable_change_g1.last: empty list"
-  | x :: _ -> List.fold_left (fun _ y -> y) x lst
+(* Last element without building a reversed copy, returned totally as an
+   option so callers never rely on partial [List.hd] or [invalid_arg]. *)
+let last_opt = function
+  | [] -> None
+  | x :: rest -> Some (List.fold_left (fun _ y -> y) x rest)
 
 type scenario =
   | Success
@@ -297,7 +295,7 @@ let aggregate_run_usages (observations : run_observation list) : usage_totals =
          cumulative_obs)
   in
   let latest_cumulative =
-    List.map
+    List.filter_map
       (fun req_id ->
          let matching =
            List.filter
@@ -331,7 +329,7 @@ let aggregate_run_usages (observations : run_observation list) : usage_totals =
                 | c -> c)
              matching
          in
-         last sorted)
+         last_opt sorted)
       request_ids
   in
   let all_countable = distinct_per_request @ latest_cumulative in
@@ -548,10 +546,13 @@ let check_observations
            run
        in
        let sorted_attempts = List.map fst sorted_run in
-       let final_attempt, final_scenario = last sorted_run in
-       let first_attempt = List.hd sorted_attempts in
+       match sorted_run, last_opt sorted_run with
+       | [], _ | _, None -> ()
+       | (first_attempt, _) :: _, Some (final_attempt, final_scenario) ->
        let revision_checks = List.map check_verified_revision sorted_attempts in
-       let final_revision_valid = last revision_checks in
+       let final_revision_valid =
+         Option.value (last_opt revision_checks) ~default:false
+       in
        let run_valid = ref (List.for_all Fun.id revision_checks) in
 
        (* Check for duplicated usage within run *)
@@ -894,10 +895,13 @@ let check_observations
            run
        in
        let sorted_attempts = List.map fst sorted_run in
-       let final_attempt, final_scenario = last sorted_run in
-       let first_attempt = List.hd sorted_attempts in
+       match sorted_run, last_opt sorted_run with
+       | [], _ | _, None -> ()
+       | (first_attempt, _) :: _, Some (final_attempt, final_scenario) ->
        let revision_checks = List.map check_verified_revision sorted_attempts in
-       let final_revision_valid = last revision_checks in
+       let final_revision_valid =
+         Option.value (last_opt revision_checks) ~default:false
+       in
        let run_valid = ref (List.for_all Fun.id revision_checks) in
 
        (match final_scenario with

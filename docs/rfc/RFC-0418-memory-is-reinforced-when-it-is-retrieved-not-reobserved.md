@@ -7,7 +7,7 @@ updated: 2026-09-19
 author: vincent
 supersedes: []
 superseded_by: null
-related: ["0247", "0251", "0402", "tui-operator-ia"]
+related: ["0247", "0251", "0402"]
 ---
 
 2026-09-19 개정(#37097): 성공한 철회는 인용이 아니다. 현재 사건을 `Retracted`로

@@ -51,7 +51,6 @@ type palette_action =
   (* One installation's Results, by its declaration id. *)
   | Palette_addon_results of string
   | Palette_goto of surface
-  | Palette_goal_payouts
   | Palette_usage_scope of string option
   | Palette_config of config_pane
   | Palette_ui_language of ui_language
@@ -186,71 +185,51 @@ let addon_result_targets (state : state) =
     if List.mem_assoc id targets then targets else targets @ [ (id, title) ])
     [] (from_asks @ from_inventory @ from_addons)
 
+let main_entries =
+  List.map (fun (surface, label) -> "go " ^ label, Palette_goto surface) surface_ring
+
 let palette_entries (state : state) =
-  let work_surfaces, other_surfaces =
-    List.partition (fun (surface, _) -> surface = Planning) surface_ring in
-  [ "settings", Palette_config Config_params ]
+  main_entries
+  @ [ "go Work / Task Review", Palette_goto Verification
+    ; "go Work / Task Verdicts", Palette_goto Harness
+    ; "go Work / Requests", Palette_goto Approvals
+    ; "go Keepers / Memory", Palette_goto Memory
+    ; "go Keepers / Schedules", Palette_goto Schedules
+    ; "go Keepers / Fusion", Palette_goto Fusion
+    ; "go Keepers / Changes", Palette_goto Changes
+    ; "go Keepers / Channels", Palette_connectors
+    ; "go Workspace / Code", Palette_goto Code
+    ; "go System / Runtime", Palette_goto Runtime
+    ; "go System / Features", Palette_goto Lanes
+    ; "go System / Clients", Palette_goto Clients
+    ; "go System / Resources", Palette_goto Resources
+    ; "go System / Tools & Skills", Palette_goto Tools
+    ; "go System / Activity", Palette_goto Acting
+    ; "go System / Logs", Palette_goto System_logs
+    ; "go System / Browser", Palette_browser_lane
+    ; "go System / Plugins", Palette_lane_addons
+    ]
   @ List.map
-      (fun (surface, label) -> ("go " ^ label ^ " / Goals", Palette_goto surface))
-      work_surfaces
-  @ [ "go Candle payouts / choose a Goal", Palette_goal_payouts ]
+      (fun (pane, label) -> ("go System / " ^ label, Palette_config pane))
+      config_panes
+  @ List.map (fun lane ->
+      ("go System / Features / " ^ Lane_run_identity.label lane ^ " history", Palette_lane_history lane))
+      Lane_run_identity.all
+  @ [ "go Play / Links", Palette_collab
+    ; "go Play / MSX", Palette_msx
+    ; "go Play / DOS", Palette_dos
+    ]
+  @ List.map (fun (id, title) -> ("go System / Plugins / " ^ title ^ " Results", Palette_addon_results id))
+      (addon_result_targets state)
+  @ (match browser_lane_on_screen state with
+      | None -> []
+      | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
   @ List.concat_map (fun lane ->
       List.map (fun mode ->
         ("gate " ^ gate_lane_label lane ^ " / " ^ gate_mode_label mode,
          Palette_gate_mode (lane, mode)))
         [Masc.Keeper_gate_mode.Manual; Masc.Keeper_gate_mode.Auto_judge; Masc.Keeper_gate_mode.Always_allow])
       [Workspace_gate; External_gate]
-  (* Both halves, because they are one reading split in two: Task Review lists
-     what waits for a ruling and Task Verdicts what was ruled. They sit one [v]
-     apart under Planning, so offering a jump to one and not the other makes the
-     nearer half look like the only one there is. *)
-  @ [ "go Task Review", Palette_goto Verification ]
-  @ [ "go Task Verdicts", Palette_goto Harness ]
-  @ [ "go Features", Palette_goto Lanes ]
-  @ List.map (fun lane ->
-      ("go " ^ Lane_run_identity.label lane ^ " history", Palette_lane_history lane))
-      Lane_run_identity.all
-  @ [ "go Clients", Palette_goto Clients ]
-  @ [ "go Schedules", Palette_goto Schedules ]
-  @ [ "go Code", Palette_goto Code ]
-  @ [ "go Artifacts / Resources", Palette_goto Resources ]
-  @ [ "go Tools", Palette_goto Tools ]
-  (* Two surfaces had no row: Runtime sits under Config behind [9], Changes
-     under Keepers behind [f], and the palette is where a destination is
-     reached by name when the key path to it is not known. Changes follows the
-     keeper selected on Keepers and says so when there is none. *)
-  @ [ "go Runtime", Palette_goto Runtime ]
-  @ [ "go Changes", Palette_goto Changes ]
-  @ (match browser_lane_on_screen state with
-      | None -> []
-      | Some _ -> [ "hide Browser Lane", Palette_hide_browser_lane ])
-  @ [ "go Browser Lane", Palette_browser_lane ]
-  (* The transport list had no way in at all between #32242 and now: the one
-     place that sets [view <- Connectors] is [show_browser_lane], which opens
-     the lane in the same breath, and neither the surface ring nor Esc comes
-     back to the list. The palette is where a destination is reached by name
-     when there is no key path to it. *)
-  @ [ "go Connectors", Palette_connectors ]
-  @ [ "go Collab", Palette_collab; "go Play links", Palette_collab ]
-  @ [ "go MSX", Palette_msx ]
-  @ [ "go DOS", Palette_dos ]
-  @ [ "go Plugins", Palette_lane_addons ]
-  @ List.map (fun (id, title) -> ("go " ^ title ^ " Results", Palette_addon_results id))
-      (addon_result_targets state)
-  @ [ "go Logs", Palette_goto System_logs ]
-  @ [ "go Activity", Palette_goto Acting ]
-  @ [ "go Approvals", Palette_goto Approvals ]
-  @ [ "go Memory", Palette_goto Memory ]
-  @ [ "go Fusion", Palette_goto Fusion ]
-  @ List.map
-      (fun (surface, label) -> ("go " ^ label, Palette_goto surface))
-      other_surfaces
-  (* After the ring, so "go system" still leads with the System surface: the
-     ranks tie on a label that starts with the query, and a tie keeps entry
-     order. *)
-  @ List.map
-      (fun (pane, label) -> ("go System / " ^ label, Palette_config pane))
-      config_panes
   @ [ "language: 한국어", Palette_ui_language Lang_ko
     ; "language: English", Palette_ui_language Lang_en
     ]
@@ -328,43 +307,40 @@ let palette_subsequence ~needle haystack =
   in
   walk 0 0
 
-(* Other words an entry answers to, kept off its row. Metrics used to be five
-   rows -- "go Metrics", "metrics", "telemetry", "charts", "stats" -- each the
-   same jump, so an empty query listed one destination five times. The slash
-   commands fold their aliases into one entry the same way
-   (Masc_tui_command.spelled_catalog). *)
-let palette_action_words = function
+(* Search names belong to their typed destination, independently of its path. *)
+let palette_action_words action =
+  let words = match action with
   | Palette_goto surface ->
       let aliases = match surface with
         | Resources -> [ "artifacts"; "reports"; "resources"; "리소스"; "산출물" ]
         | Metrics -> [ "metrics"; "telemetry"; "charts"; "stats"; "사용량"; "비용" ]
         | Overview -> [ "대시보드"; "홈" ]
-        | Planning -> [ "goals"; "작업"; "플래닝"; "목표" ]
+        | Planning -> [ "goals"; "candle"; "작업"; "목표" ]
         | Keepers _ -> [ "키퍼"; "에이전트" ]
         | Board -> [ "보드"; "게시판" ]
         | Repositories -> [ "워크스페이스"; "저장소" ]
         | Config -> [ "시스템"; "설정"; "환경설정" ]
-        | Approvals -> [ "승인"; "결재" ]
-        | Verification -> [ "작업리뷰"; "검증" ]
-        | Harness -> [ "작업판정"; "판정" ]
-        | Memory -> [ "메모리"; "기억" ]
-        | Lanes -> [ "기능"; "레인" ]
-        | Clients -> [ "클라이언트" ]
-        | Schedules -> [ "스케줄"; "일정" ]
-        | Fusion -> [ "퓨전" ]
-        | Code -> [ "코드" ]
-        | Changes -> [ "변경사항" ]
-        | Connectors -> [ "커넥터"; "채널" ]
-        | Runtime -> [ "런타임" ]
-        | Tools -> [ "도구"; "스킬" ]
-        | Acting -> [ "활동"; "이벤트" ]
-        | System_logs -> [ "로그"; "시스템로그" ] in
+        | Approvals -> [ "approvals"; "requests"; "승인"; "질문" ]
+        | Verification -> [ "task review"; "작업리뷰"; "검증" ]
+        | Harness -> [ "task verdicts"; "작업판정"; "판정" ]
+        | Memory -> [ "memory"; "메모리"; "기억" ]
+        | Lanes -> [ "features"; "lanes"; "기능"; "레인" ]
+        | Clients -> [ "clients"; "클라이언트" ]
+        | Schedules -> [ "schedules"; "스케줄"; "일정" ]
+        | Fusion -> [ "fusion"; "퓨전" ]
+        | Code -> [ "code"; "코드" ]
+        | Changes -> [ "changes"; "변경사항" ]
+        | Connectors -> [ "connectors"; "channels"; "커넥터"; "채널" ]
+        | Runtime -> [ "runtime"; "런타임" ]
+        | Tools -> [ "tools"; "skills"; "도구"; "스킬" ]
+        | Acting -> [ "activity"; "활동"; "이벤트" ]
+        | System_logs -> [ "logs"; "로그"; "시스템로그" ] in
       Option.to_list (List.assoc_opt surface surface_ring) @ aliases
   | Palette_config pane ->
       (match pane with
        | Config_runtime -> [ "설정파일"; "런타임설정" ]
        | Config_models -> [ "모델"; "모델바인딩" ]
-       | Config_params -> [ "파라미터"; "런타임파라미터" ]
+       | Config_params -> [ "settings"; "params"; "파라미터"; "런타임파라미터" ]
        | Config_prompts -> [ "프롬프트" ]
        | Config_presets -> [ "프리셋" ]
        | Config_themes -> [ "테마"; "언어" ]
@@ -374,11 +350,14 @@ let palette_action_words = function
   | Palette_usage_scope (Some scope_id) -> [scope_id]
   | Palette_addon_results id -> [id]
   | Palette_task_creation _ -> ["task-inspect"; "original Task"]
-  | Palette_goal_payouts -> ["candle"; "지급"]
   | Palette_lane_history lane -> [Lane_run_identity.to_id lane]
-  | Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
-  | Palette_collab | Palette_msx | Palette_dos
-  | Palette_lane_addons | Palette_usage_scope None | Palette_gate_mode _
+  | Palette_browser_lane -> [ "browser"; "browser lane"; "브라우저" ]
+  | Palette_connectors -> [ "connectors"; "channels"; "커넥터"; "채널" ]
+  | Palette_collab -> [ "collab"; "play"; "play links"; "초대" ]
+  | Palette_msx -> [ "msx" ]
+  | Palette_dos -> [ "dos" ]
+  | Palette_lane_addons -> [ "plugins"; "add-ons"; "플러그인" ]
+  | Palette_hide_browser_lane | Palette_usage_scope None | Palette_gate_mode _
   | Palette_chat _ | Palette_task _ | Palette_board_hearth _
   | Palette_board_post _ | Palette_lsp _ | Palette_code_file _ ->
       []
@@ -386,6 +365,8 @@ let palette_action_words = function
   | Palette_code_branch branch -> [branch.Masc.Tui_decode.gb_name; branch.gb_subject]
   | Palette_code_worktree worktree -> [worktree.Masc.Tui_decode.gw_name]
   | Palette_code_search_match found -> [found.Masc.Tui_decode.wsm_path]
+  in
+  words @ List.map (fun word -> "go " ^ word) words
 
 (* One branch row: the checked-out mark, the name, how it stands against its
    upstream, the tip's UTC date and its subject. The date comes from the tip
@@ -473,6 +454,7 @@ let palette_matches (state : state) =
   let needle = String.trim state.palette_query in
   let entries =
     match state.palette_mode with
+    | Palette_jump when String.equal needle "" -> main_entries
     | Palette_jump ->
         let entries = palette_entries state in
         (match palette_typed_question state.palette_query with
@@ -484,7 +466,7 @@ let palette_matches (state : state) =
                | ( _
                  , ( Palette_browser_lane | Palette_hide_browser_lane
                    | Palette_connectors | Palette_collab | Palette_msx
-                   | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _ | Palette_goto _ | Palette_goal_payouts
+                   | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _ | Palette_goto _
                    | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
                    | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _
                    | Palette_board_post _ | Palette_code_file _
@@ -565,7 +547,7 @@ let selected_file state =
   | Some (_, Palette_code_file path) -> Some path
   | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
     | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _
-    | Palette_goto _ | Palette_goal_payouts
+    | Palette_goto _
     | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
     | Palette_code_location _ | Palette_code_branch _ | Palette_code_worktree _ | Palette_code_search_match _))
@@ -578,7 +560,7 @@ let selected_location state =
   | Some (_, Palette_code_location (offer, location)) -> Some (offer, location)
   | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
     | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _
-    | Palette_goto _ | Palette_goal_payouts
+    | Palette_goto _
     | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
     | Palette_code_file _ | Palette_code_branch _ | Palette_code_worktree _ | Palette_code_search_match _))
@@ -591,7 +573,7 @@ let selected_search_match state =
   | Some (_, Palette_code_search_match found) -> Some found
   | Some (_, (Palette_browser_lane | Palette_hide_browser_lane | Palette_connectors
     | Palette_collab | Palette_msx | Palette_dos | Palette_lane_addons | Palette_lane_history _ | Palette_addon_results _
-    | Palette_goto _ | Palette_goal_payouts
+    | Palette_goto _
     | Palette_usage_scope _ | Palette_config _ | Palette_ui_language _ | Palette_gate_mode _ | Palette_chat _
     | Palette_task _ | Palette_task_creation _ | Palette_board_hearth _ | Palette_board_post _ | Palette_lsp _
     | Palette_code_file _ | Palette_code_location _ | Palette_code_branch _

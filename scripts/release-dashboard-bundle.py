@@ -24,7 +24,8 @@ SCHEMA = "masc.installed-release.v2"
 RECEIPT = "release.json"
 TRANSACTION = ".masc-install-transaction"
 COMPANIONS = {"masc-tui", "masc-deployment-preflight-helper",
-              "masc-check-runtime-deployment-preflight", "masc-exec-ssh-bootstrap"}
+              "masc-check-runtime-deployment-preflight", "masc-exec-ssh-bootstrap",
+              "masc-antigravity-path-hook"}
 
 
 def runtime_members(archive):

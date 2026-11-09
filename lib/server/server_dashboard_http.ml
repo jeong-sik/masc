@@ -630,6 +630,7 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
     Goal_verification.load_records_by_goal_id_authoritative config
   in
   let verifier_observations = Goal_verification_agent.capture_observations () in
+  let criterion_review_for_goal = Goal_criterion_review.projector (Goal_criterion_review.load config) in
   let goal_json (goal : Goal_store.goal) =
     let record =
       match records_by_goal_id with
@@ -651,6 +652,7 @@ let dashboard_planning_http_json ~(config : Workspace.config) : Yojson.Safe.t =
       `Assoc
         (fields
          @ [ "verification", verification
+           ; "criterion_review", criterion_review_for_goal goal
            ; "verifier_unreconciled",
              Goal_verification_agent.unreconciled_from_snapshot_to_yojson
                verifier_observations ~config ~record goal

@@ -71,6 +71,18 @@ include module type of Server_dashboard_http_keeper_api_types
     moved to Server_dashboard_http_keeper_api_types — re-exported via
     [include module type of] above. *)
 
+(** {1 GET route permission} *)
+
+val keeper_get_permission
+  :  ?include_thinking:bool
+  -> string
+  -> Masc_domain.permission option
+(** The permission a GET on this keeper subroute requires, as
+    {!Server_dashboard_http_keeper_get_route.permission} decides it for the
+    route the path names. A path that names no route needs none:
+    {!handle_keeper_get_subroutes} answers it with 404. [include_thinking]
+    comes from the query string, which the path alone does not carry. *)
+
 (** {1 Checkpoint inventory} *)
 
 val keeper_runtime_trace_json :

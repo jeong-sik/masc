@@ -19,7 +19,7 @@ type get_route =
 (* Operation reads carry state and input the dashboard already shows. The
    event log carries the turn's reasoning in full, which /raw-trace and
    /trajectory?include_thinking already put behind CanAdmin: same data, same
-   gate (server_dashboard_http_keeper_api_types.ml, keeper_get_permission). *)
+   gate (server_dashboard_http_keeper_get_route.ml, permission). *)
 let get_permission = function
   | Operation_list _ | Operation_exact _ -> Masc_domain.CanReadState
   | Chat_events _ | Turn_events _ -> Masc_domain.CanAdmin

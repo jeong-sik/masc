@@ -2467,6 +2467,15 @@ let test_browser_screenshot_reaches_vision_reader () =
           assert (not !seen_image);
           let reader = Vt.handle ~base_path ~complete ~sw ~clock:(Eio.Stdenv.clock env) ~net:(Eio.Stdenv.net env)
             ~meta ~args:(artifact_args handle) () |> json_of_output in
+          Printf.eprintf "DIAG-B seen_image=%b reader=%s\n%!" !seen_image (Yojson.Safe.to_string reader);
+          Printf.eprintf "DIAG-B runtime_ids=%s\n%!"
+            (String.concat "," (Vt.vision_runtime_ids ~now:(Unix.gettimeofday ())));
+          Printf.eprintf "DIAG-B markdown_dir=%s\n%!"
+            (match Prompt_registry.get_markdown_dir () with Some d -> d | None -> "NONE");
+          Printf.eprintf "DIAG-B guidance=%s\n%!"
+            (match Prompt_registry.render_prompt_template Prompt_names.keeper_vision_request_header [] with
+             | Ok s -> Printf.sprintf "OK len=%d" (String.length s)
+             | Error e -> "ERR " ^ e);
           assert (!seen_image);
           assert (assoc_string "text" reader = "stored browser pixels reached vision");
           assert (Sys.file_exists kept_path);

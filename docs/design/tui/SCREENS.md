@@ -28,7 +28,7 @@ Tab 순환과 상단 선택 표시는 `surface_ring`과 `surface_ring_family`가
 | 작업 | Board / `Board` | 게시글 목록·본문·댓글·투표, 새 글, 토론 후속 글 | 작업의 게시판 링크, `: go Work / Board` |
 | Workspace | Repositories / `Repositories` | 저장소 목록·전체 문맥·Keeper 활동 | Tab |
 | Workspace | Code / `Code` | 파일 트리·본문·메모·이력·diff·LSP | 저장소 Enter, 팔레트 |
-| System | Settings / `Config` | 아래 설정 탭 7개 | Tab |
+| System | Settings / `Config` | 설정·적용 상태, 설정 탭 7개와 원문 | Tab |
 | System | Runtime / `Runtime` | lane 후보 순서·전체 runtime·상세·모델 설정 | System `9`, 팔레트 |
 | 기능·플러그인 | Features / `Lanes` | 제공 기능·관측 상태·설정 적용·실행 이력·측정 상세 | Tab, Runtime `p`, 팔레트 |
 | 기능·플러그인 | Clients / `Clients` | 접속한 Keeper·MCP client·fiber, 선택 상세 | Runtime `c`, 팔레트 |

@@ -318,7 +318,7 @@ let palette_action_words action =
         | Overview -> [ "dashboard"; "operations"; "운영"; "대시보드"; "홈" ]
         | Planning -> [ "goals"; "candle"; "작업"; "목표" ]
         | Keepers _ -> [ "키퍼"; "에이전트" ]
-        | Board -> [ "보드"; "게시판" ]
+        | Board -> [ "board"; "보드"; "게시판" ]
         | Repositories -> [ "워크스페이스"; "저장소" ]
         | Config -> [ "시스템"; "설정"; "환경설정" ]
         | Approvals -> [ "approvals"; "requests"; "승인"; "질문" ]

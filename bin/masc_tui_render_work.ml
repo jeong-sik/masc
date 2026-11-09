@@ -23,7 +23,7 @@ module Task_id_set = Set.Make (String)
    which already opens the Goal summary. This is one physical header row. *)
 let work_hub_navigation (state : state) ~cols =
   let requests = ui_text state ~ko:"p:요청" ~en:"p:Requests" in
-  let board = ":go Work / Board" in
+  let board = ui_text state ~ko:":게시판" ~en:":Board" in
   let links =
     if Message_layout.display_width ("  " ^ requests ^ "  " ^ board)
        <= framed_inner_width cols

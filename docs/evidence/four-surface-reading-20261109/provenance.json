@@ -1,0 +1,572 @@
+{
+  "schema": "masc.four-surface-reading.evidence-draft.v1",
+  "prepared_at_utc": "2026-11-09T15:03:54.975064+00:00",
+  "publication_status": "retained verification record; not a PR approval, release or deployment receipt",
+  "selection": {
+    "frames": 37,
+    "txt_ansi_files": 74,
+    "native_memory_bodies": 5,
+    "new_UI_assertions": false,
+    "source_captures_modified": false,
+    "copied_bytes_equal_original_sanitized_bytes": true
+  },
+  "source_scope": {
+    "baseline_embedded_commit": "e2c38ca5ad1d850f2890b4e17d0ace08f7eea6b0",
+    "native_A0_embedded_commit": "a0b0461a7730335c7dbd59a3113ee5e156dcda3e",
+    "reviewed_final_source_commit": "db182da9c2529fcda92bbf6cfe8129ad7f80dcec",
+    "native_equals_final_source": false,
+    "final_delta_receipt": {
+      "native_source_commit": "a0b0461a7730335c7dbd59a3113ee5e156dcda3e",
+      "reviewed_code_source_commit": "db182da9c2529fcda92bbf6cfe8129ad7f80dcec",
+      "changed_files_since_native": [
+        [
+          "M",
+          "bin/masc_tui_render_memory.ml"
+        ],
+        [
+          "M",
+          "bin/masc_tui_types.ml"
+        ],
+        [
+          "M",
+          "test/test_tui_memory_facts_explorer.ml"
+        ],
+        [
+          "M",
+          "test/test_tui_planning_detail.ml"
+        ]
+      ],
+      "interpretation": "native A0 frames precede Goal test cleanup, bilingual category search, and actual Memory pass outcome labels; no final-head native execution claimed",
+      "independent_delta_source_review": "no P0/P1/P2 found; execution not performed by reviewer",
+      "minimum_ci_latest_dispatch": {
+        "url": "https://github.com/jeong-sik/masc/actions/runs/42639867713",
+        "requested_suite": "test_tui_memory_facts_explorer",
+        "status_at_record": "completed success; actual run head and job log verified",
+        "observed_head": "db182da9c2529fcda92bbf6cfe8129ad7f80dcec",
+        "job": 129237797433,
+        "cases": 9
+      },
+      "verified_behavior_runs": [
+        {
+          "source": "a0b0461a7730335c7dbd59a3113ee5e156dcda3e",
+          "run": 42633335544,
+          "result": "7 suites / 79 cases passed; legacy Goal UI assertions failed"
+        },
+        {
+          "source": "ee59eeac32aed9545ae4a16bf31d48881dcc0a79",
+          "run": 42635590216,
+          "job": 129222762126,
+          "result": "test_tui_planning_detail passed, 8 cases; verified actual job log"
+        }
+      ],
+      "not_claimed": [
+        "full regression success",
+        "post-label native execution",
+        "UI language-switch live cache invalidation",
+        "Goal confirmation and final-scroll-end execution",
+        "Memory failure-held native observation",
+        "production install/restart/deployment"
+      ]
+    },
+    "final_delta_receipt_original_sha256": "ce73c4769d26c9a4dc621d93d3d560a00eaf4c99477bceb4aef356d3bc402032"
+  },
+  "native_artifact": {
+    "source_commit": "a0b0461a7730335c7dbd59a3113ee5e156dcda3e",
+    "source_tree": "bfe560bf00c3da15236bc3680021a9a7b4545e53",
+    "workflow_head": "beb1d2d4b538e87ea2ddeed1b74dc54e7043fde9",
+    "run_id": "42633341390",
+    "run_attempt": "1",
+    "staged_build_commits": {
+      "masc": "a0b0461a7730335c7dbd59a3113ee5e156dcda3e",
+      "masc-tui": "a0b0461a7730335c7dbd59a3113ee5e156dcda3e"
+    },
+    "staged_binary_sha256": {
+      "masc": "ba59ac377ccf90cda7342d633d0eb07d30e0cd78184d4c54c3da417615dc7518",
+      "masc-tui": "afb8daed36266b2495ad4996cd8057590d7e254fd0b54c9689803d0f9282567b",
+      "masc-deployment-preflight-helper": "bf434a72f45fbc7613eff8fb5fed928f9415f2aacca8fc22e9f07a9cb95b97ce",
+      "masc-exec-ssh-bootstrap": "a32f204bda32048dabc8bc94e7557d4a13313a58e994b6796fdb2f084e0f2c54",
+      "masc-antigravity-path-hook": "59727c65ad60440b3d5e2f1fcc0cf3ab7b6415d6aff0b0ec0d239486522d3dbc",
+      "masc-check-runtime-deployment-preflight": "fea1060a28c8e1a4ae29a7263f14d56ac16b9639bb54c1a6d9d18da7a510970a"
+    },
+    "archive_zip_digest": "7a2778da854f876ca0b03aba642fb5042d5288a9273b56ce3f0b11db92ec0cb9",
+    "archive_zip_note": "GitHub connector download_workflow_artifact supplied the artifact URL; the downloaded ZIP digest and extracted payload checksums were verified separately.",
+    "workflow": "Minimal manual checks / Native TUI artifact",
+    "recorded_identity_original_sha256": "923ec91a9eb06aa30d815411cc3caf0ba18d3b599a68b522763a7ff8f4c92beb",
+    "observed_scope": "download/stage provenance and exact embedded binaries, not Full CI or release approval",
+    "release_verified": false,
+    "published": false,
+    "artifact_id": 13683830880,
+    "archive_zip_bytes": 186782903
+  },
+  "baseline_installed_binaries": {
+    "masc": {
+      "sha256": "447b0b00872c1affb6f5e189a282c3491b1c1259f2466ecf8ade554a4568ba7a",
+      "embedded_commit": "e2c38ca5ad1d850f2890b4e17d0ace08f7eea6b0"
+    },
+    "masc-tui": {
+      "sha256": "ddf98f324fe815fd18cdbed769a4cc56a9167c4083d26fd6110009a51cfb8d32",
+      "embedded_commit": "e2c38ca5ad1d850f2890b4e17d0ace08f7eea6b0"
+    }
+  },
+  "baseline_identity_original_sha256": "ba73fe3181560af570859c30f4c928675039435f8d2bbcdab1214cfd4edd1b82",
+  "native_server_identities_and_cleanup": [
+    {
+      "native_health_source_file": "artifacts/surface-minimalism-20261109/private-installed-baseline-w122ltws/native-health-1794235125910614000.json",
+      "native_health_source_sha256": "88a3425199500001abf9a7edf8ffb17c987f1e68d31b05e11f368a3a8da2fcc8",
+      "status": "ok",
+      "embedded_binary_commit": "e2c38ca5ad1d850f2890b4e17d0ace08f7eea6b0",
+      "embedded_binary_sha256": "447b0b00872c1affb6f5e189a282c3491b1c1259f2466ecf8ade554a4568ba7a",
+      "runtime_instance_id": "01a1c0be-feb2-7000-bca0-78305e25ebd2",
+      "server_started_at_utc": "2026-11-09T14:38:24Z",
+      "owned_stop_receipt_file": "artifacts/surface-minimalism-20261109/private-installed-baseline-w122ltws/server-stop-1794235372765974000.json",
+      "owned_stop_receipt_sha256": "85dd0bba332d1045e2bac16dc0e4d1316c23184b828624ae13759c16c24056f3",
+      "owned_stop": {
+        "at_utc": "2026-11-09T14:42:52.766013+00:00",
+        "owned_process_absent": true,
+        "native_exit_status_if_observed": 0,
+        "dedicated_tmux_cleanup_attempted": true,
+        "sigkill_sent": false
+      }
+    },
+    {
+      "native_health_source_file": "artifacts/surface-minimalism-20261109/private-surfaces-0vu_tg7o/native-health-1794235399276227000.json",
+      "native_health_source_sha256": "08144fccf38d3ea5980c950c6a3a5e044533cb5499f51342f6d9e62c9d706793",
+      "status": "ok",
+      "embedded_binary_commit": "a0b0461a7730335c7dbd59a3113ee5e156dcda3e",
+      "embedded_binary_sha256": "ba59ac377ccf90cda7342d633d0eb07d30e0cd78184d4c54c3da417615dc7518",
+      "runtime_instance_id": "01a1c0c3-2050-7000-b085-17fa67511e0c",
+      "server_started_at_utc": "2026-11-09T14:42:55Z",
+      "owned_stop_receipt_file": "artifacts/surface-minimalism-20261109/private-surfaces-0vu_tg7o/server-stop-1794236140658657000.json",
+      "owned_stop_receipt_sha256": "9da3d20d866e1927d2e998487d6c67d8e619a3ab37764f2577fec813fe8d9c7b",
+      "owned_stop": {
+        "at_utc": "2026-11-09T14:55:40.658701+00:00",
+        "owned_process_absent": true,
+        "native_exit_status_if_observed": 0,
+        "dedicated_tmux_cleanup_attempted": true,
+        "sigkill_sent": false
+      }
+    },
+    {
+      "native_health_source_file": "artifacts/surface-minimalism-20261109/private-surfaces-9ddyyq3m/native-health-1794236124127372000.json",
+      "native_health_source_sha256": "f3e961f598f6f9b55d830b92f175e9248dd092ddbf456715db69ec8977469dde",
+      "status": "ok",
+      "embedded_binary_commit": "a0b0461a7730335c7dbd59a3113ee5e156dcda3e",
+      "embedded_binary_sha256": "ba59ac377ccf90cda7342d633d0eb07d30e0cd78184d4c54c3da417615dc7518",
+      "runtime_instance_id": "01a1c0ce-0b81-7000-a848-ea51cfc84e3d",
+      "server_started_at_utc": "2026-11-09T14:54:51Z",
+      "owned_stop_receipt_file": "artifacts/surface-minimalism-20261109/private-surfaces-9ddyyq3m/server-stop-1794236290681738000.json",
+      "owned_stop_receipt_sha256": "8476e8b7f0ee92ff9e97e44143723d737686d665ae9432e9db06f56215fab5c6",
+      "owned_stop": {
+        "at_utc": "2026-11-09T14:58:10.681791+00:00",
+        "owned_process_absent": true,
+        "native_exit_status_if_observed": 0,
+        "dedicated_tmux_cleanup_attempted": true,
+        "sigkill_sent": false
+      }
+    }
+  ],
+  "controllers": [
+    {
+      "folder": "baseline-e2c-ko-120x35",
+      "original_manifest": "artifacts/surface-minimalism-20261109/capture-installed-before-ko-120x35-v2/manifest.json",
+      "original_manifest_sha256": "501a5bacdb5e82dac8022286798e841b37d05df454be0162a0fecb7eed74d516",
+      "role": "installed-baseline",
+      "binary_build_commit": "e2c38ca5ad1d850f2890b4e17d0ace08f7eea6b0",
+      "binary_sha256": "ddf98f324fe815fd18cdbed769a4cc56a9167c4083d26fd6110009a51cfb8d32",
+      "candidate_source_capture": false,
+      "candidate_identity_verified": false,
+      "language": "ko",
+      "capture_started_at_utc": "2026-11-09T14:40:14.036000+00:00",
+      "capture_finished_at_utc": "2026-11-09T14:41:38.934452+00:00",
+      "controller_failure": null,
+      "selected_panels": 8,
+      "original_capture_count": 11,
+      "runtime_configs_unchanged": true,
+      "live_preferences_unchanged": true,
+      "selected_base_preferences_unchanged": true,
+      "preference_digest_pairs": {
+        "live_runtime_config_before_sha256": "671b38ebddeaa7a49c8d7ec5442969bb693d91a73902538902a9e2596b2e16f1",
+        "live_runtime_config_after_sha256": "671b38ebddeaa7a49c8d7ec5442969bb693d91a73902538902a9e2596b2e16f1",
+        "base_runtime_config_before_sha256": "f6a9e1b747008642229a16002db957df89b1fc801445ff90388c46accd19d859",
+        "base_runtime_config_after_sha256": "f6a9e1b747008642229a16002db957df89b1fc801445ff90388c46accd19d859",
+        "live_preferences_start_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+        "live_preferences_finish_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+        "selected_base_preferences_start_sha256": null,
+        "selected_base_preferences_finish_sha256": null
+      },
+      "private_child_matches": [
+        {
+          "size": "120x35",
+          "private_config": true,
+          "private_base": true,
+          "private_proxy_port": true,
+          "TERM": "xterm-256color",
+          "private_preferences_before_sha256": "7a30366e8a87b88f911bd1ca8ff70c4ce9d0dc7335cb5de64822fb6a2feb7a25",
+          "private_preferences_after_sha256": "7a30366e8a87b88f911bd1ca8ff70c4ce9d0dc7335cb5de64822fb6a2feb7a25"
+        }
+      ],
+      "recorded_refresh_keys": [],
+      "http_method_counts": {
+        "GET": 89,
+        "POST": 43
+      },
+      "mutations_forwarded": false,
+      "transport_fault_enabled": false,
+      "native_memory_body": {
+        "retained": "baseline-e2c-ko-120x35/native-memory-health.json",
+        "wire_sha256": "f1c1b5636148676ce1695a17b82384a237267ae4e90a3b0dc6114118d57cbb1d",
+        "sanitized_sha256": "f1c1b5636148676ce1695a17b82384a237267ae4e90a3b0dc6114118d57cbb1d",
+        "status": 200,
+        "completed_at_utc": "2026-11-09T14:41:35.834761+00:00",
+        "generated_at": 1794235106.087967,
+        "keepers": [
+          {
+            "keeper_id": "sourcereader",
+            "facts": 2,
+            "source_facts": 1,
+            "snapshot_present": true,
+            "read_error": null,
+            "source_read_error": null
+          },
+          {
+            "keeper_id": "quietreader",
+            "facts": 0,
+            "source_facts": 1,
+            "snapshot_present": true,
+            "read_error": null,
+            "source_read_error": null
+          }
+        ]
+      }
+    },
+    {
+      "folder": "candidate-a0-ko-120x35",
+      "original_manifest": "artifacts/surface-minimalism-20261109/capture-candidate-ko-120x35/manifest.json",
+      "original_manifest_sha256": "9622066e77c8d9ed1e90cb92b92f3743a392db9fc056ec7aeb3ab822fb4273dc",
+      "role": "exact-A0-native-candidate",
+      "binary_build_commit": "a0b0461a7730335c7dbd59a3113ee5e156dcda3e",
+      "binary_sha256": "afb8daed36266b2495ad4996cd8057590d7e254fd0b54c9689803d0f9282567b",
+      "candidate_source_capture": true,
+      "candidate_identity_verified": true,
+      "language": "ko",
+      "capture_started_at_utc": "2026-11-09T14:44:14.429842+00:00",
+      "capture_finished_at_utc": "2026-11-09T14:55:24.746666+00:00",
+      "controller_failure": null,
+      "selected_panels": 9,
+      "original_capture_count": 13,
+      "runtime_configs_unchanged": true,
+      "live_preferences_unchanged": true,
+      "selected_base_preferences_unchanged": true,
+      "preference_digest_pairs": {
+        "live_runtime_config_before_sha256": "671b38ebddeaa7a49c8d7ec5442969bb693d91a73902538902a9e2596b2e16f1",
+        "live_runtime_config_after_sha256": "671b38ebddeaa7a49c8d7ec5442969bb693d91a73902538902a9e2596b2e16f1",
+        "base_runtime_config_before_sha256": "bd8f471e6d07bfe3a0cd3099b2060b741dd2035d85bd354b4a7413251e407e64",
+        "base_runtime_config_after_sha256": "bd8f471e6d07bfe3a0cd3099b2060b741dd2035d85bd354b4a7413251e407e64",
+        "live_preferences_start_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+        "live_preferences_finish_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+        "selected_base_preferences_start_sha256": null,
+        "selected_base_preferences_finish_sha256": null
+      },
+      "private_child_matches": [
+        {
+          "size": "120x35",
+          "private_config": true,
+          "private_base": true,
+          "private_proxy_port": true,
+          "TERM": "xterm-256color",
+          "private_preferences_before_sha256": "7a30366e8a87b88f911bd1ca8ff70c4ce9d0dc7335cb5de64822fb6a2feb7a25",
+          "private_preferences_after_sha256": "7a30366e8a87b88f911bd1ca8ff70c4ce9d0dc7335cb5de64822fb6a2feb7a25"
+        }
+      ],
+      "recorded_refresh_keys": [],
+      "http_method_counts": {
+        "GET": 94,
+        "POST": 332
+      },
+      "mutations_forwarded": false,
+      "transport_fault_enabled": false,
+      "native_memory_body": {
+        "retained": "candidate-a0-ko-120x35/native-memory-health.json",
+        "wire_sha256": "24be1c8890f4d7c680a990df84efee40b3aa582532d2a82108560b0a30009c28",
+        "sanitized_sha256": "24be1c8890f4d7c680a990df84efee40b3aa582532d2a82108560b0a30009c28",
+        "status": 200,
+        "completed_at_utc": "2026-11-09T14:44:50.397350+00:00",
+        "generated_at": 1794235376.865245,
+        "keepers": [
+          {
+            "keeper_id": "sourcereader",
+            "facts": 2,
+            "source_facts": 1,
+            "snapshot_present": true,
+            "read_error": null,
+            "source_read_error": null
+          },
+          {
+            "keeper_id": "quietreader",
+            "facts": 0,
+            "source_facts": 1,
+            "snapshot_present": true,
+            "read_error": null,
+            "source_read_error": null
+          }
+        ]
+      }
+    },
+    {
+      "folder": "candidate-a0-en-120x35",
+      "original_manifest": "artifacts/surface-minimalism-20261109/capture-candidate-en-120x35/manifest.json",
+      "original_manifest_sha256": "007e6b022f28c0e075fb8571eec1728ddcb7f86b29d64b9bf48073f429247306",
+      "role": "exact-A0-native-candidate",
+      "binary_build_commit": "a0b0461a7730335c7dbd59a3113ee5e156dcda3e",
+      "binary_sha256": "afb8daed36266b2495ad4996cd8057590d7e254fd0b54c9689803d0f9282567b",
+      "candidate_source_capture": true,
+      "candidate_identity_verified": true,
+      "language": "en",
+      "capture_started_at_utc": "2026-11-09T14:55:57.595981+00:00",
+      "capture_finished_at_utc": "2026-11-09T14:57:46.151241+00:00",
+      "controller_failure": null,
+      "selected_panels": 9,
+      "original_capture_count": 11,
+      "runtime_configs_unchanged": true,
+      "live_preferences_unchanged": true,
+      "selected_base_preferences_unchanged": true,
+      "preference_digest_pairs": {
+        "live_runtime_config_before_sha256": "671b38ebddeaa7a49c8d7ec5442969bb693d91a73902538902a9e2596b2e16f1",
+        "live_runtime_config_after_sha256": "671b38ebddeaa7a49c8d7ec5442969bb693d91a73902538902a9e2596b2e16f1",
+        "base_runtime_config_before_sha256": "46163571aece78bff916a4fe1ac0631974f88f6094f16a8ed0ebf96191a55900",
+        "base_runtime_config_after_sha256": "46163571aece78bff916a4fe1ac0631974f88f6094f16a8ed0ebf96191a55900",
+        "live_preferences_start_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+        "live_preferences_finish_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+        "selected_base_preferences_start_sha256": null,
+        "selected_base_preferences_finish_sha256": null
+      },
+      "private_child_matches": [
+        {
+          "size": "120x35",
+          "private_config": true,
+          "private_base": true,
+          "private_proxy_port": true,
+          "TERM": "xterm-256color",
+          "private_preferences_before_sha256": "7a30366e8a87b88f911bd1ca8ff70c4ce9d0dc7335cb5de64822fb6a2feb7a25",
+          "private_preferences_after_sha256": "7a30366e8a87b88f911bd1ca8ff70c4ce9d0dc7335cb5de64822fb6a2feb7a25"
+        }
+      ],
+      "recorded_refresh_keys": [],
+      "http_method_counts": {
+        "GET": 69,
+        "POST": 55
+      },
+      "mutations_forwarded": false,
+      "transport_fault_enabled": false,
+      "native_memory_body": {
+        "retained": "candidate-a0-en-120x35/native-memory-health.json",
+        "wire_sha256": "b60a315f42ff8b7c9ef6aca4488cf80daf14d2a4521dd313cbadd4753948cb63",
+        "sanitized_sha256": "b60a315f42ff8b7c9ef6aca4488cf80daf14d2a4521dd313cbadd4753948cb63",
+        "status": 200,
+        "completed_at_utc": "2026-11-09T14:56:47.829621+00:00",
+        "generated_at": 1794236207.813398,
+        "keepers": [
+          {
+            "keeper_id": "sourcereader",
+            "facts": 2,
+            "source_facts": 1,
+            "snapshot_present": true,
+            "read_error": null,
+            "source_read_error": null
+          },
+          {
+            "keeper_id": "quietreader",
+            "facts": 0,
+            "source_facts": 1,
+            "snapshot_present": true,
+            "read_error": null,
+            "source_read_error": null
+          }
+        ]
+      }
+    },
+    {
+      "folder": "candidate-a0-ko-80x24",
+      "original_manifest": "artifacts/surface-minimalism-20261109/capture-candidate-ko-80x24/manifest.json",
+      "original_manifest_sha256": "3a55e4002a56f3d992a5ea347c48f1c5de3198ce18c033e5927b49534bb5df39",
+      "role": "exact-A0-native-candidate",
+      "binary_build_commit": "a0b0461a7730335c7dbd59a3113ee5e156dcda3e",
+      "binary_sha256": "afb8daed36266b2495ad4996cd8057590d7e254fd0b54c9689803d0f9282567b",
+      "candidate_source_capture": true,
+      "candidate_identity_verified": true,
+      "language": "ko",
+      "capture_started_at_utc": "2026-11-09T14:44:14.429565+00:00",
+      "capture_finished_at_utc": "2026-11-09T14:55:24.518167+00:00",
+      "controller_failure": null,
+      "selected_panels": 6,
+      "original_capture_count": 13,
+      "runtime_configs_unchanged": true,
+      "live_preferences_unchanged": true,
+      "selected_base_preferences_unchanged": true,
+      "preference_digest_pairs": {
+        "live_runtime_config_before_sha256": "671b38ebddeaa7a49c8d7ec5442969bb693d91a73902538902a9e2596b2e16f1",
+        "live_runtime_config_after_sha256": "671b38ebddeaa7a49c8d7ec5442969bb693d91a73902538902a9e2596b2e16f1",
+        "base_runtime_config_before_sha256": "bd8f471e6d07bfe3a0cd3099b2060b741dd2035d85bd354b4a7413251e407e64",
+        "base_runtime_config_after_sha256": "bd8f471e6d07bfe3a0cd3099b2060b741dd2035d85bd354b4a7413251e407e64",
+        "live_preferences_start_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+        "live_preferences_finish_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+        "selected_base_preferences_start_sha256": null,
+        "selected_base_preferences_finish_sha256": null
+      },
+      "private_child_matches": [
+        {
+          "size": "80x24",
+          "private_config": true,
+          "private_base": true,
+          "private_proxy_port": true,
+          "TERM": "xterm-256color",
+          "private_preferences_before_sha256": "7a30366e8a87b88f911bd1ca8ff70c4ce9d0dc7335cb5de64822fb6a2feb7a25",
+          "private_preferences_after_sha256": "7a30366e8a87b88f911bd1ca8ff70c4ce9d0dc7335cb5de64822fb6a2feb7a25"
+        }
+      ],
+      "recorded_refresh_keys": [],
+      "http_method_counts": {
+        "GET": 92,
+        "POST": 332
+      },
+      "mutations_forwarded": false,
+      "transport_fault_enabled": false,
+      "native_memory_body": {
+        "retained": "candidate-a0-ko-80x24/native-memory-health.json",
+        "wire_sha256": "ef1b39fdb36550c161624814393b827bc7b82e6d168ec938e1770ea8330c721d",
+        "sanitized_sha256": "ef1b39fdb36550c161624814393b827bc7b82e6d168ec938e1770ea8330c721d",
+        "status": 200,
+        "completed_at_utc": "2026-11-09T14:44:56.473674+00:00",
+        "generated_at": 1794235490.396888,
+        "keepers": [
+          {
+            "keeper_id": "sourcereader",
+            "facts": 2,
+            "source_facts": 1,
+            "snapshot_present": true,
+            "read_error": null,
+            "source_read_error": null
+          },
+          {
+            "keeper_id": "quietreader",
+            "facts": 0,
+            "source_facts": 1,
+            "snapshot_present": true,
+            "read_error": null,
+            "source_read_error": null
+          }
+        ]
+      }
+    },
+    {
+      "folder": "candidate-a0-en-80x24",
+      "original_manifest": "artifacts/surface-minimalism-20261109/capture-candidate-en-80x24/manifest.json",
+      "original_manifest_sha256": "65ca8dddd0334f39d0b68bbb936d264be622a22593c2cc68efc424b34e570a7f",
+      "role": "exact-A0-native-candidate",
+      "binary_build_commit": "a0b0461a7730335c7dbd59a3113ee5e156dcda3e",
+      "binary_sha256": "afb8daed36266b2495ad4996cd8057590d7e254fd0b54c9689803d0f9282567b",
+      "candidate_source_capture": true,
+      "candidate_identity_verified": true,
+      "language": "en",
+      "capture_started_at_utc": "2026-11-09T14:55:57.595945+00:00",
+      "capture_finished_at_utc": "2026-11-09T14:57:46.102015+00:00",
+      "controller_failure": null,
+      "selected_panels": 5,
+      "original_capture_count": 11,
+      "runtime_configs_unchanged": true,
+      "live_preferences_unchanged": true,
+      "selected_base_preferences_unchanged": true,
+      "preference_digest_pairs": {
+        "live_runtime_config_before_sha256": "671b38ebddeaa7a49c8d7ec5442969bb693d91a73902538902a9e2596b2e16f1",
+        "live_runtime_config_after_sha256": "671b38ebddeaa7a49c8d7ec5442969bb693d91a73902538902a9e2596b2e16f1",
+        "base_runtime_config_before_sha256": "46163571aece78bff916a4fe1ac0631974f88f6094f16a8ed0ebf96191a55900",
+        "base_runtime_config_after_sha256": "46163571aece78bff916a4fe1ac0631974f88f6094f16a8ed0ebf96191a55900",
+        "live_preferences_start_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+        "live_preferences_finish_sha256": "f89270f2a5e4e0aa14b365cbd6bfd4289e64bc2d5a51d57125cbf44251ebb23c",
+        "selected_base_preferences_start_sha256": null,
+        "selected_base_preferences_finish_sha256": null
+      },
+      "private_child_matches": [
+        {
+          "size": "80x24",
+          "private_config": true,
+          "private_base": true,
+          "private_proxy_port": true,
+          "TERM": "xterm-256color",
+          "private_preferences_before_sha256": "7a30366e8a87b88f911bd1ca8ff70c4ce9d0dc7335cb5de64822fb6a2feb7a25",
+          "private_preferences_after_sha256": "7a30366e8a87b88f911bd1ca8ff70c4ce9d0dc7335cb5de64822fb6a2feb7a25"
+        }
+      ],
+      "recorded_refresh_keys": [],
+      "http_method_counts": {
+        "GET": 69,
+        "POST": 55
+      },
+      "mutations_forwarded": false,
+      "transport_fault_enabled": false,
+      "native_memory_body": {
+        "retained": "candidate-a0-en-80x24/native-memory-health.json",
+        "wire_sha256": "235b11c5d8954656943ab7e9682862ff3ad34b61fd70b622d350daf496f6f4cd",
+        "sanitized_sha256": "235b11c5d8954656943ab7e9682862ff3ad34b61fd70b622d350daf496f6f4cd",
+        "status": 200,
+        "completed_at_utc": "2026-11-09T14:56:47.814871+00:00",
+        "generated_at": 1794236092.67328,
+        "keepers": [
+          {
+            "keeper_id": "sourcereader",
+            "facts": 2,
+            "source_facts": 1,
+            "snapshot_present": true,
+            "read_error": null,
+            "source_read_error": null
+          },
+          {
+            "keeper_id": "quietreader",
+            "facts": 0,
+            "source_facts": 1,
+            "snapshot_present": true,
+            "read_error": null,
+            "source_read_error": null
+          }
+        ]
+      }
+    }
+  ],
+  "CI_scope": {
+    "drafter_queried_CI": false,
+    "receipt_source": "root verified actual heads and job logs; compact local receipt read by drafter",
+    "behavior_runs": [
+      {
+        "source": "a0b0461a7730335c7dbd59a3113ee5e156dcda3e",
+        "run": 42633335544,
+        "result": "7 suites / 79 cases passed; legacy Goal UI assertions failed"
+      },
+      {
+        "source": "ee59eeac32aed9545ae4a16bf31d48881dcc0a79",
+        "run": 42635590216,
+        "job": 129222762126,
+        "result": "test_tui_planning_detail passed, 8 cases; verified actual job log"
+      }
+    ],
+    "final_focused_category_suite": {
+      "url": "https://github.com/jeong-sik/masc/actions/runs/42639867713",
+      "requested_suite": "test_tui_memory_facts_explorer",
+      "status_at_record": "completed success; actual run head and job log verified",
+      "observed_head": "db182da9c2529fcda92bbf6cfe8129ad7f80dcec",
+      "job": 129237797433,
+      "cases": 9
+    },
+    "claim": "Focused source/behavior scope only; not full regression, final native execution, formal approval, release or deployment."
+  },
+  "excluded_first_baseline_attempt": {
+    "manifest": "artifacts/surface-minimalism-20261109/capture-installed-before-ko-120x35/manifest.json",
+    "sha256": "f6f8e30d83a5f577848965d7d9a46896d88adc21c97dd96043b3bf7b002f538f",
+    "failure": "EOFError",
+    "retention": "original failure preserved locally; successful v2 selected"
+  },
+  "privacy": {
+    "actual_host_home_paths_bearer_tokens_key_patterns_email_scan_matches": 0,
+    "content": "synthetic private fixture only; no personal conversation or live user data selected",
+    "captures": "Existing sanitized derivatives copied byte-for-byte; anonymous placeholders in source-path rows are retained, without relayout."
+  }
+}

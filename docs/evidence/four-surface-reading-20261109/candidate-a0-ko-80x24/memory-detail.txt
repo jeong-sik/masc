@@ -1,0 +1,24 @@
+ 운영  작업  ▸키퍼  기능·플러그인  워크스페이스  시스템
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ MASC 기억 · 사실                                                             │
+├──────────────────────────────────────────────────────────────────────────────┤
+│  원본에 묶인 사실                                                            │
+│    원본 파일은 요청과 현재 관측을 구분한다고 기록합니다.                     │
+│    Keeper:      sourcereader                                                 │
+│    원본 경로:   <user>/me/workspace/yousleepwhen/masc/artifacts/      │
+│                 surface-minimalism-20261109/private-surfaces-0vu_tg7o/       │
+│                 workspace/fixture-sources/reading-contract.md                │
+│    파일 SHA:    sha256:0044f31f4296ad91eafd570b1527e7b3f9bcd4114ed3a51e8f0164│
+│                 bae35b1df7 · 처음 관측: 26m                                  │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  Esc:닫기  …?
+ 일정 정보가 오래됐을 수 있음
+ › to quietreader   (i to write)

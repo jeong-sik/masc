@@ -1,0 +1,35 @@
+ 운영  ▸작업  키퍼  기능·플러그인  워크스페이스  시스템
+
+  MASC Board (2)  23:41:32  HTTP [connected]
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ Sort [s]: net votes first; newer breaks ties · H:choose hearth
+ hearths · census empty
+ Selected post · 해결한 논의와 다음 글
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+   ID           HEARTH       AUTHOR           TITLE                                                   AGE SCORE REPLIES
+ ──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+ @ p-s…e-closed              fixture-operator 🔒 해결한 논의와 다음 글                              3m27s  0    0
+ @ p-s…ace-open              fixture-operator 함께 읽을 요청과 댓글                                 3m27s  0    1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ACTION NEEDED 1 · keeper_memory_execution:addon_unattached  Right / Enter:read  Esc:back  v / V:up / down  q:quit  …?
+ 일정 정보가 오래됐을 수 있음
+ › to quietreader   (i to write)

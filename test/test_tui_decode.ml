@@ -5648,10 +5648,16 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
     { installation_id = "admission-installation"; request_id = "admission-request";
       wait = Masc.Keeper_librarian_pending.Capacity } in
   let admission_json = Masc.Keeper_librarian_pending.to_json (Worker admission_worker) in
-  List.iter (fun (label, updates, expected_state, expected_time) ->
-    match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
-      (with_librarian ~stopped_keepers:0 (("admission_wait", admission_json) :: updates)) with
-    | Error detail -> Alcotest.fail detail
+  List.iter (fun (label, updates, expected_state, expected_time, expected_unread_total) ->
+    let payload =
+      with_librarian ~stopped_keepers:0 (("admission_wait", admission_json) :: updates) in
+    let totals = Yojson.Safe.Util.member "totals" payload in
+    let payload = replace_field "totals"
+      (replace_field "librarian_unread_turns"
+         (Option.fold ~none:`Null ~some:(fun unread -> `Int unread) expected_unread_total)
+         totals) payload in
+    match Masc.Tui_decode_memory_health.decode_memory_health_snapshot payload with
+    | Error detail -> Alcotest.failf "%s: %s" label detail
     | Ok snapshot ->
       let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
       Alcotest.(check bool) (label ^ ": original admission owner retained") true
@@ -5659,37 +5665,14 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
       Alcotest.(check bool) (label ^ ": durable state retained") true
         (librarian.mlh_state = expected_state);
       Alcotest.(check (option (float 0.))) (label ^ ": durable measurement time retained")
-        expected_time librarian.mlh_measured_at)
+        expected_time librarian.mlh_measured_at;
+      Alcotest.(check (option int)) (label ^ ": fleet unread measurement retained")
+        expected_unread_total snapshot.mhs_total_librarian_unread_turns)
     [ "measured durable pass", [], Some Masc.Tui_decode_memory_health.Pass_drained,
-      Some 1_775_000_000.0 ];
-  (* A row the server could not read keeps its admission wait beside the
-     unknown reads, and the fleet unread total moves to unmeasured with the
-     row: reporting zero for unread rows disagrees with what the rows say. *)
-  let unobserved_json =
-    match
-      with_librarian ~stopped_keepers:0
-        [ ("admission_wait", admission_json); "state", `Null; "measured_at", `Null;
-          "unread_atom_turns", `Null; "unread_official_turns", `Null ]
-    with
-    | `Assoc fields ->
-      `Assoc
-        (List.map (fun (key, value) -> key,
-             if key = "totals"
-             then replace_field "librarian_unread_turns" `Null value
-             else value) fields)
-    | value -> value
-  in
-  (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot unobserved_json with
-   | Error detail -> Alcotest.fail detail
-   | Ok snapshot ->
-     let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
-     Alcotest.(check bool) "unobserved durable pass: original admission owner retained" true
-       (librarian.mlh_admission_wait = Some admission_worker);
-     Alcotest.(check bool) "unobserved durable pass: durable state retained" true
-       (librarian.mlh_state = None);
-     Alcotest.(check (option (float 0.)))
-       "unobserved durable pass: durable measurement time retained" None
-       librarian.mlh_measured_at);
+      Some 1_775_000_000.0, Some 0
+    ; "unobserved durable pass",
+      [ "state", `Null; "measured_at", `Null; "unread_atom_turns", `Null;
+        "unread_official_turns", `Null ], None, None, None ];
   List.iter (fun admission_wait ->
     Alcotest.(check bool) "admission wait requires a supported original worker" true
       (memory_health_rejects (with_librarian ~stopped_keepers:0 ["admission_wait", admission_wait])))

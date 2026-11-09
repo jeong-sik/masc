@@ -1,7 +1,7 @@
-(** The memory fact age ladder as text (RFC-0511 D2).
+(** The memory fact age ladder as text (RFC-0515 §2.4.5).
 
-    The server counts a Keeper's ordinary facts into four bins by the time
-    since each fact was first seen, at the health response's [generated_at]
+    The server counts a Keeper's ordinary facts into 24 bins by the time since
+    each fact was first seen, at the health response's [generated_at]
     ({!Masc.Keeper_memory_age_bins}). This module owns every word, mark and
     edge the screens draw from those bins, so the Memory header, the selected
     Keeper's detail, the Keepers second-row cell and the key sheet read one
@@ -15,12 +15,6 @@ type bin = Masc.Keeper_memory_age_bins.bin
 val oldest_first : bin list
 (** The order the bins are drawn in: the oldest on the left, so the right end is
     the facts first seen most recently. *)
-
-val edge_seconds : bin -> float option
-(** Where the bin ends, in seconds of age; [None] for the open-ended oldest
-    bin. The words on screen are made from the same three edges, and a test
-    holds them to the edges {!Masc.Keeper_memory_age_bins.classify} counts
-    with. *)
 
 (** What one bin draws. An empty bin is [Empty], never the lowest bar, so
     "none" and "a few" differ. A bar's height is its count against the tallest
@@ -58,8 +52,8 @@ val legend : string
 
 val keeper_clauses : ko:bool -> Masc.Keeper_memory_age_bins.t option -> string list
 (** One Keeper's ladder as clauses for a packed row that has no label above it:
-    "ordinary facts since first seen" with the strip, then a count per age
-    range, or the same words with a [?]. *)
+    "ordinary facts since first seen" with the strip, or the same words with a
+    [?]. *)
 
 type fleet =
   | Nobody_measured of { keepers : int }

@@ -4,6 +4,9 @@ open Tui_decode_fields
 
 open Result.Syntax
 
+(* The fleet response and the one-Keeper row carry the same schema. *)
+let current_health_schema = "keeper.memory_os.current_health.v10"
+
 type memory_alert_code =
   | Snapshot_read_error
   | Source_snapshot_read_error
@@ -707,7 +710,7 @@ let decode_memory_health_snapshot json =
   in
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "keeper.memory_os.current_health.v9"
+    if String.equal schema current_health_schema
     then Ok ()
     else Error ("unsupported memory health schema: " ^ schema)
   in
@@ -972,7 +975,7 @@ let decode_memory_health_row ~keeper json =
   in
   let* schema = required_string_field json "schema" in
   let* () =
-    if String.equal schema "keeper.memory_os.current_health.v9"
+    if String.equal schema current_health_schema
     then Ok ()
     else Error ("unsupported memory health schema: " ^ schema)
   in

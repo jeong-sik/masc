@@ -6,7 +6,7 @@
     network. *)
 
 module Pulls = Server_repository_pulls
-module Facts = Repository_pulls
+module Facts = Masc.Repository_pulls
 
 let failf = Alcotest.failf
 

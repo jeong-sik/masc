@@ -82,7 +82,7 @@ Goal 표시가 바뀌는 새 턴에서는 Agent Core System 바이트가 바뀐�
 이전 설계의 캐시 절감량을 수리 후 절감량으로 인용하지 않는다. Task 승인·거절 전달,
 실제 도구 실행, SDK의 signed Anthropic history 보존은 변경하지 않는다.
 
-- 변경 OCaml 파일 10개의 `ocamlc -stop-after parsing`과 `git diff --check`를 통과했다.
+- 변경 OCaml 파일 11개의 `ocamlc -stop-after parsing`과 `git diff --check`를 통과했다.
   사용한 compiler는 5.5.1이며 이 결과는 5.5.2 타입·빌드·실행 증명이 아니다.
 - 실제 HTTP wire 시험은 Read 두 번 뒤에도 같은 Goal 상태가 System에 있고,
   새 User 안내가 없으며 마지막 메시지가 tool인지를 검사하도록 바꿨다.

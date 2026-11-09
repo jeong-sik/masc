@@ -94,6 +94,7 @@
   keeper_turn_sandbox_runtime_start
   keeper_turn_sandbox_runtime_endpoint
   keeper_turn_sandbox_runtime_identity_refresh
+  keeper_turn_sandbox_runtime_exec
   keeper_approval_queue_registry
   keeper_approval_queue_persist
   keeper_approval_queue_load

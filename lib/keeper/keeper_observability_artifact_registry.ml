@@ -63,11 +63,7 @@ let entry = function
     { producer = "Keeper_agent_run_receipt"
     ; authority_source = "exact provider/tool terminal result"
     ; truth_role = Execution_evidence
-    ; consumers =
-        [ "Telemetry_unified"
-        ; "Dashboard_http_keeper_execution_receipt"
-        ; "Workspace_task_receipts"
-        ]
+    ; consumers = [ "Telemetry_unified"; "Dashboard_http_keeper_execution_receipt" ]
     ; retention = Dated_jsonl_operator_window
     }
   | Turn_record ->

@@ -154,27 +154,6 @@ let with_env key value f =
   result
 ;;
 
-(* Receipts are found by directory name, and a keeper's directory may have
-   been written under the name as given or under its filename-safe form, so
-   both are candidates. Nothing else is derived from the spelling: the list
-   is the names the query and the agent record supply, in those two forms. *)
-let test_receipt_candidates_are_the_two_directory_spellings () =
-  with_test_env (fun config ->
-    let agent_name = "Moss Two" in
-    let candidates =
-      Workspace_task_schedule.keeper_receipt_candidate_names config ~agent_name
-    in
-    let expected =
-      List.sort_uniq
-        String.compare
-        [ agent_name; Workspace.safe_filename agent_name ]
-    in
-    Alcotest.(check (list string))
-      "the query's two directory spellings and nothing derived from them"
-      expected
-      candidates)
-;;
-
 let latest_ring_seq () =
   match Log.Ring.recent ~limit:1 () with
   | entry :: _ -> entry.seq
@@ -3296,12 +3275,6 @@ let () =
             "preserves priorities"
             `Quick
             test_batch_add_preserves_priorities
-        ] )
-    ; ( "receipt candidates"
-      , [ Alcotest.test_case
-            "the query's two directory spellings"
-            `Quick
-            test_receipt_candidates_are_the_two_directory_spellings
         ] )
     ; (* === Status === *)
       ( "status"

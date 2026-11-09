@@ -1,0 +1,101 @@
+{
+  "captured_at": "2026-11-09T14:00:56.517802+00:00",
+  "kind": "actualChromium productioncomponent withsyntheticHTTP",
+  "source_commit": "cbd4d82af44b6a90f187c59e2a759a72b8ab0e4c",
+  "base": "e3e163a1c037202fb20d5b9fadfe228da3cf747a",
+  "browser": {
+    "task_space": 42,
+    "page": "p1",
+    "origin": "http://127.0.0.1:5193",
+    "css_viewport": [
+      1548,
+      990
+    ]
+  },
+  "captures": {
+    "observed.png": {
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser/observed.png",
+      "sha256": "71394ca4cda060775a6d21f4cf62c94374d1c1bab56d5ff0844bca90484c7471"
+    },
+    "observed.json": {
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser/observed.json",
+      "sha256": "4c3997df0947c6725f09234bea7b94bb8c9659f28ec486ff0eef884cfba00078"
+    },
+    "denied.png": {
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser/denied.png",
+      "sha256": "9d72409bf9a6743f6d3712cba5fc1e4859b1dc4bd4b4a1f5c2b661872c00298c"
+    },
+    "denied.json": {
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser/denied.json",
+      "sha256": "182a9c91149727ed022795438e61d46369b16223db1e841011557763ca4fa3d2"
+    },
+    "duplicate.png": {
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser/duplicate.png",
+      "sha256": "eddb9abb85f46cdbaa3b82704e9c4a9fa2d7d6bb5002d6f5e52d62820f097e37"
+    },
+    "duplicate.json": {
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser/duplicate.json",
+      "sha256": "c13ec4da6c30f5a13f85b41af43459548e566215a789a706c8a5edd32468300c"
+    },
+    "navigation.json": {
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser/navigation.json",
+      "sha256": "1d734d74a84d1e894d38f37b65e8994b89d8fd493acf2fc662b093d4d0684320"
+    },
+    "fixture.ts": {
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser/fixture.ts",
+      "sha256": "9f894876ad5e22920cace37407ddccfafd9c1fb64e3b4ec814f7184f04d17127"
+    },
+    "index.html": {
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser/index.html",
+      "sha256": "30ce6ef47162dfd335d492b241ed8d23ea9c9c88417ab363d211097306ae8be5"
+    },
+    "styles.ts": {
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser/styles.ts",
+      "sha256": "d5db3c79bfb45e8670410416d37bd2729b492cee6e3bf11e977ee9d78715c6de"
+    },
+    "tailwind.css": {
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser/tailwind.css",
+      "sha256": "54ac6c6c8184cc16a2ef1a5f9c60a2fff0b43d1c963fd318bce4740eb14e6238"
+    },
+    "vite.config.mjs": {
+      "original_path": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser/vite.config.mjs",
+      "sha256": "c78c9ddebd33a6b4e84cbf2b883363a1cec1540d13b88709b36b3d73f9b7b44b"
+    }
+  },
+  "source_files": {
+    "dashboard/src/api/dashboard-keeper-tool-calls.ts": {
+      "sha256": "efd89358ea456e4825d99350b0a2db3f2868e9fd6e32c9dfa0bffaaf0cfb287a",
+      "git_blob": "a84957252d4898bcd3420e205a7ae87067c28a9a"
+    },
+    "dashboard/src/components/keeper-turn-flow.ts": {
+      "sha256": "42604b1e77f180c54cfe0f72e732fa728b83c517a4ba4b5ea75b2479bf3f0de4",
+      "git_blob": "a4a11099d496b525e5c29df68dc7fcdcd70ce2b0"
+    },
+    "dashboard/src/components/common/route-link.ts": {
+      "sha256": "713acd076ca18eef5aa0f2e099b6d6e9878c5d57854e6fd33039b039b294fa11",
+      "git_blob": "6cc196a57133b750db95b13dace871df82664111"
+    },
+    "dashboard/src/components/board/board-route.ts": {
+      "sha256": "78b0d74988ca0e7697d45478938251fffe3ecc4028f7f5067f794b63c9404c97",
+      "git_blob": "a3a54c9d6f5c512ba9dbbcabb5f950699d6a6868"
+    },
+    "dashboard/src/api/keeper-turn-flow.ts": {
+      "sha256": "73d1f7d9f44fecb63f535252673733bae6812b81e99c5322fac903b32bcc4e9e",
+      "git_blob": "ffbac761b1f9aca29cfd7b72d114abbadbe659ad"
+    },
+    "dashboard/src/api/keeper-turn-source-outcomes.ts": {
+      "sha256": "278ad964a43bd65b905768086c27963409f9a7173b3ba392dbd89fbbfed24f5c",
+      "git_blob": "81e7534c264ccf7222c09c75d75a0e785ff6c60b"
+    },
+    "dashboard/src/api/keeper-physical-skill-evidence.ts": {
+      "sha256": "b1e34f2be3191acf07c7c94abe9c85d71741c9a4147facb2423e8448f7599b48",
+      "git_blob": "8d49b125a30c1d5e49be96f8ab8ad353235e92cd"
+    }
+  },
+  "limits": [
+    "Synthetic HTTP only; no livebackend/model/Board mutation orpermissionenforcement proof",
+    "No fullAppBoardread tested;actualRouteLinkhashverified only",
+    "NoOCamltype/build/behavior/CI/install/deployment proof",
+    "EarlierinitialmissingTailwindutilitiescapture retained inartifacts only, excluded fromreviewbundle"
+  ]
+}

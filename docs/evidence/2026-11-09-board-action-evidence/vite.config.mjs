@@ -1,0 +1,4 @@
+import { defineConfig } from 'vite'
+import preact from '@preact/preset-vite'
+import tailwindcss from '@tailwindcss/vite'
+export default defineConfig({plugins:[preact(),tailwindcss()],"root": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser", "base": "/", "cacheDir": "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser/vite-cache", "resolve": {"alias": {"@masc-dashboard": "/Users/dancer/me/workspace/yousleepwhen/masc-issue-26034-board-response/dashboard/src"}, "dedupe": ["preact", "htm", "@preact/signals"]}, "server": {"host": "127.0.0.1", "port": 5193, "strictPort": true, "fs": {"allow": ["/Users/dancer/me/workspace/yousleepwhen/masc-issue-26034-board-response/dashboard", "/Users/dancer/me/workspace/yousleepwhen/masc/artifacts/issue-campaign-20261109/26034-browser"]}}})

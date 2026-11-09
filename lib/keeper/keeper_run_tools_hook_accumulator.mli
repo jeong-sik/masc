@@ -5,6 +5,9 @@ type hook_accumulator =
   { mutable meta : Keeper_meta_contract.keeper_meta
   ; mutable tool_calls : Keeper_agent_result.tool_call_detail list
     (** This invocation's executed calls only, newest first. *)
+  ; mutable committed_inline_execution_ids_rev : Ids.Execution_id.t list option
+    (** Committed inline child rows, newest first. [None] seals the collector
+        after the turn takes its execution identities. *)
   ; mutable current_turn : int
   ; mutable tool_surface : Keeper_agent_tool_surface.tool_surface_metrics
   ; mutable requested_tool_names : string list
@@ -34,6 +37,23 @@ val extra_system_context_receipt :
 
 val record_requested_tool_names :
   hook_accumulator -> string list -> unit
+
+val record_inline_receipt_committed :
+  hook_accumulator ->
+  keeper_turn_id:int ->
+  keeper_name:string ->
+  turn_context:Keeper_tool_call_log_context.turn_context ->
+  Ids.Execution_id.t -> unit
+(** Bind the accumulator's current Keeper and trace plus this absolute turn.
+    The returned callback accepts only committed inline rows with that exact
+    source identity, and ignores calls after {!take_execution_ids}. *)
+
+val take_execution_ids :
+  hook_accumulator ->
+  trajectory_execution_ids:Ids.Execution_id.t list ->
+  Ids.Execution_id.t list
+(** Seal the inline collector and form a stable union: trajectory order first,
+    then committed child observation order, keeping each identity once. *)
 
 (** Add the after_turn hook's response's wire [cache_n] / [prompt_n] to
     [wire_prompt_tokens]. A response that does not report both adds nothing. *)

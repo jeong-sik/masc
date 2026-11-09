@@ -89,7 +89,11 @@ malformed facts and read failures remain explicit. A committed write may
 coexist with a failed tool response. Same-turn actions do not establish a
 single stimulus's causality or a deliberate no-action decision; no new
 settlement authority is introduced. Board navigation retains its own reader
-permissions.
+permissions. The TurnRecord producer adds inline composition child IDs only
+after their canonical rows commit, using the run's exact Keeper, trace and
+absolute turn. It seals that collector when the turn takes the stable union
+with its direct trajectory IDs. Async completions after settlement do not
+amend an already finished TurnRecord.
 
 Fusion is asynchronous. The UI shows every panel result/failure followed by the
 Judge result. It never treats minimum answer count, majority, cost, or timeout

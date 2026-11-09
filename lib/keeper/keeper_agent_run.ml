@@ -2013,15 +2013,15 @@ let run_turn
            ()
        in
        (* RFC-0233 PR-3: TurnRecord — same per-keeper-turn cadence as the
-          receipt above. execution_ids come from the trajectory
-          accumulator (every entry of this run carries the id minted at
-          the dispatch boundary); sampling reads the last agent-core turn's
-          effective values from the turn context cell. *)
+          receipt above. Trajectory IDs cover direct calls; committed inline
+          child rows contribute their own canonical IDs from this run's scoped
+          collector. Sampling reads the last agent-core turn's effective values
+          from the turn context cell. *)
        (let tctx =
           Keeper_tool_call_log_context.get_turn_context_record
             ~cell:turn_ctx_cell ()
         in
-        let execution_ids =
+        let trajectory_execution_ids =
           match trajectory_acc with
           | None -> []
           | Some tacc ->
@@ -2031,6 +2031,10 @@ let run_turn
                  (fun (e : Trajectory.tool_call_entry) ->
                     Option.map Ids.Execution_id.of_string e.execution_id)
                  tacc.Trajectory.entries)
+        in
+        let execution_ids =
+          Keeper_run_tools_hook_accumulator.take_execution_ids acc
+            ~trajectory_execution_ids
         in
         let usage : Turn_record.usage =
           match turn_result with

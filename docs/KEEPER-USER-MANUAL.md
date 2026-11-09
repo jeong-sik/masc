@@ -880,11 +880,13 @@ absolute turn together — rather than joining nearby timestamps.
   another business result. Conflicting receipts remain unresolved.
 - **Board comments and reactions** links the writer-recorded comment, parent
   reply and reaction target, including reaction removal. It reads the selected
-  turn's exact executions beyond the recent-call window and requires the
+  turn's exact executions, including committed inline Skill children, beyond
+  the recent-call window and requires the
   existing Admin permission for raw tool records. These are same-turn actions;
   they do not establish which input caused each action. Missing or malformed
   facts, including older records without this evidence, remain unconfirmed.
-  No-action intent is not inferred from missing writes.
+  No-action intent is not inferred from missing writes. Async work completed
+  after the turn is not backfilled into that finished turn's actions.
 - **Runtime choices** shows the same turn's manifest events and recorded routing
   reasons. Multiple starts remain ambiguous; incomplete or damaged scans cannot
   establish that a start was unique.

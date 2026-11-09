@@ -1,11 +1,9 @@
-(** Activity_graph — event storage and graph building. *)
+(** Activity_graph — event storage. *)
 
 (* Re-export sub-modules *)
 include Activity_graph_types
 include Activity_graph_registry
-include Activity_graph_reducer
 
-module StringMap = Set_util.StringMap
 module StringSet = Set_util.StringSet
 
 (* ================================================================ *)
@@ -295,9 +293,8 @@ type cache_stats = {
 }
 
 (* P0-4 (masc perf root-cause report, 2026-07-15, item (1)): the 2s
-   [Dashboard_snapshot.refresh_loop] calls [read_all_events] up to 3x per
-   tick — [json_response], [graph_json], and [agent_spans_json] each call
-   [list_events_with_meta] / [list_events_with_total] independently — and
+   [Dashboard_snapshot.refresh_loop] and every non-default HTTP query call
+   [list_events_with_meta] independently, and
    every call full-reparsed the current-day JSONL via
    [parse_events_from_file] (measured 1.2 MB typical, 23 MB peak; Yojson
    lexing dominated idle CPU). Past-day files already get incremental
@@ -306,10 +303,10 @@ type cache_stats = {
    [Telemetry_unified.trajectory_summary_cache] (telemetry_unified.ml
    ~L791-847) and [Dated_jsonl.file_count_cache] (dated_jsonl.ml
    ~L537-598) to the current-day file. Unlike those two (which cache an
-   aggregate), this caches the *parsed event list* itself, since all
-   three payload builders need the raw events, not just a count — so
-   caching here transparently de-duplicates all 3 per-tick calls (and any
-   non-default HTTP query) without threading a shared value through
+   aggregate), this caches the *parsed event list* itself, since the
+   readers need the raw events, not just a count — so
+   caching here transparently de-duplicates the per-tick call and any
+   non-default HTTP query without threading a shared value through
    [Dashboard_snapshot.compute]. *)
 type current_day_entry = {
   cd_fingerprint : file_fingerprint;
@@ -820,22 +817,20 @@ let read_recent_events config ~limit =
          |> List.sort (fun (a : event) (b : event) -> Int.compare a.seq b.seq)))
 ;;
 
-let list_events_with_meta config ?(kinds = []) ~after_seq ~limit ?keep
-    ?since_ms () =
+let list_events_with_meta config ?(kinds = []) ~after_seq ~limit ?keep () =
   let filtered =
     after_seq > 0
     || kinds <> []
     || Option.is_some keep
-    || Option.is_some since_ms
   in
   if not filtered
   then (
-    (* The three default dashboard projections land here: the whole store, no
-       kind, no cursor, no time bound, and a page of the newest 500 or 1000.
-       Reading only the files that cover those, and counting the rest rather
-       than parsing them, is what keeps the first read after a restart off
-       the whole store. A filtered read still needs everything, because a
-       kind or a time bound can match an event of any age. *)
+    (* The default events page lands here: the whole store, no kind, no
+       cursor, and a page of the newest 1000. Reading only the files that
+       cover it, and counting the rest rather than parsing them, is what
+       keeps the first read after a restart off the whole store. A
+       filtered read still needs everything, because a kind or a keep
+       predicate can match an event of any age. *)
     let recent = read_recent_events config ~limit in
     let recent_count = List.length recent in
     let page =
@@ -855,10 +850,7 @@ let list_events_with_meta config ?(kinds = []) ~after_seq ~limit ?keep
       |> List.filter (fun value ->
              value.seq > after_seq
              && matches_filters ~kinds value
-             && (match keep with None -> true | Some keep -> keep value)
-             && (match since_ms with
-                 | None -> true
-                 | Some ms -> value.ts_ms >= ms))
+             && (match keep with None -> true | Some keep -> keep value))
     in
     let total = List.length all in
     let page =
@@ -869,30 +861,11 @@ let list_events_with_meta config ?(kinds = []) ~after_seq ~limit ?keep
     in
     (page, total, latest_store_seq, max_event_seq all))
 
-(** Returns [(page, total_matching)] where [total_matching] is the count
-    of all events matching filters before [limit] is applied. *)
-let list_events_with_total config ?(kinds = []) ~after_seq ~limit
-    ?since_ms () =
-  let page, total, _latest_store_seq, _latest_matching_seq =
-    list_events_with_meta config ~kinds ~after_seq ~limit ?since_ms ()
-  in
-  (page, total)
-
 let list_events config ?(kinds = []) ~after_seq ~limit ~keep () =
   let page, _total, _latest_store_seq, _latest_matching_seq =
     list_events_with_meta config ~kinds ~after_seq ~limit ~keep ()
   in
   page
-
-let window_meta ~limit ~events_shown ~events_store_total
-    ?(extra = []) () : Yojson.Safe.t =
-  `Assoc ([
-    ("limit", `Int limit);
-    ("events_shown", `Int events_shown);
-    ("events_store_total", `Int events_store_total);
-    ("has_more", `Bool (events_store_total > events_shown));
-  ] @ extra)
-
 
 let activity_events_store_path config = root_dir config
 
@@ -997,143 +970,6 @@ let json_response config ?(kinds = []) ~after_seq ~limit () =
   in
   build_json_response config ~events ~total_matching ~latest_store_seq
     ~latest_matching_seq ~after_seq ~limit ~kinds
-;;
-
-(* ================================================================ *)
-(* Graph building                                                   *)
-(* ================================================================ *)
-
-let build_graph_json ~events ~events_store_total ~limit ~timeline_limit
-    ?(kinds = []) () =
-  let kind_counts_json =
-    let counts =
-      List.fold_left
-        (fun acc (e : event) ->
-          let prev = StringMap.find_opt e.kind acc |> Option.value ~default:0 in
-          StringMap.add e.kind (prev + 1) acc)
-        StringMap.empty
-        events
-    in
-    `Assoc
-      (StringMap.fold
-         (fun kind count acc -> (kind, `Int count) :: acc)
-         counts []
-      |> List.sort (fun (a, _) (b, _) -> String.compare a b))
-  in
-  let heatmap_json =
-    let matrix = Array.init 7 (fun _ -> Array.make 24 0) in
-    let max_count = ref 0 in
-    List.iter
-      (fun (e : event) ->
-        let tm = Unix.localtime (float_of_int e.ts_ms /. 1000.0) in
-        let day = if tm.tm_wday = 0 then 6 else tm.tm_wday - 1 in
-        let hour = tm.tm_hour in
-        let next_count = matrix.(day).(hour) + 1 in
-        matrix.(day).(hour) <- next_count;
-        if next_count > !max_count then max_count := next_count)
-      events;
-    let matrix_json =
-      `List
-        (Array.to_list
-           (Array.map
-              (fun row ->
-                `List
-                  (Array.to_list
-                     (Array.map (fun count -> `Int count) row)))
-              matrix))
-    in
-    `Assoc
-      [
-        ("matrix", matrix_json);
-        ("max", `Int !max_count);
-        ("total", `Int (List.length events));
-      ]
-  in
-  let nodes = Hashtbl.create 64 in
-  let edges = Hashtbl.create 96 in
-  List.iter (reduce_event ~nodes ~edges) events;
-  let node_list =
-    Hashtbl.fold (fun _ node acc -> node :: acc) nodes []
-    |> List.sort (fun a b -> String.compare a.node_id b.node_id)
-  in
-  let edge_list =
-    Hashtbl.fold (fun _ edge acc -> edge :: acc) edges []
-    |> List.sort (fun a b -> String.compare a.edge_id b.edge_id)
-  in
-  let nodes_json =
-    List.map
-      (fun node ->
-        graph_node_to_yojson
-          {
-            id = node.node_id;
-            kind = node.node_kind;
-            label = node.label;
-            status = node.status;
-            weight = node.weight;
-            last_event_at = node.last_event_at;
-            meta = node.meta;
-          })
-      node_list
-  in
-  let edges_json =
-    List.map
-      (fun edge ->
-        graph_edge_to_yojson
-          {
-            id = edge.edge_id;
-            source = edge.source;
-            target = edge.target;
-            kind = edge_kind_to_wire edge.edge_kind;
-            weight = edge.weight;
-            active = edge.active;
-            last_event_at = edge.last_event_at;
-            meta = edge.meta;
-          })
-      edge_list
-  in
-  let timeline =
-    let total = List.length events in
-    events |> List.drop (max 0 (total - timeline_limit))
-  in
-  let count_kind kind =
-    List.length
-      (List.filter (fun node -> String.equal node.node_kind kind) node_list)
-  in
-  (* No node status marks an agent inactive, so every agent node is active. *)
-  let agent_count = count_kind "agent" in
-  `Assoc
-    [
-      ("generated_at", `String (Masc_domain.now_iso ()));
-      ( "window",
-        window_meta ~limit
-          ~events_shown:(List.length events)
-          ~events_store_total
-          ~extra:[
-            ("kinds", `List (List.map (fun value -> `String value) kinds));
-          ] () );
-      ( "stats",
-        `Assoc
-          [
-            ("event_count", `Int (List.length events));
-            ("edge_count", `Int (List.length edges_json));
-            ("agent_count", `Int agent_count);
-            ("task_count", `Int (count_kind "task"));
-            ("active_agents", `Int agent_count);
-          ] );
-      ("kind_counts", kind_counts_json);
-      ("heatmap", heatmap_json);
-      ("nodes", `List nodes_json);
-      ("edges", `List edges_json);
-      ("timeline", `List (List.map event_to_yojson timeline));
-    ]
-;;
-
-let graph_json config ?(kinds = []) ?(limit = 500)
-    ?(timeline_limit = 80) ?since_ms () =
-  let events, events_store_total =
-    list_events_with_total config ~kinds ~after_seq:0 ~limit ?since_ms ()
-  in
-  build_graph_json ~events ~events_store_total ~limit ~timeline_limit ~kinds ()
 ;;
 
 module For_testing = struct

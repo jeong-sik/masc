@@ -148,14 +148,19 @@ let read_all ic =
    with End_of_file -> ());
   Buffer.contents buf
 
+(* [Sys.is_directory] stats through a link, so a directory alias is walked into
+   and then refused by [Unix.rmdir] (ENOTDIR); a dangling link reads false from
+   [Sys.file_exists] and is skipped, leaving the parent non-empty (#26648). The
+   credential fixture below builds loop links exactly this way, so the cleanup
+   must read each entry with [Unix.lstat] and remove only the link. *)
 let rec rm_rf path =
-  if Sys.file_exists path then
-    if Sys.is_directory path then begin
-      Sys.readdir path
-      |> Array.iter (fun name -> rm_rf (Filename.concat path name));
-      Unix.rmdir path
-    end else
-      Sys.remove path
+  match Unix.lstat path with
+  | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> ()
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Sys.readdir path
+    |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+    Unix.rmdir path
+  | _ -> Sys.remove path
 
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
@@ -6959,6 +6964,37 @@ let test_periodic_task_gc_archives_only_stale_terminal_tasks () =
       true (Sys.file_exists sentinel))
 ;;
 
+(* The credential fixture builds loop links ([path] at itself) that only the
+   cleanup has to finish once the fixture's own unlink step is gone. Both shapes
+   are exercised here: a link at a path and a link at a directory, plus a second
+   process-wide loop, and the outside target is checked to survive (#26648). *)
+let test_rm_rf_unlinks_symlinks () =
+  let fresh_dir prefix =
+    let path = Filename.temp_file prefix "" in
+    Sys.remove path;
+    Unix.mkdir path 0o755;
+    path
+  in
+  let dir = fresh_dir "bootstrap-rm-rf" in
+  let kept_dir = fresh_dir "bootstrap-rm-rf-kept" in
+  Fun.protect
+    ~finally:(fun () ->
+      rm_rf dir;
+      rm_rf kept_dir)
+  @@ fun () ->
+  let kept = Filename.concat kept_dir "kept" in
+  write_file kept "kept";
+  let loop = Filename.concat dir "loop" in
+  Unix.symlink loop loop;
+  let root = Filename.concat dir "root" in
+  Unix.mkdir root 0o755;
+  Unix.symlink kept_dir (Filename.concat root "live_link");
+  Unix.symlink (Filename.concat dir "gone") (Filename.concat root "dangling");
+  rm_rf dir;
+  Alcotest.(check bool) "the tree is gone" false (Sys.file_exists dir);
+  Alcotest.(check bool) "the link target survived" true (Sys.file_exists kept);
+  Alcotest.(check string) "the link target kept its contents" "kept" (read_file kept)
+
 let () =
   install_suite_watchdog ();
   Eio_main.run @@ fun env ->
@@ -6966,6 +7002,10 @@ let () =
   Eio_guard.enable ();
   Alcotest.run "Server_runtime_bootstrap"
     [
+      ( "temp directory cleanup",
+        [ Alcotest.test_case "rm_rf unlinks loop, live and dangling links" `Quick
+            test_rm_rf_unlinks_symlinks
+        ] );
       ( "periodic task gc",
         [ Alcotest.test_case "archives only stale terminal tasks" `Quick
             test_periodic_task_gc_archives_only_stale_terminal_tasks

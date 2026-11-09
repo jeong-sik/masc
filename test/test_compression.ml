@@ -1,70 +1,8 @@
-(** Test suite for compression: the backend ZSTD frame reader, the zstd
-    codec, and the gzip codec with HTTP content negotiation. *)
+(** Test suite for compression: the zstd codec and the gzip codec with HTTP
+    content negotiation. *)
 
-(* ===== Backend Compression Tests ===== *)
-
-module BackendCompression = Backend.Compression
 module Compression_codec = Compression_codec
 module Http_response_payload = Masc.Http_response_payload
-
-let test_backend_compress_skip_small () =
-  let small = "tiny" in  (* <32 bytes, below min_dict_size *)
-  let (result, _used_dict, did_compress) = BackendCompression.compress small in
-  Alcotest.(check bool) "small data not compressed" false did_compress;
-  Alcotest.(check string) "data unchanged" small result
-
-let test_backend_compress_large () =
-  let large = String.make 1000 'x' in  (* Highly compressible *)
-  let (result, _used_dict, did_compress) = BackendCompression.compress large in
-  Alcotest.(check bool) "large data compressed" true did_compress;
-  Alcotest.(check bool) "smaller than original" true (String.length result < 1000)
-
-let test_backend_roundtrip () =
-  (* A frame as an earlier version stored it: compress, prepend the
-     header, read it back through decompress_auto. *)
-  let original = String.init 500 (fun i -> Char.chr (65 + (i mod 26))) in
-  let payload, used_dict, did_compress = BackendCompression.compress original in
-  Alcotest.(check bool) "input is compressed" true did_compress;
-  let framed =
-    BackendCompression.encode_with_header ~used_dict (String.length original) payload
-  in
-  Alcotest.(check string) "decompress_auto restores the original" original
-    (BackendCompression.decompress_auto framed)
-
-let test_backend_non_compressed_passthrough () =
-  let plain = "This is plain text without ZSTD header" in
-  let result = BackendCompression.decompress_auto plain in
-  Alcotest.(check string) "non-compressed unchanged" plain result
-
-let test_backend_decompress_failure () =
-  let result = BackendCompression.decompress
-      ~orig_size:128
-      "not-a-valid-zstd-payload"
-  in
-  Alcotest.(check (option string)) "invalid payload returns none" None result
-
-let backend_tests = [
-  "skip small data", `Quick, test_backend_compress_skip_small;
-  "compress large data", `Quick, test_backend_compress_large;
-  "roundtrip", `Quick, test_backend_roundtrip;
-  "non-compressed passthrough", `Quick, test_backend_non_compressed_passthrough;
-  "decompress failure", `Quick, test_backend_decompress_failure;
-]
-
-
-(* ===== Compression Threshold Tests ===== *)
-
-let test_threshold_backend () =
-  (* Now uses dictionary compression with lower threshold *)
-  Alcotest.(check int) "backend min_size" 32 BackendCompression.min_size
-
-let test_default_level () =
-  Alcotest.(check int) "backend level" 3 BackendCompression.default_level
-
-let threshold_tests = [
-  "backend min_size", `Quick, test_threshold_backend;
-  "default compression level", `Quick, test_default_level;
-]
 
 let test_codec_encoding_tokens () =
   Alcotest.(check string) "standard encoding"
@@ -82,6 +20,25 @@ let test_codec_compress_large () =
       Alcotest.(check string) "encoding token"
         "zstd" (Compression_codec.content_encoding encoding)
 
+let test_codec_compress_skips_small () =
+  let small = "tiny" in
+  match Compression_codec.compress small with
+  | Compression_codec.Unchanged payload ->
+      Alcotest.(check string) "data unchanged" small payload
+  | Compression_codec.Compressed _ ->
+      Alcotest.fail "input below min_size must not be compressed"
+
+let test_codec_round_trip () =
+  let original = String.init 500 (fun i -> Char.chr (65 + (i mod 26))) in
+  match Compression_codec.compress original with
+  | Compression_codec.Unchanged _ ->
+      Alcotest.fail "expected the 500-byte input to compress"
+  | Compression_codec.Compressed { payload; _ } ->
+      (match Compression_codec.decompress ~orig_size:(String.length original) payload with
+       | Ok restored ->
+           Alcotest.(check string) "decompress restores the input" original restored
+       | Error message -> Alcotest.failf "decompress failed: %s" message)
+
 let test_codec_decompress_failure () =
   match Compression_codec.decompress
           ~orig_size:256
@@ -93,6 +50,8 @@ let test_codec_decompress_failure () =
 let codec_tests = [
   "encoding tokens", `Quick, test_codec_encoding_tokens;
   "compress large", `Quick, test_codec_compress_large;
+  "compress skips small", `Quick, test_codec_compress_skips_small;
+  "round trip", `Quick, test_codec_round_trip;
   "decompress failure", `Quick, test_codec_decompress_failure;
 ]
 
@@ -268,8 +227,6 @@ let gzip_tests = [
 
 let () =
   Alcotest.run "Compression" [
-    "Backend", backend_tests;
-    "Thresholds", threshold_tests;
     "Codec", codec_tests;
     "Gzip", gzip_tests;
   ]

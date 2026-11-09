@@ -4,14 +4,8 @@
     - Eio.Path for file operations
     - Eio.Mutex for concurrency control
 
-    Values are stored as given. A value that an earlier version stored
-    with a ZSTD / ZSTDD header is decoded on read (see
-    {!Backend_compression}).
+    Values are stored and read as given.
 *)
-
-(** {1 Compression} *)
-
-module Compression = Backend_compression
 
 (** {1 Types} *)
 
@@ -256,16 +250,6 @@ module FileSystem = struct
                 raise exn)
     | None -> ()
 
-  let has_zstd_header content =
-    String.starts_with content ~prefix:"ZSTD"
-
-  let decompress_with_context ~context content =
-    let had_header = has_zstd_header content in
-    let decompressed = Compression.decompress_auto content in
-    if had_header && String.equal decompressed content then
-      Log.Backend.warn "[EioFS] decompress fallback for %s" context;
-    decompressed
-
   (* eio_posix issues regular-file writev on the calling scheduler thread.
      Keep path resolution and lifetime under the original capability/switch,
      but pin its descriptor while the blocking payload write runs elsewhere.
@@ -280,7 +264,7 @@ module FileSystem = struct
           Eio_unix.Fd.use_exn "backend-save-payload" fd (fun unix_fd ->
             write_all_substring unix_fd content 0 (String.length content))))
 
-  (** Get value by key (auto-decompresses ZSTD if detected).
+  (** Get value by key.
 
       Reads run lock-free: writers in this module go through a sibling
       [.tmp-atomic] file and [Eio.Path.rename] into place (see [set] and
@@ -292,11 +276,7 @@ module FileSystem = struct
       write cycle. *)
   let get t key =
     let* path = key_to_path t key in
-    try
-      let content = Eio.Path.load path in
-      (* Values stored before compression was turned off carry a ZSTD header. *)
-      let decompressed = decompress_with_context ~context:key content in
-      Ok decompressed
+    try Ok (Eio.Path.load path)
     with
     | Eio.Io (Eio.Fs.E (Eio.Fs.Not_found _), _) ->
         Error (NotFound key)
@@ -917,9 +897,7 @@ module FileSystem = struct
           let buf = Bytes.create size in
           let n = Unix.read fd buf 0 size in
           if n = 0 then None
-          else
-            let raw = Bytes.sub_string buf 0 n in
-            Some (decompress_with_context ~context:path_str raw)
+          else Some (Bytes.sub_string buf 0 n)
         end
       in
       let new_content = f current in

@@ -72,79 +72,6 @@ let test_validate_ttl_boundary () =
   check int "TTL at min boundary" 1 (Backend_types.validate_ttl 1)
 
 (* ============================================================ *)
-(* Backend.ml - Compression Tests                            *)
-(* ============================================================ *)
-
-let test_compression_small_data () =
-  let data = "hello" in
-  let (compressed, used_dict, did_compress) = Backend.Compression.compress data in
-  (* Small data should not be compressed *)
-  check bool "small data not compressed" false did_compress;
-  check string "small data unchanged" data compressed;
-  check bool "no dict used" false used_dict
-
-let test_compression_large_data () =
-  (* Create data larger than min_size (32 bytes) *)
-  let data = String.make 100 'a' in
-  let (compressed, _used_dict, did_compress) = Backend.Compression.compress data in
-  check bool "large data compressed" true did_compress;
-  check bool "compressed smaller" true (String.length compressed < String.length data)
-
-let test_compression_uncompressed_passthrough () =
-  let data = "short" in
-  let result = Backend.Compression.decompress_auto data in
-  check string "uncompressed passthrough" data result
-
-let test_compression_encode_header () =
-  (* Test header encoding with dictionary *)
-  let orig_size = 1000 in
-  let compressed = "compressed_data" in
-
-  let with_dict = Backend.Compression.encode_with_header ~used_dict:true orig_size compressed in
-  check bool "dict header starts with ZSTDD" true (String.sub with_dict 0 5 = "ZSTDD");
-
-  let without_dict = Backend.Compression.encode_with_header ~used_dict:false orig_size compressed in
-  check bool "std header starts with ZSTD" true (String.sub without_dict 0 4 = "ZSTD")
-
-let test_compression_decode_header () =
-  (* Test header decoding *)
-  let orig = 100 in
-  let data = "test_compressed" in
-
-  (* With dictionary *)
-  let encoded_dict = Backend.Compression.encode_with_header ~used_dict:true orig data in
-  (match Backend.Compression.decode_header encoded_dict with
-  | Some (size, _, used_dict) ->
-      check int "decoded size" orig size;
-      check bool "decoded used_dict" true used_dict
-  | None -> fail "decode_header failed for dict");
-
-  (* Without dictionary *)
-  let encoded_std = Backend.Compression.encode_with_header ~used_dict:false orig data in
-  match Backend.Compression.decode_header encoded_std with
-  | Some (size, _, used_dict) ->
-      check int "decoded size std" orig size;
-      check bool "decoded used_dict std" false used_dict
-  | None -> fail "decode_header failed for std"
-
-let test_compression_invalid_header () =
-  (* Test with data that doesn't have a valid header *)
-  let result = Backend.Compression.decode_header "short" in
-  check bool "short data returns None" true (Option.is_none result);
-
-  let result2 = Backend.Compression.decode_header "INVALID_HEADER_DATA" in
-  check bool "invalid header returns None" true (Option.is_none result2);
-
-  (* "ZSTD" followed by a byte that is neither NUL nor 'D' is not a frame the
-     writer produces, so it is not a header. *)
-  let result3 = Backend.Compression.decode_header "ZSTDX\x00\x00\x00\x64payload" in
-  check bool "ZSTD + non-NUL fifth byte returns None" true (Option.is_none result3);
-
-  (* A bare 8-byte prefix is shorter than the 9-byte frame. *)
-  let result4 = Backend.Compression.decode_header "ZSTD\x00\x00\x00\x64" in
-  check bool "8-byte prefix returns None" true (Option.is_none result4)
-
-(* ============================================================ *)
 (* Backend.ml - Lock Operations                              *)
 (* ============================================================ *)
 
@@ -448,14 +375,6 @@ let () =
       test_case "normal TTL" `Quick test_validate_ttl_normal;
       test_case "large TTL" `Quick test_validate_ttl_large;
       test_case "boundary TTL" `Quick test_validate_ttl_boundary;
-    ];
-    "eio_compression", [
-      test_case "small data" `Quick test_compression_small_data;
-      test_case "large data" `Quick test_compression_large_data;
-      test_case "uncompressed passthrough" `Quick test_compression_uncompressed_passthrough;
-      test_case "encode header" `Quick test_compression_encode_header;
-      test_case "decode header" `Quick test_compression_decode_header;
-      test_case "invalid header" `Quick test_compression_invalid_header;
     ];
     "eio_locks", [
       test_case "acquire" `Quick test_eio_lock_acquire;

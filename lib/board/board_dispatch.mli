@@ -417,7 +417,8 @@ val get_comments : reader:Board_access.reader ->
 val require_persisted_sources_readable : unit -> (unit, Board.board_error) result
 (** Evidence requires complete post/comment source loads. Complete thread and
     comment-list queries also refuse partial sources; display observations can
-    retain rows with explicit incompleteness. *)
+    retain rows with explicit incompleteness. Errors use the public-safe read
+    projection; raw source diagnostics remain with their internal owner. *)
 
 val get_post_and_comments : reader:Board_access.reader ->
   post_id:string ->

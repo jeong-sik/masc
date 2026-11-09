@@ -759,6 +759,8 @@ let require_persisted_sources_readable () =
         let open Result.Syntax in
         let* () = Board.require_posts_source_readable store in
         Board.require_comments_source_readable store)
+      |> Result.map_error (fun error ->
+          Board.board_error_of_read_error (Board.Read_source_unavailable error))
 
 let get_post_and_comments_unchecked ~post_id =
   let store = backend () in

@@ -284,21 +284,6 @@ type memory_context_projection =
   ; stalled_row : (int * string) option
   }
 
-let memory_state_text ~ko keeper =
-  let korean, english = match memory_state keeper with
-    | Memory_ordinary -> "기억 관측됨", "memory observed"
-    | Memory_warning -> "보고된 주의", "warning reported"
-    | Memory_degraded -> "Librarian 실패", "Librarian failed"
-    | Memory_no_current -> "스냅샷 없음", "no snapshot"
-    | Memory_source_only -> "출처 기억만 있음", "source memory only"
-    | Memory_starving -> "스냅샷 없음 · 처리 실패", "no snapshot; processing failed"
-    | Memory_read_error -> "기억 읽기 실패", "memory read failed"
-  in
-  if ko then korean else english
-
-let memory_operator_state (state : state) keeper =
-  memory_state_text ~ko:(state.ui_language = Lang_ko) keeper
-
 let memory_pass_text ~ko ending =
   if not ko then Masc_tui_keeper_memory_reading.pass_word ending
   else match ending with
@@ -306,10 +291,27 @@ let memory_pass_text ~ko ending =
     | Pass_lane_unconfigured -> "처리 레인 없음"
     | Pass_drained -> "현재까지 처리됨"
     | Pass_yielded_to_waiting_unit -> "대기 중인 처리에 양보"
-    | Pass_pending -> "처리 대기"
+    | Pass_pending _ -> "처리 대기"
     | Pass_not_committed -> "저장 없음"
     | Pass_stopped _ -> "중단됨"
     | Pass_raised _ -> "처리 실패"
+
+let memory_state_text ~ko keeper =
+  let text korean english = if ko then korean else english in
+  let pass () = match keeper.mkh_librarian.mlh_state with
+    | Some ending -> memory_pass_text ~ko ending
+    | None -> text "처리 결과 미관측" "pass not observed" in
+  match memory_state keeper with
+  | Memory_ordinary -> text "기억 관측됨" "memory observed"
+  | Memory_warning -> text "보고된 주의" "warning reported"
+  | Memory_degraded -> "Librarian " ^ pass ()
+  | Memory_no_current -> text "스냅샷 없음" "no snapshot"
+  | Memory_source_only -> text "출처 기억만 있음" "source memory only"
+  | Memory_starving -> text "스냅샷 없음 · " "no snapshot; " ^ "Librarian " ^ pass ()
+  | Memory_read_error -> text "기억 읽기 실패" "memory read failed"
+
+let memory_operator_state (state : state) keeper =
+  memory_state_text ~ko:(state.ui_language = Lang_ko) keeper
 
 let memory_librarian_stalled_lines ~ko (librarian : memory_librarian_health) =
   let text korean english = if ko then korean else english in

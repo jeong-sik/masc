@@ -147,7 +147,23 @@ let axis_now_glyph = filled_dot
 let axis_next_glyph = "\xe2\x96\xb9" (* ▹ *)
 let pulse_header = Printf.sprintf "%s %dh" axis_before_glyph pulse_hours
 let axis_now_header = axis_now_glyph ^ " now"
-let axis_next_header = axis_next_glyph ^ " next"
+
+(* The grid of the views (RFC-0515 §2.4). The row marks are the marks the
+   list already draws for the same readings. *)
+let grid_gutter_glyph = "\xe2\x96\x8c" (* ▌ *)
+let grid_now_line = "\xe2\x94\x83" (* ┃ *)
+let grid_dot_mark = pulse_quiet_mark
+let grid_failing_mark = health_glyph Reading.Health_failing
+let grid_paused_mark = paused_glyph
+let grid_recovered_mark = pulse_ok_mark
+let grid_ok_mark = filled_dot
+let grid_late_word = "late"
+let grid_held_word = "held"
+let grid_keeper_header = "keeper"
+let grid_due_header = "due"
+let grid_lag_header = "lag"
+let grid_pulse_header ~window = axis_before_glyph ^ " " ^ window
+let grid_next_header ~window = "next " ^ axis_next_glyph ^ " " ^ window
 
 (* The memory and age views put values of their own in the same three cells. *)
 let header_words words = String.concat " \xc2\xb7 " words (* · *)
@@ -175,12 +191,19 @@ let column_legend =
     , "time since it last moved: the open turn's latest update (its start before it \
        reports one), else the later of its last turn and the start of its wait" )
   ; "LIFECYCLE", "the keeper process"
-  ; ( String.concat " " [ pulse_header; axis_now_header; axis_next_header ]
-    , "every view but the list draws a keeper on one axis row. The memory and age views \
-       pick their own cells; the others draw its turn pulse, its NOW cell, then what \
-       comes next -- what it waits on a person for, the next scheduled run, the next \
-       dispatch path and the librarian lag. With two lines only a failing keeper adds a \
-       second line" )
+  ; ( String.concat " "
+        [ axis_before_glyph; grid_now_line; axis_now_header; grid_now_line
+        ; "next " ^ axis_next_glyph; grid_due_header; grid_lag_header ]
+    , Printf.sprintf
+        "every view but the list draws a keeper on the same columns, fixed from the right \
+         edge so the %s lines stand in one column: the row mark (%s failing, %s paused, %s \
+         recovered in the cause view, %s the rest), the name, the turn pulse, the NOW cell, \
+         the half hours ahead, the next scheduled run (its time within a day, %s, %s, %s%s \
+         from an earlier reading, %s unknown) and the librarian's unread turns with a level \
+         against the keeper furthest behind. The memory and age views pick their own cells. \
+         With two lines only a failing keeper adds a second line"
+        grid_now_line grid_failing_mark grid_paused_mark grid_recovered_mark grid_ok_mark
+        grid_late_word grid_held_word grid_held_word unknown_mark unknown_mark )
   ; ( String.concat " " [ pulse_header; librarian_header; lag_digest_gap_header ]
     , Printf.sprintf
         "the memory view: the turn pulse, how the librarian's last pass ended, then the \
@@ -217,15 +240,15 @@ let column_legend =
         "resting path: relative duration (제공자 stated / 상한 bounded); in DETAIL %s prefixes next candidate after turn failure"
         axis_next_glyph )
   ; ( badge_glyph Badge_schedule
-    , Printf.sprintf "next scheduled run or hold status (Detailed second row, and %s in the views)"
-        axis_next_header )
+    , Printf.sprintf "next scheduled run or hold status (Detailed second row; %s in the views)"
+        grid_due_header )
   ; ( "mem · lag · stale"
     , Printf.sprintf
         "keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second \
-         row; its lag in %s in the views, and the memory and age views draw their own cells). \
+         row; its lag under %s in the views, and the memory and age views draw their own cells). \
          mem %s is memory health not read yet, or a refused row that may be this keeper's; mem \
          ! is this keeper's row, refused; %s is a keeper with no memory snapshot"
-        axis_next_header Masc_tui_keeper_age_ladder.unmeasured_mark
+        grid_lag_header Masc_tui_keeper_age_ladder.unmeasured_mark
         Masc_tui_theme.Glyph.no_value )
   ; ( Masc_tui_keeper_age_ladder.cell_label
     , Printf.sprintf "%s (Detailed second row, and %s in the age view)"

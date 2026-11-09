@@ -1,0 +1,4 @@
+(test
+ (name test_tui_keeper_grid)
+ (modules test_tui_keeper_grid)
+ (libraries alcotest masc masc.masc_types masc_tui_keeper_grid))

@@ -97,9 +97,41 @@ val axis_next_glyph : string
 
 val pulse_header : string
 val axis_now_header : string
-val axis_next_header : string
-(** The header words over the views' axis row (RFC-0515 §2.4): the turn pulse,
-    the NOW cell and the next cell. {!column_legend} names them. *)
+(** The header words over the views' axis row (RFC-0515 §2.4): the turn pulse
+    and the NOW cell. {!column_legend} names them. *)
+
+(** {1 The views' grid} (RFC-0515 §2.4.1 – §2.4.3) *)
+
+val grid_gutter_glyph : string
+(** [▌]: the first cell of a grid row, in the colour of the row's verdict. *)
+
+val grid_now_line : string
+(** [┃]: the two lines on either side of the now cell. *)
+
+val grid_dot_mark : string
+(** [·]: a strip cell with nothing in it. *)
+
+val grid_failing_mark : string
+val grid_paused_mark : string
+val grid_recovered_mark : string
+val grid_ok_mark : string
+(** The row marks: [!] failing, [○] paused, [✓] recovered (the cause view
+    only), [●] the rest. *)
+
+val grid_late_word : string
+val grid_held_word : string
+(** The due column's words for a due run that has not started and for a held
+    one. *)
+
+val grid_keeper_header : string
+val grid_due_header : string
+val grid_lag_header : string
+
+val grid_pulse_header : window:string -> string
+(** [◂ 12h]: the pulse column's header for a pulse that spans [window]. *)
+
+val grid_next_header : window:string -> string
+(** [next ▹ 12h]: the strip column's header for a strip that spans [window]. *)
 
 val fact_age_header : string
 val librarian_header : string

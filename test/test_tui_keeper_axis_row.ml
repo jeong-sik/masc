@@ -12,17 +12,16 @@ let before_label = function
   | Axis_row.Fact_ages -> "fact ages"
 
 let current_label = function
-  | Axis_row.Activity -> "activity"
   | Axis_row.Librarian_pass -> "librarian pass"
   | Axis_row.Update_age -> "update age"
 
 let next_label = function
-  | Axis_row.Wait_run_path_lag -> "wait, run, path, lag"
   | Axis_row.Lag_digest_gap -> "lag, digest, gap"
   | Axis_row.Lag_stale_facts -> "lag, stale, facts"
 
 let shape_label = function
   | Axis_row.List_columns -> "list columns"
+  | Axis_row.Grid Axis_row.Activity_columns -> "grid of the activity columns"
   | Axis_row.Axis { before; current; next } ->
       String.concat " · " [ before_label before; current_label current; next_label next ]
 
@@ -40,7 +39,7 @@ let test_each_view_picks_the_cells_of_its_axis_row () =
         | Model.By_memory -> "pulse · librarian pass · lag, digest, gap"
         | Model.By_age -> "fact ages · update age · lag, stale, facts"
         | Model.By_state | Model.By_cause | Model.By_time | Model.By_runtime | Model.Day_wall ->
-            "pulse · activity · wait, run, path, lag"
+            "grid of the activity columns"
       in
       Alcotest.(check string) (Model.view_label view) expected
         (shape_label (Axis_row.shape_of_view view)))

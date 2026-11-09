@@ -134,7 +134,7 @@ raw trace(`.masc/keepers/<keeper>/raw-traces`)와 reaction ledger(`reaction-ledg
 | 측정 스크립트(실행·도착) | 시험 22개, 새 필드 변형 9개를 모두 시험이 잡았다, pyright strict 오류 0, ruff 통과 |
 | 측정 스크립트(공식 클라이언트 블록·replay) | 시험 8개를 더해 30개 통과. 새 집계에 변형 17개를 넣어 모두 시험이 잡았다(처음에 하나가 살아남아 시험을 더했다). pyright strict 오류 0, ruff 통과 |
 | 3.3 의 타입 검사 | 바뀐 단위 3개(`Runtime_official_client_tool`, `Keeper_arrived_stimuli`, `Keeper_official_client_host`)와 시험 2개(`test_keeper_arrived_stimuli`, `test_keeper_host_result_retention`)를 로컬 heal 하네스로 검사했다. 미리 빌드한 snapshot 에서 바뀐 단위와 그것을 import 하는 단위만 다시 타입 검사한다. 로컬 `dune build` 가 아니다 |
-| 3.3 의 실행 | 미리 빌드한 `.cmxa` 에 바뀐 `.ml` 을 링크한 probe 로 돌렸다. `Keeper_arrived_stimuli` 검사 20개, `append_host_text` 검사 8개, 호스트 조각(`with_arrived_rows`) 검사 13개가 통과했고, 변형 20개를 모두 검사가 잡았다 |
+| 3.3 의 실행 | 미리 빌드한 `.cmxa` 에 바뀐 `.ml` 을 링크한 probe 로 돌렸다. `Keeper_arrived_stimuli` 시험 20개, `append_host_text` 검사 15개, 호스트 조각(`with_arrived_rows`) 검사 13개가 통과했고, 변형 21개를 하나씩 넣어 모두 검사가 잡았다 |
 | 측정 스크립트(되풀이 호출) | 시험 33개, 변형 34개를 모두 시험이 잡았다, pyright strict 오류 0, ruff 통과 |
 
 **[확인 필요]** `test_keeper_arrived_stimuli` 의 `claim` 시험과 `test_keeper_host_result_retention` 의 도착 행 시험은 타입 검사만 했고 alcotest 로 돌리지 않았다. 이 저장소의 CI 는 PR 에서 `dune build @check` 만 돌리고 시험은 nightly `test.yml` 이 돈다.

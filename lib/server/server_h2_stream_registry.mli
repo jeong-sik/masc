@@ -36,7 +36,10 @@ val dispatch :
     before the work starts. A handler exception resets the
     stream ({!Http_h2_stream.reset} with [Raised]); a stream that ends with
     {!Http_h2_stream.Stream_reset} ends quietly; Eio cancellation
-    propagates. *)
+    propagates. A fiber forked on the stream switch that raises ends the
+    scope first and is reported after it ({!Http_h2_stream.report_failure}).
+    An error answer h2 opens for that report has no stall bound, like the
+    ones h2 opens on the connection reader (RFC-0518 §5). *)
 
 val peer_reset : t -> stream_id:int -> unit
 (** The peer reset [stream_id]: release its entry and end its scope with

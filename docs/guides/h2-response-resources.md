@@ -38,12 +38,22 @@ SSE uses a sequential, reserved write-and-flush path outside publisher locks.
 
 A stream whose oldest response flush goes 90 seconds without an answer is
 reset with RST_STREAM(INTERNAL_ERROR), and one warn line names the request
-(RFC-0518 D2). The time counts from when that flush became the oldest one
-waiting. Bodies written through the ledger get a flush at every 16 KiB slice
-(D3), so a client that keeps reading has 90 seconds for each slice, not for
-the whole body. The reset releases the stream's fibers and reservations. The
-bound is a code constant, not a setting. gRPC listener responses are written
-by `Grpc_eio` and are outside it.
+method and path, without the query (RFC-0518 D2). The time counts from when
+that flush became the oldest one waiting. Bodies written through the ledger
+get a flush at every 16 KiB slice (D3), so the 90 seconds run between one
+slice and the next, not over the whole body. A client that opens its window
+again only after reading a batch of bytes has to read each batch within 90
+seconds: at 32 KiB per batch that is about 364 B/s. The reset releases the
+stream's fibers and reservations.
+
+An error answer h2 opened for a failed request ends differently when it
+stalls: the client gets the bytes its window allowed and an empty
+END_STREAM, then RST_STREAM(INTERNAL_ERROR) (anmonteiro/ocaml-h2#278). Two
+error answers have no bound: one h2 opens on the connection reader, and one
+for a fiber forked on the stream switch that raised before the response,
+which is reported after the stream's scope ended. The bound is a code
+constant, not a setting. gRPC listener responses are written by `Grpc_eio`
+and are outside it.
 
 The default stream capacity follows RFC 9113 section 6.5.2's recommendation to
 allow at least 100 concurrent streams. The 64 MiB payload allocation also covers

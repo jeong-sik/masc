@@ -45,7 +45,10 @@ type board_read_error =
 [@@deriving show]
 
 val board_error_of_read_error : board_read_error -> board_error
-(** For a caller that carries reads and writes in one [board_error] result. *)
+(** Public-safe projection for callers carrying reads and writes in one
+    [board_error] result. Source failures become a fixed [Io_error] message;
+    raw parser fragments, paths and exceptions remain in the internal read
+    error and source diagnostics, never in this public error. *)
 
 (** {1 Safe ID Modules — Parse, Don't Validate} *)
 

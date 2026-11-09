@@ -47,7 +47,7 @@ let board_error_of_read_error = function
   | Read_invalid_id detail -> Invalid_id detail
   | Read_post_not_found post_id -> Post_not_found post_id
   | Read_comment_not_found comment_id -> Comment_not_found comment_id
-  | Read_source_unavailable error -> error
+  | Read_source_unavailable _ -> Io_error "Board data is unavailable."
 
 (** {1 Safe ID Module - Parse Don't Validate} *)
 

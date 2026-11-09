@@ -773,7 +773,8 @@ let get_post_and_comments ~reader ~post_id =
     if not (Board_access.can_read ~reader post) then Error (Board.Post_not_found post_id)
     else (match observation.completeness with
       | Board.Source_complete -> Ok (post, observation.comments)
-      | Board.Source_incomplete error -> Error error)
+      | Board.Source_incomplete error ->
+        Error (Board.board_error_of_read_error (Board.Read_source_unavailable error)))
   | Error _ as error -> error
 
 (* One owner for board-operation failure lines. A re-vote is a routine

@@ -294,12 +294,14 @@ let get_comment store ~comment_id : (comment, board_error) Result.t =
   | Error e -> Error e
   | Ok cid ->
     with_persist_lock store (fun () ->
-      let* () = require_comments_source_readable store in
-      with_lock store (fun () ->
-        let comment_key = Comment_id.to_string cid in
-        match Hashtbl.find_opt store.comments comment_key with
-        | Some comment -> Ok comment
-        | None -> Error (Comment_not_found comment_id)))
+      match require_comments_source_readable store with
+      | Error error -> Error (board_error_of_read_error (Read_source_unavailable error))
+      | Ok () ->
+        with_lock store (fun () ->
+          let comment_key = Comment_id.to_string cid in
+          match Hashtbl.find_opt store.comments comment_key with
+          | Some comment -> Ok comment
+          | None -> Error (Comment_not_found comment_id)))
 ;;
 
 (** List all comments (for profile aggregation) *)

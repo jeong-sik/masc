@@ -159,8 +159,8 @@ let feature_summary_lines state ~width ~label ~purpose ~standing ~notices ~field
   @ wrap (Masc_tui_lane_standing.colour standing)
       (Masc_tui_lane_standing.word ~korean:(state.ui_language = Lang_ko) standing)
   @ List.concat_map (fun (style, line) -> wrap style line) notices
-  @ List.map (fun line -> Theme.info (), line) (Hint_lines.wrap ~max_cells:(max 1 width) actions)
   @ List.concat_map (fun (style, line) -> wrap style line) fields
+  @ List.map (fun line -> Theme.info (), line) (Hint_lines.wrap ~max_cells:(max 1 width) actions)
 
 let standalone_lane_summary_lines state ~width ~standing
     (lane : Tui_decode.standalone_lane) =

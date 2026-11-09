@@ -221,7 +221,7 @@ let invoke ~sw ~net ~store ~route ~request params =
   walk [] candidates
 
 let create_handler ~config ~net ~sw ~store ~instance_id ~package ~binding =
-  let owned_store = Filename.concat (Workspace.masc_dir config) "lane-addons" in
+  let owned_store = Lane_addon_store.directory ~masc_dir:(Workspace.masc_dir config) in
   let* () = if String.equal (Lane_addon_store.root store) owned_store then Ok ()
     else Error "sampling worker store does not belong to the registered workspace" in
   let* route = route_of_binding binding in

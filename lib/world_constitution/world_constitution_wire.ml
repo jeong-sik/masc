@@ -10,10 +10,12 @@ let field_evidence = "evidence"
 let field_uri = "uri"
 let field_kind = "kind"
 let field_article = "article"
+let field_superseded = "superseded"
 let field_by = "by"
 let field_reason = "reason"
 let kind_added = "added"
 let kind_removed = "removed"
+let kind_replaced = "replaced"
 
 type decode_step =
   | Field of string
@@ -119,6 +121,28 @@ let article_id_field ~path ~field fields =
   | Error detail ->
     Error { path = path @ [ Field field ]; reason = Invalid_id detail }
 
+(* An empty list decodes: the write path never mints one (empty [replaces]
+   is an [Added]), and the fold retires nothing for it, so rejecting here
+   would only refuse lines the reader already understands. *)
+let article_id_list ~path json =
+  match json with
+  | `List items ->
+    let rec decode index acc = function
+      | [] -> Ok (List.rev acc)
+      | item :: rest -> (
+        match item with
+        | `String raw -> (
+          match Article_id.of_string raw with
+          | Ok id -> decode (index + 1) (id :: acc) rest
+          | Error detail ->
+            Error { path = path @ [ Index index ]; reason = Invalid_id detail }
+          )
+        | _ ->
+          Error { path = path @ [ Index index ]; reason = Expected_string })
+    in
+    decode 0 [] items
+  | _ -> Error { path; reason = Expected_array }
+
 let evidence_item_to_json { uri } = `Assoc [ field_uri, `String uri ]
 
 let evidence_item_of_json ~path json =
@@ -177,6 +201,19 @@ let entry_to_json = function
       [ field_kind, `String kind_added
       ; field_article, article_to_json article
       ]
+  | Replaced { superseded; article; by; at; reason } ->
+    `Assoc
+      ([ field_kind, `String kind_replaced
+       ; ( field_superseded
+         , `List (List.map (fun id -> `String (Article_id.to_string id)) superseded)
+         )
+       ; field_article, article_to_json article
+       ; field_by, `String by
+       ; field_at, `Float at
+       ]
+       @ (match reason with
+         | None -> []
+         | Some why -> [ field_reason, `String why ]))
   | Removed { id; by; at; reason } ->
     `Assoc
       ([ field_kind, `String kind_removed
@@ -210,4 +247,29 @@ let entry_of_json json =
     let* at = number_field ~path ~field:field_at fields in
     let* reason = optional_string_field ~path ~field:field_reason fields in
     Ok (Removed { id; by; at; reason }))
+  else if String.equal kind kind_replaced then (
+    let* () =
+      reject_unknown ~path
+        ~allowed:
+          [ field_kind
+          ; field_superseded
+          ; field_article
+          ; field_by
+          ; field_at
+          ; field_reason
+          ]
+        fields
+    in
+    let* raw_superseded = required ~path ~field:field_superseded fields in
+    let* superseded =
+      article_id_list
+        ~path:(path @ [ Field field_superseded ])
+        raw_superseded
+    in
+    let* raw = required ~path ~field:field_article fields in
+    let* article = article_of_json ~path:(path @ [ Field field_article ]) raw in
+    let* by = string_field ~path ~field:field_by fields in
+    let* at = number_field ~path ~field:field_at fields in
+    let* reason = optional_string_field ~path ~field:field_reason fields in
+    Ok (Replaced { superseded; article; by; at; reason }))
   else Error { path; reason = Unknown_entry kind }

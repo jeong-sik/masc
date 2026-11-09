@@ -521,7 +521,7 @@
  (name masc_tui_lane_inventory)
  (wrapped false)
  (modules masc_tui_lane_inventory)
- (libraries masc masc.runtime masc_tui_lane_standing))
+ (libraries masc masc.runtime masc_tui_lane_standing masc_tui_page_line))
 
 ;; How a lane or a Lane Add-on stands, as a mark and a status colour the
 ;; Lanes list and the Lane Add-ons screen both draw.

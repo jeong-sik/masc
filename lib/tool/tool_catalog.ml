@@ -252,6 +252,7 @@ let explicit_metadata : (string * metadata) list =
     ("keeper_candle_purchase", mutating_tool);
     ("keeper_candle_equip", mutating_tool);
     ("keeper_candle_gift", mutating_tool);
+    ("keeper_pull_requests_list", read_state_tool);
     ("masc_dos_screen", play_machine_read_tool);
     ("masc_dos_meta", read_state_tool);
     ("masc_dos_inventory", read_state_tool);

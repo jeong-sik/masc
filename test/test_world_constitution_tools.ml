@@ -17,12 +17,6 @@ let () =
   Masc.Prompt_defaults.init ()
 ;;
 
-let with_world f =
-  let dir = Filename.temp_file "world-constitution-tools-" ".tmp" in
-  Sys.remove dir;
-  Unix.mkdir dir 0o700;
-  Fun.protect ~finally:(fun () -> Fs_compat.remove_tree dir) (fun () -> f dir)
-
 let make_meta name =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -30,6 +24,32 @@ let make_meta name =
   with
   | Error error -> Alcotest.fail ("meta fixture failed: " ^ error)
   | Ok meta -> meta
+
+(* Durable metadata names form the roster, independently of whether the live
+   registry can currently operate the Keeper. *)
+let with_world f =
+  let dir = Filename.temp_file "world-constitution-tools-" ".tmp" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o700;
+  let register keeper =
+    let config = Masc.Workspace.default_config dir in
+    let path = Masc.Keeper_types_profile.keeper_meta_path config keeper in
+    Yojson.Safe.to_file path (Masc.Keeper_meta_json.meta_to_json (make_meta keeper));
+    ignore
+      (Masc.Keeper_registry.For_testing.register ~base_path:dir keeper
+         (make_meta keeper))
+  in
+  let unregister keeper =
+    Masc.Keeper_registry.For_testing.unregister ~base_path:dir keeper
+  in
+  register "lane-smith";
+  register "critic";
+  Fun.protect
+    ~finally:(fun () ->
+      unregister "lane-smith";
+      unregister "critic";
+      Fs_compat.remove_tree dir)
+    (fun () -> f dir)
 
 let failed execution =
   match execution.Execution.disposition with
@@ -61,8 +81,13 @@ let remove ~base_path ?(keeper = "critic") ?reason article_id =
        @ match reason with None -> [] | Some value -> [ "reason", `String value ]))
 
 let held ~base_path =
-  match Store.load ~base_path with
+  match Store.load ~base_path ~resolve_subject:(fun _ -> true) with
   | Ok ledger -> ledger.Store.articles
+  | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
+
+let entries ~base_path =
+  match Store.load ~base_path ~resolve_subject:(fun _ -> true) with
+  | Ok ledger -> ledger.Store.entries
   | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
 
 let contains ~sub s =
@@ -400,6 +425,286 @@ let test_an_unreadable_ledger_is_not_rendered_as_no_articles () =
         Alcotest.failf "the prompt builds again once the ledger reads: %s"
           (Store.read_error_to_string error))
 
+(* RFC-0504 §2.2: naming held articles in [replaces] retires them and records
+   the norm as their replacement. *)
+let test_replacing_merges_held_norms_into_one () =
+  with_world (fun base_path ->
+      let first =
+        write ~base_path (`Assoc [ "text", `String "the first overlapping norm" ])
+      in
+      let second =
+        write ~base_path (`Assoc [ "text", `String "the second overlapping norm" ])
+      in
+      let first_id = article_id_of first in
+      let second_id = article_id_of second in
+      let merged =
+        write ~base_path
+          (`Assoc
+            [ "text", `String "the merged norm"
+            ; "replaces", `List [ `String first_id; `String second_id ]
+            ; "reason", `String "the board merged the twins"
+            ])
+      in
+      Alcotest.(check bool) "the merge succeeded" false (failed merged);
+      (match held ~base_path with
+      | [ article ] ->
+        Alcotest.(check string) "the replacement is what is held" "the merged norm"
+          article.Types.text
+      | others ->
+        Alcotest.failf "expected one article, got %d" (List.length others));
+      (match List.rev (entries ~base_path) with
+      | Types.Replaced { superseded; article; by; reason; _ } :: _ ->
+        Alcotest.(check (list string))
+          "the ledger keeps which norms were retired in the order named"
+          [ first_id; second_id ]
+          (List.map Types.Article_id.to_string superseded);
+        Alcotest.(check string) "the replacer is recorded" "lane-smith" by;
+        Alcotest.(check (option string))
+          "the reason is recorded" (Some "the board merged the twins") reason;
+        Alcotest.(check string) "the replacement text is recorded" "the merged norm"
+          article.Types.text
+      | _ -> Alcotest.fail "the last ledger line is not the replacement");
+      match Yojson.Safe.from_string (output merged) with
+      | `Assoc fields ->
+        Alcotest.(check bool) "the answer counts one held norm" true
+          (List.assoc_opt "articles_held" fields = Some (`Int 1))
+      | _ -> Alcotest.failf "unexpected output %s" (output merged))
+
+let test_replacing_an_unheld_or_doubled_id_is_a_failure () =
+  with_world (fun base_path ->
+      let written =
+        write ~base_path (`Assoc [ "text", `String "a norm that stays" ])
+      in
+      let id = article_id_of written in
+      let missing = "a-" ^ String.make 32 'f' in
+      let attempt label replaces =
+        let execution =
+          write ~base_path
+            (`Assoc
+              [ "text", `String "a merge that must not land"
+              ; "replaces", `List (List.map (fun s -> `String s) replaces)
+              ])
+        in
+        Alcotest.(check (option string)) label (Some "policy_rejection")
+          (failure_class execution)
+      in
+      attempt "an id nobody wrote is refused" [ missing ];
+      attempt "a held id beside a missing one is refused" [ id; missing ];
+      attempt "naming one id twice is refused" [ id; id ];
+      Alcotest.(check (list string)) "nothing was retired" [ "a norm that stays" ]
+        (List.map (fun (a : Types.t) -> a.Types.text) (held ~base_path));
+      Alcotest.(check int) "nothing was appended" 1
+        (List.length (entries ~base_path)))
+
+let test_malformed_replaces_is_refused_before_the_ledger_is_touched () =
+  with_world (fun base_path ->
+      let attempt label replaces =
+        let execution =
+          write ~base_path
+            (`Assoc [ "text", `String "a norm"; "replaces", replaces ])
+        in
+        Alcotest.(check (option string)) label (Some "policy_rejection")
+          (failure_class execution)
+      in
+      attempt "replaces must be an array"
+        (`String "a-0123456789abcdef0123456789abcdef");
+      attempt "replaces items must be strings" (`List [ `Int 7 ]);
+      attempt "replaces items must be minted ids"
+        (`List [ `String "a-placeholder" ]);
+      Alcotest.(check int) "nothing was written" 0
+        (List.length (held ~base_path)))
+
+(* RFC-0504 §2.3: the replacement must render smaller than the bundle it
+   retires, while the render stays within the ceiling. The per-article cap
+   does not bind a merge. *)
+let test_a_merge_must_shrink_the_render () =
+  with_world (fun base_path ->
+      let first = write ~base_path (`Assoc [ "text", `String "aa" ]) in
+      let second = write ~base_path (`Assoc [ "text", `String "bb" ]) in
+      let grown =
+        write ~base_path
+          (`Assoc
+            [ "text", `String (String.make 200 'x')
+            ; "replaces",
+              `List [ `String (article_id_of first); `String (article_id_of second) ]
+            ])
+      in
+      Alcotest.(check bool) "a merge that grows the render is refused" true
+        (failed grown);
+      Alcotest.(check (option string)) "growing the render is the caller's to fix"
+        (Some "policy_rejection") (failure_class grown);
+      Alcotest.(check int) "nothing was retired" 2 (List.length (held ~base_path)))
+
+let test_a_merge_is_not_bound_by_the_per_article_cap () =
+  with_world (fun base_path ->
+      let first =
+        write ~base_path (`Assoc [ "text", `String (String.make 400 'a') ])
+      in
+      let second =
+        write ~base_path (`Assoc [ "text", `String (String.make 400 'b') ])
+      in
+      Alcotest.(check bool) "the bundle writes succeeded" false
+        (failed first || failed second);
+      let merged =
+        write ~base_path
+          (`Assoc
+            [ "text", `String (String.make 600 'm')
+            ; "replaces",
+              `List [ `String (article_id_of first); `String (article_id_of second) ]
+            ])
+      in
+      Alcotest.(check bool) "a 600-byte merge lands" false (failed merged);
+      Alcotest.(check int) "one norm is held" 1 (List.length (held ~base_path)))
+
+let test_reason_is_refused_on_a_plain_write () =
+  with_world (fun base_path ->
+      let execution =
+        write ~base_path
+          (`Assoc [ "text", `String "a norm"; "reason", `String "no bundle" ])
+      in
+      Alcotest.(check (option string)) "a reason without a bundle is refused"
+        (Some "policy_rejection") (failure_class execution);
+      Alcotest.(check int) "nothing was written" 0
+        (List.length (held ~base_path)))
+
+let test_null_or_empty_replaces_writes_a_plain_norm () =
+  with_world (fun base_path ->
+      let plain =
+        write ~base_path (`Assoc [ "text", `String "first"; "replaces", `Null ])
+      in
+      let empty =
+        write ~base_path (`Assoc [ "text", `String "second"; "replaces", `List [] ])
+      in
+      Alcotest.(check bool) "null replaces writes" false (failed plain);
+      Alcotest.(check bool) "empty replaces writes" false (failed empty);
+      Alcotest.(check int) "two norms are held" 2 (List.length (held ~base_path));
+      (match entries ~base_path with
+      | [ Types.Added _; Types.Added _ ] -> ()
+      | others ->
+        Alcotest.failf "expected two plain additions, got %d entries"
+          (List.length others)))
+
+(* A merge that leaves the world over the ceiling is refused like any other
+   crossing write — reachable only when the ledger already exceeds it, since
+   a merge shrinks the render. *)
+let test_a_merge_over_the_ceiling_is_refused () =
+  with_world (fun base_path ->
+      let make_big author text =
+        match
+          Types.make ~id:(Types.Article_id.generate ()) ~text ~author ~at:1.0
+            ~evidence:[]
+        with
+        | Ok article -> article
+        | Error invalid ->
+          Alcotest.failf "article rejected: %s" (Types.invalid_to_string invalid)
+      in
+      let append entry =
+        let end_offset =
+          match Store.load ~base_path ~resolve_subject:(fun _ -> true) with
+          | Ok ledger -> ledger.Store.end_offset
+          | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
+        in
+        match Store.append_at ~base_path ~expected_end_offset:end_offset entry with
+        | Ok () -> ()
+        | Error error -> Alcotest.failf "%s" (Store.append_error_to_string error)
+      in
+      let first = make_big "lane-smith" (String.make 6500 'a') in
+      let second = make_big "lane-smith" (String.make 6500 'b') in
+      append (Types.Added first);
+      append (Types.Added second);
+      let over =
+        write ~base_path
+          (`Assoc
+            [ "text", `String (String.make 12300 'm')
+            ; "replaces",
+              `List
+                [ `String (Types.Article_id.to_string first.Types.id)
+                ; `String (Types.Article_id.to_string second.Types.id)
+                ]
+            ])
+      in
+      Alcotest.(check bool) "the crossing merge is refused" true (failed over);
+      Alcotest.(check (option string)) "a full world is a state to change first"
+        (Some "workflow_rejection") (failure_class over);
+      Alcotest.(check int) "nothing was retired" 2 (List.length (held ~base_path)))
+
+(* RFC-0504 §2.4: the read reports lines from outside the roster beside the
+   unreadable ones, and counts only the roster's norms as held. *)
+let test_isolated_lines_are_reported_to_the_caller () =
+  with_world (fun base_path ->
+      ignore
+        (write ~base_path (`Assoc [ "text", `String "a norm the world holds" ]));
+      let outsider =
+        match
+          Types.make ~id:(Types.Article_id.generate ())
+            ~text:"a norm from outside the tool" ~author:"codex-operator" ~at:2.0
+            ~evidence:[]
+        with
+        | Ok article -> article
+        | Error invalid ->
+          Alcotest.failf "article rejected: %s" (Types.invalid_to_string invalid)
+      in
+      let end_offset =
+        match Store.load ~base_path ~resolve_subject:(fun _ -> true) with
+        | Ok ledger -> ledger.Store.end_offset
+        | Error error -> Alcotest.failf "%s" (Store.read_error_to_string error)
+      in
+      (match
+         Store.append_at ~base_path ~expected_end_offset:end_offset
+           (Types.Added outsider)
+       with
+      | Ok () -> ()
+      | Error error -> Alcotest.failf "%s" (Store.append_error_to_string error));
+      let execution =
+        Tools.read_with_outcome ~config:(Masc.Workspace.default_config base_path)
+      in
+      Alcotest.(check bool) "the read succeeds" false (failed execution);
+      match Yojson.Safe.from_string (output execution) with
+      | `Assoc fields -> (
+        Alcotest.(check bool) "one norm is held" true
+          (List.assoc_opt "articles_held" fields = Some (`Int 1));
+        match List.assoc_opt "isolated_ledger_lines" fields with
+        | Some (`List [ `Assoc row ]) ->
+          Alcotest.(check bool) "the caller is told which line" true
+            (List.assoc_opt "line" row = Some (`Int 2));
+          Alcotest.(check bool) "the caller is told whose" true
+            (List.assoc_opt "subject" row = Some (`String "codex-operator"))
+        | Some other ->
+          Alcotest.failf "unexpected shape %s" (Yojson.Safe.to_string other)
+        | None ->
+          Alcotest.failf "the isolated line was not reported: %s" (output execution))
+      | _ -> Alcotest.failf "unexpected output %s" (output execution))
+
+let test_a_retained_author_survives_registry_loss_and_bad_metadata () =
+  with_world (fun base_path ->
+      let config = Masc.Workspace.default_config base_path in
+      ignore (write ~base_path (`Assoc [ "text", `String "a retained norm" ]));
+      Masc.Keeper_registry.For_testing.unregister ~base_path "lane-smith";
+      let path = Masc.Keeper_types_profile.keeper_meta_path config "lane-smith" in
+      let channel = open_out path in
+      output_string channel "not current metadata";
+      close_out channel;
+      let execution = Tools.read_with_outcome ~config in
+      Alcotest.(check bool) "the read succeeds" false (failed execution);
+      match Yojson.Safe.from_string (output execution) with
+      | `Assoc fields ->
+          Alcotest.(check bool) "the retained author's norm still holds" true
+            (List.assoc_opt "articles_held" fields = Some (`Int 1));
+          Alcotest.(check bool) "a retained name is not an isolated subject" true
+            (List.assoc_opt "isolated_ledger_lines" fields = None)
+      | _ -> Alcotest.failf "unexpected output %s" (output execution))
+
+let test_an_unreadable_roster_refuses_the_read () =
+  with_world (fun base_path ->
+      let config = Masc.Workspace.default_config base_path in
+      let root = Masc.Workspace.keepers_runtime_dir config in
+      Unix.rename root (root ^ ".retained");
+      let channel = open_out root in
+      close_out channel;
+      let execution = Tools.read_with_outcome ~config in
+      Alcotest.(check (option string)) "a roster failure is not an empty world"
+        (Some "runtime_failure") (failure_class execution))
+
 let () =
   Alcotest.run "world_constitution_tools"
     [ ( "end to end",
@@ -407,6 +712,10 @@ let () =
             test_a_written_norm_reaches_the_turn_prompt;
           Alcotest.test_case "an unreadable ledger is not rendered as no articles"
             `Quick test_an_unreadable_ledger_is_not_rendered_as_no_articles;
+          Alcotest.test_case "a retained author survives unavailable runtime metadata"
+            `Quick test_a_retained_author_survives_registry_loss_and_bad_metadata;
+          Alcotest.test_case "an unreadable roster refuses the read"
+            `Quick test_an_unreadable_roster_refuses_the_read;
         ] );
       ( "write",
         [ Alcotest.test_case "a written norm reaches the rendered articles"
@@ -425,6 +734,26 @@ let () =
             test_evidence_uri_reaches_the_ledger;
           Alcotest.test_case "unreadable lines are reported to the caller"
             `Quick test_unreadable_lines_are_reported_to_the_caller;
+          Alcotest.test_case "isolated lines are reported to the caller"
+            `Quick test_isolated_lines_are_reported_to_the_caller;
+        ] );
+      ( "replace",
+        [ Alcotest.test_case "replacing merges held norms into one" `Quick
+            test_replacing_merges_held_norms_into_one;
+          Alcotest.test_case "replacing an unheld or doubled id is a failure"
+            `Quick test_replacing_an_unheld_or_doubled_id_is_a_failure;
+          Alcotest.test_case "malformed replaces is refused early" `Quick
+            test_malformed_replaces_is_refused_before_the_ledger_is_touched;
+          Alcotest.test_case "a merge must shrink the render" `Quick
+            test_a_merge_must_shrink_the_render;
+          Alcotest.test_case "a merge is not bound by the per-article cap"
+            `Quick test_a_merge_is_not_bound_by_the_per_article_cap;
+          Alcotest.test_case "reason is refused on a plain write" `Quick
+            test_reason_is_refused_on_a_plain_write;
+          Alcotest.test_case "null or empty replaces writes a plain norm"
+            `Quick test_null_or_empty_replaces_writes_a_plain_norm;
+          Alcotest.test_case "a merge over the ceiling is refused" `Quick
+            test_a_merge_over_the_ceiling_is_refused;
         ] );
       ( "remove",
         [ Alcotest.test_case "removing takes the norm out" `Quick

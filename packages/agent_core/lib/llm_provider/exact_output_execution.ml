@@ -80,12 +80,6 @@ let receipt_http_status = function
     Some receipt.http_status
 ;;
 
-let receipt_identity = function
-  | Before_dispatch_receipt identity | Dispatch_started_receipt identity -> identity
-  | Response_received_receipt receipt | Terminal_receipt receipt -> receipt.identity
-;;
-let receipt_request_body_sha256 receipt = (receipt_identity receipt).request_body_sha256
-
 let raw_response_evidence (raw : Http_client.raw_sync_response) response_header_evidence =
   { raw_body = raw.body
   ; raw_body_sha256 = Agent_core_sha256.(to_hex (digest_string raw.body))

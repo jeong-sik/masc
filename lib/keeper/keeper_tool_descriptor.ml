@@ -3079,6 +3079,11 @@ let internal_descriptors : t list =
   ; masc_misc_descriptor "candle_purchase" "keeper_candle_purchase" ~readonly:false
   ; masc_misc_descriptor "candle_equip" "keeper_candle_equip" ~readonly:false
   ; masc_misc_descriptor "candle_gift" "keeper_candle_gift" ~readonly:false
+  (* Concurrent: one Atomic.get of the published snapshot, then pure row
+     selection; nothing is written and GitHub is not called. *)
+  ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent
+       "pull_requests_list" "keeper_pull_requests_list"
+       ~readonly:true
   ; masc_misc_descriptor ~ordinary_execution_mode:Concurrent "dashboard"
        "masc_dashboard"
        (* Concurrent: config reads plus pure text generation; the dashboard
@@ -3311,6 +3316,13 @@ let descriptors_for_internal internal_name =
 let readonly_static_hint d = d.policy.readonly_hint
 let readonly_for_input d ~input = d.policy.readonly_of_input input
 
+(* Composition node set (#49177, RFC-0502 draft): [Tool_execute] and
+   [Tool_board_dispatch] (including masc_board_post) answer [Direct_only],
+   so a composition naming them fails in
+   [Keeper_composition_nested.validate_leaves] ([Unsupported_leaf]) and, for
+   async catalog entries, in [Keeper_tool_composition_catalog.parse_composition]
+   ([Async_leaf_not_admitted]). Admitting them needs the RFC-0502 decision;
+   this match only records the current boundary. *)
 let prepared_leaf_admission descriptor =
   match descriptor.execution with
   | Terminal -> Direct_only

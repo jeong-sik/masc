@@ -124,7 +124,7 @@ let mcp owner =
   let schema = `Assoc ["type",`String "object";"properties",`Assoc [
     "binding",`Assoc ["type",`String "object"];
     "sources",`Assoc ["type",`String "array"]]] in
-  Server.create ~name:"masc-browser-addon" ~version:"0.1.0" ()
+  Server.create ~name:"masc-browser-addon" ~version:Build_version.current ()
   |> Server.add_tool Browser_addon_tool.definition (fun _context _name arguments ->
     Ok (Browser_addon_tool.invoke ~owner ~principal:Lane_addon_call_context.Anonymous
       (Option.value ~default:(`Assoc []) arguments)))

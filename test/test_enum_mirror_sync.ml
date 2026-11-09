@@ -693,6 +693,45 @@ let test_article_id_pattern_mirror () =
     (declared_patterns_for_schemas (all_schemas ()) ~property:"article_id")
 ;;
 
+(* Constitution merge ids. [World_constitution_types.Article_id] derives the
+   pattern from its own prefix and length; keeper_constitution_write.toml
+   hand-copies it onto the [replaces] array items. The shared
+   [declared_patterns_for_schemas] walk reads a property's own [pattern]
+   only, so the nested items pattern is pinned here, beside it. *)
+let test_replaces_item_pattern_mirror () =
+  let write =
+    match
+      List.find_opt
+        (fun (t : Masc_domain.tool_schema) ->
+          String.equal t.name "keeper_constitution_write")
+        (all_schemas ())
+    with
+    | Some schema -> schema
+    | None -> failwith "keeper_constitution_write is absent from the published schemas"
+  in
+  let pattern =
+    match write.input_schema with
+    | `Assoc top -> (
+      match List.assoc_opt "properties" top with
+      | Some (`Assoc properties) -> (
+        match List.assoc_opt "replaces" properties with
+        | Some (`Assoc declaration) -> (
+          match List.assoc_opt "items" declaration with
+          | Some (`Assoc items) -> (
+            match List.assoc_opt "pattern" items with
+            | Some (`String pattern) -> Some pattern
+            | _ -> None)
+          | _ -> None)
+        | _ -> None)
+      | _ -> None)
+    | _ -> None
+  in
+  check (option string)
+    "replaces items pattern matches Article_id"
+    (Some Masc.World_constitution_types.Article_id.json_schema_pattern)
+    pattern
+;;
+
 (* Board post id. [Masc.Board.Post_id] owns the shape; every board tool that
    takes a post_id declares it. The parser accepts [a-zA-Z0-9_-]{1,64}, not
    only the ["p-"] prefix [generate] mints, so the pattern mirrors the parser
@@ -759,6 +798,8 @@ let () =
             test_post_id_pattern_agrees_with_the_parser
         ; test_case "constitution article id pattern" `Quick
             test_article_id_pattern_mirror
+        ; test_case "constitution replaces item pattern" `Quick
+            test_replaces_item_pattern_mirror
         ; test_case "schedule contract enums" `Quick test_schedule_contract_mirrors
         ; test_case "schedule refusal kinds named in descriptions" `Quick
             test_schedule_refusal_kinds_named_in_descriptions_decode

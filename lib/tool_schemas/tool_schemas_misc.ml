@@ -60,7 +60,8 @@ let schemas : tool_schema list =
     ; Tool_schemas_misc_toml.candle_catalog
     ; Tool_schemas_misc_toml.candle_purchase
     ; Tool_schemas_misc_toml.candle_equip
-    ; Tool_schemas_misc_toml.candle_gift ]
+    ; Tool_schemas_misc_toml.candle_gift
+    ; Tool_schemas_misc_toml.pull_requests ]
   @ Tool_schemas_operator_surface.schemas
 
 type mcp_runtime_operation =
@@ -155,6 +156,7 @@ type misc_operation =
   | Misc_dos_pass
   | Misc_dos_save
   | Misc_dos_restore
+  | Misc_pull_requests
 [@@deriving enumerate]
 
 let misc_operations = all_of_misc_operation
@@ -189,7 +191,8 @@ let dos_tool_of_operation : misc_operation -> Machine_controller_contract.dos_to
   | Misc_browser_interact | Misc_msx _
   | Misc_candle_balance | Misc_candle_catalog
   | Misc_candle_purchase | Misc_candle_equip | Misc_candle_gift
-  | Misc_play_room ->
+  | Misc_play_room
+  | Misc_pull_requests ->
     None
 
 type dos_controller_need = Machine_controller_contract.controller_need =
@@ -264,6 +267,7 @@ let misc_tool_name = function
     Machine_controller_contract.(dos_tool_name Dos_save)
   | Misc_dos_restore ->
     Machine_controller_contract.(dos_tool_name Dos_restore)
+  | Misc_pull_requests -> "keeper_pull_requests_list"
 ;;
 
 let misc_operation_of_tool_name value =
@@ -323,6 +327,7 @@ let misc_registered_schema operation : tool_schema option =
   | Misc_gc
   | Misc_sandbox_volume_gc
   | Misc_keeper_waiting_inventory
+  | Misc_pull_requests
   | Misc_tool_help ->
     let name = misc_tool_name operation in
     (match

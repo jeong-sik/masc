@@ -30,6 +30,7 @@ let candle_catalog = schema_of_name "keeper_candle_catalog"
 let candle_purchase = schema_of_name "keeper_candle_purchase"
 let candle_equip = schema_of_name "keeper_candle_equip"
 let candle_gift = schema_of_name "keeper_candle_gift"
+let pull_requests = schema_of_name "keeper_pull_requests_list"
 
 let dos_step = schema_of_name "masc_dos_step"
 let dos_press = schema_of_name "masc_dos_press"

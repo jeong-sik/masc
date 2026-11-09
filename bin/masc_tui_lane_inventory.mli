@@ -37,9 +37,11 @@ val row_standing_in : Masc.Tui_decode_lane_inventory.snapshot -> Masc.Tui_decode
 (** [row_standing], with an exact row's run observation from the same
     capture: a degraded lane is [Failing], one switched off that is still
     finishing runs is [Changing]. *)
-val detail_lines : Masc.Tui_decode_lane_inventory.row -> string list
-val refused_cli_slot_lines :
-  Masc.Keeper_lane_cli_oneshot.refused_slot list -> string list
+val standing_tone : Masc_tui_lane_standing.t -> Masc_tui_page_line.tone
+(** How a standing reads on a page, so the list and the reading colour one
+    standing alike. *)
+val detail_lines : Masc.Tui_decode_lane_inventory.row -> Masc_tui_page_line.t list
+(** The row's reading below its title (label and purpose). *)
 val overview_notices : Masc.Tui_decode_lane_inventory.snapshot -> string list
 (** Owner/completeness notices and an issue count; full diagnostics stay in
     [snapshot_notices] so they do not displace the selectable overview. *)

@@ -907,6 +907,10 @@ let test_the_query_reads_head_checks_and_an_author_window () =
       (contains "head: commits(last: 1)");
     Alcotest.(check bool) "the author window reads each commit's parent count" true
       (contains "parents { totalCount }");
+    Alcotest.(check bool) "the title and the head object id are asked for" true
+      (contains "title headRefOid");
+    Alcotest.(check bool) "the last review of each account is asked for with its commit" true
+      (contains "latestReviews(first: 10)" && contains "commit { oid }" && contains "hasNextPage");
     (match List.assoc_opt "variables" fields with
      | Some (`Assoc vars) ->
        Alcotest.(check bool) "the window size is sent" true
@@ -924,6 +928,9 @@ let pull ~number ~author =
   ; review = Facts.Review_none
   ; mergeable = Facts.Mergeable
   ; author
+  ; title = None
+  ; head_oid = None
+  ; reviews = Facts.Reviews_not_read
   }
 
 let test_join_is_exact () =
@@ -983,7 +990,7 @@ let test_json_shape () =
   Alcotest.(check (list string))
     "row keys"
     [ "repo_slug"; "number"; "draft"; "checks"; "review"; "mergeable"
-    ; "author"; "keeper" ]
+    ; "author"; "keeper"; "title"; "head_oid"; "head_review"; "reviews" ]
     (keys (List.hd rows))
 
 (* A Keeper directory that cannot be listed: the snapshot says so instead of
@@ -1196,6 +1203,175 @@ let test_lane_addon_github_without_a_reader_has_no_session () =
        (Pulls.lane_addon_github ~now ~http_post:never_called ~config:(Masc.Workspace.default_config base_path)
           ~repository_id:"masc"))
 
+
+(* --- Title, head object id and the last review of each account --- *)
+
+let column_node ~number columns =
+  Printf.sprintf
+    {|{"number":%d,"isDraft":false,%s
+       "reviewDecision":null,"mergeable":"MERGEABLE",
+       "authored":{"nodes":[{"commit":{"parents":{"totalCount":1},"author":{"name":"edgar"}}}]},
+       "head":{"nodes":[{"commit":{"statusCheckRollup":{"state":"SUCCESS"}}}]}}|}
+    number
+    columns
+
+let read_one body =
+  let http_post, _ = recording_stub [ ok_response body ] in
+  Pulls.read_repository ~now ~http_post ~token:"t" "o/r" |> read_or_fail
+
+let test_title_head_and_latest_reviews_decode () =
+  let columns =
+    {|"title":"fix: a thing","headRefOid":"aaaa1111",
+      "latestReviews":{"pageInfo":{"hasNextPage":false},"nodes":[
+        {"state":"APPROVED","author":{"__typename":"User","login":"edgar"},"commit":{"oid":"aaaa1111"}},
+        {"state":"COMMENTED","author":{"__typename":"Bot","login":"review-bot"},"commit":{"oid":"bbbb2222"}},
+        {"state":"CHANGES_REQUESTED","author":null,"commit":null},
+        {"state":"SOMETHING_NEW","author":{"__typename":"Organization","login":"acme"},"commit":{"oid":"aaaa1111"}}]},|}
+  in
+  let pulls, undecodable =
+    read_one (page ~has_next:false ~cursor:None [ column_node ~number:1 columns ])
+  in
+  Alcotest.(check int) "the row stands" 0 undecodable;
+  match pulls with
+  | [ pull ] ->
+    Alcotest.(check (option string)) "title" (Some "fix: a thing") pull.title;
+    Alcotest.(check (option string)) "head object id" (Some "aaaa1111") pull.head_oid;
+    Alcotest.(check bool) "the four reviews, each with its account, state and commit" true
+      (pull.reviews
+       = Facts.Reviews_read
+           { reviews =
+               [ { reviewer = Facts.Actor_user "edgar"
+                 ; verdict = Facts.Verdict_approved
+                 ; commit_oid = Some "aaaa1111"
+                 }
+               ; { reviewer = Facts.Actor_bot "review-bot"
+                 ; verdict = Facts.Verdict_commented
+                 ; commit_oid = Some "bbbb2222"
+                 }
+               ; { reviewer = Facts.Actor_absent
+                 ; verdict = Facts.Verdict_changes_requested
+                 ; commit_oid = None
+                 }
+               ; { reviewer = Facts.Actor_other { typename = Some "Organization"; login = Some "acme" }
+                 ; verdict = Facts.Verdict_unrecognized "SOMETHING_NEW"
+                 ; commit_oid = Some "aaaa1111"
+                 }
+               ]
+           ; truncated = false
+           });
+    Alcotest.(check bool) "one review is on the head commit" true
+      (Facts.head_review_of pull = Facts.Reviewed_on_head)
+  | _ -> failf "expected one pull request"
+
+let test_unreadable_columns_keep_the_row () =
+  let body =
+    page
+      ~has_next:false
+      ~cursor:None
+      [ column_node ~number:1
+          {|"title":"kept","headRefOid":"h1",
+            "latestReviews":{"pageInfo":{"hasNextPage":false},"nodes":[{"author":null,"commit":null}]},|}
+      ; column_node ~number:2 ""
+      ; column_node ~number:3 {|"title":"t3","headRefOid":"h3","latestReviews":null,|}
+      ; column_node ~number:4
+          {|"title":"t4","headRefOid":"h4","latestReviews":{"nodes":[]},|}
+      ]
+  in
+  let pulls, undecodable = read_one body in
+  Alcotest.(check int) "a column this reader cannot read does not drop the row" 0 undecodable;
+  Alcotest.(check (list int)) "all four rows stand" [ 1; 2; 3; 4 ]
+    (List.map (fun (p : Facts.pull_request) -> p.number) pulls);
+  List.iter
+    (fun (p : Facts.pull_request) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "#%d: no readable review list is not an empty one" p.number)
+        true
+        (p.reviews = Facts.Reviews_not_read))
+    pulls;
+  match pulls with
+  | [ first; second; _; _ ] ->
+    Alcotest.(check (option string)) "a review without a state keeps the other columns" (Some "kept")
+      first.title;
+    Alcotest.(check (option string)) "an absent title is None" None second.title;
+    Alcotest.(check (option string)) "an absent head object id is None" None second.head_oid
+  | _ -> failf "expected four pull requests"
+
+let head_review_name = function
+  | Facts.Reviewed_on_head -> "reviewed_on_head"
+  | Facts.Not_reviewed_on_head -> "not_reviewed_on_head"
+  | Facts.Review_history_incomplete -> "review_history_incomplete"
+  | Facts.Head_review_unknown -> "unknown"
+
+let test_head_review_is_decided_by_the_commit_alone () =
+  let review commit_oid =
+    { Facts.reviewer = Facts.Actor_user "u"; verdict = Facts.Verdict_commented; commit_oid }
+  in
+  let read ~truncated reviews = Facts.Reviews_read { reviews; truncated } in
+  let case name ~head_oid ~reviews expected =
+    let pull = { (pull ~number:1 ~author:None) with head_oid; reviews } in
+    Alcotest.(check string) name expected (head_review_name (Facts.head_review_of pull))
+  in
+  case "a review on the head" ~head_oid:(Some "h") ~reviews:(read ~truncated:false [ review (Some "h") ])
+    "reviewed_on_head";
+  case "a review on the head in a cut list" ~head_oid:(Some "h")
+    ~reviews:(read ~truncated:true [ review (Some "old"); review (Some "h") ]) "reviewed_on_head";
+  case "reviews of an older commit only" ~head_oid:(Some "h")
+    ~reviews:(read ~truncated:false [ review (Some "old") ]) "not_reviewed_on_head";
+  case "no review at all" ~head_oid:(Some "h") ~reviews:(read ~truncated:false []) "not_reviewed_on_head";
+  case "a review with no commit is not on the head" ~head_oid:(Some "h")
+    ~reviews:(read ~truncated:false [ review None ]) "not_reviewed_on_head";
+  case "a cut list with none on the head" ~head_oid:(Some "h")
+    ~reviews:(read ~truncated:true [ review (Some "old") ]) "review_history_incomplete";
+  case "the review list was not read" ~head_oid:(Some "h") ~reviews:Facts.Reviews_not_read "unknown";
+  case "the head was not read" ~head_oid:None ~reviews:(read ~truncated:false [ review (Some "h") ])
+    "unknown"
+
+let test_json_carries_the_head_and_the_reviews () =
+  let reviewed =
+    { (pull ~number:1 ~author:None) with
+      title = Some "fix: a thing"
+    ; head_oid = Some "h"
+    ; reviews =
+        Facts.Reviews_read
+          { reviews =
+              [ { reviewer = Facts.Actor_user "edgar"
+                ; verdict = Facts.Verdict_approved
+                ; commit_oid = Some "h"
+                }
+              ; { reviewer = Facts.Actor_other { typename = None; login = None }
+                ; verdict = Facts.Verdict_unrecognized "SOMETHING_NEW"
+                ; commit_oid = Some "old"
+                }
+              ]
+          ; truncated = false
+          }
+    }
+  in
+  let unread = pull ~number:2 ~author:None in
+  let _, rows = pulls_json (snapshot_with ~keepers:Facts.Keepers_not_listed [ reviewed; unread ]) in
+  let open Yojson.Safe.Util in
+  match rows with
+  | [ first; second ] ->
+    Alcotest.(check string) "title" "fix: a thing" (first |> member "title" |> to_string);
+    Alcotest.(check string) "head object id" "h" (first |> member "head_oid" |> to_string);
+    Alcotest.(check string) "head review" "reviewed_on_head" (first |> member "head_review" |> to_string);
+    let latest = first |> member "reviews" |> member "latest" |> to_list in
+    Alcotest.(check (list string)) "verdicts" [ "approved"; "unrecognized" ]
+      (List.map (fun review -> review |> member "verdict" |> to_string) latest);
+    Alcotest.(check (list string)) "the unknown state is shown as sent, the known ones carry none"
+      [ "null"; {|"SOMETHING_NEW"|} ]
+      (List.map (fun review -> Yojson.Safe.to_string (review |> member "verdict_raw")) latest);
+    Alcotest.(check (list string)) "on head" [ "true"; "false" ]
+      (List.map (fun review -> Yojson.Safe.to_string (review |> member "on_head")) latest);
+    Alcotest.(check string) "an actor of no known type" {|{"kind":"other","typename":null,"login":null}|}
+      (Yojson.Safe.to_string (List.nth latest 1 |> member "reviewer"));
+    Alcotest.(check string) "an unread row says so, not an empty list" "not_read"
+      (second |> member "reviews" |> member "state" |> to_string);
+    Alcotest.(check string) "an unread head review is unknown" "unknown"
+      (second |> member "head_review" |> to_string);
+    Alcotest.(check string) "an absent title is null" "null" (Yojson.Safe.to_string (second |> member "title"))
+  | _ -> failf "expected two rows"
+
 let () =
   Alcotest.run
     "server_repository_pulls"
@@ -1203,6 +1379,10 @@ let () =
       , [ Alcotest.test_case "two pages decode in order" `Quick test_decodes_two_pages
         ; Alcotest.test_case "unknown enum is counted" `Quick test_unknown_enum_is_counted
         ; Alcotest.test_case "author and mergeable decode" `Quick test_author_and_mergeable_decode
+        ; Alcotest.test_case "title, head and the last reviews decode" `Quick
+            test_title_head_and_latest_reviews_decode
+        ; Alcotest.test_case "an unreadable column keeps the row" `Quick
+            test_unreadable_columns_keep_the_row
         ; Alcotest.test_case "a merge commit head keeps the writing Keeper" `Quick
             test_a_merge_commit_head_keeps_the_writing_keeper
         ; Alcotest.test_case "query reads head checks and an author window" `Quick
@@ -1281,6 +1461,10 @@ let () =
     ; ( "keeper join"
       , [ Alcotest.test_case "join is exact" `Quick test_join_is_exact
         ; Alcotest.test_case "json shape" `Quick test_json_shape
+        ; Alcotest.test_case "head review is decided by the commit alone" `Quick
+            test_head_review_is_decided_by_the_commit_alone
+        ; Alcotest.test_case "json carries the head and the reviews" `Quick
+            test_json_carries_the_head_and_the_reviews
         ; Alcotest.test_case
             "unreadable keeper list is visible"
             `Quick

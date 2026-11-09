@@ -1,6 +1,6 @@
 (** Dashboard_goals_types_builder — pure builders that compose the
-    lower-level projections into the recursive [build_tree] that produces a
-    [tree_node] from a [build_context] snapshot.
+    lower-level projections into [build_tree], which produces a [tree_node]
+    from a [build_context] snapshot.
 
     Depends on [Dashboard_goals_types_accessor],
     [Dashboard_goals_types_health], and on [Json_util] / [Masc_domain] for
@@ -36,11 +36,10 @@ let approval_goal_ids approval_json =
    field stays on the node because the JSON shape and its consumers are
    unchanged.
    Pre-indexing [all_tasks], [pending_approvals], [keeper_metas], and
-   [latest_receipts] once when [build_tree context goals] is partially applied
+   [latest_receipts] once when [build_tree context] is partially applied
    turns forest construction from O(G * (T + A + K)) into
    O((T + A + K) log (G + K)). *)
-let build_tree context goals =
-  ignore goals;
+let build_tree context =
   let tasks_by_goal_id =
     let rev_map =
       List.fold_left
@@ -120,10 +119,7 @@ let build_tree context goals =
                Some assignee
              | Some _ | None -> None)
     in
-    let direct_goal_keeper_names = [] in
-    let direct_linked_keeper_names =
-      dedupe_sort (direct_task_keeper_names @ direct_goal_keeper_names)
-    in
+    let direct_linked_keeper_names = dedupe_sort direct_task_keeper_names in
     let direct_receipt_refs =
       direct_linked_keeper_names
       |> List.filter_map (fun keeper_name ->

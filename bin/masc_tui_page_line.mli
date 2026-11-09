@@ -2,9 +2,10 @@
     label and its value) or a note, and how much it matters; the screen alone
     decides what each looks like. *)
 
-(** [Quiet] is background the reader may skip, [Plain] is the default, and
-    [Attention] is what the reader has to know before acting on the page. *)
-type tone = Quiet | Plain | Attention
+(** [Quiet] is background the reader may skip, [Plain] is the default,
+    [Attention] is what the reader has to know before acting on the page, and
+    [Failure] is something that broke and has to be fixed. *)
+type tone = Quiet | Plain | Attention | Failure
 
 type t =
   | Title of string

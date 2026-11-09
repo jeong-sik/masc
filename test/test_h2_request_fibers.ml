@@ -1,15 +1,24 @@
 open Alcotest
 module Response = Masc.Http_server_eio.Response
 module Request = Masc.Http_server_eio.Request
+module Stream_end = Masc.Http_h2_stream.Stream_end
 
-let reqd_of_h2 ~sw h2_reqd =
-  Masc.Http_reqd.of_h2 ~stream_sw:sw
+let reqd_of_h2 ~stream_end h2_reqd =
+  Masc.Http_reqd.of_h2 ~stream_end
     ~ledger:(Masc.Http_h2_response_ledger.current_exn ()) h2_reqd
+
+let stalled_after_s = Server_mcp_transport_http_headers.sse_stalled_after_s
+
+(* A registry on a mock clock: its response flushes stall only when a test
+   moves that clock past the bound. *)
+let registry ?(clock = Eio_mock.Clock.make ()) () =
+  Server_h2_stream_registry.create ~clock ~stalled_after_s ()
 
 type dispatch = Inline_reader | Request_fibers
 
-let with_connection ?streams ?resources dispatch handler run =
+let with_connection ?streams ?resources ?(client_window = 65535l) dispatch handler run =
   Eio_main.run (fun env ->
+    let clock = Eio.Stdenv.clock env in
     Eio.Time.with_timeout_exn (Eio.Stdenv.clock env) 10.0 (fun () ->
       Eio.Switch.run (fun sw ->
         let pool = Domain_pool.create ~sw ~domain_count:1 env#domain_mgr in
@@ -42,14 +51,17 @@ let with_connection ?streams ?resources dispatch handler run =
                 H2_eio.Server.create_connection_handler ~sw:conn_sw
                   ~request_handler:(fun client_addr reqd ->
                     Masc.Http_h2_response_ledger.with_request resources ~sw:conn_sw
-                      (fun () -> handler ~request_sw:conn_sw client_addr reqd))
+                      (fun () ->
+                        let stream_end =
+                          Stream_end.create ~stream_sw:conn_sw ~clock ~stalled_after_s reqd in
+                        handler ~stream_end client_addr reqd))
                   ~error_handler addr server_flow
               | Request_fibers ->
-                Server_bootstrap_http.serve_h2_connection ?streams ?resources ~sw:conn_sw
+                Server_bootstrap_http.serve_h2_connection ~clock ?streams ?resources ~sw:conn_sw
                   ~h2_request_handler:handler ~h2_error_handler:error_handler addr server_flow)) in
           let closing = ref false in
           let client = H2_eio.Client.create_connection ~sw
-            ~config:{ H2.Config.default with initial_window_size = 65535l }
+            ~config:{ H2.Config.default with initial_window_size = client_window }
             ~error_handler:(fun _ -> if not !closing then fail "unexpected H2 connection error")
             client_flow in
           (* The H2 client's reader fiber always has a read in flight on
@@ -124,9 +136,9 @@ let flow_control_body = String.make (2 * 65535) 'w'
 
 let test_reader_control () =
   let admitted, admit = Eio.Promise.create () in
-  let handler ~request_sw _ reqd =
+  let handler ~stream_end _ reqd =
     Eio.Promise.resolve admit ();
-    Response.json_value_on_cpu large_json (reqd_of_h2 ~sw:request_sw reqd) in
+    Response.json_value_on_cpu large_json (reqd_of_h2 ~stream_end reqd) in
   with_connection Inline_reader handler (fun ~env ~client ~client_flow:_ ~release ~close_client:_ ~server:_ ->
     let slow = request client "/slow" in
     Eio.Promise.await admitted;
@@ -146,8 +158,8 @@ let test_reader_control () =
 let test_multiplexed_progress meth =
   let admitted, admit = Eio.Promise.create () in
   let reader_ready, mark_reader_ready = Eio.Promise.create () in
-  let handler ~request_sw:sw _ h2_reqd =
-    let reqd = reqd_of_h2 ~sw h2_reqd in
+  let handler ~stream_end _ h2_reqd =
+    let reqd = reqd_of_h2 ~stream_end h2_reqd in
     match (H2.Reqd.request h2_reqd).target with
     | "/slow" ->
       let respond () =
@@ -194,8 +206,8 @@ let test_multiplexed_progress meth =
 let test_reset_does_not_break_siblings () =
   let admitted, admit = Eio.Promise.create () in
   let finished, finish = Eio.Promise.create () in
-  let handler ~request_sw _ h2_reqd =
-    let reqd = reqd_of_h2 ~sw:request_sw h2_reqd in
+  let handler ~stream_end _ h2_reqd =
+    let reqd = reqd_of_h2 ~stream_end h2_reqd in
     match (H2.Reqd.request h2_reqd).target with
     | "/slow" ->
       Eio.Promise.resolve admit ();
@@ -227,11 +239,11 @@ let rst_stream_frame stream_id =
 
 let test_reset_releases_stream_scopes () =
   let held_streams = 32 in
-  let streams = Server_h2_stream_registry.create () in
+  let streams = registry () in
   let admitted = ref 0 and cancelled = ref 0 in
   let all_admitted, admit_all = Eio.Promise.create () in
   let all_cancelled, cancel_all = Eio.Promise.create () in
-  let handler ~request_sw _ h2_reqd =
+  let handler ~stream_end _ h2_reqd =
     match (H2.Reqd.request h2_reqd).target with
     | "/hold" ->
       incr admitted;
@@ -240,7 +252,7 @@ let test_reset_releases_stream_scopes () =
          incr cancelled;
          if !cancelled = held_streams then Eio.Promise.resolve cancel_all ();
          raise exn)
-    | "/fast" -> Response.json ~compress:false "alive" (reqd_of_h2 ~sw:request_sw h2_reqd)
+    | "/fast" -> Response.json ~compress:false "alive" (reqd_of_h2 ~stream_end h2_reqd)
     | path -> failf "unexpected path %s" path in
   with_connection ~streams Request_fibers handler
     (fun ~env:_ ~client ~client_flow ~release:_ ~close_client:_ ~server:_ ->
@@ -272,10 +284,10 @@ let closing_data_frame stream_id =
   Bytes.to_string frame
 
 let test_reset_sent_ends_stream_scope () =
-  let streams = Server_h2_stream_registry.create () in
+  let streams = registry () in
   let held, hold = Eio.Promise.create () in
   let ended, record_end = Eio.Promise.create () in
-  let handler ~request_sw _ h2_reqd =
+  let handler ~stream_end _ h2_reqd =
     match (H2.Reqd.request h2_reqd).target with
     | "/hold" ->
       Eio.Promise.resolve hold ();
@@ -283,7 +295,7 @@ let test_reset_sent_ends_stream_scope () =
        | Eio.Cancel.Cancelled (Masc.Http_h2_stream.Stream_reset cause) as exn ->
          Eio.Promise.resolve record_end cause;
          raise exn)
-    | "/fast" -> Response.json ~compress:false "alive" (reqd_of_h2 ~sw:request_sw h2_reqd)
+    | "/fast" -> Response.json ~compress:false "alive" (reqd_of_h2 ~stream_end h2_reqd)
     | path -> failf "unexpected path %s" path in
   with_connection ~streams Request_fibers handler
     (fun ~env:_ ~client ~client_flow ~release:_ ~close_client:_ ~server:_ ->
@@ -311,18 +323,18 @@ let test_reset_sent_ends_stream_scope () =
    flushed go back to the ledger; the client sees its stream reset. No error
    handler answers a started response, so the reset logs the failure, once. *)
 let test_failure_after_headers_releases_the_stream () =
-  let streams = Server_h2_stream_registry.create () in
+  let streams = registry () in
   let resources = Masc.Http_h2_response_ledger.create
     ~max_pending_bytes:H2_response_limits.default_max_pending_bytes in
   let partial = "partial" in
   let failure = "fixture failure after the headers" in
   let reserved = ref 0 in
   let ended, record_end = Eio.Promise.create () in
-  let handler ~request_sw _ h2_reqd =
-    let reqd = reqd_of_h2 ~sw:request_sw h2_reqd in
+  let handler ~stream_end _ h2_reqd =
+    let reqd = reqd_of_h2 ~stream_end h2_reqd in
     match (H2.Reqd.request h2_reqd).target with
     | "/partial" ->
-      Eio.Fiber.fork ~sw:request_sw (fun () ->
+      Eio.Fiber.fork ~sw:(Stream_end.switch stream_end) (fun () ->
         try Eio.Fiber.await_cancel () with
         | Eio.Cancel.Cancelled (Masc.Http_h2_stream.Stream_reset cause) as exn ->
           Eio.Promise.resolve record_end cause;
@@ -360,8 +372,8 @@ let test_connection_closes_pending_work () =
   let cancelled, mark_cancelled = Eio.Promise.create () in
   let child_started, start_child = Eio.Promise.create () in
   let child_cancelled, cancel_child = Eio.Promise.create () in
-  let handler ~request_sw:sw _ h2_reqd =
-    let reqd = reqd_of_h2 ~sw h2_reqd in
+  let handler ~stream_end _ h2_reqd =
+    let reqd = reqd_of_h2 ~stream_end h2_reqd in
     match (H2.Reqd.request h2_reqd).target with
     | "/slow" ->
       Eio.Promise.resolve admit ();
@@ -372,7 +384,7 @@ let test_connection_closes_pending_work () =
          Eio.Promise.resolve mark_cancelled ();
          raise exn)
     | "/child" ->
-      Eio.Fiber.fork ~sw (fun () ->
+      Eio.Fiber.fork ~sw:(Stream_end.switch stream_end) (fun () ->
         Eio.Promise.resolve start_child ();
         try Eio.Fiber.await_cancel () with Eio.Cancel.Cancelled _ as exn ->
           Eio.Promise.resolve cancel_child ();
@@ -395,10 +407,10 @@ let test_connection_closes_pending_work () =
    error handler, which logs the failure. Nothing else logs it again. *)
 let test_handler_error_is_stream_local () =
   let failure = "fixture handler failure" in
-  let handler ~request_sw _ h2_reqd =
+  let handler ~stream_end _ h2_reqd =
     match (H2.Reqd.request h2_reqd).target with
     | "/fail" -> failwith failure
-    | "/fast" -> Response.json ~compress:false "alive" (reqd_of_h2 ~sw:request_sw h2_reqd)
+    | "/fast" -> Response.json ~compress:false "alive" (reqd_of_h2 ~stream_end h2_reqd)
     | path -> failf "unexpected path %s" path in
   with_log_capture @@ fun logged ->
   with_connection Request_fibers handler (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
@@ -408,6 +420,206 @@ let test_handler_error_is_stream_local () =
     check int "the error handler's line is the only one" 1 (logged failure);
     check string "sibling survives handler exception" "alive"
       (snd (await_reply (request client "/fast"))))
+
+(* RFC-0518 D2. The registry runs on a mock clock that only the test moves,
+   so a flush crosses the bound exactly when the test says. The client opens
+   each stream's window to [stalled_window] bytes and reads a body only when
+   the test asks: h2 opens the window again only for bytes the client read. *)
+let stalled_window = 1024
+let stalled_body = String.make (4 * stalled_window) 's'
+let stall_line = "took no response bytes"
+
+let stall_line_for path =
+  Printf.sprintf "GET %s %s for %.0fs" path stall_line stalled_after_s
+
+(* A request whose response the client holds unread. [status] resolves when
+   the headers arrive, [reset] with the error h2 reports for the stream, and
+   [read_all] drains the body afterwards: [Ok body] when the stream ended with
+   END_STREAM, [Error ()] when it was reset. *)
+let open_unread ?(meth = `GET) ?(body = "") client path =
+  let status, resolve_status = Eio.Promise.create () in
+  let reset, resolve_reset = Eio.Promise.create () in
+  let response_body, resolve_body = Eio.Promise.create () in
+  let request = H2.Request.create ~scheme:"http" meth path
+    ~headers:(H2.Headers.of_list [":authority", "localhost"]) in
+  let writer = H2_eio.Client.request client ~flush_headers_immediately:true request
+    ~error_handler:(fun error ->
+      if not (Eio.Promise.is_resolved reset) then Eio.Promise.resolve resolve_reset error)
+    ~response_handler:(fun response reader ->
+      Eio.Promise.resolve resolve_body reader;
+      Eio.Promise.resolve resolve_status (H2.Status.to_code response.status)) in
+  send_body writer body;
+  let read_all () =
+    let reader = Eio.Promise.await response_body in
+    let bytes = Buffer.create 256 in
+    let ended, resolve_end = Eio.Promise.create () in
+    let rec read () = H2.Body.Reader.schedule_read reader
+      ~on_eof:(fun () ->
+        Eio.Promise.resolve resolve_end
+          (match H2.Body.Reader.completion reader with
+           | H2.Body.Reader.Complete -> Ok (Buffer.contents bytes)
+           | H2.Body.Reader.Aborted | H2.Body.Reader.Pending -> Error ()))
+      ~on_read:(fun chunk ~off ~len ->
+        Buffer.add_string bytes (Bigstringaf.substring chunk ~off ~len);
+        read ()) in
+    read ();
+    Eio.Promise.await ended in
+  status, reset, read_all
+
+(* Each PING round trip gives the server a turn; [ready] is a server-side
+   state the test waits for without a wall clock. *)
+let ping_until client ready =
+  let rec go remaining =
+    if not (ready ()) then (
+      if remaining = 0 then fail "the server did not reach the expected state";
+      ping client;
+      go (remaining - 1)) in
+  go 20
+
+let stalled_ledger () =
+  Masc.Http_h2_response_ledger.create
+    ~max_pending_bytes:H2_response_limits.default_max_pending_bytes
+
+(* A streaming response whose client does not read it. At the bound the
+   stream is reset, its flush is answered [`Closed], its reservation goes back
+   to the ledger, and one warn line names the request. One second earlier
+   nothing has happened. *)
+let test_stalled_flush_resets_the_stream () =
+  let clock = Eio_mock.Clock.make () in
+  let streams = registry ~clock () in
+  let resources = stalled_ledger () in
+  let registered, register = Eio.Promise.create () in
+  let flushed, record_flush = Eio.Promise.create () in
+  let ended, record_end = Eio.Promise.create () in
+  let handler ~stream_end _ h2_reqd =
+    let reqd = reqd_of_h2 ~stream_end h2_reqd in
+    match (H2.Reqd.request h2_reqd).target with
+    | "/stalled" ->
+      let writer = Masc.Http_reqd.respond_with_streaming ~flush_headers_immediately:true
+        reqd (Httpun.Response.create `OK) in
+      Masc.Http_reqd.Body_writer.write_string writer stalled_body;
+      Masc.Http_reqd.Body_writer.flush writer (Eio.Promise.resolve record_flush);
+      Eio.Promise.resolve register ();
+      (try Eio.Fiber.await_cancel () with
+       | Eio.Cancel.Cancelled (Masc.Http_h2_stream.Stream_reset cause) as exn ->
+         Eio.Promise.resolve record_end cause;
+         raise exn)
+    | "/fast" -> Response.json ~compress:false "alive" reqd
+    | path -> failf "unexpected path %s" path in
+  with_log_capture @@ fun logged ->
+  with_connection ~streams ~resources ~client_window:(Int32.of_int stalled_window)
+    Request_fibers handler
+    (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
+    let status, reset, _ = open_unread client "/stalled" in
+    Eio.Promise.await registered;
+    check int "the response started" 200 (Eio.Promise.await status);
+    Eio_mock.Clock.set_time clock (stalled_after_s -. 1.0);
+    ping client;
+    check bool "a flush one second short of the bound keeps its stream" false
+      (Eio.Promise.is_resolved ended || Eio.Promise.is_resolved reset);
+    check int "nothing is logged before the bound" 0 (logged stall_line);
+    Eio_mock.Clock.set_time clock stalled_after_s;
+    check bool "the scope ended as stalled" true
+      (match Eio.Promise.await ended with
+       | Masc.Http_h2_stream.Stalled -> true
+       | _ -> false);
+    check bool "the client got RST_STREAM(INTERNAL_ERROR)" true
+      (match Eio.Promise.await reset with
+       | `Protocol_error (H2.Error_code.InternalError, _) -> true
+       | _ -> false);
+    check bool "the waiting flush was answered as closed" true
+      (match Eio.Promise.await flushed with `Closed -> true | `Written -> false);
+    check int "the unsent bytes went back to the ledger" 0
+      (Masc.Http_h2_response_ledger.pending_bytes resources);
+    check int "one warn line names the stalled request" 1
+      (logged (stall_line_for "/stalled"));
+    check int "the stalled stream left no scope behind" 0
+      (Server_h2_stream_registry.active_streams streams);
+    check string "the connection keeps serving" "alive"
+      (snd (await_reply (request client "/fast"))))
+
+(* A client that reads gets its flush answered, and the clock moving far
+   past the bound afterwards cuts nothing. *)
+let test_reading_client_keeps_its_stream () =
+  let clock = Eio_mock.Clock.make () in
+  let streams = registry ~clock () in
+  let flushed, record_flush = Eio.Promise.create () in
+  let finish, finish_response = Eio.Promise.create () in
+  let handler ~stream_end _ h2_reqd =
+    let reqd = reqd_of_h2 ~stream_end h2_reqd in
+    let writer = Masc.Http_reqd.respond_with_streaming ~flush_headers_immediately:true
+      reqd (Httpun.Response.create `OK) in
+    Masc.Http_reqd.Body_writer.write_string writer stalled_body;
+    Masc.Http_reqd.Body_writer.flush writer (Eio.Promise.resolve record_flush);
+    Eio.Promise.await finish;
+    Masc.Http_reqd.Body_writer.write_string writer "end";
+    Masc.Http_reqd.Body_writer.close writer in
+  with_log_capture @@ fun logged ->
+  with_connection ~streams ~client_window:(Int32.of_int stalled_window)
+    Request_fibers handler
+    (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
+    let reply = request client "/reading" in
+    check bool "the reading client answers the flush" true
+      (match Eio.Promise.await flushed with `Written -> true | `Closed -> false);
+    Eio_mock.Clock.set_time clock (2.0 *. stalled_after_s);
+    ping client;
+    check int "the stream keeps its scope" 1
+      (Server_h2_stream_registry.active_streams streams);
+    check int "nothing is logged as stalled" 0 (logged stall_line);
+    Eio.Promise.resolve finish_response ();
+    check string "the client gets the whole body" (stalled_body ^ "end")
+      (snd (await_reply reply)))
+
+(* An error answer h2 opens while the stream's work reports a failure gets
+   the bound too: a failure of the handler itself, or one that escapes the
+   deferred body work [Http_h2_stream.dispatch] runs. The client leaves the
+   answer unread with a window smaller than the diagnostic. At the bound the scope ends, the
+   reservation goes back, and h2 ends the cut answer (RFC-0518 §5): the
+   client gets the bytes its window let through and END_STREAM. *)
+let test_stalled_error_answer_ends source () =
+  let clock = Eio_mock.Clock.make () in
+  let streams = registry ~clock () in
+  let resources = stalled_ledger () in
+  let window = 8 in
+  let failure = "fixture failure before any response" in
+  let diagnostic = Printexc.to_string (Failure failure) in
+  let handler ~stream_end _ h2_reqd =
+    match source with
+    | `Handler -> failwith failure
+    | `Body_callback ->
+      Masc.Http_reqd.read_body (reqd_of_h2 ~stream_end h2_reqd) ~max_bytes:1024
+        ~on_body:(fun _ -> failwith failure)
+        ~on_error:(function
+          | Masc.Http_reqd.Internal exn -> raise exn
+          | Masc.Http_reqd.Too_large _ -> fail "a 12-byte body is not too large") in
+  with_log_capture @@ fun logged ->
+  with_connection ~streams ~resources ~client_window:(Int32.of_int window)
+    Request_fibers handler
+    (fun ~env:_ ~client ~client_flow:_ ~release:_ ~close_client:_ ~server:_ ->
+    let status, _, read_all =
+      match source with
+      | `Handler -> open_unread client "/fail"
+      | `Body_callback -> open_unread ~meth:`POST ~body:"request body" client "/fail" in
+    check int "the error handler answered" 500 (Eio.Promise.await status);
+    ping client;
+    check int "the error answer holds the stream scope" 1
+      (Server_h2_stream_registry.active_streams streams);
+    check bool "the diagnostic is reserved while it waits" true
+      (Masc.Http_h2_response_ledger.pending_bytes resources > 0);
+    Eio_mock.Clock.set_time clock (stalled_after_s -. 1.0);
+    ping client;
+    check int "one second short of the bound it still holds the scope" 1
+      (Server_h2_stream_registry.active_streams streams);
+    Eio_mock.Clock.set_time clock stalled_after_s;
+    ping_until client (fun () -> Server_h2_stream_registry.active_streams streams = 0);
+    check int "the diagnostic went back to the ledger" 0
+      (Masc.Http_h2_response_ledger.pending_bytes resources);
+    check bool "the client gets the bytes its window let through, then the end" true
+      (read_all () = Ok (String.sub diagnostic 0 window));
+    check int "the error handler logged the failure once" 1 (logged failure);
+    check int "one warn line names the stalled answer" 1
+      (logged (Printf.sprintf "%s /fail %s"
+         (match source with `Handler -> "GET" | `Body_callback -> "POST") stall_line)))
 
 let () = run "H2 request fibers" ["connection progress", [
   test_case "direct reader reproduces occupied CPU stall" `Quick test_reader_control;
@@ -419,4 +631,13 @@ let () = run "H2 request fibers" ["connection progress", [
   test_case "failure after headers releases the stream" `Quick test_failure_after_headers_releases_the_stream;
   test_case "disconnect cancels requests and child fibers" `Quick test_connection_closes_pending_work;
   test_case "handler failure stays on its stream" `Quick test_handler_error_is_stream_local;
+]; "flush bound", [
+  test_case "an unanswered flush resets its stream at the bound" `Quick
+    test_stalled_flush_resets_the_stream;
+  test_case "a reading client keeps its stream past the bound" `Quick
+    test_reading_client_keeps_its_stream;
+  test_case "a stalled error answer from the handler ends at the bound" `Quick
+    (test_stalled_error_answer_ends `Handler);
+  test_case "a stalled error answer from a body callback ends at the bound" `Quick
+    (test_stalled_error_answer_ends `Body_callback);
 ]]

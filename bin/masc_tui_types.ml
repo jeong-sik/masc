@@ -1227,15 +1227,28 @@ type msg_entry = {
   me_at: float;
 }
 
-(* The canonical transcript and memory journal are distinct sources, even
-   when a transcript system row uses the Memory display role. [None] means
-   no successful transcript read yet; [Some []] is a received empty source. *)
+(* A partial reply does not establish receipt of the physical page or full
+   transcript. In particular it must not consume their first-read/retry rights.
+   A received empty history remains distinct from an unread source. *)
+type keeper_chat_history =
+  | Chat_history_unread
+  | Chat_history_partial of msg_entry list
+  | Chat_history_received of msg_entry list
+
+let keeper_chat_history_rows = function
+  | Chat_history_unread -> []
+  | Chat_history_partial rows | Chat_history_received rows -> rows
+
+let keeper_chat_history_received = function
+  | Chat_history_received _ -> true
+  | Chat_history_unread | Chat_history_partial _ -> false
+
 type keeper_chat_sources = {
-  kcs_history : msg_entry list option;
+  kcs_history : keeper_chat_history;
   kcs_memory : msg_entry list;
 }
 
-let empty_keeper_chat_sources = {kcs_history=None; kcs_memory=[]}
+let empty_keeper_chat_sources = {kcs_history=Chat_history_unread; kcs_memory=[]}
 
 (* Rows already read from one Keeper, with the paging authority supplied by
    those reads. This is a session cache, not another persistent transcript. *)
@@ -21196,10 +21209,10 @@ let transcript_replaces_session_output ~(fresh : msg_entry list)
    chat projection/search. All source updates rebuild that view here. *)
 let set_keeper_chat_sources (state : state) sources =
   state.msg_loaded_sources <- sources;
-  state.msg_loaded <- match sources.kcs_history, sources.kcs_memory with
-    | None, memory -> memory
-    | Some history, [] -> history
-    | Some history, memory -> history @ memory
+  state.msg_loaded <- match keeper_chat_history_rows sources.kcs_history, sources.kcs_memory with
+    | [], memory -> memory
+    | history, [] -> history
+    | history, memory -> history @ memory
 ;;
 
 let restore_keeper_chat_page (state : state) keeper_name =
@@ -21255,7 +21268,7 @@ let retire_keeper_chat_history (state : state) keeper_name =
   state.msg_loaded_pages <- List.remove_assoc keeper_name state.msg_loaded_pages;
   if state.msg_loaded_keeper = Some keeper_name then (
     retire_keeper_message_search state;
-    set_keeper_chat_sources state {state.msg_loaded_sources with kcs_history=None};
+    set_keeper_chat_sources state {state.msg_loaded_sources with kcs_history=Chat_history_unread};
     state.msg_loaded_error <- None;
     state.msg_loaded_dropped <- 0;
     state.msg_older_cursor <- None;

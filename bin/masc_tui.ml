@@ -8983,7 +8983,7 @@ let launch_keeper_history_load ?(load_file_changes = true) ?(force = false) stat
     let port = state.port in
     state.msg_history_load_generation <- state.msg_history_load_generation + 1;
     let first_page = state.msg_loaded_keeper <> Some keeper_name
-      || Option.is_none state.msg_loaded_sources.kcs_history in
+      || not (keeper_chat_history_received state.msg_loaded_sources.kcs_history) in
     state.msg_older_loading <- first_page;
     let request = Keeper_history_read.create
       ~generation:state.msg_history_load_generation ~keeper:keeper_name
@@ -27812,7 +27812,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
           let prior_sources = match state.msg_loaded_keeper with
             | Some loaded when String.equal loaded keeper_name -> state.msg_loaded_sources
             | Some _ | None -> empty_keeper_chat_sources in
-          let prior_history = Option.value ~default:[] prior_sources.kcs_history in
+          let prior_history = keeper_chat_history_rows prior_sources.kcs_history in
           state.msg_loaded_keeper <- Some keeper_name;
           (match source with
            | Keeper_history_read.History ->
@@ -27850,7 +27850,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  (* The first explicit older read asks the server for an exact
                     newest page and its cursor. Display clocks do not locate a
                     file position; a refresh preserves already-issued authority. *)
-                 if Option.is_none prior_sources.kcs_history then (
+                 if not (keeper_chat_history_received prior_sources.kcs_history) then (
                    state.msg_older_cursor <- None;
                    state.msg_older_exist <- true);
                  (* Aggregate success does not settle a physical-page failure.
@@ -27864,7 +27864,7 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                  prior_history
              in
              let history = match result with
-               | Ok _ -> Some history_entries
+               | Ok _ -> Chat_history_received history_entries
                | Error _ -> prior_sources.kcs_history in
              set_keeper_chat_sources state {prior_sources with kcs_history=history};
              launch_keeper_chat_journal_loads state ~mailbox ~keeper_name !journal_targets;
@@ -27878,7 +27878,10 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                 (* This is only a partial reply. The full source and physical
                    page retain their own pending/error/cursor authority. *)
                 if initial <> [] then
-                  set_keeper_chat_sources state {prior_sources with kcs_history=Some history}
+                  let kcs_history = match prior_sources.kcs_history with
+                    | Chat_history_received _ -> Chat_history_received history
+                    | Chat_history_unread | Chat_history_partial _ -> Chat_history_partial history in
+                  set_keeper_chat_sources state {prior_sources with kcs_history}
               | Error detail ->
                 Log.Transport.debug "keeper initial reply unavailable for %s: %s" keeper_name detail)
            | Keeper_history_read.Memory ->
@@ -27928,11 +27931,11 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
               let sources = if state.msg_loaded_keeper = Some keeper_name
                 then state.msg_loaded_sources else empty_keeper_chat_sources in
               let rows = msg_entries_of_history_rows state keeper_name page.Keeper_chat_history.decoded.rows in
-              let held = Option.value ~default:[] sources.kcs_history in
+              let held = keeper_chat_history_rows sources.kcs_history in
               (* Keep the aggregate's copy if it arrived first. Physical-page
                  and role-filtered windows can contain different identities. *)
               let history = prepend_older_history_page ~older:rows ~held in
-              set_keeper_chat_sources state {sources with kcs_history=Some history};
+              set_keeper_chat_sources state {sources with kcs_history=Chat_history_received history};
               state.msg_loaded_keeper <- Some keeper_name;
               state.msg_older_cursor <- page.Keeper_chat_history.next_cursor;
               state.msg_older_exist <- page.Keeper_chat_history.has_more
@@ -29104,9 +29107,9 @@ and apply_async_message_body ?(input_pending = fun () -> false) ?(image_input_pe
                is prepended here. [chat_timeline] then recomputes the one
                displayed-time projection across that complete window; scroll
                pins retain row identity rather than this cache position. *)
-            let held = Option.value ~default:[] state.msg_loaded_sources.kcs_history in
+            let held = keeper_chat_history_rows state.msg_loaded_sources.kcs_history in
             let history = prepend_older_history_page ~older:rows ~held in
-            set_keeper_chat_sources state {state.msg_loaded_sources with kcs_history=Some history};
+            set_keeper_chat_sources state {state.msg_loaded_sources with kcs_history=Chat_history_received history};
             (* Loaded rows arrive here too: a held turn whose rows only an
                older page carries gets its calls' outcome and duration the
                same way a refreshed page gives them. *)

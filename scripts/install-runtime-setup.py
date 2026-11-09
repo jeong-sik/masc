@@ -964,12 +964,17 @@ def prepare_antigravity_account(source, credentials):
     return source
 
 
-def antigravity_models(binary, source):
+def antigravity_models(binary, source, base_path=None):
     if 'account_catalog' in source:
         return source.pop('account_catalog')
-    response = subprocess.run([str(binary), 'runtime-antigravity-models', '--cli-path', source['command'],
-                               '--credential-file', source['credential_file']],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    # The workspace decides whether the host account may start (masc
+    # runtime-antigravity-models publishes its access for it).
+    arguments = [str(binary), 'runtime-antigravity-models', '--cli-path', source['command']]
+    if base_path is not None:
+        arguments += ['--base-path', str(base_path)]
+    arguments += ['--credential-file', source['credential_file']]
+    response = subprocess.run(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                              env=workspace_child_env() if base_path is not None else None)
     if response.returncode:
         raise SetupError('Antigravity could not refresh models. Check sign-in and retry account selection.')
     try:
@@ -978,11 +983,14 @@ def antigravity_models(binary, source):
         raise SetupError('Antigravity did not return a readable model list')
 
 
-def antigravity_context(binary, source, model_id):
+def antigravity_context(binary, source, model_id, base_path=None):
     print('Reading the selected Antigravity model’s context window…', file=sys.stderr)
-    response = subprocess.run([str(binary), 'runtime-antigravity-context', '--cli-path', source['command'],
-                               '--credential-file', source['credential_file'], '--model', model_id],
-                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    arguments = [str(binary), 'runtime-antigravity-context', '--cli-path', source['command']]
+    if base_path is not None:
+        arguments += ['--base-path', str(base_path)]
+    arguments += ['--credential-file', source['credential_file'], '--model', model_id]
+    response = subprocess.run(arguments, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                              env=workspace_child_env() if base_path is not None else None)
     try:
         observed = json.loads(response.stdout)
         if response.returncode:
@@ -1675,7 +1683,7 @@ def source_models(binary, source, timeout, refresh=False, base_path=None):
                         else 'Model list unavailable. Check account access, API credit or the running server, then refresh.')
             origin = str(error) + ' ' + fallback
     elif choice == 'antigravity' and source.get('credential_file'):
-        observed, origin = antigravity_models(binary, source), 'Models from the selected Antigravity account'
+        observed, origin = antigravity_models(binary, source, base_path), 'Models from the selected Antigravity account'
     elif choice in ('codex', 'claude_code'):
         # CLI clients answer through the binary's client catalog; the wizard
         # never drives the vendor CLI directly.
@@ -1789,7 +1797,7 @@ def resolve_model_spec(source, model, timeout, binary=None, base_path=None):
         return render(spec, binary, base_path=base_path)[0], spec
     context = model.get('context')
     if choice == 'antigravity' and binary:
-        context = antigravity_context(binary, source, model['id'])
+        context = antigravity_context(binary, source, model['id'], base_path)
     if not positive_integer(context) and binary and source.get('provider_id') and choice not in ('ollama', 'muse'):
         result = subprocess.run([str(binary), 'runtime-model-info', model['id'], '--provider', source['provider_id']],
                                 stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)

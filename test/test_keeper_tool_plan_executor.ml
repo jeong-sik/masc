@@ -2127,18 +2127,17 @@ let test_board_write_survives_composition_output_schema_failure () =
       (`Assoc [ "author", `String "schema-board-keeper"; "content", `String "schema failure target" ]) in
   check bool "the target exists" true (Tool_result.is_success created);
   let post_id = Yojson.Safe.Util.(Tool_result.data created |> member "id" |> to_string) in
-  let canonical = canonical_descriptor "keeper_lane_status" in
-  (* Plan-level output contracts come from the descriptor catalog, not from a
-     plan's descriptor list: canonicalize_descriptors replaces a descriptor
-     whose id is registered with the catalog copy, so a stricter
-     composable_output override cannot reach the executor. The comment producer
-     therefore runs under keeper_lane_status's strict canonical output contract
-     (required profile field, the same contract case 11 proves fires), and the
-     dispatch seam below performs the real comment write. The committed write
-     must survive the schema refusal. *)
-  let descriptor = canonical in
-  let node = Plan.node ~id:(node_id "comment") ~tool_name:"keeper_lane_status"
-      ~input:(Plan.Json_template.literal (`Assoc [])) () in
+  let canonical = canonical_descriptor "masc_board_comment" in
+  (* The producer really writes a comment. The consumer's deliberately stricter
+     output contract then refuses it, after the effect has committed. *)
+  let descriptor = { canonical with composable_output = Descriptor.Json_output
+      { schema = `Assoc [ "type", `String "object"
+              ; "properties", `Assoc [ "consumer_marker", `Assoc [ "type", `String "string" ] ]
+              ; "required", `List [ `String "consumer_marker" ]
+              ; "additionalProperties", `Bool true ] } } in
+  let node = Plan.node ~id:(node_id "comment") ~tool_name:"masc_board_comment"
+      ~input:(Plan.Json_template.literal
+        (`Assoc [ "post_id", `String post_id; "content", `String "committed before schema refusal" ])) () in
   let plan = match Plan.create ~descriptors:[ descriptor ] [ node ] with
     | Ok plan -> plan
     | Error error -> fail (Plan.error_to_string error) in
@@ -2159,11 +2158,10 @@ let test_board_write_survives_composition_output_schema_failure () =
       ~turn_context:Masc.Keeper_tool_call_log_context.empty_turn_context in
   let observe_node_result result = observed := Some result; record result in
   let dispatch ?launch_replay:_ ~tool_use_id:_ ~node ~descriptor:_ ~schedule:_ ~input () =
-    ignore input;
-    let result = write "masc_board_comment"
-        (`Assoc [ "author", `String "schema-board-keeper"
-                ; "post_id", `String post_id
-                ; "content", `String "committed before schema refusal" ]) in
+    let args = match input with
+      | `Assoc fields -> `Assoc (("author", `String "schema-board-keeper") :: fields)
+      | _ -> fail "comment node input is not an object" in
+    let result = write node.Plan.tool_name args in
     check bool "actual Board producer completed" true (Tool_result.is_success result);
     producer_fact := Board_tool_evidence.of_metadata (Tool_result.metadata result);
     Executor.dispatch_result result in

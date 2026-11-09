@@ -9,6 +9,7 @@ type runtime =
   { owner : User_id.t
   ; provider_account_id : Provider_account_id.t
   ; self_grant : Grant_id.t
+  ; self_effects : Effect.Set.t
   }
 
 type t =
@@ -70,7 +71,17 @@ let owns ~account_owner ~provider_account_id user_id =
   | None -> false
 ;;
 
-let make t ~author ~is_active ~account_owner ~runtime_id ~provider_account_id ~user_id ~grant_id =
+let make
+      t
+      ~author
+      ~is_active
+      ~account_owner
+      ~runtime_id
+      ~provider_account_id
+      ~user_id
+      ~grant_id
+      ~self_effects
+  =
   if Runtime_map.mem runtime_id t.runtimes
   then Error (Already_made runtime_id)
   else if Grant_id.Set.mem grant_id t.grants
@@ -86,7 +97,7 @@ let make t ~author ~is_active ~account_owner ~runtime_id ~provider_account_id ~u
       { runtimes =
           Runtime_map.add
             runtime_id
-            { owner = user_id; provider_account_id; self_grant = grant_id }
+            { owner = user_id; provider_account_id; self_grant = grant_id; self_effects }
             t.runtimes
       ; grants = Grant_id.Set.add grant_id t.grants
       }
@@ -97,7 +108,7 @@ let make t ~author ~is_active ~account_owner ~runtime_id ~provider_account_id ~u
 let apply t ~(author : Author.t) ~is_active ~account_owner (event : E.t) =
   match author, event with
   | ( Author.Authenticated (Principal.Human id)
-    , E.Made { runtime_id; provider_account_id; user_id; grant_id } ) ->
+    , E.Made { runtime_id; provider_account_id; user_id; grant_id; self_effects } ) ->
     make
       t
       ~author:id
@@ -107,6 +118,7 @@ let apply t ~(author : Author.t) ~is_active ~account_owner (event : E.t) =
       ~provider_account_id
       ~user_id
       ~grant_id
+      ~self_effects
   | Author.Authenticated (Principal.Service _ as principal), E.Made _ ->
     Error (Not_a_human principal)
   | ( ( Author.Local_operator

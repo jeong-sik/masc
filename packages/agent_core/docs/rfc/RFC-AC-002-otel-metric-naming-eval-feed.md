@@ -192,8 +192,7 @@ val emit_run_metrics : Otel_tracer.t -> run_metrics -> unit
 > was removed in #1814, leaving the bridge with zero production
 > callers). The `emit_run_metrics` call site in `agent.ml` was never
 > wired. Do not implement this phase as written; a future OTel export
-> path, if needed, must be re-RFC'd against the surviving
-> `Eval.create_collector` surface.
+> path, if needed, must be re-RFC'd.
 
 - ~~`eval_otel_bridge.ml` 신규 모듈~~ — deleted in PR #2689
 - ~~`agent.ml`의 run 종료 시점에서 `emit_run_metrics` 호출~~ — never wired; deleted in PR #2689

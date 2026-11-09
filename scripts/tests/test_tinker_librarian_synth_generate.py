@@ -108,6 +108,10 @@ def fact(index: int, *, category: str = "topic_0", stale: bool = False,
     return S.MemoryFact(f"m{index}", text(index), category, None, seen, stale, duplicate_of)
 
 
+# m4 is stale and m6 restates m5, so only m1, m2 and m3 can be targets.
+PLANTED = (fact(1), fact(2), fact(3), fact(4, stale=True), fact(5), fact(6, duplicate_of="m5"))
+
+
 def plan_of(kind: S.CandidateKind) -> C.CandidatePlan:
     return C.CandidatePlan(kind, LENGTH, None, None, False)
 
@@ -145,6 +149,16 @@ class PlanTest(unittest.TestCase):
 
 
 class MemoryTest(unittest.TestCase):
+    def test_a_duplicate_names_the_id_its_fact_gets_once_sorted_by_time(self) -> None:
+        late, early = dt.datetime(2026, 10, 9, tzinfo=dt.UTC), dt.datetime(2026, 10, 2, tzinfo=dt.UTC)
+        written = [G.Written(late, "doc_links", False, "원래 기억", None),
+                   G.Written(early, "doc_links", False, "같은 지식의 다른 문장", "원래 기억"),
+                   G.Written(early + dt.timedelta(days=1), "doc_links", True, "낡은 상태", None)]
+        facts = G.facts_of(random.Random(1), written)
+        self.assertEqual([(f.memory_id, f.claim, f.planted_stale, f.duplicate_of) for f in facts],
+                         [("m1", "같은 지식의 다른 문장", False, "m3"), ("m2", "낡은 상태", True, None),
+                          ("m3", "원래 기억", False, None)])
+
     def test_a_duplicate_restates_a_durable_fact_of_its_category(self) -> None:
         for seed in range(30):
             facts = G.build_memory(FakeModel(), memory_plan(seed))
@@ -167,8 +181,11 @@ class MemoryTest(unittest.TestCase):
 
 
 class CandidatesTest(unittest.TestCase):
+    def test_no_target_is_a_planted_fact(self) -> None:
+        self.assertEqual([f.memory_id for f in G.target_choices(PLANTED)], ["m1", "m2", "m3"])
+
     def test_targeted_candidates_take_distinct_durable_facts_outside_the_pair(self) -> None:
-        facts = (fact(1), fact(2), fact(3), fact(4, stale=True), fact(5), fact(6, duplicate_of="m5"))
+        facts = PLANTED
         plans = tuple(plan_of(kind) for kind in
                       (S.CandidateKind.CORRECTION, S.CandidateKind.COMPLEMENT, S.CandidateKind.PARAPHRASE))
         for seed in range(40):

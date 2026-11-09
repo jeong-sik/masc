@@ -219,6 +219,9 @@ type cli_cause =
       { message : string; tool_effect_attempted : bool; response_emitted : bool }
   | Codex_measured_input_refused of measured_capacity
   | Native_failed of native_family
+  | Held of { until : float }
+      (** Not dispatched: its provider stated a time not yet reached
+          (RFC-exact-lane-waits-for-a-stated-reset). *)
 [@@deriving yojson]
 type cli_observation = { runtime_id : string; cause : cli_cause } [@@deriving yojson]
 
@@ -270,6 +273,7 @@ let native_cause (cause : Fusion_official_client.failure) =
 
 
 let cli_observation (failure : Keeper_lane_cli_oneshot.failure) = match failure with
+  | Held {runtime_id;until} -> {runtime_id;cause=Held {until}}
   | Unknown_runtime {runtime_id} -> {runtime_id;cause=Unknown_runtime}
   | Not_an_official_client {runtime_id} -> {runtime_id;cause=Not_official}
   | Invalid_json_output {runtime_id;_} -> {runtime_id;cause=Invalid_json_answer}
@@ -283,13 +287,18 @@ let cli_observation (failure : Keeper_lane_cli_oneshot.failure) = match failure 
 
 let cli_observation_slot observation = observation.runtime_id
 let cli_was_dispatched observation = match observation.cause with
-  | Unknown_runtime | Not_official -> false
+  | Unknown_runtime | Not_official | Held _ -> false
   | Invalid_json_answer | Invalid_domain_answer | Codex_context_refused _
   | Claude_context_refused _ | Codex_measured_input_refused _
   | Native_failed (Codex | Claude | Claude_admission | Antigravity | Muse | Vibe | Host) -> true
 let of_cli_observation observation = match observation.cause with
   | Invalid_json_answer | Invalid_domain_answer -> invalid_output
   | Unknown_runtime | Not_official -> empty
+  (* The account's rest refusal without the call (R5): it says nothing about
+     size, so another slot's size refusal does not prove the input must be
+     split, and with no native run there is nothing unsettled. *)
+  | Held _ -> {empty with size_independent_execution_failure=true;
+                          non_capacity_execution_failure=true}
   | Codex_context_refused {tool_effect_attempted=false;message=_}
   | Claude_context_refused {tool_effect_attempted=false;response_emitted=false;message=_} ->
     {empty with named_input_capacity=true;provider_input_refusals=[Context_overflow]}
@@ -314,6 +323,7 @@ let cli_observation_of_yojson json =
     | Unknown_runtime | Not_official | Invalid_json_answer | Invalid_domain_answer
     | Codex_context_refused _ | Claude_context_refused _
     | Native_failed (Codex | Claude | Claude_admission | Antigravity | Muse | Vibe | Host) -> true
+    | Held {until} -> Float.is_finite until && until > 0.0
     | Codex_measured_input_refused limit ->
       limit.max_chars > 0 && limit.actual_chars > limit.max_chars in
   if original=encoded && String.trim value.runtime_id<>"" && valid then Ok value

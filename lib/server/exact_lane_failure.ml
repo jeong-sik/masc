@@ -182,6 +182,10 @@ let muse_error = function
   | Runtime_muse_serve.Timeout _ -> Transient
 
 let cli_failure = function
+  (* Not called before the time its provider stated. The same request may
+     pass after it with nothing changed: the class the account's own rest
+     refusal has (RFC-exact-lane-waits-for-a-stated-reset R5). *)
+  | Keeper_lane_cli_oneshot.Held _ -> Transient
   | Keeper_lane_cli_oneshot.Unknown_runtime _
   | Keeper_lane_cli_oneshot.Not_an_official_client _ -> Configuration_refused
   | Keeper_lane_cli_oneshot.Invalid_json_output _

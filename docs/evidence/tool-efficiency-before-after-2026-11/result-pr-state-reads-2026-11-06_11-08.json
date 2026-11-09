@@ -1,0 +1,158 @@
+{
+  "window": [
+    "2026-11-06T00:00:00+00:00",
+    "2026-11-09T00:00:00+00:00"
+  ],
+  "files": 23,
+  "skipped": {
+    "bad_lines": 0
+  },
+  "days": [
+    {
+      "day": "2026-11-06",
+      "execute_calls": 7840,
+      "execute_hours": 23.283,
+      "pr_read_calls": 2334,
+      "pr_read_hours": 6.885,
+      "pr_read_call_share": 0.2977,
+      "pr_read_hour_share": 0.2957,
+      "keepers": 15,
+      "by_shape": {
+        "fan_out": {
+          "calls": 280,
+          "hours": 1.563
+        },
+        "wait": {
+          "calls": 48,
+          "hours": 2.094
+        },
+        "single": {
+          "calls": 2006,
+          "hours": 3.228
+        }
+      }
+    },
+    {
+      "day": "2026-11-07",
+      "execute_calls": 8242,
+      "execute_hours": 15.362,
+      "pr_read_calls": 4340,
+      "pr_read_hours": 8.597,
+      "pr_read_call_share": 0.5266,
+      "pr_read_hour_share": 0.5596,
+      "keepers": 13,
+      "by_shape": {
+        "fan_out": {
+          "calls": 838,
+          "hours": 2.14
+        },
+        "wait": {
+          "calls": 99,
+          "hours": 2.544
+        },
+        "single": {
+          "calls": 3403,
+          "hours": 3.913
+        }
+      }
+    },
+    {
+      "day": "2026-11-08",
+      "execute_calls": 5617,
+      "execute_hours": 12.162,
+      "pr_read_calls": 3935,
+      "pr_read_hours": 8.905,
+      "pr_read_call_share": 0.7006,
+      "pr_read_hour_share": 0.7322,
+      "keepers": 13,
+      "by_shape": {
+        "fan_out": {
+          "calls": 1891,
+          "hours": 4.944
+        },
+        "wait": {
+          "calls": 82,
+          "hours": 1.445
+        },
+        "single": {
+          "calls": 1962,
+          "hours": 2.516
+        }
+      }
+    }
+  ],
+  "total": {
+    "day": "all",
+    "execute_calls": 21699,
+    "execute_hours": 50.807,
+    "pr_read_calls": 10609,
+    "pr_read_hours": 24.387,
+    "pr_read_call_share": 0.4889,
+    "pr_read_hour_share": 0.48,
+    "keepers": 15,
+    "by_shape": {
+      "fan_out": {
+        "calls": 3009,
+        "hours": 8.648
+      },
+      "wait": {
+        "calls": 229,
+        "hours": 6.082
+      },
+      "single": {
+        "calls": 7371,
+        "hours": 9.657
+      }
+    }
+  },
+  "top_keepers": [
+    {
+      "keeper": "code-reviewer",
+      "pr_read_calls": 1412,
+      "pr_read_hours": 4.714,
+      "fan_out_calls": 424,
+      "fan_out_hours": 3.387,
+      "fan_out_p50_s": 13.4
+    },
+    {
+      "keeper": "context-reviewer",
+      "pr_read_calls": 3779,
+      "pr_read_hours": 4.291,
+      "fan_out_calls": 2061,
+      "fan_out_hours": 2.648,
+      "fan_out_p50_s": 3.2
+    },
+    {
+      "keeper": "github-pr-checker",
+      "pr_read_calls": 423,
+      "pr_read_hours": 4.017,
+      "fan_out_calls": 2,
+      "fan_out_hours": 0.008,
+      "fan_out_p50_s": 14.2
+    },
+    {
+      "keeper": "pr-updater",
+      "pr_read_calls": 789,
+      "pr_read_hours": 3.236,
+      "fan_out_calls": 260,
+      "fan_out_hours": 1.664,
+      "fan_out_p50_s": 14.9
+    },
+    {
+      "keeper": "sangsu",
+      "pr_read_calls": 205,
+      "pr_read_hours": 1.629,
+      "fan_out_calls": 4,
+      "fan_out_hours": 0.006,
+      "fan_out_p50_s": 6.7
+    },
+    {
+      "keeper": "code-reviewer-uncle",
+      "pr_read_calls": 888,
+      "pr_read_hours": 1.52,
+      "fan_out_calls": 36,
+      "fan_out_hours": 0.168,
+      "fan_out_p50_s": 10.5
+    }
+  ]
+}

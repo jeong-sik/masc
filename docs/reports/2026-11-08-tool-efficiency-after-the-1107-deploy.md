@@ -1,7 +1,7 @@
 # Tools 효율: 11-07 배포 앞뒤와 남은 일 · 2026-11-08
 
 [11-05 보고서](2026-11-05-tool-efficiency.md)와 [11-06 프로필별 값](2026-11-06-tool-efficiency-by-profile.md)이 고치겠다고 적은 것 가운데 병합된 수리가 실제 원장(`~/me/.masc/tool_calls`)에서 어떻게 달라졌는지 재요.
-11-08 14:08Z 시점 기록이고, 서버는 11-08 11:04Z 에 시작한 빌드 `268ce94c7ba8` 이에요. 이 시각 뒤에 바뀐 것은 「15:00Z 갱신」, 「15:45Z 갱신」, 「20:00Z 갱신」, 「23:40Z 갱신」에 적었어요.
+11-08 14:08Z 시점 기록이고, 서버는 11-08 11:04Z 에 시작한 빌드 `268ce94c7ba8` 이에요. 이 시각 뒤에 바뀐 것은 「15:00Z 갱신」, 「15:45Z 갱신」, 「20:00Z 갱신」, 「23:40Z 갱신」, 「11-09 갱신」에 적었어요.
 앞뒤 값은 [`docs/evidence/tool-efficiency-before-after-2026-11`](../evidence/tool-efficiency-before-after-2026-11/README.md) 의 스크립트로 셌고, 같은 명령으로 다시 낼 수 있어요.
 
 ## 한눈에
@@ -13,12 +13,13 @@
 - 백그라운드 Execute(#49825)는 이 창에서 1건(4초)이에요. 폴링 Keeper 둘은 쓰지 않았고 `masc_schedule_create` 를 4번 불렀어요.
 - 시간별·일별 차트는 코드에 있고 살아 있는 서버 값으로 그려져요. 서버가 내려주는 번들이 10-27 빌드라 사용자 화면에는 안 보여요(이슈 #49980).
 - 같은 명령을 같은 결과로 되풀이한 Execute 호출이 11-06 00:00Z ~ 11-08 19:00Z 에 20,396호출 중 4,241호출(20.8%)이에요. 호출이 턴을 붙든 시간은 3.36 h 로 작고, 되풀이마다 모델 요청이 한 번 나가는 쪽이 커요. 그중 2,346호출(55%)이 `context-reviewer` 의 열린 PR 목록 읽기예요. 이 Keeper 는 11-08 00:00Z ~ 10:40Z 에 Execute 1,628호출 중 1,574호출(96.7%)이 되풀이였고, 그 창의 전체 Keeper 입력 토큰 중 85.3%를 썼어요. 재시작 뒤(14:41Z ~ 19:00Z)는 1.1%예요. 같은 기간 Execute 의 12.4%(2,537호출)는 `date` 만 부르는 호출이고 `wkbl-front` 과 `kidsnote-incoming-dd-manager` 가 거의 전부예요(「20:00Z 갱신」).
+- `gh` 로 PR 을 읽는 Execute 가 11-06 00:00Z ~ 11-09 00:00Z 에 Execute 21,699호출 중 10,609호출(48.9%)이고, 턴을 붙든 시간 50.807 h 중 24.387 h(48.0%)예요. 하루 몫은 29.6%, 56.0%, 73.2%로 올랐어요. `gh` 가 만든 PR 목록을 PR 마다 도는 반복문이 3,009호출 8.648 h 이고, `code-reviewer` 한 Keeper 의 60초 이상 Execute 67호출 1.68 h 가 모두 이 반복문이에요(「11-09 갱신」).
 - 하지 않은 것: Delegate 와 비동기 메커니즘 변경은 없어요. 배포 뒤 21시간 창에서 긴 Execute 와 큐 대기가 겹친 시간이 0.47 h(큐 대기의 22.3%)이고 그중 0.38 h 가 sangsu 한 Keeper 예요(「15:45Z 갱신」). OCaml 시험은 로컬에서 돌리지 않았어요.
 
 ## 재는 법
 
 - 앞: 11-06 22:45Z ~ 11-07 18:24Z. 뒤: 11-07 18:29Z ~ 11-08 14:08Z(재시작 5분 뒤부터). 둘 다 19.7시간이에요. 재시작은 11-07 18:24:19Z 이고 #49794·#49803·#49812·#49817·#49825 가 이 빌드에 들어갔어요.
-- 스크립트 `measure_before_after.py` 와 결과 `result-boot-2026-11-07T18-24-19Z.json`, 원격 점검 캐시 재생 `replay_preflight_ttl.py` 와 결과 `result-preflight-replay-2026-11-07_11-08.json`, 큐 대기와 긴 Execute 가 겹친 시간 `queue_wait_overlap.py` 와 결과 `result-queue-wait-overlap-2026-11-05_11-08.json`·`result-queue-wait-overlap-2026-11-07_11-08.json`, 합성 시험 120개(되풀이 쪽 60개 포함)가 위 폴더에 있어요. 정의는 스크립트 머리말에 있어요. 크기는 원장의 `result_bytes` 라서 도구가 낸 크기이고 잘린 `output` 길이도, 모델이 본 크기도 아니에요.
+- 스크립트 `measure_before_after.py` 와 결과 `result-boot-2026-11-07T18-24-19Z.json`, 원격 점검 캐시 재생 `replay_preflight_ttl.py` 와 결과 `result-preflight-replay-2026-11-07_11-08.json`, 큐 대기와 긴 Execute 가 겹친 시간 `queue_wait_overlap.py` 와 결과 `result-queue-wait-overlap-2026-11-05_11-08.json`·`result-queue-wait-overlap-2026-11-07_11-08.json`, PR 을 읽는 Execute 를 세는 `pr_state_reads.py` 와 결과 `result-pr-state-reads-2026-11-06_11-08.json`, 합성 시험 157개(되풀이 쪽 60개, PR 읽기 쪽 37개 포함)가 위 폴더에 있어요. 정의는 스크립트 머리말에 있어요. 크기는 원장의 `result_bytes` 라서 도구가 낸 크기이고 잘린 `output` 길이도, 모델이 본 크기도 아니에요.
 - 실패 문구별 묶음은 [`docs/evidence/failed-calls-2026-11`](../evidence/failed-calls-2026-11/README.md) 의 스크립트로 셌고 결과는 `result-2026-11-07_11-08.json` 이에요. 이 스크립트의 창은 18:29:00Z 에 시작해서 앞뒤 스크립트보다 19초 일찍 열려요. 호출 8,547건·실패 117건과 8,524건·116건은 그 차이예요.
 - Delegate 값과 대시보드 값은 스크립트 없이 한 번 잰 값이에요. Delegate 는 11-05 ~ 11-07 원장(이슈 #49842 댓글), 대시보드는 브라우저로 본 화면이에요. 큐 대기 값은 「15:45Z 갱신」의 스크립트로 다시 낼 수 있어요.
 
@@ -138,11 +139,22 @@
 - 실패는 2건에서 6건으로 늘었어요. 모두 Execute 가 아니에요(브라우저 도구 5건, 사라진 artifact 읽기 1건).
 - 측정만 했어요. 이 갱신은 코드를 바꾸지 않았어요.
 
+## 11-09 갱신: PR 을 읽는 Execute
+
+- 대상은 `gh pr view`·`gh pr list`·`gh pr checks`·`gh pr status`, 그리고 `/pulls` 나 `pullRequest` 를 부르는 `gh api` 를 담은 Execute 예요. 11-06 00:00Z ~ 11-09 00:00Z 에 Execute 21,699호출(50.807 h) 중 10,609호출(48.9%, 24.387 h, 48.0%)이에요. 하루 몫은 29.6%(11-06), 56.0%(11-07), 73.2%(11-08)로 올랐어요. PR 읽기가 붙든 시간은 하루 6.9 ~ 8.9 h 로 비슷하고 나머지 Execute 시간이 16.4 h 에서 3.3 h 로 줄었어요.
+- 호출 모양은 셋이에요. `gh` 가 만든 PR 목록을 돌며 하나씩 읽는 반복문이 3,009호출 8.648 h, `sleep N` 이나 `--watch` 로 기다리는 호출이 229호출 6.082 h, 한 번 읽기가 7,371호출 9.657 h 예요. 3일 합계로 PR 읽기 시간이 큰 Keeper 는 `code-reviewer` 4.714 h, `context-reviewer` 4.291 h, `github-pr-checker` 4.017 h, `pr-updater` 3.236 h, `sangsu` 1.629 h, `code-reviewer-uncle` 1.520 h 예요.
+- `code-reviewer` 의 11-08 17:30Z ~ 11-09 00:00Z Execute 190호출 1.96 h 중 60초 이상이 67호출 1.68 h 이고, 67호출이 모두 `for n in $(gh pr list -R jeong-sik/masc --state open --limit 100 ...)` 로 시작해요. 한 번 훑는 데 70 ~ 116초(세 모양의 중앙값)가 걸려요. PR 마다 `gh pr view` 한 번과 `gh api .../reviews` 두 번을 부르므로 열린 PR 이 N개면 `gh` 를 1 + 3N번 불러요. 출력에 `total=` 이 있는 44호출에서 열린 PR 수가 39 ~ 67개라서 118 ~ 202번이에요.
+- 이 반복문이 PR 마다 알아내는 값은 head 커밋, draft 여부, 제목 앞부분, head 커밋에 달린 리뷰 수와 그중 승인·변경 요청 수예요. 서버가 60초마다 읽는 PR 스냅숏(RFC-0465)에는 draft·checks·review·mergeable·작성자가 있고, head 커밋·제목·리뷰 목록은 없어요(`lib/server/server_repository_pulls.ml` 의 쿼리에 `headRefOid`·`title`·`latestReviews` 가 없어요).
+- `RFC-keeper-world-state-shows-open-work` 는 스냅숏에 이 칸들을 더하고 Keeper 가 스냅숏을 읽는 도구 `keeper_pull_requests_list` 를 여는 것까지 결정해 두었어요(S1 ~ S5, 결정 D1 ~ D7). main 에는 그 이름이 한 곳도 없어요. 그 RFC 의 M6 이 이 읽기의 하루 수예요. 위 표는 `gh pr status` 와 `gh api` 도 세므로 M6 보다 넓고, 앞뒤를 견줄 때는 같은 스크립트로 다시 세어요.
+- 이 시간은 Keeper 턴을 붙든 시간이에요. `gh` 를 띄우는 시간과 GitHub 응답 시간이 섞여 있어서 스냅숏을 읽게 바꾸면 이만큼 줄어든다는 뜻이 아니에요. 글자 맞춤이라 명령을 인용만 한 호출과 PR 본문·댓글을 읽는 호출이 들어가고, `gh pr diff` 와 `curl`·MCP 로 읽는 호출은 빠져요.
+- 측정만 했어요. 이 갱신은 코드를 바꾸지 않았어요.
+
 ## 남은 일
 
 - #49959 와 #49942: 읽기 호출이 디스크 바닥에 걸리는 날이나 `run_in_background` 호출이 생기면 앞뒤 스크립트를 새 부팅 시각으로 다시 돌려요. `disk_low.by_tool` 에 `Grep` 이 없고 `execute_by_intent` 에 `auto` 가 없어야 하고, `background_starts.naming_both_handle_tools` 가 `calls` 와 같아야 해요. 11-08 14:41Z ~ 23:40Z 에는 `disk_low` 가 0건이었어요.
 - #50012(원격 점검 결과를 읽기 호출에 300초 재사용): 첫 32분 값이 나왔어요(「23:40Z 갱신」). 하루 넘게 쌓인 뒤 증거 README 「결과 2」의 명령으로 다시 재서 몫과 구간을 확인해요. 쓰기 호출의 점검 몫은 표본이 5건과 13건이라 값이 없어요.
 - PR 상태를 기다리는 감시 종류: 큐 대기 쪽 몫(위 0.38 h, sangsu 한 Keeper, 21시간)은 작았어요. 모델 요청 쪽은 달라요. 되풀이 4,241호출 중 2,346호출(55%)이 `context-reviewer` 의 열린 PR 목록 읽기예요(「20:00Z 갱신」). RFC-0379 §6.5 의 `until_github_run` 은 실행 하나의 끝을 기다리는 것이라 목록 변화를 못 받아요. PR 의 head 가 바뀌기를 기다리는 감시 종류의 수요와 제안은 RFC-0379 §6.6 에 적었어요(#50138, 11-08 23:21Z 병합). 쓸지, 서버가 GitHub 를 어떻게 얼마나 자주 읽을지는 사용자 결정이고, 이번에는 코드를 만들지 않았어요.
+- PR 상태 읽기: 스냅숏에 head 커밋·제목·head 의 리뷰를 더하고(RFC S2) Keeper 가 스냅숏을 읽는 도구를 여는 일(S5). 효과는 `pr_state_reads.py` 를 같은 정의로 다시 돌려 반복문 호출 수와 시간으로 재요.
 - #49881(댓글 위치) 병합(사용자).
 - 대시보드 번들 설치(사용자). 원인과 두 선택지(번들 복사, `MASC_ASSETS_DIR`)는 #49980 에 적었어요. `serve_dashboard_index` 와 `serve_dashboard_static` 이 요청마다 파일을 읽고 index.html 은 `no-store` 라서, 복사하면 재시작 없이 새로고침으로 반영될 것으로 보여요. 복사해서 확인하지는 않았어요.
 - 호스트 용량(79,672 KiB 이상)이나 `MASC_KEEPER_SSH_PREFLIGHT_DISK_FREE_MIN_KIB` 조정은 #49959 가 대신하지 못해요. `request_effect` 로 보낸 `rm` 은 계속 막혀요.
@@ -152,8 +164,9 @@
 - 앞뒤 차이의 원인. 창이 둘 다 하루 안이고 활동량이 달라서 수리 효과와 활동 변화를 가르지 못했어요.
 - #49959 와 #49942 의 효과. 서버는 14:40Z 에 다시 떴지만 두 수리가 일할 조건(읽기 호출이 디스크 바닥에 걸림, `run_in_background` 호출)이 15:00Z 까지 일어나지 않아서 값이 없어요. 23:40Z 까지도 `disk_low` 는 0건이고 `run_in_background` 시작은 1건(시작 결과가 두 도구 이름을 알렸어요)이에요.
 - `masc_dashboard` 를 상한 안으로 줄이는 방법. 호출이 적어서 재지 않았어요.
-- OCaml 시험은 로컬에서 한 번도 돌리지 않았어요. PR 검사는 type-check 와 changelog 뿐이고 시험은 야간 `test.yml` 이 처음 돌려요. Python 증거 스크립트의 시험 120개는 로컬에서 통과했고, `queue_wait_overlap.py` 의 변이 21개와 `idle_repeats.py`·원장 읽기(`turn_of`)·샌드박스별 오버헤드의 의도별 구분(`by_intent`)의 변이 68개를 모두 잡았어요. #50012 의 OCaml 파일은 구문만 확인했어요.
+- OCaml 시험은 로컬에서 한 번도 돌리지 않았어요. PR 검사는 type-check 와 changelog 뿐이고 시험은 야간 `test.yml` 이 처음 돌려요. Python 증거 스크립트의 시험 157개는 로컬에서 통과했고, `queue_wait_overlap.py` 의 변이 21개와 `idle_repeats.py`·원장 읽기(`turn_of`)·샌드박스별 오버헤드의 의도별 구분(`by_intent`)의 변이 68개, `pr_state_reads.py` 의 변이 41개를 모두 잡았어요. #50012 의 OCaml 파일은 구문만 확인했어요.
 - 되풀이가 모두 불필요했는지와, 줄이면 모델 요청이 얼마나 주는지. 같은 결과를 받은 호출에 진행 상태를 다시 확인하는 호출이 섞여 있어요.
 - `context-reviewer` 의 되풀이가 11-08 09:13Z 에 멈춘 이유, 그리고 이 Keeper 가 한 턴 안에서 목록을 계속 읽은 이유.
 - 재시작 뒤 `usage` 이벤트가 없는 레인의 모델 요청.
+- PR 읽기를 스냅숏 읽기로 바꿨을 때 줄어드는 시간. 위 값은 글자 맞춤으로 센 값이고, 반복문 아닌 한 번 읽기 7,371호출(9.657 h)과 기다림 229호출(6.082 h)이 스냅숏으로 대체되는 정도는 호출을 하나씩 읽지 않았어요.
 - #50012 의 효과 크기. 32분 창 하나이고 원격 Execute 가 94호출과 199호출이에요. 새 프로세스의 빈 캐시 구간이 들어 있고 활동량이 두 배로 달라요(간격이 같은 호출끼리 견준 값은 위에 있어요). 하루 넘게 쌓인 뒤 다시 재야 해요.

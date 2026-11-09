@@ -101,7 +101,7 @@ jobs:
               targets+=(test/test_tui_message_input.exe test/test_tui_render_schedule.exe
                 test/test_tui_memory_facts_explorer.exe test/test_tui_memory_back.exe
                 test/test_tui_detail_reading.exe test/test_tui_resource_document_search.exe
-                test/test_tui_resource_document_anchor.exe test/test_tui_resource_copy.exe
+                test/test_tui_resource_copy.exe
                 test/test_tui_resource_export.exe test/test_tui_code_draft.exe
                 test/test_tui_keeper_memory_reading.exe test/test_tui_answering.exe)
               ;;

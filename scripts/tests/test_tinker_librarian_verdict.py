@@ -182,7 +182,7 @@ class ScoreTest(unittest.TestCase):
                                 S.CandidateLabel("r2", "not_durable", None, None, None)), frozenset({"m5"}), ())
         item = M.SynthItem("i1", make_prompt(), "", label)
         both = answer((("r1", "incorporated", "new"), ("r2", "not_durable", None)),
-                      dropped=("m1", "m5", "m6"), revisions=(("m1", "new"),))
+                      dropped=("m1", "m5", "m6"), added=("new",), revisions=(("m1", "new"),))
         score = M.score_synth(item, both)
         self.assertEqual((score["correct"], score["dropped"], score["dropped_expected"], score["planted_dropped"],
                           score["dropped_off_label"]), (2, 3, 2, 1, ["m6"]))

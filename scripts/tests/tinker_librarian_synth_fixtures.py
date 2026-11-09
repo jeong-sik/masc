@@ -88,7 +88,8 @@ def answer_text(judgments: tuple[Judged, ...], *, claims: tuple[dict[str, object
 
 def label_answer(req: S.SynthRequest) -> str:
     """The answer the label asks for. A complement's claim joins its target and the candidate;
-    a duplicate pair keeps its first fact, restated byte for byte with both IDs in `absorbs`."""
+    a duplicate pair keeps its first fact, restated byte for byte with both IDs in `absorbs`.
+    When no candidate can support a change, it drops and merges nothing."""
     label = S.label_of(req)
     by_id = {f.memory_id: f for f in req.facts}
     by_request = {c.request_id: c for c in req.candidates}
@@ -106,9 +107,10 @@ def label_answer(req: S.SynthRequest) -> str:
                 judgments.append((cl.request_id, cl.outcome, cl.already_claim))
             case "not_durable":
                 judgments.append((cl.request_id, cl.outcome, None))
-    claims += [claim_json(by_id[kept].claim, absorbs=(kept, gone)) for kept, gone in label.duplicates]
+    pairs, stale = (label.duplicates, tuple(sorted(label.planted_stale))) if label.supports_change else ((), ())
+    claims += [claim_json(by_id[kept].claim, absorbs=(kept, gone)) for kept, gone in pairs]
     corrected = tuple(cl.supersedes for cl in label.candidates if cl.supersedes is not None)
-    return answer_text(tuple(judgments), claims=tuple(claims), dropped=corrected + tuple(sorted(label.planted_stale)))
+    return answer_text(tuple(judgments), claims=tuple(claims), dropped=corrected + stale)
 
 
 def prompt_of(req: S.SynthRequest) -> R.AdmissionPrompt:

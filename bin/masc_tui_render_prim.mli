@@ -238,11 +238,14 @@ val recovery_box_bottom : Masc_tui_types.state -> Buffer.t -> cols:int -> recove
     recovery notice when one fits. The result is the same selection passed to
     {!footer_line} to avoid duplicating it. *)
 
+(** [help_door] lets a surface with its own input, such as chat, supply
+    whether [?] currently opens help. *)
 val finish_frame_beside_acting_pane :
   Masc_tui_types.state ->
   ?clamped:Masc_tui_types.clamped_scroll ->
   ?roster:Masc_tui_pane_selection.roster_split ->
   ?recovery_in_slot:recovery_row option ->
+  ?help_door:bool ->
   surface_key:string ->
   cursor:Frame_presenter.cursor ->
   rows:int ->

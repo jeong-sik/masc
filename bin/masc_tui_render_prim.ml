@@ -1523,15 +1523,16 @@ type acting_pane_footer =
    draw no agenda row: an open question would otherwise be on screen nowhere
    while the operator chats, which is where a Keeper's question goes unseen. *)
 let finish_frame_beside_acting_pane (state : state) ?clamped ?roster ?(recovery_in_slot = None)
+    ?help_door
     ~surface_key ~cursor ~rows ~cols ~footer buf =
   (match footer with
    | No_footer -> ()
    | Footer_hints { hints; position } ->
        Buffer.add_string buf
-         (footer_line ?position ~recovery_in_slot state ~max_cells:cols ~hints)
+         (footer_line ?help_door ?position ~recovery_in_slot state ~max_cells:cols ~hints)
    | Footer_choices { choices; hints } ->
        Buffer.add_string buf
-         (footer_line ~choices ~recovery_in_slot state ~max_cells:cols ~hints));
+         (footer_line ?help_door ~choices ~recovery_in_slot state ~max_cells:cols ~hints));
   let framed = Buffer.create (Buffer.length buf + 4096) in
   let lines = frame_lines buf in
   (* These frames draw neither the shared composer nor the agenda. Only

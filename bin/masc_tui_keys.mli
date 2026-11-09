@@ -367,11 +367,8 @@ val footer_hints_fusion_detail : string
     fitter gives up key items from the back, and a position is the one item
     on the row that [?] cannot recover. *)
 
-val footer_hints_lanes_run_list : has_runs:bool -> has_older:bool -> string
-(** The Lanes run-list footer: the drill-down under a standalone lane row.
-    [has_runs] says the list holds a run, which [j/k] and [Enter] need;
-    [has_older] says the server named an older page, which the older-page key
-    needs. Without them the footer leaves those keys out. *)
+val footer_hints_lanes_run_list : string
+(** The Lanes run-list footer: the drill-down under a standalone lane row. *)
 
 val footer_hints_lanes_run_detail : string
 val footer_hints_lanes_run_detail_for : preflight:bool -> string

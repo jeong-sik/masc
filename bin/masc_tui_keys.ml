@@ -2085,22 +2085,13 @@ let footer_hints_fusion_detail =
 (* Lanes sub-modes ([lanes_mode] owns overview/list/detail/notice —
    masc_tui_types.ml). The overview footer stays [for_surface Lanes]; these
    name the drill-downs the same way the Fusion detail footer does. *)
-(* [has_runs] is whether the list holds a run; [has_older] is whether the
-   server named a page before it (lane_runs_next), the same fact the header
-   spells as "] older" or "end". The dispatcher does nothing for j/k and Enter
-   without the first, and nothing for the older-page key without the second. *)
-let footer_hints_lanes_run_list ~has_runs ~has_older =
+let footer_hints_lanes_run_list =
   hints_of_bindings
-    (List.filter (fun binding -> answers_in_state ~has_rows:has_runs binding)
-       ([ b Navigate "j/k" "move" ~rows:Needs_row ~help:"move the run cursor"
-        ; b Act "Right / Enter" "prompt" ~rows:Needs_row
-            ~help:"open the run's prompt and output"
-        ]
-        @ (if has_older then
-             [ b Act "]" "older"
-                 ~help:"load the next retained-run page from the server" ]
-           else [])
-        @ [ b Act "Left / Esc" "back" ~help:"back to the lane overview" ])
+    ([ b Navigate "j/k" "move" ~help:"move the run cursor"
+     ; b Act "Right / Enter" "prompt" ~help:"open the run's prompt and output"
+     ; b Act "]" "older" ~help:"load the next retained-run page from the server"
+     ; b Act "Left / Esc" "back" ~help:"back to the lane overview"
+     ]
      @ listing_meta)
 
 (* The position travels as [Masc_tui_footer.line]'s [?position], for the

@@ -832,7 +832,8 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
     ~context ~terminal_effect_state ~event_bus ~raw_trace ~on_event ~effect_disposition
     ~context_overflow_retry_safe
     ~on_official_client_tool_boundary ~on_official_client_result_handoff ~on_native_action ~on_native_tool_progress ~on_native_tool_completion ~on_native_task_observation ~on_child_content_observation
-    ~on_provider_retry ~on_usage_report ~on_tool_execution ~(config : Runtime_execution.claude_code) =
+    ~on_provider_retry ~on_usage_report ~on_tool_execution
+    ~(account : Runtime_claude_code.authorized_account) ~(config : Runtime_execution.claude_code) =
   on_results_ready None;
   context_overflow_retry_safe := false;
   match Eio_context.get_env_opt (), Eio_context.get_clock_opt () with
@@ -912,7 +913,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
     (* Before the plan is read; see the same note in keeper_codex_runtime.ml. *)
     let tool_surface_sha256 =
       Session_store.tool_surface_sha256
-        ?account_home:(Some (Runtime_official_account.home config.account_home))
+        ?account_home:(Some (Runtime_official_account.home (Runtime_account_access.account account)))
         ~native_posture tools
     in
     let* () = match official_client_continuation with
@@ -1051,7 +1052,6 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
     in
     let client_config : Runtime_claude_code.config =
       { cli_path = config.cli_path
-      ; account_home = Runtime_official_account.Captured config.account_home
       ; cwd = base_path
       ; model = config.model
       ; native = native_posture
@@ -1118,6 +1118,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
           ~mgr:process_mgr
           ~clock
           ~cwd:process_cwd
+          ~account
           probe_config
       with
       | Ok subscription -> Ok subscription
@@ -1518,6 +1519,7 @@ let run_without_lifecycle ~result_scope ~media_store ~official_task_reference ~c
                    ~updated_at:(Time_compat.now ())))
              ~on_terminal_received:close_delivery_frontier
              ?on_stream_event ~on_input_observation
+             ~account
              client_config
              ~prompt
              ~images
@@ -1759,10 +1761,11 @@ let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal 
     ?on_native_action
     ?on_usage_report
     ?on_tool_execution
-    ~event_bus ~raw_trace ~on_event ~(config : Runtime_execution.claude_code) () =
+    ~event_bus ~raw_trace ~on_event ~(account : Runtime_claude_code.authorized_account)
+    ~(config : Runtime_execution.claude_code) () =
   let quota_scope =
     Runtime_quota_window.scope_of_claude_code_home
-      (Some (Runtime_official_account.home config.account_home))
+      (Some (Runtime_official_account.home (Runtime_account_access.account account)))
   in
   let settled_session = Atomic.make None in
   let pending_result_receipts = Atomic.make None in
@@ -1895,6 +1898,7 @@ let run ~input_source ~media_store ?argument_source ?on_memory_capacity_refusal 
             ~on_usage_report
             ~on_provider_retry
             ~on_tool_execution
+            ~account
             ~config)
         ()))
   in

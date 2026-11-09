@@ -181,17 +181,26 @@ type walk_rest =
       ; resting_runtime_id : string
       }
 
-(** Who a walk runs for (RFC-0458 §3.4 rule 5).
-    [Fleet_keeper_turn recorder]: a fleet Keeper's turn. It comes back every
-    cycle, so a failure it sees names it as the recorder.
+(** Who a walk runs for (RFC-0458 §3.4 rule 5, plan D2-5).
+    [Fleet_keeper_turn turn]: a fleet Keeper's turn. It comes back every
+    cycle, so a failure it sees names the Keeper as the recorder
+    ({!Runtime_candidate_backpressure.keeper_recorder}). An official CLI
+    starts for it only on an account the access authorizes for that Keeper's
+    turn on [turn.channel] ({!Runtime_account_access.Keeper_turn}).
     [One_shot_walk]: a walk no cycle repeats, such as a completion review. It
     records no failed-attempt mark (timeout, 5xx, 529, network): a mark naming it
     would have no one to retry it, and would hold the candidate behind for
     every Keeper until something else dispatched it and got an answer. Its
     429 and 402 evidence is recorded as any walk's. An answer it receives
-    still clears the candidate's evidence, whoever recorded it. *)
+    still clears the candidate's evidence, whoever recorded it. An official CLI
+    starts for it as an operator call ({!Runtime_account_access.Operator_call}). *)
+type fleet_turn =
+  { keeper_name : string  (** The Keeper, which is the name of its TOML. *)
+  ; channel : Authz_types.Channel.t  (** What started the turn. *)
+  }
+
 type walk_owner =
-  | Fleet_keeper_turn of Runtime_candidate_backpressure.recorder
+  | Fleet_keeper_turn of fleet_turn
   | One_shot_walk
 
 (** Whose walk orders the lane (RFC-0458 §3.4, 2026-09-23).

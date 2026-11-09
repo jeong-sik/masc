@@ -19689,6 +19689,12 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
         in
         let read_one_connection () =
           Masc_tui_fleet_stream.started reader;
+          (* [Ok ()] covers two different ends: the transport returned without
+             an error, or this client chose to stop reading -- a revision gap,
+             an update before the snapshot, a rejected frame -- and unwound
+             through Close_connection. The metric must not call the second one
+             a server close, so the choice is remembered here. *)
+          let client_reconnect = ref false in
           let outcome =
             try
               Masc_tui_http.observe_fleet_stream ~clock ~expected_workspace ~host ~port
@@ -19697,7 +19703,9 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
                   post ();
                   match step with
                   | Masc_tui_fleet_stream.Keep_reading -> ()
-                  | Masc_tui_fleet_stream.Reconnect -> raise Close_connection)
+                  | Masc_tui_fleet_stream.Reconnect ->
+                      client_reconnect := true;
+                      raise Close_connection)
             with Close_connection -> Ok ()
           in
           (* Every end emits exactly one connection_ended line so reconnect
@@ -19722,7 +19730,8 @@ let launch_fleet_stream state ~expected_workspace ~host ~port ~mailbox =
                Log.Transport.info
                  "tui_fleet_stream_connection_ended outcome=retry_without_cursor detail=%s" detail
            | Ok () ->
-               Log.Transport.info "tui_fleet_stream_connection_ended outcome=closed_by_server");
+               Log.Transport.info "tui_fleet_stream_connection_ended outcome=%s"
+                 (if !client_reconnect then "client_reconnect" else "closed_by_server"));
           Masc_tui_fleet_stream.lost reader ~now:(Eio.Time.now clock);
           post ()
         in

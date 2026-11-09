@@ -108,33 +108,6 @@ let count_anthropic_staged
          , Measurement_before_dispatch ))
 ;;
 
-let count_anthropic
-      ?connection_cache
-      ?clock
-      ?timeout_s
-      ~sw
-      ~net
-      ~config
-      ~messages
-      ?tools
-      ()
-  =
-  match
-    count_anthropic_staged
-      ?connection_cache
-      ?clock
-      ?timeout_s
-      ~sw
-      ~net
-      ~config
-      ~messages
-      ?tools
-      ()
-  with
-  | Ok count -> Ok count
-  | Error (Count_failed (error, _)) -> Error error
-;;
-
 type completion_request_measurement =
   { input_count : Input_token_count.count
   ; output_token_receipt : Types.output_token_receipt

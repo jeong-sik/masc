@@ -1822,13 +1822,17 @@ let test_transport_error () =
   let result, _captured =
     with_mock ~status:`Too_many_requests ~response:"rate limited"
     @@ fun ~sw ~net ~base_url ->
-    Count_tokens_sync.count_anthropic ~sw ~net ~config:(config base_url) ~messages ()
+    Count_tokens_sync.measure_completion_request
+      ~sw
+      ~net
+      (completion_request (config base_url))
   in
   match result with
   | Error
-      (Count.Transport
-         (Http_client.HttpError { code = 429; body = Http_client.Received body; _ })) ->
-    check string "provider body" "rate limited" body
+      (Count_tokens_sync.Input_count_failed
+         (Count.Transport
+            (Http_client.HttpError { code = 429; body = Http_client.Received body; _ })))
+    -> check string "provider body" "rate limited" body
   | Ok _ | Error _ -> fail "expected typed HTTP 429"
 ;;
 

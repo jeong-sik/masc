@@ -205,6 +205,21 @@ let runtime_fact ?(tone = Page_line.Plain) label value =
   in
   [ Page_line.fact ~tone label value ]
 
+(* A repeated field as one list under its label: the label stands once and each
+   entry is a numbered row, so a page with fifty entries does not print the
+   label fifty times. A lone entry stays one fact line and an empty list draws
+   nothing. A blank entry draws the empty mark, as [runtime_fact] does. *)
+let runtime_items ?(tone = Page_line.Plain) label values =
+  let entry value =
+    if String.equal (String.trim (Terminal_text.single_line value)) ""
+    then Masc_tui_theme.Glyph.no_value
+    else value
+  in
+  match List.map entry values with
+  | [] -> []
+  | [ value ] -> [ Page_line.fact ~tone label value ]
+  | values -> [ Page_line.items ~tone label values ]
+
 (* A route is not a candidate. This reading remains available when the
    inventory is empty, and retains diagnostics beside a last-good snapshot. *)
 let runtime_routes_detail_lines state ~width =
@@ -221,7 +236,7 @@ let runtime_routes_detail_lines state ~width =
      | Some notice ->
          fact ~tone:(runtime_lane_notice_tone notice) (text "작업 결과" "Action result")
            (Masc_tui_types.runtime_lane_notice_text notice))
-    @ List.concat_map (fact ~tone:Page_line.Attention (text "이전 설정 관측" "Stale configuration"))
+    @ runtime_items ~tone:Page_line.Attention (text "이전 설정 관측" "Stale configuration")
         (Masc_tui_types.runtime_lane_stale_lines state)
   in
   let default_routes = text "1. 기본 라우트 · 진입 런타임" "1. Default routes" in
@@ -237,12 +252,7 @@ let runtime_routes_detail_lines state ~width =
       let route label values =
         match values with
         | [] -> fact label (text "없음" "none")
-        | values ->
-            List.mapi
-              (fun index value ->
-                fact (Printf.sprintf "%s %d" label (index + 1)) value)
-              values
-            |> List.concat
+        | values -> runtime_items label values
       in
       let dropped =
         List.filter
@@ -275,8 +285,8 @@ let runtime_routes_detail_lines state ~width =
                (text "미확인; 관측을 읽지 못함" "unavailable; no observation has been read")
            | Some probe ->
                fact (text "프로브 상태" "Probe status") (runtime_overall_label ~ko probe.rps_status)
-               @ List.concat_map (fact ~tone:Page_line.Attention (text "프로브 오류" "Probe error")) probe.rps_errors
-               @ List.concat_map (fact (text "프로브 한계" "Probe limitation")) probe.rps_limitations)
+               @ runtime_items ~tone:Page_line.Attention (text "프로브 오류" "Probe error") probe.rps_errors
+               @ runtime_items (text "프로브 한계" "Probe limitation") probe.rps_limitations)
       in
       detail_page ~width
         [ default_routes, routes
@@ -426,9 +436,7 @@ let runtime_detail_lines state target ~width =
       let probe_limitations =
         match state.runtime_surface with
         | Some { rss_probe = Some snapshot; _ } ->
-            List.concat_map
-              (fact "Probe limitation")
-              snapshot.rps_limitations
+            runtime_items "Probe limitation" snapshot.rps_limitations
         | Some { rss_probe = None; _ } | None -> []
       in
       let keeper_lines =

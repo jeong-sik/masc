@@ -1271,7 +1271,56 @@ let auth_cmd =
         $ github_client_id)
   in
   let doc = "Set up multi-account authorization on this workspace." in
-  Cmd.group (Cmd.info "auth" ~doc) [ bootstrap_cmd; invite_cmd; preview_cmd ]
+  let service_credential_cmd =
+    let lease_note =
+      `P
+        "The workspace must be activated with masc auth bootstrap. The command \
+         takes the workspace lease, so stop the server first."
+    in
+    let normalized base_path = Env_config.normalize_masc_base_path_input base_path in
+    let issue_cmd =
+      let service =
+        let doc = "The id of the service the credential acts as." in
+        Arg.(required & opt (some string) None & info [ "service" ] ~docv:"SERVICE" ~doc)
+      in
+      let doc = "Issue a Service credential and print its token once." in
+      Cmd.v
+        (Cmd.info "issue" ~doc ~man:[ `S Manpage.s_description; lease_note ])
+        Term.(
+          const (fun base_path service ->
+            Masc_cli_auth.service_credential_issue ~base_path:(normalized base_path) ~service)
+          $ base_path
+          $ service)
+    in
+    let revoke_cmd =
+      let credential =
+        let doc = "The id of the credential, as masc auth service-credential list prints it." in
+        Arg.(required & opt (some string) None & info [ "credential" ] ~docv:"ID" ~doc)
+      in
+      let doc = "Revoke a Service credential." in
+      Cmd.v
+        (Cmd.info "revoke" ~doc ~man:[ `S Manpage.s_description; lease_note ])
+        Term.(
+          const (fun base_path credential ->
+            Masc_cli_auth.service_credential_revoke ~base_path:(normalized base_path) ~credential)
+          $ base_path
+          $ credential)
+    in
+    let list_cmd =
+      let doc = "List the Service credentials with their service and status, with no secret." in
+      Cmd.v
+        (Cmd.info "list" ~doc ~man:[ `S Manpage.s_description; lease_note ])
+        Term.(
+          const (fun base_path ->
+            Masc_cli_auth.service_credential_list ~base_path:(normalized base_path))
+          $ base_path)
+    in
+    let doc = "Issue, revoke and list the credentials of internal services (plan C4-9)." in
+    Cmd.group (Cmd.info "service-credential" ~doc) [ issue_cmd; revoke_cmd; list_cmd ]
+  in
+  Cmd.group
+    (Cmd.info "auth" ~doc)
+    [ bootstrap_cmd; invite_cmd; preview_cmd; service_credential_cmd ]
 
 let login_cmd =
   let doc =

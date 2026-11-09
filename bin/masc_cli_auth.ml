@@ -127,6 +127,86 @@ let invite ~base_path =
     print_link ~command:"invite" ~base_url invitation
 ;;
 
+(* ---- masc auth service-credential (plan C4-9) ---- *)
+
+module H = Authz_service_credential_host
+
+(* The calls open the writer zone under the lease of the base path, as an
+   invitation does. The setting of anonymous mutations is read first, so a
+   setting a server would refuse writes nothing. *)
+let under_lease_only ~base_path call =
+  with_lease ~base_path (fun base_path ->
+    let* anonymous_mutations = anonymous_mutations () in
+    Eio_main.run (fun _env ->
+      Result.map_error
+        H.error_to_string
+        (call
+           ~base_path
+           ~config_dir:(Env_config_core.masc_config_dir_opt ())
+           ~anonymous_mutations
+           ~now_ms)))
+;;
+
+let service_credential_issue ~base_path ~service =
+  match
+    under_lease_only ~base_path (fun ~base_path ~config_dir ~anonymous_mutations ~now_ms ->
+      H.issue ~base_path ~config_dir ~anonymous_mutations ~now_ms ~service)
+  with
+  | Error reason -> refused "service-credential issue" reason
+  | Ok token ->
+    (* The credential is committed by now. A token that did not reach the
+       output is reported, so the exit code does not claim it was printed. *)
+    Printf.printf
+      "The service %s has a new credential, %s. Its token is not shown again:\n%s\n"
+      service
+      (Authz_types.Service_credential_id.to_string
+         (Authz_credential_token.Service_credential.id token))
+      (Authz_credential_token.Service_credential.to_string token);
+    (match flush stdout with
+     | () -> 0
+     | exception Sys_error detail ->
+       Printf.eprintf
+         "masc auth service-credential issue: the credential is written, and its token \
+          did not reach the standard output: %s; revoke it and issue another\n"
+         detail;
+       1)
+;;
+
+let service_credential_revoke ~base_path ~credential =
+  match
+    under_lease_only ~base_path (fun ~base_path ~config_dir ~anonymous_mutations ~now_ms ->
+      H.revoke ~base_path ~config_dir ~anonymous_mutations ~now_ms ~credential)
+  with
+  | Error reason -> refused "service-credential revoke" reason
+  | Ok () ->
+    Printf.printf "The credential %s is revoked.\n" credential;
+    0
+;;
+
+let status_label = function
+  | Authz_service_credential_state.Open -> "open"
+  | Authz_service_credential_state.Revoked -> "revoked"
+;;
+
+let service_credential_list ~base_path =
+  match under_lease_only ~base_path H.list with
+  | Error reason -> refused "service-credential list" reason
+  | Ok [] ->
+    print_endline "No Service credential is issued.";
+    0
+  | Ok listed ->
+    List.iter
+      (fun { H.credential_id; service_id; issued_at_ms; status } ->
+        Printf.printf
+          "%s\t%s\t%s\t%s\n"
+          (Authz_types.Service_credential_id.to_string credential_id)
+          (Authz_types.Service_id.to_string service_id)
+          (Time_codec.rfc3339_of_unix (float_of_int issued_at_ms /. 1000.))
+          (status_label status))
+      listed;
+    0
+;;
+
 (* ---- masc auth preview (plan, preview scope P3) ---- *)
 
 let github_client_secret_env = "MASC_GITHUB_CLIENT_SECRET"

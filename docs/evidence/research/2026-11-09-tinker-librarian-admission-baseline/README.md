@@ -12,7 +12,7 @@ keeper-librarian Lane Add-on의 `admission` 출력을 Tinker에서 학습한 Ink
 
 ## 고정한 것
 
-`scripts/tinker/librarian/pass_lines.json` (sha256 `36a15c5fd7aa67fdc6146cede693b86163695c25cc5bac00e80a428dc850a350`)
+`scripts/tinker/librarian/pass_lines.json` (sha256 `c0c1ce46a29fbc6696ba58eaab52034e3b6acea2983e1c93dc33c6f843909f4b`)
 
 - 요청 모양: MASC exact 레인처럼 admission 프롬프트 다음에 스키마 지시문을 보낸다.
   `reasoning_effort: "low"`, `max_tokens: 32768`이다.
@@ -47,6 +47,8 @@ G4와 G5는 판정 실행에서 후보와 같은 run으로 다시 잰 기본 모
   한 기억의 case는 모두 같은 fact를 전문으로 보인다. 그래서 case를 나란히 놓아도 어느 fact를 지웠는지 드러나지 않는다.
   이 집합에는 라벨 감사가 그 기억의 어느 요청에서든 고르는 fact가 들어간다. 심은 fact, 후보의 대상, 후보와 가장 비슷한 fact 3개다.
   그래서 후보가 바꿔 말한 fact를 지워도, 그 fact 말고도 후보와 이어진 fact가 전문으로 보인다.
+  판정자에게 준 파일 세 개(case, 판정 기준, 규칙 사본)의 sha256은 key 옆에 남는다.
+  판정자가 그 파일을 바꾸거나 규칙 사본이 고정한 `librarian.md`와 다르면 `verdict`가 멈춘다.
   판정자도 빼면 그 기억의 요청을 모든 타깃에서 빼고 G3을 센다.
   판정자가 남기면 틀린 삭제다. 같은 기억이 다른 삭제 때문에 빠져도 그 삭제는 정밀도에 틀린 것으로 들어간다.
   기본 모델은 남은 119건에서 라벨 밖 삭제가 없었다(감사 전 144건에서는 1개).

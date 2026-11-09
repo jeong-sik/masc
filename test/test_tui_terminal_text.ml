@@ -89,7 +89,14 @@ let test_multibyte_letters_are_not_read_as_controls () =
   Alcotest.(check bool) "the NUL itself is drawn" true (contains shown "\\x00")
 ;;
 
-(* Line shape: LF stays a line break, CR is a control and gets drawn. *)
+(* Line shape at THIS layer: LF stays a line break, CR is a control and gets
+   drawn as "\x0D".
+
+   This module does not strip a CRLF's trailing CR; it only escapes it. The
+   removal happens one layer up, in the TUI's own [without_line_end_cr]
+   (bin/masc_tui_planning_detail.ml), so that a row does not end in "\x0D".
+   Both statements are true of their own layer, and this file tests only the
+   library layer it can reach. *)
 let test_lines_keep_lf_and_escape_cr () =
   let shown = Tui_terminal_text.sanitize_terminal_lines "one\r\ntwo\000three" in
   Alcotest.(check bool) "no raw CR" false (String.contains shown '\r');

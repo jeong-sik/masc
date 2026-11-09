@@ -177,7 +177,7 @@ type t =
   ; socket : [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
   }
 
-let wrap ~on_peer_reset ~on_response_end (flow : _ Eio.Net.stream_socket) =
+let wrap ~on_peer_reset ~on_reset_sent ~on_response_end (flow : _ Eio.Net.stream_socket) =
   let state =
     { Socket.flow = (flow :> [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t)
     ; read_buffer = Cstruct.create H2.Config.default.read_buffer_size
@@ -194,7 +194,7 @@ let wrap ~on_peer_reset ~on_response_end (flow : _ Eio.Net.stream_socket) =
           ~cursor:(Header { filled = 0 })
           ~on_frame_complete:(fun frame ->
             match frame.kind with
-            | Rst_stream -> on_response_end frame.stream_id
+            | Rst_stream -> on_reset_sent frame.stream_id
             | (Data | Headers) when frame.flags land end_stream_flag <> 0 ->
               on_response_end frame.stream_id
             | Data | Headers | Continuation | Other_frame -> ())

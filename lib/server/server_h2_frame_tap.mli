@@ -21,14 +21,16 @@ type t
 
 val wrap :
   on_peer_reset:(int -> unit) ->
+  on_reset_sent:(int -> unit) ->
   on_response_end:(int -> unit) ->
   _ Eio.Net.stream_socket ->
   t
 (** [on_peer_reset stream_id] runs when a complete RST_STREAM frame arrives
-    from the peer, before h2 reads it. [on_response_end stream_id] runs when
-    the server has written a RST_STREAM frame, or a DATA or HEADERS frame
-    carrying END_STREAM, for that stream. Writes, shutdown and close are
-    forwarded to the wrapped socket. *)
+    from the peer, before h2 reads it. [on_reset_sent stream_id] runs when the
+    server has written a RST_STREAM frame for that stream, and
+    [on_response_end stream_id] when it has written a DATA or HEADERS frame
+    carrying END_STREAM. Writes, shutdown and close are forwarded to the
+    wrapped socket. *)
 
 val socket : t -> [ `Generic ] Eio.Net.stream_socket_ty Eio.Resource.t
 (** The socket h2 must read and write through. *)

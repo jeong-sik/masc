@@ -202,7 +202,8 @@ let draft_tone session =
   List.find_map
     (function
       | Masc_tui_page_line.Fact { label = "Activity draft"; tone; _ } -> Some tone
-      | Masc_tui_page_line.Fact _ | Masc_tui_page_line.Title _ | Masc_tui_page_line.Note _ -> None)
+      | Masc_tui_page_line.Fact _ | Masc_tui_page_line.Title _ | Masc_tui_page_line.Note _
+      | Masc_tui_page_line.Items _ -> None)
     (A.lines session)
 
 let unsaved_draft_is_marked () =

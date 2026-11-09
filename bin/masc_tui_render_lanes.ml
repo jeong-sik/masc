@@ -8,7 +8,6 @@ open Masc_tui_press
 
 module Hint_lines = Masc_tui_hint_lines
 module Message_layout = Masc_tui_message_layout
-module Numbered_list = Masc_tui_numbered_list
 module Rows = Masc_tui_rows
 module Page_line = Masc_tui_page_line
 module Page_reading = Masc_tui_page_reading
@@ -64,17 +63,20 @@ let standalone_lane_last_run ~now (lane : Tui_decode.standalone_lane) =
       (standalone_lane_outcome_ko outcome)
       (Masc_tui_answering.elapsed_text ~now at)
 
-let standalone_lane_state_style (lane : Tui_decode.standalone_lane) =
+let standalone_lane_state_tone (lane : Tui_decode.standalone_lane) =
   match lane.sl_configuration_state, lane.sl_status with
   | Tui_decode.Lane_registry_unavailable, _
-  | _, Tui_decode.Standalone_degraded -> Theme.bad ()
+  | _, Tui_decode.Standalone_degraded -> Page_line.Failure
   | (Tui_decode.Lane_slotless | Tui_decode.Lane_unconfigured), _
-  | _, Tui_decode.Standalone_unavailable -> Theme.warn ()
-  | Tui_decode.Lane_off, _ | _, Tui_decode.Standalone_off -> Theme.recede ()
-  | Tui_decode.Lane_ready, Tui_decode.Standalone_running -> Theme.info ()
+  | _, Tui_decode.Standalone_unavailable -> Page_line.Attention
+  | Tui_decode.Lane_off, _ | _, Tui_decode.Standalone_off -> Page_line.Quiet
+  | Tui_decode.Lane_ready, Tui_decode.Standalone_running -> Page_line.Info
   | Tui_decode.Lane_ready,
     Tui_decode.(Standalone_idle | Standalone_no_retained_observation) ->
-    Ansi.reset
+    Page_line.Plain
+
+let standalone_lane_state_style lane =
+  Page_reading.tone_style (standalone_lane_state_tone lane)
 
 let standalone_lane_headline_state ~now (lane : Tui_decode.standalone_lane) =
   let last_run = standalone_lane_last_run ~now lane in
@@ -132,36 +134,20 @@ let standalone_lane_latency_summary (lane : Tui_decode.standalone_lane) =
 let standalone_lane_jev_summary (lane : Tui_decode.standalone_lane) =
   match lane.sl_jev with
   | None -> None
-  | Some Tui_decode.Jev_off -> Some (Theme.recede (), "꺼짐 (OFF)")
+  | Some Tui_decode.Jev_off -> Some (Page_line.Quiet, "꺼짐 (OFF)")
   | Some Tui_decode.Jev_cli_only ->
-    Some (Theme.recede (), "사용 불가 (Board 레인이 CLI 전용)")
+    Some (Page_line.Quiet, "사용 불가 (Board 레인이 CLI 전용)")
   | Some Tui_decode.Jev_lane_unavailable ->
-    Some (Theme.warn (), "사용 불가 (Board 레인이 준비되지 않음)")
+    Some (Page_line.Attention, "사용 불가 (Board 레인이 준비되지 않음)")
   | Some (Tui_decode.Jev_configured { destinations }) ->
     let named (destination : Tui_decode.standalone_lane_jev_destination) =
       Printf.sprintf "%s (%s)" destination.sljd_destination_uri destination.sljd_model
     in
     Some
-      ( Ansi.reset
+      ( Page_line.Plain
       , "활성 · "
         ^ Terminal_text.single_line
             (String.concat ", " (List.map named destinations)) )
-
-(* A candidate list as its label and one numbered row per candidate, one indent
-   under the label, so a long model id wraps under its own number and is not
-   read as the next candidate. A list with no candidates stays on the label's
-   row. *)
-let numbered_slot_lines ~max_cells style ~label values =
-  match values with
-  | [] -> Page_reading.wrap_indented_line ~max_cells style (label ^ ": " ^ no_candidates)
-  | values ->
-    let under_label = Page_reading.detail_indent in
-    Page_reading.wrap_indented_line ~max_cells style (label ^ ":")
-    @ List.map
-        (fun row -> style, Page_reading.detail_indent ^ under_label ^ row)
-        (Numbered_list.rows
-           ~max_cells:(max 1 (max_cells - Message_layout.display_width under_label))
-           (List.map Terminal_text.single_line values))
 
 let lane_overview_summary_block ~titled ~cols ~label ~purpose ~left_title
     ~left_rows ~right_title ~right_rows ~actions =
@@ -400,18 +386,16 @@ let standalone_lane_without_slot_rows_ko (lane : Tui_decode.standalone_lane) =
   @ counted "슬롯 미기록" without.slws_no_slot
   @ gap
 
+(* A candidate list is a numbered list; none is the word for none, receded. *)
+let candidate_items ?(tone = Page_line.Plain) label = function
+  | [] -> Page_line.fact ~tone:Page_line.Quiet label no_candidates
+  | values -> Page_line.items ~tone label values
+
 let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane) =
-  let max_cells = max 1 (width - 4) in
-  let wrap style text = Page_reading.wrap_indented_line ~max_cells style text in
-  let purpose = standalone_lane_purpose lane in
+  let fact = Page_line.fact in
+  let state_tone = standalone_lane_state_tone lane in
   let answer = Tui_decode.standalone_lane_answer lane in
-  let obligation = standalone_lane_obligation lane in
-  let configuration =
-    Tui_decode.standalone_lane_configuration_phrase
-      lane.sl_configuration_state
-  in
-  let state_style = standalone_lane_state_style lane in
-  let slot_history_lines =
+  let slot_history =
     let slot_rows =
       List.map
         (fun (sc : Tui_decode.standalone_lane_slot_count) ->
@@ -420,46 +404,56 @@ let standalone_lane_detail_lines ~now ~width (lane : Tui_decode.standalone_lane)
         lane.sl_selected_slots
     in
     match slot_rows @ standalone_lane_without_slot_rows_ko lane with
-    | [] -> wrap (Theme.recede ()) "(기록된 슬롯 응답 이력이 없습니다)"
-    | rows -> Page_reading.wrap_indented_lines ~max_cells Ansi.reset rows
+    | [] ->
+      [ Page_line.note ~tone:Page_line.Quiet "(기록된 슬롯 응답 이력이 없습니다)" ]
+    | rows -> List.map Page_line.note rows
   in
-  wrap Ansi.bold
-    (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)
-       (Terminal_text.single_line purpose))
-  @ detail_section_heading "1. 현재 상태 · 실행 성적"
-  @ wrap state_style
-      ("현재 상태: " ^ standalone_lane_headline_state ~now lane)
-  @ wrap state_style
-      (Printf.sprintf "구분/설정: %s · %s" obligation configuration)
-  @ wrap (if lane.sl_failed_count > 0 then Theme.warn () else Ansi.reset)
-      ("실행 성적: " ^ standalone_lane_run_score_summary lane)
-  @ (match standalone_lane_latency_summary lane with
-     | None -> []
-     | Some latency -> wrap Ansi.reset ("소요 시간: " ^ latency))
-  @ (match standalone_lane_jev_summary lane with
-     | None -> []
-     | Some (style, text) -> wrap style ("JEV: " ^ text))
-  @ (match lane.sl_admission_error with
-     | None -> []
-     | Some error ->
-       wrap (Theme.bad ())
-         ("등록 오류: " ^ Terminal_text.single_line error))
-  @ detail_section_heading "2. 모델 호출 순서 (Failover) · 설정 위치"
-  @ wrap Ansi.dim
-      (Printf.sprintf "TOML 섹션: [runtime.exact_output_lanes.%s]"
-         (Standalone_lane.to_id lane.sl_lane))
-  @ numbered_slot_lines ~max_cells Ansi.reset
-      ~label:"1차 HTTP 후보 (순서대로 시도)" lane.sl_admitted_slots
-  @ numbered_slot_lines ~max_cells Ansi.reset
-      ~label:"2차 CLI 후보 (HTTP 모두 실패 시)" lane.sl_cli_slots
-  @ numbered_slot_lines ~max_cells
-      (if lane.sl_dropped_slots = [] then Ansi.dim else Theme.warn ())
-      ~label:"실행 전 탈락한 후보" lane.sl_dropped_slots
-  @ detail_section_heading "3. 모델별 누적 응답 횟수 (Slot Selection History)"
-  @ slot_history_lines
-  @ detail_section_heading "4. 레인 출력 의미 · 실행 증거 (Contract)"
-  @ wrap Ansi.reset answer.sla_output_meaning
-  @ wrap Ansi.dim answer.sla_evidence
+  let state =
+    [ fact ~tone:state_tone "상태" (standalone_lane_headline_state ~now lane)
+    ; fact "구분" (standalone_lane_obligation lane)
+    ; fact ~tone:state_tone "설정"
+        (Tui_decode.standalone_lane_configuration_phrase lane.sl_configuration_state)
+    ; fact
+        ~tone:(if lane.sl_failed_count > 0 then Page_line.Attention else Page_line.Plain)
+        "보존된 실행" (standalone_lane_run_score_summary lane)
+    ]
+    @ (match standalone_lane_latency_summary lane with
+       | None -> []
+       | Some latency -> [ fact "속도" latency ])
+    @ (match standalone_lane_jev_summary lane with
+       | None -> []
+       | Some (tone, text) -> [ fact ~tone "JEV" text ])
+    @ (match lane.sl_admission_error with
+       | None -> []
+       | Some error ->
+         [ fact ~tone:Page_line.Failure "등록 오류" (Terminal_text.single_line error) ])
+  in
+  let failover =
+    [ fact ~tone:Page_line.Quiet "TOML 섹션"
+        (Printf.sprintf "[runtime.exact_output_lanes.%s]"
+           (Standalone_lane.to_id lane.sl_lane))
+    ; candidate_items "1차 HTTP 후보 (순서대로 시도)" lane.sl_admitted_slots
+    ; candidate_items "2차 CLI 후보 (HTTP 모두 실패 시)" lane.sl_cli_slots
+    ; candidate_items ~tone:Page_line.Attention "탈락 후보"
+        lane.sl_dropped_slots
+    ]
+  in
+  Page_reading.rows
+    ~max_cells:(max 1 (width - String.length Page_reading.detail_indent))
+    [ Page_line.Title
+        (Printf.sprintf "%s · %s" (Terminal_text.single_line lane.sl_label)
+           (Terminal_text.single_line (standalone_lane_purpose lane)))
+    ]
+  @ [ Ansi.reset, "" ]
+  @ detail_page ~width
+      [ "1. 현재 관측 · 최근 실행", state
+      ; "2. 설정된 실행 후보 · 설정 위치", failover
+      ; "3. 모델별 누적 응답 횟수 (Slot Selection History)", slot_history
+      ; ( "4. 레인 출력 의미 · 실행 증거 (Contract)"
+        , [ fact "Output meaning" answer.sla_output_meaning
+          ; fact ~tone:Page_line.Quiet "Evidence" answer.sla_evidence
+          ] )
+      ]
 
 let inventory_row_detail_lines ~width ~selected_output
     (row : Masc.Tui_decode_lane_inventory.row) =

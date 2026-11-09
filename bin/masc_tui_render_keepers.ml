@@ -744,25 +744,38 @@ type keeper_display_entry =
   | Keeper_group_heading of Keeper_list_model.group * int
   | Keeper_display_row of int * Keeper_list_model.row
 
-(* The rows come ordered by group, so a heading opens each run of rows that
-   share one. *)
-let keeper_display_entries (reading : Masc_tui_types.keeper_list_reading) =
-  let rec runs acc = function
-    | [] -> List.rev acc
-    | (position, None, row) :: rest -> runs (Keeper_display_row (position, row) :: acc) rest
-    | (position, (Some group as heading), row) :: rest ->
-        let same (_, other, _) = other = heading in
-        let members = (position, heading, row) :: List.take_while same rest in
-        let rest = List.drop_while same rest in
-        let entries =
-          List.rev_map (fun (position, _, row) -> Keeper_display_row (position, row)) members
-        in
-        runs (entries @ (Keeper_group_heading (group, List.length members) :: acc)) rest
+(* The entries are the stops [j] and [k] land on, so what is drawn and where
+   the cursor can go cannot disagree. A heading counts every row of its group,
+   folded or not. [klr_groups] is mapped from [klr_rows], so every row stop
+   names a row. *)
+let keeper_display_entries ~folded (reading : Masc_tui_types.keeper_list_reading) =
+  let rows = Array.of_list reading.klr_rows in
+  let members group =
+    List.length (List.filter (fun other -> other = Some group) reading.klr_groups)
   in
-  runs []
-    (List.mapi
-       (fun position ((row : Keeper_list_model.row), group) -> position, group, row)
-       (List.combine reading.klr_rows reading.klr_groups))
+  List.map
+    (function
+      | Keeper_list_model.Stop_heading group -> Keeper_group_heading (group, members group)
+      | Keeper_list_model.Stop_row position -> Keeper_display_row (position, rows.(position)))
+    (Keeper_list_model.stops ~folded reading.klr_groups)
+
+let keeper_entry_selected stop = function
+  | Keeper_group_heading (group, _) -> stop = Some (Keeper_list_model.Stop_heading group)
+  | Keeper_display_row (position, _) -> stop = Some (Keeper_list_model.Stop_row position)
+
+(* A folded group's heading, in the mark the Code tree gives a closed
+   folder, where an open heading leaves the same two cells blank. *)
+let keeper_group_lead ~folded = if folded then "\xe2\x96\xb8 " else "  "
+
+(* The views [v] walks, one press each (RFC-0515 §2.3). *)
+let keeper_view_tabs ~cols view =
+  let lead = "  " in
+  lead
+  ^ tab_strip ~width:(tab_strip_width ~cols ~before:lead ~after:"")
+      ~press:(fun target text -> pressable (Press_keeper_view target) text)
+      (List.map
+         (fun candidate -> Keeper_list_model.view_label candidate, candidate = view, candidate)
+         Keeper_list_model.views)
 
 let keeper_state_heading_style = function
   | Keeper_list_model.Attention -> Theme.bad ()
@@ -928,14 +941,13 @@ let count_chips_that_fit ~sep ~room chips =
     fill (room - held (List.map long counted)) chips
 
 (* The frame cuts a row from the right. The counts are what a narrow screen
-   needs, so they lead and the layout and sort name trail. An item that does
-   not fit whole is left out, because "0 inactiv…" reads as a number. *)
+   needs, so they lead and the density and sort name trail; the view strip
+   above names the view. An item that does not fit whole is left out,
+   because "0 inactiv…" reads as a number. *)
 let keeper_view_summary ~cells rows view density sort =
   let mode =
     String.concat " · "
-      [ Keeper_list_model.view_label view
-      ; Keeper_list_model.density_label density
-      ; Keeper_list_model.sort_label sort ]
+      [ Keeper_list_model.density_label density; Keeper_list_model.sort_label sort ]
   in
   let sep = "   " in
   let lead = "  " in
@@ -972,11 +984,16 @@ let render_keeper_list (state : state) =
   let inner = max 1 (framed_inner_width cols) in
   let list_reading = keeper_list_reading state in
   let model_rows = list_reading.klr_rows in
+  let stop = keeper_list_stop state in
   (* Selection already follows this ordered model in list mode. Reuse it in
-     this synchronous draw rather than rebuilding it through selected_keeper. *)
+     this synchronous draw rather than rebuilding it through selected_keeper.
+     A heading selects no Keeper. *)
   let selected_reading =
-    Option.map (fun (row : Keeper_list_model.row) -> row.reading)
-      (List.nth_opt model_rows state.keeper_cursor)
+    match stop with
+    | Some (Keeper_list_model.Stop_row position) ->
+        Option.map (fun (row : Keeper_list_model.row) -> row.reading)
+          (List.nth_opt model_rows position)
+    | Some (Keeper_list_model.Stop_heading _) | None -> None
   in
   let keepers_error = Terminal_text.optional_single_line state.keepers_error in
 
@@ -1007,6 +1024,7 @@ let render_keeper_list (state : state) =
        - Message_layout.display_width badge)
   in
   box_line buf cols (heading ^ String.make gap ' ' ^ badge);
+  box_line buf cols (keeper_view_tabs ~cols state.keeper_list_view);
   box_line buf cols
     (Theme.recede ()
      ^ keeper_view_summary ~cells:inner model_rows state.keeper_list_view
@@ -1253,29 +1271,31 @@ let render_keeper_list (state : state) =
   let chrome_rows = count_frame_lines buf in
   let footer_rows = 2 in
   let keeper_count = List.length model_rows in
-  let cursor = max 0 (min state.keeper_cursor (keeper_count - 1)) in
   let entry_height =
     match state.keeper_list_density with
     | Keeper_list_model.Two_lines -> 2
     | Keeper_list_model.One_line -> 1
   in
-  let entries = keeper_display_entries list_reading in
+  let entries = keeper_display_entries ~folded:state.keeper_list_folded list_reading in
   let portrait_candidate =
-    match state.keeper_list_density, selected_reading with
-    | Keeper_list_model.Two_lines, Some reading -> (
+    match
+      Keeper_list_model.shows_portrait state.keeper_list_view state.keeper_list_density,
+      selected_reading
+    with
+    | true, Some reading -> (
         match reading.Keeper_control.liveness with
         | Keeper_control.Present runtime -> (
             match runtime.Tui_decode.kr_portrait with
             | Tui_decode.Ready equipment ->
                 Option.map (fun portrait -> reading.Keeper_control.name, portrait)
-                  (Masc_tui_chat_portrait.shown ~name:reading.Keeper_control.name
+                  (Masc_tui_chat_portrait.shown ~figure:Masc_tui_chat_portrait.Whole_body
+                     ~name:reading.Keeper_control.name
                      ~portrait:(Keeper_portrait_equipment.Ready equipment)
                      ~rows ~cols)
             | Tui_decode.Unavailable _ -> None)
         | Keeper_control.Unobserved | Keeper_control.Absent
         | Keeper_control.Invalid _ -> None)
-    | Keeper_list_model.Two_lines, None
-    | Keeper_list_model.One_line, _ -> None
+    | true, None | false, _ -> None
   in
   let portrait_list_rows =
     let target = min 4 keeper_count in
@@ -1313,15 +1333,7 @@ let render_keeper_list (state : state) =
   let entry_rows = if overflowing then max 0 (content_rows - 1) else content_rows in
   let entry_capacity = entry_rows / entry_height in
   let selected_entry =
-    match
-      List.find_index
-        (function
-          | Keeper_display_row (position, _) -> position = cursor
-          | Keeper_group_heading _ -> false)
-        entries
-    with
-    | Some index -> index
-    | None -> 0
+    Option.value ~default:0 (List.find_index (keeper_entry_selected stop) entries)
   in
   let scroll_offset =
     if entry_capacity > 0 then
@@ -1334,13 +1346,18 @@ let render_keeper_list (state : state) =
   let entries_window = List.take entry_capacity (List.drop scroll_offset entries) in
   List.iter
     (function
-      | Keeper_group_heading (group, count) ->
-          box_line buf cols
-            (keeper_group_heading_style group ^ Ansi.bold ^ "  "
-             ^ keeper_group_heading_text ~available_cells:(inner - 2) model_rows group count
-             ^ Ansi.reset)
-      | Keeper_display_row (position, row) ->
-          let selected = position = cursor in
+      | Keeper_group_heading (group, count) as entry ->
+          let text =
+            keeper_group_heading_style group ^ Ansi.bold
+            ^ keeper_group_lead ~folded:(List.mem group state.keeper_list_folded)
+            ^ keeper_group_heading_text ~available_cells:(inner - 2) model_rows group count
+            ^ Ansi.reset
+          in
+          if keeper_entry_selected stop entry then
+            box_line_selected buf cols (Masc_tui_theme.strip_sgr text)
+          else box_line buf cols text
+      | Keeper_display_row (_, row) as entry ->
+          let selected = keeper_entry_selected stop entry in
           let primary =
             keeper_row_content ~columns ~now:now_unix ~frame:state.activity_frame
               ~yolo:(List.mem row.Keeper_list_model.keeper.Tui_decode.k_name
@@ -1403,19 +1420,20 @@ let render_keeper_list (state : state) =
   done;
 
   if overflowing then begin
-    let count_keepers entries =
-      List.fold_left
-        (fun count entry ->
-          match entry with
-          | Keeper_display_row _ -> count + 1
-          | Keeper_group_heading _ -> count)
-        0 entries
+    (* Positions rather than a count of the rows drawn above, since a
+       folded group above the window draws none of its rows. *)
+    let positions =
+      List.filter_map
+        (function
+          | Keeper_display_row (position, _) -> Some position
+          | Keeper_group_heading _ -> None)
+        entries_window
     in
-    let before = count_keepers (List.take scroll_offset entries) in
-    let visible = count_keepers entries_window in
     let range =
-      if visible = 0 then "0/" ^ string_of_int keeper_count
-      else Printf.sprintf "%d–%d/%d" (before + 1) (before + visible) keeper_count
+      match positions with
+      | [] -> "0/" ^ string_of_int keeper_count
+      | first :: rest ->
+          Printf.sprintf "%d–%d/%d" (first + 1) (List.fold_left max first rest + 1) keeper_count
     in
     box_line_styled buf cols ~style:(Theme.recede ())
       (Printf.sprintf "  [keepers %s]" range)

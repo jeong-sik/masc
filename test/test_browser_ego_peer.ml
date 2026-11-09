@@ -706,12 +706,12 @@ let test_selector_input_uses_ego_sdk () =
        | Lane.Activate_tab | Lane.Click _ | Lane.Fill _ | Lane.Set_viewport _
        | Lane.Double_click _ | Lane.Double_click_at _ | Lane.Type_text _ | Lane.Press_key _
        | Lane.Scroll _ | Lane.Hover _ | Lane.Drag_to _ | Lane.Hover_at _ | Lane.Tap_at _
-       | Lane.Swipe _ | Lane.Click_at _ | Lane.Scroll_at _ | Lane.Drag _ | Lane.Follow_link _
+       | Lane.Swipe _ | Lane.Click_at _ | Lane.Scroll_at _ | Lane.Follow_link _
        | Lane.Click_node _ | Lane.Fill_node _ | Lane.Click_target _ | Lane.Fill_target _
        | Lane.Hover_target _ | Lane.Double_click_target _ -> ())
     | other -> failf "native selector was %s" (failure_kind other)) actions;
   check int "one native run per input" (List.length actions) (List.length !asked);
-  let drag = Lane.Drag_to {source=Lane.Selector "@12";destination=Lane.Selector "loc=css:#destination";via=[];duration_ms=0} in
+  let drag = Lane.Drag_to {source="@12";destination="loc=css:#destination"} in
   (match dispatch peer Live.Page_interact (interact_args drag) with
    | Ok receipt ->
      let sent=List.hd !asked in
@@ -726,40 +726,27 @@ let test_selector_input_uses_ego_sdk () =
     (failure_kind (dispatch peer Live.Page_interact (interact_args (Lane.Click selector))));
   check int "no automatic replay" (before + 1) (List.length !asked)
 
-let test_unattestable_raw_input_is_refused_before_effect () =
+let test_a_selector_drag_with_a_lost_receipt_stays_pending () =
   let module Input=Masc.Browser_ego_input in
-  let calls=ref [] and lose_receipt=ref false in
+  let lose_receipt=ref false in
   let peer=opened (fun sent ->
-    calls:=sent.step::!calls;
     match sent.step with
     | "tabs.list" -> answered tabs
     | "page.target_input" ->
       if !lose_receipt then Error (Peer.Unobserved "original receipt lost")
       else answered (obj ["urlBefore",str observed_url;"receipt",obj [];"error",`Null;
         "tab",obj ["url",str observed_url;"title",str "Slack"]])
-    | other -> failf "raw-input preflight must not run %s" other) in
+    | other -> failf "a selector drag must not run %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
-  let selector=Lane.Selector "#source" and scene=Lane.Scene_node {document_id="d1";node_id="source"} in
-  let raw=[Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0};
-    Lane.Drag_to {source=selector;destination=selector;via=[{x=0.5;y=0.5}];duration_ms=0};
-    Lane.Drag_to {source=scene;destination=selector;via=[];duration_ms=0};
-    Lane.Drag_to {source=selector;destination=scene;via=[];duration_ms=0}] in
-  let refuse readiness=List.iter (fun action ->
-    let before=List.length !calls in
-    ignore (before_effect "unattestable raw input" (dispatch peer Live.Page_interact (interact_args action)));
-    check int "no native resolution or input call" before (List.length !calls);
-    check bool "preflight preserves exact readiness" true (Peer.input_status peer=readiness)) raw in
-  refuse (Peer.input_status peer);
-  let supported=Lane.Drag_to {source=selector;destination=Lane.Selector "#destination";via=[];duration_ms=0} in
-  check string "selector drag still uses native observed dragAndDrop" "served"
+  let supported=Lane.Drag_to {source="#source";destination="#destination"} in
+  check string "selector drag uses native observed dragAndDrop" "served"
     (failure_kind (dispatch peer Live.Page_interact (interact_args supported)));
   lose_receipt:=true;
   check string "a supported input with a lost receipt remains unknown" "unknown"
     (failure_kind (Peer.dispatch ~command_id:"original-supported-drag" peer ~verb:Live.Page_interact (interact_args supported)));
-  let pending=Peer.input_status peer in
-  (match pending with Input.Uncertain value -> check string "original command retained" "original-supported-drag" value.command_id
-   | Ready _ -> fail "lost native receipt did not retain pending input");
-  refuse pending
+  (match Peer.input_status peer with
+   | Input.Uncertain value -> check string "original command retained" "original-supported-drag" value.command_id
+   | Ready _ -> fail "lost native receipt did not retain pending input")
 
 let test_invalid_workflow_is_refused_before_any_step () =
   let calls=ref 0 in
@@ -986,7 +973,7 @@ let test_workflow_raw_context_is_bound_to_its_actual_pending () =
    Only their declared receipt without [dialog] settles the input; the next
    input runs either way. *)
 let test_a_target_gesture_settles_only_from_the_receipt_it_returns () =
-  let drag = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";via=[];duration_ms=0} in
+  let drag = Lane.Drag_to {source="#source";destination="#destination"} in
   List.iter (fun gesture ->
   let tab = obj ["url",str observed_url;"title",str "Slack"] in
   let drag_reply fields = answered (obj (["urlBefore",str observed_url;"tab",tab] @ fields)) in
@@ -1093,7 +1080,7 @@ let test_a_gesture_refused_before_its_press_keeps_input () =
     | "page.target_input" -> !reply
     | other -> failf "unexpected refused-gesture step %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
-  let drag = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";via=[];duration_ms=0} in
+  let drag = Lane.Drag_to {source="#source";destination="#destination"} in
   List.iter (fun (name, kind, action) ->
     reply := refusal (str "ElementResolutionError") (str kind);
     (match dispatch peer Live.Page_interact (interact_args action) with
@@ -1695,7 +1682,7 @@ let test_chooser_upload_runs_after_uncertain_pointer_release () =
   let directory = Unix.realpath (capture_directory ()) in
   let path = Filename.concat directory "owned-upload.txt" in
   Out_channel.with_open_bin path (fun channel -> Out_channel.output_string channel "fixture");
-  let native_drag = Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";via=[];duration_ms=0} in
+  let native_drag = Lane.Drag_to {source="#source";destination="#destination"} in
   List.iter (fun (name, drag) ->
     let asked = ref [] in
     let peer = opened (fun sent ->
@@ -1807,9 +1794,7 @@ let test_the_scripts_parse_as_modules () =
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Block_requests ["ads.example.com"]});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Unblock_requests});
       Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Set_cookie {name="n";value="v";path="/";secure=false;http_only=false;same_site=None;max_age_sec=None}});
-      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Delete_cookie "n"});
-      (* Known-unavailable raw drag is refused before the runner. *)
-      Live.Page_interact, interact_args (Lane.Drag {from={x=0.25;y=0.5};to_={x=0.75;y=0.5};viewport;via=[];duration_ms=0}) ];
+      Live.Page_act, act_args (Lane.Action.On_tab {tab_id=1;interaction=Lane.Action.Delete_cookie "n"}) ];
   check (result unit string) "finish" (Ok ()) (Peer.finish peer);
   check (list string) "every step"
     ["space.open";"tabs.list";"page.read";"page.document";"page.elements";"page.scene";"page.snapshot";"page.downloads";"page.cookies";"page.network";"page.console";"page.capture";
@@ -1953,7 +1938,7 @@ let test_the_peer_serves_what_the_lane_table_says () =
     | Point_click -> interact (Click_at {point;viewport;button=Pointer.Primary})
     | Point_scroll -> interact (Scroll_at {point;viewport;x=0;y=120})
     | Trusted_hover -> interact (Hover_at {point;viewport})
-    | Trusted_drag -> interact (Drag_to {source=Selector "#source";destination=Selector "#destination";via=[];duration_ms=0})
+    | Trusted_drag -> interact (Drag_to {source="#source";destination="#destination"})
     | Trusted_double_click -> interact (Double_click_at {point;viewport})
     | Trusted_button_click -> interact (Click_at {point;viewport;button=Pointer.Secondary})
     | Viewport_resize -> interact (Set_viewport (Fit {width=800;height=600}))
@@ -2440,7 +2425,7 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
   check bool "user-held Space runs no native wait or page call" true (seen ()=`List []);
   ownership:="agent";
   ignore (dispatch peer Live.Tabs_list (obj []));
-  let drag=Lane.Drag_to {source=Lane.Selector "@12";destination=Lane.Selector "#target";via=[];duration_ms=0} in
+  let drag=Lane.Drag_to {source="@12";destination="#target"} in
   check string "drag first leaves input unconfirmed" "unknown"
     (failure_kind (dispatch peer Live.Page_interact (interact_args drag)));
   let pending=Peer.input_status peer in
@@ -2525,7 +2510,7 @@ const taskSpace=async id=>({spaceId:id,name:'SDK Space',ownership:%s,
   (* Retain the original uncertainty; management cannot act as input recovery. *)
   label:=str "borrowed";
   ignore (dispatch peer Live.Tabs_list (obj []));
-  let drag=Lane.Drag_to {source=Lane.Selector "@12";destination=Lane.Selector "#target";via=[];duration_ms=0} in
+  let drag=Lane.Drag_to {source="@12";destination="#target"} in
   check string "an interrupted input remains uncertain" "unknown"
     (failure_kind (dispatch peer Live.Page_interact (interact_args ~tab_id:2 drag)));
   let pending=Peer.input_status peer in
@@ -4468,8 +4453,7 @@ let test_loading_recovery_preserves_original_input_hold () =
     | other -> failf "recovery must not require an observation: %s" other) in
   ignore (dispatch peer Live.Tabs_list (obj []));
   let original = Peer.dispatch ~command_id:"original-lost-drag" peer ~verb:Live.Page_interact
-    (interact_args (Lane.Drag_to {source=Lane.Selector "#source";destination=Lane.Selector "#destination";
-      via=[];duration_ms=0})) in
+    (interact_args (Lane.Drag_to {source="#source";destination="#destination"})) in
   check string "the original holding input has an unknown outcome" "unknown" (failure_kind original);
   check int "the original holding input reached native exactly once" 1 !original_calls;
   let pending = Peer.input_status peer in
@@ -4510,7 +4494,7 @@ let () =
       test_case "adopted managed Pages retain origin while using native actions" `Quick test_adopted_managed_page_uses_native_actions_without_changing_origin;
       test_case "takeover receipts and native runner preserve pending input" `Quick test_takeover_receipt_and_native_runner_preserve_pending_input;
       test_case "saved fetch survives snapshot failure and reaches the download broker" `Quick test_saved_fetch_survives_snapshot_failure_and_reaches_download_broker;
-      test_case "unattestable raw inputs refuse before native resolution and preserve pending input" `Quick test_unattestable_raw_input_is_refused_before_effect;
+      test_case "a selector drag with a lost receipt stays pending" `Quick test_a_selector_drag_with_a_lost_receipt_stays_pending;
       test_case "a malformed later raw workflow step prevents every earlier effect" `Quick test_invalid_workflow_is_refused_before_any_step;
       test_case "raw typing settles only its exact native window" `Quick test_raw_type_settles_only_its_exact_native_window;
       test_case "raw typing preserves pending for a lost reply or private failure" `Quick test_raw_type_lost_and_private_failures_remain_pending;

@@ -3668,6 +3668,29 @@ let retry_without_thinking_admitted (candidate : Runtime_candidate.t) =
   Result.is_ok (Llm_provider.Complete_common.validate_all retry_cfg)
 ;;
 
+let connection_recovery_sequence ~same_run_retry_authorized ~on_reconnect
+    ~reconnect ~attempt () =
+  match attempt () with
+  | (Ok _, _, _) as completed -> completed
+  | (Error error, _, _) as failed ->
+    let kind =
+      match Keeper_turn_driver_try_runtime.core_error_to_http_error error with
+      | Some (Llm_provider.Http_client.NetworkError
+          { kind = (Connection_reset | End_of_file) as kind; _ }) -> Some kind
+      | Some (Llm_provider.Http_client.NetworkError
+          { kind = (Connection_refused | Dns_failure | Tls_error | Timeout
+                   | Local_resource_exhaustion | Unknown); _ })
+      | Some (HttpError _ | TimeoutError _ | AcceptRejected _ | ProviderTerminal _
+             | ProviderFailure _)
+      | None -> None
+    in
+    (match kind with
+     | Some kind when same_run_retry_authorized () ->
+       on_reconnect kind;
+       reconnect ()
+     | Some _ | None -> failed)
+;;
+
 let run_try_provider_with_truncation_recovery
       ?on_memory_capacity_refusal
       ?continuation_checkpoint
@@ -3676,9 +3699,33 @@ let run_try_provider_with_truncation_recovery
   =
   (* One state for the run, the continuation below included ([attempt_state]). *)
   let state = new_attempt_state ctx in
-  let first_result, checkpoint_after, success_sample =
+  let stream_started = ref false in
+  let attempt_ctx = {ctx with on_event = Option.map (fun observe event ->
+    stream_started := true;
+    observe event) ctx.on_event} in
+  let attempt () =
     run_try_provider_with_history_recovery ~state ?on_memory_capacity_refusal
-      ?continuation_checkpoint ctx candidate
+      ?continuation_checkpoint attempt_ctx candidate
+  in
+  let first_result, checkpoint_after, success_sample =
+    match ctx.input_runtime with
+    | Some { Runtime_instance.execution = Agent_core _; _ } ->
+      connection_recovery_sequence
+        ~same_run_retry_authorized:(fun () ->
+          not !stream_started
+          && same_run_retry_allowed ctx.checkpoint_progress && native_retry_allowed ctx)
+        ~on_reconnect:(fun kind ->
+          emit_runtime_manifest ctx ~status:"provider_connection_reconnect"
+            ~decision:(`Assoc
+              [ "network_error_kind", `String (Llm_provider.Http_client.network_error_kind_to_string kind)
+              ; "connection_reuse", `String "disabled"
+              ])
+            Keeper_runtime_manifest.Provider_lane_resolved)
+        ~reconnect:(fun () -> Provider_connection_cache_ref.with_fresh_connections attempt)
+        ~attempt ()
+    | Some { Runtime_instance.execution =
+        (Codex_app_server _ | Antigravity_cli _ | Claude_code _ | Muse_serve _ | Vibe_cli _); _ }
+    | None -> attempt ()
   in
   let thinking_can_be_disabled = retry_without_thinking_admitted candidate in
   if not (native_retry_allowed ctx) then first_result, checkpoint_after, success_sample

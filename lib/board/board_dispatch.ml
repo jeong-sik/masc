@@ -415,11 +415,8 @@ let sort_posts_in_memory ~sort_by (posts : Board.post list) =
         let cmp = Stdlib.Int.compare b.reply_count a.reply_count in
         if cmp <> 0 then cmp else Stdlib.Float.compare b.created_at a.created_at) posts
 
-let normalize_author_filter = function
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if String.equal trimmed "" then None else Some (String.lowercase_ascii trimmed)
-  | None -> None
+let normalize_author_filter raw =
+  String_util.option_trim raw |> Option.map String.lowercase_ascii
 
 let agent_matches_author_filter ~needle (agent_id : Board.Agent_id.t) =
   let author = Board.Agent_id.to_string agent_id |> String.lowercase_ascii in

@@ -132,25 +132,8 @@ let screenshot_response ?(source="live") ?(client=firefox.client_id) ?(tab_id=2)
     "data", `String "UE5H"; "viewport", `Assoc ["documentId",`String "fixture";
       "width",`Int 800;"height",`Int 600;"scrollX",`Int 0;"scrollY",`Int 0]; "elapsed_ms", `Float 13.]]
 
-(* Drag admission follows the screenshot's connection, including Ego, rather
-   than the wording used to describe that decision in the footer. *)
-let test_screenshot_drag_support () =
-  let ego = { bidi with client_id = "44444444-4444-4444-8444-444444444444";
-                        transport = Browser_lane.Ego_task_space; space = Some {id=51;name="fixture Space"} } in
-  let view = { (create ()) with clients = Some [firefox; bidi; ego] } in
-  let shot ?(source="live") client = success (decode_screenshot (screenshot_response ~source ~client ())) in
-  List.iter (fun (client : client) ->
-    expect "the screenshot's native connection takes the drag"
-      (screenshot_drag_support view (shot client.client_id) = Drag_served);
-    expect "the chosen client answers when the list has not been read"
-      (screenshot_drag_support (choose_client client (create ())) (shot client.client_id) = Drag_served))
-    [bidi; ego];
-  expect "a client the view no longer holds is not given a rule"
-    (screenshot_drag_support (create ()) (shot firefox.client_id) = Drag_unknown)
 let test_pointer_decision () =
   let shot ?(source="live") client = success (decode_screenshot (screenshot_response ~source ~client ())) in
-  let drag (shot : screenshot) =
-    Browser_lane.Drag {from={x=0.1;y=0.1}; to_={x=0.2;y=0.2}; viewport=shot.viewport;via=[];duration_ms=0} in
   let click (shot : screenshot) = Browser_lane.Click_at {point={x=0.1;y=0.1}; viewport=shot.viewport; button=Browser_lane.Pointer.Primary} in
   let wheel (shot : screenshot) =
     Browser_lane.Scroll_at {point={x=0.5;y=0.5}; viewport=shot.viewport; x=0; y=120} in
@@ -168,9 +151,9 @@ let test_pointer_decision () =
   expect "a tap on ego is not sent, and no listed connection serves it"
     (pointer_decision both on_ego (tap on_ego) = Pointer_unserved (unserved false)
      && pointer_decision alone on_ego (tap on_ego) = Pointer_unserved (unserved false));
-  expect "a point click, a wheel notch and a drag are sent on each connection"
+  expect "a point click and a wheel notch are sent on each connection"
     (List.for_all (fun (shot : screenshot) ->
-       sends both shot (click shot) && sends both shot (wheel shot) && sends both shot (drag shot))
+       sends both shot (click shot) && sends both shot (wheel shot))
        [on_ego; on_bidi]);
   expect "a connection the view no longer holds is left to the server"
     (sends (create ()) on_ego (tap on_ego));
@@ -1062,7 +1045,6 @@ let () =
      "picker empty row reads the list", test_picker_empty_row;
      "client inventory contract", test_clients_decode;
      "native Page context contract", test_page_context_decode;
-     "screenshot drag support follows the connection", test_screenshot_drag_support;
      "every pointer gesture is decided before it is sent", test_pointer_decision;
      "a refused gesture stays until the next input", test_unserved_gesture;
      "screenshot ownership and stale tab", test_screenshot_ownership;

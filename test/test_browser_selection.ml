@@ -86,10 +86,10 @@ let test_native_workflow_binding () =
 let test_eligibility () =
   check bool "disabled login is not selected" true
     (choose {empty with live_activity=Lane.Disabled;live_clients=[client "1" Lane.Ego_task_space]}=Error Selection.No_available_browser);
-  let timing=Lane.Page_interact {tab_id=0;expected_url=None;action=Lane.Drag_to {
-    source=Lane.Selector "#from";destination=Lane.Selector "#to";via=[];duration_ms=10}} in
-  check bool "bound timing request still requires its exact browser" true
-    (choose ~verb:timing ~bound:true {empty with live_clients=[client "1" Lane.Ego_task_space]}=Error Selection.Binding_required)
+  let drag=Lane.Page_interact {tab_id=0;expected_url=None;action=Lane.Drag_to {
+    source="#from";destination="#to"}} in
+  check bool "a bound drag still requires its exact browser" true
+    (choose ~verb:drag ~bound:true {empty with live_clients=[client "1" Lane.Ego_task_space]}=Error Selection.Binding_required)
 let test_wire () =
   List.iter (fun reason -> check bool "typed reason round trip" true
     (Selection.reason_of_wire (Selection.reason_to_wire reason)=Some reason))

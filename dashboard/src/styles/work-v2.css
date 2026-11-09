@@ -95,7 +95,7 @@
   width: 12px;
 }
 
-/* wk-prio: prototype v2.css:815 — square chip (radius-xs), mono via .mono utility */
+/* wk-prio: prototype — square chip (radius-xs), mono via .mono utility */
 .wk-prio {
   flex: none;
   font-size: var(--fs-10);
@@ -105,7 +105,7 @@
   padding: 1px 6px;
 }
 
-/* wk-gstatus: prototype v2.css:816 — pill, ui font, semantic status variants below */
+/* wk-gstatus: prototype — pill, ui font, semantic status variants below */
 .wk-gstatus {
   flex: none;
   font-family: var(--font-ui);
@@ -117,7 +117,7 @@
   color: var(--text-dim);
 }
 
-/* wk-gstatus semantic variants: prototype v2.css:817-820 */
+/* wk-gstatus semantic variants, as in the prototype */
 .wk-gstatus.ok {
   color: var(--status-ok);
   border-color: color-mix(in oklab, var(--status-ok) 38%, transparent);
@@ -141,7 +141,7 @@
   background: var(--volt-wash);
 }
 
-/* wk-approval: prototype v2.css:821 — volt theme (was warn) */
+/* wk-approval: prototype — volt theme (was warn) */
 
 .wk-goal-title {
   font-family: var(--font-ui);
@@ -202,7 +202,7 @@
 }
 
 .wk-seg.done { background: var(--status-ok); }
-/* wk-seg.verify: prototype v2.css:823 — volt-strong (was status-warn) */
+/* wk-seg.verify: prototype — volt-strong (was status-warn) */
 .wk-seg.verify { background: var(--volt-strong); }
 .wk-seg.wip { background: var(--volt); }
 .wk-seg.blocked { background: var(--status-bad); }
@@ -421,7 +421,7 @@
 /* ── Task row ─────────────────────────────────────────────────────────────── */
 .wk-task {
   /* No row padding here — the prototype's inner .wk-task-main supplies it
-     (vendored v2.css:830, 7px 8px). flex-column/gap stays: it lays out the
+     (7px 8px). flex-column/gap stays: it lays out the
      expanded .wk-task-detail block below .wk-task-main. */
   display: flex;
   flex-direction: column;

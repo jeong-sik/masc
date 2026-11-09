@@ -7,6 +7,8 @@ module Keeper_map = Map.Make (Keeper_id)
 
 type keeper =
   { owner : User_id.t
+  ; policy_id : Policy_id.t
+  ; turn_scope : Authorization_scope.t
   ; runtime : Runtime_id.t option
   }
 
@@ -21,6 +23,7 @@ let owned_by t user_id =
 
 type refusal =
   | Already_made of Keeper_id.t
+  | Policy_named_before of Policy_id.t
   | Not_made of Keeper_id.t
   | Made_for_another of
       { author : User_id.t
@@ -43,6 +46,8 @@ type refusal =
 
 let refusal_to_string = function
   | Already_made id -> Printf.sprintf "the Keeper %s was made before" (Keeper_id.to_string id)
+  | Policy_named_before id ->
+    Printf.sprintf "the policy %s was named by another Keeper before" (Policy_id.to_string id)
   | Not_made id ->
     Printf.sprintf "the Keeper %s was never made and is given no Runtime" (Keeper_id.to_string id)
   | Made_for_another { author; user_id } ->
@@ -73,14 +78,20 @@ let refusal_to_string = function
   | Not_a_keeper_author author -> Author.label author ^ " writes no Keeper record"
 ;;
 
-let make t ~author ~is_active ~keeper_id ~user_id =
+let names_policy t policy_id =
+  Keeper_map.exists (fun _ keeper -> Policy_id.equal keeper.policy_id policy_id) t
+;;
+
+let make t ~author ~is_active ~keeper_id ~user_id ~policy_id ~turn_scope =
   if Keeper_map.mem keeper_id t
   then Error (Already_made keeper_id)
+  else if names_policy t policy_id
+  then Error (Policy_named_before policy_id)
   else if not (User_id.equal author user_id)
   then Error (Made_for_another { author; user_id })
   else if not (is_active user_id)
   then Error (User_not_active user_id)
-  else Ok (Keeper_map.add keeper_id { owner = user_id; runtime = None } t)
+  else Ok (Keeper_map.add keeper_id { owner = user_id; policy_id; turn_scope; runtime = None } t)
 ;;
 
 let assign t ~author ~is_active ~runtime_owner ~keeper_id ~runtime_id =
@@ -104,8 +115,8 @@ let assign t ~author ~is_active ~runtime_owner ~keeper_id ~runtime_id =
    may write. *)
 let apply t ~(author : Author.t) ~is_active ~runtime_owner (event : E.t) =
   match author, event with
-  | Author.Authenticated (Principal.Human id), E.Made { keeper_id; user_id } ->
-    make t ~author:id ~is_active ~keeper_id ~user_id
+  | Author.Authenticated (Principal.Human id), E.Made { keeper_id; user_id; policy_id; turn_scope } ->
+    make t ~author:id ~is_active ~keeper_id ~user_id ~policy_id ~turn_scope
   | Author.Authenticated (Principal.Human id), E.Assigned { keeper_id; runtime_id } ->
     assign t ~author:id ~is_active ~runtime_owner ~keeper_id ~runtime_id
   | Author.Authenticated (Principal.Service _ as principal), (E.Made _ | E.Assigned _) ->

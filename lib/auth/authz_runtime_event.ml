@@ -10,6 +10,7 @@ type t =
       ; provider_account_id : Provider_account_id.t
       ; user_id : User_id.t
       ; grant_id : Grant_id.t
+      ; self_effects : Effect.Set.t
       }
 
 let equal (Made a) (Made b) =
@@ -17,11 +18,12 @@ let equal (Made a) (Made b) =
   && Provider_account_id.equal a.provider_account_id b.provider_account_id
   && User_id.equal a.user_id b.user_id
   && Grant_id.equal a.grant_id b.grant_id
+  && Effect.Set.equal a.self_effects b.self_effects
 ;;
 
 let made_label = "made"
 
-let to_body (Made { runtime_id; provider_account_id; user_id; grant_id }) =
+let to_body (Made { runtime_id; provider_account_id; user_id; grant_id; self_effects }) =
   let* event = Authz_body.string made_label in
   let* runtime_id = Authz_body.string (Runtime_id.to_string runtime_id) in
   let* provider_account_id =
@@ -29,12 +31,14 @@ let to_body (Made { runtime_id; provider_account_id; user_id; grant_id }) =
   in
   let* user_id = Authz_body.string (User_id.to_string user_id) in
   let* grant_id = Authz_body.string (Grant_id.to_string grant_id) in
+  let* self_effects = Authz_scope_body.effect_set_to_body self_effects in
   Authz_body.object_
     [ "event", event
     ; "runtime_id", runtime_id
     ; "provider_account_id", provider_account_id
     ; "user_id", user_id
     ; "grant_id", grant_id
+    ; "self_effects", self_effects
     ]
 ;;
 
@@ -46,21 +50,25 @@ type error =
   | Invalid_provider_account_id of Authz_id.error
   | Invalid_user_id of Authz_id.error
   | Invalid_grant_id of Authz_id.error
+  | Invalid_self_effects of Authz_scope_body.error
 
 let error_to_string = function
   | Not_an_object -> "the body of a Runtime record is an object"
   | Unknown_event label -> Printf.sprintf "%S is not an event of a Runtime" label
   | Wrong_members ->
     "the body of a made Runtime has the members event, runtime_id, provider_account_id, \
-     user_id, and grant_id, in this order, each a string"
+     user_id, grant_id, and self_effects, in this order, the last a list of effects and \
+     the others strings"
   | Invalid_runtime_id error -> "the Runtime id is not valid: " ^ Authz_id.error_to_string error
   | Invalid_provider_account_id error ->
     "the provider account id is not valid: " ^ Authz_id.error_to_string error
   | Invalid_user_id error -> "the user id is not valid: " ^ Authz_id.error_to_string error
   | Invalid_grant_id error -> "the grant id is not valid: " ^ Authz_id.error_to_string error
+  | Invalid_self_effects error ->
+    "the effects of the Self grant are not valid: " ^ Authz_scope_body.error_to_string error
 ;;
 
-let made_of ~runtime_id ~provider_account_id ~user_id ~grant_id =
+let made_of ~runtime_id ~provider_account_id ~user_id ~grant_id ~self_effects =
   let* runtime_id =
     Result.map_error (fun error -> Invalid_runtime_id error) (Runtime_id.of_string runtime_id)
   in
@@ -75,7 +83,12 @@ let made_of ~runtime_id ~provider_account_id ~user_id ~grant_id =
   let* grant_id =
     Result.map_error (fun error -> Invalid_grant_id error) (Grant_id.of_string grant_id)
   in
-  Ok (Made { runtime_id; provider_account_id; user_id; grant_id })
+  let* self_effects =
+    Result.map_error
+      (fun error -> Invalid_self_effects error)
+      (Authz_scope_body.effect_set_of_body self_effects)
+  in
+  Ok (Made { runtime_id; provider_account_id; user_id; grant_id; self_effects })
 ;;
 
 let of_body (body : Authz_body.t) =
@@ -88,6 +101,7 @@ let of_body (body : Authz_body.t) =
         ; ("provider_account_id", provider_account_id)
         ; ("user_id", user_id)
         ; ("grant_id", grant_id)
+        ; ("self_effects", self_effects)
         ] ->
         (match
            ( Authz_body.string_value runtime_id
@@ -96,7 +110,7 @@ let of_body (body : Authz_body.t) =
            , Authz_body.string_value grant_id )
          with
          | Some runtime_id, Some provider_account_id, Some user_id, Some grant_id ->
-           made_of ~runtime_id ~provider_account_id ~user_id ~grant_id
+           made_of ~runtime_id ~provider_account_id ~user_id ~grant_id ~self_effects
          | (None | Some _), (None | Some _), (None | Some _), (None | Some _) ->
            Error Wrong_members)
       | _ -> Error Wrong_members)

@@ -3,7 +3,7 @@
 Browser Lane has one source, `live`: an ego lite task space.
 
 The ego connection navigates only a native managed Page in its task space
-(`BrowserGoto` with `lane = "live"`, its `clientId` and that `tabId`). A tab the
+(`BrowserGoto` with its `clientId` and that `tabId`). A tab the
 operator opened is listed and refused until it is explicitly adopted.
 
 Keeper browser tools use the same source state. They reject backend failures,
@@ -59,11 +59,10 @@ checking rendered application state, and gathering evidence across tabs.
 | `follow_link` | `documentId`/`nodeId` for a same-tab HTTP(S) anchor | live |
 | `scroll` | relative CSS pixels `x`/`y` | live |
 | `hover` | `documentId`/`nodeId` or a unique `selector`, plus `expectedUrl`; moves the pointer onto the element without clicking | live |
-| `drag_to` | `source` and `destination`, each `{documentId,nodeId}` or `{selector}`, plus `expectedUrl` | live |
+| `drag_to` | `source` and `destination`, each `{selector}`, plus `expectedUrl` | live |
 | `hover_at` | normalized `point`, captured `viewport`, and `expectedUrl`; moves the trusted pointer without clicking | live |
 | `click_at`, `scroll_at` | normalized `point` and captured `viewport`; scroll adds `x`/`y`; `click_at` also takes `button` (`primary` by default, `middle`, `secondary`) | live |
-| `drag` | normalized `from`/`to` and captured `viewport`; trusted pointer press, move and release | live |
-| `tap_at`, `swipe` | like `click_at` and `drag` (`point`, or `from`/`to` with `via` and `durationMs`), sent by CDP touch events without touch emulation | live |
+| `tap_at`, `swipe` | `point` like `click_at`, or normalized `from`/`to` with `via` and `durationMs`, sent by CDP touch events without touch emulation | live |
 | `set_viewport` | `expectedUrl`, and `width`/`height` in CSS pixels (100 to 4096) given together; with neither, the browser's own size returns | live |
 | `select_option` | `expectedUrl` is optional; a `selector` and the exact `value`, or distinct `values`. Ego passes them to native selectOption, which follows SDK selection semantics and may select disabled options. It is not a trusted click on the list | live |
 | `activate_tab` | the selected live `clientId`/`tabId` | live |
@@ -138,7 +137,7 @@ work by it and the Keeper tools build their rejection from it.
 | `cookie_writing` | `BrowserAct action=set_cookie` or `delete_cookie` with `tabId` | yes, sets one cookie for the host of a native managed Page's top document, or deletes every cookie of a name that document sees by its domain and path; the cookie is in the operator's ego profile, so the operator's tabs and other task spaces see it and it stays after the ego SDK process ends; the answer never carries a value |
 | `point_scroll` | `scroll_at` | yes, on a native managed Page, ego's wheel |
 | `trusted_hover` | `hover`, `hover_at` | yes, on a native managed Page |
-| `trusted_drag` | `drag_to`, `drag` | yes, zero duration on native managed Pages |
+| `trusted_drag` | `drag_to` | yes, selector to selector on native managed Pages |
 | `tab_activation` | `activate_tab` | yes, native managed Page and expectedUrl; native active/window observation without rendered UI or OS-focus proof |
 
 The ego connection runs one fixed script per command in an ego lite task space
@@ -161,18 +160,10 @@ The ego adapter uses the shared semantic pointer decoder for observed geometry
 and URL, the shared action classification and the shared intermediate waypoint
 calculation; it keeps its own native input and release handling.
 
-Ego serves `drag_to` and `drag` with its native mouse API on agent pages.
-It visits the supplied viewport waypoints, or the midpoint for an empty route,
-then the destination twice before release. `durationMs` must be zero: ego's
-mouse API exposes steps, not a movement duration, so MASC adds no timing loop.
-The observed URL/document/viewport guard runs before the gesture. A drag between
-coordinates, or `drag_to` with waypoints or scene nodes, runs mouse calls. Button
-release is attempted in `finally`, including when a button-down call fails, but
-the SDK's mouse calls answer void, so the release is never confirmed. The result
-is an unknown outcome and this peer refuses further input until the operator's
-reset. A `drag_to` between two selectors without waypoints uses `dragAndDrop`,
-which answers a receipt, and only an object receipt without `dialog` lets the next
-input run. If the run loses its answer, this peer also refuses further input.
+Ego serves `drag_to` on agent pages with the SDK's `dragAndDrop`, from one
+selector onto another, after checking that the tab is still at `expectedUrl`.
+`dragAndDrop` answers a receipt, and only an object receipt without `dialog` lets
+the next input run. If the run loses its answer, this peer refuses further input.
 Reads and ending the task space remain available; end that space before
 opening a fresh connection. This is a per-peer failure state, not a durable
 cross-process recovery record. The state lives in memory and ends with the

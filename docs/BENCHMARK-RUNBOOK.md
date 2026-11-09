@@ -19,15 +19,8 @@ Aggregate the checked-in evidence fixture:
 ./scripts/harness_tool_call_quality.sh
 ```
 
-Run fresh isolated Keeper cases:
-
-```bash
-./scripts/harness_tool_call_quality.sh --live
-```
-
-The case catalog is `benchmarks/data/tool_call_quality_cases.json`. The live
-mode starts an isolated local server, executes the cases, writes raw evidence,
-and passes it through the benchmark CLI.
+The case catalog is `benchmarks/data/tool_call_quality_cases.json`. The script
+passes the catalog and the evidence file through the benchmark CLI.
 
 ## Librarian Continuity Measurement
 

@@ -43,7 +43,11 @@ val step_uncounted : delta:int -> int -> int
     top. There is no bound below to hold it at, but a negative scroll is not
     a position either: the frame indexes the list with it. The Git-changes
     overlay opened over the Keepers surface was unlisted, and one up-key
-    from the top stored -1. *)
+    from the top stored -1.
+
+    Forward stops at [max_int]. End stores that value on a reader the frame
+    clamps, and until the frame has drawn, an addition would wrap negative
+    and throw the reader to the top. *)
 
 val page_step : height:int -> int
 (** A page of visible rows with the existing one-row overlap. *)

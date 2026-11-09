@@ -1903,6 +1903,7 @@ let planning_goal_row id title =
   ; pg_due_date = None
   ; pg_metric = None
   ; pg_target_value = None
+  ; pg_criterion_review = Tui_decode.Criterion_unavailable "fixture has no criterion review"
   ; pg_proof = Tui_decode.Proof_idle
   ; pg_retry_binding = None
   ; pg_verifier_unreconciled = None

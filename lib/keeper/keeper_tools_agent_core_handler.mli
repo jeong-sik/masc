@@ -34,15 +34,13 @@
     source context retain [keeper_turn_id] attribution without inventing a
     source Task. [owned_job_replay] carries only the original job source to
     the owned-job producer; physical metadata and ordinary call attribution
-    remain those of the current invocation. [prepared_read] selects the owned
-    capability Read consumer; it requires the exact canonical Read descriptor.
-    [prepared_edit] is the opaque
-    existing-file preparation for this canonical Edit descriptor and exact
-    translated input. Its consumer still checks current confinement and owner;
-    it supplies no authorization or replay evidence. [prepared_write] binds
-    the original Overwrite/Append producer and exact input to pinned physical
-    parents; a missing target file is supported. Omission uses ordinary
-    dispatch. A prepared call supplies its original [source_context] snapshot. *)
+    remain those of the current invocation. [prepared_file] selects the owned
+    file capability consumer ([Read], [Edit], or [Write] from
+    {!Keeper_prepared_inline_files.operation}) and requires its matching
+    canonical Read, Edit, or Write descriptor. Its consumer still checks current
+    confinement and owner; it supplies no authorization or replay evidence.
+    Omission uses ordinary dispatch. A prepared call supplies its original
+    [source_context] snapshot. *)
 val make_keeper_tool_handler
   :  capability_surface:Keeper_capability_surface.t
   -> name:string
@@ -57,9 +55,7 @@ val make_keeper_tool_handler
   -> keeper_turn_id:(unit -> int option)
   -> ?source_context:(unit -> Keeper_tool_call_log_context.turn_context option)
   -> ?owned_job_replay:Keeper_owned_job_invocation.replay
-  -> ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read
-  -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
-  -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
+  -> ?prepared_file:Keeper_prepared_inline_files.operation
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?artifact_draft_scope:Keeper_artifact_draft_scope.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
@@ -98,9 +94,7 @@ val make_keeper_tool_handler_from_meta
   -> keeper_turn_id:(unit -> int option)
   -> ?source_context:(unit -> Keeper_tool_call_log_context.turn_context option)
   -> ?owned_job_replay:Keeper_owned_job_invocation.replay
-  -> ?prepared_read:Keeper_tool_filesystem_runtime.prepared_read
-  -> ?prepared_edit:Keeper_tool_filesystem_runtime.prepared_edit
-  -> ?prepared_write:Keeper_tool_filesystem_runtime.prepared_write
+  -> ?prepared_file:Keeper_prepared_inline_files.operation
   -> ?turn_sandbox_factory:Keeper_sandbox_factory.t
   -> ?artifact_draft_scope:Keeper_artifact_draft_scope.t
   -> ?clock:float Eio.Time.clock_ty Eio.Resource.t

@@ -111,6 +111,71 @@ class RemoteWorkspaceCleanup(unittest.TestCase):
         self.assertEqual(entries["clean"]["result"], "would remove")
         self.assertTrue((self.root / "clean").is_dir())
 
+    def test_old_clone_with_internal_linked_worktree_is_removed(self) -> None:
+        main = self.clone("with-worktree")
+        linked = main / "linked"
+        git(main, "worktree", "add", "-q", "--detach", str(linked))
+        with (main / ".git/info/exclude").open("a") as exclude:
+            exclude.write("\n/linked/\n")
+        for repo in (main, linked):
+            self.assertEqual(git(repo, "status", "--porcelain"), "")
+            self.assertIsNone(cleaner.unpushed_tip(repo))
+
+        # Administrative files still contribute to retention, even though
+        # they must not be treated as independent repository candidates.
+        administrative = Path(git(linked, "rev-parse", "--absolute-git-dir").strip())
+        head = administrative / "HEAD"
+        touched = time.time() + LATER
+        os.utime(head, (touched, touched))
+        self.assert_kept(self.sweep(), "with-worktree", "touched within retention")
+        os.utime(head, (0, 0))
+
+        entries = self.sweep()
+        self.assert_removed(entries, "with-worktree")
+        self.assertFalse(linked.exists())
+
+    def test_old_clone_with_fully_pushed_submodule_is_removed(self) -> None:
+        main = self.clone("with-submodule")
+        git(main, "-c", "protocol.file.allow=always", "submodule", "add", "-q",
+            str(self.origin), "sub")
+        git(main, "commit", "-q", "-am", "add submodule")
+        git(main, "push", "-q", "origin", "HEAD:main")
+        for repo in (main, main / "sub"):
+            self.assertEqual(git(repo, "status", "--porcelain"), "")
+            self.assertIsNone(cleaner.unpushed_tip(repo))
+        self.assert_removed(self.sweep(), "with-submodule")
+
+    def test_deinitialized_submodule_with_local_commit_is_kept(self) -> None:
+        main = self.clone("with-deinitialized-submodule")
+        git(main, "-c", "protocol.file.allow=always", "submodule", "add", "-q",
+            str(self.origin), "sub")
+        git(main, "commit", "-q", "-am", "add submodule")
+        git(main, "push", "-q", "origin", "HEAD:main")
+        sub = main / "sub"
+        (sub / "README").write_text("local submodule commit\n")
+        git(sub, "commit", "-q", "-am", "local only")
+        commit = git(sub, "rev-parse", "HEAD").strip()
+        git(main, "submodule", "deinit", "-q", "-f", "sub")
+        administrative = main / ".git/modules/sub"
+        self.assertIsNone(cleaner.unpushed_tip(main))
+        self.assertEqual(cleaner.unpushed_tip(administrative), commit)
+        self.assert_kept(self.sweep(), "with-deinitialized-submodule", "Git directory")
+        self.assertEqual(git(administrative, "rev-parse", "HEAD").strip(), commit)
+
+    def test_missing_linked_worktree_with_local_commit_is_kept(self) -> None:
+        main = self.clone("with-missing-worktree")
+        linked = main / "linked"
+        git(main, "worktree", "add", "-q", "--detach", str(linked))
+        (linked / "README").write_text("local detached worktree commit\n")
+        git(linked, "commit", "-q", "-am", "local only")
+        commit = git(linked, "rev-parse", "HEAD").strip()
+        administrative = Path(git(linked, "rev-parse", "--absolute-git-dir").strip())
+        shutil.rmtree(linked)
+        self.assertIsNone(cleaner.unpushed_tip(main))
+        self.assertEqual(cleaner.unpushed_tip(administrative), commit)
+        self.assert_kept(self.sweep(), "with-missing-worktree", "Git directory")
+        self.assertEqual(git(administrative, "rev-parse", "HEAD").strip(), commit)
+
     def test_recently_touched_entry_is_kept(self) -> None:
         self.clone("fresh")
         self.assert_kept(self.sweep(later=False), "fresh", "touched within retention")
@@ -135,6 +200,28 @@ class RemoteWorkspaceCleanup(unittest.TestCase):
         (detached / "README").write_text("detached\n")
         git(detached, "commit", "-q", "-am", "detached only")
         self.assert_kept(self.sweep(), "detached", "only in detached")
+
+    def test_bare_repositories_with_local_commits_are_kept(self) -> None:
+        (self.root / "box").mkdir()
+        for relative in ("local.git", "box/nested.git"):
+            bare = self.root / relative
+            git(self.root, "clone", "-q", "--bare", str(self.origin), str(bare))
+            commit = git(bare, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "local only").strip()
+            git(bare, "update-ref", "refs/heads/main", commit)
+            self.assertEqual(cleaner.unpushed_tip(bare), commit)
+        entries = self.sweep()
+        self.assert_kept(entries, "local.git", "Git directory")
+        self.assert_kept(entries, "box", "Git directory")
+
+    def test_separate_git_directory_keeps_its_external_worktree(self) -> None:
+        administrative = self.root / "administrative"
+        worktree = self.root.parent / "outside-worktree"
+        git(self.root, "clone", "-q", "--separate-git-dir", str(administrative),
+            str(self.origin), str(worktree))
+        entries = self.sweep()
+        self.assert_kept(entries, "administrative", "Git directory")
+        self.assertEqual(git(worktree, "rev-parse", "HEAD").strip(),
+                         git(self.origin, "rev-parse", "HEAD").strip())
 
     def test_unreadable_origin_keeps_an_unpushed_tip(self) -> None:
         orphan = self.clone("orphan")

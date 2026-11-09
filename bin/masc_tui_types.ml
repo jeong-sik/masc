@@ -3970,6 +3970,7 @@ type planning_goal = Tui_decode.planning_goal
   pg_metric: string option;
   pg_target_value: string option;
   pg_proof: Tui_decode.goal_proof;
+  pg_criterion_review: Tui_decode.goal_criterion_review;
   pg_retry_binding: Tui_decode.goal_retry_binding option;
   pg_verifier_unreconciled: Tui_decode.verifier_unreconciled option;
   pg_last_review_note: string option;
@@ -6598,7 +6599,7 @@ module Browser_lane_view = struct
     | Backends_unavailable (Masc.Browser_addon_observation.Ego_user_owned_name _ :: _) ->
         Some (reload () ^ " · Ego user-owned at startup (last list); fix, Off→Inactive→On")
     | Backends_unavailable (Masc.Browser_addon_observation.Ego_space_missing _ :: _) ->
-        Some (reload () ^ " · Ego Space gone, connection ended (last list); take_over reopens")
+        Some (reload () ^ " · Ego Space gone, connection ended (last list); take_over reopens it if configured by name")
   let selection_label t = match t.selection with
     | Unbound | Bound_automatic -> "Automatic"
     | Live_unbound | Bound_explicit -> "Selected browser"
@@ -6771,28 +6772,9 @@ module Browser_lane_view = struct
   let browser_choice_observation = function
     | Connected_browser client -> space_observation_row client
     | Automatic_browser -> None
-  (* Whether the connection a screenshot came from takes a drag. A live
-     screenshot names its client, and the answer is the lane table's for that
-     client's transport. It is unknown when the view no longer holds that
-     client: the footer then says so instead of naming a rule. *)
-  type drag_support = Drag_served | Drag_needs of Browser_lane.live_transport list | Drag_unknown
   let screenshot_client t (shot : screenshot) =
     List.find_opt (fun (client : client) -> Some client.client_id = shot.client_id)
       (Option.to_list t.selected_client @ listed_clients t)
-  let screenshot_drag_support t (shot : screenshot) =
-    match shot.source with
-    | Live ->
-        (match screenshot_client t shot with
-         | None -> Drag_unknown
-         | Some client ->
-             if Browser_lane.live_transport_serves client.transport Browser_lane.Trusted_drag
-             then Drag_served
-             else Drag_needs (Browser_lane.live_transports_serving Browser_lane.Trusted_drag))
-  let screenshot_drag_hint t shot =
-    match screenshot_drag_support t shot with
-    | Drag_served -> "drag: move"
-    | Drag_needs transports -> "drag: needs a " ^ transport_names transports ^ " connection"
-    | Drag_unknown -> "drag: connection not listed"
   (* What becomes of a pointer gesture on a screenshot. Every gesture -- a
      click, a drag, a wheel notch, a scroll key -- is decided here, so none
      reaches a connection that does not serve it. A request in flight consumes
@@ -7737,7 +7719,7 @@ module Browser_lane_view = struct
                                                 | Type_text _ | Press_key _
                                                 | Hover _ | Drag_to _
                                                 | Scroll _ | Hover_at _
-                                                | Click_at _ | Drag _
+                                                | Click_at _
                                                 | Tap_at _ | Swipe _
                                                 | Follow_link _ | Click_node _
                                                 | Fill_node _ | Click_target _ | Fill_target _
@@ -9861,6 +9843,11 @@ type state = {
       and age views. Those readings are decoded by modules built on this one,
       so the TUI installs the reduction after it creates the state. *)
   mutable keeper_list_density: Masc_tui_keeper_list_model.density;
+  (* The group heading the cursor stands on, and the groups whose rows are
+     folded away (RFC-0515 E12). Kept for this session only: neither is a
+     choice [tui-keepers.toml] stores. *)
+  mutable keeper_list_heading: Masc_tui_keeper_list_model.heading_focus option;
+  mutable keeper_list_folded: Masc_tui_keeper_list_model.group list;
   mutable keeper_list_sort: Masc_tui_keeper_list_model.sort;
   mutable keeper_list_preference_notice: string option;
   mutable keeper_list_preference_startup_error: string option;
@@ -12675,7 +12662,9 @@ let keeper_index state keeper_name =
     (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
     (ordered_keepers state)
 
+(* A Keeper chosen by name is a row, never the heading above it. *)
 let select_keeper_name_with keepers state keeper_name =
+  state.keeper_list_heading <- None;
   match List.find_index (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name) keepers with
   | Some index -> state.keeper_cursor <- index
   | None ->
@@ -12687,8 +12676,102 @@ let select_keeper_name state keeper_name =
 let keeper_list_select_name state keeper_name =
   select_keeper_name_with (ordered_keepers state) state keeper_name
 
+let keeper_list_stop (state : state) =
+  Masc_tui_keeper_list_model.current_stop ~folded:state.keeper_list_folded
+    ~focus:state.keeper_list_heading ~cursor:state.keeper_cursor
+    (keeper_list_reading state).klr_groups
+
+let keeper_list_stops (state : state) =
+  Masc_tui_keeper_list_model.stops ~folded:state.keeper_list_folded
+    (keeper_list_reading state).klr_groups
+
+(* Only a focused heading or a folded group can put the cursor on a heading,
+   so without either the list is not read. *)
+let keeper_list_on_heading (state : state) =
+  state.view = Keepers Keeper_list
+  && (Option.is_some state.keeper_list_heading
+      || (match state.keeper_list_folded with [] -> false | _ :: _ -> true))
+  && (match keeper_list_stop state with
+      | Some (Masc_tui_keeper_list_model.Stop_heading _) -> true
+      | Some (Masc_tui_keeper_list_model.Stop_row _) | None -> false)
+
+(* A heading names no Keeper, so a key that acts on the selected Keeper finds
+   none there. *)
 let selected_keeper (state : state) =
-  List.nth_opt (keepers_for_selection state) state.keeper_cursor
+  if keeper_list_on_heading state then None
+  else List.nth_opt (keepers_for_selection state) state.keeper_cursor
+
+(* The Keeper the cursor rests on. A heading rests the cursor on its group's
+   first row, so this names a Keeper there too, where [selected_keeper] names
+   none. A change that reorders or leaves the rows carries this one. *)
+let resting_keeper_name (state : state) =
+  Option.map (fun (keeper : keeper) -> keeper.k_name)
+    (List.nth_opt (keepers_for_selection state) state.keeper_cursor)
+
+(* A row chosen by name or position is that row, not the heading above it,
+   and on the Keepers list a folded group opens so the chosen row is drawn. *)
+let choose_keeper_row (state : state) index =
+  state.keeper_list_heading <- None;
+  state.keeper_cursor <- index;
+  if state.view = Keepers Keeper_list then
+    (match List.nth_opt (keeper_list_reading state).klr_groups index with
+     | Some (Some group) ->
+         state.keeper_list_folded <-
+           Masc_tui_keeper_list_model.refold Masc_tui_keeper_list_model.Unfold group
+             state.keeper_list_folded
+     | Some None | None -> ())
+
+let place_keeper_list_stop (state : state) stop =
+  Option.iter
+    (fun (focus, cursor) ->
+      state.keeper_list_heading <- focus;
+      state.keeper_cursor <- cursor)
+    (Masc_tui_keeper_list_model.placement (keeper_list_reading state).klr_groups stop)
+
+let step_keeper_list_stop (state : state) ~delta =
+  Option.iter
+    (fun current ->
+      Option.iter (place_keeper_list_stop state)
+        (Masc_tui_keeper_list_model.step_stop ~delta (keeper_list_stops state) current))
+    (keeper_list_stop state)
+
+let jump_keeper_list_group (state : state) direction =
+  Option.iter
+    (fun current ->
+      Option.iter (place_keeper_list_stop state)
+        (Masc_tui_keeper_list_model.group_jump direction (keeper_list_stops state) current))
+    (keeper_list_stop state)
+
+(* The heading the cursor was placed on, while the cursor still stands on it. *)
+let keeper_list_focused_heading (state : state) =
+  match state.keeper_list_heading, keeper_list_stop state with
+  | Some focus, Some (Masc_tui_keeper_list_model.Stop_heading group)
+    when focus.Masc_tui_keeper_list_model.heading = group -> Some group
+  | (Some _ | None), (Some (Masc_tui_keeper_list_model.Stop_heading _
+                           | Masc_tui_keeper_list_model.Stop_row _) | None) -> None
+
+(* A change that reorders or regroups the rows keeps what the cursor stands
+   on: the heading it was placed on while that group still has rows, else the
+   Keeper it rests on, found again by name. *)
+let carry_keeper_list_selection (state : state) update =
+  let heading = keeper_list_focused_heading state in
+  let resting = resting_keeper_name state in
+  let result = update () in
+  Option.iter (keeper_list_select_name state) resting;
+  Option.iter
+    (fun group -> place_keeper_list_stop state (Masc_tui_keeper_list_model.Stop_heading group))
+    heading;
+  result
+
+(* A heading the cursor was placed on stays selected after either change.
+   A heading that stood for the cursor's row inside a folded group gives way
+   to that row once the group unfolds. *)
+let refold_keeper_list_heading (state : state) change =
+  match keeper_list_stop state with
+  | Some (Masc_tui_keeper_list_model.Stop_heading group) ->
+      state.keeper_list_folded <-
+        Masc_tui_keeper_list_model.refold change group state.keeper_list_folded
+  | Some (Masc_tui_keeper_list_model.Stop_row _) | None -> ()
 
 let selected_tools_error (state : state) =
   held_tools_error
@@ -12764,20 +12847,28 @@ let select_activity_keeper state keeper_name =
       (fun (keeper : keeper) -> String.equal keeper.k_name keeper_name)
       (keepers_for_selection state) with
   | None -> Activity_keeper_missing
-  | Some index when index = state.keeper_cursor -> Activity_keeper_already_selected
+  | Some index when index = state.keeper_cursor && not (keeper_list_on_heading state) ->
+      Activity_keeper_already_selected
   | Some index ->
-      state.keeper_cursor <- index;
+      choose_keeper_row state index;
       Activity_keeper_selected
 
 let transition_keeper_view state view =
-  let selected = Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) in
+  let resting = resting_keeper_name state in
   state.view <- view;
-  Option.iter (select_keeper_name state) selected
+  Option.iter (select_keeper_name state) resting
+
+(* A heading keeps the cursor on its group's first row, so the Keeper the
+   cursor rests on is carried into the new view whether a heading or a row
+   was selected. The old view's headings mean nothing in the new one. *)
+let set_keeper_list_view state view =
+  let resting = resting_keeper_name state in
+  state.keeper_list_view <- view;
+  state.keeper_list_heading <- None;
+  Option.iter (keeper_list_select_name state) resting
 
 let cycle_keeper_list_view state =
-  let selected = Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) in
-  state.keeper_list_view <- Masc_tui_keeper_list_model.next_view state.keeper_list_view;
-  Option.iter (keeper_list_select_name state) selected
+  set_keeper_list_view state (Masc_tui_keeper_list_model.next_view state.keeper_list_view)
 
 (* Density changes how tall a row is, not the order, so the cursor stays on
    the same Keeper without a lookup. *)
@@ -12790,23 +12881,15 @@ let keeper_view_preference state =
     ; density = Masc_tui_keeper_list_model.density_label state.keeper_list_density }
 
 let cycle_keeper_list_sort state =
-  let selected = Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state) in
-  state.keeper_list_sort <- Masc_tui_keeper_list_model.next_sort state.keeper_list_sort;
-  Option.iter (keeper_list_select_name state) selected
+  carry_keeper_list_selection state (fun () ->
+    state.keeper_list_sort <- Masc_tui_keeper_list_model.next_sort state.keeper_list_sort)
 
 (* Ordering inputs arrive through several independent reads. Preserve identity
    across their shared application boundary rather than freezing a numeric
    index into the previous order. *)
 let preserve_keeper_list_selection state update =
-  let selected =
-    if state.view = Keepers Keeper_list then
-      Option.map (fun (keeper : keeper) -> keeper.k_name) (selected_keeper state)
-    else None
-  in
-  let result = update () in
-  if state.view = Keepers Keeper_list then
-    Option.iter (keeper_list_select_name state) selected;
-  result
+  if state.view = Keepers Keeper_list then carry_keeper_list_selection state update
+  else update ()
 
 let merge_keeper_waiting ~previous ~rows ~waiting =
   let index rows =
@@ -19963,6 +20046,8 @@ let create_state
   keeper_list_view = Masc_tui_keeper_list_model.By_state;
   keeper_outside_reading = (fun _ ~now:_ ~keeper_name:_ -> Masc_tui_keeper_list_model.outside_unread);
   keeper_list_density = Masc_tui_keeper_list_model.Two_lines;
+  keeper_list_heading = None;
+  keeper_list_folded = [];
   keeper_list_sort = Masc_tui_keeper_list_model.Priority;
   keeper_list_preference_notice = None;
   keeper_list_preference_startup_error = None;

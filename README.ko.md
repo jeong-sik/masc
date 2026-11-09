@@ -128,7 +128,7 @@ Git, opam, C 개발 도구, Python 3, Node.js 22, Corepack과 native 라이브�
 git clone https://github.com/jeong-sik/masc.git
 cd masc
 opam init --bare
-opam switch create . ocaml-base-compiler.5.5.1 --no-install
+opam switch create . ocaml-base-compiler.5.5.2 --no-install
 eval "$(opam env)"
 scripts/opam-pin-external-deps.sh
 opam install ./masc.opam --deps-only --locked

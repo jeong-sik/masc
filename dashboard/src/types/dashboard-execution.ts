@@ -1,3 +1,4 @@
+import type { GoalCriterionReviewProjection } from './goal-criterion-review'
 import type { KeeperActivationMode } from '../lib/keeper-activation-mode'
 import type { GoalProof, Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore, TrustDisposition } from './core'
 import type {
@@ -688,6 +689,7 @@ export interface GoalTreeNode extends
   title: string
   last_review_note?: string | null
   verification?: GoalProof
+  criterion_review?: GoalCriterionReviewProjection
   children: GoalTreeNode[]
   child_count: number
 }

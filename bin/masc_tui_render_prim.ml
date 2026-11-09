@@ -6148,10 +6148,10 @@ let runtime_config_status_lines state ~cols =
     | Some current ->
       [ ( View.source_heading,
           error
-          @ [ Line.fact "Source" current.path;
-              Line.fact "Current snapshot revision" current.source_revision;
-              Line.note ~tone:Line.Attention
-                "Validation and application state not read for this snapshot" ] ) ]
+          @ [ Line.note ~tone:Line.Attention
+                "Validation and application state not read for this snapshot";
+              Line.fact "Source" current.path;
+              Line.fact "Current snapshot revision" current.source_revision ] ) ]
     | None ->
       (match state.runtime_config_view with
        | None ->
@@ -6163,7 +6163,10 @@ let runtime_config_status_lines state ~cols =
            else "Source"
          in
          View.detail_blocks
-           ~lead:(error @ [ Line.fact source reading.rcv_path ])
+           ~notices:(error @ (if Option.is_some state.runtime_config_view_error then
+             [Line.note ~tone:Line.Attention "Last observed settings · current status unknown"]
+             else []))
+           ~lead:[ Line.fact source reading.rcv_path ]
            reading.rcv_metadata)
   in
   detail_page ~width:(framed_inner_width cols) blocks

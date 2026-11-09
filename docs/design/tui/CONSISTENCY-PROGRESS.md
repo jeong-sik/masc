@@ -55,9 +55,9 @@ owns that rule; this table records the remaining scope.
 | Operations | Overview, Metrics; requests, account and call details | Inspect actual decisions separately from system diagnostics; remove repeated normal-reading chrome where useful | Current-source audit and candidate execution |
 | Work | Planning, Approvals, Verification, Harness, Board; Goal, Task, request, proof and discussion details | #50671 simplifies the Task list; #50688 wraps the goal and declared success criterion, retaining exceptional proof/binding notices and keeping identifiers in detail. Linked Task details qualify partial or retained observations rather than claiming absence or a complete count | Goal candidate execution; other Work readings, installation and input/confirmation ownership |
 | Keepers | Keepers, Memory, Schedules, Fusion, Changes; all six Keeper modes and detail tabs | Coordinate with existing Keeper Pulse and memory work (#50669, #50643) rather than duplicate it | Review those changes together; chat, schedule, result and error states |
-| Features and plugins | Lanes, Clients, Connectors, Resources, Tools; plugins, browser, tools, skills and result details | Simplify feature overview around purpose, standing, errors and existing actions; retain full diagnostics in detail | Candidate build/execution; the other feature surfaces and input overlays |
+| Features and plugins | Lanes, Clients, Connectors, Resources, Tools; plugins, browser, tools, skills and result details | #50677 simplifies feature overview around purpose, standing, errors and existing actions. The a00f8aab candidate was observed in a native PTY at 150×40 and 80×24; narrow secondary action hints still displace current execution fields | Fix narrow summary priority; the other feature surfaces, input overlays and installation |
 | Workspace | Repositories, Code; checkout, Git changes, files, history, diff and navigation overlays | Registration and current Git readings remain distinct; inspect the repeated explanatory header and selected content next | Source audit, candidate execution and navigation/return behavior |
-| System | Config, Runtime, Acting, System_logs; all settings tabs, account/model forms and diagnostic details | Inspect effective settings and pending application before source revisions and raw keys | Source audit, candidate execution and save/uncertain-result behavior |
+| System | Config, Runtime, Acting, System_logs; all settings tabs, account/model forms and diagnostic details | #50690 puts validation and application before full source identifiers and key lists, retaining failed-refresh notices before previous status facts; two independent source reviews found no P0–P2 | Candidate execution, other System readings and save/uncertain-result behavior |
 
 For each row, inspect wide and narrow native views, loading/empty/error and
 retained observations, selection/scroll/return ownership, and applicable input
@@ -65,3 +65,14 @@ drafts and save receipts. Do not add tests for wording, layout or row order.
 Source review, parsing, candidate build, observed rendering, merge and installed
 runtime are separate stages. A baseline observation or a pending PR does not
 complete a row. Keep the full request open until every row has current evidence.
+
+The a00f8aab Work/Features native artifact came from `Minimal manual checks`
+[run 42625264710](https://github.com/jeong-sik/masc/actions/runs/42625264710),
+workflow `main` at 3d1271ef, with conclusion `success`. Its receipt names the
+`detail-ownership` scenario and three completed suites; it does not cover the
+later Goal or System layers. Manual PTY observations used the existing e2c38ca
+server without installing the candidate, and are not same-version integration
+or GUI screenshot proof. Raw captures stay private under `artifacts/` because
+they contain workspace requests and settings. The Task list, narrow Task detail
+entry and return were observed; detail still places identity fields before the
+request body and needs the same reading-first treatment.

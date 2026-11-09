@@ -746,7 +746,9 @@ let board_read_pane ~focus (state : state) (list_post : board_post) ~rows ~cols 
     let author_name = Terminal_text.single_line post.bp_author in
     match post.bp_kind with
     | Some Post_by_automation ->
-        Printf.sprintf "%s@%s%s %s[Keeper]%s"
+        Printf.sprintf
+          (if state.ui_language = Lang_ko then "%s@%s%s %s[자동 게시]%s"
+           else "%s@%s%s %s[Automation]%s")
           (Masc_tui_theme.tone Masc_tui_theme.Accent)
           author_name
           Ansi.reset

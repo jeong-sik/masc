@@ -219,7 +219,8 @@ let test_muse_copy_signs_in_at_the_new_home () =
     (match execution_for_binding config binding with
      | Ok (Runtime_execution.Muse_serve execution) ->
        Alcotest.(check string) "the turn runs in the new home"
-         "/home/op/.muse-account2" execution.account_home
+         "/home/op/.muse-account2"
+           (Runtime_account_access.muse_home_path execution.account_home)
      | Ok _ -> Alcotest.fail "the copy is no longer a Muse runtime"
      | Error detail -> Alcotest.failf "copy does not materialize: %s" detail)
   | bindings -> Alcotest.failf "expected one binding, got %d" (List.length bindings)

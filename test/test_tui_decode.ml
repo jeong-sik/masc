@@ -5409,6 +5409,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
         , `Assoc
             [ ("state", `String "drained")
             ; ("detail", `Null)
+            ; ("pending", `Null)
+            ; ("admission_wait", `Null)
             ; ("measured_at", `Float 1_775_000_000.0)
             ; ("unread_atom_turns", `Int 0)
             ; ("unread_official_turns", `Int 0)
@@ -5655,15 +5657,46 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
    | Error detail -> Alcotest.fail detail);
   (match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
            (with_librarian ~stopped_keepers:0
-              [ "state", `String "pending"; "detail", `Null ]) with
+              [ "state", `String "pending"; "detail", `Null;
+                "pending", Masc.Keeper_librarian_pending.to_json (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" }) ]) with
    | Ok snapshot ->
      let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
      Alcotest.(check bool) "suspended original work is a distinct nonfailure state" true
-       (librarian.mlh_state = Some Masc.Tui_decode_memory_health.Pass_pending);
-     Alcotest.(check bool) "suspended work does not invent a failure cause" true
+       (librarian.mlh_state = Some (Masc.Tui_decode_memory_health.Pass_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" })));
+     Alcotest.(check bool) "suspended work preserves its publication cause" true
        (Masc.Tui_decode_memory_health.memory_librarian_pass_end_cause
-          Masc.Tui_decode_memory_health.Pass_pending = None)
+          (Masc.Tui_decode_memory_health.Pass_pending (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" }))
+          = Some (Masc.Keeper_librarian_pending.description (Masc.Keeper_librarian_pending.Publication { request_id = "fixture-original"; detail = "publication is unfinished" })))
    | Error detail -> Alcotest.fail detail);
+  let admission_worker : Masc.Keeper_librarian_pending.worker =
+    { installation_id = "admission-installation"; request_id = "admission-request";
+      wait = Masc.Keeper_librarian_pending.Capacity } in
+  let admission_json = Masc.Keeper_librarian_pending.to_json (Worker admission_worker) in
+  List.iter (fun (label, updates, expected_state, expected_time) ->
+    match Masc.Tui_decode_memory_health.decode_memory_health_snapshot
+      (with_librarian ~stopped_keepers:0 (("admission_wait", admission_json) :: updates)) with
+    | Error detail -> Alcotest.fail detail
+    | Ok snapshot ->
+      let librarian = (List.hd snapshot.mhs_keepers).mkh_librarian in
+      Alcotest.(check bool) (label ^ ": original admission owner retained") true
+        (librarian.mlh_admission_wait = Some admission_worker);
+      Alcotest.(check bool) (label ^ ": durable state retained") true
+        (librarian.mlh_state = expected_state);
+      Alcotest.(check (option (float 0.))) (label ^ ": durable measurement time retained")
+        expected_time librarian.mlh_measured_at)
+    [ "measured durable pass", [], Some Masc.Tui_decode_memory_health.Pass_drained,
+      Some 1_775_000_000.0
+    ; "unobserved durable pass",
+      [ "state", `Null; "measured_at", `Null; "unread_atom_turns", `Null;
+        "unread_official_turns", `Null ], None, None ];
+  List.iter (fun admission_wait ->
+    Alcotest.(check bool) "admission wait requires a supported original worker" true
+      (memory_health_rejects (with_librarian ~stopped_keepers:0 ["admission_wait", admission_wait])))
+    [ Masc.Keeper_librarian_pending.to_json
+        (Publication { request_id = "original"; detail = "settling" })
+    ; replace_field "wait" (`String "retry_anyway") admission_json
+    ; replace_field "installation_id" (`String "") admission_json
+    ; `Assoc ["kind", `String "worker"; "request_id", `String "original"] ];
   (* A row this build cannot read is refused on its own: the other keeper
      still decodes and the refusal names the keeper and the reason, so a newer
      server does not blank the pane. *)
@@ -5810,6 +5843,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
          (`Assoc
             [ ("state", `String "drained")
             ; ("detail", `Null)
+            ; ("pending", `Null)
+            ; ("admission_wait", `Null)
             ; ("measured_at", `Float 1_775_000_000.0)
             ; ("unread_atom_turns", `Int (-1))
             ; ("unread_official_turns", `Int 0)
@@ -5828,6 +5863,8 @@ let test_decode_memory_health_keeps_ordinary_and_source_axes () =
          (`Assoc
             [ ("state", `String "resting")
             ; ("detail", `Null)
+            ; ("pending", `Null)
+            ; ("admission_wait", `Null)
             ; ("measured_at", `Float 1_775_000_000.0)
             ; ("unread_atom_turns", `Int 0)
             ; ("unread_official_turns", `Int 0)
@@ -6000,6 +6037,8 @@ let memory_alert_snapshot_with_extra extra_alert_fields ~code ~severity ~target 
                 , `Assoc
                     [ ("state", `String "drained")
                     ; ("detail", `Null)
+                    ; ("pending", `Null)
+                    ; ("admission_wait", `Null)
                     ; ("measured_at", `Float 1_775_000_000.0)
                     ; ("unread_atom_turns", `Int 0)
                     ; ("unread_official_turns", `Int 0)
@@ -6134,6 +6173,8 @@ let test_decode_memory_health_reads_the_librarian_position_beside_the_cut () =
                   , `Assoc
                       [ ("state", `String "drained")
                       ; ("detail", `Null)
+                      ; ("pending", `Null)
+                      ; ("admission_wait", `Null)
                       ; ("measured_at", `Float 1_775_000_000.0)
                       ; ("unread_atom_turns", `Int 0)
                       ; ("unread_official_turns", `Int 0)

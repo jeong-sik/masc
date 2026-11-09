@@ -163,7 +163,7 @@ let drive_advanced fixture =
   let before= !(fixture.deliveries) in
   match run_worker fixture with
   | Ok (Consumer.Progress_advanced _ | Official_advanced _) -> ()
-  | Ok Consumer.Pending ->
+  | Ok (Consumer.Pending _) ->
     await_delivery fixture ~after:before;
     check bool "original delivered answer completes local publication" true (advanced (run_worker fixture))
   | Ok (Nothing_to_read | Baseline_advanced _ | Memory_not_committed _) ->
@@ -179,7 +179,7 @@ let drive_until_advanced fixture =
     let before= !(fixture.deliveries) in
     match run_worker fixture with
     | Ok (Consumer.Progress_advanced _ | Official_advanced _) -> passes
-    | Ok Consumer.Pending -> await_delivery fixture ~after:before;progress_line passes;go (passes+1)
+    | Ok (Consumer.Pending _) -> await_delivery fixture ~after:before;progress_line passes;go (passes+1)
     | Ok (Consumer.Memory_not_committed _) -> go (passes+1)
     | Ok (Nothing_to_read | Baseline_advanced _) -> fail "actual completed-history source was not submitted"
     | Error error -> fail (Consumer.error_to_string error) in
@@ -407,7 +407,7 @@ let with_fixture ?(history_kind=Atoms) f =
         Memory_lane.For_testing.reset ())))))))))))
 
 let assert_pending = function
-  | Ok Consumer.Pending -> ()
+  | Ok (Consumer.Pending _) -> ()
   | Ok (Consumer.Nothing_to_read | Baseline_advanced _ | Progress_advanced _ | Official_advanced _ | Memory_not_committed _) ->
     fail "actual original request must remain Pending"
   | Error error -> fail (Consumer.error_to_string error)

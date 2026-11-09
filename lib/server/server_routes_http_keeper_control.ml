@@ -408,6 +408,60 @@ let handle_keeper_run_next state ~actor request reqd =
                  ~request_id ~signalled:result.signalled ~interrupt_error))
 ;;
 
+let handle_keeper_memory_catch_up ~actor state request reqd =
+  Http.Request.read_body_async reqd (fun body ->
+    let config = Mcp_server.workspace_config state in
+    let parsed =
+      let open Result.Syntax in
+      let* fields = Server_json_object_body.fields body in
+      let* () = if List.mem_assoc "expected_workspace" fields then Ok ()
+        else Error "expected_workspace is required" in
+      let* json = Workspace.validate_expected_workspace ~config (`Assoc fields)
+        |> Result.map_error Workspace.expected_workspace_error_message in
+      let context = "memory catch-up request" in
+      let* fields = Candle_json.object_fields ~context json in
+      let* name, fields = Candle_json.field ~context "name" Candle_json.as_non_blank fields in
+      let* () = Candle_json.finish ~context fields in
+      match Keeper_identity.Keeper_id.of_string name with
+      | Some keeper -> Ok (Keeper_identity.Keeper_id.to_string keeper)
+      | None -> Error "invalid Keeper name" in
+    let fail status message = respond_json_value_with_cors ~status request reqd
+      (Stream.keeper_chat_stream_error_json message) in
+    match parsed with
+    | Error message -> fail `Bad_request message
+    | Ok keeper_name ->
+      let presence = Pool_work.submit (Pool_work.io ~name:__FUNCTION__ (fun () ->
+        Keeper_meta_store.read_meta_presence config keeper_name)) in
+      match presence with
+      | Error detail | Ok (Keeper_meta_store.Meta_not_current detail) ->
+        respond_json_value_with_cors ~status:`Service_unavailable request reqd
+          (control_error_json Store_unavailable detail)
+      | Ok Meta_absent -> fail `Not_found "Keeper metadata is absent"
+      | Ok (Meta_present _) ->
+        match Env_config.KeeperMemoryOs.librarian_config_state () with
+        | Disabled | Invalid -> fail `Conflict "Librarian is disabled or its setting is invalid"
+        | Enabled ->
+          let outcome = Eio_context.run_on_owner_domain (fun () ->
+            if Keeper_memory_lane.initialized () then
+              Some (Keeper_librarian_queue_refresh.submit_durable
+                ~base_path:config.Workspace.base_path ~keeper_name)
+            else None) in
+          match outcome with
+          | None | Some Keeper_memory_lane.Dropped ->
+            fail `Service_unavailable "Librarian executor could not accept this wake"
+          | Some Ran_inline ->
+            fail `Service_unavailable "Librarian ran without its detached executor; completion is unconfirmed"
+          | Some (Submitted | Coalesced as outcome) ->
+            let submission = match outcome with
+              | Keeper_memory_lane.Submitted -> "submitted"
+              | Coalesced -> "coalesced"
+              | Ran_inline | Dropped -> "unconfirmed" in
+            Log.Keeper.info ~keeper_name "Operator Librarian catch-up %s actor=%s" submission actor;
+            respond_json_value_with_cors ~status:`Accepted request reqd
+              (`Assoc ["schema", `String "keeper.memory.catch_up.v1";
+                "keeper", `String keeper_name; "submission", `String submission;
+                "completion", `String "unobserved"]))
+
 let handle_keeper_turn_interrupt ~actor state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let base_path = (Mcp_server.workspace_config state).base_path in

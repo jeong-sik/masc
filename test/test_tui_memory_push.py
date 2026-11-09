@@ -29,6 +29,8 @@ def health_payload() -> dict:
     librarian = {
         "state": "drained",
         "detail": None,
+        "pending": None,
+        "admission_wait": None,
         "measured_at": 1.0,
         "unread_atom_turns": 0,
         "unread_official_turns": 0,

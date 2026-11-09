@@ -23,14 +23,15 @@ type memory_alert = {
 
 (* How the keeper's last durable Librarian pass ended, one constructor per
    [Keeper_librarian_queue_refresh.pass_end]. A pass that stopped on an error
-   or raised carries the server's account of why; the other endings have
+   or raised carries the server's account of why; pending carries its original
+   request observation. The other endings have
    none, so the detail lives on the constructor instead of beside it. *)
 type memory_librarian_pass_end =
   | Pass_off
   | Pass_lane_unconfigured
   | Pass_drained
   | Pass_yielded_to_waiting_unit
-  | Pass_pending
+  | Pass_pending of Keeper_librarian_pending.t
   | Pass_not_committed
   | Pass_stopped of string
   | Pass_raised of string
@@ -76,6 +77,7 @@ type memory_librarian_stalled =
    "not measured", which the header prints as such; it is not zero. *)
 type memory_librarian_health = {
   mlh_state : memory_librarian_pass_end option;
+  mlh_admission_wait : Keeper_librarian_pending.worker option;
   mlh_measured_at : float option;
   mlh_unread_atom_turns : int option;
   mlh_unread_official_turns : int option;
@@ -219,7 +221,12 @@ let memory_alert_severity_wire code =
    say whether the keeper is behind, and a word it cannot place says nothing.
    [detail] travels with [stopped] and [raised] and with nothing else, so a
    pair that breaks that is refused too. *)
-let decode_memory_librarian_pass_end ~state ~detail =
+let decode_memory_librarian_pass_end ~state ~detail ~pending =
+  let* () = match state, pending with
+    | Some "pending", `Null -> Error "pending Librarian pass is missing its observation"
+    | Some "pending", _ -> Ok ()
+    | (None | Some _), `Null -> Ok ()
+    | (None | Some _), _ -> Error "Librarian pending observation without a pending pass" in
   match state, detail with
   | None, None -> Ok None
   | None, Some _ -> Error "librarian detail without a state"
@@ -227,7 +234,8 @@ let decode_memory_librarian_pass_end ~state ~detail =
   | Some "lane_unconfigured", None -> Ok (Some Pass_lane_unconfigured)
   | Some "drained", None -> Ok (Some Pass_drained)
   | Some "yielded_to_waiting_unit", None -> Ok (Some Pass_yielded_to_waiting_unit)
-  | Some "pending", None -> Ok (Some Pass_pending)
+  | Some "pending", None ->
+    Result.map (fun pending -> Some (Pass_pending pending)) (Keeper_librarian_pending.of_json pending)
   | Some "not_committed", None -> Ok (Some Pass_not_committed)
   | Some "stopped", Some detail -> Ok (Some (Pass_stopped detail))
   | Some "raised", Some detail -> Ok (Some (Pass_raised detail))
@@ -255,7 +263,8 @@ let decode_memory_librarian_failure_kind = function
    carry none. *)
 let memory_librarian_pass_end_cause = function
   | Pass_stopped cause | Pass_raised cause -> Some cause
-  | Pass_off | Pass_lane_unconfigured | Pass_drained | Pass_yielded_to_waiting_unit | Pass_pending | Pass_not_committed -> None
+  | Pass_pending pending -> Some (Keeper_librarian_pending.description pending)
+  | Pass_off | Pass_lane_unconfigured | Pass_drained | Pass_yielded_to_waiting_unit | Pass_not_committed -> None
 
 let decode_memory_librarian_health keeper_json =
   let* json = required_member keeper_json "librarian" in
@@ -264,6 +273,8 @@ let decode_memory_librarian_health keeper_json =
       "memory librarian health"
       [ "state"
       ; "detail"
+      ; "pending"
+      ; "admission_wait"
       ; "measured_at"
       ; "unread_atom_turns"
       ; "unread_official_turns"
@@ -276,7 +287,18 @@ let decode_memory_librarian_health keeper_json =
   in
   let* state = required_nullable_string_field json "state" in
   let* detail = required_nullable_string_field json "detail" in
-  let* mlh_state = decode_memory_librarian_pass_end ~state ~detail in
+  let* pending = required_member json "pending" in
+  let* mlh_state = decode_memory_librarian_pass_end ~state ~detail ~pending in
+  let* mlh_admission_wait =
+    match member "admission_wait" json with
+    | `Null -> Ok None
+    | value ->
+      let* pending = Keeper_librarian_pending.of_json value in
+      (match pending with
+       | Keeper_librarian_pending.Worker worker -> Ok (Some worker)
+       | Publication _ | Basis_changed _ | Message_floor _ | Local_failure _ ->
+         Error "Librarian admission wait must name an original worker request")
+  in
   let* mlh_measured_at = required_nullable_float_field json "measured_at" in
   let* mlh_unread_atom_turns = required_nullable_int_field json "unread_atom_turns" in
   let* mlh_unread_official_turns =
@@ -346,6 +368,7 @@ let decode_memory_librarian_health keeper_json =
   in
   Ok
     { mlh_state
+    ; mlh_admission_wait
     ; mlh_measured_at
     ; mlh_unread_atom_turns
     ; mlh_unread_official_turns
@@ -685,7 +708,7 @@ let memory_keeper_totals_row (keeper : memory_keeper_health) : Keeper_memory_hea
   ; librarian_stopped =
       (match keeper.mkh_librarian.mlh_state with
        | Some (Pass_lane_unconfigured | Pass_not_committed | Pass_stopped _ | Pass_raised _) -> true
-       | Some (Pass_off | Pass_drained | Pass_yielded_to_waiting_unit | Pass_pending) | None -> false)
+       | Some (Pass_off | Pass_drained | Pass_yielded_to_waiting_unit | Pass_pending _) | None -> false)
   ; alerts =
       List.map
         (fun alert ->

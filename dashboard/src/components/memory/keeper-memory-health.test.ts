@@ -33,7 +33,7 @@ function makeEntry(
     snapshot_present: true,
     age_bins: null,
     context_cycle: { saved: null, saved_read_error: null, read_position: null, read_position_read_error: null, rewriting_through: null, unread: { snapshot: { kind: 'available', messages: [] }, memory: { kind: 'available', messages: [] } }, prepared: null, synthesis: null },
-    librarian: { state: 'drained', detail: null, measured_at: 1_699_999_950,
+    librarian: { state: 'drained', detail: null, pending: null, admission_wait: null, measured_at: 1_699_999_950,
       unread_atom_turns: 0, unread_official_turns: 0,
       continuity_unread_atoms: 0,
       last_success_at: null, last_failure_kind: null, stalled: null },
@@ -240,7 +240,7 @@ describe('KeeperMemoryHealth', () => {
       threshold: 0,
     }
     mockFetch.mockResolvedValue(makeResponse(
-      [makeEntry({ librarian: { state: 'not_committed', detail: null,
+      [makeEntry({ librarian: { state: 'not_committed', detail: null, pending: null, admission_wait: null,
           measured_at: 1_699_999_950, unread_atom_turns: 3, unread_official_turns: 0,
           continuity_unread_atoms: 0,
           last_success_at: null, last_failure_kind: null, stalled: null }, alerts: [alert] })],
@@ -263,7 +263,7 @@ describe('KeeperMemoryHealth', () => {
 
   it('renders unknown fleet unread as unknown, not zero', async () => {
     mockFetch.mockResolvedValue(makeResponse(
-      [makeEntry({ librarian: { state: null, detail: null, measured_at: null,
+      [makeEntry({ librarian: { state: null, detail: null, pending: null, admission_wait: null, measured_at: null,
         unread_atom_turns: null, unread_official_turns: null,
         continuity_unread_atoms: 0,
         last_success_at: null, last_failure_kind: null, stalled: null } })],
@@ -276,11 +276,11 @@ describe('KeeperMemoryHealth', () => {
 
   it('renders the continuity lag with how many keepers it could not be taken for', async () => {
     mockFetch.mockResolvedValue(makeResponse(
-      [ makeEntry({ librarian: { state: 'drained', detail: null, measured_at: 1_699_999_950,
+      [ makeEntry({ librarian: { state: 'drained', detail: null, pending: null, admission_wait: null, measured_at: 1_699_999_950,
           unread_atom_turns: 0, unread_official_turns: 0,
           continuity_unread_atoms: null,
           last_success_at: null, last_failure_kind: null, stalled: null } }),
-        makeEntry({ keeper_id: 'beta', librarian: { state: 'drained', detail: null,
+        makeEntry({ keeper_id: 'beta', librarian: { state: 'drained', detail: null, pending: null, admission_wait: null,
           measured_at: 1_699_999_950, unread_atom_turns: 0, unread_official_turns: 0,
           continuity_unread_atoms: 3,
           last_success_at: null, last_failure_kind: null, stalled: null } }) ],
@@ -293,7 +293,7 @@ describe('KeeperMemoryHealth', () => {
 
   it('names a one-atom gap as that atom and an unreadable file as not measured', async () => {
     const librarian = (stalled: KeeperMemoryHealthKeeperEntry['librarian']['stalled']) => ({
-      state: 'drained' as const, detail: null, measured_at: 1_699_999_950,
+      state: 'drained' as const, detail: null, pending: null, admission_wait: null, measured_at: 1_699_999_950,
       unread_atom_turns: 0, unread_official_turns: 0, continuity_unread_atoms: 0,
       last_success_at: null, last_failure_kind: null, stalled })
     mockFetch.mockResolvedValue(makeResponse(

@@ -829,7 +829,7 @@ let test_durable_runtime_returns_refusal_reports ~base_path () =
   (match (match !result with Some value -> value | None -> Alcotest.fail "actual selector skipped commit") with
    | Keeper_librarian_durable_consumer.Memory_committed ->
      Alcotest.fail "the failed walk claimed Memory committed"
-   | Memory_pending ->
+   | Memory_pending _ ->
      Alcotest.fail "the synchronous failed walk claimed an unfinished owner commit"
    | Memory_refused reports ->
      Alcotest.(check bool) "the adapter retains classified reports" true (reports <> []);

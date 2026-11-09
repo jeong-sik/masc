@@ -57,7 +57,7 @@ val legend : string
 (** The sentence the key sheet prints for the cell. It names the bins, says that
     a bar is relative to the tallest bin of the same strip, and spells the two
     marks that are not bars: [0] for a bin with no facts and [?] for a ladder
-    that was not measured. *)
+    that was not measured. The key sheet adds where the strip is drawn. *)
 
 val keeper_clauses : ko:bool -> Masc.Keeper_memory_age_bins.t option -> string list
 (** One Keeper's ladder as clauses for a packed row that has no label above it:

@@ -725,11 +725,18 @@ let keeper_axis_next_cells state ~now ~memory ~peak_lag (row : Keeper_list_model
   | Axis_row.Lag_digest_gap -> Memory_reading.lag_digest_gap_cells ~now ~peak_lag memory
   | Axis_row.Lag_stale_facts -> Memory_reading.lag_stale_facts_cells ~peak_lag memory
 
-let keeper_axis_row_content state ~(axis : Axis_row.axis) ~name_width ~now ~frame ~yolo
-    ~selected (row : Keeper_list_model.row) =
-  let memory_index = Masc_tui_keeper_axis.memory_index state in
-  let memory = Memory_reading.find memory_index ~keeper_name:row.keeper.Tui_decode.k_name in
-  let peak_lag = Memory_reading.peak_lag memory_index in
+let keeper_memory_reading state (row : Keeper_list_model.row) =
+  Memory_reading.find (Masc_tui_keeper_axis.memory_index state)
+    ~keeper_name:row.keeper.Tui_decode.k_name
+
+(* The lag bars are drawn against the listed Keeper furthest behind, so a
+   Keeper the snapshot still has a row for but the roster no longer lists
+   does not set the scale. *)
+let axis_peak_lag state rows = Memory_reading.peak_lag (List.map (keeper_memory_reading state) rows)
+
+let keeper_axis_row_content state ~(axis : Axis_row.axis) ~name_width ~peak_lag ~now ~frame
+    ~yolo ~selected (row : Keeper_list_model.row) =
+  let memory = keeper_memory_reading state row in
   String.concat ""
     [ keeper_row_marker ~selected
     ; keeper_row_name ~width:name_width ~yolo row
@@ -1393,6 +1400,7 @@ let render_keeper_list (state : state) =
   in
   let shape = Axis_row.shape_of_view state.keeper_list_view in
   let name_width = axis_name_width model_rows in
+  let peak_lag = axis_peak_lag state model_rows in
   box_line_styled buf cols ~style:(Theme.recede ())
     (match shape with
      | Axis_row.List_columns -> keeper_column_header columns
@@ -1544,7 +1552,7 @@ let render_keeper_list (state : state) =
                 keeper_row_content ~columns ~now:now_unix ~frame:state.activity_frame ~yolo
                   ~selected row
             | Axis_row.Axis axis ->
-                keeper_axis_row_content state ~axis ~name_width ~now:now_unix
+                keeper_axis_row_content state ~axis ~name_width ~peak_lag ~now:now_unix
                   ~frame:state.activity_frame ~yolo ~selected row
           in
           let press text =

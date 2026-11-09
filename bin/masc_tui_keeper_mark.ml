@@ -184,15 +184,15 @@ let column_legend =
   ; ( String.concat " " [ pulse_header; librarian_header; lag_digest_gap_header ]
     , Printf.sprintf
         "the memory view: the turn pulse, how the librarian's last pass ended, then the \
-         unread turns as a bar against the keeper furthest behind, the time since its last \
-         digest and the atoms requests skip; %s is a value the server did not measure"
-        unknown_mark )
+         unread turns as a bar against the listed keeper furthest behind, the time since its \
+         last digest and the atoms requests skip; %s is a value the server did not measure"
+        Masc_tui_keeper_age_ladder.unmeasured_mark )
   ; ( String.concat " " [ fact_age_header; updated_header; lag_stale_facts_header ]
     , Printf.sprintf
         "the age view: the keeper's facts by age as the %s strip draws them, the time since \
          its memory last changed, then the unread-turn bar, invalidated sources and the fact \
          count; %s is a value the server did not measure"
-        Masc_tui_keeper_age_ladder.cell_label unknown_mark )
+        Masc_tui_keeper_age_ladder.cell_label Masc_tui_keeper_age_ladder.unmeasured_mark )
   ; ( failing_glyph
     , "a failing keeper's last failure: how long ago · cause · the runtime that ended it \
        · candidates tried. The list draws it in place of its runtime or first in DETAIL, \
@@ -222,8 +222,13 @@ let column_legend =
   ; ( "mem · lag · stale"
     , Printf.sprintf
         "keeper memory health: unread gap/lag, update clock, invalidated sources (Detailed second \
-         row, and its lag in %s in the views)"
-        axis_next_header )
-  ; Masc_tui_keeper_age_ladder.cell_label, Masc_tui_keeper_age_ladder.legend
+         row; its lag in %s in the views, and the memory and age views draw their own cells). \
+         mem %s is memory health not read yet, or a refused row that may be this keeper's; mem \
+         ! is this keeper's row, refused; %s is a keeper with no memory snapshot"
+        axis_next_header Masc_tui_keeper_age_ladder.unmeasured_mark
+        Masc_tui_theme.Glyph.no_value )
+  ; ( Masc_tui_keeper_age_ladder.cell_label
+    , Printf.sprintf "%s (Detailed second row, and %s in the age view)"
+        Masc_tui_keeper_age_ladder.legend fact_age_header )
   ; "사람 몫 / 효과 확인 / 분류 안 됨", "requires human operator action, effect review, or unmapped fault (NOW column)"
   ]

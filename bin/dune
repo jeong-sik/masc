@@ -1381,7 +1381,7 @@
  (name masc_tui_keeper_mark)
  (wrapped false)
  (modules masc_tui_keeper_mark)
- (libraries masc masc_tui_keeper_age_ladder masc_tui_keeper_list_model))
+ (libraries masc masc_tui_theme masc_tui_keeper_age_ladder masc_tui_keeper_list_model))
 
 (library
  (name masc_tui_board_kind_mark)

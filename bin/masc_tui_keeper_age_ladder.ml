@@ -103,8 +103,7 @@ let count_cell bins : Masc_tui_keeper_axis_cell.t = { text = count_text bins; to
 let legend =
   Printf.sprintf
     "ordinary memory facts counted by time %s, oldest on the left (%s); bar height is \
-     relative to the tallest bin of the same strip, %s is none, %s is not measured \
-     (Detailed second row)"
+     relative to the tallest bin of the same strip, %s is none, %s is not measured"
     (name ~ko:false)
     (String.concat ", " (List.map (range_text ~ko:false) oldest_first))
     empty_mark

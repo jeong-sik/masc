@@ -499,6 +499,14 @@ remote_ssh uses its configured endpoint root.
 The microVM volume name does not include the workspace, so same-named
 Keepers using one runtime store can share a tree across workspaces.
 
+Only the endpoint user may enter a remote_ssh Keeper's directory
+(`remote_root/<keeper>`); bootstrap creates it at mode `0700`. When group or
+others can enter it, the hourly workspace cleanup removes nothing for that
+Keeper and logs the directory's mode and the fix. A container entrypoint that
+creates the directory itself must use the same mode. The
+[SSH endpoint runbook](operations/ssh-endpoints-runbook.md#keeper-directory-mode)
+has the details.
+
 When a microVM sets `observation_run = "guest_local"`, the observation stage
 cannot establish exclusive volume ownership and sends the request to the judge
 instead of running that box. This does not prevent writes authorized through

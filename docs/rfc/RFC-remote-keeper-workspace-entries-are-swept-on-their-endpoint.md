@@ -74,6 +74,9 @@ Keeper 루트 바로 아래 항목마다 아래를 모두 만족해야 지운다
      - 이 payload 를 실어 나르는 sshd 세션(`sshd: be-sleepers@notty`)이 그런 프로세스다. 이것까지 막으면 정리가 한 번도 돌지 못한다(11-08 report 실행에서 확인).
      - Keeper 작업(셸, git, 빌드)은 읽을 수 있는 프로세스로 돈다.
    - 그 밖에 읽지 못하는 프로세스가 하나라도 있으면 아무것도 지우지 않는다.
+     - 그 프로세스가 다른 사용자의 것이면 루트 권한 때문에 막힌 것이다. 이유에 루트 권한(예: `0755`)과 고치는 방법(bootstrap 다시 실행, `chmod go-rwx`)을 같이 적는다.
+     - 11-09 wkbl endpoint 네 Keeper 의 루트가 `755` 라 매시간 이렇게 멈췄다. entrypoint 가 bind mount 로 폴더를 만들고 권한은 맞추지 않았다.
+     - 권한 값은 bootstrap 의 `keeper_root_mode` 한 곳에 있다. 운영 절차는 `docs/operations/ssh-endpoints-runbook.md` 「Keeper directory mode」에 있다.
 4. **안의 git 저장소가 모두 커밋을 잃지 않는다.** 트리 안 `.git` 마다 확인한다.
    - `.git` 자식이 없는 bare 저장소와 별도 Git 관리 디렉터리도 찾는다. 이 디렉터리는 커밋의 유일한 사본이거나 바깥 worktree 의 저장소일 수 있으므로, 이를 포함한 항목은 남긴다.
    - `stash list` 가 비어 있다.

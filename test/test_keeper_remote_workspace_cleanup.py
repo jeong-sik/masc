@@ -280,6 +280,7 @@ class RemoteWorkspaceCleanup(unittest.TestCase):
             (0o755, other, other, False),  # a shared root lets it in
             (0o700, me, 0, True),  # our sshd session: links belong to root
             (0o700, me, me, False),  # our own inspectable process we cannot read
+            (0o755, me, me, False),  # the same, and the root's mode is not why
         ]
         process = self.proc / "4242"
         (process / "fd").mkdir(parents=True)
@@ -314,7 +315,12 @@ class RemoteWorkspaceCleanup(unittest.TestCase):
                 if removed:
                     self.assert_removed(entries, "clean")
                 else:
-                    self.assertIn("process 4242", self.report["skip"])
+                    skip = self.report["skip"]
+                    self.assertIn("process 4242", skip)
+                    # Only a root that let another user in names the fix.
+                    shared = owner != me
+                    self.assertEqual("mode 0755" in skip, shared)
+                    self.assertEqual("chmod go-rwx" in skip, shared)
                     shutil.rmtree(self.root / "clean")
 
 

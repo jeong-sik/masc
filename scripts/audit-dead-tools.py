@@ -215,6 +215,11 @@ class SourceResult:
     detail: str
     counts: dict[str, int] = field(default_factory=dict)  # norm -> calls
     raw_names: dict[str, str] = field(default_factory=dict)  # norm -> observed
+    # norm -> every norm that named the same calls. A single tool can appear as
+    # `tool_write_file` in the registry and `Write` in the ledger; this records
+    # the union so the report can tell "never called" from "called under the
+    # other spelling" (#49174 P1).
+    alias_groups: dict[str, set[str]] = field(default_factory=dict)
     rows: int = 0
     files: int = 0
     first_ts: float | None = None
@@ -261,9 +266,32 @@ def load_ledger(directory: Path, start: float, end: float) -> SourceResult:
                 if not isinstance(tool, str) or not tool:
                     continue
                 result.rows += 1
-                key = norm(tool)
-                result.counts[key] = result.counts.get(key, 0) + 1
-                result.raw_names.setdefault(key, tool)
+                # One call can be known by more than one name. The registry
+                # spells five tools `tool_write_file` style while the ledger's
+                # `tool` field carries the public name (`Write`); norm() alone
+                # never joins them, so the registry entry would look like it
+                # was never called (#49174 P1). The same row usually states
+                # both names under route_evidence, so credit every name the
+                # row itself declares. No hardcoded alias table: a row without
+                # route_evidence still counts only its own `tool` value.
+                names = [tool]
+                route = record.get("route_evidence")
+                if isinstance(route, dict):
+                    seen = {norm(tool)}
+                    for field in ("canonical_name", "public_name", "runtime_handler"):
+                        alias = route.get(field)
+                        if not isinstance(alias, str) or not alias:
+                            continue
+                        alias_key = norm(alias)
+                        if alias_key and alias_key not in seen:
+                            seen.add(alias_key)
+                            names.append(alias)
+                group = result.alias_groups.setdefault(norm(tool), set())
+                for name in names:
+                    key = norm(name)
+                    group.add(key)
+                    result.counts[key] = result.counts.get(key, 0) + 1
+                    result.raw_names.setdefault(key, name)
                 result.first_ts = ts if result.first_ts is None else min(result.first_ts, ts)
                 result.last_ts = ts if result.last_ts is None else max(result.last_ts, ts)
     if not result.detail:
@@ -435,8 +463,22 @@ def build_report(
     observed_keys: set[str] = set()
     for source in sources:
         observed_keys.update(source.counts)
+    # A name that the ledger spells differently from the registry is not an
+    # unknown tool when the same rows name a registered tool. Report only the
+    # names whose whole alias group is absent from the registry.
+    registered = set(registry.tools)
+    alias_of: dict[str, set[str]] = {}
+    for source in sources:
+        for key, group in source.alias_groups.items():
+            merged = alias_of.setdefault(key, set())
+            merged |= group
+            for member in group:
+                alias_of.setdefault(member, set()).update(group)
     unregistered: list[tuple[str, dict[str, int]]] = []
-    for key in sorted(observed_keys - set(registry.tools)):
+    for key in sorted(observed_keys - registered):
+        group = alias_of.get(key) or {key}
+        if group & registered:
+            continue
         per_source = {
             source.name: source.counts[key]
             for source in sources

@@ -138,7 +138,7 @@ let failure_to_yojson failure =
 
 (* One destination: post the body with its model id and decode what it
    returns. [Error] is that destination's refusal. *)
-let ask ~timeout_sec ~clock ~state ~questions { endpoint; model; api_key } =
+let ask ~clock ~state ~questions { endpoint; model; api_key } =
   let request_json = Typesafeai_types.request_to_yojson ~model ~state ~questions in
   let body = Yojson.Safe.to_string request_json in
   let request_body_sha256 = Agent_core_sha256.(digest_string body |> to_hex) in
@@ -149,7 +149,9 @@ let ask ~timeout_sec ~clock ~state ~questions { endpoint; model; api_key } =
     ]
   in
   let* status, response_body =
-    Masc_http_client.post_sync ~clock ~timeout_sec ~url:endpoint ~headers ~body ()
+    Masc_http_client.post_sync ~clock
+      ~timeout_sec:Masc_http_client.default_request_timeout_sec
+      ~url:endpoint ~headers ~body ()
     |> Result.map_error (transport_failure ~endpoint ~api_key)
   in
   let failed detail =
@@ -259,7 +261,6 @@ let destination_outcomes () = Outcomes.bindings (Atomic.get outcomes)
    costs one refused call per destination and ends with all of them on
    record. *)
 let evaluate
-      ?(timeout_sec = Masc_http_client.default_request_timeout_sec)
       ~clock
       ~destinations:(first, rest)
       ~state
@@ -273,7 +274,7 @@ let evaluate
     | Some refused -> attempts refused
   in
   let rec walk refused_so_far destination rest =
-    match ask ~timeout_sec ~clock ~state ~questions destination with
+    match ask ~clock ~state ~questions destination with
     | Ok (response, request_body_sha256) ->
       note_answer (identify destination) ~at:(Time_compat.now ());
       Ok

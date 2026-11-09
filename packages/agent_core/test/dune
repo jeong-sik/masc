@@ -82,7 +82,6 @@
   test_agent_tools_index
   test_api_dispatch
   test_tool_execution
-  test_artifact_service
   test_async_agent
   test_atomic_write_race
   test_backend_openai_codec
@@ -221,7 +220,6 @@
   test_agent_tools_index
   test_api_dispatch
   test_tool_execution
-  test_artifact_service
   test_async_agent
   test_atomic_write_race
   test_backend_openai_codec

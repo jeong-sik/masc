@@ -435,7 +435,6 @@ let keeper_queue_summary keeper trust =
     ; Json_util.assoc_string_opt "operator_disposition_reason" trust
     ; Json_util.assoc_string_opt "disposition_reason" trust
     ; Json_util.assoc_string_opt "latest_next_action" trust
-    ; Some "keeper needs operator attention"
     ]
   |> Option.value ~default:"keeper needs operator attention"
 ;;
@@ -474,12 +473,12 @@ let build_keeper_execution_queue keepers =
         let last_seen_at = keeper_queue_last_seen keeper trust in
         let terminal_code = terminal_reason_code trust in
         let next_human_action =
-          match Json_util.assoc_string_opt "next_human_action" trust with
-          | Some _ as value -> value
-          | None ->
-            (match Json_util.assoc_string_opt "latest_next_action" trust with
-             | Some _ as value -> value
-             | None -> terminal_reason_json trust |> Json_util.assoc_string_opt "next_action")
+          List.find_map
+            Fun.id
+            [ Json_util.assoc_string_opt "next_human_action" trust
+            ; Json_util.assoc_string_opt "latest_next_action" trust
+            ; terminal_reason_json trust |> Json_util.assoc_string_opt "next_action"
+            ]
         in
         let intervene_handoff =
           handoff_json

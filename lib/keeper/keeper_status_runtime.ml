@@ -159,12 +159,12 @@ let keeper_reply_snapshot_of_history (history_items : Yojson.Safe.t list) =
     | None -> Option.value ~default:"" (json_string_opt "preview" item)
   in
   let update_last role ts content ((last_user, last_assistant) as acc) =
-    let role = String.lowercase_ascii role in
-    if role = "user" then
+    match Keeper_context_core_message_json.role_of_string_opt (String.lowercase_ascii role) with
+    | Some Agent_core.Types.User ->
       (Some (ts, content), last_assistant)
-    else if role = "assistant" then
+    | Some Agent_core.Types.Assistant ->
       (last_user, Some (ts, content))
-    else acc
+    | Some (Agent_core.Types.System | Agent_core.Types.Tool) | None -> acc
   in
   let last_user, last_assistant =
     List.fold_left

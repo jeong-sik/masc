@@ -135,8 +135,6 @@ val dashboard_shell_status_json : Workspace.config -> Yojson.Safe.t
 val dashboard_message_json : Masc_domain.message -> Yojson.Safe.t
 val dashboard_tasks_safe : Workspace.config -> Masc_domain.task list
 val dashboard_agents_safe : Workspace.config -> Masc_domain.agent list
-val dashboard_messages_safe :
-  Workspace.config -> since_seq:int -> limit:int -> Masc_domain.message list
 val provider_capacity_json : unit -> Yojson.Safe.t
 val dashboard_shell_http_json :
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->

@@ -31,7 +31,7 @@ val clients : (string, client) Hashtbl.t
 (** Live session-id → client table. {!Activity_graph} iterates
     this Hashtbl from its broadcast loop under
     {!with_registry_ro}; mutations must go through {!register} /
-    {!unregister} / {!unregister_if_current}. *)
+    {!unregister}. *)
 
 val with_registry_rw :
   (unit -> 'a) -> 'a
@@ -63,9 +63,3 @@ val register :
 val unregister : string -> unit
 (** Drop the client for [session_id] unconditionally. No-op when
     no client is registered. *)
-
-val unregister_if_current : string -> int -> unit
-(** Drop the client for [session_id] iff its current
-    [client_id] equals the given one. Used to avoid a TOCTOU
-    where a slow disconnect handler removes a client another
-    fiber has already replaced via {!register}. *)

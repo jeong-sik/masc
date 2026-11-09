@@ -80,8 +80,8 @@ back, forward, reload, 대화상자, 업로드처럼 브라우저 수준 동작�
 
 ```text
 BrowserRead {"lane":"live","clientId":<id>,"tabId":<tab>,"mode":"elements"}
-BrowserInteract {"lane":"live","clientId":<id>,"action":"fill","tabId":<tab>,"selector":<관측한 selector>,"text":"검색어"}
-BrowserInteract {"lane":"live","clientId":<id>,"action":"press_key","tabId":<tab>,"expectedUrl":<읽은 URL>,"key":"Enter"}
+BrowserInteract {"clientId":<id>,"action":"fill","tabId":<tab>,"selector":<관측한 selector>,"text":"검색어"}
+BrowserInteract {"clientId":<id>,"action":"press_key","tabId":<tab>,"expectedUrl":<읽은 URL>,"key":"Enter"}
 BrowserRead {"lane":"live","clientId":<id>,"tabId":<tab>}
 BrowserRead {"lane":"live","clientId":<id>,"tabId":<tab>,"mode":"screenshot"}
 keeper_image_read {"artifact":<반환된 artifact>}
@@ -115,7 +115,7 @@ Keeper는 반환된 `artifact`를 먼저 `keeper_image_read`에 전달한다. TU
 
 ```json
 BrowserRead {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"mode":"screenshot"}
-BrowserInteract {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"action":"scroll","x":0,"y":640}
+BrowserInteract {"clientId":<관측한 UUID>,"tabId":73,"action":"scroll","x":0,"y":640}
 ```
 
 페이지에서 확인한 CSS selector가 있을 때 click 또는 fill을 사용한다.
@@ -123,8 +123,8 @@ BrowserInteract {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"action":"
 읽은 URL을 전달하며, 페이지가 바뀌었으면 동작을 거부한다.
 
 ```json
-BrowserInteract {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"action":"fill","selector":"#search","text":"OCaml","expectedUrl":"https://example.org/"}
-BrowserInteract {"lane":"live","clientId":<관측한 UUID>,"tabId":73,"action":"click","selector":"#search-button","expectedUrl":"https://example.org/"}
+BrowserInteract {"clientId":<관측한 UUID>,"tabId":73,"action":"fill","selector":"#search","text":"OCaml","expectedUrl":"https://example.org/"}
+BrowserInteract {"clientId":<관측한 UUID>,"tabId":73,"action":"click","selector":"#search-button","expectedUrl":"https://example.org/"}
 ```
 
 텍스트나 이미지에서 selector를 추측하지 않는다. `BrowserRead mode=elements`로
